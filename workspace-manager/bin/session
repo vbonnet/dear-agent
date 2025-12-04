@@ -1,0 +1,114 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Script metadata
+SCRIPT_VERSION="2.0.0"
+# Follow symlinks to get actual script location
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [[ -L "$SCRIPT_PATH" ]]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    [[ "$SCRIPT_PATH" != /* ]] && SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+COMMANDS_DIR="$SCRIPT_DIR/commands"
+
+# Color output (optional, if terminal supports it)
+if [[ -t 1 ]]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m' # No Color
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    NC=''
+fi
+
+# Show main help
+show_help() {
+    cat <<EOF
+session - Unified workspace and Claude session management
+
+Usage: session <command> [options]
+
+Commands:
+  migrate     Migrate workspace to hierarchical structure
+  resume      Resume a session (auto-detects workspace or Claude)
+  archive     Archive a session
+  dashboard   Interactive session dashboard
+  sync        Sync Claude sessions with manifests
+  list        List all sessions
+
+Global Options:
+  -h, --help     Show this help message
+  -v, --version  Show version information
+  --verbose      Enable verbose output
+
+Run 'session <command> --help' for command-specific help.
+
+Examples:
+  session resume claude-1
+  session list --claude
+  session sync
+  session dashboard
+
+Documentation: See README.md for detailed usage
+EOF
+}
+
+# Show version
+show_version() {
+    echo "session version $SCRIPT_VERSION"
+}
+
+# Dispatch to command
+main() {
+    local command="${1:-}"
+
+    # Handle no arguments
+    if [[ -z "$command" ]]; then
+        show_help
+        exit 1
+    fi
+
+    # Handle global options
+    case "$command" in
+        -h|--help|help)
+            show_help
+            exit 0
+            ;;
+        -v|--version|version)
+            show_version
+            exit 0
+            ;;
+    esac
+
+    # Validate command exists
+    local command_script="$COMMANDS_DIR/$command.sh"
+
+    if [[ ! -f "$command_script" ]]; then
+        echo -e "${RED}Error: Unknown command: $command${NC}" >&2
+        echo "" >&2
+        echo "Run 'session help' to see available commands." >&2
+        exit 1
+    fi
+
+    # Check if command is executable
+    if [[ ! -x "$command_script" ]]; then
+        echo -e "${RED}Error: Command not executable: $command${NC}" >&2
+        echo "This is a bug. Please report it." >&2
+        exit 1
+    fi
+
+    # Shift command name off arguments
+    shift
+
+    # Execute command (replace current process)
+    exec "$command_script" "$@"
+}
+
+# Entry point
+main "$@"
