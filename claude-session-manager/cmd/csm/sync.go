@@ -25,7 +25,7 @@ Examples:
 		homeDir, _ := os.UserHomeDir()
 		historyPath := filepath.Join(homeDir, ".claude", "history.jsonl")
 
-		entries, err := claude.ParseHistory(historyPath)
+		entries, stats, err := claude.ParseHistory(historyPath)
 		if err != nil {
 			ui.PrintError(
 				err,
@@ -34,6 +34,12 @@ Examples:
 					"  • Ensure you have run Claude at least once",
 			)
 			return err
+		}
+
+		// Show parse statistics if any lines were skipped
+		if stats.SkippedErrors > 0 || stats.SkippedEmpty > 0 {
+			ui.PrintWarning(fmt.Sprintf("Parsed %d lines: %d valid, %d skipped (empty/null), %d errors",
+				stats.TotalLines, stats.ValidEntries, stats.SkippedEmpty, stats.SkippedErrors))
 		}
 
 		// Deduplicate to get sessions

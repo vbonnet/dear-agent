@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ func TestParseHistory(t *testing.T) {
 		name        string
 		fixture     string
 		wantCount   int
+		wantStats   *ParseStats
 		wantErr     bool
 		errContains string
 	}{
@@ -18,19 +20,34 @@ func TestParseHistory(t *testing.T) {
 			name:      "valid history with 648 entries",
 			fixture:   "history-586.jsonl",
 			wantCount: 647, // 647 valid entries (1 with null sessionId)
-			wantErr:   false,
+			wantStats: &ParseStats{
+				TotalLines:   648,
+				ValidEntries: 647,
+				SkippedEmpty: 1,
+			},
+			wantErr: false,
 		},
 		{
 			name:      "empty file",
 			fixture:   "history-empty.jsonl",
 			wantCount: 0,
-			wantErr:   false,
+			wantStats: &ParseStats{
+				TotalLines:   0,
+				ValidEntries: 0,
+			},
+			wantErr: false,
 		},
 		{
 			name:      "malformed JSON lines",
 			fixture:   "history-malformed.jsonl",
 			wantCount: 2, // 2 valid, 3 malformed (skipped)
-			wantErr:   false,
+			wantStats: &ParseStats{
+				TotalLines:    5,
+				ValidEntries:  2,
+				SkippedEmpty:  1, // One empty sessionId
+				SkippedErrors: 2, // Two malformed lines
+			},
+			wantErr: false,
 		},
 		{
 			name:        "file does not exist",
@@ -45,7 +62,7 @@ func TestParseHistory(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join("testdata", tt.fixture)
 
-			entries, err := ParseHistory(path)
+			entries, stats, err := ParseHistory(path)
 
 			if tt.wantErr {
 				if err == nil {
@@ -65,6 +82,22 @@ func TestParseHistory(t *testing.T) {
 				t.Errorf("got %d entries, want %d", len(entries), tt.wantCount)
 			}
 
+			// Verify stats if provided
+			if tt.wantStats != nil {
+				if stats.TotalLines != tt.wantStats.TotalLines {
+					t.Errorf("stats.TotalLines = %d, want %d", stats.TotalLines, tt.wantStats.TotalLines)
+				}
+				if stats.ValidEntries != tt.wantStats.ValidEntries {
+					t.Errorf("stats.ValidEntries = %d, want %d", stats.ValidEntries, tt.wantStats.ValidEntries)
+				}
+				if stats.SkippedEmpty != tt.wantStats.SkippedEmpty {
+					t.Errorf("stats.SkippedEmpty = %d, want %d", stats.SkippedEmpty, tt.wantStats.SkippedEmpty)
+				}
+				if stats.SkippedErrors != tt.wantStats.SkippedErrors {
+					t.Errorf("stats.SkippedErrors = %d, want %d", stats.SkippedErrors, tt.wantStats.SkippedErrors)
+				}
+			}
+
 			// Verify entries have required fields
 			for i, e := range entries {
 				if e.SessionID == "" {
@@ -76,4 +109,35 @@ func TestParseHistory(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParseHistory_PermissionDenied(t *testing.T) {
+	// Create a file with no read permissions
+	tmpFile := filepath.Join(t.TempDir(), "noperm.jsonl")
+	if err := os.WriteFile(tmpFile, []byte(`{"sessionId":"test","timestamp":1000}`), 0000); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	_, _, err := ParseHistory(tmpFile)
+	if err == nil {
+		t.Fatal("expected permission denied error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("error should contain 'permission denied', got: %v", err)
+	}
+}
+
+func TestParseHistory_MaxEntriesLimit(t *testing.T) {
+	// Create a file that would exceed MaxHistoryEntries
+	// We'll use a small limit for testing
+	oldMax := MaxHistoryEntries
+	defer func() {
+		// Can't actually change const, so this test just documents the behavior
+		_ = oldMax
+	}()
+
+	// This test documents that the limit exists
+	// In production, a file with >1M entries would fail
+	t.Skip("MaxHistoryEntries is a const and cannot be modified for testing")
 }

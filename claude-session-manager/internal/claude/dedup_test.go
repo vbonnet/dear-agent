@@ -16,7 +16,7 @@ func TestDeduplicate(t *testing.T) {
 			name: "648 entries with 17 unique UUIDs",
 			entries: func() []RawEntry {
 				// Load real test data if available
-				entries, err := ParseHistory("testdata/history-586.jsonl")
+				entries, _, err := ParseHistory("testdata/history-586.jsonl")
 				if err != nil {
 					// Fallback to synthetic data
 					return generateTestEntries(17, 38)
