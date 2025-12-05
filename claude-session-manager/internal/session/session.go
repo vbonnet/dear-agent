@@ -56,10 +56,10 @@ func ResolveIdentifier(identifier string, sessionsDir string) (*manifest.Manifes
 
 // HealthReport contains health check results
 type HealthReport struct {
-	WorktreeExists     bool
-	SessionEnvExists   bool
-	FileHistoryExists  bool
-	Issues             []string
+	WorktreeExists    bool
+	SessionEnvExists  bool
+	FileHistoryExists bool
+	Issues            []string
 }
 
 // CheckHealth validates that all paths in manifest exist

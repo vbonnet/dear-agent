@@ -9,10 +9,10 @@ import (
 )
 
 var (
-	cfg        *config.Config
-	cfgFile    string
+	cfg         *config.Config
+	cfgFile     string
 	sessionsDir string
-	logLevel   string
+	logLevel    string
 )
 
 var rootCmd = &cobra.Command{

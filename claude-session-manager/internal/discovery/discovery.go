@@ -13,15 +13,15 @@ import (
 // MatchResult contains results of matching Claude sessions to manifests
 type MatchResult struct {
 	Matched          map[string]*manifest.Manifest // UUID → manifest
-	OrphanedClaude   []*claude.HistoryEntry        // In history.jsonl, no manifest
+	OrphanedClaude   []*claude.Session             // In history.jsonl, no manifest
 	OrphanedManifest []*manifest.Manifest          // Manifest exists, UUID not in history
 }
 
 // MatchToManifests matches Claude sessions to existing manifests
-func MatchToManifests(sessions []*claude.HistoryEntry, manifests []*manifest.Manifest) *MatchResult {
+func MatchToManifests(sessions []*claude.Session, manifests []*manifest.Manifest) *MatchResult {
 	result := &MatchResult{
 		Matched:          make(map[string]*manifest.Manifest),
-		OrphanedClaude:   []*claude.HistoryEntry{},
+		OrphanedClaude:   []*claude.Session{},
 		OrphanedManifest: []*manifest.Manifest{},
 	}
 
@@ -56,7 +56,7 @@ func MatchToManifests(sessions []*claude.HistoryEntry, manifests []*manifest.Man
 }
 
 // CreateManifest creates a new manifest for orphaned Claude session
-func CreateManifest(session *claude.HistoryEntry, sessionsDir string, tmuxName string, sessionID string) (*manifest.Manifest, error) {
+func CreateManifest(session *claude.Session, sessionsDir string, tmuxName string, sessionID string) (*manifest.Manifest, error) {
 	homeDir, _ := os.UserHomeDir()
 
 	m := &manifest.Manifest{
@@ -64,9 +64,9 @@ func CreateManifest(session *claude.HistoryEntry, sessionsDir string, tmuxName s
 		SessionID:     sessionID,
 		Status:        manifest.StatusDiscovered,
 		CreatedAt:     time.Now(),
-		LastActivity:  session.Timestamp,
+		LastActivity:  session.LastActivity,
 		Worktree: manifest.Worktree{
-			Path:   session.WorkDir,
+			Path:   session.Project,
 			Branch: "unknown",
 			Repo:   "",
 		},
@@ -74,8 +74,8 @@ func CreateManifest(session *claude.HistoryEntry, sessionsDir string, tmuxName s
 			SessionID:       session.UUID,
 			SessionEnvPath:  filepath.Join(homeDir, ".claude", "session-env", session.UUID),
 			FileHistoryPath: filepath.Join(homeDir, ".claude", "file-history", session.UUID),
-			StartedAt:       session.Timestamp,
-			LastActivity:    session.Timestamp,
+			StartedAt:       session.FirstActivity,
+			LastActivity:    session.LastActivity,
 		},
 		Tmux: manifest.Tmux{
 			SessionName: tmuxName,

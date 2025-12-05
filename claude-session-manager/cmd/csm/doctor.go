@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
-	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
@@ -23,13 +24,14 @@ Examples:
 
 		allHealthy := true
 
-		// Check Claude installation
-		claudeVersion, err := claude.Version()
-		if err != nil {
-			ui.PrintError(err, "Claude not found or not working", "  • Install Claude from https://claude.com")
+		// Check Claude installation (verify history.jsonl exists)
+		homeDir, _ := os.UserHomeDir()
+		historyPath := filepath.Join(homeDir, ".claude", "history.jsonl")
+		if _, err := os.Stat(historyPath); err != nil {
+			ui.PrintError(err, "Claude history not found", "  • Install Claude from https://claude.com\n  • Run Claude at least once")
 			allHealthy = false
 		} else {
-			ui.PrintSuccess(fmt.Sprintf("Claude installed: %s", claudeVersion))
+			ui.PrintSuccess("Claude history found")
 		}
 
 		// Check tmux installation

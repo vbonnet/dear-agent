@@ -25,7 +25,7 @@ Examples:
 		homeDir, _ := os.UserHomeDir()
 		historyPath := filepath.Join(homeDir, ".claude", "history.jsonl")
 
-		sessions, err := claude.ParseHistoryJSONL(historyPath)
+		entries, err := claude.ParseHistory(historyPath)
 		if err != nil {
 			ui.PrintError(
 				err,
@@ -36,7 +36,15 @@ Examples:
 			return err
 		}
 
+		// Deduplicate to get sessions
+		sessions := claude.Deduplicate(entries)
 		ui.PrintSuccess(fmt.Sprintf("Found %d Claude sessions in history", len(sessions)))
+
+		// Convert to pointer slice for discovery
+		sessionPtrs := make([]*claude.Session, len(sessions))
+		for i := range sessions {
+			sessionPtrs[i] = &sessions[i]
+		}
 
 		// List existing manifests
 		manifests, err := manifest.List(cfg.SessionsDir)
@@ -53,7 +61,7 @@ Examples:
 		}
 
 		// Match sessions to manifests
-		result := discovery.MatchToManifests(sessions, manifests)
+		result := discovery.MatchToManifests(sessionPtrs, manifests)
 
 		ui.PrintSuccess(fmt.Sprintf("Matched %d sessions to existing manifests", len(result.Matched)))
 
@@ -62,8 +70,8 @@ Examples:
 			fmt.Println("\nOrphaned sessions (in history.jsonl but no manifest):")
 			for i, session := range result.OrphanedClaude {
 				fmt.Printf("  %d. UUID: %s\n", i+1, session.UUID)
-				fmt.Printf("     WorkDir: %s\n", session.WorkDir)
-				fmt.Printf("     Timestamp: %s\n", session.Timestamp.Format("2006-01-02 15:04:05"))
+				fmt.Printf("     Project: %s\n", session.Project)
+				fmt.Printf("     Last Activity: %s\n", session.LastActivity.Format("2006-01-02 15:04:05"))
 
 				// Offer to create manifest
 				confirm, err := ui.Confirm("Create manifest for this session?")
@@ -73,7 +81,7 @@ Examples:
 
 				// Generate tmux name and session ID
 				tmuxName := fmt.Sprintf("claude-%d", i+1)
-				sessionID := filepath.Base(session.WorkDir)
+				sessionID := filepath.Base(session.Project)
 
 				m, err := discovery.CreateManifest(session, cfg.SessionsDir, tmuxName, sessionID)
 				if err != nil {
