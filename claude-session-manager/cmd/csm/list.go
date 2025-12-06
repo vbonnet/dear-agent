@@ -21,7 +21,7 @@ const (
 	projectMaxLen    = 35
 	messagesColWidth = 8
 	durationColWidth = 10
-	tmuxColWidth     = 10
+	tmuxColWidth     = 14 // Accommodate names like "claude-demo ✓"
 	recentDays       = 30 // Default filter for recently active sessions
 )
 
