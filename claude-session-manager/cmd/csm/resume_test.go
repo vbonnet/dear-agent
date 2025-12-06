@@ -105,8 +105,6 @@ func TestCheckSessionHealth(t *testing.T) {
 				LastActivity:  time.Now(),
 				Worktree: manifest.Worktree{
 					Path:   worktreePath,
-					Branch: "main",
-					Repo:   "test-repo",
 				},
 				Claude: manifest.Claude{
 					SessionID:       testUUID,
@@ -221,8 +219,6 @@ func TestResolveSessionIdentifier_Integration(t *testing.T) {
 			LastActivity:  time.Now(),
 			Worktree: manifest.Worktree{
 				Path:   spec.worktreePath,
-				Branch: "main",
-				Repo:   "test-repo",
 			},
 			Claude: manifest.Claude{
 				SessionID:       spec.claudeUUID,
@@ -391,8 +387,6 @@ func TestUpdateManifestActivity(t *testing.T) {
 		LastActivity:  oldTime,
 		Worktree: manifest.Worktree{
 			Path:   "/tmp/test",
-			Branch: "main",
-			Repo:   "test-repo",
 		},
 		Claude: manifest.Claude{
 			SessionID:       "c4eb298c-8c89-4f75-8dae-c725a1291add",
