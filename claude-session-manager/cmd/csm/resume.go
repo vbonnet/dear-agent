@@ -315,6 +315,13 @@ func displayHealthStatus(health *HealthStatus) {
 	}
 }
 
+// shellQuote quotes a string for safe use in shell commands
+// This prevents command injection by escaping special characters
+func shellQuote(s string) string {
+	// Simple but secure: wrap in single quotes and escape any single quotes
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
 // resumeSession performs the complete resume workflow
 func resumeSession(uuid, manifestPath string, health *HealthStatus) error {
 	// Ensure tmux session exists
@@ -327,14 +334,14 @@ func resumeSession(uuid, manifestPath string, health *HealthStatus) error {
 		ui.PrintSuccess(fmt.Sprintf("Tmux session %s already exists", health.TmuxSessionName))
 	}
 
-	// Send cd command to tmux
-	cdCmd := fmt.Sprintf("cd %s", health.WorktreePath)
+	// Send cd command to tmux (with shell quoting to prevent injection)
+	cdCmd := fmt.Sprintf("cd %s", shellQuote(health.WorktreePath))
 	if err := tmux.SendCommand(health.TmuxSessionName, cdCmd); err != nil {
 		return fmt.Errorf("failed to send cd command: %w", err)
 	}
 
-	// Send claude --resume command to tmux
-	resumeCmd := fmt.Sprintf("claude --resume %s", uuid)
+	// Send claude --resume command to tmux (UUID is validated by manifest, but quote for safety)
+	resumeCmd := fmt.Sprintf("claude --resume %s", shellQuote(uuid))
 	if err := tmux.SendCommand(health.TmuxSessionName, resumeCmd); err != nil {
 		return fmt.Errorf("failed to send claude resume command: %w", err)
 	}

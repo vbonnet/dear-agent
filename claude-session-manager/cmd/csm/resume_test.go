@@ -179,6 +179,199 @@ func TestResolveSessionIdentifier_NoManifests(t *testing.T) {
 	}
 }
 
+func TestResolveSessionIdentifier_Integration(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionsDir := filepath.Join(tmpDir, "sessions")
+
+	// Create test manifests with different characteristics
+	testUUID1 := "c4eb298c-8c89-4f75-8dae-c725a1291add"
+	testUUID2 := "e6121188-1234-4567-8901-234567890abc"
+
+	manifests := []struct {
+		sessionID   string
+		claudeUUID  string
+		tmuxName    string
+		worktreePath string
+	}{
+		{
+			sessionID:   "workspace-design",
+			claudeUUID:  testUUID1,
+			tmuxName:    "claude-1",
+			worktreePath: "/home/user/workspace-design",
+		},
+		{
+			sessionID:   "test-project",
+			claudeUUID:  testUUID2,
+			tmuxName:    "claude-2",
+			worktreePath: "/home/user/test-project",
+		},
+	}
+
+	// Create manifests
+	for _, spec := range manifests {
+		manifestDir := filepath.Join(sessionsDir, spec.sessionID)
+		manifestPath := filepath.Join(manifestDir, "manifest.yaml")
+		os.MkdirAll(manifestDir, 0700)
+
+		m := &manifest.Manifest{
+			SchemaVersion: manifest.SchemaVersion,
+			SessionID:     spec.sessionID,
+			Status:        manifest.StatusActive,
+			CreatedAt:     time.Now(),
+			LastActivity:  time.Now(),
+			Worktree: manifest.Worktree{
+				Path:   spec.worktreePath,
+				Branch: "main",
+				Repo:   "test-repo",
+			},
+			Claude: manifest.Claude{
+				SessionID:       spec.claudeUUID,
+				SessionEnvPath:  "/tmp/session-env",
+				FileHistoryPath: "/tmp/file-history",
+				StartedAt:       time.Now(),
+				LastActivity:    time.Now(),
+			},
+			Tmux: manifest.Tmux{
+				SessionName: spec.tmuxName,
+				WindowName:  "main",
+				CreatedAt:   time.Now(),
+			},
+		}
+
+		if err := manifest.Write(manifestPath, m); err != nil {
+			t.Fatalf("Failed to create test manifest: %v", err)
+		}
+	}
+
+	// Temporarily override home directory
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", oldHome)
+
+	tests := []struct {
+		name       string
+		identifier string
+		wantUUID   string
+		wantError  bool
+	}{
+		{
+			name:       "resolve by full UUID",
+			identifier: testUUID1,
+			wantUUID:   testUUID1,
+			wantError:  false,
+		},
+		{
+			name:       "resolve by UUID prefix",
+			identifier: "c4eb298c",
+			wantUUID:   testUUID1,
+			wantError:  false,
+		},
+		{
+			name:       "resolve by tmux name",
+			identifier: "claude-1",
+			wantUUID:   testUUID1,
+			wantError:  false,
+		},
+		{
+			name:       "resolve by project path fuzzy match",
+			identifier: "workspace-design",
+			wantUUID:   testUUID1,
+			wantError:  false,
+		},
+		{
+			name:       "resolve by session ID",
+			identifier: "test-project",
+			wantUUID:   testUUID2,
+			wantError:  false,
+		},
+		{
+			name:       "no match returns error",
+			identifier: "nonexistent",
+			wantUUID:   "",
+			wantError:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotUUID, gotPath, err := resolveSessionIdentifier(tt.identifier)
+
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("Expected error for identifier %q, got nil", tt.identifier)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if gotUUID != tt.wantUUID {
+				t.Errorf("UUID = %q, want %q", gotUUID, tt.wantUUID)
+			}
+
+			if gotPath == "" {
+				t.Error("Expected non-empty manifest path")
+			}
+		})
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "simple path",
+			input: "/tmp/test",
+			want:  "'/tmp/test'",
+		},
+		{
+			name:  "path with spaces",
+			input: "/tmp/test dir/file",
+			want:  "'/tmp/test dir/file'",
+		},
+		{
+			name:  "path with single quote",
+			input: "/tmp/test'dir",
+			want:  "'/tmp/test'\"'\"'dir'",
+		},
+		{
+			name:  "path with multiple single quotes",
+			input: "it's a test's path",
+			want:  "'it'\"'\"'s a test'\"'\"'s path'",
+		},
+		{
+			name:  "path with semicolon (command injection attempt)",
+			input: "/tmp/test; rm -rf /",
+			want:  "'/tmp/test; rm -rf /'",
+		},
+		{
+			name:  "path with backticks (command substitution attempt)",
+			input: "/tmp/`whoami`",
+			want:  "'/tmp/`whoami`'",
+		},
+		{
+			name:  "path with dollar sign (variable expansion attempt)",
+			input: "/tmp/$HOME",
+			want:  "'/tmp/$HOME'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shellQuote(tt.input)
+			if got != tt.want {
+				t.Errorf("shellQuote(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUpdateManifestActivity(t *testing.T) {
 	tmpDir := t.TempDir()
 	manifestDir := filepath.Join(tmpDir, "test-session")
