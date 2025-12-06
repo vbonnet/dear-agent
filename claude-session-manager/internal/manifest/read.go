@@ -59,3 +59,8 @@ func List(dir string) ([]*Manifest, error) {
 
 	return manifests, nil
 }
+
+// ReadAll is an alias for List
+func ReadAll(dir string) ([]*Manifest, error) {
+	return List(dir)
+}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
+	"gopkg.in/yaml.v3"
 )
 
 // MatchResult contains results of matching Claude sessions to manifests
@@ -97,4 +98,47 @@ func CreateManifest(session *claude.Session, sessionsDir string, tmuxName string
 	}
 
 	return m, nil
+}
+
+// GetTmuxMapping returns a map of Claude UUID → tmux session name
+// by reading all manifests in the sessions directory.
+// This function is lenient and skips manifests that fail to parse.
+func GetTmuxMapping(sessionsDir string) (map[string]string, error) {
+	mapping := make(map[string]string)
+
+	// Check if directory exists
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		// If directory doesn't exist, return empty map (not an error)
+		if os.IsNotExist(err) {
+			return mapping, nil
+		}
+		return mapping, fmt.Errorf("failed to read sessions directory: %w", err)
+	}
+
+	// Read each manifest, skipping invalid ones
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		manifestPath := filepath.Join(sessionsDir, entry.Name(), "manifest.yaml")
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			continue // Skip if can't read
+		}
+
+		// Parse manifest without validation
+		var m manifest.Manifest
+		if err := yaml.Unmarshal(data, &m); err != nil {
+			continue // Skip if can't parse
+		}
+
+		// Add to mapping if both Claude UUID and tmux name exist
+		if m.Claude.SessionID != "" && m.Tmux.SessionName != "" {
+			mapping[m.Claude.SessionID] = m.Tmux.SessionName
+		}
+	}
+
+	return mapping, nil
 }

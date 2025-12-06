@@ -59,3 +59,25 @@ func Version() (string, error) {
 	}
 	return strings.TrimSpace(string(output)), nil
 }
+
+// ListSessions returns all active tmux session names
+func ListSessions() ([]string, error) {
+	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
+	output, err := cmd.Output()
+	if err != nil {
+		// If no tmux server running, return empty list
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("failed to list tmux sessions: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	sessions := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line != "" {
+			sessions = append(sessions, line)
+		}
+	}
+	return sessions, nil
+}

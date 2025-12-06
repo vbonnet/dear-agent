@@ -12,14 +12,22 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
 
+var (
+	syncAll bool
+)
+
 var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Discover and sync Claude sessions",
 	Long: `Parse ~/.claude/history.jsonl to discover Claude sessions and create
 manifests for orphaned sessions.
 
+By default, only shows recently active sessions (last 30 days).
+Use --all to discover all sessions from history.
+
 Examples:
-  csm sync    # Discover all Claude sessions`,
+  csm sync        # Discover recently active sessions
+  csm sync --all  # Discover all sessions from history`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Parse history.jsonl
 		homeDir, _ := os.UserHomeDir()
@@ -44,7 +52,21 @@ Examples:
 
 		// Deduplicate to get sessions
 		sessions := claude.Deduplicate(entries)
-		ui.PrintSuccess(fmt.Sprintf("Found %d Claude sessions in history", len(sessions)))
+		totalSessions := len(sessions)
+
+		// Filter by recent activity unless --all is set
+		if !syncAll {
+			sessions = filterRecentSessions(sessions, recentDays)
+			if len(sessions) == 0 {
+				ui.PrintWarning(fmt.Sprintf("No sessions found in last %d days", recentDays))
+				fmt.Println("\nUse --all to sync all sessions from history")
+				return nil
+			}
+			ui.PrintSuccess(fmt.Sprintf("Found %d recent Claude sessions (last %d days, %d total in history)",
+				len(sessions), recentDays, totalSessions))
+		} else {
+			ui.PrintSuccess(fmt.Sprintf("Found %d Claude sessions in history", len(sessions)))
+		}
 
 		// Convert to pointer slice for discovery
 		sessionPtrs := make([]*claude.Session, len(sessions))
@@ -108,5 +130,6 @@ Examples:
 }
 
 func init() {
+	syncCmd.Flags().BoolVar(&syncAll, "all", false, "Sync all sessions (default: last 30 days only)")
 	rootCmd.AddCommand(syncCmd)
 }
