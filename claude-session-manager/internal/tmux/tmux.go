@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -29,12 +30,33 @@ func NewSession(name string, workDir string) error {
 	return nil
 }
 
-// AttachSession attaches to tmux session
+// AttachSession attaches to tmux session or switches if already inside tmux
+// Returns nil if session exists and was successfully switched/attached
+// In non-interactive environments (no TTY), it skips attach and returns nil
 func AttachSession(name string) error {
+	// Check if we're already inside a tmux session
+	if os.Getenv("TMUX") != "" {
+		// Already in tmux - use switch-client instead of attach
+		cmd := exec.Command("tmux", "switch-client", "-t", name)
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to switch to tmux session: %w", err)
+		}
+		return nil
+	}
+
+	// Not in tmux - check if we have a TTY available
+	// If stdin is not a terminal (e.g., running from Claude Code), skip attach
+	// The session is still ready, just can't interactively attach
+	if fileInfo, _ := os.Stdin.Stat(); (fileInfo.Mode() & os.ModeCharDevice) == 0 {
+		// No TTY available - session exists and commands were sent, just can't attach
+		return nil
+	}
+
+	// Have a TTY - use attach-session
 	cmd := exec.Command("tmux", "attach-session", "-t", name)
-	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to attach to tmux session: %w", err)
 	}
