@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/discovery"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
@@ -179,6 +180,13 @@ func resolveSessionIdentifier(identifier string) (string, string, error) {
 
 	// Handle results
 	if len(matches) == 0 {
+		// No manifest found - try to find orphaned session in history and offer to import
+		m, manifestPath, err := offerToImportOrphanedSession(identifier)
+		if err == nil {
+			// Successfully imported
+			return m.Claude.SessionID, manifestPath, nil
+		}
+		// Fall through to original error (orphaned session not found or user declined)
 		return "", "", fmt.Errorf("no sessions found matching %q", identifier)
 	}
 
@@ -377,6 +385,157 @@ func updateManifestActivity(manifestPath string) error {
 
 	// Write back
 	return manifest.Write(manifestPath, m)
+}
+
+// sanitizeTmuxName sanitizes a string for safe use as tmux session name
+// Only allows alphanumeric, dash, and underscore
+func sanitizeTmuxName(s string) string {
+	var result strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+		   (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			result.WriteRune(r)
+		} else if r == ' ' {
+			result.WriteRune('-')
+		}
+	}
+	return result.String()
+}
+
+// generateTmuxName generates a unique tmux session name from a project path
+func generateTmuxName(project string, existingSessions []string) string {
+	base := filepath.Base(project)
+	base = sanitizeTmuxName(base)
+
+	// Ensure base is not empty after sanitization
+	if base == "" {
+		base = "session"
+	}
+
+	name := fmt.Sprintf("claude-%s", base)
+
+	// Check for conflicts with existing sessions
+	conflict := false
+	for _, existing := range existingSessions {
+		if existing == name {
+			conflict = true
+			break
+		}
+	}
+
+	if !conflict {
+		return name
+	}
+
+	// Add numeric suffix if conflict
+	for i := 2; i < 100; i++ {
+		candidate := fmt.Sprintf("%s-%d", name, i)
+		conflict = false
+		for _, existing := range existingSessions {
+			if existing == candidate {
+				conflict = true
+				break
+			}
+		}
+		if !conflict {
+			return candidate
+		}
+	}
+
+	// Fallback to timestamp-based suffix
+	return fmt.Sprintf("%s-%d", name, time.Now().Unix()%10000)
+}
+
+// offerToImportOrphanedSession checks history.jsonl for orphaned sessions
+// and prompts user to import if found
+func offerToImportOrphanedSession(identifier string) (*manifest.Manifest, string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, "", err
+	}
+
+	historyPath := filepath.Join(homeDir, ".claude", "history.jsonl")
+	sessionsDir := filepath.Join(homeDir, "sessions")
+
+	// Parse history (best effort - don't fail loudly on errors)
+	entries, _, err := claude.ParseHistory(historyPath)
+	if err != nil {
+		// Return error to trigger normal "not found" message
+		return nil, "", err
+	}
+
+	// Deduplicate to sessions
+	sessions := claude.Deduplicate(entries)
+
+	// Match by UUID or project path (NOT tmux, since we have no mapping for orphaned sessions)
+	var matches []claude.Session
+	for _, s := range sessions {
+		if strings.HasPrefix(s.UUID, identifier) ||
+		   strings.Contains(s.Project, identifier) {
+			matches = append(matches, s)
+		}
+	}
+
+	if len(matches) == 0 {
+		return nil, "", fmt.Errorf("no orphaned sessions found")
+	}
+
+	// Handle multiple matches - ask user to be more specific
+	var session *claude.Session
+	if len(matches) > 1 {
+		ui.PrintWarning(fmt.Sprintf("Found %d orphaned sessions matching %q:", len(matches), identifier))
+		for i, s := range matches {
+			fmt.Printf("  %d. UUID: %s | Project: %s | Messages: %d\n",
+				i+1, s.UUID[:8], s.Project, s.MessageCount)
+		}
+		return nil, "", fmt.Errorf("multiple orphaned sessions found - please be more specific (use full UUID or project path)")
+	}
+
+	session = &matches[0]
+
+	// Display session info
+	fmt.Println()
+	ui.PrintWarning(fmt.Sprintf("No manifest found for %q", identifier))
+	fmt.Println()
+	fmt.Println("However, I found a Claude session in history that matches:")
+	fmt.Printf("  UUID:          %s\n", session.UUID)
+	fmt.Printf("  Project:       %s\n", session.Project)
+	fmt.Printf("  Messages:      %d\n", session.MessageCount)
+	fmt.Printf("  Last Activity: %s\n", session.LastActivity.Format("2006-01-02 15:04"))
+
+	// Get active tmux sessions to avoid name conflicts
+	activeTmux, _ := tmux.ListSessions()
+
+	// Generate unique tmux name
+	tmuxName := generateTmuxName(session.Project, activeTmux)
+	fmt.Printf("  Tmux:          %s (will create)\n", tmuxName)
+	fmt.Println()
+
+	// Confirm with user
+	confirm, err := ui.Confirm("Would you like to import this session?")
+	if err != nil || !confirm {
+		return nil, "", fmt.Errorf("import declined by user")
+	}
+
+	// Ensure sessions dir exists
+	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
+		return nil, "", fmt.Errorf("failed to create sessions directory: %w", err)
+	}
+
+	// Generate session ID from UUID prefix
+	sessionID := fmt.Sprintf("session-%s", session.UUID[:8])
+
+	// Create manifest
+	m, err := discovery.CreateManifest(session, sessionsDir, tmuxName, sessionID)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create manifest: %w", err)
+	}
+
+	manifestPath := filepath.Join(sessionsDir, sessionID, "manifest.yaml")
+	ui.PrintSuccess(fmt.Sprintf("Created manifest: %s", manifestPath))
+	fmt.Println()
+
+	return m, manifestPath, nil
 }
 
 func init() {

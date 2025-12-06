@@ -57,9 +57,7 @@ func Validate(m *Manifest) error {
 	if m.Worktree.Path == "" {
 		return fmt.Errorf("worktree.path is required")
 	}
-	if m.Worktree.Branch == "" {
-		return fmt.Errorf("worktree.branch is required")
-	}
+	// Branch is optional (may be empty for non-git worktrees)
 
 	// Claude
 	if m.Claude.SessionID == "" {

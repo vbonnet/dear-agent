@@ -67,9 +67,7 @@ func CreateManifest(session *claude.Session, sessionsDir string, tmuxName string
 		CreatedAt:     time.Now(),
 		LastActivity:  session.LastActivity,
 		Worktree: manifest.Worktree{
-			Path:   session.Project,
-			Branch: "unknown",
-			Repo:   "",
+			Path: session.Project,
 		},
 		Claude: manifest.Claude{
 			SessionID:       session.UUID,

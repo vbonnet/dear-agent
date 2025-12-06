@@ -14,12 +14,11 @@ type Manifest struct {
 	Tmux          Tmux      `yaml:"tmux"`
 }
 
-// Worktree represents git worktree metadata
+// Worktree represents the working directory for a Claude session
+// Branch, repo, and upstream info are intentionally omitted as they
+// change frequently during a session and would quickly become stale
 type Worktree struct {
-	Path     string `yaml:"path"`
-	Branch   string `yaml:"branch"`
-	Repo     string `yaml:"repo"`
-	Upstream string `yaml:"upstream"`
+	Path string `yaml:"path"`
 }
 
 // Claude represents Claude session metadata
