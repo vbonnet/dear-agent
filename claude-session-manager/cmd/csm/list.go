@@ -156,7 +156,10 @@ func sortSessions(sessions []claude.Session, sortBy string) {
 			return sessions[i].LastActivity.After(sessions[j].LastActivity)
 		})
 	default:
-		// Invalid sort key - just use default (activity)
+		// Invalid sort key - warn and use default (activity)
+		if sortBy != "" {
+			ui.PrintWarning(fmt.Sprintf("Invalid sort key %q, using default (activity)", sortBy))
+		}
 		sort.Slice(sessions, func(i, j int) bool {
 			return sessions[i].LastActivity.After(sessions[j].LastActivity)
 		})

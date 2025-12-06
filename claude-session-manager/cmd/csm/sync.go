@@ -30,7 +30,10 @@ Examples:
   csm sync --all  # Discover all sessions from history`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Parse history.jsonl
-		homeDir, _ := os.UserHomeDir()
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
 		historyPath := filepath.Join(homeDir, ".claude", "history.jsonl")
 
 		entries, stats, err := claude.ParseHistory(historyPath)
