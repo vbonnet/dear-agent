@@ -2,27 +2,50 @@ package manifest
 
 import "time"
 
-// Manifest represents a Claude session manifest
+// Manifest represents a Claude session manifest (v2 schema)
 type Manifest struct {
+	SchemaVersion string    `yaml:"schema_version"`
+	SessionID     string    `yaml:"session_id"`
+	Name          string    `yaml:"name"`
+	CreatedAt     time.Time `yaml:"created_at"`
+	UpdatedAt     time.Time `yaml:"updated_at"`
+	Lifecycle     string    `yaml:"lifecycle"` // "" (active/stopped) or "archived"
+	Context       Context   `yaml:"context"`
+	Tmux          Tmux      `yaml:"tmux"`
+}
+
+// Context holds session context information
+type Context struct {
+	Project string   `yaml:"project"`
+	Purpose string   `yaml:"purpose,omitempty"`
+	Tags    []string `yaml:"tags,omitempty"`
+	Notes   string   `yaml:"notes,omitempty"`
+}
+
+// Tmux represents tmux session metadata
+type Tmux struct {
+	SessionName string `yaml:"session_name"`
+}
+
+// ManifestV1 represents the legacy v1 manifest schema (for migration)
+type ManifestV1 struct {
 	SchemaVersion string    `yaml:"schema_version"`
 	SessionID     string    `yaml:"session_id"`
 	Status        string    `yaml:"status"`
 	CreatedAt     time.Time `yaml:"created_at"`
 	LastActivity  time.Time `yaml:"last_activity"`
-	Worktree      Worktree  `yaml:"worktree"`
-	Claude        Claude    `yaml:"claude"`
-	Tmux          Tmux      `yaml:"tmux"`
+	Worktree      WorktreeV1  `yaml:"worktree"`
+	Claude        ClaudeV1    `yaml:"claude"`
+	Tmux          TmuxV1      `yaml:"tmux"`
 }
 
-// Worktree represents the working directory for a Claude session
-// Branch, repo, and upstream info are intentionally omitted as they
-// change frequently during a session and would quickly become stale
-type Worktree struct {
+// WorktreeV1 represents the working directory for a Claude session (v1)
+type WorktreeV1 struct {
 	Path string `yaml:"path"`
 }
 
-// Claude represents Claude session metadata
-type Claude struct {
+// ClaudeV1 represents Claude session metadata (v1)
+type ClaudeV1 struct {
 	SessionID       string    `yaml:"session_id"`
 	SessionEnvPath  string    `yaml:"session_env_path"`
 	FileHistoryPath string    `yaml:"file_history_path"`
@@ -30,20 +53,17 @@ type Claude struct {
 	LastActivity    time.Time `yaml:"last_activity"`
 }
 
-// Tmux represents tmux session metadata
-type Tmux struct {
+// TmuxV1 represents tmux session metadata (v1)
+type TmuxV1 struct {
 	SessionName string    `yaml:"session_name"`
 	WindowName  string    `yaml:"window_name"`
 	CreatedAt   time.Time `yaml:"created_at"`
 }
 
-// Status constants
+// Status constants (v1 - deprecated)
 const (
 	StatusActive     = "active"
 	StatusDiscovered = "discovered"
 	StatusStale      = "stale"
 	StatusArchived   = "archived"
 )
-
-// SchemaVersion is the current manifest schema version
-const SchemaVersion = "1.0"

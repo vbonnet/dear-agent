@@ -1,11 +1,13 @@
 package manifest
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 var (
@@ -18,8 +20,61 @@ var (
 	)
 )
 
-// Validate checks manifest schema and required fields
-func Validate(m *Manifest) error {
+// Validate checks manifest schema and required fields (v2 schema)
+func (m *Manifest) Validate() error {
+	// Required fields
+	if m.SchemaVersion == "" {
+		return errors.New("schema_version is required")
+	}
+	if m.SessionID == "" {
+		return errors.New("session_id is required")
+	}
+	if m.Name == "" {
+		return errors.New("name is required")
+	}
+	if m.Context.Project == "" {
+		return errors.New("context.project is required")
+	}
+	if m.Tmux.SessionName == "" {
+		return errors.New("tmux.session_name is required")
+	}
+
+	// UTF-8 character counting for purpose
+	if utf8.RuneCountInString(m.Context.Purpose) > MaxPurposeLen {
+		return fmt.Errorf("purpose exceeds %d characters (has %d)",
+			MaxPurposeLen, utf8.RuneCountInString(m.Context.Purpose))
+	}
+
+	// Tags validation
+	if len(m.Context.Tags) > MaxTagsCount {
+		return fmt.Errorf("too many tags: %d (max %d)",
+			len(m.Context.Tags), MaxTagsCount)
+	}
+
+	for i, tag := range m.Context.Tags {
+		if utf8.RuneCountInString(tag) > MaxTagLen {
+			return fmt.Errorf("tag[%d] exceeds %d characters (has %d)",
+				i, MaxTagLen, utf8.RuneCountInString(tag))
+		}
+	}
+
+	// Notes validation
+	if utf8.RuneCountInString(m.Context.Notes) > MaxNotesLen {
+		return fmt.Errorf("notes exceed %d characters (has %d)",
+			MaxNotesLen, utf8.RuneCountInString(m.Context.Notes))
+	}
+
+	// Lifecycle validation
+	if m.Lifecycle != "" && m.Lifecycle != LifecycleArchived {
+		return fmt.Errorf("invalid lifecycle: %s (must be empty or %s)",
+			m.Lifecycle, LifecycleArchived)
+	}
+
+	return nil
+}
+
+// ValidateV1 checks manifest schema and required fields (v1 schema - for migration)
+func ValidateV1(m *ManifestV1) error {
 	// Session ID
 	if m.SessionID == "" {
 		return fmt.Errorf("session_id is required")
@@ -57,7 +112,6 @@ func Validate(m *Manifest) error {
 	if m.Worktree.Path == "" {
 		return fmt.Errorf("worktree.path is required")
 	}
-	// Branch is optional (may be empty for non-git worktrees)
 
 	// Claude
 	if m.Claude.SessionID == "" {
