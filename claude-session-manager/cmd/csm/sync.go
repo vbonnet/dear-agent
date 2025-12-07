@@ -9,6 +9,7 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/discovery"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
 
@@ -99,6 +100,25 @@ Examples:
 		if len(result.OrphanedClaude) > 0 {
 			ui.PrintWarning(fmt.Sprintf("Found %d orphaned Claude sessions", len(result.OrphanedClaude)))
 			fmt.Println("\nOrphaned sessions (in history.jsonl but no manifest):")
+
+			// Get existing tmux names from manifests to avoid conflicts
+			existingTmuxNames := make(map[string]bool)
+			for _, m := range manifests {
+				if m.Tmux.SessionName != "" {
+					existingTmuxNames[m.Tmux.SessionName] = true
+				}
+			}
+
+			// Get active tmux sessions to avoid conflicts
+			activeTmux, err := tmux.ListSessions()
+			if err != nil {
+				ui.PrintWarning(fmt.Sprintf("Failed to list tmux sessions: %v", err))
+				activeTmux = []string{}
+			}
+			for _, name := range activeTmux {
+				existingTmuxNames[name] = true
+			}
+
 			for i, session := range result.OrphanedClaude {
 				fmt.Printf("  %d. UUID: %s\n", i+1, session.UUID)
 				fmt.Printf("     Project: %s\n", session.Project)
@@ -110,8 +130,17 @@ Examples:
 					continue
 				}
 
-				// Generate tmux name and session ID
-				tmuxName := fmt.Sprintf("claude-%d", i+1)
+				// Generate unique tmux name (check against existing names)
+				baseTmuxName := fmt.Sprintf("claude-%d", i+1)
+				tmuxName := baseTmuxName
+				suffix := 2
+				for existingTmuxNames[tmuxName] {
+					tmuxName = fmt.Sprintf("%s-%d", baseTmuxName, suffix)
+					suffix++
+				}
+				// Mark as used for next iteration
+				existingTmuxNames[tmuxName] = true
+
 				sessionID := filepath.Base(session.Project)
 
 				m, err := discovery.CreateManifest(session, cfg.SessionsDir, tmuxName, sessionID)
