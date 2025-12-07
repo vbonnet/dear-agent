@@ -9,8 +9,22 @@ import (
 )
 
 // Read reads and parses a manifest file
+// Automatically migrates v1 manifests to v2 on first read
 func Read(path string) (*Manifest, error) {
-	// Read file
+	// Detect version
+	version, err := detectVersion(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to detect manifest version: %w", err)
+	}
+
+	// Migrate if needed (migration acquires its own lock)
+	if version == "1.0" {
+		if err := MigrateV1ToV2(path); err != nil {
+			return nil, fmt.Errorf("migration failed: %w", err)
+		}
+	}
+
+	// Read file (now guaranteed to be v2)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read manifest: %w", err)
@@ -22,8 +36,8 @@ func Read(path string) (*Manifest, error) {
 		return nil, fmt.Errorf("failed to parse manifest: %w", err)
 	}
 
-	// Validate
-	if err := Validate(&m); err != nil {
+	// Validate (v2 validation)
+	if err := m.Validate(); err != nil {
 		return nil, err
 	}
 
