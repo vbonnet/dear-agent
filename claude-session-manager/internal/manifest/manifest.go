@@ -11,6 +11,7 @@ type Manifest struct {
 	UpdatedAt     time.Time `yaml:"updated_at"`
 	Lifecycle     string    `yaml:"lifecycle"` // "" (active/stopped) or "archived"
 	Context       Context   `yaml:"context"`
+	Claude        Claude    `yaml:"claude"`
 	Tmux          Tmux      `yaml:"tmux"`
 }
 
@@ -22,6 +23,11 @@ type Context struct {
 	Notes   string   `yaml:"notes,omitempty"`
 }
 
+// Claude represents Claude session metadata
+type Claude struct {
+	UUID string `yaml:"uuid,omitempty"` // Claude session UUID (required for resume)
+}
+
 // Tmux represents tmux session metadata
 type Tmux struct {
 	SessionName string `yaml:"session_name"`
@@ -29,14 +35,14 @@ type Tmux struct {
 
 // ManifestV1 represents the legacy v1 manifest schema (for migration)
 type ManifestV1 struct {
-	SchemaVersion string    `yaml:"schema_version"`
-	SessionID     string    `yaml:"session_id"`
-	Status        string    `yaml:"status"`
-	CreatedAt     time.Time `yaml:"created_at"`
-	LastActivity  time.Time `yaml:"last_activity"`
-	Worktree      WorktreeV1  `yaml:"worktree"`
-	Claude        ClaudeV1    `yaml:"claude"`
-	Tmux          TmuxV1      `yaml:"tmux"`
+	SchemaVersion string     `yaml:"schema_version"`
+	SessionID     string     `yaml:"session_id"`
+	Status        string     `yaml:"status"`
+	CreatedAt     time.Time  `yaml:"created_at"`
+	LastActivity  time.Time  `yaml:"last_activity"`
+	Worktree      WorktreeV1 `yaml:"worktree"`
+	Claude        ClaudeV1   `yaml:"claude"`
+	Tmux          TmuxV1     `yaml:"tmux"`
 }
 
 // WorktreeV1 represents the working directory for a Claude session (v1)

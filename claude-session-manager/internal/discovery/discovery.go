@@ -26,10 +26,10 @@ func MatchToManifests(sessions []*claude.Session, manifests []*manifest.Manifest
 		OrphanedManifest: []*manifest.Manifest{},
 	}
 
-	// Build UUID → manifest map
+	// Build UUID → manifest map (v2: SessionID is top-level, not Claude.SessionID)
 	manifestsByUUID := make(map[string]*manifest.Manifest)
 	for _, m := range manifests {
-		manifestsByUUID[m.Claude.SessionID] = m
+		manifestsByUUID[m.SessionID] = m
 	}
 
 	// Match sessions to manifests
@@ -48,7 +48,7 @@ func MatchToManifests(sessions []*claude.Session, manifests []*manifest.Manifest
 	}
 
 	for _, m := range manifests {
-		if !sessionUUIDs[m.Claude.SessionID] {
+		if !sessionUUIDs[m.SessionID] {
 			result.OrphanedManifest = append(result.OrphanedManifest, m)
 		}
 	}
@@ -56,30 +56,26 @@ func MatchToManifests(sessions []*claude.Session, manifests []*manifest.Manifest
 	return result
 }
 
-// CreateManifest creates a new manifest for orphaned Claude session
+// CreateManifest creates a new manifest for orphaned Claude session (v2 schema)
 func CreateManifest(session *claude.Session, sessionsDir string, tmuxName string, sessionID string) (*manifest.Manifest, error) {
-	homeDir, _ := os.UserHomeDir()
-
 	m := &manifest.Manifest{
 		SchemaVersion: manifest.SchemaVersion,
 		SessionID:     sessionID,
-		Status:        manifest.StatusDiscovered,
+		Name:          tmuxName, // Use tmux name as manifest name
 		CreatedAt:     time.Now(),
-		LastActivity:  session.LastActivity,
-		Worktree: manifest.Worktree{
-			Path: session.Project,
+		UpdatedAt:     time.Now(),
+		Lifecycle:     "", // Empty = active/stopped (not archived)
+		Context: manifest.Context{
+			Project: session.Project,
+			Purpose: "", // Unknown for discovered sessions
+			Tags:    nil,
+			Notes:   "",
 		},
 		Claude: manifest.Claude{
-			SessionID:       session.UUID,
-			SessionEnvPath:  filepath.Join(homeDir, ".claude", "session-env", session.UUID),
-			FileHistoryPath: filepath.Join(homeDir, ".claude", "file-history", session.UUID),
-			StartedAt:       session.FirstActivity,
-			LastActivity:    session.LastActivity,
+			UUID: session.UUID, // Store the actual Claude session UUID
 		},
 		Tmux: manifest.Tmux{
 			SessionName: tmuxName,
-			WindowName:  "main",
-			CreatedAt:   time.Now(),
 		},
 	}
 
@@ -132,9 +128,9 @@ func GetTmuxMapping(sessionsDir string) (map[string]string, error) {
 			continue // Skip if can't parse
 		}
 
-		// Add to mapping if both Claude UUID and tmux name exist
-		if m.Claude.SessionID != "" && m.Tmux.SessionName != "" {
-			mapping[m.Claude.SessionID] = m.Tmux.SessionName
+		// Add to mapping if both SessionID and tmux name exist (v2: SessionID is top-level)
+		if m.SessionID != "" && m.Tmux.SessionName != "" {
+			mapping[m.SessionID] = m.Tmux.SessionName
 		}
 	}
 

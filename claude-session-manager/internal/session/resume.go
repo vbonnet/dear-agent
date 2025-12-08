@@ -2,7 +2,6 @@ package session
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/config"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
@@ -35,29 +34,33 @@ func Resume(identifier string, cfg *config.Config) error {
 	}
 
 	if !exists {
-		// Create new tmux session
-		if err := tmux.NewSession(m.Tmux.SessionName, m.Worktree.Path); err != nil {
+		// Create new tmux session (v2: use Context.Project for working directory)
+		if err := tmux.NewSession(m.Tmux.SessionName, m.Context.Project); err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
 	}
 
 	// 5. Send commands to tmux
 	// Change directory
-	cdCmd := fmt.Sprintf("cd %s", m.Worktree.Path)
+	cdCmd := fmt.Sprintf("cd %s", m.Context.Project)
 	if err := tmux.SendCommand(m.Tmux.SessionName, cdCmd); err != nil {
 		return fmt.Errorf("failed to send cd command: %w", err)
 	}
 
-	// Resume Claude
-	resumeCmd := fmt.Sprintf("claude --resume %s", m.Claude.SessionID)
+	// Resume Claude (v2: use Claude.UUID for the actual Claude session UUID)
+	var resumeCmd string
+	if m.Claude.UUID != "" {
+		resumeCmd = fmt.Sprintf("claude --resume %s", m.Claude.UUID)
+	} else {
+		// Fallback to starting a new Claude session if UUID is not set
+		resumeCmd = "claude"
+	}
 	if err := tmux.SendCommand(m.Tmux.SessionName, resumeCmd); err != nil {
 		return fmt.Errorf("failed to send claude resume command: %w", err)
 	}
 
-	// 6. Update manifest metadata
-	m.Status = manifest.StatusActive
-	m.LastActivity = time.Now()
-	m.Claude.LastActivity = time.Now()
+	// 6. Update manifest metadata (v2: only UpdatedAt is auto-updated by Write)
+	// No need to set Status or LastActivity (not in v2 schema)
 
 	if err := manifest.Write(manifestPath, m); err != nil {
 		return fmt.Errorf("failed to update manifest: %w", err)

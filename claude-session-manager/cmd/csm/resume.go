@@ -59,6 +59,24 @@ Examples:
 
 		ui.PrintSuccess(fmt.Sprintf("Resolved identifier %q to UUID: %s", identifier, uuid[:8]))
 
+		// Read manifest to check lifecycle
+		m, err := manifest.Read(manifestPath)
+		if err != nil {
+			ui.PrintError(err, "Failed to read manifest", "")
+			return err
+		}
+
+		// Check if session is archived
+		if m.Lifecycle == manifest.LifecycleArchived {
+			ui.PrintError(
+				fmt.Errorf("session is archived"),
+				"Cannot resume archived session",
+				"  • Use 'csm unarchive "+uuid[:8]+"' to restore this session\n"+
+					"  • Or use 'csm list --all' to see all sessions",
+			)
+			return fmt.Errorf("cannot resume archived session")
+		}
+
 		// Check session health
 		health, err := checkSessionHealth(uuid, manifestPath)
 		if err != nil {
@@ -109,12 +127,8 @@ type HealthStatus struct {
 
 // resolveSessionIdentifier finds the Claude UUID and manifest path from various identifier types
 func resolveSessionIdentifier(identifier string) (string, string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	sessionsDir := filepath.Join(homeDir, "sessions")
+	// Use configured sessions directory instead of hardcoded default
+	sessionsDir := cfg.SessionsDir
 	manifests, err := manifest.List(sessionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -134,21 +148,21 @@ func resolveSessionIdentifier(identifier string) (string, string, error) {
 	var matches []*manifest.Manifest
 	var matchType string
 
-	// Strategy 1: UUID match (full or partial)
+	// Strategy 1: SessionID match (full or partial - v2: SessionID is top-level)
 	for _, m := range manifests {
-		if strings.HasPrefix(m.Claude.SessionID, identifier) || m.Claude.SessionID == identifier {
+		if strings.HasPrefix(m.SessionID, identifier) || m.SessionID == identifier {
 			matches = append(matches, m)
-			matchType = "UUID"
+			matchType = "session ID"
 		}
 	}
 
 	// Strategy 2: Tmux session name match
 	if len(matches) == 0 {
-		for uuid, tmuxName := range tmuxMapping {
+		for sessionID, tmuxName := range tmuxMapping {
 			if tmuxName == identifier {
-				// Find manifest with this UUID
+				// Find manifest with this SessionID
 				for _, m := range manifests {
-					if m.Claude.SessionID == uuid {
+					if m.SessionID == sessionID {
 						matches = append(matches, m)
 						matchType = "tmux name"
 						break
@@ -158,12 +172,22 @@ func resolveSessionIdentifier(identifier string) (string, string, error) {
 		}
 	}
 
-	// Strategy 3: Fuzzy match on project path
+	// Strategy 3: Fuzzy match on project path (v2: Context.Project)
 	if len(matches) == 0 {
 		for _, m := range manifests {
-			if strings.Contains(m.Worktree.Path, identifier) {
+			if strings.Contains(m.Context.Project, identifier) {
 				matches = append(matches, m)
 				matchType = "project path"
+			}
+		}
+	}
+
+	// Strategy 4: Match on manifest Name (v2 field)
+	if len(matches) == 0 {
+		for _, m := range manifests {
+			if m.Name == identifier {
+				matches = append(matches, m)
+				matchType = "manifest name"
 			}
 		}
 	}
@@ -183,8 +207,8 @@ func resolveSessionIdentifier(identifier string) (string, string, error) {
 		// No manifest found - try to find orphaned session in history and offer to import
 		m, manifestPath, err := offerToImportOrphanedSession(identifier)
 		if err == nil {
-			// Successfully imported
-			return m.Claude.SessionID, manifestPath, nil
+			// Successfully imported (v2: SessionID is top-level)
+			return m.SessionID, manifestPath, nil
 		}
 		// Fall through to original error (orphaned session not found or user declined)
 		return "", "", fmt.Errorf("no sessions found matching %q", identifier)
@@ -194,12 +218,12 @@ func resolveSessionIdentifier(identifier string) (string, string, error) {
 		// Multiple matches - show user and ask to be more specific
 		ui.PrintWarning(fmt.Sprintf("Multiple sessions matched %q by %s:", identifier, matchType))
 		for i, m := range matches {
-			tmuxName := tmuxMapping[m.Claude.SessionID]
+			tmuxName := tmuxMapping[m.SessionID]
 			if tmuxName == "" {
 				tmuxName = "-"
 			}
-			fmt.Printf("  %d. UUID: %s | Tmux: %s | Project: %s\n",
-				i+1, m.Claude.SessionID[:8], tmuxName, m.Worktree.Path)
+			fmt.Printf("  %d. ID: %s | Tmux: %s | Project: %s\n",
+				i+1, m.SessionID, tmuxName, m.Context.Project)
 		}
 		return "", "", fmt.Errorf("ambiguous identifier - please be more specific")
 	}
@@ -207,11 +231,11 @@ func resolveSessionIdentifier(identifier string) (string, string, error) {
 	// Single match found
 	m := matches[0]
 	manifestPath := filepath.Join(sessionsDir, m.SessionID, "manifest.yaml")
-	return m.Claude.SessionID, manifestPath, nil
+	return m.SessionID, manifestPath, nil
 }
 
-// checkSessionHealth validates that a session can be resumed
-func checkSessionHealth(uuid, manifestPath string) (*HealthStatus, error) {
+// checkSessionHealth validates that a session can be resumed (v2 schema)
+func checkSessionHealth(sessionID, manifestPath string) (*HealthStatus, error) {
 	// Read manifest
 	m, err := manifest.Read(manifestPath)
 	if err != nil {
@@ -219,44 +243,30 @@ func checkSessionHealth(uuid, manifestPath string) (*HealthStatus, error) {
 	}
 
 	health := &HealthStatus{
-		UUID:            uuid,
+		UUID:            sessionID, // v2: SessionID (keeping field name UUID for backward compat in struct)
 		ManifestPath:    manifestPath,
-		WorktreePath:    m.Worktree.Path,
-		SessionEnvPath:  m.Claude.SessionEnvPath,
-		FileHistoryPath: m.Claude.FileHistoryPath,
+		WorktreePath:    m.Context.Project, // v2: Context.Project
+		SessionEnvPath:  "",                // v2: Not stored in manifest
+		FileHistoryPath: "",                // v2: Not stored in manifest
 		TmuxSessionName: m.Tmux.SessionName,
 		Issues:          []string{},
 		Warnings:        []string{},
 		CanResume:       true,
 	}
 
-	// Check worktree exists
-	if _, err := os.Stat(m.Worktree.Path); os.IsNotExist(err) {
+	// Check working directory exists (v2: Context.Project)
+	if _, err := os.Stat(m.Context.Project); os.IsNotExist(err) {
 		health.WorktreeExists = false
 		health.Issues = append(health.Issues,
-			fmt.Sprintf("Worktree directory not found: %s", m.Worktree.Path))
+			fmt.Sprintf("Working directory not found: %s", m.Context.Project))
 		health.CanResume = false
 	} else {
 		health.WorktreeExists = true
 	}
 
-	// Check session-env exists
-	if _, err := os.Stat(m.Claude.SessionEnvPath); os.IsNotExist(err) {
-		health.SessionEnvExists = false
-		health.Warnings = append(health.Warnings,
-			fmt.Sprintf("Session env directory not found: %s", m.Claude.SessionEnvPath))
-	} else {
-		health.SessionEnvExists = true
-	}
-
-	// Check file-history exists (optional - just a warning)
-	if _, err := os.Stat(m.Claude.FileHistoryPath); os.IsNotExist(err) {
-		health.FileHistoryExists = false
-		health.Warnings = append(health.Warnings,
-			fmt.Sprintf("File history directory not found: %s", m.Claude.FileHistoryPath))
-	} else {
-		health.FileHistoryExists = true
-	}
+	// Session env and file history checks removed (not in v2 schema)
+	health.SessionEnvExists = true  // Always true since not checked
+	health.FileHistoryExists = true // Always true since not checked
 
 	// Check tmux session exists
 	tmuxExists, err := tmux.HasSession(m.Tmux.SessionName)
@@ -348,8 +358,21 @@ func resumeSession(uuid, manifestPath string, health *HealthStatus) error {
 		return fmt.Errorf("failed to send cd command: %w", err)
 	}
 
-	// Send claude --resume command to tmux (UUID is validated by manifest, but quote for safety)
-	resumeCmd := fmt.Sprintf("claude --resume %s", shellQuote(uuid))
+	// Read manifest to get Claude UUID
+	m, err := manifest.Read(manifestPath)
+	if err != nil {
+		return fmt.Errorf("failed to read manifest: %w", err)
+	}
+
+	// Send claude --resume command to tmux (use Claude.UUID from manifest)
+	var resumeCmd string
+	if m.Claude.UUID != "" {
+		resumeCmd = fmt.Sprintf("claude --resume %s", shellQuote(m.Claude.UUID))
+	} else {
+		// Fallback to starting a new Claude session if UUID is not set
+		resumeCmd = "claude"
+		ui.PrintWarning("No Claude UUID found in manifest - starting new Claude session")
+	}
 	if err := tmux.SendCommand(health.TmuxSessionName, resumeCmd); err != nil {
 		return fmt.Errorf("failed to send claude resume command: %w", err)
 	}
@@ -371,17 +394,15 @@ func resumeSession(uuid, manifestPath string, health *HealthStatus) error {
 	return nil
 }
 
-// updateManifestActivity updates the last_activity field in manifest
+// updateManifestActivity updates the updated_at field in manifest (v2: auto-updated by Write)
 func updateManifestActivity(manifestPath string) error {
 	m, err := manifest.Read(manifestPath)
 	if err != nil {
 		return err
 	}
 
-	// Update last activity
-	now := time.Now()
-	m.LastActivity = now
-	m.Claude.LastActivity = now
+	// v2: UpdatedAt is automatically set by manifest.Write(), no manual update needed
+	// Just write the manifest back, which will update UpdatedAt
 
 	// Write back
 	return manifest.Write(manifestPath, m)
@@ -393,7 +414,7 @@ func sanitizeTmuxName(s string) string {
 	var result strings.Builder
 	for _, r := range s {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-		   (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			(r >= '0' && r <= '9') || r == '-' || r == '_' {
 			result.WriteRune(r)
 		} else if r == ' ' {
 			result.WriteRune('-')
@@ -455,7 +476,8 @@ func offerToImportOrphanedSession(identifier string) (*manifest.Manifest, string
 	}
 
 	historyPath := filepath.Join(homeDir, ".claude", "history.jsonl")
-	sessionsDir := filepath.Join(homeDir, "sessions")
+	// Use configured sessions directory instead of hardcoded default
+	sessionsDir := cfg.SessionsDir
 
 	// Parse history (best effort - don't fail loudly on errors)
 	entries, _, err := claude.ParseHistory(historyPath)
@@ -471,7 +493,7 @@ func offerToImportOrphanedSession(identifier string) (*manifest.Manifest, string
 	var matches []claude.Session
 	for _, s := range sessions {
 		if strings.HasPrefix(s.UUID, identifier) ||
-		   strings.Contains(s.Project, identifier) {
+			strings.Contains(s.Project, identifier) {
 			matches = append(matches, s)
 		}
 	}
