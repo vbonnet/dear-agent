@@ -342,39 +342,67 @@ func shellQuote(s string) string {
 
 // resumeSession performs the complete resume workflow
 func resumeSession(uuid, manifestPath string, health *HealthStatus) error {
+	sendCommands := false
+
 	// Ensure tmux session exists
 	if !health.TmuxExists {
 		ui.PrintSuccess(fmt.Sprintf("Creating tmux session: %s", health.TmuxSessionName))
 		if err := tmux.NewSession(health.TmuxSessionName, health.WorktreePath); err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
+		sendCommands = true
 	} else {
 		ui.PrintSuccess(fmt.Sprintf("Tmux session %s already exists", health.TmuxSessionName))
+
+		// Check if Claude is already running
+		claudeRunning, err := tmux.IsProcessRunning(health.TmuxSessionName, "claude")
+		if err != nil {
+			ui.PrintWarning("Could not check if Claude is running - skipping resume commands for safety")
+			ui.PrintWarning(fmt.Sprintf("If Claude didn't resume, run: claude --resume %s", uuid[:8]))
+			sendCommands = false
+		} else if claudeRunning {
+			ui.PrintSuccess("Claude already running - skipping resume commands")
+			sendCommands = false
+		} else {
+			ui.PrintSuccess("Claude not running - will send resume commands")
+			sendCommands = true
+		}
 	}
 
-	// Send cd command to tmux (with shell quoting to prevent injection)
-	cdCmd := fmt.Sprintf("cd %s", shellQuote(health.WorktreePath))
-	if err := tmux.SendCommand(health.TmuxSessionName, cdCmd); err != nil {
-		return fmt.Errorf("failed to send cd command: %w", err)
-	}
+	// Only send commands if needed
+	if sendCommands {
+		// Send cd command to tmux (with shell quoting to prevent injection)
+		cdCmd := fmt.Sprintf("cd %s", shellQuote(health.WorktreePath))
+		if err := tmux.SendCommand(health.TmuxSessionName, cdCmd); err != nil {
+			return fmt.Errorf("failed to send cd command: %w", err)
+		}
 
-	// Read manifest to get Claude UUID
-	m, err := manifest.Read(manifestPath)
-	if err != nil {
-		return fmt.Errorf("failed to read manifest: %w", err)
-	}
+		// Read manifest to get Claude UUID
+		m, err := manifest.Read(manifestPath)
+		if err != nil {
+			return fmt.Errorf("failed to read manifest: %w", err)
+		}
 
-	// Send claude --resume command to tmux (use Claude.UUID from manifest)
-	var resumeCmd string
-	if m.Claude.UUID != "" {
-		resumeCmd = fmt.Sprintf("claude --resume %s", shellQuote(m.Claude.UUID))
-	} else {
-		// Fallback to starting a new Claude session if UUID is not set
-		resumeCmd = "claude"
-		ui.PrintWarning("No Claude UUID found in manifest - starting new Claude session")
-	}
-	if err := tmux.SendCommand(health.TmuxSessionName, resumeCmd); err != nil {
-		return fmt.Errorf("failed to send claude resume command: %w", err)
+		// Send claude --resume command to tmux (use Claude.UUID from manifest)
+		var resumeCmd string
+		if m.Claude.UUID != "" {
+			resumeCmd = fmt.Sprintf("claude --resume %s", shellQuote(m.Claude.UUID))
+		} else {
+			// Fallback to starting a new Claude session if UUID is not set
+			resumeCmd = "claude"
+			ui.PrintWarning("No Claude UUID found in manifest - starting new Claude session")
+		}
+		if err := tmux.SendCommand(health.TmuxSessionName, resumeCmd); err != nil {
+			return fmt.Errorf("failed to send claude resume command: %w", err)
+		}
+
+		// Wait for Claude to be ready
+		fmt.Println("⏳ Waiting for Claude to be ready...")
+		if err := tmux.WaitForProcessReady(health.TmuxSessionName, "claude", 5*time.Second); err != nil {
+			ui.PrintWarning("Claude is taking longer than expected")
+		} else {
+			ui.PrintSuccess("Claude is ready!")
+		}
 	}
 
 	// Update manifest last_activity (best effort - don't fail if this errors)
@@ -384,7 +412,9 @@ func resumeSession(uuid, manifestPath string, health *HealthStatus) error {
 
 	// Attach to tmux session
 	ui.PrintSuccess(fmt.Sprintf("Attaching to tmux session: %s", health.TmuxSessionName))
-	fmt.Println("\nNote: You will be attached to the tmux session. Press Ctrl+B then D to detach.")
+	if sendCommands {
+		fmt.Println("\nNote: You will be attached to the tmux session. Press Ctrl+B then D to detach.")
+	}
 	fmt.Println()
 
 	if err := tmux.AttachSession(health.TmuxSessionName); err != nil {

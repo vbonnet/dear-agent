@@ -91,6 +91,15 @@ Examples:
 		}
 		ui.PrintSuccess("Started Claude CLI in tmux session")
 
+		// Wait for Claude to be ready before attaching
+		fmt.Println("⏳ Waiting for Claude to be ready...")
+		if err := tmux.WaitForProcessReady(tmuxName, "claude", 5*time.Second); err != nil {
+			ui.PrintWarning("Claude is taking longer than expected (still starting)")
+			fmt.Println("  Attaching now - Claude should appear shortly")
+		} else {
+			ui.PrintSuccess("Claude is ready!")
+		}
+
 		// Create manifest placeholder
 		// NOTE: We can't know the Claude UUID yet since the session just started
 		// The UUID will be populated later when user runs `csm sync`
@@ -101,26 +110,22 @@ Examples:
 		if err := os.MkdirAll(manifestDir, 0700); err != nil {
 			ui.PrintWarning(fmt.Sprintf("Failed to create manifest directory: %v", err))
 		} else {
+			// Create v2 manifest
 			m := &manifest.Manifest{
 				SchemaVersion: manifest.SchemaVersion,
 				SessionID:     "", // Will be populated by sync
-				Status:        manifest.StatusActive,
+				Name:          tmuxName,
 				CreatedAt:     time.Now(),
-				LastActivity:  time.Now(),
-				Worktree: manifest.Worktree{
-					Path: workDir,
-				},
-				Claude: manifest.Claude{
-					SessionID:       "", // Unknown until first message
-					SessionEnvPath:  "",
-					FileHistoryPath: "",
-					StartedAt:       time.Now(),
-					LastActivity:    time.Now(),
+				UpdatedAt:     time.Now(),
+				Lifecycle:     "", // Empty = active/stopped
+				Context: manifest.Context{
+					Project: workDir,
+					Purpose: "", // Can be set later
+					Tags:    nil,
+					Notes:   "",
 				},
 				Tmux: manifest.Tmux{
 					SessionName: tmuxName,
-					WindowName:  "main",
-					CreatedAt:   time.Now(),
 				},
 			}
 

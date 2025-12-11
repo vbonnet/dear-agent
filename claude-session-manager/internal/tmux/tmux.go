@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // HasSession checks if tmux session exists
@@ -102,4 +103,64 @@ func ListSessions() ([]string, error) {
 		}
 	}
 	return sessions, nil
+}
+
+// IsProcessRunning checks if a specific process is running as the foreground
+// process in any pane of the tmux session. Used to detect if Claude is already
+// active before sending resume commands, preventing text injection.
+//
+// Limitations:
+// - Only detects foreground processes (suspended processes appear as shell)
+// - Requires tmux 2.6+ for #{pane_current_command} format string support
+// - Process name matching is case-sensitive and exact
+//
+// Returns (true, nil) if process found in any pane
+// Returns (false, nil) if process not found
+// Returns (false, error) if tmux command fails
+func IsProcessRunning(sessionName, processName string) (bool, error) {
+	cmd := exec.Command("tmux", "list-panes", "-t", sessionName,
+		"-F", "#{pane_current_command}")
+	output, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("failed to check tmux pane process: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) == processName {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// WaitForProcessReady polls until the specified process is running in the
+// tmux session, or returns error on timeout. This improves UX by ensuring
+// Claude is fully started before attaching to the tmux session.
+//
+// Parameters:
+//   - sessionName: tmux session to check
+//   - processName: process to wait for (e.g., "claude")
+//   - timeout: maximum time to wait
+//
+// Returns nil when process is ready, error on timeout or check failure.
+func WaitForProcessReady(sessionName, processName string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	pollInterval := 100 * time.Millisecond
+
+	for time.Now().Before(deadline) {
+		running, err := IsProcessRunning(sessionName, processName)
+		if err != nil {
+			// Ignore transient errors (e.g., brief tmux unavailability)
+			time.Sleep(pollInterval)
+			continue
+		}
+		if running {
+			return nil // Process is ready!
+		}
+		time.Sleep(pollInterval)
+	}
+
+	return fmt.Errorf("timeout waiting for %s to start (waited %v)", processName, timeout)
 }

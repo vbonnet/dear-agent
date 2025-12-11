@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/config"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
@@ -33,30 +34,50 @@ func Resume(identifier string, cfg *config.Config) error {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
 
+	sendCommands := false
 	if !exists {
 		// Create new tmux session (v2: use Context.Project for working directory)
 		if err := tmux.NewSession(m.Tmux.SessionName, m.Context.Project); err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
-	}
-
-	// 5. Send commands to tmux
-	// Change directory
-	cdCmd := fmt.Sprintf("cd %s", m.Context.Project)
-	if err := tmux.SendCommand(m.Tmux.SessionName, cdCmd); err != nil {
-		return fmt.Errorf("failed to send cd command: %w", err)
-	}
-
-	// Resume Claude (v2: use Claude.UUID for the actual Claude session UUID)
-	var resumeCmd string
-	if m.Claude.UUID != "" {
-		resumeCmd = fmt.Sprintf("claude --resume %s", m.Claude.UUID)
+		sendCommands = true
 	} else {
-		// Fallback to starting a new Claude session if UUID is not set
-		resumeCmd = "claude"
+		// Check if Claude is already running
+		claudeRunning, err := tmux.IsProcessRunning(m.Tmux.SessionName, "claude")
+		if err != nil {
+			// Detection failed - skip commands for safety
+			sendCommands = false
+		} else if claudeRunning {
+			// Claude already running - skip commands
+			sendCommands = false
+		} else {
+			// Claude not running - send commands
+			sendCommands = true
+		}
 	}
-	if err := tmux.SendCommand(m.Tmux.SessionName, resumeCmd); err != nil {
-		return fmt.Errorf("failed to send claude resume command: %w", err)
+
+	// 5. Send commands to tmux only if needed
+	if sendCommands {
+		// Change directory
+		cdCmd := fmt.Sprintf("cd %s", m.Context.Project)
+		if err := tmux.SendCommand(m.Tmux.SessionName, cdCmd); err != nil {
+			return fmt.Errorf("failed to send cd command: %w", err)
+		}
+
+		// Resume Claude (v2: use Claude.UUID for the actual Claude session UUID)
+		var resumeCmd string
+		if m.Claude.UUID != "" {
+			resumeCmd = fmt.Sprintf("claude --resume %s", m.Claude.UUID)
+		} else {
+			// Fallback to starting a new Claude session if UUID is not set
+			resumeCmd = "claude"
+		}
+		if err := tmux.SendCommand(m.Tmux.SessionName, resumeCmd); err != nil {
+			return fmt.Errorf("failed to send claude resume command: %w", err)
+		}
+
+		// Wait for Claude to be ready
+		_ = tmux.WaitForProcessReady(m.Tmux.SessionName, "claude", 5*time.Second)
 	}
 
 	// 6. Update manifest metadata (v2: only UpdatedAt is auto-updated by Write)
