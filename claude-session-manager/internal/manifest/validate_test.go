@@ -98,16 +98,17 @@ func TestValidateUUID(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	validManifest := &Manifest{
-		SessionID:    "test-session",
-		Status:       StatusActive,
-		CreatedAt:    testTime(),
-		LastActivity: testTime(),
-		Worktree: Worktree{
-			Path:   "/home/user/code",
-			Branch: "main",
-		},
-		Claude: Claude{
-			SessionID: "c86ffd41-cbcc-4bfa-8b1f-4da7c83fc3d2",
+		SchemaVersion: "2.0",
+		SessionID:     "test-session",
+		Name:          "test-session",
+		CreatedAt:     testTime(),
+		UpdatedAt:     testTime(),
+		Lifecycle:     "",
+		Context: Context{
+			Project: "/home/user/code",
+			Purpose: "Test session",
+			Tags:    []string{"test", "dev"},
+			Notes:   "Test notes",
 		},
 		Tmux: Tmux{
 			SessionName: "claude-1",
@@ -132,23 +133,68 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "invalid status",
+			name: "missing name",
 			modify: func(m *Manifest) {
-				m.Status = "invalid"
+				m.Name = ""
 			},
 			wantErr: true,
 		},
 		{
-			name: "missing worktree path",
+			name: "missing schema_version",
 			modify: func(m *Manifest) {
-				m.Worktree.Path = ""
+				m.SchemaVersion = ""
 			},
 			wantErr: true,
 		},
 		{
-			name: "invalid claude UUID",
+			name: "missing context.project",
 			modify: func(m *Manifest) {
-				m.Claude.SessionID = "not-a-uuid"
+				m.Context.Project = ""
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid lifecycle",
+			modify: func(m *Manifest) {
+				m.Lifecycle = "invalid"
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid lifecycle archived",
+			modify: func(m *Manifest) {
+				m.Lifecycle = LifecycleArchived
+			},
+			wantErr: false,
+		},
+		{
+			name: "purpose too long",
+			modify: func(m *Manifest) {
+				m.Context.Purpose = string(make([]byte, MaxPurposeLen+1))
+			},
+			wantErr: true,
+		},
+		{
+			name: "too many tags",
+			modify: func(m *Manifest) {
+				m.Context.Tags = make([]string, MaxTagsCount+1)
+				for i := range m.Context.Tags {
+					m.Context.Tags[i] = "tag"
+				}
+			},
+			wantErr: true,
+		},
+		{
+			name: "tag too long",
+			modify: func(m *Manifest) {
+				m.Context.Tags = []string{string(make([]byte, MaxTagLen+1))}
+			},
+			wantErr: true,
+		},
+		{
+			name: "notes too long",
+			modify: func(m *Manifest) {
+				m.Context.Notes = string(make([]byte, MaxNotesLen+1))
 			},
 			wantErr: true,
 		},
@@ -158,7 +204,7 @@ func TestValidate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := *validManifest
 			tt.modify(&m)
-			err := Validate(&m)
+			err := m.Validate()
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {

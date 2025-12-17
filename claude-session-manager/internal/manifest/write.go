@@ -2,8 +2,10 @@ package manifest
 
 import (
 	"fmt"
+	"os"
 	"time"
 
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/backup"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/fileutil"
 	"gopkg.in/yaml.v3"
 )
@@ -14,7 +16,16 @@ const (
 )
 
 // Write atomically writes a manifest v2 with automatic UpdatedAt timestamp
+// If the manifest already exists, a numbered backup is created automatically
 func Write(path string, m *Manifest) error {
+	// Create backup if file exists
+	if _, err := os.Stat(path); err == nil {
+		// File exists, create backup before overwriting
+		if _, err := backup.CreateBackup(path); err != nil {
+			return fmt.Errorf("failed to create backup before write: %w", err)
+		}
+	}
+
 	// Set UpdatedAt timestamp
 	m.UpdatedAt = time.Now()
 

@@ -54,11 +54,12 @@ Global Flags:
 
 		// Commands that don't need locks (read-only operations)
 		lockFreeCommands := map[string]bool{
-			"version": true,
-			"list":    true,
-			"doctor":  true,
-			"unlock":  true,
-			"backup":  true,
+			"version":  true,
+			"list":     true,
+			"doctor":   true,
+			"unlock":   true,
+			"backup":   true,
+			"get-uuid": true,
 		}
 
 		// Acquire lock if enabled and command requires it

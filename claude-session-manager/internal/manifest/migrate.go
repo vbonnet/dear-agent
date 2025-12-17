@@ -56,9 +56,9 @@ func MigrateV1ToV2(path string) error {
 		Lifecycle:     "", // Empty = active/stopped (status computed dynamically)
 		Context: Context{
 			Project: v1.Worktree.Path, // Migrate worktree path to context project
-			Purpose: "",                // Not in v1
-			Tags:    nil,               // Not in v1
-			Notes:   "",                // Not in v1
+			Purpose: "",               // Not in v1
+			Tags:    nil,              // Not in v1
+			Notes:   "",               // Not in v1
 		},
 		Tmux: Tmux{
 			SessionName: v1.Tmux.SessionName,

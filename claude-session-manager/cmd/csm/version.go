@@ -2,17 +2,27 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/spf13/cobra"
 )
 
-const version = "1.0.0"
+var (
+	// Version information (can be set via ldflags at build time)
+	Version   = "2.0.0-dev"
+	GitCommit = "unknown"
+	BuildDate = "unknown"
+)
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
+	Long:  `Display the version, git commit, build date, and Go version of csm.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("csm version %s\n", version)
+		fmt.Printf("csm version %s\n", Version)
+		fmt.Printf("  git commit: %s\n", GitCommit)
+		fmt.Printf("  built: %s\n", BuildDate)
+		fmt.Printf("  go version: %s\n", runtime.Version())
 	},
 }
 

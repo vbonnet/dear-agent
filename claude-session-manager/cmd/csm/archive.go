@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/discovery"
@@ -183,9 +185,31 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Move session directory to .archive-old-format/
+	sessionDir := filepath.Dir(manifestPath)
+	archiveBaseDir := filepath.Join(sessionsDir, ".archive-old-format")
+	archiveTargetDir := filepath.Join(archiveBaseDir, filepath.Base(sessionDir))
+
+	// Create archive directory if it doesn't exist
+	if err := os.MkdirAll(archiveBaseDir, 0700); err != nil {
+		ui.PrintError(err, "Failed to create archive directory",
+			fmt.Sprintf("  • Directory: %s\n"+
+				"  • Check permissions and disk space", archiveBaseDir))
+		return err
+	}
+
+	// Move session directory to archive
+	if err := os.Rename(sessionDir, archiveTargetDir); err != nil {
+		ui.PrintError(err, "Failed to move session to archive",
+			fmt.Sprintf("  • From: %s\n"+
+				"  • To: %s\n"+
+				"  • Check permissions and ensure target doesn't exist", sessionDir, archiveTargetDir))
+		return err
+	}
+
 	// Report success
 	ui.PrintSuccess(fmt.Sprintf("Archived session: %s", sessionName))
-	fmt.Printf("\nManifest: %s\n", manifestPath)
+	fmt.Printf("\nSession moved to: %s\n", archiveTargetDir)
 	fmt.Printf("\nThe session is now hidden from 'csm list'.\n")
 	fmt.Printf("Use 'csm list --all' to see archived sessions.\n")
 

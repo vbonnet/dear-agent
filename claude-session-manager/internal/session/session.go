@@ -9,26 +9,9 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 )
 
-// ResolveIdentifier finds a manifest by tmux name, workspace ID, or Claude UUID
+// ResolveIdentifier finds a manifest by tmux name, workspace ID, or session ID
 func ResolveIdentifier(identifier string, sessionsDir string) (*manifest.Manifest, string, error) {
-	// Try to validate as UUID first
-	if err := manifest.ValidateUUID(identifier); err == nil {
-		// It's a UUID, search by claude.session_id
-		manifests, err := manifest.List(sessionsDir)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to list manifests: %w", err)
-		}
-
-		for _, m := range manifests {
-			if m.Claude.SessionID == identifier {
-				manifestPath := filepath.Join(sessionsDir, m.SessionID, "manifest.yaml")
-				return m, manifestPath, nil
-			}
-		}
-		return nil, "", fmt.Errorf("session not found: %s", identifier)
-	}
-
-	// Try as session ID (workspace ID)
+	// Try as session ID (workspace ID) first
 	manifestPath := filepath.Join(sessionsDir, identifier, "manifest.yaml")
 	if _, err := os.Stat(manifestPath); err == nil {
 		m, err := manifest.Read(manifestPath)
@@ -51,15 +34,21 @@ func ResolveIdentifier(identifier string, sessionsDir string) (*manifest.Manifes
 		}
 	}
 
+	// Try as manifest Name (v2 field)
+	for _, m := range manifests {
+		if m.Name == identifier {
+			manifestPath := filepath.Join(sessionsDir, m.SessionID, "manifest.yaml")
+			return m, manifestPath, nil
+		}
+	}
+
 	return nil, "", fmt.Errorf("session not found: %s", identifier)
 }
 
 // HealthReport contains health check results
 type HealthReport struct {
-	WorktreeExists    bool
-	SessionEnvExists  bool
-	FileHistoryExists bool
-	Issues            []string
+	WorktreeExists bool
+	Issues         []string
 }
 
 // CheckHealth validates that all paths in manifest exist
@@ -68,28 +57,12 @@ func CheckHealth(m *manifest.Manifest) (*HealthReport, error) {
 		Issues: []string{},
 	}
 
-	// Check worktree path
-	if _, err := os.Stat(m.Worktree.Path); err != nil {
+	// Check working directory (v2: Context.Project)
+	if _, err := os.Stat(m.Context.Project); err != nil {
 		report.WorktreeExists = false
-		report.Issues = append(report.Issues, fmt.Sprintf("Worktree path does not exist: %s", m.Worktree.Path))
+		report.Issues = append(report.Issues, fmt.Sprintf("Working directory does not exist: %s", m.Context.Project))
 	} else {
 		report.WorktreeExists = true
-	}
-
-	// Check session env path
-	if _, err := os.Stat(m.Claude.SessionEnvPath); err != nil {
-		report.SessionEnvExists = false
-		report.Issues = append(report.Issues, fmt.Sprintf("Session env path does not exist: %s", m.Claude.SessionEnvPath))
-	} else {
-		report.SessionEnvExists = true
-	}
-
-	// Check file history path
-	if _, err := os.Stat(m.Claude.FileHistoryPath); err != nil {
-		report.FileHistoryExists = false
-		report.Issues = append(report.Issues, fmt.Sprintf("File history path does not exist: %s", m.Claude.FileHistoryPath))
-	} else {
-		report.FileHistoryExists = true
 	}
 
 	return report, nil
@@ -97,7 +70,7 @@ func CheckHealth(m *manifest.Manifest) (*HealthReport, error) {
 
 // IsHealthy returns true if all health checks pass
 func (r *HealthReport) IsHealthy() bool {
-	return r.WorktreeExists && r.SessionEnvExists && r.FileHistoryExists
+	return r.WorktreeExists
 }
 
 // Summary returns a human-readable summary of health issues

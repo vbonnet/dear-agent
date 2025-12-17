@@ -60,3 +60,11 @@ func Yellow(text string) string {
 func Blue(text string) string {
 	return Colorize(text, ColorBlue)
 }
+
+// Bold returns bold text
+func Bold(text string) string {
+	if !isTerminal() {
+		return text
+	}
+	return fmt.Sprintf("\033[1m%s\033[0m", text)
+}

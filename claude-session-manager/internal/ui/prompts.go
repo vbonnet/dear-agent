@@ -47,3 +47,16 @@ func Confirm(question string) (bool, error) {
 	input = strings.ToLower(strings.TrimSpace(input))
 	return input == "y" || input == "yes", nil
 }
+
+// PromptForString displays a prompt and returns the user's string input
+func PromptForString(question string) (string, error) {
+	fmt.Printf("%s: ", question)
+
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read input: %w", err)
+	}
+
+	return strings.TrimSpace(input), nil
+}

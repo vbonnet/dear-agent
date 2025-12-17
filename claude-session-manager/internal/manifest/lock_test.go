@@ -114,8 +114,8 @@ func TestGetLockInfo(t *testing.T) {
 		t.Errorf("Wrong PID: got %d, want %d", pid, expectedPID)
 	}
 
-	// Verify timestamp is recent
-	if lockTime.Before(beforeLock) || lockTime.After(afterLock) {
+	// Verify timestamp is recent (allow 1s tolerance for RFC3339 truncation)
+	if lockTime.Before(beforeLock.Add(-time.Second)) || lockTime.After(afterLock.Add(time.Second)) {
 		t.Errorf("Lock timestamp out of range: %v (expected between %v and %v)",
 			lockTime, beforeLock, afterLock)
 	}

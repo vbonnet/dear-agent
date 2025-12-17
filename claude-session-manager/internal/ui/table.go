@@ -8,42 +8,47 @@ import (
 	"time"
 
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 )
 
-// FormatTable formats manifests as aligned table
-func FormatTable(manifests []*manifest.Manifest) string {
+// FormatTable formats manifests as aligned table (v2 schema)
+func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) string {
 	var buf bytes.Buffer
-	w := tabwriter.NewWriter(&buf, 0, 0, 3, ' ', 0)
+	w := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
 
-	// Header
+	// Header (using bold for better visibility without affecting alignment)
 	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-		Blue("SESSION ID"),
-		Blue("TMUX"),
-		Blue("STATUS"),
-		Blue("LAST ACTIVITY"),
-		Blue("WORKTREE"))
+		Bold("NAME"),
+		Bold("TMUX"),
+		Bold("STATUS"),
+		Bold("UPDATED"),
+		Bold("PROJECT"))
+
+	// Compute status for all manifests
+	statuses := session.ComputeStatusBatch(manifests, tmux)
 
 	// Rows
 	for _, m := range manifests {
-		status := m.Status
-		switch m.Status {
-		case manifest.StatusActive:
-			status = Green(m.Status)
-		case manifest.StatusStale:
-			status = Yellow(m.Status)
-		case manifest.StatusArchived:
-			status = Red(m.Status)
+		status := statuses[m.Name]
+		statusColored := status
+		switch status {
+		case "active":
+			statusColored = Green(status)
+		case "stopped":
+			statusColored = Yellow(status)
+		case "archived":
+			statusColored = Red(status)
 		}
 
-		lastActivity := formatTime(m.LastActivity)
-		worktree := truncatePath(m.Worktree.Path, 40)
+		updated := formatTime(m.UpdatedAt)
+		project := truncatePath(m.Context.Project, 40)
 
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			m.SessionID,
+			m.Name,
 			m.Tmux.SessionName,
-			status,
-			lastActivity,
-			worktree)
+			statusColored,
+			updated,
+			project)
 	}
 
 	w.Flush()
