@@ -386,13 +386,10 @@ Test that links work:
 
 **Validation test**: Ask AI agent to describe workspace without providing context.
 
-```bash
-# In new Claude Code session, from workspace root:
-cd ~/src/ws/[workspace]/
+Open new Claude Code session with working directory: `~/src/ws/[workspace]/`
 
-# Ask:
-# "What is this workspace? What belongs here? Where do wayfinder projects go?"
-```
+Then ask:
+"What is this workspace? What belongs here? Where do wayfinder projects go?"
 
 **Expected result**:
 - Agent reads AGENTS.md automatically
