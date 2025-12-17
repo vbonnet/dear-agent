@@ -38,6 +38,18 @@
   - Estimated effort: 3 hours
   - Reference: `wayfinder-projects/archive-command/STATUS.md` line 296
 
+## Recently Completed
+
+- [x] **Auto-exit tmux sessions when Claude exits** (2025-12-17)
+  - Issue: Typing `/exit` in Claude left user in tmux session requiring second `exit`
+  - Solution: Append `; exit` to all claude commands sent to tmux
+  - Files modified:
+    - `cmd/csm/resume.go` (lines 428, 431)
+    - `internal/session/resume.go` (lines 70, 73)
+    - `cmd/csm/new.go` (lines 179, 319)
+  - Testing: All existing tests pass (go test ./... -v)
+  - Documentation: `~/src/ws/csm-auto-exit-implementation.md`
+
 ## Notes
 
 - Archive command implementation completed: 2025-12-17

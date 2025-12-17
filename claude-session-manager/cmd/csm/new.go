@@ -176,7 +176,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	}
 
 	// Start Claude in the session
-	claudeCmd := "claude"
+	claudeCmd := "claude; exit"
 	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
 		ui.PrintError(err, "Failed to start Claude", "")
 		// Try to kill the tmux session if we just created it and Claude failed
@@ -316,7 +316,7 @@ func startClaudeInCurrentTmux(sessionName string) error {
 
 	// Start Claude in current pane
 	fmt.Println("Starting Claude CLI...")
-	claudeCmd := "claude"
+	claudeCmd := "claude; exit"
 	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
 		ui.PrintError(err, "Failed to start Claude", "")
 		return err

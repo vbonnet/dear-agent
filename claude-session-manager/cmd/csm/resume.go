@@ -425,10 +425,10 @@ func resumeSession(sessionID, manifestPath string, health *HealthStatus) error {
 		// Send claude --resume command to tmux (use Claude.UUID from manifest)
 		var resumeCmd string
 		if m.Claude.UUID != "" {
-			resumeCmd = fmt.Sprintf("claude --resume %s", shellQuote(m.Claude.UUID))
+			resumeCmd = fmt.Sprintf("claude --resume %s; exit", shellQuote(m.Claude.UUID))
 		} else {
 			// Fallback to starting a new Claude session if UUID is not set
-			resumeCmd = "claude"
+			resumeCmd = "claude; exit"
 			ui.PrintWarning("No Claude UUID found in manifest - starting new Claude session")
 		}
 		if err := tmux.SendCommand(health.TmuxSessionName, resumeCmd); err != nil {

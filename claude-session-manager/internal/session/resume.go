@@ -67,10 +67,10 @@ func Resume(identifier string, cfg *config.Config) error {
 		// Resume Claude (v2: use Claude.UUID for the actual Claude session UUID)
 		var resumeCmd string
 		if m.Claude.UUID != "" {
-			resumeCmd = fmt.Sprintf("claude --resume %s", m.Claude.UUID)
+			resumeCmd = fmt.Sprintf("claude --resume %s; exit", m.Claude.UUID)
 		} else {
 			// Fallback to starting a new Claude session if UUID is not set
-			resumeCmd = "claude"
+			resumeCmd = "claude; exit"
 		}
 		if err := tmux.SendCommand(m.Tmux.SessionName, resumeCmd); err != nil {
 			return fmt.Errorf("failed to send claude resume command: %w", err)
