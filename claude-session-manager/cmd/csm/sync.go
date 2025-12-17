@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
@@ -97,59 +98,72 @@ Examples:
 
 		ui.PrintSuccess(fmt.Sprintf("Matched %d sessions to existing manifests", len(result.Matched)))
 
+		// PRIORITY 1: Scan active tmux sessions for Claude conversations (automatic, non-interactive)
+		if err := syncActiveTmuxSessions(cfg.SessionsDir, entries); err != nil {
+			ui.PrintWarning(fmt.Sprintf("Failed to sync active tmux sessions: %v", err))
+		}
+
+		// PRIORITY 2: Optionally handle orphaned sessions from history (interactive)
 		if len(result.OrphanedClaude) > 0 {
-			ui.PrintWarning(fmt.Sprintf("Found %d orphaned Claude sessions", len(result.OrphanedClaude)))
-			fmt.Println("\nOrphaned sessions (in history.jsonl but no manifest):")
+			ui.PrintWarning(fmt.Sprintf("Found %d orphaned Claude sessions in history", len(result.OrphanedClaude)))
 
-			// Get existing tmux names from manifests to avoid conflicts
-			existingTmuxNames := make(map[string]bool)
-			for _, m := range manifests {
-				if m.Tmux.SessionName != "" {
-					existingTmuxNames[m.Tmux.SessionName] = true
-				}
-			}
+			// Ask if user wants to interactively create manifests for these
+			confirm, err := ui.Confirm("\nDo you want to interactively create manifests for orphaned sessions?")
+			if err != nil || !confirm {
+				fmt.Println("Skipping orphaned sessions. Run 'csm sync' again to handle them later.")
+			} else {
+				fmt.Println("\nOrphaned sessions (in history.jsonl but no manifest):")
 
-			// Get active tmux sessions to avoid conflicts
-			activeTmux, err := tmux.ListSessions()
-			if err != nil {
-				ui.PrintWarning(fmt.Sprintf("Failed to list tmux sessions: %v", err))
-				activeTmux = []string{}
-			}
-			for _, name := range activeTmux {
-				existingTmuxNames[name] = true
-			}
-
-			for i, session := range result.OrphanedClaude {
-				fmt.Printf("  %d. UUID: %s\n", i+1, session.UUID)
-				fmt.Printf("     Project: %s\n", session.Project)
-				fmt.Printf("     Last Activity: %s\n", session.LastActivity.Format("2006-01-02 15:04:05"))
-
-				// Offer to create manifest
-				confirm, err := ui.Confirm("Create manifest for this session?")
-				if err != nil || !confirm {
-					continue
+				// Get existing tmux names from manifests to avoid conflicts
+				existingTmuxNames := make(map[string]bool)
+				for _, m := range manifests {
+					if m.Tmux.SessionName != "" {
+						existingTmuxNames[m.Tmux.SessionName] = true
+					}
 				}
 
-				// Generate unique tmux name (check against existing names)
-				baseTmuxName := fmt.Sprintf("claude-%d", i+1)
-				tmuxName := baseTmuxName
-				suffix := 2
-				for existingTmuxNames[tmuxName] {
-					tmuxName = fmt.Sprintf("%s-%d", baseTmuxName, suffix)
-					suffix++
-				}
-				// Mark as used for next iteration
-				existingTmuxNames[tmuxName] = true
-
-				sessionID := filepath.Base(session.Project)
-
-				m, err := discovery.CreateManifest(session, cfg.SessionsDir, tmuxName, sessionID)
+				// Get active tmux sessions to avoid conflicts
+				activeTmux, err := tmux.ListSessions()
 				if err != nil {
-					ui.PrintError(err, "Failed to create manifest", "")
-					continue
+					ui.PrintWarning(fmt.Sprintf("Failed to list tmux sessions: %v", err))
+					activeTmux = []string{}
+				}
+				for _, name := range activeTmux {
+					existingTmuxNames[name] = true
 				}
 
-				ui.PrintSuccess(fmt.Sprintf("Created manifest: %s (tmux: %s)", m.SessionID, m.Tmux.SessionName))
+				for i, session := range result.OrphanedClaude {
+					fmt.Printf("  %d. UUID: %s\n", i+1, session.UUID)
+					fmt.Printf("     Project: %s\n", session.Project)
+					fmt.Printf("     Last Activity: %s\n", session.LastActivity.Format("2006-01-02 15:04:05"))
+
+					// Offer to create manifest
+					confirm, err := ui.Confirm("Create manifest for this session?")
+					if err != nil || !confirm {
+						continue
+					}
+
+					// Generate unique tmux name (check against existing names)
+					baseTmuxName := fmt.Sprintf("claude-%d", i+1)
+					tmuxName := baseTmuxName
+					suffix := 2
+					for existingTmuxNames[tmuxName] {
+						tmuxName = fmt.Sprintf("%s-%d", baseTmuxName, suffix)
+						suffix++
+					}
+					// Mark as used for next iteration
+					existingTmuxNames[tmuxName] = true
+
+					sessionID := filepath.Base(session.Project)
+
+					m, err := discovery.CreateManifest(session, cfg.SessionsDir, tmuxName, sessionID)
+					if err != nil {
+						ui.PrintError(err, "Failed to create manifest", "")
+						continue
+					}
+
+					ui.PrintSuccess(fmt.Sprintf("Created manifest: %s (tmux: %s)", m.SessionID, m.Tmux.SessionName))
+				}
 			}
 		}
 
@@ -159,6 +173,132 @@ Examples:
 
 		return nil
 	},
+}
+
+// syncActiveTmuxSessions scans all active tmux sessions for Claude conversations
+// and ensures they have proper manifests (without auto-assigning UUIDs)
+func syncActiveTmuxSessions(sessionsDir string, historyEntries []claude.RawEntry) error {
+	// Get all active tmux sessions
+	tmuxSessions, err := tmux.ListSessions()
+	if err != nil {
+		return fmt.Errorf("failed to list tmux sessions: %w", err)
+	}
+
+	if len(tmuxSessions) == 0 {
+		return nil // No tmux sessions to sync
+	}
+
+	var createdCount int
+	var claudeSessionCount int
+	var needsAssociationCount int
+
+	// First pass: count how many sessions are running Claude
+	for _, sessionName := range tmuxSessions {
+		isRunning, _ := tmux.IsProcessRunning(sessionName, "claude")
+		if isRunning {
+			claudeSessionCount++
+		}
+	}
+
+	if claudeSessionCount == 0 {
+		return nil // No Claude sessions running
+	}
+
+	fmt.Printf("\nScanning %d active tmux sessions running Claude...\n", claudeSessionCount)
+
+	for _, sessionName := range tmuxSessions {
+		// Check if this tmux session is running Claude
+		isRunning, err := tmux.IsProcessRunning(sessionName, "claude")
+		if err != nil {
+			// Skip this session on error (might be transient)
+			continue
+		}
+
+		if !isRunning {
+			// Not running Claude, skip
+			continue
+		}
+
+		// This session is running Claude, ensure it has a proper manifest
+		manifestDir := filepath.Join(sessionsDir, fmt.Sprintf("session-%s", sessionName))
+		manifestPath := filepath.Join(manifestDir, "manifest.yaml")
+
+		// Check if manifest exists
+		var m *manifest.Manifest
+		existingManifest := false
+
+		if _, err := os.Stat(manifestPath); err == nil {
+			// Manifest exists, try to read it
+			existingManifest = true
+			m, err = manifest.Read(manifestPath)
+			if err != nil {
+				// Failed to read, create a new one
+				existingManifest = false
+			}
+		}
+
+		if !existingManifest {
+			// Create new manifest WITHOUT auto-assigning UUID
+			workDir, err := tmux.GetCurrentWorkingDirectory(sessionName)
+			if err != nil {
+				workDir = os.Getenv("HOME") // Fallback to home directory
+			}
+
+			if err := os.MkdirAll(manifestDir, 0700); err != nil {
+				ui.PrintWarning(fmt.Sprintf("Failed to create manifest directory for %s: %v", sessionName, err))
+				continue
+			}
+
+			m = &manifest.Manifest{
+				SchemaVersion: manifest.SchemaVersion,
+				SessionID:     fmt.Sprintf("session-%s", sessionName),
+				Name:          sessionName,
+				CreatedAt:     time.Now(),
+				UpdatedAt:     time.Now(),
+				Lifecycle:     "", // Empty = active
+				Context: manifest.Context{
+					Project: workDir,
+					Purpose: "",
+					Tags:    nil,
+					Notes:   "",
+				},
+				Claude: manifest.Claude{
+					UUID: "", // Leave empty - user must associate manually
+				},
+				Tmux: manifest.Tmux{
+					SessionName: sessionName,
+				},
+			}
+
+			if err := manifest.Write(manifestPath, m); err != nil {
+				ui.PrintWarning(fmt.Sprintf("Failed to write manifest for %s: %v", sessionName, err))
+				continue
+			}
+
+			ui.PrintSuccess(fmt.Sprintf("Created manifest for tmux session '%s'", sessionName))
+			fmt.Printf("  → Run 'csm associate %s' to link Claude UUID\n", sessionName)
+			createdCount++
+			needsAssociationCount++
+		} else {
+			// Manifest exists, check if UUID is empty
+			if m.Claude.UUID == "" {
+				fmt.Printf("  ℹ Session '%s' needs Claude UUID association\n", sessionName)
+				fmt.Printf("    → Run 'csm associate %s' to link\n", sessionName)
+				needsAssociationCount++
+			}
+		}
+	}
+
+	if createdCount > 0 {
+		fmt.Printf("\nCreated %d manifest(s) for active tmux sessions\n", createdCount)
+	}
+
+	if needsAssociationCount > 0 {
+		fmt.Printf("\n💡 %d session(s) need Claude UUID association\n", needsAssociationCount)
+		fmt.Println("   Use 'csm associate <session-name>' to link each session to its Claude conversation")
+	}
+
+	return nil
 }
 
 func init() {
