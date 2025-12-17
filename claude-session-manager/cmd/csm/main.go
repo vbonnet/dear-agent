@@ -52,8 +52,18 @@ Global Flags:
 			tmux.SetTimeout(cfg.Timeout.TmuxCommands)
 		}
 
-		// Acquire lock if enabled
-		if cfg.Lock.Enabled && !noLock {
+		// Commands that don't need locks (read-only operations)
+		lockFreeCommands := map[string]bool{
+			"version": true,
+			"list":    true,
+			"doctor":  true,
+			"unlock":  true,
+			"backup":  true,
+		}
+
+		// Acquire lock if enabled and command requires it
+		needsLock := !lockFreeCommands[cmd.Name()]
+		if cfg.Lock.Enabled && !noLock && needsLock {
 			globalLock, err = lock.New(cfg.Lock.Path)
 			if err != nil {
 				return err

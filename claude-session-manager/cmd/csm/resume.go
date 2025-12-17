@@ -453,6 +453,15 @@ func resumeSession(sessionID, manifestPath string, health *HealthStatus) error {
 	// Update VS Code tab title if running in VS Code
 	updateVSCodeTabTitle(health.TmuxSessionName)
 
+	// Release lock before attaching (attachment can block for hours)
+	// The lock should only protect the setup phase, not the tmux attachment
+	if globalLock != nil {
+		if err := globalLock.Unlock(); err != nil {
+			ui.PrintWarning(fmt.Sprintf("Failed to release lock: %v", err))
+		}
+		globalLock = nil // Prevent double-unlock in PersistentPostRunE
+	}
+
 	// Attach to tmux session
 	ui.PrintSuccess(fmt.Sprintf("Attaching to tmux session: %s", health.TmuxSessionName))
 	if sendCommands {

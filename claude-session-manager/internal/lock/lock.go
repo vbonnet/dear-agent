@@ -63,7 +63,7 @@ func (fl *FileLock) TryLock() error {
 	if err != nil {
 		return &LockError{
 			Problem:  "Another csm command is currently running",
-			Recovery: "If you're sure no other csm is running, use --no-lock flag",
+			Recovery: "Wait for the other command to finish, or run 'csm unlock' to check for stale locks",
 		}
 	}
 
