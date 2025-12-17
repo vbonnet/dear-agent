@@ -1,0 +1,15 @@
+{
+  "name": "ai-tools",
+  "owner": {
+    "name": "AI Tools Team",
+    "email": "tools@example.com"
+  },
+  "plugins": [
+    {
+      "name": "csm-tools",
+      "source": "./csm-plugin",
+      "description": "Claude Session Manager commands for managing Claude sessions with tmux",
+      "version": "0.1.0"
+    }
+  ]
+}
