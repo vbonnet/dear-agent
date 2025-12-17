@@ -48,8 +48,8 @@ Examples:
 			return fmt.Errorf("interactive picker not yet implemented - please provide identifier")
 		}
 
-		// Resolve identifier to Claude UUID
-		uuid, manifestPath, err := resolveSessionIdentifier(identifier)
+		// Resolve identifier to SessionID
+		sessionID, manifestPath, err := resolveSessionIdentifier(identifier)
 		if err != nil {
 			ui.PrintError(err, "Failed to resolve session identifier",
 				fmt.Sprintf("  • Try: csm list --all to see available sessions\n"+
@@ -57,7 +57,7 @@ Examples:
 			return err
 		}
 
-		ui.PrintSuccess(fmt.Sprintf("Resolved identifier %q to UUID: %s", identifier, uuid[:8]))
+		ui.PrintSuccess(fmt.Sprintf("Resolved identifier %q to session: %s", identifier, sessionID))
 
 		// Read manifest to check lifecycle
 		m, err := manifest.Read(manifestPath)
@@ -71,14 +71,14 @@ Examples:
 			ui.PrintError(
 				fmt.Errorf("session is archived"),
 				"Cannot resume archived session",
-				"  • Use 'csm unarchive "+uuid[:8]+"' to restore this session\n"+
+				"  • Use 'csm unarchive "+sessionID+"' to restore this session\n"+
 					"  • Or use 'csm list --all' to see all sessions",
 			)
 			return fmt.Errorf("cannot resume archived session")
 		}
 
 		// Check session health
-		health, err := checkSessionHealth(uuid, manifestPath)
+		health, err := checkSessionHealth(sessionID, manifestPath)
 		if err != nil {
 			ui.PrintError(err, "Session health check failed", "")
 			return err
@@ -98,13 +98,52 @@ Examples:
 		}
 
 		// Resume the session
-		if err := resumeSession(uuid, manifestPath, health); err != nil {
+		if err := resumeSession(sessionID, manifestPath, health); err != nil {
 			ui.PrintError(err, "Failed to resume session", "")
 			return err
 		}
 
-		ui.PrintSuccess(fmt.Sprintf("Successfully resumed session %s", uuid[:8]))
+		ui.PrintSuccess(fmt.Sprintf("Successfully resumed session %s", sessionID))
 		return nil
+	},
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		// Only complete first argument (session identifier)
+		if len(args) != 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		// List manifests from configured sessions directory
+		manifests, err := manifest.List(cfg.SessionsDir)
+		if err != nil {
+			// Fail gracefully - return empty list if can't read sessions
+			return []string{}, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		// Get tmux mapping (session ID → tmux name)
+		tmuxMapping, _ := discovery.GetTmuxMapping(cfg.SessionsDir)
+		// Ignore error - worst case: empty mapping, no tmux names suggested
+
+		// Build completion suggestions
+		var suggestions []string
+		for _, m := range manifests {
+			// Skip archived sessions (can't resume archived)
+			if m.Lifecycle == manifest.LifecycleArchived {
+				continue
+			}
+
+			// Add tmux name (primary identifier)
+			if tmuxName := tmuxMapping[m.SessionID]; tmuxName != "" {
+				suggestions = append(suggestions, tmuxName)
+			}
+
+			// Add manifest name (secondary identifier, if different from tmux name)
+			if m.Name != "" && m.Name != tmuxMapping[m.SessionID] {
+				suggestions = append(suggestions, m.Name)
+			}
+		}
+
+		// Return suggestions with NoFileComp directive (prevent file completion)
+		return suggestions, cobra.ShellCompDirectiveNoFileComp
 	},
 }
 
@@ -341,7 +380,7 @@ func shellQuote(s string) string {
 }
 
 // resumeSession performs the complete resume workflow
-func resumeSession(uuid, manifestPath string, health *HealthStatus) error {
+func resumeSession(sessionID, manifestPath string, health *HealthStatus) error {
 	sendCommands := false
 
 	// Ensure tmux session exists
@@ -358,7 +397,7 @@ func resumeSession(uuid, manifestPath string, health *HealthStatus) error {
 		claudeRunning, err := tmux.IsProcessRunning(health.TmuxSessionName, "claude")
 		if err != nil {
 			ui.PrintWarning("Could not check if Claude is running - skipping resume commands for safety")
-			ui.PrintWarning(fmt.Sprintf("If Claude didn't resume, run: claude --resume %s", uuid[:8]))
+			// We'll display the Claude UUID later after reading the manifest
 			sendCommands = false
 		} else if claudeRunning {
 			ui.PrintSuccess("Claude already running - skipping resume commands")
@@ -369,18 +408,18 @@ func resumeSession(uuid, manifestPath string, health *HealthStatus) error {
 		}
 	}
 
+	// Read manifest to get Claude UUID (needed for both display and resume command)
+	m, err := manifest.Read(manifestPath)
+	if err != nil {
+		return fmt.Errorf("failed to read manifest: %w", err)
+	}
+
 	// Only send commands if needed
 	if sendCommands {
 		// Send cd command to tmux (with shell quoting to prevent injection)
 		cdCmd := fmt.Sprintf("cd %s", shellQuote(health.WorktreePath))
 		if err := tmux.SendCommand(health.TmuxSessionName, cdCmd); err != nil {
 			return fmt.Errorf("failed to send cd command: %w", err)
-		}
-
-		// Read manifest to get Claude UUID
-		m, err := manifest.Read(manifestPath)
-		if err != nil {
-			return fmt.Errorf("failed to read manifest: %w", err)
 		}
 
 		// Send claude --resume command to tmux (use Claude.UUID from manifest)
@@ -397,11 +436,12 @@ func resumeSession(uuid, manifestPath string, health *HealthStatus) error {
 		}
 
 		// Wait for Claude to be ready
-		fmt.Println("⏳ Waiting for Claude to be ready...")
+		spinner := ui.NewSpinner("Waiting for Claude to be ready...")
+		spinner.Start()
 		if err := tmux.WaitForProcessReady(health.TmuxSessionName, "claude", 5*time.Second); err != nil {
-			ui.PrintWarning("Claude is taking longer than expected")
+			spinner.Warning("Claude is taking longer than expected")
 		} else {
-			ui.PrintSuccess("Claude is ready!")
+			spinner.Success("Claude is ready!")
 		}
 	}
 
@@ -409,6 +449,9 @@ func resumeSession(uuid, manifestPath string, health *HealthStatus) error {
 	if err := updateManifestActivity(manifestPath); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to update manifest activity: %v", err))
 	}
+
+	// Update VS Code tab title if running in VS Code
+	updateVSCodeTabTitle(health.TmuxSessionName)
 
 	// Attach to tmux session
 	ui.PrintSuccess(fmt.Sprintf("Attaching to tmux session: %s", health.TmuxSessionName))

@@ -1,18 +1,25 @@
 package tmux
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 )
 
 // HasSession checks if tmux session exists
 func HasSession(name string) (bool, error) {
-	cmd := exec.Command("tmux", "has-session", "-t", name)
-	err := cmd.Run()
+	ctx := context.Background()
+	_, err := RunWithTimeout(ctx, globalTimeout, "tmux", "has-session", "-t", name)
 	if err != nil {
+		// Check for timeout error
+		if _, ok := err.(*TimeoutError); ok {
+			return false, err
+		}
 		// Exit code 1 means session doesn't exist
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return false, nil
@@ -24,8 +31,18 @@ func HasSession(name string) (bool, error) {
 
 // NewSession creates a new tmux session
 func NewSession(name string, workDir string) error {
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", name, "-c", workDir)
+	ctx := context.Background()
+	cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "new-session", "-d", "-s", name, "-c", workDir)
+	defer cancel()
 	if err := cmd.Run(); err != nil {
+		// Check for timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			return &TimeoutError{
+				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
+				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+				Duration: globalTimeout,
+			}
+		}
 		return fmt.Errorf("failed to create tmux session: %w", err)
 	}
 	return nil
@@ -35,11 +52,21 @@ func NewSession(name string, workDir string) error {
 // Returns nil if session exists and was successfully switched/attached
 // In non-interactive environments (no TTY), it skips attach and returns nil
 func AttachSession(name string) error {
+	ctx := context.Background()
+
 	// Check if we're already inside a tmux session
 	if os.Getenv("TMUX") != "" {
 		// Already in tmux - use switch-client instead of attach
-		cmd := exec.Command("tmux", "switch-client", "-t", name)
+		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "switch-client", "-t", name)
+		defer cancel()
 		if err := cmd.Run(); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return &TimeoutError{
+					Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
+					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+					Duration: globalTimeout,
+				}
+			}
 			return fmt.Errorf("failed to switch to tmux session: %w", err)
 		}
 		return nil
@@ -48,12 +75,33 @@ func AttachSession(name string) error {
 	// Not in tmux - check if we have a TTY available
 	// If stdin is not a terminal (e.g., running from Claude Code), skip attach
 	// The session is still ready, just can't interactively attach
-	if fileInfo, _ := os.Stdin.Stat(); (fileInfo.Mode() & os.ModeCharDevice) == 0 {
-		// No TTY available - session exists and commands were sent, just can't attach
+
+	// First check: can we stat stdin?
+	fileInfo, err := os.Stdin.Stat()
+	if err != nil {
+		// Error checking stdin - assume no TTY and skip attach
 		return nil
 	}
 
-	// Have a TTY - use attach-session
+	// Second check: is it a character device?
+	// Note: This alone is insufficient - /dev/null is also a char device
+	if (fileInfo.Mode() & os.ModeCharDevice) == 0 {
+		// Not a character device - definitely not a TTY
+		return nil
+	}
+
+	// Third check: use syscall isatty to actually verify it's a terminal
+	// This is the proper way to check if stdin is a real terminal
+	isTTY := term.IsTerminal(int(os.Stdin.Fd()))
+	if !isTTY {
+		// stdin is a char device but not a terminal (e.g., /dev/null)
+		// Silently skip attach - session is ready, just can't attach interactively
+		return nil
+	}
+
+	// Have a real TTY - use attach-session
+	// Note: attach-session is an interactive command that runs until user detaches
+	// DO NOT use a timeout here - the session should run indefinitely
 	cmd := exec.Command("tmux", "attach-session", "-t", name)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -66,8 +114,17 @@ func AttachSession(name string) error {
 
 // SendCommand sends a command to tmux pane
 func SendCommand(sessionName string, command string) error {
-	cmd := exec.Command("tmux", "send-keys", "-t", sessionName, command, "C-m")
+	ctx := context.Background()
+	cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "send-keys", "-t", sessionName, command, "C-m")
+	defer cancel()
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return &TimeoutError{
+				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
+				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+				Duration: globalTimeout,
+			}
+		}
 		return fmt.Errorf("failed to send command to tmux: %w", err)
 	}
 	return nil
@@ -75,9 +132,13 @@ func SendCommand(sessionName string, command string) error {
 
 // Version returns tmux version
 func Version() (string, error) {
-	cmd := exec.Command("tmux", "-V")
-	output, err := cmd.Output()
+	ctx := context.Background()
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-V")
 	if err != nil {
+		// Check for timeout error
+		if _, ok := err.(*TimeoutError); ok {
+			return "", err
+		}
 		return "", fmt.Errorf("failed to get tmux version: %w", err)
 	}
 	return strings.TrimSpace(string(output)), nil
@@ -85,9 +146,13 @@ func Version() (string, error) {
 
 // ListSessions returns all active tmux session names
 func ListSessions() ([]string, error) {
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
-	output, err := cmd.Output()
+	ctx := context.Background()
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "list-sessions", "-F", "#{session_name}")
 	if err != nil {
+		// Check for timeout error
+		if _, ok := err.(*TimeoutError); ok {
+			return nil, err
+		}
 		// If no tmux server running, return empty list
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return []string{}, nil
@@ -105,6 +170,27 @@ func ListSessions() ([]string, error) {
 	return sessions, nil
 }
 
+// GetCurrentSessionName returns the name of the current tmux session
+// Returns error if not running inside tmux or if command fails
+func GetCurrentSessionName() (string, error) {
+	// Check if we're in a tmux session
+	if os.Getenv("TMUX") == "" {
+		return "", fmt.Errorf("not running inside a tmux session")
+	}
+
+	ctx := context.Background()
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "display-message", "-p", "#S")
+	if err != nil {
+		// Check for timeout error
+		if _, ok := err.(*TimeoutError); ok {
+			return "", err
+		}
+		return "", fmt.Errorf("failed to get current tmux session name: %w", err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
+
 // IsProcessRunning checks if a specific process is running as the foreground
 // process in any pane of the tmux session. Used to detect if Claude is already
 // active before sending resume commands, preventing text injection.
@@ -118,10 +204,14 @@ func ListSessions() ([]string, error) {
 // Returns (false, nil) if process not found
 // Returns (false, error) if tmux command fails
 func IsProcessRunning(sessionName, processName string) (bool, error) {
-	cmd := exec.Command("tmux", "list-panes", "-t", sessionName,
+	ctx := context.Background()
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "list-panes", "-t", sessionName,
 		"-F", "#{pane_current_command}")
-	output, err := cmd.Output()
 	if err != nil {
+		// Check for timeout error
+		if _, ok := err.(*TimeoutError); ok {
+			return false, err
+		}
 		return false, fmt.Errorf("failed to check tmux pane process: %w", err)
 	}
 
@@ -163,4 +253,23 @@ func WaitForProcessReady(sessionName, processName string, timeout time.Duration)
 	}
 
 	return fmt.Errorf("timeout waiting for %s to start (waited %v)", processName, timeout)
+}
+
+// GetCurrentWorkingDirectory returns the current working directory of the
+// first pane in the tmux session.
+//
+// Returns the absolute path to the working directory, or an error if the
+// command fails or the session doesn't exist.
+func GetCurrentWorkingDirectory(sessionName string) (string, error) {
+	ctx := context.Background()
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "display-message", "-t", sessionName, "-p", "#{pane_current_path}")
+	if err != nil {
+		// Check for timeout error
+		if _, ok := err.(*TimeoutError); ok {
+			return "", err
+		}
+		return "", fmt.Errorf("failed to get current working directory: %w", err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
 }
