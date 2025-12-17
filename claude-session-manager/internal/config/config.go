@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,15 +14,53 @@ type Config struct {
 	SessionsDir string `yaml:"sessions_dir"`
 	LogLevel    string `yaml:"log_level"`
 	LogFile     string `yaml:"log_file"`
+
+	// Resilience features
+	Timeout     TimeoutConfig     `yaml:"timeout"`
+	Lock        LockConfig        `yaml:"lock"`
+	HealthCheck HealthCheckConfig `yaml:"health_check"`
+}
+
+// TimeoutConfig holds timeout configuration
+type TimeoutConfig struct {
+	TmuxCommands time.Duration `yaml:"tmux_commands"` // Default: 5s
+	Enabled      bool          `yaml:"enabled"`       // Default: true
+}
+
+// LockConfig holds lock configuration
+type LockConfig struct {
+	Enabled bool   `yaml:"enabled"` // Default: true
+	Path    string `yaml:"path"`    // Default: /tmp/csm-{UID}/csm.lock
+}
+
+// HealthCheckConfig holds health check configuration
+type HealthCheckConfig struct {
+	Enabled       bool          `yaml:"enabled"`        // Default: true
+	CacheDuration time.Duration `yaml:"cache_duration"` // Default: 5s
+	ProbeTimeout  time.Duration `yaml:"probe_timeout"`  // Default: 2s
 }
 
 // Default returns default configuration
 func Default() *Config {
 	homeDir, _ := os.UserHomeDir()
+	uid := os.Getuid()
 	return &Config{
 		SessionsDir: filepath.Join(homeDir, "sessions"),
 		LogLevel:    "info",
 		LogFile:     "",
+		Timeout: TimeoutConfig{
+			TmuxCommands: 5 * time.Second,
+			Enabled:      true,
+		},
+		Lock: LockConfig{
+			Enabled: true,
+			Path:    fmt.Sprintf("/tmp/csm-%d/csm.lock", uid),
+		},
+		HealthCheck: HealthCheckConfig{
+			Enabled:       true,
+			CacheDuration: 5 * time.Second,
+			ProbeTimeout:  2 * time.Second,
+		},
 	}
 }
 
@@ -58,6 +97,9 @@ func Load(cfgFile string) (*Config, error) {
 	}
 	if cfg.LogFile != "" {
 		cfg.LogFile = expandHome(cfg.LogFile)
+	}
+	if cfg.Lock.Path != "" {
+		cfg.Lock.Path = expandHome(cfg.Lock.Path)
 	}
 
 	return cfg, nil

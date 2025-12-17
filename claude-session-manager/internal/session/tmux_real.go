@@ -1,0 +1,36 @@
+package session
+
+import "github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
+
+// RealTmux wraps the internal/tmux package to provide TmuxInterface implementation
+type RealTmux struct{}
+
+// NewRealTmux creates a new RealTmux instance
+func NewRealTmux() *RealTmux {
+	return &RealTmux{}
+}
+
+// HasSession checks if a tmux session exists
+func (t *RealTmux) HasSession(name string) (bool, error) {
+	return tmux.HasSession(name)
+}
+
+// ListSessions returns all active tmux session names
+func (t *RealTmux) ListSessions() ([]string, error) {
+	return tmux.ListSessions()
+}
+
+// CreateSession creates a new tmux session
+func (t *RealTmux) CreateSession(name, workdir string) error {
+	return tmux.NewSession(name, workdir)
+}
+
+// AttachSession attaches to a tmux session
+func (t *RealTmux) AttachSession(name string) error {
+	return tmux.AttachSession(name)
+}
+
+// SendKeys sends keys to a tmux session
+func (t *RealTmux) SendKeys(session, keys string) error {
+	return tmux.SendCommand(session, keys)
+}

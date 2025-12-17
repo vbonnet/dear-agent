@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/config"
 )
 
 func TestSanitizeTmuxName(t *testing.T) {
@@ -144,6 +146,13 @@ func TestOfferToImportOrphanedSession_NoHistory(t *testing.T) {
 	// Setup temp environment
 	tmpDir := t.TempDir()
 
+	// Initialize cfg (normally done in PersistentPreRunE)
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = &config.Config{
+		SessionsDir: filepath.Join(tmpDir, "sessions"),
+	}
+
 	// Set HOME to temp dir (no history.jsonl)
 	oldHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
@@ -162,6 +171,13 @@ func TestOfferToImportOrphanedSession_NoMatch(t *testing.T) {
 	historyPath := filepath.Join(claudeDir, "history.jsonl")
 
 	os.MkdirAll(claudeDir, 0700)
+
+	// Initialize cfg (normally done in PersistentPreRunE)
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = &config.Config{
+		SessionsDir: filepath.Join(tmpDir, "sessions"),
+	}
 
 	// Create history with a different UUID
 	historyContent := `{"sessionId":"different-uuid-1234","project":"/home/user","timestamp":1733500000000}
@@ -192,6 +208,13 @@ func TestOfferToImportOrphanedSession_MultipleMatches(t *testing.T) {
 	historyPath := filepath.Join(claudeDir, "history.jsonl")
 
 	os.MkdirAll(claudeDir, 0700)
+
+	// Initialize cfg (normally done in PersistentPreRunE)
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = &config.Config{
+		SessionsDir: filepath.Join(tmpDir, "sessions"),
+	}
 
 	// Create history with multiple sessions matching "test"
 	historyContent := `{"sessionId":"test-uuid-1111","project":"/home/user/test-project","timestamp":1733500000000}
@@ -240,6 +263,13 @@ func TestResolveSessionIdentifier_WithAutoImport(t *testing.T) {
 
 	os.MkdirAll(sessionsDir, 0700)
 	os.MkdirAll(claudeDir, 0700)
+
+	// Initialize cfg (normally done in PersistentPreRunE)
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = &config.Config{
+		SessionsDir: sessionsDir,
+	}
 
 	// Create empty sessions dir (no manifests)
 	// Create history with orphaned session

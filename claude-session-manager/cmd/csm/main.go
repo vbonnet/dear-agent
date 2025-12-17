@@ -3,19 +3,27 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/cli"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/config"
-	"github.com/vbonnet/engram/core/pkg/cliutil"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/lock"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 )
 
 var (
-	cfg         *config.Config
-	cfgFile     string
-	sessionsDir string
-	logLevel    string
-	directory   string
+	cfg              *config.Config
+	cfgFile          string
+	sessionsDir      string
+	logLevel         string
+	directory        string
+	timeout          time.Duration
+	noLock           bool
+	skipHealthCheck  bool
+	globalLock       *lock.FileLock
+	globalHealthCheck *tmux.HealthChecker
 )
 
 var rootCmd = &cobra.Command{
@@ -32,13 +40,44 @@ Resume sessions by tmux name, workspace ID, or Claude UUID:
 Global Flags:
   -C, --directory <path>    Working directory (default: current directory)`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Load configuration first
+		var err error
+		cfg, err = loadConfigWithFlags()
+		if err != nil {
+			return err
+		}
+
+		// Set global timeout for tmux commands
+		if cfg.Timeout.Enabled {
+			tmux.SetTimeout(cfg.Timeout.TmuxCommands)
+		}
+
+		// Acquire lock if enabled
+		if cfg.Lock.Enabled && !noLock {
+			globalLock, err = lock.New(cfg.Lock.Path)
+			if err != nil {
+				return err
+			}
+			if err := globalLock.TryLock(); err != nil {
+				return err
+			}
+		}
+
+		// Initialize health checker
+		if cfg.HealthCheck.Enabled && !skipHealthCheck {
+			globalHealthCheck = tmux.NewHealthChecker(
+				cfg.HealthCheck.CacheDuration,
+				cfg.HealthCheck.ProbeTimeout,
+			)
+		}
+
 		// Resolve working directory from -C flag
 		if directory != "" {
-			result, err := cliutil.WorkdirFromFlags(directory, true)
+			absPath, err := filepath.Abs(directory)
 			if err != nil {
 				return fmt.Errorf("failed to resolve directory: %w", err)
 			}
-			cli.SetProjectDirectory(result.Resolved)
+			cli.SetProjectDirectory(absPath)
 		} else {
 			// Use current working directory if -C not specified
 			cwd, err := os.Getwd()
@@ -49,23 +88,36 @@ Global Flags:
 		}
 		return nil
 	},
+	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+		// Release lock
+		if globalLock != nil {
+			return globalLock.Unlock()
+		}
+		return nil
+	},
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
-
 	rootCmd.PersistentFlags().StringVarP(&directory, "directory", "C", "", "Working directory")
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/csm/config.yaml)")
 	rootCmd.PersistentFlags().StringVar(&sessionsDir, "sessions-dir", "", "sessions directory (default: ~/sessions)")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "log level (debug, info, warn, error)")
+	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 0, "tmux command timeout (overrides config)")
+	rootCmd.PersistentFlags().BoolVar(&noLock, "no-lock", false, "skip lock acquisition (DANGEROUS)")
+	rootCmd.PersistentFlags().BoolVar(&skipHealthCheck, "skip-health-check", false, "skip health check")
 }
 
-func initConfig() {
-	var err error
-	cfg, err = config.Load(cfgFile)
+func loadConfigWithFlags() (*config.Config, error) {
+	// Load config file or defaults
+	configPath := cfgFile
+	if configPath == "" {
+		home, _ := os.UserHomeDir()
+		configPath = filepath.Join(home, ".config", "csm", "config.yaml")
+	}
+
+	cfg, err := config.Load(configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		return nil, err
 	}
 
 	// Override with flags
@@ -75,6 +127,14 @@ func initConfig() {
 	if logLevel != "" {
 		cfg.LogLevel = logLevel
 	}
+	if timeout > 0 {
+		cfg.Timeout.TmuxCommands = timeout
+	}
+	if skipHealthCheck {
+		cfg.HealthCheck.Enabled = false
+	}
+
+	return cfg, nil
 }
 
 func main() {
