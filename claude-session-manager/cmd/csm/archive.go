@@ -70,10 +70,19 @@ Examples:
 			return []string{}, cobra.ShellCompDirectiveNoFileComp
 		}
 
+		// Filter out archived sessions (can't archive what's already archived)
+		filtered := make([]*manifest.Manifest, 0, len(manifests))
+		for _, m := range manifests {
+			if m.Lifecycle != manifest.LifecycleArchived {
+				filtered = append(filtered, m)
+			}
+		}
+		manifests = filtered
+
 		// Get tmux mapping
 		tmuxMapping, _ := discovery.GetTmuxMapping(cfg.SessionsDir)
 
-		// Build suggestions (include all sessions - archiving is idempotent)
+		// Build suggestions from non-archived sessions
 		var suggestions []string
 		for _, m := range manifests {
 			// Add tmux name

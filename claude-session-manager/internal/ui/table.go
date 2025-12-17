@@ -14,7 +14,8 @@ import (
 // FormatTable formats manifests as aligned table (v2 schema)
 func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) string {
 	var buf bytes.Buffer
-	w := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
+	// Increased padding from 2 to 3 for better column spacing and readability
+	w := tabwriter.NewWriter(&buf, 0, 0, 3, ' ', 0)
 
 	// Header (using bold for better visibility without affecting alignment)
 	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
