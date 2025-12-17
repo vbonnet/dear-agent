@@ -40,6 +40,22 @@
 
 ## Recently Completed
 
+- [x] **Fix critical UUID collision bug in `csm sync`** (2025-12-17)
+  - Issue: `csm sync` auto-assigned the same Claude UUID to ALL sessions with empty UUIDs, causing 12 sessions to share the same conversation
+  - Root cause: Auto-assignment logic in `syncActiveTmuxSessions()` used "latest UUID from history" for all sessions
+  - Solution:
+    - Removed auto-UUID assignment; new sessions created with empty UUID
+    - Added prompt for manual association via `csm associate`
+    - Enhanced `csm doctor` to detect UUID collisions and duplicates
+  - Files modified:
+    - `cmd/csm/sync.go` (refactored `syncActiveTmuxSessions()`)
+    - `cmd/csm/doctor.go` (added duplicate detection)
+  - Testing: All tests pass (go test ./...)
+  - Documentation:
+    - `CSM-BUG-FIX-REPORT.md` (technical analysis)
+    - `QUICK-START-FIXES.md` (user remediation guide)
+  - Commit: 19eeb9a
+
 - [x] **Auto-exit tmux sessions when Claude exits** (2025-12-17)
   - Issue: Typing `/exit` in Claude left user in tmux session requiring second `exit`
   - Solution: Append `; exit` to all claude commands sent to tmux
