@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
@@ -78,6 +79,17 @@ func restoreSession(cmd *cobra.Command, args []string) error {
 	// Move directory back to active sessions
 	sessionDir := filepath.Dir(manifestPath)
 	activeDir := filepath.Join(cfg.SessionsDir, filepath.Base(sessionDir))
+
+	// Check for conflict and auto-rename if needed
+	originalTargetName := filepath.Base(activeDir)
+	if _, err := os.Stat(activeDir); err == nil {
+		// Conflict detected: target already exists
+		timestamp := time.Now().Format("20060102T150405Z")
+		activeDir = activeDir + "-" + timestamp
+
+		ui.PrintWarning(fmt.Sprintf("Active session '%s' already exists", originalTargetName))
+		fmt.Printf("Renaming restored session to: %s\n", filepath.Base(activeDir))
+	}
 
 	if err := os.Rename(sessionDir, activeDir); err != nil {
 		ui.PrintError(err, "Failed to move session to active directory",
