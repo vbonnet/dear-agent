@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/discovery"
@@ -205,6 +206,17 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 			fmt.Sprintf("  • Directory: %s\n"+
 				"  • Check permissions and disk space", archiveBaseDir))
 		return err
+	}
+
+	// Check for conflict and auto-rename if needed
+	originalTargetName := filepath.Base(archiveTargetDir)
+	if _, err := os.Stat(archiveTargetDir); err == nil {
+		// Conflict detected: target already exists
+		timestamp := time.Now().Format("20060102T150405Z")
+		archiveTargetDir = archiveTargetDir + "-" + timestamp
+
+		ui.PrintWarning(fmt.Sprintf("Archive '%s' already exists", originalTargetName))
+		fmt.Printf("Renaming to: %s\n", filepath.Base(archiveTargetDir))
 	}
 
 	// Move session directory to archive
