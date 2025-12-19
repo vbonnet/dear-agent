@@ -8,6 +8,20 @@ Knowledge base and best practices for AI-assisted development workflows.
 
 Devlog contains documentation, guides, templates, and patterns for effective AI-assisted development. Think of it as a "development blog" that captures learnings, best practices, and reusable patterns.
 
+## What Does Devlog Cover?
+
+Devlog documents two aspects of development workspace organization:
+
+1. **Workspace Patterns** ([workspace-patterns/](workspace-patterns/))
+   - How to organize `~/src/ws/` with multiple projects
+   - Mono-Repo, Multi-Workspace, Sub-Workspace patterns
+   - AGENTS.md and README.md templates
+
+2. **Repository Patterns** ([repo-patterns/](repo-patterns/))
+   - How to structure individual git repositories
+   - Bare repository + worktrees for multi-branch workflows
+   - Migration guides and real examples
+
 ---
 
 ## Contents
@@ -22,6 +36,14 @@ Devlog contains documentation, guides, templates, and patterns for effective AI-
   - Documentation of common workspace patterns (mono-repo, multi-workspace, etc.)
   - Reusable AGENTS.md and README.md templates
   - Real-world examples from oss/, [REDACTED_EMPLOYER]/, vida/
+
+### Repository Patterns
+
+- **[repo-patterns/](repo-patterns/)** - Repository structure patterns for multi-branch workflows
+  - Bare repository + git worktrees pattern (recommended default)
+  - Complete setup guide for new and existing repositories
+  - Real migration examples from 9 successfully migrated repos
+  - Integration with git-worktrees plugin for temporary isolation
 
 ---
 
@@ -85,5 +107,5 @@ When you discover a useful pattern or practice:
 
 ---
 
-**Last updated**: 2025-12-13
+**Last updated**: 2025-12-19
 **Location**: ~/src/repos/ai-tools/base/devlog/
