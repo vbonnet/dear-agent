@@ -201,6 +201,23 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		spinner.Success("Claude is ready!")
 	}
 
+	// Wait for Claude's input prompt to appear before sending commands
+	// Even though process is ready, input handler may still be initializing
+	fmt.Println("Waiting for Claude input to be ready...")
+	if err := tmux.WaitForInputReady(sessionName, ">", 10*time.Second); err != nil {
+		ui.PrintWarning("Claude input not ready yet, skipping auto-rename")
+		fmt.Printf("💡 You can manually rename with: /rename %s\n", sessionName)
+	} else {
+		// Auto-rename Claude session to match tmux session name
+		renameCmd := fmt.Sprintf("/rename %s", sessionName)
+		if err := tmux.SendCommand(sessionName, renameCmd); err != nil {
+			ui.PrintWarning(fmt.Sprintf("Failed to auto-rename session: %v", err))
+			fmt.Printf("💡 You can manually rename with: /rename %s\n", sessionName)
+		} else {
+			ui.PrintSuccess(fmt.Sprintf("Auto-renamed Claude session to: %s", sessionName))
+		}
+	}
+
 	// Create manifest
 	sessionsDir := getSessionsDir()
 	manifestDir := filepath.Join(sessionsDir, fmt.Sprintf("session-%s", sessionName))
@@ -320,6 +337,22 @@ func startClaudeInCurrentTmux(sessionName string) error {
 	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
 		ui.PrintError(err, "Failed to start Claude", "")
 		return err
+	}
+
+	// Wait for Claude's input prompt to appear before sending commands
+	fmt.Println("Waiting for Claude input to be ready...")
+	if err := tmux.WaitForInputReady(sessionName, ">", 10*time.Second); err != nil {
+		ui.PrintWarning("Claude input not ready yet, skipping auto-rename")
+		fmt.Printf("💡 You can manually rename with: /rename %s\n", sessionName)
+	} else {
+		// Auto-rename Claude session to match tmux session name
+		renameCmd := fmt.Sprintf("/rename %s", sessionName)
+		if err := tmux.SendCommand(sessionName, renameCmd); err != nil {
+			ui.PrintWarning(fmt.Sprintf("Failed to auto-rename session: %v", err))
+			fmt.Printf("💡 You can manually rename with: /rename %s\n", sessionName)
+		} else {
+			ui.PrintSuccess(fmt.Sprintf("Auto-renamed Claude session to: %s", sessionName))
+		}
 	}
 
 	ui.PrintSuccess("Claude session started in current tmux!")

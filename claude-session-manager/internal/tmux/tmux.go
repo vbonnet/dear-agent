@@ -114,18 +114,40 @@ func AttachSession(name string) error {
 
 // SendCommand sends a command to tmux pane
 func SendCommand(sessionName string, command string) error {
-	ctx := context.Background()
-	cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "send-keys", "-t", sessionName, command, "C-m")
-	defer cancel()
+	// Send the command text first
+	ctx1 := context.Background()
+	cmd, cancel := CommandWithTimeout(ctx1, globalTimeout, "tmux", "send-keys", "-t", sessionName, command)
 	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
+		cancel()
+		if ctx1.Err() == context.DeadlineExceeded {
+			return &TimeoutError{
+				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
+				Recovery:  "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+				Duration: globalTimeout,
+			}
+		}
+		return fmt.Errorf("failed to send command to tmux: %w", err)
+	}
+	cancel()
+
+	// Small delay to ensure tmux processes the text before we send Enter
+	// See: https://github.com/tmux/tmux/issues/1778
+	time.Sleep(100 * time.Millisecond)
+
+	// Send Enter key separately (C-m doesn't work when combined with text in same command)
+	// Need a fresh context since we canceled the first one
+	ctx2 := context.Background()
+	cmd2, cancel2 := CommandWithTimeout(ctx2, globalTimeout, "tmux", "send-keys", "-t", sessionName, "C-m")
+	defer cancel2()
+	if err := cmd2.Run(); err != nil {
+		if ctx2.Err() == context.DeadlineExceeded {
 			return &TimeoutError{
 				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
 				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
 				Duration: globalTimeout,
 			}
 		}
-		return fmt.Errorf("failed to send command to tmux: %w", err)
+		return fmt.Errorf("failed to send Enter key to tmux: %w", err)
 	}
 	return nil
 }
@@ -253,6 +275,41 @@ func WaitForProcessReady(sessionName, processName string, timeout time.Duration)
 	}
 
 	return fmt.Errorf("timeout waiting for %s to start (waited %v)", processName, timeout)
+}
+
+// WaitForInputReady polls the tmux pane until the input prompt appears,
+// indicating that the program is ready to accept commands. This is needed
+// because even after the process is running, the input handler may not be
+// fully initialized yet.
+//
+// Parameters:
+//   - sessionName: tmux session to check
+//   - promptPattern: text pattern to look for (e.g., "> " for Claude)
+//   - timeout: maximum time to wait
+//
+// Returns nil when prompt is ready, error on timeout.
+func WaitForInputReady(sessionName, promptPattern string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	pollInterval := 100 * time.Millisecond
+
+	for time.Now().Before(deadline) {
+		ctx := context.Background()
+		output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "capture-pane", "-t", sessionName, "-p")
+		if err != nil {
+			// Ignore transient errors
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		// Check if prompt pattern appears in output
+		if strings.Contains(string(output), promptPattern) {
+			return nil // Input is ready!
+		}
+
+		time.Sleep(pollInterval)
+	}
+
+	return fmt.Errorf("timeout waiting for input prompt (waited %v)", timeout)
 }
 
 // GetCurrentWorkingDirectory returns the current working directory of the
