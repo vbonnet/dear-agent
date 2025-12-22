@@ -355,7 +355,7 @@ git -C ~/repos/myrepo/.bare worktree add ~/repos/myrepo/new-location branch-name
 
 **Bare Repo Pattern** (this guide):
 - **Purpose**: Permanent repository structure
-- **Location**: `~/src/repos/{repo}/.bare/` + `~/src/repos/{repo}/{branch}/`
+- **Location**: `{{DEVLOG_ROOT}}/repos/{repo}/.bare/` + `{{DEVLOG_ROOT}}/repos/{repo}/{branch}/`
 - **Use case**: All your regular development work
 - **Lifetime**: Permanent (worktrees last weeks/months)
 
@@ -614,7 +614,7 @@ Should work automatically. If not, check `.git` file in worktree points to corre
 
 ## Migration Conceptual Approach
 
-**Note**: Migration script exists at `~/src/ws/oss/wf/bare-repo-migration/migrate-to-bare.sh` but is not included in devlog per user request. Below describes the approach conceptually.
+**Note**: Migration script exists at `{{DEVLOG_ROOT}}/ws/oss/projects/bare-repo-migration/migrate-to-bare.sh` but is not included in devlog per user request. Below describes the approach conceptually.
 
 ### Three Migration Scenarios
 
@@ -702,7 +702,7 @@ mv ~/repos/myrepo.backup ~/repos/myrepo
 - **[Repository Patterns Overview](README.md)** - Navigation hub for repo patterns
 - **[Real Migration Examples](examples.md)** - Before/after from 9 actual repos
 - **[Git-Worktrees Plugin](../../../engram/main/plugins/git-worktrees/)** - Temporary worktrees for multi-agent workflows
-- **[Workspace Patterns](../workspace-patterns/)** - Organizing ~/src/ws/ with multiple projects
+- **[Workspace Patterns](../workspace-patterns/)** - Organizing {{DEVLOG_ROOT}}/ws/ with multiple projects
 
 ---
 

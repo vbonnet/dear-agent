@@ -22,17 +22,17 @@ Real workspace walkthroughs showing each pattern in action.
 
 | Pattern | Example | Location | Key Feature |
 |---------|---------|----------|-------------|
-| Mono-Repo | oss/ (engram-research) | ~/src/ws/oss/ | 119 projects in wf/ |
-| Multi-Workspace | oss/ + [REDACTED_EMPLOYER]/ | ~/src/ws/oss/ and ~/src/ws/[REDACTED_EMPLOYER]/ | Confidentiality boundary |
-| Sub-Workspace | [REDACTED_EMPLOYER]/vida/ | ~/src/ws/[REDACTED_EMPLOYER]/vida/ | Nested product area |
-| Research-vs-Product | oss/ vs engram repo | ~/src/ws/oss/ vs ~/src/repos/engram/ | Different lifecycles |
+| Mono-Repo | oss/ (engram-research) | {{DEVLOG_ROOT}}/ws/oss/ | 119 projects in projects/ |
+| Multi-Workspace | oss/ + [REDACTED_EMPLOYER]/ | {{DEVLOG_ROOT}}/ws/oss/ and {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/ | Confidentiality boundary |
+| Sub-Workspace | [REDACTED_EMPLOYER]/vida/ | {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/vida/ | Nested product area |
+| Research-vs-Product | oss/ vs engram repo | {{DEVLOG_ROOT}}/ws/oss/ vs {{DEVLOG_ROOT}}/repos/engram/ | Different lifecycles |
 
 ---
 
 ## Example 1: Mono-Repo (oss/)
 
 **Pattern**: Mono-Repo
-**Location**: ~/src/ws/oss/
+**Location**: {{DEVLOG_ROOT}}/ws/oss/
 **Purpose**: engram-research (work ON engram + ai-tools)
 
 ### Structure Breakdown
@@ -45,7 +45,7 @@ oss/                           # Workspace root
 ├── .beads/                    # Task beads (issues, enhancements)
 ├── .claude/                   # Claude Code configuration
 │
-├── wf/                        # 119 wayfinder projects
+├── projects/                        # 119 wayfinder projects
 │   ├── oss-workspace-audit/
 │   ├── workspace-patterns-documentation/
 │   └── [117 other projects]/
@@ -78,14 +78,14 @@ oss/                           # Workspace root
 - Single team/person working across all projects
 - Common tools and infrastructure
 
-**What goes at root vs wf/?**
-- **wf/**: Wayfinder projects only (SDLC-driven work)
+**What goes at root vs projects/?**
+- **projects/**: Wayfinder projects only (SDLC-driven work)
 - **Root**: Shared content, research, tools, documentation
 - **Clear separation**: Makes it easy to find wayfinder projects
 
 **How is identity documented?**
 - README.md clarifies: "This is engram-research, NOT engram product"
-- Critical distinction: Prevents confusion with ~/src/repos/engram/
+- Critical distinction: Prevents confusion with {{DEVLOG_ROOT}}/repos/engram/
 - FAQ section addresses "Why is this called engram-research?"
 
 ### Documentation Highlights
@@ -117,7 +117,7 @@ repository (which exists separately as the core engram product).
 ### Lessons Learned
 
 **engram/ directory confusion**:
-- ❌ Initially created ~/src/ws/engram/ directory
+- ❌ Initially created {{DEVLOG_ROOT}}/ws/engram/ directory
 - Thought it was for "engram work" (misunderstood workspace identity)
 - ✅ Should have realized oss/ = engram-research (the workspace already existed)
 - **Fix**: Clear README.md identity prevents this confusion
@@ -143,14 +143,14 @@ Would use:
 ## Example 2: Multi-Workspace (oss/ + [REDACTED_EMPLOYER]/)
 
 **Pattern**: Multi-Workspace
-**Location**: ~/src/ws/oss/ and ~/src/ws/[REDACTED_EMPLOYER]/
+**Location**: {{DEVLOG_ROOT}}/ws/oss/ and {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/
 **Purpose**: Separate open-source from confidential work
 
 ### Structure Breakdown
 
 **Parent directory**:
 ```
-~/src/ws/
+{{DEVLOG_ROOT}}/ws/
 ├── AGENTS.md                  # Workspace root guidance (optional)
 ├── oss/                       # Open-source workspace
 └── [REDACTED_EMPLOYER]/                    # Confidential workspace
@@ -161,7 +161,7 @@ Would use:
 oss/
 ├── README.md                  # Open-source identity
 ├── .git/                      # Full git tracking
-├── wf/                        # Public wayfinder projects
+├── projects/                        # Public wayfinder projects
 ├── research/                  # Public research
 └── [all content tracked]/
 ```
@@ -173,14 +173,14 @@ oss/
 ├── .git/                      # Metadata-only tracking
 ├── .githooks/                 # Pre-commit safety hooks
 │   └── pre-commit
-├── .gitignore                 # Excludes work/, wf/, vida/
+├── .gitignore                 # Excludes work/, projects/, vida/
 ├── .workstream-manifest.json  # Tracking policy definition
 │
 ├── session-manifests/         # ✅ TRACKED (PII-scrubbed)
 ├── scripts/                   # ✅ TRACKED (validation, install-hooks)
 │
 ├── vida/                      # ❌ NOT TRACKED (sub-workspace)
-├── wf/                        # ❌ NOT TRACKED (wayfinder projects)
+├── projects/                        # ❌ NOT TRACKED (wayfinder projects)
 └── work/                      # ❌ NOT TRACKED (confidential content)
 ```
 
@@ -203,7 +203,7 @@ oss/
 
 3. **Metadata-only tracking** ([REDACTED_EMPLOYER]/):
    - Only session-manifests/ tracked
-   - .gitignore excludes work/, wf/, vida/
+   - .gitignore excludes work/, projects/, vida/
    - PII scrubbing before commit
 
 **Cross-references**: Minimal, documented when needed in README.md
@@ -264,7 +264,7 @@ oss/
 ### Lessons Learned
 
 **vida/ initially at wrong level**:
-- ❌ Initially created ~/src/ws/vida/ (separate workspace)
+- ❌ Initially created {{DEVLOG_ROOT}}/ws/vida/ (separate workspace)
 - Thought it was independent from [REDACTED_EMPLOYER]/
 - ✅ Should be [REDACTED_EMPLOYER]/vida/ (Vida is [REDACTED_EMPLOYER] product, use sub-workspace pattern)
 - **Fix**: Parent workspace README.md documents sub-workspaces
@@ -290,7 +290,7 @@ For each workspace:
 ## Example 3: Sub-Workspace ([REDACTED_EMPLOYER]/vida/)
 
 **Pattern**: Sub-Workspace
-**Location**: ~/src/ws/[REDACTED_EMPLOYER]/vida/
+**Location**: {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/vida/
 **Purpose**: Vida product development within [REDACTED_EMPLOYER] workspace
 
 ### Structure Breakdown
@@ -308,7 +308,7 @@ For each workspace:
 ├── vida/                      # ❌ NOT TRACKED (sub-workspace)
 │   └── mcp-wizard-beta-polish/
 │
-├── wf/                        # ❌ NOT TRACKED
+├── projects/                        # ❌ NOT TRACKED
 └── work/                      # ❌ NOT TRACKED
 ```
 
@@ -326,7 +326,7 @@ vida/
 ## Directory Structure
 
 ```
-~/src/ws/[REDACTED_EMPLOYER]/
+{{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/
 ├── vida/                      # ❌ NOT TRACKED (Vida product sub-workspace)
 └── work/                      # ❌ NOT TRACKED (confidential content)
 ```
@@ -343,7 +343,7 @@ vida/
 
 # Work content
 work/
-wf/
+projects/
 ```
 
 **Integration points**:
@@ -386,7 +386,7 @@ wf/
 ### Lessons Learned
 
 **Initially created at wrong level**:
-- ❌ Created ~/src/ws/vida/ (thought it was separate workspace)
+- ❌ Created {{DEVLOG_ROOT}}/ws/vida/ (thought it was separate workspace)
 - Didn't recognize Vida as [REDACTED_EMPLOYER] product
 - ✅ Should be [REDACTED_EMPLOYER]/vida/ (sub-workspace pattern)
 - **Fix**: Parent workspace README.md documents sub-workspaces
@@ -414,7 +414,7 @@ Currently: Parent workspace documents sub-workspace
 ## Example 4: Research-vs-Product (oss/ vs engram repo)
 
 **Pattern**: Research-vs-Product
-**Location**: ~/src/ws/oss/ (research) vs ~/src/repos/engram/ (product)
+**Location**: {{DEVLOG_ROOT}}/ws/oss/ (research) vs {{DEVLOG_ROOT}}/repos/engram/ (product)
 **Purpose**: Separate work ABOUT engram from engram itself
 
 ### Separation Rationale
@@ -426,7 +426,7 @@ Currently: Parent workspace documents sub-workspace
 - AI-tools development
 - Documentation ABOUT engram development
 
-**~/src/repos/engram/ = engram product**:
+**{{DEVLOG_ROOT}}/repos/engram/ = engram product**:
 - Core engram product code
 - Tested, production-ready features
 - Product documentation (API docs, user guides)
@@ -441,7 +441,7 @@ Currently: Parent workspace documents sub-workspace
 **Research (oss/)**:
 ```
 oss/
-├── wf/                        # Research wayfinder projects
+├── projects/                        # Research wayfinder projects
 │   ├── engram-repository-restructuring/
 │   ├── alpha-launch-2025/
 │   └── [research projects]/
@@ -519,7 +519,7 @@ and ai-tools - essentially the meta-work ON engram plus related tooling.
 ### Lessons Learned
 
 **engram/ directory confusion**:
-- ❌ Initially created ~/src/ws/engram/ directory
+- ❌ Initially created {{DEVLOG_ROOT}}/ws/engram/ directory
 - Thought: "I need a place for engram work"
 - Didn't realize oss/ = engram-research already
 - ✅ Should have consulted oss/README.md first
@@ -548,7 +548,7 @@ Each repository uses appropriate structure pattern:
 
 | Pattern | Example | Key Characteristic | Boundary Type | When to Use |
 |---------|---------|-------------------|---------------|-------------|
-| Mono-Repo | oss/ | 119 projects in wf/ | Shared workspace root | Related projects, shared tools |
+| Mono-Repo | oss/ | 119 projects in projects/ | Shared workspace root | Related projects, shared tools |
 | Multi-Workspace | oss/ + [REDACTED_EMPLOYER]/ | Separate git repos | Confidentiality | Public vs private work |
 | Sub-Workspace | [REDACTED_EMPLOYER]/vida/ | Nested under parent | Logical subdivision | Product within company |
 | Research-vs-Product | oss/ vs engram/ | Different lifecycles | Meta-work vs actual work | Research vs product code |
@@ -578,4 +578,4 @@ Each repository uses appropriate structure pattern:
 ---
 
 **Last updated**: 2025-12-13
-**Part of**: ~/src/repos/ai-tools/base/devlog/workspace-patterns/
+**Part of**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/

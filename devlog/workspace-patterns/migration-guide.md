@@ -32,19 +32,19 @@ Run these commands to understand your workspace structure:
 
 ```bash
 # Check workspace root
-ls -la ~/src/ws/[workspace]/
+ls -la {{DEVLOG_ROOT}}/ws/[workspace]/
 
 # Check for wayfinder projects
-ls ~/src/ws/[workspace]/wf/ 2>/dev/null || echo "No wf/ directory"
+ls {{DEVLOG_ROOT}}/ws/[workspace]/projects/ 2>/dev/null || echo "No projects/ directory"
 
 # Check for git repository
-ls -d ~/src/ws/[workspace]/.git/ 2>/dev/null || echo "No .git"
+ls -d {{DEVLOG_ROOT}}/ws/[workspace]/.git/ 2>/dev/null || echo "No .git"
 
 # Check if nested within another workspace
-ls -la ~/src/ws/[workspace]/../ | grep -E '(README.md|AGENTS.md|\.git)'
+ls -la {{DEVLOG_ROOT}}/ws/[workspace]/../ | grep -E '(README.md|AGENTS.md|\.git)'
 
 # Count projects
-find ~/src/ws/[workspace]/wf/ -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l
+find {{DEVLOG_ROOT}}/ws/[workspace]/projects/ -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l
 ```
 
 ### Pattern Identification Questions
@@ -57,7 +57,7 @@ Answer these questions to identify your pattern:
 
 - ✅ YES → **Multi-Workspace pattern** (Pattern 3)
   - Examples: [REDACTED_EMPLOYER]/ (confidential company work), oss/ (public work)
-  - Check: Do you have other workspaces at ~/src/ws/[other]/ with different access policies?
+  - Check: Do you have other workspaces at {{DEVLOG_ROOT}}/ws/[other]/ with different access policies?
 
 - ❌ NO → Continue to Question 2
 
@@ -68,8 +68,8 @@ Answer these questions to identify your pattern:
 Check:
 ```bash
 # Look for parent workspace
-ls -la ~/src/ws/[parent]/ | grep -E '(README.md|AGENTS.md|\.git)'
-ls -la ~/src/ws/[parent]/.gitignore | grep [workspace]
+ls -la {{DEVLOG_ROOT}}/ws/[parent]/ | grep -E '(README.md|AGENTS.md|\.git)'
+ls -la {{DEVLOG_ROOT}}/ws/[parent]/.gitignore | grep [workspace]
 ```
 
 - ✅ YES → **Sub-Workspace pattern** (Pattern 4)
@@ -85,8 +85,8 @@ ls -la ~/src/ws/[parent]/.gitignore | grep [workspace]
 
 - ✅ YES → **Research-vs-Product pattern** (Pattern 2)
   - Examples: oss/ (engram-research, work ON engram), NOT engram itself
-  - Check: Actual product repository at ~/src/repos/[product]/
-  - Check: This workspace has research/, wf/, docs/
+  - Check: Actual product repository at {{DEVLOG_ROOT}}/repos/[product]/
+  - Check: This workspace has research/, projects/, docs/
   - **Note**: No template for this pattern (clarify in README.md manually)
 
 - ❌ NO → Continue to Question 4
@@ -98,7 +98,7 @@ ls -la ~/src/ws/[parent]/.gitignore | grep [workspace]
 - ✅ YES → **Mono-Repo pattern** (Pattern 1)
   - Examples: oss/ (if not research-focused)
   - Check: Single .git/ at root
-  - Check: Multiple projects in wf/ or other subdirectories
+  - Check: Multiple projects in projects/ or other subdirectories
   - Check: Shared tools, configuration at root
 
 - ❌ NO → **Clarification needed**
@@ -149,7 +149,7 @@ Map your identified pattern to the appropriate template.
 This repository is **engram-research** (research ABOUT engram), not the actual
 engram product repository.
 
-**Product repository**: ~/src/repos/engram/base/ (engram itself)
+**Product repository**: {{DEVLOG_ROOT}}/repos/engram/base/ (engram itself)
 **This repository**: Research, experiments, and tools development for engram
 
 **Pattern**: Mono-Repo (research workspace with multiple projects)
@@ -165,8 +165,8 @@ Copy the template and customize for your workspace.
 
 ```bash
 # 1. Copy template to workspace
-cp ~/src/repos/ai-tools/base/devlog/workspace-patterns/templates/AGENTS-[pattern].md \
-   ~/src/ws/[workspace]/AGENTS.md
+cp {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/AGENTS-[pattern].md \
+   {{DEVLOG_ROOT}}/ws/[workspace]/AGENTS.md
 
 # 2. Edit file to fill placeholders
 # (Use editor of choice)
@@ -196,21 +196,21 @@ Replace these placeholders (case-sensitive):
 ```markdown
 # Workspace: [WORKSPACE_NAME]
 
-**Root**: ~/src/ws/[workspace]/
-**Projects**: ~/src/ws/[workspace]/wf/
+**Root**: {{DEVLOG_ROOT}}/ws/[workspace]/
+**Projects**: {{DEVLOG_ROOT}}/ws/[workspace]/projects/
 
 **Purpose**: [Explain workspace purpose]
 ```
 
-**After** (~/src/ws/oss/AGENTS.md):
+**After** ({{DEVLOG_ROOT}}/ws/oss/AGENTS.md):
 ```markdown
 # Workspace: Engram Research
 
-**Root**: ~/src/ws/oss/
-**Projects**: ~/src/ws/oss/wf/
+**Root**: {{DEVLOG_ROOT}}/ws/oss/
+**Projects**: {{DEVLOG_ROOT}}/ws/oss/projects/
 
 **Purpose**: Research about engram project, tool development, and experiments.
-Not the actual engram product (that's ~/src/repos/engram/base/).
+Not the actual engram product (that's {{DEVLOG_ROOT}}/repos/engram/base/).
 ```
 
 ### Customization Checklist
@@ -221,7 +221,7 @@ After filling placeholders:
 - [ ] All `[lowercase]` placeholders replaced with directory names
 - [ ] Purpose section clearly states workspace identity
 - [ ] Boundaries section explains what belongs vs doesn't belong
-- [ ] Wayfinder projects location documented (wf/ directory path)
+- [ ] Wayfinder projects location documented (projects/ directory path)
 - [ ] Related workspaces listed (for Multi-Workspace pattern)
 - [ ] Parent integration documented (for Sub-Workspace pattern)
 
@@ -236,8 +236,8 @@ Choose approach based on whether README.md already exists.
 **Workflow**:
 ```bash
 # 1. Copy template
-cp ~/src/repos/ai-tools/base/devlog/workspace-patterns/templates/README-[pattern].md \
-   ~/src/ws/[workspace]/README.md
+cp {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/README-[pattern].md \
+   {{DEVLOG_ROOT}}/ws/[workspace]/README.md
 
 # 2. Customize (same placeholder replacement as AGENTS.md)
 ```
@@ -295,12 +295,12 @@ If workspace uses wayfinder:
 ```markdown
 ## Wayfinder Projects
 
-**Location**: ~/src/ws/[workspace]/wf/
+**Location**: {{DEVLOG_ROOT}}/ws/[workspace]/projects/
 
 **Creating new project**:
 ```bash
 wayfinder-new [project-name]
-# Creates: ~/src/ws/[workspace]/wf/[project-name]/
+# Creates: {{DEVLOG_ROOT}}/ws/[workspace]/projects/[project-name]/
 ```
 ```
 
@@ -351,7 +351,7 @@ Ensure documentation is complete and accurate.
 
 #### AGENTS.md Validation
 
-- [ ] File exists at workspace root: ~/src/ws/[workspace]/AGENTS.md
+- [ ] File exists at workspace root: {{DEVLOG_ROOT}}/ws/[workspace]/AGENTS.md
 - [ ] No placeholder text remaining (`[UPPERCASE]` or `[lowercase]`)
 - [ ] Workspace name in header matches actual name
 - [ ] Root path matches actual workspace location
@@ -365,7 +365,7 @@ Ensure documentation is complete and accurate.
 
 #### README.md Validation
 
-- [ ] File exists at workspace root: ~/src/ws/[workspace]/README.md
+- [ ] File exists at workspace root: {{DEVLOG_ROOT}}/ws/[workspace]/README.md
 - [ ] Pattern identified in "What is this repository?" section
 - [ ] Directory structure diagram matches actual workspace
 - [ ] Workspace Boundaries section explains what belongs/doesn't belong
@@ -377,16 +377,16 @@ Ensure documentation is complete and accurate.
 
 Test that links work:
 
-- [ ] Pattern documentation: ~/src/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#[pattern]
-- [ ] Examples: ~/src/repos/ai-tools/base/devlog/workspace-patterns/examples.md
-- [ ] Decision tree: ~/src/repos/ai-tools/base/devlog/workspace-patterns/decision-tree.md
-- [ ] Templates: ~/src/repos/ai-tools/base/devlog/workspace-patterns/templates/
+- [ ] Pattern documentation: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#[pattern]
+- [ ] Examples: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/examples.md
+- [ ] Decision tree: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/decision-tree.md
+- [ ] Templates: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/
 
 ### Test with AI Agent
 
 **Validation test**: Ask AI agent to describe workspace without providing context.
 
-Open new Claude Code session with working directory: `~/src/ws/[workspace]/`
+Open new Claude Code session with working directory: `{{DEVLOG_ROOT}}/ws/[workspace]/`
 
 Then ask:
 "What is this workspace? What belongs here? Where do wayfinder projects go?"
@@ -409,8 +409,8 @@ Then ask:
 ### Scenario 1: oss/ Workspace (Mono-Repo)
 
 **Current state**:
-- Directory: ~/src/ws/oss/
-- Contains: 119 wayfinder projects in wf/, research/, docs/
+- Directory: {{DEVLOG_ROOT}}/ws/oss/
+- Contains: 119 wayfinder projects in projects/, research/, docs/
 - Purpose: engram-research (work ON engram)
 - No AGENTS.md or README.md
 
@@ -418,10 +418,10 @@ Then ask:
 1. Identify pattern: Mono-Repo (single repo, multiple projects)
 2. Copy templates:
    ```bash
-   cp ~/src/repos/ai-tools/base/devlog/workspace-patterns/templates/AGENTS-mono-repo.md \
-      ~/src/ws/oss/AGENTS.md
-   cp ~/src/repos/ai-tools/base/devlog/workspace-patterns/templates/README-mono-repo.md \
-      ~/src/ws/oss/README.md
+   cp {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/AGENTS-mono-repo.md \
+      {{DEVLOG_ROOT}}/ws/oss/AGENTS.md
+   cp {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/README-mono-repo.md \
+      {{DEVLOG_ROOT}}/ws/oss/README.md
    ```
 3. Customize:
    - `[WORKSPACE_NAME]` → "Engram Research"
@@ -434,15 +434,15 @@ Then ask:
    This repository is **engram-research** (research ABOUT engram), NOT the
    actual engram product repository.
 
-   - **Product repo**: ~/src/repos/engram/base/
-   - **Research repo**: ~/src/ws/oss/ (this workspace)
+   - **Product repo**: {{DEVLOG_ROOT}}/repos/engram/base/
+   - **Research repo**: {{DEVLOG_ROOT}}/ws/oss/ (this workspace)
    ```
-5. Validate: Check wayfinder projects location (~/src/ws/oss/wf/)
+5. Validate: Check wayfinder projects location ({{DEVLOG_ROOT}}/ws/oss/projects/)
 
 ### Scenario 2: [REDACTED_EMPLOYER]/ Workspace (Multi-Workspace)
 
 **Current state**:
-- Directory: ~/src/ws/[REDACTED_EMPLOYER]/
+- Directory: {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/
 - Contains: Confidential company work, vida/ sub-workspace
 - Purpose: Separate from public oss/ workspace
 - Has README.md (needs pattern clarification)
@@ -451,8 +451,8 @@ Then ask:
 1. Identify pattern: Multi-Workspace (confidentiality boundary)
 2. Create AGENTS.md:
    ```bash
-   cp ~/src/repos/ai-tools/base/devlog/workspace-patterns/templates/AGENTS-multi-workspace.md \
-      ~/src/ws/[REDACTED_EMPLOYER]/AGENTS.md
+   cp {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/AGENTS-multi-workspace.md \
+      {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/AGENTS.md
    ```
 3. Update existing README.md:
    - Add pattern identity at top:
@@ -466,7 +466,7 @@ Then ask:
      ## Security and Confidentiality
 
      **Tracking Policy**: Metadata-only (session-manifests/ tracked, content excluded)
-     **Pre-Commit Hooks**: Installed via ~/src/ws/[REDACTED_EMPLOYER]/scripts/install-hooks.sh
+     **Pre-Commit Hooks**: Installed via {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/scripts/install-hooks.sh
      **PII Scrubbing**: Required before committing session manifests
      ```
 4. Document sub-workspace:
@@ -480,8 +480,8 @@ Then ask:
 ### Scenario 3: vida/ Sub-Workspace (Sub-Workspace)
 
 **Current state**:
-- Directory: ~/src/ws/[REDACTED_EMPLOYER]/vida/
-- Parent: ~/src/ws/[REDACTED_EMPLOYER]/
+- Directory: {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/vida/
+- Parent: {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/
 - Purpose: Product-specific work within [REDACTED_EMPLOYER]/
 - No AGENTS.md or README.md yet
 
@@ -489,8 +489,8 @@ Then ask:
 1. Identify pattern: Sub-Workspace (nested in [REDACTED_EMPLOYER]/)
 2. Create AGENTS.md:
    ```bash
-   cp ~/src/repos/ai-tools/base/devlog/workspace-patterns/templates/AGENTS-sub-workspace.md \
-      ~/src/ws/[REDACTED_EMPLOYER]/vida/AGENTS.md
+   cp {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/AGENTS-sub-workspace.md \
+      {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/vida/AGENTS.md
    ```
 3. Customize:
    - `[WORKSPACE_NAME]` → "vida"
@@ -498,11 +498,11 @@ Then ask:
    - `[parent]` → "[REDACTED_EMPLOYER]"
    - Purpose: "Product-specific work for vida product"
 4. Document parent integration:
-   - Check ~/src/ws/[REDACTED_EMPLOYER]/README.md mentions vida/
-   - Check ~/src/ws/[REDACTED_EMPLOYER]/.gitignore excludes vida/
+   - Check {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/README.md mentions vida/
+   - Check {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/.gitignore excludes vida/
 5. Decide wayfinder location:
-   - Few projects → Use parent wf/: ~/src/ws/[REDACTED_EMPLOYER]/wf/
-   - Many projects → Create own: ~/src/ws/[REDACTED_EMPLOYER]/vida/wf/
+   - Few projects → Use parent projects/: {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/projects/
+   - Many projects → Create own: {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/vida/projects/
 6. Validate: Ensure parent README.md documents this sub-workspace
 
 ### Scenario 4: Workspace with Existing AGENTS.md (Update Only)
@@ -514,7 +514,7 @@ Then ask:
 **Steps**:
 1. Backup existing:
    ```bash
-   cp ~/src/ws/[workspace]/AGENTS.md ~/src/ws/[workspace]/AGENTS.md.backup
+   cp {{DEVLOG_ROOT}}/ws/[workspace]/AGENTS.md {{DEVLOG_ROOT}}/ws/[workspace]/AGENTS.md.backup
    ```
 2. Identify pattern (Step 1)
 3. Read template to see recommended structure
@@ -538,31 +538,31 @@ Then ask:
 **Directory at wrong level**:
 ```bash
 # Wrong: Workspace nested when it shouldn't be
-~/src/ws/parent/child/  # child should be ~/src/ws/child/
+{{DEVLOG_ROOT}}/ws/parent/child/  # child should be {{DEVLOG_ROOT}}/ws/child/
 
 # Wrong: Workspace at top level when it should be nested
-~/src/ws/workspace/  # should be ~/src/ws/parent/workspace/
+{{DEVLOG_ROOT}}/ws/workspace/  # should be {{DEVLOG_ROOT}}/ws/parent/workspace/
 ```
 
 **Wayfinder projects in wrong location**:
 ```bash
-# Wrong: Projects scattered outside wf/
-~/src/ws/workspace/project1/
-~/src/ws/workspace/project2/
-~/src/ws/workspace/project3/
+# Wrong: Projects scattered outside projects/
+{{DEVLOG_ROOT}}/ws/workspace/project1/
+{{DEVLOG_ROOT}}/ws/workspace/project2/
+{{DEVLOG_ROOT}}/ws/workspace/project3/
 
-# Right: Projects in wf/ subdirectory
-~/src/ws/workspace/wf/project1/
-~/src/ws/workspace/wf/project2/
+# Right: Projects in projects/ subdirectory
+{{DEVLOG_ROOT}}/ws/workspace/projects/project1/
+{{DEVLOG_ROOT}}/ws/workspace/projects/project2/
 ```
 
 **Mixed content across workspaces**:
 ```bash
 # Wrong: Confidential content in public workspace
-~/src/ws/oss/confidential-project/  # Should be ~/src/ws/company/
+{{DEVLOG_ROOT}}/ws/oss/confidential-project/  # Should be {{DEVLOG_ROOT}}/ws/company/
 
 # Wrong: Public content in confidential workspace
-~/src/ws/company/open-source-project/  # Should be ~/src/ws/oss/
+{{DEVLOG_ROOT}}/ws/company/open-source-project/  # Should be {{DEVLOG_ROOT}}/ws/oss/
 ```
 
 ### Reorganization Approach
@@ -617,7 +617,7 @@ Then ask:
 ### Problem: Wayfinder Projects in Multiple Locations
 
 **Symptoms**:
-- Some projects in wf/, some scattered elsewhere
+- Some projects in projects/, some scattered elsewhere
 - Unclear which location to document
 
 **Solution**:
@@ -625,10 +625,10 @@ Then ask:
    ```markdown
    ## Wayfinder Projects
 
-   **Primary location**: ~/src/ws/[workspace]/wf/
+   **Primary location**: {{DEVLOG_ROOT}}/ws/[workspace]/projects/
    **Legacy projects**: [List other locations]
 
-   **New projects**: Use wf/ directory going forward.
+   **New projects**: Use projects/ directory going forward.
    ```
 2. Optionally file bead for consolidation later
 3. Don't move files during documentation phase
@@ -645,7 +645,7 @@ Then ask:
    ```markdown
    ## Related Workspaces
 
-   **Other workspace**: ~/src/ws/[other]/
+   **Other workspace**: {{DEVLOG_ROOT}}/ws/[other]/
    **Distinction**: [Explain difference - team, timeline, scope, etc.]
    ```
 3. File bead if consolidation makes sense
@@ -684,7 +684,7 @@ After completing documentation for existing workspace:
 
 ## Reference
 
-**Pattern documentation**: ~/src/repos/ai-tools/base/devlog/workspace-patterns/patterns.md
+**Pattern documentation**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md
 
 **More information**:
 - Pattern details: [patterns.md](patterns.md)

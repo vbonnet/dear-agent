@@ -36,7 +36,7 @@ This workspace follows the **Multi-Workspace pattern**:
 ├── README.md                  # This file (workspace identity and boundaries)
 ├── AGENTS.md                  # AI agent guidance
 ├── .git/                      # Separate git repository
-├── wf/                        # Wayfinder projects for THIS workspace
+├── projects/                        # Wayfinder projects for THIS workspace
 └── [workspace-specific content]/
 ```
 
@@ -66,15 +66,15 @@ This workspace follows the **Multi-Workspace pattern**:
 
 ## Related Workspaces
 
-**Other workspaces in ~/src/ws/**:
+**Other workspaces in {{DEVLOG_ROOT}}/ws/**:
 
 ### [Other Workspace Name]
-- **Location**: ~/src/ws/[other-workspace]/
+- **Location**: {{DEVLOG_ROOT}}/ws/[other-workspace]/
 - **Purpose**: [Other workspace purpose]
 - **Boundary**: [Why separate from this workspace]
 
 ### [Another Workspace Name] (if applicable)
-- **Location**: ~/src/ws/[another-workspace]/
+- **Location**: {{DEVLOG_ROOT}}/ws/[another-workspace]/
 - **Purpose**: [Purpose]
 - **Boundary**: [Reason for separation]
 
@@ -126,7 +126,7 @@ This workspace follows the **Multi-Workspace pattern**:
 1. Read AGENTS.md for workspace-specific guidance
 2. Understand workspace boundaries
 3. Respect cross-workspace separation
-4. Use wf/ for wayfinder projects in THIS workspace only
+4. Use projects/ for wayfinder projects in THIS workspace only
 
 ### For Developers
 
@@ -136,7 +136,7 @@ This workspace follows the **Multi-Workspace pattern**:
 wayfinder-new [project-name]
 
 # Project created at:
-# ~/src/ws/[workspace]/wf/[project-name]/
+# {{DEVLOG_ROOT}}/ws/[workspace]/projects/[project-name]/
 ```
 
 **Working with other workspaces**:
@@ -149,9 +149,9 @@ wayfinder-new [project-name]
 ## Related Documentation
 
 **Pattern documentation**:
-- Pattern details: ~/src/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#multi-workspace
-- Real examples: ~/src/repos/ai-tools/base/devlog/workspace-patterns/examples.md#multi-workspace
-- Decision tree: ~/src/repos/ai-tools/base/devlog/workspace-patterns/decision-tree.md
+- Pattern details: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#multi-workspace
+- Real examples: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/examples.md#multi-workspace
+- Decision tree: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/decision-tree.md
 
 ---
 

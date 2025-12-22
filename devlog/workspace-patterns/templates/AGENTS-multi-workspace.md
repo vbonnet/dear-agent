@@ -20,8 +20,8 @@ This is one of **multiple independent workspaces** with clear boundaries (typica
 
 ## Workspace Structure
 
-**Root**: ~/src/ws/[workspace]/
-**Projects**: ~/src/ws/[workspace]/wf/
+**Root**: {{DEVLOG_ROOT}}/ws/[workspace]/
+**Projects**: {{DEVLOG_ROOT}}/ws/[workspace]/projects/
 **Pattern**: Independent workspace, separate from others
 
 **Directory organization**:
@@ -30,7 +30,7 @@ This is one of **multiple independent workspaces** with clear boundaries (typica
 ├── README.md          # Workspace identity and boundaries
 ├── AGENTS.md          # This file
 ├── .git/              # Separate git repository
-├── wf/                # Wayfinder projects for this workspace
+├── projects/                # Wayfinder projects for this workspace
 └── [workspace-specific content]/
 ```
 
@@ -65,9 +65,9 @@ This is one of **multiple independent workspaces** with clear boundaries (typica
 
 ## Wayfinder Projects
 
-**Location**: ~/src/ws/[workspace]/wf/
+**Location**: {{DEVLOG_ROOT}}/ws/[workspace]/projects/
 
-**All wayfinder projects for THIS workspace live in wf/ subdirectory.**
+**All wayfinder projects for THIS workspace live in projects/ subdirectory.**
 
 **Usage**:
 ```bash
@@ -75,7 +75,7 @@ This is one of **multiple independent workspaces** with clear boundaries (typica
 wayfinder-new [project-name]
 
 # Project created at:
-# ~/src/ws/[workspace]/wf/[project-name]/
+# {{DEVLOG_ROOT}}/ws/[workspace]/projects/[project-name]/
 ```
 
 **Important**: Do not mix projects from different workspaces.
@@ -84,9 +84,9 @@ wayfinder-new [project-name]
 
 ## Related Workspaces
 
-**Other workspaces in ~/src/ws/**:
+**Other workspaces in {{DEVLOG_ROOT}}/ws/**:
 - **[Other workspace name]**: [Purpose and boundary]
-  - Location: ~/src/ws/[other-workspace]/
+  - Location: {{DEVLOG_ROOT}}/ws/[other-workspace]/
   - Boundary: [Explain separation reason]
 
 **Cross-workspace rules**:
@@ -127,8 +127,8 @@ Replace these placeholders when using this template:
 **Example result**:
 ```
 Workspace: company-work
-Root: ~/src/ws/company-work/
-Other workspaces: ~/src/ws/oss/ (open-source work)
+Root: {{DEVLOG_ROOT}}/ws/company-work/
+Other workspaces: {{DEVLOG_ROOT}}/ws/oss/ (open-source work)
 Boundary: Confidentiality (company vs public)
 ```
 
@@ -136,7 +136,7 @@ Boundary: Confidentiality (company vs public)
 
 ## Reference
 
-**Pattern documentation**: ~/src/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#pattern-3-multi-workspace
+**Pattern documentation**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#pattern-3-multi-workspace
 
 **More information**:
 - Pattern details: [patterns.md](../patterns.md#pattern-3-multi-workspace)

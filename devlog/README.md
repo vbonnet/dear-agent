@@ -13,7 +13,7 @@ Devlog contains documentation, guides, templates, and patterns for effective AI-
 Devlog documents two aspects of development workspace organization:
 
 1. **Workspace Patterns** ([workspace-patterns/](workspace-patterns/))
-   - How to organize `~/src/ws/` with multiple projects
+   - How to organize `{{DEVLOG_ROOT}}/ws/` with multiple projects
    - Mono-Repo, Multi-Workspace, Sub-Workspace patterns
    - AGENTS.md and README.md templates
 
@@ -108,4 +108,4 @@ When you discover a useful pattern or practice:
 ---
 
 **Last updated**: 2025-12-19
-**Location**: ~/src/repos/ai-tools/base/devlog/
+**Location**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/

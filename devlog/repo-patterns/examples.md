@@ -545,7 +545,7 @@ What's your current repository structure?
 
 - **[Bare Repo Guide](bare-repo-guide.md)** - Comprehensive guide to bare repo pattern
 - **[Repository Patterns Overview](README.md)** - Navigation hub
-- **Migration script**: `~/src/ws/oss/wf/bare-repo-migration/migrate-to-bare.sh` (not included in devlog)
+- **Migration script**: `{{DEVLOG_ROOT}}/ws/oss/projects/bare-repo-migration/migrate-to-bare.sh` (not included in devlog)
 
 ---
 

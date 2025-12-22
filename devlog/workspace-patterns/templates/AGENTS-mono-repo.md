@@ -12,7 +12,7 @@ This is a **mono-repo workspace** containing multiple related projects within a 
 
 **Key characteristics**:
 - Single .git directory at root
-- Multiple related projects in wf/ subdirectory
+- Multiple related projects in projects/ subdirectory
 - Shared tools, configuration, and resources at root level
 - All content shares common workspace root
 
@@ -20,8 +20,8 @@ This is a **mono-repo workspace** containing multiple related projects within a 
 
 ## Workspace Structure
 
-**Root**: ~/src/ws/[workspace]/
-**Projects**: ~/src/ws/[workspace]/wf/
+**Root**: {{DEVLOG_ROOT}}/ws/[workspace]/
+**Projects**: {{DEVLOG_ROOT}}/ws/[workspace]/projects/
 **Pattern**: All projects share common workspace root
 
 **Directory organization**:
@@ -30,7 +30,7 @@ This is a **mono-repo workspace** containing multiple related projects within a 
 ├── README.md          # Workspace identity
 ├── AGENTS.md          # This file
 ├── .git/              # Single git repository
-├── wf/                # All wayfinder projects
+├── projects/                # All wayfinder projects
 ├── research/          # Research documents
 ├── docs/              # Documentation
 ├── scripts/           # Shared scripts
@@ -43,7 +43,7 @@ This is a **mono-repo workspace** containing multiple related projects within a 
 
 ✅ **Content that belongs in this workspace**:
 - Related projects within same domain
-- Wayfinder projects (all go in wf/ subdirectory)
+- Wayfinder projects (all go in projects/ subdirectory)
 - Shared configuration files
 - Common tools and scripts
 - Research documents related to workspace projects
@@ -68,22 +68,22 @@ This is a **mono-repo workspace** containing multiple related projects within a 
 
 ## Wayfinder Projects
 
-**Location**: ~/src/ws/[workspace]/wf/
+**Location**: {{DEVLOG_ROOT}}/ws/[workspace]/projects/
 
-**All wayfinder projects for this workspace live in the wf/ subdirectory.**
+**All wayfinder projects for this workspace live in the projects/ subdirectory.**
 
 **Usage**:
 ```bash
-# Create new wayfinder project (configure to use wf/ directory)
+# Create new wayfinder project (configure to use projects/ directory)
 wayfinder-new [project-name]
 
 # Project will be created at:
-# ~/src/ws/[workspace]/wf/[project-name]/
+# {{DEVLOG_ROOT}}/ws/[workspace]/projects/[project-name]/
 ```
 
 **Organization**:
-- Each project in wf/ is a separate wayfinder session
-- wf/ subdirectory keeps projects organized
+- Each project in projects/ is a separate wayfinder session
+- projects/ subdirectory keeps projects organized
 - Shared workspace content stays at root level
 
 ---
@@ -92,7 +92,7 @@ wayfinder-new [project-name]
 
 **Other workspaces** (if applicable):
 - [List other workspaces and explain relationship]
-- [Example: ~/src/ws/[REDACTED_EMPLOYER]/ for confidential work]
+- [Example: {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/ for confidential work]
 
 **Workspace boundaries**:
 - This workspace: [workspace-specific content]
@@ -110,15 +110,15 @@ Replace these placeholders when using this template:
 **Example result**:
 ```
 Workspace: my-research
-Root: ~/src/ws/my-research/
-Projects: ~/src/ws/my-research/wf/
+Root: {{DEVLOG_ROOT}}/ws/my-research/
+Projects: {{DEVLOG_ROOT}}/ws/my-research/projects/
 ```
 
 ---
 
 ## Reference
 
-**Pattern documentation**: ~/src/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#pattern-1-mono-repo
+**Pattern documentation**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#pattern-1-mono-repo
 
 **More information**:
 - Pattern details: [patterns.md](../patterns.md#pattern-1-mono-repo)

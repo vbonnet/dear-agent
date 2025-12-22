@@ -10,7 +10,7 @@ This is a **sub-workspace** nested within a parent workspace, with distinct purp
 
 **Pattern**: Sub-Workspace (nested under parent workspace)
 
-**Parent workspace**: ~/src/ws/[parent]/
+**Parent workspace**: {{DEVLOG_ROOT}}/ws/[parent]/
 
 **Key characteristics**:
 - Nested under parent workspace
@@ -22,8 +22,8 @@ This is a **sub-workspace** nested within a parent workspace, with distinct purp
 
 ## Workspace Structure
 
-**Root**: ~/src/ws/[parent]/[workspace]/
-**Parent**: ~/src/ws/[parent]/
+**Root**: {{DEVLOG_ROOT}}/ws/[parent]/[workspace]/
+**Parent**: {{DEVLOG_ROOT}}/ws/[parent]/
 **Pattern**: Nested sub-workspace with parent integration
 
 **Directory organization**:
@@ -59,19 +59,19 @@ This is a **sub-workspace** nested within a parent workspace, with distinct purp
 - Other sub-workspaces' content
 - Content unrelated to this sub-workspace's purpose
 
-**Parent workspace content**: ~/src/ws/[parent]/
+**Parent workspace content**: {{DEVLOG_ROOT}}/ws/[parent]/
 
 ---
 
 ## Wayfinder Projects
 
-**Location**: ~/src/ws/[parent]/[workspace]/wf/ OR ~/src/ws/[parent]/wf/
+**Location**: {{DEVLOG_ROOT}}/ws/[parent]/[workspace]/projects/ OR {{DEVLOG_ROOT}}/ws/[parent]/projects/
 
 **Options**:
-1. **Own wf/ directory**: ~/src/ws/[parent]/[workspace]/wf/ (if many projects)
-2. **Parent wf/ directory**: ~/src/ws/[parent]/wf/ (if few projects)
+1. **Own projects/ directory**: {{DEVLOG_ROOT}}/ws/[parent]/[workspace]/projects/ (if many projects)
+2. **Parent projects/ directory**: {{DEVLOG_ROOT}}/ws/[parent]/projects/ (if few projects)
 
-**Recommendation**: Start with parent wf/, add own wf/ when it grows.
+**Recommendation**: Start with parent projects/, add own projects/ when it grows.
 
 ---
 
@@ -124,15 +124,15 @@ Replace these placeholders when using this template:
 **Example result**:
 ```
 Workspace: vida
-Root: ~/src/ws/[REDACTED_EMPLOYER]/vida/
-Parent: ~/src/ws/[REDACTED_EMPLOYER]/
+Root: {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/vida/
+Parent: {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/
 ```
 
 ---
 
 ## Reference
 
-**Pattern documentation**: ~/src/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#pattern-4-sub-workspace
+**Pattern documentation**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#pattern-4-sub-workspace
 
 **More information**:
 - Pattern details: [patterns.md](../patterns.md#pattern-4-sub-workspace)

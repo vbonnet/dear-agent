@@ -8,7 +8,7 @@ Human-readable documentation for sub-workspace pattern.
 
 [Brief description of sub-workspace purpose - 2-3 sentences]
 
-**Parent workspace**: ~/src/ws/[parent]/
+**Parent workspace**: {{DEVLOG_ROOT}}/ws/[parent]/
 
 **Relationship**: [Explain why this is nested under parent]
 - Example: Product-specific area within company workspace
@@ -58,15 +58,15 @@ This workspace follows the **Sub-Workspace pattern**:
 - [Sub-workspace-specific examples]
 
 **What does NOT belong here**:
-- Parent workspace content → ~/src/ws/[parent]/
-- Other sub-workspaces' content → ~/src/ws/[parent]/[other-sub]/
+- Parent workspace content → {{DEVLOG_ROOT}}/ws/[parent]/
+- Other sub-workspaces' content → {{DEVLOG_ROOT}}/ws/[parent]/[other-sub]/
 - Unrelated content
 
 ---
 
 ## Parent Workspace Integration
 
-**Parent workspace**: ~/src/ws/[parent]/
+**Parent workspace**: {{DEVLOG_ROOT}}/ws/[parent]/
 
 **Documented in parent README.md**:
 ```markdown
@@ -92,12 +92,12 @@ This workspace follows the **Sub-Workspace pattern**:
 
 **Options for wayfinder projects**:
 
-1. **Own wf/ directory**: ~/src/ws/[parent]/[sub-workspace]/wf/ (if many projects)
-2. **Parent wf/ directory**: ~/src/ws/[parent]/wf/ (if few projects)
+1. **Own projects/ directory**: {{DEVLOG_ROOT}}/ws/[parent]/[sub-workspace]/projects/ (if many projects)
+2. **Parent projects/ directory**: {{DEVLOG_ROOT}}/ws/[parent]/projects/ (if few projects)
 
 **Current approach**: [Document which option is used]
 
-**Recommendation**: Start with parent wf/, create own wf/ when sub-workspace has 5+ projects.
+**Recommendation**: Start with parent projects/, create own projects/ when sub-workspace has 5+ projects.
 
 ---
 
@@ -105,8 +105,8 @@ This workspace follows the **Sub-Workspace pattern**:
 
 ### For AI Agents
 
-1. Read parent ~/src/ws/[parent]/AGENTS.md for overall context
-2. Read ~/src/ws/[parent]/README.md for sub-workspace documentation
+1. Read parent {{DEVLOG_ROOT}}/ws/[parent]/AGENTS.md for overall context
+2. Read {{DEVLOG_ROOT}}/ws/[parent]/README.md for sub-workspace documentation
 3. Read this README.md for sub-workspace-specific guidance
 4. Understand integration with parent workspace
 
@@ -114,18 +114,18 @@ This workspace follows the **Sub-Workspace pattern**:
 
 **Creating new wayfinder project**:
 ```bash
-# Option 1: Parent wf/ directory
+# Option 1: Parent projects/ directory
 wayfinder-new [project-name]
-# Creates: ~/src/ws/[parent]/wf/[project-name]/
+# Creates: {{DEVLOG_ROOT}}/ws/[parent]/projects/[project-name]/
 
-# Option 2: Sub-workspace wf/ directory (if using own wf/)
+# Option 2: Sub-workspace projects/ directory (if using own projects/)
 wayfinder-new [project-name]
-# Creates: ~/src/ws/[parent]/[sub-workspace]/wf/[project-name]/
+# Creates: {{DEVLOG_ROOT}}/ws/[parent]/[sub-workspace]/projects/[project-name]/
 ```
 
 **Working with parent workspace**:
-- Parent content: ~/src/ws/[parent]/
-- This sub-workspace: ~/src/ws/[parent]/[sub-workspace]/
+- Parent content: {{DEVLOG_ROOT}}/ws/[parent]/
+- This sub-workspace: {{DEVLOG_ROOT}}/ws/[parent]/[sub-workspace]/
 - Keep purposes separate
 
 ---
@@ -140,18 +140,18 @@ wayfinder-new [project-name]
 **Growing sub-workspace** (when to add docs):
 - Add this README.md when 5+ projects or significant content
 - Add AGENTS.md for AI agent guidance
-- Consider own wf/ directory if many projects
+- Consider own projects/ directory if many projects
 
 ---
 
 ## Related Documentation
 
 **Pattern documentation**:
-- Pattern details: ~/src/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#sub-workspace
-- Real examples: ~/src/repos/ai-tools/base/devlog/workspace-patterns/examples.md#sub-workspace
-- Decision tree: ~/src/repos/ai-tools/base/devlog/workspace-patterns/decision-tree.md
+- Pattern details: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#sub-workspace
+- Real examples: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/examples.md#sub-workspace
+- Decision tree: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/decision-tree.md
 
-**Parent workspace**: ~/src/ws/[parent]/README.md
+**Parent workspace**: {{DEVLOG_ROOT}}/ws/[parent]/README.md
 
 ---
 

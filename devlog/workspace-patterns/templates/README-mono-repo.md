@@ -17,7 +17,7 @@ Human-readable documentation for mono-repo pattern workspace.
 This workspace follows the **Mono-Repo pattern**:
 - Single git repository containing multiple related projects
 - Shared tools, configuration, and resources at root level
-- All projects organized in wf/ subdirectory (or documented elsewhere)
+- All projects organized in projects/ subdirectory (or documented elsewhere)
 - Common workspace root for all content
 
 **Benefits**:
@@ -35,7 +35,7 @@ This workspace follows the **Mono-Repo pattern**:
 ├── README.md                  # This file
 ├── AGENTS.md                  # AI agent guidance
 ├── .git/                      # Git repository
-├── wf/                        # Wayfinder projects
+├── projects/                        # Wayfinder projects
 ├── research/                  # Research documents
 ├── docs/                      # Documentation
 ├── scripts/                   # Shared scripts and tools
@@ -43,7 +43,7 @@ This workspace follows the **Mono-Repo pattern**:
 ```
 
 **Key directories**:
-- **wf/**: All wayfinder projects for this workspace
+- **projects/**: All wayfinder projects for this workspace
 - **research/**: Research documents and investigations
 - **docs/**: Documentation and guides
 - **scripts/**: Automation and utility scripts
@@ -54,7 +54,7 @@ This workspace follows the **Mono-Repo pattern**:
 
 **What belongs here**:
 - Related projects within same domain/purpose
-- Wayfinder projects (in wf/ subdirectory)
+- Wayfinder projects (in projects/ subdirectory)
 - Shared configuration and tools
 - Research documents related to workspace projects
 - Documentation for workspace content
@@ -72,18 +72,18 @@ This workspace follows the **Mono-Repo pattern**:
 
 1. Read AGENTS.md for workspace-specific guidance
 2. Check this README.md for context
-3. Navigate to wf/ for wayfinder projects
+3. Navigate to projects/ for wayfinder projects
 4. Use workspace root for shared content
 
 ### For Developers
 
 **Creating new wayfinder project**:
 ```bash
-# Configure wayfinder to use wf/ directory
+# Configure wayfinder to use projects/ directory
 wayfinder-new [project-name]
 
 # Project will be created at:
-# ~/src/ws/[workspace]/wf/[project-name]/
+# {{DEVLOG_ROOT}}/ws/[workspace]/projects/[project-name]/
 ```
 
 **Adding shared tools/scripts**:
@@ -100,17 +100,17 @@ wayfinder-new [project-name]
 
 **Other workspaces** (if applicable):
 - [List other workspaces and explain relationship]
-- Example: ~/src/ws/[REDACTED_EMPLOYER]/ for confidential company work
-- Example: ~/src/repos/[product]/ for actual product repository
+- Example: {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/ for confidential company work
+- Example: {{DEVLOG_ROOT}}/repos/[product]/ for actual product repository
 
 ---
 
 ## Related Documentation
 
 **Pattern documentation**:
-- Pattern details: ~/src/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#mono-repo
-- Real examples: ~/src/repos/ai-tools/base/devlog/workspace-patterns/examples.md#mono-repo
-- Decision tree: ~/src/repos/ai-tools/base/devlog/workspace-patterns/decision-tree.md
+- Pattern details: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#mono-repo
+- Real examples: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/examples.md#mono-repo
+- Decision tree: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/decision-tree.md
 
 ---
 

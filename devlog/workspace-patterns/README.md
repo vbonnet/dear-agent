@@ -8,7 +8,7 @@
 
 ## What Are Workspace Patterns?
 
-Workspace patterns are architectural blueprints for organizing multi-project workspaces in ~/src/ws/. Each pattern defines:
+Workspace patterns are architectural blueprints for organizing multi-project workspaces in {{DEVLOG_ROOT}}/ws/. Each pattern defines:
 
 - **Structure**: Directory layout and organization
 - **Boundaries**: What belongs vs doesn't belong
@@ -186,7 +186,7 @@ If workspace matches multiple patterns:
 
 A: **Both**. oss/ is Mono-Repo (structure) and demonstrates Research-vs-Product (relationship to engram product). Document both aspects:
 - Pattern: Mono-Repo (single repo, multiple projects)
-- Clarification: This is engram-research, NOT engram product (~/src/repos/engram/base/)
+- Clarification: This is engram-research, NOT engram product ({{DEVLOG_ROOT}}/repos/engram/base/)
 
 **Q: Is [REDACTED_EMPLOYER]/vida/ Sub-Workspace or Multi-Workspace?**
 
@@ -217,12 +217,12 @@ Document all applicable patterns in workspace documentation.
 ✅ **Confused by directory placement** → examples.md
 ✅ **AI agent can't find content** → Add AGENTS.md via migration-guide.md
 ✅ **Multiple workspaces with unclear boundaries** → Multi-Workspace pattern
-✅ **Wayfinder projects scattered** → Document wf/ location in AGENTS.md
+✅ **Wayfinder projects scattered** → Document projects/ location in AGENTS.md
 
 ### Don't use this guide when:
 
 ❌ **Single project only** → Workspace patterns apply to multi-project workspaces
-❌ **Working in ~/src/repos/** → Repo patterns (not workspace patterns)
+❌ **Working in {{DEVLOG_ROOT}}/repos/** → Repo patterns (not workspace patterns)
 ❌ **File reorganization needed** → migration-guide.md documents first, reorganize later
 ❌ **Workspace is temporary** → No need for documentation
 
@@ -318,7 +318,7 @@ File beads for:
 ## Project Context
 
 **Created**: 2025-12-13
-**Wayfinder project**: ~/src/ws/oss/wf/workspace-patterns-documentation/
+**Wayfinder project**: {{DEVLOG_ROOT}}/ws/oss/projects/workspace-patterns-documentation/
 **Bead source**: Bead 3 (filed 2025-12-11)
 **Problem**: 17 workspace misplacements identified in oss-workspace-audit
 

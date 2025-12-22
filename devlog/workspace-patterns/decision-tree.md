@@ -19,22 +19,22 @@ START: I need workspace patterns documentation
 Question 1: Do you have confidentiality boundaries?
 ├─ YES → Multi-Workspace Pattern
 │         Template: AGENTS-multi-workspace.md, README-multi-workspace.md
-│         Example: ~/src/ws/oss/ vs ~/src/ws/[REDACTED_EMPLOYER]/
+│         Example: {{DEVLOG_ROOT}}/ws/oss/ vs {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/
 │
 └─ NO → Question 2: Is this nested within existing workspace?
         ├─ YES → Sub-Workspace Pattern
         │         Template: AGENTS-sub-workspace.md, README-sub-workspace.md
-        │         Example: ~/src/ws/[REDACTED_EMPLOYER]/vida/
+        │         Example: {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/vida/
         │
         └─ NO → Question 3: Is this research vs product split?
                 ├─ YES → Research-vs-Product Pattern
                 │         Template: None (conceptual pattern)
-                │         Example: ~/src/ws/oss/ vs ~/src/repos/engram/
+                │         Example: {{DEVLOG_ROOT}}/ws/oss/ vs {{DEVLOG_ROOT}}/repos/engram/
                 │
                 └─ NO → Question 4: Multiple related projects?
                         ├─ YES → Mono-Repo Pattern
                         │         Template: AGENTS-mono-repo.md, README-mono-repo.md
-                        │         Example: ~/src/ws/oss/
+                        │         Example: {{DEVLOG_ROOT}}/ws/oss/
                         │
                         └─ NO → No clear pattern (consult examples.md)
 ```
@@ -107,7 +107,7 @@ Question 1: Do you have confidentiality boundaries?
 - **Different lifecycles**: Research is exploratory, product is stable
 - **Reference direction**: Research → Product (one-way)
 
-**Example**: oss/ (engram-research) vs ~/src/repos/engram/ (engram product)
+**Example**: oss/ (engram-research) vs {{DEVLOG_ROOT}}/repos/engram/ (engram product)
 - oss/: Research, experiments, analysis, prototypes
 - engram/: Core product code, tested features
 - oss/ references engram/, not vice versa
@@ -131,16 +131,16 @@ Question 1: Do you have confidentiality boundaries?
 **Details**:
 - **Key characteristic**: Single repo, multiple projects, shared context
 - **Shared resources**: Configuration, tools, scripts available to all projects
-- **Organization**: wf/ subdirectory for wayfinder projects
+- **Organization**: projects/ subdirectory for wayfinder projects
 
 **Example**: oss/ (engram-research with 119 projects)
 - Single .git directory
-- wf/ contains all wayfinder projects
+- projects/ contains all wayfinder projects
 - Shared tools, research, documentation at root
 
 **Next steps**:
 1. Create workspace directory with .git
-2. Create wf/ subdirectory for wayfinder projects
+2. Create projects/ subdirectory for wayfinder projects
 3. Use [templates/AGENTS-mono-repo.md](templates/AGENTS-mono-repo.md)
 4. Use [templates/README-mono-repo.md](templates/README-mono-repo.md)
 5. Add README.md to clarify workspace identity
@@ -199,7 +199,7 @@ Question 1: Do you have confidentiality boundaries?
 
 | Pattern | Key Question | Example | Templates |
 |---------|--------------|---------|-----------|
-| **Mono-Repo** | Multiple related projects? | ~/src/ws/oss/ | AGENTS-mono-repo.md<br/>README-mono-repo.md |
+| **Mono-Repo** | Multiple related projects? | {{DEVLOG_ROOT}}/ws/oss/ | AGENTS-mono-repo.md<br/>README-mono-repo.md |
 | **Research-vs-Product** | Research vs product split? | oss/ vs engram/ | None (conceptual) |
 | **Multi-Workspace** | Confidentiality boundaries? | oss/ vs [REDACTED_EMPLOYER]/ | AGENTS-multi-workspace.md<br/>README-multi-workspace.md |
 | **Sub-Workspace** | Nested within existing? | [REDACTED_EMPLOYER]/vida/ | AGENTS-sub-workspace.md<br/>README-sub-workspace.md |
@@ -220,4 +220,4 @@ Question 1: Do you have confidentiality boundaries?
 ---
 
 **Last updated**: 2025-12-13
-**Part of**: ~/src/repos/ai-tools/base/devlog/workspace-patterns/
+**Part of**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/

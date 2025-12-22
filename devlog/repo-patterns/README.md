@@ -8,7 +8,7 @@
 
 ## What Are Repository Patterns?
 
-Repository patterns define how to structure individual git repositories in `~/src/repos/`. Unlike [workspace patterns](../workspace-patterns/) which organize multi-project workspaces in `~/src/ws/`, repository patterns focus on the internal structure of a single repository.
+Repository patterns define how to structure individual git repositories in `{{DEVLOG_ROOT}}/repos/`. Unlike [workspace patterns](../workspace-patterns/) which organize multi-project workspaces in `{{DEVLOG_ROOT}}/ws/`, repository patterns focus on the internal structure of a single repository.
 
 **Key pattern documented**: Bare Repository + Worktrees
 
@@ -36,7 +36,7 @@ See actual migrations from standard `.git` structure to bare repo pattern, with 
 
 **Quick answer**:
 
-- **Bare repo pattern** (this guide): Permanent repository structure in `~/src/repos/`
+- **Bare repo pattern** (this guide): Permanent repository structure in `{{DEVLOG_ROOT}}/repos/`
 - **[Git-worktrees plugin](../../../engram/main/plugins/git-worktrees/)**: Temporary worktrees in `~/worktrees/` for isolated experiments
 
 Both can coexist. Use bare repo as your permanent structure, create temporary worktrees via plugin for multi-agent workflows.
@@ -138,7 +138,7 @@ git -C ~/repos/myrepo/.bare worktree prune
 
 ### Workspace Patterns vs Repository Patterns
 
-**[Workspace Patterns](../workspace-patterns/)** - How to organize `~/src/ws/` with multiple projects
+**[Workspace Patterns](../workspace-patterns/)** - How to organize `{{DEVLOG_ROOT}}/ws/` with multiple projects
 - Mono-Repo, Multi-Workspace, Sub-Workspace patterns
 - Where to put wayfinder projects, research, docs
 - AGENTS.md and README.md templates
@@ -148,7 +148,7 @@ git -C ~/repos/myrepo/.bare worktree prune
 - Internal repository organization
 - Git workflow optimization
 
-**Both work together**: Use workspace patterns for `~/src/ws/` organization, repository patterns for `~/src/repos/` structure.
+**Both work together**: Use workspace patterns for `{{DEVLOG_ROOT}}/ws/` organization, repository patterns for `{{DEVLOG_ROOT}}/repos/` structure.
 
 ### Git-Worktrees Plugin vs Bare Repo Pattern
 
@@ -181,7 +181,7 @@ git -C ~/repos/myrepo/.bare worktree prune
 
 ### Don't use this guide when:
 
-❌ **Organizing ~/src/ws/ workspace** → Use [workspace-patterns](../workspace-patterns/) instead
+❌ **Organizing {{DEVLOG_ROOT}}/ws/ workspace** → Use [workspace-patterns](../workspace-patterns/) instead
 ❌ **Need temporary isolated worktrees** → Use [git-worktrees plugin](../../../engram/main/plugins/git-worktrees/)
 ❌ **Simple single-branch workflow** → Standard `.git` structure is fine
 ❌ **Repository is read-only/archive** → No need for worktrees
@@ -233,7 +233,7 @@ File beads for:
 ## Project Context
 
 **Created**: 2025-12-19
-**Wayfinder project**: `~/src/ws/oss/wf/devlog-bare-repo-docs/`
+**Wayfinder project**: `{{DEVLOG_ROOT}}/ws/oss/projects/devlog-bare-repo-docs/`
 **Wayfinder session**: df6bf13c-1745-4958-b53f-d96573a0240c
 **Based on**: Successful migration of 9 repositories to bare repo pattern
 
@@ -241,7 +241,7 @@ File beads for:
 - engram, vida, [REDACTED_EMPLOYER]-health-iac, grouper
 - aegis, ai-tools, beads, velvet, vpaste
 
-**Migration script**: `~/src/ws/oss/wf/bare-repo-migration/migrate-to-bare.sh` (not included in devlog per user request)
+**Migration script**: `{{DEVLOG_ROOT}}/ws/oss/projects/bare-repo-migration/migrate-to-bare.sh` (not included in devlog per user request)
 
 ---
 
