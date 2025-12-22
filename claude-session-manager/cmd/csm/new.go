@@ -203,8 +203,9 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 	// Wait for Claude's input prompt to appear before sending commands
 	// Even though process is ready, input handler may still be initializing
+	// Use generous timeout since Claude startup time varies (MCP servers, hooks, etc.)
 	fmt.Println("Waiting for Claude input to be ready...")
-	if err := tmux.WaitForInputReady(sessionName, ">", 10*time.Second); err != nil {
+	if err := tmux.WaitForInputReady(sessionName, ">", 30*time.Second); err != nil {
 		ui.PrintWarning("Claude input not ready yet, skipping auto-rename")
 		fmt.Printf("💡 You can manually rename with: /rename %s\n", sessionName)
 	} else {
@@ -340,8 +341,9 @@ func startClaudeInCurrentTmux(sessionName string) error {
 	}
 
 	// Wait for Claude's input prompt to appear before sending commands
+	// Use generous timeout since Claude startup time varies (MCP servers, hooks, etc.)
 	fmt.Println("Waiting for Claude input to be ready...")
-	if err := tmux.WaitForInputReady(sessionName, ">", 10*time.Second); err != nil {
+	if err := tmux.WaitForInputReady(sessionName, ">", 30*time.Second); err != nil {
 		ui.PrintWarning("Claude input not ready yet, skipping auto-rename")
 		fmt.Printf("💡 You can manually rename with: /rename %s\n", sessionName)
 	} else {

@@ -114,18 +114,12 @@ func AttachSession(name string) error {
 
 // SendCommand sends a command to tmux pane
 func SendCommand(sessionName string, command string) error {
-	// Use tmux's built-in chaining with run-shell to send text, delay, then Enter
-	// This is more reliable than splitting into two separate Go exec calls
-	// Format: tmux send-keys -t session "text" \; run-shell "sleep 0.1" \; send-keys -t session C-m
-	ctx := context.Background()
-	cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux",
-		"send-keys", "-t", sessionName, command,
-		";", "run-shell", "sleep 0.1",
-		";", "send-keys", "-t", sessionName, "C-m")
-	defer cancel()
-
+	// Send the command text first
+	ctx1 := context.Background()
+	cmd, cancel := CommandWithTimeout(ctx1, globalTimeout, "tmux", "send-keys", "-t", sessionName, command)
 	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
+		cancel()
+		if ctx1.Err() == context.DeadlineExceeded {
 			return &TimeoutError{
 				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
 				Recovery:  "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
@@ -133,6 +127,27 @@ func SendCommand(sessionName string, command string) error {
 			}
 		}
 		return fmt.Errorf("failed to send command to tmux: %w", err)
+	}
+	cancel()
+
+	// Small delay to ensure tmux processes the text before we send Enter
+	// See: https://github.com/tmux/tmux/issues/1778
+	time.Sleep(100 * time.Millisecond)
+
+	// Send Enter key separately (C-m doesn't work when combined with text in same command)
+	// Need a fresh context since we canceled the first one
+	ctx2 := context.Background()
+	cmd2, cancel2 := CommandWithTimeout(ctx2, globalTimeout, "tmux", "send-keys", "-t", sessionName, "C-m")
+	defer cancel2()
+	if err := cmd2.Run(); err != nil {
+		if ctx2.Err() == context.DeadlineExceeded {
+			return &TimeoutError{
+				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
+				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+				Duration: globalTimeout,
+			}
+		}
+		return fmt.Errorf("failed to send Enter key to tmux: %w", err)
 	}
 	return nil
 }
