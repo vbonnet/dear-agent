@@ -20,16 +20,24 @@ I'll archive the current CSM session and exit Claude gracefully.
 - Capture tmux session name in variable
 - If command fails or output is empty:
   - Show error: "❌ Could not determine tmux session name"
-  - Show message: "Ensure you're in a tmux session with CSM association"
+  - Show message: "Ensure you're in a tmux session"
   - Exit with code 1
 
-**Step 3: Archive the session**
+**Step 3: Verify CSM association**
+- Run: `csm get-uuid`
+- Check if command succeeds (exit code 0)
+- If command fails:
+  - Show error: "❌ Session not associated with CSM"
+  - Show message: "Run /csm-assoc first to associate this session"
+  - Exit with code 1
+
+**Step 4: Archive the session**
 - Show progress: "🔄 Archiving session..."
 - Run: `csm archive <session-name> --force`
 - Capture both output and exit code
 - Check if archive succeeded
 
-**Step 4: Handle archive result**
+**Step 5: Handle archive result**
 - If output contains "already archived":
   - Show warning: "⚠️  Session already archived"
   - Prompt user: "Exit anyway? (y/n): "
@@ -44,11 +52,11 @@ I'll archive the current CSM session and exit Claude gracefully.
 - If exit code is 0 and not already archived:
   - Show success: "✓ Session archived"
 
-**Step 5: Get tmux target**
+**Step 6: Get tmux target**
 - Run: `tmux display-message -p '#S:#I.#P'`
 - Capture target (format: session:window.pane)
 
-**Step 6: Schedule exit command in background**
+**Step 7: Schedule exit command in background**
 - Show progress: "🚪 Scheduling Claude exit..."
 - Run in background (using `&`):
   ```
