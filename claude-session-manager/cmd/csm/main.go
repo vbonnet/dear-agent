@@ -9,8 +9,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/cli"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/config"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/fuzzy"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/lock"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
 
 var (
@@ -27,18 +31,30 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "csm",
-	Short: "Claude Session Manager - Manage Claude AI sessions with ease",
+	Use:   "csm [session-name]",
+	Short: "Claude Session Manager - Smart session resume or create",
 	Long: `csm (Claude Session Manager) helps you manage Claude AI sessions
-by providing easy session resumption, discovery, and health monitoring.
+with smart resume/create behavior and interactive prompts.
 
-Resume sessions by tmux name, workspace ID, or Claude UUID:
-  csm -C ~/project resume claude-1
-  csm -C ~/project resume github.com-user-repo-main
-  csm -C ~/project resume c86ffd41-cbcc-4bfa-8b1f-4da7c83fc3d2
+When no session name is provided:
+  • If sessions exist in current directory → Shows interactive picker
+  • If no sessions exist → Prompts to create new session
+
+When session name is provided:
+  • Exact match found → Resumes that session
+  • Fuzzy matches found → Shows "did you mean" prompt
+  • No match found → Offers to create new session
+
+Examples:
+  csm                    # Smart picker or create
+  csm my-session         # Resume or create "my-session"
+  csm new                # Create new session (interactive form)
+  csm list               # List all sessions
+  csm fix                # Fix UUID associations
 
 Global Flags:
   -C, --directory <path>    Working directory (default: current directory)`,
+	RunE:              runDefaultCommand,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Load configuration first
 		var err error
@@ -146,6 +162,168 @@ func loadConfigWithFlags() (*config.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func runDefaultCommand(cmd *cobra.Command, args []string) error {
+	uiCfg := ui.LoadConfig()
+
+	// Get current working directory
+	projectDir := cli.GetProjectDirectory()
+
+	// List all sessions
+	manifests, err := manifest.List(cfg.SessionsDir)
+	if err != nil {
+		return fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	// Filter to sessions matching current directory
+	var matchingSessions []*manifest.Manifest
+	for _, m := range manifests {
+		absProjectPath, _ := filepath.Abs(m.Context.Project)
+		if absProjectPath == projectDir {
+			matchingSessions = append(matchingSessions, m)
+		}
+	}
+
+	// Case 1: No session name provided - smart behavior
+	if len(args) == 0 {
+		return handleNoArgs(matchingSessions, projectDir, uiCfg)
+	}
+
+	// Case 2: Session name provided - try to find it
+	sessionName := args[0]
+	return handleNamedSession(sessionName, manifests, matchingSessions, projectDir, uiCfg)
+}
+
+func handleNoArgs(matchingSessions []*manifest.Manifest, projectDir string, uiCfg *ui.Config) error {
+	if len(matchingSessions) == 0 {
+		// No sessions - offer to create new
+		fmt.Println("No sessions found in current directory.")
+		confirmed, err := ui.ConfirmCreate("", projectDir, uiCfg)
+		if err != nil {
+			return err
+		}
+
+		if !confirmed {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+
+		// Launch interactive form for new session
+		return runNewSessionFlow(nil, uiCfg)
+	}
+
+	if len(matchingSessions) == 1 {
+		// Single session - resume it directly
+		fmt.Printf("Resuming session: %s\n", matchingSessions[0].Name)
+		return performResume(matchingSessions[0])
+	}
+
+	// Multiple sessions - show picker
+	return showSessionPicker(matchingSessions, uiCfg)
+}
+
+func handleNamedSession(name string, allSessions, matchingSessions []*manifest.Manifest, projectDir string, uiCfg *ui.Config) error {
+	// Try exact match first
+	for _, m := range allSessions {
+		if m.Name == name {
+			fmt.Printf("Resuming session: %s\n", m.Name)
+			return performResume(m)
+		}
+	}
+
+	// No exact match - try fuzzy matching
+	var candidates []string
+	for _, m := range allSessions {
+		candidates = append(candidates, m.Name)
+	}
+
+	fuzzyMatches := fuzzy.FindSimilar(name, candidates, 0.6)
+
+	if len(fuzzyMatches) > 0 {
+		// Found fuzzy matches - show "did you mean"
+		choice, err := ui.DidYouMean(name, fuzzyMatches, uiCfg)
+		if err != nil {
+			return err
+		}
+
+		if choice == "" {
+			// User chose "create new"
+			return runNewSessionFlow(&name, uiCfg)
+		}
+
+		// User selected a fuzzy match - resume it
+		for _, m := range allSessions {
+			if m.Name == choice {
+				fmt.Printf("Resuming session: %s\n", m.Name)
+				return performResume(m)
+			}
+		}
+	}
+
+	// No matches at all - offer to create new
+	fmt.Printf("Session '%s' not found.\n", name)
+	confirmed, err := ui.ConfirmCreate(name, projectDir, uiCfg)
+	if err != nil {
+		return err
+	}
+
+	if !confirmed {
+		fmt.Println("Cancelled.")
+		return nil
+	}
+
+	return runNewSessionFlow(&name, uiCfg)
+}
+
+func showSessionPicker(sessions []*manifest.Manifest, uiCfg *ui.Config) error {
+	// Convert to UI sessions with status
+	tmuxClient := session.NewRealTmux()
+	uiSessions := make([]*ui.Session, len(sessions))
+
+	// Batch compute statuses for efficiency
+	statuses := session.ComputeStatusBatch(sessions, tmuxClient)
+
+	for i, m := range sessions {
+		uiSessions[i] = &ui.Session{
+			Manifest:  m,
+			Status:    statuses[m.Name],
+			UpdatedAt: m.UpdatedAt,
+		}
+	}
+
+	// Show interactive picker
+	selected, err := ui.SessionPicker(uiSessions, uiCfg)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Resuming session: %s\n", selected.Name)
+	return performResume(selected.Manifest)
+}
+
+func performResume(m *manifest.Manifest) error {
+	// TODO: Implement actual resume logic
+	// This will integrate with tmux and claude CLI
+	fmt.Printf("  Project: %s\n", m.Context.Project)
+	fmt.Printf("  Status: %s\n", session.ComputeStatus(m, session.NewRealTmux()))
+	if m.Claude.UUID != "" {
+		fmt.Printf("  UUID: %s\n", m.Claude.UUID)
+	}
+	fmt.Println("\n[Resume logic placeholder - full implementation in next iteration]")
+	return nil
+}
+
+func runNewSessionFlow(suggestedName *string, uiCfg *ui.Config) error {
+	// TODO: Implement new session flow
+	// This will show the interactive form we built
+	if suggestedName != nil {
+		fmt.Printf("Creating new session: %s\n", *suggestedName)
+	} else {
+		fmt.Println("Creating new session...")
+	}
+	fmt.Println("\n[New session flow placeholder - full implementation in next iteration]")
+	return nil
 }
 
 func main() {

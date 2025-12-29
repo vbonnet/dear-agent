@@ -1,280 +1,275 @@
-# CSM - Claude Session Manager
+# Claude Session Manager (CSM)
 
-Manage Claude AI sessions with tmux integration, session discovery, and health monitoring.
+Smart session management for Claude AI with interactive TUI, fuzzy matching, and automatic UUID detection.
 
 ## Features
 
-- **Session Management**: Create, resume, and archive Claude sessions
-- **Tmux Integration**: Automatic tmux session creation and attachment
-- **Session Discovery**: Auto-import orphaned sessions from Claude history
-- **Health Monitoring**: Check session status and tmux health
-- **Lock Management**: Safe concurrent command execution with stale lock detection
+### 🎯 Smart Session Management
+- **Interactive picker** - Beautiful TUI for session selection
+- **Fuzzy matching** - Typo-tolerant session names ("my-ses" → "my-session")
+- **Auto UUID detection** - Hybrid detection from `~/.claude/history.jsonl`
+- **Batch operations** - Multi-select cleanup for archival/deletion
+
+### 🚀 Quick Start
+
+```bash
+# Smart resume/create (no args needed!)
+csm                    # Shows picker if multiple sessions, creates if none
+
+# Named session (with fuzzy matching)
+csm my-session         # Exact match → resume
+csm my-ses            # Fuzzy match → "did you mean?"
+csm new-name          # No match → offer to create
+
+# Explicit commands
+csm new               # Interactive form for new session
+csm list              # List all sessions with status
+csm clean             # Batch cleanup (archive/delete)
+csm fix               # Fix UUID associations
+```
 
 ## Installation
 
 ```bash
-make build
-make install
-```
-
-This installs `csm` to `~/go/bin/csm` and `~/.local/bin/csm`.
-
-## Quick Start
-
-```bash
-# Create a new session
-csm new my-project
-
-# List all sessions
-csm list
-
-# Resume a session
-csm resume my-project
-
-# Archive a session
-csm archive my-project
+go install github.com/vbonnet/ai-tools/claude-session-manager/cmd/csm@latest
 ```
 
 ## Commands
 
-### Session Management
+### Primary Command: `csm [session-name]`
 
-#### `csm new [session-name]`
-Create a new Claude session with tmux integration.
+Smart behavior based on context:
 
-```bash
-csm new                    # Prompt for name or use current tmux session
-csm new my-project         # Create session named "my-project"
-```
+**No session name provided:**
+- Multiple sessions exist → Shows interactive picker
+- No sessions exist → Prompts to create new session
 
-**Behavior:**
-- Outside tmux: Creates new tmux session, starts Claude, attaches
-- Inside tmux: Uses current session name, starts Claude
+**Session name provided:**
+- Exact match → Resumes that session
+- Fuzzy matches found → "Did you mean" prompt
+- No match → Offers to create new session
 
-#### `csm resume [identifier]`
-Resume a Claude session by UUID, tmux name, or project path.
+### `csm new [session-name]`
 
-```bash
-csm resume c4eb298c        # By UUID prefix
-csm resume my-project      # By tmux session name
-csm resume workspace       # By project path pattern
-```
+Create new session with interactive form:
+- Session name validation (alphanumeric, hyphens, underscores)
+- Project directory selection
+- Optional purpose/description
+- Auto-creates tmux session + starts Claude
+- Auto-associates UUID via history detection
 
-#### `csm list [--all]`
-List Claude session manifests.
+### `csm list [flags]`
 
-```bash
-csm list           # Show non-archived sessions
-csm list --all     # Show all sessions including archived
-```
-
-Displays session status based on tmux state:
-- `active`: tmux session is running
-- `stopped`: tmux session not running
-- `archived`: session marked as archived
-
-#### `csm archive <session-id>`
-Archive a Claude session.
+List sessions with rich formatting:
 
 ```bash
-csm archive my-project
+csm list                 # Active/stopped sessions (table format)
+csm list --all           # Include archived
+csm list --archived      # Only archived
+csm list --format=json   # Machine-readable output
 ```
 
-### Sync and Discovery
+**Output formats:**
+- `table` (default) - Formatted table with status, project, updated time
+- `json` - Machine-readable JSON
+- `simple` - Simple name list
 
-#### `csm sync`
-Discover and sync Claude sessions from history.
+### `csm clean`
 
-Scans `~/.claude/history.jsonl` for orphaned sessions (sessions without manifests) and offers to import them.
+Interactive batch cleanup with smart suggestions:
 
-#### `csm associate [session-name]`
-Associate current session with Claude UUID.
+- **Stopped sessions >30 days** - Suggested for archival
+- **Archived sessions >90 days** - Suggested for deletion
+- Multi-select interface with confirmation
+- Thresholds customizable in `~/.config/csm/config.yaml`
 
-Links a CSM session manifest to the Claude conversation UUID. Useful after starting a new Claude session.
+### `csm fix [session-name]`
 
-### Diagnostics
-
-#### `csm doctor [--fix]`
-Check system health and configuration.
+Manual UUID association management:
 
 ```bash
-csm doctor        # Check for issues
-csm doctor --fix  # Check and attempt auto-fixes
+csm fix                  # Scan all unassociated sessions
+csm fix my-session       # Fix specific session with suggestions
+csm fix --all            # Auto-fix all (high confidence only)
+csm fix --clear my-sess  # Remove UUID association
 ```
 
-Checks for:
-- Claude history file exists
-- tmux installation
-- Duplicate session directories
-- Duplicate Claude UUIDs
-- Session health (worktree exists, etc.)
+**UUID Suggestions:**
+1. Auto-detected from history (high confidence)
+2. Recent UUIDs from `~/.claude/history.jsonl`
+3. Manual entry option
 
-#### `csm unlock [--force]`
-Remove stale lock files.
+### `csm archive <session-name>`
 
-```bash
-csm unlock         # Check and remove stale locks
-csm unlock --force # Force remove (even if process running)
-```
+Archive a session (marks as archived, keeps manifest).
 
-This command:
-- Checks if lock is held by a running process
-- Removes lock if process has exited (stale)
-- Warns if attempting to remove active lock
-- Use `--force` only if certain the process is dead
+### `csm restore <session-name>`
 
-**When to use:**
-- You see "Another csm command is currently running" error
-- A csm process crashed and left a stale lock
-- Lock file exists but process is gone
-
-**Don't use:**
-- Instead of waiting for command to finish
-- When another csm is actually running
-
-#### `csm version`
-Print version information.
-
-### Backup
-
-#### `csm backup list`
-List available manifest backups.
-
-#### `csm backup create <session-id>`
-Create manual backup of session manifest.
-
-#### `csm backup restore <session-id> <backup-number>`
-Restore session from backup.
+Restore an archived session (marks as active).
 
 ## Configuration
 
-Config file: `~/.config/csm/config.yaml`
+Create `~/.config/csm/config.yaml`:
 
 ```yaml
-sessions_dir: ~/sessions      # Where session manifests are stored
-log_level: info                # Logging level
+defaults:
+  interactive: true                # Enable interactive prompts
+  auto_associate_uuid: true        # Auto-detect UUIDs
+  confirm_destructive: true        # Confirm before delete/archive
+  cleanup_threshold_days: 30       # Stopped → archive threshold
+  archive_threshold_days: 90       # Archived → delete threshold
 
-lock:
-  enabled: true                # Enable file locking
-  path: /tmp/csm-<UID>/csm.lock
+ui:
+  theme: "dracula"                 # UI theme (dracula, catppuccin, charm, base)
+  picker_height: 15                # Session picker height
+  show_project_paths: true         # Show full project paths
+  show_tags: true                  # Show session tags
+  fuzzy_search: true               # Enable fuzzy matching
 
-timeout:
-  enabled: true
-  tmux_commands: 5s            # Timeout for tmux commands
-
-health_check:
-  enabled: true
-  cache_duration: 10s          # Cache health check results
-  probe_timeout: 2s            # Timeout for health probes
+advanced:
+  tmux_timeout: "5s"               # Tmux command timeout
+  health_check_cache: "5s"         # Health check cache duration
+  lock_timeout: "30s"              # Lock acquisition timeout
+  uuid_detection_window: "5m"      # UUID detection time window
 ```
 
-## Lock Behavior
+## UUID Auto-Detection
 
-CSM uses file locking to prevent race conditions when creating tmux sessions or modifying manifests.
+CSM uses a hybrid approach for UUID detection:
 
-### Commands That Need Locks
-- `new` - Creates tmux session, starts Claude
-- `resume` - Starts Claude, modifies manifests
-- `associate` - Modifies manifests
-- `sync` - Modifies manifests
-- `archive` - Modifies manifests
+### Automatic Detection
+1. Reads `~/.claude/history.jsonl` for recent Claude sessions
+2. Matches by project directory
+3. Confidence levels:
+   - **High** (< 2.5 min old) - Auto-applied
+   - **Medium** (2.5-5 min old) - Manual confirmation
+   - **Low** (> 5 min old) - Listed in suggestions
 
-### Commands That Don't Need Locks (Read-Only)
-- `version` - Show version
-- `list` - List sessions
-- `doctor` - Health checks
-- `unlock` - Remove locks (must work even when locked!)
-- `backup` - Backup operations
+### Manual Association
+Use `csm fix` to manually associate UUIDs:
+- Shows ranked suggestions from history
+- Displays context (directory, timestamp, confidence)
+- Allows manual UUID entry
+- Validates against history
 
-### Lock Release
+## Architecture
 
-Locks are released **before** tmux attachment, so you can:
-- Stay attached to a tmux session for hours
-- Run other csm commands concurrently
-- Multiple users can manage different sessions
+### Module Structure
 
-### Troubleshooting Locks
-
-If you see "Another csm command is currently running":
-
-1. **Wait**: Another csm command is likely running
-2. **Check**: Run `csm unlock` to see lock status
-3. **Clean up**: If process crashed, `csm unlock` removes stale locks
-4. **Force**: Use `csm unlock --force` only if certain process is dead
-
-## Session Manifest
-
-Each session has a manifest stored at `~/sessions/session-<id>/manifest.yaml`:
-
-```yaml
-schema_version: "2.0"
-session_id: "session-my-project"
-name: "my-project"
-created_at: "2025-01-15T10:30:00Z"
-updated_at: "2025-01-15T11:45:00Z"
-lifecycle: ""  # "" = active, "archived" = archived
-
-context:
-  project: "/home/user/my-project"
-  purpose: "Building feature X"
-  tags: ["backend", "api"]
-  notes: "Working on authentication"
-
-tmux:
-  session_name: "my-project"
-
-claude:
-  uuid: "c4eb298c-1234-5678-abcd-ef0123456789"
 ```
+internal/
+├── fuzzy/          # Levenshtein distance matching
+├── ui/             # Interactive TUI components (Huh)
+│   ├── picker.go   # Session picker
+│   ├── forms.go    # Multi-step forms
+│   ├── confirm.go  # Confirmation dialogs
+│   └── cleanup.go  # Multi-select cleanup
+├── history/        # ~/.claude/history.jsonl parser
+├── detection/      # Hybrid UUID auto-detection
+├── fix/            # Manual UUID association
+├── manifest/       # Session manifest (v2 schema)
+└── session/        # Session status computation
+```
+
+### Design Principles
+
+1. **Smart defaults** - Minimal input required, intelligent behavior
+2. **Interactive when helpful** - TUI for multi-option scenarios
+3. **Fuzzy matching** - Typo-tolerant (0.6 similarity threshold)
+4. **Batch operations** - Multi-select for cleanup tasks
+5. **Confidence-based auto-detection** - Only auto-apply high-confidence UUIDs
 
 ## Development
 
 ### Running Tests
 
 ```bash
-make test                    # Run all tests
-make test-coverage           # Run tests with coverage
-go test -v ./...             # Run specific package tests
+# All tests
+go test ./...
+
+# With coverage
+go test -cover ./internal/fuzzy ./internal/ui ./internal/history ./internal/detection ./internal/fix
+
+# Specific module
+go test -v ./internal/fuzzy
 ```
+
+### Test Coverage
+
+- `fuzzy`: 95.2% (Levenshtein matching)
+- `history`: 88.5% (JSONL parsing)
+- `fix`: 89.4% (UUID association)
+- `detection`: 68.2% (Auto-detection logic)
+- `ui`: 10.2% (Interactive components, TTY required)
 
 ### Building
 
 ```bash
-make build                   # Build binary to bin/csm
-make install                 # Install to ~/go/bin and ~/.local/bin
+go build ./cmd/csm
 ```
 
 ## Troubleshooting
 
-### "Another csm command is currently running"
+### UUID not detected
 
-Run `csm unlock` to check for stale locks. If a csm process crashed, the lock will be automatically removed.
-
-### Session not found
-
-Run `csm sync` to discover and import orphaned sessions from Claude history.
-
-### Tmux session errors
-
-Run `csm doctor` to check tmux health and session status.
-
-### Lock won't release
-
-Use `csm unlock --force` to forcefully remove the lock. Only use this if you're certain no csm process is running:
+Check if `~/.claude/history.jsonl` exists and has entries:
 
 ```bash
-ps aux | grep csm           # Check for running csm processes
-csm unlock --force          # Force remove lock
+cat ~/.claude/history.jsonl | tail -5
 ```
 
-## Architecture
+If empty, send a message in Claude to populate history, then run:
 
-- **Lock Management**: `internal/lock/` - File-based locking with PID validation
-- **Tmux Integration**: `internal/tmux/` - Tmux command execution and health checks
-- **Session Discovery**: `internal/claude/` - Parse Claude history for orphaned sessions
-- **Manifest Management**: `internal/manifest/` - V2 manifest format with validation
-- **Health Checking**: Cached health checks with configurable timeouts
+```bash
+csm fix --all
+```
+
+### Session not appearing in picker
+
+Verify manifest exists:
+
+```bash
+ls ~/sessions/session-*/manifest.yaml
+```
+
+Check session status:
+
+```bash
+csm list --all
+```
+
+### Fuzzy matching not working
+
+Ensure similarity is ≥60%:
+- "tset" matches "test" (75%)
+- "myses" matches "my-session" (70%)
+- "xyz" doesn't match "abc" (0%)
+
+Adjust threshold in future versions via config.
+
+## Migration from v1
+
+CSM v2 reads v1 manifests automatically. No migration needed.
+
+V1 → V2 field mapping:
+- `Worktree.Path` → `Context.Project`
+- `Status` → `Lifecycle` ("archived" only, others computed)
+- `Claude.SessionID` → `Claude.UUID`
+
+## Contributing
+
+1. Follow existing test patterns (table-driven tests)
+2. Maintain >80% coverage for new modules
+3. Use Huh library for interactive components
+4. Document public functions and types
 
 ## License
 
 MIT
+
+## Credits
+
+Built with:
+- [Huh](https://github.com/charmbracelet/huh) - Interactive TUI forms
+- [Cobra](https://github.com/spf13/cobra) - CLI framework
+- [agnivade/levenshtein](https://github.com/agnivade/levenshtein) - Fuzzy matching
