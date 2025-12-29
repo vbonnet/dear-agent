@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
@@ -219,6 +220,17 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		}
 	}
 
+	// Attempt to capture Claude UUID automatically
+	const uuidCaptureTimeout = 3 * time.Second
+	capturedUUID := ""
+	if uuid, err := claude.CaptureLatestUUID(uuidCaptureTimeout); err != nil {
+		ui.PrintWarning(fmt.Sprintf("Could not capture UUID: %v", err))
+		fmt.Println("💡 You can run 'csm sync' later to populate the UUID")
+	} else {
+		capturedUUID = uuid
+		ui.PrintSuccess(fmt.Sprintf("Captured Claude UUID: %s...", uuid[:8]))
+	}
+
 	// Create manifest
 	sessionsDir := getSessionsDir()
 	manifestDir := filepath.Join(sessionsDir, fmt.Sprintf("session-%s", sessionName))
@@ -244,13 +256,16 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			Tmux: manifest.Tmux{
 				SessionName: sessionName,
 			},
+			Claude: manifest.Claude{
+				UUID: capturedUUID,
+			},
 		}
 
 		if err := manifest.Write(manifestPath, m); err != nil {
 			ui.PrintWarning(fmt.Sprintf("Failed to write manifest: %v", err))
 		} else {
 			fmt.Printf("Created manifest: %s\n", manifestPath)
-			fmt.Println("💡 Run 'csm sync' after sending first message to populate Claude UUID")
+			// Note: UUID is now captured automatically during session creation
 		}
 	}
 

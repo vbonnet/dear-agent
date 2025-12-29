@@ -1,6 +1,9 @@
 #!/bin/bash
 # find-session-uuid.sh - Find Claude session UUIDs based on timestamp
 #
+# NOTE: As of CSM v2.x, new sessions automatically capture the UUID.
+# This script is for legacy sessions or orphaned sessions created before auto-capture.
+#
 # Usage:
 #   ./find-session-uuid.sh <session-name> <timestamp>
 #   ./find-session-uuid.sh <session-name>  # Uses creation time from manifest
