@@ -15,17 +15,17 @@ I'll archive the current CSM session and exit Claude gracefully.
   - Show message: "Use /exit manually to exit Claude"
   - Exit with code 1
 
-**Step 2: Get current session UUID**
-- Run: `csm get-uuid`
-- Capture output in variable
-- If command fails:
-  - Show error: "❌ Could not determine session UUID"
-  - Show message: "Run /csm-assoc first to associate this session"
+**Step 2: Get current session name**
+- Run: `tmux display-message -p '#S'`
+- Capture tmux session name in variable
+- If command fails or output is empty:
+  - Show error: "❌ Could not determine tmux session name"
+  - Show message: "Ensure you're in a tmux session with CSM association"
   - Exit with code 1
 
 **Step 3: Archive the session**
 - Show progress: "🔄 Archiving session..."
-- Run: `csm archive <uuid> --force`
+- Run: `csm archive <session-name> --force`
 - Capture both output and exit code
 - Check if archive succeeded
 
@@ -48,9 +48,12 @@ I'll archive the current CSM session and exit Claude gracefully.
 - Run: `tmux display-message -p '#S:#I.#P'`
 - Capture target (format: session:window.pane)
 
-**Step 6: Send exit command**
-- Show progress: "🚪 Exiting Claude..."
-- Wait 0.5 seconds (brief delay for archive completion)
-- Run: `tmux send-keys -t <target> "/exit"`
-- Wait 0.1 seconds (tmux pattern from research)
-- Run: `tmux send-keys -t <target> C-m`
+**Step 6: Schedule exit command in background**
+- Show progress: "🚪 Scheduling Claude exit..."
+- Run in background (using `&`):
+  ```
+  (sleep 2 && tmux send-keys -t <target> "/exit" && sleep 0.1 && tmux send-keys -t <target> C-m) &
+  ```
+- The 2-second delay allows this slash command to complete first
+- After delay, send "/exit" followed by Enter
+- Show final message: "✓ Exit scheduled (Claude will close in 2 seconds)"
