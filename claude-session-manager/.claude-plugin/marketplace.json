@@ -9,7 +9,7 @@
       "name": "csm-tools",
       "source": "./csm-plugin",
       "description": "Claude Session Manager commands for managing Claude sessions with tmux",
-      "version": "0.2.0"
+      "version": "0.3.0"
     }
   ]
 }
