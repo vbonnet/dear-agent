@@ -1,12 +1,12 @@
 ---
 content-hash: PLACEHOLDER
-description: Archive CSM session and exit Claude gracefully
-allowed-tools: Bash(csm get-uuid:*), Bash(csm archive:*), Bash(tmux display-message:*), Bash(tmux send-keys:*), Bash(echo:*), Bash(read:*), Bash(sleep:*), Bash(grep:*), Bash(test:*)
+description: Archive CSM session (manual exit required)
+allowed-tools: Bash(csm get-uuid:*), Bash(csm archive:*), Bash(tmux display-message:*), Bash(test:*)
 ---
 
 # CSM Exit
 
-I'll archive the current CSM session and exit Claude gracefully.
+I'll archive the current CSM session. You'll need to manually exit Claude afterward.
 
 **Step 1: Check if running in tmux**
 - Check if `$TMUX` environment variable is set
@@ -40,28 +40,23 @@ I'll archive the current CSM session and exit Claude gracefully.
 **Step 5: Handle archive result**
 - If output contains "already archived":
   - Show warning: "⚠️  Session already archived"
-  - Prompt user: "Exit anyway? (y/n): "
+  - Prompt user: "Continue anyway? (y/n): "
   - If response is not 'y' or 'Y':
     - Show: "Cancelled."
     - Exit with code 0
 - If exit code is not 0:
   - Show archive output (contains error details)
-  - Show error: "❌ Archive failed - NOT exiting Claude"
-  - Show message: "Fix the issue above and try again, or exit manually with /exit"
+  - Show error: "❌ Archive failed"
+  - Show message: "Fix the issue above and try again"
   - Exit with code 1
 - If exit code is 0 and not already archived:
   - Show success: "✓ Session archived"
 
-**Step 6: Get tmux target**
-- Run: `tmux display-message -p '#S:#I.#P'`
-- Capture target (format: session:window.pane)
+**Step 6: Completion message**
+- Show final message:
+  ```
+  ✓ Session archived successfully
 
-**Step 7: Schedule exit command in background**
-- Show progress: "🚪 Scheduling Claude exit..."
-- Run in background (using `&`):
+  To exit Claude, please run: /exit
   ```
-  (sleep 2 && tmux send-keys -t <target> "/exit" && sleep 0.1 && tmux send-keys -t <target> C-m) &
-  ```
-- The 2-second delay allows this slash command to complete first
-- After delay, send "/exit" followed by Enter
-- Show final message: "✓ Exit scheduled (Claude will close in 2 seconds)"
+- Note: Programmatic exit is not currently supported by Claude Code API
