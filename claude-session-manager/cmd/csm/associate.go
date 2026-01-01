@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/detection"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
@@ -18,6 +19,7 @@ var (
 	claudeUUID            string
 	createNew             bool
 	updateTimestampOnly   bool
+	autoDetectOnly        bool
 )
 
 var associateCmd = &cobra.Command{
@@ -49,6 +51,39 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionName := args[0]
 		sessionsDir := getSessionsDir()
+
+		// Handle --auto-detect-only mode (for hooks)
+		if autoDetectOnly {
+			// Try to find existing manifest
+			m, manifestPath, err := session.ResolveIdentifier(sessionName, sessionsDir)
+			if err != nil {
+				// No manifest found, exit silently (hook mode)
+				return nil
+			}
+
+			// If UUID already set, nothing to do
+			if m.Claude.UUID != "" {
+				return nil
+			}
+
+			// Attempt high-confidence auto-detection
+			historyPath := filepath.Join(os.Getenv("HOME"), ".claude", "history.jsonl")
+			detector := detection.NewDetector(historyPath, 5*time.Minute)
+			result, err := detector.DetectUUID(m)
+
+			if err == nil && result.UUID != "" && result.Confidence == "high" {
+				// High-confidence match found, update manifest
+				m.Claude.UUID = result.UUID
+				m.UpdatedAt = time.Now()
+				if err := manifest.Write(manifestPath, m); err != nil {
+					// Silently fail in hook mode
+					return nil
+				}
+			}
+
+			// Exit silently (hook mode - no user output)
+			return nil
+		}
 
 		// Get or determine Claude UUID
 		var targetUUID string
@@ -183,5 +218,6 @@ func init() {
 	associateCmd.Flags().StringVar(&claudeUUID, "uuid", "", "Claude session UUID (auto-detected if not specified)")
 	associateCmd.Flags().BoolVar(&createNew, "create", false, "Create new manifest if it doesn't exist")
 	associateCmd.Flags().BoolVar(&updateTimestampOnly, "update-timestamp-only", false, "Only update timestamp, don't change UUID (fast path for same UUID)")
+	associateCmd.Flags().BoolVar(&autoDetectOnly, "auto-detect-only", false, "Auto-detect UUID only if high confidence (for hooks, silent mode)")
 	rootCmd.AddCommand(associateCmd)
 }

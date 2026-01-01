@@ -44,8 +44,33 @@ func Read(path string) (*Manifest, error) {
 	return &m, nil
 }
 
-// List returns all manifests in directory, sorted by last_activity
+// List returns all manifests in directory, including archived sessions
+// Scans both main directory and .archive-old-format/ subdirectory
 func List(dir string) ([]*Manifest, error) {
+	var allManifests []*Manifest
+
+	// Scan main directory
+	mainManifests, err := scanDirectory(dir)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	allManifests = append(allManifests, mainManifests...)
+
+	// Scan archive directory (if it exists)
+	archiveDir := filepath.Join(dir, ".archive-old-format")
+	if _, err := os.Stat(archiveDir); err == nil {
+		archiveManifests, err := scanDirectory(archiveDir)
+		if err == nil {
+			allManifests = append(allManifests, archiveManifests...)
+		}
+		// Silently ignore archive directory scan errors
+	}
+
+	return allManifests, nil
+}
+
+// scanDirectory scans a single directory for session manifests
+func scanDirectory(dir string) ([]*Manifest, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read sessions directory: %w", err)
