@@ -2,11 +2,13 @@ package session
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/config"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/transcript"
 )
 
 // Resume orchestrates the full resume workflow
@@ -87,10 +89,46 @@ func Resume(identifier string, cfg *config.Config) error {
 		return fmt.Errorf("failed to update manifest: %w", err)
 	}
 
-	// 7. Attach to tmux session
+	// 7. Extract and display transcript context (if available)
+	displayTranscriptContext(m)
+
+	// 8. Attach to tmux session
 	if err := tmux.AttachSession(m.Tmux.SessionName); err != nil {
 		return fmt.Errorf("failed to attach to tmux session: %w", err)
 	}
 
 	return nil
+}
+
+// displayTranscriptContext extracts and displays context from previous session transcript
+func displayTranscriptContext(m *manifest.Manifest) {
+	// Only attempt if UUID is set
+	if m.Claude.UUID == "" {
+		return
+	}
+
+	// Extract context (last 3 exchanges = 6 messages)
+	ctx, err := transcript.ExtractContext(m.Context.Project, m.Claude.UUID, 3)
+	if err != nil {
+		// Silently skip if transcript not available (not an error)
+		return
+	}
+
+	// Check if we're in Desktop (TMUX set) or Web environment
+	isDesktop := os.Getenv("TMUX") != ""
+
+	if isDesktop {
+		// Desktop: Print context to terminal (boxed UI)
+		fmt.Println()
+		fmt.Println(ctx.FormatForDisplay())
+		fmt.Println()
+	} else {
+		// Web: Print instructions (clipboard copy not implemented in v1)
+		fmt.Println()
+		fmt.Println("📝 Transcript context available from previous session:")
+		fmt.Println("   (Copy the following to resume context)")
+		fmt.Println()
+		fmt.Println(ctx.FormatForDisplay())
+		fmt.Println()
+	}
 }
