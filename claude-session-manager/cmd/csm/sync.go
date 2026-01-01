@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/detection"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/discovery"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
@@ -238,7 +239,7 @@ func syncActiveTmuxSessions(sessionsDir string, historyEntries []claude.RawEntry
 		}
 
 		if !existingManifest {
-			// Create new manifest WITHOUT auto-assigning UUID
+			// Create new manifest with auto-detection of UUID
 			workDir, err := tmux.GetCurrentWorkingDirectory(sessionName)
 			if err != nil {
 				workDir = os.Getenv("HOME") // Fallback to home directory
@@ -263,11 +264,23 @@ func syncActiveTmuxSessions(sessionsDir string, historyEntries []claude.RawEntry
 					Notes:   "",
 				},
 				Claude: manifest.Claude{
-					UUID: "", // Leave empty - user must associate manually
+					UUID: "", // Will attempt auto-detection below
 				},
 				Tmux: manifest.Tmux{
 					SessionName: sessionName,
 				},
+			}
+
+			// Attempt to auto-detect UUID from history
+			homeDir, err := os.UserHomeDir()
+			if err == nil {
+				historyPath := filepath.Join(homeDir, ".claude", "history.jsonl")
+				detector := detection.NewDetector(historyPath, 5*time.Minute)
+				result, err := detector.DetectUUID(m)
+				if err == nil && result.UUID != "" && result.Confidence == "high" {
+					// Auto-populate UUID with high-confidence detection
+					m.Claude.UUID = result.UUID
+				}
 			}
 
 			if err := manifest.Write(manifestPath, m); err != nil {
@@ -275,10 +288,14 @@ func syncActiveTmuxSessions(sessionsDir string, historyEntries []claude.RawEntry
 				continue
 			}
 
-			ui.PrintSuccess(fmt.Sprintf("Created manifest for tmux session '%s'", sessionName))
-			fmt.Printf("  → Run 'csm associate %s' to link Claude UUID\n", sessionName)
+			if m.Claude.UUID != "" {
+				ui.PrintSuccess(fmt.Sprintf("Created manifest for tmux session '%s' (UUID auto-detected)", sessionName))
+			} else {
+				ui.PrintSuccess(fmt.Sprintf("Created manifest for tmux session '%s'", sessionName))
+				fmt.Printf("  → Run 'csm associate %s' to link Claude UUID\n", sessionName)
+				needsAssociationCount++
+			}
 			createdCount++
-			needsAssociationCount++
 		} else {
 			// Manifest exists, check if UUID is empty
 			if m.Claude.UUID == "" {
