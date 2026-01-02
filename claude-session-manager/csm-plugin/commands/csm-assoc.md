@@ -2,37 +2,46 @@
 content-hash: PLACEHOLDER
 description: Associate Claude session with CSM (auto-detects tmux session)
 argument-hint: [session-name]
-allowed-tools: Bash(csm associate:*), Bash(tmux display-message:*), Bash(pwd:*)
+allowed-tools: Bash(csm associate:*)
 ---
 
 # CSM Session Association
 
-I'll associate this Claude session with CSM.
+I'll associate this Claude session with CSM and rename it to match the tmux session name.
 
 **Step 1: Determine session name**
 - Check if `{{args}}` is provided
-- If empty, run: `tmux display-message -p '#S'` to auto-detect
-- If not in tmux and no args, show error: "Usage: /csm-tools:csm-assoc [session-name]"
+- If provided, use it as the session name
+- If empty, auto-detect from tmux environment variable `$TMUX_SESSION`
+- If `$TMUX_SESSION` is empty, run: `tmux display-message -p '#S'` to auto-detect
+- If not in tmux and no args provided, show error and exit:
+  ```
+  Error: Not in tmux session and no session name provided
+  Usage: /csm-tools:csm-assoc [session-name]
+  ```
 
-**Step 2: Get current working directory**
-- Run: `pwd`
-- Capture the current directory for project context
+**Step 2: Associate session**
+- Run: `csm associate <session-name> --create`
+- This will:
+  - Create a new manifest if it doesn't exist (using current directory as project)
+  - Update existing manifest with current Claude UUID if it exists
+  - Auto-detect Claude UUID from history
+- Capture the full output
 
-**Step 3: Attempt association**
-- Run: `csm associate <session-name>`
-- Capture exit code
-
-**Step 4: Handle result**
+**Step 3: Handle result**
 - If exit code is 0:
-  - Show success: "✓ Associated session"
-  - Show manifest path from output
-  - Exit successfully
-- If output contains "session not found":
-  - Session needs to be created
-  - Run: `csm associate <session-name> --create -C <current-directory>`
-  - Show success with manifest path
-- If any other error:
-  - Show error output
-  - Exit with code 1
+  - Show success message
+  - Extract and show manifest path from output
+  - Proceed to Step 4
+- If exit code is non-zero:
+  - Show the error output
+  - Show troubleshooting hint: "Try running: csm doctor"
+  - Exit without proceeding to rename
 
-**Note:** CSM auto-detects the Claude session UUID from history
+**Step 4: Rename Claude session to match tmux**
+- After successful association, rename this Claude session to match the tmux session name
+- This ensures tmux and Claude session names stay synchronized
+- Execute: `/rename <session-name>`
+- Show confirmation: "✓ Renamed session to: <session-name>"
+
+**Note:** The csm associate command auto-detects the Claude session UUID from ~/.claude/history.jsonl

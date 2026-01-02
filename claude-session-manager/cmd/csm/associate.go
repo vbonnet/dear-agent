@@ -163,7 +163,12 @@ Examples:
 				UpdatedAt:     time.Now(),
 				Lifecycle:     "", // Empty = active
 				Context: manifest.Context{
-					Project: "", // Can be set later
+					Project: func() string {
+					if wd, err := os.Getwd(); err == nil {
+						return wd
+					}
+					return ""
+				}(),
 				},
 				Claude: manifest.Claude{
 					UUID: "", // Will be populated below
