@@ -47,15 +47,16 @@ func restoreSession(cmd *cobra.Command, args []string) error {
 	sessionName := args[0]
 	archiveDir := filepath.Join(cfg.SessionsDir, ".archive-old-format")
 
-	// Try resolving in main sessions directory first (for in-place archived sessions)
-	m, manifestPath, err := session.ResolveIdentifier(sessionName, cfg.SessionsDir)
+	// Try resolving in ARCHIVE directory first (most likely location for archived sessions)
+	// This prevents conflicts with leftover non-archived sessions in main directory
+	m, manifestPath, err := session.ResolveIdentifier(sessionName, archiveDir)
 	if err != nil {
-		// If not found in main directory, try archive directory (old format)
-		m, manifestPath, err = session.ResolveIdentifier(sessionName, archiveDir)
+		// If not found in archive directory, try main directory (for in-place archived sessions)
+		m, manifestPath, err = session.ResolveIdentifier(sessionName, cfg.SessionsDir)
 		if err != nil {
 			ui.PrintError(err, "Archived session not found",
 				fmt.Sprintf("  • Check archived sessions with: csm list --all\n"+
-					"  • Tried: %s and %s", cfg.SessionsDir, archiveDir))
+					"  • Tried: %s and %s", archiveDir, cfg.SessionsDir))
 			return err
 		}
 	}
