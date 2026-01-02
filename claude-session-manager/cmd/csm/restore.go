@@ -47,13 +47,17 @@ func restoreSession(cmd *cobra.Command, args []string) error {
 	sessionName := args[0]
 	archiveDir := filepath.Join(cfg.SessionsDir, ".archive-old-format")
 
-	// Resolve session identifier in archive directory
-	m, manifestPath, err := session.ResolveIdentifier(sessionName, archiveDir)
+	// Try resolving in main sessions directory first (for in-place archived sessions)
+	m, manifestPath, err := session.ResolveIdentifier(sessionName, cfg.SessionsDir)
 	if err != nil {
-		ui.PrintError(err, "Archived session not found",
-			fmt.Sprintf("  • Check archived sessions with: csm list --all\n"+
-				"  • Archive directory: %s", archiveDir))
-		return err
+		// If not found in main directory, try archive directory (old format)
+		m, manifestPath, err = session.ResolveIdentifier(sessionName, archiveDir)
+		if err != nil {
+			ui.PrintError(err, "Archived session not found",
+				fmt.Sprintf("  • Check archived sessions with: csm list --all\n"+
+					"  • Tried: %s and %s", cfg.SessionsDir, archiveDir))
+			return err
+		}
 	}
 
 	// Validate session is archived
@@ -76,33 +80,43 @@ func restoreSession(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Move directory back to active sessions
+	// Check if session is in archive directory (old format) and needs to be moved
 	sessionDir := filepath.Dir(manifestPath)
-	activeDir := filepath.Join(cfg.SessionsDir, filepath.Base(sessionDir))
+	inArchiveDir := filepath.Dir(sessionDir) == archiveDir
 
-	// Check for conflict and auto-rename if needed
-	originalTargetName := filepath.Base(activeDir)
-	if _, err := os.Stat(activeDir); err == nil {
-		// Conflict detected: target already exists
-		timestamp := time.Now().Format("20060102T150405Z")
-		activeDir = activeDir + "-" + timestamp
+	if inArchiveDir {
+		// Move directory back to active sessions
+		activeDir := filepath.Join(cfg.SessionsDir, filepath.Base(sessionDir))
 
-		ui.PrintWarning(fmt.Sprintf("Active session '%s' already exists", originalTargetName))
-		fmt.Printf("Renaming restored session to: %s\n", filepath.Base(activeDir))
+		// Check for conflict and auto-rename if needed
+		originalTargetName := filepath.Base(activeDir)
+		if _, err := os.Stat(activeDir); err == nil {
+			// Conflict detected: target already exists
+			timestamp := time.Now().Format("20060102T150405Z")
+			activeDir = activeDir + "-" + timestamp
+
+			ui.PrintWarning(fmt.Sprintf("Active session '%s' already exists", originalTargetName))
+			fmt.Printf("Renaming restored session to: %s\n", filepath.Base(activeDir))
+		}
+
+		if err := os.Rename(sessionDir, activeDir); err != nil {
+			ui.PrintError(err, "Failed to move session to active directory",
+				fmt.Sprintf("  • From: %s\n"+
+					"  • To: %s\n"+
+					"  • Check permissions", sessionDir, activeDir))
+			return err
+		}
+
+		// Report success with move
+		ui.PrintSuccess(fmt.Sprintf("Restored session: %s", m.Name))
+		fmt.Printf("\nSession moved to: %s\n", activeDir)
+		fmt.Printf("\nThe session is now visible in 'csm list'.\n")
+	} else {
+		// In-place restore (session was in main directory, just had lifecycle=archived)
+		ui.PrintSuccess(fmt.Sprintf("Restored session: %s", m.Name))
+		fmt.Printf("\nLifecycle updated to active in: %s\n", sessionDir)
+		fmt.Printf("\nThe session is now visible in 'csm list' as active/stopped.\n")
 	}
-
-	if err := os.Rename(sessionDir, activeDir); err != nil {
-		ui.PrintError(err, "Failed to move session to active directory",
-			fmt.Sprintf("  • From: %s\n"+
-				"  • To: %s\n"+
-				"  • Check permissions", sessionDir, activeDir))
-		return err
-	}
-
-	// Report success
-	ui.PrintSuccess(fmt.Sprintf("Restored session: %s", m.Name))
-	fmt.Printf("\nSession moved to: %s\n", activeDir)
-	fmt.Printf("\nThe session is now visible in 'csm list'.\n")
 
 	return nil
 }
@@ -114,24 +128,29 @@ func restoreCompletion(cmd *cobra.Command, args []string, toComplete string) ([]
 	}
 
 	archiveDir := filepath.Join(cfg.SessionsDir, ".archive-old-format")
+	var allManifests []*manifest.Manifest
 
-	// List all archived manifests
-	manifests, err := manifest.List(archiveDir)
-	if err != nil {
-		return []string{}, cobra.ShellCompDirectiveNoFileComp
+	// List archived manifests from main directory
+	if manifests, err := manifest.List(cfg.SessionsDir); err == nil {
+		for _, m := range manifests {
+			if m.Lifecycle == manifest.LifecycleArchived {
+				allManifests = append(allManifests, m)
+			}
+		}
 	}
 
-	// Filter only archived sessions
-	filtered := make([]*manifest.Manifest, 0, len(manifests))
-	for _, m := range manifests {
-		if m.Lifecycle == manifest.LifecycleArchived {
-			filtered = append(filtered, m)
+	// List archived manifests from old archive directory
+	if manifests, err := manifest.List(archiveDir); err == nil {
+		for _, m := range manifests {
+			if m.Lifecycle == manifest.LifecycleArchived {
+				allManifests = append(allManifests, m)
+			}
 		}
 	}
 
 	// Build suggestions
 	var suggestions []string
-	for _, m := range filtered {
+	for _, m := range allManifests {
 		// Add manifest name
 		if m.Name != "" {
 			suggestions = append(suggestions, m.Name)

@@ -71,7 +71,7 @@ Examples:
 			ui.PrintError(
 				fmt.Errorf("session is archived"),
 				"Cannot resume archived session",
-				"  • Use 'csm unarchive "+sessionID+"' to restore this session\n"+
+				"  • Use 'csm restore "+sessionID+"' to restore this session\n"+
 					"  • Or use 'csm list --all' to see all sessions",
 			)
 			return fmt.Errorf("cannot resume archived session")
