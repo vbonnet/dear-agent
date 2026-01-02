@@ -28,20 +28,23 @@ I'll associate this Claude session with CSM and rename it to match the tmux sess
   - Auto-detect Claude UUID from history
 - Capture the full output
 
-**Step 3: Handle result**
-- If exit code is 0:
-  - Show success message
-  - Extract and show manifest path from output
-  - Proceed to Step 4
+**Step 3: Handle result and show completion message**
 - If exit code is non-zero:
   - Show the error output
   - Show troubleshooting hint: "Try running: csm doctor"
-  - Exit without proceeding to rename
+  - Exit the skill
+- If exit code is 0:
+  - Extract manifest path from output
+  - Show this completion message (include the /rename reminder):
+    ```
+    ✓ Session associated successfully
 
-**Step 4: Rename Claude session to match tmux**
-- After successful association, rename this Claude session to match the tmux session name
-- This ensures tmux and Claude session names stay synchronized
-- Execute: `/rename <session-name>`
-- Show confirmation: "✓ Renamed session to: <session-name>"
+    Session: <session-name>
+    Manifest: <manifest-path>
+
+    To keep Claude and tmux session names synchronized, run:
+      /rename <session-name>
+    ```
+  - Note: Programmatic rename is not currently supported by Claude Code API
 
 **Note:** The csm associate command auto-detects the Claude session UUID from ~/.claude/history.jsonl
