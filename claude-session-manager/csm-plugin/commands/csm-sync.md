@@ -1,7 +1,7 @@
 ---
 content-hash: 01d09e99bf19c1fc83ec012d3260254139d5fcbc2daa5b2cef270e77ea48104b
 description: Discover and sync Claude sessions from history
-allowed-tools: Bash(~/.local/bin/csm:*)
+allowed-tools: Bash(csm sync:*)
 ---
 
 # CSM Session Sync
@@ -10,14 +10,19 @@ allowed-tools: Bash(~/.local/bin/csm:*)
 
 **Session Sync Complete**
 
-The sync command has:
-- Scanned `~/.claude/history.jsonl` for Claude session UUIDs
-- Created/updated manifests for discovered sessions
-- Synchronized session metadata
+The sync command:
+- Scans ~/.claude/history.jsonl for Claude session UUIDs
+- Creates/updates manifests for discovered sessions
+- Synchronizes session metadata
 
-This is useful for:
-- Discovering sessions that don't have manifests yet
-- Updating session information after manual changes
-- Recovering from corrupted or missing manifests
+**Use cases**:
+- Discover sessions without manifests
+- Update session info after manual changes
+- Recover from corrupted/missing manifests
 
-You can now use `csm resume` in your terminal to access any discovered sessions.
+Next: Use `csm resume` in terminal to access discovered sessions.
+
+**Error Handling**:
+- If csm not found: "Install CSM from github.com/user/ai-tools"
+- If sync fails: Check ~/.claude/history.jsonl exists and is readable
+- If no sessions found: Verify Claude Code has been used before

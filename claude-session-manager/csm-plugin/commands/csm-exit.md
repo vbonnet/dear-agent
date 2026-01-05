@@ -9,15 +9,15 @@ allowed-tools: Bash(csm get-uuid:*), Bash(csm archive:*), Bash(tmux display-mess
 I'll archive the current CSM session. You'll need to manually exit Claude afterward.
 
 **Step 1: Get current tmux session name**
-- Run: `tmux display-message -p '#S'`
-- Capture tmux session name in variable
+- Run: !`tmux display-message -p '#S'`
+- Capture tmux session name as `$session_name`
 - If command fails or output is empty:
   - Show error: "❌ Not running in tmux session"
   - Show message: "Use /exit manually to exit Claude"
   - Exit gracefully
 
 **Step 2: Verify CSM association**
-- Run: `csm get-uuid <session-name>`
+- Run: !`csm get-uuid $session_name`
 - Check if command succeeds (exit code 0)
 - If command fails:
   - Show error: "❌ Session not associated with CSM"
@@ -25,7 +25,7 @@ I'll archive the current CSM session. You'll need to manually exit Claude afterw
   - Exit gracefully
 
 **Step 3: Archive the session**
-- Run: `csm archive <session-name> --force`
+- Run: !`csm archive $session_name --force`
 - Capture both output and exit code
 - Check if archive succeeded
 
