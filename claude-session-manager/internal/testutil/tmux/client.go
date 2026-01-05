@@ -109,6 +109,9 @@ func (c *client) WaitForStartup(sessionName string, timeout time.Duration) error
 
 // containsClaudePrompt checks if output contains the Claude prompt
 func containsClaudePrompt(output string) bool {
-	// Look for "Claude>" or "claude>" prompt
-	return strings.Contains(output, "Claude>") || strings.Contains(output, "claude>")
+	// Look for Claude Code welcome screen or the input prompt
+	// The prompt appears as "> " after horizontal separator lines
+	return strings.Contains(output, "Claude Code") ||
+		strings.Contains(output, "Welcome back!") ||
+		(strings.Contains(output, "───") && strings.Contains(output, "> \n───"))
 }

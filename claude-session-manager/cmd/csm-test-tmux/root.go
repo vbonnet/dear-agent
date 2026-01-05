@@ -19,7 +19,9 @@ Creates detached tmux sessions with independent CSM state, enabling:
 - Automated output capture for verification
 
 Designed for AI agents and human developers.`,
-	Version: Version,
+	Version:      Version,
+	SilenceUsage: true,  // Don't print usage on errors (we handle errors ourselves)
+	SilenceErrors: true, // Don't print error messages (we format them ourselves)
 	Run: func(cmd *cobra.Command, args []string) {
 		// Show help if no subcommand
 		cmd.Help()
