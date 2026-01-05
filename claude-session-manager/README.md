@@ -194,6 +194,50 @@ go test -cover ./internal/fuzzy ./internal/ui ./internal/history ./internal/dete
 go test -v ./internal/fuzzy
 ```
 
+### Testing with csm-test-tmux
+
+For integration testing and debugging CSM features in isolated environments, use `csm-test-tmux`:
+
+```bash
+# Quick test workflow
+cd cmd/csm-test-tmux
+make build
+
+# Create isolated test session
+./csm-test-tmux create my-test --sessions-dir /tmp/test-sessions
+
+# Send commands to test session
+./csm-test-tmux send my-test "csm associate --create my-project"
+
+# Capture output for verification
+./csm-test-tmux capture my-test --lines 50
+
+# Cleanup when done
+./csm-test-tmux cleanup my-test
+```
+
+**Common testing patterns:**
+
+```bash
+# Test CSM session lifecycle
+./csm-test-tmux create lifecycle-test
+./csm-test-tmux send lifecycle-test "csm new test-session --project ~/projects/test"
+./csm-test-tmux capture lifecycle-test
+./csm-test-tmux cleanup lifecycle-test
+
+# Test with JSON output (for automation)
+./csm-test-tmux create api-test --format json
+./csm-test-tmux send api-test "csm list --format json" --format json
+./csm-test-tmux cleanup api-test --format json
+
+# Interactive debugging
+./csm-test-tmux create debug-session
+# ... manually send commands as needed ...
+./csm-test-tmux cleanup debug-session
+```
+
+See [`cmd/csm-test-tmux/README.md`](cmd/csm-test-tmux/README.md) for full documentation.
+
 ### Test Coverage
 
 - `fuzzy`: 95.2% (Levenshtein matching)
