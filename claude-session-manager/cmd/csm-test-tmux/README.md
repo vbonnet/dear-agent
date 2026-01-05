@@ -38,17 +38,32 @@ csm-test-tmux cleanup my-test
 
 ## Installation
 
-### From Source
+### Option 1: Install to PATH (Recommended for Regular Use)
 
 ```bash
-# Clone the repository
-git clone https://github.com/vbonnet/ai-tools
-cd ai-tools/base/claude-session-manager
-
-# Build and install
-go build -o csm-test-tmux ./cmd/csm-test-tmux
-mv csm-test-tmux ~/bin/  # or /usr/local/bin
+cd ~/src/ws/oss/repos/ai-tools/base/claude-session-manager/cmd/csm-test-tmux
+make install
 ```
+
+This installs to `~/bin/csm-test-tmux`. Make sure `~/bin` is in your PATH:
+
+```bash
+export PATH="$PATH:$HOME/bin"
+```
+
+### Option 2: Use In-Place (Recommended for Development)
+
+```bash
+cd ~/src/ws/oss/repos/ai-tools/base/claude-session-manager/cmd/csm-test-tmux
+make build
+
+# Use via absolute path
+./csm-test-tmux create my-test
+```
+
+**When to use which:**
+- **Install to PATH**: Regular use, invoke from anywhere without path prefix
+- **In-place**: Active development, always using latest build without reinstalling
 
 ### Prerequisites
 
