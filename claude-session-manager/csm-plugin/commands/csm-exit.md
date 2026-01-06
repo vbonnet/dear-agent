@@ -16,31 +16,29 @@ I'll archive the current CSM session. You'll need to manually exit Claude afterw
   - Exit gracefully
 - Otherwise, capture the session name for next steps
 
-**Step 2: Verify CSM association and archive**
-- Run: !`session_name=$(tmux display-message -p '#S') && csm get-uuid "$session_name" >/dev/null 2>&1 && csm archive "$session_name" --force`
-- This command:
-  1. Gets the current tmux session name
-  2. Verifies it's associated with CSM (csm get-uuid)
-  3. Archives the session if verification succeeds
-- Check the exit code to determine outcome
+**Step 2: Get session name**
+- Run: !`tmux display-message -p '#S'`
+- Store output as `$session_name` for next steps
+- If this fails: Session name could not be retrieved, exit
 
-**Step 3: Handle result**
-- If exit code is 0:
-  - Show success: "✓ Session archived successfully"
-  - Continue to completion message
+**Step 3: Verify CSM association**
+- Run: !`csm get-uuid $session_name`
+- This checks if the session is associated with CSM
 - If exit code is not 0:
-  - Try to diagnose which step failed
-  - Run: !`session_name=$(tmux display-message -p '#S') && csm get-uuid "$session_name"`
-  - If this fails:
-    - Show error: "❌ Session not associated with CSM"
-    - Show message: "Run /csm-assoc first to associate this session"
-    - Exit gracefully
-  - If this succeeds but original command failed:
-    - Show error: "❌ Archive failed"
-    - Show message: "Check csm logs for details"
-    - Exit gracefully
+  - Show error: "❌ Session not associated with CSM"
+  - Show message: "Run /csm-tools:csm-assoc first to associate this session"
+  - Exit gracefully
 
-**Step 4: Completion message**
+**Step 4: Archive session**
+- Run: !`csm archive $session_name --force`
+- This archives the session and cleans up manifests
+- If exit code is not 0:
+  - Show error: "❌ Archive failed"
+  - Show message: "Check csm doctor for system health"
+  - Exit gracefully
+- If successful: Continue to completion message
+
+**Step 5: Completion message**
 - Show final message:
   ```
   ✓ Session archived successfully
