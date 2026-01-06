@@ -9,6 +9,8 @@ Smart session management for Claude AI with interactive TUI, fuzzy matching, and
 - **Fuzzy matching** - Typo-tolerant session names ("my-ses" → "my-session")
 - **Auto UUID detection** - Hybrid detection from `~/.claude/history.jsonl`
 - **Batch operations** - Multi-select cleanup for archival/deletion
+- **Pattern-based restore** - Glob patterns for archived session recovery (`csm unarchive *[REDACTED_EMPLOYER]*`)
+- **AI-powered search** - Semantic search using Google Vertex AI (`csm search "OAuth work"`)
 
 ### 🚀 Quick Start
 
@@ -26,6 +28,10 @@ csm new               # Interactive form for new session
 csm list              # List all sessions with status
 csm clean             # Batch cleanup (archive/delete)
 csm fix               # Fix UUID associations
+
+# Archive management (NEW!)
+csm unarchive *pattern*         # Restore archived sessions by pattern
+csm search "semantic query"     # AI-powered semantic search
 ```
 
 ## Installation
@@ -103,9 +109,60 @@ csm fix --clear my-sess  # Remove UUID association
 
 Archive a session (marks as archived, keeps manifest).
 
-### `csm restore <session-name>`
+### `csm unarchive <pattern>`
 
-Restore an archived session (marks as active).
+Restore archived sessions using glob patterns with interactive selection:
+
+```bash
+csm unarchive my-session        # Exact match - auto-restore
+csm unarchive *[REDACTED_EMPLOYER]*          # Pattern match - show picker if multiple
+csm unarchive "session-202?"    # Wildcard year
+csm unarchive "*"               # All archived - interactive selection
+```
+
+**Features:**
+- Glob pattern support (`*`, `?`, `[abc]`)
+- Auto-restore if single match found
+- Interactive selection menu for multiple matches
+- Searches both in-place archived sessions and `.archive-old-format/`
+
+### `csm search <query>`
+
+Find archived sessions using AI-powered semantic search:
+
+```bash
+csm search "that conversation about Composio"
+csm search "OAuth integration with MCP"
+csm search "last week's debugging session"
+```
+
+**Features:**
+- Semantic search powered by Google Vertex AI (Claude Haiku)
+- Searches conversation history (`~/.claude/history.jsonl`)
+- Interactive selection for multiple results
+- Auto-restores selected session
+- Results cached for 5 minutes
+- Rate limited: 10 searches/minute
+
+**Authentication:**
+```bash
+# Configure Google Cloud credentials
+gcloud auth application-default login
+
+# Set project (if not set)
+export GOOGLE_CLOUD_PROJECT=your-project-id
+# OR
+gcloud config set project your-project-id
+```
+
+**Flags:**
+- `--max-results <N>` - Maximum results to return (default: 10)
+
+### `csm restore <session-name>` (DEPRECATED)
+
+**Note:** This command is deprecated. Use `csm unarchive` instead.
+
+Restore an archived session (marks as active). This command will be removed in a future version.
 
 ## Configuration
 

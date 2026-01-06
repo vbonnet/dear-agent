@@ -9,12 +9,28 @@ import (
 	"time"
 )
 
-// Entry represents a single line from ~/.claude/history.jsonl
+// Entry represents a single line from ~/.claude/history.jsonl (old format)
 type Entry struct {
 	UUID      string    `json:"uuid"`
 	Directory string    `json:"directory"`
 	Timestamp time.Time `json:"timestamp"`
 	Name      string    `json:"name,omitempty"`
+}
+
+// ConversationEntry represents a user prompt from history.jsonl (new format)
+type ConversationEntry struct {
+	Display        string                 `json:"display"`
+	PastedContents map[string]interface{} `json:"pastedContents"`
+	Timestamp      int64                  `json:"timestamp"` // Unix timestamp in milliseconds
+	Project        string                 `json:"project"`
+	SessionID      string                 `json:"sessionId,omitempty"`
+}
+
+// SessionHistory groups conversation entries by session ID
+type SessionHistory struct {
+	SessionID string
+	Entries   []*ConversationEntry
+	Project   string // Most common project path for this session
 }
 
 // Parser reads and parses Claude history file
@@ -149,4 +165,145 @@ func (p *Parser) GetRecentEntries(limit int) ([]*Entry, error) {
 	}
 
 	return entries, nil
+}
+
+// ReadConversations reads conversation entries from history.jsonl and groups by session ID
+func (p *Parser) ReadConversations(limit int) ([]*SessionHistory, error) {
+	file, err := os.Open(p.historyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []*SessionHistory{}, nil
+		}
+		return nil, fmt.Errorf("failed to open history file: %w", err)
+	}
+	defer file.Close()
+
+	var allEntries []*ConversationEntry
+	scanner := bufio.NewScanner(file)
+	lineNum := 0
+
+	for scanner.Scan() {
+		lineNum++
+		line := scanner.Text()
+
+		if line == "" {
+			continue
+		}
+
+		var entry ConversationEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			// Try parsing as old format, then skip
+			var oldEntry Entry
+			if json.Unmarshal([]byte(line), &oldEntry) != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to parse history line %d: %v\n", lineNum, err)
+			}
+			continue
+		}
+
+		// Only include entries with sessionId for grouping
+		if entry.SessionID != "" {
+			allEntries = append(allEntries, &entry)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading history file: %w", err)
+	}
+
+	// Sort by timestamp descending (most recent first)
+	for i := 0; i < len(allEntries); i++ {
+		for j := i + 1; j < len(allEntries); j++ {
+			if allEntries[j].Timestamp > allEntries[i].Timestamp {
+				allEntries[i], allEntries[j] = allEntries[j], allEntries[i]
+			}
+		}
+	}
+
+	// Limit to N most recent entries
+	if limit > 0 && limit < len(allEntries) {
+		allEntries = allEntries[:limit]
+	}
+
+	// Group by sessionId
+	sessionMap := make(map[string]*SessionHistory)
+	projectCounts := make(map[string]map[string]int) // sessionID -> project -> count
+
+	for _, entry := range allEntries {
+		if _, exists := sessionMap[entry.SessionID]; !exists {
+			sessionMap[entry.SessionID] = &SessionHistory{
+				SessionID: entry.SessionID,
+				Entries:   []*ConversationEntry{},
+			}
+			projectCounts[entry.SessionID] = make(map[string]int)
+		}
+
+		sessionMap[entry.SessionID].Entries = append(sessionMap[entry.SessionID].Entries, entry)
+
+		// Track project frequency
+		if entry.Project != "" {
+			projectCounts[entry.SessionID][entry.Project]++
+		}
+	}
+
+	// Determine most common project for each session
+	for sessionID, session := range sessionMap {
+		maxCount := 0
+		mostCommonProject := ""
+		for project, count := range projectCounts[sessionID] {
+			if count > maxCount {
+				maxCount = count
+				mostCommonProject = project
+			}
+		}
+		session.Project = mostCommonProject
+	}
+
+	// Convert map to slice
+	var sessions []*SessionHistory
+	for _, session := range sessionMap {
+		sessions = append(sessions, session)
+	}
+
+	// Sort sessions by most recent conversation timestamp
+	for i := 0; i < len(sessions); i++ {
+		for j := i + 1; j < len(sessions); j++ {
+			if len(sessions[j].Entries) > 0 && len(sessions[i].Entries) > 0 {
+				if sessions[j].Entries[0].Timestamp > sessions[i].Entries[0].Timestamp {
+					sessions[i], sessions[j] = sessions[j], sessions[i]
+				}
+			}
+		}
+	}
+
+	return sessions, nil
+}
+
+// GetConversationSummary returns a text summary of conversations for a session (for LLM)
+func GetConversationSummary(session *SessionHistory, maxEntries int) string {
+	if session == nil || len(session.Entries) == 0 {
+		return ""
+	}
+
+	entries := session.Entries
+	if maxEntries > 0 && len(entries) > maxEntries {
+		entries = entries[:maxEntries]
+	}
+
+	var summaries []string
+	for _, entry := range entries {
+		if entry.Display != "" {
+			// Truncate long displays
+			display := entry.Display
+			if len(display) > 100 {
+				display = display[:97] + "..."
+			}
+			summaries = append(summaries, display)
+		}
+	}
+
+	if len(summaries) == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("Conversation snippets: %s", summaries[0])
 }

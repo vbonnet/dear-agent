@@ -118,3 +118,76 @@ func getTheme(themeName string) *huh.Theme {
 		return huh.ThemeBase()
 	}
 }
+
+// ArchivedSessionInfo represents minimal info for archived session selection
+type ArchivedSessionInfo struct {
+	SessionID  string
+	Name       string
+	ArchivedAt string
+	Tags       []string
+	Project    string
+}
+
+// ArchivedSessionPicker displays selection UI for archived sessions
+func ArchivedSessionPicker(sessions []ArchivedSessionInfo) (string, error) {
+	if len(sessions) == 0 {
+		return "", fmt.Errorf("no sessions available")
+	}
+
+	// Build options
+	options := make([]huh.Option[string], len(sessions))
+	for i, s := range sessions {
+		label := formatArchivedSessionOption(s)
+		options[i] = huh.NewOption(label, s.SessionID)
+	}
+
+	// Create form with picker (using default values)
+	var selected string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Select archived session to restore").
+				Description("Type to filter • ↑/↓ navigate • Enter to restore • Ctrl-C to cancel").
+				Options(options...).
+				Value(&selected).
+				Height(10), // Default height
+		),
+	).WithTheme(huh.ThemeBase()) // Default theme
+
+	if err := form.Run(); err != nil {
+		return "", err
+	}
+
+	return selected, nil
+}
+
+// formatArchivedSessionOption formats an archived session for display
+func formatArchivedSessionOption(s ArchivedSessionInfo) string {
+	// Format: "name [project] archived: 2025-12-01 tags: [tag1, tag2]"
+	parts := []string{s.Name}
+
+	// Add project (truncated)
+	if s.Project != "" {
+		project := s.Project
+		if len(project) > 40 {
+			project = "..." + project[len(project)-37:]
+		}
+		parts = append(parts, fmt.Sprintf("[%s]", project))
+	}
+
+	// Add archived date
+	if s.ArchivedAt != "" && s.ArchivedAt != "unknown" {
+		parts = append(parts, fmt.Sprintf("archived: %s", s.ArchivedAt))
+	}
+
+	// Add tags if present
+	if len(s.Tags) > 0 {
+		tagStr := strings.Join(s.Tags, ", ")
+		if len(tagStr) > 30 {
+			tagStr = tagStr[:27] + "..."
+		}
+		parts = append(parts, fmt.Sprintf("tags: [%s]", tagStr))
+	}
+
+	return strings.Join(parts, " ")
+}

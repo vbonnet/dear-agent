@@ -14,8 +14,10 @@ import (
 
 var restoreCmd = &cobra.Command{
 	Use:   "restore <session-name>",
-	Short: "Restore an archived Claude session",
-	Long: `Restore an archived Claude session by changing its lifecycle back to active.
+	Short: "Restore an archived Claude session (DEPRECATED: use 'unarchive')",
+	Long: `DEPRECATED: This command is deprecated. Use 'csm unarchive' instead.
+
+Restore an archived Claude session by changing its lifecycle back to active.
 
 Restored sessions:
   • Visible in 'csm list' (no longer need --all flag)
@@ -44,6 +46,11 @@ Examples:
 }
 
 func restoreSession(cmd *cobra.Command, args []string) error {
+	// Show deprecation warning
+	ui.PrintWarning("DEPRECATION: 'csm restore' is deprecated. Use 'csm unarchive' instead.")
+	fmt.Printf("\nThe 'csm restore' command will be removed in a future version.\n")
+	fmt.Printf("Please use: csm unarchive %s\n\n", args[0])
+
 	sessionName := args[0]
 	archiveDir := filepath.Join(cfg.SessionsDir, ".archive-old-format")
 
