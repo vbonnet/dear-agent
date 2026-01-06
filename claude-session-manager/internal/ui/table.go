@@ -13,47 +13,72 @@ import (
 
 // FormatTable formats manifests as aligned table (v2 schema)
 func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) string {
-	var buf bytes.Buffer
-	// Increased padding from 2 to 3 for better column spacing and readability
-	w := tabwriter.NewWriter(&buf, 0, 0, 3, ' ', 0)
-
-	// Header (using bold for better visibility without affecting alignment)
-	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-		Bold("NAME"),
-		Bold("TMUX"),
-		Bold("STATUS"),
-		Bold("UPDATED"),
-		Bold("PROJECT"))
-
 	// Compute status for all manifests
 	statuses := session.ComputeStatusBatch(manifests, tmux)
+
+	// First pass: format entire table without color to get proper alignment
+	var tableBuf bytes.Buffer
+	w := tabwriter.NewWriter(&tableBuf, 0, 0, 2, ' ', 0)
+
+	// Header
+	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		"NAME",
+		"TMUX",
+		"STATUS",
+		"UPDATED",
+		"PROJECT")
 
 	// Rows
 	for _, m := range manifests {
 		status := statuses[m.Name]
-		statusColored := status
-		switch status {
-		case "active":
-			statusColored = Green(status)
-		case "stopped":
-			statusColored = Yellow(status)
-		case "archived":
-			statusColored = Red(status)
-		}
-
 		updated := formatTime(m.UpdatedAt)
 		project := truncatePath(m.Context.Project, 40)
 
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			m.Name,
 			m.Tmux.SessionName,
-			statusColored,
+			status,
 			updated,
 			project)
 	}
 
 	w.Flush()
-	return buf.String()
+
+	// Second pass: apply color to entire lines based on status
+	var result bytes.Buffer
+	lines := bytes.Split(tableBuf.Bytes(), []byte("\n"))
+
+	// Color the header (first line)
+	if len(lines) > 0 {
+		result.WriteString(Bold(string(lines[0])))
+		result.WriteString("\n")
+	}
+
+	// Color data rows based on status
+	for i, m := range manifests {
+		if i+1 >= len(lines) {
+			break
+		}
+		line := string(lines[i+1])
+		if line == "" {
+			continue
+		}
+
+		status := statuses[m.Name]
+		switch status {
+		case "active":
+			line = Green(line)
+		case "stopped":
+			line = Yellow(line)
+		case "archived":
+			line = Red(line)
+		}
+
+		result.WriteString(line)
+		result.WriteString("\n")
+	}
+
+	return result.String()
 }
 
 // FormatJSON formats manifests as JSON

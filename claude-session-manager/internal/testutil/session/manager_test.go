@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	testerrors "github.com/vbonnet/ai-tools/claude-session-manager/internal/testutil/errors"
-	"github.com/vbonnet/ai-tools/claude-session-manager/internal/testutil/tmux"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	testerrors "github.com/vbonnet/ai-tools/claude-session-manager/internal/testutil/errors"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/testutil/tmux"
 )
 
 func TestManager_Create_Success(t *testing.T) {
@@ -38,7 +38,7 @@ func TestManager_Create_Success(t *testing.T) {
 	assert.Equal(t, "test-session", session.Name)
 	assert.Equal(t, "csm-test-test-session", session.TmuxSession)
 	assert.Equal(t, tmpDir, session.SessionsDir)
-	assert.GreaterOrEqual(t, session.StartupTimeMs, int64(0))  // Mock returns instantly, so can be 0
+	assert.GreaterOrEqual(t, session.StartupTimeMs, int64(0)) // Mock returns instantly, so can be 0
 
 	// Verify calls
 	assert.Len(t, mockClient.CreateSessionCalls, 1)
@@ -52,7 +52,7 @@ func TestManager_Create_InvalidName(t *testing.T) {
 	mgr := New(mockClient)
 
 	opts := CreateOptions{
-		Name:        "test session",  // Space is invalid
+		Name:        "test session", // Space is invalid
 		WorkingDir:  os.TempDir(),
 		SessionsDir: os.TempDir(),
 	}
@@ -68,7 +68,7 @@ func TestManager_Create_InvalidName(t *testing.T) {
 
 func TestManager_Create_SessionCollision(t *testing.T) {
 	mockClient := tmux.NewMock()
-	mockClient.HasSessionFunc = func(string) bool { return true }  // Simulate existing session
+	mockClient.HasSessionFunc = func(string) bool { return true } // Simulate existing session
 
 	mgr := New(mockClient)
 
@@ -185,7 +185,7 @@ func TestManager_Send_Autocomplete(t *testing.T) {
 	// Should send command + autocomplete enter
 	assert.Len(t, mockClient.SendKeysCalls, 2)
 	assert.Equal(t, "/commit", mockClient.SendKeysCalls[0].Keys)
-	assert.Equal(t, "", mockClient.SendKeysCalls[1].Keys)  // Empty = just Enter
+	assert.Equal(t, "", mockClient.SendKeysCalls[1].Keys) // Empty = just Enter
 }
 
 func TestManager_Send_SessionNotFound(t *testing.T) {
@@ -280,7 +280,7 @@ func TestManager_Cleanup_Success(t *testing.T) {
 
 func TestManager_Cleanup_AlreadyClean(t *testing.T) {
 	mockClient := tmux.NewMock()
-	mockClient.HasSessionFunc = func(string) bool { return false }  // No session exists
+	mockClient.HasSessionFunc = func(string) bool { return false } // No session exists
 
 	mgr := New(mockClient)
 
@@ -290,8 +290,8 @@ func TestManager_Cleanup_AlreadyClean(t *testing.T) {
 
 	status, err := mgr.Cleanup("test-session", opts)
 	require.NoError(t, err)
-	assert.True(t, status.TmuxKilled)  // Marked as killed because it doesn't exist
-	assert.True(t, status.DirectoryClean)  // Removing nonexistent dir succeeds
+	assert.True(t, status.TmuxKilled)     // Marked as killed because it doesn't exist
+	assert.True(t, status.DirectoryClean) // Removing nonexistent dir succeeds
 }
 
 func TestIsValidSessionName(t *testing.T) {

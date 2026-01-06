@@ -1,0 +1,19 @@
+# Test binaries
+csm-test
+csm-fixed
+*-test
+csm-test-tmux
+
+# Build artifacts
+/csm
+/bin/csm
+
+# Go build cache
+*.out
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
