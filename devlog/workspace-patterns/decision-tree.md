@@ -220,4 +220,4 @@ Question 1: Do you have confidentiality boundaries?
 ---
 
 **Last updated**: 2025-12-13
-**Part of**: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/
+**Part of**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/

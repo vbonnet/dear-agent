@@ -578,4 +578,4 @@ Each repository uses appropriate structure pattern:
 ---
 
 **Last updated**: 2025-12-13
-**Part of**: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/
+**Part of**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/

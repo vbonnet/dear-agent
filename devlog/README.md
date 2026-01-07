@@ -108,4 +108,4 @@ When you discover a useful pattern or practice:
 ---
 
 **Last updated**: 2025-12-19
-**Location**: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/
+**Location**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/

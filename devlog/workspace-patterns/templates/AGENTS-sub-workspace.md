@@ -132,7 +132,7 @@ Parent: {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/
 
 ## Reference
 
-**Pattern documentation**: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/patterns.md#pattern-4-sub-workspace
+**Pattern documentation**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#pattern-4-sub-workspace
 
 **More information**:
 - Pattern details: [patterns.md](../patterns.md#pattern-4-sub-workspace)

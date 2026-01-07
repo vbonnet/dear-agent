@@ -149,11 +149,11 @@ Session Health Check:
 To apply these fixes:
 
 ```bash
-make -C ~/src/repos/ai-tools/main/claude-session-manager clean
-make -C ~/src/repos/ai-tools/main/claude-session-manager build
-cp ~/src/repos/ai-tools/main/claude-session-manager/bin/csm ~/go/bin/csm
+make -C ~/src/repos/ai-tools/base/claude-session-manager clean
+make -C ~/src/repos/ai-tools/base/claude-session-manager build
+cp ~/src/repos/ai-tools/base/claude-session-manager/bin/csm ~/go/bin/csm
 # or
-make -C ~/src/repos/ai-tools/main/claude-session-manager install
+make -C ~/src/repos/ai-tools/base/claude-session-manager install
 ```
 
 ## Notes

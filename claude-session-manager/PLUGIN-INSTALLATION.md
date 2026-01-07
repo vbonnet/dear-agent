@@ -9,7 +9,7 @@ This repository provides Claude Code slash commands through the plugin marketpla
 From within any Claude Code session, run:
 
 ```
-/plugin marketplace add ~/src/repos/ai-tools/main/claude-session-manager
+/plugin marketplace add ~/src/repos/ai-tools/base/claude-session-manager
 ```
 
 Then install the plugin:
@@ -26,7 +26,7 @@ Add to your `.claude/settings.json`:
 {
   "extraKnownMarketplaces": {
     "ai-tools": {
-      "source": "~/src/repos/ai-tools/main/claude-session-manager"
+      "source": "~/src/repos/ai-tools/base/claude-session-manager"
     }
   }
 }

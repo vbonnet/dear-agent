@@ -25,7 +25,7 @@ Fixed critical bugs in Claude Session Manager (CSM) that caused:
 - session-claude-2-fix
 
 ### Root Cause
-Found in `~/src/repos/ai-tools/main/claude-session-manager/cmd/csm/sync.go`:
+Found in `~/src/repos/ai-tools/base/claude-session-manager/cmd/csm/sync.go`:
 
 ```go
 // Get the most recent Claude UUID from history
@@ -51,7 +51,7 @@ Claude: manifest.Claude{
 - The "latest UUID" might not even belong to any of the active sessions
 
 ### Fix Applied
-Modified `syncActiveTmuxSessions()` in `~/src/repos/ai-tools/main/claude-session-manager/cmd/csm/sync.go`:
+Modified `syncActiveTmuxSessions()` in `~/src/repos/ai-tools/base/claude-session-manager/cmd/csm/sync.go`:
 
 **Before:**
 - Auto-assigned latest UUID from history to all sessions with empty UUIDs
@@ -63,7 +63,7 @@ Modified `syncActiveTmuxSessions()` in `~/src/repos/ai-tools/main/claude-session
 - Only the user knows which tmux session corresponds to which Claude conversation
 
 ### Files Changed
-- `~/src/repos/ai-tools/main/claude-session-manager/cmd/csm/sync.go` (lines 178-301)
+- `~/src/repos/ai-tools/base/claude-session-manager/cmd/csm/sync.go` (lines 178-301)
 
 ## Bug #2: Duplicate Session Directories
 
@@ -90,7 +90,7 @@ CSM changed its directory naming convention from `<name>-session` to `session-<n
 3. Enhanced `csm doctor` to detect this pattern automatically
 
 ### Files Changed
-- `~/src/repos/ai-tools/main/claude-session-manager/cmd/csm/doctor.go` (added `detectDuplicateSessionDirs()`)
+- `~/src/repos/ai-tools/base/claude-session-manager/cmd/csm/doctor.go` (added `detectDuplicateSessionDirs()`)
 
 ## Enhancement: csm doctor
 
@@ -134,7 +134,7 @@ The `csm doctor` command now detects:
 ```
 
 ### Files Changed
-- `~/src/repos/ai-tools/main/claude-session-manager/cmd/csm/doctor.go` (comprehensive rewrite)
+- `~/src/repos/ai-tools/base/claude-session-manager/cmd/csm/doctor.go` (comprehensive rewrite)
 
 ## Current Status
 
@@ -168,11 +168,11 @@ Run: `csm associate csm-close` to link it to the current Claude conversation
 
 ### Build
 ```bash
-go build -C ~/src/repos/ai-tools/main/claude-session-manager \
-  -o ~/src/repos/ai-tools/main/claude-session-manager/csm \
+go build -C ~/src/repos/ai-tools/base/claude-session-manager \
+  -o ~/src/repos/ai-tools/base/claude-session-manager/csm \
   ./cmd/csm
-cp ~/src/repos/ai-tools/main/claude-session-manager/csm \
-   ~/src/repos/ai-tools/main/claude-session-manager/bin/csm
+cp ~/src/repos/ai-tools/base/claude-session-manager/csm \
+   ~/src/repos/ai-tools/base/claude-session-manager/bin/csm
 ```
 
 ### Test Results
