@@ -9,7 +9,7 @@ This directory contains tests for the Claude Session Manager (CSM).
 Unit tests are located alongside the source code and can be run with:
 
 ```bash
-cd ~/src/ws/oss/repos/ai-tools/base/claude-session-manager
+cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager
 go test ./... -v
 ```
 

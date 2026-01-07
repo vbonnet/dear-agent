@@ -21,11 +21,11 @@
 ## Installation
 
 ```bash
-go build -C ~/src/repos/ai-tools/base/claude-session-manager \
-  -o ~/src/repos/ai-tools/base/claude-session-manager/csm \
+go build -C ~/src/repos/ai-tools/main/claude-session-manager \
+  -o ~/src/repos/ai-tools/main/claude-session-manager/csm \
   ./cmd/csm
-cp ~/src/repos/ai-tools/base/claude-session-manager/csm \
-   ~/src/repos/ai-tools/base/claude-session-manager/bin/csm
+cp ~/src/repos/ai-tools/main/claude-session-manager/csm \
+   ~/src/repos/ai-tools/main/claude-session-manager/bin/csm
 ```
 
 ## Current Status

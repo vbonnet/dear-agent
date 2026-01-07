@@ -20,7 +20,7 @@ Automated CSM (Claude Session Manager) testing in isolated tmux sessions.
 
 ```bash
 # Build the tool
-cd ~/src/ws/oss/repos/ai-tools/base/claude-session-manager
+cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager
 go build -o ~/bin/csm-test-tmux ./cmd/csm-test-tmux
 
 # Create a test session
@@ -41,7 +41,7 @@ csm-test-tmux cleanup my-test
 ### Option 1: Install to PATH (Recommended for Regular Use)
 
 ```bash
-cd ~/src/ws/oss/repos/ai-tools/base/claude-session-manager/cmd/csm-test-tmux
+cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager/cmd/csm-test-tmux
 make install
 ```
 
@@ -54,7 +54,7 @@ export PATH="$PATH:$HOME/bin"
 ### Option 2: Use In-Place (Recommended for Development)
 
 ```bash
-cd ~/src/ws/oss/repos/ai-tools/base/claude-session-manager/cmd/csm-test-tmux
+cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager/cmd/csm-test-tmux
 make build
 
 # Use via absolute path

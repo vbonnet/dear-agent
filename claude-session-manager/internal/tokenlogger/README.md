@@ -35,7 +35,7 @@ ls ~/src/ws/oss/repos/engram/main/core/pkg/telemetry/telemetry.go
 csm get-uuid
 
 # Check go.mod replace directive
-grep "replace github.com/vbonnet/engram/core" ~/src/ws/oss/repos/ai-tools/base/claude-session-manager/go.mod
+grep "replace github.com/vbonnet/engram/core" ~/src/ws/oss/repos/ai-tools/main/claude-session-manager/go.mod
 ```
 
 ---
@@ -44,7 +44,7 @@ grep "replace github.com/vbonnet/engram/core" ~/src/ws/oss/repos/ai-tools/base/c
 
 ### Step 1: Verify go.mod Replace Directive
 
-Add to `~/src/ws/oss/repos/ai-tools/base/claude-session-manager/go.mod`:
+Add to `~/src/ws/oss/repos/ai-tools/main/claude-session-manager/go.mod`:
 
 ```go
 replace github.com/vbonnet/engram/core => ../../../engram/main/core
@@ -118,7 +118,7 @@ cat ~/src/sessions/$(csm get-uuid)/token-usage.jsonl
 ### Run Unit Tests
 
 ```bash
-cd ~/src/ws/oss/repos/ai-tools/base/claude-session-manager
+cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager
 
 # Run all tests
 go test ./internal/tokenlogger/... -v
@@ -318,7 +318,7 @@ If races detected → Report issue (should not happen, all tests pass with -race
 
 **Dependencies**:
 - engram core: `~/src/ws/oss/repos/engram/main/core/`
-- CSM: `~/src/ws/oss/repos/ai-tools/base/claude-session-manager/`
+- CSM: `~/src/ws/oss/repos/ai-tools/main/claude-session-manager/`
 
 ---
 

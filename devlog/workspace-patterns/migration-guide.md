@@ -165,7 +165,7 @@ Copy the template and customize for your workspace.
 
 ```bash
 # 1. Copy template to workspace
-cp {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/AGENTS-[pattern].md \
+cp {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/templates/AGENTS-[pattern].md \
    {{DEVLOG_ROOT}}/ws/[workspace]/AGENTS.md
 
 # 2. Edit file to fill placeholders
@@ -236,7 +236,7 @@ Choose approach based on whether README.md already exists.
 **Workflow**:
 ```bash
 # 1. Copy template
-cp {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/README-[pattern].md \
+cp {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/templates/README-[pattern].md \
    {{DEVLOG_ROOT}}/ws/[workspace]/README.md
 
 # 2. Customize (same placeholder replacement as AGENTS.md)
@@ -377,10 +377,10 @@ Ensure documentation is complete and accurate.
 
 Test that links work:
 
-- [ ] Pattern documentation: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#[pattern]
-- [ ] Examples: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/examples.md
-- [ ] Decision tree: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/decision-tree.md
-- [ ] Templates: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/
+- [ ] Pattern documentation: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/patterns.md#[pattern]
+- [ ] Examples: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/examples.md
+- [ ] Decision tree: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/decision-tree.md
+- [ ] Templates: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/templates/
 
 ### Test with AI Agent
 
@@ -418,9 +418,9 @@ Then ask:
 1. Identify pattern: Mono-Repo (single repo, multiple projects)
 2. Copy templates:
    ```bash
-   cp {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/AGENTS-mono-repo.md \
+   cp {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/templates/AGENTS-mono-repo.md \
       {{DEVLOG_ROOT}}/ws/oss/AGENTS.md
-   cp {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/README-mono-repo.md \
+   cp {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/templates/README-mono-repo.md \
       {{DEVLOG_ROOT}}/ws/oss/README.md
    ```
 3. Customize:
@@ -451,7 +451,7 @@ Then ask:
 1. Identify pattern: Multi-Workspace (confidentiality boundary)
 2. Create AGENTS.md:
    ```bash
-   cp {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/AGENTS-multi-workspace.md \
+   cp {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/templates/AGENTS-multi-workspace.md \
       {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/AGENTS.md
    ```
 3. Update existing README.md:
@@ -489,7 +489,7 @@ Then ask:
 1. Identify pattern: Sub-Workspace (nested in [REDACTED_EMPLOYER]/)
 2. Create AGENTS.md:
    ```bash
-   cp {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/templates/AGENTS-sub-workspace.md \
+   cp {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/templates/AGENTS-sub-workspace.md \
       {{DEVLOG_ROOT}}/ws/[REDACTED_EMPLOYER]/vida/AGENTS.md
    ```
 3. Customize:
@@ -684,7 +684,7 @@ After completing documentation for existing workspace:
 
 ## Reference
 
-**Pattern documentation**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md
+**Pattern documentation**: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/patterns.md
 
 **More information**:
 - Pattern details: [patterns.md](patterns.md)

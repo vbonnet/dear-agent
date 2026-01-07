@@ -90,7 +90,7 @@ Fixed critical bug in `csm sync` where all sessions with empty UUIDs were assign
 
 **What we should have done:**
 ```bash
-wayfinder-new csm-uuid-bug-fix ~/src/repos/ai-tools/base/claude-session-manager
+wayfinder-new csm-uuid-bug-fix ~/src/repos/ai-tools/main/claude-session-manager
 # Then follow D1-D4 phases
 # D1: Problem validation (UUID collision analysis)
 # D2: Solutions search (manual vs automated recovery)
