@@ -21,9 +21,11 @@ I'll associate this Claude session with CSM.
 
 **Step 2: Try association (without --create)**
 Run the appropriate command based on available session name source:
-- If `$1` is provided: Run !`csm associate "$1"`
-- Else if `$TMUX_SESSION` is set: Run !`csm associate "$TMUX_SESSION"`
-- Else run: !`csm associate $(tmux display-message -p '#S')`
+- If `$1` is provided: Run `csm associate "$1"`
+- Else if `$TMUX_SESSION` is set: Run `csm associate "$TMUX_SESSION"`
+- Else:
+  - First get session name: Run `tmux display-message -p '#S'` and capture output as SESSION_NAME
+  - Then run: `csm associate "$SESSION_NAME"`
 
 Capture exit code and output.
 
@@ -33,9 +35,10 @@ Capture exit code and output.
   - Show success message (go to Step 4)
 - If output contains "session not found":
   - Session needs to be created with --create flag
-  - If `$1` is provided: Run !`csm associate "$1" --create -C $(pwd)`
-  - Else if `$TMUX_SESSION` is set: Run !`csm associate "$TMUX_SESSION" --create -C $(pwd)`
-  - Else run: !`csm associate $(tmux display-message -p '#S') --create -C $(pwd)`
+  - First get current directory: Run `pwd` and capture output as CURRENT_DIR
+  - If session name not yet determined:
+    - Get session name: Run `tmux display-message -p '#S'` and capture as SESSION_NAME
+  - Then run: `csm associate "$SESSION_NAME" --create -C "$CURRENT_DIR"`
   - If this fails, show error and suggest: "Try running: csm doctor"
   - Show success message (go to Step 4)
 - If any other error:
