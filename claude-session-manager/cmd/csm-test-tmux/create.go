@@ -15,6 +15,8 @@ var (
 	createWorkingDir     string
 	createSessionsDir    string
 	createStartupTimeout int
+	createAddDirs        []string
+	createSkipPermissions bool
 )
 
 var createCmd = &cobra.Command{
@@ -33,6 +35,12 @@ Examples:
 
   # Create with longer startup timeout
   csm-test-tmux create my-test --startup-timeout 60
+
+  # Add trusted directories to avoid permission prompts
+  csm-test-tmux create my-test --add-dir /tmp/test-project
+
+  # Skip all permission prompts (use with caution)
+  csm-test-tmux create my-test --skip-permissions
 
   # Get JSON output for AI agents
   csm-test-tmux create my-test --format json`,
@@ -58,6 +66,18 @@ func init() {
 		"startup-timeout",
 		30,
 		"Timeout in seconds for Claude to start",
+	)
+	createCmd.Flags().StringSliceVar(
+		&createAddDirs,
+		"add-dir",
+		[]string{},
+		"Additional directories to trust (passed to claude --add-dir)",
+	)
+	createCmd.Flags().BoolVar(
+		&createSkipPermissions,
+		"skip-permissions",
+		false,
+		"Skip permission prompts (passes --dangerously-skip-permissions to claude)",
 	)
 
 	rootCmd.AddCommand(createCmd)
@@ -85,10 +105,12 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	// Create session
 	opts := session.CreateOptions{
-		Name:           name,
-		WorkingDir:     createWorkingDir,
-		SessionsDir:    createSessionsDir,
-		StartupTimeout: time.Duration(createStartupTimeout) * time.Second,
+		Name:            name,
+		WorkingDir:      createWorkingDir,
+		SessionsDir:     createSessionsDir,
+		StartupTimeout:  time.Duration(createStartupTimeout) * time.Second,
+		AdditionalDirs:  createAddDirs,
+		SkipPermissions: createSkipPermissions,
 	}
 
 	sess, err := mgr.Create(opts)

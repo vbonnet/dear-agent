@@ -118,7 +118,7 @@ Projects: {{DEVLOG_ROOT}}/ws/my-research/projects/
 
 ## Reference
 
-**Pattern documentation**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#pattern-1-mono-repo
+**Pattern documentation**: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/patterns.md#pattern-1-mono-repo
 
 **More information**:
 - Pattern details: [patterns.md](../patterns.md#pattern-1-mono-repo)

@@ -149,9 +149,9 @@ wayfinder-new [project-name]
 ## Related Documentation
 
 **Pattern documentation**:
-- Pattern details: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#multi-workspace
-- Real examples: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/examples.md#multi-workspace
-- Decision tree: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/decision-tree.md
+- Pattern details: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/patterns.md#multi-workspace
+- Real examples: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/examples.md#multi-workspace
+- Decision tree: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/decision-tree.md
 
 ---
 

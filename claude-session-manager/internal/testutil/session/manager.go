@@ -16,10 +16,12 @@ var sessionNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // CreateOptions contains options for creating a session
 type CreateOptions struct {
-	Name           string
-	WorkingDir     string
-	SessionsDir    string
-	StartupTimeout time.Duration
+	Name              string
+	WorkingDir        string
+	SessionsDir       string
+	StartupTimeout    time.Duration
+	AdditionalDirs    []string // Additional directories to trust via --add-dir
+	SkipPermissions   bool     // Skip permission prompts via --dangerously-skip-permissions
 }
 
 // SendOptions contains options for sending keys
@@ -145,8 +147,21 @@ func (m *manager) Create(opts CreateOptions) (*Session, error) {
 		)
 	}
 
+	// Build Claude command with flags
+	claudeCmd := "claude"
+
+	// Add --add-dir flags for additional directories
+	for _, dir := range opts.AdditionalDirs {
+		claudeCmd += fmt.Sprintf(" --add-dir %s", dir)
+	}
+
+	// Add --dangerously-skip-permissions if requested
+	if opts.SkipPermissions {
+		claudeCmd += " --dangerously-skip-permissions"
+	}
+
 	// Start Claude
-	if err := m.tmuxClient.SendKeys(tmuxName, "claude"); err != nil {
+	if err := m.tmuxClient.SendKeys(tmuxName, claudeCmd); err != nil {
 		return nil, testerrors.NewSystemError(
 			"failed to start Claude",
 			err,

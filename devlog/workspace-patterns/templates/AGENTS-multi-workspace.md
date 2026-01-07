@@ -136,7 +136,7 @@ Boundary: Confidentiality (company vs public)
 
 ## Reference
 
-**Pattern documentation**: {{DEVLOG_ROOT}}/repos/ai-tools/base/devlog/workspace-patterns/patterns.md#pattern-3-multi-workspace
+**Pattern documentation**: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/workspace-patterns/patterns.md#pattern-3-multi-workspace
 
 **More information**:
 - Pattern details: [patterns.md](../patterns.md#pattern-3-multi-workspace)
