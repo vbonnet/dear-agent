@@ -13,12 +13,12 @@ import (
 
 // ReadyFilePayload represents the JSON structure of ready-files.
 type ReadyFilePayload struct {
-	Status          string   `json:"status"`            // "ready" or "crashed"
-	ReadyAt         string   `json:"ready_at"`          // ISO 8601 timestamp
-	SessionName     string   `json:"session_name"`      // Tmux session name
-	ManifestPath    string   `json:"manifest_path"`     // Path to manifest.yaml
-	CSMVersion      string   `json:"csm_version"`       // CSM version string
-	SignalsDetected []string `json:"signals_detected"`  // List of signals
+	Status          string   `json:"status"`           // "ready" or "crashed"
+	ReadyAt         string   `json:"ready_at"`         // ISO 8601 timestamp
+	SessionName     string   `json:"session_name"`     // Tmux session name
+	ManifestPath    string   `json:"manifest_path"`    // Path to manifest.yaml
+	CSMVersion      string   `json:"csm_version"`      // CSM version string
+	SignalsDetected []string `json:"signals_detected"` // List of signals
 	// Phase 2 fields (crash detection)
 	CrashedAt string `json:"crashed_at,omitempty"` // ISO 8601 timestamp
 	Error     string `json:"error,omitempty"`      // Crash error message
