@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
 	"golang.org/x/term"
 )
 
@@ -291,24 +292,52 @@ func WaitForProcessReady(sessionName, processName string, timeout time.Duration)
 func WaitForInputReady(sessionName, promptPattern string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	pollInterval := 100 * time.Millisecond
+	pollCount := 0
+
+	debug.Log("Starting input ready polling (interval: %v, timeout: %v)", pollInterval, timeout)
 
 	for time.Now().Before(deadline) {
 		ctx := context.Background()
-		output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "capture-pane", "-t", sessionName, "-p")
+		pollCount++
+
+		// Capture last 200 lines including scrollback to catch prompt even if SessionStart hooks scrolled it up
+		output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "capture-pane", "-t", sessionName, "-p", "-S", "-200")
 		if err != nil {
 			// Ignore transient errors
+			if pollCount%10 == 0 { // Log every 10th poll (~1 second)
+				debug.Log("Poll #%d: capture-pane error: %v", pollCount, err)
+			}
 			time.Sleep(pollInterval)
 			continue
 		}
 
+		// Log captured output periodically
+		if pollCount%50 == 0 { // Log every 50th poll (~5 seconds)
+			lines := strings.Split(string(output), "\n")
+			lastLines := lines
+			if len(lines) > 10 {
+				lastLines = lines[len(lines)-10:]
+			}
+			debug.Log("Poll #%d: Last %d lines of captured output:", pollCount, len(lastLines))
+			for i, line := range lastLines {
+				if len(line) > 100 {
+					line = line[:100] + "..."
+				}
+				debug.Log("  [%d] %s", i, line)
+			}
+		}
+
 		// Check if prompt pattern appears in output
 		if strings.Contains(string(output), promptPattern) {
+			debug.Log("Poll #%d: Found prompt pattern '%s' in output!", pollCount, promptPattern)
+			debug.Log("Input is ready after %d polls", pollCount)
 			return nil // Input is ready!
 		}
 
 		time.Sleep(pollInterval)
 	}
 
+	debug.Log("Timeout after %d polls waiting for prompt pattern '%s'", pollCount, promptPattern)
 	return fmt.Errorf("timeout waiting for input prompt (waited %v)", timeout)
 }
 

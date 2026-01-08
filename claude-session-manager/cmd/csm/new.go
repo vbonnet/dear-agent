@@ -10,6 +10,7 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/readiness"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
@@ -245,17 +246,20 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		spinner.Success("Claude is ready!")
 	}
 
-	// Wait for Claude banner to appear (more reliable than prompt character which changes between versions)
-	debug.Phase("Wait for Claude Banner")
-	debug.Log("Waiting for 'Claude Code' banner to appear (timeout: 30s)")
+	// Wait for Claude ready signal (file-based, replaces banner text-matching)
+	debug.Phase("Wait for Claude Ready Signal")
+	debug.Log("Waiting for ready-file signal (timeout: 60s)")
 	fmt.Println("Waiting for Claude to initialize...")
-	if err := tmux.WaitForInputReady(sessionName, "Claude Code", 30*time.Second); err != nil {
-		debug.Log("Warning: Claude banner not detected within timeout: %v", err)
-		ui.PrintWarning("Claude may still be initializing")
-		fmt.Printf("💡 Session is ready, but banner not detected. This is usually fine.\n")
-	} else {
-		debug.Log("Claude banner detected - session is ready")
+	if err := readiness.WaitForClaudeReady(sessionName, 60*time.Second); err != nil {
+		debug.Log("Ready-file wait failed: %v", err)
+		ui.PrintError(err, "Claude did not become ready within timeout (60s)",
+			"  • Check if Claude started successfully: tmux attach -t "+sessionName+"\n"+
+				"  • SessionStart hooks may be running (wait and retry)\n"+
+				"  • Run diagnostics: csm doctor\n"+
+				"  • Check debug logs: ~/.csm/debug/"+sessionName+"/")
+		return err
 	}
+	debug.Log("Ready-file signal detected - Claude is ready")
 
 	// Send /csm-tools:csm-assoc command to associate session with CSM
 	// This runs the csm-assoc skill which will auto-rename the session

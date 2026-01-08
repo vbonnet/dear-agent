@@ -59,6 +59,39 @@ Manifest: {manifest_path_from_output}
 
 **Note:** The skill cannot automatically invoke `/rename` because slash commands can only be executed from user input, not from Claude's responses. Users must manually type the `/rename` command if they want to rename the Claude session.
 
+**Step 4b: Create ready-file signal**
+
+After displaying success message, create ready-file to signal CSM that Claude is ready:
+
+```bash
+# Create ~/.csm/ directory if missing
+mkdir -p "$HOME/.csm"
+
+# Extract session name from association output (from Step 4)
+SESSION_NAME="{session_name_from_step_4}"
+MANIFEST_PATH="{manifest_path_from_step_4}"
+
+# Get current timestamp (portable format for Linux and macOS)
+TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# Get CSM version
+CSM_VERSION=$(csm --version 2>/dev/null | head -1 || echo "unknown")
+
+# Create ready-file with JSON diagnostics
+cat > "$HOME/.csm/ready-$SESSION_NAME" <<EOF
+{
+  "status": "ready",
+  "ready_at": "$TIMESTAMP",
+  "session_name": "$SESSION_NAME",
+  "manifest_path": "$MANIFEST_PATH",
+  "csm_version": "$CSM_VERSION",
+  "signals_detected": ["association_complete"]
+}
+EOF
+```
+
+**Note**: This signals CSM's WaitForClaudeReady() that Claude has completed initialization and is ready for use.
+
 **Error Handling**:
 - If csm not found: "Install csm from github.com/user/ai-tools"
 - If tmux not available: Use provided session name only
