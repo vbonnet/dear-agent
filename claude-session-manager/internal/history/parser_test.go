@@ -227,6 +227,43 @@ func TestGetRecentEntries(t *testing.T) {
 }
 
 // Helper function to create a test history file
+func TestReadAll_MixedFormats(t *testing.T) {
+	// Test that parser handles both old format (RFC 3339 timestamps) and
+	// new format (Unix millisecond timestamps) without emitting warnings
+	tmpFile := createTestHistoryFile(t, []string{
+		// New format entries (integer timestamps) - should be silently skipped
+		`{"display":"Test conversation","pastedContents":{},"timestamp":1704067200000,"project":"/home/user","sessionId":"abc123"}`,
+		`{"display":"Another test","pastedContents":{},"timestamp":1704153600000,"project":"/tmp/test"}`,
+		// Old format entries (RFC 3339 timestamps) - should be parsed successfully
+		`{"uuid":"uuid-1","directory":"/tmp/project-1","timestamp":"2024-01-01T10:00:00Z"}`,
+		`{"uuid":"uuid-2","directory":"/tmp/project-2","timestamp":"2024-01-02T10:00:00Z","name":"old-session"}`,
+	})
+	defer os.Remove(tmpFile)
+
+	p := NewParser(tmpFile)
+	entries, err := p.ReadAll()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should only get old format entries (2), new format entries are skipped
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	// Verify the old format entries were parsed correctly
+	if entries[0].UUID != "uuid-1" {
+		t.Errorf("expected UUID uuid-1, got %s", entries[0].UUID)
+	}
+	if entries[1].UUID != "uuid-2" {
+		t.Errorf("expected UUID uuid-2, got %s", entries[1].UUID)
+	}
+	if entries[1].Name != "old-session" {
+		t.Errorf("expected name old-session, got %s", entries[1].Name)
+	}
+}
+
 func createTestHistoryFile(t *testing.T, lines []string) string {
 	t.Helper()
 

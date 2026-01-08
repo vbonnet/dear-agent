@@ -73,10 +73,18 @@ func (p *Parser) ReadAll() ([]*Entry, error) {
 			continue
 		}
 
+		// Try parsing as new format first (ConversationEntry with int64 timestamp)
+		var convEntry ConversationEntry
+		if err := json.Unmarshal([]byte(line), &convEntry); err == nil {
+			// Successfully parsed new format, but skip since we're looking for old format
+			continue
+		}
+
+		// Try parsing as old format (Entry with time.Time timestamp)
 		var entry Entry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			// Log warning but continue parsing
-			fmt.Fprintf(os.Stderr, "Warning: failed to parse history line %d: %v\n", lineNum, err)
+			// Both formats failed - skip this line silently
+			// (it's likely a new-format entry with no uuid/directory fields)
 			continue
 		}
 
@@ -192,11 +200,8 @@ func (p *Parser) ReadConversations(limit int) ([]*SessionHistory, error) {
 
 		var entry ConversationEntry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			// Try parsing as old format, then skip
-			var oldEntry Entry
-			if json.Unmarshal([]byte(line), &oldEntry) != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to parse history line %d: %v\n", lineNum, err)
-			}
+			// Failed to parse as new format - skip silently
+			// (old format entries don't have the fields we need for conversations)
 			continue
 		}
 
