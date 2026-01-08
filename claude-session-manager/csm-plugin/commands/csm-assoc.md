@@ -2,7 +2,7 @@
 content-hash: PLACEHOLDER
 description: Associate Claude session with CSM (auto-detects tmux session)
 argument-hint: "[session-name]"
-allowed-tools: Bash(csm associate:*), Bash(tmux display-message:*), Bash(pwd), Skill(rename)
+allowed-tools: Bash(csm associate:*), Bash(tmux display-message:*), Bash(pwd)
 ---
 
 # CSM Session Association
@@ -46,16 +46,18 @@ Capture exit code and output.
   - Suggest troubleshooting: "Try running: csm doctor"
   - Exit
 
-**Step 4: Rename Claude session and show completion message**
-Extract session name from command output, then:
-1. Invoke the `/rename` skill with the session name: `/rename {session_name_from_output}`
-2. Display completion message:
+**Step 4: Show completion message**
+Extract session name and manifest path from command output and display:
 ```
 ✓ Session associated successfully
 
 Session: {session_name_from_output}
 Manifest: {manifest_path_from_output}
+
+💡 To rename the Claude session to match: /rename {session_name_from_output}
 ```
+
+**Note:** The skill cannot automatically invoke `/rename` because slash commands can only be executed from user input, not from Claude's responses. Users must manually type the `/rename` command if they want to rename the Claude session.
 
 **Error Handling**:
 - If csm not found: "Install csm from github.com/user/ai-tools"
