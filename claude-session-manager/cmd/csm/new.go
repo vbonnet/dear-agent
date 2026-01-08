@@ -8,10 +8,13 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
+
+var detached bool
 
 var newCmd = &cobra.Command{
 	Use:   "new [session-name]",
@@ -28,18 +31,26 @@ Arguments:
                  If not provided and outside tmux, you'll be prompted
                  If not provided and inside tmux, uses current tmux session name
 
+Flags:
+  --detached - Create session without attaching (useful when inside tmux)
+
 Behavior:
   • Outside tmux + no name → Prompts for name, creates tmux + claude
   • Outside tmux + name provided → Creates tmux session with that name + claude
   • Inside tmux + no name → Uses current tmux name, starts claude
   • Inside tmux + matching name → Uses current tmux, starts claude
-  • Inside tmux + different name → Error (name mismatch)
+  • Inside tmux + different name → Error (name mismatch) unless --detached
+  • --detached flag → Creates session, doesn't attach (stays in current context)
 
 Examples:
   csm new                       # Prompt for name or use current tmux session
-  csm new my-project            # Create session named "my-project"
-  csm new feature-branch        # Create session named "feature-branch"`,
+  csm new my-project            # Create session named "my-project" and attach
+  csm new feature-branch        # Create session named "feature-branch" and attach
+  csm new other-session --detached  # Create detached session (from within tmux)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Get debug flag
+		debugEnabled, _ := cmd.Flags().GetBool("debug")
+
 		inTmux := os.Getenv("TMUX") != ""
 		var sessionName string
 		var err error
@@ -57,11 +68,11 @@ Examples:
 					return err
 				}
 
-				if sessionName != currentTmuxName {
+				if sessionName != currentTmuxName && !detached {
 					ui.PrintError(
 						fmt.Errorf("session name mismatch: %s (provided) != %s (current tmux)", sessionName, currentTmuxName),
 						"Cannot create session with different name while inside tmux",
-						"  • Exit tmux first, or\n  • Use 'csm new' without arguments to use current tmux session",
+						"  • Use --detached flag to create separate session, or\n  • Exit tmux first, or\n  • Use 'csm new' without arguments to use current tmux session",
 					)
 					return fmt.Errorf("session name mismatch")
 				}
@@ -95,11 +106,22 @@ Examples:
 			}
 		}
 
-		// Now we have a session name. Handle the two scenarios:
-		// 1. Inside tmux: start Claude in current session
-		// 2. Outside tmux: create tmux session, start Claude, attach
+		// Initialize debug logging
+		if err := debug.Init(debugEnabled, sessionName); err != nil {
+			fmt.Printf("Warning: Failed to initialize debug logging: %v\n", err)
+		}
+		defer debug.Close()
 
-		if inTmux {
+		debug.Phase("Session Creation Started")
+		debug.Log("Session name: %s", sessionName)
+		debug.Log("In tmux: %v", inTmux)
+		debug.Log("Debug enabled: %v", debugEnabled)
+
+		// Now we have a session name. Handle the scenarios:
+		// 1. Inside tmux + not detached: start Claude in current session
+		// 2. Outside tmux OR detached: create tmux session, start Claude, attach (or not if detached)
+
+		if inTmux && !detached {
 			return startClaudeInCurrentTmux(sessionName)
 		}
 
@@ -109,11 +131,20 @@ Examples:
 
 // createTmuxSessionAndStartClaude creates a new tmux session and starts Claude in it
 func createTmuxSessionAndStartClaude(sessionName string) error {
-	// Get current working directory
-	workDir, err := os.Getwd()
-	if err != nil {
-		ui.PrintError(err, "Failed to get current directory", "")
-		return err
+	debug.Phase("Get Working Directory")
+	// Get current working directory (prefer PWD to preserve symlinks)
+	workDir := os.Getenv("PWD")
+	if workDir == "" {
+		// Fall back to os.Getwd() if PWD not set
+		var err error
+		workDir, err = os.Getwd()
+		if err != nil {
+			ui.PrintError(err, "Failed to get current directory", "")
+			return err
+		}
+		debug.Log("Using os.Getwd(): %s", workDir)
+	} else {
+		debug.Log("Using $PWD: %s", workDir)
 	}
 
 	fmt.Printf("Creating new tmux session: %s (in %s)\n", sessionName, workDir)
@@ -169,15 +200,21 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		}
 	} else {
 		// Create new tmux session
+		debug.Phase("Create Tmux Session")
+		debug.Log("Creating tmux session: %s in %s", sessionName, workDir)
 		if err := tmux.NewSession(sessionName, workDir); err != nil {
 			ui.PrintError(err, "Failed to create tmux session", "")
 			return err
 		}
+		debug.Log("Tmux session created successfully")
 		ui.PrintSuccess(fmt.Sprintf("Created tmux session: %s", sessionName))
 	}
 
 	// Start Claude in the session
-	claudeCmd := "claude; exit"
+	// Use --add-dir to pre-approve workspace and avoid trust prompt blocking the ">" prompt
+	debug.Phase("Start Claude")
+	claudeCmd := fmt.Sprintf("claude --add-dir '%s'; exit", workDir)
+	debug.Log("Sending command: %s", claudeCmd)
 	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
 		ui.PrintError(err, "Failed to start Claude", "")
 		// Try to kill the tmux session if we just created it and Claude failed
@@ -186,38 +223,51 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		}
 		return err
 	}
+	debug.Log("Claude command sent successfully")
 	ui.PrintSuccess("Started Claude CLI in tmux session")
 
 	// Give Claude a moment to initialize before we start polling
+	debug.Log("Initial sleep (500ms) before polling")
 	time.Sleep(500 * time.Millisecond)
 
 	// Wait for Claude to be ready before attaching
 	// Increased timeout to 15s to account for MCP loading and SessionStart hooks
+	debug.Phase("Wait for Claude Process")
+	debug.Log("Waiting for 'claude' process to appear (timeout: 15s)")
 	spinner := ui.NewSpinner("Waiting for Claude to be ready...")
 	spinner.Start()
 	if err := tmux.WaitForProcessReady(sessionName, "claude", 15*time.Second); err != nil {
+		debug.Log("Process wait timed out or failed: %v", err)
 		spinner.Warning("Claude is taking longer than expected (still starting)")
 		fmt.Println("  Attaching now - Claude should appear shortly")
 	} else {
+		debug.Log("Claude process is ready")
 		spinner.Success("Claude is ready!")
 	}
 
-	// Wait for Claude's input prompt to appear before sending commands
-	// Even though process is ready, input handler may still be initializing
-	// Use generous timeout since Claude startup time varies (MCP servers, hooks, etc.)
-	fmt.Println("Waiting for Claude input to be ready...")
-	if err := tmux.WaitForInputReady(sessionName, ">", 30*time.Second); err != nil {
-		ui.PrintWarning("Claude input not ready yet, skipping auto-rename")
-		fmt.Printf("💡 You can manually rename with: /rename %s\n", sessionName)
+	// Wait for Claude banner to appear (more reliable than prompt character which changes between versions)
+	debug.Phase("Wait for Claude Banner")
+	debug.Log("Waiting for 'Claude Code' banner to appear (timeout: 30s)")
+	fmt.Println("Waiting for Claude to initialize...")
+	if err := tmux.WaitForInputReady(sessionName, "Claude Code", 30*time.Second); err != nil {
+		debug.Log("Warning: Claude banner not detected within timeout: %v", err)
+		ui.PrintWarning("Claude may still be initializing")
+		fmt.Printf("💡 Session is ready, but banner not detected. This is usually fine.\n")
 	} else {
-		// Auto-rename Claude session to match tmux session name
-		renameCmd := fmt.Sprintf("/rename %s", sessionName)
-		if err := tmux.SendCommand(sessionName, renameCmd); err != nil {
-			ui.PrintWarning(fmt.Sprintf("Failed to auto-rename session: %v", err))
-			fmt.Printf("💡 You can manually rename with: /rename %s\n", sessionName)
-		} else {
-			ui.PrintSuccess(fmt.Sprintf("Auto-renamed Claude session to: %s", sessionName))
-		}
+		debug.Log("Claude banner detected - session is ready")
+	}
+
+	// Send /csm-tools:csm-assoc command to associate session with CSM
+	// This runs the csm-assoc skill which will auto-rename the session
+	debug.Log("Sending /csm-tools:csm-assoc command")
+	assocCmd := "/csm-tools:csm-assoc"
+	if err := tmux.SendCommand(sessionName, assocCmd); err != nil {
+		debug.Log("Failed to send csm-assoc command: %v", err)
+		ui.PrintWarning("Failed to auto-associate session")
+		fmt.Printf("💡 You can manually run: /csm-tools:csm-assoc\n")
+	} else {
+		debug.Log("csm-assoc command sent successfully")
+		ui.PrintSuccess("Sent /csm-tools:csm-assoc to associate session")
 	}
 
 	// Attempt to capture Claude UUID automatically
@@ -281,11 +331,17 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		globalLock = nil // Prevent double-unlock in PersistentPostRunE
 	}
 
-	// Attach to session
-	fmt.Printf("Attaching to tmux session: %s\n", sessionName)
-	if err := tmux.AttachSession(sessionName); err != nil {
-		ui.PrintWarning(fmt.Sprintf("Could not attach to session: %v", err))
-		fmt.Printf("Session created successfully. Attach manually with: tmux attach -t %s\n", sessionName)
+	// Attach to session (or show detached message)
+	if !detached {
+		fmt.Printf("Attaching to tmux session: %s\n", sessionName)
+		if err := tmux.AttachSession(sessionName); err != nil {
+			ui.PrintWarning(fmt.Sprintf("Could not attach to session: %v", err))
+			fmt.Printf("Session created successfully. Attach manually with: tmux attach -t %s\n", sessionName)
+		}
+	} else {
+		ui.PrintSuccess(fmt.Sprintf("Session '%s' created (detached)", sessionName))
+		fmt.Printf("\nAttach to session with:\n  csm resume %s\n", sessionName)
+		fmt.Printf("Or manually:\n  tmux attach -t %s\n", sessionName)
 	}
 
 	return nil
@@ -349,31 +405,36 @@ func startClaudeInCurrentTmux(sessionName string) error {
 
 	// Start Claude in current pane
 	fmt.Println("Starting Claude CLI...")
-	claudeCmd := "claude; exit"
+	// Use --add-dir to pre-approve workspace and avoid trust prompt
+	// Prefer PWD to preserve symlinks (workDir already set from os.Getwd() above)
+	workDirForClaude := os.Getenv("PWD")
+	if workDirForClaude == "" {
+		workDirForClaude = workDir
+	}
+	claudeCmd := fmt.Sprintf("claude --add-dir '%s'; exit", workDirForClaude)
 	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
 		ui.PrintError(err, "Failed to start Claude", "")
 		return err
 	}
 
-	// Wait for Claude's input prompt to appear before sending commands
-	// Use generous timeout since Claude startup time varies (MCP servers, hooks, etc.)
-	fmt.Println("Waiting for Claude input to be ready...")
-	if err := tmux.WaitForInputReady(sessionName, ">", 30*time.Second); err != nil {
-		ui.PrintWarning("Claude input not ready yet, skipping auto-rename")
-		fmt.Printf("💡 You can manually rename with: /rename %s\n", sessionName)
+	// Wait for Claude banner to appear (more reliable than prompt character)
+	fmt.Println("Waiting for Claude to initialize...")
+	if err := tmux.WaitForInputReady(sessionName, "Claude Code", 30*time.Second); err != nil {
+		ui.PrintWarning("Claude may still be initializing")
+		fmt.Printf("💡 Session is ready, but banner not detected. This is usually fine.\n")
+	}
+
+	// Send /csm-tools:csm-assoc command to associate session with CSM
+	// This runs the csm-assoc skill which will auto-rename the session
+	assocCmd := "/csm-tools:csm-assoc"
+	if err := tmux.SendCommand(sessionName, assocCmd); err != nil {
+		ui.PrintWarning("Failed to auto-associate session")
+		fmt.Printf("💡 You can manually run: /csm-tools:csm-assoc\n")
 	} else {
-		// Auto-rename Claude session to match tmux session name
-		renameCmd := fmt.Sprintf("/rename %s", sessionName)
-		if err := tmux.SendCommand(sessionName, renameCmd); err != nil {
-			ui.PrintWarning(fmt.Sprintf("Failed to auto-rename session: %v", err))
-			fmt.Printf("💡 You can manually rename with: /rename %s\n", sessionName)
-		} else {
-			ui.PrintSuccess(fmt.Sprintf("Auto-renamed Claude session to: %s", sessionName))
-		}
+		ui.PrintSuccess("Sent /csm-tools:csm-assoc to associate session")
 	}
 
 	ui.PrintSuccess("Claude session started in current tmux!")
-	fmt.Println("💡 The session will be automatically associated via SessionStart hook")
 
 	// Update VS Code tab title if running in VS Code
 	updateVSCodeTabTitle(sessionName)
@@ -383,4 +444,6 @@ func startClaudeInCurrentTmux(sessionName string) error {
 
 func init() {
 	rootCmd.AddCommand(newCmd)
+	newCmd.Flags().BoolP("debug", "d", false, "Enable debug logging to ~/.csm/debug/")
+	newCmd.Flags().BoolVar(&detached, "detached", false, "Create detached session without attaching")
 }
