@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/config"
@@ -10,6 +11,13 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/transcript"
 )
+
+// shellQuote quotes a string for safe use in shell commands
+// This prevents command injection by escaping special characters
+func shellQuote(s string) string {
+	// Simple but secure: wrap in single quotes and escape any single quotes
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
 
 // Resume orchestrates the full resume workflow
 func Resume(identifier string, cfg *config.Config) error {
@@ -60,22 +68,21 @@ func Resume(identifier string, cfg *config.Config) error {
 
 	// 5. Send commands to tmux only if needed
 	if sendCommands {
-		// Change directory
-		cdCmd := fmt.Sprintf("cd %s", m.Context.Project)
-		if err := tmux.SendCommand(m.Tmux.SessionName, cdCmd); err != nil {
-			return fmt.Errorf("failed to send cd command: %w", err)
-		}
-
-		// Resume Claude (v2: use Claude.UUID for the actual Claude session UUID)
-		var resumeCmd string
+		// Build combined command: cd <project-dir> && claude --resume <uuid> && exit
+		// This ensures the directory change happens in the same shell as the Claude command
+		var fullCmd string
 		if m.Claude.UUID != "" {
-			resumeCmd = fmt.Sprintf("claude --resume %s; exit", m.Claude.UUID)
+			fullCmd = fmt.Sprintf("cd %s && claude --resume %s && exit",
+				shellQuote(m.Context.Project),
+				shellQuote(m.Claude.UUID))
 		} else {
 			// Fallback to starting a new Claude session if UUID is not set
-			resumeCmd = "claude; exit"
+			fullCmd = fmt.Sprintf("cd %s && claude && exit", shellQuote(m.Context.Project))
 		}
-		if err := tmux.SendCommand(m.Tmux.SessionName, resumeCmd); err != nil {
-			return fmt.Errorf("failed to send claude resume command: %w", err)
+
+		// Send combined command to tmux
+		if err := tmux.SendCommand(m.Tmux.SessionName, fullCmd); err != nil {
+			return fmt.Errorf("failed to send resume command: %w", err)
 		}
 
 		// Wait for Claude to be ready

@@ -416,23 +416,22 @@ func resumeSession(sessionID, manifestPath string, health *HealthStatus) error {
 
 	// Only send commands if needed
 	if sendCommands {
-		// Send cd command to tmux (with shell quoting to prevent injection)
-		cdCmd := fmt.Sprintf("cd %s", shellQuote(health.WorktreePath))
-		if err := tmux.SendCommand(health.TmuxSessionName, cdCmd); err != nil {
-			return fmt.Errorf("failed to send cd command: %w", err)
-		}
-
-		// Send claude --resume command to tmux (use Claude.UUID from manifest)
-		var resumeCmd string
+		// Build combined command: cd <project-dir> && claude --resume <uuid> && exit
+		// This ensures the directory change happens in the same shell as the Claude command
+		var fullCmd string
 		if m.Claude.UUID != "" {
-			resumeCmd = fmt.Sprintf("claude --resume %s && exit", shellQuote(m.Claude.UUID))
+			fullCmd = fmt.Sprintf("cd %s && claude --resume %s && exit",
+				shellQuote(health.WorktreePath),
+				shellQuote(m.Claude.UUID))
 		} else {
 			// Fallback to starting a new Claude session if UUID is not set
-			resumeCmd = "claude && exit"
+			fullCmd = fmt.Sprintf("cd %s && claude && exit", shellQuote(health.WorktreePath))
 			ui.PrintWarning("No Claude UUID found in manifest - starting new Claude session")
 		}
-		if err := tmux.SendCommand(health.TmuxSessionName, resumeCmd); err != nil {
-			return fmt.Errorf("failed to send claude resume command: %w", err)
+
+		// Send combined command to tmux
+		if err := tmux.SendCommand(health.TmuxSessionName, fullCmd); err != nil {
+			return fmt.Errorf("failed to send resume command: %w", err)
 		}
 
 		// Wait for Claude to be ready
