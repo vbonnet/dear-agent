@@ -1,7 +1,7 @@
 ---
 content-hash: PLACEHOLDER
 description: Associate Claude session with CSM (auto-detects tmux session)
-argument-hint: "[session-name]"
+argument-hint: "{session-name}"
 allowed-tools: Bash(csm associate:*), Bash(tmux display-message:*), Bash(pwd)
 ---
 
@@ -10,22 +10,22 @@ allowed-tools: Bash(csm associate:*), Bash(tmux display-message:*), Bash(pwd)
 I'll associate this Claude session with CSM.
 
 **Step 1: Determine session name source**
-- Check if `$1` is provided (command argument)
-- Check if `$TMUX_SESSION` environment variable is set
+- Check if session name is provided as argument (from $ARGUMENTS)
+- Check if `TMUX_SESSION` environment variable is set
 - Check if running in tmux (can run `tmux display-message -p '#S'`)
 - If none available, show error and exit:
   ```
   Error: Not in tmux session and no session name provided
-  Usage: /csm-tools:csm-assoc [session-name]
+  Usage: /csm-tools:csm-assoc {session-name}
   ```
 
 **Step 2: Try association (without --create)**
 Run the appropriate command based on available session name source:
-- If `$1` is provided: Run `csm associate "$1"`
-- Else if `$TMUX_SESSION` is set: Run `csm associate "$TMUX_SESSION"`
+- If argument provided: Run `csm associate "{session-name-from-arguments}"`
+- Else if `TMUX_SESSION` is set: Run `csm associate "{tmux-session-env}"`
 - Else:
-  - First get session name: Run `tmux display-message -p '#S'` and capture output as SESSION_NAME
-  - Then run: `csm associate "$SESSION_NAME"`
+  - First get session name: Run `tmux display-message -p '#S'` and capture output
+  - Then run: `csm associate "{session-name-from-tmux}"`
 
 Capture exit code and output.
 
@@ -35,10 +35,10 @@ Capture exit code and output.
   - Continue to Step 4
 - If output contains "session not found":
   - Session needs to be created with --create flag
-  - First get current directory: Run `pwd` and capture output as CURRENT_DIR
+  - First get current directory: Run `pwd` and capture output
   - If session name not yet determined:
-    - Get session name: Run `tmux display-message -p '#S'` and capture as SESSION_NAME
-  - Then run: `csm associate "$SESSION_NAME" --create -C "$CURRENT_DIR"`
+    - Get session name: Run `tmux display-message -p '#S'` and capture output
+  - Then run: `csm associate "{session-name-from-step-2}" --create -C "{current-dir-from-pwd}"`
   - If this fails, show error and suggest: "Try running: csm doctor", then Exit
   - If successful, continue to Step 4
 - If any other error:
