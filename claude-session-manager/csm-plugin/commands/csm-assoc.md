@@ -46,44 +46,47 @@ Capture exit code and output.
   - Suggest troubleshooting: "Try running: csm doctor"
   - Exit
 
-**Step 4: Create ready-file and show completion message**
+**Step 4: Extract session info**
+Extract session name and manifest path from the successful `csm associate` output for use in next steps.
 
-First, extract session name and manifest path from the successful `csm associate` output.
+**Step 5: Create ready-file signal**
+Create ready-file to signal CSM that Claude is ready. Execute these bash commands in sequence:
 
-Then create ready-file to signal CSM that Claude is ready:
+1. Run `mkdir -p ~/.csm` to ensure directory exists
+2. Run `date -u +%Y-%m-%dT%H:%M:%SZ` to get current timestamp
+3. Run `csm --version 2>/dev/null | head -1 || echo "unknown"` to get CSM version
 
-1. Create `~/.csm/` directory: Run `mkdir -p ~/.csm`
-2. Get current timestamp: Run `date -u +%Y-%m-%dT%H:%M:%SZ` and capture as TIMESTAMP
-3. Get CSM version: Run `csm --version 2>/dev/null | head -1 || echo "unknown"` and capture as CSM_VERSION
-4. Create ready-file using the extracted session name and manifest path from Step 2/3 output:
+4. Create the ready-file at `~/.csm/ready-{SESSION_NAME}` (replace {SESSION_NAME} with the actual session name from Step 4) with a bash heredoc. The file must contain valid JSON with these fields:
+   - status: "ready"
+   - ready_at: (the timestamp from step 2)
+   - session_name: (the session name from Step 4)
+   - manifest_path: (the manifest path from Step 4)
+   - csm_version: (the version from step 3)
+   - signals_detected: ["association_complete"]
 
-Write a bash script that creates `~/.csm/ready-{SESSION_NAME}` with this JSON content (replace {SESSION_NAME}, {MANIFEST_PATH}, {TIMESTAMP}, {CSM_VERSION} with actual values):
-```json
+Example bash command (fill in the actual values):
+```bash
+cat > ~/.csm/ready-my-session <<'EOF'
 {
   "status": "ready",
-  "ready_at": "{TIMESTAMP}",
-  "session_name": "{SESSION_NAME}",
-  "manifest_path": "{MANIFEST_PATH}",
-  "csm_version": "{CSM_VERSION}",
+  "ready_at": "2026-01-09T00:00:00Z",
+  "session_name": "my-session",
+  "manifest_path": "/home/user/src/sessions/session-my-session/manifest.yaml",
+  "csm_version": "v0.1.0",
   "signals_detected": ["association_complete"]
 }
-```
-
-Use a Write tool or bash heredoc to create this file. Example bash command:
-```bash
-cat > ~/.csm/ready-{SESSION_NAME} <<'EOF'
-{JSON content with actual values}
 EOF
 ```
 
-After creating the ready-file, display success message:
+**Step 6: Show completion message**
+After successfully creating the ready-file, display:
 ```
 ✓ Session associated successfully
 
-Session: {session_name_from_output}
-Manifest: {manifest_path_from_output}
+Session: {session_name}
+Manifest: {manifest_path}
 
-💡 To rename the Claude session to match: /rename {session_name_from_output}
+💡 To rename the Claude session to match: /rename {session_name}
 ```
 
 **Note:** The skill cannot automatically invoke `/rename` because slash commands can only be executed from user input, not from Claude's responses. Users must manually type the `/rename` command if they want to rename the Claude session.
