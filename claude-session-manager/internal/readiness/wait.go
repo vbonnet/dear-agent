@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -186,5 +188,58 @@ func cleanupStaleReadyFiles(csmDir string) error {
 		}
 	}
 
+	return nil
+}
+
+// CreateReadyFile creates a ready-file signal for the specified session.
+// Called by csm associate to signal that Claude has been successfully associated.
+func CreateReadyFile(sessionName, manifestPath string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	csmDir := filepath.Join(homeDir, ".csm")
+	readyFile := filepath.Join(csmDir, "ready-"+sessionName)
+
+	// Create ~/.csm/ directory with user-only permissions
+	if err := os.MkdirAll(csmDir, 0700); err != nil {
+		return fmt.Errorf("failed to create ~/.csm directory: %w", err)
+	}
+
+	// Get CSM version
+	csmVersion := "unknown"
+	if cmd := exec.Command("csm", "--version"); cmd != nil {
+		if output, err := cmd.Output(); err == nil {
+			// Extract first line (version info)
+			lines := strings.Split(string(output), "\n")
+			if len(lines) > 0 {
+				csmVersion = strings.TrimSpace(lines[0])
+			}
+		}
+	}
+
+	// Create payload
+	payload := ReadyFilePayload{
+		Status:          "ready",
+		ReadyAt:         time.Now().Format(time.RFC3339),
+		SessionName:     sessionName,
+		ManifestPath:    manifestPath,
+		CSMVersion:      csmVersion,
+		SignalsDetected: []string{"association_complete"},
+	}
+
+	// Marshal to JSON
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal ready-file JSON: %w", err)
+	}
+
+	// Write ready-file with user-only permissions
+	if err := os.WriteFile(readyFile, data, 0600); err != nil {
+		return fmt.Errorf("failed to write ready-file: %w", err)
+	}
+
+	debug.Log("Created ready-file: %s", readyFile)
 	return nil
 }

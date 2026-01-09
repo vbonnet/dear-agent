@@ -11,6 +11,7 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/detection"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/readiness"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
@@ -185,7 +186,7 @@ Examples:
 		if updateTimestampOnly {
 			// Fast path: Only update timestamp, don't change UUID
 			// Timestamp is automatically updated by manifest.Write()
-			ui.PrintSuccess(fmt.Sprintf("Updated timestamp for session '%s' (UUID unchanged: %s)", sessionName, oldUUID[:8]))
+			fmt.Printf("Session association in progress: updated timestamp for '%s'\n", sessionName)
 		} else {
 			// Normal path: Update UUID
 			m.Claude.UUID = targetUUID
@@ -195,11 +196,11 @@ Examples:
 				m.SessionID = uuid.New().String()
 			}
 
-			// Report success
+			// Report progress (softer message to allow skill continuation)
 			if oldUUID == "" {
-				ui.PrintSuccess(fmt.Sprintf("Associated session '%s' with Claude UUID %s", sessionName, targetUUID[:8]))
+				fmt.Printf("Session association in progress: '%s' linked to Claude UUID %s\n", sessionName, targetUUID[:8])
 			} else {
-				ui.PrintSuccess(fmt.Sprintf("Updated session '%s': %s → %s", sessionName, oldUUID[:8], targetUUID[:8]))
+				fmt.Printf("Session association in progress: '%s' updated %s → %s\n", sessionName, oldUUID[:8], targetUUID[:8])
 			}
 		}
 
@@ -209,10 +210,17 @@ Examples:
 			return err
 		}
 
+		// Create ready-file to signal Claude is initialized
+		if err := readiness.CreateReadyFile(sessionName, manifestPath); err != nil {
+			// Non-fatal: ready-file creation failed, but association succeeded
+			fmt.Printf("Warning: Failed to create ready-file signal: %v\n", err)
+		}
+
 		fmt.Printf("\nManifest: %s\n", manifestPath)
 
-		// Show how to resume
-		fmt.Printf("\nTo resume this session:\n")
+		// Show completion with softer language to allow skill continuation
+		fmt.Printf("\nSession association complete. You can now proceed to the next step.\n")
+		fmt.Printf("To resume this session:\n")
 		fmt.Printf("  csm resume %s\n", sessionName)
 
 		return nil
