@@ -263,6 +263,19 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		debug.Log("csm-assoc command sent successfully")
 	}
 
+	// Release lock BEFORE waiting for ready-file
+	// The csm-assoc command will invoke 'csm associate', which needs the lock
+	// Moving lock release here prevents deadlock (csm associate can now run)
+	debug.Log("Releasing lock before waiting for ready-file")
+	if globalLock != nil {
+		if err := globalLock.Unlock(); err != nil {
+			ui.PrintWarning(fmt.Sprintf("Failed to release lock: %v", err))
+		} else {
+			debug.Log("Lock released successfully")
+		}
+		globalLock = nil // Prevent double-unlock in PersistentPostRunE
+	}
+
 	// Wait for Claude ready signal (file-based, created by csm-assoc → csm associate)
 	debug.Phase("Wait for Claude Ready Signal")
 	debug.Log("Waiting for ready-file signal (timeout: 60s)")
@@ -331,14 +344,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	// Update VS Code tab title if running in VS Code
 	updateVSCodeTabTitle(sessionName)
 
-	// Release lock before attaching (attachment can block for hours)
-	// The lock should only protect the setup phase, not the tmux attachment
-	if globalLock != nil {
-		if err := globalLock.Unlock(); err != nil {
-			ui.PrintWarning(fmt.Sprintf("Failed to release lock: %v", err))
-		}
-		globalLock = nil // Prevent double-unlock in PersistentPostRunE
-	}
+	// Note: Lock already released earlier (before WaitForClaudeReady) to prevent deadlock
 
 	// Attach to session (or show detached message)
 	if !detached {
