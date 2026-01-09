@@ -32,15 +32,15 @@ Capture exit code and output.
 **Step 3: Handle result**
 - If exit code is 0:
   - Extract manifest path from output
-  - Show success message (go to Step 4)
+  - Continue to Step 4
 - If output contains "session not found":
   - Session needs to be created with --create flag
   - First get current directory: Run `pwd` and capture output as CURRENT_DIR
   - If session name not yet determined:
     - Get session name: Run `tmux display-message -p '#S'` and capture as SESSION_NAME
   - Then run: `csm associate "$SESSION_NAME" --create -C "$CURRENT_DIR"`
-  - If this fails, show error and suggest: "Try running: csm doctor"
-  - Show success message (go to Step 4)
+  - If this fails, show error and suggest: "Try running: csm doctor", then Exit
+  - If successful, continue to Step 4
 - If any other error:
   - Show the error output
   - Suggest troubleshooting: "Try running: csm doctor"
