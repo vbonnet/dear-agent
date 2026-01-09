@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 
 	"github.com/spf13/cobra"
@@ -19,7 +20,12 @@ var versionCmd = &cobra.Command{
 	Short: "Print version information",
 	Long:  `Display the version, git commit, build date, and Go version of csm.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		executable, err := os.Executable()
+		if err != nil {
+			executable = "unknown"
+		}
 		fmt.Printf("csm version %s\n", Version)
+		fmt.Printf("  binary: %s\n", executable)
 		fmt.Printf("  git commit: %s\n", GitCommit)
 		fmt.Printf("  built: %s\n", BuildDate)
 		fmt.Printf("  go version: %s\n", runtime.Version())
