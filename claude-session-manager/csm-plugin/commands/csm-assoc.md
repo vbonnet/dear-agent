@@ -20,12 +20,14 @@ I'll associate this Claude session with CSM.
   ```
 
 **Step 2: Try association (without --create)**
-Run the appropriate command based on available session name source:
-- If argument provided: Run `csm associate "{session-name-from-arguments}"`
-- Else if `TMUX_SESSION` is set: Run `csm associate "{tmux-session-env}"`
+Run the appropriate command based on available session name source.
+IMPORTANT: Always use `--no-lock` flag to avoid deadlock with csm new.
+
+- If argument provided: Run `csm associate "{session-name-from-arguments}" --no-lock`
+- Else if `TMUX_SESSION` is set: Run `csm associate "{tmux-session-env}" --no-lock`
 - Else:
   - First get session name: Run `tmux display-message -p '#S'` and capture output
-  - Then run: `csm associate "{session-name-from-tmux}"`
+  - Then run: `csm associate "{session-name-from-tmux}" --no-lock`
 
 Capture exit code and output.
 
@@ -38,7 +40,7 @@ Capture exit code and output.
   - First get current directory: Run `pwd` and capture output
   - If session name not yet determined:
     - Get session name: Run `tmux display-message -p '#S'` and capture output
-  - Then run: `csm associate "{session-name-from-step-2}" --create -C "{current-dir-from-pwd}"`
+  - Then run: `csm associate "{session-name-from-step-2}" --create --no-lock -C "{current-dir-from-pwd}"`
   - If this fails, show error and suggest: "Try running: csm doctor", then Exit
   - If successful, continue to Step 4
 - If any other error:

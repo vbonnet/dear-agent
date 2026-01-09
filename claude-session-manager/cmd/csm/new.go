@@ -246,7 +246,24 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		spinner.Success("Claude is ready!")
 	}
 
-	// Wait for Claude ready signal (file-based, replaces banner text-matching)
+	// Wait for Claude to fully initialize before sending commands
+	// This ensures Claude is ready to receive input (banner displayed, prompt ready)
+	debug.Log("Waiting 2s for Claude to be ready for input")
+	time.Sleep(2 * time.Second)
+
+	// Send /csm-tools:csm-assoc command to associate session with CSM
+	// This needs to run BEFORE WaitForClaudeReady() so it can create the ready-file
+	debug.Log("Sending /csm-tools:csm-assoc command")
+	assocCmd := "/csm-tools:csm-assoc"
+	if err := tmux.SendCommand(sessionName, assocCmd); err != nil {
+		debug.Log("Failed to send csm-assoc command: %v", err)
+		ui.PrintWarning("Failed to auto-send association command")
+		fmt.Printf("💡 You can manually run: /csm-tools:csm-assoc\n")
+	} else {
+		debug.Log("csm-assoc command sent successfully")
+	}
+
+	// Wait for Claude ready signal (file-based, created by csm-assoc → csm associate)
 	debug.Phase("Wait for Claude Ready Signal")
 	debug.Log("Waiting for ready-file signal (timeout: 60s)")
 	fmt.Println("Waiting for Claude to initialize...")
@@ -260,19 +277,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		return err
 	}
 	debug.Log("Ready-file signal detected - Claude is ready")
-
-	// Send /csm-tools:csm-assoc command to associate session with CSM
-	// This runs the csm-assoc skill which will auto-rename the session
-	debug.Log("Sending /csm-tools:csm-assoc command")
-	assocCmd := "/csm-tools:csm-assoc"
-	if err := tmux.SendCommand(sessionName, assocCmd); err != nil {
-		debug.Log("Failed to send csm-assoc command: %v", err)
-		ui.PrintWarning("Failed to auto-associate session")
-		fmt.Printf("💡 You can manually run: /csm-tools:csm-assoc\n")
-	} else {
-		debug.Log("csm-assoc command sent successfully")
-		ui.PrintSuccess("Sent /csm-tools:csm-assoc to associate session")
-	}
+	ui.PrintSuccess("Claude is ready and session associated")
 
 	// Attempt to capture Claude UUID automatically
 	const uuidCaptureTimeout = 3 * time.Second
