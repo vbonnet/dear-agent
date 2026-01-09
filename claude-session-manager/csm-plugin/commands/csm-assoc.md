@@ -2,7 +2,7 @@
 content-hash: PLACEHOLDER
 description: Associate Claude session with CSM (auto-detects tmux session)
 argument-hint: "[session-name]"
-allowed-tools: Bash(csm associate:*), Bash(tmux display-message:*), Bash(pwd), Bash(mkdir:*), Bash(date:*), Bash(cat:*), Bash(csm --version:*)
+allowed-tools: Bash(csm associate:*), Bash(tmux display-message:*), Bash(pwd)
 ---
 
 # CSM Session Association
@@ -46,40 +46,8 @@ Capture exit code and output.
   - Suggest troubleshooting: "Try running: csm doctor"
   - Exit
 
-**Step 4: Extract session info**
-Extract session name and manifest path from the successful `csm associate` output for use in next steps.
-
-**Step 5: Create ready-file signal**
-Create ready-file to signal CSM that Claude is ready. Execute these bash commands in sequence:
-
-1. Run `mkdir -p ~/.csm` to ensure directory exists
-2. Run `date -u +%Y-%m-%dT%H:%M:%SZ` to get current timestamp
-3. Run `csm --version 2>/dev/null | head -1 || echo "unknown"` to get CSM version
-
-4. Create the ready-file at `~/.csm/ready-{SESSION_NAME}` (replace {SESSION_NAME} with the actual session name from Step 4) with a bash heredoc. The file must contain valid JSON with these fields:
-   - status: "ready"
-   - ready_at: (the timestamp from step 2)
-   - session_name: (the session name from Step 4)
-   - manifest_path: (the manifest path from Step 4)
-   - csm_version: (the version from step 3)
-   - signals_detected: ["association_complete"]
-
-Example bash command (fill in the actual values):
-```bash
-cat > ~/.csm/ready-my-session <<'EOF'
-{
-  "status": "ready",
-  "ready_at": "2026-01-09T00:00:00Z",
-  "session_name": "my-session",
-  "manifest_path": "/home/user/src/sessions/session-my-session/manifest.yaml",
-  "csm_version": "v0.1.0",
-  "signals_detected": ["association_complete"]
-}
-EOF
-```
-
-**Step 6: Show completion message**
-After successfully creating the ready-file, display:
+**Step 4: Show completion message**
+Extract session name and manifest path from the `csm associate` output and display:
 ```
 ✓ Session associated successfully
 
@@ -91,7 +59,7 @@ Manifest: {manifest_path}
 
 **Note:** The skill cannot automatically invoke `/rename` because slash commands can only be executed from user input, not from Claude's responses. Users must manually type the `/rename` command if they want to rename the Claude session.
 
-**Note**: The ready-file signals CSM's WaitForClaudeReady() that Claude has completed initialization and is ready for use.
+**Note**: The `csm associate` command automatically creates a ready-file signal at `~/.csm/ready-{session_name}` to notify CSM that Claude initialization is complete. This enables `csm new` to detect when Claude is ready without fragile text-matching.
 
 **Error Handling**:
 - If csm not found: "Install csm from github.com/user/ai-tools"
