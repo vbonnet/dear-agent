@@ -158,12 +158,6 @@ gcloud config set project your-project-id
 **Flags:**
 - `--max-results <N>` - Maximum results to return (default: 10)
 
-### `csm restore <session-name>` (DEPRECATED)
-
-**Note:** This command is deprecated. Use `csm unarchive` instead.
-
-Restore an archived session (marks as active). This command will be removed in a future version.
-
 ## Configuration
 
 Create `~/.config/csm/config.yaml`:
