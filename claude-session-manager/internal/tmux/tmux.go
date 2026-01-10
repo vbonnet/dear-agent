@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
@@ -101,15 +102,24 @@ func AttachSession(name string) error {
 	}
 
 	// Have a real TTY - use attach-session
-	// Note: attach-session is an interactive command that runs until user detaches
-	// DO NOT use a timeout here - the session should run indefinitely
-	cmd := exec.Command("tmux", "attach-session", "-t", name)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to attach to tmux session: %w", err)
+	// Use syscall.Exec to replace the current process with tmux
+	// This ensures CSM exits immediately after attaching (not hanging until detach)
+	tmuxPath, err := exec.LookPath("tmux")
+	if err != nil {
+		return fmt.Errorf("failed to find tmux in PATH: %w", err)
 	}
+
+	// Build args: [tmux, attach-session, -t, name]
+	args := []string{"tmux", "attach-session", "-t", name}
+
+	// Exec replaces current process - this function never returns on success
+	// On error, it returns (e.g., if exec fails)
+	err = syscall.Exec(tmuxPath, args, os.Environ())
+	if err != nil {
+		return fmt.Errorf("failed to exec tmux: %w", err)
+	}
+
+	// This line is never reached on successful exec
 	return nil
 }
 

@@ -22,6 +22,7 @@ var (
 	cfgFile          string
 	sessionsDir      string
 	logLevel         string
+	debugMode        bool
 	directory        string
 	timeout          time.Duration
 	noLock           bool
@@ -129,6 +130,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/csm/config.yaml)")
 	rootCmd.PersistentFlags().StringVar(&sessionsDir, "sessions-dir", "", "sessions directory (default: ~/sessions)")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "log level (debug, info, warn, error)")
+	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "enable debug logging (shorthand for --log-level debug)")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 0, "tmux command timeout (overrides config)")
 	rootCmd.PersistentFlags().BoolVar(&noLock, "no-lock", false, "skip lock acquisition (DANGEROUS)")
 	rootCmd.PersistentFlags().BoolVar(&skipHealthCheck, "skip-health-check", false, "skip health check")
@@ -151,7 +153,10 @@ func loadConfigWithFlags() (*config.Config, error) {
 	if sessionsDir != "" {
 		cfg.SessionsDir = sessionsDir
 	}
-	if logLevel != "" {
+	// --debug flag takes precedence over --log-level
+	if debugMode {
+		cfg.LogLevel = "debug"
+	} else if logLevel != "" {
 		cfg.LogLevel = logLevel
 	}
 	if timeout > 0 {
