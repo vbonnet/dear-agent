@@ -164,6 +164,44 @@ type HealthStatus struct {
 	Warnings          []string
 }
 
+// buildManifestPathMap scans the sessions directory and builds a map from SessionID to manifest file path
+// This handles legacy directory naming where the directory name doesn't match the SessionID
+func buildManifestPathMap(sessionsDir string) (map[string]string, error) {
+	paths := make(map[string]string)
+
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read sessions directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		// Skip archive directory
+		if entry.Name() == ".archive-old-format" {
+			continue
+		}
+
+		manifestPath := filepath.Join(sessionsDir, entry.Name(), "manifest.yaml")
+		if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+			continue
+		}
+
+		// Read the manifest to get the SessionID
+		m, err := manifest.Read(manifestPath)
+		if err != nil {
+			// Skip manifests that can't be read
+			continue
+		}
+
+		paths[m.SessionID] = manifestPath
+	}
+
+	return paths, nil
+}
+
 // resolveSessionIdentifier finds the Claude UUID and manifest path from various identifier types
 func resolveSessionIdentifier(identifier string) (string, string, error) {
 	// Use configured sessions directory instead of hardcoded default
@@ -178,6 +216,12 @@ func resolveSessionIdentifier(identifier string) (string, string, error) {
 
 	if len(manifests) == 0 {
 		return "", "", fmt.Errorf("no session manifests found")
+	}
+
+	// Build sessionID -> manifestPath mapping by scanning all directories
+	manifestPaths, err := buildManifestPathMap(sessionsDir)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to build manifest path map: %w", err)
 	}
 
 	// Build tmux mapping
@@ -269,7 +313,10 @@ func resolveSessionIdentifier(identifier string) (string, string, error) {
 
 	// Single match found
 	m := matches[0]
-	manifestPath := filepath.Join(sessionsDir, m.SessionID, "manifest.yaml")
+	manifestPath, ok := manifestPaths[m.SessionID]
+	if !ok {
+		return "", "", fmt.Errorf("manifest path not found for session ID %s", m.SessionID)
+	}
 	return m.SessionID, manifestPath, nil
 }
 
