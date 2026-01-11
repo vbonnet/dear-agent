@@ -11,6 +11,11 @@ import (
 
 // ResolveIdentifier finds a manifest by tmux name, workspace ID, or session ID
 func ResolveIdentifier(identifier string, sessionsDir string) (*manifest.Manifest, string, error) {
+	// Validate identifier to prevent path traversal attacks
+	if err := validateIdentifier(identifier); err != nil {
+		return nil, "", fmt.Errorf("invalid session identifier: %w", err)
+	}
+
 	// Try as session ID (workspace ID) first
 	manifestPath := filepath.Join(sessionsDir, identifier, "manifest.yaml")
 	if _, err := os.Stat(manifestPath); err == nil {
@@ -257,4 +262,36 @@ func FindArchived(sessionsDir string, pattern string) ([]*ArchivedSession, error
 	}
 
 	return matches, nil
+}
+
+// validateIdentifier checks if a session identifier is safe to use in file paths
+// This prevents path traversal attacks (e.g., "../../etc/passwd")
+func validateIdentifier(identifier string) error {
+	if identifier == "" {
+		return fmt.Errorf("identifier cannot be empty")
+	}
+
+	// Reject if identifier contains path separators or parent directory references
+	if strings.Contains(identifier, "/") {
+		return fmt.Errorf("identifier cannot contain forward slashes")
+	}
+	if strings.Contains(identifier, "\\") {
+		return fmt.Errorf("identifier cannot contain backslashes")
+	}
+	if strings.Contains(identifier, "..") {
+		return fmt.Errorf("identifier cannot contain '..'")
+	}
+
+	// Reject if starts with a dot (hidden files/directories)
+	if strings.HasPrefix(identifier, ".") {
+		return fmt.Errorf("identifier cannot start with '.'")
+	}
+
+	// Ensure cleaned path equals original (catches any other path tricks)
+	cleaned := filepath.Clean(identifier)
+	if cleaned != identifier {
+		return fmt.Errorf("identifier contains invalid path components")
+	}
+
+	return nil
 }

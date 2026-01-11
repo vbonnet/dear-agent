@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -15,6 +17,7 @@ import (
 
 var (
 	forceArchive bool
+	asyncArchive bool // Spawn background reaper for async archival
 )
 
 var archiveCmd = &cobra.Command{
@@ -103,6 +106,12 @@ Examples:
 
 func archiveSession(cmd *cobra.Command, args []string) error {
 	sessionName := args[0]
+
+	// If --async flag is set, spawn reaper instead of archiving now
+	if asyncArchive {
+		return spawnReaper(sessionName)
+	}
+
 	sessionsDir := cfg.SessionsDir
 
 	// Resolve session identifier to manifest
@@ -237,8 +246,82 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// spawnReaper spawns a detached csm-reaper process for async archival
+// The reaper will wait for Claude prompt, send /exit, and archive the session
+func spawnReaper(sessionName string) error {
+	// Find csm-reaper binary (should be in same directory as csm)
+	csmPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+
+	reaperPath := filepath.Join(filepath.Dir(csmPath), "csm-reaper")
+
+	// Check if reaper binary exists
+	if _, err := os.Stat(reaperPath); err != nil {
+		ui.PrintError(err, "csm-reaper binary not found",
+			fmt.Sprintf("  • Expected location: %s\n"+
+				"  • Ensure csm-reaper is built and installed alongside csm", reaperPath))
+		return fmt.Errorf("csm-reaper binary not found: %w", err)
+	}
+
+	// Create log file path with sanitized session name to prevent path traversal
+	// Replace any potentially dangerous characters with underscores
+	sanitized := filepath.Base(sessionName) // Removes any directory components
+	logFile := filepath.Join(os.TempDir(), fmt.Sprintf("csm-reaper-%s.log", sanitized))
+
+	// Build command with detachment
+	cmd := exec.Command(reaperPath, "--session", sessionName, "--log-file", logFile)
+
+	// Detach process from parent using setsid
+	// This ensures the reaper survives even if the parent shell exits
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setsid: true, // Create new session (detach from terminal)
+	}
+
+	// Redirect stdout/stderr to /dev/null (all logging goes to file)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+
+	// Start process without waiting
+	if err := cmd.Start(); err != nil {
+		ui.PrintError(err, "Failed to spawn reaper process",
+			fmt.Sprintf("  • Command: %s --session %s --log-file %s\n"+
+				"  • Check permissions and binary path", reaperPath, sessionName, logFile))
+		return fmt.Errorf("failed to start reaper: %w", err)
+	}
+
+	// Don't wait for process - it's detached
+	pid := cmd.Process.Pid
+
+	// Release process resources immediately to prevent zombie process
+	// This is safe because the process is fully detached via setsid
+	if err := cmd.Process.Release(); err != nil {
+		// Log warning but don't fail - process is already running
+		fmt.Fprintf(os.Stderr, "Warning: failed to release process resources: %v\n", err)
+	}
+
+	// Report success
+	ui.PrintSuccess("Async archive started")
+	fmt.Printf("\nReaper process spawned:\n")
+	fmt.Printf("  PID: %d\n", pid)
+	fmt.Printf("  Session: %s\n", sessionName)
+	fmt.Printf("  Log file: %s\n", logFile)
+	fmt.Printf("\nThe reaper will:\n")
+	fmt.Printf("  1. Wait for Claude to return to prompt\n")
+	fmt.Printf("  2. Send /exit command\n")
+	fmt.Printf("  3. Wait for pane to close\n")
+	fmt.Printf("  4. Archive the session\n")
+	fmt.Printf("\nMonitor progress: tail -f %s\n", logFile)
+
+	return nil
+}
+
 func init() {
 	archiveCmd.Flags().BoolVarP(&forceArchive, "force", "f", false,
 		"Skip confirmation prompt and active session check")
+	archiveCmd.Flags().BoolVar(&asyncArchive, "async", false,
+		"Spawn background reaper for async archival (used by /csm-exit)")
 	rootCmd.AddCommand(archiveCmd)
 }
