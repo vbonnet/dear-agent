@@ -9,14 +9,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
 	"golang.org/x/term"
 )
 
 // HasSession checks if tmux session exists
 func HasSession(name string) (bool, error) {
 	ctx := context.Background()
-	_, err := RunWithTimeout(ctx, globalTimeout, "tmux", "has-session", "-t", name)
+	socketPath := GetSocketPath()
+	_, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "has-session", "-t", name)
 	if err != nil {
 		// Check for timeout error
 		if _, ok := err.(*TimeoutError); ok {
@@ -31,10 +31,18 @@ func HasSession(name string) (bool, error) {
 	return true, nil
 }
 
-// NewSession creates a new tmux session
+// NewSession creates a new tmux session with optimized settings
 func NewSession(name string, workDir string) error {
 	ctx := context.Background()
-	cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "new-session", "-d", "-s", name, "-c", workDir)
+	socketPath := GetSocketPath()
+
+	// Clean stale socket if exists
+	if err := CleanStaleSocket(); err != nil {
+		return fmt.Errorf("failed to clean stale socket: %w", err)
+	}
+
+	// Create session with detached mode
+	cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "new-session", "-d", "-s", name, "-c", workDir)
 	defer cancel()
 	if err := cmd.Run(); err != nil {
 		// Check for timeout
@@ -47,19 +55,42 @@ func NewSession(name string, workDir string) error {
 		}
 		return fmt.Errorf("failed to create tmux session: %w", err)
 	}
+
+	// Inject tmux settings for better UX
+	// These settings improve multi-device usage, copy/paste, and mouse support
+	settings := []string{
+		"set-window-option -g aggressive-resize on", // Fix multi-device layout conflicts
+		"set-option -g window-size latest",           // Force window to fit current screen
+		"set -g mouse on",                            // Enable mouse scrolling
+		"set -s set-clipboard on",                    // Enable OSC 52 for Cmd-C over SSH
+	}
+
+	for _, setting := range settings {
+		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", name, setting, "C-m")
+		if err := cmd.Run(); err != nil {
+			// Log warning but don't fail - these are UX improvements, not critical
+			fmt.Fprintf(os.Stderr, "Warning: Failed to apply tmux setting '%s': %v\n", setting, err)
+		}
+		cancel()
+		// Small delay to ensure commands are processed
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	return nil
 }
 
 // AttachSession attaches to tmux session or switches if already inside tmux
 // Returns nil if session exists and was successfully switched/attached
 // In non-interactive environments (no TTY), it skips attach and returns nil
+// IMPORTANT: This function uses syscall.Exec to replace the process, so it does NOT return
 func AttachSession(name string) error {
 	ctx := context.Background()
+	socketPath := GetSocketPath()
 
 	// Check if we're already inside a tmux session
 	if os.Getenv("TMUX") != "" {
 		// Already in tmux - use switch-client instead of attach
-		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "switch-client", "-t", name)
+		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "switch-client", "-t", name)
 		defer cancel()
 		if err := cmd.Run(); err != nil {
 			if ctx.Err() == context.DeadlineExceeded {
@@ -101,64 +132,55 @@ func AttachSession(name string) error {
 		return nil
 	}
 
-	// Have a real TTY - use attach-session
-	// Use syscall.Exec to replace the current process with tmux
-	// This ensures CSM exits immediately after attaching (not hanging until detach)
+	// Have a real TTY - use attach-session with zero-overhead exec
+	// CRITICAL: This replaces the current process, so ensure all cleanup is done BEFORE calling this
+
+	// Find tmux binary path
 	tmuxPath, err := exec.LookPath("tmux")
 	if err != nil {
-		return fmt.Errorf("failed to find tmux in PATH: %w", err)
+		return fmt.Errorf("tmux not found in PATH: %w", err)
 	}
 
-	// Build args: [tmux, attach-session, -t, name]
-	args := []string{"tmux", "attach-session", "-t", name}
+	// Build arguments for tmux attach
+	// DO NOT use -d (detached) flag - we want to attach interactively
+	args := []string{
+		"tmux",                 // argv[0] - program name
+		"-S", socketPath,       // Use isolated socket
+		"attach-session",       // Command
+		"-t", name,             // Target session
+	}
 
-	// Exec replaces current process - this function never returns on success
-	// On error, it returns (e.g., if exec fails)
-	err = syscall.Exec(tmuxPath, args, os.Environ())
+	// Get current environment
+	env := os.Environ()
+
+	// Replace current process with tmux
+	// This is the LAST statement - process is replaced, NO RETURN!
+	// syscall.Exec does NOT return on success
+	err = syscall.Exec(tmuxPath, args, env)
 	if err != nil {
-		return fmt.Errorf("failed to exec tmux: %w", err)
+		// Only reached if exec fails
+		return fmt.Errorf("failed to exec tmux attach: %w", err)
 	}
 
-	// This line is never reached on successful exec
+	// Unreachable code - exec replaces the process
 	return nil
 }
 
 // SendCommand sends a command to tmux pane
 func SendCommand(sessionName string, command string) error {
-	// Send the command text first
-	ctx1 := context.Background()
-	cmd, cancel := CommandWithTimeout(ctx1, globalTimeout, "tmux", "send-keys", "-t", sessionName, command)
+	ctx := context.Background()
+	socketPath := GetSocketPath()
+	cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, command, "C-m")
+	defer cancel()
 	if err := cmd.Run(); err != nil {
-		cancel()
-		if ctx1.Err() == context.DeadlineExceeded {
-			return &TimeoutError{
-				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
-				Recovery:  "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
-				Duration: globalTimeout,
-			}
-		}
-		return fmt.Errorf("failed to send command to tmux: %w", err)
-	}
-	cancel()
-
-	// Small delay to ensure tmux processes the text before we send Enter
-	// See: https://github.com/tmux/tmux/issues/1778
-	time.Sleep(100 * time.Millisecond)
-
-	// Send Enter key separately (C-m doesn't work when combined with text in same command)
-	// Need a fresh context since we canceled the first one
-	ctx2 := context.Background()
-	cmd2, cancel2 := CommandWithTimeout(ctx2, globalTimeout, "tmux", "send-keys", "-t", sessionName, "C-m")
-	defer cancel2()
-	if err := cmd2.Run(); err != nil {
-		if ctx2.Err() == context.DeadlineExceeded {
+		if ctx.Err() == context.DeadlineExceeded {
 			return &TimeoutError{
 				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
 				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
 				Duration: globalTimeout,
 			}
 		}
-		return fmt.Errorf("failed to send Enter key to tmux: %w", err)
+		return fmt.Errorf("failed to send command to tmux: %w", err)
 	}
 	return nil
 }
@@ -166,6 +188,7 @@ func SendCommand(sessionName string, command string) error {
 // Version returns tmux version
 func Version() (string, error) {
 	ctx := context.Background()
+	// Note: -V doesn't need socket path as it doesn't connect to server
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-V")
 	if err != nil {
 		// Check for timeout error
@@ -180,7 +203,8 @@ func Version() (string, error) {
 // ListSessions returns all active tmux session names
 func ListSessions() ([]string, error) {
 	ctx := context.Background()
-	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "list-sessions", "-F", "#{session_name}")
+	socketPath := GetSocketPath()
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-sessions", "-F", "#{session_name}")
 	if err != nil {
 		// Check for timeout error
 		if _, ok := err.(*TimeoutError); ok {
@@ -212,7 +236,8 @@ func GetCurrentSessionName() (string, error) {
 	}
 
 	ctx := context.Background()
-	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "display-message", "-p", "#S")
+	socketPath := GetSocketPath()
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "display-message", "-p", "#S")
 	if err != nil {
 		// Check for timeout error
 		if _, ok := err.(*TimeoutError); ok {
@@ -238,7 +263,8 @@ func GetCurrentSessionName() (string, error) {
 // Returns (false, error) if tmux command fails
 func IsProcessRunning(sessionName, processName string) (bool, error) {
 	ctx := context.Background()
-	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "list-panes", "-t", sessionName,
+	socketPath := GetSocketPath()
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-panes", "-t", sessionName,
 		"-F", "#{pane_current_command}")
 	if err != nil {
 		// Check for timeout error
@@ -288,69 +314,6 @@ func WaitForProcessReady(sessionName, processName string, timeout time.Duration)
 	return fmt.Errorf("timeout waiting for %s to start (waited %v)", processName, timeout)
 }
 
-// WaitForInputReady polls the tmux pane until the input prompt appears,
-// indicating that the program is ready to accept commands. This is needed
-// because even after the process is running, the input handler may not be
-// fully initialized yet.
-//
-// Parameters:
-//   - sessionName: tmux session to check
-//   - promptPattern: text pattern to look for (e.g., "> " for Claude)
-//   - timeout: maximum time to wait
-//
-// Returns nil when prompt is ready, error on timeout.
-func WaitForInputReady(sessionName, promptPattern string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	pollInterval := 100 * time.Millisecond
-	pollCount := 0
-
-	debug.Log("Starting input ready polling (interval: %v, timeout: %v)", pollInterval, timeout)
-
-	for time.Now().Before(deadline) {
-		ctx := context.Background()
-		pollCount++
-
-		// Capture last 200 lines including scrollback to catch prompt even if SessionStart hooks scrolled it up
-		output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "capture-pane", "-t", sessionName, "-p", "-S", "-200")
-		if err != nil {
-			// Ignore transient errors
-			if pollCount%10 == 0 { // Log every 10th poll (~1 second)
-				debug.Log("Poll #%d: capture-pane error: %v", pollCount, err)
-			}
-			time.Sleep(pollInterval)
-			continue
-		}
-
-		// Log captured output periodically
-		if pollCount%50 == 0 { // Log every 50th poll (~5 seconds)
-			lines := strings.Split(string(output), "\n")
-			lastLines := lines
-			if len(lines) > 10 {
-				lastLines = lines[len(lines)-10:]
-			}
-			debug.Log("Poll #%d: Last %d lines of captured output:", pollCount, len(lastLines))
-			for i, line := range lastLines {
-				if len(line) > 100 {
-					line = line[:100] + "..."
-				}
-				debug.Log("  [%d] %s", i, line)
-			}
-		}
-
-		// Check if prompt pattern appears in output
-		if strings.Contains(string(output), promptPattern) {
-			debug.Log("Poll #%d: Found prompt pattern '%s' in output!", pollCount, promptPattern)
-			debug.Log("Input is ready after %d polls", pollCount)
-			return nil // Input is ready!
-		}
-
-		time.Sleep(pollInterval)
-	}
-
-	debug.Log("Timeout after %d polls waiting for prompt pattern '%s'", pollCount, promptPattern)
-	return fmt.Errorf("timeout waiting for input prompt (waited %v)", timeout)
-}
-
 // GetCurrentWorkingDirectory returns the current working directory of the
 // first pane in the tmux session.
 //
@@ -358,7 +321,8 @@ func WaitForInputReady(sessionName, promptPattern string, timeout time.Duration)
 // command fails or the session doesn't exist.
 func GetCurrentWorkingDirectory(sessionName string) (string, error) {
 	ctx := context.Background()
-	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "display-message", "-t", sessionName, "-p", "#{pane_current_path}")
+	socketPath := GetSocketPath()
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "display-message", "-t", sessionName, "-p", "#{pane_current_path}")
 	if err != nil {
 		// Check for timeout error
 		if _, ok := err.(*TimeoutError); ok {

@@ -51,6 +51,43 @@ Examples:
 			ui.PrintSuccess(fmt.Sprintf("tmux installed: %s", tmuxVersion))
 		}
 
+		// Check tmux socket
+		socketInfo, err := tmux.GetSocketInfo()
+		if err != nil {
+			ui.PrintWarning(fmt.Sprintf("Failed to check socket: %v", err))
+		} else {
+			if socketInfo.Exists {
+				if socketInfo.Accessible {
+					ui.PrintSuccess(fmt.Sprintf("tmux socket active: %s", socketInfo.Path))
+				} else if socketInfo.IsStale {
+					ui.PrintWarning(fmt.Sprintf("tmux socket is stale: %s", socketInfo.Path))
+					fmt.Println("  • Run 'csm new' to start a session (stale socket will be cleaned)")
+					allHealthy = false
+				}
+			} else {
+				ui.PrintSuccess(fmt.Sprintf("tmux socket ready: %s (will be created on first use)", socketInfo.Path))
+			}
+		}
+
+		// Check user lingering (session persistence)
+		lingerStatus, err := tmux.CheckLingering()
+		if err != nil {
+			ui.PrintWarning(fmt.Sprintf("Failed to check lingering: %v", err))
+		} else {
+			if lingerStatus.LoginctlExists {
+				if lingerStatus.Enabled {
+					ui.PrintSuccess(fmt.Sprintf("User lingering enabled (sessions persist after logout)"))
+				} else {
+					ui.PrintWarning("User lingering DISABLED - sessions will be killed on logout")
+					fmt.Printf("  • Fix: Run 'loginctl enable-linger %s'\n", lingerStatus.Username)
+					fmt.Println("  • This prevents systemd from killing tmux when you disconnect")
+					allHealthy = false
+				}
+			} else {
+				ui.PrintSuccess("Lingering check skipped (systemd not available)")
+			}
+		}
+
 		// Check sessions directory
 		manifests, err := manifest.List(cfg.SessionsDir)
 		if err != nil {
