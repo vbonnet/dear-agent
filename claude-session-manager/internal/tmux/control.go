@@ -14,8 +14,8 @@ import (
 // Control mode allows programmatic control of tmux with parseable output
 type ControlModeSession struct {
 	cmd        *exec.Cmd
-	stdin      io.WriteCloser
-	stdout     io.ReadCloser
+	Stdin      io.WriteCloser // Exported for direct access in InitSequence
+	Stdout     io.ReadCloser  // Exported for OutputWatcher integration
 	stderr     io.ReadCloser
 	scanner    *bufio.Scanner
 	ctx        context.Context
@@ -39,24 +39,24 @@ func StartControlModeWithTimeout(sessionName string, timeout time.Duration) (*Co
 	// Build command: tmux -S /tmp/csm.sock -C attach-session -t <name>
 	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "-C", "attach-session", "-t", sessionName)
 
-	stdin, err := cmd.StdinPipe()
+	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
 
-	stdout, err := cmd.StdoutPipe()
+	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		stdin.Close()
+		stdinPipe.Close()
 		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
-	stderr, err := cmd.StderrPipe()
+	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
 		cancel()
-		stdin.Close()
-		stdout.Close()
+		stdinPipe.Close()
+		stdoutPipe.Close()
 		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
@@ -67,10 +67,10 @@ func StartControlModeWithTimeout(sessionName string, timeout time.Duration) (*Co
 
 	session := &ControlModeSession{
 		cmd:        cmd,
-		stdin:      stdin,
-		stdout:     stdout,
-		stderr:     stderr,
-		scanner:    bufio.NewScanner(stdout),
+		Stdin:      stdinPipe,
+		Stdout:     stdoutPipe,
+		stderr:     stderrPipe,
+		scanner:    bufio.NewScanner(stdoutPipe),
 		ctx:        ctx,
 		cancel:     cancel,
 		socketPath: socketPath,
@@ -120,7 +120,7 @@ func (c *ControlModeSession) SendCommand(command string) error {
 // SendCommandWithTimeout sends a command with a custom timeout
 func (c *ControlModeSession) SendCommandWithTimeout(command string, timeout time.Duration) error {
 	// Send command to stdin
-	if _, err := fmt.Fprintf(c.stdin, "%s\n", command); err != nil {
+	if _, err := fmt.Fprintf(c.Stdin, "%s\n", command); err != nil {
 		return fmt.Errorf("failed to send command: %w", err)
 	}
 
@@ -206,8 +206,8 @@ func (c *ControlModeSession) Close() error {
 	c.cancel()
 
 	// Close pipes
-	c.stdin.Close()
-	c.stdout.Close()
+	c.Stdin.Close()
+	c.Stdout.Close()
 	c.stderr.Close()
 
 	// Wait for process to exit (with timeout)

@@ -251,16 +251,21 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	debug.Log("Waiting 2s for Claude to be ready for input")
 	time.Sleep(2 * time.Second)
 
-	// Send /csm-tools:csm-assoc command to associate session with CSM
-	// This needs to run BEFORE WaitForClaudeReady() so it can create the ready-file
-	debug.Log("Sending /csm-tools:csm-assoc command")
-	assocCmd := "/csm-tools:csm-assoc"
-	if err := tmux.SendCommand(sessionName, assocCmd); err != nil {
-		debug.Log("Failed to send csm-assoc command: %v", err)
-		ui.PrintWarning("Failed to auto-send association command")
-		fmt.Printf("💡 You can manually run: /csm-tools:csm-assoc\n")
+	// Run sequenced initialization: /rename → /csm-assoc via control mode
+	// This solves the chicken-and-egg problem where /csm-assoc fails on new sessions
+	// because Claude needs at least one message to generate a UUID.
+	// The /rename command generates the UUID, then /csm-assoc can capture it.
+	debug.Phase("Sequenced Initialization")
+	debug.Log("Running rename + associate sequence via tmux control mode")
+	seq := tmux.NewInitSequence(sessionName)
+	if err := seq.Run(); err != nil {
+		debug.Log("Sequenced initialization failed: %v", err)
+		ui.PrintWarning("Automatic initialization failed")
+		fmt.Printf("💡 You can manually run: /rename %s\n", sessionName)
+		fmt.Printf("💡 Then run: /csm-tools:csm-assoc\n")
 	} else {
-		debug.Log("csm-assoc command sent successfully")
+		debug.Log("Sequenced initialization completed successfully (rename + assoc sent)")
+		ui.PrintSuccess("Session initialized and association requested")
 	}
 
 	// Release lock BEFORE waiting for ready-file
