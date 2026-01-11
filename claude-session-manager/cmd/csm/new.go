@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
@@ -235,15 +236,24 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	// Increased timeout to 15s to account for MCP loading and SessionStart hooks
 	debug.Phase("Wait for Claude Process")
 	debug.Log("Waiting for 'claude' process to appear (timeout: 15s)")
-	spinner := ui.NewSpinner("Waiting for Claude to be ready...")
-	spinner.Start()
-	if err := tmux.WaitForProcessReady(sessionName, "claude", 15*time.Second); err != nil {
-		debug.Log("Process wait timed out or failed: %v", err)
-		spinner.Warning("Claude is taking longer than expected (still starting)")
+	var waitErr error
+	spinErr := spinner.New().
+		Title("Waiting for Claude to be ready...").
+		Accessible(true).
+		Action(func() {
+			waitErr = tmux.WaitForProcessReady(sessionName, "claude", 15*time.Second)
+		}).
+		Run()
+	if spinErr != nil {
+		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	if waitErr != nil {
+		debug.Log("Process wait timed out or failed: %v", waitErr)
+		fmt.Println("⚠️  Claude is taking longer than expected (still starting)")
 		fmt.Println("  Attaching now - Claude should appear shortly")
 	} else {
 		debug.Log("Claude process is ready")
-		spinner.Success("Claude is ready!")
+		fmt.Println("✅ Claude is ready!")
 	}
 
 	// Wait for Claude to fully initialize before sending commands
@@ -437,11 +447,11 @@ func startClaudeInCurrentTmux(sessionName string) error {
 		return err
 	}
 
-	// Wait for Claude banner to appear (more reliable than prompt character)
+	// Wait for Claude process to appear (more reliable than prompt character)
 	fmt.Println("Waiting for Claude to initialize...")
-	if err := tmux.WaitForInputReady(sessionName, "Claude Code", 30*time.Second); err != nil {
+	if err := tmux.WaitForProcessReady(sessionName, "claude", 30*time.Second); err != nil {
 		ui.PrintWarning("Claude may still be initializing")
-		fmt.Printf("💡 Session is ready, but banner not detected. This is usually fine.\n")
+		fmt.Printf("💡 Session is ready, but process not detected. This is usually fine.\n")
 	}
 
 	// Send /csm-tools:csm-assoc command to associate session with CSM
