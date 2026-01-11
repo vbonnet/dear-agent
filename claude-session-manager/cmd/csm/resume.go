@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
@@ -672,7 +673,13 @@ func offerToImportOrphanedSession(identifier string) (*manifest.Manifest, string
 	fmt.Println()
 
 	// Confirm with user
-	confirm, err := ui.Confirm("Would you like to import this session?")
+	var confirm bool
+	err = huh.NewConfirm().
+		Title("Would you like to import this session?").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&confirm).
+		Run()
 	if err != nil || !confirm {
 		return nil, "", fmt.Errorf("import declined by user")
 	}

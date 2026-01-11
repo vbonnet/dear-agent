@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/discovery"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
@@ -172,7 +173,13 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 		fmt.Println("Files will NOT be deleted.")
 		fmt.Println()
 
-		confirmed, err := ui.Confirm("Archive this session?")
+		var confirmed bool
+		err = huh.NewConfirm().
+			Title("Archive this session?").
+			Affirmative("Yes").
+			Negative("No").
+			Value(&confirmed).
+			Run()
 		if err != nil {
 			ui.PrintError(err, "Failed to read confirmation", "")
 			return err

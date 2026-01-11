@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
@@ -91,11 +92,22 @@ Examples:
 				fmt.Printf("Using current tmux session: %s\n", sessionName)
 			} else {
 				// Prompt for session name
-				sessionName, err = ui.PromptForString("Enter session name")
+				var inputName string
+				err = huh.NewInput().
+					Title("Enter session name:").
+					Value(&inputName).
+					Validate(func(s string) error {
+						if s == "" {
+							return fmt.Errorf("session name cannot be empty")
+						}
+						return nil
+					}).
+					Run()
 				if err != nil {
 					ui.PrintError(err, "Failed to read session name", "")
 					return err
 				}
+				sessionName = inputName
 
 				if sessionName == "" {
 					ui.PrintError(
@@ -160,18 +172,25 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 	if exists {
 		// Prompt user for action
-		choice, err := ui.Prompt(
-			fmt.Sprintf("Tmux session '%s' already exists. What would you like to do?", sessionName),
-			[]string{
-				"Reuse existing tmux session (start Claude in it)",
-				"Choose a different name",
-				"Cancel",
-			},
-		)
+		var choiceStr string
+		options := []huh.Option[string]{
+			huh.NewOption("Reuse existing tmux session (start Claude in it)", "0"),
+			huh.NewOption("Choose a different name", "1"),
+			huh.NewOption("Cancel", "2"),
+		}
+		err = huh.NewSelect[string]().
+			Title(fmt.Sprintf("Tmux session '%s' already exists. What would you like to do?", sessionName)).
+			Options(options...).
+			Value(&choiceStr).
+			Run()
 		if err != nil {
 			ui.PrintError(err, "Failed to read choice", "")
 			return err
 		}
+
+		// Convert string choice to int for switch statement
+		var choice int
+		fmt.Sscanf(choiceStr, "%d", &choice)
 
 		switch choice {
 		case 0:
@@ -179,7 +198,17 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			fmt.Printf("Reusing existing tmux session: %s\n", sessionName)
 		case 1:
 			// Prompt for new name
-			newName, err := ui.PromptForString("Enter new session name")
+			var newName string
+			err = huh.NewInput().
+				Title("Enter new session name:").
+				Value(&newName).
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("session name cannot be empty")
+					}
+					return nil
+				}).
+				Run()
 			if err != nil {
 				ui.PrintError(err, "Failed to read session name", "")
 				return err
