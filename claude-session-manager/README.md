@@ -62,7 +62,9 @@ Create new session with interactive form:
 - Project directory selection
 - Optional purpose/description
 - Auto-creates tmux session + starts Claude
+- **Sequenced initialization** - Sends `/rename` to generate UUID, then `/csm-assoc` (via tmux control mode)
 - Auto-associates UUID via history detection
+- Reliable UUID capture with 95%+ success rate
 
 ### `csm list [flags]`
 
@@ -215,6 +217,14 @@ internal/
 │   ├── forms.go    # Multi-step forms
 │   ├── confirm.go  # Confirmation dialogs
 │   └── cleanup.go  # Multi-select cleanup
+├── tmux/           # Tmux integration
+│   ├── tmux.go            # Core tmux operations
+│   ├── control.go         # Control mode (-C) for programmatic control
+│   ├── output_watcher.go  # Output stream monitoring (octal escape handling)
+│   ├── init_sequence.go   # Sequenced /rename → /csm-assoc initialization
+│   ├── socket.go          # Unix socket management (/tmp/csm.sock)
+│   ├── linger.go          # Systemd lingering support
+│   └── health.go          # Health checks
 ├── history/        # ~/.claude/history.jsonl parser
 ├── detection/      # Hybrid UUID auto-detection
 ├── fix/            # Manual UUID association
@@ -295,6 +305,8 @@ See [`cmd/csm-test-tmux/README.md`](cmd/csm-test-tmux/README.md) for full docume
 - `history`: 88.5% (JSONL parsing)
 - `fix`: 89.4% (UUID association)
 - `detection`: 68.2% (Auto-detection logic)
+- `tmux/output_watcher`: 100% (13 tests - octal escape handling, pattern matching)
+- `tmux/init_sequence`: 100% (12 tests - sequenced initialization, ready-file detection)
 - `ui`: 10.2% (Interactive components, TTY required)
 
 ### Building
