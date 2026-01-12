@@ -23,6 +23,40 @@ Integration tests that require tmux, Claude CLI, and interactive sessions.
 
 End-to-end integration test that validates core CSM functionality.
 
+#### `manual-e2e-huh-test.sh`
+
+End-to-end integration test that validates the charmbracelet/huh UI migration.
+
+**What it tests:**
+- Build verification with huh dependencies
+- Custom UI file deletion (spinner.go, prompts.go)
+- Code migration completeness (old references removed)
+- Spinner migration (huh.NewSpinner in new.go, resume.go)
+- Unit tests passing with huh
+- Full workflow integration
+
+**Prerequisites:**
+- `tmux` installed and accessible
+- `claude` CLI command available
+- `csm` binary built with huh integration
+- `csm-test-tmux` tool (auto-built if not found)
+
+**How to run:**
+
+```bash
+# From the CSM repository root
+./tests/manual-e2e-huh-test.sh
+```
+
+**When to run:**
+- After making changes to UI code (spinners, prompts)
+- Before releases to validate huh integration
+- To verify migration completeness
+
+---
+
+#### `manual-e2e-test.sh` (Core CSM Functionality)
+
 **What it tests:**
 - Session creation with tmux
 - UUID association
