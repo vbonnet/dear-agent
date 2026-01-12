@@ -211,3 +211,34 @@ func (w *OutputWatcher) WaitForAnyPattern(patterns []string, timeout time.Durati
 
 	return "", fmt.Errorf("timeout waiting for any of %d patterns (waited %v)", len(patterns), timeout)
 }
+
+// GetRawLine reads next line without buffering to a goroutine
+// This is simpler than ReadLine and useful for prompt detection
+// Returns the raw line and any error (including timeout)
+func (w *OutputWatcher) GetRawLine(timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		// Use non-blocking scan with timeout check
+		if w.scanner.Scan() {
+			line := w.scanner.Text()
+			w.addToBuffer(line)
+			return line, nil
+		}
+
+		// Check for scanner error
+		if err := w.scanner.Err(); err != nil {
+			return "", fmt.Errorf("scanner error: %w", err)
+		}
+
+		// Small sleep to avoid tight loop
+		time.Sleep(10 * time.Millisecond)
+
+		// Check timeout
+		if time.Now().After(deadline) {
+			break
+		}
+	}
+
+	return "", fmt.Errorf("timeout reading line (waited %v)", timeout)
+}
