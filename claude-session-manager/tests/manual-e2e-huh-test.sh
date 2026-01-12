@@ -11,8 +11,7 @@
 # Requirements:
 # - tmux installed and running
 # - claude command available
-# - csm binary built with huh integration
-# - csm-test-tmux tool built
+# - csm binary built with huh integration and test subcommands
 #
 # Usage:
 #   ./tests/manual-e2e-huh-test.sh
@@ -31,12 +30,14 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Detect repository root for portable paths
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
+
 # Test session name (unique to avoid conflicts)
 TEST_SESSION="csm-huh-e2e-$$"
 CLEANUP_DONE=false
 
 # Paths
-CSM_TEST_TMUX="${CSM_TEST_TMUX:-/tmp/csm-test-tmux}"
 CSM_BIN="${CSM_BIN:-csm}"
 
 # Cleanup function
@@ -48,10 +49,10 @@ cleanup() {
     echo ""
     echo -e "${YELLOW}=== Cleanup ===${NC}"
 
-    # Cleanup via csm-test-tmux
-    if command -v "$CSM_TEST_TMUX" &> /dev/null; then
+    # Cleanup via csm test
+    if command -v "$CSM_BIN" &> /dev/null; then
         echo "Cleaning up test session: $TEST_SESSION"
-        "$CSM_TEST_TMUX" cleanup "$TEST_SESSION" 2>/dev/null || true
+        "$CSM_BIN" test cleanup "$TEST_SESSION" 2>/dev/null || true
     fi
 
     CLEANUP_DONE=true
@@ -99,20 +100,18 @@ check_prerequisites() {
     print_success "claude command found"
 
     if ! command -v "$CSM_BIN" &> /dev/null; then
-        fail_test "csm command not found. Please build CSM first: cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager && go build -o ~/go/bin/csm ./cmd/csm"
+        fail_test "csm command not found. Please build CSM first: go install ./cmd/csm"
     fi
     print_success "csm found: $($CSM_BIN version 2>&1 | head -1 || echo 'version unknown')"
 
-    if ! command -v "$CSM_TEST_TMUX" &> /dev/null; then
-        print_warning "csm-test-tmux not found at $CSM_TEST_TMUX"
-        print_warning "Building csm-test-tmux to /tmp..."
-        cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager
-        go build -o "$CSM_TEST_TMUX" ./cmd/csm-test-tmux || fail_test "Failed to build csm-test-tmux"
+    # Verify csm test subcommands exist
+    if ! "$CSM_BIN" test --help &> /dev/null; then
+        fail_test "csm test subcommands not available. Please ensure csm is built with test commands."
     fi
-    print_success "csm-test-tmux found: $CSM_TEST_TMUX"
+    print_success "csm test subcommands available"
 
     # Check for huh in dependencies
-    if grep -q "charmbracelet/huh" ~/src/ws/oss/repos/ai-tools/main/claude-session-manager/go.mod; then
+    if grep -q "charmbracelet/huh" "$REPO_ROOT/go.mod"; then
         print_success "huh dependency found in go.mod"
     else
         fail_test "huh dependency not found - migration may not be complete"
@@ -123,9 +122,9 @@ check_prerequisites() {
 test_spinner_new() {
     print_step "Test 1: Verify spinner in 'csm new' (huh migration)"
 
-    # Create test session via csm-test-tmux
-    print_warning "Creating test session with csm-test-tmux..."
-    if ! "$CSM_TEST_TMUX" create "$TEST_SESSION" --format json > /tmp/csm-test-output.json 2>&1; then
+    # Create test session via csm test create
+    print_warning "Creating test session with csm test create..."
+    if ! "$CSM_BIN" test create "$TEST_SESSION" --json > /tmp/csm-test-output.json 2>&1; then
         cat /tmp/csm-test-output.json
         fail_test "Failed to create test session"
     fi
@@ -133,7 +132,7 @@ test_spinner_new() {
 
     # Verify Claude started (this implicitly tests the spinner in csm new)
     sleep 2
-    OUTPUT=$("$CSM_TEST_TMUX" capture "$TEST_SESSION" --lines 30)
+    OUTPUT=$("$CSM_BIN" test capture "$TEST_SESSION" --lines 30)
 
     if echo "$OUTPUT" | grep -q "Claude"; then
         print_success "Claude prompt detected (spinner worked)"
@@ -150,9 +149,7 @@ test_spinner_new() {
 test_build_verification() {
     print_step "Test 2: Verify CSM builds with huh dependencies"
 
-    cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager
-
-    if go build -o /tmp/csm-huh-test ./cmd/csm 2>&1; then
+    if go build -C "$REPO_ROOT" -o /tmp/csm-huh-test ./cmd/csm 2>&1; then
         print_success "CSM builds successfully with huh"
     else
         fail_test "CSM failed to build with huh dependencies"
@@ -177,10 +174,8 @@ test_prompt_migration() {
     # 1. The code compiles (Test 2)
     # 2. No old ui.Confirm/Prompt/PromptForString references exist
 
-    cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager
-
     # Check for old custom UI imports (should be removed)
-    if grep -r "ui\.NewSpinner\|ui\.Spinner" cmd/csm/*.go 2>/dev/null; then
+    if grep -r "ui\.NewSpinner\|ui\.Spinner" "$REPO_ROOT/cmd/csm"/*.go 2>/dev/null; then
         fail_test "Found old ui.NewSpinner references (migration incomplete)"
     fi
     print_success "No old spinner references found"
@@ -211,14 +206,12 @@ test_prompt_migration() {
 test_file_deletion() {
     print_step "Test 4: Verify custom UI files deleted"
 
-    cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager
-
-    if [ -f "internal/ui/spinner.go" ]; then
+    if [ -f "$REPO_ROOT/internal/ui/spinner.go" ]; then
         fail_test "internal/ui/spinner.go still exists (should be deleted)"
     fi
     print_success "spinner.go deleted (114 lines removed)"
 
-    if [ -f "internal/ui/prompts.go" ]; then
+    if [ -f "$REPO_ROOT/internal/ui/prompts.go" ]; then
         fail_test "internal/ui/prompts.go still exists (should be deleted)"
     fi
     print_success "prompts.go deleted (63 lines removed)"
@@ -230,10 +223,8 @@ test_file_deletion() {
 test_unit_tests() {
     print_step "Test 5: Verify unit tests pass with huh"
 
-    cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager
-
     # Run tests and capture output
-    if go test ./... -short 2>&1 | tee /tmp/csm-test-output.txt; then
+    if go test -C "$REPO_ROOT" ./... -short 2>&1 | tee /tmp/csm-test-output.txt; then
         # Check if any tests failed (would show FAIL)
         if grep -q "FAIL" /tmp/csm-test-output.txt; then
             print_error "Unit tests failed. Output:"
@@ -271,7 +262,7 @@ test_integration_workflow() {
 # Main test execution
 main() {
     echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║      CSM Huh Migration E2E Test (csm-test-tmux)           ║${NC}"
+    echo -e "${BLUE}║      CSM Huh Migration E2E Test (csm test)                ║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Test session: $TEST_SESSION"

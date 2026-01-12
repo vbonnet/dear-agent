@@ -38,8 +38,7 @@ End-to-end integration test that validates the charmbracelet/huh UI migration.
 **Prerequisites:**
 - `tmux` installed and accessible
 - `claude` CLI command available
-- `csm` binary built with huh integration
-- `csm-test-tmux` tool (auto-built if not found)
+- `csm` binary built with huh integration and test subcommands
 
 **How to run:**
 
