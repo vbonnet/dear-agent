@@ -11,6 +11,13 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/validate"
+)
+
+var (
+	validateFlag bool
+	fixFlag      bool
+	jsonFormat   bool
 )
 
 var doctorCmd = &cobra.Command{
@@ -25,8 +32,16 @@ Detects:
 - Orphaned session directories
 - Invalid manifest files
 
+With --validate flag:
+- Tests actual session resumability (functional testing)
+- Classifies resume errors and suggests fixes
+- Auto-fixes issues with --fix flag
+
 Examples:
-  csm doctor    # Run health checks`,
+  csm doctor                    # Structural checks only
+  csm doctor --validate         # Structural + functional testing
+  csm doctor --validate --fix   # Test and auto-fix issues
+  csm doctor --validate --json  # JSON output for scripting`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println(ui.Blue("=== Claude Session Manager Health Check ===\n"))
 
@@ -95,6 +110,11 @@ Examples:
 			ui.PrintSuccess("Run 'csm sync' to create manifests")
 		} else {
 			ui.PrintSuccess(fmt.Sprintf("Found %d session manifests", len(manifests)))
+
+			// If --validate flag is set, run functional validation
+			if validateFlag {
+				return runValidation(manifests, fixFlag, jsonFormat)
+			}
 
 			// === NEW DIAGNOSTICS ===
 
@@ -272,6 +292,47 @@ func detectDuplicateSessionDirs(sessionsDir string) []DuplicateSessionDir {
 	return duplicates
 }
 
+func runValidation(manifests []*manifest.Manifest, fix bool, json bool) error {
+	if len(manifests) == 0 {
+		ui.PrintWarning("No sessions found to validate")
+		return nil
+	}
+
+	fmt.Println(ui.Blue("\n=== Testing Session Resumability ===\n"))
+
+	opts := &validate.Options{
+		AutoFix:           fix,
+		JSONOutput:        json,
+		TimeoutPerSession: 15, // 15 seconds per session
+	}
+
+	report, err := validate.RunValidation(manifests, opts)
+	if err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+
+	// Output results
+	if json {
+		validate.PrintJSON(report)
+	} else {
+		validate.PrintText(report)
+	}
+
+	// Return error if any sessions failed
+	if report.Failed > 0 {
+		return fmt.Errorf("validation failed: %d/%d sessions cannot resume",
+			report.Failed, report.TotalSessions)
+	}
+
+	return nil
+}
+
 func init() {
 	rootCmd.AddCommand(doctorCmd)
+	doctorCmd.Flags().BoolVar(&validateFlag, "validate", false,
+		"Test actual session resumability")
+	doctorCmd.Flags().BoolVar(&fixFlag, "fix", false,
+		"Auto-fix detected issues (requires --validate)")
+	doctorCmd.Flags().BoolVar(&jsonFormat, "json", false,
+		"Output results as JSON")
 }
