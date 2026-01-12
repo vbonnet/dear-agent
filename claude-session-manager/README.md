@@ -107,6 +107,58 @@ csm fix --clear my-sess  # Remove UUID association
 2. Recent UUIDs from `~/.claude/history.jsonl`
 3. Manual entry option
 
+### `csm doctor [flags]`
+
+Health check and validation for CSM and Claude sessions:
+
+```bash
+csm doctor                    # Structural checks only
+csm doctor --validate         # Structural + functional testing
+csm doctor --validate --fix   # Test and auto-fix issues
+csm doctor --validate --json  # JSON output for scripting
+```
+
+**Structural checks:**
+- Claude installation (history.jsonl exists)
+- tmux installation and socket status
+- User lingering (session persistence after logout)
+- Duplicate session directories (old vs new format)
+- Duplicate Claude UUIDs across sessions
+- Sessions with empty/missing UUIDs
+- Session health (manifest validity, directory structure)
+
+**Functional validation (--validate flag):**
+- Tests actual session resumability (creates test tmux session, attempts resume)
+- Classifies 6 resume error types:
+  - Empty session-env directory
+  - Version mismatch (Claude CLI version changed)
+  - Compacted JSONL (conversation summaries not at end)
+  - Missing JSONL file
+  - CWD mismatch (working directory changed)
+  - Lock contention (session locked by another process)
+- Auto-fix strategies (--fix flag):
+  - Safe: Version mismatch (updates session-env manifest)
+  - Risky: JSONL reorder (with backup/restore, requires confirmation)
+- Output formats: Text (human-readable) or JSON (--json for scripting)
+
+**Example output:**
+```
+=== Claude Session Manager Health Check ===
+
+✓ Claude history found
+✓ tmux installed: tmux 3.3a
+✓ tmux socket active: /tmp/tmux-1000/default
+✓ User lingering enabled (sessions persist after logout)
+✓ Found 224 session manifests
+
+--- Checking session health ---
+⚠ Unhealthy session: my-broken-session
+  Issue: JSONL file compacted (summaries not at end)
+  Fix: csm doctor --validate --fix
+
+✓ System is healthy (or ⚠ Some issues found - see recommendations above)
+```
+
 ### `csm archive <session-name>`
 
 Archive a session (marks as archived, keeps manifest).
