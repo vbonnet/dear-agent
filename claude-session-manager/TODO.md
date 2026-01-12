@@ -1,42 +1,53 @@
 # CSM TODO List
 
-## Archive Command Follow-ups
+## Recently Completed (2026-01-12)
 
-### HIGH Priority
-
-- [ ] **Add `csm unarchive` command**
+- [x] **Enhanced `csm unarchive` command** (2026-01-12)
   - File: `cmd/csm/unarchive.go`
-  - Functionality: Sets `lifecycle: ""` to restore archived sessions
-  - Estimated effort: 1 hour (~50 lines)
-  - Reference: `wayfinder-projects/archive-command/STATUS.md` line 284
+  - Added confirmation prompt before unarchiving (matching archive.go pattern)
+  - Added `--force/-f` flag to skip confirmation for automation
+  - Features: Pattern matching (`*`, `?`, `[abc]`), interactive picker for multiple matches
+  - Testing: All 8 tests passing
+  - Commit: f16c620
 
-### MEDIUM Priority
+- [x] **Add unit tests for archive command** (2026-01-12)
+  - File: `cmd/csm/archive_test.go` (724 lines)
+  - Implemented 18 test functions (exceeded requirement of 10)
+  - Coverage: 57% of archive.go (all non-interactive paths fully covered)
+  - All tests passing
+  - Commit: 788d7f4
 
-- [ ] **Add unit tests for archive command**
-  - File: `cmd/csm/archive_test.go`
-  - Test cases: 10 functions (per D2 spec)
-  - Use mock tmux interface
-  - Estimated effort: 2 hours
-  - Reference: `wayfinder-projects/archive-command/D2-DESIGN.md` section "Testing Strategy"
+- [x] **Fix pre-existing test failure in autoimport_test.go** (2026-01-12)
+  - Root cause: Global `cfg` variable could be nil in edge cases
+  - Fix: Added defensive nil checks in 3 functions:
+    - `offerToImportOrphanedSession()` at line 622
+    - `resolveSessionIdentifier()` at line 213
+    - `ValidArgsFunction` in resumeCmd at line 121
+  - Test `TestOfferToImportOrphanedSession_NoHistory` now passes
+  - Full test suite passing
+  - Commit: 298acea
 
-### Bug Fixes
+- [x] **Add bulk archive functionality** (2026-01-12)
+  - New flags: `--all`, `--older-than=<duration>`, `--dry-run`
+  - Duration parsing supports: 30d, 7d, 1w, 24h formats
+  - Batch processing with confirmation prompts and detailed previews
+  - Safety checks: skip active sessions, prevent incompatible flag combinations
+  - Code: +288 lines in archive.go, +733 lines in tests
+  - Commit: 788d7f4
 
-- [ ] **Fix pre-existing test failure in autoimport_test.go**
-  - Location: `cmd/csm/autoimport_test.go:152`
-  - Test: `TestOfferToImportOrphanedSession_NoHistory`
-  - Error: `panic: runtime error: invalid memory address or nil pointer dereference`
-  - Function: `offerToImportOrphanedSession` at `resume.go:553`
-  - Status: Pre-existing (not caused by archive command)
-  - Impact: Blocks clean test suite pass
-  - Reference: `wayfinder-projects/archive-command/STATUS.md` line 185
-
-### LOW Priority
-
-- [ ] **Add bulk archive functionality**
-  - Feature: `csm archive --all --older-than=30d`
-  - Archive sessions inactive for N days
-  - Estimated effort: 3 hours
-  - Reference: `wayfinder-projects/archive-command/STATUS.md` line 296
+- [x] **Standardize CSM UX Patterns and Error Handling** (2026-01-12)
+  - Added `--no-color` and `--screen-reader` flags for WCAG AA accessibility
+  - Created `internal/ui/errors.go` with 7 standardized error helpers
+  - Updated 14 command files to use helpers and add actionable solutions
+  - Eliminated all empty solution fields in error messages
+  - Standardized warning symbol (⚠ vs ⚠️ inconsistency fixed)
+  - Created comprehensive documentation:
+    - `docs/UX_PATTERNS.md` - UX guide for developers
+    - `docs/UX-ACCESSIBILITY-REVIEW.md` - Infrastructure review
+    - `docs/UX-SPRINT1-REVIEW.md` - Sprint documentation
+  - Updated README.md with accessibility section
+  - All 26 packages passing tests
+  - Commit: d86fbe2
 
 ## Recently Completed
 
