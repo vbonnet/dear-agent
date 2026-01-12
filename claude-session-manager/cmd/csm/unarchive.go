@@ -6,10 +6,15 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
+)
+
+var (
+	forceUnarchive bool
 )
 
 var unarchiveCmd = &cobra.Command{
@@ -22,8 +27,9 @@ Supports glob patterns: *, ?, [abc]
 The command will:
   1. Find archived sessions matching the pattern
   2. If multiple matches, show interactive selection menu
-  3. Restore the selected session (set lifecycle to active)
-  4. Move from .archive-old-format/ if needed
+  3. Prompt for confirmation (unless --force is used)
+  4. Restore the selected session (set lifecycle to active)
+  5. Move from .archive-old-format/ if needed
 
 Examples:
   # Exact match
@@ -36,7 +42,10 @@ Examples:
   csm unarchive session-202?-*
 
   # All archived sessions (interactive selection)
-  csm unarchive "*"`,
+  csm unarchive "*"
+
+  # Skip confirmation prompt
+  csm unarchive my-session --force`,
 	Args: cobra.ExactArgs(1),
 	RunE: runUnarchive,
 	ValidArgsFunction: unarchiveCompletion,
@@ -134,6 +143,39 @@ func restoreArchivedSession(archived *session.ArchivedSession) error {
 		return nil
 	}
 
+	// Show confirmation prompt (unless --force)
+	if !forceUnarchive {
+		fmt.Printf("Restore session: %s\n", ui.Bold(m.Name))
+		fmt.Printf("  Location: %s\n", archived.ManifestPath)
+		if m.Context.Project != "" {
+			fmt.Printf("  Project: %s\n", m.Context.Project)
+		}
+		fmt.Printf("  Archived: %s\n", archived.ArchivedAt)
+		fmt.Println("\nThis will restore the session and make it visible in 'csm list'.")
+		fmt.Println()
+
+		var confirmed bool
+		err = huh.NewConfirm().
+			Title("Restore this session?").
+			Affirmative("Yes").
+			Negative("No").
+			Value(&confirmed).
+			Run()
+		if err != nil {
+			ui.PrintError(err,
+				"Failed to read confirmation prompt",
+				"  • Use --force flag to skip confirmation: csm unarchive "+archived.Name+" --force\n"+
+					"  • Check terminal is interactive (TTY)\n"+
+					"  • Try running outside tmux/screen if inside")
+			return err
+		}
+
+		if !confirmed {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+	}
+
 	// Update lifecycle to active
 	m.Lifecycle = ""
 
@@ -222,5 +264,7 @@ func unarchiveCompletion(cmd *cobra.Command, args []string, toComplete string) (
 }
 
 func init() {
+	unarchiveCmd.Flags().BoolVarP(&forceUnarchive, "force", "f", false,
+		"Skip confirmation prompt")
 	rootCmd.AddCommand(unarchiveCmd)
 }
