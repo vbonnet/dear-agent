@@ -117,6 +117,11 @@ Examples:
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
 
+		// Defensive check: ensure cfg is initialized
+		if cfg == nil {
+			return []string{}, cobra.ShellCompDirectiveNoFileComp
+		}
+
 		// List manifests from configured sessions directory
 		manifests, err := manifest.List(cfg.SessionsDir)
 		if err != nil {
@@ -209,6 +214,11 @@ func buildManifestPathMap(sessionsDir string) (map[string]string, error) {
 
 // resolveSessionIdentifier finds the Claude UUID and manifest path from various identifier types
 func resolveSessionIdentifier(identifier string) (string, string, error) {
+	// Defensive check: ensure cfg is initialized
+	if cfg == nil {
+		return "", "", fmt.Errorf("config not initialized")
+	}
+
 	// Use configured sessions directory instead of hardcoded default
 	sessionsDir := cfg.SessionsDir
 	manifests, err := manifest.List(sessionsDir)
@@ -612,6 +622,11 @@ func generateTmuxName(project string, existingSessions []string) string {
 // offerToImportOrphanedSession checks history.jsonl for orphaned sessions
 // and prompts user to import if found
 func offerToImportOrphanedSession(identifier string) (*manifest.Manifest, string, error) {
+	// Defensive check: ensure cfg is initialized
+	if cfg == nil {
+		return nil, "", fmt.Errorf("config not initialized")
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, "", err
