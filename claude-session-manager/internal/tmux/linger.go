@@ -190,7 +190,7 @@ func FormatLingerStatus(status *LingerStatus) string {
 	}
 
 	if status.ErrorMessage != "" && !status.Enabled {
-		return fmt.Sprintf("⚠️  Linger check failed: %s", status.ErrorMessage)
+		return fmt.Sprintf("⚠ Linger check failed: %s", status.ErrorMessage)
 	}
 
 	if status.Enabled {

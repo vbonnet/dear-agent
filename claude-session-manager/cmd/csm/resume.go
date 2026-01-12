@@ -64,25 +64,24 @@ Examples:
 		// Read manifest to check lifecycle
 		m, err := manifest.Read(manifestPath)
 		if err != nil {
-			ui.PrintError(err, "Failed to read manifest", "")
+			ui.PrintManifestReadError(err, manifestPath)
 			return err
 		}
 
 		// Check if session is archived
 		if m.Lifecycle == manifest.LifecycleArchived {
-			ui.PrintError(
-				fmt.Errorf("session is archived"),
-				"Cannot resume archived session",
-				"  • Use 'csm restore "+sessionID+"' to restore this session\n"+
-					"  • Or use 'csm list --all' to see all sessions",
-			)
+			ui.PrintArchivedSessionError(sessionID)
 			return fmt.Errorf("cannot resume archived session")
 		}
 
 		// Check session health
 		health, err := checkSessionHealth(sessionID, manifestPath)
 		if err != nil {
-			ui.PrintError(err, "Session health check failed", "")
+			ui.PrintError(err,
+				"Session health check failed",
+				"  • Run diagnostics: csm doctor\n"+
+					"  • Check manifest file: cat "+manifestPath+"\n"+
+					"  • List all sessions: csm list --all")
 			return err
 		}
 
@@ -101,7 +100,11 @@ Examples:
 
 		// Resume the session
 		if err := resumeSession(sessionID, manifestPath, health); err != nil {
-			ui.PrintError(err, "Failed to resume session", "")
+			ui.PrintError(err,
+				"Failed to resume session",
+				"  • Check tmux is running: tmux list-sessions\n"+
+					"  • Verify session health: csm doctor\n"+
+					"  • Try manual attach: tmux attach -t "+health.TmuxSessionName)
 			return err
 		}
 
@@ -404,7 +407,7 @@ func displayHealthStatus(health *HealthStatus) {
 
 	// Display issues
 	if len(health.Issues) > 0 {
-		ui.PrintError(nil, "Critical Issues:", "")
+		fmt.Printf("\n%s Critical Issues:\n", ui.Red("✗"))
 		for _, issue := range health.Issues {
 			fmt.Printf("  • %s\n", issue)
 		}
@@ -496,7 +499,7 @@ func resumeSession(sessionID, manifestPath string, health *HealthStatus) error {
 			return fmt.Errorf("spinner error: %w", spinErr)
 		}
 		if waitErr != nil {
-			fmt.Println("⚠️  Claude is taking longer than expected")
+			fmt.Println("⚠ Claude is taking longer than expected")
 		} else {
 			fmt.Println("✅ Claude is ready!")
 		}

@@ -58,7 +58,11 @@ Examples:
 		// List backups
 		backups, err := backup.ListBackups(manifestPath)
 		if err != nil {
-			ui.PrintError(err, "Failed to list backups", "")
+			ui.PrintError(err,
+				"Failed to list backups for session",
+				"  • Check backup directory: ls -la "+filepath.Dir(manifestPath)+"/.backups\n"+
+					"  • Verify manifest exists: cat "+manifestPath+"\n"+
+					"  • Check directory permissions: ls -ld "+filepath.Dir(manifestPath))
 			return err
 		}
 
@@ -140,7 +144,14 @@ Examples:
 
 		// Restore backup
 		if err := backup.RestoreBackup(manifestPath, backupNum); err != nil {
-			ui.PrintError(err, "Failed to restore backup", "")
+			backupDir := filepath.Join(filepath.Dir(manifestPath), ".backups")
+			ui.PrintError(err,
+				"Failed to restore backup",
+				fmt.Sprintf("  • Check backup exists: ls -la %s\n"+
+					"  • Verify manifest is writable: ls -l %s\n"+
+					"  • List available backups: csm backup %s\n"+
+					"  • Check disk space: df -h %s",
+					backupDir, manifestPath, m.Name, filepath.Dir(manifestPath)))
 			return err
 		}
 

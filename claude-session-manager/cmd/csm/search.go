@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -94,7 +95,11 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	// Get list of archived sessions to filter results
 	archivedSessions, err := session.FindArchived(cfg.SessionsDir, "*")
 	if err != nil {
-		ui.PrintError(err, "Failed to list archived sessions", "")
+		ui.PrintError(err,
+			"Failed to list archived sessions",
+			"  • Check archive directory: ls -la "+filepath.Join(cfg.SessionsDir, ".archive-old-format")+"\n"+
+				"  • Verify sessions directory: ls -ld "+cfg.SessionsDir+"\n"+
+				"  • List active sessions only: csm list")
 		return err
 	}
 
@@ -163,7 +168,12 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		RateLimit: 10,
 	})
 	if err != nil {
-		ui.PrintError(err, "Failed to create LLM client", "")
+		ui.PrintError(err,
+			"Failed to create LLM client for semantic search",
+			"  • Set GCP project: export GOOGLE_CLOUD_PROJECT=<project-id>\n"+
+				"  • Or set project ID: gcloud config set project <project-id>\n"+
+				"  • Verify credentials: gcloud auth application-default login\n"+
+				"  • Enable Vertex AI API: gcloud services enable aiplatform.googleapis.com")
 		return err
 	}
 

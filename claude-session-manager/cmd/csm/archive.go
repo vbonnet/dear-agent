@@ -118,9 +118,7 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 	// Resolve session identifier to manifest
 	m, manifestPath, err := session.ResolveIdentifier(sessionName, sessionsDir)
 	if err != nil {
-		ui.PrintError(err, "Session not found",
-			fmt.Sprintf("  • Check session name with: csm list\n"+
-				"  • Available sessions are in: %s", sessionsDir))
+		ui.PrintSessionNotFoundError(sessionName, sessionsDir)
 		return err
 	}
 
@@ -145,18 +143,7 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 			isActive = false
 		}
 		if isActive {
-			ui.PrintError(
-				fmt.Errorf("session is active"),
-				fmt.Sprintf("Cannot archive active session '%s'", sessionName),
-				fmt.Sprintf("The session is currently running in tmux.\n\n"+
-					"To archive this session:\n"+
-					"  1. Stop the tmux session first:\n"+
-					"     tmux kill-session -t %s\n\n"+
-					"  2. Then archive:\n"+
-					"     csm archive %s\n\n"+
-					"Or use --force to archive anyway:\n"+
-					"  csm archive %s --force",
-					m.Tmux.SessionName, sessionName, sessionName))
+			ui.PrintActiveSessionError(sessionName, m.Tmux.SessionName)
 			return fmt.Errorf("cannot archive active session")
 		}
 	}
@@ -190,7 +177,11 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 			Value(&confirmed).
 			Run()
 		if err != nil {
-			ui.PrintError(err, "Failed to read confirmation", "")
+			ui.PrintError(err,
+				"Failed to read confirmation prompt",
+				"  • Use --force flag to skip confirmation: csm archive "+sessionName+" --force\n"+
+					"  • Check terminal is interactive (TTY)\n"+
+					"  • Try running outside tmux/screen if inside")
 			return err
 		}
 
@@ -205,9 +196,7 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 
 	// Write manifest (automatic backup + UpdatedAt)
 	if err := manifest.Write(manifestPath, m); err != nil {
-		ui.PrintError(err, "Failed to write manifest",
-			"  • Check file permissions\n"+
-				"  • Verify disk space")
+		ui.PrintManifestWriteError(err)
 		return err
 	}
 
@@ -218,9 +207,13 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 
 	// Create archive directory if it doesn't exist
 	if err := os.MkdirAll(archiveBaseDir, 0700); err != nil {
-		ui.PrintError(err, "Failed to create archive directory",
+		ui.PrintError(err,
+			"Failed to create archive directory",
 			fmt.Sprintf("  • Directory: %s\n"+
-				"  • Check permissions and disk space", archiveBaseDir))
+				"  • Check permissions: ls -ld %s\n"+
+				"  • Check disk space: df -h %s\n"+
+				"  • Verify parent directory writable",
+				archiveBaseDir, sessionsDir, sessionsDir))
 		return err
 	}
 
@@ -237,10 +230,14 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 
 	// Move session directory to archive
 	if err := os.Rename(sessionDir, archiveTargetDir); err != nil {
-		ui.PrintError(err, "Failed to move session to archive",
+		ui.PrintError(err,
+			"Failed to move session to archive",
 			fmt.Sprintf("  • From: %s\n"+
 				"  • To: %s\n"+
-				"  • Check permissions and ensure target doesn't exist", sessionDir, archiveTargetDir))
+				"  • Check permissions: ls -ld %s\n"+
+				"  • Verify source exists: ls -d %s\n"+
+				"  • Check disk space: df -h %s",
+				sessionDir, archiveTargetDir, archiveBaseDir, sessionDir, archiveBaseDir))
 		return err
 	}
 
@@ -266,9 +263,12 @@ func spawnReaper(sessionName string) error {
 
 	// Check if reaper binary exists
 	if _, err := os.Stat(reaperPath); err != nil {
-		ui.PrintError(err, "csm-reaper binary not found",
+		ui.PrintError(err,
+			"csm-reaper binary not found",
 			fmt.Sprintf("  • Expected location: %s\n"+
-				"  • Ensure csm-reaper is built and installed alongside csm", reaperPath))
+				"  • Build reaper: cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager && go build -o %s ./cmd/csm-reaper\n"+
+				"  • Or use synchronous archive: csm archive %s (without --async)",
+				reaperPath, reaperPath, sessionName))
 		return fmt.Errorf("csm-reaper binary not found: %w", err)
 	}
 
@@ -293,9 +293,13 @@ func spawnReaper(sessionName string) error {
 
 	// Start process without waiting
 	if err := cmd.Start(); err != nil {
-		ui.PrintError(err, "Failed to spawn reaper process",
+		ui.PrintError(err,
+			"Failed to spawn reaper process",
 			fmt.Sprintf("  • Command: %s --session %s --log-file %s\n"+
-				"  • Check permissions and binary path", reaperPath, sessionName, logFile))
+				"  • Check permissions: ls -l %s\n"+
+				"  • Verify binary is executable: chmod +x %s\n"+
+				"  • Test manually: %s --help",
+				reaperPath, sessionName, logFile, reaperPath, reaperPath, reaperPath))
 		return fmt.Errorf("failed to start reaper: %w", err)
 	}
 

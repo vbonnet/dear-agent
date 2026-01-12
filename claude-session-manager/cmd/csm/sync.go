@@ -172,7 +172,11 @@ Examples:
 
 					m, err := discovery.CreateManifest(session, cfg.SessionsDir, tmuxName, sessionID)
 					if err != nil {
-						ui.PrintError(err, "Failed to create manifest", "")
+						ui.PrintError(err,
+							"Failed to create manifest for orphaned session",
+							"  • Check sessions directory permissions: ls -ld "+cfg.SessionsDir+"\n"+
+								"  • Verify disk space: df -h "+cfg.SessionsDir+"\n"+
+								"  • Check session data is valid: UUID "+session.UUID[:8])
 						continue
 					}
 

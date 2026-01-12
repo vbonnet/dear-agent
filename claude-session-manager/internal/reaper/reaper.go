@@ -55,7 +55,7 @@ func (r *Reaper) Run() error {
 	// Step 1: Wait for Claude to be ready (prompt detection)
 	log.Printf("⏳ Waiting for Claude to return to prompt...")
 	if err := r.waitForPrompt(PromptDetectionTimeout); err != nil {
-		log.Printf("⚠️  Prompt detection failed: %v", err)
+		log.Printf("⚠ Prompt detection failed: %v", err)
 		log.Printf("💡 Falling back to %v timer", FallbackWaitTime)
 		time.Sleep(FallbackWaitTime)
 	} else {
@@ -147,7 +147,7 @@ func (r *Reaper) archiveSession() error {
 	if _, err := os.Stat(archiveTargetDir); err == nil {
 		timestamp := time.Now().Format("20060102T150405Z")
 		archiveTargetDir = archiveTargetDir + "-" + timestamp
-		log.Printf("⚠️  Archive conflict - renaming to: %s", filepath.Base(archiveTargetDir))
+		log.Printf("⚠ Archive conflict - renaming to: %s", filepath.Base(archiveTargetDir))
 	}
 
 	// Move directory

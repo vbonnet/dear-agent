@@ -191,7 +191,12 @@ Examples:
 			for _, m := range manifests {
 				health, err := session.CheckHealth(m)
 				if err != nil {
-					ui.PrintError(err, fmt.Sprintf("Failed to check health of %s", m.SessionID), "")
+					manifestPath := filepath.Join(cfg.SessionsDir, m.SessionID, "manifest.yaml")
+					ui.PrintError(err,
+						fmt.Sprintf("Failed to check health of session %s", m.SessionID),
+						"  • Check manifest file: cat "+manifestPath+"\n"+
+							"  • Verify manifest format: csm list --format=json | grep "+m.SessionID+"\n"+
+							"  • Try manual resume: csm resume "+m.Name)
 					unhealthyCount++
 					continue
 				}

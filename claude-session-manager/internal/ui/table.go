@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"text/tabwriter"
 	"time"
 
@@ -119,9 +120,34 @@ func truncatePath(path string, maxLen int) string {
 	return "..." + path[len(path)-maxLen+3:]
 }
 
+// ScreenReaderText returns accessible text for symbols
+func ScreenReaderText(symbol string) string {
+	switch symbol {
+	case "✓":
+		return "[SUCCESS]"
+	case "❌":
+		return "[ERROR]"
+	case "⚠", "⚠️":
+		return "[WARNING]"
+	case "○":
+		return "[INFO]"
+	default:
+		return symbol
+	}
+}
+
 // PrintError prints error message with Problem → Cause → Solution format
 func PrintError(err error, cause, solution string) {
-	fmt.Printf("%s %s\n\n", Red("❌"), err.Error())
+	cfg := GetGlobalConfig()
+	symbol := "❌"
+	// Check --screen-reader flag first
+	if cfg.UI.ScreenReader {
+		symbol = ScreenReaderText(symbol)
+	} else if os.Getenv("CSM_SCREEN_READER") != "" {
+		// Also check env var for compatibility
+		symbol = ScreenReaderText(symbol)
+	}
+	fmt.Printf("%s %s\n\n", Red(symbol), err.Error())
 	if cause != "" {
 		fmt.Printf("%s\n\n", cause)
 	}
@@ -132,10 +158,41 @@ func PrintError(err error, cause, solution string) {
 
 // PrintSuccess prints success message
 func PrintSuccess(message string) {
-	fmt.Printf("%s %s\n", Green("✓"), message)
+	cfg := GetGlobalConfig()
+	symbol := "✓"
+	// Check --screen-reader flag first
+	if cfg.UI.ScreenReader {
+		symbol = ScreenReaderText(symbol)
+	} else if os.Getenv("CSM_SCREEN_READER") != "" {
+		// Also check env var for compatibility
+		symbol = ScreenReaderText(symbol)
+	}
+	fmt.Printf("%s %s\n", Green(symbol), message)
+}
+
+// PrintSuccessWithDetail prints success with additional context
+func PrintSuccessWithDetail(message, detail string) {
+	PrintSuccess(message)
+	if detail != "" {
+		fmt.Printf("  %s\n", detail)
+	}
+}
+
+// PrintProgressStep prints a step in a multi-step process
+func PrintProgressStep(step int, total int, message string) {
+	fmt.Printf("%s [%d/%d] %s\n", Blue("→"), step, total, message)
 }
 
 // PrintWarning prints warning message
 func PrintWarning(message string) {
-	fmt.Printf("%s %s\n", Yellow("⚠"), message)
+	cfg := GetGlobalConfig()
+	symbol := "⚠"
+	// Check --screen-reader flag first
+	if cfg.UI.ScreenReader {
+		symbol = ScreenReaderText(symbol)
+	} else if os.Getenv("CSM_SCREEN_READER") != "" {
+		// Also check env var for compatibility
+		symbol = ScreenReaderText(symbol)
+	}
+	fmt.Printf("%s %s\n", Yellow(symbol), message)
 }

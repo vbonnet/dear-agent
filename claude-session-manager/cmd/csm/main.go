@@ -27,6 +27,8 @@ var (
 	timeout          time.Duration
 	noLock           bool
 	skipHealthCheck  bool
+	noColor          bool
+	screenReader     bool
 	globalLock       *lock.FileLock
 	globalHealthCheck *tmux.HealthChecker
 )
@@ -63,6 +65,16 @@ Global Flags:
 		if err != nil {
 			return err
 		}
+
+		// Load UI config and apply flag overrides
+		uiCfg := ui.LoadConfig()
+		if noColor {
+			uiCfg.UI.NoColor = true
+		}
+		if screenReader {
+			uiCfg.UI.ScreenReader = true
+		}
+		ui.SetGlobalConfig(uiCfg)
 
 		// Set global timeout for tmux commands
 		if cfg.Timeout.Enabled {
@@ -134,6 +146,8 @@ func init() {
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 0, "tmux command timeout (overrides config)")
 	rootCmd.PersistentFlags().BoolVar(&noLock, "no-lock", false, "skip lock acquisition (DANGEROUS)")
 	rootCmd.PersistentFlags().BoolVar(&skipHealthCheck, "skip-health-check", false, "skip health check")
+	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output (WCAG AA compliance)")
+	rootCmd.PersistentFlags().BoolVar(&screenReader, "screen-reader", false, "use text symbols instead of Unicode (for screen readers)")
 }
 
 func loadConfigWithFlags() (*config.Config, error) {

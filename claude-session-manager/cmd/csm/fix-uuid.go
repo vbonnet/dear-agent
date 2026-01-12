@@ -114,7 +114,7 @@ func autoFixAll(detector *detection.Detector, associator *fix.Associator) error 
 		// Try auto-detection and association
 		associated, err := detector.DetectAndAssociate(m, manifestPath, true)
 		if err != nil {
-			fmt.Printf("⚠️  %s: failed to detect UUID: %v\n", m.Name, err)
+			fmt.Printf("⚠ %s: failed to detect UUID: %v\n", m.Name, err)
 			skipped++
 			continue
 		}
@@ -152,7 +152,7 @@ func fixSpecificSession(sessionName string, associator *fix.Associator) error {
 	}
 
 	if len(suggestions) == 0 {
-		fmt.Println("\n⚠️  No UUID suggestions available.")
+		fmt.Println("\n⚠ No UUID suggestions available.")
 		fmt.Println("Try one of:")
 		fmt.Println("  • Send a message in a Claude session for this project")
 		fmt.Println("  • Check if ~/.claude/history.jsonl exists and has entries")

@@ -41,7 +41,11 @@ Examples:
 				fmt.Printf("\nCreate your first session with: csm new\n")
 				return nil
 			}
-			ui.PrintError(err, "Failed to list manifests", "")
+			ui.PrintError(err,
+			"Failed to list manifests",
+			"  • Check sessions directory permissions: ls -ld "+cfg.SessionsDir+"\n"+
+				"  • Verify directory structure: ls -la "+cfg.SessionsDir+"\n"+
+				"  • Try creating sessions directory: mkdir -p "+cfg.SessionsDir)
 			return err
 		}
 

@@ -212,6 +212,58 @@ gcloud config set project your-project-id
 **Flags:**
 - `--max-results <N>` - Maximum results to return (default: 10)
 
+## Accessibility
+
+CSM supports WCAG AA accessibility standards through global flags and environment variables:
+
+### Disable Colors
+
+For users who cannot distinguish colors or need plain text output:
+
+```bash
+# Using flags (recommended)
+csm list --no-color
+csm doctor --no-color
+
+# Using environment variable (legacy)
+NO_COLOR=1 csm list
+```
+
+The `--no-color` flag:
+- Disables all ANSI color codes
+- Works in CI/CD environments
+- Applies to all subcommands (persistent flag)
+
+### Screen Reader Support
+
+For users using screen readers or assistive technology:
+
+```bash
+# Using flags (recommended)
+csm doctor --screen-reader
+csm list --screen-reader
+
+# Using environment variable (legacy)
+CSM_SCREEN_READER=1 csm doctor
+```
+
+The `--screen-reader` flag:
+- Converts Unicode symbols to text labels (`✓` → `[SUCCESS]`, `❌` → `[ERROR]`, `⚠` → `[WARNING]`)
+- Ensures all information is available as text
+- Works with popular screen readers (NVDA, JAWS, VoiceOver)
+
+### Combine Both Flags
+
+```bash
+csm doctor --no-color --screen-reader
+```
+
+### Automatic Accessibility Detection
+
+CSM automatically detects non-TTY environments (CI/CD, pipes) and disables colors. Flags provide explicit control when needed.
+
+**Documentation:** See `docs/UX_PATTERNS.md` for complete accessibility guidelines.
+
 ## Configuration
 
 Create `~/.config/csm/config.yaml`:

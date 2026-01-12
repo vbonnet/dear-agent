@@ -67,7 +67,11 @@ Examples:
 			if inTmux {
 				currentTmuxName, err := tmux.GetCurrentSessionName()
 				if err != nil {
-					ui.PrintError(err, "Failed to get current tmux session name", "")
+					ui.PrintError(err,
+						"Failed to get current tmux session name",
+						"  • Verify you're inside tmux: echo $TMUX\n"+
+							"  • Check tmux is running: tmux list-sessions\n"+
+							"  • Exit and re-enter tmux if TMUX env var is stale")
 					return err
 				}
 
@@ -86,7 +90,11 @@ Examples:
 				// Use current tmux session name
 				sessionName, err = tmux.GetCurrentSessionName()
 				if err != nil {
-					ui.PrintError(err, "Failed to get current tmux session name", "")
+					ui.PrintError(err,
+						"Failed to get current tmux session name",
+						"  • Verify you're inside tmux: echo $TMUX\n"+
+							"  • Check tmux is running: tmux list-sessions\n"+
+							"  • Exit and re-enter tmux if TMUX env var is stale")
 					return err
 				}
 				fmt.Printf("Using current tmux session: %s\n", sessionName)
@@ -104,7 +112,11 @@ Examples:
 					}).
 					Run()
 				if err != nil {
-					ui.PrintError(err, "Failed to read session name", "")
+					ui.PrintError(err,
+						"Failed to read session name from prompt",
+						"  • Provide name as argument: csm new <session-name>\n"+
+							"  • Check terminal is interactive (TTY)\n"+
+							"  • Try running outside tmux/screen if inside")
 					return err
 				}
 				sessionName = inputName
@@ -153,7 +165,11 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		var err error
 		workDir, err = os.Getwd()
 		if err != nil {
-			ui.PrintError(err, "Failed to get current directory", "")
+			ui.PrintError(err,
+				"Failed to get current directory",
+				"  • Check directory still exists: pwd\n"+
+					"  • Verify directory permissions: ls -ld .\n"+
+					"  • Try from a different directory")
 			return err
 		}
 		debug.Log("Using os.Getwd(): %s", workDir)
@@ -166,7 +182,11 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	// Check if tmux session already exists
 	exists, err := tmux.HasSession(sessionName)
 	if err != nil {
-		ui.PrintError(err, "Failed to check tmux session", "")
+		ui.PrintError(err,
+			"Failed to check tmux session",
+			"  • Verify tmux is installed: tmux -V\n"+
+				"  • Check tmux server is running: tmux list-sessions\n"+
+				"  • Try starting tmux server: tmux start-server")
 		return err
 	}
 
@@ -184,7 +204,11 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			Value(&choiceStr).
 			Run()
 		if err != nil {
-			ui.PrintError(err, "Failed to read choice", "")
+			ui.PrintError(err,
+				"Failed to read choice from prompt",
+				"  • Choose different name: csm new <different-name>\n"+
+					"  • Check terminal is interactive (TTY)\n"+
+					"  • Cancel with Ctrl+C and retry")
 			return err
 		}
 
@@ -210,7 +234,11 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 				}).
 				Run()
 			if err != nil {
-				ui.PrintError(err, "Failed to read session name", "")
+				ui.PrintError(err,
+					"Failed to read session name from prompt",
+					"  • Provide name as argument: csm new <session-name>\n"+
+						"  • Check terminal is interactive (TTY)\n"+
+						"  • Try running outside tmux/screen if inside")
 				return err
 			}
 			if newName == "" {
@@ -234,7 +262,12 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		debug.Phase("Create Tmux Session")
 		debug.Log("Creating tmux session: %s in %s", sessionName, workDir)
 		if err := tmux.NewSession(sessionName, workDir); err != nil {
-			ui.PrintError(err, "Failed to create tmux session", "")
+			ui.PrintError(err,
+				"Failed to create tmux session",
+				"  • Verify tmux is installed: tmux -V\n"+
+					"  • Check tmux server is running: tmux list-sessions\n"+
+					"  • Verify directory exists: ls -ld "+workDir+"\n"+
+					"  • Try starting tmux server: tmux start-server")
 			return err
 		}
 		debug.Log("Tmux session created successfully")
@@ -247,7 +280,12 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	claudeCmd := fmt.Sprintf("claude --add-dir '%s'; exit", workDir)
 	debug.Log("Sending command: %s", claudeCmd)
 	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
-		ui.PrintError(err, "Failed to start Claude", "")
+		ui.PrintError(err,
+			"Failed to start Claude in tmux session",
+			"  • Verify Claude is installed: which claude\n"+
+				"  • Test Claude manually: claude --version\n"+
+				"  • Check tmux session exists: tmux list-sessions\n"+
+				"  • Attach and start manually: tmux attach -t "+sessionName)
 		// Try to kill the tmux session if we just created it and Claude failed
 		if !exists {
 			_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
@@ -278,7 +316,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	}
 	if waitErr != nil {
 		debug.Log("Process wait timed out or failed: %v", waitErr)
-		fmt.Println("⚠️  Claude is taking longer than expected (still starting)")
+		fmt.Println("⚠ Claude is taking longer than expected (still starting)")
 		fmt.Println("  Attaching now - Claude should appear shortly")
 	} else {
 		debug.Log("Claude process is ready")
@@ -423,7 +461,11 @@ func startClaudeInCurrentTmux(sessionName string) error {
 	// Get working directory
 	workDir, err := os.Getwd()
 	if err != nil {
-		ui.PrintError(err, "Failed to get current directory", "")
+		ui.PrintError(err,
+			"Failed to get current directory",
+			"  • Check directory still exists: pwd\n"+
+				"  • Verify directory permissions: ls -ld .\n"+
+				"  • Try from a different directory")
 		return err
 	}
 
@@ -472,7 +514,12 @@ func startClaudeInCurrentTmux(sessionName string) error {
 	}
 	claudeCmd := fmt.Sprintf("claude --add-dir '%s'; exit", workDirForClaude)
 	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
-		ui.PrintError(err, "Failed to start Claude", "")
+		ui.PrintError(err,
+			"Failed to start Claude in current tmux pane",
+			"  • Verify Claude is installed: which claude\n"+
+				"  • Test Claude manually: claude --version\n"+
+				"  • Check you're in tmux: echo $TMUX\n"+
+				"  • Exit tmux and try: csm new "+sessionName)
 		return err
 	}
 

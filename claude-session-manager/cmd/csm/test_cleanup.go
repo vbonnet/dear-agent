@@ -104,7 +104,7 @@ func runTestCleanup(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  Directory: failed to remove (may not exist)\n")
 		}
 		if status.Status == "partial" {
-			fmt.Printf("\n⚠️  Partial cleanup - some steps failed\n")
+			fmt.Printf("\n⚠ Partial cleanup - some steps failed\n")
 		}
 	} else {
 		// Automation mode - direct call

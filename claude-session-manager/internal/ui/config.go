@@ -7,6 +7,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// globalConfig holds the active UI configuration
+var globalConfig *Config
+
+// SetGlobalConfig sets the global UI configuration (called from main package)
+func SetGlobalConfig(cfg *Config) {
+	globalConfig = cfg
+}
+
+// GetGlobalConfig returns the global UI configuration
+func GetGlobalConfig() *Config {
+	if globalConfig == nil {
+		return DefaultConfig()
+	}
+	return globalConfig
+}
+
 // Config represents UI configuration
 type Config struct {
 	Defaults DefaultsConfig `yaml:"defaults"`
@@ -28,6 +44,8 @@ type UIConfig struct {
 	ShowProjectPaths bool   `yaml:"show_project_paths"`
 	ShowTags         bool   `yaml:"show_tags"`
 	FuzzySearch      bool   `yaml:"fuzzy_search"`
+	NoColor          bool   `yaml:"no_color"`           // Disable colored output (WCAG AA)
+	ScreenReader     bool   `yaml:"screen_reader"`      // Use text symbols instead of Unicode
 }
 
 type AdvancedConfig struct {

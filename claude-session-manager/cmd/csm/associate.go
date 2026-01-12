@@ -152,7 +152,11 @@ Examples:
 			manifestPath = filepath.Join(manifestDir, "manifest.yaml")
 
 			if err := os.MkdirAll(manifestDir, 0700); err != nil {
-				ui.PrintError(err, "Failed to create manifest directory", "")
+				ui.PrintError(err,
+				"Failed to create manifest directory",
+				"  • Check sessions directory: ls -ld "+sessionsDir+"\n"+
+					"  • Verify disk space: df -h "+sessionsDir+"\n"+
+					"  • Check permissions: ls -ld "+filepath.Dir(manifestDir))
 				return err
 			}
 
@@ -206,7 +210,7 @@ Examples:
 
 		// Write manifest (automatic backup will be created if file exists)
 		if err := manifest.Write(manifestPath, m); err != nil {
-			ui.PrintError(err, "Failed to write manifest", "")
+			ui.PrintManifestWriteError(err)
 			return err
 		}
 

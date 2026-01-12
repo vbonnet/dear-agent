@@ -26,6 +26,16 @@ var colorCodes = map[Color]string{
 
 // Colorize wraps text in ANSI color codes
 func Colorize(text string, color Color) string {
+	cfg := GetGlobalConfig()
+
+	// Check --no-color flag first (WCAG AA requirement)
+	if cfg.UI.NoColor {
+		return text
+	}
+	// Also check NO_COLOR env var for compatibility
+	if os.Getenv("NO_COLOR") != "" {
+		return text
+	}
 	if !isTerminal() {
 		return text
 	}
@@ -63,6 +73,16 @@ func Blue(text string) string {
 
 // Bold returns bold text
 func Bold(text string) string {
+	cfg := GetGlobalConfig()
+
+	// Check --no-color flag first (WCAG AA requirement)
+	if cfg.UI.NoColor {
+		return text
+	}
+	// Also check NO_COLOR env var for compatibility
+	if os.Getenv("NO_COLOR") != "" {
+		return text
+	}
 	if !isTerminal() {
 		return text
 	}
