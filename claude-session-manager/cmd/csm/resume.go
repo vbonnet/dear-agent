@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/discovery"
@@ -482,12 +484,21 @@ func resumeSession(sessionID, manifestPath string, health *HealthStatus) error {
 		}
 
 		// Wait for Claude to be ready
-		spinner := ui.NewSpinner("Waiting for Claude to be ready...")
-		spinner.Start()
-		if err := tmux.WaitForProcessReady(health.TmuxSessionName, "claude", 5*time.Second); err != nil {
-			spinner.Warning("Claude is taking longer than expected")
+		var waitErr error
+		spinErr := spinner.New().
+			Title("Waiting for Claude to be ready...").
+			Accessible(true).
+			Action(func() {
+				waitErr = tmux.WaitForProcessReady(health.TmuxSessionName, "claude", 5*time.Second)
+			}).
+			Run()
+		if spinErr != nil {
+			return fmt.Errorf("spinner error: %w", spinErr)
+		}
+		if waitErr != nil {
+			fmt.Println("⚠️  Claude is taking longer than expected")
 		} else {
-			spinner.Success("Claude is ready!")
+			fmt.Println("✅ Claude is ready!")
 		}
 	}
 
@@ -662,7 +673,13 @@ func offerToImportOrphanedSession(identifier string) (*manifest.Manifest, string
 	fmt.Println()
 
 	// Confirm with user
-	confirm, err := ui.Confirm("Would you like to import this session?")
+	var confirm bool
+	err = huh.NewConfirm().
+		Title("Would you like to import this session?").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&confirm).
+		Run()
 	if err != nil || !confirm {
 		return nil, "", fmt.Errorf("import declined by user")
 	}

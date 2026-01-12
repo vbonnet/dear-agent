@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
@@ -90,11 +92,22 @@ Examples:
 				fmt.Printf("Using current tmux session: %s\n", sessionName)
 			} else {
 				// Prompt for session name
-				sessionName, err = ui.PromptForString("Enter session name")
+				var inputName string
+				err = huh.NewInput().
+					Title("Enter session name:").
+					Value(&inputName).
+					Validate(func(s string) error {
+						if s == "" {
+							return fmt.Errorf("session name cannot be empty")
+						}
+						return nil
+					}).
+					Run()
 				if err != nil {
 					ui.PrintError(err, "Failed to read session name", "")
 					return err
 				}
+				sessionName = inputName
 
 				if sessionName == "" {
 					ui.PrintError(
@@ -159,18 +172,25 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 	if exists {
 		// Prompt user for action
-		choice, err := ui.Prompt(
-			fmt.Sprintf("Tmux session '%s' already exists. What would you like to do?", sessionName),
-			[]string{
-				"Reuse existing tmux session (start Claude in it)",
-				"Choose a different name",
-				"Cancel",
-			},
-		)
+		var choiceStr string
+		options := []huh.Option[string]{
+			huh.NewOption("Reuse existing tmux session (start Claude in it)", "0"),
+			huh.NewOption("Choose a different name", "1"),
+			huh.NewOption("Cancel", "2"),
+		}
+		err = huh.NewSelect[string]().
+			Title(fmt.Sprintf("Tmux session '%s' already exists. What would you like to do?", sessionName)).
+			Options(options...).
+			Value(&choiceStr).
+			Run()
 		if err != nil {
 			ui.PrintError(err, "Failed to read choice", "")
 			return err
 		}
+
+		// Convert string choice to int for switch statement
+		var choice int
+		fmt.Sscanf(choiceStr, "%d", &choice)
 
 		switch choice {
 		case 0:
@@ -178,7 +198,17 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			fmt.Printf("Reusing existing tmux session: %s\n", sessionName)
 		case 1:
 			// Prompt for new name
-			newName, err := ui.PromptForString("Enter new session name")
+			var newName string
+			err = huh.NewInput().
+				Title("Enter new session name:").
+				Value(&newName).
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("session name cannot be empty")
+					}
+					return nil
+				}).
+				Run()
 			if err != nil {
 				ui.PrintError(err, "Failed to read session name", "")
 				return err
@@ -235,15 +265,24 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	// Increased timeout to 15s to account for MCP loading and SessionStart hooks
 	debug.Phase("Wait for Claude Process")
 	debug.Log("Waiting for 'claude' process to appear (timeout: 15s)")
-	spinner := ui.NewSpinner("Waiting for Claude to be ready...")
-	spinner.Start()
-	if err := tmux.WaitForProcessReady(sessionName, "claude", 15*time.Second); err != nil {
-		debug.Log("Process wait timed out or failed: %v", err)
-		spinner.Warning("Claude is taking longer than expected (still starting)")
+	var waitErr error
+	spinErr := spinner.New().
+		Title("Waiting for Claude to be ready...").
+		Accessible(true).
+		Action(func() {
+			waitErr = tmux.WaitForProcessReady(sessionName, "claude", 15*time.Second)
+		}).
+		Run()
+	if spinErr != nil {
+		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	if waitErr != nil {
+		debug.Log("Process wait timed out or failed: %v", waitErr)
+		fmt.Println("⚠️  Claude is taking longer than expected (still starting)")
 		fmt.Println("  Attaching now - Claude should appear shortly")
 	} else {
 		debug.Log("Claude process is ready")
-		spinner.Success("Claude is ready!")
+		fmt.Println("✅ Claude is ready!")
 	}
 
 	// Wait for Claude to fully initialize before sending commands
@@ -437,11 +476,11 @@ func startClaudeInCurrentTmux(sessionName string) error {
 		return err
 	}
 
-	// Wait for Claude banner to appear (more reliable than prompt character)
+	// Wait for Claude process to appear (more reliable than prompt character)
 	fmt.Println("Waiting for Claude to initialize...")
-	if err := tmux.WaitForInputReady(sessionName, "Claude Code", 30*time.Second); err != nil {
+	if err := tmux.WaitForProcessReady(sessionName, "claude", 30*time.Second); err != nil {
 		ui.PrintWarning("Claude may still be initializing")
-		fmt.Printf("💡 Session is ready, but banner not detected. This is usually fine.\n")
+		fmt.Printf("💡 Session is ready, but process not detected. This is usually fine.\n")
 	}
 
 	// Send /csm-tools:csm-assoc command to associate session with CSM

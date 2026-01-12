@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/history"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/llm"
@@ -222,7 +223,13 @@ func handleSearchResults(query string, results []llm.SearchResult) error {
 		fmt.Printf("\n")
 
 		// Confirm before restoring
-		confirmed, err := ui.Confirm("Restore this session?")
+		var confirmed bool
+		err = huh.NewConfirm().
+			Title("Restore this session?").
+			Affirmative("Yes").
+			Negative("No").
+			Value(&confirmed).
+			Run()
 		if err != nil || !confirmed {
 			fmt.Printf("\nRestore cancelled.\n")
 			return nil

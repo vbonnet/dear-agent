@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/backup"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
@@ -125,7 +126,13 @@ Examples:
 		fmt.Printf("Restore session %s from backup #%d?\n", m.SessionID[:8], backupNum)
 		fmt.Println("\nWarning: The current manifest will be backed up before restoration.")
 
-		confirm, err := ui.Confirm("Continue?")
+		var confirm bool
+		err = huh.NewConfirm().
+			Title("Continue?").
+			Affirmative("Yes").
+			Negative("No").
+			Value(&confirm).
+			Run()
 		if err != nil || !confirm {
 			fmt.Println("Restoration cancelled.")
 			return nil

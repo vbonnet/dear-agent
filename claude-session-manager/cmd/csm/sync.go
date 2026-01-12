@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/detection"
@@ -109,7 +110,13 @@ Examples:
 			ui.PrintWarning(fmt.Sprintf("Found %d orphaned Claude sessions in history", len(result.OrphanedClaude)))
 
 			// Ask if user wants to interactively create manifests for these
-			confirm, err := ui.Confirm("\nDo you want to interactively create manifests for orphaned sessions?")
+			var confirm bool
+			err := huh.NewConfirm().
+				Title("\nDo you want to interactively create manifests for orphaned sessions?").
+				Affirmative("Yes").
+				Negative("No").
+				Value(&confirm).
+				Run()
 			if err != nil || !confirm {
 				fmt.Println("Skipping orphaned sessions. Run 'csm sync' again to handle them later.")
 			} else {
@@ -139,8 +146,14 @@ Examples:
 					fmt.Printf("     Last Activity: %s\n", session.LastActivity.Format("2006-01-02 15:04:05"))
 
 					// Offer to create manifest
-					confirm, err := ui.Confirm("Create manifest for this session?")
-					if err != nil || !confirm {
+					var confirmSession bool
+					err := huh.NewConfirm().
+						Title("Create manifest for this session?").
+						Affirmative("Yes").
+						Negative("No").
+						Value(&confirmSession).
+						Run()
+					if err != nil || !confirmSession {
 						continue
 					}
 
