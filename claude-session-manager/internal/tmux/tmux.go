@@ -297,6 +297,54 @@ func ListSessionsWithInfo() ([]SessionInfo, error) {
 	return sessions, nil
 }
 
+// ClientInfo holds information about a tmux client
+type ClientInfo struct {
+	SessionName string
+	TTY         string
+	PID         int
+}
+
+// ListClients returns all clients attached to a specific session
+func ListClients(sessionName string) ([]ClientInfo, error) {
+	ctx := context.Background()
+	socketPath := GetSocketPath()
+	// Format: session_name:client_tty:client_pid
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-clients", "-t", sessionName, "-F", "#{session_name}:#{client_tty}:#{client_pid}")
+	if err != nil {
+		// Check for timeout error
+		if _, ok := err.(*TimeoutError); ok {
+			return nil, err
+		}
+		// If session not found or no clients, return empty list
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return []ClientInfo{}, nil
+		}
+		return nil, fmt.Errorf("failed to list tmux clients: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	clients := make([]ClientInfo, 0, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		// Parse "session_name:tty:pid" format
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		var pid int
+		fmt.Sscanf(parts[2], "%d", &pid)
+
+		clients = append(clients, ClientInfo{
+			SessionName: parts[0],
+			TTY:         parts[1],
+			PID:         pid,
+		})
+	}
+	return clients, nil
+}
+
 // GetCurrentSessionName returns the name of the current tmux session
 // Returns error if not running inside tmux or if command fails
 func GetCurrentSessionName() (string, error) {

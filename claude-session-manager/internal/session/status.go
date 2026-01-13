@@ -1,11 +1,7 @@
 package session
 
 import (
-	"os"
-	"strings"
-
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
-	"golang.org/x/term"
 )
 
 // StatusInfo holds status and attachment information for a session
@@ -76,23 +72,6 @@ func ComputeStatusBatch(manifests []*manifest.Manifest, tmux TmuxInterface) map[
 	return statuses
 }
 
-// getCurrentTTY returns the current terminal device path (e.g., "/dev/pts/3")
-// Returns empty string if not running in a TTY
-func getCurrentTTY() string {
-	// Check if stdin is a terminal
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return ""
-	}
-
-	// Try to read the TTY name from /proc/self/fd/0
-	ttyPath, err := os.Readlink("/proc/self/fd/0")
-	if err != nil {
-		return ""
-	}
-
-	return ttyPath
-}
-
 // ComputeStatusBatchWithInfo computes status and attachment info for multiple manifests efficiently
 // Makes a single call to tmux.ListSessionsWithInfo() instead of N calls
 //
@@ -106,9 +85,6 @@ func ComputeStatusBatchWithInfo(manifests []*manifest.Manifest, tmux TmuxInterfa
 		// On error, assume no sessions exist
 		existingSessions = []SessionInfo{}
 	}
-
-	// Get current TTY to detect local attachment
-	currentTTY := getCurrentTTY()
 
 	// Build map of session name → SessionInfo for O(1) lookup
 	sessionMap := make(map[string]SessionInfo, len(existingSessions))
@@ -125,23 +101,10 @@ func ComputeStatusBatchWithInfo(manifests []*manifest.Manifest, tmux TmuxInterfa
 				LocallyAttached: false,
 			}
 		} else if sessionInfo, exists := sessionMap[m.Tmux.SessionName]; exists {
-			// Check if current TTY is in the attached list
-			locallyAttached := false
-			if currentTTY != "" && sessionInfo.AttachedList != "" {
-				// Check if currentTTY is in comma-separated list
-				attachedTTYs := strings.Split(sessionInfo.AttachedList, ",")
-				for _, tty := range attachedTTYs {
-					if strings.TrimSpace(tty) == currentTTY {
-						locallyAttached = true
-						break
-					}
-				}
-			}
-
 			statuses[m.Name] = StatusInfo{
 				Status:          "active",
 				AttachedClients: sessionInfo.AttachedClients,
-				LocallyAttached: locallyAttached,
+				LocallyAttached: false, // No longer used, but kept for compatibility
 			}
 		} else {
 			statuses[m.Name] = StatusInfo{

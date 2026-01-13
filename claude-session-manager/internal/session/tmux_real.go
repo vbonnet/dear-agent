@@ -52,3 +52,21 @@ func (t *RealTmux) AttachSession(name string) error {
 func (t *RealTmux) SendKeys(session, keys string) error {
 	return tmux.SendCommand(session, keys)
 }
+
+// ListClients returns all clients attached to a specific session
+func (t *RealTmux) ListClients(sessionName string) ([]ClientInfo, error) {
+	tmuxClients, err := tmux.ListClients(sessionName)
+	if err != nil {
+		return nil, err
+	}
+	// Convert tmux.ClientInfo to session.ClientInfo
+	clients := make([]ClientInfo, len(tmuxClients))
+	for i, c := range tmuxClients {
+		clients[i] = ClientInfo{
+			SessionName: c.SessionName,
+			TTY:         c.TTY,
+			PID:         c.PID,
+		}
+	}
+	return clients, nil
+}

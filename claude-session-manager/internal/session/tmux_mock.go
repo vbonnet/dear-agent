@@ -103,3 +103,8 @@ func (m *MockTmux) SendKeys(session, keys string) error {
 	m.SentCommands = append(m.SentCommands, keys)
 	return nil
 }
+
+// ListClients returns empty list in the mock (clients not tracked)
+func (m *MockTmux) ListClients(sessionName string) ([]ClientInfo, error) {
+	return []ClientInfo{}, nil
+}
