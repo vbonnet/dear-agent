@@ -50,21 +50,27 @@ func (seq *InitSequence) Run() error {
 	return nil
 }
 
-// sendRename sends the /rename command and waits for confirmation
+// sendRename sends the /rename command and waits for it to complete
 func (seq *InitSequence) sendRename(ctrl *ControlModeSession, watcher *OutputWatcher) error {
 	renameCmd := fmt.Sprintf("/rename %s", seq.SessionName)
 
 	// Send command using send-keys in control mode
-	// Note: We use the raw send-keys format in control mode
-	commandLine := fmt.Sprintf("send-keys -t %s %q C-m", seq.SessionName, renameCmd)
-	if _, err := fmt.Fprintf(ctrl.Stdin, "%s\n", commandLine); err != nil {
-		return fmt.Errorf("failed to send rename command: %w", err)
+	// Use -l flag for literal text, then send Enter separately
+	sendLiteralCmd := fmt.Sprintf("send-keys -t %s -l %q", seq.SessionName, renameCmd)
+	if _, err := fmt.Fprintf(ctrl.Stdin, "%s\n", sendLiteralCmd); err != nil {
+		return fmt.Errorf("failed to send rename text: %w", err)
 	}
 
-	// Wait for "Rename successful" confirmation
-	// Timeout: 10s (rename should be quick)
-	if err := watcher.WaitForPattern("Rename successful", 10*time.Second); err != nil {
-		return fmt.Errorf("rename did not complete: %w", err)
+	// Send Enter to execute the command
+	sendEnterCmd := fmt.Sprintf("send-keys -t %s C-m", seq.SessionName)
+	if _, err := fmt.Fprintf(ctrl.Stdin, "%s\n", sendEnterCmd); err != nil {
+		return fmt.Errorf("failed to send Enter: %w", err)
+	}
+
+	// /rename completes silently (no output), so just wait for the prompt to return
+	// The prompt indicator (❯) appears when Claude is ready for the next command
+	if err := watcher.WaitForPattern("❯", 10*time.Second); err != nil {
+		return fmt.Errorf("rename did not complete (prompt not returned): %w", err)
 	}
 
 	return nil
@@ -74,12 +80,19 @@ func (seq *InitSequence) sendRename(ctrl *ControlModeSession, watcher *OutputWat
 // Note: This only sends the command via control mode. The caller is responsible
 // for waiting for the ready-file signal if needed (to allow for custom progress reporting).
 func (seq *InitSequence) sendAssociation(ctrl *ControlModeSession, watcher *OutputWatcher) error {
-	assocCmd := "/csm-tools:csm-assoc"
+	assocCmd := fmt.Sprintf("/csm-tools:csm-assoc %s", seq.SessionName)
 
 	// Send command using send-keys in control mode
-	commandLine := fmt.Sprintf("send-keys -t %s %q C-m", seq.SessionName, assocCmd)
-	if _, err := fmt.Fprintf(ctrl.Stdin, "%s\n", commandLine); err != nil {
-		return fmt.Errorf("failed to send association command: %w", err)
+	// Use -l flag for literal text, then send Enter separately
+	sendLiteralCmd := fmt.Sprintf("send-keys -t %s -l %q", seq.SessionName, assocCmd)
+	if _, err := fmt.Fprintf(ctrl.Stdin, "%s\n", sendLiteralCmd); err != nil {
+		return fmt.Errorf("failed to send association text: %w", err)
+	}
+
+	// Send Enter to execute the command
+	sendEnterCmd := fmt.Sprintf("send-keys -t %s C-m", seq.SessionName)
+	if _, err := fmt.Fprintf(ctrl.Stdin, "%s\n", sendEnterCmd); err != nil {
+		return fmt.Errorf("failed to send Enter: %w", err)
 	}
 
 	// Command sent successfully - ready-file wait is handled by caller

@@ -46,7 +46,7 @@ func (w *OutputWatcher) WaitForPattern(pattern string, timeout time.Duration) er
 		// Check for %output notifications (tmux control mode)
 		if strings.HasPrefix(line, "%output") {
 			// Extract and decode the output content
-			content := extractOutputContent(line)
+			content := ExtractOutputContent(line)
 			if strings.Contains(content, pattern) {
 				return nil // Pattern found!
 			}
@@ -71,9 +71,9 @@ func (w *OutputWatcher) addToBuffer(line string) {
 	}
 }
 
-// extractOutputContent extracts and unescapes content from %output line
+// ExtractOutputContent extracts and unescapes content from %output line
 // Example: "%output %0 hello\040world\012" → "hello world\n"
-func extractOutputContent(line string) string {
+func ExtractOutputContent(line string) string {
 	// Format: %output %pane_id content
 	parts := strings.SplitN(line, " ", 3)
 	if len(parts) < 3 {
@@ -196,7 +196,7 @@ func (w *OutputWatcher) WaitForAnyPattern(patterns []string, timeout time.Durati
 		// Check for %output notifications
 		var content string
 		if strings.HasPrefix(line, "%output") {
-			content = extractOutputContent(line)
+			content = ExtractOutputContent(line)
 		} else {
 			content = line
 		}

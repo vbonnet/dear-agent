@@ -170,9 +170,11 @@ func AttachSession(name string) error {
 func SendCommand(sessionName string, command string) error {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
-	cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, command, "C-m")
-	defer cancel()
-	if err := cmd.Run(); err != nil {
+
+	// Send command text using -l (literal) flag
+	cmdText, cancel1 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, "-l", command)
+	defer cancel1()
+	if err := cmdText.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return &TimeoutError{
 				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
@@ -180,8 +182,23 @@ func SendCommand(sessionName string, command string) error {
 				Duration: globalTimeout,
 			}
 		}
-		return fmt.Errorf("failed to send command to tmux: %w", err)
+		return fmt.Errorf("failed to send command text to tmux: %w", err)
 	}
+
+	// Send Enter key separately (required - sending C-m in same command creates newline in prompt)
+	cmdEnter, cancel2 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, "C-m")
+	defer cancel2()
+	if err := cmdEnter.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return &TimeoutError{
+				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
+				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+				Duration: globalTimeout,
+			}
+		}
+		return fmt.Errorf("failed to send Enter key to tmux: %w", err)
+	}
+
 	return nil
 }
 

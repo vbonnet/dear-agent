@@ -1,15 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
-	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/readiness"
@@ -179,6 +181,16 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 	fmt.Printf("Creating new tmux session: %s (in %s)\n", sessionName, workDir)
 
+	// Add working directory to Claude's additionalDirectories to prevent trust prompt
+	debug.Phase("Configure Trust")
+	debug.Log("Adding %s to Claude's additionalDirectories", workDir)
+	if err := addToAdditionalDirectories(workDir); err != nil {
+		debug.Log("Warning: failed to add to additionalDirectories: %v", err)
+		ui.PrintWarning("Could not pre-authorize directory - trust prompt may appear")
+	} else {
+		debug.Log("Successfully added to additionalDirectories")
+	}
+
 	// Check if tmux session already exists
 	exists, err := tmux.HasSession(sessionName)
 	if err != nil {
@@ -277,7 +289,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	// Start Claude in the session
 	// Use --add-dir to pre-approve workspace and avoid trust prompt blocking the ">" prompt
 	debug.Phase("Start Claude")
-	claudeCmd := fmt.Sprintf("claude --add-dir '%s'; exit", workDir)
+	claudeCmd := fmt.Sprintf("claude --add-dir '%s'", workDir)
 	debug.Log("Sending command: %s", claudeCmd)
 	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
 		ui.PrintError(err,
@@ -323,80 +335,39 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		fmt.Println("✅ Claude is ready!")
 	}
 
-	// Wait for Claude to fully initialize before sending commands
-	// This ensures Claude is ready to receive input (banner displayed, prompt ready)
-	debug.Log("Waiting 2s for Claude to be ready for input")
-	time.Sleep(2 * time.Second)
-
-	// Run sequenced initialization: /rename → /csm-assoc via control mode
-	// This solves the chicken-and-egg problem where /csm-assoc fails on new sessions
-	// because Claude needs at least one message to generate a UUID.
-	// The /rename command generates the UUID, then /csm-assoc can capture it.
-	debug.Phase("Sequenced Initialization")
-	debug.Log("Running rename + associate sequence via tmux control mode")
-	seq := tmux.NewInitSequence(sessionName)
-	if err := seq.Run(); err != nil {
-		debug.Log("Sequenced initialization failed: %v", err)
-		ui.PrintWarning("Automatic initialization failed")
-		fmt.Printf("💡 You can manually run: /rename %s\n", sessionName)
-		fmt.Printf("💡 Then run: /csm-tools:csm-assoc\n")
-	} else {
-		debug.Log("Sequenced initialization completed successfully (rename + assoc sent)")
-		ui.PrintSuccess("Session initialized and association requested")
+	// Monitor for trust prompt using control mode (event-driven, not time-based)
+	// Only answer if we actually detect the prompt appearing
+	debug.Phase("Monitor for Trust Prompt")
+	debug.Log("Starting control mode to monitor for trust prompt")
+	if err := monitorAndAnswerTrustPrompt(sessionName, 10*time.Second); err != nil {
+		debug.Log("Trust prompt handling: %v", err)
+		// Non-fatal - either no prompt appeared (good) or we couldn't answer it (user can manually)
 	}
 
-	// Release lock BEFORE waiting for ready-file
-	// The csm-assoc command will invoke 'csm associate', which needs the lock
-	// Moving lock release here prevents deadlock (csm associate can now run)
-	debug.Log("Releasing lock before waiting for ready-file")
-	if globalLock != nil {
-		if err := globalLock.Unlock(); err != nil {
-			ui.PrintWarning(fmt.Sprintf("Failed to release lock: %v", err))
-		} else {
-			debug.Log("Lock released successfully")
-		}
-		globalLock = nil // Prevent double-unlock in PersistentPostRunE
-	}
+	// Wait for SessionStart hooks to complete before sending commands
+	// SessionStart hooks run immediately when Claude starts (no message needed)
+	debug.Phase("Wait for SessionStart Hooks")
+	debug.Log("Waiting for SessionStart hooks to complete (they run at Claude startup)")
+	fmt.Println("⏳ Waiting for SessionStart hooks to complete...")
+	time.Sleep(5 * time.Second) // Give hooks time to start
 
-	// Wait for Claude ready signal (file-based, created by csm-assoc → csm associate)
-	debug.Phase("Wait for Claude Ready Signal")
-	debug.Log("Waiting for ready-file signal (timeout: 60s)")
-	fmt.Println("Waiting for Claude to initialize...")
-	if err := readiness.WaitForClaudeReady(sessionName, 60*time.Second); err != nil {
-		debug.Log("Ready-file wait failed: %v", err)
-		ui.PrintError(err, "Claude did not become ready within timeout (60s)",
-			"  • Check if Claude started successfully: tmux attach -t "+sessionName+"\n"+
-				"  • SessionStart hooks may be running (wait and retry)\n"+
-				"  • Run diagnostics: csm doctor\n"+
-				"  • Check debug logs: ~/.csm/debug/"+sessionName+"/")
-		return err
-	}
-	debug.Log("Ready-file signal detected - Claude is ready")
-	ui.PrintSuccess("Claude is ready and session associated")
-
-	// Attempt to capture Claude UUID automatically
-	const uuidCaptureTimeout = 3 * time.Second
-	capturedUUID := ""
-	if uuid, err := claude.CaptureLatestUUID(uuidCaptureTimeout); err != nil {
-		ui.PrintWarning(fmt.Sprintf("Could not capture UUID: %v", err))
-		fmt.Println("💡 You can run 'csm sync' later to populate the UUID")
-	} else {
-		capturedUUID = uuid
-		ui.PrintSuccess(fmt.Sprintf("Captured Claude UUID: %s...", uuid[:8]))
-	}
-
-	// Create manifest
+	// Create manifest BEFORE sending /rename (so hook can find it)
+	debug.Phase("Create Manifest")
 	sessionsDir := getSessionsDir()
-	manifestDir := filepath.Join(sessionsDir, fmt.Sprintf("session-%s", sessionName))
+	manifestDir := filepath.Join(sessionsDir, sessionName)
 	manifestPath := filepath.Join(manifestDir, "manifest.yaml")
 
 	if err := os.MkdirAll(manifestDir, 0700); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to create manifest directory: %v", err))
+		fmt.Println("⚠  Proceeding without manifest - you can run 'csm sync' later")
 	} else {
-		// Create v2 manifest
+		// Create v2 manifest with proper SessionID and empty Claude UUID
+		// The /csm-assoc command will populate the Claude UUID when it runs
+		generatedUUID := uuid.New().String()
+		debug.Log("Generated SessionID: %s", generatedUUID)
 		m := &manifest.Manifest{
 			SchemaVersion: manifest.SchemaVersion,
-			SessionID:     fmt.Sprintf("session-%s", sessionName),
+			SessionID:     generatedUUID, // Generate proper UUID
 			Name:          sessionName,
 			CreatedAt:     time.Now(),
 			UpdatedAt:     time.Now(),
@@ -411,16 +382,72 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 				SessionName: sessionName,
 			},
 			Claude: manifest.Claude{
-				UUID: capturedUUID,
+				UUID: "", // Will be populated by SessionStart hook
 			},
 		}
 
 		if err := manifest.Write(manifestPath, m); err != nil {
 			ui.PrintWarning(fmt.Sprintf("Failed to write manifest: %v", err))
+			fmt.Println("⚠  Proceeding without manifest - you can run 'csm sync' later")
 		} else {
-			fmt.Printf("Created manifest: %s\n", manifestPath)
-			// Note: UUID is now captured automatically during session creation
+			debug.Log("Manifest created at: %s", manifestPath)
+			fmt.Printf("✓ Created manifest: %s\n", manifestPath)
 		}
+	}
+
+	// Release lock BEFORE running sequenced init (csm associate needs it)
+	debug.Log("Releasing lock before sequenced initialization")
+	if globalLock != nil {
+		if err := globalLock.Unlock(); err != nil {
+			ui.PrintWarning(fmt.Sprintf("Failed to release lock: %v", err))
+		} else {
+			debug.Log("Lock released successfully")
+		}
+		globalLock = nil // Prevent double-unlock in PersistentPostRunE
+	}
+
+	// Send /rename command FIRST to generate Claude UUID
+	// The UUID is only created when the first message is sent
+	debug.Phase("Send Rename Command")
+	debug.Log("Sending /rename %s command", sessionName)
+	renameCmd := fmt.Sprintf("/rename %s", sessionName)
+	if err := tmux.SendCommand(sessionName, renameCmd); err != nil {
+		debug.Log("Failed to send rename command: %v", err)
+		ui.PrintWarning("Failed to auto-send rename command")
+	} else {
+		debug.Log("Rename command sent successfully")
+	}
+
+	// Brief sleep to allow rename to process before sending association command
+	time.Sleep(500 * time.Millisecond)
+
+	// Send /csm-tools:csm-assoc command to associate session with CSM
+	// This needs to run AFTER /rename so Claude UUID is generated
+	// This needs to run BEFORE waiting for ready-file so it can create the ready-file
+	debug.Phase("Send Association Command")
+	debug.Log("Sending /csm-tools:csm-assoc %s command", sessionName)
+	assocCmd := fmt.Sprintf("/csm-tools:csm-assoc %s", sessionName)
+	if err := tmux.SendCommand(sessionName, assocCmd); err != nil {
+		debug.Log("Failed to send csm-assoc command: %v", err)
+		ui.PrintWarning("Failed to auto-send association command")
+		fmt.Printf("💡 You can manually run: /csm-tools:csm-assoc %s\n", sessionName)
+	} else {
+		debug.Log("csm-assoc command sent successfully")
+		// Success message removed - automation should be quiet
+	}
+
+	// Wait for ready-file (created by csm associate when UUID is captured)
+	debug.Phase("Wait for Ready Signal")
+	debug.Log("Waiting for ready-file signal (timeout: 60s)")
+	fmt.Println("Waiting for Claude to initialize...")
+	if err := readiness.WaitForClaudeReady(sessionName, 60*time.Second); err != nil {
+		debug.Log("Ready-file wait failed: %v", err)
+		ui.PrintWarning("Claude did not signal ready within timeout")
+		fmt.Println("  • Attach to session to check status: tmux attach -t " + sessionName)
+		fmt.Printf("  • Run 'csm sync' later to populate UUID if needed\n")
+	} else {
+		debug.Log("Ready-file detected - session is ready")
+		ui.PrintSuccess("Claude is ready and session associated!")
 	}
 
 	// Update VS Code tab title if running in VS Code
@@ -471,17 +498,20 @@ func startClaudeInCurrentTmux(sessionName string) error {
 
 	// Create or update manifest
 	sessionsDir := getSessionsDir()
-	manifestDir := filepath.Join(sessionsDir, fmt.Sprintf("session-%s", sessionName))
+	manifestDir := filepath.Join(sessionsDir, sessionName)
 	manifestPath := filepath.Join(manifestDir, "manifest.yaml")
 
 	// Create manifest directory if it doesn't exist
 	if err := os.MkdirAll(manifestDir, 0700); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to create manifest directory: %v", err))
 	} else {
-		// Create v2 manifest (will be updated with UUID by hooks)
+		// Create v2 manifest with proper SessionID and empty Claude UUID
+		// The /csm-assoc command will populate the Claude UUID when it runs
+		generatedUUID := uuid.New().String()
+		debug.Log("Generated SessionID: %s", generatedUUID)
 		m := &manifest.Manifest{
 			SchemaVersion: manifest.SchemaVersion,
-			SessionID:     fmt.Sprintf("session-%s", sessionName),
+			SessionID:     generatedUUID, // Generate proper UUID
 			Name:          sessionName,
 			CreatedAt:     time.Now(),
 			UpdatedAt:     time.Now(),
@@ -512,7 +542,7 @@ func startClaudeInCurrentTmux(sessionName string) error {
 	if workDirForClaude == "" {
 		workDirForClaude = workDir
 	}
-	claudeCmd := fmt.Sprintf("claude --add-dir '%s'; exit", workDirForClaude)
+	claudeCmd := fmt.Sprintf("claude --add-dir '%s'", workDirForClaude)
 	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
 		ui.PrintError(err,
 			"Failed to start Claude in current tmux pane",
@@ -544,6 +574,138 @@ func startClaudeInCurrentTmux(sessionName string) error {
 
 	// Update VS Code tab title if running in VS Code
 	updateVSCodeTabTitle(sessionName)
+
+	return nil
+}
+
+// monitorAndAnswerTrustPrompt monitors tmux output via control mode and answers trust prompt if detected
+// Returns nil if no prompt appears (success), error if prompt appears but we can't answer it
+func monitorAndAnswerTrustPrompt(sessionName string, timeout time.Duration) error {
+	// Start control mode
+	ctrl, err := tmux.StartControlMode(sessionName)
+	if err != nil {
+		return fmt.Errorf("failed to start control mode: %w", err)
+	}
+	defer ctrl.Close()
+
+	// Create output watcher
+	watcher := tmux.NewOutputWatcher(ctrl.Stdout)
+
+	deadline := time.Now().Add(timeout)
+	trustPromptDetected := false
+
+	for time.Now().Before(deadline) {
+		// Read next line with short timeout
+		line, err := watcher.GetRawLine(1 * time.Second)
+		if err != nil {
+			// Timeout reading - no more output
+			// If we haven't seen trust prompt, assume it won't appear
+			if !trustPromptDetected {
+				debug.Log("No trust prompt detected (good - additionalDirectories likely worked)")
+				return nil
+			}
+			continue
+		}
+
+		// Parse %output events
+		if !strings.HasPrefix(line, "%output") {
+			continue
+		}
+
+		content := tmux.ExtractOutputContent(line)
+
+		// Check for trust prompt
+		if strings.Contains(content, "Do you trust the files in this folder?") {
+			trustPromptDetected = true
+			debug.Log("Trust prompt detected!")
+			fmt.Println("📋 Trust prompt appeared - answering automatically...")
+		}
+
+		// If we detected the prompt, look for the selection UI
+		if trustPromptDetected && strings.Contains(content, "Yes, proceed") {
+			debug.Log("Sending Enter to select 'Yes, proceed'")
+
+			// Close control mode before sending keys (mixing control + send-keys doesn't work well)
+			ctrl.Close()
+
+			// Send Enter key via regular tmux
+			if err := tmux.SendCommand(sessionName, "C-m"); err != nil {
+				return fmt.Errorf("failed to answer trust prompt: %w", err)
+			}
+
+			debug.Log("Trust prompt answered successfully")
+			fmt.Println("✓ Trust prompt answered")
+			return nil
+		}
+	}
+
+	if trustPromptDetected {
+		return fmt.Errorf("trust prompt detected but couldn't find 'Yes, proceed' option")
+	}
+
+	// No trust prompt seen - this is success
+	return nil
+}
+
+// addToAdditionalDirectories adds a directory to Claude's additionalDirectories in settings.json
+// This prevents the trust prompt from appearing for this directory
+func addToAdditionalDirectories(dir string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	settingsPath := filepath.Join(homeDir, ".claude", "settings.json")
+
+	// Read existing settings
+	var settings map[string]interface{}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Create new settings file
+			settings = make(map[string]interface{})
+		} else {
+			return fmt.Errorf("failed to read settings.json: %w", err)
+		}
+	} else {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("failed to parse settings.json: %w", err)
+		}
+	}
+
+	// Get or create additionalDirectories array
+	var additionalDirs []string
+	if existing, ok := settings["additionalDirectories"]; ok {
+		if dirs, ok := existing.([]interface{}); ok {
+			for _, d := range dirs {
+				if str, ok := d.(string); ok {
+					additionalDirs = append(additionalDirs, str)
+				}
+			}
+		}
+	}
+
+	// Check if directory already exists
+	for _, d := range additionalDirs {
+		if d == dir {
+			// Already present, no need to add
+			return nil
+		}
+	}
+
+	// Add the new directory
+	additionalDirs = append(additionalDirs, dir)
+	settings["additionalDirectories"] = additionalDirs
+
+	// Write back to settings.json
+	output, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal settings: %w", err)
+	}
+
+	if err := os.WriteFile(settingsPath, output, 0600); err != nil {
+		return fmt.Errorf("failed to write settings.json: %w", err)
+	}
 
 	return nil
 }

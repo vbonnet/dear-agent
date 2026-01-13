@@ -1,0 +1,10 @@
+# Test: csm --version should display version information
+# This is a simple smoke test to verify the csm binary works
+
+exec csm --version
+stdout 'csm version'
+
+# Test: csm without arguments should show help
+exec csm
+stdout 'Usage:'
+stdout 'Available Commands:'
