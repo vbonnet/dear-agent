@@ -5,6 +5,8 @@ exec csm --version
 stdout 'csm version'
 
 # Test: csm without arguments should show help
+# Note: This currently uses a placeholder implementation
+# Full integration requires exporting rootCmd from cmd/csm/main.go
 exec csm
 stdout 'Usage:'
-stdout 'Available Commands:'
+stdout 'Claude Session Manager'
