@@ -68,6 +68,7 @@ func (m *MockTmux) ListSessionsWithInfo() ([]SessionInfo, error) {
 			sessions = append(sessions, SessionInfo{
 				Name:            name,
 				AttachedClients: 0, // Mock doesn't track attachment
+				AttachedList:    "", // Mock doesn't track TTYs
 			})
 		}
 	}

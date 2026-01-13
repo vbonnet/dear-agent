@@ -248,14 +248,15 @@ func ListSessions() ([]string, error) {
 type SessionInfo struct {
 	Name            string
 	AttachedClients int
+	AttachedList    string
 }
 
 // ListSessionsWithInfo returns all active tmux sessions with attachment information
 func ListSessionsWithInfo() ([]SessionInfo, error) {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
-	// Format: session_name:attached_count
-	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-sessions", "-F", "#{session_name}:#{session_attached}")
+	// Format: session_name:attached_count:attached_list
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-sessions", "-F", "#{session_name}:#{session_attached}:#{session_attached_list}")
 	if err != nil {
 		// Check for timeout error
 		if _, ok := err.(*TimeoutError); ok {
@@ -274,16 +275,23 @@ func ListSessionsWithInfo() ([]SessionInfo, error) {
 		if line == "" {
 			continue
 		}
-		// Parse "name:count" format
-		parts := strings.Split(line, ":")
-		if len(parts) != 2 {
+		// Parse "name:count:attached_list" format
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) < 2 {
 			continue
 		}
 		var attachedCount int
 		fmt.Sscanf(parts[1], "%d", &attachedCount)
+
+		attachedList := ""
+		if len(parts) >= 3 {
+			attachedList = parts[2]
+		}
+
 		sessions = append(sessions, SessionInfo{
 			Name:            parts[0],
 			AttachedClients: attachedCount,
+			AttachedList:    attachedList,
 		})
 	}
 	return sessions, nil

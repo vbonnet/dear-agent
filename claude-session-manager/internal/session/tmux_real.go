@@ -32,6 +32,7 @@ func (t *RealTmux) ListSessionsWithInfo() ([]SessionInfo, error) {
 		sessions[i] = SessionInfo{
 			Name:            s.Name,
 			AttachedClients: s.AttachedClients,
+			AttachedList:    s.AttachedList,
 		}
 	}
 	return sessions, nil

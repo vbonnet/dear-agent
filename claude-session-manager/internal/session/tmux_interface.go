@@ -3,7 +3,8 @@ package session
 // SessionInfo holds information about a tmux session
 type SessionInfo struct {
 	Name            string
-	AttachedClients int // Number of clients attached to this session
+	AttachedClients int    // Number of clients attached to this session
+	AttachedList    string // Comma-separated list of attached TTYs (e.g., "/dev/pts/3,/dev/pts/8")
 }
 
 // TmuxInterface provides an abstraction for tmux operations

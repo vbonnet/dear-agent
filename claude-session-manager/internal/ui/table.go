@@ -46,7 +46,7 @@ func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) str
 	// Compute status and attachment info for all manifests
 	statuses := session.ComputeStatusBatchWithInfo(manifests, tmux)
 
-	// Group manifests by status (active/stopped/stale)
+	// Group manifests by status (active-local/active-remote/stopped/stale)
 	groups := groupByStatus(manifests, statuses)
 
 	// Check if we should show TMUX column (only if any session has NAME != TMUX)
@@ -54,7 +54,7 @@ func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) str
 
 	// Render each group
 	var sections []string
-	for _, statusKey := range []string{"active", "stopped", "stale"} {
+	for _, statusKey := range []string{"active-local", "active-remote", "stopped", "stale"} {
 		group := groups[statusKey]
 		if len(group) == 0 {
 			continue // Skip empty groups
@@ -144,12 +144,13 @@ func FormatTableLegacy(manifests []*manifest.Manifest, tmux session.TmuxInterfac
 	return result.String()
 }
 
-// groupByStatus groups manifests into active/stopped/stale categories
+// groupByStatus groups manifests into active-local/active-remote/stopped/stale categories
 func groupByStatus(manifests []*manifest.Manifest, statuses map[string]session.StatusInfo) map[string][]*manifest.Manifest {
 	groups := map[string][]*manifest.Manifest{
-		"active":  {},
-		"stopped": {},
-		"stale":   {},
+		"active-local":  {},
+		"active-remote": {},
+		"stopped":       {},
+		"stale":         {},
 	}
 
 	staleThreshold := 7 * 24 * time.Hour
@@ -157,7 +158,12 @@ func groupByStatus(manifests []*manifest.Manifest, statuses map[string]session.S
 	for _, m := range manifests {
 		statusInfo := statuses[m.Name]
 		if statusInfo.Status == "active" {
-			groups["active"] = append(groups["active"], m)
+			// Active sessions: distinguish local vs remote
+			if statusInfo.LocallyAttached {
+				groups["active-local"] = append(groups["active-local"], m)
+			} else {
+				groups["active-remote"] = append(groups["active-remote"], m)
+			}
 		} else if statusInfo.Status == "stopped" {
 			// Check if session is stale (stopped for more than 7 days)
 			if time.Since(m.UpdatedAt) >= staleThreshold {
@@ -184,7 +190,19 @@ func shouldShowTmuxColumn(manifests []*manifest.Manifest) bool {
 
 // renderGroupHeader renders a styled group header (e.g., "Active Sessions (4)")
 func renderGroupHeader(status string, count int) string {
-	displayStatus := strings.Title(status) // "active" → "Active"
+	var displayStatus string
+	switch status {
+	case "active-local":
+		displayStatus = "Active (Local)"
+	case "active-remote":
+		displayStatus = "Active (Remote)"
+	case "stopped":
+		displayStatus = "Stopped"
+	case "stale":
+		displayStatus = "Stale"
+	default:
+		displayStatus = strings.Title(status)
+	}
 	text := fmt.Sprintf("%s Sessions (%d)", displayStatus, count)
 	return headerStyle.Render(text)
 }
@@ -194,9 +212,10 @@ func getStatusSymbol(status string) string {
 	cfg := GetGlobalConfig()
 
 	symbolMap := map[string]string{
-		"active":  "●", // U+25CF filled circle
-		"stopped": "○", // U+25CB empty circle
-		"stale":   "⊗", // U+2297 circled times
+		"active-local":  "●", // U+25CF filled circle
+		"active-remote": "◐", // U+25D0 circle with left half black
+		"stopped":       "○", // U+25CB empty circle
+		"stale":         "⊗", // U+2297 circled times
 	}
 
 	symbol := symbolMap[status]
@@ -206,7 +225,9 @@ func getStatusSymbol(status string) string {
 		// Update ScreenReaderText to handle our new symbols
 		switch symbol {
 		case "●":
-			return "[ACTIVE]"
+			return "[ACTIVE-LOCAL]"
+		case "◐":
+			return "[ACTIVE-REMOTE]"
 		case "○":
 			return "[STOPPED]"
 		case "⊗":
@@ -244,11 +265,21 @@ func renderGroupTable(group []*manifest.Manifest, status string, statuses map[st
 		statusInfo := statuses[m.Name]
 		symbol := getStatusSymbol(status)
 
-		// Format status text with attachment count if active and attached
-		statusText := fmt.Sprintf("%s %s", symbol, strings.Title(statusInfo.Status))
-		if statusInfo.Status == "active" && statusInfo.AttachedClients > 0 {
-			statusText = fmt.Sprintf("%s %s (%d att.)", symbol, strings.Title(statusInfo.Status), statusInfo.AttachedClients)
+		// Determine display status text
+		var displayStatus string
+		switch status {
+		case "active-local", "active-remote":
+			displayStatus = "Active"
+		case "stopped":
+			displayStatus = "Stopped"
+		case "stale":
+			displayStatus = "Stale"
+		default:
+			displayStatus = strings.Title(statusInfo.Status)
 		}
+
+		// Format status text (no need to show attachment count anymore - local/remote grouping shows this)
+		statusText := fmt.Sprintf("%s %s", symbol, displayStatus)
 
 		project := compactPath(truncatePath(m.Context.Project, 50))
 
@@ -281,7 +312,7 @@ func renderGroupTable(group []*manifest.Manifest, status string, statuses map[st
 	// Choose style based on status
 	var style lipgloss.Style
 	switch status {
-	case "active":
+	case "active-local", "active-remote":
 		style = activeStyle
 	case "stopped":
 		style = stoppedStyle
