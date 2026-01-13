@@ -1,7 +1,7 @@
 ---
 content-hash: PLACEHOLDER
 description: Archive CSM session (async exit via reaper)
-allowed-tools: Bash(csm get-uuid:*), Bash(csm archive:*), Bash(tmux display-message:*)
+allowed-tools: Bash(csm get-uuid:*), Bash(csm archive:*), Bash(tmux display-message:*), Bash(echo:*)
 ---
 
 # CSM Exit
@@ -9,12 +9,14 @@ allowed-tools: Bash(csm get-uuid:*), Bash(csm archive:*), Bash(tmux display-mess
 I'll archive the current CSM session asynchronously. The session will exit automatically once you return to the prompt.
 
 **Step 1: Verify running in tmux and get session name**
-- Run: `tmux display-message -p '#S'` and capture output
-- If command fails or output is empty:
+- First check if `$TMUX` environment variable is set: Run `echo "$TMUX"`
+- If `$TMUX` is empty or not set:
   - Show error: "❌ Not running in tmux session"
-  - Show message: "Use /exit manually to exit Claude"
-  - Exit gracefully
-- Otherwise, continue to Step 2
+  - Show message: "csm-exit requires tmux. Use /exit manually to exit Claude"
+  - Exit gracefully (do not attempt to run reaper)
+- If `$TMUX` is set:
+  - Run: `tmux display-message -p '#S'` and capture output as SESSION_NAME
+  - Continue to Step 2
 
 **Step 2: Verify CSM association**
 - Run: `csm get-uuid "{session-name-from-step-1}"` (using session name from Step 1)

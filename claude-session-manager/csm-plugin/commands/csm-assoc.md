@@ -2,7 +2,7 @@
 content-hash: PLACEHOLDER
 description: Associate Claude session with CSM (auto-detects tmux session)
 argument-hint: "{session-name}"
-allowed-tools: Bash(csm associate:*), Bash(tmux display-message:*), Bash(pwd)
+allowed-tools: Bash(csm associate:*), Bash(tmux display-message:*), Bash(pwd), Bash(echo:*)
 ---
 
 # CSM Session Association
@@ -11,25 +11,22 @@ I'll associate this Claude session with CSM.
 
 **Step 1: Determine session name source**
 - Check if session name is provided as argument (from $ARGUMENTS)
-- Check if `TMUX_SESSION` environment variable is set
-- Check if running in tmux (can run `tmux display-message -p '#S'`)
-- If none available, show error and exit:
-  ```
-  Error: Not in tmux session and no session name provided
-  Usage: /csm-tools:csm-assoc {session-name}
-  ```
+- If argument provided: Use it as SESSION_NAME, skip to Step 2
+- Check if `$TMUX` environment variable is set: Run `echo "$TMUX"`
+- If `$TMUX` is set:
+  - Run `tmux display-message -p '#S'` and capture output as SESSION_NAME
+  - Continue to Step 2
+- If `$TMUX` is empty/not set and no argument provided:
+  - Show error: "❌ Not in tmux session and no session name provided"
+  - Show message: "Usage: /csm-tools:csm-assoc {session-name}"
+  - Exit gracefully (do not attempt tmux commands)
 
 **Step 2: Try association (without --create)**
-Run the appropriate command based on available session name source.
+Run the appropriate command using SESSION_NAME from Step 1.
 IMPORTANT: Always use `--no-lock` flag to avoid deadlock with csm new.
 
-- If argument provided: Run `csm associate "{session-name-from-arguments}" --no-lock`
-- Else if `TMUX_SESSION` is set: Run `csm associate "{tmux-session-env}" --no-lock`
-- Else:
-  - First get session name: Run `tmux display-message -p '#S'` and capture output
-  - Then run: `csm associate "{session-name-from-tmux}" --no-lock`
-
-Capture exit code and output.
+- Run: `csm associate "{SESSION_NAME}" --no-lock`
+- Capture exit code and output.
 
 **Step 3: Handle result**
 - If exit code is 0:
@@ -37,10 +34,9 @@ Capture exit code and output.
   - Continue to Step 4
 - If output contains "session not found":
   - Session needs to be created with --create flag
-  - First get current directory: Run `pwd` and capture output
-  - If session name not yet determined:
-    - Get session name: Run `tmux display-message -p '#S'` and capture output
-  - Then run: `csm associate "{session-name-from-step-2}" --create --no-lock -C "{current-dir-from-pwd}"`
+  - Run `pwd` and capture output as CURRENT_DIR
+  - Run: `csm associate "{SESSION_NAME}" --create --no-lock -C "{CURRENT_DIR}"`
+    (using SESSION_NAME from Step 1, not from tmux again)
   - If this fails, show error and suggest: "Try running: csm doctor", then Exit
   - If successful, continue to Step 4
 - If any other error:
