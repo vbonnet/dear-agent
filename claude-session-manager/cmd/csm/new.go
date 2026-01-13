@@ -289,7 +289,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	// Start Claude in the session
 	// Use --add-dir to pre-approve workspace and avoid trust prompt blocking the ">" prompt
 	debug.Phase("Start Claude")
-	claudeCmd := fmt.Sprintf("claude --add-dir '%s'", workDir)
+	claudeCmd := fmt.Sprintf("claude --add-dir '%s' && exit", workDir)
 	debug.Log("Sending command: %s", claudeCmd)
 	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
 		ui.PrintError(err,
@@ -448,6 +448,12 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	} else {
 		debug.Log("Ready-file detected - session is ready")
 		ui.PrintSuccess("Claude is ready and session associated!")
+
+		// Wait for /csm-assoc skill to finish outputting its completion messages
+		// The ready-file signals when 'csm associate' binary completes, but the skill
+		// continues to output messages after that. Give it time to finish.
+		debug.Log("Waiting for /csm-assoc skill to complete output (2s)")
+		time.Sleep(2 * time.Second)
 	}
 
 	// Update VS Code tab title if running in VS Code
@@ -542,7 +548,7 @@ func startClaudeInCurrentTmux(sessionName string) error {
 	if workDirForClaude == "" {
 		workDirForClaude = workDir
 	}
-	claudeCmd := fmt.Sprintf("claude --add-dir '%s'", workDirForClaude)
+	claudeCmd := fmt.Sprintf("claude --add-dir '%s' && exit", workDirForClaude)
 	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
 		ui.PrintError(err,
 			"Failed to start Claude in current tmux pane",

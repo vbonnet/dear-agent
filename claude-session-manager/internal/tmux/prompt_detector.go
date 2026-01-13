@@ -9,6 +9,7 @@ import (
 
 // ClaudePromptPatterns are patterns that indicate Claude is ready for input
 var ClaudePromptPatterns = []string{
+	"❯",  // Claude Code primary prompt (Unicode U+276F)
 	"▌",  // Claude cursor
 	"> ", // Common prompt
 	"$ ", // Shell-style prompt
@@ -38,20 +39,22 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 	linesChecked := 0
 
 	for time.Now().Before(deadline) {
-		// Read next output line (short timeout per line)
-		line, err := watcher.GetRawLine(1 * time.Second)
+		// Read next output line (short timeout per line - 200ms for faster detection)
+		line, err := watcher.GetRawLine(200 * time.Millisecond)
 		if err != nil {
 			// Timeout on individual read - check if we've seen enough idle time
 			consecutiveIdleLines++
 
 			// If we've seen a prompt-like pattern and then idle, assume ready
-			if consecutiveIdleLines >= 3 && containsPromptPattern(lastContent) {
+			// Reduced from 3 to 2 consecutive idles (400ms instead of 3s)
+			if consecutiveIdleLines >= 2 && containsPromptPattern(lastContent) {
 				log.Printf("✓ Detected prompt pattern after idle period: %q", lastContent)
 				return nil
 			}
 
 			// If we've checked many lines and seen idle, likely ready
-			if linesChecked > 10 && consecutiveIdleLines >= 5 {
+			// Reduced from 5 to 3 consecutive idles (600ms instead of 5s)
+			if linesChecked > 10 && consecutiveIdleLines >= 3 {
 				log.Printf("✓ Stable idle state detected after %d lines", linesChecked)
 				return nil
 			}
@@ -76,8 +79,8 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 			// Check for prompt patterns
 			if containsPromptPattern(content) {
 				log.Printf("✓ Prompt pattern detected in line %d: %q", linesChecked, content)
-				// Wait a bit more to ensure it's stable
-				time.Sleep(500 * time.Millisecond)
+				// Wait a bit more to ensure it's stable (reduced from 500ms to 200ms)
+				time.Sleep(200 * time.Millisecond)
 				return nil
 			}
 		}

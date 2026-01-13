@@ -56,6 +56,24 @@ func (m *MockTmux) ListSessions() ([]string, error) {
 	return sessions, nil
 }
 
+// ListSessionsWithInfo returns all active sessions with attachment info (mock returns 0 attached)
+func (m *MockTmux) ListSessionsWithInfo() ([]SessionInfo, error) {
+	if m.ListSessionsError != nil {
+		return nil, m.ListSessionsError
+	}
+
+	sessions := []SessionInfo{}
+	for name, exists := range m.Sessions {
+		if exists {
+			sessions = append(sessions, SessionInfo{
+				Name:            name,
+				AttachedClients: 0, // Mock doesn't track attachment
+			})
+		}
+	}
+	return sessions, nil
+}
+
 // CreateSession creates a session in the mock
 func (m *MockTmux) CreateSession(name, workdir string) error {
 	if m.CreateSessionError != nil {

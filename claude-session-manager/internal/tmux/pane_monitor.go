@@ -43,19 +43,29 @@ func WaitForPaneClose(sessionName string, timeout time.Duration) error {
 }
 
 // SendKeysToPane sends keys to a specific pane
-// Sends the keys followed by C-m (Enter)
+// Sends the keys followed by C-m (Enter) as separate commands
 func SendKeysToPane(sessionName string, keys string) error {
 	socketPath := GetSocketPath()
 
 	log.Printf("⌨️  Sending keys to %s: %q", sessionName, keys)
 
-	cmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, keys, "C-m")
+	// Send the text without Enter first
+	cmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "-l", keys)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to send keys: %w (output: %s)", err, string(output))
 	}
 
-	log.Printf("✓ Keys sent successfully")
+	log.Printf("✓ Keys sent: %q", keys)
+
+	// Now send Enter as a separate command
+	cmd = exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "C-m")
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to send Enter key: %w (output: %s)", err, string(output))
+	}
+
+	log.Printf("✓ Enter key sent")
 	return nil
 }
 

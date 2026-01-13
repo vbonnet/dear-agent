@@ -20,6 +20,23 @@ func (t *RealTmux) ListSessions() ([]string, error) {
 	return tmux.ListSessions()
 }
 
+// ListSessionsWithInfo returns all active tmux sessions with attachment info
+func (t *RealTmux) ListSessionsWithInfo() ([]SessionInfo, error) {
+	tmuxSessions, err := tmux.ListSessionsWithInfo()
+	if err != nil {
+		return nil, err
+	}
+	// Convert tmux.SessionInfo to session.SessionInfo
+	sessions := make([]SessionInfo, len(tmuxSessions))
+	for i, s := range tmuxSessions {
+		sessions[i] = SessionInfo{
+			Name:            s.Name,
+			AttachedClients: s.AttachedClients,
+		}
+	}
+	return sessions, nil
+}
+
 // CreateSession creates a new tmux session
 func (t *RealTmux) CreateSession(name, workdir string) error {
 	return tmux.NewSession(name, workdir)

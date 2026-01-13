@@ -11,9 +11,8 @@ import (
 )
 
 var (
-	listJSON   bool
-	listAll    bool
-	listLegacy bool
+	listJSON bool
+	listAll  bool
 )
 
 var listCmd = &cobra.Command{
@@ -82,12 +81,7 @@ Examples:
 			fmt.Println(output)
 		} else {
 			tmux := session.NewRealTmux()
-			var output string
-			if listLegacy {
-				output = ui.FormatTableLegacy(manifests, tmux)
-			} else {
-				output = ui.FormatTable(manifests, tmux)
-			}
+			output := ui.FormatTable(manifests, tmux)
 			fmt.Print(output)
 		}
 
@@ -98,7 +92,6 @@ Examples:
 func init() {
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON")
 	listCmd.Flags().BoolVar(&listAll, "all", false, "Show all sessions including archived")
-	listCmd.Flags().BoolVar(&listLegacy, "legacy", false, "Use legacy table format (v2.x style)")
 
 	rootCmd.AddCommand(listCmd)
 }

@@ -43,8 +43,8 @@ func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) str
 		return "No sessions found.\n\nCreate one:\n  csm new <project-name>\n"
 	}
 
-	// Compute status for all manifests
-	statuses := session.ComputeStatusBatch(manifests, tmux)
+	// Compute status and attachment info for all manifests
+	statuses := session.ComputeStatusBatchWithInfo(manifests, tmux)
 
 	// Group manifests by status (active/stopped/stale)
 	groups := groupByStatus(manifests, statuses)
@@ -145,7 +145,7 @@ func FormatTableLegacy(manifests []*manifest.Manifest, tmux session.TmuxInterfac
 }
 
 // groupByStatus groups manifests into active/stopped/stale categories
-func groupByStatus(manifests []*manifest.Manifest, statuses map[string]string) map[string][]*manifest.Manifest {
+func groupByStatus(manifests []*manifest.Manifest, statuses map[string]session.StatusInfo) map[string][]*manifest.Manifest {
 	groups := map[string][]*manifest.Manifest{
 		"active":  {},
 		"stopped": {},
@@ -155,10 +155,10 @@ func groupByStatus(manifests []*manifest.Manifest, statuses map[string]string) m
 	staleThreshold := 7 * 24 * time.Hour
 
 	for _, m := range manifests {
-		status := statuses[m.Name]
-		if status == "active" {
+		statusInfo := statuses[m.Name]
+		if statusInfo.Status == "active" {
 			groups["active"] = append(groups["active"], m)
-		} else if status == "stopped" {
+		} else if statusInfo.Status == "stopped" {
 			// Check if session is stale (stopped for more than 7 days)
 			if time.Since(m.UpdatedAt) >= staleThreshold {
 				groups["stale"] = append(groups["stale"], m)
@@ -220,7 +220,7 @@ func getStatusSymbol(status string) string {
 }
 
 // renderGroupTable renders a table for a single status group
-func renderGroupTable(group []*manifest.Manifest, status string, statuses map[string]string, showTmuxColumn bool) string {
+func renderGroupTable(group []*manifest.Manifest, status string, statuses map[string]session.StatusInfo, showTmuxColumn bool) string {
 	// First pass: format entire table without color to get proper alignment
 	var tableBuf bytes.Buffer
 	w := tabwriter.NewWriter(&tableBuf, 0, 0, 2, ' ', 0)
@@ -241,9 +241,15 @@ func renderGroupTable(group []*manifest.Manifest, status string, statuses map[st
 
 	// Rows
 	for _, m := range group {
-		sessionStatus := statuses[m.Name]
+		statusInfo := statuses[m.Name]
 		symbol := getStatusSymbol(status)
-		statusText := fmt.Sprintf("%s %s", symbol, strings.Title(sessionStatus))
+
+		// Format status text with attachment count if active and attached
+		statusText := fmt.Sprintf("%s %s", symbol, strings.Title(statusInfo.Status))
+		if statusInfo.Status == "active" && statusInfo.AttachedClients > 0 {
+			statusText = fmt.Sprintf("%s %s (%d att.)", symbol, strings.Title(statusInfo.Status), statusInfo.AttachedClients)
+		}
+
 		project := compactPath(truncatePath(m.Context.Project, 50))
 
 		if showTmuxColumn {

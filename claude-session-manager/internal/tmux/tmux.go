@@ -244,6 +244,51 @@ func ListSessions() ([]string, error) {
 	return sessions, nil
 }
 
+// SessionInfo holds information about a tmux session
+type SessionInfo struct {
+	Name            string
+	AttachedClients int
+}
+
+// ListSessionsWithInfo returns all active tmux sessions with attachment information
+func ListSessionsWithInfo() ([]SessionInfo, error) {
+	ctx := context.Background()
+	socketPath := GetSocketPath()
+	// Format: session_name:attached_count
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-sessions", "-F", "#{session_name}:#{session_attached}")
+	if err != nil {
+		// Check for timeout error
+		if _, ok := err.(*TimeoutError); ok {
+			return nil, err
+		}
+		// If no tmux server running, return empty list
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return []SessionInfo{}, nil
+		}
+		return nil, fmt.Errorf("failed to list tmux sessions: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	sessions := make([]SessionInfo, 0, len(lines))
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		// Parse "name:count" format
+		parts := strings.Split(line, ":")
+		if len(parts) != 2 {
+			continue
+		}
+		var attachedCount int
+		fmt.Sscanf(parts[1], "%d", &attachedCount)
+		sessions = append(sessions, SessionInfo{
+			Name:            parts[0],
+			AttachedClients: attachedCount,
+		})
+	}
+	return sessions, nil
+}
+
 // GetCurrentSessionName returns the name of the current tmux session
 // Returns error if not running inside tmux or if command fails
 func GetCurrentSessionName() (string, error) {
