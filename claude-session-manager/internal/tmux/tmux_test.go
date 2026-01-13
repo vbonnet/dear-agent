@@ -192,9 +192,20 @@ func TestListSessions(t *testing.T) {
 // TestGetCurrentSessionName tests getting current session name
 func TestGetCurrentSessionName(t *testing.T) {
 	// When not in tmux, should return error
+	// Save and clear TMUX env var to simulate not being in tmux
+	originalTmux := os.Getenv("TMUX")
+	os.Setenv("TMUX", "")
+	defer func() {
+		if originalTmux != "" {
+			os.Setenv("TMUX", originalTmux)
+		}
+	}()
+
 	_, err := GetCurrentSessionName()
 	assert.Error(t, err, "Should error when not in tmux")
-	assert.Contains(t, err.Error(), "not running inside a tmux session")
+	if err != nil {
+		assert.Contains(t, err.Error(), "not running inside a tmux session")
+	}
 }
 
 // TestIsProcessRunning tests process detection
@@ -291,6 +302,15 @@ func TestAttachSession_NoTTY(t *testing.T) {
 	skipIfNoTmux(t)
 	_, cleanup := setupTestSocket(t)
 	defer cleanup()
+
+	// Save and clear TMUX env var to simulate not being in tmux
+	originalTmux := os.Getenv("TMUX")
+	os.Setenv("TMUX", "")
+	defer func() {
+		if originalTmux != "" {
+			os.Setenv("TMUX", originalTmux)
+		}
+	}()
 
 	sessionName := "test-attach-notty"
 	err := NewSession(sessionName, t.TempDir())

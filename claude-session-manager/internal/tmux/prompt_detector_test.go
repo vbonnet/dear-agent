@@ -96,6 +96,7 @@ func TestContainsPromptPattern(t *testing.T) {
 func TestClaudePromptPatterns(t *testing.T) {
 	// Verify that all expected patterns are defined
 	expectedPatterns := map[string]bool{
+		"❯":  false, // Claude Code primary prompt
 		"▌":  false,
 		"> ": false,
 		"$ ": false,
