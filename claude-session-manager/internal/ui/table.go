@@ -227,17 +227,15 @@ func renderGroupTable(group []*manifest.Manifest, status string, statuses map[st
 
 	// Header
 	if showTmuxColumn {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			"NAME",
 			"TMUX",
 			"STATUS",
-			"UPDATED",
 			"PROJECT")
 	} else {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\n",
 			"NAME",
 			"STATUS",
-			"UPDATED",
 			"PROJECT")
 	}
 
@@ -246,21 +244,18 @@ func renderGroupTable(group []*manifest.Manifest, status string, statuses map[st
 		sessionStatus := statuses[m.Name]
 		symbol := getStatusSymbol(status)
 		statusText := fmt.Sprintf("%s %s", symbol, strings.Title(sessionStatus))
-		updated := formatTime(m.UpdatedAt)
-		project := truncatePath(m.Context.Project, 40)
+		project := compactPath(truncatePath(m.Context.Project, 50))
 
 		if showTmuxColumn {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 				m.Name,
 				m.Tmux.SessionName,
 				statusText,
-				updated,
 				project)
 		} else {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\n",
 				m.Name,
 				statusText,
-				updated,
 				project)
 		}
 	}
@@ -343,6 +338,21 @@ func truncatePath(path string, maxLen int) string {
 		return path
 	}
 	return "..." + path[len(path)-maxLen+3:]
+}
+
+// compactPath replaces /home/user/ with ~/ to make paths more compact
+func compactPath(path string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return path // If we can't get home dir, return unchanged
+	}
+	if strings.HasPrefix(path, homeDir+"/") {
+		return "~/" + path[len(homeDir)+1:]
+	}
+	if path == homeDir {
+		return "~"
+	}
+	return path
 }
 
 // ScreenReaderText returns accessible text for symbols
