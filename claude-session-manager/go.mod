@@ -1,4 +1,4 @@
-module github.com/vbonnet/ai-tools/claude-session-manager
+module github.com/user/ai-tools/agm
 
 go 1.24.0
 
