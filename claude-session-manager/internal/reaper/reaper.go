@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -18,8 +19,8 @@ const (
 	// to handle slow responses but not so long that stuck sessions block indefinitely.
 	PromptDetectionTimeout = 60 * time.Second
 
-	// PaneCloseTimeout is how long to wait for the tmux pane to close after sending /exit.
-	// Claude should exit quickly after receiving /exit, but we allow extra time for
+	// PaneCloseTimeout is how long to wait for the tmux pane to close after sending Ctrl+D.
+	// Claude should exit quickly after receiving Ctrl+D (EOF), but we allow extra time for
 	// cleanup operations.
 	PaneCloseTimeout = 30 * time.Second
 
@@ -46,7 +47,7 @@ func New(sessionName string) *Reaper {
 
 // Run executes the full reaper sequence:
 // 1. Wait for Claude to return to prompt (prompt detection)
-// 2. Send /exit command
+// 2. Send Ctrl+D (EOF) to exit Claude
 // 3. Wait for pane to close
 // 4. Archive session (update manifest + move directory)
 func (r *Reaper) Run() error {
@@ -62,12 +63,12 @@ func (r *Reaper) Run() error {
 		log.Printf("✓ Prompt detected - Claude is ready")
 	}
 
-	// Step 2: Send /exit command
-	log.Printf("📤 Sending /exit command...")
+	// Step 2: Send Ctrl+D to exit Claude
+	log.Printf("📤 Sending Ctrl+D to exit Claude...")
 	if err := r.sendExit(); err != nil {
-		return fmt.Errorf("failed to send /exit command to tmux pane (session may have already exited): %w", err)
+		return fmt.Errorf("failed to send Ctrl+D to tmux pane (session may have already exited): %w", err)
 	}
-	log.Printf("✓ /exit sent successfully")
+	log.Printf("✓ Ctrl+D sent successfully")
 
 	// Step 3: Wait for pane to close
 	log.Printf("⏳ Waiting for pane to close...")
@@ -92,9 +93,20 @@ func (r *Reaper) waitForPrompt(timeout time.Duration) error {
 	return tmux.WaitForClaudePrompt(r.SessionName, timeout)
 }
 
-// sendExit sends /exit + ENTER to the pane
+// sendExit sends Ctrl+D (EOF) to exit Claude Code cleanly
+// This uses a direct control sequence instead of literal text to avoid
+// Claude interpreting it as a user message
 func (r *Reaper) sendExit() error {
-	return tmux.SendKeysToPane(r.SessionName, "/exit")
+	socketPath := tmux.GetSocketPath()
+
+	// Send Ctrl+D (EOF) to exit Claude Code
+	// Using control sequence directly (not -l flag) so tmux interprets it as Ctrl+D
+	cmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", r.SessionName, "C-d")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to send Ctrl+D: %w", err)
+	}
+
+	return nil
 }
 
 // waitForPaneClose waits for tmux pane to close
