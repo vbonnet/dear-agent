@@ -98,33 +98,19 @@ Examples:
 				return err
 			}
 		} else {
-			// Auto-detect from history.jsonl
+			// Auto-detect from history.jsonl with retry
 			fmt.Println("Auto-detecting Claude session UUID from history...")
-			historyPath := filepath.Join(os.Getenv("HOME"), ".claude", "history.jsonl")
-			entries, _, err := claude.ParseHistory(historyPath)
+			var err error
+			targetUUID, err = claude.CaptureLatestUUIDWithRetry(
+				claude.DefaultMaxRetries,
+				claude.DefaultBaseDelay,
+			)
 			if err != nil {
-				ui.PrintError(err, "Failed to read Claude history",
-					"  • Ensure ~/.claude/history.jsonl exists\n"+
-						"  • Run this command from within a Claude session\n"+
+				ui.PrintError(err, "Failed to detect Claude UUID",
+					"  • Ensure Claude is running and has processed at least one message\n"+
+						"  • Check ~/.claude/history.jsonl exists and is readable\n"+
 						"  • Or specify UUID manually with --uuid flag")
 				return err
-			}
-
-			if len(entries) == 0 {
-				return fmt.Errorf("no Claude sessions found in history")
-			}
-
-			// Get the most recent entry
-			latest := entries[len(entries)-1]
-			targetUUID = latest.SessionID
-
-			// Verify it's recent (within last 30 seconds)
-			entryTime := time.Unix(0, int64(latest.Timestamp)*int64(time.Millisecond))
-			age := time.Since(entryTime)
-			if age > 30*time.Second {
-				ui.PrintWarning(fmt.Sprintf("Latest Claude session is %v old", age.Round(time.Second)))
-				fmt.Println("  This may not be the current session.")
-				fmt.Println("  Use --uuid flag to specify explicitly if needed.")
 			}
 
 			ui.PrintSuccess(fmt.Sprintf("Detected Claude UUID: %s", targetUUID[:8]))
