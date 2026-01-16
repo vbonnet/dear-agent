@@ -33,7 +33,7 @@ jobs:
       with:
         repository: vbonnet/engram
         path: engram-checkout
-        token: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.ENGRAM_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
 
     - name: Prepare build context
       run: |
