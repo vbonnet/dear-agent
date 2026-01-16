@@ -1,4 +1,4 @@
-.PHONY: build test lint install clean
+.PHONY: build test test-bdd lint install clean
 
 build:
 	go build -ldflags="-s -w" -o bin/csm ./cmd/csm
@@ -6,6 +6,9 @@ build:
 
 test:
 	go test -v -cover ./...
+
+test-bdd:
+	go test -v ./test/e2e
 
 lint:
 	go fmt ./...

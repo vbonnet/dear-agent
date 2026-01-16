@@ -1,0 +1,36 @@
+# Test: Session resumption
+# Validates: Resume command (FR1.2), Claude adapter initialization (FR2.1)
+#
+# This test ensures that:
+# - csm resume command works correctly
+# - Claude adapter initializes without errors
+# - Sessions can be resumed after creation
+
+# Skip if tmux is not available (resume requires tmux)
+[!exec:tmux] skip 'tmux required for resume test'
+
+# Create a session first
+exec csm new bdd-resume-test
+stdout 'Session.*created'
+
+# Verify session was created
+exists $HOME/sessions/bdd-resume-test/manifest.yaml
+
+# Resume the session (detached mode to avoid interactive TTY issues)
+# Note: Resume command behavior may vary based on CSM configuration
+exec csm resume bdd-resume-test --detached
+
+# Verify no errors occurred during resume (Claude adapter should initialize cleanly)
+! stderr 'error|Error|ERROR'
+! stderr 'failed|Failed|FAILED'
+! stderr 'panic|Panic|PANIC'
+
+# Verify session still exists and is functional
+exists $HOME/sessions/bdd-resume-test/manifest.yaml
+
+# Verify session shows in list (adapter initialized successfully)
+exec csm list
+stdout 'bdd-resume-test'
+
+# Cleanup
+exec csm archive bdd-resume-test --force

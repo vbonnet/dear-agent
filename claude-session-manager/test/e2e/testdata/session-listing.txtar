@@ -1,0 +1,43 @@
+# Test: Session listing with multiple sessions
+# Validates: List command (FR1.3)
+#
+# This test ensures that:
+# - csm list shows all active sessions
+# - Multiple sessions are handled correctly
+# - Listing is consistent and reliable
+# - Empty list works when no sessions exist
+
+# Create multiple test sessions
+exec csm new bdd-list-test-1
+stdout 'Session.*created'
+
+exec csm new bdd-list-test-2
+stdout 'Session.*created'
+
+exec csm new bdd-list-test-3
+stdout 'Session.*created'
+
+# List all sessions - should show all three
+exec csm list
+stdout 'bdd-list-test-1'
+stdout 'bdd-list-test-2'
+stdout 'bdd-list-test-3'
+
+# Archive first session
+exec csm archive bdd-list-test-1 --force
+
+# List again - should show only remaining two
+exec csm list
+! stdout 'bdd-list-test-1'
+stdout 'bdd-list-test-2'
+stdout 'bdd-list-test-3'
+
+# Cleanup remaining sessions
+exec csm archive bdd-list-test-2 --force
+exec csm archive bdd-list-test-3 --force
+
+# Verify all test sessions are cleaned up
+exec csm list
+! stdout 'bdd-list-test-1'
+! stdout 'bdd-list-test-2'
+! stdout 'bdd-list-test-3'

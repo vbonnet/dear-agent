@@ -134,14 +134,44 @@ exec csm command
 - ✅ Test infrastructure setup
 - ✅ Example smoke test (`version.txtar`)
 - ✅ Placeholder for session lifecycle
+- ✅ **Phase 0 BDD Test Suite** (see below)
+
+### Phase 0 BDD Tests
+
+The following tests validate Phase 0 deliverables (Agent interface, Claude adapter, JSONL format, Manifest v3):
+
+1. **session-creation.txtar** - Validates session creation with Manifest v3 and JSONL format
+2. **session-resumption.txtar** - Validates resume command and Claude adapter initialization
+3. **session-listing.txtar** - Validates list command with multiple sessions
+4. **session-archiving.txtar** - Validates archive command
+5. **claude-adapter.txtar** - Validates Claude adapter behavioral correctness
+6. **jsonl-format.txtar** - Validates JSONL round-trip conversion (XML→JSONL migration)
+7. **manifest-v3.txtar** - Validates Manifest v3 structure and UUID format
+
+#### Running Phase 0 BDD Tests
+
+```bash
+# Run all BDD tests
+make test-bdd
+
+# Run specific test
+go test -v ./test/e2e -run TestCSM/session-creation
+
+# Run with verbose output
+go test -v ./test/e2e
+```
+
+#### Test Coverage
+
+- **Core commands**: new, resume, list, archive
+- **Phase 0 deliverables**: Agent interface, Claude adapter, JSONL format, Manifest v3
+- **Regression prevention**: UUID format validation, no XML files for new sessions
 
 ### TODO
 - [ ] Implement csmMain() to actually call CSM commands
-- [ ] Add tests for all major CSM commands
 - [ ] Add tests for error conditions
 - [ ] Add tests for concurrent session creation
 - [ ] Add tests for lock contention
-- [ ] Add tests for manifest migration
 - [ ] Add tests for recovery scenarios
 
 ## Best Practices

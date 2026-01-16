@@ -1,0 +1,43 @@
+# Test: Claude adapter behavioral validation
+# Validates: Claude adapter integration (FR2.1)
+#
+# This test ensures that:
+# - Claude adapter initializes correctly during session creation
+# - No errors occur during adapter operations
+# - Adapter supports basic session lifecycle (create, resume, list, archive)
+# - Phase 0 refactoring to Agent interface doesn't break behavior
+
+# Create session - should initialize Claude adapter
+exec csm new bdd-adapter-test
+stdout 'Session.*created'
+
+# Verify no adapter-related errors occurred
+! stderr 'error|Error|ERROR'
+! stderr 'failed|Failed|FAILED'
+! stderr 'adapter.*error'
+! stderr 'agent.*error'
+
+# Verify session is functional (basic adapter operations work)
+exec csm list
+stdout 'bdd-adapter-test'
+
+# Test adapter re-initialization on resume (if tmux available)
+[exec:tmux] exec csm resume bdd-adapter-test --detached
+[exec:tmux] ! stderr 'error|Error|ERROR'
+
+# Verify session metadata is intact (adapter persists state correctly)
+exists $HOME/sessions/bdd-adapter-test/manifest.yaml
+exists $HOME/sessions/bdd-adapter-test/session.jsonl
+
+# Verify manifest is valid (adapter didn't corrupt metadata)
+exec cat $HOME/sessions/bdd-adapter-test/manifest.yaml
+stdout 'schema_version: "3.0"'
+stdout 'session_id: [0-9a-f]{8}-'
+
+# Archive should work with adapter (cleanup operations)
+exec csm archive bdd-adapter-test --force
+! stderr 'error|Error|ERROR'
+
+# Verify archive succeeded (adapter cleanup worked)
+exec csm list
+! stdout 'bdd-adapter-test'
