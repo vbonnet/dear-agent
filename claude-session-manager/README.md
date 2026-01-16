@@ -40,6 +40,27 @@ csm search "semantic query"     # AI-powered semantic search
 go install github.com/vbonnet/ai-tools/claude-session-manager/cmd/csm@latest
 ```
 
+### Bash Completion (Recommended)
+
+Enable tab completion for command and session names:
+
+```bash
+# Run the setup script (recommended)
+./scripts/setup-completion.sh
+
+# Or manually install
+cp scripts/csm-completion.bash ~/.csm-completion.bash
+echo 'source ~/.csm-completion.bash' >> ~/.bashrc
+source ~/.csm-completion.bash
+```
+
+**Features:**
+- Command completion: `csm k<TAB>` → `csm kill`
+- Session name completion: `csm kill <TAB>` → shows active sessions
+- No file fallback: Only shows valid CSM commands/sessions (not random files)
+
+**Note:** This uses a custom completion script that prevents bash from falling back to file/directory completion, which is a common issue with Cobra's default completion.
+
 ## Commands
 
 ### Primary Command: `csm [session-name]`
