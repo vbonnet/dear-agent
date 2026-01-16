@@ -31,17 +31,15 @@ ENV PATH="/home/testuser/go/bin:$PATH"
 ENV GOPATH="/home/testuser/go"
 
 # Copy source code for local build (repo is private, can't use go install)
-# Need both claude-session-manager and engram/core due to go.mod replace directive
-COPY --chown=testuser:testuser ai-tools/main/claude-session-manager /home/testuser/ai-tools/main/claude-session-manager/
-COPY --chown=testuser:testuser engram/main/core /home/testuser/engram/main/core/
-WORKDIR /home/testuser/ai-tools/main/claude-session-manager
+COPY --chown=testuser:testuser claude-session-manager /home/testuser/claude-session-manager/
+WORKDIR /home/testuser/claude-session-manager
 
 # Build csm from local source
 RUN go build -o /home/testuser/go/bin/csm ./cmd/csm
 
 # Copy test scripts
 WORKDIR /home/testuser
-COPY --chown=testuser:testuser ai-tools/main/claude-session-manager/tests/e2e-install/scripts /tmp/tests/
+COPY --chown=testuser:testuser claude-session-manager/tests/e2e-install/scripts /tmp/tests/
 
 # Default command: Run full test suite
 CMD ["/bin/bash", "/tmp/tests/test-install.sh"]
