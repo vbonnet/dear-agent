@@ -27,7 +27,7 @@ package gemini
 import (
 	"errors"
 
-	"github.com/user/ai-tools/agm/internal/agent"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/agent"
 )
 
 // Compile-time interface compliance check

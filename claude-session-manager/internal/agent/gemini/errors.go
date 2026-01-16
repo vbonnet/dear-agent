@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/user/ai-tools/agm/internal/agent"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/agent"
 )
 
 // ErrUnsupportedCommand indicates that a command type is not supported by the Gemini adapter.

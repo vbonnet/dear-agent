@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/user/ai-tools/agm/internal/agent"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/agent"
 )
 
 func TestNewCommandTranslator(t *testing.T) {
