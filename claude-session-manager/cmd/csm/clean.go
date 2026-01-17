@@ -85,7 +85,7 @@ Examples:
 		// Archive stopped sessions
 		for _, s := range result.ToArchive {
 			if err := archiveSessionManifest(s.Manifest); err != nil {
-				fmt.Printf("⚠ Failed to archive %s: %v\n", s.Name, err)
+				ui.PrintWarning(fmt.Sprintf("Failed to archive %s: %v", s.Name, err))
 			} else {
 				archived++
 				fmt.Printf("📦 Archived: %s\n", s.Name)
@@ -95,7 +95,7 @@ Examples:
 		// Delete archived sessions
 		for _, s := range result.ToDelete {
 			if err := deleteSessionManifest(s.Manifest); err != nil {
-				fmt.Printf("⚠ Failed to delete %s: %v\n", s.Name, err)
+				ui.PrintWarning(fmt.Sprintf("Failed to delete %s: %v", s.Name, err))
 			} else {
 				deleted++
 				fmt.Printf("🗑️  Deleted: %s\n", s.Name)
@@ -103,7 +103,8 @@ Examples:
 		}
 
 		// Summary
-		fmt.Printf("\n✅ Cleanup complete: %d archived, %d deleted\n", archived, deleted)
+		fmt.Println()
+		ui.PrintSuccess(fmt.Sprintf("Cleanup complete: %d archived, %d deleted", archived, deleted))
 		return nil
 	},
 }

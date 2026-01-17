@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
 
 var sendJSON bool
@@ -88,7 +89,7 @@ func runTestSend(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println(string(jsonBytes))
 	} else {
-		fmt.Printf("✓ Command sent to '%s': %s\n", name, command)
+		ui.PrintSuccess(fmt.Sprintf("Command sent to '%s': %s", name, command))
 	}
 
 	return nil

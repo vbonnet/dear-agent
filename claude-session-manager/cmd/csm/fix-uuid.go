@@ -9,6 +9,7 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/fix"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/history"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
 
 var (
@@ -87,7 +88,7 @@ func clearUUID(sessionName string, associator *fix.Associator) error {
 		return fmt.Errorf("failed to clear UUID: %w", err)
 	}
 
-	fmt.Println("✅ UUID association cleared")
+	ui.PrintSuccess("UUID association cleared")
 	return nil
 }
 
@@ -114,20 +115,21 @@ func autoFixAll(detector *detection.Detector, associator *fix.Associator) error 
 		// Try auto-detection and association
 		associated, err := detector.DetectAndAssociate(m, manifestPath, true)
 		if err != nil {
-			fmt.Printf("⚠ %s: failed to detect UUID: %v\n", m.Name, err)
+			ui.PrintWarning(fmt.Sprintf("%s: failed to detect UUID: %v", m.Name, err))
 			skipped++
 			continue
 		}
 
 		if associated {
-			fmt.Printf("✅ %s: auto-associated UUID %s\n", m.Name, m.Claude.UUID)
+			ui.PrintSuccess(fmt.Sprintf("%s: auto-associated UUID %s", m.Name, m.Claude.UUID))
 			fixed++
 		} else {
 			skipped++
 		}
 	}
 
-	fmt.Printf("\n✅ Auto-fix complete: %d fixed, %d skipped (low confidence or no match)\n", fixed, skipped)
+	fmt.Println()
+	ui.PrintSuccess(fmt.Sprintf("Auto-fix complete: %d fixed, %d skipped (low confidence or no match)", fixed, skipped))
 	return nil
 }
 
@@ -152,7 +154,8 @@ func fixSpecificSession(sessionName string, associator *fix.Associator) error {
 	}
 
 	if len(suggestions) == 0 {
-		fmt.Println("\n⚠ No UUID suggestions available.")
+		fmt.Println()
+		ui.PrintWarning("No UUID suggestions available.")
 		fmt.Println("Try one of:")
 		fmt.Println("  • Send a message in a Claude session for this project")
 		fmt.Println("  • Check if ~/.claude/history.jsonl exists and has entries")
@@ -188,7 +191,7 @@ func fixSpecificSession(sessionName string, associator *fix.Associator) error {
 		if err := associator.Associate(m, manifestPath, uuid); err != nil {
 			return err
 		}
-		fmt.Printf("✅ Associated UUID: %s\n", uuid)
+		ui.PrintSuccess(fmt.Sprintf("Associated UUID: %s", uuid))
 	default:
 		// Parse choice
 		var idx int
@@ -199,7 +202,7 @@ func fixSpecificSession(sessionName string, associator *fix.Associator) error {
 		if err := associator.Associate(m, manifestPath, selectedUUID); err != nil {
 			return err
 		}
-		fmt.Printf("✅ Associated UUID: %s\n", selectedUUID)
+		ui.PrintSuccess(fmt.Sprintf("Associated UUID: %s", selectedUUID))
 	}
 
 	return nil
@@ -214,7 +217,7 @@ func scanAndFix(associator *fix.Associator) error {
 	}
 
 	if len(unassociated) == 0 {
-		fmt.Println("✅ All sessions have UUID associations!")
+		ui.PrintSuccess("All sessions have UUID associations!")
 		return nil
 	}
 

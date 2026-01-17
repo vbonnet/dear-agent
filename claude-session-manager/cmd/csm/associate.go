@@ -8,12 +8,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
-	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/detection"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/readiness"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
+	uuidpkg "github.com/vbonnet/ai-tools/claude-session-manager/internal/uuid"
 )
 
 var (
@@ -98,17 +98,31 @@ Examples:
 				return err
 			}
 		} else {
-			// Auto-detect from history.jsonl with retry
-			fmt.Println("Auto-detecting Claude session UUID from history...")
+			// Auto-detect using 3-level fallback discovery system
+			fmt.Println("Auto-detecting Claude session UUID...")
+
+			// Create manifest search function for uuid.Discover
+			findInManifests := func(name string) (*manifest.Manifest, error) {
+				manifests, err := manifest.List(sessionsDir)
+				if err != nil {
+					return nil, fmt.Errorf("failed to list sessions: %w", err)
+				}
+
+				for _, m := range manifests {
+					if m.Tmux.SessionName == name || m.Name == name {
+						return m, nil
+					}
+				}
+				return nil, fmt.Errorf("no CSM session found for: %s", name)
+			}
+
+			// Use 3-level fallback to discover UUID
 			var err error
-			targetUUID, err = claude.CaptureLatestUUIDWithRetry(
-				claude.DefaultMaxRetries,
-				claude.DefaultBaseDelay,
-			)
+			targetUUID, err = uuidpkg.Discover(sessionName, findInManifests, false)
 			if err != nil {
 				ui.PrintError(err, "Failed to detect Claude UUID",
-					"  • Ensure Claude is running and has processed at least one message\n"+
-						"  • Check ~/.claude/history.jsonl exists and is readable\n"+
+					"  • Tried CSM manifest lookup, history search by /rename, and timestamp search\n"+
+						"  • Ensure Claude has processed at least one message\n"+
 						"  • Or specify UUID manually with --uuid flag")
 				return err
 			}
