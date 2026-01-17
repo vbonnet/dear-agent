@@ -239,6 +239,7 @@ func handleSearchResults(query string, results []llm.SearchResult) error {
 			Affirmative("Yes").
 			Negative("No").
 			Value(&confirmed).
+			WithTheme(ui.GetTheme()).
 			Run()
 		if err != nil || !confirmed {
 			fmt.Printf("\nRestore cancelled.\n")

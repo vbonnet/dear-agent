@@ -203,6 +203,7 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 			Affirmative("Yes").
 			Negative("No").
 			Value(&confirmed).
+			WithTheme(ui.GetTheme()).
 			Run()
 		if err != nil {
 			ui.PrintError(err,
@@ -453,6 +454,7 @@ func archiveBulk() error {
 			Affirmative("Yes").
 			Negative("No").
 			Value(&confirmed).
+			WithTheme(ui.GetTheme()).
 			Run()
 		if err != nil {
 			ui.PrintError(err,

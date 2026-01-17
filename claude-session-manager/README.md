@@ -1,6 +1,33 @@
-# Claude Session Manager (CSM)
+# AI/Agent Session Manager (AGM)
 
-Smart session management for Claude AI with interactive TUI, fuzzy matching, and automatic UUID detection.
+*Evolved from Claude Session Manager (CSM)*
+
+Smart session management for AI agents (Claude, Gemini, GPT) with interactive TUI, multi-agent support, and automatic session tracking.
+
+## Multi-Agent Quick Start
+
+```bash
+# Create session with specific agent
+agm new --agent claude my-coding-session   # Claude: code, reasoning
+agm new --agent gemini research-task       # Gemini: research, 1M context
+agm new --agent gpt chat-session           # GPT: chat, brainstorming
+
+# Resume any session (agent auto-detected)
+agm resume my-coding-session
+
+# List all sessions (shows agents)
+agm list
+```
+
+## Choosing an Agent
+
+Not sure which agent to use?
+
+- **Claude** (Anthropic): Best for code, long context (200K), multi-step reasoning
+- **Gemini** (Google): Best for research, summarization, massive context (1M tokens)
+- **GPT** (OpenAI): Best for chat, brainstorming, general Q&A
+
+**Detailed comparison**: See [docs/AGENT-COMPARISON.md](docs/AGENT-COMPARISON.md) for use cases, context windows, features, and limitations.
 
 ## Features
 
@@ -279,11 +306,27 @@ The `--screen-reader` flag:
 csm doctor --no-color --screen-reader
 ```
 
+### High-Contrast Themes
+
+CSM includes high-contrast themes optimized for accessibility:
+
+```yaml
+# ~/.config/csm/config.yaml
+ui:
+  theme: "csm"        # High-contrast for dark terminals (default)
+  # theme: "csm-light" # High-contrast for light terminals
+```
+
+The `csm` theme provides:
+- WCAG AA compliant contrast ratios (4.5:1 minimum)
+- Selection indicated by color + cursor symbol + bold text
+- Semantic color consistency (green=success, red=error, yellow=warning)
+
 ### Automatic Accessibility Detection
 
 CSM automatically detects non-TTY environments (CI/CD, pipes) and disables colors. Flags provide explicit control when needed.
 
-**Documentation:** See `docs/UX_PATTERNS.md` for complete accessibility guidelines.
+**Documentation:** See `docs/ACCESSIBILITY.md` for complete WCAG compliance details and contrast ratios.
 
 ## Configuration
 
@@ -436,50 +479,49 @@ csm test cleanup debug-session
 go build ./cmd/csm
 ```
 
+## Documentation
+
+### Migration Guides
+
+- **[v2→v3 Manifest Migration](docs/MIGRATION-V2-V3.md)** - Upgrading from CSM v2 to AGM v3 schema
+- **[Claude→Multi-Agent Migration](docs/MIGRATION-CLAUDE-TO-MULTI-AGENT.md)** - Conceptual shift from single-agent to multi-agent workflows
+
+### Guides and References
+
+- **[Agent Comparison Matrix](docs/AGENT-COMPARISON.md)** - When to use Claude vs Gemini vs GPT
+- **[Usage Scenarios](docs/SCENARIOS.md)** - Real-world examples and BDD scenarios
+- **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+
 ## Troubleshooting
 
-### UUID not detected
+Common issues:
 
-Check if `~/.claude/history.jsonl` exists and has entries:
-
+**UUID not detected**:
 ```bash
 cat ~/.claude/history.jsonl | tail -5
+# If empty, send message in Claude, then: agm fix --all
 ```
 
-If empty, send a message in Claude to populate history, then run:
-
+**Agent not available**:
 ```bash
-csm fix --all
+agm agent list  # Check which agents are configured
+# See docs/TROUBLESHOOTING.md for API key setup
 ```
 
-### Session not appearing in picker
-
-Verify manifest exists:
-
+**Session not appearing**:
 ```bash
-ls ~/sessions/session-*/manifest.yaml
+agm list --all  # Include archived sessions
 ```
 
-Check session status:
+**For detailed troubleshooting**: See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 
-```bash
-csm list --all
-```
+## Migration from v1/v2
 
-### Fuzzy matching not working
+AGM v3 reads v2 manifests automatically and migrates on first resume.
 
-Ensure similarity is ≥60%:
-- "tset" matches "test" (75%)
-- "myses" matches "my-session" (70%)
-- "xyz" doesn't match "abc" (0%)
+For manual migration or v2→v3 details, see [docs/MIGRATION-V2-V3.md](docs/MIGRATION-V2-V3.md).
 
-Adjust threshold in future versions via config.
-
-## Migration from v1
-
-CSM v2 reads v1 manifests automatically. No migration needed.
-
-V1 → V2 field mapping:
+V1 → V2 field mapping (legacy):
 - `Worktree.Path` → `Context.Project`
 - `Status` → `Lifecycle` ("archived" only, others computed)
 - `Claude.SessionID` → `Claude.UUID`

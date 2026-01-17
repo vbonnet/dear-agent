@@ -496,22 +496,51 @@ func resumeSession(sessionID, manifestPath string, health *HealthStatus) error {
 			return fmt.Errorf("failed to send resume command: %w", err)
 		}
 
-		// Wait for Claude to be ready
-		var waitErr error
+		// Wait for Claude process to appear first (quick check)
+		var processWaitErr error
 		spinErr := spinner.New().
-			Title("Waiting for Claude to be ready...").
+			Title("Waiting for Claude process to start...").
 			Accessible(true).
 			Action(func() {
-				waitErr = tmux.WaitForProcessReady(health.TmuxSessionName, "claude", 5*time.Second)
+				processWaitErr = tmux.WaitForProcessReady(health.TmuxSessionName, "claude", 15*time.Second)
 			}).
 			Run()
 		if spinErr != nil {
 			return fmt.Errorf("spinner error: %w", spinErr)
 		}
-		if waitErr != nil {
-			fmt.Println("⚠ Claude is taking longer than expected")
+
+		// Ensure clean line after spinner
+		fmt.Println()
+
+		if processWaitErr != nil {
+			ui.PrintWarning("Claude process is taking longer than expected")
+			fmt.Println("  Continuing to wait for conversation to load...")
 		} else {
-			fmt.Println("✅ Claude is ready!")
+			ui.PrintSuccess("Claude process started!")
+		}
+
+		// Wait for conversation to load (detect prompt)
+		var promptWaitErr error
+		spinErr = spinner.New().
+			Title("Waiting for conversation to load...").
+			Accessible(true).
+			Action(func() {
+				// Increased timeout to 60s for resume operations (conversation loading can be slow)
+				promptWaitErr = tmux.WaitForClaudePrompt(health.TmuxSessionName, 60*time.Second)
+			}).
+			Run()
+		if spinErr != nil {
+			return fmt.Errorf("spinner error: %w", spinErr)
+		}
+
+		// Ensure clean line after spinner
+		fmt.Println()
+
+		if promptWaitErr != nil {
+			ui.PrintWarning("Conversation is taking longer than expected to load")
+			fmt.Println("  Attaching now - conversation should appear shortly")
+		} else {
+			ui.PrintSuccess("Conversation loaded and ready!")
 		}
 	}
 
@@ -697,6 +726,7 @@ func offerToImportOrphanedSession(identifier string) (*manifest.Manifest, string
 		Affirmative("Yes").
 		Negative("No").
 		Value(&confirm).
+		WithTheme(ui.GetTheme()).
 		Run()
 	if err != nil || !confirm {
 		return nil, "", fmt.Errorf("import declined by user")

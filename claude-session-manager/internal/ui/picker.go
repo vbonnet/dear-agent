@@ -105,18 +105,30 @@ func formatRelativeTime(t time.Time) string {
 	return fmt.Sprintf("%dmo ago", months)
 }
 
-// getTheme returns the Huh theme based on config
+// getTheme returns the Huh theme based on config (internal)
 func getTheme(themeName string) *huh.Theme {
 	switch themeName {
+	case "csm":
+		return CSMTheme() // High-contrast custom theme (default)
+	case "csm-light":
+		return CSMThemeLight() // High-contrast theme for light terminals
 	case "dracula":
 		return huh.ThemeDracula()
 	case "catppuccin":
 		return huh.ThemeCatppuccin()
 	case "charm":
 		return huh.ThemeCharm()
-	default:
+	case "base":
 		return huh.ThemeBase()
+	default:
+		return CSMTheme() // Use CSM theme as default (high contrast)
 	}
+}
+
+// GetTheme returns the appropriate Huh theme based on global config (exported for cmd/csm)
+func GetTheme() *huh.Theme {
+	cfg := GetGlobalConfig()
+	return getTheme(cfg.UI.Theme)
 }
 
 // ArchivedSessionInfo represents minimal info for archived session selection
