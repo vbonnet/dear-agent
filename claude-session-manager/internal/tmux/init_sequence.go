@@ -54,24 +54,27 @@ func (seq *InitSequence) Run() error {
 func (seq *InitSequence) sendRename(ctrl *ControlModeSession, watcher *OutputWatcher) error {
 	renameCmd := fmt.Sprintf("/rename %s", seq.SessionName)
 
-	// Send command using send-keys in control mode
-	// Use -l flag for literal text, then send Enter separately
+	// Send command text using send-keys with -l flag (literal)
 	sendLiteralCmd := fmt.Sprintf("send-keys -t %s -l %q", seq.SessionName, renameCmd)
-	if _, err := fmt.Fprintf(ctrl.Stdin, "%s\n", sendLiteralCmd); err != nil {
+	if err := ctrl.SendCommand(sendLiteralCmd); err != nil {
 		return fmt.Errorf("failed to send rename text: %w", err)
 	}
 
+	// Small delay to ensure text is received before sending Enter
+	// See: https://github.com/tmux/tmux/issues/1778
+	time.Sleep(100 * time.Millisecond)
+
 	// Send Enter to execute the command
 	sendEnterCmd := fmt.Sprintf("send-keys -t %s C-m", seq.SessionName)
-	if _, err := fmt.Fprintf(ctrl.Stdin, "%s\n", sendEnterCmd); err != nil {
+	if err := ctrl.SendCommand(sendEnterCmd); err != nil {
 		return fmt.Errorf("failed to send Enter: %w", err)
 	}
 
-	// /rename completes silently (no output), so just wait for the prompt to return
-	// The prompt indicator (❯) appears when Claude is ready for the next command
-	if err := watcher.WaitForPattern("❯", 10*time.Second); err != nil {
-		return fmt.Errorf("rename did not complete (prompt not returned): %w", err)
-	}
+	// Wait for Claude to persist the rename to history
+	// /rename completes quickly in-memory, but history file write is async
+	// We need to give Claude time to flush the history before running /csm-assoc
+	// which needs to read the UUID from the history file
+	time.Sleep(2 * time.Second)
 
 	return nil
 }
@@ -82,16 +85,19 @@ func (seq *InitSequence) sendRename(ctrl *ControlModeSession, watcher *OutputWat
 func (seq *InitSequence) sendAssociation(ctrl *ControlModeSession, watcher *OutputWatcher) error {
 	assocCmd := fmt.Sprintf("/csm-tools:csm-assoc %s", seq.SessionName)
 
-	// Send command using send-keys in control mode
-	// Use -l flag for literal text, then send Enter separately
+	// Send command text using send-keys with -l flag (literal)
 	sendLiteralCmd := fmt.Sprintf("send-keys -t %s -l %q", seq.SessionName, assocCmd)
-	if _, err := fmt.Fprintf(ctrl.Stdin, "%s\n", sendLiteralCmd); err != nil {
+	if err := ctrl.SendCommand(sendLiteralCmd); err != nil {
 		return fmt.Errorf("failed to send association text: %w", err)
 	}
 
+	// Small delay to ensure text is received before sending Enter
+	// See: https://github.com/tmux/tmux/issues/1778
+	time.Sleep(100 * time.Millisecond)
+
 	// Send Enter to execute the command
 	sendEnterCmd := fmt.Sprintf("send-keys -t %s C-m", seq.SessionName)
-	if _, err := fmt.Fprintf(ctrl.Stdin, "%s\n", sendEnterCmd); err != nil {
+	if err := ctrl.SendCommand(sendEnterCmd); err != nil {
 		return fmt.Errorf("failed to send Enter: %w", err)
 	}
 
