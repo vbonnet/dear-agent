@@ -326,13 +326,17 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	if spinErr != nil {
 		return fmt.Errorf("spinner error: %w", spinErr)
 	}
+
+	// Ensure clean line after spinner
+	fmt.Println()
+
 	if waitErr != nil {
 		debug.Log("Process wait timed out or failed: %v", waitErr)
-		fmt.Println("⚠ Claude is taking longer than expected (still starting)")
+		ui.PrintWarning("Claude is taking longer than expected (still starting)")
 		fmt.Println("  Attaching now - Claude should appear shortly")
 	} else {
 		debug.Log("Claude process is ready")
-		fmt.Println("✅ Claude is ready!")
+		ui.PrintSuccess("Claude is ready!")
 	}
 
 	// Monitor for trust prompt using control mode (event-driven, not time-based)
@@ -348,7 +352,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	// SessionStart hooks run immediately when Claude starts (no message needed)
 	debug.Phase("Wait for SessionStart Hooks")
 	debug.Log("Waiting for SessionStart hooks to complete (they run at Claude startup)")
-	fmt.Println("⏳ Waiting for SessionStart hooks to complete...")
+	fmt.Println("Waiting for SessionStart hooks to complete...")
 	time.Sleep(5 * time.Second) // Give hooks time to start
 
 	// Create manifest BEFORE sending /rename (so hook can find it)
@@ -359,7 +363,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 	if err := os.MkdirAll(manifestDir, 0700); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to create manifest directory: %v", err))
-		fmt.Println("⚠  Proceeding without manifest - you can run 'csm sync' later")
+		fmt.Println("  Proceeding without manifest - you can run 'csm sync' later")
 	} else {
 		// Create v2 manifest with proper SessionID and empty Claude UUID
 		// The /csm-assoc command will populate the Claude UUID when it runs
@@ -388,10 +392,10 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 		if err := manifest.Write(manifestPath, m); err != nil {
 			ui.PrintWarning(fmt.Sprintf("Failed to write manifest: %v", err))
-			fmt.Println("⚠  Proceeding without manifest - you can run 'csm sync' later")
+			fmt.Println("  Proceeding without manifest - you can run 'csm sync' later")
 		} else {
 			debug.Log("Manifest created at: %s", manifestPath)
-			fmt.Printf("✓ Created manifest: %s\n", manifestPath)
+			ui.PrintSuccess(fmt.Sprintf("Created manifest: %s", manifestPath))
 		}
 	}
 
@@ -406,34 +410,19 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		globalLock = nil // Prevent double-unlock in PersistentPostRunE
 	}
 
-	// Send /rename command FIRST to generate Claude UUID
-	// The UUID is only created when the first message is sent
-	debug.Phase("Send Rename Command")
-	debug.Log("Sending /rename %s command", sessionName)
-	renameCmd := fmt.Sprintf("/rename %s", sessionName)
-	if err := tmux.SendCommand(sessionName, renameCmd); err != nil {
-		debug.Log("Failed to send rename command: %v", err)
-		ui.PrintWarning("Failed to auto-send rename command")
+	// Use InitSequence to properly sequence /rename and /csm-assoc commands
+	// This uses tmux control mode to wait for each command to complete before sending the next
+	debug.Phase("Sequenced Initialization")
+	debug.Log("Running InitSequence for /rename and /csm-assoc")
+	seq := tmux.NewInitSequence(sessionName)
+	if err := seq.Run(); err != nil {
+		debug.Log("InitSequence failed: %v", err)
+		ui.PrintWarning("Failed to run initialization sequence")
+		fmt.Printf("💡 You can manually run:\n")
+		fmt.Printf("  /rename %s\n", sessionName)
+		fmt.Printf("  /csm-tools:csm-assoc %s\n", sessionName)
 	} else {
-		debug.Log("Rename command sent successfully")
-	}
-
-	// Brief sleep to allow rename to process before sending association command
-	time.Sleep(500 * time.Millisecond)
-
-	// Send /csm-tools:csm-assoc command to associate session with CSM
-	// This needs to run AFTER /rename so Claude UUID is generated
-	// This needs to run BEFORE waiting for ready-file so it can create the ready-file
-	debug.Phase("Send Association Command")
-	debug.Log("Sending /csm-tools:csm-assoc %s command", sessionName)
-	assocCmd := fmt.Sprintf("/csm-tools:csm-assoc %s", sessionName)
-	if err := tmux.SendCommand(sessionName, assocCmd); err != nil {
-		debug.Log("Failed to send csm-assoc command: %v", err)
-		ui.PrintWarning("Failed to auto-send association command")
-		fmt.Printf("💡 You can manually run: /csm-tools:csm-assoc %s\n", sessionName)
-	} else {
-		debug.Log("csm-assoc command sent successfully")
-		// Success message removed - automation should be quiet
+		debug.Log("InitSequence completed successfully")
 	}
 
 	// Wait for ready-file (created by csm associate when UUID is captured)
@@ -640,7 +629,7 @@ func monitorAndAnswerTrustPrompt(sessionName string, timeout time.Duration) erro
 			}
 
 			debug.Log("Trust prompt answered successfully")
-			fmt.Println("✓ Trust prompt answered")
+			ui.PrintSuccess("Trust prompt answered")
 			return nil
 		}
 	}
