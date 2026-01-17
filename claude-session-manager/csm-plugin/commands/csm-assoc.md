@@ -10,16 +10,32 @@ allowed-tools: Bash(csm associate:*), Bash(tmux display-message:*), Bash(pwd), B
 I'll associate this Claude session with CSM.
 
 **Step 1: Determine session name source**
-- Check if session name is provided as argument (from $ARGUMENTS)
-- If argument provided: Use it as SESSION_NAME, skip to Step 2
-- Check if `$TMUX` environment variable is set: Run `echo "$TMUX"`
-- If `$TMUX` is set:
-  - Run `tmux display-message -p '#S'` and capture output as SESSION_NAME
-  - Continue to Step 2
-- If `$TMUX` is empty/not set and no argument provided:
-  - Show error: "❌ Not in tmux session and no session name provided"
-  - Show message: "Usage: /csm-tools:csm-assoc {session-name}"
-  - Exit gracefully (do not attempt tmux commands)
+
+Execute these checks in sequence using separate tool calls. Do NOT use bash if/elif/else conditionals.
+
+**1.1: Check for argument**
+- Parse $ARGUMENTS to extract session name
+- If $ARGUMENTS contains a non-empty session name:
+  - Store as SESSION_NAME
+  - Proceed to Step 2
+- If $ARGUMENTS is empty or whitespace only:
+  - Continue to check 1.2
+
+**1.2: Check TMUX environment**
+- Run: `echo "$TMUX"`
+- If output is non-empty (TMUX session detected):
+  - Run: `tmux display-message -p '#S'`
+  - Capture output as SESSION_NAME
+  - Proceed to Step 2
+- If output is empty (not in TMUX):
+  - Continue to check 1.3
+
+**1.3: No session name available**
+- Show error: "❌ Not in tmux session and no session name provided"
+- Show message: "Usage: /csm-tools:csm-assoc {session-name}"
+- Exit gracefully (do not proceed to Step 2)
+
+**Note**: Make three separate bash calls, analyze results in your reasoning layer, then decide next action. Do NOT use conditional logic in bash.
 
 **Step 2: Try association (without --create)**
 Run the appropriate command using SESSION_NAME from Step 1.

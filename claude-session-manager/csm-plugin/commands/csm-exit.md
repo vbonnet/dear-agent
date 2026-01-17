@@ -9,14 +9,27 @@ allowed-tools: Bash(csm get-uuid:*), Bash(csm archive:*), Bash(tmux display-mess
 I'll archive the current CSM session asynchronously. The session will exit automatically once you return to the prompt.
 
 **Step 1: Verify running in tmux and get session name**
-- First check if `$TMUX` environment variable is set: Run `echo "$TMUX"`
-- If `$TMUX` is empty or not set:
+
+Execute these checks using separate tool calls. Do NOT use bash if/elif/else conditionals.
+
+**1.1: Check TMUX environment**
+- Run: `echo "$TMUX"`
+- Capture the output
+
+**1.2: Analyze TMUX status**
+- If output from 1.1 is empty or not set:
   - Show error: "❌ Not running in tmux session"
   - Show message: "csm-exit requires tmux. Use /exit manually to exit Claude"
-  - Exit gracefully (do not attempt to run reaper)
-- If `$TMUX` is set:
-  - Run: `tmux display-message -p '#S'` and capture output as SESSION_NAME
-  - Continue to Step 2
+  - Exit gracefully (do not proceed to Step 2)
+- If output from 1.1 is non-empty (TMUX detected):
+  - Continue to check 1.3
+
+**1.3: Get session name**
+- Run: `tmux display-message -p '#S'`
+- Capture output as SESSION_NAME
+- Proceed to Step 2
+
+**Note**: Make separate bash calls, analyze results in your reasoning layer. Do NOT use conditional logic in bash.
 
 **Step 2: Verify CSM association**
 - Run: `csm get-uuid "{session-name-from-step-1}"` (using session name from Step 1)
