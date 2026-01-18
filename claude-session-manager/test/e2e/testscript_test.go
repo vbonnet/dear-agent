@@ -3,6 +3,7 @@ package e2e
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/rogpeppe/go-internal/testscript"
@@ -18,29 +19,37 @@ func TestMain(m *testing.M) {
 // csmMain is the entry point for the csm binary in testscript
 // This allows tests to call "csm" commands as if they were running the real binary
 func csmMain() int {
-	// Note: For proper integration, we would need to:
-	// 1. Import the root cobra command from cmd/csm
-	// 2. Execute it with os.Args
-	// 3. Return the appropriate exit code
-	//
-	// However, this requires refactoring cmd/csm/main.go to export
-	// the rootCmd or provide a Run() function that we can call.
-	//
-	// For now, implement basic placeholders that the tests expect:
-	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Println("csm version dev (testscript)")
-		return 0
+	// Execute the real csm binary (built from cmd/csm)
+	// This ensures tests run against actual implementation
+
+	// Find the csm binary - should be in $HOME/go/bin/csm
+	csmPath := os.Getenv("HOME") + "/go/bin/csm"
+
+	// If not found in home, try building it
+	if _, err := os.Stat(csmPath); os.IsNotExist(err) {
+		// Fall back to building in-place
+		buildCmd := exec.Command("go", "build", "-o", "/tmp/csm-test", "../../cmd/csm")
+		if err := buildCmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to build csm: %v\n", err)
+			return 1
+		}
+		csmPath = "/tmp/csm-test"
 	}
 
-	// Default behavior (no args) - show usage
-	if len(os.Args) == 1 {
-		fmt.Println("Usage: csm [session-name]")
-		fmt.Println("Claude Session Manager - Smart session resume or create")
-		return 0
+	// Execute the binary with the current args
+	cmd := exec.Command(csmPath, os.Args[1:]...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	cmd.Env = os.Environ()
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return exitErr.ExitCode()
+		}
+		return 1
 	}
 
-	// For other commands, return success placeholder
-	// Full implementation requires cmd/csm refactoring
 	return 0
 }
 

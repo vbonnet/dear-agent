@@ -84,8 +84,85 @@ func MigrateV1ToV2(path string) error {
 	return nil
 }
 
+// MigrateV2ToV3 migrates a v2 manifest to v3 format
+// Acquires lock before migration to prevent concurrent migrations
+// Creates .v2.bak backup before writing v3
+// Idempotent: skips if .v2.bak already exists
+func MigrateV2ToV3(path string) error {
+	// CRITICAL: Acquire lock BEFORE migration
+	// Prevents race condition if two processes load same v2 manifest
+	if err := AcquireLock(path); err != nil {
+		return fmt.Errorf("cannot acquire lock for migration: %w", err)
+	}
+	defer ReleaseLock(path)
+
+	// Read v2 manifest
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	var v2 Manifest
+	if err := yaml.Unmarshal(data, &v2); err != nil {
+		return err
+	}
+
+	// Check if backup already exists (idempotency)
+	backupPath := path + ".v2.bak"
+	if _, err := os.Stat(backupPath); err == nil {
+		// Backup exists, migration already done
+		// This can happen if migration succeeded but load failed
+		logMigration("SKIPPED", path, errors.New("backup already exists"))
+		return nil
+	}
+
+	// Backup original
+	if err := os.WriteFile(backupPath, data, 0600); err != nil {
+		return fmt.Errorf("failed to create backup: %w", err)
+	}
+
+	// Convert to v3
+	v3 := &ManifestV3{
+		// Copy all v2 fields
+		SchemaVersion: "3.0", // Bump version
+		SessionID:     v2.SessionID,
+		Name:          v2.Name,
+		CreatedAt:     v2.CreatedAt,
+		UpdatedAt:     time.Now(), // Update timestamp
+		Lifecycle:     v2.Lifecycle,
+		Context:       v2.Context,
+		Claude:        v2.Claude,
+		Tmux:          v2.Tmux,
+
+		// Add v3 fields - default values for migrated sessions
+		Agent:        "claude",        // Assume existing sessions are Claude
+		AgentHistory: []AgentSwitch{}, // Empty array, not nil
+	}
+
+	// Validate v3 manifest before writing
+	if err := v3.Validate(); err != nil {
+		// Migration failed, remove backup to allow retry
+		os.Remove(backupPath)
+		logMigration("FAILED", path, err)
+		return fmt.Errorf("v3 validation failed: %w", err)
+	}
+
+	// Save v3 using WriteV3() which validates and uses atomic write
+	if err := WriteV3(path, v3); err != nil {
+		// Migration failed, remove backup to allow retry
+		os.Remove(backupPath)
+		logMigration("FAILED", path, err)
+		return fmt.Errorf("failed to save v3: %w", err)
+	}
+
+	// Log success
+	logMigration("SUCCESS", path, nil)
+
+	return nil
+}
+
 // detectVersion reads a manifest file and determines its schema version
-// Returns "1.0", "2.0", or error
+// Returns "1.0", "2.0", "3.0", or error
 func detectVersion(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

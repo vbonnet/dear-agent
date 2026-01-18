@@ -184,11 +184,13 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	// Add working directory to Claude's additionalDirectories to prevent trust prompt
 	debug.Phase("Configure Trust")
 	debug.Log("Adding %s to Claude's additionalDirectories", workDir)
+	trustPreConfigured := false
 	if err := addToAdditionalDirectories(workDir); err != nil {
 		debug.Log("Warning: failed to add to additionalDirectories: %v", err)
 		ui.PrintWarning("Could not pre-authorize directory - trust prompt may appear")
 	} else {
 		debug.Log("Successfully added to additionalDirectories")
+		trustPreConfigured = true
 	}
 
 	// Check if tmux session already exists
@@ -203,71 +205,76 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	}
 
 	if exists {
-		// Prompt user for action
-		var choiceStr string
-		options := []huh.Option[string]{
-			huh.NewOption("Reuse existing tmux session (start Claude in it)", "0"),
-			huh.NewOption("Choose a different name", "1"),
-			huh.NewOption("Cancel", "2"),
-		}
-		err = huh.NewSelect[string]().
-			Title(fmt.Sprintf("Tmux session '%s' already exists. What would you like to do?", sessionName)).
-			Options(options...).
-			Value(&choiceStr).
-			Run()
-		if err != nil {
-			ui.PrintError(err,
-				"Failed to read choice from prompt",
-				"  • Choose different name: csm new <different-name>\n"+
-					"  • Check terminal is interactive (TTY)\n"+
-					"  • Cancel with Ctrl+C and retry")
-			return err
-		}
-
-		// Convert string choice to int for switch statement
-		var choice int
-		fmt.Sscanf(choiceStr, "%d", &choice)
-
-		switch choice {
-		case 0:
-			// Reuse existing session
-			fmt.Printf("Reusing existing tmux session: %s\n", sessionName)
-		case 1:
-			// Prompt for new name
-			var newName string
-			err = huh.NewInput().
-				Title("Enter new session name:").
-				Value(&newName).
-				Validate(func(s string) error {
-					if s == "" {
-						return fmt.Errorf("session name cannot be empty")
-					}
-					return nil
-				}).
+		// If detached mode, skip prompts and reuse existing session
+		if detached {
+			fmt.Printf("Reusing existing tmux session: %s (detached mode)\n", sessionName)
+		} else {
+			// Prompt user for action
+			var choiceStr string
+			options := []huh.Option[string]{
+				huh.NewOption("Reuse existing tmux session (start Claude in it)", "0"),
+				huh.NewOption("Choose a different name", "1"),
+				huh.NewOption("Cancel", "2"),
+			}
+			err = huh.NewSelect[string]().
+				Title(fmt.Sprintf("Tmux session '%s' already exists. What would you like to do?", sessionName)).
+				Options(options...).
+				Value(&choiceStr).
 				Run()
 			if err != nil {
 				ui.PrintError(err,
-					"Failed to read session name from prompt",
-					"  • Provide name as argument: csm new <session-name>\n"+
+					"Failed to read choice from prompt",
+					"  • Choose different name: csm new <different-name>\n"+
 						"  • Check terminal is interactive (TTY)\n"+
-						"  • Try running outside tmux/screen if inside")
+						"  • Cancel with Ctrl+C and retry")
 				return err
 			}
-			if newName == "" {
-				ui.PrintError(
-					fmt.Errorf("session name cannot be empty"),
-					"Invalid session name",
-					"",
-				)
-				return fmt.Errorf("empty session name")
+
+			// Convert string choice to int for switch statement
+			var choice int
+			fmt.Sscanf(choiceStr, "%d", &choice)
+
+			switch choice {
+			case 0:
+				// Reuse existing session
+				fmt.Printf("Reusing existing tmux session: %s\n", sessionName)
+			case 1:
+				// Prompt for new name
+				var newName string
+				err = huh.NewInput().
+					Title("Enter new session name:").
+					Value(&newName).
+					Validate(func(s string) error {
+						if s == "" {
+							return fmt.Errorf("session name cannot be empty")
+						}
+						return nil
+					}).
+					Run()
+				if err != nil {
+					ui.PrintError(err,
+						"Failed to read session name from prompt",
+						"  • Provide name as argument: csm new <session-name>\n"+
+							"  • Check terminal is interactive (TTY)\n"+
+							"  • Try running outside tmux/screen if inside")
+					return err
+				}
+				if newName == "" {
+					ui.PrintError(
+						fmt.Errorf("session name cannot be empty"),
+						"Invalid session name",
+						"",
+					)
+					return fmt.Errorf("empty session name")
+				}
+				sessionName = newName
+				// Recursively handle the new name (might also conflict)
+				return createTmuxSessionAndStartClaude(sessionName)
+			case 2:
+				// Cancel
+				fmt.Println("Cancelled.")
+				return nil
 			}
-			sessionName = newName
-			// Recursively handle the new name (might also conflict)
-			return createTmuxSessionAndStartClaude(sessionName)
-		case 2:
-			// Cancel
-			fmt.Println("Cancelled.")
-			return nil
 		}
 	} else {
 		// Create new tmux session
@@ -341,19 +348,33 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 	// Monitor for trust prompt using control mode (event-driven, not time-based)
 	// Only answer if we actually detect the prompt appearing
-	debug.Phase("Monitor for Trust Prompt")
-	debug.Log("Starting control mode to monitor for trust prompt")
-	if err := monitorAndAnswerTrustPrompt(sessionName, 10*time.Second); err != nil {
-		debug.Log("Trust prompt handling: %v", err)
-		// Non-fatal - either no prompt appeared (good) or we couldn't answer it (user can manually)
+	// Skip if we successfully pre-configured trust (saves ~30s due to blocking scanner.Scan)
+	if trustPreConfigured {
+		debug.Phase("Skip Trust Prompt Monitoring")
+		debug.Log("Skipping trust prompt monitoring since directory was pre-configured")
+	} else {
+		debug.Phase("Monitor for Trust Prompt")
+		debug.Log("Starting control mode to monitor for trust prompt")
+		if err := monitorAndAnswerTrustPrompt(sessionName, 10*time.Second); err != nil {
+			debug.Log("Trust prompt handling: %v", err)
+			// Non-fatal - either no prompt appeared (good) or we couldn't answer it (user can manually)
+		}
 	}
 
 	// Wait for SessionStart hooks to complete before sending commands
 	// SessionStart hooks run immediately when Claude starts (no message needed)
 	debug.Phase("Wait for SessionStart Hooks")
 	debug.Log("Waiting for SessionStart hooks to complete (they run at Claude startup)")
-	fmt.Println("Waiting for SessionStart hooks to complete...")
-	time.Sleep(5 * time.Second) // Give hooks time to start
+	spinErr = spinner.New().
+		Title("Waiting for SessionStart hooks to complete...").
+		Accessible(true).
+		Action(func() {
+			time.Sleep(2 * time.Second) // Give hooks time to start (reduced from 5s)
+		}).
+		Run()
+	if spinErr != nil {
+		return fmt.Errorf("spinner error: %w", spinErr)
+	}
 
 	// Create manifest BEFORE sending /rename (so hook can find it)
 	debug.Phase("Create Manifest")
@@ -363,7 +384,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 	if err := os.MkdirAll(manifestDir, 0700); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to create manifest directory: %v", err))
-		fmt.Println("  Proceeding without manifest - you can run 'csm sync' later")
+		ui.PrintWarning("Proceeding without manifest - you can run 'csm sync' later")
 	} else {
 		// Create v2 manifest with proper SessionID and empty Claude UUID
 		// The /csm-assoc command will populate the Claude UUID when it runs
@@ -392,7 +413,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 		if err := manifest.Write(manifestPath, m); err != nil {
 			ui.PrintWarning(fmt.Sprintf("Failed to write manifest: %v", err))
-			fmt.Println("  Proceeding without manifest - you can run 'csm sync' later")
+			ui.PrintWarning("Proceeding without manifest - you can run 'csm sync' later")
 		} else {
 			debug.Log("Manifest created at: %s", manifestPath)
 			ui.PrintSuccess(fmt.Sprintf("Created manifest: %s", manifestPath))
@@ -428,9 +449,19 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	// Wait for ready-file (created by csm associate when UUID is captured)
 	debug.Phase("Wait for Ready Signal")
 	debug.Log("Waiting for ready-file signal (timeout: 60s)")
-	fmt.Println("Waiting for Claude to initialize...")
-	if err := readiness.WaitForClaudeReady(sessionName, 60*time.Second); err != nil {
-		debug.Log("Ready-file wait failed: %v", err)
+	var readyErr error
+	spinErr = spinner.New().
+		Title("Waiting for Claude to initialize...").
+		Accessible(true).
+		Action(func() {
+			readyErr = readiness.WaitForClaudeReady(sessionName, 60*time.Second)
+		}).
+		Run()
+	if spinErr != nil {
+		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	if readyErr != nil {
+		debug.Log("Ready-file wait failed: %v", readyErr)
 		ui.PrintWarning("Claude did not signal ready within timeout")
 		fmt.Println("  • Attach to session to check status: tmux attach -t " + sessionName)
 		fmt.Printf("  • Run 'csm sync' later to populate UUID if needed\n")
@@ -441,8 +472,8 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		// Wait for /csm-assoc skill to finish outputting its completion messages
 		// The ready-file signals when 'csm associate' binary completes, but the skill
 		// continues to output messages after that. Give it time to finish.
-		debug.Log("Waiting for /csm-assoc skill to complete output (2s)")
-		time.Sleep(2 * time.Second)
+		debug.Log("Waiting for /csm-assoc skill to complete output (0.5s)")
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	// Update VS Code tab title if running in VS Code
