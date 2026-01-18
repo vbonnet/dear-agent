@@ -69,6 +69,41 @@ See `docs/AGENTS.md.example` for full configuration options.
 - **Pattern-based restore** - Glob patterns for archived session recovery (`csm unarchive *[REDACTED_EMPLOYER]*`)
 - **AI-powered search** - Semantic search using Google Vertex AI (`csm search "OAuth work"`)
 
+### 🔌 Command Translation (Multi-Agent)
+
+AGM provides a unified command interface across different AI agents using the `CommandTranslator` abstraction. This allows generic operations (rename session, set directory, run hooks) to work across Claude, Gemini, and future agents.
+
+**Supported Commands:**
+- **RenameSession**: Rename agent session/conversation
+- **SetDirectory**: Set working directory context
+- **RunHook**: Execute initialization hook (agent-dependent)
+
+**Example Usage:**
+```go
+import "github.com/vbonnet/ai-tools/claude-session-manager/internal/command"
+
+// Create translator (Gemini example)
+client := gemini.NewClient(apiKey)
+translator := command.NewGeminiTranslator(client)
+
+// Execute command with timeout
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+err := translator.RenameSession(ctx, sessionID, "new-name")
+if errors.Is(err, command.ErrNotSupported) {
+    // Command not supported - graceful degradation
+} else if err != nil {
+    // Handle error
+}
+```
+
+**Supported Agents:**
+- **Claude**: Commands sent via tmux (slash commands like `/rename`)
+- **Gemini**: Commands sent via API calls (UpdateConversationTitle, UpdateMetadata)
+
+See `internal/command/` package documentation for implementation details.
+
 ### 🚀 Quick Start
 
 ```bash
