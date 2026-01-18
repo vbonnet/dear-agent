@@ -4,15 +4,25 @@ import "time"
 
 // Manifest represents a Claude session manifest (v2 schema)
 type Manifest struct {
-	SchemaVersion string    `yaml:"schema_version"`
-	SessionID     string    `yaml:"session_id"`
-	Name          string    `yaml:"name"`
-	CreatedAt     time.Time `yaml:"created_at"`
-	UpdatedAt     time.Time `yaml:"updated_at"`
-	Lifecycle     string    `yaml:"lifecycle"` // "" (active/stopped) or "archived"
-	Context       Context   `yaml:"context"`
-	Claude        Claude    `yaml:"claude"`
-	Tmux          Tmux      `yaml:"tmux"`
+	SchemaVersion  string          `yaml:"schema_version"`
+	SessionID      string          `yaml:"session_id"`
+	Name           string          `yaml:"name"`
+	CreatedAt      time.Time       `yaml:"created_at"`
+	UpdatedAt      time.Time       `yaml:"updated_at"`
+	Lifecycle      string          `yaml:"lifecycle"` // "" (active/stopped) or "archived"
+	Context        Context         `yaml:"context"`
+	Claude         Claude          `yaml:"claude"`
+	Tmux           Tmux            `yaml:"tmux"`
+	EngramMetadata *EngramMetadata `yaml:"engram_metadata,omitempty"`
+}
+
+// EngramMetadata holds Engram integration metadata
+type EngramMetadata struct {
+	Enabled   bool      `yaml:"enabled"`
+	Query     string    `yaml:"query"`
+	EngramIDs []string  `yaml:"engram_ids"`
+	LoadedAt  time.Time `yaml:"loaded_at"`
+	Count     int       `yaml:"count"`
 }
 
 // Context holds session context information
