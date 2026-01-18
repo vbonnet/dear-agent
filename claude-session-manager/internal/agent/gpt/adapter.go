@@ -1,6 +1,6 @@
 // Package gpt provides a GPT adapter implementation for the agent.Agent interface.
 //
-// This adapter integrates with OpenAI's GPT API using the official openai-go SDK.
+// This adapter integrates with OpenAI's GPT API using sashabaranov/go-openai SDK.
 // It implements full session management with in-memory storage.
 //
 // V1 Implementation:
@@ -42,8 +42,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
+	"github.com/sashabaranov/go-openai"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/agent"
 )
 
@@ -67,15 +66,21 @@ func NewAdapter() (agent.Agent, error) {
 		return nil, ErrAPIKeyNotSet
 	}
 
-	client := openai.NewClient(
-		option.WithAPIKey(apiKey),
-	)
+	client := openai.NewClient(apiKey)
 
 	return &Adapter{
 		client:   client,
 		sessions: make(map[agent.SessionID]*Session),
-		model:    "gpt-4-turbo",
+		model:    openai.GPT4o,
 	}, nil
+}
+
+func init() {
+	// Register GPT adapter (registration errors ignored, will fail at Get time)
+	adapter, _ := NewAdapter()
+	if adapter != nil {
+		agent.Register("gpt", adapter)
+	}
 }
 
 // Name returns the agent identifier.
@@ -185,16 +190,16 @@ func (a *Adapter) SendMessage(sessionID agent.SessionID, message agent.Message) 
 	a.mu.Unlock()
 
 	// 3. Build OpenAI request
-	params := openai.ChatCompletionNewParams{
-		Model:    openai.F(a.model),
-		Messages: openai.F(toOpenAIMessages(session.Messages)),
+	req := openai.ChatCompletionRequest{
+		Model:    a.model,
+		Messages: toOpenAIMessages(session.Messages),
 	}
 
 	// 4. Call API with retry
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	response, err := a.sendWithRetry(ctx, params)
+	response, err := a.sendWithRetry(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -211,31 +216,31 @@ func (a *Adapter) SendMessage(sessionID agent.SessionID, message agent.Message) 
 }
 
 // sendWithRetry calls OpenAI API with exponential backoff retry logic.
-func (a *Adapter) sendWithRetry(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
+func (a *Adapter) sendWithRetry(ctx context.Context, req openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	maxRetries := 5
 	baseDelay := 1 * time.Second
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		resp, err := a.client.Chat.Completions.New(ctx, params)
+		resp, err := a.client.CreateChatCompletion(ctx, req)
 
 		if err == nil {
 			return resp, nil
 		}
 
 		// Check error type
-		var apiErr *openai.Error
+		var apiErr *openai.APIError
 		if errors.As(err, &apiErr) {
-			if apiErr.StatusCode == 429 { // Rate limit
+			if apiErr.HTTPStatusCode == 429 { // Rate limit
 				delay := baseDelay * time.Duration(1<<attempt) // Exponential: 1s, 2s, 4s, 8s, 16s
 				select {
 				case <-time.After(delay):
 					continue
 				case <-ctx.Done():
-					return nil, ctx.Err()
+					return openai.ChatCompletionResponse{}, ctx.Err()
 				}
 			}
-			if apiErr.StatusCode == 401 { // Auth error (non-retryable)
-				return nil, &APIError{
+			if apiErr.HTTPStatusCode == 401 { // Auth error (non-retryable)
+				return openai.ChatCompletionResponse{}, &APIError{
 					Operation:  "sendMessage",
 					StatusCode: 401,
 					Message:    "authentication failed",
@@ -245,10 +250,10 @@ func (a *Adapter) sendWithRetry(ctx context.Context, params openai.ChatCompletio
 		}
 
 		// Non-retryable error
-		return nil, err
+		return openai.ChatCompletionResponse{}, err
 	}
 
-	return nil, ErrMaxRetriesExceeded
+	return openai.ChatCompletionResponse{}, ErrMaxRetriesExceeded
 }
 
 // GetHistory retrieves conversation history for a session.

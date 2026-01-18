@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/agent"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/readiness"
@@ -19,7 +20,10 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
 
-var detached bool
+var (
+	detached  bool
+	agentName string
+)
 
 var newCmd = &cobra.Command{
 	Use:   "new [session-name]",
@@ -144,6 +148,22 @@ Examples:
 		debug.Log("Session name: %s", sessionName)
 		debug.Log("In tmux: %v", inTmux)
 		debug.Log("Debug enabled: %v", debugEnabled)
+
+		// Validate agent name
+		if err := agent.ValidateAgentName(agentName); err != nil {
+			ui.PrintError(err,
+				"Invalid agent specified",
+				"  • Valid agents: claude, gemini, gpt\n"+
+					"  • Run 'agm agent list' to see available agents")
+			return err
+		}
+
+		// Warn if agent unavailable (but allow session creation)
+		if err := agent.ValidateAgentAvailability(agentName); err != nil {
+			ui.PrintWarning(fmt.Sprintf("⚠️  %s", err.Error()))
+		}
+
+		debug.Log("Agent: %s", agentName)
 
 		// Now we have a session name. Handle the scenarios:
 		// 1. Inside tmux + not detached: start Claude in current session
@@ -406,6 +426,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			Tmux: manifest.Tmux{
 				SessionName: sessionName,
 			},
+			Agent: agentName,
 			Claude: manifest.Claude{
 				UUID: "", // Will be populated by SessionStart hook
 			},
@@ -551,6 +572,7 @@ func startClaudeInCurrentTmux(sessionName string) error {
 			Tmux: manifest.Tmux{
 				SessionName: sessionName,
 			},
+			Agent: agentName,
 		}
 
 		if err := manifest.Write(manifestPath, m); err != nil {
@@ -740,4 +762,5 @@ func init() {
 	rootCmd.AddCommand(newCmd)
 	newCmd.Flags().BoolP("debug", "d", false, "Enable debug logging to ~/.csm/debug/")
 	newCmd.Flags().BoolVar(&detached, "detached", false, "Create detached session without attaching")
+	newCmd.Flags().StringVar(&agentName, "agent", "claude", "AI agent to use (claude, gemini, gpt)")
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/agent"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/discovery"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
@@ -67,6 +68,19 @@ Examples:
 			ui.PrintManifestReadError(err, manifestPath)
 			return err
 		}
+
+		// Auto-detect agent from manifest
+		agentName := m.Agent
+		if agentName == "" {
+			agentName = "claude" // Default for backward compatibility
+		}
+
+		// Warn if agent unavailable
+		if err := agent.ValidateAgentAvailability(agentName); err != nil {
+			ui.PrintWarning(fmt.Sprintf("⚠️  %s", err.Error()))
+		}
+
+		fmt.Printf("Using agent: %s\n", agentName)
 
 		// Check if session is archived
 		if m.Lifecycle == manifest.LifecycleArchived {

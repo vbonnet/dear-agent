@@ -13,6 +13,7 @@ type Manifest struct {
 	Context        Context         `yaml:"context"`
 	Claude         Claude          `yaml:"claude"`
 	Tmux           Tmux            `yaml:"tmux"`
+	Agent          string          `yaml:"agent,omitempty"` // Agent specifies the AI agent (claude, gemini, gpt)
 	EngramMetadata *EngramMetadata `yaml:"engram_metadata,omitempty"`
 }
 

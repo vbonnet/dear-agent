@@ -36,7 +36,7 @@ func TestNewAdapter_WithAPIKey(t *testing.T) {
 	require.NotNil(t, adapter)
 
 	assert.Equal(t, "gpt", adapter.Name())
-	assert.Equal(t, "gpt-4-turbo", adapter.Version())
+	assert.Equal(t, "gpt-4o", adapter.Version())
 }
 
 // TestAdapter_Metadata tests Name, Version, and Capabilities methods.
@@ -49,7 +49,7 @@ func TestAdapter_Metadata(t *testing.T) {
 	})
 
 	t.Run("Version", func(t *testing.T) {
-		assert.Equal(t, "gpt-4-turbo", adapter.Version())
+		assert.Equal(t, "gpt-4o", adapter.Version())
 	})
 
 	t.Run("Capabilities", func(t *testing.T) {
@@ -58,7 +58,7 @@ func TestAdapter_Metadata(t *testing.T) {
 		assert.True(t, caps.SupportsTools)
 		assert.True(t, caps.SupportsVision)
 		assert.Equal(t, 128000, caps.MaxContextWindow)
-		assert.Equal(t, "gpt-4-turbo", caps.ModelName)
+		assert.Equal(t, "gpt-4o", caps.ModelName)
 	})
 }
 
