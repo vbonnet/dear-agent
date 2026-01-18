@@ -58,22 +58,27 @@ func NewSession(name string, workDir string) error {
 
 	// Inject tmux settings for better UX
 	// These settings improve multi-device usage, copy/paste, and mouse support
-	settings := []string{
-		"set-window-option -g aggressive-resize on", // Fix multi-device layout conflicts
-		"set-option -g window-size latest",           // Force window to fit current screen
-		"set -g mouse on",                            // Enable mouse scrolling
-		"set -s set-clipboard on",                    // Enable OSC 52 for Cmd-C over SSH
+	// IMPORTANT: Run as actual tmux commands, NOT via send-keys (which sends to bash shell)
+	type tmuxSetting struct {
+		args        []string
+		description string
+	}
+	settings := []tmuxSetting{
+		{[]string{"set-window-option", "-t", name, "aggressive-resize", "on"}, "Fix multi-device layout conflicts"},
+		{[]string{"set-option", "-t", name, "window-size", "latest"}, "Force window to fit current screen"},
+		{[]string{"set", "-t", name, "mouse", "on"}, "Enable mouse scrolling"},
+		{[]string{"set", "-s", "set-clipboard", "on"}, "Enable OSC 52 for Cmd-C over SSH"},
 	}
 
 	for _, setting := range settings {
-		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", name, setting, "C-m")
+		// Build full command args: ["tmux", "-S", socketPath, ...setting.args]
+		cmdArgs := append([]string{"-S", socketPath}, setting.args...)
+		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", cmdArgs...)
 		if err := cmd.Run(); err != nil {
 			// Log warning but don't fail - these are UX improvements, not critical
-			fmt.Fprintf(os.Stderr, "Warning: Failed to apply tmux setting '%s': %v\n", setting, err)
+			fmt.Fprintf(os.Stderr, "Warning: Failed to apply tmux setting '%s': %v\n", setting.description, err)
 		}
 		cancel()
-		// Small delay to ensure commands are processed
-		time.Sleep(50 * time.Millisecond)
 	}
 
 	return nil
@@ -184,6 +189,11 @@ func SendCommand(sessionName string, command string) error {
 		}
 		return fmt.Errorf("failed to send command text to tmux: %w", err)
 	}
+
+	// Small delay to ensure tmux processes the text before we send Enter
+	// See: https://github.com/tmux/tmux/issues/1778
+	// Without this delay, text may not be fully received before Enter is processed
+	time.Sleep(100 * time.Millisecond)
 
 	// Send Enter key separately (required - sending C-m in same command creates newline in prompt)
 	cmdEnter, cancel2 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, "C-m")

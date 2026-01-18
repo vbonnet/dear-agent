@@ -136,6 +136,7 @@ Examples:
 			Affirmative("Yes").
 			Negative("No").
 			Value(&confirm).
+			WithTheme(ui.GetTheme()).
 			Run()
 		if err != nil || !confirm {
 			fmt.Println("Restoration cancelled.")

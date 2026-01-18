@@ -116,6 +116,7 @@ Examples:
 				Affirmative("Yes").
 				Negative("No").
 				Value(&confirm).
+				WithTheme(ui.GetTheme()).
 				Run()
 			if err != nil || !confirm {
 				fmt.Println("Skipping orphaned sessions. Run 'csm sync' again to handle them later.")
@@ -152,6 +153,7 @@ Examples:
 						Affirmative("Yes").
 						Negative("No").
 						Value(&confirmSession).
+						WithTheme(ui.GetTheme()).
 						Run()
 					if err != nil || !confirmSession {
 						continue

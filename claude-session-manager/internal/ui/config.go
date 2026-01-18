@@ -66,7 +66,7 @@ func DefaultConfig() *Config {
 			ArchiveThresholdDays: 90,
 		},
 		UI: UIConfig{
-			Theme:            "dracula",
+			Theme:            "csm", // High-contrast custom theme (changed from "dracula")
 			PickerHeight:     15,
 			ShowProjectPaths: true,
 			ShowTags:         true,

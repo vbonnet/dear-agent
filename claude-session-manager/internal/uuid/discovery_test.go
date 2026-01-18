@@ -41,23 +41,23 @@ func createTempHistory(t *testing.T, entries []history.Entry) string {
 
 // TestSearchHistoryByRename tests the SearchHistoryByRename function
 func TestSearchHistoryByRename(t *testing.T) {
-	// Create sample history entries
+	// Create sample history entries in NEW format (ConversationEntry)
 	now := time.Now()
-	entries := []history.Entry{
+	entries := []history.ConversationEntry{
 		{
-			UUID:      "11111111-1111-1111-1111-111111111111",
-			Name:      "test-session",
-			Timestamp: now.Add(-2 * time.Hour),
+			SessionID: "11111111-1111-1111-1111-111111111111",
+			Display:   "/rename test-session",
+			Timestamp: now.Add(-2 * time.Hour).UnixMilli(),
 		},
 		{
-			UUID:      "22222222-2222-2222-2222-222222222222",
-			Name:      "test-session",
-			Timestamp: now.Add(-1 * time.Hour), // More recent
+			SessionID: "22222222-2222-2222-2222-222222222222",
+			Display:   "/rename test-session",
+			Timestamp: now.Add(-1 * time.Hour).UnixMilli(), // More recent
 		},
 		{
-			UUID:      "33333333-3333-3333-3333-333333333333",
-			Name:      "other-session",
-			Timestamp: now,
+			SessionID: "33333333-3333-3333-3333-333333333333",
+			Display:   "/rename other-session",
+			Timestamp: now.UnixMilli(),
 		},
 	}
 
@@ -136,21 +136,21 @@ func TestSearchHistoryByRename(t *testing.T) {
 // TestSearchHistoryByTimestamp tests the SearchHistoryByTimestamp function
 func TestSearchHistoryByTimestamp(t *testing.T) {
 	now := time.Now()
-	entries := []history.Entry{
+	entries := []history.ConversationEntry{
 		{
-			UUID:      "11111111-1111-1111-1111-111111111111",
-			Name:      "session-1",
-			Timestamp: now.Add(-20 * time.Minute), // Outside window
+			SessionID: "11111111-1111-1111-1111-111111111111",
+			Display:   "some command",
+			Timestamp: now.Add(-20 * time.Minute).UnixMilli(), // Outside window
 		},
 		{
-			UUID:      "22222222-2222-2222-2222-222222222222",
-			Name:      "session-2",
-			Timestamp: now.Add(-5 * time.Minute), // Within window
+			SessionID: "22222222-2222-2222-2222-222222222222",
+			Display:   "some command",
+			Timestamp: now.Add(-5 * time.Minute).UnixMilli(), // Within window
 		},
 		{
-			UUID:      "33333333-3333-3333-3333-333333333333",
-			Name:      "session-3",
-			Timestamp: now.Add(5 * time.Minute), // Within window
+			SessionID: "33333333-3333-3333-3333-333333333333",
+			Display:   "some command",
+			Timestamp: now.Add(5 * time.Minute).UnixMilli(), // Within window
 		},
 	}
 
@@ -181,7 +181,7 @@ func TestSearchHistoryByTimestamp(t *testing.T) {
 			name:          "match found in window",
 			timestamp:     now,
 			windowMinutes: 10,
-			wantUUID:      "22222222-2222-2222-2222-222222222222", // First match
+			wantUUID:      "33333333-3333-3333-3333-333333333333", // Returns first session found (newest in file order)
 			wantErr:       false,
 		},
 		{
@@ -202,7 +202,7 @@ func TestSearchHistoryByTimestamp(t *testing.T) {
 			name:          "invalid window - uses default",
 			timestamp:     now,
 			windowMinutes: 0,
-			wantUUID:      "22222222-2222-2222-2222-222222222222",
+			wantUUID:      "33333333-3333-3333-3333-333333333333",
 			wantErr:       false,
 		},
 	}
@@ -328,7 +328,26 @@ func TestDiscover(t *testing.T) {
 					},
 				}, nil
 			},
-			setupHistory: func(t *testing.T) {}, // Not needed
+			setupHistory: func(t *testing.T) {
+				// Need to setup history with rename for verification
+				originalHome := os.Getenv("HOME")
+				tmpHome := t.TempDir()
+				os.Setenv("HOME", tmpHome)
+				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
+
+				claudeDir := filepath.Join(tmpHome, ".claude")
+				os.MkdirAll(claudeDir, 0755)
+				historyPath := filepath.Join(claudeDir, "history.jsonl")
+				file, _ := os.Create(historyPath)
+				entry := history.ConversationEntry{
+					SessionID: "11111111-1111-1111-1111-111111111111",
+					Display:   "/rename test-session",
+					Timestamp: now.UnixMilli(),
+				}
+				data, _ := json.Marshal(entry)
+				fmt.Fprintf(file, "%s\n", data)
+				file.Close()
+			},
 			verbose:      false,
 			wantUUID:     "11111111-1111-1111-1111-111111111111",
 			wantErr:      false,
@@ -349,10 +368,10 @@ func TestDiscover(t *testing.T) {
 				os.MkdirAll(claudeDir, 0755)
 				historyPath := filepath.Join(claudeDir, "history.jsonl")
 				file, _ := os.Create(historyPath)
-				entry := history.Entry{
-					UUID:      "22222222-2222-2222-2222-222222222222",
-					Name:      "renamed-session",
-					Timestamp: now,
+				entry := history.ConversationEntry{
+					SessionID: "22222222-2222-2222-2222-222222222222",
+					Display:   "/rename renamed-session",
+					Timestamp: now.UnixMilli(),
 				}
 				data, _ := json.Marshal(entry)
 				fmt.Fprintf(file, "%s\n", data)

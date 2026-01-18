@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
 
 var (
@@ -158,12 +159,16 @@ func runTestCreate(cmd *cobra.Command, args []string) error {
 		if spinErr != nil {
 			return fmt.Errorf("spinner error: %w", spinErr)
 		}
+
+		// Ensure clean line after spinner
+		fmt.Println()
+
 		if createErr != nil {
 			return createErr
 		}
 
 		// Print human-readable output
-		fmt.Printf("✓ Test session created: %s\n", name)
+		ui.PrintSuccess(fmt.Sprintf("Test session created: %s", name))
 		fmt.Printf("  Tmux: %s\n", tmuxName)
 		fmt.Printf("  Sessions: %s\n", createSessionsDir)
 		fmt.Printf("  Startup: %.2fs\n", float64(sess.StartupTimeMs)/1000.0)

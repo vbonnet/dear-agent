@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
 
 var (
@@ -87,12 +88,16 @@ func runTestCleanup(cmd *cobra.Command, args []string) error {
 		if spinErr != nil {
 			return fmt.Errorf("spinner error: %w", spinErr)
 		}
+
+		// Ensure clean line after spinner
+		fmt.Println()
+
 		if cleanupErr != nil {
 			return cleanupErr
 		}
 
 		// Print human-readable output
-		fmt.Printf("✓ Test session cleaned up: %s\n", name)
+		ui.PrintSuccess(fmt.Sprintf("Test session cleaned up: %s", name))
 		if status.TmuxKilled {
 			fmt.Printf("  Tmux session: killed\n")
 		} else {
@@ -104,7 +109,8 @@ func runTestCleanup(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  Directory: failed to remove (may not exist)\n")
 		}
 		if status.Status == "partial" {
-			fmt.Printf("\n⚠ Partial cleanup - some steps failed\n")
+			fmt.Println()
+			ui.PrintWarning("Partial cleanup - some steps failed")
 		}
 	} else {
 		// Automation mode - direct call

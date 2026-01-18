@@ -14,27 +14,45 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 )
 
-// Lipgloss styles for table formatting
-var (
-	activeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("10")). // Bright green
-			Bold(true)
+// Lipgloss style functions for table formatting (using palette)
+func getActiveStyle() lipgloss.Style {
+	cfg := GetGlobalConfig()
+	palette := GetPalette(cfg.UI.Theme)
+	return lipgloss.NewStyle().
+		Foreground(palette.Active).
+		Bold(true)
+}
 
-	stoppedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("11")) // Bright yellow
+func getStoppedStyle() lipgloss.Style {
+	cfg := GetGlobalConfig()
+	palette := GetPalette(cfg.UI.Theme)
+	return lipgloss.NewStyle().
+		Foreground(palette.Stopped)
+}
 
-	staleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("9")). // Bright red
-			Faint(true)
+func getStaleStyle() lipgloss.Style {
+	cfg := GetGlobalConfig()
+	palette := GetPalette(cfg.UI.Theme)
+	return lipgloss.NewStyle().
+		Foreground(palette.Stale).
+		Faint(true)
+}
 
-	headerStyle = lipgloss.NewStyle().
-			Bold(true).
-			Underline(true).
-			Foreground(lipgloss.Color("14")) // Bright cyan
+func getHeaderStyle() lipgloss.Style {
+	cfg := GetGlobalConfig()
+	palette := GetPalette(cfg.UI.Theme)
+	return lipgloss.NewStyle().
+		Bold(true).
+		Underline(true).
+		Foreground(palette.Header)
+}
 
-	dimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("8")) // Bright black (gray)
-)
+func getDimStyle() lipgloss.Style {
+	cfg := GetGlobalConfig()
+	palette := GetPalette(cfg.UI.Theme)
+	return lipgloss.NewStyle().
+		Foreground(palette.Dim)
+}
 
 // FormatTable formats manifests with enhanced lipgloss styling and grouping
 func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) string {
@@ -204,7 +222,7 @@ func renderGroupHeader(status string, count int) string {
 		displayStatus = strings.Title(status)
 	}
 	text := fmt.Sprintf("%s Sessions (%d)", displayStatus, count)
-	return headerStyle.Render(text)
+	return getHeaderStyle().Render(text)
 }
 
 // getStatusSymbol returns the Unicode symbol for a status
@@ -320,11 +338,11 @@ func renderGroupTable(group []*manifest.Manifest, status string, statuses map[st
 	var style lipgloss.Style
 	switch status {
 	case "attached", "detached":
-		style = activeStyle
+		style = getActiveStyle()
 	case "stopped":
-		style = stoppedStyle
+		style = getStoppedStyle()
 	case "stale":
-		style = staleStyle
+		style = getStaleStyle()
 	default:
 		style = lipgloss.NewStyle() // No styling
 	}

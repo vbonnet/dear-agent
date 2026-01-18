@@ -333,6 +333,10 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	if spinErr != nil {
 		return fmt.Errorf("spinner error: %w", spinErr)
 	}
+
+	// Ensure clean line after spinner
+	fmt.Println()
+
 	if waitErr != nil {
 		debug.Log("Process wait timed out or failed: %v", waitErr)
 		ui.PrintWarning("Claude is taking longer than expected (still starting)")
@@ -427,35 +431,19 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		globalLock = nil // Prevent double-unlock in PersistentPostRunE
 	}
 
-	// Send /rename command FIRST to generate Claude UUID
-	// The UUID is only created when the first message is sent
-	debug.Phase("Send Rename Command")
-	debug.Log("Sending /rename %s command", sessionName)
-	renameCmd := fmt.Sprintf("/rename %s", sessionName)
-	if err := tmux.SendCommand(sessionName, renameCmd); err != nil {
-		debug.Log("Failed to send rename command: %v", err)
-		ui.PrintWarning("Failed to auto-send rename command")
+	// Use InitSequence to properly sequence /rename and /csm-assoc commands
+	// This uses tmux control mode to wait for each command to complete before sending the next
+	debug.Phase("Sequenced Initialization")
+	debug.Log("Running InitSequence for /rename and /csm-assoc")
+	seq := tmux.NewInitSequence(sessionName)
+	if err := seq.Run(); err != nil {
+		debug.Log("InitSequence failed: %v", err)
+		ui.PrintWarning("Failed to run initialization sequence")
+		fmt.Printf("💡 You can manually run:\n")
+		fmt.Printf("  /rename %s\n", sessionName)
+		fmt.Printf("  /csm-tools:csm-assoc %s\n", sessionName)
 	} else {
-		debug.Log("Rename command sent successfully")
-	}
-
-	// Sleep to allow rename to process before sending association command
-	// Needs to be long enough to prevent commands from being buffered together
-	time.Sleep(1500 * time.Millisecond)
-
-	// Send /csm-tools:csm-assoc command to associate session with CSM
-	// This needs to run AFTER /rename so Claude UUID is generated
-	// This needs to run BEFORE waiting for ready-file so it can create the ready-file
-	debug.Phase("Send Association Command")
-	debug.Log("Sending /csm-tools:csm-assoc %s command", sessionName)
-	assocCmd := fmt.Sprintf("/csm-tools:csm-assoc %s", sessionName)
-	if err := tmux.SendCommand(sessionName, assocCmd); err != nil {
-		debug.Log("Failed to send csm-assoc command: %v", err)
-		ui.PrintWarning("Failed to auto-send association command")
-		fmt.Printf("💡 You can manually run: /csm-tools:csm-assoc %s\n", sessionName)
-	} else {
-		debug.Log("csm-assoc command sent successfully")
-		// Success message removed - automation should be quiet
+		debug.Log("InitSequence completed successfully")
 	}
 
 	// Wait for ready-file (created by csm associate when UUID is captured)

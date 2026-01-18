@@ -38,7 +38,7 @@ Examples:
 
 		// Display status
 		if !info.Exists {
-			fmt.Println("✅ No lock file found.")
+			ui.PrintSuccess("No lock file found.")
 			fmt.Printf("   Lock path: %s\n", lockPath)
 			return nil
 		}
@@ -63,7 +63,7 @@ Examples:
 
 		// Lock is held by active process
 		if force {
-			fmt.Printf("⚠ WARNING: Forcing unlock of active process %d\n", info.PID)
+			ui.PrintWarning(fmt.Sprintf("WARNING: Forcing unlock of active process %d", info.PID))
 			fmt.Printf("   Lock path: %s\n", lockPath)
 			fmt.Println("   This may cause race conditions if the process is actually running!")
 

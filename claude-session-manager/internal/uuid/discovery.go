@@ -23,6 +23,9 @@ import (
 // with the /rename command. Returns the UUID of the most recent session with
 // the given name.
 //
+// This function uses the NEW history format (ConversationEntry) which is what
+// modern Claude Code writes. The old format (Entry with name field) is deprecated.
+//
 // Parameters:
 //   - sessionName: The name to search for (from /rename command)
 //
@@ -35,25 +38,47 @@ func SearchHistoryByRename(sessionName string) (string, error) {
 	}
 
 	parser := history.NewParser("")
-	entries, err := parser.ReadAll()
+	// Use ReadConversations instead of ReadAll to get new format entries
+	// ReadAll() only returns old-format entries which modern Claude doesn't write
+	sessions, err := parser.ReadConversations(1000) // Read last 1000 entries
 	if err != nil {
 		return "", fmt.Errorf("failed to read history: %w", err)
 	}
 
-	var latest *history.Entry
-	for _, entry := range entries {
-		if entry.Name == sessionName {
-			if latest == nil || entry.Timestamp.After(latest.Timestamp) {
-				latest = entry
+	// Build a list of all rename commands with their timestamps
+	// We need to find the MOST RECENT /rename for this session name
+	type renameMatch struct {
+		sessionID string
+		timestamp int64
+	}
+	var matches []renameMatch
+
+	renameCmd := "/rename " + sessionName
+	for _, session := range sessions {
+		for _, entry := range session.Entries {
+			// Check if this entry is a rename command for our session
+			if entry.Display == renameCmd {
+				matches = append(matches, renameMatch{
+					sessionID: session.SessionID,
+					timestamp: entry.Timestamp,
+				})
 			}
 		}
 	}
 
-	if latest == nil {
+	if len(matches) == 0 {
 		return "", fmt.Errorf("no rename found for: %s", sessionName)
 	}
 
-	return latest.UUID, nil
+	// Find the most recent match (highest timestamp)
+	mostRecent := matches[0]
+	for _, match := range matches[1:] {
+		if match.timestamp > mostRecent.timestamp {
+			mostRecent = match
+		}
+	}
+
+	return mostRecent.sessionID, nil
 }
 
 // DefaultWindowMinutes is the default time window for timestamp searches
@@ -64,6 +89,9 @@ const DefaultWindowMinutes = 10
 //
 // This is useful when a manifest exists but lacks a UUID field - we can search
 // for sessions created around the same time as the manifest's last modified time.
+//
+// This function uses the NEW history format (ConversationEntry) which is what
+// modern Claude Code writes. The old format (Entry with time.Time timestamp) is deprecated.
 //
 // Parameters:
 //   - timestamp: The reference timestamp to search around
@@ -91,15 +119,23 @@ func SearchHistoryByTimestamp(timestamp time.Time, windowMinutes int) (string, e
 	startTime := timestamp.Add(-windowDuration)
 	endTime := timestamp.Add(windowDuration)
 
+	// Convert to Unix milliseconds for comparison with new format
+	startMillis := startTime.UnixMilli()
+	endMillis := endTime.UnixMilli()
+
 	parser := history.NewParser("")
-	entries, err := parser.ReadAll()
+	// Use ReadConversations to get new format entries
+	sessions, err := parser.ReadConversations(1000) // Read last 1000 entries
 	if err != nil {
 		return "", fmt.Errorf("failed to read history: %w", err)
 	}
 
-	for _, entry := range entries {
-		if entry.Timestamp.After(startTime) && entry.Timestamp.Before(endTime) {
-			return entry.UUID, nil
+	// Find first session with any entry in the time window
+	for _, session := range sessions {
+		for _, entry := range session.Entries {
+			if entry.Timestamp >= startMillis && entry.Timestamp <= endMillis {
+				return session.SessionID, nil
+			}
 		}
 	}
 
@@ -226,7 +262,18 @@ func Discover(sessionName string, manifestSearchFunc func(string) (*manifest.Man
 		if err == nil && m != nil {
 			if m.Claude.UUID != "" {
 				logf("  ✓ found: %s", m.Claude.UUID)
-				return m.Claude.UUID, nil
+				// CRITICAL BUG FIX: Don't blindly trust manifest UUID!
+				// Verify it matches the session name via rename search
+				verifyUUID, verifyErr := SearchHistoryByRename(sessionName)
+				if verifyErr == nil && verifyUUID == m.Claude.UUID {
+					return m.Claude.UUID, nil
+				}
+				if verifyErr == nil {
+					// Update manifest with correct UUID and return it
+					return verifyUUID, nil
+				}
+				// Verification failed, fall through to other levels
+				logf("  - manifest UUID could not be verified, trying other methods")
 			}
 			logf("  - manifest found but has no UUID")
 
