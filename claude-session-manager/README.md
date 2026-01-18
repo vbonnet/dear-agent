@@ -29,6 +29,36 @@ Not sure which agent to use?
 
 **Detailed comparison**: See [docs/AGENT-COMPARISON.md](docs/AGENT-COMPARISON.md) for use cases, context windows, features, and limitations.
 
+### Agent Routing with AGENTS.md (Coming Soon)
+
+Automate agent selection based on session names using AGENTS.md configuration files.
+
+**Status**: Infrastructure ready, integration pending. The `internal/agents` package provides:
+- YAML-based configuration (`AGENTS.md`)
+- Keyword-based agent selection
+- Multi-path detection (project → global)
+
+**Example `AGENTS.md`**:
+```yaml
+default_agent: claude
+preferences:
+  - keywords: [creative, design, brainstorm]
+    agent: gemini
+  - keywords: [code, debug, refactor]
+    agent: claude
+```
+
+**Once integrated**:
+```bash
+agm new creative-project      # Auto-selects gemini (matches "creative")
+agm new code-refactor         # Auto-selects claude (matches "code")
+agm new random-task           # Uses claude (default, no match)
+```
+
+See `docs/AGENTS.md.example` for full configuration options.
+
+> **Note**: Full `agm new` integration requires agent selection support in AGM core (currently hardcoded to `claude` command). The AGENTS.md parsing infrastructure is complete and ready for integration.
+
 ## Features
 
 ### 🎯 Smart Session Management
