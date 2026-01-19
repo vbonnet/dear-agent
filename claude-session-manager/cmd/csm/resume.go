@@ -406,20 +406,6 @@ func displayHealthStatus(health *HealthStatus) {
 		fmt.Printf("✗ Worktree:      %s (NOT FOUND)\n", health.WorktreePath)
 	}
 
-	// Session env
-	if health.SessionEnvExists {
-		fmt.Printf("✓ Session env:   %s\n", health.SessionEnvPath)
-	} else {
-		fmt.Printf("⚠ Session env:   %s (NOT FOUND)\n", health.SessionEnvPath)
-	}
-
-	// File history
-	if health.FileHistoryExists {
-		fmt.Printf("✓ File history:  %s\n", health.FileHistoryPath)
-	} else {
-		fmt.Printf("⚠ File history:  %s (NOT FOUND)\n", health.FileHistoryPath)
-	}
-
 	// Tmux
 	if health.TmuxExists {
 		fmt.Printf("✓ Tmux:          %s (EXISTS)\n", health.TmuxSessionName)

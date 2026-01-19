@@ -20,7 +20,7 @@ var ClaudePromptPatterns = []string{
 // Uses control mode to monitor output stream and detect prompt patterns
 // Handles octal escapes using unescapeOctal from output_watcher.go
 func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
-	log.Printf("🔍 Starting prompt detection for session: %s", sessionName)
+	log.Printf("\n🔍 Starting prompt detection for session: %s", sessionName)
 
 	// Start control mode
 	ctrl, err := StartControlMode(sessionName)
@@ -71,9 +71,12 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 			content := ExtractOutputContent(line)
 			lastContent = content
 
-			// Log output for debugging (limit verbosity)
+			// Log output for debugging (limit verbosity and filter escape sequences)
 			if linesChecked <= 5 || linesChecked%10 == 0 {
-				log.Printf("📝 Output [%d]: %q", linesChecked, content)
+				// Only log if content is meaningful (not just escape sequences)
+				if isVisibleContent(content) {
+					log.Printf("📝 Output [%d]: %q", linesChecked, truncate(content, 80))
+				}
 			}
 
 			// Check for prompt patterns
@@ -250,4 +253,27 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// isVisibleContent returns true if content contains visible characters
+// (not just ANSI escape sequences)
+func isVisibleContent(s string) bool {
+	// Empty or whitespace-only strings are not visible
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return false
+	}
+
+	// If content is mostly escape sequences, don't consider it visible
+	// Escape sequences typically start with \x1b or \033
+	if strings.HasPrefix(trimmed, "\x1b") || strings.HasPrefix(trimmed, "\033") {
+		// Check if there's any non-escape content
+		// Simple heuristic: if more than 50% is escape codes, skip it
+		escapeCount := strings.Count(trimmed, "\x1b") + strings.Count(trimmed, "\033")
+		if escapeCount*4 > len(trimmed) { // Escape sequences are typically 4+ chars
+			return false
+		}
+	}
+
+	return true
 }
