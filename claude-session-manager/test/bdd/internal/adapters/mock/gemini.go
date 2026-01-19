@@ -43,6 +43,10 @@ func (a *GeminiAdapter) CreateSession(ctx context.Context, req CreateSessionRequ
 		UpdatedAt: time.Now(),
 		State:     StateActive,
 		History:   []Message{},
+		Context: &SessionContext{
+			Attributes: make(map[string]string),
+			Messages:   []string{},
+		},
 	}
 
 	a.sessions[session.ID] = session
@@ -63,7 +67,10 @@ func (a *GeminiAdapter) SendMessage(ctx context.Context, req SendMessageRequest)
 		return nil, fmt.Errorf("session %s is archived", req.SessionID)
 	}
 
-	// Append user message
+	// Store user message in context for recall
+	session.Context.Messages = append(session.Context.Messages, req.Content)
+
+	// Append user message to history
 	userMsg := Message{
 		Role:      RoleUser,
 		Content:   req.Content,
@@ -71,8 +78,12 @@ func (a *GeminiAdapter) SendMessage(ctx context.Context, req SendMessageRequest)
 	}
 	session.History = append(session.History, userMsg)
 
-	// Generate response (using same logic as Claude for consistency)
-	responseContent := generateGeminiResponse(session, req.Content)
+	// Generate response using shared pattern matching
+	responseContent, matched := GenerateContextualResponse(session, req.Content)
+	if !matched {
+		// Fallback: echo with agent name
+		responseContent = fmt.Sprintf("Gemini received: %s", req.Content)
+	}
 
 	// Append assistant message
 	assistantMsg := Message{
@@ -88,59 +99,6 @@ func (a *GeminiAdapter) SendMessage(ctx context.Context, req SendMessageRequest)
 		Content:   responseContent,
 		Timestamp: time.Now(),
 	}, nil
-}
-
-// generateGeminiResponse generates deterministic responses (same patterns as Claude)
-func generateGeminiResponse(session *Session, message string) string {
-	// Use same context-aware patterns as Claude for cross-agent consistency testing
-	// In a real implementation, Gemini might have different response patterns
-
-	// Reuse Claude's name extraction logic
-	name := extractNameFromHistory(session.History)
-
-	// Pattern responses (identical to Claude for testing consistency)
-	if contains(message, "my name is") {
-		return "Nice to meet you! I'll remember your name."
-	}
-
-	if contains(message, "what is my name") {
-		if name != "" {
-			return fmt.Sprintf("Your name is %s.", name)
-		}
-		return "I don't know your name. You haven't told me yet."
-	}
-
-	// Default: Echo response (with Gemini prefix instead of Claude)
-	return fmt.Sprintf("Gemini received: %s", message)
-}
-
-// contains is a helper for case-insensitive substring matching
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		   (s == substr || len(s) > len(substr) && containsIgnoreCase(s, substr))
-}
-
-func containsIgnoreCase(s, substr string) bool {
-	s = toLower(s)
-	substr = toLower(substr)
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-func toLower(s string) string {
-	result := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if 'A' <= c && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		result[i] = c
-	}
-	return string(result)
 }
 
 // GetHistory retrieves conversation history

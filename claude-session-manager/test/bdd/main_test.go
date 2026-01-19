@@ -50,4 +50,6 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterSetupSteps(ctx)
 	steps.RegisterSessionSteps(ctx)
 	steps.RegisterConversationSteps(ctx)
+	steps.RegisterAgentInterfaceSteps(ctx)
+	steps.RegisterErrorHandlingSteps(ctx)
 }

@@ -3,8 +3,6 @@ package mock
 import (
 	"context"
 	"fmt"
-	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -45,6 +43,10 @@ func (a *GPTAdapter) CreateSession(ctx context.Context, req CreateSessionRequest
 		UpdatedAt: time.Now(),
 		State:     StateActive,
 		History:   []Message{},
+		Context: &SessionContext{
+			Attributes: make(map[string]string),
+			Messages:   []string{},
+		},
 	}
 
 	a.sessions[session.ID] = session
@@ -65,7 +67,10 @@ func (a *GPTAdapter) SendMessage(ctx context.Context, req SendMessageRequest) (*
 		return nil, fmt.Errorf("session %s is archived and cannot accept messages. Use 'csm resume' to reactivate", req.SessionID)
 	}
 
-	// Append user message
+	// Store user message in context for recall
+	session.Context.Messages = append(session.Context.Messages, req.Content)
+
+	// Append user message to history
 	userMsg := Message{
 		Role:      RoleUser,
 		Content:   req.Content,
@@ -73,8 +78,12 @@ func (a *GPTAdapter) SendMessage(ctx context.Context, req SendMessageRequest) (*
 	}
 	session.History = append(session.History, userMsg)
 
-	// Generate response (deterministic)
-	responseContent := a.generateResponse(session, req.Content)
+	// Generate response using shared pattern matching
+	responseContent, matched := GenerateContextualResponse(session, req.Content)
+	if !matched {
+		// Fallback: echo with agent name
+		responseContent = fmt.Sprintf("GPT received: %s", req.Content)
+	}
 
 	// Append assistant message
 	assistantMsg := Message{
@@ -90,98 +99,6 @@ func (a *GPTAdapter) SendMessage(ctx context.Context, req SendMessageRequest) (*
 		Content:   responseContent,
 		Timestamp: time.Now(),
 	}, nil
-}
-
-// generateResponse generates deterministic responses based on message content
-func (a *GPTAdapter) generateResponse(session *Session, message string) string {
-	msgLower := strings.ToLower(message)
-
-	// Pattern 1: "My name is X" → remember name
-	if strings.Contains(msgLower, "my name is") {
-		return "Nice to meet you! I'll remember your name."
-	}
-
-	// Pattern 2: "What is my name?" → recall from history
-	if strings.Contains(msgLower, "what is my name") {
-		name := extractNameFromHistoryGPT(session.History)
-		if name != "" {
-			return fmt.Sprintf("Your name is %s.", name)
-		}
-		return "I don't know your name. You haven't told me yet."
-	}
-
-	// Pattern 3: "explain" → verbose multi-line response (GPT-specific)
-	if strings.Contains(msgLower, "explain") {
-		topic := extractTopicAfterExplain(message)
-		return fmt.Sprintf(`GPT received: %s
-
-Let me break this down:
-1. GPT provides structured information
-2. This demonstrates GPT's verbose style
-3. You asked about: %s`, message, topic)
-	}
-
-	// Pattern 4: "recall first" → reference first message in history
-	if strings.Contains(msgLower, "recall first") {
-		firstMsg := extractFirstUserMessage(session.History)
-		if firstMsg != "" {
-			return fmt.Sprintf("GPT received: %s\n\nThe first message was: %s", message, firstMsg)
-		}
-		return fmt.Sprintf("GPT received: %s\n\nNo previous messages found.", message)
-	}
-
-	// Default: Echo response
-	return fmt.Sprintf("GPT received: %s", message)
-}
-
-// extractNameFromHistoryGPT extracts a name from conversation history
-func extractNameFromHistoryGPT(history []Message) string {
-	for _, msg := range history {
-		if msg.Role == RoleUser {
-			// Simple pattern: "My name is Alice"
-			re := regexp.MustCompile(`my name is (\w+)`)
-			matches := re.FindStringSubmatch(strings.ToLower(msg.Content))
-			if len(matches) > 1 {
-				// Capitalize first letter
-				name := matches[1]
-				return strings.ToUpper(name[:1]) + name[1:]
-			}
-		}
-	}
-	return ""
-}
-
-// extractTopicAfterExplain extracts topic from "explain X" message
-func extractTopicAfterExplain(message string) string {
-	msgLower := strings.ToLower(message)
-	idx := strings.Index(msgLower, "explain")
-	if idx == -1 {
-		return "the topic"
-	}
-
-	// Get text after "explain"
-	after := strings.TrimSpace(message[idx+7:])
-	if after == "" {
-		return "this concept"
-	}
-
-	// Take first word/phrase
-	words := strings.Fields(after)
-	if len(words) > 0 {
-		return words[0]
-	}
-
-	return "this"
-}
-
-// extractFirstUserMessage gets the first user message from history
-func extractFirstUserMessage(history []Message) string {
-	for _, msg := range history {
-		if msg.Role == RoleUser {
-			return msg.Content
-		}
-	}
-	return ""
 }
 
 // GetHistory retrieves conversation history

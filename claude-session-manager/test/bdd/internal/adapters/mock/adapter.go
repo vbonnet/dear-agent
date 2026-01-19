@@ -55,6 +55,7 @@ type Session struct {
 	UpdatedAt time.Time
 	State     SessionState
 	History   []Message
+	Context   *SessionContext // Context for conversation state
 }
 
 // SessionState represents session lifecycle state

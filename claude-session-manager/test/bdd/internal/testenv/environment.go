@@ -8,12 +8,17 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/test/bdd/internal/adapters/mock"
 )
 
+// Type aliases for easier use in step definitions
+type CreateSessionRequest = mock.CreateSessionRequest
+type SendMessageRequest = mock.SendMessageRequest
+
 // Environment manages test state and adapters
 type Environment struct {
 	T              *testing.T
 	ClaudeAdapter  mock.Adapter
 	GeminiAdapter  mock.Adapter
 	GPTAdapter     mock.Adapter
+	CurrentAdapter mock.Adapter             // Currently selected adapter
 	CurrentSession *mock.Session
 	Sessions       map[string]*mock.Session // Track all sessions by name
 	LastResponse   *mock.Response

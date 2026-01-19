@@ -3,8 +3,6 @@ package mock
 import (
 	"context"
 	"fmt"
-	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -45,6 +43,10 @@ func (a *ClaudeAdapter) CreateSession(ctx context.Context, req CreateSessionRequ
 		UpdatedAt: time.Now(),
 		State:     StateActive,
 		History:   []Message{},
+		Context: &SessionContext{
+			Attributes: make(map[string]string),
+			Messages:   []string{},
+		},
 	}
 
 	a.sessions[session.ID] = session
@@ -65,7 +67,10 @@ func (a *ClaudeAdapter) SendMessage(ctx context.Context, req SendMessageRequest)
 		return nil, fmt.Errorf("session %s is archived", req.SessionID)
 	}
 
-	// Append user message
+	// Store user message in context for recall
+	session.Context.Messages = append(session.Context.Messages, req.Content)
+
+	// Append user message to history
 	userMsg := Message{
 		Role:      RoleUser,
 		Content:   req.Content,
@@ -73,8 +78,12 @@ func (a *ClaudeAdapter) SendMessage(ctx context.Context, req SendMessageRequest)
 	}
 	session.History = append(session.History, userMsg)
 
-	// Generate response (deterministic)
-	responseContent := a.generateResponse(session, req.Content)
+	// Generate response using shared pattern matching
+	responseContent, matched := GenerateContextualResponse(session, req.Content)
+	if !matched {
+		// Fallback: echo with agent name
+		responseContent = fmt.Sprintf("Claude received: %s", req.Content)
+	}
 
 	// Append assistant message
 	assistantMsg := Message{
@@ -92,42 +101,6 @@ func (a *ClaudeAdapter) SendMessage(ctx context.Context, req SendMessageRequest)
 	}, nil
 }
 
-// generateResponse generates deterministic responses based on message content
-func (a *ClaudeAdapter) generateResponse(session *Session, message string) string {
-	// Pattern 1: "My name is X" → remember name
-	if strings.Contains(strings.ToLower(message), "my name is") {
-		return "Nice to meet you! I'll remember your name."
-	}
-
-	// Pattern 2: "What is my name?" → recall from history
-	if strings.Contains(strings.ToLower(message), "what is my name") {
-		name := extractNameFromHistory(session.History)
-		if name != "" {
-			return fmt.Sprintf("Your name is %s.", name)
-		}
-		return "I don't know your name. You haven't told me yet."
-	}
-
-	// Default: Echo response
-	return fmt.Sprintf("Claude received: %s", message)
-}
-
-// extractNameFromHistory extracts a name from conversation history
-func extractNameFromHistory(history []Message) string {
-	for _, msg := range history {
-		if msg.Role == RoleUser {
-			// Simple pattern: "My name is Alice"
-			re := regexp.MustCompile(`my name is (\w+)`)
-			matches := re.FindStringSubmatch(strings.ToLower(msg.Content))
-			if len(matches) > 1 {
-				// Capitalize first letter
-				name := matches[1]
-				return strings.ToUpper(name[:1]) + name[1:]
-			}
-		}
-	}
-	return ""
-}
 
 // GetHistory retrieves conversation history
 func (a *ClaudeAdapter) GetHistory(ctx context.Context, sessionID string) ([]Message, error) {
