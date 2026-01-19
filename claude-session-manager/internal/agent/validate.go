@@ -48,6 +48,11 @@ func ValidateAgentAvailability(name string) error {
 		return fmt.Errorf("unknown agent: %s", name)
 	}
 
+	// Skip API key check for Claude if Vertex AI is configured
+	if name == "claude" && isVertexAIConfigured() {
+		return nil
+	}
+
 	if os.Getenv(envVar) == "" {
 		return &AgentUnavailableError{
 			Agent:  name,
@@ -56,6 +61,11 @@ func ValidateAgentAvailability(name string) error {
 	}
 
 	return nil
+}
+
+// isVertexAIConfigured checks if Vertex AI environment is configured
+func isVertexAIConfigured() bool {
+	return os.Getenv("CLOUD_ML_REGION") != ""
 }
 
 // AgentUnavailableError represents an error when an agent's API key is not set
