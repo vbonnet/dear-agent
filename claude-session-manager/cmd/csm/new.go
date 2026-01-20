@@ -338,16 +338,17 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	debug.Log("Initial sleep (500ms) before polling")
 	time.Sleep(500 * time.Millisecond)
 
-	// Wait for Claude to be ready before attaching
-	// Increased timeout to 15s to account for MCP loading and SessionStart hooks
-	debug.Phase("Wait for Claude Process")
-	debug.Log("Waiting for 'claude' process to appear (timeout: 15s)")
+	// Wait for Claude prompt to appear (not just process)
+	// This ensures commands sent via InitSequence go to Claude, not bash
+	// Increased timeout to 30s to account for MCP loading and SessionStart hooks
+	debug.Phase("Wait for Claude Prompt")
+	debug.Log("Waiting for Claude prompt to appear (timeout: 30s)")
 	var waitErr error
 	spinErr := spinner.New().
 		Title("Waiting for Claude to be ready...").
 		Accessible(true).
 		Action(func() {
-			waitErr = tmux.WaitForProcessReady(sessionName, "claude", 15*time.Second)
+			waitErr = tmux.WaitForClaudePrompt(sessionName, 30*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
@@ -358,11 +359,12 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	fmt.Println()
 
 	if waitErr != nil {
-		debug.Log("Process wait timed out or failed: %v", waitErr)
-		ui.PrintWarning("Claude is taking longer than expected (still starting)")
-		fmt.Println("  Attaching now - Claude should appear shortly")
+		debug.Log("Prompt wait timed out or failed: %v", waitErr)
+		ui.PrintWarning("Claude prompt not detected (still initializing)")
+		fmt.Println("  Proceeding anyway - initialization may be delayed")
+		// Continue anyway - InitSequence will handle if commands arrive too early
 	} else {
-		debug.Log("Claude process is ready")
+		debug.Log("Claude prompt detected - ready for commands")
 		ui.PrintSuccess("Claude is ready!")
 	}
 
