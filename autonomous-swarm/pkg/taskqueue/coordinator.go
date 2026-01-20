@@ -109,8 +109,33 @@ func (c *Coordinator) Claim(beadID string, sessionName string) error {
 		return fmt.Errorf("bead %s not found in ready section", beadID)
 	}
 
-	// Update bead metadata
+	// Get bead for dependency validation
 	bead := c.queue.Ready[index]
+
+	// Validate all dependencies are completed before claiming.
+	// This prevents launching beads before their prerequisites are met,
+	// which would cause agent failures and wasted resources.
+	if len(bead.DependsOn) > 0 {
+		// Build map of completed bead IDs for O(1) lookup
+		completed := make(map[string]bool)
+		for _, b := range c.queue.Completed {
+			completed[b.ID] = true
+		}
+
+		// Check each dependency
+		var missingDeps []string
+		for _, depID := range bead.DependsOn {
+			if !completed[depID] {
+				missingDeps = append(missingDeps, depID)
+			}
+		}
+
+		if len(missingDeps) > 0 {
+			return fmt.Errorf("cannot claim bead %s: missing dependencies %v", beadID, missingDeps)
+		}
+	}
+
+	// Update bead metadata
 	bead.Metadata.SessionName = sessionName
 	bead.Metadata.Iterations++
 	bead.Metadata.LastAttempt = time.Now()

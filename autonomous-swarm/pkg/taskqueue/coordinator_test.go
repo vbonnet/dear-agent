@@ -3,6 +3,7 @@ package taskqueue
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -353,5 +354,172 @@ func TestCoordinator_LoadWithoutLoad(t *testing.T) {
 	}
 	if err := coordinator.Save(); err == nil {
 		t.Error("Save should fail if Load() not called")
+	}
+}
+
+func TestCoordinator_Claim_AllDependenciesCompleted(t *testing.T) {
+	tmpDir := t.TempDir()
+	queuePath := filepath.Join(tmpDir, "test-queue.yaml")
+
+	yamlContent := `schema_version: "1.0"
+last_updated: 2026-01-20T00:00:00Z
+ready:
+  - id: "bead-2"
+    tier: 2
+    title: "Dependent Task"
+    depends_on: ["bead-1"]
+    prompts:
+      start: "Start after bead-1"
+in_progress: []
+blocked: []
+completed:
+  - id: "bead-1"
+    tier: 1
+    title: "Prerequisite"
+    prompts:
+      start: "Done"
+`
+	if err := os.WriteFile(queuePath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test queue: %v", err)
+	}
+
+	coordinator := NewCoordinator(queuePath)
+	if err := coordinator.Load(); err != nil {
+		t.Fatalf("failed to load coordinator: %v", err)
+	}
+
+	// Should succeed - dependency completed
+	err := coordinator.Claim("bead-2", "test-session")
+	if err != nil {
+		t.Fatalf("Claim should succeed when all dependencies completed: %v", err)
+	}
+
+	queue := coordinator.GetQueue()
+	if len(queue.InProgress) != 1 {
+		t.Errorf("in_progress: got %d, want 1", len(queue.InProgress))
+	}
+	if queue.InProgress[0].ID != "bead-2" {
+		t.Errorf("in_progress[0].id: got %s, want bead-2", queue.InProgress[0].ID)
+	}
+}
+
+func TestCoordinator_Claim_NoDependencies(t *testing.T) {
+	tmpDir := t.TempDir()
+	queuePath := filepath.Join(tmpDir, "test-queue.yaml")
+
+	yamlContent := `schema_version: "1.0"
+last_updated: 2026-01-20T00:00:00Z
+ready:
+  - id: "bead-1"
+    tier: 1
+    title: "Independent Task"
+    prompts:
+      start: "Start"
+in_progress: []
+blocked: []
+completed: []
+`
+	if err := os.WriteFile(queuePath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test queue: %v", err)
+	}
+
+	coordinator := NewCoordinator(queuePath)
+	if err := coordinator.Load(); err != nil {
+		t.Fatalf("failed to load coordinator: %v", err)
+	}
+
+	err := coordinator.Claim("bead-1", "test-session")
+	if err != nil {
+		t.Fatalf("Claim should succeed when no dependencies: %v", err)
+	}
+
+	queue := coordinator.GetQueue()
+	if len(queue.InProgress) != 1 {
+		t.Errorf("in_progress: got %d, want 1", len(queue.InProgress))
+	}
+}
+
+func TestCoordinator_Claim_MissingOneDependency(t *testing.T) {
+	tmpDir := t.TempDir()
+	queuePath := filepath.Join(tmpDir, "test-queue.yaml")
+
+	yamlContent := `schema_version: "1.0"
+last_updated: 2026-01-20T00:00:00Z
+ready:
+  - id: "bead-2"
+    tier: 2
+    title: "Dependent Task"
+    depends_on: ["bead-1"]
+    prompts:
+      start: "Start"
+in_progress: []
+blocked: []
+completed: []
+`
+	if err := os.WriteFile(queuePath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test queue: %v", err)
+	}
+
+	coordinator := NewCoordinator(queuePath)
+	if err := coordinator.Load(); err != nil {
+		t.Fatalf("failed to load coordinator: %v", err)
+	}
+
+	err := coordinator.Claim("bead-2", "test-session")
+	if err == nil {
+		t.Fatal("Claim should fail when dependency not completed")
+	}
+
+	expectedError := "cannot claim bead bead-2: missing dependencies [bead-1]"
+	if err.Error() != expectedError {
+		t.Errorf("error message: got %q, want %q", err.Error(), expectedError)
+	}
+
+	queue := coordinator.GetQueue()
+	if len(queue.Ready) != 1 {
+		t.Errorf("ready: got %d, want 1 (bead should not move)", len(queue.Ready))
+	}
+}
+
+func TestCoordinator_Claim_MissingMultipleDependencies(t *testing.T) {
+	tmpDir := t.TempDir()
+	queuePath := filepath.Join(tmpDir, "test-queue.yaml")
+
+	yamlContent := `schema_version: "1.0"
+last_updated: 2026-01-20T00:00:00Z
+ready:
+  - id: "bead-3"
+    tier: 2
+    title: "Multi-Dep Task"
+    depends_on: ["bead-1", "bead-2"]
+    prompts:
+      start: "Start"
+in_progress: []
+blocked: []
+completed: []
+`
+	if err := os.WriteFile(queuePath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test queue: %v", err)
+	}
+
+	coordinator := NewCoordinator(queuePath)
+	if err := coordinator.Load(); err != nil {
+		t.Fatalf("failed to load coordinator: %v", err)
+	}
+
+	err := coordinator.Claim("bead-3", "test-session")
+	if err == nil {
+		t.Fatal("Claim should fail when dependencies not completed")
+	}
+
+	// Error should mention both missing dependencies
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "bead-1") || !strings.Contains(errMsg, "bead-2") {
+		t.Errorf("error should mention both missing deps: %q", errMsg)
+	}
+
+	queue := coordinator.GetQueue()
+	if len(queue.Ready) != 1 {
+		t.Errorf("ready: got %d, want 1", len(queue.Ready))
 	}
 }
