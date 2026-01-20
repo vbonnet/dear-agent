@@ -138,11 +138,18 @@ Global Flags:
 }
 
 func init() {
+	// Check for CSM_DEBUG environment variable
+	// Flag will override this if explicitly set
+	debugDefault := false
+	if os.Getenv("CSM_DEBUG") == "true" || os.Getenv("CSM_DEBUG") == "1" {
+		debugDefault = true
+	}
+
 	rootCmd.PersistentFlags().StringVarP(&directory, "directory", "C", "", "Working directory")
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/csm/config.yaml)")
 	rootCmd.PersistentFlags().StringVar(&sessionsDir, "sessions-dir", "", "sessions directory (default: ~/sessions)")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "log level (debug, info, warn, error)")
-	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", false, "enable debug logging (shorthand for --log-level debug)")
+	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", debugDefault, "enable debug logging (shorthand for --log-level debug, env: CSM_DEBUG)")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 0, "tmux command timeout (overrides config)")
 	rootCmd.PersistentFlags().BoolVar(&noLock, "no-lock", false, "skip lock acquisition (DANGEROUS)")
 	rootCmd.PersistentFlags().BoolVar(&skipHealthCheck, "skip-health-check", false, "skip health check")
