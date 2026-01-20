@@ -23,11 +23,12 @@ func iHaveAGMInstalled(ctx context.Context) (context.Context, error) {
 func iHaveAMockAdapterConfigured(ctx context.Context, agent string) (context.Context, error) {
 	env := testenv.EnvFromContext(ctx)
 
-	// Verify adapter exists
-	_, err := env.GetAdapter(agent)
+	// Get and set current adapter
+	adapter, err := env.GetAdapter(agent)
 	if err != nil {
 		return ctx, err
 	}
 
-	return ctx, nil
+	env.CurrentAdapter = adapter
+	return testenv.ContextWithEnv(ctx, env), nil
 }

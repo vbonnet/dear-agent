@@ -22,18 +22,24 @@ func csmMain() int {
 	// Execute the real csm binary (built from cmd/csm)
 	// This ensures tests run against actual implementation
 
-	// Find the csm binary - should be in $HOME/go/bin/csm
-	csmPath := os.Getenv("HOME") + "/go/bin/csm"
+	// Try to use installed csm binary first (check actual user home, not test HOME)
+	userHome := os.Getenv("REAL_HOME")
+	if userHome == "" {
+		// Fallback: get HOME before test overrides it
+		userHome = os.Getenv("HOME")
+	}
+	csmPath := userHome + "/go/bin/csm"
 
-	// If not found in home, try building it
+	// If not found, build from module
 	if _, err := os.Stat(csmPath); os.IsNotExist(err) {
-		// Fall back to building in-place
-		buildCmd := exec.Command("go", "build", "-o", "/tmp/csm-test", "../../cmd/csm")
+		// Use go install to build and cache the binary
+		buildCmd := exec.Command("go", "install", "github.com/vbonnet/ai-tools/claude-session-manager/cmd/csm")
 		if err := buildCmd.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to build csm: %v\n", err)
 			return 1
 		}
-		csmPath = "/tmp/csm-test"
+		// After go install, binary should be at $GOBIN or $GOPATH/bin or $HOME/go/bin
+		csmPath = userHome + "/go/bin/csm"
 	}
 
 	// Execute the binary with the current args
@@ -60,6 +66,11 @@ func TestCSM(t *testing.T) {
 		Setup: func(env *testscript.Env) error {
 			// Set up test environment
 			// This runs before each test script
+
+			// Preserve real HOME before overriding it
+			if realHome := os.Getenv("HOME"); realHome != "" {
+				env.Setenv("REAL_HOME", realHome)
+			}
 
 			// Set CSM environment variables for testing
 			env.Setenv("CSM_TMUX_SOCKET", env.Getenv("WORK")+"/test-tmux.sock")

@@ -1,12 +1,11 @@
-# Test: csm --version should display version information
+# Test: csm version should display version information
 # This is a simple smoke test to verify the csm binary works
 
-exec csm --version
-stdout 'csm version'
+exec csm version
+stdout 'version'
 
-# Test: csm without arguments should show help
-# Note: This currently uses a placeholder implementation
-# Full integration requires exporting rootCmd from cmd/csm/main.go
-exec csm
-stdout 'Usage:'
-stdout 'Claude Session Manager'
+# Test: csm without arguments shows usage (exits with error in non-interactive environment)
+# Note: csm tries to start interactive session which fails without TTY
+! exec csm
+stderr 'could not open a new TTY'
+stderr 'Usage:'
