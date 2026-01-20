@@ -55,16 +55,23 @@ func (seq *InitSequence) sendRename(ctrl *ControlModeSession, watcher *OutputWat
 	renameCmd := fmt.Sprintf("/rename %s", seq.SessionName)
 
 	// Send command text using send-keys with -l flag (literal)
+	// NOTE: We send the literal text and Enter key in TWO separate commands to avoid
+	// the -l flag affecting the C-m (which must be interpreted as Enter, not literal).
+	// We build the command as a shell command string that tmux control mode will parse.
+	// The %q format adds double quotes which tmux should strip during parsing.
 	sendLiteralCmd := fmt.Sprintf("send-keys -t %s -l %q", seq.SessionName, renameCmd)
 	if err := ctrl.SendCommand(sendLiteralCmd); err != nil {
 		return fmt.Errorf("failed to send rename text: %w", err)
 	}
 
-	// Small delay to ensure text is received before sending Enter
+	// CRITICAL DELAY: Wait for tmux to process the text before sending Enter
 	// See: https://github.com/tmux/tmux/issues/1778
+	// Without this delay, text may not be fully received before Enter is processed,
+	// causing commands to be concatenated or executed prematurely.
 	time.Sleep(100 * time.Millisecond)
 
 	// Send Enter to execute the command
+	// This MUST be a separate command so C-m is interpreted as the Enter key
 	sendEnterCmd := fmt.Sprintf("send-keys -t %s C-m", seq.SessionName)
 	if err := ctrl.SendCommand(sendEnterCmd); err != nil {
 		return fmt.Errorf("failed to send Enter: %w", err)
