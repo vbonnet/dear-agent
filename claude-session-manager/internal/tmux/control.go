@@ -169,26 +169,9 @@ func (c *ControlModeSession) SendKeys(target, keys string) error {
 }
 
 // SendKeysLiteral sends literal text to a tmux pane followed by Enter
-// IMPORTANT: We send text and Enter in TWO separate commands because the -l flag
-// makes ALL subsequent arguments literal, including C-m. If we sent them together,
-// C-m would be typed as literal text instead of executing as the Enter key.
 func (c *ControlModeSession) SendKeysLiteral(target, text string) error {
-	// Send literal text first
-	textCmd := fmt.Sprintf("send-keys -t %s -l %q", target, text)
-	if err := c.SendCommand(textCmd); err != nil {
-		return fmt.Errorf("failed to send literal text: %w", err)
-	}
-
-	// Small delay for tmux issue #1778
-	time.Sleep(100 * time.Millisecond)
-
-	// Send Enter key separately (not affected by -l flag)
-	enterCmd := fmt.Sprintf("send-keys -t %s C-m", target)
-	if err := c.SendCommand(enterCmd); err != nil {
-		return fmt.Errorf("failed to send Enter: %w", err)
-	}
-
-	return nil
+	command := fmt.Sprintf("send-keys -t %s -l %q C-m", target, text)
+	return c.SendCommand(command)
 }
 
 // ReadOutput reads and returns the next line of output
