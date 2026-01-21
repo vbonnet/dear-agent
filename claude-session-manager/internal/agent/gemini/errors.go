@@ -3,16 +3,30 @@ package gemini
 import (
 	"errors"
 	"fmt"
+
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/agent"
 )
 
 // Common errors
 var (
-	ErrProjectIDMissing   = errors.New("GCP_PROJECT_ID or GOOGLE_CLOUD_PROJECT environment variable not set")
-	ErrSessionNotFound    = errors.New("session not found")
-	ErrMaxRetriesExceeded = errors.New("max retries exceeded for Vertex AI API call")
-	ErrFormatNotSupported = errors.New("export format not supported (only JSONL supported in V1)")
-	ErrInvalidMessage     = errors.New("invalid message: content cannot be empty")
+	ErrProjectIDMissing     = errors.New("GCP_PROJECT_ID or GOOGLE_CLOUD_PROJECT environment variable not set")
+	ErrSessionNotFound      = errors.New("session not found")
+	ErrMaxRetriesExceeded   = errors.New("max retries exceeded for Vertex AI API call")
+	ErrFormatNotSupported   = errors.New("export format not supported (only JSONL supported in V1)")
+	ErrInvalidMessage       = errors.New("invalid message: content cannot be empty")
+	ErrUnsupportedCommand   = errors.New("command not supported by gemini adapter")
 )
+
+// ParameterError represents an error with command parameters
+type ParameterError struct {
+	CommandType   agent.CommandType
+	ParameterName string
+	Issue         string
+}
+
+func (e *ParameterError) Error() string {
+	return fmt.Sprintf("invalid parameter for command %s.%s: %s", e.CommandType, e.ParameterName, e.Issue)
+}
 
 // APIError represents an error from Vertex AI API with actionable suggestion
 type APIError struct {
