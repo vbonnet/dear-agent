@@ -553,8 +553,11 @@ func spawnReaper(sessionName string) error {
 	sanitized := filepath.Base(sessionName) // Removes any directory components
 	logFile := filepath.Join(os.TempDir(), fmt.Sprintf("csm-reaper-%s.log", sanitized))
 
+	// Get sessions directory from config
+	sessionsDir := cfg.SessionsDir
+
 	// Build command with detachment
-	cmd := exec.Command(reaperPath, "--session", sessionName, "--log-file", logFile)
+	cmd := exec.Command(reaperPath, "--session", sessionName, "--log-file", logFile, "--sessions-dir", sessionsDir)
 
 	// Detach process from parent using setsid
 	// This ensures the reaper survives even if the parent shell exits
@@ -571,11 +574,11 @@ func spawnReaper(sessionName string) error {
 	if err := cmd.Start(); err != nil {
 		ui.PrintError(err,
 			"Failed to spawn reaper process",
-			fmt.Sprintf("  • Command: %s --session %s --log-file %s\n"+
+			fmt.Sprintf("  • Command: %s --session %s --log-file %s --sessions-dir %s\n"+
 				"  • Check permissions: ls -l %s\n"+
 				"  • Verify binary is executable: chmod +x %s\n"+
 				"  • Test manually: %s --help",
-				reaperPath, sessionName, logFile, reaperPath, reaperPath, reaperPath))
+				reaperPath, sessionName, logFile, sessionsDir, reaperPath, reaperPath, reaperPath))
 		return fmt.Errorf("failed to start reaper: %w", err)
 	}
 

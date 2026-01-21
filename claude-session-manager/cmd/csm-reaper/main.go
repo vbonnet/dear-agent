@@ -10,14 +10,14 @@ import (
 )
 
 func main() {
-	// Parse args: csm-reaper --session <name> --log-file <path>
+	// Parse args: csm-reaper --session <name> --log-file <path> --sessions-dir <path>
 	if len(os.Args) < 5 {
-		fmt.Fprintf(os.Stderr, "Usage: csm-reaper --session <name> --log-file <path>\n")
+		fmt.Fprintf(os.Stderr, "Usage: csm-reaper --session <name> --log-file <path> [--sessions-dir <path>]\n")
 		os.Exit(1)
 	}
 
 	// Simple arg parsing
-	var sessionName, logFile string
+	var sessionName, logFile, sessionsDir string
 	for i := 1; i < len(os.Args); i++ {
 		switch os.Args[i] {
 		case "--session":
@@ -30,12 +30,17 @@ func main() {
 				logFile = os.Args[i+1]
 				i++
 			}
+		case "--sessions-dir":
+			if i+1 < len(os.Args) {
+				sessionsDir = os.Args[i+1]
+				i++
+			}
 		}
 	}
 
 	if sessionName == "" || logFile == "" {
 		fmt.Fprintf(os.Stderr, "Error: --session and --log-file are required\n")
-		fmt.Fprintf(os.Stderr, "Usage: csm-reaper --session <name> --log-file <path>\n")
+		fmt.Fprintf(os.Stderr, "Usage: csm-reaper --session <name> --log-file <path> [--sessions-dir <path>]\n")
 		os.Exit(1)
 	}
 
@@ -53,9 +58,10 @@ func main() {
 	log.Printf("Session: %s", sessionName)
 	log.Printf("PID: %d", os.Getpid())
 	log.Printf("Log file: %s", logFile)
+	log.Printf("Sessions directory: %s", sessionsDir)
 
 	// Run reaper
-	r := reaper.New(sessionName)
+	r := reaper.New(sessionName, sessionsDir)
 	if err := r.Run(); err != nil {
 		log.Printf("❌ Reaper failed: %v", err)
 		os.Exit(1)

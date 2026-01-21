@@ -8,10 +8,15 @@ import (
 
 func TestNew(t *testing.T) {
 	sessionName := "test-session"
-	r := New(sessionName)
+	sessionsDir := "/test/sessions"
+	r := New(sessionName, sessionsDir)
 
 	if r.SessionName != sessionName {
 		t.Errorf("New().SessionName = %q, expected %q", r.SessionName, sessionName)
+	}
+
+	if r.SessionsDir != sessionsDir {
+		t.Errorf("New().SessionsDir = %q, expected %q", r.SessionsDir, sessionsDir)
 	}
 
 	expectedSocket := "/tmp/csm.sock"
@@ -21,22 +26,38 @@ func TestNew(t *testing.T) {
 }
 
 func TestGetSessionsDir(t *testing.T) {
-	r := New("test-session")
-	sessionsDir, err := r.getSessionsDir()
+	t.Run("with configured directory", func(t *testing.T) {
+		customDir := "/custom/sessions"
+		r := New("test-session", customDir)
+		sessionsDir, err := r.getSessionsDir()
 
-	if err != nil {
-		t.Fatalf("getSessionsDir() returned error: %v", err)
-	}
+		if err != nil {
+			t.Fatalf("getSessionsDir() returned error: %v", err)
+		}
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("Failed to get home dir: %v", err)
-	}
+		if sessionsDir != customDir {
+			t.Errorf("getSessionsDir() = %q, expected %q", sessionsDir, customDir)
+		}
+	})
 
-	expected := filepath.Join(homeDir, "sessions")
-	if sessionsDir != expected {
-		t.Errorf("getSessionsDir() = %q, expected %q", sessionsDir, expected)
-	}
+	t.Run("with default directory", func(t *testing.T) {
+		r := New("test-session", "")
+		sessionsDir, err := r.getSessionsDir()
+
+		if err != nil {
+			t.Fatalf("getSessionsDir() returned error: %v", err)
+		}
+
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			t.Fatalf("Failed to get home dir: %v", err)
+		}
+
+		expected := filepath.Join(homeDir, "sessions")
+		if sessionsDir != expected {
+			t.Errorf("getSessionsDir() = %q, expected %q", sessionsDir, expected)
+		}
+	})
 }
 
 // Note: The Run() method and its sub-methods (waitForPrompt, sendExit,
@@ -49,11 +70,15 @@ func TestGetSessionsDir(t *testing.T) {
 // Here we just verify the Reaper struct is properly constructed.
 
 func TestReaperStructure(t *testing.T) {
-	r := New("test-session")
+	r := New("test-session", "/test/sessions")
 
 	// Verify all fields are initialized
 	if r.SessionName == "" {
 		t.Error("Reaper.SessionName should not be empty")
+	}
+
+	if r.SessionsDir == "" {
+		t.Error("Reaper.SessionsDir should not be empty")
 	}
 
 	if r.SocketPath == "" {

@@ -33,14 +33,16 @@ const (
 // Reaper manages the async archival process for a CSM session
 // It waits for Claude to return to prompt, sends /exit, and archives the session
 type Reaper struct {
-	SessionName string
-	SocketPath  string
+	SessionName   string
+	SessionsDir   string
+	SocketPath    string
 }
 
 // New creates a new Reaper for the given session
-func New(sessionName string) *Reaper {
+func New(sessionName, sessionsDir string) *Reaper {
 	return &Reaper{
 		SessionName: sessionName,
+		SessionsDir: sessionsDir,
 		SocketPath:  tmux.GetSocketPath(),
 	}
 }
@@ -176,8 +178,15 @@ func (r *Reaper) archiveSession() error {
 	return nil
 }
 
-// getSessionsDir returns the sessions directory path
+// getSessionsDir returns the configured sessions directory path
+// Falls back to ~/sessions if not configured
 func (r *Reaper) getSessionsDir() (string, error) {
+	// Use configured directory if provided
+	if r.SessionsDir != "" {
+		return r.SessionsDir, nil
+	}
+
+	// Fall back to default ~/sessions
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get home directory: %w", err)
