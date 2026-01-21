@@ -53,6 +53,11 @@ func ValidateAgentAvailability(name string) error {
 		return nil
 	}
 
+	// Skip API key check for Claude if running inside Claude Code CLI
+	if name == "claude" && isClaudeCodeCLI() {
+		return nil
+	}
+
 	if os.Getenv(envVar) == "" {
 		return &AgentUnavailableError{
 			Agent:  name,
@@ -65,7 +70,16 @@ func ValidateAgentAvailability(name string) error {
 
 // isVertexAIConfigured checks if Vertex AI environment is configured
 func isVertexAIConfigured() bool {
-	return os.Getenv("CLOUD_ML_REGION") != ""
+	// Check for common Vertex AI environment variables
+	return os.Getenv("CLOUD_ML_REGION") != "" ||
+		os.Getenv("GOOGLE_CLOUD_PROJECT") != "" ||
+		os.Getenv("GCP_PROJECT") != "" ||
+		os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != ""
+}
+
+// isClaudeCodeCLI checks if running inside Claude Code CLI
+func isClaudeCodeCLI() bool {
+	return os.Getenv("CLAUDECODE") != ""
 }
 
 // AgentUnavailableError represents an error when an agent's API key is not set

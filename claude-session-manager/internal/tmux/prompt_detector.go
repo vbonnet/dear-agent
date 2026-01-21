@@ -2,10 +2,20 @@ package tmux
 
 import (
 	"fmt"
+	"io"
 	"log"
+	"os"
 	"strings"
 	"time"
 )
+
+func init() {
+	// Disable tmux control mode logging by default (reduces noise)
+	// Only enable if CSM_DEBUG environment variable is set
+	if os.Getenv("CSM_DEBUG") != "true" && os.Getenv("CSM_DEBUG") != "1" {
+		log.SetOutput(io.Discard)
+	}
+}
 
 // ClaudePromptPatterns are patterns that indicate Claude is ready for input
 var ClaudePromptPatterns = []string{
@@ -75,7 +85,11 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 			if linesChecked <= 5 || linesChecked%10 == 0 {
 				// Only log if content is meaningful (not just escape sequences)
 				if isVisibleContent(content) {
-					log.Printf("📝 Output [%d]: %q", linesChecked, truncate(content, 80))
+					// Strip ANSI escape sequences before logging
+					cleanContent := stripANSI(content)
+					if strings.TrimSpace(cleanContent) != "" {
+						log.Printf("📝 Output [%d]: %q", linesChecked, truncate(cleanContent, 80))
+					}
 				}
 			}
 
@@ -177,7 +191,12 @@ func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
 
 		// Log output for debugging (first few lines and periodically)
 		if linesChecked <= 10 || linesChecked%20 == 0 {
-			log.Printf("📝 Output [%d]: %q", linesChecked, truncate(content, 100))
+			if isVisibleContent(content) {
+				cleanContent := stripANSI(content)
+				if strings.TrimSpace(cleanContent) != "" {
+					log.Printf("📝 Output [%d]: %q", linesChecked, truncate(cleanContent, 100))
+				}
+			}
 		}
 
 		// Check for trust prompt
@@ -276,4 +295,70 @@ func isVisibleContent(s string) bool {
 	}
 
 	return true
+}
+
+// stripANSI removes ANSI escape sequences from a string
+func stripANSI(s string) string {
+	// Remove all ANSI escape sequences
+	// Pattern: ESC [ ... m (color codes)
+	//          ESC ] ... (OSC sequences)
+	//          ESC ? ... (private modes like bracketed paste)
+	result := s
+
+	// Remove CSI sequences (ESC [ ... letter)
+	for {
+		start := strings.Index(result, "\x1b[")
+		if start == -1 {
+			break
+		}
+		// Find the end of the sequence (a letter A-Z, a-z)
+		end := start + 2
+		for end < len(result) {
+			ch := result[end]
+			if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') {
+				end++
+				break
+			}
+			end++
+		}
+		result = result[:start] + result[end:]
+	}
+
+	// Remove OSC sequences (ESC ] ... BEL/ST)
+	for {
+		start := strings.Index(result, "\x1b]")
+		if start == -1 {
+			break
+		}
+		// Find BEL (0x07) or ST (ESC \)
+		end := strings.IndexAny(result[start:], "\x07")
+		if end == -1 {
+			stIdx := strings.Index(result[start:], "\x1b\\")
+			if stIdx == -1 {
+				break
+			}
+			end = stIdx + 2
+		} else {
+			end++
+		}
+		result = result[:start] + result[start+end:]
+	}
+
+	// Remove bracketed paste mode sequences (ESC ? ... h/l)
+	for {
+		start := strings.Index(result, "\x1b?")
+		if start == -1 {
+			break
+		}
+		end := start + 2
+		for end < len(result) && result[end] != 'h' && result[end] != 'l' {
+			end++
+		}
+		if end < len(result) {
+			end++
+		}
+		result = result[:start] + result[end:]
+	}
+
+	return result
 }

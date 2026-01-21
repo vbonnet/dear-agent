@@ -120,3 +120,67 @@ func TestClaudePromptPatterns(t *testing.T) {
 		}
 	}
 }
+
+func TestStripANSI(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "No ANSI codes",
+			input:    "Hello, world!",
+			expected: "Hello, world!",
+		},
+		{
+			name:     "Color codes",
+			input:    "\x1b[31mRed text\x1b[0m",
+			expected: "Red text",
+		},
+		{
+			name:     "Bracketed paste mode",
+			input:    "\x1b[?2004h\x1b[?1004h",
+			expected: "",
+		},
+		{
+			name:     "Complex escape sequences from Claude",
+			input:    "\x1b[?2004h\x1b[?1004hContent here",
+			expected: "Content here",
+		},
+		{
+			name:     "Multiple CSI sequences",
+			input:    "\x1b[38;2;215;119;87m ▐\x1b[48;2;0;0;0m▛███▜\x1b[49m▌\x1b[39m   Claude Code",
+			expected: " ▐▛███▜▌   Claude Code",
+		},
+		{
+			name:     "OSC sequences",
+			input:    "\x1b]0;Title\x07Normal text",
+			expected: "Normal text",
+		},
+		{
+			name:     "Mixed sequences",
+			input:    "\x1b[?2026h\r\n\x1b[38;2;215;119;87m ▐\x1b[48;2;0;0;0m▛███▜\x1b[49m▌\x1b[39m   \x1b[1mClaude Code\x1b[22m",
+			expected: "\r\n ▐▛███▜▌   Claude Code",
+		},
+		{
+			name:     "Empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "Only escape sequences",
+			input:    "\x1b[0m\x1b[31m\x1b[?2004h",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stripANSI(tt.input)
+			if result != tt.expected {
+				t.Errorf("stripANSI(%q) = %q, expected %q",
+					tt.input, result, tt.expected)
+			}
+		})
+	}
+}
