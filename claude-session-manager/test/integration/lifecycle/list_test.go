@@ -53,7 +53,7 @@ var _ = Describe("List Sessions", func() {
 		It("should list archived sessions only", func() {
 			// Create archived session fixture
 			archivedSessionID := "test-archived-001"
-			err := helpers.CreateArchivedSession(testEnv, archivedSessionID)
+			err := helpers.CreateArchivedSession(testEnv, archivedSessionID, "claude")
 			Expect(err).ToNot(HaveOccurred())
 			defer helpers.CleanupArchivedSession(testEnv, archivedSessionID)
 
@@ -85,7 +85,7 @@ var _ = Describe("List Sessions", func() {
 
 			// Create one archived session
 			archivedSessionID := "test-archived-all-001"
-			err = helpers.CreateArchivedSession(testEnv, archivedSessionID)
+			err = helpers.CreateArchivedSession(testEnv, archivedSessionID, "claude")
 			Expect(err).ToNot(HaveOccurred())
 			defer helpers.CleanupArchivedSession(testEnv, archivedSessionID)
 

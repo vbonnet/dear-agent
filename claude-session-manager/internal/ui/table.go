@@ -70,22 +70,52 @@ func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) str
 	// Check if we should show TMUX column (only if any session has NAME != TMUX)
 	showTmuxColumn := shouldShowTmuxColumn(manifests)
 
-	// Render each group
+	// Count total sessions
+	totalCount := 0
+	for _, group := range groups {
+		totalCount += len(group)
+	}
+
+	// Add overview header
 	var sections []string
-	for _, statusKey := range []string{"attached", "detached", "stopped", "stale"} {
-		group := groups[statusKey]
+	cfg := GetGlobalConfig()
+	palette := GetPalette(cfg.UI.Theme)
+	overviewStyle := lipgloss.NewStyle().
+		Foreground(palette.Header).
+		Bold(true)
+	sections = append(sections, overviewStyle.Render(fmt.Sprintf("Sessions Overview (%d total)", totalCount)))
+	sections = append(sections, "")
+
+	// Merge attached and detached into single "ACTIVE" group
+	activeGroup := append(groups["attached"], groups["detached"]...)
+	combinedGroups := map[string][]*manifest.Manifest{
+		"active":  activeGroup,
+		"stopped": groups["stopped"],
+		"stale":   groups["stale"],
+	}
+
+	// Calculate maximum column widths across ALL groups for consistent alignment
+	maxWidths := calculateMaxColumnWidths(combinedGroups, statuses, showTmuxColumn)
+
+	// Render each group
+	for _, statusKey := range []string{"active", "stopped", "stale"} {
+		group := combinedGroups[statusKey]
 		if len(group) == 0 {
 			continue // Skip empty groups
 		}
 
-		// Render group header
-		header := renderGroupHeader(statusKey, len(group))
+		// Render group header with divider
+		header := renderGroupHeaderWithDivider(statusKey, len(group), maxWidths, showTmuxColumn)
 		sections = append(sections, header)
 
-		// Render group table
-		table := renderGroupTable(group, statusKey, statuses, showTmuxColumn)
+		// Render group table with consistent column widths
+		table := renderGroupTableWithWidths(group, statusKey, statuses, showTmuxColumn, maxWidths)
 		sections = append(sections, table)
 	}
+
+	// Add helpful footer
+	footer := renderFooter()
+	sections = append(sections, footer)
 
 	// Join sections with blank lines
 	return lipgloss.JoinVertical(lipgloss.Left, sections...) + "\n"
@@ -102,9 +132,10 @@ func FormatTableLegacy(manifests []*manifest.Manifest, tmux session.TmuxInterfac
 	w := tabwriter.NewWriter(&tableBuf, 0, 0, 2, ' ', 0)
 
 	// Header
-	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 		"NAME",
 		"TMUX",
+		"AGENT",
 		"STATUS",
 		"UPDATED",
 		"PROJECT")
@@ -115,9 +146,10 @@ func FormatTableLegacy(manifests []*manifest.Manifest, tmux session.TmuxInterfac
 		updated := formatTime(m.UpdatedAt)
 		project := truncatePath(m.Context.Project, 40)
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			m.Name,
 			m.Tmux.SessionName,
+			m.Agent,
 			status,
 			updated,
 			project)
@@ -218,11 +250,78 @@ func renderGroupHeader(status string, count int) string {
 		displayStatus = "Stopped"
 	case "stale":
 		displayStatus = "Stale"
+	case "active":
+		displayStatus = "ACTIVE"
 	default:
 		displayStatus = strings.Title(status)
 	}
 	text := fmt.Sprintf("%s Sessions (%d)", displayStatus, count)
 	return getHeaderStyle().Render(text)
+}
+
+// renderGroupHeaderWithDivider renders a group header with visual divider line and "Last Activity" column
+func renderGroupHeaderWithDivider(status string, count int, widths columnWidths, showTmuxColumn bool) string {
+	var displayStatus string
+	switch status {
+	case "active":
+		displayStatus = "ACTIVE"
+	case "stopped":
+		displayStatus = "STOPPED"
+	case "stale":
+		displayStatus = "STALE"
+	default:
+		displayStatus = strings.ToUpper(status)
+	}
+
+	cfg := GetGlobalConfig()
+	palette := GetPalette(cfg.UI.Theme)
+
+	// Calculate where "Last Activity" should appear based on column widths
+	// Format: Symbol(1) + Space(2) + Name + Space(2) + [Tmux + Space(2)] + Agent + Space(2) + Project + Space(2) + Attachment + Space(2) + Recency
+	var recencyPosition int
+	if showTmuxColumn {
+		recencyPosition = 1 + 2 + widths.name + 2 + widths.tmux + 2 + widths.agent + 2 + widths.project + 2 + widths.attachment + 2
+	} else {
+		recencyPosition = 1 + 2 + widths.name + 2 + widths.agent + 2 + widths.project + 2 + widths.attachment + 2
+	}
+
+	// Create header line with status count and "Last Activity" positioned at recency column
+	headerText := fmt.Sprintf("%s (%d)", displayStatus, count)
+	rightText := "Last Activity"
+
+	// Position "Last Activity" at the recency column
+	spacing := recencyPosition - len(headerText)
+	if spacing < 2 {
+		spacing = 2
+	}
+
+	headerLine := headerText + strings.Repeat(" ", spacing) + rightText
+
+	// Create divider line - use a consistent generous width
+	// Should extend well past the recency column to provide visual separation
+	dividerWidth := 100
+	divider := strings.Repeat("━", dividerWidth)
+
+	// Style the header and divider
+	headerStyle := lipgloss.NewStyle().
+		Foreground(palette.Header).
+		Bold(false)
+
+	dividerStyle := lipgloss.NewStyle().
+		Foreground(palette.Dim)
+
+	return headerStyle.Render(headerLine) + "\n" + dividerStyle.Render(divider)
+}
+
+// renderFooter renders helpful commands at the bottom
+func renderFooter() string {
+	cfg := GetGlobalConfig()
+	palette := GetPalette(cfg.UI.Theme)
+
+	footerStyle := lipgloss.NewStyle().
+		Foreground(palette.Info)
+
+	return "\n" + footerStyle.Render("💡 Resume: csm resume <name>  |  Stop: csm stop <name>  |  Clean: csm clean")
 }
 
 // getStatusSymbol returns the Unicode symbol for a status
@@ -258,67 +357,180 @@ func getStatusSymbol(status string) string {
 	return symbol
 }
 
+// columnWidths holds the maximum width for each column
+type columnWidths struct {
+	name       int
+	tmux       int
+	agent      int
+	project    int
+	attachment int
+}
+
+// calculateMaxColumnWidths calculates the maximum width for each column across all groups
+func calculateMaxColumnWidths(groups map[string][]*manifest.Manifest, statuses map[string]session.StatusInfo, showTmuxColumn bool) columnWidths {
+	widths := columnWidths{}
+
+	for status, group := range groups {
+		for _, m := range group {
+			// Name column
+			if len(m.Name) > widths.name {
+				widths.name = len(m.Name)
+			}
+
+			// Tmux column
+			if showTmuxColumn && len(m.Tmux.SessionName) > widths.tmux {
+				widths.tmux = len(m.Tmux.SessionName)
+			}
+
+			// Agent column
+			if len(m.Agent) > widths.agent {
+				widths.agent = len(m.Agent)
+			}
+
+			// Project column
+			project := compactPath(truncatePath(m.Context.Project, 40))
+			if len(project) > widths.project {
+				widths.project = len(project)
+			}
+
+			// Attachment column (only for active sessions)
+			if status == "active" {
+				statusInfo := statuses[m.Name]
+				if statusInfo.AttachedClients > 0 {
+					attachmentText := fmt.Sprintf("%d attached", statusInfo.AttachedClients)
+					if len(attachmentText) > widths.attachment {
+						widths.attachment = len(attachmentText)
+					}
+				}
+			}
+		}
+	}
+
+	return widths
+}
+
+// renderGroupTableWithWidths renders a table with fixed column widths for consistent alignment
+func renderGroupTableWithWidths(group []*manifest.Manifest, status string, statuses map[string]session.StatusInfo, showTmuxColumn bool, widths columnWidths) string {
+	var result bytes.Buffer
+
+	// Choose style based on status
+	var style lipgloss.Style
+	switch status {
+	case "active":
+		style = getActiveStyle().Width(100)
+	case "stopped":
+		style = getStoppedStyle().Width(100)
+	case "stale":
+		style = getStaleStyle().Width(100)
+	default:
+		style = lipgloss.NewStyle().Width(100)
+	}
+
+	// Render each row with fixed widths
+	for _, m := range group {
+		statusInfo := statuses[m.Name]
+
+		// Determine status symbol
+		var symbol string
+		if status == "active" {
+			if statusInfo.AttachedClients > 0 {
+				symbol = getStatusSymbol("attached")
+			} else {
+				symbol = getStatusSymbol("detached")
+			}
+		} else {
+			symbol = getStatusSymbol(status)
+		}
+
+		project := compactPath(truncatePath(m.Context.Project, 40))
+		recency := formatTimeCompact(m.UpdatedAt)
+
+		// Format attachment count
+		var attachmentText string
+		if status == "active" && statusInfo.AttachedClients > 0 {
+			attachmentText = fmt.Sprintf("%d attached", statusInfo.AttachedClients)
+		}
+
+		// Build line with fixed widths
+		var line string
+		if showTmuxColumn {
+			line = fmt.Sprintf("%s  %-*s  %-*s  %-*s  %-*s  %-*s  %-10s",
+				symbol,
+				widths.name, m.Name,
+				widths.tmux, m.Tmux.SessionName,
+				widths.agent, m.Agent,
+				widths.project, project,
+				widths.attachment, attachmentText,
+				recency)
+		} else {
+			line = fmt.Sprintf("%s  %-*s  %-*s  %-*s  %-*s  %-10s",
+				symbol,
+				widths.name, m.Name,
+				widths.agent, m.Agent,
+				widths.project, project,
+				widths.attachment, attachmentText,
+				recency)
+		}
+
+		// lipgloss will handle padding to width (100 chars)
+		result.WriteString(style.Render(line))
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
 // renderGroupTable renders a table for a single status group
 func renderGroupTable(group []*manifest.Manifest, status string, statuses map[string]session.StatusInfo, showTmuxColumn bool) string {
 	// First pass: format entire table without color to get proper alignment
 	var tableBuf bytes.Buffer
 	w := tabwriter.NewWriter(&tableBuf, 0, 0, 2, ' ', 0)
 
-	// Header
-	if showTmuxColumn {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			"NAME",
-			"TMUX",
-			"STATUS",
-			"PROJECT")
-	} else {
-		fmt.Fprintf(w, "%s\t%s\t%s\n",
-			"NAME",
-			"STATUS",
-			"PROJECT")
-	}
+	// No header row - the divider already has column labels
 
 	// Rows
 	for _, m := range group {
 		statusInfo := statuses[m.Name]
-		symbol := getStatusSymbol(status)
 
-		// Determine display status text
-		var displayStatus string
-		switch status {
-		case "attached":
-			displayStatus = "Active"
-		case "detached":
-			displayStatus = "Active"
-		case "stopped":
-			displayStatus = "Stopped"
-		case "stale":
-			displayStatus = "Stale"
-		default:
-			displayStatus = strings.Title(statusInfo.Status)
-		}
-
-		// Format status text with attachment count for attached sessions
-		var statusText string
-		if status == "attached" && statusInfo.AttachedClients > 0 {
-			statusText = fmt.Sprintf("%s %s (%d att.)", symbol, displayStatus, statusInfo.AttachedClients)
+		// Determine status symbol for the group
+		var symbol string
+		// For "active" group, distinguish between attached and detached
+		if status == "active" {
+			if statusInfo.AttachedClients > 0 {
+				symbol = getStatusSymbol("attached")
+			} else {
+				symbol = getStatusSymbol("detached")
+			}
 		} else {
-			statusText = fmt.Sprintf("%s %s", symbol, displayStatus)
+			symbol = getStatusSymbol(status)
 		}
 
-		project := compactPath(truncatePath(m.Context.Project, 50))
+		project := compactPath(truncatePath(m.Context.Project, 40))
+		recency := formatTimeCompact(m.UpdatedAt)
+
+		// Format attachment count column (only for active sessions)
+		var attachmentText string
+		if status == "active" && statusInfo.AttachedClients > 0 {
+			attachmentText = fmt.Sprintf("%d attached", statusInfo.AttachedClients)
+		} else {
+			attachmentText = ""
+		}
 
 		if showTmuxColumn {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				symbol,
 				m.Name,
 				m.Tmux.SessionName,
-				statusText,
-				project)
+				project,
+				attachmentText,
+				recency)
 		} else {
-			fmt.Fprintf(w, "%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+				symbol,
 				m.Name,
-				statusText,
-				project)
+				project,
+				attachmentText,
+				recency)
 		}
 	}
 
@@ -328,16 +540,10 @@ func renderGroupTable(group []*manifest.Manifest, status string, statuses map[st
 	var result bytes.Buffer
 	lines := bytes.Split(tableBuf.Bytes(), []byte("\n"))
 
-	// Color the header (first line)
-	if len(lines) > 0 {
-		result.WriteString(Bold(string(lines[0])))
-		result.WriteString("\n")
-	}
-
 	// Choose style based on status
 	var style lipgloss.Style
 	switch status {
-	case "attached", "detached":
+	case "active":
 		style = getActiveStyle()
 	case "stopped":
 		style = getStoppedStyle()
@@ -347,12 +553,12 @@ func renderGroupTable(group []*manifest.Manifest, status string, statuses map[st
 		style = lipgloss.NewStyle() // No styling
 	}
 
-	// Color data rows
+	// Color all data rows (no header row)
 	for i := range group {
-		if i+1 >= len(lines) {
+		if i >= len(lines) {
 			break
 		}
-		line := string(lines[i+1])
+		line := string(lines[i])
 		if line == "" {
 			continue
 		}
@@ -392,6 +598,34 @@ func formatTime(t time.Time) string {
 	}
 
 	return t.Format("2006-01-02")
+}
+
+// formatTimeCompact formats time as compact relative (e.g., "5m ago", "2h ago", "3d ago")
+func formatTimeCompact(t time.Time) string {
+	now := time.Now()
+	diff := now.Sub(t)
+
+	if diff < time.Minute {
+		return "now"
+	}
+	if diff < time.Hour {
+		mins := int(diff.Minutes())
+		return fmt.Sprintf("%dm ago", mins)
+	}
+	if diff < 24*time.Hour {
+		hours := int(diff.Hours())
+		return fmt.Sprintf("%dh ago", hours)
+	}
+	if diff < 7*24*time.Hour {
+		days := int(diff.Hours() / 24)
+		return fmt.Sprintf("%dd ago", days)
+	}
+	if diff < 30*24*time.Hour {
+		weeks := int(diff.Hours() / 24 / 7)
+		return fmt.Sprintf("%dw ago", weeks)
+	}
+
+	return t.Format("Jan 02")
 }
 
 // truncatePath truncates path with ... if too long

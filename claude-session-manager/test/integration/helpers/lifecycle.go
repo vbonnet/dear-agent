@@ -43,7 +43,12 @@ func ArchiveTestSession(sessionsDir, sessionID string, reason string) error {
 
 // CreateArchivedSession creates a pre-archived session fixture for testing
 // This creates the archived directory structure manually
-func CreateArchivedSession(env *TestEnv, sessionID string) error {
+func CreateArchivedSession(env *TestEnv, sessionID, agent string) error {
+	// Default to claude for backward compatibility
+	if agent == "" {
+		agent = "claude"
+	}
+
 	// Create archived session directory
 	archiveDir := filepath.Join(env.SessionsDir, "archive", sessionID)
 	if err := os.MkdirAll(archiveDir, 0700); err != nil {
@@ -53,10 +58,10 @@ func CreateArchivedSession(env *TestEnv, sessionID string) error {
 	// Create a basic archived manifest
 	manifestPath := filepath.Join(archiveDir, "manifest.yaml")
 	manifest := fmt.Sprintf(`session_id: %s
-agent: claude
+agent: %s
 status: archived
 archived_at: "2026-01-20T19:00:00Z"
-`, sessionID)
+`, sessionID, agent)
 
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0600); err != nil {
 		return fmt.Errorf("failed to write archived manifest: %w", err)

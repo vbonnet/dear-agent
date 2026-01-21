@@ -770,5 +770,6 @@ func init() {
 	rootCmd.AddCommand(newCmd)
 	newCmd.Flags().BoolP("debug", "d", debugDefault, "Enable debug logging to ~/.csm/debug/ (env: CSM_DEBUG)")
 	newCmd.Flags().BoolVar(&detached, "detached", false, "Create detached session without attaching")
-	newCmd.Flags().StringVar(&agentName, "agent", "claude", "AI agent to use (claude, gemini, gpt)")
+	newCmd.Flags().StringVar(&agentName, "agent", "", "AI agent to use (claude, gemini, gpt) [REQUIRED]")
+	newCmd.MarkFlagRequired("agent")
 }
