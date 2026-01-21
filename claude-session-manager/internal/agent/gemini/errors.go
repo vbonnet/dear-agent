@@ -3,22 +3,44 @@ package gemini
 import (
 	"errors"
 	"fmt"
-
-	"github.com/vbonnet/ai-tools/claude-session-manager/internal/agent"
 )
 
-// ErrUnsupportedCommand indicates that a command type is not supported by the Gemini adapter.
-var ErrUnsupportedCommand = errors.New("command not supported by Gemini adapter")
+// Common errors
+var (
+	ErrProjectIDMissing   = errors.New("GCP_PROJECT_ID or GOOGLE_CLOUD_PROJECT environment variable not set")
+	ErrSessionNotFound    = errors.New("session not found")
+	ErrMaxRetriesExceeded = errors.New("max retries exceeded for Vertex AI API call")
+	ErrFormatNotSupported = errors.New("export format not supported (only JSONL supported in V1)")
+	ErrInvalidMessage     = errors.New("invalid message: content cannot be empty")
+)
 
-// ParameterError indicates that a command parameter is missing or invalid.
-type ParameterError struct {
-	CommandType   agent.CommandType
-	ParameterName string
-	Issue         string
+// APIError represents an error from Vertex AI API with actionable suggestion
+type APIError struct {
+	Operation  string
+	Err        error
+	Suggestion string
 }
 
-// Error implements the error interface.
-func (e *ParameterError) Error() string {
-	return fmt.Sprintf("command %s: parameter '%s': %s",
-		e.CommandType, e.ParameterName, e.Issue)
+func (e *APIError) Error() string {
+	return fmt.Sprintf("%s failed: %v\n\nSuggestion: %s", e.Operation, e.Err, e.Suggestion)
+}
+
+func (e *APIError) Unwrap() error {
+	return e.Err
+}
+
+func wrapAPIError(operation string, err error) error {
+	return &APIError{
+		Operation:  operation,
+		Err:        err,
+		Suggestion: "Check Vertex AI quota, network connection, and credentials",
+	}
+}
+
+func wrapAuthError(err error) error {
+	return &APIError{
+		Operation:  "authentication",
+		Err:        err,
+		Suggestion: "Run 'gcloud auth application-default login' or set GOOGLE_APPLICATION_CREDENTIALS",
+	}
 }
