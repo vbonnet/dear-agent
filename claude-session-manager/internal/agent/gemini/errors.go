@@ -25,7 +25,7 @@ type ParameterError struct {
 }
 
 func (e *ParameterError) Error() string {
-	return fmt.Sprintf("invalid parameter for command %s.%s: %s", e.CommandType, e.ParameterName, e.Issue)
+	return fmt.Sprintf("command %s: parameter '%s': %s", e.CommandType, e.ParameterName, e.Issue)
 }
 
 // APIError represents an error from Vertex AI API with actionable suggestion
