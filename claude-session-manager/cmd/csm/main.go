@@ -66,6 +66,15 @@ Global Flags:
 			return err
 		}
 
+		// Print header (version and binary location) for all commands except version
+		if cmd.Name() != "version" {
+			executable, err := os.Executable()
+			if err != nil {
+				executable = "unknown"
+			}
+			fmt.Fprintf(os.Stderr, "csm %s (%s)\n", Version, executable)
+		}
+
 		// Load UI config and apply flag overrides
 		uiCfg := ui.LoadConfig()
 		if noColor {
