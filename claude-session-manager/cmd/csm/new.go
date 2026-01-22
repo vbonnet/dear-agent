@@ -409,11 +409,31 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			return fmt.Errorf("spinner error: %w", spinErr)
 		}
 
+	case "gemini":
+		// Start Gemini in the session
+		debug.Phase("Start Gemini")
+		geminiCmd := fmt.Sprintf("gemini && exit")
+		debug.Log("Sending command: %s", geminiCmd)
+		if err := tmux.SendCommand(sessionName, geminiCmd); err != nil {
+			ui.PrintError(err,
+				"Failed to start Gemini in tmux session",
+				"  • Verify Gemini is installed: which gemini\n"+
+					"  • Test Gemini manually: gemini --version\n"+
+					"  • Check tmux session exists: tmux list-sessions\n"+
+					"  • Attach and start manually: tmux attach -t "+sessionName)
+			if !exists {
+				_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
+			}
+			return err
+		}
+		debug.Log("Gemini command sent successfully")
+		ui.PrintSuccess("Started Gemini CLI in tmux session")
+
 	default:
-		// API-based agents (gemini, gpt) - no CLI needed
+		// Other agents (gpt, etc) - no CLI startup configured yet
 		debug.Phase("Skip CLI Startup")
-		debug.Log("Skipping CLI startup for API-based agent: %s", agentName)
-		ui.PrintSuccess(fmt.Sprintf("Session created for %s agent", agentName))
+		debug.Log("Skipping CLI startup for agent: %s (no CLI configured)", agentName)
+		ui.PrintSuccess(fmt.Sprintf("Session created for %s agent", sessionName))
 	}
 
 	// Create manifest BEFORE sending /rename (so hook can find it)
