@@ -313,74 +313,85 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		ui.PrintSuccess(fmt.Sprintf("Created tmux session: %s", sessionName))
 	}
 
-	// Start Claude in the session
-	// Use --add-dir to pre-approve workspace and avoid trust prompt blocking the ">" prompt
-	debug.Phase("Start Claude")
-	claudeCmd := fmt.Sprintf("claude --add-dir '%s' && exit", workDir)
-	debug.Log("Sending command: %s", claudeCmd)
-	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
-		ui.PrintError(err,
-			"Failed to start Claude in tmux session",
-			"  • Verify Claude is installed: which claude\n"+
-				"  • Test Claude manually: claude --version\n"+
-				"  • Check tmux session exists: tmux list-sessions\n"+
-				"  • Attach and start manually: tmux attach -t "+sessionName)
-		// Try to kill the tmux session if we just created it and Claude failed
-		if !exists {
-			_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
+	// Start agent-specific initialization
+	var spinErr error
+	switch agentName {
+	case "claude":
+		// Start Claude in the session
+		// Use --add-dir to pre-approve workspace and avoid trust prompt blocking the ">" prompt
+		debug.Phase("Start Claude")
+		claudeCmd := fmt.Sprintf("claude --add-dir '%s' && exit", workDir)
+		debug.Log("Sending command: %s", claudeCmd)
+		if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
+			ui.PrintError(err,
+				"Failed to start Claude in tmux session",
+				"  • Verify Claude is installed: which claude\n"+
+					"  • Test Claude manually: claude --version\n"+
+					"  • Check tmux session exists: tmux list-sessions\n"+
+					"  • Attach and start manually: tmux attach -t "+sessionName)
+			// Try to kill the tmux session if we just created it and Claude failed
+			if !exists {
+				_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
+			}
+			return err
 		}
-		return err
-	}
-	debug.Log("Claude command sent successfully")
-	ui.PrintSuccess("Started Claude CLI in tmux session")
+		debug.Log("Claude command sent successfully")
+		ui.PrintSuccess("Started Claude CLI in tmux session")
 
-	// Give Claude a moment to initialize before we start polling
-	debug.Log("Initial sleep (500ms) before polling")
-	time.Sleep(500 * time.Millisecond)
+		// Give Claude a moment to initialize before we start polling
+		debug.Log("Initial sleep (500ms) before polling")
+		time.Sleep(500 * time.Millisecond)
 
-	// Wait for Claude prompt to appear (not just process)
-	// This ensures commands sent via InitSequence go to Claude, not bash
-	// Increased timeout to 30s to account for MCP loading and SessionStart hooks
-	debug.Phase("Wait for Claude Prompt")
-	debug.Log("Waiting for Claude prompt to appear (timeout: 30s)")
-	var waitErr error
-	spinErr := spinner.New().
-		Title("Waiting for Claude to be ready...").
-		Accessible(true).
-		Action(func() {
-			waitErr = tmux.WaitForClaudePrompt(sessionName, 30*time.Second)
-		}).
-		Run()
-	if spinErr != nil {
-		return fmt.Errorf("spinner error: %w", spinErr)
-	}
-
-	// Ensure clean line after spinner
-	fmt.Println()
-
-	if waitErr != nil {
-		debug.Log("Prompt wait timed out or failed: %v", waitErr)
-		ui.PrintWarning("Claude prompt not detected (still initializing)")
-		fmt.Println("  Proceeding anyway - initialization may be delayed")
-		// Continue anyway - InitSequence will handle if commands arrive too early
-	} else {
-		debug.Log("Claude prompt detected - ready for commands")
-		ui.PrintSuccess("Claude is ready!")
-	}
-
-	// Monitor for trust prompt using control mode (event-driven, not time-based)
-	// Only answer if we actually detect the prompt appearing
-	// Skip if we successfully pre-configured trust (saves ~30s due to blocking scanner.Scan)
-	if trustPreConfigured {
-		debug.Phase("Skip Trust Prompt Monitoring")
-		debug.Log("Skipping trust prompt monitoring since directory was pre-configured")
-	} else {
-		debug.Phase("Monitor for Trust Prompt")
-		debug.Log("Starting control mode to monitor for trust prompt")
-		if err := monitorAndAnswerTrustPrompt(sessionName, 10*time.Second); err != nil {
-			debug.Log("Trust prompt handling: %v", err)
-			// Non-fatal - either no prompt appeared (good) or we couldn't answer it (user can manually)
+		// Wait for Claude prompt to appear (not just process)
+		// This ensures commands sent via InitSequence go to Claude, not bash
+		// Increased timeout to 30s to account for MCP loading and SessionStart hooks
+		debug.Phase("Wait for Claude Prompt")
+		debug.Log("Waiting for Claude prompt to appear (timeout: 30s)")
+		var waitErr error
+		spinErr = spinner.New().
+			Title("Waiting for Claude to be ready...").
+			Accessible(true).
+			Action(func() {
+				waitErr = tmux.WaitForClaudePrompt(sessionName, 30*time.Second)
+			}).
+			Run()
+		if spinErr != nil {
+			return fmt.Errorf("spinner error: %w", spinErr)
 		}
+
+		// Ensure clean line after spinner
+		fmt.Println()
+
+		if waitErr != nil {
+			debug.Log("Prompt wait timed out or failed: %v", waitErr)
+			ui.PrintWarning("Claude prompt not detected (still initializing)")
+			fmt.Println("  Proceeding anyway - initialization may be delayed")
+			// Continue anyway - InitSequence will handle if commands arrive too early
+		} else {
+			debug.Log("Claude prompt detected - ready for commands")
+			ui.PrintSuccess("Claude is ready!")
+		}
+
+		// Monitor for trust prompt using control mode (event-driven, not time-based)
+		// Only answer if we actually detect the prompt appearing
+		// Skip if we successfully pre-configured trust (saves ~30s due to blocking scanner.Scan)
+		if trustPreConfigured {
+			debug.Phase("Skip Trust Prompt Monitoring")
+			debug.Log("Skipping trust prompt monitoring since directory was pre-configured")
+		} else {
+			debug.Phase("Monitor for Trust Prompt")
+			debug.Log("Starting control mode to monitor for trust prompt")
+			if err := monitorAndAnswerTrustPrompt(sessionName, 10*time.Second); err != nil {
+				debug.Log("Trust prompt handling: %v", err)
+				// Non-fatal - either no prompt appeared (good) or we couldn't answer it (user can manually)
+			}
+		}
+
+	default:
+		// API-based agents (gemini, gpt) - no CLI needed
+		debug.Phase("Skip CLI Startup")
+		debug.Log("Skipping CLI startup for API-based agent: %s", agentName)
+		ui.PrintSuccess(fmt.Sprintf("Session created for %s agent", agentName))
 	}
 
 	// Wait for SessionStart hooks to complete before sending commands
@@ -584,30 +595,39 @@ func startClaudeInCurrentTmux(sessionName string) error {
 		}
 	}
 
-	// Start Claude in current pane
-	fmt.Println("Starting Claude CLI...")
-	// Use --add-dir to pre-approve workspace and avoid trust prompt
-	// Prefer PWD to preserve symlinks (workDir already set from os.Getwd() above)
-	workDirForClaude := os.Getenv("PWD")
-	if workDirForClaude == "" {
-		workDirForClaude = workDir
-	}
-	claudeCmd := fmt.Sprintf("claude --add-dir '%s' && exit", workDirForClaude)
-	if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
-		ui.PrintError(err,
-			"Failed to start Claude in current tmux pane",
-			"  • Verify Claude is installed: which claude\n"+
-				"  • Test Claude manually: claude --version\n"+
-				"  • Check you're in tmux: echo $TMUX\n"+
-				"  • Exit tmux and try: csm new "+sessionName)
-		return err
-	}
+	// Start agent-specific initialization
+	switch agentName {
+	case "claude":
+		// Start Claude in current pane
+		fmt.Println("Starting Claude CLI...")
+		// Use --add-dir to pre-approve workspace and avoid trust prompt
+		// Prefer PWD to preserve symlinks (workDir already set from os.Getwd() above)
+		workDirForClaude := os.Getenv("PWD")
+		if workDirForClaude == "" {
+			workDirForClaude = workDir
+		}
+		claudeCmd := fmt.Sprintf("claude --add-dir '%s' && exit", workDirForClaude)
+		if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
+			ui.PrintError(err,
+				"Failed to start Claude in current tmux pane",
+				"  • Verify Claude is installed: which claude\n"+
+					"  • Test Claude manually: claude --version\n"+
+					"  • Check you're in tmux: echo $TMUX\n"+
+					"  • Exit tmux and try: csm new "+sessionName)
+			return err
+		}
 
-	// Wait for Claude process to appear (more reliable than prompt character)
-	fmt.Println("Waiting for Claude to initialize...")
-	if err := tmux.WaitForProcessReady(sessionName, "claude", 30*time.Second); err != nil {
-		ui.PrintWarning("Claude may still be initializing")
-		fmt.Printf("💡 Session is ready, but process not detected. This is usually fine.\n")
+		// Wait for Claude process to appear (more reliable than prompt character)
+		fmt.Println("Waiting for Claude to initialize...")
+		if err := tmux.WaitForProcessReady(sessionName, "claude", 30*time.Second); err != nil {
+			ui.PrintWarning("Claude may still be initializing")
+			fmt.Printf("💡 Session is ready, but process not detected. This is usually fine.\n")
+		}
+
+	default:
+		// API-based agents (gemini, gpt) - no CLI needed
+		debug.Log("Skipping CLI startup for API-based agent: %s", agentName)
+		ui.PrintSuccess(fmt.Sprintf("Session created for %s agent", agentName))
 	}
 
 	// Send /csm-tools:csm-assoc command to associate session with CSM
