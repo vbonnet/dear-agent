@@ -23,6 +23,7 @@ import (
 var (
 	detached  bool
 	agentName string
+	projectID string
 )
 
 var newCmd = &cobra.Command{
@@ -164,6 +165,12 @@ Examples:
 		}
 
 		debug.Log("Agent: %s", agentName)
+
+		// Set GCP_PROJECT_ID environment variable if provided (for gemini agent)
+		if projectID != "" {
+			os.Setenv("GCP_PROJECT_ID", projectID)
+			debug.Log("Set GCP_PROJECT_ID: %s", projectID)
+		}
 
 		// Now we have a session name. Handle the scenarios:
 		// 1. Inside tmux + not detached: start Claude in current session
@@ -387,26 +394,26 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			}
 		}
 
+		// Wait for SessionStart hooks to complete before sending commands
+		// SessionStart hooks run immediately when Claude starts (no message needed)
+		debug.Phase("Wait for SessionStart Hooks")
+		debug.Log("Waiting for SessionStart hooks to complete (they run at Claude startup)")
+		spinErr = spinner.New().
+			Title("Waiting for SessionStart hooks to complete...").
+			Accessible(true).
+			Action(func() {
+				time.Sleep(2 * time.Second) // Give hooks time to start (reduced from 5s)
+			}).
+			Run()
+		if spinErr != nil {
+			return fmt.Errorf("spinner error: %w", spinErr)
+		}
+
 	default:
 		// API-based agents (gemini, gpt) - no CLI needed
 		debug.Phase("Skip CLI Startup")
 		debug.Log("Skipping CLI startup for API-based agent: %s", agentName)
 		ui.PrintSuccess(fmt.Sprintf("Session created for %s agent", agentName))
-	}
-
-	// Wait for SessionStart hooks to complete before sending commands
-	// SessionStart hooks run immediately when Claude starts (no message needed)
-	debug.Phase("Wait for SessionStart Hooks")
-	debug.Log("Waiting for SessionStart hooks to complete (they run at Claude startup)")
-	spinErr = spinner.New().
-		Title("Waiting for SessionStart hooks to complete...").
-		Accessible(true).
-		Action(func() {
-			time.Sleep(2 * time.Second) // Give hooks time to start (reduced from 5s)
-		}).
-		Run()
-	if spinErr != nil {
-		return fmt.Errorf("spinner error: %w", spinErr)
 	}
 
 	// Create manifest BEFORE sending /rename (so hook can find it)
@@ -454,60 +461,75 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		}
 	}
 
-	// Release lock BEFORE running sequenced init (csm associate needs it)
-	debug.Log("Releasing lock before sequenced initialization")
-	if globalLock != nil {
-		if err := globalLock.Unlock(); err != nil {
-			ui.PrintWarning(fmt.Sprintf("Failed to release lock: %v", err))
-		} else {
-			debug.Log("Lock released successfully")
+	// Claude-specific: Release lock and run initialization sequence
+	if agentName == "claude" {
+		// Release lock BEFORE running sequenced init (csm associate needs it)
+		debug.Log("Releasing lock before sequenced initialization")
+		if globalLock != nil {
+			if err := globalLock.Unlock(); err != nil {
+				ui.PrintWarning(fmt.Sprintf("Failed to release lock: %v", err))
+			} else {
+				debug.Log("Lock released successfully")
+			}
+			globalLock = nil // Prevent double-unlock in PersistentPostRunE
 		}
-		globalLock = nil // Prevent double-unlock in PersistentPostRunE
-	}
 
-	// Use InitSequence to properly sequence /rename and /csm-assoc commands
-	// This uses tmux control mode to wait for each command to complete before sending the next
-	debug.Phase("Sequenced Initialization")
-	debug.Log("Running InitSequence for /rename and /csm-assoc")
-	seq := tmux.NewInitSequence(sessionName)
-	if err := seq.Run(); err != nil {
-		debug.Log("InitSequence failed: %v", err)
-		ui.PrintWarning("Failed to run initialization sequence")
-		fmt.Printf("💡 You can manually run:\n")
-		fmt.Printf("  /rename %s\n", sessionName)
-		fmt.Printf("  /csm-tools:csm-assoc %s\n", sessionName)
+		// Use InitSequence to properly sequence /rename and /csm-assoc commands
+		// This uses tmux control mode to wait for each command to complete before sending the next
+		debug.Phase("Sequenced Initialization")
+		debug.Log("Running InitSequence for /rename and /csm-assoc")
+		seq := tmux.NewInitSequence(sessionName)
+		if err := seq.Run(); err != nil {
+			debug.Log("InitSequence failed: %v", err)
+			ui.PrintWarning("Failed to run initialization sequence")
+			fmt.Printf("💡 You can manually run:\n")
+			fmt.Printf("  /rename %s\n", sessionName)
+			fmt.Printf("  /csm-tools:csm-assoc %s\n", sessionName)
+		} else {
+			debug.Log("InitSequence completed successfully")
+		}
+
+		// Wait for ready-file (created by csm associate when UUID is captured)
+		debug.Phase("Wait for Ready Signal")
+		debug.Log("Waiting for ready-file signal (timeout: 60s)")
+		var readyErr error
+		var spinErr2 error
+		spinErr2 = spinner.New().
+			Title("Waiting for Claude to initialize...").
+			Accessible(true).
+			Action(func() {
+				readyErr = readiness.WaitForClaudeReady(sessionName, 60*time.Second)
+			}).
+			Run()
+		if spinErr2 != nil {
+			return fmt.Errorf("spinner error: %w", spinErr2)
+		}
+		if readyErr != nil {
+			debug.Log("Ready-file wait failed: %v", readyErr)
+			ui.PrintWarning("Claude did not signal ready within timeout")
+			fmt.Println("  • Attach to session to check status: tmux attach -t " + sessionName)
+			fmt.Printf("  • Run 'csm sync' later to populate UUID if needed\n")
+		} else {
+			debug.Log("Ready-file detected - session is ready")
+			ui.PrintSuccess("Claude is ready and session associated!")
+
+			// Wait for /csm-assoc skill to finish outputting its completion messages
+			// The ready-file signals when 'csm associate' binary completes, but the skill
+			// continues to output messages after that. Give it time to finish.
+			debug.Log("Waiting for /csm-assoc skill to complete output (0.5s)")
+			time.Sleep(500 * time.Millisecond)
+		}
 	} else {
-		debug.Log("InitSequence completed successfully")
-	}
-
-	// Wait for ready-file (created by csm associate when UUID is captured)
-	debug.Phase("Wait for Ready Signal")
-	debug.Log("Waiting for ready-file signal (timeout: 60s)")
-	var readyErr error
-	spinErr = spinner.New().
-		Title("Waiting for Claude to initialize...").
-		Accessible(true).
-		Action(func() {
-			readyErr = readiness.WaitForClaudeReady(sessionName, 60*time.Second)
-		}).
-		Run()
-	if spinErr != nil {
-		return fmt.Errorf("spinner error: %w", spinErr)
-	}
-	if readyErr != nil {
-		debug.Log("Ready-file wait failed: %v", readyErr)
-		ui.PrintWarning("Claude did not signal ready within timeout")
-		fmt.Println("  • Attach to session to check status: tmux attach -t " + sessionName)
-		fmt.Printf("  • Run 'csm sync' later to populate UUID if needed\n")
-	} else {
-		debug.Log("Ready-file detected - session is ready")
-		ui.PrintSuccess("Claude is ready and session associated!")
-
-		// Wait for /csm-assoc skill to finish outputting its completion messages
-		// The ready-file signals when 'csm associate' binary completes, but the skill
-		// continues to output messages after that. Give it time to finish.
-		debug.Log("Waiting for /csm-assoc skill to complete output (0.5s)")
-		time.Sleep(500 * time.Millisecond)
+		// API-based agents - release lock immediately (no initialization sequence needed)
+		debug.Log("Releasing lock (no initialization sequence for API-based agents)")
+		if globalLock != nil {
+			if err := globalLock.Unlock(); err != nil {
+				ui.PrintWarning(fmt.Sprintf("Failed to release lock: %v", err))
+			} else {
+				debug.Log("Lock released successfully")
+			}
+			globalLock = nil // Prevent double-unlock in PersistentPostRunE
+		}
 	}
 
 	// Update VS Code tab title if running in VS Code
@@ -624,23 +646,23 @@ func startClaudeInCurrentTmux(sessionName string) error {
 			fmt.Printf("💡 Session is ready, but process not detected. This is usually fine.\n")
 		}
 
+		// Send /csm-tools:csm-assoc command to associate session with CSM
+		// This runs the csm-assoc skill which will auto-rename the session
+		assocCmd := "/csm-tools:csm-assoc"
+		if err := tmux.SendCommand(sessionName, assocCmd); err != nil {
+			ui.PrintWarning("Failed to auto-associate session")
+			fmt.Printf("💡 You can manually run: /csm-tools:csm-assoc\n")
+		} else {
+			ui.PrintSuccess("Sent /csm-tools:csm-assoc to associate session")
+		}
+
 	default:
 		// API-based agents (gemini, gpt) - no CLI needed
 		debug.Log("Skipping CLI startup for API-based agent: %s", agentName)
 		ui.PrintSuccess(fmt.Sprintf("Session created for %s agent", agentName))
 	}
 
-	// Send /csm-tools:csm-assoc command to associate session with CSM
-	// This runs the csm-assoc skill which will auto-rename the session
-	assocCmd := "/csm-tools:csm-assoc"
-	if err := tmux.SendCommand(sessionName, assocCmd); err != nil {
-		ui.PrintWarning("Failed to auto-associate session")
-		fmt.Printf("💡 You can manually run: /csm-tools:csm-assoc\n")
-	} else {
-		ui.PrintSuccess("Sent /csm-tools:csm-assoc to associate session")
-	}
-
-	ui.PrintSuccess("Claude session started in current tmux!")
+	ui.PrintSuccess(fmt.Sprintf("%s session started in current tmux!", agentName))
 
 	// Update VS Code tab title if running in VS Code
 	updateVSCodeTabTitle(sessionName)
@@ -791,5 +813,6 @@ func init() {
 	newCmd.Flags().BoolP("debug", "d", debugDefault, "Enable debug logging to ~/.csm/debug/ (env: CSM_DEBUG)")
 	newCmd.Flags().BoolVar(&detached, "detached", false, "Create detached session without attaching")
 	newCmd.Flags().StringVar(&agentName, "agent", "", "AI agent to use (claude, gemini, gpt) [REQUIRED]")
+	newCmd.Flags().StringVar(&projectID, "project-id", "", "GCP project ID (required for gemini agent)")
 	newCmd.MarkFlagRequired("agent")
 }
