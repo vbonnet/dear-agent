@@ -2,20 +2,11 @@ package tmux
 
 import (
 	"fmt"
-	"io"
-	"log"
-	"os"
 	"strings"
 	"time"
-)
 
-func init() {
-	// Disable tmux control mode logging by default (reduces noise)
-	// Only enable if CSM_DEBUG environment variable is set
-	if os.Getenv("CSM_DEBUG") != "true" && os.Getenv("CSM_DEBUG") != "1" {
-		log.SetOutput(io.Discard)
-	}
-}
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
+)
 
 // ClaudePromptPatterns are patterns that indicate Claude is ready for input
 var ClaudePromptPatterns = []string{
@@ -30,7 +21,7 @@ var ClaudePromptPatterns = []string{
 // Uses control mode to monitor output stream and detect prompt patterns
 // Handles octal escapes using unescapeOctal from output_watcher.go
 func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
-	log.Printf("\n🔍 Starting prompt detection for session: %s", sessionName)
+	debug.Log("\n🔍 Starting prompt detection for session: %s", sessionName)
 
 	// Start control mode
 	ctrl, err := StartControlMode(sessionName)
@@ -59,14 +50,14 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 			// Increased to 10 consecutive idles (2 seconds) to avoid false detection
 			// during slash command execution where output might contain ">" characters
 			if consecutiveIdleLines >= 10 && containsPromptPattern(lastContent) {
-				log.Printf("✓ Detected prompt pattern after idle period: %q", lastContent)
+				debug.Log("✓ Detected prompt pattern after idle period: %q", lastContent)
 				return nil
 			}
 
 			// If we've checked many lines and seen idle, likely ready
 			// Increased to 15 consecutive idles (3 seconds) for more conservative detection
 			if linesChecked > 10 && consecutiveIdleLines >= 15 {
-				log.Printf("✓ Stable idle state detected after %d lines", linesChecked)
+				debug.Log("✓ Stable idle state detected after %d lines", linesChecked)
 				return nil
 			}
 
@@ -89,14 +80,14 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 					// Strip ANSI escape sequences before logging
 					cleanContent := stripANSI(content)
 					if strings.TrimSpace(cleanContent) != "" {
-						log.Printf("📝 Output [%d]: %q", linesChecked, truncate(cleanContent, 80))
+						debug.Log("📝 Output [%d]: %q", linesChecked, truncate(cleanContent, 80))
 					}
 				}
 			}
 
 			// Check for prompt patterns
 			if containsPromptPattern(content) {
-				log.Printf("✓ Prompt pattern detected in line %d: %q", linesChecked, content)
+				debug.Log("✓ Prompt pattern detected in line %d: %q", linesChecked, content)
 				// Wait a bit more to ensure it's stable (increased to 2s to avoid false positives)
 				time.Sleep(2 * time.Second)
 				return nil
@@ -105,7 +96,7 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 
 		// Check for %end notification (command completed)
 		if strings.HasPrefix(line, "%end") {
-			log.Printf("📋 Command completion detected (%%end) at line %d", linesChecked)
+			debug.Log("📋 Command completion detected (%%end) at line %d", linesChecked)
 			// Command finished, likely ready for input soon
 			// Continue monitoring to confirm
 		}
@@ -147,7 +138,7 @@ func containsPromptPattern(content string) bool {
 // 2. Waits for SessionStart hooks to complete
 // 3. Waits for the Claude prompt (❯) to appear
 func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
-	log.Printf("🔍 Waiting for Claude to be ready (session: %s)", sessionName)
+	debug.Log("🔍 Waiting for Claude to be ready (session: %s)", sessionName)
 
 	// Start control mode
 	ctrl, err := StartControlMode(sessionName)
@@ -174,7 +165,7 @@ func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
 			// Timeout on individual read - might be ready
 			// Only consider it ready if we've seen SessionStart hooks complete
 			if sessionStartSeen && linesChecked > 20 {
-				log.Printf("✓ Session appears ready (SessionStart hooks completed)")
+				debug.Log("✓ Session appears ready (SessionStart hooks completed)")
 				return nil
 			}
 			continue
@@ -195,7 +186,7 @@ func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
 			if isVisibleContent(content) {
 				cleanContent := stripANSI(content)
 				if strings.TrimSpace(cleanContent) != "" {
-					log.Printf("📝 Output [%d]: %q", linesChecked, truncate(cleanContent, 100))
+					debug.Log("📝 Output [%d]: %q", linesChecked, truncate(cleanContent, 100))
 				}
 			}
 		}
@@ -203,14 +194,14 @@ func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
 		// Check for trust prompt
 		if !trustPromptSeen && strings.Contains(content, "Do you trust the files in this folder?") {
 			trustPromptSeen = true
-			log.Printf("🛡️  Trust prompt detected at line %d", linesChecked)
+			debug.Log("🛡️  Trust prompt detected at line %d", linesChecked)
 		}
 
 		// If trust prompt seen but not answered yet, look for the prompt and answer
 		if trustPromptSeen && !trustPromptAnswered {
 			// Check if this line contains the selection prompt (❯ 1. Yes, proceed)
 			if strings.Contains(content, "Yes, proceed") {
-				log.Printf("✓ Answering trust prompt with Enter key")
+				debug.Log("✓ Answering trust prompt with Enter key")
 				trustPromptAnswered = true
 
 				// Close control mode session temporarily to send keys
@@ -219,11 +210,11 @@ func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
 				// Use regular tmux send-keys (not via control mode)
 				// This works better for interactive prompts
 				if err := SendCommand(sessionName, "C-m"); err != nil {
-					log.Printf("⚠ Failed to send Enter: %v", err)
+					debug.Log("⚠ Failed to send Enter: %v", err)
 					return fmt.Errorf("failed to answer trust prompt: %w", err)
 				}
 
-				log.Printf("✓ Trust prompt answer sent, waiting 2s for processing...")
+				debug.Log("✓ Trust prompt answer sent, waiting 2s for processing...")
 				time.Sleep(2 * time.Second)
 
 				// Restart control mode to continue monitoring
@@ -235,7 +226,7 @@ func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
 
 				// Recreate watcher for the new control session
 				watcher = NewOutputWatcher(ctrl.Stdout)
-				log.Printf("✓ Control mode restarted, continuing to monitor...")
+				debug.Log("✓ Control mode restarted, continuing to monitor...")
 			}
 		}
 
@@ -245,12 +236,12 @@ func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
 			strings.Contains(content, "SessionStart:startup hook success") ||
 			strings.Contains(content, "Hook execution completed") {
 			sessionStartSeen = true
-			log.Printf("📋 SessionStart hooks activity detected at line %d", linesChecked)
+			debug.Log("📋 SessionStart hooks activity detected at line %d", linesChecked)
 		}
 
 		// Check for Claude prompt (only after trust prompt handled)
 		if trustPromptAnswered && sessionStartSeen && containsPromptPattern(content) {
-			log.Printf("✓ Claude prompt detected at line %d: %q", linesChecked, truncate(content, 50))
+			debug.Log("✓ Claude prompt detected at line %d: %q", linesChecked, truncate(content, 50))
 			// Wait a bit to ensure it's stable
 			time.Sleep(500 * time.Millisecond)
 			return nil
@@ -258,7 +249,7 @@ func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
 
 		// Also check for the main prompt pattern even without session start (fallback)
 		if !trustPromptSeen && containsPromptPattern(content) {
-			log.Printf("✓ Claude prompt detected (no trust prompt) at line %d: %q", linesChecked, truncate(content, 50))
+			debug.Log("✓ Claude prompt detected (no trust prompt) at line %d: %q", linesChecked, truncate(content, 50))
 			time.Sleep(500 * time.Millisecond)
 			return nil
 		}
