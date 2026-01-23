@@ -12,7 +12,12 @@ import (
 	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/telemetry"
 )
 
-const version = "0.1.0"
+// Version information - set via ldflags at build time
+var (
+	Version   = "0.1.0-dev"
+	GitCommit = "unknown"
+	BuildDate = "unknown"
+)
 
 func main() {
 	// Define flags
@@ -28,9 +33,16 @@ func main() {
 
 	// Handle version flag
 	if *showVersion {
-		fmt.Printf("swarm-executor version %s\n", version)
+		fmt.Printf("swarm-executor version %s\n", Version)
 		os.Exit(0)
 	}
+
+	// Print header to stderr (after version check)
+	executable, err := os.Executable()
+	if err != nil {
+		executable = "unknown"
+	}
+	fmt.Fprintf(os.Stderr, "swarm-executor %s (%s)\n", Version, executable)
 
 	// Handle help flag
 	if *showHelp {

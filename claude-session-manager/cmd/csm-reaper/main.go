@@ -9,7 +9,20 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/reaper"
 )
 
+// Version information - set via ldflags at build time
+var (
+	Version   = "2.0.0-dev"
+	GitCommit = "unknown"
+	BuildDate = "unknown"
+)
+
 func main() {
+	// Print header to stderr
+	executable, err := os.Executable()
+	if err != nil {
+		executable = "unknown"
+	}
+	fmt.Fprintf(os.Stderr, "csm-reaper %s (%s)\n", Version, executable)
 	// Parse args: csm-reaper --session <name> --log-file <path> --sessions-dir <path>
 	if len(os.Args) < 5 {
 		fmt.Fprintf(os.Stderr, "Usage: csm-reaper --session <name> --log-file <path> [--sessions-dir <path>]\n")

@@ -33,8 +33,8 @@ func TestCLIVersion(t *testing.T) {
 		t.Errorf("version output missing version string: %s", outputStr)
 	}
 
-	if !strings.Contains(outputStr, version) {
-		t.Errorf("version output missing version number %s: %s", version, outputStr)
+	if !strings.Contains(outputStr, Version) {
+		t.Errorf("version output missing version number %s: %s", Version, outputStr)
 	}
 }
 
