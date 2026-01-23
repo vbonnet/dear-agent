@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
+	"golang.org/x/term"
 )
 
 // Lipgloss style functions for table formatting (using palette)
@@ -54,12 +55,212 @@ func getDimStyle() lipgloss.Style {
 		Foreground(palette.Dim)
 }
 
+// LayoutMode represents the terminal width-based layout mode
+type LayoutMode int
+
+const (
+	LayoutMinimal LayoutMode = iota
+	LayoutCompact
+	LayoutFull
+)
+
+// getTerminalWidth detects the current terminal width
+func getTerminalWidth() int {
+	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || width == 0 {
+		return 80 // Fallback for non-TTY (pipes, redirects)
+	}
+	return width
+}
+
+// selectLayout chooses the appropriate layout mode based on terminal width
+func selectLayout(width int) LayoutMode {
+	if width < 80 {
+		return LayoutMinimal
+	} else if width < 100 {
+		return LayoutCompact
+	}
+	return LayoutFull
+}
+
+// renderMinimalHeader renders a compact header for minimal layout
+func renderMinimalHeader(status string, count int) string {
+	cfg := GetGlobalConfig()
+	palette := GetPalette(cfg.UI.Theme)
+
+	displayStatus := strings.ToUpper(status)
+	headerText := fmt.Sprintf("%s (%d)                    Activity", displayStatus, count)
+	divider := strings.Repeat("━", 60)
+
+	headerStyle := lipgloss.NewStyle().Foreground(palette.Header)
+	dividerStyle := lipgloss.NewStyle().Foreground(palette.Dim)
+
+	return headerStyle.Render(headerText) + "\n" + dividerStyle.Render(divider)
+}
+
+// renderMinimalTable renders session list in minimal layout (60-79 cols)
+// Columns: Symbol + Name(20) + Agent(6) + Activity(10)
+func renderMinimalTable(
+	group []*manifest.Manifest,
+	status string,
+	statuses map[string]session.StatusInfo,
+) string {
+	var result bytes.Buffer
+
+	// Choose style based on status
+	var style lipgloss.Style
+	switch status {
+	case "active":
+		style = getActiveStyle()
+	case "stopped":
+		style = getStoppedStyle()
+	case "stale":
+		style = getStaleStyle()
+	default:
+		style = lipgloss.NewStyle()
+	}
+
+	// Render each row
+	for _, m := range group {
+		statusInfo := statuses[m.Name]
+
+		// Determine status symbol
+		var symbol string
+		if status == "active" {
+			if statusInfo.AttachedClients > 0 {
+				symbol = getStatusSymbol("attached")
+			} else {
+				symbol = getStatusSymbol("detached")
+			}
+		} else {
+			symbol = getStatusSymbol(status)
+		}
+
+		// Truncate session name to 20 chars
+		name := m.Name
+		if len(name) > 20 {
+			name = name[:17] + "..."
+		}
+
+		// Agent column (max 6 chars)
+		agent := m.Agent
+		if len(agent) > 6 {
+			agent = agent[:6]
+		}
+
+		// Activity
+		recency := formatTimeCompact(m.UpdatedAt)
+
+		// Format line: Symbol + 2sp + Name(20) + 2sp + Agent(6) + 2sp + Activity
+		line := fmt.Sprintf("%s  %-20s  %-6s  %s",
+			symbol,
+			name,
+			agent,
+			recency)
+
+		result.WriteString(style.Render(line))
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
+// renderCompactHeader renders header for compact layout
+func renderCompactHeader(status string, count int) string {
+	cfg := GetGlobalConfig()
+	palette := GetPalette(cfg.UI.Theme)
+
+	displayStatus := strings.ToUpper(status)
+	headerText := fmt.Sprintf("%s (%d)                                         Activity", displayStatus, count)
+	divider := strings.Repeat("━", 80)
+
+	headerStyle := lipgloss.NewStyle().Foreground(palette.Header)
+	dividerStyle := lipgloss.NewStyle().Foreground(palette.Dim)
+
+	return headerStyle.Render(headerText) + "\n" + dividerStyle.Render(divider)
+}
+
+// renderCompactTable renders session list in compact layout (80-99 cols)
+// Columns: Symbol + Name(30) + Agent(6) + Project(25) + Activity(10)
+func renderCompactTable(
+	group []*manifest.Manifest,
+	status string,
+	statuses map[string]session.StatusInfo,
+) string {
+	var result bytes.Buffer
+
+	// Choose style based on status
+	var style lipgloss.Style
+	switch status {
+	case "active":
+		style = getActiveStyle()
+	case "stopped":
+		style = getStoppedStyle()
+	case "stale":
+		style = getStaleStyle()
+	default:
+		style = lipgloss.NewStyle()
+	}
+
+	// Render each row
+	for _, m := range group {
+		statusInfo := statuses[m.Name]
+
+		// Determine status symbol
+		var symbol string
+		if status == "active" {
+			if statusInfo.AttachedClients > 0 {
+				symbol = getStatusSymbol("attached")
+			} else {
+				symbol = getStatusSymbol("detached")
+			}
+		} else {
+			symbol = getStatusSymbol(status)
+		}
+
+		// Truncate session name to 30 chars
+		name := m.Name
+		if len(name) > 30 {
+			name = name[:27] + "..."
+		}
+
+		// Agent column (max 6 chars)
+		agent := m.Agent
+		if len(agent) > 6 {
+			agent = agent[:6]
+		}
+
+		// Project path (truncate and compact)
+		project := compactPath(truncatePath(m.Context.Project, 25))
+
+		// Activity
+		recency := formatTimeCompact(m.UpdatedAt)
+
+		// Format line: Symbol + 2sp + Name(30) + 2sp + Agent(6) + 2sp + Project(25) + 2sp + Activity
+		line := fmt.Sprintf("%s  %-30s  %-6s  %-25s  %s",
+			symbol,
+			name,
+			agent,
+			project,
+			recency)
+
+		result.WriteString(style.Render(line))
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
 // FormatTable formats manifests with enhanced lipgloss styling and grouping
 func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) string {
 	// Handle empty list
 	if len(manifests) == 0 {
 		return "No sessions found.\n\nCreate one:\n  csm new <project-name>\n"
 	}
+
+	// Detect terminal width and select layout
+	width := getTerminalWidth()
+	layout := selectLayout(width)
 
 	// Compute status and attachment info for all manifests
 	statuses := session.ComputeStatusBatchWithInfo(manifests, tmux)
@@ -94,8 +295,11 @@ func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) str
 		"stale":   groups["stale"],
 	}
 
-	// Calculate maximum column widths across ALL groups for consistent alignment
-	maxWidths := calculateMaxColumnWidths(combinedGroups, statuses, showTmuxColumn)
+	// Calculate maximum column widths across ALL groups for consistent alignment (only for full layout)
+	var maxWidths columnWidths
+	if layout == LayoutFull {
+		maxWidths = calculateMaxColumnWidths(combinedGroups, statuses, showTmuxColumn)
+	}
 
 	// Render each group
 	for _, statusKey := range []string{"active", "stopped", "stale"} {
@@ -104,12 +308,20 @@ func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) str
 			continue // Skip empty groups
 		}
 
-		// Render group header with divider
-		header := renderGroupHeaderWithDivider(statusKey, len(group), maxWidths, showTmuxColumn)
+		// Render group header and table based on layout
+		var header, table string
+		switch layout {
+		case LayoutMinimal:
+			header = renderMinimalHeader(statusKey, len(group))
+			table = renderMinimalTable(group, statusKey, statuses)
+		case LayoutCompact:
+			header = renderCompactHeader(statusKey, len(group))
+			table = renderCompactTable(group, statusKey, statuses)
+		case LayoutFull:
+			header = renderGroupHeaderWithDivider(statusKey, len(group), maxWidths, showTmuxColumn)
+			table = renderGroupTableWithWidths(group, statusKey, statuses, showTmuxColumn, maxWidths)
+		}
 		sections = append(sections, header)
-
-		// Render group table with consistent column widths
-		table := renderGroupTableWithWidths(group, statusKey, statuses, showTmuxColumn, maxWidths)
 		sections = append(sections, table)
 	}
 
