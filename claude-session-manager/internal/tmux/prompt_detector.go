@@ -56,15 +56,16 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 			consecutiveIdleLines++
 
 			// If we've seen a prompt-like pattern and then idle, assume ready
-			// Reduced from 3 to 2 consecutive idles (400ms instead of 3s)
-			if consecutiveIdleLines >= 2 && containsPromptPattern(lastContent) {
+			// Increased to 10 consecutive idles (2 seconds) to avoid false detection
+			// during slash command execution where output might contain ">" characters
+			if consecutiveIdleLines >= 10 && containsPromptPattern(lastContent) {
 				log.Printf("✓ Detected prompt pattern after idle period: %q", lastContent)
 				return nil
 			}
 
 			// If we've checked many lines and seen idle, likely ready
-			// Reduced from 5 to 3 consecutive idles (600ms instead of 5s)
-			if linesChecked > 10 && consecutiveIdleLines >= 3 {
+			// Increased to 15 consecutive idles (3 seconds) for more conservative detection
+			if linesChecked > 10 && consecutiveIdleLines >= 15 {
 				log.Printf("✓ Stable idle state detected after %d lines", linesChecked)
 				return nil
 			}
@@ -96,8 +97,8 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 			// Check for prompt patterns
 			if containsPromptPattern(content) {
 				log.Printf("✓ Prompt pattern detected in line %d: %q", linesChecked, content)
-				// Wait a bit more to ensure it's stable (reduced from 500ms to 200ms)
-				time.Sleep(200 * time.Millisecond)
+				// Wait a bit more to ensure it's stable (increased to 2s to avoid false positives)
+				time.Sleep(2 * time.Second)
 				return nil
 			}
 		}

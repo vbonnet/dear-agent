@@ -14,9 +14,9 @@ import (
 
 type ListSessionsInput struct {
 	Filters struct {
-		Status    string `json:"status,omitempty"`     // "active", "archived", "all"
-		AgentType string `json:"agent_type,omitempty"` // "claude", "all"
-		Limit     int    `json:"limit,omitempty"`      // max 1000, default 100
+		Status    string `json:"status,omitempty" jsonschema:"description=Filter by status: active, archived, or all"`
+		AgentType string `json:"agent_type,omitempty" jsonschema:"description=Filter by agent type: claude or all"`
+		Limit     int    `json:"limit,omitempty" jsonschema:"description=Maximum number of sessions to return (max 1000, default 100)"`
 	} `json:"filters"`
 }
 
@@ -27,10 +27,10 @@ type ListSessionsOutput struct {
 }
 
 type SearchSessionsInput struct {
-	Query   string `json:"query"` // required
+	Query   string `json:"query" jsonschema:"description=Search query for session names,required"`
 	Filters struct {
-		Status string `json:"status,omitempty"` // "active", "archived", "all"
-		Limit  int    `json:"limit,omitempty"`  // max 50, default 10
+		Status string `json:"status,omitempty" jsonschema:"description=Filter by status: active, archived, or all"`
+		Limit  int    `json:"limit,omitempty" jsonschema:"description=Maximum results (max 50, default 10)"`
 	} `json:"filters"`
 }
 
@@ -40,7 +40,7 @@ type SearchSessionsOutput struct {
 }
 
 type GetSessionMetadataInput struct {
-	SessionID string `json:"session_id"` // UUID required
+	SessionID string `json:"session_id" jsonschema:"description=Session UUID,required"`
 }
 
 type GetSessionMetadataOutput struct {
@@ -48,165 +48,170 @@ type GetSessionMetadataOutput struct {
 }
 
 type MCPSessionMetadata struct {
-	ID           string `json:"id"`
-	SessionName  string `json:"session_name"`
-	CreatedAt    string `json:"created_at"`     // ISO8601
-	UpdatedAt    string `json:"updated_at"`     // ISO8601
-	Status       string `json:"status"`         // "active" or "archived"
-	AgentType    string `json:"agent_type"`     // "claude" for V1
-	TmuxSession  string `json:"tmux_session"`   // tmux session name
-	RelevanceScore float64 `json:"relevance_score,omitempty"` // for search results
+	ID             string  `json:"id"`
+	SessionName    string  `json:"session_name"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
+	Status         string  `json:"status"`
+	AgentType      string  `json:"agent_type"`
+	TmuxSession    string  `json:"tmux_session"`
+	RelevanceScore float64 `json:"relevance_score,omitempty"`
 }
 
-// Tool creation functions
+// Tool registration functions (v1.2.0 API)
 
-func createListSessionsTool(cfg *Config) *mcp.ServerTool {
-	return mcp.NewServerTool[ListSessionsInput, ListSessionsOutput](
-		"agm_list_sessions",
-		"List AGM sessions with optional filters (status, agent_type, limit)",
-		func(ctx context.Context, ss *mcp.ServerSession, params *mcp.CallToolParamsFor[ListSessionsInput]) (*mcp.CallToolResultFor[ListSessionsOutput], error) {
-			input := params.Arguments
+func addListSessionsTool(server *mcp.Server, cfg *Config) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_list_sessions",
+		Description: "List AGM sessions with optional filters (status, agent_type, limit)",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, input ListSessionsInput) (*mcp.CallToolResult, ListSessionsOutput, error) {
+		// Validate input
+		if input.Filters.Limit == 0 {
+			input.Filters.Limit = 100 // default
+		}
+		if input.Filters.Limit > 1000 {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: "limit must be ≤1000"}},
+				IsError: true,
+			}, ListSessionsOutput{}, nil
+		}
 
-			// Validate input
-			if input.Filters.Limit == 0 {
-				input.Filters.Limit = 100 // default
-			}
-			if input.Filters.Limit > 1000 {
-				return errorResponse("limit must be ≤1000"), nil
-			}
+		// Get sessions (cached)
+		sessions, err := listSessionsCached(cfg.SessionsDir)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("failed to list sessions: %v", err)}},
+				IsError: true,
+			}, ListSessionsOutput{}, nil
+		}
 
-			// Get sessions (cached)
-			sessions, err := listSessionsCached(cfg.SessionsDir)
-			if err != nil {
-				return errorResponse(fmt.Sprintf("failed to list sessions: %v", err)), nil
-			}
+		// Apply filters
+		filtered := filterSessions(sessions, input.Filters.Status, input.Filters.AgentType)
 
-			// Apply filters
-			filtered := filterSessions(sessions, input.Filters.Status, input.Filters.AgentType)
+		// Transform to MCP format
+		outputPtr := transformSessionsToMCP(filtered, input.Filters.Limit)
+		output := *outputPtr
 
-			// Transform to MCP format
-			output := transformSessionsToMCP(filtered, input.Filters.Limit)
-
-			// Return JSON response
-			jsonOutput, _ := json.Marshal(output)
-			return &mcp.CallToolResultFor[ListSessionsOutput]{
-				Content: []mcp.Content{&mcp.TextContent{Text: string(jsonOutput)}},
-			}, nil
-		},
-	)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: formatJSON(output)}},
+		}, output, nil
+	})
 }
 
-func createSearchSessionsTool(cfg *Config) *mcp.ServerTool {
-	return mcp.NewServerTool[SearchSessionsInput, SearchSessionsOutput](
-		"agm_search_sessions",
-		"Search AGM sessions by name (case-insensitive, sorted by relevance)",
-		func(ctx context.Context, ss *mcp.ServerSession, params *mcp.CallToolParamsFor[SearchSessionsInput]) (*mcp.CallToolResultFor[SearchSessionsOutput], error) {
-			input := params.Arguments
+func addSearchSessionsTool(server *mcp.Server, cfg *Config) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_search_sessions",
+		Description: "Search AGM sessions by name (case-insensitive, sorted by relevance)",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, input SearchSessionsInput) (*mcp.CallToolResult, SearchSessionsOutput, error) {
+		// Validate input
+		if input.Query == "" {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: "query is required"}},
+				IsError: true,
+			}, SearchSessionsOutput{}, nil
+		}
+		if input.Filters.Limit == 0 {
+			input.Filters.Limit = 10 // default
+		}
+		if input.Filters.Limit > 50 {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: "search limit must be ≤50"}},
+				IsError: true,
+			}, SearchSessionsOutput{}, nil
+		}
 
-			// Validate input
-			if input.Query == "" {
-				return errorResponse("query is required"), nil
-			}
-			if input.Filters.Limit == 0 {
-				input.Filters.Limit = 10 // default
-			}
-			if input.Filters.Limit > 50 {
-				return errorResponse("search limit must be ≤50"), nil
-			}
+		// Get sessions (cached)
+		sessions, err := listSessionsCached(cfg.SessionsDir)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("failed to search sessions: %v", err)}},
+				IsError: true,
+			}, SearchSessionsOutput{}, nil
+		}
 
-			// Get sessions (cached)
-			sessions, err := listSessionsCached(cfg.SessionsDir)
-			if err != nil {
-				return errorResponse(fmt.Sprintf("failed to search sessions: %v", err)), nil
-			}
+		// Search by name (case-insensitive)
+		matches := searchSessionsByName(sessions, input.Query, input.Filters.Status)
 
-			// Search by name (case-insensitive)
-			matches := searchSessionsByName(sessions, input.Query, input.Filters.Status)
+		// Limit results
+		if len(matches) > input.Filters.Limit {
+			matches = matches[:input.Filters.Limit]
+		}
 
-			// Limit results
-			if len(matches) > input.Filters.Limit {
-				matches = matches[:input.Filters.Limit]
-			}
+		// Transform to MCP format with relevance scores
+		mcpSessions := make([]MCPSessionMetadata, 0, len(matches))
+		for _, m := range matches {
+			mcpSession := manifestToMCPMetadata(m)
+			mcpSession.RelevanceScore = calculateRelevance(m.Name, input.Query)
+			mcpSessions = append(mcpSessions, mcpSession)
+		}
 
-			// Transform to MCP format with relevance scores
-			mcpSessions := make([]MCPSessionMetadata, 0, len(matches))
-			for _, m := range matches {
-				mcpSession := manifestToMCPMetadata(m)
-				mcpSession.RelevanceScore = calculateRelevance(m.Name, input.Query)
-				mcpSessions = append(mcpSessions, mcpSession)
-			}
+		output := SearchSessionsOutput{
+			Sessions:     mcpSessions,
+			TotalMatches: len(mcpSessions),
+		}
 
-			output := SearchSessionsOutput{
-				Sessions:     mcpSessions,
-				TotalMatches: len(mcpSessions),
-			}
-
-			// Return JSON response
-			jsonOutput, _ := json.Marshal(output)
-			return &mcp.CallToolResultFor[SearchSessionsOutput]{
-				Content: []mcp.Content{&mcp.TextContent{Text: string(jsonOutput)}},
-			}, nil
-		},
-	)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: formatJSON(output)}},
+		}, output, nil
+	})
 }
 
-func createGetSessionMetadataTool(cfg *Config) *mcp.ServerTool {
-	return mcp.NewServerTool[GetSessionMetadataInput, GetSessionMetadataOutput](
-		"agm_get_session_metadata",
-		"Get detailed metadata for a specific AGM session by ID (UUID)",
-		func(ctx context.Context, ss *mcp.ServerSession, params *mcp.CallToolParamsFor[GetSessionMetadataInput]) (*mcp.CallToolResultFor[GetSessionMetadataOutput], error) {
-			input := params.Arguments
+func addGetSessionMetadataTool(server *mcp.Server, cfg *Config) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_get_session_metadata",
+		Description: "Get detailed metadata for a specific AGM session by ID (UUID)",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, input GetSessionMetadataInput) (*mcp.CallToolResult, GetSessionMetadataOutput, error) {
+		// Validate input
+		if input.SessionID == "" {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: "session_id is required"}},
+				IsError: true,
+			}, GetSessionMetadataOutput{}, nil
+		}
 
-			// Validate input
-			if input.SessionID == "" {
-				return errorResponse("session_id is required"), nil
+		// Get session by ID
+		sessions, err := listSessionsCached(cfg.SessionsDir)
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("failed to get session: %v", err)}},
+				IsError: true,
+			}, GetSessionMetadataOutput{}, nil
+		}
+
+		// Find session by ID
+		var found *manifest.Manifest
+		for _, s := range sessions {
+			if s.SessionID == input.SessionID {
+				found = s
+				break
 			}
+		}
 
-			// TODO: Validate UUID format
+		if found == nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("session not found: %s", input.SessionID)}},
+				IsError: true,
+			}, GetSessionMetadataOutput{}, nil
+		}
 
-			// Get session by ID
-			// For V1, we scan all sessions (TODO: optimize with direct manifest read)
-			sessions, err := listSessionsCached(cfg.SessionsDir)
-			if err != nil {
-				return errorResponse(fmt.Sprintf("failed to get session: %v", err)), nil
-			}
+		// Transform to MCP format
+		mcpSession := manifestToMCPMetadata(found)
 
-			// Find session by ID
-			var found *manifest.Manifest
-			for _, s := range sessions {
-				if s.SessionID == input.SessionID {
-					found = s
-					break
-				}
-			}
+		output := GetSessionMetadataOutput{
+			Session: mcpSession,
+		}
 
-			if found == nil {
-				return errorResponse(fmt.Sprintf("session not found: %s", input.SessionID)), nil
-			}
-
-			// Transform to MCP format
-			mcpSession := manifestToMCPMetadata(found)
-
-			output := GetSessionMetadataOutput{
-				Session: mcpSession,
-			}
-
-			// Return JSON response
-			jsonOutput, _ := json.Marshal(output)
-			return &mcp.CallToolResultFor[GetSessionMetadataOutput]{
-				Content: []mcp.Content{&mcp.TextContent{Text: string(jsonOutput)}},
-			}, nil
-		},
-	)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: formatJSON(output)}},
+		}, output, nil
+	})
 }
 
 // Helper functions
 
-func errorResponse(message string) *mcp.CallToolResultFor[any] {
-	return &mcp.CallToolResultFor[any]{
-		Content: []mcp.Content{&mcp.TextContent{Text: message}},
-		IsError: true,
-	}
+func formatJSON(v interface{}) string {
+	jsonBytes, _ := json.Marshal(v)
+	return string(jsonBytes)
 }
 
 func filterSessions(sessions []*manifest.Manifest, status string, agentType string) []*manifest.Manifest {
@@ -255,7 +260,6 @@ func searchSessionsByName(sessions []*manifest.Manifest, query string, status st
 		}
 	}
 
-	// TODO: Sort by relevance (exact match > starts with > contains)
 	return matches
 }
 

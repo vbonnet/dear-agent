@@ -11,16 +11,102 @@ import (
 	"golang.org/x/net/html"
 )
 
-// Message represents a single conversation message
-type Message struct {
-	Timestamp time.Time `json:"timestamp"`
-	Role      string    `json:"role"` // "user" or "assistant"
-	Content   string    `json:"content"`
+// ParseJSONL reads a JSONL file and returns a Conversation.
+// Format: first line is conversation header, subsequent lines are messages.
+// Handles malformed lines gracefully (logs warning, skips line, continues).
+func ParseJSONL(path string) (*Conversation, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open file: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+
+	// Parse header (first line)
+	if !scanner.Scan() {
+		return nil, fmt.Errorf("empty file")
+	}
+
+	var conv Conversation
+	if err := json.Unmarshal(scanner.Bytes(), &conv); err != nil {
+		return nil, fmt.Errorf("invalid header: %w", err)
+	}
+
+	// Validate schema version
+	if conv.SchemaVersion != "1.0" {
+		return nil, fmt.Errorf("unsupported schema version: %s (expected 1.0)", conv.SchemaVersion)
+	}
+
+	// Parse messages (subsequent lines)
+	lineNum := 1
+	for scanner.Scan() {
+		lineNum++
+		var msg Message
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			// Log warning, skip line, continue (graceful degradation)
+			fmt.Fprintf(os.Stderr, "Warning: invalid message at line %d: %v\n", lineNum, err)
+			continue
+		}
+		conv.Messages = append(conv.Messages, msg)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan error: %w", err)
+	}
+
+	return &conv, nil
 }
 
-// ConvertHTMLToJSONL converts HTML conversation transcripts to JSONL format
-// Each line in JSONL is a JSON-encoded Message
-// Falls back to copying HTML as-is if parsing fails
+// WriteJSONL writes a Conversation to a JSONL file using atomic write pattern.
+// Writes to temp file, then renames to prevent partial files on error.
+func WriteJSONL(path string, conv *Conversation) error {
+	// Create temp file for atomic write
+	tmpPath := path + ".tmp"
+	file, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	defer os.Remove(tmpPath) // Cleanup on error
+
+	writer := bufio.NewWriter(file)
+	encoder := json.NewEncoder(writer)
+
+	// Write header (first line)
+	conv.TotalMessages = len(conv.Messages)
+	if err := encoder.Encode(conv); err != nil {
+		file.Close()
+		return fmt.Errorf("encode header: %w", err)
+	}
+
+	// Write messages (subsequent lines)
+	for i, msg := range conv.Messages {
+		if err := encoder.Encode(msg); err != nil {
+			file.Close()
+			return fmt.Errorf("encode message %d: %w", i, err)
+		}
+	}
+
+	if err := writer.Flush(); err != nil {
+		file.Close()
+		return fmt.Errorf("flush writer: %w", err)
+	}
+
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close file: %w", err)
+	}
+
+	// Atomic rename
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("atomic rename: %w", err)
+	}
+
+	return nil
+}
+
+// ConvertHTMLToJSONL converts HTML conversation transcripts to JSONL format.
+// Enhanced version: creates Conversation header, extracts messages with agent field.
+// Falls back to copying HTML as-is if parsing fails.
 func ConvertHTMLToJSONL(htmlPath, jsonlPath string) error {
 	// Read HTML file
 	htmlFile, err := os.Open(htmlPath)
@@ -39,38 +125,36 @@ func ConvertHTMLToJSONL(htmlPath, jsonlPath string) error {
 	// Extract messages from HTML
 	messages := extractMessages(doc)
 	if len(messages) == 0 {
-		// Create empty JSONL file
-		return os.WriteFile(jsonlPath, []byte{}, 0600)
-	}
-
-	// Write JSONL
-	jsonlFile, err := os.OpenFile(jsonlPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to create JSONL: %w", err)
-	}
-	defer jsonlFile.Close()
-
-	writer := bufio.NewWriter(jsonlFile)
-	for _, msg := range messages {
-		data, err := json.Marshal(msg)
-		if err != nil {
-			continue // Skip malformed message
+		// Create empty JSONL file with header only
+		conv := &Conversation{
+			SchemaVersion: "1.0",
+			CreatedAt:     time.Now(),
+			Model:         "unknown",
+			Agent:         "claude",
+			Messages:      []Message{},
 		}
-		writer.Write(data)
-		writer.WriteString("\n")
+		return WriteJSONL(jsonlPath, conv)
 	}
 
-	return writer.Flush()
+	// Create Conversation with header
+	conv := &Conversation{
+		SchemaVersion: "1.0",
+		CreatedAt:     time.Now(), // Use current time if no timestamp in HTML
+		Model:         "claude",   // Assume Claude HTML export
+		Agent:         "claude",
+		Messages:      messages,
+	}
+
+	// Write using JSONL serializer
+	return WriteJSONL(jsonlPath, conv)
 }
 
-// extractMessages parses HTML document and extracts conversation messages
-// This is a simplified implementation - production version would use
-// internal/history/parser.go if available
+// extractMessages parses HTML document and extracts conversation messages.
+// Enhanced version: creates Message with Content blocks (TextBlock).
 func extractMessages(n *html.Node) []Message {
 	var messages []Message
 
 	// Simplified extraction: find text content in conversation structure
-	// In production, this would parse specific HTML structure from AGM
 	var extract func(*html.Node)
 	extract = func(n *html.Node) {
 		if n.Type == html.ElementNode && n.Data == "div" {
@@ -91,11 +175,19 @@ func extractMessages(n *html.Node) []Message {
 			if role != "" {
 				content = extractText(n)
 				if content != "" {
-					messages = append(messages, Message{
-						Timestamp: time.Now(), // Placeholder - real version extracts from HTML
+					// Create message with TextBlock content
+					msg := Message{
+						Timestamp: time.Now(), // TODO: Extract from HTML if available
 						Role:      role,
-						Content:   content,
-					})
+						Agent:     "claude",
+						Content: []ContentBlock{
+							TextBlock{
+								Type: "text",
+								Text: strings.TrimSpace(content),
+							},
+						},
+					}
+					messages = append(messages, msg)
 				}
 			}
 		}
@@ -109,7 +201,7 @@ func extractMessages(n *html.Node) []Message {
 	return messages
 }
 
-// extractText recursively extracts text content from HTML node
+// extractText recursively extracts text content from HTML node.
 func extractText(n *html.Node) string {
 	if n.Type == html.TextNode {
 		return n.Data
@@ -122,7 +214,7 @@ func extractText(n *html.Node) string {
 	return text
 }
 
-// copyFileAsFallback copies HTML as-is when parsing fails
+// copyFileAsFallback copies HTML as-is when parsing fails.
 func copyFileAsFallback(src, dst string, parseErr error) error {
 	fmt.Fprintf(os.Stderr, "Warning: HTML parsing failed (%v), copying as-is: %s\n", parseErr, src)
 
