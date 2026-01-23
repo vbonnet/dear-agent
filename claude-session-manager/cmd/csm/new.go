@@ -481,18 +481,10 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		}
 	}
 
-	// Claude-specific: Release lock and run initialization sequence
+	// Claude-specific: Run initialization sequence
 	if agentName == "claude" {
-		// Release lock BEFORE running sequenced init (csm associate needs it)
-		debug.Log("Releasing lock before sequenced initialization")
-		if globalLock != nil {
-			if err := globalLock.Unlock(); err != nil {
-				ui.PrintWarning(fmt.Sprintf("Failed to release lock: %v", err))
-			} else {
-				debug.Log("Lock released successfully")
-			}
-			globalLock = nil // Prevent double-unlock in PersistentPostRunE
-		}
+		// NOTE: No need to release global lock - using fine-grained tmux lock instead
+		// InitSequence will acquire/release tmux lock only during actual operations
 
 		// Use InitSequence to properly sequence /rename and /csm-assoc commands
 		// This uses tmux control mode to wait for each command to complete before sending the next
@@ -540,22 +532,12 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			time.Sleep(500 * time.Millisecond)
 		}
 	} else {
-		// API-based agents - release lock immediately (no initialization sequence needed)
-		debug.Log("Releasing lock (no initialization sequence for API-based agents)")
-		if globalLock != nil {
-			if err := globalLock.Unlock(); err != nil {
-				ui.PrintWarning(fmt.Sprintf("Failed to release lock: %v", err))
-			} else {
-				debug.Log("Lock released successfully")
-			}
-			globalLock = nil // Prevent double-unlock in PersistentPostRunE
-		}
+		// API-based agents - no initialization sequence needed
+		debug.Log("Skipping initialization sequence for API-based agents")
 	}
 
 	// Update VS Code tab title if running in VS Code
 	updateVSCodeTabTitle(sessionName)
-
-	// Note: Lock already released earlier (before WaitForClaudeReady) to prevent deadlock
 
 	// Attach to session (or show detached message)
 	if !detached {

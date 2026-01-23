@@ -41,6 +41,12 @@ func NewSession(name string, workDir string) error {
 		return fmt.Errorf("failed to clean stale socket: %w", err)
 	}
 
+	// Lock tmux server for session creation + settings (prevent parallel mutations)
+	if err := AcquireTmuxLock(); err != nil {
+		return fmt.Errorf("failed to acquire tmux lock: %w", err)
+	}
+	defer ReleaseTmuxLock()
+
 	// Create session with detached mode
 	cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "new-session", "-d", "-s", name, "-c", workDir)
 	defer cancel()
@@ -175,6 +181,12 @@ func AttachSession(name string) error {
 func SendCommand(sessionName string, command string) error {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
+
+	// Lock tmux server for send-keys operations (prevent interleaved sends)
+	if err := AcquireTmuxLock(); err != nil {
+		return fmt.Errorf("failed to acquire tmux lock: %w", err)
+	}
+	defer ReleaseTmuxLock()
 
 	// Send command text using -l (literal) flag
 	cmdText, cancel1 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, "-l", command)

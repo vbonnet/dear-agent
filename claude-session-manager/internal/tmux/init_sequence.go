@@ -27,6 +27,12 @@ func NewInitSequence(sessionName string) *InitSequence {
 // 2. Associate: Send /csm-tools:csm-assoc
 // Note: Caller is responsible for waiting for ready-file signal after this completes.
 func (seq *InitSequence) Run() error {
+	// Lock tmux server for init sequence (prevent parallel command sends)
+	if err := AcquireTmuxLock(); err != nil {
+		return fmt.Errorf("failed to acquire tmux lock: %w", err)
+	}
+	defer ReleaseTmuxLock()
+
 	// Step 1: Start control mode
 	ctrl, err := StartControlMode(seq.SessionName)
 	if err != nil {

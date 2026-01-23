@@ -10,7 +10,6 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/cli"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/config"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/fuzzy"
-	"github.com/vbonnet/ai-tools/claude-session-manager/internal/lock"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
@@ -25,11 +24,10 @@ var (
 	debugMode        bool
 	directory        string
 	timeout          time.Duration
-	noLock           bool
+	noLock           bool // Kept for future use with fine-grained locks
 	skipHealthCheck  bool
 	noColor          bool
 	screenReader     bool
-	globalLock       *lock.FileLock
 	globalHealthCheck *tmux.HealthChecker
 )
 
@@ -90,27 +88,11 @@ Global Flags:
 			tmux.SetTimeout(cfg.Timeout.TmuxCommands)
 		}
 
-		// Commands that don't need locks (read-only operations)
-		lockFreeCommands := map[string]bool{
-			"version":  true,
-			"list":     true,
-			"doctor":   true,
-			"unlock":   true,
-			"backup":   true,
-			"get-uuid": true,
-		}
-
-		// Acquire lock if enabled and command requires it
-		needsLock := !lockFreeCommands[cmd.Name()]
-		if cfg.Lock.Enabled && !noLock && needsLock {
-			globalLock, err = lock.New(cfg.Lock.Path)
-			if err != nil {
-				return err
-			}
-			if err := globalLock.TryLock(); err != nil {
-				return err
-			}
-		}
+		// NOTE: Global command lock removed in favor of fine-grained locks:
+		// - Tmux operations use tmux.AcquireTmuxLock() (in internal/tmux/lock.go)
+		// - Manifest operations use manifest.AcquireLock() (in internal/manifest/lock.go)
+		// This allows multiple CSM commands to run concurrently (e.g., csm list while csm resume)
+		// while still preventing race conditions in tmux server updates and manifest modifications.
 
 		// Initialize health checker
 		if cfg.HealthCheck.Enabled && !skipHealthCheck {
@@ -138,10 +120,8 @@ Global Flags:
 		return nil
 	},
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
-		// Release lock
-		if globalLock != nil {
-			return globalLock.Unlock()
-		}
+		// No global lock cleanup needed - using fine-grained locks instead
+		// (tmux.AcquireTmuxLock and manifest.AcquireLock)
 		return nil
 	},
 }
