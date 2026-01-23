@@ -16,6 +16,9 @@ var _ = Describe("Tmux Configuration", func() {
 	var workDir string
 
 	BeforeEach(func() {
+		// Clean up any stale tmux lock from previous tests
+		tmux.ReleaseTmuxLock()
+
 		sessionName = testEnv.UniqueSessionName("config")
 		workDir = "/tmp"
 
@@ -80,11 +83,6 @@ var _ = Describe("Tmux Configuration", func() {
 
 	Describe("CSM-created session configuration", func() {
 		Context("when using internal/tmux package", func() {
-			BeforeEach(func() {
-				// Clean up any stale tmux lock from previous tests
-				tmux.ReleaseTmuxLock()
-			})
-
 			It("should create session with correct settings via NewSession", func() {
 				// Create a session using the actual CSM tmux package
 				csmSessionName := testEnv.UniqueSessionName("csm-direct")

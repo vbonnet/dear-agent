@@ -3,6 +3,7 @@ package tmux
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/lock"
 )
@@ -15,8 +16,23 @@ import (
 // NOT locked: Read operations (HasSession, ListSessions) and AttachSession (can block indefinitely)
 var tmuxServerLock *lock.FileLock
 
+// getStateDir returns the CSM state directory.
+// Uses CSM_STATE_DIR environment variable if set (for test isolation),
+// otherwise defaults to /tmp/csm-{UID} (production default).
+func getStateDir() string {
+	stateDir := os.Getenv("CSM_STATE_DIR")
+	if stateDir == "" {
+		uid := os.Getuid()
+		stateDir = fmt.Sprintf("/tmp/csm-%d", uid)
+	}
+	return stateDir
+}
+
 // AcquireTmuxLock locks tmux server mutations to prevent parallel updates.
 // This is a fine-grained lock (only tmux operations, not entire CSM commands).
+//
+// Lock path: $CSM_STATE_DIR/tmux-server.lock (defaults to /tmp/csm-{UID}/tmux-server.lock)
+// Set CSM_STATE_DIR environment variable for test isolation.
 //
 // Returns error if lock is already held by another process.
 func AcquireTmuxLock() error {
@@ -25,8 +41,8 @@ func AcquireTmuxLock() error {
 		return fmt.Errorf("tmux lock already held by this process (double lock)")
 	}
 
-	uid := os.Getuid()
-	lockPath := fmt.Sprintf("/tmp/csm-%d/tmux-server.lock", uid)
+	stateDir := getStateDir()
+	lockPath := filepath.Join(stateDir, "tmux-server.lock")
 
 	var err error
 	tmuxServerLock, err = lock.New(lockPath)

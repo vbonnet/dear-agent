@@ -7,7 +7,7 @@
 # - Directory structure is maintained after archiving
 
 # Create a test session
-exec csm new bdd-archive-test
+exec csm new bdd-archive-test --agent claude --detached
 stdout 'Session.*created'
 
 # Verify session exists in active sessions

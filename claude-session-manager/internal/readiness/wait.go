@@ -27,18 +27,32 @@ type ReadyFilePayload struct {
 	ExitCode  int    `json:"exit_code,omitempty"`  // Process exit code
 }
 
+// getStateDir returns the CSM state directory.
+// Uses CSM_STATE_DIR environment variable if set (for test isolation),
+// otherwise defaults to ~/.csm (production default).
+func getStateDir() (string, error) {
+	stateDir := os.Getenv("CSM_STATE_DIR")
+	if stateDir == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("failed to get home directory: %w", err)
+		}
+		stateDir = filepath.Join(homeDir, ".csm")
+	}
+	return stateDir, nil
+}
+
 // WaitForClaudeReady waits for Claude to create the ready-file signal.
-// It watches ~/.csm/ directory for ready-{sessionName} file creation using fsnotify.
+// It watches $CSM_STATE_DIR/ directory for ready-{sessionName} file creation using fsnotify.
 //
 // Returns nil when ready-file detected and parsed successfully.
 // Returns error on timeout or failure.
 func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
-	homeDir, err := os.UserHomeDir()
+	csmDir, err := getStateDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return err
 	}
 
-	csmDir := filepath.Join(homeDir, ".csm")
 	readyFile := filepath.Join(csmDir, "ready-"+sessionName)
 
 	// Create ~/.csm/ directory with user-only permissions (0700 for security)
@@ -194,12 +208,11 @@ func cleanupStaleReadyFiles(csmDir string) error {
 // CreateReadyFile creates a ready-file signal for the specified session.
 // Called by csm associate to signal that Claude has been successfully associated.
 func CreateReadyFile(sessionName, manifestPath string) error {
-	homeDir, err := os.UserHomeDir()
+	csmDir, err := getStateDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return err
 	}
 
-	csmDir := filepath.Join(homeDir, ".csm")
 	readyFile := filepath.Join(csmDir, "ready-"+sessionName)
 
 	// Create ~/.csm/ directory with user-only permissions

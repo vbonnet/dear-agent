@@ -8,13 +8,13 @@
 # - Empty list works when no sessions exist
 
 # Create multiple test sessions
-exec csm new bdd-list-test-1
+exec csm new bdd-list-test-1 --agent claude --detached
 stdout 'Session.*created'
 
-exec csm new bdd-list-test-2
+exec csm new bdd-list-test-2 --agent claude --detached
 stdout 'Session.*created'
 
-exec csm new bdd-list-test-3
+exec csm new bdd-list-test-3 --agent claude --detached
 stdout 'Session.*created'
 
 # List all sessions - should show all three

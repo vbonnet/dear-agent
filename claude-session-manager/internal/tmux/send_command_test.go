@@ -33,11 +33,13 @@ func TestSendCommand_EnterKeySeparation(t *testing.T) {
 		t.Skip("Skipping tmux integration test in CI (set CSM_TEST_TMUX=1 to enable)")
 	}
 
-	// Create isolated socket for this test
+	// Create isolated socket and state dir for this test
 	tmpDir := t.TempDir()
 	testSocket := tmpDir + "/test-send-command.sock"
 	os.Setenv("CSM_TMUX_SOCKET", testSocket)
+	os.Setenv("CSM_STATE_DIR", tmpDir) // Isolate lock files
 	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	defer os.Unsetenv("CSM_STATE_DIR")
 
 	sessionName := "test-send-cmd"
 
@@ -156,6 +158,9 @@ func TestSendCommand_SpecialCharacters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Clean up any stale lock from previous subtest
+			ReleaseTmuxLock()
+
 			// Clear pane before test
 			clearCmd := exec.Command("tmux", "-S", testSocket, "send-keys", "-t", sessionName, "C-l")
 			clearCmd.Run()
