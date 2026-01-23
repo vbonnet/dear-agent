@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -542,7 +544,8 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	// Attach to session (or show detached message)
 	if !detached {
 		fmt.Printf("Attaching to tmux session: %s\n", sessionName)
-		if err := tmux.AttachSession(sessionName); err != nil {
+		// Use wrapper for all agents to capture exit summaries
+		if err := attachWithCapture(sessionName); err != nil {
 			ui.PrintWarning(fmt.Sprintf("Could not attach to session: %v", err))
 			fmt.Printf("Session created successfully. Attach manually with: tmux attach -t %s\n", sessionName)
 		}
@@ -553,6 +556,30 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	}
 
 	return nil
+}
+
+// attachWithCapture uses csm-attach-wrapper to attach and capture exit summary
+func attachWithCapture(sessionName string) error {
+	// Find wrapper binary
+	wrapperPath, err := exec.LookPath("csm-attach-wrapper")
+	if err != nil {
+		// Fallback to direct attach if wrapper not found
+		debug.Log("Wrapper not found, falling back to direct attach: %v", err)
+		return tmux.AttachSession(sessionName)
+	}
+
+	// Build arguments
+	args := []string{
+		"csm-attach-wrapper",
+		sessionName,
+	}
+
+	// Get environment
+	env := os.Environ()
+
+	// Exec wrapper (replaces current process)
+	debug.Log("Executing wrapper: %s %v", wrapperPath, args)
+	return syscall.Exec(wrapperPath, args, env)
 }
 
 // getSessionsDir returns the sessions directory (respects --sessions-dir flag)
