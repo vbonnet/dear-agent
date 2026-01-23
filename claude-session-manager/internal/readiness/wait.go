@@ -42,12 +42,12 @@ func getStateDir() (string, error) {
 	return stateDir, nil
 }
 
-// WaitForClaudeReady waits for Claude to create the ready-file signal.
+// WaitForReady waits for an agent to create the ready-file signal.
 // It watches $CSM_STATE_DIR/ directory for ready-{sessionName} file creation using fsnotify.
 //
 // Returns nil when ready-file detected and parsed successfully.
 // Returns error on timeout or failure.
-func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
+func WaitForReady(sessionName string, timeout time.Duration) error {
 	csmDir, err := getStateDir()
 	if err != nil {
 		return err

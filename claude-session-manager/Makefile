@@ -26,6 +26,7 @@ build:
 	go build -ldflags="$(LDFLAGS_REAPER)" -o bin/csm-reaper ./cmd/csm-reaper
 	go build -ldflags="$(LDFLAGS_AGM)" -o bin/agm-mcp-server ./cmd/agm-mcp-server
 	go build -o bin/csm-attach-wrapper ./cmd/csm-attach-wrapper
+	go build -o bin/csm-agent-wrapper ./cmd/csm-agent-wrapper
 
 test:
 	go test -v -cover ./...
@@ -43,16 +44,19 @@ install: build
 	@rm -f $(HOME)/bin/csm-reaper $(HOME)/.local/bin/csm-reaper 2>/dev/null || true
 	@rm -f $(HOME)/bin/agm-mcp-server $(HOME)/.local/bin/agm-mcp-server 2>/dev/null || true
 	@rm -f $(HOME)/bin/csm-attach-wrapper $(HOME)/.local/bin/csm-attach-wrapper 2>/dev/null || true
+	@rm -f $(HOME)/bin/csm-agent-wrapper $(HOME)/.local/bin/csm-agent-wrapper 2>/dev/null || true
 	@# Install to standard Go binary location
 	mkdir -p $(HOME)/go/bin
 	cp bin/csm $(HOME)/go/bin/csm
 	cp bin/csm-reaper $(HOME)/go/bin/csm-reaper
 	cp bin/agm-mcp-server $(HOME)/go/bin/agm-mcp-server
 	cp bin/csm-attach-wrapper $(HOME)/go/bin/csm-attach-wrapper
+	cp bin/csm-agent-wrapper $(HOME)/go/bin/csm-agent-wrapper
 	@echo "✓ csm binary installed to $(HOME)/go/bin/csm"
 	@echo "✓ csm-reaper binary installed to $(HOME)/go/bin/csm-reaper"
 	@echo "✓ agm-mcp-server binary installed to $(HOME)/go/bin/agm-mcp-server"
 	@echo "✓ csm-attach-wrapper binary installed to $(HOME)/go/bin/csm-attach-wrapper"
+	@echo "✓ csm-agent-wrapper binary installed to $(HOME)/go/bin/csm-agent-wrapper"
 	@echo ""
 	@echo "Cleaned up old binaries from:"
 	@echo "  - $(HOME)/bin/csm (removed if existed)"

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestWaitForClaudeReady_Success(t *testing.T) {
+func TestWaitForReady_Success(t *testing.T) {
 	// Create temporary directory for test
 	tmpDir := t.TempDir()
 	sessionName := "test-session-success"
@@ -33,7 +33,7 @@ func TestWaitForClaudeReady_Success(t *testing.T) {
 	}()
 
 	// Wait for ready file
-	err := WaitForClaudeReady(sessionName, 2*time.Second)
+	err := WaitForReady(sessionName, 2*time.Second)
 	if err != nil {
 		t.Fatalf("Expected success, got error: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestWaitForClaudeReady_Success(t *testing.T) {
 	}
 }
 
-func TestWaitForClaudeReady_Timeout(t *testing.T) {
+func TestWaitForReady_Timeout(t *testing.T) {
 	// Create temporary directory for test
 	tmpDir := t.TempDir()
 	sessionName := "test-session-timeout"
@@ -55,7 +55,7 @@ func TestWaitForClaudeReady_Timeout(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 
 	// Wait for ready file with short timeout (no file will be created)
-	err := WaitForClaudeReady(sessionName, 500*time.Millisecond)
+	err := WaitForReady(sessionName, 500*time.Millisecond)
 	if err == nil {
 		t.Fatal("Expected timeout error, got nil")
 	}
@@ -66,7 +66,7 @@ func TestWaitForClaudeReady_Timeout(t *testing.T) {
 	}
 }
 
-func TestWaitForClaudeReady_RaceCondition(t *testing.T) {
+func TestWaitForReady_RaceCondition(t *testing.T) {
 	// Create temporary directory for test
 	tmpDir := t.TempDir()
 	sessionName := "test-session-race"
@@ -76,7 +76,7 @@ func TestWaitForClaudeReady_RaceCondition(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", originalHome)
 
-	// Create ready-file BEFORE calling WaitForClaudeReady (race condition simulation)
+	// Create ready-file BEFORE calling WaitForReady (race condition simulation)
 	os.MkdirAll(filepath.Join(tmpDir, ".csm"), 0700)
 	payload := ReadyFilePayload{
 		Status:      "ready",
@@ -88,7 +88,7 @@ func TestWaitForClaudeReady_RaceCondition(t *testing.T) {
 
 	// Wait for ready file (should detect immediately via pre-check)
 	start := time.Now()
-	err := WaitForClaudeReady(sessionName, 2*time.Second)
+	err := WaitForReady(sessionName, 2*time.Second)
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -101,7 +101,7 @@ func TestWaitForClaudeReady_RaceCondition(t *testing.T) {
 	}
 }
 
-func TestWaitForClaudeReady_MalformedJSON(t *testing.T) {
+func TestWaitForReady_MalformedJSON(t *testing.T) {
 	// Create temporary directory for test
 	tmpDir := t.TempDir()
 	sessionName := "test-session-malformed"
@@ -133,13 +133,13 @@ func TestWaitForClaudeReady_MalformedJSON(t *testing.T) {
 	}()
 
 	// Wait for ready file (should skip malformed, wait for valid)
-	err := WaitForClaudeReady(sessionName, 2*time.Second)
+	err := WaitForReady(sessionName, 2*time.Second)
 	if err != nil {
 		t.Fatalf("Expected success after malformed JSON ignored, got error: %v", err)
 	}
 }
 
-func TestWaitForClaudeReady_CrashedStatus(t *testing.T) {
+func TestWaitForReady_CrashedStatus(t *testing.T) {
 	// Create temporary directory for test
 	tmpDir := t.TempDir()
 	sessionName := "test-session-crashed"
@@ -165,7 +165,7 @@ func TestWaitForClaudeReady_CrashedStatus(t *testing.T) {
 	}()
 
 	// Wait for ready file (should return error for crashed status)
-	err := WaitForClaudeReady(sessionName, 2*time.Second)
+	err := WaitForReady(sessionName, 2*time.Second)
 	if err == nil {
 		t.Fatal("Expected error for crashed status, got nil")
 	}

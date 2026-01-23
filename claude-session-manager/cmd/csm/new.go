@@ -412,24 +412,70 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		}
 
 	case "gemini":
-		// Start Gemini in the session
+		// Check for csm-agent-wrapper
 		debug.Phase("Start Gemini")
-		geminiCmd := fmt.Sprintf("gemini && exit")
-		debug.Log("Sending command: %s", geminiCmd)
-		if err := tmux.SendCommand(sessionName, geminiCmd); err != nil {
-			ui.PrintError(err,
-				"Failed to start Gemini in tmux session",
-				"  • Verify Gemini is installed: which gemini\n"+
-					"  • Test Gemini manually: gemini --version\n"+
-					"  • Check tmux session exists: tmux list-sessions\n"+
-					"  • Attach and start manually: tmux attach -t "+sessionName)
-			if !exists {
-				_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
+		wrapperPath, err := exec.LookPath("csm-agent-wrapper")
+		if err != nil {
+			// Graceful fallback to direct gemini (wrapper not found)
+			debug.Log("csm-agent-wrapper not found, falling back to direct gemini: %v", err)
+			geminiCmd := "gemini && exit"
+			debug.Log("Sending command: %s", geminiCmd)
+			if err := tmux.SendCommand(sessionName, geminiCmd); err != nil {
+				ui.PrintError(err,
+					"Failed to start Gemini in tmux session",
+					"  • Verify Gemini is installed: which gemini\n"+
+						"  • Test Gemini manually: gemini --version\n"+
+						"  • Check tmux session exists: tmux list-sessions\n"+
+						"  • Attach and start manually: tmux attach -t "+sessionName)
+				if !exists {
+					_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
+				}
+				return err
 			}
-			return err
+			debug.Log("Gemini command sent successfully (direct mode)")
+			ui.PrintSuccess("Started Gemini CLI in tmux session")
+		} else {
+			// Use wrapper for readiness detection
+			debug.Log("Found csm-agent-wrapper at: %s", wrapperPath)
+			wrapperCmd := fmt.Sprintf("%s --agent=gemini %s", wrapperPath, sessionName)
+			debug.Log("Sending wrapper command: %s", wrapperCmd)
+			if err := tmux.SendCommand(sessionName, wrapperCmd); err != nil {
+				ui.PrintError(err,
+					"Failed to start csm-agent-wrapper",
+					"  • Check wrapper installed: which csm-agent-wrapper\n"+
+						"  • Try direct mode by temporarily renaming wrapper\n"+
+						"  • Attach and check: tmux attach -t "+sessionName)
+				if !exists {
+					_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
+				}
+				return err
+			}
+			debug.Log("Wrapper command sent, waiting for ready signal")
+
+			// Wait for ready-file
+			debug.Phase("Wait for Ready Signal")
+			var readyErr error
+			spinErr := spinner.New().
+				Title("Waiting for Gemini to initialize...").
+				Accessible(true).
+				Action(func() {
+					readyErr = readiness.WaitForReady(sessionName, 60*time.Second)
+				}).
+				Run()
+			if spinErr != nil {
+				return fmt.Errorf("spinner error: %w", spinErr)
+			}
+			if readyErr != nil {
+				debug.Log("Ready-file wait failed: %v", readyErr)
+				ui.PrintWarning("Gemini did not signal ready within timeout")
+				fmt.Println("  • Attach to session to check status: tmux attach -t " + sessionName)
+				fmt.Println("  • Check wrapper logs for errors")
+				fmt.Println("  • Try direct mode: csm new --agent gemini " + sessionName + " (after renaming wrapper)")
+				return fmt.Errorf("gemini readiness timeout: %w", readyErr)
+			}
+			debug.Log("Ready signal received successfully")
+			ui.PrintSuccess("Gemini initialized successfully")
 		}
-		debug.Log("Gemini command sent successfully")
-		ui.PrintSuccess("Started Gemini CLI in tmux session")
 
 	default:
 		// Other agents (gpt, etc) - no CLI startup configured yet
@@ -512,7 +558,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			Title("Waiting for Claude to initialize...").
 			Accessible(true).
 			Action(func() {
-				readyErr = readiness.WaitForClaudeReady(sessionName, 60*time.Second)
+				readyErr = readiness.WaitForReady(sessionName, 60*time.Second)
 			}).
 			Run()
 		if spinErr2 != nil {
