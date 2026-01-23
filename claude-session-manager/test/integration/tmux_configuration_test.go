@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"os/exec"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -79,33 +80,67 @@ var _ = Describe("Tmux Configuration", func() {
 
 	Describe("CSM-created session configuration", func() {
 		Context("when using internal/tmux package", func() {
+			BeforeEach(func() {
+				// Clean up any stale tmux lock from previous tests
+				tmux.ReleaseTmuxLock()
+			})
+
 			It("should create session with correct settings via NewSession", func() {
 				// Create a session using the actual CSM tmux package
 				csmSessionName := testEnv.UniqueSessionName("csm-direct")
-				defer helpers.KillTmuxSession(csmSessionName)
+				defer func() {
+					// Use CSM socket for cleanup
+					exec.Command("tmux", "-S", tmux.GetSocketPath(), "kill-session", "-t", csmSessionName).Run()
+				}()
 
 				err := tmux.NewSession(csmSessionName, workDir)
 				Expect(err).ToNot(HaveOccurred())
 
-				// Verify session exists
-				exists, err := helpers.HasTmuxSession(csmSessionName)
+				// Verify session exists (using CSM's HasSession which uses the isolated socket)
+				exists, err := tmux.HasSession(csmSessionName)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(exists).To(BeTrue())
 
-				// Verify CSM applies the expected settings
+				// Verify CSM applies the expected settings (using CSM socket)
+				socketPath := tmux.GetSocketPath()
+
 				Eventually(func() string {
-					val, _ := helpers.GetTmuxOption(csmSessionName, "aggressive-resize")
-					return val
+					cmd := exec.Command("tmux", "-S", socketPath, "show-options", "-t", csmSessionName, "aggressive-resize")
+					output, err := cmd.Output()
+					if err != nil {
+						return ""
+					}
+					parts := strings.SplitN(strings.TrimSpace(string(output)), " ", 2)
+					if len(parts) < 2 {
+						return ""
+					}
+					return strings.TrimSpace(parts[1])
 				}, "5s", "500ms").Should(Equal("on"))
 
 				Eventually(func() string {
-					val, _ := helpers.GetTmuxOption(csmSessionName, "window-size")
-					return val
+					cmd := exec.Command("tmux", "-S", socketPath, "show-options", "-t", csmSessionName, "window-size")
+					output, err := cmd.Output()
+					if err != nil {
+						return ""
+					}
+					parts := strings.SplitN(strings.TrimSpace(string(output)), " ", 2)
+					if len(parts) < 2 {
+						return ""
+					}
+					return strings.TrimSpace(parts[1])
 				}, "5s", "500ms").Should(Equal("latest"))
 
 				Eventually(func() string {
-					val, _ := helpers.GetTmuxOption(csmSessionName, "mouse")
-					return val
+					cmd := exec.Command("tmux", "-S", socketPath, "show-options", "-t", csmSessionName, "mouse")
+					output, err := cmd.Output()
+					if err != nil {
+						return ""
+					}
+					parts := strings.SplitN(strings.TrimSpace(string(output)), " ", 2)
+					if len(parts) < 2 {
+						return ""
+					}
+					return strings.TrimSpace(parts[1])
 				}, "5s", "500ms").Should(Equal("on"))
 			})
 		})
