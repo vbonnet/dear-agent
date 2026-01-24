@@ -9,6 +9,8 @@ phase_engram_path: "~/src/ws/oss/repos/engram/main/plugins/wayfinder/engrams/wor
 
 # D2: Existing Solutions - Gemini Feature Parity Testing
 
+**Overlap**: 95%
+
 ## Tool Discovery Report
 
 **Problem**: Verify Gemini feature parity with Claude through parameterized integration tests
