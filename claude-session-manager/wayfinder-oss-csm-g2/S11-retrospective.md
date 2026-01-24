@@ -9,7 +9,7 @@ last_updated: "2026-01-24T21:52:00Z"
 # S11: Project Retrospective
 
 ## Project Overview
-**Last Updated**: 2026-01-24 21:53 UTC
+**Last Updated**: 2026-01-24 21:55 UTC
 
 **Project Framing (W0):**
 
@@ -41,3 +41,18 @@ last_updated: "2026-01-24T21:52:00Z"
 
 **What Evolved:**
 - Scope clarified from "test Gemini" → "verify feature parity through parameterized tests covering Phase 1 scenarios"
+
+**Existing Solutions (D2):**
+
+**The Good:**
+- Found existing Ginkgo DescribeTable pattern already in use (95% overlap)
+- Completed tool discovery in <10 minutes (efficient reuse-first workflow)
+- One working example of multi-agent test exists as template
+
+**Key Decisions:**
+- ADAPT existing Ginkgo pattern (vs building custom harness or switching frameworks)
+- Minimal effort approach: ~3 hours to parameterize 4 remaining test files
+- Stay consistent with existing test suite (no framework changes)
+
+**What Evolved:**
+- Solution approach clarified from "create tests" → "extend existing DescribeTable pattern to 4 remaining test files"
