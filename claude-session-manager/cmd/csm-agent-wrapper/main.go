@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"syscall"
 	"time"
 
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
@@ -82,18 +81,44 @@ func run() error {
 
 	debug.Log("Agent initialized successfully, attaching to session")
 
-	// Exec into tmux attach (replaces current process)
+	// Attach to tmux session (blocks until user exits)
 	socketPath := tmux.GetSocketPath()
-	tmuxPath, err := exec.LookPath("tmux")
-	if err != nil {
-		return fmt.Errorf("tmux not found in PATH: %w", err)
+	if err := attachToSession(socketPath, sessionName); err != nil {
+		return fmt.Errorf("failed to attach to tmux session %q: %w", sessionName, err)
 	}
 
-	args := []string{"tmux", "-S", socketPath, "attach-session", "-t", sessionName}
-	env := os.Environ()
+	// Capture pane content after exit (best-effort)
+	if err := captureAndPrint(socketPath, sessionName); err != nil {
+		// Capture failure is non-fatal (attach succeeded)
+		fmt.Fprintf(os.Stderr, "Warning: failed to capture pane content: %v\n", err)
+	}
 
-	debug.Log("Exec into tmux attach: %s %v", tmuxPath, args)
-	return syscall.Exec(tmuxPath, args, env)
+	return nil
+}
+
+// attachToSession attaches to the tmux session with full terminal passthrough
+func attachToSession(socketPath, sessionName string) error {
+	cmd := exec.Command("tmux", "-S", socketPath, "attach-session", "-t", sessionName)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// captureAndPrint captures the pane content and prints to stdout
+func captureAndPrint(socketPath, sessionName string) error {
+	cmd := exec.Command("tmux", "-S", socketPath, "capture-pane", "-p", "-S", "-", "-t", sessionName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("capture-pane failed: %w", err)
+	}
+
+	// Print captured output (only if non-empty)
+	if len(output) > 0 {
+		fmt.Print(string(output))
+	}
+
+	return nil
 }
 
 // initGemini initializes a Gemini agent session
@@ -104,17 +129,35 @@ func initGemini(sessionName string) error {
 		return fmt.Errorf("failed to start gemini: %w", err)
 	}
 
-	debug.Log("Gemini started in tmux pane, waiting for initialization")
+	debug.Log("Gemini started in tmux pane, waiting for process to appear")
 
-	// 2. Wait for initialization (configurable delay)
-	delay := 500 * time.Millisecond
-	if envDelay := os.Getenv("CSM_AGENT_INIT_DELAY"); envDelay != "" {
-		if d, err := time.ParseDuration(envDelay); err == nil {
-			delay = d
-			debug.Log("Using custom init delay: %v", delay)
+	// 2. Wait for Gemini process to actually start (not just command sent)
+	timeout := 30 * time.Second
+	if envTimeout := os.Getenv("CSM_AGENT_INIT_TIMEOUT"); envTimeout != "" {
+		if t, err := time.ParseDuration(envTimeout); err == nil {
+			timeout = t
+			debug.Log("Using custom init timeout: %v", timeout)
 		}
 	}
-	time.Sleep(delay)
+
+	if err := tmux.WaitForProcessReady(sessionName, "gemini", timeout); err != nil {
+		debug.Log("Warning: Gemini process not detected: %v", err)
+		fmt.Fprintf(os.Stderr, "Warning: Gemini process not detected (may still be starting)\n")
+		// Continue anyway - graceful degradation
+	} else {
+		debug.Log("Gemini process detected and running")
+	}
+
+	// 2b. Wait for Gemini prompt to be ready (more robust than process detection alone)
+	debug.Log("Waiting for Gemini prompt to appear...")
+	promptTimeout := timeout // Use same timeout as process detection
+	if err := tmux.WaitForGeminiReady(sessionName, promptTimeout); err != nil {
+		debug.Log("Warning: Gemini prompt not detected: %v", err)
+		fmt.Fprintf(os.Stderr, "Warning: Gemini prompt not fully detected (may still be initializing)\n")
+		// Continue anyway - graceful degradation
+	} else {
+		debug.Log("Gemini prompt detected - ready for input")
+	}
 
 	// 3. Extract UUID (graceful degradation if fails)
 	uuid, err := extractGeminiUUID()

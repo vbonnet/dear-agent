@@ -354,3 +354,196 @@ func stripANSI(s string) string {
 
 	return result
 }
+
+// GeminiPromptPatterns are patterns that indicate Gemini is ready for input
+var GeminiPromptPatterns = []string{
+	">   Type your message",  // Gemini's input prompt text
+	"@path/to/file",          // Part of Gemini's input prompt
+	"╭─",                     // Box drawing characters from Gemini UI
+	"╰─",                     // Box drawing characters from Gemini UI
+}
+
+// WaitForGeminiPrompt waits for Gemini to return to the input prompt
+// Uses control mode to monitor output stream and detect prompt patterns
+// Similar to WaitForClaudePrompt but adapted for Gemini's UI patterns
+func WaitForGeminiPrompt(sessionName string, timeout time.Duration) error {
+	debug.Log("\n🔍 Starting Gemini prompt detection for session: %s", sessionName)
+
+	// Start control mode
+	ctrl, err := StartControlMode(sessionName)
+	if err != nil {
+		return fmt.Errorf("failed to start control mode: %w", err)
+	}
+	defer ctrl.Close()
+
+	// Create output watcher
+	watcher := NewOutputWatcher(ctrl.Stdout)
+
+	// Wait for prompt pattern
+	deadline := time.Now().Add(timeout)
+	consecutiveIdleLines := 0
+	linesChecked := 0
+	promptPatternsSeen := 0
+
+	for time.Now().Before(deadline) {
+		// Read next output line (200ms timeout for faster detection)
+		line, err := watcher.GetRawLine(200 * time.Millisecond)
+		if err != nil {
+			// Timeout on individual read - check if we've seen enough idle time
+			consecutiveIdleLines++
+
+			// If we've seen prompt patterns and then idle, assume ready
+			// Increased to 10 consecutive idles (2 seconds) to avoid false positives
+			if consecutiveIdleLines >= 10 && promptPatternsSeen >= 2 {
+				debug.Log("✓ Detected Gemini prompt after idle period (saw %d patterns)", promptPatternsSeen)
+				return nil
+			}
+
+			// If we've checked many lines and seen idle, likely ready
+			if linesChecked > 10 && consecutiveIdleLines >= 15 {
+				debug.Log("✓ Stable idle state detected after %d lines", linesChecked)
+				return nil
+			}
+
+			continue
+		}
+
+		// Reset idle counter
+		consecutiveIdleLines = 0
+		linesChecked++
+
+		// Extract content if it's an %output line
+		if strings.HasPrefix(line, "%output") {
+			content := ExtractOutputContent(line)
+
+			// Log output for debugging (limit verbosity)
+			if linesChecked <= 5 || linesChecked%10 == 0 {
+				if isVisibleContent(content) {
+					cleanContent := stripANSI(content)
+					if strings.TrimSpace(cleanContent) != "" {
+						debug.Log("📝 Output [%d]: %q", linesChecked, truncate(cleanContent, 80))
+					}
+				}
+			}
+
+			// Check for Gemini prompt patterns
+			if containsGeminiPromptPattern(content) {
+				promptPatternsSeen++
+				debug.Log("✓ Gemini prompt pattern detected in line %d: %q (count: %d)", linesChecked, truncate(content, 50), promptPatternsSeen)
+
+				// Need to see multiple patterns to confirm (Gemini's UI has box drawing + text)
+				if promptPatternsSeen >= 2 {
+					// Wait a bit more to ensure it's stable
+					time.Sleep(1 * time.Second)
+					return nil
+				}
+			}
+		}
+
+		// Check for %end notification (command completed)
+		if strings.HasPrefix(line, "%end") {
+			debug.Log("📋 Command completion detected (%%end) at line %d", linesChecked)
+		}
+	}
+
+	return fmt.Errorf("timeout waiting for Gemini prompt (waited %v, checked %d lines)", timeout, linesChecked)
+}
+
+// containsGeminiPromptPattern checks if content contains any Gemini prompt pattern
+func containsGeminiPromptPattern(content string) bool {
+	// Trim whitespace for comparison
+	trimmed := strings.TrimSpace(content)
+
+	// Empty content is not a prompt
+	if trimmed == "" {
+		return false
+	}
+
+	// Check against known Gemini patterns
+	for _, pattern := range GeminiPromptPatterns {
+		if strings.Contains(trimmed, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// WaitForGeminiReady waits for Gemini to be fully ready
+// This function waits for the Gemini prompt to appear after startup
+func WaitForGeminiReady(sessionName string, timeout time.Duration) error {
+	debug.Log("🔍 Waiting for Gemini to be ready (session: %s)", sessionName)
+
+	// Start control mode
+	ctrl, err := StartControlMode(sessionName)
+	if err != nil {
+		return fmt.Errorf("failed to start control mode: %w", err)
+	}
+	defer ctrl.Close()
+
+	// Create output watcher
+	watcher := NewOutputWatcher(ctrl.Stdout)
+
+	// State tracking
+	deadline := time.Now().Add(timeout)
+	linesChecked := 0
+	promptPatternsSeen := 0
+	bannerSeen := false
+
+	for time.Now().Before(deadline) {
+		// Read next output line
+		line, err := watcher.GetRawLine(2 * time.Second)
+		if err != nil {
+			// Timeout on individual read - might be ready
+			if promptPatternsSeen >= 2 && linesChecked > 10 {
+				debug.Log("✓ Gemini appears ready (saw %d prompt patterns)", promptPatternsSeen)
+				return nil
+			}
+			continue
+		}
+
+		linesChecked++
+
+		// Extract content if it's an %output line
+		var content string
+		if strings.HasPrefix(line, "%output") {
+			content = ExtractOutputContent(line)
+		} else {
+			content = line
+		}
+
+		// Log output for debugging (first few lines and periodically)
+		if linesChecked <= 10 || linesChecked%20 == 0 {
+			if isVisibleContent(content) {
+				cleanContent := stripANSI(content)
+				if strings.TrimSpace(cleanContent) != "" {
+					debug.Log("📝 Output [%d]: %q", linesChecked, truncate(cleanContent, 100))
+				}
+			}
+		}
+
+		// Check for Gemini ASCII banner (indicates startup)
+		if strings.Contains(content, "███") || strings.Contains(content, "GEMINI") {
+			if !bannerSeen {
+				bannerSeen = true
+				debug.Log("🎨 Gemini banner detected at line %d", linesChecked)
+			}
+		}
+
+		// Check for Gemini prompt patterns
+		if containsGeminiPromptPattern(content) {
+			promptPatternsSeen++
+			debug.Log("✓ Gemini prompt pattern detected at line %d: %q (count: %d)",
+				linesChecked, truncate(content, 50), promptPatternsSeen)
+
+			// Need to see multiple patterns to confirm (box drawing + text)
+			if promptPatternsSeen >= 2 {
+				debug.Log("✓ Gemini prompt fully detected, waiting for stability...")
+				time.Sleep(500 * time.Millisecond)
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("timeout waiting for Gemini to be ready (waited %v, checked %d lines)", timeout, linesChecked)
+}
