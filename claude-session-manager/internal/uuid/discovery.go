@@ -14,10 +14,13 @@ import (
 
 // Package uuid provides UUID discovery functions for CSM sessions.
 // This package implements a 3-level fallback chain:
-// - Level 1: CSM manifest lookup
-// - Level 2a: History search by rename (/rename command)
-// - Level 2b: History search by timestamp (±10 min window)
+// - Level 1: CSM manifest lookup (verified against /rename if available)
+// - Level 2: History search by rename (/rename command - strong signal)
 // - Level 3: JSONL fallback (most recent .jsonl file in projects dir)
+//
+// Note: Timestamp-based search has been removed as it's unreliable and can
+// return wrong UUIDs. We prefer to fail with "don't know" rather than
+// return incorrect associations.
 
 // SearchHistoryByRename searches the Claude history.jsonl for sessions renamed
 // with the /rename command. Returns the UUID of the most recent session with
@@ -219,9 +222,8 @@ func FindMostRecentJSONL(projectPath string) (string, error) {
 // Discover orchestrates the 3-level UUID discovery fallback chain.
 //
 // Discovery levels:
-//  1. CSM manifest lookup (via manifestSearchFunc)
-//  2a. History search by rename (/rename command)
-//  2b. History search by timestamp (±10 min window from manifest ModTime)
+//  1. CSM manifest lookup (via manifestSearchFunc), verified against /rename if available
+//  2. History search by rename (/rename command - strong signal)
 //  3. JSONL fallback (scan ~/.claude/projects/<sessionName>/ for recent .jsonl)
 //
 // Parameters:
@@ -262,30 +264,23 @@ func Discover(sessionName string, manifestSearchFunc func(string) (*manifest.Man
 		if err == nil && m != nil {
 			if m.Claude.UUID != "" {
 				logf("  ✓ found: %s", m.Claude.UUID)
-				// CRITICAL BUG FIX: Don't blindly trust manifest UUID!
-				// Verify it matches the session name via rename search
+				// Verify manifest UUID matches /rename search (stronger signal)
 				verifyUUID, verifyErr := SearchHistoryByRename(sessionName)
-				if verifyErr == nil && verifyUUID == m.Claude.UUID {
-					return m.Claude.UUID, nil
-				}
 				if verifyErr == nil {
-					// Update manifest with correct UUID and return it
-					return verifyUUID, nil
+					if verifyUUID == m.Claude.UUID {
+						// Manifest UUID verified via /rename
+						return m.Claude.UUID, nil
+					} else {
+						// Manifest has wrong UUID - trust /rename instead
+						logf("  - manifest UUID mismatch, using /rename result: %s", verifyUUID)
+						return verifyUUID, nil
+					}
 				}
-				// Verification failed, fall through to other levels
-				logf("  - manifest UUID could not be verified, trying other methods")
+				// Can't verify via /rename, but manifest UUID exists - trust it
+				logf("  - manifest UUID not verified (no /rename found), using manifest value")
+				return m.Claude.UUID, nil
 			}
 			logf("  - manifest found but has no UUID")
-
-			// If manifest exists but no UUID, try Level 2b (timestamp search)
-			logf("Level 2b: History search by timestamp (±%d min from manifest)...", DefaultWindowMinutes)
-			uuid, err := SearchHistoryByTimestamp(m.UpdatedAt, DefaultWindowMinutes)
-			if err == nil {
-				logf("  ✓ found: %s", uuid)
-				return uuid, nil
-			}
-			logf("  - not found: %v", err)
-			errors = append(errors, fmt.Sprintf("Level 2b (timestamp): %v", err))
 		} else {
 			logf("  - not found: %v", err)
 			errors = append(errors, fmt.Sprintf("Level 1 (manifest): %v", err))

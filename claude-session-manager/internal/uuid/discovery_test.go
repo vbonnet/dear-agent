@@ -403,6 +403,103 @@ func TestDiscover(t *testing.T) {
 			wantErr:         true,
 			wantErrContains: "UUID discovery failed",
 		},
+		{
+			name:        "Manifest UUID without /rename verification - trusts manifest",
+			sessionName: "unverified-session",
+			manifestSearchFunc: func(name string) (*manifest.Manifest, error) {
+				return &manifest.Manifest{
+					Claude: manifest.Claude{
+						UUID: "44444444-4444-4444-4444-444444444444",
+					},
+				}, nil
+			},
+			setupHistory: func(t *testing.T) {
+				// Create empty history (no /rename exists)
+				originalHome := os.Getenv("HOME")
+				tmpHome := t.TempDir()
+				os.Setenv("HOME", tmpHome)
+				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
+
+				claudeDir := filepath.Join(tmpHome, ".claude")
+				os.MkdirAll(claudeDir, 0755)
+				historyPath := filepath.Join(claudeDir, "history.jsonl")
+				os.WriteFile(historyPath, []byte(""), 0644)
+			},
+			verbose:  false,
+			wantUUID: "44444444-4444-4444-4444-444444444444", // Should trust manifest
+			wantErr:  false,
+		},
+		{
+			name:        "Manifest UUID mismatch with /rename - trusts /rename (BUG FIX)",
+			sessionName: "mismatched-session",
+			manifestSearchFunc: func(name string) (*manifest.Manifest, error) {
+				return &manifest.Manifest{
+					Claude: manifest.Claude{
+						UUID: "wrong-uuid-0000-0000-0000-000000000000", // Wrong UUID in manifest
+					},
+				}, nil
+			},
+			setupHistory: func(t *testing.T) {
+				// Create history with /rename pointing to different UUID
+				originalHome := os.Getenv("HOME")
+				tmpHome := t.TempDir()
+				os.Setenv("HOME", tmpHome)
+				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
+
+				claudeDir := filepath.Join(tmpHome, ".claude")
+				os.MkdirAll(claudeDir, 0755)
+				historyPath := filepath.Join(claudeDir, "history.jsonl")
+				file, _ := os.Create(historyPath)
+				entry := history.ConversationEntry{
+					SessionID: "55555555-5555-5555-5555-555555555555", // Correct UUID
+					Display:   "/rename mismatched-session",
+					Timestamp: now.UnixMilli(),
+				}
+				data, _ := json.Marshal(entry)
+				fmt.Fprintf(file, "%s\n", data)
+				file.Close()
+			},
+			verbose:  false,
+			wantUUID: "55555555-5555-5555-5555-555555555555", // Should trust /rename, not manifest
+			wantErr:  false,
+		},
+		{
+			name:        "Manifest exists but empty UUID - fails without timestamp fallback",
+			sessionName: "empty-uuid-session",
+			manifestSearchFunc: func(name string) (*manifest.Manifest, error) {
+				return &manifest.Manifest{
+					Claude: manifest.Claude{
+						UUID: "", // Empty UUID (like which-vesion before fix)
+					},
+					UpdatedAt: now,
+				}, nil
+			},
+			setupHistory: func(t *testing.T) {
+				// Create history with entries around manifest time, but NO /rename
+				originalHome := os.Getenv("HOME")
+				tmpHome := t.TempDir()
+				os.Setenv("HOME", tmpHome)
+				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
+
+				claudeDir := filepath.Join(tmpHome, ".claude")
+				os.MkdirAll(claudeDir, 0755)
+				historyPath := filepath.Join(claudeDir, "history.jsonl")
+				file, _ := os.Create(historyPath)
+				// Add entry within timestamp window but different session name
+				entry := history.ConversationEntry{
+					SessionID: "wrong-session-6666-6666-6666-666666666666",
+					Display:   "/rename other-session", // Different session
+					Timestamp: now.Add(-5 * time.Minute).UnixMilli(),
+				}
+				data, _ := json.Marshal(entry)
+				fmt.Fprintf(file, "%s\n", data)
+				file.Close()
+			},
+			verbose:         false,
+			wantUUID:        "",
+			wantErr:         true,
+			wantErrContains: "UUID discovery failed", // Should fail gracefully, not return wrong UUID
+		},
 	}
 
 	for _, tt := range tests {

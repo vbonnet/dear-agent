@@ -26,9 +26,11 @@ If session-name is not provided:
 The UUID is output to stdout for easy use in scripts.
 
 This command uses a 3-level fallback system to find UUIDs (when session-name is provided):
-  1. CSM manifest lookup (for CSM-managed sessions)
-  2. Claude history search (by /rename or timestamp)
+  1. CSM manifest lookup (for CSM-managed sessions), verified against /rename
+  2. Claude history search (by /rename command only - strong signal)
   3. JSONL filename fallback (scans ~/.claude/projects/)
+
+Note: Timestamp-based search has been removed to prevent returning wrong UUIDs.
 
 Use --verbose to see which discovery level succeeded.
 
