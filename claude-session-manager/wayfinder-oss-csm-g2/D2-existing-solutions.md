@@ -347,6 +347,8 @@ func RunAgentTests(tests []AgentTest, agents []string) {
 
 ## Recommendation for D3
 
+**Overlap**: 95%
+
 **Approach**: Enhance existing Ginkgo DescribeTable pattern
 
 **Confidence**: High (0.95)
