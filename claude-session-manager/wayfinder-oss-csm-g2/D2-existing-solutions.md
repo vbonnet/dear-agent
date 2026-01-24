@@ -13,6 +13,8 @@ phase_engram_path: "~/src/ws/oss/repos/engram/main/plugins/wayfinder/engrams/wor
 
 **Problem**: Verify Gemini feature parity with Claude through parameterized integration tests
 
+**Overlap**: 95% (Ginkgo DescribeTable pattern exists, need to apply to 4 more test files)
+
 ### Step 1: Code-Level Search (3 min)
 
 **Searched for existing test patterns**:
