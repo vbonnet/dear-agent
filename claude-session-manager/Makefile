@@ -45,13 +45,13 @@ install: build
 	@rm -f $(HOME)/bin/agm-mcp-server $(HOME)/.local/bin/agm-mcp-server 2>/dev/null || true
 	@rm -f $(HOME)/bin/csm-attach-wrapper $(HOME)/.local/bin/csm-attach-wrapper 2>/dev/null || true
 	@rm -f $(HOME)/bin/csm-agent-wrapper $(HOME)/.local/bin/csm-agent-wrapper 2>/dev/null || true
-	@# Install to standard Go binary location
+	@# Install to standard Go binary location (using install for atomic replacement)
 	mkdir -p $(HOME)/go/bin
-	cp bin/csm $(HOME)/go/bin/csm
-	cp bin/csm-reaper $(HOME)/go/bin/csm-reaper
-	cp bin/agm-mcp-server $(HOME)/go/bin/agm-mcp-server
-	cp bin/csm-attach-wrapper $(HOME)/go/bin/csm-attach-wrapper
-	cp bin/csm-agent-wrapper $(HOME)/go/bin/csm-agent-wrapper
+	install -m 755 bin/csm $(HOME)/go/bin/csm
+	install -m 755 bin/csm-reaper $(HOME)/go/bin/csm-reaper
+	install -m 755 bin/agm-mcp-server $(HOME)/go/bin/agm-mcp-server
+	install -m 755 bin/csm-attach-wrapper $(HOME)/go/bin/csm-attach-wrapper
+	install -m 755 bin/csm-agent-wrapper $(HOME)/go/bin/csm-agent-wrapper
 	@echo "✓ csm binary installed to $(HOME)/go/bin/csm"
 	@echo "✓ csm-reaper binary installed to $(HOME)/go/bin/csm-reaper"
 	@echo "✓ agm-mcp-server binary installed to $(HOME)/go/bin/agm-mcp-server"
