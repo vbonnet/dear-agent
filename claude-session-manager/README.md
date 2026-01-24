@@ -27,18 +27,26 @@ Not sure which agent to use?
 - **Gemini** (Google): Best for research, summarization, massive context (1M tokens)
 - **GPT** (OpenAI): Best for chat, brainstorming, general Q&A
 
-**Detailed comparison**: See [docs/AGENT-COMPARISON.md](docs/AGENT-COMPARISON.md) for use cases, context windows, features, and limitations.
+**Detailed comparison**: See [docs/AGENT-COMPARISON.md](docs/AGENT-COMPARISON.md) for:
+- Feature comparison table (context windows, strengths, limitations)
+- Use case guide (when to use each agent)
+- Quick decision tree (choose agent in <2 minutes)
+- Command translator support levels
 
-### Agent Routing with AGENTS.md (Coming Soon)
+**New to AGM?** See [docs/MIGRATION-CLAUDE-MULTI.md](docs/MIGRATION-CLAUDE-MULTI.md) if transitioning from Claude-only sessions.
+
+### Agent Routing with AGENTS.md
+
+**Status: Infrastructure Complete, Integration Pending**
 
 Automate agent selection based on session names using AGENTS.md configuration files.
 
-**Status**: Infrastructure ready, integration pending. The `internal/agents` package provides:
-- YAML-based configuration (`AGENTS.md`)
-- Keyword-based agent selection
-- Multi-path detection (project → global)
+**Current state:**
+- ✅ `internal/agents` package implemented (YAML parsing, keyword matching, multi-path detection)
+- ⚠️ Integration with `agm new` pending (requires agent selection support in AGM core)
+- ℹ️ Manual agent selection works: `agm new --agent <agent> <session-name>`
 
-**Example `AGENTS.md`**:
+**Example future `AGENTS.md` (not yet active)**:
 ```yaml
 default_agent: claude
 preferences:
@@ -48,16 +56,38 @@ preferences:
     agent: claude
 ```
 
-**Once integrated**:
+**Once integrated** (targeted for future release):
 ```bash
-agm new creative-project      # Auto-selects gemini (matches "creative")
-agm new code-refactor         # Auto-selects claude (matches "code")
-agm new random-task           # Uses claude (default, no match)
+agm new creative-project      # Would auto-select gemini (matches "creative")
+agm new code-refactor         # Would auto-select claude (matches "code")
+agm new random-task           # Would use claude (default, no keyword match)
 ```
 
-See `docs/AGENTS.md.example` for full configuration options.
+**Workaround:** Use explicit `--agent` flag until integration complete:
+```bash
+agm new creative-project --agent gemini    # Explicit agent selection (works now)
+```
 
-> **Note**: Full `agm new` integration requires agent selection support in AGM core (currently hardcoded to `claude` command). The AGENTS.md parsing infrastructure is complete and ready for integration.
+See `docs/AGENTS.md.example` for full configuration spec. Integration tracked in project roadmap.
+
+---
+
+## Documentation
+
+**Core Guides:**
+- **[Agent Comparison Guide](docs/AGENT-COMPARISON.md)** - Choose the right agent (Claude/Gemini/GPT) for your task
+- **[BDD Scenario Catalog](docs/BDD-CATALOG.md)** - Living documentation of AGM behavior (8 feature files, 20+ scenarios)
+- **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+
+**Migration Guides:**
+- **[Claude → Multi-Agent Migration](docs/MIGRATION-CLAUDE-MULTI.md)** - Transition from Claude-only to multi-agent usage
+- **[Manifest v2 → v3 Migration](docs/MIGRATION-V2-V3.md)** - Future manifest migration guide (v2 currently supported)
+
+**For Developers:**
+- **[BDD Testing](test/bdd/README.md)** - Running and writing BDD tests
+- **[Command Translator](README.md#-command-translation-multi-agent)** - Multi-agent command abstraction
+
+---
 
 ## Features
 
