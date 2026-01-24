@@ -102,6 +102,22 @@ func attachToSession(socketPath, sessionName string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	// Unset $TMUX to allow attaching from within another tmux session
+	// This is safe because we're using -S to specify the exact socket
+	env := os.Environ()
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		if len(e) >= 5 && e[:5] == "TMUX=" {
+			continue // Skip TMUX variable
+		}
+		if len(e) >= 11 && e[:11] == "TMUX_PANE=" {
+			continue // Also skip TMUX_PANE
+		}
+		filtered = append(filtered, e)
+	}
+	cmd.Env = filtered
+
 	return cmd.Run()
 }
 

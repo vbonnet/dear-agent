@@ -460,11 +460,23 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		} else {
 			// Use wrapper for readiness detection
 			debug.Log("Found csm-agent-wrapper at: %s", wrapperPath)
-			wrapperCmd := fmt.Sprintf("%s --agent=gemini %s", wrapperPath, sessionName)
-			debug.Log("Sending wrapper command: %s", wrapperCmd)
-			if err := tmux.SendCommand(sessionName, wrapperCmd); err != nil {
+			debug.Log("Executing wrapper directly (not via tmux): %s --agent=gemini %s", wrapperPath, sessionName)
+
+			// Execute wrapper directly (it will attach to the session)
+			// The wrapper handles:
+			// 1. Starting Gemini in the tmux session
+			// 2. Waiting for readiness
+			// 3. Creating ready-file
+			// 4. Attaching to session
+			// 5. Capturing output on exit
+			cmd := exec.Command(wrapperPath, "--agent=gemini", sessionName)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+
+			if err := cmd.Run(); err != nil {
 				ui.PrintError(err,
-					"Failed to start csm-agent-wrapper",
+					"Failed to run csm-agent-wrapper",
 					"  • Check wrapper installed: which csm-agent-wrapper\n"+
 						"  • Try direct mode by temporarily renaming wrapper\n"+
 						"  • Attach and check: tmux attach -t "+sessionName)
@@ -473,8 +485,19 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 				}
 				return err
 			}
-			debug.Log("Wrapper command sent, waiting for ready signal")
 
+			// Wrapper finished (user exited session)
+			ui.PrintSuccess("Gemini session ended")
+			return nil
+		}
+
+		// OLD CODE BELOW - ONLY REACHED IN FALLBACK MODE
+		ui.PrintSuccess("Started Gemini CLI in tmux session (direct mode)")
+
+		// HACK: The code below this point is the old fallback flow
+		// It should never be reached when using the wrapper
+		// Keep it for now in case we need fallback behavior
+		if false {
 			// Wait for ready-file
 			debug.Phase("Wait for Ready Signal")
 			var readyErr error
