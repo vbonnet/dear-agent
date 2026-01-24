@@ -49,39 +49,26 @@ var _ = Describe("List Sessions", func() {
 		)
 	})
 
-	Describe("list archived sessions", func() {
-		It("should list archived sessions only", func() {
-			// Create archived session fixture
-			archivedSessionID := "test-archived-001"
-			err := helpers.CreateArchivedSession(testEnv, archivedSessionID, "claude")
-			Expect(err).ToNot(HaveOccurred())
-			defer helpers.CleanupArchivedSession(testEnv, archivedSessionID)
-
-			// List archived sessions
-			filter := helpers.ListFilter{
-				Archived: true,
-				All:      false,
-			}
-			sessions, err := helpers.ListTestSessions(testEnv.SessionsDir, filter)
-
-			// Note: This may fail if csm list --archived is not implemented
-			// Expected behavior: should return archived sessions
-			if err != nil {
-				Skip("csm list --archived may not be implemented yet")
-			}
-
-			// Verify archived sessions in list
-			Expect(sessions).ToNot(BeEmpty(), "should find at least one archived session")
+	Describe("list archived sessions only (--archived flag)", func() {
+		It("is not supported - use --all instead", func() {
+			Skip("CSM does not have a --archived flag (only --all exists). " +
+				"The --all flag shows both active and archived sessions. " +
+				"To list archived sessions only, use 'csm list --all' and filter by status. " +
+				"See list.go:94 for flag definition.")
 		})
 	})
 
 	Describe("list all sessions", func() {
-		It("should list both active and archived sessions", func() {
-			// Create one active session
+		It("should list both active and archived sessions with --all flag", func() {
+			// Create one active session with manifest
 			activeSessionName := testEnv.UniqueSessionName("list-all-active")
 			err := helpers.CreateTmuxSession(activeSessionName, testEnv.SessionsDir)
 			Expect(err).ToNot(HaveOccurred())
 			defer helpers.KillTmuxSession(activeSessionName)
+
+			// Create manifest for active session
+			err = helpers.CreateSessionManifest(testEnv.SessionsDir, activeSessionName, "claude")
+			Expect(err).ToNot(HaveOccurred())
 
 			// Create one archived session
 			archivedSessionID := "test-archived-all-001"
@@ -89,16 +76,12 @@ var _ = Describe("List Sessions", func() {
 			Expect(err).ToNot(HaveOccurred())
 			defer helpers.CleanupArchivedSession(testEnv, archivedSessionID)
 
-			// List all sessions
+			// List all sessions (including archived)
 			filter := helpers.ListFilter{
 				All: true,
 			}
 			sessions, err := helpers.ListTestSessions(testEnv.SessionsDir, filter)
-
-			// Note: This may fail if csm list --all is not implemented
-			if err != nil {
-				Skip("csm list --all may not be implemented yet")
-			}
+			Expect(err).ToNot(HaveOccurred(), "csm list --all should succeed")
 
 			// Verify both active and archived in list
 			Expect(len(sessions)).To(BeNumerically(">=", 2), "should list at least 2 sessions (active + archived)")

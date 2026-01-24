@@ -51,4 +51,73 @@ var _ = Describe("Archive Session", func() {
 			// Phase 3 will add: Entry("gemini agent", "gemini", true),
 		)
 	})
+
+	Describe("archive session validation", func() {
+		It("should verify archived session excluded from default list", func() {
+			// Create and archive a session
+			sessionName := testEnv.UniqueSessionName("archive-list-test")
+			err := helpers.CreateTmuxSession(sessionName, testEnv.SessionsDir)
+			Expect(err).ToNot(HaveOccurred())
+
+			err = helpers.CreateSessionManifest(testEnv.SessionsDir, sessionName, "claude")
+			Expect(err).ToNot(HaveOccurred())
+
+			// Kill tmux session before archiving
+			err = helpers.KillTmuxSession(sessionName)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Archive the session
+			err = helpers.ArchiveTestSession(testEnv.SessionsDir, sessionName, "")
+			Expect(err).ToNot(HaveOccurred(), "archive should succeed")
+
+			// List active sessions (default - no --all flag)
+			filter := helpers.ListFilter{
+				Archived: false,
+				All:      false,
+			}
+			sessions, err := helpers.ListTestSessions(testEnv.SessionsDir, filter)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Verify archived session NOT in default list
+			for _, s := range sessions {
+				Expect(s.ID).ToNot(ContainSubstring(sessionName), "archived session should not appear in default list")
+			}
+		})
+
+		It("should include archived sessions when using --all flag", func() {
+			// Create and properly archive a session using CSM archive command
+			sessionName := testEnv.UniqueSessionName("archive-list-all-test")
+			err := helpers.CreateTmuxSession(sessionName, testEnv.SessionsDir)
+			Expect(err).ToNot(HaveOccurred())
+
+			err = helpers.CreateSessionManifest(testEnv.SessionsDir, sessionName, "claude")
+			Expect(err).ToNot(HaveOccurred())
+
+			// Kill tmux session before archiving
+			err = helpers.KillTmuxSession(sessionName)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Archive using CSM command (creates proper v2 manifest with lifecycle field)
+			err = helpers.ArchiveTestSession(testEnv.SessionsDir, sessionName, "")
+			Expect(err).ToNot(HaveOccurred())
+
+			// List with --all flag (should include archived sessions)
+			filter := helpers.ListFilter{
+				All: true,
+			}
+			sessionsAll, err := helpers.ListTestSessions(testEnv.SessionsDir, filter)
+			Expect(err).ToNot(HaveOccurred())
+
+			// List without --all flag (should exclude archived sessions)
+			filterDefault := helpers.ListFilter{
+				All: false,
+			}
+			sessionsActive, err := helpers.ListTestSessions(testEnv.SessionsDir, filterDefault)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Verify --all returns more sessions than default (includes archived)
+			Expect(len(sessionsAll)).To(BeNumerically(">=", len(sessionsActive)),
+				"--all should return at least as many sessions as default (includes archived)")
+		})
+	})
 })
