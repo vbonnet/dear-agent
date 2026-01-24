@@ -7,6 +7,7 @@ csm-test-tmux
 # Build artifacts
 /csm
 /bin/csm
+/bin/*-wrapper
 
 # Go build cache
 *.out
