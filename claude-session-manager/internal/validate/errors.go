@@ -1,6 +1,9 @@
 package validate
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ValidationError represents an error during session validation.
 type ValidationError struct {
@@ -31,4 +34,39 @@ func (e *FixError) Error() string {
 
 func (e *FixError) Unwrap() error {
 	return e.Cause
+}
+
+// FormatErrorWithGuidance formats an error with context and actionable suggestions.
+// This helper improves error message quality by providing users with clear steps to fix issues.
+//
+// Example usage:
+//
+//	return FormatErrorWithGuidance(
+//	    fmt.Errorf("lock held by PID %d", pid),
+//	    "Another process is using this session",
+//	    []string{
+//	        "Wait for the process to complete",
+//	        "Run `agm unlock` to force unlock",
+//	    },
+//	)
+func FormatErrorWithGuidance(err error, context string, suggestions []string) error {
+	var sb strings.Builder
+
+	// Error prefix with icon
+	sb.WriteString(fmt.Sprintf("❌ Error: %s\n", err))
+
+	// Context section
+	if context != "" {
+		sb.WriteString(fmt.Sprintf("\nContext: %s\n", context))
+	}
+
+	// Suggestions section
+	if len(suggestions) > 0 {
+		sb.WriteString("\nTo fix:\n")
+		for _, s := range suggestions {
+			sb.WriteString(fmt.Sprintf("- %s\n", s))
+		}
+	}
+
+	return fmt.Errorf("%s", sb.String())
 }
