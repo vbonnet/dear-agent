@@ -9,3 +9,4 @@
 {"timestamp":"2026-01-24T21:57:31.567673368Z","type":"phase.completed","phase":"D2","data":{"outcome":"success"}}
 {"timestamp":"2026-01-24T21:57:39.168987354Z","type":"validation.failed","phase":"D3","data":{"error":"cannot start D3: D2 missing overlap assessment. Fix: Add 'Overlap: X%' field to D2-existing-solutions.md (even if 0% for greenfield)"}}
 {"timestamp":"2026-01-24T21:58:18.917356464Z","type":"validation.failed","phase":"D3","data":{"error":"cannot start D3: D2 missing overlap assessment. Fix: Add 'Overlap: X%' field to D2-existing-solutions.md (even if 0% for greenfield)"}}
+{"timestamp":"2026-01-24T21:58:46.712074557Z","type":"validation.failed","phase":"D3","data":{"error":"cannot start D3: D2 missing overlap assessment. Fix: Add 'Overlap: X%' field to D2-existing-solutions.md (even if 0% for greenfield)"}}
