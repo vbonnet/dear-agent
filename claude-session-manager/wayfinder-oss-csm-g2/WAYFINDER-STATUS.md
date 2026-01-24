@@ -12,8 +12,10 @@ phases:
       completed_at: 2026-01-24T21:51:57.388254251Z
       outcome: success
     - name: D1
-      status: in_progress
+      status: completed
       started_at: 2026-01-24T21:52:07.179456956Z
+      completed_at: 2026-01-24T21:54:53.165054686Z
+      outcome: success
 ---
 
 # Wayfinder Session
@@ -27,7 +29,7 @@ phases:
 ## Phase Progress
 
 - [x] W0 (1m)
-- [ ] ** D1** (in progress)
+- [x] D1 (2m)
 - [ ] D2
 - [ ] D3
 - [ ] D4
