@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -200,7 +201,9 @@ func BenchmarkListSessionsScaled(b *testing.B) {
 					b.Skipf("Failed to create session %d: %v", i, err)
 				}
 				defer func(name string) {
-					tmux.KillSession(name)
+					socketPath := tmux.GetSocketPath()
+					cmd := exec.Command("tmux", "-S", socketPath, "kill-session", "-t", name)
+					cmd.Run() // Ignore cleanup errors
 				}(sessionName)
 			}
 
@@ -222,8 +225,8 @@ func BenchmarkSearchCached(b *testing.B) {
 
 	// Prime the cache
 	testResults := []llm.SearchResult{
-		{SessionID: "test-1", Score: 0.95, Snippet: "example content"},
-		{SessionID: "test-2", Score: 0.85, Snippet: "more content"},
+		{SessionID: "test-1", Relevance: 0.95, Reason: "example content"},
+		{SessionID: "test-2", Relevance: 0.85, Reason: "more content"},
 	}
 	cache.Set("test query", testResults)
 
@@ -241,7 +244,7 @@ func BenchmarkSearchUncached(b *testing.B) {
 	cache := llm.NewSearchCache(1 * time.Nanosecond) // Immediate expiration
 
 	testResults := []llm.SearchResult{
-		{SessionID: "test-1", Score: 0.95, Snippet: "example content"},
+		{SessionID: "test-1", Relevance: 0.95, Reason: "example content"},
 	}
 
 	b.ResetTimer()
