@@ -5,7 +5,6 @@ wayfinder_session_id: 21dc140a-c47f-4cac-b7e8-563a5e506a1d
 created_at: "2026-01-24T21:54:00Z"
 phase_engram_hash: "sha256:10d48ec6d9105863bf7b68e8d886e192e064f8bb4d45d2ee3979a6e48eeced4a"
 phase_engram_path: "~/src/ws/oss/repos/engram/main/plugins/wayfinder/engrams/workflows/d2-existing-solutions.ai.md"
-skip_reuse_advocate: false
 ---
 
 # D2: Existing Solutions - Gemini Feature Parity Testing
