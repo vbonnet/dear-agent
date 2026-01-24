@@ -141,6 +141,29 @@ Examples:
 			}
 		}
 
+		// Prompt for agent if not provided via flag
+		if agentName == "" {
+			var selectedAgent string
+			options := []huh.Option[string]{
+				huh.NewOption("Claude (Anthropic CLI)", "claude"),
+				huh.NewOption("Gemini (Google Vertex AI)", "gemini"),
+			}
+			err := huh.NewSelect[string]().
+				Title("Which agent would you like to use?").
+				Options(options...).
+				Value(&selectedAgent).
+				Run()
+			if err != nil {
+				ui.PrintError(err,
+					"Failed to read agent selection",
+					"  • Use --agent flag for non-interactive usage: csm new --agent=claude\n"+
+						"  • Check terminal is interactive (TTY)\n"+
+						"  • Available agents: claude, gemini")
+				return err
+			}
+			agentName = selectedAgent
+		}
+
 		// Initialize debug logging
 		if err := debug.Init(debugEnabled, sessionName); err != nil {
 			fmt.Printf("Warning: Failed to initialize debug logging: %v\n", err)
@@ -887,7 +910,7 @@ func init() {
 	rootCmd.AddCommand(newCmd)
 	newCmd.Flags().BoolP("debug", "d", debugDefault, "Enable debug logging to ~/.csm/debug/ (env: CSM_DEBUG)")
 	newCmd.Flags().BoolVar(&detached, "detached", false, "Create detached session without attaching")
-	newCmd.Flags().StringVar(&agentName, "agent", "", "AI agent to use (claude, gemini, gpt) [REQUIRED]")
+	newCmd.Flags().StringVar(&agentName, "agent", "", "AI agent to use (claude, gemini, gpt)")
 	newCmd.Flags().StringVar(&projectID, "project-id", "", "GCP project ID (required for gemini agent)")
-	newCmd.MarkFlagRequired("agent")
+	// agent flag is now optional - prompt shown if omitted
 }
