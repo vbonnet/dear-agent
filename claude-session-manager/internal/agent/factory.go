@@ -11,10 +11,10 @@ type AgentInfo struct {
 }
 
 // Agent registry maps agent names to constructor functions
-var agentRegistry = map[string]func() Agent{
-	"claude": NewClaudeAdapter,
-	"gemini": NewGeminiAdapter,
-	"gpt":    NewGPTAdapter,
+var agentRegistry = map[string]func() (Agent, error){
+	"claude": func() (Agent, error) { return NewClaudeAdapter(nil) },
+	"gemini": func() (Agent, error) { return NewGeminiAdapter(), nil },
+	"gpt":    func() (Agent, error) { return NewGPTAdapter(), nil },
 }
 
 // GetAgent returns an agent adapter instance by name
@@ -23,7 +23,7 @@ func GetAgent(name string) (Agent, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown agent: %s", name)
 	}
-	return constructor(), nil
+	return constructor()
 }
 
 // GetAllAgents returns metadata for all known agents
