@@ -35,7 +35,6 @@ Examples:
 		}
 
 		// Convert to UI sessions with status
-		tmuxClient := session.NewRealTmux()
 		uiSessions := make([]*ui.Session, len(manifests))
 		statuses := session.ComputeStatusBatch(manifests, tmuxClient)
 

@@ -164,8 +164,7 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 
 	// Check if session is active (unless --force)
 	if !forceArchive {
-		tmux := session.NewRealTmux()
-		isActive, err := tmux.HasSession(m.Tmux.SessionName)
+		isActive, err := tmuxClient.HasSession(m.Tmux.SessionName)
 		if err != nil {
 			// Ignore error - if we can't check, assume not active
 			isActive = false
@@ -185,9 +184,8 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 		}
 
 		// Show status
-		tmux := session.NewRealTmux()
 		status := "stopped"
-		isActive, err := tmux.HasSession(m.Tmux.SessionName)
+		isActive, err := tmuxClient.HasSession(m.Tmux.SessionName)
 		if err == nil && isActive {
 			status = "active"
 		}
@@ -339,10 +337,9 @@ func archiveBulk() error {
 	}
 
 	// Get active tmux sessions for filtering
-	tmux := session.NewRealTmux()
 	activeSessions := make(map[string]bool)
 	if !forceArchive {
-		activeList, err := tmux.ListSessions()
+		activeList, err := tmuxClient.ListSessions()
 		if err == nil {
 			for _, name := range activeList {
 				activeSessions[name] = true

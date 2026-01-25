@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
-	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
 
@@ -80,8 +79,7 @@ Examples:
 			}
 			fmt.Println(output)
 		} else {
-			tmux := session.NewRealTmux()
-			output := ui.FormatTable(manifests, tmux)
+			output := ui.FormatTable(manifests, tmuxClient)
 			fmt.Print(output)
 		}
 

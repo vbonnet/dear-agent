@@ -29,6 +29,7 @@ var (
 	noColor          bool
 	screenReader     bool
 	globalHealthCheck *tmux.HealthChecker
+	tmuxClient       session.TmuxInterface // Injected dependency for testing
 )
 
 var rootCmd = &cobra.Command{
@@ -293,10 +294,9 @@ func handleNamedSession(name string, allSessions, matchingSessions []*manifest.M
 
 func showSessionPicker(sessions []*manifest.Manifest, uiCfg *ui.Config) error {
 	// Convert to UI sessions with status
-	tmuxClient := session.NewRealTmux()
 	uiSessions := make([]*ui.Session, len(sessions))
 
-	// Batch compute statuses for efficiency
+	// Batch compute statuses for efficiency (use injected tmuxClient)
 	statuses := session.ComputeStatusBatch(sessions, tmuxClient)
 
 	for i, m := range sessions {
@@ -321,7 +321,7 @@ func performResume(m *manifest.Manifest) error {
 	// TODO: Implement actual resume logic
 	// This will integrate with tmux and claude CLI
 	fmt.Printf("  Project: %s\n", m.Context.Project)
-	fmt.Printf("  Status: %s\n", session.ComputeStatus(m, session.NewRealTmux()))
+	fmt.Printf("  Status: %s\n", session.ComputeStatus(m, tmuxClient))
 	if m.Claude.UUID != "" {
 		fmt.Printf("  UUID: %s\n", m.Claude.UUID)
 	}
@@ -341,8 +341,21 @@ func runNewSessionFlow(suggestedName *string, uiCfg *ui.Config) error {
 	return nil
 }
 
+// ExecuteWithDeps executes the CSM CLI with injected dependencies.
+// This function is used for testing to inject mock implementations.
+//
+// Parameters:
+//   tmux - TmuxInterface implementation (use session.NewRealTmux() for production)
+//
+// Returns:
+//   error - Command execution error (nil on success)
+func ExecuteWithDeps(tmux session.TmuxInterface) error {
+	tmuxClient = tmux
+	return rootCmd.Execute()
+}
+
 func main() {
-	if err := rootCmd.Execute(); err != nil {
+	if err := ExecuteWithDeps(session.NewRealTmux()); err != nil {
 		os.Exit(1)
 	}
 }
