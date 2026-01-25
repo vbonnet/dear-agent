@@ -1,0 +1,20 @@
+[
+  {
+    "scope": "https://www.googleapis.com:443",
+    "method": "GET",
+    "path": "/oauth2/v1/tokeninfo",
+    "body": "",
+    "status": 200,
+    "response": {
+      "issued_to": "test-client-id.apps.googleusercontent.com",
+      "audience": "test-client-id.apps.googleusercontent.com",
+      "scope": "https://www.googleapis.com/auth/documents",
+      "expires_in": 3599,
+      "access_type": "offline"
+    },
+    "headers": {
+      "authorization": "Bearer REDACTED",
+      "content-type": "application/json"
+    }
+  }
+]

@@ -1,0 +1,17 @@
+[
+  {
+    "scope": "https://www.googleapis.com:443",
+    "method": "GET",
+    "path": "/oauth2/v1/tokeninfo",
+    "body": "",
+    "status": 400,
+    "response": {
+      "error": "invalid_token",
+      "error_description": "Token has been expired or revoked."
+    },
+    "headers": {
+      "authorization": "Bearer REDACTED",
+      "content-type": "application/json"
+    }
+  }
+]

@@ -1,0 +1,44 @@
+{
+  "server": "GoogleDocs",
+  "description": "GoogleDocs MCP server tools/list response",
+  "methods": {
+    "tools/list": {
+      "request": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list"
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "tools": [
+            {
+              "name": "readGoogleDoc",
+              "description": "Read the contents of a Google Document",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "documentId": { "type": "string" }
+                },
+                "required": ["documentId"]
+              }
+            },
+            {
+              "name": "appendToGoogleDoc",
+              "description": "Append text to a Google Document",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "documentId": { "type": "string" },
+                  "textToAppend": { "type": "string" }
+                },
+                "required": ["documentId", "textToAppend"]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

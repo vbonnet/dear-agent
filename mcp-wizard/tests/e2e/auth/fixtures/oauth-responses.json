@@ -1,0 +1,35 @@
+{
+  "device_code_response": {
+    "device_code": "DEVICE-CODE-TEST-12345",
+    "user_code": "WXYZ-9876",
+    "verification_uri": "https://localhost:8080/activate",
+    "verification_uri_complete": "https://localhost:8080/activate?user_code=WXYZ-9876",
+    "expires_in": 600,
+    "interval": 1
+  },
+  "token_response": {
+    "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJzY29wZSI6Im9wZW5pZCBwcm9maWxlIiwiZXhwIjoxNzM3MDU5MjAwfQ.signature",
+    "token_type": "Bearer",
+    "expires_in": 3600,
+    "refresh_token": "1//test-refresh-token-abcdef123456",
+    "scope": "openid profile email"
+  },
+  "error_responses": {
+    "authorization_pending": {
+      "error": "authorization_pending",
+      "error_description": "Authorization pending. Continue polling."
+    },
+    "slow_down": {
+      "error": "slow_down",
+      "error_description": "Polling too fast. Increase interval by 5s."
+    },
+    "access_denied": {
+      "error": "access_denied",
+      "error_description": "The user denied the authorization request"
+    },
+    "invalid_client": {
+      "error": "invalid_client",
+      "error_description": "Client authentication failed"
+    }
+  }
+}

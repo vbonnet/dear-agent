@@ -1,0 +1,41 @@
+# Node modules
+node_modules/
+npm-debug.log
+
+# Build artifacts
+dist/
+build/
+*.tsbuildinfo
+
+# Coverage
+coverage/
+coverage-e2e/
+.nyc_output/
+
+# Test artifacts
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Misc
+*.md
+!README.md

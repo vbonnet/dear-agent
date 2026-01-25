@@ -1,0 +1,26 @@
+{
+  "scenario": "setup-wizard-full",
+  "description": "Complete setup wizard with all options selected",
+  "steps": [
+    {
+      "prompt": "Resume existing setup?",
+      "response": { "shouldResume": false }
+    },
+    {
+      "prompt": "Select agents to configure",
+      "response": { "selectedAgents": ["claude-code"] }
+    },
+    {
+      "prompt": "Select MCPs to install",
+      "response": { "selectedMcps": ["GoogleDocs", "Atlassian"] }
+    },
+    {
+      "prompt": "Use chezmoi for dotfile management?",
+      "response": { "useChezmoiManagement": true }
+    },
+    {
+      "prompt": "Confirm setup configuration",
+      "response": { "confirmSetup": true }
+    }
+  ]
+}

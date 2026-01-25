@@ -1,0 +1,14 @@
+{
+  "scenario": "valid-mcp-config",
+  "description": "Valid mcp.json configuration with GoogleDocs MCP",
+  "files": {
+    "/home/testuser/.config/claude-code/mcp.json": {
+      "mcpServers": {
+        "GoogleDocs": {
+          "command": "node",
+          "args": ["/home/testuser/mcp-servers/google-docs-mcp/dist/server.js"]
+        }
+      }
+    }
+  }
+}

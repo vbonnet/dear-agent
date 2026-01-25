@@ -1,0 +1,60 @@
+name: E2E Auth Tests
+
+on:
+  pull_request:
+    paths:
+      - 'src/lib/auth.ts'
+      - 'src/lib/token-storage.ts'
+      - 'src/commands/setup.ts'
+      - 'tests/e2e/auth/**'
+      - '.github/workflows/e2e-auth-tests.yml'
+      - 'package.json'
+      - 'jest.e2e.config.js'
+  push:
+    branches:
+      - main
+
+jobs:
+  e2e-auth-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15  # Increased timeout for E2E tests
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Run E2E auth tests in Docker
+        run: |
+          docker-compose up --build --abort-on-container-exit --exit-code-from tests
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: e2e-auth-test-logs
+          path: logs/
+          retention-days: 7
+
+      - name: Upload coverage
+        if: success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: e2e-coverage
+          path: coverage-e2e/
+          retention-days: 7
+
+      - name: Clean up Docker resources
+        if: always()
+        run: docker-compose down -v

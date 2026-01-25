@@ -1,0 +1,44 @@
+[
+  {
+    "scope": "https://oauth2.googleapis.com:443",
+    "method": "POST",
+    "path": "/device/code",
+    "body": {
+      "client_id": "test-client-id.apps.googleusercontent.com",
+      "scope": "https://www.googleapis.com/auth/documents"
+    },
+    "status": 200,
+    "response": {
+      "device_code": "REDACTED",
+      "user_code": "TEST-CODE",
+      "verification_url": "https://www.google.com/device",
+      "expires_in": 1800,
+      "interval": 5
+    },
+    "headers": {
+      "content-type": "application/json"
+    }
+  },
+  {
+    "scope": "https://oauth2.googleapis.com:443",
+    "method": "POST",
+    "path": "/token",
+    "body": {
+      "client_id": "test-client-id.apps.googleusercontent.com",
+      "client_secret": "REDACTED",
+      "device_code": "REDACTED",
+      "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+    },
+    "status": 200,
+    "response": {
+      "access_token": "REDACTED",
+      "refresh_token": "REDACTED",
+      "expires_in": 3600,
+      "scope": "https://www.googleapis.com/auth/documents",
+      "token_type": "Bearer"
+    },
+    "headers": {
+      "content-type": "application/json"
+    }
+  }
+]

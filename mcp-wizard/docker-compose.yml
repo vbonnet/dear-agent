@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  # OAuth mock server container
+  oauth-mock:
+    image: node:20-alpine
+    command: sh -c "npx oauth2-mock-server --port 8080"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/"]
+      interval: 2s
+      timeout: 1s
+      retries: 10
+
+  # Test runner container
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    depends_on:
+      oauth-mock:
+        condition: service_healthy
+    environment:
+      OAUTH_MOCK_URL: http://oauth-mock:8080
+      NODE_ENV: test
+      CI: "true"
+    network_mode: host  # For PKCE localhost:3000 callbacks
+    volumes:
+      - ./logs:/app/logs  # Preserve test logs
