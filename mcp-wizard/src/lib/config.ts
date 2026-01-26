@@ -55,6 +55,12 @@ export const SUPPORTED_MCPS: McpInfo[] = [
     description: 'Enhanced reasoning with structured thinking',
     requiresAuth: 'none',
   },
+  {
+    id: 'playwright',
+    name: 'Playwright',
+    description: 'Browser automation and testing',
+    requiresAuth: 'none',
+  },
   // Glean requires Glean admin to provision API tokens - not available for self-service
   // {
   //   id: 'glean',
@@ -170,6 +176,10 @@ export async function generateMcpConfig(
       command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
     },
+    Playwright: {
+      command: 'npx',
+      args: ['-y', '@microsoft/mcp-server-playwright'],
+    },
   };
 
   // If no selection provided, include all servers (backward compatible)
@@ -185,6 +195,7 @@ export async function generateMcpConfig(
     atlassian: 'Atlassian',
     github: 'GitHub',
     sequentialthinking: 'SequentialThinking',
+    playwright: 'Playwright',
   };
 
   const filteredServers: Record<string, McpServer> = {};

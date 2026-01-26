@@ -37,6 +37,7 @@ mcp-wizard session-start
 - ✅ **GitHub MCP**: Automated setup with PAT or OAuth (VS Code 1.101+)
 - ✅ **Atlassian MCP**: Auto-configured (OAuth on first use)
 - ✅ **Sequential Thinking MCP**: Enhanced reasoning with structured thinking (no auth required)
+- ✅ **Playwright MCP**: Browser automation and testing (no auth required)
 - ✅ **Prerequisites validation**: Checks Node.js, gcloud CLI, Claude Code
 - ✅ **Multi-agent support**: Claude Code, Cursor, Cline, Windsurf
 - ✅ **Progress tracking**: Visual feedback during setup
@@ -47,6 +48,7 @@ mcp-wizard session-start
 
 - **Node.js:** Version 18.0.0 or later
 - **Configuration:** Company-specific settings (see Configuration section below)
+- **Playwright MCP:** ~300MB Chromium browser binary (auto-downloaded on first use)
 
 ## Configuration
 
@@ -123,10 +125,11 @@ MCP_WIZARD_GLEAN_INSTANCE=staging mcp-wizard setup
 
 **Ready for Testing:**
 - ✅ Prerequisites validation with actionable errors
-- ✅ Interactive MCP selection (GoogleDocs, Atlassian, Sequential Thinking)
+- ✅ Interactive MCP selection (GoogleDocs, Atlassian, GitHub, Sequential Thinking, Playwright)
 - ✅ Google Docs OAuth wizard (GCP Console guide)
 - ✅ Atlassian auto-configuration (mcp-remote OAuth)
 - ✅ Sequential Thinking MCP (zero-config, no authentication)
+- ✅ Playwright MCP (browser automation, zero-config, no authentication)
 - ✅ Multi-agent config (Claude Code, Cursor, Cline, Windsurf)
 - ✅ Setup verification (non-blocking)
 - ✅ 45 unit tests, 89% coverage
