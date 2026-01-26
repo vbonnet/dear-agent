@@ -34,7 +34,7 @@ export const SUPPORTED_MCPS: McpInfo[] = [
   {
     id: 'googledocs',
     name: 'GoogleDocs',
-    description: 'Access Google Docs and Drive',
+    description: 'Access Google Docs and Drive (Community-maintained)',
     requiresAuth: 'oauth',
   },
   {
@@ -42,6 +42,18 @@ export const SUPPORTED_MCPS: McpInfo[] = [
     name: 'Atlassian',
     description: 'Access Jira and Confluence',
     requiresAuth: 'oauth',  // mcp-remote handles OAuth automatically on first use
+  },
+  {
+    id: 'github',
+    name: 'GitHub',
+    description: 'Access GitHub repos, issues, PRs, and Actions',
+    requiresAuth: 'oauth',  // PAT (primary) or OAuth (VS Code 1.101+)
+  },
+  {
+    id: 'sequentialthinking',
+    name: 'Sequential Thinking',
+    description: 'Enhanced reasoning with structured thinking',
+    requiresAuth: 'none',
   },
   // Glean requires Glean admin to provision API tokens - not available for self-service
   // {
@@ -147,6 +159,17 @@ export async function generateMcpConfig(
       command: 'npx',
       args: ['-y', 'mcp-remote@latest', 'https://mcp.atlassian.com/v1/sse', '--auth-timeout', '120'],
     },
+    GitHub: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-github'],
+      env: {
+        GITHUB_PERSONAL_ACCESS_TOKEN: path.join(homedir, 'mcp-servers/github-mcp/.github-token'),
+      },
+    },
+    SequentialThinking: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
+    },
   };
 
   // If no selection provided, include all servers (backward compatible)
@@ -160,6 +183,8 @@ export async function generateMcpConfig(
     glean: 'Glean',
     slack: 'Slack',
     atlassian: 'Atlassian',
+    github: 'GitHub',
+    sequentialthinking: 'SequentialThinking',
   };
 
   const filteredServers: Record<string, McpServer> = {};

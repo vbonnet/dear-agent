@@ -34,7 +34,9 @@ mcp-wizard session-start
 
 - ✅ **Interactive MCP selection**: Choose which MCPs to configure
 - ✅ **Google Docs MCP**: Automated install + OAuth wizard
+- ✅ **GitHub MCP**: Automated setup with PAT or OAuth (VS Code 1.101+)
 - ✅ **Atlassian MCP**: Auto-configured (OAuth on first use)
+- ✅ **Sequential Thinking MCP**: Enhanced reasoning with structured thinking (no auth required)
 - ✅ **Prerequisites validation**: Checks Node.js, gcloud CLI, Claude Code
 - ✅ **Multi-agent support**: Claude Code, Cursor, Cline, Windsurf
 - ✅ **Progress tracking**: Visual feedback during setup
@@ -121,9 +123,10 @@ MCP_WIZARD_GLEAN_INSTANCE=staging mcp-wizard setup
 
 **Ready for Testing:**
 - ✅ Prerequisites validation with actionable errors
-- ✅ Interactive MCP selection (GoogleDocs, Atlassian)
+- ✅ Interactive MCP selection (GoogleDocs, Atlassian, Sequential Thinking)
 - ✅ Google Docs OAuth wizard (GCP Console guide)
 - ✅ Atlassian auto-configuration (mcp-remote OAuth)
+- ✅ Sequential Thinking MCP (zero-config, no authentication)
 - ✅ Multi-agent config (Claude Code, Cursor, Cline, Windsurf)
 - ✅ Setup verification (non-blocking)
 - ✅ 45 unit tests, 89% coverage
@@ -232,6 +235,54 @@ mcp-wizard session-start 2>/dev/null || true
 
 See [docs/SESSIONSTART-HOOK.md](docs/SESSIONSTART-HOOK.md) for complete documentation.
 
+## Supported MCP Servers
+
+### Sequential Thinking MCP
+
+The Sequential Thinking MCP enhances AI reasoning by breaking down complex problems into structured, step-by-step thinking.
+
+**Features:**
+- No authentication required
+- Automatic installation via npx
+- Thought process logging enabled by default
+- Compatible with all AI agents (Claude Code, Cursor, Cline, Windsurf)
+
+**When to use:**
+- Debugging complex issues
+- Planning multi-step implementations
+- Breaking down architectural decisions
+- Analyzing trade-offs and alternatives
+
+**Performance note:**
+Thought logging may add ~50-100ms latency per AI response. If performance is critical, disable logging by manually editing your MCP config:
+
+```json
+{
+  "mcpServers": {
+    "SequentialThinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "env": {
+        "DISABLE_THOUGHT_LOGGING": "true"
+      }
+    }
+  }
+}
+```
+
+**Example prompts:**
+- "Break down this problem step-by-step"
+- "Plan the implementation for [feature] using structured thinking"
+- "Analyze the trade-offs between [option A] and [option B]"
+
+### Google Docs MCP
+
+Automated installation and OAuth setup for Google Docs and Drive access.
+
+### Atlassian MCP
+
+Auto-configured access to Jira and Confluence with automatic OAuth on first use.
+
 ## Project Documentation
 
 All planning and implementation documents are in `docs/`:
@@ -318,6 +369,63 @@ The wizard automatically falls back to manual instructions:
 ```
 
 See `docs/CHEZMOI-INTEGRATION.md` for technical details.
+
+## GitHub MCP
+
+The GitHub MCP provides access to GitHub repositories, issues, pull requests, GitHub Actions, and code security features.
+
+### Authentication Methods
+
+**Personal Access Token (PAT)** - Primary method, works everywhere:
+1. Visit https://github.com/settings/tokens/new
+2. Click "Generate new token (classic)"
+3. Select scopes:
+   - `repo` (full repository access) - **Required**
+   - `read:org` (read organization data) - **Required**
+   - `read:packages` (read package data) - Optional
+   - `workflow` (GitHub Actions access) - Optional
+4. Generate and copy the token
+5. Run `mcp-wizard setup` and select GitHub MCP
+
+**OAuth (VS Code 1.101+)** - Enhanced method (experimental):
+- Requires VS Code version 1.101 or later (released Nov 2024)
+- Browser-based authentication (no manual token generation)
+- Automatic token refresh
+- Falls back to PAT if unavailable
+
+### GitHub Enterprise Server
+
+To use with GitHub Enterprise Server:
+1. Select GitHub MCP during setup
+2. When prompted, choose "GitHub Enterprise Server"
+3. Enter your enterprise URL (e.g., `https://github.company.com`)
+4. Complete authentication (PAT or OAuth)
+
+### Feature Selection
+
+During setup, you can select which GitHub features to enable:
+- **Repositories** - File search, navigation (recommended)
+- **Issues** - Search, create, comment (recommended)
+- **Pull Requests** - Review, status, comment
+- **GitHub Actions** - Workflow monitoring
+- **Code Security** - Vulnerability scanning
+
+### Troubleshooting
+
+**Invalid PAT Scope Error:**
+```
+❌ Missing required scopes: repo, read:org
+```
+Regenerate your token at https://github.com/settings/tokens with the correct scopes.
+
+**OAuth Not Available:**
+```
+⚠ OAuth requires VS Code 1.101+
+```
+Upgrade VS Code or use PAT authentication instead.
+
+**Enterprise Connectivity Issues:**
+Make sure your enterprise URL uses HTTPS and is accessible from your network.
 
 ## Documentation
 

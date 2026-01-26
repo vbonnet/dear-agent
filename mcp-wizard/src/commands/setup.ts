@@ -2,6 +2,7 @@ import inquirer from 'inquirer';
 import { detectEnvironment } from '../lib/detect';
 import { installMcpServers } from '../lib/install';
 import { runGcpSetupGuide, showGcpSetupSummary } from '../guides/gcp-setup';
+import { runGitHubSetupGuide, showGitHubSetupSummary } from '../guides/github-setup';
 // Atlassian uses mcp-remote which handles OAuth automatically - no setup needed
 // import { runAtlassianSetupGuide, showAtlassianSetupSummary } from '../guides/atlassian-setup';
 // Slack requires workspace admin to create official app
@@ -228,7 +229,23 @@ export async function setupCommand(options: SetupOptions = {}): Promise<void> {
       }
     }
 
-    // 5. Atlassian OAuth - HANDLED AUTOMATICALLY by mcp-remote
+    // 5. GitHub Setup (if selected)
+    if (selectedMcps.includes('github')) {
+      if (!state.completedSteps.includes('GITHUB_SETUP')) {
+        console.log('');
+        if (options.dryRun) {
+          console.log('[DRY RUN] Would run GitHub setup guide');
+        } else {
+          await runGitHubSetupGuide();
+          await showGitHubSetupSummary();
+
+          state = updateState(state, SETUP_STATES.WRITE_CONFIG, 'GITHUB_SETUP');
+          await saveState(state);
+        }
+      }
+    }
+
+    // 6. Atlassian OAuth - HANDLED AUTOMATICALLY by mcp-remote
     // Check if we're in SSH and warn about port forwarding requirement
     if (selectedMcps.includes('atlassian')) {
       const isSSH = !!(process.env.SSH_CLIENT || process.env.SSH_TTY || process.env.SSH_CONNECTION);
