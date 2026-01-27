@@ -239,7 +239,7 @@ export async function setupCommand(options: SetupOptions = {}): Promise<void> {
           await runGitHubSetupGuide();
           await showGitHubSetupSummary();
 
-          state = updateState(state, SETUP_STATES.WRITE_CONFIG, 'GITHUB_SETUP');
+          state = updateState(state, SETUP_STATES.WRITE_MCP_CONFIG, 'GITHUB_SETUP');
           await saveState(state);
         }
       }
