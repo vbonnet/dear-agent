@@ -306,7 +306,7 @@ func TestScanDirectory_ManyManifests(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create 100 manifests
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		sessionName := fmt.Sprintf("session-%03d", i)
 		sessionDir := filepath.Join(tmpDir, sessionName)
 		os.MkdirAll(sessionDir, 0755)
@@ -347,7 +347,7 @@ func BenchmarkScanDirectory_100(b *testing.B) {
 	tmpDir := b.TempDir()
 
 	// Setup: Create 100 test manifests
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		sessionDir := filepath.Join(tmpDir, "bench-"+string(rune('0'+i%10))+string(rune('0'+i/10)))
 		os.MkdirAll(sessionDir, 0755)
 		manifestPath := filepath.Join(sessionDir, "manifest.yaml")
@@ -372,7 +372,7 @@ tmux:
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = scanDirectory(tmpDir)
 	}
 }
@@ -382,7 +382,7 @@ func BenchmarkScanDirectory_1000(b *testing.B) {
 	tmpDir := b.TempDir()
 
 	// Setup: Create 1000 test manifests
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		sessionDir := filepath.Join(tmpDir, "stress-"+string(rune('0'+i%10))+string(rune('0'+(i/10)%10))+string(rune('0'+i/100)))
 		os.MkdirAll(sessionDir, 0755)
 		manifestPath := filepath.Join(sessionDir, "manifest.yaml")
@@ -407,7 +407,7 @@ tmux:
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = scanDirectory(tmpDir)
 	}
 }
