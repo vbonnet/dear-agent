@@ -438,6 +438,126 @@ func TestTmuxLock_CrossProcess(t *testing.T) {
 	}
 }
 
+// TestWithTmuxLock_Success tests successful function execution with lock
+func TestWithTmuxLock_Success(t *testing.T) {
+	defer cleanupTmuxLock(t)
+
+	executed := false
+	err := withTmuxLock(func() error {
+		executed = true
+		return nil
+	})
+
+	if err != nil {
+		t.Errorf("withTmuxLock() returned unexpected error: %v", err)
+	}
+
+	if !executed {
+		t.Error("Function was not executed")
+	}
+}
+
+// TestWithTmuxLock_FunctionError tests error propagation from function
+func TestWithTmuxLock_FunctionError(t *testing.T) {
+	defer cleanupTmuxLock(t)
+
+	expectedErr := fmt.Errorf("test error")
+	err := withTmuxLock(func() error {
+		return expectedErr
+	})
+
+	if err != expectedErr {
+		t.Errorf("withTmuxLock() returned %v, expected %v", err, expectedErr)
+	}
+}
+
+// TestWithTmuxLock_LockAlreadyHeld tests double-lock detection
+func TestWithTmuxLock_LockAlreadyHeld(t *testing.T) {
+	defer cleanupTmuxLock(t)
+
+	// Acquire lock manually
+	if err := AcquireTmuxLock(); err != nil {
+		t.Fatalf("AcquireTmuxLock() failed: %v", err)
+	}
+	defer ReleaseTmuxLock()
+
+	// Try to use withTmuxLock while lock is held
+	err := withTmuxLock(func() error {
+		return nil
+	})
+
+	if err == nil {
+		t.Error("withTmuxLock() should have failed with lock already held")
+	}
+}
+
+// TestWithTmuxLock_PanicRecovery tests lock release on panic
+func TestWithTmuxLock_PanicRecovery(t *testing.T) {
+	defer cleanupTmuxLock(t)
+
+	// Execute function that panics
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("Expected panic but didn't get one")
+			}
+		}()
+
+		withTmuxLock(func() error {
+			panic("test panic")
+		})
+	}()
+
+	// Lock should have been released via defer
+	// Try to acquire it again
+	if err := AcquireTmuxLock(); err != nil {
+		t.Errorf("Lock not released after panic: %v", err)
+	}
+	defer ReleaseTmuxLock()
+}
+
+// TestWithTmuxLock_ConcurrentAccess tests concurrent withTmuxLock calls
+func TestWithTmuxLock_ConcurrentAccess(t *testing.T) {
+	defer cleanupTmuxLock(t)
+
+	const numGoroutines = 10
+	var wg sync.WaitGroup
+	var successCount atomic.Int32
+	var lockFailures atomic.Int32
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			err := withTmuxLock(func() error {
+				// Simulate work
+				time.Sleep(10 * time.Millisecond)
+				return nil
+			})
+
+			if err != nil {
+				lockFailures.Add(1)
+			} else {
+				successCount.Add(1)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// At least some operations should succeed
+	if successCount.Load() == 0 {
+		t.Error("No operations succeeded")
+	}
+
+	// Success + failures should equal total attempts
+	total := int(successCount.Load()) + int(lockFailures.Load())
+	if total != numGoroutines {
+		t.Errorf("Operation count mismatch: got %d, expected %d", total, numGoroutines)
+	}
+}
+
 // Helper: cleanup tmux lock before test
 func cleanupTmuxLock(t *testing.T) {
 	t.Helper()

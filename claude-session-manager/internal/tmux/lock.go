@@ -68,3 +68,23 @@ func ReleaseTmuxLock() error {
 	tmuxServerLock = nil // Clear after unlock
 	return err
 }
+
+// withTmuxLock executes the provided function while holding the tmux server lock.
+// The lock is automatically acquired before fn executes and released after (even on panic).
+//
+// This helper consolidates the lock acquisition/release pattern used across tmux operations,
+// ensuring consistent error handling and preventing lock leaks.
+//
+// Example:
+//
+//	return withTmuxLock(func() error {
+//	    // ... tmux operation code ...
+//	    return nil
+//	})
+func withTmuxLock(fn func() error) error {
+	if err := AcquireTmuxLock(); err != nil {
+		return fmt.Errorf("failed to acquire tmux lock: %w", err)
+	}
+	defer ReleaseTmuxLock()
+	return fn()
+}

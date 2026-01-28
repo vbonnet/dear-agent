@@ -28,32 +28,29 @@ func NewInitSequence(sessionName string) *InitSequence {
 // Note: Caller is responsible for waiting for ready-file signal after this completes.
 func (seq *InitSequence) Run() error {
 	// Lock tmux server for init sequence (prevent parallel command sends)
-	if err := AcquireTmuxLock(); err != nil {
-		return fmt.Errorf("failed to acquire tmux lock: %w", err)
-	}
-	defer ReleaseTmuxLock()
+	return withTmuxLock(func() error {
+		// Step 1: Start control mode
+		ctrl, err := StartControlMode(seq.SessionName)
+		if err != nil {
+			return fmt.Errorf("failed to start control mode: %w", err)
+		}
+		defer ctrl.Close()
 
-	// Step 1: Start control mode
-	ctrl, err := StartControlMode(seq.SessionName)
-	if err != nil {
-		return fmt.Errorf("failed to start control mode: %w", err)
-	}
-	defer ctrl.Close()
+		// Create output watcher to monitor control mode stream
+		watcher := NewOutputWatcher(ctrl.Stdout)
 
-	// Create output watcher to monitor control mode stream
-	watcher := NewOutputWatcher(ctrl.Stdout)
+		// Step 2: Prime the session with /rename
+		if err := seq.sendRename(ctrl, watcher); err != nil {
+			return fmt.Errorf("rename failed: %w", err)
+		}
 
-	// Step 2: Prime the session with /rename
-	if err := seq.sendRename(ctrl, watcher); err != nil {
-		return fmt.Errorf("rename failed: %w", err)
-	}
+		// Step 3: Associate the session
+		if err := seq.sendAssociation(ctrl, watcher); err != nil {
+			return fmt.Errorf("association failed: %w", err)
+		}
 
-	// Step 3: Associate the session
-	if err := seq.sendAssociation(ctrl, watcher); err != nil {
-		return fmt.Errorf("association failed: %w", err)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 // sendRename sends the /rename command and waits for it to complete

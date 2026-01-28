@@ -42,52 +42,49 @@ func NewSession(name string, workDir string) error {
 	}
 
 	// Lock tmux server for session creation + settings (prevent parallel mutations)
-	if err := AcquireTmuxLock(); err != nil {
-		return fmt.Errorf("failed to acquire tmux lock: %w", err)
-	}
-	defer ReleaseTmuxLock()
-
-	// Create session with detached mode
-	cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "new-session", "-d", "-s", name, "-c", workDir)
-	defer cancel()
-	if err := cmd.Run(); err != nil {
-		// Check for timeout
-		if ctx.Err() == context.DeadlineExceeded {
-			return &TimeoutError{
-				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
-				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
-				Duration: globalTimeout,
-			}
-		}
-		return fmt.Errorf("failed to create tmux session: %w", err)
-	}
-
-	// Inject tmux settings for better UX
-	// These settings improve multi-device usage, copy/paste, and mouse support
-	// IMPORTANT: Run as actual tmux commands, NOT via send-keys (which sends to bash shell)
-	type tmuxSetting struct {
-		args        []string
-		description string
-	}
-	settings := []tmuxSetting{
-		{[]string{"set-window-option", "-t", name, "aggressive-resize", "on"}, "Fix multi-device layout conflicts"},
-		{[]string{"set-option", "-t", name, "window-size", "latest"}, "Force window to fit current screen"},
-		{[]string{"set", "-t", name, "mouse", "on"}, "Enable mouse scrolling"},
-		{[]string{"set", "-s", "set-clipboard", "on"}, "Enable OSC 52 for Cmd-C over SSH"},
-	}
-
-	for _, setting := range settings {
-		// Build full command args: ["tmux", "-S", socketPath, ...setting.args]
-		cmdArgs := append([]string{"-S", socketPath}, setting.args...)
-		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", cmdArgs...)
+	return withTmuxLock(func() error {
+		// Create session with detached mode
+		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "new-session", "-d", "-s", name, "-c", workDir)
+		defer cancel()
 		if err := cmd.Run(); err != nil {
-			// Log warning but don't fail - these are UX improvements, not critical
-			fmt.Fprintf(os.Stderr, "Warning: Failed to apply tmux setting '%s': %v\n", setting.description, err)
+			// Check for timeout
+			if ctx.Err() == context.DeadlineExceeded {
+				return &TimeoutError{
+					Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
+					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+					Duration: globalTimeout,
+				}
+			}
+			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
-		cancel()
-	}
 
-	return nil
+		// Inject tmux settings for better UX
+		// These settings improve multi-device usage, copy/paste, and mouse support
+		// IMPORTANT: Run as actual tmux commands, NOT via send-keys (which sends to bash shell)
+		type tmuxSetting struct {
+			args        []string
+			description string
+		}
+		settings := []tmuxSetting{
+			{[]string{"set-window-option", "-t", name, "aggressive-resize", "on"}, "Fix multi-device layout conflicts"},
+			{[]string{"set-option", "-t", name, "window-size", "latest"}, "Force window to fit current screen"},
+			{[]string{"set", "-t", name, "mouse", "on"}, "Enable mouse scrolling"},
+			{[]string{"set", "-s", "set-clipboard", "on"}, "Enable OSC 52 for Cmd-C over SSH"},
+		}
+
+		for _, setting := range settings {
+			// Build full command args: ["tmux", "-S", socketPath, ...setting.args]
+			cmdArgs := append([]string{"-S", socketPath}, setting.args...)
+			cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", cmdArgs...)
+			if err := cmd.Run(); err != nil {
+				// Log warning but don't fail - these are UX improvements, not critical
+				fmt.Fprintf(os.Stderr, "Warning: Failed to apply tmux setting '%s': %v\n", setting.description, err)
+			}
+			cancel()
+		}
+
+		return nil
+	})
 }
 
 // AttachSession attaches to tmux session or switches if already inside tmux
@@ -183,45 +180,42 @@ func SendCommand(sessionName string, command string) error {
 	socketPath := GetSocketPath()
 
 	// Lock tmux server for send-keys operations (prevent interleaved sends)
-	if err := AcquireTmuxLock(); err != nil {
-		return fmt.Errorf("failed to acquire tmux lock: %w", err)
-	}
-	defer ReleaseTmuxLock()
-
-	// Send command text using -l (literal) flag
-	cmdText, cancel1 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, "-l", command)
-	defer cancel1()
-	if err := cmdText.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return &TimeoutError{
-				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
-				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
-				Duration: globalTimeout,
+	return withTmuxLock(func() error {
+		// Send command text using -l (literal) flag
+		cmdText, cancel1 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, "-l", command)
+		defer cancel1()
+		if err := cmdText.Run(); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return &TimeoutError{
+					Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
+					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+					Duration: globalTimeout,
+				}
 			}
+			return fmt.Errorf("failed to send command text to tmux: %w", err)
 		}
-		return fmt.Errorf("failed to send command text to tmux: %w", err)
-	}
 
-	// Small delay to ensure tmux processes the text before we send Enter
-	// See: https://github.com/tmux/tmux/issues/1778
-	// Without this delay, text may not be fully received before Enter is processed
-	time.Sleep(100 * time.Millisecond)
+		// Small delay to ensure tmux processes the text before we send Enter
+		// See: https://github.com/tmux/tmux/issues/1778
+		// Without this delay, text may not be fully received before Enter is processed
+		time.Sleep(100 * time.Millisecond)
 
-	// Send Enter key separately (required - sending C-m in same command creates newline in prompt)
-	cmdEnter, cancel2 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, "C-m")
-	defer cancel2()
-	if err := cmdEnter.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return &TimeoutError{
-				Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
-				Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
-				Duration: globalTimeout,
+		// Send Enter key separately (required - sending C-m in same command creates newline in prompt)
+		cmdEnter, cancel2 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, "C-m")
+		defer cancel2()
+		if err := cmdEnter.Run(); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return &TimeoutError{
+					Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
+					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+					Duration: globalTimeout,
+				}
 			}
+			return fmt.Errorf("failed to send Enter key to tmux: %w", err)
 		}
-		return fmt.Errorf("failed to send Enter key to tmux: %w", err)
-	}
 
-	return nil
+		return nil
+	})
 }
 
 // Version returns tmux version
