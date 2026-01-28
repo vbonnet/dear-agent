@@ -372,7 +372,7 @@ tmux:
 	}
 
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		_, _ = scanDirectory(tmpDir)
 	}
 }
@@ -407,7 +407,7 @@ tmux:
 	}
 
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		_, _ = scanDirectory(tmpDir)
 	}
 }
