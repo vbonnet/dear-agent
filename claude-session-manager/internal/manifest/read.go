@@ -70,23 +70,17 @@ func List(dir string) ([]*Manifest, error) {
 }
 
 // scanDirectory scans a single directory for session manifests
+// Uses filepath.Glob to find all manifest.yaml files in immediate subdirectories
 func scanDirectory(dir string) ([]*Manifest, error) {
-	entries, err := os.ReadDir(dir)
+	// Find all manifest.yaml files in immediate subdirectories
+	pattern := filepath.Join(dir, "*/manifest.yaml")
+	manifestPaths, err := filepath.Glob(pattern)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read sessions directory: %w", err)
+		return nil, fmt.Errorf("failed to find manifests: %w", err)
 	}
 
 	var manifests []*Manifest
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		manifestPath := filepath.Join(dir, entry.Name(), "manifest.yaml")
-		if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
-			continue
-		}
-
+	for _, manifestPath := range manifestPaths {
 		m, err := Read(manifestPath)
 		if err != nil {
 			// Skip invalid manifests, continue processing
