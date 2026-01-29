@@ -9,6 +9,7 @@ import { getConfigValue } from './user-config';
 export interface McpServer {
   command: string;
   args: string[];
+  defer?: boolean;
   env?: Record<string, string>;
 }
 
@@ -144,6 +145,7 @@ export async function generateMcpConfig(
       // No env vars needed - the server expects credentials.json and token.json
       // in /home/user/mcp-servers/google-docs-mcp/ (hardcoded paths)
       // For service account auth, use: env: { SERVICE_ACCOUNT_PATH: '/path/to/service-account.json' }
+      defer: true,
     },
     Glean: {
       command: 'npx',
@@ -152,6 +154,7 @@ export async function generateMcpConfig(
         GLEAN_INSTANCE: getConfigValue('company.glean_instance'),
         GLEAN_API_TOKEN: path.join(homedir, 'mcp-servers/glean-mcp/.glean-token'),
       },
+      defer: true,
     },
     Slack: {
       command: 'npx',
@@ -160,10 +163,12 @@ export async function generateMcpConfig(
         SLACK_BOT_TOKEN: path.join(homedir, 'mcp-servers/slack-mcp/.slack-token'),
         SLACK_TEAM_ID: path.join(homedir, 'mcp-servers/slack-mcp/.slack-team-id'),
       },
+      defer: true,
     },
     Atlassian: {
       command: 'npx',
       args: ['-y', 'mcp-remote@latest', 'https://mcp.atlassian.com/v1/sse', '--auth-timeout', '120'],
+      defer: true,
     },
     GitHub: {
       command: 'npx',
@@ -171,14 +176,17 @@ export async function generateMcpConfig(
       env: {
         GITHUB_PERSONAL_ACCESS_TOKEN: path.join(homedir, 'mcp-servers/github-mcp/.github-token'),
       },
+      defer: true,
     },
     SequentialThinking: {
       command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
+      defer: true,
     },
     Playwright: {
       command: 'npx',
       args: ['-y', '@microsoft/mcp-server-playwright'],
+      defer: true,
     },
   };
 
