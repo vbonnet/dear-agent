@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # OAuth mock server container
+  # OAuth mock server container (for E2E tests)
   oauth-mock:
     image: node:20-alpine
     command: sh -c "npx oauth2-mock-server --port 8080"
@@ -12,12 +12,15 @@ services:
       interval: 2s
       timeout: 1s
       retries: 10
+    profiles:
+      - e2e
 
-  # Test runner container
-  tests:
+  # E2E test runner container
+  e2e-tests:
     build:
       context: .
       dockerfile: Dockerfile.test
+    command: npm run test:e2e
     depends_on:
       oauth-mock:
         condition: service_healthy
@@ -25,6 +28,23 @@ services:
       OAUTH_MOCK_URL: http://oauth-mock:8080
       NODE_ENV: test
       CI: "true"
-    network_mode: host  # For PKCE localhost:3000 callbacks
+    network_mode: host
     volumes:
-      - ./logs:/app/logs  # Preserve test logs
+      - ./logs:/app/logs
+    profiles:
+      - e2e
+
+  # Integration test runner container (runs by default)
+  integration-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    command: npm test -- tests/integration/
+    environment:
+      NODE_ENV: test
+      CI: "true"
+    volumes:
+      - ./coverage:/app/coverage
+    profiles:
+      - integration
+      - default

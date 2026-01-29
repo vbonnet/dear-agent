@@ -1,0 +1,45 @@
+name: Integration Tests
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'mcp-wizard/**'
+      - '.github/workflows/integration-tests.yml'
+
+defaults:
+  run:
+    working-directory: mcp-wizard
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run integration tests
+        run: docker compose --profile integration up --build --abort-on-container-exit
+        working-directory: mcp-wizard
+
+      - name: Check test results
+        if: always()
+        run: docker compose logs integration-tests
+        working-directory: mcp-wizard
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: mcp-wizard/coverage/
+          if-no-files-found: ignore
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
+        working-directory: mcp-wizard
