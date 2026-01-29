@@ -12,7 +12,8 @@ npm install -g mcp-wizard
 mcp-wizard
 
 # Or specify MCPs via CLI
-mcp-wizard setup --mcps=googledocs,atlassian
+mcp-wizard setup --mcps=github
+mcp-wizard setup --mcps=googledocs,atlassian,github
 
 # Resume from previous session
 mcp-wizard setup --resume
@@ -429,6 +430,8 @@ Upgrade VS Code or use PAT authentication instead.
 
 **Enterprise Connectivity Issues:**
 Make sure your enterprise URL uses HTTPS and is accessible from your network.
+
+**For complete troubleshooting guide, see:** [docs/github-troubleshooting.md](docs/github-troubleshooting.md)
 
 ## Documentation
 

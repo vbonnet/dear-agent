@@ -121,10 +121,10 @@ async function setupPAT(): Promise<void> {
       mask: '*',
       validate: (input: string) => {
         if (!input || input.length < 20) {
-          return 'Token appears invalid (too short)';
+          return 'Token appears invalid (too short). GitHub PATs are typically 40+ characters.';
         }
         if (!input.startsWith('ghp_') && !input.startsWith('github_pat_')) {
-          return 'Token should start with "ghp_" or "github_pat_"';
+          return `Invalid GitHub PAT format. Tokens must start with "ghp_" (classic) or "github_pat_" (fine-grained).\nGenerate a PAT at ${GITHUB_TOKEN_URL}`;
         }
         return true;
       },
