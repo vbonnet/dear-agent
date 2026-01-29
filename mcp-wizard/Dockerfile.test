@@ -5,12 +5,13 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 COPY tsconfig.json ./
+COPY jest.config.js ./
 
 # Copy source code first (needed for any install scripts)
 COPY src ./src
 COPY tests ./tests
 
-# Install dependencies - use --ignore-scripts to avoid build during install
+# Install dependencies
 RUN npm ci --ignore-scripts
 
 # Now run the build
