@@ -13,6 +13,7 @@ var (
 	Version   = "2.0.0-dev"
 	GitCommit = "unknown"
 	BuildDate = "unknown"
+	BuiltBy   = "unknown"
 )
 
 var versionCmd = &cobra.Command{
@@ -27,7 +28,7 @@ var versionCmd = &cobra.Command{
 		fmt.Printf("csm version %s\n", Version)
 		fmt.Printf("  binary: %s\n", executable)
 		fmt.Printf("  git commit: %s\n", GitCommit)
-		fmt.Printf("  built: %s\n", BuildDate)
+		fmt.Printf("  built: %s by %s\n", BuildDate, BuiltBy)
 		fmt.Printf("  go version: %s\n", runtime.Version())
 	},
 }

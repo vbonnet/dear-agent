@@ -14,6 +14,7 @@ var (
 	Version   = "2.0.0-dev"
 	GitCommit = "unknown"
 	BuildDate = "unknown"
+	BuiltBy   = "unknown"
 )
 
 func main() {

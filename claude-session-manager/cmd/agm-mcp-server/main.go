@@ -14,6 +14,7 @@ var (
 	Version   = "1.0.0-dev"
 	GitCommit = "unknown"
 	BuildDate = "unknown"
+	BuiltBy   = "unknown"
 )
 
 // Main entry point for AGM MCP server

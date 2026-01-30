@@ -4,22 +4,26 @@
 VERSION ?= 2.0.0-dev
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+BUILT_BY ?= $(shell whoami)
 
 # Ldflags for version injection
 LDFLAGS_CSM = -s -w \
 	-X main.Version=$(VERSION) \
 	-X main.GitCommit=$(GIT_COMMIT) \
-	-X main.BuildDate=$(BUILD_DATE)
+	-X main.BuildDate=$(BUILD_DATE) \
+	-X main.BuiltBy=$(BUILT_BY)
 
 LDFLAGS_REAPER = -s -w \
 	-X main.Version=$(VERSION) \
 	-X main.GitCommit=$(GIT_COMMIT) \
-	-X main.BuildDate=$(BUILD_DATE)
+	-X main.BuildDate=$(BUILD_DATE) \
+	-X main.BuiltBy=$(BUILT_BY)
 
 LDFLAGS_AGM = -s -w \
 	-X main.Version=$(VERSION) \
 	-X main.GitCommit=$(GIT_COMMIT) \
-	-X main.BuildDate=$(BUILD_DATE)
+	-X main.BuildDate=$(BUILD_DATE) \
+	-X main.BuiltBy=$(BUILT_BY)
 
 build:
 	go build -ldflags="$(LDFLAGS_CSM)" -o bin/csm ./cmd/csm
