@@ -15,12 +15,14 @@ import (
 )
 
 var (
-	createJSON           bool
-	createWorkingDir     string
-	createSessionsDir    string
-	createStartupTimeout int
-	createAddDirs        []string
+	createJSON            bool
+	createWorkingDir      string
+	createSessionsDir     string
+	createStartupTimeout  int
+	createAddDirs         []string
 	createSkipPermissions bool
+	createPrompt          string
+	createPromptFile      string
 )
 
 // sessionNameRegex validates session names (alphanumeric, hyphens, underscores only)
@@ -97,6 +99,19 @@ func init() {
 		false,
 		"Skip permission prompts (passes --dangerously-skip-permissions to claude)",
 	)
+	testCreateCmd.Flags().StringVar(
+		&createPrompt,
+		"prompt",
+		"",
+		"Prompt to send after session initialization",
+	)
+	testCreateCmd.Flags().StringVar(
+		&createPromptFile,
+		"prompt-file",
+		"",
+		"File containing prompt to send",
+	)
+	testCreateCmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")
 
 	testCmd.AddCommand(testCreateCmd)
 }
@@ -233,6 +248,21 @@ func createTestSession(name, tmuxName, workingDir, sessionsDir string, timeoutSe
 	timeout := time.Duration(timeoutSec) * time.Second
 	if err := tmux.WaitForClaudePrompt(tmuxName, timeout); err != nil {
 		return nil, fmt.Errorf("Claude startup timeout after %ds: %w\n\nSuggestions:\n  • Increase timeout: --startup-timeout %d\n  • Check Claude is working: claude --version\n  • View session output: tmux attach -t %s", timeoutSec, err, timeoutSec+30, tmuxName)
+	}
+
+	// Step 6: Send prompt if provided via --prompt or --prompt-file flags
+	if createPrompt != "" {
+		if err := tmux.SendPromptLiteral(tmuxName, createPrompt); err != nil {
+			// Non-fatal - log warning and continue
+			fmt.Printf("Warning: failed to send prompt: %v\n", err)
+			fmt.Println("  • You can manually enter the prompt in the session")
+		}
+	} else if createPromptFile != "" {
+		if err := tmux.SendPromptFromFile(tmuxName, createPromptFile); err != nil {
+			// Non-fatal - log warning and continue
+			fmt.Printf("Warning: failed to send prompt from file: %v\n", err)
+			fmt.Println("  • You can manually enter the prompt in the session")
+		}
 	}
 
 	startupTime := time.Since(startTime)
