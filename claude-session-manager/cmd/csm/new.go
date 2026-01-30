@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,9 +24,11 @@ import (
 )
 
 var (
-	detached  bool
-	agentName string
-	projectID string
+	detached   bool
+	agentName  string
+	projectID  string
+	prompt     string
+	promptFile string
 )
 
 var newCmd = &cobra.Command{
@@ -622,8 +625,25 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			// Wait for /csm-assoc skill to finish outputting its completion messages
 			// The ready-file signals when 'csm associate' binary completes, but the skill
 			// continues to output messages after that. Give it time to finish.
-			debug.Log("Waiting for /csm-assoc skill to complete output (0.5s)")
+			debug.Log("Waiting for /csm-assoc skill to complete output")
+			// NOTE: Skill completion detection not yet implemented (requires control mode output channel)
+			// Using fixed sleep as fallback
 			time.Sleep(500 * time.Millisecond)
+
+			// Send prompt if provided via --prompt or --prompt-file flags
+			if prompt != "" {
+				debug.Log("Sending prompt from --prompt flag")
+				if err := tmux.SendPromptLiteral(sessionName, prompt); err != nil {
+					log.Printf("Warning: failed to send prompt: %v", err)
+					fmt.Println("  • You can manually enter the prompt in the session")
+				}
+			} else if promptFile != "" {
+				debug.Log("Sending prompt from --prompt-file flag: %s", promptFile)
+				if err := tmux.SendPromptFromFile(sessionName, promptFile); err != nil {
+					log.Printf("Warning: failed to send prompt from file: %v", err)
+					fmt.Println("  • You can manually enter the prompt in the session")
+				}
+			}
 		}
 	} else {
 		// API-based agents - no initialization sequence needed
@@ -935,5 +955,8 @@ func init() {
 	newCmd.Flags().BoolVar(&detached, "detached", false, "Create detached session without attaching")
 	newCmd.Flags().StringVar(&agentName, "agent", "", "AI agent to use (claude, gemini, gpt)")
 	newCmd.Flags().StringVar(&projectID, "project-id", "", "GCP project ID (required for gemini agent)")
+	newCmd.Flags().StringVar(&prompt, "prompt", "", "Prompt to send after session initialization")
+	newCmd.Flags().StringVar(&promptFile, "prompt-file", "", "File containing prompt to send")
+	newCmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")
 	// agent flag is now optional - prompt shown if omitted
 }
