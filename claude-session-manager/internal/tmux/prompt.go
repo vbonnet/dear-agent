@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 )
 
 const maxPromptFileSize = 10 * 1024 // 10KB
@@ -12,6 +13,16 @@ const maxPromptFileSize = 10 * 1024 // 10KB
 // SendPromptLiteral sends prompt text to tmux session in literal mode
 // (-l flag prevents special character interpretation), then sends Enter separately
 func SendPromptLiteral(target, prompt string) error {
+	// Step 0: Send ESC to interrupt any thinking state
+	// This prevents prompts from being queued as "pasted text"
+	cmdEsc := exec.Command("tmux", "send-keys", "-t", target, "Escape")
+	if err := cmdEsc.Run(); err != nil {
+		return fmt.Errorf("failed to send Escape: %w", err)
+	}
+
+	// Wait for session to process ESC
+	time.Sleep(500 * time.Millisecond)
+
 	// Step 1: Send text in literal mode
 	cmd1 := exec.Command("tmux", "send-keys", "-t", target, "-l", prompt)
 	if err := cmd1.Run(); err != nil {
