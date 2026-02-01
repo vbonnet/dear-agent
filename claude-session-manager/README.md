@@ -355,6 +355,88 @@ gcloud config set project your-project-id
 **Flags:**
 - `--max-results <N>` - Maximum results to return (default: 10)
 
+### `csm send <session-name> [flags]`
+
+Send a message/prompt to a running CSM session, interrupting any active thinking state:
+
+```bash
+# Send inline prompt
+csm send my-session --prompt "Please review the code"
+
+# Send prompt from file (for large multi-line prompts)
+csm send my-session --prompt-file /path/to/prompt.txt
+```
+
+**Features:**
+- **Auto-interrupt**: Sends ESC to interrupt thinking before sending prompt
+- **Literal mode**: Uses tmux `-l` flag to prevent special character interpretation
+- **Reliable execution**: Prompt is executed as command, not queued as "pasted text"
+- **Large prompts**: Supports up to 10KB prompt files
+
+**Use cases:**
+- Automated recovery of stuck sessions (used by astrocyte daemon)
+- Sending diagnosis prompts to investigate hangs
+- Batch message delivery to multiple sessions
+
+**Important:** Session must be running (active tmux session). This command executes the prompt immediately, bypassing any thinking/processing state.
+
+**Flags:**
+- `--prompt <text>` - Prompt text to send
+- `--prompt-file <path>` - File containing prompt to send (max 10KB)
+
+**Example:**
+```bash
+# Send diagnosis request to stuck session
+csm send gemini-research --prompt "⚠️ Your session was stuck. Please analyze what caused the hang and file an incident report."
+
+# Send multi-line prompt from file
+csm send my-session --prompt-file ~/templates/code-review-prompt.txt
+```
+
+### `csm reject <session-name> [flags]`
+
+Reject a permission prompt with a custom reason (automates the Down → Tab → paste → Enter flow):
+
+```bash
+# Reject with inline reason
+csm reject my-session --reason "Use Read tool instead of cat"
+
+# Reject with violation prompt from file
+csm reject my-session --reason-file ~/prompts/VIOLATION-PROMPTS.md
+```
+
+**Features:**
+- **Automated navigation**: Navigates to "No" option using arrow keys
+- **Custom reasoning**: Adds rejection reason as additional instructions
+- **Smart extraction**: Extracts "## Standard Prompt (Recommended)" from markdown files
+- **Literal mode**: Uses tmux `-l` flag for reliable text transmission
+
+**Use cases:**
+- Rejecting bash commands that violate tool usage guidelines
+- Providing feedback on why a permission was denied
+- Automated enforcement of coding standards
+
+**Important:** Session must be showing a permission prompt with a "No" option. This command assumes "No" is the second option (requires one Down keypress).
+
+**Flags:**
+- `--reason <text>` - Rejection reason to send
+- `--reason-file <path>` - File containing rejection reason (max 10KB)
+
+**Example:**
+```bash
+# Reject tool usage violation
+csm reject my-session --reason-file ~/src/ws/oss/tool-usage-analysis/prompts/VIOLATION-PROMPTS.md
+
+# Reject with custom feedback
+csm reject my-session --reason "Please use absolute paths and separate tool calls. Read the bash tool guidance at ~/docs/bash-rules.md"
+```
+
+**Workflow executed:**
+1. Send Down key to navigate to "No" option
+2. Send Tab key to add additional instructions
+3. Send rejection reason text in literal mode
+4. Send Enter to submit
+
 ## Accessibility
 
 CSM supports WCAG AA accessibility standards through global flags and environment variables:
