@@ -97,11 +97,23 @@ func runReject(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 1: Navigate to "No" option (press Down once)
-	if err := exec.Command("tmux", "send-keys", "-t", sessionName, "Down").Run(); err != nil {
-		return fmt.Errorf("failed to navigate to No option: %w", err)
+	// Step 1: Detect number of options and navigate to "No"
+	// Permission prompts have either:
+	//   2 options: 1. Yes, 2. No              (press Down once)
+	//   3 options: 1. Yes, 2. Don't ask, 3. No (press Down twice)
+	downPresses, err := detectNoOptionPosition(sessionName)
+	if err != nil {
+		return fmt.Errorf("failed to detect No option position: %w", err)
 	}
-	time.Sleep(300 * time.Millisecond)
+
+	// Navigate to "No" option
+	for i := 0; i < downPresses; i++ {
+		if err := exec.Command("tmux", "send-keys", "-t", sessionName, "Down").Run(); err != nil {
+			return fmt.Errorf("failed to navigate to No option: %w", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
 
 	// Step 2: Press Tab to add instructions
 	if err := exec.Command("tmux", "send-keys", "-t", sessionName, "Tab").Run(); err != nil {
@@ -122,6 +134,45 @@ func runReject(cmd *cobra.Command, args []string) error {
 
 	ui.PrintSuccess(fmt.Sprintf("Rejected permission prompt in '%s' with reason (%d chars)", sessionName, len(reason)))
 	return nil
+}
+
+// detectNoOptionPosition detects how many Down presses are needed to reach "No" option
+// Returns:
+//   1 for 2-option prompts (1. Yes, 2. No)
+//   2 for 3-option prompts (1. Yes, 2. Don't ask, 3. No)
+func detectNoOptionPosition(sessionName string) (int, error) {
+	// Capture pane content
+	out, err := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p").Output()
+	if err != nil {
+		return 0, fmt.Errorf("failed to capture pane: %w", err)
+	}
+
+	content := string(out)
+	lines := splitRejectLines(content)
+
+	// Look for numbered options in reverse (No is always last)
+	// Patterns: "   2. No" or "   3. No"
+	noOptionNum := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		// Check for "2. No" or "3. No" (with optional whitespace and selection marker)
+		if (containsReject(line, "2. No") || containsReject(line, "2.No")) {
+			noOptionNum = 2
+			break
+		}
+		if (containsReject(line, "3. No") || containsReject(line, "3.No")) {
+			noOptionNum = 3
+			break
+		}
+	}
+
+	if noOptionNum == 0 {
+		return 0, fmt.Errorf("could not find No option in permission prompt")
+	}
+
+	// Return number of Down presses needed (option number - 1)
+	// Option 2 = 1 Down press, Option 3 = 2 Down presses
+	return noOptionNum - 1, nil
 }
 
 // extractStandardPrompt extracts the "## Standard Prompt (Recommended)" section from markdown
