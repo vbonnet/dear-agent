@@ -1,0 +1,7 @@
+Bash command
+chmod 777 /important/file
+
+Do you want to proceed?
+❯ 1. Yes
+  2. No
+  3. Edit

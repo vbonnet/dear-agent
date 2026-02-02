@@ -1,0 +1,29 @@
+ ▐▛███▜▌   Claude Code v2.1.17
+▝▜█████▛▘  Sonnet 4.5 · API Usage Billing
+  ▘▘ ▝▝    ~/src/ws/oss/csm-astrocyte
+
+Bash command
+cat << 'EOF' > /etc/systemd/system/astrocyte.service
+[Unit]
+Description=Astrocyte Daemon - Claude Code Session Manager Watchdog
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -u /home/user/src/ws/oss/csm-astrocyte/astrocyte.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=astrocyte
+User=user
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+Do you want to proceed?
+❯ 1. Yes
+  2. No
+  3. Edit

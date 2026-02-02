@@ -1,0 +1,14 @@
+ ▐▛███▜▌   Claude Code v2.1.17
+▝▜█████▛▘  Sonnet 4.5 · API Usage Billing
+  ▘▘ ▝▝    ~/src
+
+Bash command
+cat << 'EOF' > config.yaml
+key1: value1
+key2: value2
+EOF
+
+Do you want to proceed?
+❯ 1. Yes
+  2. No
+  3. Edit

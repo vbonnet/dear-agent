@@ -1,0 +1,13 @@
+ ▐▛███▜▌   Claude Code v2.1.17
+▝▜█████▛▘  Sonnet 4.5 · API Usage Billing
+  ▘▘ ▝▝    ~/src
+
+Bash command
+cat << 'EOF' > /tmp/test.txt
+Hello World
+EOF
+
+Do you want to proceed?
+❯ 1. Yes
+  2. No
+  3. Edit
