@@ -17,8 +17,9 @@ const (
 	// PromptDetectionTimeout is how long to wait for Claude to return to prompt
 	// before falling back to timer-based waiting. This should be generous enough
 	// to handle slow responses but not so long that stuck sessions block indefinitely.
-	// Increased to 5 minutes to handle long-running slash commands.
-	PromptDetectionTimeout = 5 * time.Minute
+	// Reduced to 90 seconds after fixing GetRawLine blocking bug. Most commands complete
+	// within seconds; if no prompt after 90s, likely stuck and fallback should trigger.
+	PromptDetectionTimeout = 90 * time.Second
 
 	// PaneCloseTimeout is how long to wait for the tmux pane to close after sending /exit.
 	// Claude should exit quickly after receiving /exit command, but we allow extra time for
@@ -28,8 +29,8 @@ const (
 	// FallbackWaitTime is used when prompt detection fails or times out.
 	// This is a conservative estimate of how long Claude might take to finish
 	// a response and return to the prompt.
-	// Increased to 3 minutes to handle long-running slash commands and complex responses.
-	FallbackWaitTime = 3 * time.Minute
+	// Reduced to 60 seconds to avoid excessive waiting for stuck sessions.
+	FallbackWaitTime = 60 * time.Second
 )
 
 // Reaper manages the async archival process for a CSM session

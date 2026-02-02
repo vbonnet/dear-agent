@@ -39,9 +39,18 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 	lastContent := ""
 	linesChecked := 0
 
+	lastLog := time.Now()
+
 	for time.Now().Before(deadline) {
+		// Log progress every 10 seconds for debugging hangs
+		if time.Since(lastLog) > 10*time.Second {
+			debug.Log("⏳ Still waiting for prompt... (checked %d lines, %d consecutive idles)", linesChecked, consecutiveIdleLines)
+			lastLog = time.Now()
+		}
+
 		// Read next output line (short timeout per line - 200ms for faster detection)
-		line, err := watcher.GetRawLine(200 * time.Millisecond)
+		// Using ReadLine instead of GetRawLine to ensure timeout is enforced via goroutine + select
+		line, err := watcher.ReadLine(200 * time.Millisecond)
 		if err != nil {
 			// Timeout on individual read - check if we've seen enough idle time
 			consecutiveIdleLines++
