@@ -97,6 +97,9 @@ func runReject(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Get CSM socket path for all tmux commands
+	socketPath := tmux.GetSocketPath()
+
 	// Step 1: Detect number of options and navigate to "No"
 	// Permission prompts have either:
 	//   2 options: 1. Yes, 2. No              (press Down once)
@@ -108,7 +111,7 @@ func runReject(cmd *cobra.Command, args []string) error {
 
 	// Navigate to "No" option
 	for i := 0; i < downPresses; i++ {
-		if err := exec.Command("tmux", "send-keys", "-t", sessionName, "Down").Run(); err != nil {
+		if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "Down").Run(); err != nil {
 			return fmt.Errorf("failed to navigate to No option: %w", err)
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -116,19 +119,19 @@ func runReject(cmd *cobra.Command, args []string) error {
 	time.Sleep(200 * time.Millisecond)
 
 	// Step 2: Press Tab to add instructions
-	if err := exec.Command("tmux", "send-keys", "-t", sessionName, "Tab").Run(); err != nil {
+	if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "Tab").Run(); err != nil {
 		return fmt.Errorf("failed to press Tab: %w", err)
 	}
 	time.Sleep(300 * time.Millisecond)
 
 	// Step 3: Send rejection reason in literal mode
-	if err := exec.Command("tmux", "send-keys", "-t", sessionName, "-l", reason).Run(); err != nil {
+	if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "-l", reason).Run(); err != nil {
 		return fmt.Errorf("failed to send rejection reason: %w", err)
 	}
 	time.Sleep(300 * time.Millisecond)
 
 	// Step 4: Send Enter to submit
-	if err := exec.Command("tmux", "send-keys", "-t", sessionName, "C-m").Run(); err != nil {
+	if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "C-m").Run(); err != nil {
 		return fmt.Errorf("failed to send Enter: %w", err)
 	}
 
@@ -141,8 +144,9 @@ func runReject(cmd *cobra.Command, args []string) error {
 //   1 for 2-option prompts (1. Yes, 2. No)
 //   2 for 3-option prompts (1. Yes, 2. Don't ask, 3. No)
 func detectNoOptionPosition(sessionName string) (int, error) {
-	// Capture pane content
-	out, err := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p").Output()
+	// Capture pane content using CSM socket
+	socketPath := tmux.GetSocketPath()
+	out, err := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", sessionName, "-p").Output()
 	if err != nil {
 		return 0, fmt.Errorf("failed to capture pane: %w", err)
 	}
