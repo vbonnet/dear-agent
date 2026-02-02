@@ -169,7 +169,7 @@ func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
 
 	for time.Now().Before(deadline) {
 		// Read next output line
-		line, err := watcher.GetRawLine(2 * time.Second)
+		line, err := watcher.ReadLine(2 * time.Second)
 		if err != nil {
 			// Timeout on individual read - might be ready
 			// Only consider it ready if we've seen SessionStart hooks complete
@@ -396,7 +396,7 @@ func WaitForGeminiPrompt(sessionName string, timeout time.Duration) error {
 
 	for time.Now().Before(deadline) {
 		// Read next output line (200ms timeout for faster detection)
-		line, err := watcher.GetRawLine(200 * time.Millisecond)
+		line, err := watcher.ReadLine(200 * time.Millisecond)
 		if err != nil {
 			// Timeout on individual read - check if we've seen enough idle time
 			consecutiveIdleLines++
@@ -501,7 +501,7 @@ func WaitForGeminiReady(sessionName string, timeout time.Duration) error {
 
 	for time.Now().Before(deadline) {
 		// Read next output line
-		line, err := watcher.GetRawLine(2 * time.Second)
+		line, err := watcher.ReadLine(2 * time.Second)
 		if err != nil {
 			// Timeout on individual read - might be ready
 			if promptPatternsSeen >= 2 && linesChecked > 10 {
