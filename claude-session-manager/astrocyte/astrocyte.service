@@ -1,0 +1,30 @@
+[Unit]
+Description=Astrocyte - Autonomous CSM Session Monitor
+Documentation=https://github.com/anthropics/ai-tools/tree/main/claude-session-manager/astrocyte
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/src/ws/oss/repos/ai-tools/main/claude-session-manager/astrocyte
+ExecStart=/home/%i/src/ws/oss/repos/ai-tools/main/claude-session-manager/astrocyte/.venv/bin/python3 /home/%i/src/ws/oss/repos/ai-tools/main/claude-session-manager/astrocyte/astrocyte-daemon.py
+
+# Restart configuration
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=astrocyte
+
+# Resource limits
+MemoryMax=256M
+CPUQuota=50%
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

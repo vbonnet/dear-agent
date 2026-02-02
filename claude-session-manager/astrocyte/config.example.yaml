@@ -1,0 +1,102 @@
+# Astrocyte Configuration File
+# Copy to ~/.csm/astrocyte/config.yaml and customize
+
+# Global Settings
+interval_seconds: 300  # Check interval (5 minutes)
+
+# Detection Thresholds (in minutes)
+thresholds:
+  mustering_timeout: 10      # "Mustering..." stuck for >10 min
+  zero_token_waiting: 10     # "Galloping..." + ↓ 0 tokens for >10 min
+  cursor_frozen: 15          # No cursor movement + no output for >15 min
+  ask_question_violation: 5  # Agent asking questions in text for >5 min
+
+# Slack Notifications (optional)
+slack:
+  enabled: false
+  webhook_url: null  # "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+
+# Email Notifications (optional)
+email:
+  enabled: false
+  smtp_host: "localhost"        # SMTP server hostname
+  smtp_port: 587                # SMTP port (587 for TLS, 25 for no TLS)
+  smtp_use_tls: true            # Use TLS encryption
+  smtp_user: null               # SMTP username (null if no auth)
+  smtp_password: null           # SMTP password (null if no auth)
+  from: "astrocyte@localhost"   # From email address
+  to:                           # List of recipient email addresses
+    # - "admin@example.com"
+    # - "oncall@example.com"
+
+# Per-Session Overrides
+# Customize thresholds for specific sessions
+session_overrides:
+  # Example: Long-running planning session
+  # my-planning-session:
+  #   mustering_timeout: 20  # Allow longer mustering
+  #   zero_token_waiting: 15
+
+  # Example: Critical production session
+  # prod-session:
+  #   mustering_timeout: 5   # Detect faster
+  #   cursor_frozen: 10
+
+# Recovery Settings
+recovery:
+  enabled: true
+  method: "escape"  # Options: "escape", "ctrl_c", "session_restart", "chain", "manual_alert"
+  max_attempts: 1   # How many times to try recovery
+  strategy_chain:   # Used when method="chain" - try strategies in order until one succeeds
+    - "escape"      # Try ESC first (least disruptive)
+    - "ctrl_c"      # Then try Ctrl-C (interrupts running process)
+    # - "session_restart"  # WARNING: Destructive! Kills and restarts tmux session
+
+  # Recovery method guide:
+  # - "escape": Send ESC key (default, safest)
+  # - "ctrl_c": Send Ctrl-C (more aggressive, interrupts processes)
+  # - "session_restart": Kill and restart tmux session (DESTRUCTIVE!)
+  # - "chain": Try multiple strategies in sequence (uses strategy_chain)
+  # - "manual_alert": Detect only, no auto-recovery (just log and notify)
+
+# Logging
+logging:
+  incidents_file: "~/.csm/astrocyte/incidents.jsonl"
+  diagnoses_dir: "~/.csm/astrocyte/diagnoses"
+  verbose: false  # Extra debug output
+
+# Diagnosis Prompts
+diagnosis:
+  enabled: true
+  use_csm_prompt_file: true  # Prefer CSM --prompt-file over tmux
+  fallback_to_tmux: true     # Use tmux if CSM unavailable
+
+# Multi-User Monitoring (Team Environments)
+multi_user:
+  enabled: false              # Enable multi-user session monitoring
+  home_directories:           # List of user home directories to monitor
+    - "/home/user"            # Default: current user only
+    # - "/home/alice"         # Add additional users here
+    # - "/home/bob"
+  separate_incident_logs: false  # If true, creates per-user incident logs
+
+  # Notes:
+  # - Daemon must have read permissions to each user's ~/src/sessions/ directory
+  # - Each user can have their own ~/.csm/astrocyte/config.yaml for custom thresholds
+  # - separate_incident_logs=true creates logs like: /home/alice/.csm/astrocyte/incidents.jsonl
+  # - separate_incident_logs=false uses single combined log (daemon owner's home directory)
+
+# Remote Monitoring (Cloud Deployment)
+remote:
+  enabled: false                                     # Enable remote reporting to collector
+  collector_url: ""                                  # Collector URL (e.g., "https://astrocyte-collector.example.com")
+  api_token: "${ASTROCYTE_API_TOKEN}"                # API token from environment variable
+  report_interval: 300                               # Send heartbeat every 5 minutes
+  report_incidents: true                             # Report incidents to collector
+  report_metrics: true                               # Report metrics to collector
+
+  # Notes:
+  # - API token should be set via ASTROCYTE_API_TOKEN environment variable
+  # - Collector must be running and accessible from this workstation
+  # - Reporting fails silently if collector is unavailable (local monitoring continues)
+  # - See CLOUD-DEPLOYMENT.md for collector setup instructions

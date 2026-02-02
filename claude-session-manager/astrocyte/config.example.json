@@ -1,0 +1,5 @@
+{
+  "slack_webhook_url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+  "interval_seconds": 300,
+  "mustering_timeout_minutes": 10
+}
