@@ -62,6 +62,8 @@ class Incident:
     recovery_method: str | None
     recovery_success: bool | None
     recovery_duration_seconds: float | None
+    cascade_depth: int = 1  # Number of prompts cleared in cascade
+    circuit_breaker_triggered: bool = False  # Circuit breaker fired?
     diagnosis_filed: bool
     diagnosis_file: str | None
 
