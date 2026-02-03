@@ -644,7 +644,7 @@ def is_stuck_permission_prompt(
         r'\bfor\s+\w+\s+in\b',    # For loop
         r'\bwhile\s+',            # While loop
         r'\b(cat|grep|find|sed|awk|head|tail|wc)\s+',  # Text processing
-        r'\b(cp|mv|mkdir)\s+',    # File operations
+        r'\b(rm|cp|mv|mkdir)\s+',    # File operations
     ]
 
     has_violation = False
