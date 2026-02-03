@@ -10,7 +10,7 @@ Autonomous daemon for detecting and recovering stuck CSM sessions.
 - ✅ Mustering timeout detection (3 patterns, configurable threshold)
 - ✅ **Zero-token waiting detection** (↓ 0 tokens + waiting pattern)
 - ✅ **Cursor frozen detection** (no cursor movement + no output for >15 min)
-- ✅ Detection loop (5-minute cycles, state persistence)
+- ✅ Detection loop (1-minute cycles, state persistence)
 - ✅ ESC recovery mechanism (automatic unsticking)
 - ✅ JSONL incident logging (crash-safe, append-only)
 - ✅ Integrated auto-recovery (detection → recovery → logging)
@@ -94,10 +94,10 @@ python ~/src/ws/oss/repos/ai-tools/main/claude-session-manager/astrocyte/astrocy
 ```
 🧠 Astrocyte daemon starting...
    Timestamp: 2026-01-30T09:57:02
-   Mode: Prototype (5-minute check cycles)
+   Mode: Prototype (1-minute check cycles)
 
 ⚙️  Configuration:
-   Interval: 300 seconds (5 minutes)
+   Interval: 60 seconds (1 minute)
    Mustering timeout: 10 minutes
    Max check cycles: 1
 
@@ -228,10 +228,10 @@ kubectl get svc astrocyte-collector
 
 ### Test Mustering Detection
 
-1. Edit max_checks=3 in main() (15-minute test)
+1. Edit max_checks=10 in main() (10-minute test)
 2. Start a session, trigger long mustering (complex prompt)
 3. Run astrocyte.py
-4. Wait 15 minutes (3 check cycles)
+4. Wait 10 minutes (10 check cycles)
 5. Verify: After >10 minutes, "STUCK DETECTED" message appears
 
 ### Test False Positives
@@ -242,8 +242,8 @@ kubectl get svc astrocyte-collector
 
 ## Configuration
 
-**Current** (hardcoded in main()):
-- Interval: 5 minutes (300 seconds)
+**Current** (configured via config.yaml):
+- Interval: 1 minute (60 seconds)
 - Mustering timeout: 10 minutes
 
 **Future** (Phase 4):
@@ -397,7 +397,7 @@ Astrocyte Daemon
 │   └── get_session_id(session) → str (from manifest.yaml)
 │
 └── Main Loop
-    ├── Capture states every 5 minutes
+    ├── Capture states every minute
     ├── Compare current vs previous
     ├── Detect stuck patterns
     ├── Create incident record
@@ -500,7 +500,7 @@ All core functionality is production-ready and deployed.
 ## Success Criteria Met ✅
 
 - ✅ Detects stuck mustering in test case
-- ✅ Detection latency <15 min (2 check cycles @ 5 min each)
+- ✅ Detection latency <3 min (2 check cycles @ 1 min each)
 - ✅ No false positives on normal 3-min mustering
 - ✅ Code runs without errors
 - ✅ README covers setup, running, testing

@@ -2,7 +2,7 @@
 # Copy to ~/.csm/astrocyte/config.yaml and customize
 
 # Global Settings
-interval_seconds: 300  # Check interval (5 minutes)
+interval_seconds: 60   # Check interval (1 minute)
 
 # Detection Thresholds (in minutes)
 thresholds:
