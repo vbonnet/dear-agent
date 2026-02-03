@@ -18,25 +18,49 @@ var (
 
 var rejectCmd = &cobra.Command{
 	Use:   "reject <session-name>",
-	Short: "Reject a permission prompt with a reason",
-	Long: `Reject a permission prompt in a CSM session by navigating to "No" and providing a rejection reason.
+	Short: "Reject a permission prompt with custom reason",
+	Long: `Reject a permission prompt with a custom reason, automating the Down → Tab → paste → Enter flow.
+
+Features:
+  • Automated navigation: Navigates to "No" option using arrow keys
+  • Custom reasoning: Adds rejection reason as additional instructions
+  • Smart extraction: Extracts "## Standard Prompt (Recommended)" from markdown files
+  • Literal mode: Uses tmux -l flag for reliable text transmission
 
 This automates the flow:
-1. Navigate to "No" option using arrow keys
-2. Press Tab to add additional instructions
-3. Paste rejection reason (e.g., tool usage violation prompt)
-4. Send Enter to submit
+  1. Detect prompt type (2 or 3 options) and navigate to "No"
+  2. Press Tab to add additional instructions
+  3. Send rejection reason in literal mode
+  4. Submit with Enter
 
-Common use case: Rejecting bash commands that should use Claude Code tools instead.
+Use Cases:
+  • Rejecting bash commands that violate tool usage guidelines
+  • Providing feedback on why a permission was denied
+  • Automated enforcement of coding standards
 
 Examples:
   # Reject with inline reason
   csm reject my-session --reason "Use Read tool instead of cat"
 
   # Reject with violation prompt from file
-  csm reject my-session --reason-file ~/src/ws/oss/tool-usage-analysis/prompts/VIOLATION-PROMPTS.md
+  csm reject my-session --reason-file ~/prompts/VIOLATION-PROMPTS.md
 
-IMPORTANT: Session must be showing a permission prompt with "No" option.`,
+  # Reject with custom feedback
+  csm reject task --reason "Please use absolute paths and separate tool calls. Read the bash tool guidance at ~/docs/bash-rules.md"
+
+Workflow Executed:
+  1. Send Down key(s) to navigate to "No" option (auto-detects 2 or 3 option prompts)
+  2. Send Tab key to add additional instructions
+  3. Send rejection reason text in literal mode
+  4. Send Enter to submit
+
+Requirements:
+  • Session must be showing a permission prompt with a "No" option
+  • Requires either --reason or --reason-file flag
+
+See Also:
+  • csm send - Send messages to running sessions
+  • csm doctor - Check session health`,
 	Args: cobra.ExactArgs(1),
 	RunE: runReject,
 }

@@ -74,6 +74,10 @@ See `docs/AGENTS.md.example` for full configuration spec. Integration tracked in
 
 ## Documentation
 
+**Quick Start:**
+- **[Quick Reference](docs/AGM-QUICK-REFERENCE.md)** - One-page cheat sheet with essential commands
+- **[Command Reference](docs/AGM-COMMAND-REFERENCE.md)** - Complete reference for all AGM commands with examples
+
 **Core Guides:**
 - **[Agent Comparison Guide](docs/AGENT-COMPARISON.md)** - Choose the right agent (Claude/Gemini/GPT) for your task
 - **[BDD Scenario Catalog](docs/BDD-CATALOG.md)** - Living documentation of AGM behavior (8 feature files, 20+ scenarios)
