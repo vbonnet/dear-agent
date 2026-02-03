@@ -179,17 +179,53 @@ func (w *GeminiDeepResearch) executeMultiURL(ctx workflow.WorkflowContext, urls 
 	// Determine overall success
 	success := successCount > 0 // At least one URL succeeded
 
+	// Apply research insights if successful
+	var applicationResult *ApplicationResult
+	if success {
+		applicator, err := NewResearchApplicator([]string{"engram", "ai-tools"})
+		if err == nil {
+			result, err := applicator.Apply(context.Background(), artifacts)
+			if err == nil {
+				applicationResult = &result
+
+				// Write proposals to file
+				proposalsPath := ctx.OutputPath
+				if proposalsPath == "" {
+					proposalsPath = "research-proposals.md"
+				}
+				if err := WriteProposalsToMarkdown(result, proposalsPath); err != nil {
+					fmt.Printf("Warning: Failed to write proposals: %v\n", err)
+				} else {
+					fmt.Printf("✓ Proposals written to: %s\n", proposalsPath)
+
+					// Add proposals as an artifact
+					artifacts = append(artifacts, workflow.Artifact{
+						Type: "research-proposals",
+						Path: proposalsPath,
+					})
+				}
+			}
+		}
+	}
+
+	metadata := map[string]interface{}{
+		"urls_total":      len(urls),
+		"urls_successful": successCount,
+		"urls_failed":     len(errors),
+		"errors":          errors,
+	}
+
+	if applicationResult != nil {
+		metadata["proposals_generated"] = true
+		metadata["application_summary"] = applicationResult.Summary
+	}
+
 	return workflow.WorkflowResult{
 		Success:       success,
 		Artifacts:     artifacts,
 		Summary:       summary,
 		ExecutionTime: time.Since(startTime),
-		Metadata: map[string]interface{}{
-			"urls_total":      len(urls),
-			"urls_successful": successCount,
-			"urls_failed":     len(errors),
-			"errors":          errors,
-		},
+		Metadata:      metadata,
 	}, nil
 }
 
