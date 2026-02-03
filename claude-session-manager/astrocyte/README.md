@@ -145,10 +145,43 @@ Active CSM sessions: 9
   "recovery_method": "escape",
   "recovery_success": true,
   "recovery_duration_seconds": 5.2,
+  "cascade_depth": 1,
+  "circuit_breaker_triggered": false,
   "diagnosis_filed": false,
   "diagnosis_file": null
 }
 ```
+
+**Cascading Permission Prompt Rejection**:
+
+When multiple permission prompts are queued (e.g., autonomous agents generating bash tool calls in rapid succession), astrocyte automatically clears all queued prompts in a single detection cycle:
+
+```json
+{
+  "timestamp": "2026-02-03T12:34:56.789012",
+  "session_name": "autonomous-swarm-coordinator",
+  "session_id": "uuid-5678",
+  "symptom": "permission_prompt",
+  "duration_minutes": 5,
+  "detection_heuristic": "permission_prompt_duration",
+  "pane_snapshot": "Do you want to run this bash command? (y/N)",
+  "cursor_position": "10,0",
+  "recovery_attempted": true,
+  "recovery_method": "reject_permission",
+  "recovery_success": true,
+  "recovery_duration_seconds": 6.5,
+  "cascade_depth": 4,
+  "circuit_breaker_triggered": false,
+  "diagnosis_filed": false,
+  "diagnosis_file": null
+}
+```
+
+**Key fields**:
+- `cascade_depth`: Number of prompts cleared in cascade (4 prompts rejected in ~6.5 seconds)
+- `circuit_breaker_triggered`: Circuit breaker status (false = all prompts cleared successfully)
+
+**Performance**: 10 queued prompts cleared in ~15 seconds (1.5s per prompt)
 
 ## Cloud Deployment
 
@@ -328,6 +361,11 @@ kubectl get svc astrocyte-collector
 **Configuration Options**:
 - Global interval (check frequency)
 - Detection thresholds (customizable per heuristic)
+  - `mustering_timeout`: Minutes before stuck mustering detected (default: 10)
+  - `zero_token_waiting`: Minutes before zero-token waiting detected (default: 3)
+  - `cursor_frozen`: Minutes before cursor frozen detected (default: 15)
+  - `permission_prompt_duration`: Minutes before permission prompt detected (default: 5)
+  - `max_cascade_rejections`: Circuit breaker for cascading permission prompts (default: 10)
 - Slack notification settings
 - Recovery behavior settings
 - Logging verbosity and paths
