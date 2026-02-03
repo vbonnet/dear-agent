@@ -13,7 +13,7 @@ type AgentInfo struct {
 // Agent registry maps agent names to constructor functions
 var agentRegistry = map[string]func() (Agent, error){
 	"claude": func() (Agent, error) { return NewClaudeAdapter(nil) },
-	"gemini": func() (Agent, error) { return NewGeminiAdapter(), nil },
+	"gemini": func() (Agent, error) { return NewGeminiAdapter(nil) },
 	"gpt":    func() (Agent, error) { return NewGPTAdapter(), nil },
 }
 

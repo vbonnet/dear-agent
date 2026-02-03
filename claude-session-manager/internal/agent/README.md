@@ -30,7 +30,11 @@ The Agent interface provides a unified API for managing AI agent sessions, enabl
         └───────────────┘
 
         ┌───────────────┐
-        │ GeminiAdapter │ (future)
+        │ GeminiAdapter │ (implemented)
+        └───────────────┘
+
+        ┌───────────────┐
+        │  GPTAdapter   │ (future)
         └───────────────┘
 ```
 
@@ -51,6 +55,15 @@ ClaudeAdapter implementation:
 - Delegates to existing CSM tmux infrastructure
 - Maps SessionIDs to tmux session names
 - Wraps existing session management logic
+
+### gemini_adapter.go
+GeminiAdapter implementation:
+- Implements Agent interface for Google Gemini
+- Uses Google Generative AI Go SDK (`github.com/google/generative-ai-go`)
+- Client-side conversation history persistence
+- Stores sessions in `~/.csm/gemini/<session-id>/history.jsonl`
+- Default model: `gemini-2.0-flash-exp`
+- API key from `GEMINI_API_KEY` environment variable
 
 ### session_store.go
 SessionStore manages SessionID persistence:
@@ -177,35 +190,42 @@ This decouples the Agent abstraction from tmux naming conventions, allowing:
 ### Implemented ✅
 - Agent interface definition
 - ClaudeAdapter with all 11 methods
+- GeminiAdapter with all 11 methods ✨ NEW
 - SessionStore with JSON persistence
-- Basic unit tests
+- Comprehensive unit tests for both adapters
 
 ### TODO 🚧
-- HTML export for ExportConversation
-- ImportConversation implementation
+- HTML export for ClaudeAdapter
 - Advanced command support (authorize, run_hook)
-- Integration tests
-- GeminiAdapter implementation (separate bead: oss-csm-g1)
+- Integration tests with real API calls
+- GPTAdapter implementation (future)
 
 ## Testing
 
 Run unit tests:
 ```bash
+# All tests
 cd internal/agent
 go test -v
+
+# Claude adapter only
+go test -v -run TestClaude
+
+# Gemini adapter only
+go test -v -run TestGemini
 ```
 
 Expected output:
 ```
 === RUN   TestClaudeAdapterImplementsAgentInterface
 --- PASS: TestClaudeAdapterImplementsAgentInterface (0.00s)
-=== RUN   TestClaudeAdapterName
---- PASS: TestClaudeAdapterName (0.00s)
-=== RUN   TestClaudeAdapterVersion
---- PASS: TestClaudeAdapterVersion (0.00s)
-=== RUN   TestClaudeAdapterCapabilities
---- PASS: TestClaudeAdapterCapabilities (0.00s)
+=== RUN   TestGeminiAdapter_NewGeminiAdapter
+--- PASS: TestGeminiAdapter_NewGeminiAdapter (0.00s)
+=== RUN   TestGeminiAdapter_CreateSession
+--- PASS: TestGeminiAdapter_CreateSession (0.00s)
+...
 PASS
+ok  	github.com/vbonnet/ai-tools/claude-session-manager/internal/agent	0.035s
 ```
 
 ## Design Decisions
@@ -225,18 +245,27 @@ PASS
 **Alternative:** In-memory map
 **Rationale:** Survives restarts, simple to implement
 
-## Future Extensions
+## Agent Comparison
 
-### GeminiAgent (oss-csm-g1)
-The Agent interface is designed to support GeminiAgent without modifications:
-- CreateSession → Gemini API session creation
-- SendMessage → Gemini API call
-- GetHistory → Retrieve from Gemini conversation history
-- Capabilities → Gemini-specific features (1M+ context window)
+| Feature | ClaudeAdapter | GeminiAdapter | GPTAdapter |
+|---------|---------------|---------------|------------|
+| Type | CLI-based | API-based | API-based |
+| Backend | tmux + Claude CLI | Google Gen AI SDK | OpenAI SDK |
+| Session Storage | `~/.claude/sessions/` | `~/.csm/gemini/` | TBD |
+| API Key | Built into CLI | `GEMINI_API_KEY` | `OPENAI_API_KEY` |
+| Default Model | claude-sonnet-4.5 | gemini-2.0-flash-exp | TBD |
+| Slash Commands | ✅ | ❌ | ❌ |
+| Function Calling | ✅ | ✅ | ✅ |
+| Vision | ✅ | ✅ | ✅ |
+| Multimodal | ❌ | ✅ | ❌ |
+| Max Context | 200K tokens | 1M tokens | 128K tokens |
+| Status | ✅ Implemented | ✅ Implemented | 🚧 TODO |
+
+## Future Extensions
 
 ### Additional Agents
 The interface supports any AI provider:
-- GPT-4 via OpenAI API
+- GPT-4 via OpenAI API (planned)
 - Local models via Ollama
 - Custom agents via plugin system
 
