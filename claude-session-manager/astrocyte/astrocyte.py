@@ -643,8 +643,9 @@ def is_stuck_permission_prompt(
         r'<<',                     # Here document
         r'\bfor\s+\w+\s+in\b',    # For loop
         r'\bwhile\s+',            # While loop
-        r'\b(cat|grep|find|sed|awk|head|tail|wc)\s+',  # Text processing
+        r'\b(cat|grep|find|sed|awk|head|tail|wc|stat|ls)\s+',  # Text processing and file reading
         r'\b(rm|cp|mv|mkdir)\s+',    # File operations
+        r'\binstall\s+-D',         # install -D (file operations)
     ]
 
     has_violation = False
