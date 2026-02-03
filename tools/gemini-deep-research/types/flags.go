@@ -48,8 +48,29 @@ func (f *Flags) Validate() error {
 
 // GetPrompt returns the prompt text from either --input flag or --input-file
 // Returns empty string if neither is specified (will use default prompt)
+//
+// Supports Azure @file syntax: if f.Input starts with '@', it reads the file.
+// This provides backward compatibility: existing --input "text" works,
+// and new --input "@file.txt" syntax works too.
 func (f *Flags) GetPrompt() (string, error) {
 	if f.Input != "" {
+		// Support Azure @file syntax in --input flag
+		// This allows: --input "@prompt.txt" as an alternative to --input-file
+		if len(f.Input) > 0 && f.Input[0] == '@' {
+			// Use ResolveFile to handle @file syntax
+			// Import path: "github.com/vbonnet/ai-tools/tools/gemini-deep-research/config"
+			// For now, inline the file reading to avoid circular import
+			// (config package doesn't depend on types, but types would depend on config)
+			filePath := f.Input[1:] // Remove @ prefix
+			content, err := os.ReadFile(filePath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					return "", fmt.Errorf("file not found: %s\nTry: ls -la to check file path", filePath)
+				}
+				return "", fmt.Errorf("failed to read file '%s': %w", filePath, err)
+			}
+			return string(content), nil
+		}
 		return f.Input, nil
 	}
 
