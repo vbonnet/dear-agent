@@ -105,8 +105,8 @@ class Config:
     recovery_strategy_chain: List[str] = field(default_factory=lambda: ["escape", "ctrl_c"])  # Used when recovery_method="chain"
 
     # Logging settings
-    incidents_file: str = "~/.csm/astrocyte/incidents.jsonl"
-    diagnoses_dir: str = "~/.csm/astrocyte/diagnoses"
+    incidents_file: str = field(default_factory=lambda: os.path.expanduser("~/.csm/astrocyte/incidents.jsonl"))
+    diagnoses_dir: str = field(default_factory=lambda: os.path.expanduser("~/.csm/astrocyte/diagnoses"))
     verbose: bool = False
 
     # Diagnosis settings
@@ -141,7 +141,7 @@ class Config:
 
 def load_config() -> Config:
     """
-    Load configuration from ~/.csm/astrocyte/config.yaml.
+    Load configuration from ~/.csm/astrocyte/config.yaml.  # noqa: path-portability
 
     Falls back to config.json for backward compatibility.
     Returns default config if no file exists.
@@ -177,8 +177,8 @@ def load_config() -> Config:
                 recovery_method=recovery.get("method", "escape"),
                 recovery_max_attempts=recovery.get("max_attempts", 1),
                 recovery_strategy_chain=recovery.get("strategy_chain", ["escape", "ctrl_c"]),
-                incidents_file=logging_cfg.get("incidents_file", "~/.csm/astrocyte/incidents.jsonl"),
-                diagnoses_dir=logging_cfg.get("diagnoses_dir", "~/.csm/astrocyte/diagnoses"),
+                incidents_file=os.path.expanduser(logging_cfg.get("incidents_file", "~/.csm/astrocyte/incidents.jsonl")),
+                diagnoses_dir=os.path.expanduser(logging_cfg.get("diagnoses_dir", "~/.csm/astrocyte/diagnoses")),
                 verbose=logging_cfg.get("verbose", False),
                 diagnosis_enabled=diagnosis.get("enabled", True),
                 diagnosis_use_csm=diagnosis.get("use_csm_prompt_file", True),
@@ -946,7 +946,7 @@ def log_incident(incident: Incident, log_file_path: str | None = None, reporter:
 
     Args:
         incident: The incident to log
-        log_file_path: Optional custom log file path. If None, uses default ~/.csm/astrocyte/incidents.jsonl
+        log_file_path: Optional custom log file path. If None, uses default ~/.csm/astrocyte/incidents.jsonl  # noqa: path-portability
         reporter: Optional RemoteReporter for sending incident to collector
 
     Creates directory if needed. Uses fsync for durability.
@@ -988,7 +988,7 @@ def log_false_positive(
         stuck_since: When stuck state was first detected
         unstuck_at: When session unstuck itself
 
-    Logs to ~/.csm/astrocyte/logs/false-positives.jsonl in JSONL format.
+    Logs to ~/.csm/astrocyte/logs/false-positives.jsonl in JSONL format.  # noqa: path-portability
     """
     log_file = Path.home() / ".csm/astrocyte/logs/false-positives.jsonl"
     log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1045,7 +1045,7 @@ def generate_diagnosis_prompt(
     """
     # Extract diagnosis file path
     timestamp_str = incident.timestamp.replace(":", "-").split(".")[0]
-    diagnosis_file = f"~/.csm/astrocyte/diagnoses/{incident.session_name}-{timestamp_str}.md"
+    diagnosis_file = os.path.expanduser(f"~/.csm/astrocyte/diagnoses/{incident.session_name}-{timestamp_str}.md")
 
     # Generate prompt
     prompt = f"""⚠️ INCIDENT RECOVERY NOTICE
@@ -1958,7 +1958,7 @@ def main():
                                 stuck_since=details["stuck_since"],
                                 unstuck_at=unstuck_at
                             )
-                            print(f"   📝 False positive logged to ~/.csm/astrocyte/logs/false-positives.jsonl")
+                            print(f"   📝 False positive logged to ~/.csm/astrocyte/logs/false-positives.jsonl")  # noqa: path-portability
 
                             # Clear stuck tracking for this session
                             stuck_details.pop(session, None)

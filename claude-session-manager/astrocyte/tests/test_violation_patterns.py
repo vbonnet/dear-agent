@@ -139,7 +139,7 @@ class TestViolationPatternDetection:
 
     def test_rm_command_detected(self):
         """Test that rm command is detected."""
-        current = self.create_permission_prompt("rm ~/.claude/hooks/pretool-beads-protection.py")
+        current = self.create_permission_prompt("rm ~/.claude/hooks/pretool-beads-protection.py")  # noqa: path-portability
         result = is_stuck_permission_prompt(current, None, 0)
         assert result, "Should detect rm command"
 
