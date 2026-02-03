@@ -1,0 +1,141 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"os"
+
+	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/cmd"
+	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/config"
+	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/types"
+)
+
+const version = "2.0.0"
+
+var (
+	// Custom usage function for better help text
+	usageFunc = func() {
+		fmt.Fprintf(os.Stderr, `gemini-deep-research - Research tool using Gemini Deep Research API
+
+Usage:
+  gemini-deep-research [FLAGS] <URL>
+
+Flags:
+  --input <text>          Short custom prompt for topic analysis (conflicts with --input-file)
+  --input-file <path>     Path to file containing custom prompt (conflicts with --input)
+  --type <content-type>   Override content type auto-detection (video|article|arxiv|huggingface)
+  --output-dir <path>     Output directory for results (default: ./output)
+  --timeout <minutes>     Deep Research timeout in minutes (default: 60)
+  --project <id>          GCP project ID (fallback: GOOGLE_CLOUD_PROJECT env var)
+  --help, -h              Show this help message
+  --version, -v           Show version information
+
+Positional Arguments:
+  <URL>                   Content URL to analyze (required)
+
+Examples:
+  # Basic usage (YouTube video)
+  gemini-deep-research https://www.youtube.com/watch?v=VIDEO_ID
+
+  # Custom prompt (short)
+  gemini-deep-research --input "Focus on security topics" https://example.com
+
+  # Custom prompt (from file)
+  gemini-deep-research --input-file ./prompts/security-analysis.txt https://example.com
+
+  # Override content type detection
+  gemini-deep-research --type article https://youtu.be/VIDEO_ID
+
+  # Custom output directory
+  gemini-deep-research --output-dir /tmp/research https://arxiv.org/abs/2601.20802
+
+  # Specify GCP project
+  gemini-deep-research --project my-project-id https://example.com
+
+Environment Variables:
+  GEMINI_API_KEY          API key for Deep Research (required)
+  GOOGLE_CLOUD_PROJECT    GCP project ID (fallback if --project not specified)
+  GEMINI_DR_OUTPUT_DIR    Default output directory (fallback if --output-dir not specified)
+  GEMINI_DR_TIMEOUT       Research timeout in minutes (default: 60)
+
+Exit Codes:
+  0  Success
+  1  Invalid arguments or configuration
+  2  Content extraction failed
+  3  Topic analysis failed
+  4  Deep Research failed
+  5  Output writing failed
+  6  Unexpected error
+
+For more information, visit: https://github.com/vbonnet/gemini-deep-research
+`)
+	}
+)
+
+func main() {
+	// Create flags
+	var flags types.Flags
+
+	flag.StringVar(&flags.Input, "input", "", "Short custom prompt for topic analysis")
+	flag.StringVar(&flags.InputFile, "input-file", "", "Path to file containing custom prompt")
+	flag.StringVar(&flags.Type, "type", "", "Override content type auto-detection (video|article|arxiv|huggingface)")
+	flag.StringVar(&flags.OutputDir, "output-dir", "", "Output directory for results")
+	flag.IntVar(&flags.Timeout, "timeout", 0, "Deep Research timeout in minutes")
+	flag.StringVar(&flags.Project, "project", "", "GCP project ID")
+	flag.BoolVar(&flags.Force, "force", false, "Force refresh of existing research")
+
+	var showHelp bool
+	var showVersion bool
+	flag.BoolVar(&showHelp, "help", false, "Show help message")
+	flag.BoolVar(&showHelp, "h", false, "Show help message (shorthand)")
+	flag.BoolVar(&showVersion, "version", false, "Show version information")
+	flag.BoolVar(&showVersion, "v", false, "Show version information (shorthand)")
+
+	// Set custom usage
+	flag.Usage = usageFunc
+
+	// Parse flags
+	flag.Parse()
+
+	// Handle version flag
+	if showVersion {
+		fmt.Printf("gemini-deep-research version %s\n", version)
+		os.Exit(0)
+	}
+
+	// Handle help flag
+	if showHelp {
+		flag.Usage()
+		os.Exit(0)
+	}
+
+	// Validate positional arguments
+	if flag.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "Error: URL argument required")
+		fmt.Fprintln(os.Stderr, "")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	// Get URL from positional argument
+	url := flag.Arg(0)
+
+	// Validate flags
+	if err := cmd.Validate(&flags); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintln(os.Stderr, "")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	// Load configuration
+	cfg, err := config.Load(&flags)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Run the command
+	exitCode := cmd.Run(url, &flags, cfg)
+	os.Exit(exitCode)
+}
