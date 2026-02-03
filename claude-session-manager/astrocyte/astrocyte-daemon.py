@@ -32,6 +32,7 @@ from astrocyte import (
     recover_session,
     send_violation_prompt,
     reject_permission_prompt,
+    verify_recovery,
     log_incident,
     get_session_id,
     send_slack_notification,
@@ -269,7 +270,50 @@ def main():
                         elif symptom == "permission_prompt":
                             print(f"   🔧 Rejecting permission prompt with tool usage violation...")
                             logger.info(f"Rejecting permission prompt for session={session}")
-                            recovery = reject_permission_prompt(session)
+
+                            # Cascading rejection loop
+                            cascade_depth = 0
+                            max_cascade = config.get_threshold(session, "max_cascade_rejections")
+                            circuit_breaker_hit = False
+                            before_state = current  # Start with detected state
+
+                            while cascade_depth < max_cascade:
+                                logger.info(f"Rejecting permission prompt for {session} (cascade depth={cascade_depth})")
+
+                                # Execute rejection
+                                recovery = reject_permission_prompt(session)
+                                cascade_depth += 1
+
+                                # Wait for CSM to display next queued prompt (if any)
+                                time.sleep(1.0)
+
+                                # Get fresh state
+                                after_state = capture_pane_state(session)
+
+                                # Check if more prompts queued
+                                if not is_stuck_permission_prompt(after_state, None, 0):
+                                    logger.info(f"Cascade complete for {session} (cleared {cascade_depth} prompts)")
+                                    print(f"   ✅ Cascade complete (cleared {cascade_depth} prompts)")
+                                    break
+
+                                # Verify this rejection worked
+                                if not verify_recovery(before_state, after_state):
+                                    logger.warning(f"Cascade failed at depth {cascade_depth} for {session}")
+                                    print(f"   ⚠️  Cascade failed at depth {cascade_depth}")
+                                    break
+
+                                # Update before state for next iteration
+                                before_state = after_state
+
+                            # Circuit breaker triggered
+                            if cascade_depth >= max_cascade:
+                                logger.error(f"Circuit breaker triggered for {session} (max={max_cascade})")
+                                print(f"   ⚠️  Circuit breaker triggered at {max_cascade} rejections")
+                                circuit_breaker_hit = True
+
+                            # Update incident with cascade fields
+                            incident.cascade_depth = cascade_depth
+                            incident.circuit_breaker_triggered = circuit_breaker_hit
                         else:
                             print(f"   🔧 Attempting recovery with {config.recovery_method} strategy...")
                             logger.info(f"Attempting recovery with {config.recovery_method} for session={session}")
