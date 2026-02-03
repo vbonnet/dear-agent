@@ -79,7 +79,7 @@ class Config:
     # Detection thresholds (minutes)
     # Tuned based on observed false positive data
     mustering_timeout: int = 10      # Mustering usually resolves within 10min
-    zero_token_waiting: int = 5      # 0 tokens = stuck, recover quickly
+    zero_token_waiting: int = 3      # 0 tokens = stuck, recover quickly
     cursor_frozen: int = 15           # Legitimate thinking can take time
     ask_question_violation: int = 10  # Give time for complex questions
     permission_prompt_duration: int = 5  # Duration-based detection (fresh start uses violation patterns)
