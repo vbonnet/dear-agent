@@ -85,6 +85,7 @@ class Config:
     cursor_frozen: int = 15           # Legitimate thinking can take time
     ask_question_violation: int = 10  # Give time for complex questions
     permission_prompt_duration: int = 5  # Duration-based detection (fresh start uses violation patterns)
+    max_cascade_rejections: int = 10  # Circuit breaker for cascading permission prompts
 
     # Slack configuration
     slack_enabled: bool = False
