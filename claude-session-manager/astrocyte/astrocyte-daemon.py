@@ -59,6 +59,13 @@ def setup_logging(log_dir: Path, verbose: bool = False):
     logger.setLevel(logging.DEBUG if verbose else logging.INFO)
 
     # Remove existing handlers to avoid duplicates
+    # CRITICAL: Must close handlers before clearing to prevent file descriptor leaks
+    # that would prevent logging after daemon restart
+    for handler in logger.handlers[:]:  # Use slice to avoid modifying list during iteration
+        try:
+            handler.close()
+        except Exception:
+            pass  # Ignore errors closing old handlers
     logger.handlers.clear()
 
     # File handler with rotation (10MB max, keep 5 backups)
@@ -107,9 +114,9 @@ def main():
     print("🧠 Astrocyte daemon starting...")
     print(f"   Timestamp: {datetime.now().isoformat()}")
     print(f"   Mode: Production Deployment - Continuous Monitoring")
-    print(f"   Incidents: ~/.csm/astrocyte/incidents.jsonl")
-    print(f"   Diagnoses: ~/.csm/astrocyte/diagnoses/")
-    print(f"   Debug logs: ~/.csm/astrocyte/logs/daemon.log")
+    print(f"   Incidents: ~/.csm/astrocyte/incidents.jsonl")  # noqa: path-portability
+    print(f"   Diagnoses: ~/.csm/astrocyte/diagnoses/")  # noqa: path-portability
+    print(f"   Debug logs: ~/.csm/astrocyte/logs/daemon.log")  # noqa: path-portability
 
     logger.info("="*60)
     logger.info("Astrocyte daemon starting")
@@ -336,11 +343,21 @@ def main():
         logger.info(f"Sessions monitored: {len(previous_states)}")
         logger.info("="*60)
 
+        # Ensure all logs are flushed before shutdown
+        for handler in logger.handlers:
+            try:
+                handler.flush()
+                handler.close()
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
+        # Ensure logging is properly shut down on interrupt
+        logging.shutdown()
         sys.exit(0)
     except Exception as e:
         # Try to log the fatal error if logger is available
@@ -348,10 +365,15 @@ if __name__ == "__main__":
             logger = logging.getLogger("astrocyte")
             if logger.hasHandlers():
                 logger.critical(f"FATAL ERROR: {e}", exc_info=True)
+                # Flush critical error before exit
+                for handler in logger.handlers:
+                    handler.flush()
         except:
             pass  # Logger not set up yet, just print
 
         print(f"Fatal error: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
+        # Ensure logging is properly shut down on fatal error
+        logging.shutdown()
         sys.exit(1)
