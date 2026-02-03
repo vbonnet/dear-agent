@@ -28,13 +28,6 @@ func Run(url string, flags *types.Flags, cfg *config.Config) int {
 		return 1
 	}
 
-	// Get prompt (if provided)
-	prompt, err := GetPrompt(flags)
-	if err != nil {
-		fmt.Fprintf(cfg.Stderr, "Error: %v\n", err)
-		return 1
-	}
-
 	// Log configuration
 	fmt.Fprintf(cfg.Stdout, "Configuration:\n")
 	fmt.Fprintf(cfg.Stdout, "  URL: %s\n", url)
@@ -43,8 +36,18 @@ func Run(url string, flags *types.Flags, cfg *config.Config) int {
 	if cfg.ProjectID != "" {
 		fmt.Fprintf(cfg.Stdout, "  GCP Project: %s\n", cfg.ProjectID)
 	}
-	if prompt != "" {
-		fmt.Fprintf(cfg.Stdout, "  Custom Prompt: %s\n", truncate(prompt, 50))
+	if flags.ExtractPrompt != "" {
+		fmt.Fprintf(cfg.Stdout, "  Custom Extract Prompt: %s\n", truncate(flags.ExtractPrompt, 50))
+	}
+	if flags.AnalyzePrompt != "" {
+		fmt.Fprintf(cfg.Stdout, "  Custom Analyze Prompt: %s\n", truncate(flags.AnalyzePrompt, 50))
+	}
+	if flags.ResearchPrompt != "" {
+		fmt.Fprintf(cfg.Stdout, "  Custom Research Prompt: %s\n", truncate(flags.ResearchPrompt, 50))
+	}
+	// Also show legacy --input if used
+	if flags.Input != "" {
+		fmt.Fprintf(cfg.Stdout, "  Custom Prompt (legacy): %s\n", truncate(flags.Input, 50))
 	}
 	if flags.Type != "" {
 		fmt.Fprintf(cfg.Stdout, "  Content Type Override: %s\n", flags.Type)
@@ -52,7 +55,7 @@ func Run(url string, flags *types.Flags, cfg *config.Config) int {
 	fmt.Fprintf(cfg.Stdout, "\n")
 
 	// Execute pipeline
-	return executePipeline(url, prompt, flags, cfg)
+	return executePipeline(url, flags, cfg)
 }
 
 // truncate truncates a string to maxLen characters with ellipsis
@@ -64,7 +67,7 @@ func truncate(s string, maxLen int) string {
 }
 
 // executePipeline executes the full E2E pipeline
-func executePipeline(url, customPrompt string, flags *types.Flags, cfg *config.Config) int {
+func executePipeline(url string, flags *types.Flags, cfg *config.Config) int {
 	ctx := context.Background()
 
 	// Step 1: Detect content type
@@ -114,9 +117,30 @@ func executePipeline(url, customPrompt string, flags *types.Flags, cfg *config.C
 	}
 	fmt.Fprintf(cfg.Stdout, "  Extracted %d characters\n\n", len(content.Raw))
 
-	// Step 3: Analyze topics with Gemini
+	// Step 2.5: Load and resolve prompts (ConfigParser → FileResolver)
+	fmt.Fprintf(cfg.Stdout, "Step 2.5: Loading prompt configuration...\n")
+	resolvedPrompts, err := LoadAndResolvePrompts(flags)
+	if err != nil {
+		fmt.Fprintf(cfg.Stderr, "Error loading prompts: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(cfg.Stdout, "  Prompts loaded and @file syntax resolved\n\n")
+
+	// Step 2.6: Variable substitution for extract/analyze prompts (url, content_type available)
+	initialVariables := config.Variables{
+		URL:         url,
+		Topics:      []string{}, // Not available yet
+		ContentType: contentType.String(),
+	}
+	partialPrompts, err := SubstituteVariables(resolvedPrompts, initialVariables)
+	if err != nil {
+		fmt.Fprintf(cfg.Stderr, "Error substituting variables: %v\n", err)
+		return 1
+	}
+
+	// Step 3: Analyze topics with Gemini (using custom analyze prompt)
 	fmt.Fprintf(cfg.Stdout, "Step 3: Analyzing topics with Gemini...\n")
-	topics, err := gemini.AnalyzeTopics(content.Raw, customPrompt)
+	topics, err := gemini.AnalyzeTopics(content.Raw, partialPrompts.AnalyzePrompt)
 	if err != nil {
 		fmt.Fprintf(cfg.Stderr, "Error analyzing topics: %v\n", err)
 		return 3
@@ -127,8 +151,24 @@ func executePipeline(url, customPrompt string, flags *types.Flags, cfg *config.C
 	}
 	fmt.Fprintf(cfg.Stdout, "\n")
 
+	// Step 3.5: Re-substitute variables with topics for research prompt
+	finalVariables := config.Variables{
+		URL:         url,
+		Topics:      topics,
+		ContentType: contentType.String(),
+	}
+	finalPrompts, err := SubstituteVariables(resolvedPrompts, finalVariables)
+	if err != nil {
+		fmt.Fprintf(cfg.Stderr, "Error substituting final variables: %v\n", err)
+		return 3
+	}
+
+	// Use finalPrompts.ResearchPrompt for the research stage (with topics substituted)
+	// Note: finalPrompts has {topics} variable replaced with actual topics list
+
 	// Step 4: Run Deep Research
 	fmt.Fprintf(cfg.Stdout, "Step 4: Running Deep Research...\n")
+	fmt.Fprintf(cfg.Stdout, "Research prompt: %s\n", finalPrompts.ResearchPrompt)
 	client, err := research.NewClient(cfg.ProjectID)
 	if err != nil {
 		fmt.Fprintf(cfg.Stderr, "Error creating research client: %v\n", err)

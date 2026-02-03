@@ -150,63 +150,6 @@ Active CSM sessions: 9
 }
 ```
 
-## Troubleshooting
-
-### API Stalls and Zero-Token Detection
-
-Astrocyte automatically detects and recovers from API stalls (transient backend issues where Claude API returns zero tokens). These are observable symptoms of external API/network conditions, not bugs in Astrocyte or CSM.
-
-**Quick check**: View recent zero-token stalls
-```bash
-jq -r 'select(.symptom == "stuck_zero_token_waiting") |
-  "\(.timestamp) | \(.session_name) | recovery:\(.recovery_duration_seconds)s"' \
-  ~/.csm/astrocyte/incidents.jsonl | tail -10
-```
-
-**Expected frequency**: 2-4 stalls per day across all sessions is normal.
-
-**See**: [API Stall Mitigation Guide](docs/API-STALL-MITIGATION.md) for:
-- What are API stalls and how to identify them
-- Difference between API stalls and local hangs
-- Common stall patterns and triggers
-- Threshold tuning recommendations
-- Detailed troubleshooting procedures
-- When to contact Anthropic support
-
-### Adjusting Detection Thresholds
-
-If you experience frequent API stalls or want faster recovery, adjust thresholds:
-
-```bash
-# Edit config
-nano ~/.csm/astrocyte/config.yaml
-
-# Adjust zero_token_waiting threshold (default: 10 minutes)
-thresholds:
-  zero_token_waiting: 5  # Faster recovery (5 minutes)
-
-# Restart daemon
-systemctl --user restart astrocyte
-```
-
-**Recommended thresholds**:
-- Conservative (default): 10 minutes - safest, zero false positives
-- Balanced: 5 minutes - faster recovery, very low false positive risk
-- Aggressive: 3 minutes - fastest recovery, small false positive risk
-
-### Viewing Logs
-
-```bash
-# Live daemon logs
-journalctl --user -u astrocyte -f
-
-# Recent incidents
-tail -20 ~/.csm/astrocyte/incidents.jsonl | jq
-
-# Debug logs
-tail -f ~/.csm/astrocyte/logs/daemon.log
-```
-
 ## Cloud Deployment
 
 For distributed team monitoring across multiple workstations, deploy the central collector service.

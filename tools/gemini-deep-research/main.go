@@ -21,8 +21,16 @@ Usage:
   gemini-deep-research [FLAGS] <URL>
 
 Flags:
-  --input <text>          Short custom prompt for topic analysis (conflicts with --input-file)
-  --input-file <path>     Path to file containing custom prompt (conflicts with --input)
+  Per-Stage Prompts:
+  --extract-prompt <text|@file>   Custom prompt for extraction stage
+  --analyze-prompt <text|@file>   Custom prompt for topic analysis stage
+  --research-prompt <text|@file>  Custom prompt for deep research stage
+
+  Legacy (Deprecated):
+  --input <text>          DEPRECATED: Use --analyze-prompt instead
+  --input-file <path>     DEPRECATED: Use --analyze-prompt @file.txt instead
+
+  Other Options:
   --type <content-type>   Override content type auto-detection (video|article|arxiv|huggingface)
   --output-dir <path>     Output directory for results (default: ./output)
   --timeout <minutes>     Deep Research timeout in minutes (default: 60)
@@ -37,11 +45,18 @@ Examples:
   # Basic usage (YouTube video)
   gemini-deep-research https://www.youtube.com/watch?v=VIDEO_ID
 
-  # Custom prompt (short)
-  gemini-deep-research --input "Focus on security topics" https://example.com
+  # Custom prompt for analysis stage
+  gemini-deep-research --analyze-prompt "Focus on security topics" https://example.com
 
-  # Custom prompt (from file)
-  gemini-deep-research --input-file ./prompts/security-analysis.txt https://example.com
+  # Custom prompt from file (using @file syntax)
+  gemini-deep-research --analyze-prompt @prompts/security.txt https://example.com
+
+  # Multi-stage prompts
+  gemini-deep-research \
+    --extract-prompt "Extract security vulnerabilities" \
+    --analyze-prompt "Analyze threat patterns" \
+    --research-prompt "Research mitigation strategies" \
+    https://example.com
 
   # Override content type detection
   gemini-deep-research --type article https://youtu.be/VIDEO_ID
@@ -76,8 +91,16 @@ func main() {
 	// Create flags
 	var flags types.Flags
 
-	flag.StringVar(&flags.Input, "input", "", "Short custom prompt for topic analysis")
-	flag.StringVar(&flags.InputFile, "input-file", "", "Path to file containing custom prompt")
+	// New per-stage prompt flags
+	flag.StringVar(&flags.ExtractPrompt, "extract-prompt", "", "Custom prompt for extraction stage (supports @file syntax)")
+	flag.StringVar(&flags.AnalyzePrompt, "analyze-prompt", "", "Custom prompt for topic analysis stage (supports @file syntax)")
+	flag.StringVar(&flags.ResearchPrompt, "research-prompt", "", "Custom prompt for deep research stage (supports @file syntax)")
+
+	// Legacy flags (deprecated)
+	flag.StringVar(&flags.Input, "input", "", "DEPRECATED: Use --analyze-prompt instead")
+	flag.StringVar(&flags.InputFile, "input-file", "", "DEPRECATED: Use --analyze-prompt @file.txt instead")
+
+	// Other flags
 	flag.StringVar(&flags.Type, "type", "", "Override content type auto-detection (video|article|arxiv|huggingface)")
 	flag.StringVar(&flags.OutputDir, "output-dir", "", "Output directory for results")
 	flag.IntVar(&flags.Timeout, "timeout", 0, "Deep Research timeout in minutes")
@@ -126,6 +149,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, "")
 		flag.Usage()
 		os.Exit(1)
+	}
+
+	// Show deprecation warning for --input or --input-file
+	if flags.Input != "" || flags.InputFile != "" {
+		fmt.Fprintln(os.Stderr, "WARNING: --input and --input-file are deprecated.")
+		fmt.Fprintln(os.Stderr, "         Use --analyze-prompt instead. These flags will be removed in v3.0.0.")
+		fmt.Fprintln(os.Stderr, "         Migration: --input 'text' → --analyze-prompt 'text'")
+		fmt.Fprintln(os.Stderr, "                   --input-file file.txt → --analyze-prompt @file.txt")
+		fmt.Fprintln(os.Stderr, "")
 	}
 
 	// Load configuration

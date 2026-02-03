@@ -2,13 +2,8 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
 
 	"github.com/spf13/cobra"
-	"github.com/vbonnet/ai-tools/claude-session-manager/internal/messages"
-	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
@@ -16,12 +11,7 @@ import (
 var (
 	sessionSendPrompt     string
 	sessionSendPromptFile string
-	sessionSendSender     string
-	sessionSendReplyTo    string
 )
-
-// Sender name validation regex: alphanumeric, dash, underscore only
-var senderNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 var sendCmd = &cobra.Command{
 	Use:   "send <session-name>",
@@ -34,29 +24,11 @@ special character interpretation, followed by a separate Enter key.
 This solves the common issue where multi-line prompts sent via paste-buffer
 are interpreted as "pasted text" instead of being executed.
 
-SENDER ATTRIBUTION:
-  - If running in a CSM session: sender is auto-detected (tamper-resistant)
-  - If NOT in CSM session: --sender flag is REQUIRED
-  - Sender name must match: ^[a-zA-Z0-9_-]+$ (no spaces)
-
-MESSAGE THREADING:
-  - Each message gets a unique ID for tracking
-  - Use --reply-to to link messages in conversation threads
-
 Examples:
-  # Send from within a CSM session (auto-detects sender)
+  # Send a prompt from command line
   csm send my-session --prompt "Please review the code"
 
-  # Send from external process (must specify sender)
-  csm send my-session --sender astrocyte --prompt "Diagnosis complete"
-
-  # Reply to a previous message
-  csm send my-session --reply-to 1738612345678-sender-001 --prompt "Looks good!"
-
-  # Send from cron job
-  csm send my-session --sender cron-backup --prompt "Backup finished"
-
-  # Send a prompt from file
+  # Send a prompt from file (for large multi-line prompts)
   csm send my-session --prompt-file /path/to/prompt.txt
 
 IMPORTANT: Requires either --prompt or --prompt-file flag.`,
@@ -77,18 +49,6 @@ func init() {
 		"",
 		"File containing prompt to send (max 10KB)",
 	)
-	sendCmd.Flags().StringVar(
-		&sessionSendSender,
-		"sender",
-		"",
-		"Sender identifier (required if not in CSM session)",
-	)
-	sendCmd.Flags().StringVar(
-		&sessionSendReplyTo,
-		"reply-to",
-		"",
-		"Message ID to reply to (creates conversation thread)",
-	)
 	sendCmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")
 	sendCmd.MarkFlagsOneRequired("prompt", "prompt-file")
 
@@ -96,152 +56,29 @@ func init() {
 }
 
 func runSend(cmd *cobra.Command, args []string) error {
-	recipientSession := args[0]
+	sessionName := args[0]
 
-	// Determine sender (auto-detect or use --sender flag)
-	senderName, err := determineSender()
-	if err != nil {
-		return err
-	}
-
-	// Validate sender name format
-	if !senderNameRegex.MatchString(senderName) {
-		return fmt.Errorf("invalid sender name '%s': must match pattern ^[a-zA-Z0-9_-]+$ (alphanumeric, dash, underscore only)", senderName)
-	}
-
-	// Validate sender name length
-	if len(senderName) < 1 || len(senderName) > 64 {
-		return fmt.Errorf("invalid sender name '%s': must be 1-64 characters", senderName)
-	}
-
-	// Validate --reply-to if provided
-	if sessionSendReplyTo != "" {
-		if !messages.ValidateMessageID(sessionSendReplyTo) {
-			return fmt.Errorf("invalid --reply-to message ID format: '%s'\n\nExpected format: {timestamp}-{sender}-{seq}\nExample: 1738612345678-sender-001", sessionSendReplyTo)
-		}
-	}
-
-	// Check rate limit
-	rateLimiter := messages.GetRateLimiter(senderName)
-	allowed, remaining, err := rateLimiter.Allow()
-	if !allowed {
-		return fmt.Errorf("rate limit exceeded: %w\n\nLimit: 10 messages per minute\nTry again in a few seconds", err)
-	}
-	_ = remaining // Will be used in logging metadata
-
-	// Check recipient session exists in tmux
-	exists, err := tmux.HasSession(recipientSession)
+	// Check session exists in tmux
+	exists, err := tmux.HasSession(sessionName)
 	if err != nil {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
 	if !exists {
-		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: csm list\n  • Create session: csm new %s", recipientSession, recipientSession)
+		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: csm list\n  • Create session: csm new %s", sessionName, sessionName)
 	}
 
-	// Get message content
-	var message string
+	// Send prompt using literal mode
 	if sessionSendPrompt != "" {
-		message = sessionSendPrompt
-	} else if sessionSendPromptFile != "" {
-		// Read file content (max 10KB)
-		fileContent, err := readPromptFile(sessionSendPromptFile)
-		if err != nil {
-			return err
+		if err := tmux.SendPromptLiteral(sessionName, sessionSendPrompt); err != nil {
+			return fmt.Errorf("failed to send prompt: %w", err)
 		}
-		message = fileContent
+		ui.PrintSuccess(fmt.Sprintf("Prompt sent to '%s' (%d chars)", sessionName, len(sessionSendPrompt)))
+	} else if sessionSendPromptFile != "" {
+		if err := tmux.SendPromptFromFile(sessionName, sessionSendPromptFile); err != nil {
+			return fmt.Errorf("failed to send prompt from file: %w", err)
+		}
+		ui.PrintSuccess(fmt.Sprintf("Prompt sent to '%s' from file: %s", sessionName, sessionSendPromptFile))
 	}
-
-	// Generate unique message ID
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
-	}
-	stateDir := filepath.Join(homeDir, ".csm", "state")
-	idGen, err := messages.NewMessageIDGenerator(senderName, stateDir)
-	if err != nil {
-		return fmt.Errorf("failed to create message ID generator: %w", err)
-	}
-	messageID, err := idGen.Next()
-	if err != nil {
-		return fmt.Errorf("failed to generate message ID: %w", err)
-	}
-
-	// Format message with sender prefix and message ID
-	formattedMessage := formatMessageWithMetadata(senderName, messageID, sessionSendReplyTo, message)
-
-	// Log the message before sending
-	logsDir := filepath.Join(homeDir, ".csm", "logs", "messages")
-	logger, err := messages.NewMessageLogger(logsDir)
-	if err != nil {
-		return fmt.Errorf("failed to create logger: %w", err)
-	}
-
-	logEntry := messages.CreateLogEntry(messageID, senderName, recipientSession, message, sessionSendReplyTo)
-	if err := logger.LogMessage(logEntry); err != nil {
-		// Log error but don't fail the send operation
-		fmt.Fprintf(os.Stderr, "Warning: failed to log message: %v\n", err)
-	}
-
-	// Send using literal mode
-	if err := tmux.SendPromptLiteral(recipientSession, formattedMessage); err != nil {
-		return fmt.Errorf("failed to send prompt: %w", err)
-	}
-
-	// Print success message with message ID
-	successMsg := fmt.Sprintf("Sent to '%s' from '%s' (%d chars) [ID: %s]", recipientSession, senderName, len(formattedMessage), messageID)
-	if sessionSendPromptFile != "" {
-		successMsg += fmt.Sprintf(" [file: %s]", sessionSendPromptFile)
-	}
-	ui.PrintSuccess(successMsg)
 
 	return nil
-}
-
-// determineSender returns the sender name either from auto-detection or --sender flag
-func determineSender() (string, error) {
-	// If --sender flag provided, use it
-	if sessionSendSender != "" {
-		return sessionSendSender, nil
-	}
-
-	// Try auto-detection (only works in CSM sessions)
-	detectedName, err := session.GetCurrentSessionName(cfg.SessionsDir)
-	if err != nil {
-		return "", fmt.Errorf("--sender flag is required when not in a CSM session.\n\nError: %w\n\nExamples:\n  • From daemon: csm send session --sender astrocyte --prompt \"...\"\n  • From script: csm send session --sender my-script --prompt \"...\"", err)
-	}
-
-	return detectedName, nil
-}
-
-// formatMessageWithMetadata prefixes the message with sender, ID, and optional reply-to
-func formatMessageWithMetadata(sender, messageID, replyTo, message string) string {
-	header := fmt.Sprintf("[From: %s | ID: %s", sender, messageID)
-	if replyTo != "" {
-		header += fmt.Sprintf(" | Reply-To: %s", replyTo)
-	}
-	header += "]"
-	return fmt.Sprintf("%s\n%s", header, message)
-}
-
-// readPromptFile reads and validates a prompt file (max 10KB)
-func readPromptFile(filePath string) (string, error) {
-	// Check file exists and get size
-	stat, err := os.Stat(filePath)
-	if err != nil {
-		return "", fmt.Errorf("prompt file not found: %s", filePath)
-	}
-
-	// Enforce 10KB size limit
-	const maxPromptFileSize = 10 * 1024
-	if stat.Size() > maxPromptFileSize {
-		return "", fmt.Errorf("prompt file too large: %d bytes (max 10KB)", stat.Size())
-	}
-
-	// Read file content
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read prompt file: %w", err)
-	}
-
-	return string(content), nil
 }

@@ -18,31 +18,6 @@ from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Dict, Any, List
 
-# Import stuck csm send recovery
-try:
-    from astrocyte_stuck_csm_send_recovery import kill_stuck_csm_send
-    STUCK_CSM_SEND_RECOVERY_AVAILABLE = True
-except ImportError:
-    STUCK_CSM_SEND_RECOVERY_AVAILABLE = False
-    kill_stuck_csm_send = None
-
-# Import Ctrl+C recovery
-try:
-    from astrocyte_ctrlc_recovery import try_ctrlc_recovery
-    CTRLC_RECOVERY_AVAILABLE = True
-except ImportError:
-    CTRLC_RECOVERY_AVAILABLE = False
-    try_ctrlc_recovery = None
-
-# Import session restart
-try:
-    from astrocyte_session_restart import should_restart_session, restart_session
-    SESSION_RESTART_AVAILABLE = True
-except ImportError:
-    SESSION_RESTART_AVAILABLE = False
-    should_restart_session = None
-    restart_session = None
-
 # Import remote reporter
 try:
     from reporter import RemoteReporter, RemoteReporterConfig
@@ -695,45 +670,12 @@ def recover_session(session_name: str, config: Config) -> RecoveryResult:
     """
     Dispatch to appropriate recovery strategy based on configuration.
 
-    Recovery chain (in order):
-    1. Kill stuck csm send processes (if any) - BLOCKING fix
-    2. Send ESC key - gentle recovery for active API calls
-    3. Send Ctrl+C - aggressive recovery for stale UI states
-
     Args:
         session_name: Name of the stuck session
         config: Configuration object with recovery settings
 
     Returns RecoveryResult from the selected recovery strategy.
     """
-    # Step 0: Kill stuck csm send processes FIRST
-    # This is critical because stuck csm send blocks ALL input including Ctrl+C
-    if STUCK_CSM_SEND_RECOVERY_AVAILABLE:
-        try:
-            success, duration = kill_stuck_csm_send(session_name, min_age_seconds=600)
-            if success:
-                print(f"   🔪 Killed stuck csm send processes in {duration:.2f}s")
-                # Wait for session to clear
-                time.sleep(2)
-                # Check if session recovered
-                before = capture_pane_state(session_name)
-                time.sleep(1)
-                after = capture_pane_state(session_name)
-                if verify_recovery(before, after):
-                    print(f"   ✅ Session recovered after killing stuck csm send")
-                    return RecoveryResult(
-                        success=True,
-                        method="kill_stuck_csm_send",
-                        duration_seconds=duration + 3,
-                        before_state=before,
-                        after_state=after
-                    )
-            else:
-                print(f"   ℹ️  No stuck csm send processes found (checked in {duration:.2f}s)")
-        except Exception as e:
-            print(f"   ⚠️  Error checking for stuck csm send: {e}")
-            # Continue with other recovery methods
-
     method = config.recovery_method
 
     if method == "escape":
@@ -859,21 +801,6 @@ def recover_with_ctrl_c(session_name: str) -> RecoveryResult:
 
     Returns RecoveryResult with success status and duration.
     """
-    # Use new Ctrl+C recovery module if available
-    if CTRLC_RECOVERY_AVAILABLE:
-        result = try_ctrlc_recovery(session_name)
-        # Convert tuple result to RecoveryResult if needed
-        if isinstance(result, tuple):
-            return RecoveryResult(
-                success=result.success,
-                method=result.method,
-                duration_seconds=result.duration_seconds,
-                before_state=result.before_state,
-                after_state=result.after_state
-            )
-        return result
-
-    # Fallback to original implementation
     before = capture_pane_state(session_name)
     start_time = time.time()
 
@@ -901,28 +828,13 @@ def recover_with_ctrl_c(session_name: str) -> RecoveryResult:
 
 def recover_with_session_restart(session_name: str) -> RecoveryResult:
     """
-    Attempt recovery by killing and restarting the session using CSM commands.
+    Attempt recovery by killing and restarting the tmux session.
 
     WARNING: This is destructive! Only use as last resort.
-    Uses `csm kill --force` and `csm resume` for proper state management.
+    Preserves session directory but loses tmux state.
 
     Returns RecoveryResult with success status and duration.
     """
-    # Use new session restart module if available
-    if SESSION_RESTART_AVAILABLE:
-        result = restart_session(session_name)
-        # Convert tuple result to RecoveryResult if needed
-        if isinstance(result, tuple):
-            return RecoveryResult(
-                success=result.success,
-                method=result.method,
-                duration_seconds=result.duration_seconds,
-                before_state=result.before_state if hasattr(result, 'before_state') else None,
-                after_state=result.after_state if hasattr(result, 'after_state') else None
-            )
-        return result
-
-    # Fallback to original implementation
     before = capture_pane_state(session_name)
     start_time = time.time()
 

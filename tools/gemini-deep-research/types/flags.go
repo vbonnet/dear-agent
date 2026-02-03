@@ -7,8 +7,16 @@ import (
 
 // Flags represents CLI flags for the application
 type Flags struct {
-	Input     string // --input: Short custom prompt
-	InputFile string // --input-file: Path to file containing prompt
+	// Legacy flags (deprecated)
+	Input     string // --input: Short custom prompt (DEPRECATED: use --analyze-prompt)
+	InputFile string // --input-file: Path to file containing prompt (DEPRECATED: use --analyze-prompt)
+
+	// New per-stage prompt flags
+	ExtractPrompt  string // --extract-prompt: Custom prompt for extraction stage
+	AnalyzePrompt  string // --analyze-prompt: Custom prompt for topic analysis stage
+	ResearchPrompt string // --research-prompt: Custom prompt for deep research stage
+
+	// Other flags
 	Type      string // --type: Content type override
 	OutputDir string // --output-dir: Output directory
 	Timeout   int    // --timeout: Deep Research timeout in minutes
@@ -18,9 +26,19 @@ type Flags struct {
 
 // Validate validates flag values
 func (f *Flags) Validate() error {
-	// Check mutual exclusion of --input and --input-file
+	// Check mutual exclusion of legacy --input and --input-file
 	if f.Input != "" && f.InputFile != "" {
 		return fmt.Errorf("--input and --input-file are mutually exclusive")
+	}
+
+	// Check mutual exclusion of legacy --input and new --analyze-prompt
+	if f.Input != "" && f.AnalyzePrompt != "" {
+		return fmt.Errorf("--input and --analyze-prompt are mutually exclusive (use --analyze-prompt)")
+	}
+
+	// Check mutual exclusion of legacy --input-file and new --analyze-prompt
+	if f.InputFile != "" && f.AnalyzePrompt != "" {
+		return fmt.Errorf("--input-file and --analyze-prompt are mutually exclusive (use --analyze-prompt)")
 	}
 
 	// Check input file exists if specified
