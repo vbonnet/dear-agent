@@ -703,26 +703,60 @@ def recover_session(session_name: str, config: Config) -> RecoveryResult:
 
 def verify_recovery(before: SessionState, after: SessionState) -> bool:
     """
-    Check if session recovered (pane content changed or cursor moved).
+    Check if session recovered (meaningful content changed, stuck patterns gone).
 
-    Returns True if any of:
-    - Pane content changed
-    - Cursor moved
-    - Mustering pattern gone
+    Returns True if session is actually unstuck (not just timer updates).
+
+    Key improvements:
+    - Normalizes timers to ignore timestamp changes (e.g., "5m 10s" → "5m 15s")
+    - Checks if stuck patterns persist (0 tokens, mustering, waiting)
+    - Only reports success if meaningful content changed
     """
-    # Content changed = likely unstuck
-    if before.pane_content != after.pane_content:
-        return True
+    # Normalize content by removing dynamic timers/timestamps
+    # Pattern: "1m 23s", "45s", "2h 15m 30s", "esc to interrupt · 14m 15s"
+    timer_pattern = r'\d+[smh](\s+\d+[smh])*'
 
-    # Cursor moved = likely unstuck
-    if before.cursor_position != after.cursor_position:
-        return True
+    before_normalized = re.sub(timer_pattern, 'TIME', before.pane_content)
+    after_normalized = re.sub(timer_pattern, 'TIME', after.pane_content)
+
+    # If normalized content is identical, only timer changed (NOT recovery)
+    if before_normalized == after_normalized:
+        return False
+
+    # Check if stuck patterns persist after recovery attempt
+    stuck_patterns = [
+        r'↓ 0 tokens',              # Zero token download (stuck waiting)
+        r'Mustering\.\.\.',         # Stuck mustering
+        r'Flowing\.\.\.',           # Stuck flowing with 0 tokens
+        r'Drizzling\.\.\.',         # Stuck drizzling with 0 tokens
+        r'Cooking\.\.\.',           # Stuck cooking with 0 tokens
+        r'Metamorphosing\.\.\.',    # Stuck metamorphosing with 0 tokens
+    ]
+
+    # If any stuck pattern was present before AND still present after, recovery failed
+    for pattern in stuck_patterns:
+        if re.search(pattern, before.pane_content):
+            if re.search(pattern, after.pane_content):
+                # Pattern still present - still stuck
+                return False
 
     # Mustering pattern gone = unstuck
     for pattern in MUSTERING_PATTERNS:
         if re.search(pattern, before.pane_content):
             if not re.search(pattern, after.pane_content):
                 return True
+
+    # Cursor moved = likely unstuck (but check it moved meaningfully)
+    # Ignore tiny cursor movements (< 3 rows or columns) that could be jitter
+    if before.cursor_position != after.cursor_position:
+        row_diff = abs(after.cursor_position[0] - before.cursor_position[0])
+        col_diff = abs(after.cursor_position[1] - before.cursor_position[1])
+        if row_diff >= 3 or col_diff >= 3:
+            return True
+
+    # Meaningful content changed (after normalization) = likely unstuck
+    if before_normalized != after_normalized:
+        return True
 
     return False
 
