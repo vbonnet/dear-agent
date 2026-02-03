@@ -28,8 +28,10 @@ from astrocyte import (
     is_stuck_zero_token_waiting,
     is_stuck_cursor_frozen,
     is_asking_question_without_tool,
+    is_stuck_permission_prompt,
     recover_session,
     send_violation_prompt,
+    reject_permission_prompt,
     log_incident,
     get_session_id,
     send_slack_notification,
@@ -171,7 +173,17 @@ def main():
                     symptom = None
                     heuristic = None
 
-                    if previous:
+                    # Check permission prompts FIRST (works without previous state)
+                    # Fresh start detection: if we see a permission prompt with violation patterns,
+                    # we can detect and reject immediately without waiting for second cycle
+                    permission_threshold = config.get_threshold(session, "permission_prompt_duration")
+                    if is_stuck_permission_prompt(current, previous, permission_threshold):
+                        stuck = True
+                        symptom = "permission_prompt"
+                        heuristic = "permission_prompt_detected"
+
+                    # Other detection heuristics require previous state for comparison
+                    if not stuck and previous:
                         # Get session-specific thresholds (with overrides)
                         mustering_threshold = config.get_threshold(session, "mustering_timeout")
                         zero_token_threshold = config.get_threshold(session, "zero_token_waiting")
@@ -196,7 +208,12 @@ def main():
                             heuristic = "ask_question_pattern"
 
                     if stuck:
-                        delta_minutes = int((current.timestamp - previous.timestamp).seconds / 60)
+                        # Calculate duration (0 for fresh start detection)
+                        if previous:
+                            delta_minutes = int((current.timestamp - previous.timestamp).seconds / 60)
+                        else:
+                            delta_minutes = 0  # Fresh start detection, no duration yet
+
                         print(f"\n⚠️  STUCK DETECTED: {session}")
                         print(f"   Symptom: {symptom}")
                         print(f"   Heuristic: {heuristic}")
@@ -210,6 +227,8 @@ def main():
                         # Determine recovery method based on symptom
                         if symptom == "ask_question_violation":
                             recovery_method = "violation_prompt"
+                        elif symptom == "permission_prompt":
+                            recovery_method = "reject_permission"
                         else:
                             recovery_method = "escape"
 
@@ -240,6 +259,10 @@ def main():
                             print(f"   🔧 Sending AskUserQuestion violation prompt...")
                             logger.info(f"Sending violation prompt to session={session}")
                             recovery = send_violation_prompt(session)
+                        elif symptom == "permission_prompt":
+                            print(f"   🔧 Rejecting permission prompt with tool usage violation...")
+                            logger.info(f"Rejecting permission prompt for session={session}")
+                            recovery = reject_permission_prompt(session)
                         else:
                             print(f"   🔧 Attempting recovery with {config.recovery_method} strategy...")
                             logger.info(f"Attempting recovery with {config.recovery_method} for session={session}")
@@ -265,7 +288,8 @@ def main():
 
                         # Send diagnosis prompt (if recovery successful and not a violation prompt)
                         # Skip diagnosis for AskUserQuestion violations (violation prompt handles it)
-                        if recovery.success and symptom != "ask_question_violation":
+                        # Skip diagnosis for permission prompts (rejection is automated, no agent diagnosis needed)
+                        if recovery.success and symptom not in ["ask_question_violation", "permission_prompt"]:
                             diagnosis_prompt = generate_diagnosis_prompt(incident, recovery)
                             diagnosis_sent = send_diagnosis_prompt_via_csm(session, diagnosis_prompt)
                             if diagnosis_sent:
@@ -277,6 +301,9 @@ def main():
                         elif symptom == "ask_question_violation":
                             print(f"   📋 Violation prompt sent (no diagnosis needed)")
                             logger.info(f"Violation prompt sent to {session}, skipping diagnosis")
+                        elif symptom == "permission_prompt":
+                            print(f"   📋 Permission rejected (no diagnosis needed)")
+                            logger.info(f"Permission prompt rejected for {session}, skipping diagnosis")
 
                         if recovery.success:
                             print(f"   ✅ Recovery successful ({recovery.duration_seconds:.1f}s)")
