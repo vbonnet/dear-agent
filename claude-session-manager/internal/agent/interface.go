@@ -126,6 +126,11 @@ type SessionContext struct {
 	// Environment contains environment variables for the session.
 	// Optional.
 	Environment map[string]string
+
+	// WorkflowName specifies the execution mode for this session.
+	// Examples: "deep-research", "code-review", "architect".
+	// Optional. If empty, session runs in default conversational mode.
+	WorkflowName string
 }
 
 // Message represents a single message in a conversation.

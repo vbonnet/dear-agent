@@ -21,14 +21,16 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/readiness"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/workflow"
 )
 
 var (
-	detached   bool
-	agentName  string
-	projectID  string
-	prompt     string
-	promptFile string
+	detached     bool
+	agentName    string
+	workflowName string
+	projectID    string
+	prompt       string
+	promptFile   string
 )
 
 var newCmd = &cobra.Command{
@@ -193,6 +195,20 @@ Examples:
 		}
 
 		debug.Log("Agent: %s", agentName)
+
+		// Validate workflow compatibility if workflow specified
+		if workflowName != "" {
+			if err := workflow.ValidateCompatibility(workflowName, agentName); err != nil {
+				ui.PrintError(err,
+					"Workflow not compatible with agent",
+					fmt.Sprintf("  • Workflow '%s' does not support agent '%s'\n"+
+						"  • Run 'csm workflow list' to see available workflows\n"+
+						"  • Run 'csm workflow list --agent=%s' to see compatible workflows",
+						workflowName, agentName, agentName))
+				return err
+			}
+			debug.Log("Workflow: %s (compatible with %s)", workflowName, agentName)
+		}
 
 		// Set GCP_PROJECT_ID environment variable if provided (for gemini agent)
 		if projectID != "" {
@@ -954,6 +970,7 @@ func init() {
 	newCmd.Flags().BoolP("debug", "d", debugDefault, "Enable debug logging to ~/.csm/debug/ (env: CSM_DEBUG)")
 	newCmd.Flags().BoolVar(&detached, "detached", false, "Create detached session without attaching")
 	newCmd.Flags().StringVar(&agentName, "agent", "", "AI agent to use (claude, gemini, gpt)")
+	newCmd.Flags().StringVar(&workflowName, "workflow", "", "Execution workflow (deep-research, code-review, architect)")
 	newCmd.Flags().StringVar(&projectID, "project-id", "", "GCP project ID (required for gemini agent)")
 	newCmd.Flags().StringVar(&prompt, "prompt", "", "Prompt to send after session initialization")
 	newCmd.Flags().StringVar(&promptFile, "prompt-file", "", "File containing prompt to send")
