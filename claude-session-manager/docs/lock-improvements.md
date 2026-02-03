@@ -38,7 +38,7 @@ This document describes the lock system improvements implemented to fix three cr
 
 **Issue:**
 - Agents were manually deleting lock files: `rm -rf /tmp/csm-*.lock`
-- Error messages suggested dangerous `--no-lock` flag
+- Error messages previously suggested dangerous `--no-lock` flag (removed in 2026)
 - No built-in way to check if lock is stale (process crashed but lock file remains)
 
 **Solution:**
@@ -65,7 +65,7 @@ This document describes the lock system improvements implemented to fix three cr
 
 **Issue:**
 - Commands like `csm version` and `csm list` required locks
-- Agents using `csm version --no-lock` to bypass
+- Agents previously used `csm version --no-lock` to bypass locks (flag removed after deadlock fix)
 - No reason for read-only commands to need locks (they don't modify state)
 
 **Solution:**

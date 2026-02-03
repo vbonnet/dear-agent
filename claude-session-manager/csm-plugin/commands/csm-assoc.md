@@ -39,9 +39,8 @@ Execute these checks in sequence using separate tool calls. Do NOT use bash if/e
 
 **Step 2: Try association (without --create)**
 Run the appropriate command using SESSION_NAME from Step 1.
-IMPORTANT: Always use `--no-lock` flag to avoid deadlock with csm new.
 
-- Run: `csm associate "{SESSION_NAME}" --no-lock`
+- Run: `csm associate "{SESSION_NAME}"`
 - Capture exit code and output.
 
 **Step 3: Handle result**
@@ -51,7 +50,7 @@ IMPORTANT: Always use `--no-lock` flag to avoid deadlock with csm new.
 - If output contains "session not found":
   - Session needs to be created with --create flag
   - Run `pwd` and capture output as CURRENT_DIR
-  - Run: `csm associate "{SESSION_NAME}" --create --no-lock -C "{CURRENT_DIR}"`
+  - Run: `csm associate "{SESSION_NAME}" --create -C "{CURRENT_DIR}"`
     (using SESSION_NAME from Step 1, not from tmux again)
   - If this fails, show error and suggest: "Try running: csm doctor", then Exit
   - If successful, continue to Step 4

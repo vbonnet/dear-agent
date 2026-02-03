@@ -109,7 +109,7 @@ For users upgrading:
 - Old lock file (`/tmp/csm-{UID}/csm.lock`) is no longer used
 - New lock file (`/tmp/csm-{UID}/tmux-server.lock`) is created automatically
 - No configuration changes needed
-- `--no-lock` flag still exists (kept for future use with fine-grained locks)
+- `--no-lock` flag was removed (obsolete after deadlock fix in commit 262c069)
 
 ## Lock Hierarchy
 

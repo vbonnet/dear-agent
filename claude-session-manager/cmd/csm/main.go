@@ -24,7 +24,6 @@ var (
 	debugMode        bool
 	directory        string
 	timeout          time.Duration
-	noLock           bool // Kept for future use with fine-grained locks
 	skipHealthCheck  bool
 	noColor          bool
 	screenReader     bool
@@ -141,7 +140,6 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "log level (debug, info, warn, error)")
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", debugDefault, "enable debug logging (shorthand for --log-level debug, env: CSM_DEBUG)")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 0, "tmux command timeout (overrides config)")
-	rootCmd.PersistentFlags().BoolVar(&noLock, "no-lock", false, "skip lock acquisition (DANGEROUS)")
 	rootCmd.PersistentFlags().BoolVar(&skipHealthCheck, "skip-health-check", false, "skip health check")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output (WCAG AA compliance)")
 	rootCmd.PersistentFlags().BoolVar(&screenReader, "screen-reader", false, "use text symbols instead of Unicode (for screen readers)")
