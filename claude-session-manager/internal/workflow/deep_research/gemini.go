@@ -115,18 +115,71 @@ func (w *GeminiDeepResearch) executeSingleURL(ctx workflow.WorkflowContext, url 
 
 // executeMultiURL handles parallel research for multiple URLs.
 func (w *GeminiDeepResearch) executeMultiURL(ctx workflow.WorkflowContext, urls []string, startTime time.Time) (workflow.WorkflowResult, error) {
+	// Create crash-resilient logger
+	logger, err := NewResearchLogger(string(ctx.SessionID), urls, ctx.WorkingDirectory)
+	if err != nil {
+		return workflow.WorkflowResult{
+			Success: false,
+			Summary: fmt.Sprintf("Failed to create logger: %v", err),
+		}, err
+	}
+
+	// Check for already-completed URLs (resume logic)
+	completedURLs := logger.GetCompletedURLs()
+	pendingURLs := logger.GetPendingURLs()
+
+	if len(completedURLs) > 0 {
+		fmt.Printf("⏭️  Resuming session - skipping %d already-completed URLs\n", len(completedURLs))
+		for _, url := range completedURLs {
+			fmt.Printf("   ✓ %s (already complete)\n", url)
+		}
+	}
+
+	if len(pendingURLs) == 0 {
+		fmt.Printf("✓ All URLs already researched - loading results\n")
+		// All URLs already complete, just load artifacts and apply proposals
+		artifacts := logger.GetArtifacts()
+		applicationResult, err := w.applyResearch(ctx, artifacts, logger)
+		if err != nil {
+			fmt.Printf("Warning: Failed to apply research: %v\n", err)
+		}
+
+		// Add log file as artifact
+		artifacts = append(artifacts, workflow.Artifact{
+			Type: "research-log",
+			Path: logger.GetLogPath(),
+		})
+
+		return workflow.WorkflowResult{
+			Success:       len(artifacts) > 0,
+			Artifacts:     artifacts,
+			Summary:       fmt.Sprintf("All %d URLs already researched", len(urls)),
+			ExecutionTime: time.Since(startTime),
+			Metadata: map[string]interface{}{
+				"urls_total":           len(urls),
+				"urls_successful":      len(completedURLs),
+				"urls_failed":          0,
+				"resumed":              true,
+				"proposals_generated":  applicationResult != nil,
+				"application_summary":  getApplicationSummary(applicationResult),
+			},
+		}, nil
+	}
+
 	type researchResult struct {
 		url        string
 		reportPath string
 		err        error
 	}
 
-	results := make(chan researchResult, len(urls))
+	results := make(chan researchResult, len(pendingURLs))
 
-	// Start parallel research workflows
-	for i, url := range urls {
+	// Start parallel research workflows for pending URLs only
+	for i, url := range pendingURLs {
 		go func(index int, url string) {
 			fmt.Printf("[%d/%d] Starting research: %s\n", index+1, len(urls), url)
+			logger.MarkStarted(url)
+
 			reportPath, err := w.runDeepResearch(string(ctx.SessionID), url)
 			results <- researchResult{
 				url:        url,
@@ -137,35 +190,22 @@ func (w *GeminiDeepResearch) executeMultiURL(ctx workflow.WorkflowContext, urls 
 	}
 
 	// Collect results
-	var artifacts []workflow.Artifact
+	successCount := len(completedURLs) // Count already-completed URLs
 	var errors []string
-	successCount := 0
 
-	for i := 0; i < len(urls); i++ {
+	for i := 0; i < len(pendingURLs); i++ {
 		result := <-results
 
 		if result.err != nil {
 			// Track error but continue with other results
+			logger.MarkFailed(result.url, result.err)
 			errors = append(errors, fmt.Sprintf("%s: %v", result.url, result.err))
 			fmt.Printf("✗ Research failed: %s (%v)\n", result.url, result.err)
 			continue
 		}
 
-		// Create artifact for successful research
-		artifact := workflow.Artifact{
-			Type: "research-report",
-			Path: result.reportPath,
-			Metadata: map[string]interface{}{
-				"url": result.url,
-			},
-		}
-
-		// Get file size
-		if stat, err := os.Stat(result.reportPath); err == nil {
-			artifact.Size = stat.Size()
-		}
-
-		artifacts = append(artifacts, artifact)
+		// Mark as completed in log
+		logger.MarkCompleted(result.url, result.reportPath)
 		successCount++
 		fmt.Printf("✓ Research completed: %s\n", result.url)
 	}
@@ -175,49 +215,36 @@ func (w *GeminiDeepResearch) executeMultiURL(ctx workflow.WorkflowContext, urls 
 	if len(errors) > 0 {
 		summary += fmt.Sprintf(" (%d failed)", len(errors))
 	}
+	if len(completedURLs) > 0 {
+		summary += fmt.Sprintf(" (resumed from %d existing)", len(completedURLs))
+	}
 
 	// Determine overall success
 	success := successCount > 0 // At least one URL succeeded
 
+	// Get all artifacts (including previously completed ones)
+	artifacts := logger.GetArtifacts()
+
 	// Apply research insights if successful
-	var applicationResult *ApplicationResult
-	if success {
-		applicator, err := NewResearchApplicator([]string{"engram", "ai-tools"})
-		if err == nil {
-			result, err := applicator.Apply(context.Background(), artifacts)
-			if err == nil {
-				applicationResult = &result
-
-				// Write proposals to file
-				proposalsPath := ctx.OutputPath
-				if proposalsPath == "" {
-					proposalsPath = "research-proposals.md"
-				}
-				if err := WriteProposalsToMarkdown(result, proposalsPath); err != nil {
-					fmt.Printf("Warning: Failed to write proposals: %v\n", err)
-				} else {
-					fmt.Printf("✓ Proposals written to: %s\n", proposalsPath)
-
-					// Add proposals as an artifact
-					artifacts = append(artifacts, workflow.Artifact{
-						Type: "research-proposals",
-						Path: proposalsPath,
-					})
-				}
-			}
-		}
+	applicationResult, err := w.applyResearch(ctx, artifacts, logger)
+	if err != nil {
+		fmt.Printf("Warning: Failed to apply research: %v\n", err)
 	}
+
+	// Add log file as artifact
+	artifacts = append(artifacts, workflow.Artifact{
+		Type: "research-log",
+		Path: logger.GetLogPath(),
+	})
 
 	metadata := map[string]interface{}{
-		"urls_total":      len(urls),
-		"urls_successful": successCount,
-		"urls_failed":     len(errors),
-		"errors":          errors,
-	}
-
-	if applicationResult != nil {
-		metadata["proposals_generated"] = true
-		metadata["application_summary"] = applicationResult.Summary
+		"urls_total":          len(urls),
+		"urls_successful":     successCount,
+		"urls_failed":         len(errors),
+		"errors":              errors,
+		"resumed":             len(completedURLs) > 0,
+		"proposals_generated": applicationResult != nil,
+		"application_summary": getApplicationSummary(applicationResult),
 	}
 
 	return workflow.WorkflowResult{
@@ -227,6 +254,49 @@ func (w *GeminiDeepResearch) executeMultiURL(ctx workflow.WorkflowContext, urls 
 		ExecutionTime: time.Since(startTime),
 		Metadata:      metadata,
 	}, nil
+}
+
+// applyResearch applies research insights and updates the log.
+func (w *GeminiDeepResearch) applyResearch(ctx workflow.WorkflowContext, artifacts []workflow.Artifact, logger *ResearchLogger) (*ApplicationResult, error) {
+	if len(artifacts) == 0 {
+		return nil, fmt.Errorf("no artifacts to apply")
+	}
+
+	applicator, err := NewResearchApplicator([]string{"engram", "ai-tools"})
+	if err != nil {
+		return nil, fmt.Errorf("create applicator: %w", err)
+	}
+
+	result, err := applicator.Apply(context.Background(), artifacts)
+	if err != nil {
+		return nil, fmt.Errorf("apply research: %w", err)
+	}
+
+	// Write proposals to separate file
+	proposalsPath := ctx.OutputPath
+	if proposalsPath == "" {
+		proposalsPath = "research-proposals.md"
+	}
+	if err := WriteProposalsToMarkdown(result, proposalsPath); err != nil {
+		return &result, fmt.Errorf("write proposals: %w", err)
+	}
+	fmt.Printf("✓ Proposals written to: %s\n", proposalsPath)
+
+	// Add proposals to log file
+	if err := logger.AddProposals(result); err != nil {
+		return &result, fmt.Errorf("add proposals to log: %w", err)
+	}
+	fmt.Printf("✓ Proposals added to log: %s\n", logger.GetLogPath())
+
+	return &result, nil
+}
+
+// getApplicationSummary safely extracts summary from application result.
+func getApplicationSummary(result *ApplicationResult) string {
+	if result == nil {
+		return ""
+	}
+	return result.Summary
 }
 
 // runDeepResearch executes the gemini-deep-research CLI and returns the report path.
