@@ -9,7 +9,48 @@ import (
 	"strings"
 
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 )
+
+// GetCurrentSessionName returns the CSM session name for the current context.
+// It auto-detects if running in a CSM-managed tmux session.
+//
+// Returns:
+//   - Session name if in CSM session
+//   - Error if not in tmux or not a CSM session
+//
+// This function is used for auto-detecting sender in csm send command.
+func GetCurrentSessionName(sessionsDir string) (string, error) {
+	// Check if running in tmux
+	tmuxSessionName, err := tmux.GetCurrentSessionName()
+	if err != nil {
+		return "", fmt.Errorf("not in tmux session: %w", err)
+	}
+
+	// Look up CSM manifest by tmux session name
+	manifests, err := manifest.List(sessionsDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to list CSM sessions: %w", err)
+	}
+
+	// Find manifest matching this tmux session
+	for _, m := range manifests {
+		// Skip archived sessions
+		if m.Lifecycle == manifest.LifecycleArchived {
+			continue
+		}
+
+		if m.Tmux.SessionName == tmuxSessionName {
+			// Return the CSM session name (prefer Name field, fallback to tmux name)
+			if m.Name != "" {
+				return m.Name, nil
+			}
+			return m.Tmux.SessionName, nil
+		}
+	}
+
+	return "", fmt.Errorf("tmux session '%s' is not a CSM-managed session", tmuxSessionName)
+}
 
 // ResolveIdentifier finds a manifest by tmux name, workspace ID, or session ID
 func ResolveIdentifier(identifier string, sessionsDir string) (*manifest.Manifest, string, error) {
