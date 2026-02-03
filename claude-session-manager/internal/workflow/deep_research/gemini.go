@@ -59,6 +59,7 @@ func (w *GeminiDeepResearch) SupportedAgents() []string {
 }
 
 // Execute runs the deep-research workflow.
+// Supports both single and multi-URL research with parallel execution.
 func (w *GeminiDeepResearch) Execute(ctx workflow.WorkflowContext) (workflow.WorkflowResult, error) {
 	startTime := time.Now()
 
@@ -71,17 +72,17 @@ func (w *GeminiDeepResearch) Execute(ctx workflow.WorkflowContext) (workflow.Wor
 		}, fmt.Errorf("no URLs detected in prompt")
 	}
 
-	// For now, support single URL research
-	// Multi-URL orchestration will be added in Phase 3
-	if len(urls) > 1 {
-		return workflow.WorkflowResult{
-			Success: false,
-			Summary: fmt.Sprintf("Multiple URL research not yet supported (found %d URLs)", len(urls)),
-		}, fmt.Errorf("multi-URL research not implemented (use Phase 3)")
+	// Single URL: direct execution
+	if len(urls) == 1 {
+		return w.executeSingleURL(ctx, urls[0], startTime)
 	}
 
-	url := urls[0]
+	// Multi-URL: parallel orchestration
+	return w.executeMultiURL(ctx, urls, startTime)
+}
 
+// executeSingleURL handles research for a single URL.
+func (w *GeminiDeepResearch) executeSingleURL(ctx workflow.WorkflowContext, url string, startTime time.Time) (workflow.WorkflowResult, error) {
 	// Execute gemini-deep-research CLI
 	reportPath, err := w.runDeepResearch(string(ctx.SessionID), url)
 	if err != nil {
@@ -109,6 +110,86 @@ func (w *GeminiDeepResearch) Execute(ctx workflow.WorkflowContext) (workflow.Wor
 		Summary: fmt.Sprintf("Research completed for %s", url),
 		LogPath: reportPath,
 		ExecutionTime: time.Since(startTime),
+	}, nil
+}
+
+// executeMultiURL handles parallel research for multiple URLs.
+func (w *GeminiDeepResearch) executeMultiURL(ctx workflow.WorkflowContext, urls []string, startTime time.Time) (workflow.WorkflowResult, error) {
+	type researchResult struct {
+		url        string
+		reportPath string
+		err        error
+	}
+
+	results := make(chan researchResult, len(urls))
+
+	// Start parallel research workflows
+	for i, url := range urls {
+		go func(index int, url string) {
+			fmt.Printf("[%d/%d] Starting research: %s\n", index+1, len(urls), url)
+			reportPath, err := w.runDeepResearch(string(ctx.SessionID), url)
+			results <- researchResult{
+				url:        url,
+				reportPath: reportPath,
+				err:        err,
+			}
+		}(i, url)
+	}
+
+	// Collect results
+	var artifacts []workflow.Artifact
+	var errors []string
+	successCount := 0
+
+	for i := 0; i < len(urls); i++ {
+		result := <-results
+
+		if result.err != nil {
+			// Track error but continue with other results
+			errors = append(errors, fmt.Sprintf("%s: %v", result.url, result.err))
+			fmt.Printf("✗ Research failed: %s (%v)\n", result.url, result.err)
+			continue
+		}
+
+		// Create artifact for successful research
+		artifact := workflow.Artifact{
+			Type: "research-report",
+			Path: result.reportPath,
+			Metadata: map[string]interface{}{
+				"url": result.url,
+			},
+		}
+
+		// Get file size
+		if stat, err := os.Stat(result.reportPath); err == nil {
+			artifact.Size = stat.Size()
+		}
+
+		artifacts = append(artifacts, artifact)
+		successCount++
+		fmt.Printf("✓ Research completed: %s\n", result.url)
+	}
+
+	// Build summary
+	summary := fmt.Sprintf("Researched %d/%d URLs successfully", successCount, len(urls))
+	if len(errors) > 0 {
+		summary += fmt.Sprintf(" (%d failed)", len(errors))
+	}
+
+	// Determine overall success
+	success := successCount > 0 // At least one URL succeeded
+
+	return workflow.WorkflowResult{
+		Success:       success,
+		Artifacts:     artifacts,
+		Summary:       summary,
+		ExecutionTime: time.Since(startTime),
+		Metadata: map[string]interface{}{
+			"urls_total":      len(urls),
+			"urls_successful": successCount,
+			"urls_failed":     len(errors),
+			"errors":          errors,
+		},
 	}, nil
 }
 
