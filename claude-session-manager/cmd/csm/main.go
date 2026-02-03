@@ -14,6 +14,9 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
+
+	// Import workflows to trigger registration
+	_ "github.com/vbonnet/ai-tools/claude-session-manager/internal/workflow/deep_research"
 )
 
 var (
