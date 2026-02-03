@@ -91,12 +91,96 @@ gemini-deep-research https://example.com/article
 ### With Custom Prompt
 
 ```bash
-# Short prompt
+# Short prompt (inline)
 gemini-deep-research --input "Focus on security topics" https://example.com
 
-# Prompt from file
+# Prompt from file (explicit flag)
 gemini-deep-research --input-file ./prompts/security.txt https://example.com
+
+# Prompt from file (Azure @file syntax) - NEW
+gemini-deep-research --input "@prompts/security.txt" https://example.com
 ```
+
+#### Azure @file Syntax
+
+The tool supports Azure CLI-style `@file` syntax for loading prompts from files. Simply prefix a file path with `@`:
+
+```bash
+# Relative path
+gemini-deep-research --input "@./my-prompt.txt" https://example.com
+
+# Absolute path
+gemini-deep-research --input "@/home/user/prompts/custom.txt" https://example.com
+
+# Works with all prompt flags
+gemini-deep-research --input "@analyze.txt" https://example.com
+```
+
+**Features:**
+- Cross-platform path resolution (Windows/Unix)
+- UTF-8 encoding support
+- File size limit: 1MB (prevents accidental large files)
+- Helpful error messages for missing files
+
+**Example:**
+```bash
+# Create a prompt file
+echo "Extract security vulnerabilities and CVEs from the content" > security-prompt.txt
+
+# Use it with @file syntax
+gemini-deep-research --input "@security-prompt.txt" https://example.com/article
+```
+
+#### Template Variables
+
+Prompts support template variables that are dynamically replaced with actual values during execution. This allows you to create reusable prompt templates that adapt to different URLs and content types.
+
+**Available Variables:**
+
+| Variable | Description | Example Value |
+|----------|-------------|---------------|
+| `{url}` | Source URL being analyzed | `https://youtube.com/watch?v=abc123` |
+| `{topics}` | Comma-separated list of extracted topics | `artificial intelligence, machine learning, neural networks` |
+| `{content_type}` | Detected content type | `video`, `article`, `arxiv`, `huggingface` |
+
+**Usage Examples:**
+
+```bash
+# Use {url} in your prompt
+gemini-deep-research --input "Extract key topics from {url}" https://example.com
+
+# Use {content_type} to adapt prompt based on content
+gemini-deep-research --input "Analyze this {content_type} for technical depth" https://arxiv.org/abs/2312.12345
+
+# Use {topics} in research phase (available after extraction)
+# Note: {topics} is only available in analyze and research prompts, not extract
+```
+
+**Template File Example:**
+
+```bash
+# Create a template file
+cat > research-template.txt << EOF
+Research the following topics from {url}:
+{topics}
+
+Focus on practical implementation and security considerations.
+Prioritize {content_type}-specific insights.
+EOF
+
+# Use the template
+gemini-deep-research --input "@research-template.txt" https://example.com/article
+```
+
+**Error Handling:**
+
+If you use an unknown variable (e.g., `{foo}`), the tool will fail-fast with a helpful error message:
+
+```
+Error: unknown variables: {foo} (available: url, topics, content_type)
+```
+
+This prevents silent failures and ensures your prompts work as expected.
 
 ### With Configuration
 
