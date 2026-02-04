@@ -403,7 +403,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			Title("Waiting for Claude to be ready...").
 			Accessible(true).
 			Action(func() {
-				waitErr = tmux.WaitForClaudePrompt(sessionName, 30*time.Second)
+				waitErr = tmux.WaitForPromptSimple(sessionName, 30*time.Second)
 			}).
 			Run()
 		if spinErr != nil {

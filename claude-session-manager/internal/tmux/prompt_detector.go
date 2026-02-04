@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -139,6 +140,50 @@ func containsPromptPattern(content string) bool {
 	}
 
 	return false
+}
+
+// WaitForPromptSimple waits for Claude prompt using simple capture-pane approach.
+// This is a simplified version that doesn't use control mode (which has issues).
+// It periodically captures the pane content and checks for prompt patterns.
+func WaitForPromptSimple(sessionName string, timeout time.Duration) error {
+	debug.Log("\n🔍 Starting simple prompt detection for session: %s", sessionName)
+
+	deadline := time.Now().Add(timeout)
+	checkCount := 0
+
+	for time.Now().Before(deadline) {
+		checkCount++
+
+		// Capture last 5 lines of the pane
+		output, err := exec.Command("tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-5").Output()
+		if err != nil {
+			// Session might not exist or not accessible
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		lines := strings.Split(string(output), "\n")
+
+		// Check each line for prompt pattern
+		for i, line := range lines {
+			if containsPromptPattern(line) {
+				debug.Log("✓ Prompt pattern detected in line %d (check #%d): %q", i, checkCount, strings.TrimSpace(line))
+				// Found prompt - wait a bit to ensure it's stable
+				time.Sleep(500 * time.Millisecond)
+				return nil
+			}
+		}
+
+		// Log progress every 10 checks (5 seconds)
+		if checkCount%10 == 0 {
+			debug.Log("⏳ Still waiting for prompt... (check #%d)", checkCount)
+		}
+
+		// Wait before next check
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return fmt.Errorf("timeout waiting for Claude prompt (waited %v, performed %d checks)", timeout, checkCount)
 }
 
 // WaitForClaudeReady waits for Claude to be fully ready, handling trust prompts if needed

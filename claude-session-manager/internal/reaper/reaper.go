@@ -95,7 +95,7 @@ func (r *Reaper) Run() error {
 // waitForPrompt monitors output stream for Claude prompt
 // Uses tmux control mode to detect when Claude is ready for input
 func (r *Reaper) waitForPrompt(timeout time.Duration) error {
-	return tmux.WaitForClaudePrompt(r.SessionName, timeout)
+	return tmux.WaitForPromptSimple(r.SessionName, timeout)
 }
 
 // sendExit sends /exit command to exit Claude Code cleanly

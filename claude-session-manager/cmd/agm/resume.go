@@ -526,7 +526,7 @@ func resumeSession(sessionID, manifestPath string, health *HealthStatus) error {
 			Accessible(true).
 			Action(func() {
 				// Increased timeout to 60s for resume operations (conversation loading can be slow)
-				promptWaitErr = tmux.WaitForClaudePrompt(health.TmuxSessionName, 60*time.Second)
+				promptWaitErr = tmux.WaitForPromptSimple(health.TmuxSessionName, 60*time.Second)
 			}).
 			Run()
 		if spinErr != nil {

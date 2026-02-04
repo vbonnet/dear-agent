@@ -246,7 +246,7 @@ func createTestSession(name, tmuxName, workingDir, sessionsDir string, timeoutSe
 
 	// Step 5: Wait for Claude prompt
 	timeout := time.Duration(timeoutSec) * time.Second
-	if err := tmux.WaitForClaudePrompt(tmuxName, timeout); err != nil {
+	if err := tmux.WaitForPromptSimple(tmuxName, timeout); err != nil {
 		return nil, fmt.Errorf("Claude startup timeout after %ds: %w\n\nSuggestions:\n  • Increase timeout: --startup-timeout %d\n  • Check Claude is working: claude --version\n  • View session output: tmux attach -t %s", timeoutSec, err, timeoutSec+30, tmuxName)
 	}
 

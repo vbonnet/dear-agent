@@ -21,7 +21,7 @@ import (
 //  - Any automation that sends commands to Claude
 func SendCommandSafe(sessionName string, command string) error {
 	// Step 1: Wait for Claude to be ready (detect prompt)
-	if err := WaitForClaudePrompt(sessionName, 60*time.Second); err != nil {
+	if err := WaitForPromptSimple(sessionName, 60*time.Second); err != nil {
 		return fmt.Errorf("session not ready: %w\n\nRecovery:\n  1. Check if session exists: csm list\n  2. Attach to session: csm attach %s\n  3. Verify Claude is at prompt (look for ❯ marker)", err, sessionName)
 	}
 
@@ -59,7 +59,7 @@ func SendPromptFileSafe(sessionName string, filePath string) error {
 	}
 
 	// Step 3: Wait for Claude to be ready
-	if err := WaitForClaudePrompt(sessionName, 60*time.Second); err != nil {
+	if err := WaitForPromptSimple(sessionName, 60*time.Second); err != nil {
 		return fmt.Errorf("session not ready before sending file: %w", err)
 	}
 
@@ -90,7 +90,7 @@ func SendSlashCommandSafe(sessionName string, command string) error {
 	}
 
 	// Wait for Claude to be ready
-	if err := WaitForClaudePrompt(sessionName, 60*time.Second); err != nil {
+	if err := WaitForPromptSimple(sessionName, 60*time.Second); err != nil {
 		return fmt.Errorf("session not ready for slash command: %w", err)
 	}
 
@@ -117,7 +117,7 @@ func SendSlashCommandSafe(sessionName string, command string) error {
 //  - Any text that needs to preserve newlines
 func SendMultiLinePromptSafe(sessionName string, prompt string) error {
 	// Wait for Claude to be ready
-	if err := WaitForClaudePrompt(sessionName, 60*time.Second); err != nil {
+	if err := WaitForPromptSimple(sessionName, 60*time.Second); err != nil {
 		return fmt.Errorf("session not ready for multi-line prompt: %w", err)
 	}
 
