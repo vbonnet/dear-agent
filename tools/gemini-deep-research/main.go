@@ -36,8 +36,13 @@ Flags:
   --output-dir <path>     Output directory for results (default: ./output)
   --timeout <minutes>     Deep Research timeout in minutes (default: 60)
   --project <id>          GCP project ID (fallback: GOOGLE_CLOUD_PROJECT env var)
+  --force                 Force refresh of existing research (ignore cache)
   --help, -h              Show this help message
   --version, -v           Show version information
+
+  Competitive Mode Options:
+  --no-discovery          Skip URL discovery in competitive mode (use provided URL directly)
+  --discovery-limit <n>   Maximum URLs to discover (default: 5, max: 20)
 
 Positional Arguments:
   <URL>                   Content URL to analyze (required)
@@ -63,7 +68,13 @@ Examples:
   gemini-deep-research --type article https://youtu.be/VIDEO_ID
 
   # Force competitive analysis mode
-  gemini-deep-research --mode competitive "How does AWS Lambda compare to Google Cloud Functions?"
+  gemini-deep-research --mode competitive https://github.com/features/copilot
+
+  # Skip URL discovery in competitive mode (use provided URL directly)
+  gemini-deep-research --mode competitive --no-discovery https://github.com/features/copilot
+
+  # Limit discovery to 3 URLs
+  gemini-deep-research --mode competitive --discovery-limit 3 https://example.com
 
   # Custom output directory
   gemini-deep-research --output-dir /tmp/research https://arxiv.org/abs/2601.20802
@@ -111,6 +122,10 @@ func main() {
 	flag.IntVar(&flags.Timeout, "timeout", 0, "Deep Research timeout in minutes")
 	flag.StringVar(&flags.Project, "project", "", "GCP project ID")
 	flag.BoolVar(&flags.Force, "force", false, "Force refresh of existing research")
+
+	// Competitive mode discovery flags
+	flag.BoolVar(&flags.NoDiscovery, "no-discovery", false, "Skip URL discovery in competitive mode (use provided URL directly)")
+	flag.IntVar(&flags.DiscoveryLimit, "discovery-limit", 5, "Maximum URLs to discover in competitive mode (default: 5, max: 20)")
 
 	var showHelp bool
 	var showVersion bool

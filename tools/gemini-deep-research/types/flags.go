@@ -23,6 +23,10 @@ type Flags struct {
 	Timeout   int    // --timeout: Deep Research timeout in minutes
 	Project   string // --project: GCP project ID
 	Force     bool   // --force: Force refresh of existing research
+
+	// Competitive mode discovery flags
+	NoDiscovery    bool // --no-discovery: Skip URL discovery in competitive mode
+	DiscoveryLimit int  // --discovery-limit: Max URLs to discover (default: 5)
 }
 
 // Validate validates flag values
@@ -71,6 +75,14 @@ func (f *Flags) Validate() error {
 		if !validModes[f.Mode] {
 			return fmt.Errorf("invalid mode: %s (must be: general, competitive)", f.Mode)
 		}
+	}
+
+	// Validate discovery limit if specified
+	if f.DiscoveryLimit < 0 {
+		return fmt.Errorf("invalid discovery-limit: %d (must be >= 0)", f.DiscoveryLimit)
+	}
+	if f.DiscoveryLimit > 20 {
+		return fmt.Errorf("invalid discovery-limit: %d (must be <= 20 to avoid excessive API usage)", f.DiscoveryLimit)
 	}
 
 	return nil

@@ -84,11 +84,11 @@ func truncate(s string, maxLen int) string {
 func executePipeline(url string, flags *types.Flags, cfg *config.Config, mode modes.Mode) int {
 	ctx := context.Background()
 
-	// Stage 0: Discovery (competitive mode only)
+	// Stage 0: Discovery (competitive mode only, unless --no-discovery)
 	var targetURL string
-	if mode.IsCompetitive() {
+	if mode.IsCompetitive() && !flags.NoDiscovery {
 		fmt.Fprintf(cfg.Stdout, "Stage 0: Discovering competitor URLs...\n")
-		discoveredURLs, err := runDiscovery(ctx, url, cfg)
+		discoveredURLs, err := runDiscovery(ctx, url, flags, cfg)
 		if err != nil {
 			fmt.Fprintf(cfg.Stderr, "Error during discovery: %v\n", err)
 			fmt.Fprintf(cfg.Stderr, "Tip: Use --no-discovery flag to skip URL discovery\n")
@@ -108,7 +108,10 @@ func executePipeline(url string, flags *types.Flags, cfg *config.Config, mode mo
 		targetURL = discoveredURLs[0]
 		fmt.Fprintf(cfg.Stdout, "  Analyzing: %s\n\n", targetURL)
 	} else {
-		// General mode: use provided URL directly
+		// General mode OR competitive with --no-discovery: use provided URL directly
+		if mode.IsCompetitive() && flags.NoDiscovery {
+			fmt.Fprintf(cfg.Stdout, "Stage 0: Skipping discovery (--no-discovery flag)\n\n")
+		}
 		targetURL = url
 	}
 
@@ -295,7 +298,7 @@ func calculateContentHash(content string) string {
 }
 
 // runDiscovery executes Stage 0: competitor URL discovery
-func runDiscovery(ctx context.Context, query string, cfg *config.Config) ([]string, error) {
+func runDiscovery(ctx context.Context, query string, flags *types.Flags, cfg *config.Config) ([]string, error) {
 	// Load API configuration from environment
 	apiKey := os.Getenv("GOOGLE_CUSTOM_SEARCH_API_KEY")
 	if apiKey == "" {
@@ -307,11 +310,17 @@ func runDiscovery(ctx context.Context, query string, cfg *config.Config) ([]stri
 		return nil, fmt.Errorf("GOOGLE_SEARCH_ENGINE_ID environment variable not set")
 	}
 
+	// Determine max results from flags or use default
+	maxResults := 5 // Default: 5 URLs
+	if flags.DiscoveryLimit > 0 {
+		maxResults = flags.DiscoveryLimit
+	}
+
 	// Create discovery config
 	discoveryConfig := discovery.SearchConfig{
 		APIKey:         apiKey,
 		SearchEngineID: searchEngineID,
-		MaxResults:     5, // Default: 5 URLs
+		MaxResults:     maxResults,
 	}
 
 	// Discover competitor URLs
