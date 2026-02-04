@@ -43,7 +43,7 @@ func DiscoverCompetitorURLs(ctx context.Context, query string, config SearchConf
 	}
 
 	// Extract competitor name from query
-	competitor := extractCompetitorName(query)
+	competitor := ExtractCompetitorName(query)
 	if competitor == "" {
 		return nil, fmt.Errorf("could not extract competitor name from query: %s", query)
 	}
@@ -94,13 +94,13 @@ func DiscoverCompetitorURLs(ctx context.Context, query string, config SearchConf
 	return urls, nil
 }
 
-// extractCompetitorName extracts the first competitor name from a query.
+// ExtractCompetitorName extracts the first competitor name from a query.
 // Examples:
 //   - "X vs Y" → "X"
 //   - "compare X and Y" → "X"
 //   - "what can we learn from X" → "X"
 //   - "competitive analysis of X" → "X"
-func extractCompetitorName(query string) string {
+func ExtractCompetitorName(query string) string {
 	// Pattern 1: "X vs Y" or "X vs. Y"
 	vsPattern := regexp.MustCompile(`(?i)^(.+?)\s+vs\.?\s+.+$`)
 	if matches := vsPattern.FindStringSubmatch(query); len(matches) > 1 {

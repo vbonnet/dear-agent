@@ -70,9 +70,9 @@ func TestExtractCompetitorName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := extractCompetitorName(tt.query)
+			got := ExtractCompetitorName(tt.query)
 			if got != tt.want {
-				t.Errorf("extractCompetitorName(%q) = %q, want %q", tt.query, got, tt.want)
+				t.Errorf("ExtractCompetitorName(%q) = %q, want %q", tt.query, got, tt.want)
 			}
 		})
 	}
