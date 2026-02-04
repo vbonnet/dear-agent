@@ -1113,11 +1113,11 @@ def send_diagnosis_prompt_via_csm(
     """
     Send diagnosis prompt to session via CSM send command.
 
-    This is the preferred method:
+    Now delegates to centralized send_tagged_message() wrapper which:
+    - Adds source attribution tags (<system-reminder> block)
+    - Logs all sends to ~/.csm/astrocyte/logs/messages.log
     - Uses tmux literal mode (-l flag) for reliable text transmission
-    - Sends Enter as separate command (C-m) avoiding paste-buffer issues
-    - No "pasted text" interpretation problems
-    - Handles large prompts (up to 10KB)
+    - Handles large prompts (up to 10KB via --prompt, >10KB via --prompt-file)
 
     Args:
         session_name: The session to send prompt to
@@ -1127,44 +1127,12 @@ def send_diagnosis_prompt_via_csm(
         True if sent successfully, False otherwise
     """
     try:
-        # Write prompt to temporary file
-        prompt_dir = Path.home() / ".csm/astrocyte/prompts"
-        prompt_dir.mkdir(parents=True, exist_ok=True)
-
-        prompt_file = prompt_dir / f"{session_name}-diagnosis.txt"
-        with open(prompt_file, "w") as f:
-            f.write(prompt)
-
-        # Send via CSM send --prompt-file
-        # Uses tmux send-keys -l (literal mode) + separate C-m
-        # This prevents the "pasted text" issue where prompts are queued instead of executed
-        result = subprocess.run(
-            ["csm", "send", session_name, "--prompt-file", str(prompt_file)],
-            check=False,  # Don't raise on error
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-
-        if result.returncode == 0:
-            return True
-
-        # Check if failure was due to queued input
-        if "queued input" in result.stderr:
-            print(f"   ⚠️  {session_name} has queued input - skipping this cycle", file=sys.stderr)
-            return False  # Don't fall back to tmux method - just skip this session
-
-        # Other errors - try fallback
-        print(f"   ⚠️  CSM send failed (rc={result.returncode}): {result.stderr}", file=sys.stderr)
-        # Fall back to tmux method
-        return send_diagnosis_prompt_via_tmux_fallback(session_name, prompt)
-
-    except FileNotFoundError:
-        # CSM not found
-        print(f"   ⚠️  CSM send not available, using tmux fallback", file=sys.stderr)
-        return send_diagnosis_prompt_via_tmux_fallback(session_name, prompt)
+        from astrocyte_messaging import send_tagged_message
+        send_tagged_message(session_name, prompt, "diagnosis")
+        return True
     except Exception as e:
-        print(f"   ⚠️  Failed to send diagnosis prompt via CSM: {e}", file=sys.stderr)
+        print(f"   ⚠️  Failed to send diagnosis prompt: {e}", file=sys.stderr)
+        # Fall back to tmux method
         return send_diagnosis_prompt_via_tmux_fallback(session_name, prompt)
 
 
@@ -1264,8 +1232,14 @@ def send_violation_prompt(session_name: str) -> RecoveryResult:
 
         violation_prompt = match.group(1).strip()
 
-        # Send via CSM (same mechanism as diagnosis prompts)
-        prompt_sent = send_diagnosis_prompt_via_csm(session_name, violation_prompt)
+        # Send via centralized wrapper (tags as "violation_prompt" type)
+        from astrocyte_messaging import send_tagged_message
+        try:
+            send_tagged_message(session_name, violation_prompt, "violation_prompt")
+            prompt_sent = True
+        except Exception as e:
+            print(f"   ⚠️  Failed to send violation prompt via wrapper: {e}", file=sys.stderr)
+            prompt_sent = False
 
         # Wait for prompt to be processed
         time.sleep(5)
@@ -1305,11 +1279,14 @@ def send_violation_prompt(session_name: str) -> RecoveryResult:
 
 def reject_permission_prompt(session_name: str) -> RecoveryResult:
     """
-    Reject permission prompt using csm reject command.
+    Reject permission prompt by sending violation message.
 
     Permission prompts appear when PreToolUse hook blocks bash commands
-    for tool usage violations (cd, &&, pipes, etc.). We auto-reject these
-    with the violation prompt to unstick the session.
+    for tool usage violations (cd, &&, pipes, etc.). We send the violation
+    prompt to unstick the session. Now delegates to centralized wrapper which:
+    - Adds source attribution tags (<system-reminder> block)
+    - Logs rejection to ~/.csm/astrocyte/logs/messages.log
+    - Tags as "violation_prompt" type
 
     Args:
         session_name: The session to send rejection to
@@ -1325,19 +1302,14 @@ def reject_permission_prompt(session_name: str) -> RecoveryResult:
     violation_prompt_file = Path.home() / "src/ws/oss/tool-usage-analysis/prompts/VIOLATION-PROMPTS.md"
 
     try:
-        # Use csm reject command
-        result = subprocess.run(
-            ["csm", "reject", session_name, "--reason-file", str(violation_prompt_file)],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        # Read violation prompt content
+        with open(violation_prompt_file, "r") as f:
+            violation_content = f.read()
 
-        success = result.returncode == 0
-
-        if not success:
-            print(f"   ⚠️  csm reject failed (rc={result.returncode}): {result.stderr}")
+        # Send via centralized wrapper (tags as "violation_prompt" type)
+        from astrocyte_messaging import send_tagged_message
+        send_tagged_message(session_name, violation_content, "violation_prompt")
+        success = True
 
         # Wait for rejection to be processed
         time.sleep(2)
@@ -1355,7 +1327,7 @@ def reject_permission_prompt(session_name: str) -> RecoveryResult:
         )
 
     except FileNotFoundError:
-        print(f"   ⚠️  csm command not found or violation prompt file missing")
+        print(f"   ⚠️  Violation prompt file not found: {violation_prompt_file}")
         return RecoveryResult(
             success=False,
             method="reject_permission",
