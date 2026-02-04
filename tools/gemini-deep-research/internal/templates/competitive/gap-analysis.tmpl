@@ -1,0 +1,41 @@
+Perform a comprehensive gap analysis comparing our tool to the competitor:
+
+## Context
+Target (our tool): {{.Target}}
+Competitor: {{.Competitor}}
+Analysis URL: {{.URL}}
+
+## Analysis Framework
+
+Based on the competitor's capabilities, identify:
+
+### 1. Competitor Strengths
+List features and capabilities where the competitor excels or has unique advantages.
+
+### 2. Our Gaps
+Identify specific features, capabilities, or approaches that our tool lacks compared to the competitor.
+Be concrete and specific - avoid generic statements.
+
+### 3. Prioritized Recommendations
+For each gap identified, provide:
+- **Gap**: What specific capability or feature is missing
+- **Impact**: How does this gap affect users or our competitive position
+- **Effort**: Rough estimation (Low/Medium/High) to implement
+- **Priority**: Critical/High/Medium/Low based on impact and strategic value
+
+### 4. Unique Differentiators
+Identify areas where our tool has advantages or different approaches that should be preserved.
+
+## Focus Areas
+{{range .Topics}}
+- {{.}}
+{{end}}
+
+## Output Format
+Structure the analysis as a detailed gap analysis report with:
+- Executive summary of key findings
+- Detailed capability comparison
+- Prioritized list of recommendations
+- Strategic insights for product development
+
+Focus on actionable insights and concrete technical differences, not marketing claims.
