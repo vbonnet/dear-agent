@@ -18,8 +18,8 @@ func TestGetSocketPath(t *testing.T) {
 
 	// Test environment variable override
 	customPath := "/tmp/test-csm.sock"
-	os.Setenv("CSM_TMUX_SOCKET", customPath)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", customPath)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	path = GetSocketPath()
 	assert.Equal(t, customPath, path, "should return custom socket path from env var")
@@ -27,8 +27,8 @@ func TestGetSocketPath(t *testing.T) {
 
 func TestCleanStaleSocket_NoSocket(t *testing.T) {
 	// Use a socket path that doesn't exist
-	os.Setenv("CSM_TMUX_SOCKET", "/tmp/test-nonexistent.sock")
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", "/tmp/test-nonexistent.sock")
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	err := CleanStaleSocket()
 	assert.NoError(t, err, "should not error when socket doesn't exist")
@@ -39,8 +39,8 @@ func TestCleanStaleSocket_StaleSocket(t *testing.T) {
 	tmpDir := t.TempDir()
 	socketPath := filepath.Join(tmpDir, "stale.sock")
 
-	os.Setenv("CSM_TMUX_SOCKET", socketPath)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	// Create a stale socket file (not connected to any server)
 	// We can't easily create a Unix socket without a server, so create a regular file
@@ -85,8 +85,8 @@ func TestCleanStaleSocket_LiveSocket(t *testing.T) {
 		}
 	}()
 
-	os.Setenv("CSM_TMUX_SOCKET", socketPath)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	// Clean should NOT remove live socket
 	err = CleanStaleSocket()
@@ -101,8 +101,8 @@ func TestEnsureSocketDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	socketPath := filepath.Join(tmpDir, "subdir", "test.sock")
 
-	os.Setenv("CSM_TMUX_SOCKET", socketPath)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	err := EnsureSocketDir()
 	assert.NoError(t, err, "should create socket directory")
@@ -115,8 +115,8 @@ func TestEnsureSocketDir(t *testing.T) {
 }
 
 func TestCheckSocketPermissions_NoSocket(t *testing.T) {
-	os.Setenv("CSM_TMUX_SOCKET", "/tmp/test-nonexistent-perms.sock")
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", "/tmp/test-nonexistent-perms.sock")
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	err := CheckSocketPermissions()
 	assert.NoError(t, err, "should not error when socket doesn't exist")
@@ -131,8 +131,8 @@ func TestCheckSocketPermissions_InsecureSocket(t *testing.T) {
 	require.NoError(t, err)
 	file.Close()
 
-	os.Setenv("CSM_TMUX_SOCKET", socketPath)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	err = CheckSocketPermissions()
 	assert.Error(t, err, "should error for insecure permissions")
@@ -140,8 +140,8 @@ func TestCheckSocketPermissions_InsecureSocket(t *testing.T) {
 }
 
 func TestGetSocketInfo_NonExistent(t *testing.T) {
-	os.Setenv("CSM_TMUX_SOCKET", "/tmp/test-nonexistent-info.sock")
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", "/tmp/test-nonexistent-info.sock")
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	info, err := GetSocketInfo()
 	assert.NoError(t, err, "should not error for non-existent socket")
@@ -159,8 +159,8 @@ func TestGetSocketInfo_ExistingFile(t *testing.T) {
 	require.NoError(t, err)
 	file.Close()
 
-	os.Setenv("CSM_TMUX_SOCKET", socketPath)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	info, err := GetSocketInfo()
 	assert.NoError(t, err, "should not error")
@@ -179,8 +179,8 @@ func TestRemoveSocket(t *testing.T) {
 	require.NoError(t, err)
 	file.Close()
 
-	os.Setenv("CSM_TMUX_SOCKET", socketPath)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	err = RemoveSocket()
 	assert.NoError(t, err, "should not error when removing socket")
@@ -191,8 +191,8 @@ func TestRemoveSocket(t *testing.T) {
 }
 
 func TestRemoveSocket_NonExistent(t *testing.T) {
-	os.Setenv("CSM_TMUX_SOCKET", "/tmp/test-nonexistent-remove.sock")
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", "/tmp/test-nonexistent-remove.sock")
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	err := RemoveSocket()
 	assert.NoError(t, err, "should not error when socket doesn't exist")
@@ -202,8 +202,8 @@ func TestLockSocket(t *testing.T) {
 	tmpDir := t.TempDir()
 	socketPath := filepath.Join(tmpDir, "lock.sock")
 
-	os.Setenv("CSM_TMUX_SOCKET", socketPath)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	// Acquire lock
 	unlock, err := LockSocket()
@@ -231,8 +231,8 @@ func TestLockSocket_StaleLock(t *testing.T) {
 	socketPath := filepath.Join(tmpDir, "stale-lock.sock")
 	lockPath := socketPath + ".lock"
 
-	os.Setenv("CSM_TMUX_SOCKET", socketPath)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	// Create a stale lock file (old timestamp)
 	file, err := os.Create(lockPath)
@@ -252,8 +252,8 @@ func TestLockSocket_StaleLock(t *testing.T) {
 }
 
 func TestIsSocketInUse_NonExistent(t *testing.T) {
-	os.Setenv("CSM_TMUX_SOCKET", "/tmp/test-nonexistent-inuse.sock")
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", "/tmp/test-nonexistent-inuse.sock")
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	inUse, err := IsSocketInUse()
 	assert.NoError(t, err, "should not error")
@@ -261,8 +261,8 @@ func TestIsSocketInUse_NonExistent(t *testing.T) {
 }
 
 func TestWaitForSocket_Timeout(t *testing.T) {
-	os.Setenv("CSM_TMUX_SOCKET", "/tmp/test-nonexistent-wait.sock")
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", "/tmp/test-nonexistent-wait.sock")
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	err := WaitForSocket(100 * time.Millisecond)
 	assert.Error(t, err, "should timeout")
@@ -277,8 +277,8 @@ func TestWaitForSocket_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	socketPath := filepath.Join(tmpDir, "wait.sock")
 
-	os.Setenv("CSM_TMUX_SOCKET", socketPath)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	// Start socket server in background
 	go func() {
@@ -304,8 +304,8 @@ func TestGetSocketOwner(t *testing.T) {
 	require.NoError(t, err)
 	file.Close()
 
-	os.Setenv("CSM_TMUX_SOCKET", socketPath)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	uid, err := GetSocketOwner()
 	assert.NoError(t, err, "should not error")

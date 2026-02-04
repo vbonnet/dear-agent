@@ -28,10 +28,10 @@ type ReadyFilePayload struct {
 }
 
 // getStateDir returns the CSM state directory.
-// Uses CSM_STATE_DIR environment variable if set (for test isolation),
+// Uses AGM_STATE_DIR environment variable if set (for test isolation),
 // otherwise defaults to ~/.csm (production default).
 func getStateDir() (string, error) {
-	stateDir := os.Getenv("CSM_STATE_DIR")
+	stateDir := os.Getenv("AGM_STATE_DIR")
 	if stateDir == "" {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -43,7 +43,7 @@ func getStateDir() (string, error) {
 }
 
 // WaitForReady waits for an agent to create the ready-file signal.
-// It watches $CSM_STATE_DIR/ directory for ready-{sessionName} file creation using fsnotify.
+// It watches $AGM_STATE_DIR/ directory for ready-{sessionName} file creation using fsnotify.
 //
 // Returns nil when ready-file detected and parsed successfully.
 // Returns error on timeout or failure.

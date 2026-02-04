@@ -156,10 +156,10 @@ timeout:
 
 func TestLoad_EnvironmentOverrides(t *testing.T) {
 	// Set environment variables
-	os.Setenv("CSM_SESSIONS_DIR", "/tmp/env-sessions")
-	os.Setenv("CSM_LOG_LEVEL", "warn")
-	defer os.Unsetenv("CSM_SESSIONS_DIR")
-	defer os.Unsetenv("CSM_LOG_LEVEL")
+	os.Setenv("AGM_SESSIONS_DIR", "/tmp/env-sessions")
+	os.Setenv("AGM_LOG_LEVEL", "warn")
+	defer os.Unsetenv("AGM_SESSIONS_DIR")
+	defer os.Unsetenv("AGM_LOG_LEVEL")
 
 	// Load config
 	cfg, err := Load("/nonexistent/config.yaml")

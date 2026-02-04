@@ -16,7 +16,7 @@ import (
 
 var (
 	validateFlag bool
-	fixFlag      bool
+	applyFixesFlag bool
 	jsonFormat   bool
 )
 
@@ -35,13 +35,13 @@ Detects:
 With --validate flag:
 - Tests actual session resumability (functional testing)
 - Classifies resume errors and suggests fixes
-- Auto-fixes issues with --fix flag
+- Auto-fixes issues with --apply-fixes flag
 
 Examples:
-  csm doctor                    # Structural checks only
-  csm doctor --validate         # Structural + functional testing
-  csm doctor --validate --fix   # Test and auto-fix issues
-  csm doctor --validate --json  # JSON output for scripting`,
+  csm doctor                             # Structural checks only
+  csm doctor --validate                  # Structural + functional testing
+  csm doctor --validate --apply-fixes    # Test and auto-fix issues
+  csm doctor --validate --json           # JSON output for scripting`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println(ui.Blue("=== Claude Session Manager Health Check ===\n"))
 
@@ -113,7 +113,7 @@ Examples:
 
 			// If --validate flag is set, run functional validation
 			if validateFlag {
-				return runValidation(manifests, fixFlag, jsonFormat)
+				return runValidation(manifests, applyFixesFlag, jsonFormat)
 			}
 
 			// === NEW DIAGNOSTICS ===
@@ -336,8 +336,8 @@ func init() {
 	rootCmd.AddCommand(doctorCmd)
 	doctorCmd.Flags().BoolVar(&validateFlag, "validate", false,
 		"Test actual session resumability")
-	doctorCmd.Flags().BoolVar(&fixFlag, "fix", false,
-		"Auto-fix detected issues (requires --validate)")
+	doctorCmd.Flags().BoolVar(&applyFixesFlag, "apply-fixes", false,
+		"Apply suggested fixes (requires --validate)")
 	doctorCmd.Flags().BoolVar(&jsonFormat, "json", false,
 		"Output results as JSON")
 }

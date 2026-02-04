@@ -81,13 +81,13 @@ func Load(cfgFile string) (*Config, error) {
 	}
 
 	// Override with environment variables
-	if dir := os.Getenv("CSM_SESSIONS_DIR"); dir != "" {
+	if dir := os.Getenv("AGM_SESSIONS_DIR"); dir != "" {
 		cfg.SessionsDir = dir
 	}
-	if level := os.Getenv("CSM_LOG_LEVEL"); level != "" {
+	if level := os.Getenv("AGM_LOG_LEVEL"); level != "" {
 		cfg.LogLevel = level
 	}
-	if file := os.Getenv("CSM_LOG_FILE"); file != "" {
+	if file := os.Getenv("AGM_LOG_FILE"); file != "" {
 		cfg.LogFile = file
 	}
 

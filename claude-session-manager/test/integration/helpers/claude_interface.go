@@ -26,14 +26,14 @@ const (
 
 // GetTestMode returns the current test mode from environment variable
 func GetTestMode() ClaudeTestMode {
-	mode := os.Getenv("CSM_TEST_CLAUDE_MODE")
+	mode := os.Getenv("AGM_TEST_CLAUDE_MODE")
 	if mode == "real" {
 		return ModeReal
 	}
 	return ModeMock // default to mock
 }
 
-// NewClaudeForTest returns appropriate Claude implementation based on CSM_TEST_CLAUDE_MODE
+// NewClaudeForTest returns appropriate Claude implementation based on AGM_TEST_CLAUDE_MODE
 func NewClaudeForTest() ClaudeInterface {
 	if GetTestMode() == ModeReal {
 		// For now, real mode is not implemented - return mock

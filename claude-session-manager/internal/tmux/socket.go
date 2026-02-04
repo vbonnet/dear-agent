@@ -15,8 +15,8 @@ const DefaultSocketPath = "/tmp/csm.sock"
 // GetSocketPath returns the CSM-specific tmux socket path
 // This can be extended later to support custom paths via config
 func GetSocketPath() string {
-	// Check if CSM_TMUX_SOCKET environment variable is set
-	if socketPath := os.Getenv("CSM_TMUX_SOCKET"); socketPath != "" {
+	// Check if AGM_TMUX_SOCKET environment variable is set
+	if socketPath := os.Getenv("AGM_TMUX_SOCKET"); socketPath != "" {
 		return socketPath
 	}
 	return DefaultSocketPath

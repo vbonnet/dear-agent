@@ -149,7 +149,7 @@ func initGemini(sessionName string) error {
 
 	// 2. Wait for Gemini process to actually start (not just command sent)
 	timeout := 30 * time.Second
-	if envTimeout := os.Getenv("CSM_AGENT_INIT_TIMEOUT"); envTimeout != "" {
+	if envTimeout := os.Getenv("AGM_AGENT_INIT_TIMEOUT"); envTimeout != "" {
 		if t, err := time.ParseDuration(envTimeout); err == nil {
 			timeout = t
 			debug.Log("Using custom init timeout: %v", timeout)

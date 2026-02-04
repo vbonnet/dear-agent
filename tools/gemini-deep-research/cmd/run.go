@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/config"
@@ -34,6 +35,7 @@ func Run(url string, flags *types.Flags, cfg *config.Config) int {
 
 	// Detect analysis mode
 	mode := modes.DetectMode(url, flags.Mode)
+	log.Printf("Mode detection: %s (explicit=%v)", mode.String(), flags.Mode != "")
 
 	// Log configuration
 	fmt.Fprintf(cfg.Stdout, "Configuration:\n")
@@ -58,10 +60,6 @@ func Run(url string, flags *types.Flags, cfg *config.Config) int {
 	}
 	if flags.ResearchPrompt != "" {
 		fmt.Fprintf(cfg.Stdout, "  Custom Research Prompt: %s\n", truncate(flags.ResearchPrompt, 50))
-	}
-	// Also show legacy --input if used
-	if flags.Input != "" {
-		fmt.Fprintf(cfg.Stdout, "  Custom Prompt (legacy): %s\n", truncate(flags.Input, 50))
 	}
 	if flags.Type != "" {
 		fmt.Fprintf(cfg.Stdout, "  Content Type Override: %s\n", flags.Type)
@@ -90,23 +88,36 @@ func executePipeline(url string, flags *types.Flags, cfg *config.Config, mode mo
 		fmt.Fprintf(cfg.Stdout, "Stage 0: Discovering competitor URLs...\n")
 		discoveredURLs, err := runDiscovery(ctx, url, flags, cfg)
 		if err != nil {
-			fmt.Fprintf(cfg.Stderr, "Error during discovery: %v\n", err)
-			fmt.Fprintf(cfg.Stderr, "Tip: Use --no-discovery flag to skip URL discovery\n")
-			return 1
-		}
-		if len(discoveredURLs) == 0 {
-			fmt.Fprintf(cfg.Stderr, "No competitor URLs discovered\n")
-			return 1
-		}
-		fmt.Fprintf(cfg.Stdout, "  Discovered %d URLs:\n", len(discoveredURLs))
-		for i, u := range discoveredURLs {
-			fmt.Fprintf(cfg.Stdout, "    %d. %s\n", i+1, u)
-		}
-		fmt.Fprintf(cfg.Stdout, "\n")
+			// Enhanced error handling with fallback option
+			log.Printf("Discovery error (falling back to provided URL): %v", err)
+			fmt.Fprintf(cfg.Stderr, "Warning: Discovery failed: %v\n", err)
+			fmt.Fprintf(cfg.Stderr, "Falling back to analyzing the provided URL directly...\n\n")
 
-		// Use first discovered URL for analysis
-		targetURL = discoveredURLs[0]
-		fmt.Fprintf(cfg.Stdout, "  Analyzing: %s\n\n", targetURL)
+			// Fallback: use provided URL
+			targetURL = url
+			fmt.Fprintf(cfg.Stdout, "  Analyzing (fallback): %s\n\n", targetURL)
+		} else if len(discoveredURLs) == 0 {
+			// No URLs discovered - fall back to provided URL
+			log.Printf("No URLs discovered (falling back to provided URL)")
+			fmt.Fprintf(cfg.Stderr, "Warning: No competitor URLs discovered\n")
+			fmt.Fprintf(cfg.Stderr, "Falling back to analyzing the provided URL directly...\n\n")
+
+			targetURL = url
+			fmt.Fprintf(cfg.Stdout, "  Analyzing (fallback): %s\n\n", targetURL)
+		} else {
+			// Discovery successful
+			log.Printf("Discovery successful: %d URLs found", len(discoveredURLs))
+			fmt.Fprintf(cfg.Stdout, "  Discovered %d URLs:\n", len(discoveredURLs))
+			for i, u := range discoveredURLs {
+				fmt.Fprintf(cfg.Stdout, "    %d. %s\n", i+1, u)
+			}
+			fmt.Fprintf(cfg.Stdout, "\n")
+
+			// Use first discovered URL for analysis
+			targetURL = discoveredURLs[0]
+			log.Printf("Selected URL for analysis: %s", targetURL)
+			fmt.Fprintf(cfg.Stdout, "  Analyzing: %s\n\n", targetURL)
+		}
 	} else {
 		// General mode OR competitive with --no-discovery: use provided URL directly
 		if mode.IsCompetitive() && flags.NoDiscovery {
@@ -168,20 +179,26 @@ func executePipeline(url string, flags *types.Flags, cfg *config.Config, mode mo
 	var analyzePrompt string
 	if mode.IsCompetitive() {
 		// Use competitive templates
+		log.Printf("Loading competitive analysis template for query: %s", url)
 		analyzePrompt, err = loadCompetitivePrompt(url, targetURL)
 		if err != nil {
+			log.Printf("Template loading failed: %v", err)
 			fmt.Fprintf(cfg.Stderr, "Error loading competitive template: %v\n", err)
 			return 1
 		}
+		log.Printf("Competitive template loaded successfully (length: %d chars)", len(analyzePrompt))
 		fmt.Fprintf(cfg.Stdout, "  Loaded competitive analysis template\n\n")
 	} else {
 		// Use general mode prompts (existing behavior)
+		log.Printf("Loading general mode prompts")
 		resolvedPrompts, err := LoadAndResolvePrompts(flags)
 		if err != nil {
+			log.Printf("Prompt loading failed: %v", err)
 			fmt.Fprintf(cfg.Stderr, "Error loading prompts: %v\n", err)
 			return 1
 		}
 		analyzePrompt = resolvedPrompts.AnalyzePrompt
+		log.Printf("General prompts loaded successfully")
 		fmt.Fprintf(cfg.Stdout, "  Prompts loaded and @file syntax resolved\n\n")
 	}
 
@@ -202,11 +219,14 @@ func executePipeline(url string, flags *types.Flags, cfg *config.Config, mode mo
 	var researchPrompt string
 	if mode.IsCompetitive() {
 		// Use competitive gap-analysis template with topics
+		log.Printf("Loading gap analysis template with %d topics", len(topics))
 		researchPrompt, err = loadGapAnalysisPrompt(url, targetURL, topics)
 		if err != nil {
+			log.Printf("Gap analysis template loading failed: %v", err)
 			fmt.Fprintf(cfg.Stderr, "Error loading gap analysis template: %v\n", err)
 			return 3
 		}
+		log.Printf("Gap analysis template loaded successfully (length: %d chars)", len(researchPrompt))
 	} else {
 		// General mode: use variable substitution (existing behavior)
 		resolvedPrompts, err := LoadAndResolvePrompts(flags)
@@ -260,8 +280,17 @@ func executePipeline(url string, flags *types.Flags, cfg *config.Config, mode mo
 		fmt.Fprintf(cfg.Stdout, "  Cached research at: %s/report.md\n", cachePath)
 	}
 
+	// Prepare output configuration
+	outputConfig := &OutputConfig{
+		Mode: mode.String(),
+	}
+	if mode.IsCompetitive() {
+		outputConfig.Competitor = discovery.ExtractCompetitorName(url)
+		outputConfig.SourceQuery = url
+	}
+
 	// Also write to legacy output directory for backwards compatibility
-	outputPath, err := WriteOutput(cfg.OutputDir, targetURL, contentType, content, topics, report)
+	outputPath, err := WriteOutput(cfg.OutputDir, targetURL, contentType, content, topics, report, outputConfig)
 	if err != nil {
 		fmt.Fprintf(cfg.Stderr, "Error writing output: %v\n", err)
 		return 5
@@ -299,15 +328,26 @@ func calculateContentHash(content string) string {
 
 // runDiscovery executes Stage 0: competitor URL discovery
 func runDiscovery(ctx context.Context, query string, flags *types.Flags, cfg *config.Config) ([]string, error) {
-	// Load API configuration from environment
+	// Load API configuration from environment with enhanced validation
 	apiKey := os.Getenv("GOOGLE_CUSTOM_SEARCH_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("GOOGLE_CUSTOM_SEARCH_API_KEY environment variable not set")
+		return nil, fmt.Errorf("GOOGLE_CUSTOM_SEARCH_API_KEY environment variable not set\n\n" +
+			"Setup instructions:\n" +
+			"1. Create a Google Custom Search API key: https://developers.google.com/custom-search/v1/overview\n" +
+			"2. Export the environment variable:\n" +
+			"   export GOOGLE_CUSTOM_SEARCH_API_KEY=\"your-api-key\"\n" +
+			"3. Alternatively, use --no-discovery flag to skip URL discovery")
 	}
 
 	searchEngineID := os.Getenv("GOOGLE_SEARCH_ENGINE_ID")
 	if searchEngineID == "" {
-		return nil, fmt.Errorf("GOOGLE_SEARCH_ENGINE_ID environment variable not set")
+		return nil, fmt.Errorf("GOOGLE_SEARCH_ENGINE_ID environment variable not set\n\n" +
+			"Setup instructions:\n" +
+			"1. Create a Custom Search Engine: https://programmablesearchengine.google.com/\n" +
+			"2. Get your Search Engine ID from the control panel\n" +
+			"3. Export the environment variable:\n" +
+			"   export GOOGLE_SEARCH_ENGINE_ID=\"your-search-engine-id\"\n" +
+			"4. Alternatively, use --no-discovery flag to skip URL discovery")
 	}
 
 	// Determine max results from flags or use default
@@ -337,11 +377,16 @@ func loadCompetitivePrompt(query string, targetURL string) (string, error) {
 	// Import templates package
 	loader, err := templates.NewLoader()
 	if err != nil {
-		return "", fmt.Errorf("failed to create template loader: %w", err)
+		return "", fmt.Errorf("failed to create template loader: %w\n\n"+
+			"This is likely a bug in the template system. Please report this issue.", err)
 	}
 
 	// Extract competitor name from query
 	competitorName := discovery.ExtractCompetitorName(query)
+	if competitorName == "" {
+		return "", fmt.Errorf("failed to extract competitor name from query: %q\n\n"+
+			"Tip: Try using a more explicit query like 'GitHub Copilot vs Cursor' or 'analyze GitHub Copilot'", query)
+	}
 
 	// Create prompt data
 	data := templates.PromptData{
@@ -353,13 +398,15 @@ func loadCompetitivePrompt(query string, targetURL string) (string, error) {
 
 	// Validate data
 	if err := templates.ValidateData(data); err != nil {
-		return "", fmt.Errorf("invalid template data: %w", err)
+		return "", fmt.Errorf("invalid template data: %w\n\n"+
+			"Template data: Competitor=%q, Target=%q, URL=%q", err, competitorName, "Our Tool", targetURL)
 	}
 
 	// Render analyze template
 	prompt, err := loader.Render(templates.TemplateAnalyze, data)
 	if err != nil {
-		return "", fmt.Errorf("failed to render template: %w", err)
+		return "", fmt.Errorf("failed to render competitive analysis template: %w\n\n"+
+			"This is likely a bug in the template system. Please report this issue.", err)
 	}
 
 	return prompt, nil
@@ -370,11 +417,22 @@ func loadGapAnalysisPrompt(query string, targetURL string, topics []string) (str
 	// Import templates package
 	loader, err := templates.NewLoader()
 	if err != nil {
-		return "", fmt.Errorf("failed to create template loader: %w", err)
+		return "", fmt.Errorf("failed to create template loader: %w\n\n"+
+			"This is likely a bug in the template system. Please report this issue.", err)
 	}
 
 	// Extract competitor name from query
 	competitorName := discovery.ExtractCompetitorName(query)
+	if competitorName == "" {
+		return "", fmt.Errorf("failed to extract competitor name from query: %q\n\n"+
+			"Tip: Try using a more explicit query like 'GitHub Copilot vs Cursor' or 'analyze GitHub Copilot'", query)
+	}
+
+	// Validate topics
+	if len(topics) == 0 {
+		return "", fmt.Errorf("no topics provided for gap analysis\n\n"+
+			"Topics should be identified during the analysis stage. This is likely a pipeline error.")
+	}
 
 	// Create prompt data
 	data := templates.PromptData{
@@ -386,13 +444,16 @@ func loadGapAnalysisPrompt(query string, targetURL string, topics []string) (str
 
 	// Validate data
 	if err := templates.ValidateData(data); err != nil {
-		return "", fmt.Errorf("invalid template data: %w", err)
+		return "", fmt.Errorf("invalid template data: %w\n\n"+
+			"Template data: Competitor=%q, Target=%q, URL=%q, Topics=%d",
+			err, competitorName, "Our Tool", targetURL, len(topics))
 	}
 
 	// Render gap-analysis template
 	prompt, err := loader.Render(templates.TemplateGapAnalysis, data)
 	if err != nil {
-		return "", fmt.Errorf("failed to render template: %w", err)
+		return "", fmt.Errorf("failed to render gap analysis template: %w\n\n"+
+			"This is likely a bug in the template system. Please report this issue.", err)
 	}
 
 	return prompt, nil

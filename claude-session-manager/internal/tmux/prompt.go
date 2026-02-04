@@ -68,8 +68,8 @@ func SendPromptLiteral(target, prompt string) error {
 		return fmt.Errorf("failed to send Enter key: %w", err)
 	}
 
-	// Debug logging if CSM_DEBUG=1
-	if os.Getenv("CSM_DEBUG") == "1" {
+	// Debug logging if AGM_DEBUG=1
+	if os.Getenv("AGM_DEBUG") == "1" {
 		hash := sha256.Sum256([]byte(prompt))
 		fmt.Printf("DEBUG: Sent prompt (hash: %x, length: %d chars, source: --prompt)\n",
 			hash[:8], len(prompt))
@@ -97,8 +97,8 @@ func SendPromptFromFile(target, filePath string) error {
 		return fmt.Errorf("failed to read prompt file: %w", err)
 	}
 
-	// Debug logging if CSM_DEBUG=1
-	if os.Getenv("CSM_DEBUG") == "1" {
+	// Debug logging if AGM_DEBUG=1
+	if os.Getenv("AGM_DEBUG") == "1" {
 		hash := sha256.Sum256(content)
 		fmt.Printf("DEBUG: Sent prompt (hash: %x, length: %d chars, source: --prompt-file %s)\n",
 			hash[:8], len(content), filePath)

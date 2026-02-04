@@ -18,15 +18,6 @@ func LoadAndResolvePrompts(flags *types.Flags) (config.ResolvedConfig, error) {
 		ResearchPrompt: flags.ResearchPrompt,
 	}
 
-	// Handle legacy --input and --input-file flags (map to analyze prompt)
-	if flags.Input != "" {
-		// Legacy --input maps to --analyze-prompt
-		cliPrompts.AnalyzePrompt = flags.Input
-	} else if flags.InputFile != "" {
-		// Legacy --input-file maps to --analyze-prompt @file
-		cliPrompts.AnalyzePrompt = "@" + flags.InputFile
-	}
-
 	mergedPrompts, err := config.LoadPrompts(cliPrompts)
 	if err != nil {
 		return config.ResolvedConfig{}, fmt.Errorf("config parser: %w", err)

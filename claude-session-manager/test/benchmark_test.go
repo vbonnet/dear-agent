@@ -182,8 +182,8 @@ func BenchmarkListSessionsScaled(b *testing.B) {
 		b.Run(fmt.Sprintf("Sessions_%d", scale), func(b *testing.B) {
 			tmpDir := b.TempDir()
 			socketPath := filepath.Join(tmpDir, "bench-tmux.sock")
-			os.Setenv("CSM_TMUX_SOCKET", socketPath)
-			defer os.Unsetenv("CSM_TMUX_SOCKET")
+			os.Setenv("AGM_TMUX_SOCKET", socketPath)
+			defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 			// Create scale sessions
 			// Note: Creating 1000+ sessions is expensive, so we create a reasonable sample
