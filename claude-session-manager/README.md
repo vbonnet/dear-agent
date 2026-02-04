@@ -74,22 +74,35 @@ See `docs/AGENTS.md.example` for full configuration spec. Integration tracked in
 
 ## Documentation
 
-**Quick Start:**
+**🚀 Start Here:**
+- **[Documentation Index](docs/INDEX.md)** - Complete navigation hub with learning paths
 - **[Quick Reference](docs/AGM-QUICK-REFERENCE.md)** - One-page cheat sheet with essential commands
-- **[Command Reference](docs/AGM-COMMAND-REFERENCE.md)** - Complete reference for all AGM commands with examples
+- **[Getting Started](docs/GETTING-STARTED.md)** - Installation and first steps (10 minutes)
 
-**Core Guides:**
-- **[Agent Comparison Guide](docs/AGENT-COMPARISON.md)** - Choose the right agent (Claude/Gemini/GPT) for your task
-- **[BDD Scenario Catalog](docs/BDD-CATALOG.md)** - Living documentation of AGM behavior (8 feature files, 20+ scenarios)
-- **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+**📚 Core Guides:**
+- **[Command Reference](docs/AGM-COMMAND-REFERENCE.md)** - Complete CLI reference with all commands and examples
+- **[User Guide](docs/USER-GUIDE.md)** - Comprehensive usage guide and workflows
+- **[Examples](docs/EXAMPLES.md)** - 30+ real-world scenarios across 7 categories
+- **[Agent Comparison](docs/AGENT-COMPARISON.md)** - Choose the right agent (Claude/Gemini/GPT)
 
-**Migration Guides:**
-- **[Claude → Multi-Agent Migration](docs/MIGRATION-CLAUDE-MULTI.md)** - Transition from Claude-only to multi-agent usage
-- **[Manifest v2 → v3 Migration](docs/MIGRATION-V2-V3.md)** - Future manifest migration guide (v2 currently supported)
+**🔧 Technical Documentation:**
+- **[Architecture Overview](docs/ARCHITECTURE.md)** - Complete system architecture and design
+- **[API Reference](docs/API-REFERENCE.md)** - Developer API for Go packages and interfaces
+- **[BDD Catalog](docs/BDD-CATALOG.md)** - Living documentation (8 feature files, 20+ scenarios)
 
-**For Developers:**
-- **[BDD Testing](test/bdd/README.md)** - Running and writing BDD tests
-- **[Command Translator](README.md#-command-translation-multi-agent)** - Multi-agent command abstraction
+**🔄 Migration & Troubleshooting:**
+- **[Migration Guide](docs/AGM-MIGRATION-GUIDE.md)** - CSM to AGM migration (validation, rollback)
+- **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+- **[FAQ](docs/FAQ.md)** - Frequently asked questions
+
+**♿ Accessibility:**
+- **[Accessibility Guide](docs/ACCESSIBILITY.md)** - WCAG AA compliance, screen readers, high contrast
+
+**For detailed documentation navigation**, see **[Documentation Index](docs/INDEX.md)** with:
+- Quick navigation by role (Users, Developers, Contributors)
+- Documentation by topic (Installation, Usage, Architecture, API)
+- 5 learning paths (10 minutes to 3 hours)
+- Complete documentation list (32 files)
 
 ---
 

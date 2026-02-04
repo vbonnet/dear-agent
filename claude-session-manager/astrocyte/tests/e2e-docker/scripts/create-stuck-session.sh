@@ -57,12 +57,27 @@ log_info "Created tmux session: $SESSION_NAME"
 # Wait for session to initialize
 sleep 0.5
 
-# Load fixture content into tmux buffer and paste it
-FIXTURE_CONTENT=$(cat "$FIXTURES_DIR/$FIXTURE_FILE")
+# Create a script that will output the fixture content
+SCRIPT_PATH="$SESSION_DIR/display_content.sh"
+cat > "$SCRIPT_PATH" << 'EOF_SCRIPT'
+#!/bin/bash
+cat << 'EOF'
+EOF_SCRIPT
 
-# Use tmux load-buffer and paste-buffer to inject content
-echo "$FIXTURE_CONTENT" | tmux -S "$TMUX_SOCKET" load-buffer -
-tmux -S "$TMUX_SOCKET" paste-buffer -t "$SESSION_NAME"
+# Append the fixture content
+cat "$FIXTURES_DIR/$FIXTURE_FILE" >> "$SCRIPT_PATH"
+
+# Close the heredoc in the script
+cat >> "$SCRIPT_PATH" << 'EOF_SCRIPT'
+EOF
+# Keep the output visible
+sleep 999999
+EOF_SCRIPT
+
+chmod +x "$SCRIPT_PATH"
+
+# Run the script in the tmux session
+tmux -S "$TMUX_SOCKET" send-keys -t "$SESSION_NAME" "bash $SCRIPT_PATH" C-m
 
 log_info "Loaded fixture content from: $FIXTURE_FILE"
 

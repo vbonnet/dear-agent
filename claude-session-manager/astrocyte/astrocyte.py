@@ -4,6 +4,7 @@ Astrocyte - CSM Session Monitor
 
 Autonomous daemon for detecting and recovering stuck CSM sessions.
 """
+from __future__ import annotations
 
 import sys
 import time
@@ -62,10 +63,10 @@ class Incident:
     recovery_method: str | None
     recovery_success: bool | None
     recovery_duration_seconds: float | None
-    cascade_depth: int = 1  # Number of prompts cleared in cascade
-    circuit_breaker_triggered: bool = False  # Circuit breaker fired?
     diagnosis_filed: bool
     diagnosis_file: str | None
+    cascade_depth: int = 1  # Number of prompts cleared in cascade
+    circuit_breaker_triggered: bool = False  # Circuit breaker fired?
 
     def to_json(self) -> str:
         """Serialize to JSON string."""
@@ -1970,8 +1971,9 @@ def main():
                         has_mustering = any(re.search(p, current.pane_content) for p in MUSTERING_PATTERNS)
                         if has_mustering:
                             if previous:
+                                mustering_threshold = config.get_threshold(session, "mustering_timeout")
                                 delta_minutes = int((current.timestamp - previous.timestamp).seconds / 60)
-                                print(f"   ⏳ {session}: Mustering for {delta_minutes} min (threshold: {mustering_timeout_minutes} min)")
+                                print(f"   ⏳ {session}: Mustering for {delta_minutes} min (threshold: {mustering_threshold} min)")
                             else:
                                 print(f"   ⏳ {session}: Mustering (first observation)")
 

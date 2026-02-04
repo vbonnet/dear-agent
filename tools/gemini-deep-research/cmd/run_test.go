@@ -90,8 +90,8 @@ func TestRun(t *testing.T) {
 			},
 			wantExitCode: 2, // Will fail at extraction
 			checkOutput: func(t *testing.T, stdout, stderr string) {
-				if !strings.Contains(stdout, "Custom Prompt:") {
-					t.Error("Expected custom prompt in output")
+				if !strings.Contains(stdout, "Custom Prompt (legacy):") {
+					t.Error("Expected custom prompt (legacy) in output")
 				}
 			},
 		},
@@ -349,15 +349,8 @@ func TestLoadGapAnalysisPrompt(t *testing.T) {
 			query:     "React vs Vue",
 			targetURL: "https://react.dev",
 			topics:    []string{},
-			wantErr:   false,
-			checkPrompt: func(t *testing.T, prompt string) {
-				if !strings.Contains(prompt, "React") {
-					t.Error("Expected competitor name even with empty topics")
-				}
-				if !strings.Contains(prompt, "Prioritized Recommendations") {
-					t.Error("Expected gap analysis structure")
-				}
-			},
+			wantErr:   true, // Gap analysis now requires topics (enhanced validation in Task 8)
+			checkPrompt: nil,
 		},
 	}
 
