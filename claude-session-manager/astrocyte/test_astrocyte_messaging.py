@@ -358,8 +358,8 @@ class TestIntegration(unittest.TestCase):
         mock_send.assert_not_called()
 
     @patch('astrocyte_messaging._send_via_csm')
-    @patch('astrocyte_messaging._log_message', side_effect=OSError("Log write failed"))
-    def test_log_failure_does_not_block_send(self, mock_log, mock_send):
+    @patch('astrocyte_messaging._get_message_logger', side_effect=OSError("Log write failed"))
+    def test_log_failure_does_not_block_send(self, mock_get_logger, mock_send):
         """Log failure should not prevent send (fail-safe)."""
         try:
             astrocyte_messaging.send_tagged_message(
