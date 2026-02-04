@@ -29,17 +29,17 @@ func TestSendCommand_EnterKeySeparation(t *testing.T) {
 	}
 
 	// Skip in CI unless explicitly enabled
-	if os.Getenv("CI") != "" && os.Getenv("CSM_TEST_TMUX") == "" {
-		t.Skip("Skipping tmux integration test in CI (set CSM_TEST_TMUX=1 to enable)")
+	if os.Getenv("CI") != "" && os.Getenv("AGM_TEST_TMUX") == "" {
+		t.Skip("Skipping tmux integration test in CI (set AGM_TEST_TMUX=1 to enable)")
 	}
 
 	// Create isolated socket and state dir for this test
 	tmpDir := t.TempDir()
 	testSocket := tmpDir + "/test-send-command.sock"
-	os.Setenv("CSM_TMUX_SOCKET", testSocket)
-	os.Setenv("CSM_STATE_DIR", tmpDir) // Isolate lock files
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
-	defer os.Unsetenv("CSM_STATE_DIR")
+	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	os.Setenv("AGM_STATE_DIR", tmpDir) // Isolate lock files
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
+	defer os.Unsetenv("AGM_STATE_DIR")
 
 	sessionName := "test-send-cmd"
 
@@ -113,15 +113,15 @@ func TestSendCommand_SpecialCharacters(t *testing.T) {
 		t.Skip("tmux not available")
 	}
 
-	if os.Getenv("CI") != "" && os.Getenv("CSM_TEST_TMUX") == "" {
+	if os.Getenv("CI") != "" && os.Getenv("AGM_TEST_TMUX") == "" {
 		t.Skip("Skipping tmux integration test in CI")
 	}
 
 	// Create isolated socket for this test
 	tmpDir := t.TempDir()
 	testSocket := tmpDir + "/test-special-chars.sock"
-	os.Setenv("CSM_TMUX_SOCKET", testSocket)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	sessionName := "test-special-chars"
 
@@ -247,8 +247,8 @@ func BenchmarkSendCommand(b *testing.B) {
 	// Create test session
 	tmpDir := b.TempDir()
 	testSocket := tmpDir + "/bench-send-command.sock"
-	os.Setenv("CSM_TMUX_SOCKET", testSocket)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	sessionName := "bench-send-cmd"
 	cmd := exec.Command("tmux", "-S", testSocket, "new-session", "-d", "-s", sessionName)

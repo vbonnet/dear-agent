@@ -486,7 +486,7 @@ csm doctor --screen-reader
 csm list --screen-reader
 
 # Using environment variable (legacy)
-CSM_SCREEN_READER=1 csm doctor
+AGM_SCREEN_READER=1 csm doctor
 ```
 
 The `--screen-reader` flag:

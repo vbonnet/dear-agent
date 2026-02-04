@@ -21,8 +21,8 @@ func skipIfNoTmux(t *testing.T) {
 	if !isTmuxAvailable() {
 		t.Skip("tmux not available")
 	}
-	if os.Getenv("CI") != "" && os.Getenv("CSM_TEST_TMUX") == "" {
-		t.Skip("Skipping tmux tests in CI (set CSM_TEST_TMUX=1 to enable)")
+	if os.Getenv("CI") != "" && os.Getenv("AGM_TEST_TMUX") == "" {
+		t.Skip("Skipping tmux tests in CI (set AGM_TEST_TMUX=1 to enable)")
 	}
 }
 
@@ -31,10 +31,10 @@ func setupTestSocket(t *testing.T) (socketPath string, cleanup func()) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	socketPath = tmpDir + "/test-tmux.sock"
-	os.Setenv("CSM_TMUX_SOCKET", socketPath)
+	os.Setenv("AGM_TMUX_SOCKET", socketPath)
 
 	cleanup = func() {
-		os.Unsetenv("CSM_TMUX_SOCKET")
+		os.Unsetenv("AGM_TMUX_SOCKET")
 	}
 	return socketPath, cleanup
 }
@@ -357,8 +357,8 @@ func BenchmarkHasSession(b *testing.B) {
 
 	tmpDir := b.TempDir()
 	socketPath := tmpDir + "/bench-tmux.sock"
-	os.Setenv("CSM_TMUX_SOCKET", socketPath)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	sessionName := "bench-has"
 	err := NewSession(sessionName, tmpDir)
@@ -380,8 +380,8 @@ func BenchmarkListSessions(b *testing.B) {
 
 	tmpDir := b.TempDir()
 	socketPath := tmpDir + "/bench-tmux.sock"
-	os.Setenv("CSM_TMUX_SOCKET", socketPath)
-	defer os.Unsetenv("CSM_TMUX_SOCKET")
+	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	// Create a few sessions
 	for i := 0; i < 3; i++ {

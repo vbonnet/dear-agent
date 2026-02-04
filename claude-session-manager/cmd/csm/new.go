@@ -960,14 +960,14 @@ func addToAdditionalDirectories(dir string) error {
 }
 
 func init() {
-	// Check for CSM_DEBUG environment variable for default value
+	// Check for AGM_DEBUG environment variable for default value
 	debugDefault := false
-	if os.Getenv("CSM_DEBUG") == "true" || os.Getenv("CSM_DEBUG") == "1" {
+	if os.Getenv("AGM_DEBUG") == "true" || os.Getenv("AGM_DEBUG") == "1" {
 		debugDefault = true
 	}
 
 	rootCmd.AddCommand(newCmd)
-	newCmd.Flags().BoolP("debug", "d", debugDefault, "Enable debug logging to ~/.csm/debug/ (env: CSM_DEBUG)")
+	newCmd.Flags().BoolP("debug", "d", debugDefault, "Enable debug logging to ~/.csm/debug/ (env: AGM_DEBUG)")
 	newCmd.Flags().BoolVar(&detached, "detached", false, "Create detached session without attaching")
 	newCmd.Flags().StringVar(&agentName, "agent", "", "AI agent to use (claude, gemini, gpt)")
 	newCmd.Flags().StringVar(&workflowName, "workflow", "", "Execution workflow (deep-research, code-review, architect)")

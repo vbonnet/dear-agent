@@ -17,10 +17,10 @@ import (
 var tmuxServerLock *lock.FileLock
 
 // getStateDir returns the CSM state directory.
-// Uses CSM_STATE_DIR environment variable if set (for test isolation),
+// Uses AGM_STATE_DIR environment variable if set (for test isolation),
 // otherwise defaults to /tmp/csm-{UID} (production default).
 func getStateDir() string {
-	stateDir := os.Getenv("CSM_STATE_DIR")
+	stateDir := os.Getenv("AGM_STATE_DIR")
 	if stateDir == "" {
 		uid := os.Getuid()
 		stateDir = fmt.Sprintf("/tmp/csm-%d", uid)
@@ -31,8 +31,8 @@ func getStateDir() string {
 // AcquireTmuxLock locks tmux server mutations to prevent parallel updates.
 // This is a fine-grained lock (only tmux operations, not entire CSM commands).
 //
-// Lock path: $CSM_STATE_DIR/tmux-server.lock (defaults to /tmp/csm-{UID}/tmux-server.lock)
-// Set CSM_STATE_DIR environment variable for test isolation.
+// Lock path: $AGM_STATE_DIR/tmux-server.lock (defaults to /tmp/csm-{UID}/tmux-server.lock)
+// Set AGM_STATE_DIR environment variable for test isolation.
 //
 // Returns error if lock is already held by another process.
 func AcquireTmuxLock() error {

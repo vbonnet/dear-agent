@@ -40,8 +40,8 @@ func TestHooks_PostInitExecution(t *testing.T) {
 	hookScript := filepath.Join(hooksDir, "post-init")
 	hookContent := `#!/bin/bash
 echo "Post-init hook executed at $(date)" > ` + markerFile + `
-echo "Session: $CSM_SESSION_NAME" >> ` + markerFile + `
-echo "Project: $CSM_PROJECT_DIR" >> ` + markerFile + `
+echo "Session: $AGM_SESSION_NAME" >> ` + markerFile + `
+echo "Project: $AGM_PROJECT_DIR" >> ` + markerFile + `
 `
 	if err := os.WriteFile(hookScript, []byte(hookContent), 0755); err != nil {
 		t.Fatalf("Failed to write hook script: %v", err)
@@ -92,7 +92,7 @@ func TestHooks_PreArchiveExecution(t *testing.T) {
 	hookScript := filepath.Join(hooksDir, "pre-archive")
 	hookContent := `#!/bin/bash
 echo "Pre-archive hook executed" > ` + markerFile + `
-echo "Archiving session: $CSM_SESSION_NAME" >> ` + markerFile + `
+echo "Archiving session: $AGM_SESSION_NAME" >> ` + markerFile + `
 `
 	if err := os.WriteFile(hookScript, []byte(hookContent), 0755); err != nil {
 		t.Fatalf("Failed to write hook script: %v", err)
@@ -165,7 +165,7 @@ func TestHooks_EnvironmentVariables(t *testing.T) {
 	envFile := filepath.Join(env.TempDir, "hook-env.txt")
 	hookScript := filepath.Join(hooksDir, "post-init")
 	hookContent := `#!/bin/bash
-env | grep CSM_ > ` + envFile + `
+env | grep AGM_ > ` + envFile + `
 `
 	if err := os.WriteFile(hookScript, []byte(hookContent), 0755); err != nil {
 		t.Fatalf("Failed to write hook: %v", err)
@@ -175,12 +175,12 @@ env | grep CSM_ > ` + envFile + `
 	t.Skip("Hook execution not yet implemented")
 
 	// Expected environment variables:
-	// - CSM_SESSION_NAME
-	// - CSM_SESSION_ID
-	// - CSM_PROJECT_DIR
-	// - CSM_AGENT
-	// - CSM_TMUX_SESSION
-	// - CSM_MANIFEST_PATH
+	// - AGM_SESSION_NAME
+	// - AGM_SESSION_ID
+	// - AGM_PROJECT_DIR
+	// - AGM_AGENT
+	// - AGM_TMUX_SESSION
+	// - AGM_MANIFEST_PATH
 
 	// When implemented, verify env file contains these variables
 }

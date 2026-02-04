@@ -92,10 +92,10 @@ func TestCSM(t *testing.T) {
 				env.Setenv("REAL_HOME", realHome)
 			}
 
-			// Set CSM environment variables for testing
+			// Set AGM environment variables for testing
 			workDir := env.Getenv("WORK")
-			env.Setenv("CSM_TMUX_SOCKET", workDir+"/test-tmux.sock")
-			env.Setenv("CSM_STATE_DIR", workDir+"/.csm") // Isolate lock files and ready files per test
+			env.Setenv("AGM_TMUX_SOCKET", workDir+"/test-tmux.sock")
+			env.Setenv("AGM_STATE_DIR", workDir+"/.csm") // Isolate lock files and ready files per test
 			env.Setenv("HOME", workDir+"/home")
 
 			// Set dummy API key for tests to allow sessions to be created

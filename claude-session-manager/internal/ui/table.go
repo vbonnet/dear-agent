@@ -550,7 +550,7 @@ func getStatusSymbol(status string) string {
 	symbol := symbolMap[status]
 
 	// Check screen-reader mode
-	if cfg.UI.ScreenReader || os.Getenv("CSM_SCREEN_READER") != "" {
+	if cfg.UI.ScreenReader || os.Getenv("AGM_SCREEN_READER") != "" {
 		// Update ScreenReaderText to handle our new symbols
 		switch symbol {
 		case "●":
@@ -886,7 +886,7 @@ func PrintError(err error, cause, solution string) {
 	// Check --screen-reader flag first
 	if cfg.UI.ScreenReader {
 		symbol = ScreenReaderText(symbol)
-	} else if os.Getenv("CSM_SCREEN_READER") != "" {
+	} else if os.Getenv("AGM_SCREEN_READER") != "" {
 		// Also check env var for compatibility
 		symbol = ScreenReaderText(symbol)
 	}
@@ -906,7 +906,7 @@ func PrintSuccess(message string) {
 	// Check --screen-reader flag first
 	if cfg.UI.ScreenReader {
 		symbol = ScreenReaderText(symbol)
-	} else if os.Getenv("CSM_SCREEN_READER") != "" {
+	} else if os.Getenv("AGM_SCREEN_READER") != "" {
 		// Also check env var for compatibility
 		symbol = ScreenReaderText(symbol)
 	}
@@ -933,7 +933,7 @@ func PrintWarning(message string) {
 	// Check --screen-reader flag first
 	if cfg.UI.ScreenReader {
 		symbol = ScreenReaderText(symbol)
-	} else if os.Getenv("CSM_SCREEN_READER") != "" {
+	} else if os.Getenv("AGM_SCREEN_READER") != "" {
 		// Also check env var for compatibility
 		symbol = ScreenReaderText(symbol)
 	}
