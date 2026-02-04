@@ -61,10 +61,6 @@ func Run(url string, flags *types.Flags, cfg *config.Config) int {
 	if flags.ResearchPrompt != "" {
 		fmt.Fprintf(cfg.Stdout, "  Custom Research Prompt: %s\n", truncate(flags.ResearchPrompt, 50))
 	}
-	// Also show legacy --input if used
-	if flags.Input != "" {
-		fmt.Fprintf(cfg.Stdout, "  Custom Prompt (legacy): %s\n", truncate(flags.Input, 50))
-	}
 	if flags.Type != "" {
 		fmt.Fprintf(cfg.Stdout, "  Content Type Override: %s\n", flags.Type)
 	}

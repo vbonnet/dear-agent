@@ -78,10 +78,10 @@ func TestRun(t *testing.T) {
 			},
 		},
 		{
-			name: "With custom prompt",
+			name: "With custom analyze prompt",
 			url:  "https://example.com/article",
 			flags: &types.Flags{
-				Input: "Focus on security topics and vulnerabilities",
+				AnalyzePrompt: "Focus on security topics and vulnerabilities",
 			},
 			cfg: &config.Config{
 				OutputDir:    "./output",
@@ -90,8 +90,8 @@ func TestRun(t *testing.T) {
 			},
 			wantExitCode: 2, // Will fail at extraction
 			checkOutput: func(t *testing.T, stdout, stderr string) {
-				if !strings.Contains(stdout, "Custom Prompt (legacy):") {
-					t.Error("Expected custom prompt (legacy) in output")
+				if !strings.Contains(stdout, "Custom Analyze Prompt:") {
+					t.Error("Expected custom analyze prompt in output")
 				}
 			},
 		},

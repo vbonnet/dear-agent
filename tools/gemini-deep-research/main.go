@@ -26,10 +26,6 @@ Flags:
   --analyze-prompt <text|@file>   Custom prompt for topic analysis stage
   --research-prompt <text|@file>  Custom prompt for deep research stage
 
-  Legacy (Deprecated):
-  --input <text>          DEPRECATED: Use --analyze-prompt instead
-  --input-file <path>     DEPRECATED: Use --analyze-prompt @file.txt instead
-
   Other Options:
   --type <content-type>   Override content type auto-detection (video|article|arxiv|huggingface)
   --mode <general|competitive>  Analysis mode (auto-detected from query if not specified)
@@ -106,14 +102,10 @@ func main() {
 	// Create flags
 	var flags types.Flags
 
-	// New per-stage prompt flags
+	// Per-stage prompt flags
 	flag.StringVar(&flags.ExtractPrompt, "extract-prompt", "", "Custom prompt for extraction stage (supports @file syntax)")
 	flag.StringVar(&flags.AnalyzePrompt, "analyze-prompt", "", "Custom prompt for topic analysis stage (supports @file syntax)")
 	flag.StringVar(&flags.ResearchPrompt, "research-prompt", "", "Custom prompt for deep research stage (supports @file syntax)")
-
-	// Legacy flags (deprecated)
-	flag.StringVar(&flags.Input, "input", "", "DEPRECATED: Use --analyze-prompt instead")
-	flag.StringVar(&flags.InputFile, "input-file", "", "DEPRECATED: Use --analyze-prompt @file.txt instead")
 
 	// Other flags
 	flag.StringVar(&flags.Type, "type", "", "Override content type auto-detection (video|article|arxiv|huggingface)")
@@ -169,15 +161,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, "")
 		flag.Usage()
 		os.Exit(1)
-	}
-
-	// Show deprecation warning for --input or --input-file
-	if flags.Input != "" || flags.InputFile != "" {
-		fmt.Fprintln(os.Stderr, "WARNING: --input and --input-file are deprecated.")
-		fmt.Fprintln(os.Stderr, "         Use --analyze-prompt instead. These flags will be removed in v3.0.0.")
-		fmt.Fprintln(os.Stderr, "         Migration: --input 'text' → --analyze-prompt 'text'")
-		fmt.Fprintln(os.Stderr, "                   --input-file file.txt → --analyze-prompt @file.txt")
-		fmt.Fprintln(os.Stderr, "")
 	}
 
 	// Load configuration
