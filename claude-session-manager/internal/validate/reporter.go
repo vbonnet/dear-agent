@@ -203,9 +203,95 @@ func PrintText(report *Report) {
 	fmt.Println()
 }
 
-// PrintJSON outputs the validation report in JSON format.
+// StandardReport represents the standardized health check JSON schema
+type StandardReport struct {
+	Timestamp      string          `json:"timestamp"`
+	Tool           string          `json:"tool"`
+	Command        string          `json:"command"`
+	Status         string          `json:"status"` // "healthy", "degraded", "critical"
+	Summary        StandardSummary `json:"summary"`
+	Checks         []CheckResult   `json:"checks"`
+	FixesAvailable int             `json:"fixes_available"`
+}
+
+// StandardSummary represents aggregated health check statistics
+type StandardSummary struct {
+	Total    int `json:"total"`
+	Passed   int `json:"passed"`
+	Warnings int `json:"warnings"`
+	Failed   int `json:"failed"`
+}
+
+// CheckResult represents a single health check result
+type CheckResult struct {
+	Name     string `json:"name"`
+	Category string `json:"category"` // "session"
+	Status   string `json:"status"`   // "passed", "warning", "failed"
+	Message  string `json:"message,omitempty"`
+	Fix      string `json:"fix,omitempty"`
+}
+
+// ToStandardReport converts the validation report to standard schema
+func (r *Report) ToStandardReport() *StandardReport {
+	// Convert sessions to checks
+	checks := make([]CheckResult, 0, len(r.Sessions))
+	fixesAvailable := 0
+
+	for _, session := range r.Sessions {
+		check := CheckResult{
+			Name:     session.Name,
+			Category: "session",
+		}
+
+		switch session.Status {
+		case "resumable":
+			check.Status = "passed"
+		case "failed":
+			check.Status = "failed"
+		case "unknown":
+			check.Status = "warning"
+		}
+
+		// Add issues as message
+		if len(session.Issues) > 0 {
+			check.Message = session.Issues[0].Message
+			check.Fix = session.Issues[0].Fix
+			if session.Issues[0].AutoFixable {
+				fixesAvailable++
+			}
+		}
+
+		checks = append(checks, check)
+	}
+
+	// Determine overall status
+	status := "healthy"
+	if r.Failed > 0 {
+		status = "critical"
+	} else if r.Unknown > 0 {
+		status = "degraded"
+	}
+
+	return &StandardReport{
+		Timestamp: r.ValidatedAt.Format(time.RFC3339),
+		Tool:      "agm", // or "csm"
+		Command:   "doctor --validate",
+		Status:    status,
+		Summary: StandardSummary{
+			Total:    r.TotalSessions,
+			Passed:   r.Resumable,
+			Warnings: r.Unknown,
+			Failed:   r.Failed,
+		},
+		Checks:         checks,
+		FixesAvailable: fixesAvailable,
+	}
+}
+
+// PrintJSON outputs the validation report in standardized JSON format.
 func PrintJSON(report *Report) error {
-	data, err := json.MarshalIndent(report, "", "  ")
+	standard := report.ToStandardReport()
+	data, err := json.MarshalIndent(standard, "", "  ")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to marshal JSON: %v\n", err)
 		return err
