@@ -1,3 +1,4 @@
+//go:build ignore
 // +build ignore
 
 // verify_integration.go - Integration test for GPT adapter

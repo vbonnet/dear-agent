@@ -72,7 +72,7 @@ func ValidateROADMAP(filePath string) []ValidationError {
 	for _, bead := range beads {
 		if strings.TrimSpace(bead.Description) == "" {
 			errors = append(errors, ValidationError{
-				Line: bead.LineNumber,
+				Line:    bead.LineNumber,
 				Message: fmt.Sprintf("Bead '%s' has empty description", bead.ID),
 			})
 		}

@@ -115,9 +115,9 @@ func CapturePaneHistory(sessionName string, lines int) (string, error) {
 
 // GetSessionInfo returns basic information about a tmux session.
 type SessionInfo struct {
-	Name    string
-	Windows int
-	Created string
+	Name     string
+	Windows  int
+	Created  string
 	Attached bool
 }
 
@@ -153,8 +153,8 @@ func GetSessionInfo(sessionName string) (*SessionInfo, error) {
 
 		if parts[0] == sessionName {
 			info := &SessionInfo{
-				Name:    parts[0],
-				Created: parts[2],
+				Name:     parts[0],
+				Created:  parts[2],
 				Attached: parts[3] == "1",
 			}
 

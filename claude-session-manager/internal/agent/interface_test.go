@@ -8,18 +8,18 @@ import (
 
 // MockAgent is a test implementation of the Agent interface.
 type MockAgent struct {
-	NameFunc                func() string
-	VersionFunc             func() string
-	CreateSessionFunc       func(SessionContext) (SessionID, error)
-	ResumeSessionFunc       func(SessionID) error
-	TerminateSessionFunc    func(SessionID) error
-	GetSessionStatusFunc    func(SessionID) (Status, error)
-	SendMessageFunc         func(SessionID, Message) error
-	GetHistoryFunc          func(SessionID) ([]Message, error)
-	ExportConversationFunc  func(SessionID, ConversationFormat) ([]byte, error)
-	ImportConversationFunc  func([]byte, ConversationFormat) (SessionID, error)
-	CapabilitiesFunc        func() Capabilities
-	ExecuteCommandFunc      func(Command) error
+	NameFunc               func() string
+	VersionFunc            func() string
+	CreateSessionFunc      func(SessionContext) (SessionID, error)
+	ResumeSessionFunc      func(SessionID) error
+	TerminateSessionFunc   func(SessionID) error
+	GetSessionStatusFunc   func(SessionID) (Status, error)
+	SendMessageFunc        func(SessionID, Message) error
+	GetHistoryFunc         func(SessionID) ([]Message, error)
+	ExportConversationFunc func(SessionID, ConversationFormat) ([]byte, error)
+	ImportConversationFunc func([]byte, ConversationFormat) (SessionID, error)
+	CapabilitiesFunc       func() Capabilities
+	ExecuteCommandFunc     func(Command) error
 }
 
 func (m *MockAgent) Name() string {

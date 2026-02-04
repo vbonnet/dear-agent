@@ -11,8 +11,8 @@ import (
 type Mode string
 
 const (
-	ModeArchitect    Mode = "architect"   // Planning, design, architecture (Opus)
-	ModeImplementer  Mode = "implementer" // Coding, execution, testing (Sonnet/Haiku)
+	ModeArchitect   Mode = "architect"   // Planning, design, architecture (Opus)
+	ModeImplementer Mode = "implementer" // Coding, execution, testing (Sonnet/Haiku)
 )
 
 // TaskComplexity represents the assessed complexity of a task.
@@ -26,30 +26,30 @@ const (
 
 // RoutingDecision represents the gateway's routing choice.
 type RoutingDecision struct {
-	Mode       Mode           `json:"mode"`        // Which mode to use
-	Model      string         `json:"model"`       // Specific model (opus-4.5, sonnet-4.5, haiku-4)
-	Complexity TaskComplexity `json:"complexity"`  // Assessed task complexity
-	Reasoning  string         `json:"reasoning"`   // Why this routing was chosen
-	Confidence float64        `json:"confidence"`  // Confidence in decision (0.0-1.0)
+	Mode       Mode           `json:"mode"`       // Which mode to use
+	Model      string         `json:"model"`      // Specific model (opus-4.5, sonnet-4.5, haiku-4)
+	Complexity TaskComplexity `json:"complexity"` // Assessed task complexity
+	Reasoning  string         `json:"reasoning"`  // Why this routing was chosen
+	Confidence float64        `json:"confidence"` // Confidence in decision (0.0-1.0)
 }
 
 // TaskContext contains information about the task for routing.
 type TaskContext struct {
-	Prompt        string            `json:"prompt"`         // User's prompt
-	Project       string            `json:"project"`        // Project context
-	PreviousMode  Mode              `json:"previous_mode"`  // Previous mode (for hand-offs)
-	Metadata      map[string]string `json:"metadata"`       // Additional context
+	Prompt       string            `json:"prompt"`        // User's prompt
+	Project      string            `json:"project"`       // Project context
+	PreviousMode Mode              `json:"previous_mode"` // Previous mode (for hand-offs)
+	Metadata     map[string]string `json:"metadata"`      // Additional context
 }
 
 // HandoffContext contains state transfer between modes.
 type HandoffContext struct {
-	FromMode    Mode              `json:"from_mode"`     // Source mode
-	ToMode      Mode              `json:"to_mode"`       // Target mode
-	Summary     string            `json:"summary"`       // What was done in source mode
-	NextSteps   []string          `json:"next_steps"`    // Tasks for target mode
-	Artifacts   map[string]string `json:"artifacts"`     // Files, designs, etc.
-	Metadata    map[string]string `json:"metadata"`      // Additional context
-	Timestamp   int64             `json:"timestamp"`     // When hand-off occurred
+	FromMode  Mode              `json:"from_mode"`  // Source mode
+	ToMode    Mode              `json:"to_mode"`    // Target mode
+	Summary   string            `json:"summary"`    // What was done in source mode
+	NextSteps []string          `json:"next_steps"` // Tasks for target mode
+	Artifacts map[string]string `json:"artifacts"`  // Files, designs, etc.
+	Metadata  map[string]string `json:"metadata"`   // Additional context
+	Timestamp int64             `json:"timestamp"`  // When hand-off occurred
 }
 
 // DualModeGateway routes tasks between Architect and Implementer modes.

@@ -277,11 +277,11 @@ func TestCalculateConfidence(t *testing.T) {
 	gateway := NewDualModeGateway(ModeImplementer)
 
 	tests := []struct {
-		name           string
-		prompt         string
-		complexity     TaskComplexity
-		mode           Mode
-		minConfidence  float64
+		name          string
+		prompt        string
+		complexity    TaskComplexity
+		mode          Mode
+		minConfidence float64
 	}{
 		{
 			name:          "architect with design keyword",

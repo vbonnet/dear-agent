@@ -236,9 +236,9 @@ func TestScanUnassociated(t *testing.T) {
 	os.MkdirAll(sessionsDir, 0755)
 
 	// Create manifests with and without UUIDs
-	createTestManifest(t, sessionsDir, "session-1", "")           // No UUID
-	createTestManifest(t, sessionsDir, "session-2", "uuid-123")   // Has UUID
-	createTestManifest(t, sessionsDir, "session-3", "")           // No UUID
+	createTestManifest(t, sessionsDir, "session-1", "")         // No UUID
+	createTestManifest(t, sessionsDir, "session-2", "uuid-123") // Has UUID
+	createTestManifest(t, sessionsDir, "session-3", "")         // No UUID
 
 	detector := detection.NewDetector("", 5*time.Minute)
 	parser := history.NewParser("")

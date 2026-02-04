@@ -234,4 +234,3 @@ const genericHandoffTemplate = `# Mode Transition: {{.FromMode}} → {{.ToMode}}
 {{define "next_steps"}}{{if .NextSteps}}{{range $i, $step := .NextSteps}}{{add $i 1}}. {{$step}}
 {{end}}{{else}}No specific next steps{{end}}{{end}}
 `
-

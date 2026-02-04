@@ -36,9 +36,9 @@ const (
 // Reaper manages the async archival process for a CSM session
 // It waits for Claude to return to prompt, sends /exit, and archives the session
 type Reaper struct {
-	SessionName   string
-	SessionsDir   string
-	SocketPath    string
+	SessionName string
+	SessionsDir string
+	SocketPath  string
 }
 
 // New creates a new Reaper for the given session

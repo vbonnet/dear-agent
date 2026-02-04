@@ -12,43 +12,43 @@ import (
 // TestGeminiTranslator_RenameSession tests all paths for RenameSession method
 func TestGeminiTranslator_RenameSession(t *testing.T) {
 	tests := []struct {
-		name       string
-		sessionID  string
-		newName    string
-		clientErr  error
-		wantErr    error
+		name        string
+		sessionID   string
+		newName     string
+		clientErr   error
+		wantErr     error
 		wantCallLog string
 	}{
 		{
-			name:       "success",
-			sessionID:  "conv-123",
-			newName:    "new-name",
-			clientErr:  nil,
-			wantErr:    nil,
+			name:        "success",
+			sessionID:   "conv-123",
+			newName:     "new-name",
+			clientErr:   nil,
+			wantErr:     nil,
 			wantCallLog: "UpdateTitle(conv-123, new-name)",
 		},
 		{
-			name:       "client error",
-			sessionID:  "conv-123",
-			newName:    "new-name",
-			clientErr:  errors.New("api error"),
-			wantErr:    ErrAPIFailure,
+			name:        "client error",
+			sessionID:   "conv-123",
+			newName:     "new-name",
+			clientErr:   errors.New("api error"),
+			wantErr:     ErrAPIFailure,
 			wantCallLog: "UpdateTitle(conv-123, new-name)",
 		},
 		{
-			name:       "empty name",
-			sessionID:  "conv-123",
-			newName:    "",
-			clientErr:  nil,
-			wantErr:    nil,
+			name:        "empty name",
+			sessionID:   "conv-123",
+			newName:     "",
+			clientErr:   nil,
+			wantErr:     nil,
 			wantCallLog: "UpdateTitle(conv-123, )",
 		},
 		{
-			name:       "special characters",
-			sessionID:  "conv-456",
-			newName:    "my-new-name_123",
-			clientErr:  nil,
-			wantErr:    nil,
+			name:        "special characters",
+			sessionID:   "conv-456",
+			newName:     "my-new-name_123",
+			clientErr:   nil,
+			wantErr:     nil,
 			wantCallLog: "UpdateTitle(conv-456, my-new-name_123)",
 		},
 	}
@@ -145,11 +145,11 @@ func TestGeminiTranslator_RenameSession_ContextTimeout(t *testing.T) {
 // TestGeminiTranslator_SetDirectory tests all paths for SetDirectory method
 func TestGeminiTranslator_SetDirectory(t *testing.T) {
 	tests := []struct {
-		name       string
-		sessionID  string
-		path       string
-		clientErr  error
-		wantErr    error
+		name      string
+		sessionID string
+		path      string
+		clientErr error
+		wantErr   error
 	}{
 		{
 			name:      "success",

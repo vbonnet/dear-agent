@@ -60,9 +60,46 @@ func (a *ClaudeAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		tmuxName = fmt.Sprintf("claude-%s", time.Now().Format("20060102-150405"))
 	}
 
-	// Create tmux session
-	if err := tmux.NewSession(tmuxName, ctx.WorkingDirectory); err != nil {
-		return "", fmt.Errorf("failed to create tmux session: %w", err)
+	// Check if tmux session already exists
+	exists, err := tmux.HasSession(tmuxName)
+	if err != nil {
+		return "", fmt.Errorf("failed to check tmux session: %w", err)
+	}
+
+	if !exists {
+		// Create new tmux session
+		if err := tmux.NewSession(tmuxName, ctx.WorkingDirectory); err != nil {
+			return "", fmt.Errorf("failed to create tmux session: %w", err)
+		}
+	}
+
+	// Build Claude command with directory authorization
+	// Use --add-dir to pre-approve workspace and avoid trust prompt
+	claudeCmd := fmt.Sprintf("claude --add-dir '%s'", ctx.WorkingDirectory)
+
+	// Add additional authorized directories
+	for _, dir := range ctx.AuthorizedDirs {
+		if dir != ctx.WorkingDirectory {
+			claudeCmd += fmt.Sprintf(" --add-dir '%s'", dir)
+		}
+	}
+
+	claudeCmd += " && exit"
+
+	// Start Claude in the tmux session
+	if err := tmux.SendCommand(tmuxName, claudeCmd); err != nil {
+		// Clean up tmux session on error if we created it
+		if !exists {
+			_ = tmux.SendCommand(tmuxName, "exit\r")
+		}
+		return "", fmt.Errorf("failed to start Claude in tmux session: %w", err)
+	}
+
+	// Wait for Claude to be ready (prompt appears)
+	// This ensures subsequent commands go to Claude, not bash
+	if err := tmux.WaitForProcessReady(tmuxName, "claude", 30*time.Second); err != nil {
+		// Non-fatal warning - Claude may still be initializing
+		fmt.Fprintf(os.Stderr, "Warning: Claude prompt not detected (still initializing)\n")
 	}
 
 	// Store session metadata
@@ -74,13 +111,10 @@ func (a *ClaudeAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	}
 
 	if err := a.sessionStore.Set(sessionID, metadata); err != nil {
-		// Clean up tmux session on error by sending exit
+		// Clean up tmux session on error
 		_ = tmux.SendCommand(tmuxName, "exit\r")
 		return "", fmt.Errorf("failed to store session metadata: %w", err)
 	}
-
-	// TODO: Start Claude CLI in the tmux session
-	// This would involve sending "claude" command to the tmux pane
 
 	return sessionID, nil
 }
@@ -88,6 +122,7 @@ func (a *ClaudeAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 // ResumeSession resumes an existing Claude session.
 //
 // Attaches to the tmux session associated with the SessionID.
+// If the tmux session doesn't exist, creates it and resumes the Claude session.
 func (a *ClaudeAdapter) ResumeSession(sessionID SessionID) error {
 	metadata, err := a.sessionStore.Get(sessionID)
 	if err != nil {
@@ -99,8 +134,44 @@ func (a *ClaudeAdapter) ResumeSession(sessionID SessionID) error {
 	if err != nil {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
+
+	sendCommands := false
 	if !exists {
-		return fmt.Errorf("tmux session %s not found (session may have been terminated)", metadata.TmuxName)
+		// Create new tmux session
+		if err := tmux.NewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {
+			return fmt.Errorf("failed to create tmux session: %w", err)
+		}
+		sendCommands = true
+	} else {
+		// Check if Claude is already running
+		claudeRunning, err := tmux.IsProcessRunning(metadata.TmuxName, "claude")
+		if err != nil {
+			// Detection failed - skip commands for safety
+			sendCommands = false
+		} else if claudeRunning {
+			// Claude already running - skip commands
+			sendCommands = false
+		} else {
+			// Claude not running - send commands
+			sendCommands = true
+		}
+	}
+
+	// Send resume command if needed
+	if sendCommands {
+		// Build combined command: cd <workdir> && claude --resume <uuid> && exit
+		// Note: We use string(sessionID) as the Claude UUID
+		// TODO: If we need to support separate Claude UUID, store it in metadata
+		fullCmd := fmt.Sprintf("cd '%s' && claude --resume %s && exit",
+			metadata.WorkingDir,
+			string(sessionID))
+
+		if err := tmux.SendCommand(metadata.TmuxName, fullCmd); err != nil {
+			return fmt.Errorf("failed to send resume command: %w", err)
+		}
+
+		// Wait for Claude to be ready
+		_ = tmux.WaitForProcessReady(metadata.TmuxName, "claude", 5*time.Second)
 	}
 
 	// Attach to tmux session
@@ -285,13 +356,13 @@ func (a *ClaudeAdapter) ImportConversation(data []byte, format ConversationForma
 // Capabilities returns Claude's feature capabilities
 func (a *ClaudeAdapter) Capabilities() Capabilities {
 	return Capabilities{
-		SupportsSlashCommands: true,  // Claude CLI supports /rename, /clear, etc.
-		SupportsHooks:         false, // AGM-level feature, not agent-specific
-		SupportsTools:         true,  // Claude supports MCP tools
-		SupportsVision:        true,  // Claude Sonnet/Opus support vision
-		SupportsMultimodal:    false, // No audio/video support yet
-		SupportsStreaming:     true,  // Claude CLI supports streaming
-		SupportsSystemPrompts: true,  // Claude supports system prompts
+		SupportsSlashCommands: true,   // Claude CLI supports /rename, /clear, etc.
+		SupportsHooks:         false,  // AGM-level feature, not agent-specific
+		SupportsTools:         true,   // Claude supports MCP tools
+		SupportsVision:        true,   // Claude Sonnet/Opus support vision
+		SupportsMultimodal:    false,  // No audio/video support yet
+		SupportsStreaming:     true,   // Claude CLI supports streaming
+		SupportsSystemPrompts: true,   // Claude supports system prompts
 		MaxContextWindow:      200000, // 200K tokens
 		ModelName:             "claude-sonnet-4.5",
 	}

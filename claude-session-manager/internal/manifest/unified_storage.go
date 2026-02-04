@@ -25,9 +25,9 @@ type MigrationReport struct {
 
 // MigrationError captures details of a failed migration
 type MigrationError struct {
-	SessionID string
+	SessionID   string
 	SessionName string
-	Error     string
+	Error       string
 }
 
 // MigrateToUnifiedStorage migrates sessions from workspace-specific locations
@@ -79,9 +79,9 @@ func MigrateToUnifiedStorage(locations []SessionLocation, opts MigrationOptions)
 		if err := AcquireLock(location.ManifestPath); err != nil {
 			report.Failed++
 			report.Errors = append(report.Errors, MigrationError{
-				SessionID: location.SessionID,
+				SessionID:   location.SessionID,
 				SessionName: location.Name,
-				Error: fmt.Sprintf("lock acquisition failed: %v", err),
+				Error:       fmt.Sprintf("lock acquisition failed: %v", err),
 			})
 			continue
 		}
@@ -91,9 +91,9 @@ func MigrateToUnifiedStorage(locations []SessionLocation, opts MigrationOptions)
 			ReleaseLock(location.ManifestPath)
 			report.Failed++
 			report.Errors = append(report.Errors, MigrationError{
-				SessionID: location.SessionID,
+				SessionID:   location.SessionID,
 				SessionName: location.Name,
-				Error: err.Error(),
+				Error:       err.Error(),
 			})
 			continue
 		}

@@ -28,7 +28,7 @@ func TestGeminiAdapter_NewGeminiAdapter(t *testing.T) {
 		errContains string
 	}{
 		{
-			name: "default config with env var",
+			name:   "default config with env var",
 			config: nil,
 			setupEnv: func() {
 				os.Setenv("GEMINI_API_KEY", "test-api-key")
@@ -43,18 +43,18 @@ func TestGeminiAdapter_NewGeminiAdapter(t *testing.T) {
 			config: &GeminiConfig{
 				APIKey: "explicit-key",
 			},
-			setupEnv: func() {},
+			setupEnv:   func() {},
 			cleanupEnv: func() {},
-			wantErr: false,
+			wantErr:    false,
 		},
 		{
-			name: "missing api key",
+			name:   "missing api key",
 			config: nil,
 			setupEnv: func() {
 				os.Unsetenv("GEMINI_API_KEY")
 			},
-			cleanupEnv: func() {},
-			wantErr: true,
+			cleanupEnv:  func() {},
+			wantErr:     true,
 			errContains: "GEMINI_API_KEY",
 		},
 		{
@@ -63,9 +63,9 @@ func TestGeminiAdapter_NewGeminiAdapter(t *testing.T) {
 				ModelName: "gemini-1.5-pro",
 				APIKey:    "test-key",
 			},
-			setupEnv: func() {},
+			setupEnv:   func() {},
 			cleanupEnv: func() {},
-			wantErr: false,
+			wantErr:    false,
 		},
 	}
 

@@ -96,12 +96,12 @@ func (a *Adapter) Version() string {
 // Capabilities returns the agent's feature capabilities.
 func (a *Adapter) Capabilities() agent.Capabilities {
 	return agent.Capabilities{
-		SupportsSlashCommands: false,   // API adapter, not CLI
-		SupportsHooks:         false,   // V1: not implemented
-		SupportsTools:         true,    // GPT-4 supports function calling
-		SupportsVision:        true,    // GPT-4V capable (not impl in V1)
-		SupportsMultimodal:    false,   // V2 feature
-		MaxContextWindow:      128000,  // gpt-4-turbo: 128K tokens
+		SupportsSlashCommands: false,  // API adapter, not CLI
+		SupportsHooks:         false,  // V1: not implemented
+		SupportsTools:         true,   // GPT-4 supports function calling
+		SupportsVision:        true,   // GPT-4V capable (not impl in V1)
+		SupportsMultimodal:    false,  // V2 feature
+		MaxContextWindow:      128000, // gpt-4-turbo: 128K tokens
 		ModelName:             a.model,
 	}
 }

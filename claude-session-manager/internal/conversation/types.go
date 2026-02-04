@@ -9,21 +9,21 @@ import (
 // Conversation represents a complete conversation with metadata and messages.
 // JSONL format: first line is Conversation (header), subsequent lines are Messages.
 type Conversation struct {
-	SchemaVersion string       `json:"schema_version"`         // Must be "1.0"
-	CreatedAt     time.Time    `json:"created_at"`             // ISO8601 timestamp
-	Model         string       `json:"model"`                  // e.g., "claude-sonnet-4-5"
-	Agent         string       `json:"agent"`                  // Primary agent: "claude", "gemini", "gpt"
-	TotalMessages int          `json:"total_messages,omitempty"` // Count of messages
-	TotalTokens   *TokenUsage  `json:"total_tokens,omitempty"`  // Aggregate token usage
-	Messages      []Message    `json:"-"`                       // Not serialized in header line
+	SchemaVersion string      `json:"schema_version"`           // Must be "1.0"
+	CreatedAt     time.Time   `json:"created_at"`               // ISO8601 timestamp
+	Model         string      `json:"model"`                    // e.g., "claude-sonnet-4-5"
+	Agent         string      `json:"agent"`                    // Primary agent: "claude", "gemini", "gpt"
+	TotalMessages int         `json:"total_messages,omitempty"` // Count of messages
+	TotalTokens   *TokenUsage `json:"total_tokens,omitempty"`   // Aggregate token usage
+	Messages      []Message   `json:"-"`                        // Not serialized in header line
 }
 
 // Message represents a single conversation turn.
 type Message struct {
-	Timestamp time.Time      `json:"timestamp"` // ISO8601 timestamp
-	Role      string         `json:"role"`      // "user" or "assistant"
-	Agent     string         `json:"agent"`     // "claude", "gemini", "gpt"
-	Content   []ContentBlock `json:"content"`   // Array of content blocks
+	Timestamp time.Time      `json:"timestamp"`       // ISO8601 timestamp
+	Role      string         `json:"role"`            // "user" or "assistant"
+	Agent     string         `json:"agent"`           // "claude", "gemini", "gpt"
+	Content   []ContentBlock `json:"content"`         // Array of content blocks
 	Usage     *TokenUsage    `json:"usage,omitempty"` // Token usage for this message
 }
 
@@ -50,8 +50,8 @@ func (t TextBlock) BlockType() string { return "text" }
 type ImageBlock struct {
 	Type   string `json:"type"` // "image"
 	Source struct {
-		Type      string `json:"type"`       // "base64" or "url"
-		MediaType string `json:"media_type"` // MIME type (e.g., "image/png")
+		Type      string `json:"type"`           // "base64" or "url"
+		MediaType string `json:"media_type"`     // MIME type (e.g., "image/png")
 		Data      string `json:"data,omitempty"` // Base64-encoded data
 		URL       string `json:"url,omitempty"`  // Image URL
 	} `json:"source"`
@@ -61,9 +61,9 @@ func (i ImageBlock) BlockType() string { return "image" }
 
 // ToolUseBlock represents a tool invocation.
 type ToolUseBlock struct {
-	Type  string          `json:"type"` // "tool_use"
-	ID    string          `json:"id"`   // Unique tool use ID
-	Name  string          `json:"name"` // Tool name
+	Type  string          `json:"type"`  // "tool_use"
+	ID    string          `json:"id"`    // Unique tool use ID
+	Name  string          `json:"name"`  // Tool name
 	Input json.RawMessage `json:"input"` // Arbitrary JSON input
 }
 

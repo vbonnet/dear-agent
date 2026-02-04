@@ -16,9 +16,9 @@ type EngramConfig struct {
 }
 
 const (
-	DefaultEngramLimit     = 10
-	DefaultScoreThreshold  = 0.7
-	DefaultQueryTimeout    = 5 * time.Second
+	DefaultEngramLimit    = 10
+	DefaultScoreThreshold = 0.7
+	DefaultQueryTimeout   = 5 * time.Second
 )
 
 // LoadEngramConfig loads configuration from environment variables

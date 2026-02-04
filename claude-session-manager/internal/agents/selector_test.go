@@ -21,13 +21,13 @@ func TestSelectAgent_KeywordMatch(t *testing.T) {
 		sessionName string
 		expected    string
 	}{
-		{"creative-project", "gemini"},       // Matches "creative"
-		{"design-system", "gemini"},          // Matches "design"
-		{"code-refactor", "claude"},          // Matches "code"
-		{"debug-api", "claude"},              // Matches "debug"
-		{"random-task", "claude"},            // No match, uses default
-		{"my-creative-idea", "gemini"},       // Substring match
-		{"decode-service", "claude"},         // Substring "code" in "decode"
+		{"creative-project", "gemini"}, // Matches "creative"
+		{"design-system", "gemini"},    // Matches "design"
+		{"code-refactor", "claude"},    // Matches "code"
+		{"debug-api", "claude"},        // Matches "debug"
+		{"random-task", "claude"},      // No match, uses default
+		{"my-creative-idea", "gemini"}, // Substring match
+		{"decode-service", "claude"},   // Substring "code" in "decode"
 	}
 
 	for _, tt := range tests {

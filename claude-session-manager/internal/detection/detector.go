@@ -19,7 +19,7 @@ type Result struct {
 
 // Detector performs hybrid UUID auto-detection
 type Detector struct {
-	historyParser *history.Parser
+	historyParser   *history.Parser
 	detectionWindow time.Duration
 }
 
