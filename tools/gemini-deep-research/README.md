@@ -88,6 +88,49 @@ gemini-deep-research https://huggingface.co/papers/2501.12345
 gemini-deep-research https://example.com/article
 ```
 
+### Competitive Analysis Mode
+
+**NEW**: Analyze competitor tools and generate gap analysis reports
+
+```bash
+# Analyze a specific competitor
+gemini-deep-research "https://github.com/features/copilot" --mode competitive
+
+# Automatic competitor discovery from query
+gemini-deep-research "GitHub Copilot vs Cursor" --mode competitive
+
+# Skip URL discovery and analyze directly
+gemini-deep-research "https://github.com/features/copilot" --mode competitive --no-discovery
+
+# Customize discovery limit (default: 5, max: 20)
+gemini-deep-research "React vs Vue" --mode competitive --discovery-limit 10
+```
+
+**Features**:
+- Automatic URL discovery using Google Custom Search
+- Intelligent competitor name extraction from queries
+- Gap analysis reports with prioritized recommendations
+- Executive summaries for quick review
+
+**Setup** (for URL discovery):
+```bash
+# Required for automatic URL discovery
+export GOOGLE_CUSTOM_SEARCH_API_KEY="your-api-key"
+export GOOGLE_SEARCH_ENGINE_ID="your-search-engine-id"
+```
+
+**Output structure**:
+```
+output/20240203-150405-competitive-github-com-features-copilot/
+├── competitive-summary.md    # Executive summary
+├── report.md                 # Full gap analysis report
+├── metadata.json             # Analysis metadata
+├── topics.json               # Identified topics
+└── content.txt               # Extracted content
+```
+
+**See**: [docs/competitive-analysis.md](docs/competitive-analysis.md) for complete documentation
+
 ### With Custom Prompt
 
 ```bash
@@ -207,9 +250,13 @@ gemini-deep-research --type article https://youtu.be/VIDEO_ID
 | `--input <text>` | Short custom prompt for topic analysis | None |
 | `--input-file <path>` | Path to file containing custom prompt | None |
 | `--type <type>` | Override content type (video\|article\|arxiv\|huggingface) | Auto-detect |
+| `--mode <mode>` | Analysis mode (general\|competitive) | Auto-detect |
+| `--no-discovery` | Skip URL discovery in competitive mode | false |
+| `--discovery-limit <n>` | Max URLs to discover (0-20) | 5 |
 | `--output-dir <path>` | Output directory for results | `./output` |
 | `--timeout <minutes>` | Deep Research timeout in minutes | 60 |
 | `--project <id>` | GCP project ID | From env |
+| `--force` | Bypass cache and force fresh research | false |
 | `--help, -h` | Show help message | - |
 | `--version, -v` | Show version | - |
 
@@ -219,6 +266,8 @@ gemini-deep-research --type article https://youtu.be/VIDEO_ID
 |----------|-------------|---------|
 | `GEMINI_API_KEY` | API key for Deep Research | **Required** |
 | `GOOGLE_CLOUD_PROJECT` | GCP project ID | None |
+| `GOOGLE_CUSTOM_SEARCH_API_KEY` | Google Custom Search API key (competitive mode) | None |
+| `GOOGLE_SEARCH_ENGINE_ID` | Custom Search Engine ID (competitive mode) | None |
 | `GEMINI_DR_OUTPUT_DIR` | Default output directory | `./output` |
 | `GEMINI_DR_TIMEOUT` | Research timeout (minutes) | 60 |
 
@@ -229,6 +278,8 @@ gemini-deep-research --type article https://youtu.be/VIDEO_ID
 3. Default values (lowest priority)
 
 ## Output Structure
+
+### General Mode
 
 Each run creates a timestamped directory:
 
@@ -241,18 +292,48 @@ output/
     └── content.txt        # Extracted content (for reference)
 ```
 
+### Competitive Mode
+
+Competitive analysis includes an additional executive summary:
+
+```
+output/
+└── 20240203-150405-competitive-github-com-features-copilot/
+    ├── competitive-summary.md    # Executive summary (NEW)
+    ├── report.md                 # Gap analysis report
+    ├── metadata.json             # Run metadata (includes mode, competitor, source query)
+    ├── topics.json               # Identified topics list
+    └── content.txt               # Extracted content
+```
+
 ### metadata.json
 
+**General Mode**:
 ```json
 {
   "url": "https://example.com/article",
   "content_type": "GenericArticle",
   "topics": ["Topic 1", "Topic 2", "Topic 3"],
   "timestamp": "2024-02-03T15:04:05Z",
+  "mode": "general",
   "metadata": {
     "title": "Article Title",
     "authors": ["Author Name"]
   }
+}
+```
+
+**Competitive Mode**:
+```json
+{
+  "url": "https://github.com/features/copilot",
+  "content_type": "GenericArticle",
+  "topics": ["AI completion", "IDE integration", "Context awareness"],
+  "timestamp": "2024-02-03T15:04:05Z",
+  "mode": "competitive",
+  "competitor": "GitHub Copilot",
+  "source_query": "GitHub Copilot vs Cursor",
+  "metadata": {}
 }
 ```
 
