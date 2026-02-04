@@ -10,6 +10,7 @@ import (
 	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/extractors"
 	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/gemini"
 	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/internal/cache"
+	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/internal/modes"
 	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/research"
 	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/types"
 )
@@ -28,9 +29,19 @@ func Run(url string, flags *types.Flags, cfg *config.Config) int {
 		return 1
 	}
 
+	// Detect analysis mode
+	mode := modes.DetectMode(url, flags.Mode)
+
 	// Log configuration
 	fmt.Fprintf(cfg.Stdout, "Configuration:\n")
 	fmt.Fprintf(cfg.Stdout, "  URL: %s\n", url)
+	fmt.Fprintf(cfg.Stdout, "  Mode: %s", mode.String())
+	if flags.Mode == "" {
+		fmt.Fprintf(cfg.Stdout, " (auto-detected)")
+	} else {
+		fmt.Fprintf(cfg.Stdout, " (explicit)")
+	}
+	fmt.Fprintf(cfg.Stdout, "\n")
 	fmt.Fprintf(cfg.Stdout, "  Output Directory: %s\n", cfg.OutputDir)
 	fmt.Fprintf(cfg.Stdout, "  Timeout: %d minutes\n", cfg.Timeout)
 	if cfg.ProjectID != "" {

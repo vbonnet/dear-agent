@@ -18,6 +18,7 @@ type Flags struct {
 
 	// Other flags
 	Type      string // --type: Content type override
+	Mode      string // --mode: Analysis mode (general|competitive)
 	OutputDir string // --output-dir: Output directory
 	Timeout   int    // --timeout: Deep Research timeout in minutes
 	Project   string // --project: GCP project ID
@@ -58,6 +59,17 @@ func (f *Flags) Validate() error {
 		}
 		if !validTypes[f.Type] {
 			return fmt.Errorf("invalid type: %s (must be: video, article, arxiv, huggingface)", f.Type)
+		}
+	}
+
+	// Validate mode if specified
+	if f.Mode != "" {
+		validModes := map[string]bool{
+			"general":     true,
+			"competitive": true,
+		}
+		if !validModes[f.Mode] {
+			return fmt.Errorf("invalid mode: %s (must be: general, competitive)", f.Mode)
 		}
 	}
 

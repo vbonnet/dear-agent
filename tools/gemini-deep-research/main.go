@@ -32,6 +32,7 @@ Flags:
 
   Other Options:
   --type <content-type>   Override content type auto-detection (video|article|arxiv|huggingface)
+  --mode <general|competitive>  Analysis mode (auto-detected from query if not specified)
   --output-dir <path>     Output directory for results (default: ./output)
   --timeout <minutes>     Deep Research timeout in minutes (default: 60)
   --project <id>          GCP project ID (fallback: GOOGLE_CLOUD_PROJECT env var)
@@ -60,6 +61,9 @@ Examples:
 
   # Override content type detection
   gemini-deep-research --type article https://youtu.be/VIDEO_ID
+
+  # Force competitive analysis mode
+  gemini-deep-research --mode competitive "How does AWS Lambda compare to Google Cloud Functions?"
 
   # Custom output directory
   gemini-deep-research --output-dir /tmp/research https://arxiv.org/abs/2601.20802
@@ -102,6 +106,7 @@ func main() {
 
 	// Other flags
 	flag.StringVar(&flags.Type, "type", "", "Override content type auto-detection (video|article|arxiv|huggingface)")
+	flag.StringVar(&flags.Mode, "mode", "", "Analysis mode: general or competitive (auto-detected from query by default)")
 	flag.StringVar(&flags.OutputDir, "output-dir", "", "Output directory for results")
 	flag.IntVar(&flags.Timeout, "timeout", 0, "Deep Research timeout in minutes")
 	flag.StringVar(&flags.Project, "project", "", "GCP project ID")
