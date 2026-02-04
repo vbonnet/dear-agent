@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"bytes"
+	"context"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/config"
+	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/internal/modes"
 	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/types"
 )
 
@@ -233,6 +236,367 @@ func TestTruncate(t *testing.T) {
 			}
 			if len(got) > tt.maxLen {
 				t.Errorf("truncate result length %d exceeds maxLen %d", len(got), tt.maxLen)
+			}
+		})
+	}
+}
+
+// Integration tests for Task 5: Pipeline Integration (Stage 0)
+
+func TestLoadCompetitivePrompt(t *testing.T) {
+	tests := []struct {
+		name        string
+		query       string
+		targetURL   string
+		wantErr     bool
+		checkPrompt func(t *testing.T, prompt string)
+	}{
+		{
+			name:      "Valid competitive query - vs pattern",
+			query:     "GitHub Copilot vs Cursor",
+			targetURL: "https://github.com/features/copilot",
+			wantErr:   false,
+			checkPrompt: func(t *testing.T, prompt string) {
+				if !strings.Contains(prompt, "GitHub Copilot") {
+					t.Error("Expected competitor name in prompt")
+				}
+				if !strings.Contains(prompt, "https://github.com/features/copilot") {
+					t.Error("Expected target URL in prompt")
+				}
+				if !strings.Contains(prompt, "Competitor Capabilities") {
+					t.Error("Expected analyze template content")
+				}
+			},
+		},
+		{
+			name:      "Simple query - fallback pattern",
+			query:     "Notion",
+			targetURL: "https://www.notion.so",
+			wantErr:   false,
+			checkPrompt: func(t *testing.T, prompt string) {
+				if !strings.Contains(prompt, "Notion") {
+					t.Error("Expected competitor name (full query) in prompt")
+				}
+				if !strings.Contains(prompt, "Our Tool") {
+					t.Error("Expected target tool name in prompt")
+				}
+			},
+		},
+		{
+			name:      "Complex query - competitor analysis pattern",
+			query:     "competitive analysis of Terraform",
+			targetURL: "https://www.terraform.io/docs",
+			wantErr:   false,
+			checkPrompt: func(t *testing.T, prompt string) {
+				if !strings.Contains(prompt, "Terraform") {
+					t.Error("Expected extracted competitor name")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prompt, err := loadCompetitivePrompt(tt.query, tt.targetURL)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("loadCompetitivePrompt() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr && tt.checkPrompt != nil {
+				tt.checkPrompt(t, prompt)
+			}
+		})
+	}
+}
+
+func TestLoadGapAnalysisPrompt(t *testing.T) {
+	tests := []struct {
+		name        string
+		query       string
+		targetURL   string
+		topics      []string
+		wantErr     bool
+		checkPrompt func(t *testing.T, prompt string)
+	}{
+		{
+			name:      "With topics",
+			query:     "AWS Lambda vs Google Cloud Functions",
+			targetURL: "https://aws.amazon.com/lambda/",
+			topics:    []string{"Serverless compute", "Event triggers", "Pricing models"},
+			wantErr:   false,
+			checkPrompt: func(t *testing.T, prompt string) {
+				if !strings.Contains(prompt, "AWS Lambda") {
+					t.Error("Expected competitor name in prompt")
+				}
+				if !strings.Contains(prompt, "Serverless compute") {
+					t.Error("Expected topics in prompt")
+				}
+				if !strings.Contains(prompt, "Event triggers") {
+					t.Error("Expected all topics in prompt")
+				}
+				if !strings.Contains(prompt, "Competitor Strengths") {
+					t.Error("Expected gap-analysis template content")
+				}
+				if !strings.Contains(prompt, "Our Gaps") {
+					t.Error("Expected gap analysis sections")
+				}
+			},
+		},
+		{
+			name:      "Empty topics",
+			query:     "React vs Vue",
+			targetURL: "https://react.dev",
+			topics:    []string{},
+			wantErr:   false,
+			checkPrompt: func(t *testing.T, prompt string) {
+				if !strings.Contains(prompt, "React") {
+					t.Error("Expected competitor name even with empty topics")
+				}
+				if !strings.Contains(prompt, "Prioritized Recommendations") {
+					t.Error("Expected gap analysis structure")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prompt, err := loadGapAnalysisPrompt(tt.query, tt.targetURL, tt.topics)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("loadGapAnalysisPrompt() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr && tt.checkPrompt != nil {
+				tt.checkPrompt(t, prompt)
+			}
+		})
+	}
+}
+
+func TestRunDiscovery_MissingCredentials(t *testing.T) {
+	// Save original env vars
+	origAPIKey := os.Getenv("GOOGLE_CUSTOM_SEARCH_API_KEY")
+	origEngineID := os.Getenv("GOOGLE_SEARCH_ENGINE_ID")
+
+	// Clear env vars
+	os.Unsetenv("GOOGLE_CUSTOM_SEARCH_API_KEY")
+	os.Unsetenv("GOOGLE_SEARCH_ENGINE_ID")
+
+	// Restore after test
+	defer func() {
+		if origAPIKey != "" {
+			os.Setenv("GOOGLE_CUSTOM_SEARCH_API_KEY", origAPIKey)
+		}
+		if origEngineID != "" {
+			os.Setenv("GOOGLE_SEARCH_ENGINE_ID", origEngineID)
+		}
+	}()
+
+	tests := []struct {
+		name          string
+		setupEnv      func()
+		wantErrSubstr string
+	}{
+		{
+			name:          "Missing API key",
+			setupEnv:      func() {
+				os.Setenv("GOOGLE_SEARCH_ENGINE_ID", "test-engine-id")
+			},
+			wantErrSubstr: "GOOGLE_CUSTOM_SEARCH_API_KEY",
+		},
+		{
+			name:          "Missing search engine ID",
+			setupEnv:      func() {
+				os.Setenv("GOOGLE_CUSTOM_SEARCH_API_KEY", "test-api-key")
+			},
+			wantErrSubstr: "GOOGLE_SEARCH_ENGINE_ID",
+		},
+		{
+			name:          "Both missing",
+			setupEnv:      func() {},
+			wantErrSubstr: "GOOGLE_CUSTOM_SEARCH_API_KEY",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear env vars before each test
+			os.Unsetenv("GOOGLE_CUSTOM_SEARCH_API_KEY")
+			os.Unsetenv("GOOGLE_SEARCH_ENGINE_ID")
+
+			// Setup test-specific env
+			tt.setupEnv()
+
+			ctx := context.Background()
+			cfg := &config.Config{
+				Stdout: &bytes.Buffer{},
+				Stderr: &bytes.Buffer{},
+			}
+
+			_, err := runDiscovery(ctx, "GitHub Copilot vs Cursor", cfg)
+
+			if err == nil {
+				t.Fatal("Expected error for missing credentials, got nil")
+			}
+
+			if !strings.Contains(err.Error(), tt.wantErrSubstr) {
+				t.Errorf("Expected error containing %q, got: %v", tt.wantErrSubstr, err)
+			}
+		})
+	}
+}
+
+func TestCompetitiveMode_PipelineFlow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	tests := []struct {
+		name         string
+		url          string
+		mode         string
+		wantStage0   bool
+		expectError  bool // URL validation may fail for text queries
+		checkOutput  func(t *testing.T, stdout, stderr string)
+	}{
+		{
+			name:        "Competitive mode with explicit flag and valid URL",
+			url:         "https://github.com/features/copilot",
+			mode:        "competitive",
+			wantStage0:  true,
+			expectError: false,
+			checkOutput: func(t *testing.T, stdout, stderr string) {
+				if !strings.Contains(stdout, "Mode: competitive") {
+					t.Error("Expected competitive mode in output")
+				}
+				if !strings.Contains(stdout, "(explicit)") {
+					t.Error("Expected explicit mode indicator")
+				}
+				// Note: Will fail at Stage 0 if no API credentials, but mode is shown
+			},
+		},
+		{
+			name:        "General mode - should skip Stage 0",
+			url:         "https://example.com/article",
+			mode:        "general",
+			wantStage0:  false,
+			expectError: false,
+			checkOutput: func(t *testing.T, stdout, stderr string) {
+				if !strings.Contains(stdout, "Mode: general") {
+					t.Error("Expected general mode in output")
+				}
+				if strings.Contains(stdout, "Stage 0:") {
+					t.Error("General mode should not execute Stage 0")
+				}
+			},
+		},
+		{
+			name:        "Auto-detect general for URL input",
+			url:         "https://arxiv.org/abs/2601.20802",
+			mode:        "", // Auto-detect
+			wantStage0:  false,
+			expectError: false,
+			checkOutput: func(t *testing.T, stdout, stderr string) {
+				if !strings.Contains(stdout, "Mode: general") {
+					t.Error("Expected auto-detection to choose general mode for URL")
+				}
+				if !strings.Contains(stdout, "(auto-detected)") {
+					t.Error("Expected auto-detection indicator")
+				}
+				if strings.Contains(stdout, "Stage 0:") {
+					t.Error("General mode should not execute Stage 0")
+				}
+			},
+		},
+		{
+			name:        "Text query fails URL validation (known limitation)",
+			url:         "GitHub Copilot vs Cursor",
+			mode:        "competitive",
+			wantStage0:  false,
+			expectError: true, // Fails URL validation before mode detection
+			checkOutput: func(t *testing.T, stdout, stderr string) {
+				if !strings.Contains(stderr, "Error:") {
+					t.Error("Expected URL validation error in stderr")
+				}
+				// This is a known limitation: text queries fail URL validation
+				// TODO: Move URL validation after mode detection (Task 6)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			cfg := &config.Config{
+				OutputDir:    "/tmp/test-output",
+				Timeout:      60,
+				PollInterval: 10,
+				Stdout:       &stdout,
+				Stderr:       &stderr,
+			}
+
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Config validation failed: %v", err)
+			}
+
+			flags := &types.Flags{
+				Mode: tt.mode,
+			}
+
+			// Run pipeline (will fail at various stages, that's OK)
+			exitCode := Run(tt.url, flags, cfg)
+
+			// Check exit code
+			if tt.expectError && exitCode != 1 {
+				t.Errorf("Expected exit code 1 for validation error, got %d", exitCode)
+			}
+
+			// Check output
+			if tt.checkOutput != nil {
+				tt.checkOutput(t, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestExecutePipeline_ModeRouting(t *testing.T) {
+	tests := []struct {
+		name             string
+		mode             modes.Mode
+		url              string
+		expectStage0     bool
+		expectGeneral    bool
+	}{
+		{
+			name:          "Competitive mode triggers Stage 0",
+			mode:          modes.ModeCompetitive,
+			url:           "GitHub Copilot vs Cursor",
+			expectStage0:  true,
+			expectGeneral: false,
+		},
+		{
+			name:          "General mode skips Stage 0",
+			mode:          modes.ModeGeneral,
+			url:           "https://example.com/article",
+			expectStage0:  false,
+			expectGeneral: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// This test verifies mode routing logic
+			if tt.mode.IsCompetitive() != tt.expectStage0 {
+				t.Errorf("Mode %s: IsCompetitive() = %v, want %v",
+					tt.mode, tt.mode.IsCompetitive(), tt.expectStage0)
+			}
+
+			if (tt.mode == modes.ModeGeneral) != tt.expectGeneral {
+				t.Errorf("Mode %s: General check failed", tt.mode)
 			}
 		})
 	}
