@@ -92,12 +92,12 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 	// Send prompt using literal mode
 	if sessionSendPrompt != "" {
-		if err := tmux.SendPromptLiteral(sessionName, sessionSendPrompt); err != nil {
+		if err := tmux.SendMultiLinePromptSafe(sessionName, sessionSendPrompt); err != nil {
 			return fmt.Errorf("failed to send prompt: %w", err)
 		}
 		ui.PrintSuccess(fmt.Sprintf("Prompt sent to '%s' (%d chars)", sessionName, len(sessionSendPrompt)))
 	} else if sessionSendPromptFile != "" {
-		if err := tmux.SendPromptFromFile(sessionName, sessionSendPromptFile); err != nil {
+		if err := tmux.SendPromptFileSafe(sessionName, sessionSendPromptFile); err != nil {
 			return fmt.Errorf("failed to send prompt from file: %w", err)
 		}
 		ui.PrintSuccess(fmt.Sprintf("Prompt sent to '%s' from file: %s", sessionName, sessionSendPromptFile))

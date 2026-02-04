@@ -649,13 +649,13 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			// Send prompt if provided via --prompt or --prompt-file flags
 			if prompt != "" {
 				debug.Log("Sending prompt from --prompt flag")
-				if err := tmux.SendPromptLiteral(sessionName, prompt); err != nil {
+				if err := tmux.SendMultiLinePromptSafe(sessionName, prompt); err != nil {
 					log.Printf("Warning: failed to send prompt: %v", err)
 					fmt.Println("  • You can manually enter the prompt in the session")
 				}
 			} else if promptFile != "" {
 				debug.Log("Sending prompt from --prompt-file flag: %s", promptFile)
-				if err := tmux.SendPromptFromFile(sessionName, promptFile); err != nil {
+				if err := tmux.SendPromptFileSafe(sessionName, promptFile); err != nil {
 					log.Printf("Warning: failed to send prompt from file: %v", err)
 					fmt.Println("  • You can manually enter the prompt in the session")
 				}
