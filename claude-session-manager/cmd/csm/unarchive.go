@@ -46,8 +46,8 @@ Examples:
 
   # Skip confirmation prompt
   csm unarchive my-session --force`,
-	Args: cobra.ExactArgs(1),
-	RunE: runUnarchive,
+	Args:              cobra.ExactArgs(1),
+	RunE:              runUnarchive,
 	ValidArgsFunction: unarchiveCompletion,
 }
 

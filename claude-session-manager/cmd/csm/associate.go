@@ -17,10 +17,10 @@ import (
 )
 
 var (
-	claudeUUID            string
-	createNew             bool
-	updateTimestampOnly   bool
-	autoDetectOnly        bool
+	claudeUUID          string
+	createNew           bool
+	updateTimestampOnly bool
+	autoDetectOnly      bool
 )
 
 var associateCmd = &cobra.Command{
@@ -153,10 +153,10 @@ Examples:
 
 			if err := os.MkdirAll(manifestDir, 0700); err != nil {
 				ui.PrintError(err,
-				"Failed to create manifest directory",
-				"  • Check sessions directory: ls -ld "+sessionsDir+"\n"+
-					"  • Verify disk space: df -h "+sessionsDir+"\n"+
-					"  • Check permissions: ls -ld "+filepath.Dir(manifestDir))
+					"Failed to create manifest directory",
+					"  • Check sessions directory: ls -ld "+sessionsDir+"\n"+
+						"  • Verify disk space: df -h "+sessionsDir+"\n"+
+						"  • Check permissions: ls -ld "+filepath.Dir(manifestDir))
 				return err
 			}
 
@@ -169,11 +169,11 @@ Examples:
 				Lifecycle:     "", // Empty = active
 				Context: manifest.Context{
 					Project: func() string {
-					if wd, err := os.Getwd(); err == nil {
-						return wd
-					}
-					return ""
-				}(),
+						if wd, err := os.Getwd(); err == nil {
+							return wd
+						}
+						return ""
+					}(),
 				},
 				Claude: manifest.Claude{
 					UUID: "", // Will be populated below

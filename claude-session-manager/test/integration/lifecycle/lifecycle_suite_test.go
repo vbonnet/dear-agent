@@ -27,10 +27,10 @@ var _ = BeforeSuite(func() {
 	Expect(err).ToNot(HaveOccurred(), "csm command must be available for lifecycle tests")
 
 	// Setup test environment
-	testEnv = helpers.NewTestEnv()
+	testEnv = helpers.NewTestEnv(nil)
 
 	// Clean up any leftover test sessions from previous runs
-	err = testEnv.Cleanup()
+	err = testEnv.Cleanup(nil)
 	if err != nil {
 		GinkgoWriter.Printf("Warning: failed to cleanup before suite: %v\n", err)
 	}
@@ -39,7 +39,7 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	// Final cleanup
 	if testEnv != nil {
-		err := testEnv.Cleanup()
+		err := testEnv.Cleanup(nil)
 		if err != nil {
 			GinkgoWriter.Printf("Warning: failed to cleanup after suite: %v\n", err)
 		}

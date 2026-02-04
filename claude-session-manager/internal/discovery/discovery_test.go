@@ -208,8 +208,8 @@ func TestGetTmuxMapping(t *testing.T) {
 	uuid2 := uuid.New().String()
 
 	manifests := []struct {
-		sessionID string
-		tmuxName  string
+		sessionID  string
+		tmuxName   string
 		claudeUUID string
 	}{
 		{uuid1, "tmux-session-1", uuid.New().String()},

@@ -285,11 +285,13 @@ func (a *ClaudeAdapter) ImportConversation(data []byte, format ConversationForma
 // Capabilities returns Claude's feature capabilities
 func (a *ClaudeAdapter) Capabilities() Capabilities {
 	return Capabilities{
-		SupportsSlashCommands: true, // Claude CLI supports /rename, /clear, etc.
-		SupportsHooks:         false,
-		SupportsTools:         true,
-		SupportsVision:        true,
-		SupportsMultimodal:    false,
+		SupportsSlashCommands: true,  // Claude CLI supports /rename, /clear, etc.
+		SupportsHooks:         false, // AGM-level feature, not agent-specific
+		SupportsTools:         true,  // Claude supports MCP tools
+		SupportsVision:        true,  // Claude Sonnet/Opus support vision
+		SupportsMultimodal:    false, // No audio/video support yet
+		SupportsStreaming:     true,  // Claude CLI supports streaming
+		SupportsSystemPrompts: true,  // Claude supports system prompts
 		MaxContextWindow:      200000, // 200K tokens
 		ModelName:             "claude-sonnet-4.5",
 	}

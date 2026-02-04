@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	searchCache   *llm.SearchCache
+	searchCache      *llm.SearchCache
 	searchMaxResults int
 )
 

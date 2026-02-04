@@ -66,7 +66,7 @@ Examples:
 		if workflowListAgent != "" {
 			fmt.Printf("Workflows compatible with %s:\n\n", workflowListAgent)
 		} else {
-			fmt.Println("Available workflows:\n")
+			fmt.Println("Available workflows:")
 		}
 
 		// Display workflows

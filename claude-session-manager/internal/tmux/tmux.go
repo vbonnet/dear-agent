@@ -152,10 +152,10 @@ func AttachSession(name string) error {
 	// Build arguments for tmux attach
 	// DO NOT use -d (detached) flag - we want to attach interactively
 	args := []string{
-		"tmux",                 // argv[0] - program name
-		"-S", socketPath,       // Use isolated socket
-		"attach-session",       // Command
-		"-t", name,             // Target session
+		"tmux",           // argv[0] - program name
+		"-S", socketPath, // Use isolated socket
+		"attach-session", // Command
+		"-t", name,       // Target session
 	}
 
 	// Get current environment

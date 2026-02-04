@@ -366,10 +366,10 @@ func stripANSI(s string) string {
 
 // GeminiPromptPatterns are patterns that indicate Gemini is ready for input
 var GeminiPromptPatterns = []string{
-	">   Type your message",  // Gemini's input prompt text
-	"@path/to/file",          // Part of Gemini's input prompt
-	"╭─",                     // Box drawing characters from Gemini UI
-	"╰─",                     // Box drawing characters from Gemini UI
+	">   Type your message", // Gemini's input prompt text
+	"@path/to/file",         // Part of Gemini's input prompt
+	"╭─",                    // Box drawing characters from Gemini UI
+	"╰─",                    // Box drawing characters from Gemini UI
 }
 
 // WaitForGeminiPrompt waits for Gemini to return to the input prompt

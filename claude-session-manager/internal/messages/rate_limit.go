@@ -8,12 +8,12 @@ import (
 
 // RateLimiter implements token bucket algorithm for rate limiting
 type RateLimiter struct {
-	senderName       string
-	messagesPerMin   int
-	burst            int
-	tokens           int
-	lastRefill       time.Time
-	mu               sync.Mutex
+	senderName     string
+	messagesPerMin int
+	burst          int
+	tokens         int
+	lastRefill     time.Time
+	mu             sync.Mutex
 }
 
 // NewRateLimiter creates a new rate limiter

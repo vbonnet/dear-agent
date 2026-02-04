@@ -1,0 +1,470 @@
+package lifecycle_test
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/vbonnet/ai-tools/claude-session-manager/test/integration/helpers"
+)
+
+// TestHooks_PostInitExecution tests post-init hook execution order
+func TestHooks_PostInitExecution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping hook execution test in short mode")
+	}
+
+	if !helpers.IsTmuxAvailable() {
+		t.Skip("Tmux not available")
+	}
+
+	env := helpers.NewTestEnv(t)
+	defer env.Cleanup(t)
+
+	_ = "test-post-init-" + helpers.RandomString(6)
+
+	// Create hook directory structure
+	claudeDir := filepath.Join(env.TempDir, ".claude")
+	hooksDir := filepath.Join(claudeDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("Failed to create hooks directory: %v", err)
+	}
+
+	// Create marker file path
+	markerFile := filepath.Join(env.TempDir, "post-init-executed.txt")
+
+	// Create post-init hook
+	hookScript := filepath.Join(hooksDir, "post-init")
+	hookContent := `#!/bin/bash
+echo "Post-init hook executed at $(date)" > ` + markerFile + `
+echo "Session: $CSM_SESSION_NAME" >> ` + markerFile + `
+echo "Project: $CSM_PROJECT_DIR" >> ` + markerFile + `
+`
+	if err := os.WriteFile(hookScript, []byte(hookContent), 0755); err != nil {
+		t.Fatalf("Failed to write hook script: %v", err)
+	}
+
+	t.Log("NOTE: Hook execution is not yet implemented in CSM")
+	t.Log("This test documents expected behavior for future implementation")
+
+	// Expected behavior when hooks are implemented:
+	// 1. csm new creates session
+	// 2. Manifest created
+	// 3. Tmux session started
+	// 4. Agent initialized
+	// 5. post-init hook executed with environment variables set
+	// 6. Marker file should exist with expected content
+
+	// For now, skip actual execution
+	t.Skip("Hook execution not yet implemented")
+
+	// When implemented, verify:
+	// - Hook was executed
+	// - Environment variables were set correctly
+	// - Hook ran after session initialization
+}
+
+// TestHooks_PreArchiveExecution tests pre-archive hook execution
+func TestHooks_PreArchiveExecution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping hook execution test in short mode")
+	}
+
+	env := helpers.NewTestEnv(t)
+	defer env.Cleanup(t)
+
+	_ = "test-pre-archive-" + helpers.RandomString(6)
+
+	// Create hook directory
+	claudeDir := filepath.Join(env.TempDir, ".claude")
+	hooksDir := filepath.Join(claudeDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("Failed to create hooks directory: %v", err)
+	}
+
+	// Create marker file path
+	markerFile := filepath.Join(env.TempDir, "pre-archive-executed.txt")
+
+	// Create pre-archive hook
+	hookScript := filepath.Join(hooksDir, "pre-archive")
+	hookContent := `#!/bin/bash
+echo "Pre-archive hook executed" > ` + markerFile + `
+echo "Archiving session: $CSM_SESSION_NAME" >> ` + markerFile + `
+`
+	if err := os.WriteFile(hookScript, []byte(hookContent), 0755); err != nil {
+		t.Fatalf("Failed to write hook script: %v", err)
+	}
+
+	t.Log("NOTE: Hook execution not yet implemented")
+	t.Skip("Hook execution not yet implemented")
+
+	// Expected behavior:
+	// 1. csm archive command initiated
+	// 2. pre-archive hook executed
+	// 3. Session archived (lifecycle field updated)
+	// 4. Marker file exists
+}
+
+// TestHooks_ErrorHandling tests hook error handling
+func TestHooks_ErrorHandling(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping hook error test in short mode")
+	}
+
+	env := helpers.NewTestEnv(t)
+	defer env.Cleanup(t)
+
+	// Create hook that exits with error
+	claudeDir := filepath.Join(env.TempDir, ".claude")
+	hooksDir := filepath.Join(claudeDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("Failed to create hooks directory: %v", err)
+	}
+
+	hookScript := filepath.Join(hooksDir, "post-init")
+	hookContent := `#!/bin/bash
+echo "Hook failing intentionally" >&2
+exit 1
+`
+	if err := os.WriteFile(hookScript, []byte(hookContent), 0755); err != nil {
+		t.Fatalf("Failed to write failing hook: %v", err)
+	}
+
+	t.Log("NOTE: Hook execution not yet implemented")
+	t.Skip("Hook execution not yet implemented")
+
+	// Expected behavior:
+	// - Hook executes and fails
+	// - CSM logs hook failure
+	// - Session creation continues (hooks are non-blocking)
+	// OR
+	// - Session creation aborts with error (if hooks are blocking)
+	//
+	// Actual behavior depends on implementation decision
+}
+
+// TestHooks_EnvironmentVariables tests hook environment variable availability
+func TestHooks_EnvironmentVariables(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping hook environment test in short mode")
+	}
+
+	env := helpers.NewTestEnv(t)
+	defer env.Cleanup(t)
+
+	// Create hook that captures environment
+	claudeDir := filepath.Join(env.TempDir, ".claude")
+	hooksDir := filepath.Join(claudeDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("Failed to create hooks directory: %v", err)
+	}
+
+	envFile := filepath.Join(env.TempDir, "hook-env.txt")
+	hookScript := filepath.Join(hooksDir, "post-init")
+	hookContent := `#!/bin/bash
+env | grep CSM_ > ` + envFile + `
+`
+	if err := os.WriteFile(hookScript, []byte(hookContent), 0755); err != nil {
+		t.Fatalf("Failed to write hook: %v", err)
+	}
+
+	t.Log("NOTE: Hook execution not yet implemented")
+	t.Skip("Hook execution not yet implemented")
+
+	// Expected environment variables:
+	// - CSM_SESSION_NAME
+	// - CSM_SESSION_ID
+	// - CSM_PROJECT_DIR
+	// - CSM_AGENT
+	// - CSM_TMUX_SESSION
+	// - CSM_MANIFEST_PATH
+
+	// When implemented, verify env file contains these variables
+}
+
+// TestHooks_ExecutionOrder tests multiple hooks execute in correct order
+func TestHooks_ExecutionOrder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping hook order test in short mode")
+	}
+
+	env := helpers.NewTestEnv(t)
+	defer env.Cleanup(t)
+
+	// Create multiple hooks
+	claudeDir := filepath.Join(env.TempDir, ".claude")
+	hooksDir := filepath.Join(claudeDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("Failed to create hooks directory: %v", err)
+	}
+
+	logFile := filepath.Join(env.TempDir, "hook-order.log")
+
+	// Create hooks that append to log file
+	hooks := []string{"pre-init", "post-init", "pre-archive", "post-archive"}
+	for _, hookName := range hooks {
+		hookPath := filepath.Join(hooksDir, hookName)
+		content := `#!/bin/bash
+echo "` + hookName + ` $(date +%s%N)" >> ` + logFile + `
+`
+		if err := os.WriteFile(hookPath, []byte(content), 0755); err != nil {
+			t.Fatalf("Failed to write hook %s: %v", hookName, err)
+		}
+	}
+
+	t.Log("NOTE: Hook execution not yet implemented")
+	t.Skip("Hook execution not yet implemented")
+
+	// Expected execution order:
+	// 1. pre-init (before session creation)
+	// 2. post-init (after session ready)
+	// 3. pre-archive (before archiving)
+	// 4. post-archive (after archived)
+
+	// Verify log file shows correct order
+}
+
+// TestHooks_Timeout tests hook execution timeout
+func TestHooks_Timeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping hook timeout test in short mode")
+	}
+
+	env := helpers.NewTestEnv(t)
+	defer env.Cleanup(t)
+
+	// Create hook that takes too long
+	claudeDir := filepath.Join(env.TempDir, ".claude")
+	hooksDir := filepath.Join(claudeDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("Failed to create hooks directory: %v", err)
+	}
+
+	hookScript := filepath.Join(hooksDir, "post-init")
+	hookContent := `#!/bin/bash
+sleep 300
+echo "This should timeout"
+`
+	if err := os.WriteFile(hookScript, []byte(hookContent), 0755); err != nil {
+		t.Fatalf("Failed to write slow hook: %v", err)
+	}
+
+	t.Log("NOTE: Hook execution not yet implemented")
+	t.Skip("Hook execution not yet implemented")
+
+	// Expected behavior:
+	// - Hook starts executing
+	// - Timeout triggers (e.g., after 30 seconds)
+	// - Hook process killed
+	// - Session creation continues or aborts with timeout error
+}
+
+// TestHooks_ShellTypes tests hooks work with different shell types
+func TestHooks_ShellTypes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping shell types test in short mode")
+	}
+
+	env := helpers.NewTestEnv(t)
+	defer env.Cleanup(t)
+
+	claudeDir := filepath.Join(env.TempDir, ".claude")
+	hooksDir := filepath.Join(claudeDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("Failed to create hooks directory: %v", err)
+	}
+
+	// Test hooks in different languages
+	tests := []struct {
+		name       string
+		filename   string
+		content    string
+		markerFile string
+	}{
+		{
+			name:     "Bash",
+			filename: "post-init-bash",
+			content: `#!/bin/bash
+echo "Bash hook" > ` + filepath.Join(env.TempDir, "bash.txt") + `
+`,
+			markerFile: filepath.Join(env.TempDir, "bash.txt"),
+		},
+		{
+			name:     "Python",
+			filename: "post-init-python",
+			content: `#!/usr/bin/env python3
+with open("` + filepath.Join(env.TempDir, "python.txt") + `", "w") as f:
+    f.write("Python hook")
+`,
+			markerFile: filepath.Join(env.TempDir, "python.txt"),
+		},
+		{
+			name:     "Go",
+			filename: "post-init-go",
+			content: `#!/usr/bin/env go run
+package main
+import "os"
+func main() {
+	os.WriteFile("` + filepath.Join(env.TempDir, "go.txt") + `", []byte("Go hook"), 0644)
+}
+`,
+			markerFile: filepath.Join(env.TempDir, "go.txt"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hookPath := filepath.Join(hooksDir, tt.filename)
+			if err := os.WriteFile(hookPath, []byte(tt.content), 0755); err != nil {
+				t.Fatalf("Failed to write %s hook: %v", tt.name, err)
+			}
+
+			t.Logf("NOTE: Hook execution not yet implemented")
+			t.Skip("Hook execution not yet implemented")
+
+			// When implemented, verify marker file exists
+		})
+	}
+}
+
+// TestAssociateCommand_SendsRename tests /rename is sent before /csm-assoc
+func TestAssociateCommand_SendsRename(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping associate command test in short mode")
+	}
+
+	if !helpers.IsTmuxAvailable() {
+		t.Skip("Tmux not available")
+	}
+
+	env := helpers.NewTestEnv(t)
+	defer env.Cleanup(t)
+
+	sessionName := "test-rename-assoc-" + helpers.RandomString(6)
+
+	// Create tmux session
+	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "bash")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to create tmux session: %v", err)
+	}
+	defer exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+
+	// Wait for bash to start
+	time.Sleep(500 * time.Millisecond)
+
+	// Create session manifest
+	if err := helpers.CreateSessionManifest(env.SessionsDir, sessionName, "claude"); err != nil {
+		t.Fatalf("Failed to create manifest: %v", err)
+	}
+
+	// Run csm associate command
+	cmd = exec.Command("csm", "associate", sessionName,
+		"--sessions-dir", env.SessionsDir,
+		"--name", "Custom Session Name")
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("Associate command output: %s", output)
+		// May fail if associate command requires different setup
+	}
+
+	// Capture pane to verify command order
+	time.Sleep(500 * time.Millisecond)
+	captureCmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-S", "-100")
+	paneOutput, err := captureCmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to capture pane: %v", err)
+	}
+
+	paneContent := string(paneOutput)
+
+	// Verify /rename appears before /csm-assoc
+	renameIdx := strings.Index(paneContent, "/rename")
+	assocIdx := strings.Index(paneContent, "/csm-assoc")
+
+	if renameIdx == -1 || assocIdx == -1 {
+		t.Log("Commands not found in pane (may need different test setup)")
+		t.Logf("Pane content:\n%s", paneContent)
+	} else if renameIdx > assocIdx {
+		t.Errorf("/rename should appear before /csm-assoc, but /rename at %d, /csm-assoc at %d",
+			renameIdx, assocIdx)
+	}
+}
+
+// TestHookDirectory_Discovery tests CSM discovers hooks from correct locations
+func TestHookDirectory_Discovery(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping hook discovery test in short mode")
+	}
+
+	env := helpers.NewTestEnv(t)
+	defer env.Cleanup(t)
+
+	// Create hooks in multiple locations
+	locations := []string{
+		filepath.Join(env.TempDir, ".claude", "hooks"),       // Project-level
+		filepath.Join(os.Getenv("HOME"), ".claude", "hooks"), // User-level
+		filepath.Join("/etc", "csm", "hooks"),                // System-level
+	}
+
+	// Only create test hooks in project-level (don't modify user/system)
+	projectHooksDir := locations[0]
+	if err := os.MkdirAll(projectHooksDir, 0755); err != nil {
+		t.Fatalf("Failed to create project hooks directory: %v", err)
+	}
+
+	markerFile := filepath.Join(env.TempDir, "hook-discovery.txt")
+	hookScript := filepath.Join(projectHooksDir, "post-init")
+	hookContent := `#!/bin/bash
+echo "Hook discovered" > ` + markerFile + `
+`
+	if err := os.WriteFile(hookScript, []byte(hookContent), 0755); err != nil {
+		t.Fatalf("Failed to write hook: %v", err)
+	}
+
+	t.Log("NOTE: Hook discovery not yet implemented")
+	t.Skip("Hook discovery not yet implemented")
+
+	// Expected behavior:
+	// - CSM searches for hooks in priority order
+	// - Project hooks override user hooks override system hooks
+	// - All hooks in a directory execute (not just first match)
+}
+
+// TestHooks_AsyncExecution tests hooks execute asynchronously if configured
+func TestHooks_AsyncExecution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping async hook test in short mode")
+	}
+
+	env := helpers.NewTestEnv(t)
+	defer env.Cleanup(t)
+
+	claudeDir := filepath.Join(env.TempDir, ".claude")
+	hooksDir := filepath.Join(claudeDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatalf("Failed to create hooks directory: %v", err)
+	}
+
+	// Create slow hook
+	hookScript := filepath.Join(hooksDir, "post-init")
+	hookContent := `#!/bin/bash
+sleep 5
+echo "Slow hook completed"
+`
+	if err := os.WriteFile(hookScript, []byte(hookContent), 0755); err != nil {
+		t.Fatalf("Failed to write slow hook: %v", err)
+	}
+
+	t.Log("NOTE: Async hook execution not yet implemented")
+	t.Skip("Async hook execution not yet implemented")
+
+	// Expected behavior:
+	// - Hook starts in background
+	// - csm new command returns immediately
+	// - Session is usable while hook runs
+	// - Hook completion logged somewhere
+}

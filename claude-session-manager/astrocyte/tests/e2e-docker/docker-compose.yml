@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  astrocyte-test:
+    build:
+      context: ../../..  # Build from claude-session-manager root
+      dockerfile: astrocyte/tests/e2e-docker/Dockerfile
+    image: astrocyte-e2e-test:latest
+    container_name: astrocyte-e2e-test
+    environment:
+      - ASTROCYTE_TEST_MODE=true
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount test results for inspection
+      - ./test-results:/home/testuser/test-results
+    command: /bin/bash /tests/run-all-tests.sh
+
+  # Optional: Interactive debugging container
+  astrocyte-debug:
+    build:
+      context: ../../..
+      dockerfile: astrocyte/tests/e2e-docker/Dockerfile
+    image: astrocyte-e2e-test:latest
+    container_name: astrocyte-e2e-debug
+    environment:
+      - ASTROCYTE_TEST_MODE=true
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./test-results:/home/testuser/test-results
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+    profiles:
+      - debug

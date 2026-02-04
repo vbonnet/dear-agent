@@ -1,0 +1,4 @@
+● Task completed successfully
+
+Ready for next command
+user@testhost:~/src$

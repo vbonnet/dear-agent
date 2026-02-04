@@ -41,7 +41,7 @@ Examples:
   csm fix --clear old-session  # Remove UUID association`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Create detector and associator
-		historyPath := ""  // Use default ~/.claude/history.jsonl
+		historyPath := "" // Use default ~/.claude/history.jsonl
 		detector := detection.NewDetector(historyPath, 5*time.Minute)
 		parser := history.NewParser(historyPath)
 		associator := fix.NewAssociator(detector, parser)

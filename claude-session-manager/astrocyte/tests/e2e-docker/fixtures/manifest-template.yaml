@@ -1,0 +1,7 @@
+sessionId: "test-session-{SESSION_NAME}"
+createdAt: "2026-02-03T15:00:00Z"
+lastActiveAt: "2026-02-03T15:00:00Z"
+lifecycle: "active"
+metadata:
+  purpose: "E2E testing for astrocyte"
+  project: "astrocyte-e2e-tests"

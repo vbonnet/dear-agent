@@ -56,10 +56,10 @@ func init() {
 
 // CaptureResult represents captured output
 type CaptureResult struct {
-	Name        string    `json:"name"`
-	Lines       []string  `json:"lines"`
-	Count       int       `json:"count"`
-	CapturedAt  time.Time `json:"captured_at"`
+	Name       string    `json:"name"`
+	Lines      []string  `json:"lines"`
+	Count      int       `json:"count"`
+	CapturedAt time.Time `json:"captured_at"`
 }
 
 func runTestCapture(cmd *cobra.Command, args []string) error {

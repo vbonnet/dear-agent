@@ -101,7 +101,6 @@ func (a *ClaudeAdapter) SendMessage(ctx context.Context, req SendMessageRequest)
 	}, nil
 }
 
-
 // GetHistory retrieves conversation history
 func (a *ClaudeAdapter) GetHistory(ctx context.Context, sessionID string) ([]Message, error) {
 	a.mu.RLock()

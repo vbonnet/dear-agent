@@ -67,6 +67,13 @@ func (g *HandoffPromptGenerator) DeserializeContext(data string) (*HandoffContex
 
 // registerTemplates loads all prompt templates.
 func (g *HandoffPromptGenerator) registerTemplates() error {
+	// Define custom template functions
+	funcMap := template.FuncMap{
+		"add": func(a, b int) int {
+			return a + b
+		},
+	}
+
 	templates := map[string]string{
 		"architect_to_implementer": architectToImplementerTemplate,
 		"implementer_to_architect": implementerToArchitectTemplate,
@@ -74,7 +81,7 @@ func (g *HandoffPromptGenerator) registerTemplates() error {
 	}
 
 	for name, tmplStr := range templates {
-		tmpl, err := template.New(name).Parse(tmplStr)
+		tmpl, err := template.New(name).Funcs(funcMap).Parse(tmplStr)
 		if err != nil {
 			return fmt.Errorf("failed to parse template %s: %w", name, err)
 		}
@@ -228,13 +235,3 @@ const genericHandoffTemplate = `# Mode Transition: {{.FromMode}} → {{.ToMode}}
 {{end}}{{else}}No specific next steps{{end}}{{end}}
 `
 
-// Template helper functions
-func init() {
-	// Register custom template functions
-	funcMap := template.FuncMap{
-		"add": func(a, b int) int {
-			return a + b
-		},
-	}
-	_ = funcMap
-}

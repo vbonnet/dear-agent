@@ -40,6 +40,7 @@ Complete reference for AGM (AI/Agent Session Manager) CLI commands.
   - [agm sync](#agm-sync)
   - [agm logs](#agm-logs)
   - [agm unlock](#agm-unlock)
+  - [agm migrate](#agm-migrate)
 - [Testing](#testing)
   - [agm test](#agm-test)
 - [Utilities](#utilities)
@@ -432,6 +433,15 @@ agm send research --prompt "Analyze the following:
 1. Authentication flow
 2. Error handling
 3. Security concerns"
+
+# Interrupt and redirect stuck session
+agm send my-session --prompt "Stop and list all files in current directory"
+
+# Send code review request
+agm send code-review --prompt "Review src/auth/login.py for security issues"
+
+# Send research task
+agm send research-task --prompt-file ~/tasks/api-analysis.md
 ```
 
 **Features**:
@@ -444,8 +454,16 @@ agm send research --prompt "Analyze the following:
 - Automated recovery of stuck sessions
 - Sending diagnosis prompts
 - Batch message delivery
+- Automated code review requests
+- Research task automation
+- CI/CD integration for AI-assisted analysis
 
 **Requirements**: Session must be running (active tmux session)
+
+**Tips**:
+- Use `--prompt-file` for complex, multi-line prompts
+- Keep prompts under 10KB for reliability
+- Verify session is active with `agm list` before sending
 
 ---
 
@@ -465,11 +483,20 @@ Reject permission prompt with custom reason.
 # Reject with inline reason
 agm reject my-session --reason "Use Read tool instead of cat"
 
-# Reject with violation prompt
+# Reject with violation prompt from file
 agm reject my-session --reason-file ~/prompts/VIOLATION-PROMPTS.md
 
 # Reject with detailed feedback
 agm reject task --reason "Please use absolute paths and separate tool calls"
+
+# Reject with coding standards
+agm reject code-session --reason "Use Edit tool, not sed command via Bash"
+
+# Reject with security guidance
+agm reject review-task --reason "Do not read .env files. Request user to provide required values."
+
+# Reject with process guidance
+agm reject research --reason "Create separate Read tool calls instead of using cat. One file per call."
 ```
 
 **What it does**:
@@ -726,18 +753,34 @@ Backup and restore session manifests.
 **Usage**: `agm backup <subcommand>`
 
 **Subcommands**:
-- `list` - List available backups
-- `restore <backup-id>` - Restore from backup
+- `list <identifier>` - List available backups for a session
+- `restore <identifier> <backup-number>` - Restore from specific backup
+
+**Identifier Types**:
+- Session UUID (full or partial): `c4eb298c`
+- Tmux session name: `claude-1`
+- Project path pattern: `workspace-design`
 
 **Examples**:
 
 ```bash
-# List backups
-agm backup list
+# List backups for a session
+agm backup list c4eb298c              # By UUID prefix
+agm backup list claude-1              # By tmux name
+agm backup list workspace-design      # By project path
 
 # Restore specific backup
-agm backup restore 2026-02-03-1430
+agm backup restore c4eb298c 3         # Restore backup #3 by UUID
+agm backup restore claude-1 2         # Restore backup #2 by tmux name
 ```
+
+**What it does**:
+1. Lists numbered backups (`.manifest.1`, `.manifest.2`, etc.)
+2. Shows full path to each backup file
+3. Restores selected backup with confirmation
+4. Creates safety backup of current manifest before restoration
+
+**Backup Location**: Backups stored in `.backups/` subdirectory within session directory
 
 ---
 
@@ -765,26 +808,58 @@ Session log management and analysis.
 **Usage**: `agm logs <subcommand>`
 
 **Subcommands**:
-- `clean` - Clean old logs
+- `clean` - Remove old message log files
 - `stats` - Show log statistics
-- `thread <session>` - Show session thread
-- `query <pattern>` - Query logs
+- `thread <message-id>` - Show conversation thread for a message
+- `query` - Search message logs
+
+**Log Storage**: `~/.csm/logs/messages/` as daily JSONL files (format: `YYYY-MM-DD.jsonl`)
 
 **Examples**:
 
 ```bash
-# Clean old logs
+# Clean logs older than 90 days (default)
 agm logs clean
 
-# Show statistics
+# Clean logs older than 30 days
+agm logs clean --older-than 30
+
+# Show log statistics
 agm logs stats
 
-# Show session thread
-agm logs thread my-session
+# Show conversation thread for a message
+agm logs thread 1738612345678-sender-001
 
-# Query logs
-agm logs query "error"
+# Query logs by sender
+agm logs query --sender astrocyte
+
+# Query logs by date
+agm logs query --since 2026-02-01
+
+# Combine filters
+agm logs query --sender csm-send --since 2026-02-03
 ```
+
+**Flags**:
+- `clean`:
+  - `--older-than <days>` - Delete logs older than N days (default: 90)
+- `query`:
+  - `--sender <name>` - Filter by sender name
+  - `--since <date>` - Filter by date (YYYY-MM-DD format)
+
+**Statistics Display**:
+- Total log files
+- Total messages logged
+- Date range (oldest to newest)
+- Disk usage (formatted: MB, GB, etc.)
+- Log directory location
+
+**Use Cases**:
+- Audit message history
+- Debug communication issues
+- Track session activity
+- Clean up old logs to free disk space
+- Search for specific messages or senders
 
 ---
 
@@ -810,6 +885,59 @@ agm unlock my-session
 
 ---
 
+### agm migrate
+
+Migrate sessions to unified storage structure.
+
+**Usage**: `agm migrate --to-unified-storage [flags]`
+
+**Flags**:
+- `--dry-run` - Preview changes without modifying files
+- `--force` - Overwrite existing destinations
+- `--workspace <name>` - Migrate only specified workspace (e.g., 'oss')
+
+**What it does**:
+1. Discovers sessions across all workspaces (`~/src/ws/*/sessions/`)
+2. Moves manifests and conversations to `~/src/sessions/{session-name}/`
+3. Converts conversation formats (HTML → JSONL)
+4. Creates audit log of all operations
+5. Preserves old directories for 30 days (rollback safety)
+
+**Examples**:
+
+```bash
+# Preview migration (no changes)
+agm migrate --to-unified-storage --dry-run
+
+# Migrate all sessions
+agm migrate --to-unified-storage
+
+# Migrate only 'oss' workspace sessions
+agm migrate --to-unified-storage --workspace=oss
+
+# Force overwrite of existing destinations
+agm migrate --to-unified-storage --force
+```
+
+**Migration Report**:
+- Succeeded: Number of successfully migrated sessions
+- Skipped: Already migrated (use --force to overwrite)
+- Failed: Sessions with errors (detailed error messages)
+
+**Use Cases**:
+- Consolidate sessions from multiple workspace directories
+- Transition to unified storage layout
+- Clean up fragmented session storage
+- Standardize session organization
+
+**Safety Features**:
+- Dry-run mode for previewing changes
+- Automatic backup of existing manifests
+- Detailed error reporting
+- 30-day preservation of old directories
+
+---
+
 ## Testing
 
 ### agm test
@@ -819,10 +947,16 @@ Testing utilities for AGM development and debugging.
 **Usage**: `agm test <subcommand>`
 
 **Subcommands**:
-- `create <name>` - Create isolated test session
+- `create <name>` - Create isolated test session with Claude started
 - `send <name> <command>` - Send commands to test session
 - `capture <name>` - Capture output from test session
-- `cleanup <name>` - Cleanup test session
+- `cleanup <name>` - Cleanup test sessions
+
+**Test Isolation**:
+- Uses `/tmp/csm-test-*` directories for state
+- Uses `csm-test-*` tmux sessions
+- Completely isolated from production (`~/.claude-sessions/`)
+- Clean environment for testing AGM functionality
 
 **Examples**:
 
@@ -830,22 +964,26 @@ Testing utilities for AGM development and debugging.
 # Create test session
 agm test create my-test
 
-# Send commands
+# Send commands to test session
 agm test send my-test "agm associate --create test-project"
+agm test send my-test "agm list"
 
-# Capture output
+# Capture output from test session
+agm test capture my-test
 agm test capture my-test --lines 50
 
-# Cleanup
+# Cleanup test session
 agm test cleanup my-test
 ```
 
-**Test Isolation**:
-- Uses `/tmp/csm-test-*` directories
-- Uses `csm-test-*` tmux sessions
-- Completely isolated from production (`~/.claude-sessions/`)
+**Use Cases**:
+- Test AGM functionality without affecting production sessions
+- Automate testing workflows
+- Debug session lifecycle
+- Validate command behavior
+- Integration testing
 
-**Common Patterns**:
+**Common Testing Patterns**:
 
 ```bash
 # Test session lifecycle
@@ -854,11 +992,24 @@ agm test send lifecycle-test "agm new test-session --project ~/projects/test"
 agm test capture lifecycle-test
 agm test cleanup lifecycle-test
 
+# Test session association
+agm test create assoc-test
+agm test send assoc-test "agm associate --create my-project"
+agm test send assoc-test "agm associate --status"
+agm test capture assoc-test
+agm test cleanup assoc-test
+
 # JSON output for automation
 agm test create api-test --json
 agm test send api-test "agm list" --json
 agm test cleanup api-test --json
 ```
+
+**Best Practices**:
+- Always cleanup test sessions after use
+- Use descriptive test session names
+- Isolate tests to prevent interference
+- Use `--json` flag for automation scripts
 
 ---
 
@@ -989,7 +1140,7 @@ agm research
 ### Multi-Agent Workflow
 
 ```bash
-# Create sessions with different agents
+# Create sessions with different agents for different tasks
 agm new --agent claude code-task
 agm new --agent gemini research-task
 agm new --agent gpt brainstorm-task
@@ -1002,6 +1153,38 @@ agm resume code-task
 agm resume research-task
 ```
 
+### Code Review Workflow
+
+```bash
+# Create session for code review
+agm new --agent claude code-review-auth-refactor
+
+# Send code for review
+agm send code-review-auth-refactor --prompt "Review the authentication refactor in src/auth/"
+
+# Resume to see results
+agm resume code-review-auth-refactor
+
+# Archive when done
+agm archive code-review-auth-refactor
+```
+
+### Research and Documentation Workflow
+
+```bash
+# Create research session with Gemini (1M context)
+agm new --agent gemini --workflow deep-research api-research
+
+# Send URLs for research
+agm send api-research --prompt "Analyze these API design patterns: https://..."
+
+# Resume to review findings
+agm resume api-research
+
+# Search later if archived
+agm search "API design patterns"
+```
+
 ### Cleanup Workflow
 
 ```bash
@@ -1011,7 +1194,7 @@ agm list --all
 # Archive completed sessions
 agm archive old-task
 
-# Interactive cleanup
+# Interactive cleanup (recommended)
 agm clean
 
 # Or manual cleanup
@@ -1038,19 +1221,70 @@ agm fix --all
 
 # Unlock stuck session
 agm unlock my-session
+
+# View logs for troubleshooting
+agm logs stats
+agm logs query --sender csm-send --since 2026-02-01
 ```
 
 ### Search and Restore Workflow
 
 ```bash
-# Search for archived session
+# Search for archived session by semantic meaning
 agm search "OAuth integration"
+agm search "that debugging session about timeouts"
 
 # Or use pattern matching
 agm unarchive *oauth*
+agm unarchive "session-2026*"
 
 # Resume restored session
 agm resume oauth-task
+```
+
+### Backup and Recovery Workflow
+
+```bash
+# List backups for a session
+agm backup list my-session
+
+# Restore from backup if needed
+agm backup restore my-session 3
+
+# Verify restored state
+agm resume my-session
+```
+
+### Migration Workflow
+
+```bash
+# Preview migration from workspace directories
+agm migrate --to-unified-storage --dry-run
+
+# Migrate specific workspace
+agm migrate --to-unified-storage --workspace=oss
+
+# Full migration
+agm migrate --to-unified-storage
+
+# Verify migration
+agm list --all
+```
+
+### Automated Session Management
+
+```bash
+# Create session with initial prompt
+agm new task --agent claude --prompt "Review security vulnerabilities"
+
+# Send follow-up commands
+agm send task --prompt-file ~/prompts/security-checklist.txt
+
+# Reject permission with guidance
+agm reject task --reason "Use Read tool instead of cat command"
+
+# Kill session when done
+agm kill task
 ```
 
 ---
@@ -1208,5 +1442,5 @@ agm version
 
 ---
 
-**Last Updated**: 2026-02-03
+**Last Updated**: 2026-02-04
 **AGM Version**: 3.0

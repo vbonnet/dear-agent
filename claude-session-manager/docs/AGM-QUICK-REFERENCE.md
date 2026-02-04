@@ -107,11 +107,16 @@ agm new --agent gemini --workflow deep-research url-task
 
 # Backup/Restore
 agm backup list my-session
-agm backup restore my-session 1
+agm backup restore my-session 3
 
 # Logs
 agm logs stats
-agm logs thread my-session
+agm logs clean --older-than 30
+agm logs query --sender astrocyte --since 2026-02-01
+
+# Migration
+agm migrate --to-unified-storage --dry-run
+agm migrate --to-unified-storage --workspace=oss
 ```
 
 ---
@@ -236,4 +241,4 @@ agm kill my-session
 
 ---
 
-**Version**: 3.0 | **Updated**: 2026-02-03
+**Version**: 3.0 | **Updated**: 2026-02-04

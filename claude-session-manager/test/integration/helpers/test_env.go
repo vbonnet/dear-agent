@@ -10,34 +10,41 @@ import (
 // TestEnv provides test environment configuration and utilities
 type TestEnv struct {
 	SessionsDir    string          // Temporary sessions directory for tests
+	TempDir        string          // Temporary directory for test files
 	TmuxPrefix     string          // Prefix for test sessions (csm-test-)
 	Claude         ClaudeInterface // Claude implementation (mock or real)
 	CurrentSession string          // Current test session name
+	t              interface{}     // Testing context (can be *testing.T or *testing.B)
 }
 
 // NewTestEnv creates a new test environment
-func NewTestEnv() *TestEnv {
-	tmpDir := filepath.Join(os.TempDir(), "csm-test-sessions")
+func NewTestEnv(t interface{}) *TestEnv {
+	tmpDir := filepath.Join(os.TempDir(), fmt.Sprintf("csm-test-%d", time.Now().UnixNano()))
 	os.MkdirAll(tmpDir, 0700)
 
+	sessionsDir := filepath.Join(tmpDir, "sessions")
+	os.MkdirAll(sessionsDir, 0700)
+
 	return &TestEnv{
-		SessionsDir: tmpDir,
+		SessionsDir: sessionsDir,
+		TempDir:     tmpDir,
 		TmuxPrefix:  "csm-test-",
 		Claude:      NewClaudeForTest(),
+		t:           t,
 	}
 }
 
 // Cleanup removes all test sessions and manifest directories
-func (e *TestEnv) Cleanup() error {
+func (e *TestEnv) Cleanup(t interface{}) error {
 	// Kill all csm-test-* tmux sessions
 	sessions, _ := ListTmuxSessions(e.TmuxPrefix)
 	for _, session := range sessions {
 		KillTmuxSession(session)
 	}
 
-	// Remove sessions directory
-	if err := os.RemoveAll(e.SessionsDir); err != nil {
-		return fmt.Errorf("failed to cleanup sessions directory: %w", err)
+	// Remove temp directory
+	if err := os.RemoveAll(e.TempDir); err != nil {
+		return fmt.Errorf("failed to cleanup temp directory: %w", err)
 	}
 
 	return nil

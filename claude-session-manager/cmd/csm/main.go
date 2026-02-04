@@ -20,18 +20,18 @@ import (
 )
 
 var (
-	cfg              *config.Config
-	cfgFile          string
-	sessionsDir      string
-	logLevel         string
-	debugMode        bool
-	directory        string
-	timeout          time.Duration
-	skipHealthCheck  bool
-	noColor          bool
-	screenReader     bool
+	cfg               *config.Config
+	cfgFile           string
+	sessionsDir       string
+	logLevel          string
+	debugMode         bool
+	directory         string
+	timeout           time.Duration
+	skipHealthCheck   bool
+	noColor           bool
+	screenReader      bool
 	globalHealthCheck *tmux.HealthChecker
-	tmuxClient       session.TmuxInterface // Injected dependency for testing
+	tmuxClient        session.TmuxInterface // Injected dependency for testing
 )
 
 var rootCmd = &cobra.Command{
@@ -58,7 +58,7 @@ Examples:
 
 Global Flags:
   -C, --directory <path>    Working directory (default: current directory)`,
-	RunE:              runDefaultCommand,
+	RunE: runDefaultCommand,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Load configuration first
 		var err error
@@ -346,10 +346,12 @@ func runNewSessionFlow(suggestedName *string, uiCfg *ui.Config) error {
 // This function is used for testing to inject mock implementations.
 //
 // Parameters:
-//   tmux - TmuxInterface implementation (use session.NewRealTmux() for production)
+//
+//	tmux - TmuxInterface implementation (use session.NewRealTmux() for production)
 //
 // Returns:
-//   error - Command execution error (nil on success)
+//
+//	error - Command execution error (nil on success)
 func ExecuteWithDeps(tmux session.TmuxInterface) error {
 	tmuxClient = tmux
 	return rootCmd.Execute()

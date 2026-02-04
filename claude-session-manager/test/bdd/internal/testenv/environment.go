@@ -18,7 +18,7 @@ type Environment struct {
 	ClaudeAdapter  mock.Adapter
 	GeminiAdapter  mock.Adapter
 	GPTAdapter     mock.Adapter
-	CurrentAdapter mock.Adapter             // Currently selected adapter
+	CurrentAdapter mock.Adapter // Currently selected adapter
 	CurrentSession *mock.Session
 	Sessions       map[string]*mock.Session // Track all sessions by name
 	LastResponse   *mock.Response

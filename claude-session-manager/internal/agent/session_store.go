@@ -2,17 +2,11 @@ package agent
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
-)
-
-// Common errors
-var (
-	ErrSessionNotFound = errors.New("session not found")
 )
 
 // SessionStore manages the mapping between SessionIDs and tmux session names.

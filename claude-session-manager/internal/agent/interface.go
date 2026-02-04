@@ -187,6 +187,14 @@ type Capabilities struct {
 	// Future-proofing for next-gen models.
 	SupportsMultimodal bool
 
+	// SupportsStreaming indicates if agent supports streaming responses.
+	// True for most modern APIs (Claude, GPT, Gemini).
+	SupportsStreaming bool
+
+	// SupportsSystemPrompts indicates if agent supports system prompts.
+	// True for Claude, GPT-4; Gemini (via conversation prefix).
+	SupportsSystemPrompts bool
+
 	// MaxContextWindow is the maximum context window size in tokens.
 	// Varies by model (Claude: 200K, GPT-4: 128K, Gemini: 1M+).
 	MaxContextWindow int
@@ -215,11 +223,11 @@ type CommandType string
 
 const (
 	// CommandRename renames the current session.
-	// Params: name (string)
+	// Params: session_id (SessionID), name (string)
 	CommandRename CommandType = "rename_session"
 
 	// CommandSetDir changes the working directory.
-	// Params: path (string)
+	// Params: session_id (SessionID), path (string)
 	CommandSetDir CommandType = "set_directory"
 
 	// CommandRunHook executes a pre/post-command hook.
@@ -227,8 +235,16 @@ const (
 	CommandRunHook CommandType = "run_hook"
 
 	// CommandAuthorize authorizes a directory for agent access.
-	// Params: path (string)
+	// Params: session_id (SessionID), path (string)
 	CommandAuthorize CommandType = "authorize_directory"
+
+	// CommandClearHistory clears conversation history.
+	// Params: session_id (SessionID)
+	CommandClearHistory CommandType = "clear_history"
+
+	// CommandSetSystemPrompt sets or updates system prompt.
+	// Params: session_id (SessionID), prompt (string)
+	CommandSetSystemPrompt CommandType = "set_system_prompt"
 )
 
 // SessionID is an opaque agent-specific session identifier.
@@ -267,4 +283,8 @@ const (
 	// FormatMarkdown is a human-readable markdown format.
 	// Used for export/sharing.
 	FormatMarkdown ConversationFormat = "markdown"
+
+	// FormatNative is the agent-specific native format.
+	// Claude: history.jsonl, Gemini: API JSON, GPT: Thread JSON
+	FormatNative ConversationFormat = "native"
 )

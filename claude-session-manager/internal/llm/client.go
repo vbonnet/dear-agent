@@ -61,8 +61,8 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 
 // SearchRequest represents a semantic search request
 type SearchRequest struct {
-	Query    string
-	Sessions []SessionMetadata
+	Query      string
+	Sessions   []SessionMetadata
 	MaxResults int // Maximum results to return (default: 10)
 }
 

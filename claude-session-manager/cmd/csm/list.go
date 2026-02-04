@@ -41,10 +41,10 @@ Examples:
 				return nil
 			}
 			ui.PrintError(err,
-			"Failed to list manifests",
-			"  • Check sessions directory permissions: ls -ld "+cfg.SessionsDir+"\n"+
-				"  • Verify directory structure: ls -la "+cfg.SessionsDir+"\n"+
-				"  • Try creating sessions directory: mkdir -p "+cfg.SessionsDir)
+				"Failed to list manifests",
+				"  • Check sessions directory permissions: ls -ld "+cfg.SessionsDir+"\n"+
+					"  • Verify directory structure: ls -la "+cfg.SessionsDir+"\n"+
+					"  • Try creating sessions directory: mkdir -p "+cfg.SessionsDir)
 			return err
 		}
 

@@ -165,8 +165,9 @@ func runReject(cmd *cobra.Command, args []string) error {
 
 // detectNoOptionPosition detects how many Down presses are needed to reach "No" option
 // Returns:
-//   1 for 2-option prompts (1. Yes, 2. No)
-//   2 for 3-option prompts (1. Yes, 2. Don't ask, 3. No)
+//
+//	1 for 2-option prompts (1. Yes, 2. No)
+//	2 for 3-option prompts (1. Yes, 2. Don't ask, 3. No)
 func detectNoOptionPosition(sessionName string) (int, error) {
 	// Capture pane content using CSM socket
 	socketPath := tmux.GetSocketPath()
@@ -184,11 +185,11 @@ func detectNoOptionPosition(sessionName string) (int, error) {
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := lines[i]
 		// Check for "2. No" or "3. No" (with optional whitespace and selection marker)
-		if (containsReject(line, "2. No") || containsReject(line, "2.No")) {
+		if containsReject(line, "2. No") || containsReject(line, "2.No") {
 			noOptionNum = 2
 			break
 		}
-		if (containsReject(line, "3. No") || containsReject(line, "3.No")) {
+		if containsReject(line, "3. No") || containsReject(line, "3.No") {
 			noOptionNum = 3
 			break
 		}

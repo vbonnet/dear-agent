@@ -23,10 +23,10 @@ var _ = BeforeSuite(func() {
 	Expect(err).ToNot(HaveOccurred(), "tmux must be installed for integration tests")
 
 	// Setup test environment
-	testEnv = helpers.NewTestEnv()
+	testEnv = helpers.NewTestEnv(GinkgoT())
 
 	// Clean up any leftover test sessions from previous runs
-	err = testEnv.Cleanup()
+	err = testEnv.Cleanup(GinkgoT())
 	if err != nil {
 		GinkgoWriter.Printf("Warning: failed to cleanup before suite: %v\n", err)
 	}
@@ -35,7 +35,7 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	// Final cleanup
 	if testEnv != nil {
-		err := testEnv.Cleanup()
+		err := testEnv.Cleanup(GinkgoT())
 		if err != nil {
 			GinkgoWriter.Printf("Warning: failed to cleanup after suite: %v\n", err)
 		}

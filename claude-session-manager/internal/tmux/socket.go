@@ -97,13 +97,13 @@ func CheckSocketPermissions() error {
 
 // GetSocketInfo returns information about the current socket
 type SocketInfo struct {
-	Path      string
-	Exists    bool
-	IsSocket  bool
-	Mode      os.FileMode
-	Size      int64
-	Modified  time.Time
-	IsStale   bool // True if socket exists but no server is responding
+	Path       string
+	Exists     bool
+	IsSocket   bool
+	Mode       os.FileMode
+	Size       int64
+	Modified   time.Time
+	IsStale    bool // True if socket exists but no server is responding
 	Accessible bool // True if we can connect to the socket
 }
 

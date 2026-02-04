@@ -50,10 +50,10 @@ Examples:
 
 			if err := lock.ForceUnlock(lockPath); err != nil {
 				ui.PrintError(err,
-				"Failed to remove stale lock",
-				"  • Check lock file permissions: ls -l "+lockPath+"\n"+
-					"  • Verify file is not owned by another user: ls -l "+lockPath+"\n"+
-					"  • Try manual removal: rm "+lockPath)
+					"Failed to remove stale lock",
+					"  • Check lock file permissions: ls -l "+lockPath+"\n"+
+						"  • Verify file is not owned by another user: ls -l "+lockPath+"\n"+
+						"  • Try manual removal: rm "+lockPath)
 				return err
 			}
 
@@ -69,11 +69,11 @@ Examples:
 
 			if err := lock.ForceUnlock(lockPath); err != nil {
 				ui.PrintError(err,
-				"Failed to force unlock active lock",
-				"  • Check lock file permissions: ls -l "+lockPath+"\n"+
-					"  • Verify file is not owned by another user: ls -l "+lockPath+"\n"+
-					"  • Kill holding process first: kill "+fmt.Sprintf("%d", info.PID)+"\n"+
-					"  • Try manual removal: rm "+lockPath)
+					"Failed to force unlock active lock",
+					"  • Check lock file permissions: ls -l "+lockPath+"\n"+
+						"  • Verify file is not owned by another user: ls -l "+lockPath+"\n"+
+						"  • Kill holding process first: kill "+fmt.Sprintf("%d", info.PID)+"\n"+
+						"  • Try manual removal: rm "+lockPath)
 				return err
 			}
 

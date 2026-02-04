@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	cleanupJSON       bool
+	cleanupJSON        bool
 	cleanupSessionsDir string
 )
 
