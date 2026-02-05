@@ -26,12 +26,9 @@ LDFLAGS_AGM = -s -w \
 	-X main.BuiltBy=$(BUILT_BY)
 
 build:
-	go build -ldflags="$(LDFLAGS_CSM)" -o bin/agm ./cmd/agm
+	go build -ldflags="$(LDFLAGS_AGM)" -o bin/agm ./cmd/agm
 	go build -o bin/csm ./cmd/csm
-	go build -ldflags="$(LDFLAGS_REAPER)" -o bin/csm-reaper ./cmd/csm-reaper
 	go build -ldflags="$(LDFLAGS_AGM)" -o bin/agm-mcp-server ./cmd/agm-mcp-server
-	go build -o bin/csm-attach-wrapper ./cmd/csm-attach-wrapper
-	go build -o bin/csm-agent-wrapper ./cmd/csm-agent-wrapper
 
 test:
 	go test -v -cover ./...
@@ -47,24 +44,29 @@ install: build
 	@# Clean up old binaries from incorrect locations to prevent confusion
 	@rm -f $(HOME)/bin/agm $(HOME)/.local/bin/agm 2>/dev/null || true
 	@rm -f $(HOME)/bin/csm $(HOME)/.local/bin/csm 2>/dev/null || true
-	@rm -f $(HOME)/bin/csm-reaper $(HOME)/.local/bin/csm-reaper 2>/dev/null || true
 	@rm -f $(HOME)/bin/agm-mcp-server $(HOME)/.local/bin/agm-mcp-server 2>/dev/null || true
-	@rm -f $(HOME)/bin/csm-attach-wrapper $(HOME)/.local/bin/csm-attach-wrapper 2>/dev/null || true
-	@rm -f $(HOME)/bin/csm-agent-wrapper $(HOME)/.local/bin/csm-agent-wrapper 2>/dev/null || true
 	@# Install to standard Go binary location (using install for atomic replacement)
 	mkdir -p $(HOME)/go/bin
 	install -m 755 bin/agm $(HOME)/go/bin/agm
 	install -m 755 bin/csm $(HOME)/go/bin/csm
-	install -m 755 bin/csm-reaper $(HOME)/go/bin/csm-reaper
 	install -m 755 bin/agm-mcp-server $(HOME)/go/bin/agm-mcp-server
-	install -m 755 bin/csm-attach-wrapper $(HOME)/go/bin/csm-attach-wrapper
-	install -m 755 bin/csm-agent-wrapper $(HOME)/go/bin/csm-agent-wrapper
 	@echo "✓ agm binary installed to $(HOME)/go/bin/agm"
 	@echo "✓ csm wrapper binary installed to $(HOME)/go/bin/csm (forwards to agm)"
-	@echo "✓ csm-reaper binary installed to $(HOME)/go/bin/csm-reaper"
 	@echo "✓ agm-mcp-server binary installed to $(HOME)/go/bin/agm-mcp-server"
-	@echo "✓ csm-attach-wrapper binary installed to $(HOME)/go/bin/csm-attach-wrapper"
-	@echo "✓ csm-agent-wrapper binary installed to $(HOME)/go/bin/csm-agent-wrapper"
+	@echo ""
+	@# Setup bash completion
+	@if [ -f $(HOME)/.bashrc ]; then \
+		if ! grep -q "agm completion bash" $(HOME)/.bashrc; then \
+			echo "" >> $(HOME)/.bashrc; \
+			echo "# AGM (Agent Gateway Manager) bash completion" >> $(HOME)/.bashrc; \
+			echo "if command -v agm &> /dev/null; then" >> $(HOME)/.bashrc; \
+			echo "    source <(agm completion bash)" >> $(HOME)/.bashrc; \
+			echo "fi" >> $(HOME)/.bashrc; \
+			echo "✓ Added agm completion to ~/.bashrc"; \
+		else \
+			echo "✓ agm completion already in ~/.bashrc"; \
+		fi; \
+	fi
 	@echo ""
 	@echo "⚠️  csm has been renamed to agm"
 	@echo "  - Use 'agm' for new sessions (recommended)"
@@ -75,8 +77,9 @@ install: build
 	@echo "  - $(HOME)/bin/csm (removed if existed)"
 	@echo "  - $(HOME)/.local/bin/agm (removed if existed)"
 	@echo "  - $(HOME)/.local/bin/csm (removed if existed)"
-	@echo "  - $(HOME)/bin/csm-reaper (removed if existed)"
-	@echo "  - $(HOME)/.local/bin/csm-reaper (removed if existed)"
+	@echo ""
+	@echo "To enable tab completion in current shell:"
+	@echo "  source <(agm completion bash)"
 	@echo ""
 	@echo "To install slash commands, add this repo as a plugin marketplace:"
 	@echo "  /plugin marketplace add $(shell pwd)"

@@ -184,21 +184,28 @@ go install github.com/vbonnet/ai-tools/claude-session-manager/cmd/csm@latest
 Enable tab completion for command and session names:
 
 ```bash
-# Run the setup script (recommended)
-./scripts/setup-completion.sh
+# Add to ~/.bashrc (or run manually for current shell)
+if command -v agm &> /dev/null; then
+    source <(agm completion bash)
+fi
 
-# Or manually install
-cp scripts/csm-completion.bash ~/.csm-completion.bash
-echo 'source ~/.csm-completion.bash' >> ~/.bashrc
-source ~/.csm-completion.bash
+# Reload shell
+source ~/.bashrc
+```
+
+**For zsh users:**
+```bash
+# Add to ~/.zshrc
+if command -v agm &> /dev/null; then
+    source <(agm completion zsh)
+fi
 ```
 
 **Features:**
-- Command completion: `csm k<TAB>` → `csm kill`
-- Session name completion: `csm kill <TAB>` → shows active sessions
-- No file fallback: Only shows valid CSM commands/sessions (not random files)
-
-**Note:** This uses a custom completion script that prevents bash from falling back to file/directory completion, which is a common issue with Cobra's default completion.
+- Command completion: `agm k<TAB>` → `agm kill`
+- Session name completion: `agm kill <TAB>` → shows active sessions
+- Flag completion: `agm --<TAB>` → shows available flags
+- Dynamic: Generated from the binary (always up-to-date)
 
 ## Commands
 
