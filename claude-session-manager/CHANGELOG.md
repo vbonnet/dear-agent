@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`csm new` bash prompt false positives**: Fixed race condition causing `/rename` and `/csm-assoc` commands to execute in bash shell instead of Claude
+  - **Root cause**: Prompt detector matched bash prompts ("$", ">", "#") in addition to Claude prompt ("❯"), causing `WaitForPromptSimple` to return too early when bash shell appeared briefly during startup
+  - **Fix**: Added `containsClaudePromptPattern` that only matches Claude's specific "❯" prompt (Unicode U+276F), excluding all bash prompt patterns
+  - **InitSequence improvements**: Added `waitForClaudePrompt` method with 100ms polling to ensure commands are sent to Claude (not bash)
+  - **Error handling**: Changed `WaitForPromptSimple` failure from warning to blocking error with session cleanup
+  - **Impact**: `csm new` now reliably starts sessions without "command not found" errors for `/rename` and `/csm-assoc`
+  - **Commits**: 4ff847f (pattern matcher), b47aa60 (readiness checks), 9c1e6e2 (error handling)
+
 - **Build and Test Failures**: Fixed critical compilation and test issues (oss-lj4)
   - Fixed redundant newline in `fmt.Println` in workflow.go (Go vet error)
   - Fixed template function registration in handoff_prompt.go (template "add" function not defined)
