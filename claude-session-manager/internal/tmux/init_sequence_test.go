@@ -23,11 +23,11 @@ func TestGetReadyFilePath(t *testing.T) {
 	sessionName := "my-session"
 	path := getReadyFilePath(sessionName)
 
-	// Should be in ~/.csm/ready-{session}
+	// Should be in ~/.agm/ready-{session}
 	homeDir, err := os.UserHomeDir()
 	require.NoError(t, err)
 
-	expectedPath := filepath.Join(homeDir, ".csm", "ready-my-session")
+	expectedPath := filepath.Join(homeDir, ".agm", "ready-my-session")
 	assert.Equal(t, expectedPath, path)
 }
 
