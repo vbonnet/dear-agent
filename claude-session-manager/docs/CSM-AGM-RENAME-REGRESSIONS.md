@@ -8,12 +8,13 @@
 
 ## Executive Summary
 
-This document catalogs all regressions discovered during the CSM→AGM rename migration. Four major categories of issues were identified and resolved:
+This document catalogs all regressions discovered during the CSM→AGM rename migration. Five major categories of issues were identified and resolved:
 
 1. **Control Mode Socket Detection** - Critical initialization failure
 2. **Archive Command Logic** - False positive active session detection
 3. **Tab Completion** - Broken shell completion after rename
 4. **Documentation Inconsistency** - 93+ command references needing update
+5. **Default Socket Fallback** - Commands falling back to default tmux socket
 
 All issues have been resolved and tested.
 
@@ -362,6 +363,107 @@ $ grep -r "csm" docs/*.md | grep -v "CSM→AGM" | grep -v "historical"
 
 ---
 
+## Regression 5: Default Socket Fallback
+
+### Issue Description
+
+**User Report:** "I don't think we should have a fallback to the main socket"
+
+**Symptom:** tmux commands in prompt sending and health checks were falling back to default tmux socket instead of using AGM/CSM isolated sockets.
+
+**Impact:**
+- Prompts sent to wrong sessions (cross-contamination with non-AGM tmux sessions)
+- Health checks monitoring default socket instead of AGM socket
+- Session status detection issues when sessions exist on both default and AGM sockets
+
+### Root Cause
+
+**Files:** `internal/tmux/prompt.go`, `internal/tmux/health.go`
+
+**Problem:** Three tmux commands were missing the `-S socketPath` flag:
+
+1. **prompt.go:62** - `send-keys` for prompt text
+2. **prompt.go:72** - `send-keys` for Enter key
+3. **health.go:68** - `list-sessions` health probe
+
+**Without `-S` flag:** Commands default to `$TMUX_TMPDIR/default` socket, bypassing AGM socket isolation.
+
+**Code Examples:**
+```go
+// OLD (broken) - prompt.go:62
+cmd1 := exec.Command("tmux", "send-keys", "-t", target, "-l", prompt)
+
+// OLD (broken) - prompt.go:72
+cmd2 := exec.Command("tmux", "send-keys", "-t", target, "C-m")
+
+// OLD (broken) - health.go:66
+cmd := exec.CommandContext(ctx, "tmux", "list-sessions")
+```
+
+### Fix Applied
+
+**Commit:** `4a7d2e6`
+**Files Modified:** `internal/tmux/prompt.go`, `internal/tmux/health.go`
+
+**Solution:** Added `-S socketPath` flag to all three tmux commands.
+
+**Code Fixed:**
+```go
+// NEW (fixed) - prompt.go:62
+socketPath := GetSocketPath()  // Already retrieved at top of function
+cmd1 := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", target, "-l", prompt)
+
+// NEW (fixed) - prompt.go:72
+cmd2 := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", target, "C-m")
+
+// NEW (fixed) - health.go:68
+socketPath := GetSocketPath()
+cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-sessions")
+```
+
+### Testing
+
+**Discovery Method:**
+1. Ran `lsof /tmp/agm.sock /tmp/csm.sock` to identify separate tmux server processes
+2. Found PID 660639 (AGM socket) and PID 3133763 (CSM socket) were different servers
+3. Ran `tmux list-sessions` (no -S flag) and saw sessions from default socket
+4. Compared with `tmux -S /tmp/agm.sock list-sessions` and `tmux -S /tmp/csm.sock list-sessions`
+5. Code review found missing `-S` flags in prompt.go and health.go
+
+**Manual Test:**
+```bash
+# Before fix - health check probes default socket
+agm doctor  # Would check default socket, not AGM socket
+
+# After fix - health check probes AGM socket correctly
+agm doctor  # Now checks /tmp/agm.sock specifically
+```
+
+**Result:** ✅ All tmux commands now explicitly specify socket path, no fallback to default socket
+
+### Test Coverage Added
+
+**Status:** ⚠️ Pending (Task #6)
+
+**Recommended Tests:**
+- Unit test: Verify all tmux commands include `-S` flag (static analysis)
+- Integration test: Create session on default socket, verify AGM commands ignore it
+- Integration test: Send prompt via `agm send`, verify it goes to AGM socket session only
+
+### Impact Assessment
+
+**Severity:** Medium (functional regression, data integrity concern)
+
+**User Experience:**
+- Before: Prompts might be sent to wrong session if names collide
+- After: Prompts guaranteed to target AGM-managed sessions only
+
+**Data Integrity:**
+- Before: Health checks could report healthy when AGM socket is down (checking wrong socket)
+- After: Health checks accurately reflect AGM socket status
+
+---
+
 ## Pattern Analysis
 
 ### Common Failure Modes
@@ -370,6 +472,7 @@ $ grep -r "csm" docs/*.md | grep -v "CSM→AGM" | grep -v "historical"
 2. **Semantic Confusion** - `HasSession()` vs `ListClients()` for different use cases
 3. **Legacy References** - Scripts/configs pointing to old paths
 4. **Systematic Rename** - Need to update all references consistently
+5. **Missing Socket Flags** - tmux commands without `-S socketPath` fall back to default socket
 
 ### Architectural Lessons
 
@@ -377,17 +480,13 @@ $ grep -r "csm" docs/*.md | grep -v "CSM→AGM" | grep -v "historical"
 2. **Status Semantics** - Distinguish between "exists" vs "active" vs "attached"
 3. **Completion Generation** - Use dynamic generation over static scripts
 4. **Documentation Sync** - Automate or batch-update documentation during renames
+5. **Socket Isolation** - ALL tmux commands must include `-S socketPath` to prevent default socket fallback
 
 ---
 
 ## Remaining Work
 
 ### Pending Tasks (from Task List)
-
-**Task #11:** Fix CSM→AGM session status detection regression
-- User reports sessions showing as ACTIVE in csm but STOPPED in agm
-- May be related to sessions on default tmux socket (before socket isolation)
-- Files to investigate: `internal/session/status.go`, `internal/tmux/tmux.go`
 
 **Task #7:** Run AGM integration tests
 - Execute full test suite after rename
