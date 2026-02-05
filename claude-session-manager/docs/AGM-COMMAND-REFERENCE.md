@@ -827,7 +827,7 @@ Session log management and analysis.
 - `thread <message-id>` - Show conversation thread for a message
 - `query` - Search message logs
 
-**Log Storage**: `~/.csm/logs/messages/` as daily JSONL files (format: `YYYY-MM-DD.jsonl`)
+**Log Storage**: `~/.agm/logs/messages/` as daily JSONL files (format: `YYYY-MM-DD.jsonl`)
 
 **Examples**:
 

@@ -163,7 +163,7 @@ agm unarchive *oauth*
 
 ## Configuration
 
-**Location**: `~/.config/csm/config.yaml`
+**Location**: `~/.config/agm/config.yaml`
 
 ```yaml
 defaults:
@@ -172,7 +172,7 @@ defaults:
   cleanup_threshold_days: 30
 
 ui:
-  theme: "csm"              # csm, csm-light, dracula
+  theme: "agm"              # agm, agm-light, dracula
   fuzzy_search: true
 
 advanced:

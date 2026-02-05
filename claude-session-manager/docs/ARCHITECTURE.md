@@ -309,7 +309,7 @@ claude:
         └── manifest.json
 
 ~/.config/csm/config.yaml            # User configuration
-~/.csm/logs/messages/                # Message logs (JSONL per day)
+~/.agm/logs/messages/                # Message logs (JSONL per day)
     ├── 2026-02-01.jsonl
     ├── 2026-02-02.jsonl
     └── 2026-02-03.jsonl
@@ -707,7 +707,7 @@ defaults:
 
 ### Logging
 
-**Message logs**: `~/.csm/logs/messages/YYYY-MM-DD.jsonl`
+**Message logs**: `~/.agm/logs/messages/YYYY-MM-DD.jsonl`
 
 **Format**:
 ```json
