@@ -29,14 +29,35 @@ func StartControlMode(sessionName string) (*ControlModeSession, error) {
 	return StartControlModeWithTimeout(sessionName, 30*time.Second)
 }
 
+// findSessionSocket finds which socket the session is on (dual-socket support)
+// Returns the socket path if found, empty string if not found
+func findSessionSocket(sessionName string) string {
+	socketPaths := GetReadSocketPaths()
+
+	for _, socketPath := range socketPaths {
+		// Check if session exists on this socket
+		ctx := context.Background()
+		_, err := RunWithTimeout(ctx, 2*time.Second, "tmux", "-S", socketPath, "has-session", "-t", sessionName)
+		if err == nil {
+			// Found it!
+			return socketPath
+		}
+	}
+
+	// Not found on any socket - return write socket as fallback
+	// (session might be brand new and about to be created)
+	return GetSocketPath()
+}
+
 // StartControlModeWithTimeout starts control mode with a custom timeout
 func StartControlModeWithTimeout(sessionName string, timeout time.Duration) (*ControlModeSession, error) {
-	socketPath := GetSocketPath()
+	// Find which socket the session is on (dual-socket support)
+	socketPath := findSessionSocket(sessionName)
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 
-	// Build command: tmux -S /tmp/csm.sock -C attach-session -t <name>
+	// Build command: tmux -S /tmp/agm.sock -C attach-session -t <name>
 	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "-C", "attach-session", "-t", sessionName)
 
 	stdinPipe, err := cmd.StdinPipe()
