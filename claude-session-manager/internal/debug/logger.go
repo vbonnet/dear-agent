@@ -36,7 +36,7 @@ func Init(enabled bool, sessionName string) error {
 		return fmt.Errorf("failed to get home dir: %w", err)
 	}
 
-	debugDir := filepath.Join(homeDir, ".csm", "debug")
+	debugDir := filepath.Join(homeDir, ".agm", "debug")
 	if err := os.MkdirAll(debugDir, 0755); err != nil {
 		return fmt.Errorf("failed to create debug dir: %w", err)
 	}

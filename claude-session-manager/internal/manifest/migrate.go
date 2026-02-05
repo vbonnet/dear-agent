@@ -186,7 +186,7 @@ func detectVersion(path string) (string, error) {
 	return versionCheck.SchemaVersion, nil
 }
 
-// logMigration logs migration events to ~/.csm/logs/migration.log
+// logMigration logs migration events to ~/.agm/logs/migration.log
 // TODO: Implement proper logging when D3.2 Log Rotation is complete
 func logMigration(status string, path string, err error) {
 	// For now, just print to stderr
