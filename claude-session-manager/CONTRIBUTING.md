@@ -1,6 +1,8 @@
-# Contributing to CSM
+# Contributing to AGM
 
-Thank you for your interest in contributing to Claude Session Manager (CSM)!
+Thank you for your interest in contributing to AI/Agent Gateway Manager (AGM)!
+
+*Note: This project was renamed from CSM (Claude Session Manager) to AGM in 2026-02.*
 
 ## Development Setup
 
@@ -20,8 +22,8 @@ cd ai-tools/claude-session-manager
 # Install dependencies
 go mod download
 
-# Build CSM
-go build -o csm ./cmd/csm
+# Build AGM
+go build -o agm ./cmd/agm
 
 # Run tests
 go test ./...
@@ -29,13 +31,13 @@ go test ./...
 
 ## Testing
 
-CSM has a comprehensive test suite with multiple levels of testing.
+AGM has a comprehensive test suite with multiple levels of testing.
 
 ### Test Structure
 
 ```
 claude-session-manager/
-├── cmd/csm/*_test.go           # Command integration tests
+├── cmd/agm/*_test.go           # Command integration tests
 ├── internal/*/                  # Package tests alongside source
 │   ├── package.go
 │   └── package_test.go
@@ -130,13 +132,13 @@ Test complete workflows from the CLI. Located in `test/e2e/`.
 **Example (`test/e2e/testdata/example.txtar`):**
 ```
 # Test: Create and list sessions
-exec csm new --detached test-session
+exec agm new --detached test-session
 stdout 'Session.*created'
 
-exec csm list
+exec agm list
 stdout 'test-session'
 
-exec csm archive test-session --force
+exec agm archive test-session --force
 ```
 
 See `test/e2e/README.md` for detailed testscript documentation.
@@ -165,7 +167,7 @@ When fixing a bug, add a regression test that:
 ### Coverage Goals
 
 - **Overall**: 80%+ coverage
-- **Critical packages** (`cmd/csm`, `internal/tmux`, `internal/session`): 75%+
+- **Critical packages** (`cmd/agm`, `internal/tmux`, `internal/session`): 75%+
 - **All packages**: >50%
 
 Coverage is a useful metric but not the goal. Focus on **effective testing** that catches real bugs.
@@ -290,8 +292,9 @@ Fixes #123
 ```
 claude-session-manager/
 ├── cmd/
-│   ├── csm/           # Main CSM binary
-│   └── csm-reaper/    # Background reaper process
+│   ├── agm/           # Main AGM binary
+│   ├── csm/           # Compatibility wrapper (forwards to agm)
+│   └── agm-mcp-server/    # MCP server for Claude Code integration
 ├── internal/
 │   ├── backup/        # Backup rotation
 │   ├── claude/        # Claude history parsing
