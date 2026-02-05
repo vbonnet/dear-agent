@@ -10,9 +10,25 @@ import (
 )
 
 var (
-	listJSON bool
-	listAll  bool
+	listJSON     bool
+	listAll      bool
+	listTestMode bool
 )
+
+// getListSessionsDir returns the sessions directory based on test mode
+func getListSessionsDir() string {
+	// Test mode overrides config
+	if listTestMode {
+		homeDir, _ := os.UserHomeDir()
+		return homeDir + "/sessions-test"
+	}
+	if cfg != nil && cfg.SessionsDir != "" {
+		return cfg.SessionsDir
+	}
+	// Default to ~/sessions
+	homeDir, _ := os.UserHomeDir()
+	return homeDir + "/sessions"
+}
 
 var listCmd = &cobra.Command{
 	Use:   "list",
@@ -32,19 +48,22 @@ Examples:
   csm list --all        # List all sessions (including archived)
   csm list --json       # Output as JSON`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Get sessions directory (test mode or production)
+		sessionsDir := getListSessionsDir()
+
 		// List all manifests
-		manifests, err := manifest.List(cfg.SessionsDir)
+		manifests, err := manifest.List(sessionsDir)
 		if err != nil {
 			if os.IsNotExist(err) {
-				ui.PrintWarning(fmt.Sprintf("No sessions directory found: %s", cfg.SessionsDir))
+				ui.PrintWarning(fmt.Sprintf("No sessions directory found: %s", sessionsDir))
 				fmt.Printf("\nCreate your first session with: csm new\n")
 				return nil
 			}
 			ui.PrintError(err,
 				"Failed to list manifests",
-				"  • Check sessions directory permissions: ls -ld "+cfg.SessionsDir+"\n"+
-					"  • Verify directory structure: ls -la "+cfg.SessionsDir+"\n"+
-					"  • Try creating sessions directory: mkdir -p "+cfg.SessionsDir)
+				"  • Check sessions directory permissions: ls -ld "+sessionsDir+"\n"+
+					"  • Verify directory structure: ls -la "+sessionsDir+"\n"+
+					"  • Try creating sessions directory: mkdir -p "+sessionsDir)
 			return err
 		}
 
@@ -90,6 +109,7 @@ Examples:
 func init() {
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON")
 	listCmd.Flags().BoolVar(&listAll, "all", false, "Show all sessions including archived")
+	listCmd.Flags().BoolVar(&listTestMode, "test", false, "List test sessions from ~/sessions-test/ (isolated from production)")
 
 	rootCmd.AddCommand(listCmd)
 }

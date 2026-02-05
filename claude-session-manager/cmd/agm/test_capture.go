@@ -51,6 +51,9 @@ func init() {
 		"Number of lines to capture from the pane",
 	)
 
+	// Mark as hidden - use common commands with --test flag instead
+	testCaptureCmd.Hidden = true
+
 	testCmd.AddCommand(testCaptureCmd)
 }
 

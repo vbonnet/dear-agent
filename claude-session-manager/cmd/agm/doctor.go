@@ -15,10 +15,26 @@ import (
 )
 
 var (
-	validateFlag bool
-	applyFixesFlag bool
-	jsonFormat   bool
+	validateFlag     bool
+	applyFixesFlag   bool
+	jsonFormat       bool
+	doctorTestMode   bool
 )
+
+// getDoctorSessionsDir returns the sessions directory based on test mode
+func getDoctorSessionsDir() string {
+	// Test mode overrides config
+	if doctorTestMode {
+		homeDir, _ := os.UserHomeDir()
+		return homeDir + "/sessions-test"
+	}
+	if cfg != nil && cfg.SessionsDir != "" {
+		return cfg.SessionsDir
+	}
+	// Default to ~/sessions
+	homeDir, _ := os.UserHomeDir()
+	return homeDir + "/sessions"
+}
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
@@ -46,6 +62,9 @@ Examples:
 		fmt.Println(ui.Blue("=== Claude Session Manager Health Check ===\n"))
 
 		allHealthy := true
+
+		// Get sessions directory (test mode or production)
+		sessionsDir := getDoctorSessionsDir()
 
 		// Check Claude installation (verify history.jsonl exists)
 		homeDir, _ := os.UserHomeDir()
@@ -104,9 +123,9 @@ Examples:
 		}
 
 		// Check sessions directory
-		manifests, err := manifest.List(cfg.SessionsDir)
+		manifests, err := manifest.List(sessionsDir)
 		if err != nil {
-			ui.PrintWarning(fmt.Sprintf("Sessions directory not found: %s", cfg.SessionsDir))
+			ui.PrintWarning(fmt.Sprintf("Sessions directory not found: %s", sessionsDir))
 			ui.PrintSuccess("Run 'csm sync' to create manifests")
 		} else {
 			ui.PrintSuccess(fmt.Sprintf("Found %d session manifests", len(manifests)))
@@ -120,7 +139,7 @@ Examples:
 
 			// 1. Check for duplicate session directories (old vs new format)
 			fmt.Println(ui.Blue("\n--- Checking for duplicate session directories ---"))
-			duplicates := detectDuplicateSessionDirs(cfg.SessionsDir)
+			duplicates := detectDuplicateSessionDirs(sessionsDir)
 			if len(duplicates) > 0 {
 				ui.PrintWarning(fmt.Sprintf("Found %d duplicate session directories", len(duplicates)))
 				for _, dup := range duplicates {
@@ -129,8 +148,8 @@ Examples:
 					fmt.Printf("    - New format: %s\n", dup.NewFormat)
 				}
 				fmt.Println("\n  Recommendation: Archive old format directories")
-				fmt.Printf("    mkdir -p %s/.archive-old-format\n", cfg.SessionsDir)
-				fmt.Printf("    mv %s/claude-*-session %s/.archive-old-format/\n", cfg.SessionsDir, cfg.SessionsDir)
+				fmt.Printf("    mkdir -p %s/.archive-old-format\n", sessionsDir)
+				fmt.Printf("    mv %s/claude-*-session %s/.archive-old-format/\n", sessionsDir, sessionsDir)
 				allHealthy = false
 			} else {
 				ui.PrintSuccess("No duplicate session directories found")
@@ -191,7 +210,7 @@ Examples:
 			for _, m := range manifests {
 				health, err := session.CheckHealth(m)
 				if err != nil {
-					manifestPath := filepath.Join(cfg.SessionsDir, m.SessionID, "manifest.yaml")
+					manifestPath := filepath.Join(sessionsDir, m.SessionID, "manifest.yaml")
 					ui.PrintError(err,
 						fmt.Sprintf("Failed to check health of session %s", m.SessionID),
 						"  • Check manifest file: cat "+manifestPath+"\n"+
@@ -340,4 +359,6 @@ func init() {
 		"Apply suggested fixes (requires --validate)")
 	doctorCmd.Flags().BoolVar(&jsonFormat, "json", false,
 		"Output results as JSON")
+	doctorCmd.Flags().BoolVar(&doctorTestMode, "test", false,
+		"Check test sessions in ~/sessions-test/ (isolated from production)")
 }

@@ -6,23 +6,24 @@ import (
 
 var testCmd = &cobra.Command{
 	Use:   "test",
-	Short: "Manage CSM test sessions",
-	Long: `Create and manage isolated test sessions for CSM development and automation.
+	Short: "Test session utilities (legacy)",
+	Long: `Test session utilities for CSM development and automation.
 
-Test sessions use isolated tmux sessions (csm-test-*) and state directories (/tmp/csm-test-*).
-They provide a clean environment for testing CSM functionality without affecting production sessions.
+RECOMMENDED APPROACH:
+Use common commands with --test flag for test session isolation:
 
-Available commands:
-  create   - Create a new isolated test session with Claude started
-  send     - Send a command to a test session
-  capture  - Capture output from a test session
-  cleanup  - Clean up test sessions
+  csm new --test <name>           # Create test session in ~/sessions-test/
+  csm list --test                 # List test sessions
+  csm doctor --test               # Check test session health
 
-Examples:
-  csm test create my-test                  # Create test session
-  csm test send my-test "csm list"         # Send command
-  csm test capture my-test                 # Capture output
-  csm test cleanup my-test                 # Cleanup session`,
+Test sessions are isolated from production:
+- Tmux sessions: csm-test-* (separate from production)
+- Sessions directory: ~/sessions-test/ (not ~/sessions/)
+- Working directory: configurable per session
+
+LEGACY COMMANDS:
+This command group contains backward-compatibility utilities.
+New workflows should use --test flag on common commands instead.`,
 }
 
 func init() {

@@ -26,6 +26,7 @@ import (
 
 var (
 	detached     bool
+	testMode     bool
 	agentName    string
 	workflowName string
 	projectID    string
@@ -710,8 +711,13 @@ func attachWithCapture(sessionName string) error {
 	return syscall.Exec(wrapperPath, args, env)
 }
 
-// getSessionsDir returns the sessions directory (respects --sessions-dir flag)
+// getSessionsDir returns the sessions directory (respects --sessions-dir flag and --test mode)
 func getSessionsDir() string {
+	// Test mode overrides config
+	if testMode {
+		homeDir, _ := os.UserHomeDir()
+		return filepath.Join(homeDir, "sessions-test")
+	}
 	if cfg != nil && cfg.SessionsDir != "" {
 		return cfg.SessionsDir
 	}
@@ -969,6 +975,7 @@ func init() {
 	rootCmd.AddCommand(newCmd)
 	newCmd.Flags().BoolP("debug", "d", debugDefault, "Enable debug logging to ~/.csm/debug/ (env: AGM_DEBUG)")
 	newCmd.Flags().BoolVar(&detached, "detached", false, "Create detached session without attaching")
+	newCmd.Flags().BoolVar(&testMode, "test", false, "Create test session in ~/sessions-test/ (isolated from production)")
 	newCmd.Flags().StringVar(&agentName, "agent", "", "AI agent to use (claude, gemini, gpt)")
 	newCmd.Flags().StringVar(&workflowName, "workflow", "", "Execution workflow (deep-research, code-review, architect)")
 	newCmd.Flags().StringVar(&projectID, "project-id", "", "GCP project ID (required for gemini agent)")

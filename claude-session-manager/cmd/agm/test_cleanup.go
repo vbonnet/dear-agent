@@ -52,6 +52,9 @@ func init() {
 		"Sessions directory to clean (default: /tmp/csm-test-<name>)",
 	)
 
+	// Mark as hidden - use common commands with --test flag instead
+	testCleanupCmd.Hidden = true
+
 	testCmd.AddCommand(testCleanupCmd)
 }
 
