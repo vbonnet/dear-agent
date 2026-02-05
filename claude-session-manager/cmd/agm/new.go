@@ -61,10 +61,10 @@ Behavior:
   • --detached flag → Creates session, doesn't attach (stays in current context)
 
 Examples:
-  csm new                       # Prompt for name or use current tmux session
-  csm new my-project            # Create session named "my-project" and attach
-  csm new feature-branch        # Create session named "feature-branch" and attach
-  csm new other-session --detached  # Create detached session (from within tmux)`,
+  agmnew                       # Prompt for name or use current tmux session
+  agmnew my-project            # Create session named "my-project" and attach
+  agmnew feature-branch        # Create session named "feature-branch" and attach
+  agmnew other-session --detached  # Create detached session (from within tmux)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get debug flag
 		debugEnabled, _ := cmd.Flags().GetBool("debug")
@@ -94,7 +94,7 @@ Examples:
 					ui.PrintError(
 						fmt.Errorf("session name mismatch: %s (provided) != %s (current tmux)", sessionName, currentTmuxName),
 						"Cannot create session with different name while inside tmux",
-						"  • Use --detached flag to create separate session, or\n  • Exit tmux first, or\n  • Use 'csm new' without arguments to use current tmux session",
+						"  • Use --detached flag to create separate session, or\n  • Exit tmux first, or\n  • Use 'agmnew' without arguments to use current tmux session",
 					)
 					return fmt.Errorf("session name mismatch")
 				}
@@ -129,7 +129,7 @@ Examples:
 				if err != nil {
 					ui.PrintError(err,
 						"Failed to read session name from prompt",
-						"  • Provide name as argument: csm new <session-name>\n"+
+						"  • Provide name as argument: agmnew <session-name>\n"+
 							"  • Check terminal is interactive (TTY)\n"+
 							"  • Try running outside tmux/screen if inside")
 					return err
@@ -162,7 +162,7 @@ Examples:
 			if err != nil {
 				ui.PrintError(err,
 					"Failed to read agent selection",
-					"  • Use --agent flag for non-interactive usage: csm new --agent=claude\n"+
+					"  • Use --agent flag for non-interactive usage: agmnew --agent=claude\n"+
 						"  • Check terminal is interactive (TTY)\n"+
 						"  • Available agents: claude, gemini")
 				return err
@@ -203,8 +203,8 @@ Examples:
 				ui.PrintError(err,
 					"Workflow not compatible with agent",
 					fmt.Sprintf("  • Workflow '%s' does not support agent '%s'\n"+
-						"  • Run 'csm workflow list' to see available workflows\n"+
-						"  • Run 'csm workflow list --agent=%s' to see compatible workflows",
+						"  • Run 'agmworkflow list' to see available workflows\n"+
+						"  • Run 'agmworkflow list --agent=%s' to see compatible workflows",
 						workflowName, agentName, agentName))
 				return err
 			}
@@ -296,7 +296,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			if err != nil {
 				ui.PrintError(err,
 					"Failed to read choice from prompt",
-					"  • Choose different name: csm new <different-name>\n"+
+					"  • Choose different name: agmnew <different-name>\n"+
 						"  • Check terminal is interactive (TTY)\n"+
 						"  • Cancel with Ctrl+C and retry")
 				return err
@@ -326,7 +326,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 				if err != nil {
 					ui.PrintError(err,
 						"Failed to read session name from prompt",
-						"  • Provide name as argument: csm new <session-name>\n"+
+						"  • Provide name as argument: agmnew <session-name>\n"+
 							"  • Check terminal is interactive (TTY)\n"+
 							"  • Try running outside tmux/screen if inside")
 					return err
@@ -415,14 +415,30 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		fmt.Println()
 
 		if waitErr != nil {
-			debug.Log("Prompt wait timed out or failed: %v", waitErr)
-			ui.PrintWarning("Claude prompt not detected (still initializing)")
-			fmt.Println("  Proceeding anyway - initialization may be delayed")
-			// Continue anyway - InitSequence will handle if commands arrive too early
-		} else {
-			debug.Log("Claude prompt detected - ready for commands")
-			ui.PrintSuccess("Claude is ready!")
+			// Claude not ready - this is now a BLOCKING error
+			// (Phase 3 of fix: make WaitForPromptSimple failure fatal)
+			debug.Log("Claude startup failed: %v", waitErr)
+			ui.PrintError(waitErr,
+				"Failed to start Claude session",
+				"  Cannot proceed without Claude being ready.\n"+
+					"  Possible issues:\n"+
+					"    • Claude Code not installed or not in PATH\n"+
+					"    • Claude startup taking longer than expected (>60s)\n"+
+					"    • Session name conflict or tmux issue\n")
+
+			// Clean up the session since we can't proceed
+			socketPath := tmux.GetSocketPath()
+			killCmd := exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName)
+			if err := killCmd.Run(); err != nil {
+				debug.Log("Failed to clean up session: %v", err)
+			}
+
+			return fmt.Errorf("Claude not ready: %w", waitErr)
 		}
+
+		// Claude is ready!
+		debug.Log("Claude prompt detected - ready for commands")
+		ui.PrintSuccess("Claude is ready!")
 
 		// Monitor for trust prompt using control mode (event-driven, not time-based)
 		// Only answer if we actually detect the prompt appearing
@@ -536,7 +552,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 				ui.PrintWarning("Gemini did not signal ready within timeout")
 				fmt.Println("  • Attach to session to check status: tmux attach -t " + sessionName)
 				fmt.Println("  • Check wrapper logs for errors")
-				fmt.Println("  • Try direct mode: csm new --agent gemini " + sessionName + " (after renaming wrapper)")
+				fmt.Println("  • Try direct mode: agmnew --agent gemini " + sessionName + " (after renaming wrapper)")
 				return fmt.Errorf("gemini readiness timeout: %w", readyErr)
 			}
 			debug.Log("Ready signal received successfully")
@@ -558,7 +574,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 	if err := os.MkdirAll(manifestDir, 0700); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to create manifest directory: %v", err))
-		ui.PrintWarning("Proceeding without manifest - you can run 'csm sync' later")
+		ui.PrintWarning("Proceeding without manifest - you can run 'agmsync' later")
 	} else {
 		// Create v2 manifest with proper SessionID and empty Claude UUID
 		// The /csm-assoc command will populate the Claude UUID when it runs
@@ -588,7 +604,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 		if err := manifest.Write(manifestPath, m); err != nil {
 			ui.PrintWarning(fmt.Sprintf("Failed to write manifest: %v", err))
-			ui.PrintWarning("Proceeding without manifest - you can run 'csm sync' later")
+			ui.PrintWarning("Proceeding without manifest - you can run 'agmsync' later")
 		} else {
 			debug.Log("Manifest created at: %s", manifestPath)
 			ui.PrintSuccess(fmt.Sprintf("Created manifest: %s", manifestPath))
@@ -615,7 +631,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			debug.Log("InitSequence completed successfully")
 		}
 
-		// Wait for ready-file (created by csm associate when UUID is captured)
+		// Wait for ready-file (created by agmassociate when UUID is captured)
 		debug.Phase("Wait for Ready Signal")
 		debug.Log("Waiting for ready-file signal (timeout: 60s)")
 		var readyErr error
@@ -634,13 +650,13 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			debug.Log("Ready-file wait failed: %v", readyErr)
 			ui.PrintWarning("Claude did not signal ready within timeout")
 			fmt.Println("  • Attach to session to check status: tmux attach -t " + sessionName)
-			fmt.Printf("  • Run 'csm sync' later to populate UUID if needed\n")
+			fmt.Printf("  • Run 'agmsync' later to populate UUID if needed\n")
 		} else {
 			debug.Log("Ready-file detected - session is ready")
 			ui.PrintSuccess("Claude is ready and session associated!")
 
 			// Wait for /csm-assoc skill to finish outputting its completion messages
-			// The ready-file signals when 'csm associate' binary completes, but the skill
+			// The ready-file signals when 'agmassociate' binary completes, but the skill
 			// continues to output messages after that. Give it time to finish.
 			debug.Log("Waiting for /csm-assoc skill to complete output")
 			// NOTE: Skill completion detection not yet implemented (requires control mode output channel)
@@ -680,7 +696,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		}
 	} else {
 		ui.PrintSuccess(fmt.Sprintf("Session '%s' created (detached)", sessionName))
-		fmt.Printf("\nAttach to session with:\n  csm resume %s\n", sessionName)
+		fmt.Printf("\nAttach to session with:\n  agmresume %s\n", sessionName)
 		fmt.Printf("Or manually:\n  tmux attach -t %s\n", sessionName)
 	}
 
@@ -798,7 +814,7 @@ func startClaudeInCurrentTmux(sessionName string) error {
 				"  • Verify Claude is installed: which claude\n"+
 					"  • Test Claude manually: claude --version\n"+
 					"  • Check you're in tmux: echo $TMUX\n"+
-					"  • Exit tmux and try: csm new "+sessionName)
+					"  • Exit tmux and try: agmnew "+sessionName)
 			return err
 		}
 
@@ -973,7 +989,7 @@ func init() {
 	}
 
 	rootCmd.AddCommand(newCmd)
-	newCmd.Flags().BoolP("debug", "d", debugDefault, "Enable debug logging to ~/.csm/debug/ (env: AGM_DEBUG)")
+	newCmd.Flags().BoolP("debug", "d", debugDefault, "Enable debug logging to ~/.agm/debug/ (env: AGM_DEBUG)")
 	newCmd.Flags().BoolVar(&detached, "detached", false, "Create detached session without attaching")
 	newCmd.Flags().BoolVar(&testMode, "test", false, "Create test session in ~/sessions-test/ (isolated from production)")
 	newCmd.Flags().StringVar(&agentName, "agent", "", "AI agent to use (claude, gemini, gpt)")
