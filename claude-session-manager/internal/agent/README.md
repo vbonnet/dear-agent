@@ -61,14 +61,14 @@ GeminiAdapter implementation:
 - Implements Agent interface for Google Gemini
 - Uses Google Generative AI Go SDK (`github.com/google/generative-ai-go`)
 - Client-side conversation history persistence
-- Stores sessions in `~/.csm/gemini/<session-id>/history.jsonl`
+- Stores sessions in `~/.agm/gemini/<session-id>/history.jsonl`
 - Default model: `gemini-2.0-flash-exp`
 - API key from `GEMINI_API_KEY` environment variable
 
 ### session_store.go
 SessionStore manages SessionID persistence:
 - `SessionStore` interface - Get/Set/Delete/List operations
-- `JSONSessionStore` - File-based implementation (~/.csm/sessions.json)
+- `JSONSessionStore` - File-based implementation (~/.agm/sessions.json)
 - `SessionMetadata` - Session information (tmux name, created time, working dir)
 - Thread-safe with sync.RWMutex
 - Atomic file writes for data integrity
@@ -166,7 +166,7 @@ err = adapter.ExecuteCommand(agent.Command{
 
 ClaudeAdapter maintains a persistent mapping between UUIDs (SessionID) and tmux session names:
 
-**Storage:** `~/.csm/sessions.json`
+**Storage:** `~/.agm/sessions.json`
 
 **Format:**
 ```json
@@ -251,7 +251,7 @@ ok  	github.com/vbonnet/ai-tools/claude-session-manager/internal/agent	0.035s
 |---------|---------------|---------------|------------|
 | Type | CLI-based | API-based | API-based |
 | Backend | tmux + Claude CLI | Google Gen AI SDK | OpenAI SDK |
-| Session Storage | `~/.claude/sessions/` | `~/.csm/gemini/` | TBD |
+| Session Storage | `~/.claude/sessions/` | `~/.agm/gemini/` | TBD |
 | API Key | Built into CLI | `GEMINI_API_KEY` | `OPENAI_API_KEY` |
 | Default Model | claude-sonnet-4.5 | gemini-2.0-flash-exp | TBD |
 | Slash Commands | ✅ | ❌ | ❌ |
