@@ -55,9 +55,16 @@ func (seq *InitSequence) Run() error {
 
 // sendRename sends the /rename command and waits for it to complete
 func (seq *InitSequence) sendRename(ctrl *ControlModeSession, watcher *OutputWatcher) error {
+	// Wait for Claude to be ready BEFORE sending command
+	// This ensures we don't send /rename to bash shell (which would fail)
+	if err := seq.waitForClaudePrompt(watcher, 30*time.Second); err != nil {
+		return fmt.Errorf("Claude not ready for rename: %w", err)
+	}
+
 	renameCmd := fmt.Sprintf("/rename %s", seq.SessionName)
 
 	// Send command text using send-keys with -l flag (literal)
+	// This preserves the C-m/Enter fix from commit 76d3053
 	sendLiteralCmd := fmt.Sprintf("send-keys -t %s -l %q", seq.SessionName, renameCmd)
 	if err := ctrl.SendCommand(sendLiteralCmd); err != nil {
 		return fmt.Errorf("failed to send rename text: %w", err)
@@ -73,22 +80,29 @@ func (seq *InitSequence) sendRename(ctrl *ControlModeSession, watcher *OutputWat
 		return fmt.Errorf("failed to send Enter: %w", err)
 	}
 
-	// Wait for Claude to persist the rename to history
-	// /rename completes quickly in-memory, but history file write is async
-	// We need to give Claude time to flush the history before running /csm-assoc
-	// which needs to read the UUID from the history file
-	time.Sleep(2 * time.Second)
+	// Wait for command to complete AFTER sending (Claude returns to prompt)
+	// /rename completes quickly, so shorter timeout (10s) is acceptable
+	if err := seq.waitForClaudePrompt(watcher, 10*time.Second); err != nil {
+		return fmt.Errorf("rename command timeout: %w", err)
+	}
 
 	return nil
 }
 
 // sendAssociation sends /csm-tools:csm-assoc command
-// Note: This only sends the command via control mode. The caller is responsible
-// for waiting for the ready-file signal if needed (to allow for custom progress reporting).
+// Note: This sends the command and waits for Claude to be ready, but the caller is responsible
+// for waiting for the ready-file signal to confirm association completed (for custom progress reporting).
 func (seq *InitSequence) sendAssociation(ctrl *ControlModeSession, watcher *OutputWatcher) error {
+	// Wait for Claude to be ready BEFORE sending command
+	// This ensures we don't send /csm-assoc to bash shell (which would fail)
+	if err := seq.waitForClaudePrompt(watcher, 30*time.Second); err != nil {
+		return fmt.Errorf("Claude not ready for association: %w", err)
+	}
+
 	assocCmd := fmt.Sprintf("/csm-tools:csm-assoc %s", seq.SessionName)
 
 	// Send command text using send-keys with -l flag (literal)
+	// This preserves the C-m/Enter fix from commit 76d3053
 	sendLiteralCmd := fmt.Sprintf("send-keys -t %s -l %q", seq.SessionName, assocCmd)
 	if err := ctrl.SendCommand(sendLiteralCmd); err != nil {
 		return fmt.Errorf("failed to send association text: %w", err)
@@ -105,7 +119,40 @@ func (seq *InitSequence) sendAssociation(ctrl *ControlModeSession, watcher *Outp
 	}
 
 	// Command sent successfully - ready-file wait is handled by caller
+	// (Association completion takes longer, so ready-file is the definitive signal)
 	return nil
+}
+
+// waitForClaudePrompt waits for Claude to become ready by polling the output stream.
+// This is used internally by InitSequence to ensure Claude is ready before
+// sending slash commands.
+//
+// It monitors the control mode output stream for Claude's unique prompt pattern ("❯")
+// and returns once detected, or times out if Claude never becomes ready.
+func (seq *InitSequence) waitForClaudePrompt(watcher *OutputWatcher, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Get latest output from watcher (last 5 lines should be enough to detect prompt)
+			lines := watcher.GetRecentOutput(5)
+
+			// Check each line for Claude prompt pattern
+			for _, line := range lines {
+				if containsClaudePromptPattern(line) {
+					// Claude prompt detected - ready for commands
+					return nil
+				}
+			}
+
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timeout waiting for Claude prompt (waited %v)", timeout)
+			}
+		}
+	}
 }
 
 // waitForReadyFile waits for the ready-file signal to appear
