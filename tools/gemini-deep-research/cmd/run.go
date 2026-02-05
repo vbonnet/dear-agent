@@ -22,24 +22,33 @@ import (
 // Run executes the main command logic
 // Returns exit code (0 for success, >0 for errors)
 func Run(url string, flags *types.Flags, cfg *config.Config) int {
-	// Validate URL
-	if err := ValidateURL(url); err != nil {
-		fmt.Fprintf(cfg.Stderr, "Error: %v\n", err)
-		fmt.Fprintf(cfg.Stderr, "\nExamples of valid URLs:\n")
-		fmt.Fprintf(cfg.Stderr, "  https://www.youtube.com/watch?v=VIDEO_ID\n")
-		fmt.Fprintf(cfg.Stderr, "  https://arxiv.org/abs/2601.20802\n")
-		fmt.Fprintf(cfg.Stderr, "  https://huggingface.co/papers/2501.12345\n")
-		fmt.Fprintf(cfg.Stderr, "  https://example.com/article\n")
-		return 1
-	}
-
-	// Detect analysis mode
+	// Detect analysis mode FIRST (before URL validation)
+	// This allows natural language queries like "competitive analysis of X vs Y"
 	mode := modes.DetectMode(url, flags.Mode)
 	log.Printf("Mode detection: %s (explicit=%v)", mode.String(), flags.Mode != "")
 
+	// Validate URL only if NOT in competitive mode (competitive mode accepts natural language queries)
+	if !mode.IsCompetitive() {
+		if err := ValidateURL(url); err != nil {
+			fmt.Fprintf(cfg.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(cfg.Stderr, "\nExamples of valid URLs:\n")
+			fmt.Fprintf(cfg.Stderr, "  https://www.youtube.com/watch?v=VIDEO_ID\n")
+			fmt.Fprintf(cfg.Stderr, "  https://arxiv.org/abs/2601.20802\n")
+			fmt.Fprintf(cfg.Stderr, "  https://huggingface.co/papers/2501.12345\n")
+			fmt.Fprintf(cfg.Stderr, "  https://example.com/article\n")
+			fmt.Fprintf(cfg.Stderr, "\nOr try competitive analysis:\n")
+			fmt.Fprintf(cfg.Stderr, "  gemini-deep-research \"competitive analysis of Tool X vs Tool Y\"\n")
+			return 1
+		}
+	}
+
 	// Log configuration
 	fmt.Fprintf(cfg.Stdout, "Configuration:\n")
-	fmt.Fprintf(cfg.Stdout, "  URL: %s\n", url)
+	if mode.IsCompetitive() {
+		fmt.Fprintf(cfg.Stdout, "  Query: %s\n", url)
+	} else {
+		fmt.Fprintf(cfg.Stdout, "  URL: %s\n", url)
+	}
 	fmt.Fprintf(cfg.Stdout, "  Mode: %s", mode.String())
 	if flags.Mode == "" {
 		fmt.Fprintf(cfg.Stdout, " (auto-detected)")
@@ -88,20 +97,43 @@ func executePipeline(url string, flags *types.Flags, cfg *config.Config, mode mo
 		fmt.Fprintf(cfg.Stdout, "Stage 0: Discovering competitor URLs...\n")
 		discoveredURLs, err := runDiscovery(ctx, url, flags, cfg)
 		if err != nil {
-			// Enhanced error handling with fallback option
-			log.Printf("Discovery error (falling back to provided URL): %v", err)
+			// Enhanced error handling - check if provided input is a valid URL
+			log.Printf("Discovery error: %v", err)
 			fmt.Fprintf(cfg.Stderr, "Warning: Discovery failed: %v\n", err)
-			fmt.Fprintf(cfg.Stderr, "Falling back to analyzing the provided URL directly...\n\n")
 
-			// Fallback: use provided URL
+			// Check if the provided input is a valid URL for fallback
+			if err := ValidateURL(url); err != nil {
+				// Not a valid URL - cannot proceed
+				fmt.Fprintf(cfg.Stderr, "\nError: Discovery failed and the provided query is not a valid URL.\n\n")
+				fmt.Fprintf(cfg.Stderr, "Options:\n")
+				fmt.Fprintf(cfg.Stderr, "  1. Set up Google Custom Search API (see error message above)\n")
+				fmt.Fprintf(cfg.Stderr, "  2. Provide a competitor URL with --no-discovery:\n")
+				fmt.Fprintf(cfg.Stderr, "     gemini-deep-research --mode competitive --no-discovery <competitor-url>\n\n")
+				return 1
+			}
+
+			// Valid URL provided - use as fallback
+			fmt.Fprintf(cfg.Stderr, "Falling back to analyzing the provided URL directly...\n\n")
 			targetURL = url
 			fmt.Fprintf(cfg.Stdout, "  Analyzing (fallback): %s\n\n", targetURL)
 		} else if len(discoveredURLs) == 0 {
-			// No URLs discovered - fall back to provided URL
-			log.Printf("No URLs discovered (falling back to provided URL)")
+			// No URLs discovered - check if provided input is a valid URL for fallback
+			log.Printf("No URLs discovered")
 			fmt.Fprintf(cfg.Stderr, "Warning: No competitor URLs discovered\n")
-			fmt.Fprintf(cfg.Stderr, "Falling back to analyzing the provided URL directly...\n\n")
 
+			// Check if the provided input is a valid URL for fallback
+			if err := ValidateURL(url); err != nil {
+				// Not a valid URL - cannot proceed
+				fmt.Fprintf(cfg.Stderr, "\nError: No URLs discovered and the provided query is not a valid URL.\n\n")
+				fmt.Fprintf(cfg.Stderr, "Options:\n")
+				fmt.Fprintf(cfg.Stderr, "  1. Try a more specific competitor name in your query\n")
+				fmt.Fprintf(cfg.Stderr, "  2. Provide a competitor URL with --no-discovery:\n")
+				fmt.Fprintf(cfg.Stderr, "     gemini-deep-research --mode competitive --no-discovery <competitor-url>\n\n")
+				return 1
+			}
+
+			// Valid URL provided - use as fallback
+			fmt.Fprintf(cfg.Stderr, "Falling back to analyzing the provided URL directly...\n\n")
 			targetURL = url
 			fmt.Fprintf(cfg.Stdout, "  Analyzing (fallback): %s\n\n", targetURL)
 		} else {
