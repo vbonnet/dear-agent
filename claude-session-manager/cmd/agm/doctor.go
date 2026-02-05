@@ -41,23 +41,42 @@ var doctorCmd = &cobra.Command{
 	Short: "Check system health and configuration",
 	Long: `Verify that Claude, tmux, and all sessions are healthy.
 
-Detects:
-- Duplicate session directories (old vs new naming format)
-- Sessions sharing the same Claude UUID
-- Sessions with empty/missing Claude UUIDs
-- Orphaned session directories
-- Invalid manifest files
+USAGE MODES:
 
-With --validate flag:
-- Tests actual session resumability (functional testing)
-- Classifies resume errors and suggests fixes
-- Auto-fixes issues with --apply-fixes flag
+1. Quick Health Check (DEFAULT - Fast, ~1-5 seconds)
+   Run: csm doctor
+
+   Performs structural checks:
+   - Claude and tmux installation status
+   - Duplicate session directories (old vs new naming format)
+   - Sessions sharing the same Claude UUID
+   - Sessions with empty/missing Claude UUIDs
+   - Orphaned session directories
+   - Invalid manifest files
+
+   Use when: You want a quick overview of system health
+
+2. Deep Validation (OPTIONAL - Slower, ~5-30 seconds per session)
+   Run: csm doctor --validate
+
+   Performs structural checks PLUS functional testing:
+   - Tests actual session resumability by attempting resume
+   - Classifies resume errors and suggests fixes
+   - Auto-fixes issues with --apply-fixes flag
+
+   Use when: Debugging session resume failures or preparing for production
+
+WHICH MODE TO USE:
+- Daily health checks: Use default mode (fast)
+- Troubleshooting resume issues: Use --validate mode (thorough)
+- CI/CD pipelines: Use --validate --json for automated testing
 
 Examples:
-  csm doctor                             # Structural checks only
-  csm doctor --validate                  # Structural + functional testing
+  csm doctor                             # Quick health check (structural only)
+  csm doctor --validate                  # Thorough validation (structural + functional)
   csm doctor --validate --apply-fixes    # Test and auto-fix issues
-  csm doctor --validate --json           # JSON output for scripting`,
+  csm doctor --validate --json           # JSON output for scripting
+  csm doctor --test                      # Check test sessions in ~/sessions-test/`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println(ui.Blue("=== Claude Session Manager Health Check ===\n"))
 

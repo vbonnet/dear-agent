@@ -197,7 +197,7 @@ func TestIntegration_CustomPrompt(t *testing.T) {
 		}
 
 		flags := &types.Flags{
-			Input: "Focus on security topics",
+			AnalyzePrompt: "Focus on security topics",
 		}
 
 		// Will fail at extraction, but should handle custom prompt
@@ -209,11 +209,15 @@ func TestIntegration_CustomPrompt(t *testing.T) {
 		}
 	})
 
-	// Test file prompt
+	// Test file prompt with @file syntax
 	t.Run("file prompt", func(t *testing.T) {
 		// Create temp prompt file
 		promptFile := t.TempDir() + "/prompt.txt"
 		os.WriteFile(promptFile, []byte("Focus on AI topics"), 0644)
+
+		oldWd, _ := os.Getwd()
+		os.Chdir(t.TempDir())
+		defer os.Chdir(oldWd)
 
 		var stdout, stderr bytes.Buffer
 		cfg := &config.Config{
@@ -225,7 +229,7 @@ func TestIntegration_CustomPrompt(t *testing.T) {
 		}
 
 		flags := &types.Flags{
-			InputFile: promptFile,
+			AnalyzePrompt: "@prompt.txt",
 		}
 
 		// Will fail at extraction, but should handle file prompt

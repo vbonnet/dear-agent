@@ -292,9 +292,9 @@ func TestE2E_Scenario4_FullCustomization(t *testing.T) {
 func TestE2E_Scenario5_MigrationFromLegacyInput(t *testing.T) {
 	tempDir := t.TempDir()
 
-	t.Run("Legacy --input flag (string)", func(t *testing.T) {
+	t.Run("Modern --analyze-prompt flag (string)", func(t *testing.T) {
 		flags := &types.Flags{
-			Input: "Focus on security implications",
+			AnalyzePrompt: "Focus on security implications",
 		}
 
 		resolved, err := cmd.LoadAndResolvePrompts(flags)
@@ -302,9 +302,9 @@ func TestE2E_Scenario5_MigrationFromLegacyInput(t *testing.T) {
 			t.Fatalf("LoadAndResolvePrompts failed: %v", err)
 		}
 
-		// Legacy --input should map to analyze prompt
+		// Modern --analyze-prompt should be used
 		if resolved.AnalyzePrompt != "Focus on security implications" {
-			t.Errorf("Expected legacy input in analyze prompt, got: %s", resolved.AnalyzePrompt)
+			t.Errorf("Expected analyze prompt, got: %s", resolved.AnalyzePrompt)
 		}
 
 		// Other prompts should use defaults
@@ -314,27 +314,7 @@ func TestE2E_Scenario5_MigrationFromLegacyInput(t *testing.T) {
 		}
 	})
 
-	t.Run("Legacy --input-file flag", func(t *testing.T) {
-		// Create legacy input file
-		inputFile := filepath.Join(tempDir, "legacy-input.txt")
-		os.WriteFile(inputFile, []byte("Legacy prompt from file"), 0644)
-
-		flags := &types.Flags{
-			InputFile: inputFile,
-		}
-
-		resolved, err := cmd.LoadAndResolvePrompts(flags)
-		if err != nil {
-			t.Fatalf("LoadAndResolvePrompts failed: %v", err)
-		}
-
-		// Legacy --input-file should map to analyze prompt
-		if resolved.AnalyzePrompt != "Legacy prompt from file" {
-			t.Errorf("Expected legacy file content in analyze prompt, got: %s", resolved.AnalyzePrompt)
-		}
-	})
-
-	t.Run("Migration path: --input-file to --analyze-prompt @file", func(t *testing.T) {
+	t.Run("Modern --analyze-prompt @file flag", func(t *testing.T) {
 		// Create prompt file
 		promptFile := filepath.Join(tempDir, "modern-prompt.txt")
 		os.WriteFile(promptFile, []byte("Modern prompt with {topics}"), 0644)

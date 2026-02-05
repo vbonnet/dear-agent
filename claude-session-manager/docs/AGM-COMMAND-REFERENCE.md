@@ -636,12 +636,23 @@ Health check and validation for AGM and agent sessions.
 
 **Usage**: `agm doctor [flags]`
 
-**Flags**:
-- `--validate` - Structural + functional testing
-- `--fix` - Auto-fix issues (with --validate)
-- `--json` - JSON output for scripting
+**Modes**:
 
-**Structural Checks**:
+1. **Quick Health Check** (default): Fast structural checks (~1-5 seconds)
+2. **Deep Validation** (`--validate`): Thorough functional testing (~5-30 seconds per session)
+
+**When to Use Each Mode**:
+
+- **Use default mode** for daily health checks, quick overviews, and when performance matters
+- **Use `--validate` mode** for debugging resume failures, production readiness checks, and automated testing
+
+**Flags**:
+- `--validate` - Enable deep validation (structural + functional testing)
+- `--apply-fixes` - Auto-fix issues (requires --validate)
+- `--json` - JSON output for scripting
+- `--test` - Check test sessions in ~/sessions-test/ instead of production
+
+**Structural Checks** (always performed):
 - Agent installation (history files, binaries)
 - tmux installation and socket status
 - User lingering (session persistence after logout)
@@ -650,7 +661,7 @@ Health check and validation for AGM and agent sessions.
 - Sessions with empty/missing UUIDs
 - Session health (manifest validity, directory structure)
 
-**Functional Validation** (--validate flag):
+**Functional Validation** (--validate flag only):
 - Tests actual session resumability
 - Classifies 6 resume error types:
   - Empty session-env directory
@@ -660,24 +671,27 @@ Health check and validation for AGM and agent sessions.
   - CWD mismatch (working directory changed)
   - Lock contention (session locked by process)
 
-**Auto-Fix Strategies** (--fix flag):
+**Auto-Fix Strategies** (--apply-fixes flag):
 - Safe: Version mismatch (updates session-env manifest)
 - Risky: JSONL reorder (with backup/restore, requires confirmation)
 
 **Examples**:
 
 ```bash
-# Structural checks only
+# Quick health check (structural only - fast)
 agm doctor
 
-# Structural + functional testing
+# Deep validation (structural + functional - slower)
 agm doctor --validate
 
 # Test and auto-fix issues
-agm doctor --validate --fix
+agm doctor --validate --apply-fixes
 
 # JSON output for scripting
 agm doctor --validate --json
+
+# Check test sessions instead of production
+agm doctor --test
 ```
 
 **Output Example**:
@@ -694,7 +708,7 @@ agm doctor --validate --json
 --- Checking session health ---
 ⚠ Unhealthy session: my-broken-session
   Issue: JSONL file compacted (summaries not at end)
-  Fix: agm doctor --validate --fix
+  Fix: agm doctor --validate --apply-fixes
 
 ✓ System is healthy
 ```
@@ -1206,14 +1220,14 @@ agm unarchive task1  # Restore if needed
 ### Debugging Workflow
 
 ```bash
-# Check system health
+# Quick health check (fast)
 agm doctor
 
-# Detailed validation
+# Deep validation (thorough)
 agm doctor --validate
 
 # Auto-fix issues
-agm doctor --validate --fix
+agm doctor --validate --apply-fixes
 
 # Fix UUID associations
 agm fix my-session

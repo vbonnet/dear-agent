@@ -38,11 +38,11 @@ func TestMainHelp(t *testing.T) {
 	if !strings.Contains(output, "gemini-deep-research") {
 		t.Error("Help text should contain program name")
 	}
-	if !strings.Contains(output, "--input") {
-		t.Error("Help text should contain --input flag")
+	if !strings.Contains(output, "--analyze-prompt") {
+		t.Error("Help text should contain --analyze-prompt flag")
 	}
-	if !strings.Contains(output, "--input-file") {
-		t.Error("Help text should contain --input-file flag")
+	if !strings.Contains(output, "--mode") {
+		t.Error("Help text should contain --mode flag")
 	}
 	if !strings.Contains(output, "Examples:") {
 		t.Error("Help text should contain examples section")
@@ -81,8 +81,8 @@ func TestUsageText(t *testing.T) {
 
 	// Check for all flags
 	requiredFlags := []string{
-		"--input",
-		"--input-file",
+		"--analyze-prompt",
+		"--mode",
 		"--type",
 		"--output-dir",
 		"--timeout",

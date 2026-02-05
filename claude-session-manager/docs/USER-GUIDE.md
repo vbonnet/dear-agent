@@ -643,14 +643,35 @@ agm reject my-session --reason-file ~/prompts/VIOLATION.md
 
 ### Health Checks
 
-#### Basic Health Check
+The `doctor` command provides two modes of health checking:
+
+1. **Quick Health Check** (default): Fast structural checks (~1-5 seconds)
+2. **Deep Validation** (`--validate`): Thorough functional testing (~5-30 seconds per session)
+
+#### When to Use Each Mode
+
+**Use Quick Health Check (`agm doctor`) when:**
+- Running daily health checks
+- Quick system overview needed
+- Checking for configuration issues
+- Verifying installation status
+- Performance matters (fast exit)
+
+**Use Deep Validation (`agm doctor --validate`) when:**
+- Debugging session resume failures
+- Preparing for production deployment
+- Running automated CI/CD tests
+- Need to verify session resumability
+- Auto-fixing issues with `--apply-fixes`
+
+#### Quick Health Check (Default)
 
 ```bash
-# Structural checks only
+# Fast structural checks only
 agm doctor
 ```
 
-**Checks:**
+**Checks performed:**
 - Claude installation (history.jsonl exists)
 - tmux installation and socket status
 - User lingering (session persistence)
@@ -659,7 +680,9 @@ agm doctor
 - Sessions with empty/missing UUIDs
 - Session health (manifest validity)
 
-**Output:**
+**Performance:** ~1-5 seconds total
+
+**Example output:**
 ```
 === AGM Health Check ===
 
@@ -675,18 +698,20 @@ agm doctor
 ✓ System is healthy
 ```
 
-#### Functional Validation
+#### Deep Validation (Functional Testing)
 
 ```bash
 # Structural + functional tests
 agm doctor --validate
 
 # Test and auto-fix issues
-agm doctor --validate --fix
+agm doctor --validate --apply-fixes
 
 # JSON output for scripting
 agm doctor --validate --json
 ```
+
+**Performance:** ~5-30 seconds per session (depends on number of sessions)
 
 **Functional tests:**
 - Session resumability (creates test tmux session)

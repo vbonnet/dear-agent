@@ -205,11 +205,11 @@ func TestIntegrationConfigFlow_ErrorHandling(t *testing.T) {
 	})
 }
 
-// TestIntegrationConfigFlow_BackwardCompatibility tests migration from --input to --analyze-prompt
-func TestIntegrationConfigFlow_BackwardCompatibility(t *testing.T) {
-	t.Run("Legacy --input flag", func(t *testing.T) {
+// TestIntegrationConfigFlow_ModernPromptFlags tests modern prompt flag usage
+func TestIntegrationConfigFlow_ModernPromptFlags(t *testing.T) {
+	t.Run("Modern --analyze-prompt flag", func(t *testing.T) {
 		flags := &types.Flags{
-			Input: "Legacy input prompt",
+			AnalyzePrompt: "Modern analyze prompt",
 		}
 
 		resolved, err := cmd.LoadAndResolvePrompts(flags)
@@ -217,29 +217,34 @@ func TestIntegrationConfigFlow_BackwardCompatibility(t *testing.T) {
 			t.Fatalf("LoadAndResolvePrompts failed: %v", err)
 		}
 
-		// Legacy --input should map to analyze prompt
-		if resolved.AnalyzePrompt != "Legacy input prompt" {
-			t.Errorf("Expected legacy input to map to analyze prompt, got: %s", resolved.AnalyzePrompt)
+		// Modern --analyze-prompt should be used directly
+		if resolved.AnalyzePrompt != "Modern analyze prompt" {
+			t.Errorf("Expected analyze prompt to be used, got: %s", resolved.AnalyzePrompt)
 		}
 	})
 
-	t.Run("Legacy --input-file flag", func(t *testing.T) {
+	t.Run("Modern --analyze-prompt @file flag", func(t *testing.T) {
 		tempDir := t.TempDir()
-		inputFile := filepath.Join(tempDir, "input.txt")
-		os.WriteFile(inputFile, []byte("Legacy file content"), 0644)
+		promptFile := filepath.Join(tempDir, "analyze.txt")
+		os.WriteFile(promptFile, []byte("Modern file content"), 0644)
 
+		// Modern @file syntax is handled by LoadAndResolvePrompts
 		flags := &types.Flags{
-			InputFile: inputFile,
+			AnalyzePrompt: "@analyze.txt",
 		}
+
+		oldWd, _ := os.Getwd()
+		os.Chdir(tempDir)
+		defer os.Chdir(oldWd)
 
 		resolved, err := cmd.LoadAndResolvePrompts(flags)
 		if err != nil {
 			t.Fatalf("LoadAndResolvePrompts failed: %v", err)
 		}
 
-		// Legacy --input-file should map to analyze prompt with @file
-		if resolved.AnalyzePrompt != "Legacy file content" {
-			t.Errorf("Expected legacy input-file content, got: %s", resolved.AnalyzePrompt)
+		// Modern @file syntax should load file content
+		if resolved.AnalyzePrompt != "Modern file content" {
+			t.Errorf("Expected file content, got: %s", resolved.AnalyzePrompt)
 		}
 	})
 }
