@@ -2,11 +2,11 @@ package engram
 
 import (
 	"context"
-	"encoding/json"
+	"crypto/sha256"
 	"fmt"
-	"os"
-	"os/exec"
-	"strconv"
+
+	"github.com/google/uuid"
+	"github.com/vbonnet/engram/core/pkg/retrieval"
 )
 
 // EngramResult represents a single engram result from retrieval
@@ -25,98 +25,87 @@ type Client interface {
 	IsAvailable() bool
 }
 
-type cliClient struct {
-	config      EngramConfig
-	execCommand func(string, ...string) *exec.Cmd
+type libClient struct {
+	config  EngramConfig
+	service *retrieval.Service
 }
 
-// NewClient creates a new Engram CLI client
+// NewClient creates a new Engram library client
 func NewClient(cfg EngramConfig) Client {
-	return &cliClient{
-		config:      cfg,
-		execCommand: exec.Command,
+	return &libClient{
+		config:  cfg,
+		service: retrieval.NewService(),
 	}
 }
 
-// IsAvailable checks if Engram binary is available
-func (c *cliClient) IsAvailable() bool {
-	binaryPath := c.config.BinaryPath
-	if binaryPath == "" {
-		path, err := exec.LookPath("engram")
-		if err != nil {
-			return false
-		}
-		binaryPath = path
-	}
-
-	// Verify binary exists and is executable
-	info, err := os.Stat(binaryPath)
-	if err != nil {
-		return false
-	}
-
-	return info.Mode()&0111 != 0
+// IsAvailable checks if Engram retrieval is available
+// With library integration, this always returns true
+// (no binary dependency required)
+func (c *libClient) IsAvailable() bool {
+	return true // Library always available
 }
 
 // Query executes Engram retrieval with given query and tags
-func (c *cliClient) Query(query string, tags []string) ([]EngramResult, error) {
-	// Check availability first
-	if !c.IsAvailable() {
-		return nil, fmt.Errorf("engram binary not found (install or set AGM_ENGRAM_PATH)")
-	}
-
-	// Build command args
-	args := []string{"retrieve", query, "--format", "json", "--limit", strconv.Itoa(c.config.Limit)}
-	for _, tag := range tags {
-		args = append(args, "--tag", tag)
-	}
-
-	// Execute with timeout
+func (c *libClient) Query(query string, tags []string) ([]EngramResult, error) {
+	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), c.config.Timeout)
 	defer cancel()
 
-	cmd := c.execCommand("engram", args...)
-	cmdWithCtx := exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
+	// Generate session ID for telemetry
+	sessionID := uuid.New().String()
 
-	output, err := cmdWithCtx.Output()
-	if ctx.Err() == context.DeadlineExceeded {
-		return nil, fmt.Errorf("engram query timed out after %v", c.config.Timeout)
+	// Build search options
+	opts := retrieval.SearchOptions{
+		EngramPath: c.resolveEngramPath(),
+		Query:      query,
+		SessionID:  sessionID,
+		Transcript: query, // V1: use query as transcript
+		Tags:       tags,
+		Limit:      c.config.Limit,
+		UseAPI:     true, // Enable API ranking for better results
 	}
+
+	// Perform search
+	results, err := c.service.Search(ctx, opts)
 	if err != nil {
-		return nil, fmt.Errorf("engram command failed: %w", err)
+		return nil, fmt.Errorf("engram search failed: %w", err)
 	}
 
-	// Parse JSON
-	results, err := parseResults(output)
-	if err != nil {
-		return nil, err
+	// Convert retrieval.SearchResult → EngramResult
+	engramResults := make([]EngramResult, 0, len(results))
+	for _, r := range results {
+		// Compute content hash (SHA-256)
+		hasher := sha256.New()
+		hasher.Write([]byte(r.Engram.Content))
+		contentHash := fmt.Sprintf("%x", hasher.Sum(nil))
+
+		result := EngramResult{
+			Path:    r.Path,
+			Title:   r.Engram.Frontmatter.Title,
+			Score:   r.Score,
+			Tags:    r.Engram.Frontmatter.Tags,
+			Content: r.Engram.Content,
+			Hash:    "sha256:" + contentHash,
+		}
+
+		engramResults = append(engramResults, result)
 	}
 
-	// Filter by score
-	filtered := filterByScore(results, c.config.ScoreThreshold)
+	// Filter by score threshold
+	filtered := filterByScore(engramResults, c.config.ScoreThreshold)
 	return filtered, nil
 }
 
-// parseResults parses JSON output from Engram CLI
-func parseResults(data []byte) ([]EngramResult, error) {
-	if len(data) == 0 {
-		return []EngramResult{}, nil
+// resolveEngramPath determines the engrams directory path
+func (c *libClient) resolveEngramPath() string {
+	// Use BinaryPath as EngramPath (config field name is legacy from subprocess version)
+	if c.config.BinaryPath != "" {
+		return c.config.BinaryPath
 	}
 
-	var results []EngramResult
-	if err := json.Unmarshal(data, &results); err != nil {
-		return []EngramResult{}, fmt.Errorf("failed to parse engram JSON: %w", err)
-	}
-
-	// Filter out invalid results (missing required fields)
-	valid := []EngramResult{}
-	for _, r := range results {
-		if r.Hash != "" && r.Content != "" {
-			valid = append(valid, r)
-		}
-	}
-
-	return valid, nil
+	// Default: let retrieval.Service resolve path
+	// (tries ~/.engram/core/engrams, then relative path)
+	return "engrams"
 }
 
 // filterByScore filters results by minimum score threshold
