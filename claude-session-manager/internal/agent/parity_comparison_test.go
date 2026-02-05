@@ -142,9 +142,7 @@ func TestAgentParity_Capabilities(t *testing.T) {
 
 // TestAgentParity_SessionLifecycle compares session lifecycle behavior
 func TestAgentParity_SessionLifecycle(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "parity-lifecycle-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
@@ -204,9 +202,7 @@ func TestAgentParity_SessionLifecycle(t *testing.T) {
 
 // TestAgentParity_ExportFormats compares export format support
 func TestAgentParity_ExportFormats(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "parity-export-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
@@ -404,9 +400,7 @@ func TestAgentParity_NameAndVersion(t *testing.T) {
 
 // TestAgentParity_SessionMetadata compares how agents store metadata
 func TestAgentParity_SessionMetadata(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "parity-metadata-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)

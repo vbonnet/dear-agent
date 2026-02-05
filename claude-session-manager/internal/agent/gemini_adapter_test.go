@@ -148,9 +148,7 @@ func TestGeminiAdapter_Version(t *testing.T) {
 
 func TestGeminiAdapter_CreateSession(t *testing.T) {
 	// Create temp directory for session storage
-	tmpDir, err := os.MkdirTemp("", "gemini-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Override home directory for testing
 	originalHome := os.Getenv("HOME")
@@ -192,9 +190,7 @@ func TestGeminiAdapter_CreateSession(t *testing.T) {
 
 func TestGeminiAdapter_GetHistory(t *testing.T) {
 	// Create temp directory for session storage
-	tmpDir, err := os.MkdirTemp("", "gemini-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Override home directory for testing
 	originalHome := os.Getenv("HOME")
@@ -249,9 +245,7 @@ func TestGeminiAdapter_GetHistory(t *testing.T) {
 
 func TestGeminiAdapter_ExportConversation(t *testing.T) {
 	// Create temp directory for session storage
-	tmpDir, err := os.MkdirTemp("", "gemini-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Override home directory for testing
 	originalHome := os.Getenv("HOME")
@@ -340,9 +334,7 @@ func TestGeminiAdapter_ExportConversation(t *testing.T) {
 
 func TestGeminiAdapter_ImportConversation(t *testing.T) {
 	// Create temp directory for session storage
-	tmpDir, err := os.MkdirTemp("", "gemini-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Override home directory for testing
 	originalHome := os.Getenv("HOME")
@@ -418,9 +410,7 @@ func TestGeminiAdapter_GetSessionStatus(t *testing.T) {
 
 func TestGeminiAdapter_TerminateSession(t *testing.T) {
 	// Create temp directory for session storage
-	tmpDir, err := os.MkdirTemp("", "gemini-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Override home directory for testing
 	originalHome := os.Getenv("HOME")

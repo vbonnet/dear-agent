@@ -58,9 +58,7 @@ func TestGeminiAdapter_FeatureParity_AgentInterface(t *testing.T) {
 
 // TestGeminiAdapter_SessionLifecycle tests complete session lifecycle
 func TestGeminiAdapter_SessionLifecycle(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "gemini-lifecycle-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
@@ -103,9 +101,7 @@ func TestGeminiAdapter_SessionLifecycle(t *testing.T) {
 
 // TestGeminiAdapter_ResumeSession_EdgeCases tests resume session error conditions
 func TestGeminiAdapter_ResumeSession_EdgeCases(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "gemini-resume-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
@@ -184,9 +180,7 @@ func TestGeminiAdapter_ResumeSession_EdgeCases(t *testing.T) {
 
 // TestGeminiAdapter_CreateSession_ErrorHandling tests session creation failures
 func TestGeminiAdapter_CreateSession_ErrorHandling(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "gemini-create-err-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
@@ -238,9 +232,7 @@ func TestGeminiAdapter_CreateSession_ErrorHandling(t *testing.T) {
 
 // TestGeminiAdapter_HistoryPersistence tests history file persistence
 func TestGeminiAdapter_HistoryPersistence(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "gemini-history-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
@@ -320,9 +312,7 @@ func TestGeminiAdapter_HistoryPersistence(t *testing.T) {
 
 // TestGeminiAdapter_GetHistory_MalformedData tests robustness against corrupted history
 func TestGeminiAdapter_GetHistory_MalformedData(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "gemini-malformed-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
@@ -363,9 +353,7 @@ invalid json line
 
 // TestGeminiAdapter_ExportImport_RoundTrip tests export/import round-trip
 func TestGeminiAdapter_ExportImport_RoundTrip(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "gemini-roundtrip-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
@@ -430,9 +418,7 @@ func TestGeminiAdapter_ExportImport_RoundTrip(t *testing.T) {
 
 // TestGeminiAdapter_ExportMarkdown_Format tests markdown export formatting
 func TestGeminiAdapter_ExportMarkdown_Format(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "gemini-markdown-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
@@ -648,9 +634,7 @@ func TestGeminiAdapter_ExecuteCommand_Coverage(t *testing.T) {
 
 // TestGeminiAdapter_SessionDirectory_Structure tests directory structure
 func TestGeminiAdapter_SessionDirectory_Structure(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "gemini-dirstructure-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
@@ -693,9 +677,7 @@ func TestGeminiAdapter_SessionDirectory_Structure(t *testing.T) {
 
 // TestGeminiAdapter_ConcurrentSessions tests multiple simultaneous sessions
 func TestGeminiAdapter_ConcurrentSessions(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "gemini-concurrent-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
@@ -750,9 +732,7 @@ func TestGeminiAdapter_ConcurrentSessions(t *testing.T) {
 
 // TestGeminiAdapter_TerminateSession_Preservation tests history preservation after termination
 func TestGeminiAdapter_TerminateSession_Preservation(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "gemini-preserve-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
@@ -805,9 +785,7 @@ func TestGeminiAdapter_TerminateSession_Preservation(t *testing.T) {
 
 // TestGeminiAdapter_ImportConversation_InvalidFormat tests import error handling
 func TestGeminiAdapter_ImportConversation_InvalidFormat(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "gemini-import-invalid-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
