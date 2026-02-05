@@ -59,11 +59,13 @@ func (hc *HealthChecker) Check() error {
 		return nil
 	}
 
-	// Perform health probe: run tmux list-sessions with timeout
+	// Perform health probe: check AGM socket (our primary socket)
 	ctx, cancel := context.WithTimeout(context.Background(), hc.probeTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "tmux", "list-sessions")
+	// Check AGM socket specifically (not default tmux socket)
+	socketPath := GetSocketPath()
+	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-sessions")
 	err := cmd.Run()
 
 	// Update cache

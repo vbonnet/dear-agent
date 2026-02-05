@@ -59,7 +59,7 @@ func SendPromptLiteral(target, prompt string) error {
 	// Step 2: Send text in literal mode
 	// IMPORTANT: -l and C-m must be SEPARATE commands (https://github.com/tmux/tmux/issues/1778)
 	// If combined, C-m is treated as literal text instead of Enter key
-	cmd1 := exec.Command("tmux", "send-keys", "-t", target, "-l", prompt)
+	cmd1 := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", target, "-l", prompt)
 	if err := cmd1.Run(); err != nil {
 		return fmt.Errorf("failed to send prompt text: %w", err)
 	}
@@ -69,7 +69,7 @@ func SendPromptLiteral(target, prompt string) error {
 	time.Sleep(500 * time.Millisecond)
 
 	// Step 3: Send Enter key separately (as user specified)
-	cmd2 := exec.Command("tmux", "send-keys", "-t", target, "C-m")
+	cmd2 := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", target, "C-m")
 	if err := cmd2.Run(); err != nil {
 		return fmt.Errorf("failed to send Enter key: %w", err)
 	}
