@@ -14,16 +14,17 @@ type SendMessageRequest = mock.SendMessageRequest
 
 // Environment manages test state and adapters
 type Environment struct {
-	T              *testing.T
-	ClaudeAdapter  mock.Adapter
-	GeminiAdapter  mock.Adapter
-	GPTAdapter     mock.Adapter
-	CurrentAdapter mock.Adapter // Currently selected adapter
-	CurrentSession *mock.Session
-	Sessions       map[string]*mock.Session // Track all sessions by name
-	LastResponse   *mock.Response
-	LastError      error
-	FirstMessage   string // Store first message for sequential message tests
+	T                  *testing.T
+	ClaudeAdapter      mock.Adapter
+	GeminiAdapter      mock.Adapter
+	GPTAdapter         mock.Adapter
+	CurrentAdapter     mock.Adapter // Currently selected adapter
+	CurrentSession     *mock.Session
+	Sessions           map[string]*mock.Session // Track all sessions by name
+	LastResponse       *mock.Response
+	LastError          error
+	FirstMessage       string      // Store first message for sequential message tests
+	AssociationContext interface{} // Context for association tests
 }
 
 // NewEnvironment creates a new test environment
@@ -58,4 +59,5 @@ func (e *Environment) Cleanup() {
 	e.LastResponse = nil
 	e.LastError = nil
 	e.FirstMessage = ""
+	e.AssociationContext = nil
 }

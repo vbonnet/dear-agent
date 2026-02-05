@@ -1,6 +1,6 @@
-# Claude Session Manager - Plugin Installation
+# AGM - Plugin Installation
 
-This repository provides Claude Code slash commands through the plugin marketplace system.
+This repository provides Claude Code slash commands for Agent Gateway Manager (AGM) through the plugin marketplace system.
 
 ## Installation
 
@@ -15,7 +15,7 @@ From within any Claude Code session, run:
 Then install the plugin:
 
 ```
-/plugin install csm-tools@ai-tools
+/plugin install agm@ai-tools
 ```
 
 ### Option 2: Configure in Settings
@@ -35,7 +35,7 @@ Add to your `.claude/settings.json`:
 Then restart Claude Code and run:
 
 ```
-/plugin install csm-tools
+/plugin install agm
 ```
 
 ### Option 3: GitHub-based (For Shared Teams)
@@ -44,14 +44,14 @@ If this repo is on GitHub:
 
 ```
 /plugin marketplace add your-org/ai-tools
-/plugin install csm-tools@ai-tools
+/plugin install agm@ai-tools
 ```
 
 ## Available Commands
 
 After installation, the following slash commands will be available:
 
-- `/csm-assoc <session-name>` - Associate current Claude session with a CSM session
+- `/agm:assoc <session-name>` - Associate current Claude session with an AGM session
 
 ## Verification
 
@@ -67,27 +67,27 @@ View available commands:
 /help
 ```
 
-The CSM commands should appear with "(csm-tools)" suffix.
+The AGM commands should appear with "(agm)" suffix.
 
 ## Updating
 
 When commands are updated in the repository:
 
 ```
-/plugin update csm-tools
+/plugin update agm
 ```
 
 Or reinstall:
 
 ```
-/plugin uninstall csm-tools
-/plugin install csm-tools@ai-tools
+/plugin uninstall agm
+/plugin install agm@ai-tools
 ```
 
 ## Requirements
 
 - Claude Code CLI installed
-- CSM binary installed (`make install` for the binary)
+- AGM binary installed (`make install` for the binary)
 - This repository cloned locally
 
 ## See Also
