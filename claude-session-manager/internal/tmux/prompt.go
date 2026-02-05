@@ -56,25 +56,21 @@ func SendPromptLiteral(target, prompt string) error {
 	// Wait for session to process ESC
 	time.Sleep(500 * time.Millisecond)
 
-	// Step 2: Use control mode to send text + Enter with reliable timing
-	// Control mode waits for %end notifications, eliminating race conditions
-	ctrl, err := StartControlMode(target)
-	if err != nil {
-		return fmt.Errorf("failed to start control mode: %w", err)
-	}
-	defer ctrl.Close()
-
-	// Send text in literal mode (waits for %end notification)
-	cmd1 := fmt.Sprintf("send-keys -t %s -l %q", target, prompt)
-	if err := ctrl.SendCommand(cmd1); err != nil {
+	// Step 2: Send text in literal mode
+	// IMPORTANT: -l and C-m must be SEPARATE commands (https://github.com/tmux/tmux/issues/1778)
+	// If combined, C-m is treated as literal text instead of Enter key
+	cmd1 := exec.Command("tmux", "send-keys", "-t", target, "-l", prompt)
+	if err := cmd1.Run(); err != nil {
 		return fmt.Errorf("failed to send prompt text: %w", err)
 	}
 
-	// Send Enter separately (waits for %end notification)
-	// IMPORTANT: C-m must be separate from -l, otherwise it's treated as literal text
-	// See: https://github.com/tmux/tmux/issues/1778
-	cmd2 := fmt.Sprintf("send-keys -t %s C-m", target)
-	if err := ctrl.SendCommand(cmd2); err != nil {
+	// Wait for text to be fully sent before sending Enter
+	// Increased from 200ms to 500ms to handle load conditions
+	time.Sleep(500 * time.Millisecond)
+
+	// Step 3: Send Enter key separately (as user specified)
+	cmd2 := exec.Command("tmux", "send-keys", "-t", target, "C-m")
+	if err := cmd2.Run(); err != nil {
 		return fmt.Errorf("failed to send Enter key: %w", err)
 	}
 

@@ -179,34 +179,63 @@ func SendCommand(sessionName string, command string) error {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
 
-	// Lock tmux server for send-keys operations (prevent interleaved sends)
+	// Lock tmux server for buffer operations (prevent interleaved pastes)
 	return withTmuxLock(func() error {
-		// Send command text using -l (literal) flag
-		cmdText, cancel1 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, "-l", command)
+		// Step 1: Load command text into tmux paste buffer via stdin
+		// This avoids command-line length limits and special character escaping issues
+		cmdLoad, cancel1 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "load-buffer", "-")
 		defer cancel1()
-		if err := cmdText.Run(); err != nil {
+
+		stdin, err := cmdLoad.StdinPipe()
+		if err != nil {
+			return fmt.Errorf("failed to create stdin pipe for load-buffer: %w", err)
+		}
+
+		if err := cmdLoad.Start(); err != nil {
+			return fmt.Errorf("failed to start load-buffer: %w", err)
+		}
+
+		// Write command to buffer via stdin
+		if _, err := stdin.Write([]byte(command)); err != nil {
+			stdin.Close()
+			cmdLoad.Wait()
+			return fmt.Errorf("failed to write to load-buffer stdin: %w", err)
+		}
+		stdin.Close()
+
+		if err := cmdLoad.Wait(); err != nil {
 			if ctx.Err() == context.DeadlineExceeded {
 				return &TimeoutError{
-					Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
+					Problem:  fmt.Sprintf("tmux load-buffer timed out after %v (server may be hung)", globalTimeout),
 					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
 					Duration: globalTimeout,
 				}
 			}
-			return fmt.Errorf("failed to send command text to tmux: %w", err)
+			return fmt.Errorf("failed to load command into tmux buffer: %w", err)
 		}
 
-		// Small delay to ensure tmux processes the text before we send Enter
-		// See: https://github.com/tmux/tmux/issues/1778
-		// Without this delay, text may not be fully received before Enter is processed
-		time.Sleep(100 * time.Millisecond)
-
-		// Send Enter key separately (required - sending C-m in same command creates newline in prompt)
-		cmdEnter, cancel2 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, "C-m")
+		// Step 2: Paste buffer to session (atomic operation, -d deletes buffer after paste)
+		cmdPaste, cancel2 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "paste-buffer", "-t", sessionName, "-d")
 		defer cancel2()
+		if err := cmdPaste.Run(); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return &TimeoutError{
+					Problem:  fmt.Sprintf("tmux paste-buffer timed out after %v (server may be hung)", globalTimeout),
+					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+					Duration: globalTimeout,
+				}
+			}
+			return fmt.Errorf("failed to paste buffer to tmux session: %w", err)
+		}
+
+		// Step 3: Send Enter key to submit the command
+		// No delay needed - paste-buffer is atomic and tmux handles the timing
+		cmdEnter, cancel3 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, "C-m")
+		defer cancel3()
 		if err := cmdEnter.Run(); err != nil {
 			if ctx.Err() == context.DeadlineExceeded {
 				return &TimeoutError{
-					Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
+					Problem:  fmt.Sprintf("tmux send-keys timed out after %v (server may be hung)", globalTimeout),
 					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
 					Duration: globalTimeout,
 				}
