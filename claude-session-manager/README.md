@@ -113,8 +113,8 @@ See `docs/AGENTS.md.example` for full configuration spec. Integration tracked in
 - **Fuzzy matching** - Typo-tolerant session names ("my-ses" → "my-session")
 - **Auto UUID detection** - Hybrid detection from `~/.claude/history.jsonl`
 - **Batch operations** - Multi-select cleanup for archival/deletion
-- **Pattern-based restore** - Glob patterns for archived session recovery (`csm unarchive *[REDACTED_EMPLOYER]*`)
-- **AI-powered search** - Semantic search using Google Vertex AI (`csm search "OAuth work"`)
+- **Pattern-based restore** - Glob patterns for archived session recovery (`agm unarchive *[REDACTED_EMPLOYER]*`)
+- **AI-powered search** - Semantic search using Google Vertex AI (`agm search "OAuth work"`)
 
 ### 🔌 Command Translation (Multi-Agent)
 
@@ -155,28 +155,28 @@ See `internal/command/` package documentation for implementation details.
 
 ```bash
 # Smart resume/create (no args needed!)
-csm                    # Shows picker if multiple sessions, creates if none
+agm                    # Shows picker if multiple sessions, creates if none
 
 # Named session (with fuzzy matching)
-csm my-session         # Exact match → resume
-csm my-ses            # Fuzzy match → "did you mean?"
-csm new-name          # No match → offer to create
+agm my-session         # Exact match → resume
+agm my-ses            # Fuzzy match → "did you mean?"
+agm new-name          # No match → offer to create
 
 # Explicit commands
-csm new               # Interactive form for new session
-csm list              # List all sessions with status
-csm clean             # Batch cleanup (archive/delete)
-csm fix               # Fix UUID associations
+agm new               # Interactive form for new session
+agm list              # List all sessions with status
+agm clean             # Batch cleanup (archive/delete)
+agm fix               # Fix UUID associations
 
 # Archive management (NEW!)
-csm unarchive *pattern*         # Restore archived sessions by pattern
-csm search "semantic query"     # AI-powered semantic search
+agm unarchive *pattern*         # Restore archived sessions by pattern
+agm search "semantic query"     # AI-powered semantic search
 ```
 
 ## Installation
 
 ```bash
-go install github.com/vbonnet/ai-tools/claude-session-manager/cmd/csm@latest
+go install github.com/vbonnet/ai-tools/claude-session-manager/cmd/agm@latest
 ```
 
 ### Bash Completion (Recommended)
@@ -209,7 +209,7 @@ fi
 
 ## Commands
 
-### Primary Command: `csm [session-name]`
+### Primary Command: `agm [session-name]`
 
 Smart behavior based on context:
 
@@ -222,26 +222,26 @@ Smart behavior based on context:
 - Fuzzy matches found → "Did you mean" prompt
 - No match → Offers to create new session
 
-### `csm new [session-name]`
+### `agm new [session-name]`
 
 Create new session with interactive form:
 - Session name validation (alphanumeric, hyphens, underscores)
 - Project directory selection
 - Optional purpose/description
 - Auto-creates tmux session + starts Claude
-- **Sequenced initialization** - Sends `/rename` to generate UUID, then `/csm-assoc` (via tmux control mode)
+- **Sequenced initialization** - Sends `/rename` to generate UUID, then `/agm:assoc` (via tmux control mode)
 - Auto-associates UUID via history detection
 - Reliable UUID capture with 95%+ success rate
 
-### `csm list [flags]`
+### `agm list [flags]`
 
 List sessions with rich formatting:
 
 ```bash
-csm list                 # Active/stopped sessions (table format)
-csm list --all           # Include archived
-csm list --archived      # Only archived
-csm list --format=json   # Machine-readable output
+agm list                 # Active/stopped sessions (table format)
+agm list --all           # Include archived
+agm list --archived      # Only archived
+agm list --format=json   # Machine-readable output
 ```
 
 **Output formats:**
@@ -249,24 +249,24 @@ csm list --format=json   # Machine-readable output
 - `json` - Machine-readable JSON
 - `simple` - Simple name list
 
-### `csm clean`
+### `agm clean`
 
 Interactive batch cleanup with smart suggestions:
 
 - **Stopped sessions >30 days** - Suggested for archival
 - **Archived sessions >90 days** - Suggested for deletion
 - Multi-select interface with confirmation
-- Thresholds customizable in `~/.config/csm/config.yaml`
+- Thresholds customizable in `~/.config/agm/config.yaml`
 
-### `csm fix [session-name]`
+### `agm fix [session-name]`
 
 Manual UUID association management:
 
 ```bash
-csm fix                  # Scan all unassociated sessions
-csm fix my-session       # Fix specific session with suggestions
-csm fix --all            # Auto-fix all (high confidence only)
-csm fix --clear my-sess  # Remove UUID association
+agm fix                  # Scan all unassociated sessions
+agm fix my-session       # Fix specific session with suggestions
+agm fix --all            # Auto-fix all (high confidence only)
+agm fix --clear my-sess  # Remove UUID association
 ```
 
 **UUID Suggestions:**
@@ -274,15 +274,15 @@ csm fix --clear my-sess  # Remove UUID association
 2. Recent UUIDs from `~/.claude/history.jsonl`
 3. Manual entry option
 
-### `csm doctor [flags]`
+### `agm doctor [flags]`
 
-Health check and validation for CSM and Claude sessions:
+Health check and validation for AGM and Claude sessions:
 
 ```bash
-csm doctor                    # Structural checks only
-csm doctor --validate         # Structural + functional testing
-csm doctor --validate --fix   # Test and auto-fix issues
-csm doctor --validate --json  # JSON output for scripting
+agm doctor                    # Structural checks only
+agm doctor --validate         # Structural + functional testing
+agm doctor --validate --fix   # Test and auto-fix issues
+agm doctor --validate --json  # JSON output for scripting
 ```
 
 **Structural checks:**
@@ -321,24 +321,24 @@ csm doctor --validate --json  # JSON output for scripting
 --- Checking session health ---
 ⚠ Unhealthy session: my-broken-session
   Issue: JSONL file compacted (summaries not at end)
-  Fix: csm doctor --validate --fix
+  Fix: agm doctor --validate --fix
 
 ✓ System is healthy (or ⚠ Some issues found - see recommendations above)
 ```
 
-### `csm archive <session-name>`
+### `agm archive <session-name>`
 
 Archive a session (marks as archived, keeps manifest).
 
-### `csm unarchive <pattern>`
+### `agm unarchive <pattern>`
 
 Restore archived sessions using glob patterns with interactive selection:
 
 ```bash
-csm unarchive my-session        # Exact match - auto-restore
-csm unarchive *[REDACTED_EMPLOYER]*          # Pattern match - show picker if multiple
-csm unarchive "session-202?"    # Wildcard year
-csm unarchive "*"               # All archived - interactive selection
+agm unarchive my-session        # Exact match - auto-restore
+agm unarchive *[REDACTED_EMPLOYER]*          # Pattern match - show picker if multiple
+agm unarchive "session-202?"    # Wildcard year
+agm unarchive "*"               # All archived - interactive selection
 ```
 
 **Features:**
@@ -347,14 +347,14 @@ csm unarchive "*"               # All archived - interactive selection
 - Interactive selection menu for multiple matches
 - Searches both in-place archived sessions and `.archive-old-format/`
 
-### `csm search <query>`
+### `agm search <query>`
 
 Find archived sessions using AI-powered semantic search:
 
 ```bash
-csm search "that conversation about Composio"
-csm search "OAuth integration with MCP"
-csm search "last week's debugging session"
+agm search "that conversation about Composio"
+agm search "OAuth integration with MCP"
+agm search "last week's debugging session"
 ```
 
 **Features:**
@@ -379,16 +379,16 @@ gcloud config set project your-project-id
 **Flags:**
 - `--max-results <N>` - Maximum results to return (default: 10)
 
-### `csm send <session-name> [flags]`
+### `agm send <session-name> [flags]`
 
-Send a message/prompt to a running CSM session, interrupting any active thinking state:
+Send a message/prompt to a running AGM session, interrupting any active thinking state:
 
 ```bash
 # Send inline prompt
-csm send my-session --prompt "Please review the code"
+agm send my-session --prompt "Please review the code"
 
 # Send prompt from file (for large multi-line prompts)
-csm send my-session --prompt-file /path/to/prompt.txt
+agm send my-session --prompt-file /path/to/prompt.txt
 ```
 
 **Features:**
@@ -411,22 +411,22 @@ csm send my-session --prompt-file /path/to/prompt.txt
 **Example:**
 ```bash
 # Send diagnosis request to stuck session
-csm send gemini-research --prompt "⚠️ Your session was stuck. Please analyze what caused the hang and file an incident report."
+agm send gemini-research --prompt "⚠️ Your session was stuck. Please analyze what caused the hang and file an incident report."
 
 # Send multi-line prompt from file
-csm send my-session --prompt-file ~/templates/code-review-prompt.txt
+agm send my-session --prompt-file ~/templates/code-review-prompt.txt
 ```
 
-### `csm reject <session-name> [flags]`
+### `agm reject <session-name> [flags]`
 
 Reject a permission prompt with a custom reason (automates the Down → Tab → paste → Enter flow):
 
 ```bash
 # Reject with inline reason
-csm reject my-session --reason "Use Read tool instead of cat"
+agm reject my-session --reason "Use Read tool instead of cat"
 
 # Reject with violation prompt from file
-csm reject my-session --reason-file ~/prompts/VIOLATION-PROMPTS.md
+agm reject my-session --reason-file ~/prompts/VIOLATION-PROMPTS.md
 ```
 
 **Features:**
@@ -449,10 +449,10 @@ csm reject my-session --reason-file ~/prompts/VIOLATION-PROMPTS.md
 **Example:**
 ```bash
 # Reject tool usage violation
-csm reject my-session --reason-file ~/src/ws/oss/tool-usage-analysis/prompts/VIOLATION-PROMPTS.md
+agm reject my-session --reason-file ~/src/ws/oss/tool-usage-analysis/prompts/VIOLATION-PROMPTS.md
 
 # Reject with custom feedback
-csm reject my-session --reason "Please use absolute paths and separate tool calls. Read the bash tool guidance at ~/docs/bash-rules.md"
+agm reject my-session --reason "Please use absolute paths and separate tool calls. Read the bash tool guidance at ~/docs/bash-rules.md"
 ```
 
 **Workflow executed:**
@@ -463,7 +463,7 @@ csm reject my-session --reason "Please use absolute paths and separate tool call
 
 ## Accessibility
 
-CSM supports WCAG AA accessibility standards through global flags and environment variables:
+AGM supports WCAG AA accessibility standards through global flags and environment variables:
 
 ### Disable Colors
 
@@ -471,11 +471,11 @@ For users who cannot distinguish colors or need plain text output:
 
 ```bash
 # Using flags (recommended)
-csm list --no-color
-csm doctor --no-color
+agm list --no-color
+agm doctor --no-color
 
 # Using environment variable (legacy)
-NO_COLOR=1 csm list
+NO_COLOR=1 agm list
 ```
 
 The `--no-color` flag:
@@ -489,11 +489,11 @@ For users using screen readers or assistive technology:
 
 ```bash
 # Using flags (recommended)
-csm doctor --screen-reader
-csm list --screen-reader
+agm doctor --screen-reader
+agm list --screen-reader
 
 # Using environment variable (legacy)
-AGM_SCREEN_READER=1 csm doctor
+AGM_SCREEN_READER=1 agm doctor
 ```
 
 The `--screen-reader` flag:
@@ -504,34 +504,34 @@ The `--screen-reader` flag:
 ### Combine Both Flags
 
 ```bash
-csm doctor --no-color --screen-reader
+agm doctor --no-color --screen-reader
 ```
 
 ### High-Contrast Themes
 
-CSM includes high-contrast themes optimized for accessibility:
+AGM includes high-contrast themes optimized for accessibility:
 
 ```yaml
-# ~/.config/csm/config.yaml
+# ~/.config/agm/config.yaml
 ui:
-  theme: "csm"        # High-contrast for dark terminals (default)
-  # theme: "csm-light" # High-contrast for light terminals
+  theme: "agm"        # High-contrast for dark terminals (default)
+  # theme: "agm-light" # High-contrast for light terminals
 ```
 
-The `csm` theme provides:
+The `agm` theme provides:
 - WCAG AA compliant contrast ratios (4.5:1 minimum)
 - Selection indicated by color + cursor symbol + bold text
 - Semantic color consistency (green=success, red=error, yellow=warning)
 
 ### Automatic Accessibility Detection
 
-CSM automatically detects non-TTY environments (CI/CD, pipes) and disables colors. Flags provide explicit control when needed.
+AGM automatically detects non-TTY environments (CI/CD, pipes) and disables colors. Flags provide explicit control when needed.
 
 **Documentation:** See `docs/ACCESSIBILITY.md` for complete WCAG compliance details and contrast ratios.
 
 ## Configuration
 
-Create `~/.config/csm/config.yaml`:
+Create `~/.config/agm/config.yaml`:
 
 ```yaml
 defaults:
@@ -557,7 +557,7 @@ advanced:
 
 ## UUID Auto-Detection
 
-CSM uses a hybrid approach for UUID detection:
+AGM uses a hybrid approach for UUID detection:
 
 ### Automatic Detection
 1. Reads `~/.claude/history.jsonl` for recent Claude sessions
@@ -568,7 +568,7 @@ CSM uses a hybrid approach for UUID detection:
    - **Low** (> 5 min old) - Listed in suggestions
 
 ### Manual Association
-Use `csm fix` to manually associate UUIDs:
+Use `agm fix` to manually associate UUIDs:
 - Shows ranked suggestions from history
 - Displays context (directory, timestamp, confidence)
 - Allows manual UUID entry
@@ -590,8 +590,8 @@ internal/
 │   ├── tmux.go            # Core tmux operations
 │   ├── control.go         # Control mode (-C) for programmatic control
 │   ├── output_watcher.go  # Output stream monitoring (octal escape handling)
-│   ├── init_sequence.go   # Sequenced /rename → /csm-assoc initialization
-│   ├── socket.go          # Unix socket management (/tmp/csm.sock)
+│   ├── init_sequence.go   # Sequenced /rename → /agm:assoc initialization
+│   ├── socket.go          # Unix socket management (/tmp/agm.sock)
 │   ├── linger.go          # Systemd lingering support
 │   └── health.go          # Health checks
 ├── history/        # ~/.claude/history.jsonl parser
@@ -624,45 +624,45 @@ go test -cover ./internal/fuzzy ./internal/ui ./internal/history ./internal/dete
 go test -v ./internal/fuzzy
 ```
 
-### Testing with csm test
+### Testing with agm test
 
-For integration testing and debugging CSM features in isolated environments, use the `csm test` subcommands:
+For integration testing and debugging AGM features in isolated environments, use the `agm test` subcommands:
 
 ```bash
 # Create isolated test session (separate from production sessions)
-csm test create my-test
+agm test create my-test
 
 # Send commands to test session
-csm test send my-test "csm associate --create my-project"
+agm test send my-test "agm associate --create my-project"
 
 # Capture output for verification
-csm test capture my-test --lines 50
+agm test capture my-test --lines 50
 
 # Cleanup when done
-csm test cleanup my-test
+agm test cleanup my-test
 ```
 
 **Common testing patterns:**
 
 ```bash
-# Test CSM session lifecycle
-csm test create lifecycle-test
-csm test send lifecycle-test "csm new test-session --project ~/projects/test"
-csm test capture lifecycle-test
-csm test cleanup lifecycle-test
+# Test AGM session lifecycle
+agm test create lifecycle-test
+agm test send lifecycle-test "agm new test-session --project ~/projects/test"
+agm test capture lifecycle-test
+agm test cleanup lifecycle-test
 
 # Test with JSON output (for automation)
-csm test create api-test --json
-csm test send api-test "csm list" --json
-csm test cleanup api-test --json
+agm test create api-test --json
+agm test send api-test "agm list" --json
+agm test cleanup api-test --json
 
 # Interactive debugging
-csm test create debug-session
+agm test create debug-session
 # ... manually send commands as needed ...
-csm test cleanup debug-session
+agm test cleanup debug-session
 ```
 
-**Test isolation:** Test sessions use `/tmp/csm-test-*` directories and `csm-test-*` tmux sessions, completely isolated from production CSM state (`~/.claude-sessions/`).
+**Test isolation:** Test sessions use `/tmp/agm-test-*` directories and `agm-test-*` tmux sessions, completely isolated from production AGM state (`~/.claude-sessions/`).
 
 ### Test Coverage
 
@@ -677,7 +677,7 @@ csm test cleanup debug-session
 ### Building
 
 ```bash
-go build ./cmd/csm
+go build ./cmd/agm
 ```
 
 ## Documentation
