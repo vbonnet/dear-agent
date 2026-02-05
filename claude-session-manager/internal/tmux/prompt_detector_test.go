@@ -93,6 +93,97 @@ func TestContainsPromptPattern(t *testing.T) {
 	}
 }
 
+func TestContainsClaudePromptPattern(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		expected bool
+	}{
+		// Positive cases - should match Claude prompt
+		{
+			name:     "Exact Claude prompt",
+			content:  "❯",
+			expected: true,
+		},
+		{
+			name:     "Claude prompt with whitespace",
+			content:  "  ❯  ",
+			expected: true,
+		},
+		{
+			name:     "Claude prompt in context",
+			content:  "user@host:~/dir ❯",
+			expected: true,
+		},
+		{
+			name:     "Multi-line with Claude prompt",
+			content:  "some output\nmore output\n❯",
+			expected: true,
+		},
+		// Negative cases - should NOT match bash prompts
+		{
+			name:     "Bash prompt $ (no space)",
+			content:  "$",
+			expected: false,
+		},
+		{
+			name:     "Bash prompt > (no space)",
+			content:  ">",
+			expected: false,
+		},
+		{
+			name:     "Bash prompt # (no space)",
+			content:  "#",
+			expected: false,
+		},
+		{
+			name:     "Bash prompt $ with space",
+			content:  "$ ",
+			expected: false,
+		},
+		{
+			name:     "Bash prompt > with space",
+			content:  "> ",
+			expected: false,
+		},
+		{
+			name:     "Bash prompt # with space",
+			content:  "# ",
+			expected: false,
+		},
+		{
+			name:     "Bash prompt with path",
+			content:  "user@host:~/dir $ ",
+			expected: false,
+		},
+		{
+			name:     "Empty string",
+			content:  "",
+			expected: false,
+		},
+		{
+			name:     "Whitespace only",
+			content:  "   ",
+			expected: false,
+		},
+		{
+			name:     "Regular text",
+			content:  "hello world",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := containsClaudePromptPattern(tt.content)
+			if result != tt.expected {
+				t.Errorf("containsClaudePromptPattern(%q) = %v, expected %v",
+					tt.content, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestClaudePromptPatterns(t *testing.T) {
 	// Verify that all expected patterns are defined
 	expectedPatterns := map[string]bool{

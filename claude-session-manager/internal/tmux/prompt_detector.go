@@ -115,7 +115,27 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for Claude prompt (waited %v, checked %d lines)", timeout, linesChecked)
 }
 
-// containsPromptPattern checks if content contains any prompt pattern
+// containsClaudePromptPattern checks if content contains Claude's unique prompt pattern.
+// This function is more strict than containsPromptPattern - it ONLY matches
+// Claude Code's specific "❯" prompt, not generic shell prompts.
+//
+// This is used to avoid false positives when bash shell is visible before Claude starts.
+// The bash prompt ("$", ">", "#") should NOT be detected as Claude being ready.
+func containsClaudePromptPattern(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+
+	// Only check for Claude's specific prompt character (U+276F)
+	// This excludes bash prompts like "$", ">", "#"
+	return strings.Contains(trimmed, "❯")
+}
+
+// containsPromptPattern is deprecated. Use containsClaudePromptPattern instead.
+// This function matches bash prompts ("$", ">", "#") which causes false positives
+// when bash shell is visible before Claude starts.
+// Preserved for backward compatibility with WaitForClaudePrompt (control mode function).
 func containsPromptPattern(content string) bool {
 	// Trim whitespace for comparison
 	trimmed := strings.TrimSpace(content)
@@ -166,8 +186,8 @@ func WaitForPromptSimple(sessionName string, timeout time.Duration) error {
 
 		// Check each line for prompt pattern
 		for i, line := range lines {
-			if containsPromptPattern(line) {
-				debug.Log("✓ Prompt pattern detected in line %d (check #%d): %q", i, checkCount, strings.TrimSpace(line))
+			if containsClaudePromptPattern(line) {
+				debug.Log("✓ Claude prompt detected in line %d (check #%d): %q", i, checkCount, strings.TrimSpace(line))
 				// Found prompt - wait a bit to ensure it's stable
 				time.Sleep(500 * time.Millisecond)
 				return nil

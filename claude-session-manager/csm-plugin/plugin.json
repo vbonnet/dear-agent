@@ -1,7 +1,0 @@
-{
-  "name": "csm-tools",
-  "version": "0.4.0",
-  "description": "Claude Session Manager commands for managing Claude sessions with tmux",
-  "commands": ["./commands/"],
-  "dependencies": ["csm", "tmux"]
-}
