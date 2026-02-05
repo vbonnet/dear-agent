@@ -20,7 +20,7 @@ AGM is a smart session manager for AI agents (Claude, Gemini, GPT) that provides
 
 ```bash
 # Install AGM
-go install github.com/vbonnet/ai-tools/claude-session-manager/cmd/csm@latest
+go install github.com/vbonnet/ai-tools/claude-session-manager/cmd/agm@latest
 
 # Verify installation
 agm --version
@@ -29,13 +29,12 @@ agm --version
 ### Enable Bash Completion (Recommended)
 
 ```bash
-# Run the setup script
-cd ~/src/ai-tools/claude-session-manager
-./scripts/setup-completion.sh
+# Add to ~/.bashrc
+if command -v agm &> /dev/null; then
+    source <(agm completion bash)
+fi
 
-# Or manually
-cp scripts/csm-completion.bash ~/.csm-completion.bash
-echo 'source ~/.csm-completion.bash' >> ~/.bashrc
+# Reload shell
 source ~/.bashrc
 ```
 
@@ -201,7 +200,7 @@ defaults:
   archive_threshold_days: 90
 
 ui:
-  theme: "csm"
+  theme: "agm"
   picker_height: 15
   show_project_paths: true
   fuzzy_search: true
