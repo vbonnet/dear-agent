@@ -1,4 +1,6 @@
-# CSM TODO List
+# AGM TODO List
+
+*Historical note: This project was renamed from CSM (Claude Session Manager) to AGM (AI/Agent Gateway Manager) in 2026-02. References below reflect historical context.*
 
 ## Recently Completed (2026-01-12)
 
