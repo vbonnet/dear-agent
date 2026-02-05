@@ -62,9 +62,9 @@ install: build
 			echo "if command -v agm &> /dev/null; then" >> $(HOME)/.bashrc; \
 			echo "    source <(agm completion bash)" >> $(HOME)/.bashrc; \
 			echo "fi" >> $(HOME)/.bashrc; \
-			echo "✓ Added agm completion to ~/.bashrc"; \
+			echo "✓ Added agm completion to $(HOME)/.bashrc"; \
 		else \
-			echo "✓ agm completion already in ~/.bashrc"; \
+			echo "✓ agm completion already in $(HOME)/.bashrc"; \
 		fi; \
 	fi
 	@echo ""
@@ -83,7 +83,7 @@ install: build
 	@echo ""
 	@echo "To install slash commands, add this repo as a plugin marketplace:"
 	@echo "  /plugin marketplace add $(shell pwd)"
-	@echo "  /plugin install csm-tools@ai-tools"
+	@echo "  /plugin install agm@ai-tools"
 	@echo ""
 	@echo "See PLUGIN-INSTALLATION.md for details"
 	@echo ""
