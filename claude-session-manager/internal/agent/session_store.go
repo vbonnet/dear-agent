@@ -48,14 +48,14 @@ type JSONSessionStore struct {
 
 // NewJSONSessionStore creates a new JSON-backed session store.
 //
-// If filePath is empty, defaults to ~/.csm/sessions.json.
+// If filePath is empty, defaults to ~/.agm/sessions.json.
 func NewJSONSessionStore(filePath string) (*JSONSessionStore, error) {
 	if filePath == "" {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get home directory: %w", err)
 		}
-		filePath = filepath.Join(homeDir, ".csm", "sessions.json")
+		filePath = filepath.Join(homeDir, ".agm", "sessions.json")
 	}
 
 	store := &JSONSessionStore{

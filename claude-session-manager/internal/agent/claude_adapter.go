@@ -14,7 +14,7 @@ import (
 
 // ClaudeAdapter implements Agent interface for Claude CLI.
 //
-// It wraps existing CSM tmux-based session management and provides
+// It wraps existing AGM tmux-based session management and provides
 // the Agent interface abstraction for Claude sessions.
 type ClaudeAdapter struct {
 	sessionStore SessionStore
@@ -22,7 +22,7 @@ type ClaudeAdapter struct {
 
 // NewClaudeAdapter creates a new Claude adapter instance.
 //
-// If sessionStore is nil, creates a default JSON-backed store at ~/.csm/sessions.json.
+// If sessionStore is nil, creates a default JSON-backed store at ~/.agm/sessions.json.
 func NewClaudeAdapter(sessionStore SessionStore) (Agent, error) {
 	if sessionStore == nil {
 		store, err := NewJSONSessionStore("")

@@ -27,9 +27,9 @@ type ReadyFilePayload struct {
 	ExitCode  int    `json:"exit_code,omitempty"`  // Process exit code
 }
 
-// getStateDir returns the CSM state directory.
+// getStateDir returns the AGM state directory.
 // Uses AGM_STATE_DIR environment variable if set (for test isolation),
-// otherwise defaults to ~/.csm (production default).
+// otherwise defaults to ~/.agm (production default).
 func getStateDir() (string, error) {
 	stateDir := os.Getenv("AGM_STATE_DIR")
 	if stateDir == "" {
@@ -37,7 +37,7 @@ func getStateDir() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to get home directory: %w", err)
 		}
-		stateDir = filepath.Join(homeDir, ".csm")
+		stateDir = filepath.Join(homeDir, ".agm")
 	}
 	return stateDir, nil
 }
@@ -55,9 +55,9 @@ func WaitForReady(sessionName string, timeout time.Duration) error {
 
 	readyFile := filepath.Join(csmDir, "ready-"+sessionName)
 
-	// Create ~/.csm/ directory with user-only permissions (0700 for security)
+	// Create ~/.agm/ directory with user-only permissions (0700 for security)
 	if err := os.MkdirAll(csmDir, 0700); err != nil {
-		return fmt.Errorf("failed to create ~/.csm directory: %w", err)
+		return fmt.Errorf("failed to create ~/.agm directory: %w", err)
 	}
 
 	// Cleanup stale ready-files before watching
@@ -80,7 +80,7 @@ func WaitForReady(sessionName string, timeout time.Duration) error {
 	}
 	defer watcher.Close()
 
-	// Watch ~/.csm/ directory (1 FD, not individual files)
+	// Watch ~/.agm/ directory (1 FD, not individual files)
 	if err := watcher.Add(csmDir); err != nil {
 		return fmt.Errorf("failed to watch directory: %w", err)
 	}
@@ -206,7 +206,7 @@ func cleanupStaleReadyFiles(csmDir string) error {
 }
 
 // CreateReadyFile creates a ready-file signal for the specified session.
-// Called by csm associate to signal that Claude has been successfully associated.
+// Called by agm associate to signal that Claude has been successfully associated.
 func CreateReadyFile(sessionName, manifestPath string) error {
 	csmDir, err := getStateDir()
 	if err != nil {
@@ -215,14 +215,14 @@ func CreateReadyFile(sessionName, manifestPath string) error {
 
 	readyFile := filepath.Join(csmDir, "ready-"+sessionName)
 
-	// Create ~/.csm/ directory with user-only permissions
+	// Create ~/.agm/ directory with user-only permissions
 	if err := os.MkdirAll(csmDir, 0700); err != nil {
-		return fmt.Errorf("failed to create ~/.csm directory: %w", err)
+		return fmt.Errorf("failed to create ~/.agm directory: %w", err)
 	}
 
-	// Get CSM version
+	// Get AGM version
 	csmVersion := "unknown"
-	if cmd := exec.Command("csm", "--version"); cmd != nil {
+	if cmd := exec.Command("agm", "--version"); cmd != nil {
 		if output, err := cmd.Output(); err == nil {
 			// Extract first line (version info)
 			lines := strings.Split(string(output), "\n")

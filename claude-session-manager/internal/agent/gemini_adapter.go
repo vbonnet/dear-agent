@@ -16,7 +16,7 @@ import (
 // GeminiAdapter implements the Agent interface for Google Gemini.
 //
 // It uses the Google Generative AI Go SDK with client-side history persistence.
-// Conversation history is stored in ~/.csm/gemini/<session-id>/history.jsonl.
+// Conversation history is stored in ~/.agm/gemini/<session-id>/history.jsonl.
 type GeminiAdapter struct {
 	sessionStore SessionStore
 	modelName    string
@@ -40,7 +40,7 @@ type GeminiConfig struct {
 // If config is nil, uses default configuration:
 // - Model: gemini-2.0-flash-exp
 // - API Key: from GEMINI_API_KEY environment variable
-// - Session Store: default JSON store at ~/.csm/sessions.json
+// - Session Store: default JSON store at ~/.agm/sessions.json
 func NewGeminiAdapter(config *GeminiConfig) (Agent, error) {
 	if config == nil {
 		config = &GeminiConfig{}
@@ -89,7 +89,7 @@ func (a *GeminiAdapter) Version() string {
 
 // CreateSession creates a new Gemini session.
 //
-// Creates a session directory at ~/.csm/gemini/<session-id>/ to store conversation history.
+// Creates a session directory at ~/.agm/gemini/<session-id>/ to store conversation history.
 func (a *GeminiAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	// Generate unique SessionID
 	sessionID := SessionID(uuid.New().String())
@@ -154,7 +154,7 @@ func (a *GeminiAdapter) TerminateSession(sessionID SessionID) error {
 	}
 
 	// Note: We preserve the session directory for historical purposes
-	// Users can manually delete ~/.csm/gemini/<session-id>/ if needed
+	// Users can manually delete ~/.agm/gemini/<session-id>/ if needed
 
 	return nil
 }
@@ -442,7 +442,7 @@ func (a *GeminiAdapter) getSessionDir(sessionID SessionID) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get home directory: %w", err)
 	}
-	return filepath.Join(homeDir, ".csm", "gemini", string(sessionID)), nil
+	return filepath.Join(homeDir, ".agm", "gemini", string(sessionID)), nil
 }
 
 // getHistoryPath returns the history.jsonl file path for a session.
