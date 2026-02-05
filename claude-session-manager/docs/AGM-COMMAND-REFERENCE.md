@@ -54,7 +54,7 @@ These flags work with all commands:
 
 ```bash
 -C, --directory <path>       # Working directory (default: current directory)
-    --config <file>          # Config file (default: ~/.config/csm/config.yaml)
+    --config <file>          # Config file (default: ~/.config/agm/config.yaml)
     --sessions-dir <dir>     # Sessions directory (default: ~/sessions)
     --log-level <level>      # Log level: debug, info, warn, error
     --debug                  # Enable debug logging (env: CSM_DEBUG)
@@ -399,7 +399,7 @@ agm clean
 **Configuration**:
 
 ```yaml
-# ~/.config/csm/config.yaml
+# ~/.config/agm/config.yaml
 defaults:
   cleanup_threshold_days: 30    # Stopped → archive
   archive_threshold_days: 90    # Archived → delete
@@ -851,7 +851,7 @@ agm logs query --sender astrocyte
 agm logs query --since 2026-02-01
 
 # Combine filters
-agm logs query --sender csm-send --since 2026-02-03
+agm logs query --sender agm-send --since 2026-02-03
 ```
 
 **Flags**:
@@ -967,8 +967,8 @@ Testing utilities for AGM development and debugging.
 - `cleanup <name>` - Cleanup test sessions
 
 **Test Isolation**:
-- Uses `/tmp/csm-test-*` directories for state
-- Uses `csm-test-*` tmux sessions
+- Uses `/tmp/agm-test-*` directories for state
+- Uses `agm-test-*` tmux sessions
 - Completely isolated from production (`~/.claude-sessions/`)
 - Clean environment for testing AGM functionality
 
@@ -1073,7 +1073,7 @@ GOOGLE_APPLICATION_CREDENTIALS=...  # Service account key
 
 ## Configuration File
 
-AGM uses `~/.config/csm/config.yaml` for configuration.
+AGM uses `~/.config/agm/config.yaml` for configuration.
 
 **Example Configuration**:
 
@@ -1086,7 +1086,7 @@ defaults:
   archive_threshold_days: 90     # Archived → delete threshold
 
 ui:
-  theme: "csm"                   # UI theme (csm, csm-light, dracula, catppuccin)
+  theme: "agm"                   # UI theme (agm, agm-light, dracula, catppuccin)
   picker_height: 15              # Session picker height
   show_project_paths: true       # Show full project paths
   show_tags: true                # Show session tags
@@ -1100,8 +1100,8 @@ advanced:
 ```
 
 **Available Themes**:
-- `csm` - High-contrast for dark terminals (default, WCAG AA compliant)
-- `csm-light` - High-contrast for light terminals
+- `agm` - High-contrast for dark terminals (default, WCAG AA compliant)
+- `agm-light` - High-contrast for light terminals
 - `dracula` - Dracula color scheme
 - `catppuccin` - Catppuccin color scheme
 - `charm` - Charm Bracelet theme
@@ -1238,7 +1238,7 @@ agm unlock my-session
 
 # View logs for troubleshooting
 agm logs stats
-agm logs query --sender csm-send --since 2026-02-01
+agm logs query --sender agm-send --since 2026-02-01
 ```
 
 ### Search and Restore Workflow
@@ -1358,9 +1358,9 @@ alias agm='agm --no-color --screen-reader'
 agm --no-color list --json
 
 # For high-contrast needs
-# Set theme in ~/.config/csm/config.yaml
+# Set theme in ~/.config/agm/config.yaml
 ui:
-  theme: "csm"  # or "csm-light" for light terminals
+  theme: "agm"  # or "csm-light" for light terminals
 ```
 
 ### Performance
@@ -1373,7 +1373,7 @@ agm --skip-health-check list
 agm list --json | jq '.[] | select(.status == "active")'
 
 # Cache configuration for repeated commands
-export CSM_CONFIG=~/.config/csm/config.yaml
+export AGM_CONFIG=~/.config/agm/config.yaml
 ```
 
 ---
