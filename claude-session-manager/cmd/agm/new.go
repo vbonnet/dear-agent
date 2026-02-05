@@ -616,17 +616,17 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		// NOTE: No need to release global lock - using fine-grained tmux lock instead
 		// InitSequence will acquire/release tmux lock only during actual operations
 
-		// Use InitSequence to properly sequence /rename and /csm-assoc commands
+		// Use InitSequence to properly sequence /rename and /agm:assoc commands
 		// This uses tmux control mode to wait for each command to complete before sending the next
 		debug.Phase("Sequenced Initialization")
-		debug.Log("Running InitSequence for /rename and /csm-assoc")
+		debug.Log("Running InitSequence for /rename and /agm:assoc")
 		seq := tmux.NewInitSequence(sessionName)
 		if err := seq.Run(); err != nil {
 			debug.Log("InitSequence failed: %v", err)
 			ui.PrintWarning("Failed to run initialization sequence")
 			fmt.Printf("💡 You can manually run:\n")
 			fmt.Printf("  /rename %s\n", sessionName)
-			fmt.Printf("  /csm-tools:csm-assoc %s\n", sessionName)
+			fmt.Printf("  /agm:assoc %s\n", sessionName)
 		} else {
 			debug.Log("InitSequence completed successfully")
 		}
@@ -648,17 +648,28 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		}
 		if readyErr != nil {
 			debug.Log("Ready-file wait failed: %v", readyErr)
-			ui.PrintWarning("Claude did not signal ready within timeout")
-			fmt.Println("  • Attach to session to check status: tmux attach -t " + sessionName)
-			fmt.Printf("  • Run 'agmsync' later to populate UUID if needed\n")
+
+			// Get state directory for error message
+			homeDir, _ := os.UserHomeDir()
+			stateDir := filepath.Join(homeDir, ".agm")
+			readyFilePath := filepath.Join(stateDir, "ready-"+sessionName)
+
+			ui.PrintError(
+				readyErr,
+				fmt.Sprintf("Ready-file not created at: %s", readyFilePath),
+				fmt.Sprintf("  • Attach to session to check Claude output: tmux attach -t %s\n"+
+					"  • Check debug logs: ls -lt ~/.agm/debug/\n"+
+					"  • Run 'agm sync' later to populate UUID if needed\n\n"+
+					"  Note: Session is still usable, but UUID association may have failed", sessionName),
+			)
 		} else {
 			debug.Log("Ready-file detected - session is ready")
 			ui.PrintSuccess("Claude is ready and session associated!")
 
-			// Wait for /csm-assoc skill to finish outputting its completion messages
-			// The ready-file signals when 'agmassociate' binary completes, but the skill
+			// Wait for /agm:assoc skill to finish outputting its completion messages
+			// The ready-file signals when 'agm associate' binary completes, but the skill
 			// continues to output messages after that. Give it time to finish.
-			debug.Log("Waiting for /csm-assoc skill to complete output")
+			debug.Log("Waiting for /agm:assoc skill to complete output")
 			// NOTE: Skill completion detection not yet implemented (requires control mode output channel)
 			// Using fixed sleep as fallback
 			time.Sleep(500 * time.Millisecond)
@@ -703,10 +714,10 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	return nil
 }
 
-// attachWithCapture uses csm-attach-wrapper to attach and capture exit summary
+// attachWithCapture uses agm-attach-wrapper to attach and capture exit summary
 func attachWithCapture(sessionName string) error {
 	// Find wrapper binary
-	wrapperPath, err := exec.LookPath("csm-attach-wrapper")
+	wrapperPath, err := exec.LookPath("agm-attach-wrapper")
 	if err != nil {
 		// Fallback to direct attach if wrapper not found
 		debug.Log("Wrapper not found, falling back to direct attach: %v", err)
@@ -715,7 +726,7 @@ func attachWithCapture(sessionName string) error {
 
 	// Build arguments
 	args := []string{
-		"csm-attach-wrapper",
+		"agm-attach-wrapper",
 		sessionName,
 	}
 
