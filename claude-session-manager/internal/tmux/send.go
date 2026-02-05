@@ -3,6 +3,7 @@ package tmux
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -124,6 +125,37 @@ func SendMultiLinePromptSafe(sessionName string, prompt string) error {
 	// Send using literal mode (preserves newlines)
 	if err := SendPromptLiteral(sessionName, prompt); err != nil {
 		return fmt.Errorf("failed to send multi-line prompt: %w", err)
+	}
+
+	return nil
+}
+
+// SendKeys sends special key names to a session (Down, Up, Tab, Enter, etc.)
+// This does NOT use literal mode - it sends the actual key codes to tmux.
+//
+// Key behavior:
+//  - Sends named keys without literal mode
+//  - Does NOT append Enter automatically (use "Enter" explicitly if needed)
+//  - Useful for navigating UI elements (AskUserQuestion, menus, etc.)
+//
+// Common key names:
+//  - Arrow keys: Up, Down, Left, Right
+//  - Special keys: Tab, Enter, Escape, Space
+//  - Modifiers: C-c (Ctrl+C), M-x (Alt+X)
+//
+// Use this for:
+//  - Navigating AskUserQuestion option lists
+//  - Interacting with CLI menus
+//  - Sending control sequences
+func SendKeys(sessionName string, keyName string) error {
+	socketPath := GetSocketPath()
+
+	// Send the key name directly (tmux interprets it)
+	// Example: "Down" sends arrow down key, "Tab" sends tab key
+	cmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, keyName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to send key %s: %w (output: %s)", keyName, err, string(output))
 	}
 
 	return nil
