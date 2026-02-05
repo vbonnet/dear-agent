@@ -57,7 +57,9 @@ export async function validateNodeVersion(version: string): Promise<boolean> {
 }
 
 export function detectSudo(): boolean {
-  return process.env.SUDO_USER !== undefined || process.getuid?.() === 0;
+  // Only check actual UID, not SUDO_USER env var (which may be stale)
+  // Running as root means UID = 0
+  return process.getuid?.() === 0;
 }
 
 export async function pathExists(filePath: string): Promise<boolean> {

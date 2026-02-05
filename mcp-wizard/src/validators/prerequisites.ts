@@ -53,9 +53,9 @@ export class PrerequisitesValidator {
    */
   async validateGcloudInstalled(): Promise<ValidationResult> {
     try {
-      // Timeout after 5s (prevent hangs on network issues)
+      // Timeout after 30s (prevent hangs on network issues)
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
       await execFileAsync('gcloud', ['--version'], {
         signal: controller.signal as any,
@@ -68,7 +68,7 @@ export class PrerequisitesValidator {
         return {
           name: 'gcloud CLI',
           passed: false,
-          error: 'gcloud command timed out (5s)',
+          error: 'gcloud command timed out (30s)',
           fix: 'Check network connection or install gcloud: https://cloud.google.com/sdk/docs/install',
         };
       }
@@ -88,9 +88,9 @@ export class PrerequisitesValidator {
    */
   async validateGcloudAuth(): Promise<ValidationResult> {
     try {
-      // Timeout after 5s
+      // Timeout after 30s
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
       const { stdout } = await execFileAsync(
         'gcloud',
@@ -115,7 +115,7 @@ export class PrerequisitesValidator {
         return {
           name: 'gcloud auth',
           passed: false,
-          error: 'gcloud auth check timed out (5s)',
+          error: 'gcloud auth check timed out (30s)',
           fix: 'Check network connection',
         };
       }

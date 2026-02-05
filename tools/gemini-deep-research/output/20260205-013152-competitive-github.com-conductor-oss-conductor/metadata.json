@@ -1,0 +1,20 @@
+{
+  "url": "https://github.com/conductor-oss/conductor",
+  "content_type": "GenericArticle",
+  "topics": [
+    "Workflow Orchestration",
+    "Durable and Scalable Systems",
+    "Microservices and Event-Driven Architecture",
+    "Agentic AI and LLM Integration",
+    "Developer Tools and SDKs",
+    "Open Source Community and Governance"
+  ],
+  "timestamp": "2026-02-05T01:31:52Z",
+  "mode": "competitive",
+  "competitor": "https://github.com/conductor-oss/conductor",
+  "source_query": "https://github.com/conductor-oss/conductor",
+  "metadata": {
+    "authors": "conductor-oss",
+    "title": "GitHub - conductor-oss/conductor: Conductor is an event driven orchestration platform providing durable and highly resilient execution engine for your applications"
+  }
+}

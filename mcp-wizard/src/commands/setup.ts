@@ -524,5 +524,7 @@ export async function setupCommand(options: SetupOptions = {}): Promise<void> {
 }
 
 function detectSudo(): boolean {
-  return process.env.SUDO_USER !== undefined || process.getuid?.() === 0;
+  // Only check actual UID, not SUDO_USER env var (which may be stale)
+  // Running as root means UID = 0
+  return process.getuid?.() === 0;
 }
