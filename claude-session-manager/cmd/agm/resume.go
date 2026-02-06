@@ -23,10 +23,10 @@ var resumeCmd = &cobra.Command{
 	Short: "Resume a Claude session by UUID, tmux name, or fuzzy match",
 	Long: `Resume a Claude session by various identifier types:
 
-- UUID (full or partial): csm resume c4eb298c
-- Tmux session name:      csm resume claude-1
-- Fuzzy match on project: csm resume workspace-design
-- Interactive (no args):  csm resume
+- UUID (full or partial): agmresume c4eb298c
+- Tmux session name:      agmresume claude-1
+- Fuzzy match on project: agmresume workspace-design
+- Interactive (no args):  agmresume
 
 The command will:
 1. Resolve the identifier to find the Claude UUID
@@ -37,10 +37,10 @@ The command will:
 6. Update manifest last_activity timestamp
 
 Examples:
-  csm resume c4eb298c              # By UUID prefix
-  csm resume claude-1              # By tmux name
-  csm resume workspace-design      # By project path pattern
-  csm resume                       # Interactive picker (TODO)`,
+  agmresume c4eb298c              # By UUID prefix
+  agmresume claude-1              # By tmux name
+  agmresume workspace-design      # By project path pattern
+  agmresume                       # Interactive picker (TODO)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get identifier from args or prompt
 		var identifier string
@@ -55,7 +55,7 @@ Examples:
 		sessionID, manifestPath, err := resolveSessionIdentifier(identifier)
 		if err != nil {
 			ui.PrintError(err, "Failed to resolve session identifier",
-				fmt.Sprintf("  • Try: csm list --all to see available sessions\n"+
+				fmt.Sprintf("  • Try: agmlist --all to see available sessions\n"+
 					"  • Identifier can be UUID, tmux name, or project path pattern"))
 			return err
 		}
@@ -93,9 +93,9 @@ Examples:
 		if err != nil {
 			ui.PrintError(err,
 				"Session health check failed",
-				"  • Run diagnostics: csm doctor\n"+
+				"  • Run diagnostics: agmdoctor\n"+
 					"  • Check manifest file: cat "+manifestPath+"\n"+
-					"  • List all sessions: csm list --all")
+					"  • List all sessions: agmlist --all")
 			return err
 		}
 
@@ -117,7 +117,7 @@ Examples:
 			ui.PrintError(err,
 				"Failed to resume session",
 				"  • Check tmux is running: tmux list-sessions\n"+
-					"  • Verify session health: csm doctor\n"+
+					"  • Verify session health: agmdoctor\n"+
 					"  • Try manual attach: tmux attach -t "+health.TmuxSessionName)
 			return err
 		}
@@ -453,21 +453,9 @@ func resumeSession(sessionID, manifestPath string, health *HealthStatus) error {
 		}
 		sendCommands = true
 	} else {
-		ui.PrintSuccess(fmt.Sprintf("Tmux session %s already exists", health.TmuxSessionName))
-
-		// Check if Claude is already running
-		claudeRunning, err := tmux.IsProcessRunning(health.TmuxSessionName, "claude")
-		if err != nil {
-			ui.PrintWarning("Could not check if Claude is running - skipping resume commands for safety")
-			// We'll display the Claude UUID later after reading the manifest
-			sendCommands = false
-		} else if claudeRunning {
-			ui.PrintSuccess("Claude already running - skipping resume commands")
-			sendCommands = false
-		} else {
-			ui.PrintSuccess("Claude not running - will send resume commands")
-			sendCommands = true
-		}
+		// ATTACH scenario: existing tmux session - never send resume command
+		ui.PrintSuccess(fmt.Sprintf("Attaching to existing tmux session: %s", health.TmuxSessionName))
+		sendCommands = false
 	}
 
 	// Read manifest to get Claude UUID (needed for both display and resume command)
