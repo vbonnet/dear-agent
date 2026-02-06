@@ -690,6 +690,65 @@ def is_processing_stale_notifications(pane_content: str) -> bool:
     return False
 
 
+def is_conversation_endpoint_idle(session: SessionState) -> bool:
+    """
+    Detect if session is at a natural conversation endpoint.
+
+    A session is at an endpoint if ALL of these conditions are true:
+    1. Has completion language (task done)
+    2. Has idle prompt (❯ visible)
+    3. No pending tool calls (no spinners)
+    4. Not processing stale notifications
+
+    This prevents false positive hang detection when Claude finishes a task
+    and idles at the prompt waiting for user input.
+
+    Args:
+        session: Current session state
+
+    Returns:
+        True if at endpoint (skip recovery), False otherwise (check for hang)
+
+    Example endpoint (all conditions met):
+        ● ✅ Task completed successfully
+
+        All beads closed. Ready to proceed.
+
+        ❯
+
+    Example NOT endpoint (pending work):
+        ● ✅ Part 1 complete
+        ● Starting Part 2...
+        ✶ Thinking…
+
+    Design:
+        Conservative approach - ALL signals must pass for endpoint detection.
+        If ANY signal fails, NOT at endpoint → proceed with hang detection.
+
+    Reference:
+        Design doc: ~/src/ws/oss/docs/conversation-endpoint-detection-design.md
+        Bead: src-wws (Phase 1, monitoring-improvements swarm)
+    """
+    pane = session.pane_content
+
+    # Signal 1: Check for completion language
+    has_completion = has_completion_language(pane)
+
+    # Signal 2: Check for idle prompt
+    has_prompt = has_idle_prompt(pane)
+
+    # Signal 3: Check for pending tools
+    no_pending = not has_pending_tool_calls(pane)
+
+    # Signal 4: Check for stale notifications
+    no_stale = not is_processing_stale_notifications(pane)
+
+    # All signals must be true for endpoint detection
+    is_endpoint = has_completion and has_prompt and no_pending and no_stale
+
+    return is_endpoint
+
+
 def is_stuck_mustering(
     current: SessionState,
     previous: SessionState,

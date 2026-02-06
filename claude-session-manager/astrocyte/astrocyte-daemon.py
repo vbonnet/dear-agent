@@ -29,6 +29,7 @@ from astrocyte import (
     is_stuck_cursor_frozen,
     is_asking_question_without_tool,
     is_stuck_permission_prompt,
+    is_conversation_endpoint_idle,
     recover_session,
     send_violation_prompt,
     reject_permission_prompt,
