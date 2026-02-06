@@ -579,7 +579,7 @@ func TestGeminiAdapter_getSessionDir(t *testing.T) {
 	require.NoError(t, err)
 
 	homeDir, _ := os.UserHomeDir()
-	expected := filepath.Join(homeDir, ".csm", "gemini", "test-session-123")
+	expected := filepath.Join(homeDir, ".agm", "gemini", "test-session-123")
 	assert.Equal(t, expected, dir)
 }
 
@@ -597,6 +597,6 @@ func TestGeminiAdapter_getHistoryPath(t *testing.T) {
 	require.NoError(t, err)
 
 	homeDir, _ := os.UserHomeDir()
-	expected := filepath.Join(homeDir, ".csm", "gemini", "test-session-123", "history.jsonl")
+	expected := filepath.Join(homeDir, ".agm", "gemini", "test-session-123", "history.jsonl")
 	assert.Equal(t, expected, historyPath)
 }

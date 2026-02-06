@@ -95,7 +95,7 @@ func TestCSM(t *testing.T) {
 			// Set AGM environment variables for testing
 			workDir := env.Getenv("WORK")
 			env.Setenv("AGM_TMUX_SOCKET", workDir+"/test-tmux.sock")
-			env.Setenv("AGM_STATE_DIR", workDir+"/.csm") // Isolate lock files and ready files per test
+			env.Setenv("AGM_STATE_DIR", workDir+"/.agm") // Isolate lock files and ready files per test
 			env.Setenv("HOME", workDir+"/home")
 
 			// Set dummy API key for tests to allow sessions to be created
@@ -104,12 +104,12 @@ func TestCSM(t *testing.T) {
 
 			// Create necessary directories
 			homeDir := env.Getenv("HOME")
-			csmDir := workDir + "/.csm"
+			agmDir := workDir + "/.agm"
 
 			if err := os.MkdirAll(homeDir+"/.claude", 0755); err != nil {
 				return err
 			}
-			if err := os.MkdirAll(csmDir, 0755); err != nil {
+			if err := os.MkdirAll(agmDir, 0755); err != nil {
 				return err
 			}
 			if err := os.MkdirAll(homeDir+"/sessions", 0755); err != nil {

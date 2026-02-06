@@ -659,7 +659,7 @@ func TestGeminiAdapter_SessionDirectory_Structure(t *testing.T) {
 	sessionDir, err := geminiAdapter.getSessionDir(sessionID)
 	require.NoError(t, err)
 
-	expectedPath := filepath.Join(tmpDir, ".csm", "gemini", string(sessionID))
+	expectedPath := filepath.Join(tmpDir, ".agm", "gemini", string(sessionID))
 	assert.Equal(t, expectedPath, sessionDir)
 
 	stat, err := os.Stat(sessionDir)

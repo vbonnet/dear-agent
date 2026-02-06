@@ -28,8 +28,8 @@ func TestWaitForReady_Success(t *testing.T) {
 			SessionName: sessionName,
 		}
 		data, _ := json.Marshal(payload)
-		os.MkdirAll(filepath.Join(tmpDir, ".csm"), 0700)
-		os.WriteFile(filepath.Join(tmpDir, ".csm", "ready-"+sessionName), data, 0600)
+		os.MkdirAll(filepath.Join(tmpDir, ".agm"), 0700)
+		os.WriteFile(filepath.Join(tmpDir, ".agm", "ready-"+sessionName), data, 0600)
 	}()
 
 	// Wait for ready file
@@ -39,7 +39,7 @@ func TestWaitForReady_Success(t *testing.T) {
 	}
 
 	// Verify ready-file was cleaned up
-	if _, err := os.Stat(filepath.Join(tmpDir, ".csm", "ready-"+sessionName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(tmpDir, ".agm", "ready-"+sessionName)); !os.IsNotExist(err) {
 		t.Error("Expected ready-file to be cleaned up after detection")
 	}
 }
@@ -77,14 +77,14 @@ func TestWaitForReady_RaceCondition(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 
 	// Create ready-file BEFORE calling WaitForReady (race condition simulation)
-	os.MkdirAll(filepath.Join(tmpDir, ".csm"), 0700)
+	os.MkdirAll(filepath.Join(tmpDir, ".agm"), 0700)
 	payload := ReadyFilePayload{
 		Status:      "ready",
 		ReadyAt:     time.Now().Format(time.RFC3339),
 		SessionName: sessionName,
 	}
 	data, _ := json.Marshal(payload)
-	os.WriteFile(filepath.Join(tmpDir, ".csm", "ready-"+sessionName), data, 0600)
+	os.WriteFile(filepath.Join(tmpDir, ".agm", "ready-"+sessionName), data, 0600)
 
 	// Wait for ready file (should detect immediately via pre-check)
 	start := time.Now()
@@ -114,14 +114,14 @@ func TestWaitForReady_MalformedJSON(t *testing.T) {
 	// Create malformed JSON ready-file, then valid one
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		os.MkdirAll(filepath.Join(tmpDir, ".csm"), 0700)
+		os.MkdirAll(filepath.Join(tmpDir, ".agm"), 0700)
 
 		// First, create malformed JSON (should be ignored)
-		os.WriteFile(filepath.Join(tmpDir, ".csm", "ready-"+sessionName), []byte("invalid json{"), 0600)
+		os.WriteFile(filepath.Join(tmpDir, ".agm", "ready-"+sessionName), []byte("invalid json{"), 0600)
 
 		// Wait a bit, then create valid JSON
 		time.Sleep(200 * time.Millisecond)
-		os.Remove(filepath.Join(tmpDir, ".csm", "ready-"+sessionName))
+		os.Remove(filepath.Join(tmpDir, ".agm", "ready-"+sessionName))
 
 		payload := ReadyFilePayload{
 			Status:      "ready",
@@ -129,7 +129,7 @@ func TestWaitForReady_MalformedJSON(t *testing.T) {
 			SessionName: sessionName,
 		}
 		data, _ := json.Marshal(payload)
-		os.WriteFile(filepath.Join(tmpDir, ".csm", "ready-"+sessionName), data, 0600)
+		os.WriteFile(filepath.Join(tmpDir, ".agm", "ready-"+sessionName), data, 0600)
 	}()
 
 	// Wait for ready file (should skip malformed, wait for valid)
@@ -152,7 +152,7 @@ func TestWaitForReady_CrashedStatus(t *testing.T) {
 	// Create ready-file with "crashed" status
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		os.MkdirAll(filepath.Join(tmpDir, ".csm"), 0700)
+		os.MkdirAll(filepath.Join(tmpDir, ".agm"), 0700)
 
 		payload := ReadyFilePayload{
 			Status:      "crashed",
@@ -161,7 +161,7 @@ func TestWaitForReady_CrashedStatus(t *testing.T) {
 			Error:       "test crash error",
 		}
 		data, _ := json.Marshal(payload)
-		os.WriteFile(filepath.Join(tmpDir, ".csm", "ready-"+sessionName), data, 0600)
+		os.WriteFile(filepath.Join(tmpDir, ".agm", "ready-"+sessionName), data, 0600)
 	}()
 
 	// Wait for ready file (should return error for crashed status)
@@ -249,17 +249,17 @@ func TestParseReadyFile_MissingStatus(t *testing.T) {
 func TestCleanupStaleReadyFiles(t *testing.T) {
 	// Create temporary directory
 	tmpDir := t.TempDir()
-	csmDir := filepath.Join(tmpDir, ".csm")
-	os.MkdirAll(csmDir, 0700)
+	agmDir := filepath.Join(tmpDir, ".agm")
+	os.MkdirAll(agmDir, 0700)
 
 	// Create stale ready-file (11 minutes old)
-	staleFile := filepath.Join(csmDir, "ready-stale-session")
+	staleFile := filepath.Join(agmDir, "ready-stale-session")
 	os.WriteFile(staleFile, []byte("{}"), 0600)
 	oldTime := time.Now().Add(-11 * time.Minute)
 	os.Chtimes(staleFile, oldTime, oldTime)
 
 	// Run cleanup
-	err := cleanupStaleReadyFiles(csmDir)
+	err := cleanupStaleReadyFiles(agmDir)
 	if err != nil {
 		t.Fatalf("Expected success, got error: %v", err)
 	}
@@ -273,17 +273,17 @@ func TestCleanupStaleReadyFiles(t *testing.T) {
 func TestCleanupStaleReadyFiles_PreservesRecent(t *testing.T) {
 	// Create temporary directory
 	tmpDir := t.TempDir()
-	csmDir := filepath.Join(tmpDir, ".csm")
-	os.MkdirAll(csmDir, 0700)
+	agmDir := filepath.Join(tmpDir, ".agm")
+	os.MkdirAll(agmDir, 0700)
 
 	// Create recent ready-file (5 minutes old)
-	recentFile := filepath.Join(csmDir, "ready-recent-session")
+	recentFile := filepath.Join(agmDir, "ready-recent-session")
 	os.WriteFile(recentFile, []byte("{}"), 0600)
 	recentTime := time.Now().Add(-5 * time.Minute)
 	os.Chtimes(recentFile, recentTime, recentTime)
 
 	// Run cleanup
-	err := cleanupStaleReadyFiles(csmDir)
+	err := cleanupStaleReadyFiles(agmDir)
 	if err != nil {
 		t.Fatalf("Expected success, got error: %v", err)
 	}
@@ -297,17 +297,17 @@ func TestCleanupStaleReadyFiles_PreservesRecent(t *testing.T) {
 func TestCleanupStaleReadyFiles_IgnoresNonReadyFiles(t *testing.T) {
 	// Create temporary directory
 	tmpDir := t.TempDir()
-	csmDir := filepath.Join(tmpDir, ".csm")
-	os.MkdirAll(csmDir, 0700)
+	agmDir := filepath.Join(tmpDir, ".agm")
+	os.MkdirAll(agmDir, 0700)
 
 	// Create stale file that doesn't match "ready-*" pattern
-	otherFile := filepath.Join(csmDir, "other-file.txt")
+	otherFile := filepath.Join(agmDir, "other-file.txt")
 	os.WriteFile(otherFile, []byte("{}"), 0600)
 	oldTime := time.Now().Add(-11 * time.Minute)
 	os.Chtimes(otherFile, oldTime, oldTime)
 
 	// Run cleanup
-	err := cleanupStaleReadyFiles(csmDir)
+	err := cleanupStaleReadyFiles(agmDir)
 	if err != nil {
 		t.Fatalf("Expected success, got error: %v", err)
 	}

@@ -355,7 +355,7 @@ func TestParseTimestamp(t *testing.T) {
 
 // Integration test with real diagnosis files
 func TestParseDiagnosisFile_RealFiles(t *testing.T) {
-	diagnosisDir := "/home/user/.csm/astrocyte/diagnoses"
+	diagnosisDir := "/home/user/.agm/astrocyte/diagnoses"
 
 	// Check if directory exists (skip test if not)
 	if _, err := os.Stat(diagnosisDir); os.IsNotExist(err) {
