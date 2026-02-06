@@ -176,6 +176,14 @@ def main():
                     current = capture_pane_state(session)
                     previous = previous_states.get(session)
 
+                    # Detect session type for threshold selection
+                    from astrocyte import get_session_type
+                    session_type = get_session_type(session)
+                    cursor_threshold = config.get_threshold(session, "cursor_frozen")
+
+                    logger.debug(f"Session: {session}, Type: {session_type}, " +
+                                f"Cursor threshold: {cursor_threshold}min")
+
                     # Check all detection heuristics
                     stuck = False
                     symptom = None

@@ -88,6 +88,12 @@ class Config:
     permission_prompt_duration: int = 5  # Duration-based detection (fresh start uses violation patterns)
     max_cascade_rejections: int = 10  # Circuit breaker for cascading permission prompts
 
+    # Session-type-specific thresholds (minutes)
+    # Auto-applied based on session name patterns (via get_session_type)
+    orchestrator_cursor_frozen: int = 15  # Orchestrators monitor multiple sessions, natural idle periods
+    single_task_cursor_frozen: int = 5    # Single tasks should be active, longer idle = stuck
+    interactive_cursor_frozen: int = 3    # Interactive sessions idle quickly when user pauses
+
     # Slack configuration
     slack_enabled: bool = False
     slack_webhook_url: str | None = None
@@ -109,8 +115,8 @@ class Config:
     recovery_strategy_chain: List[str] = field(default_factory=lambda: ["escape", "ctrl_c"])  # Used when recovery_method="chain"
 
     # Logging settings
-    incidents_file: str = field(default_factory=lambda: os.path.expanduser("~/.csm/astrocyte/incidents.jsonl"))
-    diagnoses_dir: str = field(default_factory=lambda: os.path.expanduser("~/.csm/astrocyte/diagnoses"))
+    incidents_file: str = field(default_factory=lambda: os.path.expanduser("~/.agm/astrocyte/incidents.jsonl"))
+    diagnoses_dir: str = field(default_factory=lambda: os.path.expanduser("~/.agm/astrocyte/diagnoses"))
     verbose: bool = False
 
     # Diagnosis settings
@@ -135,22 +141,46 @@ class Config:
     remote_report_metrics: bool = True
 
     def get_threshold(self, session_name: str, threshold_name: str) -> int:
-        """Get threshold for a session, applying overrides if present."""
+        """
+        Get threshold for a session, applying session type detection and overrides.
+
+        Priority order (highest to lowest):
+        1. Per-session override (session_overrides config)
+        2. Session-type-specific threshold (auto-detected from session name)
+        3. Global default threshold
+
+        Args:
+            session_name: Name of the session
+            threshold_name: Name of the threshold (e.g., "cursor_frozen")
+
+        Returns:
+            Threshold value in minutes
+        """
+        # Priority 1: Per-session override (highest priority)
         if session_name in self.session_overrides:
             override = self.session_overrides[session_name].get(threshold_name)
             if override is not None:
                 return override
+
+        # Priority 2: Session-type-specific threshold (for cursor_frozen only currently)
+        if threshold_name == "cursor_frozen":
+            session_type = get_session_type(session_name)
+            type_threshold_name = f"{session_type}_{threshold_name}"
+            if hasattr(self, type_threshold_name):
+                return getattr(self, type_threshold_name)
+
+        # Priority 3: Global default threshold (fallback)
         return getattr(self, threshold_name)
 
 
 def load_config() -> Config:
     """
-    Load configuration from ~/.csm/astrocyte/config.yaml.  # noqa: path-portability
+    Load configuration from ~/.agm/astrocyte/config.yaml.  # noqa: path-portability
 
     Falls back to config.json for backward compatibility.
     Returns default config if no file exists.
     """
-    config_dir = Path.home() / ".csm/astrocyte"
+    config_dir = Path.home() / ".agm/astrocyte"
     yaml_config = config_dir / "config.yaml"
     json_config = config_dir / "config.json"
 
@@ -175,14 +205,17 @@ def load_config() -> Config:
                 zero_token_waiting=thresholds.get("zero_token_waiting", 10),
                 cursor_frozen=thresholds.get("cursor_frozen", 15),
                 ask_question_violation=thresholds.get("ask_question_violation", 5),
+                orchestrator_cursor_frozen=thresholds.get("orchestrator_cursor_frozen", 15),
+                single_task_cursor_frozen=thresholds.get("single_task_cursor_frozen", 5),
+                interactive_cursor_frozen=thresholds.get("interactive_cursor_frozen", 3),
                 slack_enabled=slack.get("enabled", False),
                 slack_webhook_url=slack.get("webhook_url"),
                 recovery_enabled=recovery.get("enabled", True),
                 recovery_method=recovery.get("method", "escape"),
                 recovery_max_attempts=recovery.get("max_attempts", 1),
                 recovery_strategy_chain=recovery.get("strategy_chain", ["escape", "ctrl_c"]),
-                incidents_file=os.path.expanduser(logging_cfg.get("incidents_file", "~/.csm/astrocyte/incidents.jsonl")),
-                diagnoses_dir=os.path.expanduser(logging_cfg.get("diagnoses_dir", "~/.csm/astrocyte/diagnoses")),
+                incidents_file=os.path.expanduser(logging_cfg.get("incidents_file", "~/.agm/astrocyte/incidents.jsonl")),
+                diagnoses_dir=os.path.expanduser(logging_cfg.get("diagnoses_dir", "~/.agm/astrocyte/diagnoses")),
                 verbose=logging_cfg.get("verbose", False),
                 diagnosis_enabled=diagnosis.get("enabled", True),
                 diagnosis_use_csm=diagnosis.get("use_csm_prompt_file", True),
@@ -265,14 +298,66 @@ def get_sessions_from_home_directories(home_dirs: List[str]) -> list[tuple[str, 
     return sessions
 
 
+def get_read_socket_paths() -> list[str]:
+    """
+    Get list of socket paths to check for READ operations.
+
+    Returns both AGM socket (/tmp/agm.sock) and legacy CSM socket (/tmp/csm.sock)
+    for backward compatibility during migration.
+    """
+    sockets = []
+    agm_socket = Path("/tmp/agm.sock")
+    csm_socket = Path("/tmp/csm.sock")
+
+    if agm_socket.exists():
+        sockets.append(str(agm_socket))
+    if csm_socket.exists():
+        sockets.append(str(csm_socket))
+
+    return sockets
+
+
+def get_write_socket_path() -> str:
+    """
+    Get socket path for WRITE operations (new sessions only).
+
+    Always returns /tmp/agm.sock for new session creation.
+    """
+    return "/tmp/agm.sock"
+
+
+def find_session_socket(session_name: str) -> str | None:
+    """
+    Find which socket a specific session is running on.
+
+    Args:
+        session_name: Name of the tmux session to find
+
+    Returns:
+        Socket path if session found, None if not found on any socket
+    """
+    for socket_path in get_read_socket_paths():
+        result = subprocess.run(
+            ["tmux", "-S", socket_path, "has-session", "-t", session_name],
+            capture_output=True,
+            check=False
+        )
+        if result.returncode == 0:
+            return socket_path
+    return None
+
+
 def get_tmux_cmd() -> list[str]:
     """
-    Get tmux command prefix with CSM socket if available.
+    Get tmux command prefix with AGM socket if available.
 
-    CSM uses a custom tmux socket at /tmp/csm.sock.
-    Returns ["tmux", "-S", "/tmp/csm.sock"] or ["tmux"].
+    DEPRECATED: Use get_read_socket_paths() for read operations or
+    find_session_socket() for session-specific operations.
+
+    AGM uses a custom tmux socket at /tmp/agm.sock.
+    Returns ["tmux", "-S", "/tmp/agm.sock"] or ["tmux"].
     """
-    csm_socket = Path("/tmp/csm.sock")
+    csm_socket = Path("/tmp/agm.sock")
     return ["tmux", "-S", str(csm_socket)] if csm_socket.exists() else ["tmux"]
 
 
@@ -280,29 +365,30 @@ def get_active_csm_sessions() -> list[str]:
     """
     List all active CSM sessions from tmux.
 
-    A CSM session is identified by having a manifest.yaml file.
+    Checks both AGM socket (/tmp/agm.sock) and legacy CSM socket (/tmp/csm.sock)
+    for backward compatibility. A CSM session is identified by having a manifest.yaml file.
     """
     try:
-        tmux_cmd = get_tmux_cmd()
+        socket_paths = get_read_socket_paths()
+        all_sessions = set()  # Use set to deduplicate
 
-        # Get all tmux session names
-        result = subprocess.run(
-            tmux_cmd + ["list-sessions", "-F", "#{session_name}"],
-            capture_output=True,
-            text=True,
-            check=False
-        )
+        # Check all sockets for sessions
+        for socket_path in socket_paths:
+            result = subprocess.run(
+                ["tmux", "-S", socket_path, "list-sessions", "-F", "#{session_name}"],
+                capture_output=True,
+                text=True,
+                check=False
+            )
 
-        if result.returncode != 0:
-            # No tmux server running or no sessions
-            return []
-
-        sessions = result.stdout.strip().split("\n") if result.stdout.strip() else []
+            if result.returncode == 0:
+                sessions = result.stdout.strip().split("\n") if result.stdout.strip() else []
+                all_sessions.update(sessions)
 
         # Filter for CSM sessions (have manifest.yaml)
         csm_sessions = []
-        for session in sessions:
-            if session_has_manifest(session):
+        for session in all_sessions:
+            if session and session_has_manifest(session):
                 csm_sessions.append(session)
 
         return csm_sessions
@@ -318,18 +404,80 @@ def session_has_manifest(session_name: str) -> bool:
     return manifest_path.exists()
 
 
+def get_session_type(session_name: str) -> str:
+    """
+    Auto-detect session type from session name patterns.
+
+    Session types:
+    - "orchestrator": Multi-session coordination, swarm monitoring, patrol loops
+    - "single-task": Focused task work (fixes, features, implementation)
+    - "interactive": General purpose, exploratory, testing, or unclear type
+
+    Detection priority:
+    1. Orchestrator patterns (highest specificity)
+    2. Single-task patterns (specific work intent)
+    3. Interactive (fallback for generic/exploratory sessions)
+
+    Returns:
+        Session type string: "orchestrator", "single-task", or "interactive"
+    """
+    name_lower = session_name.lower()
+
+    # Orchestrator patterns (highest priority - specific coordination context)
+    orchestrator_patterns = [
+        "swarm",
+        "orchestrator",
+        "monitoring",
+        "patrol",
+        "coordinator",
+        "manager",
+        "supervisor"
+    ]
+
+    for pattern in orchestrator_patterns:
+        if pattern in name_lower:
+            return "orchestrator"
+
+    # Single-task patterns (focused work, specific deliverable)
+    # Exclude generic "test" and "session" which are often exploratory
+    single_task_patterns = [
+        "fix-",      # Prefixed patterns are more specific
+        "bug-",
+        "feature-",
+        "implement-",
+        "add-",
+        "update-",
+        "refactor-",
+        "cleanup-",
+        "migration-",
+        "deploy-"
+    ]
+
+    for pattern in single_task_patterns:
+        if pattern in name_lower:
+            return "single-task"
+
+    # Default to interactive for generic session names
+    # Includes: "claude-1", "session-test", "test-X", "my-work", etc.
+    return "interactive"
+
+
 def capture_pane_state(session_name: str) -> SessionState:
     """
     Capture current state of tmux pane.
 
     Returns SessionState with pane content and cursor position.
     """
+    # Find which socket the session is on
+    socket_path = find_session_socket(session_name)
+    if socket_path is None:
+        raise RuntimeError(f"Session {session_name} not found on any tmux socket")
+
     # Capture pane content (with history to ensure long commands are fully captured)
     # -S -500 captures last 500 lines to ensure "Bash command" header is included
     # even when long heredocs or multiline commands push it off the visible viewport
-    tmux_cmd = get_tmux_cmd()
     pane_result = subprocess.run(
-        tmux_cmd + ["capture-pane", "-t", session_name, "-p", "-S", "-500"],
+        ["tmux", "-S", socket_path, "capture-pane", "-t", session_name, "-p", "-S", "-500"],
         capture_output=True,
         text=True,
         check=True
@@ -338,7 +486,7 @@ def capture_pane_state(session_name: str) -> SessionState:
 
     # Capture cursor position
     cursor_result = subprocess.run(
-        tmux_cmd + ["display-message", "-t", session_name, "-p", "#{cursor_x},#{cursor_y}"],
+        ["tmux", "-S", socket_path, "display-message", "-t", session_name, "-p", "#{cursor_x},#{cursor_y}"],
         capture_output=True,
         text=True,
         check=True
@@ -775,9 +923,13 @@ def recover_with_escape(session_name: str) -> RecoveryResult:
     before = capture_pane_state(session_name)
     start_time = time.time()
 
+    # Find which socket the session is on
+    socket_path = find_session_socket(session_name)
+    if socket_path is None:
+        raise RuntimeError(f"Session {session_name} not found on any tmux socket")
+
     # Send ESC
-    tmux_cmd = get_tmux_cmd()
-    subprocess.run(tmux_cmd + ["send-keys", "-t", session_name, "Escape"])
+    subprocess.run(["tmux", "-S", socket_path, "send-keys", "-t", session_name, "Escape"])
 
     # Wait for recovery
     time.sleep(5)
@@ -808,9 +960,13 @@ def recover_with_ctrl_c(session_name: str) -> RecoveryResult:
     before = capture_pane_state(session_name)
     start_time = time.time()
 
+    # Find which socket the session is on
+    socket_path = find_session_socket(session_name)
+    if socket_path is None:
+        raise RuntimeError(f"Session {session_name} not found on any tmux socket")
+
     # Send Ctrl-C
-    tmux_cmd = get_tmux_cmd()
-    subprocess.run(tmux_cmd + ["send-keys", "-t", session_name, "C-c"])
+    subprocess.run(["tmux", "-S", socket_path, "send-keys", "-t", session_name, "C-c"])
 
     # Wait for recovery
     time.sleep(5)
@@ -842,20 +998,25 @@ def recover_with_session_restart(session_name: str) -> RecoveryResult:
     before = capture_pane_state(session_name)
     start_time = time.time()
 
+    # Find which socket the session is on (for killing)
+    socket_path = find_session_socket(session_name)
+    if socket_path is None:
+        raise RuntimeError(f"Session {session_name} not found on any tmux socket")
+
     # Kill the tmux session
-    tmux_cmd = get_tmux_cmd()
-    subprocess.run(tmux_cmd + ["kill-session", "-t", session_name])
+    subprocess.run(["tmux", "-S", socket_path, "kill-session", "-t", session_name])
 
     # Wait for session to die
     time.sleep(2)
 
     # Restart session (assumes CSM session structure)
-    # This will create a new tmux session with same name
+    # This will create a new tmux session with same name on AGM socket
     session_dir = Path.home() / "src/sessions" / session_name
     if session_dir.exists():
-        # Start new tmux session in session directory
+        # Start new tmux session in session directory on AGM socket
+        write_socket = get_write_socket_path()
         subprocess.run([
-            "tmux", "new-session", "-d", "-s", session_name,
+            "tmux", "-S", write_socket, "new-session", "-d", "-s", session_name,
             "-c", str(session_dir)
         ])
         time.sleep(2)
@@ -950,7 +1111,7 @@ def log_incident(incident: Incident, log_file_path: str | None = None, reporter:
 
     Args:
         incident: The incident to log
-        log_file_path: Optional custom log file path. If None, uses default ~/.csm/astrocyte/incidents.jsonl  # noqa: path-portability
+        log_file_path: Optional custom log file path. If None, uses default ~/.agm/astrocyte/incidents.jsonl  # noqa: path-portability
         reporter: Optional RemoteReporter for sending incident to collector
 
     Creates directory if needed. Uses fsync for durability.
@@ -992,7 +1153,7 @@ def log_false_positive(
         stuck_since: When stuck state was first detected
         unstuck_at: When session unstuck itself
 
-    Logs to ~/.csm/astrocyte/logs/false-positives.jsonl in JSONL format.  # noqa: path-portability
+    Logs to ~/.agm/astrocyte/logs/false-positives.jsonl in JSONL format.  # noqa: path-portability
     """
     log_file = Path.home() / ".csm/astrocyte/logs/false-positives.jsonl"
     log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1049,7 +1210,7 @@ def generate_diagnosis_prompt(
     """
     # Extract diagnosis file path
     timestamp_str = incident.timestamp.replace(":", "-").split(".")[0]
-    diagnosis_file = os.path.expanduser(f"~/.csm/astrocyte/diagnoses/{incident.session_name}-{timestamp_str}.md")
+    diagnosis_file = os.path.expanduser(f"~/.agm/astrocyte/diagnoses/{incident.session_name}-{timestamp_str}.md")
 
     # Generate prompt
     prompt = f"""⚠️ INCIDENT RECOVERY NOTICE
@@ -1115,7 +1276,7 @@ def send_diagnosis_prompt_via_csm(
 
     Now delegates to centralized send_tagged_message() wrapper which:
     - Adds source attribution tags (<system-reminder> block)
-    - Logs all sends to ~/.csm/astrocyte/logs/messages.log
+    - Logs all sends to ~/.agm/astrocyte/logs/messages.log
     - Uses tmux literal mode (-l flag) for reliable text transmission
     - Handles large prompts (up to 10KB via --prompt, >10KB via --prompt-file)
 
@@ -1153,22 +1314,26 @@ def send_diagnosis_prompt_via_tmux_fallback(
         True if sent successfully, False otherwise
     """
     try:
+        # Find which socket the session is on
+        socket_path = find_session_socket(session_name)
+        if socket_path is None:
+            raise RuntimeError(f"Session {session_name} not found on any tmux socket")
+
         # Write prompt to temp file
         prompt_file = Path(f"/tmp/astrocyte-diagnosis-{session_name}.txt")
         with open(prompt_file, "w") as f:
             f.write(prompt)
 
         # Load into tmux buffer
-        tmux_cmd = get_tmux_cmd()
         subprocess.run(
-            tmux_cmd + ["load-buffer", str(prompt_file)],
+            ["tmux", "-S", socket_path, "load-buffer", str(prompt_file)],
             check=True,
             capture_output=True
         )
 
         # Paste into session
         subprocess.run(
-            tmux_cmd + ["paste-buffer", "-t", session_name],
+            ["tmux", "-S", socket_path, "paste-buffer", "-t", session_name],
             check=True,
             capture_output=True
         )
@@ -1180,7 +1345,7 @@ def send_diagnosis_prompt_via_tmux_fallback(
 
         # Send Enter to submit (as separate command)
         subprocess.run(
-            tmux_cmd + ["send-keys", "-t", session_name, "C-m"],
+            ["tmux", "-S", socket_path, "send-keys", "-t", session_name, "C-m"],
             check=True,
             capture_output=True
         )
@@ -1279,13 +1444,16 @@ def send_violation_prompt(session_name: str) -> RecoveryResult:
 
 def reject_permission_prompt(session_name: str) -> RecoveryResult:
     """
-    Reject permission prompt by sending violation message.
+    Reject permission prompt by sending Escape key, then violation message.
 
     Permission prompts appear when PreToolUse hook blocks bash commands
-    for tool usage violations (cd, &&, pipes, etc.). We send the violation
-    prompt to unstick the session. Now delegates to centralized wrapper which:
+    for tool usage violations (cd, &&, pipes, etc.). We:
+    1. Send Escape key to dismiss the permission dialog
+    2. Send violation prompt to educate Claude about the violation
+
+    This delegates to centralized wrapper which:
     - Adds source attribution tags (<system-reminder> block)
-    - Logs rejection to ~/.csm/astrocyte/logs/messages.log
+    - Logs rejection to ~/.agm/astrocyte/logs/messages.log
     - Tags as "violation_prompt" type
 
     Args:
@@ -1302,7 +1470,17 @@ def reject_permission_prompt(session_name: str) -> RecoveryResult:
     violation_prompt_file = Path.home() / "src/ws/oss/tool-usage-analysis/prompts/VIOLATION-PROMPTS.md"
 
     try:
-        # Read violation prompt content
+        # STEP 1: Send Escape key to dismiss the permission dialog
+        socket_path = find_session_socket(session_name)
+        if socket_path is None:
+            raise RuntimeError(f"Session {session_name} not found on any tmux socket")
+
+        subprocess.run(["tmux", "-S", socket_path, "send-keys", "-t", session_name, "Escape"])
+
+        # Wait for dialog to dismiss
+        time.sleep(1.5)
+
+        # STEP 2: Read and send violation prompt content
         with open(violation_prompt_file, "r") as f:
             violation_content = f.read()
 
@@ -1311,8 +1489,8 @@ def reject_permission_prompt(session_name: str) -> RecoveryResult:
         send_tagged_message(session_name, violation_content, "violation_prompt")
         success = True
 
-        # Wait for rejection to be processed
-        time.sleep(2)
+        # Wait for violation message to be processed
+        time.sleep(1.5)
 
         # Capture state after rejection
         after = capture_pane_state(session_name)
@@ -1934,7 +2112,7 @@ def main():
                                 stuck_since=details["stuck_since"],
                                 unstuck_at=unstuck_at
                             )
-                            print(f"   📝 False positive logged to ~/.csm/astrocyte/logs/false-positives.jsonl")  # noqa: path-portability
+                            print(f"   📝 False positive logged to ~/.agm/astrocyte/logs/false-positives.jsonl")  # noqa: path-portability
 
                             # Clear stuck tracking for this session
                             stuck_details.pop(session, None)
