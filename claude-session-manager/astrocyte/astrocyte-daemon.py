@@ -225,6 +225,17 @@ def main():
                             heuristic = "ask_question_pattern"
 
                     if stuck:
+                        # Check if this is a conversation endpoint (natural completion) before recovery
+                        # Prevents false positive recoveries when Claude finishes task and idles at prompt
+                        if is_conversation_endpoint_idle(current):
+                            logger.info(f"Endpoint detected for {session} - skipping recovery (natural completion)")
+                            print(f"\n✓ ENDPOINT DETECTED: {session}")
+                            print(f"   Session at natural conversation endpoint (task complete)")
+                            print(f"   Symptom detected: {symptom} (but endpoint signals present)")
+                            print(f"   Skipping recovery - not a genuine hang")
+                            continue  # Skip to next session
+
+                        # Not an endpoint - proceed with genuine hang recovery
                         # Calculate duration (0 for fresh start detection)
                         if previous:
                             delta_minutes = int((current.timestamp - previous.timestamp).seconds / 60)
