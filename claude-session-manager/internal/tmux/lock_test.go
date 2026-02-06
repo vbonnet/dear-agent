@@ -279,7 +279,7 @@ func TestTmuxLock_Performance_Throughput(t *testing.T) {
 // TestTmuxLock_LockPath tests that lock path is correctly scoped to tmux operations
 func TestTmuxLock_LockPath(t *testing.T) {
 	uid := os.Getuid()
-	expectedPath := fmt.Sprintf("/tmp/csm-%d/tmux-server.lock", uid)
+	expectedPath := fmt.Sprintf("/tmp/agm-%d/tmux-server.lock", uid)
 
 	// Acquire lock and verify file exists
 	if err := AcquireTmuxLock(); err != nil {
@@ -410,7 +410,7 @@ func TestTmuxLock_CrossProcess(t *testing.T) {
 	// For now, we verify the lock file mechanism works at the syscall level
 
 	uid := os.Getuid()
-	lockPath := fmt.Sprintf("/tmp/csm-%d/tmux-server.lock", uid)
+	lockPath := fmt.Sprintf("/tmp/agm-%d/tmux-server.lock", uid)
 
 	// Clean up
 	defer func() {
@@ -567,6 +567,6 @@ func cleanupTmuxLock(t *testing.T) {
 
 	// Remove lock file
 	uid := os.Getuid()
-	lockPath := fmt.Sprintf("/tmp/csm-%d/tmux-server.lock", uid)
+	lockPath := fmt.Sprintf("/tmp/agm-%d/tmux-server.lock", uid)
 	os.Remove(lockPath)
 }

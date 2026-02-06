@@ -212,10 +212,10 @@ func TestWaitForReadyFileWithProgress(t *testing.T) {
 func TestSocketPath(t *testing.T) {
 	seq := NewInitSequence("socket-test")
 
-	// Socket path should be set to CSM socket
+	// Socket path should be set to AGM socket
 	expectedPath := GetSocketPath()
 	assert.Equal(t, expectedPath, seq.SocketPath)
 
-	// Should typically be /tmp/csm.sock
-	assert.Contains(t, seq.SocketPath, "csm.sock")
+	// Should typically be /tmp/agm.sock
+	assert.Contains(t, seq.SocketPath, "agm.sock")
 }

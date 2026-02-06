@@ -126,8 +126,7 @@ func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(t *testing.T) {
 				}
 
 				cmd := exec.Command("csm", "resume", sessionName,
-					"--sessions-dir", env.SessionsDir,
-					"--detached")
+					"--sessions-dir", env.SessionsDir)
 
 				output, err := cmd.CombinedOutput()
 				if err != nil {

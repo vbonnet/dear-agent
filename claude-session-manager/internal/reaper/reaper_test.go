@@ -19,7 +19,7 @@ func TestNew(t *testing.T) {
 		t.Errorf("New().SessionsDir = %q, expected %q", r.SessionsDir, sessionsDir)
 	}
 
-	expectedSocket := "/tmp/csm.sock"
+	expectedSocket := "/tmp/agm.sock"
 	if r.SocketPath != expectedSocket {
 		t.Errorf("New().SocketPath = %q, expected %q", r.SocketPath, expectedSocket)
 	}
