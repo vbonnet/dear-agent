@@ -28,6 +28,16 @@ except ImportError:
     RemoteReporter = None
     RemoteReporterConfig = None
 
+# Import session history for adaptive thresholds
+try:
+    # Import from installed location
+    sys.path.insert(0, str(Path.home() / ".csm" / "astrocyte"))
+    from session_history import get_adaptive_threshold
+    ADAPTIVE_THRESHOLDS_AVAILABLE = True
+except ImportError:
+    ADAPTIVE_THRESHOLDS_AVAILABLE = False
+    get_adaptive_threshold = None
+
 
 @dataclass
 class SessionState:
@@ -146,6 +156,7 @@ class Config:
 
         Priority order (highest to lowest):
         1. Per-session override (session_overrides config)
+        1.5. Adaptive threshold from session history (learned patterns)
         2. Session-type-specific threshold (auto-detected from session name)
         3. Global default threshold
 
@@ -161,6 +172,20 @@ class Config:
             override = self.session_overrides[session_name].get(threshold_name)
             if override is not None:
                 return override
+
+        # Priority 1.5: Adaptive threshold from session history
+        # For cursor_frozen threshold, check if session has learned pattern
+        if ADAPTIVE_THRESHOLDS_AVAILABLE and threshold_name == "cursor_frozen":
+            try:
+                # get_adaptive_threshold returns seconds or None
+                adaptive_threshold_seconds = get_adaptive_threshold(session_name)
+                if adaptive_threshold_seconds is not None:
+                    # Convert seconds to minutes (Astrocyte uses minutes)
+                    adaptive_threshold_minutes = adaptive_threshold_seconds / 60
+                    return int(adaptive_threshold_minutes)
+            except Exception:
+                # If session history fails, continue to fallback thresholds
+                pass
 
         # Priority 2: Session-type-specific threshold (for cursor_frozen only currently)
         if threshold_name == "cursor_frozen":
