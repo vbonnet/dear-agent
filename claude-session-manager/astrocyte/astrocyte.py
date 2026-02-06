@@ -165,7 +165,9 @@ class Config:
         # Priority 2: Session-type-specific threshold (for cursor_frozen only currently)
         if threshold_name == "cursor_frozen":
             session_type = get_session_type(session_name)
-            type_threshold_name = f"{session_type}_{threshold_name}"
+            # Replace hyphens with underscores for attribute lookup
+            # (session_type uses "single-task", Config uses "single_task_cursor_frozen")
+            type_threshold_name = f"{session_type.replace('-', '_')}_{threshold_name}"
             if hasattr(self, type_threshold_name):
                 return getattr(self, type_threshold_name)
 
@@ -439,16 +441,20 @@ def get_session_type(session_name: str) -> str:
             return "orchestrator"
 
     # Single-task patterns (focused work, specific deliverable)
-    # Exclude generic "test" and "session" which are often exploratory
+    # Match both prefixed (fix-X) and suffixed (X-fix) patterns
     single_task_patterns = [
-        "fix-",      # Prefixed patterns are more specific
+        "fix-",       # Prefixed: fix-astrocyte
+        "-fix",       # Suffixed: astrocyte-fix
         "bug-",
+        "-bug",
         "feature-",
+        "-feature",
         "implement-",
         "add-",
         "update-",
         "refactor-",
         "cleanup-",
+        "-cleanup",
         "migration-",
         "deploy-"
     ]
