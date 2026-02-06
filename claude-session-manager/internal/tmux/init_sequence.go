@@ -24,7 +24,7 @@ func NewInitSequence(sessionName string) *InitSequence {
 
 // Run executes the initialization sequence via tmux control mode:
 // 1. Prime: Send /rename to generate UUID (waits for confirmation)
-// 2. Associate: Send /csm-tools:csm-assoc
+// 2. Associate: Send /agm:agm-assoc
 // Note: Caller is responsible for waiting for ready-file signal after this completes.
 func (seq *InitSequence) Run() error {
 	// Lock tmux server for init sequence (prevent parallel command sends)
@@ -89,17 +89,17 @@ func (seq *InitSequence) sendRename(ctrl *ControlModeSession, watcher *OutputWat
 	return nil
 }
 
-// sendAssociation sends /csm-tools:csm-assoc command
+// sendAssociation sends /agm:agm-assoc command
 // Note: This sends the command and waits for Claude to be ready, but the caller is responsible
 // for waiting for the ready-file signal to confirm association completed (for custom progress reporting).
 func (seq *InitSequence) sendAssociation(ctrl *ControlModeSession, watcher *OutputWatcher) error {
 	// Wait for Claude to be ready BEFORE sending command
-	// This ensures we don't send /csm-assoc to bash shell (which would fail)
+	// This ensures we don't send /agm:agm-assoc to bash shell (which would fail)
 	if err := seq.waitForClaudePrompt(watcher, 30*time.Second); err != nil {
 		return fmt.Errorf("Claude not ready for association: %w", err)
 	}
 
-	assocCmd := fmt.Sprintf("/csm-tools:csm-assoc %s", seq.SessionName)
+	assocCmd := fmt.Sprintf("/agm:agm-assoc %s", seq.SessionName)
 
 	// Send command text using send-keys with -l flag (literal)
 	// This preserves the C-m/Enter fix from commit 76d3053
@@ -178,8 +178,8 @@ func (seq *InitSequence) waitForReadyFile(timeout time.Duration) error {
 // getReadyFilePath returns the path to the ready-file for a session
 func getReadyFilePath(sessionName string) string {
 	homeDir, _ := os.UserHomeDir()
-	csmDir := filepath.Join(homeDir, ".csm")
-	return filepath.Join(csmDir, fmt.Sprintf("ready-%s", sessionName))
+	agmDir := filepath.Join(homeDir, ".agm")
+	return filepath.Join(agmDir, fmt.Sprintf("ready-%s", sessionName))
 }
 
 // CleanupReadyFile removes the ready-file if it exists

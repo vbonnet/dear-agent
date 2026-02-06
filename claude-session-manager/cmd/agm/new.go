@@ -94,7 +94,7 @@ Examples:
 					ui.PrintError(
 						fmt.Errorf("session name mismatch: %s (provided) != %s (current tmux)", sessionName, currentTmuxName),
 						"Cannot create session with different name while inside tmux",
-						"  • Use --detached flag to create separate session, or\n  • Exit tmux first, or\n  • Use 'agmnew' without arguments to use current tmux session",
+						"  • Use --detached flag to create separate session, or\n  • Exit tmux first, or\n  • Use 'agm new' without arguments to use current tmux session",
 					)
 					return fmt.Errorf("session name mismatch")
 				}
@@ -203,8 +203,8 @@ Examples:
 				ui.PrintError(err,
 					"Workflow not compatible with agent",
 					fmt.Sprintf("  • Workflow '%s' does not support agent '%s'\n"+
-						"  • Run 'agmworkflow list' to see available workflows\n"+
-						"  • Run 'agmworkflow list --agent=%s' to see compatible workflows",
+						"  • Run 'agm workflow list' to see available workflows\n"+
+						"  • Run 'agm workflow list --agent=%s' to see compatible workflows",
 						workflowName, agentName, agentName))
 				return err
 			}
@@ -574,7 +574,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 	if err := os.MkdirAll(manifestDir, 0700); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to create manifest directory: %v", err))
-		ui.PrintWarning("Proceeding without manifest - you can run 'agmsync' later")
+		ui.PrintWarning("Proceeding without manifest - you can run 'agm sync' later")
 	} else {
 		// Create v2 manifest with proper SessionID and empty Claude UUID
 		// The /csm-assoc command will populate the Claude UUID when it runs
@@ -604,7 +604,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 		if err := manifest.Write(manifestPath, m); err != nil {
 			ui.PrintWarning(fmt.Sprintf("Failed to write manifest: %v", err))
-			ui.PrintWarning("Proceeding without manifest - you can run 'agmsync' later")
+			ui.PrintWarning("Proceeding without manifest - you can run 'agm sync' later")
 		} else {
 			debug.Log("Manifest created at: %s", manifestPath)
 			ui.PrintSuccess(fmt.Sprintf("Created manifest: %s", manifestPath))
@@ -616,17 +616,17 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		// NOTE: No need to release global lock - using fine-grained tmux lock instead
 		// InitSequence will acquire/release tmux lock only during actual operations
 
-		// Use InitSequence to properly sequence /rename and /agm:assoc commands
+		// Use InitSequence to properly sequence /rename and /agm:agm-assoc commands
 		// This uses tmux control mode to wait for each command to complete before sending the next
 		debug.Phase("Sequenced Initialization")
-		debug.Log("Running InitSequence for /rename and /agm:assoc")
+		debug.Log("Running InitSequence for /rename and /agm:agm-assoc")
 		seq := tmux.NewInitSequence(sessionName)
 		if err := seq.Run(); err != nil {
 			debug.Log("InitSequence failed: %v", err)
 			ui.PrintWarning("Failed to run initialization sequence")
 			fmt.Printf("💡 You can manually run:\n")
 			fmt.Printf("  /rename %s\n", sessionName)
-			fmt.Printf("  /agm:assoc %s\n", sessionName)
+			fmt.Printf("  /agm:agm-assoc %s\n", sessionName)
 		} else {
 			debug.Log("InitSequence completed successfully")
 		}
@@ -666,10 +666,10 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			debug.Log("Ready-file detected - session is ready")
 			ui.PrintSuccess("Claude is ready and session associated!")
 
-			// Wait for /agm:assoc skill to finish outputting its completion messages
+			// Wait for /agm:agm-assoc skill to finish outputting its completion messages
 			// The ready-file signals when 'agm associate' binary completes, but the skill
 			// continues to output messages after that. Give it time to finish.
-			debug.Log("Waiting for /agm:assoc skill to complete output")
+			debug.Log("Waiting for /agm:agm-assoc skill to complete output")
 			// NOTE: Skill completion detection not yet implemented (requires control mode output channel)
 			// Using fixed sleep as fallback
 			time.Sleep(500 * time.Millisecond)
@@ -836,14 +836,14 @@ func startClaudeInCurrentTmux(sessionName string) error {
 			fmt.Printf("💡 Session is ready, but process not detected. This is usually fine.\n")
 		}
 
-		// Send /csm-tools:csm-assoc command to associate session with CSM
-		// This runs the csm-assoc skill which will auto-rename the session
-		assocCmd := "/csm-tools:csm-assoc"
+		// Send /agm:agm-assoc command to associate session with AGM
+		// This runs the agm-assoc skill which will auto-rename the session
+		assocCmd := "/agm:agm-assoc"
 		if err := tmux.SendCommand(sessionName, assocCmd); err != nil {
 			ui.PrintWarning("Failed to auto-associate session")
-			fmt.Printf("💡 You can manually run: /csm-tools:csm-assoc\n")
+			fmt.Printf("💡 You can manually run: /agm:agm-assoc\n")
 		} else {
-			ui.PrintSuccess("Sent /csm-tools:csm-assoc to associate session")
+			ui.PrintSuccess("Sent /agm:agm-assoc to associate session")
 		}
 
 	default:

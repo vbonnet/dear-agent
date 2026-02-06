@@ -143,16 +143,17 @@ func TestSendAssociation_CommandFormat(t *testing.T) {
 	// This test validates the command format without actually running tmux
 
 	sessionName := "test-assoc"
-	expectedCmd := "/csm-tools:csm-assoc"
 
 	// The actual send-keys format should be:
-	// send-keys -t test-assoc "/csm-tools:csm-assoc" C-m
-	expectedCommandLine := `send-keys -t test-assoc "/csm-tools:csm-assoc" C-m`
+	// send-keys -t test-assoc -l "/agm:agm-assoc test-assoc"
+	// send-keys -t test-assoc C-m
+	expectedCommandLine1 := `send-keys -t test-assoc -l "/agm:agm-assoc test-assoc"`
+	expectedCommandLine2 := `send-keys -t test-assoc C-m`
 
 	// This validates our understanding of the format
-	assert.Contains(t, expectedCommandLine, sessionName)
-	assert.Contains(t, expectedCommandLine, expectedCmd)
-	assert.Contains(t, expectedCommandLine, "C-m") // Enter key
+	assert.Contains(t, expectedCommandLine1, sessionName)
+	assert.Contains(t, expectedCommandLine1, "/agm:agm-assoc")
+	assert.Contains(t, expectedCommandLine2, "C-m") // Enter key
 }
 
 // TestInitSequence_Integration tests basic initialization
