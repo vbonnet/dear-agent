@@ -564,6 +564,131 @@ QUESTION_PATTERNS = [
     r"Verify (the|your|that)",
 ]
 
+# Conversation endpoint detection patterns
+# Used to identify when a conversation naturally completes (task done, waiting for user)
+COMPLETION_PATTERNS = [
+    # Explicit completion
+    r"✅.*complete",
+    r"✅.*done",
+    r"✅.*finished",
+    r"✓.*complete",
+    r"✓.*done",
+
+    # Summary language
+    r"All.*complete",
+    r"Successfully.*completed",
+    r"Task.*finished",
+    r"Work.*done",
+
+    # Ready state
+    r"Ready to proceed",
+    r"Waiting for.*input",
+    r"What would you like",
+    r"How can I help",
+
+    # Final status
+    r"Status:.*complete",
+    r"Result:.*success",
+]
+
+
+def has_completion_language(pane_content: str) -> bool:
+    """
+    Check if pane content contains completion language.
+
+    Scans last 500 characters for phrases indicating task completion
+    (e.g., "✅ complete", "Task finished", "Ready to proceed").
+
+    Args:
+        pane_content: Full pane content from tmux
+
+    Returns:
+        True if completion language detected, False otherwise
+    """
+    # Scan last 500 chars (recent output)
+    recent_content = pane_content[-500:]
+
+    for pattern in COMPLETION_PATTERNS:
+        if re.search(pattern, recent_content, re.IGNORECASE):
+            return True
+
+    return False
+
+
+def has_idle_prompt(pane_content: str) -> bool:
+    """
+    Check if idle prompt (❯) is visible in pane.
+
+    The ❯ character indicates Claude is ready for user input
+    (not stuck in execution or thinking).
+
+    Args:
+        pane_content: Full pane content from tmux
+
+    Returns:
+        True if idle prompt visible, False otherwise
+    """
+    # Check last 100 chars (prompt is always at end)
+    recent_content = pane_content[-100:]
+
+    return "❯" in recent_content
+
+
+def has_pending_tool_calls(pane_content: str) -> bool:
+    """
+    Check if tool execution is in progress.
+
+    Detects spinner patterns (✶ Thinking…, ✢ Processing…, etc.)
+    indicating Claude is actively executing tools.
+
+    Args:
+        pane_content: Full pane content from tmux
+
+    Returns:
+        True if pending tool calls detected, False otherwise
+    """
+    # Scan last 500 chars for spinner patterns
+    recent_content = pane_content[-500:]
+
+    # Use existing WAITING_PATTERNS (already defined for hang detection)
+    for pattern in WAITING_PATTERNS:
+        if re.search(pattern, recent_content):
+            return True
+
+    return False
+
+
+def is_processing_stale_notifications(pane_content: str) -> bool:
+    """
+    Check if processing stale background task notifications.
+
+    Background task notifications that arrive hours after task completion
+    can create false appearance of activity. This detects notification
+    processing to distinguish from genuine work.
+
+    Args:
+        pane_content: Full pane content from tmux
+
+    Returns:
+        True if processing stale notifications, False otherwise
+
+    Note:
+        Currently returns False (conservative - treat as endpoint).
+        Stale notifications don't indicate active work, just delayed display.
+        Future enhancement: parse timestamps to detect truly stale notifications.
+    """
+    # Conservative approach: Don't treat background notifications as blocking endpoint
+    # Rationale: If completion language + idle prompt present, background output
+    # is just delayed notification display, not active work
+
+    # Future enhancement: Parse notification timestamps to detect stale (>1 hour old)
+    # notification_pattern = r"Background task.*output.*(\d{4}-\d{2}-\d{2})"
+    # if re.search(notification_pattern, pane_content[-500:]):
+    #     # Check if timestamp is >1 hour old
+    #     return True
+
+    return False
+
 
 def is_stuck_mustering(
     current: SessionState,
