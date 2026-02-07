@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/activity"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 	"golang.org/x/term"
@@ -149,7 +150,7 @@ func renderMinimalTable(
 		}
 
 		// Activity
-		recency := formatTimeCompact(m.UpdatedAt)
+		recency := getSessionActivity(m)
 
 		// Format line: Symbol + 2sp + Name(20) + 2sp + Agent(6) + 2sp + Activity
 		line := fmt.Sprintf("%s  %-20s  %-6s  %s",
@@ -234,7 +235,7 @@ func renderCompactTable(
 		project := compactPath(truncatePath(m.Context.Project, 25))
 
 		// Activity
-		recency := formatTimeCompact(m.UpdatedAt)
+		recency := getSessionActivity(m)
 
 		// Format line: Symbol + 2sp + Name(30) + 2sp + Agent(6) + 2sp + Project(25) + 2sp + Activity
 		line := fmt.Sprintf("%s  %-30s  %-6s  %-25s  %s",
@@ -489,12 +490,12 @@ func renderGroupHeaderWithDivider(status string, count int, widths columnWidths,
 	palette := GetPalette(cfg.UI.Theme)
 
 	// Calculate where "Last Activity" should appear based on column widths
-	// Format: Symbol(1) + Space(2) + Name + Space(2) + [Tmux + Space(2)] + Agent + Space(2) + Project + Space(2) + Attachment + Space(2) + Recency
+	// Format: Symbol(1) + Space(2) + Name + Space(2) + [Tmux + Space(2)] + Agent + Space(2) + Project + Space(2) + Recency
 	var recencyPosition int
 	if showTmuxColumn {
-		recencyPosition = 1 + 2 + widths.name + 2 + widths.tmux + 2 + widths.agent + 2 + widths.project + 2 + widths.attachment + 2
+		recencyPosition = 1 + 2 + widths.name + 2 + widths.tmux + 2 + widths.agent + 2 + widths.project + 2
 	} else {
-		recencyPosition = 1 + 2 + widths.name + 2 + widths.agent + 2 + widths.project + 2 + widths.attachment + 2
+		recencyPosition = 1 + 2 + widths.name + 2 + widths.agent + 2 + widths.project + 2
 	}
 
 	// Create header line with status count and "Last Activity" positioned at recency column
@@ -533,7 +534,7 @@ func renderFooter() string {
 	footerStyle := lipgloss.NewStyle().
 		Foreground(palette.Info)
 
-	return "\n" + footerStyle.Render("💡 Resume: csm resume <name>  |  Stop: csm stop <name>  |  Clean: csm clean")
+	return "\n" + footerStyle.Render("💡 Resume: agm resume <name>  |  Stop: agm stop <name>  |  Clean: agm clean")
 }
 
 // getStatusSymbol returns the Unicode symbol for a status
@@ -571,18 +572,17 @@ func getStatusSymbol(status string) string {
 
 // columnWidths holds the maximum width for each column
 type columnWidths struct {
-	name       int
-	tmux       int
-	agent      int
-	project    int
-	attachment int
+	name    int
+	tmux    int
+	agent   int
+	project int
 }
 
 // calculateMaxColumnWidths calculates the maximum width for each column across all groups
 func calculateMaxColumnWidths(groups map[string][]*manifest.Manifest, statuses map[string]session.StatusInfo, showTmuxColumn bool) columnWidths {
 	widths := columnWidths{}
 
-	for status, group := range groups {
+	for _, group := range groups {
 		for _, m := range group {
 			// Name column
 			if len(m.Name) > widths.name {
@@ -603,17 +603,6 @@ func calculateMaxColumnWidths(groups map[string][]*manifest.Manifest, statuses m
 			project := compactPath(truncatePath(m.Context.Project, 40))
 			if len(project) > widths.project {
 				widths.project = len(project)
-			}
-
-			// Attachment column (only for active sessions)
-			if status == "active" {
-				statusInfo := statuses[m.Name]
-				if statusInfo.AttachedClients > 0 {
-					attachmentText := fmt.Sprintf("%d attached", statusInfo.AttachedClients)
-					if len(attachmentText) > widths.attachment {
-						widths.attachment = len(attachmentText)
-					}
-				}
 			}
 		}
 	}
@@ -657,30 +646,22 @@ func renderGroupTableWithWidths(group []*manifest.Manifest, status string, statu
 		project := compactPath(truncatePath(m.Context.Project, 40))
 		recency := formatTimeCompact(m.UpdatedAt)
 
-		// Format attachment count
-		var attachmentText string
-		if status == "active" && statusInfo.AttachedClients > 0 {
-			attachmentText = fmt.Sprintf("%d attached", statusInfo.AttachedClients)
-		}
-
 		// Build line with fixed widths
 		var line string
 		if showTmuxColumn {
-			line = fmt.Sprintf("%s  %-*s  %-*s  %-*s  %-*s  %-*s  %-10s",
+			line = fmt.Sprintf("%s  %-*s  %-*s  %-*s  %-*s  %-10s",
 				symbol,
 				widths.name, m.Name,
 				widths.tmux, m.Tmux.SessionName,
 				widths.agent, m.Agent,
 				widths.project, project,
-				widths.attachment, attachmentText,
 				recency)
 		} else {
-			line = fmt.Sprintf("%s  %-*s  %-*s  %-*s  %-*s  %-10s",
+			line = fmt.Sprintf("%s  %-*s  %-*s  %-*s  %-10s",
 				symbol,
 				widths.name, m.Name,
 				widths.agent, m.Agent,
 				widths.project, project,
-				widths.attachment, attachmentText,
 				recency)
 		}
 
@@ -838,6 +819,32 @@ func formatTimeCompact(t time.Time) string {
 	}
 
 	return t.Format("Jan 02")
+}
+
+// getSessionActivity returns formatted activity time for a session using ActivityTracker.
+// Falls back to "unknown ⚠️" on errors (missing history, corrupted data, etc).
+func getSessionActivity(m *manifest.Manifest) string {
+	var tracker activity.ActivityTracker
+
+	// Determine agent type and create appropriate tracker
+	switch m.Agent {
+	case "claude":
+		tracker = activity.NewClaudeActivityTracker()
+	case "gemini":
+		tracker = activity.NewGeminiActivityTracker()
+	default:
+		// Unknown agent type, fallback to UpdatedAt
+		return formatTimeCompact(m.UpdatedAt)
+	}
+
+	// Get last activity timestamp
+	timestamp, err := tracker.GetLastActivity(m.SessionID)
+	if err != nil {
+		// History file not found, corrupted, or empty
+		return "unknown ⚠️"
+	}
+
+	return formatTimeCompact(timestamp)
 }
 
 // truncatePath truncates path with ... if too long
