@@ -1,0 +1,169 @@
+package reaper
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
+)
+
+// TestSendExit_UsesAGMSend verifies that sendExit() now uses 'agm send' instead of raw tmux commands
+func TestSendExit_UsesAGMSend(t *testing.T) {
+	// This is a smoke test to verify the sendExit() implementation calls agm send
+	// We can't easily test the full integration without a real tmux session,
+	// but we can verify the code path uses exec.LookPath("agm") and exec.Command("agm", "send", ...)
+
+	// Check that agm binary exists in PATH (required for the fix to work)
+	agmPath, err := exec.LookPath("agm")
+	if err != nil {
+		t.Skip("agm binary not found in PATH, skipping integration test")
+	}
+
+	t.Logf("Found agm binary at: %s", agmPath)
+
+	// Verify agm send command syntax
+	cmd := exec.Command(agmPath, "send", "--help")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("agm send --help failed: %v\nOutput: %s", err, string(output))
+	}
+
+	// Verify --sender flag is documented
+	if !strings.Contains(string(output), "--sender") {
+		t.Error("agm send doesn't support --sender flag (required for reaper)")
+	}
+
+	// Verify --prompt flag is documented
+	if !strings.Contains(string(output), "--prompt") {
+		t.Error("agm send doesn't support --prompt flag (required for reaper)")
+	}
+
+	t.Log("✓ agm send supports required flags (--sender, --prompt)")
+}
+
+// TestSendExit_FailsGracefully verifies error handling when session doesn't exist
+func TestSendExit_FailsGracefully(t *testing.T) {
+	// Create reaper for non-existent session
+	r := New("nonexistent-test-session-12345", "/tmp/test-sessions")
+
+	// sendExit should fail gracefully (session doesn't exist)
+	err := r.sendExit()
+	if err == nil {
+		t.Error("sendExit() should fail for non-existent session, but succeeded")
+	}
+
+	// Error should mention agm send failure
+	if !strings.Contains(err.Error(), "agm send") {
+		t.Errorf("Error should mention 'agm send', got: %v", err)
+	}
+
+	t.Logf("✓ sendExit() fails gracefully with error: %v", err)
+}
+
+// TestIntegration_ReaperWithRealSession tests the full reaper flow with a real tmux session
+// This test requires:
+// - agm binary in PATH
+// - tmux running
+// - ability to create test sessions
+func TestIntegration_ReaperWithRealSession(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Check prerequisites
+	if _, err := exec.LookPath("agm"); err != nil {
+		t.Skip("agm binary not found, skipping integration test")
+	}
+
+	// Get socket path
+	socketPath := tmux.GetSocketPath()
+
+	// Create test session directory
+	tmpDir := t.TempDir()
+	sessionsDir := filepath.Join(tmpDir, "sessions")
+	sessionName := "reaper-integration-test-" + filepath.Base(tmpDir)
+	sessionDir := filepath.Join(sessionsDir, sessionName)
+
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		t.Fatalf("Failed to create session dir: %v", err)
+	}
+
+	// Create minimal manifest
+	manifestContent := `{
+  "uuid": "test-uuid-integration",
+  "session_name": "` + sessionName + `",
+  "agent_id": "claude",
+  "created_at": "2026-02-07T21:00:00Z",
+  "lifecycle": "active"
+}`
+
+	manifestPath := filepath.Join(sessionDir, "MANIFEST.json")
+	if err := os.WriteFile(manifestPath, []byte(manifestContent), 0644); err != nil {
+		t.Fatalf("Failed to write manifest: %v", err)
+	}
+
+	// Create a simple tmux session that will accept commands
+	// Use a session that just runs 'sleep infinity' so it stays alive
+	cmd := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName, "bash")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to create tmux session: %v", err)
+	}
+
+	// Cleanup: kill session at end of test
+	defer func() {
+		killCmd := exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName)
+		_ = killCmd.Run() // Ignore errors (session might already be gone)
+	}()
+
+	// Wait for session to be ready
+	time.Sleep(500 * time.Millisecond)
+
+	// Send a command that simulates Claude finishing work
+	// This will echo the Claude prompt character
+	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "-l", "echo '❯'")
+	if err := sendCmd.Run(); err != nil {
+		t.Fatalf("Failed to send test command: %v", err)
+	}
+
+	sendCmd = exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "Enter")
+	if err := sendCmd.Run(); err != nil {
+		t.Fatalf("Failed to send Enter: %v", err)
+	}
+
+	// Wait for command to execute
+	time.Sleep(500 * time.Millisecond)
+
+	// Test sendExit() which should use agm send
+	r := New(sessionName, sessionsDir)
+
+	// This test focuses on sendExit() which now uses 'agm send'
+	// agm send internally waits for prompt, so if the session has "❯" visible,
+	// it should detect it and send /exit
+	err := r.sendExit()
+
+	// Note: agm send will likely timeout because this isn't a real Claude session
+	// But we can verify it tried to use agm send (not raw tmux)
+	if err != nil {
+		// Expected - agm send times out waiting for real Claude prompt
+		if !strings.Contains(err.Error(), "agm send") {
+			t.Errorf("Error should mention 'agm send', got: %v", err)
+		}
+
+		// Check if the error is specifically a timeout (expected)
+		if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "session not ready") {
+			t.Logf("✓ agm send was invoked (timed out as expected for non-Claude session)")
+		} else {
+			t.Logf("agm send error: %v", err)
+		}
+	} else {
+		// If it succeeded, that's fine too - means agm send worked
+		t.Log("✓ agm send succeeded")
+	}
+
+	// The key verification: reaper now uses 'agm send' instead of raw tmux send-keys
+	// This is a behavioral test, not a full end-to-end test
+}

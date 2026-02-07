@@ -99,23 +99,37 @@ func (r *Reaper) waitForPrompt(timeout time.Duration) error {
 }
 
 // sendExit sends /exit command to exit Claude Code cleanly
-// Claude Code requires the /exit command (not Ctrl+D) to exit properly
+// Uses agm send which provides robust sending with automatic prompt detection
+// and proper handling of busy pane states
 func (r *Reaper) sendExit() error {
-	socketPath := tmux.GetSocketPath()
-
-	// Send /exit command followed by Enter
-	// Using -l flag to send literal text (slash command)
-	cmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", r.SessionName, "-l", "/exit")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to send /exit: %w", err)
+	// Find agm binary (should be in PATH or same directory as csm-reaper)
+	agmPath, err := exec.LookPath("agm")
+	if err != nil {
+		// Fallback: try same directory as current executable
+		execPath, execErr := os.Executable()
+		if execErr != nil {
+			return fmt.Errorf("agm not found in PATH and failed to get executable path: %w", err)
+		}
+		agmPath = filepath.Join(filepath.Dir(execPath), "agm")
+		if _, statErr := os.Stat(agmPath); statErr != nil {
+			return fmt.Errorf("agm not found in PATH or %s: %w", agmPath, err)
+		}
 	}
 
-	// Send Enter to execute the command
-	cmd = exec.Command("tmux", "-S", socketPath, "send-keys", "-t", r.SessionName, "Enter")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to send Enter: %w", err)
+	// Use agm send with --sender flag
+	// agm send internally calls WaitForPromptSimple before sending,
+	// so it handles the case where Claude is still working
+	cmd := exec.Command(agmPath, "send", r.SessionName,
+		"--sender", "agm-reaper",
+		"--prompt", "/exit")
+
+	// Capture output for debugging
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("agm send failed: %w\nOutput: %s", err, string(output))
 	}
 
+	log.Printf("✓ agm send output: %s", string(output))
 	return nil
 }
 
