@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -99,37 +98,20 @@ func (r *Reaper) waitForPrompt(timeout time.Duration) error {
 }
 
 // sendExit sends /exit command to exit Claude Code cleanly
-// Uses agm send which provides robust sending with automatic prompt detection
-// and proper handling of busy pane states
+// Uses tmux.SendMultiLinePromptSafe which waits for prompt and sends literal /exit
+// This avoids the sender attribution header that agm send adds
 func (r *Reaper) sendExit() error {
-	// Find agm binary (should be in PATH or same directory as csm-reaper)
-	agmPath, err := exec.LookPath("agm")
-	if err != nil {
-		// Fallback: try same directory as current executable
-		execPath, execErr := os.Executable()
-		if execErr != nil {
-			return fmt.Errorf("agm not found in PATH and failed to get executable path: %w", err)
-		}
-		agmPath = filepath.Join(filepath.Dir(execPath), "agm")
-		if _, statErr := os.Stat(agmPath); statErr != nil {
-			return fmt.Errorf("agm not found in PATH or %s: %w", agmPath, err)
-		}
+	// Use tmux.SendMultiLinePromptSafe to send /exit as a literal command
+	// This function:
+	// 1. Waits for Claude prompt (handles busy pane states)
+	// 2. Sends ESC to interrupt any thinking
+	// 3. Sends /exit in literal mode (not as a message)
+	// 4. Sends Enter to execute
+	if err := tmux.SendMultiLinePromptSafe(r.SessionName, "/exit"); err != nil {
+		return fmt.Errorf("failed to send /exit: %w", err)
 	}
 
-	// Use agm send with --sender flag
-	// agm send internally calls WaitForPromptSimple before sending,
-	// so it handles the case where Claude is still working
-	cmd := exec.Command(agmPath, "send", r.SessionName,
-		"--sender", "agm-reaper",
-		"--prompt", "/exit")
-
-	// Capture output for debugging
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("agm send failed: %w\nOutput: %s", err, string(output))
-	}
-
-	log.Printf("✓ agm send output: %s", string(output))
+	log.Printf("✓ /exit sent via SendMultiLinePromptSafe")
 	return nil
 }
 
