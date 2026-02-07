@@ -825,20 +825,23 @@ func formatTimeCompact(t time.Time) string {
 // Falls back to "unknown ⚠️" on errors (missing history, corrupted data, etc).
 func getSessionActivity(m *manifest.Manifest) string {
 	var tracker activity.ActivityTracker
+	var sessionKey string
 
 	// Determine agent type and create appropriate tracker
 	switch m.Agent {
 	case "claude":
 		tracker = activity.NewClaudeActivityTracker()
+		sessionKey = m.Claude.UUID // Claude uses UUID from history.jsonl
 	case "gemini":
 		tracker = activity.NewGeminiActivityTracker()
+		sessionKey = m.SessionID // Gemini uses session ID for per-session files
 	default:
 		// Unknown agent type, fallback to UpdatedAt
 		return formatTimeCompact(m.UpdatedAt)
 	}
 
 	// Get last activity timestamp
-	timestamp, err := tracker.GetLastActivity(m.SessionID)
+	timestamp, err := tracker.GetLastActivity(sessionKey)
 	if err != nil {
 		// History file not found, corrupted, or empty
 		return "unknown ⚠️"
