@@ -1,0 +1,67 @@
+# session_resume.txtar
+# Test: Resume existing AGM session
+
+env AGM_TEST_MODE=true
+env HOME=$WORK/home
+
+mkdir $HOME/sessions
+
+# Create session manifest with Claude UUID
+exec cat >$HOME/sessions/my-project.yaml <<EOF
+schema_version: "2"
+session_id: sess-my-project-001
+name: my-project
+created_at: 2024-01-01T12:00:00Z
+updated_at: 2024-01-01T12:00:00Z
+lifecycle: ""
+context:
+  project: /home/user/projects/my-project
+  purpose: Project development
+  tags:
+    - development
+    - feature-work
+  notes: Working on authentication feature
+claude:
+  uuid: claude-uuid-12345
+tmux:
+  session_name: my-project
+agent: claude
+EOF
+
+# Test: Resume by session name
+# In test mode, resume should show session info without actually launching tmux/Claude
+exec agm resume my-project --test-mode --dry-run
+stdout 'my-project'
+stdout 'claude-uuid-12345'
+stdout 'Project: /home/user/projects/my-project'
+
+# Test: Resume non-existent session should fail
+! exec agm resume nonexistent --test-mode
+stderr 'not found'
+
+# Test: Fuzzy matching (if implemented)
+# Typo "my-projet" should fuzzy match to "my-project"
+exec agm resume my-projet --test-mode --dry-run
+stdout 'my-project'
+stdout 'Did you mean'
+
+# Test: Resume archived session should warn or fail
+exec cat >$HOME/sessions/archived-project.yaml <<EOF
+schema_version: "2"
+session_id: sess-archived-001
+name: archived-project
+created_at: 2024-01-01T10:00:00Z
+updated_at: 2024-01-01T11:00:00Z
+lifecycle: "archived"
+context:
+  project: /home/user/projects/archived
+claude:
+  uuid: uuid-archived-001
+tmux:
+  session_name: archived-project
+agent: claude
+EOF
+
+! exec agm resume archived-project --test-mode
+stderr 'archived'
+stderr 'unarchive'

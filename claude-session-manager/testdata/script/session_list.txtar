@@ -1,0 +1,88 @@
+# session_list.txtar
+# Test: List AGM sessions with filters
+
+env AGM_TEST_MODE=true
+env HOME=$WORK/home
+
+# Create test directory and sessions
+mkdir $HOME/sessions
+
+# Create test manifest files directly for predictable testing
+# Active session manifest
+exec cat >$HOME/sessions/active-session.yaml <<EOF
+schema_version: "2"
+session_id: sess-001
+name: active-session
+created_at: 2024-01-01T12:00:00Z
+updated_at: 2024-01-01T12:00:00Z
+lifecycle: ""
+context:
+  project: /home/user/projects/active
+  purpose: Active development
+  tags:
+    - development
+    - active
+claude:
+  uuid: uuid-active-001
+tmux:
+  session_name: active-session
+agent: claude
+EOF
+
+# Stopped session manifest
+exec cat >$HOME/sessions/stopped-session.yaml <<EOF
+schema_version: "2"
+session_id: sess-002
+name: stopped-session
+created_at: 2024-01-01T13:00:00Z
+updated_at: 2024-01-01T13:00:00Z
+lifecycle: ""
+context:
+  project: /home/user/projects/stopped
+  purpose: Stopped session
+  tags:
+    - testing
+claude:
+  uuid: uuid-stopped-002
+tmux:
+  session_name: stopped-session
+agent: claude
+EOF
+
+# Archived session manifest
+exec cat >$HOME/sessions/archived-session.yaml <<EOF
+schema_version: "2"
+session_id: sess-003
+name: archived-session
+created_at: 2024-01-01T14:00:00Z
+updated_at: 2024-01-01T14:00:00Z
+lifecycle: "archived"
+context:
+  project: /home/user/projects/archived
+  purpose: Archived project
+  tags:
+    - completed
+claude:
+  uuid: uuid-archived-003
+tmux:
+  session_name: archived-session
+agent: claude
+EOF
+
+# Test: List without --all (should exclude archived)
+exec agm list --test-mode
+stdout 'active-session'
+stdout 'stopped-session'
+! stdout 'archived-session'
+
+# Test: List with --all (should include archived)
+exec agm list --all --test-mode
+stdout 'active-session'
+stdout 'stopped-session'
+stdout 'archived-session'
+
+# Test: Empty sessions directory
+mkdir $HOME/sessions-empty
+exec agm list --test-mode --sessions-dir $HOME/sessions-empty
+stdout 'No sessions found'
+stdout 'Create your first session'

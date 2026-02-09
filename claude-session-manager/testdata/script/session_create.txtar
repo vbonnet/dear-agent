@@ -1,0 +1,41 @@
+# session_create.txtar
+# Test: Create a new AGM session in detached mode
+
+# AGM_TEST_MODE enables test mode for predictable paths
+env AGM_TEST_MODE=true
+env HOME=$WORK/home
+
+# Create test directory structure
+mkdir $HOME/sessions
+mkdir $HOME/projects/test-project
+
+# Create session in detached mode (no tmux required for test)
+# Session should be created with manifest
+exec agm new test-session-1 --detached --agent claude
+stdout 'Session created'
+stdout 'test-session-1'
+
+# Verify manifest file exists
+exists $HOME/sessions/test-session-1.yaml
+
+# Read manifest and verify fields
+exec cat $HOME/sessions/test-session-1.yaml
+stdout 'session_id:'
+stdout 'name: test-session-1'
+stdout 'schema_version: "2"'
+stdout 'agent: claude'
+
+# Verify tmux session name is set
+stdout 'session_name: test-session-1'
+
+# List sessions should show the new session
+exec agm list --test-mode
+stdout 'test-session-1'
+
+# Create second session to test multiple sessions
+exec agm new test-session-2 --detached --agent claude
+stdout 'Session created'
+
+exec agm list --test-mode
+stdout 'test-session-1'
+stdout 'test-session-2'
