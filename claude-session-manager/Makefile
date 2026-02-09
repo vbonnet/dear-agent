@@ -54,6 +54,11 @@ install: build
 	@echo "✓ csm wrapper binary installed to $(HOME)/go/bin/csm (forwards to agm)"
 	@echo "✓ agm-mcp-server binary installed to $(HOME)/go/bin/agm-mcp-server"
 	@echo ""
+	@# Install SessionStart hook (auto-discovered from ~/.claude/hooks/session-start/)
+	@mkdir -p $(HOME)/.claude/hooks/session-start
+	@install -m 755 docs/hooks/session-start-agm.sh $(HOME)/.claude/hooks/session-start/agm-ready-signal
+	@echo "✓ SessionStart hook installed to $(HOME)/.claude/hooks/session-start/agm-ready-signal"
+	@echo ""
 	@# Setup bash completion
 	@if [ -f $(HOME)/.bashrc ]; then \
 		if ! grep -q "agm completion bash" $(HOME)/.bashrc; then \

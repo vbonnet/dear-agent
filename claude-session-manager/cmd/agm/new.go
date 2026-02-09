@@ -69,6 +69,14 @@ Examples:
 		// Get debug flag
 		debugEnabled, _ := cmd.Flags().GetBool("debug")
 
+		// FAIL FAST: Cannot run from within tmux unless --detached
+		if os.Getenv("TMUX") != "" && !detached {
+			return fmt.Errorf("cannot run 'agm new' from within tmux session\n\n" +
+				"Solutions:\n" +
+				"  • Use --detached flag: agm new --detached\n" +
+				"  • Exit tmux first: Press Ctrl+B then D to detach")
+		}
+
 		inTmux := os.Getenv("TMUX") != ""
 		var sessionName string
 		var err error
@@ -369,10 +377,17 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	var spinErr error
 	switch agentName {
 	case "claude":
+		// Cleanup Claude ready-files from previous sessions (if any)
+		claudeReady := tmux.NewClaudeReadyFile(sessionName)
+		if err := claudeReady.Cleanup(); err != nil {
+			debug.Log("Warning: failed to cleanup ready-files: %v", err)
+		}
+
 		// Start Claude in the session
 		// Use --add-dir to pre-approve workspace and avoid trust prompt blocking the ">" prompt
+		// Pass AGM_SESSION_NAME env var so SessionStart hook can create ready-file signal
 		debug.Phase("Start Claude")
-		claudeCmd := fmt.Sprintf("claude --add-dir '%s' && exit", workDir)
+		claudeCmd := fmt.Sprintf("AGM_SESSION_NAME=%s claude --add-dir '%s' && exit", sessionName, workDir)
 		debug.Log("Sending command: %s", claudeCmd)
 		if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
 			ui.PrintError(err,
@@ -394,17 +409,25 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		debug.Log("Initial sleep (500ms) before polling")
 		time.Sleep(500 * time.Millisecond)
 
-		// Wait for Claude prompt to appear (not just process)
-		// This ensures commands sent via InitSequence go to Claude, not bash
-		// Increased timeout to 30s to account for MCP loading and SessionStart hooks
-		debug.Phase("Wait for Claude Prompt")
-		debug.Log("Waiting for Claude prompt to appear (timeout: 30s)")
+		// Manually trigger SessionStart hook since hooks don't run when Claude
+		// is started non-interactively via tmux send-keys
+		debug.Phase("Trigger SessionStart Hook Manually")
+		if err := claudeReady.TriggerHookManually(); err != nil {
+			debug.Log("Manual hook trigger failed (non-fatal): %v", err)
+		}
+
+		// Wait for Claude ready signal from SessionStart hook (manual or automatic)
+		// Try hook-based detection first (5 second timeout for fast failure)
+		debug.Phase("Wait for Claude Ready Signal (Hook-Based)")
+		debug.Log("Waiting for hook-based ready signal (timeout: 5s)")
 		var waitErr error
 		spinErr = spinner.New().
-			Title("Waiting for Claude to be ready...").
+			Title("Waiting for Claude to be ready (hook-based)...").
 			Accessible(true).
 			Action(func() {
-				waitErr = tmux.WaitForPromptSimple(sessionName, 30*time.Second)
+				waitErr = claudeReady.WaitForReady(5*time.Second, func(elapsed time.Duration) {
+					// Progress callback (optional, currently unused)
+				})
 			}).
 			Run()
 		if spinErr != nil {
@@ -415,29 +438,54 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		fmt.Println()
 
 		if waitErr != nil {
-			// Claude not ready - this is now a BLOCKING error
-			// (Phase 3 of fix: make WaitForPromptSimple failure fatal)
-			debug.Log("Claude startup failed: %v", waitErr)
-			ui.PrintError(waitErr,
-				"Failed to start Claude session",
-				"  Cannot proceed without Claude being ready.\n"+
-					"  Possible issues:\n"+
-					"    • Claude Code not installed or not in PATH\n"+
-					"    • Claude startup taking longer than expected (>60s)\n"+
-					"    • Session name conflict or tmux issue\n")
+			// Hook-based detection failed - fall back to text-parsing
+			debug.Log("Hook-based detection failed (timeout), falling back to text-parsing: %v", waitErr)
+			debug.Phase("Wait for Claude Ready Signal (Text-Parsing Fallback)")
+			debug.Log("Using text-parsing fallback to detect Claude prompt (timeout: 30s)")
 
-			// Clean up the session since we can't proceed
-			socketPath := tmux.GetSocketPath()
-			killCmd := exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName)
-			if err := killCmd.Run(); err != nil {
-				debug.Log("Failed to clean up session: %v", err)
+			spinErr = spinner.New().
+				Title("Waiting for Claude to be ready (text-parsing)...").
+				Accessible(true).
+				Action(func() {
+					waitErr = tmux.WaitForClaudePrompt(sessionName, 30*time.Second)
+				}).
+				Run()
+			if spinErr != nil {
+				return fmt.Errorf("spinner error: %w", spinErr)
 			}
 
-			return fmt.Errorf("Claude not ready: %w", waitErr)
+			// Ensure clean line after spinner
+			fmt.Println()
+
+			if waitErr != nil {
+				// Both hook and text-parsing failed - this is a BLOCKING error
+				debug.Log("Text-parsing fallback also failed: %v", waitErr)
+				ui.PrintError(waitErr,
+					"Failed to detect Claude ready signal",
+					"  Both hook-based and text-parsing detection failed.\n"+
+						"  \n"+
+						"  Troubleshooting:\n"+
+						"    1. Check if Claude started: tmux attach -t "+sessionName+"\n"+
+						"    2. Verify hook is installed: ls -l ~/.claude/hooks/session-start/agm-ready-signal\n"+
+						"    3. See docs/HOOKS-SETUP.md for detailed setup instructions\n")
+
+				// Clean up the session since we can't proceed
+				socketPath := tmux.GetSocketPath()
+				killCmd := exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName)
+				if err := killCmd.Run(); err != nil {
+					debug.Log("Failed to clean up session: %v", err)
+				}
+
+				return fmt.Errorf("Claude not ready: %w", waitErr)
+			}
+
+			debug.Log("✓ Text-parsing fallback succeeded - Claude is ready")
+		} else {
+			debug.Log("✓ Hook-based detection succeeded - Claude is ready")
 		}
 
 		// Claude is ready!
-		debug.Log("Claude prompt detected - ready for commands")
+		debug.Log("Claude ready signal received")
 		ui.PrintSuccess("Claude is ready!")
 
 		// Monitor for trust prompt using control mode (event-driven, not time-based)
@@ -455,20 +503,12 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			}
 		}
 
-		// Wait for SessionStart hooks to complete before sending commands
-		// SessionStart hooks run immediately when Claude starts (no message needed)
-		debug.Phase("Wait for SessionStart Hooks")
-		debug.Log("Waiting for SessionStart hooks to complete (they run at Claude startup)")
-		spinErr = spinner.New().
-			Title("Waiting for SessionStart hooks to complete...").
-			Accessible(true).
-			Action(func() {
-				time.Sleep(2 * time.Second) // Give hooks time to start (reduced from 5s)
-			}).
-			Run()
-		if spinErr != nil {
-			return fmt.Errorf("spinner error: %w", spinErr)
-		}
+		// NOTE: We no longer need to wait for SessionStart hooks explicitly.
+		// The Claude ready-file signal (above) confirms that SessionStart hooks have completed,
+		// since the agm-ready-signal hook creates the file after initialization.
+		// This eliminates the previous 2-second fixed delay.
+		debug.Phase("Skip Explicit SessionStart Hook Wait")
+		debug.Log("SessionStart hooks confirmed complete (ready-file signal received)")
 
 	case "gemini":
 		// Check for csm-agent-wrapper
@@ -810,15 +850,22 @@ func startClaudeInCurrentTmux(sessionName string) error {
 	// Start agent-specific initialization
 	switch agentName {
 	case "claude":
+		// Cleanup Claude ready-files from previous sessions (if any)
+		claudeReady := tmux.NewClaudeReadyFile(sessionName)
+		if err := claudeReady.Cleanup(); err != nil {
+			debug.Log("Warning: failed to cleanup ready-files: %v", err)
+		}
+
 		// Start Claude in current pane
 		fmt.Println("Starting Claude CLI...")
 		// Use --add-dir to pre-approve workspace and avoid trust prompt
 		// Prefer PWD to preserve symlinks (workDir already set from os.Getwd() above)
+		// Pass AGM_SESSION_NAME env var so SessionStart hook can create ready-file signal
 		workDirForClaude := os.Getenv("PWD")
 		if workDirForClaude == "" {
 			workDirForClaude = workDir
 		}
-		claudeCmd := fmt.Sprintf("claude --add-dir '%s' && exit", workDirForClaude)
+		claudeCmd := fmt.Sprintf("AGM_SESSION_NAME=%s claude --add-dir '%s' && exit", sessionName, workDirForClaude)
 		if err := tmux.SendCommand(sessionName, claudeCmd); err != nil {
 			ui.PrintError(err,
 				"Failed to start Claude in current tmux pane",
@@ -829,11 +876,29 @@ func startClaudeInCurrentTmux(sessionName string) error {
 			return err
 		}
 
-		// Wait for Claude process to appear (more reliable than prompt character)
+		// Give Claude a moment to initialize
+		time.Sleep(500 * time.Millisecond)
+
+		// Manually trigger SessionStart hook
+		if err := claudeReady.TriggerHookManually(); err != nil {
+			debug.Log("Manual hook trigger failed (non-fatal): %v", err)
+		}
+
+		// Wait for Claude ready signal (hook-based, then text-parsing fallback)
 		fmt.Println("Waiting for Claude to initialize...")
-		if err := tmux.WaitForProcessReady(sessionName, "claude", 30*time.Second); err != nil {
-			ui.PrintWarning("Claude may still be initializing")
-			fmt.Printf("💡 Session is ready, but process not detected. This is usually fine.\n")
+		if err := claudeReady.WaitForReady(5*time.Second, nil); err != nil {
+			// Hook-based detection failed - fall back to text-parsing
+			debug.Log("Hook-based detection failed, using text-parsing fallback: %v", err)
+			fmt.Println("Using text-parsing fallback to detect Claude prompt...")
+			if err := tmux.WaitForClaudePrompt(sessionName, 30*time.Second); err != nil {
+				ui.PrintWarning("Claude ready signal not detected (both hook and text-parsing failed)")
+				fmt.Printf("💡 SessionStart hook may not be configured. See docs/HOOKS-SETUP.md\n")
+				fmt.Printf("   Session may still work, but initialization timing is uncertain.\n")
+			} else {
+				ui.PrintSuccess("Claude is ready! (text-parsing fallback)")
+			}
+		} else {
+			ui.PrintSuccess("Claude is ready!")
 		}
 
 		// Send /agm:agm-assoc command to associate session with AGM
