@@ -174,9 +174,11 @@ func (a *ClaudeAdapter) ResumeSession(sessionID SessionID) error {
 		_ = tmux.WaitForProcessReady(metadata.TmuxName, "claude", 5*time.Second)
 	}
 
-	// Attach to tmux session
-	if err := tmux.AttachSession(metadata.TmuxName); err != nil {
-		return fmt.Errorf("failed to attach to tmux session: %w", err)
+	// Attach to tmux session (skip if already in tmux)
+	if os.Getenv("TMUX") == "" {
+		if err := tmux.AttachSession(metadata.TmuxName); err != nil {
+			return fmt.Errorf("failed to attach to tmux session: %w", err)
+		}
 	}
 
 	return nil
@@ -309,7 +311,7 @@ func (a *ClaudeAdapter) ExportConversation(sessionID SessionID, format Conversat
 	switch format {
 	case FormatJSONL:
 		// Export as JSONL (one JSON object per line)
-		var result []byte
+		result := make([]byte, 0)
 		for _, msg := range messages {
 			data, err := json.Marshal(msg)
 			if err != nil {
@@ -368,11 +370,34 @@ func (a *ClaudeAdapter) Capabilities() Capabilities {
 	}
 }
 
+// getStringParam safely extracts a string parameter from the command params map.
+//
+// Returns an error if the parameter is missing or not a string.
+func getStringParam(params map[string]interface{}, key string) (string, error) {
+	val, ok := params[key]
+	if !ok {
+		return "", fmt.Errorf("missing required parameter: %s", key)
+	}
+
+	str, ok := val.(string)
+	if !ok {
+		return "", fmt.Errorf("parameter %s must be a string, got %T", key, val)
+	}
+
+	return str, nil
+}
+
 // ExecuteCommand executes a generic command.
 //
 // Translates generic commands to Claude CLI-specific operations.
 func (a *ClaudeAdapter) ExecuteCommand(cmd Command) error {
-	metadata, err := a.sessionStore.Get(SessionID(cmd.Params["session_id"].(string)))
+	// Validate session_id parameter
+	sessionIDStr, err := getStringParam(cmd.Params, "session_id")
+	if err != nil {
+		return fmt.Errorf("invalid command: %w", err)
+	}
+
+	metadata, err := a.sessionStore.Get(SessionID(sessionIDStr))
 	if err != nil {
 		return fmt.Errorf("session not found: %w", err)
 	}
@@ -380,7 +405,10 @@ func (a *ClaudeAdapter) ExecuteCommand(cmd Command) error {
 	switch cmd.Type {
 	case CommandRename:
 		// Send /rename command to Claude CLI
-		newName := cmd.Params["name"].(string)
+		newName, err := getStringParam(cmd.Params, "name")
+		if err != nil {
+			return fmt.Errorf("rename command: %w", err)
+		}
 		if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("/rename %s\r", newName)); err != nil {
 			return fmt.Errorf("failed to send rename command: %w", err)
 		}
@@ -388,7 +416,10 @@ func (a *ClaudeAdapter) ExecuteCommand(cmd Command) error {
 
 	case CommandSetDir:
 		// Send cd command to change working directory
-		newPath := cmd.Params["path"].(string)
+		newPath, err := getStringParam(cmd.Params, "path")
+		if err != nil {
+			return fmt.Errorf("setdir command: %w", err)
+		}
 		if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("cd %s\r", newPath)); err != nil {
 			return fmt.Errorf("failed to send cd command: %w", err)
 		}

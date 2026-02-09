@@ -305,7 +305,7 @@ func (a *GeminiAdapter) ExportConversation(sessionID SessionID, format Conversat
 	switch format {
 	case FormatJSONL:
 		// Export as JSONL (one JSON object per line)
-		var result []byte
+		result := make([]byte, 0)
 		for _, msg := range messages {
 			data, err := json.Marshal(msg)
 			if err != nil {
