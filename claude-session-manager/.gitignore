@@ -6,8 +6,12 @@ csm-test-tmux
 
 # Build artifacts
 /csm
+/agm
 /bin/csm
+/bin/agm
 /bin/*-wrapper
+cmd/agm/agm
+cmd/csm/
 
 # Go build cache
 *.out
