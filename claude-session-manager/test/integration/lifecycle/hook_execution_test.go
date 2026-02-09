@@ -377,7 +377,6 @@ func TestAssociateCommand_SendsRename(t *testing.T) {
 
 	// CAPTURE: Get pane output
 	var paneContent string
-	var err error
 
 	// Retry capture with timeout (handles timing sensitivity)
 	timeout := 5 * time.Second
