@@ -6,9 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jubnzv/go-tmux"
 	"github.com/stretchr/testify/require"
 )
+
+// TmuxServer represents an isolated tmux server for testing.
+type TmuxServer struct {
+	SocketPath string
+}
 
 // SetupTestServer creates an isolated tmux server for testing.
 //
@@ -28,27 +32,23 @@ import (
 //	    session := helpers.CreateSession(t, server, "test-session")
 //	    // ... test code ...
 //	}
-func SetupTestServer(t *testing.T) *tmux.Server {
+func SetupTestServer(t *testing.T) *TmuxServer {
 	t.Helper()
 
 	// Create unique socket path in temp directory
 	socketPath := filepath.Join(t.TempDir(), "tmux.sock")
 
-	// Create isolated tmux server
-	server := tmux.NewServer(socketPath, "", nil)
+	// Create server instance
+	server := &TmuxServer{
+		SocketPath: socketPath,
+	}
 
 	// Register LIFO cleanup
 	t.Cleanup(func() {
-		// Step 1: Kill all sessions first
-		sessions, _ := server.ListSessions()
-		for _, session := range sessions {
-			_ = session.Kill()
-		}
-
-		// Step 2: Kill server
+		// Kill server (this also kills all sessions)
 		_ = exec.Command("tmux", "-S", socketPath, "kill-server").Run()
 
-		// Step 3: Socket file cleaned by t.TempDir() cleanup
+		// Socket file cleaned by t.TempDir() cleanup
 	})
 
 	return server
@@ -61,16 +61,16 @@ func SetupTestServer(t *testing.T) *tmux.Server {
 //
 // Parameters:
 //   - server: tmux server instance (from SetupTestServer)
-//   - paneID: tmux pane identifier (e.g., "0", "1", "%0")
+//   - paneID: tmux pane identifier (e.g., "session:0.0", "%0")
 //
 // Returns:
 //   - Captured pane content as string (whitespace trimmed)
 //
 // Example:
 //
-//	output := helpers.CapturePane(t, server, session.Panes[0].ID)
+//	output := helpers.CapturePane(t, server, "test-session:0.0")
 //	helpers.CompareGolden(t, "testdata/golden/session-output.golden", output)
-func CapturePane(t *testing.T, server *tmux.Server, paneID string) string {
+func CapturePane(t *testing.T, server *TmuxServer, paneID string) string {
 	t.Helper()
 
 	cmd := exec.Command("tmux", "-S", server.SocketPath,
@@ -92,18 +92,21 @@ func CapturePane(t *testing.T, server *tmux.Server, paneID string) string {
 //   - name: session name (must be unique per server)
 //
 // Returns:
-//   - Session instance for further operations
+//   - Session name for reference (use with paneID like "name:0.0")
 //
 // Example:
 //
 //	server := helpers.SetupTestServer(t)
 //	session := helpers.CreateSession(t, server, "test-session")
-//	// Session is automatically cleaned up when test ends
-func CreateSession(t *testing.T, server *tmux.Server, name string) *tmux.Session {
+//	output := helpers.CapturePane(t, server, session+":0.0")
+func CreateSession(t *testing.T, server *TmuxServer, name string) string {
 	t.Helper()
 
-	session, err := server.NewSession(name)
+	cmd := exec.Command("tmux", "-S", server.SocketPath,
+		"new-session", "-d", "-s", name)
+
+	err := cmd.Run()
 	require.NoError(t, err, "Failed to create session %s", name)
 
-	return session
+	return name
 }
