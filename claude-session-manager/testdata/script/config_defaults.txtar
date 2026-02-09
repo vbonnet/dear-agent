@@ -1,19 +1,37 @@
-# config_defaults.txtar
 # Test: Configuration defaults and environment overrides
 
-env AGM_TEST_MODE=true
-env HOME=$WORK/home
-
 # Test: Default config values when no config file exists
-exec agm list --test-mode --log-level debug
+exec agm list --test --log-level debug
 stderr 'sessions directory'
 # Should use default ~/sessions
 
 # Test: Environment variable override
 env AGM_SESSIONS_DIR=$HOME/custom-sessions
 mkdir $HOME/custom-sessions
+cp env-test.yaml $HOME/custom-sessions/
 
-exec cat >$HOME/custom-sessions/env-test.yaml <<EOF
+exec agm list --test
+stdout 'env-test'
+
+# Test: Config file override
+mkdir $HOME/.config/agm
+cp config.yaml $HOME/.config/agm/
+mkdir $HOME/config-sessions
+cp config-test.yaml $HOME/config-sessions/
+
+# Clear env var to test config file
+env -u AGM_SESSIONS_DIR
+
+exec agm list --test --config $HOME/.config/agm/config.yaml
+stdout 'config-test'
+! stdout 'env-test'
+
+# Test: Command-line flag takes highest precedence
+exec agm list --test --sessions-dir $HOME/custom-sessions
+stdout 'env-test'
+! stdout 'config-test'
+
+-- env-test.yaml --
 schema_version: "2"
 session_id: sess-env-001
 name: env-test
@@ -24,29 +42,8 @@ context:
 tmux:
   session_name: env-test
 agent: claude
-EOF
 
-exec agm list --test-mode
-stdout 'env-test'
-
-# Test: Config file override
-mkdir $HOME/.config/csm
-exec cat >$HOME/.config/csm/config.yaml <<EOF
-sessions_dir: $HOME/config-sessions
-log_level: debug
-timeout:
-  tmux_commands: 10s
-  enabled: true
-lock:
-  enabled: true
-  path: /tmp/csm-test.lock
-health_check:
-  enabled: false
-EOF
-
-mkdir $HOME/config-sessions
-
-exec cat >$HOME/config-sessions/config-test.yaml <<EOF
+-- config-test.yaml --
 schema_version: "2"
 session_id: sess-config-001
 name: config-test
@@ -57,16 +54,15 @@ context:
 tmux:
   session_name: config-test
 agent: claude
-EOF
 
-# Clear env var to test config file
-env -u AGM_SESSIONS_DIR
-
-exec agm list --test-mode --config $HOME/.config/csm/config.yaml
-stdout 'config-test'
-! stdout 'env-test'
-
-# Test: Command-line flag takes highest precedence
-exec agm list --test-mode --sessions-dir $HOME/custom-sessions
-stdout 'env-test'
-! stdout 'config-test'
+-- config.yaml --
+sessions_dir: $HOME/config-sessions
+log_level: debug
+timeout:
+  tmux_commands: 10s
+  enabled: true
+lock:
+  enabled: true
+  path: /tmp/agm-test.lock
+health_check:
+  enabled: false

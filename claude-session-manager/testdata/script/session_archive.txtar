@@ -1,13 +1,42 @@
-# session_archive.txtar
 # Test: Archive AGM session
 
-env AGM_TEST_MODE=true
-env HOME=$WORK/home
-
 mkdir $HOME/sessions
+cp project-alpha.yaml $HOME/sessions/
 
-# Create active session manifest
-exec cat >$HOME/sessions/project-alpha.yaml <<EOF
+# Verify session is initially active (not archived)
+exec agm list --test
+stdout 'project-alpha'
+
+exec agm list --all --test
+stdout 'project-alpha'
+
+# Archive the session
+exec agm archive project-alpha --test
+stdout 'archived'
+stdout 'project-alpha'
+
+# Verify session is now archived
+# List without --all should NOT show archived session
+exec agm list --test
+! stdout 'project-alpha'
+
+# List with --all SHOULD show archived session
+exec agm list --all --test
+stdout 'project-alpha'
+
+# Read manifest and verify lifecycle field updated
+exec cat $HOME/sessions/project-alpha.yaml
+stdout 'lifecycle: "archived"'
+
+# Verify updated_at timestamp changed (should have new timestamp)
+exec cat $HOME/sessions/project-alpha.yaml
+stdout 'updated_at:'
+
+# Test archiving non-existent session should fail
+! exec agm archive nonexistent-session --test
+stderr 'not found'
+
+-- project-alpha.yaml --
 schema_version: "2"
 session_id: sess-alpha-001
 name: project-alpha
@@ -25,37 +54,3 @@ claude:
 tmux:
   session_name: project-alpha
 agent: claude
-EOF
-
-# Verify session is initially active (not archived)
-exec agm list --test-mode
-stdout 'project-alpha'
-
-exec agm list --all --test-mode
-stdout 'project-alpha'
-
-# Archive the session
-exec agm archive project-alpha --test-mode
-stdout 'archived'
-stdout 'project-alpha'
-
-# Verify session is now archived
-# List without --all should NOT show archived session
-exec agm list --test-mode
-! stdout 'project-alpha'
-
-# List with --all SHOULD show archived session
-exec agm list --all --test-mode
-stdout 'project-alpha'
-
-# Read manifest and verify lifecycle field updated
-exec cat $HOME/sessions/project-alpha.yaml
-stdout 'lifecycle: "archived"'
-
-# Verify updated_at timestamp changed (should have new timestamp)
-exec cat $HOME/sessions/project-alpha.yaml
-stdout 'updated_at:'
-
-# Test archiving non-existent session should fail
-! exec agm archive nonexistent-session --test-mode
-stderr 'not found'

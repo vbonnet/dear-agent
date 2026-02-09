@@ -1,71 +1,75 @@
-# error_handling.txtar
 # Test: Error handling and validation
-
-env AGM_TEST_MODE=true
-env HOME=$WORK/home
 
 mkdir $HOME/sessions
 
 # Test: Invalid manifest format should fail gracefully
-exec cat >$HOME/sessions/invalid.yaml <<EOF
-not_a_valid: manifest
-missing: required_fields
-EOF
+cp invalid.yaml $HOME/sessions/
 
-exec agm list --test-mode
+exec agm list --test
 stderr 'failed to parse'
 ! stdout 'invalid'
 
 # Test: Missing required fields validation
-exec cat >$HOME/sessions/missing-fields.yaml <<EOF
-schema_version: "2"
-name: missing-fields
-# Missing: session_id, created_at, updated_at, tmux.session_name
-EOF
+cp missing-fields.yaml $HOME/sessions/
 
-! exec agm list --test-mode
+! exec agm list --test
 stderr 'validation'
 
 # Test: Corrupted manifest file
-exec cat >$HOME/sessions/corrupted.yaml <<EOF
-schema_version: "2"
-session_id: corrupted-001
-name: corrupted-session
-  invalid_indentation: here
-    more_bad_yaml: true
-EOF
+cp corrupted.yaml $HOME/sessions/
 
-! exec agm list --test-mode
+! exec agm list --test
 stderr 'parse'
 
 # Test: Permission denied on sessions directory
 mkdir $HOME/no-access
 chmod 000 $HOME/no-access
 
-! exec agm list --test-mode --sessions-dir $HOME/no-access
+! exec agm list --test --sessions-dir $HOME/no-access
 stderr 'permission denied'
 
 # Restore permissions for cleanup
 chmod 755 $HOME/no-access
 
 # Test: Archive non-existent session
-! exec agm archive does-not-exist --test-mode
+! exec agm archive does-not-exist --test
 stderr 'not found'
 
 # Test: Resume non-existent session
-! exec agm resume does-not-exist --test-mode
+! exec agm resume does-not-exist --test
 stderr 'not found'
 
 # Test: Invalid session name characters
-! exec agm new "invalid/name" --test-mode --detached
+! exec agm new "invalid/name" --test --detached
 stderr 'invalid'
 
 # Test: Empty session name
-! exec agm new "" --test-mode --detached
+! exec agm new "" --test --detached
 stderr 'required'
 
 # Test: Session name conflict (already exists)
-exec cat >$HOME/sessions/existing.yaml <<EOF
+cp existing.yaml $HOME/sessions/
+
+! exec agm new existing --test --detached
+stderr 'already exists'
+
+-- invalid.yaml --
+not_a_valid: manifest
+missing: required_fields
+
+-- missing-fields.yaml --
+schema_version: "2"
+name: missing-fields
+# Missing: session_id, created_at, updated_at, tmux.session_name
+
+-- corrupted.yaml --
+schema_version: "2"
+session_id: corrupted-001
+name: corrupted-session
+  invalid_indentation: here
+    more_bad_yaml: true
+
+-- existing.yaml --
 schema_version: "2"
 session_id: sess-existing-001
 name: existing
@@ -76,7 +80,3 @@ context:
 tmux:
   session_name: existing
 agent: claude
-EOF
-
-! exec agm new existing --test-mode --detached
-stderr 'already exists'

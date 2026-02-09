@@ -1,13 +1,33 @@
-# session_resume.txtar
 # Test: Resume existing AGM session
 
-env AGM_TEST_MODE=true
-env HOME=$WORK/home
-
 mkdir $HOME/sessions
+cp my-project.yaml $HOME/sessions/
 
-# Create session manifest with Claude UUID
-exec cat >$HOME/sessions/my-project.yaml <<EOF
+# Test: Resume by session name
+# In test mode, resume should show session info without actually launching tmux/Claude
+exec agm resume my-project --test --dry-run
+stdout 'my-project'
+stdout 'claude-uuid-12345'
+stdout 'Project: /home/user/projects/my-project'
+
+# Test: Resume non-existent session should fail
+! exec agm resume nonexistent --test
+stderr 'not found'
+
+# Test: Fuzzy matching (if implemented)
+# Typo "my-projet" should fuzzy match to "my-project"
+exec agm resume my-projet --test --dry-run
+stdout 'my-project'
+stdout 'Did you mean'
+
+# Test: Resume archived session should warn or fail
+cp archived-project.yaml $HOME/sessions/
+
+! exec agm resume archived-project --test
+stderr 'archived'
+stderr 'unarchive'
+
+-- my-project.yaml --
 schema_version: "2"
 session_id: sess-my-project-001
 name: my-project
@@ -26,27 +46,8 @@ claude:
 tmux:
   session_name: my-project
 agent: claude
-EOF
 
-# Test: Resume by session name
-# In test mode, resume should show session info without actually launching tmux/Claude
-exec agm resume my-project --test-mode --dry-run
-stdout 'my-project'
-stdout 'claude-uuid-12345'
-stdout 'Project: /home/user/projects/my-project'
-
-# Test: Resume non-existent session should fail
-! exec agm resume nonexistent --test-mode
-stderr 'not found'
-
-# Test: Fuzzy matching (if implemented)
-# Typo "my-projet" should fuzzy match to "my-project"
-exec agm resume my-projet --test-mode --dry-run
-stdout 'my-project'
-stdout 'Did you mean'
-
-# Test: Resume archived session should warn or fail
-exec cat >$HOME/sessions/archived-project.yaml <<EOF
+-- archived-project.yaml --
 schema_version: "2"
 session_id: sess-archived-001
 name: archived-project
@@ -60,8 +61,3 @@ claude:
 tmux:
   session_name: archived-project
 agent: claude
-EOF
-
-! exec agm resume archived-project --test-mode
-stderr 'archived'
-stderr 'unarchive'

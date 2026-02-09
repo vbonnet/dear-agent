@@ -29,13 +29,13 @@ stdout 'agent: claude'
 stdout 'session_name: test-session-1'
 
 # List sessions should show the new session
-exec agm list --test-mode
+exec agm list --test
 stdout 'test-session-1'
 
 # Create second session to test multiple sessions
 exec agm new test-session-2 --detached --agent claude
 stdout 'Session created'
 
-exec agm list --test-mode
+exec agm list --test
 stdout 'test-session-1'
 stdout 'test-session-2'
