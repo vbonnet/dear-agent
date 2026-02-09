@@ -22,6 +22,12 @@ func GetSocketPath() string {
 	return DefaultSocketPath
 }
 
+// GetReadSocketPaths returns all socket paths to check when reading/attaching
+// Currently returns just the primary socket, but can be extended for dual-socket support
+func GetReadSocketPaths() []string {
+	return []string{GetSocketPath()}
+}
+
 // CleanStaleSocket removes the socket file if it exists but no tmux server is running
 // This prevents "socket is in use" errors when a previous tmux server crashed
 func CleanStaleSocket() error {
