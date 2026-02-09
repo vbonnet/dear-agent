@@ -1,15 +1,30 @@
-# session_list.txtar
 # Test: List AGM sessions with filters
 
-env AGM_TEST_MODE=true
-env HOME=$WORK/home
-
-# Create test directory and sessions
+# Copy test manifests to sessions directory
 mkdir $HOME/sessions
+cp active-session.yaml $HOME/sessions/
+cp stopped-session.yaml $HOME/sessions/
+cp archived-session.yaml $HOME/sessions/
 
-# Create test manifest files directly for predictable testing
-# Active session manifest
-exec cat >$HOME/sessions/active-session.yaml <<EOF
+# Test: List without --all (should exclude archived)
+exec agm list --test
+stdout 'active-session'
+stdout 'stopped-session'
+! stdout 'archived-session'
+
+# Test: List with --all (should include archived)
+exec agm list --all --test
+stdout 'active-session'
+stdout 'stopped-session'
+stdout 'archived-session'
+
+# Test: Empty sessions directory
+mkdir $HOME/sessions-empty
+exec agm list --test --sessions-dir $HOME/sessions-empty
+stdout 'No sessions found'
+stdout 'Create your first session'
+
+-- active-session.yaml --
 schema_version: "2"
 session_id: sess-001
 name: active-session
@@ -27,10 +42,8 @@ claude:
 tmux:
   session_name: active-session
 agent: claude
-EOF
 
-# Stopped session manifest
-exec cat >$HOME/sessions/stopped-session.yaml <<EOF
+-- stopped-session.yaml --
 schema_version: "2"
 session_id: sess-002
 name: stopped-session
@@ -47,10 +60,8 @@ claude:
 tmux:
   session_name: stopped-session
 agent: claude
-EOF
 
-# Archived session manifest
-exec cat >$HOME/sessions/archived-session.yaml <<EOF
+-- archived-session.yaml --
 schema_version: "2"
 session_id: sess-003
 name: archived-session
@@ -67,22 +78,4 @@ claude:
 tmux:
   session_name: archived-session
 agent: claude
-EOF
 
-# Test: List without --all (should exclude archived)
-exec agm list --test-mode
-stdout 'active-session'
-stdout 'stopped-session'
-! stdout 'archived-session'
-
-# Test: List with --all (should include archived)
-exec agm list --all --test-mode
-stdout 'active-session'
-stdout 'stopped-session'
-stdout 'archived-session'
-
-# Test: Empty sessions directory
-mkdir $HOME/sessions-empty
-exec agm list --test-mode --sessions-dir $HOME/sessions-empty
-stdout 'No sessions found'
-stdout 'Create your first session'
