@@ -18,11 +18,71 @@ var ClaudePromptPatterns = []string{
 	"# ", // Root prompt
 }
 
-// WaitForClaudePrompt waits for Claude to return to the input prompt
-// Uses control mode to monitor output stream and detect prompt patterns
-// Handles octal escapes using unescapeOctal from output_watcher.go
+// WaitForClaudePrompt waits for Claude prompt using capture-pane polling
+// This replaces the control-mode approach which only sees NEW output after attachment.
+// capture-pane reads the pane's historical buffer, allowing us to detect prompts
+// that appeared before we started monitoring.
 func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
-	debug.Log("\n🔍 Starting prompt detection for session: %s", sessionName)
+	debug.Log("\n🔍 Starting prompt detection for session: %s (using capture-pane polling)", sessionName)
+
+	// Find which socket the session is on
+	socketPath := findSessionSocket(sessionName)
+
+	deadline := time.Now().Add(timeout)
+	pollInterval := 500 * time.Millisecond
+	checksPerformed := 0
+	lastLog := time.Now()
+
+	for time.Now().Before(deadline) {
+		checksPerformed++
+
+		// Log progress every 10 seconds
+		if time.Since(lastLog) > 10*time.Second {
+			debug.Log("⏳ Still waiting for prompt... (performed %d checks)", checksPerformed)
+			lastLog = time.Now()
+		}
+
+		// Capture last 50 lines from pane
+		cmd := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", sessionName, "-p", "-S", "-50")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			debug.Log("⚠️  capture-pane failed (attempt %d): %v", checksPerformed, err)
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		content := string(output)
+
+		// Log a sample on first check to verify we're reading output
+		if checksPerformed == 1 {
+			lines := strings.Split(strings.TrimSpace(content), "\n")
+			if len(lines) > 0 {
+				lastLine := lines[len(lines)-1]
+				debug.Log("📝 Sample output (last line): %q", truncate(lastLine, 100))
+			}
+		}
+
+		// Check for Claude's specific prompt pattern (❯)
+		// Use strict matching to avoid false positives from bash prompts
+		if containsClaudePromptPattern(content) {
+			debug.Log("✓ Claude prompt detected after %d checks", checksPerformed)
+			// Brief sleep to ensure prompt is stable
+			time.Sleep(500 * time.Millisecond)
+			return nil
+		}
+
+		// Sleep before next poll
+		time.Sleep(pollInterval)
+	}
+
+	return fmt.Errorf("timeout waiting for Claude prompt (waited %v, checked %d times)", timeout, checksPerformed)
+}
+
+// WaitForClaudePromptControlMode is the old control-mode based implementation
+// DEPRECATED: Control mode only sees NEW output after attachment, missing historical output
+// Preserved for reference but should not be used for session startup detection
+func WaitForClaudePromptControlMode(sessionName string, timeout time.Duration) error {
+	debug.Log("\n🔍 Starting prompt detection for session: %s (control mode - DEPRECATED)", sessionName)
 
 	// Start control mode
 	ctrl, err := StartControlMode(sessionName)

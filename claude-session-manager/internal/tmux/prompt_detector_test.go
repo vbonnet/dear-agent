@@ -1,7 +1,10 @@
 package tmux
 
 import (
+	"os/exec"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestContainsPromptPattern(t *testing.T) {
@@ -273,5 +276,218 @@ func TestStripANSI(t *testing.T) {
 					tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+// Integration Tests for WaitForClaudePrompt
+// These tests verify the capture-pane polling approach works correctly
+
+// TestWaitForClaudePromptPolling tests the capture-pane polling approach
+func TestWaitForClaudePromptPolling(t *testing.T) {
+	// Skip if tmux not available
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	// Create a test session with Claude prompt
+	sessionName := "test-prompt-detection-polling"
+	socketPath := GetSocketPath()
+
+	// Clean up any existing session
+	exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+
+	// Create session with fake Claude prompt
+	cmd := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to create test session: %v", err)
+	}
+	defer func() {
+		exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+	}()
+
+	// Send Claude prompt character
+	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "❯", "Space")
+	if err := sendCmd.Run(); err != nil {
+		t.Fatalf("Failed to send prompt: %v", err)
+	}
+
+	// Wait for prompt (should succeed quickly)
+	if err := WaitForClaudePrompt(sessionName, 5*time.Second); err != nil {
+		t.Errorf("WaitForClaudePrompt failed: %v", err)
+	}
+}
+
+// TestWaitForClaudePromptTimeout tests timeout behavior
+func TestWaitForClaudePromptTimeout(t *testing.T) {
+	// Skip if tmux not available
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := "test-prompt-timeout"
+	socketPath := GetSocketPath()
+
+	// Clean up any existing session
+	exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+
+	// Create session WITHOUT Claude prompt
+	cmd := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to create test session: %v", err)
+	}
+	defer func() {
+		exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+	}()
+
+	// Should timeout (no prompt)
+	start := time.Now()
+	err := WaitForClaudePrompt(sessionName, 2*time.Second)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Error("Expected timeout error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Errorf("Expected timeout error, got: %v", err)
+	}
+
+	// Should timeout after approximately 2 seconds
+	if elapsed < 1800*time.Millisecond || elapsed > 3000*time.Millisecond {
+		t.Errorf("Timeout took %v, expected ~2s", elapsed)
+	}
+}
+
+// TestCapturePaneReadsHistoricalOutput verifies capture-pane can read output
+// that was printed before we started monitoring (the core issue we're fixing).
+// This is the REGRESSION TEST that prevents going back to control mode.
+func TestCapturePaneReadsHistoricalOutput(t *testing.T) {
+	// Skip if tmux not available
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := "test-historical-output"
+	socketPath := GetSocketPath()
+
+	// Clean up any existing session
+	exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+
+	// Create session
+	cmd := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to create test session: %v", err)
+	}
+	defer func() {
+		exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+	}()
+
+	// Send output BEFORE we start monitoring
+	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "echo 'Historical output' && echo '❯'", "Enter")
+	if err := sendCmd.Run(); err != nil {
+		t.Fatalf("Failed to send output: %v", err)
+	}
+
+	// Wait for command to execute
+	time.Sleep(500 * time.Millisecond)
+
+	// NOW try to detect the prompt that was printed earlier
+	// This is the key test - control mode would fail here because it only sees NEW output
+	if err := WaitForClaudePrompt(sessionName, 5*time.Second); err != nil {
+		t.Errorf("Failed to detect historical prompt: %v", err)
+	}
+
+	// Verify we can actually read the historical output
+	captureCmd := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", sessionName, "-p")
+	output, err := captureCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Failed to capture pane: %v", err)
+	}
+
+	content := string(output)
+	if !strings.Contains(content, "Historical output") {
+		t.Errorf("capture-pane didn't read historical output: %q", content)
+	}
+	if !strings.Contains(content, "❯") {
+		t.Errorf("capture-pane didn't read prompt: %q", content)
+	}
+}
+
+// TestWaitForClaudePromptIgnoresBashPrompts verifies we don't false-positive on bash prompts
+func TestWaitForClaudePromptIgnoresBashPrompts(t *testing.T) {
+	// Skip if tmux not available
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := "test-bash-prompt"
+	socketPath := GetSocketPath()
+
+	// Clean up any existing session
+	exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+
+	// Create session with bash prompt (not Claude)
+	cmd := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to create test session: %v", err)
+	}
+	defer func() {
+		exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+	}()
+
+	// Send bash-style prompts (should NOT match)
+	bashPrompts := []string{"$", ">", "#", "user@host:~$ ", "root@host#"}
+	for _, prompt := range bashPrompts {
+		sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "echo '"+prompt+"'", "Enter")
+		if err := sendCmd.Run(); err != nil {
+			t.Fatalf("Failed to send bash prompt %q: %v", prompt, err)
+		}
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Should timeout (bash prompts should NOT be detected as Claude prompts)
+	err := WaitForClaudePrompt(sessionName, 2*time.Second)
+	if err == nil {
+		t.Error("Expected timeout on bash prompts, but detection succeeded")
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Errorf("Expected timeout error, got: %v", err)
+	}
+}
+
+// BenchmarkWaitForClaudePrompt benchmarks the polling performance
+func BenchmarkWaitForClaudePrompt(b *testing.B) {
+	// Skip if tmux not available
+	if _, err := exec.LookPath("tmux"); err != nil {
+		b.Skip("tmux not available")
+	}
+
+	sessionName := "test-prompt-bench"
+	socketPath := GetSocketPath()
+
+	// Setup: Create session with prompt
+	exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+	cmd := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName)
+	if err := cmd.Run(); err != nil {
+		b.Fatalf("Failed to create test session: %v", err)
+	}
+	defer func() {
+		exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+	}()
+
+	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "❯", "Space")
+	if err := sendCmd.Run(); err != nil {
+		b.Fatalf("Failed to send prompt: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond) // Ensure prompt is visible
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if err := WaitForClaudePrompt(sessionName, 5*time.Second); err != nil {
+			b.Errorf("Iteration %d failed: %v", i, err)
+		}
 	}
 }
