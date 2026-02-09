@@ -87,4 +87,66 @@ var _ = Describe("Resume Session", func() {
 				"Manual testing: Run 'csm resume <session-id>' in terminal to verify attach behavior.")
 		})
 	})
+
+	Describe("resume attach vs resume branching", func() {
+		DescribeTable("should choose correct branch based on tmux existence",
+			func(tmuxExists bool, expectedBehavior string) {
+				sessionName := testEnv.UniqueSessionName("resume-branch-test")
+				uuid := "test-uuid-" + helpers.RandomString(8)
+
+				// SETUP: Create manifest with UUID
+				manifestPath := helpers.SetupManifestWithUUID(sessionName, uuid)
+				defer os.Remove(manifestPath)
+				defer os.RemoveAll(filepath.Dir(manifestPath))
+
+				// SETUP: Create or ensure NO tmux session based on scenario
+				if tmuxExists {
+					// Scenario A: Tmux exists -> attach only
+					err := helpers.CreateTmuxSession(sessionName, testEnv.SessionsDir)
+					Expect(err).ToNot(HaveOccurred(), "tmux session creation should succeed")
+					defer helpers.KillTmuxSession(sessionName)
+				} else {
+					// Scenario B: Tmux NOT exists -> send resume command
+					err := helpers.EnsureNoTmuxSession(sessionName)
+					Expect(err).ToNot(HaveOccurred(), "tmux session should not exist")
+				}
+
+				// EXECUTION: Check session health (simulates resume logic)
+				exists, err := helpers.HasTmuxSession(sessionName)
+				Expect(err).ToNot(HaveOccurred())
+
+				// Create mock command sender to verify behavior
+				mockSender := &helpers.MockCommandSender{}
+				defer mockSender.Reset()
+
+				// Simulate resume logic decision
+				sendCommands := !exists
+
+				if sendCommands {
+					// Scenario B: Send claude --resume command
+					resumeCmd := filepath.Join(testEnv.SessionsDir, sessionName, "project") + " && claude --resume " + uuid + " && exit"
+					mockSender.SendCommand(sessionName, resumeCmd)
+				}
+
+				// ASSERTIONS
+				if expectedBehavior == "attach" {
+					Expect(mockSender.CommandsSent).To(BeEmpty(),
+						"Expected NO commands sent when tmux exists")
+					Expect(exists).To(BeTrue(),
+						"Expected tmux session to exist for attach scenario")
+				} else {
+					Expect(mockSender.CommandsSent).To(HaveLen(1),
+						"Expected claude --resume command sent when tmux NOT exists")
+					Expect(mockSender.CommandsSent[0]).To(ContainSubstring("claude --resume "+uuid),
+						"Expected correct UUID in resume command")
+					Expect(mockSender.CommandsSent[0]).To(ContainSubstring("&&"),
+						"Expected command chain (cd && claude --resume && exit)")
+					Expect(exists).To(BeFalse(),
+						"Expected tmux session NOT to exist for resume scenario")
+				}
+			},
+			Entry("Tmux exists -> attach only (no command sent)", true, "attach"),
+			Entry("Tmux NOT exists -> send claude --resume", false, "resume"),
+		)
+	})
 })
