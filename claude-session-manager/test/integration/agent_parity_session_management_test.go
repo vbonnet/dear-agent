@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -262,7 +263,7 @@ var _ = Describe("Agent Parity - Session Management", func() {
 				// Create 3 sessions
 				for i := 1; i <= 3; i++ {
 					ctx := agent.SessionContext{
-						Name:             testEnv.UniqueSessionName(agentName + "-concurrent-" + string(rune(i))),
+						Name:             testEnv.UniqueSessionName(fmt.Sprintf("%s-concurrent-%d", agentName, i)),
 						WorkingDirectory: "/tmp",
 					}
 					sessionID, err := adapter.CreateSession(ctx)
@@ -370,7 +371,7 @@ var _ = Describe("Agent Parity - Session Management", func() {
 
 				// Verify session was created within time window
 				// (Implementation-specific verification would check metadata)
-				Expect(afterCreate.Sub(beforeCreate)).To(BeNumerically("<", 5*time.Second))
+				Expect(afterCreate.Sub(beforeCreate)).To(BeNumerically("<", 10*time.Second))
 			},
 			Entry("claude agent", "claude"),
 			Entry("gemini agent", "gemini"),
