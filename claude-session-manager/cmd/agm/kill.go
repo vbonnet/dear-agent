@@ -91,7 +91,7 @@ Examples:
 
 func init() {
 	killCmd.Flags().BoolVarP(&forceKill, "force", "f", false, "skip confirmation prompt")
-	rootCmd.AddCommand(killCmd)
+	sessionCmd.AddCommand(killCmd)
 }
 
 func runKillCommand(cmd *cobra.Command, args []string) error {

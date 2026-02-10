@@ -267,5 +267,5 @@ func unarchiveCompletion(cmd *cobra.Command, args []string, toComplete string) (
 func init() {
 	unarchiveCmd.Flags().BoolVarP(&forceUnarchive, "force", "f", false,
 		"Skip confirmation prompt")
-	rootCmd.AddCommand(unarchiveCmd)
+	sessionCmd.AddCommand(unarchiveCmd)
 }

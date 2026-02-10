@@ -128,5 +128,5 @@ func getSessionDir(sessionID string) string {
 }
 
 func init() {
-	rootCmd.AddCommand(cleanCmd)
+	adminCmd.AddCommand(cleanCmd)
 }

@@ -111,5 +111,5 @@ func init() {
 	listCmd.Flags().BoolVar(&listAll, "all", false, "Show all sessions including archived")
 	listCmd.Flags().BoolVar(&listTestMode, "test", false, "List test sessions from ~/sessions-test/ (isolated from production)")
 
-	rootCmd.AddCommand(listCmd)
+	sessionCmd.AddCommand(listCmd)
 }

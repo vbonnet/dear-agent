@@ -127,7 +127,7 @@ func init() {
 	logsCmd.AddCommand(logsStatsCmd)
 	logsCmd.AddCommand(logsThreadCmd)
 	logsCmd.AddCommand(logsQueryCmd)
-	rootCmd.AddCommand(logsCmd)
+	sessionCmd.AddCommand(logsCmd)
 }
 
 func runLogsClean(cmd *cobra.Command, args []string) error {

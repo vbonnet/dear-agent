@@ -616,5 +616,5 @@ func init() {
 		"Archive sessions inactive for N days (e.g., 30d, 7d, 1w, 24h)")
 	archiveCmd.Flags().BoolVar(&dryRun, "dry-run", false,
 		"Preview sessions to be archived without executing")
-	rootCmd.AddCommand(archiveCmd)
+	sessionCmd.AddCommand(archiveCmd)
 }

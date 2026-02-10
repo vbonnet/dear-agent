@@ -236,5 +236,5 @@ func init() {
 	associateCmd.Flags().BoolVar(&createNew, "create", false, "Create new manifest if it doesn't exist")
 	associateCmd.Flags().BoolVar(&updateTimestampOnly, "update-timestamp-only", false, "Only update timestamp, don't change UUID (fast path for same UUID)")
 	associateCmd.Flags().BoolVar(&autoDetectOnly, "auto-detect-only", false, "Auto-detect UUID only if high confidence (for hooks, silent mode)")
-	rootCmd.AddCommand(associateCmd)
+	sessionCmd.AddCommand(associateCmd)
 }

@@ -105,7 +105,7 @@ func init() {
 	sendCmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")
 	sendCmd.MarkFlagsOneRequired("prompt", "prompt-file")
 
-	rootCmd.AddCommand(sendCmd)
+	sessionCmd.AddCommand(sendCmd)
 }
 
 func runSend(cmd *cobra.Command, args []string) error {

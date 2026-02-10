@@ -81,7 +81,7 @@ func init() {
 	rejectCmd.MarkFlagsMutuallyExclusive("reason", "reason-file")
 	rejectCmd.MarkFlagsOneRequired("reason", "reason-file")
 
-	rootCmd.AddCommand(rejectCmd)
+	sessionCmd.AddCommand(rejectCmd)
 }
 
 func runReject(cmd *cobra.Command, args []string) error {

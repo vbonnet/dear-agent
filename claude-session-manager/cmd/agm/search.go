@@ -58,7 +58,7 @@ Fallback:
 
 func init() {
 	searchCmd.Flags().IntVar(&searchMaxResults, "max-results", 10, "Maximum number of results to return")
-	rootCmd.AddCommand(searchCmd)
+	sessionCmd.AddCommand(searchCmd)
 
 	// Initialize search cache (5-minute TTL)
 	searchCache = llm.NewSearchCache(5 * time.Minute)

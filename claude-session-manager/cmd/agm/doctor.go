@@ -371,7 +371,7 @@ func runValidation(manifests []*manifest.Manifest, fix bool, json bool) error {
 }
 
 func init() {
-	rootCmd.AddCommand(doctorCmd)
+	adminCmd.AddCommand(doctorCmd)
 	doctorCmd.Flags().BoolVar(&validateFlag, "validate", false,
 		"Test actual session resumability")
 	doctorCmd.Flags().BoolVar(&applyFixesFlag, "apply-fixes", false,

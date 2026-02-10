@@ -252,5 +252,5 @@ func findSession(sessionName string) (*manifest.Manifest, string, error) {
 func init() {
 	fixCmd.Flags().BoolVar(&fixAll, "all", false, "Auto-fix all sessions with high confidence")
 	fixCmd.Flags().BoolVar(&fixClear, "clear", false, "Clear UUID association")
-	rootCmd.AddCommand(fixCmd)
+	adminCmd.AddCommand(fixCmd)
 }

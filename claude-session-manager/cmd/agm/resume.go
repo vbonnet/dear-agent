@@ -736,5 +736,5 @@ func offerToImportOrphanedSession(identifier string) (*manifest.Manifest, string
 }
 
 func init() {
-	rootCmd.AddCommand(resumeCmd)
+	sessionCmd.AddCommand(resumeCmd)
 }

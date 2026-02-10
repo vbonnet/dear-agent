@@ -1036,7 +1036,7 @@ func init() {
 		debugDefault = true
 	}
 
-	rootCmd.AddCommand(newCmd)
+	sessionCmd.AddCommand(newCmd)
 	newCmd.Flags().BoolP("debug", "d", debugDefault, "Enable debug logging to ~/.agm/debug/ (env: AGM_DEBUG)")
 	newCmd.Flags().BoolVar(&detached, "detached", false, "Create detached session without attaching")
 	newCmd.Flags().BoolVar(&testMode, "test", false, "Create test session in ~/sessions-test/ (isolated from production)")

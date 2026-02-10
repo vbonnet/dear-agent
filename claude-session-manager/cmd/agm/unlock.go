@@ -95,5 +95,5 @@ Examples:
 
 func init() {
 	unlockCmd.Flags().BoolVar(&force, "force", false, "force unlock even if process is running (DANGEROUS)")
-	rootCmd.AddCommand(unlockCmd)
+	adminCmd.AddCommand(unlockCmd)
 }

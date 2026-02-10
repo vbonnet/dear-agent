@@ -63,7 +63,7 @@ func init() {
 		"Optional custom text to provide after selecting option (sends Tab, types text, Enter)",
 	)
 
-	rootCmd.AddCommand(selectOptionCmd)
+	sessionCmd.AddCommand(selectOptionCmd)
 }
 
 func runSelectOption(cmd *cobra.Command, args []string) error {

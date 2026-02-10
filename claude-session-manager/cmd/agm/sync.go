@@ -339,5 +339,5 @@ func syncActiveTmuxSessions(sessionsDir string, historyEntries []claude.RawEntry
 
 func init() {
 	syncCmd.Flags().BoolVar(&syncAll, "all", false, "Sync all sessions (default: last 30 days only)")
-	rootCmd.AddCommand(syncCmd)
+	adminCmd.AddCommand(syncCmd)
 }
