@@ -22,9 +22,9 @@ var _ = BeforeSuite(func() {
 	_, err := exec.LookPath("tmux")
 	Expect(err).ToNot(HaveOccurred(), "tmux must be installed for lifecycle tests")
 
-	// Verify csm command is available
-	_, err = exec.LookPath("csm")
-	Expect(err).ToNot(HaveOccurred(), "csm command must be available for lifecycle tests")
+	// Verify agm command is available
+	_, err = exec.LookPath("agm")
+	Expect(err).ToNot(HaveOccurred(), "agm command must be available for lifecycle tests")
 
 	// Setup test environment
 	testEnv = helpers.NewTestEnv(nil)
