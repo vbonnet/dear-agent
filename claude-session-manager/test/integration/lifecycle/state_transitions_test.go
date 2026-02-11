@@ -2,7 +2,6 @@ package lifecycle_test
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"

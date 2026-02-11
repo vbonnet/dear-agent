@@ -1,11 +1,11 @@
 package helpers
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -80,9 +80,17 @@ func ResumeTestSession(sessionsDir, sessionID string) error {
 	return nil
 }
 
-// ListTestSessions lists sessions using agm list command
+// manifestJSON represents the JSON structure returned by agm list --json
+type manifestJSON struct {
+	SessionID string `json:"SessionID"`
+	Name      string `json:"Name"`
+	Agent     string `json:"Agent"`
+	Lifecycle string `json:"Lifecycle"`
+}
+
+// ListTestSessions lists sessions using agm list command with JSON output
 func ListTestSessions(sessionsDir string, filter ListFilter) ([]Session, error) {
-	args := []string{"session", "list", "--sessions-dir", sessionsDir}
+	args := []string{"session", "list", "--sessions-dir", sessionsDir, "--json"}
 	if filter.Archived {
 		args = append(args, "--archived")
 	}
@@ -102,27 +110,50 @@ func ListTestSessions(sessionsDir string, filter ListFilter) ([]Session, error) 
 		}
 	}
 
-	// Parse output - simple line-based parsing
-	// Expected format: one session per line with ID, agent, status
-	// Example: "session-123  claude  active"
-	var sessions []Session
-	for _, line := range strings.Split(string(output), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
+	// Parse JSON output - extract JSON array from output
+	// agm may append version info after JSON, so find the array boundaries
+	var manifests []manifestJSON
+	outputStr := string(output)
 
-		// Parse line (split by whitespace)
-		parts := strings.Fields(trimmed)
-		if len(parts) < 3 {
-			continue // Skip malformed lines
+	// Find first [ and last ]
+	startIdx := -1
+	endIdx := -1
+	for i, ch := range outputStr {
+		if ch == '[' && startIdx == -1 {
+			startIdx = i
+		}
+		if ch == ']' {
+			endIdx = i + 1
+		}
+	}
+
+	// If no JSON array found, check if it's the "no sessions" case
+	if startIdx == -1 || endIdx == -1 {
+		// agm outputs "No sessions found" when there are no sessions
+		// This is a valid response, not an error
+		return []Session{}, nil
+	}
+
+	jsonBytes := []byte(outputStr[startIdx:endIdx])
+	if err := json.Unmarshal(jsonBytes, &manifests); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON output: %w", err)
+	}
+
+	// Convert to Session structs
+	var sessions []Session
+	for _, m := range manifests {
+		status := "active"
+		if m.Lifecycle == "archived" {
+			status = "archived"
+		} else if m.Lifecycle != "" {
+			status = m.Lifecycle
 		}
 
 		session := Session{
-			ID:       parts[0],
-			Agent:    parts[1],
-			Status:   parts[2],
-			Archived: parts[2] == "archived",
+			ID:       m.Name, // Use Name field as ID (tmux session name)
+			Agent:    m.Agent,
+			Status:   status,
+			Archived: m.Lifecycle == "archived",
 		}
 		sessions = append(sessions, session)
 	}

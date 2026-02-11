@@ -359,7 +359,8 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 	} else {
 		// Create new tmux session
 		debug.Phase("Create Tmux Session")
-		debug.Log("Creating tmux session: %s in %s", sessionName, workDir)
+		socketPath := tmux.GetSocketPath()
+		debug.Log("Creating tmux session: %s in %s (socket: %s)", sessionName, workDir, socketPath)
 		if err := tmux.NewSession(sessionName, workDir); err != nil {
 			ui.PrintError(err,
 				"Failed to create tmux session",
@@ -715,6 +716,8 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 	// Attach to session (or show detached message)
 	if !detached {
+		socketPath := tmux.GetSocketPath()
+		debug.Log("Attaching to tmux session: %s (socket: %s)", sessionName, socketPath)
 		fmt.Printf("Attaching to tmux session: %s\n", sessionName)
 		// Use wrapper for all agents to capture exit summaries
 		if err := attachWithCapture(sessionName); err != nil {

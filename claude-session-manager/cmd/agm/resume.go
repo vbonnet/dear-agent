@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/agent"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/discovery"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
@@ -544,6 +545,8 @@ func resumeSession(sessionID, manifestPath string, health *HealthStatus) error {
 	// AttachSession never holds any lock, so it can block indefinitely without issues
 
 	// Attach to tmux session
+	socketPath := tmux.GetSocketPath()
+	debug.Log("Attaching to tmux session: %s (socket: %s)", health.TmuxSessionName, socketPath)
 	ui.PrintSuccess(fmt.Sprintf("Attaching to tmux session: %s", health.TmuxSessionName))
 	if sendCommands {
 		fmt.Println("\nNote: You will be attached to the tmux session. Press Ctrl+B then D to detach.")
