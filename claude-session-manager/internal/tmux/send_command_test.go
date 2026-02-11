@@ -52,8 +52,9 @@ func TestSendCommand_EnterKeySeparation(t *testing.T) {
 		exec.Command("tmux", "-S", testSocket, "kill-session", "-t", sessionName).Run()
 	}()
 
-	// Wait for session to be ready
-	time.Sleep(100 * time.Millisecond)
+	// Wait for session to be ready and shell to initialize
+	// Shell needs time to source profile and display prompt
+	time.Sleep(500 * time.Millisecond)
 
 	// Send a command using our SendCommand function
 	testCommand := "echo 'regression test'"
@@ -61,7 +62,7 @@ func TestSendCommand_EnterKeySeparation(t *testing.T) {
 	require.NoError(t, err, "SendCommand should not error")
 
 	// Give command time to execute
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 
 	// Capture pane output to verify command executed
 	captureCmd := exec.Command("tmux", "-S", testSocket, "capture-pane", "-t", sessionName, "-p")
