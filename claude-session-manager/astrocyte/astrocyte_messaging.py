@@ -207,15 +207,32 @@ def _send_via_csm(session_name: str, tagged_message: str) -> None:
         >>> _send_via_csm("my-session", "<system-reminder>...</system-reminder>")
         # Executes: csm send my-session --prompt "..."
     """
+    logger = _get_message_logger()
+
     # Threshold: 10KB (agm session send supports larger via --prompt-file)
     if len(tagged_message) < 10_000:
         # Small message: Use --prompt flag
-        subprocess.run(
-            ["agm", "session", "send", session_name, "--prompt", tagged_message],
-            check=True,
-            capture_output=True,
-            text=True
-        )
+        cmd = ["agm", "session", "send", session_name, "--prompt", tagged_message]
+        logger.debug(f"Executing command: agm session send {session_name} --prompt [message_len={len(tagged_message)}]")
+
+        import time
+        start_time = time.time()
+        try:
+            result = subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            duration = time.time() - start_time
+            logger.debug(f"Command succeeded in {duration:.2f}s")
+        except subprocess.CalledProcessError as e:
+            duration = time.time() - start_time
+            logger.error(f"Command failed after {duration:.2f}s: agm session send {session_name}")
+            logger.error(f"Exit code: {e.returncode}")
+            logger.error(f"stdout: {e.stdout}")
+            logger.error(f"stderr: {e.stderr}")
+            raise
     else:
         # Large message: Use temp file
         with tempfile.NamedTemporaryFile(
@@ -227,12 +244,27 @@ def _send_via_csm(session_name: str, tagged_message: str) -> None:
             temp_path = f.name
 
         try:
-            subprocess.run(
-                ["agm", "session", "send", session_name, "--prompt-file", temp_path],
-                check=True,
-                capture_output=True,
-                text=True
-            )
+            cmd = ["agm", "session", "send", session_name, "--prompt-file", temp_path]
+            logger.debug(f"Executing command: agm session send {session_name} --prompt-file {temp_path} [message_len={len(tagged_message)}]")
+
+            import time
+            start_time = time.time()
+            try:
+                result = subprocess.run(
+                    cmd,
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                duration = time.time() - start_time
+                logger.debug(f"Command succeeded in {duration:.2f}s")
+            except subprocess.CalledProcessError as e:
+                duration = time.time() - start_time
+                logger.error(f"Command failed after {duration:.2f}s: agm session send {session_name} --prompt-file")
+                logger.error(f"Exit code: {e.returncode}")
+                logger.error(f"stdout: {e.stdout}")
+                logger.error(f"stderr: {e.stderr}")
+                raise
         finally:
             os.unlink(temp_path)  # Cleanup
 

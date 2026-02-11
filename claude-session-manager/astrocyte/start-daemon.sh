@@ -10,7 +10,7 @@ sleep 10
 export PATH="/usr/local/bin:/usr/bin:/bin:$PATH"
 
 # Log directory
-LOG_DIR="$HOME/.csm/astrocyte/logs"
+LOG_DIR="$HOME/.agm/astrocyte/logs"
 mkdir -p "$LOG_DIR"
 
 # Start daemon with output redirected to startup log
