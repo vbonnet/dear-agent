@@ -51,7 +51,7 @@ func NewSession(name string, workDir string) error {
 			if ctx.Err() == context.DeadlineExceeded {
 				return &TimeoutError{
 					Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
-					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
 					Duration: globalTimeout,
 				}
 			}
@@ -115,7 +115,7 @@ func AttachSession(name string) error {
 			if ctx.Err() == context.DeadlineExceeded {
 				return &TimeoutError{
 					Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
-					Recovery:  "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+					Recovery:  "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
 					Duration: globalTimeout,
 				}
 			}
@@ -218,7 +218,7 @@ func SendCommand(sessionName string, command string) error {
 			if ctx.Err() == context.DeadlineExceeded {
 				return &TimeoutError{
 					Problem:  fmt.Sprintf("tmux load-buffer timed out after %v (server may be hung)", globalTimeout),
-					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
 					Duration: globalTimeout,
 				}
 			}
@@ -232,7 +232,7 @@ func SendCommand(sessionName string, command string) error {
 			if ctx.Err() == context.DeadlineExceeded {
 				return &TimeoutError{
 					Problem:  fmt.Sprintf("tmux paste-buffer timed out after %v (server may be hung)", globalTimeout),
-					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
 					Duration: globalTimeout,
 				}
 			}
@@ -251,7 +251,7 @@ func SendCommand(sessionName string, command string) error {
 			if ctx.Err() == context.DeadlineExceeded {
 				return &TimeoutError{
 					Problem:  fmt.Sprintf("tmux send-keys timed out after %v (server may be hung)", globalTimeout),
-					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
 					Duration: globalTimeout,
 				}
 			}

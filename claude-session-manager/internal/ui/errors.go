@@ -7,9 +7,9 @@ func PrintSessionNotFoundError(identifier, sessionsDir string) {
 	PrintError(
 		fmt.Errorf("session not found: %s", identifier),
 		"Could not resolve identifier to a session",
-		fmt.Sprintf("  • List sessions: csm list --all\n"+
+		fmt.Sprintf("  • List sessions: agm session list --all\n"+
 			"  • Check sessions directory: %s\n"+
-			"  • Import orphaned sessions: csm sync", sessionsDir),
+			"  • Import orphaned sessions: agm admin sync", sessionsDir),
 	)
 }
 
@@ -19,7 +19,7 @@ func PrintManifestReadError(err error, manifestPath string) {
 		"Failed to read session manifest",
 		fmt.Sprintf("  • Check file exists: %s\n"+
 			"  • Verify permissions: ls -la %s\n"+
-			"  • Restore from backup: csm backup restore", manifestPath, manifestPath),
+			"  • Restore from backup: agm admin backup restore", manifestPath, manifestPath),
 	)
 }
 
@@ -61,8 +61,8 @@ func PrintActiveSessionError(sessionName, tmuxName string) {
 		fmt.Errorf("session is active"),
 		fmt.Sprintf("Cannot archive active session '%s'", sessionName),
 		fmt.Sprintf("  • Stop tmux session: tmux kill-session -t %s\n"+
-			"  • Then archive: csm archive %s\n"+
-			"  • Or force archive: csm archive %s --force",
+			"  • Then archive: agm session archive %s\n"+
+			"  • Or force archive: agm session archive %s --force",
 			tmuxName, sessionName, sessionName),
 	)
 }
@@ -72,9 +72,9 @@ func PrintArchivedSessionError(sessionID string) {
 	PrintError(
 		fmt.Errorf("session is archived"),
 		"Cannot resume archived sessions",
-		fmt.Sprintf("  • Restore session: csm unarchive %s\n"+
-			"  • List archived: csm list --all\n"+
-			"  • View details: csm list --all | grep %s",
+		fmt.Sprintf("  • Restore session: agm session unarchive %s\n"+
+			"  • List archived: agm session list --all\n"+
+			"  • View details: agm session list --all | grep %s",
 			sessionID[:8], sessionID[:8]),
 	)
 }

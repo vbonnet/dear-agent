@@ -207,11 +207,11 @@ def _send_via_csm(session_name: str, tagged_message: str) -> None:
         >>> _send_via_csm("my-session", "<system-reminder>...</system-reminder>")
         # Executes: csm send my-session --prompt "..."
     """
-    # Threshold: 10KB (csm send supports larger via --prompt-file)
+    # Threshold: 10KB (agm session send supports larger via --prompt-file)
     if len(tagged_message) < 10_000:
         # Small message: Use --prompt flag
         subprocess.run(
-            ["csm", "send", session_name, "--prompt", tagged_message],
+            ["agm", "session", "send", session_name, "--prompt", tagged_message],
             check=True,
             capture_output=True,
             text=True
@@ -228,7 +228,7 @@ def _send_via_csm(session_name: str, tagged_message: str) -> None:
 
         try:
             subprocess.run(
-                ["csm", "send", session_name, "--prompt-file", temp_path],
+                ["agm", "session", "send", session_name, "--prompt-file", temp_path],
                 check=True,
                 capture_output=True,
                 text=True

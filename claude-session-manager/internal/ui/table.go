@@ -256,7 +256,7 @@ func renderCompactTable(
 func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) string {
 	// Handle empty list
 	if len(manifests) == 0 {
-		return "No sessions found.\n\nCreate one:\n  csm new <project-name>\n"
+		return "No sessions found.\n\nCreate one:\n  agm session new <project-name>\n"
 	}
 
 	// Detect terminal width and select layout

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Stuck csm send Process Recovery for Astrocyte
+Stuck agm session send Process Recovery for Astrocyte
 
-This module provides detection and recovery for stuck csm send processes
+This module provides detection and recovery for stuck agm session send processes
 that block session input for hours.
 
-Problem: csm send processes can hang for 10+ hours, blocking all session input
+Problem: agm session send processes can hang for 10+ hours, blocking all session input
 including Ctrl+C. This prevents normal recovery mechanisms from working.
 
-Solution: Detect csm send processes older than 10 minutes targeting a specific
+Solution: Detect agm session send processes older than 10 minutes targeting a specific
 session and kill them (along with their tmux send-keys children) before
 attempting other recovery methods.
 """
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 def find_stuck_csm_send_processes(session_name: str, min_age_seconds: int = 600) -> List[Tuple[int, float]]:
     """
-    Find csm send processes targeting this session that are older than min_age_seconds.
+    Find agm session send processes targeting this session that are older than min_age_seconds.
 
     Args:
         session_name: Name of the tmux session to check
@@ -36,14 +36,14 @@ def find_stuck_csm_send_processes(session_name: str, min_age_seconds: int = 600)
         List of (pid, age_seconds) tuples for stuck processes
 
     Implementation:
-        Uses 'ps aux' to find processes matching "csm send <session_name>"
+        Uses 'ps aux' to find processes matching "agm session send <session_name>"
         Parses elapsed time (etime) to determine process age
         Returns processes older than threshold
     """
     stuck_processes = []
 
     try:
-        # Use ps to find csm send processes with elapsed time
+        # Use ps to find agm session send processes with elapsed time
         # Format: user,pid,etime,args
         cmd = ['ps', 'aux']
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
@@ -52,10 +52,10 @@ def find_stuck_csm_send_processes(session_name: str, min_age_seconds: int = 600)
             logger.error(f"Failed to run ps command: {result.stderr}")
             return stuck_processes
 
-        # Parse ps output looking for csm send processes
+        # Parse ps output looking for agm session send processes
         for line in result.stdout.splitlines():
-            # Look for "csm send <session_name>" in the command line
-            if f'csm send {session_name}' not in line and f'csm send "{session_name}"' not in line:
+            # Look for "agm session send <session_name>" in the command line
+            if f'agm session send {session_name}' not in line and f'agm session send "{session_name}"' not in line:
                 continue
 
             # Parse the line to extract PID and elapsed time
@@ -80,7 +80,7 @@ def find_stuck_csm_send_processes(session_name: str, min_age_seconds: int = 600)
                 age_seconds = parse_elapsed_time(etime_str)
 
                 if age_seconds >= min_age_seconds:
-                    logger.info(f"Found stuck csm send process: PID {pid}, age {age_seconds}s ({etime_str})")
+                    logger.info(f"Found stuck agm session send process: PID {pid}, age {age_seconds}s ({etime_str})")
                     stuck_processes.append((pid, age_seconds))
 
             except (ValueError, IndexError) as e:
@@ -90,7 +90,7 @@ def find_stuck_csm_send_processes(session_name: str, min_age_seconds: int = 600)
     except subprocess.TimeoutExpired:
         logger.error("ps command timed out")
     except Exception as e:
-        logger.error(f"Error finding stuck csm send processes: {e}")
+        logger.error(f"Error finding stuck agm session send processes: {e}")
 
     return stuck_processes
 
@@ -221,7 +221,7 @@ def kill_process_tree(pid: int, signal_num: int = signal.SIGKILL) -> bool:
 
 def kill_stuck_csm_send(session_name: str, min_age_seconds: int = 600) -> Tuple[bool, float]:
     """
-    Kill stuck csm send processes and their children blocking the session.
+    Kill stuck agm session send processes and their children blocking the session.
 
     This is the main recovery function that should be called before other
     recovery methods (like ESC or Ctrl+C).
@@ -246,16 +246,16 @@ def kill_stuck_csm_send(session_name: str, min_age_seconds: int = 600) -> Tuple[
     stuck_processes = find_stuck_csm_send_processes(session_name, min_age_seconds)
 
     if not stuck_processes:
-        logger.debug(f"No stuck csm send processes found for session '{session_name}'")
+        logger.debug(f"No stuck agm session send processes found for session '{session_name}'")
         duration = time.time() - start_time
         return (False, duration)
 
-    logger.warning(f"Found {len(stuck_processes)} stuck csm send processes for '{session_name}'")
+    logger.warning(f"Found {len(stuck_processes)} stuck agm session send processes for '{session_name}'")
 
     # Kill each stuck process and its children
     killed_count = 0
     for pid, age in stuck_processes:
-        logger.info(f"Attempting to kill stuck csm send process {pid} (age: {age:.0f}s)")
+        logger.info(f"Attempting to kill stuck agm session send process {pid} (age: {age:.0f}s)")
 
         if kill_process_tree(pid):
             killed_count += 1
@@ -284,7 +284,7 @@ def kill_stuck_csm_send(session_name: str, min_age_seconds: int = 600) -> Tuple[
     success = killed_count > 0 and len(still_alive) == 0
 
     if success:
-        logger.info(f"Successfully killed {killed_count} stuck csm send processes in {duration:.2f}s")
+        logger.info(f"Successfully killed {killed_count} stuck agm session send processes in {duration:.2f}s")
     else:
         logger.warning(f"Killed {killed_count}/{len(stuck_processes)} processes, {len(still_alive)} still alive")
 
@@ -306,9 +306,9 @@ def integrate_with_astrocyte_recovery(session_name: str) -> bool:
 
     Usage in astrocyte recovery chain:
         def recover_stuck_session(session_name):
-            # Step 1: Kill stuck csm send processes (if any)
+            # Step 1: Kill stuck agm session send processes (if any)
             if kill_stuck_csm_send_recovery(session_name):
-                logger.info("Killed stuck csm send processes")
+                logger.info("Killed stuck agm session send processes")
                 time.sleep(1)  # Let session clear
 
             # Step 2: Try ESC (gentle recovery)
@@ -323,7 +323,7 @@ def integrate_with_astrocyte_recovery(session_name: str) -> bool:
     success, duration = kill_stuck_csm_send(session_name)
 
     if success:
-        logger.info(f"Recovery: killed stuck csm send processes in {duration:.2f}s")
+        logger.info(f"Recovery: killed stuck agm session send processes in {duration:.2f}s")
 
     return success
 
@@ -333,7 +333,7 @@ def self_test():
     """
     Run self-tests to verify the module works correctly.
     """
-    print("Running self-tests for stuck csm send recovery...")
+    print("Running self-tests for stuck agm session send recovery...")
 
     # Test 1: Parse elapsed time
     test_cases = [
@@ -350,7 +350,7 @@ def self_test():
         print(f"  {status}: parse_elapsed_time('{etime_str}') = {result} (expected {expected})")
 
     # Test 2: Find stuck processes (should find none in normal operation)
-    print("\nTest 2: Find stuck csm send processes")
+    print("\nTest 2: Find stuck agm session send processes")
     stuck = find_stuck_csm_send_processes("test-session-that-does-not-exist")
     print(f"  Found {len(stuck)} stuck processes (expected 0 for non-existent session)")
 
@@ -383,7 +383,7 @@ if __name__ == "__main__":
             print("  python astrocyte_stuck_csm_send_recovery.py <session-name>")
         else:
             session_name = sys.argv[1]
-            print(f"Checking for stuck csm send processes for session: {session_name}")
+            print(f"Checking for stuck agm session send processes for session: {session_name}")
             success, duration = kill_stuck_csm_send(session_name)
             if success:
                 print(f"SUCCESS: Killed stuck processes in {duration:.2f}s")

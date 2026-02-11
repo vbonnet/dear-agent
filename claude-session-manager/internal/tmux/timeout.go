@@ -51,7 +51,7 @@ func RunWithTimeout(ctx context.Context, timeout time.Duration, name string, arg
 	if timeoutCtx.Err() == context.DeadlineExceeded {
 		return nil, &TimeoutError{
 			Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", timeout),
-			Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+			Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
 			Duration: timeout,
 		}
 	}
