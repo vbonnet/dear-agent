@@ -10,7 +10,8 @@
 [!exec:tmux] skip 'tmux required for resume test'
 
 # Create a session first
-exec agm session new bdd-resume-test --agent claude --detached
+# Use --agent gpt to avoid 60s ready-file wait (E2E tests use dummy API key)
+exec agm session new bdd-resume-test --agent gpt --detached
 stdout 'Session.*created'
 
 # Verify session was created

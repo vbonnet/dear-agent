@@ -13,13 +13,13 @@ import (
 // TestMain sets up the testscript environment
 func TestMain(m *testing.M) {
 	os.Exit(testscript.RunMain(m, map[string]func() int{
-		"csm": csmMain,
+		"agm": agmMain,
 	}))
 }
 
-// csmMain is the entry point for the csm binary in testscript
-// This allows tests to call "csm" commands as if they were running the real binary
-func csmMain() int {
+// agmMain is the entry point for the agm binary in testscript
+// This allows tests to call "agm" commands as if they were running the real binary
+func agmMain() int {
 	// Create mock tmux client for testing
 	mockTmux := session.NewMockTmux()
 
@@ -34,35 +34,35 @@ func csmMain() int {
 	// For this initial implementation, use the mock approach
 	// Tests will validate that commands work with mocked dependencies
 
-	// Try to use installed csm binary first (check actual user home, not test HOME)
+	// Try to use installed agm binary first (check actual user home, not test HOME)
 	userHome := os.Getenv("REAL_HOME")
 	if userHome == "" {
 		// Fallback: get HOME before test overrides it
 		userHome = os.Getenv("HOME")
 	}
-	csmPath := userHome + "/go/bin/csm"
+	agmPath := userHome + "/go/bin/agm"
 
 	// If not found, build from module
-	if _, err := os.Stat(csmPath); os.IsNotExist(err) {
+	if _, err := os.Stat(agmPath); os.IsNotExist(err) {
 		// Use go install to build and cache the binary
-		buildCmd := exec.Command("go", "install", "github.com/vbonnet/ai-tools/claude-session-manager/cmd/csm")
+		buildCmd := exec.Command("go", "install", "github.com/vbonnet/ai-tools/claude-session-manager/cmd/agm")
 		if err := buildCmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to build csm: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Failed to build agm: %v\n", err)
 			return 1
 		}
 		// After go install, binary should be at $GOBIN or $GOPATH/bin or $HOME/go/bin
-		csmPath = userHome + "/go/bin/csm"
+		agmPath = userHome + "/go/bin/agm"
 	}
 
 	// Execute the binary with the current args
-	cmd := exec.Command(csmPath, os.Args[1:]...)
+	cmd := exec.Command(agmPath, os.Args[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 	cmd.Env = os.Environ()
 
 	// Note: mockTmux is created but not yet wired to the binary execution
-	// This will be completed once cmd/csm exports ExecuteWithDeps publicly
+	// This will be completed once cmd/agm exports ExecuteWithDeps publicly
 	_ = mockTmux
 
 	if err := cmd.Run(); err != nil {

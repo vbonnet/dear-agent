@@ -8,7 +8,8 @@
 # - Format is properly structured for Phase 0 requirements
 
 # Create a test session
-exec agm session new bdd-jsonl-test --agent claude --detached
+# Use --agent gpt to avoid 60s ready-file wait (E2E tests use dummy API key)
+exec agm session new bdd-jsonl-test --agent gpt --detached
 stdout 'Session.*created'
 
 # Verify manifest was created (CSM's responsibility)

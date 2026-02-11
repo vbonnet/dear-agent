@@ -7,7 +7,8 @@
 # - Directory structure is maintained after archiving
 
 # Create a test session
-exec agm session new bdd-archive-test --agent claude --detached
+# Use --agent gpt to avoid 60s ready-file wait (E2E tests use dummy API key)
+exec agm session new bdd-archive-test --agent gpt --detached
 stdout 'Session.*created'
 
 # Verify session exists in active sessions

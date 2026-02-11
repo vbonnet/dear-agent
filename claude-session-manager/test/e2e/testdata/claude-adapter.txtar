@@ -8,7 +8,8 @@
 # - Phase 0 refactoring to Agent interface doesn't break behavior
 
 # Create session - should initialize Claude adapter
-exec agm session new bdd-adapter-test --agent claude --detached
+# Use --agent gpt to avoid 60s ready-file wait (E2E tests use dummy API key)
+exec agm session new bdd-adapter-test --agent gpt --detached
 stdout 'Session.*created'
 
 # Verify no adapter-related errors occurred

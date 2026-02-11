@@ -8,7 +8,8 @@
 # - UUID format regression is prevented
 
 # Create a test session
-exec agm session new bdd-manifest-v3-test --agent claude --detached
+# Use --agent gpt to avoid 60s ready-file wait (E2E tests use dummy API key)
+exec agm session new bdd-manifest-v3-test --agent gpt --detached
 stdout 'Session.*created'
 
 # Verify manifest file exists

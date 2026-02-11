@@ -9,7 +9,8 @@
 # - JSONL contains valid JSON session_start event
 
 # Create a new session
-exec agm session new bdd-create-test --agent claude --detached
+# Use --agent gpt to avoid 60s ready-file wait (E2E tests use dummy API key)
+exec agm session new bdd-create-test --agent gpt --detached
 stdout 'Session.*created'
 
 # Verify CSM created the manifest (CSM's responsibility)

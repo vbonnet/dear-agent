@@ -8,13 +8,14 @@
 # - Empty list works when no sessions exist
 
 # Create multiple test sessions
-exec agm session new bdd-list-test-1 --agent claude --detached
+# Use --agent gpt to avoid 60s ready-file wait (E2E tests use dummy API key)
+exec agm session new bdd-list-test-1 --agent gpt --detached
 stdout 'Session.*created'
 
-exec agm session new bdd-list-test-2 --agent claude --detached
+exec agm session new bdd-list-test-2 --agent gpt --detached
 stdout 'Session.*created'
 
-exec agm session new bdd-list-test-3 --agent claude --detached
+exec agm session new bdd-list-test-3 --agent gpt --detached
 stdout 'Session.*created'
 
 # List all sessions - should show all three
