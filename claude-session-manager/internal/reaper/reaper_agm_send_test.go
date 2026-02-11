@@ -11,11 +11,11 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 )
 
-// TestSendExit_UsesAGMSend verifies that sendExit() now uses 'agm send' instead of raw tmux commands
+// TestSendExit_UsesAGMSend verifies that sendExit() now uses 'agm session send' instead of raw tmux commands
 func TestSendExit_UsesAGMSend(t *testing.T) {
-	// This is a smoke test to verify the sendExit() implementation calls agm send
+	// This is a smoke test to verify the sendExit() implementation calls agm session send
 	// We can't easily test the full integration without a real tmux session,
-	// but we can verify the code path uses exec.LookPath("agm") and exec.Command("agm", "send", ...)
+	// but we can verify the code path uses exec.LookPath("agm") and exec.Command("agm", "session", "send", ...)
 
 	// Check that agm binary exists in PATH (required for the fix to work)
 	agmPath, err := exec.LookPath("agm")
@@ -25,24 +25,24 @@ func TestSendExit_UsesAGMSend(t *testing.T) {
 
 	t.Logf("Found agm binary at: %s", agmPath)
 
-	// Verify agm send command syntax
-	cmd := exec.Command(agmPath, "send", "--help")
+	// Verify agm session send command syntax
+	cmd := exec.Command(agmPath, "session", "send", "--help")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("agm send --help failed: %v\nOutput: %s", err, string(output))
+		t.Fatalf("agm session send --help failed: %v\nOutput: %s", err, string(output))
 	}
 
 	// Verify --sender flag is documented
 	if !strings.Contains(string(output), "--sender") {
-		t.Error("agm send doesn't support --sender flag (required for reaper)")
+		t.Error("agm session send doesn't support --sender flag (required for reaper)")
 	}
 
 	// Verify --prompt flag is documented
 	if !strings.Contains(string(output), "--prompt") {
-		t.Error("agm send doesn't support --prompt flag (required for reaper)")
+		t.Error("agm session send doesn't support --prompt flag (required for reaper)")
 	}
 
-	t.Log("✓ agm send supports required flags (--sender, --prompt)")
+	t.Log("✓ agm session send supports required flags (--sender, --prompt)")
 }
 
 // TestSendExit_FailsGracefully verifies error handling when session doesn't exist
