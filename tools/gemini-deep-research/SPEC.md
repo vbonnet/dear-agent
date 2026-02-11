@@ -583,6 +583,21 @@ Pipeline completed successfully!
 
 ## Data Model
 
+### Package Structure
+
+**Note:** The specification references a `pkg/` directory, but the actual implementation organizes packages at the root level:
+
+- `detector/` - Content type detection
+- `config/` - Configuration management
+- `gemini/` - Gemini CLI integration and topic analysis
+- `research/` - Deep Research API client
+- `extractors/` - Content extraction (youtube, arxiv, web)
+- `internal/` - Internal utilities (cache, modes, discovery, templates)
+- `cmd/` - Command-line interface
+- `types/` - Shared type definitions
+
+All documented packages exist and match the functionality described in this specification.
+
 ### Configuration
 
 ```go

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -192,8 +193,25 @@ func CleanupArchivedSession(env *TestEnv, sessionID string) error {
 // CreateSessionManifest creates a manifest file for a test session
 // This registers the session with CSM so commands like resume/archive can find it
 func CreateSessionManifest(sessionsDir, sessionName, agent string) error {
+	// Validate session name
+	if sessionName == "" {
+		return fmt.Errorf("session name cannot be empty")
+	}
+
+	// Reject path traversal characters
+	if strings.Contains(sessionName, "/") || strings.Contains(sessionName, "\\") {
+		return fmt.Errorf("session name cannot contain path separators: %s", sessionName)
+	}
+
 	// Create session directory
 	sessionDir := filepath.Join(sessionsDir, sessionName)
+
+	// Check if session already exists (for duplicate detection)
+	manifestPath := filepath.Join(sessionDir, "manifest.yaml")
+	if _, err := os.Stat(manifestPath); err == nil {
+		return fmt.Errorf("session already exists: %s", sessionName)
+	}
+
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		return fmt.Errorf("failed to create session directory: %w", err)
 	}
@@ -226,8 +244,7 @@ claude:
   uuid: ""
 `, sessionID, sessionName, now, now, projectDir, sessionName, agent)
 
-	// Write manifest file
-	manifestPath := filepath.Join(sessionDir, "manifest.yaml")
+	// Write manifest file (path already declared for duplicate check above)
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0644); err != nil {
 		return fmt.Errorf("failed to write manifest: %w", err)
 	}

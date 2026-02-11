@@ -468,6 +468,9 @@ func TestSessionErrorHandling_AgentParity(t *testing.T) {
 					Context: manifest.Context{
 						Project: "/nonexistent/path",
 					},
+					Tmux: manifest.Tmux{
+						SessionName: sessionName,
+					},
 					Agent: agent,
 				}
 
@@ -681,6 +684,9 @@ func TestSessionMetadataPreservation(t *testing.T) {
 			Purpose: originalPurpose,
 			Tags:    originalTags,
 			Notes:   originalNotes,
+		},
+		Tmux: manifest.Tmux{
+			SessionName: sessionName,
 		},
 		Agent: "claude",
 	}
