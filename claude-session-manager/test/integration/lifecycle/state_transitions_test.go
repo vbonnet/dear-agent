@@ -165,9 +165,9 @@ func TestStateTransition_ActiveToArchived(t *testing.T) {
 	}
 
 	// Verify archived state
-	// Note: archive command moves session to .archive-old-format/ directory
-	archivedManifestPath := filepath.Join(env.SessionsDir, ".archive-old-format", sessionName, "manifest.yaml")
-	m, err = manifest.Read(archivedManifestPath)
+	// Note: archive command uses in-place archiving (sets lifecycle field)
+	manifestPath = filepath.Join(env.SessionsDir, sessionName, "manifest.yaml")
+	m, err = manifest.Read(manifestPath)
 	if err != nil {
 		t.Fatalf("Failed to read manifest after archive: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestStateTransition_ActiveToArchived(t *testing.T) {
 	}
 
 	// Note: archive command does NOT kill tmux session automatically
-	// It only moves the manifest to .archive-old-format/ and marks lifecycle as archived
+	// It only sets lifecycle: archived in the manifest
 	// The tmux session may still be running (user needs to kill it manually or via --force)
 	t.Log("Archive command preserves tmux session - user must kill it manually if desired")
 }
@@ -297,9 +297,9 @@ func TestStateTransition_MultipleRapidTransitions(t *testing.T) {
 		t.Fatalf("Failed to archive session: %v", err)
 	}
 
-	// Verify archived (manifest moved to .archive-old-format/)
-	archivedManifestPath := filepath.Join(env.SessionsDir, ".archive-old-format", sessionName, "manifest.yaml")
-	m, err = manifest.Read(archivedManifestPath)
+	// Verify archived (in-place with lifecycle field)
+	manifestPath = filepath.Join(env.SessionsDir, sessionName, "manifest.yaml")
+	m, err = manifest.Read(manifestPath)
 	if err != nil {
 		t.Fatalf("Failed to read manifest after archive: %v", err)
 	}
@@ -363,10 +363,10 @@ func TestStateTransition_ConcurrentTransitions(t *testing.T) {
 		}
 	}
 
-	// Verify all sessions are archived (moved to .archive-old-format/)
+	// Verify all sessions are archived (in-place with lifecycle field)
 	for _, sessionName := range sessions {
-		archivedManifestPath := filepath.Join(env.SessionsDir, ".archive-old-format", sessionName, "manifest.yaml")
-		m, err := manifest.Read(archivedManifestPath)
+		manifestPath := filepath.Join(env.SessionsDir, sessionName, "manifest.yaml")
+		m, err := manifest.Read(manifestPath)
 		if err != nil {
 			t.Errorf("Failed to read manifest for %s: %v", sessionName, err)
 			continue
@@ -433,9 +433,9 @@ func TestStateTransition_PreservesMetadataOnTransition(t *testing.T) {
 		t.Fatalf("Failed to archive session: %v", err)
 	}
 
-	// Read archived manifest (moved to .archive-old-format/)
-	archivedManifestPath := filepath.Join(env.SessionsDir, ".archive-old-format", sessionName, "manifest.yaml")
-	archivedManifest, err := manifest.Read(archivedManifestPath)
+	// Read archived manifest (in-place with lifecycle field)
+	manifestPath = filepath.Join(env.SessionsDir, sessionName, "manifest.yaml")
+	archivedManifest, err := manifest.Read(manifestPath)
 	if err != nil {
 		t.Fatalf("Failed to read archived manifest: %v", err)
 	}

@@ -130,10 +130,11 @@ func TestConcurrent_ArchiveMultipleSessions(t *testing.T) {
 		errorCount++
 	}
 
-	// Verify all sessions are archived (moved to .archive-old-format/)
+	// Verify all sessions are archived (in-place with lifecycle field)
 	for _, sessionName := range sessions {
-		archivedManifestPath := filepath.Join(env.SessionsDir, ".archive-old-format", sessionName, "manifest.yaml")
-		m, err := manifest.Read(archivedManifestPath)
+		// Archived sessions remain in original location with lifecycle: archived
+		manifestPath := filepath.Join(env.SessionsDir, sessionName, "manifest.yaml")
+		m, err := manifest.Read(manifestPath)
 		if err != nil {
 			t.Errorf("Failed to read manifest for %s: %v", sessionName, err)
 			continue
@@ -353,9 +354,9 @@ func TestConcurrent_SessionLifecycleStressTest(t *testing.T) {
 				return
 			}
 
-			// Verify (manifest moved to .archive-old-format/)
-			archivedManifestPath := filepath.Join(env.SessionsDir, ".archive-old-format", sessionName, "manifest.yaml")
-			m, err := manifest.Read(archivedManifestPath)
+			// Verify (in-place archive with lifecycle field)
+			manifestPath := filepath.Join(env.SessionsDir, sessionName, "manifest.yaml")
+			m, err := manifest.Read(manifestPath)
 			if err != nil {
 				errors <- fmt.Errorf("verify %s: %w", sessionName, err)
 				return

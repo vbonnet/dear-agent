@@ -42,29 +42,47 @@ func ArchiveTestSession(sessionsDir, sessionID string, reason string) error {
 }
 
 // CreateArchivedSession creates a pre-archived session fixture for testing
-// This creates the archived directory structure manually
+// Uses in-place archiving (lifecycle field) instead of moving to archive directory
 func CreateArchivedSession(env *TestEnv, sessionID, agent string) error {
 	// Default to claude for backward compatibility
 	if agent == "" {
 		agent = "claude"
 	}
 
-	// Create archived session directory
-	archiveDir := filepath.Join(env.SessionsDir, "archive", sessionID)
-	if err := os.MkdirAll(archiveDir, 0700); err != nil {
-		return fmt.Errorf("failed to create archived session directory: %w", err)
+	// Create session directory in normal location (not in archive subdirectory)
+	sessionDir := filepath.Join(env.SessionsDir, sessionID)
+	if err := os.MkdirAll(sessionDir, 0700); err != nil {
+		return fmt.Errorf("failed to create session directory: %w", err)
 	}
 
-	// Create a basic archived manifest
-	manifestPath := filepath.Join(archiveDir, "manifest.yaml")
-	manifest := fmt.Sprintf(`session_id: %s
-agent: %s
-status: archived
-archived_at: "2026-01-20T19:00:00Z"
-`, sessionID, agent)
+	// Create project directory (required for valid session)
+	projectDir := filepath.Join(sessionDir, "project")
+	if err := os.MkdirAll(projectDir, 0700); err != nil {
+		return fmt.Errorf("failed to create project directory: %w", err)
+	}
+
+	// Create a v2 manifest with lifecycle: archived
+	manifestPath := filepath.Join(sessionDir, "manifest.yaml")
+	manifest := fmt.Sprintf(`schema_version: "2.0"
+session_id: %s
+name: %s
+created_at: "2026-01-20T19:00:00Z"
+updated_at: "2026-01-20T19:00:00Z"
+lifecycle: "archived"
+context:
+  project: "%s"
+  purpose: ""
+  tags: []
+  notes: ""
+tmux:
+  session_name: "%s"
+agent: "%s"
+claude:
+  uuid: ""
+`, sessionID, sessionID, projectDir, sessionID, agent)
 
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0600); err != nil {
-		return fmt.Errorf("failed to write archived manifest: %w", err)
+		return fmt.Errorf("failed to write manifest: %w", err)
 	}
 
 	return nil
@@ -163,8 +181,9 @@ func ListTestSessions(sessionsDir string, filter ListFilter) ([]Session, error) 
 
 // CleanupArchivedSession removes an archived session fixture
 func CleanupArchivedSession(env *TestEnv, sessionID string) error {
-	archiveDir := filepath.Join(env.SessionsDir, "archive", sessionID)
-	if err := os.RemoveAll(archiveDir); err != nil {
+	// Archived sessions are now in-place, not in separate archive directory
+	sessionDir := filepath.Join(env.SessionsDir, sessionID)
+	if err := os.RemoveAll(sessionDir); err != nil {
 		return fmt.Errorf("failed to cleanup archived session: %w", err)
 	}
 	return nil
