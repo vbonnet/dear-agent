@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vbonnet/ai-tools/main/claude-session-manager/internal/api"
-	"github.com/vbonnet/ai-tools/main/claude-session-manager/internal/state"
-	"github.com/vbonnet/ai-tools/main/claude-session-manager/internal/tmux"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/api"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/state"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 )
 
 // Daemon runs AGM as a background service

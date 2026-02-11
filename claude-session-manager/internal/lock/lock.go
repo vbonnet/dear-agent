@@ -62,8 +62,8 @@ func (fl *FileLock) TryLock() error {
 	err := syscall.Flock(int(fl.file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err != nil {
 		return &LockError{
-			Problem:  "Another csm command is currently running",
-			Recovery: "Wait for the other command to finish, or run 'csm unlock' to check for stale locks",
+			Problem:  "Another agm command is currently running",
+			Recovery: "Wait for the other command to finish, or run 'agm unlock' to check for stale locks",
 		}
 	}
 
@@ -89,10 +89,10 @@ func (fl *FileLock) Unlock() error {
 }
 
 // DefaultLockPath returns the default lock file path.
-// Format: /tmp/csm-{UID}/csm.lock
+// Format: /tmp/agm-{UID}/agm.lock
 func DefaultLockPath() (string, error) {
 	uid := os.Getuid()
-	return fmt.Sprintf("/tmp/csm-%d/csm.lock", uid), nil
+	return fmt.Sprintf("/tmp/agm-%d/agm.lock", uid), nil
 }
 
 // CheckLock checks the status of a lock file

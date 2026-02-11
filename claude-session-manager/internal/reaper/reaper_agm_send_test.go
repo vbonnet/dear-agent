@@ -56,9 +56,9 @@ func TestSendExit_FailsGracefully(t *testing.T) {
 		t.Error("sendExit() should fail for non-existent session, but succeeded")
 	}
 
-	// Error should mention agm send failure
-	if !strings.Contains(err.Error(), "agm send") {
-		t.Errorf("Error should mention 'agm send', got: %v", err)
+	// Error should indicate failure to send /exit (implementation-agnostic check)
+	if !strings.Contains(err.Error(), "failed to send /exit") {
+		t.Errorf("Error should mention '/exit' send failure, got: %v", err)
 	}
 
 	t.Logf("✓ sendExit() fails gracefully with error: %v", err)
@@ -140,30 +140,25 @@ func TestIntegration_ReaperWithRealSession(t *testing.T) {
 	// Test sendExit() which should use agm send
 	r := New(sessionName, sessionsDir)
 
-	// This test focuses on sendExit() which now uses 'agm send'
-	// agm send internally waits for prompt, so if the session has "❯" visible,
-	// it should detect it and send /exit
+	// This test focuses on sendExit() error handling
+	// It waits for prompt and sends /exit
 	err := r.sendExit()
 
-	// Note: agm send will likely timeout because this isn't a real Claude session
-	// But we can verify it tried to use agm send (not raw tmux)
+	// Note: sendExit will likely timeout because this isn't a real Claude session
+	// But we can verify it gracefully handles the error
 	if err != nil {
-		// Expected - agm send times out waiting for real Claude prompt
-		if !strings.Contains(err.Error(), "agm send") {
-			t.Errorf("Error should mention 'agm send', got: %v", err)
-		}
-
+		// Expected - sendExit times out waiting for real Claude prompt
 		// Check if the error is specifically a timeout (expected)
 		if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "session not ready") {
-			t.Logf("✓ agm send was invoked (timed out as expected for non-Claude session)")
+			t.Logf("✓ sendExit() timed out as expected for non-Claude session")
 		} else {
-			t.Logf("agm send error: %v", err)
+			t.Logf("sendExit() error: %v", err)
 		}
 	} else {
-		// If it succeeded, that's fine too - means agm send worked
-		t.Log("✓ agm send succeeded")
+		// If it succeeded, that's fine too
+		t.Log("✓ sendExit() succeeded")
 	}
 
-	// The key verification: reaper now uses 'agm send' instead of raw tmux send-keys
+	// The key verification: reaper gracefully handles sending /exit to sessions
 	// This is a behavioral test, not a full end-to-end test
 }

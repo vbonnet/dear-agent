@@ -329,17 +329,13 @@ def get_read_socket_paths() -> list[str]:
     """
     Get list of socket paths to check for READ operations.
 
-    Returns both AGM socket (/tmp/agm.sock) and legacy CSM socket (/tmp/csm.sock)
-    for backward compatibility during migration.
+    Returns AGM socket (/tmp/agm.sock) if it exists.
     """
     sockets = []
     agm_socket = Path("/tmp/agm.sock")
-    csm_socket = Path("/tmp/csm.sock")
 
     if agm_socket.exists():
         sockets.append(str(agm_socket))
-    if csm_socket.exists():
-        sockets.append(str(csm_socket))
 
     return sockets
 
@@ -392,8 +388,7 @@ def get_active_csm_sessions() -> list[str]:
     """
     List all active CSM sessions from tmux.
 
-    Checks both AGM socket (/tmp/agm.sock) and legacy CSM socket (/tmp/csm.sock)
-    for backward compatibility. A CSM session is identified by having a manifest.yaml file.
+    Checks AGM socket (/tmp/agm.sock). A CSM session is identified by having a manifest.yaml file.
     """
     try:
         socket_paths = get_read_socket_paths()

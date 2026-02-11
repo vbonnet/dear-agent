@@ -21,8 +21,8 @@ func TestSocketPath_DefaultPath(t *testing.T) {
 
 	socketPath := tmux.GetSocketPath()
 
-	// Default path should be /tmp/csm.sock
-	assert.Equal(t, "/tmp/csm.sock", socketPath, "Default socket should be /tmp/csm.sock")
+	// Default path should be /tmp/agm.sock
+	assert.Equal(t, "/tmp/agm.sock", socketPath, "Default socket should be /tmp/agm.sock")
 }
 
 // TestSocketPath_EnvironmentOverride tests AGM_TMUX_SOCKET override
@@ -187,7 +187,7 @@ func TestSocketPath_DirectoryCreation(t *testing.T) {
 	assert.Equal(t, "/tmp", socketDir, "Socket dir should be /tmp")
 
 	// Verify basename
-	assert.Equal(t, "csm.sock", filepath.Base(socketPath), "Socket filename should be csm.sock")
+	assert.Equal(t, "agm.sock", filepath.Base(socketPath), "Socket filename should be agm.sock")
 }
 
 // TestGetReadSocketPaths_ReturnsNonEmpty tests socket path list
@@ -299,7 +299,7 @@ func TestSocketPath_Simplicity(t *testing.T) {
 	socketPath := tmux.GetSocketPath()
 
 	// Socket path should be simple and consistent
-	assert.Equal(t, "/tmp/csm.sock", socketPath, "Default socket should be simple /tmp/csm.sock")
+	assert.Equal(t, "/tmp/agm.sock", socketPath, "Default socket should be simple /tmp/agm.sock")
 
 	// Verify it's in /tmp (shared location)
 	assert.True(t, strings.HasPrefix(socketPath, "/tmp/"), "Socket should be in /tmp")

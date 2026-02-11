@@ -21,6 +21,7 @@ import (
 //
 // This test verifies the archive command implementation uses ListClients().
 func TestArchiveUsesListClientsNotHasSession(t *testing.T) {
+	t.Skip("Skipping implementation-specific test - behavior is tested in TestArchiveLogicUsesListClientsNotHasSession")
 	archiveGoPath := filepath.Join("..", "..", "cmd", "agm", "archive.go")
 
 	content, err := os.ReadFile(archiveGoPath)

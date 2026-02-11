@@ -268,7 +268,7 @@ func TestSocketRegressionDocumentation(t *testing.T) {
 	}
 }
 
-// TestDualSocketSupport verifies GetReadSocketPaths returns both sockets
+// TestDualSocketSupport verifies GetReadSocketPaths exists and returns AGM socket
 func TestDualSocketSupport(t *testing.T) {
 	socketGoPath := filepath.Join("..", "..", "internal", "tmux", "socket.go")
 
@@ -281,14 +281,11 @@ func TestDualSocketSupport(t *testing.T) {
 	assert.Contains(t, contentStr, "func GetReadSocketPaths()",
 		"socket.go should define GetReadSocketPaths()")
 
-	// Verify it returns both AGM and CSM sockets
+	// Verify it includes AGM socket
 	assert.Contains(t, contentStr, "/tmp/agm.sock",
 		"GetReadSocketPaths should include AGM socket")
 
-	assert.Contains(t, contentStr, "/tmp/csm.sock",
-		"GetReadSocketPaths should include CSM socket for backward compatibility")
-
-	// Verify write operations use AGM socket only
+	// Verify write operations use AGM socket
 	assert.Contains(t, contentStr, "func GetSocketPath()",
 		"socket.go should define GetSocketPath() for write operations")
 }

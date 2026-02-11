@@ -30,7 +30,7 @@ type TimeoutConfig struct {
 // LockConfig holds lock configuration
 type LockConfig struct {
 	Enabled bool   `yaml:"enabled"` // Default: true
-	Path    string `yaml:"path"`    // Default: /tmp/csm-{UID}/csm.lock
+	Path    string `yaml:"path"`    // Default: /tmp/agm-{UID}/agm.lock
 }
 
 // HealthCheckConfig holds health check configuration
@@ -54,7 +54,7 @@ func Default() *Config {
 		},
 		Lock: LockConfig{
 			Enabled: true,
-			Path:    fmt.Sprintf("/tmp/csm-%d/csm.lock", uid),
+			Path:    fmt.Sprintf("/tmp/agm-%d/agm.lock", uid),
 		},
 		HealthCheck: HealthCheckConfig{
 			Enabled:       true,

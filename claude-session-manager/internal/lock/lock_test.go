@@ -161,17 +161,17 @@ func TestDefaultLockPath(t *testing.T) {
 		t.Fatalf("DefaultLockPath() failed: %v", err)
 	}
 
-	// Verify path format: /tmp/csm-{UID}/csm.lock
+	// Verify path format: /tmp/agm-{UID}/agm.lock
 	if path == "" {
 		t.Error("DefaultLockPath() returned empty string")
 	}
 
-	// Verify it contains /tmp and csm.lock
+	// Verify it contains /tmp and agm.lock
 	if !filepath.IsAbs(path) {
 		t.Errorf("DefaultLockPath() returned relative path: %s", path)
 	}
-	if filepath.Base(path) != "csm.lock" {
-		t.Errorf("DefaultLockPath() basename is not csm.lock: %s", filepath.Base(path))
+	if filepath.Base(path) != "agm.lock" {
+		t.Errorf("DefaultLockPath() basename is not agm.lock: %s", filepath.Base(path))
 	}
 }
 

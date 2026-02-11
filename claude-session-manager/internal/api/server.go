@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vbonnet/ai-tools/main/claude-session-manager/internal/state"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/state"
 )
 
 // StatusResponse represents API response for session status

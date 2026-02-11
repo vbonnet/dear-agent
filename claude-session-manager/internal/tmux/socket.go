@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-// DefaultSocketPath is the default Unix socket path for CSM tmux sessions
-const DefaultSocketPath = "/tmp/csm.sock"
+// DefaultSocketPath is the default Unix socket path for AGM tmux sessions
+const DefaultSocketPath = "/tmp/agm.sock"
 
-// GetSocketPath returns the CSM-specific tmux socket path
+// GetSocketPath returns the AGM-specific tmux socket path
 // This can be extended later to support custom paths via config
 func GetSocketPath() string {
 	// Check if AGM_TMUX_SOCKET environment variable is set

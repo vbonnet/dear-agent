@@ -8,11 +8,9 @@ import (
 
 // CapturePaneOutput captures last N lines from session's active pane
 func CapturePaneOutput(sessionName string, lines int) (string, error) {
-	cmd := exec.Command("tmux", "capture-pane",
-		"-t", sessionName,
-		"-p",                    // Print to stdout
-		"-S", fmt.Sprintf("-%d", lines), // Start from N lines back
-	)
+	socketPath := GetSocketPath()
+	cmd := exec.Command("tmux", "-S", socketPath, // Use AGM-specific socket
+		"capture-pane", "-t", sessionName, "-p", "-S", fmt.Sprintf("-%d", lines))
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout

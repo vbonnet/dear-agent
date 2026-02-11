@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vbonnet/ai-tools/main/claude-session-manager/internal/state"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/state"
 )
 
 func TestStatusFileWriter_WriteAndRead(t *testing.T) {

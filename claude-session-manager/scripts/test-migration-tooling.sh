@@ -93,7 +93,7 @@ created_at: "2026-01-01T00:00:00Z"
 updated_at: "2026-02-04T12:00:00Z"
 lifecycle: ""
 context:
-  project: "/home/user/src/test"
+  project: "$HOME/src/test"
   purpose: "Testing"
   tags: []
   notes: ""
@@ -115,7 +115,7 @@ updated_at: "2026-02-04T12:00:00Z"
 lifecycle: ""
 agent: "gemini"
 context:
-  project: "/home/user/src/test"
+  project: "$HOME/src/test"
   purpose: "Testing"
   tags: []
   notes: ""
@@ -154,7 +154,7 @@ created_at: "2026-01-01T00:00:00Z"
 updated_at: "2026-02-04T12:00:00Z"
 lifecycle: ""
 context:
-  project: "/home/user/src/test"
+  project: "$HOME/src/test"
 claude:
   uuid: ""
 tmux:
@@ -203,7 +203,7 @@ created_at: "2026-01-01T00:00:00Z"
 updated_at: "2026-02-04T12:00:00Z"
 lifecycle: ""
 context:
-  project: "/home/user/src/test"
+  project: "$HOME/src/test"
 claude:
   uuid: ""
 tmux:
@@ -222,7 +222,7 @@ updated_at: "2026-02-04T12:00:00Z"
 lifecycle: ""
 agent: "unknown-agent"
 context:
-  project: "/home/user/src/test"
+  project: "$HOME/src/test"
 claude:
   uuid: ""
 tmux:
@@ -241,7 +241,7 @@ updated_at: "2026-02-04T12:00:00Z"
 lifecycle: ""
 agent: "claude"
 context:
-  project: "/home/user/src/test"
+  project: "$HOME/src/test"
 claude:
   uuid: "g7h8i9j0-k1l2-3456-ghij-kl7890123456"
 tmux:

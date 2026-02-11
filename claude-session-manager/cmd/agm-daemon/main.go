@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/vbonnet/ai-tools/main/claude-session-manager/internal/daemon"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/daemon"
 )
 
 func main() {
