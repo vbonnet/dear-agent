@@ -25,29 +25,29 @@ var (
 
 var associateCmd = &cobra.Command{
 	Use:   "associate <session-name>",
-	Short: "Associate a CSM session with the current Claude session UUID",
-	Long: `Associate a CSM session with a Claude session UUID by updating the manifest.
+	Short: "Associate a AGM session with the current Claude session UUID",
+	Long: `Associate a AGM session with a Claude session UUID by updating the manifest.
 
 This command is useful when:
 - You started a Claude session outside of tmux and want to track it
-- You want to reassign a different Claude UUID to an existing CSM session
+- You want to reassign a different Claude UUID to an existing AGM session
 - You're reconnecting an existing session after the UUID changed
 
 The command will:
 1. Get the current Claude session UUID (from history.jsonl latest entry)
-2. Find or create the manifest for the specified CSM session
+2. Find or create the manifest for the specified AGM session
 3. Create a backup of the existing manifest (if one exists)
 4. Update the manifest with the new Claude UUID
 
 Examples:
-  # Associate current Claude session with CSM session "claude-1"
-  csm associate claude-1
+  # Associate current Claude session with AGM session "claude-1"
+  agm session associate claude-1
 
   # Specify a specific Claude UUID instead of auto-detecting
-  csm associate claude-1 --uuid c86ffd41-cbcc-4bfa-8b1f-4da7c83fc3d2
+  agm session associate claude-1 --uuid c86ffd41-cbcc-4bfa-8b1f-4da7c83fc3d2
 
   # Create a new manifest if it doesn't exist
-  csm associate my-new-session --create`,
+  agm session associate my-new-session --create`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionName := args[0]
@@ -113,7 +113,7 @@ Examples:
 						return m, nil
 					}
 				}
-				return nil, fmt.Errorf("no CSM session found for: %s", name)
+				return nil, fmt.Errorf("no AGM session found for: %s", name)
 			}
 
 			// Use 3-level fallback to discover UUID
@@ -121,7 +121,7 @@ Examples:
 			targetUUID, err = uuidpkg.Discover(sessionName, findInManifests, false)
 			if err != nil {
 				ui.PrintError(err, "Failed to detect Claude UUID",
-					"  • Tried CSM manifest lookup, history search by /rename, and timestamp search\n"+
+					"  • Tried AGM manifest lookup, history search by /rename, and timestamp search\n"+
 						"  • Ensure Claude has processed at least one message\n"+
 						"  • Or specify UUID manually with --uuid flag")
 				return err
@@ -142,12 +142,12 @@ Examples:
 			if !createNew {
 				ui.PrintError(err, "Session not found",
 					fmt.Sprintf("  • Use --create to create a new session\n"+
-						"  • Or run: csm new %s", sessionName))
+						"  • Or run: agm session new %s", sessionName))
 				return err
 			}
 
 			// Create new manifest
-			fmt.Printf("Creating new CSM session: %s\n", sessionName)
+			fmt.Printf("Creating new AGM session: %s\n", sessionName)
 			manifestDir := filepath.Join(sessionsDir, fmt.Sprintf("session-%s", sessionName))
 			manifestPath = filepath.Join(manifestDir, "manifest.yaml")
 
@@ -225,7 +225,7 @@ Examples:
 		// Show completion with softer language to allow skill continuation
 		fmt.Printf("\nSession association complete. You can now proceed to the next step.\n")
 		fmt.Printf("To resume this session:\n")
-		fmt.Printf("  csm resume %s\n", sessionName)
+		fmt.Printf("  agm session resume %s\n", sessionName)
 
 		return nil
 	},

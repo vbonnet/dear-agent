@@ -487,12 +487,12 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 		debug.Log("SessionStart hooks confirmed complete (ready-file signal received)")
 
 	case "gemini":
-		// Check for csm-agent-wrapper
+		// Check for agm-agent-wrapper
 		debug.Phase("Start Gemini")
-		wrapperPath, err := exec.LookPath("csm-agent-wrapper")
+		wrapperPath, err := exec.LookPath("agm-agent-wrapper")
 		if err != nil {
 			// Graceful fallback to direct gemini (wrapper not found)
-			debug.Log("csm-agent-wrapper not found, falling back to direct gemini: %v", err)
+			debug.Log("agm-agent-wrapper not found, falling back to direct gemini: %v", err)
 			geminiCmd := "gemini && exit"
 			debug.Log("Sending command: %s", geminiCmd)
 			if err := tmux.SendCommand(sessionName, geminiCmd); err != nil {
@@ -511,7 +511,7 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 			ui.PrintSuccess("Started Gemini CLI in tmux session")
 		} else {
 			// Use wrapper for readiness detection
-			debug.Log("Found csm-agent-wrapper at: %s", wrapperPath)
+			debug.Log("Found agm-agent-wrapper at: %s", wrapperPath)
 			debug.Log("Executing wrapper directly (not via tmux): %s --agent=gemini %s", wrapperPath, sessionName)
 
 			// Execute wrapper directly (it will attach to the session)
@@ -528,8 +528,8 @@ func createTmuxSessionAndStartClaude(sessionName string) error {
 
 			if err := cmd.Run(); err != nil {
 				ui.PrintError(err,
-					"Failed to run csm-agent-wrapper",
-					"  • Check wrapper installed: which csm-agent-wrapper\n"+
+					"Failed to run agm-agent-wrapper",
+					"  • Check wrapper installed: which agm-agent-wrapper\n"+
 						"  • Try direct mode by temporarily renaming wrapper\n"+
 						"  • Attach and check: tmux attach -t "+sessionName)
 				if !exists {

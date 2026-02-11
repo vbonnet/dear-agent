@@ -30,8 +30,8 @@ By default, only shows recently active sessions (last 30 days).
 Use --all to discover all sessions from history.
 
 Examples:
-  csm sync        # Discover recently active sessions
-  csm sync --all  # Discover all sessions from history`,
+  agm admin sync        # Discover recently active sessions
+  agm admin sync --all  # Discover all sessions from history`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Parse history.jsonl
 		homeDir, err := os.UserHomeDir()
@@ -119,7 +119,7 @@ Examples:
 				WithTheme(ui.GetTheme()).
 				Run()
 			if err != nil || !confirm {
-				fmt.Println("Skipping orphaned sessions. Run 'csm sync' again to handle them later.")
+				fmt.Println("Skipping orphaned sessions. Run 'agm admin sync' again to handle them later.")
 			} else {
 				fmt.Println("\nOrphaned sessions (in history.jsonl but no manifest):")
 
@@ -311,7 +311,7 @@ func syncActiveTmuxSessions(sessionsDir string, historyEntries []claude.RawEntry
 				ui.PrintSuccess(fmt.Sprintf("Created manifest for tmux session '%s' (UUID auto-detected)", sessionName))
 			} else {
 				ui.PrintSuccess(fmt.Sprintf("Created manifest for tmux session '%s'", sessionName))
-				fmt.Printf("  → Run 'csm associate %s' to link Claude UUID\n", sessionName)
+				fmt.Printf("  → Run 'agm session associate %s' to link Claude UUID\n", sessionName)
 				needsAssociationCount++
 			}
 			createdCount++
@@ -319,7 +319,7 @@ func syncActiveTmuxSessions(sessionsDir string, historyEntries []claude.RawEntry
 			// Manifest exists, check if UUID is empty
 			if m.Claude.UUID == "" {
 				fmt.Printf("  ℹ Session '%s' needs Claude UUID association\n", sessionName)
-				fmt.Printf("    → Run 'csm associate %s' to link\n", sessionName)
+				fmt.Printf("    → Run 'agm session associate %s' to link\n", sessionName)
 				needsAssociationCount++
 			}
 		}
@@ -331,7 +331,7 @@ func syncActiveTmuxSessions(sessionsDir string, historyEntries []claude.RawEntry
 
 	if needsAssociationCount > 0 {
 		fmt.Printf("\n💡 %d session(s) need Claude UUID association\n", needsAssociationCount)
-		fmt.Println("   Use 'csm associate <session-name>' to link each session to its Claude conversation")
+		fmt.Println("   Use 'agm session associate <session-name>' to link each session to its Claude conversation")
 	}
 
 	return nil

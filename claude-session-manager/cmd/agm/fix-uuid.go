@@ -24,10 +24,10 @@ var fixCmd = &cobra.Command{
 	Long: `Manually associate or fix Claude UUIDs for sessions.
 
 Modes:
-  csm fix                  # Scan for unassociated sessions, show suggestions
-  csm fix my-session       # Fix specific session with UUID suggestions
-  csm fix --all            # Auto-detect and fix all sessions with high confidence
-  csm fix --clear my-session  # Clear UUID association
+  agm admin fix-uuid                  # Scan for unassociated sessions, show suggestions
+  agm admin fix-uuid my-session       # Fix specific session with UUID suggestions
+  agm admin fix-uuid --all            # Auto-detect and fix all sessions with high confidence
+  agm admin fix-uuid --clear my-session  # Clear UUID association
 
 The fix command helps resolve UUID issues:
   • Unassociated sessions (no UUID)
@@ -35,10 +35,10 @@ The fix command helps resolve UUID issues:
   • Wrong associations (UUID mismatch)
 
 Examples:
-  csm fix                  # Interactive fix for all unassociated
-  csm fix my-project       # Fix specific session
-  csm fix --all            # Auto-fix all with high confidence
-  csm fix --clear old-session  # Remove UUID association`,
+  agm admin fix-uuid                  # Interactive fix for all unassociated
+  agm admin fix-uuid my-project       # Fix specific session
+  agm admin fix-uuid --all            # Auto-fix all with high confidence
+  agm admin fix-uuid --clear old-session  # Remove UUID association`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Create detector and associator
 		historyPath := "" // Use default ~/.claude/history.jsonl
@@ -227,8 +227,8 @@ func scanAndFix(associator *fix.Associator) error {
 	}
 
 	fmt.Println("\nOptions:")
-	fmt.Println("  • Run 'csm fix <session-name>' to fix a specific session")
-	fmt.Println("  • Run 'csm fix --all' to auto-fix all with high confidence")
+	fmt.Println("  • Run 'agm admin fix-uuid <session-name>' to fix a specific session")
+	fmt.Println("  • Run 'agm admin fix-uuid --all' to auto-fix all with high confidence")
 
 	return nil
 }

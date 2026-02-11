@@ -18,29 +18,29 @@ var forceKill bool
 
 var killCmd = &cobra.Command{
 	Use:   "kill [session-name]",
-	Short: "Kill tmux session for a CSM session",
-	Long: `Kill tmux session for a CSM session without archiving.
+	Short: "Kill tmux session for a AGM session",
+	Long: `Kill tmux session for a AGM session without archiving.
 
 This command terminates the tmux session immediately while preserving
-session metadata. The session can be resumed later with 'csm resume'.
+session metadata. The session can be resumed later with 'agm session resume'.
 
 Use this when:
   • Tmux session is stuck or unresponsive
   • Terminal crashed but session still running
   • Need to force-stop without archiving
 
-Note: This does NOT archive the session. Use 'csm exit' for graceful
+Note: This does NOT archive the session. Use 'agm exit' for graceful
 shutdown with archiving.
 
 Examples:
   # Kill with confirmation prompt
-  csm kill my-session
+  agm session kill my-session
 
   # Kill without confirmation (for scripts)
-  csm kill my-session --force
+  agm session kill my-session --force
 
   # Resume session after killing
-  csm resume my-session`,
+  agm session resume my-session`,
 	Args: cobra.ExactArgs(1),
 	RunE: runKillCommand,
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -137,7 +137,7 @@ Tmux session: %s
 This will terminate the tmux process immediately.
 Session data will be preserved and can be resumed later.
 
-Resume with: csm resume %s`, sessionName, tmuxName, sessionName)
+Resume with: agm session resume %s`, sessionName, tmuxName, sessionName)
 
 	err := huh.NewConfirm().
 		Title(fmt.Sprintf("Kill tmux session for '%s'?", sessionName)).
@@ -168,8 +168,8 @@ func renderSessionNotFoundError(sessionName string) error {
 	ui.PrintError(
 		fmt.Errorf("session not found"),
 		fmt.Sprintf("Session '%s' not found", sessionName),
-		`• List all sessions: csm list
-• Create new session: csm new <name>`,
+		`• List all sessions: agm session list
+• Create new session: agm session new <name>`,
 	)
 	return fmt.Errorf("session not found")
 }
@@ -181,8 +181,8 @@ func renderSessionArchivedError(sessionName string) error {
 		fmt.Sprintf(`Archived sessions don't have active tmux processes.
 
 To work with this session:
-  1. Resume it: csm resume %s
-  2. Then kill if needed: csm kill %s`, sessionName, sessionName),
+  1. Resume it: agm session resume %s
+  2. Then kill if needed: agm session kill %s`, sessionName, sessionName),
 	)
 	return fmt.Errorf("session is archived")
 }
@@ -204,5 +204,5 @@ func renderSuccessMessage(sessionName string) {
 	ui.PrintSuccess(fmt.Sprintf("Tmux session killed for '%s'", sessionName))
 	fmt.Println()
 	fmt.Printf("  The session can be resumed with:\n")
-	fmt.Printf("    csm resume %s\n", sessionName)
+	fmt.Printf("    agm session resume %s\n", sessionName)
 }

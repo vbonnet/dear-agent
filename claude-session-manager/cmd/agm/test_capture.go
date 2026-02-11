@@ -26,13 +26,13 @@ the Claude conversation, command output, and any other terminal content.
 
 Examples:
   # Capture last 30 lines (default)
-  csm test capture my-test
+  agm test capture my-test
 
   # Capture last 100 lines
-  csm test capture my-test --lines 100
+  agm test capture my-test --lines 100
 
   # Get JSON output for automation
-  csm test capture my-test --json`,
+  agm test capture my-test --json`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTestCapture,
 }
@@ -67,7 +67,7 @@ type CaptureResult struct {
 
 func runTestCapture(cmd *cobra.Command, args []string) error {
 	name := args[0]
-	tmuxName := fmt.Sprintf("csm-test-%s", name)
+	tmuxName := fmt.Sprintf("agm-test-%s", name)
 
 	// Check session exists
 	exists, err := tmux.HasSession(tmuxName)
@@ -75,7 +75,7 @@ func runTestCapture(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
 	if !exists {
-		return fmt.Errorf("session '%s' does not exist.\n\nSuggestions:\n  • Create session: csm test create %s\n  • List sessions: tmux ls", name, name)
+		return fmt.Errorf("session '%s' does not exist.\n\nSuggestions:\n  • Create session: agm test create %s\n  • List sessions: tmux ls", name, name)
 	}
 
 	// Capture pane output

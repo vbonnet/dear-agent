@@ -44,7 +44,7 @@ var doctorCmd = &cobra.Command{
 USAGE MODES:
 
 1. Quick Health Check (DEFAULT - Fast, ~1-5 seconds)
-   Run: csm doctor
+   Run: agm admin doctor
 
    Performs structural checks:
    - Claude and tmux installation status
@@ -57,7 +57,7 @@ USAGE MODES:
    Use when: You want a quick overview of system health
 
 2. Deep Validation (OPTIONAL - Slower, ~5-30 seconds per session)
-   Run: csm doctor --validate
+   Run: agm admin doctor --validate
 
    Performs structural checks PLUS functional testing:
    - Tests actual session resumability by attempting resume
@@ -72,11 +72,11 @@ WHICH MODE TO USE:
 - CI/CD pipelines: Use --validate --json for automated testing
 
 Examples:
-  csm doctor                             # Quick health check (structural only)
-  csm doctor --validate                  # Thorough validation (structural + functional)
-  csm doctor --validate --apply-fixes    # Test and auto-fix issues
-  csm doctor --validate --json           # JSON output for scripting
-  csm doctor --test                      # Check test sessions in ~/sessions-test/`,
+  agm admin doctor                             # Quick health check (structural only)
+  agm admin doctor --validate                  # Thorough validation (structural + functional)
+  agm admin doctor --validate --apply-fixes    # Test and auto-fix issues
+  agm admin doctor --validate --json           # JSON output for scripting
+  agm admin doctor --test                      # Check test sessions in ~/sessions-test/`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println(ui.Blue("=== Claude Session Manager Health Check ===\n"))
 
@@ -114,7 +114,7 @@ Examples:
 					ui.PrintSuccess(fmt.Sprintf("tmux socket active: %s", socketInfo.Path))
 				} else if socketInfo.IsStale {
 					ui.PrintWarning(fmt.Sprintf("tmux socket is stale: %s", socketInfo.Path))
-					fmt.Println("  • Run 'csm new' to start a session (stale socket will be cleaned)")
+					fmt.Println("  • Run 'agm session new' to start a session (stale socket will be cleaned)")
 					allHealthy = false
 				}
 			} else {
@@ -145,7 +145,7 @@ Examples:
 		manifests, err := manifest.List(sessionsDir)
 		if err != nil {
 			ui.PrintWarning(fmt.Sprintf("Sessions directory not found: %s", sessionsDir))
-			ui.PrintSuccess("Run 'csm sync' to create manifests")
+			ui.PrintSuccess("Run 'agm admin sync' to create manifests")
 		} else {
 			ui.PrintSuccess(fmt.Sprintf("Found %d session manifests", len(manifests)))
 
@@ -204,7 +204,7 @@ Examples:
 					}
 				}
 				fmt.Println("\n  Recommendation: Each session should have a unique Claude UUID")
-				fmt.Println("    Use 'csm associate <session-name>' to assign correct UUIDs")
+				fmt.Println("    Use 'agm session associate <session-name>' to assign correct UUIDs")
 				allHealthy = false
 			} else {
 				ui.PrintSuccess("No duplicate Claude UUIDs found")
@@ -217,7 +217,7 @@ Examples:
 					fmt.Printf("  • %s\n", sessName)
 				}
 				fmt.Println("\n  Recommendation: Associate each session with its Claude conversation")
-				fmt.Println("    Use 'csm associate <session-name>' to link")
+				fmt.Println("    Use 'agm session associate <session-name>' to link")
 				allHealthy = false
 			} else {
 				ui.PrintSuccess("All sessions have Claude UUIDs")
@@ -233,8 +233,8 @@ Examples:
 					ui.PrintError(err,
 						fmt.Sprintf("Failed to check health of session %s", m.SessionID),
 						"  • Check manifest file: cat "+manifestPath+"\n"+
-							"  • Verify manifest format: csm list --format=json | grep "+m.SessionID+"\n"+
-							"  • Try manual resume: csm resume "+m.Name)
+							"  • Verify manifest format: agm session list --format=json | grep "+m.SessionID+"\n"+
+							"  • Try manual resume: agm session resume "+m.Name)
 					unhealthyCount++
 					continue
 				}

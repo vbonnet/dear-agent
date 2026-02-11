@@ -18,10 +18,10 @@ var (
 
 var logsCmd = &cobra.Command{
 	Use:   "logs",
-	Short: "Manage CSM message logs",
-	Long: `Manage CSM message logs (query, stats, thread tracking, cleanup).
+	Short: "Manage AGM message logs",
+	Long: `Manage AGM message logs (query, stats, thread tracking, cleanup).
 
-Message logs are stored in ~/.csm/logs/messages/ as daily JSONL files.
+Message logs are stored in ~/.agm/logs/messages/ as daily JSONL files.
 Each log file contains all messages sent on that day.
 
 Log format: YYYY-MM-DD.jsonl
@@ -40,17 +40,17 @@ var logsCleanCmd = &cobra.Command{
 	Long: `Remove message log files older than the retention period.
 
 Default retention: 90 days
-Configurable via ~/.config/csm/config.yaml
+Configurable via ~/.config.agm/config.yaml
 
 Examples:
   # Clean logs older than 90 days (default)
-  csm logs clean
+  agm session logs clean
 
   # Clean logs older than 30 days
-  csm logs clean --older-than 30
+  agm session logs clean --older-than 30
 
   # Dry run (show what would be deleted)
-  csm logs clean --dry-run --older-than 30`,
+  agm session logs clean --dry-run --older-than 30`,
 	RunE: runLogsClean,
 }
 
@@ -67,7 +67,7 @@ Shows:
 
 Examples:
   # Show log statistics
-  csm logs stats`,
+  agm session logs stats`,
 	RunE: runLogsStats,
 }
 
@@ -80,7 +80,7 @@ Follows reply-to links to reconstruct the conversation flow.
 
 Examples:
   # Show thread for a message
-  csm logs thread 1738612345678-sender-001`,
+  agm session logs thread 1738612345678-sender-001`,
 	Args: cobra.ExactArgs(1),
 	RunE: runLogsThread,
 }
@@ -92,13 +92,13 @@ var logsQueryCmd = &cobra.Command{
 
 Examples:
   # Find all messages from a sender
-  csm logs query --sender astrocyte
+  agm session logs query --sender astrocyte
 
   # Find messages since a date
-  csm logs query --since 2026-02-01
+  agm session logs query --since 2026-02-01
 
   # Combine filters
-  csm logs query --sender csm-send --since 2026-02-03`,
+  agm session logs query --sender agm-send --since 2026-02-03`,
 	RunE: runLogsQuery,
 }
 
@@ -136,7 +136,7 @@ func runLogsClean(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
-	logsDir := filepath.Join(homeDir, ".csm", "logs", "messages")
+	logsDir := filepath.Join(homeDir, ".agm", "logs", "messages")
 
 	// Create logger
 	logger, err := messages.NewMessageLogger(logsDir)
@@ -165,7 +165,7 @@ func runLogsStats(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
-	logsDir := filepath.Join(homeDir, ".csm", "logs", "messages")
+	logsDir := filepath.Join(homeDir, ".agm", "logs", "messages")
 
 	// Create logger
 	logger, err := messages.NewMessageLogger(logsDir)
@@ -224,7 +224,7 @@ func runLogsThread(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
-	logsDir := filepath.Join(homeDir, ".csm", "logs", "messages")
+	logsDir := filepath.Join(homeDir, ".agm", "logs", "messages")
 
 	fmt.Printf("Thread view for message: %s\n", messageID)
 	fmt.Println("(Note: Full thread tracking implementation pending)")
@@ -241,7 +241,7 @@ func runLogsQuery(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
-	logsDir := filepath.Join(homeDir, ".csm", "logs", "messages")
+	logsDir := filepath.Join(homeDir, ".agm", "logs", "messages")
 
 	fmt.Println("Message Log Query")
 	fmt.Println("=================")

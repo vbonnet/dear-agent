@@ -26,7 +26,7 @@ var senderNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 var sendCmd = &cobra.Command{
 	Use:   "send <session-name>",
 	Short: "Send a message to a running session",
-	Long: `Send a message/prompt to a running CSM session, interrupting any active thinking state.
+	Long: `Send a message/prompt to a running AGM session, interrupting any active thinking state.
 
 Features:
   • Auto-interrupt: Sends ESC to interrupt thinking before sending prompt
@@ -35,11 +35,11 @@ Features:
   • Large prompts: Supports up to 10KB prompt files
   • Sender attribution: Messages tagged with sender name and unique ID
   • Message threading: Link related messages with --reply-to
-  • Audit trail: All messages logged to ~/.csm/logs/messages/
+  • Audit trail: All messages logged to ~/.agm/logs/messages/
 
 SENDER ATTRIBUTION:
-  - If running in a CSM session: sender is auto-detected (tamper-resistant)
-  - If NOT in CSM session: --sender flag is REQUIRED
+  - If running in a AGM session: sender is auto-detected (tamper-resistant)
+  - If NOT in AGM session: --sender flag is REQUIRED
   - Sender name must match: ^[a-zA-Z0-9_-]+$ (no spaces)
 
 MESSAGE THREADING:
@@ -47,32 +47,32 @@ MESSAGE THREADING:
   - Use --reply-to to link messages in conversation threads
 
 Examples:
-  # Send from within a CSM session (auto-detects sender)
-  csm send my-session --prompt "Please review the code"
+  # Send from within a AGM session (auto-detects sender)
+  agm session send my-session --prompt "Please review the code"
 
   # Send from external process (must specify sender)
-  csm send my-session --sender astrocyte --prompt "Diagnosis complete"
+  agm session send my-session --sender astrocyte --prompt "Diagnosis complete"
 
   # Reply to a previous message
-  csm send my-session --reply-to 1738612345678-sender-001 --prompt "Looks good!"
+  agm session send my-session --reply-to 1738612345678-sender-001 --prompt "Looks good!"
 
   # Send from cron job
-  csm send my-session --sender cron-backup --prompt "Backup finished"
+  agm session send my-session --sender cron-backup --prompt "Backup finished"
 
   # Send a prompt from file
-  csm send my-session --prompt-file /path/to/prompt.txt
+  agm session send my-session --prompt-file /path/to/prompt.txt
 
   # Send diagnosis request to stuck session
-  csm send gemini-research --sender astrocyte --prompt "⚠️ Your session was stuck. Please analyze what caused the hang."
+  agm session send gemini-research --sender astrocyte --prompt "⚠️ Your session was stuck. Please analyze what caused the hang."
 
 Requirements:
   • Session must be running (active tmux session)
   • Requires either --prompt or --prompt-file flag
 
 See Also:
-  • csm reject - Reject permission prompts with custom reasons
-  • csm logs - View message audit trail
-  • csm doctor - Check session health`,
+  • agm session reject - Reject permission prompts with custom reasons
+  • agm session logs - View message audit trail
+  • agm admin doctor - Check session health`,
 	Args: cobra.ExactArgs(1),
 	RunE: runSend,
 }
@@ -94,7 +94,7 @@ func init() {
 		&sessionSendSender,
 		"sender",
 		"",
-		"Sender identifier (required if not in CSM session)",
+		"Sender identifier (required if not in AGM session)",
 	)
 	sendCmd.Flags().StringVar(
 		&sessionSendReplyTo,
@@ -148,7 +148,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
 	if !exists {
-		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: csm list\n  • Create session: csm new %s", recipientSession, recipientSession)
+		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: agm session list\n  • Create session: agm session new %s", recipientSession, recipientSession)
 	}
 
 	// Get message content
@@ -169,7 +169,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
-	stateDir := filepath.Join(homeDir, ".csm", "state")
+	stateDir := filepath.Join(homeDir, ".agm", "state")
 	idGen, err := messages.NewMessageIDGenerator(senderName, stateDir)
 	if err != nil {
 		return fmt.Errorf("failed to create message ID generator: %w", err)
@@ -183,7 +183,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 	formattedMessage := formatMessageWithMetadata(senderName, messageID, sessionSendReplyTo, message)
 
 	// Log the message before sending
-	logsDir := filepath.Join(homeDir, ".csm", "logs", "messages")
+	logsDir := filepath.Join(homeDir, ".agm", "logs", "messages")
 	logger, err := messages.NewMessageLogger(logsDir)
 	if err != nil {
 		return fmt.Errorf("failed to create logger: %w", err)
@@ -219,10 +219,10 @@ func determineSender() (string, error) {
 		return sessionSendSender, nil
 	}
 
-	// Try auto-detection (only works in CSM sessions)
+	// Try auto-detection (only works in AGM sessions)
 	detectedName, err := session.GetCurrentSessionName(cfg.SessionsDir)
 	if err != nil {
-		return "", fmt.Errorf("--sender flag is required when not in a CSM session.\n\nError: %w\n\nExamples:\n  • From daemon: csm send session --sender astrocyte --prompt \"...\"\n  • From script: csm send session --sender my-script --prompt \"...\"", err)
+		return "", fmt.Errorf("--sender flag is required when not in a AGM session.\n\nError: %w\n\nExamples:\n  • From daemon: agm session send session --sender astrocyte --prompt \"...\"\n  • From script: agm session send session --sender my-script --prompt \"...\"", err)
 	}
 
 	return detectedName, nil

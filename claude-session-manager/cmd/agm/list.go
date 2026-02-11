@@ -44,9 +44,9 @@ Displays session status based on tmux state:
 - archived: session marked as archived
 
 Examples:
-  csm list              # List active/stopped sessions
-  csm list --all        # List all sessions (including archived)
-  csm list --json       # Output as JSON`,
+  agm session list              # List active/stopped sessions
+  agm session list --all        # List all sessions (including archived)
+  agm session list --json       # Output as JSON`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get sessions directory (test mode or production)
 		sessionsDir := getListSessionsDir()
@@ -56,7 +56,7 @@ Examples:
 		if err != nil {
 			if os.IsNotExist(err) {
 				ui.PrintWarning(fmt.Sprintf("No sessions directory found: %s", sessionsDir))
-				fmt.Printf("\nCreate your first session with: csm new\n")
+				fmt.Printf("\nCreate your first session with: agm session new\n")
 				return nil
 			}
 			ui.PrintError(err,
@@ -69,7 +69,7 @@ Examples:
 
 		if len(manifests) == 0 {
 			ui.PrintWarning("No sessions found")
-			fmt.Printf("\nCreate your first session with: csm new\n")
+			fmt.Printf("\nCreate your first session with: agm session new\n")
 			return nil
 		}
 

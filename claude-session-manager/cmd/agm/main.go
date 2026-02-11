@@ -50,11 +50,11 @@ When session name is provided:
   • No match found → Offers to create new session
 
 Examples:
-  csm                    # Smart picker or create
-  csm my-session         # Resume or create "my-session"
-  csm new                # Create new session (interactive form)
-  csm list               # List all sessions
-  csm fix                # Fix UUID associations
+  agm                    # Smart picker or create
+  agm my-session         # Resume or create "my-session"
+  agm session new        # Create new session (interactive form)
+  agm session list       # List all sessions
+  agm admin fix-uuid     # Fix UUID associations
 
 Global Flags:
   -C, --directory <path>    Working directory (default: current directory)`,
@@ -73,7 +73,7 @@ Global Flags:
 			if err != nil {
 				executable = "unknown"
 			}
-			fmt.Fprintf(os.Stderr, "csm %s (%s)\n", Version, executable)
+			fmt.Fprintf(os.Stderr, "agm %s (%s)\n", Version, executable)
 		}
 
 		// Load UI config and apply flag overrides
@@ -94,7 +94,7 @@ Global Flags:
 		// NOTE: Global command lock removed in favor of fine-grained locks:
 		// - Tmux operations use tmux.AcquireTmuxLock() (in internal/tmux/lock.go)
 		// - Manifest operations use manifest.AcquireLock() (in internal/manifest/lock.go)
-		// This allows multiple CSM commands to run concurrently (e.g., csm list while csm resume)
+		// This allows multiple AGM commands to run concurrently (e.g., agm session list while agm my-session)
 		// while still preventing race conditions in tmux server updates and manifest modifications.
 
 		// Initialize health checker
@@ -138,7 +138,7 @@ func init() {
 	}
 
 	rootCmd.PersistentFlags().StringVarP(&directory, "directory", "C", "", "Working directory")
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/csm/config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/agm/config.yaml)")
 	rootCmd.PersistentFlags().StringVar(&sessionsDir, "sessions-dir", "", "sessions directory (default: ~/sessions)")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "log level (debug, info, warn, error)")
 	rootCmd.PersistentFlags().BoolVar(&debugMode, "debug", debugDefault, "enable debug logging (shorthand for --log-level debug, env: AGM_DEBUG)")
@@ -153,7 +153,7 @@ func loadConfigWithFlags() (*config.Config, error) {
 	configPath := cfgFile
 	if configPath == "" {
 		home, _ := os.UserHomeDir()
-		configPath = filepath.Join(home, ".config", "csm", "config.yaml")
+		configPath = filepath.Join(home, ".config", "agm", "config.yaml")
 	}
 
 	cfg, err := config.Load(configPath)
@@ -342,7 +342,7 @@ func runNewSessionFlow(suggestedName *string, uiCfg *ui.Config) error {
 	return nil
 }
 
-// ExecuteWithDeps executes the CSM CLI with injected dependencies.
+// ExecuteWithDeps executes the AGM CLI with injected dependencies.
 // This function is used for testing to inject mock implementations.
 //
 // Parameters:

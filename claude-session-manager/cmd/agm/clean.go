@@ -20,11 +20,11 @@ Shows multi-select lists of:
   • Stopped sessions >30 days (suggested for archival)
   • Archived sessions >90 days (suggested for deletion)
 
-Thresholds can be customized in ~/.config/csm/config.yaml
+Thresholds can be customized in ~/.config.agm/config.yaml
 
 Examples:
-  csm clean                 # Interactive cleanup with smart suggestions
-  csm clean --dry-run       # Preview what would be cleaned`,
+  agm admin clean                 # Interactive cleanup with smart suggestions
+  agm admin clean --dry-run       # Preview what would be cleaned`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		uiCfg := ui.LoadConfig()
 

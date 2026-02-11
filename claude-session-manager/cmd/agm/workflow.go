@@ -23,8 +23,8 @@ Workflows define how agents should behave for specific tasks:
 - architect: Design system architectures
 
 Examples:
-  csm workflow list                 # List all workflows
-  csm workflow list --agent=gemini  # List workflows compatible with Gemini`,
+  agm workflow list                 # List all workflows
+  agm workflow list --agent=gemini  # List workflows compatible with Gemini`,
 }
 
 var workflowListCmd = &cobra.Command{
@@ -35,9 +35,9 @@ var workflowListCmd = &cobra.Command{
 By default, lists all workflows. Use --agent flag to filter by agent compatibility.
 
 Examples:
-  csm workflow list                 # List all workflows
-  csm workflow list --agent=gemini  # List workflows compatible with Gemini
-  csm workflow list --agent=claude  # List workflows compatible with Claude`,
+  agm workflow list                 # List all workflows
+  agm workflow list --agent=gemini  # List workflows compatible with Gemini
+  agm workflow list --agent=claude  # List workflows compatible with Claude`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var workflows []workflow.Workflow
 

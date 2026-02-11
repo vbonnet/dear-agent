@@ -9,32 +9,32 @@ import (
 
 var getSessionNameCmd = &cobra.Command{
 	Use:   "get-session-name",
-	Short: "Get CSM session name for current context",
-	Long: `Returns the CSM session name if running in a CSM-managed tmux session.
+	Short: "Get AGM session name for current context",
+	Long: `Returns the AGM session name if running in an AGM-managed tmux session.
 
 This command auto-detects the current tmux session and looks up the corresponding
-CSM session name from the manifest.
+AGM session name from the manifest.
 
 The session name is output to stdout for easy use in scripts and automation.
 
 Examples:
-  # Get session name (must be run inside CSM session)
-  csm get-session-name
+  # Get session name (must be run inside AGM session)
+  agm get-session-name
 
   # Use in shell script
-  SESSION_NAME=$(csm get-session-name)
+  SESSION_NAME=$(agm get-session-name)
   echo "Current session: $SESSION_NAME"
 
-  # Check if in CSM session
-  if csm get-session-name >/dev/null 2>&1; then
-    echo "In CSM session"
+  # Check if in AGM session
+  if agm get-session-name >/dev/null 2>&1; then
+    echo "In AGM session"
   else
-    echo "Not in CSM session"
+    echo "Not in AGM session"
   fi
 
 Exit codes:
-  0 - Success (in CSM session)
-  1 - Error (not in tmux or not a CSM session)`,
+  0 - Success (in AGM session)
+  1 - Error (not in tmux or not a AGM session)`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get current session name using shared function

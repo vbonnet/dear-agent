@@ -7,17 +7,17 @@ import (
 var testCmd = &cobra.Command{
 	Use:   "test",
 	Short: "Test session utilities (legacy)",
-	Long: `Test session utilities for CSM development and automation.
+	Long: `Test session utilities for AGM development and automation.
 
 RECOMMENDED APPROACH:
 Use common commands with --test flag for test session isolation:
 
-  csm new --test <name>           # Create test session in ~/sessions-test/
-  csm list --test                 # List test sessions
-  csm doctor --test               # Check test session health
+  agm session new --test <name>           # Create test session in ~/sessions-test/
+  agm session list --test                 # List test sessions
+  agm admin doctor --test               # Check test session health
 
 Test sessions are isolated from production:
-- Tmux sessions: csm-test-* (separate from production)
+- Tmux sessions: agm-test-* (separate from production)
 - Sessions directory: ~/sessions-test/ (not ~/sessions/)
 - Working directory: configurable per session
 

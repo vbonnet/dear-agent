@@ -13,7 +13,7 @@ var force bool
 var unlockCmd = &cobra.Command{
 	Use:   "unlock",
 	Short: "Remove stale lock files",
-	Long: `Check for and remove stale csm lock files.
+	Long: `Check for and remove stale agm lock files.
 
 This command checks if the lock is held by a process that is still running.
 If the process has exited, the lock is considered stale and will be removed.
@@ -21,8 +21,8 @@ If the process has exited, the lock is considered stale and will be removed.
 Use --force to remove the lock even if the process is still running (DANGEROUS).
 
 Examples:
-  csm unlock              # Check lock status and remove if stale
-  csm unlock --force      # Force remove lock (even if process is running)`,
+  agm admin unlock              # Check lock status and remove if stale
+  agm admin unlock --force      # Force remove lock (even if process is running)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get lock path
 		lockPath, err := lock.DefaultLockPath()
@@ -87,7 +87,7 @@ Examples:
 			"Lock is currently in use",
 			fmt.Sprintf("  • Wait for the process to finish\n"+
 				"  • Kill the process: kill %d\n"+
-				"  • Force unlock: csm unlock --force (DANGEROUS)", info.PID),
+				"  • Force unlock: agm admin unlock --force (DANGEROUS)", info.PID),
 		)
 		return fmt.Errorf("lock is active")
 	},

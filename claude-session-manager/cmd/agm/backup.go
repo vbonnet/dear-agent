@@ -19,8 +19,8 @@ var backupCmd = &cobra.Command{
 	Long: `Manage manifest backups with list and restore operations.
 
 Examples:
-  csm backup list <identifier>       # List backups for a session
-  csm backup restore <identifier> <num>  # Restore backup number`,
+  agm backup list <identifier>       # List backups for a session
+  agm backup restore <identifier> <num>  # Restore backup number`,
 }
 
 var backupListCmd = &cobra.Command{
@@ -34,9 +34,9 @@ The identifier can be:
 - Project path pattern
 
 Examples:
-  csm backup list c4eb298c              # By UUID prefix
-  csm backup list claude-1              # By tmux name
-  csm backup list workspace-design      # By project path`,
+  agm backup list c4eb298c              # By UUID prefix
+  agm backup list claude-1              # By tmux name
+  agm backup list workspace-design      # By project path`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		identifier := args[0]
@@ -51,7 +51,7 @@ Examples:
 		m, manifestPath, err := session.ResolveIdentifier(identifier, sessionsDir)
 		if err != nil {
 			ui.PrintError(err, "Failed to resolve session identifier",
-				"  • Try: csm list --all to see available sessions")
+				"  • Try: agm session list --all to see available sessions")
 			return err
 		}
 
@@ -83,7 +83,7 @@ Examples:
 		}
 
 		fmt.Printf("\nTotal: %d backup(s)\n", len(backups))
-		fmt.Printf("\nRestore with: csm backup restore %s <number>\n", m.SessionID[:8])
+		fmt.Printf("\nRestore with: agm backup restore %s <number>\n", m.SessionID[:8])
 
 		return nil
 	},
@@ -102,8 +102,8 @@ The identifier can be:
 - Project path pattern
 
 Examples:
-  csm backup restore c4eb298c 3         # Restore backup #3 by UUID
-  csm backup restore claude-1 2         # Restore backup #2 by tmux name`,
+  agm backup restore c4eb298c 3         # Restore backup #3 by UUID
+  agm backup restore claude-1 2         # Restore backup #2 by tmux name`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		identifier := args[0]
@@ -122,7 +122,7 @@ Examples:
 		m, manifestPath, err := session.ResolveIdentifier(identifier, sessionsDir)
 		if err != nil {
 			ui.PrintError(err, "Failed to resolve session identifier",
-				"  • Try: csm list --all to see available sessions")
+				"  • Try: agm session list --all to see available sessions")
 			return err
 		}
 
@@ -150,7 +150,7 @@ Examples:
 				"Failed to restore backup",
 				fmt.Sprintf("  • Check backup exists: ls -la %s\n"+
 					"  • Verify manifest is writable: ls -l %s\n"+
-					"  • List available backups: csm backup %s\n"+
+					"  • List available backups: agm backup %s\n"+
 					"  • Check disk space: df -h %s",
 					backupDir, manifestPath, m.Name, filepath.Dir(manifestPath)))
 			return err

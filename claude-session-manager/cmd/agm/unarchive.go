@@ -33,19 +33,19 @@ The command will:
 
 Examples:
   # Exact match
-  csm unarchive my-session
+  agm session unarchive my-session
 
   # Any session with "[REDACTED_EMPLOYER]" in the name
-  csm unarchive *[REDACTED_EMPLOYER]*
+  agm session unarchive *[REDACTED_EMPLOYER]*
 
   # Wildcard year pattern
-  csm unarchive session-202?-*
+  agm session unarchive session-202?-*
 
   # All archived sessions (interactive selection)
-  csm unarchive "*"
+  agm session unarchive "*"
 
   # Skip confirmation prompt
-  csm unarchive my-session --force`,
+  agm session unarchive my-session --force`,
 	Args:              cobra.ExactArgs(1),
 	RunE:              runUnarchive,
 	ValidArgsFunction: unarchiveCompletion,
@@ -73,9 +73,9 @@ func runUnarchive(cmd *cobra.Command, args []string) error {
 	case 0:
 		fmt.Printf("No archived sessions match pattern: %s\n", pattern)
 		fmt.Printf("\nSuggestions:\n")
-		fmt.Printf("  • List all archived sessions: csm list --all\n")
-		fmt.Printf("  • Try a broader pattern: csm unarchive '*'\n")
-		fmt.Printf("  • Use search for semantic matching: csm search \"<query>\"\n")
+		fmt.Printf("  • List all archived sessions: agm session list --all\n")
+		fmt.Printf("  • Try a broader pattern: agm session unarchive '*'\n")
+		fmt.Printf("  • Use search for semantic matching: agm session search \"<query>\"\n")
 		return nil
 
 	case 1:
@@ -151,7 +151,7 @@ func restoreArchivedSession(archived *session.ArchivedSession) error {
 			fmt.Printf("  Project: %s\n", m.Context.Project)
 		}
 		fmt.Printf("  Archived: %s\n", archived.ArchivedAt)
-		fmt.Println("\nThis will restore the session and make it visible in 'csm list'.")
+		fmt.Println("\nThis will restore the session and make it visible in 'agm session list'.")
 		fmt.Println()
 
 		var confirmed bool
@@ -165,7 +165,7 @@ func restoreArchivedSession(archived *session.ArchivedSession) error {
 		if err != nil {
 			ui.PrintError(err,
 				"Failed to read confirmation prompt",
-				"  • Use --force flag to skip confirmation: csm unarchive "+archived.Name+" --force\n"+
+				"  • Use --force flag to skip confirmation: agm session unarchive "+archived.Name+" --force\n"+
 					"  • Check terminal is interactive (TTY)\n"+
 					"  • Try running outside tmux/screen if inside")
 			return err
@@ -218,12 +218,12 @@ func restoreArchivedSession(archived *session.ArchivedSession) error {
 
 		ui.PrintSuccess(fmt.Sprintf("Restored session: %s", m.Name))
 		fmt.Printf("\nSession moved to: %s\n", activeDir)
-		fmt.Printf("\nThe session is now visible in 'csm list'.\n")
+		fmt.Printf("\nThe session is now visible in 'agm session list'.\n")
 	} else {
 		// In-place restore
 		ui.PrintSuccess(fmt.Sprintf("Restored session: %s", m.Name))
 		fmt.Printf("\nLifecycle updated to active in: %s\n", sessionDir)
-		fmt.Printf("\nThe session is now visible in 'csm list' as active/stopped.\n")
+		fmt.Printf("\nThe session is now visible in 'agm session list' as active/stopped.\n")
 	}
 
 	return nil

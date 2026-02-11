@@ -40,13 +40,13 @@ Use Cases:
 
 Examples:
   # Reject with inline reason
-  csm reject my-session --reason "Use Read tool instead of cat"
+  agm session reject my-session --reason "Use Read tool instead of cat"
 
   # Reject with violation prompt from file
-  csm reject my-session --reason-file ~/prompts/VIOLATION-PROMPTS.md
+  agm session reject my-session --reason-file ~/prompts/VIOLATION-PROMPTS.md
 
   # Reject with custom feedback
-  csm reject task --reason "Please use absolute paths and separate tool calls. Read the bash tool guidance at ~/docs/bash-rules.md"
+  agm session reject task --reason "Please use absolute paths and separate tool calls. Read the bash tool guidance at ~/docs/bash-rules.md"
 
 Workflow Executed:
   1. Send Down key(s) to navigate to "No" option (auto-detects 2 or 3 option prompts)
@@ -59,8 +59,8 @@ Requirements:
   • Requires either --reason or --reason-file flag
 
 See Also:
-  • csm send - Send messages to running sessions
-  • csm doctor - Check session health`,
+  • agm session send - Send messages to running sessions
+  • agm admin doctor - Check session health`,
 	Args: cobra.ExactArgs(1),
 	RunE: runReject,
 }
@@ -93,7 +93,7 @@ func runReject(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
 	if !exists {
-		return fmt.Errorf("session '%s' does not exist in tmux.\\n\\nSuggestions:\\n  • List sessions: csm list\\n  • Create session: csm new %s", sessionName, sessionName)
+		return fmt.Errorf("session '%s' does not exist in tmux.\\n\\nSuggestions:\\n  • List sessions: agm session list\\n  • Create session: agm session new %s", sessionName, sessionName)
 	}
 
 	// Get rejection reason
@@ -121,7 +121,7 @@ func runReject(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get CSM socket path for all tmux commands
+	// Get AGM socket path for all tmux commands
 	socketPath := tmux.GetSocketPath()
 
 	// Step 1: Detect number of options and navigate to "No"
@@ -169,7 +169,7 @@ func runReject(cmd *cobra.Command, args []string) error {
 //	1 for 2-option prompts (1. Yes, 2. No)
 //	2 for 3-option prompts (1. Yes, 2. Don't ask, 3. No)
 func detectNoOptionPosition(sessionName string) (int, error) {
-	// Capture pane content using CSM socket
+	// Capture pane content using AGM socket
 	socketPath := tmux.GetSocketPath()
 	out, err := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", sessionName, "-p").Output()
 	if err != nil {

@@ -27,13 +27,13 @@ Partial cleanup is considered successful if at least one step succeeds.
 
 Examples:
   # Cleanup specific session
-  csm test cleanup my-test
+  agm test cleanup my-test
 
   # Cleanup with custom sessions directory
-  csm test cleanup my-test --sessions-dir /tmp/my-tests
+  agm test cleanup my-test --sessions-dir /tmp/my-tests
 
   # Get JSON output for automation
-  csm test cleanup my-test --json`,
+  agm test cleanup my-test --json`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTestCleanup,
 }
@@ -49,7 +49,7 @@ func init() {
 		&cleanupSessionsDir,
 		"sessions-dir",
 		"",
-		"Sessions directory to clean (default: /tmp/csm-test-<name>)",
+		"Sessions directory to clean (default: /tmp/agm-test-<name>)",
 	)
 
 	// Mark as hidden - use common commands with --test flag instead
@@ -68,11 +68,11 @@ type CleanupStatus struct {
 
 func runTestCleanup(cmd *cobra.Command, args []string) error {
 	name := args[0]
-	tmuxName := fmt.Sprintf("csm-test-%s", name)
+	tmuxName := fmt.Sprintf("agm-test-%s", name)
 
 	// Set default sessions directory
 	if cleanupSessionsDir == "" {
-		cleanupSessionsDir = fmt.Sprintf("/tmp/csm-test-%s", name)
+		cleanupSessionsDir = fmt.Sprintf("/tmp/agm-test-%s", name)
 	}
 
 	// Perform cleanup with or without spinner

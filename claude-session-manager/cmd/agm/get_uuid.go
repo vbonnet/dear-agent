@@ -26,7 +26,7 @@ If session-name is not provided:
 The UUID is output to stdout for easy use in scripts.
 
 This command uses a 3-level fallback system to find UUIDs (when session-name is provided):
-  1. CSM manifest lookup (for CSM-managed sessions), verified against /rename
+  1. AGM manifest lookup (for CSM-managed sessions), verified against /rename
   2. Claude history search (by /rename command only - strong signal)
   3. JSONL filename fallback (scans ~/.claude/projects/)
 
@@ -36,19 +36,19 @@ Use --verbose to see which discovery level succeeded.
 
 Examples:
   # Get UUID for current session (auto-detect from history if not in tmux)
-  csm get-uuid
+  agm get-uuid
 
   # Get UUID for specific session by tmux name
-  csm get-uuid csm-resilience
+  agm get-uuid csm-resilience
 
-  # Get UUID for specific session by CSM name
-  csm get-uuid my-project
+  # Get UUID for specific session by AGM name
+  agm get-uuid my-project
 
   # Show discovery path (verbose mode)
-  csm get-uuid --verbose my-legacy-session
+  agm get-uuid --verbose my-legacy-session
 
   # Use in shell script
-  UUID=$(csm get-uuid)
+  UUID=$(agm get-uuid)
   echo "Current session: $UUID"`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -93,7 +93,7 @@ Examples:
 					return m, nil
 				}
 			}
-			return nil, fmt.Errorf("no CSM session found for: %s", name)
+			return nil, fmt.Errorf("no AGM session found for: %s", name)
 		}
 
 		// Use 3-level fallback to discover UUID

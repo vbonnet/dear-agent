@@ -41,17 +41,17 @@ Cache: Results cached for 5 minutes
 
 Examples:
   # Find session about Composio
-  csm search "that conversation about Composio"
+  agm session search "that conversation about Composio"
 
   # Find OAuth implementation work
-  csm search "OAuth integration with MCP"
+  agm session search "OAuth integration with MCP"
 
   # Find session from last week
-  csm search "last week's debugging session"
+  agm session search "last week's debugging session"
 
 Fallback:
   If search doesn't find what you need, try pattern matching:
-  csm unarchive *composio*`,
+  agm session unarchive *composio*`,
 	Args: cobra.ExactArgs(1),
 	RunE: runSearch,
 }
@@ -86,7 +86,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	if len(sessions) == 0 {
 		fmt.Printf("No conversation history found\n")
 		fmt.Printf("\nHistory file appears to be empty or doesn't exist.\n")
-		fmt.Printf("Try pattern matching instead: csm unarchive *<pattern>*\n")
+		fmt.Printf("Try pattern matching instead: agm session unarchive *<pattern>*\n")
 		return nil
 	}
 
@@ -99,14 +99,14 @@ func runSearch(cmd *cobra.Command, args []string) error {
 			"Failed to list archived sessions",
 			"  • Check archive directory: ls -la "+filepath.Join(cfg.SessionsDir, ".archive-old-format")+"\n"+
 				"  • Verify sessions directory: ls -ld "+cfg.SessionsDir+"\n"+
-				"  • List active sessions only: csm list")
+				"  • List active sessions only: agm session list")
 		return err
 	}
 
 	if len(archivedSessions) == 0 {
 		fmt.Printf("No archived sessions found\n")
 		fmt.Printf("\nYou don't have any archived sessions to search.\n")
-		fmt.Printf("Use 'csm list' to see active sessions.\n")
+		fmt.Printf("Use 'agm session list' to see active sessions.\n")
 		return nil
 	}
 
@@ -143,7 +143,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	if len(sessionMetadata) == 0 {
 		fmt.Printf("No archived sessions with conversation history found\n")
 		fmt.Printf("\nArchived sessions don't have conversation history in ~/.claude/history.jsonl.\n")
-		fmt.Printf("Try pattern matching: csm unarchive *<pattern>*\n")
+		fmt.Printf("Try pattern matching: agm session unarchive *<pattern>*\n")
 		return nil
 	}
 
@@ -192,7 +192,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 				"  • GCP credentials not configured (run 'gcloud auth application-default login')\n"+
 				"  • Vertex AI API not enabled (enable at console.cloud.google.com)\n"+
 				"  • Network connectivity issue\n\n"+
-				"Try pattern matching as fallback: csm unarchive *<pattern>*")
+				"Try pattern matching as fallback: agm session unarchive *<pattern>*")
 		return err
 	}
 
@@ -209,8 +209,8 @@ func handleSearchResults(query string, results []llm.SearchResult) error {
 		fmt.Printf("\nNo archived sessions match your query: \"%s\"\n\n", query)
 		fmt.Printf("Suggestions:\n")
 		fmt.Printf("  • Try a different query\n")
-		fmt.Printf("  • Use pattern matching: csm unarchive *<pattern>*\n")
-		fmt.Printf("  • List all archived: csm list --all\n")
+		fmt.Printf("  • Use pattern matching: agm session unarchive *<pattern>*\n")
+		fmt.Printf("  • List all archived: agm session list --all\n")
 		return nil
 
 	case 1:

@@ -54,8 +54,8 @@ func TestHeaderPrinting(t *testing.T) {
 	output := buf.String()
 
 	// Verify header was printed
-	if !strings.Contains(output, "csm") {
-		t.Errorf("Expected header to contain 'csm', got: %s", output)
+	if !strings.Contains(output, "agm") {
+		t.Errorf("Expected header to contain 'agm', got: %s", output)
 	}
 	if !strings.Contains(output, Version) {
 		t.Errorf("Expected header to contain version '%s', got: %s", Version, output)
@@ -150,9 +150,9 @@ func TestHeaderFormat(t *testing.T) {
 	buf.ReadFrom(r)
 	output := strings.TrimSpace(buf.String())
 
-	// Verify format: "csm <version> (<path>)"
-	if !strings.HasPrefix(output, "csm ") {
-		t.Errorf("Expected header to start with 'csm ', got: %s", output)
+	// Verify format: "agm <version> (<path>)"
+	if !strings.HasPrefix(output, "agm ") {
+		t.Errorf("Expected header to start with 'agm ', got: %s", output)
 	}
 	if !strings.Contains(output, "(") || !strings.Contains(output, ")") {
 		t.Errorf("Expected header to contain parentheses around path, got: %s", output)

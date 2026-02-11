@@ -55,7 +55,7 @@ func setTerminalTitle(title string) {
 }
 
 // updateVSCodeTabTitle updates the VS Code tab title if running in VS Code
-// This is called after successfully creating or resuming a CSM session
+// This is called after successfully creating or resuming a AGM session
 func updateVSCodeTabTitle(sessionName string) {
 	if !isRunningInVSCode() {
 		return
