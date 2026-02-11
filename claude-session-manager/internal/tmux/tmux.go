@@ -97,14 +97,25 @@ func AttachSession(name string) error {
 
 	// Check if we're already inside a tmux session
 	if os.Getenv("TMUX") != "" {
-		// Already in tmux - use switch-client instead of attach
+		// Already in tmux - DO NOT switch unless user is interactive
+		// This prevents unexpected window switching when running from within tmux
+		// (e.g., running tests, background commands, etc.)
+
+		// Check if stdin is a TTY (interactive terminal)
+		isTTY := term.IsTerminal(int(os.Stdin.Fd()))
+		if !isTTY {
+			// Not interactive (tests, scripts, etc.) - skip switch to avoid disruption
+			return nil
+		}
+
+		// Interactive session - use switch-client to switch to target session
 		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "switch-client", "-t", name)
 		defer cancel()
 		if err := cmd.Run(); err != nil {
 			if ctx.Err() == context.DeadlineExceeded {
 				return &TimeoutError{
 					Problem:  fmt.Sprintf("tmux command timed out after %v (server may be hung)", globalTimeout),
-					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
+					Recovery:  "  pkill -9 tmux    # Kill hung tmux server\n  csm list         # Verify recovery",
 					Duration: globalTimeout,
 				}
 			}
