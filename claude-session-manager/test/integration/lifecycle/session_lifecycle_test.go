@@ -91,7 +91,7 @@ func TestSessionCreation_FullLifecycle(t *testing.T) {
 	t.Run("ArchiveSession", func(t *testing.T) {
 		// First kill tmux session to make it inactive
 		if helpers.IsTmuxAvailable() {
-			exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+			helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run()
 			time.Sleep(100 * time.Millisecond)
 		}
 
@@ -251,11 +251,11 @@ func TestA2AMessaging_SendReceive(t *testing.T) {
 		}
 
 		// Create actual tmux session
-		cmd := exec.Command("tmux", "new-session", "-d", "-s", name, "sleep", "3600")
+		cmd := helpers.BuildTmuxCmd("new-session", "-d", "-s", name, "sleep", "3600")
 		if err := cmd.Run(); err != nil {
 			t.Fatalf("Failed to create tmux session %s: %v", name, err)
 		}
-		defer exec.Command("tmux", "kill-session", "-t", name).Run()
+		defer helpers.BuildTmuxCmd("kill-session", "-t", name).Run()
 	}
 
 	// Wait for sessions to be ready
@@ -276,7 +276,7 @@ func TestA2AMessaging_SendReceive(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	// Capture receiver pane to verify message was sent
-	captureCmd := exec.Command("tmux", "capture-pane", "-t", receiverName, "-p")
+	captureCmd := helpers.BuildTmuxCmd("capture-pane", "-t", receiverName, "-p")
 	captureOutput, err := captureCmd.Output()
 	if err != nil {
 		t.Fatalf("Failed to capture pane: %v", err)
@@ -460,11 +460,11 @@ func TestConcurrentSessions_NoConflict(t *testing.T) {
 		}
 
 		// Create tmux session
-		cmd := exec.Command("tmux", "new-session", "-d", "-s", name, "sleep", "60")
+		cmd := helpers.BuildTmuxCmd("new-session", "-d", "-s", name, "sleep", "60")
 		if err := cmd.Run(); err != nil {
 			t.Fatalf("Failed to create tmux session %s: %v", name, err)
 		}
-		defer exec.Command("tmux", "kill-session", "-t", name).Run()
+		defer helpers.BuildTmuxCmd("kill-session", "-t", name).Run()
 	}
 
 	// Verify all sessions exist and have unique session IDs
@@ -540,7 +540,7 @@ func TestPromptDetection(t *testing.T) {
 	sessionName := "test-prompt-" + helpers.RandomString(6)
 
 	// Create tmux session with bash
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "bash")
+	cmd := helpers.BuildTmuxCmd("new-session", "-d", "-s", sessionName, "bash")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to create tmux session: %v", err)
 	}
@@ -559,7 +559,7 @@ func TestPromptDetection(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Verify command output is in pane
-	captureCmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p")
+	captureCmd := helpers.BuildTmuxCmd("capture-pane", "-t", sessionName, "-p")
 	output, err := captureCmd.Output()
 	if err != nil {
 		t.Fatalf("Failed to capture pane: %v", err)

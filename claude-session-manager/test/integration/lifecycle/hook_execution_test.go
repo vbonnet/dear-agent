@@ -355,17 +355,17 @@ func TestAssociateCommand_SendsRename(t *testing.T) {
 	// For this test, we manually send the commands to verify order
 
 	// Send rename command
-	renameCmd := exec.Command("tmux", "send-keys", "-t", sessionName, "-l", "/rename "+sessionName)
+	renameCmd := helpers.BuildTmuxCmd("send-keys", "-t", sessionName, "-l", "/rename "+sessionName)
 	if err := renameCmd.Run(); err != nil {
 		t.Fatalf("Failed to send rename command: %v", err)
 	}
-	enterCmd := exec.Command("tmux", "send-keys", "-t", sessionName, "C-m")
+	enterCmd := helpers.BuildTmuxCmd("send-keys", "-t", sessionName, "C-m")
 	enterCmd.Run()
 
 	time.Sleep(200 * time.Millisecond)
 
 	// Send assoc command
-	assocCmd := exec.Command("tmux", "send-keys", "-t", sessionName, "-l", "/agm:agm-assoc")
+	assocCmd := helpers.BuildTmuxCmd("send-keys", "-t", sessionName, "-l", "/agm:agm-assoc")
 	if err := assocCmd.Run(); err != nil {
 		t.Fatalf("Failed to send assoc command: %v", err)
 	}
@@ -386,7 +386,7 @@ func TestAssociateCommand_SendsRename(t *testing.T) {
 
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		captureCmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-S", "-100")
+		captureCmd := helpers.BuildTmuxCmd("capture-pane", "-t", sessionName, "-p", "-S", "-100")
 		paneOutput, err := captureCmd.Output()
 		if err != nil {
 			t.Fatalf("Failed to capture pane: %v", err)

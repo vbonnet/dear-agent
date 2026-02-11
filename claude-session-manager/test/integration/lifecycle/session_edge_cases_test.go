@@ -272,7 +272,7 @@ func TestEdgeCase_SessionWithNoTmuxSession(t *testing.T) {
 
 	// Verify tmux session does NOT exist
 	if helpers.IsTmuxAvailable() {
-		cmd := exec.Command("tmux", "has-session", "-t", sessionName)
+		cmd := helpers.BuildTmuxCmd("has-session", "-t", sessionName)
 		if err := cmd.Run(); err == nil {
 			t.Error("Tmux session should not exist")
 		}

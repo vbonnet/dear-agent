@@ -12,6 +12,7 @@ type TestEnv struct {
 	SessionsDir    string          // Temporary sessions directory for tests
 	TempDir        string          // Temporary directory for test files
 	TmuxPrefix     string          // Prefix for test sessions (csm-test-)
+	TmuxSocket     string          // Isolated tmux socket path for this test
 	Claude         ClaudeInterface // Claude implementation (mock or real)
 	CurrentSession string          // Current test session name
 	t              interface{}     // Testing context (can be *testing.T or *testing.B)
@@ -25,10 +26,15 @@ func NewTestEnv(t interface{}) *TestEnv {
 	sessionsDir := filepath.Join(tmpDir, "sessions")
 	os.MkdirAll(sessionsDir, 0700)
 
+	// For integration tests: Use main tmux socket (/tmp/agm.sock) but with unique session names
+	// Tests will clean up their sessions in Cleanup()
+	// We don't use isolated sockets because agm binary needs the real tmux server
+
 	return &TestEnv{
 		SessionsDir: sessionsDir,
 		TempDir:     tmpDir,
 		TmuxPrefix:  "csm-test-",
+		TmuxSocket:  "/tmp/agm.sock", // Use main AGM socket for integration tests
 		Claude:      NewClaudeForTest(),
 		t:           t,
 	}
@@ -36,7 +42,7 @@ func NewTestEnv(t interface{}) *TestEnv {
 
 // Cleanup removes all test sessions and manifest directories
 func (e *TestEnv) Cleanup(t interface{}) error {
-	// Kill all csm-test-* tmux sessions
+	// Kill all csm-test-* tmux sessions on the main AGM socket
 	sessions, _ := ListTmuxSessions(e.TmuxPrefix)
 	for _, session := range sessions {
 		KillTmuxSession(session)

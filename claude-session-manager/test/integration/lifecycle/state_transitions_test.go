@@ -32,11 +32,11 @@ func TestStateTransition_ActiveToSuspended(t *testing.T) {
 	}
 
 	// Create tmux session (active state)
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "300")
+	cmd := helpers.BuildTmuxCmd("new-session", "-d", "-s", sessionName, "sleep", "300")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to create tmux session: %v", err)
 	}
-	defer exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	defer helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run()
 
 	// Verify initial state - lifecycle should be empty (active/running)
 	manifestPath := filepath.Join(env.SessionsDir, sessionName, "manifest.yaml")
@@ -50,7 +50,7 @@ func TestStateTransition_ActiveToSuspended(t *testing.T) {
 	}
 
 	// Suspend session by killing tmux (simulates detach/stop)
-	if err := exec.Command("tmux", "kill-session", "-t", sessionName).Run(); err != nil {
+	if err := helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run(); err != nil {
 		t.Logf("Failed to kill tmux session: %v", err)
 	}
 
@@ -58,7 +58,7 @@ func TestStateTransition_ActiveToSuspended(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify tmux session is gone (suspended state)
-	checkCmd := exec.Command("tmux", "has-session", "-t", sessionName)
+	checkCmd := helpers.BuildTmuxCmd("has-session", "-t", sessionName)
 	if err := checkCmd.Run(); err == nil {
 		t.Error("Tmux session should be gone after suspend")
 	}
@@ -104,7 +104,7 @@ func TestStateTransition_SuspendedToActive(t *testing.T) {
 	}
 
 	// Verify no tmux session exists
-	checkCmd := exec.Command("tmux", "has-session", "-t", sessionName)
+	checkCmd := helpers.BuildTmuxCmd("has-session", "-t", sessionName)
 	if err := checkCmd.Run(); err == nil {
 		t.Error("Tmux session should not exist for suspended session")
 	}
@@ -136,7 +136,7 @@ func TestStateTransition_ActiveToArchived(t *testing.T) {
 	}
 
 	// Create tmux session
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "60")
+	cmd := helpers.BuildTmuxCmd("new-session", "-d", "-s", sessionName, "sleep", "60")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to create tmux session: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestStateTransition_ActiveToArchived(t *testing.T) {
 	err = helpers.ArchiveTestSession(env.SessionsDir, sessionName, "transition test")
 	if err != nil {
 		// Kill tmux session first and retry
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+		helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run()
 		time.Sleep(100 * time.Millisecond)
 
 		err = helpers.ArchiveTestSession(env.SessionsDir, sessionName, "transition test")
@@ -264,7 +264,7 @@ func TestStateTransition_MultipleRapidTransitions(t *testing.T) {
 	manifestPath := filepath.Join(env.SessionsDir, sessionName, "manifest.yaml")
 
 	// Transition 1: Start tmux (suspended → active)
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "60")
+	cmd := helpers.BuildTmuxCmd("new-session", "-d", "-s", sessionName, "sleep", "60")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to create tmux session: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestStateTransition_MultipleRapidTransitions(t *testing.T) {
 	}
 
 	// Transition 2: Kill tmux (active → suspended)
-	if err := exec.Command("tmux", "kill-session", "-t", sessionName).Run(); err != nil {
+	if err := helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run(); err != nil {
 		t.Fatalf("Failed to kill tmux session: %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -335,7 +335,7 @@ func TestStateTransition_ConcurrentTransitions(t *testing.T) {
 		}
 
 		// Start tmux session
-		cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "60")
+		cmd := helpers.BuildTmuxCmd("new-session", "-d", "-s", sessionName, "sleep", "60")
 		if err := cmd.Run(); err != nil {
 			t.Fatalf("Failed to create tmux session %s: %v", sessionName, err)
 		}
@@ -346,7 +346,7 @@ func TestStateTransition_ConcurrentTransitions(t *testing.T) {
 	for _, sessionName := range sessions {
 		go func(name string) {
 			// Kill tmux first
-			exec.Command("tmux", "kill-session", "-t", name).Run()
+			helpers.BuildTmuxCmd("kill-session", "-t", name).Run()
 			time.Sleep(50 * time.Millisecond)
 
 			// Archive

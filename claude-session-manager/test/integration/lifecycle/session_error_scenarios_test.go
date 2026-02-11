@@ -33,11 +33,11 @@ func TestError_CreateDuplicateSession(t *testing.T) {
 	}
 
 	// Create tmux session
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "60")
+	cmd := helpers.BuildTmuxCmd("new-session", "-d", "-s", sessionName, "sleep", "60")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to create tmux session: %v", err)
 	}
-	defer exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	defer helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run()
 
 	// Attempt to create duplicate session
 	cmd = exec.Command("agm", "session", "new", sessionName,
@@ -102,11 +102,11 @@ func TestError_ArchiveActiveSession(t *testing.T) {
 	}
 
 	// Create tmux session
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "300")
+	cmd := helpers.BuildTmuxCmd("new-session", "-d", "-s", sessionName, "sleep", "300")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to create tmux session: %v", err)
 	}
-	defer exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	defer helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run()
 
 	// Wait for session to be active
 	time.Sleep(100 * time.Millisecond)
@@ -503,11 +503,11 @@ func TestError_SendEmptyMessage(t *testing.T) {
 	}
 
 	// Create tmux session
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "60")
+	cmd := helpers.BuildTmuxCmd("new-session", "-d", "-s", sessionName, "sleep", "60")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to create tmux session: %v", err)
 	}
-	defer exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	defer helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run()
 
 	// Attempt to send empty message
 	cmd = exec.Command("agm", "send", sessionName,
@@ -539,11 +539,11 @@ func TestError_MessageTooLarge(t *testing.T) {
 	}
 
 	// Create tmux session
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "60")
+	cmd := helpers.BuildTmuxCmd("new-session", "-d", "-s", sessionName, "sleep", "60")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to create tmux session: %v", err)
 	}
-	defer exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	defer helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run()
 
 	// Create very large message (1MB)
 	largeMessage := strings.Repeat("A", 1024*1024)

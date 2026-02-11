@@ -96,7 +96,7 @@ func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(t *testing.T) {
 					t.Skip("Tmux not available")
 				}
 
-				cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
+				cmd := helpers.BuildTmuxCmd("kill-session", "-t", sessionName)
 				err := cmd.Run()
 				if err != nil {
 					t.Logf("Kill session: %v (may already be dead)", err)
@@ -106,7 +106,7 @@ func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(t *testing.T) {
 				time.Sleep(200 * time.Millisecond)
 
 				// Verify tmux session is gone
-				cmd = exec.Command("tmux", "has-session", "-t", sessionName)
+				cmd = helpers.BuildTmuxCmd("has-session", "-t", sessionName)
 				err = cmd.Run()
 				if err == nil {
 					t.Error("Tmux session should be terminated")
@@ -138,7 +138,7 @@ func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(t *testing.T) {
 				time.Sleep(500 * time.Millisecond)
 
 				// Verify tmux session exists
-				cmd = exec.Command("tmux", "has-session", "-t", sessionName)
+				cmd = helpers.BuildTmuxCmd("has-session", "-t", sessionName)
 				err = cmd.Run()
 				if err != nil {
 					t.Log("Resumed session tmux verification skipped (implementation dependent)")
@@ -149,7 +149,7 @@ func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(t *testing.T) {
 			t.Run("Archive", func(t *testing.T) {
 				// Ensure tmux session is dead before archiving
 				if helpers.IsTmuxAvailable() {
-					exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+					helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run()
 					time.Sleep(100 * time.Millisecond)
 				}
 
@@ -273,13 +273,13 @@ func TestSessionStateTransitions(t *testing.T) {
 			switch tc.action {
 			case "create_tmux":
 				if helpers.IsTmuxAvailable() {
-					cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "sleep", "60")
+					cmd := helpers.BuildTmuxCmd("new-session", "-d", "-s", sessionName, "sleep", "60")
 					actionErr = cmd.Run()
-					defer exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+					defer helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run()
 				}
 			case "kill_tmux":
 				if helpers.IsTmuxAvailable() {
-					exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+					helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run()
 					time.Sleep(100 * time.Millisecond)
 				}
 			case "resume":
@@ -288,7 +288,7 @@ func TestSessionStateTransitions(t *testing.T) {
 				_, actionErr = cmd.CombinedOutput()
 			case "archive":
 				if helpers.IsTmuxAvailable() {
-					exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+					helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run()
 					time.Sleep(100 * time.Millisecond)
 				}
 				actionErr = helpers.ArchiveTestSession(env.SessionsDir, sessionName, "state transition test")
@@ -618,11 +618,11 @@ func TestSessionPromptDetection(t *testing.T) {
 	sessionName := "test-prompt-detect-" + helpers.RandomString(6)
 
 	// Create tmux session with bash
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", sessionName, "bash")
+	cmd := helpers.BuildTmuxCmd("new-session", "-d", "-s", sessionName, "bash")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("Failed to create tmux session: %v", err)
 	}
-	defer exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	defer helpers.BuildTmuxCmd("kill-session", "-t", sessionName).Run()
 
 	// Wait for bash startup
 	time.Sleep(500 * time.Millisecond)
@@ -636,7 +636,7 @@ func TestSessionPromptDetection(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	// Verify command output
-	captureCmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p")
+	captureCmd := helpers.BuildTmuxCmd("capture-pane", "-t", sessionName, "-p")
 	output, err := captureCmd.Output()
 	if err != nil {
 		t.Fatalf("Failed to capture pane: %v", err)

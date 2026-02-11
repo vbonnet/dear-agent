@@ -86,8 +86,8 @@ Examples:
 			// User provided a session name
 			sessionName = args[0]
 
-			// If inside tmux, verify name matches current session
-			if inTmux {
+			// If inside tmux and not detached, verify name matches current session
+			if inTmux && !detached {
 				currentTmuxName, err := tmux.GetCurrentSessionName()
 				if err != nil {
 					ui.PrintError(err,
@@ -98,7 +98,7 @@ Examples:
 					return err
 				}
 
-				if sessionName != currentTmuxName && !detached {
+				if sessionName != currentTmuxName {
 					ui.PrintError(
 						fmt.Errorf("session name mismatch: %s (provided) != %s (current tmux)", sessionName, currentTmuxName),
 						"Cannot create session with different name while inside tmux",
