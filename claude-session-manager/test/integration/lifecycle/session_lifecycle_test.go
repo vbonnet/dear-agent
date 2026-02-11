@@ -496,22 +496,6 @@ func TestConcurrentSessions_NoConflict(t *testing.T) {
 	}
 }
 
-// TestSessionReidentify_AfterTmuxRestart tests session recovery after tmux restart
-func TestSessionReidentify_AfterTmuxRestart(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping tmux restart test in short mode")
-	}
-
-	t.Skip("Test requires tmux server restart - implement with caution")
-
-	// This test would:
-	// 1. Create session with tmux
-	// 2. Kill tmux server
-	// 3. Restart tmux server
-	// 4. Verify CSM can still identify and manage session
-	//
-	// Skipped because killing tmux server affects other tests
-}
 
 // Helper functions
 
