@@ -34,7 +34,7 @@ func TestSessionCreation_FullLifecycle(t *testing.T) {
 		}
 
 		// Create session in detached mode
-		cmd := exec.Command("csm", "new", sessionName,
+		cmd := exec.Command("agm", "session", "new", sessionName,
 			"--sessions-dir", env.SessionsDir,
 			"--detached",
 			"--agent", "claude")
@@ -263,7 +263,7 @@ func TestA2AMessaging_SendReceive(t *testing.T) {
 
 	// Send message from sender to receiver
 	message := "Test message " + helpers.RandomString(8)
-	cmd := exec.Command("csm", "send", receiverName,
+	cmd := exec.Command("agm", "send", receiverName,
 		"--sessions-dir", env.SessionsDir,
 		"--prompt", message)
 
@@ -409,7 +409,7 @@ func TestSessionCleanup_OnError(t *testing.T) {
 
 	// Attempt to create session with invalid parameters
 	// (e.g., invalid agent name)
-	cmd := exec.Command("csm", "new", sessionName,
+	cmd := exec.Command("agm", "session", "new", sessionName,
 		"--sessions-dir", env.SessionsDir,
 		"--agent", "invalid-agent-xyz",
 		"--detached")

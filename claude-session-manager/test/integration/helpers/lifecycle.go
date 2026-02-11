@@ -26,14 +26,14 @@ type Session struct {
 	Archived bool
 }
 
-// ArchiveTestSession archives a test session using csm archive command
+// ArchiveTestSession archives a test session using agm archive command
 // Note: Session should be inactive (tmux killed) before calling this
 func ArchiveTestSession(sessionsDir, sessionID string, reason string) error {
-	args := []string{"archive", sessionID, "--sessions-dir", sessionsDir, "--force"}
+	args := []string{"session", "archive", sessionID, "--sessions-dir", sessionsDir, "--force"}
 	// --force skips confirmation prompt (test env has no TTY)
 	// Note: --reason flag is a Phase 2 feature, not available in Phase 1
 
-	cmd := exec.Command("csm", args...)
+	cmd := exec.Command("agm", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to archive session %s: %w (output: %s)", sessionID, err, string(output))
@@ -70,9 +70,9 @@ archived_at: "2026-01-20T19:00:00Z"
 	return nil
 }
 
-// ResumeTestSession resumes a test session using csm resume command
+// ResumeTestSession resumes a test session using agm resume command
 func ResumeTestSession(sessionsDir, sessionID string) error {
-	cmd := exec.Command("csm", "resume", sessionID, "--sessions-dir", sessionsDir)
+	cmd := exec.Command("agm", "session", "resume", sessionID, "--sessions-dir", sessionsDir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to resume session %s: %w (output: %s)", sessionID, err, string(output))
@@ -80,9 +80,9 @@ func ResumeTestSession(sessionsDir, sessionID string) error {
 	return nil
 }
 
-// ListTestSessions lists sessions using csm list command
+// ListTestSessions lists sessions using agm list command
 func ListTestSessions(sessionsDir string, filter ListFilter) ([]Session, error) {
-	args := []string{"list", "--sessions-dir", sessionsDir}
+	args := []string{"session", "list", "--sessions-dir", sessionsDir}
 	if filter.Archived {
 		args = append(args, "--archived")
 	}
@@ -93,10 +93,10 @@ func ListTestSessions(sessionsDir string, filter ListFilter) ([]Session, error) 
 		args = append(args, "--agent", filter.Agent)
 	}
 
-	cmd := exec.Command("csm", args...)
+	cmd := exec.Command("agm", args...)
 	output, err := cmd.Output()
 	if err != nil {
-		// If no sessions, csm list may return exit code 0 with empty output
+		// If no sessions, agm list may return exit code 0 with empty output
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() != 0 {
 			return nil, fmt.Errorf("failed to list sessions: %w", err)
 		}

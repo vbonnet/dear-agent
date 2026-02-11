@@ -40,7 +40,7 @@ func TestError_CreateDuplicateSession(t *testing.T) {
 	defer exec.Command("tmux", "kill-session", "-t", sessionName).Run()
 
 	// Attempt to create duplicate session
-	cmd = exec.Command("csm", "new", sessionName,
+	cmd = exec.Command("agm", "session", "new", sessionName,
 		"--sessions-dir", env.SessionsDir,
 		"--detached")
 
@@ -64,7 +64,7 @@ func TestError_ResumeMissingSession(t *testing.T) {
 
 	sessionName := "nonexistent-session-" + helpers.RandomString(8)
 
-	cmd := exec.Command("csm", "resume", sessionName,
+	cmd := exec.Command("agm", "session", "resume", sessionName,
 		"--sessions-dir", env.SessionsDir)
 
 	output, err := cmd.CombinedOutput()
@@ -112,7 +112,7 @@ func TestError_ArchiveActiveSession(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Attempt to archive active session without force flag
-	cmd = exec.Command("csm", "archive", sessionName,
+	cmd = exec.Command("agm", "session", "archive", sessionName,
 		"--sessions-dir", env.SessionsDir)
 
 	output, err := cmd.CombinedOutput()
@@ -124,7 +124,7 @@ func TestError_ArchiveActiveSession(t *testing.T) {
 	t.Logf("Archive active session output: %s, err: %v", output, err)
 
 	// With --force flag, should succeed
-	cmd = exec.Command("csm", "archive", sessionName,
+	cmd = exec.Command("agm", "session", "archive", sessionName,
 		"--sessions-dir", env.SessionsDir,
 		"--force")
 
@@ -141,7 +141,7 @@ func TestError_SendToMissingSession(t *testing.T) {
 
 	sessionName := "missing-target-" + helpers.RandomString(8)
 
-	cmd := exec.Command("csm", "send", sessionName,
+	cmd := exec.Command("agm", "send", sessionName,
 		"--sessions-dir", env.SessionsDir,
 		"--prompt", "test message")
 
@@ -250,7 +250,7 @@ func TestError_ConcurrentArchive(t *testing.T) {
 	done2 := make(chan error, 1)
 
 	go func() {
-		cmd := exec.Command("csm", "archive", sessionName,
+		cmd := exec.Command("agm", "session", "archive", sessionName,
 			"--sessions-dir", env.SessionsDir,
 			"--force")
 		_, err := cmd.CombinedOutput()
@@ -258,7 +258,7 @@ func TestError_ConcurrentArchive(t *testing.T) {
 	}()
 
 	go func() {
-		cmd := exec.Command("csm", "archive", sessionName,
+		cmd := exec.Command("agm", "session", "archive", sessionName,
 			"--sessions-dir", env.SessionsDir,
 			"--force")
 		_, err := cmd.CombinedOutput()
@@ -310,7 +310,7 @@ func TestError_InvalidSessionName(t *testing.T) {
 
 	for _, invalidName := range invalidNames {
 		t.Run("InvalidName_"+invalidName, func(t *testing.T) {
-			cmd := exec.Command("csm", "new", invalidName,
+			cmd := exec.Command("agm", "session", "new", invalidName,
 				"--sessions-dir", env.SessionsDir,
 				"--detached")
 
@@ -510,7 +510,7 @@ func TestError_SendEmptyMessage(t *testing.T) {
 	defer exec.Command("tmux", "kill-session", "-t", sessionName).Run()
 
 	// Attempt to send empty message
-	cmd = exec.Command("csm", "send", sessionName,
+	cmd = exec.Command("agm", "send", sessionName,
 		"--sessions-dir", env.SessionsDir,
 		"--prompt", "")
 
@@ -548,7 +548,7 @@ func TestError_MessageTooLarge(t *testing.T) {
 	// Create very large message (1MB)
 	largeMessage := strings.Repeat("A", 1024*1024)
 
-	cmd = exec.Command("csm", "send", sessionName,
+	cmd = exec.Command("agm", "send", sessionName,
 		"--sessions-dir", env.SessionsDir,
 		"--prompt", largeMessage)
 

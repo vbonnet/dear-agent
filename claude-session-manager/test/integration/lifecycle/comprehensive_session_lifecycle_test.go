@@ -37,7 +37,7 @@ func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(t *testing.T) {
 					t.Skip("Tmux not available")
 				}
 
-				cmd := exec.Command("csm", "new", sessionName,
+				cmd := exec.Command("agm", "session", "new", sessionName,
 					"--sessions-dir", env.SessionsDir,
 					"--detached",
 					"--agent", agent)
@@ -125,7 +125,7 @@ func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(t *testing.T) {
 					t.Skip("Tmux not available")
 				}
 
-				cmd := exec.Command("csm", "resume", sessionName,
+				cmd := exec.Command("agm", "session", "resume", sessionName,
 					"--sessions-dir", env.SessionsDir)
 
 				output, err := cmd.CombinedOutput()
@@ -284,7 +284,7 @@ func TestSessionStateTransitions(t *testing.T) {
 				}
 			case "resume":
 				// Resume attempt
-				cmd := exec.Command("csm", "resume", sessionName, "--sessions-dir", env.SessionsDir)
+				cmd := exec.Command("agm", "session", "resume", sessionName, "--sessions-dir", env.SessionsDir)
 				_, actionErr = cmd.CombinedOutput()
 			case "archive":
 				if helpers.IsTmuxAvailable() {
@@ -556,7 +556,7 @@ func TestSessionEdgeCases_CrossAgent(t *testing.T) {
 		}
 
 		// Try to resume (may fail due to agent mismatch)
-		cmd := exec.Command("csm", "resume", sessionName, "--sessions-dir", env.SessionsDir)
+		cmd := exec.Command("agm", "session", "resume", sessionName, "--sessions-dir", env.SessionsDir)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Logf("Cross-agent resume failed as expected: %s", output)
