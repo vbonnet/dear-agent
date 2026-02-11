@@ -28,8 +28,9 @@ Feature: UX Consistency
   Scenario: Error messages follow template format
     When I try to access a non-existent session "missing-session"
     Then the command should exit with non-zero code
-    And the output should contain "Error:"
-    Or the output should contain "❌"
+    And the output should contain one of:
+      | Error: |
+      | ❌     |
 
   Scenario Outline: Commands support standard flags
     When I run "agm <command> --help"
