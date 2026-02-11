@@ -93,21 +93,15 @@ func TestArchiveSession_Success(t *testing.T) {
 		t.Fatalf("archiveSession failed: %v", err)
 	}
 
-	// Verify session was moved to archive directory
-	archiveDir := filepath.Join(sessionsDir, ".archive-old-format", sessionID)
-	if _, err := os.Stat(archiveDir); os.IsNotExist(err) {
-		t.Errorf("Session directory was not moved to archive: %s", archiveDir)
-	}
-
-	// Verify original directory no longer exists
+	// Verify session remains in original directory (in-place archive)
 	originalDir := filepath.Join(sessionsDir, sessionID)
-	if _, err := os.Stat(originalDir); !os.IsNotExist(err) {
-		t.Errorf("Original session directory still exists: %s", originalDir)
+	if _, err := os.Stat(originalDir); os.IsNotExist(err) {
+		t.Errorf("Session directory should remain in place: %s", originalDir)
 	}
 
 	// Verify manifest has archived lifecycle
-	archivedManifestPath := filepath.Join(archiveDir, "manifest.yaml")
-	m, err := manifest.Read(archivedManifestPath)
+	manifestPath := filepath.Join(originalDir, "manifest.yaml")
+	m, err := manifest.Read(manifestPath)
 	if err != nil {
 		t.Fatalf("Failed to read archived manifest: %v", err)
 	}
@@ -135,10 +129,20 @@ func TestArchiveSession_WithForceFlag(t *testing.T) {
 		t.Fatalf("archiveSession with force flag failed: %v", err)
 	}
 
-	// Verify session was archived
-	archiveDir := filepath.Join(sessionsDir, ".archive-old-format", sessionID)
-	if _, err := os.Stat(archiveDir); os.IsNotExist(err) {
-		t.Errorf("Session was not archived with force flag")
+	// Verify session remains in original location (in-place archive)
+	originalDir := filepath.Join(sessionsDir, sessionID)
+	if _, err := os.Stat(originalDir); os.IsNotExist(err) {
+		t.Errorf("Session directory should remain in place: %s", originalDir)
+	}
+
+	// Verify manifest has archived lifecycle
+	manifestPath := filepath.Join(originalDir, "manifest.yaml")
+	m, err := manifest.Read(manifestPath)
+	if err != nil {
+		t.Fatalf("Failed to read archived manifest: %v", err)
+	}
+	if m.Lifecycle != manifest.LifecycleArchived {
+		t.Errorf("Expected lifecycle 'archived', got '%s'", m.Lifecycle)
 	}
 }
 
@@ -289,10 +293,20 @@ func TestArchiveSession_ByTmuxName(t *testing.T) {
 		t.Fatalf("archiveSession by tmux name failed: %v", err)
 	}
 
-	// Verify session was archived
-	archiveDir := filepath.Join(sessionsDir, ".archive-old-format", sessionID)
-	if _, err := os.Stat(archiveDir); os.IsNotExist(err) {
-		t.Errorf("Session was not archived when using tmux name")
+	// Verify session remains in original location (in-place archive)
+	originalDir := filepath.Join(sessionsDir, sessionID)
+	if _, err := os.Stat(originalDir); os.IsNotExist(err) {
+		t.Errorf("Session directory should remain in place: %s", originalDir)
+	}
+
+	// Verify manifest has archived lifecycle
+	manifestPath := filepath.Join(originalDir, "manifest.yaml")
+	m, err := manifest.Read(manifestPath)
+	if err != nil {
+		t.Fatalf("Failed to read archived manifest: %v", err)
+	}
+	if m.Lifecycle != manifest.LifecycleArchived {
+		t.Errorf("Expected lifecycle 'archived', got '%s'", m.Lifecycle)
 	}
 }
 
@@ -314,60 +328,20 @@ func TestArchiveSession_BySessionID(t *testing.T) {
 		t.Fatalf("archiveSession by session ID failed: %v", err)
 	}
 
-	// Verify session was archived
-	archiveDir := filepath.Join(sessionsDir, ".archive-old-format", sessionID)
-	if _, err := os.Stat(archiveDir); os.IsNotExist(err) {
-		t.Errorf("Session was not archived when using session ID")
-	}
-}
-
-// TestArchiveSession_ArchiveDirectoryConflict tests handling of archive directory conflicts
-func TestArchiveSession_ArchiveDirectoryConflict(t *testing.T) {
-	_, sessionsDir, cleanup := setupArchiveTest(t)
-	defer cleanup()
-
-	sessionID := "conflict-session"
-	createArchiveTestSession(t, sessionsDir, sessionID, "conflict", "claude-conflict", "")
-
-	// Pre-create archive directory to simulate conflict
-	archiveBaseDir := filepath.Join(sessionsDir, ".archive-old-format")
-	archiveTargetDir := filepath.Join(archiveBaseDir, sessionID)
-	if err := os.MkdirAll(archiveTargetDir, 0755); err != nil {
-		t.Fatalf("Failed to create conflicting archive directory: %v", err)
+	// Verify session remains in original location (in-place archive)
+	originalDir := filepath.Join(sessionsDir, sessionID)
+	if _, err := os.Stat(originalDir); os.IsNotExist(err) {
+		t.Errorf("Session directory should remain in place: %s", originalDir)
 	}
 
-	oldForce := forceArchive
-	forceArchive = true
-	defer func() { forceArchive = oldForce }()
-
-	// Archive session - should auto-rename to avoid conflict
-	err := archiveSession(nil, []string{"conflict"})
+	// Verify manifest has archived lifecycle
+	manifestPath := filepath.Join(originalDir, "manifest.yaml")
+	m, err := manifest.Read(manifestPath)
 	if err != nil {
-		t.Fatalf("archiveSession with conflict failed: %v", err)
+		t.Fatalf("Failed to read archived manifest: %v", err)
 	}
-
-	// Verify original conflict directory still exists
-	if _, err := os.Stat(archiveTargetDir); os.IsNotExist(err) {
-		t.Errorf("Original archive directory was removed unexpectedly")
-	}
-
-	// Verify new renamed directory exists (should have timestamp suffix)
-	entries, err := os.ReadDir(archiveBaseDir)
-	if err != nil {
-		t.Fatalf("Failed to read archive directory: %v", err)
-	}
-
-	foundRenamed := false
-	for _, entry := range entries {
-		if entry.IsDir() && entry.Name() != sessionID &&
-			len(entry.Name()) > len(sessionID) {
-			foundRenamed = true
-			break
-		}
-	}
-
-	if !foundRenamed {
-		t.Errorf("Renamed archive directory not found (expected timestamped suffix)")
+	if m.Lifecycle != manifest.LifecycleArchived {
+		t.Errorf("Expected lifecycle 'archived', got '%s'", m.Lifecycle)
 	}
 }
 
@@ -392,9 +366,9 @@ func TestArchiveSession_UpdatedAtTimestamp(t *testing.T) {
 		t.Fatalf("archiveSession failed: %v", err)
 	}
 
-	// Read archived manifest
-	archiveDir := filepath.Join(sessionsDir, ".archive-old-format", sessionID)
-	manifestPath := filepath.Join(archiveDir, "manifest.yaml")
+	// Read archived manifest from original location (in-place archive)
+	originalDir := filepath.Join(sessionsDir, sessionID)
+	manifestPath := filepath.Join(originalDir, "manifest.yaml")
 	m, err := manifest.Read(manifestPath)
 	if err != nil {
 		t.Fatalf("Failed to read archived manifest: %v", err)
@@ -455,9 +429,9 @@ func TestArchiveSession_PreservesManifestFields(t *testing.T) {
 		t.Fatalf("archiveSession failed: %v", err)
 	}
 
-	// Read archived manifest
-	archiveDir := filepath.Join(sessionsDir, ".archive-old-format", sessionID)
-	archivedManifestPath := filepath.Join(archiveDir, "manifest.yaml")
+	// Read archived manifest from original location (in-place archive)
+	originalDir := filepath.Join(sessionsDir, sessionID)
+	archivedManifestPath := filepath.Join(originalDir, "manifest.yaml")
 	m, err := manifest.Read(archivedManifestPath)
 	if err != nil {
 		t.Fatalf("Failed to read archived manifest: %v", err)
@@ -487,62 +461,6 @@ func TestArchiveSession_PreservesManifestFields(t *testing.T) {
 	if m.Lifecycle != manifest.LifecycleArchived {
 		t.Errorf("Lifecycle not set to archived: got %s, want %s",
 			m.Lifecycle, manifest.LifecycleArchived)
-	}
-}
-
-// TestArchiveSession_DirectoryCreateError tests error when .archive-old-format cannot be created
-func TestArchiveSession_DirectoryCreateError(t *testing.T) {
-	_, sessionsDir, cleanup := setupArchiveTest(t)
-	defer cleanup()
-
-	sessionID := "dir-error-session"
-	createArchiveTestSession(t, sessionsDir, sessionID, "dir-error", "claude-dir-error", "")
-
-	// Make sessions directory read-only to prevent archive dir creation
-	if err := os.Chmod(sessionsDir, 0555); err != nil {
-		t.Fatalf("Failed to chmod directory: %v", err)
-	}
-	defer os.Chmod(sessionsDir, 0755)
-
-	oldForce := forceArchive
-	forceArchive = true
-	defer func() { forceArchive = oldForce }()
-
-	// Archive should fail when it can't create .archive-old-format directory
-	err := archiveSession(nil, []string{"dir-error"})
-	if err == nil {
-		t.Fatal("Expected error when archive directory cannot be created, got nil")
-	}
-}
-
-// TestArchiveSession_MoveError tests error when session directory cannot be moved
-func TestArchiveSession_MoveError(t *testing.T) {
-	_, sessionsDir, cleanup := setupArchiveTest(t)
-	defer cleanup()
-
-	sessionID := "move-error-session"
-	createArchiveTestSession(t, sessionsDir, sessionID, "move-error", "claude-move-error", "")
-
-	// Create the archive base directory first
-	archiveBaseDir := filepath.Join(sessionsDir, ".archive-old-format")
-	if err := os.MkdirAll(archiveBaseDir, 0755); err != nil {
-		t.Fatalf("Failed to create archive directory: %v", err)
-	}
-
-	// Make archive directory read-only to prevent move
-	if err := os.Chmod(archiveBaseDir, 0555); err != nil {
-		t.Fatalf("Failed to chmod archive directory: %v", err)
-	}
-	defer os.Chmod(archiveBaseDir, 0755)
-
-	oldForce := forceArchive
-	forceArchive = true
-	defer func() { forceArchive = oldForce }()
-
-	// Archive should fail when it can't move the directory
-	err := archiveSession(nil, []string{"move-error"})
-	if err == nil {
-		t.Fatal("Expected error when session directory cannot be moved, got nil")
 	}
 }
 

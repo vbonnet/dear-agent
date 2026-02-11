@@ -216,52 +216,12 @@ func archiveSession(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Move session directory to .archive-old-format/
-	sessionDir := filepath.Dir(manifestPath)
-	archiveBaseDir := filepath.Join(sessionsDir, ".archive-old-format")
-	archiveTargetDir := filepath.Join(archiveBaseDir, filepath.Base(sessionDir))
-
-	// Create archive directory if it doesn't exist
-	if err := os.MkdirAll(archiveBaseDir, 0700); err != nil {
-		ui.PrintError(err,
-			"Failed to create archive directory",
-			fmt.Sprintf("  • Directory: %s\n"+
-				"  • Check permissions: ls -ld %s\n"+
-				"  • Check disk space: df -h %s\n"+
-				"  • Verify parent directory writable",
-				archiveBaseDir, sessionsDir, sessionsDir))
-		return err
-	}
-
-	// Check for conflict and auto-rename if needed
-	originalTargetName := filepath.Base(archiveTargetDir)
-	if _, err := os.Stat(archiveTargetDir); err == nil {
-		// Conflict detected: target already exists
-		timestamp := time.Now().Format("20060102T150405Z")
-		archiveTargetDir = archiveTargetDir + "-" + timestamp
-
-		ui.PrintWarning(fmt.Sprintf("Archive '%s' already exists", originalTargetName))
-		fmt.Printf("Renaming to: %s\n", filepath.Base(archiveTargetDir))
-	}
-
-	// Move session directory to archive
-	if err := os.Rename(sessionDir, archiveTargetDir); err != nil {
-		ui.PrintError(err,
-			"Failed to move session to archive",
-			fmt.Sprintf("  • From: %s\n"+
-				"  • To: %s\n"+
-				"  • Check permissions: ls -ld %s\n"+
-				"  • Verify source exists: ls -d %s\n"+
-				"  • Check disk space: df -h %s",
-				sessionDir, archiveTargetDir, archiveBaseDir, sessionDir, archiveBaseDir))
-		return err
-	}
-
 	// Report success
 	ui.PrintSuccess(fmt.Sprintf("Archived session: %s", sessionName))
-	fmt.Printf("\nSession moved to: %s\n", archiveTargetDir)
+	fmt.Printf("\nSession location: %s\n", filepath.Dir(manifestPath))
 	fmt.Printf("\nThe session is now hidden from 'agm session list'.\n")
 	fmt.Printf("Use 'agm session list --all' to see archived sessions.\n")
+	fmt.Printf("\nTo restore: edit manifest.yaml and change lifecycle from 'archived' to ''\n")
 
 	return nil
 }

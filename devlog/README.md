@@ -26,6 +26,12 @@ Devlog documents two aspects of development workspace organization:
 
 ## Contents
 
+### Documentation
+
+- **[SPEC.md](SPEC.md)** - Complete specification: what devlog is, what problems it solves, and how it works
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture: components, navigation, design patterns, and quality mechanisms
+- **[.docs/adr/](.docs/adr/)** - Architecture Decision Records: why devlog is designed the way it is
+
 ### Guides
 
 - **[session-artifact-tracking.md](session-artifact-tracking.md)** - How to preserve valuable session artifacts instead of losing them in /tmp
@@ -107,5 +113,5 @@ When you discover a useful pattern or practice:
 
 ---
 
-**Last updated**: 2025-12-19
+**Last updated**: 2026-02-11 (Backfill documentation added: SPEC.md, ARCHITECTURE.md, ADRs)
 **Location**: {{DEVLOG_ROOT}}/repos/ai-tools/main/devlog/
