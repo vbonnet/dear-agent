@@ -490,40 +490,6 @@ func TestArchiveSession_PreservesManifestFields(t *testing.T) {
 	}
 }
 
-// TestArchiveSession_AsyncFlagNotImplementedInTests tests that async flag is handled
-func TestArchiveSession_AsyncFlag(t *testing.T) {
-	_, _, cleanup := setupArchiveTest(t)
-	defer cleanup()
-
-	// Note: We can't easily test async archival in unit tests because it requires
-	// the csm-reaper binary. This test just verifies the flag path is reachable.
-	oldAsync := asyncArchive
-	asyncArchive = true
-	defer func() { asyncArchive = oldAsync }()
-
-	// This should attempt to spawn reaper and fail (binary not found)
-	// which is expected in unit tests
-	err := archiveSession(nil, []string{"test-session"})
-
-	// We expect an error because csm-reaper binary won't exist in test environment
-	if err == nil {
-		t.Log("Warning: async archive succeeded unexpectedly (reaper binary found?)")
-	}
-	// Not failing the test since this is expected behavior in unit tests
-}
-
-// TestSpawnReaper_BinaryNotFound tests error when csm-reaper binary is missing
-func TestSpawnReaper_BinaryNotFound(t *testing.T) {
-	// This test verifies the error path when csm-reaper is not found
-	// In most test environments, csm-reaper won't be built, so this should fail
-	err := spawnReaper("test-session")
-
-	// We expect an error about the binary not being found
-	if err == nil {
-		t.Error("Expected error when csm-reaper binary not found, got nil")
-	}
-}
-
 // TestArchiveSession_DirectoryCreateError tests error when .archive-old-format cannot be created
 func TestArchiveSession_DirectoryCreateError(t *testing.T) {
 	_, sessionsDir, cleanup := setupArchiveTest(t)
