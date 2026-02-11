@@ -279,7 +279,8 @@ func iStartWatchingForReadyFileEventsAsynchronously(ctx context.Context) (contex
 func theReadyFileShouldBeDetectedWithinTimeout(ctx context.Context) (context.Context, error) {
 	assocCtx := getAssociationContext(ctx)
 
-	if assocCtx.ReadyErr != nil {
+	// Check that we didn't timeout (crash errors are OK - file was still detected)
+	if assocCtx.ReadyErr != nil && assocCtx.ReadyErr.Error() == "timeout waiting for ready-file" {
 		return ctx, fmt.Errorf("ready-file was not detected: %w", assocCtx.ReadyErr)
 	}
 

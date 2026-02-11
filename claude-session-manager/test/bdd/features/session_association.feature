@@ -43,7 +43,7 @@ Feature: Session Association
 
   Scenario: Stale ready-file cleanup before new session
     Given a Claude session "test-stale" exists with a stale ready-file
-    And the stale ready-file is older than "10 minutes"
+    And the stale ready-file is older than "10m"
     When a new session "test-stale" is created
     Then the stale ready-file should be removed before watching
     And the new ready-file should be detected correctly

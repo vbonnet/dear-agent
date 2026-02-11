@@ -60,8 +60,8 @@ func TestWaitForReady_Timeout(t *testing.T) {
 		t.Fatal("Expected timeout error, got nil")
 	}
 
-	// Verify error message contains "timeout"
-	if err.Error() != "timeout waiting for ready-file after 500ms" {
+	// Verify error message
+	if err.Error() != "timeout waiting for ready-file" {
 		t.Errorf("Expected timeout error message, got: %v", err)
 	}
 }

@@ -69,6 +69,20 @@ func WaitForReady(sessionName string, timeout time.Duration) error {
 	// Check if ready-file already exists (race condition mitigation)
 	if fileExists(readyFile) {
 		debug.Log("Ready-file already exists: %s", readyFile)
+
+		// Parse JSON to verify status (crash detection)
+		status, err := parseReadyFile(readyFile)
+		if err != nil {
+			debug.Log("Failed to parse pre-existing ready-file: %v", err)
+			os.Remove(readyFile) // Cleanup malformed file
+			return nil
+		}
+
+		if status == "crashed" {
+			os.Remove(readyFile) // Cleanup
+			return fmt.Errorf("Claude crashed during startup")
+		}
+
 		os.Remove(readyFile) // Cleanup
 		return nil
 	}
@@ -120,6 +134,7 @@ func WaitForReady(sessionName string, timeout time.Duration) error {
 				}
 
 				if status == "crashed" {
+					os.Remove(readyFile) // Cleanup
 					return fmt.Errorf("Claude crashed during startup")
 				}
 
@@ -143,7 +158,7 @@ func WaitForReady(sessionName string, timeout time.Duration) error {
 		}
 	}
 
-	return fmt.Errorf("timeout waiting for ready-file after %v", timeout)
+	return fmt.Errorf("timeout waiting for ready-file")
 }
 
 // fileExists checks if a file exists and is not a directory.
