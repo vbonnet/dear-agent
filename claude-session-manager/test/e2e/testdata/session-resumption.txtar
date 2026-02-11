@@ -10,7 +10,7 @@
 [!exec:tmux] skip 'tmux required for resume test'
 
 # Create a session first
-exec csm new bdd-resume-test --agent claude --detached
+exec agm session new bdd-resume-test --agent claude --detached
 stdout 'Session.*created'
 
 # Verify session was created
@@ -29,8 +29,8 @@ exists $HOME/sessions/bdd-resume-test/manifest.yaml
 exists $HOME/sessions/bdd-resume-test/manifest.yaml
 
 # Verify session shows in list (adapter initialized successfully)
-exec csm list
+exec agm session list
 stdout 'bdd-resume-test'
 
 # Cleanup
-exec csm archive bdd-resume-test --force
+exec agm session archive bdd-resume-test --force

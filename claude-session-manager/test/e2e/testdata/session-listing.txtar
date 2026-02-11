@@ -8,36 +8,36 @@
 # - Empty list works when no sessions exist
 
 # Create multiple test sessions
-exec csm new bdd-list-test-1 --agent claude --detached
+exec agm session new bdd-list-test-1 --agent claude --detached
 stdout 'Session.*created'
 
-exec csm new bdd-list-test-2 --agent claude --detached
+exec agm session new bdd-list-test-2 --agent claude --detached
 stdout 'Session.*created'
 
-exec csm new bdd-list-test-3 --agent claude --detached
+exec agm session new bdd-list-test-3 --agent claude --detached
 stdout 'Session.*created'
 
 # List all sessions - should show all three
-exec csm list
+exec agm session list
 stdout 'bdd-list-test-1'
 stdout 'bdd-list-test-2'
 stdout 'bdd-list-test-3'
 
 # Archive first session
-exec csm archive bdd-list-test-1 --force
+exec agm session archive bdd-list-test-1 --force
 
 # List again - should show only remaining two
-exec csm list
+exec agm session list
 ! stdout 'bdd-list-test-1'
 stdout 'bdd-list-test-2'
 stdout 'bdd-list-test-3'
 
 # Cleanup remaining sessions
-exec csm archive bdd-list-test-2 --force
-exec csm archive bdd-list-test-3 --force
+exec agm session archive bdd-list-test-2 --force
+exec agm session archive bdd-list-test-3 --force
 
 # Verify all test sessions are cleaned up
-exec csm list
+exec agm session list
 ! stdout 'bdd-list-test-1'
 ! stdout 'bdd-list-test-2'
 ! stdout 'bdd-list-test-3'

@@ -8,7 +8,7 @@
 # - Phase 0 refactoring to Agent interface doesn't break behavior
 
 # Create session - should initialize Claude adapter
-exec csm new bdd-adapter-test --agent claude --detached
+exec agm session new bdd-adapter-test --agent claude --detached
 stdout 'Session.*created'
 
 # Verify no adapter-related errors occurred
@@ -18,12 +18,12 @@ stdout 'Session.*created'
 ! stderr 'agent.*error'
 
 # Verify session is functional (basic adapter operations work)
-exec csm list
+exec agm session list
 stdout 'bdd-adapter-test'
 
 # Test adapter re-initialization on resume (if tmux available)
 # Note: csm resume doesn't support --detached flag, so we skip interactive attach test
-# [exec:tmux] exec csm resume bdd-adapter-test
+# [exec:tmux] exec agm session resume bdd-adapter-test
 # [exec:tmux] ! stderr 'error|Error|ERROR'
 
 # Verify session manifest is intact (CSM's adapter persists state correctly)
@@ -38,9 +38,9 @@ stdout 'session_id: [0-9a-f]{8}-'
 # Tests use dummy API key so full Claude initialization doesn't complete
 
 # Archive should work with adapter (cleanup operations)
-exec csm archive bdd-adapter-test --force
+exec agm session archive bdd-adapter-test --force
 ! stderr 'error|Error|ERROR'
 
 # Verify archive succeeded (adapter cleanup worked)
-exec csm list
+exec agm session list
 ! stdout 'bdd-adapter-test'

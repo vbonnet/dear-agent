@@ -8,7 +8,7 @@
 # - Format is properly structured for Phase 0 requirements
 
 # Create a test session
-exec csm new bdd-jsonl-test --agent claude --detached
+exec agm session new bdd-jsonl-test --agent claude --detached
 stdout 'Session.*created'
 
 # Verify manifest was created (CSM's responsibility)
@@ -24,4 +24,4 @@ stdout 'schema_version: "2.0"'
 # ! exists $HOME/sessions/bdd-jsonl-test/session.xml  # XML format deprecated
 
 # Cleanup
-exec csm archive bdd-jsonl-test --force
+exec agm session archive bdd-jsonl-test --force

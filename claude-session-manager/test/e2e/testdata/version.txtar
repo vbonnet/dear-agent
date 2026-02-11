@@ -1,11 +1,11 @@
-# Test: csm version should display version information
-# This is a simple smoke test to verify the csm binary works
+# Test: agm version should display version information
+# This is a simple smoke test to verify the agm binary works
 
-exec csm version
+exec agm version
 stdout 'version'
 
-# Test: csm without arguments shows usage (exits with error in non-interactive environment)
-# Note: csm tries to start interactive session which fails without TTY
-! exec csm
+# Test: agm without arguments shows usage (exits with error in non-interactive environment)
+# Note: agm tries to start interactive session which fails without TTY
+! exec agm
 stderr 'could not open a new TTY'
 stderr 'Usage:'

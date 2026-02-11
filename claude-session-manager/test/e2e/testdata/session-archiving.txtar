@@ -7,19 +7,19 @@
 # - Directory structure is maintained after archiving
 
 # Create a test session
-exec csm new bdd-archive-test --agent claude --detached
+exec agm session new bdd-archive-test --agent claude --detached
 stdout 'Session.*created'
 
 # Verify session exists in active sessions
-exec csm list
+exec agm session list
 stdout 'bdd-archive-test'
 
 # Archive the session
-exec csm archive bdd-archive-test --force
+exec agm session archive bdd-archive-test --force
 stdout 'archived|Archive'
 
 # Verify session no longer appears in active list
-exec csm list
+exec agm session list
 ! stdout 'bdd-archive-test'
 
 # Note: Archive location varies by CSM implementation

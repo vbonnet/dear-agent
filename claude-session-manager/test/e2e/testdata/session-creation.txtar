@@ -9,7 +9,7 @@
 # - JSONL contains valid JSON session_start event
 
 # Create a new session
-exec csm new bdd-create-test --agent claude --detached
+exec agm session new bdd-create-test --agent claude --detached
 stdout 'Session.*created'
 
 # Verify CSM created the manifest (CSM's responsibility)
@@ -32,4 +32,4 @@ stdout 'name: bdd-create-test'
 # We verify CSM's responsibilities (manifest creation with v3 schema) work correctly
 
 # Cleanup
-exec csm archive bdd-create-test --force
+exec agm session archive bdd-create-test --force

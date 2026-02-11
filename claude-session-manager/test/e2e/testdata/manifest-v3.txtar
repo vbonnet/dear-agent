@@ -8,7 +8,7 @@
 # - UUID format regression is prevented
 
 # Create a test session
-exec csm new bdd-manifest-v3-test --agent claude --detached
+exec agm session new bdd-manifest-v3-test --agent claude --detached
 stdout 'Session.*created'
 
 # Verify manifest file exists
@@ -40,4 +40,4 @@ stdout 'name: bdd-manifest-v3-test'
 # Additional fields like created_at, status, etc. may exist
 
 # Cleanup
-exec csm archive bdd-manifest-v3-test --force
+exec agm session archive bdd-manifest-v3-test --force
