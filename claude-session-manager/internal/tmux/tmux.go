@@ -240,7 +240,11 @@ func SendCommand(sessionName string, command string) error {
 		}
 
 		// Step 3: Send Enter key to submit the command
-		// No delay needed - paste-buffer is atomic and tmux handles the timing
+		// Delay needed to avoid race condition between paste-buffer and send-keys
+		// Without this, Enter may execute before paste is fully processed by tmux
+		// 100ms ensures paste completes even under load
+		time.Sleep(100 * time.Millisecond)
+
 		cmdEnter, cancel3 := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "send-keys", "-t", sessionName, "C-m")
 		defer cancel3()
 		if err := cmdEnter.Run(); err != nil {
