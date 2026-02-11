@@ -144,7 +144,7 @@ func levenshteinDistance(a, b string) int {
 	}
 
 	for i := 1; i <= len(a); i++ {
-		for j := 1; j <= len(b); i++ {
+		for j := 1; j <= len(b); j++ {
 			cost := 0
 			if a[i-1] != b[j-1] {
 				cost = 1
