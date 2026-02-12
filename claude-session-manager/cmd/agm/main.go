@@ -12,6 +12,7 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/fuzzy"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/telemetry/usage"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 
@@ -32,6 +33,8 @@ var (
 	screenReader      bool
 	globalHealthCheck *tmux.HealthChecker
 	tmuxClient        session.TmuxInterface // Injected dependency for testing
+	usageTracker      *usage.Tracker
+	commandStartTime  time.Time
 )
 
 var rootCmd = &cobra.Command{
@@ -60,6 +63,9 @@ Global Flags:
   -C, --directory <path>    Working directory (default: current directory)`,
 	RunE: runDefaultCommand,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Record command start time for usage tracking
+		commandStartTime = time.Now()
+
 		// Load configuration first
 		var err error
 		cfg, err = loadConfigWithFlags()
@@ -123,6 +129,17 @@ Global Flags:
 		return nil
 	},
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+		// Track usage after command completes
+		if usageTracker != nil {
+			duration := time.Since(commandStartTime).Milliseconds()
+			_ = usageTracker.TrackSync(usage.Event{
+				Command:  cmd.CommandPath(),
+				Args:     args,
+				Duration: duration,
+				Success:  true,
+			})
+		}
+
 		// No global lock cleanup needed - using fine-grained locks instead
 		// (tmux.AcquireTmuxLock and manifest.AcquireLock)
 		return nil
@@ -130,6 +147,13 @@ Global Flags:
 }
 
 func init() {
+	// Initialize usage tracker
+	var err error
+	usageTracker, err = usage.New("")
+	if err != nil {
+		usageTracker = nil // Don't fail if tracker can't be initialized
+	}
+
 	// Check for AGM_DEBUG environment variable
 	// Flag will override this if explicitly set
 	debugDefault := false
