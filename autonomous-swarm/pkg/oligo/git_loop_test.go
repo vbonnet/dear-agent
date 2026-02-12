@@ -149,13 +149,13 @@ func TestOligoLoop_Merge_WithConflict(t *testing.T) {
 	repoPath := setupTestRepo(t)
 	loop, _ := NewOligoLoop(repoPath, "")
 
-	// Modify same file on both branches
-	commitChange(t, repoPath, "test.txt", "main version\n", "Update on main")
-
+	// Create feature branch first (from initial commit)
 	createBranch(t, repoPath, "feature")
 	commitChange(t, repoPath, "test.txt", "feature version\n", "Update on feature")
 
+	// Switch to main and make conflicting change
 	loop.checkout("main")
+	commitChange(t, repoPath, "test.txt", "main version\n", "Update on main")
 
 	// Merge should create conflict
 	result := loop.merge("feature")
@@ -181,13 +181,14 @@ func TestOligoLoop_DetectConflictFiles(t *testing.T) {
 	repoPath := setupTestRepo(t)
 	loop, _ := NewOligoLoop(repoPath, "")
 
-	// Create conflict scenario
-	commitChange(t, repoPath, "file1.txt", "main content\n", "Main change")
-
+	// Create conflict scenario - feature branch first
 	createBranch(t, repoPath, "feature")
 	commitChange(t, repoPath, "file1.txt", "feature content\n", "Feature change")
 
+	// Switch to main and make conflicting change
 	loop.checkout("main")
+	commitChange(t, repoPath, "file1.txt", "main content\n", "Main change")
+
 	loop.merge("feature") // Creates conflict
 
 	conflicts := loop.detectConflictFiles()
@@ -235,13 +236,14 @@ func TestOligoLoop_AbortMerge(t *testing.T) {
 	repoPath := setupTestRepo(t)
 	loop, _ := NewOligoLoop(repoPath, "")
 
-	// Create conflict
-	commitChange(t, repoPath, "test.txt", "main version\n", "Main update")
-
+	// Create conflict - feature branch first
 	createBranch(t, repoPath, "feature")
 	commitChange(t, repoPath, "test.txt", "feature version\n", "Feature update")
 
+	// Switch to main and make conflicting change
 	loop.checkout("main")
+	commitChange(t, repoPath, "test.txt", "main version\n", "Main update")
+
 	loop.merge("feature") // Creates conflict
 
 	// Abort merge
