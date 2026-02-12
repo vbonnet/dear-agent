@@ -17,7 +17,8 @@ def main():
     print()
 
     # Show ready prompt (reaper detects this)
-    sys.stdout.write("> ")
+    # Use Claude's specific prompt character U+276F
+    sys.stdout.write("❯ ")
     sys.stdout.flush()
 
     try:
@@ -27,7 +28,11 @@ def main():
             if not line:  # EOF
                 break
 
+            # Strip whitespace and control characters (like ESC)
             line = line.strip()
+            # Remove leading ESC character if present (tmux send-keys may add it)
+            if line.startswith('\x1b'):
+                line = line[1:]
 
             if line == "/exit":
                 print()
@@ -36,7 +41,7 @@ def main():
             elif line:
                 print(f"Unknown command: {line}")
                 print("Type /exit to quit")
-                sys.stdout.write("> ")
+                sys.stdout.write("❯ ")
                 sys.stdout.flush()
     except KeyboardInterrupt:
         print()
