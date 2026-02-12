@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/csm"
+	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/agm"
 	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/taskqueue"
 )
 
@@ -26,7 +26,7 @@ func TestNewHarness(t *testing.T) {
 }
 
 func TestExecuteBead_Validation(t *testing.T) {
-	// This is a placeholder test - full integration testing requires CSM
+	// This is a placeholder test - full integration testing requires AGM
 	coord := taskqueue.NewCoordinator("nonexistent.yaml")
 	orch := csm.NewOrchestrator()
 	prompter := csm.NewPrompter()

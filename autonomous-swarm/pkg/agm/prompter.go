@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-// Prompter handles prompt injection into CSM sessions
+// Prompter handles prompt injection into AGM sessions
 type Prompter struct {
 	// tmpDir is where temp prompt files are written (defaults to /tmp)
 	tmpDir string
@@ -27,7 +27,7 @@ func NewPrompterWithTmpDir(tmpDir string) *Prompter {
 	}
 }
 
-// InjectPrompt injects a bead prompt into a CSM session via tmux send-keys
+// InjectPrompt injects a bead prompt into a AGM session via tmux send-keys
 func (p *Prompter) InjectPrompt(sessionName string, beadID string, prompt string) error {
 	if sessionName == "" {
 		return fmt.Errorf("session name cannot be empty")

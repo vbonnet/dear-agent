@@ -2,7 +2,7 @@ package csm
 
 import "time"
 
-// SessionState represents the state of a CSM session
+// SessionState represents the state of a AGM session
 type SessionState string
 
 const (
@@ -11,7 +11,7 @@ const (
 	SessionArchived SessionState = "archived"
 )
 
-// SessionMetadata contains metadata about a CSM session
+// SessionMetadata contains metadata about a AGM session
 type SessionMetadata struct {
 	Name      string       `json:"name"`
 	UUID      string       `json:"uuid"`

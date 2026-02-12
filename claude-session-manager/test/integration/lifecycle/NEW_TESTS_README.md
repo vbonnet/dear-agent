@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the comprehensive session lifecycle tests added to Claude Session Manager (CSM) as part of bead **oss-csm-t2**.
+This document describes the comprehensive session lifecycle tests added to Agent Session Manager (AGM) as part of bead **oss-csm-t2**.
 
 ## Test Files Created
 
@@ -335,7 +335,7 @@ Concurrent Writes:  Last-write-wins
 
 ## Conclusion
 
-This test suite adds comprehensive coverage for CSM session lifecycle operations:
+This test suite adds comprehensive coverage for AGM session lifecycle operations:
 - **27 new tests** covering state transitions, concurrency, and edge cases
 - **~1500 lines** of production-quality test code
 - **100% of critical paths** tested (creation, archive, transitions)

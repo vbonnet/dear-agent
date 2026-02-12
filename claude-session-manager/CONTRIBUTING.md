@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing to AI/Agent Gateway Manager (AGM)!
 
-*Note: This project was renamed from CSM (Claude Session Manager) to AGM in 2026-02.*
+*Note: This project was renamed from AGM (Agent Session Manager) to AGM in 2026-02.*
 
 ## Development Setup
 

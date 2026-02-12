@@ -7,7 +7,7 @@
 
 ## Objective
 
-Create comprehensive session lifecycle tests for Claude Session Manager covering:
+Create comprehensive session lifecycle tests for Agent Session Manager covering:
 - Session creation, resume, suspend, termination
 - State transitions across all states
 - Error handling for all failure modes
@@ -299,7 +299,7 @@ All success criteria met:
 
 ## Conclusion
 
-This implementation provides **comprehensive session lifecycle test coverage** for the Claude Session Manager. The tests cover:
+This implementation provides **comprehensive session lifecycle test coverage** for the Agent Session Manager. The tests cover:
 
 - **Complete lifecycle workflows** from creation to archive
 - **All supported agent types** (Claude, Gemini, GPT)
@@ -309,7 +309,7 @@ This implementation provides **comprehensive session lifecycle test coverage** f
 - **State transitions** with validation rules
 - **Metadata preservation** through lifecycle
 
-The test suite is **production-ready**, well-documented, and provides a solid foundation for maintaining code quality as CSM evolves.
+The test suite is **production-ready**, well-documented, and provides a solid foundation for maintaining code quality as AGM evolves.
 
 ---
 

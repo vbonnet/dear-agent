@@ -23,7 +23,7 @@ func WaitForSkillCompletion(ctx context.Context, outputChan <-chan string) error
 
 		case line, ok := <-outputChan:
 			if !ok {
-				// Channel closed - treat as completion (CSM process ended)
+				// Channel closed - treat as completion (AGM process ended)
 				return nil
 			}
 

@@ -43,7 +43,7 @@ else
     echo "Adding completion to ${BASHRC}..."
     cat >> "${BASHRC}" << 'EOF'
 
-# CSM (Claude Session Manager) completion
+# AGM (Claude Session Manager) completion
 if [ -f ~/.csm-completion.bash ]; then
     source ~/.csm-completion.bash
 fi

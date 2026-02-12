@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -477,6 +478,139 @@ func TestArchiveSession_EmptySessionsDir(t *testing.T) {
 	err := archiveSession(nil, []string{"nonexistent"})
 	if err == nil {
 		t.Fatal("Expected error for session in empty directory, got nil")
+	}
+}
+
+// TestArchiveSession_AsyncFlag tests archive with --async flag
+func TestArchiveSession_AsyncFlag(t *testing.T) {
+	_, sessionsDir, cleanup := setupArchiveTest(t)
+	defer cleanup()
+
+	sessionID := "async-test-session"
+	createArchiveTestSession(t, sessionsDir, sessionID, "async-session", "claude-async", "")
+
+	// Set async flag
+	oldAsync := asyncArchive
+	asyncArchive = true
+	defer func() { asyncArchive = oldAsync }()
+
+	// Mock the executable path to point to our test binary directory
+	// Note: This test verifies the --async flag routes to spawnReaper()
+	// The actual spawning is tested separately since it requires a real binary
+
+	// For this test, we expect an error because agm-reaper won't be found
+	// in the test environment. That's OK - we're testing the routing logic.
+	err := archiveSession(nil, []string{"async-session"})
+
+	// We expect an error about missing binary (spawnReaper was called)
+	if err == nil {
+		t.Fatal("Expected error about missing agm-reaper binary, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "agm-reaper") {
+		t.Errorf("Expected error about agm-reaper, got: %v", err)
+	}
+
+	// Verify session was NOT archived yet (async doesn't archive immediately)
+	manifestPath := filepath.Join(sessionsDir, sessionID, "manifest.yaml")
+	m, err := manifest.Read(manifestPath)
+	if err != nil {
+		t.Fatalf("Failed to read manifest: %v", err)
+	}
+	if m.Lifecycle == manifest.LifecycleArchived {
+		t.Error("Session should not be archived yet with --async flag")
+	}
+}
+
+// TestArchiveSession_AsyncIncompatibleWithAll tests --async + --all error
+func TestArchiveSession_AsyncIncompatibleWithAll(t *testing.T) {
+	_, sessionsDir, cleanup := setupArchiveTest(t)
+	defer cleanup()
+
+	// Create a test session
+	createArchiveTestSession(t, sessionsDir, "test-123", "test", "claude-test", "")
+
+	// Set both async and all flags
+	oldAsync := asyncArchive
+	oldAll := archiveAll
+	asyncArchive = true
+	archiveAll = true
+	defer func() {
+		asyncArchive = oldAsync
+		archiveAll = oldAll
+	}()
+
+	// Try to archive - should fail with incompatibility error
+	err := archiveSession(nil, []string{})
+	if err == nil {
+		t.Fatal("Expected error for --async + --all, got nil")
+	}
+
+	expectedMsg := "--async flag is not compatible with --all"
+	if !strings.Contains(err.Error(), expectedMsg) {
+		t.Errorf("Expected error containing '%s', got: %v", expectedMsg, err)
+	}
+}
+
+// TestSpawnReaper_SessionNameSanitization tests path traversal protection
+func TestSpawnReaper_SessionNameSanitization(t *testing.T) {
+	_, _, cleanup := setupArchiveTest(t)
+	defer cleanup()
+
+	testCases := []struct {
+		name         string
+		sessionName  string
+		expectedLog  string // Expected log file name (sanitized)
+		shouldAccept bool
+	}{
+		{
+			name:         "path traversal attempt",
+			sessionName:  "../../../evil-session",
+			expectedLog:  "agm-reaper-evil-session.log",
+			shouldAccept: true,
+		},
+		{
+			name:         "with forward slash",
+			sessionName:  "session/with/slashes",
+			expectedLog:  "agm-reaper-slashes.log",
+			shouldAccept: true,
+		},
+		{
+			name:         "with backslash",
+			sessionName:  "session\\with\\backslash",
+			expectedLog:  "agm-reaper-backslash.log",
+			shouldAccept: true,
+		},
+		{
+			name:         "normal session name",
+			sessionName:  "my-normal-session",
+			expectedLog:  "agm-reaper-my-normal-session.log",
+			shouldAccept: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Note: spawnReaper() will fail because agm-reaper binary doesn't exist
+			// in test environment. We're testing the path sanitization logic.
+			err := spawnReaper(tc.sessionName)
+
+			// Should get error about missing binary (expected in tests)
+			if err == nil {
+				t.Fatal("Expected error about missing binary, got nil")
+			}
+
+			// Verify error message mentions expected log path (sanitized)
+			if !strings.Contains(err.Error(), tc.expectedLog) {
+				t.Errorf("Expected log path with '%s', got error: %v", tc.expectedLog, err)
+			}
+
+			// Verify log path is in /tmp (not traversed elsewhere)
+			tmpPath := fmt.Sprintf("/tmp/%s", tc.expectedLog)
+			if !strings.Contains(err.Error(), tmpPath) {
+				t.Errorf("Log path should be in /tmp, got error: %v", err)
+			}
+		})
 	}
 }
 

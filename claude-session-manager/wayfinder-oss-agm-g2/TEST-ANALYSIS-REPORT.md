@@ -225,7 +225,7 @@ With current implementation, only these can be tested:
 6. ❌ Command execution
 7. ❌ A2A protocol integration
 8. ❌ Hooks system
-9. ❌ CSM session management features
+9. ❌ AGM session management features
 
 ## Recommendations
 

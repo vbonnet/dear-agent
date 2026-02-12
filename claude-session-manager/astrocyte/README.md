@@ -1,6 +1,6 @@
-# Astrocyte - CSM Session Monitor
+# Astrocyte - AGM Session Monitor
 
-Autonomous daemon for detecting and recovering stuck CSM sessions.
+Autonomous daemon for detecting and recovering stuck AGM sessions.
 
 ## Status: ALL PHASES COMPLETE ✅ Production Ready
 
@@ -18,7 +18,7 @@ Autonomous daemon for detecting and recovering stuck CSM sessions.
 - ✅ **Diagnosis prompt generation** (agent self-analysis template)
 
 **Current Capabilities**:
-- Monitors all active CSM sessions
+- Monitors all active AGM sessions
 - Captures pane content and cursor position
 - **Detects 3 stuck patterns**:
   1. **Mustering timeout**: "Mustering..." for >10 minutes
@@ -36,7 +36,7 @@ Autonomous daemon for detecting and recovering stuck CSM sessions.
 
 - Python 3.11+
 - tmux
-- CSM installed
+- AGM installed
 - (Optional) Slack workspace with incoming webhook for notifications
 
 ### Installation
@@ -106,7 +106,7 @@ python ~/src/ws/oss/repos/ai-tools/main/claude-session-manager/astrocyte/astrocy
 ============================================================
 Check cycle #1 at 09:57:02
 ============================================================
-Active CSM sessions: 9
+Active AGM sessions: 9
 
 ⏳ session-name: Mustering for 3 min (threshold: 10 min)
 
@@ -254,9 +254,9 @@ kubectl get svc astrocyte-collector
 
 ### Test Pane Capture
 
-1. Start CSM sessions
+1. Start AGM sessions
 2. Run astrocyte.py
-3. Verify: "Active CSM sessions: X" matches your session count
+3. Verify: "Active AGM sessions: X" matches your session count
 4. Verify: Each session shows captured characters and cursor position
 
 ### Test Mustering Detection
@@ -330,7 +330,7 @@ kubectl get svc astrocyte-collector
 ### Phase 3: Agent Self-Diagnosis ✅ COMPLETE (Core)
 
 - [x] Bead 3.1: Diagnosis prompt generation ✅
-- [x] Bead 3.2: CSM --prompt-file integration ✅
+- [x] Bead 3.2: AGM --prompt-file integration ✅
 - [x] Bead 3.3: Diagnosis file monitoring ✅ (deferred - agent autonomous)
 - [x] Bead 3.4: Root cause parsing ✅ (deferred - human-readable output)
 - [x] Bead 3.5: AskUserQuestion violation ✅ (deferred - separate feature)
@@ -338,7 +338,7 @@ kubectl get svc astrocyte-collector
 
 **Implementation Summary**: `/home/user/src/ws/oss/repos/ai-tools/main/claude-session-manager/astrocyte/PHASE-3-SUMMARY.md`
 
-**Core Functionality**: Diagnosis prompt generation + CSM integration working end-to-end
+**Core Functionality**: Diagnosis prompt generation + AGM integration working end-to-end
 
 **Deferred Enhancements**: Monitoring, parsing, and AskUserQuestion detection are optional features with diminishing returns. Core value delivered.
 
@@ -447,7 +447,7 @@ Astrocyte Daemon
 
 ## Recovery Mechanisms
 
-Astrocyte uses two CSM commands for automated recovery:
+Astrocyte uses two AGM commands for automated recovery:
 
 ### `csm send` - Diagnosis Prompt Delivery
 
@@ -519,8 +519,8 @@ def send_violation_prompt(session_name: str) -> RecoveryResult:
 4. Send Enter to submit
 
 **See also:**
-- CSM README: Commands documentation
-- sessions-stuck/CSM-REJECT-COMMAND.md: Usage guide and integration details
+- AGM README: Commands documentation
+- sessions-stuck/AGM-REJECT-COMMAND.md: Usage guide and integration details
 
 ## Known Limitations (All Resolved ✅)
 

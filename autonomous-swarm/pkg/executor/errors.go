@@ -6,7 +6,7 @@ import "fmt"
 type ErrorType int
 
 const (
-	// ErrorRecoverable indicates retriable errors (CSM timeout, parse error)
+	// ErrorRecoverable indicates retriable errors (AGM timeout, parse error)
 	ErrorRecoverable ErrorType = iota
 	// ErrorEscalation indicates escalation required (max iterations, explicit signal)
 	ErrorEscalation

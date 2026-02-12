@@ -343,7 +343,7 @@ type CommandTranslator interface {
 ## References
 
 - **Bead:** ai-tools-lz6 (960 min estimate)
-- **Roadmap:** CSM Multi-Agent Roadmap, Layer 3 (Command Translation)
+- **Roadmap:** AGM Multi-Agent Roadmap, Layer 3 (Command Translation)
 - **Implementation:** `internal/command/` package
 - **Tests:** 100% coverage, all passing
 - **Benchmarks:** <1µs overhead (well under 10ms target)

@@ -270,7 +270,7 @@ prompter := csm.NewPrompter()
 // Inject dependencies into harness
 harness := executor.NewHarness(
     coord,      // Task queue coordinator
-    orch,       // CSM orchestrator
+    orch,       // AGM orchestrator
     prompter,   // Prompt injector
     3,          // Max iterations
 )
@@ -415,10 +415,10 @@ completed: []
 
 ### 5.4 Mock Strategies
 
-**External Dependencies (CSM, tmux)**:
-- Integration tests attempt execution but expect failure (CSM unavailable)
-- Tests verify CLI correctly handles CSM errors
-- Package-level tests mock CSM orchestrator
+**External Dependencies (AGM, tmux)**:
+- Integration tests attempt execution but expect failure (AGM unavailable)
+- Tests verify CLI correctly handles AGM errors
+- Package-level tests mock AGM orchestrator
 
 **File System**:
 - Use t.TempDir() for isolated test directories
@@ -559,7 +559,7 @@ Header output       | < 1ms          | Negligible
 Telemetry init      | < 10ms         | File creation
 Queue load          | 50-100ms       | YAML parsing (varies with size)
 Component init      | < 5ms          | Memory allocation
-Harness execution   | Minutes-hours  | CSM session execution
+Harness execution   | Minutes-hours  | AGM session execution
 Roadmap generation  | 10-50ms        | Queue serialization
 --------------------|----------------|---------------------------
 Total overhead      | < 200ms        | Everything except harness

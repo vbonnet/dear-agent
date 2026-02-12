@@ -14,7 +14,7 @@
 
 `swarm-executor` is the primary CLI harness for executing autonomous beads within the
 Autonomous Swarm system. It orchestrates the complete lifecycle of a single bead execution:
-claiming from queue, CSM session management, prompt injection, result extraction, validation,
+claiming from queue, AGM session management, prompt injection, result extraction, validation,
 and completion/escalation handling.
 
 ### 1.2 Scope
@@ -22,7 +22,7 @@ and completion/escalation handling.
 This component is responsible for:
 - CLI interface for bead execution (flag parsing, usage documentation)
 - Telemetry initialization (execution log, roadmap generation)
-- Component coordination (taskqueue, CSM, executor harness)
+- Component coordination (taskqueue, AGM, executor harness)
 - Exit code mapping (success, error, escalation)
 - Top-level error handling and cleanup
 
@@ -90,7 +90,7 @@ This component is responsible for:
 
 **FR-EXEC-002**: Binary SHALL log execution start event with bead ID and session name
 
-**FR-EXEC-003**: Binary SHALL coordinate taskqueue, CSM, and executor harness
+**FR-EXEC-003**: Binary SHALL coordinate taskqueue, AGM, and executor harness
 
 **FR-EXEC-004**: Binary SHALL generate roadmap after execution completion or error
 
@@ -168,7 +168,7 @@ This component is responsible for:
 Required Flags:
   --queue <path>      Path to TASK-QUEUE.yaml file (required)
   --bead-id <id>      Bead ID to execute (required)
-  --session <name>    CSM session name for execution (required)
+  --session <name>    AGM session name for execution (required)
 
 Optional Flags:
   --version           Show version and exit
@@ -190,7 +190,7 @@ Optional Flags:
 | 0 | Success | `--version` or `--help` flag provided |
 | 1 | Error | Missing required flags |
 | 1 | Error | Queue file not found or invalid |
-| 1 | Error | Execution failed (CSM error, validation failure) |
+| 1 | Error | Execution failed (AGM error, validation failure) |
 | 2 | Escalation | Bead requires human intervention |
 
 ### 4.3 Output Streams
@@ -420,8 +420,8 @@ func TestCLIVersion(t *testing.T) {
 
 ### 7.4 Test Limitations
 
-**CSM Availability**: Tests requiring CSM will fail without real CSM binary. Tests verify
-CLI correctly attempts execution but don't mock full CSM integration.
+**AGM Availability**: Tests requiring AGM will fail without real AGM binary. Tests verify
+CLI correctly attempts execution but don't mock full AGM integration.
 
 **tmux Availability**: Session creation tests require tmux server running.
 
@@ -558,7 +558,7 @@ Escalation: <escalation reason>
 
 ### 11.3 Execution Time
 
-- Dominated by CSM session execution (minutes to hours)
+- Dominated by AGM session execution (minutes to hours)
 - CLI overhead negligible compared to bead execution time
 
 ## 12. Failure Modes
@@ -577,7 +577,7 @@ Error: Failed to load task queue: yaml: unmarshal error
 Exit code: 1
 ```
 
-**CSM Not Available**:
+**AGM Not Available**:
 ```
 Error: Execution failed: failed to create session: exec: "csm": executable file not found
 Exit code: 1
@@ -597,7 +597,7 @@ Exit code: 2
 
 ### 12.2 Recovery Strategies
 
-**Transient CSM Errors**: Retry bead execution (harness increments iteration count)
+**Transient AGM Errors**: Retry bead execution (harness increments iteration count)
 
 **Queue Corruption**: Restore from backup (manual intervention)
 
@@ -626,10 +626,10 @@ Exit code: 2
 ## 14. Glossary
 
 - **Bead**: Autonomous task unit with defined prompts and dependencies
-- **CSM**: Claude Session Manager - CLI tool for managing Claude sessions
+- **AGM**: Agent Session Manager - CLI tool for managing Claude sessions
 - **Escalation**: Condition requiring human intervention (max retries or explicit signal)
 - **Harness**: Executor component managing bead lifecycle
-- **Session**: CSM session running autonomous agent
+- **Session**: AGM session running autonomous agent
 - **Telemetry**: Event logging and progress tracking system
 
 ## 15. References

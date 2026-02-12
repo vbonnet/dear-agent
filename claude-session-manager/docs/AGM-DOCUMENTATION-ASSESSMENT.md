@@ -30,7 +30,7 @@ The Agent Gateway Manager (AGM) already has extensive documentation (35+ files, 
 
 ### Specialized Guides (Complete ✅)
 15. **docs/AGENT-COMPARISON.md** - Agent selection guide
-16. **docs/AGM-MIGRATION-GUIDE.md** - CSM to AGM migration
+16. **docs/AGM-MIGRATION-GUIDE.md** - AGM to AGM migration
 17. **docs/MIGRATION-V2-V3.md** - Version migration guide
 18. **docs/MIGRATION-CLAUDE-MULTI.md** - Single to multi-agent migration
 19. **docs/MIGRATION-TOOLING-README.md** - Migration tooling

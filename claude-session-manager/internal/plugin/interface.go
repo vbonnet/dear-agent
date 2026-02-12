@@ -1,7 +1,7 @@
 package plugin
 
 // TaskManagerPlugin is the core interface all task manager plugins must implement
-// This is a data provider interface - plugins provide task data to CSM
+// This is a data provider interface - plugins provide task data to AGM
 type TaskManagerPlugin interface {
 	// Metadata returns plugin information
 	Metadata() PluginMetadata

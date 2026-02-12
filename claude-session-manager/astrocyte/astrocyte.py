@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Astrocyte - CSM Session Monitor
+Astrocyte - AGM Session Monitor
 
-Autonomous daemon for detecting and recovering stuck CSM sessions.
+Autonomous daemon for detecting and recovering stuck AGM sessions.
 """
 from __future__ import annotations
 
@@ -290,7 +290,7 @@ def load_config() -> Config:
 
 def get_sessions_from_home_directories(home_dirs: List[str]) -> list[tuple[str, str]]:
     """
-    Discover CSM sessions by scanning session directories in multiple home directories.
+    Discover AGM sessions by scanning session directories in multiple home directories.
 
     Args:
         home_dirs: List of home directory paths to scan (e.g., ["/home/user1", "/home/user2"])
@@ -384,11 +384,11 @@ def get_tmux_cmd() -> list[str]:
     return ["tmux", "-S", str(csm_socket)] if csm_socket.exists() else ["tmux"]
 
 
-def get_active_csm_sessions() -> list[str]:
+def get_active_agm_sessions() -> list[str]:
     """
-    List all active CSM sessions from tmux.
+    List all active AGM sessions from tmux.
 
-    Checks AGM socket (/tmp/agm.sock). A CSM session is identified by having a manifest.yaml file.
+    Checks AGM socket (/tmp/agm.sock). A AGM session is identified by having a manifest.yaml file.
     """
     try:
         socket_paths = get_read_socket_paths()
@@ -407,13 +407,13 @@ def get_active_csm_sessions() -> list[str]:
                 sessions = result.stdout.strip().split("\n") if result.stdout.strip() else []
                 all_sessions.update(sessions)
 
-        # Filter for CSM sessions (have manifest.yaml)
-        csm_sessions = []
+        # Filter for AGM sessions (have manifest.yaml)
+        agm_sessions = []
         for session in all_sessions:
             if session and session_has_manifest(session):
-                csm_sessions.append(session)
+                agm_sessions.append(session)
 
-        return csm_sessions
+        return agm_sessions
 
     except Exception as e:
         print(f"Error listing sessions: {e}", file=sys.stderr)
@@ -421,7 +421,7 @@ def get_active_csm_sessions() -> list[str]:
 
 
 def session_has_manifest(session_name: str) -> bool:
-    """Check if session has a CSM manifest file."""
+    """Check if session has a AGM manifest file."""
     manifest_path = Path.home() / "src/sessions" / session_name / "manifest.yaml"
     return manifest_path.exists()
 
@@ -1219,7 +1219,7 @@ def recover_with_session_restart(session_name: str) -> RecoveryResult:
     # Wait for session to die
     time.sleep(2)
 
-    # Restart session (assumes CSM session structure)
+    # Restart session (assumes AGM session structure)
     # This will create a new tmux session with same name on AGM socket
     session_dir = Path.home() / "src/sessions" / session_name
     if session_dir.exists():
@@ -1482,7 +1482,7 @@ def send_diagnosis_prompt_via_csm(
     prompt: str
 ) -> bool:
     """
-    Send diagnosis prompt to session via CSM send command.
+    Send diagnosis prompt to session via AGM send command.
 
     Now delegates to centralized send_tagged_message() wrapper which:
     - Adds source attribution tags (<system-reminder> block)
@@ -1514,7 +1514,7 @@ def send_diagnosis_prompt_via_tmux_fallback(
     """
     Fallback: Send diagnosis prompt via tmux (original Phase 3 Bead 3.1 method).
 
-    Used when CSM --prompt-file is not available.
+    Used when AGM --prompt-file is not available.
 
     Args:
         session_name: The session to send prompt to
@@ -1754,17 +1754,17 @@ def send_slack_notification(incident: Incident, recovery: RecoveryResult | None 
     # Build message
     if recovery and recovery.success:
         emoji = "✅"
-        title = "CSM Session Auto-Recovered"
+        title = "AGM Session Auto-Recovered"
         color = "good"
         status = f"Recovered in {recovery.duration_seconds:.1f}s"
     elif recovery and not recovery.success:
         emoji = "❌"
-        title = "CSM Session Recovery Failed"
+        title = "AGM Session Recovery Failed"
         color = "danger"
         status = f"Recovery failed after {recovery.duration_seconds:.1f}s - manual intervention needed"
     else:
         emoji = "⚠️"
-        title = "CSM Session Stuck Detected"
+        title = "AGM Session Stuck Detected"
         color = "warning"
         status = "Detected, recovery pending"
 
@@ -2087,7 +2087,7 @@ def main():
     print(f"   No change: {'✅' if not result else '❌'} (expected: False, got: {result})")
 
     print("\n2️⃣ Test recover_with_escape():")
-    print("   Note: Requires active CSM session for real test")
+    print("   Note: Requires active AGM session for real test")
     print("   Skipping live test (no test session available)")
     print("   Function signature validated ✅")
 
@@ -2141,8 +2141,8 @@ def main():
             print(f"Check cycle #{check_count} at {datetime.now().strftime('%H:%M:%S')}")
             print(f"{'='*60}")
 
-            sessions = get_active_csm_sessions()
-            print(f"Active CSM sessions: {len(sessions)}")
+            sessions = get_active_agm_sessions()
+            print(f"Active AGM sessions: {len(sessions)}")
 
             for session in sessions:
                 try:
@@ -2287,7 +2287,7 @@ def main():
                             diagnosis_prompt = generate_diagnosis_prompt(incident, recovery)
                             diagnosis_sent = send_diagnosis_prompt_via_csm(session, diagnosis_prompt)
                             if diagnosis_sent:
-                                print(f"   📋 Diagnosis prompt sent to session (CSM)")
+                                print(f"   📋 Diagnosis prompt sent to session (AGM)")
                             else:
                                 print(f"   ⚠️  Diagnosis prompt failed to send")
                         elif symptom == "ask_question_violation":

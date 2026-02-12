@@ -118,26 +118,26 @@ test_jsonl_format() {
     fi
 }
 
-# Test: CSM commands called (if mock log exists)
+# Test: AGM commands called (if mock log exists)
 test_csm_commands() {
     echo ""
-    echo "=== Test: CSM Commands Called ==="
+    echo "=== Test: AGM Commands Called ==="
 
     if [ ! -f "$CSM_MOCK_LOG" ]; then
-        log_warn "CSM mock log not found - skipping test"
+        log_warn "AGM mock log not found - skipping test"
         return 0
     fi
 
     # Check if csm send or csm reject was called
     if grep -q "csm send\|csm reject" "$CSM_MOCK_LOG"; then
-        log_info "CSM commands were invoked"
+        log_info "AGM commands were invoked"
         ((PASSED++))
 
         # Show which commands were called
         echo "Commands called:"
         grep "csm send\|csm reject" "$CSM_MOCK_LOG" | sed 's/^/  /'
     else
-        log_warn "No CSM commands were called"
+        log_warn "No AGM commands were called"
     fi
 }
 

@@ -1,6 +1,6 @@
-// Package validate provides session resumability validation for CSM.
+// Package validate provides session resumability validation for AGM.
 //
-// This package implements functional testing of CSM sessions by actually
+// This package implements functional testing of AGM sessions by actually
 // attempting to resume each session in a temporary tmux session, detecting
 // errors, and providing auto-fix capabilities for common issues.
 package validate
@@ -304,7 +304,7 @@ func classifyResumeError(output string, err error) *Issue {
 	case strings.Contains(output, "Another csm command is currently running"):
 		return &Issue{
 			Type:        IssueLockContention,
-			Message:     "CSM lock held by another process",
+			Message:     "AGM lock held by another process",
 			Fix:         "Run 'csm unlock' to remove stale locks",
 			AutoFixable: false,
 		}

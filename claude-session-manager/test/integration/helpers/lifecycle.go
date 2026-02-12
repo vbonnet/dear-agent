@@ -21,7 +21,7 @@ type ListFilter struct {
 	Agent    string
 }
 
-// Session represents a CSM session (minimal struct for testing)
+// Session represents a AGM session (minimal struct for testing)
 type Session struct {
 	ID       string
 	Agent    string
@@ -193,7 +193,7 @@ func CleanupArchivedSession(env *TestEnv, sessionID string) error {
 }
 
 // CreateSessionManifest creates a manifest file for a test session
-// This registers the session with CSM so commands like resume/archive can find it
+// This registers the session with AGM so commands like resume/archive can find it
 func CreateSessionManifest(sessionsDir, sessionName, agent string) error {
 	// Validate session name
 	if sessionName == "" {
@@ -218,7 +218,7 @@ func CreateSessionManifest(sessionsDir, sessionName, agent string) error {
 		return fmt.Errorf("failed to create session directory: %w", err)
 	}
 
-	// Create a test project directory (CSM health check requires it to exist)
+	// Create a test project directory (AGM health check requires it to exist)
 	projectDir := filepath.Join(sessionsDir, sessionName, "project")
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		return fmt.Errorf("failed to create project directory: %w", err)

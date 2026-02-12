@@ -7,9 +7,9 @@ import (
 
 func TestExecutionError_Error(t *testing.T) {
 	cause := errors.New("underlying error")
-	err := NewRecoverableError("bead-1", 2, "CSM timeout", cause)
+	err := NewRecoverableError("bead-1", 2, "AGM timeout", cause)
 
-	expectedMsg := "[RECOVERABLE] bead=bead-1 iteration=2: CSM timeout: underlying error"
+	expectedMsg := "[RECOVERABLE] bead=bead-1 iteration=2: AGM timeout: underlying error"
 	if err.Error() != expectedMsg {
 		t.Errorf("error message: got %q, want %q", err.Error(), expectedMsg)
 	}

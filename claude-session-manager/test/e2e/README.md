@@ -1,6 +1,6 @@
 # E2E Tests with testscript
 
-This directory contains end-to-end tests for CSM using the [testscript](https://github.com/rogpeppe/go-internal/tree/master/testscript) framework.
+This directory contains end-to-end tests for AGM using the [testscript](https://github.com/rogpeppe/go-internal/tree/master/testscript) framework.
 
 ## What is testscript?
 
@@ -37,7 +37,7 @@ go test -v ./test/e2e
 # Run a specific test
 go test -v ./test/e2e -run TestCSM/version
 
-# Run with coverage (requires building CSM with -cover)
+# Run with coverage (requires building AGM with -cover)
 go build -cover -o csm-cover ./cmd/csm
 GOCOVER DIR=coverage go test ./test/e2e
 ```
@@ -168,7 +168,7 @@ go test -v ./test/e2e
 - **Regression prevention**: UUID format validation, no XML files for new sessions
 
 ### TODO
-- [ ] Implement csmMain() to actually call CSM commands
+- [ ] Implement csmMain() to actually call AGM commands
 - [ ] Add tests for error conditions
 - [ ] Add tests for concurrent session creation
 - [ ] Add tests for lock contention

@@ -41,7 +41,7 @@ var _ = Describe("Error Scenarios", func() {
 				Expect(exists).To(BeTrue())
 
 				// Attempting to create again should be detectable
-				// (actual behavior depends on CSM implementation)
+				// (actual behavior depends on AGM implementation)
 				// For now, verify we can detect the session exists
 				exists, err = helpers.HasTmuxSession(sessionName)
 				Expect(err).ToNot(HaveOccurred())

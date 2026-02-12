@@ -1,11 +1,11 @@
 #!/bin/bash
-# Install CSM slash commands to global Claude commands directory
+# Install AGM slash commands to global Claude commands directory
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMANDS_SRC="$SCRIPT_DIR/csm-plugin/commands"
 COMMANDS_DST="$HOME/.claude/commands"
 
-echo "Installing CSM slash commands..."
+echo "Installing AGM slash commands..."
 
 for cmd in "$COMMANDS_SRC"/*; do
     if [ -f "$cmd" ]; then
@@ -16,7 +16,7 @@ for cmd in "$COMMANDS_SRC"/*; do
     fi
 done
 
-echo "✓ CSM commands installed to $COMMANDS_DST"
+echo "✓ AGM commands installed to $COMMANDS_DST"
 echo ""
 echo "Available commands:"
 ls -1 "$COMMANDS_DST" | grep -E "^csm-" | sed 's/^/  \//'

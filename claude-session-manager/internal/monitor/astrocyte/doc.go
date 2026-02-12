@@ -1,9 +1,9 @@
 // Package astrocyte provides utilities for parsing Astrocyte diagnosis files.
 //
-// This package is part of the CSM session monitoring infrastructure and provides
+// This package is part of the AGM session monitoring infrastructure and provides
 // tools for reading and analyzing Astrocyte daemon diagnosis logs.
 //
-// Astrocyte is the CSM daemon that detects and auto-recovers stuck sessions
+// Astrocyte is the AGM daemon that detects and auto-recovers stuck sessions
 // (zero-token galloping, permission prompts, API stalls, etc.). It writes
 // diagnosis files to ~/.agm/astrocyte/diagnoses/ in markdown format.
 //

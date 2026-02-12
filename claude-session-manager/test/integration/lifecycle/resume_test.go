@@ -85,7 +85,7 @@ var _ = Describe("Resume Session", func() {
 		It("requires TTY for tmux attach step", func() {
 			Skip("Full resume with tmux attach requires interactive TTY (not available in CI). " +
 				"Session health checks, creation logic, and state updates are tested above. " +
-				"Future enhancement: Add --dry-run flag to CSM resume command for programmatic testing. " +
+				"Future enhancement: Add --dry-run flag to AGM resume command for programmatic testing. " +
 				"Manual testing: Run 'csm resume <session-id>' in terminal to verify attach behavior.")
 		})
 	})

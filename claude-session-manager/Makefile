@@ -1,4 +1,4 @@
-.PHONY: build test lint install clean
+.PHONY: build test lint install clean test-unit test-e2e-docker test-all
 
 # Version information
 VERSION ?= 2.0.0-dev
@@ -97,3 +97,23 @@ install: build
 
 clean:
 	rm -rf bin/
+
+# Test targets
+test-unit:
+	go test -v -cover ./...
+
+test-e2e-docker: build
+	@echo "Running Docker E2E tests for reaper..."
+	@echo ""
+	@# Create test-results directory if it doesn't exist
+	@mkdir -p test/e2e/docker/test-results
+	@# Run Docker Compose tests
+	@cd test/e2e/docker && docker compose up --build --abort-on-container-exit --exit-code-from reaper-e2e-test
+	@# Cleanup
+	@cd test/e2e/docker && docker compose down
+	@echo ""
+	@echo "✓ Docker E2E tests completed"
+
+test-all: test-unit test-e2e-docker
+	@echo ""
+	@echo "✓ All tests passed"

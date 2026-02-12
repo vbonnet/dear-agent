@@ -53,7 +53,7 @@ Grep pattern="agent.*gemini|gemini.*agent" glob="**/*.go" -i
 
 ### Step 2: Architecture-Level Search (3 min)
 
-**CSM Testing Ecosystem**:
+**AGM Testing Ecosystem**:
 - ✅ Ginkgo/Gomega BDD framework in use
 - ✅ Integration test suite structure exists
 - ✅ Test helpers for tmux session management
@@ -97,7 +97,7 @@ DescribeTable("creates session for multiple agents",
 )
 ```
 
-**Precedent Found**: CSM already has established pattern for multi-agent testing using Ginkgo's DescribeTable.
+**Precedent Found**: AGM already has established pattern for multi-agent testing using Ginkgo's DescribeTable.
 
 ### Step 4: Decision
 
@@ -124,7 +124,7 @@ DescribeTable("creates session for multiple agents",
 ### Option 1: Ginkgo DescribeTable Pattern (EXISTING - ADAPT)
 
 **Description**:
-Ginkgo is the BDD testing framework already in use by CSM. It provides `DescribeTable` for parameterized tests that run the same test logic with different inputs.
+Ginkgo is the BDD testing framework already in use by AGM. It provides `DescribeTable` for parameterized tests that run the same test logic with different inputs.
 
 **Current State**:
 - ✅ Already installed and configured in `go.mod`
@@ -269,7 +269,7 @@ func (s *MultiAgentSuite) TestAgents() {
 ### Option 4: Build Custom Test Harness (BUILD FROM SCRATCH)
 
 **Description**:
-Create a custom parameterized test runner specifically for CSM multi-agent testing.
+Create a custom parameterized test runner specifically for AGM multi-agent testing.
 
 **Example**:
 ```go
@@ -330,7 +330,7 @@ func RunAgentTests(tests []AgentTest, agents []string) {
 - ✅ Test isolation and cleanup
 - ✅ Parallel test execution
 - ✅ Clear failure reporting
-- ✅ Integration with existing CSM test suite
+- ✅ Integration with existing AGM test suite
 - ✅ One example already working (`session_creation_test.go`)
 
 **What's Missing** (5%):
@@ -356,7 +356,7 @@ func RunAgentTests(tests []AgentTest, agents []string) {
 **Confidence**: High (0.95)
 
 **Rationale**:
-- Already integrated and working in CSM
+- Already integrated and working in AGM
 - Minimal effort to extend (3 hours vs 8-20 hours for alternatives)
 - Consistent with existing test suite
 - Proven pattern (one example already works)

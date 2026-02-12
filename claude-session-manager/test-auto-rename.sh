@@ -1,11 +1,11 @@
 #!/bin/bash
-# Test script for CSM auto-rename feature
+# Test script for AGM auto-rename feature
 # Location: ~/src/ws/oss/repos/ai-tools/main/claude-session-manager/test-auto-rename.sh  # noqa: path-portability
 
 set -e
 
 echo "========================================="
-echo "CSM Auto-Rename Test Script"
+echo "AGM Auto-Rename Test Script"
 echo "========================================="
 echo ""
 

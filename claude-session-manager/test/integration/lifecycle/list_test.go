@@ -20,7 +20,7 @@ var _ = Describe("List Sessions", func() {
 					err := helpers.CreateTmuxSession(sessionName, testEnv.SessionsDir)
 					Expect(err).ToNot(HaveOccurred())
 
-					// Register session with CSM (create manifest)
+					// Register session with AGM (create manifest)
 					err = helpers.CreateSessionManifest(testEnv.SessionsDir, sessionName, agent)
 					Expect(err).ToNot(HaveOccurred())
 
@@ -53,7 +53,7 @@ var _ = Describe("List Sessions", func() {
 
 	Describe("list archived sessions only (--archived flag)", func() {
 		It("is not supported - use --all instead", func() {
-			Skip("CSM does not have a --archived flag (only --all exists). " +
+			Skip("AGM does not have a --archived flag (only --all exists). " +
 				"The --all flag shows both active and archived sessions. " +
 				"To list archived sessions only, use 'csm list --all' and filter by status. " +
 				"See list.go:94 for flag definition.")

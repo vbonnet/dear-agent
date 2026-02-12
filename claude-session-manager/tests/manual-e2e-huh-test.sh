@@ -1,9 +1,9 @@
 #!/bin/bash
-# Manual End-to-End Test for CSM Huh Migration
+# Manual End-to-End Test for AGM Huh Migration
 #
 # ⚠️  DO NOT RUN IN CI/CD - This is a manual integration test
 #
-# This script tests CSM's huh migration including:
+# This script tests AGM's huh migration including:
 # - Spinner behavior (new.go, resume.go)
 # - Prompt behavior (confirm, input, select)
 # - Theme integration (where applicable)
@@ -100,7 +100,7 @@ check_prerequisites() {
     print_success "claude command found"
 
     if ! command -v "$CSM_BIN" &> /dev/null; then
-        fail_test "csm command not found. Please build CSM first: go install ./cmd/csm"
+        fail_test "csm command not found. Please build AGM first: go install ./cmd/csm"
     fi
     print_success "csm found: $($CSM_BIN version 2>&1 | head -1 || echo 'version unknown')"
 
@@ -147,12 +147,12 @@ test_spinner_new() {
 
 # Test 2: Build verification (code compiles with huh)
 test_build_verification() {
-    print_step "Test 2: Verify CSM builds with huh dependencies"
+    print_step "Test 2: Verify AGM builds with huh dependencies"
 
     if go build -C "$REPO_ROOT" -o /tmp/csm-huh-test ./cmd/csm 2>&1; then
-        print_success "CSM builds successfully with huh"
+        print_success "AGM builds successfully with huh"
     else
-        fail_test "CSM failed to build with huh dependencies"
+        fail_test "AGM failed to build with huh dependencies"
     fi
 
     # Check for huh imports in compiled binary
@@ -262,7 +262,7 @@ test_integration_workflow() {
 # Main test execution
 main() {
     echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║      CSM Huh Migration E2E Test (csm test)                ║${NC}"
+    echo -e "${BLUE}║      AGM Huh Migration E2E Test (csm test)                ║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Test session: $TEST_SESSION"
@@ -282,7 +282,7 @@ main() {
     echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Key validations:"
-    echo "  ✓ CSM builds with huh dependencies"
+    echo "  ✓ AGM builds with huh dependencies"
     echo "  ✓ Custom UI files deleted (177 lines removed)"
     echo "  ✓ Old UI references removed"
     echo "  ✓ Spinner migration working (huh.NewSpinner)"

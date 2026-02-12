@@ -1,12 +1,12 @@
 # AGM Migration Guide
 
-Complete guide for migrating from Claude Session Manager (CSM) to AI/Agent Gateway Manager (AGM) multi-agent architecture.
+Complete guide for migrating from Agent Session Manager (AGM) to AI/Agent Gateway Manager (AGM) multi-agent architecture.
 
 ---
 
 ## Overview
 
-**AGM** (AI/Agent Gateway Manager) evolved from Claude Session Manager (CSM) to support multiple AI agents (Claude, Gemini, GPT) while maintaining backward compatibility with existing Claude-only sessions.
+**AGM** (AI/Agent Gateway Manager) evolved from Agent Session Manager (AGM) to support multiple AI agents (Claude, Gemini, GPT) while maintaining backward compatibility with existing Claude-only sessions.
 
 **Migration Impact:**
 - **Low risk**: Existing sessions continue working without changes
@@ -54,7 +54,7 @@ agm resume my-session       # Resumes Claude sessions as before
 agm new coding-work         # Creates new Claude session (default)
 ```
 
-**No action required.** AGM is backward compatible with CSM.
+**No action required.** AGM is backward compatible with AGM.
 
 ---
 
@@ -159,7 +159,7 @@ Invalid sessions: 0
 **Transition from `csm` to `agm` commands:**
 
 ```bash
-# Old (CSM)              # New (AGM)
+# Old (AGM)              # New (AGM)
 csm new my-session      → agm new my-session
 csm list                → agm list
 csm resume my-session   → agm resume my-session
@@ -290,7 +290,7 @@ This is **normal** for sessions created before multi-agent support. They will wo
 
 **If you encounter issues**, rollback to previous state:
 
-### Option 1: Continue Using CSM Commands
+### Option 1: Continue Using AGM Commands
 
 ```bash
 # Use csm instead of agm (backward compatible)
@@ -392,7 +392,7 @@ tail -f ~/.config/agm/logs/agm.log
 ✗ Session 'old-session': Invalid UUID format: session-old-session
 ```
 
-**Cause:** Legacy session ID format from very old CSM versions.
+**Cause:** Legacy session ID format from very old AGM versions.
 
 **Solution:**
 ```bash

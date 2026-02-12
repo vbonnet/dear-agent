@@ -1,4 +1,4 @@
-# Quick Start: CSM Bug Fixes
+# Quick Start: AGM Bug Fixes
 
 ## What Was Fixed
 
@@ -141,8 +141,8 @@ csm associate my-session
 - The bug is FIXED in the code - future `csm sync` won't create this problem
 - Existing sessions require manual remediation
 - Use `csm doctor` regularly to catch issues early
-- Each Claude conversation should have exactly ONE CSM session pointing to it
+- Each Claude conversation should have exactly ONE AGM session pointing to it
 
 ## Need Help?
 
-Check the full report: `CSM-BUG-FIX-REPORT.md`
+Check the full report: `AGM-BUG-FIX-REPORT.md`

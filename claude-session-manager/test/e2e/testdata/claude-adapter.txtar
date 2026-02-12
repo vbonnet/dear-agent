@@ -27,7 +27,7 @@ stdout 'bdd-adapter-test'
 # [exec:tmux] exec agm session resume bdd-adapter-test
 # [exec:tmux] ! stderr 'error|Error|ERROR'
 
-# Verify session manifest is intact (CSM's adapter persists state correctly)
+# Verify session manifest is intact (AGM's adapter persists state correctly)
 exists $HOME/sessions/bdd-adapter-test/manifest.yaml
 
 # Verify manifest is valid (adapter didn't corrupt metadata)

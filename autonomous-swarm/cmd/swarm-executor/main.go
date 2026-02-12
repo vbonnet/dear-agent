@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/csm"
+	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/agm"
 	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/executor"
 	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/taskqueue"
 	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/telemetry"
@@ -24,7 +24,7 @@ func main() {
 	var (
 		queuePath   = flag.String("queue", "", "Path to TASK-QUEUE.yaml file (required)")
 		beadID      = flag.String("bead-id", "", "Bead ID to execute (required)")
-		sessionName = flag.String("session", "", "CSM session name (required)")
+		sessionName = flag.String("session", "", "AGM session name (required)")
 		showVersion = flag.Bool("version", false, "Show version and exit")
 		showHelp    = flag.Bool("help", false, "Show help and exit")
 	)
@@ -73,7 +73,7 @@ Usage:
 Flags:
   --queue <path>    Path to TASK-QUEUE.yaml file (required)
   --bead-id <id>    Bead ID to execute (required)
-  --session <name>  CSM session name for execution (required)
+  --session <name>  AGM session name for execution (required)
   --version         Show version and exit
   --help            Show this help and exit
 
@@ -120,7 +120,7 @@ func executeBead(queuePath string, beadID string, sessionName string) int {
 		return 1
 	}
 
-	// Initialize CSM orchestrator and prompter
+	// Initialize AGM orchestrator and prompter
 	orch := csm.NewOrchestrator()
 	prompter := csm.NewPrompter()
 

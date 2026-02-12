@@ -17,7 +17,7 @@ Users need to identify sessions across multiple contexts: by human-readable name
 
 **Business Driver**: Poor identifier resolution leads to user frustration, abandoned sessions, and low CLI adoption. A smart resolution strategy reduces cognitive load and improves UX.
 
-**Technical Constraint**: Must support backward compatibility with CSM's UUID-only resolution while adding name-based and fuzzy matching.
+**Technical Constraint**: Must support backward compatibility with AGM's UUID-only resolution while adding name-based and fuzzy matching.
 
 ---
 
@@ -36,7 +36,7 @@ We will implement a **cascading multi-strategy resolution algorithm** with fuzzy
 
 ## Alternatives Considered
 
-### Alternative 1: UUID-Only Resolution (CSM Legacy)
+### Alternative 1: UUID-Only Resolution (AGM Legacy)
 
 **Approach**: Sessions identified exclusively by UUID, no name-based lookup
 
@@ -59,7 +59,7 @@ func resolveSession(identifier string) (*Manifest, error) {
 **Cons**:
 - Poor UX (users must remember/copy UUIDs)
 - Not human-friendly (32-character hex strings)
-- Breaking change from CSM (users relied on UUIDs)
+- Breaking change from AGM (users relied on UUIDs)
 - No support for typos or partial recall
 
 **Verdict**: Rejected. Too rigid for human users, violates "usability first" principle.
@@ -146,7 +146,7 @@ func resolveSessionIdentifier(identifier string) (*Manifest, string, error) {
 
 **Pros**:
 - **Best UX**: Handles exact names, UUIDs, typos, partial recall
-- **Backward Compatible**: UUID prefix matching preserves CSM behavior
+- **Backward Compatible**: UUID prefix matching preserves AGM behavior
 - **Tmux Context-Aware**: Recognizes tmux session names
 - **Graceful Degradation**: Fuzzy match fallback for typos
 - **Programmatic + Human**: Supports both UUID (scripts) and name (humans)
@@ -196,7 +196,7 @@ for _, m := range manifests {
 **Design Rationale**:
 - UUIDs are unique (prefix match is deterministic)
 - Users can copy short prefixes from `agm session list`
-- Backward compatible with CSM scripts using full UUIDs
+- Backward compatible with AGM scripts using full UUIDs
 
 ---
 
@@ -328,7 +328,7 @@ similarity("my-project", "other") = 0.3     ❌ No match
 ✅ **Excellent UX**: Users don't need to remember exact names/UUIDs
 ✅ **Typo Tolerance**: Fuzzy matching catches common mistakes
 ✅ **Context-Aware**: Recognizes tmux session names
-✅ **Backward Compatible**: UUID prefix matching preserves CSM behavior
+✅ **Backward Compatible**: UUID prefix matching preserves AGM behavior
 ✅ **Programmatic Access**: Scripts can still use full UUIDs
 ✅ **Discoverable**: Interactive picker when ambiguous
 

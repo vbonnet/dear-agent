@@ -335,7 +335,7 @@ func (a *ClaudeAdapter) ExportConversation(sessionID SessionID, format Conversat
 		return []byte(result), nil
 
 	case FormatHTML:
-		// TODO: Implement HTML export (use existing CSM HTML generation)
+		// TODO: Implement HTML export (use existing AGM HTML generation)
 		return nil, fmt.Errorf("HTML export not yet implemented")
 
 	default:

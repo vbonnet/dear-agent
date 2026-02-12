@@ -26,7 +26,7 @@ func agmMain() int {
 	// Configure mock based on environment if needed
 	// For now, tests will set up state via test files
 
-	// Import the actual CSM command (requires exporting ExecuteWithDeps from cmd/csm)
+	// Import the actual AGM command (requires exporting ExecuteWithDeps from cmd/csm)
 	// Since we can't import cmd/csm directly, we'll use the binary approach for now
 	// TODO: This is a temporary solution; full implementation requires refactoring cmd/csm
 	// to export ExecuteWithDeps

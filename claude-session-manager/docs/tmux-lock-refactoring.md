@@ -4,12 +4,12 @@
 
 The global command lock (`/tmp/csm-{UID}/csm.lock`) was too coarse-grained:
 
-1. **Locked entire CSM command execution** - from PersistentPreRunE to PersistentPostRunE
+1. **Locked entire AGM command execution** - from PersistentPreRunE to PersistentPostRunE
 2. **Prevented concurrent operations** - `csm list` couldn't run while `csm resume` was executing
 3. **Caused deadlocks** - Had to release lock early in several places to prevent:
    - `/csm-tools:csm-assoc` skill from deadlocking (it runs `csm associate` internally)
    - `AttachSession` from blocking indefinitely while holding the lock
-4. **Wrong granularity** - The actual race condition is only in **tmux server updates**, not all CSM operations
+4. **Wrong granularity** - The actual race condition is only in **tmux server updates**, not all AGM operations
 
 ## Root Cause
 
@@ -113,14 +113,14 @@ For users upgrading:
 
 ## Lock Hierarchy
 
-CSM now uses **two levels of locking**:
+AGM now uses **two levels of locking**:
 
 | Lock Type | Scope | Location | Mechanism | When Held |
 |-----------|-------|----------|-----------|-----------|
 | **Tmux Server Lock** | Tmux mutations | `/tmp/csm-{UID}/tmux-server.lock` | File lock (syscall.Flock) | Only during NewSession, SendCommand, InitSequence |
 | **Manifest Lock** | Manifest file | `{manifest-path}.lock` | PID + timestamp | During manifest read/write operations |
 
-No global command lock - allows concurrent CSM operations while preventing race conditions.
+No global command lock - allows concurrent AGM operations while preventing race conditions.
 
 ## Related Files
 

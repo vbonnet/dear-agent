@@ -1,6 +1,6 @@
 # AGM TODO List
 
-*Historical note: This project was renamed from CSM (Claude Session Manager) to AGM (AI/Agent Gateway Manager) in 2026-02. References below reflect historical context.*
+*Historical note: This project was renamed from AGM (Agent Session Manager) to AGM (AI/Agent Gateway Manager) in 2026-02. References below reflect historical context.*
 
 ## Recently Completed (2026-01-12)
 
@@ -37,7 +37,7 @@
   - Code: +288 lines in archive.go, +733 lines in tests
   - Commit: 788d7f4
 
-- [x] **Standardize CSM UX Patterns and Error Handling** (2026-01-12)
+- [x] **Standardize AGM UX Patterns and Error Handling** (2026-01-12)
   - Added `--no-color` and `--screen-reader` flags for WCAG AA accessibility
   - Created `internal/ui/errors.go` with 7 standardized error helpers
   - Updated 14 command files to use helpers and add actionable solutions
@@ -65,7 +65,7 @@
     - `cmd/csm/doctor.go` (added duplicate detection)
   - Testing: All tests pass (go test ./...)
   - Documentation:
-    - `CSM-BUG-FIX-REPORT.md` (technical analysis)
+    - `AGM-BUG-FIX-REPORT.md` (technical analysis)
     - `QUICK-START-FIXES.md` (user remediation guide)
   - Commit: 19eeb9a
 

@@ -1,6 +1,6 @@
 // Package tmux provides utilities for capturing and monitoring tmux pane content.
 //
-// This package is part of the CSM session monitoring infrastructure and provides
+// This package is part of the AGM session monitoring infrastructure and provides
 // low-level primitives for reading tmux session state.
 //
 // Key features:

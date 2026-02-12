@@ -4,7 +4,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Palette defines semantic color mappings for CSM UI components.
+// Palette defines semantic color mappings for AGM UI components.
 // All colors use ANSI codes (0-15) for maximum terminal compatibility.
 //
 // WCAG 2.1 Level AA compliance:
@@ -115,7 +115,7 @@ func LightPalette() Palette {
 }
 
 // GetPalette returns the appropriate palette for the given theme name.
-// Supports both CSM themes and legacy theme names for backward compatibility.
+// Supports both AGM themes and legacy theme names for backward compatibility.
 func GetPalette(themeName string) Palette {
 	switch themeName {
 	case "csm":

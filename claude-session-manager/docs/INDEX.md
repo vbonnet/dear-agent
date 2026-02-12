@@ -22,7 +22,7 @@ Complete guide to AGM (AI/Agent Gateway Manager) documentation.
 
 ### Specialized Guides
 8. **[Agent Comparison](AGENT-COMPARISON.md)** - Choose the right agent
-9. **[Migration Guide](AGM-MIGRATION-GUIDE.md)** - CSM to AGM migration
+9. **[Migration Guide](AGM-MIGRATION-GUIDE.md)** - AGM to AGM migration
 10. **[Troubleshooting](TROUBLESHOOTING.md)** - Common issues and solutions
 11. **[FAQ](FAQ.md)** - Frequently asked questions
 
@@ -49,7 +49,7 @@ Complete guide to AGM (AI/Agent Gateway Manager) documentation.
 **I'm having problems:**
 - **[Troubleshooting](TROUBLESHOOTING.md)** - Common issues
 - **[FAQ](FAQ.md)** - Frequently asked questions
-- **[Migration Guide](AGM-MIGRATION-GUIDE.md)** - CSM to AGM transition
+- **[Migration Guide](AGM-MIGRATION-GUIDE.md)** - AGM to AGM transition
 
 **I want to choose the right agent:**
 - **[Agent Comparison](AGENT-COMPARISON.md)** - Claude vs Gemini vs GPT
@@ -82,7 +82,7 @@ Complete guide to AGM (AI/Agent Gateway Manager) documentation.
 
 ### Installation & Setup
 - **[Getting Started](GETTING-STARTED.md)** - Installation, prerequisites, configuration
-- **[Migration Guide](AGM-MIGRATION-GUIDE.md)** - Migrating from CSM
+- **[Migration Guide](AGM-MIGRATION-GUIDE.md)** - Migrating from AGM
 
 ### Basic Usage
 - **[Quick Reference](AGM-QUICK-REFERENCE.md)** - Essential commands
@@ -175,7 +175,7 @@ CSM_DEBUG=true          # Debug mode
 
 ### Specialized Guides
 8. **AGENT-COMPARISON.md** - Agent selection guide (Claude vs Gemini vs GPT)
-9. **AGM-MIGRATION-GUIDE.md** - CSM to AGM migration (validation, rollback)
+9. **AGM-MIGRATION-GUIDE.md** - AGM to AGM migration (validation, rollback)
 10. **TROUBLESHOOTING.md** - Common issues and solutions (detailed diagnostics)
 11. **FAQ.md** - Frequently asked questions (quick answers)
 
@@ -388,7 +388,7 @@ docs/
 
 ### 2026-02-01
 - Initial AGM v3.0 documentation
-- Migrated from CSM documentation
+- Migrated from AGM documentation
 - Added multi-agent support documentation
 
 ---

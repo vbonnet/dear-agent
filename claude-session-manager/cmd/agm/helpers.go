@@ -62,6 +62,6 @@ func updateVSCodeTabTitle(sessionName string) {
 	}
 
 	// Set terminal title to session name
-	title := fmt.Sprintf("CSM: %s", sessionName)
+	title := fmt.Sprintf("AGM: %s", sessionName)
 	setTerminalTitle(title)
 }

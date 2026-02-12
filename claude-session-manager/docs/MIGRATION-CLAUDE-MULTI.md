@@ -1,4 +1,4 @@
-# Claude Session Manager → Multi-Agent AGM Migration
+# Agent Session Manager → Multi-Agent AGM Migration
 
 Transitioning from Claude-only sessions to multi-agent AGM (Agent Grid Manager).
 
@@ -8,7 +8,7 @@ Transitioning from Claude-only sessions to multi-agent AGM (Agent Grid Manager).
 
 ### Conceptual Shift
 
-**Before (CSM - Claude Session Manager):**
+**Before (AGM - Agent Session Manager):**
 - Single agent (Claude only)
 - Command: `csm`
 - Hardcoded to Claude/Anthropic
@@ -18,7 +18,7 @@ Transitioning from Claude-only sessions to multi-agent AGM (Agent Grid Manager).
 - Command: `csm` or `agm` (both work)
 - Agent selection via `--agent` flag
 
-**Evolution:** AGM evolved from Claude Session Manager. The name changed to reflect multi-agent support, but existing CSM users can continue using familiar workflows.
+**Evolution:** AGM evolved from Agent Session Manager. The name changed to reflect multi-agent support, but existing AGM users can continue using familiar workflows.
 
 ---
 
@@ -48,7 +48,7 @@ agm resume my-session
 
 ### New: Agent Selection
 
-**CSM (old - Claude only):**
+**AGM (old - Claude only):**
 ```bash
 # Implicitly used Claude
 csm new my-session
@@ -62,13 +62,13 @@ agm new my-session --agent gemini   # Gemini (research, 1M context)
 agm new my-session --agent gpt      # GPT (chat, brainstorming)
 ```
 
-**Default behavior:** If you omit `--agent`, AGM uses Claude (for CSM compatibility).
+**Default behavior:** If you omit `--agent`, AGM uses Claude (for AGM compatibility).
 
 ---
 
 ## Migration Checklist
 
-### For Existing CSM Users
+### For Existing AGM Users
 
 - [ ] **No action required** - Existing sessions continue working
 - [ ] **Optional:** Update commands from `csm` to `agm` for clarity
@@ -93,7 +93,7 @@ agm new my-session --agent gpt      # GPT (chat, brainstorming)
 **Answer:** They continue working without changes.
 
 ```bash
-# Old session created with CSM
+# Old session created with AGM
 # Before AGM migration:
 csm new old-session  # Used Claude by default
 
@@ -132,7 +132,7 @@ agm resume research    # Uses Gemini automatically
 
 ## Workflow Changes
 
-### Before (CSM): Single-Agent Workflow
+### Before (AGM): Single-Agent Workflow
 
 ```bash
 # 1. Create session (always Claude)
@@ -169,7 +169,7 @@ agm archive my-code-project
 
 ## API Key Configuration
 
-### CSM (Claude only)
+### AGM (Claude only)
 
 **Before:**
 ```bash
@@ -201,7 +201,7 @@ export OPENAI_API_KEY=sk-...
 ### Session Creation
 
 ```bash
-# CSM style (still works, defaults to Claude)
+# AGM style (still works, defaults to Claude)
 csm new my-session
 
 # AGM style (explicit agent)
@@ -276,7 +276,7 @@ agm new my-session
 agm new my-session --agent claude
 ```
 
-Default agent (when `--agent` omitted) is Claude for CSM compatibility, but explicit is better.
+Default agent (when `--agent` omitted) is Claude for AGM compatibility, but explicit is better.
 
 ---
 
@@ -297,7 +297,7 @@ Old Claude sessions fail to resume after AGM migration.
 
 **You don't need to migrate all at once.**
 
-### Phase 1: Keep Using CSM
+### Phase 1: Keep Using AGM
 
 ```bash
 # Continue using csm commands

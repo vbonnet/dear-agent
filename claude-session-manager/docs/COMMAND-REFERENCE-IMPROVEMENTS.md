@@ -72,14 +72,14 @@ One-page cheat sheet with:
 
 **Before**:
 ```
-Send a message/prompt to a running CSM session.
+Send a message/prompt to a running AGM session.
 Examples:
   csm send my-session --prompt "Please review the code"
 ```
 
 **After**:
 ```
-Send a message/prompt to a running CSM session, interrupting any active thinking state.
+Send a message/prompt to a running AGM session, interrupting any active thinking state.
 
 Features:
   • Auto-interrupt: Sends ESC to interrupt thinking before sending prompt
@@ -109,7 +109,7 @@ Use Cases:
 
 **Before**:
 ```
-Reject a permission prompt in a CSM session.
+Reject a permission prompt in a AGM session.
 Examples:
   csm reject my-session --reason "Use Read tool instead of cat"
 ```

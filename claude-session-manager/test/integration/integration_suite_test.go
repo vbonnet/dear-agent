@@ -19,7 +19,7 @@ import (
 
 func TestIntegration(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "CSM Integration Suite")
+	RunSpecs(t, "AGM Integration Suite")
 }
 
 var testEnv *helpers.TestEnv

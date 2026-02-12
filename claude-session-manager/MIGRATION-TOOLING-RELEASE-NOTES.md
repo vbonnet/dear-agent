@@ -8,7 +8,7 @@
 
 ## Overview
 
-Complete migration tooling package to help users upgrade from Claude Session Manager (CSM) to multi-agent AI/Agent Gateway Manager (AGM) architecture.
+Complete migration tooling package to help users upgrade from Agent Session Manager (AGM) to multi-agent AI/Agent Gateway Manager (AGM) architecture.
 
 **Key Benefits**:
 - ✅ Automated session validation
@@ -74,7 +74,7 @@ Invalid sessions: 0
 
 **File**: `docs/AGM-MIGRATION-GUIDE.md`
 
-**Purpose**: Comprehensive step-by-step guide for migrating from CSM to AGM.
+**Purpose**: Comprehensive step-by-step guide for migrating from AGM to AGM.
 
 **Contents**:
 1. **Pre-Migration Checklist**
@@ -102,7 +102,7 @@ Invalid sessions: 0
 5. **Rollback Procedures**
    - Complete rollback
    - Partial rollback
-   - CSM command compatibility
+   - AGM command compatibility
 
 6. **FAQs**
    - Common questions
@@ -354,7 +354,7 @@ cp -r ~/.claude-sessions.backup/my-session \
 
 ---
 
-### Continue Using CSM
+### Continue Using AGM
 
 No rollback needed:
 
@@ -501,13 +501,13 @@ Potential improvements for future releases:
 
 **Thanks To**:
 - Existing AGM users for feedback on migration pain points
-- CSM legacy users for testing backward compatibility
+- AGM legacy users for testing backward compatibility
 
 ---
 
 ## License
 
-MIT License - Same as AGM/CSM project
+MIT License - Same as AGM/AGM project
 
 ---
 

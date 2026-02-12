@@ -1,5 +1,5 @@
 [Unit]
-Description=Astrocyte - Autonomous CSM Session Monitor
+Description=Astrocyte - Autonomous AGM Session Monitor
 Documentation=https://github.com/anthropics/ai-tools/tree/main/claude-session-manager/astrocyte
 After=network.target
 

@@ -28,7 +28,7 @@ var _ = Describe("Tmux Configuration", func() {
 		err := helpers.CreateTmuxSession(sessionName, workDir)
 		Expect(err).ToNot(HaveOccurred())
 
-		// Apply CSM tmux settings (simulating what csm new does)
+		// Apply AGM tmux settings (simulating what csm new does)
 		// These are the settings from internal/tmux/tmux.go NewSession()
 		setTmuxOption(sessionName, "aggressive-resize", "on")
 		setTmuxOption(sessionName, "window-size", "latest")
@@ -83,25 +83,25 @@ var _ = Describe("Tmux Configuration", func() {
 		})
 	})
 
-	Describe("CSM-created session configuration", func() {
+	Describe("AGM-created session configuration", func() {
 		Context("when using internal/tmux package", func() {
 			It("should create session with correct settings via NewSession", func() {
-				// Create a session using the actual CSM tmux package
+				// Create a session using the actual AGM tmux package
 				csmSessionName := testEnv.UniqueSessionName("csm-direct")
 				defer func() {
-					// Use CSM socket for cleanup
+					// Use AGM socket for cleanup
 					exec.Command("tmux", "-S", tmux.GetSocketPath(), "kill-session", "-t", csmSessionName).Run()
 				}()
 
 				err := tmux.NewSession(csmSessionName, workDir)
 				Expect(err).ToNot(HaveOccurred())
 
-				// Verify session exists (using CSM's HasSession which uses the isolated socket)
+				// Verify session exists (using AGM's HasSession which uses the isolated socket)
 				exists, err := tmux.HasSession(csmSessionName)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(exists).To(BeTrue())
 
-				// Verify CSM applies the expected settings (using CSM socket)
+				// Verify AGM applies the expected settings (using AGM socket)
 				socketPath := tmux.GetSocketPath()
 
 				Eventually(func() string {

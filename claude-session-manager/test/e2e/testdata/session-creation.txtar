@@ -13,10 +13,10 @@
 exec agm session new bdd-create-test --agent gpt --detached
 stdout 'Session.*created'
 
-# Verify CSM created the manifest (CSM's responsibility)
+# Verify AGM created the manifest (AGM's responsibility)
 exists $HOME/sessions/bdd-create-test/manifest.yaml
 
-# Verify Manifest v2 schema (CSM's responsibility)
+# Verify Manifest v2 schema (AGM's responsibility)
 exec cat $HOME/sessions/bdd-create-test/manifest.yaml
 stdout 'schema_version: "2.0"'
 
@@ -30,7 +30,7 @@ stdout 'name: bdd-create-test'
 
 # Note: session.jsonl is created by Claude CLI's SessionStart hook during initialization
 # Since tests use dummy API key, Claude can't complete initialization
-# We verify CSM's responsibilities (manifest creation with v3 schema) work correctly
+# We verify AGM's responsibilities (manifest creation with v3 schema) work correctly
 
 # Cleanup
 exec agm session archive bdd-create-test --force

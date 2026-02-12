@@ -70,7 +70,7 @@ go test -c ./test/integration/lifecycle/...
 
 - Go 1.21+
 - Tmux (for tmux-dependent tests)
-- CSM built (`make build`)
+- AGM built (`make build`)
 
 ## Common Issues
 

@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-This document provides a comprehensive analysis of the Gemini agent implementation's feature parity with the Claude agent in the Claude Session Manager (CSM). The analysis is based on extensive testing of all Agent interface methods, error handling, session management, conversation export/import, and integration points.
+This document provides a comprehensive analysis of the Gemini agent implementation's feature parity with the Claude agent in the Agent Session Manager (AGM). The analysis is based on extensive testing of all Agent interface methods, error handling, session management, conversation export/import, and integration points.
 
 **Overall Parity Status:** ⚠️ **Substantial Parity with Known Gaps**
 

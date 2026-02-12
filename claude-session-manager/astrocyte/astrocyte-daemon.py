@@ -22,7 +22,7 @@ from pathlib import Path
 # Import all core functions from astrocyte.py
 sys.path.insert(0, str(Path(__file__).parent))
 from astrocyte import (
-    get_active_csm_sessions,
+    get_active_agm_sessions,
     capture_pane_state,
     is_stuck_mustering,
     is_stuck_zero_token_waiting,
@@ -167,10 +167,10 @@ def main():
 
             logger.debug(f"Check cycle #{check_count} starting")
 
-            sessions = get_active_csm_sessions()
-            print(f"Active CSM sessions: {len(sessions)}")
+            sessions = get_active_agm_sessions()
+            print(f"Active AGM sessions: {len(sessions)}")
 
-            logger.info(f"Active CSM sessions: {len(sessions)} - {sessions if sessions else '(none)'}")
+            logger.info(f"Active AGM sessions: {len(sessions)} - {sessions if sessions else '(none)'}")
 
             for session in sessions:
                 try:
@@ -304,7 +304,7 @@ def main():
                                 recovery = reject_permission_prompt(session)
                                 cascade_depth += 1
 
-                                # Wait for CSM to display next queued prompt (if any)
+                                # Wait for AGM to display next queued prompt (if any)
                                 time.sleep(1.0)
 
                                 # Get fresh state

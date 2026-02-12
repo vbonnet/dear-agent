@@ -36,7 +36,7 @@ RUN useradd -m -s /bin/bash testuser && \
 USER testuser
 WORKDIR /home/testuser
 
-# Setup directory structure for CSM sessions
+# Setup directory structure for AGM sessions
 RUN mkdir -p src/sessions
 
 # Copy astrocyte source code
@@ -53,12 +53,12 @@ USER root
 RUN chmod +x /tests/scripts/*.sh /tests/*.sh
 USER testuser
 
-# Create mock CSM commands for testing
+# Create mock AGM commands for testing
 RUN mkdir -p /home/testuser/bin
 COPY --chown=testuser:testuser astrocyte/tests/e2e-docker/mocks/ /home/testuser/bin/
 RUN chmod +x /home/testuser/bin/*
 
-# Add mock CSM to PATH
+# Add mock AGM to PATH
 ENV PATH="/home/testuser/bin:${PATH}"
 
 # Create tmux socket directory

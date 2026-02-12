@@ -1,4 +1,4 @@
-# CSM Resume Bug Fixes - 2025-12-17
+# AGM Resume Bug Fixes - 2025-12-17
 
 ## Issues Fixed
 

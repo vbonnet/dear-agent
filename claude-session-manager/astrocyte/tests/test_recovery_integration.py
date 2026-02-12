@@ -15,7 +15,7 @@ Test coverage:
 Success criteria:
 - All RecoveryResult calls have 5 required arguments
 - All recovery paths tested (success and failure)
-- CSM subprocess calls properly mocked
+- AGM subprocess calls properly mocked
 - Tmux commands properly mocked
 - No crashes from malformed RecoveryResult calls
 """
@@ -101,7 +101,7 @@ def mock_capture_pane_state():
 
 @pytest.fixture
 def mock_csm_send():
-    """Mock CSM send command subprocess calls."""
+    """Mock AGM send command subprocess calls."""
     with patch('subprocess.run') as mock_run:
         mock_run.return_value = Mock(
             stdout="",
@@ -285,11 +285,11 @@ class TestSendViolationPrompt:
             # Act
             result = send_violation_prompt("test-session")
 
-            # Assert: File was read (CSM send called)
-            assert mock_csm_send.called, "CSM send command should be called"
+            # Assert: File was read (AGM send called)
+            assert mock_csm_send.called, "AGM send command should be called"
 
     def test_violation_prompt_csm_command_construction(self, mock_violation_prompt_file, mock_csm_send):
-        """Verify CSM command is constructed correctly."""
+        """Verify AGM command is constructed correctly."""
         # Arrange
         with patch('astrocyte.capture_pane_state') as mock_capture:
             mock_capture.return_value = SessionState(
@@ -302,7 +302,7 @@ class TestSendViolationPrompt:
             # Act
             result = send_violation_prompt("test-session")
 
-            # Assert: CSM command structure
+            # Assert: AGM command structure
             if mock_csm_send.called:
                 call_args = mock_csm_send.call_args[0][0]
                 assert "csm" in call_args, "Should call 'csm' command"
@@ -464,7 +464,7 @@ class TestRejectPermissionPrompt:
         # Act
         result = reject_permission_prompt("test-session")
 
-        # Assert: CSM reject was called
+        # Assert: AGM reject was called
         if mock_csm_send.called:
             call_args = mock_csm_send.call_args[0][0]
             assert "csm" in call_args, "Should call 'csm' command"

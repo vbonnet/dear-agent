@@ -248,7 +248,7 @@ func TestEdgeCase_ManifestWithFutureTimestamp(t *testing.T) {
 		t.Errorf("Future timestamp not preserved: expected %v, got %v", futureTime, readManifest.CreatedAt)
 	}
 
-	// CSM should accept future timestamps (clock skew, migrations, etc.)
+	// AGM should accept future timestamps (clock skew, migrations, etc.)
 	t.Log("Future timestamps accepted and preserved correctly")
 }
 
@@ -403,7 +403,7 @@ func TestEdgeCase_SessionWithSymlinkedProject(t *testing.T) {
 		t.Errorf("Symlinked project should be accessible: %v", err)
 	}
 
-	// Verify CSM can work with symlinked projects
+	// Verify AGM can work with symlinked projects
 	sessions, err := helpers.ListTestSessions(env.SessionsDir, helpers.ListFilter{All: true})
 	if err != nil {
 		t.Fatalf("Failed to list sessions: %v", err)

@@ -5,7 +5,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// CSMTheme returns a custom high-contrast theme optimized for CSM
+// CSMTheme returns a custom high-contrast theme optimized for AGM
 // Addresses accessibility concerns and selection visibility issues
 func CSMTheme() *huh.Theme {
 	theme := huh.ThemeBase()

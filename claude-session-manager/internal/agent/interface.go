@@ -277,7 +277,7 @@ const (
 	FormatJSONL ConversationFormat = "jsonl"
 
 	// FormatHTML is the HTML transcript format (Claude-specific).
-	// Used for legacy compatibility with existing CSM transcripts.
+	// Used for legacy compatibility with existing AGM transcripts.
 	FormatHTML ConversationFormat = "html"
 
 	// FormatMarkdown is a human-readable markdown format.

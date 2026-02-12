@@ -169,7 +169,7 @@ var _ = Describe("Manifest Validation", func() {
 				fixturePath := filepath.Join("testdata", "manifests", "invalid-schema.yaml")
 
 				m, err := manifest.Read(fixturePath)
-				// CSM auto-migrates v1 to v2
+				// AGM auto-migrates v1 to v2
 				if err == nil {
 					// Should have been migrated to v2
 					Expect(m.SchemaVersion).To(Equal("2.0"))

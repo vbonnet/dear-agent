@@ -24,16 +24,16 @@ func TestResumeCorruptedManifest(t *testing.T) {
 	// at testdata/archived_sessions/corrupted/manifest.yaml
 	// The actual test may need to create a corrupted manifest fixture
 
-	// This test may need implementation details from actual CSM resume behavior
-	// Skipping for now, can be implemented when CSM resume command behavior is clear
-	t.Skip("Test requires CSM resume implementation details")
+	// This test may need implementation details from actual AGM resume behavior
+	// Skipping for now, can be implemented when AGM resume command behavior is clear
+	t.Skip("Test requires AGM resume implementation details")
 }
 
 // TestResumeArchivedSession tests resuming a session that was archived
 func TestResumeArchivedSession(t *testing.T) {
 	// Note: This test assumes we can detect archived sessions
-	// Implementation depends on how CSM handles archived sessions
-	t.Skip("Test requires CSM archive/resume interaction behavior")
+	// Implementation depends on how AGM handles archived sessions
+	t.Skip("Test requires AGM archive/resume interaction behavior")
 }
 
 // TestArchiveMissingSession tests archiving a session that doesn't exist
@@ -49,7 +49,7 @@ func TestArchiveMissingSession(t *testing.T) {
 func TestArchiveAlreadyArchived(t *testing.T) {
 	// This test verifies that archiving an already-archived session is idempotent
 	// Expected behavior: should succeed (or return specific "already archived" message)
-	t.Skip("Test requires CSM archive idempotency behavior")
+	t.Skip("Test requires AGM archive idempotency behavior")
 }
 
 // TestListWhenNoSessions tests listing sessions when none exist

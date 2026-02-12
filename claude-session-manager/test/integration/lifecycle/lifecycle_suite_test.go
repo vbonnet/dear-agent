@@ -19,7 +19,7 @@ import (
 
 func TestLifecycle(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "CSM Lifecycle Tests Suite")
+	RunSpecs(t, "AGM Lifecycle Tests Suite")
 }
 
 var testEnv *helpers.TestEnv

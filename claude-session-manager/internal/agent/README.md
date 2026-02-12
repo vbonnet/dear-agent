@@ -1,10 +1,10 @@
 # Agent Abstraction
 
-This package implements the Agent interface abstraction for supporting multiple AI agents in CSM (Claude Session Manager).
+This package implements the Agent interface abstraction for supporting multiple AI agents in AGM (Agent Session Manager).
 
 ## Overview
 
-The Agent interface provides a unified API for managing AI agent sessions, enabling CSM to support multiple providers (Claude, Gemini, GPT, etc.) without duplicating session management code.
+The Agent interface provides a unified API for managing AI agent sessions, enabling AGM to support multiple providers (Claude, Gemini, GPT, etc.) without duplicating session management code.
 
 ## Architecture
 
@@ -52,7 +52,7 @@ Defines the Agent interface and supporting types:
 ### claude_adapter.go
 ClaudeAdapter implementation:
 - Implements Agent interface for Claude CLI
-- Delegates to existing CSM tmux infrastructure
+- Delegates to existing AGM tmux infrastructure
 - Maps SessionIDs to tmux session names
 - Wraps existing session management logic
 
@@ -231,8 +231,8 @@ ok  	github.com/vbonnet/ai-tools/claude-session-manager/internal/agent	0.035s
 ## Design Decisions
 
 ### 1. Adapter Pattern
-**Chosen:** ClaudeAdapter wraps existing CSM code
-**Alternative:** Refactor CSM internals to export reusable packages
+**Chosen:** ClaudeAdapter wraps existing AGM code
+**Alternative:** Refactor AGM internals to export reusable packages
 **Rationale:** Minimizes changes, maintains backward compatibility
 
 ### 2. SessionID Type

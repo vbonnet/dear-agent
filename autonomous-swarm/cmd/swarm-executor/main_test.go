@@ -186,7 +186,7 @@ completed: []
 		_ = os.Remove(binary)
 	}()
 
-	// Note: This will fail because CSM integration requires real tmux session
+	// Note: This will fail because AGM integration requires real tmux session
 	// But we can verify that CLI correctly attempts execution
 	cmd := exec.Command(binary,
 		"--queue", queueFile,
@@ -195,7 +195,7 @@ completed: []
 	)
 	output, err := cmd.CombinedOutput()
 
-	// Expected to fail due to CSM not available, but check error is from CSM not CLI
+	// Expected to fail due to AGM not available, but check error is from AGM not CLI
 	outputStr := string(output)
 
 	// CLI should have successfully parsed flags and loaded queue
@@ -212,14 +212,14 @@ completed: []
 
 	// Should show execution started
 	if !strings.Contains(outputStr, "Executing bead") {
-		t.Logf("Note: Execution likely failed due to CSM unavailable (expected)")
+		t.Logf("Note: Execution likely failed due to AGM unavailable (expected)")
 		t.Logf("Output: %s", outputStr)
 	}
 
 	// Verify error is from execution phase, not CLI setup
 	if err != nil {
-		// This is expected - CSM not available
-		t.Logf("Execution failed (expected without CSM): %v", err)
+		// This is expected - AGM not available
+		t.Logf("Execution failed (expected without AGM): %v", err)
 	}
 }
 

@@ -32,7 +32,7 @@ The AGM CLI (`cmd/agm/`) is the primary user interface for the AI/Agent Gateway 
 2. **Smart Defaults** - Minimize required user input through intelligent detection
 3. **Progressive Disclosure** - Simple commands for common tasks, advanced flags for power users
 4. **Fail Fast, Recover Gracefully** - Validate early, provide clear error messages with remediation
-5. **Backward Compatible** - Seamless migration from CSM to AGM
+5. **Backward Compatible** - Seamless migration from AGM to AGM
 6. **Dependency Injection** - Testable design with injected dependencies
 
 ---
@@ -543,7 +543,7 @@ defer unlock()
 ```
 
 **Versioning:**
-- Reads both v2 (CSM) and v3 (AGM) manifests
+- Reads both v2 (AGM) and v3 (AGM) manifests
 - Always writes v3 format
 - Automatic upgrade on first write
 

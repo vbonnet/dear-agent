@@ -4,13 +4,13 @@ End-to-end Docker-based tests for astrocyte that simulate real tmux sessions and
 
 ## Overview
 
-These tests run astrocyte in isolated Docker containers with simulated CSM sessions in tmux. They verify that astrocyte correctly detects stuck sessions, performs recovery, and logs incidents.
+These tests run astrocyte in isolated Docker containers with simulated AGM sessions in tmux. They verify that astrocyte correctly detects stuck sessions, performs recovery, and logs incidents.
 
 ## Test Architecture
 
 ```
 tests/e2e-docker/
-├── Dockerfile                    # Test environment with tmux, Python, CSM
+├── Dockerfile                    # Test environment with tmux, Python, AGM
 ├── docker-compose.yml            # Orchestration for test containers
 ├── README.md                     # This file
 ├── scripts/
@@ -23,9 +23,9 @@ tests/e2e-docker/
 │   ├── stuck-zero-token.txt     # Pane content for zero-token waiting
 │   ├── stuck-permission.txt     # Permission prompt with violations
 │   ├── normal-session.txt       # Normal session content
-│   └── manifest-template.yaml   # CSM manifest template
+│   └── manifest-template.yaml   # AGM manifest template
 ├── mocks/
-│   └── csm                       # Mock CSM binary for testing
+│   └── csm                       # Mock AGM binary for testing
 └── tests/
     ├── test_mustering_detection.sh   # Test mustering timeout
     ├── test_zero_token_recovery.sh   # Test zero-token waiting
@@ -199,7 +199,7 @@ thresholds:
 
 This allows tests to complete in ~15 seconds per scenario instead of production timeouts (10+ minutes).
 
-## Mock CSM Commands
+## Mock AGM Commands
 
 The tests use a mock `csm` binary (`mocks/csm`) that:
 - Logs all calls to `~/.agm/astrocyte/logs/csm-mock.log`
@@ -207,7 +207,7 @@ The tests use a mock `csm` binary (`mocks/csm`) that:
 - Simulates `csm reject` (permission rejection)
 - Returns success (exit 0) for valid calls
 
-This allows testing astrocyte's integration without requiring the full CSM Go binary.
+This allows testing astrocyte's integration without requiring the full AGM Go binary.
 
 ## Troubleshooting
 
@@ -227,8 +227,8 @@ This allows testing astrocyte's integration without requiring the full CSM Go bi
 - **Cause**: Astrocyte didn't detect stuck pattern or threshold not met
 - **Fix**: Check astrocyte log: `/home/testuser/.agm/astrocyte/logs/astrocyte-test.log`
 
-**Error: `CSM commands not called`**
-- **Cause**: Mock CSM binary not in PATH or not executable
+**Error: `AGM commands not called`**
+- **Cause**: Mock AGM binary not in PATH or not executable
 - **Fix**: Verify `/home/testuser/bin/csm` exists and is executable
 
 **Error: `Tmux session not found`**
@@ -303,7 +303,7 @@ jobs:
 
 ## Limitations
 
-1. **Mock CSM**: Tests use mock `csm` binary, not real CSM Go implementation
+1. **Mock AGM**: Tests use mock `csm` binary, not real AGM Go implementation
 2. **Fast timeouts**: Tests use 1-minute thresholds vs. production 10+ minutes
 3. **No cloud integration**: Remote reporting not tested
 4. **No Slack/email**: Notification systems not tested (would require external services)
@@ -322,7 +322,7 @@ jobs:
 
 - Astrocyte README: `../README.md`
 - Astrocyte source: `../astrocyte.py`
-- CSM E2E tests: `../../tests/e2e-install/README.md`
+- AGM E2E tests: `../../tests/e2e-install/README.md`
 
 ## Contributing
 
@@ -337,4 +337,4 @@ When adding new tests:
 
 ## License
 
-Same as astrocyte and CSM projects.
+Same as astrocyte and AGM projects.

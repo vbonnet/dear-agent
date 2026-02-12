@@ -237,7 +237,7 @@ func TestSocketDetectionHelperExists(t *testing.T) {
 
 // TestSocketRegressionDocumentation ensures socket regressions are documented
 func TestSocketRegressionDocumentation(t *testing.T) {
-	docPath := filepath.Join("..", "..", "docs", "CSM-AGM-RENAME-REGRESSIONS.md")
+	docPath := filepath.Join("..", "..", "docs", "AGM-RENAME-REGRESSIONS.md")
 	content, err := os.ReadFile(docPath)
 	require.NoError(t, err, "Regression documentation should exist")
 

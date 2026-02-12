@@ -23,7 +23,7 @@ stdout 'archived|Archive'
 exec agm session list
 ! stdout 'bdd-archive-test'
 
-# Note: Archive location varies by CSM implementation
+# Note: Archive location varies by AGM implementation
 # Common patterns: $HOME/.archive/ or $HOME/sessions/.archive/
 # We verify the session is gone from active list (primary requirement)
 # Archive location verification is implementation-specific

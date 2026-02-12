@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run CSM session lifecycle integration tests
+# Run AGM session lifecycle integration tests
 
 set -e
 
@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "====================================="
-echo "CSM Session Lifecycle Test Suite"
+echo "AGM Session Lifecycle Test Suite"
 echo "====================================="
 echo ""
 
@@ -35,16 +35,16 @@ else
     echo -e "${GREEN}✓${NC} tmux installed: $(tmux -V)"
 fi
 
-# Check CSM binary
+# Check AGM binary
 if ! command -v csm &> /dev/null && [ ! -f "$PROJECT_ROOT/csm" ]; then
     echo -e "${YELLOW}WARNING: csm binary not found - building...${NC}"
     cd "$PROJECT_ROOT"
     make build || {
-        echo -e "${RED}ERROR: Failed to build CSM${NC}"
+        echo -e "${RED}ERROR: Failed to build AGM${NC}"
         exit 1
     }
 fi
-echo -e "${GREEN}✓${NC} CSM binary available"
+echo -e "${GREEN}✓${NC} AGM binary available"
 
 echo ""
 echo "====================================="
@@ -90,7 +90,7 @@ case "$MODE" in
         go test ./test/integration/lifecycle/... -v -run "$TEST_NAME"
         ;;
     help)
-        echo "CSM Lifecycle Test Runner"
+        echo "AGM Lifecycle Test Runner"
         echo ""
         echo "Usage: $0 [mode] [options]"
         echo ""

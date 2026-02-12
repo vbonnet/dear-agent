@@ -76,8 +76,8 @@ func TestArchive_EmptySessionName(t *testing.T) {
 	}
 }
 
-// Integration tests - require actual CSM installation
-// These tests are skipped in CI environments without CSM
+// Integration tests - require actual AGM installation
+// These tests are skipped in CI environments without AGM
 
 func TestCreate_Integration(t *testing.T) {
 	if testing.Short() {
@@ -93,7 +93,7 @@ func TestCreate_Integration(t *testing.T) {
 	// Create session
 	err := orch.Create(sessionName)
 	if err != nil {
-		t.Skipf("CSM not available or test failed: %v", err)
+		t.Skipf("AGM not available or test failed: %v", err)
 	}
 
 	// Cleanup
@@ -122,7 +122,7 @@ func TestMonitor_NonexistentSession(t *testing.T) {
 
 	healthy, err := orch.Monitor(sessionName)
 	if err != nil {
-		t.Skipf("CSM not available: %v", err)
+		t.Skipf("AGM not available: %v", err)
 	}
 
 	if healthy {
@@ -143,7 +143,7 @@ func TestExtract_Integration(t *testing.T) {
 
 	// Create session
 	if err := orch.Create(sessionName); err != nil {
-		t.Skipf("CSM not available: %v", err)
+		t.Skipf("AGM not available: %v", err)
 	}
 
 	defer func() {
@@ -179,7 +179,7 @@ func TestArchive_Integration(t *testing.T) {
 
 	// Create session
 	if err := orch.Create(sessionName); err != nil {
-		t.Skipf("CSM not available: %v", err)
+		t.Skipf("AGM not available: %v", err)
 	}
 
 	// Archive session
@@ -226,7 +226,7 @@ func TestWaitForSession_Success(t *testing.T) {
 
 	// Create session
 	if err := orch.Create(sessionName); err != nil {
-		t.Skipf("CSM not available: %v", err)
+		t.Skipf("AGM not available: %v", err)
 	}
 
 	defer func() {

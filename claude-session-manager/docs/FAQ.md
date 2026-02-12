@@ -25,7 +25,7 @@ AGM (AI/Agent Session Manager) is a smart session manager for AI agents (Claude,
 - Interactive TUI with fuzzy search
 - Batch operations for cleanup and organization
 
-**Evolved from:** Claude Session Manager (CSM)
+**Evolved from:** Agent Session Manager (AGM)
 
 ### Why use AGM instead of just using AI agents directly?
 
@@ -37,9 +37,9 @@ AGM (AI/Agent Session Manager) is a smart session manager for AI agents (Claude,
 - **Searchability** - AI-powered semantic search of conversation history
 - **Productivity** - Fuzzy matching, batch operations, interactive TUI
 
-### What's the difference between CSM and AGM?
+### What's the difference between AGM and AGM?
 
-**CSM (Claude Session Manager):**
+**AGM (Agent Session Manager):**
 - Claude-only support
 - Single-agent focus
 - Original version
@@ -48,7 +48,7 @@ AGM (AI/Agent Session Manager) is a smart session manager for AI agents (Claude,
 - Multi-agent support (Claude, Gemini, GPT)
 - Command translation abstraction
 - Enhanced features (agent routing, environment validation)
-- Evolved version (CSM v3 → AGM v3)
+- Evolved version (AGM v3 → AGM v3)
 
 **Migration:** See [MIGRATION-CLAUDE-MULTI.md](MIGRATION-CLAUDE-MULTI.md)
 

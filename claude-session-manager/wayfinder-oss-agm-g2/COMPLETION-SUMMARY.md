@@ -13,7 +13,7 @@ wayfinder_phase: S11 - Retrospective Complete
 **Bead Title**: Test Gemini feature parity
 
 **Original Goal**:
-> Test that GeminiAgent implementation has feature parity with ClaudeAgent. Verify all CSM features work correctly with Gemini models (session management, A2A protocol, hooks, etc.).
+> Test that GeminiAgent implementation has feature parity with ClaudeAgent. Verify all AGM features work correctly with Gemini models (session management, A2A protocol, hooks, etc.).
 
 **Expected Deliverable**: Comprehensive integration tests verifying Gemini and Claude agents have identical functionality.
 

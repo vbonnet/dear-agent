@@ -157,7 +157,7 @@ func TestSendAssociation_CommandFormat(t *testing.T) {
 }
 
 // TestInitSequence_Integration tests basic initialization
-// Full end-to-end testing with tmux requires manual testing with actual CSM
+// Full end-to-end testing with tmux requires manual testing with actual AGM
 func TestInitSequence_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
@@ -171,13 +171,13 @@ func TestInitSequence_Integration(t *testing.T) {
 	assert.Equal(t, sessionName, seq.SessionName)
 	assert.NotEmpty(t, seq.SocketPath)
 
-	// Verify socket path is set to CSM socket
+	// Verify socket path is set to AGM socket
 	expectedPath := GetSocketPath()
 	assert.Equal(t, expectedPath, seq.SocketPath)
 
 	// Note: We can't fully test Run() without a real Claude session
 	// that responds to /rename and /csm-assoc commands.
-	// Full end-to-end testing requires manual testing with CSM.
+	// Full end-to-end testing requires manual testing with AGM.
 }
 
 // TestWaitForReadyFileWithProgress tests the progress reporting variant

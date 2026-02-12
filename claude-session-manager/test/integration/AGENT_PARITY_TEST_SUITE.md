@@ -2,7 +2,7 @@
 
 ## Overview
 
-This comprehensive test suite verifies feature parity between Claude and Gemini agent implementations in the Claude Session Manager (CSM). The tests use Ginkgo's `DescribeTable` pattern to run identical test scenarios for both agents, ensuring consistent behavior across the agent interface.
+This comprehensive test suite verifies feature parity between Claude and Gemini agent implementations in the Agent Session Manager (AGM). The tests use Ginkgo's `DescribeTable` pattern to run identical test scenarios for both agents, ensuring consistent behavior across the agent interface.
 
 **Status**: ✅ **COMPLETE** - GeminiAdapter fully implemented and testable
 

@@ -19,7 +19,7 @@ type ReadyFilePayload struct {
 	ReadyAt         string   `json:"ready_at"`         // ISO 8601 timestamp
 	SessionName     string   `json:"session_name"`     // Tmux session name
 	ManifestPath    string   `json:"manifest_path"`    // Path to manifest.yaml
-	CSMVersion      string   `json:"csm_version"`      // CSM version string
+	CSMVersion      string   `json:"csm_version"`      // AGM version string
 	SignalsDetected []string `json:"signals_detected"` // List of signals
 	// Phase 2 fields (crash detection)
 	CrashedAt string `json:"crashed_at,omitempty"` // ISO 8601 timestamp
@@ -191,7 +191,7 @@ func parseReadyFile(path string) (string, error) {
 }
 
 // cleanupStaleReadyFiles removes ready-files older than 10 minutes.
-// Prevents false positives from stale files (e.g., CSM crashed before cleanup).
+// Prevents false positives from stale files (e.g., AGM crashed before cleanup).
 func cleanupStaleReadyFiles(csmDir string) error {
 	cutoff := time.Now().Add(-10 * time.Minute)
 

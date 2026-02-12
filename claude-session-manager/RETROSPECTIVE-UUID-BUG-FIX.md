@@ -1,4 +1,4 @@
-# Retrospective: CSM UUID Collision Bug Fix
+# Retrospective: AGM UUID Collision Bug Fix
 
 **Date:** 2025-12-17
 **Session:** wayfinder (current conversation)
@@ -41,7 +41,7 @@ Fixed critical bug in `csm sync` where all sessions with empty UUIDs were assign
 
 4. **Cleanup & Documentation** (~15 min)
    - Archived duplicate session directories
-   - Created CSM-BUG-FIX-REPORT.md (technical)
+   - Created AGM-BUG-FIX-REPORT.md (technical)
    - Created QUICK-START-FIXES.md (user guide)
    - Updated TODO.md
    - Committed and pushed changes
@@ -238,7 +238,7 @@ Forcing manual `csm associate` is better than auto-assignment because:
   - b5aa842: `docs: Update TODO.md with UUID collision bug fix`
 
 - **Documentation:**
-  - `CSM-BUG-FIX-REPORT.md` (technical analysis)
+  - `AGM-BUG-FIX-REPORT.md` (technical analysis)
   - `QUICK-START-FIXES.md` (user remediation guide)
   - `TODO.md` (updated with completed work)
 

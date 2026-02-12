@@ -64,7 +64,7 @@ func main() {
     var (
         queuePath   = flag.String("queue", "", "Path to TASK-QUEUE.yaml file (required)")
         beadID      = flag.String("bead-id", "", "Bead ID to execute (required)")
-        sessionName = flag.String("session", "", "CSM session name (required)")
+        sessionName = flag.String("session", "", "AGM session name (required)")
         showVersion = flag.Bool("version", false, "Show version and exit")
         showHelp    = flag.Bool("help", false, "Show help and exit")
     )
@@ -123,7 +123,7 @@ swarm-executor - Autonomous bead execution harness
 
 **Version Without Dependencies**:
 ```bash
-# Version works even without CSM installed
+# Version works even without AGM installed
 $ swarm-executor --version
 swarm-executor version 0.1.0
 
@@ -312,7 +312,7 @@ Usage:
 Flags:
   --queue <path>    Path to TASK-QUEUE.yaml file (required)
   --bead-id <id>    Bead ID to execute (required)
-  --session <name>  CSM session name for execution (required)
+  --session <name>  AGM session name for execution (required)
   --version         Show version and exit
   --help            Show this help and exit
 

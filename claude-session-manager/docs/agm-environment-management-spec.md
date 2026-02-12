@@ -49,7 +49,7 @@ GOOGLE_GENAI_USE_VERTEXAI=true  # ← Forces Vertex AI mode
 
 ### Why This Matters
 
-As AGM evolves from CSM (Claude Session Manager) to multi-agent support, environment configuration becomes a critical user experience issue. The rename to AGM signals support for multiple AI agents, but current state requires users to manually configure each agent's environment.
+As AGM evolves from AGM (Agent Session Manager) to multi-agent support, environment configuration becomes a critical user experience issue. The rename to AGM signals support for multiple AI agents, but current state requires users to manually configure each agent's environment.
 
 ---
 

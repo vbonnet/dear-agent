@@ -1,10 +1,10 @@
-# CSM Integration Tests
+# AGM Integration Tests
 
-Integration tests for Claude Session Manager (CSM) that verify the `csm new` command and related functionality.
+Integration tests for Agent Session Manager (AGM) that verify the `csm new` command and related functionality.
 
 ## Overview
 
-This test suite uses Ginkgo/Gomega BDD framework to test CSM integration with:
+This test suite uses Ginkgo/Gomega BDD framework to test AGM integration with:
 - Real tmux sessions
 - Manifest file creation and validation
 - Tmux configuration settings

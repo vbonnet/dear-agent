@@ -1,4 +1,4 @@
-# CSM Comprehensive Testing Plan
+# AGM Comprehensive Testing Plan
 
 ## Executive Summary
 
@@ -199,7 +199,7 @@
 - **Pattern**: Multi-component workflows
 - **Examples**:
   - `csm new` → check manifest → verify tmux session
-  - Lock contention across multiple CSM commands
+  - Lock contention across multiple AGM commands
   - Concurrent session creation
 
 #### E2E Tests (15% of effort)
@@ -332,7 +332,7 @@ t.Run("group", func(t *testing.T) {
 4. **Golden files** for output validation
 5. **Coverage for integration tests** (`go build -cover`)
 
-### CSM-Specific
+### AGM-Specific
 1. **Tmux mocking** - Mock tmux socket interactions for unit tests
 2. **Filesystem isolation** - Use t.TempDir() for manifest tests
 3. **Time-sensitive tests** - Mock time.Now() for timeout tests
@@ -370,4 +370,4 @@ t.Run("group", func(t *testing.T) {
 
 **Document Version**: 1.0
 **Last Updated**: 2026-01-13
-**Owner**: CSM Testing Initiative
+**Owner**: AGM Testing Initiative

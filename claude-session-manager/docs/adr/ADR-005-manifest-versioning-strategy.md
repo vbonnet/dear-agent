@@ -9,16 +9,16 @@
 
 ## Context
 
-AGM manifests store session metadata (session ID, agent, project path, timestamps). As AGM evolves from CSM (v2 manifests) to multi-agent support (v3 manifests), we need a versioning strategy that:
+AGM manifests store session metadata (session ID, agent, project path, timestamps). As AGM evolves from AGM (v2 manifests) to multi-agent support (v3 manifests), we need a versioning strategy that:
 
-1. Maintains backward compatibility (CSM users can upgrade seamlessly)
+1. Maintains backward compatibility (AGM users can upgrade seamlessly)
 2. Enables forward evolution (new features don't break old manifests)
 3. Supports migration (automated or manual)
 4. Provides rollback capability (if migration fails)
 
 ### Current State
 
-**CSM Manifests (v2)**:
+**AGM Manifests (v2)**:
 ```yaml
 version: "2.0"
 session_id: "abc-123"
@@ -67,10 +67,10 @@ We will implement **Read Old, Write New** versioning strategy with schema evolut
 - One-time migration event
 
 **Cons**:
-- ❌ Destructive (can't rollback to CSM)
+- ❌ Destructive (can't rollback to AGM)
 - ❌ Risky (all manifests changed at once)
 - ❌ Forces migration (user may not want to upgrade yet)
-- ❌ Breaks co-existence (can't run CSM and AGM concurrently)
+- ❌ Breaks co-existence (can't run AGM and AGM concurrently)
 
 **Verdict**: Rejected. Too risky, prevents gradual adoption.
 
@@ -81,8 +81,8 @@ We will implement **Read Old, Write New** versioning strategy with schema evolut
 **Approach**: AGM writes both v2 and v3 manifests (manifest.yaml and manifest.v3.yaml)
 
 **Pros**:
-- Perfect backward compatibility (CSM reads v2, AGM reads v3)
-- Co-existence (CSM and AGM can run concurrently)
+- Perfect backward compatibility (AGM reads v2, AGM reads v3)
+- Co-existence (AGM and AGM can run concurrently)
 - Rollback trivial (delete v3 manifests)
 
 **Cons**:
@@ -119,7 +119,7 @@ We will implement **Read Old, Write New** versioning strategy with schema evolut
 
 ### Schema Versions
 
-**v2 (CSM)**:
+**v2 (AGM)**:
 ```yaml
 version: "2.0"
 session_id: "..."
@@ -307,12 +307,12 @@ agm migrate
 
 **AGM reads v2**: ✅ Always
 **AGM writes v2**: ❌ Never (writes v3)
-**CSM reads v3**: ❌ Fails (unknown fields)
-**CSM writes v2**: ✅ Always (but AGM won't read after writing v3)
+**AGM reads v3**: ❌ Fails (unknown fields)
+**AGM writes v2**: ✅ Always (but AGM won't read after writing v3)
 
 **Co-Existence**:
-- ✅ CSM and AGM can coexist BEFORE first AGM write
-- ❌ CSM and AGM CANNOT coexist AFTER first AGM write
+- ✅ AGM and AGM can coexist BEFORE first AGM write
+- ❌ AGM and AGM CANNOT coexist AFTER first AGM write
 
 **Rollback**:
 - ✅ Restore from backup (`.backups/manifest.1`)
@@ -335,7 +335,7 @@ agm migrate
 ⚠️ **Code Complexity**: Must support v2 and v3 readers
 ⚠️ **Testing Burden**: Test both versions, migration path
 ⚠️ **Implicit Migration**: User may not know manifest upgraded
-⚠️ **CSM Co-Existence Limited**: Can't run CSM after AGM writes
+⚠️ **AGM Co-Existence Limited**: Can't run AGM after AGM writes
 
 ### Neutral
 
@@ -361,9 +361,9 @@ agm migrate
 - `agm admin validate-manifests` reports versions
 - Migration guide documents behavior
 
-**CSM Co-Existence**:
+**AGM Co-Existence**:
 - Document limitation clearly
-- `agm migrate --validate` checks for CSM sessions
+- `agm migrate --validate` checks for AGM sessions
 - Prompt user before destructive operations
 
 ---
@@ -384,7 +384,7 @@ agm migrate
 - Version detection → correct reader selected
 
 **Integration Tests**:
-- CSM session migrated → AGM can read/write
+- AGM session migrated → AGM can read/write
 - AGM session created → v3 format
 - Mixed v2/v3 sessions → both work
 

@@ -3,7 +3,7 @@ package executor
 import (
 	"fmt"
 
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/csm"
+	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/agm"
 	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/taskqueue"
 )
 
@@ -37,7 +37,7 @@ func (h *Harness) ExecuteBead(beadID string, sessionName string) error {
 		return fmt.Errorf("failed to save queue after claim: %w", err)
 	}
 
-	// 2. Create CSM session
+	// 2. Create AGM session
 	if err := h.orchestrator.Create(sessionName); err != nil {
 		return fmt.Errorf("failed to create session %s: %w", sessionName, err)
 	}

@@ -12,7 +12,7 @@ AGM is a smart session manager for AI agents (Claude, Gemini, GPT) that provides
 - **Automatic tracking** - Auto-detects and associates AI sessions with projects
 - **Command translation** - Unified commands work across all agents
 
-**Evolved from:** Claude Session Manager (CSM)
+**Evolved from:** Agent Session Manager (AGM)
 
 ## Installation
 

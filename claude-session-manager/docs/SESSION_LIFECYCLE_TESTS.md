@@ -1,8 +1,8 @@
-## CSM Session Lifecycle Tests - Implementation Summary
+## AGM Session Lifecycle Tests - Implementation Summary
 
 ### Overview
 
-Comprehensive test suite for Claude Session Manager (CSM) session lifecycle covering:
+Comprehensive test suite for Agent Session Manager (AGM) session lifecycle covering:
 - Session creation and initialization
 - Hook execution (documented for future implementation)
 - Agent-to-Agent (A2A) messaging

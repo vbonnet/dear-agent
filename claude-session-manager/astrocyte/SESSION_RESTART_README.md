@@ -32,7 +32,7 @@ Added session restart capability to astrocyte for recovering severely stuck sess
 ---
 
 ### 3. astrocyte_session_restart.py
-**Purpose**: Hard restart using CSM commands
+**Purpose**: Hard restart using AGM commands
 
 **Functions**:
 - `should_restart_session(session_name, esc_failures, ctrlc_failures, stuck_hours)` - Check if unrecoverable
@@ -50,7 +50,7 @@ Added session restart capability to astrocyte for recovering severely stuck sess
 Modified `astrocyte.py`:
 - Added imports for new modules
 - Updated `recover_with_ctrl_c()` to use new module
-- Updated `recover_with_session_restart()` to use new module with CSM commands
+- Updated `recover_with_session_restart()` to use new module with AGM commands
 
 ## Recovery Chain
 

@@ -165,7 +165,7 @@ func TestArchiveLogicUsesListClientsNotHasSession(t *testing.T) {
 
 // TestArchiveRegresssion2Documentation ensures regression is documented
 func TestArchiveRegression2Documentation(t *testing.T) {
-	docPath := filepath.Join("..", "..", "docs", "CSM-AGM-RENAME-REGRESSIONS.md")
+	docPath := filepath.Join("..", "..", "docs", "AGM-RENAME-REGRESSIONS.md")
 	content, err := os.ReadFile(docPath)
 	require.NoError(t, err, "Regression documentation should exist")
 

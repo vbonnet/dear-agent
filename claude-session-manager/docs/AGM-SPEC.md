@@ -14,7 +14,7 @@ AGM (AI/Agent Gateway Manager) is a unified session management CLI for multiple 
 
 **Core Value Proposition**: One CLI to manage all your AI agent sessions, regardless of provider.
 
-**Evolution**: AGM evolved from CSM (Claude Session Manager) to support multi-agent workflows, maintaining backward compatibility while adding extensibility for new AI providers.
+**Evolution**: AGM evolved from AGM (Agent Session Manager) to support multi-agent workflows, maintaining backward compatibility while adding extensibility for new AI providers.
 
 ---
 
@@ -100,7 +100,7 @@ AI agents from different providers (Claude, Gemini, GPT) have:
 - Generate configuration templates (.envrc, .bashrc)
 
 ✅ **G4: Backward Compatibility**
-- CSM sessions migrate seamlessly to AGM
+- AGM sessions migrate seamlessly to AGM
 - Existing tmux workflows continue working
 - Zero-downtime migration path
 
@@ -483,7 +483,7 @@ agm backup clean my-session --keep 5    # Adjust retention
 
 ### F9: Migration & Compatibility
 
-**Description**: Migrate CSM sessions to AGM, maintain compatibility
+**Description**: Migrate AGM sessions to AGM, maintain compatibility
 
 **Commands**:
 ```bash
@@ -494,14 +494,14 @@ agm migrate --rollback                  # Revert migration
 ```
 
 **Migration Phases**:
-1. **Validation**: Check CSM sessions exist, no conflicts
-2. **Backup**: Create backups of all CSM manifests
+1. **Validation**: Check AGM sessions exist, no conflicts
+2. **Backup**: Create backups of all AGM manifests
 3. **Migration**: Convert manifests to AGM format (add agent field)
 4. **Verification**: Validate new manifests
 5. **Cleanup**: Archive old manifests (optional)
 
 **Backward Compatibility**:
-- AGM reads v2 manifests (CSM format)
+- AGM reads v2 manifests (AGM format)
 - AGM writes v3 manifests (AGM format)
 - `csm` symlink points to `agm` binary
 - All `csm` commands work unchanged
@@ -812,7 +812,7 @@ agm admin clean-orphans
 
 ### AC4: Backward Compatibility
 
-- [ ] AGM reads v2 manifests (CSM format)
+- [ ] AGM reads v2 manifests (AGM format)
 - [ ] `csm` command symlinks to `agm`
 - [ ] All `csm` commands work unchanged
 - [ ] Migration wizard converts sessions correctly
@@ -986,7 +986,7 @@ agm admin clean-orphans
 
 ### Risk 5: Backward Compatibility Burden
 
-**Risk**: Supporting CSM manifests (v2) slows development, increases complexity
+**Risk**: Supporting AGM manifests (v2) slows development, increases complexity
 
 **Likelihood**: High (v2 support is indefinite commitment)
 **Impact**: Medium (code complexity, testing burden)
@@ -1008,7 +1008,7 @@ agm admin clean-orphans
 ✅ Multi-agent session management (Claude, Gemini)
 ✅ Command translation layer
 ✅ Environment validation (Gemini)
-✅ Backward compatibility (CSM migration)
+✅ Backward compatibility (AGM migration)
 ✅ Accessibility features (WCAG AA)
 ✅ Message logging system
 ✅ Health checks and diagnostics
@@ -1100,7 +1100,7 @@ See [Architecture](ARCHITECTURE.md) for detailed technical architecture.
 
 ### A3: Migration Guide
 
-See [Migration Guide](AGM-MIGRATION-GUIDE.md) for CSM to AGM migration steps.
+See [Migration Guide](AGM-MIGRATION-GUIDE.md) for AGM to AGM migration steps.
 
 ### A4: Agent Comparison
 
@@ -1114,7 +1114,7 @@ See [Troubleshooting](TROUBLESHOOTING.md) for common issues and solutions.
 
 ## References
 
-- **CSM Documentation**: Original Claude Session Manager docs
+- **AGM Documentation**: Original Agent Session Manager docs
 - **Agent Provider Docs**:
   - Claude CLI: https://docs.anthropic.com/claude/docs/cli
   - Gemini CLI: https://ai.google.dev/gemini-api/docs

@@ -175,7 +175,7 @@ func TestSessionCreation_WithHooks(t *testing.T) {
 		t.Fatalf("Failed to create hook script: %v", err)
 	}
 
-	// Create session (hooks are currently not implemented in CSM, so this documents expected behavior)
+	// Create session (hooks are currently not implemented in AGM, so this documents expected behavior)
 	// When hooks are implemented, this test will verify execution order
 	t.Skip("Hook execution not yet implemented - test documents expected behavior")
 

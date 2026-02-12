@@ -1,7 +1,7 @@
 #!/bin/bash
 # find-session-uuid.sh - Find Claude session UUIDs based on timestamp
 #
-# NOTE: As of CSM v2.x, new sessions automatically capture the UUID.
+# NOTE: As of AGM v2.x, new sessions automatically capture the UUID.
 # This script is for legacy sessions or orphaned sessions created before auto-capture.
 #
 # Usage:
@@ -16,17 +16,17 @@ set -euo pipefail
 
 SESSION_NAME="${1:-}"
 TIMESTAMP="${2:-}"
-SESSIONS_DIR="${CSM_SESSIONS_DIR:-$HOME/src/sessions}"
+SESSIONS_DIR="${AGM_SESSIONS_DIR:-$HOME/src/sessions}"
 HISTORY_FILE="$HOME/.claude/history.jsonl"
 WINDOW_MINUTES=10
 
 usage() {
     echo "Usage: $0 <session-name> [timestamp-ms]"
     echo ""
-    echo "Find Claude session UUID(s) around the time a CSM session was created."
+    echo "Find Claude session UUID(s) around the time a AGM session was created."
     echo ""
     echo "Arguments:"
-    echo "  session-name    Name of the CSM session (e.g., 'lock', 'atlassian-mcp')"
+    echo "  session-name    Name of the AGM session (e.g., 'lock', 'atlassian-mcp')"
     echo "  timestamp-ms    Optional: Unix timestamp in milliseconds"
     echo "                  If not provided, reads from session manifest"
     echo ""

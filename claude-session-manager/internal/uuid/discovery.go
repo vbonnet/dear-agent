@@ -12,9 +12,9 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 )
 
-// Package uuid provides UUID discovery functions for CSM sessions.
+// Package uuid provides UUID discovery functions for AGM sessions.
 // This package implements a 3-level fallback chain:
-// - Level 1: CSM manifest lookup (verified against /rename if available)
+// - Level 1: AGM manifest lookup (verified against /rename if available)
 // - Level 2: History search by rename (/rename command - strong signal)
 // - Level 3: JSONL fallback (most recent .jsonl file in projects dir)
 //
@@ -149,7 +149,7 @@ func SearchHistoryByTimestamp(timestamp time.Time, windowMinutes int) (string, e
 // FindMostRecentJSONL scans a project directory for .jsonl files and returns
 // the UUID extracted from the most recently modified file.
 //
-// This is a last-resort fallback when neither CSM manifest nor history lookups
+// This is a last-resort fallback when neither AGM manifest nor history lookups
 // succeed. It relies on the convention that Claude saves transcripts as
 // <uuid>.jsonl in the projects directory.
 //
@@ -222,13 +222,13 @@ func FindMostRecentJSONL(projectPath string) (string, error) {
 // Discover orchestrates the 3-level UUID discovery fallback chain.
 //
 // Discovery levels:
-//  1. CSM manifest lookup (via manifestSearchFunc), verified against /rename if available
+//  1. AGM manifest lookup (via manifestSearchFunc), verified against /rename if available
 //  2. History search by rename (/rename command - strong signal)
 //  3. JSONL fallback (scan ~/.claude/projects/<sessionName>/ for recent .jsonl)
 //
 // Parameters:
 //   - sessionName: The session name to discover UUID for
-//   - manifestSearchFunc: Function that searches CSM manifests. Should return
+//   - manifestSearchFunc: Function that searches AGM manifests. Should return
 //     manifest if found, or error if not found. Pass nil to skip Level 1.
 //   - verbose: If true, prints diagnostic output to stderr showing discovery path
 //
@@ -245,7 +245,7 @@ func FindMostRecentJSONL(projectPath string) (string, error) {
 //	            return m, nil
 //	        }
 //	    }
-//	    return nil, fmt.Errorf("no CSM session found")
+//	    return nil, fmt.Errorf("no AGM session found")
 //	}
 //	uuid, err := Discover("my-session", findInManifests, false)
 func Discover(sessionName string, manifestSearchFunc func(string) (*manifest.Manifest, error), verbose bool) (string, error) {
@@ -257,9 +257,9 @@ func Discover(sessionName string, manifestSearchFunc func(string) (*manifest.Man
 
 	var errors []string
 
-	// Level 1: CSM manifest search
+	// Level 1: AGM manifest search
 	if manifestSearchFunc != nil {
-		logf("Level 1: CSM manifest search...")
+		logf("Level 1: AGM manifest search...")
 		m, err := manifestSearchFunc(sessionName)
 		if err == nil && m != nil {
 			if m.Claude.UUID != "" {

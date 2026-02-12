@@ -23,7 +23,7 @@ func (p *Plugin) Metadata() plugin.PluginMetadata {
 	return plugin.PluginMetadata{
 		Name:        "claude-tasks",
 		Version:     "1.0.0",
-		Author:      "CSM Team",
+		Author:      "AGM Team",
 		Description: "Claude Code task tracker via ROADMAP.md",
 	}
 }

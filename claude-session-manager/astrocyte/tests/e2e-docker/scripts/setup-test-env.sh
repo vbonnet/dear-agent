@@ -39,7 +39,7 @@ setup_directories() {
     log_info "Directories created"
 }
 
-# Start tmux server with CSM socket
+# Start tmux server with AGM socket
 start_tmux_server() {
     log_info "Starting tmux server..."
 

@@ -1,14 +1,14 @@
-# CSM→AGM Rename: Regression Analysis
+# AGM→AGM Rename: Regression Analysis
 
 **Date:** 2026-02-04 to 2026-02-05
 **Version:** 2.0.0-dev → 3.0.0
-**Scope:** Complete rename from Claude Session Manager (CSM) to AI/Agent Gateway Manager (AGM)
+**Scope:** Complete rename from Agent Session Manager (AGM) to AI/Agent Gateway Manager (AGM)
 
 ---
 
 ## Executive Summary
 
-This document catalogs all regressions discovered during the CSM→AGM rename migration. Five major categories of issues were identified and resolved:
+This document catalogs all regressions discovered during the AGM→AGM rename migration. Five major categories of issues were identified and resolved:
 
 1. **Control Mode Socket Detection** - Critical initialization failure
 2. **Archive Command Logic** - False positive active session detection
@@ -40,7 +40,7 @@ All issues have been resolved and tested.
 
 **File:** `internal/tmux/control.go:34`
 
-**Problem:** `StartControlModeWithTimeout()` used hardcoded `GetSocketPath()` which returns only the write socket (`/tmp/agm.sock`). With dual-socket support (reading from both `/tmp/agm.sock` and `/tmp/csm.sock`), sessions could exist on either socket. Control mode would fail to attach when session was on the legacy CSM socket.
+**Problem:** `StartControlModeWithTimeout()` used hardcoded `GetSocketPath()` which returns only the write socket (`/tmp/agm.sock`). With dual-socket support (reading from both `/tmp/agm.sock` and `/tmp/csm.sock`), sessions could exist on either socket. Control mode would fail to attach when session was on the legacy AGM socket.
 
 **Code Path:**
 ```go
@@ -99,7 +99,7 @@ func StartControlModeWithTimeout(sessionName string, timeout time.Duration) (*Co
 **Status:** ⚠️ Pending (Task #6)
 
 **Recommended Tests:**
-- Integration test: Create new session on CSM socket, verify InitSequence works
+- Integration test: Create new session on AGM socket, verify InitSequence works
 - Integration test: Create new session on AGM socket, verify InitSequence works
 - Unit test: `findSessionSocket()` with mocked socket paths
 
@@ -213,7 +213,7 @@ $ agm archive nightly
 
 **Old Setup:**
 ```bash
-# Legacy CSM completion (broken)
+# Legacy AGM completion (broken)
 source ~/.agm-completion.bash
 ```
 
@@ -276,7 +276,7 @@ agm new test-session
 
 ### Issue Description
 
-**Symptom:** All user-facing documentation still referenced CSM commands, paths, and concepts after binary rename.
+**Symptom:** All user-facing documentation still referenced AGM commands, paths, and concepts after binary rename.
 
 **Impact:** User confusion - documentation showed `csm` commands but binary was renamed to `agm`.
 
@@ -309,12 +309,12 @@ agm new test-session
 
 2. **TODO.md** - Historical context added
    ```markdown
-   *Historical note: This project was renamed from CSM (Claude Session Manager)
+   *Historical note: This project was renamed from AGM (Agent Session Manager)
    to AGM (AI/Agent Gateway Manager) in 2026-02.*
    ```
 
 3. **CONTRIBUTING.md** - Developer docs updated
-   - Title: "Contributing to CSM" → "Contributing to AGM"
+   - Title: "Contributing to AGM" → "Contributing to AGM"
    - Build commands: `cmd/csm` → `cmd/agm`
    - Test examples updated
 
@@ -348,8 +348,8 @@ agm new test-session
 
 **Manual Verification:**
 ```bash
-# Verified no CSM references remain in user-facing docs
-$ grep -r "csm" docs/*.md | grep -v "CSM→AGM" | grep -v "historical"
+# Verified no AGM references remain in user-facing docs
+$ grep -r "csm" docs/*.md | grep -v "AGM→AGM" | grep -v "historical"
 # (no matches - all references are historical context only)
 ```
 
@@ -369,7 +369,7 @@ $ grep -r "csm" docs/*.md | grep -v "CSM→AGM" | grep -v "historical"
 
 **User Report:** "I don't think we should have a fallback to the main socket"
 
-**Symptom:** tmux commands in prompt sending and health checks were falling back to default tmux socket instead of using AGM/CSM isolated sockets.
+**Symptom:** tmux commands in prompt sending and health checks were falling back to default tmux socket instead of using AGM/AGM isolated sockets.
 
 **Impact:**
 - Prompts sent to wrong sessions (cross-contamination with non-AGM tmux sessions)
@@ -425,7 +425,7 @@ cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-sessions")
 
 **Discovery Method:**
 1. Ran `lsof /tmp/agm.sock /tmp/csm.sock` to identify separate tmux server processes
-2. Found PID 660639 (AGM socket) and PID 3133763 (CSM socket) were different servers
+2. Found PID 660639 (AGM socket) and PID 3133763 (AGM socket) were different servers
 3. Ran `tmux list-sessions` (no -S flag) and saw sessions from default socket
 4. Compared with `tmux -S /tmp/agm.sock list-sessions` and `tmux -S /tmp/csm.sock list-sessions`
 5. Code review found missing `-S` flags in prompt.go and health.go
@@ -492,7 +492,7 @@ agm doctor  # Now checks /tmp/agm.sock specifically
 - Execute full test suite after rename
 - Verify no additional regressions
 
-**Task #6:** Write regression tests for CSM→AGM rename
+**Task #6:** Write regression tests for AGM→AGM rename
 - Add test coverage for all issues documented here
 - Prevent future regressions
 
@@ -501,7 +501,7 @@ agm doctor  # Now checks /tmp/agm.sock specifically
 ## Historical Context
 
 **Project Evolution:**
-- **Original:** Claude Session Manager (CSM) - Single-agent (Claude only)
+- **Original:** Agent Session Manager (AGM) - Single-agent (Claude only)
 - **Current:** AI/Agent Gateway Manager (AGM) - Multi-agent (Claude, Gemini, GPT)
 
 **Migration Timeline:**

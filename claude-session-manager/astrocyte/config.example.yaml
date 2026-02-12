@@ -68,8 +68,8 @@ logging:
 # Diagnosis Prompts
 diagnosis:
   enabled: true
-  use_csm_prompt_file: true  # Prefer CSM --prompt-file over tmux
-  fallback_to_tmux: true     # Use tmux if CSM unavailable
+  use_csm_prompt_file: true  # Prefer AGM --prompt-file over tmux
+  fallback_to_tmux: true     # Use tmux if AGM unavailable
 
 # Multi-User Monitoring (Team Environments)
 multi_user:

@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-01-10
 **Deciders:** Foundation Engineering Team
-**Related:** CSM legacy design decisions
+**Related:** AGM legacy design decisions
 
 ---
 
@@ -396,7 +396,7 @@ func escapeForTmux(text string) string {
 
 - **ADR-005**: Manifest Schema (tmux_session_name field)
 - **ADR-006**: Lock Management Strategy (global tmux lock)
-- **CSM Legacy**: Original tmux integration (this ADR formalizes it)
+- **AGM Legacy**: Original tmux integration (this ADR formalizes it)
 
 ---
 
@@ -423,5 +423,5 @@ func escapeForTmux(text string) string {
 
 ---
 
-**Implementation Status:** ✅ Complete (Inherited from CSM, formalized in AGM v3.0)
+**Implementation Status:** ✅ Complete (Inherited from AGM, formalized in AGM v3.0)
 **Date Formalized:** 2026-01-10

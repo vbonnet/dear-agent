@@ -49,7 +49,7 @@ echo "Project: $AGM_PROJECT_DIR" >> ` + markerFile + `
 		t.Fatalf("Failed to write hook script: %v", err)
 	}
 
-	t.Log("NOTE: Hook execution is not yet implemented in CSM")
+	t.Log("NOTE: Hook execution is not yet implemented in AGM")
 	t.Log("This test documents expected behavior for future implementation")
 
 	// Expected behavior when hooks are implemented:
@@ -140,7 +140,7 @@ exit 1
 
 	// Expected behavior:
 	// - Hook executes and fails
-	// - CSM logs hook failure
+	// - AGM logs hook failure
 	// - Session creation continues (hooks are non-blocking)
 	// OR
 	// - Session creation aborts with error (if hooks are blocking)
@@ -408,7 +408,7 @@ func TestAssociateCommand_SendsRename(t *testing.T) {
 	helpers.AssertCommandOrder(t, paneContent, []string{"/rename", "/agm:agm-assoc"})
 }
 
-// TestHookDirectory_Discovery tests CSM discovers hooks from correct locations
+// TestHookDirectory_Discovery tests AGM discovers hooks from correct locations
 func TestHookDirectory_Discovery(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping hook discovery test in short mode")
@@ -443,7 +443,7 @@ echo "Hook discovered" > ` + markerFile + `
 	t.Skip("Hook discovery not yet implemented")
 
 	// Expected behavior:
-	// - CSM searches for hooks in priority order
+	// - AGM searches for hooks in priority order
 	// - Project hooks override user hooks override system hooks
 	// - All hooks in a directory execute (not just first match)
 }

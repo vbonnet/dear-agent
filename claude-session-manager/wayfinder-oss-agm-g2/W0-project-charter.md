@@ -11,7 +11,7 @@ phase_engram_path: "~/src/ws/oss/repos/engram/main/plugins/wayfinder/engrams/wor
 
 ## Problem Statement
 
-The Claude Session Manager (CSM) project has implemented GeminiAgent as part of bead oss-csm-g1. However, we need to verify that the Gemini integration (`csm new --agent=gemini`) has complete feature parity with the existing Claude agent implementation. Without comprehensive integration tests comparing both agents, we risk shipping an incomplete or inconsistent Gemini implementation.
+The Agent Session Manager (AGM) project has implemented GeminiAgent as part of bead oss-csm-g1. However, we need to verify that the Gemini integration (`csm new --agent=gemini`) has complete feature parity with the existing Claude agent implementation. Without comprehensive integration tests comparing both agents, we risk shipping an incomplete or inconsistent Gemini implementation.
 
 **Current State**:
 - GeminiAgent implementation exists (from oss-csm-g1)
@@ -25,7 +25,7 @@ The Claude Session Manager (CSM) project has implemented GeminiAgent as part of 
 
 ## Impact & Value
 
-**Who is affected**: CSM users who want to use Gemini models, CSM developers maintaining multi-agent support
+**Who is affected**: AGM users who want to use Gemini models, AGM developers maintaining multi-agent support
 
 **Impact if not solved**:
 - Users may encounter missing features or bugs when using Gemini

@@ -1,6 +1,6 @@
-# CSM Session Lifecycle Test Suite
+# AGM Session Lifecycle Test Suite
 
-Comprehensive integration tests for Claude Session Manager (CSM) session lifecycle operations.
+Comprehensive integration tests for Agent Session Manager (AGM) session lifecycle operations.
 
 ## Overview
 
@@ -134,7 +134,7 @@ go test ./test/integration/lifecycle/... -v -race
 ### Prerequisites
 - Go 1.21+
 - Tmux installed and available
-- CSM binary built (`make build`)
+- AGM binary built (`make build`)
 - Sufficient permissions to create temp directories
 
 ### Environment Variables
@@ -237,10 +237,10 @@ defer env.Cleanup(t)          // Removes temp directory
 ## Known Issues & Limitations
 
 ### Current Limitations
-1. **Hook tests are skipped** - Hook execution not yet implemented in CSM
+1. **Hook tests are skipped** - Hook execution not yet implemented in AGM
 2. **Tmux server restart test skipped** - Dangerous to kill tmux server in CI
 3. **Disk full test skipped** - Requires special filesystem setup
-4. **Some error tests may succeed** - CSM may sanitize invalid inputs
+4. **Some error tests may succeed** - AGM may sanitize invalid inputs
 
 ### Test Stability
 - Tests requiring tmux may be flaky in CI environments without proper tmux setup
@@ -286,7 +286,7 @@ Examples:
 
 - [Test Plan](../../../TEST-PLAN.md) - Overall testing strategy
 - [Integration Test README](../README.md) - General integration test info
-- [CSM Architecture](../../../docs/architecture.md) - System design
+- [AGM Architecture](../../../docs/architecture.md) - System design
 - [Hook Specification](../../../docs/hooks.md) - Hook system design (future)
 
 ## Maintenance
@@ -308,6 +308,6 @@ Examples:
 ## Contact
 
 For questions or issues with these tests:
-- File issue: [CSM Issues](https://github.com/vbonnet/ai-tools/issues)
+- File issue: [AGM Issues](https://github.com/vbonnet/ai-tools/issues)
 - Check TEST-PLAN.md for testing strategy
 - See CONTRIBUTING.md for development guidelines

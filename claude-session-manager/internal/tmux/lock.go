@@ -9,7 +9,7 @@ import (
 )
 
 // tmuxServerLock protects tmux server state mutations from parallel access.
-// This prevents race conditions when multiple CSM commands update tmux settings,
+// This prevents race conditions when multiple AGM commands update tmux settings,
 // send commands, or modify session state concurrently.
 //
 // Lock scope: Only tmux server mutations (NewSession settings, SendCommand, InitSequence)

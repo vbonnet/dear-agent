@@ -1,9 +1,9 @@
 #!/bin/bash
-# Manual End-to-End Test for CSM
+# Manual End-to-End Test for AGM
 #
 # ⚠️  DO NOT RUN IN CI/CD - This is a manual integration test
 #
-# This script tests CSM's core functionality including:
+# This script tests AGM's core functionality including:
 # - Session creation with tmux
 # - UUID association
 # - Session archiving
@@ -108,7 +108,7 @@ check_prerequisites() {
     print_success "claude command found"
 
     if ! command -v csm &> /dev/null; then
-        fail_test "csm command not found. Please build CSM first: cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager && go build -o ~/go/bin/csm ./cmd/csm"  # noqa: path-portability
+        fail_test "csm command not found. Please build AGM first: cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager && go build -o ~/go/bin/csm ./cmd/csm"  # noqa: path-portability
     fi
     print_success "csm found: $(csm version | head -1)"
 
@@ -258,7 +258,7 @@ test_archive_visibility() {
 # Main test execution
 main() {
     echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║       CSM End-to-End Manual Integration Test              ║${NC}"
+    echo -e "${BLUE}║       AGM End-to-End Manual Integration Test              ║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Test session: $TEST_SESSION"

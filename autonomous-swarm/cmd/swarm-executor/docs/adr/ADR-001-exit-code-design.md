@@ -36,7 +36,7 @@ Exit Code 0: SUCCESS
 Exit Code 1: ERROR
   - Missing required flags
   - Queue file not found or invalid
-  - CSM session creation failed
+  - AGM session creation failed
   - Execution errors (non-escalation)
   - Any recoverable or fatal error
 
@@ -131,7 +131,7 @@ esac
 
 **Limited Granularity**:
 - Cannot distinguish error types via exit code alone (must parse stderr)
-- All errors grouped into exit code 1 (queue load, CSM failure, validation, etc.)
+- All errors grouped into exit code 1 (queue load, AGM failure, validation, etc.)
 - Future: Could use codes 3-10 for specific error categories if needed
 
 **Convention Conflict**:
@@ -168,7 +168,7 @@ esac
 0 = Success
 1 = General error
 2 = Queue load error
-3 = CSM creation error
+3 = AGM creation error
 4 = Validation failure
 5 = Max iterations exceeded
 6 = Explicit escalation

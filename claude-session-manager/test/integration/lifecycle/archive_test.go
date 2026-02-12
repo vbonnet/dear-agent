@@ -18,7 +18,7 @@ var _ = Describe("Archive Session", func() {
 				err := helpers.CreateTmuxSession(sessionName, testEnv.SessionsDir)
 				Expect(err).ToNot(HaveOccurred(), "test session creation should succeed")
 
-				// Create manifest for the session (registers it with CSM)
+				// Create manifest for the session (registers it with AGM)
 				err = helpers.CreateSessionManifest(testEnv.SessionsDir, sessionName, agent)
 				Expect(err).ToNot(HaveOccurred(), "manifest creation should succeed")
 
@@ -27,7 +27,7 @@ var _ = Describe("Archive Session", func() {
 				Expect(err).ToNot(HaveOccurred())
 				Expect(exists).To(BeTrue(), "test session should exist before archive")
 
-				// Kill tmux session (CSM expects sessions to be stopped before archiving)
+				// Kill tmux session (AGM expects sessions to be stopped before archiving)
 				err = helpers.KillTmuxSession(sessionName)
 				Expect(err).ToNot(HaveOccurred(), "tmux session kill should succeed")
 
@@ -87,7 +87,7 @@ var _ = Describe("Archive Session", func() {
 		})
 
 		It("should include archived sessions when using --all flag", func() {
-			// Create and properly archive a session using CSM archive command
+			// Create and properly archive a session using AGM archive command
 			sessionName := testEnv.UniqueSessionName("archive-list-all-test")
 			err := helpers.CreateTmuxSession(sessionName, testEnv.SessionsDir)
 			Expect(err).ToNot(HaveOccurred())
@@ -99,7 +99,7 @@ var _ = Describe("Archive Session", func() {
 			err = helpers.KillTmuxSession(sessionName)
 			Expect(err).ToNot(HaveOccurred())
 
-			// Archive using CSM command (creates proper v2 manifest with lifecycle field)
+			// Archive using AGM command (creates proper v2 manifest with lifecycle field)
 			err = helpers.ArchiveTestSession(testEnv.SessionsDir, sessionName, "")
 			Expect(err).ToNot(HaveOccurred())
 

@@ -2,14 +2,14 @@
 
 ## Overview
 
-This document provides comprehensive documentation for the session lifecycle tests in the Claude Session Manager (CSM). These tests cover all critical session operations across all supported agent types (Claude, Gemini, GPT).
+This document provides comprehensive documentation for the session lifecycle tests in the Agent Session Manager (AGM). These tests cover all critical session operations across all supported agent types (Claude, Gemini, GPT).
 
 ## Test Files
 
 ### 1. `session_lifecycle_test.go`
 **Purpose**: Basic session lifecycle operations
 **Coverage**:
-- Session creation with CSM new command
+- Session creation with AGM new command
 - Manifest validation (fields, timestamps, UUIDs)
 - Session listing and filtering
 - Session archiving

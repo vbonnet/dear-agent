@@ -6,7 +6,7 @@ import (
 )
 
 // ManifestV3 represents a Claude session manifest (v3 schema)
-// Extends v2 with agent tracking for multi-agent support (CSM→AGM evolution)
+// Extends v2 with agent tracking for multi-agent support (AGM→AGM evolution)
 type ManifestV3 struct {
 	// v2 fields (unchanged for backward compatibility)
 	SchemaVersion string    `yaml:"schema_version"` // "3.0"

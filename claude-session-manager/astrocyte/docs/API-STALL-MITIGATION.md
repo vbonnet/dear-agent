@@ -44,7 +44,7 @@ API stalls can happen due to:
 - Claude API infrastructure transients
 - Rate limiting edge cases
 
-**Important**: These are NOT bugs in Astrocyte or CSM - they're observable symptoms of external API/network conditions.
+**Important**: These are NOT bugs in Astrocyte or AGM - they're observable symptoms of external API/network conditions.
 
 ---
 
@@ -412,7 +412,7 @@ echo "Successful recoveries: $(jq -r 'select(.symptom == "stuck_zero_token_waiti
 
 5. **Examine recent changes**:
    - Did you change networks? (home → coffee shop → office)
-   - Did you update Claude Code or CSM recently?
+   - Did you update Claude Code or AGM recently?
    - Did you change API keys or billing settings?
 
 #### Mitigation Actions
@@ -541,7 +541,7 @@ echo "Recovery success rate: $(jq -r 'select(.recovery_success == true)' \
 - Session names and operation types
 - Network environment (home/office/VPN)
 - Claude Code version: `claude-code --version`
-- CSM version: `csm version`
+- AGM version: `csm version`
 - Astrocyte logs: `~/.agm/astrocyte/logs/daemon.log`
 
 ### Do NOT Contact Support For:

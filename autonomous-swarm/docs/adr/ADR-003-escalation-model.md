@@ -6,9 +6,9 @@ Accepted
 
 ## Context
 
-Autonomous Swarm executes beads (autonomous agent tasks) through CSM (Claude Session Manager) sessions. During execution, various errors can occur:
+Autonomous Swarm executes beads (autonomous agent tasks) through AGM (Agent Session Manager) sessions. During execution, various errors can occur:
 
-1. **Transient failures**: CSM timeout, network hiccup, temporary resource unavailability
+1. **Transient failures**: AGM timeout, network hiccup, temporary resource unavailability
 2. **Agent uncertainty**: Agent determines human decision needed
 3. **Fatal errors**: Missing configuration, invalid bead ID, file not found
 4. **Iteration limits**: Bead retried too many times without success
@@ -56,7 +56,7 @@ type ExecutionError struct {
 #### 1. Recoverable Errors (Retry)
 
 **Conditions**:
-- CSM session timeout (session didn't start in time)
+- AGM session timeout (session didn't start in time)
 - YAML parse errors (malformed output)
 - tmux connection issues
 - Temporary file system errors (disk momentarily busy)
@@ -115,7 +115,7 @@ ESCALATE: Requires human decision on API version choice (v1 vs v2)
 **Conditions**:
 - Configuration file not found
 - Invalid bead ID (not in queue)
-- CSM binary not in PATH
+- AGM binary not in PATH
 - Queue file corrupted (YAML parse failure)
 - Missing required dependencies (not in completed queue)
 
@@ -150,7 +150,7 @@ Recoverable error?
 ```
 Bead: ready → in_progress (claim)
     ↓
-Execute via CSM
+Execute via AGM
     ↓
 Error occurs
     ├─ Recoverable → Retry (bead stays in_progress, iteration++)
@@ -243,7 +243,7 @@ Error occurs
 
 ```go
 // Recoverable
-return NewRecoverableError(beadID, iteration, "CSM timeout", err)
+return NewRecoverableError(beadID, iteration, "AGM timeout", err)
 
 // Escalation
 return NewEscalationError(beadID, iteration, "max iterations", nil)
@@ -323,7 +323,7 @@ func TestErrorClassification(t *testing.T) {
         err      error
         wantType ErrorType
     }{
-        {"CSM timeout", csmTimeoutErr, ErrorRecoverable},
+        {"AGM timeout", csmTimeoutErr, ErrorRecoverable},
         {"Bead not found", beadNotFoundErr, ErrorFatal},
         {"Max iterations", maxIterErr, ErrorEscalation},
     }
@@ -347,7 +347,7 @@ func TestDetectEscalation(t *testing.T) {
 **Telemetry Events** (`EXECUTION-LOG.jsonl`):
 
 ```json
-{"timestamp":"2024-01-01T12:00:00Z","bead_id":"bead-1","event":"error","details":{"type":"recoverable","iteration":1,"message":"CSM timeout"}}
+{"timestamp":"2024-01-01T12:00:00Z","bead_id":"bead-1","event":"error","details":{"type":"recoverable","iteration":1,"message":"AGM timeout"}}
 {"timestamp":"2024-01-01T12:05:00Z","bead_id":"bead-1","event":"escalate","details":{"reason":"max iterations exceeded","iterations":3}}
 ```
 

@@ -14,7 +14,7 @@
 Autonomous Swarm is designed as a **lightweight, file-based task orchestration system** for autonomous AI agents. The architecture emphasizes simplicity, observability, and reliability through:
 
 - **File-based state**: YAML queue persistence (no database required)
-- **Process isolation**: CSM sessions in separate tmux instances
+- **Process isolation**: AGM sessions in separate tmux instances
 - **Append-only logging**: JSON Lines for auditability
 - **Dependency awareness**: DAG-based execution ordering
 
@@ -52,7 +52,7 @@ Autonomous Swarm is designed as a **lightweight, file-based task orchestration s
         │                      │                     │
         ▼                      ▼                     ▼
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│ Task Queue   │     │ CSM Session  │     │ Validation   │
+│ Task Queue   │     │ AGM Session  │     │ Validation   │
 │ Management   │     │ Orchestrator │     │ Engine       │
 │              │     │              │     │              │
 │ taskqueue.   │     │ csm.         │     │ validation.  │
@@ -221,13 +221,13 @@ type Coordinator struct {
 
 #### 2.2.3 pkg/csm
 
-**Purpose**: CSM session lifecycle management
+**Purpose**: AGM session lifecycle management
 
 **Components**:
 
 1. **orchestrator.go**: Session operations
-   - `Create()`: Spawn CSM session
-   - `Monitor()`: Health check (CSM list + tmux)
+   - `Create()`: Spawn AGM session
+   - `Monitor()`: Health check (AGM list + tmux)
    - `Extract()`: Get session UUID
    - `Archive()`: Clean up session
    - `WaitForSession()`: Polling with timeout
@@ -253,7 +253,7 @@ tmux has-session -t <name>       # Health check
 **Health Check Strategy**:
 ```go
 func (o *Orchestrator) Monitor(sessionName string) (bool, error) {
-    // 1. Check CSM session exists
+    // 1. Check AGM session exists
     sessions := exec("csm list --json")
     if !contains(sessions, sessionName) {
         return false, nil
@@ -272,8 +272,8 @@ func (o *Orchestrator) Monitor(sessionName string) (bool, error) {
 - Archive failure: Return error (resource leak warning)
 
 **Design Rationale**:
-- Thin wrapper around CSM CLI (no reimplementation)
-- Health checks use both CSM and tmux for redundancy
+- Thin wrapper around AGM CLI (no reimplementation)
+- Health checks use both AGM and tmux for redundancy
 - Polling-based wait (acceptable for v1, future: inotify)
 
 #### 2.2.4 pkg/executor
@@ -284,7 +284,7 @@ func (o *Orchestrator) Monitor(sessionName string) (bool, error) {
 
 1. **harness.go**: Main execution loop
    - `ExecuteBead()`: Full lifecycle (claim → execute → validate → complete)
-   - Coordinates taskqueue, CSM, validation
+   - Coordinates taskqueue, AGM, validation
    - Handles cleanup on errors
 
 2. **iteration.go**: Retry logic
@@ -652,7 +652,7 @@ Transitions:
 **Thread Safety**:
 - Coordinator: RWMutex for queue access
 - Logger: OS-level file locking (append mode)
-- CSM Orchestrator: Stateless (exec.Command is thread-safe)
+- AGM Orchestrator: Stateless (exec.Command is thread-safe)
 
 **Reentrancy**:
 - Same bead cannot be claimed twice (removed from ready on claim)
@@ -666,7 +666,7 @@ Transitions:
 
 ## 4. Integration Architecture
 
-### 4.1 CSM Integration
+### 4.1 AGM Integration
 
 **Interface Contract**:
 ```bash
@@ -705,8 +705,8 @@ tmux has-session -t <session-name>
 
 **Assumptions**:
 - tmux server is running (prerequisite)
-- Session names match CSM session names
-- No manual session manipulation (don't detach CSM sessions)
+- Session names match AGM session names
+- No manual session manipulation (don't detach AGM sessions)
 
 ## 5. Testing Architecture
 
@@ -724,7 +724,7 @@ tmux has-session -t <session-name>
 
 **pkg/executor (53.8% coverage)**:
 - Unit: Error classification, iteration tracking
-- Integration: Full execution with mock CSM
+- Integration: Full execution with mock AGM
 - Edge cases: Max retries, escalation signals
 
 **pkg/validation (91.7% coverage)**:
@@ -766,7 +766,7 @@ func TestCoordinator_Claim(t *testing.T) {
 
 **Mock External Dependencies**:
 ```go
-// Test CSM orchestrator without real csm binary
+// Test AGM orchestrator without real csm binary
 type mockOrchestrator struct {
     createErr error
     uuid      string
@@ -799,7 +799,7 @@ func TestLogger(t *testing.T) {
 
 **Out of Scope** (assumes trusted environment):
 - Malicious bead prompts (user-controlled)
-- CSM binary tampering (trusted tool)
+- AGM binary tampering (trusted tool)
 - Network attacks (local-only system)
 
 ### 6.2 Security Controls
@@ -862,7 +862,7 @@ ROADMAP.md:            0644 (rw-r--r--)
 **System Requirements**:
 - OS: Linux, macOS (tmux available)
 - Go: 1.25.1+ (for building)
-- CSM: Latest version in PATH
+- AGM: Latest version in PATH
 - tmux: Any recent version
 
 **File System**:
@@ -917,8 +917,8 @@ swarm-executor --daemon --queue TASK-QUEUE.yaml
 - External systems: Hook LogEvent() for webhooks
 
 **Orchestrators**:
-- Alternative CSM: Implement Orchestrator interface
-- Local execution: Bypass CSM entirely
+- Alternative AGM: Implement Orchestrator interface
+- Local execution: Bypass AGM entirely
 - Remote execution: Network-based orchestrator
 
 ### 9.2 Backward Compatibility

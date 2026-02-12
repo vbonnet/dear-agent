@@ -1,273 +1,301 @@
 package deadlock
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// ProcessInfo contains information about a potentially deadlocked process
+// ProcessInfo contains information about a Claude process
 type ProcessInfo struct {
-	PID         int
-	Command     string
-	State       string
-	CPUPercent  float64
-	Runtime     time.Duration
-	RawStat     string
-	IsDeadlock  bool
+	PID          int
+	CPU          float64
+	RuntimeSec   int
+	State        string
+	WCHAN        string
+	IsDeadlock   bool
+	Command      string
+	Connections  int
 }
 
-// DetectClaudeDeadlock finds the Claude process in a tmux session and checks if it's deadlocked
-func DetectClaudeDeadlock(tmuxSessionName string) (*ProcessInfo, error) {
-	// Step 1: Get the PID of the tmux pane
-	panePID, err := getTmuxPanePID(tmuxSessionName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tmux pane PID: %w", err)
-	}
+// Deadlock detection thresholds (from ROADMAP-STAGE-1.md)
+const (
+	MinCPUPercent      = 25.0 // Processes using >25% CPU
+	MinRuntimeMinutes  = 5    // Running for >5 minutes
+)
 
-	// Step 2: Find the Claude process (child of the pane shell)
-	claudePID, err := findClaudeProcess(panePID)
+// DetectClaudeDeadlock detects if the Claude process in a tmux session is deadlocked
+func DetectClaudeDeadlock(tmuxSessionName string) (*ProcessInfo, error) {
+	// Step 1: Find Claude process PID from tmux session
+	pid, err := getClaudePIDFromTmux(tmuxSessionName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find Claude process: %w", err)
 	}
 
-	// Step 3: Get process information
-	info, err := getProcessInfo(claudePID)
+	// Step 2: Get process information
+	info, err := getProcessInfo(pid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get process info: %w", err)
 	}
 
-	// Step 4: Check for deadlock criteria
-	info.IsDeadlock = isDeadlocked(info)
+	// Step 3: Check deadlock criteria
+	runtimeMinutes := info.RuntimeSec / 60
+	info.IsDeadlock = (info.CPU >= MinCPUPercent) &&
+	                  (runtimeMinutes >= MinRuntimeMinutes) &&
+	                  (strings.HasPrefix(info.State, "R")) // Running/Runnable state
 
 	return info, nil
 }
 
-// getTmuxPanePID gets the PID of the shell running in a tmux pane
-func getTmuxPanePID(tmuxSessionName string) (int, error) {
-	// Get socket path (default Claude socket)
-	socketPath := os.Getenv("TMUX_SOCKET")
-	if socketPath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return 0, fmt.Errorf("failed to get home directory: %w", err)
-		}
-		socketPath = home + "/.claude/tmux.sock"
-	}
-
-	// Run: tmux list-panes -t <session> -F "#{pane_pid}"
-	cmd := exec.Command("tmux", "-S", socketPath, "list-panes", "-t", tmuxSessionName, "-F", "#{pane_pid}")
+// getClaudePIDFromTmux finds the Claude process PID running in a tmux session
+func getClaudePIDFromTmux(tmuxSessionName string) (int, error) {
+	// Get tmux pane PID
+	cmd := exec.Command("tmux", "list-panes", "-t", tmuxSessionName, "-F", "#{pane_pid}")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("tmux list-panes failed: %w", err)
 	}
 
-	pidStr := strings.TrimSpace(string(output))
-	pid, err := strconv.Atoi(pidStr)
+	panePID, err := strconv.Atoi(strings.TrimSpace(string(output)))
 	if err != nil {
-		return 0, fmt.Errorf("invalid PID from tmux: %s", pidStr)
+		return 0, fmt.Errorf("invalid pane PID: %w", err)
 	}
 
-	return pid, nil
+	// Find Claude process (child of pane)
+	// Look for process named "claude" or "node" with "claude" in cmdline
+	claudePID, err := findClaudeProcess(panePID)
+	if err != nil {
+		return 0, err
+	}
+
+	return claudePID, nil
 }
 
-// findClaudeProcess finds the Claude Code process (child of shell in tmux pane)
-func findClaudeProcess(panePID int) (int, error) {
-	// Use pgrep to find processes with "claude" in the command that are descendants
-	// of the pane PID
-	cmd := exec.Command("pgrep", "-P", strconv.Itoa(panePID), "-f", "claude")
+// findClaudeProcess finds the Claude node process (child of tmux pane)
+func findClaudeProcess(parentPID int) (int, error) {
+	// ps -o pid,ppid,comm --no-headers | awk '$2 == <parentPID> && ($3 ~ /node/ || $3 ~ /claude/)'
+	cmd := exec.Command("ps", "-o", "pid,ppid,comm", "--no-headers")
 	output, err := cmd.Output()
 	if err != nil {
-		// pgrep returns exit code 1 if no processes found
-		return 0, fmt.Errorf("no Claude process found (pane PID %d may not have Claude running)", panePID)
+		return 0, fmt.Errorf("ps command failed: %w", err)
 	}
 
-	// Parse PID (take first line if multiple)
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) == 0 {
-		return 0, fmt.Errorf("no Claude process found")
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+
+		ppid, err := strconv.Atoi(fields[1])
+		if err != nil {
+			continue
+		}
+
+		if ppid == parentPID {
+			comm := fields[2]
+			if comm == "node" || comm == "claude" {
+				pid, err := strconv.Atoi(fields[0])
+				if err != nil {
+					continue
+				}
+				return pid, nil
+			}
+		}
 	}
 
-	pid, err := strconv.Atoi(lines[0])
-	if err != nil {
-		return 0, fmt.Errorf("invalid PID from pgrep: %s", lines[0])
-	}
-
-	return pid, nil
+	return 0, fmt.Errorf("no Claude process found under pane PID %d", parentPID)
 }
 
-// getProcessInfo retrieves detailed process information
+// getProcessInfo retrieves detailed information about a process
 func getProcessInfo(pid int) (*ProcessInfo, error) {
-	info := &ProcessInfo{
-		PID: pid,
-	}
+	info := &ProcessInfo{PID: pid}
 
-	// Read /proc/<pid>/stat for process state and CPU time
-	statPath := fmt.Sprintf("/proc/%d/stat", pid)
-	data, err := os.ReadFile(statPath)
+	// Get CPU%, TIME, STATE from ps
+	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "pcpu,time,stat,wchan:30,cmd", "--no-headers")
+	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", statPath, err)
+		return nil, fmt.Errorf("ps command failed: %w", err)
 	}
 
-	info.RawStat = string(data)
-
-	// Parse /proc/<pid>/stat
-	// Format: pid (comm) state ppid ... utime stime ...
-	// We need: state (field 3), utime (field 14), stime (field 15)
-	fields := strings.Fields(string(data))
-	if len(fields) < 15 {
-		return nil, fmt.Errorf("invalid /proc/%d/stat format", pid)
+	fields := strings.Fields(string(output))
+	if len(fields) < 4 {
+		return nil, fmt.Errorf("unexpected ps output format")
 	}
 
-	// Extract state (field 3, after comm which is in parentheses)
+	// Parse CPU%
+	cpuStr := fields[0]
+	cpu, err := strconv.ParseFloat(cpuStr, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse CPU: %w", err)
+	}
+	info.CPU = cpu
+
+	// Parse TIME (format: MM:SS.ss or HH:MM:SS)
+	timeStr := fields[1]
+	runtimeSec, err := parseTime(timeStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse runtime: %w", err)
+	}
+	info.RuntimeSec = runtimeSec
+
+	// Parse STATE
 	info.State = fields[2]
 
-	// Extract command name (field 2, in parentheses)
-	commStart := strings.Index(string(data), "(")
-	commEnd := strings.LastIndex(string(data), ")")
-	if commStart != -1 && commEnd != -1 && commEnd > commStart {
-		info.Command = string(data[commStart+1 : commEnd])
-	}
+	// Parse WCHAN
+	info.WCHAN = fields[3]
 
-	// Calculate CPU percentage (simplified)
-	// Read system uptime
-	uptimeData, err := os.ReadFile("/proc/uptime")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read /proc/uptime: %w", err)
-	}
-	uptimeFields := strings.Fields(string(uptimeData))
-	if len(uptimeFields) < 1 {
-		return nil, fmt.Errorf("invalid /proc/uptime format")
-	}
-	systemUptime, err := strconv.ParseFloat(uptimeFields[0], 64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse uptime: %w", err)
-	}
+	// Parse COMMAND (rest of fields)
+	info.Command = strings.Join(fields[4:], " ")
 
-	// Get process start time (field 22)
-	if len(fields) >= 22 {
-		starttime, err := strconv.ParseInt(fields[21], 10, 64)
-		if err == nil {
-			// starttime is in clock ticks since system boot
-			clockTicks := int64(100) // Hz (usually 100 on Linux)
-			processStartSeconds := float64(starttime) / float64(clockTicks)
-			processRuntime := systemUptime - processStartSeconds
-			info.Runtime = time.Duration(processRuntime * float64(time.Second))
-		}
-	}
-
-	// Calculate CPU percentage using ps
-	cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "%cpu", "--no-headers")
-	output, err := cmd.Output()
-	if err == nil {
-		cpuStr := strings.TrimSpace(string(output))
-		cpu, err := strconv.ParseFloat(cpuStr, 64)
-		if err == nil {
-			info.CPUPercent = cpu
-		}
-	}
+	// Count network connections (lsof)
+	connections, _ := countConnections(pid) // Ignore errors
+	info.Connections = connections
 
 	return info, nil
 }
 
-// isDeadlocked checks if a process meets deadlock criteria
-func isDeadlocked(info *ProcessInfo) bool {
-	// Deadlock criteria based on ROADMAP-STAGE-1.md:
-	// - State: RNl+ (R = running, N = low priority, l = multi-threaded, + = foreground)
-	// - CPU: > 25%
-	// - Runtime: > 5 minutes
+// parseTime converts ps TIME format (MM:SS.ss or HH:MM:SS) to seconds
+func parseTime(timeStr string) (int, error) {
+	parts := strings.Split(timeStr, ":")
 
-	// Check state for "R" (running/runnable)
-	if !strings.HasPrefix(info.State, "R") {
-		return false
+	if len(parts) == 2 {
+		// MM:SS.ss format
+		minutes, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return 0, err
+		}
+
+		// Handle seconds with decimal (e.g., "45.12")
+		secondsStr := strings.Split(parts[1], ".")[0]
+		seconds, err := strconv.Atoi(secondsStr)
+		if err != nil {
+			return 0, err
+		}
+
+		return minutes*60 + seconds, nil
+	} else if len(parts) == 3 {
+		// HH:MM:SS format
+		hours, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return 0, err
+		}
+
+		minutes, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return 0, err
+		}
+
+		seconds, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return 0, err
+		}
+
+		return hours*3600 + minutes*60 + seconds, nil
 	}
 
-	// Check CPU percentage
-	if info.CPUPercent <= 25.0 {
-		return false
-	}
-
-	// Check runtime
-	if info.Runtime < 5*time.Minute {
-		return false
-	}
-
-	return true
+	return 0, fmt.Errorf("unexpected time format: %s", timeStr)
 }
 
-// FormatProcessInfo returns a human-readable summary of process info
+// countConnections counts network connections for a process
+func countConnections(pid int) (int, error) {
+	cmd := exec.Command("lsof", "-p", strconv.Itoa(pid), "-a", "-i")
+	output, err := cmd.Output()
+	if err != nil {
+		// lsof may fail if no connections, that's OK
+		return 0, nil
+	}
+
+	lines := strings.Split(string(output), "\n")
+	// Subtract 1 for header line, count non-empty lines
+	count := 0
+	for i, line := range lines {
+		if i == 0 || line == "" {
+			continue
+		}
+		count++
+	}
+
+	return count, nil
+}
+
+// FormatProcessInfo formats process information for display
 func FormatProcessInfo(info *ProcessInfo) string {
-	return fmt.Sprintf(`Process Information:
-  PID:        %d
-  Command:    %s
-  State:      %s
-  CPU:        %.1f%%
-  Runtime:    %s
-  Deadlock:   %v`,
-		info.PID,
-		info.Command,
-		info.State,
-		info.CPUPercent,
-		formatDuration(info.Runtime),
-		info.IsDeadlock,
-	)
+	var b strings.Builder
+
+	runtimeMinutes := info.RuntimeSec / 60
+
+	fmt.Fprintf(&b, "Process Information:\n")
+	fmt.Fprintf(&b, "  PID:         %d\n", info.PID)
+	fmt.Fprintf(&b, "  CPU:         %.1f%%\n", info.CPU)
+	fmt.Fprintf(&b, "  Runtime:     %dm (%ds)\n", runtimeMinutes, info.RuntimeSec)
+	fmt.Fprintf(&b, "  State:       %s\n", info.State)
+	fmt.Fprintf(&b, "  WCHAN:       %s\n", info.WCHAN)
+	fmt.Fprintf(&b, "  Connections: %d\n", info.Connections)
+	fmt.Fprintf(&b, "  Command:     %s\n", info.Command)
+	fmt.Fprintf(&b, "\n")
+
+	if info.IsDeadlock {
+		fmt.Fprintf(&b, "⚠️  DEADLOCK DETECTED\n")
+		fmt.Fprintf(&b, "\nDeadlock criteria met:\n")
+		fmt.Fprintf(&b, "  ✓ CPU > %d%% (%.1f%%)\n", int(MinCPUPercent), info.CPU)
+		fmt.Fprintf(&b, "  ✓ Runtime > %dm (%dm)\n", MinRuntimeMinutes, runtimeMinutes)
+		fmt.Fprintf(&b, "  ✓ State: R (running/runnable)\n")
+	} else {
+		fmt.Fprintf(&b, "ℹ️  No deadlock detected\n")
+		fmt.Fprintf(&b, "\nDeadlock criteria:\n")
+
+		if info.CPU >= MinCPUPercent {
+			fmt.Fprintf(&b, "  ✓ CPU > %d%% (%.1f%%)\n", int(MinCPUPercent), info.CPU)
+		} else {
+			fmt.Fprintf(&b, "  ✗ CPU > %d%% (%.1f%% - below threshold)\n", int(MinCPUPercent), info.CPU)
+		}
+
+		if runtimeMinutes >= MinRuntimeMinutes {
+			fmt.Fprintf(&b, "  ✓ Runtime > %dm (%dm)\n", MinRuntimeMinutes, runtimeMinutes)
+		} else {
+			fmt.Fprintf(&b, "  ✗ Runtime > %dm (%dm - below threshold)\n", MinRuntimeMinutes, runtimeMinutes)
+		}
+
+		if strings.HasPrefix(info.State, "R") {
+			fmt.Fprintf(&b, "  ✓ State: R (running/runnable)\n")
+		} else {
+			fmt.Fprintf(&b, "  ✗ State: R (current: %s)\n", info.State)
+		}
+	}
+
+	return b.String()
 }
 
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%.0fs", d.Seconds())
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%.0fm %.0fs", d.Minutes(), d.Seconds()-60*d.Minutes())
-	}
-	return fmt.Sprintf("%.0fh %.0fm", d.Hours(), d.Minutes()-60*d.Hours())
-}
-
-// LogDeadlockIncident appends a deadlock incident to ~/deadlock-log.txt
+// LogDeadlockIncident logs a deadlock incident to ~/deadlock-log.txt
 func LogDeadlockIncident(sessionName string, info *ProcessInfo) error {
-	home, err := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	logPath := home + "/deadlock-log.txt"
+	logPath := filepath.Join(homeDir, "deadlock-log.txt")
 
-	// Open file for appending (create if doesn't exist)
+	// Open file in append mode, create if doesn't exist
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
 	defer f.Close()
 
-	writer := bufio.NewWriter(f)
-
-	// Write log entry
+	// Format: timestamp | session | PID | CPU% | runtime | state | WCHAN
 	timestamp := time.Now().Format(time.RFC3339)
-	_, err = writer.WriteString(fmt.Sprintf(`
-================================================================================
-Deadlock Incident: %s
-================================================================================
-Session:    %s
-PID:        %d
-Command:    %s
-State:      %s
-CPU:        %.1f%%
-Runtime:    %s
-Timestamp:  %s
-Action:     SIGKILL sent
-================================================================================
+	runtimeMinutes := info.RuntimeSec / 60
 
-`, timestamp, sessionName, info.PID, info.Command, info.State, info.CPUPercent, formatDuration(info.Runtime), timestamp))
-	if err != nil {
-		return fmt.Errorf("failed to write log entry: %w", err)
-	}
+	logLine := fmt.Sprintf("%s | session=%s | pid=%d | cpu=%.1f%% | runtime=%dm | state=%s | wchan=%s\n",
+		timestamp, sessionName, info.PID, info.CPU, runtimeMinutes, info.State, info.WCHAN)
 
-	if err := writer.Flush(); err != nil {
-		return fmt.Errorf("failed to flush log: %w", err)
+	if _, err := f.WriteString(logLine); err != nil {
+		return fmt.Errorf("failed to write log: %w", err)
 	}
 
 	return nil

@@ -1,4 +1,4 @@
-# CSM Critical Bug Fix Report
+# AGM Critical Bug Fix Report
 
 **Date:** 2025-12-17
 **Investigator:** Claude Sonnet 4.5
@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-Fixed critical bugs in Claude Session Manager (CSM) that caused:
+Fixed critical bugs in Agent Session Manager (AGM) that caused:
 1. Multiple sessions sharing the same Claude UUID (12 sessions affected)
 2. Duplicate session directories (old vs new naming format)
 3. Broken UUID assignment logic in `csm sync`
@@ -75,7 +75,7 @@ Sessions existed in both old and new naming formats:
 This caused duplicate entries in `csm list` and confusion about which directory was active.
 
 ### Root Cause
-CSM changed its directory naming convention from `<name>-session` to `session-<name>`, but old directories were not cleaned up or migrated.
+AGM changed its directory naming convention from `<name>-session` to `session-<name>`, but old directories were not cleaned up or migrated.
 
 ### Fix Applied
 1. Created archive directory: `~/src/sessions/.archive-old-format/`
@@ -178,7 +178,7 @@ cp ~/src/repos/ai-tools/main/claude-session-manager/csm \
 ### Test Results
 ```bash
 $ csm doctor
-=== Claude Session Manager Health Check ===
+=== Agent Session Manager Health Check ===
 
 ✓ Claude history found
 ✓ tmux installed: tmux 3.4
@@ -231,6 +231,6 @@ The critical UUID bug has been fixed in the code, preventing future occurrences.
 ---
 
 **Next Steps:**
-1. Commit these changes to the CSM repository
+1. Commit these changes to the AGM repository
 2. User to remediate the 12 sessions with shared UUIDs
 3. Consider implementing the SessionStart hook for automatic UUID capture

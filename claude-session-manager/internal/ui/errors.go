@@ -37,7 +37,7 @@ func PrintManifestWriteError(err error) {
 func PrintTmuxNotFoundError() {
 	PrintError(
 		fmt.Errorf("tmux not found"),
-		"CSM requires tmux to manage sessions",
+		"AGM requires tmux to manage sessions",
 		"  • Install: sudo apt install tmux (Ubuntu/Debian)\n"+
 			"  • Install: brew install tmux (macOS)\n"+
 			"  • Verify: tmux -V",
@@ -48,7 +48,7 @@ func PrintTmuxNotFoundError() {
 func PrintClaudeNotFoundError() {
 	PrintError(
 		fmt.Errorf("Claude CLI not found"),
-		"CSM requires Claude CLI to be installed",
+		"AGM requires Claude CLI to be installed",
 		"  • Install from: https://claude.com\n"+
 			"  • Run at least once to create history\n"+
 			"  • Verify: claude --version",

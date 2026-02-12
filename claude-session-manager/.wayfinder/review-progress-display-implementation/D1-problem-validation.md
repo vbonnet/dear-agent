@@ -25,7 +25,7 @@ The recently implemented `pkg/progress` system needs comprehensive review before
 
 ## Why It Matters
 
-**Impact**: This is infrastructure code that will be used across multiple tools (Wayfinder, CSM, potentially other AI tools). A systematic review now prevents:
+**Impact**: This is infrastructure code that will be used across multiple tools (Wayfinder, AGM, potentially other AI tools). A systematic review now prevents:
 - **Integration delays**: Teams waiting to integrate need confidence in stability
 - **Technical debt**: Fixing issues after adoption is 3-10x more expensive than fixing before
 - **User friction**: Poor API design or documentation slows adoption and frustrates developers

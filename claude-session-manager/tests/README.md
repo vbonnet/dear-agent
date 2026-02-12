@@ -1,6 +1,6 @@
-# CSM Tests
+# AGM Tests
 
-This directory contains tests for the Claude Session Manager (CSM).
+This directory contains tests for the Agent Session Manager (AGM).
 
 ## Test Types
 
@@ -21,7 +21,7 @@ Integration tests that require tmux, Claude CLI, and interactive sessions.
 
 #### `manual-e2e-test.sh`
 
-End-to-end integration test that validates core CSM functionality.
+End-to-end integration test that validates core AGM functionality.
 
 #### `manual-e2e-huh-test.sh`
 
@@ -43,7 +43,7 @@ End-to-end integration test that validates the charmbracelet/huh UI migration.
 **How to run:**
 
 ```bash
-# From the CSM repository root
+# From the AGM repository root
 ./tests/manual-e2e-huh-test.sh
 ```
 
@@ -54,7 +54,7 @@ End-to-end integration test that validates the charmbracelet/huh UI migration.
 
 ---
 
-#### `manual-e2e-test.sh` (Core CSM Functionality)
+#### `manual-e2e-test.sh` (Core AGM Functionality)
 
 **What it tests:**
 - Session creation with tmux
@@ -70,14 +70,14 @@ End-to-end integration test that validates the charmbracelet/huh UI migration.
 **How to run:**
 
 ```bash
-# From the CSM repository root
+# From the AGM repository root
 ./tests/manual-e2e-test.sh
 ```
 
 **Expected output:**
 ```
 ╔════════════════════════════════════════════════════════════╗
-║       CSM End-to-End Manual Integration Test              ║
+║       AGM End-to-End Manual Integration Test              ║
 ╚════════════════════════════════════════════════════════════╝
 
 >>> Checking prerequisites

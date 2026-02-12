@@ -26,13 +26,13 @@ Complete architectural documentation for the AI/Agent Gateway Manager (AGM).
 
 ### What is AGM?
 
-AGM (AI/Agent Gateway Manager) is a sophisticated session management system that provides unified access to multiple AI agents (Claude, Gemini, GPT) through a consistent command-line interface. It evolved from Claude Session Manager (CSM) to support multi-agent workflows.
+AGM (AI/Agent Gateway Manager) is a sophisticated session management system that provides unified access to multiple AI agents (Claude, Gemini, GPT) through a consistent command-line interface. It evolved from Agent Session Manager (AGM) to support multi-agent workflows.
 
 ### Design Principles
 
 1. **Multi-agent abstraction** - Single interface for multiple AI providers
 2. **Session persistence** - Long-lived conversations across terminal sessions
-3. **Backward compatibility** - CSM sessions migrate seamlessly
+3. **Backward compatibility** - AGM sessions migrate seamlessly
 4. **Tmux integration** - Leverages tmux for session management
 5. **Zero-downtime** - Sessions persist across reboots and network interruptions
 6. **Explicit configuration** - No hidden state, manifest-driven design
@@ -753,7 +753,7 @@ defaults:
 - **[Getting Started](GETTING-STARTED.md)** - Installation and first steps
 - **[Examples](EXAMPLES.md)** - Real-world usage scenarios
 - **[Troubleshooting](TROUBLESHOOTING.md)** - Common issues and solutions
-- **[Migration Guide](AGM-MIGRATION-GUIDE.md)** - CSM to AGM migration
+- **[Migration Guide](AGM-MIGRATION-GUIDE.md)** - AGM to AGM migration
 - **[BDD Catalog](BDD-CATALOG.md)** - Living documentation
 
 ---

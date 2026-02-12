@@ -16,7 +16,7 @@ Provide a production-ready CLI that:
 - Supports multiple AI agents through a unified interface
 - Provides robust session discovery and fuzzy matching
 - Ensures session health through validation and diagnostics
-- Maintains backward compatibility with Claude Session Manager (CSM)
+- Maintains backward compatibility with Agent Session Manager (AGM)
 
 ## Requirements
 
@@ -125,7 +125,7 @@ Provide a production-ready CLI that:
   - Automatic backups before destructive operations (archive, UUID update)
   - Numbered backups with timestamps
   - Restore from specific backup number
-  - Migration wizard for CSM → AGM transition
+  - Migration wizard for AGM → AGM transition
 
 #### FR8: Workflow Automation
 - **ID:** FR8
@@ -207,15 +207,15 @@ Provide a production-ready CLI that:
 #### NFR3: Backward Compatibility
 - **ID:** NFR3
 - **Priority:** P0 (Critical)
-- **Description:** CLI MUST maintain CSM compatibility
+- **Description:** CLI MUST maintain AGM compatibility
 - **Guarantees:**
-  - Read CSM manifest v2 format
+  - Read AGM manifest v2 format
   - Write AGM manifest v3 format
   - Auto-upgrade manifests on first write
   - `csm` command symlinked to `agm` (deprecated)
-  - CSM sessions discoverable in AGM
+  - AGM sessions discoverable in AGM
 - **Migration:**
-  - Wizard for CSM → AGM migration
+  - Wizard for AGM → AGM migration
   - Preserve all session metadata
   - Maintain UUID associations
 
@@ -580,7 +580,7 @@ agm 3.0.0 (/usr/local/bin/agm)
 
 ### Compatibility Matrix
 
-| AGM Version | Manifest Version | CSM Compatible | Agents Supported |
+| AGM Version | Manifest Version | AGM Compatible | Agents Supported |
 |-------------|------------------|----------------|------------------|
 | 3.0.0 | v3 (writes), v2 (reads) | Yes | claude, gemini, gpt |
 | 2.x.x | v2 | Yes | claude only |
@@ -618,7 +618,7 @@ agm 3.0.0 (/usr/local/bin/agm)
 - [x] Backup and restore operations
 - [x] Workflow automation support
 - [x] Session association (manual + auto-detect)
-- [x] Backward compatibility with CSM
+- [x] Backward compatibility with AGM
 - [x] Comprehensive error handling
 - [x] Accessibility features
 - [x] Tab completion

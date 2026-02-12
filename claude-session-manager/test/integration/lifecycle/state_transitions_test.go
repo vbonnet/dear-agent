@@ -70,7 +70,7 @@ func TestStateTransition_ActiveToSuspended(t *testing.T) {
 		t.Fatalf("Failed to read manifest after suspend: %v", err)
 	}
 
-	// Note: CSM doesn't currently track suspended state explicitly
+	// Note: AGM doesn't currently track suspended state explicitly
 	// Suspended = manifest exists, lifecycle is empty, tmux session doesn't exist
 	if m.Lifecycle == manifest.LifecycleArchived {
 		t.Error("Suspended session should not be archived")

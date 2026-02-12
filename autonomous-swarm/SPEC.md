@@ -11,13 +11,13 @@
 
 ### 1.1 Purpose
 
-Autonomous Swarm is a Go-based execution harness that orchestrates autonomous agent tasks ("beads") with priority-based queuing, dependency management, and CSM (Claude Session Manager) integration. The system enables distributed execution of AI agent tasks with built-in validation, telemetry, and escalation handling.
+Autonomous Swarm is a Go-based execution harness that orchestrates autonomous agent tasks ("beads") with priority-based queuing, dependency management, and AGM (Agent Session Manager) integration. The system enables distributed execution of AI agent tasks with built-in validation, telemetry, and escalation handling.
 
 ### 1.2 Scope
 
 This specification covers:
 - Task queue management and state transitions
-- CSM session orchestration for agent execution
+- AGM session orchestration for agent execution
 - Execution lifecycle with iteration limits and escalation detection
 - S8/S9 validation phases
 - Telemetry and roadmap generation
@@ -80,16 +80,16 @@ type Bead struct {
 - `QueryNext()`: Get first ready bead (O(n) scan acceptable for v1)
 - `Unblock()`: Check blocked beads and move to ready if dependencies met
 
-#### 2.1.2 CSM Orchestrator (pkg/csm)
+#### 2.1.2 AGM Orchestrator (pkg/csm)
 
 **Responsibilities**:
-- CSM session lifecycle management
+- AGM session lifecycle management
 - tmux session health monitoring
 - Session UUID extraction for result tracking
 
 **Operations**:
-- `Create(sessionName)`: Spawn new CSM session
-- `Monitor(sessionName)`: Check session health (tmux + CSM list)
+- `Create(sessionName)`: Spawn new AGM session
+- `Monitor(sessionName)`: Check session health (tmux + AGM list)
 - `Extract(sessionName)`: Retrieve session UUID
 - `Archive(sessionName)`: Clean up session resources
 - `WaitForSession(sessionName, timeout)`: Poll until session ready
@@ -110,7 +110,7 @@ type Bead struct {
 **Execution Flow**:
 ```
 1. Claim bead from queue
-2. Create CSM session
+2. Create AGM session
 3. Wait for session ready
 4. Inject bead prompt
 5. Monitor session health (placeholder)
@@ -121,7 +121,7 @@ type Bead struct {
 ```
 
 **Error Handling**:
-- **Recoverable**: CSM timeout, parse errors → retry (increment iteration)
+- **Recoverable**: AGM timeout, parse errors → retry (increment iteration)
 - **Escalation**: Max iterations exceeded, explicit ESCALATE signal → move to blocked
 - **Fatal**: File not found, invalid config → fail immediately
 
@@ -175,7 +175,7 @@ Coordinator (in-memory queue)
     ↓ (Claim)
 Execution Harness
     ↓ (Create session)
-CSM Orchestrator
+AGM Orchestrator
     ↓ (Execute)
 Agent Session (tmux + Claude)
     ↓ (Results)
@@ -198,7 +198,7 @@ TASK-QUEUE.yaml + EXECUTION-LOG.jsonl + ROADMAP.md
 
 ### 3.2 Bead Execution
 
-**FR-EX-001**: System SHALL execute beads through CSM sessions
+**FR-EX-001**: System SHALL execute beads through AGM sessions
 **FR-EX-002**: System SHALL retry beads up to 3 times on recoverable errors
 **FR-EX-003**: System SHALL detect explicit escalation signals ("ESCALATE:" keyword)
 **FR-EX-004**: System SHALL track iteration count in bead metadata
@@ -320,17 +320,17 @@ completed: [bead]
 ```
 --queue <path>    Path to TASK-QUEUE.yaml (required)
 --bead-id <id>    Bead ID to execute (required)
---session <name>  CSM session name (required)
+--session <name>  AGM session name (required)
 --version         Show version and exit
 --help            Show help and exit
 ```
 
 ## 7. Integration Points
 
-### 7.1 CSM Integration
+### 7.1 AGM Integration
 
 **Requirements**:
-- CSM binary (`csm`) must be in PATH
+- AGM binary (`csm`) must be in PATH
 - Supported operations: new, list, get-uuid, archive
 - JSON output format for `list` command
 
@@ -369,7 +369,7 @@ completed: [bead]
 
 ### 8.3 Integration Testing
 
-- End-to-end bead execution (requires CSM + tmux)
+- End-to-end bead execution (requires AGM + tmux)
 - Queue persistence across restarts
 - Dependency chain execution
 
@@ -383,7 +383,7 @@ completed: [bead]
 
 ### 9.2 Session Isolation
 
-- CSM sessions isolated via tmux
+- AGM sessions isolated via tmux
 - Session names prevent conflicts
 - Archive cleanup prevents resource leaks
 
@@ -414,7 +414,7 @@ completed: [bead]
 ## 11. Glossary
 
 - **Bead**: Autonomous task unit with defined prompts and dependencies
-- **CSM**: Claude Session Manager - CLI tool for managing Claude agent sessions
+- **AGM**: Agent Session Manager - CLI tool for managing Claude agent sessions
 - **Escalation**: Condition requiring human intervention (max retries or explicit signal)
 - **S8**: Implementation file validation phase (syntax checks)
 - **S9**: Test execution and coverage validation phase

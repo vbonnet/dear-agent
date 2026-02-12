@@ -63,7 +63,7 @@ func TestGetSessionsDir(t *testing.T) {
 // Note: The Run() method and its sub-methods (waitForPrompt, sendExit,
 // waitForPaneClose, archiveSession) require:
 // 1. A running tmux session
-// 2. A CSM session manifest
+// 2. A AGM session manifest
 // 3. Claude Code running in the session
 //
 // These would be tested in integration tests rather than unit tests.

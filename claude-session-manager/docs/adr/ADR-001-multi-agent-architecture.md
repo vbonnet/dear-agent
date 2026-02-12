@@ -3,13 +3,13 @@
 **Status:** Accepted
 **Date:** 2026-01-15
 **Deciders:** Foundation Engineering Team
-**Related:** CSM to AGM rename decision
+**Related:** AGM to AGM rename decision
 
 ---
 
 ## Context
 
-Claude Session Manager (CSM) was originally designed to manage Claude CLI sessions exclusively. As AI landscape evolved, users expressed need to manage multiple AI agents (Gemini, GPT) with same tooling. Three architectural approaches were considered for multi-agent support.
+Agent Session Manager (AGM) was originally designed to manage Claude CLI sessions exclusively. As AI landscape evolved, users expressed need to manage multiple AI agents (Gemini, GPT) with same tooling. Three architectural approaches were considered for multi-agent support.
 
 ### Problem Statement
 
@@ -17,7 +17,7 @@ Claude Session Manager (CSM) was originally designed to manage Claude CLI sessio
 
 **Business Driver**: As AI agents proliferate, providing multi-agent support increases AGM's value proposition and differentiates from single-agent tools.
 
-**Technical Constraint**: Must maintain backward compatibility with existing CSM sessions while enabling extensibility for new agents.
+**Technical Constraint**: Must maintain backward compatibility with existing AGM sessions while enabling extensibility for new agents.
 
 ---
 
@@ -197,7 +197,7 @@ agent_metadata:  # Renamed from "claude" to be generic
 ✅ **Extensibility**: New agents added via new adapter (no core changes)
 ✅ **Testability**: Mock agents for unit tests, real agents for integration tests
 ✅ **UX Consistency**: Single binary, unified session list, consistent commands
-✅ **Backward Compatibility**: v2 manifests still work, CSM command symlinked
+✅ **Backward Compatibility**: v2 manifests still work, AGM command symlinked
 ✅ **Future-Proof**: Plugin system possible (custom agents via external adapters)
 
 ### Negative
@@ -209,7 +209,7 @@ agent_metadata:  # Renamed from "claude" to be generic
 
 ### Neutral
 
-🔄 **Manifest Migration**: Users must migrate CSM → AGM manifests (wizard provided)
+🔄 **Manifest Migration**: Users must migrate AGM → AGM manifests (wizard provided)
 🔄 **Learning Curve**: Users must understand agent differences (docs/comparison table)
 
 ---

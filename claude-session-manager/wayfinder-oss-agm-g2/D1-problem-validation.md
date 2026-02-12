@@ -11,7 +11,7 @@ phase_engram_path: "~/src/ws/oss/repos/engram/main/plugins/wayfinder/engrams/wor
 
 ## What Problem Are We Solving?
 
-**Problem Statement**: While CSM has implemented GeminiAgent (via bead oss-csm-g1), we lack automated tests that verify Gemini has complete feature parity with Claude. The existing integration test suite from Phase 1 tests Claude agent functionality, but we need parameterized tests that verify both agents support identical features.
+**Problem Statement**: While AGM has implemented GeminiAgent (via bead oss-csm-g1), we lack automated tests that verify Gemini has complete feature parity with Claude. The existing integration test suite from Phase 1 tests Claude agent functionality, but we need parameterized tests that verify both agents support identical features.
 
 **Current State**:
 - ✅ GeminiAgent implementation exists (`internal/agent/gemini_adapter.go`)
@@ -28,11 +28,11 @@ phase_engram_path: "~/src/ws/oss/repos/engram/main/plugins/wayfinder/engrams/wor
 
 ## Why Does It Matter?
 
-**Impact**: Without comprehensive multi-agent testing, CSM ships with unverified Gemini support, creating risk of poor user experience and maintenance burden.
+**Impact**: Without comprehensive multi-agent testing, AGM ships with unverified Gemini support, creating risk of poor user experience and maintenance burden.
 
 **Who Is Affected**:
-- **CSM users**: Users who prefer Gemini models will encounter bugs/missing features
-- **CSM maintainers**: Developers can't confidently maintain both agents
+- **AGM users**: Users who prefer Gemini models will encounter bugs/missing features
+- **AGM maintainers**: Developers can't confidently maintain both agents
 - **Project credibility**: Shipping incomplete multi-agent support damages trust
 
 **Frequency and Severity**:

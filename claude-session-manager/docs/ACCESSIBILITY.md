@@ -1,12 +1,12 @@
 # Accessibility
 
-Claude Session Manager (CSM) is designed to meet WCAG 2.1 Level AA accessibility standards for terminal applications.
+Agent Session Manager (AGM) is designed to meet WCAG 2.1 Level AA accessibility standards for terminal applications.
 
 ## WCAG 2.1 Compliance Status
 
 ### ✅ Level AA Compliance Achieved
 
-CSM meets WCAG 2.1 Level AA requirements through:
+AGM meets WCAG 2.1 Level AA requirements through:
 
 1. **Non-color indicators (1.4.1)**: Selection indicated by cursor symbol (❯), bold text, AND color
 2. **Contrast ratios (1.4.3)**: All text meets minimum 4.5:1 contrast ratio
@@ -47,7 +47,7 @@ All colors tested against WebAIM Contrast Checker with black (#000000) backgroun
 
 ### Selected vs Unselected Contrast
 
-CSM ensures **3:1 minimum contrast** between selected and unselected options:
+AGM ensures **3:1 minimum contrast** between selected and unselected options:
 
 - **Dark theme**: Bright Cyan (14) vs Gray (8) = ~3.5:1 ✅
 - **Light theme**: Cyan (6) vs Gray (8) = ~1.0:1 (compensated by bold + cursor)
@@ -61,7 +61,7 @@ CSM ensures **3:1 minimum contrast** between selected and unselected options:
 
 ### 1. NO_COLOR Support
 
-CSM respects the NO_COLOR environment variable for accessibility:
+AGM respects the NO_COLOR environment variable for accessibility:
 
 ```bash
 # Disable all colored output
@@ -79,7 +79,7 @@ When NO_COLOR is set:
 
 ### 2. Screen Reader Mode
 
-CSM includes a screen reader mode that replaces Unicode symbols with text equivalents:
+AGM includes a screen reader mode that replaces Unicode symbols with text equivalents:
 
 ```bash
 # Via environment variable
@@ -98,7 +98,7 @@ ui:
 
 ### 3. Keyboard Navigation
 
-All CSM interactive components are fully keyboard-accessible:
+All AGM interactive components are fully keyboard-accessible:
 
 - **Arrow keys (↑/↓)**: Navigate options in pickers
 - **Enter**: Confirm selection
@@ -106,7 +106,7 @@ All CSM interactive components are fully keyboard-accessible:
 - **Ctrl+C**: Cancel operation
 - **Type to filter**: Fuzzy search in session pickers
 
-No mouse required for any CSM operation.
+No mouse required for any AGM operation.
 
 ### 4. Theme Customization
 
@@ -130,19 +130,19 @@ ui:
 
 ### Color Blindness Testing
 
-CSM has been designed with color blindness in mind:
+AGM has been designed with color blindness in mind:
 
 1. **Deuteranopia (red-green)**: Selection uses cyan (not red/green)
 2. **Protanopia (red-green)**: Active/Success uses bright green with high luminance
 3. **Tritanopia (blue-yellow)**: Multiple indicators (cursor, bold, spacing)
 
-**Test CSM with color blindness simulators:**
+**Test AGM with color blindness simulators:**
 - [Coblis](https://www.color-blindness.com/coblis-color-blindness-simulator/)
 - Terminal color blindness modes (if available)
 
 ### Terminal Compatibility
 
-CSM uses standard ANSI 16-color palette (codes 0-15) for maximum compatibility.
+AGM uses standard ANSI 16-color palette (codes 0-15) for maximum compatibility.
 
 **Tested terminals:**
 - ✅ iTerm2 (macOS)
@@ -157,7 +157,7 @@ CSM uses standard ANSI 16-color palette (codes 0-15) for maximum compatibility.
 
 ### Screen Reader Testing
 
-While CSM includes screen reader mode, comprehensive screen reader testing requires:
+While AGM includes screen reader mode, comprehensive screen reader testing requires:
 
 1. Enable screen reader mode: `CSM_SCREEN_READER=1`
 2. Test with screen readers:
@@ -179,7 +179,7 @@ ANSI colors may render differently across terminals depending on:
 - True color (24-bit) vs 256-color vs 16-color support
 - Custom color palette overrides
 
-**Mitigation**: CSM uses only ANSI 0-15 codes which are universally supported.
+**Mitigation**: AGM uses only ANSI 0-15 codes which are universally supported.
 
 ### 2. Unicode Symbol Support
 
@@ -191,7 +191,7 @@ Cursor symbols (❯), status indicators (✓, ✗, ⚠) require Unicode support.
 
 Yellow text (ANSI 3) has low contrast on white backgrounds (1.47:1).
 
-**Mitigation**: CSM applies bold styling to improve visibility, but users with severe low vision may prefer dark terminals.
+**Mitigation**: AGM applies bold styling to improve visibility, but users with severe low vision may prefer dark terminals.
 
 ## Future Enhancements
 
@@ -237,12 +237,12 @@ defaults:
 
 ## Reporting Accessibility Issues
 
-If you encounter accessibility issues with CSM:
+If you encounter accessibility issues with AGM:
 
 1. Open an issue at: https://github.com/vbonnet/ai-tools/issues
 2. Include:
    - Your terminal emulator and version
-   - CSM version (`csm version`)
+   - AGM version (`csm version`)
    - Theme setting (`grep theme ~/.config/csm/config.yaml`)
    - Description of the accessibility barrier
    - Screenshots (if applicable)
@@ -252,5 +252,5 @@ We are committed to maintaining WCAG AA compliance and improving accessibility.
 ---
 
 **Last Updated**: 2026-01-16
-**CSM Version**: 0.x.x
+**AGM Version**: 0.x.x
 **WCAG Level**: AA ✅

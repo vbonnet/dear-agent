@@ -2,7 +2,7 @@
 #
 # Deep Research E2E Test Script
 #
-# Tests the complete deep-research workflow integration with CSM:
+# Tests the complete deep-research workflow integration with AGM:
 # 1. Parallel URL research orchestration
 # 2. Research report generation
 # 3. Proposal application
@@ -33,21 +33,21 @@ echo "=== Deep Research E2E Test ==="
 echo "Mode: $TEST_MODE"
 echo ""
 
-# Get CSM binary path (script location relative)
+# Get AGM binary path (script location relative)
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 CSM_DIR="$(dirname "$SCRIPT_DIR")"
 CSM_BIN="$CSM_DIR/csm"
 
-# Build CSM if not present
+# Build AGM if not present
 if [ ! -f "$CSM_BIN" ]; then
-  echo "Building CSM binary..."
+  echo "Building AGM binary..."
   go build -C "$CSM_DIR" -o csm ./cmd/csm
   if [ ! -f "$CSM_BIN" ]; then
-    echo -e "${RED}❌ CSM binary not found at $CSM_BIN${NC}"
+    echo -e "${RED}❌ AGM binary not found at $CSM_BIN${NC}"
     echo "Expected location: $CSM_BIN"
     exit 1
   fi
-  echo -e "${GREEN}✓${NC} CSM binary built: $CSM_BIN"
+  echo -e "${GREEN}✓${NC} AGM binary built: $CSM_BIN"
 fi
 
 # Check environment
@@ -154,8 +154,8 @@ if [ "$TEST_MODE" == "--quick" ]; then
   echo "  improving engram and ai-tools repos\""
   echo ""
 
-  # Validate CSM command structure
-  echo "Validating CSM command..."
+  # Validate AGM command structure
+  echo "Validating AGM command..."
   if ! "$CSM_BIN" workflow list | grep -q "deep-research"; then
     echo -e "${RED}❌ FAIL: deep-research workflow not found${NC}"
     exit 1

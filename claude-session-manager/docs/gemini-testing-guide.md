@@ -4,7 +4,7 @@
 
 ## Overview
 
-This guide covers testing the Gemini agent implementation to verify feature parity with the Claude agent in CSM (Claude Session Manager).
+This guide covers testing the Gemini agent implementation to verify feature parity with the Claude agent in AGM (Agent Session Manager).
 
 ## Test Files
 

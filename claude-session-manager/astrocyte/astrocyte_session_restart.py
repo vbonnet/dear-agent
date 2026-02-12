@@ -37,7 +37,7 @@ def check_session_age(session_name: str, min_age_minutes: int = 30) -> Tuple[boo
     Returns:
         (is_old_enough, reason) tuple
     """
-    # TODO: Implement session age checking via CSM manifest or astrocyte state
+    # TODO: Implement session age checking via AGM manifest or astrocyte state
     # For now, assume sessions are old enough (graceful degradation)
     logger.info(f"Session age check: assuming {session_name} is old enough (>={min_age_minutes}min)")
     return (True, "age check passed (assumed)")

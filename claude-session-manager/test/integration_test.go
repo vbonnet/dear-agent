@@ -14,7 +14,7 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 )
 
-// TestConcurrentExecution_Locked verifies that concurrent CSM commands are prevented by file locking
+// TestConcurrentExecution_Locked verifies that concurrent AGM commands are prevented by file locking
 func TestConcurrentExecution_Locked(t *testing.T) {
 	tmpDir := t.TempDir()
 	lockPath := filepath.Join(tmpDir, "test.lock")

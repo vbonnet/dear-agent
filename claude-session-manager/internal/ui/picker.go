@@ -121,7 +121,7 @@ func getTheme(themeName string) *huh.Theme {
 	case "base":
 		return huh.ThemeBase()
 	default:
-		return CSMTheme() // Use CSM theme as default (high contrast)
+		return CSMTheme() // Use AGM theme as default (high contrast)
 	}
 }
 

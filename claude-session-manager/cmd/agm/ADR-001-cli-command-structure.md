@@ -3,13 +3,13 @@
 **Status:** Accepted
 **Date:** 2026-01-20
 **Deciders:** AGM Engineering Team
-**Related:** AGM CLI refactoring from CSM
+**Related:** AGM CLI refactoring from AGM
 
 ---
 
 ## Context
 
-The AGM CLI needed to evolve from Claude Session Manager (CSM) to support multiple AI agents while maintaining an intuitive, scalable command structure. Three organizational approaches were considered for structuring the CLI commands.
+The AGM CLI needed to evolve from Agent Session Manager (AGM) to support multiple AI agents while maintaining an intuitive, scalable command structure. Three organizational approaches were considered for structuring the CLI commands.
 
 ### Problem Statement
 
@@ -17,7 +17,7 @@ The AGM CLI needed to evolve from Claude Session Manager (CSM) to support multip
 
 **Business Driver**: As AGM adds features (agents, workflows, backups), the CLI must remain intuitive for new users while providing power-user capabilities.
 
-**Technical Constraint**: Must maintain backward compatibility with existing CSM commands while introducing new agent-agnostic patterns.
+**Technical Constraint**: Must maintain backward compatibility with existing AGM commands while introducing new agent-agnostic patterns.
 
 ---
 
@@ -29,7 +29,7 @@ We will implement a **hybrid flat + grouped command structure** with smart defau
 1. **Smart Root Command** - `agm [session-name]` with intelligent behavior (no subcommand required)
 2. **Flat Commonly-Used Commands** - `agm new`, `agm resume`, `agm search` (one level deep)
 3. **Grouped Advanced Commands** - `agm session <subcommand>`, `agm agent <subcommand>`, `agm admin <subcommand>`
-4. **Backward Compatibility** - `csm` symlinked to `agm` for CSM users
+4. **Backward Compatibility** - `csm` symlinked to `agm` for AGM users
 
 ---
 
@@ -69,9 +69,9 @@ We will implement a **hybrid flat + grouped command structure** with smart defau
 - Verbose for common operations (3-4 words per command)
 - Steep learning curve for new users
 - Unfamiliar to CLI users expecting flat structure
-- Breaking change from CSM (no `csm new`, only `csm session new`)
+- Breaking change from AGM (no `csm new`, only `csm session new`)
 
-**Verdict**: Rejected. Too verbose for common use cases, breaks CSM muscle memory.
+**Verdict**: Rejected. Too verbose for common use cases, breaks AGM muscle memory.
 
 ---
 
@@ -120,7 +120,7 @@ agm logs <subcommand>        # Grouped (log management)
 - Best of both worlds (fast + organized)
 - Intuitive for new users (smart default, flat common commands)
 - Scales for power users (grouped advanced commands)
-- Backward compatible (flat commands match CSM)
+- Backward compatible (flat commands match AGM)
 - Discoverable (grouped commands organize related features)
 
 **Cons**:
@@ -183,7 +183,7 @@ var searchCmd = &cobra.Command{
 - Most frequently used commands (80% of CLI usage)
 - Short, memorable verbs (`new`, `resume`, `search`)
 - One-level deep (fast to type)
-- Matches CSM patterns (backward compatible)
+- Matches AGM patterns (backward compatible)
 
 ---
 
@@ -235,14 +235,14 @@ func init() {
 
 ---
 
-### Backward Compatibility (CSM Symlink)
+### Backward Compatibility (AGM Symlink)
 
 ```bash
 # Installation creates symlink
 ln -s /usr/local/bin/agm /usr/local/bin/csm
 ```
 
-**Result**: All CSM commands work unchanged:
+**Result**: All AGM commands work unchanged:
 ```bash
 csm new my-session     # Works (calls agm new)
 csm resume my-session  # Works (calls agm resume)
@@ -250,7 +250,7 @@ csm list               # Works (calls agm session list)
 ```
 
 **Design Rationale**:
-- Zero-friction migration for CSM users
+- Zero-friction migration for AGM users
 - Muscle memory preserved
 - Gradual deprecation path
 
@@ -263,7 +263,7 @@ csm list               # Works (calls agm session list)
 ✅ **Fast Common Operations**: `agm resume` instead of `agm session resume` (saves typing)
 ✅ **Scalable Advanced Features**: Grouped commands prevent root namespace pollution
 ✅ **Intuitive for New Users**: Smart default reduces cognitive load
-✅ **Backward Compatible**: CSM commands work unchanged via symlink
+✅ **Backward Compatible**: AGM commands work unchanged via symlink
 ✅ **Progressive Disclosure**: Start simple (flat), advance to grouped as needed
 ✅ **Discoverable**: Help text organized by logical groupings
 
@@ -316,8 +316,8 @@ csm list               # Works (calls agm session list)
 - Power users discovered advanced commands (doctor, fix-uuid) via help text
 
 **Backward Compatibility Testing**:
-- All CSM commands executed successfully via symlink
-- No breaking changes detected in CSM → AGM migration
+- All AGM commands executed successfully via symlink
+- No breaking changes detected in AGM → AGM migration
 
 ---
 

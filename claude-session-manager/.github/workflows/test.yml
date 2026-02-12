@@ -43,7 +43,7 @@ jobs:
 
     - name: Run tests
       env:
-        CSM_TEST_TMUX: "1"
+        AGM_TEST_TMUX: "1"
       run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
     - name: Check test coverage
@@ -101,10 +101,10 @@ jobs:
         go-version: '1.24.x'
         cache: true
 
-    - name: Build CSM
+    - name: Build AGM
       run: go build -v -o csm ./cmd/csm
 
-    - name: Build CSM Reaper
+    - name: Build AGM Reaper
       run: go build -v -o csm-reaper ./cmd/csm-reaper
 
     - name: Verify binaries
@@ -130,12 +130,12 @@ jobs:
     - name: Install tmux
       run: sudo apt-get update && sudo apt-get install -y tmux
 
-    - name: Build CSM with coverage
+    - name: Build AGM with coverage
       run: go build -cover -o csm-cover ./cmd/csm
 
     - name: Run integration tests
       env:
-        CSM_TEST_TMUX: "1"
+        AGM_TEST_TMUX: "1"
         GOCOVERDIR: coverage-integration
       run: |
         mkdir -p coverage-integration

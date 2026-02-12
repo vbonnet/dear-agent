@@ -107,7 +107,7 @@ func TestInjectPromptDirect_EmptyPrompt(t *testing.T) {
 	}
 }
 
-// Integration tests - require tmux and CSM
+// Integration tests - require tmux and AGM
 
 func TestInjectPrompt_Integration(t *testing.T) {
 	if testing.Short() {
@@ -123,7 +123,7 @@ func TestInjectPrompt_Integration(t *testing.T) {
 
 	// Create session
 	if err := orch.Create(sessionName); err != nil {
-		t.Skipf("CSM not available: %v", err)
+		t.Skipf("AGM not available: %v", err)
 	}
 
 	defer func() {
@@ -160,7 +160,7 @@ func TestInjectPromptDirect_Integration(t *testing.T) {
 
 	// Create session
 	if err := orch.Create(sessionName); err != nil {
-		t.Skipf("CSM not available: %v", err)
+		t.Skipf("AGM not available: %v", err)
 	}
 
 	defer func() {
@@ -194,7 +194,7 @@ func TestInjectPrompt_LargePrompt(t *testing.T) {
 
 	// Create session
 	if err := orch.Create(sessionName); err != nil {
-		t.Skipf("CSM not available: %v", err)
+		t.Skipf("AGM not available: %v", err)
 	}
 
 	defer func() {

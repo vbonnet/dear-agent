@@ -32,7 +32,7 @@ const (
 	FallbackWaitTime = 60 * time.Second
 )
 
-// Reaper manages the async archival process for a CSM session
+// Reaper manages the async archival process for a AGM session
 // It waits for Claude to return to prompt, sends /exit, and archives the session
 type Reaper struct {
 	SessionName string

@@ -8,27 +8,27 @@ import (
 	"time"
 )
 
-// Orchestrator manages CSM session lifecycle
+// Orchestrator manages AGM session lifecycle
 type Orchestrator struct {
-	// Optional: CSM binary path (defaults to "csm" in PATH)
+	// Optional: AGM binary path (defaults to "csm" in PATH)
 	csmBinary string
 }
 
-// NewOrchestrator creates a new CSM orchestrator
+// NewOrchestrator creates a new AGM orchestrator
 func NewOrchestrator() *Orchestrator {
 	return &Orchestrator{
 		csmBinary: "csm",
 	}
 }
 
-// NewOrchestratorWithBinary creates an orchestrator with custom CSM binary path
+// NewOrchestratorWithBinary creates an orchestrator with custom AGM binary path
 func NewOrchestratorWithBinary(csmBinary string) *Orchestrator {
 	return &Orchestrator{
 		csmBinary: csmBinary,
 	}
 }
 
-// Create creates a new CSM session
+// Create creates a new AGM session
 func (o *Orchestrator) Create(sessionName string) error {
 	if sessionName == "" {
 		return fmt.Errorf("session name cannot be empty")
@@ -49,11 +49,11 @@ func (o *Orchestrator) Monitor(sessionName string) (bool, error) {
 		return false, fmt.Errorf("session name cannot be empty")
 	}
 
-	// Check CSM session exists
+	// Check AGM session exists
 	cmd := exec.Command(o.csmBinary, "list", "--json")
 	output, err := cmd.Output()
 	if err != nil {
-		return false, fmt.Errorf("failed to list CSM sessions: %w", err)
+		return false, fmt.Errorf("failed to list AGM sessions: %w", err)
 	}
 
 	// Parse JSON output
@@ -104,7 +104,7 @@ func (o *Orchestrator) Extract(sessionName string) (string, error) {
 	return uuid, nil
 }
 
-// Archive archives a CSM session
+// Archive archives a AGM session
 func (o *Orchestrator) Archive(sessionName string) error {
 	if sessionName == "" {
 		return fmt.Errorf("session name cannot be empty")
