@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/telemetry/usage"
 )
 
 var (
@@ -57,6 +59,24 @@ Examples:
 }
 
 func main() {
+	// Track usage with defer pattern
+	startTime := time.Now()
+	tracker, _ := usage.New("")
+	defer func() {
+		if tracker != nil {
+			command := "swarm-executor"
+			if len(os.Args) > 1 {
+				command = "swarm-executor " + os.Args[1]
+			}
+			_ = tracker.TrackSync(usage.Event{
+				Command:  command,
+				Args:     os.Args[1:],
+				Duration: time.Since(startTime).Milliseconds(),
+				Success:  true,
+			})
+		}
+	}()
+
 	// Add persistent flags
 	rootCmd.PersistentFlags().IntVar(&maxParallel, "max-parallel", defaultMaxParallel, "Maximum parallel agents (safe limit)")
 	rootCmd.PersistentFlags().StringVar(&batchMode, "batch-mode", batchModeAuto, "Batching mode: auto, manual, off")

@@ -4,15 +4,21 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/cmd"
 	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/config"
+	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/internal/telemetry/usage"
 	"github.com/vbonnet/ai-tools/tools/gemini-deep-research/types"
 )
 
 const version = "2.0.0"
 
 var (
+	tracker    *usage.Tracker
+	startTime  time.Time
+	argsString string
+
 	// Custom usage function for better help text
 	usageFunc = func() {
 		fmt.Fprintf(os.Stderr, `gemini-deep-research - Research tool using Gemini Deep Research API
@@ -98,7 +104,28 @@ For more information, visit: https://github.com/vbonnet/gemini-deep-research
 	}
 )
 
+// trackAndExit tracks usage and exits with given code
+func trackAndExit(code int) {
+	if tracker != nil {
+		_ = tracker.TrackSync(usage.Event{
+			Command:  "gemini-deep-research" + argsString,
+			Args:     os.Args[1:],
+			Duration: time.Since(startTime).Milliseconds(),
+			Success:  code == 0,
+		})
+	}
+	os.Exit(code)
+}
+
 func main() {
+	// Initialize usage tracking
+	startTime = time.Now()
+	tracker, _ = usage.New("")
+
+	// Build command string for tracking
+	if len(os.Args) > 1 {
+		argsString = " " + os.Args[1]
+	}
 	// Create flags
 	var flags types.Flags
 
@@ -135,13 +162,13 @@ func main() {
 	// Handle version flag
 	if showVersion {
 		fmt.Printf("gemini-deep-research version %s\n", version)
-		os.Exit(0)
+		trackAndExit(0)
 	}
 
 	// Handle help flag
 	if showHelp {
 		flag.Usage()
-		os.Exit(0)
+		trackAndExit(0)
 	}
 
 	// Validate positional arguments
@@ -149,7 +176,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Error: URL argument required")
 		fmt.Fprintln(os.Stderr, "")
 		flag.Usage()
-		os.Exit(1)
+		trackAndExit(1)
 	}
 
 	// Get URL from positional argument
@@ -160,17 +187,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		fmt.Fprintln(os.Stderr, "")
 		flag.Usage()
-		os.Exit(1)
+		trackAndExit(1)
 	}
 
 	// Load configuration
 	cfg, err := config.Load(&flags)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
-		os.Exit(1)
+		trackAndExit(1)
 	}
 
 	// Run the command
 	exitCode := cmd.Run(url, &flags, cfg)
-	os.Exit(exitCode)
+	trackAndExit(exitCode)
 }
