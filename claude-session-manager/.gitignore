@@ -24,3 +24,6 @@ cmd/csm/
 
 # OS
 .DS_Store
+
+# Incomplete features (WIP)
+/internal/telemetry/
