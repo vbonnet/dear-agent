@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vbonnet/claude-session-manager/internal/debug"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
 )
 
 // InitSequence orchestrates the initialization sequence for a new Claude session
