@@ -72,18 +72,8 @@ func TestCompareGolden_UpdateMode(t *testing.T) {
 	assert.Equal(t, actual, string(content))
 }
 
-func TestCompareGolden_MissingFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	goldenPath := filepath.Join(tmpDir, "nonexistent.golden")
-
-	// We can't actually test this without failing the test
-	// So we'll just verify the file doesn't exist
-	_, err := os.Stat(goldenPath)
-	assert.True(t, os.IsNotExist(err))
-
-	// In real usage, CompareGolden would t.Fatalf here
-	t.Skip("Cannot test missing file error without failing test")
-}
+// Deleted TestCompareGolden_MissingFile - Cannot test t.Fatalf behavior in unit test.
+// Missing file scenario is an acceptable failure mode for CompareGolden.
 
 func TestValidateGoldenFile_Valid(t *testing.T) {
 	data := []byte("Valid UTF-8 content\nWith multiple lines\n")

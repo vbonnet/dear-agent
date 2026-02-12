@@ -1,3 +1,5 @@
+//go:build integration
+
 // +build integration
 
 // Package integration contains integration tests for AGM with real tmux.

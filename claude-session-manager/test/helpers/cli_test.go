@@ -10,59 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRunCLI_OutputCapture(t *testing.T) {
-	// Use a simple command that we know exists (echo via sh)
-	// This tests output capture without requiring AGM binary
-
-	// Create a test script that prints to stdout and stderr
-	tmpDir := t.TempDir()
-	scriptPath := filepath.Join(tmpDir, "test-script.sh")
-	script := `#!/bin/sh
-echo "stdout message"
-echo "stderr message" >&2
-exit 0
-`
-	err := os.WriteFile(scriptPath, []byte(script), 0755)
-	require.NoError(t, err)
-
-	// Temporarily replace "agm" with our test script
-	// We'll modify RunCLI to accept a binary path parameter in real implementation
-	// For now, test the concept with a shell command
-
-	// Since RunCLI hardcodes "agm", we'll test with a mock that uses sh -c
-	// This is a limitation of the current implementation
-	// For now, skip this test if AGM is not available
-	t.Skip("Requires AGM binary or mock - will implement after AGM is in PATH")
-}
-
-func TestRunCLI_ExitCode_Success(t *testing.T) {
-	// Test with a simple successful command
-	t.Skip("Requires AGM binary or mock - will implement after AGM is in PATH")
-}
-
-func TestRunCLI_ExitCode_Failure(t *testing.T) {
-	// Test with a command that exits with non-zero code
-	t.Skip("Requires AGM binary or mock - will implement after AGM is in PATH")
-}
-
-func TestRunCLI_EnvironmentIsolation(t *testing.T) {
-	// Verify that RunCLI creates isolated environment directories
-	// This tests the isolation logic without requiring AGM binary
-
-	// We can't test RunCLI directly without AGM, but we can test
-	// the isolation setup by examining what directories would be created
-
-	// For now, verify the implementation sets up correct env vars
-	// by examining the source code
-
-	// This test will be comprehensive once AGM is available
-	t.Skip("Requires AGM binary to verify environment isolation")
-}
-
-func TestRunCLI_IsolatedHomeDirectory(t *testing.T) {
-	// Test that HOME is set to isolated temp directory
-	t.Skip("Requires AGM binary or mock - will implement after AGM is in PATH")
-}
+// Deleted stub tests (TestRunCLI_OutputCapture, TestRunCLI_ExitCode_Success,
+// TestRunCLI_ExitCode_Failure, TestRunCLI_EnvironmentIsolation,
+// TestRunCLI_IsolatedHomeDirectory) - these always skipped, violating coverage requirements.
+// Functionality is covered by TestRunCLI_Mock, TestRunCLI_MockFailure, and
+// TestRunCLI_EnvironmentIsolation_Mock, which actually test the code.
 
 func TestGetPath(t *testing.T) {
 	// Test the getPath helper function
