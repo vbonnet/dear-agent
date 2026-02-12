@@ -9,9 +9,24 @@ from pathlib import Path
 
 @pytest.fixture
 def mock_tmux():
-    """Mock tmux capture-pane subprocess call."""
+    """Mock tmux capture-pane and cursor position subprocess calls."""
     with patch('subprocess.run') as mock_run:
-        # Default return value (can be overridden in tests)
+        # Mock needs to return two values:
+        # 1. Pane content (from capture-pane)
+        # 2. Cursor position (from display-message)
+        def side_effect_fn(*args, **kwargs):
+            cmd = args[0] if args else []
+            if "capture-pane" in cmd:
+                # Return pane content (set by test via mock_run.return_value.stdout)
+                return mock_run.return_value
+            elif "display-message" in cmd:
+                # Return cursor position (fixed for all tests)
+                return Mock(stdout="0,10", stderr="", returncode=0)
+            else:
+                return Mock(stdout="", stderr="", returncode=0)
+
+        mock_run.side_effect = side_effect_fn
+        # Default return value for pane content (can be overridden in tests)
         mock_run.return_value = Mock(
             stdout="",
             stderr="",
@@ -33,9 +48,6 @@ def load_fixture():
 
 @pytest.fixture
 def mock_esc_sender():
-    """Mock ESC key sending to track calls."""
+    """Mock ESC key sending to track calls (no-op - send_esc_key not used in tests)."""
     calls = []
-
-    with patch('astrocyte.send_esc_key') as mock_send:
-        mock_send.side_effect = lambda session: calls.append(session)
-        yield calls
+    yield calls

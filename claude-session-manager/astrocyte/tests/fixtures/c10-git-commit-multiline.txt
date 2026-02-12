@@ -1,0 +1,16 @@
+ ▐▛███▜▌   Claude Code v2.1.17
+▝▜█████▛▘  Sonnet 4.5 · API Usage Billing
+  ▘▘ ▝▝    ~/project
+
+Bash command
+git -C /home/user/project commit -m "feat: add new feature
+
+This is a longer commit message with multiple lines.
+It describes the changes in detail.
+
+Co-Authored-By: Developer Name [dev@example.com]"
+
+Do you want to proceed?
+❯ 1. Yes
+  2. No
+  3. Edit

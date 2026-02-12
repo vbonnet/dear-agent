@@ -994,8 +994,10 @@ def is_stuck_permission_prompt(
 
     # Check for clear tool usage violations that should be rejected immediately
     # These patterns indicate the session is definitely stuck and needs rejection
+    # NOTE: Patterns use ^ anchor to match only at command start, preventing false positives
+    # (e.g., "git rm" is OK, but "rm" alone is a violation)
     violation_patterns = [
-        r'\bcd\s+.*&&',           # cd followed by &&
+        r'\bcd\s+.*&&',           # cd followed by && (can appear mid-command)
         r'&&',                     # Command chaining
         r';\s*\w+',               # Semicolon chaining
         r'\|\|',                   # OR operator
@@ -1003,20 +1005,32 @@ def is_stuck_permission_prompt(
         r'>(?!>)',                # Redirect output
         r'>>',                     # Append redirect
         r'<<',                     # Here document
-        r'\bfor\s+\w+\s+in\b',    # For loop
-        r'\bwhile\s+',            # While loop
-        r'\b(cat|grep|find|sed|awk|head|tail|wc|stat|ls)\s+',  # Text processing and file reading
-        r'\b(rm|cp|mv|mkdir)\s+',    # File operations
-        r'\binstall\s+-D',         # install -D (file operations)
+        r'^\s*for\s+\w+\s+in\b',    # For loop (at command start)
+        r'^\s*while\s+',            # While loop (at command start)
+        r'^\s*(cat|grep|find|sed|awk|head|tail|wc|stat|ls)\s+',  # Text processing and file reading (at command start)
+        r'^\s*rm\s+(?!-)',          # rm without flags (tool usage violation; rm -rf is security prompt, not auto-rejected)
+        r'^\s*(cp|mv|mkdir)\s+',    # File operations (at command start)
+        r'^\s*install\s+-D',         # install -D (at command start)
     ]
 
     has_violation = False
     if bash_command_match:
         command_text = bash_command_match.group(1)
-        has_violation = any(
-            re.search(pattern, command_text)
-            for pattern in violation_patterns
-        )
+
+        # Empty/whitespace-only commands are suspicious violations
+        if not command_text.strip():
+            has_violation = True
+        else:
+            # Whitelist git commands - they're safe and can contain special characters in strings
+            # (e.g., git commit -m "message with <email@example.com>" is legitimate)
+            is_git_command = command_text.strip().startswith('git ')
+
+            if not is_git_command:
+                # Only check violation patterns for non-git commands
+                has_violation = any(
+                    re.search(pattern, command_text)
+                    for pattern in violation_patterns
+                )
 
     # If we found a clear violation, return True immediately (fresh start detection)
     if has_violation:
