@@ -60,7 +60,7 @@ func (seq *InitSequence) Run() error {
 func (seq *InitSequence) sendRename(ctrl *ControlModeSession, watcher *OutputWatcher) error {
 	// Wait for Claude to be ready BEFORE sending command
 	// This ensures we don't send /rename to bash shell (which would fail)
-	if err := seq.waitForClaudePrompt(watcher, 30*time.Second); err != nil {
+	if err := seq.waitForClaudePrompt(ctrl, watcher, 30*time.Second); err != nil {
 		return fmt.Errorf("Claude not ready for rename: %w", err)
 	}
 
@@ -85,7 +85,7 @@ func (seq *InitSequence) sendRename(ctrl *ControlModeSession, watcher *OutputWat
 
 	// Wait for command to complete AFTER sending (Claude returns to prompt)
 	// /rename completes quickly, so shorter timeout (10s) is acceptable
-	if err := seq.waitForClaudePrompt(watcher, 10*time.Second); err != nil {
+	if err := seq.waitForClaudePrompt(ctrl, watcher, 10*time.Second); err != nil {
 		return fmt.Errorf("rename command timeout: %w", err)
 	}
 
@@ -98,7 +98,7 @@ func (seq *InitSequence) sendRename(ctrl *ControlModeSession, watcher *OutputWat
 func (seq *InitSequence) sendAssociation(ctrl *ControlModeSession, watcher *OutputWatcher) error {
 	// Wait for Claude to be ready BEFORE sending command
 	// This ensures we don't send /agm:agm-assoc to bash shell (which would fail)
-	if err := seq.waitForClaudePrompt(watcher, 30*time.Second); err != nil {
+	if err := seq.waitForClaudePrompt(ctrl, watcher, 30*time.Second); err != nil {
 		return fmt.Errorf("Claude not ready for association: %w", err)
 	}
 
@@ -173,19 +173,20 @@ func (seq *InitSequence) waitForClaudePrompt(ctrl *ControlModeSession, watcher *
 
 					// Close control mode before sending keys
 					// (mixing control mode + send-keys doesn't work well)
-					watcher.Close()
+					ctrl.Close()
 
 					// Send Enter key to select "Yes, proceed"
 					if err := SendCommand(seq.SessionName, "C-m"); err != nil {
 						return fmt.Errorf("failed to answer trust prompt: %w", err)
 					}
 
-					// Recreate OutputWatcher (control mode was closed)
+					// Recreate control mode session and watcher
 					var err error
-					watcher, err = NewOutputWatcher(seq.SessionName)
+					ctrl, err = StartControlMode(seq.SessionName)
 					if err != nil {
-						return fmt.Errorf("failed to recreate watcher after trust: %w", err)
+						return fmt.Errorf("failed to restart control mode after trust: %w", err)
 					}
+					watcher = NewOutputWatcher(ctrl.Stdout)
 
 					debug.Log("Trust answered, continuing to wait for Claude prompt")
 
