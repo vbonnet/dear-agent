@@ -9,6 +9,8 @@ csm-test-tmux
 /agm
 /bin/csm
 /bin/agm
+/bin/agm-mcp-server
+/bin/agm-reaper
 /bin/*-wrapper
 cmd/agm/agm
 cmd/csm/
