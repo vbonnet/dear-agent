@@ -28,6 +28,7 @@ LDFLAGS_AGM = -s -w \
 build:
 	go build -ldflags="$(LDFLAGS_AGM)" -o bin/agm ./cmd/agm
 	go build -o bin/csm ./cmd/csm
+	go build -ldflags="$(LDFLAGS_REAPER)" -o bin/agm-reaper ./cmd/agm-reaper
 	go build -ldflags="$(LDFLAGS_AGM)" -o bin/agm-mcp-server ./cmd/agm-mcp-server
 
 test:
@@ -41,14 +42,17 @@ install: build
 	@# Clean up old binaries from incorrect locations to prevent confusion
 	@rm -f $(HOME)/bin/agm $(HOME)/.local/bin/agm 2>/dev/null || true
 	@rm -f $(HOME)/bin/csm $(HOME)/.local/bin/csm 2>/dev/null || true
+	@rm -f $(HOME)/bin/agm-reaper $(HOME)/.local/bin/agm-reaper 2>/dev/null || true
 	@rm -f $(HOME)/bin/agm-mcp-server $(HOME)/.local/bin/agm-mcp-server 2>/dev/null || true
 	@# Install to standard Go binary location (using install for atomic replacement)
 	mkdir -p $(HOME)/go/bin
 	install -m 755 bin/agm $(HOME)/go/bin/agm
 	install -m 755 bin/csm $(HOME)/go/bin/csm
+	install -m 755 bin/agm-reaper $(HOME)/go/bin/agm-reaper
 	install -m 755 bin/agm-mcp-server $(HOME)/go/bin/agm-mcp-server
 	@echo "✓ agm binary installed to $(HOME)/go/bin/agm"
 	@echo "✓ csm wrapper binary installed to $(HOME)/go/bin/csm (forwards to agm)"
+	@echo "✓ agm-reaper binary installed to $(HOME)/go/bin/agm-reaper"
 	@echo "✓ agm-mcp-server binary installed to $(HOME)/go/bin/agm-mcp-server"
 	@echo ""
 	@# Install SessionStart hook (auto-discovered from $(HOME)/.claude/hooks/session-start/)
