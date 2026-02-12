@@ -10,7 +10,7 @@ Strategy:
   skip strategies that were already tried and escalate to next one
 - This prevents ESC → unstuck → stuck → ESC → unstuck → stuck loops
 
-File format: ~/.csm/astrocyte/recovery-escalation.jsonl
+File format: ~/.agm/astrocyte/recovery-escalation.jsonl
 {"session": "name", "timestamp": "2026-02-03T21:30:00Z", "method": "escape", "success": true}
 """
 
@@ -23,7 +23,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-ESCALATION_HISTORY_FILE = Path.home() / ".csm" / "astrocyte" / "recovery-escalation.jsonl"
+ESCALATION_HISTORY_FILE = Path.home() / ".agm" / "astrocyte" / "recovery-escalation.jsonl"
 ESCALATION_WINDOW_MINUTES = 5  # If stuck again within 5 minutes, escalate
 
 

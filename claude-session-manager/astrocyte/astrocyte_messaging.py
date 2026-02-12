@@ -157,7 +157,7 @@ def _log_message(
     Log message send event (fail-safe).
 
     Logs to:
-    - File: ~/.csm/astrocyte/logs/messages.log
+    - File: ~/.agm/astrocyte/logs/messages.log
     - Stdout: For real-time monitoring
 
     On error: Warns to stderr, never raises (message delivery > audit trail)
@@ -291,7 +291,7 @@ def _setup_message_logger() -> logging.Logger:
     Setup logger with file + stdout handlers (fail-safe).
 
     File handler:
-    - Location: ~/.csm/astrocyte/logs/messages.log
+    - Location: ~/.agm/astrocyte/logs/messages.log
     - Rotation: 10MB, 5 backups
     - Permissions: 0600 (owner read/write only)
     - Fail-safe: If file setup fails, warn and use stdout only
@@ -314,7 +314,7 @@ def _setup_message_logger() -> logging.Logger:
 
     # File handler (fail-safe)
     try:
-        log_dir = os.path.expanduser("~/.csm/astrocyte/logs")
+        log_dir = os.path.expanduser("~/.agm/astrocyte/logs")
         os.makedirs(log_dir, mode=0o700, exist_ok=True)
 
         log_file = os.path.join(log_dir, "messages.log")

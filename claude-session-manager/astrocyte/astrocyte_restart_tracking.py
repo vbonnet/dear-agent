@@ -4,7 +4,7 @@ Restart State Tracking for Astrocyte
 
 Tracks session restart history to enable rate limiting and prevent infinite restart loops.
 
-File format: ~/.csm/astrocyte/restart-history.jsonl
+File format: ~/.agm/astrocyte/restart-history.jsonl
 {"session": "name", "timestamp": "2026-02-03T19:57:00Z", "outcome": "success"}
 """
 
@@ -17,7 +17,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-RESTART_HISTORY_FILE = Path.home() / ".csm" / "astrocyte" / "restart-history.jsonl"
+RESTART_HISTORY_FILE = Path.home() / ".agm" / "astrocyte" / "restart-history.jsonl"
 
 
 def ensure_history_file_exists() -> None:

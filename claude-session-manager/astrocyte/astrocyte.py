@@ -31,7 +31,7 @@ except ImportError:
 # Import session history for adaptive thresholds
 try:
     # Import from installed location
-    sys.path.insert(0, str(Path.home() / ".csm" / "astrocyte"))
+    sys.path.insert(0, str(Path.home() / ".agm" / "astrocyte"))
     from session_history import get_adaptive_threshold
     ADAPTIVE_THRESHOLDS_AVAILABLE = True
 except ImportError:
@@ -1329,7 +1329,7 @@ def log_incident(incident: Incident, log_file_path: str | None = None, reporter:
     if log_file_path:
         log_file = Path(log_file_path).expanduser()
     else:
-        log_file = Path.home() / ".csm/astrocyte/incidents.jsonl"
+        log_file = Path.home() / ".agm/astrocyte/incidents.jsonl"
 
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1365,7 +1365,7 @@ def log_false_positive(
 
     Logs to ~/.agm/astrocyte/logs/false-positives.jsonl in JSONL format.  # noqa: path-portability
     """
-    log_file = Path.home() / ".csm/astrocyte/logs/false-positives.jsonl"
+    log_file = Path.home() / ".agm/astrocyte/logs/false-positives.jsonl"
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
     entry = {
@@ -1391,7 +1391,7 @@ def get_slack_webhook_url() -> str | None:
 
     Returns None if config file doesn't exist or webhook not configured.
     """
-    config_file = Path.home() / ".csm/astrocyte/config.json"
+    config_file = Path.home() / ".agm/astrocyte/config.json"
 
     if not config_file.exists():
         return None
@@ -1976,7 +1976,7 @@ def main():
     # Test logging
     print("\n2️⃣ Test log_incident():")
 
-    log_file = Path.home() / ".csm/astrocyte/incidents.jsonl"
+    log_file = Path.home() / ".agm/astrocyte/incidents.jsonl"
     print(f"   Log file: {log_file}")
 
     # Log the test incident

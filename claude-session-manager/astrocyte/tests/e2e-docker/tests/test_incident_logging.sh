@@ -46,7 +46,7 @@ log_info "Running astrocyte daemon (15 seconds)..."
 /tests/scripts/run-astrocyte-test.sh 15
 
 # Validate incident log
-INCIDENTS_LOG="/home/testuser/.csm/astrocyte/incidents.jsonl"
+INCIDENTS_LOG="/home/testuser/.agm/astrocyte/incidents.jsonl"
 PASSED=0
 FAILED=0
 

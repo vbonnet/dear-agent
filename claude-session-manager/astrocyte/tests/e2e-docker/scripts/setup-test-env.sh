@@ -7,7 +7,7 @@ set -euo pipefail
 # Configuration
 TEST_HOME="/home/testuser"
 SESSIONS_DIR="$TEST_HOME/src/sessions"
-ASTROCYTE_DIR="$TEST_HOME/.csm/astrocyte"
+ASTROCYTE_DIR="$TEST_HOME/.agm/astrocyte"
 TMUX_SOCKET="/tmp/csm.sock"
 
 # Colors for output

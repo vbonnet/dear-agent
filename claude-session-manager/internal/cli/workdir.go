@@ -8,7 +8,7 @@ var (
 )
 
 // SetProjectDirectory stores the resolved project directory for commands to use.
-// This directory is where commands should look for .csm files and session data.
+// This directory is where commands should look for .agm files and session data.
 // IMPORTANT: This does NOT change the process working directory (no os.Chdir).
 func SetProjectDirectory(dir string) {
 	projectDirMutex.Lock()

@@ -6,7 +6,7 @@ set -euo pipefail
 
 DURATION="${1:-30}"  # Default: 30 seconds
 ASTROCYTE_PY="/home/testuser/astrocyte/astrocyte.py"
-ASTROCYTE_LOG="/home/testuser/.csm/astrocyte/logs/astrocyte-test.log"
+ASTROCYTE_LOG="/home/testuser/.agm/astrocyte/logs/astrocyte-test.log"
 
 # Colors
 GREEN='\033[0;32m'

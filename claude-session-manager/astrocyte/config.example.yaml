@@ -1,5 +1,5 @@
 # Astrocyte Configuration File
-# Copy to ~/.csm/astrocyte/config.yaml and customize
+# Copy to ~/.agm/astrocyte/config.yaml and customize
 
 # Global Settings
 interval_seconds: 60   # Check interval (1 minute)
@@ -61,8 +61,8 @@ recovery:
 
 # Logging
 logging:
-  incidents_file: "~/.csm/astrocyte/incidents.jsonl"
-  diagnoses_dir: "~/.csm/astrocyte/diagnoses"
+  incidents_file: "~/.agm/astrocyte/incidents.jsonl"
+  diagnoses_dir: "~/.agm/astrocyte/diagnoses"
   verbose: false  # Extra debug output
 
 # Diagnosis Prompts
@@ -82,8 +82,8 @@ multi_user:
 
   # Notes:
   # - Daemon must have read permissions to each user's ~/src/sessions/ directory
-  # - Each user can have their own ~/.csm/astrocyte/config.yaml for custom thresholds
-  # - separate_incident_logs=true creates logs like: /home/alice/.csm/astrocyte/incidents.jsonl
+  # - Each user can have their own ~/.agm/astrocyte/config.yaml for custom thresholds
+  # - separate_incident_logs=true creates logs like: /home/alice/.agm/astrocyte/incidents.jsonl
   # - separate_incident_logs=false uses single combined log (daemon owner's home directory)
 
 # Remote Monitoring (Cloud Deployment)

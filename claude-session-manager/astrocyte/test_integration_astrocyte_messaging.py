@@ -170,7 +170,7 @@ Line 4: Fourth line"""
     def test_logging_creates_messages_log(self):
         """Message send should create log entry in messages.log."""
         # Clear existing log if present
-        log_file = Path.home() / ".csm/astrocyte/logs/messages.log"
+        log_file = Path.home() / ".agm/astrocyte/logs/messages.log"
         if log_file.exists():
             # Record initial size
             initial_size = log_file.stat().st_size

@@ -14,7 +14,6 @@ type AgentInfo struct {
 var agentRegistry = map[string]func() (Agent, error){
 	"claude": func() (Agent, error) { return NewClaudeAdapter(nil) },
 	"gemini": func() (Agent, error) { return NewGeminiAdapter(nil) },
-	"gpt":    func() (Agent, error) { return NewGPTAdapter(), nil },
 }
 
 // GetAgent returns an agent adapter instance by name
@@ -28,7 +27,7 @@ func GetAgent(name string) (Agent, error) {
 
 // GetAllAgents returns metadata for all known agents
 func GetAllAgents() []AgentInfo {
-	agents := []string{"claude", "gemini", "gpt"}
+	agents := []string{"claude", "gemini"}
 	result := []AgentInfo{}
 
 	for _, name := range agents {

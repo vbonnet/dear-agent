@@ -25,7 +25,7 @@ Autonomous daemon for detecting and recovering stuck CSM sessions.
   2. **Zero-token waiting**: ↓ 0 tokens + waiting pattern for >10 minutes
   3. **Cursor frozen**: No cursor movement + no output for >15 minutes
 - **Automatically recovers stuck sessions using ESC**
-- **Logs incidents to JSONL** (`~/.csm/astrocyte/incidents.jsonl`)
+- **Logs incidents to JSONL** (`~/.agm/astrocyte/incidents.jsonl`)
 - **Verifies recovery success** (pane content changed, cursor moved, pattern gone)
 - **Sends Slack notifications** (optional, configurable webhook)
 - **Continues monitoring after recovery**
@@ -63,7 +63,7 @@ To enable Slack notifications for incidents:
 
 2. Create config file:
    ```bash
-   cp ~/src/ws/oss/repos/ai-tools/main/claude-session-manager/astrocyte/config.example.json ~/.csm/astrocyte/config.json
+   cp ~/src/ws/oss/repos/ai-tools/main/claude-session-manager/astrocyte/config.example.json ~/.agm/astrocyte/config.json
    ```
 
 3. Edit config file:
@@ -130,7 +130,7 @@ Active CSM sessions: 9
    📊 Pane content changed: YES
 ```
 
-**JSONL Log Entry** (`~/.csm/astrocyte/incidents.jsonl`):
+**JSONL Log Entry** (`~/.agm/astrocyte/incidents.jsonl`):
 ```json
 {
   "timestamp": "2026-01-30T10:00:31.298856",
@@ -195,7 +195,7 @@ docker-compose up -d
 
 # Configure agent
 export ASTROCYTE_API_TOKEN="dev_token_12345"
-# Edit ~/.csm/astrocyte/config.yaml:
+# Edit ~/.agm/astrocyte/config.yaml:
 # remote:
 #   enabled: true
 #   collector_url: "http://localhost:8000"
@@ -226,7 +226,7 @@ kubectl apply -f k8s/deployment.yaml # Deploy collector
 kubectl get svc astrocyte-collector
 
 # Configure agents with collector URL
-# Edit ~/.csm/astrocyte/config.yaml on each workstation
+# Edit ~/.agm/astrocyte/config.yaml on each workstation
 ```
 
 ### Architecture
@@ -280,7 +280,7 @@ kubectl get svc astrocyte-collector
 - Mustering timeout: 10 minutes
 
 **Future** (Phase 4):
-- Config file: `~/.csm/astrocyte/config.yaml`
+- Config file: `~/.agm/astrocyte/config.yaml`
 - Per-session overrides
 - Adjustable thresholds
 
@@ -351,7 +351,7 @@ kubectl get svc astrocyte-collector
 - [x] Bead 4.5: Integration with main loop ✅
 
 **Key Features**:
-- Configuration file: `~/.csm/astrocyte/config.yaml`
+- Configuration file: `~/.agm/astrocyte/config.yaml`
 - Adjustable thresholds (mustering, zero-token, cursor frozen)
 - Per-session overrides for custom timeouts
 - Backward compatible with existing `config.json` (Slack webhook)

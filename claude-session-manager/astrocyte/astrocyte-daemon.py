@@ -50,7 +50,7 @@ def setup_logging(log_dir: Path, verbose: bool = False):
     Configure logging to both file and console.
 
     Args:
-        log_dir: Directory for log files (e.g., ~/.csm/astrocyte/logs)
+        log_dir: Directory for log files (e.g., ~/.agm/astrocyte/logs)
         verbose: If True, set DEBUG level; otherwise INFO
     """
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -97,7 +97,7 @@ def setup_logging(log_dir: Path, verbose: bool = False):
 def main():
     """Production monitoring loop - no test code."""
     # Create necessary directories
-    base_dir = Path.home() / ".csm/astrocyte"
+    base_dir = Path.home() / ".agm/astrocyte"
     base_dir.mkdir(parents=True, exist_ok=True)
 
     log_dir = base_dir / "logs"
@@ -116,9 +116,9 @@ def main():
     print("🧠 Astrocyte daemon starting...")
     print(f"   Timestamp: {datetime.now().isoformat()}")
     print(f"   Mode: Production Deployment - Continuous Monitoring")
-    print(f"   Incidents: ~/.csm/astrocyte/incidents.jsonl")  # noqa: path-portability
-    print(f"   Diagnoses: ~/.csm/astrocyte/diagnoses/")  # noqa: path-portability
-    print(f"   Debug logs: ~/.csm/astrocyte/logs/daemon.log")  # noqa: path-portability
+    print(f"   Incidents: ~/.agm/astrocyte/incidents.jsonl")  # noqa: path-portability
+    print(f"   Diagnoses: ~/.agm/astrocyte/diagnoses/")  # noqa: path-portability
+    print(f"   Debug logs: ~/.agm/astrocyte/logs/daemon.log")  # noqa: path-portability
 
     logger.info("="*60)
     logger.info("Astrocyte daemon starting")

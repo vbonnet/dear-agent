@@ -7,8 +7,8 @@ set -euo pipefail
 SESSION_NAME="$1"
 EXPECTED_SYMPTOM="${2:-}"
 
-INCIDENTS_LOG="/home/testuser/.csm/astrocyte/incidents.jsonl"
-CSM_MOCK_LOG="/home/testuser/.csm/astrocyte/logs/csm-mock.log"
+INCIDENTS_LOG="/home/testuser/.agm/astrocyte/incidents.jsonl"
+CSM_MOCK_LOG="/home/testuser/.agm/astrocyte/logs/csm-mock.log"
 
 # Colors
 GREEN='\033[0;32m'

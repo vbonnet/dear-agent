@@ -51,7 +51,7 @@ if /tests/scripts/verify-recovery.sh "$SESSION_NAME" "stuck_zero_token_waiting";
     log_pass "Zero-token detection test PASSED"
 
     # Additional check: Verify diagnosis prompt was sent
-    CSM_LOG="/home/testuser/.csm/astrocyte/logs/csm-mock.log"
+    CSM_LOG="/home/testuser/.agm/astrocyte/logs/csm-mock.log"
     if [ -f "$CSM_LOG" ] && grep -q "csm send.*$SESSION_NAME" "$CSM_LOG"; then
         log_pass "Diagnosis prompt was sent via csm send"
     else

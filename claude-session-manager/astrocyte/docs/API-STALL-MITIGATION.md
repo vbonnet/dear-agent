@@ -232,7 +232,7 @@ def verify_recovery(before: SessionState, after: SessionState) -> bool:
 
 ### Incident Logging
 
-Every detection and recovery is logged to `~/.csm/astrocyte/incidents.jsonl`:
+Every detection and recovery is logged to `~/.agm/astrocyte/incidents.jsonl`:
 
 ```json
 {
@@ -303,7 +303,7 @@ thresholds:
 
 ### Threshold Configuration
 
-Edit `~/.csm/astrocyte/config.yaml`:
+Edit `~/.agm/astrocyte/config.yaml`:
 
 ```yaml
 # Detection Thresholds (in minutes)
@@ -343,7 +343,7 @@ session_overrides:
 jq -r 'select(.symptom == "stuck_zero_token_waiting") |
   "\(.timestamp) | \(.session_name) | duration:\(.duration_minutes)m |
    recovery:\(.recovery_duration_seconds)s"' \
-  ~/.csm/astrocyte/incidents.jsonl | tail -20
+  ~/.agm/astrocyte/incidents.jsonl | tail -20
 ```
 
 **Example output**:
@@ -358,7 +358,7 @@ jq -r 'select(.symptom == "stuck_zero_token_waiting") |
 # Get full incident details
 jq 'select(.symptom == "stuck_zero_token_waiting") |
   select(.timestamp | startswith("2026-02-02"))' \
-  ~/.csm/astrocyte/incidents.jsonl | jq -r '.pane_snapshot'
+  ~/.agm/astrocyte/incidents.jsonl | jq -r '.pane_snapshot'
 ```
 
 **Step 3**: Check recovery success rate
@@ -366,10 +366,10 @@ jq 'select(.symptom == "stuck_zero_token_waiting") |
 ```bash
 # Calculate recovery success rate
 echo "Total stalls: $(jq -r 'select(.symptom == "stuck_zero_token_waiting") |
-  select(.recovery_success != null)' ~/.csm/astrocyte/incidents.jsonl | wc -l)"
+  select(.recovery_success != null)' ~/.agm/astrocyte/incidents.jsonl | wc -l)"
 
 echo "Successful recoveries: $(jq -r 'select(.symptom == "stuck_zero_token_waiting") |
-  select(.recovery_success == true)' ~/.csm/astrocyte/incidents.jsonl | wc -l)"
+  select(.recovery_success == true)' ~/.agm/astrocyte/incidents.jsonl | wc -l)"
 ```
 
 ### What to Do If Stalls Increase in Frequency
@@ -390,7 +390,7 @@ echo "Successful recoveries: $(jq -r 'select(.symptom == "stuck_zero_token_waiti
    ```bash
    # Which sessions are stalling most?
    jq -r 'select(.symptom == "stuck_zero_token_waiting") | .session_name' \
-     ~/.csm/astrocyte/incidents.jsonl | sort | uniq -c | sort -rn
+     ~/.agm/astrocyte/incidents.jsonl | sort | uniq -c | sort -rn
    ```
 
 3. **Check for network issues**:
@@ -463,7 +463,7 @@ csm restart <session-name>
 jq -r 'select(.symptom == "stuck_zero_token_waiting") |
   select(.timestamp | startswith("'$(date +%Y-%m-%d)'")) |
   "\(.timestamp) | \(.session_name)"' \
-  ~/.csm/astrocyte/incidents.jsonl
+  ~/.agm/astrocyte/incidents.jsonl
 ```
 
 ### 2. Tune Thresholds Per Workflow
@@ -477,7 +477,7 @@ jq -r 'select(.symptom == "stuck_zero_token_waiting") |
 Configure Slack webhooks for real-time alerts:
 
 ```yaml
-# ~/.csm/astrocyte/config.yaml
+# ~/.agm/astrocyte/config.yaml
 slack:
   enabled: true
   webhook_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
@@ -527,7 +527,7 @@ When contacting support, include:
 # Extract recent stall incidents
 jq 'select(.symptom == "stuck_zero_token_waiting") |
   select(.timestamp | startswith("'$(date -d "7 days ago" +%Y-%m-%d)'"))' \
-  ~/.csm/astrocyte/incidents.jsonl > stall_incidents_last_7_days.jsonl
+  ~/.agm/astrocyte/incidents.jsonl > stall_incidents_last_7_days.jsonl
 
 # Summary statistics
 echo "Total stalls (7 days): $(cat stall_incidents_last_7_days.jsonl | wc -l)"
@@ -542,7 +542,7 @@ echo "Recovery success rate: $(jq -r 'select(.recovery_success == true)' \
 - Network environment (home/office/VPN)
 - Claude Code version: `claude-code --version`
 - CSM version: `csm version`
-- Astrocyte logs: `~/.csm/astrocyte/logs/daemon.log`
+- Astrocyte logs: `~/.agm/astrocyte/logs/daemon.log`
 
 ### Do NOT Contact Support For:
 
@@ -561,7 +561,7 @@ For advanced users who want dynamic threshold control:
 
 ```bash
 # Edit config to add session-specific override
-cat >> ~/.csm/astrocyte/config.yaml <<EOF
+cat >> ~/.agm/astrocyte/config.yaml <<EOF
 
 session_overrides:
   $(tmux display-message -p '#S'):
@@ -576,17 +576,17 @@ systemctl --user restart astrocyte
 
 ```bash
 # Backup current config
-cp ~/.csm/astrocyte/config.yaml ~/.csm/astrocyte/config.yaml.backup
+cp ~/.agm/astrocyte/config.yaml ~/.agm/astrocyte/config.yaml.backup
 
 # Set aggressive thresholds globally
 sed -i 's/zero_token_waiting: [0-9]*/zero_token_waiting: 3/' \
-  ~/.csm/astrocyte/config.yaml
+  ~/.agm/astrocyte/config.yaml
 
 # Restart daemon
 systemctl --user restart astrocyte
 
 # Restore later
-mv ~/.csm/astrocyte/config.yaml.backup ~/.csm/astrocyte/config.yaml
+mv ~/.agm/astrocyte/config.yaml.backup ~/.agm/astrocyte/config.yaml
 systemctl --user restart astrocyte
 ```
 
@@ -596,7 +596,7 @@ systemctl --user restart astrocyte
 
 ### Real-World Statistics (Production)
 
-Based on `~/.csm/astrocyte/incidents.jsonl` analysis:
+Based on `~/.agm/astrocyte/incidents.jsonl` analysis:
 
 **Total zero-token stalls logged**: 850+ incidents
 **Date range**: 2026-01-30 to 2026-02-03

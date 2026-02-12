@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_FILE="$SCRIPT_DIR/astrocyte.service"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
-CONFIG_DIR="$HOME/.csm/astrocyte"
+CONFIG_DIR="$HOME/.agm/astrocyte"
 
 echo "🧠 Astrocyte Installation Script"
 echo "================================"

@@ -53,7 +53,7 @@ log_info "Running astrocyte daemon (15 seconds)..."
 # Verify results
 log_info "Verifying recovery..."
 
-INCIDENTS_LOG="/home/testuser/.csm/astrocyte/incidents.jsonl"
+INCIDENTS_LOG="/home/testuser/.agm/astrocyte/incidents.jsonl"
 PASSED=0
 FAILED=0
 

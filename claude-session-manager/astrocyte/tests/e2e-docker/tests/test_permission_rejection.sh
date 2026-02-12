@@ -69,7 +69,7 @@ if /tests/scripts/verify-recovery.sh "$SESSION_NAME" "permission_prompt"; then
     log_pass "Permission prompt detection test PASSED"
 
     # Additional check: Verify csm reject was called
-    CSM_LOG="/home/testuser/.csm/astrocyte/logs/csm-mock.log"
+    CSM_LOG="/home/testuser/.agm/astrocyte/logs/csm-mock.log"
     if [ -f "$CSM_LOG" ] && grep -q "csm reject.*$SESSION_NAME" "$CSM_LOG"; then
         log_pass "Permission prompt was rejected via csm reject"
     else
