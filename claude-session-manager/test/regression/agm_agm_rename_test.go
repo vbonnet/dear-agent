@@ -13,9 +13,9 @@ import (
 // TestRegressionDocumentation ensures AGM→AGM rename regressions are documented
 func TestRegressionDocumentation(t *testing.T) {
 	// Verify regression documentation exists
-	docPath := filepath.Join("..", "..", "docs", "CSM-AGM-RENAME-REGRESSIONS.md")
+	docPath := filepath.Join("..", "..", "docs", "AGM-RENAME-REGRESSIONS.md")
 	_, err := os.Stat(docPath)
-	require.NoError(t, err, "Regression documentation should exist at docs/CSM-AGM-RENAME-REGRESSIONS.md")
+	require.NoError(t, err, "Regression documentation should exist at docs/AGM-RENAME-REGRESSIONS.md")
 
 	// Read documentation
 	content, err := os.ReadFile(docPath)
