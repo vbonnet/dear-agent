@@ -78,13 +78,13 @@ chmod 600 ~/.bashrc
 **Session storage location:**
 - `~/sessions/` - Current unified storage
 - `~/.claude-sessions/` - Legacy storage
-- `~/.csm/logs/messages/` - Message logs
+- `~/.agm/logs/messages/` - Message logs
 
 **File permissions:**
 ```bash
 # Secure your session directories
 chmod 700 ~/sessions
-chmod 700 ~/.csm/logs
+chmod 700 ~/.agm/logs
 
 # Verify permissions
 ls -la ~/sessions
@@ -176,7 +176,7 @@ ui:
 ### Audit Logging
 
 **Message logging:**
-- All agent interactions logged to `~/.csm/logs/messages/`
+- All agent interactions logged to `~/.agm/logs/messages/`
 - Logs contain timestamps, sender, recipient, message content
 - Default retention: 30 days
 - Rotation: Size-based (10MB per file)
@@ -196,11 +196,11 @@ agm logs query --sender astrocyte --level error
 **Log security:**
 ```bash
 # Secure log directory
-chmod 700 ~/.csm/logs
-chmod 600 ~/.csm/logs/messages/*.jsonl
+chmod 700 ~/.agm/logs
+chmod 600 ~/.agm/logs/messages/*.jsonl
 
 # Verify permissions
-ls -la ~/.csm/logs/messages/
+ls -la ~/.agm/logs/messages/
 ```
 
 ### Multi-User Environments

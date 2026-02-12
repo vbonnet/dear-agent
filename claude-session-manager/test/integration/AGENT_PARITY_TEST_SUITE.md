@@ -202,7 +202,7 @@ go test ./test/integration/ -v -run TestAgentParity -ginkgo.focus="Integration"
 
 The tests automatically configure both agents:
 
-- **Claude**: Uses default session store at `~/.csm/sessions.json`
+- **Claude**: Uses default session store at `~/.agm/sessions.json`
 - **Gemini**: Sets `GEMINI_API_KEY=test-api-key-for-testing` for testing
 
 ### Test Environment
@@ -399,7 +399,7 @@ When agent interface changes:
 
 ### Tests Fail with "session not found"
 
-- Check that `~/.csm/` directory exists and is writable
+- Check that `~/.agm/` directory exists and is writable
 - Verify session store permissions
 - Ensure cleanup is working properly
 

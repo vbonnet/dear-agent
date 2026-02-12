@@ -89,7 +89,7 @@ Ratio:     5.0x advantage for Gemini
 
 | Operation | Gemini | Claude | Parity |
 |-----------|--------|--------|--------|
-| **Create Session** | ✅ Creates ~/.csm/gemini/<id>/ | ✅ Creates tmux session | ⚠️ Different mechanisms |
+| **Create Session** | ✅ Creates ~/.agm/gemini/<id>/ | ✅ Creates tmux session | ⚠️ Different mechanisms |
 | **Resume Session** | ✅ Validates directory exists | ✅ Attaches to tmux | ⚠️ Different mechanisms |
 | **Terminate Session** | ✅ Removes from store | ✅ Kills tmux session | ⚠️ Different cleanup |
 | **Status Check** | ✅ Active/Terminated | ✅ Active/Suspended/Terminated | ⚠️ Missing "Suspended" state |
@@ -104,7 +104,7 @@ Ratio:     5.0x advantage for Gemini
 
 **Gemini:**
 ```
-~/.csm/
+~/.agm/
 ├── gemini/
 │   ├── <session-id-1>/
 │   │   └── history.jsonl

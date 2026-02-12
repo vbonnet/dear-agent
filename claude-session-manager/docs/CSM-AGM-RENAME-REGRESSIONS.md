@@ -209,12 +209,12 @@ $ agm archive nightly
 
 **File:** `~/.bashrc`
 
-**Problem:** Old completion setup referenced `~/.csm-completion.bash` script which no longer exists after rename. Legacy approach used static completion script instead of dynamic completion generator.
+**Problem:** Old completion setup referenced `~/.agm-completion.bash` script which no longer exists after rename. Legacy approach used static completion script instead of dynamic completion generator.
 
 **Old Setup:**
 ```bash
 # Legacy CSM completion (broken)
-source ~/.csm-completion.bash
+source ~/.agm-completion.bash
 ```
 
 ### Fix Applied

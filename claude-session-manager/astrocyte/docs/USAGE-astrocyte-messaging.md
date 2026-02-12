@@ -49,7 +49,7 @@ send_tagged_message(
 
 1. **Formatting:** Message wrapped in `<system-reminder>` block with metadata
 2. **Validation:** Inputs checked (fail-fast on errors)
-3. **Logging:** Send logged to `~/.csm/astrocyte/logs/messages.log`
+3. **Logging:** Send logged to `~/.agm/astrocyte/logs/messages.log`
 4. **Sending:** Message sent via `csm send` command
 
 ### Message Format
@@ -120,7 +120,7 @@ except subprocess.CalledProcessError as e:
 def send_diagnosis_prompt_via_csm(session_name: str, prompt: str) -> bool:
     try:
         # Write prompt to temp file
-        prompt_file = Path.home() / ".csm/astrocyte/prompts" / f"{session_name}-diagnosis.txt"
+        prompt_file = Path.home() / ".agm/astrocyte/prompts" / f"{session_name}-diagnosis.txt"
         with open(prompt_file, "w") as f:
             f.write(prompt)
 
@@ -230,9 +230,9 @@ send_tagged_message("session", "Tagged message", "diagnosis")
 
 **Fix:**
 
-1. Check disk space: `df -h ~/.csm/astrocyte/logs`
-2. Check permissions: `ls -ld ~/.csm/astrocyte/logs`
-3. Fix permissions: `chmod 0700 ~/.csm/astrocyte/logs`
+1. Check disk space: `df -h ~/.agm/astrocyte/logs`
+2. Check permissions: `ls -ld ~/.agm/astrocyte/logs`
+3. Fix permissions: `chmod 0700 ~/.agm/astrocyte/logs`
 
 **Note:** This warning is fail-safe - the message is still delivered. Logging is best-effort.
 
@@ -341,7 +341,7 @@ send_tagged_message(session, large_report, "diagnosis")
 
 ## Log File Reference
 
-**Location:** `~/.csm/astrocyte/logs/messages.log`
+**Location:** `~/.agm/astrocyte/logs/messages.log`
 
 **Permissions:** 0600 (owner read/write only)
 
@@ -366,16 +366,16 @@ send_tagged_message(session, large_report, "diagnosis")
 
 ```bash
 # View recent sends
-tail -20 ~/.csm/astrocyte/logs/messages.log
+tail -20 ~/.agm/astrocyte/logs/messages.log
 
 # Find all diagnosis messages
-grep "type=diagnosis" ~/.csm/astrocyte/logs/messages.log
+grep "type=diagnosis" ~/.agm/astrocyte/logs/messages.log
 
 # Find messages to specific session
-grep "session=my-session" ~/.csm/astrocyte/logs/messages.log
+grep "session=my-session" ~/.agm/astrocyte/logs/messages.log
 
 # Count sends by type
-grep -o "type=[^[:space:]]*" ~/.csm/astrocyte/logs/messages.log | sort | uniq -c
+grep -o "type=[^[:space:]]*" ~/.agm/astrocyte/logs/messages.log | sort | uniq -c
 ```
 
 ---

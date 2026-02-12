@@ -164,7 +164,7 @@ AGM creates the following directories:
 
 ~/.claude-sessions/     # Legacy session storage (v2)
 
-~/.csm/                 # AGM runtime data
+~/.agm/                 # AGM runtime data
   ├── logs/
   │   └── messages/     # Message logs
   └── cache/            # Temporary cache files
@@ -178,7 +178,7 @@ AGM creates the following directories:
 ```bash
 # Set recommended permissions
 chmod 700 ~/sessions
-chmod 700 ~/.csm/logs
+chmod 700 ~/.agm/logs
 chmod 600 ~/.config/csm/config.yaml
 chmod 600 ~/.bashrc  # Contains API keys
 ```
@@ -236,7 +236,7 @@ Each user maintains their own:
 - Session storage (`~/sessions/`)
 - Configuration (`~/.config/csm/`)
 - API keys (environment variables)
-- Message logs (`~/.csm/logs/`)
+- Message logs (`~/.agm/logs/`)
 
 **Administrator setup:**
 ```bash
@@ -283,7 +283,7 @@ RUN apk add --no-cache tmux bash
 COPY --from=builder /build/agm /usr/local/bin/agm
 
 # Create directories
-RUN mkdir -p /root/sessions /root/.config/csm /root/.csm/logs
+RUN mkdir -p /root/sessions /root/.config/csm /root/.agm/logs
 
 # Set entrypoint
 ENTRYPOINT ["/usr/local/bin/agm"]
@@ -529,7 +529,7 @@ tar czf $BACKUP_DIR/sessions.tar.gz ~/sessions
 cp ~/.config/csm/config.yaml $BACKUP_DIR/
 
 # Backup logs
-tar czf $BACKUP_DIR/logs.tar.gz ~/.csm/logs
+tar czf $BACKUP_DIR/logs.tar.gz ~/.agm/logs
 
 # Cleanup old backups (keep 30 days)
 find /backups/agm -type d -mtime +30 -exec rm -rf {} +
@@ -546,7 +546,7 @@ find /backups/agm -type d -mtime +30 -exec rm -rf {} +
 **Log rotation:**
 ```bash
 # /etc/logrotate.d/agm
-/home/*/.csm/logs/messages/*.jsonl {
+/home/*/.agm/logs/messages/*.jsonl {
     daily
     rotate 30
     compress
@@ -571,8 +571,8 @@ chmod 700 ~/.config/csm
 chmod 600 ~/.config/csm/config.yaml
 
 # Secure logs
-chmod 700 ~/.csm/logs
-chmod 600 ~/.csm/logs/messages/*.jsonl
+chmod 700 ~/.agm/logs
+chmod 600 ~/.agm/logs/messages/*.jsonl
 
 # Audit permissions
 agm doctor --validate
@@ -610,7 +610,7 @@ loginctl show-user $USER | grep Linger
 **Problem:** Permission denied errors
 ```bash
 # Solution: Fix permissions
-chmod 700 ~/sessions ~/.csm
+chmod 700 ~/sessions ~/.agm
 agm doctor --validate --fix
 ```
 

@@ -14,7 +14,7 @@ Added session restart capability to astrocyte for recovering severely stuck sess
 - `get_last_restart_time(session_name)` - Get most recent restart timestamp
 - `check_rate_limit(session_name, window_hours=1)` - Prevent excessive restarts
 
-**File**: `~/.csm/astrocyte/restart-history.jsonl`
+**File**: `~/.agm/astrocyte/restart-history.jsonl`
 
 ---
 
@@ -83,5 +83,5 @@ Integration test needed:
 
 1. Copy modules to astrocyte directory (done)
 2. Restart astrocyte daemon
-3. Monitor `~/.csm/astrocyte/restart-history.jsonl` for restart events
+3. Monitor `~/.agm/astrocyte/restart-history.jsonl` for restart events
 4. Monitor astrocyte logs for recovery chain execution

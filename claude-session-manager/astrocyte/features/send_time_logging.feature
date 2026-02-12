@@ -5,7 +5,7 @@ Feature: Send-Time Logging (AC2: Complete audit trail)
 
   Background:
     Given the astrocyte_messaging module is loaded
-    And the log directory exists at "~/.csm/astrocyte/logs/"
+    And the log directory exists at "~/.agm/astrocyte/logs/"
 
   Scenario: Message send creates log entry
     Given the messages.log file is empty or missing

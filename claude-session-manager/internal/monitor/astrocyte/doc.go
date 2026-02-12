@@ -5,7 +5,7 @@
 //
 // Astrocyte is the CSM daemon that detects and auto-recovers stuck sessions
 // (zero-token galloping, permission prompts, API stalls, etc.). It writes
-// diagnosis files to ~/.csm/astrocyte/diagnoses/ in markdown format.
+// diagnosis files to ~/.agm/astrocyte/diagnoses/ in markdown format.
 //
 // Key features:
 //   - Parse individual diagnosis files
@@ -17,7 +17,7 @@
 // Example usage:
 //
 //	// Parse a single diagnosis file
-//	diag, err := astrocyte.ParseDiagnosisFile("~/.csm/astrocyte/diagnoses/session-2026-01-01.md")
+//	diag, err := astrocyte.ParseDiagnosisFile("~/.agm/astrocyte/diagnoses/session-2026-01-01.md")
 //	if err != nil {
 //	    return err
 //	}
@@ -25,7 +25,7 @@
 //	    diag.SessionID, diag.Type, diag.RecoverySuccess)
 //
 //	// Parse all diagnosis files in a directory
-//	diagnoses, err := astrocyte.ParseDiagnosisDirectory("~/.csm/astrocyte/diagnoses")
+//	diagnoses, err := astrocyte.ParseDiagnosisDirectory("~/.agm/astrocyte/diagnoses")
 //	if err != nil {
 //	    log.Printf("Some files failed to parse: %v", err)
 //	}

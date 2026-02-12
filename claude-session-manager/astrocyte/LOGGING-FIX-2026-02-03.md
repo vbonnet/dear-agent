@@ -2,7 +2,7 @@
 
 ## Problem
 
-The astrocyte daemon stopped producing logs to `~/.csm/astrocyte/logs/daemon.log` after restart (either via systemd `Restart=always` or manual restart).
+The astrocyte daemon stopped producing logs to `~/.agm/astrocyte/logs/daemon.log` after restart (either via systemd `Restart=always` or manual restart).
 
 ## Root Cause
 
@@ -89,7 +89,7 @@ To verify the fix works:
 
 2. **Check logs are being written**:
    ```bash
-   tail -f ~/.csm/astrocyte/logs/daemon.log
+   tail -f ~/.agm/astrocyte/logs/daemon.log
    ```
 
 3. **Simulate restart** (Ctrl-C and restart):
@@ -101,7 +101,7 @@ To verify the fix works:
 
 4. **Verify logs continue** after restart:
    ```bash
-   tail -20 ~/.csm/astrocyte/logs/daemon.log
+   tail -20 ~/.agm/astrocyte/logs/daemon.log
    # Should see new "Astrocyte daemon starting" message
    ```
 

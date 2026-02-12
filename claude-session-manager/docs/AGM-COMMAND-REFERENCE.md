@@ -559,34 +559,38 @@ agm fix --clear my-session
 
 ---
 
-### agm associate
+### agm session associate
 
-Create session association from within running session.
+Associate a AGM session with the current Claude session UUID.
 
-**Usage**: `agm associate [flags]`
+**Usage**: `agm session associate <session-name> [flags]`
 
 **Flags**:
-- `--create <session-name>` - Create new session association
-- `--list` - List all sessions
-- `--status` - Show current session status
+- `--uuid <uuid>` - Specify Claude UUID explicitly (instead of auto-detection)
+- `--create` - Create new manifest if session doesn't exist
+- `-C, --directory <path>` - Working directory for new session
 
 **Examples**:
 
 ```bash
-# From within Claude session
-agm associate --create my-project
+# Associate current Claude session with AGM session "my-project"
+agm session associate my-project
 
-# List sessions (verify association)
-agm associate --list
+# Create new session if it doesn't exist
+agm session associate my-project --create
 
-# Check current status
-agm associate --status
+# Specify directory for new session
+agm session associate my-project --create -C ~/projects/myapp
+
+# Use specific Claude UUID instead of auto-detection
+agm session associate my-project --uuid c86ffd41-cbcc-4bfa-8b1f-4da7c83fc3d2
 ```
 
 **Use Cases**:
-- Manual session creation from within agent
-- Verifying session associations
-- Debugging association issues
+- Associate existing AGM session with current Claude UUID
+- Create new AGM session from within Claude
+- Reconnect session after UUID changes
+- Debug session association issues
 
 ---
 

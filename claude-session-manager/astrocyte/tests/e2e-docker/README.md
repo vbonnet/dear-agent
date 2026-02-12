@@ -187,7 +187,7 @@ Failed tests:
 Tests use accelerated timeouts for fast execution:
 
 ```yaml
-# ~/.csm/astrocyte/config.yaml (in container)
+# ~/.agm/astrocyte/config.yaml (in container)
 interval_seconds: 5  # Check every 5 seconds
 
 thresholds:
@@ -202,7 +202,7 @@ This allows tests to complete in ~15 seconds per scenario instead of production 
 ## Mock CSM Commands
 
 The tests use a mock `csm` binary (`mocks/csm`) that:
-- Logs all calls to `~/.csm/astrocyte/logs/csm-mock.log`
+- Logs all calls to `~/.agm/astrocyte/logs/csm-mock.log`
 - Simulates `csm send` (prompt delivery)
 - Simulates `csm reject` (permission rejection)
 - Returns success (exit 0) for valid calls
@@ -225,7 +225,7 @@ This allows testing astrocyte's integration without requiring the full CSM Go bi
 
 **Error: `Incident not logged`**
 - **Cause**: Astrocyte didn't detect stuck pattern or threshold not met
-- **Fix**: Check astrocyte log: `/home/testuser/.csm/astrocyte/logs/astrocyte-test.log`
+- **Fix**: Check astrocyte log: `/home/testuser/.agm/astrocyte/logs/astrocyte-test.log`
 
 **Error: `CSM commands not called`**
 - **Cause**: Mock CSM binary not in PATH or not executable
@@ -239,12 +239,12 @@ This allows testing astrocyte's integration without requiring the full CSM Go bi
 
 1. **View astrocyte logs**:
    ```bash
-   docker run --rm astrocyte-e2e-test cat /home/testuser/.csm/astrocyte/logs/astrocyte-test.log
+   docker run --rm astrocyte-e2e-test cat /home/testuser/.agm/astrocyte/logs/astrocyte-test.log
    ```
 
 2. **View incidents log**:
    ```bash
-   docker run --rm astrocyte-e2e-test cat /home/testuser/.csm/astrocyte/incidents.jsonl
+   docker run --rm astrocyte-e2e-test cat /home/testuser/.agm/astrocyte/incidents.jsonl
    ```
 
 3. **Interactive shell**:

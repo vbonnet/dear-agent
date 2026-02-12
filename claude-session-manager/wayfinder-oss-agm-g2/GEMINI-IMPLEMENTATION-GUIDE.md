@@ -160,7 +160,7 @@ func (a *GeminiAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 **Reference**: `claude_adapter.go:180-227`
 
 **Storage Options**:
-- **Option A**: JSONL file (like Claude) at `~/.csm/gemini-sessions/<session-id>/history.jsonl`
+- **Option A**: JSONL file (like Claude) at `~/.agm/gemini-sessions/<session-id>/history.jsonl`
 - **Option B**: In-memory map (loses history on restart)
 - **Option C**: SQLite database
 
@@ -384,7 +384,7 @@ go get google.golang.org/api@latest
 ### Recommended Structure
 
 ```
-~/.csm/gemini-sessions/
+~/.agm/gemini-sessions/
 ├── sessions.json                    # SessionID -> Metadata mapping
 └── <session-uuid>/
     ├── history.jsonl                # Conversation history
@@ -461,7 +461,7 @@ type geminiSession struct {
 }
 
 func NewGeminiAdapter() (Agent, error) {
-    store, err := NewJSONSessionStore(filepath.Join(os.Getenv("HOME"), ".csm", "gemini-sessions.json"))
+    store, err := NewJSONSessionStore(filepath.Join(os.Getenv("HOME"), ".agm", "gemini-sessions.json"))
     if err != nil {
         return nil, fmt.Errorf("failed to create session store: %w", err)
     }

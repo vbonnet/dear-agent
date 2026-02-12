@@ -221,7 +221,7 @@ This provides defense in depth:
 
 - `internal/tmux/prompt_detector.go` - Prompt detection logic
 - `internal/reaper/reaper.go` - Reaper workflow
-- `~/.csm/astrocyte/diagnoses/agentic-standards-2026-2026-02-02T21-27-49.md` - Original incident diagnosis
+- `~/.agm/astrocyte/diagnoses/agentic-standards-2026-2026-02-02T21-27-49.md` - Original incident diagnosis
 
 ## Status
 

@@ -50,8 +50,8 @@ docker-compose --profile debug run --rm astrocyte-debug
 python3 /home/testuser/astrocyte/astrocyte.py
 
 # Check results:
-cat ~/.csm/astrocyte/incidents.jsonl
-cat ~/.csm/astrocyte/logs/csm-mock.log
+cat ~/.agm/astrocyte/incidents.jsonl
+cat ~/.agm/astrocyte/logs/csm-mock.log
 tmux -S /tmp/csm.sock list-sessions
 ```
 

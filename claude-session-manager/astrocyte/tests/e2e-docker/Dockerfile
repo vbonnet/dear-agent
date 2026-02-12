@@ -30,7 +30,7 @@ RUN pip3 install --no-cache-dir \
 # Create test user (non-root for realistic testing)
 RUN useradd -m -s /bin/bash testuser && \
     mkdir -p /home/testuser/src/sessions && \
-    mkdir -p /home/testuser/.csm/astrocyte/{diagnoses,prompts,logs} && \
+    mkdir -p /home/testuser/.agm/astrocyte/{diagnoses,prompts,logs} && \
     chown -R testuser:testuser /home/testuser
 
 USER testuser

@@ -567,7 +567,7 @@ import (
 )
 
 func main() {
-    logger, err := messages.NewMessageLogger("/home/user/.csm/logs/messages")
+    logger, err := messages.NewMessageLogger("/home/user/.agm/logs/messages")
     if err != nil {
         panic(err)
     }

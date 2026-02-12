@@ -59,10 +59,10 @@ def module_loaded():
     assert astrocyte_messaging is not None
 
 
-@given('the log directory exists at "~/.csm/astrocyte/logs/"')
+@given('the log directory exists at "~/.agm/astrocyte/logs/"')  # noqa: path-portability
 def log_directory_exists():
     """Ensure log directory exists."""
-    log_dir = Path.home() / ".csm/astrocyte/logs"
+    log_dir = Path.home() / ".agm/astrocyte/logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     assert log_dir.exists()
 
@@ -70,7 +70,7 @@ def log_directory_exists():
 @given("the messages.log file is empty or missing")
 def clear_messages_log(context):
     """Clear messages.log for clean test state."""
-    log_file = Path.home() / ".csm/astrocyte/logs/messages.log"
+    log_file = Path.home() / ".agm/astrocyte/logs/messages.log"
     if log_file.exists():
         # Record initial line count
         with open(log_file, "r") as f:
@@ -233,7 +233,7 @@ def send_to_session(context, session):
 @when(parsers.parse('I send {count:d} diagnosis messages'))
 def send_n_diagnosis_messages(context, count):
     """Send N diagnosis messages."""
-    log_file = Path.home() / ".csm/astrocyte/logs/messages.log"
+    log_file = Path.home() / ".agm/astrocyte/logs/messages.log"
 
     # Count before
     if log_file.exists():
@@ -310,7 +310,7 @@ def percentage_messages_include(context, percentage, text):
 @then("a log entry is created in messages.log")
 def log_entry_created():
     """Verify log entry exists."""
-    log_file = Path.home() / ".csm/astrocyte/logs/messages.log"
+    log_file = Path.home() / ".agm/astrocyte/logs/messages.log"
     assert log_file.exists(), "messages.log should exist"
 
     with open(log_file, "r") as f:
@@ -321,7 +321,7 @@ def log_entry_created():
 @then(parsers.parse('the log entry includes "{text}"'))
 def log_includes_text(text):
     """Verify log entry contains text."""
-    log_file = Path.home() / ".csm/astrocyte/logs/messages.log"
+    log_file = Path.home() / ".agm/astrocyte/logs/messages.log"
 
     with open(log_file, "r") as f:
         content = f.read()
@@ -375,7 +375,7 @@ def send_operation_result(context, result):
 @then(parsers.parse('the file permissions are {perms} (owner read/write only)'))
 def check_file_permissions(perms):
     """Verify file permissions."""
-    log_file = Path.home() / ".csm/astrocyte/logs/messages.log"
+    log_file = Path.home() / ".agm/astrocyte/logs/messages.log"
     if log_file.exists():
         stat_info = log_file.stat()
         actual_perms = oct(stat_info.st_mode)[-3:]

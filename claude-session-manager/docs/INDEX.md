@@ -141,10 +141,10 @@ agm doctor --validate
 **Full reference**: [Command Reference](AGM-COMMAND-REFERENCE.md)
 
 ### Configuration Files
-- `~/.config/csm/config.yaml` - User configuration
+- `~/.config/agm/config.yaml` - User configuration
 - `~/sessions/` - Session storage (unified)
 - `~/.claude-sessions/` - Legacy session storage
-- `~/.csm/logs/messages/` - Message logs
+- `~/.agm/logs/messages/` - Message logs
 
 **Details**: [Architecture](ARCHITECTURE.md#storage-architecture)
 
