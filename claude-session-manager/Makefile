@@ -1,4 +1,4 @@
-.PHONY: build test test-bdd lint install clean
+.PHONY: build test lint install clean
 
 # Version information
 VERSION ?= 2.0.0-dev
@@ -32,9 +32,6 @@ build:
 
 test:
 	go test -v -cover ./...
-
-test-bdd:
-	go test -v ./test/e2e
 
 lint:
 	go fmt ./...
