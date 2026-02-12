@@ -1,14 +1,14 @@
 # Autonomous Swarm
 
-**Autonomous bead execution harness** for distributed task orchestration with Claude Session Manager (CSM) integration.
+**Autonomous bead execution harness** for distributed task orchestration with AGM (Agent Gateway Manager) integration.
 
 ## Overview
 
-Autonomous Swarm is a Go-based execution system that manages and executes "beads" (autonomous tasks) using a priority queue, CSM session orchestration, and built-in telemetry. It supports iteration limits, escalation detection, and automatic roadmap generation.
+Autonomous Swarm is a Go-based execution system that manages and executes "beads" (autonomous tasks) using a priority queue, AGM session orchestration, and built-in telemetry. It supports iteration limits, escalation detection, and automatic roadmap generation.
 
 **Key Features**:
 - Priority-based task queue (Tiers 1-4)
-- CSM session integration for autonomous execution
+- AGM session integration for autonomous execution
 - Iteration limiting (max 3 per bead)
 - Escalation signal detection
 - JSON Lines event logging
@@ -19,7 +19,7 @@ Autonomous Swarm is a Go-based execution system that manages and executes "beads
 The system is organized into 6 core packages:
 
 1. **pkg/taskqueue**: Task queue management (CRUD, state transitions, YAML persistence)
-2. **pkg/csm**: CSM session orchestration (tmux-based execution, session lifecycle)
+2. **pkg/csm**: AGM session orchestration (tmux-based execution, session lifecycle)
 3. **pkg/executor**: Execution harness (iteration tracking, escalation detection, error classification)
 4. **pkg/validation**: S8 file validation, S9 test execution
 5. **pkg/telemetry**: Event logging (JSON Lines), roadmap generation
@@ -29,7 +29,7 @@ The system is organized into 6 core packages:
 
 ### Prerequisites
 - Go 1.25.1+
-- Claude Code CLI with CSM support
+- Claude Code CLI with AGM support
 - tmux (for session management)
 
 ### Build
@@ -53,7 +53,7 @@ go build -o swarm-executor ./cmd/swarm-executor
 ### Flags
 - `--queue <path>`: Path to TASK-QUEUE.yaml file (required)
 - `--bead-id <id>`: Bead ID to execute (required)
-- `--session <name>`: CSM session name (required)
+- `--session <name>`: AGM session name (required)
 - `--version`: Show version and exit
 - `--help`: Show help and exit
 
@@ -129,7 +129,7 @@ Human-readable roadmap generated after each execution (max 1500 tokens):
 
 ### Iteration Limits
 - Each bead can be retried up to **3 times**
-- Retries occur on recoverable errors (CSM timeout, parse errors)
+- Retries occur on recoverable errors (AGM timeout, parse errors)
 - After 3 iterations, bead is escalated
 
 ### Escalation Signals
@@ -151,7 +151,7 @@ When escalated:
 ## Error Handling
 
 ### Error Types
-1. **Recoverable** (retry): CSM timeout, parse errors
+1. **Recoverable** (retry): AGM timeout, parse errors
 2. **Escalation** (requires human): Max iterations, explicit ESCALATE signal
 3. **Fatal** (stop): File not found, invalid configuration
 
@@ -180,7 +180,7 @@ Recoverable error?
 - Review ROADMAP.md for bead status
 - Beads in `blocked:` section require manual intervention
 
-### CSM session errors
+### AGM session errors
 - Ensure Claude Code CLI is installed
 - Verify tmux is running
 - Check session name doesn't conflict with existing sessions
