@@ -4,16 +4,14 @@ Experimental tools for AI-assisted development workflows.
 
 ## Tools
 
-### workspace-manager
-Generic workspace structure manager for multi-session AI development.
-- Works with any AI coding agent (Claude Code, Cursor, etc.)
-- Manages sessions, tmux integration, and workspace organization
-- See: [workspace-manager/README.md](workspace-manager/README.md)
-
-### claude-session-manager (planned)
-Session management CLI specifically for Claude Code + tmux workflows.
-- Go rewrite of workspace-manager's Claude-specific features
+### AGM (Agent Gateway Manager)
+Session management CLI for Claude Code + tmux workflows (formerly claude-session-manager).
+- Go-based session lifecycle management
+- Integration with engram bead tracking system
+- Async session archiving via agm-reaper daemon
 - See: [claude-session-manager/README.md](claude-session-manager/README.md)
+
+**Note**: workspace-manager has been deprecated in favor of AGM.
 
 ## Installation
 
