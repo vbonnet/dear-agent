@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -470,22 +471,34 @@ func spawnReaper(sessionName string) error {
 
 	reaperPath := filepath.Join(filepath.Dir(agmPath), "agm-reaper")
 
+	// Create log file path with sanitized session name to prevent path traversal
+	// This must happen before binary check so error messages include sanitized path
+	// Handle both forward slashes and backslashes for cross-platform security
+	sanitized := sessionName
+	// Remove directory components with forward slashes
+	if idx := strings.LastIndex(sanitized, "/"); idx != -1 {
+		sanitized = sanitized[idx+1:]
+	}
+	// Remove directory components with backslashes (Windows-style paths)
+	if idx := strings.LastIndex(sanitized, "\\"); idx != -1 {
+		sanitized = sanitized[idx+1:]
+	}
+	// Use filepath.Base as final cleanup for any platform-specific separators
+	sanitized = filepath.Base(sanitized)
+	logFile := filepath.Join(os.TempDir(), fmt.Sprintf("agm-reaper-%s.log", sanitized))
+
 	// Check if reaper binary exists
 	if _, err := os.Stat(reaperPath); err != nil {
 		ui.PrintError(err,
 			"agm-reaper binary not found",
 			fmt.Sprintf("  • Expected location: %s\n"+
+				"  • Log file: %s\n"+
 				"  • Build reaper: cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager && make build\n"+
 				"  • Or install: make install\n"+
 				"  • Or use synchronous archive: agm session archive %s (without --async)",
-				reaperPath, sessionName))
-		return fmt.Errorf("agm-reaper binary not found: %w", err)
+				reaperPath, logFile, sessionName))
+		return fmt.Errorf("agm-reaper binary not found (log: %s): %w", logFile, err)
 	}
-
-	// Create log file path with sanitized session name to prevent path traversal
-	// Replace any potentially dangerous characters with underscores
-	sanitized := filepath.Base(sessionName) // Removes any directory components
-	logFile := filepath.Join(os.TempDir(), fmt.Sprintf("agm-reaper-%s.log", sanitized))
 
 	// Get sessions directory from config
 	sessionsDir := cfg.SessionsDir

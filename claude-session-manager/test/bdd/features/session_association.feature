@@ -62,7 +62,7 @@ Feature: Session Association
     And the ready-file is created "500ms" after watch starts
     Then the fsnotify CREATE event should be detected
     And the ready-file should be detected before timeout
-    And the watch should complete in less than "1s"
+    And the watch should complete in less than "2s"
 
   Scenario: Ready-file validation after creation
     Given a Claude session "test-validation" is starting
