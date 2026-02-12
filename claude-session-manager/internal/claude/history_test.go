@@ -128,16 +128,3 @@ func TestParseHistory_PermissionDenied(t *testing.T) {
 	}
 }
 
-func TestParseHistory_MaxEntriesLimit(t *testing.T) {
-	// Create a file that would exceed MaxHistoryEntries
-	// We'll use a small limit for testing
-	oldMax := MaxHistoryEntries
-	defer func() {
-		// Can't actually change const, so this test just documents the behavior
-		_ = oldMax
-	}()
-
-	// This test documents that the limit exists
-	// In production, a file with >1M entries would fail
-	t.Skip("MaxHistoryEntries is a const and cannot be modified for testing")
-}

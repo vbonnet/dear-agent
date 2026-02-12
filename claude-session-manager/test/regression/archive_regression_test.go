@@ -10,59 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestArchiveUsesListClientsNotHasSession tests Regression 2: Archive Command Logic
-//
-// REGRESSION: Archive command used HasSession() which returns true for both
-// attached AND detached sessions, incorrectly preventing archiving of
-// detached sessions.
-//
-// FIX: Changed to ListClients() check - only prevents archiving if clients
-// are actively attached.
-//
-// This test verifies the archive command implementation uses ListClients().
-func TestArchiveUsesListClientsNotHasSession(t *testing.T) {
-	t.Skip("Skipping implementation-specific test - behavior is tested in TestArchiveLogicUsesListClientsNotHasSession")
-	archiveGoPath := filepath.Join("..", "..", "cmd", "agm", "archive.go")
-
-	content, err := os.ReadFile(archiveGoPath)
-	require.NoError(t, err, "Should be able to read archive.go")
-
-	contentStr := string(content)
-
-	// Verify archive command uses ListClients() for attached check
-	assert.Contains(t, contentStr, "ListClients(",
-		"Archive command should use ListClients() to check for attached clients")
-
-	// Verify it checks for attached clients, not just session existence
-	assert.Contains(t, contentStr, "hasAttachedClients",
-		"Archive command should track 'hasAttachedClients' state")
-
-	// Verify the fix comment explaining why we allow detached sessions
-	assert.Contains(t, contentStr, "allow archiving detached sessions",
-		"Archive command should document detached session handling")
-
-	// Additional validation: check that logic distinguishes attached vs detached
-	// The key is: len(clients) > 0 means attached, empty means detached
-	lines := strings.Split(contentStr, "\n")
-
-	foundListClientsCheck := false
-	for i, line := range lines {
-		if strings.Contains(line, "ListClients(") {
-			// Look for the pattern where we check len(clients) > 0
-			// within a few lines after ListClients call
-			for j := i; j < i+10 && j < len(lines); j++ {
-				if strings.Contains(lines[j], "len(clients) > 0") {
-					foundListClientsCheck = true
-					break
-				}
-			}
-		}
-	}
-
-	assert.True(t, foundListClientsCheck,
-		"Archive command should check len(clients) > 0 to detect attached clients")
-}
-
 // TestArchiveAttachedSessionRequiresForce tests that attached sessions require --force
 //
 // This ensures the fix didn't break the safety check - we still prevent

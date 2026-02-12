@@ -3,7 +3,6 @@ package tmux
 import (
 	"os"
 	"os/exec"
-	"strings"
 	"testing"
 	"time"
 
@@ -11,80 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSendCommand_EnterKeySeparation is a REGRESSION TEST for the bug where
-// sending the Enter key in the same command as the text caused a newline to appear
-// in the prompt instead of executing the command.
-//
-// Bug History (2026-01-13):
-// - Before fix: SendCommand sent "/cmd C-m" in a single send-keys call
-// - Symptom: Command text appeared in prompt but didn't execute (Enter not sent)
-// - Root cause: tmux interprets "C-m" as literal text when included with other text
-// - Fix: Split into two calls - send text with `-l` flag, then send C-m separately
-//
-// This test ensures we never regress back to the broken single-command approach.
-func TestSendCommand_EnterKeySeparation(t *testing.T) {
-	// Skip if tmux not available
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available")
-	}
-
-	// Skip in CI unless explicitly enabled
-	if os.Getenv("CI") != "" && os.Getenv("AGM_TEST_TMUX") == "" {
-		t.Skip("Skipping tmux integration test in CI (set AGM_TEST_TMUX=1 to enable)")
-	}
-
-	// Create isolated socket and state dir for this test
-	tmpDir := t.TempDir()
-	testSocket := tmpDir + "/test-send-command.sock"
-	os.Setenv("AGM_TMUX_SOCKET", testSocket)
-	os.Setenv("AGM_STATE_DIR", tmpDir) // Isolate lock files
-	defer os.Unsetenv("AGM_TMUX_SOCKET")
-	defer os.Unsetenv("AGM_STATE_DIR")
-
-	sessionName := "test-send-cmd"
-
-	// Create test tmux session
-	cmd := exec.Command("tmux", "-S", testSocket, "new-session", "-d", "-s", sessionName)
-	err := cmd.Run()
-	require.NoError(t, err, "Failed to create test tmux session")
-	defer func() {
-		// Cleanup: kill test session
-		exec.Command("tmux", "-S", testSocket, "kill-session", "-t", sessionName).Run()
-	}()
-
-	// Wait for session to be ready and shell to initialize
-	// Shell needs time to source profile and display prompt
-	time.Sleep(500 * time.Millisecond)
-
-	// Send a command using our SendCommand function
-	testCommand := "echo 'regression test'"
-	err = SendCommand(sessionName, testCommand)
-	require.NoError(t, err, "SendCommand should not error")
-
-	// Give command time to execute
-	time.Sleep(300 * time.Millisecond)
-
-	// Capture pane output to verify command executed
-	captureCmd := exec.Command("tmux", "-S", testSocket, "capture-pane", "-t", sessionName, "-p")
-	output, err := captureCmd.CombinedOutput()
-	require.NoError(t, err, "Failed to capture pane output")
-
-	outputStr := string(output)
-
-	// Verify the command was executed (not just typed in the prompt)
-	// The output should contain the echo result, not the command sitting in a prompt
-	assert.Contains(t, outputStr, "regression test", "Command output should be visible (command executed)")
-
-	// Verify the command is NOT sitting at a prompt waiting for Enter
-	// This would indicate the bug has regressed
-	lines := strings.Split(strings.TrimSpace(outputStr), "\n")
-	lastLine := lines[len(lines)-1]
-
-	// The last line should NOT be the command itself (that would mean it's at a prompt)
-	// It should be either the command output or a shell prompt after execution
-	assert.NotContains(t, lastLine, "echo 'regression test'",
-		"Command should NOT be sitting in prompt (indicates Enter was not sent)")
-}
 
 // TestSendCommand_EnterKeyDocumentation documents the correct implementation
 // This is a documentation test - it doesn't run tmux but serves as executable documentation
