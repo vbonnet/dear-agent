@@ -187,6 +187,86 @@ func TestContainsClaudePromptPattern(t *testing.T) {
 	}
 }
 
+func TestContainsTrustPromptPattern(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		expected bool
+	}{
+		// Positive cases - should match trust prompt
+		{
+			name:     "Exact trust prompt",
+			content:  "Do you trust the files in this folder?",
+			expected: true,
+		},
+		{
+			name:     "Trust prompt with whitespace",
+			content:  "  Do you trust the files in this folder?  \n",
+			expected: true,
+		},
+		{
+			name:     "Trust prompt in multiline output",
+			content:  "Some text\nDo you trust the files in this folder?\nMore text",
+			expected: true,
+		},
+		{
+			name:     "Trust prompt with surrounding text",
+			content:  "Claude Code is asking: Do you trust the files in this folder? Please answer.",
+			expected: true,
+		},
+		// Negative cases - should NOT match
+		{
+			name:     "Empty string",
+			content:  "",
+			expected: false,
+		},
+		{
+			name:     "Whitespace only",
+			content:  "   \n  ",
+			expected: false,
+		},
+		{
+			name:     "Claude ready prompt",
+			content:  "❯ ",
+			expected: false,
+		},
+		{
+			name:     "Bash prompt",
+			content:  "$ ",
+			expected: false,
+		},
+		{
+			name:     "Random text",
+			content:  "Random output from command",
+			expected: false,
+		},
+		{
+			name:     "Similar but not exact trust text",
+			content:  "Do you trust this folder?", // Missing "the files in"
+			expected: false,
+		},
+		{
+			name:     "Partial trust text",
+			content:  "trust the files",
+			expected: false,
+		},
+		{
+			name:     "Trust word in different context",
+			content:  "I trust you completely",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := containsTrustPromptPattern(tt.content)
+			if result != tt.expected {
+				t.Errorf("containsTrustPromptPattern(%q) = %v, want %v", tt.content, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestClaudePromptPatterns(t *testing.T) {
 	// Verify that all expected patterns are defined
 	expectedPatterns := map[string]bool{
