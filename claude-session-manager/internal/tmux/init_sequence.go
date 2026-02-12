@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/vbonnet/claude-session-manager/internal/debug"
 )
 
 // InitSequence orchestrates the initialization sequence for a new Claude session
@@ -129,10 +132,18 @@ func (seq *InitSequence) sendAssociation(ctrl *ControlModeSession, watcher *Outp
 //
 // It monitors the control mode output stream for Claude's unique prompt pattern ("❯")
 // and returns once detected, or times out if Claude never becomes ready.
-func (seq *InitSequence) waitForClaudePrompt(watcher *OutputWatcher, timeout time.Duration) error {
+//
+// This function also handles trust prompts that may appear during session creation.
+// When a trust prompt is detected, it automatically answers with "Yes, proceed" and
+// continues waiting for the Claude prompt.
+func (seq *InitSequence) waitForClaudePrompt(ctrl *ControlModeSession, watcher *OutputWatcher, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+
+	// Trust prompt state tracking
+	trustPromptDetected := false
+	trustAnsweringDeadline := time.Time{} // Zero value = no trust answering in progress
 
 	for {
 		select {
@@ -140,15 +151,63 @@ func (seq *InitSequence) waitForClaudePrompt(watcher *OutputWatcher, timeout tim
 			// Get latest output from watcher (last 5 lines should be enough to detect prompt)
 			lines := watcher.GetRecentOutput(5)
 
-			// Check each line for Claude prompt pattern
+			// Check each line for prompts
 			for _, line := range lines {
+				// Check for Claude ready prompt (original logic)
 				if containsClaudePromptPattern(line) {
 					// Claude prompt detected - ready for commands
 					return nil
 				}
+
+				// Check for trust prompt (NEW)
+				if !trustPromptDetected && containsTrustPromptPattern(line) {
+					trustPromptDetected = true
+					trustAnsweringDeadline = time.Now().Add(10 * time.Second)
+					debug.Log("Trust prompt detected during InitSequence")
+					// Continue to answering logic below
+				}
+
+				// If trust detected, look for "Yes, proceed" option (NEW)
+				if trustPromptDetected && strings.Contains(line, "Yes, proceed") {
+					debug.Log("Answering trust prompt with Enter")
+
+					// Close control mode before sending keys
+					// (mixing control mode + send-keys doesn't work well)
+					watcher.Close()
+
+					// Send Enter key to select "Yes, proceed"
+					if err := SendCommand(seq.SessionName, "C-m"); err != nil {
+						return fmt.Errorf("failed to answer trust prompt: %w", err)
+					}
+
+					// Recreate OutputWatcher (control mode was closed)
+					var err error
+					watcher, err = NewOutputWatcher(seq.SessionName)
+					if err != nil {
+						return fmt.Errorf("failed to recreate watcher after trust: %w", err)
+					}
+
+					debug.Log("Trust answered, continuing to wait for Claude prompt")
+
+					// Reset trust detection (answered)
+					trustPromptDetected = false
+					trustAnsweringDeadline = time.Time{}
+
+					// Continue polling for Claude "❯" prompt
+					continue
+				}
 			}
 
+			// Check trust answering timeout (NEW)
+			if !trustAnsweringDeadline.IsZero() && time.Now().After(trustAnsweringDeadline) {
+				return fmt.Errorf("timeout waiting for trust prompt 'Yes, proceed' option")
+			}
+
+			// Check main timeout
 			if time.Now().After(deadline) {
+				if trustPromptDetected {
+					return fmt.Errorf("trust prompt detected but couldn't answer (waited %v)", timeout)
+				}
 				return fmt.Errorf("timeout waiting for Claude prompt (waited %v)", timeout)
 			}
 		}

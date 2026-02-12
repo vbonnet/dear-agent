@@ -192,6 +192,24 @@ func containsClaudePromptPattern(content string) bool {
 	return strings.Contains(trimmed, "❯")
 }
 
+// containsTrustPromptPattern checks if content contains Claude Code trust prompt.
+//
+// Claude Code shows a trust prompt when opening untrusted directories:
+// "Do you trust the files in this folder?"
+//
+// This is used during InitSequence to auto-answer trust prompts that appear
+// during session creation (e.g., after /rename or /agm:agm-assoc commands).
+func containsTrustPromptPattern(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+
+	// Exact text match for trust prompt
+	// This text is stable and used consistently by Claude Code
+	return strings.Contains(trimmed, "Do you trust the files in this folder?")
+}
+
 // containsPromptPattern is deprecated. Use containsClaudePromptPattern instead.
 // This function matches bash prompts ("$", ">", "#") which causes false positives
 // when bash shell is visible before Claude starts.
