@@ -37,10 +37,12 @@ run_test() {
 
 # Run tests
 run_test "Reaper Happy Path" "/home/testuser/tests/test_reaper_happy_path.sh"
+run_test "Reaper Binary Missing" "/home/testuser/tests/test_reaper_binary_missing.sh"
+
+# Long-running tests (disabled by default for faster CI):
+# run_test "Reaper Prompt Timeout" "/home/testuser/tests/test_reaper_prompt_timeout.sh"  # Takes ~150s
 
 # Future tests (uncomment when implemented):
-# run_test "Reaper Prompt Timeout" "/home/testuser/tests/test_reaper_prompt_timeout.sh"
-# run_test "Reaper Binary Missing" "/home/testuser/tests/test_reaper_binary_missing.sh"
 # run_test "AGM Exit Workflow" "/home/testuser/tests/test_agm_exit_workflow.sh"
 
 # Summary
