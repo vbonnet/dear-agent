@@ -55,8 +55,8 @@ status: active
 cp -r ~/sessions ~/sessions.backup
 
 # Or archive all sessions
-for session in $(csm list --format=name); do
-  csm archive "$session"
+for session in $(agmlist --format=name); do
+  agmarchive "$session"
 done
 ```
 
@@ -65,7 +65,7 @@ done
 **Automated approach** (when migration tool released):
 ```bash
 # Future migration command (TBD)
-csm migrate-manifests --from=2.0 --to=3.0
+agmmigrate-manifests --from=2.0 --to=3.0
 ```
 
 **Manual approach:**
@@ -80,10 +80,10 @@ cd ~/sessions/<session-name>
 
 ```bash
 # Verify manifest format (when v3 released)
-csm validate-manifest ~/sessions/<session-name>/manifest.yaml
+agmvalidate-manifest ~/sessions/<session-name>/manifest.yaml
 
 # Test session resume
-csm resume <session-name>
+agmresume <session-name>
 ```
 
 ### Step 4: Verify Session ID Format
@@ -115,7 +115,7 @@ AGM validates manifests to ensure:
 **Test validation:**
 ```bash
 # Create test session
-csm new test-validation --agent claude --detached
+agmnew test-validation --agent claude --detached
 
 # Verify manifest
 cat ~/sessions/test-validation/manifest.yaml
@@ -126,7 +126,7 @@ cat ~/sessions/test-validation/manifest.yaml
 # - name: test-validation
 
 # Cleanup
-csm archive test-validation --force
+agmarchive test-validation --force
 ```
 
 ---
@@ -143,8 +143,8 @@ session_id: session-my-old-session  # ❌ Legacy bug pattern
 **Solution:**
 This was a bug in older versions. Newer AGM versions generate proper UUIDs. If you have old sessions with this pattern:
 
-1. Archive the old session: `csm archive old-session`
-2. Create new session with same name: `csm new old-session --agent <agent>`
+1. Archive the old session: `agmarchive old-session`
+2. Create new session with same name: `agmnew old-session --agent <agent>`
 3. Manually restore conversation history if needed
 
 ### Issue: Invalid UUID Format
@@ -195,18 +195,18 @@ If v3 migration causes issues:
 **Test script:**
 ```bash
 # Create test session
-csm new migration-test --agent claude --detached
+agmnew migration-test --agent claude --detached
 
 # Archive it
-csm archive migration-test
+agmarchive migration-test
 
 # After v3 migration, restore and test
-csm unarchive migration-test
-csm resume migration-test
+agmunarchive migration-test
+agmresume migration-test
 
 # Verify it works
 # Cleanup
-csm archive migration-test --force
+agmarchive migration-test --force
 ```
 
 ---

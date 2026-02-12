@@ -144,10 +144,10 @@ agm new my-session --agent claude --project ~/src/my-project
 ✗ Session 'old-session': Invalid UUID format: session-old-session
 ```
 
-**Cause:** Legacy session ID format from very old CSM versions.
+**Cause:** Legacy session ID format from older versions.
 
 **Explanation:**
-Early versions of CSM used `session-<name>` format instead of proper UUIDs. This was a bug, fixed in later versions.
+Older versions used `session-<name>` format instead of proper UUIDs. This format is no longer supported.
 
 **Solution:**
 
@@ -190,7 +190,7 @@ agm new old-session --agent claude
 ⚠ Session 'my-session': Unsupported schema version '1.0' (expected 2.0 or 3.0)
 ```
 
-**Cause:** Session created with very old CSM version (schema v1.0).
+**Cause:** Session created with older version (schema v1.0).
 
 **Solution:**
 
@@ -302,7 +302,7 @@ agm agent list
 # If agent missing from list, update AGM:
 cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager
 git pull
-go build -o agm ./cmd/csm
+go build -o agm ./cmd/agm
 ```
 
 **B. Verify API key:**
@@ -575,11 +575,11 @@ agm list | xargs -I {} agm kill {}
 rm -rf ~/.claude-sessions
 mv ~/.claude-sessions.backup ~/.claude-sessions
 
-# 3. Downgrade AGM (if needed)
-go install github.com/vbonnet/ai-tools/claude-session-manager/cmd/csm@v2.0.0
+# 3. Reinstall AGM (if needed)
+go install github.com/vbonnet/ai-tools/claude-session-manager/cmd/agm@latest
 
 # 4. Verify sessions
-csm list
+agm list
 ```
 
 ---

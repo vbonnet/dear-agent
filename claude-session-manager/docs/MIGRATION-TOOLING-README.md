@@ -1,6 +1,6 @@
 # AGM Migration Tooling
 
-**Purpose**: Tools and documentation to help users migrate from Claude Session Manager (CSM) to multi-agent AI/Agent Gateway Manager (AGM).
+**Purpose**: Tools and documentation to help users migrate to multi-agent support.
 
 ---
 
@@ -90,7 +90,7 @@ See [AGM-MIGRATION-GUIDE.md](AGM-MIGRATION-GUIDE.md) for:
 
 **Location**: `docs/AGM-MIGRATION-GUIDE.md`
 
-**Purpose**: Comprehensive guide for migrating from CSM to AGM.
+**Purpose**: Comprehensive guide for version migration.
 
 **Sections**:
 1. **Overview** - Migration impact, requirements
@@ -106,7 +106,6 @@ See [AGM-MIGRATION-GUIDE.md](AGM-MIGRATION-GUIDE.md) for:
 8. **FAQs** - Frequently asked questions
 
 **Target Audience**:
-- Existing CSM users
 - Users transitioning to multi-agent workflows
 - Teams adopting AGM
 
@@ -316,19 +315,6 @@ cp -r ~/.claude-sessions.backup/my-session \
 **Recovery time**: < 1 minute per session
 
 ---
-
-### Continue Using CSM
-
-**When**: AGM migration not desired.
-
-**Steps**:
-```bash
-# Use csm commands (backward compatible)
-csm list
-csm resume my-session
-```
-
-**Note**: No rollback needed. `csm` command remains available as alias.
 
 ---
 

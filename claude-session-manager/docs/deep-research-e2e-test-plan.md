@@ -2,9 +2,9 @@
 
 ## Overview
 
-End-to-end testing for the deep-research workflow integration with CSM.
+End-to-end testing for the deep-research workflow integration with AGM.
 
-**Bead**: oss-csm-e2e-testing (Phase 6)
+**Bead**: oss-agm-e2e-testing (Phase 6)
 **Duration**: 2-3 hours
 **Status**: In Progress
 
@@ -52,7 +52,7 @@ The E2E test must verify all 5 expected behaviors from the ROADMAP:
 
 **Command**:
 ```bash
-csm new research-test-happy --agent=gemini --workflow=deep-research \
+agmnew research-test-happy --agent=gemini --workflow=deep-research \
   --prompt="Please research https://www.youtube.com/watch?v=WEEKBlQfGt8, \
   https://www.youtube.com/watch?v=4_2j5wgt_ds, and \
   https://www.youtube.com/watch?v=eT_6uaHNlk8 and come up with ideas we can \
@@ -126,7 +126,7 @@ csm new research-test-happy --agent=gemini --workflow=deep-research \
 
 **Command**:
 ```bash
-csm new research-test-failure --agent=gemini --workflow=deep-research \
+agmnew research-test-failure --agent=gemini --workflow=deep-research \
   --prompt="Research https://www.youtube.com/watch?v=WEEKBlQfGt8, \
   https://invalid-url-12345.fake, and \
   https://www.youtube.com/watch?v=4_2j5wgt_ds"
@@ -165,7 +165,7 @@ For faster testing, use shorter content URLs instead of long videos:
 
 **Command**:
 ```bash
-csm new research-test-quick --agent=gemini --workflow=deep-research \
+agmnew research-test-quick --agent=gemini --workflow=deep-research \
   --prompt="Research https://arxiv.org/abs/1706.03762, \
   https://arxiv.org/abs/1810.04805, and \
   https://arxiv.org/abs/2005.14165"
@@ -223,7 +223,7 @@ echo "-----------------------------------"
 
 SESSION_NAME="research-test-$(date +%s)"
 
-csm new "$SESSION_NAME" --agent=gemini --workflow=deep-research \
+agmnew "$SESSION_NAME" --agent=gemini --workflow=deep-research \
   --prompt="Research https://arxiv.org/abs/1706.03762, \
   https://arxiv.org/abs/1810.04805, and \
   https://arxiv.org/abs/2005.14165 and come up with ideas for \
@@ -286,7 +286,7 @@ If automated script not available, run manual test:
 
 1. **Start Test**:
    ```bash
-   csm new research-manual-test --agent=gemini --workflow=deep-research \
+   agmnew research-manual-test --agent=gemini --workflow=deep-research \
      --prompt="Research https://arxiv.org/abs/1706.03762, \
      https://arxiv.org/abs/1810.04805, and \
      https://arxiv.org/abs/2005.14165"
@@ -358,5 +358,5 @@ After E2E test passes, document:
 ---
 
 **Created**: 2026-02-03
-**Bead**: oss-csm-e2e-testing
+**Bead**: oss-agm-e2e-testing
 **Phase**: 6 (Validation)

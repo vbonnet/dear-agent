@@ -1,8 +1,8 @@
-# CSM UX Patterns Guide
+# AGMUX Patterns Guide
 
 ## Overview
 
-Standard UX patterns for CSM command output, ensuring consistency, accessibility, and actionability across all commands.
+Standard UX patterns for AGMcommand output, ensuring consistency, accessibility, and actionability across all commands.
 
 ---
 
@@ -27,9 +27,9 @@ Try:
 Could not resolve identifier to a session
 
 Try:
-  • List sessions: csm list --all
+  • List sessions: agmlist --all
   • Check sessions directory: ~/sessions
-  • Import orphaned sessions: csm sync
+  • Import orphaned sessions: agmsync
 ```
 
 ### API
@@ -122,13 +122,13 @@ ui.PrintWarning("Claude is taking longer than expected")
 
 **Environment Variable (legacy):**
 ```bash
-NO_COLOR=1 csm list
+NO_COLOR=1 agmlist
 ```
 
 **Flag (recommended):**
 ```bash
-csm list --no-color
-csm doctor --no-color
+agmlist --no-color
+agmdoctor --no-color
 ```
 
 Disables all ANSI color codes for users who:
@@ -140,13 +140,13 @@ Disables all ANSI color codes for users who:
 
 **Environment Variable (legacy):**
 ```bash
-CSM_SCREEN_READER=1 csm doctor
+CSM_SCREEN_READER=1 agmdoctor
 ```
 
 **Flag (recommended):**
 ```bash
-csm doctor --screen-reader
-csm list --screen-reader
+agmdoctor --screen-reader
+agmlist --screen-reader
 ```
 
 **Symbol Conversion:**
@@ -215,7 +215,7 @@ if err != nil {
     // Always provide solution for prompt failures
     ui.PrintError(err,
         "Failed to read confirmation prompt",
-        "  • Use --force flag to skip confirmation: csm archive session-name --force\n"+
+        "  • Use --force flag to skip confirmation: agmarchive session-name --force\n"+
             "  • Check terminal is interactive (TTY)")
     return err
 }
@@ -238,7 +238,7 @@ err := huh.NewInput().
 if err != nil {
     ui.PrintError(err,
         "Failed to read session name",
-        "  • Provide name as argument: csm new <session-name>\n"+
+        "  • Provide name as argument: agmnew <session-name>\n"+
             "  • Check terminal is interactive (TTY)")
     return err
 }
@@ -263,7 +263,7 @@ err := huh.NewSelect[string]().
 
 ## WCAG AA Compliance
 
-CSM meets WCAG AA accessibility standards through:
+AGMmeets WCAG AA accessibility standards through:
 
 ### 1. Color Independence
 - ✅ All information conveyed by color is also available through text/symbols
@@ -342,19 +342,19 @@ When updating existing commands:
 
 ```bash
 # Test NO_COLOR support
-csm list --no-color
-csm doctor --no-color
+agmlist --no-color
+agmdoctor --no-color
 
 # Test screen reader mode
-csm doctor --screen-reader
-csm list --screen-reader
+agmdoctor --screen-reader
+agmlist --screen-reader
 
 # Test both together
-csm doctor --no-color --screen-reader
+agmdoctor --no-color --screen-reader
 
 # Test backward compatibility
-NO_COLOR=1 csm list
-CSM_SCREEN_READER=1 csm doctor
+NO_COLOR=1 agmlist
+CSM_SCREEN_READER=1 agmdoctor
 ```
 
 ### Automated Tests

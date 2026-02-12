@@ -1,7 +1,5 @@
 # AI/Agent Session Manager (AGM)
 
-*Evolved from Claude Session Manager (CSM)*
-
 Smart session management for AI agents (Claude, Gemini, GPT) with interactive TUI, multi-agent support, and automatic session tracking.
 
 ## Multi-Agent Quick Start
@@ -91,7 +89,7 @@ See `docs/AGENTS.md.example` for full configuration spec. Integration tracked in
 - **[BDD Catalog](docs/BDD-CATALOG.md)** - Living documentation (8 feature files, 20+ scenarios)
 
 **🔄 Migration & Troubleshooting:**
-- **[Migration Guide](docs/AGM-MIGRATION-GUIDE.md)** - CSM to AGM migration (validation, rollback)
+- **[Migration Guide](docs/AGM-MIGRATION-GUIDE.md)** - Version migration (validation, rollback)
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 - **[FAQ](docs/FAQ.md)** - Frequently asked questions
 
@@ -684,7 +682,7 @@ go build ./cmd/agm
 
 ### Migration Guides
 
-- **[v2→v3 Manifest Migration](docs/MIGRATION-V2-V3.md)** - Upgrading from CSM v2 to AGM v3 schema
+- **[v2→v3 Manifest Migration](docs/MIGRATION-V2-V3.md)** - Upgrading from v2 to v3 manifest schema
 - **[Claude→Multi-Agent Migration](docs/MIGRATION-CLAUDE-TO-MULTI-AGENT.md)** - Conceptual shift from single-agent to multi-agent workflows
 
 ### Guides and References
