@@ -892,6 +892,144 @@ def is_stuck_cursor_frozen(
     return False
 
 
+# Global cache for bash pattern database
+_bash_patterns = None
+_bash_patterns_mtime = 0
+
+
+def load_bash_patterns():
+    """Load bash anti-patterns database with caching"""
+    global _bash_patterns, _bash_patterns_mtime
+
+    pattern_db_path = os.path.expanduser("~/src/ws/oss/repos/engram/patterns/bash-anti-patterns.yaml")
+
+    try:
+        if not os.path.exists(pattern_db_path):
+            return None
+
+        current_mtime = os.path.getmtime(pattern_db_path)
+
+        # Cache hit
+        if _bash_patterns and current_mtime == _bash_patterns_mtime:
+            return _bash_patterns
+
+        # Cache miss - reload
+        with open(pattern_db_path, 'r') as f:
+            data = yaml.safe_load(f)
+
+        if not data or 'patterns' not in data:
+            return None
+
+        # Pre-compile regex patterns
+        for pattern in data['patterns']:
+            try:
+                pattern['_compiled'] = re.compile(pattern['regex'])
+            except re.error:
+                pattern['_compiled'] = None
+
+        _bash_patterns = data
+        _bash_patterns_mtime = current_mtime
+
+        return data
+
+    except Exception:
+        return None
+
+
+def detect_bash_violation(current: SessionState) -> str | None:
+    """Detect bash violations in pane content
+
+    Returns pattern ID if violation found, None otherwise
+    """
+    patterns = load_bash_patterns()
+    if not patterns or 'patterns' not in patterns:
+        return None
+
+    # Extract bash command from pane content
+    # Look for common patterns like:
+    # - "cd /path && git push"
+    # - "cat file.txt | grep pattern"
+    # Match after last user input prompt or bash command execution
+    pane_text = current.pane_content
+
+    # Try to extract command from recent output
+    # Look for bash tool usage patterns
+    for pattern in patterns['patterns']:
+        if not pattern.get('_compiled'):
+            continue
+
+        try:
+            if pattern['_compiled'].search(pane_text):
+                return pattern['id']
+        except Exception:
+            continue
+
+    return None
+
+
+def reject_with_bash_feedback(session_name: str, pattern_id: str) -> RecoveryResult:
+    """Reject session with bash violation feedback using agm session reject
+
+    Args:
+        session_name: Session name
+        pattern_id: Pattern ID from database
+
+    Returns:
+        RecoveryResult with success status
+    """
+    before = capture_pane_state(session_name)
+    start_time = time.time()
+
+    patterns = load_bash_patterns()
+    if not patterns:
+        # Fallback to ESC if pattern DB unavailable
+        return recover_with_escape(session_name)
+
+    # Find pattern
+    pattern = None
+    for p in patterns['patterns']:
+        if p.get('id') == pattern_id:
+            pattern = p
+            break
+
+    if not pattern:
+        # Pattern not found - fallback to ESC
+        return recover_with_escape(session_name)
+
+    # Format rejection message
+    reason = pattern.get('reason', 'Bash tool usage violation')
+    alternative = pattern.get('alternative', 'Use Claude Code tools instead')
+
+    rejection_message = f"{reason}\n\n{alternative}\n\nSee bash tool guidance: bash-command-simplification.ai.md"
+
+    # Call agm session reject
+    try:
+        subprocess.run([
+            "agm", "session", "reject", session_name,
+            "--reason", rejection_message
+        ], timeout=10, check=True)
+    except Exception:
+        # Fallback to ESC on agm failure
+        return recover_with_escape(session_name)
+
+    # Wait for rejection to process
+    time.sleep(2)
+
+    after = capture_pane_state(session_name)
+    duration = time.time() - start_time
+
+    # Check if rejection successful
+    success = verify_recovery(before, after)
+
+    return RecoveryResult(
+        success=success,
+        method="bash_rejection",
+        duration_seconds=duration,
+        before_state=before,
+        after_state=after
+    )
+
+
 def is_asking_question_without_tool(
     current: SessionState,
     previous: SessionState,
@@ -2200,6 +2338,14 @@ def main():
                             stuck = True
                             symptom = "stuck_cursor_frozen"
                             heuristic = "cursor_frozen"
+
+                        # Check for bash violations (NEW)
+                        bash_violation_pattern = detect_bash_violation(current)
+                        if bash_violation_pattern:
+                            stuck = True
+                            symptom = "bash_violation"
+                            heuristic = f"bash_pattern:{bash_violation_pattern}"
+
                         # DISABLED: Never interfere with sessions asking user questions
                         # If a session is blocked on user questions, astrocyte must leave it alone.
                         # Only the user should answer questions - astrocyte must NEVER answer on their behalf.
@@ -2235,6 +2381,8 @@ def main():
                             # Use csm reject for permission prompts
                             # Fixed to handle both 2-option and 3-option prompts
                             recovery_method = "reject_permission"
+                        elif symptom == "bash_violation":
+                            recovery_method = "bash_rejection"
                         else:
                             recovery_method = "escape"
 
@@ -2267,6 +2415,9 @@ def main():
                         elif symptom == "permission_prompt":
                             print(f"   🔧 Rejecting permission prompt with tool usage violation...")
                             recovery = reject_permission_prompt(session)
+                        elif symptom == "bash_violation":
+                            print(f"   🔧 Rejecting bash violation with agm session reject...")
+                            recovery = reject_with_bash_feedback(session, bash_violation_pattern)
                         else:
                             print(f"   🔧 Attempting recovery with {config.recovery_method} strategy...")
                             recovery = recover_session(session, config)
