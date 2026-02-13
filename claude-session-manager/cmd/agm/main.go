@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/cli"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/config"
-	"github.com/vbonnet/ai-tools/claude-session-manager/internal/fuzzy"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/session"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/telemetry/usage"
@@ -38,29 +37,31 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "agm [session-name]",
+	Use:   "agm",
 	Short: "Agent Gateway Manager - Multi-AI session management",
 	Long: `agm (Agent Gateway Manager) helps you manage AI agent sessions
-(Claude, Gemini, GPT) with smart resume/create behavior and interactive prompts.
+(Claude, Gemini, GPT) with explicit session commands.
 
-When no session name is provided:
+When no arguments are provided:
   • If sessions exist in current directory → Shows interactive picker
   • If no sessions exist → Prompts to create new session
 
-When session name is provided:
-  • Exact match found → Resumes that session
-  • Fuzzy matches found → Shows "did you mean" prompt
-  • No match found → Offers to create new session
+Session operations require explicit subcommands:
+  • Use 'agm session resume <name>' to resume a session
+  • Use 'agm session new <name>' to create a new session
+  • Use 'agm session list' to list all sessions
 
 Examples:
-  agm                    # Smart picker or create
-  agm my-session         # Resume or create "my-session"
-  agm session new        # Create new session (interactive form)
-  agm session list       # List all sessions
-  agm admin fix-uuid     # Fix UUID associations
+  agm                            # Smart picker or create (interactive)
+  agm session resume my-session  # Resume existing session
+  agm session new my-session     # Create new session
+  agm session list               # List all sessions
+  agm session archive my-session # Archive a session
+  agm admin fix-uuid             # Fix UUID associations
 
 Global Flags:
   -C, --directory <path>    Working directory (default: current directory)`,
+	Args: cobra.ArbitraryArgs, // Allow any arguments to reach runDefaultCommand
 	RunE: runDefaultCommand,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Record command start time for usage tracking
@@ -226,14 +227,23 @@ func runDefaultCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Case 1: No session name provided - smart behavior
+	// Case 1: No arguments provided - smart picker behavior
 	if len(args) == 0 {
 		return handleNoArgs(matchingSessions, projectDir, uiCfg)
 	}
 
-	// Case 2: Session name provided - try to find it
+	// Case 2: Arguments provided - this is an error (removed 'agm <name>' shortcut)
 	sessionName := args[0]
-	return handleNamedSession(sessionName, manifests, matchingSessions, projectDir, uiCfg)
+	fmt.Fprintf(os.Stderr, "Error: Unknown command or argument: %q\n\n", sessionName)
+	fmt.Fprintf(os.Stderr, "The 'agm <session-name>' shortcut has been removed to prevent command name collisions.\n\n")
+	fmt.Fprintf(os.Stderr, "To resume a session, use:\n")
+	fmt.Fprintf(os.Stderr, "  agm session resume %s\n\n", sessionName)
+	fmt.Fprintf(os.Stderr, "To create a new session, use:\n")
+	fmt.Fprintf(os.Stderr, "  agm session new %s\n\n", sessionName)
+	fmt.Fprintf(os.Stderr, "To list all sessions, use:\n")
+	fmt.Fprintf(os.Stderr, "  agm session list\n\n")
+	fmt.Fprintf(os.Stderr, "Run 'agm --help' for more information.\n")
+	return fmt.Errorf("unknown command: %q", sessionName)
 }
 
 func handleNoArgs(matchingSessions []*manifest.Manifest, projectDir string, uiCfg *ui.Config) error {
@@ -264,58 +274,8 @@ func handleNoArgs(matchingSessions []*manifest.Manifest, projectDir string, uiCf
 	return showSessionPicker(matchingSessions, uiCfg)
 }
 
-func handleNamedSession(name string, allSessions, matchingSessions []*manifest.Manifest, projectDir string, uiCfg *ui.Config) error {
-	// Try exact match first
-	for _, m := range allSessions {
-		if m.Name == name {
-			fmt.Printf("Resuming session: %s\n", m.Name)
-			return performResume(m)
-		}
-	}
-
-	// No exact match - try fuzzy matching
-	var candidates []string
-	for _, m := range allSessions {
-		candidates = append(candidates, m.Name)
-	}
-
-	fuzzyMatches := fuzzy.FindSimilar(name, candidates, 0.6)
-
-	if len(fuzzyMatches) > 0 {
-		// Found fuzzy matches - show "did you mean"
-		choice, err := ui.DidYouMean(name, fuzzyMatches, uiCfg)
-		if err != nil {
-			return err
-		}
-
-		if choice == "" {
-			// User chose "create new"
-			return runNewSessionFlow(&name, uiCfg)
-		}
-
-		// User selected a fuzzy match - resume it
-		for _, m := range allSessions {
-			if m.Name == choice {
-				fmt.Printf("Resuming session: %s\n", m.Name)
-				return performResume(m)
-			}
-		}
-	}
-
-	// No matches at all - offer to create new
-	fmt.Printf("Session '%s' not found.\n", name)
-	confirmed, err := ui.ConfirmCreate(name, projectDir, uiCfg)
-	if err != nil {
-		return err
-	}
-
-	if !confirmed {
-		fmt.Println("Cancelled.")
-		return nil
-	}
-
-	return runNewSessionFlow(&name, uiCfg)
-}
+// handleNamedSession removed - 'agm <name>' shortcut no longer supported
+// Use 'agm session resume <name>' or 'agm session new <name>' instead
 
 func showSessionPicker(sessions []*manifest.Manifest, uiCfg *ui.Config) error {
 	// Convert to UI sessions with status
