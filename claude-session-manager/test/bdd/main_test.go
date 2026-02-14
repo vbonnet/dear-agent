@@ -53,4 +53,5 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterAgentInterfaceSteps(ctx)
 	steps.RegisterErrorHandlingSteps(ctx)
 	steps.RegisterAssociationSteps(ctx)
+	steps.RegisterInitializationSteps(ctx)
 }
