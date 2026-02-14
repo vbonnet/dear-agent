@@ -3,8 +3,11 @@ package tmux
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/debug"
 )
 
 // InitSequence orchestrates the initialization sequence for a new Claude session
@@ -29,21 +32,21 @@ func NewInitSequence(sessionName string) *InitSequence {
 //
 // Uses WaitForClaudePrompt (capture-pane polling) instead of control mode for prompt detection.
 // See ADR-0001 for rationale on why capture-pane is preferred over control mode.
+//
+// Note: Does NOT acquire tmux lock here because SendCommand (called by SendCommandLiteral)
+// already handles locking. Attempting to lock here causes double-lock errors.
 func (seq *InitSequence) Run() error {
-	// Lock tmux server for init sequence (prevent parallel command sends)
-	return withTmuxLock(func() error {
-		// Step 1: Prime the session with /rename
-		if err := seq.sendRename(); err != nil {
-			return fmt.Errorf("rename failed: %w", err)
-		}
+	// Step 1: Prime the session with /rename
+	if err := seq.sendRename(); err != nil {
+		return fmt.Errorf("rename failed: %w", err)
+	}
 
-		// Step 2: Associate the session
-		if err := seq.sendAssociation(); err != nil {
-			return fmt.Errorf("association failed: %w", err)
-		}
+	// Step 2: Associate the session
+	if err := seq.sendAssociation(); err != nil {
+		return fmt.Errorf("association failed: %w", err)
+	}
 
-		return nil
-	})
+	return nil
 }
 
 // SendCommandLiteral sends a command as literal text to a tmux session.
@@ -51,21 +54,32 @@ func (seq *InitSequence) Run() error {
 // which requires: send literal text → sleep 100ms → send Enter.
 // The 100ms delay ensures tmux receives the text before Enter (see tmux/tmux#1778).
 func SendCommandLiteral(sessionName, command string) error {
+	socketPath := GetSocketPath()
+
+	debug.Log("SendCommandLiteral: Sending command text: %q to session %s", command, sessionName)
+
 	// Send command text using send-keys with -l flag (literal)
-	// SendCommand takes: sessionName, command (where command is the full send-keys arguments)
-	sendKeysCmd := fmt.Sprintf("-l %q", command)
-	if err := SendCommand(sessionName, sendKeysCmd); err != nil {
+	// Use exec.Command directly instead of SendCommand (which uses load-buffer)
+	cmdText := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "-l", command)
+	if err := cmdText.Run(); err != nil {
+		debug.Log("SendCommandLiteral: FAILED to send text: %v", err)
 		return fmt.Errorf("failed to send command text: %w", err)
 	}
+	debug.Log("SendCommandLiteral: Text sent successfully")
 
-	// Small delay to ensure text is received before sending Enter
+	// Longer delay to ensure text is received and processed before sending Enter
 	// See: https://github.com/tmux/tmux/issues/1778
-	time.Sleep(100 * time.Millisecond)
+	// Increased to 500ms to prevent command queueing issues in detached sessions
+	time.Sleep(500 * time.Millisecond)
+	debug.Log("SendCommandLiteral: Sending C-m (Enter)")
 
 	// Send Enter to execute the command
-	if err := SendCommand(sessionName, "C-m"); err != nil {
+	cmdEnter := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "C-m")
+	if err := cmdEnter.Run(); err != nil {
+		debug.Log("SendCommandLiteral: FAILED to send Enter: %v", err)
 		return fmt.Errorf("failed to send Enter: %w", err)
 	}
+	debug.Log("SendCommandLiteral: Enter sent successfully, command should execute")
 
 	return nil
 }
@@ -74,11 +88,16 @@ func SendCommandLiteral(sessionName, command string) error {
 // Uses capture-pane polling (WaitForClaudePrompt) to detect when Claude is ready.
 // See ADR-0001 for rationale on capture-pane vs control mode.
 func (seq *InitSequence) sendRename() error {
+	debug.Log("sendRename: Starting for session %s", seq.SessionName)
+
 	// Wait for Claude to be ready BEFORE sending command
 	// This ensures we don't send /rename to bash shell (which would fail)
+	debug.Log("sendRename: Calling WaitForClaudePrompt with 30s timeout")
 	if err := WaitForClaudePrompt(seq.SessionName, 30*time.Second); err != nil {
+		debug.Log("sendRename: WaitForClaudePrompt FAILED: %v", err)
 		return fmt.Errorf("Claude not ready for rename: %w", err)
 	}
+	debug.Log("sendRename: WaitForClaudePrompt succeeded")
 
 	renameCmd := fmt.Sprintf("/rename %s", seq.SessionName)
 
@@ -86,9 +105,13 @@ func (seq *InitSequence) sendRename() error {
 	if err := SendCommandLiteral(seq.SessionName, renameCmd); err != nil {
 		return fmt.Errorf("failed to send rename command: %w", err)
 	}
+	debug.Log("sendRename: /rename command sent, waiting 5s for execution")
 
-	// Note: We don't wait after /rename completes because capture-pane is stateless.
-	// The ready-file signal (waited for by caller) confirms the full sequence completed.
+	// Wait longer for /rename to fully complete and Claude to be ready
+	// 5 seconds gives Claude time to process the rename and return to prompt
+	time.Sleep(5 * time.Second)
+	debug.Log("sendRename: Wait complete, /rename should be done")
+
 	return nil
 }
 
