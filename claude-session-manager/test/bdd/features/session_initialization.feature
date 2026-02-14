@@ -59,3 +59,43 @@ Feature: Session Initialization
     Then the initialization should complete successfully
     And the session should be renamed to "test-init-network"
     And the session should be associated with AGM
+
+  # Regression tests for double-lock and command queueing bugs
+
+  Scenario: Initialization does not cause double-lock errors
+    Given no session named "test-no-double-lock" exists
+    When I run "agm session new test-no-double-lock --agent=claude"
+    Then the command should not produce "lock already held" errors
+    And the command should not produce "tmux lock" errors
+    And the session should initialize successfully
+
+  Scenario: Commands execute on separate lines in detached mode
+    Given no session named "test-separate-commands" exists
+    When I run "agm session new test-separate-commands --agent=claude --detached"
+    And I wait for initialization to complete
+    And I capture the tmux pane content
+    Then "/rename test-separate-commands" should be on one line
+    And "/agm:agm-assoc test-separate-commands" should be on a different line
+    And "/rename" should execute before "/agm:agm-assoc"
+
+  Scenario: Sufficient delay between sequential commands
+    Given no session named "test-command-timing" exists
+    When I run "agm session new test-command-timing --agent=claude --detached"
+    Then the initialization should take at least 6 seconds
+    And the "/rename" command should execute completely
+    And the "/agm:agm-assoc" command should execute after "/rename" completes
+
+  Scenario: SendCommandLiteral uses correct tmux send-keys format
+    Given a test tmux session exists
+    When I send a command with special characters using SendCommandLiteral
+    Then the special characters should be interpreted literally
+    And the command should not be interpreted by the shell
+    And the command should execute with the -l flag
+
+  Scenario: Detached sessions initialize without user interaction
+    Given no session named "test-detached-init" exists
+    When I run "agm session new test-detached-init --agent=claude --detached"
+    Then I should not need to attach to the session
+    And the initialization should complete automatically within 60 seconds
+    And both "/rename" and "/agm:agm-assoc" should execute
+    And the ready-file signal should be created
