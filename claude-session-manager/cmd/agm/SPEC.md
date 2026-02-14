@@ -413,6 +413,62 @@ IF session name provided:
 11. Print success message
 ```
 
+### Session Initialization Sequence (Automatic)
+
+**Critical User Journey**: After `agm session new --agent=claude` creates a tmux session and starts Claude, the InitSequence automatically executes initialization commands without user intervention.
+
+**Test Coverage**: See `test/bdd/features/session_initialization.feature`
+
+**Flow**:
+```
+1. Claude CLI starts in tmux pane
+2. Wait for Claude prompt (❯) using capture-pane polling
+   - Poll interval: 500ms
+   - Timeout: 30 seconds
+   - Detection: containsClaudePromptPattern("❯")
+3. Send /rename command:
+   - Command: `/rename <session-name>`
+   - Purpose: Set Claude session name to match tmux session
+   - Wait for command completion
+4. Send /agm:agm-assoc command:
+   - Command: `/agm:agm-assoc`
+   - Purpose: Associate session with AGM
+   - Creates ready-file: ~/.agm/ready-<session-name>
+5. Session initialization complete
+   - User attached to session
+   - Commands executed successfully
+   - Session ready for interaction
+
+ERROR HANDLING:
+- Trust Prompt: If Claude shows "Do you want to allow access?" prompt:
+  - Initialization WAITS for user input (captured by tmux pane)
+  - User answers prompt manually
+  - Initialization continues after answer
+- Timeout (30s): If Claude never appears:
+  - Warning displayed to user
+  - Session remains attached (not killed)
+  - User can manually run `/rename` and `/agm:agm-assoc`
+- Network Interruption: Retries with exponential backoff
+
+TECHNICAL IMPLEMENTATION:
+- Uses capture-pane polling (not control mode)
+- Proven approach from prompt_detector.go:WaitForClaudePrompt()
+- See ADR-0001 for architectural decision rationale
+```
+
+**Expected Behavior** (from BDD scenarios):
+- ✓ Successful initialization completes within 90 seconds
+- ✓ Session renamed to match tmux session name
+- ✓ Session associated with AGM (ready-file created)
+- ✓ Timeout handled gracefully (session remains accessible)
+- ✓ Trust prompts handled via user input (no auto-answering)
+- ✓ Parallel session creation works without race conditions
+
+**Reference**:
+- BDD Tests: `test/bdd/features/session_initialization.feature`
+- Implementation: `internal/tmux/init_sequence.go`
+- Architecture Decision: `docs/adr/0001-init-sequence-capture-pane.md`
+
 ### Resume Session Flow (agm resume [identifier])
 
 ```
