@@ -229,6 +229,65 @@ tmux list-sessions
 - Verify tmux server isn't hung: `pkill tmux`, then restart
 - Check for leftover test sessions: `tmux list-sessions | grep csm-test`
 
+## Temporal Backend E2E Tests
+
+### Overview
+
+The `temporal_e2e_test.go` file contains end-to-end integration tests for the AGM Temporal backend (Phase 1 deliverable). These tests verify the complete session lifecycle using a real Temporal server.
+
+### Prerequisites for Temporal Tests
+
+1. **Temporal Server Running**:
+   ```bash
+   cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager
+   docker-compose up -d
+   ```
+
+2. **Verify Temporal Connectivity**:
+   ```bash
+   temporal server health
+   ```
+
+### Running Temporal E2E Tests
+
+```bash
+# Run with integration tag (Temporal tests will skip if server not available)
+go test -tags=integration ./test/integration/... -v -run "Temporal"
+```
+
+### Test Scenarios (5 total)
+
+1. **Session Creation** - Create session with Temporal backend (`AGM_SESSION_BACKEND=temporal`)
+2. **Client Attachment** - Attach/detach clients to running sessions
+3. **Workflow State Verification** - Query workflow state via Temporal API
+4. **Full Lifecycle** - Complete state transitions (create → active → stopped → archived)
+5. **Crash Resilience** - Session survives worker restart (workflow state persists)
+
+### Skip Behavior
+
+Temporal E2E tests automatically skip if Temporal server is not available:
+
+```
+S S S S S  # 5 skipped tests (Temporal server not running)
+```
+
+This is expected and allows the integration test suite to run without Temporal infrastructure.
+
+### Temporal Test Configuration
+
+- **Task Queue**: `agm-test-queue`
+- **Workflow Timeout**: 30 seconds
+- **Default Host**: `localhost:7233`
+- **Default Namespace**: `default`
+
+### Troubleshooting Temporal Tests
+
+**Tests Skipped**: Temporal server not running → Start with `docker-compose up -d`
+
+**Connection Refused**: Port 7233 not listening → Verify containers: `docker ps | grep temporal`
+
+**Test Timeout**: Increase timeout → `go test -timeout 5m ...`
+
 ## Contributing
 
 When adding new integration tests:
@@ -237,4 +296,5 @@ When adding new integration tests:
 2. Use unique session names (`testEnv.UniqueSessionName()`)
 3. Clean up in AfterEach (with failure preservation)
 4. Add table-driven tests for multi-agent scenarios
-5. Update this README if adding new test files
+5. For Temporal tests: use `//go:build integration` tag and graceful skip when server unavailable
+6. Update this README if adding new test files
