@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/backend"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/cli"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/config"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
@@ -15,6 +16,8 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 
+	// Import backends to trigger registration
+	_ "github.com/vbonnet/ai-tools/claude-session-manager/internal/backend"
 	// Import workflows to trigger registration
 	_ "github.com/vbonnet/ai-tools/claude-session-manager/internal/workflow/deep_research"
 )
@@ -342,7 +345,16 @@ func ExecuteWithDeps(tmux session.TmuxInterface) error {
 }
 
 func main() {
-	if err := ExecuteWithDeps(session.NewRealTmux()); err != nil {
+	// Use backend adapter to support multiple backends (tmux, temporal, etc.)
+	// The backend is selected via AGM_SESSION_BACKEND env var (defaults to tmux)
+	adapter, err := backend.GetDefaultBackendAdapter()
+	if err != nil {
+		// Fallback to tmux if backend initialization fails
+		fmt.Fprintf(os.Stderr, "Warning: failed to initialize backend, falling back to tmux: %v\n", err)
+		adapter = backend.NewBackendAdapter(backend.NewTmuxBackend())
+	}
+
+	if err := ExecuteWithDeps(adapter); err != nil {
 		os.Exit(1)
 	}
 }
