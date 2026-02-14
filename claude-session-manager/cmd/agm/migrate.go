@@ -3,16 +3,21 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/db"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/discovery"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/migrate"
 )
 
 var (
-	dryRunFlag    bool
-	forceFlag     bool
-	workspaceFlag string
+	dryRunFlag     bool
+	forceFlag      bool
+	workspaceFlag  string
+	manifestDirFlag string
+	dbPathFlag     string
 )
 
 var migrateCmd = &cobra.Command{
@@ -48,16 +53,53 @@ var migrateToUnifiedStorageCmd = &cobra.Command{
 	RunE:  runMigrate,
 }
 
+var migrateYAMLToSQLiteCmd = &cobra.Command{
+	Use:   "migrate-yaml-to-sqlite",
+	Short: "Migrate YAML manifests to SQLite database",
+	Long: `Migrate existing YAML session manifests to SQLite database.
+
+This command:
+- Scans manifest directory for *.yaml files
+- Imports each manifest into SQLite database
+- Validates all fields migrated correctly
+- Reports migration statistics
+
+Examples:
+  # Migrate with default paths
+  agm migrate migrate-yaml-to-sqlite
+
+  # Specify custom paths
+  agm migrate migrate-yaml-to-sqlite --manifest-dir ~/.agm/sessions --db-path ~/.agm/sessions.db
+
+  # Preview migration (no changes)
+  agm migrate migrate-yaml-to-sqlite --dry-run
+
+  # View progress during migration
+  agm migrate migrate-yaml-to-sqlite --manifest-dir ~/sessions
+`,
+	RunE: runMigrateYAMLToSQLite,
+}
+
 func init() {
 	migrateCmd.AddCommand(migrateToUnifiedStorageCmd)
+	migrateCmd.AddCommand(migrateYAMLToSQLiteCmd)
 
-	// Flags for migration
+	// Flags for unified storage migration
 	migrateToUnifiedStorageCmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Preview changes without modifying files")
 	migrateToUnifiedStorageCmd.Flags().BoolVar(&forceFlag, "force", false, "Overwrite existing destinations")
 	migrateToUnifiedStorageCmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Migrate only specified workspace (e.g., 'oss')")
 
-	// Add to root command (assumes rootCmd exists in main.go)
-	// rootCmd.AddCommand(migrateCmd)
+	// Flags for YAML to SQLite migration
+	home, _ := os.UserHomeDir()
+	defaultManifestDir := filepath.Join(home, ".agm", "sessions")
+	defaultDBPath := filepath.Join(home, ".agm", "sessions.db")
+
+	migrateYAMLToSQLiteCmd.Flags().StringVar(&manifestDirFlag, "manifest-dir", defaultManifestDir, "Directory containing YAML manifests")
+	migrateYAMLToSQLiteCmd.Flags().StringVar(&dbPathFlag, "db-path", defaultDBPath, "SQLite database path")
+	migrateYAMLToSQLiteCmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Preview migration without writing to database")
+
+	// Add to root command
+	rootCmd.AddCommand(migrateCmd)
 }
 
 func runMigrate(cmd *cobra.Command, args []string) error {
@@ -132,4 +174,116 @@ func convertLocations(locations []discovery.SessionLocation) []manifest.SessionL
 		}
 	}
 	return result
+}
+
+func runMigrateYAMLToSQLite(cmd *cobra.Command, args []string) error {
+	fmt.Println("YAML to SQLite Migration")
+	fmt.Println("========================")
+	fmt.Println()
+
+	if dryRunFlag {
+		fmt.Println("[DRY-RUN MODE] No database changes will be made")
+		fmt.Println()
+	}
+
+	// Display configuration
+	fmt.Printf("Manifest directory: %s\n", manifestDirFlag)
+	fmt.Printf("Database path:      %s\n", dbPathFlag)
+	fmt.Println()
+
+	// Read YAML manifests
+	fmt.Println("Scanning for YAML manifests...")
+	manifests, err := migrate.ReadYAMLManifests(manifestDirFlag)
+	if err != nil {
+		return fmt.Errorf("failed to read manifests: %w", err)
+	}
+
+	if len(manifests) == 0 {
+		fmt.Println("No YAML manifests found.")
+		fmt.Printf("(Searched in: %s)\n", manifestDirFlag)
+		return nil
+	}
+
+	fmt.Printf("Found %d manifest(s)\n\n", len(manifests))
+
+	// Open or create SQLite database
+	var database *db.DB
+	if !dryRunFlag {
+		// Ensure parent directory exists
+		dbDir := filepath.Dir(dbPathFlag)
+		if err := os.MkdirAll(dbDir, 0755); err != nil {
+			return fmt.Errorf("failed to create database directory: %w", err)
+		}
+
+		database, err = db.Open(dbPathFlag)
+		if err != nil {
+			return fmt.Errorf("failed to open database: %w", err)
+		}
+		defer database.Close()
+	} else {
+		// For dry-run, use in-memory database for validation
+		database, err = db.Open(":memory:")
+		if err != nil {
+			return fmt.Errorf("failed to open in-memory database: %w", err)
+		}
+		defer database.Close()
+	}
+
+	// Migrate manifests
+	fmt.Println("Migrating manifests...")
+	result, err := migrate.MigrateAll(database, manifests, dryRunFlag)
+	if err != nil {
+		return fmt.Errorf("migration failed: %w", err)
+	}
+
+	// Progress reporting
+	for i, m := range manifests {
+		status := "✓"
+		if result.ErrorCount > 0 {
+			// Check if this specific manifest had an error
+			for _, migErr := range result.Errors {
+				if migErr.FilePath == m.SessionID {
+					status = "✗"
+					break
+				}
+			}
+		}
+		fmt.Printf("  %s Migrating %d of %d: %s (%s)\n",
+			status, i+1, len(manifests), m.Name, m.SessionID)
+	}
+	fmt.Println()
+
+	// Summary
+	fmt.Println("Migration Summary")
+	fmt.Println("-----------------")
+	fmt.Printf("Total manifests:    %d\n", result.TotalFiles)
+	fmt.Printf("✓ Migrated:         %d\n", result.SuccessCount)
+	if result.SkippedCount > 0 {
+		fmt.Printf("⏭  Skipped:          %d (already exist)\n", result.SkippedCount)
+	}
+	if result.ErrorCount > 0 {
+		fmt.Printf("✗ Failed:           %d\n", result.ErrorCount)
+	}
+	fmt.Println()
+
+	// Display errors if any
+	if result.ErrorCount > 0 {
+		fmt.Println("Errors:")
+		for _, migErr := range result.Errors {
+			fmt.Printf("  - %s: %v\n", migErr.FilePath, migErr.Error)
+		}
+		fmt.Println()
+		return fmt.Errorf("migration completed with %d error(s)", result.ErrorCount)
+	}
+
+	// Success message
+	if dryRunFlag {
+		fmt.Println("✓ Dry-run completed successfully")
+		fmt.Println("  Run without --dry-run to perform actual migration")
+	} else {
+		fmt.Println("✓ Migration completed successfully")
+		fmt.Printf("  Database: %s\n", dbPathFlag)
+	}
+
+	return nil
 }

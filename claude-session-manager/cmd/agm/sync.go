@@ -9,9 +9,11 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/claude"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/db"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/detection"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/discovery"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
+	"github.com/vbonnet/ai-tools/claude-session-manager/internal/persistence"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/ui"
 )
@@ -337,7 +339,88 @@ func syncActiveTmuxSessions(sessionsDir string, historyEntries []claude.RawEntry
 	return nil
 }
 
+// syncYAMLFromSQLiteCmd rebuilds YAML cache from SQLite database
+var syncYAMLFromSQLiteCmd = &cobra.Command{
+	Use:   "sync-yaml-from-sqlite",
+	Short: "Rebuild YAML cache from SQLite database",
+	Long: `Rebuilds the YAML cache from the SQLite database (source of truth).
+
+This command is useful when:
+  • YAML files are corrupted or out of sync
+  • You want to ensure YAML matches SQLite exactly
+  • Migrating from YAML-only to dual-write system
+
+The SQLite database is always the source of truth. This command reads all
+sessions from SQLite and writes them to YAML files, overwriting any existing
+YAML files.
+
+Examples:
+  agm admin sync-yaml-from-sqlite     # Rebuild all YAML files from SQLite`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Get home directory for database path
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+
+		// Open SQLite database
+		dbPath := filepath.Join(homeDir, ".agm", "sessions.db")
+		database, err := db.Open(dbPath)
+		if err != nil {
+			ui.PrintError(
+				err,
+				"Failed to open SQLite database.",
+				"  • Verify database exists: "+dbPath+"\n"+
+					"  • Check file permissions\n"+
+					"  • Run 'agm doctor' to diagnose issues",
+			)
+			return err
+		}
+		defer database.Close()
+
+		// Create DualWriter
+		dw := persistence.NewDualWriter(database, cfg.SessionsDir)
+
+		// Get session count for progress reporting
+		allSessions, err := dw.ListSessions(nil)
+		if err != nil {
+			return fmt.Errorf("failed to list sessions: %w", err)
+		}
+		totalSessions := len(allSessions)
+
+		if totalSessions == 0 {
+			ui.PrintWarning("No sessions found in SQLite database")
+			return nil
+		}
+
+		fmt.Printf("Syncing %d sessions from SQLite to YAML...\n", totalSessions)
+
+		// Sync YAML from SQLite
+		syncCount, err := dw.SyncYAMLFromSQLite()
+		if err != nil {
+			ui.PrintError(
+				err,
+				"Failed to sync YAML from SQLite.",
+				"  • Check YAML directory permissions: "+cfg.SessionsDir+"\n"+
+					"  • Verify disk space: df -h\n"+
+					"  • Check for file system errors",
+			)
+			return err
+		}
+
+		// Print summary
+		if syncCount == totalSessions {
+			ui.PrintSuccess(fmt.Sprintf("✓ Synced %d YAML files from SQLite", syncCount))
+		} else {
+			ui.PrintWarning(fmt.Sprintf("Synced %d of %d sessions (some failed, check logs)", syncCount, totalSessions))
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	syncCmd.Flags().BoolVar(&syncAll, "all", false, "Sync all sessions (default: last 30 days only)")
 	adminCmd.AddCommand(syncCmd)
+	adminCmd.AddCommand(syncYAMLFromSQLiteCmd)
 }
