@@ -2,8 +2,8 @@
 
 Complete architectural documentation for the AI/Agent Gateway Manager (AGM).
 
-**Version**: 3.0
-**Last Updated**: 2026-02-04
+**Version**: 3.1
+**Last Updated**: 2026-02-14
 
 ---
 
@@ -16,6 +16,7 @@ Complete architectural documentation for the AI/Agent Gateway Manager (AGM).
 - [Storage Architecture](#storage-architecture)
 - [Multi-Agent System](#multi-agent-system)
 - [Session Lifecycle](#session-lifecycle)
+- [Session Initialization](#session-initialization)
 - [Command Translation Layer](#command-translation-layer)
 - [Security Model](#security-model)
 - [Performance Considerations](#performance-considerations)
@@ -135,11 +136,13 @@ internal/
 │
 ├── tmux/               # Tmux integration
 │   ├── tmux.go         # Core tmux operations
+│   ├── init_sequence.go    # Session initialization orchestration
 │   ├── control.go      # Control mode (-C) for programmatic control
 │   ├── output_watcher.go   # Output stream monitoring
+│   ├── prompt_detector.go  # Claude prompt detection via capture-pane
 │   ├── socket.go       # Unix socket management
 │   ├── lock.go         # Global tmux lock
-│   └── prompt.go       # Prompt injection (send/reject)
+│   └── send_command.go # Send literal commands to tmux sessions
 │
 ├── history/            # Conversation history
 │   ├── parser.go       # Parse ~/.claude/history.jsonl
@@ -435,6 +438,172 @@ func ComputeStatus(manifest *Manifest) string {
     return "stopped"
 }
 ```
+
+---
+
+## Session Initialization
+
+### InitSequence Component
+
+**Purpose**: Automate the initialization of Claude sessions by sending `/rename` and `/agm:agm-assoc` commands without user intervention.
+
+**Location**: `internal/tmux/init_sequence.go`
+
+### Architecture
+
+**Key Design Decisions**:
+1. Uses capture-pane polling (not control mode) - see [ADR-0001](adr/0001-init-sequence-capture-pane.md)
+2. Implements timing delays to prevent command queueing
+3. Avoids lock conflicts by calling tmux commands directly
+
+**Component Structure**:
+
+```go
+type InitSequence struct {
+    SessionName string
+}
+
+func (seq *InitSequence) Run() error {
+    // Step 1: Wait for Claude prompt
+    if err := WaitForClaudePrompt(seq.SessionName, 30*time.Second); err != nil {
+        return err
+    }
+
+    // Step 2: Send /rename command
+    if err := seq.sendRename(); err != nil {
+        return err
+    }
+
+    // Step 3: Send /agm:agm-assoc command
+    if err := seq.sendAssociation(); err != nil {
+        return err
+    }
+
+    return nil
+}
+```
+
+### Timing Constraints
+
+**Critical timing requirements** (prevents command queueing bug):
+
+1. **SendCommandLiteral delay**: 500ms between text and Enter
+   - Prevents both commands queuing on same input line
+   - Ensures tmux processes text before Enter key
+
+2. **Post-rename wait**: 5 seconds after `/rename` completes
+   - Ensures first command fully executes before second starts
+   - Total minimum duration: ≥6 seconds
+
+**Implementation**:
+
+```go
+func SendCommandLiteral(sessionName, command string) error {
+    socketPath := GetSocketPath()
+
+    // Send command text with -l flag (literal interpretation)
+    cmdText := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "-l", command)
+    if err := cmdText.Run(); err != nil {
+        return err
+    }
+
+    time.Sleep(500 * time.Millisecond)  // Critical delay
+
+    // Send Enter separately
+    cmdEnter := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "C-m")
+    if err := cmdEnter.Run(); err != nil {
+        return err
+    }
+
+    return nil
+}
+```
+
+### Lock Management
+
+**Important**: InitSequence.Run() does NOT use withTmuxLock() wrapper.
+
+**Rationale**:
+- SendCommandLiteral calls `exec.Command` directly (not SendCommand)
+- SendCommand acquires tmux lock via withTmuxLock()
+- Double-locking causes "tmux lock already held by this process" error
+
+**Design Pattern**:
+
+```go
+// ❌ WRONG - causes double-lock error
+func (seq *InitSequence) Run() error {
+    return withTmuxLock(func() error {
+        // SendCommandLiteral internally calls SendCommand
+        // SendCommand also calls withTmuxLock()
+        return seq.sendRename()  // ERROR: double-lock
+    })
+}
+
+// ✅ CORRECT - no lock wrapper, direct tmux commands
+func (seq *InitSequence) Run() error {
+    // Each SendCommandLiteral uses exec.Command directly
+    // No lock conflicts
+    return seq.sendRename()  // OK
+}
+```
+
+### Error Handling
+
+**Trust Prompt Handling**:
+- Capture-pane polling detects trust prompts naturally
+- Initialization waits for user to manually answer prompt
+- Continues after "❯" prompt detected
+
+**Timeout Handling** (30 seconds):
+- Warning displayed to user
+- Session remains attached (not killed)
+- User can manually run `/rename` and `/agm:agm-assoc`
+
+**Network Interruption**:
+- Retries with exponential backoff
+- Uses ready-file signal for completion detection
+
+### Ready-File Signal
+
+**Path**: `~/.agm/claude-ready-<session-name>`
+
+**Purpose**: File-based signal that Claude CLI is ready and initialization is complete.
+
+**Integration**:
+- Created by Claude SessionStart hook (`~/.claude/hooks/session-start/agm-ready-signal`)
+- AGM waits for this file before sending commands
+- Replaces fragile text-parsing-based prompt detection
+
+### Test Coverage
+
+**Regression Tests**: `internal/tmux/init_sequence_regression_test.go`
+- TestSendCommandLiteral_DoesNotUseSendCommand (no double-lock)
+- TestSendCommandLiteral_Timing (500ms delays)
+- TestInitSequence_NoDoubleLock (no lock errors)
+- TestSendCommandLiteral_UsesLiteralFlag (correct tmux flags)
+- TestInitSequence_DetachedMode (detached mode works)
+
+**BDD Scenarios**: `test/bdd/features/session_initialization.feature`
+- Commands execute on separate lines
+- Sufficient delay between commands
+- Detached sessions initialize automatically
+
+**Documentation**: `docs/testing/INIT_SEQUENCE_TEST_COVERAGE.md`
+
+### Performance Characteristics
+
+**Typical execution**:
+- Wait for prompt: 2-10 seconds (depends on Claude startup)
+- Send /rename: 500ms (command + delay)
+- Wait after /rename: 5 seconds
+- Send /agm:agm-assoc: 500ms (command + delay)
+- **Total**: ~8-16 seconds
+
+**Overhead acceptable** because:
+- Initialization is infrequent (once per session creation)
+- Reliability more important than speed
+- Timing delays prevent critical bugs
 
 ---
 

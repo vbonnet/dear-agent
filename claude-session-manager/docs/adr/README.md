@@ -65,6 +65,22 @@ Each ADR follows this structure:
 
 ---
 
+### Session Initialization
+
+**[ADR-0001: InitSequence Uses Capture-Pane Polling](0001-init-sequence-capture-pane.md)**
+- **Status**: Accepted (2026-02-14)
+- **Summary**: Replace control mode with capture-pane polling for Claude prompt detection
+- **Key Decision**: Capture-pane polling vs control mode, hybrid approach, or async monitoring
+- **Impact**: Simpler implementation, proven reliability, easier trust prompt handling
+
+**[ADR-0002: InitSequence Timing Delays and Lock-Free Implementation](0002-init-sequence-timing-and-locking.md)**
+- **Status**: Accepted (2026-02-14)
+- **Summary**: Fix double-lock and command queueing bugs with timing delays and direct tmux commands
+- **Key Decision**: Lock-free implementation with fixed delays vs configurable delays or adaptive timing
+- **Impact**: Reliable initialization, no race conditions, slower but deterministic
+
+---
+
 ### Data & Storage
 
 **Related to ADR-005**: Manifest versioning and schema evolution
@@ -94,6 +110,8 @@ Each ADR follows this structure:
 2026-01-16: ADR-005 - Manifest Versioning Strategy
 2026-01-18: ADR-002 - Command Translation Layer
 2026-01-19: ADR-003 - Environment Validation Philosophy
+2026-02-14: ADR-0001 - InitSequence Uses Capture-Pane Polling
+2026-02-14: ADR-0002 - InitSequence Timing Delays and Lock-Free Implementation
 ```
 
 ---
@@ -242,5 +260,5 @@ Supersede an ADR when:
 ---
 
 **Maintained by**: Foundation Engineering
-**Last Updated**: 2026-02-11
-**AGM Version**: 3.0+
+**Last Updated**: 2026-02-14
+**AGM Version**: 3.1+
