@@ -29,13 +29,13 @@ Key Features:
 
 Examples:
   # Select option 2 (simple selection)
-  agm select-option my-session 2
+  agm session select-option my-session 2
 
   # Select option 1 and provide custom text
-  agm select-option my-session 1 --prompt "Custom configuration details"
+  agm session select-option my-session 1 --prompt "Custom configuration details"
 
   # Select "Yes, and don't ask again" option (typically option 2)
-  agm select-option my-session 2
+  agm session select-option my-session 2
 
 Use Cases:
   • Orchestrator answering session questions automatically

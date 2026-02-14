@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Session Communication Commands** (v2.1): New unified command namespace for session interactions
+  - `agm session send` - Send messages with sender attribution and audit logging
+  - `agm session reject` - Reject permission prompts with custom reasons
+  - `agm session recover` - Soft recovery for stuck sessions (ESC/Ctrl-C)
+  - `agm session select-option` - Programmatically answer AskUserQuestion prompts
+  - **Sender Attribution**: All messages tagged with sender name and unique IDs
+  - **Message Logging**: Audit trail in `~/.agm/logs/messages/*.jsonl`
+  - **Message Threading**: Support for --reply-to to link related messages
+  - **Impact**: Enables automated session orchestration, monitoring, and recovery
+
+### Removed
+
+- **Unused Commands** (v2.2 - Phase 3): Removed based on telemetry analysis (0% usage over 3 days, 484 events)
+  - `agm backup` - Manifest backup management (0 uses)
+  - `agm deadlock-report` - Deadlock metrics reporting (0 uses)
+  - `agm metrics-log` - Manual metrics logging (0 uses)
+  - `agm agent list` - List available AI agents (1 use, 0.2%)
+  - **Rationale**: Telemetry data showed zero or near-zero usage
+  - **Impact**: Reduced binary size, simplified CLI surface area
+  - **Migration**: No migration needed - commands had no active users
+
 ### Fixed
 
 - **`csm new` bash prompt false positives**: Fixed race condition causing `/rename` and `/csm-assoc` commands to execute in bash shell instead of Claude

@@ -383,10 +383,10 @@ Send a message/prompt to a running AGM session, interrupting any active thinking
 
 ```bash
 # Send inline prompt
-agm send my-session --prompt "Please review the code"
+agm session send my-session --prompt "Please review the code"
 
 # Send prompt from file (for large multi-line prompts)
-agm send my-session --prompt-file /path/to/prompt.txt
+agm session send my-session --prompt-file /path/to/prompt.txt
 ```
 
 **Features:**
@@ -409,10 +409,10 @@ agm send my-session --prompt-file /path/to/prompt.txt
 **Example:**
 ```bash
 # Send diagnosis request to stuck session
-agm send gemini-research --prompt "⚠️ Your session was stuck. Please analyze what caused the hang and file an incident report."
+agm session send gemini-research --prompt "⚠️ Your session was stuck. Please analyze what caused the hang and file an incident report."
 
 # Send multi-line prompt from file
-agm send my-session --prompt-file ~/templates/code-review-prompt.txt
+agm session send my-session --prompt-file ~/templates/code-review-prompt.txt
 ```
 
 ### `agm reject <session-name> [flags]`
@@ -421,10 +421,10 @@ Reject a permission prompt with a custom reason (automates the Down → Tab → 
 
 ```bash
 # Reject with inline reason
-agm reject my-session --reason "Use Read tool instead of cat"
+agm session reject my-session --reason "Use Read tool instead of cat"
 
 # Reject with violation prompt from file
-agm reject my-session --reason-file ~/prompts/VIOLATION-PROMPTS.md
+agm session reject my-session --reason-file ~/prompts/VIOLATION-PROMPTS.md
 ```
 
 **Features:**
@@ -447,10 +447,10 @@ agm reject my-session --reason-file ~/prompts/VIOLATION-PROMPTS.md
 **Example:**
 ```bash
 # Reject tool usage violation
-agm reject my-session --reason-file ~/src/ws/oss/tool-usage-analysis/prompts/VIOLATION-PROMPTS.md
+agm session reject my-session --reason-file ~/src/ws/oss/tool-usage-analysis/prompts/VIOLATION-PROMPTS.md
 
 # Reject with custom feedback
-agm reject my-session --reason "Please use absolute paths and separate tool calls. Read the bash tool guidance at ~/docs/bash-rules.md"
+agm session reject my-session --reason "Please use absolute paths and separate tool calls. Read the bash tool guidance at ~/docs/bash-rules.md"
 ```
 
 **Workflow executed:**

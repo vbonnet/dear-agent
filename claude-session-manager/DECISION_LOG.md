@@ -64,10 +64,10 @@ AGM's command structure has grown organically with several issues:
 
 **Examples:**
 ```bash
-agm send msg <session> "Hello world"          # Send text message
-agm send recover <session>                     # Send ESC/CTRL-C
-agm send reject <session> "reason"             # Reject permission prompt
-agm send select-option <session> <option-id>   # Select AskUserQuestion option
+agm session send <session> --prompt "Hello world"  # Send text message
+agm session recover <session>                      # Send ESC/CTRL-C
+agm session reject <session> --reason "reason"     # Reject permission prompt
+agm session select-option <session> <option-id>    # Select AskUserQuestion option
 ```
 
 ---
@@ -132,10 +132,13 @@ agm send select-option <session> <option-id>   # Select AskUserQuestion option
 **Answer:** **Aggressive clean slate approach**
 
 **Strategy:**
-- Remove unused commands entirely (based on telemetry analysis)
-- Rename `agm session send` → `agm send msg` (no backwards compatibility)
-- Rename `agm session reject` → `agm send reject`
-- Rename `agm session recover` → `agm send recover`
+**IMPLEMENTATION NOTE**: Final implementation kept commands under `agm session` namespace.
+
+- Implemented new session communication commands:
+  - `agm session send` - Send messages with attribution
+  - `agm session reject` - Reject permission prompts
+  - `agm session recover` - Soft recovery
+  - `agm session select-option` - Answer prompts
 - No deprecation period, no aliases
 - Users and agents must update
 - Comprehensive migration guide in docs
@@ -226,15 +229,16 @@ agm send select-option <session> <option-id>   # Select AskUserQuestion option
 - Run for 1-2 weeks to collect data
 
 **Phase 2: Reorganize Send Namespace (v2.1-beta)**
-- Create `agm send` namespace
-- Implement sender attribution (required: sender, timestamp, action_type)
+**IMPLEMENTATION NOTE**: Final implementation kept commands under `agm session` namespace rather than creating new `agm send` namespace.
+
+- Implemented commands under `agm session` namespace:
+  - `agm session send` - Send messages with sender attribution
+  - `agm session reject` - Reject permission prompts
+  - `agm session recover` - Soft recovery (ESC/Ctrl-C)
+  - `agm session select-option` - Answer AskUserQuestion prompts
+- Implement sender attribution (sender, timestamp, message ID)
 - Unified logging to `~/.agm/logs/messages/`
-- Migrate commands:
-  - `agm session send` → `agm send msg`
-  - `agm session reject` → `agm send reject`
-  - `agm session recover` → `agm send recover`
-  - `agm session select-option` → `agm send select-option`
-- Remove old `agm session send|reject|recover|select-option` commands
+- Message threading support (--reply-to)
 - Update documentation and migration guide
 
 **Phase 3: Remove Unused Commands (v2.2 - Future)**

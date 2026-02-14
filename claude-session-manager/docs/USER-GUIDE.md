@@ -593,10 +593,10 @@ Select UUID (1-3):
 
 ```bash
 # Send inline prompt
-agm send my-session --prompt "Please review the code"
+agm session send my-session --prompt "Please review the code"
 
 # Send from file
-agm send my-session --prompt-file ~/prompts/review.txt
+agm session send my-session --prompt-file ~/prompts/review.txt
 ```
 
 **Features:**
@@ -618,10 +618,10 @@ agm send my-session --prompt-file ~/prompts/review.txt
 
 ```bash
 # Reject with inline reason
-agm reject my-session --reason "Use Read tool instead of cat"
+agm session reject my-session --reason "Use Read tool instead of cat"
 
 # Reject with violation prompt from file
-agm reject my-session --reason-file ~/prompts/VIOLATION.md
+agm session reject my-session --reason-file ~/prompts/VIOLATION.md
 ```
 
 **Workflow:**

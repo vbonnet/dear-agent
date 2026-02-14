@@ -297,7 +297,7 @@ pipeline {
 
         stage('Run Tests') {
             steps {
-                sh 'agm send ci-build-${BUILD_NUMBER} --prompt "Run test suite"'
+                sh 'agm session send ci-build-${BUILD_NUMBER} --prompt "Run test suite"'
             }
         }
 
@@ -642,7 +642,7 @@ SESSION="ci-test-$(date +%Y%m%d-%H%M%S)"
 agm new --agent claude "$SESSION" --detached
 
 # Send test prompt
-agm send "$SESSION" --prompt "Run full test suite and report results"
+agm session send "$SESSION" --prompt "Run full test suite and report results"
 
 # Wait for completion (poll for status)
 while true; do
@@ -673,7 +673,7 @@ SESSION="research-$DATE"
 agm resume "$SESSION" || agm new --agent gemini "$SESSION"
 
 # Send research query
-agm send "$SESSION" --prompt-file ~/research/daily-topics.txt
+agm session send "$SESSION" --prompt-file ~/research/daily-topics.txt
 
 # Log session activity
 agm logs query --session "$SESSION" > ~/research/logs/$DATE.log

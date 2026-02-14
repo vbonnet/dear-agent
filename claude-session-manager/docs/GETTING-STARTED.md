@@ -324,8 +324,8 @@ agm doctor gemini                # Agent-specific validation
 ### Advanced Commands
 
 ```bash
-agm send <session> --prompt "text"    # Send message to session
-agm reject <session> --reason "..."   # Reject permission prompt
+agm session send <session> --prompt "text"    # Send message to session
+agm session reject <session> --reason "..."   # Reject permission prompt
 ```
 
 ## Troubleshooting

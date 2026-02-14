@@ -750,13 +750,13 @@ agm doctor gemini --generate-bashrc >> ~/.bashrc
 
 ## Advanced Commands
 
-### agm send
+### agm session send
 
 Send message/prompt to a running session.
 
 **Usage:**
 ```bash
-agm send <session-name> [flags]
+agm session send <session-name> [flags]
 ```
 
 **Flags:**
@@ -768,13 +768,13 @@ agm send <session-name> [flags]
 **Examples:**
 ```bash
 # Send inline prompt
-agm send my-session --prompt "Please review the code"
+agm session send my-session --prompt "Please review the code"
 
 # Send from file
-agm send my-session --prompt-file ~/prompts/review.txt
+agm session send my-session --prompt-file ~/prompts/review.txt
 
 # Diagnosis prompt
-agm send stuck-session --prompt "⚠️ Your session was stuck. Analyze what caused the hang."
+agm session send stuck-session --prompt "⚠️ Your session was stuck. Analyze what caused the hang."
 ```
 
 **Features:**
@@ -800,13 +800,13 @@ agm send stuck-session --prompt "⚠️ Your session was stuck. Analyze what cau
 
 ---
 
-### agm reject
+### agm session reject
 
 Reject permission prompt with custom reason.
 
 **Usage:**
 ```bash
-agm reject <session-name> [flags]
+agm session reject <session-name> [flags]
 ```
 
 **Flags:**
@@ -818,10 +818,10 @@ agm reject <session-name> [flags]
 **Examples:**
 ```bash
 # Reject with inline reason
-agm reject my-session --reason "Use Read tool instead of cat"
+agm session reject my-session --reason "Use Read tool instead of cat"
 
 # Reject with violation prompt from file
-agm reject my-session --reason-file ~/prompts/VIOLATION.md
+agm session reject my-session --reason-file ~/prompts/VIOLATION.md
 ```
 
 **Workflow executed:**

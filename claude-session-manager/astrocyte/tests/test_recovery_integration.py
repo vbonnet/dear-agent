@@ -875,3 +875,215 @@ class TestCoverageSummary:
 
         assert len(paths_tested) >= 9, \
             "Should test at least 9 different RecoveryResult paths"
+
+
+class TestConservativeDetectionIntegration:
+    """Integration tests for conservative interruption policy.
+
+    Philosophy: Default is "do not interrupt". Better to miss an interruption
+    than interrupt legitimate work (AskUserQuestion, planning, user thinking).
+    """
+
+    def test_askuserquestion_session_not_interrupted(self, mock_tmux, mock_esc_sender):
+        """Session waiting for AskUserQuestion must NOT be interrupted."""
+        # Simulate session stuck on AskUserQuestion for 30+ minutes
+        session = "planning-session"
+
+        # Pane content shows AskUserQuestion prompt (completion + idle prompt)
+        pane_content = """
+● I need to choose an authentication approach for OAuth login. I've researched options:
+
+A) Enhance Passport.js (existing library)
+   - Pros: 90% overlap with needs, battle-tested
+   - Cons: 4 hours to fill gaps
+   - Cost: $50/month infrastructure + 4hr dev time
+
+B) Integrate Auth0 (commercial service)
+   - Pros: 100% solution, zero code, SOC2 certified
+   - Cons: $2300/month at scale, vendor lock-in
+   - Cost: $2300/month at 10k users
+
+Which approach fits best?
+
+❯
+"""
+
+        # Mock tmux responses
+        mock_tmux.set_pane_content(pane_content)
+        mock_tmux.set_cursor_position("0,15")
+
+        # Simulate 2 detection cycles (30 minutes = cursor_frozen threshold)
+        from astrocyte import capture_pane_state, is_conversation_endpoint_idle
+        from datetime import datetime, timedelta
+
+        # Cycle 1
+        state1 = capture_pane_state(session)
+
+        # Cycle 2 (30 min later) - same pane, same cursor (appears "frozen")
+        state2 = SessionState(
+            pane_content=pane_content,
+            cursor_position=(0, 15),
+            timestamp=state1.timestamp + timedelta(minutes=30)
+        )
+
+        # Check endpoint detection
+        is_endpoint = is_conversation_endpoint_idle(state2)
+
+        # CRITICAL: Must be detected as endpoint to avoid interruption
+        assert is_endpoint is True, \
+            "AskUserQuestion session must be detected as endpoint"
+
+        # ESC should NOT be sent
+        assert mock_esc_sender.call_count == 0, \
+            "Must NOT send ESC to session waiting for AskUserQuestion"
+
+    def test_planning_session_not_interrupted(self, mock_tmux, mock_esc_sender):
+        """Planning session at completion must NOT be interrupted."""
+        session = "architecture-planning"
+
+        # Pane shows plan completed, waiting for user approval
+        pane_content = """
+● ✅ Plan finalized
+
+I've created a comprehensive implementation plan for the authentication system:
+
+1. Phase 1: Setup (2 hours)
+2. Phase 2: Core implementation (4 hours)
+3. Phase 3: Testing (2 hours)
+
+Ready for your approval to proceed.
+
+❯
+"""
+
+        mock_tmux.set_pane_content(pane_content)
+        mock_tmux.set_cursor_position("0,12")
+
+        from astrocyte import is_conversation_endpoint_idle
+
+        state = capture_pane_state(session)
+        is_endpoint = is_conversation_endpoint_idle(state)
+
+        # Must be detected as endpoint
+        assert is_endpoint is True, \
+            "Planning session at completion must be detected as endpoint"
+
+        # No recovery should be attempted
+        assert mock_esc_sender.call_count == 0
+
+    def test_genuine_mustering_freeze_can_be_interrupted(self, mock_tmux, mock_esc_sender):
+        """Genuine mustering freeze (>20 min) CAN be interrupted."""
+        session = "stuck-session"
+
+        # Pane shows mustering pattern (no completion, no idle prompt)
+        pane_content = """
+● Processing task...
+
+✻ Mustering...
+
+"""
+
+        mock_tmux.set_pane_content(pane_content)
+        mock_tmux.set_cursor_position("0,3")
+
+        from astrocyte import is_conversation_endpoint_idle
+
+        state = capture_pane_state(session)
+        is_endpoint = is_conversation_endpoint_idle(state)
+
+        # Must NOT be detected as endpoint (eligible for interruption)
+        assert is_endpoint is False, \
+            "Mustering freeze must NOT be detected as endpoint"
+
+    def test_zero_tokens_bug_can_be_interrupted(self, mock_tmux, mock_esc_sender):
+        """0 tokens bug (genuine freeze) CAN be interrupted."""
+        session = "zero-tokens-session"
+
+        # Pane shows 0 tokens waiting pattern
+        pane_content = """
+● Bootstrapping…
+
+Bootstrapping… (esc to interrupt · 15m 32s · ↓ 0 tokens)
+
+"""
+
+        mock_tmux.set_pane_content(pane_content)
+        mock_tmux.set_cursor_position("0,4")
+
+        from astrocyte import is_conversation_endpoint_idle
+
+        state = capture_pane_state(session)
+        is_endpoint = is_conversation_endpoint_idle(state)
+
+        # Must NOT be endpoint (0 tokens bug needs interruption)
+        assert is_endpoint is False, \
+            "0 tokens bug must NOT be detected as endpoint"
+
+    def test_multiple_detection_cycles_with_endpoint_signals(self, mock_tmux):
+        """Multiple detection cycles should consistently detect endpoint."""
+        session = "persistent-endpoint"
+
+        pane_content = "● ✅ Task completed\n\nReady to proceed.\n\n❯"
+        mock_tmux.set_pane_content(pane_content)
+        mock_tmux.set_cursor_position("0,5")
+
+        from astrocyte import is_conversation_endpoint_idle
+        from datetime import datetime, timedelta
+
+        # Cycle 1
+        state1 = capture_pane_state(session)
+        assert is_conversation_endpoint_idle(state1) is True
+
+        # Cycle 2 (1 min later)
+        state2 = SessionState(
+            pane_content=pane_content,
+            cursor_position=(0, 5),
+            timestamp=state1.timestamp + timedelta(minutes=1)
+        )
+        assert is_conversation_endpoint_idle(state2) is True
+
+        # Cycle 3 (30 min later)
+        state3 = SessionState(
+            pane_content=pane_content,
+            cursor_position=(0, 5),
+            timestamp=state1.timestamp + timedelta(minutes=30)
+        )
+        assert is_conversation_endpoint_idle(state3) is True
+
+        # All cycles should consistently detect endpoint
+
+    def test_partial_endpoint_signals_not_detected(self, mock_tmux):
+        """Partial endpoint signals (only 1 of 2) must NOT be detected as endpoint."""
+        session = "partial-signals"
+
+        # Has idle prompt but NO completion language
+        pane_content = "● Still working on task...\n\n❯"
+        mock_tmux.set_pane_content(pane_content)
+        mock_tmux.set_cursor_position("0,3")
+
+        from astrocyte import is_conversation_endpoint_idle
+
+        state = capture_pane_state(session)
+        is_endpoint = is_conversation_endpoint_idle(state)
+
+        # Must NOT be endpoint (missing completion language)
+        assert is_endpoint is False, \
+            "Partial endpoint signals (only idle prompt) must NOT detect as endpoint"
+
+    def test_completion_with_active_spinner_not_endpoint(self, mock_tmux):
+        """Completion language + spinner must NOT be endpoint (contradiction)."""
+        session = "conflicting-signals"
+
+        # Has completion language AND spinner (contradiction)
+        pane_content = "● ✅ Task completed\n\n✶ Thinking…\n\n❯"
+        mock_tmux.set_pane_content(pane_content)
+        mock_tmux.set_cursor_position("0,5")
+
+        from astrocyte import is_conversation_endpoint_idle
+
+        state = capture_pane_state(session)
+        is_endpoint = is_conversation_endpoint_idle(state)
+
+        # Must NOT be endpoint (spinner indicates active work)
+        assert is_endpoint is False, \
+            "Completion + spinner must NOT be endpoint"

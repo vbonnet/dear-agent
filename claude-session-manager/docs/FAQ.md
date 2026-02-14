@@ -479,10 +479,10 @@ agm doctor
 
 ```bash
 # Send interrupt + diagnosis prompt
-agm send my-session --prompt "⚠️ Your session was stuck. Please analyze what caused the hang."
+agm session send my-session --prompt "⚠️ Your session was stuck. Please analyze what caused the hang."
 
 # Or reject current operation
-agm reject my-session --reason "Timeout exceeded, moving on"
+agm session reject my-session --reason "Timeout exceeded, moving on"
 ```
 
 **Prevention:**

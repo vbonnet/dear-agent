@@ -90,19 +90,21 @@ class Config:
     interval_seconds: int = 60  # 1 minute (fast detection)
 
     # Detection thresholds (minutes)
-    # Tuned based on observed false positive data
-    mustering_timeout: int = 10      # Mustering usually resolves within 10min
-    zero_token_waiting: int = 3      # 0 tokens = stuck, recover quickly
-    cursor_frozen: int = 15           # Legitimate thinking can take time
-    ask_question_violation: int = 10  # Give time for complex questions
-    permission_prompt_duration: int = 5  # Duration-based detection (fresh start uses violation patterns)
+    # CONSERVATIVE DEFAULTS: Better to miss an interruption than interrupt legitimate work
+    # Only interrupt for genuine freezes (0 tokens bug, UI completely unresponsive)
+    mustering_timeout: int = 20      # Genuine hang only - mustering should complete <20min
+    zero_token_waiting: int = 15     # 0 tokens bug - genuine freeze indicator
+    cursor_frozen: int = 30          # UI completely unresponsive - very conservative
+    ask_question_violation: int = 10  # DISABLED by default (see line 2352-2355)
+    permission_prompt_duration: int = 10  # Permission prompt stuck (increased from 5min)
     max_cascade_rejections: int = 10  # Circuit breaker for cascading permission prompts
 
     # Session-type-specific thresholds (minutes)
     # Auto-applied based on session name patterns (via get_session_type)
-    orchestrator_cursor_frozen: int = 15  # Orchestrators monitor multiple sessions, natural idle periods
-    single_task_cursor_frozen: int = 5    # Single tasks should be active, longer idle = stuck
-    interactive_cursor_frozen: int = 3    # Interactive sessions idle quickly when user pauses
+    # These are also more conservative now
+    orchestrator_cursor_frozen: int = 30  # Orchestrators monitor multiple sessions, very long idle OK
+    single_task_cursor_frozen: int = 15   # Single tasks can think for extended periods
+    interactive_cursor_frozen: int = 10   # Interactive sessions need more time for user thinking
 
     # Slack configuration
     slack_enabled: bool = False
@@ -228,13 +230,13 @@ def load_config() -> Config:
 
             return Config(
                 interval_seconds=data.get("interval_seconds", 60),
-                mustering_timeout=thresholds.get("mustering_timeout", 10),
-                zero_token_waiting=thresholds.get("zero_token_waiting", 10),
-                cursor_frozen=thresholds.get("cursor_frozen", 15),
-                ask_question_violation=thresholds.get("ask_question_violation", 5),
-                orchestrator_cursor_frozen=thresholds.get("orchestrator_cursor_frozen", 15),
-                single_task_cursor_frozen=thresholds.get("single_task_cursor_frozen", 5),
-                interactive_cursor_frozen=thresholds.get("interactive_cursor_frozen", 3),
+                mustering_timeout=thresholds.get("mustering_timeout", 20),
+                zero_token_waiting=thresholds.get("zero_token_waiting", 15),
+                cursor_frozen=thresholds.get("cursor_frozen", 30),
+                ask_question_violation=thresholds.get("ask_question_violation", 10),
+                orchestrator_cursor_frozen=thresholds.get("orchestrator_cursor_frozen", 30),
+                single_task_cursor_frozen=thresholds.get("single_task_cursor_frozen", 15),
+                interactive_cursor_frozen=thresholds.get("interactive_cursor_frozen", 10),
                 slack_enabled=slack.get("enabled", False),
                 slack_webhook_url=slack.get("webhook_url"),
                 recovery_enabled=recovery.get("enabled", True),
@@ -587,24 +589,55 @@ QUESTION_PATTERNS = [
 # Conversation endpoint detection patterns
 # Used to identify when a conversation naturally completes (task done, waiting for user)
 COMPLETION_PATTERNS = [
-    # Explicit completion
+    # Explicit completion with checkmarks
     r"✅.*complete",
     r"✅.*done",
     r"✅.*finished",
     r"✓.*complete",
     r"✓.*done",
 
-    # Summary language
-    r"All.*complete",
-    r"Successfully.*completed",
-    r"Task.*finished",
-    r"Work.*done",
+    # Just the checkmark itself
+    r"✅",
+    r"✓",
 
-    # Ready state
+    # Task/work completion
+    r"Task.*completed",
+    r"Task.*complete",
+    r"Task.*finished",
+    r"Task.*done",
+    r"Work.*done",
+    r"Work.*complete",
+
+    # All/everything done
+    r"All.*complete",
+    r"All.*done",
+    r"All.*finished",
+    r"Successfully.*completed",
+
+    # Session/job complete
+    r"Session.*complete",
+    r"Session.*done",
+    r"Job.*complete",
+    r"Job.*done",
+
+    # Simple completion words
+    r"\bComplete\b",
+    r"\bFinished\b",
+    r"\bDone\b",
+
+    # Ready state / waiting for user
     r"Ready to proceed",
+    r"Ready for",
     r"Waiting for.*input",
     r"What would you like",
     r"How can I help",
+    r"Which.*\?",  # "Which would you prefer?", "Which approach?", etc.
+    r"What.*\?",   # "What should I...", "What would you..."
+    r"Should I",   # "Should I proceed?", etc.
+    r"Would you like",
+    r"Do you want",
+    r"Your.*preference",
+    r"Your.*choice",
 
     # Final status
     r"Status:.*complete",
@@ -2355,6 +2388,18 @@ def main():
                         #     heuristic = "ask_question_pattern"
 
                     if stuck:
+                        # CONSERVATIVE INTERRUPTION: Check if session is at a natural endpoint
+                        # Only interrupt if genuinely frozen (0 tokens bug, UI unresponsive)
+                        # Default: do not interrupt - better to miss than interrupt legitimate work
+                        if is_conversation_endpoint_idle(current):
+                            print(f"\n✓ ENDPOINT DETECTED: {session}")
+                            print(f"   Session at natural conversation endpoint (waiting for user input)")
+                            print(f"   Symptom detected: {symptom} (but endpoint signals present)")
+                            print(f"   Skipping recovery - not a genuine hang")
+                            print(f"   Rationale: Session may be waiting for AskUserQuestion response")
+                            continue  # Skip to next session - DO NOT INTERRUPT
+
+                        # Not an endpoint - proceed with conservative hang detection
                         # Calculate duration (0 for fresh start detection)
                         if previous:
                             delta_minutes = int((current.timestamp - previous.timestamp).seconds / 60)

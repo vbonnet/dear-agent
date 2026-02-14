@@ -409,11 +409,11 @@ defaults:
 
 ## Session Communication
 
-### agm send
+### agm session send
 
 Send message/prompt to running session, interrupting active thinking.
 
-**Usage**: `agm send <session-name> [flags]`
+**Usage**: `agm session send <session-name> [flags]`
 
 **Flags**:
 - `--prompt <text>` - Prompt text to send
@@ -423,25 +423,25 @@ Send message/prompt to running session, interrupting active thinking.
 
 ```bash
 # Send inline prompt
-agm send my-session --prompt "Please review the code"
+agm session send my-session --prompt "Please review the code"
 
 # Send from file (large prompts)
-agm send my-session --prompt-file ~/prompts/diagnosis.txt
+agm session send my-session --prompt-file ~/prompts/diagnosis.txt
 
 # Send multi-line prompt
-agm send research --prompt "Analyze the following:
+agm session send research --prompt "Analyze the following:
 1. Authentication flow
 2. Error handling
 3. Security concerns"
 
 # Interrupt and redirect stuck session
-agm send my-session --prompt "Stop and list all files in current directory"
+agm session send my-session --prompt "Stop and list all files in current directory"
 
 # Send code review request
-agm send code-review --prompt "Review src/auth/login.py for security issues"
+agm session send code-review --prompt "Review src/auth/login.py for security issues"
 
 # Send research task
-agm send research-task --prompt-file ~/tasks/api-analysis.md
+agm session send research-task --prompt-file ~/tasks/api-analysis.md
 ```
 
 **Features**:
@@ -467,11 +467,11 @@ agm send research-task --prompt-file ~/tasks/api-analysis.md
 
 ---
 
-### agm reject
+### agm session reject
 
 Reject permission prompt with custom reason.
 
-**Usage**: `agm reject <session-name> [flags]`
+**Usage**: `agm session reject <session-name> [flags]`
 
 **Flags**:
 - `--reason <text>` - Rejection reason
@@ -481,22 +481,22 @@ Reject permission prompt with custom reason.
 
 ```bash
 # Reject with inline reason
-agm reject my-session --reason "Use Read tool instead of cat"
+agm session reject my-session --reason "Use Read tool instead of cat"
 
 # Reject with violation prompt from file
-agm reject my-session --reason-file ~/prompts/VIOLATION-PROMPTS.md
+agm session reject my-session --reason-file ~/prompts/VIOLATION-PROMPTS.md
 
 # Reject with detailed feedback
-agm reject task --reason "Please use absolute paths and separate tool calls"
+agm session reject task --reason "Please use absolute paths and separate tool calls"
 
 # Reject with coding standards
-agm reject code-session --reason "Use Edit tool, not sed command via Bash"
+agm session reject code-session --reason "Use Edit tool, not sed command via Bash"
 
 # Reject with security guidance
-agm reject review-task --reason "Do not read .env files. Request user to provide required values."
+agm session reject review-task --reason "Do not read .env files. Request user to provide required values."
 
 # Reject with process guidance
-agm reject research --reason "Create separate Read tool calls instead of using cat. One file per call."
+agm session reject research --reason "Create separate Read tool calls instead of using cat. One file per call."
 ```
 
 **What it does**:
@@ -1178,7 +1178,7 @@ agm resume research-task
 agm new --agent claude code-review-auth-refactor
 
 # Send code for review
-agm send code-review-auth-refactor --prompt "Review the authentication refactor in src/auth/"
+agm session send code-review-auth-refactor --prompt "Review the authentication refactor in src/auth/"
 
 # Resume to see results
 agm resume code-review-auth-refactor
@@ -1194,7 +1194,7 @@ agm archive code-review-auth-refactor
 agm new --agent gemini --workflow deep-research api-research
 
 # Send URLs for research
-agm send api-research --prompt "Analyze these API design patterns: https://..."
+agm session send api-research --prompt "Analyze these API design patterns: https://..."
 
 # Resume to review findings
 agm resume api-research
@@ -1296,10 +1296,10 @@ agm list --all
 agm new task --agent claude --prompt "Review security vulnerabilities"
 
 # Send follow-up commands
-agm send task --prompt-file ~/prompts/security-checklist.txt
+agm session send task --prompt-file ~/prompts/security-checklist.txt
 
 # Reject permission with guidance
-agm reject task --reason "Use Read tool instead of cat command"
+agm session reject task --reason "Use Read tool instead of cat command"
 
 # Kill session when done
 agm kill task

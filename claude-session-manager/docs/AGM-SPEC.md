@@ -358,9 +358,9 @@ agm workflow deep-research my-topic \
 
 **Commands**:
 ```bash
-agm send my-session "Analyze this code"
-agm send my-session --file prompt.txt
-agm send my-session --reject          # Reject last response
+agm session send my-session "Analyze this code"
+agm session send my-session --file prompt.txt
+agm session send my-session --reject          # Reject last response
 agm logs list                         # List message logs
 agm logs show my-session              # Show session messages
 agm logs clean --older-than 90        # Cleanup old logs

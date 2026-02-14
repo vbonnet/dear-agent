@@ -302,7 +302,7 @@ state=$(cat ~/.agm/status/my-session.json 2>/dev/null | jq -r '.state')
 
 if [ "$state" = "ready" ]; then
     echo "Session ready, sending command..."
-    agm send my-session "some command"
+    agm session send my-session --prompt "some command"
 else
     echo "Session busy (state: $state), waiting..."
 fi

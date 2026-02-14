@@ -74,7 +74,7 @@ One-page cheat sheet with:
 ```
 Send a message/prompt to a running AGM session.
 Examples:
-  csm send my-session --prompt "Please review the code"
+  csm session send my-session --prompt "Please review the code"
 ```
 
 **After**:
@@ -111,7 +111,7 @@ Use Cases:
 ```
 Reject a permission prompt in a AGM session.
 Examples:
-  csm reject my-session --reason "Use Read tool instead of cat"
+  csm session reject my-session --reason "Use Read tool instead of cat"
 ```
 
 **After**:
@@ -270,7 +270,7 @@ agm reject --help
 agm list
 agm agent list
 agm new --agent gemini test-session
-agm send test-session --prompt "Test message"
+agm session send test-session --prompt "Test message"
 ```
 
 ### Documentation Testing

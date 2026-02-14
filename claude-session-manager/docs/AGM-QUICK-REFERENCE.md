@@ -70,11 +70,11 @@ agm search "OAuth work"
 
 ```bash
 # Send message to running session
-agm send my-session --prompt "Review the code"
-agm send my-session --prompt-file ~/prompts/task.txt
+agm session send my-session --prompt "Review the code"
+agm session send my-session --prompt-file ~/prompts/task.txt
 
 # Reject permission with reason
-agm reject my-session --reason "Use Read tool instead"
+agm session reject my-session --reason "Use Read tool instead"
 ```
 
 ---

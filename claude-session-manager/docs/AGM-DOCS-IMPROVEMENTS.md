@@ -88,7 +88,7 @@ Added 5 comprehensive workflow sections:
 ```bash
 # Create session for code review
 agm new --agent claude code-review-auth-refactor
-agm send code-review-auth-refactor --prompt "Review the authentication refactor in src/auth/"
+agm session send code-review-auth-refactor --prompt "Review the authentication refactor in src/auth/"
 agm resume code-review-auth-refactor
 agm archive code-review-auth-refactor
 ```
@@ -97,7 +97,7 @@ agm archive code-review-auth-refactor
 ```bash
 # Create research session with Gemini (1M context)
 agm new --agent gemini --workflow deep-research api-research
-agm send api-research --prompt "Analyze these API design patterns: https://..."
+agm session send api-research --prompt "Analyze these API design patterns: https://..."
 agm resume api-research
 agm search "API design patterns"
 ```
@@ -120,8 +120,8 @@ agm list --all
 #### 11. Automated Session Management (NEW)
 ```bash
 agm new task --agent claude --prompt "Review security vulnerabilities"
-agm send task --prompt-file ~/prompts/security-checklist.txt
-agm reject task --reason "Use Read tool instead of cat command"
+agm session send task --prompt-file ~/prompts/security-checklist.txt
+agm session reject task --reason "Use Read tool instead of cat command"
 agm kill task
 ```
 

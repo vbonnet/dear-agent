@@ -5,11 +5,13 @@
 interval_seconds: 60   # Check interval (1 minute)
 
 # Detection Thresholds (in minutes)
+# CONSERVATIVE DEFAULTS: Better to miss an interruption than interrupt legitimate work
 thresholds:
-  mustering_timeout: 10      # "Mustering..." stuck for >10 min
-  zero_token_waiting: 10     # "Galloping..." + ↓ 0 tokens for >10 min
-  cursor_frozen: 15          # No cursor movement + no output for >15 min
-  ask_question_violation: 5  # Agent asking questions in text for >5 min
+  mustering_timeout: 20      # "Mustering..." stuck for >20 min (genuine hang only)
+  zero_token_waiting: 15     # "Galloping..." + ↓ 0 tokens for >15 min (0 tokens bug)
+  cursor_frozen: 30          # No cursor movement + no output for >30 min (UI freeze only)
+  ask_question_violation: 10 # Agent asking questions in text for >10 min (DISABLED by default)
+  permission_prompt_duration: 10  # Permission prompt stuck for >10 min
 
 # Slack Notifications (optional)
 slack:
