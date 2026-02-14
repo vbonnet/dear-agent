@@ -28,11 +28,13 @@ func TestFullIntegration(t *testing.T) {
 		events: eventChan,
 	}
 
-	// Start watcher
+	// Start watcher with short poll interval for faster testing
+	testPollInterval := 100 * time.Millisecond
 	watcher := &Watcher{
 		hub:           captureHub,
 		tracker:       NewEscalationTracker(15 * time.Minute),
 		incidentsFile: incidentsFile,
+		pollInterval:  testPollInterval,
 		shutdown:      make(chan struct{}),
 	}
 
@@ -85,7 +87,7 @@ func TestFullIntegration(t *testing.T) {
 			t.Errorf("Expected pattern %s, got %s", incident.DetectionHeuristic, payload.Pattern)
 		}
 
-	case <-time.After(pollInterval + 500*time.Millisecond):
+	case <-time.After(testPollInterval + 500*time.Millisecond):
 		t.Fatal("Timeout waiting for event")
 	}
 }
@@ -105,10 +107,12 @@ func TestMultipleSessionsIntegration(t *testing.T) {
 		events: eventChan,
 	}
 
+	testPollInterval := 100 * time.Millisecond
 	watcher := &Watcher{
 		hub:           captureHub,
 		tracker:       NewEscalationTracker(15 * time.Minute),
 		incidentsFile: incidentsFile,
+		pollInterval:  testPollInterval,
 		shutdown:      make(chan struct{}),
 	}
 
@@ -139,7 +143,7 @@ func TestMultipleSessionsIntegration(t *testing.T) {
 
 	// Collect events
 	receivedSessions := make(map[string]bool)
-	timeout := time.After(pollInterval + 500*time.Millisecond)
+	timeout := time.After(testPollInterval + 500*time.Millisecond)
 
 	for i := 0; i < len(sessions); i++ {
 		select {
@@ -173,11 +177,14 @@ func TestTimeWindowingIntegration(t *testing.T) {
 		events: eventChan,
 	}
 
-	// Use a short window for testing
+	// Use a short poll interval (50ms) and short window (300ms) for testing
+	testPollInterval := 50 * time.Millisecond
+	testWindow := 300 * time.Millisecond
 	watcher := &Watcher{
 		hub:           captureHub,
-		tracker:       NewEscalationTracker(300 * time.Millisecond),
+		tracker:       NewEscalationTracker(testWindow),
 		incidentsFile: incidentsFile,
+		pollInterval:  testPollInterval,
 		shutdown:      make(chan struct{}),
 	}
 
@@ -212,7 +219,7 @@ func TestTimeWindowingIntegration(t *testing.T) {
 		if event.SessionID != sessionID {
 			t.Errorf("Expected session %s, got %s", sessionID, event.SessionID)
 		}
-	case <-time.After(pollInterval + 200*time.Millisecond):
+	case <-time.After(testPollInterval + 200*time.Millisecond):
 		t.Fatal("Timeout waiting for first event")
 	}
 
@@ -238,12 +245,12 @@ func TestTimeWindowingIntegration(t *testing.T) {
 	select {
 	case event := <-eventChan:
 		t.Errorf("Received unexpected event within time window: %+v", event)
-	case <-time.After(pollInterval + 200*time.Millisecond):
+	case <-time.After(testPollInterval + 200*time.Millisecond):
 		// Expected - no event should be received
 	}
 
 	// Wait for window to expire
-	time.Sleep(400 * time.Millisecond)
+	time.Sleep(testWindow + 100*time.Millisecond)
 
 	// Write third incident (should be published)
 	incident3 := &AstrocyteIncident{
@@ -269,7 +276,7 @@ func TestTimeWindowingIntegration(t *testing.T) {
 		if event.SessionID != sessionID {
 			t.Errorf("Expected session %s, got %s", sessionID, event.SessionID)
 		}
-	case <-time.After(pollInterval + 200*time.Millisecond):
+	case <-time.After(testPollInterval + 200*time.Millisecond):
 		t.Fatal("Timeout waiting for third event after time window")
 	}
 }

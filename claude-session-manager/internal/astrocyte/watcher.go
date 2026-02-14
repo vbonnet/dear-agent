@@ -18,8 +18,8 @@ const (
 	// Default escalation window (15 minutes)
 	defaultEscalationWindow = 15 * time.Minute
 
-	// Polling interval for checking the incidents file
-	pollInterval = 5 * time.Second
+	// Default polling interval for checking the incidents file
+	defaultPollInterval = 5 * time.Second
 
 	// Size of the event buffer channel
 	eventBufferSize = 100
@@ -86,6 +86,7 @@ type Watcher struct {
 	hub           eventbus.Broadcaster
 	tracker       *EscalationTracker
 	incidentsFile string
+	pollInterval  time.Duration
 	lastPosition  int64
 	shutdown      chan struct{}
 	wg            sync.WaitGroup
@@ -94,6 +95,11 @@ type Watcher struct {
 
 // NewWatcher creates a new Astrocyte incidents watcher
 func NewWatcher(hub eventbus.Broadcaster, incidentsFile string, escalationWindow time.Duration) *Watcher {
+	return NewWatcherWithPollInterval(hub, incidentsFile, escalationWindow, defaultPollInterval)
+}
+
+// NewWatcherWithPollInterval creates a new Astrocyte incidents watcher with a custom poll interval
+func NewWatcherWithPollInterval(hub eventbus.Broadcaster, incidentsFile string, escalationWindow time.Duration, pollInterval time.Duration) *Watcher {
 	if incidentsFile == "" {
 		// Default to ~/.agm/astrocyte/incidents.jsonl
 		home, err := os.UserHomeDir()
@@ -105,10 +111,15 @@ func NewWatcher(hub eventbus.Broadcaster, incidentsFile string, escalationWindow
 		}
 	}
 
+	if pollInterval <= 0 {
+		pollInterval = defaultPollInterval
+	}
+
 	return &Watcher{
 		hub:           hub,
 		tracker:       NewEscalationTracker(escalationWindow),
 		incidentsFile: incidentsFile,
+		pollInterval:  pollInterval,
 		lastPosition:  0,
 		shutdown:      make(chan struct{}),
 	}
@@ -170,7 +181,7 @@ func (w *Watcher) initializeFilePosition() error {
 func (w *Watcher) watchLoop() {
 	defer w.wg.Done()
 
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
 
 	for {

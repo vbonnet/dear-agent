@@ -319,7 +319,8 @@ func TestWatcher_FileWatching(t *testing.T) {
 	incidentsFile := filepath.Join(tmpDir, "incidents.jsonl")
 
 	hub := &mockHub{}
-	watcher := NewWatcher(hub, incidentsFile, 15*time.Minute)
+	testPollInterval := 100 * time.Millisecond
+	watcher := NewWatcherWithPollInterval(hub, incidentsFile, 15*time.Minute, testPollInterval)
 
 	// Start the watcher
 	if err := watcher.Start(); err != nil {
@@ -348,7 +349,7 @@ func TestWatcher_FileWatching(t *testing.T) {
 	}
 
 	// Wait for the watcher to process the file
-	time.Sleep(pollInterval + 100*time.Millisecond)
+	time.Sleep(testPollInterval + 100*time.Millisecond)
 
 	// Check that the event was published
 	events := hub.GetEvents()
@@ -368,7 +369,8 @@ func TestWatcher_MultipleIncidents(t *testing.T) {
 	incidentsFile := filepath.Join(tmpDir, "incidents.jsonl")
 
 	hub := &mockHub{}
-	watcher := NewWatcher(hub, incidentsFile, 15*time.Minute)
+	testPollInterval := 100 * time.Millisecond
+	watcher := NewWatcherWithPollInterval(hub, incidentsFile, 15*time.Minute, testPollInterval)
 
 	if err := watcher.Start(); err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -417,7 +419,7 @@ func TestWatcher_MultipleIncidents(t *testing.T) {
 	file.Close()
 
 	// Wait for the watcher to process
-	time.Sleep(pollInterval + 100*time.Millisecond)
+	time.Sleep(testPollInterval + 100*time.Millisecond)
 
 	// Check that all events were published
 	events := hub.GetEvents()
