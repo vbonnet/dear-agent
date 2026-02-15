@@ -1,0 +1,35 @@
+# Team MCP Configuration Example
+# Location: ~/.config/agm/teams/<team-name>/mcp.yaml
+#
+# This file defines shared MCP servers for a team. All team members
+# will inherit these configurations unless overridden by user or
+# session-specific configs.
+
+team:
+  name: ml-research
+  description: ML Research Team Shared Infrastructure
+  owner: research-lead@example.com
+
+mcp_servers:
+  # Shared GitHub MCP for team repositories
+  - name: team-github
+    url: https://mcp-gateway.example.com/github
+    type: mcp
+
+  # Shared Jira MCP for issue tracking
+  - name: team-jira
+    url: https://mcp-gateway.example.com/jira
+    type: mcp
+
+  # Shared documentation MCP (Google Docs)
+  - name: team-docs
+    url: https://mcp-gateway.example.com/googledocs
+    type: mcp
+
+  # Internal data access MCP
+  - name: team-data
+    url: https://mcp-gateway.internal:8443/data-api
+    type: mcp
+
+# Note: Team members can override these configs in their user config
+# (~/.config/agm/mcp.yaml) or session config (<project>/.agm/mcp.yaml)
