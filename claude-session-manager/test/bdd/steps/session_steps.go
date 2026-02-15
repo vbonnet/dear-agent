@@ -3,7 +3,9 @@ package steps
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/cucumber/godog"
 
@@ -71,6 +73,12 @@ func iRun(ctx context.Context, command string) (context.Context, error) {
 
 	args := parseCommand(command)
 
+	// For "agm session new" commands, execute real CLI instead of mocks
+	if strings.Contains(command, "agm session new") || strings.Contains(command, "agm new") {
+		return executeRealAGMCommand(ctx, args)
+	}
+
+	// Otherwise, use mock adapters for unit-test-style scenarios
 	switch args.Command {
 	case "new":
 		adapter, err := env.GetAdapter(args.Agent)
@@ -126,6 +134,47 @@ func iRun(ctx context.Context, command string) (context.Context, error) {
 			env.CurrentSession.State = mock.StateArchived
 		}
 	}
+
+	return ctx, nil
+}
+
+// executeRealAGMCommand executes actual agm CLI commands (for integration tests)
+func executeRealAGMCommand(ctx context.Context, args *CommandArgs) (context.Context, error) {
+	env := testenv.EnvFromContext(ctx)
+
+	// Parse command into agm CLI arguments
+	// "agm session new test-init-success --agent=claude"
+	cmdArgs := []string{"session", args.Command, args.SessionName}
+	if args.Agent != "" {
+		cmdArgs = append(cmdArgs, "--agent="+args.Agent)
+	}
+
+	// Add --detached flag for BDD tests (don't attach to session)
+	cmdArgs = append(cmdArgs, "--detached")
+
+	// Set timeout for command execution (90 seconds as per BDD feature)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	// Execute agm command
+	cmd := exec.CommandContext(timeoutCtx, "agm", cmdArgs...)
+	output, err := cmd.CombinedOutput()
+
+	env.LastError = err
+	if err != nil {
+		env.LastError = fmt.Errorf("agm command failed: %v\nOutput: %s", err, output)
+		return ctx, nil // Don't fail here, let assertion step check
+	}
+
+	// Store session name for later assertions
+	// Create a mock session object to maintain compatibility with existing test code
+	session := &mock.Session{
+		Name:  args.SessionName,
+		Agent: args.Agent,
+		State: mock.StateActive,
+	}
+	env.CurrentSession = session
+	env.Sessions[args.SessionName] = session
 
 	return ctx, nil
 }
