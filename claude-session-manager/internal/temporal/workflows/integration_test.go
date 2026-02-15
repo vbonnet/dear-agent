@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -18,9 +19,48 @@ type WorkflowTestSuite struct {
 	env *testsuite.TestWorkflowEnvironment
 }
 
+// Stub activity functions for testing
+func LogEscalationActivity(ctx context.Context, input interface{}) error { return nil }
+func SendNotificationActivity(ctx context.Context, input interface{}) (NotificationResult, error) {
+	return NotificationResult{}, nil
+}
+func StoreEscalationRecordActivity(ctx context.Context, input interface{}) error { return nil }
+func LaunchAgentActivity(ctx context.Context, input interface{}) error           { return nil }
+func MonitorOutputActivity(ctx context.Context, input interface{}) error         { return nil }
+func CheckpointStateActivity(ctx context.Context, input interface{}) error       { return nil }
+func TerminateSessionActivity(ctx context.Context, input interface{}) error      { return nil }
+func CreateSessionActivity(ctx context.Context, input interface{}) (interface{}, error) {
+	return nil, nil
+}
+func ActivateSessionActivity(ctx context.Context, input interface{}) error      { return nil }
+func StopSessionActivity(ctx context.Context, input interface{}) error          { return nil }
+func ArchiveSessionActivity(ctx context.Context, input interface{}) error       { return nil }
+func FetchSessionOutputActivity(ctx context.Context, input interface{}) ([]OutputLine, error) {
+	return nil, nil
+}
+
 // SetupTest sets up the test environment before each test
 func (s *WorkflowTestSuite) SetupTest() {
 	s.env = s.NewTestWorkflowEnvironment()
+
+	// Register workflows (needed for child workflow execution)
+	s.env.RegisterWorkflow(EscalationWorkflow)
+	s.env.RegisterWorkflow(SessionWorkflow)
+	s.env.RegisterWorkflow(MonitorWorkflow)
+
+	// Register stub activities for mocking
+	s.env.RegisterActivity(LogEscalationActivity)
+	s.env.RegisterActivity(SendNotificationActivity)
+	s.env.RegisterActivity(StoreEscalationRecordActivity)
+	s.env.RegisterActivity(LaunchAgentActivity)
+	s.env.RegisterActivity(MonitorOutputActivity)
+	s.env.RegisterActivity(CheckpointStateActivity)
+	s.env.RegisterActivity(TerminateSessionActivity)
+	s.env.RegisterActivity(CreateSessionActivity)
+	s.env.RegisterActivity(ActivateSessionActivity)
+	s.env.RegisterActivity(StopSessionActivity)
+	s.env.RegisterActivity(ArchiveSessionActivity)
+	s.env.RegisterActivity(FetchSessionOutputActivity)
 }
 
 // TearDownTest cleans up after each test
@@ -345,17 +385,37 @@ func (s *WorkflowTestSuite) Test_EscalationWorkflow_CriticalWithFallback() {
 	// Mock activities - primary notification fails
 	s.env.OnActivity("LogEscalationActivity", mock.Anything, mock.Anything).Return(nil)
 
-	// First call fails
-	s.env.OnActivity("SendNotificationActivity", mock.Anything, mock.MatchedBy(func(input NotificationInput) bool {
-		return input.Severity == "critical"
+	// First call fails (matches severity == "critical")
+	s.env.OnActivity("SendNotificationActivity", mock.Anything, mock.MatchedBy(func(input interface{}) bool {
+		// Handle map[string]interface{} (Temporal serialization)
+		if m, ok := input.(map[string]interface{}); ok {
+			if severity, ok := m["Severity"].(string); ok {
+				return severity == "critical"
+			}
+		}
+		// Handle NotificationInput struct (direct)
+		if ni, ok := input.(NotificationInput); ok {
+			return ni.Severity == "critical"
+		}
+		return false
 	})).Return(NotificationResult{
 		Success: false,
 		Message: "Failed to send",
 	}, fmt.Errorf("notification failed"))
 
-	// Fallback notification succeeds
-	s.env.OnActivity("SendNotificationActivity", mock.Anything, mock.MatchedBy(func(input NotificationInput) bool {
-		return input.Severity == "critical-fallback"
+	// Fallback notification succeeds (matches severity == "critical-fallback")
+	s.env.OnActivity("SendNotificationActivity", mock.Anything, mock.MatchedBy(func(input interface{}) bool {
+		// Handle map[string]interface{} (Temporal serialization)
+		if m, ok := input.(map[string]interface{}); ok {
+			if severity, ok := m["Severity"].(string); ok {
+				return severity == "critical-fallback"
+			}
+		}
+		// Handle NotificationInput struct (direct)
+		if ni, ok := input.(NotificationInput); ok {
+			return ni.Severity == "critical-fallback"
+		}
+		return false
 	})).Return(NotificationResult{
 		Success:   true,
 		Message:   "Fallback sent",
@@ -442,8 +502,6 @@ func (s *WorkflowTestSuite) Test_MonitorWorkflow_ChildWorkflow() {
 	}
 	s.env.OnActivity("FetchSessionOutputActivity", mock.Anything, "test-session-011").Return(outputLines, nil)
 
-	// Register child workflow (EscalationWorkflow)
-	s.env.RegisterWorkflow(EscalationWorkflow)
 	s.env.OnActivity("LogEscalationActivity", mock.Anything, mock.Anything).Return(nil)
 	s.env.OnActivity("SendNotificationActivity", mock.Anything, mock.Anything).Return(NotificationResult{
 		Success:   true,
@@ -541,7 +599,7 @@ func Test_getDefaultNotificationChannels(t *testing.T) {
 func Test_getRetryPolicyForSeverity(t *testing.T) {
 	tests := []struct {
 		severity        string
-		expectedMaxAttempts int
+		expectedMaxAttempts int32
 	}{
 		{"critical", 5},
 		{"high", 3},
