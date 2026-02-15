@@ -45,9 +45,12 @@ func TestValidateParentSession(t *testing.T) {
 
 	require.NoError(t, manifest.Write(parentManifestPath, parentManifest))
 
-	// Set up environment to use tmpDir as sessions directory
-	// Note: We'll need to update implementation to support test mode
-	// For now, tests will use the actual getSessionsDir() implementation
+	// Create test database and insert parent session
+	dbPath := filepath.Join(tmpDir, "test.db")
+	database, err := db.Open(dbPath)
+	require.NoError(t, err)
+	require.NoError(t, database.CreateSession(parentManifest))
+	database.Close()
 
 	tests := []struct {
 		name          string
@@ -79,9 +82,11 @@ func TestValidateParentSession(t *testing.T) {
 			// Temporarily set test mode to use tmpDir
 			testMode = true
 			cfg = &config.Config{SessionsDir: tmpDir}
+			testDBPath = dbPath
 			defer func() {
 				testMode = false
 				cfg = nil
+				testDBPath = ""
 			}()
 
 			result, err := validateParentSession(tt.parentID)
@@ -165,9 +170,11 @@ func TestFindManifestByTmuxName(t *testing.T) {
 			// Temporarily set test mode to use tmpDir
 			testMode = true
 			cfg = &config.Config{SessionsDir: tmpDir}
+			testDBPath = "" // Not needed for this test
 			defer func() {
 				testMode = false
 				cfg = nil
+				testDBPath = ""
 			}()
 
 			result, err := findManifestByTmuxName(tt.tmuxName)
@@ -252,6 +259,25 @@ func TestWriteSessionToDatabase(t *testing.T) {
 			// Call writeSessionToDatabase with test database path
 			database, err := db.Open(dbPath)
 			require.NoError(t, err)
+
+			// Insert parent session first if parent_session_id is provided
+			if tt.parentSessionID != nil && *tt.parentSessionID != "" {
+				parentManifest := &manifest.Manifest{
+					SchemaVersion: manifest.SchemaVersion,
+					SessionID:     *tt.parentSessionID,
+					Name:          "test-parent",
+					CreatedAt:     time.Now(),
+					UpdatedAt:     time.Now(),
+					Context: manifest.Context{
+						Project: tmpDir,
+					},
+					Tmux: manifest.Tmux{
+						SessionName: "test-parent",
+					},
+					Agent: "claude",
+				}
+				require.NoError(t, database.CreateSession(parentManifest))
+			}
 
 			// Manually insert session instead of using writeSessionToDatabase
 			// since we can't easily override the openDatabase function

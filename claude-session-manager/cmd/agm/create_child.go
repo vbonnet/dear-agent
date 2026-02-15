@@ -20,6 +20,7 @@ import (
 
 var (
 	inheritContext bool
+	testDBPath     string // Test-only: Override database path for testing
 )
 
 var createChildCmd = &cobra.Command{
@@ -401,12 +402,18 @@ func writeSessionToDatabase(session *manifest.Manifest, parentSessionID *string)
 
 // openDatabase opens the AGM database
 func openDatabase() (*db.DB, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
-	}
+	var dbPath string
 
-	dbPath := filepath.Join(homeDir, ".agm", "agm.db")
+	// Test mode: use test database path if set
+	if testDBPath != "" {
+		dbPath = testDBPath
+	} else {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get home directory: %w", err)
+		}
+		dbPath = filepath.Join(homeDir, ".agm", "agm.db")
+	}
 
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0700); err != nil {

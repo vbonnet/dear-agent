@@ -759,13 +759,14 @@ func attachWithCapture(sessionName string) error {
 
 // getSessionsDir returns the sessions directory (respects --sessions-dir flag and --test mode)
 func getSessionsDir() string {
-	// Test mode overrides config
+	// Config takes precedence (allows tests to override with tmpDir)
+	if cfg != nil && cfg.SessionsDir != "" {
+		return cfg.SessionsDir
+	}
+	// Test mode fallback
 	if testMode {
 		homeDir, _ := os.UserHomeDir()
 		return filepath.Join(homeDir, "sessions-test")
-	}
-	if cfg != nil && cfg.SessionsDir != "" {
-		return cfg.SessionsDir
 	}
 	// Default to ~/sessions
 	homeDir, _ := os.UserHomeDir()
