@@ -1,4 +1,4 @@
-.PHONY: build test lint install clean test-unit test-e2e-docker test-all
+.PHONY: build test lint install clean test-unit test-coverage coverage test-e2e-docker test-all
 
 # Version information
 VERSION ?= 2.0.0-dev
@@ -32,7 +32,7 @@ build:
 	go build -ldflags="$(LDFLAGS_AGM)" -o bin/agm-mcp-server ./cmd/agm-mcp-server
 
 test:
-	go test -v -cover ./...
+	CGO_ENABLED=1 go test -tags="fts5" -v -cover ./...
 
 lint:
 	go fmt ./...
@@ -100,7 +100,13 @@ clean:
 
 # Test targets
 test-unit:
-	go test -v -cover ./...
+	CGO_ENABLED=1 go test -tags="fts5" -v -cover ./...
+
+test-coverage:
+	CGO_ENABLED=1 go test -tags="fts5" -v -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out
+
+coverage: test-coverage
 
 test-e2e-docker: build
 	@echo "Running Docker E2E tests for reaper..."

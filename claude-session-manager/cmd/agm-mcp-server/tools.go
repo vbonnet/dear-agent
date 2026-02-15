@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/manifest"
@@ -283,4 +287,162 @@ func calculateRelevance(sessionName string, query string) float64 {
 	}
 
 	return 0.0
+}
+
+// Wayfinder MCP tool forwarding (Phase 7.1)
+
+type ListWayfinderSessionsInput struct {
+	StatusFilter string `json:"status_filter,omitempty" jsonschema:"description=Filter by status: active, completed, failed, abandoned"`
+	Limit        int    `json:"limit,omitempty" jsonschema:"description=Maximum number of sessions to return (max 1000, default 100)"`
+}
+
+type GetWayfinderSessionInput struct {
+	SessionID string `json:"session_id" jsonschema:"description=Session UUID,required"`
+}
+
+func addListWayfinderSessionsTool(server *mcp.Server, cfg *Config) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "engram_list_wayfinder_sessions",
+		Description: "List Wayfinder sessions from Engram with optional status filter (via MCP forwarding)",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, input ListWayfinderSessionsInput) (*mcp.CallToolResult, interface{}, error) {
+		// Forward to Engram MCP server
+		result, err := forwardToEngramMCP(ctx, "engram_list_wayfinder_sessions", map[string]interface{}{
+			"status_filter": input.StatusFilter,
+			"limit":         input.Limit,
+		}, cfg)
+
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Failed to query Wayfinder sessions: %v", err)}},
+				IsError: true,
+			}, nil, nil
+		}
+
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: result}},
+		}, nil, nil
+	})
+}
+
+func addGetWayfinderSessionTool(server *mcp.Server, cfg *Config) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "engram_get_wayfinder_session",
+		Description: "Get detailed information for a specific Wayfinder session by ID (via MCP forwarding)",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, input GetWayfinderSessionInput) (*mcp.CallToolResult, interface{}, error) {
+		// Validate input
+		if input.SessionID == "" {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: "session_id is required"}},
+				IsError: true,
+			}, nil, nil
+		}
+
+		// Forward to Engram MCP server
+		result, err := forwardToEngramMCP(ctx, "engram_get_wayfinder_session", map[string]interface{}{
+			"session_id": input.SessionID,
+		}, cfg)
+
+		if err != nil {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf("Failed to get Wayfinder session: %v", err)}},
+				IsError: true,
+			}, nil, nil
+		}
+
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: result}},
+		}, nil, nil
+	})
+}
+
+// forwardToEngramMCP forwards MCP tool call to Engram MCP server via HTTP
+func forwardToEngramMCP(ctx context.Context, toolName string, arguments map[string]interface{}, cfg *Config) (string, error) {
+	// Get Engram MCP server URL from config or default
+	engramURL := cfg.EngramMCPURL
+	if engramURL == "" {
+		engramURL = "http://localhost:8081" // Default Engram MCP server port
+	}
+
+	// Create JSON-RPC request
+	requestID := 1
+	mcpRequest := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      requestID,
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name":      toolName,
+			"arguments": arguments,
+		},
+	}
+
+	// Marshal request
+	requestBody, err := json.Marshal(mcpRequest)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Create HTTP request with timeout
+	httpCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(httpCtx, "POST", engramURL, bytes.NewReader(requestBody))
+	if err != nil {
+		return "", fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	// Send HTTP request
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("HTTP request failed: %w (is Engram MCP server running at %s?)", err, engramURL)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Check HTTP status
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(responseBody))
+	}
+
+	// Parse JSON-RPC response
+	var mcpResponse struct {
+		Jsonrpc string `json:"jsonrpc"`
+		ID      int    `json:"id"`
+		Result  struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+		Error struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(responseBody, &mcpResponse); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	// Check for JSON-RPC error
+	if mcpResponse.Error.Code != 0 {
+		return "", fmt.Errorf("Engram MCP error %d: %s", mcpResponse.Error.Code, mcpResponse.Error.Message)
+	}
+
+	// Extract result text
+	if len(mcpResponse.Result.Content) == 0 {
+		return "", fmt.Errorf("empty response from Engram MCP server")
+	}
+
+	return mcpResponse.Result.Content[0].Text, nil
 }

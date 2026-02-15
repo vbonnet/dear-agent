@@ -5,7 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite" // Pure Go SQLite driver with FTS5 support
 )
 
 //go:embed schema.sql
@@ -19,8 +19,8 @@ type DB struct {
 // Open opens a SQLite database at the given path and applies the schema.
 // If path is ":memory:", it creates an in-memory database (useful for testing).
 func Open(path string) (*DB, error) {
-	// Open SQLite database connection
-	conn, err := sql.Open("sqlite3", path)
+	// Open SQLite database connection (modernc.org/sqlite registers as "sqlite")
+	conn, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}

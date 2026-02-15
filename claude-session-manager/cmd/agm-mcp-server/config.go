@@ -16,6 +16,7 @@ type Config struct {
 	AutoRegister     bool     `yaml:"auto_register"`
 	ClaudeConfigPath string   `yaml:"claude_config_path"`
 	SessionsDir      string   `yaml:"sessions_dir"`
+	EngramMCPURL     string   `yaml:"engram_mcp_url"` // Phase 7.1: Engram MCP server URL for forwarding
 }
 
 // loadConfig loads configuration from YAML file with smart defaults
@@ -28,6 +29,7 @@ func loadConfig(configPath string) (*Config, error) {
 		AutoRegister:     true,
 		ClaudeConfigPath: expandHomeDir("~/.config/claude/mcp_servers.json"),
 		SessionsDir:      detectSessionsDir(),
+		EngramMCPURL:     "http://localhost:8081", // Default Engram MCP server URL
 	}
 
 	// Expand config path
@@ -66,6 +68,9 @@ func loadConfig(configPath string) (*Config, error) {
 	}
 	if yamlCfg.MCPServer.SessionsDir != "" {
 		cfg.SessionsDir = expandHomeDir(yamlCfg.MCPServer.SessionsDir)
+	}
+	if yamlCfg.MCPServer.EngramMCPURL != "" {
+		cfg.EngramMCPURL = yamlCfg.MCPServer.EngramMCPURL
 	}
 
 	// Use YAML boolean values

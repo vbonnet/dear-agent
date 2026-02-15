@@ -56,7 +56,12 @@ func main() {
 	addSearchSessionsTool(server, cfg)
 	addGetSessionMetadataTool(server, cfg)
 
-	log.Println("Registered 3 tools: agm_list_sessions, agm_search_sessions, agm_get_session_metadata")
+	// Register Wayfinder forwarding tools (Phase 7.1)
+	addListWayfinderSessionsTool(server, cfg)
+	addGetWayfinderSessionTool(server, cfg)
+
+	log.Println("Registered 5 tools: agm_list_sessions, agm_search_sessions, agm_get_session_metadata, engram_list_wayfinder_sessions, engram_get_wayfinder_session")
+	log.Printf("Wayfinder forwarding enabled (Engram MCP URL: %s)", cfg.EngramMCPURL)
 
 	// Auto-register with Claude Code (optional)
 	if cfg.AutoRegister {

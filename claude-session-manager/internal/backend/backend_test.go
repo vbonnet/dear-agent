@@ -19,9 +19,23 @@ func (m *mockBackend) CreateSession(name, workdir string) error            { ret
 func (m *mockBackend) AttachSession(name string) error                     { return nil }
 func (m *mockBackend) SendKeys(session, keys string) error                 { return nil }
 
+// registerDefaultBackends re-registers the default backends (tmux, temporal)
+// This is needed after unregisterAll() is called in tests
+func registerDefaultBackends() {
+	Register("tmux", func() (Backend, error) {
+		return NewTmuxBackend(), nil
+	})
+	Register("temporal", func() (Backend, error) {
+		return NewTemporalBackend(), nil
+	})
+}
+
 func TestRegister(t *testing.T) {
 	// Clean up registry before test
-	defer unregisterAll()
+	defer func() {
+		unregisterAll()
+		registerDefaultBackends()
+	}()
 	unregisterAll()
 
 	// Test registering a new backend
@@ -40,7 +54,10 @@ func TestRegister(t *testing.T) {
 }
 
 func TestRegisterPanic(t *testing.T) {
-	defer unregisterAll()
+	defer func() {
+		unregisterAll()
+		registerDefaultBackends()
+	}()
 	unregisterAll()
 
 	// Test panic on nil factory
@@ -53,7 +70,10 @@ func TestRegisterPanic(t *testing.T) {
 }
 
 func TestRegisterDuplicatePanic(t *testing.T) {
-	defer unregisterAll()
+	defer func() {
+		unregisterAll()
+		registerDefaultBackends()
+	}()
 	unregisterAll()
 
 	factory := func() (Backend, error) {
@@ -289,15 +309,7 @@ func TestIsRegistered(t *testing.T) {
 
 func TestUnregisterAll(t *testing.T) {
 	// This test ensures unregisterAll works correctly
-	defer func() {
-		// Re-register tmux and temporal after test
-		Register("tmux", func() (Backend, error) {
-			return NewTmuxBackend(), nil
-		})
-		Register("temporal", func() (Backend, error) {
-			return NewTemporalBackend(), nil
-		})
-	}()
+	defer registerDefaultBackends()
 
 	unregisterAll()
 

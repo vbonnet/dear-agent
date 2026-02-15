@@ -13,9 +13,9 @@ import (
 	"github.com/vbonnet/ai-tools/claude-session-manager/internal/tmux"
 )
 
-// TestSendExit_UsesAGMSend verifies that sendExit() now uses 'agm session send' instead of raw tmux commands
+// TestSendExit_UsesAGMSend verifies that sendExit() now uses 'agm send msg' instead of raw tmux commands
 func TestSendExit_UsesAGMSend(t *testing.T) {
-	// This is a smoke test to verify the sendExit() implementation calls agm session send
+	// This is a smoke test to verify the sendExit() implementation calls agm send msg
 	// We can't easily test the full integration without a real tmux session,
 	// but we can verify the code path uses exec.LookPath("agm") and exec.Command("agm", "session", "send", ...)
 
@@ -27,24 +27,24 @@ func TestSendExit_UsesAGMSend(t *testing.T) {
 
 	t.Logf("Found agm binary at: %s", agmPath)
 
-	// Verify agm session send command syntax
+	// Verify agm send msg command syntax
 	cmd := exec.Command(agmPath, "session", "send", "--help")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("agm session send --help failed: %v\nOutput: %s", err, string(output))
+		t.Fatalf("agm send msg --help failed: %v\nOutput: %s", err, string(output))
 	}
 
 	// Verify --sender flag is documented
 	if !strings.Contains(string(output), "--sender") {
-		t.Error("agm session send doesn't support --sender flag (required for reaper)")
+		t.Error("agm send msg doesn't support --sender flag (required for reaper)")
 	}
 
 	// Verify --prompt flag is documented
 	if !strings.Contains(string(output), "--prompt") {
-		t.Error("agm session send doesn't support --prompt flag (required for reaper)")
+		t.Error("agm send msg doesn't support --prompt flag (required for reaper)")
 	}
 
-	t.Log("✓ agm session send supports required flags (--sender, --prompt)")
+	t.Log("✓ agm send msg supports required flags (--sender, --prompt)")
 }
 
 // TestSendExit_FailsGracefully verifies error handling when session doesn't exist

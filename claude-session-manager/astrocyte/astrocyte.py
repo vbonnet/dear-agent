@@ -925,16 +925,22 @@ def is_stuck_cursor_frozen(
     return False
 
 
-# Global cache for bash pattern database
-_bash_patterns = None
-_bash_patterns_mtime = 0
+# Global cache for pattern databases
+_pattern_cache = {}  # {pattern_type: (data, mtime)}
 
 
-def load_bash_patterns():
-    """Load bash anti-patterns database with caching"""
-    global _bash_patterns, _bash_patterns_mtime
+def load_patterns(pattern_type: str):
+    """Load anti-patterns database with caching
 
-    pattern_db_path = os.path.expanduser("~/src/ws/oss/repos/engram/patterns/bash-anti-patterns.yaml")
+    Args:
+        pattern_type: Type of pattern file to load (bash, beads, git)
+
+    Returns:
+        Pattern data dict or None if unavailable
+    """
+    global _pattern_cache
+
+    pattern_db_path = os.path.expanduser(f"~/src/ws/oss/repos/engram/patterns/{pattern_type}-anti-patterns.yaml")
 
     try:
         if not os.path.exists(pattern_db_path):
@@ -943,8 +949,10 @@ def load_bash_patterns():
         current_mtime = os.path.getmtime(pattern_db_path)
 
         # Cache hit
-        if _bash_patterns and current_mtime == _bash_patterns_mtime:
-            return _bash_patterns
+        if pattern_type in _pattern_cache:
+            cached_data, cached_mtime = _pattern_cache[pattern_type]
+            if current_mtime == cached_mtime:
+                return cached_data
 
         # Cache miss - reload
         with open(pattern_db_path, 'r') as f:
@@ -960,13 +968,162 @@ def load_bash_patterns():
             except re.error:
                 pattern['_compiled'] = None
 
-        _bash_patterns = data
-        _bash_patterns_mtime = current_mtime
+        _pattern_cache[pattern_type] = (data, current_mtime)
 
         return data
 
     except Exception:
         return None
+
+
+def load_bash_patterns():
+    """Load bash anti-patterns database with caching (backward compatibility)"""
+    return load_patterns('bash')
+
+
+def file_violation(pattern_id: str, command: str, session_id: str, agent_type: str, pattern_type: str = 'bash') -> str | None:
+    """File a violation to violations directory
+
+    Args:
+        pattern_id: Pattern ID from pattern database
+        command: Exact command that violated
+        session_id: Session name where violation occurred
+        agent_type: Type of agent (general-purpose, explore, etc.)
+        pattern_type: Pattern file type (bash, beads, git)
+
+    Returns:
+        Path to violation file or None if filing failed
+    """
+    try:
+        import hashlib
+
+        # Get pattern details
+        patterns = load_patterns(pattern_type)
+        if not patterns:
+            return None
+
+        pattern = None
+        for p in patterns['patterns']:
+            if p.get('id') == pattern_id:
+                pattern = p
+                break
+
+        if not pattern:
+            return None
+
+        # Generate short hash from command
+        command_hash = hashlib.sha256(command.encode()).hexdigest()[:8]
+
+        # Create violations subdirectory if needed
+        violations_dir = os.path.expanduser(f"~/src/ws/oss/repos/engram/violations/{pattern_type}")
+        os.makedirs(violations_dir, exist_ok=True)
+
+        # Generate filename: YYYY-MM-DD-{pattern-id}-{short-hash}.md
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        filename = f"{date_str}-{pattern_id}-{command_hash}.md"
+        filepath = os.path.join(violations_dir, filename)
+
+        # Map pattern_id to violation type
+        type_map = {
+            'cd-chaining': 'cd_usage',
+            'cd-semicolon-chain': 'cd_usage',
+            'for-loop': 'for_loops',
+            'while-loop': 'for_loops',
+            'double-ampersand-chain': 'chained_commands',
+            'semicolon-chain': 'chained_commands',
+        }
+        violation_type = type_map.get(pattern_id, 'bash_over_tools')
+
+        # Determine severity
+        severity = pattern.get('severity', 'medium')
+
+        # Generate violation content
+        content = f"""---
+id: {os.path.splitext(filename)[0]}
+date: {datetime.now().isoformat()}Z
+type: {violation_type}
+severity: {severity}
+tier: "3_astrocyte"
+pattern_id: {pattern_id}
+pattern_type: {pattern_type}
+session_id: {session_id}
+agent_type: {agent_type}
+command: {command}
+---
+
+# Violation Report: {pattern_id}
+
+## Context
+
+Agent attempted to use a bash command that violated the {pattern_type} anti-pattern database.
+The Astrocyte daemon detected this violation during session monitoring and filed this report.
+
+Session: {session_id}
+Agent type: {agent_type}
+
+## Violation Details
+
+- **Command attempted**: `{command}`
+- **Pattern matched**: {pattern_id} ({pattern_type})
+- **Reason**: {pattern.get('reason', 'Unknown reason')}
+- **Correct approach**: {pattern.get('alternative', 'Use appropriate Claude Code tools')}
+
+## Why It Happened
+
+This violation was detected by Astrocyte (Tier 3 enforcement). It indicates that:
+1. The agent bypassed or ignored Tier 1 instructions in .ai.md engrams
+2. The PreTool hook (Tier 2) did not catch the violation (may need updating)
+3. The violation persisted long enough to trigger Astrocyte monitoring
+
+Root cause likely: Instruction gap in engrams or agent mental model override.
+
+## Recovery
+
+Astrocyte sent rejection message via `agm send reject` with the following guidance:
+- Reason: {pattern.get('reason', 'Bash tool usage violation')}
+- Alternative: {pattern.get('alternative', 'Use Claude Code tools')}
+
+## Proposed Fix
+
+Review and strengthen Tier 1 instructions in bash-command-simplification.ai.md.
+Consider adding this pattern to PreTool hook validation if not already present.
+"""
+
+        # Write violation file
+        with open(filepath, 'w') as f:
+            f.write(content)
+
+        return filepath
+
+    except Exception as e:
+        # Don't fail recovery on violation filing error
+        return None
+
+
+def extract_command_from_pane(pane_content: str, pattern: dict) -> str:
+    """Extract the violating command from pane content
+
+    Args:
+        pane_content: Pane text content
+        pattern: Pattern dict with compiled regex
+
+    Returns:
+        Extracted command string or 'unknown'
+    """
+    try:
+        if not pattern.get('_compiled'):
+            return 'unknown'
+
+        match = pattern['_compiled'].search(pane_content)
+        if match:
+            # Return the matched text (first 500 chars max)
+            matched_text = match.group(0)
+            if len(matched_text) > 500:
+                return matched_text[:500] + '...'
+            return matched_text
+        return 'unknown'
+    except Exception:
+        return 'unknown'
 
 
 def detect_bash_violation(current: SessionState) -> str | None:
@@ -1001,7 +1158,7 @@ def detect_bash_violation(current: SessionState) -> str | None:
 
 
 def reject_with_bash_feedback(session_name: str, pattern_id: str) -> RecoveryResult:
-    """Reject session with bash violation feedback using agm session reject
+    """Reject session with bash violation feedback using agm send reject
 
     Args:
         session_name: Session name
@@ -1029,18 +1186,40 @@ def reject_with_bash_feedback(session_name: str, pattern_id: str) -> RecoveryRes
         # Pattern not found - fallback to ESC
         return recover_with_escape(session_name)
 
-    # Format rejection message
+    # Extract command from pane content (best effort)
+    command = extract_command_from_pane(before.pane_content, pattern)
+
+    # Format rejection message with tier1_example if available
     reason = pattern.get('reason', 'Bash tool usage violation')
     alternative = pattern.get('alternative', 'Use Claude Code tools instead')
+    tier1_example = pattern.get('tier1_example', '')
 
-    rejection_message = f"{reason}\n\n{alternative}\n\nSee bash tool guidance: bash-command-simplification.ai.md"
+    # Build rejection message
+    rejection_message = f"{reason}\n\n{alternative}"
 
-    # Call agm session reject
+    if tier1_example:
+        # Add tier1_example with formatting
+        rejection_message += f"\n\n{tier1_example}"
+
+    rejection_message += "\n\nSee bash tool guidance: bash-command-simplification.ai.md"
+
+    # File violation before rejection
+    violation_file = file_violation(
+        pattern_id=pattern_id,
+        command=command,
+        session_id=session_name,
+        agent_type='unknown',  # Could be enhanced to detect agent type from manifest
+        pattern_type='bash'
+    )
+
+    # Call agm send reject (v2.1 command structure)
     try:
+        env = os.environ.copy()
+        env["AGM_SENDER"] = "astrocyte-daemon"
         subprocess.run([
-            "agm", "session", "reject", session_name,
+            "agm", "send", "reject", session_name,
             "--reason", rejection_message
-        ], timeout=10, check=True)
+        ], timeout=10, check=True, env=env)
     except Exception:
         # Fallback to ESC on agm failure
         return recover_with_escape(session_name)
@@ -2461,7 +2640,7 @@ def main():
                             print(f"   🔧 Rejecting permission prompt with tool usage violation...")
                             recovery = reject_permission_prompt(session)
                         elif symptom == "bash_violation":
-                            print(f"   🔧 Rejecting bash violation with agm session reject...")
+                            print(f"   🔧 Rejecting bash violation with agm send reject...")
                             recovery = reject_with_bash_feedback(session, bash_violation_pattern)
                         else:
                             print(f"   🔧 Attempting recovery with {config.recovery_method} strategy...")
