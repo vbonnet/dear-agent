@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -185,7 +186,7 @@ func TestPaneContentHistory_Integration(t *testing.T) {
 
 	// Generate lots of output to test scrollback
 	for i := 0; i < 100; i++ {
-		sendTestKeys(t, sessionName, "echo 'Line "+string(rune(i))+"'", "Enter")
+		sendTestKeys(t, sessionName, fmt.Sprintf("echo 'Line %d'", i), "Enter")
 	}
 	time.Sleep(500 * time.Millisecond)
 

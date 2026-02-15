@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/vbonnet/ai-tools/astrocyte/internal/config"
+	"github.com/vbonnet/ai-tools/astrocyte/internal/tmux"
 )
 
 // TestFullDaemonWorkflow tests the complete workflow:
@@ -352,4 +353,262 @@ func createTestConfigForIntegration(t *testing.T, tmpDir string) *config.Config 
 // UnmarshalIncident is a helper to unmarshal JSONL incident data.
 func UnmarshalIncident(data []byte, incident *Incident) error {
 	return json.Unmarshal(data, incident)
+}
+
+// TestDaemonSignalHandling tests graceful shutdown on signals.
+func TestDaemonSignalHandling(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping signal handling test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+	cfg := createTestConfigForIntegration(t, tmpDir)
+
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	// Start monitoring in background
+	go func() {
+		_ = monitor.StartMonitoring()
+	}()
+
+	// Wait for startup
+	time.Sleep(100 * time.Millisecond)
+	assert.True(t, monitor.running)
+
+	// Simulate signal stop
+	monitor.StopMonitoring()
+
+	// Wait for graceful shutdown
+	time.Sleep(200 * time.Millisecond)
+	assert.False(t, monitor.running, "should stop gracefully")
+}
+
+// TestFullLifecycle tests complete daemon lifecycle.
+func TestFullLifecycle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping full lifecycle test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+	cfg := createTestConfigForIntegration(t, tmpDir)
+	cfg.Monitoring.IntervalDuration = 100 * time.Millisecond
+
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	// Phase 1: Start
+	go func() {
+		_ = monitor.StartMonitoring()
+	}()
+
+	time.Sleep(150 * time.Millisecond)
+	assert.True(t, monitor.running, "should be running")
+
+	// Phase 2: Monitor (detect would happen here)
+	// In real scenario, would detect stuck sessions
+
+	// Phase 3: Stop
+	monitor.StopMonitoring()
+	// Wait for goroutine to actually complete
+	// CheckAllSessions() now checks stopChan between sessions, so should exit quickly
+	time.Sleep(200 * time.Millisecond) // Allow time for current checkSession to complete and goroutine to exit
+	monitor.mu.Lock()
+	running := monitor.running
+	monitor.mu.Unlock()
+	assert.False(t, running, "should be stopped")
+}
+
+// TestIncidentValidation tests incident logging validation.
+func TestIncidentValidation(t *testing.T) {
+	tmpDir := t.TempDir()
+	incidentsFile := filepath.Join(tmpDir, "validation-test.jsonl")
+
+	logger, err := NewIncidentLogger(incidentsFile)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		incident *Incident
+		wantErr  bool
+	}{
+		{
+			name: "valid incident",
+			incident: &Incident{
+				ID:              "valid-1",
+				Timestamp:       time.Now().Format(time.RFC3339),
+				SessionID:       "session-1",
+				Symptom:         "stuck_mustering",
+				DurationMinutes: 10,
+				CursorPosition:  "0,10",
+				RecoveryMethod:  "escape",
+			},
+			wantErr: false,
+		},
+		{
+			name: "minimal incident",
+			incident: &Incident{
+				ID:              "minimal-1",
+				Timestamp:       time.Now().Format(time.RFC3339),
+				SessionID:       "session-2",
+				Symptom:         "stuck_waiting",
+				DurationMinutes: 5,
+				CursorPosition:  "5,15",
+				RecoveryMethod:  "manual",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := logger.LogIncident(tt.incident)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+
+	// Verify logged incidents
+	data, err := os.ReadFile(incidentsFile)
+	require.NoError(t, err)
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	assert.Equal(t, 2, len(lines))
+}
+
+// TestMonitorStability tests monitor stability over multiple cycles.
+func TestMonitorStability(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping stability test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+	cfg := createTestConfigForIntegration(t, tmpDir)
+	cfg.Monitoring.IntervalDuration = 50 * time.Millisecond
+
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	// Run for multiple monitoring cycles
+	go func() {
+		_ = monitor.StartMonitoring()
+	}()
+
+	// Let it run for 5 cycles
+	time.Sleep(300 * time.Millisecond)
+	assert.True(t, monitor.running, "should still be running after 5 cycles")
+
+	monitor.StopMonitoring()
+	// CheckAllSessions() now checks stopChan between sessions, so should exit quickly
+	time.Sleep(200 * time.Millisecond) // Allow time for current checkSession to complete and goroutine to exit
+	monitor.mu.Lock()
+	running := monitor.running
+	monitor.mu.Unlock()
+	assert.False(t, running)
+}
+
+// TestDetectorCursorFreezeIntegration tests cursor freeze with detector.
+func TestDetectorCursorFreezeIntegration(t *testing.T) {
+	detector := NewStuckSessionDetector()
+	detector.CursorFrozenTimeout = 1 // 1 minute for testing
+
+	sessionName := "freeze-integration-test"
+
+	// Simulate frozen cursor (within 1-minute detection window)
+	baseTime := time.Now().Add(-55 * time.Second) // Start 55 seconds ago (within 60s window)
+	detector.sessionHistories[sessionName] = &SessionHistory{
+		cursorPositions: []CursorSnapshot{
+			{X: 15, Y: 25, Timestamp: baseTime},                      // 55s ago
+			{X: 15, Y: 25, Timestamp: baseTime.Add(20 * time.Second)}, // 35s ago
+			{X: 15, Y: 25, Timestamp: baseTime.Add(40 * time.Second)}, // 15s ago
+			{X: 15, Y: 25, Timestamp: baseTime.Add(50 * time.Second)}, // 5s ago
+		},
+		maxHistory: 10,
+	}
+
+	// Create pane with frozen cursor
+	pane := &tmux.PaneInfo{
+		SessionName: sessionName,
+		Content:     "Working on task...", // No completion language
+		CursorX:     15,
+		CursorY:     25,
+		CapturedAt:  time.Now(),
+	}
+
+	stuck, reason := detector.IsSessionStuck(pane)
+	assert.True(t, stuck, "should detect frozen cursor")
+	assert.Equal(t, "cursor_frozen", reason)
+
+	info := detector.DetectStuckSession(pane)
+	require.NotNil(t, info)
+	assert.Equal(t, sessionName, info.SessionName)
+	assert.Equal(t, "cursor_frozen", info.Reason)
+}
+
+// TestMultipleSimultaneousStuckSessions tests handling multiple stuck sessions.
+func TestMultipleSimultaneousStuckSessions(t *testing.T) {
+	detector := NewStuckSessionDetector()
+
+	sessions := []struct {
+		name    string
+		content string
+		reason  string
+	}{
+		{"session-1", "✻ Mustering...", "stuck_mustering"},
+		{"session-2", "✶ Thinking...", "stuck_zero_token_waiting"},
+		{"session-3", "Allow this? (y/n)", "stuck_permission_prompt"},
+	}
+
+	stuckCount := 0
+	for _, s := range sessions {
+		pane := &tmux.PaneInfo{
+			SessionName: s.name,
+			Content:     s.content,
+			CapturedAt:  time.Now(),
+		}
+
+		stuck, reason := detector.IsSessionStuck(pane)
+		if stuck {
+			stuckCount++
+			assert.Equal(t, s.reason, reason)
+		}
+	}
+
+	assert.Equal(t, 3, stuckCount, "should detect all 3 stuck sessions")
+}
+
+// TestRecoveryHistoryEdgeCases tests recovery history edge cases.
+func TestRecoveryHistoryEdgeCases(t *testing.T) {
+	t.Run("zero max attempts", func(t *testing.T) {
+		history := NewRecoveryHistory("test", 0)
+		assert.False(t, history.CanAttemptRecovery(),
+			"should not allow recovery with zero max attempts")
+	})
+
+	t.Run("negative max attempts", func(t *testing.T) {
+		// This shouldn't happen in practice, but test defensive behavior
+		history := NewRecoveryHistory("test", -1)
+		assert.False(t, history.CanAttemptRecovery(),
+			"should not allow recovery with negative max attempts")
+	})
+
+	t.Run("very large max attempts", func(t *testing.T) {
+		history := NewRecoveryHistory("test", 1000)
+		assert.True(t, history.CanAttemptRecovery())
+
+		// Record 999 attempts
+		for i := 0; i < 999; i++ {
+			history.RecordAttempt(RecoveryEscape, false, "test")
+		}
+
+		assert.True(t, history.CanAttemptRecovery(),
+			"should allow one more attempt")
+
+		history.RecordAttempt(RecoveryEscape, false, "test")
+		assert.False(t, history.CanAttemptRecovery(),
+			"should block after 1000 attempts")
+	})
 }

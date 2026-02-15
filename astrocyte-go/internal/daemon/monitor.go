@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/vbonnet/ai-tools/astrocyte/internal/config"
@@ -39,6 +40,7 @@ type SessionMonitor struct {
 	incidentLogger    *IncidentLogger
 	running           bool
 	stopChan          chan struct{}
+	mu                sync.Mutex // Protects running field
 }
 
 // NewSessionMonitor creates a new session monitor with given configuration.
@@ -104,11 +106,14 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 // Checks all tmux sessions at configured interval for stuck indicators.
 // Blocks until StopMonitoring is called.
 func (m *SessionMonitor) StartMonitoring() error {
+	m.mu.Lock()
 	if m.running {
+		m.mu.Unlock()
 		return fmt.Errorf("monitor is already running")
 	}
-
 	m.running = true
+	m.mu.Unlock()
+
 	log.Printf("Starting Astrocyte session monitor (interval: %v, stuck threshold: %v)",
 		m.config.Monitoring.IntervalDuration,
 		m.config.Monitoring.StuckThresholdDuration)
@@ -126,7 +131,9 @@ func (m *SessionMonitor) StartMonitoring() error {
 
 		case <-m.stopChan:
 			log.Printf("Stopping session monitor")
+			m.mu.Lock()
 			m.running = false
+			m.mu.Unlock()
 			return nil
 		}
 	}
@@ -134,8 +141,12 @@ func (m *SessionMonitor) StartMonitoring() error {
 
 // StopMonitoring stops the monitoring loop gracefully.
 func (m *SessionMonitor) StopMonitoring() {
+	m.mu.Lock()
 	if m.running {
+		m.mu.Unlock()
 		close(m.stopChan)
+	} else {
+		m.mu.Unlock()
 	}
 }
 
@@ -154,6 +165,15 @@ func (m *SessionMonitor) CheckAllSessions() error {
 
 	// Check each session
 	for _, sessionName := range sessions {
+		// Check if we should stop (non-blocking check)
+		select {
+		case <-m.stopChan:
+			// Stop signal received, abort checking remaining sessions
+			return nil
+		default:
+			// Continue processing
+		}
+
 		if err := m.checkSession(sessionName); err != nil {
 			log.Printf("Error checking session %s: %v", sessionName, err)
 			// Continue to next session even if one fails
