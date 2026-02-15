@@ -68,6 +68,7 @@ export async function runAllHealthChecks(options: HealthCheckOptions = {}): Prom
     checkMCPProcesses(options),
     checkNetworkConnectivity(options),
     checkIntentAnalyzer(options),
+    checkGlobalMCPHealth(options),
   ];
 
   return await Promise.all(checks);
@@ -422,6 +423,114 @@ async function checkIntentAnalyzer(options: HealthCheckOptions): Promise<HealthC
       last_check: new Date(),
     };
     setCached('Intent Analyzer', result);
+    return result;
+  }
+}
+
+/**
+ * Check 5: Global MCP Server Health
+ *
+ * Checks if global MCP HTTP server is enabled and healthy.
+ * Makes HTTP GET request to health endpoint with 5s timeout.
+ *
+ * Status: healthy if enabled and responding, degraded if disabled, unhealthy if unreachable.
+ *
+ * @param options - Health check options
+ * @returns Global MCP health check result
+ */
+export async function checkGlobalMCPHealth(options: HealthCheckOptions): Promise<HealthCheckResult> {
+  const cached = getCached('Global MCP Discovery', options.force);
+  if (cached) return cached;
+
+  try {
+    const config = await loadConfig();
+
+    // If global MCPs not configured or disabled
+    if (!config.globalMcps?.enabled) {
+      const result: HealthCheckResult = {
+        name: 'Global MCP Discovery',
+        status: 'healthy',
+        message: 'Global MCPs not enabled',
+        details: { enabled: false },
+        last_check: new Date(),
+      };
+      setCached('Global MCP Discovery', result);
+      return result;
+    }
+
+    const healthUrl = config.globalMcps.healthCheckUrl || 'http://localhost:8001/health';
+
+    // Make HTTP health check with 5s timeout
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    try {
+      const response = await fetch(healthUrl, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (response.ok) {
+        const data = await response.json();
+        const result: HealthCheckResult = {
+          name: 'Global MCP Discovery',
+          status: 'healthy',
+          message: `HTTP server healthy (uptime: ${data.uptime || 'unknown'}s)`,
+          details: {
+            enabled: true,
+            healthUrl,
+            uptime: data.uptime,
+            sessionCount: data.sessionCount || 0,
+            responseData: data,
+          },
+          last_check: new Date(),
+        };
+        setCached('Global MCP Discovery', result);
+        return result;
+      } else {
+        const result: HealthCheckResult = {
+          name: 'Global MCP Discovery',
+          status: 'unhealthy',
+          message: `HTTP ${response.status} ${response.statusText}`,
+          details: {
+            enabled: true,
+            healthUrl,
+            status: response.status,
+            statusText: response.statusText,
+          },
+          last_check: new Date(),
+        };
+        setCached('Global MCP Discovery', result);
+        return result;
+      }
+    } catch (error: any) {
+      clearTimeout(timeout);
+
+      const result: HealthCheckResult = {
+        name: 'Global MCP Discovery',
+        status: 'unhealthy',
+        message: `Health check failed: ${error.message}`,
+        details: {
+          enabled: true,
+          healthUrl,
+          error: error.message,
+        },
+        last_check: new Date(),
+      };
+      setCached('Global MCP Discovery', result);
+      return result;
+    }
+  } catch (error: any) {
+    const result: HealthCheckResult = {
+      name: 'Global MCP Discovery',
+      status: 'unhealthy',
+      message: `Config error: ${error.message}`,
+      details: { error: error.message },
+      last_check: new Date(),
+    };
+    setCached('Global MCP Discovery', result);
     return result;
   }
 }

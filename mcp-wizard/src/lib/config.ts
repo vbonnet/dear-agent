@@ -11,6 +11,8 @@ export interface McpServer {
   args: string[];
   defer?: boolean;
   env?: Record<string, string>;
+  global?: boolean;  // Mark as global (always available across sessions)
+  httpUrl?: string;  // HTTP endpoint for global MCPs
 }
 
 export interface McpConfig {

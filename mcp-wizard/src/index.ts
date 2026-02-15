@@ -10,6 +10,8 @@ import { doctor } from './commands/doctor';
 import { sessionStart } from './commands/session-start';
 import { serve } from './commands/serve'; // NEW
 import { logoutCommand } from './lib/logout';
+import { enableGlobalMcpsCommand } from './commands/enable-global-mcps';
+import { disableGlobalMcpsCommand } from './commands/disable-global-mcps';
 import { getConfigValue, setConfigValue, loadConfig, saveConfig, getUserConfigPath } from './lib/user-config';
 import { TraceLogger } from './lib/trace-logger';
 import inquirer from 'inquirer';
@@ -292,6 +294,39 @@ See docs/SESSIONSTART-HOOK.md for detailed documentation.
 `)
   .action(async (options) => {
     await sessionStart(options);
+  });
+
+program
+  .command('enable-global-mcps')
+  .description('Enable global MCP discovery and HTTP transport')
+  .option('--health-url <url>', 'Health check URL (default: http://localhost:8001/health)')
+  .option('--discovery-url <url>', 'Discovery URL (default: http://localhost:8001/discovery)')
+  .option('--temporal-url <url>', 'Temporal server URL (default: http://localhost:7233)')
+  .addHelpText('after', `
+Examples:
+  $ mcp-wizard enable-global-mcps
+  $ mcp-wizard enable-global-mcps --health-url http://localhost:9000/health
+
+This enables global MCP discovery, allowing MCPs to be shared across sessions.
+The global MCP server must be running separately (see mcp-server setup).
+`)
+  .action(async (options) => {
+    await enableGlobalMcpsCommand(options);
+  });
+
+program
+  .command('disable-global-mcps')
+  .description('Disable global MCP discovery (use stdio MCPs only)')
+  .option('--silent', 'Suppress success messages')
+  .addHelpText('after', `
+Examples:
+  $ mcp-wizard disable-global-mcps
+  $ mcp-wizard disable-global-mcps --silent
+
+This disables global MCP discovery. Sessions will use stdio MCPs only.
+`)
+  .action(async (options) => {
+    await disableGlobalMcpsCommand(options);
   });
 
 // Config command with subcommands

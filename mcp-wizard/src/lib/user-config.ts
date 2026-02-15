@@ -20,6 +20,12 @@ export interface UserConfig {
     glean_instance: string; // Glean instance ID (e.g., "acme", "example")
     okta_domain: string;    // Okta domain (e.g., "company.okta.com", "example.okta.com")
   };
+  globalMcps?: {
+    enabled: boolean;         // Enable global MCP discovery
+    discoveryUrl?: string;    // Discovery endpoint (e.g., "http://localhost:8001/discovery")
+    healthCheckUrl?: string;  // Health check endpoint (e.g., "http://localhost:8001/health")
+    temporalUrl?: string;     // Temporal server URL (e.g., "http://localhost:7233")
+  };
 }
 
 /**

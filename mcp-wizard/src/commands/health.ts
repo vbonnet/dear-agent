@@ -38,6 +38,7 @@ export interface HealthStatus {
     mcp: { status: string; details?: string };
     network: { status: string; details?: string };
     intentAnalyzer: { status: string; details?: string };
+    globalMcp: { status: string; details?: string };
   };
   warnings?: string[];
   errors?: string[];
@@ -62,6 +63,7 @@ export async function checkHealth(options: HealthOptions = {}): Promise<HealthSt
     mcp: { status: 'healthy', details: undefined as string | undefined },
     network: { status: 'healthy', details: undefined as string | undefined },
     intentAnalyzer: { status: 'healthy', details: undefined as string | undefined },
+    globalMcp: { status: 'healthy', details: undefined as string | undefined },
   };
 
   const warnings: string[] = [];
@@ -124,6 +126,7 @@ export function formatHealthOutput(status: HealthStatus): string {
       mcp: 'MCP',
       network: 'Network',
       intentAnalyzer: 'Intent Analyzer',
+      globalMcp: 'Global MCP',
     };
     const label = labelMap[key] || key;
     lines.push(color(`  ${icon} ${label}: ${check.status}`));
@@ -161,6 +164,7 @@ function getCheckKey(name: string): keyof HealthStatus['checks'] | null {
   if (name === 'MCP Processes') return 'mcp';
   if (name === 'Network Connectivity') return 'network';
   if (name === 'Intent Analyzer') return 'intentAnalyzer';
+  if (name === 'Global MCP Discovery') return 'globalMcp';
   return null;
 }
 
