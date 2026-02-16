@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -350,3 +351,209 @@ patterns:
 }
 
 // (Removed mock pattern - using actual enforcement.Pattern struct instead)
+
+// TestSessionMonitor_ErrorConditions tests error handling.
+func TestSessionMonitor_ErrorConditions(t *testing.T) {
+	t.Run("missing config file", func(t *testing.T) {
+		cfg := &config.Config{
+			Patterns: config.PatternConfig{
+				Bash:  "/nonexistent/bash-patterns.yaml",
+				Beads: "/nonexistent/beads-patterns.yaml",
+				Git:   "/nonexistent/git-patterns.yaml",
+			},
+		}
+
+		_, err := NewSessionMonitor(cfg)
+		assert.Error(t, err, "should error with missing pattern files")
+	})
+
+	t.Run("corrupted pattern file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		corruptedPath := filepath.Join(tmpDir, "corrupted.yaml")
+
+		// Write invalid YAML
+		err := os.WriteFile(corruptedPath, []byte("invalid: yaml: content: [[["), 0644)
+		require.NoError(t, err)
+
+		cfg := &config.Config{
+			Patterns: config.PatternConfig{
+				Bash:  corruptedPath,
+				Beads: corruptedPath,
+				Git:   corruptedPath,
+			},
+		}
+
+		_, err = NewSessionMonitor(cfg)
+		assert.Error(t, err, "should error with corrupted pattern file")
+	})
+}
+
+// TestSessionMonitor_EmptySessionList tests handling empty session list.
+func TestSessionMonitor_EmptySessionList(t *testing.T) {
+	cfg := createTestConfig(t)
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	// CheckAllSessions should handle empty list gracefully
+	// In real environment with no tmux sessions, this should not panic
+	err = monitor.CheckAllSessions()
+	// Error is acceptable (no tmux running), but shouldn't panic
+	t.Logf("CheckAllSessions with no sessions: %v", err)
+}
+
+// TestSessionMonitor_MultipleSessions tests monitoring multiple sessions.
+func TestSessionMonitor_MultipleSessions(t *testing.T) {
+	cfg := createTestConfig(t)
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	// Track multiple sessions in recovery history
+	sessions := []string{"session-1", "session-2", "session-3"}
+	for _, session := range sessions {
+		history := NewRecoveryHistory(session, 3)
+		monitor.recoveryHistories[session] = history
+		history.RecordAttempt(RecoveryEscape, true, "test")
+	}
+
+	assert.Equal(t, 3, len(monitor.recoveryHistories))
+	for _, session := range sessions {
+		assert.Contains(t, monitor.recoveryHistories, session)
+		assert.Equal(t, 1, monitor.recoveryHistories[session].TotalAttempts)
+	}
+}
+
+// TestSessionMonitor_SessionDisappearsCheck tests handling session disappearance.
+func TestSessionMonitor_SessionDisappearsCheck(t *testing.T) {
+	cfg := createTestConfig(t)
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	// Create history for session that no longer exists
+	monitor.recoveryHistories["ghost-session"] = NewRecoveryHistory("ghost-session", 3)
+
+	// Should not panic when checking non-existent session
+	err = monitor.CheckAllSessions()
+	// Error expected (session doesn't exist), but no panic
+	t.Logf("Check on disappeared session: %v", err)
+}
+
+// TestIncidentLogger_ConcurrentWrites tests thread safety.
+func TestIncidentLogger_ConcurrentWrites(t *testing.T) {
+	tmpDir := t.TempDir()
+	incidentsFile := filepath.Join(tmpDir, "concurrent-incidents.jsonl")
+
+	logger, err := NewIncidentLogger(incidentsFile)
+	require.NoError(t, err)
+
+	// Write incidents concurrently
+	done := make(chan bool)
+	for i := 0; i < 5; i++ {
+		go func(id int) {
+			incident := &Incident{
+				ID:              fmt.Sprintf("concurrent-%d", id),
+				Timestamp:       time.Now().Format(time.RFC3339),
+				SessionID:       fmt.Sprintf("session-%d", id),
+				Symptom:         "test",
+				DurationMinutes: 1,
+				CursorPosition:  "0,0",
+				RecoveryMethod:  "escape",
+			}
+			_ = logger.LogIncident(incident)
+			done <- true
+		}(i)
+	}
+
+	// Wait for all writes
+	for i := 0; i < 5; i++ {
+		<-done
+	}
+
+	// Verify file integrity
+	data, err := os.ReadFile(incidentsFile)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	assert.Equal(t, 5, len(lines), "should have 5 incident lines")
+}
+
+// TestSessionMonitor_CircuitBreakerBehavior tests circuit breaker.
+func TestSessionMonitor_CircuitBreakerBehavior(t *testing.T) {
+	cfg := createTestConfig(t)
+	cfg.Recovery.MaxAttempts = 2
+
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	sessionName := "circuit-test"
+	history := NewRecoveryHistory(sessionName, 2)
+	monitor.recoveryHistories[sessionName] = history
+
+	// First attempt - allowed
+	assert.True(t, history.CanAttemptRecovery())
+	history.RecordAttempt(RecoveryEscape, false, "stuck_1")
+
+	// Second attempt - allowed
+	assert.True(t, history.CanAttemptRecovery())
+	history.RecordAttempt(RecoveryEscape, false, "stuck_2")
+
+	// Third attempt - blocked by circuit breaker
+	assert.False(t, history.CanAttemptRecovery(),
+		"circuit breaker should prevent further attempts")
+	assert.Equal(t, 2, history.TotalAttempts)
+}
+
+// TestIncidentLogger_WritePermissionError tests handling write errors.
+func TestIncidentLogger_WritePermissionError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test when running as root")
+	}
+
+	tmpDir := t.TempDir()
+	readOnlyDir := filepath.Join(tmpDir, "readonly")
+	require.NoError(t, os.Mkdir(readOnlyDir, 0555)) // read-only directory
+
+	incidentsFile := filepath.Join(readOnlyDir, "incidents.jsonl")
+
+	logger, err := NewIncidentLogger(incidentsFile)
+	// Might error on creation if directory check fails
+	if err != nil {
+		return // Expected
+	}
+
+	incident := &Incident{
+		ID:              "test-1",
+		Timestamp:       time.Now().Format(time.RFC3339),
+		SessionID:       "test",
+		Symptom:         "test",
+		DurationMinutes: 1,
+		CursorPosition:  "0,0",
+		RecoveryMethod:  "escape",
+	}
+
+	err = logger.LogIncident(incident)
+	assert.Error(t, err, "should error when writing to read-only directory")
+}
+
+// TestSessionMonitor_MaxRecoveryAttempts tests max attempts enforcement.
+func TestSessionMonitor_MaxRecoveryAttempts(t *testing.T) {
+	cfg := createTestConfig(t)
+	cfg.Recovery.MaxAttempts = 3
+
+	monitor, err := NewSessionMonitor(cfg)
+	require.NoError(t, err)
+
+	sessionName := "max-attempts-test"
+	history := NewRecoveryHistory(sessionName, cfg.Recovery.MaxAttempts)
+	monitor.recoveryHistories[sessionName] = history
+
+	// Exhaust all attempts
+	for i := 0; i < cfg.Recovery.MaxAttempts; i++ {
+		assert.True(t, history.CanAttemptRecovery(),
+			"attempt %d should be allowed", i+1)
+		history.RecordAttempt(RecoveryEscape, false, fmt.Sprintf("attempt-%d", i+1))
+	}
+
+	// No more attempts allowed
+	assert.False(t, history.CanAttemptRecovery(),
+		"should block after max attempts")
+	assert.Equal(t, cfg.Recovery.MaxAttempts, history.TotalAttempts)
+}

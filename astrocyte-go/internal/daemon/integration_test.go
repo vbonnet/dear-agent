@@ -190,12 +190,12 @@ func TestLongRunningTask_FalsePositivePrevention(t *testing.T) {
 
 	sessionName := "long-task"
 
-	// Simulate long-running task with frozen cursor but completion indicators
-	baseTime := time.Now().Add(-2 * time.Minute)
+	// Simulate long-running task with frozen cursor (within 1-minute window)
+	baseTime := time.Now().Add(-55 * time.Second) // Start 55 seconds ago (within 60s window)
 	detector.sessionHistories[sessionName] = &SessionHistory{
 		cursorPositions: []CursorSnapshot{
-			{X: 10, Y: 20, Timestamp: baseTime},
-			{X: 10, Y: 20, Timestamp: baseTime.Add(60 * time.Second)},
+			{X: 10, Y: 20, Timestamp: baseTime},                      // 55s ago
+			{X: 10, Y: 20, Timestamp: baseTime.Add(50 * time.Second)}, // 5s ago (all within 60s window)
 		},
 		maxHistory: 10,
 	}
@@ -342,19 +342,20 @@ func TestHistoricalTracking(t *testing.T) {
 
 	sessionName := "historical-test"
 
-	// Build up history over time
-	baseTime := time.Now().Add(-10 * time.Minute)
+	// Build up history over time (checking for 3-minute freeze)
+	// Cursor at 11,20 needs to be frozen for 3+ minutes (180+ seconds)
+	baseTime := time.Now().Add(-200 * time.Second) // Start 200 seconds (3m20s) ago
 
 	snapshots := []struct {
 		x    int
 		y    int
 		time time.Time
 	}{
-		{10, 20, baseTime},
-		{10, 20, baseTime.Add(1 * time.Minute)},
-		{11, 20, baseTime.Add(2 * time.Minute)}, // Cursor moved
-		{11, 20, baseTime.Add(3 * time.Minute)},
-		{11, 20, baseTime.Add(4 * time.Minute)}, // Frozen for 3 minutes now
+		{10, 20, baseTime},                       // 200s ago (different position)
+		{11, 20, baseTime.Add(10 * time.Second)},  // 190s ago - cursor moved to 11,20
+		{11, 20, baseTime.Add(50 * time.Second)},  // 150s ago - still at 11,20
+		{11, 20, baseTime.Add(100 * time.Second)}, // 100s ago - still at 11,20
+		{11, 20, baseTime.Add(190 * time.Second)}, // 10s ago - still at 11,20 (frozen 190s = 3m10s)
 	}
 
 	history := NewSessionHistory(10)

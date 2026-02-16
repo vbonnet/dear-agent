@@ -194,13 +194,13 @@ func TestIsSessionStuck_CursorFrozen(t *testing.T) {
 
 	sessionName := "frozen-session"
 
-	// Track cursor at same position over time
-	baseTime := time.Now().Add(-2 * time.Minute)
+	// Track cursor at same position over time (use timestamps within 1-minute window)
+	baseTime := time.Now().Add(-50 * time.Second) // Start 50 seconds ago (within 60s window)
 	detector.sessionHistories[sessionName] = &SessionHistory{
 		cursorPositions: []CursorSnapshot{
-			{X: 10, Y: 20, Timestamp: baseTime},
-			{X: 10, Y: 20, Timestamp: baseTime.Add(30 * time.Second)},
-			{X: 10, Y: 20, Timestamp: baseTime.Add(60 * time.Second)},
+			{X: 10, Y: 20, Timestamp: baseTime},                      // 50s ago
+			{X: 10, Y: 20, Timestamp: baseTime.Add(25 * time.Second)}, // 25s ago
+			{X: 10, Y: 20, Timestamp: baseTime.Add(45 * time.Second)}, // 5s ago
 		},
 		maxHistory: 10,
 	}
@@ -225,12 +225,12 @@ func TestIsSessionStuck_CursorFrozenButCompleted(t *testing.T) {
 
 	sessionName := "completed-session"
 
-	// Cursor frozen but task completed
-	baseTime := time.Now().Add(-2 * time.Minute)
+	// Cursor frozen but task completed (use timestamps within 1-minute window)
+	baseTime := time.Now().Add(-55 * time.Second) // Start 55 seconds ago (within 60s window)
 	detector.sessionHistories[sessionName] = &SessionHistory{
 		cursorPositions: []CursorSnapshot{
-			{X: 10, Y: 20, Timestamp: baseTime},
-			{X: 10, Y: 20, Timestamp: baseTime.Add(60 * time.Second)},
+			{X: 10, Y: 20, Timestamp: baseTime},                      // 55s ago
+			{X: 10, Y: 20, Timestamp: baseTime.Add(50 * time.Second)}, // 5s ago
 		},
 		maxHistory: 10,
 	}

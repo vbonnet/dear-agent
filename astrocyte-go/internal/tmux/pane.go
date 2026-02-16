@@ -19,6 +19,7 @@ type PaneInfo struct {
 // Stuck detection patterns
 var (
 	// Mustering patterns - session stuck during initialization
+	// These are checked FIRST to prevent overlap with waiting patterns
 	musteringPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`✻ Mustering\.\.\.`),
 		regexp.MustCompile(`✶ Evaporating\.\.\.`),
@@ -26,14 +27,16 @@ var (
 	}
 
 	// Waiting patterns - session stuck with spinner
+	// NOTE: We use specific patterns first, then generic pattern
 	waitingPatterns = []*regexp.Regexp{
-		// Generic Claude spinner pattern (✶✢✻· symbol + verb…)
-		regexp.MustCompile(`[✶✢✻·]\s+\w+\.\.\.`),
-		// Common specific patterns
+		// Specific patterns (checked first for fast path)
 		regexp.MustCompile(`✶ Thinking\.\.\.`),
 		regexp.MustCompile(`✢ Processing\.\.\.`),
+		regexp.MustCompile(`✶ Processing\.\.\.`),
 		regexp.MustCompile(`✻ Working\.\.\.`),
 		regexp.MustCompile(`· Waiting\.\.\.`),
+		// Generic pattern: any spinner with dots (checked AFTER mustering patterns to avoid overlap)
+		regexp.MustCompile(`[✶✢✻·]\s+.+\.\.\.`),
 	}
 
 	// Permission prompt patterns - Claude asking for tool permission
@@ -60,8 +63,8 @@ var (
 		regexp.MustCompile(`(?i)How can I help`),
 	}
 
-	// Idle prompt - ❯ character indicating Claude is ready
-	idlePromptPattern = regexp.MustCompile(`❯`)
+	// Idle prompt - ❯ character indicating Claude is ready (must be at end)
+	idlePromptPattern = regexp.MustCompile(`❯\s*$`)
 )
 
 // ExtractLastCommand attempts to extract the last command from pane content.
@@ -119,12 +122,14 @@ func (p *PaneInfo) DetectStuckIndicators() map[string]bool {
 		}
 	}
 
-	// Check for waiting/spinner patterns
+	// Check for waiting/spinner patterns (but NOT if it's mustering/evaporating)
 	indicators["waiting"] = false
-	for _, pattern := range waitingPatterns {
-		if pattern.MatchString(recentContent) {
-			indicators["waiting"] = true
-			break
+	if !indicators["mustering"] { // Only check waiting if NOT mustering
+		for _, pattern := range waitingPatterns {
+			if pattern.MatchString(recentContent) {
+				indicators["waiting"] = true
+				break
+			}
 		}
 	}
 

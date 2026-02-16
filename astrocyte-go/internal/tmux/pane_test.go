@@ -294,7 +294,7 @@ func TestGetStuckReason(t *testing.T) {
 		{
 			name:     "general waiting",
 			content:  "✢ Processing...",
-			expected: "stuck_waiting",
+			expected: "stuck_zero_token_waiting", // Waiting without idle prompt = zero token waiting
 		},
 		{
 			name:     "not stuck",
@@ -541,6 +541,130 @@ Test suite executing...
 				"stuck detection mismatch")
 			assert.Equal(t, tt.expectedReason, reason,
 				"reason mismatch")
+		})
+	}
+}
+
+// TestPatternOverlap tests that mustering and waiting patterns don't overlap.
+func TestPatternOverlap(t *testing.T) {
+	tests := []struct {
+		name                 string
+		content              string
+		expectMustering      bool
+		expectWaiting        bool
+		expectOnlyOne        bool
+		description          string
+	}{
+		{
+			name:            "mustering should NOT trigger waiting",
+			content:         "✻ Mustering...",
+			expectMustering: true,
+			expectWaiting:   false,
+			expectOnlyOne:   true,
+			description:     "Mustering pattern should only match mustering, not waiting",
+		},
+		{
+			name:            "evaporating should NOT trigger waiting",
+			content:         "✶ Evaporating...",
+			expectMustering: true,
+			expectWaiting:   false,
+			expectOnlyOne:   true,
+			description:     "Evaporating pattern should only match mustering, not waiting",
+		},
+		{
+			name:            "thinking should only trigger waiting",
+			content:         "✶ Thinking...",
+			expectMustering: false,
+			expectWaiting:   true,
+			expectOnlyOne:   true,
+			description:     "Thinking pattern should only match waiting, not mustering",
+		},
+		{
+			name:            "processing should only trigger waiting",
+			content:         "✢ Processing...",
+			expectMustering: false,
+			expectWaiting:   true,
+			expectOnlyOne:   true,
+			description:     "Processing pattern should only match waiting, not mustering",
+		},
+		{
+			name:            "working should only trigger waiting",
+			content:         "✻ Working...",
+			expectMustering: false,
+			expectWaiting:   true,
+			expectOnlyOne:   true,
+			description:     "Working pattern should only match waiting, not mustering",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pane := &PaneInfo{
+				Content: tt.content,
+			}
+
+			indicators := pane.DetectStuckIndicators()
+
+			assert.Equal(t, tt.expectMustering, indicators["mustering"],
+				"%s: mustering detection failed", tt.description)
+			assert.Equal(t, tt.expectWaiting, indicators["waiting"],
+				"%s: waiting detection failed", tt.description)
+
+			if tt.expectOnlyOne {
+				// Verify only one is true (no overlap)
+				count := 0
+				if indicators["mustering"] {
+					count++
+				}
+				if indicators["waiting"] {
+					count++
+				}
+				assert.Equal(t, 1, count,
+					"%s: should trigger exactly one pattern, not both", tt.description)
+			}
+		})
+	}
+}
+
+// TestMusteringPatternSpecificity tests mustering patterns are specific.
+func TestMusteringPatternSpecificity(t *testing.T) {
+	musteringContent := []string{
+		"✻ Mustering...",
+		"✶ Evaporating...",
+		"✢ Mustering...",
+	}
+
+	for _, content := range musteringContent {
+		t.Run(content, func(t *testing.T) {
+			pane := &PaneInfo{Content: content}
+			indicators := pane.DetectStuckIndicators()
+
+			assert.True(t, indicators["mustering"],
+				"Should detect mustering for: %s", content)
+			assert.False(t, indicators["waiting"],
+				"Should NOT detect waiting for mustering pattern: %s", content)
+		})
+	}
+}
+
+// TestWaitingPatternSpecificity tests waiting patterns don't match mustering.
+func TestWaitingPatternSpecificity(t *testing.T) {
+	waitingContent := []string{
+		"✶ Thinking...",
+		"✢ Processing...",
+		"✻ Working...",
+		"· Waiting...",
+	}
+
+	for _, content := range waitingContent {
+		t.Run(content, func(t *testing.T) {
+			pane := &PaneInfo{Content: content}
+			indicators := pane.DetectStuckIndicators()
+
+			assert.False(t, indicators["mustering"],
+				"Should NOT detect mustering for waiting pattern: %s", content)
+			assert.True(t, indicators["waiting"],
+				"Should detect waiting for: %s", content)
 		})
 	}
 }
