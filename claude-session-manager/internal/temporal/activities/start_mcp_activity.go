@@ -31,7 +31,7 @@ func StartMCPActivity(ctx context.Context, input workflows.StartMCPInput) (*work
 		if err != nil {
 			return nil, fmt.Errorf("failed to get home directory: %w", err)
 		}
-		input.ServerPath = filepath.Join(homeDir, "src/ws/oss/swarm/projects/mcp-global-sharing/packages/mcp-http-server/dist/server.js")
+		input.ServerPath = filepath.Join(homeDir, "src/mcp-global-sharing/packages/mcp-http-server/dist/server.js")
 	}
 
 	// Verify server script exists

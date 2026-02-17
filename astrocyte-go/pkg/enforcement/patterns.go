@@ -56,7 +56,7 @@ func LoadPatterns(path string) (*PatternDatabase, error) {
 
 // LoadPatternsByType loads patterns for a specific type (bash, beads, git).
 // It looks for pattern files in the standard location:
-// ~/src/ws/oss/repos/engram/patterns/{type}-anti-patterns.yaml
+// ~/src/engram/patterns/{type}-anti-patterns.yaml
 func LoadPatternsByType(patternType string) (*PatternDatabase, error) {
 	// Expand home directory
 	home, err := os.UserHomeDir()
@@ -65,7 +65,7 @@ func LoadPatternsByType(patternType string) (*PatternDatabase, error) {
 	}
 
 	// Construct path to pattern file
-	path := filepath.Join(home, "src", "ws", "oss", "repos", "engram", "patterns",
+	path := filepath.Join(home, "src", "engram", "patterns",
 		fmt.Sprintf("%s-anti-patterns.yaml", patternType))
 
 	return LoadPatterns(path)

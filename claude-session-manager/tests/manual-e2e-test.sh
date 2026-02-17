@@ -108,7 +108,7 @@ check_prerequisites() {
     print_success "claude command found"
 
     if ! command -v csm &> /dev/null; then
-        fail_test "csm command not found. Please build AGM first: cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager && go build -o ~/go/bin/csm ./cmd/csm"  # noqa: path-portability
+        fail_test "csm command not found. Please build AGM first: cd ~/src/ai-tools/claude-session-manager && go build -o ~/go/bin/csm ./cmd/csm"
     fi
     print_success "csm found: $(csm version | head -1)"
 

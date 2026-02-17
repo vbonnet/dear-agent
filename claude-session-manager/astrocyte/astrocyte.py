@@ -779,7 +779,7 @@ def is_conversation_endpoint_idle(session: SessionState) -> bool:
         If ANY signal fails, NOT at endpoint → proceed with hang detection.
 
     Reference:
-        Design doc: ~/src/ws/oss/docs/conversation-endpoint-detection-design.md
+        Design doc: ~/src/ai-tools/docs/conversation-endpoint-detection-design.md
         Bead: src-wws (Phase 1, monitoring-improvements swarm)
     """
     pane = session.pane_content
@@ -940,7 +940,7 @@ def load_patterns(pattern_type: str):
     """
     global _pattern_cache
 
-    pattern_db_path = os.path.expanduser(f"~/src/ws/oss/repos/engram/patterns/{pattern_type}-anti-patterns.yaml")
+    pattern_db_path = os.path.expanduser(f"~/src/engram/patterns/{pattern_type}-anti-patterns.yaml")
 
     try:
         if not os.path.exists(pattern_db_path):
@@ -1015,7 +1015,7 @@ def file_violation(pattern_id: str, command: str, session_id: str, agent_type: s
         command_hash = hashlib.sha256(command.encode()).hexdigest()[:8]
 
         # Create violations subdirectory if needed
-        violations_dir = os.path.expanduser(f"~/src/ws/oss/repos/engram/violations/{pattern_type}")
+        violations_dir = os.path.expanduser(f"~/src/engram/violations/{pattern_type}")
         os.makedirs(violations_dir, exist_ok=True)
 
         # Generate filename: YYYY-MM-DD-{pattern-id}-{short-hash}.md
@@ -1260,7 +1260,7 @@ def is_asking_question_without_tool(
     - Duration > threshold_minutes
 
     This heuristic triggers sending a violation prompt from
-    ~/src/ws/oss/ask-question-violations/prompts/VIOLATION-PROMPTS.md
+    ~/src/ask-question-violations/prompts/VIOLATION-PROMPTS.md
     """
     # Check for question patterns in current state
     has_question_pattern = False
@@ -1936,7 +1936,7 @@ def send_violation_prompt(session_name: str) -> RecoveryResult:
     Send AskUserQuestion violation prompt to session.
 
     Instead of ESC recovery, send the violation prompt from
-    ~/src/ws/oss/ask-question-violations/prompts/VIOLATION-PROMPTS.md
+    ~/src/ask-question-violations/prompts/VIOLATION-PROMPTS.md
 
     Args:
         session_name: The session to send prompt to
@@ -1949,7 +1949,7 @@ def send_violation_prompt(session_name: str) -> RecoveryResult:
     start_time = time.time()
 
     # Read violation prompt from file
-    violation_prompt_file = Path.home() / "src/ws/oss/ask-question-violations/prompts/VIOLATION-PROMPTS.md"
+    violation_prompt_file = Path.home() / "src/ask-question-violations/prompts/VIOLATION-PROMPTS.md"
 
     try:
         with open(violation_prompt_file, "r") as f:
@@ -2041,7 +2041,7 @@ def reject_permission_prompt(session_name: str) -> RecoveryResult:
     start_time = time.time()
 
     # Violation prompt file path
-    violation_prompt_file = Path.home() / "src/ws/oss/tool-usage-analysis/prompts/VIOLATION-PROMPTS.md"
+    violation_prompt_file = Path.home() / "src/tool-usage-analysis/prompts/VIOLATION-PROMPTS.md"
 
     try:
         # STEP 1: Send Escape key to dismiss the permission dialog

@@ -29,8 +29,8 @@ func NewGeminiDeepResearch() *GeminiDeepResearch {
 		// Try common locations
 		homeDir, err := os.UserHomeDir()
 		if err == nil {
-			// Try ~/src/ws/oss/repos/ai-tools/main/tools/gemini-deep-research/gemini-deep-research
-			cliPath = filepath.Join(homeDir, "src/ws/oss/repos/ai-tools/main/tools/gemini-deep-research/gemini-deep-research")
+			// Try ~/src/ai-tools/tools/gemini-deep-research/gemini-deep-research
+			cliPath = filepath.Join(homeDir, "src/ai-tools/tools/gemini-deep-research/gemini-deep-research")
 			if _, err := os.Stat(cliPath); err != nil {
 				// Fallback to PATH
 				cliPath = "gemini-deep-research"
@@ -337,7 +337,7 @@ func (w *GeminiDeepResearch) runDeepResearch(sessionID, url string) (string, err
 	}
 
 	// Handle literal tilde directory bug (P2 bug from testing)
-	// gemini-dr may create ./~/src/ws/oss/research/ instead of expanding ~
+	// gemini-dr may create ./~/src/research/ instead of expanding ~
 	if strings.HasPrefix(reportPath, "~/") && !filepath.IsAbs(reportPath) {
 		// Try as literal path first
 		if _, err := os.Stat(reportPath); os.IsNotExist(err) {

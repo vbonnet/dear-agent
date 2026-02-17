@@ -83,7 +83,7 @@ func (s *MCPServiceWorkflowTestSuite) Test_MCPServiceWorkflow_BasicStartStop() {
 	homeDir, err := os.UserHomeDir()
 	require.NoError(s.T(), err)
 
-	serverPath := filepath.Join(homeDir, "src/ws/oss/swarm/projects/mcp-global-sharing/packages/mcp-http-server/dist/server.js")
+	serverPath := filepath.Join(homeDir, "src/mcp-global-sharing/packages/mcp-http-server/dist/server.js")
 
 	// Check if server script exists, skip test if not
 	if _, err := os.Stat(serverPath); os.IsNotExist(err) {
@@ -174,7 +174,7 @@ func (s *MCPServiceWorkflowTestSuite) Test_MCPServiceWorkflow_Restart() {
 	homeDir, err := os.UserHomeDir()
 	require.NoError(s.T(), err)
 
-	serverPath := filepath.Join(homeDir, "src/ws/oss/swarm/projects/mcp-global-sharing/packages/mcp-http-server/dist/server.js")
+	serverPath := filepath.Join(homeDir, "src/mcp-global-sharing/packages/mcp-http-server/dist/server.js")
 
 	// Check if server script exists, skip test if not
 	if _, err := os.Stat(serverPath); os.IsNotExist(err) {
@@ -263,7 +263,7 @@ func (s *MCPServiceWorkflowTestSuite) Test_MCPServiceWorkflow_StateQueries() {
 	homeDir, err := os.UserHomeDir()
 	require.NoError(s.T(), err)
 
-	serverPath := filepath.Join(homeDir, "src/ws/oss/swarm/projects/mcp-global-sharing/packages/mcp-http-server/dist/server.js")
+	serverPath := filepath.Join(homeDir, "src/mcp-global-sharing/packages/mcp-http-server/dist/server.js")
 
 	// Check if server script exists, skip test if not
 	if _, err := os.Stat(serverPath); os.IsNotExist(err) {

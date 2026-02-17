@@ -136,7 +136,7 @@ Alternative violation message.
     with patch('astrocyte.Path.home') as mock_home:
         mock_home.return_value = tmp_path.parent
         # Create the expected directory structure
-        violation_dir = tmp_path.parent / "src/ws/oss/ask-question-violations/prompts"
+        violation_dir = tmp_path.parent / "src/ask-question-violations/prompts"
         violation_dir.mkdir(parents=True, exist_ok=True)
         violation_prompt = violation_dir / "VIOLATION-PROMPTS.md"
         violation_prompt.write_text(prompt_content)
@@ -812,7 +812,7 @@ class TestRecoveryErrorHandling:
 
         with patch('astrocyte.Path.home') as mock_home:
             mock_home.return_value = tmp_path.parent
-            violation_dir = tmp_path.parent / "src/ws/oss/ask-question-violations/prompts"
+            violation_dir = tmp_path.parent / "src/ask-question-violations/prompts"
             violation_dir.mkdir(parents=True, exist_ok=True)
             violation_prompt = violation_dir / "VIOLATION-PROMPTS.md"
             violation_prompt.write_text("This is not a valid prompt file")

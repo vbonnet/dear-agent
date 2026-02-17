@@ -5,7 +5,7 @@ const (
 	DefaultOutputDir = "./output"
 
 	// DefaultCacheDir is the default cache directory for research results
-	DefaultCacheDir = "~/src/ws/oss/research"
+	DefaultCacheDir = "~/src/research"
 
 	// DefaultTimeout is the default Deep Research timeout in minutes
 	DefaultTimeout = 60

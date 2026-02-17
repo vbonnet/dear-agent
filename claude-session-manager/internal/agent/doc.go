@@ -46,6 +46,6 @@
 //
 // # Design References
 //
-//   - ~/src/ws/oss/AGM-MULTI-AGENT-ROADMAP.md (Phase 0, Task 2)
+//   - ~/src/ai-tools/AGM-MULTI-AGENT-ROADMAP.md (Phase 0, Task 2)
 //   - Bead oss-6tm6 (Priority P1, 480 minutes)
 package agent

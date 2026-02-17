@@ -14,8 +14,8 @@ LOG_DIR="$HOME/.agm/astrocyte/logs"
 mkdir -p "$LOG_DIR"
 
 # Start daemon with output redirected to startup log
-cd "$HOME/src/ws/oss/repos/ai-tools/main/claude-session-manager/astrocyte"
-nohup python3 "$HOME/src/ws/oss/repos/ai-tools/main/claude-session-manager/astrocyte/astrocyte-daemon.py" \
+cd "${AI_TOOLS_ROOT:-$HOME/src/ai-tools}/claude-session-manager/astrocyte"
+nohup python3 "${AI_TOOLS_ROOT:-$HOME/src/ai-tools}/claude-session-manager/astrocyte/astrocyte-daemon.py" \
     >> "$LOG_DIR/startup.log" 2>&1 &
 
 # Log startup event

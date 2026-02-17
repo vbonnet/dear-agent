@@ -12,7 +12,7 @@ echo
 
 # Build fresh binary
 echo "Building AGM..."
-cd /home/user/src/ws/oss/repos/ai-tools/main/claude-session-manager
+cd "${AI_TOOLS_ROOT:-$HOME/src/ai-tools}/claude-session-manager"
 go build -o /tmp/agm-test ./cmd/agm
 AGM=/tmp/agm-test
 

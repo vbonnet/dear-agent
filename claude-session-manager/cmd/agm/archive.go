@@ -493,7 +493,7 @@ func spawnReaper(sessionName string) error {
 			"agm-reaper binary not found",
 			fmt.Sprintf("  • Expected location: %s\n"+
 				"  • Log file: %s\n"+
-				"  • Build reaper: cd ~/src/ws/oss/repos/ai-tools/main/claude-session-manager && make build\n"+
+				"  • Build reaper: cd ~/src/ai-tools/claude-session-manager && make build\n"+
 				"  • Or install: make install\n"+
 				"  • Or use synchronous archive: agm session archive %s (without --async)",
 				reaperPath, logFile, sessionName))

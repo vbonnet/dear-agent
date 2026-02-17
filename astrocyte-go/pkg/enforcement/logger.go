@@ -28,7 +28,7 @@ type ViolationData struct {
 }
 
 // FileViolation writes a violation file to the violations directory.
-// The file follows the schema defined in ~/src/ws/oss/repos/engram/violations/SCHEMA.yaml
+// The file follows the schema defined in ~/src/engram/violations/SCHEMA.yaml
 //
 // File structure:
 // - YAML frontmatter with required and optional fields

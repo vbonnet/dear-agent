@@ -38,7 +38,7 @@ log_info "Setting up test environment..."
 /tests/scripts/setup-test-env.sh
 
 # Create violation prompt file for csm reject
-VIOLATION_PROMPTS="/home/testuser/src/ws/oss/tool-usage-analysis/prompts/VIOLATION-PROMPTS.md"
+VIOLATION_PROMPTS="/home/testuser/src/tool-usage-analysis/prompts/VIOLATION-PROMPTS.md"
 mkdir -p "$(dirname "$VIOLATION_PROMPTS")"
 cat > "$VIOLATION_PROMPTS" <<'EOF'
 # Tool Usage Violation Prompts

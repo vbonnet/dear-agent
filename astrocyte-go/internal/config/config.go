@@ -107,12 +107,12 @@ func DefaultConfig() *Config {
 
 	return &Config{
 		Patterns: PatternConfig{
-			Bash:  filepath.Join(homeDir, "src/ws/oss/repos/engram/patterns/bash-anti-patterns.yaml"),
-			Beads: filepath.Join(homeDir, "src/ws/oss/repos/engram/patterns/beads-anti-patterns.yaml"),
-			Git:   filepath.Join(homeDir, "src/ws/oss/repos/engram/patterns/git-anti-patterns.yaml"),
+			Bash:  filepath.Join(homeDir, "src/engram/patterns/bash-anti-patterns.yaml"),
+			Beads: filepath.Join(homeDir, "src/engram/patterns/beads-anti-patterns.yaml"),
+			Git:   filepath.Join(homeDir, "src/engram/patterns/git-anti-patterns.yaml"),
 		},
 		Violations: ViolationsConfig{
-			Directory: filepath.Join(homeDir, "src/ws/oss/repos/engram/violations"),
+			Directory: filepath.Join(homeDir, "src/engram/violations"),
 		},
 		Monitoring: MonitoringConfig{
 			Interval:               "60s",  // Check every 60 seconds

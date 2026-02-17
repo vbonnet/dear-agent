@@ -1,6 +1,6 @@
 #!/bin/bash
 # Test script for AGM auto-rename feature
-# Location: ~/src/ws/oss/repos/ai-tools/main/claude-session-manager/test-auto-rename.sh  # noqa: path-portability
+# Location: ~/src/ai-tools/claude-session-manager/test-auto-rename.sh
 
 set -e
 

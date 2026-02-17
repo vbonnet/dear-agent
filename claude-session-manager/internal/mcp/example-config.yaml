@@ -53,7 +53,7 @@ mcp_servers:
 # Starting Global MCP Servers:
 #
 # Option 1: Manually (for development)
-#   cd ~/src/ws/oss/swarm/projects/mcp-global-sharing/packages/mcp-http-server
+#   cd ~/src/mcp-global-sharing/packages/mcp-http-server
 #   npm run dev -- --port 8001 --mcp-command "npx -y @modelcontextprotocol/server-googledocs"
 #
 # Option 2: Via Temporal Workflow (production)
