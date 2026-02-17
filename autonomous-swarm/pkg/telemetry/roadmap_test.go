@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/taskqueue"
+	"github.com/vbonnet/ai-tools/autonomous-swarm/pkg/taskqueue"
 )
 
 func TestGenerateRoadmap(t *testing.T) {

@@ -28,7 +28,6 @@
 // # Usage
 //
 // Agent implementations are in subdirectories:
-//   - internal/agent/claude/   (Claude CLI adapter)
 //   - internal/agent/gemini/   (Gemini API adapter)
 //   - internal/agent/gpt/      (GPT API adapter)
 //

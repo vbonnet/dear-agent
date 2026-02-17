@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/taskqueue"
+	"github.com/vbonnet/ai-tools/autonomous-swarm/pkg/taskqueue"
 )
 
 // Orchestrator manages dependency-aware bead launching.

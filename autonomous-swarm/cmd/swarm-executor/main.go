@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/agm"
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/executor"
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/taskqueue"
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/telemetry"
+	"github.com/vbonnet/ai-tools/autonomous-swarm/pkg/agm"
+	"github.com/vbonnet/ai-tools/autonomous-swarm/pkg/executor"
+	"github.com/vbonnet/ai-tools/autonomous-swarm/pkg/taskqueue"
+	"github.com/vbonnet/ai-tools/autonomous-swarm/pkg/telemetry"
 )
 
 // Version information - set via ldflags at build time

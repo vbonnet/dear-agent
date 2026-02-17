@@ -3,7 +3,7 @@ package executor
 import (
 	"fmt"
 
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/taskqueue"
+	"github.com/vbonnet/ai-tools/autonomous-swarm/pkg/taskqueue"
 )
 
 // IterationManager tracks iteration counts and enforces limits

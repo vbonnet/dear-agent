@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/taskqueue"
+	"github.com/vbonnet/ai-tools/autonomous-swarm/pkg/taskqueue"
 )
 
 // DependencyGraph represents a directed acyclic graph (DAG) of bead dependencies.

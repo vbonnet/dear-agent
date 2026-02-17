@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/taskqueue"
+	"github.com/vbonnet/ai-tools/autonomous-swarm/pkg/taskqueue"
 )
 
 const (

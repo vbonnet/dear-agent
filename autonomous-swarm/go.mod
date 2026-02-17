@@ -1,4 +1,4 @@
-module github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm
+module github.com/vbonnet/ai-tools/autonomous-swarm
 
 go 1.25.1
 

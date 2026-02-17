@@ -3,7 +3,7 @@ package executor
 import (
 	"testing"
 
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/taskqueue"
+	"github.com/vbonnet/ai-tools/autonomous-swarm/pkg/taskqueue"
 )
 
 func TestNewIterationManager(t *testing.T) {

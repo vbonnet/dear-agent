@@ -776,7 +776,7 @@ cd autonomous-swarm
 make build-executor
 
 # Direct install
-go install github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/cmd/swarm-executor@latest
+go install github.com/vbonnet/ai-tools/autonomous-swarm/cmd/swarm-executor@latest
 ```
 
 ### 13.2 Runtime Requirements

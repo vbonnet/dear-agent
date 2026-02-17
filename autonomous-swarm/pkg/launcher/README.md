@@ -35,7 +35,7 @@ Uses **Kahn's Topological Sort** algorithm:
 ## Usage
 
 ```go
-import "github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/launcher"
+import "github.com/vbonnet/ai-tools/autonomous-swarm/pkg/launcher"
 
 // Create coordinator
 coord := taskqueue.NewCoordinator(queuePath)

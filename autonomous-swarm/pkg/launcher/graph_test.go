@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/[REDACTED_EMPLOYER]-src/ai-tools/autonomous-swarm/pkg/taskqueue"
+	"github.com/vbonnet/ai-tools/autonomous-swarm/pkg/taskqueue"
 )
 
 func TestBuildGraph(t *testing.T) {
