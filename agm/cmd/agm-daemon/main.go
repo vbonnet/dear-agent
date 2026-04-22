@@ -1,0 +1,135 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/vbonnet/dear-agent/agm/internal/daemon"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/logging"
+	"github.com/vbonnet/dear-agent/agm/internal/messages"
+	sentinelcfg "github.com/vbonnet/dear-agent/agm/internal/sentinel/config"
+	sentineldaemon "github.com/vbonnet/dear-agent/agm/internal/sentinel/daemon"
+)
+
+var logger = logging.DefaultLogger()
+
+func main() {
+	// Get home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		logger.Error("Failed to get home directory", "error", err)
+		os.Exit(1)
+	}
+
+	baseDir := filepath.Join(homeDir, ".agm")
+	logDir := filepath.Join(baseDir, "logs", "daemon")
+	pidFile := filepath.Join(baseDir, "daemon.pid")
+
+	// Create log directory
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		logger.Error("Failed to create log directory", "error", err)
+		os.Exit(1)
+	}
+
+	// Create daemon logger (uses slog.Logger with file output)
+	logPath := filepath.Join(logDir, "daemon.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		logger.Error("Failed to open log file", "error", err)
+		os.Exit(1)
+	}
+	defer logFile.Close()
+
+	daemonLogger := logging.NewTextLogger(logFile)
+
+	// Open message queue
+	queue, err := messages.NewMessageQueue()
+	if err != nil {
+		logger.Error("Failed to open message queue", "error", err)
+		os.Exit(1)
+	}
+
+	// Create acknowledgment manager
+	ackManager := messages.NewAckManager(queue)
+
+	// Create Dolt adapter for session resolution
+	var doltAdapter *dolt.Adapter
+	doltConfig, err := dolt.DefaultConfig()
+	if err != nil {
+		daemonLogger.Warn("Dolt config not available, session resolution will use YAML fallback", "error", err)
+	} else {
+		adapter, err := dolt.New(doltConfig)
+		if err != nil {
+			daemonLogger.Warn("Dolt connection failed, session resolution will use YAML fallback", "error", err)
+		} else {
+			if err := adapter.ApplyMigrations(); err != nil {
+				adapter.Close()
+				daemonLogger.Warn("Dolt migrations failed", "error", err)
+			} else {
+				doltAdapter = adapter
+			}
+		}
+	}
+	if doltAdapter != nil {
+		defer doltAdapter.Close()
+	}
+
+	// Create daemon config
+	cfg := daemon.Config{
+		BaseDir:     baseDir,
+		LogDir:      logDir,
+		PIDFile:     pidFile,
+		Queue:       queue,
+		AckManager:  ackManager,
+		Logger:      daemonLogger,
+		DoltAdapter: doltAdapter,
+	}
+
+	// Create daemon
+	d := daemon.NewDaemon(cfg)
+
+	// Start sentinel (session monitor) as a background goroutine
+	sentinelCfg, err := sentinelcfg.LoadConfig(sentinelcfg.DefaultConfigPath())
+	if err != nil {
+		daemonLogger.Warn("Sentinel config load failed, sentinel disabled", "error", err)
+	}
+	var sentinel *sentineldaemon.SessionMonitor
+	if sentinelCfg != nil {
+		sentinelCfg.ExpandPaths()
+		monitor, err := sentineldaemon.NewSessionMonitor(sentinelCfg)
+		if err != nil {
+			daemonLogger.Warn("Sentinel init failed, sentinel disabled", "error", err)
+		} else {
+			sentinel = monitor
+			go func() {
+				daemonLogger.Info("Sentinel session monitor starting...")
+				if err := sentinel.StartMonitoring(); err != nil {
+					daemonLogger.Error("Sentinel monitor failed", "error", err)
+				}
+			}()
+		}
+	}
+
+	// Log startup to both stdout and file
+	fmt.Println("AGM Daemon starting...")
+	fmt.Printf("  Base dir: %s\n", baseDir)
+	fmt.Printf("  Log dir: %s\n", logDir)
+	fmt.Printf("  PID file: %s\n", pidFile)
+	daemonLogger.Info("AGM Daemon starting...")
+
+	// Start daemon (blocks until stopped via signal)
+	if err := d.Start(); err != nil {
+		logger.Error("Daemon failed", "error", err)
+		if sentinel != nil {
+			sentinel.StopMonitoring()
+		}
+		os.Exit(1)
+	}
+
+	// Stop sentinel after daemon exits
+	if sentinel != nil {
+		sentinel.StopMonitoring()
+	}
+}

@@ -1,0 +1,25 @@
+{
+  "description": "Gemini agent - successful message send with API call",
+  "agent": "gemini",
+  "operation": "SendMessage",
+  "request": {
+    "sessionID": "gemini-session-20260220-100000",
+    "message": {
+      "ID": "msg-gemini-001",
+      "Role": "user",
+      "Content": "Analyze this dataset and provide insights",
+      "Timestamp": "2026-02-20T10:05:00Z",
+      "Metadata": {}
+    }
+  },
+  "response": {
+    "success": true,
+    "error": null
+  },
+  "metadata": {
+    "timestamp": "2026-02-20T10:05:00Z",
+    "model": "gemini-2.0-flash-thinking-exp",
+    "thinking_tokens": 1250,
+    "output_tokens": 850
+  }
+}

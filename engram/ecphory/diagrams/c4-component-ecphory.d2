@@ -1,0 +1,357 @@
+# C4 Component Diagram: Ecphory Module
+# Level 3 - Component-level internal architecture
+# Shows the 3-tier retrieval system and internal components
+
+title: {
+  label: "Ecphory - 3-Tier Memory Retrieval System"
+  near: top-center
+  shape: text
+  style: {
+    font-size: 24
+    bold: true
+  }
+}
+
+# External dependencies (outside the module boundary)
+engram_parser: "Engram Parser" {
+  shape: rectangle
+  style.fill: "#E8E8E8"
+  description: "Parses .ai.md files and extracts frontmatter"
+}
+
+reflection_types: "Reflection Types" {
+  shape: rectangle
+  style.fill: "#E8E8E8"
+  description: "Error category definitions (syntax, permission, timeout, etc.)"
+}
+
+prompt_sanitizer: "Prompt Sanitizer" {
+  shape: rectangle
+  style.fill: "#E8E8E8"
+  description: "Query sanitization & injection defense"
+}
+
+llm_auth: "LLM Auth" {
+  shape: rectangle
+  style.fill: "#E8E8E8"
+  description: "Provider authentication detection"
+}
+
+# Main Ecphory container
+ecphory_container: "Ecphory Module" {
+  style.fill: "#D4E6F1"
+  style.stroke: "#2874A6"
+  style.stroke-width: 3
+
+  # Core orchestrator component
+  ecphory_orchestrator: "Ecphory Orchestrator" {
+    shape: rectangle
+    style.fill: "#5DADE2"
+    description: "Coordinates 3-tier retrieval pipeline\n• Query execution\n• Lifecycle management\n• Telemetry publishing"
+  }
+
+  # Tier 1: Index/Filter
+  tier1_container: "Tier 1: Fast Filter" {
+    style.fill: "#AED6F1"
+    style.stroke: "#5499C7"
+    style.stroke-width: 2
+
+    index: "Index" {
+      shape: rectangle
+      style.fill: "#85C1E9"
+      description: "In-memory frontmatter index\n• Tag filtering (hierarchical)\n• Agent filtering (cached)\n• Type filtering\n• Thread-safe (RWMutex)"
+    }
+
+    symlink_handler: "Symlink Handler" {
+      shape: rectangle
+      style.fill: "#85C1E9"
+      description: "Symlink cycle detection\n• Max depth: 5\n• Visited tracking"
+    }
+  }
+
+  # Tier 2: Semantic Ranking
+  tier2_container: "Tier 2: Semantic Ranking" {
+    style.fill: "#F9E79F"
+    style.stroke: "#F39C12"
+    style.stroke-width: 2
+
+    ranker: "Ranker" {
+      shape: rectangle
+      style.fill: "#F7DC6F"
+      description: "Semantic relevance ranking\n• Prompt building\n• Response validation\n• Error handling"
+    }
+
+    rate_limiter: "Rate Limiter" {
+      shape: rectangle
+      style.fill: "#F7DC6F"
+      description: "Token bucket rate limiting\n• 100 requests/hour\n• 20 requests/session\n• 1 second minimum interval\n• Monotonic clock"
+    }
+
+    provider_factory: "Provider Factory" {
+      shape: rectangle
+      style.fill: "#F7DC6F"
+      description: "Multi-provider management\n• Auto-detection\n• Registration\n• Precedence ordering"
+    }
+  }
+
+  # Provider implementations
+  providers_container: "LLM Providers" {
+    style.fill: "#D5F4E6"
+    style.stroke: "#27AE60"
+    style.stroke-width: 2
+
+    anthropic_provider: "Anthropic Provider" {
+      shape: rectangle
+      style.fill: "#7DCEA0"
+      description: "Anthropic API\n• Model: claude-3-5-haiku\n• API key validation\n• JSON response parsing"
+    }
+
+    vertexai_claude: "Vertex AI Claude" {
+      shape: rectangle
+      style.fill: "#7DCEA0"
+      description: "Google Vertex AI (Claude)\n• Model: claude-sonnet-4-5\n• Region: us-east5\n• gcloud auth"
+    }
+
+    vertexai_gemini: "Vertex AI Gemini" {
+      shape: rectangle
+      style.fill: "#7DCEA0"
+      description: "Google Vertex AI (Gemini)\n• Model: gemini-2.0-flash\n• Region: us-central1\n• gcloud auth"
+    }
+
+    local_provider: "Local Provider" {
+      shape: rectangle
+      style.fill: "#7DCEA0"
+      description: "Local fallback\n• Tag-based matching\n• No API calls\n• Always available"
+    }
+  }
+
+  # Failure boosting system
+  boosting_container: "Failure Boosting" {
+    style.fill: "#FADBD8"
+    style.stroke: "#E74C3C"
+    style.stroke-width: 2
+
+    context_detector: "Context Detector" {
+      shape: rectangle
+      style.fill: "#F1948A"
+      description: "Debugging context detection\n• Regex pattern matching\n• Error category classification\n• 5 categories: syntax, permission,\n  timeout, tool_misuse, other"
+    }
+
+    failure_booster: "Failure Booster" {
+      shape: rectangle
+      style.fill: "#F1948A"
+      description: "Relevance score boosting\n• +25.0 for matching category\n• Capped at 100.0\n• Reflection-only"
+    }
+  }
+
+  # Tier 3: Budget Management
+  tier3_container: "Tier 3: Budget Management" {
+    style.fill: "#D7BDE2"
+    style.stroke: "#8E44AD"
+    style.stroke-width: 2
+
+    budget_manager: "Budget Manager" {
+      shape: rectangle
+      style.fill: "#BB8FCE"
+      description: "Token budget enforcement\n• Load in relevance order\n• Estimate tokens (char/4)\n• Stop when budget exhausted"
+    }
+
+    metadata_updater: "Metadata Updater" {
+      shape: rectangle
+      style.fill: "#BB8FCE"
+      description: "Frontmatter updates (async)\n• Increment retrieval_count\n• Update last_accessed\n• Non-blocking"
+    }
+  }
+
+  # Telemetry
+  telemetry: "Telemetry Publisher" {
+    shape: rectangle
+    style.fill: "#D5D8DC"
+    description: "Event publishing (async)\n• Query metrics\n• Result tracking\n• Privacy-preserving paths"
+  }
+}
+
+# External systems
+anthropic_api: "Anthropic API" {
+  shape: cloud
+  style.fill: "#F8F9F9"
+  description: "Claude models via REST API"
+}
+
+vertex_api: "Vertex AI API" {
+  shape: cloud
+  style.fill: "#F8F9F9"
+  description: "Claude/Gemini via Google Cloud"
+}
+
+eventbus: "EventBus" {
+  shape: queue
+  style.fill: "#F8F9F9"
+  description: "Telemetry event stream"
+}
+
+engram_files: "Engram Files" {
+  shape: cylinder
+  style.fill: "#F8F9F9"
+  description: ".ai.md files with frontmatter"
+}
+
+# Component relationships - Query flow (3-tier pipeline)
+
+ecphory_container.ecphory_orchestrator -> ecphory_container.tier1_container.index: "1. Filter by tags/agent" {
+  style.stroke: "#2874A6"
+  style.stroke-width: 3
+}
+
+ecphory_container.tier1_container.index -> ecphory_container.tier1_container.symlink_handler: "handles symlinks" {
+  style.stroke-dash: 3
+}
+
+ecphory_container.ecphory_orchestrator -> ecphory_container.tier2_container.ranker: "2. Rank candidates" {
+  style.stroke: "#F39C12"
+  style.stroke-width: 3
+}
+
+ecphory_container.tier2_container.ranker -> ecphory_container.tier2_container.rate_limiter: "check limits" {
+  style.stroke-dash: 3
+}
+
+ecphory_container.tier2_container.ranker -> ecphory_container.tier2_container.provider_factory: "get provider" {
+  style.stroke-dash: 3
+}
+
+ecphory_container.tier2_container.provider_factory -> ecphory_container.providers_container.anthropic_provider: "precedence 1"
+ecphory_container.tier2_container.provider_factory -> ecphory_container.providers_container.vertexai_claude: "precedence 2"
+ecphory_container.tier2_container.provider_factory -> ecphory_container.providers_container.vertexai_gemini: "precedence 3"
+ecphory_container.tier2_container.provider_factory -> ecphory_container.providers_container.local_provider: "fallback"
+
+ecphory_container.ecphory_orchestrator -> ecphory_container.boosting_container.context_detector: "3a. Detect context" {
+  style.stroke: "#E74C3C"
+  style.stroke-width: 2
+}
+
+ecphory_container.boosting_container.context_detector -> ecphory_container.boosting_container.failure_booster: "if debugging query" {
+  style.stroke-dash: 3
+}
+
+ecphory_container.boosting_container.failure_booster -> ecphory_container.ecphory_orchestrator: "boosted scores" {
+  style.stroke-dash: 3
+}
+
+ecphory_container.ecphory_orchestrator -> ecphory_container.tier3_container.budget_manager: "3b. Load within budget" {
+  style.stroke: "#8E44AD"
+  style.stroke-width: 3
+}
+
+ecphory_container.ecphory_orchestrator -> ecphory_container.tier3_container.metadata_updater: "4. Update metadata (async)" {
+  style.stroke-dash: 3
+}
+
+ecphory_container.ecphory_orchestrator -> ecphory_container.telemetry: "5. Publish events (async)" {
+  style.stroke-dash: 3
+}
+
+# External dependencies
+
+ecphory_container.tier1_container.index -> engram_parser: "parse frontmatter"
+ecphory_container.tier3_container.budget_manager -> engram_parser: "parse full content"
+
+ecphory_container.boosting_container.context_detector -> reflection_types: "error categories"
+
+ecphory_container.tier2_container.ranker -> prompt_sanitizer: "sanitize query"
+
+ecphory_container.tier2_container.provider_factory -> llm_auth: "detect auth method"
+
+# Provider API calls
+
+ecphory_container.providers_container.anthropic_provider -> anthropic_api: "Messages API"
+ecphory_container.providers_container.vertexai_claude -> vertex_api: "streamRawPredict"
+ecphory_container.providers_container.vertexai_gemini -> vertex_api: "streamGenerateContent"
+
+# Data sources
+
+ecphory_container.tier1_container.index -> engram_files: "scan .ai.md files"
+ecphory_container.tier3_container.budget_manager -> engram_files: "load content"
+ecphory_container.tier3_container.metadata_updater -> engram_files: "update frontmatter"
+
+# Telemetry output
+
+ecphory_container.telemetry -> eventbus: "publish events"
+
+# Legend
+legend: {
+  near: bottom-right
+  style.fill: "#FFFFFF"
+  style.stroke: "#333333"
+
+  legend_title: "Component Types" {
+    shape: text
+    style.bold: true
+  }
+
+  tier1_color: "Tier 1: Fast Filter" {
+    shape: rectangle
+    style.fill: "#85C1E9"
+  }
+
+  tier2_color: "Tier 2: Semantic Ranking" {
+    shape: rectangle
+    style.fill: "#F7DC6F"
+  }
+
+  tier3_color: "Tier 3: Budget Management" {
+    shape: rectangle
+    style.fill: "#BB8FCE"
+  }
+
+  boosting_color: "Failure Boosting" {
+    shape: rectangle
+    style.fill: "#F1948A"
+  }
+
+  provider_color: "LLM Providers" {
+    shape: rectangle
+    style.fill: "#7DCEA0"
+  }
+
+  external_color: "External Dependencies" {
+    shape: rectangle
+    style.fill: "#E8E8E8"
+  }
+}
+
+# Notes
+notes: {
+  near: bottom-left
+  style.fill: "#FEF9E7"
+  style.stroke: "#F39C12"
+
+  notes_title: "Key Architectural Features" {
+    shape: text
+    style.bold: true
+  }
+
+  note1: "• 3-tier pipeline: Filter → Rank → Budget" {
+    shape: text
+  }
+
+  note2: "• Multi-provider support with auto-detection" {
+    shape: text
+  }
+
+  note3: "• Failure-aware boosting for debugging queries" {
+    shape: text
+  }
+
+  note4: "• Rate limiting: 100/hour, 20/session" {
+    shape: text
+  }
+
+  note5: "• Thread-safe concurrent query execution" {
+    shape: text
+  }
+
+  note6: "• Async telemetry & metadata updates" {
+    shape: text
+  }
+}

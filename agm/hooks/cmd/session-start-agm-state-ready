@@ -1,0 +1,24 @@
+#!/bin/bash
+# Claude Code hook: Notify AGM when session starts
+# Triggered when Claude Code session initialization completes
+#
+# Purpose: Update AGM session state to READY when Claude is ready for input
+#
+# Installation: Copy to ~/.claude/hooks/session-start/agm-state-ready
+# Permissions: chmod +x ~/.claude/hooks/session-start/agm-state-ready
+
+set -euo pipefail
+
+# Get current tmux session name
+AGM_SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "")
+
+if [ -z "$AGM_SESSION" ]; then
+    # Not in tmux - skip hook
+    exit 0
+fi
+
+# Notify AGM of state transition to READY
+# Silent failure is OK - AGM might not be installed or session might not be AGM-managed
+agm session state set "$AGM_SESSION" "READY" --source hook 2>/dev/null || true
+
+exit 0

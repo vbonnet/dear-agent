@@ -1,0 +1,45 @@
+// This file demonstrates the refactored main.go structure for Phase 0.
+// In future phases, main.go will be simplified to match this pattern.
+// Current main.go remains unchanged to maintain compatibility.
+
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/vbonnet/ai-tools/agm/internal/app"
+	"github.com/vbonnet/ai-tools/agm/internal/backend"
+	"github.com/vbonnet/ai-tools/agm/internal/terminal"
+)
+
+// Version is set during build via -ldflags
+var Version = "dev"
+
+func main() {
+	// Initialize dependencies
+	pty := terminal.NewRealPTY()
+	defer pty.Close()
+
+	// Use backend adapter to support multiple backends (tmux, temporal, etc.)
+	adapter, err := backend.GetDefaultBackendAdapter()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to initialize backend: %v\n", err)
+		adapter = backend.NewBackendAdapter(backend.NewTmuxBackend())
+	}
+
+	// Create app with injected dependencies
+	// Agent and FS will be initialized in future phases
+	application := app.NewApp(
+		pty,      // PTY provider
+		adapter,  // Tmux interface
+		nil,      // Agent (TODO: Phase 1+)
+		nil,      // Filesystem (TODO: Phase 1+)
+	)
+
+	// Run application with command-line arguments
+	if err := application.Run(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}

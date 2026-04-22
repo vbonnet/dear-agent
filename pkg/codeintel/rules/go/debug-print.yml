@@ -1,0 +1,11 @@
+id: go-debug-print
+language: go
+severity: warning
+message: "Debug print statement found"
+rule:
+  kind: call_expression
+  has:
+    kind: selector_expression
+    any:
+      - regex: "^fmt\\.Print"
+      - regex: "^log\\.Print"

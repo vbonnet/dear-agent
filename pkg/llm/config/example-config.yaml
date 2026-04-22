@@ -1,0 +1,46 @@
+# LLM Configuration Example
+# Place this file at: ~/.engram/llm-config.yaml
+#
+# This configuration allows per-tool model preferences with fallback to global defaults.
+# Different tools can use different models based on their cost/accuracy requirements.
+
+# Per-tool model preferences
+tools:
+  # Cost-optimized: ecphory runs frequently for semantic search
+  ecphory:
+    anthropic:
+      model: claude-3-5-sonnet-20241022
+      max_tokens: 4096
+    gemini:
+      model: gemini-2.0-flash-exp
+      max_tokens: 8192
+    default_family: gemini  # Prefer Gemini for cost efficiency
+
+  # High-stakes: multi-persona review needs accuracy over cost
+  multi-persona-review:
+    anthropic:
+      model: claude-opus-4-6
+      max_tokens: 8192
+    gemini:
+      model: gemini-2.5-pro-exp
+      max_tokens: 8192
+    default_family: anthropic  # Prefer Claude for quality
+
+  # Balanced: review-spec has moderate complexity
+  review-spec:
+    anthropic:
+      model: claude-3-5-sonnet-20241022
+      max_tokens: 4096
+    gemini:
+      model: gemini-2.0-flash-exp
+      max_tokens: 4096
+    default_family: gemini
+
+# Global defaults (used when tool-specific config not found)
+defaults:
+  anthropic:
+    model: claude-3-5-sonnet-20241022
+    max_tokens: 4096
+  gemini:
+    model: gemini-2.0-flash-exp
+    max_tokens: 8192

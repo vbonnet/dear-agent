@@ -1,0 +1,18 @@
+version: 1
+default_workspace: oss
+
+workspaces:
+  - name: oss
+    root: ~/projects/myworkspace
+    output_dir: ./.test
+    enabled: true
+
+  - name: acme
+    root: ~/src/ws/acme
+    output_dir: ~/src/ws/acme/.test
+    enabled: true
+
+  - name: personal
+    root: ~/personal/projects
+    output_dir: ~/personal/.test
+    enabled: false

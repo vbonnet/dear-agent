@@ -1,0 +1,1021 @@
+# Bash Anti-Patterns Database
+# Version: 3.2
+# Last updated: 2026-04-05
+# Purpose: Single source of truth for bash command validation
+# Used by: pretool-bash-blocker hook (RE2 regex), Astrocyte daemon (PCRE regex)
+#
+# Fields:
+#   id              - unique identifier for the pattern
+#   order           - Go hook evaluation order (index * 10); lower = higher priority
+#   re2_regex       - RE2-compatible regex used by Go pretool-bash-blocker hook
+#   pattern_name    - display name from Go patternNames (used in hook error messages)
+#   remediation     - remediation text from Go remediations (used in hook error messages)
+#   regex           - PCRE regex used by astrocyte daemon
+#   reason          - human-readable reason (astrocyte)
+#   alternative     - suggested alternative (astrocyte)
+#   examples        - positive match examples (astrocyte)
+#   should_not_match - negative examples that must NOT trigger re2_regex
+#   severity        - high/medium/low (astrocyte)
+#   tier2_validation - whether astrocyte uses tier-2 validation
+#   tier1_example   - example shown in tier-1 (astrocyte)
+#   relaxed         - if true, pattern is not actively enforced
+#   consolidated_into - if set, this pattern is subsumed by the referenced id for hook purposes
+#
+# Ordering: Hook patterns (with re2_regex) come first sorted by order,
+#           then astrocyte-only patterns at the end.
+
+patterns:
+
+  # ============================================================
+  # HOOK PATTERNS (have re2_regex, sorted by order)
+  # ============================================================
+
+  # --- order 0: inline env var prefix ---
+  - id: inline-env-var-prefix
+    order: 0
+    re2_regex: '^[A-Za-z_][A-Za-z0-9_]*=\S*\s+\S'
+    pattern_name: 'inline env var prefix (ENV=value command)'
+    remediation: "Use tool-native flags instead: 'git -C /path' not 'GIT_DIR=/path git'. Env prefixes bypass permission matching"
+    regex: '^[A-Za-z_][A-Za-z0-9_]*=\S*\s+\S'
+    reason: "Inline environment variable prefix bypasses permission matching"
+    alternative: "Use tool-native flags instead of env var prefixes"
+    examples:
+      - "GIT_DIR=/path git status"
+      - "LANG=C sort file.txt"
+      - "CC=gcc make"
+    should_not_match:
+      - "MY_VAR=hello"
+      - "export FOO=bar"
+    severity: high
+    tier2_validation: true
+    tier1_example: |
+      BAD: GIT_DIR=/path git status
+      GOOD: git -C /path status
+    relaxed: true
+    relaxed_date: "2026-03-30"
+    relaxed_reason: "Blanket env-prefix block removed; targeted path-deny covers security concern"
+
+  # --- order 10: subshell with cd ---
+  - id: subshell-cd
+    order: 10
+    re2_regex: '\(\s*cd\s+'
+    pattern_name: 'subshell with cd (cd in subshell)'
+    remediation: "Avoid cd entirely; use absolute paths or tool -C flags: e.g., 'git -C /path' not '(cd /path && git...)'"
+    regex: '\(\s*cd\s+'
+    reason: "Subshell with cd command"
+    alternative: "Avoid cd entirely; use absolute paths or tool -C flags"
+    examples:
+      - "(cd /tmp && pwd)"
+      - "(cd /repo && git push)"
+      - "( cd /dir && make build )"
+    should_not_match:
+      - "echo parenthetical"
+      - "git status"
+    severity: high
+    tier2_validation: true
+    tier1_example: |
+      BAD: (cd /repo && git push)
+      GOOD: git -C /repo push
+
+  # --- order 20: cd command ---
+  - id: cd-command
+    order: 20
+    re2_regex: '(^|\s)cd\s+'
+    pattern_name: 'cd command'
+    remediation: "Use absolute paths instead: e.g., 'go -C /path test' not 'cd /path && go test'"
+    regex: '(^|\s)cd\s+'
+    reason: "Using cd command"
+    alternative: "Use absolute paths or tool -C flags"
+    examples:
+      - "cd /repo && git push"
+      - "cd /dir && npm test"
+      - "cd ~/src && make build"
+      - "cd /repo; git push"
+    should_not_match:
+      - "abcd efg"
+      - "git -C /path status"
+      - "auto-cd /path"
+    severity: high
+    tier2_validation: true
+    tier1_example: |
+      BAD: cd /repo && git push
+      GOOD: git -C /repo push
+
+  # --- order 30: command chaining (&&) ---
+  - id: command-chaining
+    order: 30
+    re2_regex: '&&'
+    pattern_name: 'command chaining (&&)'
+    remediation: "Run commands sequentially with separate Bash calls, not '&&'"
+    regex: '&&'
+    reason: "Command chaining with &&"
+    alternative: "Make separate tool calls"
+    examples:
+      - "git add . && git commit -m 'msg'"
+      - "npm install && npm test"
+    should_not_match:
+      - "git status"
+      - "echo hello"
+    severity: high
+    tier2_validation: true
+    tier1_example: |
+      BAD: git add . && git commit -m 'msg'
+      GOOD: Make 2 sequential Bash calls:
+        1. Bash: git add .
+        2. Bash: git commit -m 'msg'
+    relaxed: true
+    relaxed_date: "2026-03-30"
+    relaxed_reason: "Blanket && block removed; cd-chaining still caught by cd-command pattern"
+
+  # --- order 40: error suppression (||) ---
+  - id: error-suppression-hook
+    order: 40
+    re2_regex: '\|\|'
+    pattern_name: 'error suppression (||)'
+    remediation: "Run commands sequentially with separate Bash calls, not '||'"
+    regex: '\|\|'
+    reason: "Error suppression with ||"
+    alternative: "Let errors show - they indicate real problems"
+    examples:
+      - "rm file.txt || true"
+      - "command || echo fallback"
+    should_not_match:
+      - "git status"
+      - "echo hello"
+    severity: medium
+    tier2_validation: false
+    relaxed: true
+    relaxed_date: "2026-03-30"
+    relaxed_reason: "Blanket || block removed to reduce friction"
+
+  # --- order 50: bash conditional ---
+  - id: bash-conditional
+    order: 50
+    re2_regex: '\b(if|elif|else|then|fi)(\s+|\b)'
+    pattern_name: 'bash conditional (if/elif/else/then/fi)'
+    remediation: "Use dedicated tools or separate Bash calls instead of bash conditionals"
+    regex: '\b(if|elif|else|then|fi)(\s+|\b)'
+    reason: "Using bash conditional constructs"
+    alternative: "Use dedicated tools or separate Bash calls"
+    examples:
+      - "if [ -f file.txt ]; then echo exists; fi"
+      - "if grep -q pattern file; then echo found; fi"
+    should_not_match:
+      - "git diff"
+      - "notify_user"
+    severity: high
+    tier2_validation: true
+    relaxed: true
+    relaxed_date: "2026-03-30"
+    relaxed_reason: "Blanket conditional block removed to reduce friction"
+
+  # --- order 70: while loop ---
+  - id: while-loop
+    order: 70
+    re2_regex: '(^|\s)while\s+'
+    pattern_name: 'while loop'
+    remediation: "Use dedicated tools or separate Bash calls instead of while loops"
+    regex: 'while\s+'
+    reason: "Using while loop"
+    alternative: "Make multiple parallel tool calls or conversational continuation"
+    examples:
+      - "while true; do check_status; sleep 300; done"
+      - "while read line; do echo $line; done"
+    should_not_match:
+      - "git status"
+      - "awhile ago"
+    severity: high
+    tier2_validation: true
+    tier1_example: |
+      BAD: while read line; do echo $line; done
+      GOOD: Use Read tool to get content, then process in conversation
+
+  # --- order 80: python one-liner ---
+  - id: python-oneliner
+    order: 80
+    re2_regex: '(^|\s)(python3?)\s+-c\b'
+    pattern_name: 'python one-liner (python3 -c / python -c)'
+    remediation: "Use the Write tool to create a .py file, then run it with Bash"
+    regex: 'python3?\s+-c\s+'
+    reason: "Python one-liner"
+    alternative: "Create /tmp/script.py, then run it"
+    examples:
+      - "python3 -c 'import sys; print(sys.version)'"
+      - "python -c 'print(2+2)'"
+    should_not_match:
+      - "python3 script.py"
+      - "python myscript.py"
+    severity: medium
+    tier2_validation: false
+
+  # --- order 90: python heredoc ---
+  - id: python-heredoc
+    order: 90
+    re2_regex: '(^|\s)(python3?)\s+<<'
+    pattern_name: 'python heredoc (python3 << / python <<)'
+    remediation: "Use the Write tool to create a .py file, then run it with Bash"
+    regex: '\b(python3?)\s+<<'
+    reason: "Python heredoc"
+    alternative: "Create /tmp/script.py, then run it"
+    examples:
+      - "python3 << 'EOF'"
+      - "python << EOF"
+    should_not_match:
+      - "python3 script.py"
+      - "python myscript.py"
+    severity: medium
+    tier2_validation: false
+
+  # --- order 100: command separator (;) ---
+  - id: command-separator
+    order: 100
+    re2_regex: ';'
+    pattern_name: 'command separator (;)'
+    remediation: "Run as separate Bash calls instead of chaining with ';'"
+    regex: ';'
+    reason: "Command chaining with semicolon"
+    alternative: "Make separate tool calls"
+    examples:
+      - "rm file.txt; echo 'Deleted'"
+      - "git add .; git status"
+    should_not_match:
+      - "git status"
+      - "echo hello"
+    severity: high
+    tier2_validation: true
+    tier1_example: |
+      BAD: git add .; git status
+      GOOD: Make 2 sequential Bash calls:
+        1. Bash: git add .
+        2. Bash: git status
+
+  # --- order 110: command substitution $() ---
+  - id: command-substitution
+    order: 110
+    re2_regex: '\$\('
+    pattern_name: 'command substitution $()'
+    remediation: "Use --prompt-file flag instead of command substitution in arguments"
+    regex: '\$\('
+    reason: "Command substitution (complex bash)"
+    alternative: "Use --prompt-file flag or separate tool calls"
+    examples:
+      - "agm send msg --prompt \"$(cat file)\""
+      - "result=$(git log)"
+    should_not_match:
+      - "git status"
+      - "echo hello"
+      - "go build -C /path ./..."
+    severity: high
+    tier2_validation: true
+
+  # --- order 120: command substitution backticks ---
+  - id: backtick-substitution
+    order: 120
+    re2_regex: '`'
+    pattern_name: 'command substitution backticks'
+    remediation: "Run commands separately instead of using backtick substitution"
+    regex: '`'
+    reason: "Command substitution using backticks"
+    alternative: "Run commands separately"
+    examples:
+      - "echo `date`"
+      - "result=`git log`"
+    should_not_match:
+      - "git status"
+      - "echo hello"
+    severity: low
+    tier2_validation: false
+    relaxed: true
+    relaxed_date: "2026-03-30"
+    relaxed_reason: "Companion to command-substitution relaxation"
+
+  # --- order 130: bash test ---
+  - id: bash-test
+    order: 130
+    re2_regex: '(^test\s+|\[\[?\s*)'
+    pattern_name: 'bash test ([/[[/test)'
+    remediation: "Use the Grep tool for searching, not bash test/[/[[ expressions"
+    regex: '(^test\s+|\[\[?\s*)'
+    reason: "Using bash test/[/[[ expressions"
+    alternative: "Use Grep tool for searching"
+    examples:
+      - "test -f file.txt"
+      - "[[ -d /path ]]"
+      - "[ -f file.txt ]"
+    should_not_match:
+      - "go test ./..."
+      - "npm test"
+      - "pytest tests/"
+    severity: medium
+    tier2_validation: true
+
+  # --- order 140: combined redirection (&>>) ---
+  - id: combined-redirect-append
+    order: 140
+    re2_regex: '&>>'
+    pattern_name: 'combined redirection (&>/&>>)'
+    remediation: "Use the Write tool instead of redirection operators"
+    regex: '&>>'
+    reason: "Combined stderr+stdout append redirection"
+    alternative: "Use Write tool"
+    examples:
+      - "command &>> output.log"
+    should_not_match:
+      - "echo hello"
+      - "git status"
+    severity: high
+    tier2_validation: true
+    relaxed: true
+    relaxed_date: "2026-03-30"
+    relaxed_reason: "Replaced by targeted redirect-system-path pattern"
+
+  # --- order 141: redirection to system path ---
+  - id: redirect-system-path
+    order: 141
+    re2_regex: '([^2&]|^)>\s*/(etc|sys|proc|boot|dev|usr|var|sbin)/'
+    pattern_name: 'redirection to system path'
+    remediation: "Do not redirect output to system directories. Write to project paths or /tmp/ instead."
+    regex: '([^2&]|^)>\s*/(etc|sys|proc|boot|dev|usr|var|sbin)/'
+    reason: "Redirecting output to system directories is dangerous"
+    alternative: "Write to project directories or /tmp/"
+    examples:
+      - "echo 'config' > /etc/hosts"
+      - "cmd > /var/log/custom.log"
+      - "cmd >> /usr/local/bin/script"
+    should_not_match:
+      - "echo hello > output.txt"
+      - "cmd > /tmp/output.log"
+      - "cmd > ~/file.txt"
+      - "git status"
+      - "cmd 2>/dev/null"
+      - "cmd &>/dev/null"
+    severity: high
+    tier2_validation: true
+
+  # --- order 150: combined redirection (&>) ---
+  - id: combined-redirect
+    order: 150
+    re2_regex: '&>'
+    pattern_name: 'combined redirection (&>/&>>)'
+    remediation: "Use the Write tool instead of redirection operators"
+    regex: '&>'
+    reason: "Combined stderr+stdout redirection"
+    alternative: "Use Write tool"
+    examples:
+      - "command &> output.log"
+    should_not_match:
+      - "echo hello"
+      - "git status"
+    severity: high
+    tier2_validation: true
+    relaxed: true
+    relaxed_date: "2026-03-30"
+    relaxed_reason: "Replaced by targeted redirect-system-path pattern"
+
+  # --- order 160: triple redirect (>>>) ---
+  - id: triple-redirect
+    order: 160
+    re2_regex: '>>>'
+    pattern_name: 'output redirection (>)'
+    remediation: "Use the Write tool instead of redirection operators"
+    regex: '>>>'
+    reason: "Triple redirect operator"
+    alternative: "Use Write tool"
+    examples:
+      - "command >>> file.txt"
+    should_not_match:
+      - "echo hello"
+      - "git status"
+    severity: high
+    tier2_validation: true
+    relaxed: true
+    relaxed_date: "2026-03-30"
+    relaxed_reason: "Replaced by targeted redirect-system-path pattern"
+
+  # --- order 170: output redirection (>>) ---
+  - id: output-redirect-append
+    order: 170
+    re2_regex: '[^2]>>|^>>'
+    pattern_name: 'output redirection (>)'
+    remediation: "Use the Write tool instead of redirection operators"
+    regex: '[^2]>>|^>>'
+    reason: "Append output redirection"
+    alternative: "Use Write tool"
+    examples:
+      - "echo text >> file.txt"
+      - ">> file.txt"
+    should_not_match:
+      - "2>> errors.log"
+      - "echo hello"
+    severity: high
+    tier2_validation: true
+    relaxed: true
+    relaxed_date: "2026-03-30"
+    relaxed_reason: "Replaced by targeted redirect-system-path pattern"
+
+  # --- order 180: output redirection (>) ---
+  - id: output-redirect
+    order: 180
+    re2_regex: '[^2&>]>|^>'
+    pattern_name: 'output redirection (>)'
+    remediation: "Use the Write tool instead of redirection operators"
+    regex: '[^2&>]>|^>'
+    reason: "Output redirection"
+    alternative: "Use Write tool"
+    examples:
+      - "command > output.txt"
+      - "> file.txt"
+    should_not_match:
+      - "2> errors.log"
+      - "&> combined.log"
+    severity: high
+    tier2_validation: true
+    relaxed: true
+    relaxed_date: "2026-03-30"
+    relaxed_reason: "Replaced by targeted redirect-system-path pattern"
+
+  # --- order 190: heredoc (<<) ---
+  - id: heredoc
+    order: 190
+    re2_regex: '[^<]<<([^<]|$)|^<<([^<]|$)'
+    pattern_name: 'heredoc (<<)'
+    remediation: "Use the Write tool instead of redirection operators"
+    regex: '[^<]<<([^<]|$)|^<<([^<]|$)'
+    reason: "Heredoc redirection"
+    alternative: "Use Write tool"
+    examples:
+      - "cat << EOF"
+      - "command <<END"
+    should_not_match:
+      - "echo hello"
+      - "<<<input"
+    severity: high
+    tier2_validation: true
+    relaxed: true
+    relaxed_date: "2026-03-30"
+    relaxed_reason: "Replaced by targeted redirect-system-path pattern"
+
+  # --- order 200: file operations ---
+  - id: file-operations
+    order: 200
+    re2_regex: '\b(cat|cp|mv|rm|touch)\b'
+    pattern_name: 'file operations (cat/cp/mv/rm/touch)'
+    remediation: "Use Read/Write/Edit tools: Read(cat), Write(cp/touch), Edit(mv content)"
+    regex: '\b(cat|cp|mv|rm|touch)\b'
+    reason: "Using shell file operation commands"
+    alternative: "Use Read/Write/Edit tools"
+    examples:
+      - "cat file.txt"
+      - "cp file.txt dest/"
+      - "mv file.txt dest/"
+      - "rm file.txt"
+      - "touch newfile.txt"
+    should_not_match:
+      - "git status"
+      - "echo hello"
+      - "go test ./..."
+    severity: high
+    tier2_validation: true
+    tier1_example: |
+      BAD: cat file.txt
+      GOOD: Read(file_path='file.txt')
+    relaxed: true
+    relaxed_date: "2026-03-30"
+    relaxed_reason: "Replaced by targeted rm-recursive pattern; cat/cp/mv/touch unblocked"
+
+  # --- order 201: recursive rm ---
+  - id: rm-recursive
+    order: 201
+    re2_regex: '(^|\s)rm\s+(-[a-zA-Z]*r[a-zA-Z]*)\b'
+    pattern_name: 'recursive rm (rm -r / rm -rf)'
+    remediation: "Use git rm for tracked files, or ask the user to confirm directory deletion."
+    regex: '\brm\s+(-[a-zA-Z]*r[a-zA-Z]*)\b'
+    reason: "Recursive rm can destroy directory trees"
+    alternative: "Remove files individually or ask user to confirm"
+    examples:
+      - "rm -rf /path/to/dir"
+      - "rm -r directory/"
+      - "rm -fr /tmp/build"
+      - "rm -rfi /path"
+    should_not_match:
+      - "rm file.txt"
+      - "rm -f file.txt"
+      - "rm file1.go file2.go"
+      - "git status"
+      - "git rm file.txt"
+    severity: high
+    tier2_validation: true
+    tier1_example: |
+      BAD: rm -rf /path/to/dir
+      GOOD: Remove files individually: rm file1 file2
+
+  # --- order 210: text processing ---
+  - id: text-processing
+    order: 210
+    re2_regex: '\b(ls|grep|sed|awk|head|tail|wc|cut|sort|uniq)\b'
+    pattern_name: 'text processing (ls/grep/sed/awk/head/tail/wc/cut/sort/uniq)'
+    remediation: "Use Grep tool (for grep), Glob tool (for ls/find), Read tool (for head/tail/cat)"
+    regex: '\b(ls|grep|sed|awk|head|tail|wc|cut|sort|uniq)\b'
+    reason: "Using shell text processing commands"
+    alternative: "Use Grep/Glob/Read tools"
+    examples:
+      - "ls /dir"
+      - "grep 'pattern' file.txt"
+      - "sed 's/foo/bar/' file.txt"
+      - "awk '{print $1}' file.txt"
+      - "head -n 20 file.txt"
+      - "tail -n 20 file.txt"
+      - "wc -l file.txt"
+    should_not_match:
+      - "git status"
+      - "go test ./..."
+      - "npm install"
+    severity: high
+    tier2_validation: true
+    tier1_example: |
+      BAD: grep 'TODO' file.txt
+      GOOD: Grep(pattern='TODO', path='file.txt', output_mode='content')
+    relaxed: true
+    relaxed_date: "2026-03-30"
+    relaxed_reason: "Replaced by targeted sed-in-place pattern; read-only tools unblocked"
+
+  # --- order 211: sed in-place ---
+  - id: sed-in-place
+    order: 211
+    re2_regex: '(^|\s)sed\s+(-[a-zA-Z]*i|--in-place)\b'
+    pattern_name: 'sed in-place edit (sed -i)'
+    remediation: "Use the Edit tool for in-place file modifications instead of sed -i"
+    regex: '\bsed\s+(-[a-zA-Z]*i|--in-place)\b'
+    reason: "Using sed -i modifies files in place"
+    alternative: "Use Edit tool: Edit(file_path='...', old_string='...', new_string='...')"
+    examples:
+      - "sed -i 's/foo/bar/' file.txt"
+      - "sed -i.bak 's/old/new/g' config.yaml"
+      - "sed --in-place 's/a/b/' file"
+      - "sed -ni '/pattern/p' file.txt"
+    should_not_match:
+      - "sed 's/foo/bar/' file.txt"
+      - "sed -n '/pattern/p' file.txt"
+      - "sed -e 's/foo/bar/' file.txt"
+      - "go test ./..."
+      - "git status"
+    severity: high
+    tier2_validation: true
+    tier1_example: |
+      BAD: sed -i 's/foo/bar/' file.txt
+      GOOD: Edit(file_path='file.txt', old_string='foo', new_string='bar')
+
+  # --- order 220: find command ---
+  - id: find-file-search
+    order: 220
+    re2_regex: '(^|\s)find\s+'
+    pattern_name: 'find command'
+    remediation: "Use the Glob tool instead of find"
+    regex: 'find\s+'
+    reason: "Using bash find"
+    alternative: "Use Glob tool: Glob(pattern='**/*.py')"
+    examples:
+      - "find . -name '*.py'"
+      - "find /dir -type f -name 'test_*'"
+    should_not_match:
+      - "git status"
+      - "echo findings"
+      - "path-find /dir"
+    severity: high
+    tier2_validation: true
+    tier1_example: |
+      BAD: find . -name '*.py'
+      GOOD: Glob(pattern='**/*.py')
+
+  # --- order 225: git checkout main/master (worktree safety) ---
+  - id: git-checkout-main
+    order: 225
+    re2_regex: '\bgit\s+(-C\s+\S+\s+)?checkout\s+(main|master)\b'
+    pattern_name: 'git checkout main/master (worktree safety)'
+    remediation: "Do not checkout main in worktrees. Use git -C for read-only operations on main."
+    regex: '\bgit\s+(-C\s+\S+\s+)?checkout\s+(main|master)\b'
+    reason: "Checking out main/master in worktrees is dangerous"
+    alternative: "Use git -C for read-only operations on main"
+    examples:
+      - "git checkout main"
+      - "git checkout master"
+      - "git -C /repo checkout main"
+    should_not_match:
+      - "git checkout -b feature"
+      - "git checkout -- file.txt"
+      - "git checkout feature-branch"
+      - "git status"
+    severity: high
+    tier2_validation: true
+
+  # --- order 230: git switch ---
+  - id: git-switch
+    order: 230
+    re2_regex: '\bgit\s+(-C\s+\S+\s+)?switch\b'
+    pattern_name: 'git switch (branch-level operation)'
+    remediation: "Do not checkout main in worktrees. Use git -C for read-only operations on main."
+    regex: '\bgit\s+(-C\s+\S+\s+)?switch\b'
+    reason: "Using git switch for branch operations"
+    alternative: "Use 'git checkout -b' for new branches, or ask the user"
+    examples:
+      - "git switch main"
+      - "git -C /repo switch feature"
+    should_not_match:
+      - "git checkout -b feature"
+      - "git status"
+    severity: high
+    tier2_validation: true
+
+  # --- order 240: git stash ---
+  - id: git-stash
+    order: 240
+    re2_regex: '\bgit\s+(-C\s+\S+\s+)?stash\b'
+    pattern_name: 'git stash (contaminates shared state)'
+    remediation: "Avoid git stash in shared trees; use a worktree instead"
+    regex: '\bgit\s+(-C\s+\S+\s+)?stash\b'
+    reason: "Using git stash contaminates shared state"
+    alternative: "Use a worktree instead of stash"
+    examples:
+      - "git stash"
+      - "git -C /repo stash pop"
+    should_not_match:
+      - "git status"
+      - "git commit -m 'msg'"
+    severity: high
+    tier2_validation: true
+
+  # --- order 250: git add broad ---
+  - id: git-add-broad
+    order: 250
+    re2_regex: '\bgit\s+(-C\s+\S+\s+)?add\s+(\.|--all|--update|-A|-u)(\s|$)'
+    pattern_name: 'git add (broad staging: . -A --all -u --update)'
+    remediation: "Use 'git add file1.go file2.go' with specific files instead of broad staging (. -A --all)"
+    regex: '\bgit\s+(-C\s+\S+\s+)?add\s+(\.|--all|--update|-A|-u)(\s|$)'
+    reason: "Broad git staging risks including unintended files"
+    alternative: "Use 'git add' with specific file names"
+    examples:
+      - "git add ."
+      - "git add --all"
+      - "git add -A"
+      - "git -C /repo add --update"
+    should_not_match:
+      - "git add file1.go file2.go"
+      - "git add src/main.py"
+    severity: high
+    tier2_validation: true
+
+  # --- order 260: git --no-verify ---
+  - id: git-no-verify
+    order: 260
+    re2_regex: '\bgit\s+[^|&;]*?(--no-verify\b|-n(\s+[^0-9]|\s*$))'
+    pattern_name: 'git --no-verify flag (hook bypass)'
+    remediation: "Do not skip verification. If the findings are real, fix them. If the verification has a bug, fix and redeploy it. If verification is blocking legitimate work, use AskUserQuestion to surface the issue and propose a fix for the verification — not --no-verify."
+    regex: '\bgit\s+[^|&;]*?(--no-verify\b|-n(\s+[^0-9]|\s*$))'
+    reason: "Bypassing git hooks with --no-verify"
+    alternative: "Fix the underlying issue instead of bypassing hooks"
+    examples:
+      - "git commit --no-verify -m 'msg'"
+      - "git push --no-verify"
+    should_not_match:
+      - "git commit -m 'msg'"
+      - "git push origin main"
+    severity: high
+    tier2_validation: true
+
+  # --- order 270: stat command ---
+  - id: stat-command
+    order: 270
+    re2_regex: '(^|\s)stat(\s|$)'
+    pattern_name: 'stat (causes shell expansion permission prompt)'
+    remediation: "Use Read tool to check file existence/contents, or TaskGet/TaskOutput for background task polling"
+    regex: '(^|\s)stat(\s|$)'
+    reason: "Using stat causes shell expansion permission prompts"
+    alternative: "Use Read tool or Glob tool instead of stat"
+    examples:
+      - "stat file.txt"
+      - "stat -c '%s %n' file.txt"
+    should_not_match:
+      - "git status"
+      - "thermostat check"
+    severity: medium
+    tier2_validation: true
+    tier1_example: |
+      BAD: stat -c '%s %n' /tmp/output.txt
+      GOOD: Read(file_path='/tmp/output.txt') or Glob(pattern='output.txt', path='/tmp/')
+
+  # --- order 280: checksum commands ---
+  - id: checksum-commands
+    order: 280
+    re2_regex: '\b(sha256sum|sha1sum|sha512sum|md5sum|cksum)\b'
+    pattern_name: 'checksum (sha256sum/sha1sum/md5sum/cksum)'
+    remediation: "Use Read tool to read file contents for verification; for wayfinder phase checks use the wayfinder CLI"
+    regex: '\b(sha256sum|sha1sum|sha512sum|md5sum|cksum)\b'
+    reason: "Using checksum commands"
+    alternative: "Use Read tool to read file contents for verification"
+    examples:
+      - "sha256sum file.txt"
+      - "md5sum binary.tar.gz"
+      - "cksum archive.zip"
+    should_not_match:
+      - "git status"
+      - "echo hello"
+    severity: medium
+    tier2_validation: false
+
+  # --- order 290: AGM_SKIP_TEST_GATE bypass ---
+  - id: agm-skip-test-gate
+    order: 290
+    re2_regex: 'AGM_SKIP_TEST_GATE'
+    pattern_name: 'AGM_SKIP_TEST_GATE (test gate bypass)'
+    remediation: "Do not bypass the test gate. Fix failing tests instead. Use AskUserQuestion to escalate if blocked."
+    regex: 'AGM_SKIP_TEST_GATE'
+    reason: "Bypassing test enforcement gate"
+    alternative: "Fix failing tests instead of bypassing the test gate"
+    examples:
+      - "export AGM_SKIP_TEST_GATE=1"
+      - "AGM_SKIP_TEST_GATE=1"
+    should_not_match:
+      - "git commit -m 'msg'"
+      - "go test ./..."
+      - "echo test gate"
+    severity: high
+    tier2_validation: false
+
+  # --- order 300: sensitive dotdir access ---
+  - id: sensitive-dotdir-access
+    order: 300
+    re2_regex: '(~|/home/\w+)/\.(ssh|aws|gnupg|gpg)/'
+    pattern_name: 'sensitive dotdir access (~/.ssh, ~/.aws, ~/.gnupg)'
+    remediation: "Do not access sensitive credential directories. Ask the user to perform credential operations manually."
+    regex: '(~|/home/\w+)/\.(ssh|aws|gnupg|gpg)/'
+    reason: "Accessing sensitive credential directories"
+    alternative: "Ask the user to handle credential operations"
+    examples:
+      - "ls ~/.ssh/id_rsa"
+      - "cat ~/.aws/credentials"
+      - "cp ~/.gnupg/pubring.kbx /tmp/"
+      - "chmod 600 ~/.ssh/config"
+      - "cat ~/.gpg/trustdb.gpg"
+    should_not_match:
+      - "git status"
+      - "ls ~/.config/settings.json"
+      - "cat ~/.claude/CLAUDE.md"
+      - "ssh user@host"
+    severity: high
+    tier2_validation: true
+
+  # --- order 310: ls (standalone) ---
+  - id: ls-standalone
+    order: 310
+    re2_regex: '(^|\s)ls\b'
+    pattern_name: 'ls (standalone)'
+    remediation: "Use Glob tool (for ls/find), Read tool (for head/tail/cat)"
+    examples:
+      - "ls"
+      - "ls -la /path"
+    should_not_match:
+      - "lsblk -f"
+      - "git status"
+    severity: high
+    tier2_validation: true
+
+  # --- order 320: grep/rg (standalone) ---
+  - id: grep-rg-standalone
+    order: 320
+    re2_regex: '(^|\s)(grep|rg)\b'
+    pattern_name: 'grep/rg (standalone)'
+    remediation: "Use Grep tool (for grep), Glob tool (for find)"
+    examples:
+      - "grep -l 'pattern' /path/*.md"
+      - "rg pattern file"
+    should_not_match:
+      - "mygrep pattern file"
+      - "git status"
+      - "ast-grep -p 'pattern'"
+      - "ast-grep --lang go 'func main'"
+    severity: high
+    tier2_validation: true
+
+  # --- order 330: cat (standalone) ---
+  - id: cat-standalone
+    order: 330
+    re2_regex: '(^|\s)cat\b'
+    pattern_name: 'cat (standalone)'
+    remediation: "Use Read tool"
+    examples:
+      - "cat file.txt"
+      - "cat ~/.claude/CLAUDE.md"
+    should_not_match:
+      - "git status"
+      - "concatenate words"
+    severity: high
+    tier2_validation: true
+
+  # --- order 340: head/tail (standalone) ---
+  - id: head-tail-standalone
+    order: 340
+    re2_regex: '(^|\s)(head|tail)\b'
+    pattern_name: 'head/tail (standalone)'
+    remediation: "Use Read tool"
+    examples:
+      - "head -n 20 file.txt"
+      - "tail -n +8 file.txt"
+    should_not_match:
+      - "healhead start"
+      - "git status"
+    severity: high
+    tier2_validation: true
+
+  # --- order 350: sed (standalone) ---
+  - id: sed-standalone
+    order: 350
+    re2_regex: '(^|\s)sed\b'
+    pattern_name: 'sed (standalone)'
+    remediation: "Use Read tool with offset/limit parameters, or Edit tool for modifications"
+    examples:
+      - "sed 's/foo/bar/' file.txt"
+      - "sed -n '/pattern/p' file.txt"
+    should_not_match:
+      - "git status"
+      - "go test ./..."
+    severity: high
+    tier2_validation: true
+
+  # --- order 360: awk (standalone) ---
+  - id: awk-standalone
+    order: 360
+    re2_regex: '(^|\s)awk\b'
+    pattern_name: 'awk (standalone)'
+    remediation: "Use Edit tool"
+    examples:
+      - "awk '{print $1}' file.txt"
+    should_not_match:
+      - "awkward command"
+      - "git status"
+    severity: high
+    tier2_validation: true
+
+  # --- order 370: echo/printf (standalone) ---
+  - id: echo-printf-standalone
+    order: 370
+    re2_regex: '(^|\s)(echo|printf)\b'
+    pattern_name: 'echo/printf (standalone)'
+    remediation: "Use Write tool to create files"
+    examples:
+      - "echo hello"
+      - "printf 'hello'"
+    should_not_match:
+      - "git status"
+      - "go test ./..."
+    severity: high
+    tier2_validation: true
+
+  # --- order 380: touch (standalone) ---
+  - id: touch-standalone
+    order: 380
+    re2_regex: '(^|\s)touch\b'
+    pattern_name: 'touch (standalone)'
+    remediation: "Use Write tool to create files"
+    examples:
+      - "touch newfile.txt"
+      - "touch /tmp/marker"
+    should_not_match:
+      - "git status"
+      - "touchstone test"
+    severity: high
+    tier2_validation: true
+
+  # --- order 390: wc (standalone) ---
+  - id: wc-standalone
+    order: 390
+    re2_regex: '(^|\s)wc\b'
+    pattern_name: 'wc (standalone)'
+    remediation: "Use Read tool and count in conversation"
+    examples:
+      - "wc -l file.txt"
+      - "wc -w document.txt"
+    should_not_match:
+      - "git status"
+      - "go test ./..."
+    severity: high
+    tier2_validation: true
+
+  # --- order 400: sort (standalone) ---
+  - id: sort-standalone
+    order: 400
+    re2_regex: '(^|\s)sort\b'
+    pattern_name: 'sort (standalone)'
+    remediation: "Use Read tool and sort in conversation"
+    examples:
+      - "sort file.txt"
+      - "sort -u names.txt"
+    should_not_match:
+      - "git status"
+      - "go test ./..."
+    severity: high
+    tier2_validation: true
+
+  # --- order 410: mkdir (standalone) ---
+  - id: mkdir-standalone
+    order: 410
+    re2_regex: '(^|\s)mkdir\b'
+    pattern_name: 'mkdir (standalone)'
+    remediation: "Use Write tool (auto-creates parent dirs)"
+    examples:
+      - "mkdir -p /path/to/dir"
+      - "mkdir newdir"
+    should_not_match:
+      - "git status"
+      - "go test ./..."
+    severity: high
+    tier2_validation: true
+
+  # --- order 420: cp (standalone) ---
+  - id: cp-standalone
+    order: 420
+    re2_regex: '(^|\s)cp\b'
+    pattern_name: 'cp (standalone)'
+    remediation: "Use Read tool to read source, then Write tool to create dest"
+    examples:
+      - "cp file.txt dest/"
+      - "cp -r src/ dest/"
+    should_not_match:
+      - "git status"
+      - "go test ./..."
+    severity: high
+    tier2_validation: true
+
+  # --- order 430: mv (standalone) ---
+  - id: mv-standalone
+    order: 430
+    re2_regex: '(^|\s)mv\b'
+    pattern_name: 'mv (standalone)'
+    remediation: "Use Read + Write tools, then git mv for tracked files"
+    examples:
+      - "mv file.txt dest/"
+      - "mv old.go new.go"
+    should_not_match:
+      - "git status"
+      - "go test ./..."
+    severity: high
+    tier2_validation: true
+
+  # --- order 440: cut (standalone) ---
+  - id: cut-standalone
+    order: 440
+    re2_regex: '(^|\s)cut\b'
+    pattern_name: 'cut (standalone)'
+    remediation: "Use Read tool and parse in conversation"
+    examples:
+      - "cut -d: -f1 /etc/passwd"
+      - "cut -f2 data.tsv"
+    should_not_match:
+      - "git status"
+      - "shortcut link"
+    severity: high
+    tier2_validation: true
+
+  # --- order 450: uniq (standalone) ---
+  - id: uniq-standalone
+    order: 450
+    re2_regex: '(^|\s)uniq\b'
+    pattern_name: 'uniq (standalone)'
+    remediation: "Use Read tool and deduplicate in conversation"
+    examples:
+      - "uniq file.txt"
+      - "uniq -c sorted.txt"
+    should_not_match:
+      - "git status"
+      - "unique identifier"
+    severity: high
+    tier2_validation: true
+
+  # --- order 460: tee (standalone) ---
+  - id: tee-standalone
+    order: 460
+    re2_regex: '(^|\s)tee\b'
+    pattern_name: 'tee (standalone)'
+    remediation: "Use Read + Write tools"
+    examples:
+      - "tee output.txt"
+      - "command | tee log.txt"
+    should_not_match:
+      - "git status"
+      - "teeming with"
+    severity: high
+    tier2_validation: true
+
+  # --- order 470: rm (standalone) ---
+  - id: rm-standalone
+    order: 470
+    re2_regex: '(^|\s)rm\b'
+    pattern_name: 'rm (standalone)'
+    remediation: "Use git rm for tracked files, or ask user to confirm file deletion"
+    examples:
+      - "rm file.txt"
+      - "rm -f temp.log"
+    should_not_match:
+      - "git status"
+      - "git rm file.txt"
+    severity: high
+    tier2_validation: true

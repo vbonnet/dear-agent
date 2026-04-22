@@ -1,0 +1,11 @@
+#!/bin/bash
+# pre-merge-commit hook: Enforce that Go code changes include test changes.
+# See test-gate-common.sh for shared logic.
+
+set -euo pipefail
+
+HOOK_DIR="$(dirname "$0")"
+source "$HOOK_DIR/test-gate-common.sh"
+
+# Get files changed in the merge commit
+git diff --cached --name-only --diff-filter=ACMR | check_test_gate "pre-merge-commit"

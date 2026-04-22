@@ -1,0 +1,50 @@
+{
+  "SchemaVersion": "2",
+  "SessionID": "test-session-002",
+  "Name": "test-resumed-session",
+  "ParentSessionID": null,
+  "State": "",
+  "StateUpdatedAt": "0001-01-01T00:00:00Z",
+  "StateSource": "",
+  "CreatedAt": "2026-02-19T14:30:00Z",
+  "UpdatedAt": "2026-02-20T10:15:00Z",
+  "Lifecycle": "",
+  "Workspace": "acme",
+  "Context": {
+    "Project": "~/src/resumed-project",
+    "Purpose": "Testing resumed session manifest",
+    "Tags": [
+      "test",
+      "golden",
+      "resumed"
+    ],
+    "Notes": "Session resumed after stopping"
+  },
+  "Claude": {
+    "UUID": "claude-uuid-67890",
+    "PreviousUUID": ""
+  },
+  "Tmux": {
+    "SessionName": "test-resumed-session-tmux"
+  },
+  "OpenCode": null,
+  "Harness": "claude-code",
+  "Model": "",
+  "EngramMetadata": null,
+  "ContextUsage": null,
+  "PermissionMode": "",
+  "PermissionModeUpdatedAt": null,
+  "PermissionModeSource": "",
+  "IsTest": false,
+  "Sandbox": null,
+  "WorkingDirectory": "",
+  "LastKnownCost": 0,
+  "LastKnownModel": "",
+  "LastKnownModelAt": "0001-01-01T00:00:00Z",
+  "Disposable": false,
+  "DisposableTTL": "",
+  "Monitors": null,
+  "WorkflowPhase": "",
+  "WorkflowPhaseUpdatedAt": null,
+  "CostTracking": null
+}

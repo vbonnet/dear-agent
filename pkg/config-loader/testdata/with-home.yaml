@@ -1,0 +1,3 @@
+name: "test-app"
+log_path: "~/logs/app.log"
+data_dir: "~/.local/share/app"

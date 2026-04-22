@@ -1,0 +1,30 @@
+{
+  "description": "Claude agent - successful session creation",
+  "agent": "claude",
+  "operation": "CreateSession",
+  "request": {
+    "context": {
+      "Name": "test-session",
+      "WorkingDirectory": "~/project",
+      "Project": "ai-tools",
+      "AuthorizedDirs": [
+        "~/project",
+        "~/.config"
+      ],
+      "Environment": {
+        "TERM": "xterm-256color"
+      },
+      "WorkflowName": ""
+    }
+  },
+  "response": {
+    "success": true,
+    "sessionID": "550e8400-e29b-41d4-a716-446655440000",
+    "error": null
+  },
+  "metadata": {
+    "timestamp": "2026-02-20T10:00:00Z",
+    "model": "claude-sonnet-4.5",
+    "api_version": "2023-06-01"
+  }
+}

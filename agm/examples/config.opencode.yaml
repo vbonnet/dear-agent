@@ -1,0 +1,129 @@
+# AGM Configuration Example - OpenCode SSE Adapter
+# Location: ~/.config/agm/config.yaml
+#
+# This example demonstrates OpenCode SSE adapter configuration for multi-agent
+# integration. See MULTI-AGENT-INTEGRATION-SPEC.md for full details.
+
+# ============================================================================
+# MULTI-AGENT ADAPTERS (New in Phase 1)
+# ============================================================================
+adapters:
+  # OpenCode SSE Adapter - Real-time event streaming from OpenCode server
+  opencode:
+    # Enable OpenCode SSE adapter (default: false)
+    # When enabled, AGM subscribes to OpenCode's SSE /event endpoint for
+    # real-time state detection instead of tmux screen scraping
+    enabled: true
+
+    # OpenCode server URL (default: http://localhost:4096)
+    # This is the URL of the headless OpenCode server started with:
+    #   opencode serve --port 4096
+    # Environment override: OPENCODE_SERVER_URL
+    server_url: "http://localhost:4096"
+
+    # Auto-reconnect configuration
+    reconnect:
+      # Initial delay before first reconnect attempt (default: 1s)
+      initial_delay: 1s
+
+      # Maximum delay between reconnect attempts (default: 30s)
+      # Delay uses exponential backoff: 1s → 2s → 4s → 8s → 16s → 30s
+      max_delay: 30s
+
+      # Backoff multiplier (default: 2)
+      # Each failed attempt multiplies delay by this value
+      multiplier: 2
+
+    # Fallback to tmux scraping if SSE fails (default: true)
+    # If true and SSE connection fails, Astrocyte will monitor via tmux
+    fallback_to_tmux: true
+
+  # Claude Hooks Adapter - HTTP webhooks for PreToolUse (Phase 3, optional)
+  claude_hooks:
+    # Enable Claude webhook adapter (default: false)
+    # Not implemented yet - deferred to Phase 3
+    enabled: false
+
+    # Local HTTP server address for receiving webhooks
+    listen_addr: "127.0.0.1:14321"
+
+  # Gemini Hooks Adapter - BeforeTool hook via Unix socket (Phase 4, optional)
+  gemini_hooks:
+    # Enable Gemini hook adapter (default: false)
+    # Not implemented yet - deferred to Phase 4
+    enabled: false
+
+    # Unix socket path for hook communication
+    socket_path: "/tmp/agm-gemini-hook.sock"
+
+# ============================================================================
+# STANDARD AGM CONFIGURATION
+# ============================================================================
+
+# Session storage directory
+sessions_dir: ~/sessions
+
+# Logging
+log_level: info
+log_file: ""
+
+# Storage mode (dotfile or centralized)
+storage:
+  mode: dotfile
+  workspace: ""
+  relative_path: .agm
+
+# Timeouts
+timeout:
+  tmux_commands: 5s
+  enabled: true
+
+# Locking
+lock:
+  enabled: true
+  path: /tmp/agm-{UID}/agm.lock
+
+# Health checks
+health_check:
+  enabled: true
+  cache_duration: 5s
+  probe_timeout: 2s
+
+# ============================================================================
+# USAGE EXAMPLES
+# ============================================================================
+#
+# 1. Create OpenCode session:
+#    $ opencode serve --port 4096  # In terminal 1
+#    $ agm session new my-session --agent opencode -C /path/to/project
+#
+# 2. State detection:
+#    - OpenCode events stream via SSE to AGM
+#    - State changes published to EventBus
+#    - State file updated: ~/.agm/sessions/my-session/state
+#    - Notifications triggered automatically
+#
+# 3. Verify adapter health:
+#    $ agm status
+#    Adapters:
+#      opencode-sse: ✓ Connected (last event: 2s ago)
+#
+# 4. Debugging:
+#    - Check logs for SSE connection status
+#    - Verify OpenCode server is running: curl http://localhost:4096/health
+#    - Test SSE endpoint: curl -N http://localhost:4096/event
+#
+# ============================================================================
+# ENVIRONMENT OVERRIDES
+# ============================================================================
+#
+# - OPENCODE_SERVER_URL: Override server_url
+# - OPENCODE_ADAPTER_ENABLED: Override enabled (true/false/1/0)
+# - AGM_SESSIONS_DIR: Override sessions directory
+# - AGM_LOG_LEVEL: Override log level
+#
+# Example:
+#   export OPENCODE_SERVER_URL="http://localhost:8080"
+#   export OPENCODE_ADAPTER_ENABLED="true"
+#   agm daemon start
+#

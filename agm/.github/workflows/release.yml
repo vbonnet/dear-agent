@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Run tests
+        run: |
+          go test -v ./test/unit/...
+          go test -v -tags=integration ./test/integration/...
+
+      - name: Build binaries
+        run: |
+          # Build for multiple platforms
+          GOOS=linux GOARCH=amd64 go build -o agm-linux-amd64 ./cmd/agm
+          GOOS=linux GOARCH=arm64 go build -o agm-linux-arm64 ./cmd/agm
+          GOOS=darwin GOARCH=amd64 go build -o agm-darwin-amd64 ./cmd/agm
+          GOOS=darwin GOARCH=arm64 go build -o agm-darwin-arm64 ./cmd/agm
+          GOOS=windows GOARCH=amd64 go build -o agm-windows-amd64.exe ./cmd/agm
+
+      - name: Create checksums
+        run: |
+          sha256sum agm-* > checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            agm-linux-amd64
+            agm-linux-arm64
+            agm-darwin-amd64
+            agm-darwin-arm64
+            agm-windows-amd64.exe
+            checksums.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false

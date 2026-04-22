@@ -1,0 +1,17 @@
+schema_version: "2.0"
+session_id: mock-missing-tmux-001
+name: missing-tmux-session
+created_at: 2024-02-19T10:00:00Z
+updated_at: 2024-02-19T12:00:00Z
+lifecycle: ""
+workspace: oss
+context:
+  project: ./no-tmux
+  purpose: Session with missing tmux session
+  tags:
+    - testing
+    - missing-tmux
+claude:
+  uuid: bbbbbbbb-cccc-dddd-eeee-ffffffffffff
+tmux:
+  session_name: agm-oss-nonexistent-tmux-session

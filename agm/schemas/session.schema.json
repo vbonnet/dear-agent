@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agm.dev/schemas/session.v1.json",
+  "title": "AGM Session",
+  "description": "AGM session metadata and lifecycle (Claude/Gemini)",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique session identifier (UUID or human-readable name)",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable session name",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "tmux_session": {
+      "type": ["string", "null"],
+      "description": "Associated tmux session name",
+      "maxLength": 255
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Session creation timestamp (ISO 8601)"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last update timestamp (ISO 8601)"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "archived", "deleted"],
+      "description": "Session lifecycle status"
+    },
+    "workspace": {
+      "type": "string",
+      "description": "Workspace identifier (oss, personal, etc.)",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "model": {
+      "type": ["string", "null"],
+      "description": "LLM model identifier (claude-sonnet-4-5, gemini-2.0-flash, etc.)",
+      "maxLength": 100
+    },
+    "agent_mode": {
+      "type": ["string", "null"],
+      "description": "Agent operating mode (implementer, researcher, reviewer, etc.)",
+      "maxLength": 50
+    },
+    "metadata": {
+      "type": ["object", "null"],
+      "description": "Additional session metadata (custom fields, configuration, etc.)",
+      "additionalProperties": true
+    }
+  },
+  "required": ["id", "name", "created_at", "updated_at", "status", "workspace"],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "id": "session-123",
+      "name": "Implement AGM component manifest",
+      "tmux_session": "agm-session-123",
+      "created_at": "2026-02-19T10:00:00Z",
+      "updated_at": "2026-02-19T11:30:00Z",
+      "status": "active",
+      "workspace": "oss",
+      "model": "claude-sonnet-4-5",
+      "agent_mode": "implementer",
+      "metadata": {
+        "task_id": "oss-t3bu",
+        "phase": 3,
+        "component": "agm"
+      }
+    }
+  ]
+}

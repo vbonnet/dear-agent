@@ -1,0 +1,22 @@
+{
+  "description": "Edge case - invalid session ID format",
+  "agent": "claude",
+  "operation": "GetSessionStatus",
+  "request": {
+    "sessionID": "invalid@session#id"
+  },
+  "response": {
+    "success": false,
+    "error": {
+      "code": "INVALID_SESSION_ID",
+      "message": "session ID contains invalid characters",
+      "details": {
+        "sessionID": "invalid@session#id",
+        "allowed_pattern": "^[a-zA-Z0-9-_]+$"
+      }
+    }
+  },
+  "metadata": {
+    "timestamp": "2026-02-20T12:05:00Z"
+  }
+}

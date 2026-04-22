@@ -1,0 +1,139 @@
+# AGM SLO Contracts
+# =================
+# Extracted from hardcoded Go constants. These thresholds define the
+# operational Service Level Objectives for each AGM subsystem.
+#
+# To override defaults, place a copy at ~/.agm/slo-contracts.yaml
+# and adjust values. Missing keys fall back to the defaults below.
+
+contract_version: "1.0.0"
+
+# ---------------------------------------------------------------------------
+# Session Lifecycle
+# ---------------------------------------------------------------------------
+session_lifecycle:
+  resume_ready_timeout: 5s
+  bloat_size_threshold_bytes: 104857600  # 100 MB
+  bloat_progress_entry_threshold: 1000
+  session_scan_limit: 1000
+  process_kill_grace_period: 2s
+  gc_protected_roles:
+    - orchestrator
+    - meta-orchestrator
+    - overseer
+  cooldown_interval: 5m
+  recent_activity_threshold: 5m
+  lock_timeout: 5s
+  lock_poll_interval: 50ms
+
+# ---------------------------------------------------------------------------
+# Scan Loop
+# ---------------------------------------------------------------------------
+scan_loop:
+  default_scan_interval: 5m
+  stuck_timeout: 5m
+  scan_gap_timeout: 10m
+  worker_commit_lookback: 24h
+  metrics_window: 1h
+  tmux_capture_depth: 30
+  session_list_limit: 1000
+
+# ---------------------------------------------------------------------------
+# Trust Protocol
+# ---------------------------------------------------------------------------
+trust_protocol:
+  base_score: 50
+  min_score: 0
+  max_score: 100
+  event_deltas:
+    success: 5
+    false_completion: -15
+    stall: -5
+    error_loop: -3
+    permission_churn: -1
+    quality_gate_failure: -10
+    gc_archived: 0
+  min_dispatch_score: 30
+  preferred_score: 60
+  probation_score: 20
+
+# ---------------------------------------------------------------------------
+# Stall Detection
+# ---------------------------------------------------------------------------
+stall_detection:
+  permission_timeout: 5m
+  no_commit_timeout: 15m
+  error_repeat_threshold: 3
+  tmux_capture_depth: 50
+  error_message_max_length: 100
+  session_scan_limit: 1000
+
+# ---------------------------------------------------------------------------
+# Audit Trail
+# ---------------------------------------------------------------------------
+audit_trail:
+  max_line_buffer_bytes: 1048576  # 1 MB
+  log_directory_permissions: 0755
+  log_file_permissions: 0644
+
+# ---------------------------------------------------------------------------
+# Compaction
+# ---------------------------------------------------------------------------
+compaction:
+  context_threshold_warn: 70.0
+  context_threshold_compact: 80.0
+  context_threshold_critical: 90.0
+
+# ---------------------------------------------------------------------------
+# Retry
+# ---------------------------------------------------------------------------
+retry:
+  max_retries: 3
+  backoff_delays:
+    - 1m
+    - 3m
+    - 10m
+
+# ---------------------------------------------------------------------------
+# Session Health
+# ---------------------------------------------------------------------------
+session_health:
+  responsiveness_critical_timeout: 30m
+  responsiveness_warning_timeout: 10m
+  error_lines_critical: 10
+  error_lines_warning: 3
+  cpu_warning_percent: 90.0
+  memory_warning_mb: 4096
+  trust_score_warning: 20
+
+# ---------------------------------------------------------------------------
+# Ops Alerts
+# ---------------------------------------------------------------------------
+ops_alerts:
+  load_threshold: 12.0
+  memory_threshold_percent: 80.0
+  disk_threshold_percent: 85.0
+  permission_prompt_threshold: 5m
+
+# ---------------------------------------------------------------------------
+# Daemon
+# ---------------------------------------------------------------------------
+daemon:
+  poll_interval: 30s
+  max_retries: 3
+  initial_backoff: 5s
+  latency_history_size: 100
+
+# ---------------------------------------------------------------------------
+# Daemon Alerts
+# ---------------------------------------------------------------------------
+daemon_alerts:
+  queue_depth_critical: 100
+  queue_depth_warning: 50
+  success_rate_critical: 50.0
+  success_rate_warning: 75.0
+  latency_critical: 30s
+  latency_warning: 10s
+  poll_timeout: 5m
+  state_error_rate_critical: 25.0
+  state_error_rate_warning: 10.0

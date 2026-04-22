@@ -1,0 +1,19 @@
+#!/bin/sh
+# Post-commit hook: auto-rebuild AGM binary after commits
+# to keep the installed binary in sync with the latest code.
+#
+# Install: git config core.hooksPath claude-session-manager/.githooks
+# Or:      make -C claude-session-manager init
+
+set -e
+
+# Only rebuild if the commit touches AGM-related files
+CHANGED=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null || true)
+if printf '%s\n' "$CHANGED" | grep -qE '^claude-session-manager/'; then
+    echo "[post-commit] AGM source changed — rebuilding..."
+    if make -C claude-session-manager build install 2>/dev/null; then
+        echo "[post-commit] AGM binary rebuilt and installed."
+    else
+        echo "[post-commit] WARNING: AGM rebuild failed. Run 'make -C claude-session-manager install' manually."
+    fi
+fi

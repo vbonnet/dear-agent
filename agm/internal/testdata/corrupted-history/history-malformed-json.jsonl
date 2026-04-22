@@ -1,0 +1,9 @@
+{"sessionId":"uuid-valid-before","project":"/tmp/valid1","timestamp":1708300000000}
+{malformed json without quotes or proper structure
+{"sessionId":"uuid-after-malformed","project":"/tmp/valid2","timestamp":1708300100000}
+{"sessionId":"uuid-incomplete","project":"/tmp/valid3"
+{"sessionId":"uuid-missing-bracket","project":"/tmp/valid4","timestamp":1708300200000
+{"sessionId":"uuid-extra-comma","project":"/tmp/valid5","timestamp":1708300300000,}
+{"sessionId":"","project":"/tmp/empty-uuid","timestamp":1708300400000}
+another completely invalid line without json structure
+{"sessionId":"uuid-final-valid","project":"/tmp/valid6","timestamp":1708300500000}

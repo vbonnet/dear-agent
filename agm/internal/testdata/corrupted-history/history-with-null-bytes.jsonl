@@ -1,0 +1,6 @@
+{"sessionId":"uuid-valid-1","project":"/tmp/test-project","timestamp":1708300000000}
+{"sessionId":"uuid-corrupted-1","project":"/tmp/corrup\x00ted","timestamp":1708300100000}
+{"sessionId":"uuid-valid-2","project":"/tmp/another-project","timestamp":1708300200000}
+{"sessionId":"\x00uuid-null-start","project":"/tmp/project3","timestamp":1708300300000}
+{"sessionId":"uuid-valid-3","project":"/tmp/project4","timestamp":1708300400000}
+{"sessionId":"uuid-mid\x00dle-null","project":"/tmp/project5","timestamp":1708300500000}

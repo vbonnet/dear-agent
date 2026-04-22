@@ -1,0 +1,9 @@
+id: typescript-no-any-type
+language: typescript
+severity: warning
+message: "Avoid using 'any' type; prefer 'unknown' or a specific type"
+rule:
+  kind: type_annotation
+  has:
+    kind: predefined_type
+    regex: "^any$"

@@ -1,0 +1,87 @@
+# Global MCP Configuration Example
+# Location: ~/.config/agm/mcp.yaml
+
+# List of global MCP servers
+# These servers run as HTTP/SSE services and can be shared across multiple AGM sessions
+mcp_servers:
+  # Google Docs MCP Server
+  - name: googledocs
+    url: http://localhost:8001
+    type: mcp
+
+  # GitHub MCP Server
+  - name: github
+    url: http://localhost:8002
+    type: mcp
+
+  # Filesystem MCP Server
+  - name: filesystem
+    url: http://localhost:8003
+    type: mcp
+
+  # Custom MCP Server
+  - name: my-custom-mcp
+    url: http://localhost:9000
+    type: mcp
+
+# Configuration Notes:
+#
+# 1. Name: Unique identifier for the MCP server
+#    - Used to reference the server in commands and logs
+#    - Must match the MCP server's registered name
+#
+# 2. URL: HTTP endpoint for the MCP server
+#    - Must be a valid HTTP/HTTPS URL
+#    - Include port if not default (80/443)
+#    - Health check endpoint is automatically appended: {url}/health
+#
+# 3. Type: MCP server type (currently only "mcp" is supported)
+#    - Future: may support other types (grpc, websocket, etc.)
+#
+# Global vs Session-Specific MCPs:
+#
+# - Global MCPs (this file): Shared across all sessions, managed by daemon
+#   - Advantages: Resource efficient, faster startup, shared state
+#   - Use for: Common tools (googledocs, github), authenticated services
+#
+# - Session-Specific MCPs (.agm/mcp.yaml): Per-project, stdio-based
+#   - Advantages: Project isolation, no daemon dependency
+#   - Use for: Project-specific tools, development/testing
+#
+# Priority: Session-specific MCPs override global MCPs with the same name
+#
+# Starting Global MCP Servers:
+#
+# Option 1: Manually (for development)
+#   cd ~/src/mcp-global-sharing/packages/mcp-http-server
+#   npm run dev -- --port 8001 --mcp-command "npx -y @modelcontextprotocol/server-googledocs"
+#
+# Option 2: Via Temporal Workflow (production)
+#   agm daemon start
+#   # Daemon automatically starts configured global MCPs
+#
+# Option 3: Systemd Service (Linux)
+#   sudo systemctl start mcp-googledocs
+#
+# Checking Status:
+#
+#   agm mcp-status
+#   agm mcp-status --json
+#
+# Environment Variable Alternative:
+#
+#   export AGM_MCP_SERVERS="googledocs=http://localhost:8001,github=http://localhost:8002"
+#   agm session new my-session
+#
+# Health Check:
+#
+#   curl http://localhost:8001/health
+#
+# Expected response:
+#   {
+#     "status": "healthy",
+#     "uptime": 3600,
+#     "sessions": 2,
+#     "mcpProcess": "running",
+#     "timestamp": "2024-01-01T00:00:00Z"
+#   }

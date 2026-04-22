@@ -1,0 +1,43 @@
+# Test binaries
+agm-test
+agm-fixed
+*-test
+agm-test-tmux
+
+# Build artifacts (legacy csm names kept for cleanup)
+/csm
+/agm
+/bin/csm
+/bin/csm-reaper
+/bin/agm
+/bin/agm-mcp-server
+/bin/agm-reaper
+/bin/*-wrapper
+cmd/agm/agm
+cmd/csm/
+
+# Go build cache
+*.out
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Claude Code project files
+.claude/
+
+# Incomplete features (WIP)
+/internal/telemetry/
+
+# Recovery scripts from 2026-03-19 corruption incident (archived in scripts/)
+apply-recovery.go
+recover-corrupted-sessions.go
+
+# Temporary debug/analysis scripts
+check-*.go
+verify-*.go
+get-*.go
+clear-*.go

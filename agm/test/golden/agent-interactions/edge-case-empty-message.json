@@ -1,0 +1,29 @@
+{
+  "description": "Edge case - attempt to send empty message",
+  "agent": "claude",
+  "operation": "SendMessage",
+  "request": {
+    "sessionID": "550e8400-e29b-41d4-a716-446655440000",
+    "message": {
+      "ID": "msg-empty-001",
+      "Role": "user",
+      "Content": "",
+      "Timestamp": "2026-02-20T12:00:00Z",
+      "Metadata": {}
+    }
+  },
+  "response": {
+    "success": false,
+    "error": {
+      "code": "INVALID_MESSAGE",
+      "message": "message content cannot be empty",
+      "details": {
+        "field": "Content",
+        "constraint": "non-empty"
+      }
+    }
+  },
+  "metadata": {
+    "timestamp": "2026-02-20T12:00:00Z"
+  }
+}

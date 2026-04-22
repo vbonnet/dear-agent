@@ -1,0 +1,73 @@
+{
+  "SessionsDir": "~/sessions",
+  "LogLevel": "debug",
+  "LogFile": "/var/log/agm.log",
+  "Workspace": "oss",
+  "WorkspaceConfigPath": "",
+  "Storage": {
+    "Mode": "",
+    "Workspace": "",
+    "RelativePath": "",
+    "Dolt": {
+      "StartScript": ""
+    }
+  },
+  "Timeout": {
+    "TmuxCommands": 8000000000,
+    "Enabled": true
+  },
+  "Lock": {
+    "Enabled": true,
+    "Path": "/tmp/agm-1000/agm.lock"
+  },
+  "HealthCheck": {
+    "Enabled": true,
+    "CacheDuration": 7000000000,
+    "ProbeTimeout": 3000000000
+  },
+  "Adapters": {
+    "OpenCode": {
+      "Enabled": false,
+      "ServerURL": "",
+      "Reconnect": {
+        "InitialDelay": 0,
+        "MaxDelay": 0,
+        "Multiplier": 0
+      },
+      "FallbackTmux": false
+    },
+    "ClaudeHooks": {
+      "Enabled": false,
+      "ListenAddr": ""
+    },
+    "GeminiHooks": {
+      "Enabled": false,
+      "SocketPath": ""
+    }
+  },
+  "AutoResume": {
+    "Enabled": false,
+    "IncludeArchived": false,
+    "WorkspaceFilter": "",
+    "DelaySeconds": 0
+  },
+  "StatusLine": {
+    "Enabled": false,
+    "DefaultFormat": "",
+    "RefreshInterval": 0,
+    "ShowContextUsage": false,
+    "ShowGitStatus": false,
+    "HarnessIcons": null,
+    "CustomFormats": null
+  },
+  "Sandbox": {
+    "Enabled": false,
+    "Provider": "",
+    "Repos": null,
+    "Secrets": null,
+    "Onboarding": {
+      "Enabled": false,
+      "TemplatePath": ""
+    }
+  }
+}

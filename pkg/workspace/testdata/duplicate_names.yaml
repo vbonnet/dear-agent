@@ -1,0 +1,11 @@
+version: 1
+default_workspace: oss
+
+workspaces:
+  - name: oss
+    root: ~/projects/myworkspace
+    enabled: true
+
+  - name: oss
+    root: ~/projects/secondary
+    enabled: true

@@ -1,0 +1,149 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.x'
+        cache: true
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Run go vet
+      run: go vet ./...
+
+    - name: Run go fmt check
+      run: |
+        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+          echo "Please run 'go fmt ./...'"
+          gofmt -s -d .
+          exit 1
+        fi
+
+    - name: Install tmux (for integration tests)
+      run: sudo apt-get update && sudo apt-get install -y tmux
+
+    - name: Run tests
+      env:
+        AGM_TEST_TMUX: "1"
+      run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+    - name: Check test coverage
+      run: |
+        go tool cover -func=coverage.out
+        COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+        echo "Total coverage: ${COVERAGE}%"
+
+        # Require minimum coverage (adjust as needed)
+        MIN_COVERAGE=70.0
+        if (( $(echo "$COVERAGE < $MIN_COVERAGE" | bc -l) )); then
+          echo "Coverage ${COVERAGE}% is below minimum ${MIN_COVERAGE}%"
+          exit 1
+        fi
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        files: ./coverage.out
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.x'
+        cache: true
+
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: latest
+        args: --timeout=5m
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.x'
+        cache: true
+
+    - name: Build AGM
+      run: go build -v -o agm ./cmd/agm
+
+    - name: Build AGM Reaper
+      run: go build -v -o agm-reaper ./cmd/agm-reaper
+
+    - name: Verify binaries
+      run: |
+        ./agm --version || echo "agm binary created"
+        file agm | grep "ELF 64-bit"
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [test, build]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.x'
+        cache: true
+
+    - name: Install tmux
+      run: sudo apt-get update && sudo apt-get install -y tmux
+
+    - name: Build AGM with coverage
+      run: go build -cover -o agm-cover ./cmd/agm
+
+    - name: Run integration tests
+      env:
+        AGM_TEST_TMUX: "1"
+        GOCOVERDIR: coverage-integration
+      run: |
+        mkdir -p coverage-integration
+        go test -v ./test/... -timeout 10m
+
+    - name: Collect integration coverage
+      run: |
+        if [ -d coverage-integration ] && [ "$(ls -A coverage-integration)" ]; then
+          go tool covdata textfmt -i=coverage-integration -o coverage-integration.out
+          go tool cover -func=coverage-integration.out
+        fi

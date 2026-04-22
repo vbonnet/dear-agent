@@ -1,0 +1,31 @@
+{
+  "description": "Gemini agent - API quota exceeded error",
+  "agent": "gemini",
+  "operation": "SendMessage",
+  "request": {
+    "sessionID": "gemini-session-20260220-100000",
+    "message": {
+      "ID": "msg-gemini-999",
+      "Role": "user",
+      "Content": "Process large dataset",
+      "Timestamp": "2026-02-20T11:00:00Z",
+      "Metadata": {}
+    }
+  },
+  "response": {
+    "success": false,
+    "error": {
+      "code": "QUOTA_EXCEEDED",
+      "message": "API quota exceeded. Please try again later.",
+      "details": {
+        "quota_type": "requests_per_minute",
+        "limit": 60,
+        "reset_time": "2026-02-20T11:01:00Z"
+      }
+    }
+  },
+  "metadata": {
+    "timestamp": "2026-02-20T11:00:00Z",
+    "api_version": "v1beta"
+  }
+}

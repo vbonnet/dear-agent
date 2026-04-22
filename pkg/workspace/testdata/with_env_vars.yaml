@@ -1,0 +1,6 @@
+version: 1
+workspaces:
+  - name: env-based
+    root: $HOME/workspace
+    enabled: true
+    output_dir: $HOME/workspace/.output

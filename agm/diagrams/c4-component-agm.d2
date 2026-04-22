@@ -1,0 +1,298 @@
+direction: right
+
+title: {
+  label: AGM (Agent Gateway Manager) - C4 Component Diagram
+  near: top-center
+  shape: text
+  style: {
+    font-size: 24
+    bold: true
+  }
+}
+
+# System boundary
+AGM: {
+  label: "Agent Gateway Manager\n[Component: CLI System]"
+  style.fill: "#1168bd"
+  style.stroke: "#0b4884"
+
+  # Layer 1: Command Layer (CLI Interface)
+  CommandLayer: {
+    label: "Command Layer"
+    style.fill: "#438dd5"
+    style.stroke: "#2e5f8f"
+
+    CLI: {
+      label: "Command Interface\n[Component: Cobra CLI]\n\nParses commands, validates flags,\nroutes to business logic"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    SessionCommands: {
+      label: "Session Commands\n[Component]\n\nnew, resume, list, archive,\nkill, associate"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    AdminCommands: {
+      label: "Admin Commands\n[Component]\n\ndoctor, fix-uuid, clean,\nunlock, migrate"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    WorkflowCommands: {
+      label: "Workflow Commands\n[Component]\n\ndeep-research, code-review,\narchitect"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+  }
+
+  # Layer 2: Business Logic Layer
+  BusinessLogic: {
+    label: "Business Logic Layer"
+    style.fill: "#438dd5"
+    style.stroke: "#2e5f8f"
+
+    SessionManager: {
+      label: "Session Manager\n[Component]\n\nSession lifecycle management,\nstate tracking, validation"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    CommandTranslator: {
+      label: "Command Translator\n[Component]\n\nTranslates AGM commands to\nagent-specific actions"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    IdentifierResolver: {
+      label: "Identifier Resolver\n[Component]\n\nMulti-strategy resolution:\nexact, UUID prefix, fuzzy,\ninteractive picker"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    WorkflowEngine: {
+      label: "Workflow Engine\n[Component]\n\nExecutes specialized workflows\nwith agent coordination"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+  }
+
+  # Layer 3: Adapter Layer (Multi-CLI Support)
+  AdapterRegistry: {
+    label: "Adapter Registry"
+    style.fill: "#438dd5"
+    style.stroke: "#2e5f8f"
+
+    ClaudeAdapter: {
+      label: "Claude Adapter\n[Component: Agent Interface]\n\nCLI integration, UUID detection,\nslash commands, history.jsonl"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    GeminiAdapter: {
+      label: "Gemini Adapter\n[Component: Agent Interface]\n\nAPI integration, session files,\ncommand translation"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    CodexAdapter: {
+      label: "Codex Adapter\n[Component: Agent Interface]\n\nOpenAI API integration,\nthread management"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    OpenCodeAdapter: {
+      label: "OpenCode Adapter\n[Component: Agent Interface]\n\nSSE event stream, server port,\nreal-time state updates"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+  }
+
+  # Layer 4: Coordination & Storage
+  CoordinationLayer: {
+    label: "Coordination & Storage Layer"
+    style.fill: "#438dd5"
+    style.stroke: "#2e5f8f"
+
+    ManifestStore: {
+      label: "Manifest Store\n[Component]\n\nSession metadata persistence,\natomic writes, versioning\n(v2/v3 schemas)"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    CoordinationDaemon: {
+      label: "Coordination Daemon\n[Component]\n\nMulti-session orchestration,\nmessage queue, state detection,\nauto-delivery (30s polling)"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    MessageQueue: {
+      label: "Message Queue\n[Component]\n\nAsync communication,\nretry logic, acknowledgments"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    StateMonitor: {
+      label: "State Monitor\n[Component: Astrocyte]\n\nReal-time state detection:\nREADY, BUSY, PERMISSION_PROMPT,\nCOMPACTING, OFFLINE"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+  }
+
+  # Layer 5: Backend Abstraction
+  BackendAdapter: {
+    label: "Backend Adapter"
+    style.fill: "#438dd5"
+    style.stroke: "#2e5f8f"
+
+    TmuxBackend: {
+      label: "Tmux Backend\n[Component: Backend Interface]\n\nSession management,\npane control, key sending"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    TemporalBackend: {
+      label: "Temporal Backend\n[Component: Backend Interface]\n\nWorkflow orchestration,\ndurable execution (future)"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+  }
+
+  # Layer 6: UI & Presentation
+  UILayer: {
+    label: "UI & Presentation Layer"
+    style.fill: "#438dd5"
+    style.stroke: "#2e5f8f"
+
+    InteractiveUI: {
+      label: "Interactive UI\n[Component: Huh TUI]\n\nSession picker, forms,\nconfirmations, fuzzy search"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+
+    ErrorPresentation: {
+      label: "Error Presentation\n[Component]\n\nLayered error handling,\nremediation suggestions"
+      shape: rectangle
+      style.fill: "#85bbf0"
+    }
+  }
+}
+
+# External Systems
+User: {
+  label: "Developer\n[Person]\n\nManages AI agent sessions\nvia CLI"
+  shape: person
+  style.fill: "#08427b"
+}
+
+ClaudeCLI: {
+  label: "Claude CLI\n[External System]\n\nOfficial Claude Code CLI"
+  shape: rectangle
+  style.fill: "#999999"
+}
+
+GeminiCLI: {
+  label: "Gemini CLI\n[External System]\n\nGoogle Gemini CLI"
+  shape: rectangle
+  style.fill: "#999999"
+}
+
+OpenAIAPI: {
+  label: "OpenAI API\n[External System]\n\nChatGPT/Codex API"
+  shape: rectangle
+  style.fill: "#999999"
+}
+
+OpenCodeServer: {
+  label: "OpenCode Server\n[External System]\n\nSSE event stream server"
+  shape: rectangle
+  style.fill: "#999999"
+}
+
+TmuxServer: {
+  label: "Tmux Server\n[External System]\n\nTerminal multiplexer"
+  shape: rectangle
+  style.fill: "#999999"
+}
+
+FileSystem: {
+  label: "File System\n[External System]\n\nManifest storage:\n~/.agm/sessions/\n{workspace}/.agm/sessions/"
+  shape: rectangle
+  style.fill: "#999999"
+}
+
+# Relationships - User Interactions
+User -> AGM.CommandLayer.CLI: "Executes commands\n[CLI]"
+AGM.UILayer.InteractiveUI -> User: "Displays prompts,\npickers, errors"
+
+# Command Layer to Business Logic
+AGM.CommandLayer.CLI -> AGM.CommandLayer.SessionCommands: "Routes session commands"
+AGM.CommandLayer.CLI -> AGM.CommandLayer.AdminCommands: "Routes admin commands"
+AGM.CommandLayer.CLI -> AGM.CommandLayer.WorkflowCommands: "Routes workflow commands"
+
+AGM.CommandLayer.SessionCommands -> AGM.BusinessLogic.SessionManager: "Invokes session operations"
+AGM.CommandLayer.SessionCommands -> AGM.BusinessLogic.IdentifierResolver: "Resolves session identifiers"
+AGM.CommandLayer.WorkflowCommands -> AGM.BusinessLogic.WorkflowEngine: "Executes workflows"
+
+# Business Logic to Adapters
+AGM.BusinessLogic.SessionManager -> AGM.AdapterRegistry.ClaudeAdapter: "Creates/resumes Claude sessions"
+AGM.BusinessLogic.SessionManager -> AGM.AdapterRegistry.GeminiAdapter: "Creates/resumes Gemini sessions"
+AGM.BusinessLogic.SessionManager -> AGM.AdapterRegistry.CodexAdapter: "Creates/resumes Codex sessions"
+AGM.BusinessLogic.SessionManager -> AGM.AdapterRegistry.OpenCodeAdapter: "Creates/resumes OpenCode sessions"
+
+AGM.BusinessLogic.CommandTranslator -> AGM.AdapterRegistry.ClaudeAdapter: "Translates to slash commands"
+AGM.BusinessLogic.CommandTranslator -> AGM.AdapterRegistry.GeminiAdapter: "Translates to API calls"
+
+# Adapters to External Systems
+AGM.AdapterRegistry.ClaudeAdapter -> ClaudeCLI: "Launches/controls\n[Process + Tmux]"
+AGM.AdapterRegistry.GeminiAdapter -> GeminiCLI: "Launches/controls\n[Process + Tmux]"
+AGM.AdapterRegistry.CodexAdapter -> OpenAIAPI: "Makes API requests\n[HTTPS]"
+AGM.AdapterRegistry.OpenCodeAdapter -> OpenCodeServer: "Subscribes to events\n[SSE]"
+
+# Coordination Layer
+AGM.BusinessLogic.SessionManager -> AGM.CoordinationLayer.ManifestStore: "Reads/writes manifests"
+AGM.BusinessLogic.SessionManager -> AGM.CoordinationLayer.MessageQueue: "Enqueues messages"
+
+AGM.CoordinationLayer.CoordinationDaemon -> AGM.CoordinationLayer.MessageQueue: "Polls for pending messages\n(30s interval)"
+AGM.CoordinationLayer.CoordinationDaemon -> AGM.CoordinationLayer.StateMonitor: "Detects session state"
+AGM.CoordinationLayer.CoordinationDaemon -> AGM.CoordinationLayer.ManifestStore: "Updates state metadata"
+
+AGM.CoordinationLayer.StateMonitor -> AGM.BackendAdapter.TmuxBackend: "Monitors tmux panes"
+AGM.CoordinationLayer.StateMonitor -> AGM.AdapterRegistry.OpenCodeAdapter: "Receives SSE events"
+
+# Backend Layer
+AGM.BusinessLogic.SessionManager -> AGM.BackendAdapter.TmuxBackend: "Creates/attaches sessions"
+AGM.BackendAdapter.TmuxBackend -> TmuxServer: "Controls sessions\n[tmux commands]"
+AGM.BackendAdapter.TemporalBackend -> AGM.BackendAdapter.TmuxBackend: "Future: orchestration fallback"
+
+# Storage
+AGM.CoordinationLayer.ManifestStore -> FileSystem: "Reads/writes YAML\n[Atomic operations]"
+AGM.AdapterRegistry.ClaudeAdapter -> FileSystem: "Reads history.jsonl"
+
+# UI Layer
+AGM.CommandLayer.SessionCommands -> AGM.UILayer.InteractiveUI: "Shows session picker"
+AGM.BusinessLogic.IdentifierResolver -> AGM.UILayer.InteractiveUI: "Shows fuzzy matches"
+AGM.CommandLayer.CLI -> AGM.UILayer.ErrorPresentation: "Formats errors"
+
+# Key Data Flows (placed at bottom)
+SessionCreationFlow: {
+  label: "Session Creation Flow:\n1. User: agm new my-session → 2. CLI validates flags →\n3. SessionManager generates UUID → 4. Adapter starts agent CLI →\n5. ManifestStore persists metadata → 6. TmuxBackend attaches session"
+  shape: text
+  style.font-size: 11
+  style.fill: "#f0f0f0"
+}
+
+MessageDeliveryFlow: {
+  label: "Async Message Delivery:\n1. Session A enqueues message for B → 2. Daemon polls queue (30s) →\n3. StateMonitor checks B's state → 4. If READY: deliver message →\n5. Update B's state to BUSY → 6. Acknowledge delivery"
+  shape: text
+  style.font-size: 11
+  style.fill: "#f0f0f0"
+}
+
+AdapterPattern: {
+  label: "Adapter Pattern:\nUnified Agent interface with multiple implementations.\nEnables CLI-agnostic session management and command translation."
+  shape: text
+  style.font-size: 11
+  style.fill: "#f0f0f0"
+}

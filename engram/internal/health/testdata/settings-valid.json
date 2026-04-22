@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "~/.claude/hooks/session-start-hook",
+            "timeout": 10
+          }
+        ],
+        "matcher": ".*"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "~/.claude/hooks/pretool-validator",
+            "timeout": 5
+          }
+        ],
+        "matcher": "Write|Edit"
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "engram@local": true
+  }
+}

@@ -1,0 +1,6 @@
+{"sessionId":"uuid-complete","project":"/tmp/complete","timestamp":1708300000000}
+{"sessionId":"uuid-no-project","timestamp":1708300100000}
+{"project":"/tmp/no-uuid","timestamp":1708300200000}
+{"sessionId":"uuid-no-timestamp","project":"/tmp/no-timestamp"}
+{}
+{"sessionId":"uuid-valid-after-empty","project":"/tmp/valid","timestamp":1708300300000}

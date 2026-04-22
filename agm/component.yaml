@@ -1,0 +1,374 @@
+# AGM Component Manifest
+# AI-assisted session management for Claude Code and Gemini
+#
+# This manifest defines all metadata required by the component installer
+# to install, upgrade, and uninstall AGM in a workspace.
+
+manifest_version: "1.0"
+
+# ============================================================================
+# Component Identity
+# ============================================================================
+
+component:
+  name: "agm"
+  version: "2.0.0"
+  description: "AI-assisted session management for Claude Code and Gemini with tmux integration"
+  license: "MIT"
+  repository: "https://github.com/vbonnet/ai-tools"
+  homepage: "https://github.com/vbonnet/ai-tools/tree/main/main/agm"
+  authors:
+    - name: "Vincent Bonnet"
+      email: "vincent@example.com"
+
+# ============================================================================
+# Dependencies
+# ============================================================================
+
+dependencies:
+  # Required: Engram for workspace detection
+  - name: "engram"
+    contract: "workspace-v1"
+    version: "^2.0.0"
+    optional: false
+    reason: "AGM requires workspace detection for session isolation across OSS/Acme/etc workspaces"
+
+  # Optional: Corpus Callosum for schema registration
+  - name: "corpus-callosum"
+    contract: "schema-registry-v1"
+    version: "^1.0.0"
+    optional: true
+    reason: "Enhanced schema discovery and cross-component queries (graceful degradation if missing)"
+
+# ============================================================================
+# Contracts Provided
+# ============================================================================
+
+contracts:
+  # AGM provides session management contract
+  - name: "agm-session-v1"
+    version: "1.0.0"
+    description: "Session management and context tracking for AI-assisted workflows (Claude/Gemini)"
+    methods:
+      - "create_session"
+      - "list_sessions"
+      - "get_session"
+      - "update_session"
+      - "delete_session"
+      - "get_session_context"
+      - "add_context_item"
+      - "attach_session"
+      - "kill_session"
+
+# ============================================================================
+# Database Migrations
+# ============================================================================
+
+migrations:
+  # Migration 1: Create core sessions table
+  - version: 1
+    file: "migrations/001_create_sessions_table.sql"
+    description: "Create agm_sessions table with basic metadata"
+    checksum: "sha256:placeholder001"
+
+  # Migration 2: Create messages table
+  - version: 2
+    file: "migrations/002_create_messages_table.sql"
+    description: "Create agm_messages table for conversation history"
+    checksum: "sha256:placeholder002"
+
+  # Migration 3: Create tool calls table
+  - version: 3
+    file: "migrations/003_create_tool_calls_table.sql"
+    description: "Create agm_tool_calls table for tracking tool usage and results"
+    checksum: "sha256:placeholder003"
+
+  # Migration 4: Create session tags table
+  - version: 4
+    file: "migrations/004_create_session_tags_table.sql"
+    description: "Create agm_session_tags table for session categorization"
+    checksum: "sha256:placeholder004"
+
+  # Migration 5: Create message embeddings table
+  - version: 5
+    file: "migrations/005_create_message_embeddings_table.sql"
+    description: "Create agm_message_embeddings table for semantic search"
+    checksum: "sha256:placeholder005"
+
+# ============================================================================
+# Install Hooks
+# ============================================================================
+
+hooks:
+  # Pre-install: Validate prerequisites
+  pre-install:
+    command: "./scripts/pre-install.sh"
+    args:
+      - "${WORKSPACE_ROOT}"
+      - "${COMPONENT_VERSION}"
+    timeout: 30
+    description: |
+      Validate prerequisites:
+      - Check Engram is installed (dependency)
+      - Verify Dolt is accessible
+      - Check disk space (minimum 100 MB)
+      - Validate workspace directory structure
+      - Check tmux is installed (required for session management)
+
+  # Post-install: Initialize configuration
+  post-install:
+    command: "./scripts/post-install.sh"
+    args:
+      - "${WORKSPACE_ROOT}"
+    timeout: 10
+    description: |
+      Initialize AGM configuration:
+      - Create default session directory (~/.agm/sessions/)
+      - Generate initial configuration file
+      - Display setup instructions
+      - Register with Corpus Callosum (if installed)
+      - Verify tmux integration
+
+  # Pre-uninstall: Export session data
+  pre-uninstall:
+    command: "./scripts/export-data.sh"
+    args:
+      - "${WORKSPACE_ROOT}/backup/agm-export-${TIMESTAMP}.tar.gz"
+    timeout: 300
+    description: |
+      Export session data before uninstall:
+      - Create backup of all sessions from Dolt database
+      - Export to workspace backup directory
+      - Include session metadata, messages, tool calls, and tags
+      - Generate restore instructions
+      - Preserve JSONL history files
+
+  # Post-uninstall: Cleanup
+  post-uninstall:
+    command: "./scripts/cleanup.sh"
+    args:
+      - "${WORKSPACE_ROOT}"
+    timeout: 5
+    description: |
+      Cleanup AGM cache and temporary files:
+      - Remove session cache directory (~/.agm-cache)
+      - Delete temporary files
+      - Clean tmux session artifacts
+      - Preserve backed-up data
+
+# ============================================================================
+# Binary Distribution
+# ============================================================================
+
+binaries:
+  # Linux x86_64
+  - platform: "linux-amd64"
+    url: "https://releases.agm.dev/v2.0.0/agm-linux-amd64.tar.gz"
+    checksum: "sha256:placeholder_checksum_linux_amd64"
+    size_bytes: 2400000
+
+  # Linux ARM64
+  - platform: "linux-arm64"
+    url: "https://releases.agm.dev/v2.0.0/agm-linux-arm64.tar.gz"
+    checksum: "sha256:placeholder_checksum_linux_arm64"
+    size_bytes: 2300000
+
+  # macOS Intel
+  - platform: "darwin-amd64"
+    url: "https://releases.agm.dev/v2.0.0/agm-darwin-amd64.tar.gz"
+    checksum: "sha256:placeholder_checksum_darwin_amd64"
+    size_bytes: 2500000
+
+  # macOS Apple Silicon
+  - platform: "darwin-arm64"
+    url: "https://releases.agm.dev/v2.0.0/agm-darwin-arm64.tar.gz"
+    checksum: "sha256:placeholder_checksum_darwin_arm64"
+    size_bytes: 2450000
+
+# ============================================================================
+# Corpus Callosum Integration (Optional)
+# ============================================================================
+
+corpus_callosum:
+  # Schema registration
+  schemas:
+    # Session schema
+    - name: "agm.session"
+      version: "1.0"
+      file: "schemas/session.schema.json"
+      description: "AGM session metadata and lifecycle (Claude/Gemini)"
+
+    # Message schema
+    - name: "agm.message"
+      version: "1.0"
+      file: "schemas/message.schema.json"
+      description: "AGM message structure (user/assistant/system)"
+
+    # Tool call schema
+    - name: "agm.tool_call"
+      version: "1.0"
+      file: "schemas/tool_call.schema.json"
+      description: "AGM tool call tracking (Read, Write, Edit, Bash, etc.)"
+
+  # Predefined queries for common operations
+  queries:
+    # List all active sessions
+    - name: "list-active-sessions"
+      description: "List all active AGM sessions across all workspaces, ordered by most recent"
+      query: |
+        SELECT
+          id,
+          name,
+          created_at,
+          updated_at,
+          workspace,
+          model
+        FROM agm_sessions
+        WHERE status = 'active'
+        ORDER BY updated_at DESC
+
+    # Search sessions by name
+    - name: "search-sessions"
+      description: "Search sessions by name (case-insensitive)"
+      query: |
+        SELECT
+          id,
+          name,
+          created_at,
+          status,
+          workspace,
+          model
+        FROM agm_sessions
+        WHERE LOWER(name) LIKE CONCAT('%', LOWER(:search_term), '%')
+        ORDER BY created_at DESC
+
+    # Get session with message count
+    - name: "get-session-with-stats"
+      description: "Get session with message count and latest activity"
+      query: |
+        SELECT
+          s.id AS session_id,
+          s.name AS session_name,
+          s.created_at,
+          s.updated_at,
+          s.status,
+          s.workspace,
+          s.model,
+          COUNT(m.id) AS message_count,
+          MAX(m.timestamp) AS last_message_at
+        FROM agm_sessions s
+        LEFT JOIN agm_messages m ON s.id = m.session_id
+        WHERE s.id = :session_id
+        GROUP BY s.id, s.name, s.created_at, s.updated_at, s.status, s.workspace, s.model
+
+    # Recent sessions with tag counts
+    - name: "recent-sessions-with-tags"
+      description: "Recent sessions with tag counts and message counts"
+      query: |
+        SELECT
+          s.id,
+          s.name,
+          s.created_at,
+          s.status,
+          s.workspace,
+          s.model,
+          COUNT(DISTINCT t.tag) AS tag_count,
+          COUNT(DISTINCT m.id) AS message_count
+        FROM agm_sessions s
+        LEFT JOIN agm_session_tags t ON s.id = t.session_id
+        LEFT JOIN agm_messages m ON s.id = m.session_id
+        GROUP BY s.id, s.name, s.created_at, s.status, s.workspace, s.model
+        ORDER BY s.created_at DESC
+        LIMIT 20
+
+    # Sessions by date range
+    - name: "sessions-by-date"
+      description: "Get sessions within date range (for reporting/analysis)"
+      query: |
+        SELECT
+          id,
+          name,
+          created_at,
+          updated_at,
+          status,
+          workspace,
+          model
+        FROM agm_sessions
+        WHERE created_at BETWEEN :start_date AND :end_date
+        ORDER BY created_at DESC
+
+    # Tool usage statistics
+    - name: "tool-usage-stats"
+      description: "Analyze tool usage across sessions"
+      query: |
+        SELECT
+          tool_name,
+          COUNT(*) AS usage_count,
+          COUNT(DISTINCT session_id) AS session_count,
+          AVG(execution_time_ms) AS avg_execution_time,
+          SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS error_count
+        FROM agm_tool_calls
+        GROUP BY tool_name
+        ORDER BY usage_count DESC
+
+# ============================================================================
+# Metadata
+# ============================================================================
+
+metadata:
+  # Searchable tags
+  tags:
+    - "session"
+    - "ai-assistant"
+    - "workflow"
+    - "context-management"
+    - "claude-code"
+    - "gemini"
+    - "tmux"
+
+  # Component category
+  category: "workflow"
+
+  # Compatibility requirements
+  compatibility:
+    min_workspace_version: "1.0.0"
+    min_engram_version: "2.0.0"
+    supported_platforms:
+      - "linux"
+      - "darwin"
+
+  # AGM-specific configuration defaults
+  agm_config:
+    session_timeout_hours: 24
+    max_active_sessions: 50
+    auto_archive_after_days: 30
+    context_max_items: 1000
+    default_model: "claude-sonnet-4-5"
+
+  # Feature flags
+  features:
+    multi_session_context: true
+    session_tagging: true
+    auto_archival: true
+    corpus_callosum_integration: true
+    gemini_support: true
+    claude_support: true
+    tmux_integration: true
+
+  # Installation notes
+  installation_notes: |
+    AGM (AI-assisted session management) provides:
+    - Session lifecycle management for Claude Code and Gemini
+    - Multi-turn conversation context tracking
+    - Session categorization via tags
+    - Integration with Engram for workspace detection
+    - Optional Corpus Callosum schema registration
+    - Tmux integration for persistent sessions
+
+    After installation:
+    1. Create your first session: agm new "My First Session"
+    2. List sessions: agm list
+    3. Attach to session: agm attach <session-name>
+    4. Kill session: agm kill <session-name>
+
+    Documentation: https://github.com/vbonnet/ai-tools/tree/main/main/agm

@@ -1,0 +1,72 @@
+# AGENTS.md - Agent Routing Configuration for AGM
+# Place this file in your project root or ~/.config/agm/
+
+# Schema version (optional, default: "1.0")
+schema_version: "1.0"
+
+# Default harness when no keyword matches (required)
+# Options: claude-code, gemini-cli, codex-cli, opencode-cli
+default_harness: claude-code
+
+# Keyword-based routing rules (optional)
+# Order matters: first match wins
+preferences:
+  # Example 1: Creative and design tasks → Gemini
+  - keywords:
+      - creative
+      - brainstorm
+      - design
+      - art
+      - ideation
+    harness: gemini-cli
+
+  # Example 2: Coding and implementation → Claude
+  - keywords:
+      - code
+      - implement
+      - debug
+      - refactor
+      - test
+      - fix
+      - build
+    harness: claude-code
+
+  # Example 3: Research and data analysis → Codex
+  - keywords:
+      - research
+      - analyze
+      - data
+      - gpt
+      - openai
+    harness: codex-cli
+
+  # Example 4: General chat and questions → OpenCode
+  - keywords:
+      - chat
+      - question
+      - explain
+      - discuss
+    harness: opencode-cli
+
+# Usage Examples:
+#   agm new creative-project       → Uses gemini-cli (matches "creative")
+#   agm new code-refactor          → Uses claude-code (matches "code")
+#   agm new research-analysis      → Uses codex-cli (matches "research")
+#   agm new random-task            → Uses claude-code (default, no match)
+#   agm new creative-project --harness claude-code  → Uses claude-code (flag overrides)
+
+# Configuration Locations:
+# AGENTS.md is searched in this order (first found wins):
+# 1. ./AGENTS.md - Project-specific config
+# 2. ~/.config/agm/AGENTS.md - Global user config
+
+# Keyword Matching Rules:
+# - Case-insensitive: "Creative" matches "creative"
+# - Substring matching: "creative-project" matches keyword "creative"
+# - First match wins: Order matters in preferences list
+
+# Error Handling:
+# - Invalid YAML syntax → Warning + fallback to defaults
+# - Missing default_agent → Warning + uses "claude"
+# - Empty keywords list → Warning + skip that preference
+# - File not found → Silent fallback to defaults (expected)

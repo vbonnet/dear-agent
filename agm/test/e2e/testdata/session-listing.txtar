@@ -1,0 +1,46 @@
+# Test: Session listing with multiple sessions
+# Validates: List command (FR1.3)
+#
+# This test ensures that:
+# - csm list shows all active sessions
+# - Multiple sessions are handled correctly
+# - Listing is consistent and reliable
+# - Empty list works when no sessions exist
+
+[!can-create-tmux-session] skip 'cannot create tmux sessions in this environment'
+
+# Create multiple test sessions
+# Use --agent gpt to avoid 60s ready-file wait (E2E tests use dummy API key)
+exec agm session new bdd-list-test-1 --agent gpt --detached --sessions-dir $HOME/sessions
+stdout 'Session.*created'
+
+exec agm session new bdd-list-test-2 --agent gpt --detached --sessions-dir $HOME/sessions
+stdout 'Session.*created'
+
+exec agm session new bdd-list-test-3 --agent gpt --detached --sessions-dir $HOME/sessions
+stdout 'Session.*created'
+
+# List all sessions - should show all three
+exec agm session list --sessions-dir $HOME/sessions
+stdout 'bdd-list-test-1'
+stdout 'bdd-list-test-2'
+stdout 'bdd-list-test-3'
+
+# Archive first session
+exec agm session archive bdd-list-test-1 --sessions-dir $HOME/sessions --force
+
+# List again - should show only remaining two
+exec agm session list --sessions-dir $HOME/sessions
+! stdout 'bdd-list-test-1'
+stdout 'bdd-list-test-2'
+stdout 'bdd-list-test-3'
+
+# Cleanup remaining sessions
+exec agm session archive bdd-list-test-2 --sessions-dir $HOME/sessions --force
+exec agm session archive bdd-list-test-3 --sessions-dir $HOME/sessions --force
+
+# Verify all test sessions are cleaned up
+exec agm session list --sessions-dir $HOME/sessions
+! stdout 'bdd-list-test-1'
+! stdout 'bdd-list-test-2'
+! stdout 'bdd-list-test-3'

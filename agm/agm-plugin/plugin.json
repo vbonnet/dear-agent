@@ -1,0 +1,7 @@
+{
+  "name": "agm",
+  "version": "0.4.1",
+  "description": "AGM (Agent Gateway Manager) commands for managing Claude sessions with tmux",
+  "commands": ["./commands/"],
+  "dependencies": ["agm", "tmux"]
+}

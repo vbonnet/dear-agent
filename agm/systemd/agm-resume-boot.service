@@ -1,0 +1,43 @@
+[Unit]
+Description=AGM Auto-Resume Sessions on Boot
+Documentation=https://github.com/vbonnet/ai-tools/tree/main/agm
+After=default.target network.target agm-daemon.service
+Wants=agm-daemon.service
+
+[Service]
+Type=oneshot
+User=%i
+
+# Wait for tmux server to be ready
+ExecStartPre=/bin/sleep 5
+
+# Check if auto-resume is enabled (exit 0 if disabled)
+ExecStartPre=/bin/bash -c 'test "$(agm config get auto_resume.enabled)" = "true" || exit 0'
+
+# Resume all sessions in detached mode
+ExecStart=%h/bin/agm sessions resume-all --detached
+
+# Don't keep service running after completion
+RemainAfterExit=no
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agm-resume-boot
+
+# Environment
+Environment="PATH=%h/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="HOME=%h"
+
+# Timeout (5 minutes for bulk resume)
+TimeoutStartSec=300
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.agm %h/.claude %h/sessions
+
+[Install]
+WantedBy=default.target
