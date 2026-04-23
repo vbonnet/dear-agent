@@ -1,8 +1,12 @@
 # dear-agent
 
-**A closed-loop agent harness implementing the DEAR protocol.**
+**A personal experiment in AI agent harness design, built around the DEAR protocol.**
 
-DEAR (Define, Enforce, Audit, Resolve) is an architectural pattern for building AI agent systems that get permanently better after every failure. dear-agent is its reference implementation: a session manager, orchestration layer, and safety harness for multi-agent workflows across Claude, Gemini, Codex, and OpenCode.
+DEAR (Define, Enforce, Audit, Resolve) is an architectural pattern for building AI agent systems that get permanently better after every failure. dear-agent is a working implementation of that pattern: a session manager, orchestration layer, and safety harness for multi-agent workflows across Claude, Gemini, Codex, and OpenCode.
+
+This project grew out of a concrete problem — research sessions were silently lost when cleanup processes ran before work was committed. The DEAR loop is how the system learned to stop losing work. Some parts are solid and battle-tested. Others are still in progress. The README is honest about which is which.
+
+> *"Every bypass is a bug. Fix the layer, not the symptom."*
 
 ---
 
@@ -194,23 +198,36 @@ After this change: zero sessions lost to cleanup. The failure class was eliminat
 
 ## Project Status
 
-dear-agent is in active development. The Enforce layer is production-ready. The Audit layer is partially implemented. The Resolve & Refine self-improvement loop is the current focus.
+This is a personal project, not a product. I use it daily to manage my own AI coding sessions. The session management core is solid; the more ambitious self-improvement features are still taking shape.
+
+**What works today:**
 
 | Component | Status |
 |-----------|--------|
-| Session lifecycle (create, resume, archive, kill) | ✅ Production |
-| Multi-harness adapters (Claude, Gemini, Codex, OpenCode) | ✅ Production |
-| Circuit breaker with DEARLevel | ✅ Production |
-| Async message delivery with state-aware routing | ✅ Production |
-| dear-diary immutable event log | ✅ Production |
-| Overseer monitor (5-min heartbeat) | ✅ Production |
-| Cross-harness verification gate | ✅ Production |
-| Pre-merge validation hooks | ✅ Production |
-| Worktree isolation and recovery | ✅ Production |
+| Session lifecycle (create, resume, archive, kill) | ✅ Working |
+| Multi-harness adapters (Claude, Gemini, Codex, OpenCode) | ✅ Working |
+| Circuit breaker with DEARLevel | ✅ Working |
+| Async message delivery with state-aware routing | ✅ Working |
+| dear-diary immutable event log | ✅ Working |
+| Overseer monitor (5-min heartbeat) | ✅ Working |
+| Cross-harness verification gate | ✅ Working |
+| Pre-merge validation hooks | ✅ Working |
+| Worktree isolation and recovery | ✅ Working |
+
+**What's in progress:**
+
+| Component | Status |
+|-----------|--------|
 | Branch auditor daemon | 🚧 In progress |
 | `session.CheckCompletion()` | 🚧 In progress |
+
+**What's aspirational:**
+
+| Component | Status |
+|-----------|--------|
 | Prompt A/B testing framework | 📋 Planned |
-| Bead analysis pipeline (self-improvement) | 📋 Planned |
+| Bead analysis pipeline (self-improvement flywheel) | 📋 Planned |
+| Benchmark-driven self-improvement (SWE-bench) | 📋 Planned |
 
 ---
 
