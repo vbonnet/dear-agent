@@ -44,10 +44,10 @@ Define ──► Enforce ──► [ Agent Work ] ──► Audit ─┤
 - **Session lifecycle management** — Create, resume, list, archive, and monitor sessions with persistent metadata and automatic state tracking.
 - **Circuit breaker** — DEARLevel classification (GREEN / YELLOW / RED / EMERGENCY) gates agent spawning based on system load. Prevents cascade failures before they start.
 - **Async message delivery** — State-aware message routing. Messages are held until the target session is READY, then delivered with retry logic.
-- **Immutable audit trail** — `dear-diary` records every session event as append-only JSONL. Never deleted, always queryable.
+- **Immutable audit trail** — `dear-diary` reads append-only JSONL session logs. The log writer runs as an external session hook (not included in this repo).
 - **Worktree isolation** — Agents operate in isolated filesystem environments. Work is recoverable even if a session dies mid-task.
-- **Overseer monitor** — Runs on a 5-minute heartbeat, detects stalled sessions, false completions, and missed permission prompts.
-- **Cross-harness verification** — A different model family reviews agent output before merging. Independent review catches shared blind spots.
+- **Overseer monitor** — Architecture and ADRs defined; daemon implementation in progress.
+- **Cross-harness verification** — `internal/ops/cross_check.go` implements review logic; merge-path wiring is in progress.
 
 ---
 
@@ -55,14 +55,14 @@ Define ──► Enforce ──► [ Agent Work ] ──► Audit ─┤
 
 ### Prerequisites
 
-- Go 1.23+
+- Go 1.25+
 - tmux
 - Git
 
 ### Install
 
 ```bash
-go install github.com/vbonnet/dear-agent/cmd/agm@latest
+go install github.com/vbonnet/dear-agent/agm/cmd/agm@latest
 ```
 
 ### First Session
@@ -75,7 +75,7 @@ agm session new my-feature
 agm status
 
 # Send a message to a running session
-agm session send my-feature "run the tests and report back"
+agm send msg my-feature "run the tests and report back"
 
 # Archive when done
 agm session archive my-feature
@@ -85,15 +85,13 @@ agm session archive my-feature
 
 ```bash
 # Launch an orchestrator session (Claude Code)
-agm session new orchestrator --agent claude
+agm session new orchestrator --harness claude-code
 
 # Launch worker sessions (different harnesses for cross-verification)
-agm session new worker-1 --agent claude
-agm session new worker-2 --agent gemini
+agm session new worker-1 --harness claude-code
+agm session new worker-2 --harness gemini-cli
 
 # The orchestrator dispatches work; workers execute and report back
-# Overseer monitors all three for stalls and false completions
-agm admin overseer start
 ```
 
 ---
@@ -174,9 +172,9 @@ During development, 17 research sessions were launched. 10 were stranded on unme
 4. Requester notified
 5. Work is merge-ready
 
-**Enforce:** Pre-exit hook blocks termination if any predicate fails. UUID branch names are rejected at creation time. Cleanup process now auto-commits and pushes before running.
+**Enforce:** UUID branch names are rejected at creation time. Cleanup process now auto-commits and pushes before running. (Pre-exit hook for completion predicates is in progress.)
 
-**Audit:** `agm admin audit-branches` scans all repos for stale/unmerged work. Overseer runs this check every 5 minutes.
+**Audit:** `agm admin audit` scans sessions for orphaned conversations, corrupted manifests, and duplicate UUIDs. A dedicated branch auditor (`agm admin audit-branches`) is in progress.
 
 **Resolve:** Clean branches auto-merge. Conflicted branches get PRs. Escalation: auto-fix → PR → human notification.
 
@@ -208,9 +206,6 @@ This is a personal project, not a product. I use it daily to manage my own AI co
 | Multi-harness adapters (Claude, Gemini, Codex, OpenCode) | ✅ Working |
 | Circuit breaker with DEARLevel | ✅ Working |
 | Async message delivery with state-aware routing | ✅ Working |
-| dear-diary immutable event log | ✅ Working |
-| Overseer monitor (5-min heartbeat) | ✅ Working |
-| Cross-harness verification gate | ✅ Working |
 | Pre-merge validation hooks | ✅ Working |
 | Worktree isolation and recovery | ✅ Working |
 
@@ -218,8 +213,11 @@ This is a personal project, not a product. I use it daily to manage my own AI co
 
 | Component | Status |
 |-----------|--------|
-| Branch auditor daemon | 🚧 In progress |
+| Branch auditor daemon (`agm admin audit-branches`) | 🚧 In progress |
 | `session.CheckCompletion()` | 🚧 In progress |
+| dear-diary log writer (external hook) | 🚧 In progress |
+| Overseer monitor daemon (5-min heartbeat) | 🚧 In progress |
+| Cross-harness verification merge gate | 🚧 In progress |
 
 **What's aspirational:**
 
