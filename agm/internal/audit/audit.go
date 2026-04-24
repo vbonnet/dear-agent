@@ -178,7 +178,7 @@ func checkOrphanedConversations(sessionsDir, workspaceFilter string, adapter *do
 			UUID:           o.UUID,
 			Workspace:      o.Workspace,
 			Path:           o.ProjectPath,
-			Message:        fmt.Sprintf("Orphaned conversation found: %s", o.UUID[:8]),
+			Message:        fmt.Sprintf("Orphaned conversation found: %s", shortID(o.UUID)),
 			Details:        fmt.Sprintf("Project: %s, Last modified: %s", o.ProjectPath, o.LastModified.Format("2006-01-02 15:04")),
 			Recommendation: "Run 'agm session import " + o.UUID + "' to restore tracking",
 			DetectedAt:     time.Now(),
@@ -419,8 +419,8 @@ func checkDuplicateUUIDs(sessionsDir, workspaceFilter string, adapter *dolt.Adap
 					UUID:           uuid,
 					Workspace:      s.Workspace,
 					Path:           filepath.Join(sessionsDir, s.SessionID),
-					Message:        fmt.Sprintf("Duplicate UUID: %s", uuid[:8]),
-					Details:        fmt.Sprintf("UUID %s is claimed by: %v", uuid[:8], sessionIDs),
+					Message:        fmt.Sprintf("Duplicate UUID: %s", shortID(uuid)),
+					Details:        fmt.Sprintf("UUID %s is claimed by: %v", shortID(uuid), sessionIDs),
 					Recommendation: "Keep the correct session and run 'agm admin fix-uuid' on duplicates",
 					DetectedAt:     time.Now(),
 				})
@@ -429,6 +429,16 @@ func checkDuplicateUUIDs(sessionsDir, workspaceFilter string, adapter *dolt.Adap
 	}
 
 	return issues, nil
+}
+
+// shortID returns the first 8 characters of a UUID string for display.
+// If the string is shorter than 8 characters it is returned as-is to avoid
+// an index-out-of-bounds panic on corrupt or empty manifest UUIDs.
+func shortID(s string) string {
+	if len(s) <= 8 {
+		return s
+	}
+	return s[:8]
 }
 
 // filterBySeverity filters issues by minimum severity level

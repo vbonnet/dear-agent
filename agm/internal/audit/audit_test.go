@@ -489,6 +489,25 @@ func createTestSession(t *testing.T, baseDir, sessionID, workspace, uuid string,
 	require.NoError(t, os.WriteFile(manifestPath, data, 0644))
 }
 
+func TestShortID(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", ""},                      // empty — no panic
+		{"abc", "abc"},               // shorter than 8 — returned as-is
+		{"1234567", "1234567"},        // exactly 7 — no panic
+		{"12345678", "12345678"},      // exactly 8 — full string
+		{"abcdefgh-extra", "abcdefgh"}, // longer than 8 — truncated
+	}
+	for _, tc := range cases {
+		got := shortID(tc.in)
+		if got != tc.want {
+			t.Errorf("shortID(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func createCorruptedManifest(t *testing.T, baseDir, sessionID string) {
 	sessionDir := filepath.Join(baseDir, sessionID)
 	require.NoError(t, os.MkdirAll(sessionDir, 0755))
