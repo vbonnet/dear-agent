@@ -356,6 +356,79 @@ func TestTopoOrderCycleRejected(t *testing.T) {
 	}
 }
 
+func TestRunnerBashEnvVarExposure(t *testing.T) {
+	// Inputs and outputs must be auto-exposed as INPUT_* / OUTPUT_* env vars
+	// so scripts can reference them without interpolating into the command string.
+	r := NewRunner(&fakeAI{})
+	w := &Workflow{
+		Name:    "env-exposure",
+		Version: "1",
+		Inputs:  []InputSpec{{Name: "greeting", Required: true}},
+		Nodes: []Node{
+			// First node: uses env var instead of template interpolation.
+			{ID: "n", Kind: KindBash, Bash: &BashNode{Cmd: "echo $INPUT_GREETING"}},
+		},
+	}
+	rep, err := r.Run(context.Background(), w, map[string]string{"greeting": "hello"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got := strings.TrimSpace(rep.Results[0].Output)
+	if got != "hello" {
+		t.Errorf("INPUT_GREETING = %q, want hello", got)
+	}
+}
+
+func TestRunnerBashShellQuoteFunction(t *testing.T) {
+	// {{shq .Inputs.x}} must shell-quote the value so metacharacters don't execute.
+	r := NewRunner(&fakeAI{})
+	w := &Workflow{
+		Name:    "shq",
+		Version: "1",
+		Inputs:  []InputSpec{{Name: "x", Required: true}},
+		Nodes: []Node{
+			// shq wraps in single quotes — printf %s ensures no execution of content.
+			{ID: "n", Kind: KindBash, Bash: &BashNode{Cmd: "printf '%s' {{shq .Inputs.x}}"}},
+		},
+	}
+	// A value with shell metacharacters — must NOT execute a subcommand.
+	rep, err := r.Run(context.Background(), w, map[string]string{"x": "a;b"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got := rep.Results[0].Output
+	if got != "a;b" {
+		t.Errorf("shq output = %q, want a;b", got)
+	}
+}
+
+func TestEnvVarKey(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"foo", "INPUT_FOO"},
+		{"my-key", "INPUT_MY_KEY"},
+		{"stage.output", "INPUT_STAGE_OUTPUT"},
+	}
+	for _, tc := range cases {
+		if got := envVarKey("INPUT_", tc.in); got != tc.want {
+			t.Errorf("envVarKey(INPUT_, %q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"hello", "'hello'"},
+		{"it's", "'it'\\''s'"},
+		{"a;b", "'a;b'"},
+		{"$(rm -rf /)", "'$(rm -rf /)'"},
+	}
+	for _, tc := range cases {
+		if got := shellQuote(tc.in); got != tc.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestRunnerCancelsOnContextDone(t *testing.T) {
 	r := NewRunner(&fakeAI{})
 	w := &Workflow{

@@ -183,6 +183,13 @@ func (r *Runner) executeAI(nc *nodeContext, node *Node) (string, error) {
 
 // executeBash runs the rendered command under /bin/sh -c and returns its
 // stdout + exit code. Stderr is captured into the Meta map.
+//
+// WARNING — injection risk: {{.Inputs.foo}} in the Cmd template interpolates
+// values directly into the shell command string. If those values contain shell
+// metacharacters (;, &&, $(...), backticks) arbitrary commands can execute.
+// Prefer the safe alternatives:
+//   - Reference values as $INPUT_FOO / $OUTPUT_FOO env vars (auto-injected).
+//   - Use the {{shq .Inputs.foo}} template function for explicit shell-quoting.
 func (r *Runner) executeBash(nc *nodeContext, node *Node) (string, int, error) {
 	rendered, err := renderTemplate(node.Bash.Cmd, nc)
 	if err != nil {
@@ -197,9 +204,21 @@ func (r *Runner) executeBash(nc *nodeContext, node *Node) (string, int, error) {
 	if cmd.Dir == "" {
 		cmd.Dir = r.DefaultWorkingDir
 	}
+	// Always start from a clean copy of the parent environment, then layer:
+	// 1. node-declared env overrides, 2. INPUT_* / OUTPUT_* from workflow state.
+	env := cmd.Environ()
 	if len(node.Bash.Env) > 0 {
-		cmd.Env = append(cmd.Environ(), envSlice(node.Bash.Env)...)
+		env = append(env, envSlice(node.Bash.Env)...)
 	}
+	// Auto-expose workflow inputs/outputs so scripts can use $INPUT_FOO /
+	// $OUTPUT_FOO without interpolating untrusted values into the command string.
+	for k, v := range nc.inputs {
+		env = append(env, envVarKey("INPUT_", k)+"="+v)
+	}
+	for k, v := range nc.outputs {
+		env = append(env, envVarKey("OUTPUT_", k)+"="+v)
+	}
+	cmd.Env = env
 	out, err := cmd.Output()
 	code := cmd.ProcessState.ExitCode()
 	if err != nil {
@@ -348,11 +367,17 @@ func findNode(nodes []Node, id string) *Node {
 // renderTemplate applies Go text/template substitution over t using the
 // node's inputs + upstream outputs + env. Template functions are minimal
 // by design — users embedding DSL logic into prompts encourages drift.
+//
+// Available template functions:
+//   - shq <value>: shell-quote a value so it is safe to interpolate into a
+//     shell command string (wraps in single quotes, escapes embedded quotes).
 func renderTemplate(t string, nc *nodeContext) (string, error) {
 	if !strings.Contains(t, "{{") {
 		return t, nil // fast path: no templating needed
 	}
-	tpl, err := template.New("node").Option("missingkey=zero").Parse(t)
+	tpl, err := template.New("node").Option("missingkey=zero").Funcs(template.FuncMap{
+		"shq": shellQuote,
+	}).Parse(t)
 	if err != nil {
 		return "", err
 	}
@@ -443,4 +468,26 @@ func envSlice(m map[string]string) []string {
 		out = append(out, k+"="+v)
 	}
 	return out
+}
+
+// envVarKey converts a workflow key name to a safe env var name with the
+// given prefix. Non-alphanumeric characters are replaced with underscores.
+func envVarKey(prefix, name string) string {
+	var b strings.Builder
+	b.WriteString(prefix)
+	for _, r := range strings.ToUpper(name) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
+// shellQuote wraps s in single quotes so it is safe to interpolate into a
+// shell command. Single quotes inside s are escaped by ending the current
+// quoted string, inserting an escaped quote, and reopening.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
