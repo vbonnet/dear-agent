@@ -4,7 +4,7 @@ go 1.25.9
 
 require (
 	cloud.google.com/go/aiplatform v1.124.0
-	github.com/BurntSushi/toml v0.3.1
+	github.com/BurntSushi/toml v1.6.0
 	github.com/Netflix/go-expect v0.0.0-20220104043353-73e0943537d2
 	github.com/a2aproject/a2a-go v0.3.12
 	github.com/agnivade/levenshtein v1.2.1
@@ -20,7 +20,7 @@ require (
 	github.com/cucumber/godog v0.15.1
 	github.com/fatih/color v1.19.0
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/go-playground/validator/v10 v10.30.1
+	github.com/go-playground/validator/v10 v10.30.2
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
@@ -42,7 +42,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/xeipuuv/gojsonschema v1.2.0
-	github.com/yuin/goldmark v1.7.8
+	github.com/yuin/goldmark v1.8.2
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.43.0
 	go.opentelemetry.io/otel/sdk v1.43.0
