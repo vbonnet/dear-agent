@@ -1,0 +1,165 @@
+{
+  "$schema": "https://corpus-callosum.dev/schema/v1",
+  "component": "wayfinder",
+  "version": "1.0.0",
+  "compatibility": "backward",
+  "description": "Wayfinder SDLC project tracking and phase management",
+  "schemas": {
+    "project": {
+      "type": "object",
+      "description": "Wayfinder project metadata and status",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "description": "Unique session identifier (UUID)",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "project_path": {
+          "type": "string",
+          "description": "Absolute path to project directory"
+        },
+        "schema_version": {
+          "type": "string",
+          "description": "WAYFINDER-STATUS.md schema version",
+          "default": "1.0"
+        },
+        "version": {
+          "type": "string",
+          "description": "Wayfinder workflow version (v1 or v2)",
+          "enum": ["v1", "v2"],
+          "default": "v1"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Project start timestamp (ISO 8601)"
+        },
+        "ended_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Project end timestamp (ISO 8601)"
+        },
+        "status": {
+          "type": "string",
+          "description": "Overall project status",
+          "enum": ["in_progress", "completed", "abandoned", "obsolete", "blocked"]
+        },
+        "lifecycle_state": {
+          "type": "string",
+          "description": "A2A-compatible lifecycle state for observability",
+          "enum": ["working", "input-required", "dependency-blocked", "validating", "completed", "failed", "canceled"]
+        },
+        "current_phase": {
+          "type": "string",
+          "description": "Current active phase (e.g., D1, S8, discovery.problem)"
+        },
+        "skip_roadmap": {
+          "type": "boolean",
+          "description": "V2 only: skip optional roadmap.* phases",
+          "default": false
+        },
+        "blocked_on": {
+          "type": "string",
+          "description": "Agent ID or task ID causing block (when status=blocked)"
+        },
+        "error_message": {
+          "type": "string",
+          "description": "Error details when lifecycle_state=failed"
+        },
+        "input_needed": {
+          "type": "string",
+          "description": "Description of needed input when lifecycle_state=input-required"
+        }
+      },
+      "required": ["session_id", "project_path", "started_at", "status"]
+    },
+    "phase": {
+      "type": "object",
+      "description": "Individual Wayfinder phase metadata",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Phase identifier (v1: W0, D1-D4, S4-S11; v2: dot-notation like discovery.problem)"
+        },
+        "status": {
+          "type": "string",
+          "description": "Phase completion status",
+          "enum": ["pending", "in_progress", "completed", "skipped"]
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Phase start timestamp (ISO 8601)"
+        },
+        "completed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Phase completion timestamp (ISO 8601)"
+        },
+        "outcome": {
+          "type": "string",
+          "description": "Phase outcome classification",
+          "enum": ["success", "partial", "skipped"]
+        }
+      },
+      "required": ["name", "status"]
+    }
+  },
+  "discovery": {
+    "description": "Patterns for discovering Wayfinder projects in the filesystem",
+    "directories": [
+      "wf/"
+    ],
+    "patterns": [
+      "**/WAYFINDER-STATUS.md"
+    ],
+    "exclude": [
+      "**/.wayfinder/archives/**",
+      "**/.worktrees/**"
+    ]
+  },
+  "examples": {
+    "project": {
+      "session_id": "7c4e76a6-a7d5-4d8e-ae86-27f3f2a6dc1e",
+      "project_path": "the git history",
+      "schema_version": "1.0",
+      "version": "v1",
+      "started_at": "2026-02-19T12:00:00Z",
+      "status": "in_progress",
+      "lifecycle_state": "working",
+      "current_phase": "S8"
+    },
+    "phase": {
+      "name": "S8",
+      "status": "in_progress",
+      "started_at": "2026-02-19T14:30:00Z",
+      "outcome": "success"
+    }
+  },
+  "metadata": {
+    "repository": "https://github.com/vbonnet/engram",
+    "documentation": "https://github.com/vbonnet/engram/tree/main/core/docs/wayfinder",
+    "phase_types": {
+      "v1": ["W0", "D1", "D2", "D3", "D4", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S11"],
+      "v2": [
+        "discovery.problem",
+        "discovery.solutions",
+        "discovery.approach",
+        "discovery.requirements",
+        "definition",
+        "specification",
+        "design.tech-lead",
+        "design.security",
+        "design.qa",
+        "roadmap.planning",
+        "roadmap.breakdown",
+        "roadmap.dependencies",
+        "build.implement",
+        "build.test",
+        "build.integrate",
+        "deploy",
+        "retrospective"
+      ]
+    }
+  }
+}

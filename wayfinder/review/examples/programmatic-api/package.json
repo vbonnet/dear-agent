@@ -1,0 +1,26 @@
+{
+  "name": "multi-persona-review-api-example",
+  "version": "1.0.0",
+  "description": "Programmatic API example for multi-persona-review",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node index.js",
+    "dev": "tsc && node index.js"
+  },
+  "keywords": [
+    "code-review",
+    "multi-persona",
+    "example"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@wayfinder/multi-persona-review": "file:../.."
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

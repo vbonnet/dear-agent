@@ -1,0 +1,412 @@
+/**
+ * Cost sink abstraction for tracking code review costs
+ */
+
+import type { CostInfo, PersonaCost, CostSinkConfig, CacheMetrics } from './types.js';
+import type { CacheAlert } from './cache-alert-tracker.js';
+
+/**
+ * Cost savings calculation result
+ */
+export interface CostSavings {
+  /** Baseline cost without caching (USD) */
+  baselineCost: number;
+
+  /** Actual cost with caching (USD) */
+  cachedCost: number;
+
+  /** Cost savings (USD) */
+  savings: number;
+
+  /** Savings percentage */
+  savingsPercent: number;
+}
+
+/**
+ * Anthropic pricing structure (as of 2025)
+ */
+const ANTHROPIC_PRICING = {
+  'claude-3-5-sonnet-20241022': {
+    input: 3.0 / 1_000_000,           // $3 per MTok
+    cacheWrite: 3.75 / 1_000_000,     // $3.75 per MTok (25% premium)
+    cacheRead: 0.30 / 1_000_000,      // $0.30 per MTok (90% discount)
+    output: 15.0 / 1_000_000,         // $15 per MTok
+  },
+  'claude-3-5-haiku-20241022': {
+    input: 0.8 / 1_000_000,
+    cacheWrite: 1.0 / 1_000_000,
+    cacheRead: 0.08 / 1_000_000,
+    output: 4.0 / 1_000_000,
+  },
+  'claude-3-opus-20240229': {
+    input: 15.0 / 1_000_000,
+    cacheWrite: 18.75 / 1_000_000,
+    cacheRead: 1.50 / 1_000_000,
+    output: 75.0 / 1_000_000,
+  },
+} as const;
+
+const DEFAULT_MODEL = 'claude-3-5-sonnet-20241022';
+
+/**
+ * Calculate cache hit rate from metrics
+ * @param metrics Cache metrics from API response
+ * @returns Hit rate as percentage (0-100)
+ */
+export function calculateCacheHitRate(metrics: CacheMetrics): number {
+  const totalCached = metrics.cacheReadTokens;
+  const totalUncached = metrics.inputTokens;
+
+  if (totalCached + totalUncached === 0) {
+    return 0;
+  }
+
+  return (totalCached / (totalCached + totalUncached)) * 100;
+}
+
+/**
+ * Calculate cost savings from caching
+ * @param metrics Cache metrics
+ * @param model Model name (for pricing lookup)
+ * @returns Cost savings breakdown
+ */
+export function calculateCostSavings(
+  metrics: CacheMetrics,
+  model: string = DEFAULT_MODEL
+): CostSavings {
+  const pricing = ANTHROPIC_PRICING[model as keyof typeof ANTHROPIC_PRICING]
+    || ANTHROPIC_PRICING[DEFAULT_MODEL];
+
+  // Actual cost with caching
+  const cachedCost =
+    (metrics.inputTokens * pricing.input) +
+    (metrics.cacheCreationTokens * pricing.cacheWrite) +
+    (metrics.cacheReadTokens * pricing.cacheRead);
+
+  // Baseline cost (if all tokens were uncached)
+  const totalInputTokens =
+    metrics.inputTokens +
+    metrics.cacheCreationTokens +
+    metrics.cacheReadTokens;
+  const baselineCost = totalInputTokens * pricing.input;
+
+  // Savings
+  const savings = baselineCost - cachedCost;
+  const savingsPercent = baselineCost > 0 ? (savings / baselineCost) * 100 : 0;
+
+  return {
+    baselineCost,
+    cachedCost,
+    savings,
+    savingsPercent,
+  };
+}
+
+/**
+ * Extract cache metrics from PersonaCost
+ * @param personaCost PersonaCost object
+ * @returns Cache metrics
+ */
+export function extractCacheMetrics(personaCost: PersonaCost): CacheMetrics {
+  const cacheCreationTokens = personaCost.cacheCreationInputTokens || 0;
+  const cacheReadTokens = personaCost.cacheReadInputTokens || 0;
+  const inputTokens = personaCost.inputTokens;
+  const outputTokens = personaCost.outputTokens;
+
+  const cacheHit = cacheReadTokens > 0;
+  const totalInputTokens = inputTokens + cacheCreationTokens + cacheReadTokens;
+  const cacheEfficiency = totalInputTokens > 0 ? cacheReadTokens / totalInputTokens : 0;
+
+  return {
+    cacheCreationTokens,
+    cacheReadTokens,
+    inputTokens,
+    outputTokens,
+    cacheHit,
+    cacheEfficiency,
+  };
+}
+
+/**
+ * Aggregate cache metrics across multiple personas
+ * @param costInfo Cost information with multiple personas
+ * @returns Aggregated cache metrics
+ */
+export function aggregateCacheMetrics(costInfo: CostInfo): CacheMetrics {
+  let totalCacheCreation = 0;
+  let totalCacheRead = 0;
+  let totalInput = 0;
+  let totalOutput = 0;
+
+  for (const personaCost of Object.values(costInfo.byPersona)) {
+    const metrics = extractCacheMetrics(personaCost);
+    totalCacheCreation += metrics.cacheCreationTokens;
+    totalCacheRead += metrics.cacheReadTokens;
+    totalInput += metrics.inputTokens;
+    totalOutput += metrics.outputTokens;
+  }
+
+  const cacheHit = totalCacheRead > 0;
+  const totalInputTokens = totalInput + totalCacheCreation + totalCacheRead;
+  const cacheEfficiency = totalInputTokens > 0 ? totalCacheRead / totalInputTokens : 0;
+
+  return {
+    cacheCreationTokens: totalCacheCreation,
+    cacheReadTokens: totalCacheRead,
+    inputTokens: totalInput,
+    outputTokens: totalOutput,
+    cacheHit,
+    cacheEfficiency,
+  };
+}
+
+/**
+ * Cost sink interface - all sinks must implement this
+ */
+export interface CostSink {
+  /**
+   * Record cost information for a code review
+   */
+  record(cost: CostInfo, metadata?: CostMetadata): Promise<void>;
+
+  /**
+   * Flush any pending cost records
+   */
+  flush?(): Promise<void>;
+
+  /**
+   * Close the cost sink and clean up resources
+   */
+  close?(): Promise<void>;
+
+  /**
+   * Get cache alerts generated by this sink (if supported)
+   */
+  getCacheAlerts?(): CacheAlert[];
+}
+
+/**
+ * Metadata to include with cost records
+ */
+export interface CostMetadata {
+  /** Repository name */
+  repository?: string;
+
+  /** Branch name */
+  branch?: string;
+
+  /** Commit SHA */
+  commit?: string;
+
+  /** Pull request number */
+  pullRequest?: number;
+
+  /** Review mode used */
+  mode?: string;
+
+  /** Number of files reviewed */
+  filesReviewed?: number;
+
+  /** Total findings count */
+  totalFindings?: number;
+
+  /** Timestamp (defaults to now) */
+  timestamp?: Date;
+
+  /** Additional custom metadata */
+  custom?: Record<string, unknown>;
+}
+
+/**
+ * Error codes for cost sink errors
+ */
+export const COST_SINK_ERROR_CODES = {
+  INVALID_CONFIG: 'INVALID_CONFIG',
+  SINK_UNAVAILABLE: 'SINK_UNAVAILABLE',
+  RECORD_FAILED: 'RECORD_FAILED',
+  AUTHENTICATION_FAILED: 'AUTHENTICATION_FAILED',
+} as const;
+
+/**
+ * Cost sink error class
+ */
+export class CostSinkError extends Error {
+  constructor(
+    public code: string,
+    message: string,
+    public details?: unknown
+  ) {
+    super(message);
+    this.name = 'CostSinkError';
+  }
+}
+
+/**
+ * Stdout cost sink - prints costs to console (default)
+ */
+export class StdoutCostSink implements CostSink {
+  private alertTracker?: any; // CacheAlertTracker - lazy loaded
+
+  async record(cost: CostInfo, metadata?: CostMetadata): Promise<void> {
+    const record = {
+      timestamp: metadata?.timestamp || new Date(),
+      cost: {
+        total: cost.totalCost,
+        tokens: cost.totalTokens,
+        byPersona: Object.entries(cost.byPersona).map(([name, info]) => ({
+          persona: name,
+          cost: info.cost,
+          inputTokens: info.inputTokens,
+          outputTokens: info.outputTokens,
+        })),
+      },
+      metadata: metadata ? {
+        repository: metadata.repository,
+        branch: metadata.branch,
+        commit: metadata.commit,
+        pullRequest: metadata.pullRequest,
+        mode: metadata.mode,
+        filesReviewed: metadata.filesReviewed,
+        totalFindings: metadata.totalFindings,
+        custom: metadata.custom,
+      } : undefined,
+    };
+
+    console.error('[COST_TRACKING]', JSON.stringify(record));
+
+    // Track cache alerts
+    if (!this.alertTracker) {
+      const { CacheAlertTracker } = await import('./cache-alert-tracker.js');
+      this.alertTracker = new CacheAlertTracker();
+    }
+
+    // Track cache performance for each persona
+    for (const [personaName, personaCost] of Object.entries(cost.byPersona)) {
+      const metrics = extractCacheMetrics(personaCost);
+      const alert = this.alertTracker.track(personaName, metrics);
+
+      if (alert) {
+        console.error('[CACHE_ALERT]', JSON.stringify({
+          persona: alert.persona,
+          severity: alert.severity,
+          hitRate: alert.currentHitRate,
+          consecutiveFailures: alert.consecutiveFailures,
+          message: alert.message,
+          suggestions: alert.suggestions,
+          timestamp: alert.timestamp,
+        }));
+      }
+    }
+  }
+
+  getCacheAlerts(): CacheAlert[] {
+    return this.alertTracker?.getAlerts() || [];
+  }
+}
+
+/**
+ * File-based cost sink - writes costs to a JSONL file
+ */
+export class FileCostSink implements CostSink {
+  private filePath: string;
+  private alertTracker?: any; // CacheAlertTracker - lazy loaded
+
+  constructor(config: Record<string, unknown>) {
+    if (!config.filePath || typeof config.filePath !== 'string') {
+      throw new CostSinkError(
+        COST_SINK_ERROR_CODES.INVALID_CONFIG,
+        'FileCostSink requires filePath in config'
+      );
+    }
+    this.filePath = config.filePath;
+  }
+
+  async record(cost: CostInfo, metadata?: CostMetadata): Promise<void> {
+    const { appendFile } = await import('fs/promises');
+
+    const record = {
+      timestamp: (metadata?.timestamp || new Date()).toISOString(),
+      cost: {
+        total: cost.totalCost,
+        tokens: cost.totalTokens,
+        byPersona: cost.byPersona,
+      },
+      metadata,
+    };
+
+    await appendFile(this.filePath, JSON.stringify(record) + '\n');
+
+    // Track cache alerts
+    if (!this.alertTracker) {
+      const { CacheAlertTracker } = await import('./cache-alert-tracker.js');
+      this.alertTracker = new CacheAlertTracker();
+    }
+
+    // Track cache performance for each persona
+    const alerts: CacheAlert[] = [];
+    for (const [personaName, personaCost] of Object.entries(cost.byPersona)) {
+      const metrics = extractCacheMetrics(personaCost);
+      const alert = this.alertTracker.track(personaName, metrics);
+
+      if (alert) {
+        alerts.push(alert);
+      }
+    }
+
+    // Write alerts to file if any were generated
+    if (alerts.length > 0) {
+      const alertRecord = {
+        timestamp: new Date().toISOString(),
+        type: 'CACHE_ALERT',
+        alerts,
+      };
+      await appendFile(this.filePath, JSON.stringify(alertRecord) + '\n');
+    }
+  }
+
+  getCacheAlerts(): CacheAlert[] {
+    return this.alertTracker?.getAlerts() || [];
+  }
+}
+
+/**
+ * Create cost sink factory
+ */
+export async function createCostSink(config: CostSinkConfig): Promise<CostSink> {
+  switch (config.type) {
+    case 'stdout':
+      return new StdoutCostSink();
+
+    case 'file':
+      return new FileCostSink(config.config || {});
+
+    case 'gcp':
+      // Lazy load GCP sink to avoid requiring dependencies if not used
+      const { GCPCostSink } = await import('./cost-sinks/gcp-sink.js');
+      return new GCPCostSink(config.config || {});
+
+    case 'aws':
+      throw new CostSinkError(
+        COST_SINK_ERROR_CODES.SINK_UNAVAILABLE,
+        'AWS cost sink not implemented yet (deferred per MVP requirements)'
+      );
+
+    case 'datadog':
+      throw new CostSinkError(
+        COST_SINK_ERROR_CODES.SINK_UNAVAILABLE,
+        'Datadog cost sink not implemented yet (deferred per MVP requirements)'
+      );
+
+    case 'webhook':
+      throw new CostSinkError(
+        COST_SINK_ERROR_CODES.SINK_UNAVAILABLE,
+        'Webhook cost sink not implemented yet'
+      );
+
+    default:
+      throw new CostSinkError(
+        COST_SINK_ERROR_CODES.INVALID_CONFIG,
+        `Unknown cost sink type: ${config.type}`
+      );
+  }
+}

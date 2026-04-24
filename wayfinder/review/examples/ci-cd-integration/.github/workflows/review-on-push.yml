@@ -1,0 +1,93 @@
+name: Multi-Persona Review on Push
+
+# Alternative workflow: Run review on push to main branch
+# Use this for post-merge quality monitoring
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'src/**'
+      - 'lib/**'
+      - '**.ts'
+      - '**.js'
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Get previous commit for diff
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install multi-persona-review
+        run: npm install -g @wayfinder/multi-persona-review
+
+      - name: Run quality review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Review changed files in the latest commit
+          multi-persona-review \
+            --mode thorough \
+            --scan changed \
+            --format json \
+            --cost-sink file \
+            --cost-file review-costs.jsonl \
+            > review-results.json
+
+      - name: Check for critical issues
+        run: |
+          # Parse JSON and fail if critical issues found
+          CRITICAL=$(jq '.summary.bySeverity.critical // 0' review-results.json)
+          HIGH=$(jq '.summary.bySeverity.high // 0' review-results.json)
+
+          echo "Critical issues: $CRITICAL"
+          echo "High issues: $HIGH"
+
+          if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+            echo "::error::Quality gate failed: Found $CRITICAL critical and $HIGH high severity issues"
+            exit 1
+          fi
+
+      - name: Store results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-results-${{ github.sha }}
+          path: |
+            review-results.json
+            review-costs.jsonl
+          retention-days: 90
+
+      # Optional: Send Slack notification on failures
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "Quality gate failed on main branch",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "🔴 *Code quality issues detected on main*\n\nCommit: <${{ github.event.head_commit.url }}|${{ github.event.head_commit.message }}>\nAuthor: ${{ github.event.head_commit.author.name }}"
+                  }
+                }
+              ]
+            }

@@ -1,0 +1,141 @@
+name: Multi-Persona Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'src/**'
+      - 'lib/**'
+      - '**.ts'
+      - '**.js'
+
+jobs:
+  code-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better git diff
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install multi-persona-review
+        run: |
+          npm install -g @wayfinder/multi-persona-review
+
+      # Option A: Using Anthropic (Claude)
+      - name: Run multi-persona review (Anthropic)
+        if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          multi-persona-review src/ \
+            --mode thorough \
+            --scan diff \
+            --format github \
+            --show-cache-metrics \
+            > review-comment.md || true
+
+      # Option B: Using VertexAI (Gemini)
+      - name: Authenticate to GCP (VertexAI)
+        if: ${{ secrets.VERTEX_SERVICE_ACCOUNT_KEY != '' && secrets.ANTHROPIC_API_KEY == '' }}
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.VERTEX_SERVICE_ACCOUNT_KEY }}
+
+      - name: Run multi-persona review (VertexAI)
+        if: ${{ secrets.VERTEX_PROJECT_ID != '' && secrets.ANTHROPIC_API_KEY == '' }}
+        env:
+          VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
+          VERTEX_LOCATION: ${{ secrets.VERTEX_LOCATION || 'us-central1' }}
+        run: |
+          multi-persona-review src/ \
+            --provider vertexai \
+            --mode thorough \
+            --scan diff \
+            --format github \
+            --show-cache-metrics \
+            > review-comment.md || true
+
+      # Post review as PR comment
+      - name: Post review comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Check if review comment exists
+            if (!fs.existsSync('review-comment.md')) {
+              console.log('No review comment generated');
+              return;
+            }
+
+            const comment = fs.readFileSync('review-comment.md', 'utf8');
+
+            // Find existing review comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Multi-Persona Code Review')
+            );
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
+
+      # Optional: Track costs to GCP
+      - name: Track review costs
+        if: ${{ secrets.GCP_COST_PROJECT_ID != '' }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          multi-persona-review src/ \
+            --scan diff \
+            --cost-sink gcp \
+            --gcp-project ${{ secrets.GCP_COST_PROJECT_ID }} \
+            --dry-run  # Just track costs, don't re-run review
+
+      # Optional: Store cost data as artifact
+      - name: Generate cost report
+        if: always()
+        run: |
+          echo "Review completed at $(date)" > cost-report.txt
+          echo "PR: #${{ github.event.pull_request.number }}" >> cost-report.txt
+          echo "Branch: ${{ github.head_ref }}" >> cost-report.txt
+
+      - name: Upload cost report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-cost-report-${{ github.run_number }}
+          path: cost-report.txt
+          retention-days: 30

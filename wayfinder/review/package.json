@@ -1,0 +1,70 @@
+{
+  "name": "@wayfinder/multi-persona-review",
+  "version": "0.1.0",
+  "description": "Multi-persona code review plugin for Wayfinder",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "multi-persona-review": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "prepare": "husky install"
+  },
+  "keywords": [
+    "wayfinder",
+    "code-review",
+    "multi-persona",
+    "static-analysis"
+  ],
+  "author": "Wayfinder Team",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.20.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@google-cloud/vertexai": "^1.10.0",
+    "chalk": "^5.3.0",
+    "commander": "^11.0.0",
+    "jws": "^4.0.1",
+    "yaml": "^2.3.0"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.0.0",
+    "@commitlint/config-conventional": "^19.0.0",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/commit-analyzer": "^12.0.0",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^10.0.0",
+    "@semantic-release/npm": "^12.0.0",
+    "@semantic-release/release-notes-generator": "^13.0.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.0",
+    "@typescript-eslint/parser": "^8.57.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^10.0.3",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vitest-globals": "^1.5.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.3.3",
+    "prettier": "^3.8.1",
+    "semantic-release": "^23.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.0",
+    "vitest": "^1.0.0"
+  },
+  "optionalDependencies": {
+    "@google-cloud/monitoring": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

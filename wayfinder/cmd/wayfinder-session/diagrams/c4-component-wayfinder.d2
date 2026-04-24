@@ -1,0 +1,212 @@
+# C4 Component Diagram: Wayfinder Session Manager
+# Level 3: Component-level view of internal architecture
+
+direction: right
+
+title: {
+  label: "Wayfinder Session Manager - Component Architecture"
+  near: top-center
+  shape: text
+  style: {
+    font-size: 24
+    bold: true
+  }
+}
+
+# External Systems
+user: {
+  label: "Developer/Agent"
+  shape: person
+  style.fill: "#08427b"
+}
+
+filesystem: {
+  label: "Project Files\n(Phase Docs, Status)"
+  shape: cylinder
+  style.fill: "#999999"
+}
+
+git: {
+  label: "Git Repository"
+  shape: cylinder
+  style.fill: "#999999"
+}
+
+beads: {
+  label: "Beads Issue Tracker\n(.beads/issues.jsonl)"
+  shape: cylinder
+  style.fill: "#999999"
+}
+
+# Wayfinder Container
+wayfinder: {
+  label: "Wayfinder Session Manager"
+  style.fill: "#1168bd"
+  style.stroke: "#0b4884"
+
+  # Core Orchestration Components
+  orchestrator: {
+    label: "Phase Orchestrator V2\n[Go Component]\n\nManages W0, D1-D4, S6-S8, S11\nphase transitions with validation\ngates and state machine"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  transitions: {
+    label: "Transition Validator\n[Go Component]\n\nValidates phase transitions,\nblocks phase skipping,\nenforces exit criteria"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  # Status Management
+  status_manager: {
+    label: "Status Manager\n[Go Component]\n\nReads/writes WAYFINDER-STATUS.md,\nmanages waypoint history,\nroadmap, quality metrics"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  status_parser: {
+    label: "Status Parser\n[Go Component]\n\nParses YAML frontmatter,\ndetects schema version (V1/V2),\nvalidates structure"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  filesystem_scanner: {
+    label: "Filesystem Scanner\n[Go Component]\n\nScans phase files,\ndetects validation signatures,\ninfers current phase"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  # Build Loop Engine (S8 Phase)
+  buildloop: {
+    label: "Build Loop Engine\n[Go Component]\n\nTDD state machine:\nRed→Green→Refactor→Review\nwith quality gates"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  iteration_tracker: {
+    label: "Iteration Tracker\n[Go Component]\n\nTracks build iterations,\ntest runs, state transitions,\nmetrics collection"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  # Review & Quality
+  review_engine: {
+    label: "Multi-Persona Review\n[Go Component]\n\nOrchestrates Security,\nPerformance, Maintainability,\nUX, Reliability reviews"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  risk_adapter: {
+    label: "Risk Adapter\n[Go Component]\n\nCalculates task risk (XS-XL),\nadapts review strategy,\nper-task vs batch review"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  # History & Migration
+  history: {
+    label: "History Logger\n[Go Component]\n\nAppend-only event log\n(WAYFINDER-HISTORY.md),\nconcurrent-safe writes"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  migration: {
+    label: "Migration Engine\n[Go Component]\n\nMigrates V1→V2 schema,\nbatch migration support,\nrollback capability"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  # Task Management
+  task_manager: {
+    label: "Task Manager\n[Go Component]\n\nCRUD operations on roadmap\ntasks, dependency tracking,\nstatus updates"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  # Retrospective & Resume
+  retrospective: {
+    label: "Retrospective Engine\n[Go Component]\n\nGenerates S11 retrospective,\naggregates metrics,\nlearnings extraction"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  resume: {
+    label: "Resume Detector\n[Go Component]\n\nDetects incomplete sessions,\nprompts for resumption,\nstate recovery"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+}
+
+# Relationships - User interactions
+user -> wayfinder.orchestrator: "Advances phase\n(next-phase, rewind)"
+user -> wayfinder.task_manager: "Manages tasks\n(add, update, delete)"
+user -> wayfinder.status_manager: "Queries status\n(status, verify)"
+
+# Orchestrator relationships
+wayfinder.orchestrator -> wayfinder.transitions: "Validates transition"
+wayfinder.orchestrator -> wayfinder.status_manager: "Updates phase state"
+wayfinder.orchestrator -> wayfinder.history: "Logs phase events"
+
+# Status management relationships
+wayfinder.status_manager -> wayfinder.status_parser: "Parses YAML"
+wayfinder.status_manager -> wayfinder.filesystem_scanner: "Scans phase files"
+wayfinder.status_manager -> filesystem: "Reads/writes\nWAYFINDER-STATUS.md"
+
+# Transition validation
+wayfinder.transitions -> wayfinder.status_manager: "Checks deliverables,\nvalidation status"
+wayfinder.transitions -> filesystem: "Validates phase files\n(D1-discovery.md, etc.)"
+
+# Build loop relationships
+wayfinder.buildloop -> wayfinder.iteration_tracker: "Records iterations"
+wayfinder.buildloop -> wayfinder.review_engine: "Triggers review\n(per-task or batch)"
+wayfinder.buildloop -> wayfinder.status_manager: "Updates task status"
+
+# Review engine relationships
+wayfinder.review_engine -> wayfinder.risk_adapter: "Gets risk level"
+wayfinder.risk_adapter -> wayfinder.status_manager: "Reads task metadata"
+wayfinder.review_engine -> filesystem: "Reads code files"
+
+# Task management
+wayfinder.task_manager -> wayfinder.status_manager: "Updates roadmap"
+wayfinder.task_manager -> beads: "Syncs with beads\n(optional)"
+
+# Migration
+wayfinder.migration -> wayfinder.status_parser: "Reads V1 status"
+wayfinder.migration -> wayfinder.status_manager: "Writes V2 status"
+wayfinder.migration -> filesystem: "Migrates phase files"
+
+# Retrospective
+wayfinder.retrospective -> wayfinder.history: "Reads event log"
+wayfinder.retrospective -> wayfinder.status_manager: "Reads metrics"
+wayfinder.retrospective -> filesystem: "Writes S11-retrospective.md"
+
+# Resume
+wayfinder.resume -> wayfinder.filesystem_scanner: "Detects incomplete\nsession"
+wayfinder.resume -> wayfinder.status_manager: "Reads last state"
+
+# Git integration
+wayfinder.status_manager -> git: "Commits status updates\n(optional)"
+wayfinder.history -> git: "Commits history\n(append-only)"
+
+# Legend
+legend: {
+  near: bottom-right
+  label: "Legend"
+
+  component: {
+    label: "Internal Component\n[Technology]\nResponsibilities"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  external: {
+    label: "External System"
+    shape: cylinder
+    style.fill: "#999999"
+  }
+
+  person: {
+    label: "User/Actor"
+    shape: person
+    style.fill: "#08427b"
+  }
+}

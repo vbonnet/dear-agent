@@ -1,0 +1,200 @@
+#!/bin/bash
+set -euo pipefail
+
+# wayfinder-monitor-subs: Track progress of parallel sub-projects
+
+print_usage() {
+    cat <<EOF
+Usage: wayfinder-monitor-subs --parent <parent-dir> [--watch]
+
+Options:
+  --parent DIR    Parent project directory
+  --watch         Continuous refresh every 5 seconds
+
+Example:
+  wayfinder-monitor-subs --parent ~/src/ws/oss/wf/xl-project
+  wayfinder-monitor-subs --parent ~/src/ws/oss/wf/xl-project --watch
+EOF
+}
+
+# Phase order mapping for progress calculation
+PHASE_ORDER=(
+    "W0"
+    "D1" "D2" "D3" "D4"
+    "S4" "S5" "S6" "S7" "S8" "S9" "S10" "S11"
+)
+
+# Get phase index (0-12)
+get_phase_index() {
+    local phase=$1
+    for i in "${!PHASE_ORDER[@]}"; do
+        if [[ "${PHASE_ORDER[$i]}" == "$phase" ]]; then
+            echo "$i"
+            return
+        fi
+    done
+    echo "0"
+}
+
+# Calculate progress percentage
+calculate_progress() {
+    local current_phase=$1
+    local phase_index=$(get_phase_index "$current_phase")
+    local total_phases=${#PHASE_ORDER[@]}
+
+    # Progress = (phase_index / total_phases) * 100
+    echo $(( (phase_index * 100) / total_phases ))
+}
+
+# Get progress bar
+get_progress_bar() {
+    local progress=$1
+    local bar_length=20
+    local filled=$(( (progress * bar_length) / 100 ))
+    local empty=$(( bar_length - filled ))
+
+    printf "["
+    printf "%.0s=" $(seq 1 $filled)
+    printf "%.0s " $(seq 1 $empty)
+    printf "]"
+}
+
+# Get status icon
+get_status_icon() {
+    local status=$1
+    case "$status" in
+        completed)
+            echo "✅"
+            ;;
+        in_progress)
+            echo "🔄"
+            ;;
+        pending)
+            echo "⏳"
+            ;;
+        abandoned)
+            echo "❌"
+            ;;
+        *)
+            echo "❓"
+            ;;
+    esac
+}
+
+# Display sub-project status
+display_status() {
+    local parent_dir=$1
+
+    # Find all sub-projects
+    SUB_PROJECTS_DIR="$parent_dir/sub-projects"
+
+    if [[ ! -d "$SUB_PROJECTS_DIR" ]]; then
+        echo "No sub-projects found in $parent_dir"
+        return
+    fi
+
+    # Count sub-projects
+    TOTAL_SUBS=0
+    COMPLETED_SUBS=0
+    IN_PROGRESS_SUBS=0
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📊 Sub-Project Progress Monitor"
+    echo "Parent: $(basename "$parent_dir")"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    for sub_dir in "$SUB_PROJECTS_DIR"/*; do
+        if [[ ! -d "$sub_dir" ]]; then
+            continue
+        fi
+
+        TOTAL_SUBS=$((TOTAL_SUBS + 1))
+
+        # Read STATUS file
+        STATUS_FILE="$sub_dir/WAYFINDER-STATUS.md"
+        if [[ ! -f "$STATUS_FILE" ]]; then
+            echo "  ⚠️  $(basename "$sub_dir"): No STATUS file"
+            continue
+        fi
+
+        # Extract status and current phase
+        STATUS=$(grep "^status:" "$STATUS_FILE" | awk '{print $2}' || echo "unknown")
+        CURRENT_PHASE=$(grep "^current_phase:" "$STATUS_FILE" | awk '{print $2}' || echo "W0")
+
+        # Count completed/in-progress
+        if [[ "$STATUS" == "completed" ]]; then
+            COMPLETED_SUBS=$((COMPLETED_SUBS + 1))
+        elif [[ "$STATUS" == "in_progress" ]]; then
+            IN_PROGRESS_SUBS=$((IN_PROGRESS_SUBS + 1))
+        fi
+
+        # Calculate progress
+        PROGRESS=$(calculate_progress "$CURRENT_PHASE")
+        PROGRESS_BAR=$(get_progress_bar "$PROGRESS")
+        STATUS_ICON=$(get_status_icon "$STATUS")
+
+        # Display
+        printf "  %-30s %s %s %3d%% [%s]\n" \
+            "$(basename "$sub_dir")" \
+            "$STATUS_ICON" \
+            "$PROGRESS_BAR" \
+            "$PROGRESS" \
+            "$CURRENT_PHASE"
+    done
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Summary:"
+    echo "  Total: $TOTAL_SUBS"
+    echo "  Completed: $COMPLETED_SUBS"
+    echo "  In Progress: $IN_PROGRESS_SUBS"
+    echo "  Pending: $((TOTAL_SUBS - COMPLETED_SUBS - IN_PROGRESS_SUBS))"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+# Parse arguments
+PARENT_DIR=""
+WATCH_MODE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --parent)
+            PARENT_DIR="$2"
+            shift 2
+            ;;
+        --watch)
+            WATCH_MODE=true
+            shift
+            ;;
+        -h|--help)
+            print_usage
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            print_usage >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Validate required arguments
+if [[ -z "$PARENT_DIR" ]]; then
+    echo "Error: --parent is required" >&2
+    print_usage >&2
+    exit 1
+fi
+
+# Watch mode or single display
+if [[ "$WATCH_MODE" == true ]]; then
+    while true; do
+        clear
+        display_status "$PARENT_DIR"
+        echo ""
+        echo "Refreshing every 5 seconds... (Ctrl+C to exit)"
+        sleep 5
+    done
+else
+    display_status "$PARENT_DIR"
+fi

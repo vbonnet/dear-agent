@@ -1,0 +1,32 @@
+{
+  "entryPoints": ["src/index.ts"],
+  "out": "docs/api",
+  "plugin": [],
+  "excludePrivate": true,
+  "excludeProtected": false,
+  "excludeInternal": true,
+  "readme": "README.md",
+  "categorizeByGroup": true,
+  "categoryOrder": [
+    "Core",
+    "Review Engine",
+    "Personas",
+    "Formatters",
+    "Cost Tracking",
+    "Configuration",
+    "*"
+  ],
+  "navigation": {
+    "includeCategories": true,
+    "includeGroups": true
+  },
+  "sort": ["source-order"],
+  "kindSortOrder": [
+    "Function",
+    "Class",
+    "Interface",
+    "Type alias",
+    "Enum",
+    "Variable"
+  ]
+}

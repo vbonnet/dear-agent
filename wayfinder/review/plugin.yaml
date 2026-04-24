@@ -1,0 +1,19 @@
+name: multi-persona-review
+version: 0.1.0
+description: Multi-persona code review tool
+pattern: tool
+
+# Commands this plugin provides
+commands:
+  - name: review
+    description: Perform multi-persona code review
+    executable: bin/multi-persona-review
+    args: []
+
+# Permissions needed
+permissions:
+  filesystem:
+    - "." # Current directory for reading code
+  network: []
+  commands:
+    - git # For diff generation

@@ -1,0 +1,26 @@
+---
+schema_version: "2.0"
+project_name: "Cyclic Dependency Test"
+project_type: "feature"
+risk_level: "M"
+current_waypoint: "BUILD"
+status: "in-progress"
+created_at: "2026-02-20T10:00:00Z"
+updated_at: "2026-02-20T10:00:00Z"
+roadmap:
+  phases:
+    - id: "BUILD"
+      name: "BUILD Loop"
+      status: "in-progress"
+      tasks:
+        - id: "task-1"
+          title: "First task"
+          effort_days: 1.0
+          status: "pending"
+          depends_on: ["task-2"]
+        - id: "task-2"
+          title: "Second task"
+          effort_days: 1.0
+          status: "pending"
+          depends_on: ["task-1"]
+---

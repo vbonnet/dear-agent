@@ -1,0 +1,135 @@
+#!/bin/bash
+set -euo pipefail
+
+# wayfinder-spawn-sub: Create sub-project from charter fragment
+
+print_usage() {
+    cat <<EOF
+Usage: wayfinder-spawn-sub --parent <parent-dir> --name <sub-name> --charter <charter-text>
+
+Options:
+  --parent DIR      Parent project directory
+  --name NAME       Sub-project name (kebab-case)
+  --charter TEXT    Charter text for sub-project
+  --depth DEPTH     Depth tier for sub-project (default: S)
+
+Example:
+  wayfinder-spawn-sub --parent ~/src/ws/oss/wf/xl-project \\
+                      --name claude-integration \\
+                      --charter "Implement Claude integration"
+EOF
+}
+
+# Parse arguments
+PARENT_DIR=""
+SUB_NAME=""
+CHARTER_TEXT=""
+SUB_DEPTH="S"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --parent)
+            PARENT_DIR="$2"
+            shift 2
+            ;;
+        --name)
+            SUB_NAME="$2"
+            shift 2
+            ;;
+        --charter)
+            CHARTER_TEXT="$2"
+            shift 2
+            ;;
+        --depth)
+            SUB_DEPTH="$2"
+            shift 2
+            ;;
+        -h|--help)
+            print_usage
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown option: $1" >&2
+            print_usage >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Validate required arguments
+if [[ -z "$PARENT_DIR" ]]; then
+    echo "Error: --parent is required" >&2
+    print_usage >&2
+    exit 1
+fi
+
+if [[ -z "$SUB_NAME" ]]; then
+    echo "Error: --name is required" >&2
+    print_usage >&2
+    exit 1
+fi
+
+if [[ -z "$CHARTER_TEXT" ]]; then
+    echo "Error: --charter is required" >&2
+    print_usage >&2
+    exit 1
+fi
+
+# Ensure parent directory exists
+if [[ ! -d "$PARENT_DIR" ]]; then
+    echo "Error: Parent directory not found: $PARENT_DIR" >&2
+    exit 1
+fi
+
+# Get parent project ID
+PARENT_PROJECT_ID=$(basename "$PARENT_DIR")
+PARENT_SESSION_ID=$(grep "^session_id:" "$PARENT_DIR/WAYFINDER-STATUS.md" | awk '{print $2}' || echo "unknown")
+
+# Create sub-projects directory
+SUB_PROJECTS_DIR="$PARENT_DIR/sub-projects"
+mkdir -p "$SUB_PROJECTS_DIR"
+
+# Create sub-project directory
+SUB_PROJECT_DIR="$SUB_PROJECTS_DIR/$SUB_NAME"
+
+if [[ -d "$SUB_PROJECT_DIR" ]]; then
+    echo "Error: Sub-project already exists: $SUB_PROJECT_DIR" >&2
+    exit 1
+fi
+
+echo "Creating sub-project: $SUB_NAME"
+echo "Parent: $PARENT_PROJECT_ID"
+echo "Location: $SUB_PROJECT_DIR"
+echo ""
+
+# Create sub-project using wayfinder start
+if ! wayfinder start --depth "$SUB_DEPTH" "$CHARTER_TEXT" 2>&1 | grep -q "Created Wayfinder project"; then
+    echo "Error: Failed to create sub-project with wayfinder start" >&2
+    exit 1
+fi
+
+# Move created project to sub-projects directory
+WORKSPACE=$(grep "^workspace:" "$HOME/src/ws/oss/WORKSPACE" | awk '{print $2}' || echo "oss")
+CREATED_PROJECT_DIR="$HOME/src/ws/$WORKSPACE/wf/$(echo "$SUB_NAME" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')"
+
+if [[ -d "$CREATED_PROJECT_DIR" ]]; then
+    mv "$CREATED_PROJECT_DIR" "$SUB_PROJECT_DIR"
+else
+    echo "Warning: Could not find created project at $CREATED_PROJECT_DIR" >&2
+fi
+
+# Add parent project metadata to sub-project STATUS
+if [[ -f "$SUB_PROJECT_DIR/WAYFINDER-STATUS.md" ]]; then
+    # Add parent_project_id field
+    sed -i "s/^session_id:/parent_project_id: $PARENT_PROJECT_ID\nsession_id:/" "$SUB_PROJECT_DIR/WAYFINDER-STATUS.md"
+    # Add sub_project flag
+    sed -i "s/^session_id:/sub_project: true\nsession_id:/" "$SUB_PROJECT_DIR/WAYFINDER-STATUS.md"
+fi
+
+echo ""
+echo "✅ Sub-project created successfully"
+echo ""
+echo "Next steps:"
+echo "  1. Run phases in sub-project: cd $SUB_PROJECT_DIR && /wayfinder-next-phase"
+echo "  2. Monitor all sub-projects: wayfinder-monitor-subs --parent $PARENT_DIR"
+echo "  3. Track progress: ls -1 $SUB_PROJECTS_DIR"

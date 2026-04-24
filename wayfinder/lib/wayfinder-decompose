@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""
+wayfinder-decompose: Analyze XL charter and propose decomposition strategy
+"""
+
+import argparse
+import json
+import yaml
+import sys
+import os
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+# Decomposition strategy keywords
+PLATFORM_KEYWORDS = {
+    'claude': ['claude', 'claude code', 'claude.ai', 'anthropic claude'],
+    'gemini': ['gemini', 'google gemini', 'bard'],
+    'anthropic': ['anthropic', 'anthropic api'],
+    'openai': ['openai', 'gpt', 'chatgpt'],
+    'perplexity': ['perplexity'],
+    'deepseek': ['deepseek'],
+}
+
+LAYER_KEYWORDS = {
+    'frontend': ['frontend', 'ui', 'react', 'vue', 'svelte', 'angular', 'web interface', 'dashboard'],
+    'backend': ['backend', 'api', 'server', 'microservice', 'service'],
+    'database': ['database', 'postgres', 'mysql', 'mongodb', 'schema', 'data model'],
+    'infrastructure': ['infrastructure', 'docker', 'kubernetes', 'cloud', 'deployment', 'ci/cd'],
+}
+
+CONCERN_KEYWORDS = {
+    'auth': ['auth', 'authentication', 'authorization', 'login', 'oauth', 'sso'],
+    'payments': ['payment', 'billing', 'subscription', 'stripe', 'checkout'],
+    'storage': ['storage', 's3', 'file upload', 'blob', 'cdn'],
+    'notifications': ['notification', 'email', 'sms', 'push', 'alert'],
+    'api': ['api', 'rest', 'graphql', 'grpc', 'endpoint'],
+}
+
+
+def detect_platforms(charter: str) -> List[str]:
+    """Detect platform-based decomposition opportunities"""
+    charter_lower = charter.lower()
+    detected = []
+
+    for platform, keywords in PLATFORM_KEYWORDS.items():
+        if any(kw in charter_lower for kw in keywords):
+            detected.append(platform)
+
+    return detected
+
+
+def detect_layers(charter: str) -> List[str]:
+    """Detect layer-based decomposition opportunities"""
+    charter_lower = charter.lower()
+    detected = []
+
+    for layer, keywords in LAYER_KEYWORDS.items():
+        if any(kw in charter_lower for kw in keywords):
+            detected.append(layer)
+
+    return detected
+
+
+def detect_concerns(charter: str) -> List[str]:
+    """Detect concern-based decomposition opportunities"""
+    charter_lower = charter.lower()
+    detected = []
+
+    for concern, keywords in CONCERN_KEYWORDS.items():
+        if any(kw in charter_lower for kw in keywords):
+            detected.append(concern)
+
+    return detected
+
+
+def auto_detect_strategy(charter: str) -> str:
+    """Auto-detect best decomposition strategy"""
+    platforms = detect_platforms(charter)
+    layers = detect_layers(charter)
+    concerns = detect_concerns(charter)
+
+    # Scoring: platform (weight 2), layer (weight 1.5), concern (weight 1)
+    platform_score = len(platforms) * 2 if len(platforms) >= 2 else 0
+    layer_score = len(layers) * 1.5 if len(layers) >= 2 else 0
+    concern_score = len(concerns) if len(concerns) >= 2 else 0
+
+    # Choose strategy with highest score
+    if platform_score > max(layer_score, concern_score):
+        return 'platform'
+    elif layer_score > concern_score:
+        return 'layer'
+    elif concern_score > 0:
+        return 'concern'
+    else:
+        # Default to platform if no clear winner
+        return 'platform'
+
+
+def generate_sub_charters(charter: str, strategy: str) -> List[Dict]:
+    """Generate sub-project charter fragments"""
+    charter_lower = charter.lower()
+    sub_charters = []
+
+    if strategy == 'platform':
+        platforms = detect_platforms(charter)
+        for platform in platforms:
+            sub_charter = {
+                'name': f"{platform}-integration",
+                'description': f"Implement {platform} integration based on project charter",
+                'charter_fragment': f"Implement {platform} integration:\n\n{charter}",
+                'strategy': 'platform',
+                'platform': platform,
+            }
+            sub_charters.append(sub_charter)
+
+    elif strategy == 'layer':
+        layers = detect_layers(charter)
+        for layer in layers:
+            sub_charter = {
+                'name': f"{layer}-layer",
+                'description': f"Implement {layer} layer based on project charter",
+                'charter_fragment': f"Implement {layer} layer:\n\n{charter}",
+                'strategy': 'layer',
+                'layer': layer,
+            }
+            sub_charters.append(sub_charter)
+
+    elif strategy == 'concern':
+        concerns = detect_concerns(charter)
+        for concern in concerns:
+            sub_charter = {
+                'name': f"{concern}-implementation",
+                'description': f"Implement {concern} based on project charter",
+                'charter_fragment': f"Implement {concern}:\n\n{charter}",
+                'strategy': 'concern',
+                'concern': concern,
+            }
+            sub_charters.append(sub_charter)
+
+    return sub_charters
+
+
+def calculate_timeline_savings(num_sub_projects: int, sequential_time: int) -> Dict:
+    """Calculate timeline savings from parallelization"""
+    # Assume each sub-project takes equal time
+    parallel_time = sequential_time  # All run in parallel, so same as one
+
+    savings = {
+        'sequential_hours': sequential_time,
+        'parallel_hours': parallel_time,
+        'time_saved_hours': sequential_time - parallel_time,
+        'speedup_factor': f"{num_sub_projects}x"
+    }
+
+    return savings
+
+
+def format_output(result: Dict, output_format: str) -> str:
+    """Format output in requested format"""
+    if output_format == 'json':
+        return json.dumps(result, indent=2)
+    elif output_format == 'yaml':
+        return yaml.dump(result, default_flow_style=False)
+    else:  # text
+        lines = []
+        lines.append(f"🔍 Decomposition Analysis")
+        lines.append(f"")
+        lines.append(f"Strategy: {result['strategy']}")
+        lines.append(f"Sub-projects: {result['num_sub_projects']}")
+        lines.append(f"")
+        lines.append(f"💡 Timeline Savings:")
+        lines.append(f"  Sequential: {result['timeline_savings']['sequential_hours']}h")
+        lines.append(f"  Parallel: {result['timeline_savings']['parallel_hours']}h")
+        lines.append(f"  Time saved: {result['timeline_savings']['time_saved_hours']}h")
+        lines.append(f"  Speedup: {result['timeline_savings']['speedup_factor']}")
+        lines.append(f"")
+        lines.append(f"📦 Sub-project Charters:")
+        for i, sub in enumerate(result['sub_charters'], 1):
+            lines.append(f"")
+            lines.append(f"  {i}. {sub['name']}")
+            lines.append(f"     Description: {sub['description']}")
+            if 'platform' in sub:
+                lines.append(f"     Platform: {sub['platform']}")
+            elif 'layer' in sub:
+                lines.append(f"     Layer: {sub['layer']}")
+            elif 'concern' in sub:
+                lines.append(f"     Concern: {sub['concern']}")
+        return "\n".join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Analyze XL charter and propose decomposition strategy')
+    parser.add_argument('--parent', required=True, help='Parent project directory')
+    parser.add_argument('--strategy', default='auto', choices=['auto', 'platform', 'layer', 'concern'],
+                        help='Decomposition strategy')
+    parser.add_argument('--format', default='text', choices=['text', 'json', 'yaml'],
+                        help='Output format')
+    parser.add_argument('--sequential-time', type=int, default=100,
+                        help='Estimated sequential time in hours (default: 100h)')
+
+    args = parser.parse_args()
+
+    # Read W0-charter.md
+    parent_dir = Path(args.parent)
+    charter_path = parent_dir / "W0-charter.md"
+
+    if not charter_path.exists():
+        print(f"Error: Charter not found at {charter_path}", file=sys.stderr)
+        sys.exit(1)
+
+    charter = charter_path.read_text()
+
+    # Detect or use specified strategy
+    if args.strategy == 'auto':
+        strategy = auto_detect_strategy(charter)
+    else:
+        strategy = args.strategy
+
+    # Generate sub-project charters
+    sub_charters = generate_sub_charters(charter, strategy)
+
+    if not sub_charters:
+        print(f"Warning: No sub-projects detected for strategy '{strategy}'", file=sys.stderr)
+        print(f"Recommendation: Review charter for decomposition opportunities", file=sys.stderr)
+        sys.exit(1)
+
+    # Calculate timeline savings
+    timeline_savings = calculate_timeline_savings(len(sub_charters), args.sequential_time)
+
+    # Build result
+    result = {
+        'strategy': strategy,
+        'num_sub_projects': len(sub_charters),
+        'sub_charters': sub_charters,
+        'timeline_savings': timeline_savings,
+    }
+
+    # Output result
+    output = format_output(result, args.format)
+    print(output)
+
+
+if __name__ == '__main__':
+    main()

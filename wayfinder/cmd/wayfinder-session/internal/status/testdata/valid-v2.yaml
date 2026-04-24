@@ -1,0 +1,98 @@
+---
+schema_version: "2.0"
+project_name: "User Authentication Service"
+project_type: "feature"
+risk_level: "L"
+current_waypoint: "BUILD"
+status: "in-progress"
+created_at: "2026-02-15T10:00:00Z"
+updated_at: "2026-02-20T14:30:00Z"
+description: "Implement OAuth2 authentication for API endpoints"
+repository: "https://github.com/example/auth-service"
+branch: "feature/oauth2-auth"
+tags:
+  - "security"
+  - "backend"
+  - "api"
+beads:
+  - "oss-abc123"
+  - "oss-def456"
+waypoint_history:
+  - name: "CHARTER"
+    status: "completed"
+    started_at: "2026-02-15T10:00:00Z"
+    completed_at: "2026-02-15T12:00:00Z"
+    deliverables:
+      - "W0-intake.md"
+  - name: "PROBLEM"
+    status: "completed"
+    started_at: "2026-02-15T12:00:00Z"
+    completed_at: "2026-02-16T09:00:00Z"
+    deliverables:
+      - "D1-discovery.md"
+  - name: "SPEC"
+    status: "completed"
+    started_at: "2026-02-18T09:00:00Z"
+    completed_at: "2026-02-18T17:00:00Z"
+    stakeholder_approved: true
+    stakeholder_notes: "Approved by security team"
+  - name: "PLAN"
+    status: "completed"
+    started_at: "2026-02-19T09:00:00Z"
+    completed_at: "2026-02-19T17:00:00Z"
+    tests_feature_created: true
+    research_notes: "Selected Auth0 for faster time-to-market"
+  - name: "BUILD"
+    status: "in-progress"
+    started_at: "2026-02-20T11:00:00Z"
+    validation_status: "in-progress"
+    deployment_status: "pending"
+    build_iterations: 3
+roadmap:
+  phases:
+    - id: "SETUP"
+      name: "Planning & Task Breakdown"
+      status: "completed"
+      tasks:
+        - id: "task-7.1"
+          title: "Break down implementation tasks"
+          effort_days: 0.25
+          status: "completed"
+          deliverables: []
+    - id: "BUILD"
+      name: "BUILD Loop"
+      status: "in-progress"
+      tasks:
+        - id: "task-8.1"
+          title: "Implement OAuth2 authorization endpoint"
+          effort_days: 0.5
+          status: "completed"
+          deliverables:
+            - "src/oauth/authorize.go"
+          depends_on: []
+          blocks:
+            - "task-8.2"
+        - id: "task-8.2"
+          title: "Implement OAuth2 token endpoint"
+          effort_days: 0.625
+          status: "in-progress"
+          depends_on:
+            - "task-8.1"
+          blocks: []
+quality_metrics:
+  coverage_percent: 78.5
+  coverage_target: 80.0
+  assertion_density: 3.2
+  assertion_density_target: 3.0
+  multi_persona_score: 85.0
+  security_score: 90.0
+  performance_score: 85.0
+  reliability_score: 88.0
+  maintainability_score: 77.0
+  p0_issues: 0
+  p1_issues: 2
+  p2_issues: 5
+  estimated_effort_hours: 20.0
+  actual_effort_hours: 18.5
+  effort_variance: -7.5
+---

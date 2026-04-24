@@ -1,0 +1,7 @@
+{
+  "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended"],
+  "rules": {
+    "no-unused-vars": "error",
+    "no-console": "warn"
+  }
+}

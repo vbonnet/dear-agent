@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""
+generate-s11-classification-assessment: S11 retrospective enhancement with classification accuracy
+"""
+
+import argparse
+import json
+import yaml
+import sys
+import os
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, Optional
+
+# True depth calculation based on actual time spent
+DEPTH_TIME_RANGES = {
+    'XS': (0, 2.5),      # 0-2.5 hours
+    'S': (2.5, 4.5),     # 2.5-4.5 hours
+    'M': (4.5, 9),       # 4.5-9 hours
+    'L': (9, float('inf'))  # >9 hours
+}
+
+
+def calculate_true_depth(actual_hours: float) -> str:
+    """Calculate true depth from actual time spent"""
+    for depth, (min_h, max_h) in DEPTH_TIME_RANGES.items():
+        if min_h <= actual_hours < max_h:
+            return depth
+    return 'L'  # Default to L for very long projects
+
+
+def parse_status_file(status_path: Path) -> Dict:
+    """Parse WAYFINDER-STATUS.md to extract depth and classification data"""
+    if not status_path.exists():
+        raise FileNotFoundError(f"STATUS file not found: {status_path}")
+
+    with open(status_path) as f:
+        content = f.read()
+
+    # Parse YAML frontmatter
+    if not content.startswith('---'):
+        raise ValueError("STATUS file does not have YAML frontmatter")
+
+    parts = content.split('---', 2)
+    if len(parts) < 3:
+        raise ValueError("Invalid STATUS file format")
+
+    frontmatter = yaml.safe_load(parts[1])
+
+    return {
+        'predicted_depth': frontmatter.get('depth'),
+        'depth_source': frontmatter.get('depth_source'),
+        'classification': frontmatter.get('classification'),
+        'estimated_time': frontmatter.get('estimated_time'),
+        'session_id': frontmatter.get('session_id'),
+        'project_path': frontmatter.get('project_path'),
+    }
+
+
+def parse_s8_time(project_dir: Path) -> Optional[float]:
+    """Parse S8-implementation.md to get actual time spent"""
+    s8_path = project_dir / "S8-implementation.md"
+
+    if not s8_path.exists():
+        return None
+
+    with open(s8_path) as f:
+        content = f.read()
+
+    # Look for time metrics in S8
+    # Format: "Total: X hours" or "Actual: X hours"
+    import re
+
+    patterns = [
+        r'Total:\s*(\d+(?:\.\d+)?)\s*hours',
+        r'Actual:\s*(\d+(?:\.\d+)?)\s*hours',
+        r'Duration:\s*(\d+(?:\.\d+)?)\s*hours',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            return float(match.group(1))
+
+    return None
+
+
+def generate_verdict(predicted_depth: str, true_depth: str) -> Dict:
+    """Generate classification accuracy verdict"""
+    depth_order = ['XS', 'S', 'M', 'L', 'XL']
+    predicted_idx = depth_order.index(predicted_depth) if predicted_depth in depth_order else -1
+    true_idx = depth_order.index(true_depth) if true_depth in depth_order else -1
+
+    if predicted_idx == true_idx:
+        return {
+            'verdict': 'correct',
+            'icon': '✅',
+            'message': f"Correct prediction: {predicted_depth}",
+        }
+    elif predicted_idx > true_idx:
+        return {
+            'verdict': 'over-predicted',
+            'icon': '⚠️',
+            'message': f"Over-predicted: {predicted_depth} (actual: {true_depth})",
+        }
+    else:
+        return {
+            'verdict': 'under-predicted',
+            'icon': '❌',
+            'message': f"Under-predicted: {predicted_depth} (actual: {true_depth})",
+        }
+
+
+def generate_heuristic_feedback(verdict: Dict, classification: Dict) -> str:
+    """Generate feedback for heuristic tuning"""
+    feedback = []
+
+    if verdict['verdict'] == 'over-predicted':
+        feedback.append("Heuristic tuning suggestions:")
+        feedback.append("- Reduce weight for keyword signals that triggered over-prediction")
+        feedback.append("- Check if file count heuristic is too sensitive")
+        if classification and 'signals' in classification:
+            signals = classification['signals']
+            if 'file_count' in signals:
+                feedback.append(f"- File count signal: {signals['file_count']} (may need higher threshold)")
+
+    elif verdict['verdict'] == 'under-predicted':
+        feedback.append("Heuristic tuning suggestions:")
+        feedback.append("- Increase weight for complexity signals")
+        feedback.append("- Check if certain keyword patterns were missed")
+        if classification and 'signals' in classification:
+            signals = classification['signals']
+            if 'dependencies' in signals:
+                feedback.append(f"- Dependencies: {signals['dependencies']} (may need to factor in)")
+
+    return "\n".join(feedback)
+
+
+def generate_markdown_section(result: Dict) -> str:
+    """Generate markdown section for S11 retrospective"""
+    lines = []
+    lines.append("## Classification Accuracy Assessment")
+    lines.append("")
+    lines.append(f"**Predicted Depth:** {result['predicted_depth']}")
+    lines.append(f"**True Depth:** {result['true_depth']} (based on {result['actual_hours']}h actual time)")
+    lines.append("")
+    lines.append(f"**Verdict:** {result['verdict']['icon']} {result['verdict']['message']}")
+    lines.append("")
+
+    if result['confidence']:
+        lines.append(f"**Confidence:** {result['confidence']}")
+        lines.append("")
+
+    if result['heuristic_feedback']:
+        lines.append(result['heuristic_feedback'])
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def log_to_jsonl(result: Dict, log_dir: Path):
+    """Log classification result to JSONL database"""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "classification-log.jsonl"
+
+    log_entry = {
+        'timestamp': datetime.now().isoformat(),
+        'session_id': result['session_id'],
+        'project_path': result['project_path'],
+        'predicted_depth': result['predicted_depth'],
+        'true_depth': result['true_depth'],
+        'actual_hours': result['actual_hours'],
+        'verdict': result['verdict']['verdict'],
+        'confidence': result['confidence'],
+        'classification': result['classification'],
+    }
+
+    with open(log_file, 'a') as f:
+        f.write(json.dumps(log_entry) + '\n')
+
+
+def append_to_s11(project_dir: Path, markdown_section: str):
+    """Append classification assessment to S11-retrospective.md"""
+    s11_path = project_dir / "S11-retrospective.md"
+
+    if not s11_path.exists():
+        print(f"Warning: S11 retrospective not found at {s11_path}", file=sys.stderr)
+        return
+
+    with open(s11_path) as f:
+        content = f.read()
+
+    # Insert after frontmatter
+    parts = content.split('---', 2)
+    if len(parts) < 3:
+        print(f"Warning: Invalid S11 format (no frontmatter)", file=sys.stderr)
+        return
+
+    # Insert section after frontmatter
+    updated = f"---{parts[1]}---\n\n{markdown_section}\n\n{parts[2]}"
+
+    with open(s11_path, 'w') as f:
+        f.write(updated)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Generate S11 classification accuracy assessment')
+    parser.add_argument('--project', required=True, help='Project directory')
+    parser.add_argument('--append-to-s11', action='store_true', help='Append to S11-retrospective.md')
+    parser.add_argument('--log-dir', default='~/.classification-logs', help='Log directory for JSONL database')
+
+    args = parser.parse_args()
+
+    project_dir = Path(args.project).expanduser()
+    log_dir = Path(args.log_dir).expanduser()
+
+    # Parse STATUS file
+    status_path = project_dir / "WAYFINDER-STATUS.md"
+    try:
+        status_data = parse_status_file(status_path)
+    except Exception as e:
+        print(f"Error: Failed to parse STATUS file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Get actual time from S8
+    actual_hours = parse_s8_time(project_dir)
+    if actual_hours is None:
+        print("Warning: Could not determine actual time from S8 (using estimated time)", file=sys.stderr)
+        # Try to parse estimated time
+        estimated = status_data.get('estimated_time', '0h')
+        import re
+        match = re.search(r'(\d+(?:\.\d+)?)', estimated)
+        actual_hours = float(match.group(1)) if match else 0
+
+    # Calculate true depth
+    true_depth = calculate_true_depth(actual_hours)
+
+    # Generate verdict
+    predicted_depth = status_data.get('predicted_depth', 'S')
+    verdict = generate_verdict(predicted_depth, true_depth)
+
+    # Generate heuristic feedback
+    classification = status_data.get('classification')
+    heuristic_feedback = generate_heuristic_feedback(verdict, classification)
+
+    # Build result
+    result = {
+        'session_id': status_data.get('session_id'),
+        'project_path': status_data.get('project_path'),
+        'predicted_depth': predicted_depth,
+        'true_depth': true_depth,
+        'actual_hours': actual_hours,
+        'confidence': classification.get('confidence') if classification else None,
+        'classification': classification,
+        'verdict': verdict,
+        'heuristic_feedback': heuristic_feedback,
+    }
+
+    # Generate markdown section
+    markdown_section = generate_markdown_section(result)
+
+    # Output markdown
+    print(markdown_section)
+
+    # Append to S11 if requested
+    if args.append_to_s11:
+        append_to_s11(project_dir, markdown_section)
+        print(f"\n✅ Appended to {project_dir}/S11-retrospective.md", file=sys.stderr)
+
+    # Log to JSONL
+    log_to_jsonl(result, log_dir)
+    print(f"✅ Logged to {log_dir}/classification-log.jsonl", file=sys.stderr)
+
+
+if __name__ == '__main__':
+    main()

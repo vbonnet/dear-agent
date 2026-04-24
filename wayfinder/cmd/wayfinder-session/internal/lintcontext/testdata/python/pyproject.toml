@@ -1,0 +1,6 @@
+[tool.ruff]
+select = ["ANN", "TCH", "S", "E", "F"]
+ignore = ["ANN101"]
+
+[tool.pyright]
+typeCheckingMode = "strict"

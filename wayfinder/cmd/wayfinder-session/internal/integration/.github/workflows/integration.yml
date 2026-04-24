@@ -1,0 +1,84 @@
+name: Wayfinder V2 Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'cmd/wayfinder-session/**'
+      - 'test/integration/**'
+      - 'internal/status/**'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'cmd/wayfinder-session/**'
+      - 'test/integration/**'
+      - 'internal/status/**'
+
+jobs:
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
+    - name: Install dependencies
+      working-directory: core/cortex
+      run: go mod download
+
+    - name: Build wayfinder-session
+      working-directory: core/cortex
+      run: |
+        go build -o /tmp/wayfinder-session ./cmd/wayfinder-session
+        chmod +x /tmp/wayfinder-session
+
+    - name: Configure Git
+      run: |
+        git config --global user.email "ci@engram.dev"
+        git config --global user.name "Engram CI"
+
+    - name: Run integration tests
+      working-directory: core/cortex
+      env:
+        PATH: /tmp:$PATH
+      run: go test -v -timeout 30m ./test/integration/...
+
+    - name: Generate coverage report
+      if: success()
+      working-directory: core/cortex
+      env:
+        PATH: /tmp:$PATH
+      run: |
+        go test -v -cover -coverprofile=coverage.out ./test/integration/...
+        go tool cover -func=coverage.out
+
+    - name: Upload coverage to Codecov
+      if: success()
+      uses: codecov/codecov-action@v4
+      with:
+        files: ./core/cortex/coverage.out
+        flags: integration
+        name: integration-tests
+
+  fast-tests:
+    name: Fast Tests (Short Mode)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
+    - name: Run fast tests
+      working-directory: core/cortex
+      run: go test -short -v ./test/integration/...

@@ -1,0 +1,376 @@
+# Wayfinder Component Manifest
+# SDLC workflow management with phase-based project tracking
+#
+# This manifest defines all metadata required by the component installer
+# to install, upgrade, and uninstall Wayfinder in a workspace.
+
+manifest_version: "1.0"
+
+# ============================================================================
+# Component Identity
+# ============================================================================
+
+component:
+  name: "wayfinder"
+  version: "0.1.0"
+  description: "Structured SDLC workflow manager with phase validation and retrospectives"
+  license: "MIT"
+  repository: "https://github.com/vbonnet/engram"
+  homepage: "https://github.com/vbonnet/engram/tree/main/core/cortex/cmd/wayfinder-session"
+  authors:
+    - name: "Vincent Bonnet"
+      email: "vincent@example.com"
+
+# ============================================================================
+# Dependencies
+# ============================================================================
+
+dependencies:
+  # Required: Engram for project data storage
+  - name: "engram"
+    contract: "storage-v1"
+    version: "^1.0.0"
+    optional: false
+    reason: "Wayfinder requires Engram for project persistence and phase tracking storage"
+
+  # Required: Engram workspace detection
+  - name: "engram"
+    contract: "workspace-v1"
+    version: "^1.0.0"
+    optional: false
+    reason: "Wayfinder requires workspace detection for project isolation across workspaces"
+
+  # Optional: Corpus Callosum for schema registration
+  - name: "corpus-callosum"
+    contract: "schema-registry-v1"
+    version: "^1.0.0"
+    optional: true
+    reason: "Enhanced project discovery and cross-component queries (graceful degradation if missing)"
+
+# ============================================================================
+# Contracts Provided
+# ============================================================================
+
+contracts:
+  # Wayfinder provides SDLC workflow contract
+  - name: "wayfinder-workflow-v1"
+    version: "1.0.0"
+    description: "SDLC workflow management for phase-based project execution"
+    methods:
+      - "create_project"
+      - "list_projects"
+      - "get_project"
+      - "update_project_status"
+      - "start_phase"
+      - "complete_phase"
+      - "next_phase"
+      - "rewind_phase"
+      - "get_phase_status"
+      - "validate_phase"
+      - "record_validation_result"
+
+# ============================================================================
+# Database Migrations
+# ============================================================================
+
+migrations:
+  # Migration 1: Create projects table
+  - version: 1
+    file: "migrations/001_create_projects_table.sql"
+    description: "Create wayfinder_projects table with workspace isolation"
+    checksum: "sha256:placeholder001"
+
+  # Migration 2: Create phases table
+  - version: 2
+    file: "migrations/002_create_phases_table.sql"
+    description: "Create wayfinder_phases table for phase tracking"
+    checksum: "sha256:placeholder002"
+
+  # Migration 3: Create phase validations table
+  - version: 3
+    file: "migrations/003_create_phase_validations_table.sql"
+    description: "Create wayfinder_phase_validations table for validation results"
+    checksum: "sha256:placeholder003"
+
+# ============================================================================
+# Install Hooks
+# ============================================================================
+
+hooks:
+  # Pre-install: Validate prerequisites
+  pre-install:
+    command: "./scripts/pre-install.sh"
+    args:
+      - "${WORKSPACE_ROOT}"
+      - "${COMPONENT_VERSION}"
+    timeout: 30
+    description: |
+      Validate prerequisites:
+      - Check Engram is installed (dependency)
+      - Verify Dolt is accessible
+      - Check disk space (minimum 50 MB)
+      - Validate workspace directory structure
+      - Check for existing wf/ directory
+
+  # Post-install: Initialize configuration
+  post-install:
+    command: "./scripts/post-install.sh"
+    args:
+      - "${WORKSPACE_ROOT}"
+    timeout: 10
+    description: |
+      Initialize Wayfinder configuration:
+      - Create default wf/ directory for projects
+      - Generate initial configuration file
+      - Display setup instructions
+      - Register with Corpus Callosum (if installed)
+
+  # Pre-uninstall: Export project data
+  pre-uninstall:
+    command: "./scripts/export-data.sh"
+    args:
+      - "${WORKSPACE_ROOT}/backup/wayfinder-export-${TIMESTAMP}.tar.gz"
+    timeout: 300
+    description: |
+      Export project data before uninstall:
+      - Create backup of all projects from Dolt database
+      - Export to workspace backup directory
+      - Include project metadata, phases, and validation results
+      - Generate restore instructions
+
+  # Post-uninstall: Cleanup
+  post-uninstall:
+    command: "./scripts/cleanup.sh"
+    args:
+      - "${WORKSPACE_ROOT}"
+    timeout: 5
+    description: |
+      Cleanup Wayfinder cache and temporary files:
+      - Remove session cache directory (~/.wayfinder-cache)
+      - Delete temporary files
+      - Preserve backed-up data
+
+# ============================================================================
+# Binary Distribution
+# ============================================================================
+
+binaries:
+  # Linux x86_64
+  - platform: "linux-amd64"
+    url: "https://releases.wayfinder.dev/v0.1.0/wayfinder-linux-amd64.tar.gz"
+    checksum: "sha256:placeholder_checksum_linux_amd64"
+    size_bytes: 3200000
+
+  # Linux ARM64
+  - platform: "linux-arm64"
+    url: "https://releases.wayfinder.dev/v0.1.0/wayfinder-linux-arm64.tar.gz"
+    checksum: "sha256:placeholder_checksum_linux_arm64"
+    size_bytes: 3100000
+
+  # macOS Intel
+  - platform: "darwin-amd64"
+    url: "https://releases.wayfinder.dev/v0.1.0/wayfinder-darwin-amd64.tar.gz"
+    checksum: "sha256:placeholder_checksum_darwin_amd64"
+    size_bytes: 3300000
+
+  # macOS Apple Silicon
+  - platform: "darwin-arm64"
+    url: "https://releases.wayfinder.dev/v0.1.0/wayfinder-darwin-arm64.tar.gz"
+    checksum: "sha256:placeholder_checksum_darwin_arm64"
+    size_bytes: 3250000
+
+# ============================================================================
+# Corpus Callosum Integration (Optional)
+# ============================================================================
+
+corpus_callosum:
+  # Schema registration
+  schemas:
+    # Project schema
+    - name: "wayfinder.project"
+      version: "1.0"
+      file: "schemas/project.schema.json"
+      description: "Wayfinder project metadata and lifecycle"
+
+    # Phase schema
+    - name: "wayfinder.phase"
+      version: "1.0"
+      file: "schemas/phase.schema.json"
+      description: "Wayfinder phase structure and status"
+
+    # Validation result schema
+    - name: "wayfinder.validation_result"
+      version: "1.0"
+      file: "schemas/validation_result.schema.json"
+      description: "Wayfinder phase validation results"
+
+  # Predefined queries for common operations
+  queries:
+    # List all active projects
+    - name: "list-active-projects"
+      description: "List all active Wayfinder projects across all workspaces, ordered by most recent"
+      query: |
+        SELECT
+          project_id,
+          name,
+          status,
+          current_phase,
+          created_at,
+          updated_at,
+          workspace
+        FROM wayfinder_projects
+        WHERE status = 'active'
+        ORDER BY updated_at DESC
+
+    # Search projects by name
+    - name: "search-projects"
+      description: "Search projects by name (case-insensitive)"
+      query: |
+        SELECT
+          project_id,
+          name,
+          status,
+          current_phase,
+          workspace,
+          created_at
+        FROM wayfinder_projects
+        WHERE LOWER(name) LIKE CONCAT('%', LOWER(:search_term), '%')
+        ORDER BY created_at DESC
+
+    # Get project with phase count
+    - name: "get-project-with-stats"
+      description: "Get project with phase count and completion stats"
+      query: |
+        SELECT
+          p.project_id,
+          p.name,
+          p.status,
+          p.current_phase,
+          p.created_at,
+          p.updated_at,
+          p.workspace,
+          COUNT(ph.phase_id) AS total_phases,
+          SUM(CASE WHEN ph.status = 'completed' THEN 1 ELSE 0 END) AS completed_phases,
+          MAX(ph.end_time) AS last_phase_completed_at
+        FROM wayfinder_projects p
+        LEFT JOIN wayfinder_phases ph ON p.project_id = ph.project_id
+        WHERE p.project_id = :project_id
+        GROUP BY p.project_id, p.name, p.status, p.current_phase, p.created_at, p.updated_at, p.workspace
+
+    # Recent projects with phase progress
+    - name: "recent-projects-with-progress"
+      description: "Recent projects with phase completion progress"
+      query: |
+        SELECT
+          p.project_id,
+          p.name,
+          p.status,
+          p.current_phase,
+          p.workspace,
+          COUNT(ph.phase_id) AS total_phases,
+          SUM(CASE WHEN ph.status = 'completed' THEN 1 ELSE 0 END) AS completed_phases,
+          ROUND(100.0 * SUM(CASE WHEN ph.status = 'completed' THEN 1 ELSE 0 END) / COUNT(ph.phase_id), 1) AS completion_percentage
+        FROM wayfinder_projects p
+        LEFT JOIN wayfinder_phases ph ON p.project_id = ph.project_id
+        GROUP BY p.project_id, p.name, p.status, p.current_phase, p.workspace
+        ORDER BY p.created_at DESC
+        LIMIT 20
+
+    # Projects by date range
+    - name: "projects-by-date"
+      description: "Get projects within date range (for reporting/analysis)"
+      query: |
+        SELECT
+          project_id,
+          name,
+          status,
+          current_phase,
+          workspace,
+          created_at,
+          updated_at
+        FROM wayfinder_projects
+        WHERE created_at BETWEEN :start_date AND :end_date
+        ORDER BY created_at DESC
+
+    # Phase validation statistics
+    - name: "phase-validation-stats"
+      description: "Analyze phase validation results across projects"
+      query: |
+        SELECT
+          ph.phase_name,
+          COUNT(DISTINCT p.project_id) AS project_count,
+          COUNT(v.validation_id) AS total_validations,
+          SUM(CASE WHEN v.passed = TRUE THEN 1 ELSE 0 END) AS passed_count,
+          SUM(CASE WHEN v.passed = FALSE THEN 1 ELSE 0 END) AS failed_count,
+          ROUND(100.0 * SUM(CASE WHEN v.passed = TRUE THEN 1 ELSE 0 END) / COUNT(v.validation_id), 1) AS pass_rate
+        FROM wayfinder_phases ph
+        LEFT JOIN wayfinder_projects p ON ph.project_id = p.project_id
+        LEFT JOIN wayfinder_phase_validations v ON ph.phase_id = v.phase_id
+        GROUP BY ph.phase_name
+        ORDER BY project_count DESC
+
+# ============================================================================
+# Metadata
+# ============================================================================
+
+metadata:
+  # Searchable tags
+  tags:
+    - "workflow"
+    - "sdlc"
+    - "project-management"
+    - "phase-tracking"
+    - "validation"
+    - "retrospective"
+
+  # Component category
+  category: "workflow"
+
+  # Compatibility requirements
+  compatibility:
+    min_workspace_version: "1.0.0"
+    min_engram_version: "1.0.0"
+    supported_platforms:
+      - "linux"
+      - "darwin"
+
+  # Wayfinder-specific configuration defaults
+  wayfinder_config:
+    default_phases:
+      - "S1-Requirements"
+      - "S2-Research"
+      - "S3-Architecture"
+      - "S4-Design"
+      - "S5-Implementation"
+      - "S6-Testing"
+      - "S7-Deployment"
+      - "S8-Retrospective"
+    validation_enabled: true
+    auto_retrospective: true
+    max_active_projects: 100
+
+  # Feature flags
+  features:
+    phase_validation: true
+    retrospective_generation: true
+    multi_workspace: true
+    corpus_callosum_integration: true
+    git_integration: true
+
+  # Installation notes
+  installation_notes: |
+    Wayfinder provides:
+    - Structured SDLC workflow management
+    - Phase-based project tracking
+    - Validation gates between phases
+    - Automated retrospective generation
+    - Integration with Engram for workspace detection
+    - Optional Corpus Callosum schema registration
+
+    After installation:
+    1. Create your first project: wayfinder-session start
+    2. Move to next phase: wayfinder-session next-phase
+    3. Check project status: wayfinder-session status
+    4. Complete phase: wayfinder-session complete-phase
+
+    Documentation: https://github.com/vbonnet/engram/tree/main/core/cortex/cmd/wayfinder-session
