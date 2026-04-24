@@ -1,0 +1,11 @@
+id: ts-debug-print
+language: typescript
+severity: warning
+message: "Debug print statement found: '$MATCH'"
+rule:
+  any:
+    - pattern: console.log($$$)
+    - pattern: console.warn($$$)
+    - pattern: console.error($$$)
+    - pattern: console.debug($$$)
+    - pattern: debugger

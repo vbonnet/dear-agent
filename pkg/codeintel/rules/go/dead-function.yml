@@ -1,0 +1,15 @@
+id: go-dead-function
+language: go
+severity: warning
+message: "Function '$FUNC' appears to be unused"
+note: "AST-based dead code detection; verify function is not called via interface or reflection"
+rule:
+  kind: function_declaration
+  has:
+    kind: identifier
+    field: name
+    pattern: $FUNC
+constraints:
+  FUNC:
+    not:
+      regex: "^(main|init|TestMain|Test[A-Z]|Benchmark[A-Z]|Example[A-Z])"

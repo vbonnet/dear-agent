@@ -1,0 +1,15 @@
+id: python-dead-function
+language: python
+severity: warning
+message: "Function '$FUNC' appears to be unused"
+note: "AST-based dead code detection; verify function is not used dynamically"
+rule:
+  kind: function_definition
+  has:
+    kind: identifier
+    field: name
+    pattern: $FUNC
+constraints:
+  FUNC:
+    not:
+      regex: "^(main|__[a-z]+__|test_|setUp|tearDown)"

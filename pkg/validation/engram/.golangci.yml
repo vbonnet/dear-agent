@@ -1,0 +1,31 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - bodyclose
+    - errorlint
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - unconvert
+    - unparam
+    - gocyclo
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  errcheck:
+    check-blank: true
+    exclude-functions:
+      - (os.File).Close
+      - os.Remove

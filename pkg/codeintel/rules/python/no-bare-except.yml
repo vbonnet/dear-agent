@@ -1,0 +1,11 @@
+id: python-no-bare-except
+language: python
+severity: warning
+message: "Bare 'except:' catches all exceptions including KeyboardInterrupt and SystemExit; use 'except Exception:' instead"
+rule:
+  kind: except_clause
+  not:
+    has:
+      any:
+        - kind: identifier
+        - kind: tuple

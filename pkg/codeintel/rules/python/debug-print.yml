@@ -1,0 +1,9 @@
+id: python-debug-print
+language: python
+severity: warning
+message: "Debug print statement found: '$MATCH'"
+rule:
+  any:
+    - pattern: print($$$)
+    - pattern: breakpoint()
+    - pattern: pdb.set_trace()

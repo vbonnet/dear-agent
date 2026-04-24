@@ -1,0 +1,23 @@
+id: ts-dead-function
+language: typescript
+severity: warning
+message: "Function '$FUNC' appears to be unused"
+note: "AST-based dead code detection; verify function is not referenced dynamically"
+rule:
+  any:
+    - kind: function_declaration
+      has:
+        kind: identifier
+        field: name
+        pattern: $FUNC
+    - kind: lexical_declaration
+      has:
+        kind: variable_declarator
+        has:
+          kind: identifier
+          field: name
+          pattern: $FUNC
+constraints:
+  FUNC:
+    not:
+      regex: "^(default|describe|it|test|before|after)"

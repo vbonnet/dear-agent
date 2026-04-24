@@ -1,0 +1,8 @@
+version: 1
+default_workspace: default
+
+workspaces:
+  - name: default
+    root: ~/src
+    output_dir: ~/src
+    enabled: true
