@@ -507,7 +507,7 @@ Potential improvements for future releases:
 
 ## License
 
-MIT License - Same as AGM/AGM project
+Apache License 2.0
 
 ---
 
