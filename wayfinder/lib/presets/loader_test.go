@@ -8,7 +8,11 @@ import (
 
 func TestLoadCorePresets(t *testing.T) {
 	homeDir, _ := os.UserHomeDir()
-	loader := NewLoaderWithDir(filepath.Join(homeDir, ".wayfinder", "presets"))
+	presetDir := filepath.Join(homeDir, ".wayfinder", "presets")
+	if _, err := os.Stat(presetDir); os.IsNotExist(err) {
+		t.Skip("~/.wayfinder/presets not installed; skipping core preset tests")
+	}
+	loader := NewLoaderWithDir(presetDir)
 
 	corePresets := []string{"high-quality", "fast-iteration", "research-heavy"}
 
@@ -47,7 +51,11 @@ func TestLoadCorePresets(t *testing.T) {
 
 func TestPresetDifferentiation(t *testing.T) {
 	homeDir, _ := os.UserHomeDir()
-	loader := NewLoaderWithDir(filepath.Join(homeDir, ".wayfinder", "presets"))
+	presetDir := filepath.Join(homeDir, ".wayfinder", "presets")
+	if _, err := os.Stat(presetDir); os.IsNotExist(err) {
+		t.Skip("~/.wayfinder/presets not installed; skipping preset differentiation tests")
+	}
+	loader := NewLoaderWithDir(presetDir)
 
 	highQuality, _ := loader.Load("high-quality")
 	fastIteration, _ := loader.Load("fast-iteration")
