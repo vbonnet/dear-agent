@@ -1,0 +1,14 @@
+# Example DoD for a code implementation bead
+# Checks files, tests, and build success
+
+files_must_exist:
+  - ~/src/engram/pkg/bead/dod/dod.go
+  - ~/src/engram/pkg/bead/dod/dod_test.go
+
+tests_must_pass: true
+
+commands_must_succeed:
+  - cmd: "go build ./pkg/bead/dod"
+    exit_code: 0
+  - cmd: "go vet ./pkg/bead/dod"
+    exit_code: 0

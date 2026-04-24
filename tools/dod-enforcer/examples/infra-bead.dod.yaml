@@ -1,0 +1,15 @@
+# Example DoD for an infrastructure bead
+# Checks configuration files and deployment commands
+
+files_must_exist:
+  - ~/src/engram/deploy/docker-compose.yml
+  - ~/src/engram/deploy/Dockerfile
+  - ~/src/engram/.github/workflows/deploy.yml
+
+tests_must_pass: false
+
+commands_must_succeed:
+  - cmd: "docker-compose -f deploy/docker-compose.yml config"
+    exit_code: 0
+  - cmd: "yamllint deploy/docker-compose.yml"
+    exit_code: 0

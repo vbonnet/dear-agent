@@ -1,0 +1,278 @@
+# C4 Container Diagram: Banking Platform
+# Level 2: CQRS + Event Sourcing Architecture
+
+direction: down
+
+title: {
+  label: Banking Platform - Container Diagram (CQRS + Event Sourcing)
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# External Actor
+user: {
+  label: Account Holder
+  shape: person
+  style.fill: "#08427b"
+}
+
+# Client Applications
+web_app: {
+  label: Web Application
+  shape: rectangle
+  style.fill: "#438dd5"
+
+  description: React SPA for account management
+}
+
+mobile_app: {
+  label: Mobile App
+  shape: rectangle
+  style.fill: "#438dd5"
+
+  description: iOS/Android native apps
+}
+
+# Command Side (Write Path)
+command_api: {
+  label: Command API
+  shape: rectangle
+  style.fill: "#1168bd"
+
+  description: |md
+    Go + gRPC (Write operations)
+    - CreateAccount
+    - DebitAccount
+    - CreditAccount
+    - InitiateTransfer
+    Business rule validation
+  |
+}
+
+command_handler: {
+  label: Command Handler
+  shape: rectangle
+  style.fill: "#1168bd"
+
+  description: |md
+    Go service
+    - Validates commands
+    - Generates domain events
+    - Ensures business invariants
+  |
+}
+
+# Query Side (Read Path)
+query_api: {
+  label: Query API
+  shape: rectangle
+  style.fill: "#1168bd"
+
+  description: |md
+    Go + HTTP/REST (Read operations)
+    - GetAccountBalance
+    - GetTransactionHistory
+    - SearchAccounts
+    Optimized for reads
+  |
+}
+
+# Event Store (Source of Truth)
+event_store: {
+  label: Event Store
+  shape: queue
+  style.fill: "#ff9f43"
+
+  description: |md
+    Apache Kafka
+    - Immutable event log
+    - Partitioned by account ID
+    - Retention: 7 years (compliance)
+    - Topics: account-events, transaction-events
+  |
+}
+
+# Write Model (Current State)
+write_db: {
+  label: Write Model
+  shape: cylinder
+  style.fill: "#438dd5"
+
+  description: |md
+    PostgreSQL
+    - Current account balances
+    - Account metadata
+    - Transaction locks
+    ACID guarantees
+  |
+}
+
+# Read Model (Denormalized)
+read_db: {
+  label: Read Model
+  shape: cylinder
+  style.fill: "#438dd5"
+
+  description: |md
+    MongoDB
+    - Denormalized views
+    - Account summaries
+    - Transaction history
+    - Search indexes
+    Optimized for queries
+  |
+}
+
+# Projection Service
+projection_service: {
+  label: Projection Service
+  shape: rectangle
+  style.fill: "#1168bd"
+
+  description: |md
+    Go workers
+    - Consume events from Kafka
+    - Build read models
+    - Update MongoDB projections
+    - Handle event replay
+    Eventually consistent
+  |
+}
+
+# Saga Orchestrator
+saga_orchestrator: {
+  label: Saga Orchestrator
+  shape: rectangle
+  style.fill: "#1168bd"
+
+  description: |md
+    Go + Temporal.io
+    - Distributed transactions
+    - Compensation logic
+    - Long-running workflows
+    Example: Money transfer saga
+  |
+}
+
+# Cache
+redis: {
+  label: Redis Cache
+  shape: cylinder
+  style.fill: "#ff6b6b"
+
+  description: Account balance caching (TTL: 5min)
+}
+
+# External System
+payment_network: {
+  label: Payment Network
+  shape: rectangle
+  style.fill: "#999999"
+
+  description: SWIFT/ACH integration
+}
+
+# Relationships - Users to Apps
+user -> web_app: Uses {style.stroke-width: 2}
+user -> mobile_app: Uses {style.stroke-width: 2}
+
+# Apps to APIs
+web_app -> command_api: Write operations (gRPC) {style.stroke-width: 2}
+web_app -> query_api: Read operations (HTTP) {style.stroke-width: 2}
+
+mobile_app -> command_api: Write operations (gRPC) {style.stroke-width: 2}
+mobile_app -> query_api: Read operations (HTTP) {style.stroke-width: 2}
+
+# Command Path
+command_api -> command_handler: Forwards commands {style.stroke-width: 2}
+command_handler -> event_store: Appends events {style.stroke-width: 2; style.stroke: "#e74c3c"}
+command_handler -> write_db: Updates current state {style.stroke-width: 2; style.stroke: "#e74c3c"}
+
+# Query Path
+query_api -> read_db: Reads projections {style.stroke-width: 2; style.stroke: "#27ae60"}
+query_api -> redis: Reads cached data {style.stroke-width: 2; style.stroke: "#27ae60"}
+
+# Projection Path
+event_store -> projection_service: Streams events {style.stroke-width: 2; style.stroke-dash: 3}
+projection_service -> read_db: Updates projections {style.stroke-width: 2; style.stroke-dash: 3}
+projection_service -> redis: Updates cache {style.stroke-width: 2; style.stroke-dash: 3}
+
+# Saga Path
+event_store -> saga_orchestrator: Consumes events {style.stroke-width: 2; style.stroke-dash: 3}
+saga_orchestrator -> command_api: Triggers compensating commands {style.stroke-width: 2; style.stroke-dash: 3}
+saga_orchestrator -> payment_network: External payment calls {style.stroke-width: 2; style.stroke-dash: 3}
+
+# Annotations
+write_path_note: {
+  near: command_handler
+  label: |md
+    **Write Path**
+    1. Validate command
+    2. Generate events
+    3. Append to event store
+    4. Update write model
+  |
+  shape: text
+  style.font-size: 12
+  style.fill: "#fff5f5"
+  style.stroke: "#e74c3c"
+}
+
+read_path_note: {
+  near: query_api
+  label: |md
+    **Read Path**
+    1. Query read model
+    2. Fast response
+    3. Eventually consistent
+  |
+  shape: text
+  style.font-size: 12
+  style.fill: "#f0fff4"
+  style.stroke: "#27ae60"
+}
+
+# Legend
+legend: {
+  near: bottom-right
+
+  api_legend: {
+    label: API Service
+    shape: rectangle
+    style.fill: "#1168bd"
+  }
+
+  event_store_legend: {
+    label: Event Store (Kafka)
+    shape: queue
+    style.fill: "#ff9f43"
+  }
+
+  database_legend: {
+    label: Database
+    shape: cylinder
+    style.fill: "#438dd5"
+  }
+
+  cache_legend: {
+    label: Cache
+    shape: cylinder
+    style.fill: "#ff6b6b"
+  }
+
+  write_legend: {
+    label: Write Path
+    shape: rectangle
+    style.stroke: "#e74c3c"
+    style.fill: none
+  }
+
+  read_legend: {
+    label: Read Path
+    shape: rectangle
+    style.stroke: "#27ae60"
+    style.fill: none
+  }
+}

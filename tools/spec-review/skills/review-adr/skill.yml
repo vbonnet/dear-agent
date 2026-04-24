@@ -1,0 +1,99 @@
+---
+name: review-adr
+description: Reviews Architecture Decision Records (ADRs) for quality and completeness
+version: 2.0.0
+author: engram
+plugin: spec-review-marketplace
+
+metadata:
+  activation_patterns:
+    - "/review-adr"
+
+  supported_clis:
+    - claude-code
+    - gemini
+    - opencode
+    - codex
+
+  capabilities:
+    - multi-persona-validation
+    - adr-quality-scoring
+    - anti-pattern-detection
+    - hybrid-template-support
+
+  targets:
+    cost_per_validation: "$0.30"
+    latency_p95: "3 minutes"
+    quality_threshold: "8/10"
+
+  dependencies:
+    - lib/cli_abstraction.py
+    - lib/cli_detector.py
+
+execution:
+  main_script: review_adr.py
+  cli_adapters:
+    claude-code: cli-adapters/claude-code.py
+    gemini: cli-adapters/gemini.py
+    opencode: cli-adapters/opencode.py
+    codex: cli-adapters/codex.py
+
+scoring:
+  total_points: 100
+  min_pass_score: 70  # 8/10
+
+  categories:
+    - name: Section Presence
+      points: 20
+      description: Required sections (Status, Context, Decision, Consequences)
+
+    - name: Why Focus
+      points: 25
+      description: Rationale vs implementation details
+
+    - name: Trade-Off Transparency
+      points: 25
+      description: Positive + negative consequences, alternatives considered
+
+    - name: Agentic Extensions
+      points: 15
+      description: AI agent-specific sections (when applicable)
+
+    - name: Clarity & Completeness
+      points: 15
+      description: Problem clarity, decision clarity, actionable consequences
+
+personas:
+  - name: Solution Architect
+    focus: Architectural rationale quality, alternatives considered
+    evaluates:
+      - Section Presence (20 pts)
+      - Why Focus (25 pts)
+    max_score: 45
+
+  - name: Tech Lead
+    focus: Trade-off transparency, feasibility
+    evaluates:
+      - Trade-Off Transparency (25 pts)
+      - Clarity (10 pts)
+    max_score: 35
+
+  - name: Senior Developer
+    focus: Clarity for future teams, completeness
+    evaluates:
+      - Agentic Extensions (15 pts)
+      - Clarity & Completeness (15 pts)
+    max_score: 30
+
+anti_patterns:
+  - name: Mega-ADR
+    description: Multiple architectural decisions in one ADR
+
+  - name: Fairy Tale
+    description: Only benefits documented, no costs
+
+  - name: Blueprint in Disguise
+    description: Implementation details instead of rationale
+
+  - name: Context Window Blindness
+    description: Agentic ADRs ignoring token limits

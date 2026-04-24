@@ -1,0 +1,115 @@
+---
+# create-spec skill metadata
+# Part of spec-review-marketplace plugin
+
+name: create-spec
+version: 1.0.0
+description: LLM-powered SPEC.md generation from requirements and codebase analysis
+
+# Skill metadata
+category: documentation-generation
+tags:
+  - spec
+  - documentation
+  - generation
+  - llm
+  - codebase-analysis
+
+# Author information
+author: Engram Plugin Development Team
+license: MIT
+
+# Dependencies
+dependencies:
+  - cli-abstraction  # CLI abstraction layer
+  - anthropic       # For LLM-based generation
+
+# Supported AI coding assistant CLIs
+supported_clis:
+  - claude-code
+  - gemini-cli
+  - opencode
+  - codex
+
+# CLI-specific features
+cli_features:
+  claude-code:
+    - prompt_caching
+    - long_context
+    - multimodal
+  gemini-cli:
+    - batch_mode
+    - parallel_processing
+  opencode:
+    - mcp_integration
+    - tool_registry
+  codex:
+    - mcp_integration
+    - completion_mode
+
+# Skill entry points
+entry_points:
+  main: ./create_spec.py
+  cli_adapters:
+    claude-code: ./cli-adapters/claude-code.py
+    gemini-cli: ./cli-adapters/gemini.py
+    opencode: ./cli-adapters/opencode.py
+    codex: ./cli-adapters/codex.py
+
+# Configuration options
+config:
+  default_template: spec-template.md
+  interactive_mode: true
+  validation_enabled: true
+  llm_model: claude-sonnet-4-5
+  llm_temperature: 0.7
+  max_tokens: 8000
+
+# External requirements
+requirements:
+  - name: python
+    version: ">=3.10"
+    required: true
+  - name: anthropic
+    description: Anthropic Python SDK
+    version: ">=0.18.0"
+    required: true
+  - name: pydantic
+    description: Data validation library
+    version: ">=2.0.0"
+    required: true
+
+# Capabilities
+capabilities:
+  - analyze_codebase
+  - generate_questions
+  - interactive_clarification
+  - render_spec_template
+  - validate_spec_quality
+  - multi_cli_support
+
+# Output formats
+output_formats:
+  - markdown
+
+# Testing
+tests:
+  integration: ./tests/test_create_spec.py
+  unit: ./tests/test_create_spec.py
+
+# Documentation
+docs:
+  readme: ./SKILL.md
+  examples: ./SKILL.md#examples
+
+# Changelog
+changelog:
+  - version: 1.0.0
+    date: 2026-03-11
+    changes:
+      - Initial implementation
+      - Codebase analyzer component
+      - Question generator with interactive mode
+      - SPEC renderer with template system
+      - Validation loop integration
+      - CLI adapters for 4 CLIs

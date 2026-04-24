@@ -1,0 +1,10 @@
+# Example DoD for a test creation bead
+# Checks test files exist and tests pass
+
+files_must_exist:
+  - ~/src/engram/pkg/bead/dod/dod_test.go
+  - ~/src/engram/pkg/bead/dod/integration_test.go
+
+tests_must_pass: true
+
+commands_must_succeed: []

@@ -1,0 +1,547 @@
+# C4 Component Diagram: Spec-Review-Marketplace Internal Architecture
+# Level: Component (C4 Level 3)
+# Shows internal components, multi-language skill system, and data flow
+
+direction: down
+
+# ============================================================================
+# CONTAINER: Skill Registry & Discovery
+# ============================================================================
+skill_registry: {
+  label: "Skill Registry Container"
+  description: "Manages skill lifecycle, discovery, and execution"
+  style.fill: "#438dd5"
+  style.stroke: "#2e5c8a"
+
+  discovery: {
+    label: "Skill Discovery"
+    description: "Search, filter, recommend skills by tags/category"
+    shape: rectangle
+  }
+
+  loader: {
+    label: "Lazy Loader"
+    description: "On-demand skill loading, initialization"
+    shape: rectangle
+  }
+
+  cache: {
+    label: "Skill Cache"
+    description: "In-memory caching of loaded skills"
+    shape: rectangle
+  }
+
+  version_mgr: {
+    label: "Version Manager"
+    description: "Semantic versioning, compatibility checks"
+    shape: rectangle
+  }
+
+  dependency_resolver: {
+    label: "Dependency Resolver"
+    description: "Resolve Python package dependencies"
+    shape: rectangle
+  }
+
+  # Internal flow
+  discovery -> loader: "Load skill"
+  loader -> cache: "Cache loaded skill"
+  loader -> dependency_resolver: "Resolve dependencies"
+  version_mgr -> loader: "Version validation"
+}
+
+# ============================================================================
+# CONTAINER: CLI Abstraction Layer
+# ============================================================================
+cli_abstraction: {
+  label: "CLI Abstraction Layer"
+  description: "Cross-CLI compatibility (Claude Code, Gemini, OpenCode, Codex)"
+  style.fill: "#438dd5"
+  style.stroke: "#2e5c8a"
+
+  cli_detector: {
+    label: "CLI Detector"
+    description: "Detect active CLI via env vars, process inspection"
+    shape: rectangle
+  }
+
+  cli_wrapper: {
+    label: "CLI Wrapper"
+    description: "Unified API: prompt caching, batch processing"
+    shape: rectangle
+  }
+
+  security_utils: {
+    label: "Security Utils"
+    description: "Input validation, sanitization, DoS prevention"
+    shape: rectangle
+  }
+
+  parallel_executor: {
+    label: "Parallel Executor"
+    description: "Concurrent skill execution, thread pool management"
+    shape: rectangle
+  }
+
+  # Internal flow
+  cli_detector -> cli_wrapper: "Detected CLI"
+  security_utils -> cli_wrapper: "Sanitized input"
+  parallel_executor -> cli_wrapper: "Execute batch"
+}
+
+# ============================================================================
+# CONTAINER: Documentation Skills (Python)
+# ============================================================================
+doc_skills: {
+  label: "Documentation Skills"
+  description: "LLM-as-judge validation for SPEC.md, ARCHITECTURE.md, ADRs"
+  style.fill: "#85bbf0"
+  style.stroke: "#5a9dd6"
+
+  review_spec: {
+    label: "review-spec.py"
+    description: "SPEC.md validation (vision, CUJs, metrics, scope)"
+    shape: rectangle
+  }
+
+  review_architecture: {
+    label: "review-architecture.py"
+    description: "ARCHITECTURE.md validation + diagram syntax checking"
+    shape: rectangle
+  }
+
+  review_adr: {
+    label: "review-adr.py"
+    description: "ADR validation with anti-pattern detection"
+    shape: rectangle
+  }
+
+  create_spec: {
+    label: "create-spec.py"
+    description: "Generate SPEC.md from requirements + codebase analysis"
+    shape: rectangle
+  }
+
+  # Internal connections
+  review_spec -> review_architecture: "References specs"
+  review_architecture -> review_adr: "References ADRs"
+}
+
+# ============================================================================
+# CONTAINER: Diagram-as-Code Skills (Multi-language)
+# ============================================================================
+diagram_skills: {
+  label: "Diagram-as-Code Skills"
+  description: "C4 diagram generation, validation, rendering, sync detection"
+  style.fill: "#85bbf0"
+  style.stroke: "#5a9dd6"
+
+  create_diagrams: {
+    label: "create-diagrams.py"
+    description: "Python wrapper → Go binary (codebase analysis)"
+    shape: rectangle
+  }
+
+  review_diagrams: {
+    label: "review-diagrams.py"
+    description: "Multi-persona LLM validation (C4 compliance + quality)"
+    shape: rectangle
+  }
+
+  render_diagrams: {
+    label: "render-diagrams.py"
+    description: "Compile diagram-as-code to PNG/SVG/PDF"
+    shape: rectangle
+  }
+
+  diagram_sync: {
+    label: "diagram-sync.py"
+    description: "Detect drift (diagram vs code), sync scoring"
+    shape: rectangle
+  }
+
+  # Internal connections
+  create_diagrams -> review_diagrams: "Generated diagrams"
+  review_diagrams -> render_diagrams: "Validated diagrams"
+  diagram_sync -> create_diagrams: "Regenerate on drift"
+}
+
+# ============================================================================
+# CONTAINER: Shared Services (Python)
+# ============================================================================
+shared_services: {
+  label: "Shared Services"
+  description: "Common utilities used by all skills"
+  style.fill: "#438dd5"
+  style.stroke: "#2e5c8a"
+
+  llm_judge: {
+    label: "LLM Judge Engine"
+    description: "Multi-persona validation, self-consistency checks"
+    shape: rectangle
+  }
+
+  rubric_loader: {
+    label: "Rubric Loader"
+    description: "Load YAML quality rubrics (spec, architecture, diagram)"
+    shape: rectangle
+  }
+
+  response_parser: {
+    label: "Response Parser"
+    description: "Extract JSON from LLM responses, handle markdown blocks"
+    shape: rectangle
+  }
+
+  terminal_formatter: {
+    label: "Terminal Formatter"
+    description: "Rich terminal output (colors, panels, tables)"
+    shape: rectangle
+  }
+
+  # Internal flow
+  llm_judge -> response_parser: "Parse LLM response"
+  rubric_loader -> llm_judge: "Quality criteria"
+  response_parser -> terminal_formatter: "Structured output"
+}
+
+# ============================================================================
+# CONTAINER: Go Core Services
+# ============================================================================
+go_services: {
+  label: "Go Core Services"
+  description: "High-performance diagram processing (Go 1.21+)"
+  style.fill: "#1168bd"
+  style.stroke: "#0b4582"
+
+  codebase_analyzer: {
+    label: "Codebase Analyzer"
+    description: "AST parsing (Go), regex (Python/TS/Java), dependency graph"
+    shape: rectangle
+  }
+
+  c4_builder: {
+    label: "C4 Model Builder"
+    description: "Map code structure → C4 elements (System, Container, Component)"
+    shape: rectangle
+  }
+
+  c4_validator: {
+    label: "C4 Validator"
+    description: "Validate C4 level rules (no element mixing)"
+    shape: rectangle
+  }
+
+  d2_renderer: {
+    label: "D2 Renderer"
+    description: "Native oss.terrastruct.com/d2 library integration"
+    shape: rectangle
+  }
+
+  diagram_parser: {
+    label: "Diagram Parser"
+    description: "Parse D2/Structurizr/Mermaid → extract elements"
+    shape: rectangle
+  }
+
+  sync_engine: {
+    label: "Sync Engine"
+    description: "Compare diagram graph vs code graph, calculate sync score"
+    shape: rectangle
+  }
+
+  # Internal flow
+  codebase_analyzer -> c4_builder: "Dependency graph"
+  c4_builder -> c4_validator: "C4 model"
+  c4_builder -> d2_renderer: "Generate D2 syntax"
+  diagram_parser -> sync_engine: "Diagram elements"
+  codebase_analyzer -> sync_engine: "Code elements"
+}
+
+# ============================================================================
+# CONTAINER: CLI Adapters (Per-Skill)
+# ============================================================================
+cli_adapters: {
+  label: "CLI Adapters"
+  description: "Skill-specific CLI implementations"
+  style.fill: "#85bbf0"
+  style.stroke: "#5a9dd6"
+
+  claude_adapter: {
+    label: "Claude Code Adapter"
+    description: "Prompt caching, multimodal support"
+    shape: rectangle
+  }
+
+  gemini_adapter: {
+    label: "Gemini CLI Adapter"
+    description: "Batch mode, function calling"
+    shape: rectangle
+  }
+
+  opencode_adapter: {
+    label: "OpenCode Adapter"
+    description: "MCP integration"
+    shape: rectangle
+  }
+
+  codex_adapter: {
+    label: "Codex Adapter"
+    description: "MCP integration"
+    shape: rectangle
+  }
+}
+
+# ============================================================================
+# DATA STORES
+# ============================================================================
+marketplace_data: {
+  shape: cylinder
+  label: "marketplace.json"
+  description: "8 skills, compatibility matrix, metadata"
+  style.fill: "#c4d5e8"
+}
+
+rubrics_db: {
+  shape: cylinder
+  label: "Quality Rubrics"
+  description: "YAML rubrics (spec, architecture, diagram, ADR)"
+  style.fill: "#c4d5e8"
+}
+
+examples_db: {
+  shape: cylinder
+  label: "Example Diagrams"
+  description: "7 reference diagrams (microservices, monolith, event-driven)"
+  style.fill: "#c4d5e8"
+}
+
+templates_db: {
+  shape: cylinder
+  label: "Templates"
+  description: "Spec templates, diagram templates (JSON/YAML)"
+  style.fill: "#c4d5e8"
+}
+
+# ============================================================================
+# EXTERNAL SYSTEMS
+# ============================================================================
+anthropic_api: {
+  label: "Anthropic API"
+  description: "Claude Sonnet 4.5 (LLM-as-judge validation)"
+  style.fill: "#999999"
+  style.stroke-dash: 3
+}
+
+diagram_tools: {
+  label: "Diagram CLI Tools"
+  description: "d2, mmdc (Mermaid), structurizr-cli"
+  style.fill: "#999999"
+  style.stroke-dash: 3
+}
+
+user_codebase: {
+  label: "User Codebase"
+  description: "Target codebase for analysis (Go, Python, TypeScript, Java)"
+  style.fill: "#999999"
+  style.stroke-dash: 3
+}
+
+# ============================================================================
+# RELATIONSHIPS - Skill Registry
+# ============================================================================
+skill_registry.discovery -> marketplace_data: "Load skills" {
+  style.stroke: "#666"
+}
+
+skill_registry.loader -> doc_skills: "Load documentation skills" {
+  style.stroke: "#666"
+}
+
+skill_registry.loader -> diagram_skills: "Load diagram skills" {
+  style.stroke: "#666"
+}
+
+skill_registry.dependency_resolver -> skill_registry.loader: "Dependencies resolved" {
+  style.stroke: "#666"
+}
+
+# ============================================================================
+# RELATIONSHIPS - CLI Abstraction
+# ============================================================================
+cli_abstraction.cli_wrapper -> cli_adapters: "Delegate to CLI-specific adapter" {
+  style.stroke: "#666"
+}
+
+cli_adapters.claude_adapter -> cli_abstraction.cli_wrapper: "Uses abstraction" {
+  style.stroke: "#666"
+  style.stroke-dash: 3
+}
+
+cli_adapters.gemini_adapter -> cli_abstraction.cli_wrapper: "Uses abstraction" {
+  style.stroke: "#666"
+  style.stroke-dash: 3
+}
+
+# ============================================================================
+# RELATIONSHIPS - Documentation Skills
+# ============================================================================
+doc_skills.review_spec -> shared_services.llm_judge: "LLM validation" {
+  style.stroke: "#4a90d9"
+}
+
+doc_skills.review_architecture -> shared_services.llm_judge: "LLM validation" {
+  style.stroke: "#4a90d9"
+}
+
+doc_skills.review_architecture -> go_services.c4_validator: "Validate diagram syntax" {
+  style.stroke: "#4a90d9"
+}
+
+doc_skills.review_adr -> shared_services.llm_judge: "LLM validation" {
+  style.stroke: "#4a90d9"
+}
+
+doc_skills.create_spec -> templates_db: "Load spec template" {
+  style.stroke: "#666"
+}
+
+# ============================================================================
+# RELATIONSHIPS - Diagram Skills
+# ============================================================================
+diagram_skills.create_diagrams -> go_services.codebase_analyzer: "Subprocess call (Go binary)" {
+  style.stroke: "#0088cc"
+}
+
+diagram_skills.create_diagrams -> templates_db: "Load diagram template" {
+  style.stroke: "#666"
+}
+
+diagram_skills.review_diagrams -> shared_services.llm_judge: "Multi-persona LLM validation" {
+  style.stroke: "#4a90d9"
+}
+
+diagram_skills.review_diagrams -> go_services.c4_validator: "C4 compliance check" {
+  style.stroke: "#0088cc"
+}
+
+diagram_skills.render_diagrams -> diagram_tools: "CLI invocation (d2, mmdc)" {
+  style.stroke: "#666"
+}
+
+diagram_skills.diagram_sync -> go_services.sync_engine: "Calculate sync score" {
+  style.stroke: "#0088cc"
+}
+
+# ============================================================================
+# RELATIONSHIPS - Go Services
+# ============================================================================
+go_services.codebase_analyzer -> user_codebase: "Static analysis (AST, regex)" {
+  style.stroke: "#0088cc"
+}
+
+go_services.c4_builder -> go_services.codebase_analyzer: "Uses dependency graph" {
+  style.stroke: "#0088cc"
+}
+
+go_services.d2_renderer -> diagram_tools: "Native D2 library" {
+  style.stroke: "#666"
+}
+
+go_services.diagram_parser -> go_services.d2_renderer: "Parse generated diagrams" {
+  style.stroke: "#0088cc"
+  style.stroke-dash: 3
+}
+
+go_services.sync_engine -> go_services.diagram_parser: "Extract diagram elements" {
+  style.stroke: "#0088cc"
+}
+
+go_services.sync_engine -> go_services.codebase_analyzer: "Extract code elements" {
+  style.stroke: "#0088cc"
+}
+
+# ============================================================================
+# RELATIONSHIPS - Shared Services
+# ============================================================================
+shared_services.llm_judge -> anthropic_api: "API calls (HTTPS/JSON)" {
+  style.stroke: "#d94a4a"
+}
+
+shared_services.rubric_loader -> rubrics_db: "Load YAML rubrics" {
+  style.stroke: "#666"
+}
+
+shared_services.llm_judge -> cli_abstraction.cli_wrapper: "Uses prompt caching" {
+  style.stroke: "#666"
+  style.stroke-dash: 3
+}
+
+# ============================================================================
+# RELATIONSHIPS - Security & Utilities
+# ============================================================================
+cli_abstraction.security_utils -> doc_skills: "Input validation" {
+  style.stroke: "#666"
+  style.stroke-dash: 3
+}
+
+cli_abstraction.security_utils -> diagram_skills: "Input validation" {
+  style.stroke: "#666"
+  style.stroke-dash: 3
+}
+
+cli_abstraction.parallel_executor -> diagram_skills.render_diagrams: "Parallel rendering" {
+  style.stroke: "#666"
+  style.stroke-dash: 3
+}
+
+# ============================================================================
+# RELATIONSHIPS - Examples & Documentation
+# ============================================================================
+diagram_skills.create_diagrams -> examples_db: "Reference examples" {
+  style.stroke: "#666"
+  style.stroke-dash: 3
+}
+
+diagram_skills.review_diagrams -> examples_db: "Comparison baseline" {
+  style.stroke: "#666"
+  style.stroke-dash: 3
+}
+
+# ============================================================================
+# LEGEND
+# ============================================================================
+legend: {
+  label: "Legend"
+  style.fill: "#f5f5f5"
+  style.stroke: "#999"
+
+  legend_python: {
+    label: "Python Components"
+    description: "Python 3.10+ (CLI adapters, skills, utilities)"
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  legend_go: {
+    label: "Go Components"
+    description: "Go 1.21+ (diagram core services)"
+    shape: rectangle
+    style.fill: "#1168bd"
+  }
+
+  legend_data: {
+    label: "Data Stores"
+    description: "JSON, YAML, Markdown files"
+    shape: cylinder
+    style.fill: "#c4d5e8"
+  }
+
+  legend_external: {
+    label: "External Systems"
+    description: "APIs, CLI tools, user codebase"
+    shape: rectangle
+    style.fill: "#999999"
+    style.stroke-dash: 3
+  }
+}

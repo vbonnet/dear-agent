@@ -1,0 +1,192 @@
+name: spec-quality-rubric
+description: Research-backed SPEC.md quality assessment rubric
+version: 1.0.0
+source: "Synthesized from academic research on software specification quality"
+
+# Rubric dimensions and weights
+dimensions:
+  vision_and_goals:
+    weight: 0.30
+    description: "Clarity, measurability, and alignment of vision and goals"
+    criteria:
+      - id: VG1
+        name: "Vision Clarity"
+        weight: 0.35
+        description: "Clear, compelling vision statement that explains the 'why'"
+        scoring:
+          excellent: "Vision is clear, compelling, and explains both what and why"
+          good: "Vision is clear but lacks some compelling elements"
+          fair: "Vision is present but vague or unclear"
+          poor: "Vision is missing or completely unclear"
+
+      - id: VG2
+        name: "Goals Measurability"
+        weight: 0.35
+        description: "Goals are specific, measurable, and achievable"
+        scoring:
+          excellent: "All goals are SMART (Specific, Measurable, Achievable, Relevant, Time-bound)"
+          good: "Most goals are measurable with clear success criteria"
+          fair: "Some goals are measurable but many are vague"
+          poor: "Goals are vague and not measurable"
+
+      - id: VG3
+        name: "Stakeholder Alignment"
+        weight: 0.30
+        description: "Clear identification and alignment of stakeholder needs"
+        scoring:
+          excellent: "Stakeholders clearly identified with explicit needs and alignment"
+          good: "Stakeholders identified with some needs documented"
+          fair: "Stakeholders mentioned but needs not well documented"
+          poor: "Stakeholders not identified or aligned"
+
+  critical_user_journeys:
+    weight: 0.25
+    description: "Completeness, detail, and coverage of critical user journeys (CUJs)"
+    criteria:
+      - id: CUJ1
+        name: "Journey Completeness"
+        weight: 0.40
+        description: "All critical user journeys are identified and documented"
+        scoring:
+          excellent: "All critical journeys documented with clear scope"
+          good: "Most critical journeys documented"
+          fair: "Some critical journeys missing"
+          poor: "Many critical journeys missing or unclear"
+
+      - id: CUJ2
+        name: "Journey Detail"
+        weight: 0.30
+        description: "Each journey has sufficient detail (steps, actors, outcomes)"
+        scoring:
+          excellent: "All journeys have clear steps, actors, preconditions, and outcomes"
+          good: "Most journeys have sufficient detail"
+          fair: "Some journeys lack detail"
+          poor: "Journeys are too high-level or lack detail"
+
+      - id: CUJ3
+        name: "Edge Cases Coverage"
+        weight: 0.30
+        description: "Edge cases and error scenarios are documented"
+        scoring:
+          excellent: "Comprehensive edge case and error scenario coverage"
+          good: "Most important edge cases covered"
+          fair: "Some edge cases covered but many missing"
+          poor: "Edge cases not documented"
+
+  success_metrics:
+    weight: 0.25
+    description: "Quality and measurability of success metrics"
+    criteria:
+      - id: SM1
+        name: "Metric Measurability"
+        weight: 0.40
+        description: "Metrics are quantifiable and measurable"
+        scoring:
+          excellent: "All metrics are quantifiable with clear measurement methods"
+          good: "Most metrics are measurable"
+          fair: "Some metrics are vague or hard to measure"
+          poor: "Metrics are not measurable"
+
+      - id: SM2
+        name: "Baseline and Targets"
+        weight: 0.35
+        description: "Current baselines and target values are specified"
+        scoring:
+          excellent: "All metrics have baselines and specific target values"
+          good: "Most metrics have baselines and targets"
+          fair: "Some metrics lack baselines or targets"
+          poor: "Baselines and targets are missing"
+
+      - id: SM3
+        name: "Metric Relevance"
+        weight: 0.25
+        description: "Metrics align with goals and measure real success"
+        scoring:
+          excellent: "All metrics directly align with goals and measure success"
+          good: "Most metrics are relevant to goals"
+          fair: "Some metrics are tangential to goals"
+          poor: "Metrics don't align with goals"
+
+  scope_definition:
+    weight: 0.10
+    description: "Clarity of scope boundaries and constraints"
+    criteria:
+      - id: SC1
+        name: "Scope Boundaries"
+        weight: 0.50
+        description: "Clear definition of what is in and out of scope"
+        scoring:
+          excellent: "Clear in-scope and out-of-scope boundaries"
+          good: "Scope boundaries mostly clear"
+          fair: "Some ambiguity in scope"
+          poor: "Scope is unclear or missing"
+
+      - id: SC2
+        name: "Assumptions and Constraints"
+        weight: 0.50
+        description: "Key assumptions and constraints are documented"
+        scoring:
+          excellent: "All key assumptions and constraints documented"
+          good: "Most assumptions and constraints documented"
+          fair: "Some assumptions/constraints missing"
+          poor: "Assumptions and constraints not documented"
+
+  living_document:
+    weight: 0.10
+    description: "Spec is maintainable and will evolve with the project"
+    criteria:
+      - id: LD1
+        name: "Updateability"
+        weight: 0.40
+        description: "Clear process for updating the spec"
+        scoring:
+          excellent: "Clear update process and version history"
+          good: "Update process documented"
+          fair: "Some update guidance"
+          poor: "No update process"
+
+      - id: LD2
+        name: "Ownership"
+        weight: 0.30
+        description: "Clear ownership and maintenance responsibility"
+        scoring:
+          excellent: "Clear owner and stakeholders identified"
+          good: "Owner identified"
+          fair: "Ownership implied but not explicit"
+          poor: "No clear ownership"
+
+      - id: LD3
+        name: "Version Control"
+        weight: 0.30
+        description: "Version history and change tracking"
+        scoring:
+          excellent: "Full version history with change tracking"
+          good: "Version information present"
+          fair: "Some version tracking"
+          poor: "No version tracking"
+
+# Decision thresholds
+decision_thresholds:
+  pass: 8.0    # Score >= 8.0 is a PASS
+  warn: 6.0    # Score 6.0-7.9 is a WARN (user can decide)
+  fail: 0.0    # Score < 6.0 is a FAIL
+
+# LLM-as-judge configuration
+llm_judge:
+  model: "claude-sonnet-4-5"
+  temperature: 0.7
+  max_tokens: 4000
+  num_iterations: 5  # Hybrid self-consistency: 5 independent scores
+  aggregation: "median"  # Use median to reduce outlier impact
+
+# Output format
+output:
+  format: "structured"
+  sections:
+    - overall_score: "Overall quality score (0-10)"
+    - dimension_scores: "Score breakdown by dimension"
+    - criterion_scores: "Detailed scores for each criterion"
+    - strengths: "What the spec does well"
+    - weaknesses: "Areas needing improvement"
+    - recommendations: "Specific actionable recommendations"
+    - decision: "PASS / WARN / FAIL"

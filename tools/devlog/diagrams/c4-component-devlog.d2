@@ -1,0 +1,251 @@
+# C4 Component Diagram - Devlog CLI
+# Level 3: Component-level architecture showing internal structure
+
+direction: right
+
+title: {
+  label: "Devlog CLI - Component Diagram (C4 Level 3)"
+  near: top-center
+  shape: text
+  style: {
+    font-size: 26
+    bold: true
+  }
+}
+
+# External Actors & Systems
+user: {
+  label: "Developer"
+  shape: person
+  style.fill: "#08427B"
+  style.stroke: "#052E56"
+}
+
+filesystem: {
+  label: "File System\n\n.devlog/config.yaml\n.devlog/config.local.yaml\nBare repos + worktrees"
+  shape: cylinder
+  style.fill: "#999999"
+  style.stroke: "#666666"
+}
+
+gitCLI: {
+  label: "Git CLI\n\ngit clone --bare\ngit worktree add\ngit branch"
+  shape: hexagon
+  style.fill: "#999999"
+  style.stroke: "#666666"
+}
+
+yamlLib: {
+  label: "gopkg.in/yaml.v3\n\nYAML Parser"
+  shape: hexagon
+  style.fill: "#999999"
+  style.stroke: "#666666"
+}
+
+cobraLib: {
+  label: "github.com/spf13/cobra\n\nCLI Framework"
+  shape: hexagon
+  style.fill: "#999999"
+  style.stroke: "#666666"
+}
+
+# Devlog Application Container
+devlog: {
+  label: "Devlog CLI Application [Container: Go]"
+  style.fill: "#1168BD"
+  style.stroke: "#0B4884"
+
+  # CLI Layer
+  cli: {
+    label: "CLI Commands Layer"
+    style.fill: "#438DD5"
+    style.stroke: "#2E6295"
+
+    rootCmd: {
+      label: "RootCommand\n[Component]\n\nEntry point\nFlag parsing (verbose, dry-run)\nCommand orchestration"
+      shape: rectangle
+      style.fill: "#85BBF0"
+      style.stroke: "#5D9DD5"
+    }
+
+    initCmd: {
+      label: "InitCommand\n[Component]\n\nBootstrap workspace\nCreate .devlog structure\nGenerate config templates"
+      shape: rectangle
+      style.fill: "#85BBF0"
+      style.stroke: "#5D9DD5"
+    }
+
+    syncCmd: {
+      label: "SyncCommand\n[Component]\n\nClone missing repos\nCreate worktrees\nIdempotent sync operations"
+      shape: rectangle
+      style.fill: "#85BBF0"
+      style.stroke: "#5D9DD5"
+    }
+
+    statusCmd: {
+      label: "StatusCommand\n[Component]\n\nShow workspace state\nRepo/worktree status\nBranch tracking"
+      shape: rectangle
+      style.fill: "#85BBF0"
+      style.stroke: "#5D9DD5"
+    }
+  }
+
+  # Core Business Logic
+  core: {
+    label: "Core Business Logic"
+    style.fill: "#438DD5"
+    style.stroke: "#2E6295"
+
+    workspaceManager: {
+      label: "WorkspaceManager\n[Component]\n\nWorkspace discovery\nPath resolution\nRepo/worktree path management"
+      shape: rectangle
+      style.fill: "#85BBF0"
+      style.stroke: "#5D9DD5"
+    }
+
+    configLoader: {
+      label: "ConfigLoader\n[Component]\n\nFind .devlog/ directory\nSearch up directory tree\nLoad base + local YAML\nSize limit enforcement (1MB)"
+      shape: rectangle
+      style.fill: "#85BBF0"
+      style.stroke: "#5D9DD5"
+    }
+
+    configMerger: {
+      label: "ConfigMerger\n[Component]\n\nAdditive merge strategy\nLocal extends base config\nDeduplicate repos/worktrees\nPreserve team settings"
+      shape: rectangle
+      style.fill: "#85BBF0"
+      style.stroke: "#5D9DD5"
+    }
+
+    configValidator: {
+      label: "ConfigValidator\n[Component]\n\nSecurity validations\nPath traversal prevention\nGit URL validation (HTTPS/SSH)\nYAML bomb protection\nDuplicate detection"
+      shape: rectangle
+      style.fill: "#85BBF0"
+      style.stroke: "#5D9DD5"
+    }
+  }
+
+  # Git Operations
+  git: {
+    label: "Git Operations Layer"
+    style.fill: "#438DD5"
+    style.stroke: "#2E6295"
+
+    repoInterface: {
+      label: "Repository Interface\n[Component]\n\nClone(url, path)\nCreateWorktree(name, branch)\nListWorktrees()\nGetCurrentBranch()\nExists()"
+      shape: rectangle
+      style.fill: "#85BBF0"
+      style.stroke: "#5D9DD5"
+    }
+
+    localRepo: {
+      label: "LocalRepository\n[Component]\n\nBare repo operations\nWorktree management\nCommand execution (exec.Command)\nPorcelain parsing\nSecurity: arg separation"
+      shape: rectangle
+      style.fill: "#85BBF0"
+      style.stroke: "#5D9DD5"
+    }
+  }
+
+  # Infrastructure
+  infra: {
+    label: "Infrastructure & Support"
+    style.fill: "#438DD5"
+    style.stroke: "#2E6295"
+
+    outputWriter: {
+      label: "OutputWriter\n[Component]\n\nFormatted CLI output\nSuccess/Error/Info/Progress\nTable rendering\nVerbose mode control"
+      shape: rectangle
+      style.fill: "#85BBF0"
+      style.stroke: "#5D9DD5"
+    }
+
+    errorHandler: {
+      label: "ErrorHandler\n[Component]\n\nStructured errors (DevlogError)\nOperation context tracking\nPath tracking\nError unwrapping (Go 1.13+)\nExit codes mapping"
+      shape: rectangle
+      style.fill: "#85BBF0"
+      style.stroke: "#5D9DD5"
+    }
+  }
+
+  # Domain Model
+  model: {
+    label: "Domain Model"
+    style.fill: "#438DD5"
+    style.stroke: "#2E6295"
+
+    config: {
+      label: "Config\n[Data Structure]\n\nname, description, owner\nRepos[]\n - name, url, type\n - Worktrees[]\n   - name, branch, protected"
+      shape: rectangle
+      style.fill: "#A5CBF5"
+      style.stroke: "#7DABD5"
+    }
+
+    workspace: {
+      label: "Workspace\n[Data Structure]\n\nConfig reference\nRoot directory\nGetRepoPath()\nGetWorktreePath()"
+      shape: rectangle
+      style.fill: "#A5CBF5"
+      style.stroke: "#7DABD5"
+    }
+
+    worktreeInfo: {
+      label: "WorktreeInfo\n[Data Structure]\n\nName, Path\nBranch, Commit"
+      shape: rectangle
+      style.fill: "#A5CBF5"
+      style.stroke: "#7DABD5"
+    }
+  }
+}
+
+# User Interactions
+user -> devlog.cli.rootCmd: "Execute CLI\ncommands"
+
+# CLI Command Flows
+devlog.cli.rootCmd -> cobraLib: "Parse flags\nand arguments"
+devlog.cli.initCmd -> devlog.core.workspaceManager: "Create workspace"
+devlog.cli.syncCmd -> devlog.core.workspaceManager: "Load workspace"
+devlog.cli.statusCmd -> devlog.core.workspaceManager: "Load workspace"
+
+# WorkspaceManager Dependencies
+devlog.core.workspaceManager -> devlog.core.configLoader: "LoadMerged(path)"
+devlog.core.workspaceManager -> devlog.model.workspace: "Create instance"
+devlog.core.workspaceManager -> devlog.model.config: "Use configuration"
+
+# Config Loading Workflow
+devlog.core.configLoader -> filesystem: "Search .devlog/\nRead YAML files"
+devlog.core.configLoader -> yamlLib: "yaml.Unmarshal()"
+devlog.core.configLoader -> devlog.core.configMerger: "Merge(base, local)"
+devlog.core.configLoader -> devlog.core.configValidator: "Validate()"
+
+# Config Validation
+devlog.core.configValidator -> devlog.model.config: "Check constraints\nand rules"
+devlog.core.configValidator -> devlog.infra.errorHandler: "Return\nvalidation errors"
+
+# Sync Command Flow
+devlog.cli.syncCmd -> devlog.git.repoInterface: "Clone repos"
+devlog.cli.syncCmd -> devlog.git.repoInterface: "Create worktrees"
+devlog.cli.syncCmd -> devlog.infra.outputWriter: "Report progress"
+
+# Status Command Flow
+devlog.cli.statusCmd -> devlog.git.repoInterface: "Check existence"
+devlog.cli.statusCmd -> devlog.git.repoInterface: "List worktrees"
+devlog.cli.statusCmd -> devlog.infra.outputWriter: "Display status"
+
+# Git Layer Implementation
+devlog.git.localRepo -> devlog.git.repoInterface: "Implements interface"
+devlog.git.localRepo -> gitCLI: "Execute git commands"
+devlog.git.localRepo -> filesystem: "Check repo structure\n(HEAD, objects/, refs/)"
+devlog.git.localRepo -> devlog.model.worktreeInfo: "Parse and return"
+
+# Output Handling
+devlog.infra.outputWriter -> user: "Formatted output\n(stdout/stderr)"
+
+# Error Handling (Cross-cutting)
+devlog.core.configLoader -> devlog.infra.errorHandler: "Wrap config errors"
+devlog.git.localRepo -> devlog.infra.errorHandler: "WrapPath git errors"
+devlog.cli.syncCmd -> devlog.infra.errorHandler: "Handle failures"
+devlog.cli.statusCmd -> devlog.infra.errorHandler: "Handle failures"
+devlog.cli.initCmd -> devlog.infra.errorHandler: "Handle failures"
+
+# Init Command Flow
+devlog.cli.initCmd -> filesystem: "Create .devlog/\nWrite config.yaml"
+devlog.cli.initCmd -> devlog.infra.outputWriter: "Output results"

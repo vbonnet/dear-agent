@@ -1,0 +1,263 @@
+# Architecture Documentation Quality Rubric
+# Version: 2.0 (Enhanced with diagram-as-code validation)
+# Last Updated: 2026-03-12
+
+version: "2.0"
+name: "Architecture Quality Rubric"
+description: "Dual-layer architecture framework with enhanced diagram validation"
+
+# Overall scoring threshold
+passing_score: 8.0
+warning_score: 6.0
+
+# Dimension weights (must sum to 100%)
+dimensions:
+  traditional_architecture:
+    weight: 45
+    description: "Traditional system architecture documentation"
+    criteria:
+      - name: "Component Architecture"
+        weight: 15
+        description: "Clear component boundaries, responsibilities, and interactions"
+        examples:
+          - "C4 Context diagram showing system boundary"
+          - "C4 Container diagram showing deployable units"
+          - "Component relationships and dependencies documented"
+
+      - name: "C4 Diagram Quality"
+        weight: 10
+        description: "High-quality C4 diagrams at appropriate abstraction levels"
+        examples:
+          - "Context diagram (Level 1) for system overview"
+          - "Container diagram (Level 2) for runtime architecture"
+          - "Component diagram (Level 3) for internal structure (optional)"
+
+      - name: "Deployment Architecture"
+        weight: 10
+        description: "Infrastructure and deployment patterns documented"
+        examples:
+          - "Deployment topology (cloud/on-prem/hybrid)"
+          - "Scalability and resilience patterns"
+          - "Infrastructure-as-code references"
+
+      - name: "Data Flow Documentation"
+        weight: 10
+        description: "Data movement and integration points"
+        examples:
+          - "Data flow between components"
+          - "External API integrations"
+          - "Event/message flows"
+
+  agentic_architecture:
+    weight: 25
+    description: "Multi-agent system patterns and coordination"
+    criteria:
+      - name: "Agent Patterns"
+        weight: 8
+        description: "Agent types, roles, and behaviors documented"
+        examples:
+          - "Agent taxonomy (planning, execution, monitoring)"
+          - "Agent capabilities and tools"
+          - "Agent lifecycle management"
+
+      - name: "Coordination Strategy"
+        weight: 9
+        description: "How agents communicate and collaborate"
+        examples:
+          - "Message passing or shared state"
+          - "Orchestration vs choreography patterns"
+          - "Conflict resolution mechanisms"
+
+      - name: "State Management"
+        weight: 8
+        description: "Agent state persistence and consistency"
+        examples:
+          - "State storage (memory, database, cache)"
+          - "State synchronization across agents"
+          - "Recovery and fault tolerance"
+
+  adr_integration:
+    weight: 10
+    description: "Architectural Decision Records integration"
+    criteria:
+      - name: "ADR References"
+        weight: 5
+        description: "Architecture doc links to ADRs"
+        examples:
+          - "Links to relevant ADRs for major decisions"
+          - "ADR numbering convention followed"
+          - "Decision context explained"
+
+      - name: "Decision Rationale"
+        weight: 5
+        description: "Why decisions were made"
+        examples:
+          - "Trade-offs documented"
+          - "Alternatives considered"
+          - "Decision criteria explained"
+
+  visual_diagrams:
+    weight: 20
+    description: "Diagram-as-code quality and syntax validation (ENHANCED)"
+    criteria:
+      - name: "Diagram Presence"
+        weight: 10
+        description: "Architecture diagrams exist and are referenced"
+        examples:
+          - "At least one C4 Context diagram"
+          - "Container diagrams for distributed systems"
+          - "Diagrams embedded or linked in doc"
+
+      - name: "Diagram Syntax Validation"
+        weight: 5
+        description: "Diagram-as-code files have valid syntax"
+        examples:
+          - "D2 files compile without errors"
+          - "Structurizr DSL validates successfully"
+          - "Mermaid files are non-empty and parseable"
+        validation:
+          d2: "d2 compile --dry-run"
+          structurizr: "structurizr-cli validate"
+          mermaid: "Non-empty file check"
+
+      - name: "Diagram References"
+        weight: 5
+        description: "Diagrams are properly referenced and up-to-date"
+        examples:
+          - "Clear figure captions and numbers"
+          - "Referenced in relevant sections"
+          - "Rendering instructions documented"
+
+# Persona-based evaluation
+personas:
+  - name: "System Architect"
+    mandatory: true
+    focus:
+      - "Overall architecture quality"
+      - "Component design and patterns"
+      - "Structural coherence"
+      - "C4 model compliance"
+
+  - name: "DevOps Engineer"
+    mandatory: false
+    trigger_keywords:
+      - "deployment"
+      - "infrastructure"
+      - "kubernetes"
+      - "k8s"
+      - "docker"
+      - "cloud"
+      - "aws"
+      - "gcp"
+      - "azure"
+    focus:
+      - "Deployment architecture"
+      - "Observability patterns"
+      - "Scalability design"
+      - "Operational concerns"
+
+  - name: "Developer"
+    mandatory: false
+    trigger_keywords:
+      - "agent"
+      - "module"
+      - "package"
+      - "coordinator"
+      - "state management"
+    focus:
+      - "Code organization"
+      - "Module structure"
+      - "Implementability"
+      - "Agentic patterns"
+
+# Quick validation gates (auto-fail before LLM call)
+quick_validation:
+  required_sections:
+    - "Traditional Architecture"
+    - "Agentic Architecture"
+
+  required_diagrams:
+    formats:
+      - ".d2"
+      - ".dsl"
+      - ".mmd"
+      - ".mermaid"
+      - ".puml"
+      - ".pu"
+      - ".png"
+      - ".svg"
+    directories:
+      - "docs/architecture"
+      - "docs/diagrams"
+      - "diagrams"
+      - "architecture"
+
+  required_adrs:
+    patterns:
+      - "\\[ADR-\\d+\\]"
+      - "docs/adr/"
+      - "adr/\\d+"
+      - "decisions/"
+
+# Self-consistency checking
+self_consistency:
+  iterations: 5
+  variance_threshold: 0.5
+  description: "Run 5 independent evaluations and check variance"
+
+# Output format
+output:
+  json_schema:
+    overall_score: "float 0-10"
+    dimension_scores:
+      traditional_architecture: "float 0-10"
+      agentic_architecture: "float 0-10"
+      adr_integration: "float 0-10"
+      visual_diagrams: "float 0-10"
+    personas:
+      - role: "string"
+        score: "float 0-10"
+        feedback: "string (2-3 sentences)"
+    self_consistency:
+      scores: "array of 5 floats"
+      mean: "float"
+      variance: "float"
+
+  decision_thresholds:
+    PASS: ">=8.0"
+    WARN: "6.0-7.9"
+    FAIL: "<6.0"
+
+# CLI abstraction support
+cli_support:
+  claude_code:
+    optimization: "prompt_caching"
+    cache_key: "review-architecture-rubric"
+
+  gemini:
+    optimization: "batch_processing"
+    batch_size: 20
+
+  opencode:
+    optimization: "mcp_integration"
+
+  codex:
+    optimization: "completion_mode"
+
+# Change history
+changelog:
+  - version: "2.0"
+    date: "2026-03-12"
+    changes:
+      - "Enhanced Visual Diagrams dimension from 10% to 20%"
+      - "Added diagram syntax validation support"
+      - "Adjusted Traditional Architecture from 50% to 45%"
+      - "Adjusted Agentic Architecture from 30% to 25%"
+      - "Added support for D2, Structurizr DSL, Mermaid formats"
+
+  - version: "1.0"
+    date: "2026-03-11"
+    changes:
+      - "Initial rubric with dual-layer framework"
+      - "Multi-persona evaluation support"
+      - "Quick validation gates"

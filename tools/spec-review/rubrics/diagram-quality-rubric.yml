@@ -1,0 +1,320 @@
+---
+rubric_name: "Diagram Quality Assessment"
+version: "1.0.0"
+total_points: 100
+last_updated: "2026-03-12"
+description: "Multi-persona quality rubric for architecture diagrams following C4 Model framework"
+
+personas:
+  - name: "System Architect"
+    weight: 0.40
+    focus: "C4 correctness, abstraction levels, architectural patterns"
+
+  - name: "Technical Writer"
+    weight: 0.30
+    focus: "Visual clarity, documentation quality, accessibility"
+
+  - name: "Developer"
+    weight: 0.20
+    focus: "Technical accuracy, implementation feasibility, maintainability"
+
+  - name: "DevOps Engineer"
+    weight: 0.10
+    focus: "Deployment architecture, infrastructure representation"
+
+categories:
+  - category: "C4 Model Correctness"
+    points: 30
+    weight: 0.30
+    description: "Adherence to C4 Model framework and semantic conventions"
+    primary_persona: "System Architect"
+
+    criteria:
+      - name: "C4 Level Compliance"
+        points: 10
+        rules:
+          - "Context diagrams show only systems and people (no containers/components)"
+          - "Container diagrams show deployable units within system boundary"
+          - "Component diagrams show internal modules within container boundary"
+          - "No mixing of abstraction levels in single diagram"
+
+      - name: "Element Type Correctness"
+        points: 10
+        rules:
+          - "People represented as actors/users (not systems)"
+          - "Software Systems are independent deployable systems"
+          - "Containers are deployable units (services, databases, apps)"
+          - "Components are internal modules/packages"
+          - "External Systems properly tagged"
+
+      - name: "Relationship Semantics"
+        points: 10
+        rules:
+          - "Relationships use appropriate verbs (Uses, Calls, Reads/Writes, Publishes/Subscribes)"
+          - "Technology annotations present where relevant"
+          - "Directionality correct (from source to target)"
+          - "No circular dependencies at Context level"
+
+  - category: "Visual Clarity"
+    points: 25
+    weight: 0.25
+    description: "Readability, layout quality, and visual effectiveness"
+    primary_persona: "Technical Writer"
+
+    criteria:
+      - name: "Layout Efficiency"
+        points: 8
+        rules:
+          - "Minimal edge crossings"
+          - "Logical grouping of related elements"
+          - "Consistent spacing and alignment"
+          - "Appropriate use of hierarchy (nesting)"
+
+      - name: "Detail Level Appropriateness"
+        points: 8
+        rules:
+          - "Context diagrams: High-level (5-9 systems max recommended)"
+          - "Container diagrams: Medium detail (10-20 containers max)"
+          - "Component diagrams: Focused scope (single container decomposition)"
+          - "Labels concise but descriptive"
+
+      - name: "Styling Consistency"
+        points: 9
+        rules:
+          - "Consistent color scheme (C4 conventions or custom)"
+          - "Uniform shape usage for element types"
+          - "Readable font sizes"
+          - "Proper use of boundaries/boxes"
+          - "External systems visually distinguished"
+
+  - category: "Technical Accuracy"
+    points: 25
+    weight: 0.25
+    description: "Correctness of technical details and alignment with codebase"
+    primary_persona: "Developer"
+
+    criteria:
+      - name: "Component Naming Accuracy"
+        points: 10
+        rules:
+          - "Component names match actual code structure"
+          - "Service names match deployment artifacts"
+          - "Database names match configuration"
+          - "Technology labels accurate (versions optional)"
+
+      - name: "Relationship Accuracy"
+        points: 10
+        rules:
+          - "Dependencies match import statements"
+          - "API calls match actual service-to-service communication"
+          - "Database connections match code configuration"
+          - "Message queue relationships match producers/consumers"
+
+      - name: "Implementation Feasibility"
+        points: 5
+        rules:
+          - "No impossible dependencies (e.g., frontend → database direct)"
+          - "Technology stack realistic"
+          - "Deployment model achievable"
+
+  - category: "Documentation Quality"
+    points: 10
+    weight: 0.10
+    description: "Completeness of descriptions, metadata, and supporting information"
+    primary_persona: "Technical Writer"
+
+    criteria:
+      - name: "Element Descriptions"
+        points: 5
+        rules:
+          - "All systems have descriptions"
+          - "Containers have technology annotations"
+          - "Relationships have descriptive labels"
+          - "External systems identified"
+
+      - name: "Diagram Metadata"
+        points: 5
+        rules:
+          - "Diagram title present"
+          - "C4 level indicated (Context/Container/Component)"
+          - "System name clear"
+          - "Legend provided (if custom notation used)"
+
+  - category: "Maintainability"
+    points: 10
+    weight: 0.10
+    description: "Ease of updates, version control compatibility, reproducibility"
+    primary_persona: "Developer"
+
+    criteria:
+      - name: "Source Format Quality"
+        points: 5
+        rules:
+          - "Diagram-as-code (not binary image)"
+          - "Syntax valid (D2/Structurizr/Mermaid compiles)"
+          - "Modular structure (separate files per diagram)"
+          - "Version control friendly (text-based)"
+
+      - name: "Update Friendliness"
+        points: 5
+        rules:
+          - "Clear element IDs/references"
+          - "Logical file organization"
+          - "Minimal duplication"
+          - "README with rendering instructions"
+
+scoring_thresholds:
+  excellent: 90-100
+  good: 80-89
+  acceptable: 70-79
+  needs_improvement: 60-69
+  poor: 0-59
+
+deductions:
+  - reason: "Missing required C4 element (Person/System)"
+    points: -10
+
+  - reason: "Wrong abstraction level (e.g., components in Context diagram)"
+    points: -15
+
+  - reason: "Syntax errors (diagram doesn't compile)"
+    points: -20
+
+  - reason: "Binary format (PNG/PDF, not diagram-as-code)"
+    points: -25
+
+  - reason: "No descriptions on any elements"
+    points: -10
+
+  - reason: "More than 3 edge crossings in simple diagram"
+    points: -5
+
+  - reason: "Incorrect technology labels"
+    points: -5
+
+  - reason: "Component names don't match codebase"
+    points: -10
+
+bonus_points:
+  - reason: "Multiple C4 levels provided (Context + Container + Component)"
+    points: +5
+
+  - reason: "Deployment diagram included"
+    points: +5
+
+  - reason: "Interactive features (if supported by format)"
+    points: +3
+
+  - reason: "Accessibility considerations (alt text, color contrast)"
+    points: +2
+
+validation_rules:
+  auto_fail_conditions:
+    - "Syntax errors prevent compilation"
+    - "No C4 elements present (empty diagram)"
+    - "Binary format only (no source)"
+
+  warning_conditions:
+    - "More than 15 elements in Context diagram"
+    - "Circular dependencies detected"
+    - "Missing technology annotations on containers"
+    - "No external systems identified"
+
+review_process:
+  steps:
+    1: "Automated C4 compliance check (validator.go)"
+    2: "Syntax validation (compile test)"
+    3: "Technical accuracy check (compare vs codebase)"
+    4: "Multi-persona LLM review (4 personas)"
+    5: "Variance analysis (self-consistency)"
+    6: "Final score calculation (weighted average)"
+
+  llm_prompts:
+    system_architect: |
+      You are an experienced System Architect reviewing architecture diagrams.
+      Focus on:
+      - C4 Model correctness (abstraction levels, element types)
+      - Architectural patterns and best practices
+      - System boundary definition
+      - Scalability and maintainability concerns
+
+      Score the diagram on a 0-100 scale based on the rubric.
+
+    technical_writer: |
+      You are a Technical Writer reviewing diagram documentation quality.
+      Focus on:
+      - Visual clarity and readability
+      - Completeness of labels and descriptions
+      - Logical layout and information hierarchy
+      - Accessibility for diverse audiences
+
+      Score the diagram on a 0-100 scale based on the rubric.
+
+    developer: |
+      You are a Senior Developer reviewing technical accuracy.
+      Focus on:
+      - Correctness of component names and relationships
+      - Implementation feasibility
+      - Technology stack accuracy
+      - Code-diagram alignment
+
+      Score the diagram on a 0-100 scale based on the rubric.
+
+    devops_engineer: |
+      You are a DevOps Engineer reviewing deployment architecture.
+      Focus on:
+      - Deployment model clarity
+      - Infrastructure representation
+      - Network boundaries and security
+      - Operational considerations
+
+      Score the diagram on a 0-100 scale based on the rubric.
+
+output_format:
+  summary:
+    - "Overall Score: X/100 (Rating)"
+    - "C4 Correctness: X/30"
+    - "Visual Clarity: X/25"
+    - "Technical Accuracy: X/25"
+    - "Documentation: X/10"
+    - "Maintainability: X/10"
+
+  persona_breakdown:
+    - "System Architect (40%): X/100"
+    - "Technical Writer (30%): X/100"
+    - "Developer (20%): X/100"
+    - "DevOps Engineer (10%): X/100"
+
+  variance_analysis:
+    - "Mean Score: X.X"
+    - "Standard Deviation: X.X"
+    - "Confidence Interval: [X.X, X.X]"
+    - "Outliers: {persona names if variance > threshold}"
+
+  recommendations:
+    - "Critical Issues: {list}"
+    - "Improvement Suggestions: {list}"
+    - "Best Practices Applied: {list}"
+
+examples:
+  excellent_score:
+    score: 95
+    description: "Complete C4 Context diagram with proper abstraction, clear relationships, accurate technology labels, comprehensive descriptions, and maintainable D2 source"
+
+  good_score:
+    score: 82
+    description: "Correct C4 Container diagram with minor layout inefficiencies, mostly accurate components, good documentation"
+
+  acceptable_score:
+    score: 72
+    description: "Valid C4 Component diagram with some naming inconsistencies, acceptable visual clarity, basic documentation"
+
+  needs_improvement_score:
+    score: 65
+    description: "C4 diagram with mixed abstraction levels, some incorrect relationships, sparse documentation"
+
+  poor_score:
+    score: 45
+    description: "Diagram with syntax errors, wrong C4 level usage, missing descriptions, binary format"
+
+# End of Diagram Quality Rubric

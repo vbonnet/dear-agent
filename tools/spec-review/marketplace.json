@@ -1,0 +1,179 @@
+{
+  "name": "spec-review-marketplace",
+  "version": "2.0.0",
+  "description": "Specification, architecture, and diagram-as-code review marketplace with cross-CLI support",
+  "type": "marketplace",
+  "skills": [
+    {
+      "name": "review-spec",
+      "version": "1.0.0",
+      "description": "Validate SPEC.md files against research-backed quality rubric",
+      "path": "skills/review-spec",
+      "entry_point": "review_spec.py",
+      "cli_adapters": {
+        "claude-code": "cli-adapters/claude-code.py",
+        "gemini-cli": "cli-adapters/gemini.py",
+        "opencode": "cli-adapters/opencode.py",
+        "codex": "cli-adapters/codex.py"
+      },
+      "tags": ["spec", "validation", "quality-assessment", "llm-as-judge"],
+      "dependencies": ["anthropic>=0.18.0", "pydantic>=2.0.0", "rich>=13.0.0"]
+    },
+    {
+      "name": "review-architecture",
+      "version": "1.0.0",
+      "description": "Validate ARCHITECTURE.md files with multi-persona assessment",
+      "path": "skills/review-architecture",
+      "entry_point": "review_architecture.py",
+      "cli_adapters": {
+        "claude-code": "cli-adapters/claude-code.py",
+        "gemini-cli": "cli-adapters/gemini.py",
+        "opencode": "cli-adapters/opencode.py",
+        "codex": "cli-adapters/codex.py"
+      },
+      "tags": ["architecture", "validation", "quality-assessment", "llm-as-judge", "multi-persona"],
+      "dependencies": ["anthropic>=0.18.0", "pydantic>=2.0.0", "rich>=13.0.0"]
+    },
+    {
+      "name": "review-adr",
+      "version": "1.0.0",
+      "description": "Validate ADR files with multi-persona assessment and anti-pattern detection",
+      "path": "skills/review-adr",
+      "entry_point": "review_adr.py",
+      "cli_adapters": {
+        "claude-code": "cli-adapters/claude-code.py",
+        "gemini-cli": "cli-adapters/gemini.py",
+        "opencode": "cli-adapters/opencode.py",
+        "codex": "cli-adapters/codex.py"
+      },
+      "tags": ["adr", "validation", "quality-assessment", "multi-persona", "anti-patterns"],
+      "dependencies": ["anthropic>=0.18.0", "pydantic>=2.0.0", "rich>=13.0.0"]
+    },
+    {
+      "name": "create-spec",
+      "version": "1.0.0",
+      "description": "Generate SPEC.md files from codebase analysis and requirements",
+      "path": "skills/create-spec",
+      "entry_point": "create_spec.py",
+      "cli_adapters": {
+        "claude-code": "cli-adapters/claude-code.py",
+        "gemini-cli": "cli-adapters/gemini.py",
+        "opencode": "cli-adapters/opencode.py",
+        "codex": "cli-adapters/codex.py"
+      },
+      "tags": ["spec", "generation", "automation", "codebase-analysis"],
+      "dependencies": ["anthropic>=0.18.0", "pydantic>=2.0.0", "rich>=13.0.0", "pystache>=0.6.0"]
+    },
+    {
+      "name": "create-diagrams",
+      "version": "1.0.0",
+      "description": "Generate C4 architecture diagrams from codebase analysis (D2, Mermaid, Structurizr DSL)",
+      "path": "skills/create-diagrams",
+      "entry_point": "create_diagrams.py",
+      "cli_adapters": {
+        "claude-code": "cli-adapters/claude-code.py",
+        "gemini-cli": "cli-adapters/gemini.py",
+        "opencode": "cli-adapters/opencode.py",
+        "codex": "cli-adapters/codex.py"
+      },
+      "tags": ["diagrams", "c4-model", "architecture", "generation", "diagram-as-code"],
+      "dependencies": ["pydantic>=2.0.0", "rich>=13.0.0", "pyyaml>=6.0.0"]
+    },
+    {
+      "name": "review-diagrams",
+      "version": "1.0.0",
+      "description": "Multi-persona diagram quality validation with C4 compliance and cost tracking",
+      "path": "skills/review-diagrams",
+      "entry_point": "review_diagrams.py",
+      "cli_adapters": {
+        "claude-code": "cli-adapters/claude-code.py",
+        "gemini-cli": "cli-adapters/gemini.py",
+        "opencode": "cli-adapters/opencode.py",
+        "codex": "cli-adapters/codex.py"
+      },
+      "tags": ["diagrams", "validation", "c4-model", "multi-persona", "llm-as-judge", "cost-tracking"],
+      "dependencies": ["anthropic>=0.18.0", "pydantic>=2.0.0", "rich>=13.0.0", "pyyaml>=6.0.0"]
+    },
+    {
+      "name": "render-diagrams",
+      "version": "1.0.0",
+      "description": "Compile diagram-as-code to visual formats (PNG, SVG, PDF) with syntax validation",
+      "path": "skills/render-diagrams",
+      "entry_point": "render_diagrams.py",
+      "cli_adapters": {
+        "claude-code": "cli-adapters/claude-code.py",
+        "gemini-cli": "cli-adapters/gemini.py",
+        "opencode": "cli-adapters/opencode.py",
+        "codex": "cli-adapters/codex.py"
+      },
+      "tags": ["diagrams", "rendering", "visualization", "d2", "mermaid", "structurizr"],
+      "dependencies": ["pydantic>=2.0.0", "rich>=13.0.0", "pyyaml>=6.0.0"]
+    },
+    {
+      "name": "diagram-sync",
+      "version": "1.0.0",
+      "description": "Detect drift between architecture diagrams and codebase reality",
+      "path": "skills/diagram-sync",
+      "entry_point": "diagram_sync.py",
+      "cli_adapters": {
+        "claude-code": "cli-adapters/claude-code.py",
+        "gemini-cli": "cli-adapters/gemini.py",
+        "opencode": "cli-adapters/opencode.py",
+        "codex": "cli-adapters/codex.py"
+      },
+      "tags": ["diagrams", "sync", "validation", "drift-detection", "ci-cd"],
+      "dependencies": ["pydantic>=2.0.0", "rich>=13.0.0", "pyyaml>=6.0.0"]
+    }
+  ],
+  "metadata": {
+    "category": "documentation-review",
+    "tags": ["spec", "adr", "architecture", "documentation", "diagrams", "diagram-as-code", "c4-model"],
+    "author": "Engram Team",
+    "created": "2026-03-11",
+    "updated": "2026-03-17"
+  },
+  "compatibility": {
+    "claude-code": {
+      "min_version": "1.0.0",
+      "supported": true,
+      "features": ["caching", "tools", "multimodal"]
+    },
+    "gemini-cli": {
+      "min_version": "0.1.0",
+      "supported": true,
+      "features": ["batch_mode", "function_calling"]
+    },
+    "opencode": {
+      "min_version": "1.0.0",
+      "supported": true,
+      "features": ["mcp"]
+    },
+    "codex": {
+      "min_version": "1.0.0",
+      "supported": true,
+      "features": ["mcp"]
+    }
+  },
+  "rubrics": [
+    {
+      "name": "spec-quality-rubric",
+      "file": "rubrics/spec-quality-rubric.yml",
+      "description": "Research-backed SPEC.md quality assessment rubric"
+    },
+    {
+      "name": "adr-quality-rubric",
+      "file": "rubrics/adr-quality-rubric.yml",
+      "description": "Architecture Decision Record quality assessment rubric"
+    },
+    {
+      "name": "architecture-quality-rubric",
+      "file": "rubrics/architecture-quality-rubric.yml",
+      "description": "ARCHITECTURE.md dual-layer (traditional + agentic) quality rubric"
+    },
+    {
+      "name": "diagram-quality-rubric",
+      "file": "rubrics/diagram-quality-rubric.yml",
+      "description": "C4 diagram quality assessment rubric (correctness, clarity, accuracy, documentation, maintainability)"
+    }
+  ]
+}

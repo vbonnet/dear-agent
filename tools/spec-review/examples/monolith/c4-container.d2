@@ -1,0 +1,204 @@
+# C4 Container Diagram: CMS Platform (Monolith)
+# Level 2: Containers (3-Tier Architecture)
+
+direction: down
+
+title: {
+  label: CMS Platform - Container Diagram (3-Tier Monolith)
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# External Actors
+content_editor: {
+  label: Content Editor
+  shape: person
+  style.fill: "#08427b"
+}
+
+website_visitor: {
+  label: Website Visitor
+  shape: person
+  style.fill: "#08427b"
+}
+
+# Presentation Tier
+admin_dashboard: {
+  label: Admin Dashboard
+  shape: rectangle
+  style.fill: "#438dd5"
+
+  description: |md
+    React SPA
+    - Content editor UI
+    - Media manager
+    - User management
+    - Analytics dashboard
+  |
+}
+
+public_website: {
+  label: Public Website
+  shape: rectangle
+  style.fill: "#438dd5"
+
+  description: |md
+    Server-rendered HTML
+    - Article pages
+    - Category pages
+    - Search results
+    - SEO-optimized
+  |
+}
+
+# Application Tier (Monolith)
+web_application: {
+  label: CMS Web Application
+  shape: rectangle
+  style.fill: "#1168bd"
+  style.font-color: "#ffffff"
+
+  description: |md
+    Java Spring Boot (Monolith)
+
+    **Presentation Layer**:
+    - REST API controllers
+    - Template rendering (Thymeleaf)
+    - WebSocket for real-time updates
+
+    **Business Logic Layer**:
+    - Content service
+    - User service
+    - Media service
+    - Publishing workflow
+    - Search indexing
+
+    **Data Access Layer**:
+    - JPA repositories
+    - Query optimization
+    - Transaction management
+  |
+}
+
+# Data Tier
+database: {
+  label: PostgreSQL Database
+  shape: cylinder
+  style.fill: "#438dd5"
+
+  description: |md
+    Primary data store
+    - Content tables
+    - User tables
+    - Media metadata
+    - Full-text search indexes
+  |
+}
+
+redis_cache: {
+  label: Redis Cache
+  shape: cylinder
+  style.fill: "#ff6b6b"
+
+  description: |md
+    Caching layer
+    - Published articles
+    - Category listings
+    - User sessions
+    - API responses
+  |
+}
+
+file_storage: {
+  label: File Storage
+  shape: storage
+  style.fill: "#438dd5"
+
+  description: |md
+    NFS or S3
+    - Images
+    - Videos
+    - Documents
+    - Backups
+  |
+}
+
+# External System
+cdn: {
+  label: CDN
+  shape: rectangle
+  style.fill: "#999999"
+
+  description: CloudFlare CDN
+}
+
+# Relationships - Users to UI
+content_editor -> admin_dashboard: Uses (HTTPS) {style.stroke-width: 2}
+website_visitor -> public_website: Visits (HTTPS) {style.stroke-width: 2}
+
+# UI to Application
+admin_dashboard -> web_application: API calls (REST) {style.stroke-width: 2}
+public_website -> web_application: Server requests {style.stroke-width: 2}
+
+# Application to Data
+web_application -> database: |md
+  Read/Write operations
+  (JDBC connection pool)
+| {
+  style.stroke-width: 2
+}
+
+web_application -> redis_cache: |md
+  Cache read/write
+  Session storage
+| {
+  style.stroke-width: 2
+}
+
+web_application -> file_storage: |md
+  Upload/retrieve media
+  Generate thumbnails
+| {
+  style.stroke-width: 2
+}
+
+# Application to External
+web_application -> cdn: Push static assets {style.stroke-width: 2; style.stroke-dash: 3}
+public_website <- cdn: Serves static files {style.stroke-width: 2; style.stroke-dash: 3}
+
+# Legend
+legend: {
+  near: bottom-right
+
+  ui_legend: {
+    label: Web/Mobile App
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  monolith_legend: {
+    label: Monolithic Application
+    shape: rectangle
+    style.fill: "#1168bd"
+  }
+
+  database_legend: {
+    label: Database
+    shape: cylinder
+    style.fill: "#438dd5"
+  }
+
+  cache_legend: {
+    label: Cache
+    shape: cylinder
+    style.fill: "#ff6b6b"
+  }
+
+  external_legend: {
+    label: External System
+    shape: rectangle
+    style.fill: "#999999"
+  }
+}

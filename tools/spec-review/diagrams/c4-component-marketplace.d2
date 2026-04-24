@@ -1,0 +1,223 @@
+# C4 Component Diagram: Spec-Review-Marketplace Plugin
+# Level 3 - Component View
+# Shows internal plugin architecture, skill system, and CLI abstraction layer
+
+direction: down
+
+# Title and metadata
+title: {
+  label: "Spec-Review Marketplace - Component Architecture"
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# Container boundary
+marketplace: {
+  label: "Spec-Review-Marketplace Plugin"
+  style.fill: "#e8f4f8"
+  style.stroke: "#1168bd"
+  style.stroke-width: 3
+
+  # Core Components
+
+  # Skill Registry
+  skill_registry: {
+    label: "Skill Registry"
+    description: "Discovers, loads, and manages marketplace skills"
+    style.fill: "#438dd5"
+
+    discovery: "Discovery Engine\n(tag search, filtering)"
+    loader: "Lazy Loader\n(on-demand skill loading)"
+    cache: "Skill Cache\n(performance optimization)"
+    version_mgr: "Version Manager\n(compatibility checks)"
+  }
+
+  # CLI Abstraction Layer
+  cli_abstraction: {
+    label: "CLI Abstraction Layer"
+    description: "Cross-CLI compatibility (Claude/Gemini/OpenCode/Codex)"
+    style.fill: "#438dd5"
+
+    detector: "CLI Detector\n(auto-detect environment)"
+    wrapper: "CLI Wrapper\n(unified interface)"
+    features: "Feature Adapter\n(caching, batch mode)"
+  }
+
+  # Documentation Skills
+  doc_skills: {
+    label: "Documentation Skills"
+    description: "LLM-as-judge validation skills"
+    style.fill: "#85bbf0"
+
+    review_spec: "review-spec\n(SPEC.md validation)"
+    review_arch: "review-architecture\n(ARCHITECTURE.md validation)"
+    review_adr: "review-adr\n(ADR validation)"
+    create_spec: "create-spec\n(spec generation)"
+  }
+
+  # Diagram Skills
+  diagram_skills: {
+    label: "Diagram-as-Code Skills"
+    description: "C4 diagram generation and validation"
+    style.fill: "#85bbf0"
+
+    create_diagrams: "create-diagrams\n(Go binary: codebase → diagrams)"
+    review_diagrams: "review-diagrams\n(multi-persona validation)"
+    render_diagrams: "render-diagrams\n(compile to PNG/SVG)"
+    diagram_sync: "diagram-sync\n(drift detection)"
+  }
+
+  # Shared Services
+  shared_services: {
+    label: "Shared Services"
+    description: "Common utilities and libraries"
+    style.fill: "#438dd5"
+
+    llm_judge: "LLM Judge Engine\n(multi-persona validation)"
+    dependency_resolver: "Dependency Resolver\n(skill dependencies)"
+    parallel_executor: "Parallel Executor\n(concurrent skill execution)"
+    security_utils: "Security Utils\n(input sanitization)"
+  }
+
+  # Go Core Services (Diagram Library)
+  go_services: {
+    label: "Go Core Services"
+    description: "High-performance diagram processing"
+    style.fill: "#1168bd"
+
+    d2_renderer: "D2 Renderer\n(native Go library)"
+    c4_validator: "C4 Validator\n(semantic compliance)"
+    codebase_analyzer: "Codebase Analyzer\n(AST + regex parsing)"
+    sync_engine: "Sync Engine\n(diagram ↔ code diff)"
+  }
+
+  # CLI Adapters (per skill)
+  cli_adapters: {
+    label: "CLI Adapters"
+    description: "Skill-specific CLI implementations"
+    style.fill: "#85bbf0"
+
+    claude_code: "claude-code.py\n(prompt caching)"
+    gemini: "gemini.py\n(batch mode)"
+    opencode: "opencode.py\n(MCP integration)"
+    codex: "codex.py\n(minimal interface)"
+  }
+}
+
+# External Systems
+anthropic_api: {
+  label: "Anthropic API"
+  description: "Claude Sonnet 4.5 for LLM-as-judge"
+  shape: cylinder
+  style.fill: "#999999"
+  style.stroke-dash: 3
+}
+
+diagram_tools: {
+  label: "Diagram Tools"
+  description: "d2, mmdc, structurizr-cli"
+  shape: cylinder
+  style.fill: "#999999"
+  style.stroke-dash: 3
+}
+
+rubrics_db: {
+  label: "Quality Rubrics"
+  description: "YAML scoring criteria"
+  shape: cylinder
+  style.fill: "#999999"
+  style.stroke-dash: 3
+}
+
+codebase: {
+  label: "User Codebase"
+  description: "Source code to analyze"
+  shape: cylinder
+  style.fill: "#999999"
+  style.stroke-dash: 3
+}
+
+# Relationships - Internal Component Flow
+
+# Skill Registry relationships
+marketplace.skill_registry.discovery -> marketplace.skill_registry.cache: "Caches discovered skills"
+marketplace.skill_registry.loader -> marketplace.skill_registry.version_mgr: "Checks compatibility"
+marketplace.skill_registry -> marketplace.doc_skills: "Loads documentation skills"
+marketplace.skill_registry -> marketplace.diagram_skills: "Loads diagram skills"
+
+# CLI Abstraction relationships
+marketplace.cli_abstraction.detector -> marketplace.cli_abstraction.wrapper: "Provides CLI type"
+marketplace.cli_abstraction.wrapper -> marketplace.cli_abstraction.features: "Applies optimizations"
+marketplace.cli_abstraction -> marketplace.cli_adapters: "Delegates to CLI-specific adapters"
+
+# Documentation Skills relationships
+marketplace.doc_skills.review_spec -> marketplace.shared_services.llm_judge: "Uses multi-persona validation"
+marketplace.doc_skills.review_arch -> marketplace.shared_services.llm_judge: "Uses multi-persona validation"
+marketplace.doc_skills.review_adr -> marketplace.shared_services.llm_judge: "Uses multi-persona validation"
+marketplace.doc_skills.create_spec -> marketplace.shared_services.llm_judge: "Uses LLM generation"
+
+# Diagram Skills relationships
+marketplace.diagram_skills.create_diagrams -> marketplace.go_services.codebase_analyzer: "Analyzes code structure"
+marketplace.diagram_skills.create_diagrams -> marketplace.go_services.c4_validator: "Validates C4 compliance"
+marketplace.diagram_skills.review_diagrams -> marketplace.shared_services.llm_judge: "Uses multi-persona validation"
+marketplace.diagram_skills.render_diagrams -> marketplace.go_services.d2_renderer: "Renders D2 diagrams"
+marketplace.diagram_skills.diagram_sync -> marketplace.go_services.sync_engine: "Detects drift"
+
+# Shared Services relationships
+marketplace.shared_services.dependency_resolver -> marketplace.skill_registry: "Resolves skill dependencies"
+marketplace.shared_services.parallel_executor -> marketplace.diagram_skills: "Executes diagram tasks concurrently"
+
+# Go Services internal relationships
+marketplace.go_services.codebase_analyzer -> marketplace.go_services.c4_validator: "Validates generated model"
+marketplace.go_services.sync_engine -> marketplace.go_services.c4_validator: "Validates sync results"
+
+# CLI Adapters relationships
+marketplace.cli_adapters -> marketplace.cli_abstraction: "Uses abstraction layer"
+marketplace.cli_adapters.claude_code -> marketplace.doc_skills: "Invokes skills (Claude Code)"
+marketplace.cli_adapters.gemini -> marketplace.doc_skills: "Invokes skills (Gemini)"
+marketplace.cli_adapters.opencode -> marketplace.diagram_skills: "Invokes skills (OpenCode)"
+marketplace.cli_adapters.codex -> marketplace.diagram_skills: "Invokes skills (Codex)"
+
+# External relationships
+marketplace.shared_services.llm_judge -> anthropic_api: "API calls (HTTPS/JSON)"
+marketplace.go_services.d2_renderer -> diagram_tools: "CLI invocations (d2, mmdc)"
+marketplace.doc_skills -> rubrics_db: "Loads quality rubrics"
+marketplace.diagram_skills -> rubrics_db: "Loads diagram rubrics"
+marketplace.go_services.codebase_analyzer -> codebase: "Analyzes source code"
+marketplace.go_services.sync_engine -> codebase: "Compares with diagrams"
+
+# Legend
+legend: {
+  near: bottom-right
+  shape: rectangle
+  style.fill: "#f0f0f0"
+  style.stroke: "#cccccc"
+
+  title: "Legend" {
+    shape: text
+    style.bold: true
+  }
+
+  core: "Core Components (Dark Blue)" {
+    shape: rectangle
+    style.fill: "#438dd5"
+  }
+
+  go: "Go Services (Blue)" {
+    shape: rectangle
+    style.fill: "#1168bd"
+  }
+
+  skills: "Skills (Light Blue)" {
+    shape: rectangle
+    style.fill: "#85bbf0"
+  }
+
+  external: "External Systems (Gray, Dashed)" {
+    shape: cylinder
+    style.fill: "#999999"
+    style.stroke-dash: 3
+  }
+}

@@ -1,0 +1,39 @@
+%% C4 Context Diagram: Banking Platform (Event-Driven CQRS)
+%% Level 1: System Context
+
+graph TB
+    %% Define styles
+    classDef person fill:#08427b,stroke:#052e56,color:#fff
+    classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+    classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+
+    %% Title
+    title["<b>Banking Platform - System Context<br/>(Event-Driven CQRS Architecture)</b>"]
+    style title fill:none,stroke:none,color:#000
+
+    %% External Actors
+    account_holder["👤 Account Holder<br/><i>Manages accounts and<br/>makes transactions</i>"]
+    admin["👤 Administrator<br/><i>Monitors system and<br/>manages compliance</i>"]
+
+    %% Central System
+    banking_platform["📦 Banking Platform<br/><b>CQRS + Event Sourcing</b><br/><br/>• Account management<br/>• Transaction processing<br/>• Event-driven architecture<br/>• Complete audit trail<br/>• Real-time balance queries"]
+
+    %% External Systems
+    payment_network["📦 Payment Network<br/><i>SWIFT/ACH</i><br/><br/>External payment<br/>processing network"]
+
+    regulatory["📦 Regulatory Reporting<br/><i>Financial Authority</i><br/><br/>Compliance and<br/>transaction reporting"]
+
+    fraud_detection["📦 Fraud Detection<br/><i>3rd Party ML Service</i><br/><br/>Real-time transaction<br/>fraud analysis"]
+
+    %% Relationships
+    account_holder -->|"Makes transactions<br/>Checks balance<br/>Views history"| banking_platform
+    admin -->|"Views audit logs<br/>Generates reports<br/>Manages accounts"| banking_platform
+
+    banking_platform -->|"Sends/receives payments<br/>(ISO 20022 messages)"| payment_network
+    banking_platform -->|"Submits transaction logs<br/>Regulatory compliance"| regulatory
+    banking_platform -->|"Streams transaction events<br/>Risk scoring requests"| fraud_detection
+
+    %% Apply styles
+    class account_holder,admin person
+    class banking_platform system
+    class payment_network,regulatory,fraud_detection external

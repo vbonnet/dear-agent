@@ -1,0 +1,143 @@
+---
+# review-architecture skill metadata
+# Part of spec-review-marketplace plugin
+
+name: review-architecture
+version: 1.0.0
+description: ARCHITECTURE.md quality validation with multi-persona assessment and CLI abstraction support
+
+# Skill metadata
+category: documentation-review
+tags:
+  - architecture
+  - documentation
+  - quality-assurance
+  - llm-as-judge
+  - multi-persona
+  - agentic-architecture
+
+# Author information
+author: Engram Plugin Development Team
+license: MIT
+
+# Dependencies
+dependencies:
+  - cli-abstraction  # CLI abstraction layer (Python)
+  - anthropic        # Claude API client
+  - pydantic         # Data validation
+  - rich             # Terminal formatting
+
+# Supported AI coding assistant CLIs
+supported_clis:
+  - claude-code
+  - gemini-cli
+  - opencode
+  - codex
+
+# CLI-specific features
+cli_features:
+  claude-code:
+    - prompt_caching
+    - tool_integration
+    - multimodal
+  gemini-cli:
+    - batch_mode
+    - parallel_processing
+    - function_calling
+  opencode:
+    - mcp_integration
+    - tool_registry
+  codex:
+    - mcp_integration
+    - completion_mode
+
+# Skill entry points
+entry_points:
+  main: ./review_architecture.py
+  cli_adapters:
+    claude-code: ./cli-adapters/claude-code.py
+    gemini-cli: ./cli-adapters/gemini.py
+    opencode: ./cli-adapters/opencode.py
+    codex: ./cli-adapters/codex.py
+
+# Configuration options
+config:
+  quality_threshold: 8.0  # Minimum score to pass
+  cost_target: 0.50       # Maximum cost per validation (USD)
+  latency_target: 300     # p95 latency target (seconds)
+  rubric_source: plugin   # Use plugin rubrics directory
+  default_personas:
+    - System Architect
+    - DevOps Engineer (conditional)
+    - Developer (conditional)
+
+# Validation rubric weights
+rubric_weights:
+  traditional_architecture: 0.50
+  agentic_architecture: 0.30
+  adr_integration: 0.10
+  visual_diagrams: 0.10
+
+# External requirements
+requirements:
+  - name: python
+    version: ">=3.10"
+    required: true
+  - name: anthropic
+    version: ">=0.18.0"
+    description: Anthropic Python SDK
+    install_cmd: pip install anthropic>=0.18.0
+    required: true
+  - name: pydantic
+    version: ">=2.0.0"
+    description: Data validation library
+    install_cmd: pip install pydantic>=2.0.0
+    required: true
+  - name: rich
+    version: ">=13.0.0"
+    description: Rich text and formatting
+    install_cmd: pip install rich>=13.0.0
+    required: true
+
+# Capabilities
+capabilities:
+  - quick_validation_gate
+  - multi_persona_review
+  - llm_as_judge
+  - self_consistency_check
+  - cli_optimization
+  - prompt_caching
+
+# Output formats
+output_formats:
+  - terminal (rich formatting)
+  - json
+
+# Exit codes
+exit_codes:
+  0: PASS (score >= 8.0)
+  1: FAIL (score < 6.0)
+  2: WARN (score 6.0-7.9)
+  3: ERROR (file not found, API error, etc.)
+
+# Testing
+tests:
+  integration: ./tests/test_review_architecture.py
+  unit: []
+
+# Documentation
+docs:
+  readme: ./SKILL.md
+  examples: ./SKILL.md#examples
+
+# Changelog
+changelog:
+  - version: 1.0.0
+    date: 2026-03-11
+    changes:
+      - Migrated from engram/skills to spec-review-marketplace plugin
+      - Added CLI abstraction support for 4 CLIs
+      - Integration with plugin rubrics directory
+      - CLI-specific optimization adapters
+      - Enhanced with multi-persona validation
+      - Support for prompt caching in Claude Code

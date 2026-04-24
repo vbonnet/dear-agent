@@ -1,0 +1,145 @@
+name: review-spec
+version: 1.0.0
+description: "Validate SPEC.md files against research-backed quality rubric using LLM-as-judge"
+type: validation
+
+author: Engram Team
+created: 2026-03-11
+updated: 2026-03-11
+
+# CLI Support
+cli_support:
+  claude-code:
+    enabled: true
+    adapter: cli-adapters/claude-code.py
+    features:
+      - prompt_caching
+      - tool_based_operations
+    batch_size: 10
+    optimizations:
+      - "Prompt caching for rubric reuse"
+      - "Tool-based file operations"
+
+  gemini-cli:
+    enabled: true
+    adapter: cli-adapters/gemini.py
+    features:
+      - batch_mode
+      - function_calling
+    batch_size: 20
+    optimizations:
+      - "Batch mode processing"
+      - "Function calling for structured output"
+
+  opencode:
+    enabled: true
+    adapter: cli-adapters/opencode.py
+    features:
+      - mcp_integration
+      - tool_registry
+    batch_size: 5
+    optimizations:
+      - "MCP integration for tool calls"
+      - "Tool registry for structured operations"
+
+  codex:
+    enabled: true
+    adapter: cli-adapters/codex.py
+    features:
+      - mcp_integration
+      - completion_mode
+    batch_size: 5
+    optimizations:
+      - "MCP integration for tool calls"
+      - "Completion mode for efficiency"
+
+# Entry Points
+entry_points:
+  main: review_spec.py
+  cli_adapters:
+    - cli-adapters/claude-code.py
+    - cli-adapters/gemini.py
+    - cli-adapters/opencode.py
+    - cli-adapters/codex.py
+
+# Dependencies
+dependencies:
+  python: ">=3.9"
+  packages:
+    - anthropic>=0.18.0
+    - pydantic>=2.0.0
+    - rich>=13.0.0
+    - pytest>=7.0.0
+
+# Usage
+usage:
+  command: python review_spec.py <spec_path>
+  arguments:
+    spec_path:
+      description: Path to SPEC.md file
+      required: true
+    --output-json:
+      description: Save JSON result to file
+      required: false
+    --cli:
+      description: Override CLI type detection
+      required: false
+      choices: [claude-code, gemini-cli, opencode, codex]
+
+# Environment Variables
+environment:
+  ANTHROPIC_API_KEY:
+    description: Anthropic API key
+    required: true
+    alternative: Vertex AI configuration
+  REVIEW_SPEC_TEMPERATURE:
+    description: LLM temperature (0.0-1.0)
+    default: "0.7"
+  REVIEW_SPEC_TIMEOUT:
+    description: API timeout in seconds
+    default: "60"
+
+# Quality Metrics
+quality:
+  rubric: Research-backed SPEC.md quality assessment
+  dimensions:
+    - name: Vision/Goals
+      weight: 30%
+    - name: Critical User Journeys
+      weight: 25%
+    - name: Success Metrics
+      weight: 25%
+    - name: Scope Boundaries
+      weight: 10%
+    - name: Living Document Process
+      weight: 10%
+
+  personas:
+    - Technical Writer (clarity, structure, completeness)
+    - Product Manager (business value, user outcomes)
+    - Developer (implementability, actionability)
+
+  thresholds:
+    pass: 8.0
+    warn: 6.0
+    fail: <6.0
+
+# Testing
+testing:
+  test_file: tests/test_review_spec.py
+  framework: pytest
+  coverage_target: 80%
+
+# Tags
+tags:
+  - spec
+  - validation
+  - quality-assessment
+  - llm-as-judge
+  - documentation
+
+# Categories
+categories:
+  - documentation-review
+  - quality-gates
+  - spec-validation

@@ -1,0 +1,202 @@
+# C4 Container Diagram: E-Commerce Platform
+# Level 2: Containers (Services, Databases, Apps)
+
+direction: right
+
+title: {
+  label: E-Commerce Platform - Container Diagram
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# External Actor
+customer: {
+  label: Customer
+  shape: person
+  style.fill: "#08427b"
+}
+
+# Client Applications
+web_app: {
+  label: Web Application
+  shape: rectangle
+  style.fill: "#438dd5"
+
+  description: React SPA (TypeScript)
+}
+
+mobile_app: {
+  label: Mobile Application
+  shape: rectangle
+  style.fill: "#438dd5"
+
+  description: React Native (iOS/Android)
+}
+
+# API Gateway
+api_gateway: {
+  label: API Gateway
+  shape: rectangle
+  style.fill: "#1168bd"
+
+  description: |md
+    Kong API Gateway (Go)
+    - Routing
+    - Authentication
+    - Rate limiting
+  |
+}
+
+# Microservices
+user_service: {
+  label: User Service
+  shape: rectangle
+  style.fill: "#1168bd"
+
+  description: |md
+    Node.js + Express
+    - Authentication
+    - User profiles
+    - JWT tokens
+  |
+}
+
+product_service: {
+  label: Product Service
+  shape: rectangle
+  style.fill: "#1168bd"
+
+  description: |md
+    Go + gRPC
+    - Product catalog
+    - Search
+    - Categories
+  |
+}
+
+order_service: {
+  label: Order Service
+  shape: rectangle
+  style.fill: "#1168bd"
+
+  description: |md
+    Python + FastAPI
+    - Order creation
+    - Order tracking
+    - Invoice generation
+  |
+}
+
+payment_service: {
+  label: Payment Service
+  shape: rectangle
+  style.fill: "#1168bd"
+
+  description: |md
+    Go + HTTP
+    - Payment processing
+    - Refunds
+    - Transaction history
+  |
+}
+
+notification_service: {
+  label: Notification Service
+  shape: rectangle
+  style.fill: "#1168bd"
+
+  description: |md
+    Node.js + Worker
+    - Email notifications
+    - SMS alerts
+    - Push notifications
+  |
+}
+
+# Databases
+user_db: {
+  label: User DB
+  shape: cylinder
+  style.fill: "#438dd5"
+
+  description: PostgreSQL
+}
+
+product_db: {
+  label: Product DB
+  shape: cylinder
+  style.fill: "#438dd5"
+
+  description: PostgreSQL
+}
+
+order_db: {
+  label: Order DB
+  shape: cylinder
+  style.fill: "#438dd5"
+
+  description: PostgreSQL
+}
+
+# Cache
+redis_cache: {
+  label: Redis Cache
+  shape: cylinder
+  style.fill: "#ff6b6b"
+
+  description: Product catalog caching
+}
+
+# Message Queue
+rabbitmq: {
+  label: RabbitMQ
+  shape: queue
+  style.fill: "#ff9f43"
+
+  description: Message broker for async communication
+}
+
+# External System
+payment_gateway_ext: {
+  label: Stripe Payment Gateway
+  shape: rectangle
+  style.fill: "#999999"
+
+  description: External payment API
+}
+
+# Relationships - Client to API Gateway
+customer -> web_app: Uses {style.stroke-width: 2}
+customer -> mobile_app: Uses {style.stroke-width: 2}
+
+web_app -> api_gateway: Makes API calls (HTTPS) {style.stroke-width: 2}
+mobile_app -> api_gateway: Makes API calls (HTTPS) {style.stroke-width: 2}
+
+# API Gateway to Services
+api_gateway -> user_service: Routes requests {style.stroke-width: 2}
+api_gateway -> product_service: Routes requests {style.stroke-width: 2}
+api_gateway -> order_service: Routes requests {style.stroke-width: 2}
+api_gateway -> payment_service: Routes requests {style.stroke-width: 2}
+
+# Services to Databases
+user_service -> user_db: Reads/Writes {style.stroke-width: 2}
+product_service -> product_db: Reads/Writes {style.stroke-width: 2}
+order_service -> order_db: Reads/Writes {style.stroke-width: 2}
+
+# Services to Cache
+product_service -> redis_cache: Caches product data {style.stroke-width: 2}
+api_gateway -> redis_cache: Caches responses {style.stroke-width: 2}
+
+# Services to Message Queue
+order_service -> rabbitmq: Publishes order events {style.stroke-width: 2; style.stroke-dash: 3}
+payment_service -> rabbitmq: Publishes payment events {style.stroke-width: 2; style.stroke-dash: 3}
+notification_service <- rabbitmq: Consumes events {style.stroke-width: 2; style.stroke-dash: 3}
+
+# Service-to-Service Communication
+order_service -> payment_service: Initiates payment (HTTP) {style.stroke-width: 2}
+order_service -> product_service: Checks stock (gRPC) {style.stroke-width: 2}
+
+# External Integration
+payment_service -> payment_gateway_ext: Processes payment (HTTPS) {style.stroke-width: 2}

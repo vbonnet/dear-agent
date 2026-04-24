@@ -1,0 +1,131 @@
+# C4 Context Diagram: E-Commerce Platform
+# Level 1: System Context
+
+direction: right
+
+title: {
+  label: E-Commerce Platform - System Context
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# External Actors
+customer: {
+  label: Customer
+  shape: person
+  style.fill: "#08427b"
+}
+
+admin: {
+  label: Administrator
+  shape: person
+  style.fill: "#08427b"
+}
+
+# Central System (Our System)
+ecommerce_platform: {
+  label: E-Commerce Platform
+  shape: rectangle
+  style.fill: "#1168bd"
+  style.font-color: "#ffffff"
+
+  description: |md
+    Microservices-based e-commerce platform
+    - Product catalog
+    - Order management
+    - Payment processing
+    - User authentication
+  |
+}
+
+# External Systems
+payment_gateway: {
+  label: Payment Gateway
+  shape: rectangle
+  style.fill: "#999999"
+
+  description: Stripe API for payment processing
+}
+
+email_service: {
+  label: Email Service
+  shape: rectangle
+  style.fill: "#999999"
+
+  description: SendGrid for transactional emails
+}
+
+inventory_system: {
+  label: Legacy Inventory System
+  shape: rectangle
+  style.fill: "#999999"
+
+  description: Existing warehouse management system
+}
+
+# Relationships
+customer -> ecommerce_platform: |md
+  Browses products
+  Places orders
+  Makes payments
+| {
+  style.stroke-width: 2
+}
+
+admin -> ecommerce_platform: |md
+  Manages products
+  Views orders
+  Manages users
+| {
+  style.stroke-width: 2
+}
+
+ecommerce_platform -> payment_gateway: |md
+  Processes payments
+  Validates cards
+| {
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+ecommerce_platform -> email_service: |md
+  Sends order confirmations
+  Sends notifications
+| {
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+ecommerce_platform -> inventory_system: |md
+  Checks stock
+  Reserves items
+  Updates inventory
+| {
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+# Legend
+legend: {
+  near: bottom-right
+
+  person_legend: {
+    label: Person
+    shape: person
+    style.fill: "#08427b"
+  }
+
+  system_legend: {
+    label: Software System
+    shape: rectangle
+    style.fill: "#1168bd"
+  }
+
+  external_legend: {
+    label: External System
+    shape: rectangle
+    style.fill: "#999999"
+  }
+}

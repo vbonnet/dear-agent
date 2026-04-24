@@ -1,0 +1,205 @@
+# C4 Component Diagram: Order Service
+# Level 3: Components within Order Service Container
+
+direction: down
+
+title: {
+  label: Order Service - Component Diagram
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# External Dependencies
+api_gateway: {
+  label: API Gateway
+  shape: rectangle
+  style.fill: "#999999"
+}
+
+rabbitmq: {
+  label: RabbitMQ
+  shape: queue
+  style.fill: "#ff9f43"
+}
+
+product_service: {
+  label: Product Service
+  shape: rectangle
+  style.fill: "#999999"
+}
+
+payment_service: {
+  label: Payment Service
+  shape: rectangle
+  style.fill: "#999999"
+}
+
+order_db: {
+  label: Order Database
+  shape: cylinder
+  style.fill: "#438dd5"
+}
+
+# Order Service Boundary
+order_service: {
+  label: Order Service (Python + FastAPI)
+  style.fill: "#e8f4f8"
+  style.stroke: "#1168bd"
+  style.stroke-width: 3
+
+  # API Layer
+  order_api: {
+    label: Order API
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      FastAPI REST endpoints
+      - POST /orders
+      - GET /orders/:id
+      - GET /orders/user/:userId
+      - PUT /orders/:id/status
+    |
+  }
+
+  order_validator: {
+    label: Order Validator
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      Pydantic models
+      - Validate order data
+      - Check business rules
+      - Enforce constraints
+    |
+  }
+
+  # Business Logic Layer
+  order_service_logic: {
+    label: Order Service Logic
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      Core business logic
+      - Create order
+      - Calculate totals
+      - Apply discounts
+      - Handle state transitions
+    |
+  }
+
+  order_state_machine: {
+    label: Order State Machine
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      State transitions
+      - Pending → Processing
+      - Processing → Payment
+      - Payment → Fulfilled
+      - Error → Cancelled
+    |
+  }
+
+  # Data Access Layer
+  order_repository: {
+    label: Order Repository
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      SQLAlchemy ORM
+      - CRUD operations
+      - Query builder
+      - Transaction management
+    |
+  }
+
+  # Integration Layer
+  payment_client: {
+    label: Payment Client
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      HTTP client
+      - Initiate payment
+      - Check payment status
+      - Handle refunds
+      - Circuit breaker pattern
+    |
+  }
+
+  inventory_client: {
+    label: Inventory Client
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      gRPC client
+      - Check stock availability
+      - Reserve items
+      - Release reservations
+      - Retry logic
+    |
+  }
+
+  event_publisher: {
+    label: Event Publisher
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      RabbitMQ publisher
+      - OrderCreated event
+      - OrderFulfilled event
+      - OrderCancelled event
+      - OrderRefunded event
+    |
+  }
+
+  # Internal Relationships
+  order_api -> order_validator: Validates request
+  order_validator -> order_service_logic: Validated data
+  order_service_logic -> order_state_machine: State transition
+  order_service_logic -> order_repository: Persist order
+  order_service_logic -> payment_client: Process payment
+  order_service_logic -> inventory_client: Check/reserve stock
+  order_service_logic -> event_publisher: Publish events
+  order_repository -> order_db: SQL queries
+}
+
+# External Relationships
+api_gateway -> order_service.order_api: HTTP requests (JSON)
+order_service.payment_client -> payment_service: HTTP API call
+order_service.inventory_client -> product_service: gRPC call
+order_service.event_publisher -> rabbitmq: Publish messages
+order_service.order_repository -> order_db: Read/Write
+
+# Legend
+legend: {
+  near: bottom-right
+
+  component_legend: {
+    label: Component
+    shape: rectangle
+    style.fill: "#1168bd"
+  }
+
+  external_legend: {
+    label: External Container
+    shape: rectangle
+    style.fill: "#999999"
+  }
+
+  database_legend: {
+    label: Database
+    shape: cylinder
+    style.fill: "#438dd5"
+  }
+}

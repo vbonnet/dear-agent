@@ -1,0 +1,135 @@
+# C4 Context Diagram: CMS Platform (Monolith)
+# Level 1: System Context
+
+direction: right
+
+title: {
+  label: CMS Platform - System Context (Monolithic)
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+# External Actors
+content_editor: {
+  label: Content Editor
+  shape: person
+  style.fill: "#08427b"
+
+  description: Creates and manages content
+}
+
+website_visitor: {
+  label: Website Visitor
+  shape: person
+  style.fill: "#08427b"
+
+  description: Views published content
+}
+
+# Central System (Monolith)
+cms_platform: {
+  label: CMS Platform
+  shape: rectangle
+  style.fill: "#1168bd"
+  style.font-color: "#ffffff"
+
+  description: |md
+    Monolithic content management system
+    - Content authoring and editing
+    - Publishing workflow
+    - Media management
+    - User management
+    - SEO optimization
+  |
+}
+
+# External Systems
+cdn: {
+  label: CDN (CloudFlare)
+  shape: rectangle
+  style.fill: "#999999"
+
+  description: Content delivery network for static assets
+}
+
+analytics: {
+  label: Analytics Service
+  shape: rectangle
+  style.fill: "#999999"
+
+  description: Google Analytics for traffic tracking
+}
+
+email_service: {
+  label: Email Service
+  shape: rectangle
+  style.fill: "#999999"
+
+  description: SendGrid for notifications
+}
+
+# Relationships
+content_editor -> cms_platform: |md
+  Creates content
+  Manages media
+  Publishes articles
+| {
+  style.stroke-width: 2
+}
+
+website_visitor -> cms_platform: |md
+  Reads articles
+  Searches content
+  Views media
+| {
+  style.stroke-width: 2
+}
+
+cms_platform -> cdn: |md
+  Serves static assets
+  (images, CSS, JS)
+| {
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+cms_platform -> analytics: |md
+  Sends page view events
+  Tracks user behavior
+| {
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+cms_platform -> email_service: |md
+  Sends notifications
+  Password resets
+| {
+  style.stroke-width: 2
+  style.stroke-dash: 3
+}
+
+# Legend
+legend: {
+  near: bottom-right
+
+  person_legend: {
+    label: Person
+    shape: person
+    style.fill: "#08427b"
+  }
+
+  system_legend: {
+    label: Software System
+    shape: rectangle
+    style.fill: "#1168bd"
+  }
+
+  external_legend: {
+    label: External System
+    shape: rectangle
+    style.fill: "#999999"
+  }
+}

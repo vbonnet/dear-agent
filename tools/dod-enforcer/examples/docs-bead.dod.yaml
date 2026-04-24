@@ -1,0 +1,11 @@
+# Example DoD for a documentation bead
+# Only checks that required files exist
+
+files_must_exist:
+  - ~/src/engram/docs/architecture.md
+  - ~/src/engram/docs/api-reference.md
+  - ~/src/engram/README.md
+
+tests_must_pass: false
+
+commands_must_succeed: []

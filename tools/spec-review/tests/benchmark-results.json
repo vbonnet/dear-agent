@@ -1,0 +1,99 @@
+[
+  {
+    "operation": "create-diagrams",
+    "test_case": "small_d2",
+    "duration_seconds": 0.25,
+    "exit_code": 0,
+    "files_analyzed": 3,
+    "output_size_bytes": 2583,
+    "target_seconds": 30,
+    "meets_target": true
+  },
+  {
+    "operation": "create-diagrams",
+    "test_case": "medium_d2",
+    "duration_seconds": 0.247,
+    "exit_code": 0,
+    "files_analyzed": 90,
+    "output_size_bytes": 23645,
+    "target_seconds": 300,
+    "meets_target": true
+  },
+  {
+    "operation": "create-diagrams",
+    "test_case": "large_d2",
+    "duration_seconds": 0.309,
+    "exit_code": 0,
+    "files_analyzed": 300,
+    "output_size_bytes": 37662,
+    "target_seconds": null,
+    "meets_target": null
+  },
+  {
+    "operation": "render-diagrams",
+    "test_case": "small_validate",
+    "duration_seconds": 0.875,
+    "exit_code": 0,
+    "input_size_bytes": 1152,
+    "output_size_bytes": 0,
+    "estimated_nodes": 65,
+    "target_seconds": 60,
+    "meets_target": null
+  },
+  {
+    "operation": "render-diagrams",
+    "test_case": "medium_validate",
+    "duration_seconds": 0.501,
+    "exit_code": 0,
+    "input_size_bytes": 9305,
+    "output_size_bytes": 0,
+    "estimated_nodes": 370,
+    "target_seconds": 60,
+    "meets_target": null
+  },
+  {
+    "operation": "review-diagrams",
+    "test_case": "small_validate",
+    "duration_seconds": 0.402,
+    "exit_code": 1,
+    "personas_consulted": 0,
+    "target_seconds": 5,
+    "meets_target": true
+  },
+  {
+    "operation": "review-diagrams",
+    "test_case": "small_full",
+    "duration_seconds": 0.325,
+    "exit_code": 0,
+    "personas_consulted": 4,
+    "target_seconds": 120,
+    "meets_target": true
+  },
+  {
+    "operation": "review-diagrams",
+    "test_case": "medium_validate",
+    "duration_seconds": 0.296,
+    "exit_code": 1,
+    "personas_consulted": 0,
+    "target_seconds": 5,
+    "meets_target": true
+  },
+  {
+    "operation": "diagram-sync",
+    "test_case": "small",
+    "duration_seconds": 0.293,
+    "exit_code": 0,
+    "files_scanned": 3,
+    "target_seconds": 30,
+    "meets_target": true
+  },
+  {
+    "operation": "diagram-sync",
+    "test_case": "medium",
+    "duration_seconds": 0.275,
+    "exit_code": 0,
+    "files_scanned": 90,
+    "target_seconds": 30,
+    "meets_target": true
+  }
+]

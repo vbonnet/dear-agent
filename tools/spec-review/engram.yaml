@@ -1,0 +1,80 @@
+name: spec-review-marketplace
+version: 1.0.0
+description: Specification and architecture review marketplace with cross-CLI support
+pattern: marketplace
+type: plugin-marketplace
+
+# Marketplace metadata
+metadata:
+  category: documentation-review
+  tags:
+    - spec
+    - adr
+    - architecture
+    - documentation
+    - llm-as-judge
+  author: Engram Team
+  license: MIT
+  homepage: https://github.com/engram/spec-review-marketplace
+
+# CLI compatibility
+compatibility:
+  claude-code:
+    min_version: "1.0.0"
+    supported: true
+    optimizations:
+      - prompt_caching
+      - multimodal
+  gemini-cli:
+    min_version: "0.1.0"
+    supported: true
+    optimizations:
+      - batch_mode
+  opencode:
+    min_version: "1.0.0"
+    supported: true
+    optimizations:
+      - mcp_integration
+  codex:
+    min_version: "1.0.0"
+    supported: true
+    optimizations:
+      - mcp_integration
+
+# Required permissions
+permissions:
+  filesystem:
+    - "." # Current directory for reading specs
+    - "docs/" # Documentation directory
+  network:
+    - "api.anthropic.com" # For LLM-as-judge
+  commands: []
+
+# Dependencies
+dependencies:
+  cli_abstraction:
+    source: "./lib/cli-abstraction.py"
+    version: "1.0.0"
+  cli_detector:
+    source: "./lib/cli-detector.py"
+    version: "1.0.0"
+  python_packages:
+    - "anthropic>=0.18.0"
+    - "pydantic>=2.0.0"
+    - "rich>=13.0.0"
+
+# Marketplace configuration
+marketplace:
+  manifest: "./marketplace.json"
+  skills_directory: "./skills"
+  rubrics_directory: "./rubrics"
+  cli_adapters_directory: "./cli-adapters"
+
+# Installation hooks
+hooks:
+  pre_install:
+    - script: "./scripts/check-python-deps.sh"
+      description: "Check Python dependencies"
+  post_install:
+    - script: "./scripts/setup-rubrics.sh"
+      description: "Set up default rubrics"
