@@ -1,0 +1,55 @@
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+vendor/
+
+# Bash
+*.log
+*.tmp
+
+# Temp files
+/tmp/
+*.bak
+*.backup
+
+# Binaries
+bin/
+
+# Database files
+beads.db
+*.db-shm
+*.db-wal
+
+# Coverage migration artifacts
+mcp-wizard/coverage-migrate/
+
+# SQLite / beads
+.beads
+
+# Bats test helpers (installed via make test-shell)
+tests/test_helper/
+
+# Environment
+.env
+.env.local
+
+# Claude local settings
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
