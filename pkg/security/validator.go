@@ -157,6 +157,14 @@ func ValidatePath(path, allowedBase string, followSymlinks bool) (string, error)
 		return "", &PathTraversalError{Path: path, AllowedBase: allowedBase}
 	}
 
+	// Resolve the base through symlinks now that we know it exists.
+	// On macOS /var → /private/var; without this the Rel check below produces
+	// a false PathTraversalError when the user path is resolved but base is not.
+	baseResolved, err := filepath.EvalSymlinks(baseAbs)
+	if err != nil {
+		return "", fmt.Errorf("evaluating base symlinks: %w", err)
+	}
+
 	// Check for symlinks before resolving if not allowed
 	if !followSymlinks {
 		linkInfo, err := os.Lstat(path)
@@ -174,19 +182,16 @@ func ValidatePath(path, allowedBase string, followSymlinks bool) (string, error)
 	// Clean the path to resolve .. and . components
 	cleanPath := filepath.Clean(absPath)
 
-	// Evaluate symlinks if path exists
-	var resolvedPath string
-	if _, err := os.Stat(cleanPath); err == nil {
-		resolvedPath, err = filepath.EvalSymlinks(cleanPath)
-		if err != nil {
-			return "", fmt.Errorf("evaluating symlinks: %w", err)
-		}
-	} else {
-		resolvedPath = cleanPath
+	// Evaluate symlinks for the path. For non-existent paths (e.g. files
+	// about to be created) walk up to the first existing ancestor so the
+	// resolved result is comparable to the resolved base.
+	resolvedPath, err := resolveExisting(cleanPath)
+	if err != nil {
+		return "", fmt.Errorf("evaluating symlinks: %w", err)
 	}
 
-	// Validate path is within allowed base
-	relPath, err := filepath.Rel(baseAbs, resolvedPath)
+	// Validate path is within allowed base (both sides fully resolved)
+	relPath, err := filepath.Rel(baseResolved, resolvedPath)
 	if err != nil {
 		return "", fmt.Errorf("computing relative path: %w", err)
 	}
@@ -314,6 +319,12 @@ func SafeCreateDirectory(path, allowedBase string, mode os.FileMode) (string, er
 		return "", &PathTraversalError{Path: path, AllowedBase: allowedBase}
 	}
 
+	// Resolve the base through symlinks (see ValidatePath — same macOS fix).
+	baseResolved, err := filepath.EvalSymlinks(baseAbs)
+	if err != nil {
+		return "", fmt.Errorf("evaluating base symlinks: %w", err)
+	}
+
 	// Check for symlink BEFORE resolving
 	pathAbs, err := filepath.Abs(path)
 	if err != nil {
@@ -326,11 +337,15 @@ func SafeCreateDirectory(path, allowedBase string, mode os.FileMode) (string, er
 		}
 	}
 
-	// Clean the path
+	// Clean the path and resolve as much as possible (directory may not exist yet).
 	cleanPath := filepath.Clean(pathAbs)
+	resolvedClean, err := resolveExisting(cleanPath)
+	if err != nil {
+		return "", fmt.Errorf("evaluating path symlinks: %w", err)
+	}
 
-	// Validate path is within base
-	relPath, err := filepath.Rel(baseAbs, cleanPath)
+	// Validate path is within base (both sides fully resolved)
+	relPath, err := filepath.Rel(baseResolved, resolvedClean)
 	if err != nil {
 		return "", fmt.Errorf("computing relative path: %w", err)
 	}
@@ -339,12 +354,12 @@ func SafeCreateDirectory(path, allowedBase string, mode os.FileMode) (string, er
 		return "", &PathTraversalError{Path: path, AllowedBase: allowedBase}
 	}
 
-	// Create directory
-	if err := os.MkdirAll(cleanPath, mode); err != nil {
+	// Create directory (use resolvedClean so the path matches the resolved base)
+	if err := os.MkdirAll(resolvedClean, mode); err != nil {
 		return "", fmt.Errorf("creating directory: %w", err)
 	}
 
-	return cleanPath, nil
+	return resolvedClean, nil
 }
 
 // IsSafePath checks if a path is safe without raising errors.
@@ -364,4 +379,27 @@ func IsSafePath(path, allowedBase string) bool {
 // Returns the path to the system temporary directory.
 func GetSafeTempDir() string {
 	return os.TempDir()
+}
+
+// resolveExisting resolves as many leading path components as possible through
+// filepath.EvalSymlinks, then appends the unresolved suffix. This handles
+// paths that do not yet exist (e.g. a file about to be created) so they can
+// be compared against a fully-resolved base directory.
+//
+// On macOS, os.TempDir() returns /var/… while EvalSymlinks resolves it to
+// /private/var/… — without this, Rel comparisons produce false ../ prefixes.
+func resolveExisting(path string) (string, error) {
+	if _, err := os.Stat(path); err == nil {
+		return filepath.EvalSymlinks(path)
+	}
+	parent := filepath.Dir(path)
+	if parent == path {
+		// Reached the filesystem root; return as-is.
+		return path, nil
+	}
+	resolvedParent, err := resolveExisting(parent)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolvedParent, filepath.Base(path)), nil
 }
