@@ -2,6 +2,7 @@ package sandbox_test
 
 import (
 	"errors"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,6 +28,9 @@ func TestProviderRegistration_ClaudeCodeWorktree(t *testing.T) {
 func TestProviderRegistration_OverlayFS(t *testing.T) {
 	t.Parallel()
 
+	if runtime.GOOS != "linux" {
+		t.Skip("overlayfs provider is Linux-only; stub does not register on macOS/Windows")
+	}
 	provider, err := sandbox.NewProviderForPlatform("overlayfs")
 	require.NoError(t, err, "overlayfs should be registered via init()")
 	require.NotNil(t, provider)
