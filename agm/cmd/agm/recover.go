@@ -178,12 +178,11 @@ func runRecoverCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// All methods failed
-	{
-		fmt.Println()
-		ui.PrintError(
-			fmt.Errorf("soft recovery failed"),
-			"All soft recovery methods failed",
-			fmt.Sprintf(`The session may be in a deadlock state.
+	fmt.Println()
+	ui.PrintError(
+		fmt.Errorf("soft recovery failed"),
+		"All soft recovery methods failed",
+		fmt.Sprintf(`The session may be in a deadlock state.
 
 Next steps:
   1. Check session status: agm session list
@@ -195,11 +194,8 @@ Hard recovery will:
   - Confirm before killing
   - Send SIGKILL to Claude process
   - Log incident to ~/deadlock-log.txt`, tmux.GetSocketPath(), tmuxSessionName, sessionName),
-		)
-		return fmt.Errorf("soft recovery failed")
-	}
-
-	return nil
+	)
+	return fmt.Errorf("soft recovery failed")
 }
 
 func sendKey(tmuxSessionName, key string) error {
