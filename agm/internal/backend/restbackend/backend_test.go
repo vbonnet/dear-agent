@@ -313,3 +313,36 @@ func TestRegistration(t *testing.T) {
 
 	var _ backend.Backend = b
 }
+
+func TestRingBuffer_BoundsChecking(t *testing.T) {
+	// newRingBuffer clamps negative/zero size
+	rb := newRingBuffer(0)
+	if rb.size != 1 {
+		t.Errorf("expected size 1 for zero input, got %d", rb.size)
+	}
+
+	rb = newRingBuffer(-5)
+	if rb.size != 1 {
+		t.Errorf("expected size 1 for negative input, got %d", rb.size)
+	}
+
+	// newRingBuffer clamps excessive size
+	rb = newRingBuffer(maxRingBufferSize + 100)
+	if rb.size != maxRingBufferSize {
+		t.Errorf("expected size %d for excessive input, got %d", maxRingBufferSize, rb.size)
+	}
+
+	// ReadLast with negative n returns nil
+	rb = newRingBuffer(5)
+	rb.Write("a")
+	result := rb.ReadLast(-1)
+	if result != nil {
+		t.Errorf("expected nil for negative n, got %v", result)
+	}
+
+	// ReadLast with zero returns nil
+	result = rb.ReadLast(0)
+	if result != nil {
+		t.Errorf("expected nil for zero n, got %v", result)
+	}
+}
