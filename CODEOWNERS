@@ -1,0 +1,16 @@
+# Default owners for the entire repository
+* @vbonnet
+
+# Product directories
+/agm/       @vbonnet
+/engram/    @vbonnet
+/wayfinder/ @vbonnet
+/tools/     @vbonnet
+/pkg/       @vbonnet
+
+# CI/CD and infrastructure
+/.github/   @vbonnet
+/scripts/   @vbonnet
+
+# Documentation
+/docs/      @vbonnet
