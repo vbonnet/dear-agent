@@ -1,0 +1,46 @@
+name: Shell Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - '**/*.sh'
+      - 'tests/bats/**'
+      - '.github/workflows/shell-tests.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - '**/*.sh'
+      - 'tests/bats/**'
+      - '.github/workflows/shell-tests.yml'
+
+jobs:
+  bats:
+    name: Bats Shell Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Bats and helpers
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bats
+        mkdir -p tests/test_helper
+        git clone --depth 1 https://github.com/bats-core/bats-support.git tests/test_helper/bats-support
+        git clone --depth 1 https://github.com/bats-core/bats-assert.git tests/test_helper/bats-assert
+        git clone --depth 1 https://github.com/bats-core/bats-file.git tests/test_helper/bats-file
+
+    - name: Run Bats tests
+      run: bats tests/bats/
+
+    - name: Test summary
+      if: always()
+      run: |
+        echo "## Shell Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "All Bats tests passed" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "Some Bats tests failed" >> $GITHUB_STEP_SUMMARY
+        fi

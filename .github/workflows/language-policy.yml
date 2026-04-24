@@ -1,0 +1,184 @@
+name: Language Policy Enforcement
+
+# Purpose: Enforce language-specific policies across the codebase
+# - Bash scripts must remain under 20 lines (bash-20-line-limit)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  bash-line-limit:
+    name: Bash Script Size Check (20-line limit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3
+
+      - name: Check bash script line counts
+        run: |
+          #!/bin/bash
+          set -euo pipefail
+
+          # Configuration
+          EXCEPTIONS_DB="${GITHUB_WORKSPACE}/.github/language-policy/exceptions.db"
+          RULE_NAME="bash-20-line-limit"
+          LINE_LIMIT=20
+          EXIT_CODE=0
+
+          # Colors for output
+          RED='\033[0;31m'
+          GREEN='\033[0;32m'
+          YELLOW='\033[1;33m'
+          NC='\033[0m' # No Color
+
+          # Function to count non-empty, non-comment lines in a bash script
+          # Excludes: empty lines, comment-only lines, shebang
+          count_lines() {
+            local file="$1"
+            grep -v '^[[:space:]]*$' "$file" | \
+              grep -v '^[[:space:]]*#' | \
+              grep -v '^#!/' | \
+              wc -l | \
+              tr -d ' '
+          }
+
+          # Function to check if file has an exception in the database
+          has_exception() {
+            local file="$1"
+
+            # If database doesn't exist, no exceptions
+            if [[ ! -f "$EXCEPTIONS_DB" ]]; then
+              return 1
+            fi
+
+            # Query database for active exception
+            # Returns 0 if exception exists and is active (status='active')
+            local count
+            count=$(sqlite3 "$EXCEPTIONS_DB" \
+              "SELECT COUNT(*) FROM exceptions
+               WHERE rule_name='${RULE_NAME}'
+               AND file_path='${file}'
+               AND status='active'
+               AND (sunset_date IS NULL OR sunset_date > date('now'));" 2>/dev/null || echo "0")
+
+            [[ "$count" -gt 0 ]]
+          }
+
+          # Function to get exception details
+          get_exception_details() {
+            local file="$1"
+
+            if [[ ! -f "$EXCEPTIONS_DB" ]]; then
+              return
+            fi
+
+            sqlite3 "$EXCEPTIONS_DB" \
+              "SELECT reason, approver, sunset_date
+               FROM exceptions
+               WHERE rule_name='${RULE_NAME}'
+               AND file_path='${file}'
+               AND status='active'
+               AND (sunset_date IS NULL OR sunset_date > date('now'));" \
+              2>/dev/null | head -1
+          }
+
+          echo "=========================================="
+          echo "Bash Script Size Policy Enforcement"
+          echo "=========================================="
+          echo "Rule: bash-20-line-limit"
+          echo "Limit: ${LINE_LIMIT} lines (non-empty, non-comment, excluding shebang)"
+          echo ""
+
+          # Find all .sh files, excluding common directories
+          violations=()
+          exceptions_used=()
+          compliant=()
+
+          while IFS= read -r file; do
+            # Skip if file doesn't exist (edge case)
+            [[ ! -f "$file" ]] && continue
+
+            # Count lines
+            line_count=$(count_lines "$file")
+
+            if [[ "$line_count" -gt "$LINE_LIMIT" ]]; then
+              # Check for exception
+              if has_exception "$file"; then
+                exception_details=$(get_exception_details "$file")
+                exceptions_used+=("$file|$line_count|$exception_details")
+              else
+                violations+=("$file|$line_count")
+                EXIT_CODE=1
+              fi
+            else
+              compliant+=("$file|$line_count")
+            fi
+          done < <(find . -type f -name "*.sh" \
+            -not -path "*/.archived/*" \
+            -not -path "*/node_modules/*" \
+            -not -path "*/vendor/*" \
+            -not -path "*/.git/*" \
+            -not -path "*/.worktrees/*")
+
+          # Report compliant files
+          if [[ ${#compliant[@]} -gt 0 ]]; then
+            echo -e "${GREEN}✓ Compliant scripts (${#compliant[@]}):${NC}"
+            for item in "${compliant[@]}"; do
+              IFS='|' read -r file count <<< "$item"
+              printf "  %-60s %3d lines\n" "$file" "$count"
+            done
+            echo ""
+          fi
+
+          # Report exceptions
+          if [[ ${#exceptions_used[@]} -gt 0 ]]; then
+            echo -e "${YELLOW}⚠ Scripts with active exceptions (${#exceptions_used[@]}):${NC}"
+            for item in "${exceptions_used[@]}"; do
+              IFS='|' read -r file count reason approver sunset <<< "$item"
+              printf "  %-60s %3d lines\n" "$file" "$count"
+              [[ -n "$reason" ]] && echo "    Reason: $reason"
+              [[ -n "$approver" ]] && echo "    Approver: $approver"
+              [[ -n "$sunset" ]] && echo "    Sunset: $sunset"
+            done
+            echo ""
+          fi
+
+          # Report violations
+          if [[ ${#violations[@]} -gt 0 ]]; then
+            echo -e "${RED}✗ POLICY VIOLATIONS (${#violations[@]}):${NC}"
+            echo ""
+            for item in "${violations[@]}"; do
+              IFS='|' read -r file count <<< "$item"
+              excess=$((count - LINE_LIMIT))
+              printf "  ${RED}%-60s %3d lines (+%d over limit)${NC}\n" "$file" "$count" "$excess"
+            done
+            echo ""
+            echo -e "${RED}=========================================="
+            echo "FAILURE: ${#violations[@]} bash script(s) exceed the 20-line limit"
+            echo -e "==========================================${NC}"
+            echo ""
+            echo "What to do:"
+            echo "1. RECOMMENDED: Refactor the script into Go, Python, or TypeScript"
+            echo "2. TEMPORARY: Split large scripts into smaller, focused scripts"
+            echo "3. EXCEPTION: Request an exception by adding to the exceptions database:"
+            echo "   - Database: ${EXCEPTIONS_DB}"
+            echo "   - Rule: ${RULE_NAME}"
+            echo "   - File: [path from violation above]"
+            echo "   - Include reason, approver, and sunset_date"
+            echo ""
+          else
+            echo -e "${GREEN}=========================================="
+            echo "SUCCESS: All bash scripts are compliant"
+            echo -e "==========================================${NC}"
+          fi
+
+          exit $EXIT_CODE

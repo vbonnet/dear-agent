@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build binaries
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          GIT_COMMIT=$(git rev-parse --short HEAD)
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          LDFLAGS="-s -w -X main.Version=${VERSION} -X main.GitCommit=${GIT_COMMIT} -X main.BuildDate=${BUILD_DATE} -X main.BuiltBy=github-actions"
+
+          declare -A BINARIES=(
+            ["agm"]="./agm/cmd/agm"
+            ["agm-reaper"]="./agm/cmd/agm-reaper"
+            ["agm-mcp-server"]="./agm/cmd/agm-mcp-server"
+            ["engram"]="./engram/cmd/engram"
+            ["deep-research"]="./research/cmd/deep-research"
+            ["research-feed"]="./research/cmd/research-feed"
+            ["benchmark-query"]="./tools/benchmark-query"
+          )
+
+          mkdir -p dist
+
+          for GOOS in linux darwin; do
+            for GOARCH in amd64 arm64; do
+              for name in "${!BINARIES[@]}"; do
+                src="${BINARIES[$name]}"
+                output="dist/${name}-${GOOS}-${GOARCH}"
+                [ "$GOOS" = "windows" ] && output="${output}.exe"
+                echo "Building ${name} for ${GOOS}/${GOARCH}..."
+                GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="${LDFLAGS}" -o "$output" "$src"
+              done
+            done
+          done
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*

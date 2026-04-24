@@ -1,0 +1,81 @@
+name: AGM E2E Installation Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'agm/**'
+      - '.github/workflows/agm-e2e-install.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'agm/**'
+      - '.github/workflows/agm-e2e-install.yml'
+
+jobs:
+  e2e-install:
+    name: AGM E2E Install (${{ matrix.distro }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        distro:
+          - ubuntu
+          - debian
+
+    steps:
+    - name: Checkout ai-tools
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Cache Docker layers
+      uses: actions/cache@v4
+      with:
+        path: /tmp/.buildx-cache
+        key: ${{ runner.os }}-buildx-${{ matrix.distro }}-${{ hashFiles('go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-buildx-${{ matrix.distro }}-
+
+    - name: Build ${{ matrix.distro }} test image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: agm/tests/e2e-install/Dockerfiles/${{ matrix.distro }}.Dockerfile
+        tags: agm-test-${{ matrix.distro }}:latest
+        load: true
+        cache-from: type=local,src=/tmp/.buildx-cache
+        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+    - name: Run ${{ matrix.distro }} E2E tests
+      run: docker run --rm agm-test-${{ matrix.distro }}
+
+    - name: Post-install verification (agm doctor)
+      run: |
+        docker run --rm agm-test-${{ matrix.distro }} \
+          /bin/bash -c 'agm admin doctor 2>&1; exit_code=$?; if [ $exit_code -ne 0 ]; then echo "CRITICAL: agm doctor failed with exit code $exit_code"; exit 1; fi'
+
+    - name: Rotate cache
+      if: always()
+      run: |
+        rm -rf /tmp/.buildx-cache
+        mv /tmp/.buildx-cache-new /tmp/.buildx-cache 2>/dev/null || true
+
+    - name: Cleanup Docker resources
+      if: always()
+      run: |
+        docker rmi agm-test-${{ matrix.distro }} 2>/dev/null || true
+        docker builder prune -f 2>/dev/null || true
+
+    - name: Test summary
+      if: always()
+      run: |
+        echo "## AGM E2E Installation Test Results (${{ matrix.distro }})" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ ${{ job.status }} == 'success' ]; then
+          echo "All tests passed on ${{ matrix.distro }}" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "Tests failed on ${{ matrix.distro }}" >> $GITHUB_STEP_SUMMARY
+        fi

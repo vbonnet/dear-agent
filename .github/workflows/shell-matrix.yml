@@ -1,0 +1,78 @@
+name: Shell Interpreter Matrix
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - '**/*.sh'
+      - 'tests/bats/**'
+      - '.github/workflows/shell-matrix.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - '**/*.sh'
+      - 'tests/bats/**'
+      - '.github/workflows/shell-matrix.yml'
+
+jobs:
+  shell-matrix:
+    name: Bats (${{ matrix.shell }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shell: bash-5
+            image: bash:5
+          - shell: bash-4
+            image: bash:4
+          - shell: zsh
+            image: alpine:latest
+            install: apk add --no-cache zsh bats
+          - shell: dash
+            image: debian:bookworm-slim
+            install: apt-get update && apt-get install -y dash bats
+          - shell: ash
+            image: alpine:latest
+
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - name: Install dependencies (Alpine)
+        if: matrix.image == 'alpine:latest'
+        run: apk add --no-cache git bash bats coreutils ${{ matrix.shell == 'zsh' && 'zsh' || '' }}
+
+      - name: Install dependencies (Debian)
+        if: matrix.image == 'debian:bookworm-slim'
+        run: apt-get update && apt-get install -y git bash bats coreutils
+
+      - name: Install dependencies (Bash image)
+        if: startsWith(matrix.image, 'bash:')
+        run: apk add --no-cache git bats coreutils
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Bats helpers
+        run: |
+          mkdir -p tests/test_helper
+          git clone --depth 1 https://github.com/bats-core/bats-support.git tests/test_helper/bats-support
+          git clone --depth 1 https://github.com/bats-core/bats-assert.git tests/test_helper/bats-assert
+          git clone --depth 1 https://github.com/bats-core/bats-file.git tests/test_helper/bats-file
+
+      - name: Run Bats tests
+        run: bats tests/bats/
+        env:
+          SHELL_UNDER_TEST: ${{ matrix.shell }}
+
+      - name: Test summary
+        if: always()
+        run: |
+          echo "## Shell Matrix Test Results (${{ matrix.shell }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "All Bats tests passed under ${{ matrix.shell }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Some Bats tests failed under ${{ matrix.shell }}" >> $GITHUB_STEP_SUMMARY
+          fi
