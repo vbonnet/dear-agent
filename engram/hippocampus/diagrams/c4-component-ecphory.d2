@@ -1,0 +1,241 @@
+# C4 Component Diagram: Hippocampus (Ecphory)
+# Level 3: Components within Hippocampus Module
+# Brain-Inspired Memory Consolidation System
+
+direction: down
+
+title: {
+  label: Hippocampus - Memory Consolidation Pipeline (Ecphory)
+  near: top-center
+  shape: text
+  style.font-size: 24
+  style.bold: true
+}
+
+subtitle: {
+  label: Brain metaphor: Temporary storage → Consolidation → Long-term archive
+  near: top-center
+  shape: text
+  style.font-size: 14
+  style.italic: true
+}
+
+# External Dependencies
+thalamus: {
+  label: Thalamus\n(Sleep Cycle Trigger)
+  shape: rectangle
+  style.fill: "#999999"
+
+  description: |md
+    Monitors token usage
+    - Triggers at 80% (160K/200K)
+    - Calls ConsolidateMemory()
+    - Generates wake-up prompt
+  |
+}
+
+agm: {
+  label: AGM\n(Session History)
+  shape: rectangle
+  style.fill: "#999999"
+
+  description: |md
+    Working memory storage
+    - Full conversation history
+    - 165K tokens (verbose)
+    - Source for extraction
+  |
+}
+
+consolidation_storage: {
+  label: Consolidation Storage\n~/engram/consolidation/
+  shape: cylinder
+  style.fill: "#438dd5"
+
+  description: |md
+    Structured summaries
+    - YYYY-MM-DD-HH-MM-SS.md
+    - 15K tokens (compact)
+    - Wake-up state
+  |
+}
+
+archive_storage: {
+  label: Session Archive\n~/engram/archive/
+  shape: cylinder
+  style.fill: "#438dd5"
+
+  description: |md
+    Full history backup
+    - {sessionID}-full.jsonl
+    - 165K tokens (reference)
+    - Recovery/audit trail
+  |
+}
+
+# Hippocampus Module Boundary
+hippocampus: {
+  label: Hippocampus (Go Module)
+  style.fill: "#e8f4f8"
+  style.stroke: "#1168bd"
+  style.stroke-width: 3
+
+  # Core Orchestration
+  consolidation_engine: {
+    label: ConsolidationEngine
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      Main workflow orchestrator
+      - ConsolidateMemory(sessionID, history)
+      - Coordinates extraction pipeline
+      - Calls Archiver + Generator
+      - Returns Consolidation struct
+    |
+  }
+
+  # Extraction Components
+  extractor: {
+    label: Extractor\n(Pattern Matcher)
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      Pattern-based extraction (V1)
+      - extractDecisions()
+      - extractOutcomes()
+      - extractTechnicalLearnings()
+      - extractProcessLearnings()
+      - extractActivePlan()
+      - extractEngrams()
+    |
+  }
+
+  pattern_matcher: {
+    label: PatternMatcher
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      Regex patterns for extraction
+      - Decision markers
+      - Outcome indicators
+      - Learning statements
+      - Active plan phase
+      - Engram references (*.ai.md)
+    |
+  }
+
+  # Storage Components
+  archiver: {
+    label: Archiver\n(Session Backup)
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      Full history preservation
+      - archiveSession()
+      - Write JSONL format
+      - Ensures recovery path
+      - Returns archive path
+    |
+  }
+
+  generator: {
+    label: Generator\n(Summary Builder)
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      Consolidation artifact creation
+      - generateConsolidationArtifact()
+      - Renders markdown template
+      - Includes metadata
+      - Token reduction stats
+    |
+  }
+
+  # Data Models
+  consolidation_model: {
+    label: Consolidation\n(Data Model)
+    shape: rectangle
+    style.fill: "#1168bd"
+
+    description: |md
+      Consolidation result struct
+      - SessionID, Timestamp
+      - TokensBefore, TokensAfter
+      - Decisions, Outcomes
+      - Learnings (Technical/Process)
+      - ActivePlan, Engrams
+      - ArchivePath
+    |
+  }
+
+  # Internal Relationships (Consolidation Pipeline)
+  consolidation_engine -> extractor: 1. Extract key info
+  extractor -> pattern_matcher: Uses regex patterns
+  pattern_matcher -> extractor: Matched data
+  extractor -> consolidation_model: Populates struct
+
+  consolidation_engine -> archiver: 2. Archive full history
+  archiver -> consolidation_model: Sets ArchivePath
+
+  consolidation_engine -> generator: 3. Generate summary
+  generator -> consolidation_model: Reads data
+  consolidation_model -> consolidation_engine: Returns result
+}
+
+# External Relationships
+thalamus -> hippocampus.consolidation_engine: Triggers consolidation\n(session history)
+agm -> hippocampus.consolidation_engine: Provides history\n(165K tokens)
+
+hippocampus.archiver -> archive_storage: Write JSONL\n(backup)
+hippocampus.generator -> consolidation_storage: Write MD\n(summary)
+
+hippocampus.consolidation_engine -> thalamus: Returns Consolidation\n(for wake-up)
+
+# Brain Metaphor Flow
+metaphor: {
+  near: bottom-left
+  label: Brain Metaphor
+  style.fill: "#fff4e6"
+  style.stroke: "#ffa94d"
+  style.stroke-width: 2
+
+  description: |md
+    **Hippocampus (Neuroscience)**:
+    - Temporary storage → Pattern completion
+    - Consolidation → Transfer to cortex
+    - During sleep → Long-term memory
+
+    **Hippocampus (Engram)**:
+    - Session history → Pattern extraction
+    - Consolidation → Structured summary
+    - Sleep Cycle → Archive + Wake-up state
+  |
+}
+
+# Legend
+legend: {
+  near: bottom-right
+
+  component_legend: {
+    label: Hippocampus Component
+    shape: rectangle
+    style.fill: "#1168bd"
+  }
+
+  external_legend: {
+    label: External Container
+    shape: rectangle
+    style.fill: "#999999"
+  }
+
+  storage_legend: {
+    label: Storage (File System)
+    shape: cylinder
+    style.fill: "#438dd5"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "~/.claude/hooks/posttool-auto-commit-beads.py",
+            "timeout": 10
+          }
+        ],
+        "matcher": "Bash"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "~/.claude/hooks/pretool-beads-protection.py",
+            "timeout": 5
+          },
+          {
+            "command": "~/.claude/hooks/pretool-validate-paired-files.py",
+            "timeout": 5
+          }
+        ],
+        "matcher": "Read|Write|Edit"
+      }
+    ]
+  }
+}

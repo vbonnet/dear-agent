@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "~/src/ws/oss/repos/engram/main/hooks/token-tracker-init",
+            "timeout": 10
+          },
+          {
+            "command": "~/.claude/hooks/sessionstart/ecphory-session-hook",
+            "timeout": 10
+          }
+        ],
+        "matcher": ".*"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "~/src/ws/oss/.claude/hooks/pretool-validator.py",
+            "timeout": 5
+          }
+        ],
+        "matcher": ".*"
+      }
+    ]
+  }
+}

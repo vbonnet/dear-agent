@@ -1,0 +1,15 @@
+# Engram MCP Server Dependencies
+
+# Semantic search and embeddings (Task 3.5)
+sentence-transformers>=2.2.0
+
+# Vector similarity
+numpy>=1.24.0
+scikit-learn>=1.3.0
+
+# YAML parsing (for engram frontmatter)
+PyYAML>=6.0
+
+# Testing
+pytest>=7.4.0
+pytest-timeout>=2.1.0

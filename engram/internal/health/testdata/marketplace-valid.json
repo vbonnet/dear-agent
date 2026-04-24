@@ -1,0 +1,10 @@
+{
+  "anthropic-official": {
+    "source": "https://api.github.com/repos/anthropics/claude-code-plugins/contents/plugins",
+    "installLocation": "~/.claude/plugins"
+  },
+  "custom-plugins": {
+    "source": "~/custom-plugins",
+    "installLocation": "~/.claude/plugins"
+  }
+}

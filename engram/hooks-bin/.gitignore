@@ -1,0 +1,21 @@
+# Build artifacts
+bin/
+sessionend-*
+pretool-*
+posttool-*
+sessionstart-*
+monitor-*
+
+# Compiled hook binaries in cmd directories
+cmd/*/sessionend-*
+cmd/*/posttool-*
+cmd/*/pretool-*
+cmd/*/sessionstart-*
+cmd/*/monitor-*
+
+# Test binaries
+*.test
+*.out
+
+# Coverage files
+coverage.txt

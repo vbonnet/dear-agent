@@ -1,0 +1,16 @@
+{
+  "engram": {
+    "source": {
+      "source": "directory",
+      "path": "/opt/workspace/repos/engram"
+    },
+    "installLocation": "/opt/workspace/repos/engram"
+  },
+  "ai-tools": {
+    "source": {
+      "source": "directory",
+      "path": "/opt/workspace/repos/ai-tools"
+    },
+    "installLocation": "/opt/workspace/repos/ai-tools"
+  }
+}
