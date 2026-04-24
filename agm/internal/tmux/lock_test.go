@@ -73,6 +73,10 @@ func TestTmuxLock_MultipleReleaseSafe(t *testing.T) {
 
 // TestTmuxLock_Concurrency_NewSession simulates concurrent NewSession calls
 func TestTmuxLock_Concurrency_NewSession(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires requires tmux lock concurrency")
+	}
+
 	cleanupTmuxLock(t)
 	defer cleanupTmuxLock(t)
 
@@ -122,6 +126,10 @@ func TestTmuxLock_Concurrency_NewSession(t *testing.T) {
 
 // TestTmuxLock_Concurrency_SendCommand simulates concurrent SendCommand calls
 func TestTmuxLock_Concurrency_SendCommand(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires requires tmux lock concurrency")
+	}
+
 	cleanupTmuxLock(t)
 	defer cleanupTmuxLock(t)
 
@@ -198,6 +206,10 @@ func TestTmuxLock_NoDeadlock_DeferPattern(t *testing.T) {
 
 // TestTmuxLock_RaceCondition_SettingsUpdate tests race conditions in settings updates
 func TestTmuxLock_RaceCondition_SettingsUpdate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires race condition test")
+	}
+
 	cleanupTmuxLock(t)
 	defer cleanupTmuxLock(t)
 
@@ -544,6 +556,10 @@ func TestWithTmuxLock_PanicRecovery(t *testing.T) {
 
 // TestWithTmuxLock_ConcurrentAccess tests concurrent withTmuxLock calls
 func TestWithTmuxLock_ConcurrentAccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires requires tmux lock")
+	}
+
 	cleanupTmuxLock(t)
 	defer cleanupTmuxLock(t)
 

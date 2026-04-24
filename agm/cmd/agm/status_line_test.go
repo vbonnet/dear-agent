@@ -51,6 +51,10 @@ func TestStatusLineCommand(t *testing.T) {
 
 // TestAutoDetectTmuxSession tests tmux session auto-detection
 func TestAutoDetectTmuxSession(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires requires tmux/service")
+	}
+
 	tests := []struct {
 		name        string
 		tmuxEnv     string
