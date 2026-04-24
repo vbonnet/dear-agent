@@ -1,0 +1,90 @@
+# CI Gate Policy Configuration
+# This file controls when and how CI workflows must pass before allowing merges.
+
+version: v1
+
+# Default policy applies to all branches unless overridden
+default:
+  # Workflows that MUST pass before allowing merge
+  required_workflows:
+    - test.yml
+    - lint.yml
+
+  # Workflows that run but don't block merges
+  optional_workflows: []
+
+  # Allow emergency bypass via SKIP_CI_GATES=true
+  allow_bypass: false
+
+  # Maximum time to wait for all workflows (minutes)
+  timeout_minutes: 30
+
+  # What to do when workflows fail:
+  #   - "block": Prevent merge, exit non-zero (recommended)
+  #   - "warn": Show warning but allow merge
+  #   - "allow": Allow merge silently
+  failure_behavior: block
+
+  # Run workflows in parallel (faster) or sequential (safer)
+  parallel_execution: false
+
+  # Require ALL required workflows to pass (true) or ANY (false)
+  require_all_passing: true
+
+  # Workflow dependencies (only used with parallel_execution: true)
+  # Format: workflow -> list of workflows that must complete first
+  workflow_dependencies: {}
+
+# Branch-specific policies override the default
+branch_policies:
+  # Strict policy for main branch
+  main:
+    required_workflows:
+      - test.yml
+      - lint.yml
+      - security.yml
+    allow_bypass: false
+    timeout_minutes: 60
+    failure_behavior: block
+    parallel_execution: true
+    require_all_passing: true
+    workflow_dependencies:
+      # security.yml depends on test.yml and lint.yml passing first
+      security.yml:
+        - test.yml
+        - lint.yml
+
+  # Relaxed policy for feature branches
+  feature/*:
+    required_workflows:
+      - test.yml
+    optional_workflows:
+      - lint.yml
+    allow_bypass: true
+    timeout_minutes: 20
+    failure_behavior: warn
+    parallel_execution: true
+    require_all_passing: false
+
+  # Release branches require comprehensive checks
+  release/*:
+    required_workflows:
+      - test.yml
+      - lint.yml
+      - security.yml
+      - e2e.yml
+    allow_bypass: false
+    timeout_minutes: 120
+    failure_behavior: block
+    parallel_execution: true
+    require_all_passing: true
+    workflow_dependencies:
+      e2e.yml:
+        - test.yml
+        - lint.yml
+
+# Notes:
+# - Workflow paths are relative to .github/workflows/
+# - Patterns support wildcards: "feature/*" matches "feature/auth", "feature/api", etc.
+# - Bypass events are logged in .git/ci-gate-bypass.log for audit
+# - Use --dry-run flag to test configuration without running workflows
