@@ -25,9 +25,3 @@ linters:
         linters:
           - errcheck
           - ineffassign
-
-output:
-  formats:
-    - format: text
-      path: stdout
-  sort-results: true
