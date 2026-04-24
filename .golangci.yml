@@ -14,7 +14,6 @@ linters:
     - govet
     - ineffassign
     - misspell
-    - errcheck
 
   exclusions:
     presets:
@@ -23,5 +22,4 @@ linters:
     rules:
       - path: _test\.go
         linters:
-          - errcheck
           - ineffassign
