@@ -39,6 +39,13 @@ jobs:
           go build -ldflags="${LDFLAGS}" -o /tmp/agm-mcp-server ./agm/cmd/agm-mcp-server
           go build ./...
 
+      - name: Install binaries for e2e tests
+        run: |
+          mkdir -p $HOME/go/bin
+          cp /tmp/agm $HOME/go/bin/agm
+          cp /tmp/agm-reaper $HOME/go/bin/agm-reaper
+          cp /tmp/agm-mcp-server $HOME/go/bin/agm-mcp-server
+
       - name: Vet
         run: go vet ./...
 
