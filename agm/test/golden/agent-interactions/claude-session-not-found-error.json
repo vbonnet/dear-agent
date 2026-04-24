@@ -1,0 +1,21 @@
+{
+  "description": "Claude agent - session not found error",
+  "agent": "claude",
+  "operation": "ResumeSession",
+  "request": {
+    "sessionID": "non-existent-session-uuid"
+  },
+  "response": {
+    "success": false,
+    "error": {
+      "code": "SESSION_NOT_FOUND",
+      "message": "session not found: non-existent-session-uuid",
+      "details": {
+        "sessionID": "non-existent-session-uuid"
+      }
+    }
+  },
+  "metadata": {
+    "timestamp": "2026-02-20T10:15:00Z"
+  }
+}

@@ -1,0 +1,47 @@
+#!/bin/bash
+# Claude Code hook: Track permission mode changes for AGM sessions
+# Triggered before each tool use (PreToolUse)
+#
+# Purpose: Detect when user changes Claude Code permission mode (default/auto/plan)
+#          and persist it to AGM's Dolt database for restoration on resume
+#
+# KNOWN LIMITATION: Claude Code PreToolUse hook JSON does NOT include a permission_mode field.
+# This hook cannot detect mode changes made via Shift+Tab in the TUI.
+# Mode persistence currently relies on `agm send mode` which calls updateModeManifest() directly.
+# TODO: Consider using a Stop hook to capture final mode from status bar before session ends.
+#
+# Installation: agm admin install-hooks
+# Permissions: chmod +x ~/.claude/hooks/pretool-agm-mode-tracker
+
+set -euo pipefail
+
+# Only run for AGM sessions
+if [ -z "${AGM_SESSION_NAME:-}" ]; then
+    exit 0
+fi
+
+# Extract permission_mode from hook JSON input (stdin)
+current_mode=$(jq -r '.permission_mode // "default"' 2>/dev/null || echo "default")
+
+# Cache file to avoid redundant database writes
+cache_dir="$HOME/.agm/mode-cache"
+cache_file="$cache_dir/$AGM_SESSION_NAME"
+mkdir -p "$cache_dir"
+
+# Read last known mode
+last_mode="unknown"
+if [ -f "$cache_file" ]; then
+    last_mode=$(cat "$cache_file")
+fi
+
+# Mode changed? Update cache and database
+if [ "$current_mode" != "$last_mode" ]; then
+    echo "$current_mode" > "$cache_file"
+
+    # Update Dolt in background (non-blocking)
+    # Errors are logged but don't block tool execution
+    (agm session update-mode "$AGM_SESSION_NAME" "$current_mode" 2>&1 | \
+        logger -t agm-mode-tracker || true) &
+fi
+
+exit 0

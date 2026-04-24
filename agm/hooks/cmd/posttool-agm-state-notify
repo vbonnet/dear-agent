@@ -1,0 +1,25 @@
+#!/bin/bash
+# Claude Code hook: Notify AGM after tool use
+# Triggered after any tool execution completes
+#
+# Purpose: Update AGM session state to THINKING after tool use
+# This indicates the session is processing/thinking about the tool results.
+#
+# Installation: Copy to ~/.claude/hooks/posttool-agm-state-notify
+# Permissions: chmod +x ~/.claude/hooks/posttool-agm-state-notify
+
+set -euo pipefail
+
+# Get current tmux session name
+AGM_SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "")
+
+if [ -z "$AGM_SESSION" ]; then
+    # Not in tmux - skip hook
+    exit 0
+fi
+
+# Notify AGM of state transition to THINKING
+# Silent failure is OK - AGM might not be installed or session might not be AGM-managed
+agm session state set "$AGM_SESSION" "THINKING" --source hook 2>/dev/null || true
+
+exit 0

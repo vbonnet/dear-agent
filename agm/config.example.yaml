@@ -1,0 +1,118 @@
+# AGM Configuration Example
+# Location: ~/.config/agm/config.yaml
+
+# ============================================================================
+# CENTRALIZED STORAGE CONFIGURATION (New in v3.x)
+# ============================================================================
+# AGM supports two storage modes:
+# 1. "dotfile" (default) - Stores data in ~/.agm/ (backward compatible)
+# 2. "centralized" - Stores data in git-tracked workspace (portable)
+
+storage:
+  # Storage mode: "dotfile" or "centralized"
+  # Default: "dotfile" (backward compatible)
+  mode: dotfile
+
+  # Workspace name or absolute path (for centralized mode only)
+  # Examples:
+  #   workspace: engram-research                     # Auto-detect location
+  #   workspace: ./engram-research  # Absolute path
+  # Default: "" (not used in dotfile mode)
+  workspace: ""
+
+  # Path within workspace (for centralized mode only)
+  # Default: ".agm"
+  relative_path: .agm
+
+# ============================================================================
+# EXAMPLE: Enable Centralized Storage
+# ============================================================================
+# Uncomment the following to enable centralized storage:
+#
+# storage:
+#   mode: centralized
+#   workspace: engram-research
+#   relative_path: .agm
+#
+# This will:
+# 1. Store AGM data in: .agm/
+# 2. Create symlink: ~/.agm -> .agm/
+# 3. Make data git-tracked and portable
+
+# ============================================================================
+# WORKSPACE CONFIGURATION (Existing)
+# ============================================================================
+# Explicit workspace for session isolation (still supported)
+# workspace: oss
+
+# Path to workspace config (default: ~/.agm/config.yaml)
+# workspace_config: ~/.agm/config.yaml
+
+# ============================================================================
+# SESSION STORAGE
+# ============================================================================
+# Explicit sessions directory (overrides storage.mode if set)
+# Default: ~/.claude/sessions (no workspace) or {workspace}/.agm/sessions (workspace detected)
+# sessions_dir: ~/.claude/sessions
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+# Log level: debug, info, warn, error
+log_level: info
+
+# Log file path (empty = stderr only)
+log_file: ""
+
+# ============================================================================
+# TIMEOUTS
+# ============================================================================
+timeout:
+  # Timeout for tmux commands
+  tmux_commands: 5s
+  # Enable timeout enforcement
+  enabled: true
+
+# ============================================================================
+# LOCKING
+# ============================================================================
+lock:
+  # Enable file locking for concurrent operations
+  enabled: true
+  # Lock file path (uses {UID} for multi-user systems)
+  path: /tmp/agm-{UID}/agm.lock
+
+# ============================================================================
+# HEALTH CHECKS
+# ============================================================================
+health_check:
+  # Enable health checks for tmux server
+  enabled: true
+  # Cache duration for health check results
+  cache_duration: 5s
+  # Timeout for health probe
+  probe_timeout: 2s
+
+# ============================================================================
+# NOTES
+# ============================================================================
+#
+# Priority order for configuration:
+# 1. Command-line flags (highest priority)
+# 2. Environment variables
+# 3. This config file
+# 4. Default values (lowest priority)
+#
+# Environment variables:
+# - AGM_SESSIONS_DIR: Override sessions directory
+# - AGM_LOG_LEVEL: Override log level
+# - AGM_LOG_FILE: Override log file
+# - ENGRAM_WORKSPACE: Override workspace detection
+# - WORKSPACE: Explicit workspace selection
+#
+# Storage modes:
+# - Dotfile mode: ~/.agm/ (default, backward compatible)
+# - Centralized mode: {workspace}/.agm/ (portable, git-tracked)
+#
+# See documentation: CENTRALIZED-STORAGE.md
+#

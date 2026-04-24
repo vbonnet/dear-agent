@@ -1,0 +1,47 @@
+# agm-bus.service — systemd user unit template for the agm-bus broker.
+#
+# This is a TEMPLATE: install-systemd.sh substitutes $HOME_DIR for the real
+# home directory before installing to ~/.config/systemd/user/agm-bus.service.
+#
+# Install:
+#   ./install-systemd.sh install
+#
+# Manual install:
+#   sed -e "s|\$HOME_DIR|$HOME|g" agm-bus.service \
+#       > ~/.config/systemd/user/agm-bus.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now agm-bus
+
+[Unit]
+Description=agm-bus message broker
+Documentation=https://github.com/vbonnet/dear-agent
+# Start after the user's D-Bus session and basic network target.
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=$HOME_DIR/go/bin/agm-bus serve
+
+# Restart policy: restart on any non-zero exit; throttle to avoid a crash-loop
+# storm if something is persistently broken.
+Restart=on-failure
+RestartSec=10
+
+# Logging: append to a single log file so ops can grep one place.
+StandardOutput=append:%h/.agm/logs/agm-bus.log
+StandardError=append:%h/.agm/logs/agm-bus.log
+
+# Environment: give the broker a predictable PATH that covers the Go bin dir
+# and common locations.  Users who need custom values (verbose logging,
+# non-default socket) can override via a drop-in:
+#   systemctl --user edit agm-bus
+Environment=HOME=$HOME_DIR
+Environment=PATH=$HOME_DIR/go/bin:/usr/local/bin:/usr/bin:/bin
+
+WorkingDirectory=$HOME_DIR
+
+# Low priority; the broker is infrastructure, not latency-critical.
+Nice=5
+
+[Install]
+WantedBy=default.target

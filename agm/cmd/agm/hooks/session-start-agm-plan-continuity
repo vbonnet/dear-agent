@@ -1,0 +1,51 @@
+#!/bin/bash
+# AGM Plan Continuity Hook
+# Automatically detects and links execution sessions to their planning session parents
+# when Claude Code uses "Clear Context and Execute Plan"
+
+set -euo pipefail
+
+# Read JSON from stdin (Claude hook protocol)
+read -r HOOK_DATA
+
+# Extract metadata from hook data
+SESSION_ID=$(echo "$HOOK_DATA" | jq -r '.session_id // empty')
+SESSION_NAME=$(echo "$HOOK_DATA" | jq -r '.session_name // "Unknown"')
+CWD=$(echo "$HOOK_DATA" | jq -r '.cwd // empty')
+SLUG=$(echo "$HOOK_DATA" | jq -r '.slug // empty')
+
+# Only process if session name is "Unknown" (execution session pattern)
+# Planning sessions have meaningful names, execution sessions start as "Unknown"
+if [ "$SESSION_NAME" != "Unknown" ]; then
+  exit 0
+fi
+
+# Ensure required data is present
+if [ -z "$SESSION_ID" ] || [ -z "$CWD" ]; then
+  # Missing required data - silently exit
+  exit 0
+fi
+
+# Sleep 2 seconds to ensure parent session has been committed to database
+# This prevents race conditions where we try to detect before parent is visible
+sleep 2
+
+# Detect parent session (if any)
+# Suppress errors to avoid noise if detection fails
+PARENT=$(agm admin detect-plan-parent \
+  --session-id "$SESSION_ID" \
+  --slug "$SLUG" \
+  --cwd "$CWD" \
+  --timeout 60s 2>&1 | grep -v "^Error" || echo "")
+
+# If parent found, link and inherit name
+if [ -n "$PARENT" ]; then
+  agm admin link-session-parent \
+    --child "$SESSION_ID" \
+    --parent "$PARENT" \
+    --inherit-name \
+    2>&1 | grep -v "^Error" || true
+fi
+
+# Always exit successfully (hook should not block session start)
+exit 0

@@ -1,0 +1,46 @@
+{
+  "SchemaVersion": "2",
+  "SessionID": "test-session-006",
+  "Name": "test-minimal-session",
+  "ParentSessionID": null,
+  "State": "",
+  "StateUpdatedAt": "0001-01-01T00:00:00Z",
+  "StateSource": "",
+  "CreatedAt": "2026-02-20T13:00:00Z",
+  "UpdatedAt": "2026-02-20T13:00:00Z",
+  "Lifecycle": "",
+  "Workspace": "",
+  "Context": {
+    "Project": "~/src/minimal-project",
+    "Purpose": "",
+    "Tags": null,
+    "Notes": ""
+  },
+  "Claude": {
+    "UUID": "",
+    "PreviousUUID": ""
+  },
+  "Tmux": {
+    "SessionName": "test-minimal-session-tmux"
+  },
+  "OpenCode": null,
+  "Harness": "",
+  "Model": "",
+  "EngramMetadata": null,
+  "ContextUsage": null,
+  "PermissionMode": "",
+  "PermissionModeUpdatedAt": null,
+  "PermissionModeSource": "",
+  "IsTest": false,
+  "Sandbox": null,
+  "WorkingDirectory": "",
+  "LastKnownCost": 0,
+  "LastKnownModel": "",
+  "LastKnownModelAt": "0001-01-01T00:00:00Z",
+  "Disposable": false,
+  "DisposableTTL": "",
+  "Monitors": null,
+  "WorkflowPhase": "",
+  "WorkflowPhaseUpdatedAt": null,
+  "CostTracking": null
+}

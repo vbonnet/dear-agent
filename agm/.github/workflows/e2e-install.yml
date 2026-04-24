@@ -1,0 +1,56 @@
+name: E2E Installation Tests
+
+on:
+  push:
+    branches: [ main, develop, refactor/agm-rename ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  e2e-install:
+    name: E2E Installation (${{ matrix.distro }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        distro:
+          - ubuntu
+          - debian
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        path: ai-tools/main/agm
+
+    - name: Checkout engram/core (dependency)
+      uses: actions/checkout@v4
+      with:
+        repository: vbonnet/engram
+        path: engram/main/core
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build ${{ matrix.distro }} test image
+      run: |
+        docker build \
+          -f ai-tools/main/agm/tests/e2e-install/Dockerfiles/${{ matrix.distro }}.Dockerfile \
+          -t agm-test-${{ matrix.distro }} \
+          .
+
+    - name: Run ${{ matrix.distro }} E2E tests
+      run: docker run --rm agm-test-${{ matrix.distro }}
+
+    - name: Test summary
+      if: always()
+      run: |
+        echo "## E2E Installation Test Results (${{ matrix.distro }})" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ $? -eq 0 ]; then
+          echo "✅ All tests passed on ${{ matrix.distro }}" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Tests failed on ${{ matrix.distro }}" >> $GITHUB_STEP_SUMMARY
+        fi

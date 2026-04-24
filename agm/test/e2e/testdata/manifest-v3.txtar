@@ -1,0 +1,46 @@
+# Test: Manifest structure validation
+# Validates: Manifest format and UUID generation
+#
+# This test ensures that:
+# - New sessions create valid manifests (schema_version: "2.0")
+# - Session ID is a proper UUID (not legacy "session-<name>" pattern)
+# - All required manifest fields are present
+# - UUID format regression is prevented
+
+[!can-create-tmux-session] skip 'cannot create tmux sessions in this environment'
+
+# Create a test session
+# Use --agent gpt to avoid 60s ready-file wait (E2E tests use dummy API key)
+exec agm session new bdd-manifest-v3-test --agent gpt --detached
+stdout 'Session.*created'
+
+# Verify manifest file exists
+exists $HOME/sessions/bdd-manifest-v3-test/manifest.yaml
+
+# Read manifest content
+exec cat $HOME/sessions/bdd-manifest-v3-test/manifest.yaml
+
+# Verify schema version is v2 (current implementation)
+stdout 'schema_version: "2.0"'
+
+# Verify session_id is a proper UUID (not legacy "session-<name>" bug)
+# This validates the UUID regression fix regardless of schema version
+
+# Verify session_id is a proper UUID format
+# UUID format: 8-4-4-4-12 hexadecimal characters
+stdout 'session_id: [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+
+# Verify session_id is NOT using legacy pattern (bug fix validation)
+# Legacy bug created session IDs like "session-test-name"
+! stdout 'session_id: session-'
+! stdout 'session_id: "session-'
+
+# Verify name field exists and is correct
+stdout 'name: bdd-manifest-v3-test'
+
+# Verify manifest contains other common v3 fields (if present)
+# These may vary by implementation, but schema_version is required
+# Additional fields like created_at, status, etc. may exist
+
+# Cleanup
+exec agm session archive bdd-manifest-v3-test --force

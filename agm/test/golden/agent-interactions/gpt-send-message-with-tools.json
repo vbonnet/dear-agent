@@ -1,0 +1,42 @@
+{
+  "description": "GPT agent - message with tool/function call",
+  "agent": "gpt",
+  "operation": "SendMessage",
+  "request": {
+    "sessionID": "thread_abc123xyz456",
+    "message": {
+      "ID": "msg-gpt-001",
+      "Role": "user",
+      "Content": "What's the current weather in San Francisco?",
+      "Timestamp": "2026-02-20T10:05:00Z",
+      "Metadata": {}
+    }
+  },
+  "response": {
+    "success": true,
+    "error": null,
+    "assistant_message": {
+      "ID": "msg-gpt-002",
+      "Role": "assistant",
+      "Content": "",
+      "Timestamp": "2026-02-20T10:05:05Z",
+      "Metadata": {
+        "tool_calls": [
+          {
+            "id": "call_xyz789",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"location\": \"San Francisco, CA\"}"
+            }
+          }
+        ],
+        "tokens_used": 95
+      }
+    }
+  },
+  "metadata": {
+    "timestamp": "2026-02-20T10:05:05Z",
+    "model": "gpt-4-turbo-2024-04-09"
+  }
+}

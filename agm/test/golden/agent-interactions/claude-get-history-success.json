@@ -1,0 +1,35 @@
+{
+  "description": "Claude agent - retrieve conversation history",
+  "agent": "claude",
+  "operation": "GetHistory",
+  "request": {
+    "sessionID": "550e8400-e29b-41d4-a716-446655440000"
+  },
+  "response": {
+    "success": true,
+    "messages": [
+      {
+        "ID": "msg-001",
+        "Role": "user",
+        "Content": "Hello, can you help me debug this Python function?",
+        "Timestamp": "2026-02-20T10:05:00Z",
+        "Metadata": {}
+      },
+      {
+        "ID": "msg-002",
+        "Role": "assistant",
+        "Content": "Of course! I'd be happy to help you debug your Python function. Please share the function code and let me know what issue you're experiencing.",
+        "Timestamp": "2026-02-20T10:05:15Z",
+        "Metadata": {
+          "model": "claude-sonnet-4.5",
+          "tokens_used": 42
+        }
+      }
+    ],
+    "error": null
+  },
+  "metadata": {
+    "timestamp": "2026-02-20T10:10:00Z",
+    "total_messages": 2
+  }
+}

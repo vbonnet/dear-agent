@@ -1,0 +1,23 @@
+{
+  "description": "Claude agent - successful message send",
+  "agent": "claude",
+  "operation": "SendMessage",
+  "request": {
+    "sessionID": "550e8400-e29b-41d4-a716-446655440000",
+    "message": {
+      "ID": "msg-001",
+      "Role": "user",
+      "Content": "Hello, can you help me debug this Python function?",
+      "Timestamp": "2026-02-20T10:05:00Z",
+      "Metadata": {}
+    }
+  },
+  "response": {
+    "success": true,
+    "error": null
+  },
+  "metadata": {
+    "timestamp": "2026-02-20T10:05:00Z",
+    "model": "claude-sonnet-4.5"
+  }
+}

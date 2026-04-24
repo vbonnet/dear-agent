@@ -1,0 +1,43 @@
+[Unit]
+Description=AGM Daemon - Multi-Session Message Delivery
+Documentation=https://github.com/vbonnet/dear-agent/tree/main/agm
+Documentation=file:///home/%u/src/ws/oss/worktrees/ai-tools/coordination-phase1-message-infra/agm/cmd/agm-daemon/SPEC.md
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/bin/agm-daemon
+Restart=always
+RestartSec=10
+
+# Working directory
+WorkingDirectory=%h/.agm
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agm-daemon
+
+# Environment
+Environment="PATH=%h/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="HOME=%h"
+
+# Resource limits
+MemoryMax=256M
+CPUQuota=50%
+TasksMax=100
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.agm %h/.claude
+
+# Process management
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

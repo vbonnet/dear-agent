@@ -1,0 +1,17 @@
+schema_version: "2.0"
+session_id: agm-file-edit-001
+name: readme-updates
+created_at: 2024-02-19T08:00:00Z
+updated_at: 2024-02-19T11:20:00Z
+lifecycle: ""
+workspace: oss
+context:
+  project: ~/projects/myworkspace
+  purpose: Update README and documentation
+  tags:
+    - documentation
+    - readme
+claude:
+  uuid: session-file-edit-001
+tmux:
+  session_name: agm-oss-readme-updates

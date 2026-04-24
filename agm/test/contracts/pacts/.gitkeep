@@ -1,0 +1,2 @@
+# This directory will contain generated Pact JSON files after running contract tests
+# Generated files: agm-claude-client-claude-api.json, agm-gemini-client-gemini-api.json, agm-gpt-client-openai-api.json

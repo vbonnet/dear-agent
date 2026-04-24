@@ -1,0 +1,28 @@
+{
+  "description": "GPT agent - successful session creation",
+  "agent": "gpt",
+  "operation": "CreateSession",
+  "request": {
+    "context": {
+      "Name": "gpt-test-session",
+      "WorkingDirectory": "~/gpt-project",
+      "Project": "code-assistant",
+      "AuthorizedDirs": [
+        "~/gpt-project",
+        "~/gpt-project/src"
+      ],
+      "Environment": {},
+      "WorkflowName": "code-review"
+    }
+  },
+  "response": {
+    "success": true,
+    "sessionID": "thread_abc123xyz456",
+    "error": null
+  },
+  "metadata": {
+    "timestamp": "2026-02-20T10:00:00Z",
+    "model": "gpt-4-turbo-2024-04-09",
+    "api_version": "v1"
+  }
+}

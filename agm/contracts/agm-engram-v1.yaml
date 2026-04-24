@@ -1,0 +1,195 @@
+# AGM-Engram Contract v1
+# Defines the workspace detection contract required by AGM
+#
+# This contract formalizes AGM's dependency on Engram's workspace detection
+# capability, enabling AGM to isolate sessions by workspace (OSS, Acme, etc.)
+
+contract_version: "1.0.0"
+contract_name: "workspace-v1"
+
+# ============================================================================
+# Contract Metadata
+# ============================================================================
+
+metadata:
+  provider: "engram"
+  consumer: "agm"
+  description: "Workspace detection and isolation for multi-workspace environments"
+  stability: "stable"
+  breaking_changes_policy: "Major version bump required for breaking changes"
+
+# ============================================================================
+# Interface Definition
+# ============================================================================
+
+interface:
+  # Workspace Detection
+  - method: "detect_workspace"
+    description: "Detect workspace from current working directory using 6-priority algorithm"
+    parameters:
+      - name: "cwd"
+        type: "string"
+        required: true
+        description: "Current working directory"
+      - name: "workspace_flag"
+        type: "string"
+        required: false
+        description: "Explicit workspace override (priority 1)"
+      - name: "workspace_env"
+        type: "string"
+        required: false
+        description: "Environment variable workspace (priority 2)"
+    returns:
+      type: "Workspace"
+      description: "Detected workspace object"
+    errors:
+      - "ErrNoWorkspace: No workspace found (priority 6)"
+      - "ErrInvalidWorkspaceName: Workspace name invalid"
+
+  # List Workspaces
+  - method: "list_workspaces"
+    description: "List all configured workspaces from config"
+    parameters: []
+    returns:
+      type: "[]Workspace"
+      description: "Array of configured workspaces"
+    errors:
+      - "ErrConfigNotFound: Workspace config not found"
+      - "ErrConfigInvalid: Workspace config invalid"
+
+  # Validate Workspace
+  - method: "validate_workspace"
+    description: "Validate workspace name and existence"
+    parameters:
+      - name: "name"
+        type: "string"
+        required: true
+        description: "Workspace name to validate"
+    returns:
+      type: "boolean"
+      description: "True if workspace is valid"
+    errors:
+      - "ErrInvalidWorkspaceName: Invalid workspace name format"
+      - "ErrWorkspaceNotFound: Workspace not found in config"
+
+# ============================================================================
+# Data Structures
+# ============================================================================
+
+types:
+  Workspace:
+    description: "Workspace metadata"
+    fields:
+      - name: "name"
+        type: "string"
+        required: true
+        description: "Workspace identifier (e.g., 'oss', 'acme')"
+      - name: "root"
+        type: "string"
+        required: true
+        description: "Workspace root directory (absolute path)"
+      - name: "source"
+        type: "DetectionSource"
+        required: true
+        description: "How workspace was detected (flag, env, auto-detect, etc.)"
+      - name: "config"
+        type: "map[string]interface{}"
+        required: false
+        description: "Workspace-specific configuration"
+
+  DetectionSource:
+    description: "Workspace detection method"
+    enum:
+      - "flag"           # Priority 1: --workspace flag
+      - "env"            # Priority 2: WORKSPACE env var
+      - "auto_detect"    # Priority 3: Auto-detect from PWD
+      - "config"         # Priority 4: Default from config
+      - "interactive"    # Priority 5: Interactive prompt
+
+# ============================================================================
+# Configuration Contract
+# ============================================================================
+
+configuration:
+  format: "yaml"
+  location: "~/.engram/config.yaml"
+  schema:
+    version: 1
+    default_workspace:
+      type: "string"
+      required: false
+      description: "Default workspace (priority 4 detection)"
+    workspaces:
+      type: "array"
+      required: true
+      description: "List of configured workspaces"
+      items:
+        type: "object"
+        fields:
+          - name: "name"
+            type: "string"
+            required: true
+          - name: "root"
+            type: "string"
+            required: true
+          - name: "enabled"
+            type: "boolean"
+            required: false
+            default: true
+
+# ============================================================================
+# Versioning Policy
+# ============================================================================
+
+versioning:
+  current_version: "1.0.0"
+  compatibility:
+    - version: "1.0.0"
+      changes: "Initial contract definition"
+      breaking: false
+  deprecation_policy: "1 major version grace period before removal"
+
+# ============================================================================
+# Examples
+# ============================================================================
+
+examples:
+  - name: "Detect workspace from current directory"
+    code: |
+      workspace, err := engram.DetectWorkspace(DetectOptions{
+        PWD: "the git history",
+      })
+      // Result: Workspace{Name: "oss", Root: "~/projects/myworkspace", Source: "auto_detect"}
+
+  - name: "Explicit workspace override"
+    code: |
+      workspace, err := engram.DetectWorkspace(DetectOptions{
+        WorkspaceFlag: "acme",
+        PWD: "~/projects/myworkspace",
+      })
+      // Result: Workspace{Name: "acme", Root: "~/src/ws/acme", Source: "flag"}
+
+  - name: "List all workspaces"
+    code: |
+      workspaces, err := engram.ListWorkspaces()
+      // Result: [Workspace{Name: "oss", ...}, Workspace{Name: "acme", ...}]
+
+# ============================================================================
+# Testing Requirements
+# ============================================================================
+
+testing:
+  compliance_tests:
+    - "Test detect_workspace with all 6 priorities"
+    - "Test list_workspaces returns configured workspaces"
+    - "Test validate_workspace accepts valid names"
+    - "Test validate_workspace rejects invalid names"
+
+  compatibility_tests:
+    - "Test old AGM v1 works with new Engram v2"
+    - "Test new AGM v2 works with old Engram v1"
+
+  integration_tests:
+    - "Test AGM session creation with workspace detection"
+    - "Test workspace switching updates environment"
+    - "Test multi-workspace isolation"

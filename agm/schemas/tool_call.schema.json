@@ -1,0 +1,97 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agm.dev/schemas/tool_call.v1.json",
+  "title": "AGM Tool Call",
+  "description": "AGM tool call tracking (Read, Write, Edit, Bash, etc.)",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique tool call identifier (UUID)",
+      "format": "uuid"
+    },
+    "message_id": {
+      "type": "string",
+      "description": "Associated message ID (assistant message that made tool call)",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Associated session ID",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "tool_name": {
+      "type": "string",
+      "description": "Tool name (Read, Write, Edit, Bash, WebSearch, etc.)",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "tool_use_id": {
+      "type": ["string", "null"],
+      "description": "Tool use ID from LLM API (for matching with results)",
+      "maxLength": 255
+    },
+    "arguments": {
+      "type": ["object", "null"],
+      "description": "Tool input parameters (JSON-encoded)",
+      "additionalProperties": true
+    },
+    "result": {
+      "type": ["object", "null"],
+      "description": "Tool output/result (JSON-encoded)",
+      "additionalProperties": true
+    },
+    "error": {
+      "type": ["string", "null"],
+      "description": "Error message if tool invocation failed"
+    },
+    "timestamp": {
+      "type": "integer",
+      "description": "Unix timestamp in milliseconds when tool was called",
+      "minimum": 0
+    },
+    "execution_time_ms": {
+      "type": ["integer", "null"],
+      "description": "Tool execution duration in milliseconds",
+      "minimum": 0
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "success", "error", "timeout"],
+      "description": "Tool call execution status"
+    },
+    "metadata": {
+      "type": ["object", "null"],
+      "description": "Additional tool call metadata (retries, context, etc.)",
+      "additionalProperties": true
+    }
+  },
+  "required": ["id", "message_id", "session_id", "tool_name", "timestamp", "status"],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "id": "tool-789",
+      "message_id": "msg-457",
+      "session_id": "session-123",
+      "tool_name": "Write",
+      "tool_use_id": "toolu_abc123",
+      "arguments": {
+        "file_path": "main/agm/component.yaml",
+        "content": "manifest_version: \"1.0\"..."
+      },
+      "result": {
+        "success": true,
+        "bytes_written": 5432
+      },
+      "error": null,
+      "timestamp": 1708336803000,
+      "execution_time_ms": 45,
+      "status": "success",
+      "metadata": {
+        "file_created": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+# Test: agm version should display version information
+# This is a simple smoke test to verify the agm binary works
+
+exec agm version
+stdout 'version'
+
+# Test: agm without arguments shows usage (exits with error in non-interactive environment)
+# Note: agm tries to start interactive session which fails either with TTY error or database error
+! exec agm
+stderr 'Usage:'

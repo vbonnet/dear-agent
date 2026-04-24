@@ -1,0 +1,5 @@
+{"sessionId":"valid-1","project":"/tmp/a","timestamp":1000}
+{"sessionId":"valid-2","project":"/tmp/b","timestamp":2000}
+{malformed json here
+{"sessionId":"","project":"/tmp/c","timestamp":3000}
+another bad line

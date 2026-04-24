@@ -1,0 +1,33 @@
+{
+  "description": "Edge case - context window size exceeded",
+  "agent": "claude",
+  "operation": "SendMessage",
+  "request": {
+    "sessionID": "550e8400-e29b-41d4-a716-446655440000",
+    "message": {
+      "ID": "msg-large-001",
+      "Role": "user",
+      "Content": "[Very large message content that exceeds context window...]",
+      "Timestamp": "2026-02-20T12:10:00Z",
+      "Metadata": {
+        "estimated_tokens": 210000
+      }
+    }
+  },
+  "response": {
+    "success": false,
+    "error": {
+      "code": "CONTEXT_WINDOW_EXCEEDED",
+      "message": "message size exceeds model's context window limit",
+      "details": {
+        "estimated_tokens": 210000,
+        "max_context_tokens": 200000,
+        "model": "claude-sonnet-4.5"
+      }
+    }
+  },
+  "metadata": {
+    "timestamp": "2026-02-20T12:10:00Z",
+    "model": "claude-sonnet-4.5"
+  }
+}

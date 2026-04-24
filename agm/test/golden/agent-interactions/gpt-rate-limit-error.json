@@ -1,0 +1,31 @@
+{
+  "description": "GPT agent - rate limit exceeded error",
+  "agent": "gpt",
+  "operation": "SendMessage",
+  "request": {
+    "sessionID": "thread_abc123xyz456",
+    "message": {
+      "ID": "msg-gpt-999",
+      "Role": "user",
+      "Content": "Process this request",
+      "Timestamp": "2026-02-20T11:30:00Z",
+      "Metadata": {}
+    }
+  },
+  "response": {
+    "success": false,
+    "error": {
+      "code": "RATE_LIMIT_EXCEEDED",
+      "message": "Rate limit exceeded. Please retry after the specified time.",
+      "details": {
+        "type": "tokens",
+        "retry_after_seconds": 20,
+        "limit_type": "requests_per_day"
+      }
+    }
+  },
+  "metadata": {
+    "timestamp": "2026-02-20T11:30:00Z",
+    "api_version": "v1"
+  }
+}

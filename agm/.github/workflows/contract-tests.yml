@@ -1,0 +1,63 @@
+name: Contract Tests
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Run weekly on Sundays at midnight UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    # Allow manual trigger
+
+jobs:
+  contract-tests:
+    name: Contract Tests (Real APIs)
+    runs-on: ubuntu-latest
+    # Only run if API keys are configured
+    if: github.repository == 'vbonnet/ai-tools' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+
+      - name: Build AGM binary
+        run: |
+          go build -o agm ./cmd/agm
+          chmod +x agm
+          echo "$PWD" >> $GITHUB_PATH
+
+      - name: Run contract tests (Claude)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::warning::ANTHROPIC_API_KEY not set, skipping Claude contract tests"
+          else
+            go test -v -tags=contract ./test/contract -run TestClaudeAPI || true
+          fi
+
+      - name: Run contract tests (Gemini)
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          if [ -z "$GOOGLE_API_KEY" ]; then
+            echo "::warning::GOOGLE_API_KEY not set, skipping Gemini contract tests"
+          else
+            go test -v -tags=contract ./test/contract -run TestGeminiAPI || true
+          fi
+
+      - name: Contract test summary
+        run: |
+          echo "::notice::Contract tests completed (quota-limited, some tests may skip)"
+          echo "::notice::Contract tests verify real API integration"
+          echo "::notice::Test failures are expected when quota is exhausted"

@@ -1,0 +1,296 @@
+# AGM Configuration Example - OpenCode Multi-Agent Integration
+#
+# This example configuration enables OpenCode SSE monitoring while maintaining
+# backward compatibility with Claude/Gemini tmux-based monitoring.
+#
+# Copy to ~/.agm/config.yaml and customize for your environment.
+
+# ============================================================================
+# Multi-Agent Adapter Configuration
+# ============================================================================
+
+adapters:
+  # OpenCode SSE Adapter (Phase 1-3: agm-multi-agent-integration)
+  opencode:
+    # Enable native SSE monitoring for OpenCode sessions
+    enabled: true
+
+    # OpenCode server URL (must match 'opencode serve' port)
+    server_url: "http://localhost:4096"
+
+    # Reconnect configuration (resilient SSE connection)
+    reconnect:
+      enabled: true                # Auto-reconnect on disconnect
+      initial_delay: 5s            # First reconnect delay
+      max_delay: 5m                # Maximum backoff delay
+      backoff_multiplier: 2        # Exponential backoff factor
+
+    # Fallback to Astrocyte tmux monitoring if SSE fails
+    # Recommended: true (provides safety net during outages)
+    fallback_tmux: true
+
+  # Future adapters can be added here:
+  # gemini:
+  #   enabled: true
+  #   hooks_config: ~/.config/gemini/hooks.yaml
+  #
+  # cortex:
+  #   enabled: true
+  #   api_endpoint: "http://localhost:8080"
+
+# ============================================================================
+# Logging Configuration
+# ============================================================================
+
+logging:
+  # Log level: debug, info, warn, error
+  level: info
+
+  # Log output: stdout, file, or both
+  output: both
+
+  # Log file path (if output includes 'file')
+  file: ~/.agm/logs/agm-daemon.log
+
+  # Log rotation
+  rotation:
+    max_size_mb: 100       # Rotate when file exceeds 100MB
+    max_age_days: 30       # Delete logs older than 30 days
+    max_backups: 5         # Keep max 5 backup files
+
+# ============================================================================
+# EventBus Configuration
+# ============================================================================
+
+eventbus:
+  # Maximum number of concurrent EventBus clients
+  max_clients: 100
+
+  # Event buffer size per client
+  buffer_size: 1000
+
+  # Enable event persistence (write to disk)
+  persistence:
+    enabled: false
+    path: ~/.agm/eventbus/events.jsonl
+
+# ============================================================================
+# Session Management
+# ============================================================================
+
+sessions:
+  # Default session directory
+  base_dir: ~/src/sessions
+
+  # Session manifest format version
+  manifest_version: "v4"
+
+  # Auto-cleanup stale sessions (no activity for N days)
+  auto_cleanup:
+    enabled: false
+    stale_days: 90
+
+# ============================================================================
+# Multi-Agent Configuration
+# ============================================================================
+
+multi_agent:
+  # Default agent for new sessions (if --agent not specified)
+  default_agent: claude
+
+  # Agent-specific settings
+  agents:
+    claude:
+      enabled: true
+      monitor_method: tmux  # Astrocyte tmux scraping
+
+    gemini:
+      enabled: true
+      monitor_method: tmux  # Astrocyte tmux scraping
+
+    opencode:
+      enabled: true
+      monitor_method: sse   # Native SSE adapter
+
+    gpt:
+      enabled: false        # OpenAI GPT support (future)
+      monitor_method: tmux
+
+# ============================================================================
+# Notification Configuration (Optional)
+# ============================================================================
+
+notifications:
+  # Slack notifications
+  slack:
+    enabled: false
+    webhook_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+    channel: "#agm-notifications"
+
+  # Email notifications
+  email:
+    enabled: false
+    smtp_host: smtp.gmail.com
+    smtp_port: 587
+    smtp_user: your-email@gmail.com
+    smtp_password: "${AGM_EMAIL_PASSWORD}"  # Use env var
+    from: agm@example.com
+    to:
+      - admin@example.com
+
+# ============================================================================
+# Health Checks
+# ============================================================================
+
+health:
+  # Enable health check HTTP endpoint
+  enabled: true
+
+  # Health check listen address
+  listen: "127.0.0.1:8090"
+
+  # Endpoints:
+  # - GET /health - Overall health (200 if all adapters healthy)
+  # - GET /health/adapters - Individual adapter status
+  # - GET /metrics - Prometheus-style metrics (if enabled)
+
+# ============================================================================
+# Metrics (Optional - Prometheus Integration)
+# ============================================================================
+
+metrics:
+  # Enable Prometheus metrics export
+  enabled: false
+
+  # Metrics listen address
+  listen: "127.0.0.1:9090"
+
+  # Metrics to export:
+  # - agm_sessions_total (gauge): Total active sessions
+  # - agm_events_received_total (counter): SSE events received
+  # - agm_state_changes_total (counter): State transitions
+  # - agm_adapter_health (gauge): Adapter health (1=healthy, 0=unhealthy)
+
+# ============================================================================
+# Daemon Configuration
+# ============================================================================
+
+daemon:
+  # PID file location
+  pid_file: ~/.agm/daemon.pid
+
+  # Daemon log file (separate from application logs)
+  log_file: ~/.agm/logs/daemon.log
+
+  # Graceful shutdown timeout
+  shutdown_timeout: 10s
+
+# ============================================================================
+# Advanced Configuration
+# ============================================================================
+
+advanced:
+  # Enable debug mode (verbose logging, extra checks)
+  debug: false
+
+  # Enable experimental features
+  experimental:
+    enabled: false
+    features:
+      - circuit_breaker    # Circuit breaker for SSE adapter
+      - structured_logs    # JSON-formatted structured logging
+      - metrics_export     # Export metrics to external systems
+
+# ============================================================================
+# Example Configurations for Different Scenarios
+# ============================================================================
+
+# Scenario 1: Claude-only (no OpenCode)
+# --------------------------------------
+# adapters:
+#   opencode:
+#     enabled: false  # Disable OpenCode adapter
+#
+# Result: Behavior identical to AGM v3 (tmux-only monitoring)
+
+# Scenario 2: OpenCode-only (no Claude/Gemini)
+# --------------------------------------------
+# adapters:
+#   opencode:
+#     enabled: true
+#     fallback_tmux: false  # No fallback needed
+#
+# multi_agent:
+#   default_agent: opencode
+#
+# Note: Astrocyte can be disabled in this setup
+
+# Scenario 3: Mixed environment (Claude + OpenCode)
+# -------------------------------------------------
+# adapters:
+#   opencode:
+#     enabled: true
+#     fallback_tmux: true  # Recommended for resilience
+#
+# multi_agent:
+#   default_agent: claude
+#   agents:
+#     claude:
+#       enabled: true
+#     opencode:
+#       enabled: true
+#
+# Result: Optimal hybrid setup (SSE for OpenCode, tmux for Claude)
+
+# Scenario 4: Development/Testing
+# --------------------------------
+# logging:
+#   level: debug  # Verbose logging
+#
+# adapters:
+#   opencode:
+#     reconnect:
+#       initial_delay: 1s  # Faster reconnects for testing
+#
+# advanced:
+#   debug: true  # Extra validation and checks
+#
+# Result: Enhanced debugging output for development
+
+# ============================================================================
+# Notes
+# ============================================================================
+
+# 1. Environment Variables:
+#    - AGM_EMAIL_PASSWORD: SMTP password for email notifications
+#    - AGM_SLACK_WEBHOOK: Slack webhook URL
+#    - Any config value can use ${VAR_NAME} syntax
+
+# 2. Minimal Configuration:
+#    A minimal config only needs:
+#    adapters:
+#      opencode:
+#        enabled: true
+#        server_url: "http://localhost:4096"
+#
+#    All other settings use sensible defaults.
+
+# 3. Migration from v3:
+#    - v3 config files work without changes (no 'adapters' section)
+#    - Adding 'adapters' section is opt-in
+#    - See docs/MULTI-AGENT-MIGRATION-GUIDE.md for details
+
+# 4. Validation:
+#    Test your configuration before deploying:
+#    $ agm config validate
+#    $ agm daemon restart --dry-run
+
+# 5. Troubleshooting:
+#    - Check logs: journalctl --user -u agm-daemon -f
+#    - Verify adapter: agm status
+#    - Test connectivity: curl http://localhost:4096/health
+#    - See docs/OPENCODE-INTEGRATION.md for common issues
+
+# ============================================================================
+# End of Configuration
+# ============================================================================

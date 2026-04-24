@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      launchd template for agm-bus. Installs to
+      ~/Library/LaunchAgents/com.vbonnet.agm-bus.plist and runs as the
+      current user (no root). The plist is templated: install-launchd.sh
+      substitutes the user home for $HOME_DIR before loading.
+
+      Scope: user-only. RunAtLoad + KeepAlive means the broker starts on
+      login and restarts if it crashes. Stdout/stderr land in
+      ~/.agm/logs/agm-bus.log so ops can grep one place.
+    -->
+    <key>Label</key>
+    <string>com.vbonnet.agm-bus</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>$HOME_DIR/go/bin/agm-bus</string>
+        <string>serve</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart the broker if it exits for any reason; throttle to avoid a
+         crash-loop storm if something is persistently broken. -->
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Low priority; the broker is infrastructure, not latency-critical. -->
+    <key>Nice</key>
+    <integer>5</integer>
+
+    <!-- Logging -->
+    <key>StandardOutPath</key>
+    <string>$HOME_DIR/.agm/logs/agm-bus.log</string>
+    <key>StandardErrorPath</key>
+    <string>$HOME_DIR/.agm/logs/agm-bus.log</string>
+
+    <!-- Environment: inherit minimum PATH; users who want different values
+         (verbose logging, custom socket) should edit the installed plist
+         directly under ~/Library/LaunchAgents/. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>$HOME_DIR</string>
+        <key>PATH</key>
+        <string>$HOME_DIR/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- Working dir: user's home. launchd runs in / otherwise. -->
+    <key>WorkingDirectory</key>
+    <string>$HOME_DIR</string>
+</dict>
+</plist>

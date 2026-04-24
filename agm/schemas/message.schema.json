@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agm.dev/schemas/message.v1.json",
+  "title": "AGM Message",
+  "description": "AGM message structure (user/assistant/system)",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique message identifier (UUID)",
+      "format": "uuid"
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Associated session ID",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "role": {
+      "type": "string",
+      "enum": ["user", "assistant", "system"],
+      "description": "Message role in conversation"
+    },
+    "content": {
+      "type": "string",
+      "description": "Message content (text, markdown, etc.)",
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "integer",
+      "description": "Unix timestamp in milliseconds",
+      "minimum": 0
+    },
+    "sequence_number": {
+      "type": "integer",
+      "description": "Message order within session (0-indexed)",
+      "minimum": 0
+    },
+    "input_tokens": {
+      "type": ["integer", "null"],
+      "description": "Input token count (for assistant messages)",
+      "minimum": 0
+    },
+    "output_tokens": {
+      "type": ["integer", "null"],
+      "description": "Output token count (for assistant messages)",
+      "minimum": 0
+    },
+    "cache_creation_tokens": {
+      "type": ["integer", "null"],
+      "description": "Tokens used to create cache (Claude Code cache tiers)",
+      "minimum": 0
+    },
+    "cache_read_tokens": {
+      "type": ["integer", "null"],
+      "description": "Tokens read from cache (Claude Code cache tiers)",
+      "minimum": 0
+    },
+    "metadata": {
+      "type": ["object", "null"],
+      "description": "Additional message metadata (tool_calls, thinking, attachments, etc.)",
+      "additionalProperties": true
+    }
+  },
+  "required": ["id", "session_id", "role", "content", "timestamp", "sequence_number"],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "id": "msg-456",
+      "session_id": "session-123",
+      "role": "user",
+      "content": "Create AGM component manifest",
+      "timestamp": 1708336800000,
+      "sequence_number": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_creation_tokens": null,
+      "cache_read_tokens": null,
+      "metadata": {
+        "source": "cli"
+      }
+    },
+    {
+      "id": "msg-457",
+      "session_id": "session-123",
+      "role": "assistant",
+      "content": "I'll create the AGM component manifest...",
+      "timestamp": 1708336802000,
+      "sequence_number": 1,
+      "input_tokens": 1500,
+      "output_tokens": 500,
+      "cache_creation_tokens": 100,
+      "cache_read_tokens": 1400,
+      "metadata": {
+        "thinking": "Planning the manifest structure...",
+        "tool_calls": ["Read", "Write"]
+      }
+    }
+  ]
+}

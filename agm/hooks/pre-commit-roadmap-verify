@@ -1,0 +1,31 @@
+#!/bin/bash
+# Git pre-commit hook: Verify ROADMAP.md consistency with task manager
+# Blocks commits if ROADMAP.md status mismatches with task manager state
+
+set -e
+
+# Check if ROADMAP.md is in staged files
+if ! git diff --cached --name-only | grep -q "^ROADMAP.md$"; then
+    # ROADMAP.md not being committed, skip verification
+    exit 0
+fi
+
+# Find csm-verify-roadmap binary
+CSM_VERIFY=$(which agm-verify-roadmap 2>/dev/null || echo "")
+
+if [ -z "$CSM_VERIFY" ]; then
+    echo "⚠️  Warning: agm-verify-roadmap not found in PATH" >&2
+    echo "   Install: go install github.com/vbonnet/dear-agent/claude-session-manager/cmd/agm-verify-roadmap@latest" >&2
+    echo "   Skipping ROADMAP verification..." >&2
+    exit 0
+fi
+
+# Get repository root
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+# Run verification
+"$CSM_VERIFY" "$REPO_ROOT/ROADMAP.md" "$REPO_ROOT"
+EXIT_CODE=$?
+
+# Exit with verification result
+exit $EXIT_CODE

@@ -1,0 +1,83 @@
+{
+  "SessionsDir": "/tmp/test-sessions",
+  "LogLevel": "info",
+  "LogFile": "",
+  "Workspace": "acme",
+  "WorkspaceConfigPath": "/tmp/test-agm/acme-workspace.yaml",
+  "Storage": {
+    "Mode": "dotfile",
+    "Workspace": "",
+    "RelativePath": ".agm",
+    "Dolt": {
+      "StartScript": ""
+    }
+  },
+  "Timeout": {
+    "TmuxCommands": 5000000000,
+    "Enabled": true
+  },
+  "Lock": {
+    "Enabled": true,
+    "Path": "/tmp/agm-1000/agm.lock"
+  },
+  "HealthCheck": {
+    "Enabled": true,
+    "CacheDuration": 5000000000,
+    "ProbeTimeout": 2000000000
+  },
+  "Adapters": {
+    "OpenCode": {
+      "Enabled": false,
+      "ServerURL": "http://localhost:4096",
+      "Reconnect": {
+        "InitialDelay": 1000000000,
+        "MaxDelay": 30000000000,
+        "Multiplier": 2
+      },
+      "FallbackTmux": true
+    },
+    "ClaudeHooks": {
+      "Enabled": false,
+      "ListenAddr": "127.0.0.1:14321"
+    },
+    "GeminiHooks": {
+      "Enabled": false,
+      "SocketPath": "/tmp/agm-gemini-hook.sock"
+    }
+  },
+  "AutoResume": {
+    "Enabled": false,
+    "IncludeArchived": false,
+    "WorkspaceFilter": "",
+    "DelaySeconds": 5
+  },
+  "StatusLine": {
+    "Enabled": true,
+    "DefaultFormat": "",
+    "RefreshInterval": 10,
+    "ShowContextUsage": true,
+    "ShowGitStatus": true,
+    "HarnessIcons": {
+      "claude-code": "🤖",
+      "codex-cli": "🧠",
+      "gemini-cli": "✨",
+      "opencode-cli": "💻"
+    },
+    "CustomFormats": {
+      "compact": "{{.AgentIcon}} #[fg={{.StateColor}}]●#[default] {{if ge .ContextPercent 0.0}}{{printf \"%.0f\" .ContextPercent}}%{{else}}--{{end}} | {{.Branch}}",
+      "full": "{{.AgentIcon}} #[fg={{.StateColor}}]{{.State}}#[default] | CTX:#[fg={{.ContextColor}}]{{if ge .ContextPercent 0.0}}{{printf \"%.0f\" .ContextPercent}}%{{else}}--{{end}}#[default] | {{.Branch}}{{if gt .Uncommitted 0}}(+{{.Uncommitted}}){{end}} | {{.SessionName}}",
+      "minimal": "{{.AgentIcon}} {{.State}} | {{if ge .ContextPercent 0.0}}{{printf \"%.0f\" .ContextPercent}}%{{else}}--{{end}}",
+      "multi-agent": "{{.AgentIcon}}{{.AgentType}} | #[fg={{.StateColor}}]{{.State}}#[default] | {{if ge .ContextPercent 0.0}}{{printf \"%.0f\" .ContextPercent}}%{{else}}--{{end}}"
+    }
+  },
+  "Sandbox": {
+    "Enabled": true,
+    "Provider": "auto",
+    "Repos": [],
+    "Secrets": {},
+    "Onboarding": {
+      "Enabled": true,
+      "TemplatePath": ""
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "youtube",
+  "version": "0.1.0",
+  "description": "Extract transcripts and metadata from YouTube videos using yt-dlp",
+  "commands": ["./commands/"],
+  "dependencies": ["yt-dlp"]
+}

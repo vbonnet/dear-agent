@@ -1,0 +1,18 @@
+schema_version: "2.0"
+session_id: mock-stale-001
+name: stale-session
+created_at: 2023-12-01T10:00:00Z
+updated_at: 2023-12-15T12:00:00Z
+lifecycle: ""
+workspace: oss
+context:
+  project: ./old-project
+  purpose: Session inactive for >30 days
+  tags:
+    - testing
+    - stale
+  notes: Last activity over 2 months ago
+claude:
+  uuid: cccccccc-dddd-eeee-ffff-000000000000
+tmux:
+  session_name: agm-oss-stale-session

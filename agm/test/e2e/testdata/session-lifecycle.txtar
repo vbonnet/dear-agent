@@ -1,0 +1,32 @@
+# Test: Complete session lifecycle
+# This test verifies: create -> list -> status -> archive
+# Note: This test is currently a placeholder for the E2E test structure
+
+# Skip for now - requires full tmux and Claude integration
+[!can-create-tmux-session] skip 'cannot create tmux sessions in this environment'
+[!exec:claude] skip 'claude not available'
+
+# Create a test session
+# Note: In real implementation, this would use --detached to avoid hanging
+# exec csm new --detached test-session-lifecycle
+# stdout 'Session.*created'
+
+# List sessions - should show our new session
+# exec csm list
+# stdout 'test-session-lifecycle'
+
+# Check session status
+# exec csm status test-session-lifecycle
+# stdout 'active'
+
+# Archive the session
+# exec csm archive test-session-lifecycle --force
+# stdout 'Archived'
+
+# List again - session should be gone
+# exec csm list
+# ! stdout 'test-session-lifecycle'
+
+# List with --all - should show archived session
+# exec csm list --all
+# stdout 'test-session-lifecycle'

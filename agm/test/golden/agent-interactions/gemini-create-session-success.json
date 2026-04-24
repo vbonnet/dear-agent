@@ -1,0 +1,27 @@
+{
+  "description": "Gemini agent - successful session creation",
+  "agent": "gemini",
+  "operation": "CreateSession",
+  "request": {
+    "context": {
+      "Name": "gemini-test-session",
+      "WorkingDirectory": "~/gemini-project",
+      "Project": "ai-research",
+      "AuthorizedDirs": [
+        "~/gemini-project"
+      ],
+      "Environment": {},
+      "WorkflowName": "deep-research"
+    }
+  },
+  "response": {
+    "success": true,
+    "sessionID": "gemini-session-20260220-100000",
+    "error": null
+  },
+  "metadata": {
+    "timestamp": "2026-02-20T10:00:00Z",
+    "model": "gemini-2.0-flash-thinking-exp",
+    "api_version": "v1beta"
+  }
+}
