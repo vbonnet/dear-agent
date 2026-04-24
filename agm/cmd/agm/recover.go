@@ -127,8 +127,6 @@ func runRecoverCommand(cmd *cobra.Command, args []string) error {
 	// Step 4: Attempt soft recovery
 	fmt.Printf("Attempting soft recovery for session '%s'...\n\n", sessionName)
 
-	success := false
-
 	// Try 1: ESC
 	fmt.Println("1. Sending ESC to interrupt...")
 	if err := sendKey(tmuxSessionName, "Escape"); err != nil {
@@ -137,7 +135,6 @@ func runRecoverCommand(cmd *cobra.Command, args []string) error {
 		fmt.Println("   Sent ESC, waiting 5 seconds...")
 		time.Sleep(5 * time.Second)
 		if checkRecovered(tmuxSessionName) {
-			success = true
 			fmt.Println("   ✓ Recovery successful with ESC")
 			renderRecoverySuccess(sessionName)
 			return nil
@@ -153,7 +150,6 @@ func runRecoverCommand(cmd *cobra.Command, args []string) error {
 		fmt.Println("   Sent Ctrl-C, waiting 5 seconds...")
 		time.Sleep(5 * time.Second)
 		if checkRecovered(tmuxSessionName) {
-			success = true
 			fmt.Println("   ✓ Recovery successful with Ctrl-C")
 			renderRecoverySuccess(sessionName)
 			return nil
@@ -173,7 +169,6 @@ func runRecoverCommand(cmd *cobra.Command, args []string) error {
 			fmt.Println("   Sent double Ctrl-C, waiting 5 seconds...")
 			time.Sleep(5 * time.Second)
 			if checkRecovered(tmuxSessionName) {
-				success = true
 				fmt.Println("   ✓ Recovery successful with double Ctrl-C")
 				renderRecoverySuccess(sessionName)
 				return nil
@@ -183,7 +178,7 @@ func runRecoverCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// All methods failed
-	if !success {
+	{
 		fmt.Println()
 		ui.PrintError(
 			fmt.Errorf("soft recovery failed"),

@@ -303,7 +303,6 @@ func (g *DualModeGateway) generateScoredReasoning(score int, b complexityBreakdo
 func (g *DualModeGateway) scoreToConfidence(score int) float64 {
 	// Scores near band boundaries (30, 65) have lower confidence
 	// Scores near band centers (15, 48, 83) have higher confidence
-	distFromBoundary := score // distance from nearest boundary
 	boundaries := []int{0, 30, 65, 100}
 
 	minDist := 100
@@ -316,7 +315,7 @@ func (g *DualModeGateway) scoreToConfidence(score int) float64 {
 			minDist = d
 		}
 	}
-	distFromBoundary = minDist
+	distFromBoundary := minDist
 
 	// Map distance to confidence: 0 distance = 0.5, 15+ distance = 0.95
 	confidence := 0.5 + float64(distFromBoundary)*0.03

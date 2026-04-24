@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 )
 
 // SynthesisInput holds the input for charter synthesis.
@@ -27,11 +26,6 @@ type CharterValidationResult struct {
 
 // GenerateSynthesisPrompt generates the synthesis prompt for creating a W0 charter.
 func GenerateSynthesisPrompt(input SynthesisInput) string {
-	date := input.Date
-	if date == "" {
-		date = time.Now().Format("2006-01-02")
-	}
-
 	return fmt.Sprintf(`You are helping create a W0 Project Charter for a wayfinder project.
 
 Context from conversation:
