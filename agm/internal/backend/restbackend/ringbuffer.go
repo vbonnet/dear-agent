@@ -2,6 +2,8 @@ package restbackend
 
 import "sync"
 
+const maxRingBufferSize = 10000
+
 // ringBuffer is a fixed-size circular buffer for storing output lines.
 type ringBuffer struct {
 	mu    sync.Mutex
@@ -12,6 +14,12 @@ type ringBuffer struct {
 }
 
 func newRingBuffer(size int) *ringBuffer {
+	if size < 1 {
+		size = 1
+	}
+	if size > maxRingBufferSize {
+		size = maxRingBufferSize
+	}
 	return &ringBuffer{
 		items: make([]string, size),
 		size:  size,
@@ -45,6 +53,10 @@ func (rb *ringBuffer) ReadAll() []string {
 
 // ReadLast returns the last n lines (or fewer if not enough stored).
 func (rb *ringBuffer) ReadLast(n int) []string {
+	if n <= 0 {
+		return nil
+	}
+
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 
