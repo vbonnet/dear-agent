@@ -15,7 +15,7 @@ type ringBuffer struct {
 const maxRingBufferSize = 10_000
 
 func newRingBuffer(size int) *ringBuffer {
-	if size <= 0 {
+	if size < 1 {
 		size = 1
 	}
 	if size > maxRingBufferSize {
@@ -54,6 +54,10 @@ func (rb *ringBuffer) ReadAll() []string {
 
 // ReadLast returns the last n lines (or fewer if not enough stored).
 func (rb *ringBuffer) ReadLast(n int) []string {
+	if n <= 0 {
+		return nil
+	}
+
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 
