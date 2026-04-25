@@ -2,7 +2,7 @@
 
 ## High-Level Overview
 
-AI Tools is a Go monorepo organized around four products that share common
+dear-agent is a Go monorepo organized around four products that share common
 infrastructure. AGM (Agent Gateway Manager) is the core product — it manages
 the lifecycle of AI coding agent sessions across multiple harnesses.
 
@@ -220,7 +220,7 @@ User → Completion verified (no pending work)
 ## Monorepo Structure
 
 ```
-ai-tools/
+dear-agent/
 ├── agm/                 # AGM: session management & orchestration
 │   ├── cmd/agm/         #   CLI entry point
 │   ├── internal/        #   Core logic (ops, agent, session, backend, ...)
