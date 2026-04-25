@@ -1,0 +1,104 @@
+# dear-agent
+
+> Software engineering infrastructure for AI agents.
+> Repository: https://github.com/vbonnet/dear-agent
+> License: Apache 2.0
+
+## Overview
+
+dear-agent is a meta-harness for AI coding agents. It provides the session
+lifecycle, sandbox isolation, persistent memory, and multi-agent orchestration
+that production-grade AI-assisted development requires.
+
+The core philosophy is DEAR: Define, Enforce, Audit, Resolve. Every rule is
+written down, enforced automatically, audited continuously, and when things
+break, we fix the infrastructure — not the agent.
+
+Supported AI CLIs: Claude Code, Gemini CLI, Codex CLI, OpenCode CLI — all
+behind a unified adapter interface.
+
+## Products
+
+### AGM (Agent Gateway Manager)
+
+Session lifecycle management for AI coding agents. Create, resume, archive,
+and monitor sessions with persistent metadata and state tracking.
+
+**Location**: `agm/cmd/agm`
+
+```bash
+go install github.com/vbonnet/dear-agent/agm/cmd/agm@latest
+
+agm session new my-feature     # Create isolated session
+agm session list               # List active sessions
+agm session send my-feature "run the tests"
+agm session archive my-feature # Clean up
+```
+
+Key capabilities:
+- Sandbox isolation (OverlayFS on Linux, APFS on macOS)
+- Multi-agent orchestration with async message delivery
+- State detection chain: hooks → tmux → manual
+- Harness-agnostic adapter pattern (one interface per AI CLI)
+- Three API surfaces (CLI, MCP server, Skills) sharing one operations layer
+
+### Engram (Persistent Memory)
+
+Cue-based memory retrieval for AI sessions. Memories are stored with
+contextual cues and retrieved by relevance, giving agents persistent
+context across conversations.
+
+**Location**: `engram/cmd/engram`
+
+```bash
+go install github.com/vbonnet/dear-agent/engram/cmd/engram@latest
+```
+
+### Wayfinder (Workflow Engine)
+
+Structured SDLC workflow with nine phases and validation gates. Guides
+work from scoping through release with defined entry/exit criteria.
+
+**Location**: `wayfinder/`
+
+## Architecture
+
+```
+CLI / MCP Server / Skills
+        │
+  Shared Operations Layer (internal/ops/)
+        │
+  Harness Adapter Registry (internal/agent/)
+  ┌─────────┬─────────┬─────────┬───────────┐
+  │ Claude  │ Gemini  │ Codex   │ OpenCode  │
+  └─────────┴─────────┴─────────┴───────────┘
+        │
+  Backend Abstraction (tmux / temporal)
+        │
+  Storage & Coordination (DB, Manifests, Queue, Sandbox)
+```
+
+## Key Packages
+
+| Package | Import Path | Purpose |
+|---------|-------------|---------|
+| enforcement | `pkg/enforcement` | Anti-pattern detection with compiled regex |
+| eventbus | `pkg/eventbus` | Four-channel event bus with delivery guarantees |
+| security | `pkg/security` | Path validation and sandbox enforcement |
+| workflow | `pkg/workflow` | YAML DAG engine with retry and crash recovery |
+| costtrack | `pkg/costtrack` | Token pricing across LLM providers |
+| llm | `pkg/llm` | Unified LLM provider routing interface |
+| monitoring | `pkg/monitoring` | Sub-agent monitoring and validation scoring |
+| validation | `pkg/validation` | Frontmatter and structure validators |
+| promptcache | `pkg/promptcache` | Claude API cache control |
+| benchmark | `pkg/benchmark` | Statistical benchmarking (t-tests, effect sizes) |
+
+## Build
+
+```bash
+go build ./...
+go test ./...
+golangci-lint run ./...
+```
+
+Requires Go 1.25+, tmux, and Git.
