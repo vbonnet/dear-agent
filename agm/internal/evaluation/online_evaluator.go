@@ -119,7 +119,7 @@ func (oe *OnlineEvaluator) ProcessEvent(ctx context.Context, event SessionEvent)
 	sampled := shouldSample(sampleRate)
 
 	tracer := otel.Tracer("engram/evaluation")
-	_, span := tracer.Start(ctx, "evaluation.sample",
+	ctx, span := tracer.Start(ctx, "evaluation.sample",
 		trace.WithAttributes(
 			attribute.String("session.id", event.SessionID),
 			attribute.Float64("evaluation.sample_rate", sampleRate),

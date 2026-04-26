@@ -19,7 +19,11 @@ type LastSessionResult struct {
 }
 
 // LastSession returns the most recently active session by UpdatedAt timestamp.
-func LastSession(ctx *OpContext, _ *LastSessionRequest) (*LastSessionResult, error) {
+func LastSession(ctx *OpContext, req *LastSessionRequest) (*LastSessionResult, error) {
+	if req == nil {
+		req = &LastSessionRequest{}
+	}
+
 	// List all non-archived sessions
 	filter := &dolt.SessionFilter{
 		ExcludeArchived: true,

@@ -1,6 +1,6 @@
 [Unit]
 Description=AGM Daemon - Multi-Session Message Delivery
-Documentation=https://github.com/vbonnet/dear-agent/tree/main/agm
+Documentation=https://github.com/vbonnet/ai-tools/tree/main/agm
 Documentation=file:///home/%u/src/ws/oss/worktrees/ai-tools/coordination-phase1-message-infra/agm/cmd/agm-daemon/SPEC.md
 After=default.target
 

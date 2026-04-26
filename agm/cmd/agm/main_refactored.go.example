@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/vbonnet/dear-agent/agm/internal/app"
-	"github.com/vbonnet/dear-agent/agm/internal/backend"
-	"github.com/vbonnet/dear-agent/agm/internal/terminal"
+	"github.com/vbonnet/ai-tools/agm/internal/app"
+	"github.com/vbonnet/ai-tools/agm/internal/backend"
+	"github.com/vbonnet/ai-tools/agm/internal/terminal"
 )
 
 // Version is set during build via -ldflags

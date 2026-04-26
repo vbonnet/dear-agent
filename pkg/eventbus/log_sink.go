@@ -15,7 +15,6 @@ func NewLogSink(logger *slog.Logger) *LogSink {
 	return &LogSink{logger: logger}
 }
 
-// Name returns the sink identifier.
 func (s *LogSink) Name() string { return "log" }
 
 // HandleEvent logs the event using structured logging.

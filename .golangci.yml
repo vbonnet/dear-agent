@@ -11,9 +11,66 @@ run:
 linters:
   default: none
   enable:
+    # Essential — catches real bugs
+    - errcheck
     - govet
     - ineffassign
+    - staticcheck
+    - unused
+
+    # Security
+    - gosec
+
+    # Recommended — widely adopted, low false-positive rate
+    - bodyclose
+    - errorlint
     - misspell
+    # - modernize  # TODO: not available in golangci-lint v2.5.0
+    - nilerr
+    - noctx
+    - revive
+    - unconvert
+    - unparam
+
+    # Complexity
+    - gocyclo
+
+    # Best practices
+    - gocritic     # subtle style and performance issues
+    - exhaustive   # switch statement exhaustiveness on enums
+    - usetesting   # use testing package helpers (t.Setenv, etc.)
+    - usestdlibvars # use stdlib constants (http.StatusOK vs 200)
+
+  settings:
+    gocyclo:
+      min-complexity: 15
+
+    errcheck:
+      check-blank: false  # Allow _ = for intentional cleanup
+
+    staticcheck:
+      checks: ["all", "-SA4010"]  # Disable unused append check
+
+    revive:
+      severity: warning
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: indent-error-flow
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
 
   exclusions:
     presets:
@@ -22,4 +79,37 @@ linters:
     rules:
       - path: _test\.go
         linters:
-          - ineffassign
+          - errcheck
+          - gosec
+          - unparam
+          - gocyclo
+          - noctx
+          - nilerr
+          - revive
+          - exhaustive
+      - text: "Error return value.*is not checked"
+        linters:
+          - errcheck
+      - text: "os/exec.Command must not be called"
+        linters:
+          - noctx
+      - text: "G204|G301|G104"
+        linters:
+          - gosec
+      - text: "if-return|exported.*stutters|package-comments"
+        linters:
+          - revive
+      - text: "unnecessary conversion"
+        linters:
+          - unconvert
+    paths:
+      - third_party
+      - vendor
+      - mcp-wizard/node_modules
+
+output:
+  formats:
+    text:
+      print-issued-lines: true
+      print-linter-name: true
+  sort-results: true
