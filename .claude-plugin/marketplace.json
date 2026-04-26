@@ -7,13 +7,13 @@
   "plugins": [
     {
       "name": "agm",
-      "source": "./agm-plugin",
+      "source": "./agm/agm-plugin",
       "description": "AGM (Agent Gateway Manager) commands for managing Claude sessions with tmux",
       "version": "0.4.1"
     },
     {
       "name": "youtube",
-      "source": "./youtube-plugin",
+      "source": "./agm/youtube-plugin",
       "description": "Extract transcripts and metadata from YouTube videos",
       "version": "0.1.0"
     }
