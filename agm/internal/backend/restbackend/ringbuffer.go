@@ -11,16 +11,7 @@ type ringBuffer struct {
 	count int
 }
 
-// maxRingBufferSize is the upper bound for ring buffer allocation to prevent memory exhaustion.
-const maxRingBufferSize = 10_000
-
 func newRingBuffer(size int) *ringBuffer {
-	if size < 1 {
-		size = 1
-	}
-	if size > maxRingBufferSize {
-		size = maxRingBufferSize
-	}
 	return &ringBuffer{
 		items: make([]string, size),
 		size:  size,
@@ -54,16 +45,9 @@ func (rb *ringBuffer) ReadAll() []string {
 
 // ReadLast returns the last n lines (or fewer if not enough stored).
 func (rb *ringBuffer) ReadLast(n int) []string {
-	if n <= 0 {
-		return nil
-	}
-
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 
-	if n <= 0 {
-		return nil
-	}
 	if n > rb.count {
 		n = rb.count
 	}

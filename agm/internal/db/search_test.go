@@ -333,10 +333,6 @@ func TestSearchSessions_Pagination(t *testing.T) {
 
 // TestSearchSessions_Performance tests performance with large dataset
 func TestSearchSessions_Performance(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires performance test")
-	}
-
 	db := setupSearchTestDB(t)
 	defer db.Close()
 

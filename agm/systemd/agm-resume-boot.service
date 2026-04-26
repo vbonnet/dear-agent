@@ -1,6 +1,6 @@
 [Unit]
 Description=AGM Auto-Resume Sessions on Boot
-Documentation=https://github.com/vbonnet/dear-agent/tree/main/agm
+Documentation=https://github.com/vbonnet/ai-tools/tree/main/agm
 After=default.target network.target agm-daemon.service
 Wants=agm-daemon.service
 

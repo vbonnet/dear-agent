@@ -29,7 +29,6 @@ func NewJSONLSink(dir string) (*JSONLSink, error) {
 	}, nil
 }
 
-// Name returns the sink identifier.
 func (s *JSONLSink) Name() string { return "jsonl" }
 
 // HandleEvent writes the event as a JSON line to the appropriate channel file.

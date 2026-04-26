@@ -14,7 +14,7 @@
 
 [Unit]
 Description=agm-bus message broker
-Documentation=https://github.com/vbonnet/dear-agent
+Documentation=https://github.com/vbonnet/ai-tools
 # Start after the user's D-Bus session and basic network target.
 After=default.target
 

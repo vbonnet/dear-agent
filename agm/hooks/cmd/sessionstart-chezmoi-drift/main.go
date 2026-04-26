@@ -44,7 +44,7 @@ func check() int {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	_ = cmd.Run()
+	err = cmd.Run()
 
 	// chezmoi diff exits 0 if no diff, non-zero if diff exists
 	output := strings.TrimSpace(stdout.String())

@@ -72,12 +72,10 @@ type PathTraversalError struct {
 	AllowedBase string
 }
 
-// Error returns a human-readable description of the path traversal violation.
 func (e *PathTraversalError) Error() string {
 	return fmt.Sprintf("path %s escapes allowed directory %s", e.Path, e.AllowedBase)
 }
 
-// Unwrap returns the underlying ErrPathTraversal sentinel.
 func (e *PathTraversalError) Unwrap() error {
 	return ErrPathTraversal
 }
@@ -87,12 +85,10 @@ type SymlinkError struct {
 	Path string
 }
 
-// Error returns a human-readable description of the symlink violation.
 func (e *SymlinkError) Error() string {
 	return fmt.Sprintf("symlinks not allowed: %s", e.Path)
 }
 
-// Unwrap returns the underlying ErrSymlink sentinel.
 func (e *SymlinkError) Unwrap() error {
 	return ErrSymlink
 }
@@ -103,12 +99,10 @@ type FileSizeError struct {
 	MaxSize int64
 }
 
-// Error returns a human-readable description of the file size violation.
 func (e *FileSizeError) Error() string {
 	return fmt.Sprintf("file too large: %d bytes (max %d)", e.Size, e.MaxSize)
 }
 
-// Unwrap returns the underlying ErrFileSize sentinel.
 func (e *FileSizeError) Unwrap() error {
 	return ErrFileSize
 }
@@ -119,7 +113,6 @@ type InvalidExtensionError struct {
 	Allowed   map[string]bool
 }
 
-// Error returns a human-readable description of the invalid extension.
 func (e *InvalidExtensionError) Error() string {
 	allowed := make([]string, 0, len(e.Allowed))
 	for ext := range e.Allowed {
@@ -128,7 +121,6 @@ func (e *InvalidExtensionError) Error() string {
 	return fmt.Sprintf("invalid extension: %s. Allowed: %s", e.Extension, strings.Join(allowed, ", "))
 }
 
-// Unwrap returns the underlying ErrInvalidExtension sentinel.
 func (e *InvalidExtensionError) Unwrap() error {
 	return ErrInvalidExtension
 }

@@ -15,7 +15,7 @@ CSM_VERIFY=$(which agm-verify-roadmap 2>/dev/null || echo "")
 
 if [ -z "$CSM_VERIFY" ]; then
     echo "⚠️  Warning: agm-verify-roadmap not found in PATH" >&2
-    echo "   Install: go install github.com/vbonnet/dear-agent/claude-session-manager/cmd/agm-verify-roadmap@latest" >&2
+    echo "   Install: go install github.com/vbonnet/ai-tools/claude-session-manager/cmd/agm-verify-roadmap@latest" >&2
     echo "   Skipping ROADMAP verification..." >&2
     exit 0
 fi
