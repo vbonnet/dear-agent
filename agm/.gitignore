@@ -29,9 +29,6 @@ cmd/csm/
 # Claude Code project files
 .claude/
 
-# Incomplete features (WIP)
-/internal/telemetry/
-
 # Recovery scripts from 2026-03-19 corruption incident (archived in scripts/)
 apply-recovery.go
 recover-corrupted-sessions.go
