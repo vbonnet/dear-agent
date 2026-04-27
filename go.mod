@@ -32,7 +32,7 @@ require (
 	github.com/olekukonko/tablewriter v1.1.4
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
-	github.com/pact-foundation/pact-go/v2 v2.4.2
+	github.com/pact-foundation/pact-go/v2 v2.4.3
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/rogpeppe/go-internal v1.14.1
@@ -107,7 +107,7 @@ require (
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
 	github.com/hashicorp/go-memdb v1.3.4 // indirect
-	github.com/hashicorp/go-version v1.7.0 // indirect
+	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/hashicorp/logutils v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
