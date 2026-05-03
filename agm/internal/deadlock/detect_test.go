@@ -1,6 +1,7 @@
 package deadlock
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -219,7 +220,12 @@ func TestCountConnections_NoProcess(t *testing.T) {
 }
 
 func TestFindClaudeProcess_NoChildren(t *testing.T) {
-	// PID 1 (init/systemd) shouldn't have a Claude child process
+	// findClaudeProcess shells out to `ps --no-headers`, a GNU/Linux flag.
+	// macOS and BSD ps reject it, so this test only exercises the parsing
+	// path on Linux.
+	if runtime.GOOS != "linux" {
+		t.Skip("findClaudeProcess uses GNU ps --no-headers; Linux-only")
+	}
 	_, err := findClaudeProcess(999999999)
 	if err == nil {
 		t.Error("findClaudeProcess with fake PID should return error")

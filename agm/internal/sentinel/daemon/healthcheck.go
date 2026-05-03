@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -89,16 +90,16 @@ func CheckHealth(heartbeatPath string, maxAge time.Duration) (*Heartbeat, error)
 		return &hb, fmt.Errorf("heartbeat stale: last beat %s ago (threshold %s)", age.Round(time.Second), maxAge)
 	}
 
-	// Check if the PID is still alive
+	// Check if the PID is still alive. Use signal-0 (portable) instead of
+	// /proc/{pid}, which doesn't exist on macOS and made every daemon look
+	// dead on developer macs.
 	if hb.PID > 0 {
 		proc, err := os.FindProcess(hb.PID)
 		if err != nil {
 			return &hb, fmt.Errorf("daemon process %d not found", hb.PID)
 		}
-		// On Unix, FindProcess always succeeds. Check /proc to verify.
-		if _, err := os.Stat(fmt.Sprintf("/proc/%d", hb.PID)); err != nil {
-			_ = proc // suppress unused
-			return &hb, fmt.Errorf("daemon process %d is not running", hb.PID)
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			return &hb, fmt.Errorf("daemon process %d is not running: %w", hb.PID, err)
 		}
 	}
 

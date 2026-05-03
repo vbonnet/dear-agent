@@ -167,8 +167,10 @@ func ListAllSessionBackups() ([]BackupInfo, error) {
 			timestampStr = parts[len(parts)-2] + "-" + parts[len(parts)-1]
 		}
 
-		// Parse timestamp
-		timestamp, err := time.Parse("20060102-150405", timestampStr)
+		// Parse timestamp. Backups are written via time.Now().Format(...)
+		// which produces a local-time string; parsing must round-trip in the
+		// same zone or "time since backup" is skewed by the local offset.
+		timestamp, err := time.ParseInLocation("20060102-150405", timestampStr, time.Local)
 		if err != nil {
 			continue // Skip if timestamp can't be parsed
 		}
