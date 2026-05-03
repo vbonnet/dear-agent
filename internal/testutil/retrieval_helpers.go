@@ -53,15 +53,7 @@ This is a test engram used for unit testing the retrieval package.
 func SetupTestEngrams(t *testing.T) string {
 	t.Helper()
 
-	tmpdir, err := os.MkdirTemp("", "retrieval-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp directory: %v", err)
-	}
-
-	// Auto-cleanup on test completion
-	t.Cleanup(func() {
-		os.RemoveAll(tmpdir)
-	})
+	tmpdir := t.TempDir()
 
 	// Create diverse test engrams
 	CreateTestEngram(t, tmpdir, "pattern1.ai.md", "pattern", []string{"go", "testing"})

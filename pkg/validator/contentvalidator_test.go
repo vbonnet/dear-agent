@@ -114,12 +114,7 @@ tokens: 0
 
 // setupTestDir creates a temporary directory with test files.
 func setupTestDir(t *testing.T) string {
-	tmpDir, err := os.MkdirTemp("", "validator-test-*")
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		os.RemoveAll(tmpDir)
-	})
+	tmpDir := t.TempDir()
 
 	return tmpDir
 }

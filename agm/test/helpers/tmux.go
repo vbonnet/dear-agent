@@ -38,7 +38,7 @@ func SetupTestServer(t *testing.T) *TmuxServer {
 
 	// Use /tmp for socket path to avoid macOS 104-char Unix socket limit.
 	// Go's t.TempDir() paths can exceed this limit with long test names.
-	socketDir, err := os.MkdirTemp("/tmp", "agm-test-")
+	socketDir, err := os.MkdirTemp("/tmp", "agm-test-") //nolint:usetesting // see comment above
 	if err != nil {
 		t.Fatalf("Failed to create socket dir: %v", err)
 	}

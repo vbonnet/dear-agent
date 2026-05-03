@@ -16,16 +16,19 @@ import (
 //	references/markdown-formatting.ai.md (tags: markdown, formatting; no agent)
 //	strategies/retrieval.ai.md (tags: ai, retrieval, strategies; agent: claude-code)
 func CreateTestEngramDir(t *testing.T) string {
-	tmpdir, err := os.MkdirTemp("", "ecphory-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(tmpdir) })
+	t.Helper()
+	tmpdir := t.TempDir()
 
 	// Create directory structure
-	os.MkdirAll(filepath.Join(tmpdir, "patterns", "go"), 0o700)
-	os.MkdirAll(filepath.Join(tmpdir, "references"), 0o700)
-	os.MkdirAll(filepath.Join(tmpdir, "strategies"), 0o700)
+	if err := os.MkdirAll(filepath.Join(tmpdir, "patterns", "go"), 0o700); err != nil {
+		t.Fatalf("mkdir patterns/go: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpdir, "references"), 0o700); err != nil {
+		t.Fatalf("mkdir references: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpdir, "strategies"), 0o700); err != nil {
+		t.Fatalf("mkdir strategies: %v", err)
+	}
 
 	// Write sample engrams
 	writeTestEngram(t, filepath.Join(tmpdir, "patterns/go/error-handling.ai.md"),
