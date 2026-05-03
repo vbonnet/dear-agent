@@ -96,8 +96,8 @@ roles:
   research:
     description: "long-context analysis"
     primary:
-      model: claude-opus-4-7
-      effort: max
+      model: gemini-3.1-pro
+      effort: high
       max_context: 1000000
 ```
 
@@ -120,6 +120,30 @@ nodes:
 Migrating to a new model is a one-line edit to `roles.yaml`. The
 `workflow-lint --check-deprecated-models` command flags any node still
 hardcoding a `model:`.
+
+#### Multi-provider load-spreading
+
+The shipped `config/roles.yaml` deliberately puts each role's **primary**
+tier on a different provider so a typical workflow round-robins across
+Anthropic, OpenAI, and Google. The benefits:
+
+- A single-vendor outage degrades one role at a time, not the whole engine.
+- Per-vendor rate limits are spread across the workload.
+- Each role's secondary/tertiary tiers spill onto the other two providers,
+  so any single role survives the loss of any single vendor.
+
+| Role           | Primary (vendor)             | Secondary       | Tertiary        | Why this primary                        |
+|----------------|------------------------------|-----------------|-----------------|------------------------------------------|
+| `research`     | `gemini-3.1-pro` (Google)    | `claude-opus-4-7` | `gpt-5.5-pro` | 1M-context window, strong synthesis      |
+| `implementer`  | `claude-opus-4-7` (Anthropic)| `gpt-5.5-pro`   | `gemini-3.1-pro`| Highest accepted-patch rate in evals     |
+| `reviewer`     | `gpt-5.5-pro` (OpenAI)       | `claude-opus-4-7` | `gemini-2.5-pro` | Off-vendor critic — different blind spots |
+| `orchestrator` | `claude-sonnet-4-6` (Anthropic)| `gemini-2.5-flash` | `gpt-5.4-mini` | Cheap/fast for high-volume routing       |
+
+The `Resolver` walks tiers in order and skips any tier whose model fails the
+node's capability or budget filters, or that the optional
+`CapacityChecker` reports as rate-limited. To pin a role to a specific
+model for one run, pass `Resolver.Overrides[role] = "<model-id>"` — useful
+for A/B comparisons and incident workarounds.
 
 ### 6. Add a HITL gate (≈1 min)
 
