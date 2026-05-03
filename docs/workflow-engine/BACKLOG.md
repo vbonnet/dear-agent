@@ -91,7 +91,7 @@ in use.
 
 **Goal:** the engine becomes substrate-grade — bounded permissions,
 human-in-the-loop gates, declared outputs with durability tiers.
-**Phase status:** `done`
+**Phase status:** `done (#40)`
 **Estimated:** 4 weeks
 **Depends on:** Phase 1
 
@@ -101,12 +101,12 @@ human-in-the-loop gates, declared outputs with durability tiers.
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 2.1 | DEAR hook surface: `OnDefine`, `OnEnforce`, `OnAudit`, `OnResolve` | `pkg/workflow/hooks.go`, `hooks_test.go` | Each hook called with documented payload; hook errors surfaced in audit_events | 1.* | S | `done` |
-| 2.2 | HITL: `awaiting_hitl` state, approver_role check, timeout policy | `pkg/workflow/hitl.go`, `runner_hitl.go` | Block → approve via CLI → resume; timeout fires `on_timeout`; rejection transitions node to `failed` | 1.1 | M | `done` |
-| 2.3 | `dear-agent workflow approve / reject` CLI | `cmd/workflow-approve/main.go` | Round-trip with HITL backend; `--as <role>` enforces approver_role match; `--reason` audit-logged | 2.2 | S | `done` |
-| 2.4 | Audit subscribers: stdout, JSONL file, Engram, OpenTelemetry | `pkg/workflow/audit_stdout.go`, `audit_jsonl.go`, `audit_engram.go`, `audit_otel.go` | Each sink has tests; sinks composable; failure of one sink doesn't break the run | 2.1 | M | `done` |
-| 2.5 | MCP server with 5 workflow tools | `cmd/dear-agent-mcp/workflow.go` | Tools: `workflow_run / status / approve / reject / cancel`. All callable from a vanilla MCP client | 2.3 | M | `done` |
-| 2.6 | Discord HITL backend (extends existing AGM bot) | `pkg/hitl/discord/backend.go` | Bot reads `audit_events` for new HITL rows; renders summary; reply-to-approve writes to `approvals` table | 2.4 | M | `done` |
+| 2.1 | DEAR hook surface: `OnDefine`, `OnEnforce`, `OnAudit`, `OnResolve` | `pkg/workflow/hooks.go`, `hooks_test.go` | Each hook called with documented payload; hook errors surfaced in audit_events | 1.* | S | `done (#40)` |
+| 2.2 | HITL: `awaiting_hitl` state, approver_role check, timeout policy | `pkg/workflow/hitl.go`, `runner_hitl.go` | Block → approve via CLI → resume; timeout fires `on_timeout`; rejection transitions node to `failed` | 1.1 | M | `done (#40)` |
+| 2.3 | `dear-agent workflow approve / reject` CLI | `cmd/workflow-approve/main.go` | Round-trip with HITL backend; `--as <role>` enforces approver_role match; `--reason` audit-logged | 2.2 | S | `done (#40)` |
+| 2.4 | Audit subscribers: stdout, JSONL file, Engram, OpenTelemetry | `pkg/workflow/audit_stdout.go`, `audit_jsonl.go`, `audit_engram.go`, `audit_otel.go` | Each sink has tests; sinks composable; failure of one sink doesn't break the run | 2.1 | M | `done (#40)` |
+| 2.5 | MCP server with 5 workflow tools | `cmd/dear-agent-mcp/workflow.go` | Tools: `workflow_run / status / approve / reject / cancel`. All callable from a vanilla MCP client | 2.3 | M | `done (#40)` |
+| 2.6 | Discord HITL backend (extends existing AGM bot) | `pkg/hitl/discord/backend.go` | Bot reads `audit_events` for new HITL rows; renders summary; reply-to-approve writes to `approvals` table | 2.4 | M | `done (#40)` |
 
 **Phase 2 ship criterion:** Wayfinder migrates one project end-to-end
 onto the engine. Discord approval round-trip works. Substrate score
@@ -119,17 +119,17 @@ onto the engine. Discord approval round-trip works. Substrate score
 **Goal:** node outputs become addressable knowledge. `dear-agent search
 "topic"` returns sources cited by previous research runs, joined to
 their work-items.
-**Phase status:** `pending`
+**Phase status:** `done`
 **Estimated:** 2 weeks
 **Depends on:** Phase 0 (parallelizable with Phase 1 + Phase 2)
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 3.1 | `pkg/source` adapter interface | `pkg/source/adapter.go` | Interface matches ADR-010 §D9 contract; documented godoc | — | S | `pending` |
-| 3.2 | SQLite + FTS5 adapter | `pkg/source/sqlite/adapter.go`, `adapter_test.go` | FTS round-trip; 10K-row Fetch P95 < 50 ms | 3.1 | M | `pending` |
-| 3.3 | MCP tools `FetchSource` / `AddSource` | `cmd/dear-agent-mcp/source.go` | Tools call through adapter; reject backend mismatch with clear error | 3.2 | S | `pending` |
-| 3.4 | Wire `outputs.durability=engram_indexed` to `AddSource` | `pkg/workflow/outputs.go` (extends 1.6) | Run produces a row in `sources` table per node-output declared `engram_indexed` | 3.3, 1.6 | S | `pending` |
-| 3.5 | `dear-agent search` CLI | `cmd/dear-agent-search/main.go` | Returns results joined to `runs.run_id`; `--since` flag filters | 3.4 | S | `pending` |
+| 3.1 | `pkg/source` adapter interface | `pkg/source/adapter.go` | Interface matches ADR-010 §D9 contract; documented godoc | — | S | `done` |
+| 3.2 | SQLite + FTS5 adapter | `pkg/source/sqlite/adapter.go`, `adapter_test.go` | FTS round-trip; 10K-row Fetch P95 < 50 ms | 3.1 | M | `done` |
+| 3.3 | MCP tools `FetchSource` / `AddSource` | `cmd/dear-agent-mcp/source.go` | Tools call through adapter; reject backend mismatch with clear error | 3.2 | S | `done` |
+| 3.4 | Wire `outputs.durability=engram_indexed` to `AddSource` | `pkg/workflow/outputs.go` (extends 1.6) | Run produces a row in `sources` table per node-output declared `engram_indexed` | 3.3, 1.6 | S | `done` |
+| 3.5 | `dear-agent search` CLI | `cmd/dear-agent-search/main.go` | Returns results joined to `runs.run_id`; `--since` flag filters | 3.4 | S | `done` |
 
 **Phase 3 ship criterion:** `dear-agent search` returns results from the
 last 30 days of research outputs, joined to their work-item ids; FTS

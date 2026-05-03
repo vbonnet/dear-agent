@@ -10,10 +10,13 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	sqlitesource "github.com/vbonnet/dear-agent/pkg/source/sqlite"
 	"github.com/vbonnet/dear-agent/pkg/workflow"
 )
 
-// helper that opens a fresh DB and returns Server + cleanup.
+// helper that opens a fresh DB and returns Server + cleanup. The Server
+// gets a sources adapter wired against the same file so FetchSource /
+// AddSource tools work in tests.
 func newTestServer(t *testing.T) (*Server, *workflow.SQLiteState) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "runs.db")
@@ -29,7 +32,12 @@ func newTestServer(t *testing.T) (*Server, *workflow.SQLiteState) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	return &Server{DB: db, DBPath: dbPath}, ss
+	srcAdapter, err := sqlitesource.New(db)
+	if err != nil {
+		t.Fatalf("sqlitesource.New: %v", err)
+	}
+
+	return &Server{DB: db, DBPath: dbPath, Source: srcAdapter}, ss
 }
 
 func callTool(t *testing.T, srv *Server, name string, args map[string]any) rpcResponse {
@@ -43,7 +51,7 @@ func callTool(t *testing.T, srv *Server, name string, args map[string]any) rpcRe
 	})
 }
 
-func TestMCP_ToolsList_Returns5Tools(t *testing.T) {
+func TestMCP_ToolsList_IncludesAllTools(t *testing.T) {
 	srv, _ := newTestServer(t)
 	resp := srv.HandleRequest(context.Background(), rpcRequest{JSONRPC: "2.0", ID: 1, Method: "tools/list"})
 	if resp.Error != nil {
@@ -51,8 +59,8 @@ func TestMCP_ToolsList_Returns5Tools(t *testing.T) {
 	}
 	res := resp.Result.(map[string]any)
 	tools := res["tools"].([]map[string]any)
-	if len(tools) != 5 {
-		t.Errorf("got %d tools, want 5", len(tools))
+	if len(tools) != 7 {
+		t.Errorf("got %d tools, want 7 (5 workflow + 2 source)", len(tools))
 	}
 	wantNames := map[string]bool{
 		"workflow_run":     false,
@@ -60,6 +68,8 @@ func TestMCP_ToolsList_Returns5Tools(t *testing.T) {
 		"workflow_approve": false,
 		"workflow_reject":  false,
 		"workflow_cancel":  false,
+		"FetchSource":      false,
+		"AddSource":        false,
 	}
 	for _, tool := range tools {
 		wantNames[tool["name"].(string)] = true
@@ -67,6 +77,22 @@ func TestMCP_ToolsList_Returns5Tools(t *testing.T) {
 	for n, found := range wantNames {
 		if !found {
 			t.Errorf("missing tool %q", n)
+		}
+	}
+}
+
+func TestMCP_ToolsList_OmitsSourceToolsWhenAdapterDisabled(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.Source = nil
+	resp := srv.HandleRequest(context.Background(), rpcRequest{JSONRPC: "2.0", ID: 1, Method: "tools/list"})
+	if resp.Error != nil {
+		t.Fatalf("tools/list error: %+v", resp.Error)
+	}
+	tools := resp.Result.(map[string]any)["tools"].([]map[string]any)
+	for _, tool := range tools {
+		name := tool["name"].(string)
+		if name == "FetchSource" || name == "AddSource" {
+			t.Errorf("source tool %q surfaced when adapter is nil", name)
 		}
 	}
 }
