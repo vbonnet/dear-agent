@@ -760,6 +760,11 @@ func (r *Runner) dispatchKind(nc *nodeContext, node *Node, res *Result) {
 		iters, err := r.executeLoop(nc, node)
 		res.Meta["iterations"] = iters
 		res.Error = err
+	case KindSpawn:
+		out, count, err := r.executeSpawn(nc, node)
+		res.Output = out
+		res.Meta["spawned"] = count
+		res.Error = err
 	default:
 		res.Error = fmt.Errorf("unknown kind %q", node.Kind)
 	}
