@@ -10,6 +10,7 @@ import (
 	"github.com/vbonnet/dear-agent/internal/sandbox"
 
 	// Import providers to trigger registration via init().
+	_ "github.com/vbonnet/dear-agent/internal/sandbox/apfs"
 	_ "github.com/vbonnet/dear-agent/internal/sandbox/bubblewrap"
 	_ "github.com/vbonnet/dear-agent/internal/sandbox/overlayfs"
 )
