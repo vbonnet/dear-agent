@@ -3,6 +3,7 @@ package mcp
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -131,7 +132,12 @@ func TestCleanup_FinderError(t *testing.T) {
 }
 
 func TestProcFSFinder_FindsSelf(t *testing.T) {
-	// Integration test: our own process should be findable via /proc
+	// Integration test: our own process should be findable via /proc.
+	// /proc is Linux-only — on macOS the finder returns no results because
+	// the directory doesn't exist, which makes the assertion meaningless.
+	if runtime.GOOS != "linux" {
+		t.Skip("ProcFSFinder requires Linux /proc filesystem")
+	}
 	finder := &ProcFSFinder{}
 
 	// Use our own executable path as search term

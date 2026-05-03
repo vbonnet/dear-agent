@@ -1,0 +1,25 @@
+#!/bin/bash
+# Claude Code hook: Clean up session resources on stop
+# Triggered when Claude Code session ends (Stop event)
+#
+# Purpose: Remove git worktrees and branches declared in the session manifest.
+# This ensures resources are cleaned up deterministically rather than relying
+# on agent judgment.
+#
+# Installation: Copy to ~/.claude/hooks/stop-agm-resource-cleanup
+# Permissions: chmod +x ~/.claude/hooks/stop-agm-resource-cleanup
+
+set -euo pipefail
+
+# Get current tmux session name (AGM session identifier)
+AGM_SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "")
+
+if [ -z "$AGM_SESSION" ]; then
+    # Not in tmux - skip hook
+    exit 0
+fi
+
+# Run resource cleanup for this session (best-effort: never block session exit)
+agm session cleanup "$AGM_SESSION" 2>/dev/null || true
+
+exit 0

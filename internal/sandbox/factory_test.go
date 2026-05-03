@@ -217,6 +217,9 @@ func TestIsKernelVersionAtLeast(t *testing.T) {
 
 func TestNewProviderForPlatform_Implemented(t *testing.T) {
 	t.Run("overlayfs", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skipf("overlayfs is Linux-only; skipping on %s", runtime.GOOS)
+		}
 		provider, err := sandbox.NewProviderForPlatform("overlayfs")
 
 		if err != nil {
@@ -229,6 +232,19 @@ func TestNewProviderForPlatform_Implemented(t *testing.T) {
 
 		if provider != nil && provider.Name() != "overlayfs-native" {
 			t.Errorf("Provider name should be 'overlayfs-native', got '%s'", provider.Name())
+		}
+	})
+
+	t.Run("apfs", func(t *testing.T) {
+		if runtime.GOOS != "darwin" {
+			t.Skipf("apfs is Darwin-only; skipping on %s", runtime.GOOS)
+		}
+		provider, err := sandbox.NewProviderForPlatform("apfs")
+		if err != nil {
+			t.Errorf("NewProviderForPlatform(apfs) should succeed on darwin: %v", err)
+		}
+		if provider == nil {
+			t.Error("Provider should not be nil for apfs")
 		}
 	})
 
@@ -245,6 +261,22 @@ func TestNewProviderForPlatform_Implemented(t *testing.T) {
 
 		if provider != nil && provider.Name() != "bubblewrap" {
 			t.Errorf("Provider name should be 'bubblewrap', got '%s'", provider.Name())
+		}
+	})
+
+	t.Run("gvisor", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skipf("gvisor is Linux-only; skipping on %s", runtime.GOOS)
+		}
+		provider, err := sandbox.NewProviderForPlatform("gvisor")
+		if err != nil {
+			t.Errorf("NewProviderForPlatform(gvisor) should succeed on linux: %v", err)
+		}
+		if provider == nil {
+			t.Error("Provider should not be nil for gvisor")
+		}
+		if provider != nil && provider.Name() != "gvisor" {
+			t.Errorf("Provider name should be 'gvisor', got '%s'", provider.Name())
 		}
 	})
 
@@ -266,9 +298,10 @@ func TestNewProviderForPlatform_Implemented(t *testing.T) {
 }
 
 func TestNewProviderForPlatform_Unimplemented(t *testing.T) {
+	// apfs is implemented on darwin; overlayfs is implemented on linux. The
+	// rest remain unimplemented across all platforms.
 	unimplementedProviders := []string{
 		"fuse-overlayfs", // Not yet implemented
-		"apfs",           // macOS provider (not yet implemented)
 		"macfuse",        // macOS alternative
 		"fallback",       // Generic fallback
 	}
