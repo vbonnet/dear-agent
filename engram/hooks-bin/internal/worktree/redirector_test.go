@@ -167,8 +167,14 @@ func TestRedirector_calculateRedirectedPath(t *testing.T) {
 		t.Fatalf("calculateRedirectedPath() failed: %v", err)
 	}
 
-	// Verify path structure is preserved
-	expectedPath := filepath.Join(worktreePath, "src", "pkg", "file.go")
+	// Verify path structure is preserved.
+	// calculateRedirectedPath resolves symlinks (e.g. /var → /private/var on
+	// macOS), so we must do the same on the expected path before comparing.
+	resolvedWorktree, err := filepath.EvalSymlinks(worktreePath)
+	if err != nil {
+		resolvedWorktree = worktreePath
+	}
+	expectedPath := filepath.Join(resolvedWorktree, "src", "pkg", "file.go")
 	if redirected != expectedPath {
 		t.Errorf("calculateRedirectedPath() = %q, want %q", redirected, expectedPath)
 	}
@@ -210,7 +216,11 @@ func TestRedirector_calculateRedirectedPath_RootFile(t *testing.T) {
 		t.Fatalf("calculateRedirectedPath() failed: %v", err)
 	}
 
-	expectedPath := filepath.Join(worktreePath, "README.md")
+	resolvedWorktree, err := filepath.EvalSymlinks(worktreePath)
+	if err != nil {
+		resolvedWorktree = worktreePath
+	}
+	expectedPath := filepath.Join(resolvedWorktree, "README.md")
 	if redirected != expectedPath {
 		t.Errorf("calculateRedirectedPath() = %q, want %q", redirected, expectedPath)
 	}

@@ -53,8 +53,14 @@ func TestListWorktrees_NoExtraWorktrees(t *testing.T) {
 	if !worktrees[0].IsMain {
 		t.Error("Expected first worktree to be main")
 	}
-	if worktrees[0].Path != tmpDir {
-		t.Errorf("Expected path %q, got %q", tmpDir, worktrees[0].Path)
+	// git resolves symlinks (e.g. /var -> /private/var on macOS) when
+	// reporting worktree paths; resolve our expectation the same way.
+	expectedPath, err := filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		expectedPath = tmpDir
+	}
+	if worktrees[0].Path != expectedPath {
+		t.Errorf("Expected path %q, got %q", expectedPath, worktrees[0].Path)
 	}
 }
 
@@ -290,10 +296,17 @@ func TestListWorktrees_DetachedHead(t *testing.T) {
 		t.Fatalf("Expected 2 worktrees, got %d", len(worktrees))
 	}
 
+	// git resolves symlinks (e.g. /var -> /private/var on macOS) when
+	// reporting worktree paths; resolve our expectation the same way.
+	expectedDetached, err := filepath.EvalSymlinks(detachedPath)
+	if err != nil {
+		expectedDetached = detachedPath
+	}
+
 	// Find the detached worktree
 	var foundDetached bool
 	for _, wt := range worktrees {
-		if wt.Path == detachedPath {
+		if wt.Path == expectedDetached {
 			foundDetached = true
 			if wt.Branch != "" {
 				t.Errorf("Expected empty branch for detached HEAD, got %q", wt.Branch)

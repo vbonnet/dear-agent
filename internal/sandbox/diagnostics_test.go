@@ -3,11 +3,21 @@ package sandbox
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// requireLinux skips the test on non-Linux platforms. The /proc-based
+// helpers (kernel version, mounts, /proc/self/fd) only exist there.
+func requireLinux(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skipf("test requires linux /proc filesystem (running on %s)", runtime.GOOS)
+	}
+}
 
 func TestDiagnoseSystem(t *testing.T) {
 	caps, err := DiagnoseSystem()
@@ -182,6 +192,7 @@ func TestCalculateDiskUsage_WithFiles(t *testing.T) {
 }
 
 func TestCountOpenFDs(t *testing.T) {
+	requireLinux(t)
 	fds := countOpenFDs()
 	// Should have at least a few FDs open (stdin, stdout, stderr, etc.)
 	assert.Greater(t, fds, 0)
@@ -201,6 +212,7 @@ func TestGetDiskSpace_InvalidPath(t *testing.T) {
 }
 
 func TestIsMountActive(t *testing.T) {
+	requireLinux(t)
 	// A random path should not be an active mount
 	active, err := isMountActive("/tmp/definitely-not-a-mount-point-xyz")
 	require.NoError(t, err)
@@ -208,6 +220,7 @@ func TestIsMountActive(t *testing.T) {
 }
 
 func TestCountActiveMounts(t *testing.T) {
+	requireLinux(t)
 	count, err := countActiveMounts()
 	require.NoError(t, err)
 	assert.Greater(t, count, 0) // Should have at least root mount
@@ -225,6 +238,7 @@ func TestGetMaxMounts(t *testing.T) {
 }
 
 func TestGetKernelVersion(t *testing.T) {
+	requireLinux(t)
 	version, err := getKernelVersion()
 	require.NoError(t, err)
 	assert.NotEmpty(t, version)
