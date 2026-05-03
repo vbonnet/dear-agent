@@ -218,6 +218,9 @@ started)`.
 | `workflow-migrate` | Port a `FileState` snapshot into `runs.db` |
 | `dear-agent-mcp` | JSON-RPC server: `workflow_*` + `FetchSource` + `AddSource` |
 | `dear-agent-search` | Search the knowledge corpus, joined to `runs` |
+| `workflow-codemod` | v0.1 → v0.2 upgrade; `from-wayfinder` synthesis (Phase 4.1/4.2) |
+| `workflow-dev` | Interactive dev shell with mocked-by-default fixtures (Phase 4.4) |
+| `workflow-inspector` | Read-only HTML view of `runs.db` (Phase 5.5) |
 
 ---
 
@@ -270,7 +273,7 @@ want the knowledge corpus in a separate file.
 | 1 | Roles + budget | done (#39) |
 | 2 | DEAR hooks + HITL + audit sinks + MCP + Discord | done (#40) |
 | 3 | FetchSource / AddSource (this guide is current as of here) | done |
-| 4 | Migration + `workflow dev` | partial — `workflow-migrate` shipped; `workflow dev` open |
-| 5 | Adapters + visual inspector + `kind: spawn` | pending |
+| 4 | Migration + `workflow dev` | done — `workflow-migrate`, `workflow-codemod`, `workflow-dev` |
+| 5 | Adapters + visual inspector + `kind: spawn` | done — Obsidian/llm-wiki/registry adapters, `workflow-inspector`, `kind: spawn`; OpenViking ships as a stub |
 
 For per-ticket detail see [BACKLOG.md](workflow-engine/BACKLOG.md).

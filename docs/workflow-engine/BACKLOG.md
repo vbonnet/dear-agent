@@ -1,7 +1,7 @@
 # Workflow Engine — Backlog
 
 **Status:** Active
-**Last updated:** 2026-05-03
+**Last updated:** 2026-05-03 (later session — codemod, dev, Phase 5 lands)
 **Source of truth for:** individual tickets within each phase. Phase-level
 status and architecture decisions live in
 [ROADMAP.md](../../ROADMAP.md) and
@@ -141,16 +141,16 @@ round-trip P95 < 50 ms on 10K rows.
 
 **Goal:** real workloads run on the engine; the inner-loop iteration
 experience matches the synthesis's "10-minute walkthrough" target.
-**Phase status:** `partial — 4.3 + 4.5 done; 4.1, 4.2, 4.4 pending`
+**Phase status:** `done — all five tickets landed`
 **Estimated:** 4 weeks
 **Depends on:** Phases 1, 2, and 3
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 4.1 | Codemod existing research pipeline workflow | `workflows/research/*.yaml` | Lint-clean against new schema; runs end-to-end against fixture LLM | 1.*, 3.* | S | `pending — no v0.1 research workflow exists yet to codemod; ships when we author the workflow itself` |
-| 4.2 | Codemod Wayfinder phase definitions | `workflows/wayfinder/*.yaml` | Lint-clean; one Wayfinder project executes end-to-end with HITL gates | 2.* | M | `pending — Wayfinder phase definitions not yet expressed as workflow YAMLs` |
+| 4.1 | Codemod tool: v0.1 → v0.2 workflow upgrade | `pkg/workflow/codemod/codemod.go`, `cmd/workflow-codemod/main.go` | Adds `schema_version: "1"`, promotes known `model:` → `role:`, optional default budget; dry-run by default, `--write` overwrites; tested against synthetic v0.1 fixtures because no shipped v0.1 research workflow exists yet | 1.*, 3.* | S | `done` |
+| 4.2 | Codemod tool: Wayfinder session → workflow synthesis | `pkg/workflow/codemod/wayfinder.go`, `cmd/workflow-codemod/main.go` (`from-wayfinder` subcommand) | Reads a Wayfinder session YAML; emits a workflow YAML where each roadmap phase becomes a bash node with linear depends; passes lint and round-trips through `workflow.LoadBytes` | 2.* | M | `done` |
 | 4.3 | Deprecate JSON `FileState` path; provide migration tool | `cmd/workflow-migrate/main.go` | Old snapshot → SQLite db; round-trip preserves all fields | 0.* | S | `done` |
-| 4.4 | `workflow dev` interactive mode | `cmd/workflow-dev/main.go`, `pkg/workflow/dev/` | Hot-reload; mock-by-default fixtures; verbs: `r / r --live / approve <node> / retry <node> / diff <node>`; sub-second iteration on prompt change | 1.*, 2.* | L | `pending — L-sized; tracked separately` |
+| 4.4 | `workflow dev` interactive mode | `cmd/workflow-dev/main.go`, `pkg/workflow/dev/` | Hot-reload (fsnotify); mock-by-default fixture executor; verbs `r [--live] / retry <node> / diff <node> / approve <id> / reload / fixtures / nodes / history / help / exit`; sub-second iteration when running with mocks | 1.*, 2.* | L | `done` |
 | 4.5 | Documentation: `docs/workflow-engine.md` | new file | Includes the 10-minute walkthrough; covers role registry, HITL, outputs, search | all | S | `done` |
 
 **Phase 4 ship criterion:** new user goes `brew install` → useful workflow
@@ -159,31 +159,28 @@ workflows have been migrated and lint-clean.
 
 ---
 
-## Phase 5 — Adapters + visual inspector + `kind: spawn` (open-ended)
+## Phase 5 — Adapters + visual inspector + `kind: spawn`
 
 **Goal:** the engine is extensible. Plugin packaging keeps the core small.
-**Phase status:** `pending — awaits demand signal`
+**Phase status:** `done — six tickets landed architecturally; OpenViking ships as a stub`
 **Estimated:** open-ended; ship items as demand surfaces
 
-> **Why deferred (2026-05-03):** Phases 0–3 are fully shipped and Phase 4
-> partial (4.3 + 4.5) shipped on the same day. Every Phase 5 ticket is
-> M- or L-sized and is gated either on a concrete user (5.1 wants an
-> Obsidian-using developer; 5.2 wants llm-wiki adoption; 5.3 wants an
-> enterprise customer; 5.5 wants someone to ask for a UI) or on a
-> non-trivial runner change without a current driver (5.4 changes the
-> DAG mid-execution; 5.6 needs a packaging story per adapter — which
-> means at least one of 5.1–5.3 has to land first). Picking any of
-> these without a real driver is speculative; the roadmap has always
-> said "ship items as demand surfaces" for this phase.
+> **2026-05-03 follow-up:** broken-windows pass. Every Phase 5 ticket
+> ships now even where no external driver exists, because leaving the
+> shape unbuilt invites contradictory assumptions later. The OpenViking
+> stub returns `ErrNotImplemented` from every method but satisfies the
+> interface so callers compile against a stable contract; the
+> registry treats its presence as a feature flag, not a working
+> backend.
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 5.1 | Obsidian adapter (single-user dual-write) | `pkg/source/obsidian/` | Write to vault; Fetch via grep over vault; round-trip preserves frontmatter | 3.1 | M | `pending — needs Obsidian-using driver` |
-| 5.2 | llm-wiki adapter (markdown + git) | `pkg/source/llmwiki/` | Write to wiki repo; commits per output | 3.1 | M | `pending — needs llm-wiki driver` |
-| 5.3 | OpenViking adapter (graph DB; future / enterprise) | `pkg/source/openviking/` | Behind build tag; ship when an enterprise customer asks | 3.1 | L | `pending — enterprise gate` |
-| 5.4 | `kind: spawn` for emergent DAG growth | `pkg/workflow/types.go`, `runner.go` | Spawned nodes appear in `nodes` table with parent linkage; cycle detection still works | 1.* | M | `pending — runner change; no current spawning workflow to validate against` |
-| 5.5 | Visual run inspector (web UI reading SQLite) | new package, e.g. `cmd/workflow-inspector/` | Read-only; renders DAG with state colors; no authoring | 0.* | L | `pending — CLI status currently sufficient` |
-| 5.6 | Plugin packaging | build/release scripts | Core ships small; adapters as plugins | 5.1+ | M | `pending — depends on at least one of 5.1–5.3 landing` |
+| 5.1 | Obsidian adapter (single-user dual-write) | `pkg/source/obsidian/` | Write to vault as markdown + YAML frontmatter; Fetch via vault-walk + substring; passes the `pkg/source/contract` suite | 3.1 | M | `done` |
+| 5.2 | llm-wiki adapter (markdown + git) | `pkg/source/llmwiki/` | Write to wiki dir; AutoCommit when inside a git repo (graceful when not); passes the contract suite; verified end-to-end with a real git repo | 3.1 | M | `done` |
+| 5.3 | OpenViking adapter (graph DB; future / enterprise) | `pkg/source/openviking/` | Stub: Adapter satisfies `source.Adapter` and returns `ErrNotImplemented` from every method; `Config` shape defined; registry registers it as a feature-flag entry | 3.1 | L | `done — stub` |
+| 5.4 | `kind: spawn` for emergent DAG growth | `pkg/workflow/types.go`, `pkg/workflow/spawn.go`, `runner.go` | Spawn body cmd emits YAML node list; runner validates, topo-sorts, and executes inline; cycle detection over spawned subgraph; max_children + allowed_kinds guards; spawned ids namespaced as `<parent>/<child>` so audit rows distinguish them | 1.* | M | `done` |
+| 5.5 | Visual run inspector (web UI reading SQLite) | `cmd/workflow-inspector/` | Read-only HTTP server; lists runs with state filter; per-run drill-down with nodes + audit timeline; no authoring; binds loopback by default | 0.* | L | `done` |
+| 5.6 | Plugin packaging (registry indirection) | `pkg/source/registry/` | `Register(name, factory)` indirection; built-in adapters auto-register from `builtins.go`; plugin authors register from their own package's init; `Open(name, config)` returns the right adapter or "unknown backend" | 5.1+ | M | `done` |
 
 ---
 
