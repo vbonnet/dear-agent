@@ -349,15 +349,18 @@ func extractTarGz(archivePath, targetDir string) error {
 			return fmt.Errorf("invalid file path in archive: %s", header.Name)
 		}
 
+		// Mask to permission bits only — tar header mode is int64, but
+		// only the lower 12 bits are meaningful for os.FileMode here.
+		mode := os.FileMode(header.Mode & 0o7777) //nolint:gosec // masked to perm bits
 		switch header.Typeflag {
 		case tar.TypeDir:
 			// Create directory
-			if err := os.MkdirAll(targetPath, os.FileMode(header.Mode)); err != nil {
+			if err := os.MkdirAll(targetPath, mode); err != nil {
 				return err
 			}
 		case tar.TypeReg:
 			// Create parent directories
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 				return err
 			}
 
@@ -374,7 +377,7 @@ func extractTarGz(archivePath, targetDir string) error {
 			}
 
 			// Set permissions
-			if err := outFile.Chmod(os.FileMode(header.Mode)); err != nil {
+			if err := outFile.Chmod(mode); err != nil {
 				outFile.Close()
 				return err
 			}
