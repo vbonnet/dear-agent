@@ -432,10 +432,8 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 
 	personaResult := review.Personas[0]
 
-	// Convert findings to vote
-	verdict := "GO"
-	confidence := "HIGH"
-	severity := "LOW"
+	// Convert findings to vote (verdict/confidence/severity are set per-branch below)
+	var verdict, confidence, severity string
 	var blockers []string
 	var recommendations []string
 

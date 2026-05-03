@@ -387,9 +387,10 @@ func TestInitSequence_PromptScrolledOff_Regression(t *testing.T) {
 	seq := NewInitSequence(sessionName)
 	seq.PromptVerified = true // Caller verified prompt before buffer filled
 
-	// Run should succeed quickly without waiting for prompt
+	// Run should succeed quickly without waiting for prompt; result error
+	// is intentionally ignored — this test only asserts on elapsed time.
 	start := time.Now()
-	err = seq.Run()
+	_ = seq.Run()
 	elapsed := time.Since(start)
 
 	// Should complete quickly (mostly 5s sleep in sendRename)
