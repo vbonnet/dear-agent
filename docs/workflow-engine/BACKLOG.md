@@ -162,17 +162,28 @@ workflows have been migrated and lint-clean.
 ## Phase 5 — Adapters + visual inspector + `kind: spawn` (open-ended)
 
 **Goal:** the engine is extensible. Plugin packaging keeps the core small.
-**Phase status:** `pending`
+**Phase status:** `pending — awaits demand signal`
 **Estimated:** open-ended; ship items as demand surfaces
+
+> **Why deferred (2026-05-03):** Phases 0–3 are fully shipped and Phase 4
+> partial (4.3 + 4.5) shipped on the same day. Every Phase 5 ticket is
+> M- or L-sized and is gated either on a concrete user (5.1 wants an
+> Obsidian-using developer; 5.2 wants llm-wiki adoption; 5.3 wants an
+> enterprise customer; 5.5 wants someone to ask for a UI) or on a
+> non-trivial runner change without a current driver (5.4 changes the
+> DAG mid-execution; 5.6 needs a packaging story per adapter — which
+> means at least one of 5.1–5.3 has to land first). Picking any of
+> these without a real driver is speculative; the roadmap has always
+> said "ship items as demand surfaces" for this phase.
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 5.1 | Obsidian adapter (single-user dual-write) | `pkg/source/obsidian/` | Write to vault; Fetch via grep over vault; round-trip preserves frontmatter | 3.1 | M | `pending` |
-| 5.2 | llm-wiki adapter (markdown + git) | `pkg/source/llmwiki/` | Write to wiki repo; commits per output | 3.1 | M | `pending` |
-| 5.3 | OpenViking adapter (graph DB; future / enterprise) | `pkg/source/openviking/` | Behind build tag; ship when an enterprise customer asks | 3.1 | L | `pending` |
-| 5.4 | `kind: spawn` for emergent DAG growth | `pkg/workflow/types.go`, `runner.go` | Spawned nodes appear in `nodes` table with parent linkage; cycle detection still works | 1.* | M | `pending` |
-| 5.5 | Visual run inspector (web UI reading SQLite) | new package, e.g. `cmd/workflow-inspector/` | Read-only; renders DAG with state colors; no authoring | 0.* | L | `pending` |
-| 5.6 | Plugin packaging | build/release scripts | Core ships small; adapters as plugins | 5.1+ | M | `pending` |
+| 5.1 | Obsidian adapter (single-user dual-write) | `pkg/source/obsidian/` | Write to vault; Fetch via grep over vault; round-trip preserves frontmatter | 3.1 | M | `pending — needs Obsidian-using driver` |
+| 5.2 | llm-wiki adapter (markdown + git) | `pkg/source/llmwiki/` | Write to wiki repo; commits per output | 3.1 | M | `pending — needs llm-wiki driver` |
+| 5.3 | OpenViking adapter (graph DB; future / enterprise) | `pkg/source/openviking/` | Behind build tag; ship when an enterprise customer asks | 3.1 | L | `pending — enterprise gate` |
+| 5.4 | `kind: spawn` for emergent DAG growth | `pkg/workflow/types.go`, `runner.go` | Spawned nodes appear in `nodes` table with parent linkage; cycle detection still works | 1.* | M | `pending — runner change; no current spawning workflow to validate against` |
+| 5.5 | Visual run inspector (web UI reading SQLite) | new package, e.g. `cmd/workflow-inspector/` | Read-only; renders DAG with state colors; no authoring | 0.* | L | `pending — CLI status currently sufficient` |
+| 5.6 | Plugin packaging | build/release scripts | Core ships small; adapters as plugins | 5.1+ | M | `pending — depends on at least one of 5.1–5.3 landing` |
 
 ---
 
