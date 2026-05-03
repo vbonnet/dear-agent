@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -45,8 +47,52 @@ type Runner struct {
 	// Pass it to Resume to skip already-completed nodes on restart.
 	State State
 
+	// Recorder, if non-nil, receives per-run, per-node, and per-attempt
+	// detail beyond the simple Snapshot. SQLiteState implements both this
+	// and AuditSink; wiring all three at once is what UseSQLiteState does.
+	Recorder RunRecorder
+
+	// Audit, if non-nil, receives a structured event for every state
+	// transition. The default SQLite-backed sink is the engine's
+	// canonical audit log; users can fan out to multiple sinks via
+	// MultiAuditSink.
+	Audit AuditSink
+
+	// Trigger labels how this run was started ("cli", "mcp", "sdk",
+	// "cron", "trigger"). Recorded on the runs row. Empty defaults to
+	// "sdk" (the most common embedding).
+	Trigger string
+	// TriggeredBy is a free-form actor label (user name, MCP client id,
+	// schedule id) recorded on the runs row.
+	TriggeredBy string
+
 	mu      sync.Mutex
 	signals map[string]chan struct{}
+}
+
+// UseSQLiteState wires a SQLiteState as State, Recorder, and AuditSink in
+// one call. Most callers want all three; this is the convenience.
+func (r *Runner) UseSQLiteState(ss *SQLiteState) {
+	r.State = ss
+	r.Recorder = ss
+	r.Audit = ss
+}
+
+// recorder returns the configured RunRecorder or a no-op fallback so the
+// runner can call recorder methods unconditionally.
+func (r *Runner) recorder() RunRecorder {
+	if r.Recorder == nil {
+		return noopRunRecorder{}
+	}
+	return r.Recorder
+}
+
+// audit returns the configured AuditSink or a no-op fallback.
+func (r *Runner) audit() AuditSink {
+	if r.Audit == nil {
+		return noopAuditSink{}
+	}
+	return r.Audit
 }
 
 // NewRunner returns a Runner with defaults applied. ai must be non-nil.
@@ -118,7 +164,7 @@ func (r *Runner) Resume(ctx context.Context, w *Workflow, st State) (*RunReport,
 
 // run is the shared implementation of Run and Resume.
 //
-//nolint:gocyclo // sequential node loop with checkpoint; splitting further hurts readability
+//nolint:gocyclo // sequential node loop with checkpoint + audit; splitting further hurts readability
 func (r *Runner) run(ctx context.Context, w *Workflow, inputs map[string]string, snap *Snapshot) (*RunReport, error) {
 	if err := w.Validate(); err != nil {
 		return nil, err
@@ -127,16 +173,27 @@ func (r *Runner) run(ctx context.Context, w *Workflow, inputs map[string]string,
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
 	rep := &RunReport{
 		Workflow: w.Name,
 		Inputs:   merged,
-		Started:  time.Now(),
+		Started:  now,
 	}
+
+	// Generate a stable run_id for this invocation. Threaded through every
+	// audit event and per-attempt record so the substrate can join across
+	// tables. Resume re-uses the run_id stored on the snapshot when present.
+	runID := uuid.NewString()
+	if snap != nil && snap.RunID != "" {
+		runID = snap.RunID
+	}
+
 	nc := &nodeContext{
 		ctx:     ctx,
 		inputs:  merged,
 		outputs: make(map[string]string, len(w.Nodes)),
 		env:     w.Env,
+		runID:   runID,
 	}
 
 	// Restore outputs from a prior snapshot so downstream templates resolve.
@@ -146,23 +203,33 @@ func (r *Runner) run(ctx context.Context, w *Workflow, inputs map[string]string,
 		}
 	}
 
-	// Build the initial snapshot for State.Save calls.
-	snapStarted := time.Now()
+	snapStarted := now
 	if snap != nil {
 		snapStarted = snap.Started
 	}
 
+	r.beginRunRecord(ctx, runID, w.Name, merged, snapStarted)
+
 	order, err := topoOrder(w.Nodes)
 	if err != nil {
+		r.finishRunRecord(ctx, runID, RunStateFailed, err.Error())
 		return rep, err
 	}
-	for _, id := range order {
+
+	finalState := RunStateSucceeded
+	var runErr error
+	executed := 0
+	for i, id := range order {
 		if ctx.Err() != nil {
 			rep.Finished = time.Now()
+			r.markSkippedDownstream(ctx, runID, w.Nodes, order[i:], "context-cancelled")
+			r.finishRunRecord(ctx, runID, RunStateCancelled, ctx.Err().Error())
 			return rep, ctx.Err()
 		}
 
-		// Skip already-completed nodes when resuming.
+		// Skip already-completed nodes when resuming. The audit log for
+		// the original run already captured their transitions; emitting
+		// duplicates here would corrupt the timeline.
 		if snap != nil && snap.Completed[id] {
 			r.Logger.Debug("node skipped (completed in snapshot)", "node", id)
 			continue
@@ -171,28 +238,115 @@ func (r *Runner) run(ctx context.Context, w *Workflow, inputs map[string]string,
 		node := findNode(w.Nodes, id)
 		res := r.executeNode(nc, node)
 		rep.Results = append(rep.Results, res)
+		executed++
 		if res.Error != nil {
 			rep.Finished = time.Now()
-			return rep, fmt.Errorf("node %q: %w", node.ID, res.Error)
+			runErr = fmt.Errorf("node %q: %w", node.ID, res.Error)
+			finalState = RunStateFailed
+			r.markSkippedDownstream(ctx, runID, w.Nodes, order[i+1:], "upstream-failed")
+			r.finishRunRecord(ctx, runID, finalState, runErr.Error())
+			return rep, runErr
 		}
 		nc.outputs[node.ID] = res.Output
 
-		snap = r.checkpoint(ctx, w.Name, merged, snapStarted, snap, node.ID, res.Output)
+		snap = r.checkpoint(ctx, w.Name, runID, merged, snapStarted, snap, node.ID, res.Output)
 	}
 	rep.Finished = time.Now()
-	rep.Succeeded = len(rep.Results) > 0
+	rep.Succeeded = executed > 0
+	r.finishRunRecord(ctx, runID, finalState, "")
 	return rep, nil
+}
+
+// beginRunRecord initialises the run-level rows and emits the run-start
+// audit event. Errors are logged but do not abort the run — the substrate
+// goal is "best-effort recording, never block execution".
+func (r *Runner) beginRunRecord(ctx context.Context, runID, workflowName string, inputs map[string]string, started time.Time) {
+	inputsJSON, _ := json.Marshal(inputs)
+	if err := r.recorder().BeginRun(ctx, RunRecord{
+		RunID:        runID,
+		WorkflowName: workflowName,
+		State:        RunStateRunning,
+		InputsJSON:   string(inputsJSON),
+		StartedAt:    started,
+		Trigger:      r.triggerOrDefault(),
+		TriggeredBy:  r.TriggeredBy,
+	}); err != nil {
+		r.Logger.Warn("recorder BeginRun failed", "run_id", runID, "err", err)
+	}
+	if err := r.audit().Emit(ctx, AuditEvent{
+		RunID:      runID,
+		FromState:  string(RunStatePending),
+		ToState:    string(RunStateRunning),
+		Reason:     "run-started",
+		Actor:      formatActor(r.TriggeredBy),
+		OccurredAt: started,
+	}); err != nil {
+		r.Logger.Warn("audit emit failed", "run_id", runID, "err", err)
+	}
+}
+
+// finishRunRecord marks the run terminal in the recorder + audit log.
+func (r *Runner) finishRunRecord(ctx context.Context, runID string, state RunState, errMsg string) {
+	now := time.Now()
+	if err := r.recorder().FinishRun(ctx, runID, state, now, errMsg); err != nil {
+		r.Logger.Warn("recorder FinishRun failed", "run_id", runID, "err", err)
+	}
+	if err := r.audit().Emit(ctx, AuditEvent{
+		RunID:      runID,
+		FromState:  string(RunStateRunning),
+		ToState:    string(state),
+		Reason:     errMsg,
+		Actor:      formatActor(r.TriggeredBy),
+		OccurredAt: now,
+	}); err != nil {
+		r.Logger.Warn("audit emit failed", "run_id", runID, "err", err)
+	}
+}
+
+// markSkippedDownstream emits pending→skipped events for every node that
+// will not execute because of an upstream failure or a cancelled run. The
+// nodes table reflects the same skip state, so `workflow status` shows
+// the full picture rather than a truncated DAG.
+func (r *Runner) markSkippedDownstream(ctx context.Context, runID string, all []Node, remaining []string, reason string) {
+	now := time.Now()
+	for _, id := range remaining {
+		_ = r.recorder().UpsertNode(ctx, NodeRecord{
+			RunID:       runID,
+			NodeID:      id,
+			State:       NodeStateSkipped,
+			FinishedAt:  now,
+			Error:       reason,
+		})
+		_ = r.audit().Emit(ctx, AuditEvent{
+			RunID:      runID,
+			NodeID:     id,
+			FromState:  string(NodeStatePending),
+			ToState:    string(NodeStateSkipped),
+			Reason:     reason,
+			Actor:      "system",
+			OccurredAt: now,
+		})
+	}
+	_ = all // reserved for future cycle-detection diagnostics
+}
+
+func (r *Runner) triggerOrDefault() string {
+	if r.Trigger == "" {
+		return "sdk"
+	}
+	return r.Trigger
 }
 
 // checkpoint saves the completed node to State (if configured). It returns
 // the updated snapshot so the caller can carry it forward.
-func (r *Runner) checkpoint(ctx context.Context, wfName string, inputs map[string]string, started time.Time, snap *Snapshot, nodeID, output string) *Snapshot {
+func (r *Runner) checkpoint(ctx context.Context, wfName, runID string, inputs map[string]string, started time.Time, snap *Snapshot, nodeID, output string) *Snapshot {
 	if r.State == nil {
 		return snap
 	}
 	if snap == nil {
 		snap = &Snapshot{
 			Workflow:  wfName,
+			RunID:     runID,
 			Inputs:    inputs,
 			Outputs:   make(map[string]string),
 			Completed: make(map[string]bool),
@@ -204,6 +358,9 @@ func (r *Runner) checkpoint(ctx context.Context, wfName string, inputs map[strin
 	}
 	if snap.Completed == nil {
 		snap.Completed = make(map[string]bool)
+	}
+	if snap.RunID == "" {
+		snap.RunID = runID
 	}
 	snap.Outputs[nodeID] = output
 	snap.Completed[nodeID] = true
@@ -229,15 +386,19 @@ func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 		if err != nil {
 			res.Error = fmt.Errorf("when: %w", err)
 			res.Finished = time.Now()
+			r.recordNodeFinished(nc, node, &res, NodeStateFailed, "when-eval-failed")
 			return res
 		}
 		if !shouldRun {
 			r.Logger.Debug("node skipped by when clause", "node", node.ID, "when", node.When)
 			res.Meta["skipped"] = true
 			res.Finished = time.Now()
+			r.recordNodeFinished(nc, node, &res, NodeStateSkipped, "when-false")
 			return res
 		}
 	}
+
+	r.recordNodeStarted(nc, node, &res)
 
 	ctx := nc.ctx
 	if node.Timeout > 0 {
@@ -245,7 +406,7 @@ func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 		ctx, cancel = context.WithTimeout(nc.ctx, node.Timeout)
 		defer cancel()
 	}
-	childNC := &nodeContext{ctx: ctx, inputs: nc.inputs, outputs: nc.outputs, env: nc.env}
+	childNC := &nodeContext{ctx: ctx, inputs: nc.inputs, outputs: nc.outputs, env: nc.env, runID: nc.runID}
 
 	// Gate nodes never retry — a gate waiting on a signal should keep
 	// waiting, not re-enter on each attempt.
@@ -256,19 +417,113 @@ func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 
 	r.runWithRetry(childNC, node, &res, policy)
 	res.Finished = time.Now()
+
+	state := NodeStateSucceeded
+	reason := ""
+	if res.Error != nil {
+		state = NodeStateFailed
+		reason = res.Error.Error()
+	}
+	r.recordNodeFinished(nc, node, &res, state, reason)
 	return res
+}
+
+// recordNodeStarted emits the pending → running transition and a
+// running-state nodes row. The runner calls this once, before the first
+// attempt; later attempts append to node_attempts only.
+func (r *Runner) recordNodeStarted(nc *nodeContext, node *Node, res *Result) {
+	if nc.runID == "" {
+		return
+	}
+	if err := r.recorder().UpsertNode(nc.ctx, NodeRecord{
+		RunID:     nc.runID,
+		NodeID:    node.ID,
+		State:     NodeStateRunning,
+		StartedAt: res.Started,
+		ModelUsed: nodeModel(node),
+	}); err != nil {
+		r.Logger.Warn("recorder UpsertNode(running) failed", "node", node.ID, "err", err)
+	}
+	if err := r.audit().Emit(nc.ctx, AuditEvent{
+		RunID:      nc.runID,
+		NodeID:     node.ID,
+		FromState:  string(NodeStatePending),
+		ToState:    string(NodeStateRunning),
+		Actor:      "system",
+		OccurredAt: res.Started,
+	}); err != nil {
+		r.Logger.Warn("audit emit(running) failed", "node", node.ID, "err", err)
+	}
+}
+
+// recordNodeFinished emits the running → terminal transition and updates
+// the nodes row with attempt count, output, and any error.
+func (r *Runner) recordNodeFinished(nc *nodeContext, node *Node, res *Result, state NodeState, reason string) {
+	if nc.runID == "" {
+		return
+	}
+	attempts, _ := res.Meta["attempts"].(int)
+	if err := r.recorder().UpsertNode(nc.ctx, NodeRecord{
+		RunID:       nc.runID,
+		NodeID:      node.ID,
+		State:       state,
+		Attempts:    attempts,
+		ModelUsed:   nodeModel(node),
+		Output:      res.Output,
+		StartedAt:   res.Started,
+		FinishedAt:  res.Finished,
+		Error:       reason,
+	}); err != nil {
+		r.Logger.Warn("recorder UpsertNode(finish) failed", "node", node.ID, "err", err)
+	}
+	from := NodeStateRunning
+	if state == NodeStateSkipped {
+		from = NodeStatePending
+	}
+	if err := r.audit().Emit(nc.ctx, AuditEvent{
+		RunID:      nc.runID,
+		NodeID:     node.ID,
+		FromState:  string(from),
+		ToState:    string(state),
+		Reason:     reason,
+		Actor:      "system",
+		OccurredAt: res.Finished,
+	}); err != nil {
+		r.Logger.Warn("audit emit(finish) failed", "node", node.ID, "err", err)
+	}
+}
+
+// nodeModel returns the model id for AI nodes (Phase 1 swaps this for the
+// resolved role). For non-AI nodes it returns "" — the column allows NULL.
+func nodeModel(n *Node) string {
+	if n.Kind == KindAI && n.AI != nil {
+		return n.AI.Model
+	}
+	return ""
 }
 
 // runWithRetry executes the node's kind-specific logic, retrying on failure
 // according to policy. It mutates res in place.
 //
-//nolint:gocyclo // retry loop + kind dispatch; splitting further obscures intent
+//nolint:gocyclo // retry loop + kind dispatch + per-attempt recording
 func (r *Runner) runWithRetry(nc *nodeContext, node *Node, res *Result, policy *RetryPolicy) {
 	attempts := 0
 	for {
 		attempts++
+		attemptStart := time.Now()
 		r.dispatchKind(nc, node, res)
+		attemptFinish := time.Now()
 		res.Meta["attempts"] = attempts
+
+		state := NodeStateSucceeded
+		errClass := ""
+		errMsg := ""
+		if res.Error != nil {
+			state = NodeStateFailed
+			errClass = classifyError(res.Error)
+			errMsg = res.Error.Error()
+		}
+		r.recordAttempt(nc, node, attempts, state, attemptStart, attemptFinish, errClass, errMsg)
 
 		if res.Error == nil || policy == nil {
 			return
@@ -292,6 +547,28 @@ func (r *Runner) runWithRetry(nc *nodeContext, node *Node, res *Result, policy *
 			return
 		case <-time.After(delay):
 		}
+	}
+}
+
+// recordAttempt writes one node_attempts row. Called once per attempt
+// regardless of outcome — the row carries the attempt's state so retry
+// stats are queryable.
+func (r *Runner) recordAttempt(nc *nodeContext, node *Node, attemptNo int, state NodeState, started, finished time.Time, errClass, errMsg string) {
+	if nc.runID == "" {
+		return
+	}
+	if err := r.recorder().RecordAttempt(nc.ctx, AttemptRecord{
+		RunID:        nc.runID,
+		NodeID:       node.ID,
+		AttemptNo:    attemptNo,
+		State:        state,
+		ModelUsed:    nodeModel(node),
+		StartedAt:    started,
+		FinishedAt:   finished,
+		ErrorClass:   errClass,
+		ErrorMessage: errMsg,
+	}); err != nil {
+		r.Logger.Warn("recorder RecordAttempt failed", "node", node.ID, "attempt", attemptNo, "err", err)
 	}
 }
 
@@ -542,6 +819,7 @@ func (r *Runner) executeLoopParallel(nc *nodeContext, node *Node) (int, error) {
 				// not polluted; expose Iter via a dedicated key in outputs.
 				outputs: iterOutputs,
 				env:     nc.env,
+				runID:   nc.runID,
 			}
 
 			for _, id := range order {
