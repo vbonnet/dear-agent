@@ -152,6 +152,13 @@ func (w *Watcher) Stop() {
 	w.logger.Info("Astrocyte watcher stopped")
 }
 
+// LastPosition returns the watcher's last-read byte offset under lock.
+func (w *Watcher) LastPosition() int64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lastPosition
+}
+
 // initializeFilePosition sets the initial file position to the end of the file
 // so we only process new incidents, not historical ones
 func (w *Watcher) initializeFilePosition() error {
