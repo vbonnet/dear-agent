@@ -80,8 +80,9 @@ func runInstallHooks(cmd *cobra.Command, args []string) error {
 		"hooks/posttool-agm-state-notify":         filepath.Join(hooksDir, "posttool-agm-state-notify"),
 		"hooks/session-start-agm-state-ready":     filepath.Join(sessionStartDir, "agm-state-ready"),
 		"hooks/session-start-agm-plan-continuity": filepath.Join(sessionStartDir, "agm-plan-continuity"),
-		"hooks/agm-pretool-test-session-guard":        filepath.Join(hooksDir, "agm-pretool-test-session-guard"),
+		"hooks/agm-pretool-test-session-guard":    filepath.Join(hooksDir, "agm-pretool-test-session-guard"),
 		"hooks/pretool-agm-mode-tracker":          filepath.Join(hooksDir, "pretool-agm-mode-tracker"),
+		"hooks/stop-agm-resource-cleanup":         filepath.Join(hooksDir, "stop-agm-resource-cleanup"),
 	}
 
 	installed := 0
@@ -138,6 +139,11 @@ func runInstallHooks(cmd *cobra.Command, args []string) error {
 			Event:   "SessionStart",
 			Command: "~/.claude/hooks/session-start/agm-plan-continuity",
 			Timeout: 10,
+		},
+		{
+			Event:   "Stop",
+			Command: "~/.claude/hooks/stop-agm-resource-cleanup",
+			Timeout: 30,
 		},
 	}
 

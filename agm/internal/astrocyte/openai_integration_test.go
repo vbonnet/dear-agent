@@ -74,7 +74,7 @@ func TestOpenAIIncidentProcessing(t *testing.T) {
 	// Verify incident was processed
 	// Note: In a real test, we'd subscribe to the EventBus and verify the event was published
 	// For now, we just verify the watcher didn't crash and the file was read
-	if watcher.lastPosition == 0 {
+	if watcher.LastPosition() == 0 {
 		t.Error("Watcher did not process the incidents file")
 	}
 }
@@ -161,7 +161,7 @@ func TestMixedAgentIncidents(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	// Verify all incidents were processed
-	if watcher.lastPosition == 0 {
+	if watcher.LastPosition() == 0 {
 		t.Error("Watcher did not process the incidents file")
 	}
 
