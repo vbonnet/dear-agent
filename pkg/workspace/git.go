@@ -106,7 +106,7 @@ func (g *GitConfigManager) GenerateGitConfigFile(workspaceName string, config Gi
 	}
 
 	// Write file
-	if err := os.WriteFile(expandedPath, []byte(content.String()), 0644); err != nil {
+	if err := os.WriteFile(expandedPath, []byte(content.String()), 0o600); err != nil {
 		return "", fmt.Errorf("failed to write git config file: %w", err)
 	}
 
@@ -151,7 +151,7 @@ func (g *GitConfigManager) AddGitIncludeIf(workspaceRoot, configPath string) err
 	fmt.Fprintf(&newContent, "    path = %s\n", configPath)
 
 	// Write updated config
-	if err := os.WriteFile(globalConfigPath, []byte(newContent.String()), 0644); err != nil {
+	if err := os.WriteFile(globalConfigPath, []byte(newContent.String()), 0o600); err != nil {
 		return fmt.Errorf("failed to write global git config: %w", err)
 	}
 

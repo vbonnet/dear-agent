@@ -26,13 +26,13 @@ func Open(path string) (*DB, error) {
 	}
 
 	// Test the connection
-	if err := conn.Ping(); err != nil {
+	if err := conn.Ping(); err != nil { //nolint:noctx // TODO(context): plumb ctx through this layer
 		conn.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	// Apply schema
-	if _, err := conn.Exec(schemaSQL); err != nil {
+	if _, err := conn.Exec(schemaSQL); err != nil { //nolint:noctx // TODO(context): plumb ctx through this layer
 		conn.Close()
 		return nil, fmt.Errorf("failed to apply schema: %w", err)
 	}
@@ -50,7 +50,7 @@ func (db *DB) Close() error {
 
 // BeginTx starts a new transaction
 func (db *DB) BeginTx() (*sql.Tx, error) {
-	return db.conn.Begin()
+	return db.conn.Begin() //nolint:noctx // TODO(context): plumb ctx through this layer
 }
 
 // Conn returns the underlying database connection for direct access

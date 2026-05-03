@@ -34,7 +34,7 @@ func CheckLingering() (*LingerStatus, error) {
 	if _, err := exec.LookPath("loginctl"); err != nil {
 		status.LoginctlExists = false
 		status.ErrorMessage = "loginctl not found (systemd not available)"
-		return status, nil
+		return status, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 	status.LoginctlExists = true
 

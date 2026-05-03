@@ -57,10 +57,7 @@ func TestRecoverNoCommitStall(t *testing.T) {
 	if action.ActionType != "nudge" {
 		t.Errorf("ActionType = %v, want nudge", action.ActionType)
 	}
-	// Note: Sent will be false because our mock returns false for delivery
-	if !action.Sent {
-		// This is expected since our mock doesn't implement delivery
-	}
+	// Sent will be false because our mock doesn't implement delivery — that's expected.
 }
 
 func TestRecoverErrorLoopStall_WithOrchestrator(t *testing.T) {

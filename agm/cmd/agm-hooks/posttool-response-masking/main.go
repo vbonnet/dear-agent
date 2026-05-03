@@ -91,22 +91,22 @@ func (m *ResponseMasker) nextArchiveN() int {
 	if err != nil {
 		return 0
 	}
-	max := -1
+	highest := -1
 	for _, e := range entries {
 		name := e.Name()
 		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".txt") {
 			numStr := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".txt")
-			if n, err := strconv.Atoi(numStr); err == nil && n > max {
-				max = n
+			if n, err := strconv.Atoi(numStr); err == nil && n > highest {
+				highest = n
 			}
 		}
 	}
-	return max + 1
+	return highest + 1
 }
 
 // archive writes the full tool result to disk and returns the file path.
 func (m *ResponseMasker) archive() (string, error) {
-	if err := os.MkdirAll(m.archiveDir, 0755); err != nil {
+	if err := os.MkdirAll(m.archiveDir, 0o700); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", m.archiveDir, err)
 	}
 
@@ -114,7 +114,7 @@ func (m *ResponseMasker) archive() (string, error) {
 	filename := fmt.Sprintf("%s-%s-%d.txt", m.sessionID, m.toolName, n)
 	path := filepath.Join(m.archiveDir, filename)
 
-	if err := os.WriteFile(path, []byte(m.toolResult), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(m.toolResult), 0o600); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 

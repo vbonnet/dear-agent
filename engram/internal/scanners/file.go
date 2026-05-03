@@ -69,7 +69,7 @@ func (s *FileScanner) buildFileWalker(
 ) fs.WalkDirFunc {
 	return func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // Skip inaccessible paths
+			return nil //nolint:nilerr // Skip inaccessible paths
 		}
 
 		if s.shouldSkipEntry(d, path) {

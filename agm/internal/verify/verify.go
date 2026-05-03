@@ -393,7 +393,7 @@ func searchFiles(dir, pattern, globFilter string) []string {
 
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // skip errors
+			return nil //nolint:nilerr // skip errors
 		}
 		if info.IsDir() {
 			// Skip hidden dirs and common noise

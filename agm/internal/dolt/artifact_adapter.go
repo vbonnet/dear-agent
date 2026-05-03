@@ -52,7 +52,7 @@ func (aa *ArtifactAdapter) Store(artifact *artifacts.Artifact) error {
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
-	_, err := aa.adapter.conn.Exec(query,
+	_, err := aa.adapter.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		artifact.ID,
 		artifact.SessionID,
 		artifact.Type,
@@ -89,7 +89,7 @@ func (aa *ArtifactAdapter) Get(id string) (*artifacts.Artifact, error) {
 	var path sql.NullString
 	var size sql.NullInt64
 
-	err := aa.adapter.conn.QueryRow(query, id).Scan(
+	err := aa.adapter.conn.QueryRow(query, id).Scan( //nolint:noctx // TODO(context): plumb ctx through this layer
 		&artifact.ID,
 		&artifact.SessionID,
 		&artifact.Type,
@@ -138,7 +138,7 @@ func (aa *ArtifactAdapter) ListBySession(sessionID string) ([]*artifacts.Artifac
 		ORDER BY created_at ASC
 	`
 
-	rows, err := aa.adapter.conn.Query(query, sessionID)
+	rows, err := aa.adapter.conn.Query(query, sessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query artifacts: %w", err)
 	}
@@ -199,7 +199,7 @@ func (aa *ArtifactAdapter) Delete(id string) error {
 
 	query := `DELETE FROM agm_artifacts WHERE id = ?`
 
-	result, err := aa.adapter.conn.Exec(query, id)
+	result, err := aa.adapter.conn.Exec(query, id) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to delete artifact: %w", err)
 	}

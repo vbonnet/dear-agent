@@ -616,7 +616,11 @@ func renderGroupHeader(status string, count int) string {
 	case "active":
 		displayStatus = "ACTIVE"
 	default:
-		displayStatus = strings.Title(status)
+		// Status values are short ASCII tokens (e.g. "running"), so simple
+		// first-byte upper-case suffices.
+		if status != "" {
+			displayStatus = strings.ToUpper(status[:1]) + status[1:]
+		}
 	}
 	text := fmt.Sprintf("%s Sessions (%d)", displayStatus, count)
 	return getHeaderStyle().Render(text)

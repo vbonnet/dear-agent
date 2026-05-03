@@ -29,7 +29,7 @@ func (a *ArchiveManager) ArchivePhase(phaseName string) error {
 	archiveDir := filepath.Join(a.projectDir, ".wayfinder", "archives", phaseName+"-"+timestamp)
 
 	// Create archive directory
-	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+	if err := os.MkdirAll(archiveDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create archive directory: %w", err)
 	}
 
@@ -94,7 +94,7 @@ func copyFile(src, dst string) error {
 		return err
 	}
 
-	return os.WriteFile(dst, data, 0644)
+	return os.WriteFile(dst, data, 0o600)
 }
 
 // ArchiveInfo contains metadata about an archived phase

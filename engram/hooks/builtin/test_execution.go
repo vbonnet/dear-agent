@@ -47,7 +47,7 @@ func (te *TestExecutor) DetectFrameworks() ([]TestFramework, error) {
 	// Walk directory tree to find test files
 	err := filepath.Walk(te.projectRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // Skip errors, continue walking
+			return nil //nolint:nilerr // Skip errors, continue walking
 		}
 
 		// Skip hidden directories

@@ -207,7 +207,7 @@ func iTryToSendMessageToSession(ctx context.Context, sessionID string) (context.
 	adapter, err := env.GetAdapter("claude")
 	if err != nil {
 		env.LastError = err
-		return ctx, nil
+		return ctx, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	_, err = adapter.SendMessage(ctx, mock.SendMessageRequest{
@@ -283,8 +283,8 @@ func responseShouldComeFrom(ctx context.Context, agent string) error {
 	var agentCapitalized string
 	if agent == "gpt" {
 		agentCapitalized = "GPT"
-	} else {
-		agentCapitalized = strings.Title(agent)
+	} else if agent != "" {
+		agentCapitalized = strings.ToUpper(agent[:1]) + agent[1:]
 	}
 
 	expectedPrefix := fmt.Sprintf("%s received:", agentCapitalized)

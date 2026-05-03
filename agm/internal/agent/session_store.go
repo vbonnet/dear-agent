@@ -78,7 +78,7 @@ func NewJSONSessionStore(filePath string) (*JSONSessionStore, error) {
 
 	// Create directory if it doesn't exist
 	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create sessions directory: %w", err)
 	}
 
@@ -168,7 +168,7 @@ func (s *JSONSessionStore) save() error {
 
 	// Write to temp file first for atomic replacement
 	tempPath := s.filePath + ".tmp"
-	if err := os.WriteFile(tempPath, data, 0644); err != nil {
+	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write sessions file: %w", err)
 	}
 

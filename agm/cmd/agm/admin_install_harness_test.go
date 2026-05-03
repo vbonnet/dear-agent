@@ -39,11 +39,8 @@ func TestInstallHarnessCmd_ValidHarness(t *testing.T) {
 			}
 
 			// Verify command accepts the harness argument
+			// (ValidArgs is not required for ExactArgs; command validates at runtime)
 			cmd.SetArgs([]string{harness})
-			if len(cmd.ValidArgs) == 0 && harness != "" {
-				// ValidArgs is not strictly required for ExactArgs check
-				// Command will validate harness at runtime
-			}
 		})
 	}
 }

@@ -136,12 +136,12 @@ func (l *ResearchLogger) initializeLog() error {
 
 	// Ensure parent directory exists
 	dir := filepath.Dir(l.logPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create directory %s: %w", dir, err)
 	}
 
 	// Write to file
-	if err := os.WriteFile(l.logPath, []byte(content.String()), 0644); err != nil {
+	if err := os.WriteFile(l.logPath, []byte(content.String()), 0o600); err != nil {
 		return fmt.Errorf("write log file: %w", err)
 	}
 
@@ -270,7 +270,7 @@ func (l *ResearchLogger) updateLog() {
 	content.WriteString("_Will be generated after all research completes_\n")
 
 	// Write to file (ignore errors during update, best effort)
-	os.WriteFile(l.logPath, []byte(content.String()), 0644)
+	os.WriteFile(l.logPath, []byte(content.String()), 0o600)
 }
 
 // AddProposals adds the generated proposals to the log.
@@ -332,7 +332,7 @@ func (l *ResearchLogger) AddProposals(result ApplicationResult) error {
 	updatedContent += proposalsContent.String()
 
 	// Write updated log
-	if err := os.WriteFile(l.logPath, []byte(updatedContent), 0644); err != nil {
+	if err := os.WriteFile(l.logPath, []byte(updatedContent), 0o600); err != nil {
 		return fmt.Errorf("write updated log: %w", err)
 	}
 

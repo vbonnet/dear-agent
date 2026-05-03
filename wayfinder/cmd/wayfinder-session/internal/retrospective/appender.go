@@ -22,7 +22,7 @@ func AppendToS11(projectDir string, data *RewindEventData) error {
 
 	// Open file with O_APPEND (concurrent-safe atomic writes)
 	// Create if doesn't exist (0644 permissions)
-	file, err := os.OpenFile(s11Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(s11Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open %s: %w", S11Filename, err)
 	}

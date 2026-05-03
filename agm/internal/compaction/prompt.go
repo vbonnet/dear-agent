@@ -93,12 +93,12 @@ func NextPromptNumber(baseDir, sessionName string) (int, error) {
 // SavePrompt writes the compaction prompt to an audit trail file.
 func SavePrompt(baseDir, sessionName string, promptNumber int, content string) (string, error) {
 	dir := promptDir(baseDir)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create prompt dir: %w", err)
 	}
 	filename := fmt.Sprintf("%s-compact-%d.md", sessionName, promptNumber)
 	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return "", fmt.Errorf("write prompt file: %w", err)
 	}
 	return path, nil

@@ -63,7 +63,7 @@ func (a *Adapter) CreateMessage(msg *Message) error {
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	_, err = a.conn.Exec(query,
+	_, err = a.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		msg.ID,
 		msg.SessionID,
 		msg.Role,
@@ -90,12 +90,13 @@ func (a *Adapter) CreateMessages(messages []*Message) error {
 	}
 
 	// Start transaction for batch insert
-	tx, err := a.conn.Begin()
+	tx, err := a.conn.Begin() //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	stmt, err := tx.Prepare(`
 		INSERT INTO agm_messages (
 			id, session_id, role, content, timestamp, sequence_number,
@@ -131,7 +132,7 @@ func (a *Adapter) CreateMessages(messages []*Message) error {
 			}
 		}
 
-		_, err = stmt.Exec(
+		_, err = stmt.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
 			msg.ID,
 			msg.SessionID,
 			msg.Role,
@@ -169,7 +170,7 @@ func (a *Adapter) GetMessage(messageID string) (*Message, error) {
 		WHERE id = ?
 	`
 
-	row := a.conn.QueryRow(query, messageID)
+	row := a.conn.QueryRow(query, messageID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	return scanMessage(row)
 }
 
@@ -187,7 +188,7 @@ func (a *Adapter) GetSessionMessages(sessionID string) ([]*Message, error) {
 		ORDER BY sequence_number ASC
 	`
 
-	rows, err := a.conn.Query(query, sessionID)
+	rows, err := a.conn.Query(query, sessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query messages: %w", err)
 	}
@@ -235,7 +236,7 @@ func (a *Adapter) UpdateMessage(msg *Message) error {
 		WHERE id = ?
 	`
 
-	result, err := a.conn.Exec(query,
+	result, err := a.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		msg.Role,
 		msg.Content,
 		msg.Harness,
@@ -269,7 +270,7 @@ func (a *Adapter) DeleteMessage(messageID string) error {
 
 	query := `DELETE FROM agm_messages WHERE id = ?`
 
-	result, err := a.conn.Exec(query, messageID)
+	result, err := a.conn.Exec(query, messageID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to delete message: %w", err)
 	}
@@ -294,7 +295,7 @@ func (a *Adapter) DeleteSessionMessages(sessionID string) error {
 
 	query := `DELETE FROM agm_messages WHERE session_id = ?`
 
-	_, err := a.conn.Exec(query, sessionID)
+	_, err := a.conn.Exec(query, sessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to delete session messages: %w", err)
 	}

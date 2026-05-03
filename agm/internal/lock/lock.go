@@ -42,12 +42,12 @@ type LockInfo struct {
 func New(path string) (*FileLock, error) {
 	// Create lock directory if missing
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create lock directory: %w", err)
 	}
 
 	// Open lock file (create if missing)
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open lock file: %w", err)
 	}
@@ -135,7 +135,7 @@ func CheckLock(path string) (*LockInfo, error) {
 		// Invalid PID - stale
 		info.IsStale = true
 		info.CanUnlock = true
-		return info, nil
+		return info, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	info.PID = pid

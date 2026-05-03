@@ -172,7 +172,7 @@ func TestGeminiActivityTracker_PermissionDenied(t *testing.T) {
 func TestNewGeminiActivityTracker_DefaultPath(t *testing.T) {
 	tracker := NewGeminiActivityTracker()
 	if tracker == nil {
-		t.Errorf("Expected tracker, got nil")
+		t.Fatalf("Expected tracker, got nil")
 	}
 
 	// Check that baseDir is set (should be ~/.agm/gemini)

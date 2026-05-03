@@ -69,7 +69,7 @@ func GenerateSkills(ops []OpIR, outDir string) error {
 	}
 
 	skillsDir := filepath.Join(outDir, "skills")
-	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+	if err := os.MkdirAll(skillsDir, 0o700); err != nil {
 		return err
 	}
 
@@ -86,7 +86,7 @@ func GenerateSkills(ops []OpIR, outDir string) error {
 		if err := tmpl.Execute(&buf, data); err != nil {
 			return err
 		}
-		if err := os.WriteFile(outPath, []byte(buf.String()), 0o644); err != nil {
+		if err := os.WriteFile(outPath, []byte(buf.String()), 0o600); err != nil {
 			return err
 		}
 	}

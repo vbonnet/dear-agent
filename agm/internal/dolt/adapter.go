@@ -84,6 +84,7 @@ func DefaultConfig() (*Config, error) {
 			workspace == "main"
 
 		if isProductionWorkspace {
+			//nolint:staticcheck // multi-line CLI-facing help text
 			return nil, fmt.Errorf("TEST POLLUTION BLOCKED: Tests cannot write to production workspace '%s'\n\n"+
 				"Why: Production workspaces contain real data that tests would corrupt.\n\n"+
 				"Fix: Set ENGRAM_TEST_WORKSPACE to a test-specific value:\n"+
@@ -153,7 +154,7 @@ func New(config *Config) (*Adapter, error) {
 	}
 
 	// Test connection
-	if err := conn.Ping(); err != nil {
+	if err := conn.Ping(); err != nil { //nolint:noctx // TODO(context): plumb ctx through this layer
 		conn.Close()
 
 		// Try auto-start if script configured and not in test
@@ -171,7 +172,7 @@ func New(config *Config) (*Adapter, error) {
 				if err2 != nil {
 					continue
 				}
-				if err3 := conn2.Ping(); err3 == nil {
+				if err3 := conn2.Ping(); err3 == nil { //nolint:noctx // TODO(context): plumb ctx through this layer
 					return &Adapter{
 						conn:      conn2,
 						workspace: config.Workspace,
@@ -255,7 +256,7 @@ func (a *Adapter) Conn() *sql.DB {
 
 // BeginTx starts a new transaction
 func (a *Adapter) BeginTx() (*sql.Tx, error) {
-	return a.conn.Begin()
+	return a.conn.Begin() //nolint:noctx // TODO(context): plumb ctx through this layer
 }
 
 // Workspace returns the current workspace name

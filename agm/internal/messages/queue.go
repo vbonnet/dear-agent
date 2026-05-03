@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // sqlite3 driver
 )
 
 // QueueEntry represents a queued message waiting for delivery
@@ -92,19 +92,19 @@ func NewMessageQueue() (*MessageQueue, error) {
 	CREATE INDEX IF NOT EXISTS idx_queued_at ON message_queue(queued_at);
 	`
 
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(schema); err != nil { //nolint:noctx // TODO(context): plumb ctx through this layer
 		return nil, fmt.Errorf("failed to create schema: %w", err)
 	}
 
 	// Migrate existing databases to add ack columns if they don't exist
 	// This is safe because we're only adding columns with default values
 	// We ignore errors since the column might already exist
-	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_required INTEGER NOT NULL DEFAULT 1;`)
-	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_received INTEGER NOT NULL DEFAULT 0;`)
-	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_timeout TIMESTAMP;`)
+	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_required INTEGER NOT NULL DEFAULT 1;`) //nolint:noctx // TODO(context): plumb ctx through this layer
+	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_received INTEGER NOT NULL DEFAULT 0;`) //nolint:noctx // TODO(context): plumb ctx through this layer
+	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_timeout TIMESTAMP;`) //nolint:noctx // TODO(context): plumb ctx through this layer
 
 	// Create index if it doesn't exist (idempotent) - must be after ALTER TABLE
-	db.Exec(`CREATE INDEX IF NOT EXISTS idx_ack_required ON message_queue(ack_required, ack_received);`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_ack_required ON message_queue(ack_required, ack_received);`) //nolint:noctx // TODO(context): plumb ctx through this layer
 
 	return &MessageQueue{db: db}, nil
 }
@@ -119,6 +119,7 @@ func (q *MessageQueue) Close() error {
 
 // Enqueue adds a message to the queue
 func (q *MessageQueue) Enqueue(entry *QueueEntry) error {
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	_, err := q.db.Exec(`
 		INSERT INTO message_queue (message_id, from_session, to_session, message, priority, queued_at, status)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -150,7 +151,7 @@ func (q *MessageQueue) GetPending(sessionName string) ([]*QueueEntry, error) {
 			queued_at ASC
 	`
 
-	rows, err := q.db.Query(query, sessionName, StatusQueued)
+	rows, err := q.db.Query(query, sessionName, StatusQueued) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query pending messages: %w", err)
 	}
@@ -205,7 +206,7 @@ func (q *MessageQueue) GetAllPending() ([]*QueueEntry, error) {
 			queued_at ASC
 	`
 
-	rows, err := q.db.Query(query, StatusQueued)
+	rows, err := q.db.Query(query, StatusQueued) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query all pending messages: %w", err)
 	}
@@ -243,6 +244,7 @@ func (q *MessageQueue) GetAllPending() ([]*QueueEntry, error) {
 
 // MarkDelivered updates a message status to delivered
 func (q *MessageQueue) MarkDelivered(messageID string) error {
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	result, err := q.db.Exec(`
 		UPDATE message_queue
 		SET status = ?, last_attempt = ?
@@ -267,6 +269,7 @@ func (q *MessageQueue) MarkDelivered(messageID string) error {
 
 // MarkFailed increments attempt count and updates last attempt time
 func (q *MessageQueue) MarkFailed(messageID string) error {
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	result, err := q.db.Exec(`
 		UPDATE message_queue
 		SET attempt_count = attempt_count + 1, last_attempt = ?
@@ -291,6 +294,7 @@ func (q *MessageQueue) MarkFailed(messageID string) error {
 
 // IncrementAttempt increments the attempt count for a message
 func (q *MessageQueue) IncrementAttempt(messageID string) error {
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	result, err := q.db.Exec(`
 		UPDATE message_queue
 		SET attempt_count = attempt_count + 1, last_attempt = ?
@@ -315,6 +319,7 @@ func (q *MessageQueue) IncrementAttempt(messageID string) error {
 
 // MarkPermanentlyFailed marks a message as permanently failed (after max retries)
 func (q *MessageQueue) MarkPermanentlyFailed(messageID string) error {
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	result, err := q.db.Exec(`
 		UPDATE message_queue
 		SET status = ?, last_attempt = ?
@@ -341,6 +346,7 @@ func (q *MessageQueue) MarkPermanentlyFailed(messageID string) error {
 func (q *MessageQueue) CleanupOld(retentionDays int) (int64, error) {
 	cutoffTime := time.Now().AddDate(0, 0, -retentionDays)
 
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	result, err := q.db.Exec(`
 		DELETE FROM message_queue
 		WHERE status IN (?, ?) AND queued_at < ?
@@ -363,6 +369,7 @@ func (q *MessageQueue) GetStats() (map[string]int, error) {
 	stats := make(map[string]int)
 
 	// Count by status
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	rows, err := q.db.Query(`
 		SELECT status, COUNT(*) as count
 		FROM message_queue
@@ -387,6 +394,7 @@ func (q *MessageQueue) GetStats() (map[string]int, error) {
 
 // MarkAcknowledged marks a message as acknowledged
 func (q *MessageQueue) MarkAcknowledged(messageID string) error {
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	result, err := q.db.Exec(`
 		UPDATE message_queue
 		SET ack_received = 1
@@ -411,6 +419,7 @@ func (q *MessageQueue) MarkAcknowledged(messageID string) error {
 
 // MarkTimeout marks a message as having timed out waiting for acknowledgment
 func (q *MessageQueue) MarkTimeout(messageID string) error {
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	result, err := q.db.Exec(`
 		UPDATE message_queue
 		SET ack_timeout = ?
@@ -448,7 +457,7 @@ func (q *MessageQueue) GetByMessageID(messageID string) (*QueueEntry, error) {
 	var ackTimeout sql.NullTime
 	var ackRequired, ackReceived int
 
-	err := q.db.QueryRow(query, messageID).Scan(
+	err := q.db.QueryRow(query, messageID).Scan( //nolint:noctx // TODO(context): plumb ctx through this layer
 		&e.ID,
 		&e.MessageID,
 		&e.From,
@@ -496,7 +505,7 @@ func (q *MessageQueue) GetDLQ() ([]*QueueEntry, error) {
 		ORDER BY queued_at DESC
 	`
 
-	rows, err := q.db.Query(query, StatusFailed)
+	rows, err := q.db.Query(query, StatusFailed) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query DLQ: %w", err)
 	}
@@ -551,6 +560,7 @@ func (q *MessageQueue) GetDLQ() ([]*QueueEntry, error) {
 func (q *MessageQueue) RetryRecentlyFailed(within time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-within)
 
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	result, err := q.db.Exec(`
 		UPDATE message_queue
 		SET status = ?, attempt_count = 0, last_attempt = NULL
@@ -592,7 +602,7 @@ func (q *MessageQueue) GetQueueList(statusFilter string, limit int) ([]*QueueEnt
 		args = []interface{}{limit}
 	}
 
-	rows, err := q.db.Query(query, args...)
+	rows, err := q.db.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query queue list: %w", err)
 	}
@@ -650,7 +660,7 @@ func (q *MessageQueue) GetUnacknowledged() ([]*QueueEntry, error) {
 		ORDER BY queued_at ASC
 	`
 
-	rows, err := q.db.Query(query, StatusDelivered)
+	rows, err := q.db.Query(query, StatusDelivered) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query unacknowledged: %w", err)
 	}
@@ -704,6 +714,7 @@ func (q *MessageQueue) GetUnacknowledged() ([]*QueueEntry, error) {
 // Returns the total number of rows updated.
 func (q *MessageQueue) RenameSession(oldName, newName string) (int, error) {
 	// Update to_session
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	result1, err := q.db.Exec(`
 		UPDATE message_queue SET to_session = ? WHERE to_session = ?
 	`, newName, oldName)
@@ -713,6 +724,7 @@ func (q *MessageQueue) RenameSession(oldName, newName string) (int, error) {
 	count1, _ := result1.RowsAffected()
 
 	// Update from_session
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	result2, err := q.db.Exec(`
 		UPDATE message_queue SET from_session = ? WHERE from_session = ?
 	`, newName, oldName)

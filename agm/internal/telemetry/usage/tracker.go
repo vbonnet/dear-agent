@@ -37,7 +37,7 @@ func New(filePath string) (*Tracker, error) {
 		}
 
 		engramDir := filepath.Join(home, ".engram")
-		if err := os.MkdirAll(engramDir, 0755); err != nil {
+		if err := os.MkdirAll(engramDir, 0o700); err != nil {
 			return nil, fmt.Errorf("failed to create .engram directory: %w", err)
 		}
 
@@ -66,7 +66,7 @@ func (t *Tracker) trackSync(event Event) error {
 	}
 
 	// Open file in append mode
-	f, err := os.OpenFile(t.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(t.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		// Silently fail - we don't want to break CLI if tracking fails
 		return fmt.Errorf("failed to open usage file: %w", err)

@@ -59,7 +59,7 @@ func (db *DB) SearchSessions(query string, opts *SearchOptions) ([]*manifest.Man
 	sqlQuery, args := buildSearchSQL(ftsQuery, opts)
 
 	// Execute query
-	rows, err := db.conn.Query(sqlQuery, args...)
+	rows, err := db.conn.Query(sqlQuery, args...) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("search query failed: %w", err)
 	}

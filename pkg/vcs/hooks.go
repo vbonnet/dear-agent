@@ -136,7 +136,7 @@ func InstallPreCommitHook(repoDir string) error {
 	}
 
 	hooksDir := filepath.Join(gitDir, "hooks")
-	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+	if err := os.MkdirAll(hooksDir, 0o700); err != nil {
 		return fmt.Errorf("create hooks dir: %w", err)
 	}
 
@@ -144,7 +144,7 @@ func InstallPreCommitHook(repoDir string) error {
 
 	// Write to temp file then rename (atomic write pattern)
 	tmpPath := hookPath + ".tmp"
-	if err := os.WriteFile(tmpPath, []byte(preCommitHookScript), 0755); err != nil {
+	if err := os.WriteFile(tmpPath, []byte(preCommitHookScript), 0o700); err != nil { //#nosec G306 -- executable hook
 		return fmt.Errorf("write hook: %w", err)
 	}
 

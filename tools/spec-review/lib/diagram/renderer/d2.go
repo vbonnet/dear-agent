@@ -42,7 +42,7 @@ func (r *D2Renderer) Render(ctx context.Context, source io.Reader, dest io.Write
 
 	// Write source to temp file
 	sourceFile := filepath.Join(tempDir, "diagram.d2")
-	if err := os.WriteFile(sourceFile, sourceData, 0644); err != nil {
+	if err := os.WriteFile(sourceFile, sourceData, 0o600); err != nil {
 		return fmt.Errorf("failed to write D2 source file: %w", err)
 	}
 

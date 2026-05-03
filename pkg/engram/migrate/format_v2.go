@@ -87,7 +87,7 @@ func migrateFile(path string, opts Options, stats *Stats) error {
 
 	// Write migrated content (unless dry-run)
 	if !opts.DryRun {
-		if err := os.WriteFile(path, []byte(migrated), 0644); err != nil {
+		if err := os.WriteFile(path, []byte(migrated), 0o600); err != nil {
 			return fmt.Errorf("failed to write file: %w", err)
 		}
 		slog.Info("tier markers added", "file", path)

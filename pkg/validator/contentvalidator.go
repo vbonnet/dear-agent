@@ -90,16 +90,9 @@ func NewContentValidator(contentDir string, autoFix bool) (*ContentValidator, er
 		fixesApplied: make([]string, 0),
 	}
 
-	// Load configuration files
-	if err := v.loadCoreFiles(); err != nil {
-		// Non-fatal: core files list is optional
-		// Continue with empty set
-	}
-
-	if err := v.loadTokenBudgets(); err != nil {
-		// Non-fatal: token budgets are optional
-		// Continue with empty budgets
-	}
+	// Load configuration files; both are optional, so failures are ignored.
+	_ = v.loadCoreFiles()
+	_ = v.loadTokenBudgets()
 
 	return v, nil
 }
@@ -285,7 +278,7 @@ func (v *ContentValidator) getRelativePath(absPath string) (string, error) {
 	relPath, err := filepath.Rel(v.contentDir, absPath)
 	if err != nil {
 		// If we can't get relative path, use the filename
-		return filepath.Base(absPath), nil
+		return filepath.Base(absPath), nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 	return relPath, nil
 }
@@ -426,7 +419,7 @@ func (v *ContentValidator) updateTokenCount(filepath string, newCount int) error
 	newContent := fmt.Sprintf("---\n%s---\n%s", buf.String(), body)
 
 	// Write back
-	if err := os.WriteFile(filepath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(filepath, []byte(newContent), 0o600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 

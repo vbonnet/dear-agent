@@ -290,11 +290,7 @@ invalid: [yaml: {
 
 // TestApplyFailureBoosting_AllErrorCategories verifies boosting works for all 5 error categories
 func TestApplyFailureBoosting_AllErrorCategories(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "boosting-categories-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create reflections for each error category
 	categories := []struct {
@@ -312,7 +308,7 @@ func TestApplyFailureBoosting_AllErrorCategories(t *testing.T) {
 		// Create reflection with this category
 		content := "---\ntype: strategy\nerror_category: " + string(cat.category) + "\n---\n\n# Test\n"
 		path := filepath.Join(tmpDir, string(cat.category)+".ai.md")
-		err = os.WriteFile(path, []byte(content), 0644)
+		err := os.WriteFile(path, []byte(content), 0o600)
 		if err != nil {
 			t.Fatalf("failed to write reflection for %s: %v", cat.category, err)
 		}

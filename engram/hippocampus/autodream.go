@@ -399,7 +399,7 @@ func (a *Autodream) archiveOldestTopics(state *MemoryState, count int) []string 
 	var archived []string
 
 	for _, tf := range sorted[:count] {
-		if err := os.MkdirAll(archiveDir, 0o755); err != nil {
+		if err := os.MkdirAll(archiveDir, 0o700); err != nil {
 			continue
 		}
 		dest := filepath.Join(archiveDir, tf.Name)
@@ -484,7 +484,7 @@ func (a *Autodream) loadTopicFiles() ([]TopicFile, error) {
 // Creates .bak backup, writes to temp file, then renames.
 func atomicWriteFile(path string, content []byte) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create directory: %w", err)
 	}
 
@@ -493,7 +493,7 @@ func atomicWriteFile(path string, content []byte) error {
 		backupPath := path + ".bak"
 		data, err := os.ReadFile(path)
 		if err == nil {
-			_ = os.WriteFile(backupPath, data, 0o644)
+			_ = os.WriteFile(backupPath, data, 0o600)
 		}
 	}
 
@@ -684,8 +684,8 @@ func generateDiff(original, updated string) string {
 	newLines := strings.Split(updated, "\n")
 
 	var diff strings.Builder
-	diff.WriteString(fmt.Sprintf("--- MEMORY.md (before)\n+++ MEMORY.md (after)\n"))
-	diff.WriteString(fmt.Sprintf("@@ -%d lines +%d lines @@\n", len(origLines), len(newLines)))
+	diff.WriteString("--- MEMORY.md (before)\n+++ MEMORY.md (after)\n")
+	fmt.Fprintf(&diff, "@@ -%d lines +%d lines @@\n", len(origLines), len(newLines))
 
 	// Simple line-by-line diff (not unified, but informative)
 	maxLines := len(origLines)

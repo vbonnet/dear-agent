@@ -202,7 +202,7 @@ func (v *Validator) countFilesInDir(dir string) int {
 	count := 0
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 		if !info.IsDir() && v.isSourceFile(path) {
 			count++

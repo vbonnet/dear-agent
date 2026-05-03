@@ -110,7 +110,7 @@ func InitializeDoltDatabase(workspaceRoot string) error {
 	}
 
 	// Create .dolt directory
-	if err := os.MkdirAll(doltDir, 0755); err != nil {
+	if err := os.MkdirAll(doltDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create .dolt directory: %w", err)
 	}
 
@@ -177,7 +177,7 @@ performance:
   query_parallelism: 4
 `, port, filepath.Join(doltDir, "dolt-db"))
 
-	if err := os.WriteFile(serverConfigPath, []byte(config), 0644); err != nil {
+	if err := os.WriteFile(serverConfigPath, []byte(config), 0o600); err != nil {
 		return fmt.Errorf("failed to write server.yaml: %w", err)
 	}
 

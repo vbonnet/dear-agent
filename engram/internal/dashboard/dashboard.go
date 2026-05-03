@@ -77,6 +77,7 @@ func openStorage(path string) (*agent.Storage, error) {
 			if dbPath == "" {
 				dbPath = agent.DefaultDatabasePath()
 			}
+			//nolint:revive,staticcheck // multi-line CLI-facing help text
 			return nil, fmt.Errorf("telemetry database not found: %s\n\nRun 'engram-telemetry' to initialize telemetry collection.", dbPath)
 		}
 		return nil, fmt.Errorf("failed to open telemetry database: %w", err)
@@ -100,6 +101,7 @@ func checkDataExists(storage *agent.Storage) error {
 	}
 
 	if stats.Total == 0 {
+		//nolint:revive,staticcheck // multi-line CLI-facing help text
 		return fmt.Errorf("no agent launches found in telemetry database.\n\nRun 'engram-telemetry' to start collecting data.")
 	}
 

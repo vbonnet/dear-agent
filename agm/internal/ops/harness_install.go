@@ -61,7 +61,7 @@ func IsInstalled(ctx context.Context, harness HarnessType) (bool, string, error)
 
 	path, err := exec.LookPath(cmd)
 	if err != nil {
-		return false, "", nil
+		return false, "", nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 	return true, path, nil
 }
@@ -137,10 +137,13 @@ func InstallCodex(ctx context.Context) *HarnessInstallResult {
 	}
 
 	// Verify installation
-	installed, path, err = IsInstalled(ctx, HarnessCodex)
-	if !installed {
+	installed, path, verifyErr := IsInstalled(ctx, HarnessCodex)
+	if verifyErr != nil || !installed {
 		result.Success = false
 		result.Message = "Installation completed but codex binary not found in PATH"
+		if verifyErr != nil {
+			result.ErrorDetails = verifyErr.Error()
+		}
 		return result
 	}
 
@@ -205,10 +208,13 @@ func InstallGemini(ctx context.Context) *HarnessInstallResult {
 	}
 
 	// Verify installation
-	installed, path, err = IsInstalled(ctx, HarnessGemini)
-	if !installed {
+	installed, path, verifyErr := IsInstalled(ctx, HarnessGemini)
+	if verifyErr != nil || !installed {
 		result.Success = false
 		result.Message = "Installation completed but gemini binary not found in PATH"
+		if verifyErr != nil {
+			result.ErrorDetails = verifyErr.Error()
+		}
 		return result
 	}
 
@@ -273,10 +279,13 @@ func InstallOpenCode(ctx context.Context) *HarnessInstallResult {
 	}
 
 	// Verify installation
-	installed, path, err = IsInstalled(ctx, HarnessOpenCode)
-	if !installed {
+	installed, path, verifyErr := IsInstalled(ctx, HarnessOpenCode)
+	if verifyErr != nil || !installed {
 		result.Success = false
 		result.Message = "Installation completed but opencode binary not found in PATH"
+		if verifyErr != nil {
+			result.ErrorDetails = verifyErr.Error()
+		}
 		return result
 	}
 

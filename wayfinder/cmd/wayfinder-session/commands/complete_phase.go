@@ -141,7 +141,7 @@ func countFiles(root string, filter func(string) bool) int {
 	count := 0
 	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info == nil || info.IsDir() {
-			return nil
+			return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 		// Skip excluded directories
 		if shouldExcludeDir(path) {

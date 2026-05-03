@@ -594,7 +594,7 @@ func (e *ReviewEngine) GenerateReport(result *ReviewResult) string {
 // SaveReportToFile writes the review report to a file
 func (e *ReviewEngine) SaveReportToFile(result *ReviewResult, outputPath string) error {
 	report := e.GenerateReport(result)
-	return os.WriteFile(outputPath, []byte(report), 0644)
+	return os.WriteFile(outputPath, []byte(report), 0o600)
 }
 
 // SaveReportJSON writes the review result as JSON
@@ -604,5 +604,5 @@ func (e *ReviewEngine) SaveReportJSON(result *ReviewResult, outputPath string) e
 		return fmt.Errorf("failed to marshal review result: %w", err)
 	}
 
-	return os.WriteFile(outputPath, data, 0644)
+	return os.WriteFile(outputPath, data, 0o600)
 }

@@ -63,7 +63,7 @@ func RecordMergeDuration(d time.Duration) error {
 		return fmt.Errorf("cannot determine metrics path")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create metrics dir: %w", err)
 	}
 
@@ -77,7 +77,7 @@ func RecordMergeDuration(d time.Duration) error {
 		return fmt.Errorf("marshal merge duration: %w", err)
 	}
 
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 // LoadMergeDuration loads the most recent merge duration from disk.

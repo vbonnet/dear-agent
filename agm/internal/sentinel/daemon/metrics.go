@@ -111,7 +111,7 @@ func (mc *MetricsCollector) Flush() error {
 	}
 
 	dir := filepath.Dir(mc.metricsFile)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 
@@ -119,5 +119,5 @@ func (mc *MetricsCollector) Flush() error {
 	mc.lastFlush = time.Now()
 	mc.mu.Unlock()
 
-	return os.WriteFile(mc.metricsFile, data, 0o644)
+	return os.WriteFile(mc.metricsFile, data, 0o600)
 }

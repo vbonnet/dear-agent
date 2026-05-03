@@ -80,7 +80,7 @@ func (dc *DiskCache) Get() (*Identity, error) {
 	if err := json.Unmarshal(data, &identity); err != nil {
 		// Cache corrupted, delete it
 		_ = os.Remove(dc.path)
-		return nil, nil
+		return nil, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Verify DetectedAt is set and within TTL

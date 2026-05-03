@@ -401,7 +401,7 @@ func (b *DockerBackend) CheckDelivery(ctx context.Context, id manager.SessionID)
 
 	state, err := b.client.InspectContainer(ctx, rec.containerID)
 	if err != nil {
-		return manager.CanReceiveQueue, nil
+		return manager.CanReceiveQueue, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	if !state.Running {

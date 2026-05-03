@@ -49,7 +49,7 @@ func ApplyFieldMask(v any, fields []string) (json.RawMessage, error) {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(data, &m); err != nil {
 		// Not an object — return as-is
-		return data, nil
+		return data, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	filtered := make(map[string]json.RawMessage, len(fields))

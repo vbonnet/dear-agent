@@ -28,7 +28,7 @@ func NewTier1Fixer(workspace string) *Tier1Fixer {
 
 // CreateMissingDirectory creates a directory if missing (Tier 1 Operation 1)
 func (f *Tier1Fixer) CreateMissingDirectory(path string) error {
-	if err := os.MkdirAll(path, 0755); err != nil {
+	if err := os.MkdirAll(path, 0o700); err != nil {
 		return fmt.Errorf("create directory: %w", err)
 	}
 	return nil
@@ -255,7 +255,7 @@ func (f *Tier1Fixer) fixHookScriptPermissions() error {
 	hooksDir := filepath.Join(os.Getenv("HOME"), ".claude", "hooks")
 	entries, err := os.ReadDir(hooksDir)
 	if err != nil {
-		return nil // No hooks dir, nothing to fix
+		return nil //nolint:nilerr // No hooks dir, nothing to fix
 	}
 
 	for _, entry := range entries {
@@ -268,7 +268,7 @@ func (f *Tier1Fixer) fixHookScriptPermissions() error {
 			continue
 		}
 		if info.Mode()&0111 == 0 {
-			if err := f.FixPermissions(path, 0755); err != nil {
+			if err := f.FixPermissions(path, 0o700); err != nil {
 				return err
 			}
 		}
@@ -283,7 +283,7 @@ func (f *Tier1Fixer) fixHookExtensionMismatches() error {
 	settingsPath := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
 	settingsData, err := os.ReadFile(settingsPath)
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Fix settings.json itself first
@@ -338,12 +338,12 @@ func (f *Tier1Fixer) fixExtensionsInFile(filePath string, data []byte) error {
 	if modified {
 		// Back up original
 		backupPath := filePath + ".bak"
-		if err := os.WriteFile(backupPath, data, 0644); err != nil {
+		if err := os.WriteFile(backupPath, data, 0o600); err != nil {
 			return fmt.Errorf("backup file: %w", err)
 		}
 
 		// Write fixed content
-		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
 			return fmt.Errorf("write fixed file: %w", err)
 		}
 	}
@@ -356,7 +356,7 @@ func (f *Tier1Fixer) fixHookPaths() error {
 	settingsPath := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
 	settingsData, err := os.ReadFile(settingsPath)
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Fix settings.json itself first
@@ -433,12 +433,12 @@ func (f *Tier1Fixer) fixPathsInFile(filePath string, data []byte) error {
 	if modified {
 		// Back up original
 		backupPath := filePath + ".bak"
-		if err := os.WriteFile(backupPath, data, 0644); err != nil {
+		if err := os.WriteFile(backupPath, data, 0o600); err != nil {
 			return fmt.Errorf("backup file: %w", err)
 		}
 
 		// Write fixed content
-		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
 			return fmt.Errorf("write fixed file: %w", err)
 		}
 	}
@@ -451,7 +451,7 @@ func (f *Tier1Fixer) removeNonExistentHooks() error {
 	settingsPath := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Parse settings
@@ -462,7 +462,7 @@ func (f *Tier1Fixer) removeNonExistentHooks() error {
 
 	// Back up original
 	backupPath := settingsPath + ".bak"
-	if err := os.WriteFile(backupPath, data, 0644); err != nil {
+	if err := os.WriteFile(backupPath, data, 0o600); err != nil {
 		return fmt.Errorf("backup settings.json: %w", err)
 	}
 
@@ -556,7 +556,7 @@ func (f *Tier1Fixer) removeNonExistentHooks() error {
 		}
 		out = append(out, '\n')
 
-		if err := os.WriteFile(settingsPath, out, 0644); err != nil {
+		if err := os.WriteFile(settingsPath, out, 0o600); err != nil {
 			return fmt.Errorf("write settings.json: %w", err)
 		}
 	}
@@ -570,12 +570,12 @@ func (f *Tier1Fixer) fixMarketplaceConfig() error {
 
 	data, err := os.ReadFile(mktPath)
 	if err != nil {
-		return nil // Nothing to fix
+		return nil //nolint:nilerr // Nothing to fix
 	}
 
 	// Back up original
 	backupPath := mktPath + ".bak"
-	if err := os.WriteFile(backupPath, data, 0644); err != nil {
+	if err := os.WriteFile(backupPath, data, 0o600); err != nil {
 		return fmt.Errorf("backup marketplace config: %w", err)
 	}
 
@@ -583,7 +583,7 @@ func (f *Tier1Fixer) fixMarketplaceConfig() error {
 	var marketplaces map[string]json.RawMessage
 	if err := json.Unmarshal(data, &marketplaces); err != nil {
 		// Completely malformed — write empty object
-		if err := os.WriteFile(mktPath, []byte("{}"), 0644); err != nil {
+		if err := os.WriteFile(mktPath, []byte("{}"), 0o600); err != nil {
 			return fmt.Errorf("write empty marketplace config: %w", err)
 		}
 		return nil
@@ -625,7 +625,7 @@ func (f *Tier1Fixer) fixMarketplaceConfig() error {
 	}
 	out = append(out, '\n')
 
-	if err := os.WriteFile(mktPath, out, 0644); err != nil {
+	if err := os.WriteFile(mktPath, out, 0o600); err != nil {
 		return fmt.Errorf("write cleaned marketplace config: %w", err)
 	}
 

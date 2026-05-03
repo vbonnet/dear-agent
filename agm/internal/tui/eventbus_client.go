@@ -355,7 +355,7 @@ func (c *EventBusClient) pollHTTPEvents() {
 	endpoint := fmt.Sprintf("%s/api/events?session_id=%s&since=%d",
 		httpURL, sessionID, lastEventTime.Unix())
 
-	resp, err := c.httpClient.Get(endpoint)
+	resp, err := c.httpClient.Get(endpoint) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		c.logger.Warn("HTTP polling failed", "error", err)
 		return

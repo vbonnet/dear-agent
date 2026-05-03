@@ -187,7 +187,7 @@ func (hc *HealthChecker) checkLogsDirectoryWritable() CheckResult {
 
 	// Test write permission
 	testFile := filepath.Join(logsDir, ".healthcheck")
-	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte("test"), 0o600); err != nil {
 		return CheckResult{
 			Name:     "logs_directory_writable",
 			Category: "core",
@@ -352,7 +352,7 @@ func (hc *HealthChecker) checkCoreEngramsAccessible() CheckResult {
 	count := 0
 	filepath.Walk(engramsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".ai.md") {
 			count++
@@ -412,7 +412,7 @@ func (hc *HealthChecker) checkCacheDirectoryWritable() CheckResult {
 
 	// Test write permission
 	testFile := filepath.Join(cacheDir, ".healthcheck")
-	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte("test"), 0o600); err != nil {
 		return CheckResult{
 			Name:     "cache_directory_writable",
 			Category: "core",

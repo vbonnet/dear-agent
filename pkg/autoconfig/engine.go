@@ -133,7 +133,7 @@ func (e *Engine) writeConfig(proposals []Proposal) error {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 
@@ -149,7 +149,7 @@ func (e *Engine) writeConfig(proposals []Proposal) error {
 	}
 
 	// Write as YAML-compatible JSON (valid YAML subset).
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 func (e *Engine) logModification(sessionID string, proposals []Proposal, applied bool) error {
@@ -158,11 +158,11 @@ func (e *Engine) logModification(sessionID string, proposals []Proposal, applied
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return err
 	}
 
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}

@@ -102,14 +102,14 @@ func (t *Tracker) emitEvent(event map[string]any) error {
 		return fmt.Errorf("get home directory: %w", err)
 	}
 	telemetryDir := filepath.Join(home, ".engram", "telemetry")
-	err = os.MkdirAll(telemetryDir, 0755)
+	err = os.MkdirAll(telemetryDir, 0o700)
 	if err != nil {
 		return fmt.Errorf("create telemetry directory: %w", err)
 	}
 	now := time.Now().UTC()
 	filename := fmt.Sprintf("%d-%02d.jsonl", now.Year(), now.Month())
 	telemetryFile := filepath.Join(telemetryDir, filename)
-	file, err := os.OpenFile(telemetryFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(telemetryFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open telemetry file: %w", err)
 	}

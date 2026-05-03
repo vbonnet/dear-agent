@@ -84,10 +84,10 @@ func runConfigApplyHarnessEffort(cmd *cobra.Command, args []string) error {
 
 func writeOutputFile(out harnesseffort.OutputFile) error {
 	dir := filepath.Dir(out.Path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating directory %s: %w", dir, err)
 	}
-	if err := os.WriteFile(out.Path, out.Content, 0o644); err != nil {
+	if err := os.WriteFile(out.Path, out.Content, 0o600); err != nil {
 		return fmt.Errorf("writing %s: %w", out.Path, err)
 	}
 	return nil

@@ -53,7 +53,7 @@ func (p *SimpleFileProvider) StoreMemory(ctx context.Context, namespace []string
 	filePath := p.getMemoryPath(namespace, memory.ID)
 
 	// 4. Create parent directories
-	if err = os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+	if err = os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
 		return fmt.Errorf("store memory: create directory: %w", err)
 	}
 
@@ -65,7 +65,7 @@ func (p *SimpleFileProvider) StoreMemory(ctx context.Context, namespace []string
 	}
 
 	// 6. Write to file atomically
-	if err = os.WriteFile(filePath, data, 0644); err != nil {
+	if err = os.WriteFile(filePath, data, 0o600); err != nil {
 		return fmt.Errorf("store memory: write file: %w", err)
 	}
 
@@ -231,7 +231,7 @@ func (p *SimpleFileProvider) UpdateMemory(ctx context.Context, namespace []strin
 		return fmt.Errorf("update memory: serialize: %w", err)
 	}
 
-	if err = os.WriteFile(filePath, data, 0644); err != nil {
+	if err = os.WriteFile(filePath, data, 0o600); err != nil {
 		return fmt.Errorf("update memory: write file: %w", err)
 	}
 

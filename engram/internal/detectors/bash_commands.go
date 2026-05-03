@@ -46,21 +46,14 @@ func (d *BashCommandPatternDetector) Detect(ctx context.Context, input DetectorI
 	// Check each pattern
 	for ruleID, pattern := range d.patterns {
 		if pattern.MatchString(input.Content) {
-			// Find corresponding rule for message
-			var ruleMessage string
-			var ruleConfidence = telemetry.ConfidenceHigh // Default
+			// Find rule confidence (message is unused by ViolationEvent today)
+			ruleConfidence := telemetry.ConfidenceHigh // Default
 
 			for _, r := range input.Rules {
 				if r.ID == ruleID {
-					ruleMessage = r.Message
 					ruleConfidence = r.Confidence
 					break
 				}
-			}
-
-			// Use default message if rule not provided
-			if ruleMessage == "" {
-				ruleMessage = getDefaultMessage(ruleID)
 			}
 
 			violation := telemetry.ViolationEvent{
@@ -82,21 +75,6 @@ func (d *BashCommandPatternDetector) Detect(ctx context.Context, input DetectorI
 	}
 
 	return violations, nil
-}
-
-// getDefaultMessage returns default message for rule ID
-func getDefaultMessage(ruleID string) string {
-	messages := map[string]string{
-		"never_use_cd_and":   "Never use 'cd ... &&' pattern - use -C flag instead",
-		"never_use_cat":      "Never use 'cat file' - use Read tool instead",
-		"never_use_grep":     "Never use 'grep' command - use Grep tool instead",
-		"never_use_for_loop": "Never use bash for loops - use parallel tool calls instead",
-	}
-
-	if msg, ok := messages[ruleID]; ok {
-		return msg
-	}
-	return "Bash anti-pattern detected"
 }
 
 // getMetadata retrieves metadata value with fallback

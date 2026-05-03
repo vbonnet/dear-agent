@@ -82,10 +82,10 @@ func runWikiQuerySave(cmd *cobra.Command, _ []string) error {
 
 	content := buildQueryPage(wikiQuerySaveQuery, wikiQuerySaveAnswer, outRel)
 
-	if mkdirErr := os.MkdirAll(filepath.Dir(absOut), 0o755); mkdirErr != nil {
+	if mkdirErr := os.MkdirAll(filepath.Dir(absOut), 0o700); mkdirErr != nil {
 		return fmt.Errorf("cannot create directory: %w", mkdirErr)
 	}
-	if writeErr := os.WriteFile(absOut, []byte(content), 0o644); writeErr != nil {
+	if writeErr := os.WriteFile(absOut, []byte(content), 0o600); writeErr != nil {
 		return fmt.Errorf("failed to write page: %w", writeErr)
 	}
 	fmt.Printf("✅ Saved: %s\n", outRel)

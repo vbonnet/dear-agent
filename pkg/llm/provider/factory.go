@@ -140,7 +140,7 @@ func (f *Factory) newGeminiProvider(authMethod auth.AuthMethod, model string) (P
 	switch authMethod {
 	case auth.AuthVertexAI:
 		// TODO: Implement VertexAIGeminiProvider
-		return nil, fmt.Errorf("Vertex AI Gemini provider not yet implemented")
+		return nil, fmt.Errorf("Vertex AI Gemini provider not yet implemented") //nolint:staticcheck // proper noun
 
 	case auth.AuthAPIKey:
 		// TODO: Implement GeminiProvider

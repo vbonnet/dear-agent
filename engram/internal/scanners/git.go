@@ -55,7 +55,7 @@ func (s *GitScanner) Scan(ctx context.Context, req *metacontext.AnalyzeRequest) 
 	if err != nil {
 		// Graceful degradation: corrupted repo, detached HEAD, etc.
 		// Log warning, emit telemetry, but continue analysis
-		return signals, nil
+		return signals, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Parse output for signals (currently minimal, could extract commit patterns)

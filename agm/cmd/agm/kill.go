@@ -277,7 +277,7 @@ Do you still want to proceed with hard kill?`, sessionName, sessionName))
 
 		if err != nil || !confirmed {
 			fmt.Println("Cancelled")
-			return nil
+			return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 	} else {
 		// Deadlock detected, confirm kill
@@ -302,7 +302,7 @@ This is an irreversible action.`, info.PID)
 
 		if err != nil || !confirmed {
 			fmt.Println("Cancelled")
-			return nil
+			return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 	}
 

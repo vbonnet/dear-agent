@@ -109,7 +109,7 @@ func (b *TmuxBackend) GetSession(_ context.Context, id manager.SessionID) (manag
 	// Get attachment info
 	sessions, err := tmux.ListSessionsWithInfo()
 	if err != nil {
-		return manager.SessionInfo{
+		return manager.SessionInfo{ //nolint:nilerr // intentional: caller signals via separate bool/optional
 			ID:    id,
 			Name:  name,
 			State: manager.StateIdle,
@@ -217,7 +217,7 @@ func (b *TmuxBackend) GetState(_ context.Context, id manager.SessionID) (manager
 
 	paneContent, err := tmux.CapturePaneOutput(name, 30)
 	if err != nil {
-		return manager.StateResult{
+		return manager.StateResult{ //nolint:nilerr // intentional: caller signals via separate bool/optional
 			State:      manager.StateIdle,
 			Confidence: 0.5,
 			Evidence:   "cannot read terminal content, defaulting to IDLE",
@@ -251,12 +251,12 @@ func (b *TmuxBackend) CheckDelivery(_ context.Context, id manager.SessionID) (ma
 
 	exists, err := tmux.HasSession(name)
 	if err != nil || !exists {
-		return manager.CanReceiveNotFound, nil
+		return manager.CanReceiveNotFound, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	paneContent, err := tmux.CapturePaneOutput(name, 30)
 	if err != nil {
-		return manager.CanReceiveQueue, nil
+		return manager.CanReceiveQueue, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	detector := state.NewDetector()

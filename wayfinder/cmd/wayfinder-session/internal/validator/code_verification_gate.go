@@ -520,7 +520,7 @@ func updateCodeVerificationCache(projectDir string, cache *CodeVerificationCache
 	cachePath := filepath.Join(cacheDir, cache.BeadID+".json")
 
 	// Create cache directory if it doesn't exist
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
@@ -531,7 +531,7 @@ func updateCodeVerificationCache(projectDir string, cache *CodeVerificationCache
 	}
 
 	// Write cache file
-	if err := os.WriteFile(cachePath, data, 0644); err != nil {
+	if err := os.WriteFile(cachePath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write cache file: %w", err)
 	}
 
