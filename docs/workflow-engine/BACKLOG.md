@@ -141,17 +141,17 @@ round-trip P95 < 50 ms on 10K rows.
 
 **Goal:** real workloads run on the engine; the inner-loop iteration
 experience matches the synthesis's "10-minute walkthrough" target.
-**Phase status:** `pending`
+**Phase status:** `partial — 4.3 + 4.5 done; 4.1, 4.2, 4.4 pending`
 **Estimated:** 4 weeks
 **Depends on:** Phases 1, 2, and 3
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 4.1 | Codemod existing research pipeline workflow | `workflows/research/*.yaml` | Lint-clean against new schema; runs end-to-end against fixture LLM | 1.*, 3.* | S | `pending` |
-| 4.2 | Codemod Wayfinder phase definitions | `workflows/wayfinder/*.yaml` | Lint-clean; one Wayfinder project executes end-to-end with HITL gates | 2.* | M | `pending` |
-| 4.3 | Deprecate JSON `FileState` path; provide migration tool | `cmd/workflow-migrate/main.go` | Old snapshot → SQLite db; round-trip preserves all fields | 0.* | S | `pending` |
-| 4.4 | `workflow dev` interactive mode | `cmd/workflow-dev/main.go`, `pkg/workflow/dev/` | Hot-reload; mock-by-default fixtures; verbs: `r / r --live / approve <node> / retry <node> / diff <node>`; sub-second iteration on prompt change | 1.*, 2.* | L | `pending` |
-| 4.5 | Documentation: `docs/workflow-engine.md` | new file | Includes the 10-minute walkthrough; covers role registry, HITL, outputs, search | all | S | `pending` |
+| 4.1 | Codemod existing research pipeline workflow | `workflows/research/*.yaml` | Lint-clean against new schema; runs end-to-end against fixture LLM | 1.*, 3.* | S | `pending — no v0.1 research workflow exists yet to codemod; ships when we author the workflow itself` |
+| 4.2 | Codemod Wayfinder phase definitions | `workflows/wayfinder/*.yaml` | Lint-clean; one Wayfinder project executes end-to-end with HITL gates | 2.* | M | `pending — Wayfinder phase definitions not yet expressed as workflow YAMLs` |
+| 4.3 | Deprecate JSON `FileState` path; provide migration tool | `cmd/workflow-migrate/main.go` | Old snapshot → SQLite db; round-trip preserves all fields | 0.* | S | `done` |
+| 4.4 | `workflow dev` interactive mode | `cmd/workflow-dev/main.go`, `pkg/workflow/dev/` | Hot-reload; mock-by-default fixtures; verbs: `r / r --live / approve <node> / retry <node> / diff <node>`; sub-second iteration on prompt change | 1.*, 2.* | L | `pending — L-sized; tracked separately` |
+| 4.5 | Documentation: `docs/workflow-engine.md` | new file | Includes the 10-minute walkthrough; covers role registry, HITL, outputs, search | all | S | `done` |
 
 **Phase 4 ship criterion:** new user goes `brew install` → useful workflow
 in ten minutes. Recorded fixtures make iteration sub-second. All existing
