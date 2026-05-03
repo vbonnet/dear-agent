@@ -40,3 +40,41 @@ forbidden-paths:
     # findings — belong in ~/src/engram-research, not in this repo.
     - research/*.md
     - research/*.txt
+
+# DEAR Audit subsystem configuration. See ADR-011 and pkg/audit/config.
+# This is the dogfood configuration: dear-agent itself runs the daily
+# checks below on every push (via the workflow-audit CLI in CI). The
+# weekly / monthly tiers cost more and run from a scheduled trigger.
+#
+# Severity policy is the package default; we leave it implicit. Override
+# only when this repo deviates from the recommended P0/P1/P2/P3 actions.
+audits:
+  schedule:
+    daily:
+      - check: build
+      - check: test
+        config:
+          # Skip -race in CI to keep the daily under 5 min; the weekly
+          # tier picks it up.
+          race: false
+          timeout: "3m"
+      - check: lint.go
+      - check: vuln.govulncheck
+
+    weekly:
+      # Re-run the daily set with the expensive flags turned on. The
+      # registry resolves these to the same checks; .config differs.
+      - check: build
+      - check: test
+        config:
+          race: true
+          timeout: "10m"
+      - check: lint.go
+      - check: vuln.govulncheck
+
+    # The monthly tier is currently empty — the expensive checks
+    # (test-quality, complexity, docs.staleness, license,
+    # security.deep) ship in v1.x per ADR-011 §"Implementation plan".
+    # Leaving the bucket declared but empty documents the cadence so
+    # the schedule lines up with future check additions.
+    monthly: []

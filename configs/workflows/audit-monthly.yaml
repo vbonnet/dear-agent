@@ -1,0 +1,24 @@
+# Monthly DEAR audit workflow. See configs/workflows/audit-daily.yaml
+# for the design rationale.
+name: audit-monthly
+version: "1"
+description: |
+  Monthly-cadence DEAR audit. Expensive checks live here:
+  test-quality, complexity hotspots, doc staleness, license, deep
+  security scans.
+inputs:
+  - name: db
+    default: ".dear-agent/audit.db"
+  - name: repo
+    default: "."
+
+nodes:
+  - id: run-monthly
+    kind: bash
+    name: workflow-audit run --cadence monthly
+    bash:
+      command: |
+        workflow-audit run \
+          --cadence monthly \
+          --db "{{ .Inputs.db }}" \
+          --repo "{{ .Inputs.repo }}"

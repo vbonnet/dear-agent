@@ -1,0 +1,35 @@
+# Daily DEAR audit workflow.
+#
+# Wraps `workflow-audit run --cadence daily` in a workflow node so the
+# audit shows up in `workflow status` / `workflow logs` like any other
+# run. The CLI is the source of truth for what runs; this template is
+# for operators who want to attach audit runs to their existing
+# workflow plumbing (HITL, notifications, downstream nodes).
+#
+# Usage:
+#   workflow-run -file configs/workflows/audit-daily.yaml -input db=./.dear-agent/audit.db
+name: audit-daily
+version: "1"
+description: |
+  Daily-cadence DEAR audit. Runs the .dear-agent.yml > audits.schedule.daily
+  set against the current repository, persists findings, fires registered
+  refiners, and exits non-zero on a P0/P1 finding under the default
+  severity-policy.
+inputs:
+  - name: db
+    description: path to the audit SQLite database
+    default: ".dear-agent/audit.db"
+  - name: repo
+    description: repository root (defaults to cwd)
+    default: "."
+
+nodes:
+  - id: run-daily
+    kind: bash
+    name: workflow-audit run --cadence daily
+    bash:
+      command: |
+        workflow-audit run \
+          --cadence daily \
+          --db "{{ .Inputs.db }}" \
+          --repo "{{ .Inputs.repo }}"
