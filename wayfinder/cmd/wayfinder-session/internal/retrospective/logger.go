@@ -56,12 +56,13 @@ func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFl
 	// Capture context snapshot (parallel git/deliverables/phase)
 	snapshot := CaptureContext(projectDir, st)
 
-	// Build rewind event data
+	// Build rewind event data. Timestamp is stored UTC so the rendered
+	// RFC3339 string carries a "Z" suffix and stays comparable across hosts.
 	data := &RewindEventData{
 		FromPhase: fromPhase,
 		ToPhase:   toPhase,
 		Magnitude: magnitude,
-		Timestamp: time.Now(),
+		Timestamp: time.Now().UTC(),
 		Prompted:  (magnitude >= 1 && !flags.NoPrompt && flags.Reason == ""),
 		Reason:    userCtx.Reason,
 		Learnings: userCtx.Learnings,

@@ -18,10 +18,16 @@ var ClaudePromptPatterns = []string{
 	"# ", // Root prompt
 }
 
-// WaitForClaudePrompt waits for Claude prompt using capture-pane polling
+// WaitForClaudePrompt waits for Claude prompt using capture-pane polling.
 // This replaces the control-mode approach which only sees NEW output after attachment.
 // capture-pane reads the pane's historical buffer, allowing us to detect prompts
 // that appeared before we started monitoring.
+//
+// If a trust prompt ("Do you trust the files in this folder?") appears during the
+// wait, this function auto-answers it by sending Enter (selecting the default
+// "Yes, proceed" option) and continues waiting for the Claude prompt. This is
+// critical when starting Claude in a sandbox where --add-dir does not pre-trust
+// the workspace path.
 func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting prompt detection for session: %s (using capture-pane polling)", sessionName)
 
@@ -32,6 +38,8 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 	pollInterval := 500 * time.Millisecond
 	checksPerformed := 0
 	lastLog := time.Now()
+	trustAnswered := false
+	var trustAnsweredAt time.Time
 
 	for time.Now().Before(deadline) {
 		checksPerformed++
@@ -63,12 +71,36 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 		}
 
 		// Check for Claude's specific prompt pattern (❯)
-		// Use strict matching to avoid false positives from bash prompts
+		// Use strict matching to avoid false positives from bash prompts.
+		// Suppress detection for ~2s after answering trust to avoid matching
+		// the still-visible trust prompt UI ("❯ 1. Yes, proceed").
 		if containsClaudePromptPattern(content) {
-			debug.Log("✓ Claude prompt detected after %d checks", checksPerformed)
-			// Brief sleep to ensure prompt is stable
-			time.Sleep(500 * time.Millisecond)
-			return nil
+			if trustAnswered && time.Since(trustAnsweredAt) < 2*time.Second {
+				// Trust prompt UI may still be on screen — ignore false match.
+			} else {
+				debug.Log("✓ Claude prompt detected after %d checks", checksPerformed)
+				// Brief sleep to ensure prompt is stable
+				time.Sleep(500 * time.Millisecond)
+				return nil
+			}
+		}
+
+		// Detect and auto-answer trust prompt inline.
+		// Without this, the trust prompt blocks Claude's main UI from rendering,
+		// so the ❯ prompt never appears and we time out.
+		if !trustAnswered && containsTrustPromptPattern(content) && strings.Contains(content, "Yes, proceed") {
+			debug.Log("🛡️  Trust prompt detected — auto-answering with Enter")
+			if err := SendKeys(sessionName, "Enter"); err != nil {
+				debug.Log("⚠️  Failed to answer trust prompt: %v", err)
+				// Don't give up; maybe a retry will succeed.
+			} else {
+				trustAnswered = true
+				trustAnsweredAt = time.Now()
+				debug.Log("✓ Trust prompt answered, continuing to wait for ❯")
+				// Brief sleep so Claude can transition past the trust UI
+				time.Sleep(1 * time.Second)
+				continue
+			}
 		}
 
 		// Sleep before next poll
