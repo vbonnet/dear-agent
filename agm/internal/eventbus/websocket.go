@@ -127,7 +127,9 @@ func (h *Hub) Run() {
 			h.mu.Unlock()
 
 		case event := <-h.broadcast:
-			h.mu.RLock()
+			// We may delete entries from h.clients on full-buffer disconnects,
+			// so take the write lock for the whole iteration.
+			h.mu.Lock()
 			for client := range h.clients {
 				// Filter by session if client has a filter set
 				if client.sessionFilter != "*" && client.sessionFilter != event.SessionID {
@@ -150,7 +152,7 @@ func (h *Hub) Run() {
 					h.logger.Warn("Client send buffer full, disconnected")
 				}
 			}
-			h.mu.RUnlock()
+			h.mu.Unlock()
 
 		case <-h.shutdown:
 			h.mu.Lock()
@@ -247,11 +249,16 @@ func (c *Client) readPump() {
 			if msg.SessionID == "" {
 				msg.SessionID = "*"
 			}
+			c.hub.mu.Lock()
 			c.sessionFilter = msg.SessionID
-			c.hub.logger.Info("Client subscribed to session", "session_filter", c.sessionFilter)
+			filter := c.sessionFilter
+			c.hub.mu.Unlock()
+			c.hub.logger.Info("Client subscribed to session", "session_filter", filter)
 
 		case "unsubscribe":
+			c.hub.mu.Lock()
 			c.sessionFilter = ""
+			c.hub.mu.Unlock()
 			c.hub.logger.Info("Client unsubscribed")
 
 		default:

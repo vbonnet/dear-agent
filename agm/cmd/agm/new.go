@@ -31,8 +31,14 @@ import (
 	"github.com/vbonnet/dear-agent/internal/sandbox"
 	"github.com/vbonnet/dear-agent/pkg/workspace"
 
-	// Import sandbox providers to trigger registration
+	// Import sandbox providers to trigger registration. Each provider's
+	// init() registers itself on its supported platform; on other platforms
+	// the package compiles to an empty stub. Without these imports the
+	// providers are never registered and selecting them returns
+	// "provider not available".
+	_ "github.com/vbonnet/dear-agent/internal/sandbox/apfs"
 	_ "github.com/vbonnet/dear-agent/internal/sandbox/bubblewrap"
+	_ "github.com/vbonnet/dear-agent/internal/sandbox/gvisor"
 	_ "github.com/vbonnet/dear-agent/internal/sandbox/overlayfs"
 )
 
@@ -971,13 +977,15 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 		// Manual hook triggers create false positives since the hook runs immediately
 		// but Claude hasn't actually started in tmux yet
 		debug.Phase("Wait for Claude Ready Signal (Text-Parsing)")
-		debug.Log("Waiting for Claude prompt to appear in tmux (timeout: 30s)")
+		debug.Log("Waiting for Claude prompt to appear in tmux (timeout: 90s)")
 		var waitErr error
 		spinErr = spinner.New().
 			Title("Waiting for Claude to be ready...").
 			Accessible(true).
 			Action(func() {
-				waitErr = tmux.WaitForClaudePrompt(sessionName, 30*time.Second)
+				// 90s timeout: long enough for slow SessionStart hooks (engram
+				// reindex, token-tracker) and post-trust-prompt re-render.
+				waitErr = tmux.WaitForClaudePrompt(sessionName, 90*time.Second)
 			}).
 			Run()
 		if spinErr != nil {
