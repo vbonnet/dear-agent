@@ -30,7 +30,7 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get session: %v\n", err)
 		adapter.Close()
-		os.Exit(1)
+		os.Exit(1) //nolint:gocritic // adapter.Close() called explicitly above
 	}
 
 	fmt.Printf("Current UUID: %s\n", session.Claude.UUID)
