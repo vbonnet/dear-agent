@@ -328,7 +328,7 @@ func FindArchived(sessionsDir string, pattern string, adapter *dolt.Adapter) ([]
 
 	// Location 1: In-place archived sessions (Lifecycle: "archived")
 	if adapter == nil {
-		return nil, fmt.Errorf("Dolt adapter required")
+		return nil, fmt.Errorf("dolt adapter required")
 	}
 
 	// Query Dolt for archived sessions

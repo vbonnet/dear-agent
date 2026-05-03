@@ -81,7 +81,7 @@ func WaitForReady(sessionName string, timeout time.Duration) error {
 
 		if status == "crashed" {
 			os.Remove(readyFile) // Cleanup
-			return fmt.Errorf("Claude crashed during startup")
+			return fmt.Errorf("Claude crashed during startup") //nolint:staticcheck // proper noun (product name)
 		}
 
 		os.Remove(readyFile) // Cleanup
@@ -136,7 +136,7 @@ func WaitForReady(sessionName string, timeout time.Duration) error {
 
 				if status == "crashed" {
 					os.Remove(readyFile) // Cleanup
-					return fmt.Errorf("Claude crashed during startup")
+					return fmt.Errorf("Claude crashed during startup") //nolint:staticcheck // proper noun (product name)
 				}
 
 				debug.Log("Unexpected status in ready-file: %s", status)
@@ -168,7 +168,7 @@ func WaitForReady(sessionName string, timeout time.Duration) error {
 
 				if status == "crashed" {
 					os.Remove(readyFile)
-					return fmt.Errorf("Claude crashed during startup")
+					return fmt.Errorf("Claude crashed during startup") //nolint:staticcheck // proper noun (product name)
 				}
 
 				debug.Log("Unexpected status in ready-file: %s", status)

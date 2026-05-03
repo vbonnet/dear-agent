@@ -104,7 +104,7 @@ func claudeRunningInSession(ctx context.Context) (context.Context, error) {
 
 	// Check for Claude prompt pattern
 	if !strings.Contains(string(output), "❯") {
-		return ctx, fmt.Errorf("Claude prompt not found in session output")
+		return ctx, fmt.Errorf("claude prompt not found in session output")
 	}
 
 	return ctx, nil
@@ -146,7 +146,7 @@ func claudeStartsWithinSeconds(ctx context.Context, seconds int) (context.Contex
 	// Wait for Claude prompt
 	err := tmux.WaitForClaudePrompt(sessionName, time.Duration(seconds)*time.Second)
 	if err != nil {
-		return ctx, fmt.Errorf("Claude did not start within %ds: %w", seconds, err)
+		return ctx, fmt.Errorf("claude did not start within %ds: %w", seconds, err)
 	}
 
 	return ctx, nil

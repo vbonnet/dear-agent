@@ -48,7 +48,7 @@ func PrintTmuxNotFoundError() {
 // PrintClaudeNotFoundError shows a standardized error for Claude CLI not found
 func PrintClaudeNotFoundError() {
 	PrintError(
-		fmt.Errorf("Claude CLI not found"),
+		fmt.Errorf("claude CLI not found"),
 		"AGM requires Claude CLI to be installed",
 		"  • Install from: https://claude.com\n"+
 			"  • Run at least once to create history\n"+

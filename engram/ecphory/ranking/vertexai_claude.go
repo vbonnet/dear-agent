@@ -41,7 +41,7 @@ func NewVertexAIClaudeProvider(config VertexAIClaudeConfig) (Provider, error) {
 		location = "us-east5"
 	}
 	if location != "us-east5" {
-		return nil, fmt.Errorf("vertex AI Claude only available in us-east5, got: %s", location)
+		return nil, fmt.Errorf("Vertex AI Claude only available in us-east5, got: %s", location)
 	}
 
 	// Default model

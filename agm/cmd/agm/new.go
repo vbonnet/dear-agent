@@ -1014,7 +1014,7 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 				debug.Log("Failed to clean up session: %v", err)
 			}
 
-			return fmt.Errorf("Claude not ready: %w", waitErr)
+			return fmt.Errorf("claude not ready: %w", waitErr)
 		}
 
 		debug.Log("✓ Claude prompt detected - Claude is ready")
