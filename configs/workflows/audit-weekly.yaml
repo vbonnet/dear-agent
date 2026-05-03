@@ -1,0 +1,24 @@
+# Weekly DEAR audit workflow. See configs/workflows/audit-daily.yaml
+# for the design rationale; this template is identical except for the
+# cadence flag.
+name: audit-weekly
+version: "1"
+description: |
+  Weekly-cadence DEAR audit. Wraps `workflow-audit run --cadence
+  weekly` so the run is visible to the workflow engine.
+inputs:
+  - name: db
+    default: ".dear-agent/audit.db"
+  - name: repo
+    default: "."
+
+nodes:
+  - id: run-weekly
+    kind: bash
+    name: workflow-audit run --cadence weekly
+    bash:
+      command: |
+        workflow-audit run \
+          --cadence weekly \
+          --db "{{ .Inputs.db }}" \
+          --repo "{{ .Inputs.repo }}"
