@@ -140,14 +140,6 @@ func jaccardSimilarity(setA, setB []string) (float64, []string) {
 	return similarity, matched
 }
 
-// formatReasoning creates reasoning string for ranking (tag-only, kept for backward compat)
-func formatReasoning(matched []string) string {
-	if len(matched) == 0 {
-		return "No matching tags"
-	}
-
-	return "Matched tags: " + strings.Join(matched, ", ")
-}
 
 // formatReasoningWithDesc creates reasoning string that includes both tag and description matches.
 func formatReasoningWithDesc(tagMatched, descMatched []string) string {

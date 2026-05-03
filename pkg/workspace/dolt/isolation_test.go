@@ -223,30 +223,6 @@ func (v *IsolationVerifier) Cleanup() {
 	}
 }
 
-// Integration test helper
-func setupTestWorkspace(t *testing.T, name string, port int) (*WorkspaceAdapter, func()) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	config := &DoltConfig{
-		WorkspaceName: name,
-		DoltDir:       filepath.Join(t.TempDir(), "test-"+name, ".dolt"),
-		Port:          port,
-		Host:          "127.0.0.1",
-		DatabaseName:  "workspace",
-		AutoStart:     false,
-	}
-
-	adapter, err := NewWorkspaceAdapter(config)
-	require.NoError(t, err)
-
-	cleanup := func() {
-		adapter.Close()
-	}
-
-	return adapter, cleanup
-}
 
 // Benchmark isolation overhead
 func BenchmarkWorkspaceConfigCreation(b *testing.B) {

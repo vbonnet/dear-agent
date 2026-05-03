@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -310,32 +309,5 @@ func TestSessionImport_ErrorHandling(t *testing.T) {
 			// Expected: Proper error message
 			t.Logf("Would verify error handling for: %s (expects: %s)", tt.uuid, tt.expectedErr)
 		})
-	}
-}
-
-// Helper function to verify manifest contents
-func verifyManifest(t *testing.T, manifestPath string, expectedUUID string, expectedWorkspace string) {
-	t.Helper()
-
-	m, err := manifest.Read(manifestPath)
-	if err != nil {
-		t.Fatalf("Failed to read manifest: %v", err)
-	}
-
-	if m.Claude.UUID != expectedUUID {
-		t.Errorf("Expected UUID %s, got: %s", expectedUUID, m.Claude.UUID)
-	}
-
-	if m.Workspace != expectedWorkspace {
-		t.Errorf("Expected workspace %s, got: %s", expectedWorkspace, m.Workspace)
-	}
-
-	if m.SchemaVersion != manifest.SchemaVersion {
-		t.Errorf("Expected schema version %s, got: %s", manifest.SchemaVersion, m.SchemaVersion)
-	}
-
-	// Verify tmux name is sanitized (no periods, special chars)
-	if strings.ContainsAny(m.Tmux.SessionName, ".@#$%^&*()+=[]{}|\\;:'\",<>?/") {
-		t.Errorf("Tmux session name contains invalid characters: %s", m.Tmux.SessionName)
 	}
 }

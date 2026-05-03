@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -162,57 +161,6 @@ func findCodeFiles(projectDir string) ([]string, error) {
 	}
 
 	return codeFiles, nil
-}
-
-// parseBeadOutcome extracts file paths from bead outcome text using regex.
-// Strategy D from D2: convention-based path detection with validation.
-func parseBeadOutcome(outcome string) ([]string, error) {
-	// Regex pattern from D2: ([a-zA-Z0-9_/-]+\.(go|py|ts|js|rs|c|cpp|java))
-	pathRegex := regexp.MustCompile(`([a-zA-Z0-9_/-]+\.(go|py|ts|js|rs|c|cpp|java))`)
-	matches := pathRegex.FindAllString(outcome, -1)
-
-	// Filter false positives
-	var validPaths []string
-	seenPaths := make(map[string]bool)
-
-	for _, match := range matches {
-		// Skip if already seen (deduplicate)
-		if seenPaths[match] {
-			continue
-		}
-
-		// Filter false positives
-		if isFalsePositive(match) {
-			continue
-		}
-
-		seenPaths[match] = true
-		validPaths = append(validPaths, match)
-	}
-
-	return validPaths, nil
-}
-
-// isFalsePositive checks if extracted path is false positive (URL, version string, etc.)
-func isFalsePositive(path string) bool {
-	// URLs (contains ://)
-	if strings.Contains(path, "://") {
-		return true
-	}
-
-	// Version strings (e.g., v1.2.3, go1.21.0)
-	versionRegex := regexp.MustCompile(`^(v|go)\d+\.\d+`)
-	if versionRegex.MatchString(path) {
-		return true
-	}
-
-	// Excessive special characters (likely not a file path)
-	specialChars := strings.Count(path, "@") + strings.Count(path, "#") + strings.Count(path, "$")
-	if specialChars > 2 {
-		return true
-	}
-
-	return false
 }
 
 // validateFilesExist verifies all extracted file paths exist on filesystem.

@@ -13,8 +13,6 @@ import (
 
 // ResearchApplicator analyzes research reports and generates actionable improvement proposals.
 type ResearchApplicator struct {
-	// geminiAPIKey is the API key for Gemini
-	geminiAPIKey string
 
 	// projectID is the GCP project ID
 	projectID string

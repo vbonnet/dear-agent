@@ -16,7 +16,6 @@ import (
 var (
 	fixAll     bool
 	fixClear   bool
-	fixSession string
 )
 
 var fixCmd = &cobra.Command{

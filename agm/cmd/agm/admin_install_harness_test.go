@@ -120,20 +120,3 @@ func TestInstallHarnessJSONFlag(t *testing.T) {
 	}
 }
 
-// Helper to verify that command output contains expected structure
-func verifyJSONOutput(t *testing.T, output string) {
-	var result ops.HarnessInstallResult
-	err := json.Unmarshal([]byte(output), &result)
-	if err != nil {
-		t.Fatalf("Failed to parse JSON output: %v\nOutput: %s", err, output)
-	}
-
-	// Verify required fields
-	if result.Harness == "" {
-		t.Fatal("Result missing harness field")
-	}
-
-	if result.Message == "" {
-		t.Fatal("Result missing message field")
-	}
-}

@@ -13,7 +13,6 @@ var (
 	green  = color.New(color.FgGreen)
 	yellow = color.New(color.FgYellow)
 	gray   = color.New(color.FgHiBlack)
-	bold   = color.New(color.Bold)
 )
 
 // FormatStatus formats the progress status for display

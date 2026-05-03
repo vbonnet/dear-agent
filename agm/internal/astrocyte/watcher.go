@@ -22,8 +22,6 @@ const (
 	// Default polling interval for checking the incidents file
 	defaultPollInterval = 5 * time.Second
 
-	// Size of the event buffer channel
-	eventBufferSize = 100
 )
 
 // AstrocyteIncident represents an incident record from Astrocyte's JSONL log

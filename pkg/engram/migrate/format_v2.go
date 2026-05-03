@@ -174,15 +174,6 @@ func stripTierMarkers(content string) string {
 	return strings.Join(result, "\n")
 }
 
-// stripMarkdownFormatting removes common markdown formatting for comparison
-func stripMarkdownFormatting(content string) string {
-	// Remove common markdown formatting
-	content = strings.ReplaceAll(content, "#", "")
-	content = strings.ReplaceAll(content, "*", "")
-	content = strings.ReplaceAll(content, "_", "")
-	content = strings.ReplaceAll(content, "`", "")
-	return strings.TrimSpace(content)
-}
 
 func abs(n int) int {
 	if n < 0 {

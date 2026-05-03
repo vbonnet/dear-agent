@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
@@ -537,11 +536,4 @@ func (o *PhaseOrchestratorV2) allTasksCompleted() bool {
 	}
 
 	return false
-}
-
-// fileExists checks if a file exists (helper for filesystem checks)
-func fileExists(projectDir, filename string) bool {
-	path := filepath.Join(projectDir, filename)
-	_, err := os.Stat(path)
-	return err == nil
 }

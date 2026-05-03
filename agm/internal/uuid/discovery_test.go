@@ -15,29 +15,6 @@ import (
 
 // Test helpers
 
-// createTempHistory creates a temporary history.jsonl file for testing
-func createTempHistory(t *testing.T, entries []history.Entry) string {
-	t.Helper()
-
-	tmpDir := t.TempDir()
-	historyPath := filepath.Join(tmpDir, "history.jsonl")
-
-	file, err := os.Create(historyPath)
-	if err != nil {
-		t.Fatalf("failed to create temp history file: %v", err)
-	}
-	defer file.Close()
-
-	for _, entry := range entries {
-		data, err := json.Marshal(entry)
-		if err != nil {
-			t.Fatalf("failed to marshal entry: %v", err)
-		}
-		fmt.Fprintf(file, "%s\n", data)
-	}
-
-	return historyPath
-}
 
 // TestSearchHistoryByRename tests the SearchHistoryByRename function
 func TestSearchHistoryByRename(t *testing.T) {

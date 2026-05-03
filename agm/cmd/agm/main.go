@@ -34,26 +34,25 @@ import (
 )
 
 var (
-	cfg               *config.Config
-	cfgFile           string
-	sessionsDir       string
-	logLevel          string
-	debugMode         bool
-	directory         string
-	timeout           time.Duration
-	skipHealthCheck   bool
-	noColor           bool
-	screenReader      bool
-	workspaceFlag     string
-	listCommandsJSON  bool
-	outputFormat      string   // "text" (default), "json"
-	fieldsFlag        []string // field mask for JSON output
-	globalHealthCheck *tmux.HealthChecker
-	tmuxClient        session.TmuxInterface // Injected dependency for testing
-	managerBackend    manager.Backend       // New abstraction layer (nil = legacy path)
-	usageTracker      *usage.Tracker
-	commandStartTime  time.Time
-	auditLogger       *ops.AuditLogger
+	cfg              *config.Config
+	cfgFile          string
+	sessionsDir      string
+	logLevel         string
+	debugMode        bool
+	directory        string
+	timeout          time.Duration
+	skipHealthCheck  bool
+	noColor          bool
+	screenReader     bool
+	workspaceFlag    string
+	listCommandsJSON bool
+	outputFormat     string                // "text" (default), "json"
+	fieldsFlag       []string              // field mask for JSON output
+	tmuxClient       session.TmuxInterface // Injected dependency for testing
+	managerBackend   manager.Backend       // New abstraction layer (nil = legacy path)
+	usageTracker     *usage.Tracker
+	commandStartTime time.Time
+	auditLogger      *ops.AuditLogger
 )
 
 var rootCmd = &cobra.Command{
@@ -134,14 +133,6 @@ Global Flags:
 		// - Manifest operations use manifest.AcquireLock() (in internal/manifest/lock.go)
 		// This allows multiple AGM commands to run concurrently (e.g., agm session list while agm my-session)
 		// while still preventing race conditions in tmux server updates and manifest modifications.
-
-		// Initialize health checker
-		if cfg.HealthCheck.Enabled && !skipHealthCheck {
-			globalHealthCheck = tmux.NewHealthChecker(
-				cfg.HealthCheck.CacheDuration,
-				cfg.HealthCheck.ProbeTimeout,
-			)
-		}
 
 		// Resolve working directory from -C flag
 		if directory != "" {

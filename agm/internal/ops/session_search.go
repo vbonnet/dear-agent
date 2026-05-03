@@ -2,8 +2,6 @@ package ops
 
 import (
 	"strings"
-
-	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 // SearchSessionsRequest defines input for searching sessions by name.
@@ -114,11 +112,4 @@ func calculateRelevance(name, queryLower string) float64 {
 		return 0.5
 	}
 	return 0.0
-}
-
-// manifestMatchesQuery checks if a manifest matches a search query.
-// Used internally; exported for testing.
-func manifestMatchesQuery(m *manifest.Manifest, query string) bool {
-	queryLower := strings.ToLower(query)
-	return strings.Contains(strings.ToLower(m.Name), queryLower)
 }

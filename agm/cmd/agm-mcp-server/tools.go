@@ -179,10 +179,6 @@ func mcpError(err error) *mcp.CallToolResult {
 	}
 }
 
-func formatJSON(v interface{}) string {
-	jsonBytes, _ := json.Marshal(v)
-	return string(jsonBytes)
-}
 
 // --- Mutation tools ---
 
