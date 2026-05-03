@@ -91,17 +91,17 @@ func (m *ResponseMasker) nextArchiveN() int {
 	if err != nil {
 		return 0
 	}
-	max := -1
+	highest := -1
 	for _, e := range entries {
 		name := e.Name()
 		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".txt") {
 			numStr := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".txt")
-			if n, err := strconv.Atoi(numStr); err == nil && n > max {
-				max = n
+			if n, err := strconv.Atoi(numStr); err == nil && n > highest {
+				highest = n
 			}
 		}
 	}
-	return max + 1
+	return highest + 1
 }
 
 // archive writes the full tool result to disk and returns the file path.

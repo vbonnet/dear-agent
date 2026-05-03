@@ -34,7 +34,7 @@ func ParseS7Plan(path string) (string, []S7Feature, error) {
 	sectionRegex := regexp.MustCompile(`(?s)##\s+Feature Tracking.*?\n.*?\n\|\s*Feature ID\s*\|.*?\|\s*Estimate\s*\|.*?\|\s*\n\|[-:\s|]+\|\s*\n((?:\|[^|]+\|[^|]+\|[^|]+\|[^|]+\|\s*\n)+)`)
 	matches := sectionRegex.FindStringSubmatch(content)
 	if len(matches) < 2 {
-		return "", nil, fmt.Errorf("Feature Tracking table not found in S7 plan\nEnsure your S7 plan includes:\n\n## Feature Tracking\n\n| Feature ID | Description | Estimate | Verification |\n|------------|-------------|----------|--------------|")
+		return "", nil, fmt.Errorf("feature tracking table not found in S7 plan\nEnsure your S7 plan includes:\n\n## Feature Tracking\n\n| Feature ID | Description | Estimate | Verification |\n|------------|-------------|----------|--------------|")
 	}
 
 	// Parse table rows

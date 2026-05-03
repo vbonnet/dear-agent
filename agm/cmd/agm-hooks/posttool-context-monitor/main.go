@@ -100,8 +100,8 @@ func (m *ContextMonitor) extractTokenUsageFromJSON(data map[string]interface{}) 
 	}
 
 	maxTokens := 200000 // default
-	if max, ok := data["max_context_tokens"].(float64); ok {
-		maxTokens = int(max)
+	if v, ok := data["max_context_tokens"].(float64); ok {
+		maxTokens = int(v)
 	}
 
 	m.log("INFO", fmt.Sprintf("Extracted from JSON: %d/%d", int(totalTokens), maxTokens))

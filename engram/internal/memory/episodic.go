@@ -89,7 +89,7 @@ func (em *EpisodicMemory) ShouldMolt(currentSessionTokens int) bool {
 }
 
 // GetTokenUsage returns current token count and threshold.
-func (em *EpisodicMemory) GetTokenUsage() (current int, max int, percentage float64) {
+func (em *EpisodicMemory) GetTokenUsage() (current int, maximum int, percentage float64) {
 	em.mu.RLock()
 	defer em.mu.RUnlock()
 

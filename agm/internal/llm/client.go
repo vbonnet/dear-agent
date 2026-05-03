@@ -144,7 +144,7 @@ func (c *Client) Search(ctx context.Context, req SearchRequest) ([]SearchResult,
 
 	resp, err := client.Predict(ctxWithTimeout, apiReq)
 	if err != nil {
-		return nil, fmt.Errorf("Vertex AI API request failed: %w\nHint: Ensure GCP credentials are configured with 'gcloud auth application-default login'", err)
+		return nil, fmt.Errorf("Vertex AI API request failed: %w\nHint: Ensure GCP credentials are configured with 'gcloud auth application-default login'", err) //nolint:staticcheck // proper noun
 	}
 
 	// Parse response

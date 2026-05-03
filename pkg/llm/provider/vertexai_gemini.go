@@ -60,6 +60,7 @@ func NewVertexAIGeminiProvider(config VertexAIGeminiConfig) (*VertexAIGeminiProv
 	authMethod := auth.DetectAuthMethod("gemini")
 	if authMethod != auth.AuthVertexAI {
 		return nil, NewProviderError("vertexai-gemini", "authenticate",
+			//nolint:staticcheck // proper noun
 			fmt.Errorf("Vertex AI authentication not available (need GOOGLE_CLOUD_PROJECT)"))
 	}
 

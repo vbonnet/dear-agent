@@ -191,13 +191,13 @@ func calculateContextScore(prompt string) float64 {
 	return score
 }
 
-// clamp restricts value to [min, max] range.
-func clamp(value, min, max float64) float64 {
-	if value < min {
-		return min
+// clamp restricts value to [lo, hi] range.
+func clamp(value, lo, hi float64) float64 {
+	if value < lo {
+		return lo
 	}
-	if value > max {
-		return max
+	if value > hi {
+		return hi
 	}
 	return value
 }

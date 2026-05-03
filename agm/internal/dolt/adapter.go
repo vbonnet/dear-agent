@@ -84,6 +84,7 @@ func DefaultConfig() (*Config, error) {
 			workspace == "main"
 
 		if isProductionWorkspace {
+			//nolint:staticcheck // multi-line CLI-facing help text
 			return nil, fmt.Errorf("TEST POLLUTION BLOCKED: Tests cannot write to production workspace '%s'\n\n"+
 				"Why: Production workspaces contain real data that tests would corrupt.\n\n"+
 				"Fix: Set ENGRAM_TEST_WORKSPACE to a test-specific value:\n"+

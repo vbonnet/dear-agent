@@ -114,8 +114,8 @@ func SuggestToolCall(patternIdx int, command string) string {
 
 	case 9: // sed -i
 		if m := sedArgsRe.FindStringSubmatch(command); m != nil {
-			old, new, file := m[1], m[2], m[3]
-			return fmt.Sprintf("Use: Edit(file_path='%s', old_string='%s', new_string='%s')", file, old, new)
+			oldText, newText, file := m[1], m[2], m[3]
+			return fmt.Sprintf("Use: Edit(file_path='%s', old_string='%s', new_string='%s')", file, oldText, newText)
 		}
 		// Fallback: at least mention Edit tool
 		return "Use: Edit(file_path='<file>', old_string='<old>', new_string='<new>') instead of sed -i"

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // sqlite3 driver
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 )
@@ -179,6 +179,7 @@ func openExceptionDB() (*sql.DB, error) {
 	dbPath := getExceptionDBPath()
 
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		//nolint:revive // multi-line CLI-facing help text
 		return nil, fmt.Errorf("exception database not found: %s\n\nPlease ensure the language-consolidation project is initialized.\nSet ENGRAM_EXCEPTION_DB env var or use --db flag to specify location.", dbPath)
 	}
 

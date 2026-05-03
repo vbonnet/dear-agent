@@ -69,12 +69,12 @@ func (sm *SessionMap) ListAll() map[string]string {
 	defer sm.mu.RUnlock()
 
 	// Return copy to prevent external modification
-	copy := make(map[string]string, len(sm.names))
+	out := make(map[string]string, len(sm.names))
 	for k, v := range sm.names {
-		copy[k] = v
+		out[k] = v
 	}
 
-	return copy
+	return out
 }
 
 // load reads session map from JSON file
