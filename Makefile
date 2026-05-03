@@ -1,12 +1,14 @@
-# Root Makefile for ai-tools
+# Root Makefile for dear-agent
 #
 # Targets:
 #   act-validate    Run full local CI validation via act
 #   act-lint        Run lint job via act
 #   act-test        Run test job via act
 #   install-hooks   Install git pre-push hook for act validation
+#   codegraph       Build a tree-sitter knowledge graph for this repo
+#   codegraph-all   Build graphs for dear-agent and brain-v2
 
-.PHONY: act-validate act-lint act-test install-hooks test-shell build-configure-settings uninstall
+.PHONY: act-validate act-lint act-test install-hooks test-shell build-configure-settings uninstall codegraph codegraph-all codegraph-install
 
 # Run full local CI validation via act
 act-validate: act-lint act-test
@@ -68,3 +70,21 @@ install-configure-settings: build-configure-settings
 # Uninstall AGM components
 uninstall:
 	@./scripts/uninstall.sh
+
+# Build a tree-sitter knowledge graph (graphify) for this repo.
+# Output lands in ~/.local/share/codegraph/<repo>/. See docs/codegraph.md.
+codegraph:
+	@./scripts/codegraph
+
+# Build graphs for dear-agent and brain-v2 (the two codebases the team queries).
+codegraph-all:
+	@./scripts/codegraph $(CURDIR)
+	@if [ -d $$HOME/src/brain-v2 ]; then \
+		./scripts/codegraph $$HOME/src/brain-v2; \
+	else \
+		echo "skip: $$HOME/src/brain-v2 not present"; \
+	fi
+
+# Bootstrap the graphify venv at ~/.local/venvs/graphify.
+codegraph-install:
+	@./scripts/codegraph install
