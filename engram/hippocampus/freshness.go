@@ -123,7 +123,11 @@ func parseFrontmatterDate(path string) (time.Time, error) {
 		if inFrontmatter {
 			if strings.HasPrefix(line, "observed:") {
 				dateStr := strings.TrimSpace(strings.TrimPrefix(line, "observed:"))
-				t, err := time.Parse("2006-01-02", dateStr)
+				// Parse in local zone — date-only strings authored by humans
+				// represent "that day" wherever they are, not UTC midnight. Without
+				// this, age calculations skew by the local timezone offset and
+				// flip "10 days old" to "11 days old" west of UTC.
+				t, err := time.ParseInLocation("2006-01-02", dateStr, time.Local)
 				if err != nil {
 					continue // malformed date, skip
 				}
@@ -134,7 +138,7 @@ func parseFrontmatterDate(path string) (time.Time, error) {
 
 		// Scan body for autodream inline dates: "- content (YYYY-MM-DD)"
 		if matches := inlineDatePattern.FindStringSubmatch(line); len(matches) == 2 {
-			t, err := time.Parse("2006-01-02", matches[1])
+			t, err := time.ParseInLocation("2006-01-02", matches[1], time.Local)
 			if err != nil {
 				continue
 			}

@@ -3,6 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,39 +52,50 @@ func TestStatusLineCommand(t *testing.T) {
 	}
 }
 
-// TestAutoDetectTmuxSession tests tmux session auto-detection
+// TestAutoDetectTmuxSession tests tmux session auto-detection.
+//
+// The "in_tmux_session" subtest used to depend on whatever tmux server
+// happened to be running on the AGM socket — which made it pass when run
+// alone (because the user's normal sessions exist) and fail in CI or
+// after other tests cleared the server. We now drive a dedicated tmux
+// server on a temp socket so the assertion is hermetic.
 func TestAutoDetectTmuxSession(t *testing.T) {
-	tests := []struct {
-		name        string
-		tmuxEnv     string
-		expectError bool
-	}{
-		{
-			name:        "not in tmux",
-			tmuxEnv:     "",
-			expectError: true,
-		},
-		{
-			name:        "in tmux session",
-			tmuxEnv:     "/tmp/tmux-1000/default,123,0",
-			expectError: false,
-		},
-	}
+	t.Run("not_in_tmux", func(t *testing.T) {
+		t.Setenv("TMUX", "")
+		_, err := autoDetectTmuxSession()
+		if err == nil {
+			t.Error("expected error when TMUX is unset, got nil")
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Set TMUX environment variable
-			t.Setenv("TMUX", tt.tmuxEnv)
+	t.Run("in_tmux_session", func(t *testing.T) {
+		if _, err := exec.LookPath("tmux"); err != nil {
+			t.Skip("tmux not installed")
+		}
 
-			_, err := autoDetectTmuxSession()
-			if tt.expectError && err == nil {
-				t.Error("expected error but got none")
-			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
+		// Spin up a tmux server on a private socket so detection can find a
+		// real session without depending on whatever the user has running.
+		socketPath := filepath.Join(t.TempDir(), "tmux.sock")
+		sessionName := "auto-detect-test-" + time.Now().Format("150405.000")
+		// Normalize to tmux's allowed characters.
+		sessionName = strings.ReplaceAll(sessionName, ".", "-")
+
+		cmd := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName)
+		if err := cmd.Run(); err != nil {
+			t.Skipf("could not create test tmux session: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = exec.Command("tmux", "-S", socketPath, "kill-server").Run()
 		})
-	}
+
+		t.Setenv("TMUX", socketPath+",1,0")
+		t.Setenv("AGM_TMUX_SOCKET", socketPath)
+
+		_, err := autoDetectTmuxSession()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
 }
 
 // TestOutputJSON tests JSON output formatting

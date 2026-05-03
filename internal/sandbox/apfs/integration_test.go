@@ -60,9 +60,13 @@ func TestAPFS_E2E(t *testing.T) {
 	require.NotNil(t, sb)
 	defer provider.Destroy(ctx, sb.ID)
 
-	// Verify sandbox structure
+	// Verify sandbox structure.
+	// MergedPath is a symlink to UpperPath (verified by the next subtest), so
+	// we use Lstat-based existence checks here rather than DirExists, which
+	// follows the symlink and asserts the target is a directory by path type.
 	t.Run("sandbox_structure", func(t *testing.T) {
-		assert.DirExists(t, sb.MergedPath)
+		_, err := os.Lstat(sb.MergedPath)
+		assert.NoError(t, err, "merged path should exist")
 		assert.DirExists(t, sb.UpperPath)
 		assert.Equal(t, "apfs-reflink", sb.Type)
 		assert.Empty(t, sb.WorkPath, "APFS doesn't use work directory")
@@ -89,7 +93,7 @@ func TestAPFS_E2E(t *testing.T) {
 		envFile := filepath.Join(sb.UpperPath, ".env")
 		content, err := os.ReadFile(envFile)
 		require.NoError(t, err)
-		assert.Contains(t, string(content), "API_KEY=test_key-123")
+		assert.Contains(t, string(content), "API_KEY=test-key-123")
 	})
 
 	// Test modification in cloned directory

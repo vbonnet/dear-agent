@@ -8,7 +8,11 @@ import (
 
 func TestLoadCorePresets(t *testing.T) {
 	homeDir, _ := os.UserHomeDir()
-	loader := NewLoaderWithDir(filepath.Join(homeDir, ".wayfinder", "presets"))
+	presetDir := filepath.Join(homeDir, ".wayfinder", "presets")
+	if _, err := os.Stat(presetDir); os.IsNotExist(err) {
+		t.Skipf("preset directory not provisioned at %s — skipping integration test for user-installed presets", presetDir)
+	}
+	loader := NewLoaderWithDir(presetDir)
 
 	corePresets := []string{"high-quality", "fast-iteration", "research-heavy"}
 
@@ -47,11 +51,24 @@ func TestLoadCorePresets(t *testing.T) {
 
 func TestPresetDifferentiation(t *testing.T) {
 	homeDir, _ := os.UserHomeDir()
-	loader := NewLoaderWithDir(filepath.Join(homeDir, ".wayfinder", "presets"))
+	presetDir := filepath.Join(homeDir, ".wayfinder", "presets")
+	if _, err := os.Stat(presetDir); os.IsNotExist(err) {
+		t.Skipf("preset directory not provisioned at %s — skipping integration test for user-installed presets", presetDir)
+	}
+	loader := NewLoaderWithDir(presetDir)
 
-	highQuality, _ := loader.Load("high-quality")
-	fastIteration, _ := loader.Load("fast-iteration")
-	researchHeavy, _ := loader.Load("research-heavy")
+	highQuality, err := loader.Load("high-quality")
+	if err != nil {
+		t.Fatalf("load high-quality: %v", err)
+	}
+	fastIteration, err := loader.Load("fast-iteration")
+	if err != nil {
+		t.Fatalf("load fast-iteration: %v", err)
+	}
+	researchHeavy, err := loader.Load("research-heavy")
+	if err != nil {
+		t.Fatalf("load research-heavy: %v", err)
+	}
 
 	// Verify test coverage differentiation
 	if highQuality.TestCoverage.MinimumPercentage <= fastIteration.TestCoverage.MinimumPercentage {

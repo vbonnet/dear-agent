@@ -38,6 +38,7 @@ type Manifest struct {
 	WorkflowPhase           string          `yaml:"workflow_phase,omitempty"`             // Session workflow phase: research, delegate, wait, verify, exit
 	WorkflowPhaseUpdatedAt  *time.Time      `yaml:"workflow_phase_updated_at,omitempty"`  // When workflow phase was last changed
 	CostTracking            *CostTracking   `yaml:"cost_tracking,omitempty"`              // Token usage and cost tracking
+	Resources               *ResourceManifest `yaml:"resources,omitempty"`                // Git worktrees and branches created by this session
 }
 
 // IsExpired returns true if the session is disposable and its TTL has elapsed.
@@ -130,6 +131,28 @@ type SandboxConfig struct {
 	Provider   string    `yaml:"provider,omitempty"`    // Provider type (overlayfs, apfs, mock)
 	MergedPath string    `yaml:"merged_path,omitempty"` // Path where agents operate
 	CreatedAt  time.Time `yaml:"created_at,omitempty"`  // When sandbox was created
+}
+
+// ResourceManifest records git worktrees and branches created during a session.
+// Agents that create worktrees should update this field so cleanup is deterministic.
+type ResourceManifest struct {
+	Worktrees []WorktreeResource `yaml:"worktrees,omitempty"`
+	Branches  []BranchResource  `yaml:"branches,omitempty"`
+}
+
+// WorktreeResource describes a git worktree created during a session.
+type WorktreeResource struct {
+	Path      string    `yaml:"path"`
+	Branch    string    `yaml:"branch"`
+	Repo      string    `yaml:"repo"`
+	CreatedAt time.Time `yaml:"created_at"`
+}
+
+// BranchResource describes a git branch created during a session.
+type BranchResource struct {
+	Name      string    `yaml:"name"`
+	Repo      string    `yaml:"repo"`
+	CreatedAt time.Time `yaml:"created_at"`
 }
 
 // CostTracking holds token usage and cost data for a session

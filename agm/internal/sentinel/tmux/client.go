@@ -47,9 +47,15 @@ func getReadSocketPaths() []string {
 		}
 	}
 
-	// System default socket
-	// tmux default is /tmp/tmux-{uid}/default
-	systemSocket := filepath.Join(os.TempDir(), fmt.Sprintf("tmux-%d", os.Getuid()), "default")
+	// System default socket. tmux's actual default location is
+	// $TMUX_TMPDIR/tmux-{uid}/default, falling back to /tmp — NOT
+	// os.TempDir(), which honors $TMPDIR (e.g. /var/folders/... on macOS)
+	// and won't match where tmux actually puts the socket.
+	tmuxTmp := os.Getenv("TMUX_TMPDIR")
+	if tmuxTmp == "" {
+		tmuxTmp = "/tmp"
+	}
+	systemSocket := filepath.Join(tmuxTmp, fmt.Sprintf("tmux-%d", os.Getuid()), "default")
 	if _, err := os.Stat(systemSocket); err == nil {
 		paths = append(paths, systemSocket)
 	}
@@ -113,7 +119,10 @@ func (c *Client) ListSessions() ([]string, error) {
 		}
 	}
 
-	var sessions []string
+	// Return an empty (non-nil) slice when no sessions match, so callers
+	// can range without nil-checking. Pre-allocates by map size to avoid
+	// reallocating during the loop.
+	sessions := make([]string, 0, len(sessionSet))
 	for session := range sessionSet {
 		sessions = append(sessions, session)
 	}

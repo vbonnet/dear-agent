@@ -130,9 +130,15 @@ func detectWorkspaceFromCwd() string {
 	}
 
 	home := os.Getenv("HOME")
-
-	// Look for /ws/{workspace}/ pattern
+	// Resolve symlinks on the home prefix too. On macOS, $HOME under /tmp or
+	// /var (e.g. via t.TempDir) resolves through /private/..., while cwd is
+	// already canonicalized via EvalSymlinks above. Without matching that
+	// resolution here, the HasPrefix check fails and detection silently
+	// returns "" — which is what broke the cwd-detection unit tests.
 	prefix := filepath.Join(home, "src", "ws")
+	if resolved, err := filepath.EvalSymlinks(prefix); err == nil {
+		prefix = resolved
+	}
 	if strings.HasPrefix(realCwd, prefix) {
 		// Extract workspace name from path
 		relPath := strings.TrimPrefix(realCwd, prefix+string(filepath.Separator))

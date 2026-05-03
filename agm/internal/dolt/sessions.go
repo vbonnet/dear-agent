@@ -1,6 +1,7 @@
 package dolt
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -320,6 +321,30 @@ func (a *Adapter) DeleteSession(sessionID string) error {
 	}
 
 	return nil
+}
+
+// ListActiveSessions returns the names of all non-archived sessions.
+// Used for lightweight cross-reference (e.g., audit commands) without loading full manifests.
+func (a *Adapter) ListActiveSessions(ctx context.Context) ([]string, error) {
+	if err := a.ApplyMigrations(); err != nil {
+		return nil, fmt.Errorf("failed to apply migrations: %w", err)
+	}
+	query := `SELECT name FROM agm_sessions WHERE workspace = ? AND status != 'archived' ORDER BY updated_at DESC`
+	rows, err := a.conn.QueryContext(ctx, query, a.workspace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list active sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan session name: %w", err)
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
 }
 
 // ListSessions returns a list of sessions matching the filter criteria

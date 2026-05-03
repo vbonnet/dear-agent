@@ -56,5 +56,6 @@
   "Monitors": null,
   "WorkflowPhase": "",
   "WorkflowPhaseUpdatedAt": null,
-  "CostTracking": null
+  "CostTracking": null,
+  "Resources": null
 }
