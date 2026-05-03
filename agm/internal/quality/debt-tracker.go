@@ -75,7 +75,7 @@ func SaveBaseline(path string, b *Baseline) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal baseline: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write baseline file: %w", err)
 	}
 	return nil

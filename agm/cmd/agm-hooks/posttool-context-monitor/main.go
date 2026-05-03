@@ -32,7 +32,7 @@ type ContextMonitor struct {
 // NewContextMonitor creates a new context monitor from environment variables
 func NewContextMonitor() *ContextMonitor {
 	cacheDir := "/tmp/agm-context-cache"
-	os.MkdirAll(cacheDir, 0755)
+	os.MkdirAll(cacheDir, 0o700)
 
 	return &ContextMonitor{
 		sessionID:  os.Getenv("CLAUDE_SESSION_ID"),
@@ -189,7 +189,7 @@ func (m *ContextMonitor) updateCache(percentage float64) {
 		return
 	}
 
-	if err := os.WriteFile(cacheFile, data, 0644); err != nil {
+	if err := os.WriteFile(cacheFile, data, 0o600); err != nil {
 		m.log("WARN", fmt.Sprintf("Cache write error: %v", err))
 		return
 	}

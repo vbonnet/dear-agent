@@ -41,7 +41,7 @@ type Logger struct {
 // It creates the parent directory if needed.
 func New(path string) (*Logger, error) {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create gc log dir: %w", err)
 	}
 	return &Logger{path: path}, nil
@@ -68,7 +68,7 @@ func (l *Logger) Log(entry Entry) error {
 	}
 	data = append(data, '\n')
 
-	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open gc log: %w", err)
 	}

@@ -246,7 +246,7 @@ func createBackup(statusFile string) error {
 	}
 
 	// Write backup
-	if err := os.WriteFile(backupFile, data, 0644); err != nil {
+	if err := os.WriteFile(backupFile, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write backup: %w", err)
 	}
 

@@ -611,7 +611,7 @@ func (a *OpenAIAdapter) executeHook(sessionID SessionID, sessionInfo *openai.Ses
 	}
 
 	hookDir := filepath.Join(homeDir, ".agm", "openai-hooks")
-	if err := os.MkdirAll(hookDir, 0755); err != nil {
+	if err := os.MkdirAll(hookDir, 0o700); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to create hook directory: %v\n", err)
 		return nil // Non-fatal
 	}
@@ -636,7 +636,7 @@ func (a *OpenAIAdapter) executeHook(sessionID SessionID, sessionInfo *openai.Ses
 		return nil // Non-fatal
 	}
 
-	if err := os.WriteFile(hookFile, contextData, 0644); err != nil {
+	if err := os.WriteFile(hookFile, contextData, 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to write hook context: %v\n", err)
 		return nil // Non-fatal
 	}

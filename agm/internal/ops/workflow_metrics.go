@@ -60,7 +60,7 @@ func RecordWorkflowMetrics(m *WorkflowMetrics) error {
 		return fmt.Errorf("cannot determine metrics path")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create metrics dir: %w", err)
 	}
 
@@ -69,7 +69,7 @@ func RecordWorkflowMetrics(m *WorkflowMetrics) error {
 		return fmt.Errorf("marshal workflow metrics: %w", err)
 	}
 
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 // LoadWorkflowMetrics loads the most recent workflow metrics from disk.

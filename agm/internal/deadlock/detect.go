@@ -282,7 +282,7 @@ func LogDeadlockIncident(sessionName string, info *ProcessInfo) error {
 	logPath := filepath.Join(homeDir, "deadlock-log.txt")
 
 	// Open file in append mode, create if doesn't exist
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}

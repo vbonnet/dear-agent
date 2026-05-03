@@ -47,7 +47,7 @@ func (r *StructurizrRenderer) Render(ctx context.Context, source io.Reader, dest
 
 	// Write source to workspace.dsl
 	workspaceFile := filepath.Join(tempDir, "workspace.dsl")
-	if err := os.WriteFile(workspaceFile, sourceData, 0644); err != nil {
+	if err := os.WriteFile(workspaceFile, sourceData, 0o600); err != nil {
 		return fmt.Errorf("failed to write workspace file: %w", err)
 	}
 

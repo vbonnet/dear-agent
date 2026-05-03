@@ -106,7 +106,7 @@ func CreateWhyFileIfMissing(aiMdPath string) error {
 	template := GenerateWhyTemplate(basename)
 
 	// Write file
-	if err := os.WriteFile(whyPath, []byte(template), 0644); err != nil {
+	if err := os.WriteFile(whyPath, []byte(template), 0o600); err != nil {
 		return fmt.Errorf("failed to write .why.md: %w", err)
 	}
 

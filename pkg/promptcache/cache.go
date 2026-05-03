@@ -205,7 +205,7 @@ func hashContent(content string) string {
 
 // writeDiff writes a cache-break diff file showing what changed.
 func (d *Detector) writeDiff(source string, oldSnap PromptSnapshot, newContent string) string {
-	if err := os.MkdirAll(d.diffDir, 0o755); err != nil {
+	if err := os.MkdirAll(d.diffDir, 0o700); err != nil {
 		return ""
 	}
 
@@ -228,7 +228,7 @@ func (d *Detector) writeDiff(source string, oldSnap PromptSnapshot, newContent s
 	}
 	b.WriteString(fmt.Sprintf("Current content preview:\n%s\n", preview))
 
-	os.WriteFile(path, []byte(b.String()), 0o644)
+	os.WriteFile(path, []byte(b.String()), 0o600)
 	return path
 }
 

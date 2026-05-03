@@ -24,7 +24,7 @@ func NewFileInjector() *FileInjector {
 // Each engram is prefixed with an HTML comment showing the event source.
 func (fi *FileInjector) Inject(projectRoot string, eventType string, engrams []*engram.Engram) error {
 	engramDir := filepath.Join(projectRoot, ".engram")
-	if err := os.MkdirAll(engramDir, 0755); err != nil {
+	if err := os.MkdirAll(engramDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create .engram directory: %w", err)
 	}
 
@@ -43,7 +43,7 @@ func (fi *FileInjector) Inject(projectRoot string, eventType string, engrams []*
 	}
 
 	outputPath := filepath.Join(engramDir, "triggered-context.md")
-	if err := os.WriteFile(outputPath, []byte(sb.String()), 0644); err != nil {
+	if err := os.WriteFile(outputPath, []byte(sb.String()), 0o600); err != nil {
 		return fmt.Errorf("failed to write triggered-context.md: %w", err)
 	}
 

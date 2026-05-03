@@ -91,7 +91,7 @@ func (sm *SessionMap) load() error {
 func (sm *SessionMap) save() error {
 	// Ensure directory exists
 	dir := filepath.Dir(sm.filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 
@@ -103,7 +103,7 @@ func (sm *SessionMap) save() error {
 
 	// Write atomically (write to temp, then rename)
 	tempPath := sm.filePath + ".tmp"
-	if err := os.WriteFile(tempPath, data, 0644); err != nil {
+	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
 		return err
 	}
 

@@ -1364,7 +1364,7 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 		debug.Phase("Wait for Ready Signal")
 		debug.Log("Waiting for ready-file signal (timeout: 60s)")
 		var readyErr error
-		var spinErr2 error = spinner.New().
+		var spinErr2 = spinner.New().
 			Title("Waiting for Claude to initialize...").
 			Accessible(true).
 			Action(func() {

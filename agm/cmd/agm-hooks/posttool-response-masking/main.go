@@ -106,7 +106,7 @@ func (m *ResponseMasker) nextArchiveN() int {
 
 // archive writes the full tool result to disk and returns the file path.
 func (m *ResponseMasker) archive() (string, error) {
-	if err := os.MkdirAll(m.archiveDir, 0755); err != nil {
+	if err := os.MkdirAll(m.archiveDir, 0o700); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", m.archiveDir, err)
 	}
 
@@ -114,7 +114,7 @@ func (m *ResponseMasker) archive() (string, error) {
 	filename := fmt.Sprintf("%s-%s-%d.txt", m.sessionID, m.toolName, n)
 	path := filepath.Join(m.archiveDir, filename)
 
-	if err := os.WriteFile(path, []byte(m.toolResult), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(m.toolResult), 0o600); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 

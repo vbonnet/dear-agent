@@ -426,7 +426,7 @@ func (v *ContentValidator) updateTokenCount(filepath string, newCount int) error
 	newContent := fmt.Sprintf("---\n%s---\n%s", buf.String(), body)
 
 	// Write back
-	if err := os.WriteFile(filepath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(filepath, []byte(newContent), 0o600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 

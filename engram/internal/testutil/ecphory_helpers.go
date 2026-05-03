@@ -23,9 +23,9 @@ func CreateTestEngramDir(t *testing.T) string {
 	t.Cleanup(func() { os.RemoveAll(tmpdir) })
 
 	// Create directory structure
-	os.MkdirAll(filepath.Join(tmpdir, "patterns", "go"), 0755)
-	os.MkdirAll(filepath.Join(tmpdir, "references"), 0755)
-	os.MkdirAll(filepath.Join(tmpdir, "strategies"), 0755)
+	os.MkdirAll(filepath.Join(tmpdir, "patterns", "go"), 0o700)
+	os.MkdirAll(filepath.Join(tmpdir, "references"), 0o700)
+	os.MkdirAll(filepath.Join(tmpdir, "strategies"), 0o700)
 
 	// Write sample engrams
 	writeTestEngram(t, filepath.Join(tmpdir, "patterns/go/error-handling.ai.md"),
@@ -84,7 +84,7 @@ Use semantic search for relevant retrieval.
 
 // writeTestEngram writes an engram file to the given path
 func writeTestEngram(t *testing.T, path, content string) {
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("failed to write test engram: %v", err)
 	}
 }

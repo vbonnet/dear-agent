@@ -48,7 +48,7 @@ func (s *Store) lockPath() string {
 // Retries up to 3 times with 100ms delay between attempts.
 func (s *Store) acquireLock() (*os.File, error) {
 	for i := 0; i < 3; i++ {
-		f, err := os.OpenFile(s.lockPath(), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+		f, err := os.OpenFile(s.lockPath(), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
 			return f, nil
 		}
@@ -98,7 +98,7 @@ func (s *Store) Load() ([]ErrorRecord, error) {
 // Save writes all records to the JSONL file atomically via temp file + rename.
 func (s *Store) Save(records []ErrorRecord) error {
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating directory %s: %w", dir, err)
 	}
 

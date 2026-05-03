@@ -168,7 +168,7 @@ func (s *Sandbox) writeCodeFile(req *ExecuteRequest) (string, error) {
 	ext := getFileExtension(req.Language)
 	codeFile := filepath.Join(s.workdir, fmt.Sprintf("probe%s", ext))
 
-	if err := os.WriteFile(codeFile, []byte(req.Code), 0644); err != nil {
+	if err := os.WriteFile(codeFile, []byte(req.Code), 0o600); err != nil {
 		return "", err
 	}
 

@@ -194,7 +194,7 @@ func newCleanupLogger() *cleanupLogger {
 		return nil
 	}
 	logPath := filepath.Join(home, ".agm", "logs", "cleanup.jsonl")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		slog.Warn("Failed to create cleanup log directory", "error", err)
 		return nil
 	}
@@ -213,7 +213,7 @@ func logAction(logger *cleanupLogger, action CleanupAction) {
 		return
 	}
 	data = append(data, '\n')
-	f, err := os.OpenFile(logger.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(logger.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}

@@ -83,12 +83,12 @@ func EmitQualityEvent(ctx context.Context, event QualityAssessedEvent, telemetry
 
 	// Ensure parent directory exists
 	dir := filepath.Dir(telemetryPath)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create telemetry directory: %w", err)
 	}
 
 	// Append to JSONL file
-	f, err := os.OpenFile(telemetryPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+	f, err := os.OpenFile(telemetryPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open telemetry file: %w", err)
 	}

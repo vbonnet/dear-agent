@@ -40,7 +40,7 @@ This is a test engram used for unit testing the retrieval package.
 `, filename, typ, tagsStr, filename, filename)
 
 	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("failed to create test engram %s: %v", filename, err)
 	}
 

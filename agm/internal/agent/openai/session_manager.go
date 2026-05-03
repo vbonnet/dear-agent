@@ -43,7 +43,7 @@ func NewSessionManager(baseDir string) (*SessionManager, error) {
 	}
 
 	// Create directory if it doesn't exist
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
+	if err := os.MkdirAll(baseDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create sessions directory: %w", err)
 	}
 
@@ -99,7 +99,7 @@ func (sm *SessionManager) CreateSession(id, model, workingDir string) (*SessionI
 
 	// Create session directory
 	sessionDir := sm.getSessionDir(id)
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create session directory: %w", err)
 	}
 
@@ -271,7 +271,7 @@ func (sm *SessionManager) saveMetadata(sessionID string) error {
 	metadataPath := sm.getMetadataPath(sessionID)
 	tempPath := metadataPath + ".tmp"
 
-	if err := os.WriteFile(tempPath, data, 0644); err != nil {
+	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write metadata: %w", err)
 	}
 
@@ -286,7 +286,7 @@ func (sm *SessionManager) saveMetadata(sessionID string) error {
 func (sm *SessionManager) appendMessageToFile(sessionID string, msg Message) error {
 	messagesPath := sm.getMessagesPath(sessionID)
 
-	file, err := os.OpenFile(messagesPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(messagesPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open messages file: %w", err)
 	}

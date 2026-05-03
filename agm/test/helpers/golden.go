@@ -43,10 +43,10 @@ func CompareGolden(t *testing.T, goldenPath, actual string) {
 
 	// Update mode: write actual as new golden
 	if updateFlag {
-		err := os.MkdirAll(filepath.Dir(goldenPath), 0755)
+		err := os.MkdirAll(filepath.Dir(goldenPath), 0o700)
 		require.NoError(t, err)
 
-		err = os.WriteFile(goldenPath, []byte(actual), 0644)
+		err = os.WriteFile(goldenPath, []byte(actual), 0o600)
 		require.NoError(t, err, "Failed to update golden file")
 		return
 	}

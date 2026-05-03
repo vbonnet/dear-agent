@@ -126,7 +126,7 @@ func (c *Checker) LoadState() (*State, error) {
 // SaveState saves check state to JSON file
 func (c *Checker) SaveState(state *State) error {
 	dir := filepath.Dir(c.stateFile)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create state directory: %w", err)
 	}
 
@@ -135,7 +135,7 @@ func (c *Checker) SaveState(state *State) error {
 		return fmt.Errorf("failed to marshal state: %w", err)
 	}
 
-	if err := os.WriteFile(c.stateFile, data, 0644); err != nil {
+	if err := os.WriteFile(c.stateFile, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write state file: %w", err)
 	}
 

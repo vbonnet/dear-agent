@@ -40,7 +40,7 @@ func (h *History) AppendEvent(eventType, phase string, data map[string]interface
 	}
 
 	// Open file with O_APPEND for concurrent-safe writes
-	file, err := os.OpenFile(h.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(h.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open history file: %w", err)
 	}

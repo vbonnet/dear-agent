@@ -67,24 +67,24 @@ func runInit(cmd *cobra.Command, args []string) error {
 	userConfig := filepath.Join(userDir, "config.yaml")
 
 	// Step 1: Create workspace directory
-	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+	if err := os.MkdirAll(workspaceDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create workspace directory: %w", err)
 	}
 	cli.PrintSuccess(fmt.Sprintf("Created workspace at %s", workspaceDir))
 
 	// Step 2: Create user directory
-	if err := os.MkdirAll(userDir, 0755); err != nil {
+	if err := os.MkdirAll(userDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create user directory: %w", err)
 	}
 	cli.PrintSuccess(fmt.Sprintf("Created user directory at %s", userDir))
 
 	// Step 3: Create logs directory
-	if err := os.MkdirAll(logsDir, 0755); err != nil {
+	if err := os.MkdirAll(logsDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create logs directory: %w", err)
 	}
 
 	// Step 4: Create cache directory
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
@@ -135,7 +135,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 # telemetry:
 #   enabled: false
 `
-		if err := os.WriteFile(userConfig, []byte(defaultConfig), 0644); err != nil {
+		if err := os.WriteFile(userConfig, []byte(defaultConfig), 0o600); err != nil {
 			cli.PrintWarning(fmt.Sprintf("Failed to create user config: %v", err))
 		} else {
 			cli.PrintSuccess(fmt.Sprintf("Created user config at %s", userConfig))

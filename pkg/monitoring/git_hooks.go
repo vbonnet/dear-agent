@@ -49,7 +49,7 @@ func (ghm *GitHookManager) InstallHooks() error {
 	}
 
 	// Write hook file
-	if err := os.WriteFile(hookPath, []byte(hookContent), 0755); err != nil {
+	if err := os.WriteFile(hookPath, []byte(hookContent), 0o700); err != nil { //#nosec G306 -- executable hook
 		return fmt.Errorf("failed to write hook: %w", err)
 	}
 

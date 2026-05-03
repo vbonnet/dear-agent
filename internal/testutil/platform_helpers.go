@@ -14,7 +14,7 @@ func SetupTestConfig(t *testing.T, tmpdir string) {
 
 	// Create config directory structure (.engram/core/)
 	configDir := filepath.Join(tmpdir, ".engram", "core")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatalf("failed to create config dir: %v", err)
 	}
 
@@ -31,7 +31,7 @@ plugins:
   disabled: []
 `
 	configPath := filepath.Join(configDir, "config.yaml")
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(configContent), 0o600); err != nil {
 		t.Fatalf("failed to write config file: %v", err)
 	}
 
@@ -44,7 +44,7 @@ func SetupTestEngramPath(t *testing.T, tmpdir string) string {
 	t.Helper()
 
 	engramPath := filepath.Join(tmpdir, "test-engrams")
-	if err := os.MkdirAll(engramPath, 0755); err != nil {
+	if err := os.MkdirAll(engramPath, 0o700); err != nil {
 		t.Fatalf("failed to create engram path: %v", err)
 	}
 
@@ -54,7 +54,7 @@ func SetupTestEngramPath(t *testing.T, tmpdir string) string {
 
 This is a test engram for platform testing.
 `
-	if err := os.WriteFile(sampleEngram, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(sampleEngram, []byte(content), 0o600); err != nil {
 		t.Fatalf("failed to write sample engram: %v", err)
 	}
 

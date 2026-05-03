@@ -157,7 +157,7 @@ func renderGoTemplate(name, tmplStr string, data any, outPath string, buildIgnor
 		return fmt.Errorf("formatting %s output: %w\n---\n%s", name, err, buf.String())
 	}
 
-	if err := os.WriteFile(outPath, formatted, 0o644); err != nil {
+	if err := os.WriteFile(outPath, formatted, 0o600); err != nil {
 		return fmt.Errorf("writing %s: %w", outPath, err)
 	}
 

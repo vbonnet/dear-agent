@@ -284,7 +284,7 @@ func WorkflowDir() string {
 
 // SaveWorkflow writes a workflow definition to the standard directory.
 func SaveWorkflow(w *WorkflowDefinition, dir string) (string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create workflow directory: %w", err)
 	}
 
@@ -294,7 +294,7 @@ func SaveWorkflow(w *WorkflowDefinition, dir string) (string, error) {
 	}
 
 	path := filepath.Join(dir, w.Name+".yaml")
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return "", fmt.Errorf("failed to write workflow file: %w", err)
 	}
 

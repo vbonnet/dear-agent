@@ -240,7 +240,7 @@ func resumeSessionsBatch(adapter *dolt.Adapter, sessions []*manifest.Manifest) e
 func writeResumeTimestamp(sessionID string) error {
 	// Create .agm directory if it doesn't exist
 	agmDir := filepath.Join(cfg.SessionsDir, sessionID, ".agm")
-	if err := os.MkdirAll(agmDir, 0755); err != nil {
+	if err := os.MkdirAll(agmDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create .agm directory: %w", err)
 	}
 
@@ -248,7 +248,7 @@ func writeResumeTimestamp(sessionID string) error {
 	timestampFile := filepath.Join(agmDir, "resume-timestamp")
 	timestamp := time.Now().Format(time.RFC3339)
 
-	if err := os.WriteFile(timestampFile, []byte(timestamp), 0644); err != nil {
+	if err := os.WriteFile(timestampFile, []byte(timestamp), 0o600); err != nil {
 		return fmt.Errorf("failed to write resume timestamp: %w", err)
 	}
 

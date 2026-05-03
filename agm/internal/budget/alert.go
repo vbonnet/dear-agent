@@ -56,7 +56,7 @@ func CheckAndAlert(status Status, cfg Config, signalDir string) *Alert {
 // writeCompactSignal writes a signal file to trigger auto-compaction.
 // The file is named "compact-{sessionID}" and contains the timestamp.
 func writeCompactSignal(sessionID string, signalDir string) {
-	if err := os.MkdirAll(signalDir, 0o755); err != nil {
+	if err := os.MkdirAll(signalDir, 0o700); err != nil {
 		log.Printf("budget: failed to create signal dir %s: %v", signalDir, err)
 		return
 	}
@@ -65,7 +65,7 @@ func writeCompactSignal(sessionID string, signalDir string) {
 	content := fmt.Sprintf("compact requested at %s\nusage exceeded critical threshold\n",
 		time.Now().Format(time.RFC3339))
 
-	if err := os.WriteFile(signalPath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(signalPath, []byte(content), 0o600); err != nil {
 		log.Printf("budget: failed to write compact signal %s: %v", signalPath, err)
 	}
 }

@@ -182,10 +182,10 @@ func triggerCompaction(ctx *OpContext, m *manifest.Manifest, baseDir string, com
 // writeCompactAuditLog appends an entry to the auto-compact audit log.
 func writeCompactAuditLog(baseDir, sessionName, sessionID string) {
 	logDir := filepath.Join(baseDir, "auto-compact-logs")
-	_ = os.MkdirAll(logDir, 0o755)
+	_ = os.MkdirAll(logDir, 0o700)
 
 	logFile := filepath.Join(logDir, "triggers.log")
-	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}

@@ -51,7 +51,7 @@ func runWikiIndex(cmd *cobra.Command, _ []string) error {
 	}
 
 	indexPath := filepath.Join(kbPath, "index.md")
-	if err := os.WriteFile(indexPath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(indexPath, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to write index.md: %w", err)
 	}
 	fmt.Printf("✅ Wrote %s (%d pages)\n", indexPath, len(pages))

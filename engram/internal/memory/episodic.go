@@ -62,7 +62,7 @@ func (em *EpisodicMemory) AppendEntry(ctx context.Context, entry *MemoryEntry) e
 	entryText := formatMemoryEntry(entry)
 
 	// Append to DECISION_LOG.md
-	f, err := os.OpenFile(em.logPath, os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(em.logPath, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open DECISION_LOG.md: %w", err)
 	}
@@ -193,7 +193,7 @@ When the agent's token usage exceeds 80% of the context window, it performs a "M
 
 `
 
-	return os.WriteFile(path, []byte(template), 0644)
+	return os.WriteFile(path, []byte(template), 0o600)
 }
 
 // estimateTokens provides rough token count (4 chars = 1 token heuristic).

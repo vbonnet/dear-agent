@@ -29,7 +29,7 @@ func NewManager(baseDir string) (*Manager, error) {
 	if baseDir == "" {
 		baseDir = expandPath(DefaultArtifactsDir)
 	}
-	err := os.MkdirAll(baseDir, 0755)
+	err := os.MkdirAll(baseDir, 0o700)
 	if err != nil {
 		return nil, fmt.Errorf("create base directory: %w", err)
 	}
@@ -42,7 +42,7 @@ func (m *Manager) StoreArtifact(channelID string, artifactPath string, descripti
 		return "", fmt.Errorf("artifact not found: %s", artifactPath)
 	}
 	channelDir := filepath.Join(m.baseDir, channelID)
-	err := os.MkdirAll(channelDir, 0755)
+	err := os.MkdirAll(channelDir, 0o700)
 	if err != nil {
 		return "", fmt.Errorf("create channel directory: %w", err)
 	}
@@ -118,7 +118,7 @@ func (m *Manager) updateIndex(channelID, artifactName, description string) error
 	indexFile := filepath.Join(m.baseDir, "INDEX.md")
 	if _, err := os.Stat(indexFile); os.IsNotExist(err) {
 		content := "# A2A Artifact Index\n\nGlobal index of all stored artifacts.\n\n"
-		err = os.WriteFile(indexFile, []byte(content), 0644)
+		err = os.WriteFile(indexFile, []byte(content), 0o600)
 		if err != nil {
 			return fmt.Errorf("create index: %w", err)
 		}
@@ -129,7 +129,7 @@ func (m *Manager) updateIndex(channelID, artifactName, description string) error
 		entry += fmt.Sprintf(" - %s", description)
 	}
 	entry += fmt.Sprintf(" (added %s)\n", timestamp)
-	file, err := os.OpenFile(indexFile, os.O_APPEND|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(indexFile, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open index: %w", err)
 	}

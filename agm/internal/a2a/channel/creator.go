@@ -84,11 +84,11 @@ func (c *Creator) CreateChannel(topic string, options *CreateOptions) (string, e
 		Participants:     participants,
 	})
 
-	if err := os.MkdirAll(c.channelsDir, 0755); err != nil {
+	if err := os.MkdirAll(c.channelsDir, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create channels directory: %w", err)
 	}
 
-	if err := os.WriteFile(channelPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(channelPath, []byte(content), 0o600); err != nil {
 		return "", fmt.Errorf("failed to create channel file: %w", err)
 	}
 
