@@ -3,6 +3,7 @@ package delegation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -101,7 +102,8 @@ func (s *HeadlessStrategy) Execute(ctx context.Context, input *AgentInput) (*Age
 	output, err := cmd.Output()
 	if err != nil {
 		// Check if it's an ExitError (contains stderr)
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			stderr := string(exitErr.Stderr)
 			return nil, NewStrategyError("Headless", "execute",
 				fmt.Errorf("CLI failed with stderr: %s", stderr))

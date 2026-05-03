@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -78,7 +79,8 @@ func TestRunWithTimeout_DeadlineExceeded(t *testing.T) {
 		t.Fatal("Expected TimeoutError, got nil")
 	}
 
-	timeoutErr, ok := err.(*TimeoutError)
+	timeoutErr := &TimeoutError{}
+	ok := errors.As(err, &timeoutErr)
 	if !ok {
 		t.Fatalf("Expected *TimeoutError, got %T", err)
 	}

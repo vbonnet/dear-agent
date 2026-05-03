@@ -20,10 +20,10 @@ const (
 // CheckFriction returns the friction level for the next interrupt to a recipient
 func CheckFriction(recipient string) FrictionLevel {
 	count := GetInterruptCount(recipient)
-	switch {
-	case count == 0:
+	switch count {
+	case 0:
 		return FrictionFree
-	case count == 1:
+	case 1:
 		return FrictionReason
 	default:
 		return FrictionWarn

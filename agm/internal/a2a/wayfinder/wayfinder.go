@@ -62,12 +62,13 @@ func StatusToMessage(status Status, agentID string) *protocol.Message {
 	msg.Questions = []string{}
 	msg.Blockers = []string{}
 
-	if status.Status == "in_progress" {
+	switch status.Status {
+	case "in_progress":
 		msg.NextSteps = []string{
 			fmt.Sprintf("Continue %s phase", status.CurrentPhase),
 			"Report progress when phase completes",
 		}
-	} else if status.Status == "completed" {
+	case "completed":
 		msg.NextSteps = []string{
 			"Review deliverables",
 			"Transition to next phase",
@@ -118,14 +119,15 @@ func TaskToMessage(task TaskUpdate, agentID, context string) *protocol.Message {
 	msg.Questions = []string{}
 	msg.Blockers = []string{}
 
-	if task.Status == "completed" {
+	switch task.Status {
+	case "completed":
 		msg.Status = protocol.StatusConsensusReached
 		msg.NextSteps = []string{"Review task deliverables", "Mark task as complete"}
-	} else if task.Status == "blocked" {
+	case "blocked":
 		msg.Status = protocol.NewBlockedStatus("task-dependency")
 		msg.Blockers = []string{"Task blocked - awaiting dependency resolution"}
 		msg.NextSteps = []string{"Resolve blocker", "Resume task"}
-	} else {
+	default:
 		msg.Status = protocol.StatusPending
 		msg.NextSteps = []string{"Continue task work", "Report progress"}
 	}
@@ -190,9 +192,10 @@ func formatPhases(phases []Phase) string {
 	result := ""
 	for _, phase := range phases {
 		statusIcon := "P"
-		if phase.Status == "completed" {
+		switch phase.Status {
+		case "completed":
 			statusIcon = "V"
-		} else if phase.Status == "in_progress" {
+		case "in_progress":
 			statusIcon = ">"
 		}
 

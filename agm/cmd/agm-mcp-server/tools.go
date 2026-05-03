@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -166,7 +167,8 @@ func mcpSuccess(result any) *mcp.CallToolResult {
 // If the error is an OpError, includes the full RFC 7807 JSON.
 func mcpError(err error) *mcp.CallToolResult {
 	var text string
-	if opErr, ok := err.(*ops.OpError); ok {
+	opErr := &ops.OpError{}
+	if errors.As(err, &opErr) {
 		text = string(opErr.JSON())
 	} else {
 		text = err.Error()
@@ -344,7 +346,7 @@ func forwardToEngramMCP(ctx context.Context, toolName string, arguments map[stri
 	httpCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(httpCtx, "POST", engramURL, bytes.NewReader(requestBody))
+	httpReq, err := http.NewRequestWithContext(httpCtx, http.MethodPost, engramURL, bytes.NewReader(requestBody))
 	if err != nil {
 		return "", fmt.Errorf("failed to create HTTP request: %w", err)
 	}

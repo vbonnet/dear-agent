@@ -146,21 +146,21 @@ func (em *EpisodicMemory) RecordError(ctx context.Context, sessionID string, err
 func formatMemoryEntry(entry *MemoryEntry) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("\n## %s - %s\n\n",
+	fmt.Fprintf(&sb, "\n## %s - %s\n\n",
 		entry.Timestamp.Format("2006-01-02 15:04:05"),
-		entry.Event))
+		entry.Event)
 
-	sb.WriteString(fmt.Sprintf("**Session**: %s\n\n", entry.Session))
-	sb.WriteString(fmt.Sprintf("**Summary**: %s\n\n", entry.Summary))
+	fmt.Fprintf(&sb, "**Session**: %s\n\n", entry.Session)
+	fmt.Fprintf(&sb, "**Summary**: %s\n\n", entry.Summary)
 
 	if entry.Details != "" {
-		sb.WriteString(fmt.Sprintf("**Details**:\n%s\n\n", entry.Details))
+		fmt.Fprintf(&sb, "**Details**:\n%s\n\n", entry.Details)
 	}
 
 	if len(entry.Metadata) > 0 {
 		sb.WriteString("**Metadata**:\n")
 		for k, v := range entry.Metadata {
-			sb.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
+			fmt.Fprintf(&sb, "- %s: %s\n", k, v)
 		}
 		sb.WriteString("\n")
 	}

@@ -159,9 +159,10 @@ func AggregateWorkspaceStatus(adapter dolt.Storage, workspace string) (*Workspac
 		workspaceStatus.Sessions = append(workspaceStatus.Sessions, status)
 
 		// Update counters
-		if status.State == manifest.StateDone || status.State == manifest.StateReady {
+		switch status.State {
+		case manifest.StateDone, manifest.StateReady:
 			workspaceStatus.DoneSessions++
-		} else if status.State == manifest.StateWorking || status.State == "THINKING" {
+		case manifest.StateWorking, "THINKING":
 			workspaceStatus.WorkingSessions++
 		}
 	}

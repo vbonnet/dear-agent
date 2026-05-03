@@ -109,7 +109,7 @@ func TestCountEventsByType_NonexistentFile(t *testing.T) {
 }
 
 func TestCountEventsByType_WithEvents(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "event-log-*.jsonl")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "event-log-*.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestCountLinesInDir(t *testing.T) {
 }
 
 func TestValidateGitCommits_FromEventLog(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "event-log-*.jsonl")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "event-log-*.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestValidate_ScoringLogic(t *testing.T) {
 	}
 
 	// Create event log with commits and tests
-	tmpFile, err := os.CreateTemp("", "event-log-*.jsonl")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "event-log-*.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}

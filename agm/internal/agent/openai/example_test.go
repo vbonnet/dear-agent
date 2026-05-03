@@ -2,6 +2,7 @@ package openai_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -168,7 +169,8 @@ func ExampleClient_CreateChatCompletion_errorHandling() {
 	resp, err := client.CreateChatCompletion(context.Background(), messages)
 	if err != nil {
 		// Check for specific error types
-		if clientErr, ok := err.(*openai.ClientError); ok {
+		clientErr := &openai.ClientError{}
+		if errors.As(err, &clientErr) {
 			switch clientErr.Type {
 			case openai.ErrorTypeAPIKeyMissing:
 				fmt.Println("API key is not configured")

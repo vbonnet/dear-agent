@@ -76,9 +76,10 @@ func TestAdminTraceFiles_MultipleFiles(t *testing.T) {
 	// Verify both files have results
 	var readmeResult, mainGoResult *trace.TraceResult
 	for _, result := range results {
-		if result.FilePath == "/tmp/test-ws/oss/README.md" {
+		switch result.FilePath {
+		case "/tmp/test-ws/oss/README.md":
 			readmeResult = result
-		} else if result.FilePath == "/tmp/test-ws/oss/src/main.go" {
+		case "/tmp/test-ws/oss/src/main.go":
 			mainGoResult = result
 		}
 	}

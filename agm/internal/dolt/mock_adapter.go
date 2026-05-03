@@ -425,9 +425,10 @@ func (m *MockAdapter) List(filter *manifest.Filter) ([]*manifest.Manifest, error
 		Limit:     filter.Limit,
 		Offset:    filter.Offset,
 	}
-	if filter.Status == "archived" {
+	switch filter.Status {
+	case "archived":
 		sf.Lifecycle = manifest.LifecycleArchived
-	} else if filter.Status == "active" {
+	case "active":
 		sf.ExcludeArchived = true
 	}
 	return m.ListSessions(sf)

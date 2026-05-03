@@ -201,9 +201,10 @@ func runDaemonHealth(cmd *cobra.Command, args []string) error {
 
 	// Overall status
 	statusSymbol := "✓"
-	if health.HealthStatusLevel == "critical" {
+	switch health.HealthStatusLevel {
+	case "critical":
 		statusSymbol = "✗"
-	} else if health.HealthStatusLevel == "degraded" {
+	case "degraded":
 		statusSymbol = "⚠"
 	}
 

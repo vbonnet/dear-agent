@@ -37,7 +37,8 @@ func stripQuotedContents(cmd string) string {
 	var result []byte
 	i := 0
 	for i < len(cmd) {
-		if cmd[i] == '\'' {
+		switch cmd[i] {
+		case '\'':
 			// Single quote: everything inside is literal, skip it all
 			result = append(result, '\'')
 			i++
@@ -48,7 +49,7 @@ func stripQuotedContents(cmd string) string {
 				result = append(result, '\'')
 				i++
 			}
-		} else if cmd[i] == '"' {
+		case '"':
 			// Double quote: skip content but preserve $( sequences
 			result = append(result, '"')
 			i++
@@ -69,7 +70,7 @@ func stripQuotedContents(cmd string) string {
 				result = append(result, '"')
 				i++
 			}
-		} else {
+		default:
 			result = append(result, cmd[i])
 			i++
 		}

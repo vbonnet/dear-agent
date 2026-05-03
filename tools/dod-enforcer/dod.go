@@ -2,6 +2,7 @@ package dod
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -202,7 +203,8 @@ func executeCommand(cmdStr string, timeout time.Duration) (int, string, error) {
 
 	exitCode := 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			return -1, string(output), fmt.Errorf("command execution error: %w", err)

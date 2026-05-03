@@ -89,7 +89,7 @@ func (db *DB) GetParent(sessionID string) (*manifest.Manifest, error) {
 	if err != nil {
 		// If parent session doesn't exist (orphaned reference), return nil
 		// This handles the case where parent was deleted with ON DELETE SET NULL
-		if err.Error() == fmt.Sprintf("session not found") {
+		if err.Error() == "session not found" {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get parent session: %w", err)

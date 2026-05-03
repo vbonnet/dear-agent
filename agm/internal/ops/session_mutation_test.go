@@ -74,7 +74,8 @@ func TestArchiveSession_AlreadyArchived(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for already archived session")
 	}
-	opErr, ok := err.(*OpError)
+	opErr := &OpError{}
+	ok := errors.As(err, &opErr)
 	if !ok {
 		t.Fatalf("expected *OpError, got %T", err)
 	}
@@ -89,7 +90,8 @@ func TestArchiveSession_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing session")
 	}
-	opErr, ok := err.(*OpError)
+	opErr := &OpError{}
+	ok := errors.As(err, &opErr)
 	if !ok {
 		t.Fatalf("expected *OpError, got %T", err)
 	}
@@ -232,7 +234,8 @@ func TestKillSession_ArchivedSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for archived session")
 	}
-	opErr, ok := err.(*OpError)
+	opErr := &OpError{}
+	ok := errors.As(err, &opErr)
 	if !ok {
 		t.Fatalf("expected *OpError, got %T", err)
 	}
@@ -357,7 +360,8 @@ func TestKillSession_KillProtect_RecentlyActive(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected kill-protected error for recently active session")
 	}
-	opErr, ok := err.(*OpError)
+	opErr := &OpError{}
+	ok := errors.As(err, &opErr)
 	if !ok {
 		t.Fatalf("expected OpError, got %T", err)
 	}
@@ -467,7 +471,8 @@ func TestSendMessage_ArchivedSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for archived session")
 	}
-	opErr, ok := err.(*OpError)
+	opErr := &OpError{}
+	ok := errors.As(err, &opErr)
 	if !ok {
 		t.Fatalf("expected *OpError, got %T", err)
 	}

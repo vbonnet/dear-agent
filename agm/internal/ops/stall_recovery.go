@@ -10,20 +10,20 @@ import (
 
 // RecoveryAction represents an action taken to recover from a stall.
 type RecoveryAction struct {
-	SessionName   string // Target session
-	ActionType    string // "nudge" | "alert_orchestrator" | "log_diagnostic" | "auto_approve"
-	Description   string // Human-readable action description
-	Sent          bool   // Whether action succeeded
-	Error         string // Error if failed
+	SessionName string // Target session
+	ActionType  string // "nudge" | "alert_orchestrator" | "log_diagnostic" | "auto_approve"
+	Description string // Human-readable action description
+	Sent        bool   // Whether action succeeded
+	Error       string // Error if failed
 }
 
 // StallRecovery handles recovery from detected stalls with retry tracking.
 type StallRecovery struct {
-	ctx               *OpContext
-	orchestratorName  string        // Name of orchestrator session to notify
-	autoApprovePatterns []string    // Safe patterns to auto-approve
-	retryTracker      *RetryTracker // Tracks retry attempts with bounded retries
-	bus               eventbus.Broadcaster // Optional: publishes StallRecovered/StallEscalated events
+	ctx                 *OpContext
+	orchestratorName    string               // Name of orchestrator session to notify
+	autoApprovePatterns []string             // Safe patterns to auto-approve
+	retryTracker        *RetryTracker        // Tracks retry attempts with bounded retries
+	bus                 eventbus.Broadcaster // Optional: publishes StallRecovered/StallEscalated events
 }
 
 // NewStallRecovery creates a new stall recovery handler with retry tracking.
@@ -160,7 +160,7 @@ func (sr *StallRecovery) recoverNoCommitStall(ctx context.Context, event StallEv
 	}
 
 	action.Sent = result.Delivered
-	action.Description = fmt.Sprintf("Sent nudge message to worker")
+	action.Description = "Sent nudge message to worker"
 	return action, nil
 }
 

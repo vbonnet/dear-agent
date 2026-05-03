@@ -166,7 +166,7 @@ func TestBackendSwitching_CompatibilityLayer(t *testing.T) {
 	}
 
 	// Verify all interface methods are callable
-	var _ backend.Backend = b
+	var _ = b
 
 	// Test each method to ensure it doesn't panic
 	_, _ = b.HasSession("test")

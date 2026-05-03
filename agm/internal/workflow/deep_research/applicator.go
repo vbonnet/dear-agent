@@ -215,23 +215,23 @@ func WriteProposalsToMarkdown(result ApplicationResult, outputPath string) error
 
 	// Header
 	content.WriteString("# Research-Based Improvement Proposals\n\n")
-	content.WriteString(fmt.Sprintf("**Summary**: %s\n\n", result.Summary))
+	fmt.Fprintf(&content, "**Summary**: %s\n\n", result.Summary)
 	content.WriteString("---\n\n")
 
 	// Proposals by repository
 	for repo, proposals := range result.Proposals {
-		content.WriteString(fmt.Sprintf("## %s Proposals\n\n", repo))
+		fmt.Fprintf(&content, "## %s Proposals\n\n", repo)
 
 		for i, proposal := range proposals {
-			content.WriteString(fmt.Sprintf("### %d. %s\n\n", i+1, proposal.Title))
-			content.WriteString(fmt.Sprintf("**Category**: %s  \n", proposal.Category))
-			content.WriteString(fmt.Sprintf("**Priority**: %s\n\n", proposal.Priority))
-			content.WriteString(fmt.Sprintf("%s\n\n", proposal.Description))
+			fmt.Fprintf(&content, "### %d. %s\n\n", i+1, proposal.Title)
+			fmt.Fprintf(&content, "**Category**: %s  \n", proposal.Category)
+			fmt.Fprintf(&content, "**Priority**: %s\n\n", proposal.Priority)
+			fmt.Fprintf(&content, "%s\n\n", proposal.Description)
 
 			if len(proposal.TestableIdeas) > 0 {
 				content.WriteString("**Testable Ideas**:\n")
 				for _, idea := range proposal.TestableIdeas {
-					content.WriteString(fmt.Sprintf("- %s\n", idea))
+					fmt.Fprintf(&content, "- %s\n", idea)
 				}
 				content.WriteString("\n")
 			}
@@ -242,7 +242,7 @@ func WriteProposalsToMarkdown(result ApplicationResult, outputPath string) error
 	if len(result.CrossCuttingIdeas) > 0 {
 		content.WriteString("## Cross-Cutting Ideas\n\n")
 		for _, idea := range result.CrossCuttingIdeas {
-			content.WriteString(fmt.Sprintf("- %s\n", idea))
+			fmt.Fprintf(&content, "- %s\n", idea)
 		}
 		content.WriteString("\n")
 	}

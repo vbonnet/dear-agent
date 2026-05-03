@@ -233,9 +233,9 @@ func countProgressEntries(sessionFile string) (int, error) {
 func formatBloatError(sessionFile string, sizeMB float64, progressCount int) string {
 	var msg strings.Builder
 
-	msg.WriteString(fmt.Sprintf("Claude Code session file is bloated (%.0fMB", sizeMB))
+	fmt.Fprintf(&msg, "Claude Code session file is bloated (%.0fMB", sizeMB)
 	if progressCount > 0 {
-		msg.WriteString(fmt.Sprintf(", %d progress entries", progressCount))
+		fmt.Fprintf(&msg, ", %d progress entries", progressCount)
 	}
 	msg.WriteString(")\n")
 	msg.WriteString("File: " + sessionFile + "\n")
@@ -246,15 +246,15 @@ func formatBloatError(sessionFile string, sizeMB float64, progressCount int) str
 	msg.WriteString("\n")
 	msg.WriteString("To fix:\n")
 	msg.WriteString("1. Create timestamped backup:\n")
-	msg.WriteString(fmt.Sprintf("   cp \"%s\" \"%s.backup-$(date +%%Y%%m%%d-%%H%%M%%S)\"\n", sessionFile, sessionFile))
+	fmt.Fprintf(&msg, "   cp \"%s\" \"%s.backup-$(date +%%Y%%m%%d-%%H%%M%%S)\"\n", sessionFile, sessionFile)
 	msg.WriteString("\n")
 	msg.WriteString("2. Run cleanup script (removes normalizedMessages from progress entries):\n")
 	msg.WriteString("   wget -O /tmp/fix-claude-sessions.py https://raw.githubusercontent.com/anthropics/claude-code/main/scripts/fix-claude-sessions.py\n")
-	msg.WriteString(fmt.Sprintf("   python3 /tmp/fix-claude-sessions.py \"%s\"\n", sessionFile))
+	fmt.Fprintf(&msg, "   python3 /tmp/fix-claude-sessions.py \"%s\"\n", sessionFile)
 	msg.WriteString("\n")
 	msg.WriteString("3. Ensure custom-title is first line (required for Claude Code 2.1.14+):\n")
 	msg.WriteString("   wget -O /tmp/move-custom-title-to-first.py https://raw.githubusercontent.com/anthropics/claude-code/main/scripts/move-custom-title-to-first.py\n")
-	msg.WriteString(fmt.Sprintf("   python3 /tmp/move-custom-title-to-first.py \"%s\"\n", sessionFile))
+	fmt.Fprintf(&msg, "   python3 /tmp/move-custom-title-to-first.py \"%s\"\n", sessionFile)
 	msg.WriteString("\n")
 	msg.WriteString("After fixing, try resuming again with: agm session resume\n")
 	msg.WriteString("\n")

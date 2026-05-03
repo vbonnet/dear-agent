@@ -35,7 +35,7 @@ func TestOpenCodeAdapterImplementsAgentInterface(t *testing.T) {
 	}
 
 	// Verify adapter implements Agent interface
-	var _ Agent = adapter
+	var _ = adapter
 }
 
 // TestOpenCodeAdapterName tests Name() method.

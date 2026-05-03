@@ -18,8 +18,8 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
-	"github.com/vbonnet/dear-agent/agm/internal/interrupt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
+	"github.com/vbonnet/dear-agent/agm/internal/interrupt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/readiness"
@@ -1364,8 +1364,7 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 		debug.Phase("Wait for Ready Signal")
 		debug.Log("Waiting for ready-file signal (timeout: 60s)")
 		var readyErr error
-		var spinErr2 error
-		spinErr2 = spinner.New().
+		var spinErr2 error = spinner.New().
 			Title("Waiting for Claude to initialize...").
 			Accessible(true).
 			Action(func() {
@@ -1556,7 +1555,7 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 
 	// Apply --mode flag for non-claude-code paths (test mode, other harnesses)
 	// Skip if already applied at Point A (claude-code normal path)
-	if modeFlagValue != "" && !(harnessName == "claude-code" && os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "") {
+	if modeFlagValue != "" && (harnessName != "claude-code" || os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "") {
 		applyCreationModeSwitch(sessionName, harnessName, modeFlagValue)
 	}
 
@@ -2340,10 +2339,7 @@ func buildSessionTags(role string, tags []string) []string {
 
 func init() {
 	// Check for AGM_DEBUG environment variable for default value
-	debugDefault := false
-	if os.Getenv("AGM_DEBUG") == "true" || os.Getenv("AGM_DEBUG") == "1" {
-		debugDefault = true
-	}
+	debugDefault := os.Getenv("AGM_DEBUG") == "true" || os.Getenv("AGM_DEBUG") == "1"
 
 	sessionCmd.AddCommand(newCmd)
 	newCmd.Flags().BoolP("debug", "d", debugDefault, "Enable debug logging to ~/.agm/debug/ (env: AGM_DEBUG)")

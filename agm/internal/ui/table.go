@@ -552,14 +552,15 @@ func groupByStatus(manifests []*manifest.Manifest, statuses map[string]session.S
 		}
 
 		statusInfo := statuses[m.Name]
-		if statusInfo.Status == "active" {
+		switch statusInfo.Status {
+		case "active":
 			// Active sessions: distinguish attached vs detached
 			if statusInfo.AttachedClients > 0 {
 				groups["attached"] = append(groups["attached"], m)
 			} else {
 				groups["detached"] = append(groups["detached"], m)
 			}
-		} else if statusInfo.Status == "stopped" {
+		case "stopped":
 			groups["stopped"] = append(groups["stopped"], m)
 		}
 	}

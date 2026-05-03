@@ -113,10 +113,10 @@ func FormatValidationReport(result ValidationResult) string {
 	var sb strings.Builder
 	sb.WriteString("Bead description validation failed\n")
 	for _, ref := range result.InvalidFileRefs {
-		sb.WriteString(fmt.Sprintf("  - %s: %s\n", ref.Path, ref.Reason))
+		fmt.Fprintf(&sb, "  - %s: %s\n", ref.Path, ref.Reason)
 	}
 	for _, w := range result.Warnings {
-		sb.WriteString(fmt.Sprintf("  Warning: %s\n", w))
+		fmt.Fprintf(&sb, "  Warning: %s\n", w)
 	}
 	return sb.String()
 }

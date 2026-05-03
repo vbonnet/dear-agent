@@ -60,7 +60,7 @@ func BenchmarkDetectVagueVerbs(b *testing.B) {
 // Helper function for benchmarks
 func createBenchFile(b *testing.B, content string) string {
 	b.Helper()
-	tmpFile, err := os.CreateTemp("", "engram-bench-*.ai.md")
+	tmpFile, err := os.CreateTemp(b.TempDir(), "engram-bench-*.ai.md")
 	if err != nil {
 		b.Fatalf("Failed to create temp file: %v", err)
 	}

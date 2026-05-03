@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -197,7 +198,8 @@ func TestGetHistoryPaths_ErrorCases(t *testing.T) {
 			}
 
 			// Check if error is LocationError
-			locErr, ok := err.(*history.LocationError)
+			locErr := &history.LocationError{}
+			ok := errors.As(err, &locErr)
 			if !ok {
 				t.Fatalf("GetHistoryPaths() error type = %T, want *history.LocationError", err)
 			}

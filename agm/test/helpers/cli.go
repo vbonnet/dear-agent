@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"bytes"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -77,7 +78,8 @@ func RunCLI(t *testing.T, args ...string) CLIResult {
 	// Determine exit code
 	exitCode := 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			// Command failed to start (binary not found, etc.)

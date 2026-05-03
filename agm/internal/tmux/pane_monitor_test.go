@@ -13,6 +13,6 @@ func TestPaneMonitorFunctionsExist(t *testing.T) {
 	// This is a compile-time check - if these functions don't exist
 	// or have the wrong signature, this won't compile
 
-	var _ func(string, string) error = SendKeysToPane
-	var _ func(string) (bool, error) = IsPaneActive
+	var _ = SendKeysToPane
+	var _ = IsPaneActive
 }

@@ -66,7 +66,7 @@ func TestParseHistoryFile(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create temp file
-			tmpFile, err := os.CreateTemp("", "history-*.jsonl")
+			tmpFile, err := os.CreateTemp(t.TempDir(), "history-*.jsonl")
 			if err != nil {
 				t.Fatalf("failed to create temp file: %v", err)
 			}
@@ -397,7 +397,7 @@ context:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create temp file
-			tmpFile, err := os.CreateTemp("", "manifest-*.yaml")
+			tmpFile, err := os.CreateTemp(t.TempDir(), "manifest-*.yaml")
 			if err != nil {
 				t.Fatalf("failed to create temp file: %v", err)
 			}
@@ -446,7 +446,7 @@ func TestNullByteResilience(t *testing.T) {
 	content.WriteByte(0) // null byte
 	content.WriteString("\"project\":\"/home/user\",\"timestamp\":1708300000000,\"files_modified\":[\"~/README.md\"]}\n")
 
-	tmpFile, err := os.CreateTemp("", "history-*.jsonl")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "history-*.jsonl")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}

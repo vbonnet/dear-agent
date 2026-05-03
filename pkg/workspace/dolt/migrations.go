@@ -107,7 +107,7 @@ func (a *WorkspaceAdapter) ApplyMigration(ctx context.Context, component string,
 	err = a.ExecuteInTransaction(ctx, func(tx *sql.Tx) error {
 		// Execute migration SQL
 		if _, err := tx.ExecContext(ctx, migration.SQL); err != nil {
-			return fmt.Errorf("%w: %v", ErrMigrationFailed, err)
+			return fmt.Errorf("%w: %w", ErrMigrationFailed, err)
 		}
 
 		// Record migration in registry

@@ -110,10 +110,10 @@ type SessionHealth struct {
 
 // OpsAlerts holds thresholds for system-level alert generation.
 type OpsAlerts struct {
-	LoadThreshold              float64  `yaml:"load_threshold"`
-	MemoryThresholdPercent     float64  `yaml:"memory_threshold_percent"`
-	DiskThresholdPercent       float64  `yaml:"disk_threshold_percent"`
-	PermissionPromptThreshold  Duration `yaml:"permission_prompt_threshold"`
+	LoadThreshold             float64  `yaml:"load_threshold"`
+	MemoryThresholdPercent    float64  `yaml:"memory_threshold_percent"`
+	DiskThresholdPercent      float64  `yaml:"disk_threshold_percent"`
+	PermissionPromptThreshold Duration `yaml:"permission_prompt_threshold"`
 }
 
 // Daemon holds daemon polling and retry configuration.
@@ -158,7 +158,7 @@ func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 
 // MarshalYAML serialises the duration back to a string.
 func (d Duration) MarshalYAML() (interface{}, error) {
-	return d.Duration.String(), nil
+	return d.String(), nil
 }
 
 var (
@@ -223,11 +223,11 @@ func Defaults() *SLOContracts {
 			EventDeltas: map[string]int{
 				"success":              5,
 				"false_completion":     -15,
-				"stall":               -5,
-				"error_loop":          -3,
-				"permission_churn":    -1,
+				"stall":                -5,
+				"error_loop":           -3,
+				"permission_churn":     -1,
 				"quality_gate_failure": -10,
-				"gc_archived":         0,
+				"gc_archived":          0,
 			},
 			MinDispatchScore: 30,
 			PreferredScore:   60,

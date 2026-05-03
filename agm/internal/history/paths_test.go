@@ -1,6 +1,7 @@
 package history
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -232,7 +233,8 @@ func TestGetClaudeCodePaths_MissingWorkingDir(t *testing.T) {
 		t.Error("getClaudeCodePaths() expected error for empty working dir, got nil")
 	}
 
-	locErr, ok := err.(*LocationError)
+	locErr := &LocationError{}
+	ok := errors.As(err, &locErr)
 	if !ok {
 		t.Errorf("getClaudeCodePaths() error type = %T, want *LocationError", err)
 	} else {

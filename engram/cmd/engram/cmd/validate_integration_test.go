@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -150,7 +151,8 @@ func TestIntegration_ValidateRealCorpus(t *testing.T) {
 
 		// Command should succeed (exit 0) or fail (exit 1) but not crash (exit 2)
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed with unexpected error: %v\nOutput: %s", err, output)
 			}
@@ -178,7 +180,8 @@ func TestIntegration_ValidateRealCorpus(t *testing.T) {
 
 		// Should complete without crashing
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
 			}
@@ -213,7 +216,8 @@ func TestIntegration_EngramValidator(t *testing.T) {
 
 				// Should not crash
 				if err != nil {
-					exitErr, ok := err.(*exec.ExitError)
+					exitErr := &exec.ExitError{}
+					ok := errors.As(err, &exitErr)
 					if !ok || exitErr.ExitCode() > 1 {
 						t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
 					}
@@ -262,7 +266,8 @@ func TestIntegration_ContentValidator(t *testing.T) {
 
 		// Should not crash
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
 			}
@@ -309,7 +314,8 @@ func TestIntegration_WayfinderValidator(t *testing.T) {
 
 		// Should not crash
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
 			}
@@ -337,7 +343,8 @@ func TestIntegration_LinkChecker(t *testing.T) {
 
 		// Should not crash
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
 			}
@@ -430,7 +437,8 @@ func TestIntegration_RetrospectiveValidator(t *testing.T) {
 
 		// Should not crash
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
 			}
@@ -468,7 +476,8 @@ func TestIntegration_JSONOutput(t *testing.T) {
 
 		// Should not crash
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
 			}
@@ -569,7 +578,8 @@ func TestIntegration_AutoFix(t *testing.T) {
 
 		// Should not crash
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
 			}
@@ -608,7 +618,8 @@ func TestIntegration_PerformanceBenchmark(t *testing.T) {
 
 		// Should not crash
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
 			}
@@ -690,7 +701,8 @@ version: 1.0
 
 		// Should process all files
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
 			}
@@ -742,7 +754,8 @@ This is a test file.
 
 			// Should not crash
 			if err != nil {
-				exitErr, ok := err.(*exec.ExitError)
+				exitErr := &exec.ExitError{}
+				ok := errors.As(err, &exitErr)
 				if !ok || exitErr.ExitCode() > 1 {
 					t.Fatalf("Command crashed with --type=%s: %v\nOutput: %s", vType, err, output)
 				}
@@ -785,7 +798,8 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 
 		// Should handle empty file gracefully
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed on empty file: %v\nOutput: %s", err, output)
 			}
@@ -811,7 +825,8 @@ This is broken
 
 		// Should handle malformed file gracefully
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed on malformed file: %v\nOutput: %s", err, output)
 			}
@@ -927,7 +942,8 @@ This file should be skipped.
 
 		// Should process validatable files and skip README.md
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
 			}
@@ -993,7 +1009,8 @@ This should fail validation.
 		if err == nil {
 			t.Logf("Note: Expected validation to fail for file without frontmatter")
 		} else {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if ok && exitErr.ExitCode() == 1 {
 				t.Logf("Correct exit code 1 for validation errors")
 			}
@@ -1032,7 +1049,8 @@ description: Test file
 
 		// Should process all files in directory
 		if err != nil {
-			exitErr, ok := err.(*exec.ExitError)
+			exitErr := &exec.ExitError{}
+			ok := errors.As(err, &exitErr)
 			if !ok || exitErr.ExitCode() > 1 {
 				t.Fatalf("Command crashed: %v\nOutput: %s", err, output)
 			}

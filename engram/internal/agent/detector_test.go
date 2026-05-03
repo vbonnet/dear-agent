@@ -450,7 +450,7 @@ func TestFileExists(t *testing.T) {
 	detector := NewDetector()
 
 	// Test with existing file
-	tmpFile, err := os.CreateTemp("", "test-*")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}

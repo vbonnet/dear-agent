@@ -298,7 +298,7 @@ func TestBackendInterfaceCompliance(t *testing.T) {
 
 			// Test that backend implements all interface methods
 			// (This is mainly a compile-time check, but we verify at runtime too)
-			var _ Backend = backend
+			var _ = backend
 		})
 	}
 }

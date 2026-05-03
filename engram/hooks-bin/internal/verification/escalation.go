@@ -68,28 +68,28 @@ func formatEscalation(v PendingVerification) string {
 
 	switch v.Type {
 	case "bead_close":
-		sb.WriteString(fmt.Sprintf("Type: Bead close (swarm: %s)\n", v.SwarmLabel))
-		sb.WriteString(fmt.Sprintf("Bead: %s\n", v.BeadID))
-		sb.WriteString(fmt.Sprintf("Ignored for: %d tool uses\n", v.ToolUsesSince))
+		fmt.Fprintf(&sb, "Type: Bead close (swarm: %s)\n", v.SwarmLabel)
+		fmt.Fprintf(&sb, "Bead: %s\n", v.BeadID)
+		fmt.Fprintf(&sb, "Ignored for: %d tool uses\n", v.ToolUsesSince)
 		sb.WriteString("\n")
 		sb.WriteString("Action Required:\n")
-		sb.WriteString(fmt.Sprintf("  1. Check remaining beads: bd list -l %s\n", v.SwarmLabel))
+		fmt.Fprintf(&sb, "  1. Check remaining beads: bd list -l %s\n", v.SwarmLabel)
 		sb.WriteString("  2. Pick next task and continue work\n")
 		sb.WriteString("  3. Or explicitly defer: bd defer <bead-id>\n")
 
 	case "notification_send":
-		sb.WriteString(fmt.Sprintf("Type: Notification sent to %s\n", v.Recipient))
-		sb.WriteString(fmt.Sprintf("Ignored for: %d tool uses\n", v.ToolUsesSince))
+		fmt.Fprintf(&sb, "Type: Notification sent to %s\n", v.Recipient)
+		fmt.Fprintf(&sb, "Ignored for: %d tool uses\n", v.ToolUsesSince)
 		sb.WriteString("\n")
 		sb.WriteString("Action Required:\n")
-		sb.WriteString(fmt.Sprintf("  1. Check for response from %s\n", v.Recipient))
+		fmt.Fprintf(&sb, "  1. Check for response from %s\n", v.Recipient)
 		sb.WriteString("  2. Re-send if no response received\n")
 		sb.WriteString("  3. Or continue with other work while waiting\n")
 
 	default:
-		sb.WriteString(fmt.Sprintf("Type: %s\n", v.Type))
-		sb.WriteString(fmt.Sprintf("Message: %s\n", v.Message))
-		sb.WriteString(fmt.Sprintf("Ignored for: %d tool uses\n", v.ToolUsesSince))
+		fmt.Fprintf(&sb, "Type: %s\n", v.Type)
+		fmt.Fprintf(&sb, "Message: %s\n", v.Message)
+		fmt.Fprintf(&sb, "Ignored for: %d tool uses\n", v.ToolUsesSince)
 	}
 
 	sb.WriteString(strings.Repeat("-", 50))

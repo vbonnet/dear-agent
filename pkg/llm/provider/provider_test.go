@@ -959,7 +959,7 @@ func newTestOpenRouterProvider(t *testing.T, handler http.HandlerFunc) *OpenRout
 func TestOpenRouterProvider_Generate_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 		if r.Header.Get("Authorization") != "Bearer sk-or-test-key-123" {

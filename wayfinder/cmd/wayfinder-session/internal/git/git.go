@@ -70,7 +70,7 @@ func (g *GitIntegrator) formatCommitMessage(phase, outcome, context string) stri
 	var msg strings.Builder
 
 	// Subject line
-	msg.WriteString(fmt.Sprintf("wayfinder: complete %s (%s)", phase, outcome))
+	fmt.Fprintf(&msg, "wayfinder: complete %s (%s)", phase, outcome)
 
 	// Add context if provided
 	if context != "" {

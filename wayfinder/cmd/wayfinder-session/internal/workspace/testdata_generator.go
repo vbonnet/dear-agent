@@ -81,7 +81,7 @@ func createTestProject(projectPath, workspace, projectName, phase string, includ
 	allPhases := status.AllPhasesV2()
 	for _, p := range allPhases {
 		phaseStatus := status.PhaseStatusCompleted
-		var completedAt *time.Time = timePtr(time.Now().Add(-1 * time.Hour))
+		var completedAt = timePtr(time.Now().Add(-1 * time.Hour))
 
 		if p == phase {
 			phaseStatus = status.PhaseStatusInProgress

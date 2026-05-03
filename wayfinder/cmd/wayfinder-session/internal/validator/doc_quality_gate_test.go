@@ -2,6 +2,7 @@ package validator
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,7 +18,8 @@ func TestValidateDocQuality_MissingFile(t *testing.T) {
 		t.Fatal("expected error for missing SPEC.md, got nil")
 	}
 
-	verr, ok := err.(*ValidationError)
+	verr := &ValidationError{}
+	ok := errors.As(err, &verr)
 	if !ok {
 		t.Fatalf("expected ValidationError, got %T", err)
 	}
@@ -61,7 +63,8 @@ func TestValidateDocQuality_FileTooLarge(t *testing.T) {
 		t.Fatal("expected error for oversized file, got nil")
 	}
 
-	verr, ok := err.(*ValidationError)
+	verr := &ValidationError{}
+	ok := errors.As(err, &verr)
 	if !ok {
 		t.Fatalf("expected ValidationError, got %T", err)
 	}

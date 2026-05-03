@@ -225,11 +225,11 @@ func FormatFileList(files []string, maxFiles int) string {
 	}
 
 	for i := 0; i < displayed; i++ {
-		result.WriteString(fmt.Sprintf("- %s\n", files[i]))
+		fmt.Fprintf(&result, "- %s\n", files[i])
 	}
 
 	if count > maxFiles {
-		result.WriteString(fmt.Sprintf("\n... and %d more file(s)", count-maxFiles))
+		fmt.Fprintf(&result, "\n... and %d more file(s)", count-maxFiles)
 	}
 
 	return result.String()

@@ -116,7 +116,7 @@ func TestMCPManager_DisconnectGlobalMCP(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"sessionId":"test-session-123","createdAt":"2024-01-01T00:00:00Z"}`))
 		default:
-			if r.Method == "DELETE" {
+			if r.Method == http.MethodDelete {
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte(`{"success":true}`))
 			} else {

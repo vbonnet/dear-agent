@@ -114,28 +114,28 @@ func GeneratePreservePrompt(state *SessionState, stateFilePath string, focusText
 	}
 
 	// Construct the prompt
-	sb.WriteString(fmt.Sprintf("/compact PRESERVE THROUGH COMPACTION: I am the %s.", identity))
+	fmt.Fprintf(&sb, "/compact PRESERVE THROUGH COMPACTION: I am the %s.", identity)
 
 	sb.WriteString(" After compaction, IMMEDIATELY:")
-	sb.WriteString(fmt.Sprintf(" (1) Read %s", stateFilePath))
+	fmt.Fprintf(&sb, " (1) Read %s", stateFilePath)
 
 	stepNum := 2
 	if resumeLoop != "" {
-		sb.WriteString(fmt.Sprintf(" (%d) %s", stepNum, resumeLoop))
+		fmt.Fprintf(&sb, " (%d) %s", stepNum, resumeLoop)
 		stepNum++
 	}
-	sb.WriteString(fmt.Sprintf(" (%d) Check session health with agm session list.", stepNum))
+	fmt.Fprintf(&sb, " (%d) Check session health with agm session list.", stepNum)
 
 	if len(policyRules) > 0 {
-		sb.WriteString(fmt.Sprintf(" Critical rules: %s.", strings.Join(policyRules, " | ")))
+		fmt.Fprintf(&sb, " Critical rules: %s.", strings.Join(policyRules, " | "))
 	}
 
 	if len(stateParts) > 0 {
-		sb.WriteString(fmt.Sprintf(" Current state: %s.", strings.Join(stateParts, "; ")))
+		fmt.Fprintf(&sb, " Current state: %s.", strings.Join(stateParts, "; "))
 	}
 
 	if focusText != "" {
-		sb.WriteString(fmt.Sprintf(" Additional focus: %s.", focusText))
+		fmt.Fprintf(&sb, " Additional focus: %s.", focusText)
 	}
 
 	return sb.String()

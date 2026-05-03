@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -82,7 +83,8 @@ func TestHealthChecker_Check_Timeout(t *testing.T) {
 	}
 
 	// Check if it's a HealthCheckError
-	healthErr, ok := err.(*HealthCheckError)
+	healthErr := &HealthCheckError{}
+	ok := errors.As(err, &healthErr)
 	if !ok {
 		// Might be exec error if tmux not found
 		t.Logf("Got error (not HealthCheckError): %v", err)

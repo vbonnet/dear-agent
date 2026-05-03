@@ -2,6 +2,7 @@ package validator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -206,7 +207,8 @@ func runBuild(projectDir, lang string) (*CompilationResult, error) {
 	cmd.Dir = projectDir
 	output, err := cmd.CombinedOutput()
 	exitCode := 0
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	exitErr := &exec.ExitError{}
+	if errors.As(err, &exitErr) {
 		exitCode = exitErr.ExitCode()
 	}
 
@@ -262,7 +264,8 @@ func runTests(projectDir, lang string) (*CompilationResult, error) {
 
 	output, err := cmd.CombinedOutput()
 	exitCode := 0
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	exitErr := &exec.ExitError{}
+	if errors.As(err, &exitErr) {
 		exitCode = exitErr.ExitCode()
 	}
 

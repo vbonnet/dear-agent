@@ -127,12 +127,12 @@ func (c *Context) FormatForDisplay() string {
 			icon = "🤖"
 		}
 
-		sb.WriteString(fmt.Sprintf("│ %s %s:\n", icon, strings.Title(msg.Role)))
+		fmt.Fprintf(&sb, "│ %s %s:\n", icon, strings.Title(msg.Role))
 
 		// Word wrap content to fit in box (60 chars wide)
 		wrapped := wordWrap(msg.Content, 58)
 		for _, line := range strings.Split(wrapped, "\n") {
-			sb.WriteString(fmt.Sprintf("│   %s\n", line))
+			fmt.Fprintf(&sb, "│   %s\n", line)
 		}
 
 		if i < len(c.Messages)-1 {

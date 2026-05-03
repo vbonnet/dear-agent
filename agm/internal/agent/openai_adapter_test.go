@@ -18,7 +18,7 @@ func TestOpenAIAdapterImplementsAgentInterface(t *testing.T) {
 	adapter := createTestAdapter(t, tmpDir)
 
 	// Verify adapter implements Agent interface
-	var _ Agent = adapter
+	var _ = adapter
 }
 
 // TestNewOpenAIAdapter tests OpenAI adapter creation

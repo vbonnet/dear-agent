@@ -225,10 +225,7 @@ func init() {
 
 	// Check for AGM_DEBUG environment variable
 	// Flag will override this if explicitly set
-	debugDefault := false
-	if os.Getenv("AGM_DEBUG") == "true" || os.Getenv("AGM_DEBUG") == "1" {
-		debugDefault = true
-	}
+	debugDefault := os.Getenv("AGM_DEBUG") == "true" || os.Getenv("AGM_DEBUG") == "1"
 
 	rootCmd.PersistentFlags().StringVarP(&directory, "directory", "C", "", "Working directory")
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/agm/config.yaml)")

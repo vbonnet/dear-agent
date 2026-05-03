@@ -272,11 +272,11 @@ func mockEvent(topic, sessionID, phase string, timestamp time.Time, extraData ma
 
 		switch val := v.(type) {
 		case string:
-			dataStr.WriteString(fmt.Sprintf(`"%s":"%s"`, k, val))
+			fmt.Fprintf(&dataStr, `"%s":"%s"`, k, val)
 		case int:
-			dataStr.WriteString(fmt.Sprintf(`"%s":%d`, k, val))
+			fmt.Fprintf(&dataStr, `"%s":%d`, k, val)
 		default:
-			dataStr.WriteString(fmt.Sprintf(`"%s":"%v"`, k, val))
+			fmt.Fprintf(&dataStr, `"%s":"%v"`, k, val)
 		}
 	}
 	dataStr.WriteString("}")

@@ -116,18 +116,18 @@ func (l *ResearchLogger) initializeLog() error {
 	var content strings.Builder
 
 	content.WriteString("# Deep Research Session Log\n\n")
-	content.WriteString(fmt.Sprintf("**Session ID**: %s\n", l.sessionID))
-	content.WriteString(fmt.Sprintf("**Started**: %s\n", l.startTime.Format(time.RFC3339)))
-	content.WriteString(fmt.Sprintf("**URLs**: %d total\n\n", len(l.urls)))
+	fmt.Fprintf(&content, "**Session ID**: %s\n", l.sessionID)
+	fmt.Fprintf(&content, "**Started**: %s\n", l.startTime.Format(time.RFC3339))
+	fmt.Fprintf(&content, "**URLs**: %d total\n\n", len(l.urls))
 
 	content.WriteString("## Progress\n\n")
 	for _, url := range l.urls {
-		content.WriteString(fmt.Sprintf("- [ ] %s (pending)\n", url))
+		fmt.Fprintf(&content, "- [ ] %s (pending)\n", url)
 	}
 
 	content.WriteString("\n## Results\n\n")
 	for i, url := range l.urls {
-		content.WriteString(fmt.Sprintf("### %d. %s\n\n", i+1, url))
+		fmt.Fprintf(&content, "### %d. %s\n\n", i+1, url)
 		content.WriteString("Status: ⏸️ Pending\n\n")
 	}
 
@@ -222,44 +222,45 @@ func (l *ResearchLogger) updateLog() {
 	var content strings.Builder
 
 	content.WriteString("# Deep Research Session Log\n\n")
-	content.WriteString(fmt.Sprintf("**Session ID**: %s\n", l.sessionID))
-	content.WriteString(fmt.Sprintf("**Started**: %s\n", l.startTime.Format(time.RFC3339)))
-	content.WriteString(fmt.Sprintf("**URLs**: %d total\n\n", len(l.urls)))
+	fmt.Fprintf(&content, "**Session ID**: %s\n", l.sessionID)
+	fmt.Fprintf(&content, "**Started**: %s\n", l.startTime.Format(time.RFC3339))
+	fmt.Fprintf(&content, "**URLs**: %d total\n\n", len(l.urls))
 
 	content.WriteString("## Progress\n\n")
 	for _, url := range l.urls {
 		result := l.results[url]
 		checkbox := "[ ]"
 		status := "pending"
-		if result.Status == "completed" {
+		switch result.Status {
+		case "completed":
 			checkbox = "[x]"
 			status = fmt.Sprintf("completed at %s, report: %s", result.EndTime.Format("15:04:05"), result.ReportPath)
-		} else if result.Status == "failed" {
+		case "failed":
 			checkbox = "[x]"
 			status = fmt.Sprintf("failed: %s", result.Error)
-		} else if result.Status == "in_progress" {
+		case "in_progress":
 			status = "in progress..."
 		}
-		content.WriteString(fmt.Sprintf("- %s %s (%s)\n", checkbox, url, status))
+		fmt.Fprintf(&content, "- %s %s (%s)\n", checkbox, url, status)
 	}
 
 	content.WriteString("\n## Results\n\n")
 	for i, url := range l.urls {
 		result := l.results[url]
-		content.WriteString(fmt.Sprintf("### %d. %s\n\n", i+1, url))
+		fmt.Fprintf(&content, "### %d. %s\n\n", i+1, url)
 
 		switch result.Status {
 		case "completed":
 			content.WriteString("Status: ✅ Complete\n")
-			content.WriteString(fmt.Sprintf("Completed: %s\n", result.EndTime.Format("15:04:05")))
-			content.WriteString(fmt.Sprintf("Report: %s\n", result.ReportPath))
-			content.WriteString(fmt.Sprintf("Duration: %s\n\n", formatDuration(result.Duration)))
+			fmt.Fprintf(&content, "Completed: %s\n", result.EndTime.Format("15:04:05"))
+			fmt.Fprintf(&content, "Report: %s\n", result.ReportPath)
+			fmt.Fprintf(&content, "Duration: %s\n\n", formatDuration(result.Duration))
 		case "failed":
 			content.WriteString("Status: ❌ Failed\n")
-			content.WriteString(fmt.Sprintf("Error: %s\n\n", result.Error))
+			fmt.Fprintf(&content, "Error: %s\n\n", result.Error)
 		case "in_progress":
 			content.WriteString("Status: 🔄 In Progress\n")
-			content.WriteString(fmt.Sprintf("Started: %s\n\n", result.StartTime.Format("15:04:05")))
+			fmt.Fprintf(&content, "Started: %s\n\n", result.StartTime.Format("15:04:05"))
 		default:
 			content.WriteString("Status: ⏸️ Pending\n\n")
 		}
@@ -296,23 +297,23 @@ func (l *ResearchLogger) AddProposals(result ApplicationResult) error {
 	// Add new proposals section
 	var proposalsContent strings.Builder
 	proposalsContent.WriteString("## Proposals\n\n")
-	proposalsContent.WriteString(fmt.Sprintf("**Generated**: %s\n", time.Now().Format(time.RFC3339)))
-	proposalsContent.WriteString(fmt.Sprintf("**Summary**: %s\n\n", result.Summary))
+	fmt.Fprintf(&proposalsContent, "**Generated**: %s\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&proposalsContent, "**Summary**: %s\n\n", result.Summary)
 	proposalsContent.WriteString("---\n\n")
 
 	// Add proposals by repository
 	for repo, proposals := range result.Proposals {
-		proposalsContent.WriteString(fmt.Sprintf("### %s Proposals\n\n", repo))
+		fmt.Fprintf(&proposalsContent, "### %s Proposals\n\n", repo)
 		for i, proposal := range proposals {
-			proposalsContent.WriteString(fmt.Sprintf("#### %d. %s\n\n", i+1, proposal.Title))
-			proposalsContent.WriteString(fmt.Sprintf("**Category**: %s  \n", proposal.Category))
-			proposalsContent.WriteString(fmt.Sprintf("**Priority**: %s\n\n", proposal.Priority))
-			proposalsContent.WriteString(fmt.Sprintf("%s\n\n", proposal.Description))
+			fmt.Fprintf(&proposalsContent, "#### %d. %s\n\n", i+1, proposal.Title)
+			fmt.Fprintf(&proposalsContent, "**Category**: %s  \n", proposal.Category)
+			fmt.Fprintf(&proposalsContent, "**Priority**: %s\n\n", proposal.Priority)
+			fmt.Fprintf(&proposalsContent, "%s\n\n", proposal.Description)
 
 			if len(proposal.TestableIdeas) > 0 {
 				proposalsContent.WriteString("**Testable Ideas**:\n")
 				for _, idea := range proposal.TestableIdeas {
-					proposalsContent.WriteString(fmt.Sprintf("- %s\n", idea))
+					fmt.Fprintf(&proposalsContent, "- %s\n", idea)
 				}
 				proposalsContent.WriteString("\n")
 			}
@@ -323,7 +324,7 @@ func (l *ResearchLogger) AddProposals(result ApplicationResult) error {
 	if len(result.CrossCuttingIdeas) > 0 {
 		proposalsContent.WriteString("### Cross-Cutting Ideas\n\n")
 		for _, idea := range result.CrossCuttingIdeas {
-			proposalsContent.WriteString(fmt.Sprintf("- %s\n", idea))
+			fmt.Fprintf(&proposalsContent, "- %s\n", idea)
 		}
 		proposalsContent.WriteString("\n")
 	}

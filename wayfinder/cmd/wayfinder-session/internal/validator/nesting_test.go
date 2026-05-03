@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -394,7 +395,7 @@ func TestCheckChildrenComplete_MaxDepthExceeded(t *testing.T) {
 		t.Error("Expected max depth error, got nil")
 	}
 
-	if err != status.ErrMaxDepthExceeded {
+	if !errors.Is(err, status.ErrMaxDepthExceeded) {
 		t.Errorf("Expected ErrMaxDepthExceeded, got: %v", err)
 	}
 }

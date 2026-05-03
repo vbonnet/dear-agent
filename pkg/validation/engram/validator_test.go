@@ -555,7 +555,7 @@ func TestMultipleValidations(t *testing.T) {
 
 func createTempFile(t *testing.T, content string) string {
 	t.Helper()
-	tmpFile, err := os.CreateTemp("", "engram-test-*.ai.md")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "engram-test-*.ai.md")
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}

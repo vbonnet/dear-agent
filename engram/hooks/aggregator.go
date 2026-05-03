@@ -98,8 +98,8 @@ func (a *Aggregator) FormatTerminal(report *AggregatedReport) string {
 	var buf bytes.Buffer
 
 	// Header
-	buf.WriteString(fmt.Sprintf("Verification Report - %s\n", report.Event))
-	buf.WriteString(fmt.Sprintf("Timestamp: %s\n\n", report.Timestamp.Format(time.RFC3339)))
+	fmt.Fprintf(&buf, "Verification Report - %s\n", report.Event)
+	fmt.Fprintf(&buf, "Timestamp: %s\n\n", report.Timestamp.Format(time.RFC3339))
 
 	// Group violations by severity
 	highViolations := make([]violationWithHook, 0)
@@ -127,12 +127,12 @@ func (a *Aggregator) FormatTerminal(report *AggregatedReport) string {
 	if len(highViolations) > 0 {
 		buf.WriteString(colorRed("HIGH SEVERITY VIOLATIONS:\n"))
 		for i, vwh := range highViolations {
-			buf.WriteString(fmt.Sprintf("\n%d. [%s] %s\n", i+1, vwh.hook, vwh.violation.Message))
+			fmt.Fprintf(&buf, "\n%d. [%s] %s\n", i+1, vwh.hook, vwh.violation.Message)
 			if len(vwh.violation.Files) > 0 {
-				buf.WriteString(fmt.Sprintf("   Files: %v\n", vwh.violation.Files))
+				fmt.Fprintf(&buf, "   Files: %v\n", vwh.violation.Files)
 			}
 			if vwh.violation.Suggestion != "" {
-				buf.WriteString(fmt.Sprintf("   Fix: %s\n", vwh.violation.Suggestion))
+				fmt.Fprintf(&buf, "   Fix: %s\n", vwh.violation.Suggestion)
 			}
 		}
 		buf.WriteString("\n")
@@ -141,12 +141,12 @@ func (a *Aggregator) FormatTerminal(report *AggregatedReport) string {
 	if len(mediumViolations) > 0 {
 		buf.WriteString(colorYellow("MEDIUM SEVERITY VIOLATIONS:\n"))
 		for i, vwh := range mediumViolations {
-			buf.WriteString(fmt.Sprintf("\n%d. [%s] %s\n", i+1, vwh.hook, vwh.violation.Message))
+			fmt.Fprintf(&buf, "\n%d. [%s] %s\n", i+1, vwh.hook, vwh.violation.Message)
 			if len(vwh.violation.Files) > 0 {
-				buf.WriteString(fmt.Sprintf("   Files: %v\n", vwh.violation.Files))
+				fmt.Fprintf(&buf, "   Files: %v\n", vwh.violation.Files)
 			}
 			if vwh.violation.Suggestion != "" {
-				buf.WriteString(fmt.Sprintf("   Fix: %s\n", vwh.violation.Suggestion))
+				fmt.Fprintf(&buf, "   Fix: %s\n", vwh.violation.Suggestion)
 			}
 		}
 		buf.WriteString("\n")
@@ -155,9 +155,9 @@ func (a *Aggregator) FormatTerminal(report *AggregatedReport) string {
 	if len(lowViolations) > 0 {
 		buf.WriteString("LOW SEVERITY VIOLATIONS:\n")
 		for i, vwh := range lowViolations {
-			buf.WriteString(fmt.Sprintf("\n%d. [%s] %s\n", i+1, vwh.hook, vwh.violation.Message))
+			fmt.Fprintf(&buf, "\n%d. [%s] %s\n", i+1, vwh.hook, vwh.violation.Message)
 			if len(vwh.violation.Files) > 0 {
-				buf.WriteString(fmt.Sprintf("   Files: %v\n", vwh.violation.Files))
+				fmt.Fprintf(&buf, "   Files: %v\n", vwh.violation.Files)
 			}
 		}
 		buf.WriteString("\n")
@@ -167,19 +167,19 @@ func (a *Aggregator) FormatTerminal(report *AggregatedReport) string {
 	if len(report.Warnings) > 0 {
 		buf.WriteString(colorYellow("WARNINGS:\n"))
 		for _, w := range report.Warnings {
-			buf.WriteString(fmt.Sprintf("  - [%s] %s\n", w.Hook, w.Message))
+			fmt.Fprintf(&buf, "  - [%s] %s\n", w.Hook, w.Message)
 		}
 		buf.WriteString("\n")
 	}
 
 	// Summary
 	buf.WriteString("SUMMARY:\n")
-	buf.WriteString(fmt.Sprintf("  Total Hooks: %d\n", report.Summary.TotalHooks))
-	buf.WriteString(fmt.Sprintf("  Passed: %s\n", colorGreen(fmt.Sprintf("%d", report.Summary.PassedHooks))))
-	buf.WriteString(fmt.Sprintf("  Failed: %s\n", colorRed(fmt.Sprintf("%d", report.Summary.FailedHooks))))
-	buf.WriteString(fmt.Sprintf("  Warnings: %s\n", colorYellow(fmt.Sprintf("%d", report.Summary.WarningHooks))))
-	buf.WriteString(fmt.Sprintf("  Total Violations: %d\n", report.Summary.TotalViolations))
-	buf.WriteString(fmt.Sprintf("  Exit Code: %d\n", report.Summary.ExitCode))
+	fmt.Fprintf(&buf, "  Total Hooks: %d\n", report.Summary.TotalHooks)
+	fmt.Fprintf(&buf, "  Passed: %s\n", colorGreen(fmt.Sprintf("%d", report.Summary.PassedHooks)))
+	fmt.Fprintf(&buf, "  Failed: %s\n", colorRed(fmt.Sprintf("%d", report.Summary.FailedHooks)))
+	fmt.Fprintf(&buf, "  Warnings: %s\n", colorYellow(fmt.Sprintf("%d", report.Summary.WarningHooks)))
+	fmt.Fprintf(&buf, "  Total Violations: %d\n", report.Summary.TotalViolations)
+	fmt.Fprintf(&buf, "  Exit Code: %d\n", report.Summary.ExitCode)
 
 	return buf.String()
 }
@@ -189,8 +189,8 @@ func (a *Aggregator) FormatMarkdown(report *AggregatedReport) string {
 	var buf bytes.Buffer
 
 	// Header
-	buf.WriteString(fmt.Sprintf("# Verification Report - %s\n\n", report.Event))
-	buf.WriteString(fmt.Sprintf("**Timestamp:** %s\n\n", report.Timestamp.Format(time.RFC3339)))
+	fmt.Fprintf(&buf, "# Verification Report - %s\n\n", report.Event)
+	fmt.Fprintf(&buf, "**Timestamp:** %s\n\n", report.Timestamp.Format(time.RFC3339))
 
 	// Group violations by severity
 	highViolations := make([]violationWithHook, 0)
@@ -218,12 +218,12 @@ func (a *Aggregator) FormatMarkdown(report *AggregatedReport) string {
 	if len(highViolations) > 0 {
 		buf.WriteString("## High Severity Violations\n\n")
 		for i, vwh := range highViolations {
-			buf.WriteString(fmt.Sprintf("%d. **[%s]** %s\n", i+1, vwh.hook, vwh.violation.Message))
+			fmt.Fprintf(&buf, "%d. **[%s]** %s\n", i+1, vwh.hook, vwh.violation.Message)
 			if len(vwh.violation.Files) > 0 {
-				buf.WriteString(fmt.Sprintf("   - **Files:** `%v`\n", vwh.violation.Files))
+				fmt.Fprintf(&buf, "   - **Files:** `%v`\n", vwh.violation.Files)
 			}
 			if vwh.violation.Suggestion != "" {
-				buf.WriteString(fmt.Sprintf("   - **Fix:** %s\n", vwh.violation.Suggestion))
+				fmt.Fprintf(&buf, "   - **Fix:** %s\n", vwh.violation.Suggestion)
 			}
 			buf.WriteString("\n")
 		}
@@ -232,12 +232,12 @@ func (a *Aggregator) FormatMarkdown(report *AggregatedReport) string {
 	if len(mediumViolations) > 0 {
 		buf.WriteString("## Medium Severity Violations\n\n")
 		for i, vwh := range mediumViolations {
-			buf.WriteString(fmt.Sprintf("%d. **[%s]** %s\n", i+1, vwh.hook, vwh.violation.Message))
+			fmt.Fprintf(&buf, "%d. **[%s]** %s\n", i+1, vwh.hook, vwh.violation.Message)
 			if len(vwh.violation.Files) > 0 {
-				buf.WriteString(fmt.Sprintf("   - **Files:** `%v`\n", vwh.violation.Files))
+				fmt.Fprintf(&buf, "   - **Files:** `%v`\n", vwh.violation.Files)
 			}
 			if vwh.violation.Suggestion != "" {
-				buf.WriteString(fmt.Sprintf("   - **Fix:** %s\n", vwh.violation.Suggestion))
+				fmt.Fprintf(&buf, "   - **Fix:** %s\n", vwh.violation.Suggestion)
 			}
 			buf.WriteString("\n")
 		}
@@ -246,9 +246,9 @@ func (a *Aggregator) FormatMarkdown(report *AggregatedReport) string {
 	if len(lowViolations) > 0 {
 		buf.WriteString("## Low Severity Violations\n\n")
 		for i, vwh := range lowViolations {
-			buf.WriteString(fmt.Sprintf("%d. **[%s]** %s\n", i+1, vwh.hook, vwh.violation.Message))
+			fmt.Fprintf(&buf, "%d. **[%s]** %s\n", i+1, vwh.hook, vwh.violation.Message)
 			if len(vwh.violation.Files) > 0 {
-				buf.WriteString(fmt.Sprintf("   - **Files:** `%v`\n", vwh.violation.Files))
+				fmt.Fprintf(&buf, "   - **Files:** `%v`\n", vwh.violation.Files)
 			}
 			buf.WriteString("\n")
 		}
@@ -256,12 +256,12 @@ func (a *Aggregator) FormatMarkdown(report *AggregatedReport) string {
 
 	// Summary
 	buf.WriteString("## Summary\n\n")
-	buf.WriteString(fmt.Sprintf("- **Total Hooks:** %d\n", report.Summary.TotalHooks))
-	buf.WriteString(fmt.Sprintf("- **Passed:** %d\n", report.Summary.PassedHooks))
-	buf.WriteString(fmt.Sprintf("- **Failed:** %d\n", report.Summary.FailedHooks))
-	buf.WriteString(fmt.Sprintf("- **Warnings:** %d\n", report.Summary.WarningHooks))
-	buf.WriteString(fmt.Sprintf("- **Total Violations:** %d\n", report.Summary.TotalViolations))
-	buf.WriteString(fmt.Sprintf("- **Exit Code:** %d\n", report.Summary.ExitCode))
+	fmt.Fprintf(&buf, "- **Total Hooks:** %d\n", report.Summary.TotalHooks)
+	fmt.Fprintf(&buf, "- **Passed:** %d\n", report.Summary.PassedHooks)
+	fmt.Fprintf(&buf, "- **Failed:** %d\n", report.Summary.FailedHooks)
+	fmt.Fprintf(&buf, "- **Warnings:** %d\n", report.Summary.WarningHooks)
+	fmt.Fprintf(&buf, "- **Total Violations:** %d\n", report.Summary.TotalViolations)
+	fmt.Fprintf(&buf, "- **Exit Code:** %d\n", report.Summary.ExitCode)
 
 	return buf.String()
 }

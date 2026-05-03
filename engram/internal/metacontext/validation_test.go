@@ -64,7 +64,7 @@ func TestValidateWorkingDir_NonExistentPath(t *testing.T) {
 // TestValidateWorkingDir_FileNotDirectory tests rejection of file paths
 func TestValidateWorkingDir_FileNotDirectory(t *testing.T) {
 	// Create temporary file
-	tmpfile, err := os.CreateTemp("", "test-*.txt")
+	tmpfile, err := os.CreateTemp(t.TempDir(), "test-*.txt")
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}

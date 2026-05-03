@@ -144,29 +144,29 @@ func (e *EnvManager) GenerateActivationScript(workspaceName string) (string, err
 	// Generate script
 	var script strings.Builder
 
-	script.WriteString(fmt.Sprintf("# Workspace activation script for: %s\n\n", workspaceName))
+	fmt.Fprintf(&script, "# Workspace activation script for: %s\n\n", workspaceName)
 
 	// Core workspace vars
 	script.WriteString("# Core workspace variables\n")
-	script.WriteString(fmt.Sprintf("export WORKSPACE_ROOT=%q\n", ws.Root))
-	script.WriteString(fmt.Sprintf("export WORKSPACE_NAME=%q\n", ws.Name))
-	script.WriteString(fmt.Sprintf("export WORKSPACE_ENABLED=%t\n", ws.Enabled))
+	fmt.Fprintf(&script, "export WORKSPACE_ROOT=%q\n", ws.Root)
+	fmt.Fprintf(&script, "export WORKSPACE_NAME=%q\n", ws.Name)
+	fmt.Fprintf(&script, "export WORKSPACE_ENABLED=%t\n", ws.Enabled)
 
 	// Protocol settings
 	if ws.OutputDir != "" {
-		script.WriteString(fmt.Sprintf("export WORKSPACE_OUTPUT_DIR=%q\n", ws.OutputDir))
+		fmt.Fprintf(&script, "export WORKSPACE_OUTPUT_DIR=%q\n", ws.OutputDir)
 	}
 
 	// Default cache dir
 	cacheDir := filepath.Join(ws.Root, ".cache")
-	script.WriteString(fmt.Sprintf("export WORKSPACE_CACHE_DIR=%q\n", cacheDir))
+	fmt.Fprintf(&script, "export WORKSPACE_CACHE_DIR=%q\n", cacheDir)
 
 	// Load settings from registry
 	if registry.DefaultSettings != nil {
 		script.WriteString("\n# Default settings\n")
 		for key, value := range registry.DefaultSettings {
 			envKey := "WORKSPACE_" + strings.ToUpper(key)
-			script.WriteString(fmt.Sprintf("export %s=%q\n", envKey, fmt.Sprint(value)))
+			fmt.Fprintf(&script, "export %s=%q\n", envKey, fmt.Sprint(value))
 		}
 	}
 
@@ -175,7 +175,7 @@ func (e *EnvManager) GenerateActivationScript(workspaceName string) (string, err
 		script.WriteString("\n# Workspace settings\n")
 		for key, value := range ws.Settings {
 			envKey := "WORKSPACE_" + strings.ToUpper(key)
-			script.WriteString(fmt.Sprintf("export %s=%q\n", envKey, fmt.Sprint(value)))
+			fmt.Fprintf(&script, "export %s=%q\n", envKey, fmt.Sprint(value))
 		}
 	}
 
@@ -187,13 +187,13 @@ func (e *EnvManager) GenerateActivationScript(workspaceName string) (string, err
 			if strings.HasPrefix(key, "WORKSPACE_") {
 				continue
 			}
-			script.WriteString(fmt.Sprintf("export %s=%q\n", key, value))
+			fmt.Fprintf(&script, "export %s=%q\n", key, value)
 		}
 	}
 
 	// Verification message
-	script.WriteString(fmt.Sprintf("\necho \"Activated workspace: %s\"\n", workspaceName))
-	script.WriteString(fmt.Sprintf("echo \"  Root: %s\"\n", ws.Root))
+	fmt.Fprintf(&script, "\necho \"Activated workspace: %s\"\n", workspaceName)
+	fmt.Fprintf(&script, "echo \"  Root: %s\"\n", ws.Root)
 
 	return script.String(), nil
 }

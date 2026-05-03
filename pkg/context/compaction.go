@@ -154,21 +154,21 @@ func CompactConversation(ctx context.Context, messages []Message, llm provider.P
 func renderMessagesForSummary(messages []Message) string {
 	var sb strings.Builder
 	for _, m := range messages {
-		sb.WriteString(fmt.Sprintf("[%s]\n", m.Role))
+		fmt.Fprintf(&sb, "[%s]\n", m.Role)
 		for _, block := range m.Content {
 			switch block.Type {
 			case "text":
 				sb.WriteString(block.Text)
 				sb.WriteString("\n")
 			case "tool_use":
-				sb.WriteString(fmt.Sprintf("<tool_use name=%q id=%q />\n", block.Name, block.ID))
+				fmt.Fprintf(&sb, "<tool_use name=%q id=%q />\n", block.Name, block.ID)
 			case "tool_result":
 				// Truncate very long tool results for the summarizer.
 				content := block.Content
 				if len(content) > 2000 {
 					content = content[:2000] + "\n... [truncated]"
 				}
-				sb.WriteString(fmt.Sprintf("<tool_result id=%q>\n%s\n</tool_result>\n", block.ToolUseID, content))
+				fmt.Fprintf(&sb, "<tool_result id=%q>\n%s\n</tool_result>\n", block.ToolUseID, content)
 			}
 		}
 		sb.WriteString("\n")

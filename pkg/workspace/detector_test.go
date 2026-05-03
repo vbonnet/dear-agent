@@ -253,7 +253,7 @@ func TestDetect_Priority6_Error(t *testing.T) {
 		t.Fatal("expected error when no workspace found, got nil")
 	}
 
-	if err != ErrNoWorkspaceFound {
+	if !errors.Is(err, ErrNoWorkspaceFound) {
 		t.Errorf("expected ErrNoWorkspaceFound, got %v", err)
 	}
 }
