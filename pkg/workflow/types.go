@@ -195,8 +195,15 @@ type State interface {
 }
 
 // Snapshot is the serialisable checkpoint written by State.Save.
+//
+// RunID was added in Phase 0 of the workflow-engine roadmap. SQLiteState
+// uses it to address the right row in `runs`; legacy FileState snapshots
+// written before Phase 0 leave it empty (omitempty), and the runner then
+// generates a fresh id — preserving exact resume semantics for callers
+// who never adopted the substrate path.
 type Snapshot struct {
 	Workflow  string            `json:"workflow"`
+	RunID     string            `json:"run_id,omitempty"`
 	Inputs    map[string]string `json:"inputs"`
 	Outputs   map[string]string `json:"outputs"`   // completed node outputs
 	Completed map[string]bool   `json:"completed"` // node id → done
@@ -400,10 +407,13 @@ type RunReport struct {
 
 // Context threads through node execution. The runner fills these in from
 // the workflow definition + caller-supplied inputs before invoking each
-// node's executor.
+// node's executor. runID is set when the runner has generated an id for
+// the current invocation; recorder/audit calls use it to attribute rows
+// to the right run.
 type nodeContext struct {
 	ctx     context.Context
 	inputs  map[string]string
 	outputs map[string]string // node id → primary output
 	env     map[string]string
+	runID   string
 }
