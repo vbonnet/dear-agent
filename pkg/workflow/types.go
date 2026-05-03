@@ -48,6 +48,17 @@ const (
 	// true. A loop node carries its own nested Nodes which are all
 	// executed each iteration.
 	KindLoop NodeKind = "loop"
+
+	// KindSpawn lets a node emit zero or more new sibling nodes that
+	// the runner appends to the DAG and executes after the spawn node
+	// itself completes. The spawn body is a bash command whose stdout
+	// is parsed as a YAML list of Node values; each spawned node
+	// inherits a depends edge on the spawn parent so the new work
+	// runs strictly after the spawn point. Cycle detection runs over
+	// the augmented DAG before any spawned node executes — a spawn
+	// that produces a cycle fails the parent. See runner.go's
+	// executeSpawn for the full lifecycle. Phase 5.4.
+	KindSpawn NodeKind = "spawn"
 )
 
 // Workflow is the top-level YAML shape. A workflow has a unique name, a
@@ -81,10 +92,11 @@ type Node struct {
 	Depends []string `yaml:"depends,omitempty"`
 
 	// Kind-specific bodies. Only the one matching Kind is read.
-	AI   *AINode   `yaml:"ai,omitempty"`
-	Bash *BashNode `yaml:"bash,omitempty"`
-	Gate *GateNode `yaml:"gate,omitempty"`
-	Loop *LoopNode `yaml:"loop,omitempty"`
+	AI    *AINode    `yaml:"ai,omitempty"`
+	Bash  *BashNode  `yaml:"bash,omitempty"`
+	Gate  *GateNode  `yaml:"gate,omitempty"`
+	Loop  *LoopNode  `yaml:"loop,omitempty"`
+	Spawn *SpawnNode `yaml:"spawn,omitempty"`
 
 	// Retry configures automatic retry on failure for this node. Nil or
 	// zero-value means no retry (equivalent to MaxAttempts=1). Gate nodes
@@ -204,6 +216,39 @@ type BashNode struct {
 type GateNode struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description,omitempty"`
+}
+
+// SpawnNode emits new sibling nodes at run-time. Cmd is interpreted
+// by /bin/sh -c (matching BashNode); its stdout must be a YAML list
+// of Node values, e.g.
+//
+//	- id: child-1
+//	  kind: bash
+//	  bash: { cmd: "echo first child" }
+//	- id: child-2
+//	  kind: bash
+//	  bash: { cmd: "echo second child" }
+//
+// Each spawned node inherits a depends edge on the spawn node's id
+// (added automatically by the runner if absent), so the new work
+// always runs strictly after the spawn point. Spawned nodes go
+// through Validate before the runner accepts them; a malformed
+// spawn output fails the parent.
+//
+// MaxChildren caps how many nodes a single spawn may emit — a guard
+// against runaway DAG growth. Zero means "use the default cap" (32);
+// negative means "no cap" and is rejected at validate.
+//
+// AllowedKinds, when set, restricts what the spawned children may
+// be. Empty means "any kind"; a typical safe configuration is
+// AllowedKinds: [bash] so untrusted spawn output cannot smuggle in
+// AI calls or gates.
+type SpawnNode struct {
+	Cmd          string            `yaml:"cmd"`
+	Env          map[string]string `yaml:"env,omitempty"`
+	WorkingDir   string            `yaml:"working_dir,omitempty"`
+	MaxChildren  int               `yaml:"max_children,omitempty"`
+	AllowedKinds []NodeKind        `yaml:"allowed_kinds,omitempty"`
 }
 
 // LoopNode repeats a nested DAG. In sequential mode (Parallel: false, the
@@ -336,8 +381,11 @@ func (n *Node) Validate() error {
 	if n.Loop != nil {
 		bodies++
 	}
+	if n.Spawn != nil {
+		bodies++
+	}
 	if bodies != 1 {
-		return fmt.Errorf("exactly one of ai/bash/gate/loop must be set, got %d", bodies)
+		return fmt.Errorf("exactly one of ai/bash/gate/loop/spawn must be set, got %d", bodies)
 	}
 	switch n.Kind {
 	case KindAI:
@@ -393,6 +441,16 @@ func (n *Node) Validate() error {
 			if err := child.Validate(); err != nil {
 				return fmt.Errorf("loop child %q: %w", child.ID, err)
 			}
+		}
+	case KindSpawn:
+		if n.Spawn == nil {
+			return fmt.Errorf("kind=spawn but spawn body missing")
+		}
+		if n.Spawn.Cmd == "" {
+			return fmt.Errorf("spawn.cmd is required")
+		}
+		if n.Spawn.MaxChildren < 0 {
+			return fmt.Errorf("spawn.max_children must be >= 0 (got %d; use 0 for default)", n.Spawn.MaxChildren)
 		}
 	default:
 		return fmt.Errorf("unknown kind %q", n.Kind)
