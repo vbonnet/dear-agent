@@ -1,0 +1,42 @@
+# dear-agent: per-repo output routing for AI agents.
+#
+# Agents use this file to decide where to write artifacts they produce.
+# It exists so a session running in this repo can deterministically answer
+# "where does a research artifact / a session log / a code change go?"
+# without having to guess from directory names.
+#
+# Schema (versioned; bump `version` if you make a breaking change):
+#   version              integer, currently 1
+#   repo                 logical name of this repository (informational)
+#   output-dirs          map of artifact-kind -> filesystem path
+#     code               where source code changes go (this repo)
+#     research           where research artifacts go (analysis docs,
+#                        transcripts, findings, literature reviews)
+#     logs               where conversation logs / session transcripts go
+#   forbidden-paths      directories where new files of a given kind MUST NOT
+#                        be created in THIS repo. Maps kind -> list of globs
+#                        relative to repo root.
+#
+# Resolution: if a kind appears in `forbidden-paths`, an agent that wants
+# to write that kind redirects to `output-dirs[kind]` instead. Repos that
+# do not list a kind in forbidden-paths inherit no constraint for it.
+#
+# This file is read by `agm` hooks and by agent CLAUDE.md guidance.
+# It is not a runtime sandbox — enforcement is best-effort and advisory,
+# but the redirection target IS authoritative: agents should treat it as
+# "the answer" rather than re-deriving it from context.
+
+version: 1
+repo: dear-agent
+
+output-dirs:
+  code: .
+  research: ~/src/engram-research
+  logs: ~/src/ai-conversation-logs
+
+forbidden-paths:
+  research:
+    # Research artifacts — analysis docs, transcripts, literature reviews,
+    # findings — belong in ~/src/engram-research, not in this repo.
+    - research/*.md
+    - research/*.txt
