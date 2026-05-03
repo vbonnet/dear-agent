@@ -120,6 +120,6 @@ func runCheckWorktrees(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Run 'agm admin cleanup-worktrees' to remove them.\n")
-	os.Exit(1)
-	return nil
+	cmd.SilenceUsage = true
+	return fmt.Errorf("found %d active worktree(s)", len(orphans))
 }

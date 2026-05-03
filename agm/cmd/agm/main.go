@@ -595,6 +595,11 @@ func ExecuteWithDeps(tmux session.TmuxInterface) error {
 }
 
 func main() {
+	exitCode := run()
+	os.Exit(exitCode)
+}
+
+func run() int {
 	shutdown := otelsetup.InitTracer("agm")
 	defer shutdown(context.Background()) //nolint:errcheck
 
@@ -615,6 +620,7 @@ func main() {
 	managerBackend = mgr
 
 	if err := ExecuteWithDeps(adapter); err != nil {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
