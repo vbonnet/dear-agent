@@ -254,7 +254,7 @@ func TestRetrievalWorkflow_NoAPIKey(t *testing.T) {
 	os.Unsetenv("ANTHROPIC_API_KEY")
 	defer func() {
 		if oldAPIKey != "" {
-			os.Setenv("ANTHROPIC_API_KEY", oldAPIKey)
+			t.Setenv("ANTHROPIC_API_KEY", oldAPIKey)
 		}
 	}()
 

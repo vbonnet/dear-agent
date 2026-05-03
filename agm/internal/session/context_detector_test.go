@@ -135,9 +135,7 @@ func TestDetectContextFromConversationLog(t *testing.T) {
 	}
 
 	// Mock home directory
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tempDir)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tempDir)
 
 	// Clear cache
 	ClearDetectorCache()
@@ -195,9 +193,7 @@ func TestDetectContextFromConversationLog_NoTokenUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tempDir)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tempDir)
 
 	ClearDetectorCache()
 
@@ -232,9 +228,7 @@ func TestCacheExpiration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tempDir)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tempDir)
 
 	ClearDetectorCache()
 
@@ -414,9 +408,7 @@ func TestExtractUsageFromJSONL_Integration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tempDir)
-	defer os.Setenv("HOME", originalHome)
 
 	ClearDetectorCache()
 
@@ -492,9 +484,7 @@ func TestFindConversationLog(t *testing.T) {
 		},
 	}
 
-	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tempDir)
-	defer os.Setenv("HOME", originalHome)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

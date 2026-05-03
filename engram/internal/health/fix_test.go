@@ -175,9 +175,7 @@ func TestFixMarketplaceConfig(t *testing.T) {
 	}
 
 	// Set HOME to tmpDir for the fixer
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Run the fix
 	fixer := NewTier1Fixer(tmpDir)
@@ -276,9 +274,7 @@ func TestRemoveNonExistentHooks(t *testing.T) {
 	}
 
 	// Set HOME to tmpDir
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Run the fix
 	fixer := NewTier1Fixer(tmpDir)

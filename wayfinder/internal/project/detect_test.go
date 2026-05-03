@@ -14,15 +14,15 @@ func TestDetermineWorkspace(t *testing.T) {
 	originalHome := os.Getenv("HOME")
 	defer func() {
 		if originalWorkspace != "" {
-			os.Setenv("WORKSPACE", originalWorkspace)
+			t.Setenv("WORKSPACE", originalWorkspace)
 		} else {
 			os.Unsetenv("WORKSPACE")
 		}
-		os.Setenv("HOME", originalHome)
+		t.Setenv("HOME", originalHome)
 	}()
 
 	t.Run("Priority1_EnvironmentVariable", func(t *testing.T) {
-		os.Setenv("WORKSPACE", "test-workspace")
+		t.Setenv("WORKSPACE", "test-workspace")
 		defer os.Unsetenv("WORKSPACE")
 
 		workspace, err := DetermineWorkspace()
@@ -39,7 +39,7 @@ func TestDetermineWorkspace(t *testing.T) {
 
 		// Create temporary AGM session
 		tmpDir := t.TempDir()
-		os.Setenv("HOME", tmpDir)
+		t.Setenv("HOME", tmpDir)
 
 		agmDir := filepath.Join(tmpDir, ".agm")
 		sessionDir := filepath.Join(agmDir, "test-session")
@@ -70,7 +70,7 @@ func TestDetermineWorkspace(t *testing.T) {
 
 		// Set HOME to temp dir (no AGM session)
 		tmpDir := t.TempDir()
-		os.Setenv("HOME", tmpDir)
+		t.Setenv("HOME", tmpDir)
 
 		// Create workspace directory structure
 		workspaceDir := filepath.Join(tmpDir, "src", "ws", "cwd-workspace", "wf", "test-project")
@@ -95,7 +95,7 @@ func TestDetermineWorkspace(t *testing.T) {
 
 		// Set HOME to temp dir (no AGM session, not in workspace directory)
 		tmpDir := t.TempDir()
-		os.Setenv("HOME", tmpDir)
+		t.Setenv("HOME", tmpDir)
 
 		workspace, err := DetermineWorkspace()
 		if err != nil {
@@ -107,12 +107,12 @@ func TestDetermineWorkspace(t *testing.T) {
 	})
 
 	t.Run("EnvOverridesAGM", func(t *testing.T) {
-		os.Setenv("WORKSPACE", "env-wins")
+		t.Setenv("WORKSPACE", "env-wins")
 		defer os.Unsetenv("WORKSPACE")
 
 		// Create AGM session with different workspace
 		tmpDir := t.TempDir()
-		os.Setenv("HOME", tmpDir)
+		t.Setenv("HOME", tmpDir)
 
 		agmDir := filepath.Join(tmpDir, ".agm")
 		sessionDir := filepath.Join(agmDir, "test-session")
@@ -139,7 +139,7 @@ func TestDetermineWorkspace(t *testing.T) {
 	})
 
 	t.Run("InvalidEnvVar", func(t *testing.T) {
-		os.Setenv("WORKSPACE", "invalid workspace!")
+		t.Setenv("WORKSPACE", "invalid workspace!")
 		defer os.Unsetenv("WORKSPACE")
 
 		_, err := DetermineWorkspace()
@@ -183,7 +183,7 @@ func TestDetectWorkspaceFromCwd(t *testing.T) {
 	originalHome := os.Getenv("HOME")
 	originalCwd, _ := os.Getwd()
 	defer func() {
-		os.Setenv("HOME", originalHome)
+		t.Setenv("HOME", originalHome)
 		os.Chdir(originalCwd)
 	}()
 
@@ -224,7 +224,7 @@ func TestDetectWorkspaceFromCwd(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			os.Setenv("HOME", tmpDir)
+			t.Setenv("HOME", tmpDir)
 
 			cwdPath := tt.setupCwd(tmpDir)
 			os.Chdir(cwdPath)
@@ -240,12 +240,10 @@ func TestDetectWorkspaceFromCwd(t *testing.T) {
 // TestQueryAGMWorkspace tests AGM manifest reading
 func TestQueryAGMWorkspace(t *testing.T) {
 	// Save original HOME
-	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
 
 	t.Run("ValidJSONManifest", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		os.Setenv("HOME", tmpDir)
+		t.Setenv("HOME", tmpDir)
 
 		agmDir := filepath.Join(tmpDir, ".agm")
 		sessionDir := filepath.Join(agmDir, "test-session")
@@ -270,7 +268,7 @@ func TestQueryAGMWorkspace(t *testing.T) {
 
 	t.Run("NoCurrentSession", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		os.Setenv("HOME", tmpDir)
+		t.Setenv("HOME", tmpDir)
 
 		workspace := queryAGMWorkspace()
 		if workspace != "" {
@@ -280,7 +278,7 @@ func TestQueryAGMWorkspace(t *testing.T) {
 
 	t.Run("ManifestWithoutWorkspace", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		os.Setenv("HOME", tmpDir)
+		t.Setenv("HOME", tmpDir)
 
 		agmDir := filepath.Join(tmpDir, ".agm")
 		sessionDir := filepath.Join(agmDir, "test-session")
@@ -304,7 +302,7 @@ func TestQueryAGMWorkspace(t *testing.T) {
 
 	t.Run("FallbackToClaudeDirectory", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		os.Setenv("HOME", tmpDir)
+		t.Setenv("HOME", tmpDir)
 
 		claudeDir := filepath.Join(tmpDir, ".claude")
 		sessionDir := filepath.Join(claudeDir, "test-session")

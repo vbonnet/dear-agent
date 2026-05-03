@@ -185,8 +185,8 @@ func TestDetectWorkspace_AbsolutePath(t *testing.T) {
 
 func TestDetectWorkspace_TestMode(t *testing.T) {
 	// Set test mode environment variables
-	os.Setenv("ENGRAM_TEST_MODE", "1")
-	os.Setenv("ENGRAM_TEST_WORKSPACE", "/tmp/test-workspace")
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "/tmp/test-workspace")
 	defer func() {
 		os.Unsetenv("ENGRAM_TEST_MODE")
 		os.Unsetenv("ENGRAM_TEST_WORKSPACE")
@@ -203,7 +203,7 @@ func TestDetectWorkspace_TestMode(t *testing.T) {
 
 func TestDetectWorkspace_EnvironmentVariable(t *testing.T) {
 	// Set environment variable
-	os.Setenv("ENGRAM_WORKSPACE", "/custom/workspace")
+	t.Setenv("ENGRAM_WORKSPACE", "/custom/workspace")
 	defer os.Unsetenv("ENGRAM_WORKSPACE")
 
 	workspace, err := DetectWorkspace("any-name")
@@ -321,9 +321,7 @@ func TestLoadAndSave(t *testing.T) {
 	configPath := filepath.Join(configDir, "config.yaml")
 
 	// Override home directory for test
-	originalHomeVar := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", originalHomeVar)
+	t.Setenv("HOME", tmpHome)
 
 	// Test 1: Load when config doesn't exist (should return default)
 	cfg1, err := Load()

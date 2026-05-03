@@ -107,10 +107,10 @@ telemetry:
 func withConfigEnv(t *testing.T, configPath string, fn func()) {
 	t.Helper()
 	oldConfigPath := os.Getenv("ENGRAM_CONFIG_PATH")
-	os.Setenv("ENGRAM_CONFIG_PATH", configPath)
+	t.Setenv("ENGRAM_CONFIG_PATH", configPath)
 	defer func() {
 		if oldConfigPath != "" {
-			os.Setenv("ENGRAM_CONFIG_PATH", oldConfigPath)
+			t.Setenv("ENGRAM_CONFIG_PATH", oldConfigPath)
 		} else {
 			os.Unsetenv("ENGRAM_CONFIG_PATH")
 		}

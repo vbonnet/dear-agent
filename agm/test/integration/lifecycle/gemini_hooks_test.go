@@ -116,10 +116,10 @@ exit 0
 
 	// Set GEMINI_CONFIG_DIR for test
 	originalConfigDir := os.Getenv("GEMINI_CONFIG_DIR")
-	os.Setenv("GEMINI_CONFIG_DIR", geminiConfigDir)
+	t.Setenv("GEMINI_CONFIG_DIR", geminiConfigDir)
 	defer func() {
 		if originalConfigDir != "" {
-			os.Setenv("GEMINI_CONFIG_DIR", originalConfigDir)
+			t.Setenv("GEMINI_CONFIG_DIR", originalConfigDir)
 		} else {
 			os.Unsetenv("GEMINI_CONFIG_DIR")
 		}
@@ -254,7 +254,7 @@ exit 0
 	os.WriteFile(settingsFile, settingsData, 0644)
 
 	// Set config dir
-	os.Setenv("GEMINI_CONFIG_DIR", geminiConfigDir)
+	t.Setenv("GEMINI_CONFIG_DIR", geminiConfigDir)
 	defer os.Unsetenv("GEMINI_CONFIG_DIR")
 
 	// Create session
@@ -354,7 +354,7 @@ exit 2
 	settingsData, _ := json.MarshalIndent(settings, "", "  ")
 	os.WriteFile(settingsFile, settingsData, 0644)
 
-	os.Setenv("GEMINI_CONFIG_DIR", geminiConfigDir)
+	t.Setenv("GEMINI_CONFIG_DIR", geminiConfigDir)
 	defer os.Unsetenv("GEMINI_CONFIG_DIR")
 
 	t.Log("NOTE: Hook blocking behavior (exit code 2) depends on Gemini CLI implementation")
@@ -422,7 +422,7 @@ echo "This should timeout"
 	settingsData, _ := json.MarshalIndent(settings, "", "  ")
 	os.WriteFile(settingsFile, settingsData, 0644)
 
-	os.Setenv("GEMINI_CONFIG_DIR", geminiConfigDir)
+	t.Setenv("GEMINI_CONFIG_DIR", geminiConfigDir)
 	defer os.Unsetenv("GEMINI_CONFIG_DIR")
 
 	t.Log("NOTE: Hook timeout handling depends on Gemini CLI implementation")

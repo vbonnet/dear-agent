@@ -62,7 +62,7 @@ func TestServerAlive_WithServer(t *testing.T) {
 	}
 
 	testSocket := fmt.Sprintf("/tmp/agm-test-alive-%d.sock", os.Getpid())
-	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
 		os.Remove(testSocket)
@@ -85,7 +85,7 @@ func TestServerAlive_WithServer(t *testing.T) {
 func TestServerAlive_NoServer(t *testing.T) {
 	// Point to non-existent socket
 	testSocket := fmt.Sprintf("/tmp/agm-test-dead-%d.sock", os.Getpid())
-	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	err := ServerAlive()
@@ -96,7 +96,7 @@ func TestServerAlive_NoServer(t *testing.T) {
 func TestServerAliveOrRecover_DeadServer(t *testing.T) {
 	// Point to non-existent socket
 	testSocket := fmt.Sprintf("/tmp/agm-test-recover-%d.sock", os.Getpid())
-	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	// Should succeed (nothing to clean up = recovery successful)

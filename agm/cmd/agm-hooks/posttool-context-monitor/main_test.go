@@ -306,9 +306,7 @@ workspace: personal
 			}
 
 			// Override home dir for testing
-			oldHome := os.Getenv("HOME")
-			os.Setenv("HOME", homeDir)
-			defer os.Setenv("HOME", oldHome)
+			t.Setenv("HOME", homeDir)
 
 			monitor := &ContextMonitor{
 				sessionID: sessionID,

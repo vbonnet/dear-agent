@@ -850,10 +850,10 @@ func TestParseDuration(t *testing.T) {
 
 func BenchmarkArchiveSession(b *testing.B) {
 	// Setup test environment for benchmark
-	os.Setenv("ENGRAM_TEST_MODE", "1")
+	b.Setenv("ENGRAM_TEST_MODE", "1")
 	testWorkspace := "test"
-	os.Setenv("ENGRAM_TEST_WORKSPACE", testWorkspace)
-	os.Setenv("WORKSPACE", testWorkspace)
+	b.Setenv("ENGRAM_TEST_WORKSPACE", testWorkspace)
+	b.Setenv("WORKSPACE", testWorkspace)
 	defer func() {
 		os.Unsetenv("ENGRAM_TEST_MODE")
 		os.Unsetenv("ENGRAM_TEST_WORKSPACE")

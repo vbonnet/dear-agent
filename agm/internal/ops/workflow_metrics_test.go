@@ -100,9 +100,7 @@ func TestCollectWorkflowMetrics_EmptyWorkflow(t *testing.T) {
 func TestRecordAndLoadWorkflowMetrics(t *testing.T) {
 	// Set up temp HOME so metrics go to a temp dir
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Ensure no existing metrics
 	loaded, err := LoadWorkflowMetrics()
@@ -168,9 +166,7 @@ func TestRecordAndLoadWorkflowMetrics(t *testing.T) {
 
 func TestLoadWorkflowMetrics_InvalidJSON(t *testing.T) {
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
 
 	metricsDir := filepath.Join(tmpDir, ".agm", "metrics")
 	os.MkdirAll(metricsDir, 0o755)

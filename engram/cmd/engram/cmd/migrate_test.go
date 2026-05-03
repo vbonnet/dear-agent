@@ -8,8 +8,6 @@ import (
 
 func TestRunMigrate_NoLegacyPath(t *testing.T) {
 	// Save and restore HOME
-	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
 
 	// Create temp home without .engram
 	tmpHome, err := os.MkdirTemp("", "engram-migrate-test-*")
@@ -18,7 +16,7 @@ func TestRunMigrate_NoLegacyPath(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpHome)
 
-	os.Setenv("HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Should succeed with message about no migration needed
 	err = runMigrate(nil, []string{})
@@ -29,8 +27,6 @@ func TestRunMigrate_NoLegacyPath(t *testing.T) {
 
 func TestRunMigrate_AlreadyMigrated(t *testing.T) {
 	// Save and restore HOME
-	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
 
 	// Create temp home
 	tmpHome, err := os.MkdirTemp("", "engram-migrate-test-*")
@@ -39,7 +35,7 @@ func TestRunMigrate_AlreadyMigrated(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpHome)
 
-	os.Setenv("HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Create target directory with proper engram structure
 	targetDir, err := os.MkdirTemp("", "engram-target-*")
@@ -78,14 +74,12 @@ func TestRunMigrate_AlreadyMigrated(t *testing.T) {
 
 func TestRunMigrate_NoWorkspace(t *testing.T) {
 	// Save and restore HOME
-	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
 
 	// Save and restore WORKSPACE
 	originalWorkspace := os.Getenv("WORKSPACE")
 	defer func() {
 		if originalWorkspace != "" {
-			os.Setenv("WORKSPACE", originalWorkspace)
+			t.Setenv("WORKSPACE", originalWorkspace)
 		} else {
 			os.Unsetenv("WORKSPACE")
 		}
@@ -98,7 +92,7 @@ func TestRunMigrate_NoWorkspace(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpHome)
 
-	os.Setenv("HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
 	os.Unsetenv("WORKSPACE")
 
 	// Create legacy .engram directory
@@ -125,8 +119,6 @@ func TestMigrateWorkspaceFlag(t *testing.T) {
 	// Just verify the flag is recognized
 
 	// Save and restore HOME
-	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
 
 	// Create temp home without .engram (no migration needed case)
 	tmpHome, err := os.MkdirTemp("", "engram-migrate-test-*")
@@ -135,7 +127,7 @@ func TestMigrateWorkspaceFlag(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpHome)
 
-	os.Setenv("HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Set workspace flag
 	migrateWorkspaceFlag = "test-workspace"

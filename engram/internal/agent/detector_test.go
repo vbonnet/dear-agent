@@ -20,13 +20,13 @@ func TestDetect_ClaudeCode_EnvVar(t *testing.T) {
 	oldVal := os.Getenv("CLAUDECODE")
 	defer func() {
 		if oldVal != "" {
-			os.Setenv("CLAUDECODE", oldVal)
+			t.Setenv("CLAUDECODE", oldVal)
 		} else {
 			os.Unsetenv("CLAUDECODE")
 		}
 	}()
 
-	os.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDECODE", "1")
 	detector := NewDetector()
 	agent := detector.Detect()
 
@@ -40,13 +40,13 @@ func TestDetect_ClaudeCode_EntrypointEnv(t *testing.T) {
 	oldVal := os.Getenv("CLAUDE_CODE_ENTRYPOINT")
 	defer func() {
 		if oldVal != "" {
-			os.Setenv("CLAUDE_CODE_ENTRYPOINT", oldVal)
+			t.Setenv("CLAUDE_CODE_ENTRYPOINT", oldVal)
 		} else {
 			os.Unsetenv("CLAUDE_CODE_ENTRYPOINT")
 		}
 	}()
 
-	os.Setenv("CLAUDE_CODE_ENTRYPOINT", "/some/path")
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "/some/path")
 	detector := NewDetector()
 	agent := detector.Detect()
 
@@ -70,7 +70,7 @@ func TestDetect_Cursor_EnvVar(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -81,7 +81,7 @@ func TestDetect_Cursor_EnvVar(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("CURSOR", "1")
+	t.Setenv("CURSOR", "1")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -106,7 +106,7 @@ func TestDetect_Cursor_SessionID(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -117,7 +117,7 @@ func TestDetect_Cursor_SessionID(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("CURSOR_SESSION_ID", "test-session-123")
+	t.Setenv("CURSOR_SESSION_ID", "test-session-123")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -140,7 +140,7 @@ func TestDetect_Windsurf_EnvVar(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -150,7 +150,7 @@ func TestDetect_Windsurf_EnvVar(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("WINDSURF", "1")
+	t.Setenv("WINDSURF", "1")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -173,7 +173,7 @@ func TestDetect_Aider_ModelEnv(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -183,7 +183,7 @@ func TestDetect_Aider_ModelEnv(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("AIDER_MODEL", "gpt-4")
+	t.Setenv("AIDER_MODEL", "gpt-4")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -206,7 +206,7 @@ func TestDetect_Aider_ArchitectEnv(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -216,7 +216,7 @@ func TestDetect_Aider_ArchitectEnv(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("AIDER_ARCHITECT", "1")
+	t.Setenv("AIDER_ARCHITECT", "1")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -238,7 +238,7 @@ func TestDetect_ClaudeCode_FileDetection(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
@@ -275,7 +275,7 @@ func TestDetect_Cursor_FileDetection(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
@@ -324,7 +324,7 @@ func TestDetect_Windsurf_FileDetection(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
@@ -369,7 +369,7 @@ func TestDetect_Aider_FileDetection(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
@@ -414,7 +414,7 @@ func TestDetect_Unknown(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
@@ -491,7 +491,7 @@ func TestDetect_MultipleEnvVars(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -499,9 +499,9 @@ func TestDetect_MultipleEnvVars(t *testing.T) {
 	}()
 
 	// Claude Code should take priority
-	os.Setenv("CLAUDECODE", "1")
-	os.Setenv("CURSOR", "1")
-	os.Setenv("WINDSURF", "1")
+	t.Setenv("CLAUDECODE", "1")
+	t.Setenv("CURSOR", "1")
+	t.Setenv("WINDSURF", "1")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -530,7 +530,7 @@ func TestDetect_FallbackPriority(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
@@ -567,7 +567,7 @@ func TestDetect_EdgeCase_ClaudeCodeNotSet(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -578,7 +578,7 @@ func TestDetect_EdgeCase_ClaudeCodeNotSet(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("CLAUDECODE", "0")
+	t.Setenv("CLAUDECODE", "0")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -604,7 +604,7 @@ func TestDetect_AiderignoreFile(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
@@ -653,7 +653,7 @@ func TestDetect_Caching(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -664,7 +664,7 @@ func TestDetect_Caching(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("CURSOR", "1")
+	t.Setenv("CURSOR", "1")
 
 	detector := NewDetector()
 
@@ -676,7 +676,7 @@ func TestDetect_Caching(t *testing.T) {
 
 	// Change env var to Claude Code
 	os.Unsetenv("CURSOR")
-	os.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDECODE", "1")
 
 	// Second call should still return cached Cursor (not re-detect)
 	agent2 := detector.Detect()
@@ -698,7 +698,7 @@ func TestDetect_CachingMultipleCalls(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -708,7 +708,7 @@ func TestDetect_CachingMultipleCalls(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("WINDSURF", "1")
+	t.Setenv("WINDSURF", "1")
 
 	detector := NewDetector()
 
@@ -741,7 +741,7 @@ func TestClearCache(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -751,7 +751,7 @@ func TestClearCache(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("AIDER_MODEL", "gpt-4")
+	t.Setenv("AIDER_MODEL", "gpt-4")
 
 	detector := NewDetector()
 
@@ -763,7 +763,7 @@ func TestClearCache(t *testing.T) {
 
 	// Change env var
 	os.Unsetenv("AIDER_MODEL")
-	os.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDECODE", "1")
 
 	// Before clear, should still get cached value
 	agent2 := detector.Detect()
@@ -808,7 +808,7 @@ func TestDetect_CachingPerInstance(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -818,7 +818,7 @@ func TestDetect_CachingPerInstance(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("CURSOR", "1")
+	t.Setenv("CURSOR", "1")
 
 	// Create two detectors
 	detector1 := NewDetector()
@@ -832,7 +832,7 @@ func TestDetect_CachingPerInstance(t *testing.T) {
 
 	// Change env var to Windsurf
 	os.Unsetenv("CURSOR")
-	os.Setenv("WINDSURF", "1")
+	t.Setenv("WINDSURF", "1")
 
 	// First detector should still return cached Cursor
 	agent1Again := detector1.Detect()

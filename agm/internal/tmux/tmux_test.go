@@ -110,7 +110,7 @@ func skipIfNoTmux(t *testing.T) {
 func setupTestSocket(t *testing.T) (socketPath string, cleanup func()) {
 	t.Helper()
 	socketPath = fmt.Sprintf("/tmp/agm-test-%d.sock", os.Getpid())
-	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	t.Setenv("AGM_TMUX_SOCKET", socketPath)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", socketPath, "kill-server").Run()
 		os.Remove(socketPath)
@@ -122,7 +122,7 @@ func setupTestSocket(t *testing.T) (socketPath string, cleanup func()) {
 func setupTestState(t *testing.T) {
 	t.Helper()
 	stateDir := t.TempDir()
-	os.Setenv("AGM_STATE_DIR", stateDir)
+	t.Setenv("AGM_STATE_DIR", stateDir)
 	t.Cleanup(func() { os.Unsetenv("AGM_STATE_DIR") })
 }
 
@@ -322,10 +322,10 @@ func TestGetCurrentSessionName(t *testing.T) {
 	// When not in tmux, should return error
 	// Save and clear TMUX env var to simulate not being in tmux
 	originalTmux := os.Getenv("TMUX")
-	os.Setenv("TMUX", "")
+	t.Setenv("TMUX", "")
 	defer func() {
 		if originalTmux != "" {
-			os.Setenv("TMUX", originalTmux)
+			t.Setenv("TMUX", originalTmux)
 		}
 	}()
 
@@ -510,10 +510,10 @@ func TestAttachSession_NoTTY(t *testing.T) {
 
 	// Save and clear TMUX env var to simulate not being in tmux
 	originalTmux := os.Getenv("TMUX")
-	os.Setenv("TMUX", "")
+	t.Setenv("TMUX", "")
 	defer func() {
 		if originalTmux != "" {
-			os.Setenv("TMUX", originalTmux)
+			t.Setenv("TMUX", originalTmux)
 		}
 	}()
 
@@ -647,7 +647,7 @@ func BenchmarkHasSession(b *testing.B) {
 
 	tmpDir := b.TempDir()
 	socketPath := tmpDir + "/bench-tmux.sock"
-	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	b.Setenv("AGM_TMUX_SOCKET", socketPath)
 	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	sessionName := "bench-has"
@@ -670,7 +670,7 @@ func BenchmarkListSessions(b *testing.B) {
 
 	tmpDir := b.TempDir()
 	socketPath := tmpDir + "/bench-tmux.sock"
-	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	b.Setenv("AGM_TMUX_SOCKET", socketPath)
 	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	// Create a few sessions

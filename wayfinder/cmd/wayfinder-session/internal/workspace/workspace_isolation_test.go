@@ -378,13 +378,13 @@ Information from other workspaces should NEVER appear here.
 	// Test 8: Environment variable isolation
 	t.Run("EnvironmentIsolation", func(t *testing.T) {
 		// Set workspace-specific environment variables
-		os.Setenv("WAYFINDER_WORKSPACE", "oss")
+		t.Setenv("WAYFINDER_WORKSPACE", "oss")
 		ossWorkspace := os.Getenv("WAYFINDER_WORKSPACE")
 		if ossWorkspace != "oss" {
 			t.Errorf("Expected OSS workspace from env, got '%s'", ossWorkspace)
 		}
 
-		os.Setenv("WAYFINDER_WORKSPACE", "acme")
+		t.Setenv("WAYFINDER_WORKSPACE", "acme")
 		acmeWorkspace := os.Getenv("WAYFINDER_WORKSPACE")
 		if acmeWorkspace != "acme" {
 			t.Errorf("Expected Acme workspace from env, got '%s'", acmeWorkspace)

@@ -124,8 +124,8 @@ debug: true
 
 func TestConfigLoader_Load_EnvVarOverride(t *testing.T) {
 	// Set environment variable
-	os.Setenv("TEST_HOST", "env.example.com")
-	os.Setenv("TEST_PORT", "7070")
+	t.Setenv("TEST_HOST", "env.example.com")
+	t.Setenv("TEST_PORT", "7070")
 	defer os.Unsetenv("TEST_HOST")
 	defer os.Unsetenv("TEST_PORT")
 
@@ -170,8 +170,8 @@ port: 9090
 
 func TestConfigLoader_Load_NestedEnvKeys(t *testing.T) {
 	// Set environment variable with nested key
-	os.Setenv("TEST_DB__HOST", "db.example.com")
-	os.Setenv("TEST_DB__PORT", "5432")
+	t.Setenv("TEST_DB__HOST", "db.example.com")
+	t.Setenv("TEST_DB__PORT", "5432")
 	defer os.Unsetenv("TEST_DB__HOST")
 	defer os.Unsetenv("TEST_DB__PORT")
 

@@ -67,10 +67,8 @@ func TestSearchHistoryByRename(t *testing.T) {
 	}
 
 	// Save original history parser behavior
-	originalHome := os.Getenv("HOME")
 	tmpHome := t.TempDir()
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Create .claude directory structure
 	claudeDir := filepath.Join(tmpHome, ".claude")
@@ -166,10 +164,8 @@ func TestSearchHistoryByTimestamp(t *testing.T) {
 	}
 
 	// Setup temp HOME
-	originalHome := os.Getenv("HOME")
 	tmpHome := t.TempDir()
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpHome)
 
 	claudeDir := filepath.Join(tmpHome, ".claude")
 	os.MkdirAll(claudeDir, 0755)
@@ -343,7 +339,7 @@ func TestDiscover(t *testing.T) {
 				// Need to setup history with rename for verification
 				originalHome := os.Getenv("HOME")
 				tmpHome := t.TempDir()
-				os.Setenv("HOME", tmpHome)
+				t.Setenv("HOME", tmpHome)
 				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
 
 				claudeDir := filepath.Join(tmpHome, ".claude")
@@ -372,7 +368,7 @@ func TestDiscover(t *testing.T) {
 			setupHistory: func(t *testing.T) {
 				originalHome := os.Getenv("HOME")
 				tmpHome := t.TempDir()
-				os.Setenv("HOME", tmpHome)
+				t.Setenv("HOME", tmpHome)
 				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
 
 				claudeDir := filepath.Join(tmpHome, ".claude")
@@ -401,7 +397,7 @@ func TestDiscover(t *testing.T) {
 			setupHistory: func(t *testing.T) {
 				originalHome := os.Getenv("HOME")
 				tmpHome := t.TempDir()
-				os.Setenv("HOME", tmpHome)
+				t.Setenv("HOME", tmpHome)
 				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
 
 				claudeDir := filepath.Join(tmpHome, ".claude")
@@ -428,7 +424,7 @@ func TestDiscover(t *testing.T) {
 				// Create empty history (no /rename exists)
 				originalHome := os.Getenv("HOME")
 				tmpHome := t.TempDir()
-				os.Setenv("HOME", tmpHome)
+				t.Setenv("HOME", tmpHome)
 				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
 
 				claudeDir := filepath.Join(tmpHome, ".claude")
@@ -454,7 +450,7 @@ func TestDiscover(t *testing.T) {
 				// Create history with /rename pointing to different UUID
 				originalHome := os.Getenv("HOME")
 				tmpHome := t.TempDir()
-				os.Setenv("HOME", tmpHome)
+				t.Setenv("HOME", tmpHome)
 				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
 
 				claudeDir := filepath.Join(tmpHome, ".claude")
@@ -489,7 +485,7 @@ func TestDiscover(t *testing.T) {
 				// Create history with entries around manifest time, but NO /rename
 				originalHome := os.Getenv("HOME")
 				tmpHome := t.TempDir()
-				os.Setenv("HOME", tmpHome)
+				t.Setenv("HOME", tmpHome)
 				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
 
 				claudeDir := filepath.Join(tmpHome, ".claude")

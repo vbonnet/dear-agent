@@ -373,7 +373,7 @@ func TestService_Search_WithAPIFallback(t *testing.T) {
 		os.Unsetenv("ANTHROPIC_API_KEY")
 		defer func() {
 			if originalKey != "" {
-				os.Setenv("ANTHROPIC_API_KEY", originalKey)
+				t.Setenv("ANTHROPIC_API_KEY", originalKey)
 			}
 		}()
 
@@ -545,6 +545,7 @@ func TestService_Search_WithQuery(t *testing.T) {
 
 	t.Run("search with query and useAPI but no key", func(t *testing.T) {
 		// Ensure no API key
+		t.Setenv("ANTHROPIC_API_KEY", "") // restored on test cleanup
 		os.Unsetenv("ANTHROPIC_API_KEY")
 
 		tmpdir := testutil.SetupTestEngrams(t)

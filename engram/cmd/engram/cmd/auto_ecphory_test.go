@@ -228,9 +228,7 @@ Check token expiration first.
 		Cwd:    tmpDir,
 	}
 
-	origHome := os.Getenv("ENGRAM_HOME")
-	os.Setenv("ENGRAM_HOME", engramDir)
-	defer os.Setenv("ENGRAM_HOME", origHome)
+	t.Setenv("ENGRAM_HOME", engramDir)
 
 	ctx := testContext(t)
 	results, err := queryEngrams(ctx, engramDir, input)
@@ -272,9 +270,7 @@ Always validate JWT signatures before trusting claims.
 	require.NoError(t, os.WriteFile(engramPath, []byte(engramContent), 0644))
 
 	// Set ENGRAM_HOME so resolveEngramPath finds our test dir
-	origHome := os.Getenv("ENGRAM_HOME")
-	os.Setenv("ENGRAM_HOME", engramDir)
-	defer os.Setenv("ENGRAM_HOME", origHome)
+	t.Setenv("ENGRAM_HOME", engramDir)
 
 	// Override stdin with test input
 	origStdin := os.Stdin
@@ -307,9 +303,7 @@ Always validate JWT signatures before trusting claims.
 
 func TestAutoEcphoryMissingEngramDir(t *testing.T) {
 	// Point to a non-existent directory
-	origHome := os.Getenv("ENGRAM_HOME")
-	os.Setenv("ENGRAM_HOME", "/tmp/nonexistent-engram-dir-12345")
-	defer os.Setenv("ENGRAM_HOME", origHome)
+	t.Setenv("ENGRAM_HOME", "/tmp/nonexistent-engram-dir-12345")
 
 	// Override stdin
 	origStdin := os.Stdin

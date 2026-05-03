@@ -107,7 +107,7 @@ func TestNormalizePath_TildeExpansion(t *testing.T) {
 
 // TestNormalizePath_EnvVarExpansion tests environment variable expansion.
 func TestNormalizePath_EnvVarExpansion(t *testing.T) {
-	os.Setenv("TEST_PATH", "/custom/path")
+	t.Setenv("TEST_PATH", "/custom/path")
 	defer os.Unsetenv("TEST_PATH")
 
 	result, err := NormalizePath("$TEST_PATH/workspace")
@@ -344,7 +344,7 @@ func TestValidateAbsolutePath_EmptyString(t *testing.T) {
 
 // TestValidateAbsolutePath_WithEnvVar tests validation with environment variables.
 func TestValidateAbsolutePath_WithEnvVar(t *testing.T) {
-	os.Setenv("TEST_ABS_PATH", "/absolute/from/env")
+	t.Setenv("TEST_ABS_PATH", "/absolute/from/env")
 	defer os.Unsetenv("TEST_ABS_PATH")
 
 	err := ValidateAbsolutePath("$TEST_ABS_PATH/workspace")
@@ -356,7 +356,7 @@ func TestValidateAbsolutePath_WithEnvVar(t *testing.T) {
 // TestNormalizePath_ComplexPath tests normalization with multiple transformations.
 func TestNormalizePath_ComplexPath(t *testing.T) {
 	home := os.Getenv("HOME")
-	os.Setenv("WORKSPACE", "my-workspace")
+	t.Setenv("WORKSPACE", "my-workspace")
 	defer os.Unsetenv("WORKSPACE")
 
 	result, err := NormalizePath("~/$WORKSPACE/../$WORKSPACE/./src")

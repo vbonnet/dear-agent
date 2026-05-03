@@ -326,9 +326,7 @@ tiers:
 	}
 
 	// Redirect HOME so loadOverrideFile picks up the file.
-	origHome := os.Getenv("HOME")
 	t.Setenv("HOME", dir)
-	defer func() { _ = os.Setenv("HOME", origHome) }()
 
 	opts := GenerateOpts{
 		DryRun:      true,

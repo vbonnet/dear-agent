@@ -314,7 +314,7 @@ func TestGetOpenCodePaths(t *testing.T) {
 func TestGetOpenCodePaths_CustomDataDir(t *testing.T) {
 	// Set custom data dir
 	customDir := "/custom/opencode/path"
-	os.Setenv("OPENCODE_DATA_DIR", customDir)
+	t.Setenv("OPENCODE_DATA_DIR", customDir)
 	defer os.Unsetenv("OPENCODE_DATA_DIR")
 
 	uuid := "ses_ghi789"

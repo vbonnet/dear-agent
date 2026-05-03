@@ -192,8 +192,8 @@ timeout:
 
 func TestLoad_EnvironmentOverrides(t *testing.T) {
 	// Set environment variables
-	os.Setenv("AGM_SESSIONS_DIR", "/tmp/env-sessions")
-	os.Setenv("AGM_LOG_LEVEL", "warn")
+	t.Setenv("AGM_SESSIONS_DIR", "/tmp/env-sessions")
+	t.Setenv("AGM_LOG_LEVEL", "warn")
 	defer os.Unsetenv("AGM_SESSIONS_DIR")
 	defer os.Unsetenv("AGM_LOG_LEVEL")
 
@@ -397,8 +397,8 @@ func TestLoad_PartialOpenCodeConfig(t *testing.T) {
 
 func TestLoad_OpenCodeEnvironmentOverrides(t *testing.T) {
 	// Set environment variables
-	os.Setenv("OPENCODE_SERVER_URL", "http://localhost:7777")
-	os.Setenv("OPENCODE_ADAPTER_ENABLED", "true")
+	t.Setenv("OPENCODE_SERVER_URL", "http://localhost:7777")
+	t.Setenv("OPENCODE_ADAPTER_ENABLED", "true")
 	defer os.Unsetenv("OPENCODE_SERVER_URL")
 	defer os.Unsetenv("OPENCODE_ADAPTER_ENABLED")
 
@@ -434,7 +434,7 @@ func TestLoad_OpenCodeEnvironmentEnabled_BooleanVariants(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.envValue != "" {
-				os.Setenv("OPENCODE_ADAPTER_ENABLED", tt.envValue)
+				t.Setenv("OPENCODE_ADAPTER_ENABLED", tt.envValue)
 				defer os.Unsetenv("OPENCODE_ADAPTER_ENABLED")
 			}
 
@@ -465,8 +465,8 @@ func TestLoad_OpenCodeEnvironmentOverridesFileConfig(t *testing.T) {
 	}
 
 	// Set environment variables (should override file)
-	os.Setenv("OPENCODE_SERVER_URL", "http://localhost:8888")
-	os.Setenv("OPENCODE_ADAPTER_ENABLED", "true")
+	t.Setenv("OPENCODE_SERVER_URL", "http://localhost:8888")
+	t.Setenv("OPENCODE_ADAPTER_ENABLED", "true")
 	defer os.Unsetenv("OPENCODE_SERVER_URL")
 	defer os.Unsetenv("OPENCODE_ADAPTER_ENABLED")
 

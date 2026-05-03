@@ -26,7 +26,7 @@ func TestOpenCodeAPI_SessionCreation(t *testing.T) {
 	// Note: OpenCode is a mock implementation for AGM testing
 	// In production, this would check for real OpenCode server
 	if os.Getenv("OPENCODE_SERVER_URL") == "" {
-		os.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
+		t.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
 	}
 
 	// Create session with OpenCode agent
@@ -66,7 +66,7 @@ func TestOpenCodeAPI_SessionCreation(t *testing.T) {
 func TestOpenCodeAPI_BasicPrompt(t *testing.T) {
 	// Check OpenCode server availability
 	if os.Getenv("OPENCODE_SERVER_URL") == "" {
-		os.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
+		t.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
 	}
 
 	// Create OpenCode session
@@ -100,7 +100,7 @@ func TestOpenCodeAPI_BasicPrompt(t *testing.T) {
 func TestOpenCodeAPI_SessionArchive(t *testing.T) {
 	// Check OpenCode server availability
 	if os.Getenv("OPENCODE_SERVER_URL") == "" {
-		os.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
+		t.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
 	}
 
 	// Create OpenCode session
@@ -149,7 +149,7 @@ func TestOpenCodeAPI_SessionArchive(t *testing.T) {
 func TestOpenCodeAPI_AgentParity(t *testing.T) {
 	// Check OpenCode server availability
 	if os.Getenv("OPENCODE_SERVER_URL") == "" {
-		os.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
+		t.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
 	}
 
 	// Create OpenCode session
@@ -190,7 +190,7 @@ func TestOpenCodeAPI_AgentParity(t *testing.T) {
 func TestOpenCodeAPI_SSEMonitoring(t *testing.T) {
 	// Check OpenCode server availability
 	if os.Getenv("OPENCODE_SERVER_URL") == "" {
-		os.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
+		t.Setenv("OPENCODE_SERVER_URL", "http://localhost:4096")
 	}
 
 	// Create OpenCode session

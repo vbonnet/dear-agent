@@ -28,9 +28,7 @@ func TestSessionImport_EndToEnd(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create test conversation file
 	testUUID := "integration-test-uuid-123"
@@ -70,9 +68,7 @@ func TestSessionImport_TmuxNameSanitization(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create test conversation file
 	testUUID := "sanitization-test-uuid"
@@ -130,9 +126,7 @@ func TestSessionImport_ManifestStructure(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create test conversation file
 	testUUID := "manifest-structure-test"
@@ -163,9 +157,7 @@ func TestSessionImport_WorkspaceSupport(t *testing.T) {
 			}
 
 			// Override home directory
-			oldHome := os.Getenv("HOME")
-			os.Setenv("HOME", tmpDir)
-			defer os.Setenv("HOME", oldHome)
+			t.Setenv("HOME", tmpDir)
 
 			// Create test conversation file
 			testUUID := "workspace-test-" + workspace
@@ -199,9 +191,7 @@ func TestSessionImport_ProjectPathInference(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create conversation files in different projects
 	tests := []struct {
@@ -251,9 +241,7 @@ func TestSessionImport_DuplicatePrevention_Integration(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create test conversation file
 	testUUID := "duplicate-prevention-test"

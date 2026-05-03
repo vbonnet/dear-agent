@@ -112,14 +112,11 @@ func TestLoadConfigWithHierarchy(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Override home directory for testing
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Clear environment variable
-	origEnv := os.Getenv("AGM_MCP_SERVERS")
+	t.Setenv("AGM_MCP_SERVERS", "") // restored on test cleanup
 	os.Unsetenv("AGM_MCP_SERVERS")
-	defer os.Setenv("AGM_MCP_SERVERS", origEnv)
 
 	// Create team config
 	teamName := "engineering"
@@ -201,14 +198,11 @@ func TestLoadConfigWithHierarchy_NoTeam(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Override home directory for testing
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Clear environment variables
-	origEnv := os.Getenv("AGM_MCP_SERVERS")
+	t.Setenv("AGM_MCP_SERVERS", "") // restored on test cleanup
 	os.Unsetenv("AGM_MCP_SERVERS")
-	defer os.Setenv("AGM_MCP_SERVERS", origEnv)
 
 	origTeam := os.Getenv("AGM_TEAM")
 	os.Unsetenv("AGM_TEAM")
@@ -243,14 +237,10 @@ func TestLoadConfigWithHierarchy_EnvVarOnly(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Override home directory for testing
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Set environment variable
-	origEnv := os.Getenv("AGM_MCP_SERVERS")
-	os.Setenv("AGM_MCP_SERVERS", "server1=http://localhost:8001,server2=http://localhost:8002")
-	defer os.Setenv("AGM_MCP_SERVERS", origEnv)
+	t.Setenv("AGM_MCP_SERVERS", "server1=http://localhost:8001,server2=http://localhost:8002")
 
 	// Load config with only env var
 	cfg, err := LoadConfigWithHierarchy("")

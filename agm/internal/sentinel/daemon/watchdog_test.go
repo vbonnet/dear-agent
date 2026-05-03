@@ -324,7 +324,7 @@ func TestNotifySystemdWatchdog_NoSocket(t *testing.T) {
 	t.Setenv("NOTIFY_SOCKET", "")
 	defer func() {
 		if orig != "" {
-			os.Setenv("NOTIFY_SOCKET", orig)
+			t.Setenv("NOTIFY_SOCKET", orig)
 		}
 	}()
 
@@ -337,7 +337,7 @@ func TestNotifySystemdReady_NoSocket(t *testing.T) {
 	t.Setenv("NOTIFY_SOCKET", "")
 	defer func() {
 		if orig != "" {
-			os.Setenv("NOTIFY_SOCKET", orig)
+			t.Setenv("NOTIFY_SOCKET", orig)
 		}
 	}()
 

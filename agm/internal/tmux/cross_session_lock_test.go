@@ -27,7 +27,7 @@ func TestSendPromptLiteral_AcquiresLock(t *testing.T) {
 	}
 
 	testSocket := fmt.Sprintf("/tmp/agm-spl-lock-%d.sock", os.Getpid())
-	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
 		os.Remove(testSocket)
@@ -113,7 +113,7 @@ func TestCrossSessionIsolation_Sequential(t *testing.T) {
 	}
 
 	testSocket := fmt.Sprintf("/tmp/agm-isolation-%d.sock", os.Getpid())
-	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
 		os.Remove(testSocket)
@@ -177,7 +177,7 @@ func TestCrossSessionLocking_NoCopyMode(t *testing.T) {
 	}
 
 	testSocket := fmt.Sprintf("/tmp/agm-copymode-test-%d.sock", os.Getpid())
-	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
 		os.Remove(testSocket)

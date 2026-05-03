@@ -73,8 +73,6 @@ func TestDetectEngramRepo(t *testing.T) {
 
 func TestRunInit(t *testing.T) {
 	// Save original HOME
-	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
 
 	// Create temporary home directory
 	tmpHome, err := os.MkdirTemp("", "engram-home-*")
@@ -84,7 +82,7 @@ func TestRunInit(t *testing.T) {
 	defer os.RemoveAll(tmpHome)
 
 	// Set HOME to temp directory
-	os.Setenv("HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Run init command
 	err = runInit(nil, []string{})
@@ -139,10 +137,9 @@ func TestRunInit(t *testing.T) {
 
 func TestRunInit_NoHome(t *testing.T) {
 	// Save original HOME
-	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
 
 	// Unset HOME
+	t.Setenv("HOME", "") // restored on test cleanup
 	os.Unsetenv("HOME")
 
 	// Run init command - should fail

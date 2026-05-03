@@ -12,7 +12,7 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	// Set environment variable for test
 	testAPIKey := "test-api-key-12345"
-	os.Setenv("OPENAI_API_KEY", testAPIKey)
+	t.Setenv("OPENAI_API_KEY", testAPIKey)
 	defer os.Unsetenv("OPENAI_API_KEY")
 
 	config := DefaultConfig()
@@ -38,8 +38,8 @@ func TestDefaultConfig_WithModelEnvVar(t *testing.T) {
 	// Set environment variables for test
 	testAPIKey := "test-api-key-12345"
 	testModel := "gpt-4o"
-	os.Setenv("OPENAI_API_KEY", testAPIKey)
-	os.Setenv("OPENAI_MODEL", testModel)
+	t.Setenv("OPENAI_API_KEY", testAPIKey)
+	t.Setenv("OPENAI_MODEL", testModel)
 	defer func() {
 		os.Unsetenv("OPENAI_API_KEY")
 		os.Unsetenv("OPENAI_MODEL")
@@ -665,7 +665,7 @@ func TestNewClient_WithInvalidModel(t *testing.T) {
 
 func TestNewClient_ModelFromEnvVar(t *testing.T) {
 	testModel := "gpt-4o-mini"
-	os.Setenv("OPENAI_MODEL", testModel)
+	t.Setenv("OPENAI_MODEL", testModel)
 	defer os.Unsetenv("OPENAI_MODEL")
 
 	config := Config{

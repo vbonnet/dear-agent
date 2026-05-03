@@ -175,8 +175,8 @@ func TestValidateSafeEnvExpansion_Injection(t *testing.T) {
 	}
 
 	// Set up test environment variables
-	os.Setenv("TEST_SAFE_PATH", filepath.Join(home, ".engram", "config.yaml"))
-	os.Setenv("TEST_EVIL_PATH", "/etc/shadow")
+	t.Setenv("TEST_SAFE_PATH", filepath.Join(home, ".engram", "config.yaml"))
+	t.Setenv("TEST_EVIL_PATH", "/etc/shadow")
 	defer os.Unsetenv("TEST_SAFE_PATH")
 	defer os.Unsetenv("TEST_EVIL_PATH")
 

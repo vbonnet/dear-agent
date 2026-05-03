@@ -13,7 +13,7 @@ func TestBackendSwitching_Default(t *testing.T) {
 	oldEnv := os.Getenv("AGM_SESSION_BACKEND")
 	defer func() {
 		if oldEnv != "" {
-			os.Setenv("AGM_SESSION_BACKEND", oldEnv)
+			t.Setenv("AGM_SESSION_BACKEND", oldEnv)
 		} else {
 			os.Unsetenv("AGM_SESSION_BACKEND")
 		}
@@ -40,14 +40,14 @@ func TestBackendSwitching_Tmux(t *testing.T) {
 	oldEnv := os.Getenv("AGM_SESSION_BACKEND")
 	defer func() {
 		if oldEnv != "" {
-			os.Setenv("AGM_SESSION_BACKEND", oldEnv)
+			t.Setenv("AGM_SESSION_BACKEND", oldEnv)
 		} else {
 			os.Unsetenv("AGM_SESSION_BACKEND")
 		}
 	}()
 
 	// Set env var to tmux
-	os.Setenv("AGM_SESSION_BACKEND", "tmux")
+	t.Setenv("AGM_SESSION_BACKEND", "tmux")
 
 	// Get backend
 	b, err := backend.GetBackend()
@@ -67,14 +67,14 @@ func TestBackendSwitching_Invalid(t *testing.T) {
 	oldEnv := os.Getenv("AGM_SESSION_BACKEND")
 	defer func() {
 		if oldEnv != "" {
-			os.Setenv("AGM_SESSION_BACKEND", oldEnv)
+			t.Setenv("AGM_SESSION_BACKEND", oldEnv)
 		} else {
 			os.Unsetenv("AGM_SESSION_BACKEND")
 		}
 	}()
 
 	// Set env var to an invalid backend
-	os.Setenv("AGM_SESSION_BACKEND", "invalid-backend")
+	t.Setenv("AGM_SESSION_BACKEND", "invalid-backend")
 
 	// Get backend should fail
 	_, err := backend.GetBackend()
@@ -95,13 +95,13 @@ func TestBackendSwitching_TmuxOperations(t *testing.T) {
 	oldEnv := os.Getenv("AGM_SESSION_BACKEND")
 	defer func() {
 		if oldEnv != "" {
-			os.Setenv("AGM_SESSION_BACKEND", oldEnv)
+			t.Setenv("AGM_SESSION_BACKEND", oldEnv)
 		} else {
 			os.Unsetenv("AGM_SESSION_BACKEND")
 		}
 	}()
 
-	os.Setenv("AGM_SESSION_BACKEND", "tmux")
+	t.Setenv("AGM_SESSION_BACKEND", "tmux")
 
 	// Get backend
 	b, err := backend.GetBackend()
@@ -152,13 +152,13 @@ func TestBackendSwitching_CompatibilityLayer(t *testing.T) {
 	oldEnv := os.Getenv("AGM_SESSION_BACKEND")
 	defer func() {
 		if oldEnv != "" {
-			os.Setenv("AGM_SESSION_BACKEND", oldEnv)
+			t.Setenv("AGM_SESSION_BACKEND", oldEnv)
 		} else {
 			os.Unsetenv("AGM_SESSION_BACKEND")
 		}
 	}()
 
-	os.Setenv("AGM_SESSION_BACKEND", "tmux")
+	t.Setenv("AGM_SESSION_BACKEND", "tmux")
 
 	b, err := backend.GetBackend()
 	if err != nil {
@@ -233,7 +233,7 @@ func TestBackendSwitching_BackwardCompatibility(t *testing.T) {
 	oldEnv := os.Getenv("AGM_SESSION_BACKEND")
 	defer func() {
 		if oldEnv != "" {
-			os.Setenv("AGM_SESSION_BACKEND", oldEnv)
+			t.Setenv("AGM_SESSION_BACKEND", oldEnv)
 		} else {
 			os.Unsetenv("AGM_SESSION_BACKEND")
 		}

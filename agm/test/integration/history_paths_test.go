@@ -220,10 +220,10 @@ func TestGetHistoryPaths_CustomOpenCodeDataDir(t *testing.T) {
 	// Set custom OPENCODE_DATA_DIR
 	customDir := "/tmp/custom-opencode-test"
 	originalEnv := os.Getenv("OPENCODE_DATA_DIR")
-	os.Setenv("OPENCODE_DATA_DIR", customDir)
+	t.Setenv("OPENCODE_DATA_DIR", customDir)
 	defer func() {
 		if originalEnv != "" {
-			os.Setenv("OPENCODE_DATA_DIR", originalEnv)
+			t.Setenv("OPENCODE_DATA_DIR", originalEnv)
 		} else {
 			os.Unsetenv("OPENCODE_DATA_DIR")
 		}

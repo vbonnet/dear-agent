@@ -101,8 +101,8 @@ func getTestAdapter(t *testing.T) *Adapter {
 	}
 
 	// Set up test environment
-	os.Setenv("WORKSPACE", "test")
-	os.Setenv("DOLT_PORT", "3307")
+	t.Setenv("WORKSPACE", "test")
+	t.Setenv("DOLT_PORT", "3307")
 	os.Unsetenv("DOLT_DATABASE") // Let it default to workspace name
 
 	// Initialize lookupEnv

@@ -15,9 +15,7 @@ func TestWaitForReady_Success(t *testing.T) {
 	sessionName := "test-session-success"
 
 	// Override home directory for test
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create ready-file in background after 100ms
 	go func() {
@@ -50,9 +48,7 @@ func TestWaitForReady_Timeout(t *testing.T) {
 	sessionName := "test-session-timeout"
 
 	// Override home directory for test
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Wait for ready file with short timeout (no file will be created)
 	err := WaitForReady(sessionName, 500*time.Millisecond)
@@ -72,9 +68,7 @@ func TestWaitForReady_RaceCondition(t *testing.T) {
 	sessionName := "test-session-race"
 
 	// Override home directory for test
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create ready-file BEFORE calling WaitForReady (race condition simulation)
 	os.MkdirAll(filepath.Join(tmpDir, ".agm"), 0700)
@@ -107,9 +101,7 @@ func TestWaitForReady_MalformedJSON(t *testing.T) {
 	sessionName := "test-session-malformed"
 
 	// Override home directory for test
-	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
 
 	// Create malformed JSON ready-file, then valid one
 	go func() {
@@ -145,9 +137,7 @@ func TestWaitForReady_CrashedStatus(t *testing.T) {
 	sessionName := "test-session-crashed"
 
 	// Override home directory for test
-	originalHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
 
 	// Create ready-file with "crashed" status
 	go func() {

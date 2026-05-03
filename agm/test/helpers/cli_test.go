@@ -47,9 +47,7 @@ exit 0
 
 	// Modify PATH to include our mock binary
 	// This is hacky but allows testing RunCLI without real AGM
-	oldPath := os.Getenv("PATH")
-	defer os.Setenv("PATH", oldPath)
-	os.Setenv("PATH", tmpDir+":"+oldPath)
+	t.Setenv("PATH", tmpDir+":"+os.Getenv("PATH"))
 
 	// Run the mock command
 	result := RunCLI(t, "test-arg")
@@ -79,9 +77,7 @@ exit 1
 	require.NoError(t, err)
 
 	// Modify PATH to include our mock binary
-	oldPath := os.Getenv("PATH")
-	defer os.Setenv("PATH", oldPath)
-	os.Setenv("PATH", tmpDir+":"+oldPath)
+	t.Setenv("PATH", tmpDir+":"+os.Getenv("PATH"))
 
 	// Run the mock command
 	result := RunCLI(t, "test-arg")
@@ -112,9 +108,7 @@ echo "XDG_CACHE_HOME=$XDG_CACHE_HOME"
 	require.NoError(t, err)
 
 	// Modify PATH to include our mock binary
-	oldPath := os.Getenv("PATH")
-	defer os.Setenv("PATH", oldPath)
-	os.Setenv("PATH", tmpDir+":"+oldPath)
+	t.Setenv("PATH", tmpDir+":"+os.Getenv("PATH"))
 
 	// Save current HOME to verify isolation
 	originalHome := os.Getenv("HOME")

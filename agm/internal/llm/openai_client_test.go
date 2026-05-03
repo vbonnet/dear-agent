@@ -52,7 +52,7 @@ func TestDetectProvider(t *testing.T) {
 
 			// Set test env vars
 			for key, value := range tt.envVars {
-				os.Setenv(key, value)
+				t.Setenv(key, value)
 			}
 
 			result := detectProvider()
@@ -177,7 +177,7 @@ func TestLoadEnvironmentConfig(t *testing.T) {
 
 			// Set test env vars
 			for key, value := range tt.envVars {
-				os.Setenv(key, value)
+				t.Setenv(key, value)
 			}
 
 			cfg := tt.initialCfg
@@ -358,7 +358,7 @@ func TestNewOpenAIClient(t *testing.T) {
 			// Clear and set env vars
 			clearEnvVars(t)
 			for key, value := range tt.envVars {
-				os.Setenv(key, value)
+				t.Setenv(key, value)
 			}
 
 			client, err := NewOpenAIClient(tt.config)
@@ -379,7 +379,7 @@ func TestGetProvider(t *testing.T) {
 	clearEnvVars(t)
 
 	// Test OpenAI
-	os.Setenv("OPENAI_API_KEY", "sk-test")
+	t.Setenv("OPENAI_API_KEY", "sk-test")
 	client, err := NewOpenAIClient(OpenAIConfig{
 		Provider: ProviderOpenAI,
 		Model:    "gpt-4",
@@ -389,7 +389,7 @@ func TestGetProvider(t *testing.T) {
 
 	// Test Azure
 	clearEnvVars(t)
-	os.Setenv("AZURE_OPENAI_KEY", "azure-test")
+	t.Setenv("AZURE_OPENAI_KEY", "azure-test")
 	azureClient, err := NewOpenAIClient(OpenAIConfig{
 		Provider:        ProviderAzure,
 		AzureEndpoint:   "https://test.openai.azure.com",
@@ -439,7 +439,7 @@ func TestGetModel(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			clearEnvVars(t)
 			for key, value := range tt.envVars {
-				os.Setenv(key, value)
+				t.Setenv(key, value)
 			}
 
 			client, err := NewOpenAIClient(tt.config)
@@ -488,7 +488,7 @@ func TestGetEndpoint(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			clearEnvVars(t)
 			for key, value := range tt.envVars {
-				os.Setenv(key, value)
+				t.Setenv(key, value)
 			}
 
 			client, err := NewOpenAIClient(tt.config)
@@ -541,7 +541,7 @@ func TestCreateChatCompletionRequest(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			clearEnvVars(t)
 			for key, value := range tt.envVars {
-				os.Setenv(key, value)
+				t.Setenv(key, value)
 			}
 
 			client, err := NewOpenAIClient(tt.config)

@@ -187,7 +187,7 @@ func TestCheckHookExtensionMatch(t *testing.T) {
 
 				// Set HOME for test
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
+				t.Setenv("HOME", tmpDir)
 
 				return settingsPath, func() { os.Setenv("HOME", oldHome) }
 			},
@@ -212,7 +212,7 @@ func TestCheckHookExtensionMatch(t *testing.T) {
 
 				// Set HOME for the test
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
+				t.Setenv("HOME", tmpDir)
 
 				return settingsPath, func() { os.Setenv("HOME", oldHome) }
 			},
@@ -266,7 +266,7 @@ func TestCheckHookPathsValid(t *testing.T) {
 				os.WriteFile(settingsPath, []byte(settings), 0644)
 
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
+				t.Setenv("HOME", tmpDir)
 
 				return settingsPath, func() { os.Setenv("HOME", oldHome) }
 			},
@@ -292,7 +292,7 @@ func TestCheckHookPathsValid(t *testing.T) {
 				os.WriteFile(settingsPath, []byte(settings), 0644)
 
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
+				t.Setenv("HOME", tmpDir)
 
 				return settingsPath, func() { os.Setenv("HOME", oldHome) }
 			},
@@ -312,7 +312,7 @@ func TestCheckHookPathsValid(t *testing.T) {
 				os.WriteFile(settingsPath, []byte(settings), 0644)
 
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
+				t.Setenv("HOME", tmpDir)
 
 				return settingsPath, func() { os.Setenv("HOME", oldHome) }
 			},
@@ -354,7 +354,7 @@ func TestCheckMarketplaceConfigValid(t *testing.T) {
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
+				t.Setenv("HOME", tmpDir)
 				t.Cleanup(func() { os.Setenv("HOME", oldHome) })
 				return tmpDir
 			},
@@ -374,7 +374,7 @@ func TestCheckMarketplaceConfigValid(t *testing.T) {
 				os.WriteFile(mktPath, []byte(invalidConfig), 0644)
 
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
+				t.Setenv("HOME", tmpDir)
 				t.Cleanup(func() { os.Setenv("HOME", oldHome) })
 				return tmpDir
 			},
@@ -403,7 +403,7 @@ func TestCheckMarketplaceConfigValid(t *testing.T) {
 				os.WriteFile(mktPath, []byte(validConfig), 0644)
 
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
+				t.Setenv("HOME", tmpDir)
 				t.Cleanup(func() { os.Setenv("HOME", oldHome) })
 				return tmpDir
 			},

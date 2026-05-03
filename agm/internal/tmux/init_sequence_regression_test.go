@@ -292,7 +292,7 @@ func BenchmarkSendCommandLiteral(b *testing.B) {
 	}
 
 	testSocket := fmt.Sprintf("/tmp/agm-test-%d.sock", os.Getpid())
-	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	b.Setenv("AGM_TMUX_SOCKET", testSocket)
 	b.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
 		os.Remove(testSocket)

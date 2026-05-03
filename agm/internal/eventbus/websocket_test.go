@@ -68,7 +68,7 @@ func TestNewHub(t *testing.T) {
 }
 
 func TestNewHub_CustomMaxClients(t *testing.T) {
-	os.Setenv("AGM_EVENTBUS_MAX_CLIENTS", "50")
+	t.Setenv("AGM_EVENTBUS_MAX_CLIENTS", "50")
 	defer os.Unsetenv("AGM_EVENTBUS_MAX_CLIENTS")
 
 	hub := NewHub()
@@ -91,7 +91,7 @@ func TestGetPort(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.envValue != "" {
-				os.Setenv("AGM_EVENTBUS_PORT", tt.envValue)
+				t.Setenv("AGM_EVENTBUS_PORT", tt.envValue)
 				defer os.Unsetenv("AGM_EVENTBUS_PORT")
 			}
 
@@ -358,7 +358,7 @@ func TestHub_UnknownAction(t *testing.T) {
 }
 
 func TestHub_MaxClients(t *testing.T) {
-	os.Setenv("AGM_EVENTBUS_MAX_CLIENTS", "2")
+	t.Setenv("AGM_EVENTBUS_MAX_CLIENTS", "2")
 	defer os.Unsetenv("AGM_EVENTBUS_MAX_CLIENTS")
 
 	hub := NewHub()
