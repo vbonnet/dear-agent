@@ -150,8 +150,8 @@ ship incrementally without breaking anything.
 
 | # | Name | Size | Status | Tracking |
 |---|------|------|--------|----------|
-| 0 | SQLite + audit_events (MVS pt. 1) | 4 weeks | `pending` | [BACKLOG §0](docs/workflow-engine/BACKLOG.md#phase-0--sqlite--audit_events-mvs-pt-1) |
-| 1 | Roles + budget (MVS pt. 2) | 3 weeks | `pending` | [BACKLOG §1](docs/workflow-engine/BACKLOG.md#phase-1--roles--budget-mvs-pt-2) |
+| 0 | SQLite + audit_events (MVS pt. 1) | 4 weeks | `done (#38)` | [BACKLOG §0](docs/workflow-engine/BACKLOG.md#phase-0--sqlite--audit_events-mvs-pt-1) |
+| 1 | Roles + budget (MVS pt. 2) | 3 weeks | `done` | [BACKLOG §1](docs/workflow-engine/BACKLOG.md#phase-1--roles--budget-mvs-pt-2) |
 | 2 | DEAR hooks + HITL + exit_gate + outputs[] | 4 weeks | `pending` | [BACKLOG §2](docs/workflow-engine/BACKLOG.md#phase-2--dear-hooks--hitl--exit_gate--outputs) |
 | 3 | FetchSource / AddSource | 2 weeks | `pending` | [BACKLOG §3](docs/workflow-engine/BACKLOG.md#phase-3--fetchsource--addsource) |
 | 4 | Migration + `workflow dev` | 4 weeks | `pending` | [BACKLOG §4](docs/workflow-engine/BACKLOG.md#phase-4--migration--workflow-dev) |

@@ -1,0 +1,56 @@
+# Default roles registry shipped with dear-agent.
+#
+# Operators override per environment by writing to one of:
+#   - $DEAR_AGENT_ROLES (env var path)
+#   - ./.dear-agent/roles.yaml (per-repo)
+#   - ~/.config/dear-agent/roles.yaml (per-user)
+#
+# Last-resort fallback is the compiled-in registry in
+# pkg/workflow/roles.BuiltinRegistry — keep this file in sync.
+#
+# Schema: pkg/workflow/roles/registry.go.
+
+version: 1
+
+defaults:
+  effort: high
+  max_context: 200000
+
+roles:
+  research:
+    description: "Long-context document analysis with citations"
+    capabilities: [long_context, citations, web_search, structured_output]
+    primary:
+      model: claude-opus-4-7
+      effort: max
+      max_context: 1000000
+      cost_per_mtok:
+        input: 15.00
+        output: 75.00
+    secondary:
+      model: gemini-3.1-pro
+      effort: high
+      max_context: 1000000
+      cost_per_mtok:
+        input: 1.25
+        output: 10.00
+    tertiary:
+      model: gpt-5.5-pro
+      effort: high
+
+  implementer:
+    description: "Code synthesis with tool use and patch application"
+    capabilities: [tool_use, code_synthesis, structured_output]
+    primary:
+      model: claude-sonnet-4-6
+      effort: high
+    secondary:
+      model: claude-opus-4-7
+      effort: high
+
+  reviewer:
+    description: "Adversarial critique of artifacts produced by implementer"
+    capabilities: [reasoning, structured_output]
+    primary:
+      model: claude-opus-4-7
+      effort: max
