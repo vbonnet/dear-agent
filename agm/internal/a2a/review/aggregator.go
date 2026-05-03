@@ -145,7 +145,7 @@ func (a *Aggregator) UpdateMetadata(channelFile string, reviewData ReviewData) e
 	newHeader := "---\n" + strings.Join(headerLines, "\n") + "\n---"
 	pattern := regexp.MustCompile(`(?s)^---\s*\n.*?\n---`)
 	updatedContent := pattern.ReplaceAllString(string(content), newHeader)
-	err = os.WriteFile(channelFile, []byte(updatedContent), 0644)
+	err = os.WriteFile(channelFile, []byte(updatedContent), 0o600)
 	if err != nil {
 		return fmt.Errorf("write channel file: %w", err)
 	}

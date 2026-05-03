@@ -68,9 +68,9 @@ func (mc *ModelCard) SetStatus(status Status) {
 }
 
 // HasCapability checks if the agent declares a specific capability.
-func (mc *ModelCard) HasCapability(cap string) bool {
+func (mc *ModelCard) HasCapability(capability string) bool {
 	for _, c := range mc.Capabilities {
-		if c == cap {
+		if c == capability {
 			return true
 		}
 	}

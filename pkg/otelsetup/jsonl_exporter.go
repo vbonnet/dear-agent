@@ -65,12 +65,12 @@ func NewJSONLExporter(sessionID string) (*JSONLExporter, error) {
 	}
 
 	dir := filepath.Join(home, ".engram", "traces", sessionID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("jsonl exporter: mkdir: %w", err)
 	}
 
 	path := filepath.Join(dir, "spans.jsonl")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("jsonl exporter: open: %w", err)
 	}

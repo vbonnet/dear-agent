@@ -251,7 +251,7 @@ func handleSearchResults(adapter *dolt.Adapter, query string, results []llm.Sear
 			Run()
 		if err != nil || !confirmed {
 			fmt.Printf("\nRestore cancelled.\n")
-			return nil
+			return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 
 		return restoreArchivedSession(adapter, archivedSession)
@@ -285,7 +285,7 @@ func handleSearchResults(adapter *dolt.Adapter, query string, results []llm.Sear
 		selectedID, err := ui.ArchivedSessionPicker(sessionInfos)
 		if err != nil {
 			fmt.Printf("\nRestore cancelled.\n")
-			return nil
+			return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 
 		// Find and restore selected session

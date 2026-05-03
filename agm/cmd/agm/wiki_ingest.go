@@ -89,7 +89,7 @@ func runWikiIngest(cmd *cobra.Command, _ []string) error {
 	if !wikiIngestNoIndex {
 		content := wikibrain.GenerateIndex(pages, now)
 		indexPath := filepath.Join(kbPath, "index.md")
-		if writeErr := os.WriteFile(indexPath, []byte(content), 0o644); writeErr != nil {
+		if writeErr := os.WriteFile(indexPath, []byte(content), 0o600); writeErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not write index.md: %v\n", writeErr)
 		} else {
 			fmt.Printf("\n✅ index.md updated (%d pages)\n", len(pages))

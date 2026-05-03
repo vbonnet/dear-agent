@@ -78,8 +78,8 @@ type Hub struct {
 func NewHub() *Hub {
 	maxClients := defaultMaxClients
 	if maxStr := os.Getenv("AGM_EVENTBUS_MAX_CLIENTS"); maxStr != "" {
-		if max, err := strconv.Atoi(maxStr); err == nil && max > 0 {
-			maxClients = max
+		if n, err := strconv.Atoi(maxStr); err == nil && n > 0 {
+			maxClients = n
 		}
 	}
 

@@ -106,7 +106,7 @@ set -g status-right-length 80
 	)
 
 	// Append to tmux.conf
-	f, err := os.OpenFile(tmuxConf, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(tmuxConf, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open tmux.conf: %w", err)
 	}
@@ -172,5 +172,5 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, 0644)
+	return os.WriteFile(dst, data, 0o600)
 }

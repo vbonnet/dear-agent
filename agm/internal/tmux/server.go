@@ -68,7 +68,7 @@ func ServerAlive() error {
 	socketPath := GetSocketPath()
 
 	// Fast path: try to connect to socket directly (avoids spawning tmux process)
-	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
+	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		// Socket connection failed — try tmux command as fallback
 		// (socket might be temporarily busy but server still alive)

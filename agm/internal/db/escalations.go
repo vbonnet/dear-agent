@@ -39,7 +39,7 @@ func (db *DB) CreateEscalation(sessionID string, event *EscalationEvent) (int64,
 		) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL)
 	`
 
-	result, err := db.conn.Exec(query,
+	result, err := db.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		sessionID,
 		event.Type,
 		event.Pattern,
@@ -75,7 +75,7 @@ func (db *DB) GetEscalations(sessionID string) ([]*EscalationEvent, error) {
 		ORDER BY detected_at DESC
 	`
 
-	rows, err := db.conn.Query(query, sessionID)
+	rows, err := db.conn.Query(query, sessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query escalations: %w", err)
 	}
@@ -111,7 +111,7 @@ func (db *DB) GetUnresolvedEscalations(sessionID string) ([]*EscalationEvent, er
 		ORDER BY detected_at DESC
 	`
 
-	rows, err := db.conn.Query(query, sessionID)
+	rows, err := db.conn.Query(query, sessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query unresolved escalations: %w", err)
 	}
@@ -145,7 +145,7 @@ func (db *DB) ResolveEscalation(escalationID int64, note string) error {
 		WHERE escalation_id = ?
 	`
 
-	result, err := db.conn.Exec(query, time.Now(), note, escalationID)
+	result, err := db.conn.Exec(query, time.Now(), note, escalationID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to resolve escalation: %w", err)
 	}
@@ -170,7 +170,7 @@ func (db *DB) DeleteEscalations(sessionID string) error {
 
 	query := `DELETE FROM escalations WHERE session_id = ?`
 
-	_, err := db.conn.Exec(query, sessionID)
+	_, err := db.conn.Exec(query, sessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to delete escalations: %w", err)
 	}

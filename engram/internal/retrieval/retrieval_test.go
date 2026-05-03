@@ -303,8 +303,7 @@ func TestService_Search_IndexOnly(t *testing.T) {
 		{
 			name: "empty directory returns no results",
 			setup: func(t *testing.T) SearchOptions {
-				tmpdir, _ := os.MkdirTemp("", "empty-*")
-				t.Cleanup(func() { os.RemoveAll(tmpdir) })
+				tmpdir := t.TempDir()
 				return SearchOptions{
 					EngramPath: tmpdir,
 					Limit:      10,

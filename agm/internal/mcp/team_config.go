@@ -88,12 +88,12 @@ func SetTeamMembership(teamName string) error {
 	teamDir := filepath.Dir(teamFilePath)
 
 	// Create directory if it doesn't exist
-	if err := os.MkdirAll(teamDir, 0755); err != nil {
+	if err := os.MkdirAll(teamDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
 	// Write team name
-	if err := os.WriteFile(teamFilePath, []byte(teamName+"\n"), 0644); err != nil {
+	if err := os.WriteFile(teamFilePath, []byte(teamName+"\n"), 0o600); err != nil {
 		return fmt.Errorf("failed to write team membership: %w", err)
 	}
 
@@ -159,7 +159,7 @@ func CreateTeamConfig(teamName, description, owner string, servers []ServerConfi
 	teamDir := filepath.Dir(teamConfigPath)
 
 	// Create team directory
-	if err := os.MkdirAll(teamDir, 0755); err != nil {
+	if err := os.MkdirAll(teamDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create team directory: %w", err)
 	}
 
@@ -178,7 +178,7 @@ func CreateTeamConfig(teamName, description, owner string, servers []ServerConfi
 		return fmt.Errorf("failed to marshal team config: %w", err)
 	}
 
-	if err := os.WriteFile(teamConfigPath, data, 0644); err != nil {
+	if err := os.WriteFile(teamConfigPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write team config: %w", err)
 	}
 

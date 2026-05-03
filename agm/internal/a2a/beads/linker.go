@@ -101,7 +101,7 @@ func (l *Linker) UpdateMetadata(channelFile string, metadata map[string]string) 
 	newHeader := "---\n" + strings.Join(headerLines, "\n") + "\n---"
 	re := regexp.MustCompile(`(?s)---\s*\n.*?\n---`)
 	updatedContent := re.ReplaceAllString(contentStr, newHeader)
-	if err := os.WriteFile(channelFile, []byte(updatedContent), 0644); err != nil {
+	if err := os.WriteFile(channelFile, []byte(updatedContent), 0o600); err != nil {
 		return fmt.Errorf("failed to write channel: %w", err)
 	}
 	return nil

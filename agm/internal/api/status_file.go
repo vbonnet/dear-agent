@@ -18,7 +18,7 @@ type StatusFileWriter struct {
 // NewStatusFileWriter creates a new status file writer
 func NewStatusFileWriter(baseDir string) (*StatusFileWriter, error) {
 	// Ensure base directory exists
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
+	if err := os.MkdirAll(baseDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create status directory: %w", err)
 	}
 
@@ -47,7 +47,7 @@ func (w *StatusFileWriter) WriteStatus(sessionName string, result state.Detectio
 
 	// Write atomically via temp file + rename
 	tempPath := filePath + ".tmp"
-	if err := os.WriteFile(tempPath, data, 0644); err != nil {
+	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 

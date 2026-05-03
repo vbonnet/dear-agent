@@ -16,16 +16,19 @@ import (
 //	references/markdown-formatting.ai.md (tags: markdown, formatting; no agent)
 //	strategies/retrieval.ai.md (tags: ai, retrieval, strategies; agent: claude-code)
 func CreateTestEngramDir(t *testing.T) string {
-	tmpdir, err := os.MkdirTemp("", "ecphory-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(tmpdir) })
+	t.Helper()
+	tmpdir := t.TempDir()
 
 	// Create directory structure
-	os.MkdirAll(filepath.Join(tmpdir, "patterns", "go"), 0755)
-	os.MkdirAll(filepath.Join(tmpdir, "references"), 0755)
-	os.MkdirAll(filepath.Join(tmpdir, "strategies"), 0755)
+	if err := os.MkdirAll(filepath.Join(tmpdir, "patterns", "go"), 0o700); err != nil {
+		t.Fatalf("mkdir patterns/go: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpdir, "references"), 0o700); err != nil {
+		t.Fatalf("mkdir references: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpdir, "strategies"), 0o700); err != nil {
+		t.Fatalf("mkdir strategies: %v", err)
+	}
 
 	// Write sample engrams
 	writeTestEngram(t, filepath.Join(tmpdir, "patterns/go/error-handling.ai.md"),
@@ -84,7 +87,7 @@ Use semantic search for relevant retrieval.
 
 // writeTestEngram writes an engram file to the given path
 func writeTestEngram(t *testing.T, path, content string) {
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("failed to write test engram: %v", err)
 	}
 }

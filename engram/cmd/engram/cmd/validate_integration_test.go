@@ -599,13 +599,7 @@ func TestIntegration_PerformanceBenchmark(t *testing.T) {
 	env := setupValidateTest(t)
 
 	t.Run("performance benchmark 500+ files", func(t *testing.T) {
-		// Change to repo root
-		origDir, _ := os.Getwd()
-		defer os.Chdir(origDir)
-
-		if err := os.Chdir(env.repoRoot); err != nil {
-			t.Fatalf("Failed to chdir to repo root: %v", err)
-		}
+		t.Chdir(env.repoRoot)
 
 		// Measure time to validate all files
 		start := time.Now()
@@ -688,9 +682,7 @@ version: 1.0
 		}
 
 		// Change to temp dir
-		origDir, _ := os.Getwd()
-		defer os.Chdir(origDir)
-		os.Chdir(tmpDir)
+		t.Chdir(tmpDir)
 
 		// Run --all
 		output, err := runValidateCommand(t, env.bin, "--all")
@@ -929,9 +921,7 @@ This file should be skipped.
 		}
 
 		// Change to temp dir
-		origDir, _ := os.Getwd()
-		defer os.Chdir(origDir)
-		os.Chdir(tmpDir)
+		t.Chdir(tmpDir)
 
 		// Validate all files
 		output, err := runValidateCommand(t, env.bin, "--all")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -687,7 +688,7 @@ func TestMerge_TildeExpansion_TelemetryPath(t *testing.T) {
 	}
 
 	// Verify NO literal tilde directory
-	if filepath.HasPrefix(dst.Telemetry.Path, "~") {
+	if strings.HasPrefix(dst.Telemetry.Path, "~") {
 		t.Errorf("Telemetry.Path still contains literal tilde: %q", dst.Telemetry.Path)
 	}
 }
@@ -716,7 +717,7 @@ func TestMerge_TildeExpansion_EngramPath(t *testing.T) {
 	}
 
 	// Verify NO literal tilde directory
-	if filepath.HasPrefix(dst.Platform.EngramPath, "~") {
+	if strings.HasPrefix(dst.Platform.EngramPath, "~") {
 		t.Errorf("Platform.EngramPath still contains literal tilde: %q", dst.Platform.EngramPath)
 	}
 }
@@ -761,7 +762,7 @@ func TestMerge_TildeExpansion_PluginPaths(t *testing.T) {
 		}
 
 		// Verify NO literal tilde directory
-		if filepath.HasPrefix(dst.Plugins.Paths[i], "~") {
+		if strings.HasPrefix(dst.Plugins.Paths[i], "~") {
 			t.Errorf("Plugins.Paths[%d] still contains literal tilde: %q", i, dst.Plugins.Paths[i])
 		}
 	}
@@ -819,7 +820,7 @@ telemetry:
 	if cfg.Telemetry.Path != expectedTelemetryPath {
 		t.Errorf("Telemetry.Path = %q, want %q", cfg.Telemetry.Path, expectedTelemetryPath)
 	}
-	if filepath.HasPrefix(cfg.Telemetry.Path, "~") {
+	if strings.HasPrefix(cfg.Telemetry.Path, "~") {
 		t.Errorf("Telemetry.Path contains literal tilde: %q", cfg.Telemetry.Path)
 	}
 
@@ -828,7 +829,7 @@ telemetry:
 	if cfg.Platform.EngramPath != expectedEngramPath {
 		t.Errorf("Platform.EngramPath = %q, want %q", cfg.Platform.EngramPath, expectedEngramPath)
 	}
-	if filepath.HasPrefix(cfg.Platform.EngramPath, "~") {
+	if strings.HasPrefix(cfg.Platform.EngramPath, "~") {
 		t.Errorf("Platform.EngramPath contains literal tilde: %q", cfg.Platform.EngramPath)
 	}
 
@@ -841,7 +842,7 @@ telemetry:
 	if cfg.Plugins.Paths[0] != expectedPluginPath0 {
 		t.Errorf("Plugins.Paths[0] = %q, want %q", cfg.Plugins.Paths[0], expectedPluginPath0)
 	}
-	if filepath.HasPrefix(cfg.Plugins.Paths[0], "~") {
+	if strings.HasPrefix(cfg.Plugins.Paths[0], "~") {
 		t.Errorf("Plugins.Paths[0] contains literal tilde: %q", cfg.Plugins.Paths[0])
 	}
 

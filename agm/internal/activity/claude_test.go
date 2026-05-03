@@ -157,7 +157,7 @@ func TestClaudeActivityTracker_PermissionDenied(t *testing.T) {
 func TestNewClaudeActivityTracker_DefaultPath(t *testing.T) {
 	tracker := NewClaudeActivityTracker()
 	if tracker == nil {
-		t.Errorf("Expected tracker, got nil")
+		t.Fatalf("Expected tracker, got nil")
 	}
 
 	// Check that historyPath is set (should be ~/.claude/history.jsonl)

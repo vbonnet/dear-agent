@@ -34,7 +34,7 @@ func ListWorktrees(repoPath string) ([]Worktree, error) {
 	// Find the git root so worktree commands work correctly
 	gitRoot, err := findGitRoot(repoPath)
 	if err != nil {
-		return nil, nil
+		return nil, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	cmd := exec.Command("git", "-C", gitRoot, "worktree", "list", "--porcelain")
@@ -179,7 +179,7 @@ func RemoveMergedWorktrees(repoPath, baseBranch string) ([]CleanupResult, error)
 
 	gitRoot, err := findGitRoot(repoPath)
 	if err != nil {
-		return nil, nil
+		return nil, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	var results []CleanupResult

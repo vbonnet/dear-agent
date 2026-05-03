@@ -165,7 +165,7 @@ func isProjectCompleteWithDepth(dir string, depth int) (bool, error) {
 	}
 
 	// Check 2: Are all phases completed?
-	allPhasesComplete := !(len(st.Phases) == 0)
+	allPhasesComplete := len(st.Phases) != 0
 
 	for _, phase := range st.Phases {
 		if phase.Status != status.PhaseStatusCompleted {

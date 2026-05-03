@@ -207,7 +207,7 @@ func (r *registryImpl) Save() error {
 
 	// Create directory if it doesn't exist
 	dir := filepath.Dir(r.path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
 
@@ -235,7 +235,7 @@ func (r *registryImpl) Save() error {
 
 	// Atomic write: write to temp file, then rename
 	tempPath := r.path + ".tmp"
-	if err := os.WriteFile(tempPath, data, 0644); err != nil {
+	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 

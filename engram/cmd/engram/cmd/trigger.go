@@ -72,7 +72,7 @@ func scanTriggeredEngrams(engramPath string) ([]triggerEngramEntry, error) {
 
 	err := filepath.Walk(engramPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // skip errors
+			return nil //nolint:nilerr // skip errors
 		}
 		if info.IsDir() || !strings.HasSuffix(path, ".ai.md") {
 			return nil
@@ -80,7 +80,7 @@ func scanTriggeredEngrams(engramPath string) ([]triggerEngramEntry, error) {
 
 		eg, err := parser.Parse(path)
 		if err != nil {
-			return nil // skip unparseable files
+			return nil //nolint:nilerr // skip unparseable files
 		}
 
 		if len(eg.Frontmatter.Triggers) > 0 {

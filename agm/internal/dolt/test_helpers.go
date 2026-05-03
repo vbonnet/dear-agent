@@ -42,6 +42,6 @@ func GetTestAdapter(t *testing.T) *Adapter {
 // CleanTestDatabase removes all sessions from test database
 // Exported for use in test suites that need manual cleanup
 func CleanTestDatabase(adapter *Adapter) error {
-	_, err := adapter.conn.Exec("DELETE FROM agm_sessions")
+	_, err := adapter.conn.Exec("DELETE FROM agm_sessions") //nolint:noctx // TODO(context): plumb ctx through this layer
 	return err
 }

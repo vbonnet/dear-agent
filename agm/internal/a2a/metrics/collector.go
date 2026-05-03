@@ -118,7 +118,7 @@ func NewCollector(channelsDir string) (*Collector, error) {
 // InitializeMetrics creates initial metrics.json for a new channel
 func (c *Collector) InitializeMetrics(channelID string) error {
 	metricsFile := filepath.Join(c.activeDir, channelID, "metrics.json")
-	err := os.MkdirAll(filepath.Dir(metricsFile), 0755)
+	err := os.MkdirAll(filepath.Dir(metricsFile), 0o700)
 	if err != nil {
 		return fmt.Errorf("create metrics directory: %w", err)
 	}
@@ -149,7 +149,7 @@ func (c *Collector) InitializeMetrics(channelID string) error {
 	if err != nil {
 		return fmt.Errorf("marshal metrics: %w", err)
 	}
-	return os.WriteFile(metricsFile, data, 0644)
+	return os.WriteFile(metricsFile, data, 0o600)
 }
 
 // RecordMessage records message posting metrics
@@ -343,7 +343,7 @@ func (c *Collector) calculateConsensusMetrics(metrics *Metrics) {
 }
 
 func (c *Collector) loadMetricsLocked(metricsFile string) (Metrics, func(), error) {
-	file, err := os.OpenFile(metricsFile, os.O_RDWR, 0644)
+	file, err := os.OpenFile(metricsFile, os.O_RDWR, 0o600)
 	if err != nil {
 		return Metrics{}, nil, fmt.Errorf("open metrics file: %w", err)
 	}
@@ -377,7 +377,7 @@ func (c *Collector) saveMetricsLocked(metricsFile string, metrics Metrics) error
 	if err != nil {
 		return fmt.Errorf("marshal metrics: %w", err)
 	}
-	return os.WriteFile(metricsFile, data, 0644)
+	return os.WriteFile(metricsFile, data, 0o600)
 }
 
 func roundFloat(val float64, places int) float64 {

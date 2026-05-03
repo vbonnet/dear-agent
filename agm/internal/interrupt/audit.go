@@ -34,7 +34,7 @@ func LogPath() string {
 // LogInterrupt appends an audit entry to the interrupt log
 func LogInterrupt(entry *AuditEntry) error {
 	dir := LogDir()
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create log directory: %w", err)
 	}
 
@@ -46,7 +46,7 @@ func LogInterrupt(entry *AuditEntry) error {
 		return fmt.Errorf("failed to marshal audit entry: %w", err)
 	}
 
-	f, err := os.OpenFile(LogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(LogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open audit log: %w", err)
 	}

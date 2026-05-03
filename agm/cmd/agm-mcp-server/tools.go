@@ -380,7 +380,7 @@ func forwardToEngramMCP(ctx context.Context, toolName string, arguments map[stri
 	}
 
 	if mcpResponse.Error.Code != 0 {
-		return "", fmt.Errorf("Engram MCP error %d: %s", mcpResponse.Error.Code, mcpResponse.Error.Message)
+		return "", fmt.Errorf("Engram MCP error %d: %s", mcpResponse.Error.Code, mcpResponse.Error.Message) //nolint:staticcheck // proper noun
 	}
 
 	if len(mcpResponse.Result.Content) == 0 {

@@ -186,7 +186,7 @@ func TestClone_EmptyMetacontext(t *testing.T) {
 	cloned := original.Clone()
 
 	if cloned == nil {
-		t.Error("Clone should not return nil")
+		t.Fatal("Clone should not return nil")
 	}
 	if len(cloned.Languages) != 0 {
 		t.Errorf("Cloned empty metacontext should have 0 languages, got %d", len(cloned.Languages))

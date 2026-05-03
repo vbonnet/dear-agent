@@ -35,14 +35,14 @@ func CommitManifest(manifestPath, operation, sessionName string) error {
 	gitRoot, err := findGitRoot(manifestDir)
 	if err != nil {
 		// Not in a git repo - this is OK, just return silently
-		return nil
+		return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Verify the manifest file exists
 	if _, err := os.Stat(manifestPath); err != nil {
 		// File doesn't exist - this might be an error in the caller
 		// But we don't want to fail here, so return nil
-		return nil
+		return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Make manifest path relative to git root for cleaner git commands

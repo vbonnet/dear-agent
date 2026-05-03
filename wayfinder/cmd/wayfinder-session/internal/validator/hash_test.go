@@ -140,8 +140,8 @@ func TestCalculatePhaseEngramHash_TildeExpansion(t *testing.T) {
 		t.Fatalf("failed to get home directory: %v", err)
 	}
 
-	// Create a temporary file in a subdirectory of home
-	tmpDir, err := os.MkdirTemp(home, "wayfinder-test-*")
+	// Create a temporary file in a subdirectory of home (test exercises tilde expansion)
+	tmpDir, err := os.MkdirTemp(home, "wayfinder-test-*") //nolint:usetesting // needs $HOME root
 	if err != nil {
 		t.Fatalf("failed to create temp dir in home: %v", err)
 	}

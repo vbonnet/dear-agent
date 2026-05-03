@@ -163,17 +163,3 @@ func levenshteinDistance(s1, s2 string) int {
 	return prevRow[len2]
 }
 
-// Helper functions for min/max
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

@@ -158,6 +158,7 @@ EXAMPLES
 		}
 
 		if cfg.Telemetry.Enforce {
+			//nolint:staticcheck // multi-line CLI-facing help text
 			return fmt.Errorf("cannot disable telemetry: enforced by organization policy\n\n" +
 				"Your organization requires telemetry for compliance.\n" +
 				"Contact your IT administrator to request opt-out.")

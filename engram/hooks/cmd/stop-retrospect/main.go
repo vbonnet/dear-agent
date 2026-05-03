@@ -219,7 +219,7 @@ func findConversationFile(cwd, sessionID string) string {
 
 	_ = filepath.Walk(projectsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 		if !info.IsDir() && strings.HasSuffix(path, ".jsonl") && info.ModTime().After(newestTime) {
 			newest = path

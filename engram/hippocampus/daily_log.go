@@ -47,7 +47,7 @@ func (dl *DailyLogger) AppendEntry(entry LogEntry) error {
 	logPath := dl.GetLogPath(entry.Timestamp)
 	dir := filepath.Dir(logPath)
 
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create log directory: %w", err)
 	}
 
@@ -57,7 +57,7 @@ func (dl *DailyLogger) AppendEntry(entry LogEntry) error {
 		isNew = true
 	}
 
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open log file: %w", err)
 	}
@@ -145,7 +145,7 @@ func (dl *DailyLogger) ListLogFiles() ([]string, error) {
 
 	err := filepath.Walk(dl.baseDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // skip errors
+			return nil //nolint:nilerr // skip errors
 		}
 		if !info.IsDir() && strings.HasSuffix(path, ".md") {
 			logs = append(logs, path)

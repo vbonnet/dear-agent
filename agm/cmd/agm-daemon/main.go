@@ -34,13 +34,13 @@ func run() error {
 	pidFile := filepath.Join(baseDir, "daemon.pid")
 
 	// Create log directory
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create log directory: %w", err)
 	}
 
 	// Create daemon logger (uses slog.Logger with file output)
 	logPath := filepath.Join(logDir, "daemon.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}

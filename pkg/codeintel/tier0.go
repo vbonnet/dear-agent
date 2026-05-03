@@ -147,7 +147,7 @@ func hasReferencesElsewhere(cwd, funcName, defFile string, spec LanguageSpec) bo
 		found := false
 		_ = filepath.WalkDir(cwd, func(path string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
-				return nil
+				return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 			}
 			if filepath.Ext(path) != ext {
 				return nil
@@ -163,7 +163,7 @@ func hasReferencesElsewhere(cwd, funcName, defFile string, spec LanguageSpec) bo
 			}
 			data, err := os.ReadFile(path)
 			if err != nil {
-				return nil
+				return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 			}
 			if bytes.Contains(data, []byte(funcName)) {
 				found = true

@@ -31,7 +31,7 @@ func GetCurrentSessionName(sessionsDir string, adapter *dolt.Adapter) (string, e
 
 	// Look up AGM manifest by tmux session name from Dolt
 	if adapter == nil {
-		return "", fmt.Errorf("Dolt adapter required")
+		return "", fmt.Errorf("Dolt adapter required") //nolint:staticcheck // proper noun
 	}
 	manifests, err := adapter.ListSessions(&dolt.SessionFilter{})
 	if err != nil {
@@ -66,7 +66,7 @@ func ResolveIdentifier(identifier string, sessionsDir string, adapter *dolt.Adap
 
 	// Try as session ID first using Dolt
 	if adapter == nil {
-		return nil, "", fmt.Errorf("Dolt adapter required")
+		return nil, "", fmt.Errorf("Dolt adapter required") //nolint:staticcheck // proper noun
 	}
 
 	manifestPath := filepath.Join(sessionsDir, identifier, "manifest.yaml")

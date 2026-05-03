@@ -201,7 +201,7 @@ func EnsureSymlinkBootstrap(cfg *Config) error {
 // createSymlink creates a symlink and ensures the target directory exists
 func createSymlink(target, link string) error {
 	// Ensure target directory exists
-	if err := os.MkdirAll(target, 0755); err != nil {
+	if err := os.MkdirAll(target, 0o700); err != nil {
 		return fmt.Errorf("failed to create target directory: %w", err)
 	}
 
@@ -224,7 +224,7 @@ func migrateToSymlink(dotfilePath, centralizedPath string) error {
 	}
 
 	// Ensure centralized directory exists
-	if err := os.MkdirAll(centralizedPath, 0755); err != nil {
+	if err := os.MkdirAll(centralizedPath, 0o700); err != nil {
 		// Rollback on failure
 		os.Rename(backupPath, dotfilePath)
 		return fmt.Errorf("failed to create centralized directory: %w", err)
@@ -312,7 +312,7 @@ func VerifyStorageIntegrity(cfg *Config) error {
 
 	// Check if writable
 	testFile := filepath.Join(storagePath, ".agm-test-write")
-	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte("test"), 0o600); err != nil {
 		return fmt.Errorf("storage path is not writable: %w", err)
 	}
 	os.Remove(testFile)

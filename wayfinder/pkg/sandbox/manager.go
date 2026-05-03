@@ -67,7 +67,7 @@ func (m *Manager) CreateSandbox(name string) (*Sandbox, error) {
 	}()
 
 	// Step 1: Create sandbox directory
-	if err := os.MkdirAll(sandboxPath, 0755); err != nil {
+	if err := os.MkdirAll(sandboxPath, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create sandbox directory: %w", err)
 	}
 	cleanupFuncs = append(cleanupFuncs, func() error {
@@ -206,7 +206,7 @@ func (m *Manager) writeMetadata(path string, sandbox *Sandbox) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 // readMetadata reads sandbox metadata from file

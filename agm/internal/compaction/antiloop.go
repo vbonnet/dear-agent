@@ -63,14 +63,14 @@ func LoadState(baseDir, sessionName string) (*CompactionState, error) {
 // SaveState writes compaction state to disk.
 func SaveState(baseDir string, state *CompactionState) error {
 	dir := stateDir(baseDir)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create compaction-state dir: %w", err)
 	}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal compaction state: %w", err)
 	}
-	return os.WriteFile(stateFile(baseDir, state.SessionName), data, 0o644)
+	return os.WriteFile(stateFile(baseDir, state.SessionName), data, 0o600)
 }
 
 // recentCompactions counts compactions within the rolling window.

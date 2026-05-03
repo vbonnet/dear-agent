@@ -80,11 +80,11 @@ func (el *ErrorLog) AppendError(category, message, source string) error {
 
 // appendEntry marshals and appends a single entry to the JSONL file.
 func (el *ErrorLog) appendEntry(entry ErrorEntry) error {
-	if err := os.MkdirAll(filepath.Dir(el.path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(el.path), 0o700); err != nil {
 		return fmt.Errorf("create error log directory: %w", err)
 	}
 
-	f, err := os.OpenFile(el.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(el.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open error log: %w", err)
 	}

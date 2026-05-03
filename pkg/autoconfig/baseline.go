@@ -106,7 +106,7 @@ func (b *Baseline) Save() error {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("save baseline: mkdir: %w", err)
 	}
 
@@ -114,7 +114,7 @@ func (b *Baseline) Save() error {
 	if err != nil {
 		return fmt.Errorf("save baseline: marshal: %w", err)
 	}
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 func (b *Baseline) recompute() {

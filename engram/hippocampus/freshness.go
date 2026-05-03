@@ -73,7 +73,7 @@ func SurfaceMemoryWithFreshness(path string) (string, error) {
 	days, err := MemoryAgeDays(path)
 	if err != nil {
 		// If we can't determine age, return content without caveat
-		return string(content), nil
+		return string(content), nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	caveat := MemoryFreshnessText(days)

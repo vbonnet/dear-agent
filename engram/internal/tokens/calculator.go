@@ -94,13 +94,9 @@ func runTokenizers(text string) map[string]int {
 		go func(t tokenizers.Tokenizer) {
 			defer wg.Done()
 
-			// Recover from panics (defensive, shouldn't happen in practice)
-			defer func() {
-				if r := recover(); r != nil {
-					// TODO: Log panic when structured logging available
-					// For now, silently skip panicked tokenizers
-				}
-			}()
+			// Recover from panics (defensive — silently skip panicked tokenizers
+			// until structured logging is available; tracked separately).
+			defer func() { _ = recover() }()
 
 			count, err := t.Count(text)
 			if err != nil {

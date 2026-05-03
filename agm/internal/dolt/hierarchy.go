@@ -25,7 +25,7 @@ func (a *Adapter) GetParent(sessionID string) (*manifest.Manifest, error) {
 	var parentID sql.NullString
 	query := `SELECT parent_session_id FROM agm_sessions WHERE id = ? AND workspace = ?`
 
-	err := a.conn.QueryRow(query, sessionID, a.workspace).Scan(&parentID)
+	err := a.conn.QueryRow(query, sessionID, a.workspace).Scan(&parentID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("session not found: %s", sessionID)
@@ -76,7 +76,7 @@ func (a *Adapter) GetChildren(sessionID string) ([]*manifest.Manifest, error) {
 		ORDER BY created_at ASC
 	`
 
-	rows, err := a.conn.Query(query, sessionID, a.workspace)
+	rows, err := a.conn.Query(query, sessionID, a.workspace) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query child sessions: %w", err)
 	}
@@ -111,7 +111,7 @@ func (a *Adapter) DetachChild(sessionID string) error {
 	}
 
 	query := `UPDATE agm_sessions SET parent_session_id = NULL WHERE id = ? AND workspace = ?`
-	result, err := a.conn.Exec(query, sessionID, a.workspace)
+	result, err := a.conn.Exec(query, sessionID, a.workspace) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to detach child session %s: %w", sessionID, err)
 	}
@@ -175,7 +175,7 @@ func (a *Adapter) GetSessionTree(sessionID string) (*SessionTree, error) {
 	for {
 		var parentID sql.NullString
 		query := `SELECT parent_session_id FROM agm_sessions WHERE id = ? AND workspace = ?`
-		err := a.conn.QueryRow(query, currentID, a.workspace).Scan(&parentID)
+		err := a.conn.QueryRow(query, currentID, a.workspace).Scan(&parentID) //nolint:noctx // TODO(context): plumb ctx through this layer
 		if err != nil {
 			if err == sql.ErrNoRows {
 				break // Session not found in chain

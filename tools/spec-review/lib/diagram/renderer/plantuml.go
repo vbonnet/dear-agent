@@ -48,7 +48,7 @@ func (r *PlantUMLRenderer) Render(ctx context.Context, source io.Reader, dest io
 
 	// Write source to temp file
 	sourceFile := filepath.Join(tempDir, "diagram.puml")
-	if err := os.WriteFile(sourceFile, sourceData, 0644); err != nil {
+	if err := os.WriteFile(sourceFile, sourceData, 0o600); err != nil {
 		return fmt.Errorf("failed to write PlantUML source file: %w", err)
 	}
 

@@ -14,14 +14,19 @@ import (
 
 // TestMain sets up the testscript environment
 func TestMain(m *testing.M) {
-	os.Exit(testscript.RunMain(m, map[string]func() int{
+	testscript.Main(m, map[string]func(){
 		"agm": agmMain,
-	}))
+	})
 }
 
 // agmMain is the entry point for the agm binary in testscript
-// This allows tests to call "agm" commands as if they were running the real binary
-func agmMain() int {
+// This allows tests to call "agm" commands as if they were running the real binary.
+// Calls os.Exit on its own to mirror the original RunMain int-return semantics.
+func agmMain() {
+	os.Exit(runAGM())
+}
+
+func runAGM() int {
 	// Create mock tmux client for testing
 	mockTmux := session.NewMockTmux()
 

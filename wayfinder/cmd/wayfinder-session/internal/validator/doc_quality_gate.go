@@ -481,7 +481,7 @@ func updateCache(projectDir, docFile, fileHash string, score float64) error {
 	cacheDir := filepath.Join(projectDir, ".wayfinder-cache")
 	cachePath := filepath.Join(cacheDir, "doc-quality-scores.json")
 
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
@@ -506,7 +506,7 @@ func updateCache(projectDir, docFile, fileHash string, score float64) error {
 		return fmt.Errorf("failed to marshal cache: %w", err)
 	}
 
-	if err := os.WriteFile(cachePath, newData, 0644); err != nil {
+	if err := os.WriteFile(cachePath, newData, 0o600); err != nil {
 		return fmt.Errorf("failed to write cache: %w", err)
 	}
 

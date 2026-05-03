@@ -41,7 +41,7 @@ func (r *MermaidRenderer) Render(ctx context.Context, source io.Reader, dest io.
 
 	// Write source to temp file
 	sourceFile := filepath.Join(tempDir, "diagram.mmd")
-	if err := os.WriteFile(sourceFile, sourceData, 0644); err != nil {
+	if err := os.WriteFile(sourceFile, sourceData, 0o600); err != nil {
 		return fmt.Errorf("failed to write Mermaid source file: %w", err)
 	}
 

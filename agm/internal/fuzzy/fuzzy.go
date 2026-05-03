@@ -65,9 +65,3 @@ func FindSimilar(input string, candidates []string, threshold float64) []Match {
 	return matches
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -197,7 +198,7 @@ func assertResultsInDirectory(t *testing.T, results []*SearchResult, expectedDir
 		if !filepath.IsAbs(r.Path) {
 			t.Errorf("Result path %q is not absolute", r.Path)
 		}
-		if !filepath.HasPrefix(r.Path, expectedDir) {
+		if !strings.HasPrefix(r.Path, expectedDir) {
 			t.Errorf("Result path %q is not in expected directory %q", r.Path, expectedDir)
 		}
 	}

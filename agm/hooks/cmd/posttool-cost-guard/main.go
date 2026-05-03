@@ -166,7 +166,7 @@ func shouldCheck(sessionID string) bool {
 
 	count++
 	// Best-effort write; ignore errors.
-	_ = os.WriteFile(counterPath, []byte(strconv.Itoa(count)), 0o644)
+	_ = os.WriteFile(counterPath, []byte(strconv.Itoa(count)), 0o600)
 
 	return count%sampleInterval == 0
 }

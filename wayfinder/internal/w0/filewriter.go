@@ -55,11 +55,11 @@ func SaveCharter(projectPath, charter string, metadata ...FileMetadata) WriteRes
 			fmt.Sprintf("W0-project-charter.backup-%d.md", time.Now().UnixMilli()))
 		data, _ := os.ReadFile(filePath)
 		if data != nil {
-			_ = os.WriteFile(backupPath, data, 0o644)
+			_ = os.WriteFile(backupPath, data, 0o600)
 		}
 	}
 
-	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
 		return WriteResult{Error: err.Error()}
 	}
 

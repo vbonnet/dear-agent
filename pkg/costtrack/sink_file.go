@@ -18,7 +18,7 @@ type FileSink struct {
 // NewFileSink creates a new file cost sink
 func NewFileSink(path string) (*FileSink, error) {
 	// Open file in append mode, create if doesn't exist
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open cost file: %w", err)
 	}

@@ -131,7 +131,7 @@ func (cv *CommandValidator) SaveAllowlist() error {
 
 	// Create directory if it doesn't exist
 	dir := filepath.Dir(cv.allowlistPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create allowlist directory: %w", err)
 	}
 
@@ -150,7 +150,7 @@ func (cv *CommandValidator) SaveAllowlist() error {
 
 	// Atomic write
 	tempPath := cv.allowlistPath + ".tmp"
-	if err := os.WriteFile(tempPath, data, 0644); err != nil {
+	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 

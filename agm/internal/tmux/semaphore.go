@@ -58,6 +58,6 @@ func TmuxConcurrentOps() int {
 
 // SetMaxConcurrentOps replaces the semaphore with a new capacity.
 // Only safe to call during init or tests when no operations are in flight.
-func SetMaxConcurrentOps(max int) {
-	tmuxSemaphore = make(chan struct{}, max)
+func SetMaxConcurrentOps(capacity int) {
+	tmuxSemaphore = make(chan struct{}, capacity)
 }

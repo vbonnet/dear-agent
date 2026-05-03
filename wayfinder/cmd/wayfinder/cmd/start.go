@@ -80,7 +80,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	// Validate root exists or create it
 	if _, statErr := os.Stat(projectRoot); os.IsNotExist(statErr) {
-		if err := os.MkdirAll(projectRoot, 0755); err != nil {
+		if err := os.MkdirAll(projectRoot, 0o700); err != nil {
 			return fmt.Errorf("failed to create project root %s: %w", projectRoot, err)
 		}
 	}
@@ -93,7 +93,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create project directory
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
+	if err := os.MkdirAll(projectDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create project directory: %w", err)
 	}
 
@@ -217,7 +217,7 @@ func createRetrospective(projectDir, projectID, prompt, sessionID string) error 
 	content = strings.ReplaceAll(content, "{DATE}", date)
 
 	retrospectivePath := filepath.Join(projectDir, "S11-retrospective.md")
-	return os.WriteFile(retrospectivePath, []byte(content), 0644)
+	return os.WriteFile(retrospectivePath, []byte(content), 0o600)
 }
 
 // livingRetrospectiveTemplate is the template for S11-retrospective.md

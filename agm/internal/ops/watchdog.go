@@ -123,16 +123,16 @@ fi
 // InstallWatchdog writes the watchdog script and installs a crontab entry.
 func InstallWatchdog(paths WatchdogPaths, socketPath, agmBin string) error {
 	// Create directories
-	if err := os.MkdirAll(paths.BinDir, 0755); err != nil {
+	if err := os.MkdirAll(paths.BinDir, 0o700); err != nil {
 		return fmt.Errorf("create bin dir: %w", err)
 	}
-	if err := os.MkdirAll(paths.LogDir, 0755); err != nil {
+	if err := os.MkdirAll(paths.LogDir, 0o700); err != nil {
 		return fmt.Errorf("create log dir: %w", err)
 	}
 
 	// Write script
 	script := GenerateWatchdogScript(socketPath, agmBin)
-	if err := os.WriteFile(paths.ScriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(paths.ScriptPath, []byte(script), 0o700); err != nil { //#nosec G306 -- executable script
 		return fmt.Errorf("write watchdog script: %w", err)
 	}
 

@@ -223,13 +223,6 @@ func extractT2(lines []string, structure *ContentStructure) []string {
 	return lines
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func findFrontmatterEnd(lines []string) int {
 	if len(lines) < 2 || lines[0] != "---" {
 		return -1

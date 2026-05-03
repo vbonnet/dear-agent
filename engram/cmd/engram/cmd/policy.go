@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // sqlite3 driver
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 )
@@ -179,6 +179,7 @@ func openExceptionDB() (*sql.DB, error) {
 	dbPath := getExceptionDBPath()
 
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		//nolint:revive,staticcheck // multi-line CLI-facing help text
 		return nil, fmt.Errorf("exception database not found: %s\n\nPlease ensure the language-consolidation project is initialized.\nSet ENGRAM_EXCEPTION_DB env var or use --db flag to specify location.", dbPath)
 	}
 
@@ -240,7 +241,7 @@ func getExceptionSummary(db *sql.DB, summary *ExceptionSummary) error {
 		FROM exceptions
 	`
 
-	row := db.QueryRow(query)
+	row := db.QueryRow(query) //nolint:noctx // TODO(context): plumb ctx through this layer
 	err := row.Scan(&summary.TotalActive, &summary.TotalExpired, &summary.TotalResolved, &summary.TotalPending, &summary.Total)
 	return err
 }
@@ -256,7 +257,7 @@ func getComplianceRates(db *sql.DB, rates *ComplianceRates) error {
 		GROUP BY rule_name
 	`
 
-	rows, err := db.Query(query)
+	rows, err := db.Query(query) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return err
 	}
@@ -306,7 +307,7 @@ func getExpiringExceptions(db *sql.DB, exceptions *[]ExceptionDetail, days int) 
 		ORDER BY sunset_date ASC
 	`
 
-	rows, err := db.Query(query, days)
+	rows, err := db.Query(query, days) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return err
 	}
@@ -349,7 +350,7 @@ func getRuleBreakdown(db *sql.DB, breakdown *[]RuleBreakdown) error {
 		ORDER BY rule_name
 	`
 
-	rows, err := db.Query(query)
+	rows, err := db.Query(query) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return err
 	}
@@ -510,7 +511,7 @@ func runPolicyExceptions() error {
 
 	query += " ORDER BY sunset_date ASC"
 
-	rows, err := db.Query(query, args...)
+	rows, err := db.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return err
 	}

@@ -62,7 +62,7 @@ func (em *EpisodicMemory) AppendEntry(ctx context.Context, entry *MemoryEntry) e
 	entryText := formatMemoryEntry(entry)
 
 	// Append to DECISION_LOG.md
-	f, err := os.OpenFile(em.logPath, os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(em.logPath, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open DECISION_LOG.md: %w", err)
 	}
@@ -89,7 +89,7 @@ func (em *EpisodicMemory) ShouldMolt(currentSessionTokens int) bool {
 }
 
 // GetTokenUsage returns current token count and threshold.
-func (em *EpisodicMemory) GetTokenUsage() (current int, max int, percentage float64) {
+func (em *EpisodicMemory) GetTokenUsage() (current int, maximum int, percentage float64) {
 	em.mu.RLock()
 	defer em.mu.RUnlock()
 
@@ -193,7 +193,7 @@ When the agent's token usage exceeds 80% of the context window, it performs a "M
 
 `
 
-	return os.WriteFile(path, []byte(template), 0644)
+	return os.WriteFile(path, []byte(template), 0o600)
 }
 
 // estimateTokens provides rough token count (4 chars = 1 token heuristic).

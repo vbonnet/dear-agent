@@ -413,7 +413,7 @@ func isMetaOrchestrator(sessionName string) bool {
 func (m *SessionMonitor) autoDenyPermissionPrompt(sessionName string) error {
 	paneInfo, err := m.tmuxClient.GetPaneInfo(sessionName)
 	if err != nil {
-		return nil // Can't check — fail open (don't block monitoring loop)
+		return nil //nolint:nilerr // Can't check — fail open (don't block monitoring loop)
 	}
 
 	// Check for permission prompt

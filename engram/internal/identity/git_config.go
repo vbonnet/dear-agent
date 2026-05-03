@@ -36,7 +36,7 @@ func (d *GitConfigDetector) Detect(ctx context.Context) (*Identity, error) {
 	output, err := cmd.Output()
 	if err != nil {
 		// Git not installed or config not set, not an error
-		return nil, nil
+		return nil, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	email = strings.TrimSpace(string(output))

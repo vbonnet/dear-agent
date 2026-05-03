@@ -52,7 +52,7 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	// Extract phase name from filename (e.g., "D1.md" -> "D1")
 	phaseName := extractPhaseName(filepath.Base(absPath))
 	if phaseName == "" {
-		return fmt.Errorf("invalid phase file name: must match pattern W0.md, D1.md, S4.md, etc.")
+		return fmt.Errorf("invalid phase file name: must match pattern W0.md, D1.md, S4.md (etc)")
 	}
 
 	// Validate phase name is in AllPhases()

@@ -65,13 +65,13 @@ func runInstallHooks(cmd *cobra.Command, args []string) error {
 	hooksDir := filepath.Join(homeDir, ".claude", "hooks")
 
 	// Create hooks directory if it doesn't exist
-	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+	if err := os.MkdirAll(hooksDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
 
 	// Create session-start subdirectory
 	sessionStartDir := filepath.Join(hooksDir, "session-start")
-	if err := os.MkdirAll(sessionStartDir, 0755); err != nil {
+	if err := os.MkdirAll(sessionStartDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create session-start directory: %w", err)
 	}
 
@@ -101,8 +101,8 @@ func runInstallHooks(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Write hook file
-		err = os.WriteFile(destPath, content, 0755)
+		// Write hook file (must be executable)
+		err = os.WriteFile(destPath, content, 0o700) //#nosec G306 -- executable hook
 		if err != nil {
 			return fmt.Errorf("failed to write hook %s: %w", destPath, err)
 		}

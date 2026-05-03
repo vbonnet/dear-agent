@@ -31,7 +31,7 @@ func NewStore(dir string) (*Store, error) {
 		}
 		dir = filepath.Join(home, defaultDir)
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create metrics dir: %w", err)
 	}
 	return &Store{
@@ -54,7 +54,7 @@ func (s *Store) Append(r Record) error {
 		return fmt.Errorf("marshal record: %w", err)
 	}
 
-	f, err := os.OpenFile(s.file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(s.file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open metrics file: %w", err)
 	}

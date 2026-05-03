@@ -127,7 +127,7 @@ func (c *Context) FormatForDisplay() string {
 			icon = "🤖"
 		}
 
-		fmt.Fprintf(&sb, "│ %s %s:\n", icon, strings.Title(msg.Role))
+		fmt.Fprintf(&sb, "│ %s %s:\n", icon, capitalizeFirst(msg.Role))
 
 		// Word wrap content to fit in box (60 chars wide)
 		wrapped := wordWrap(msg.Content, 58)
@@ -171,4 +171,13 @@ func wordWrap(text string, width int) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// capitalizeFirst returns s with its first byte upper-cased.
+// Roles ("user", "assistant") are ASCII, so this is sufficient.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }

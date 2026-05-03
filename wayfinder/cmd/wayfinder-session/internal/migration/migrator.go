@@ -99,7 +99,7 @@ func createBackup(statusPath string) (string, error) {
 	backupPath := filepath.Join(dir, backupFilename)
 
 	// Write backup
-	if err := os.WriteFile(backupPath, data, 0644); err != nil {
+	if err := os.WriteFile(backupPath, data, 0o600); err != nil {
 		return "", fmt.Errorf("failed to write backup: %w", err)
 	}
 
@@ -116,7 +116,7 @@ func RestoreFromBackup(projectPath, backupPath string) error {
 
 	// Write to status file
 	statusPath := filepath.Join(projectPath, status.StatusFilename)
-	if err := os.WriteFile(statusPath, data, 0644); err != nil {
+	if err := os.WriteFile(statusPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to restore status file: %w", err)
 	}
 

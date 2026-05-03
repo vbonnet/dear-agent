@@ -153,6 +153,12 @@ func simplifyRecommendation(rec string) string {
 	return rec
 }
 
+// ctxKey is a private type for context keys to avoid collisions across packages.
+type ctxKey string
+
+// CLIFlagsKey is the context key used to mark CLI-flag presence for user-type detection.
+const CLIFlagsKey ctxKey = "cli_flags"
+
 // DetectUserType detects whether the user is technical or non-technical
 //
 // Detection heuristics:
@@ -170,7 +176,7 @@ func DetectUserType(ctx context.Context) UserType {
 	}
 
 	// Check context for CLI flag usage
-	if ctx.Value("cli_flags") != nil {
+	if ctx.Value(CLIFlagsKey) != nil {
 		return UserTypeTechnical
 	}
 

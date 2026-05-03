@@ -59,7 +59,7 @@ func AddSignature(filePath string) error {
 	newContent := fmt.Sprintf("---\n%s---\n%s", string(updatedFrontmatter), body)
 
 	// Write back to file
-	if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(newContent), 0o600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -79,13 +79,13 @@ func HasSignature(filePath string) (bool, error) {
 	// Extract frontmatter
 	frontmatter, _, err := splitFrontmatterAndBody(contentStr)
 	if err != nil {
-		return false, nil // No frontmatter = no signature
+		return false, nil //nolint:nilerr // No frontmatter = no signature
 	}
 
 	// Parse frontmatter
 	var fm map[string]interface{}
 	if err := yaml.Unmarshal([]byte(frontmatter), &fm); err != nil {
-		return false, nil // Invalid YAML = no signature
+		return false, nil //nolint:nilerr // Invalid YAML = no signature
 	}
 
 	// Check for validated field
@@ -147,7 +147,7 @@ func RemoveSignature(filePath string) error {
 	newContent := fmt.Sprintf("---\n%s---\n%s", string(updatedFrontmatter), body)
 
 	// Write back to file
-	if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(newContent), 0o600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 

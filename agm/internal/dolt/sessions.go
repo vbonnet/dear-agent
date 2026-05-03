@@ -111,7 +111,7 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 		model = "claude-sonnet-4-5"
 	}
 
-	_, err = a.conn.Exec(query,
+	_, err = a.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		session.SessionID,
 		session.CreatedAt,
 		session.UpdatedAt,
@@ -168,7 +168,7 @@ func (a *Adapter) GetSession(sessionID string) (*manifest.Manifest, error) {
 		WHERE id = ? AND workspace = ?
 	`
 
-	row := a.conn.QueryRow(query, sessionID, a.workspace)
+	row := a.conn.QueryRow(query, sessionID, a.workspace) //nolint:noctx // TODO(context): plumb ctx through this layer
 	return a.scanSession(row)
 }
 
@@ -253,7 +253,7 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 		WHERE id = ? AND workspace = ?
 	`
 
-	result, err := a.conn.Exec(query,
+	result, err := a.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		session.UpdatedAt,
 		status,
 		session.Name,
@@ -306,7 +306,7 @@ func (a *Adapter) DeleteSession(sessionID string) error {
 
 	query := `DELETE FROM agm_sessions WHERE id = ? AND workspace = ?`
 
-	result, err := a.conn.Exec(query, sessionID, a.workspace)
+	result, err := a.conn.Exec(query, sessionID, a.workspace) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
@@ -413,7 +413,7 @@ func (a *Adapter) ListSessions(filter *SessionFilter) ([]*manifest.Manifest, err
 		}
 	}
 
-	rows, err := a.conn.Query(query, args...)
+	rows, err := a.conn.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sessions: %w", err)
 	}
@@ -464,7 +464,7 @@ func (a *Adapter) ResolveIdentifier(identifier string) (*manifest.Manifest, erro
 		LIMIT 1
 	`
 
-	row := a.conn.QueryRow(query, a.workspace, identifier, identifier, identifier)
+	row := a.conn.QueryRow(query, a.workspace, identifier, identifier, identifier) //nolint:noctx // TODO(context): plumb ctx through this layer
 	m, err := a.scanSession(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "session not found") {
@@ -500,7 +500,7 @@ func (a *Adapter) GetSessionByName(name string) (*manifest.Manifest, error) {
 		LIMIT 1
 	`
 
-	row := a.conn.QueryRow(query, a.workspace, name)
+	row := a.conn.QueryRow(query, a.workspace, name) //nolint:noctx // TODO(context): plumb ctx through this layer
 	m, err := a.scanSession(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "session not found") {

@@ -42,7 +42,7 @@ func ImportOrphanedSession(conversationUUID, sessionName, workspace string, adap
 		return "", fmt.Errorf("session name cannot be empty")
 	}
 	if adapter == nil {
-		return "", fmt.Errorf("Dolt adapter not available")
+		return "", fmt.Errorf("Dolt adapter not available") //nolint:staticcheck // proper noun
 	}
 
 	// 2. Check for duplicate (UUID already has manifest)

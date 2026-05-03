@@ -67,7 +67,7 @@ func (t *SessionTracker) loadLocked() (*SessionBudget, error) {
 
 	var b SessionBudget
 	if err := json.Unmarshal(data, &b); err != nil {
-		return newBudget(), nil // corrupt file: reset
+		return newBudget(), nil //nolint:nilerr // corrupt file: reset
 	}
 	if b.ConsecutiveViolations == nil {
 		b.ConsecutiveViolations = make(map[string]int)

@@ -69,7 +69,7 @@ func (s *FileBasedExecutionStrategy) ExecutePhase(
 
 func (s *FileBasedExecutionStrategy) createPhaseDirectory(phase PhaseDefinition, projectPath string) (string, error) {
 	phaseDir := filepath.Join(projectPath, "phases", string(phase.ID))
-	if err := os.MkdirAll(phaseDir, 0o755); err != nil {
+	if err := os.MkdirAll(phaseDir, 0o700); err != nil {
 		return "", err
 	}
 	return phaseDir, nil
@@ -119,7 +119,7 @@ func (s *FileBasedExecutionStrategy) writePhaseInput(phaseDir string, context Ph
 	sections = append(sections, "")
 
 	content := strings.Join(sections, "\n")
-	return os.WriteFile(filepath.Join(phaseDir, "PHASE-INPUT.md"), []byte(content), 0o644)
+	return os.WriteFile(filepath.Join(phaseDir, "PHASE-INPUT.md"), []byte(content), 0o600)
 }
 
 func (s *FileBasedExecutionStrategy) writePhasePrompt(phaseDir string, phase PhaseDefinition, context PhaseContext) error {
@@ -157,11 +157,11 @@ func (s *FileBasedExecutionStrategy) writePhasePrompt(phaseDir string, phase Pha
 	sections = append(sections, context.PhaseSystemPrompt, "")
 
 	content := strings.Join(sections, "\n")
-	return os.WriteFile(filepath.Join(phaseDir, "PHASE-PROMPT.md"), []byte(content), 0o644)
+	return os.WriteFile(filepath.Join(phaseDir, "PHASE-PROMPT.md"), []byte(content), 0o600)
 }
 
 func (s *FileBasedExecutionStrategy) writeStatus(phaseDir string, status PhaseStatus) {
-	_ = os.WriteFile(filepath.Join(phaseDir, "STATUS.md"), []byte(string(status)), 0o644)
+	_ = os.WriteFile(filepath.Join(phaseDir, "STATUS.md"), []byte(string(status)), 0o600)
 }
 
 func (s *FileBasedExecutionStrategy) readStatus(phaseDir string) PhaseStatus {

@@ -447,13 +447,13 @@ func (d *Daemon) writePIDFile() error {
 	}
 
 	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(d.cfg.PIDFile), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(d.cfg.PIDFile), 0o700); err != nil {
 		return fmt.Errorf("failed to create PID directory: %w", err)
 	}
 
 	// Write current PID
 	pid := os.Getpid()
-	if err := os.WriteFile(d.cfg.PIDFile, []byte(fmt.Sprintf("%d\n", pid)), 0644); err != nil {
+	if err := os.WriteFile(d.cfg.PIDFile, []byte(fmt.Sprintf("%d\n", pid)), 0o600); err != nil {
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 

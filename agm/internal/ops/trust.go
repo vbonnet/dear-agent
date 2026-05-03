@@ -334,11 +334,11 @@ func computeScore(sessionName string, events []TrustEvent) *TrustScoreResult {
 // appendTrustEvent appends a trust event to the session's JSONL file.
 func appendTrustEvent(sessionName string, event TrustEvent) error {
 	path := trustFilePath(sessionName)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create trust directory: %w", err)
 	}
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open trust log: %w", err)
 	}

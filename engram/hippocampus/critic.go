@@ -127,7 +127,7 @@ func CriticCheck(workerOutput string) CriticDecision {
 func (d *Dyad) LogDecision(decision CriticDecision) error {
 	logPath := filepath.Join(d.LogDir, "decisions.jsonl")
 
-	if err := os.MkdirAll(d.LogDir, 0o755); err != nil {
+	if err := os.MkdirAll(d.LogDir, 0o700); err != nil {
 		return fmt.Errorf("create critic log dir: %w", err)
 	}
 
@@ -136,7 +136,7 @@ func (d *Dyad) LogDecision(decision CriticDecision) error {
 		return fmt.Errorf("marshal decision: %w", err)
 	}
 
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open decisions log: %w", err)
 	}

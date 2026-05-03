@@ -37,7 +37,7 @@ func (c *Channel) Create() error {
 	}
 
 	dir := filepath.Dir(c.Path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -72,7 +72,7 @@ func (c *Channel) AppendMessage(msg *protocol.Message) error {
 		return fmt.Errorf("invalid message: %w", err)
 	}
 
-	file, err := os.OpenFile(c.Path, os.O_APPEND|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(c.Path, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open channel file: %w", err)
 	}

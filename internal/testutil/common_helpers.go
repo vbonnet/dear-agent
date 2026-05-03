@@ -11,14 +11,7 @@ import (
 // SetupTempDir creates a temporary directory for testing and registers cleanup
 func SetupTempDir(t *testing.T) string {
 	t.Helper()
-	tmpdir, err := os.MkdirTemp("", "engram-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	t.Cleanup(func() {
-		os.RemoveAll(tmpdir)
-	})
-	return tmpdir
+	return t.TempDir()
 }
 
 // NowNano returns current time in nanoseconds for performance testing

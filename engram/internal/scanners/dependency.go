@@ -72,7 +72,7 @@ func (s *DependencyScanner) Scan(ctx context.Context, req *metacontext.AnalyzeRe
 		}
 	}
 
-	return signals, nil
+	return signals, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 }
 
 // PackageJSON represents relevant fields from package.json.

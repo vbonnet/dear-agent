@@ -56,7 +56,7 @@ func (l *PersonaEffectivenessLogger) OnEvent(event *Event) error {
 	}
 
 	// Ensure log directory exists
-	if err := os.MkdirAll(l.logDir, 0755); err != nil {
+	if err := os.MkdirAll(l.logDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create log directory: %w", err)
 	}
 
@@ -78,7 +78,7 @@ func (l *PersonaEffectivenessLogger) OnEvent(event *Event) error {
 	defer l.mu.Unlock()
 
 	logPath := filepath.Join(l.logDir, l.filename)
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}

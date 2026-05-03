@@ -195,6 +195,7 @@ func executeIsolatedWorkflow(projectDir string) error {
 func checkClaudeCLI() error {
 	claudePath, err := exec.LookPath("claude")
 	if err != nil {
+		//nolint:staticcheck // multi-line CLI-facing help text
 		return fmt.Errorf("claude CLI not found in PATH\n\n" +
 			"Please install Claude CLI from: https://claude.com/claude-code\n" +
 			"Autopilot requires Claude CLI to execute phases.")

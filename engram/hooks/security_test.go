@@ -184,29 +184,11 @@ func TestVerifyCommandHash(t *testing.T) {
 	}
 
 	// Calculate actual hash manually
-	f, err := os.Open(cmdPath)
-	if err != nil {
-		t.Fatalf("Failed to open command: %v", err)
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := os.Open(cmdPath); err == nil {
-		f.Close()
-		f, _ = os.Open(cmdPath)
-		h.Reset()
-		if _, err := h.Write([]byte{}); err == nil {
-			// Read the actual file
-			data, _ := os.ReadFile(cmdPath)
-			h.Reset()
-			h.Write(data)
-		}
-	}
-
 	data, err := os.ReadFile(cmdPath)
 	if err != nil {
 		t.Fatalf("Failed to read command: %v", err)
 	}
+	h := sha256.New()
 	h.Reset()
 	h.Write(data)
 	expectedHash := hex.EncodeToString(h.Sum(nil))

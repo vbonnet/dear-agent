@@ -36,13 +36,13 @@ func embeddedRulesDir() (string, error) {
 			}
 			dest := filepath.Join(tmpDir, path)
 			if d.IsDir() {
-				return os.MkdirAll(dest, 0o755)
+				return os.MkdirAll(dest, 0o700)
 			}
 			data, err := embeddedRules.ReadFile(path)
 			if err != nil {
 				return fmt.Errorf("reading embedded %s: %w", path, err)
 			}
-			return os.WriteFile(dest, data, 0o644)
+			return os.WriteFile(dest, data, 0o600)
 		})
 		if err != nil {
 			extractErr = fmt.Errorf("extracting embedded rules: %w", err)

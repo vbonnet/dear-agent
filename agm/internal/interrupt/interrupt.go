@@ -64,7 +64,7 @@ func ValidateType(t string) (Type, error) {
 
 // Write atomically writes an interrupt flag file using temp+rename.
 func Write(dir, sessionName string, flag *Flag) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create interrupts directory: %w", err)
 	}
 
@@ -77,7 +77,7 @@ func Write(dir, sessionName string, flag *Flag) error {
 
 	// Atomic write: write to temp file, then rename
 	tmp := target + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write temp interrupt file: %w", err)
 	}
 

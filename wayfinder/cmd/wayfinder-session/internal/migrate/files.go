@@ -87,7 +87,7 @@ func (fm *FileMigrator) migrateS4ToD4() error {
 	}
 
 	// Write updated D4 file
-	if err := os.WriteFile(d4Path, []byte(d4Content), 0644); err != nil {
+	if err := os.WriteFile(d4Path, []byte(d4Content), 0o600); err != nil {
 		return fmt.Errorf("failed to write D4 file: %w", err)
 	}
 
@@ -129,7 +129,7 @@ func (fm *FileMigrator) migrateS5ToS6() error {
 	}
 
 	// Write updated S6 file
-	if err := os.WriteFile(s6Path, []byte(s6Content), 0644); err != nil {
+	if err := os.WriteFile(s6Path, []byte(s6Content), 0o600); err != nil {
 		return fmt.Errorf("failed to write S6 file: %w", err)
 	}
 
@@ -169,7 +169,7 @@ func (fm *FileMigrator) migrateS8S9S10ToS8() error {
 	}
 
 	// Write unified S8 file
-	if err := os.WriteFile(s8BuildPath, []byte(s8Content), 0644); err != nil {
+	if err := os.WriteFile(s8BuildPath, []byte(s8Content), 0o600); err != nil {
 		return fmt.Errorf("failed to write S8 build file: %w", err)
 	}
 
@@ -201,7 +201,7 @@ func (fm *FileMigrator) generateTestsOutlineIfNeeded() error {
 	outline := fm.generateOutlineFromD4(string(d4Content))
 
 	// Write TESTS.outline
-	if err := os.WriteFile(outlinePath, []byte(outline), 0644); err != nil {
+	if err := os.WriteFile(outlinePath, []byte(outline), 0o600); err != nil {
 		return fmt.Errorf("failed to write TESTS.outline: %w", err)
 	}
 
@@ -233,7 +233,7 @@ func (fm *FileMigrator) generateTestsFeatureIfNeeded() error {
 	feature := fm.generateFeatureFromS6(string(s6Content))
 
 	// Write TESTS.feature
-	if err := os.WriteFile(featurePath, []byte(feature), 0644); err != nil {
+	if err := os.WriteFile(featurePath, []byte(feature), 0o600); err != nil {
 		return fmt.Errorf("failed to write TESTS.feature: %w", err)
 	}
 
@@ -451,7 +451,7 @@ func (fm *FileMigrator) generateFeatureFromS6(s6Content string) string {
 func (fm *FileMigrator) Cleanup() error {
 	// Move old files to a backup directory
 	backupDir := filepath.Join(fm.projectDir, ".wayfinder-v1-backup")
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
+	if err := os.MkdirAll(backupDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create backup directory: %w", err)
 	}
 

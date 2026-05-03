@@ -203,7 +203,7 @@ func runSingleGate(gate QualityGate, repoDir, branch string) QualityGateCheckRes
 
 	output := stdout.String() + stderr.String()
 
-	passed := !(gate.ExpectExit != nil && exitCode != *gate.ExpectExit)
+	passed := gate.ExpectExit == nil || exitCode == *gate.ExpectExit
 
 	if gate.ExpectEmpty != nil && *gate.ExpectEmpty && len(strings.TrimSpace(output)) > 0 {
 		passed = false

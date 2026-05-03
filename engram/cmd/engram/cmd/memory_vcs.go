@@ -250,7 +250,7 @@ var vcsBackfillCmd = &cobra.Command{
 			}
 
 			dstPath := repo.Dir() + "/" + name
-			if err := os.WriteFile(dstPath, data, 0644); err != nil {
+			if err := os.WriteFile(dstPath, data, 0o600); err != nil {
 				log.Printf("WARN: skip %s: %v", name, err)
 				continue
 			}
@@ -260,7 +260,7 @@ var vcsBackfillCmd = &cobra.Command{
 			whySrc := sourceDir + "/" + whyName
 			if whyData, err := os.ReadFile(whySrc); err == nil {
 				whyDst := repo.Dir() + "/" + whyName
-				_ = os.WriteFile(whyDst, whyData, 0644)
+				_ = os.WriteFile(whyDst, whyData, 0o600)
 			}
 
 			imported++
@@ -304,7 +304,7 @@ func loadVCSConfig() (*vcs.Config, error) {
 	cfg, err := loader.Load()
 	if err != nil {
 		// Fall back to defaults if config loading fails
-		return vcs.DefaultConfig(), nil
+		return vcs.DefaultConfig(), nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	return &vcs.Config{

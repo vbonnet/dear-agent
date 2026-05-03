@@ -360,5 +360,5 @@ func (c *ControlModeSession) GetPaneContent(target string, lines int) ([]string,
 		content = append(content, line)
 	}
 
-	return content, nil
+	return content, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 }

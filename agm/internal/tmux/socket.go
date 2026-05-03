@@ -59,7 +59,7 @@ func CleanStaleSocket() error {
 	}
 
 	// Try to connect to see if server is alive
-	conn, err := net.DialTimeout("unix", socketPath, 1*time.Second)
+	conn, err := net.DialTimeout("unix", socketPath, 1*time.Second) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		// Connection failed - socket is stale or server is not responding
 		// Try to remove the stale socket
@@ -160,7 +160,7 @@ func GetSocketInfo() (*SocketInfo, error) {
 	info.Modified = stat.ModTime()
 
 	// Try to connect to check if server is alive
-	conn, err := net.DialTimeout("unix", socketPath, 500*time.Millisecond)
+	conn, err := net.DialTimeout("unix", socketPath, 500*time.Millisecond) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		info.IsStale = true
 		info.Accessible = false
@@ -233,7 +233,7 @@ func IsSocketInUse() (bool, error) {
 	}
 
 	// Try to connect
-	conn, err := net.DialTimeout("unix", socketPath, 500*time.Millisecond)
+	conn, err := net.DialTimeout("unix", socketPath, 500*time.Millisecond) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return false, nil // Can't connect, so not in use
 	}
@@ -250,7 +250,7 @@ func WaitForSocket(timeout time.Duration) error {
 
 	for time.Now().Before(deadline) {
 		// Check if socket exists and is accessible
-		conn, err := net.DialTimeout("unix", socketPath, 100*time.Millisecond)
+		conn, err := net.DialTimeout("unix", socketPath, 100*time.Millisecond) //nolint:noctx // TODO(context): plumb ctx through this layer
 		if err == nil {
 			conn.Close()
 			return nil // Socket is ready

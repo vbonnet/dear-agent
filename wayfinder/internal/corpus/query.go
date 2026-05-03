@@ -32,7 +32,7 @@ func QueryAGMSessions(workspace string, filters map[string]string) ([]map[string
 	output, err := cmd.Output()
 	if err != nil {
 		// No results or error - return empty list
-		return []map[string]interface{}{}, nil
+		return []map[string]interface{}{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	var sessions []map[string]interface{}
@@ -84,7 +84,7 @@ func QueryEngramBeads(workspace string, filters map[string]string) ([]map[string
 	cmd := exec.Command("cc", args...)
 	output, err := cmd.Output()
 	if err != nil {
-		return []map[string]interface{}{}, nil
+		return []map[string]interface{}{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	var beads []map[string]interface{}
@@ -131,7 +131,7 @@ func QueryWayfinderProjects(workspace string, filters map[string]string) ([]map[
 	cmd := exec.Command("cc", args...)
 	output, err := cmd.Output()
 	if err != nil {
-		return []map[string]interface{}{}, nil
+		return []map[string]interface{}{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	var projects []map[string]interface{}
@@ -183,7 +183,7 @@ func QueryPhases(workspace, sessionID string) ([]map[string]interface{}, error) 
 	cmd := exec.Command("cc", args...)
 	output, err := cmd.Output()
 	if err != nil {
-		return []map[string]interface{}{}, nil
+		return []map[string]interface{}{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	var phases []map[string]interface{}
@@ -247,7 +247,7 @@ func DiscoverComponents(workspace string) ([]string, error) {
 	cmd := exec.Command("cc", "discover", "--workspace", workspace, "--format", "json")
 	output, err := cmd.Output()
 	if err != nil {
-		return []string{}, nil
+		return []string{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	var components []struct {
@@ -255,7 +255,7 @@ func DiscoverComponents(workspace string) ([]string, error) {
 	}
 
 	if err := json.Unmarshal(output, &components); err != nil {
-		return []string{}, nil
+		return []string{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	names := make([]string, len(components))

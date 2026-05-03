@@ -34,7 +34,7 @@ func WaitForPaneClose(sessionName string, timeout time.Duration) error {
 		if err != nil {
 			// Exit code != 0 means pane doesn't exist anymore
 			logger.Info("Pane closed", "checks", checkCount, "duration_seconds", time.Since(deadline.Add(-timeout)).Seconds())
-			return nil
+			return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 
 		// Log first few checks and periodically thereafter for debugging
@@ -170,7 +170,7 @@ func IsPaneActive(sessionName string) (bool, error) {
 
 	if err != nil {
 		// Non-zero exit = pane doesn't exist
-		return false, nil
+		return false, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	return true, nil

@@ -261,10 +261,10 @@ func (p *Platform) Close() error {
 }
 
 // safeClose wraps Close() calls to prevent panics from propagating
-func safeClose(name string, closeFn func() error) error {
+func safeClose(name string, closeFn func() error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			// Panic recovered but we'll return it as an error
+			err = fmt.Errorf("%s close panicked: %v", name, r)
 		}
 	}()
 

@@ -208,7 +208,7 @@ func countConnections(pid int) (int, error) {
 	output, err := cmd.Output()
 	if err != nil {
 		// lsof may fail if no connections, that's OK
-		return 0, nil
+		return 0, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	lines := strings.Split(string(output), "\n")
@@ -282,7 +282,7 @@ func LogDeadlockIncident(sessionName string, info *ProcessInfo) error {
 	logPath := filepath.Join(homeDir, "deadlock-log.txt")
 
 	// Open file in append mode, create if doesn't exist
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}

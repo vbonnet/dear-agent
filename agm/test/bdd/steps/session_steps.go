@@ -115,7 +115,7 @@ func iRun(ctx context.Context, command string) (context.Context, error) {
 		adapter, err := env.GetAdapter(args.Agent)
 		if err != nil {
 			env.LastError = err
-			return ctx, nil // Don't fail here, let assertion step check
+			return ctx, nil //nolint:nilerr // Don't fail here, let assertion step check
 		}
 
 		session, err := adapter.CreateSession(ctx, mock.CreateSessionRequest{
@@ -138,7 +138,7 @@ func iRun(ctx context.Context, command string) (context.Context, error) {
 		adapter, err := env.GetAdapter(env.CurrentSession.Agent)
 		if err != nil {
 			env.LastError = err
-			return ctx, nil
+			return ctx, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 
 		session, err := adapter.ResumeSession(ctx, env.CurrentSession.ID)
@@ -154,7 +154,7 @@ func iRun(ctx context.Context, command string) (context.Context, error) {
 		adapter, err := env.GetAdapter(env.CurrentSession.Agent)
 		if err != nil {
 			env.LastError = err
-			return ctx, nil
+			return ctx, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 
 		err = adapter.ArchiveSession(ctx, env.CurrentSession.ID)

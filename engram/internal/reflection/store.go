@@ -25,7 +25,7 @@ func NewStore(reflectionPath string) *Store {
 // Save saves a reflection as an engram
 func (s *Store) Save(r *Reflection) error {
 	// Create reflections directory if needed
-	if err := os.MkdirAll(s.reflectionPath, 0755); err != nil {
+	if err := os.MkdirAll(s.reflectionPath, 0o700); err != nil {
 		return fmt.Errorf("failed to create reflections directory: %w", err)
 	}
 
@@ -88,7 +88,7 @@ func (s *Store) Save(r *Reflection) error {
 	content := contentBuilder
 
 	// Write file
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to write reflection: %w", err)
 	}
 

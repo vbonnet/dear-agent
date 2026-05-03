@@ -54,12 +54,12 @@ func (p *SimpleFileProvider) StoreArtifact(ctx context.Context, artifactID strin
 	artifactPath := filepath.Join(p.storagePath, "_artifacts", artifactID)
 
 	// 3. Create parent directory
-	if err = os.MkdirAll(filepath.Dir(artifactPath), 0755); err != nil {
+	if err = os.MkdirAll(filepath.Dir(artifactPath), 0o700); err != nil {
 		return fmt.Errorf("store artifact: create directory: %w", err)
 	}
 
 	// 4. Write binary data
-	if err = os.WriteFile(artifactPath, data, 0644); err != nil {
+	if err = os.WriteFile(artifactPath, data, 0o600); err != nil {
 		return fmt.Errorf("store artifact: write file: %w", err)
 	}
 

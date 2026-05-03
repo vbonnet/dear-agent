@@ -25,10 +25,10 @@ func GenerateTestData(config TestDataConfig) error {
 	acmeRoot := filepath.Join(config.RootDir, "acme", "wf")
 
 	// Create workspace roots
-	if err := os.MkdirAll(ossRoot, 0755); err != nil {
+	if err := os.MkdirAll(ossRoot, 0o700); err != nil {
 		return fmt.Errorf("failed to create OSS workspace root: %w", err)
 	}
-	if err := os.MkdirAll(acmeRoot, 0755); err != nil {
+	if err := os.MkdirAll(acmeRoot, 0o700); err != nil {
 		return fmt.Errorf("failed to create Acme workspace root: %w", err)
 	}
 
@@ -60,7 +60,7 @@ func GenerateTestData(config TestDataConfig) error {
 // createTestProject creates a single test project with status file
 func createTestProject(projectPath, workspace, projectName, phase string, includePhaseFiles bool) error {
 	// Create project directory
-	if err := os.MkdirAll(projectPath, 0755); err != nil {
+	if err := os.MkdirAll(projectPath, 0o700); err != nil {
 		return err
 	}
 
@@ -144,7 +144,7 @@ Cross-workspace data leakage would be a critical security violation.
 `, phase, workspace, projectName, phase, workspace, projectName, workspace,
 		projectName, workspace, projectName, workspace, projectName, workspace, workspace)
 
-	return os.WriteFile(filepath, []byte(content), 0644)
+	return os.WriteFile(filepath, []byte(content), 0o600)
 }
 
 // getPhaseByIndex returns a phase for test data generation

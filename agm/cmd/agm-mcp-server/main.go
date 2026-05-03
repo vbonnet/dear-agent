@@ -140,7 +140,7 @@ func main() {
 			Handler: handler,
 		}
 
-		ln, err := net.Listen("tcp", addr)
+		ln, err := net.Listen("tcp", addr) //nolint:noctx // TODO(context): plumb ctx through this layer
 		if err != nil {
 			logger.Error("A2A HTTP listen failed", "addr", addr, "error", err)
 			stop() // explicit cleanup before exit (otherwise the deferred stop() at the top of main wouldn't run)

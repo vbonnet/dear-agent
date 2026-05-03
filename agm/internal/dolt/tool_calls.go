@@ -74,7 +74,7 @@ func (a *Adapter) CreateToolCall(call *ToolCall) error {
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	_, err = a.conn.Exec(query,
+	_, err = a.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		call.ID,
 		call.MessageID,
 		call.SessionID,
@@ -100,12 +100,13 @@ func (a *Adapter) CreateToolCalls(calls []*ToolCall) error {
 	}
 
 	// Start transaction for batch insert
-	tx, err := a.conn.Begin()
+	tx, err := a.conn.Begin() //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
+	//nolint:noctx // TODO(context): plumb ctx through this layer
 	stmt, err := tx.Prepare(`
 		INSERT INTO agm_tool_calls (
 			id, message_id, session_id, tool_name, arguments,
@@ -150,7 +151,7 @@ func (a *Adapter) CreateToolCalls(calls []*ToolCall) error {
 			}
 		}
 
-		_, err = stmt.Exec(
+		_, err = stmt.Exec( //nolint:noctx // TODO(context): plumb ctx through this layer
 			call.ID,
 			call.MessageID,
 			call.SessionID,
@@ -187,7 +188,7 @@ func (a *Adapter) GetToolCall(toolCallID string) (*ToolCall, error) {
 		WHERE id = ?
 	`
 
-	row := a.conn.QueryRow(query, toolCallID)
+	row := a.conn.QueryRow(query, toolCallID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	return scanToolCall(row)
 }
 
@@ -205,7 +206,7 @@ func (a *Adapter) GetMessageToolCalls(messageID string) ([]*ToolCall, error) {
 		ORDER BY timestamp ASC
 	`
 
-	rows, err := a.conn.Query(query, messageID)
+	rows, err := a.conn.Query(query, messageID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tool calls: %w", err)
 	}
@@ -241,7 +242,7 @@ func (a *Adapter) GetSessionToolCalls(sessionID string) ([]*ToolCall, error) {
 		ORDER BY timestamp ASC
 	`
 
-	rows, err := a.conn.Query(query, sessionID)
+	rows, err := a.conn.Query(query, sessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tool calls: %w", err)
 	}
@@ -281,7 +282,7 @@ func (a *Adapter) GetToolCallStats(sessionID string) (map[string]any, error) {
 		ORDER BY call_count DESC
 	`
 
-	rows, err := a.conn.Query(query, sessionID)
+	rows, err := a.conn.Query(query, sessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query tool call stats: %w", err)
 	}

@@ -247,12 +247,12 @@ func WriteProposalsToMarkdown(result ApplicationResult, outputPath string) error
 
 	// Ensure parent directory exists
 	dir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create directory %s: %w", dir, err)
 	}
 
 	// Write to file
-	if err := os.WriteFile(outputPath, []byte(content.String()), 0644); err != nil {
+	if err := os.WriteFile(outputPath, []byte(content.String()), 0o600); err != nil {
 		return fmt.Errorf("write proposals to %s: %w", outputPath, err)
 	}
 

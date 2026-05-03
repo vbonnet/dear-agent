@@ -191,7 +191,11 @@ func GenerateMarkdownReport(result *ReviewResult) string {
 	sb.WriteString("## Persona Reviews\n\n")
 
 	for _, persona := range result.PersonaResults {
-		fmt.Fprintf(&sb, "### %s\n\n", strings.Title(string(persona.Persona)))
+		name := string(persona.Persona)
+		if name != "" {
+			name = strings.ToUpper(name[:1]) + name[1:]
+		}
+		fmt.Fprintf(&sb, "### %s\n\n", name)
 		fmt.Fprintf(&sb, "- **Score**: %.1f/100\n", persona.Score)
 		fmt.Fprintf(&sb, "- **Confidence**: %s\n", persona.Confidence)
 

@@ -38,7 +38,7 @@ func TestDetectUserType_NoConfigFile(t *testing.T) {
 }
 
 func TestDetectUserType_CLIFlags(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "cli_flags", map[string]string{"verbose": "true"})
+	ctx := context.WithValue(context.Background(), CLIFlagsKey, map[string]string{"verbose": "true"})
 
 	userType := DetectUserType(ctx)
 
@@ -48,7 +48,7 @@ func TestDetectUserType_CLIFlags(t *testing.T) {
 }
 
 func TestPluginLoadingFailed_TechnicalMessage(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "cli_flags", map[string]string{"verbose": "true"})
+	ctx := context.WithValue(context.Background(), CLIFlagsKey, map[string]string{"verbose": "true"})
 
 	err := PluginLoadingFailed(ctx, []string{"research", "personas"}, "Plugin manifest not found")
 
@@ -105,7 +105,7 @@ func TestPluginLoadingFailed_SimpleMessage(t *testing.T) {
 }
 
 func TestVersionCompatibilityWarning_TechnicalMessage(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "cli_flags", map[string]string{"verbose": "true"})
+	ctx := context.WithValue(context.Background(), CLIFlagsKey, map[string]string{"verbose": "true"})
 
 	err := VersionCompatibilityWarning(ctx, "research", "0.1.0", "0.2.0")
 
@@ -144,7 +144,7 @@ func TestVersionCompatibilityWarning_SimpleMessage(t *testing.T) {
 }
 
 func TestEcphoryCoverageWarning_HighUtilization(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "cli_flags", map[string]string{"verbose": "true"})
+	ctx := context.WithValue(context.Background(), CLIFlagsKey, map[string]string{"verbose": "true"})
 
 	err := EcphoryCoverageWarning(ctx, 85.5, 85500)
 
@@ -160,7 +160,7 @@ func TestEcphoryCoverageWarning_HighUtilization(t *testing.T) {
 }
 
 func TestStorageNearLimit_Warning(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "cli_flags", map[string]string{"verbose": "true"})
+	ctx := context.WithValue(context.Background(), CLIFlagsKey, map[string]string{"verbose": "true"})
 
 	// 85 MB / 100 MB
 	err := StorageNearLimit(ctx, 85*1024*1024, 100*1024*1024)
@@ -196,7 +196,7 @@ func TestTelemetryDisabled_Message(t *testing.T) {
 }
 
 func TestParseError_LineNumber(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "cli_flags", map[string]string{"verbose": "true"})
+	ctx := context.WithValue(context.Background(), CLIFlagsKey, map[string]string{"verbose": "true"})
 
 	err := ParseError(ctx, "~/.engram/telemetry/events.jsonl", 42, "invalid JSON syntax")
 
@@ -247,7 +247,7 @@ func TestSimplifyRecommendation_RemovesTechnicalTerms(t *testing.T) {
 }
 
 func TestTelemetryError_ContextFields(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "cli_flags", map[string]string{"verbose": "true"})
+	ctx := context.WithValue(context.Background(), CLIFlagsKey, map[string]string{"verbose": "true"})
 
 	err := PluginLoadingFailed(ctx, []string{"research"}, "Test reason")
 

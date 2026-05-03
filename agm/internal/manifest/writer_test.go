@@ -125,12 +125,9 @@ func TestWriteManifestHelper_ValidationFailure(t *testing.T) {
 		t.Error("file should be unchanged on validation failure")
 	}
 
-	// Verify backup was created (happens before validation)
-	backupPath := testPath + ".1"
-	if _, err := os.Stat(backupPath); err == nil {
-		// Backup exists - this is OK (backup happens before validation)
-		// Original file should still be unchanged
-	}
+	// Backup is allowed to exist (it's created before validation runs);
+	// the assertion above already covers the original file being unchanged.
+	_ = testPath + ".1"
 }
 
 func TestWriteManifestHelper_MarshalFailure(t *testing.T) {

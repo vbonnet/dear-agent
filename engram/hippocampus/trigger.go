@@ -49,7 +49,7 @@ func LoadTriggerState(path string) (TriggerState, error) {
 // Creates parent directories if needed.
 func SaveTriggerState(path string, state TriggerState) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 
@@ -57,7 +57,7 @@ func SaveTriggerState(path string, state TriggerState) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 // IncrementSession increments the session counter and updates the last session ID.

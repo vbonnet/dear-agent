@@ -63,7 +63,7 @@ func EnsureRepo(dir, remoteName, remoteURL, branch string) (*Repo, error) {
 	// Create .gitignore that defaults to tracking .ai.md and .why.md
 	gitignore := "# Track .ai.md and .why.md by default (opt-out)\n# Everything else is ignored unless explicitly added\n*\n!.gitignore\n!**/*.ai.md\n!**/*.why.md\n!**/\n"
 	gitignorePath := filepath.Join(dir, ".gitignore")
-	if err := os.WriteFile(gitignorePath, []byte(gitignore), 0644); err != nil {
+	if err := os.WriteFile(gitignorePath, []byte(gitignore), 0o600); err != nil {
 		return nil, fmt.Errorf("write .gitignore: %w", err)
 	}
 

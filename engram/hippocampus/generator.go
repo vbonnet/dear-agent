@@ -22,7 +22,7 @@ func (h *Hippocampus) generateConsolidationArtifact(c *Consolidation) error {
 	)
 
 	// Write artifact
-	if err := os.WriteFile(artifactPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(artifactPath, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to write artifact: %w", err)
 	}
 

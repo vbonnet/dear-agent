@@ -83,7 +83,7 @@ func (c *Config) Save() error {
 
 	// Ensure config directory exists
 	configDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -94,7 +94,7 @@ func (c *Config) Save() error {
 	}
 
 	// Write to file
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 

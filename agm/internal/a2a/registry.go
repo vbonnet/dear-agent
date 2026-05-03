@@ -19,7 +19,7 @@ type Registry struct {
 // NewRegistry creates a Registry rooted at the given cards directory.
 // The directory is created if it does not exist.
 func NewRegistry(cardsDir string) (*Registry, error) {
-	if err := os.MkdirAll(cardsDir, 0o755); err != nil {
+	if err := os.MkdirAll(cardsDir, 0o700); err != nil {
 		return nil, fmt.Errorf("a2a: create cards directory: %w", err)
 	}
 	return &Registry{cardsDir: cardsDir}, nil
@@ -50,7 +50,7 @@ func (r *Registry) UpdateCard(m *manifest.Manifest) error {
 	filename := cardFilename(m.Name)
 	path := filepath.Join(r.cardsDir, filename)
 
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("a2a: write card %s: %w", path, err)
 	}
 	return nil
@@ -142,7 +142,7 @@ func (r *Registry) SyncFromManifests(manifests []*manifest.Manifest) error {
 	// Remove orphan cards (sessions that no longer exist)
 	entries, err := os.ReadDir(r.cardsDir)
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {

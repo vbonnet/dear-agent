@@ -114,22 +114,22 @@ func (m *MetricsCollector) GetMetrics() MetricsSnapshot {
 	// Calculate latency statistics
 	if len(m.deliveryLatencies) > 0 {
 		var total time.Duration
-		min := m.deliveryLatencies[0]
-		max := m.deliveryLatencies[0]
+		minLat := m.deliveryLatencies[0]
+		maxLat := m.deliveryLatencies[0]
 
 		for _, lat := range m.deliveryLatencies {
 			total += lat
-			if lat < min {
-				min = lat
+			if lat < minLat {
+				minLat = lat
 			}
-			if lat > max {
-				max = lat
+			if lat > maxLat {
+				maxLat = lat
 			}
 		}
 
 		snapshot.AvgDeliveryLatency = total / time.Duration(len(m.deliveryLatencies))
-		snapshot.MinDeliveryLatency = min
-		snapshot.MaxDeliveryLatency = max
+		snapshot.MinDeliveryLatency = minLat
+		snapshot.MaxDeliveryLatency = maxLat
 	}
 
 	// Calculate success rate

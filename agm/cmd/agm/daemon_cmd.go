@@ -270,12 +270,12 @@ func isDaemonRunning() (bool, int, error) {
 	// Check if process exists
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		return false, 0, nil
+		return false, 0, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Send signal 0 to check if process is alive
 	if err := process.Signal(syscall.Signal(0)); err != nil {
-		return false, 0, nil
+		return false, 0, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	return true, pid, nil

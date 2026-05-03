@@ -78,7 +78,7 @@ func (s *Status) WriteTo(dir string) error {
 		s.formatPhaseList(),
 	)
 
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to write %s: %w", StatusFilename, err)
 	}
 

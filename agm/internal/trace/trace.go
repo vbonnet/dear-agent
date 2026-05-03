@@ -108,7 +108,7 @@ func (t *Tracer) findHistoryFiles() ([]string, error) {
 	// Walk the sessions directory
 	err := filepath.Walk(t.sessionsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // Skip directories we can't read
+			return nil //nolint:nilerr // Skip directories we can't read
 		}
 
 		if !info.IsDir() && info.Name() == "history.jsonl" {
@@ -202,7 +202,7 @@ func (t *Tracer) loadManifests() (map[string]SessionInfo, error) {
 
 	err := filepath.Walk(t.sessionsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // Skip directories we can't read
+			return nil //nolint:nilerr // Skip directories we can't read
 		}
 
 		if !info.IsDir() && info.Name() == "manifest.yaml" {
@@ -210,7 +210,7 @@ func (t *Tracer) loadManifests() (map[string]SessionInfo, error) {
 			sessionInfo, err := t.parseManifest(path)
 			if err != nil {
 				// Skip invalid manifests
-				return nil
+				return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 			}
 
 			// Map Claude UUID to session info

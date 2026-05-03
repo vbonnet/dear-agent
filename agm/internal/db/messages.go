@@ -55,7 +55,7 @@ func (db *DB) CreateMessage(sessionID string, msg *conversation.Message) error {
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
-	_, err = db.conn.Exec(query,
+	_, err = db.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		sessionID,
 		msg.Timestamp,
 		msg.Role,
@@ -126,7 +126,7 @@ func (db *DB) GetMessages(sessionID string, opts *MessageOptions) ([]*conversati
 		}
 	}
 
-	rows, err := db.conn.Query(query, args...)
+	rows, err := db.conn.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query messages: %w", err)
 	}
@@ -156,7 +156,7 @@ func (db *DB) DeleteMessages(sessionID string) error {
 
 	query := `DELETE FROM messages WHERE session_id = ?`
 
-	_, err := db.conn.Exec(query, sessionID)
+	_, err := db.conn.Exec(query, sessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to delete messages: %w", err)
 	}

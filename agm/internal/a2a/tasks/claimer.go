@@ -47,7 +47,7 @@ func (c *Claimer) ClaimTask(channelID, agentID, reason string) (bool, error) {
 		return false, fmt.Errorf("channel not found: %s", channelID)
 	}
 
-	lockFd, err := os.OpenFile(lockFile, os.O_CREATE|os.O_RDWR, 0644)
+	lockFd, err := os.OpenFile(lockFile, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return false, fmt.Errorf("failed to open lock file: %w", err)
 	}
@@ -77,7 +77,7 @@ func (c *Claimer) ClaimTask(channelID, agentID, reason string) (bool, error) {
 	updated := injectOwner(contentStr, agentID, timestamp, reason)
 	updated = updateLatestStatus(updated, "in-progress")
 
-	if err := os.WriteFile(channelFile, []byte(updated), 0644); err != nil {
+	if err := os.WriteFile(channelFile, []byte(updated), 0o600); err != nil {
 		return false, fmt.Errorf("failed to update channel: %w", err)
 	}
 
@@ -93,7 +93,7 @@ func (c *Claimer) UnclaimTask(channelID, agentID, reason string) error {
 		return fmt.Errorf("channel not found: %s", channelID)
 	}
 
-	lockFd, err := os.OpenFile(lockFile, os.O_CREATE|os.O_RDWR, 0644)
+	lockFd, err := os.OpenFile(lockFile, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open lock file: %w", err)
 	}
@@ -122,7 +122,7 @@ func (c *Claimer) UnclaimTask(channelID, agentID, reason string) error {
 	updated := removeOwner(contentStr, reason)
 	updated = updateLatestStatus(updated, "awaiting-response")
 
-	if err := os.WriteFile(channelFile, []byte(updated), 0644); err != nil {
+	if err := os.WriteFile(channelFile, []byte(updated), 0o600); err != nil {
 		return fmt.Errorf("failed to update channel: %w", err)
 	}
 

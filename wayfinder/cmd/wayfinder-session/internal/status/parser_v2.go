@@ -49,7 +49,7 @@ func WriteV2(status *StatusV2, filePath string) error {
 	// Note: V2 files are pure YAML between --- markers, no markdown body
 	content := fmt.Sprintf("---\n%s---\n", string(yamlData))
 
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 

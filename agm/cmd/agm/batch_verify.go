@@ -269,7 +269,7 @@ func saveReport(report *BatchVerifyReport) (string, error) {
 	}
 
 	reportsDir := filepath.Join(homeDir, ".agm", "batch-reports")
-	if err := os.MkdirAll(reportsDir, 0755); err != nil {
+	if err := os.MkdirAll(reportsDir, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create reports directory: %w", err)
 	}
 
@@ -281,7 +281,7 @@ func saveReport(report *BatchVerifyReport) (string, error) {
 		return "", err
 	}
 
-	if err := os.WriteFile(reportPath, data, 0644); err != nil {
+	if err := os.WriteFile(reportPath, data, 0o600); err != nil {
 		return "", err
 	}
 

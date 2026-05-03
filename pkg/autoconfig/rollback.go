@@ -167,12 +167,12 @@ func (rc *RollbackController) loadState() (*RollbackState, error) {
 }
 
 func (rc *RollbackController) saveState() error {
-	if err := os.MkdirAll(filepath.Dir(rc.statePath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(rc.statePath), 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(rc.state, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(rc.statePath, data, 0o644)
+	return os.WriteFile(rc.statePath, data, 0o600)
 }

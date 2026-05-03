@@ -39,7 +39,7 @@ func (d *GCPADCDetector) Detect(ctx context.Context) (*Identity, error) {
 	if err != nil {
 		// Credentials not found or invalid - this is not an error, just means
 		// GCP ADC is not configured
-		return nil, nil
+		return nil, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Verify credentials are actually loaded
@@ -51,7 +51,7 @@ func (d *GCPADCDetector) Detect(ctx context.Context) (*Identity, error) {
 	// The credentials file validates authentication but doesn't include user email
 	email, err := d.getEmailFromGcloudConfig()
 	if err != nil || email == "" {
-		return nil, nil // Cannot determine email, not an error
+		return nil, nil //nolint:nilerr // Cannot determine email, not an error
 	}
 
 	domain := extractDomain(email)
