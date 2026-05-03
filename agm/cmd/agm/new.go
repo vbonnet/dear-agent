@@ -31,7 +31,12 @@ import (
 	"github.com/vbonnet/dear-agent/internal/sandbox"
 	"github.com/vbonnet/dear-agent/pkg/workspace"
 
-	// Import sandbox providers to trigger registration
+	// Import sandbox providers to trigger registration. Each provider's
+	// init() registers itself on its supported platform; on other platforms
+	// the package compiles to an empty stub. Without these imports the
+	// providers are never registered and selecting them returns
+	// "provider not available".
+	_ "github.com/vbonnet/dear-agent/internal/sandbox/apfs"
 	_ "github.com/vbonnet/dear-agent/internal/sandbox/bubblewrap"
 	_ "github.com/vbonnet/dear-agent/internal/sandbox/overlayfs"
 )
