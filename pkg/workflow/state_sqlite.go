@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -114,6 +115,15 @@ func ResumeSQLiteState(path, runID string) (*SQLiteState, error) {
 
 // openSQLiteDB is the internal connector. Centralized so ttl/WAL/foreign-key
 // pragmas stay consistent everywhere.
+//
+// Initial connection setup (PingContext) and schema application are wrapped
+// in a SQLITE_BUSY retry loop. The driver's busy_timeout pragma covers the
+// steady-state writer contention but does not cover the journal_mode=WAL
+// switch the first connection performs — that switch needs an exclusive
+// lock, and concurrent first-opens against the same fresh DB file race for
+// it. Without retries the loser sees `database is locked (SQLITE_BUSY)` on
+// PingContext and bails out (the workflow_test concurrent-saves test was
+// reproducing this ~10% of the time).
 func openSQLiteDB(path string) (*sql.DB, error) {
 	dsn := path + sqliteOpenOptions
 	db, err := sql.Open("sqlite", dsn)
@@ -121,15 +131,61 @@ func openSQLiteDB(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("workflow: open %s: %w", path, err)
 	}
 	ctx := context.Background()
-	if err := db.PingContext(ctx); err != nil {
+	if err := pingWithBusyRetry(ctx, db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("workflow: ping %s: %w", path, err)
 	}
-	if _, err := db.ExecContext(ctx, sqliteSchema); err != nil {
+	if err := execWithBusyRetry(ctx, db, sqliteSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("workflow: apply schema: %w", err)
 	}
 	return db, nil
+}
+
+// pingWithBusyRetry retries PingContext on SQLITE_BUSY for up to 5s.
+func pingWithBusyRetry(ctx context.Context, db *sql.DB) error {
+	return retryOnSQLiteBusy(ctx, func() error { return db.PingContext(ctx) })
+}
+
+// execWithBusyRetry retries ExecContext on SQLITE_BUSY for up to 5s.
+func execWithBusyRetry(ctx context.Context, db *sql.DB, query string, args ...any) error {
+	return retryOnSQLiteBusy(ctx, func() error {
+		_, err := db.ExecContext(ctx, query, args...)
+		return err
+	})
+}
+
+// retryOnSQLiteBusy invokes fn repeatedly while it returns a SQLITE_BUSY
+// error, with exponential backoff capped at 5 seconds total. Errors that
+// are not SQLITE_BUSY are returned immediately.
+func retryOnSQLiteBusy(ctx context.Context, fn func() error) error {
+	const totalBudget = 5 * time.Second
+	deadline := time.Now().Add(totalBudget)
+	delay := 5 * time.Millisecond
+	for {
+		err := fn()
+		if err == nil || !isSQLiteBusy(err) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+		if delay < 200*time.Millisecond {
+			delay *= 2
+		}
+	}
+}
+
+// isSQLiteBusy reports whether err carries a SQLITE_BUSY (code 5) signal.
+// modernc.org/sqlite does not export a sentinel for this, so match on the
+// stable substring the driver puts in its message.
+func isSQLiteBusy(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "database is locked")
 }
 
 // Close releases the underlying connection if SQLiteState owns it.
