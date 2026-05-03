@@ -154,7 +154,7 @@ ship incrementally without breaking anything.
 | 1 | Roles + budget (MVS pt. 2) | 3 weeks | `done` | [BACKLOG §1](docs/workflow-engine/BACKLOG.md#phase-1--roles--budget-mvs-pt-2) |
 | 2 | DEAR hooks + HITL + exit_gate + outputs[] | 4 weeks | `done (#40)` | [BACKLOG §2](docs/workflow-engine/BACKLOG.md#phase-2--dear-hooks--hitl--exit_gate--outputs) |
 | 3 | FetchSource / AddSource | 2 weeks | `done` | [BACKLOG §3](docs/workflow-engine/BACKLOG.md#phase-3--fetchsource--addsource) |
-| 4 | Migration + `workflow dev` | 4 weeks | `pending` | [BACKLOG §4](docs/workflow-engine/BACKLOG.md#phase-4--migration--workflow-dev) |
+| 4 | Migration + `workflow dev` | 4 weeks | `partial (4.3, 4.5 done)` | [BACKLOG §4](docs/workflow-engine/BACKLOG.md#phase-4--migration--workflow-dev) |
 | 5 | Adapters + visual inspector + `kind: spawn` | open-ended | `pending` | [BACKLOG §5](docs/workflow-engine/BACKLOG.md#phase-5--adapters--visual-inspector--kind-spawn) |
 
 ### Parallelism map
