@@ -112,12 +112,9 @@ func (t *TiktokenTokenizer) initialize() {
 		cacheDir := filepath.Join(homeDir, ".engram", "cache", "tiktoken")
 		os.Setenv("TIKTOKEN_CACHE_DIR", cacheDir)
 
-		// Ensure cache directory exists
-		if err := os.MkdirAll(cacheDir, 0755); err != nil {
-			// Log warning but continue - GetEncoding will try tmpdir fallback
-			// TODO: Use structured logging when available
-			// For now, silently continue (tiktoken library handles fallback)
-		}
+		// Ensure cache directory exists; ignore failure — tiktoken falls back
+		// to its own tmpdir if the cache dir can't be created.
+		_ = os.MkdirAll(cacheDir, 0o700)
 	}
 
 	// Load cl100k_base encoding (used by Claude/GPT-4)

@@ -283,8 +283,8 @@ func responseShouldComeFrom(ctx context.Context, agent string) error {
 	var agentCapitalized string
 	if agent == "gpt" {
 		agentCapitalized = "GPT"
-	} else {
-		agentCapitalized = strings.Title(agent)
+	} else if agent != "" {
+		agentCapitalized = strings.ToUpper(agent[:1]) + agent[1:]
 	}
 
 	expectedPrefix := fmt.Sprintf("%s received:", agentCapitalized)

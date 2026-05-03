@@ -90,16 +90,9 @@ func NewContentValidator(contentDir string, autoFix bool) (*ContentValidator, er
 		fixesApplied: make([]string, 0),
 	}
 
-	// Load configuration files
-	if err := v.loadCoreFiles(); err != nil {
-		// Non-fatal: core files list is optional
-		// Continue with empty set
-	}
-
-	if err := v.loadTokenBudgets(); err != nil {
-		// Non-fatal: token budgets are optional
-		// Continue with empty budgets
-	}
+	// Load configuration files; both are optional, so failures are ignored.
+	_ = v.loadCoreFiles()
+	_ = v.loadTokenBudgets()
 
 	return v, nil
 }

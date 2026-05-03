@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -110,7 +111,7 @@ Always wrap errors with context.
 			if !filepath.IsAbs(r.Path) {
 				t.Errorf("Result path %q is not absolute", r.Path)
 			}
-			if !filepath.HasPrefix(r.Path, tmpDir) {
+			if !strings.HasPrefix(r.Path, tmpDir) {
 				t.Errorf("Result path %q is not in temp directory %q", r.Path, tmpDir)
 			}
 		}
