@@ -166,7 +166,7 @@ func TestRecordAndLoadWorkflowMetrics(t *testing.T) {
 
 func TestLoadWorkflowMetrics_InvalidJSON(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 
 	metricsDir := filepath.Join(tmpDir, ".agm", "metrics")
 	os.MkdirAll(metricsDir, 0o755)

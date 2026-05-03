@@ -122,10 +122,7 @@ type Maybe<T> = T | null
 func setupTestEcphory(t *testing.T) (*Ecphory, string, func()) {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "ecphory-integration-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
+	tmpDir := t.TempDir()
 
 	// Write test engrams
 	for _, te := range getTestEngrams() {
@@ -259,14 +256,10 @@ func TestRetrievalWorkflow_NoAPIKey(t *testing.T) {
 	}()
 
 	// Create temporary directory
-	tmpDir, err := os.MkdirTemp("", "ecphory-integration-noapi-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// NewEcphory should fail without API key (ranker requirement)
-	_, err = NewEcphory(tmpDir, 10000)
+	_, err := NewEcphory(tmpDir, 10000)
 	if err == nil {
 		t.Fatal("NewEcphory() succeeded without API key, expected error")
 	}
@@ -286,11 +279,7 @@ func TestRetrievalWorkflow_EmptyDirectory(t *testing.T) {
 		t.Skip("Skipping integration test: ANTHROPIC_API_KEY not set")
 	}
 
-	tmpDir, err := os.MkdirTemp("", "ecphory-integration-empty-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create ecphory with empty directory
 	ecphory, err := NewEcphory(tmpDir, 10000)

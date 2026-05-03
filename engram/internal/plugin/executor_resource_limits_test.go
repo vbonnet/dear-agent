@@ -29,11 +29,7 @@ func TestApplyResourceLimits(t *testing.T) {
 // TestExecutor_ResourceLimits verifies that resource limits are applied during execution
 func TestExecutor_ResourceLimits(t *testing.T) {
 	// Create temporary directory for test plugin
-	tmpDir, err := os.MkdirTemp("", "plugin-rlimit-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create test plugin directory
 	pluginDir := filepath.Join(tmpDir, "test-rlimit")

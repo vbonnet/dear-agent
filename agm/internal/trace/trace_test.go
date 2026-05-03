@@ -475,11 +475,7 @@ func TestNullByteResilience(t *testing.T) {
 
 func TestTraceFiles_Integration(t *testing.T) {
 	// Create temp directory structure
-	tmpDir, err := os.MkdirTemp("", "trace-test-")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create workspace directory
 	workspaceDir := filepath.Join(tmpDir, "oss")

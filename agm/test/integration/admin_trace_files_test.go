@@ -372,10 +372,7 @@ func TestAdminTraceFiles_OrphanedSession(t *testing.T) {
 func setupTraceTestEnv(t *testing.T) string {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "agm-trace-test-")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
+	tmpDir := t.TempDir()
 
 	// Create workspace directory
 	workspaceDir := filepath.Join(tmpDir, "oss")

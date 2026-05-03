@@ -160,7 +160,7 @@ func TestIsTrivialSession_BelowThreshold(t *testing.T) {
 	}
 
 	// Override HOME for this test
-	os.Setenv("HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
 
 	threshold := 5
 	isTrivial, err := IsTrivialSession(sessionID, threshold)
@@ -198,7 +198,7 @@ func TestIsTrivialSession_AboveThreshold(t *testing.T) {
 	}
 
 	// Override HOME for this test
-	os.Setenv("HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
 
 	threshold := 5
 	isTrivial, err := IsTrivialSession(sessionID, threshold)
@@ -233,7 +233,7 @@ func TestIsTrivialSession_ExactThreshold(t *testing.T) {
 	}
 
 	// Override HOME for this test
-	os.Setenv("HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
 
 	threshold := 5
 	isTrivial, err := IsTrivialSession(sessionID, threshold)
@@ -252,7 +252,7 @@ func TestIsTrivialSession_NonExistentSession(t *testing.T) {
 	sessionID := "non-existent-session"
 
 	// Override HOME for this test
-	os.Setenv("HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
 
 	threshold := 5
 	isTrivial, err := IsTrivialSession(sessionID, threshold)

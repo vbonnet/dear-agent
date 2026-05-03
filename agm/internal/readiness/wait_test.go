@@ -101,7 +101,7 @@ func TestWaitForReady_MalformedJSON(t *testing.T) {
 	sessionName := "test-session-malformed"
 
 	// Override home directory for test
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 
 	// Create malformed JSON ready-file, then valid one
 	go func() {
@@ -137,7 +137,7 @@ func TestWaitForReady_CrashedStatus(t *testing.T) {
 	sessionName := "test-session-crashed"
 
 	// Override home directory for test
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 
 	// Create ready-file with "crashed" status
 	go func() {

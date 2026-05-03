@@ -175,11 +175,7 @@ func TestDetectWorkspace_AutoDetect(t *testing.T) {
 	}
 
 	// Change to workspace directory
-	originalCwd, _ := os.Getwd()
-	defer os.Chdir(originalCwd)
-	if err := os.Chdir(workspaceRoot); err != nil {
-		t.Fatalf("failed to change to workspace root: %v", err)
-	}
+	t.Chdir(workspaceRoot)
 
 	cfg := config.Default()
 	cfg.WorkspaceConfigPath = configPath
@@ -225,11 +221,7 @@ func TestDetectWorkspace_AutoDetect_NestedDirectory(t *testing.T) {
 	}
 
 	// Change to nested directory
-	originalCwd, _ := os.Getwd()
-	defer os.Chdir(originalCwd)
-	if err := os.Chdir(nestedPath); err != nil {
-		t.Fatalf("failed to change to nested path: %v", err)
-	}
+	t.Chdir(nestedPath)
 
 	cfg := config.Default()
 	cfg.WorkspaceConfigPath = configPath
@@ -271,12 +263,8 @@ func TestDetectWorkspace_MultipleWorkspaces(t *testing.T) {
 	}
 
 	// Test detection in ws1
-	originalCwd, _ := os.Getwd()
-	defer os.Chdir(originalCwd)
 
-	if err := os.Chdir(ws1Root); err != nil {
-		t.Fatalf("failed to change to ws1: %v", err)
-	}
+	t.Chdir(ws1Root)
 
 	cfg := config.Default()
 	cfg.WorkspaceConfigPath = configPath
@@ -287,9 +275,7 @@ func TestDetectWorkspace_MultipleWorkspaces(t *testing.T) {
 	}
 
 	// Test detection in ws2
-	if err := os.Chdir(ws2Root); err != nil {
-		t.Fatalf("failed to change to ws2: %v", err)
-	}
+	t.Chdir(ws2Root)
 
 	cfg2 := config.Default()
 	cfg2.WorkspaceConfigPath = configPath
@@ -327,11 +313,7 @@ func TestDetectWorkspace_OutsideWorkspace(t *testing.T) {
 		t.Fatalf("failed to create outside dir: %v", err)
 	}
 
-	originalCwd, _ := os.Getwd()
-	defer os.Chdir(originalCwd)
-	if err := os.Chdir(outsideDir); err != nil {
-		t.Fatalf("failed to change to outside dir: %v", err)
-	}
+	t.Chdir(outsideDir)
 
 	cfg := config.Default()
 	cfg.WorkspaceConfigPath = configPath
@@ -374,11 +356,7 @@ func TestDetectWorkspace_DefaultWorkspace(t *testing.T) {
 		t.Fatalf("failed to create outside dir: %v", err)
 	}
 
-	originalCwd, _ := os.Getwd()
-	defer os.Chdir(originalCwd)
-	if err := os.Chdir(outsideDir); err != nil {
-		t.Fatalf("failed to change to outside dir: %v", err)
-	}
+	t.Chdir(outsideDir)
 
 	cfg := config.Default()
 	cfg.WorkspaceConfigPath = configPath
@@ -420,11 +398,7 @@ func TestDetectWorkspace_SkippedWhenSessionsDirSet(t *testing.T) {
 	}
 
 	// Change to workspace directory
-	originalCwd, _ := os.Getwd()
-	defer os.Chdir(originalCwd)
-	if err := os.Chdir(workspaceRoot); err != nil {
-		t.Fatalf("failed to change to workspace root: %v", err)
-	}
+	t.Chdir(workspaceRoot)
 
 	cfg := config.Default()
 	cfg.WorkspaceConfigPath = configPath
@@ -470,11 +444,7 @@ func TestDetectWorkspace_DisabledWorkspace(t *testing.T) {
 	}
 
 	// Change to disabled workspace directory
-	originalCwd, _ := os.Getwd()
-	defer os.Chdir(originalCwd)
-	if err := os.Chdir(disabledRoot); err != nil {
-		t.Fatalf("failed to change to disabled workspace: %v", err)
-	}
+	t.Chdir(disabledRoot)
 
 	cfg := config.Default()
 	cfg.WorkspaceConfigPath = configPath

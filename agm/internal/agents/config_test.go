@@ -25,9 +25,7 @@ func TestDefaultConfig(t *testing.T) {
 func TestLoadConfig_NoFile(t *testing.T) {
 	// Change to a temp directory where no AGENTS.md exists
 	tempDir := t.TempDir()
-	oldDir, _ := os.Getwd()
-	os.Chdir(tempDir)
-	defer os.Chdir(oldDir)
+	t.Chdir(tempDir)
 
 	config := LoadConfig()
 
@@ -38,9 +36,7 @@ func TestLoadConfig_NoFile(t *testing.T) {
 
 func TestLoadConfig_ValidFile(t *testing.T) {
 	tempDir := t.TempDir()
-	oldDir, _ := os.Getwd()
-	os.Chdir(tempDir)
-	defer os.Chdir(oldDir)
+	t.Chdir(tempDir)
 
 	// Create valid AGENTS.md
 	content := `
@@ -75,9 +71,7 @@ preferences:
 
 func TestLoadConfig_MalformedYAML(t *testing.T) {
 	tempDir := t.TempDir()
-	oldDir, _ := os.Getwd()
-	os.Chdir(tempDir)
-	defer os.Chdir(oldDir)
+	t.Chdir(tempDir)
 
 	// Create malformed YAML
 	content := `
@@ -102,9 +96,7 @@ preferences:
 
 func TestLoadConfig_MissingDefaultHarness(t *testing.T) {
 	tempDir := t.TempDir()
-	oldDir, _ := os.Getwd()
-	os.Chdir(tempDir)
-	defer os.Chdir(oldDir)
+	t.Chdir(tempDir)
 
 	// Create YAML without default_harness
 	content := `
@@ -124,9 +116,7 @@ preferences:
 
 func TestLoadConfig_InvalidPreferences(t *testing.T) {
 	tempDir := t.TempDir()
-	oldDir, _ := os.Getwd()
-	os.Chdir(tempDir)
-	defer os.Chdir(oldDir)
+	t.Chdir(tempDir)
 
 	// Create YAML with invalid preferences
 	content := `
@@ -155,9 +145,7 @@ preferences:
 
 func TestLoadConfig_MultiPath(t *testing.T) {
 	tempDir := t.TempDir()
-	oldDir, _ := os.Getwd()
-	os.Chdir(tempDir)
-	defer os.Chdir(oldDir)
+	t.Chdir(tempDir)
 
 	// Create global config
 	homeDir, _ := os.UserHomeDir()

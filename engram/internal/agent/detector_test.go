@@ -281,11 +281,7 @@ func TestDetect_Cursor_FileDetection(t *testing.T) {
 	}()
 
 	// Create temporary .cursorrules file
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	cursorRulesPath := filepath.Join(tmpDir, ".cursorrules")
 	if err := os.WriteFile(cursorRulesPath, []byte("test"), 0644); err != nil {
@@ -293,15 +289,8 @@ func TestDetect_Cursor_FileDetection(t *testing.T) {
 	}
 
 	// Change to temp directory for file detection
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -329,26 +318,15 @@ func TestDetect_Windsurf_FileDetection(t *testing.T) {
 		}
 	}()
 
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	windsurfRulesPath := filepath.Join(tmpDir, ".windsurfrules")
 	if err := os.WriteFile(windsurfRulesPath, []byte("test"), 0644); err != nil {
 		t.Fatalf("failed to create .windsurfrules: %v", err)
 	}
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -374,26 +352,15 @@ func TestDetect_Aider_FileDetection(t *testing.T) {
 		}
 	}()
 
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	aiderConfPath := filepath.Join(tmpDir, ".aider.conf.yml")
 	if err := os.WriteFile(aiderConfPath, []byte("model: gpt-4"), 0644); err != nil {
 		t.Fatalf("failed to create .aider.conf.yml: %v", err)
 	}
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -420,21 +387,10 @@ func TestDetect_Unknown(t *testing.T) {
 	}()
 
 	// Create temp directory with no agent files
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -467,11 +423,7 @@ func TestFileExists(t *testing.T) {
 	}
 
 	// Test with directory
-	tmpDir, err := os.MkdirTemp("", "test-dir-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	if !detector.fileExists(tmpDir) {
 		t.Errorf("fileExists(%q) = false, want true (directories should return true)", tmpDir)
@@ -514,11 +466,7 @@ func TestDetect_MultipleEnvVars(t *testing.T) {
 // TestDetect_FallbackPriority verifies file detection fallback order
 func TestDetect_FallbackPriority(t *testing.T) {
 	// Create temp directory for file detection tests
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Clear all env vars
 	envVars := []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CURSOR", "WINDSURF", "AIDER_MODEL", "AIDER_ARCHITECT"}
@@ -539,9 +487,7 @@ func TestDetect_FallbackPriority(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, ".cursorrules"), []byte("test"), 0644)
 	os.WriteFile(filepath.Join(tmpDir, ".windsurfrules"), []byte("test"), 0644)
 
-	oldWd, _ := os.Getwd()
-	defer os.Chdir(oldWd)
-	os.Chdir(tmpDir)
+	t.Chdir(tmpDir)
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -609,26 +555,15 @@ func TestDetect_AiderignoreFile(t *testing.T) {
 		}
 	}()
 
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	aiderIgnorePath := filepath.Join(tmpDir, ".aiderignore")
 	if err := os.WriteFile(aiderIgnorePath, []byte("*.log"), 0644); err != nil {
 		t.Fatalf("failed to create .aiderignore: %v", err)
 	}
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	detector := NewDetector()
 	agent := detector.Detect()

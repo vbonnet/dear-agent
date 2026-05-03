@@ -77,9 +77,7 @@ func TestDetermineWorkspace(t *testing.T) {
 		os.MkdirAll(workspaceDir, 0755)
 
 		// Change to workspace directory
-		originalCwd, _ := os.Getwd()
-		defer os.Chdir(originalCwd)
-		os.Chdir(workspaceDir)
+		t.Chdir(workspaceDir)
 
 		workspace, err := DetermineWorkspace()
 		if err != nil {
@@ -184,7 +182,7 @@ func TestDetectWorkspaceFromCwd(t *testing.T) {
 	originalCwd, _ := os.Getwd()
 	defer func() {
 		t.Setenv("HOME", originalHome)
-		os.Chdir(originalCwd)
+		t.Chdir(originalCwd)
 	}()
 
 	tests := []struct {
@@ -227,7 +225,7 @@ func TestDetectWorkspaceFromCwd(t *testing.T) {
 			t.Setenv("HOME", tmpDir)
 
 			cwdPath := tt.setupCwd(tmpDir)
-			os.Chdir(cwdPath)
+			t.Chdir(cwdPath)
 
 			result := detectWorkspaceFromCwd()
 			if result != tt.expected {

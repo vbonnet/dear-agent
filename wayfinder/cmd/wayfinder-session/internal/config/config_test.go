@@ -233,9 +233,7 @@ func TestDetectWorkspace_SearchUpward(t *testing.T) {
 	}
 
 	// Change to subdirectory
-	originalDir, _ := os.Getwd()
-	defer os.Chdir(originalDir)
-	os.Chdir(subDir)
+	t.Chdir(subDir)
 
 	// Search upward for workspace
 	workspace := searchUpwardForWorkspace(subDir, "engram-research")

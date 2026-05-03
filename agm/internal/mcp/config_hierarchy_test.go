@@ -206,7 +206,7 @@ func TestLoadConfigWithHierarchy_NoTeam(t *testing.T) {
 
 	origTeam := os.Getenv("AGM_TEAM")
 	os.Unsetenv("AGM_TEAM")
-	defer os.Setenv("AGM_TEAM", origTeam)
+	defer t.Setenv("AGM_TEAM", origTeam)
 
 	// Create user config only
 	userConfigDir := filepath.Join(tmpDir, ".config", "agm")

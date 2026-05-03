@@ -340,7 +340,7 @@ func TestDiscover(t *testing.T) {
 				originalHome := os.Getenv("HOME")
 				tmpHome := t.TempDir()
 				t.Setenv("HOME", tmpHome)
-				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
+				t.Cleanup(func() { t.Setenv("HOME", originalHome) })
 
 				claudeDir := filepath.Join(tmpHome, ".claude")
 				os.MkdirAll(claudeDir, 0755)
@@ -369,7 +369,7 @@ func TestDiscover(t *testing.T) {
 				originalHome := os.Getenv("HOME")
 				tmpHome := t.TempDir()
 				t.Setenv("HOME", tmpHome)
-				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
+				t.Cleanup(func() { t.Setenv("HOME", originalHome) })
 
 				claudeDir := filepath.Join(tmpHome, ".claude")
 				os.MkdirAll(claudeDir, 0755)
@@ -398,7 +398,7 @@ func TestDiscover(t *testing.T) {
 				originalHome := os.Getenv("HOME")
 				tmpHome := t.TempDir()
 				t.Setenv("HOME", tmpHome)
-				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
+				t.Cleanup(func() { t.Setenv("HOME", originalHome) })
 
 				claudeDir := filepath.Join(tmpHome, ".claude")
 				os.MkdirAll(claudeDir, 0755)
@@ -425,7 +425,7 @@ func TestDiscover(t *testing.T) {
 				originalHome := os.Getenv("HOME")
 				tmpHome := t.TempDir()
 				t.Setenv("HOME", tmpHome)
-				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
+				t.Cleanup(func() { t.Setenv("HOME", originalHome) })
 
 				claudeDir := filepath.Join(tmpHome, ".claude")
 				os.MkdirAll(claudeDir, 0755)
@@ -451,7 +451,7 @@ func TestDiscover(t *testing.T) {
 				originalHome := os.Getenv("HOME")
 				tmpHome := t.TempDir()
 				t.Setenv("HOME", tmpHome)
-				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
+				t.Cleanup(func() { t.Setenv("HOME", originalHome) })
 
 				claudeDir := filepath.Join(tmpHome, ".claude")
 				os.MkdirAll(claudeDir, 0755)
@@ -486,7 +486,7 @@ func TestDiscover(t *testing.T) {
 				originalHome := os.Getenv("HOME")
 				tmpHome := t.TempDir()
 				t.Setenv("HOME", tmpHome)
-				t.Cleanup(func() { os.Setenv("HOME", originalHome) })
+				t.Cleanup(func() { t.Setenv("HOME", originalHome) })
 
 				claudeDir := filepath.Join(tmpHome, ".claude")
 				os.MkdirAll(claudeDir, 0755)

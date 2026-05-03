@@ -90,15 +90,11 @@ func TestValidateWorkingDir_RelativePath(t *testing.T) {
 // TestValidateWorkingDir_SymlinkPath tests handling of symlinks
 func TestValidateWorkingDir_SymlinkPath(t *testing.T) {
 	// Create temp directory
-	tmpdir, err := os.MkdirTemp("", "test-symlink-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	// Create symlink to temp directory
 	symlink := filepath.Join(os.TempDir(), "test-symlink-link")
-	err = os.Symlink(tmpdir, symlink)
+	err := os.Symlink(tmpdir, symlink)
 	if err != nil {
 		t.Skipf("Failed to create symlink (may not have permissions): %v", err)
 	}

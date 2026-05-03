@@ -29,11 +29,7 @@ func TestNewRetrospectiveParser(t *testing.T) {
 // TestParseFile_WithTechnicalChallenges verifies parsing retrospective with failures
 func TestParseFile_WithTechnicalChallenges(t *testing.T) {
 	// Create temporary retrospective file
-	tmpDir, err := os.MkdirTemp("", "retrospective-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	retrospectiveContent := `---
 phase: S11
@@ -67,7 +63,7 @@ title: Test Retrospective
 `
 
 	retrospectivePath := filepath.Join(tmpDir, "S11-retrospective.md")
-	err = os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
+	err := os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
 	if err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
@@ -105,11 +101,7 @@ title: Test Retrospective
 
 // TestParseFile_NoTechnicalChallenges verifies handling empty section
 func TestParseFile_NoTechnicalChallenges(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "retrospective-empty-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	retrospectiveContent := `---
 phase: S11
@@ -131,7 +123,7 @@ phase: S11
 `
 
 	retrospectivePath := filepath.Join(tmpDir, "S11-retrospective.md")
-	err = os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
+	err := os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
 	if err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
@@ -150,11 +142,7 @@ phase: S11
 
 // TestParseFile_NumberedList verifies parsing numbered lists
 func TestParseFile_NumberedList(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "retrospective-numbered-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	retrospectiveContent := `## What Could Improve
 
@@ -165,7 +153,7 @@ func TestParseFile_NumberedList(t *testing.T) {
 `
 
 	retrospectivePath := filepath.Join(tmpDir, "S11-retrospective.md")
-	err = os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
+	err := os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
 	if err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
@@ -206,11 +194,7 @@ func TestParseFile_AlternativeHeaders(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			tmpDir, err := os.MkdirTemp("", "retrospective-header-*")
-			if err != nil {
-				t.Fatalf("failed to create temp dir: %v", err)
-			}
-			defer os.RemoveAll(tmpDir)
+			tmpDir := t.TempDir()
 
 			content := tc.header + `
 
@@ -219,7 +203,7 @@ func TestParseFile_AlternativeHeaders(t *testing.T) {
 `
 
 			path := filepath.Join(tmpDir, "test.md")
-			err = os.WriteFile(path, []byte(content), 0644)
+			err := os.WriteFile(path, []byte(content), 0644)
 			if err != nil {
 				t.Fatalf("failed to write test file: %v", err)
 			}
@@ -296,11 +280,7 @@ func TestConvertToReflection(t *testing.T) {
 
 // TestExtractAndConvert verifies end-to-end workflow
 func TestExtractAndConvert(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "retrospective-e2e-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	retrospectiveContent := `## What Could Improve
 
@@ -310,7 +290,7 @@ func TestExtractAndConvert(t *testing.T) {
 `
 
 	retrospectivePath := filepath.Join(tmpDir, "S11-retrospective.md")
-	err = os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
+	err := os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
 	if err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
@@ -362,11 +342,7 @@ func TestParseContent_DirectScanner(t *testing.T) {
 
 // TestParseFile_RealWorldExample tests against realistic retrospective
 func TestParseFile_RealWorldExample(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "retrospective-real-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Realistic retrospective with multiple sections
 	retrospectiveContent := `---
@@ -416,7 +392,7 @@ title: Living Retrospective - Fix authentication bug
 `
 
 	retrospectivePath := filepath.Join(tmpDir, "S11-retrospective.md")
-	err = os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
+	err := os.WriteFile(retrospectivePath, []byte(retrospectiveContent), 0644)
 	if err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}

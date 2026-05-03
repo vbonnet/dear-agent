@@ -16,11 +16,7 @@ import (
 
 // TestNewCollector_Enabled verifies collector initialization when enabled
 func TestNewCollector_Enabled(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	telemetryPath := filepath.Join(tmpDir, "telemetry", "events.jsonl")
 
@@ -78,11 +74,7 @@ func TestNewCollector_InvalidPath(t *testing.T) {
 
 // TestRecord_Enabled verifies event recording when enabled
 func TestRecord_Enabled(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	telemetryPath := filepath.Join(tmpDir, "events.jsonl")
 
@@ -159,11 +151,7 @@ func TestRecord_Disabled(t *testing.T) {
 
 // TestRecord_MultipleEvents verifies JSONL format with multiple events
 func TestRecord_MultipleEvents(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	telemetryPath := filepath.Join(tmpDir, "events.jsonl")
 
@@ -222,11 +210,7 @@ func TestRecord_MultipleEvents(t *testing.T) {
 
 // TestRecord_NilData verifies handling of nil data
 func TestRecord_NilData(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	telemetryPath := filepath.Join(tmpDir, "events.jsonl")
 
@@ -262,11 +246,7 @@ func TestRecord_NilData(t *testing.T) {
 
 // TestClose verifies close handling
 func TestClose(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	telemetryPath := filepath.Join(tmpDir, "events.jsonl")
 
@@ -302,11 +282,7 @@ func TestClose_Disabled(t *testing.T) {
 
 // TestConcurrency verifies thread-safe recording
 func TestConcurrency(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	telemetryPath := filepath.Join(tmpDir, "events.jsonl")
 
@@ -368,11 +344,7 @@ func TestEventConstants(t *testing.T) {
 // TestRecordSync_NoRaceCondition verifies RecordSync is atomic
 // P0-3: RecordSync must hold lock across both Record and Sync operations
 func TestRecordSync_NoRaceCondition(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	telemetryPath := filepath.Join(tmpDir, "events.jsonl")
 
@@ -423,11 +395,7 @@ func TestRecordSync_NoRaceCondition(t *testing.T) {
 
 // TestRecordSync_Enabled verifies RecordSync writes and syncs
 func TestRecordSync_Enabled(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	telemetryPath := filepath.Join(tmpDir, "events.jsonl")
 
@@ -525,11 +493,7 @@ func TestEvent_JSONMarshaling(t *testing.T) {
 
 // Test 2.3: Async notification - Record() completes in <100μs with slow listener
 func TestAsyncNotification(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	telemetryPath := filepath.Join(tmpDir, "events.jsonl")
 

@@ -247,15 +247,8 @@ func TestIsSubpath_WithRelativePaths(t *testing.T) {
 	}
 
 	// Change to tmpDir
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	// Test with relative paths
 	result := IsSubpath(".", "./subdir")

@@ -10,11 +10,7 @@ import (
 
 func TestQueryEngine_Basic(t *testing.T) {
 	// Create temporary test directory
-	tmpDir, err := os.MkdirTemp("", "cc-query-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create test data directory
 	dataDir := filepath.Join(tmpDir, ".test-component", "data")

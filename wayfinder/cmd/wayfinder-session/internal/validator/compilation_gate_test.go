@@ -90,11 +90,7 @@ func TestDetectProjectLanguage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create temporary directory
-			tmpDir, err := os.MkdirTemp("", "test-lang-detect-*")
-			if err != nil {
-				t.Fatalf("failed to create temp dir: %v", err)
-			}
-			defer os.RemoveAll(tmpDir)
+			tmpDir := t.TempDir()
 
 			// Create test files
 			for filename, content := range tt.files {
@@ -209,11 +205,7 @@ test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`,
 
 func TestValidateCompilation_NonS8Phase(t *testing.T) {
 	// validateCompilation should skip validation for non-S8 phases
-	tmpDir, err := os.MkdirTemp("", "test-validate-compilation-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Test with different phases
 	phases := []string{"W0", "D1", "D2", "D3", "D4", "S4", "S5", "S6", "S7", "S9", "S10", "S11"}
@@ -227,11 +219,7 @@ func TestValidateCompilation_NonS8Phase(t *testing.T) {
 
 func TestValidateCompilation_NoLanguageDetected(t *testing.T) {
 	// validateCompilation should skip validation if no language detected
-	tmpDir, err := os.MkdirTemp("", "test-validate-compilation-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create a README.md (non-code file)
 	readmePath := filepath.Join(tmpDir, "README.md")
@@ -240,7 +228,7 @@ func TestValidateCompilation_NoLanguageDetected(t *testing.T) {
 	}
 
 	// Should not error because no language is detected (allows docs-only projects)
-	err = validateCompilation(tmpDir, "S8")
+	err := validateCompilation(tmpDir, "S8")
 	if err != nil {
 		t.Errorf("validateCompilation() should skip validation for non-code projects, got error: %v", err)
 	}

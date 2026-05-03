@@ -10,16 +10,12 @@ func TestRunMigrate_NoLegacyPath(t *testing.T) {
 	// Save and restore HOME
 
 	// Create temp home without .engram
-	tmpHome, err := os.MkdirTemp("", "engram-migrate-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpHome)
+	tmpHome := t.TempDir()
 
 	t.Setenv("HOME", tmpHome)
 
 	// Should succeed with message about no migration needed
-	err = runMigrate(nil, []string{})
+	err := runMigrate(nil, []string{})
 	if err != nil {
 		t.Errorf("runMigrate should succeed when no legacy path exists, got error: %v", err)
 	}
@@ -29,20 +25,12 @@ func TestRunMigrate_AlreadyMigrated(t *testing.T) {
 	// Save and restore HOME
 
 	// Create temp home
-	tmpHome, err := os.MkdirTemp("", "engram-migrate-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpHome)
+	tmpHome := t.TempDir()
 
 	t.Setenv("HOME", tmpHome)
 
 	// Create target directory with proper engram structure
-	targetDir, err := os.MkdirTemp("", "engram-target-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(targetDir)
+	targetDir := t.TempDir()
 
 	// Create minimal engram structure in target (simulates real migrated setup)
 	coreDir := filepath.Join(targetDir, "core")
@@ -66,7 +54,7 @@ func TestRunMigrate_AlreadyMigrated(t *testing.T) {
 	}
 
 	// Should succeed with message about already migrated
-	err = runMigrate(nil, []string{})
+	err := runMigrate(nil, []string{})
 	if err != nil {
 		t.Errorf("runMigrate should succeed when already migrated, got error: %v", err)
 	}
@@ -86,11 +74,7 @@ func TestRunMigrate_NoWorkspace(t *testing.T) {
 	}()
 
 	// Create temp home with .engram
-	tmpHome, err := os.MkdirTemp("", "engram-migrate-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpHome)
+	tmpHome := t.TempDir()
 
 	t.Setenv("HOME", tmpHome)
 	os.Unsetenv("WORKSPACE")
@@ -108,7 +92,7 @@ func TestRunMigrate_NoWorkspace(t *testing.T) {
 	}
 
 	// Should fail when no workspace can be detected
-	err = runMigrate(nil, []string{})
+	err := runMigrate(nil, []string{})
 	if err == nil {
 		t.Error("runMigrate should fail when no workspace detected")
 	}
@@ -121,11 +105,7 @@ func TestMigrateWorkspaceFlag(t *testing.T) {
 	// Save and restore HOME
 
 	// Create temp home without .engram (no migration needed case)
-	tmpHome, err := os.MkdirTemp("", "engram-migrate-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpHome)
+	tmpHome := t.TempDir()
 
 	t.Setenv("HOME", tmpHome)
 
@@ -134,7 +114,7 @@ func TestMigrateWorkspaceFlag(t *testing.T) {
 	defer func() { migrateWorkspaceFlag = "" }()
 
 	// Should not panic with workspace flag set
-	err = runMigrate(nil, []string{})
+	err := runMigrate(nil, []string{})
 	if err != nil {
 		// Expected to succeed with "no migration needed" message
 		t.Logf("Got expected result: %v", err)

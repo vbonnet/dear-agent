@@ -96,10 +96,7 @@ func TestService_ResolveEngramPath(t *testing.T) {
 		{
 			name: "absolute path exists",
 			setup: func(t *testing.T) string {
-				tmpdir, err := os.MkdirTemp("", "resolve-test-*")
-				if err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
+				tmpdir := t.TempDir()
 				t.Cleanup(func() { os.RemoveAll(tmpdir) })
 				return tmpdir
 			},
@@ -436,10 +433,7 @@ func TestService_Search_ParseErrors(t *testing.T) {
 
 	t.Run("skip unparseable engrams", func(t *testing.T) {
 		// Create temp directory
-		tmpdir, err := os.MkdirTemp("", "parse-test-*")
-		if err != nil {
-			t.Fatalf("setup failed: %v", err)
-		}
+		tmpdir := t.TempDir()
 		t.Cleanup(func() { os.RemoveAll(tmpdir) })
 
 		// Create valid engram

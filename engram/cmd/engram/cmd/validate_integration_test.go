@@ -140,12 +140,8 @@ func TestIntegration_ValidateRealCorpus(t *testing.T) {
 	// Validate entire corpus should find at least some files
 	t.Run("validate entire corpus", func(t *testing.T) {
 		// Change to repo root to use --all
-		origDir, _ := os.Getwd()
-		defer os.Chdir(origDir)
 
-		if err := os.Chdir(env.repoRoot); err != nil {
-			t.Fatalf("Failed to chdir to repo root: %v", err)
-		}
+		t.Chdir(env.repoRoot)
 
 		output, err := runValidateCommand(t, env.bin, "--all")
 
