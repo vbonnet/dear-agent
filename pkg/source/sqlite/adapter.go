@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // registers the "sqlite" driver with database/sql
 
 	"github.com/vbonnet/dear-agent/pkg/source"
 )

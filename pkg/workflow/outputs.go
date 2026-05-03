@@ -130,32 +130,15 @@ func (w *OutputWriter) MaterialiseOutputs(ctx context.Context, runID, nodeID str
 		if err != nil {
 			return fmt.Errorf("output %q: render path: %w", key, err)
 		}
-		switch spec.Durability {
-		case "", DurabilityEphemeral:
-			// No persistence requirement; record what we know.
-			if err := w.record(ctx, runID, nodeID, key, path, spec, 0, ""); err != nil {
-				return err
-			}
-		case DurabilityLocalDisk, DurabilityGitCommitted, DurabilityEngramIndexed:
-			info, err := os.Stat(path)
-			if err != nil {
-				return fmt.Errorf("output %q: %w: %w", key, ErrOutputMissing, err)
-			}
-			h, hashErr := hashFile(path)
-			if hashErr != nil {
-				return fmt.Errorf("output %q: hash: %w", key, hashErr)
-			}
-			if err := w.record(ctx, runID, nodeID, key, path, spec, info.Size(), h); err != nil {
-				return err
-			}
-			if spec.Durability == DurabilityGitCommitted {
-				gitCommittedPaths = append(gitCommittedPaths, path)
-			}
-			if spec.Durability == DurabilityEngramIndexed {
-				engramIndexed = append(engramIndexed, engramOutput{key: key, path: path, spec: spec})
-			}
-		default:
-			return fmt.Errorf("output %q: unknown durability %q", key, spec.Durability)
+		gitPath, engramOut, err := w.materialiseOne(ctx, runID, nodeID, key, path, spec)
+		if err != nil {
+			return err
+		}
+		if gitPath != "" {
+			gitCommittedPaths = append(gitCommittedPaths, gitPath)
+		}
+		if engramOut != nil {
+			engramIndexed = append(engramIndexed, *engramOut)
 		}
 	}
 	if len(gitCommittedPaths) > 0 && w.Git != nil {
@@ -172,6 +155,41 @@ func (w *OutputWriter) MaterialiseOutputs(ctx context.Context, runID, nodeID str
 		}
 	}
 	return nil
+}
+
+// materialiseOne handles a single output spec: stat + hash for durable
+// tiers, record the row, and return any git-committed path / engram
+// indexable output for the caller to batch. The split keeps
+// MaterialiseOutputs under the cyclomatic complexity threshold.
+func (w *OutputWriter) materialiseOne(ctx context.Context, runID, nodeID, key, path string, spec OutputSpec) (gitCommittedPath string, engramIdx *engramOutput, err error) {
+	switch spec.Durability {
+	case "", DurabilityEphemeral:
+		if err := w.record(ctx, runID, nodeID, key, path, spec, 0, ""); err != nil {
+			return "", nil, err
+		}
+		return "", nil, nil
+	case DurabilityLocalDisk, DurabilityGitCommitted, DurabilityEngramIndexed:
+		info, err := os.Stat(path)
+		if err != nil {
+			return "", nil, fmt.Errorf("output %q: %w: %w", key, ErrOutputMissing, err)
+		}
+		h, hashErr := hashFile(path)
+		if hashErr != nil {
+			return "", nil, fmt.Errorf("output %q: hash: %w", key, hashErr)
+		}
+		if err := w.record(ctx, runID, nodeID, key, path, spec, info.Size(), h); err != nil {
+			return "", nil, err
+		}
+		if spec.Durability == DurabilityGitCommitted {
+			gitCommittedPath = path
+		}
+		if spec.Durability == DurabilityEngramIndexed {
+			engramIdx = &engramOutput{key: key, path: path, spec: spec}
+		}
+		return gitCommittedPath, engramIdx, nil
+	default:
+		return "", nil, fmt.Errorf("output %q: unknown durability %q", key, spec.Durability)
+	}
 }
 
 // engramOutput is the per-output bundle MaterialiseOutputs hands to
@@ -212,14 +230,14 @@ func (w *OutputWriter) indexOutput(ctx context.Context, runID, nodeID string, ou
 // 200 bytes. Cheap, deterministic, and good enough for a "preview"
 // shown by `dear-agent search`.
 func snippetFor(b []byte) string {
-	const cap = 200
+	const maxBytes = 200
 	for _, line := range strings.Split(string(b), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		if len(line) > cap {
-			return line[:cap]
+		if len(line) > maxBytes {
+			return line[:maxBytes]
 		}
 		return line
 	}

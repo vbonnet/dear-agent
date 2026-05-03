@@ -9,6 +9,23 @@
 # pkg/workflow/roles.BuiltinRegistry — keep this file in sync.
 #
 # Schema: pkg/workflow/roles/registry.go.
+#
+# ---------------------------------------------------------------------------
+# Multi-provider load-spreading strategy
+# ---------------------------------------------------------------------------
+# Each role's primary tier is deliberately on a different provider so that a
+# typical mixed workflow (research → code → review → orchestration) round-
+# robins across Anthropic, OpenAI, and Google. A single provider outage
+# degrades one role at a time instead of stopping the engine. Secondary and
+# tertiary tiers spill onto the other two providers, so every role survives
+# the loss of any single vendor.
+#
+# Per-role primary assignment (see comments on each role for rationale):
+#   research      → Google     (Gemini 3.1 Pro — long context + synthesis)
+#   implementer   → Anthropic  (Claude Opus 4.7 — strongest at code)
+#   reviewer      → OpenAI     (GPT 5.5 Pro — independent critic, off-vendor)
+#   orchestrator  → Anthropic  (Claude Sonnet 4.6 — fast/cheap default)
+# ---------------------------------------------------------------------------
 
 version: 1
 
@@ -17,40 +34,90 @@ defaults:
   max_context: 200000
 
 roles:
+  # Research: long-context document analysis with citations.
+  # Primary on Gemini for the 1M-token context window and strong synthesis;
+  # Anthropic Opus is the closest substitute on context + reasoning;
+  # OpenAI GPT 5.5 Pro is the third leg so a Google+Anthropic outage still
+  # resolves.
   research:
     description: "Long-context document analysis with citations"
     capabilities: [long_context, citations, web_search, structured_output]
     primary:
-      model: claude-opus-4-7
-      effort: max
-      max_context: 1000000
-      cost_per_mtok:
-        input: 15.00
-        output: 75.00
-    secondary:
       model: gemini-3.1-pro
       effort: high
       max_context: 1000000
       cost_per_mtok:
         input: 1.25
         output: 10.00
+    secondary:
+      model: claude-opus-4-7
+      effort: max
+      max_context: 1000000
+      cost_per_mtok:
+        input: 15.00
+        output: 75.00
     tertiary:
       model: gpt-5.5-pro
       effort: high
 
+  # Implementer (a.k.a. "code role"): code synthesis, tool use, patch
+  # application. Anthropic Opus has the highest accepted-patch rate in our
+  # internal evals, so it stays primary. GPT 5.5 Pro is the secondary because
+  # it has the strongest tool-use behaviour among non-Anthropic models;
+  # Gemini 3.1 Pro is the tertiary fallback.
   implementer:
     description: "Code synthesis with tool use and patch application"
     capabilities: [tool_use, code_synthesis, structured_output]
     primary:
-      model: claude-sonnet-4-6
-      effort: high
-    secondary:
       model: claude-opus-4-7
       effort: high
+      cost_per_mtok:
+        input: 15.00
+        output: 75.00
+    secondary:
+      model: gpt-5.5-pro
+      effort: high
+    tertiary:
+      model: gemini-3.1-pro
+      effort: high
+      max_context: 1000000
 
+  # Reviewer (a.k.a. "review/audit role"): adversarial critique of artifacts
+  # produced by the implementer. We deliberately put a different vendor
+  # primary here so the reviewer is unlikely to share the implementer's
+  # blind spots. GPT 5.5 Pro leads; Claude Opus is secondary; Gemini 2.5 Pro
+  # is the tertiary — a smaller-but-fast Google model that keeps the review
+  # path open if both flagship vendors are down.
   reviewer:
     description: "Adversarial critique of artifacts produced by implementer"
     capabilities: [reasoning, structured_output]
     primary:
+      model: gpt-5.5-pro
+      effort: max
+    secondary:
       model: claude-opus-4-7
       effort: max
+      cost_per_mtok:
+        input: 15.00
+        output: 75.00
+    tertiary:
+      model: gemini-2.5-pro
+      effort: high
+
+  # Orchestrator (general / coordinator): routes between other roles, makes
+  # cheap decisions, summarises state for HITL. High call volume, low per-
+  # call complexity — so the primary is the cheapest capable Anthropic model
+  # (Sonnet 4.6). Secondary spills to Gemini 2.5 Flash, then GPT 5.4 Mini —
+  # both also in the "fast and cheap" tier.
+  orchestrator:
+    description: "Routing, coordination, and cheap decisions across the workflow"
+    capabilities: [tool_use, structured_output]
+    primary:
+      model: claude-sonnet-4-6
+      effort: high
+    secondary:
+      model: gemini-2.5-flash
+      effort: high
+    tertiary:
+      model: gpt-5.4-mini
+      effort: high
