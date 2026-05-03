@@ -30,13 +30,19 @@ jobs:
         run: go mod download
 
       - name: Build
+        # The first three binaries collide with same-named directories
+        # under the repo root (./agm, ./agm-reaper exists as a dir, etc.),
+        # so go build refuses to write the executable next to the source
+        # tree. Force the output into a build/ directory keyed off the
+        # binary name so each invocation has a unique destination.
         run: |
           GIT_COMMIT=$(git rev-parse --short HEAD)
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           LDFLAGS="-s -w -X main.Version=2.0.0-dev -X main.GitCommit=${GIT_COMMIT} -X main.BuildDate=${BUILD_DATE} -X main.BuiltBy=ci"
-          go build -ldflags="${LDFLAGS}" ./agm/cmd/agm
-          go build -ldflags="${LDFLAGS}" ./agm/cmd/agm-reaper
-          go build -ldflags="${LDFLAGS}" ./agm/cmd/agm-mcp-server
+          mkdir -p build
+          go build -ldflags="${LDFLAGS}" -o build/agm ./agm/cmd/agm
+          go build -ldflags="${LDFLAGS}" -o build/agm-reaper ./agm/cmd/agm-reaper
+          go build -ldflags="${LDFLAGS}" -o build/agm-mcp-server ./agm/cmd/agm-mcp-server
           go build ./...
 
       - name: Vet

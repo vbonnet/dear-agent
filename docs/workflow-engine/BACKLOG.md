@@ -65,19 +65,19 @@ event P95 < 1 ms (validated by `runner_perf_test.go`).
 **Goal:** AI nodes declare `role:` not `model:`. A central registry
 resolves the role to a model tier. Budgets are enforced per-node and
 per-run.
-**Phase status:** `pending`
+**Phase status:** `done`
 **Estimated:** 3 weeks
 **Depends on:** Phase 0
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 1.1 | Schema additions: `role`, `permissions`, `budget`, `exit_gate`, `hitl`, `context_policy`, `outputs[]` | `pkg/workflow/types.go`, `load.go`, `load_test.go` | YAML round-trips; `Validate` accepts/rejects per ADR-010 §D; existing workflows still pass | 0.* | M | `pending` |
-| 1.2 | Role registry + resolver | `pkg/workflow/roles/registry.go`, `roles/resolver.go`, `roles/resolver_test.go` | Resolves correctly for primary/secondary/tertiary; capacity, cost, capability filters per ROADMAP "Resolution algorithm" | 1.1 | M | `pending` |
-| 1.3 | Budget enforcement at `AIExecutor` wrapper | `pkg/workflow/budget.go`, `budget_test.go` | Run hitting ceiling triggers `on_overrun` policy (escalate/fail/truncate); live `$` printout in CLI | 1.2 | S | `pending` |
-| 1.4 | Permission enforcer interface; bash + ai check tool/path allowlists | `pkg/workflow/permissions.go`, `permissions_test.go` | Rejected tool call produces audit row + node failure; allowlist semantics match ADR-010 §D5 | 1.1 | M | `pending` |
-| 1.5 | Exit-gate evaluator (5 kinds: bash, regex_match, json_schema, test_cmd, confidence_score) | `pkg/workflow/exit_gate.go`, `exit_gate_test.go` | Each kind has unit tests; gate failure short-circuits and transitions node to `failed`; gates evaluated in declared order | 1.1 | M | `pending` |
-| 1.6 | `outputs[]` map-shape + path resolution + durability tier writer | `pkg/workflow/outputs.go`, `outputs_test.go` | Files materialize at declared paths; `git_committed` writes a commit; node refuses `succeeded` if a declared output is missing | 1.1 | M | `pending` |
-| 1.7 | `workflow lint` command | `cmd/workflow-lint/main.go` | `--check-deprecated-models` lists every node with hardcoded `model:` or `model_override:` pointing at a deprecated model | 1.2 | S | `pending` |
+| 1.1 | Schema additions: `role`, `permissions`, `budget`, `exit_gate`, `hitl`, `context_policy`, `outputs[]` | `pkg/workflow/types.go`, `load.go`, `load_test.go` | YAML round-trips; `Validate` accepts/rejects per ADR-010 §D; existing workflows still pass | 0.* | M | `done` |
+| 1.2 | Role registry + resolver | `pkg/workflow/roles/registry.go`, `roles/resolver.go`, `roles/registry_test.go` | Resolves correctly for primary/secondary/tertiary; capacity, cost, capability filters per ROADMAP "Resolution algorithm" | 1.1 | M | `done` |
+| 1.3 | Budget enforcement at `AIExecutor` wrapper | `pkg/workflow/budget.go`, `budget_test.go` | Run hitting ceiling triggers `on_overrun` policy (escalate/fail/truncate); live `$` printout in CLI | 1.2 | S | `done` |
+| 1.4 | Permission enforcer interface; bash + ai check tool/path allowlists | `pkg/workflow/permissions.go`, `permissions_test.go` | Rejected tool call produces audit row + node failure; allowlist semantics match ADR-010 §D5 | 1.1 | M | `done` |
+| 1.5 | Exit-gate evaluator (5 kinds: bash, regex_match, json_schema, test_cmd, confidence_score) | `pkg/workflow/exit_gate.go`, `exit_gate_test.go` | Each kind has unit tests; gate failure short-circuits and transitions node to `failed`; gates evaluated in declared order | 1.1 | M | `done` |
+| 1.6 | `outputs[]` map-shape + path resolution + durability tier writer | `pkg/workflow/outputs.go`, `outputs_test.go` | Files materialize at declared paths; `git_committed` writes a commit; node refuses `succeeded` if a declared output is missing | 1.1 | M | `done` |
+| 1.7 | `workflow lint` + `workflow roles` commands | `cmd/workflow-lint/main.go`, `cmd/workflow-roles/main.go` | `--check-deprecated-models` lists every node with hardcoded `model:` or `model_override:` pointing at a deprecated model; `workflow-roles list/describe/validate` matches ROADMAP "Role-based model mapping" | 1.2 | S | `done` |
 
 **Phase 1 ship criterion:** `dear-agent workflow lint
 --check-deprecated-models` passes on all existing workflows after a
@@ -187,6 +187,8 @@ phase. Triage as they come up.
 | X.2 | Cost-per-mtok refresh in `roles.yaml` | ADR open question §3; punted to post-MVS |
 | X.3 | Per-tenant isolation | ADR open question §2; punted to post-MVS |
 | X.4 | GitHub-PR HITL backend | ADR open question §4; not in v1 |
+| DEAR-X.5 | Flaky `TestSQLiteStateConcurrentSaves` (SQLITE_BUSY on schema apply) | Pre-existing as of #38; reproduces on main with `-count=100`. Root cause: 10 concurrent `OpenSQLiteState` calls each call `db.PingContext` + `ExecContext(sqliteSchema)`, racing on the WAL-creation handshake. Fix is likely a once-per-path schema-apply guard, or move schema apply behind a file lock. |
+| DEAR-X.6 | Phase 2 wiring for Phase 1 schema fields | `permissions`, `hitl`, `context_policy`, and exit-gate failure modes are validated in Phase 1 but only partially enforced in the runner. Phase 2.* tickets cover the runner integration (HITL state, audit-row emission for permission denials, context_policy resolver). |
 
 ---
 
