@@ -159,7 +159,7 @@ func runBackfillSkillPython(skillName string, projectPath string) error {
 
 	// Check if script exists
 	if _, err := os.Stat(scriptPath); err != nil {
-		//nolint:revive // multi-line CLI-facing help text
+		//nolint:revive,staticcheck // multi-line CLI-facing help text
 		return fmt.Errorf("skill script not found: %s\n\nNOTE: Backfill skills are not yet fully implemented.\nThese Wayfinder projects are in progress:\n  - backfill-spec-skill (D4 phase - ~/src/backfill-spec-skill)\n  - backfill-architecture-skill (stub created - ~/src/backfill-architecture-skill)\n  - backfill-adrs-skill (not started - ~/src/backfill-adrs-skill)\n\nThe CLI integration is ready. Python implementations need to be completed and moved to skills/ directory.", scriptPath)
 	}
 

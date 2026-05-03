@@ -179,7 +179,7 @@ func openExceptionDB() (*sql.DB, error) {
 	dbPath := getExceptionDBPath()
 
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		//nolint:revive // multi-line CLI-facing help text
+		//nolint:revive,staticcheck // multi-line CLI-facing help text
 		return nil, fmt.Errorf("exception database not found: %s\n\nPlease ensure the language-consolidation project is initialized.\nSet ENGRAM_EXCEPTION_DB env var or use --db flag to specify location.", dbPath)
 	}
 

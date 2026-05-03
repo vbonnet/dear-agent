@@ -215,18 +215,18 @@ func (d *Detector) writeDiff(source string, oldSnap PromptSnapshot, newContent s
 	path := filepath.Join(d.diffDir, filename)
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("--- Cache Break Detected ---\n"))
-	b.WriteString(fmt.Sprintf("Source: %s\n", source))
-	b.WriteString(fmt.Sprintf("Time: %s\n", time.Now().Format(time.RFC3339)))
-	b.WriteString(fmt.Sprintf("Previous hash: %s (est %d tokens)\n", oldSnap.Hash, oldSnap.TokenEst))
-	b.WriteString(fmt.Sprintf("Current hash: %s (est %d tokens)\n", hashContent(newContent), EstimateTokens(newContent)))
-	b.WriteString(fmt.Sprintf("---\n"))
+	b.WriteString("--- Cache Break Detected ---\n")
+	fmt.Fprintf(&b, "Source: %s\n", source)
+	fmt.Fprintf(&b, "Time: %s\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&b, "Previous hash: %s (est %d tokens)\n", oldSnap.Hash, oldSnap.TokenEst)
+	fmt.Fprintf(&b, "Current hash: %s (est %d tokens)\n", hashContent(newContent), EstimateTokens(newContent))
+	b.WriteString("---\n")
 	// Write first 500 chars of new content as context
 	preview := newContent
 	if len(preview) > 500 {
 		preview = preview[:500] + "\n... (truncated)"
 	}
-	b.WriteString(fmt.Sprintf("Current content preview:\n%s\n", preview))
+	fmt.Fprintf(&b, "Current content preview:\n%s\n", preview)
 
 	os.WriteFile(path, []byte(b.String()), 0o600)
 	return path

@@ -684,8 +684,8 @@ func generateDiff(original, updated string) string {
 	newLines := strings.Split(updated, "\n")
 
 	var diff strings.Builder
-	diff.WriteString(fmt.Sprintf("--- MEMORY.md (before)\n+++ MEMORY.md (after)\n"))
-	diff.WriteString(fmt.Sprintf("@@ -%d lines +%d lines @@\n", len(origLines), len(newLines)))
+	diff.WriteString("--- MEMORY.md (before)\n+++ MEMORY.md (after)\n")
+	fmt.Fprintf(&diff, "@@ -%d lines +%d lines @@\n", len(origLines), len(newLines))
 
 	// Simple line-by-line diff (not unified, but informative)
 	maxLines := len(origLines)
