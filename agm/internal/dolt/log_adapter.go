@@ -50,7 +50,7 @@ func (la *LogAdapter) Append(entry *logs.LogEntry) error {
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
-	_, err := la.adapter.conn.Exec(query,
+	_, err := la.adapter.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		entry.ID,
 		entry.SessionID,
 		entry.Timestamp,
@@ -107,7 +107,7 @@ func (la *LogAdapter) List(sessionID string, opts *logs.ListOpts) ([]*logs.LogEn
 		}
 	}
 
-	rows, err := la.adapter.conn.Query(query, args...)
+	rows, err := la.adapter.conn.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query log entries: %w", err)
 	}

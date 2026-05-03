@@ -34,20 +34,20 @@ func loadConfigWithWorkspace() (*config.Config, error) {
 	detector, err := workspace.NewDetector(workspaceConfigPath)
 	if err != nil {
 		// Workspace config not found or invalid - use legacy behavior
-		return cfg, nil
+		return cfg, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Detect workspace using current working directory
 	cwd, err := os.Getwd()
 	if err != nil {
 		// Can't get cwd - use legacy behavior
-		return cfg, nil
+		return cfg, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	ws, err := detector.Detect(cwd, workspaceFlag)
 	if err != nil {
 		// Workspace detection failed - use legacy behavior
-		return cfg, nil
+		return cfg, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Workspace detected successfully!

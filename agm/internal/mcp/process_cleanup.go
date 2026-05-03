@@ -78,12 +78,12 @@ type SignalKiller struct{}
 func (k *SignalKiller) Kill(pid int) error {
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		return nil // process doesn't exist
+		return nil //nolint:nilerr // process doesn't exist
 	}
 
 	// Check if process is alive
 	if err := process.Signal(syscall.Signal(0)); err != nil {
-		return nil // already dead
+		return nil //nolint:nilerr // already dead
 	}
 
 	// Send SIGTERM
@@ -111,7 +111,7 @@ func (k *SignalKiller) Kill(pid int) error {
 	case <-done:
 		// Check if actually dead
 		if err := process.Signal(syscall.Signal(0)); err != nil {
-			return nil // graceful exit
+			return nil //nolint:nilerr // graceful exit
 		}
 	case <-time.After(5 * time.Second):
 	}

@@ -55,7 +55,7 @@ func (s *Storage) Query(params QueryParams) ([]BenchmarkRun, error) {
 	query += fmt.Sprintf(" LIMIT %d", limit)
 
 	// Execute query
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}

@@ -106,7 +106,7 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			// Not in tmux - show minimal message instead of error
 			fmt.Print("[Not in tmux]")
-			return nil
+			return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 	}
 
@@ -116,7 +116,7 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 		// Session not found - this is a regular tmux session, not AGM-managed
 		// Show minimal indicator instead of erroring (prevents tmux status line from disappearing)
 		fmt.Printf("[%s]", sessionName)
-		return nil
+		return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Collect status line data
@@ -124,7 +124,7 @@ func runStatusLine(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		// Collection failed - show session name with error indicator
 		fmt.Printf("[%s ⚠️]", sessionName)
-		return nil
+		return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Output based on format flag

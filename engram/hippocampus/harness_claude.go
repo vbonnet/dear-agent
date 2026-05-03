@@ -219,7 +219,7 @@ func findJSONLFiles(dir string) ([]string, error) {
 
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip errors
+			return nil //nolint:nilerr // skip errors
 		}
 		if !d.IsDir() && strings.HasSuffix(d.Name(), ".jsonl") {
 			files = append(files, path)

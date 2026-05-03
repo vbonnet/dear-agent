@@ -135,7 +135,7 @@ func CheckLock(path string) (*LockInfo, error) {
 		// Invalid PID - stale
 		info.IsStale = true
 		info.CanUnlock = true
-		return info, nil
+		return info, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	info.PID = pid

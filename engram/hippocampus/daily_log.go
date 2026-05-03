@@ -145,7 +145,7 @@ func (dl *DailyLogger) ListLogFiles() ([]string, error) {
 
 	err := filepath.Walk(dl.baseDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // skip errors
+			return nil //nolint:nilerr // skip errors
 		}
 		if !info.IsDir() && strings.HasSuffix(path, ".md") {
 			logs = append(logs, path)

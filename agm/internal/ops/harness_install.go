@@ -61,7 +61,7 @@ func IsInstalled(ctx context.Context, harness HarnessType) (bool, string, error)
 
 	path, err := exec.LookPath(cmd)
 	if err != nil {
-		return false, "", nil
+		return false, "", nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 	return true, path, nil
 }

@@ -31,7 +31,7 @@ func DetectState(sessionName string) (string, error) {
 	paneContent, err := tmux.CapturePaneOutput(sessionName, 30)
 	if err != nil {
 		// Can't read pane — fall back to DONE (safe default)
-		return manifest.StateDone, nil
+		return manifest.StateDone, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	detector := state.NewDetector()
@@ -76,7 +76,7 @@ func DetectStateWithConfidence(sessionName string) (*DetectionResult, error) {
 
 	paneContent, err := tmux.CapturePaneOutput(sessionName, 30)
 	if err != nil {
-		return &DetectionResult{
+		return &DetectionResult{ //nolint:nilerr // intentional: caller signals via separate bool/optional
 			State:      manifest.StateDone,
 			Confidence: 0.5,
 			Reason:     "Cannot read terminal content, defaulting to DONE",

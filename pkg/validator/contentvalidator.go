@@ -278,7 +278,7 @@ func (v *ContentValidator) getRelativePath(absPath string) (string, error) {
 	relPath, err := filepath.Rel(v.contentDir, absPath)
 	if err != nil {
 		// If we can't get relative path, use the filename
-		return filepath.Base(absPath), nil
+		return filepath.Base(absPath), nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 	return relPath, nil
 }

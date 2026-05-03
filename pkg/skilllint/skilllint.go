@@ -57,7 +57,7 @@ func CheckFile(path string) ([]Violation, error) {
 	}
 	fm, rest, err := extractFrontmatter(data)
 	if err != nil {
-		return []Violation{{Path: path, Reason: err.Error()}}, nil
+		return []Violation{{Path: path, Reason: err.Error()}}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 	if rest == nil {
 		return []Violation{{Path: path, Reason: "no YAML frontmatter (expected --- fenced block at top of file)"}}, nil

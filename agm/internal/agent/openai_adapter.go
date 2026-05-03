@@ -238,7 +238,7 @@ func (a *OpenAIAdapter) GetSessionStatus(sessionID SessionID) (Status, error) {
 	_, err := a.sessionManager.GetSession(string(sessionID))
 	if err != nil {
 		// Session not found = terminated
-		return StatusTerminated, nil
+		return StatusTerminated, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Session exists = active

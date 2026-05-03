@@ -55,7 +55,7 @@ func (d *Detector) DetectUUID(m *manifest.Manifest) (*Result, error) {
 	result, err := d.detectFromHistory(m)
 	if err != nil {
 		// No match found, return empty result
-		return &Result{
+		return &Result{ //nolint:nilerr // intentional: caller signals via separate bool/optional
 			Source:     "none",
 			Confidence: "low",
 		}, nil

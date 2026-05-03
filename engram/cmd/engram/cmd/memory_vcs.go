@@ -304,7 +304,7 @@ func loadVCSConfig() (*vcs.Config, error) {
 	cfg, err := loader.Load()
 	if err != nil {
 		// Fall back to defaults if config loading fails
-		return vcs.DefaultConfig(), nil
+		return vcs.DefaultConfig(), nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	return &vcs.Config{

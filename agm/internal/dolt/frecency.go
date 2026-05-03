@@ -63,7 +63,7 @@ func (a *Adapter) UpdateAccess(sessionID string) error {
 		WHERE id = ? AND workspace = ?
 	`
 
-	result, err := a.conn.Exec(query, time.Now(), sessionID, a.workspace)
+	result, err := a.conn.Exec(query, time.Now(), sessionID, a.workspace) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to update access: %w", err)
 	}
@@ -113,7 +113,7 @@ func (a *Adapter) GetByFrecency(limit int) ([]FrecencyResult, error) {
 		args = append(args, limit)
 	}
 
-	rows, err := a.conn.Query(query, args...)
+	rows, err := a.conn.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sessions by frecency: %w", err)
 	}

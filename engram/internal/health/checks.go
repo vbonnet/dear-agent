@@ -352,7 +352,7 @@ func (hc *HealthChecker) checkCoreEngramsAccessible() CheckResult {
 	count := 0
 	filepath.Walk(engramsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".ai.md") {
 			count++

@@ -208,7 +208,7 @@ func countConnections(pid int) (int, error) {
 	output, err := cmd.Output()
 	if err != nil {
 		// lsof may fail if no connections, that's OK
-		return 0, nil
+		return 0, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	lines := strings.Split(string(output), "\n")

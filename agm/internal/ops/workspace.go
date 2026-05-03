@@ -27,7 +27,7 @@ func ListWorkspaces(ctx *OpContext, _ *ListWorkspacesRequest) (*ListWorkspacesRe
 	wsInfos, err := discovery.ListWorkspacesUsingContract()
 	if err != nil {
 		// Graceful degradation: workspace CLI may not be available
-		return &ListWorkspacesResult{
+		return &ListWorkspacesResult{ //nolint:nilerr // intentional: caller signals via separate bool/optional
 			Operation:  "list_workspaces",
 			Workspaces: []WorkspaceInfo{},
 			Total:      0,

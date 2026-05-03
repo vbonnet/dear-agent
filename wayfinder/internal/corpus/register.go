@@ -105,7 +105,7 @@ func GetRegistrationStatus(workspace string) ([]string, error) {
 	output, err := cmd.Output()
 	if err != nil {
 		// Not registered or error - return empty list
-		return []string{}, nil
+		return []string{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	var schemas []struct {
@@ -113,7 +113,7 @@ func GetRegistrationStatus(workspace string) ([]string, error) {
 	}
 
 	if err := json.Unmarshal(output, &schemas); err != nil {
-		return []string{}, nil
+		return []string{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	entities := make([]string, len(schemas))

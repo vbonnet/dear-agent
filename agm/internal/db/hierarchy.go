@@ -33,7 +33,7 @@ func (db *DB) GetChildren(sessionID string) ([]*manifest.Manifest, error) {
 		ORDER BY created_at ASC
 	`
 
-	rows, err := db.conn.Query(query, sessionID)
+	rows, err := db.conn.Query(query, sessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query children: %w", err)
 	}
@@ -71,7 +71,7 @@ func (db *DB) GetParent(sessionID string) (*manifest.Manifest, error) {
 	// Query for the parent_session_id from the database row
 	var parentSessionID sql.NullString
 	query := `SELECT parent_session_id FROM sessions WHERE session_id = ?`
-	err := db.conn.QueryRow(query, sessionID).Scan(&parentSessionID)
+	err := db.conn.QueryRow(query, sessionID).Scan(&parentSessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("session not found: %s", sessionID)
@@ -136,7 +136,7 @@ func (db *DB) GetSessionTree(sessionID string) (*SessionTree, error) {
 
 		var parentID sql.NullString
 		query := `SELECT parent_session_id FROM sessions WHERE session_id = ?`
-		err := db.conn.QueryRow(query, currentID).Scan(&parentID)
+		err := db.conn.QueryRow(query, currentID).Scan(&parentID) //nolint:noctx // TODO(context): plumb ctx through this layer
 		if err != nil {
 			if err == sql.ErrNoRows {
 				break
@@ -196,7 +196,7 @@ func (db *DB) GetAllSessionsHierarchy(filter *SessionFilter) ([]*SessionNode, er
 		// Get parent_session_id from database
 		var parentSessionID sql.NullString
 		query := `SELECT parent_session_id FROM sessions WHERE session_id = ?`
-		err := db.conn.QueryRow(query, s.SessionID).Scan(&parentSessionID)
+		err := db.conn.QueryRow(query, s.SessionID).Scan(&parentSessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 		if err != nil {
 			if err == sql.ErrNoRows {
 				continue

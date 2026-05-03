@@ -154,7 +154,7 @@ func New(config *Config) (*Adapter, error) {
 	}
 
 	// Test connection
-	if err := conn.Ping(); err != nil {
+	if err := conn.Ping(); err != nil { //nolint:noctx // TODO(context): plumb ctx through this layer
 		conn.Close()
 
 		// Try auto-start if script configured and not in test
@@ -172,7 +172,7 @@ func New(config *Config) (*Adapter, error) {
 				if err2 != nil {
 					continue
 				}
-				if err3 := conn2.Ping(); err3 == nil {
+				if err3 := conn2.Ping(); err3 == nil { //nolint:noctx // TODO(context): plumb ctx through this layer
 					return &Adapter{
 						conn:      conn2,
 						workspace: config.Workspace,
@@ -256,7 +256,7 @@ func (a *Adapter) Conn() *sql.DB {
 
 // BeginTx starts a new transaction
 func (a *Adapter) BeginTx() (*sql.Tx, error) {
-	return a.conn.Begin()
+	return a.conn.Begin() //nolint:noctx // TODO(context): plumb ctx through this layer
 }
 
 // Workspace returns the current workspace name

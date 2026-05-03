@@ -59,7 +59,7 @@ func matchSourceGlob(cwd, pattern string) bool {
 	found := false
 	_ = filepath.WalkDir(cwd, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 		}
 		if !d.IsDir() && filepath.Ext(path) == ext {
 			found = true

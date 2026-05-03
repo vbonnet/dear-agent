@@ -66,7 +66,7 @@ func (db *DB) CreateSession(session *manifest.Manifest) error {
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	_, err = db.conn.Exec(query,
+	_, err = db.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		session.SessionID,
 		session.Name,
 		session.SchemaVersion,
@@ -111,7 +111,7 @@ func (db *DB) GetSession(sessionID string) (*manifest.Manifest, error) {
 		WHERE session_id = ?
 	`
 
-	row := db.conn.QueryRow(query, sessionID)
+	row := db.conn.QueryRow(query, sessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	return scanSession(row)
 }
 
@@ -161,7 +161,7 @@ func (db *DB) UpdateSession(session *manifest.Manifest) error {
 		WHERE session_id = ?
 	`
 
-	result, err := db.conn.Exec(query,
+	result, err := db.conn.Exec(query, //nolint:noctx // TODO(context): plumb ctx through this layer
 		session.Name,
 		session.SchemaVersion,
 		session.UpdatedAt,
@@ -207,7 +207,7 @@ func (db *DB) DeleteSession(sessionID string) error {
 
 	query := `DELETE FROM sessions WHERE session_id = ?`
 
-	result, err := db.conn.Exec(query, sessionID)
+	result, err := db.conn.Exec(query, sessionID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
@@ -280,7 +280,7 @@ func (db *DB) ListSessions(filter *SessionFilter) ([]*manifest.Manifest, error) 
 		}
 	}
 
-	rows, err := db.conn.Query(query, args...)
+	rows, err := db.conn.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sessions: %w", err)
 	}

@@ -116,7 +116,7 @@ func NewStorageAt(path string) (*Storage, error) {
 	}
 
 	// Enable WAL mode for better concurrency
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil { //nolint:noctx // TODO(context): plumb ctx through this layer
 		db.Close()
 		return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
 	}
@@ -139,7 +139,7 @@ func DefaultDatabasePath() string {
 
 // initSchema creates the database schema if it doesn't exist.
 func (s *Storage) initSchema() error {
-	if _, err := s.db.Exec(schema); err != nil {
+	if _, err := s.db.Exec(schema); err != nil { //nolint:noctx // TODO(context): plumb ctx through this layer
 		return fmt.Errorf("failed to initialize schema: %w", err)
 	}
 	return nil

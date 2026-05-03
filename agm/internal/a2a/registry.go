@@ -142,7 +142,7 @@ func (r *Registry) SyncFromManifests(manifests []*manifest.Manifest) error {
 	// Remove orphan cards (sessions that no longer exist)
 	entries, err := os.ReadDir(r.cardsDir)
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {

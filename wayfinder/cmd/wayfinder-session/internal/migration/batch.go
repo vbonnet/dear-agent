@@ -77,7 +77,7 @@ func findV1Projects(workspaceRoot string) ([]string, error) {
 	// Walk the workspace root looking for WAYFINDER-STATUS.md files
 	err := filepath.Walk(workspaceRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // Skip paths with errors
+			return nil //nolint:nilerr // Skip paths with errors
 		}
 
 		// Look for WAYFINDER-STATUS.md files
@@ -87,7 +87,7 @@ func findV1Projects(workspaceRoot string) ([]string, error) {
 			// Detect schema version
 			schemaVersion, err := status.DetectSchemaVersion(path)
 			if err != nil {
-				return nil // Skip invalid files
+				return nil //nolint:nilerr // Skip invalid files
 			}
 
 			// Only include V1 projects

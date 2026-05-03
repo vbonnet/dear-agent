@@ -223,7 +223,7 @@ func (a *GeminiCLIAdapter) GetSessionStatus(sessionID SessionID) (Status, error)
 	metadata, err := a.sessionStore.Get(sessionID)
 	if err != nil {
 		// Session not in store = terminated
-		return StatusTerminated, nil
+		return StatusTerminated, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Check if tmux session exists

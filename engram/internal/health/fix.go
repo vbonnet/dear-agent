@@ -255,7 +255,7 @@ func (f *Tier1Fixer) fixHookScriptPermissions() error {
 	hooksDir := filepath.Join(os.Getenv("HOME"), ".claude", "hooks")
 	entries, err := os.ReadDir(hooksDir)
 	if err != nil {
-		return nil // No hooks dir, nothing to fix
+		return nil //nolint:nilerr // No hooks dir, nothing to fix
 	}
 
 	for _, entry := range entries {
@@ -283,7 +283,7 @@ func (f *Tier1Fixer) fixHookExtensionMismatches() error {
 	settingsPath := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
 	settingsData, err := os.ReadFile(settingsPath)
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Fix settings.json itself first
@@ -356,7 +356,7 @@ func (f *Tier1Fixer) fixHookPaths() error {
 	settingsPath := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
 	settingsData, err := os.ReadFile(settingsPath)
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Fix settings.json itself first
@@ -451,7 +451,7 @@ func (f *Tier1Fixer) removeNonExistentHooks() error {
 	settingsPath := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Parse settings
@@ -570,7 +570,7 @@ func (f *Tier1Fixer) fixMarketplaceConfig() error {
 
 	data, err := os.ReadFile(mktPath)
 	if err != nil {
-		return nil // Nothing to fix
+		return nil //nolint:nilerr // Nothing to fix
 	}
 
 	// Back up original

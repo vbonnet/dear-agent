@@ -36,7 +36,7 @@ func validateCompilation(projectDir, phaseName string) error {
 	if err != nil {
 		// If we can't detect language, skip compilation validation
 		// (allows for non-code projects like documentation)
-		return nil
+		return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// Run build verification

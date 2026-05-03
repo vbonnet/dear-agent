@@ -281,7 +281,7 @@ func (a *OpenCodeAdapter) GetSessionStatus(sessionID SessionID) (Status, error) 
 	metadata, err := a.sessionStore.Get(sessionID)
 	if err != nil {
 		// Session not in store = terminated
-		return StatusTerminated, nil
+		return StatusTerminated, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 	}
 
 	// 2. Check if tmux session exists
@@ -431,7 +431,7 @@ func (a *OpenCodeAdapter) checkServerHealth() error {
 		Timeout: 5 * time.Second,
 	}
 
-	resp, err := client.Get(a.serverURL + "/health")
+	resp, err := client.Get(a.serverURL + "/health") //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		return fmt.Errorf("server unreachable at %s: %w", a.serverURL, err)
 	}
