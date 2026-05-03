@@ -87,7 +87,22 @@ func TestStripPrefix(t *testing.T) {
 	}
 }
 
+// withGenerousProviderTimeout extends providerTimeout for the duration of t.
+// The 500ms production default exists to keep the statusline responsive in
+// the editor; under heavy parallel `go test ./...` load (especially in CI)
+// fork+exec of the test's /bin/sh providers can exceed that, producing a
+// flaky 0-segments result that has nothing to do with the behavior under
+// test. Bumping the timeout for tests that exercise actual subprocesses
+// makes the assertion test correctness, not contention.
+func withGenerousProviderTimeout(t *testing.T) {
+	t.Helper()
+	prev := providerTimeout
+	providerTimeout = 10 * time.Second
+	t.Cleanup(func() { providerTimeout = prev })
+}
+
 func TestRunProviders(t *testing.T) {
+	withGenerousProviderTimeout(t)
 	dir := t.TempDir()
 	providersDir = dir
 
@@ -124,6 +139,7 @@ func TestRunProviders(t *testing.T) {
 }
 
 func TestRunProviders_Disabled(t *testing.T) {
+	withGenerousProviderTimeout(t)
 	dir := t.TempDir()
 	providersDir = dir
 
@@ -148,6 +164,7 @@ func TestRunProviders_Disabled(t *testing.T) {
 }
 
 func TestRunProviders_StdinPassthrough(t *testing.T) {
+	withGenerousProviderTimeout(t)
 	dir := t.TempDir()
 	providersDir = dir
 
