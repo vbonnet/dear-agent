@@ -199,7 +199,7 @@ func TestParseFrontmatterDate_ValidDate(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
+	expected := time.Date(2026, 3, 15, 0, 0, 0, 0, time.Local)
 	if !got.Equal(expected) {
 		t.Errorf("expected %v, got %v", expected, got)
 	}
@@ -257,7 +257,7 @@ func TestParseFrontmatterDate_InlineDateFormat(t *testing.T) {
 	}
 
 	// Should return the most recent inline date
-	expected := time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC)
+	expected := time.Date(2026, 3, 25, 0, 0, 0, 0, time.Local)
 	if !got.Equal(expected) {
 		t.Errorf("expected %v (latest inline date), got %v", expected, got)
 	}
@@ -278,7 +278,7 @@ func TestParseFrontmatterDate_InlineDateNoFrontmatter(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
+	expected := time.Date(2026, 3, 15, 0, 0, 0, 0, time.Local)
 	if !got.Equal(expected) {
 		t.Errorf("expected %v (latest inline date), got %v", expected, got)
 	}
@@ -299,7 +299,7 @@ func TestParseFrontmatterDate_FrontmatterDateTakesPrecedence(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	expected := time.Date(2026, 4, 1, 0, 0, 0, 0, time.Local)
 	if !got.Equal(expected) {
 		t.Errorf("expected frontmatter date %v to take precedence, got %v", expected, got)
 	}
