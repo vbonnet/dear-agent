@@ -30,6 +30,7 @@ func (s Severity) String() string {
 }
 
 func (s Severity) Emoji() string {
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch s {
 	case SeverityError:
 		return "🔴"

@@ -76,6 +76,7 @@ func (s *ScopeEnforcer) isAllowed(tool string) bool {
 		return false
 	}
 
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch s.policy {
 	case PolicyDeny:
 		// Must be explicitly allowed

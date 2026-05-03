@@ -321,6 +321,7 @@ func (d *Daemon) deliverMessage(entry messages.QueueEntry) error {
 	canReceive := session.CheckSessionDelivery(recipientManifest.Tmux.SessionName)
 	d.cfg.Logger.Info("Session delivery check", "session", entry.To, "display_state", currentState, "can_receive", canReceive, "message_id", entry.MessageID)
 
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch canReceive {
 	case state.CanReceiveYes:
 		// Prompt visible, no dialog blocking → deliver now

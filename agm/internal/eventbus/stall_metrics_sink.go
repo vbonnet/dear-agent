@@ -34,6 +34,7 @@ func NewStallMetricsSink() *StallMetricsSink {
 
 // HandleEvent processes a stall event and updates metrics.
 func (s *StallMetricsSink) HandleEvent(event *Event) error {
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch event.Type {
 	case EventStallDetected:
 		s.detected.Add(1)
