@@ -1,7 +1,7 @@
 # Workflow Engine — Backlog
 
 **Status:** Active
-**Last updated:** 2026-05-02
+**Last updated:** 2026-05-03
 **Source of truth for:** individual tickets within each phase. Phase-level
 status and architecture decisions live in
 [ROADMAP.md](../../ROADMAP.md) and
@@ -41,17 +41,17 @@ past its size, split it before continuing.
 
 **Goal:** every node-execution is a queryable row, every state transition
 is an audit event. Existing workflows run unchanged.
-**Phase status:** `pending`
+**Phase status:** `done (#38)`
 **Estimated:** 4 weeks
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 0.1 | Add `SQLiteState` implementing existing `State` interface | `pkg/workflow/state_sqlite.go`, `state_sqlite_test.go` | Pass existing `state_test.go` semantics; new `runner_perf_test.go` passes targets in ADR-010 §6 | — | M | `pending` |
-| 0.2 | Migrate `Snapshot` representation to relational schema | `pkg/workflow/types.go`, `state_sqlite.go` | All existing snapshot fields representable; backward-compatible JSON dump retained for `workflow migrate` | 0.1 | S | `pending` |
-| 0.3 | Add `runs` + `nodes` + `node_attempts` tables; runner writes per-attempt rows | `pkg/workflow/runner.go`, `state_sqlite.go`, schema migration | After a 5-node run with one retry, `SELECT * FROM nodes` shows 5 rows and `SELECT * FROM node_attempts` shows 6 rows | 0.2 | M | `pending` |
-| 0.4 | Add `audit_events` table + `AuditSink` interface; runner emits transitions | `pkg/workflow/audit.go`, `runner.go` | Every state transition produces an `audit_events` row; replayable from sink | 0.3 | M | `pending` |
-| 0.5 | CLI `dear-agent workflow status <run-id>` reading from SQLite | `cmd/workflow-status/main.go` | Output matches the spec in `ROADMAP.md`; `--json` and `--watch` flags work | 0.4 | S | `pending` |
-| 0.6 | CLI `dear-agent workflow list / cancel / logs` | `cmd/workflow-list/`, `cmd/workflow-cancel/`, `cmd/workflow-logs/` | All three commands tested against a real SQLite DB; respect `--state=` filter | 0.5 | M | `pending` |
+| 0.1 | Add `SQLiteState` implementing existing `State` interface | `pkg/workflow/state_sqlite.go`, `state_sqlite_test.go` | Pass existing `state_test.go` semantics; new `runner_perf_test.go` passes targets in ADR-010 §6 | — | M | `done (#38)` |
+| 0.2 | Migrate `Snapshot` representation to relational schema | `pkg/workflow/types.go`, `state_sqlite.go` | All existing snapshot fields representable; backward-compatible JSON dump retained for `workflow migrate` | 0.1 | S | `done (#38)` |
+| 0.3 | Add `runs` + `nodes` + `node_attempts` tables; runner writes per-attempt rows | `pkg/workflow/runner.go`, `state_sqlite.go`, schema migration | After a 5-node run with one retry, `SELECT * FROM nodes` shows 5 rows and `SELECT * FROM node_attempts` shows 6 rows | 0.2 | M | `done (#38)` |
+| 0.4 | Add `audit_events` table + `AuditSink` interface; runner emits transitions | `pkg/workflow/audit.go`, `runner.go` | Every state transition produces an `audit_events` row; replayable from sink | 0.3 | M | `done (#38)` |
+| 0.5 | CLI `dear-agent workflow status <run-id>` reading from SQLite | `cmd/workflow-status/main.go` | Output matches the spec in `ROADMAP.md`; `--json` and `--watch` flags work | 0.4 | S | `done (#38)` |
+| 0.6 | CLI `dear-agent workflow list / cancel / logs` | `cmd/workflow-list/`, `cmd/workflow-cancel/`, `cmd/workflow-logs/` | All three commands tested against a real SQLite DB; respect `--state=` filter | 0.5 | M | `done (#38)` |
 
 **Phase 0 ship criterion:** existing workflows run unchanged. `SELECT *
 FROM audit_events WHERE run_id = ?` returns every transition for the run.
@@ -65,19 +65,19 @@ event P95 < 1 ms (validated by `runner_perf_test.go`).
 **Goal:** AI nodes declare `role:` not `model:`. A central registry
 resolves the role to a model tier. Budgets are enforced per-node and
 per-run.
-**Phase status:** `pending`
+**Phase status:** `done`
 **Estimated:** 3 weeks
 **Depends on:** Phase 0
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 1.1 | Schema additions: `role`, `permissions`, `budget`, `exit_gate`, `hitl`, `context_policy`, `outputs[]` | `pkg/workflow/types.go`, `load.go`, `load_test.go` | YAML round-trips; `Validate` accepts/rejects per ADR-010 §D; existing workflows still pass | 0.* | M | `pending` |
-| 1.2 | Role registry + resolver | `pkg/workflow/roles/registry.go`, `roles/resolver.go`, `roles/resolver_test.go` | Resolves correctly for primary/secondary/tertiary; capacity, cost, capability filters per ROADMAP "Resolution algorithm" | 1.1 | M | `pending` |
-| 1.3 | Budget enforcement at `AIExecutor` wrapper | `pkg/workflow/budget.go`, `budget_test.go` | Run hitting ceiling triggers `on_overrun` policy (escalate/fail/truncate); live `$` printout in CLI | 1.2 | S | `pending` |
-| 1.4 | Permission enforcer interface; bash + ai check tool/path allowlists | `pkg/workflow/permissions.go`, `permissions_test.go` | Rejected tool call produces audit row + node failure; allowlist semantics match ADR-010 §D5 | 1.1 | M | `pending` |
-| 1.5 | Exit-gate evaluator (5 kinds: bash, regex_match, json_schema, test_cmd, confidence_score) | `pkg/workflow/exit_gate.go`, `exit_gate_test.go` | Each kind has unit tests; gate failure short-circuits and transitions node to `failed`; gates evaluated in declared order | 1.1 | M | `pending` |
-| 1.6 | `outputs[]` map-shape + path resolution + durability tier writer | `pkg/workflow/outputs.go`, `outputs_test.go` | Files materialize at declared paths; `git_committed` writes a commit; node refuses `succeeded` if a declared output is missing | 1.1 | M | `pending` |
-| 1.7 | `workflow lint` command | `cmd/workflow-lint/main.go` | `--check-deprecated-models` lists every node with hardcoded `model:` or `model_override:` pointing at a deprecated model | 1.2 | S | `pending` |
+| 1.1 | Schema additions: `role`, `permissions`, `budget`, `exit_gate`, `hitl`, `context_policy`, `outputs[]` | `pkg/workflow/types.go`, `load.go`, `load_test.go` | YAML round-trips; `Validate` accepts/rejects per ADR-010 §D; existing workflows still pass | 0.* | M | `done` |
+| 1.2 | Role registry + resolver | `pkg/workflow/roles/registry.go`, `roles/resolver.go`, `roles/registry_test.go` | Resolves correctly for primary/secondary/tertiary; capacity, cost, capability filters per ROADMAP "Resolution algorithm" | 1.1 | M | `done` |
+| 1.3 | Budget enforcement at `AIExecutor` wrapper | `pkg/workflow/budget.go`, `budget_test.go` | Run hitting ceiling triggers `on_overrun` policy (escalate/fail/truncate); live `$` printout in CLI | 1.2 | S | `done` |
+| 1.4 | Permission enforcer interface; bash + ai check tool/path allowlists | `pkg/workflow/permissions.go`, `permissions_test.go` | Rejected tool call produces audit row + node failure; allowlist semantics match ADR-010 §D5 | 1.1 | M | `done` |
+| 1.5 | Exit-gate evaluator (5 kinds: bash, regex_match, json_schema, test_cmd, confidence_score) | `pkg/workflow/exit_gate.go`, `exit_gate_test.go` | Each kind has unit tests; gate failure short-circuits and transitions node to `failed`; gates evaluated in declared order | 1.1 | M | `done` |
+| 1.6 | `outputs[]` map-shape + path resolution + durability tier writer | `pkg/workflow/outputs.go`, `outputs_test.go` | Files materialize at declared paths; `git_committed` writes a commit; node refuses `succeeded` if a declared output is missing | 1.1 | M | `done` |
+| 1.7 | `workflow lint` + `workflow roles` commands | `cmd/workflow-lint/main.go`, `cmd/workflow-roles/main.go` | `--check-deprecated-models` lists every node with hardcoded `model:` or `model_override:` pointing at a deprecated model; `workflow-roles list/describe/validate` matches ROADMAP "Role-based model mapping" | 1.2 | S | `done` |
 
 **Phase 1 ship criterion:** `dear-agent workflow lint
 --check-deprecated-models` passes on all existing workflows after a
@@ -91,7 +91,7 @@ in use.
 
 **Goal:** the engine becomes substrate-grade — bounded permissions,
 human-in-the-loop gates, declared outputs with durability tiers.
-**Phase status:** `pending`
+**Phase status:** `done (#40)`
 **Estimated:** 4 weeks
 **Depends on:** Phase 1
 
@@ -101,12 +101,12 @@ human-in-the-loop gates, declared outputs with durability tiers.
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 2.1 | DEAR hook surface: `OnDefine`, `OnEnforce`, `OnAudit`, `OnResolve` | `pkg/workflow/hooks.go`, `hooks_test.go` | Each hook called with documented payload; hook errors surfaced in audit_events | 1.* | S | `pending` |
-| 2.2 | HITL: `awaiting_hitl` state, approver_role check, timeout policy | `pkg/workflow/hitl.go`, runner integration | Block → approve via CLI → resume; timeout fires `on_timeout`; rejection transitions node to `failed` | 1.1 | M | `pending` |
-| 2.3 | `dear-agent workflow approve / reject` CLI | `cmd/workflow-approve/main.go` | Round-trip with HITL backend; `--as <role>` enforces approver_role match; `--reason` audit-logged | 2.2 | S | `pending` |
-| 2.4 | Audit subscribers: stdout, JSONL file, Engram, OpenTelemetry | `pkg/workflow/audit_stdout.go`, `audit_jsonl.go`, `audit_engram.go`, `audit_otel.go` | Each sink has tests; sinks composable; failure of one sink doesn't break the run | 2.1 | M | `pending` |
-| 2.5 | MCP server with 5 workflow tools | `cmd/dear-agent-mcp/workflow.go` | Tools: `workflow_run / status / approve / reject / cancel`. All callable from a vanilla MCP client | 2.3 | M | `pending` |
-| 2.6 | Discord HITL backend (extends existing AGM bot) | `wayfinder/internal/hitl_discord.go` (or new `pkg/hitl/discord/`) | Bot reads `audit_events` for new HITL rows; renders summary; reply-to-approve writes to `approvals` table | 2.4 | M | `pending` |
+| 2.1 | DEAR hook surface: `OnDefine`, `OnEnforce`, `OnAudit`, `OnResolve` | `pkg/workflow/hooks.go`, `hooks_test.go` | Each hook called with documented payload; hook errors surfaced in audit_events | 1.* | S | `done (#40)` |
+| 2.2 | HITL: `awaiting_hitl` state, approver_role check, timeout policy | `pkg/workflow/hitl.go`, `runner_hitl.go` | Block → approve via CLI → resume; timeout fires `on_timeout`; rejection transitions node to `failed` | 1.1 | M | `done (#40)` |
+| 2.3 | `dear-agent workflow approve / reject` CLI | `cmd/workflow-approve/main.go` | Round-trip with HITL backend; `--as <role>` enforces approver_role match; `--reason` audit-logged | 2.2 | S | `done (#40)` |
+| 2.4 | Audit subscribers: stdout, JSONL file, Engram, OpenTelemetry | `pkg/workflow/audit_stdout.go`, `audit_jsonl.go`, `audit_engram.go`, `audit_otel.go` | Each sink has tests; sinks composable; failure of one sink doesn't break the run | 2.1 | M | `done (#40)` |
+| 2.5 | MCP server with 5 workflow tools | `cmd/dear-agent-mcp/workflow.go` | Tools: `workflow_run / status / approve / reject / cancel`. All callable from a vanilla MCP client | 2.3 | M | `done (#40)` |
+| 2.6 | Discord HITL backend (extends existing AGM bot) | `pkg/hitl/discord/backend.go` | Bot reads `audit_events` for new HITL rows; renders summary; reply-to-approve writes to `approvals` table | 2.4 | M | `done (#40)` |
 
 **Phase 2 ship criterion:** Wayfinder migrates one project end-to-end
 onto the engine. Discord approval round-trip works. Substrate score
@@ -119,17 +119,17 @@ onto the engine. Discord approval round-trip works. Substrate score
 **Goal:** node outputs become addressable knowledge. `dear-agent search
 "topic"` returns sources cited by previous research runs, joined to
 their work-items.
-**Phase status:** `pending`
+**Phase status:** `done`
 **Estimated:** 2 weeks
 **Depends on:** Phase 0 (parallelizable with Phase 1 + Phase 2)
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 3.1 | `pkg/source` adapter interface | `pkg/source/adapter.go` | Interface matches ADR-010 §D9 contract; documented godoc | — | S | `pending` |
-| 3.2 | SQLite + FTS5 adapter | `pkg/source/sqlite/adapter.go`, `adapter_test.go` | FTS round-trip; 10K-row Fetch P95 < 50 ms | 3.1 | M | `pending` |
-| 3.3 | MCP tools `FetchSource` / `AddSource` | `cmd/dear-agent-mcp/source.go` | Tools call through adapter; reject backend mismatch with clear error | 3.2 | S | `pending` |
-| 3.4 | Wire `outputs.durability=engram_indexed` to `AddSource` | `pkg/workflow/outputs.go` (extends 1.6) | Run produces a row in `sources` table per node-output declared `engram_indexed` | 3.3, 1.6 | S | `pending` |
-| 3.5 | `dear-agent search` CLI | `cmd/dear-agent-search/main.go` | Returns results joined to `runs.run_id`; `--since` flag filters | 3.4 | S | `pending` |
+| 3.1 | `pkg/source` adapter interface | `pkg/source/adapter.go` | Interface matches ADR-010 §D9 contract; documented godoc | — | S | `done` |
+| 3.2 | SQLite + FTS5 adapter | `pkg/source/sqlite/adapter.go`, `adapter_test.go` | FTS round-trip; 10K-row Fetch P95 < 50 ms | 3.1 | M | `done` |
+| 3.3 | MCP tools `FetchSource` / `AddSource` | `cmd/dear-agent-mcp/source.go` | Tools call through adapter; reject backend mismatch with clear error | 3.2 | S | `done` |
+| 3.4 | Wire `outputs.durability=engram_indexed` to `AddSource` | `pkg/workflow/outputs.go` (extends 1.6) | Run produces a row in `sources` table per node-output declared `engram_indexed` | 3.3, 1.6 | S | `done` |
+| 3.5 | `dear-agent search` CLI | `cmd/dear-agent-search/main.go` | Returns results joined to `runs.run_id`; `--since` flag filters | 3.4 | S | `done` |
 
 **Phase 3 ship criterion:** `dear-agent search` returns results from the
 last 30 days of research outputs, joined to their work-item ids; FTS
@@ -141,17 +141,17 @@ round-trip P95 < 50 ms on 10K rows.
 
 **Goal:** real workloads run on the engine; the inner-loop iteration
 experience matches the synthesis's "10-minute walkthrough" target.
-**Phase status:** `pending`
+**Phase status:** `partial — 4.3 + 4.5 done; 4.1, 4.2, 4.4 pending`
 **Estimated:** 4 weeks
 **Depends on:** Phases 1, 2, and 3
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 4.1 | Codemod existing research pipeline workflow | `workflows/research/*.yaml` | Lint-clean against new schema; runs end-to-end against fixture LLM | 1.*, 3.* | S | `pending` |
-| 4.2 | Codemod Wayfinder phase definitions | `workflows/wayfinder/*.yaml` | Lint-clean; one Wayfinder project executes end-to-end with HITL gates | 2.* | M | `pending` |
-| 4.3 | Deprecate JSON `FileState` path; provide migration tool | `cmd/workflow-migrate/main.go` | Old snapshot → SQLite db; round-trip preserves all fields | 0.* | S | `pending` |
-| 4.4 | `workflow dev` interactive mode | `cmd/workflow-dev/main.go`, `pkg/workflow/dev/` | Hot-reload; mock-by-default fixtures; verbs: `r / r --live / approve <node> / retry <node> / diff <node>`; sub-second iteration on prompt change | 1.*, 2.* | L | `pending` |
-| 4.5 | Documentation: `docs/workflow-engine.md` | new file | Includes the 10-minute walkthrough; covers role registry, HITL, outputs, search | all | S | `pending` |
+| 4.1 | Codemod existing research pipeline workflow | `workflows/research/*.yaml` | Lint-clean against new schema; runs end-to-end against fixture LLM | 1.*, 3.* | S | `pending — no v0.1 research workflow exists yet to codemod; ships when we author the workflow itself` |
+| 4.2 | Codemod Wayfinder phase definitions | `workflows/wayfinder/*.yaml` | Lint-clean; one Wayfinder project executes end-to-end with HITL gates | 2.* | M | `pending — Wayfinder phase definitions not yet expressed as workflow YAMLs` |
+| 4.3 | Deprecate JSON `FileState` path; provide migration tool | `cmd/workflow-migrate/main.go` | Old snapshot → SQLite db; round-trip preserves all fields | 0.* | S | `done` |
+| 4.4 | `workflow dev` interactive mode | `cmd/workflow-dev/main.go`, `pkg/workflow/dev/` | Hot-reload; mock-by-default fixtures; verbs: `r / r --live / approve <node> / retry <node> / diff <node>`; sub-second iteration on prompt change | 1.*, 2.* | L | `pending — L-sized; tracked separately` |
+| 4.5 | Documentation: `docs/workflow-engine.md` | new file | Includes the 10-minute walkthrough; covers role registry, HITL, outputs, search | all | S | `done` |
 
 **Phase 4 ship criterion:** new user goes `brew install` → useful workflow
 in ten minutes. Recorded fixtures make iteration sub-second. All existing
@@ -162,17 +162,28 @@ workflows have been migrated and lint-clean.
 ## Phase 5 — Adapters + visual inspector + `kind: spawn` (open-ended)
 
 **Goal:** the engine is extensible. Plugin packaging keeps the core small.
-**Phase status:** `pending`
+**Phase status:** `pending — awaits demand signal`
 **Estimated:** open-ended; ship items as demand surfaces
+
+> **Why deferred (2026-05-03):** Phases 0–3 are fully shipped and Phase 4
+> partial (4.3 + 4.5) shipped on the same day. Every Phase 5 ticket is
+> M- or L-sized and is gated either on a concrete user (5.1 wants an
+> Obsidian-using developer; 5.2 wants llm-wiki adoption; 5.3 wants an
+> enterprise customer; 5.5 wants someone to ask for a UI) or on a
+> non-trivial runner change without a current driver (5.4 changes the
+> DAG mid-execution; 5.6 needs a packaging story per adapter — which
+> means at least one of 5.1–5.3 has to land first). Picking any of
+> these without a real driver is speculative; the roadmap has always
+> said "ship items as demand surfaces" for this phase.
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 5.1 | Obsidian adapter (single-user dual-write) | `pkg/source/obsidian/` | Write to vault; Fetch via grep over vault; round-trip preserves frontmatter | 3.1 | M | `pending` |
-| 5.2 | llm-wiki adapter (markdown + git) | `pkg/source/llmwiki/` | Write to wiki repo; commits per output | 3.1 | M | `pending` |
-| 5.3 | OpenViking adapter (graph DB; future / enterprise) | `pkg/source/openviking/` | Behind build tag; ship when an enterprise customer asks | 3.1 | L | `pending` |
-| 5.4 | `kind: spawn` for emergent DAG growth | `pkg/workflow/types.go`, `runner.go` | Spawned nodes appear in `nodes` table with parent linkage; cycle detection still works | 1.* | M | `pending` |
-| 5.5 | Visual run inspector (web UI reading SQLite) | new package, e.g. `cmd/workflow-inspector/` | Read-only; renders DAG with state colors; no authoring | 0.* | L | `pending` |
-| 5.6 | Plugin packaging | build/release scripts | Core ships small; adapters as plugins | 5.1+ | M | `pending` |
+| 5.1 | Obsidian adapter (single-user dual-write) | `pkg/source/obsidian/` | Write to vault; Fetch via grep over vault; round-trip preserves frontmatter | 3.1 | M | `pending — needs Obsidian-using driver` |
+| 5.2 | llm-wiki adapter (markdown + git) | `pkg/source/llmwiki/` | Write to wiki repo; commits per output | 3.1 | M | `pending — needs llm-wiki driver` |
+| 5.3 | OpenViking adapter (graph DB; future / enterprise) | `pkg/source/openviking/` | Behind build tag; ship when an enterprise customer asks | 3.1 | L | `pending — enterprise gate` |
+| 5.4 | `kind: spawn` for emergent DAG growth | `pkg/workflow/types.go`, `runner.go` | Spawned nodes appear in `nodes` table with parent linkage; cycle detection still works | 1.* | M | `pending — runner change; no current spawning workflow to validate against` |
+| 5.5 | Visual run inspector (web UI reading SQLite) | new package, e.g. `cmd/workflow-inspector/` | Read-only; renders DAG with state colors; no authoring | 0.* | L | `pending — CLI status currently sufficient` |
+| 5.6 | Plugin packaging | build/release scripts | Core ships small; adapters as plugins | 5.1+ | M | `pending — depends on at least one of 5.1–5.3 landing` |
 
 ---
 
@@ -187,6 +198,8 @@ phase. Triage as they come up.
 | X.2 | Cost-per-mtok refresh in `roles.yaml` | ADR open question §3; punted to post-MVS |
 | X.3 | Per-tenant isolation | ADR open question §2; punted to post-MVS |
 | X.4 | GitHub-PR HITL backend | ADR open question §4; not in v1 |
+| DEAR-X.5 | Flaky `TestSQLiteStateConcurrentSaves` (SQLITE_BUSY on schema apply) | Pre-existing as of #38; reproduces on main with `-count=100`. Root cause: 10 concurrent `OpenSQLiteState` calls each call `db.PingContext` + `ExecContext(sqliteSchema)`, racing on the WAL-creation handshake. Fix is likely a once-per-path schema-apply guard, or move schema apply behind a file lock. |
+| DEAR-X.6 | Phase 2 wiring for Phase 1 schema fields | `permissions`, `hitl`, `context_policy`, and exit-gate failure modes are validated in Phase 1 but only partially enforced in the runner. Phase 2.* tickets cover the runner integration (HITL state, audit-row emission for permission denials, context_policy resolver). |
 
 ---
 

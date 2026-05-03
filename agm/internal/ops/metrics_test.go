@@ -184,10 +184,16 @@ func TestGenerateAlerts_Throughput(t *testing.T) {
 
 func TestCollectThroughputMetrics_WorkersLaunched(t *testing.T) {
 	now := time.Now()
+	// CreatedAt uses the literal "Z" suffix and is parsed by
+	// collectThroughputMetrics as UTC. Format from UTC so the round-trip
+	// produces an instant equal to `now`, not skewed by the local offset.
+	fmtUTC := func(t time.Time) string {
+		return t.UTC().Format("2006-01-02T15:04:05Z")
+	}
 	sessions := []SessionSummary{
-		{CreatedAt: now.Add(-30 * time.Minute).Format("2006-01-02T15:04:05Z")},
-		{CreatedAt: now.Add(-90 * time.Minute).Format("2006-01-02T15:04:05Z")},
-		{CreatedAt: now.Add(-10 * time.Minute).Format("2006-01-02T15:04:05Z")},
+		{CreatedAt: fmtUTC(now.Add(-30 * time.Minute))},
+		{CreatedAt: fmtUTC(now.Add(-90 * time.Minute))},
+		{CreatedAt: fmtUTC(now.Add(-10 * time.Minute))},
 	}
 
 	tp := collectThroughputMetrics(sessions, now, time.Hour)
