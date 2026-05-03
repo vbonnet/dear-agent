@@ -1,3 +1,4 @@
+// Package trigger provides trigger-related functionality.
 package trigger
 
 import (

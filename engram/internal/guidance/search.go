@@ -1,3 +1,4 @@
+// Package guidance provides guidance-related functionality.
 package guidance
 
 import (

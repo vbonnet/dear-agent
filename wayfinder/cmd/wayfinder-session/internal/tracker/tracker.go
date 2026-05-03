@@ -1,3 +1,4 @@
+// Package tracker provides tracker-related functionality.
 package tracker
 
 import (

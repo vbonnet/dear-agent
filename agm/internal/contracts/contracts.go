@@ -1,3 +1,4 @@
+// Package contracts provides contracts-related functionality.
 package contracts
 
 import (

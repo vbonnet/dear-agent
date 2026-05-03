@@ -1,3 +1,4 @@
+// Package otelsetup provides otelsetup-related functionality.
 // JSONL SpanExporter writes completed spans to a JSONL file for offline
 // analysis by the session summary and retrospective hooks.
 //

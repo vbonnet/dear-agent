@@ -1,3 +1,4 @@
+// Package simple provides simple-related functionality.
 package simple
 
 import (

@@ -1,3 +1,4 @@
+// Package s7 provides s7-related functionality.
 package s7
 
 import (

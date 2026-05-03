@@ -1,3 +1,4 @@
+// Package dod provides dod-related functionality.
 package dod
 
 import (

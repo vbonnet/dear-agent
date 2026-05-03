@@ -1,3 +1,4 @@
+// Package scope provides scope-related functionality.
 package scope
 
 import (

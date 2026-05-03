@@ -1,3 +1,4 @@
+// Package metacontext provides metacontext-related functionality.
 package metacontext
 
 import (

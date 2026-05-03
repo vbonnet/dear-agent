@@ -1,3 +1,4 @@
+// Package dashboard provides dashboard-related functionality.
 package dashboard
 
 import (

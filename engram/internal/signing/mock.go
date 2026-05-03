@@ -1,3 +1,4 @@
+// Package signing provides signing-related functionality.
 package signing
 
 import (

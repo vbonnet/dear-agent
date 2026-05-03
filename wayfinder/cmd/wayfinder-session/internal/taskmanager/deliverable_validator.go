@@ -1,3 +1,4 @@
+// Package taskmanager provides taskmanager-related functionality.
 package taskmanager
 
 import (

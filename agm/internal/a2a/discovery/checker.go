@@ -1,3 +1,4 @@
+// Package discovery provides discovery-related functionality.
 package discovery
 
 import (

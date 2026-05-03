@@ -1,3 +1,4 @@
+// Package memory provides memory-related functionality.
 package memory
 
 import (

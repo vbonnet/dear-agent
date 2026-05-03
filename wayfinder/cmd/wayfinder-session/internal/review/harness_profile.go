@@ -1,3 +1,4 @@
+// Package review provides review-related functionality.
 package review
 
 // HarnessProfile defines the process depth profile for a task based on its risk level.

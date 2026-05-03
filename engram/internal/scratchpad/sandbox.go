@@ -1,3 +1,4 @@
+// Package scratchpad provides scratchpad-related functionality.
 package scratchpad
 
 import (

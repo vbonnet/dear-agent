@@ -1,3 +1,4 @@
+// Package migrate provides migrate-related functionality.
 package migrate
 
 import (

@@ -1,3 +1,4 @@
+// Package protocol provides protocol-related functionality.
 package protocol
 
 import (

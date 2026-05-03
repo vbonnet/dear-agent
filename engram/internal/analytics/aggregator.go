@@ -1,3 +1,4 @@
+// Package analytics provides analytics-related functionality.
 package analytics
 
 import (

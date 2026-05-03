@@ -1,3 +1,4 @@
+// Package wayfinder provides wayfinder-related functionality.
 package wayfinder
 
 import (

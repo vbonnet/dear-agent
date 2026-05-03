@@ -1,3 +1,4 @@
+// Package intake provides intake-related functionality.
 package intake
 
 import (

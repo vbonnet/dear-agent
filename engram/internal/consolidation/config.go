@@ -1,3 +1,4 @@
+// Package consolidation provides consolidation-related functionality.
 package consolidation
 
 import (

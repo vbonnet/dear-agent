@@ -1,3 +1,4 @@
+// Package hooks provides hooks-related functionality.
 package hooks
 
 import (

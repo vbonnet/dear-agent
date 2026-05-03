@@ -1,3 +1,4 @@
+// Package errormemory provides errormemory-related functionality.
 package errormemory
 
 import (

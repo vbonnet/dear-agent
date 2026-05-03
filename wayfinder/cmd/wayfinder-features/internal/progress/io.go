@@ -1,3 +1,4 @@
+// Package progress provides progress-related functionality.
 package progress
 
 import (
