@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 )
 
 
@@ -21,9 +22,11 @@ import (
 var ErrOutputMissing = errors.New("workflow: declared output missing")
 
 // OutputWriter materialises declared outputs and (for tiers that
-// require it) records them in the node_outputs table. Phase 1 covers
-// the local_disk and git_committed tiers; engram_indexed is wired in
-// Phase 3 and currently behaves like local_disk + a TODO.
+// require it) records them in the node_outputs table. Phase 1 covered
+// the local_disk and git_committed tiers; Phase 3 wires
+// engram_indexed through pkg/source.Adapter so the artifact is added
+// to the knowledge corpus and becomes addressable via FetchSource and
+// `dear-agent search`.
 //
 // The writer is intentionally tiny — paths are resolved as Go
 // templates over the run's inputs/outputs/run_id, and the file is
@@ -45,6 +48,38 @@ type OutputWriter struct {
 	// WorkflowDir; nil disables git commit (the file is still written
 	// to disk).
 	Git GitCommitter
+
+	// SourceIndexer, if non-nil, indexes engram_indexed outputs into
+	// the knowledge store. Implemented by anything that satisfies the
+	// minimal Add+Name surface — pkg/source.Adapter is the production
+	// implementation; tests use a fake. Nil disables indexing (the
+	// file is still written and recorded as engram_indexed in
+	// node_outputs).
+	SourceIndexer SourceIndexer
+}
+
+// SourceIndexer is the small surface of pkg/source.Adapter that
+// OutputWriter actually uses. Defined as a local interface so
+// pkg/workflow does not import pkg/source — keeping the dependency
+// graph one-way (workflow → source via composition, never the other
+// direction).
+type SourceIndexer interface {
+	Name() string
+	Add(ctx context.Context, s SourceArtifact) error
+}
+
+// SourceArtifact is the minimal payload OutputWriter hands to
+// SourceIndexer for an engram_indexed output. Mirrors the substantive
+// fields of pkg/source.Source without taking the dependency.
+type SourceArtifact struct {
+	URI         string
+	Title       string
+	Snippet     string
+	Content     []byte
+	ContentType string
+	WorkItem    string
+	Cues        []string
+	IndexedAt   time.Time
 }
 
 // OutputRecorder is the substrate hook for writing node_outputs rows.
@@ -88,6 +123,7 @@ type GitCommitter interface {
 func (w *OutputWriter) MaterialiseOutputs(ctx context.Context, runID, nodeID string, specs map[string]OutputSpec, nc *nodeContext) error {
 	keys := sortedKeys(specs)
 	gitCommittedPaths := make([]string, 0, len(keys))
+	engramIndexed := make([]engramOutput, 0)
 	for _, key := range keys {
 		spec := specs[key]
 		path, err := w.resolvePath(spec.Path, runID, nc)
@@ -115,6 +151,9 @@ func (w *OutputWriter) MaterialiseOutputs(ctx context.Context, runID, nodeID str
 			if spec.Durability == DurabilityGitCommitted {
 				gitCommittedPaths = append(gitCommittedPaths, path)
 			}
+			if spec.Durability == DurabilityEngramIndexed {
+				engramIndexed = append(engramIndexed, engramOutput{key: key, path: path, spec: spec})
+			}
 		default:
 			return fmt.Errorf("output %q: unknown durability %q", key, spec.Durability)
 		}
@@ -125,7 +164,66 @@ func (w *OutputWriter) MaterialiseOutputs(ctx context.Context, runID, nodeID str
 			return fmt.Errorf("git_committed: %w", err)
 		}
 	}
+	if len(engramIndexed) > 0 && w.SourceIndexer != nil {
+		for _, out := range engramIndexed {
+			if err := w.indexOutput(ctx, runID, nodeID, out); err != nil {
+				return fmt.Errorf("engram_indexed %q: %w", out.key, err)
+			}
+		}
+	}
 	return nil
+}
+
+// engramOutput is the per-output bundle MaterialiseOutputs hands to
+// the SourceIndexer once all local-disk + git-committed work has
+// finished. Indexing happens last so a partial git failure doesn't
+// leave the corpus referencing files that didn't make it onto disk.
+type engramOutput struct {
+	key  string
+	path string
+	spec OutputSpec
+}
+
+// indexOutput reads the materialised file and forwards it to the
+// SourceIndexer. The URI is constructed deterministically from
+// runID/nodeID/key so re-running a node updates the same Source row
+// rather than spawning a duplicate.
+func (w *OutputWriter) indexOutput(ctx context.Context, runID, nodeID string, out engramOutput) error {
+	content, err := os.ReadFile(out.path) //nolint:gosec // path comes from operator-controlled YAML
+	if err != nil {
+		return fmt.Errorf("read: %w", err)
+	}
+	uri := fmt.Sprintf("workflow://%s/%s/%s", runID, nodeID, out.key)
+	title := filepath.Base(out.path)
+	art := SourceArtifact{
+		URI:         uri,
+		Title:       title,
+		Snippet:     snippetFor(content),
+		Content:     content,
+		ContentType: out.spec.ContentType,
+		WorkItem:    fmt.Sprintf("%s/%s", runID, nodeID),
+		Cues:        []string{nodeID, out.key},
+		IndexedAt:   time.Now().UTC(),
+	}
+	return w.SourceIndexer.Add(ctx, art)
+}
+
+// snippetFor returns the first non-blank line of content, capped at
+// 200 bytes. Cheap, deterministic, and good enough for a "preview"
+// shown by `dear-agent search`.
+func snippetFor(b []byte) string {
+	const cap = 200
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if len(line) > cap {
+			return line[:cap]
+		}
+		return line
+	}
+	return ""
 }
 
 // resolvePath renders the path template and joins it against
