@@ -38,6 +38,7 @@ import (
 	// "provider not available".
 	_ "github.com/vbonnet/dear-agent/internal/sandbox/apfs"
 	_ "github.com/vbonnet/dear-agent/internal/sandbox/bubblewrap"
+	_ "github.com/vbonnet/dear-agent/internal/sandbox/gvisor"
 	_ "github.com/vbonnet/dear-agent/internal/sandbox/overlayfs"
 )
 

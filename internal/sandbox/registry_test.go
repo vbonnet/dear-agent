@@ -12,6 +12,7 @@ import (
 	// Import providers to trigger registration via init().
 	_ "github.com/vbonnet/dear-agent/internal/sandbox/apfs"
 	_ "github.com/vbonnet/dear-agent/internal/sandbox/bubblewrap"
+	_ "github.com/vbonnet/dear-agent/internal/sandbox/gvisor"
 	_ "github.com/vbonnet/dear-agent/internal/sandbox/overlayfs"
 )
 
@@ -45,6 +46,18 @@ func TestProviderRegistration_Bubblewrap(t *testing.T) {
 	require.NoError(t, err, "bubblewrap should be registered via init()")
 	require.NotNil(t, provider)
 	assert.Equal(t, "bubblewrap", provider.Name())
+}
+
+func TestProviderRegistration_GVisor(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS != "linux" {
+		t.Skip("gvisor provider is Linux-only; stub does not register on macOS/Windows")
+	}
+	provider, err := sandbox.NewProviderForPlatform("gvisor")
+	require.NoError(t, err, "gvisor should be registered via init() on linux")
+	require.NotNil(t, provider)
+	assert.Equal(t, "gvisor", provider.Name())
 }
 
 func TestProviderRegistration_Mock(t *testing.T) {

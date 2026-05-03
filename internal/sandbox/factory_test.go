@@ -264,6 +264,22 @@ func TestNewProviderForPlatform_Implemented(t *testing.T) {
 		}
 	})
 
+	t.Run("gvisor", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skipf("gvisor is Linux-only; skipping on %s", runtime.GOOS)
+		}
+		provider, err := sandbox.NewProviderForPlatform("gvisor")
+		if err != nil {
+			t.Errorf("NewProviderForPlatform(gvisor) should succeed on linux: %v", err)
+		}
+		if provider == nil {
+			t.Error("Provider should not be nil for gvisor")
+		}
+		if provider != nil && provider.Name() != "gvisor" {
+			t.Errorf("Provider name should be 'gvisor', got '%s'", provider.Name())
+		}
+	})
+
 	t.Run("mock", func(t *testing.T) {
 		provider, err := sandbox.NewProviderForPlatform("mock")
 
