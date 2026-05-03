@@ -130,7 +130,7 @@ func (r *MermaidRenderer) Validate(ctx context.Context, source io.Reader) error 
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("Mermaid validation failed: %s", stderr.String())
+		return fmt.Errorf("mermaid validation failed: %s", stderr.String())
 	}
 
 	return nil

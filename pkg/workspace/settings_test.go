@@ -58,7 +58,7 @@ func TestSettingsResolver_ResolveSetting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.envValue != "" {
-				os.Setenv(tt.envVar, tt.envValue)
+				t.Setenv(tt.envVar, tt.envValue)
 				defer os.Unsetenv(tt.envVar)
 			}
 

@@ -47,7 +47,7 @@ func TestNoColorFlag(t *testing.T) {
 
 			// Set env var if specified
 			if tt.envVar != "" {
-				os.Setenv("NO_COLOR", tt.envVar)
+				t.Setenv("NO_COLOR", tt.envVar)
 				defer os.Unsetenv("NO_COLOR")
 			}
 
@@ -108,7 +108,7 @@ func TestScreenReaderFlag(t *testing.T) {
 
 			// Set env var if specified
 			if tt.envVar != "" {
-				os.Setenv("AGM_SCREEN_READER", tt.envVar)
+				t.Setenv("AGM_SCREEN_READER", tt.envVar)
 				defer os.Unsetenv("AGM_SCREEN_READER")
 			}
 
@@ -206,7 +206,7 @@ func TestBoldWithNoColor(t *testing.T) {
 			SetGlobalConfig(cfg)
 
 			if tt.envVar != "" {
-				os.Setenv("NO_COLOR", tt.envVar)
+				t.Setenv("NO_COLOR", tt.envVar)
 				defer os.Unsetenv("NO_COLOR")
 			}
 

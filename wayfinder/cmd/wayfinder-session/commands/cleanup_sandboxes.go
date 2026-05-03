@@ -1,3 +1,4 @@
+// Package commands provides commands-related functionality.
 package commands
 
 import (

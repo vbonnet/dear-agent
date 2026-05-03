@@ -142,16 +142,8 @@ func TestAGM(t *testing.T) {
 			switch cond {
 			case "can-create-tmux-session":
 				// Check if agm can create sessions in a sandboxed environment.
-				socketDir, err := os.MkdirTemp("/tmp", "agm-cond-")
-				if err != nil {
-					return false, nil
-				}
-				defer os.RemoveAll(socketDir)
-				homeDir, err := os.MkdirTemp("/tmp", "agm-home-")
-				if err != nil {
-					return false, nil
-				}
-				defer os.RemoveAll(homeDir)
+				socketDir := t.TempDir()
+				homeDir := t.TempDir()
 				os.MkdirAll(homeDir+"/sessions", 0755)
 				os.MkdirAll(homeDir+"/.claude", 0755)
 

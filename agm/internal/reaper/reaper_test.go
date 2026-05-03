@@ -90,5 +90,5 @@ func TestReaperStructure(t *testing.T) {
 	}
 
 	// Verify Run method exists (compile-time check)
-	var _ func() error = r.Run
+	var _ = r.Run
 }

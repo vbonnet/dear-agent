@@ -17,7 +17,7 @@ func TestClaudeAdapterImplementsAgentInterface(t *testing.T) {
 	}
 
 	// Verify adapter implements Agent interface
-	var _ Agent = adapter
+	var _ = adapter
 }
 
 // TestClaudeAdapterName tests Name() method.

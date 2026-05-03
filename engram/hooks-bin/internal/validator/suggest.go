@@ -20,8 +20,6 @@ var (
 	// git switch branch → extract branch
 	gitSwitchRe = regexp.MustCompile(`\bgit\s+(?:-C\s+\S+\s+)?switch\s+(?:-c\s+)?(\S+)`)
 
-	// git stash [push|pop|apply] → extract subcommand
-	gitStashRe = regexp.MustCompile(`\bgit\s+(?:-C\s+\S+\s+)?stash\s*(\S*)`)
 
 	// git add . / git add -A → extract what was being added
 	gitAddBroadRe = regexp.MustCompile(`\bgit\s+(?:-C\s+(\S+)\s+)?add\s+(\.|--all|--update|-A|-u)`)

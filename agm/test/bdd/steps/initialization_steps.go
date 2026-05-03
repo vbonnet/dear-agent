@@ -104,7 +104,7 @@ func claudeRunningInSession(ctx context.Context) (context.Context, error) {
 
 	// Check for Claude prompt pattern
 	if !strings.Contains(string(output), "❯") {
-		return ctx, fmt.Errorf("Claude prompt not found in session output")
+		return ctx, fmt.Errorf("claude prompt not found in session output")
 	}
 
 	return ctx, nil
@@ -146,7 +146,7 @@ func claudeStartsWithinSeconds(ctx context.Context, seconds int) (context.Contex
 	// Wait for Claude prompt
 	err := tmux.WaitForClaudePrompt(sessionName, time.Duration(seconds)*time.Second)
 	if err != nil {
-		return ctx, fmt.Errorf("Claude did not start within %ds: %v", seconds, err)
+		return ctx, fmt.Errorf("claude did not start within %ds: %w", seconds, err)
 	}
 
 	return ctx, nil
@@ -161,7 +161,7 @@ func shouldSeeInitTimeout(ctx context.Context) (context.Context, error) {
 
 	errMsg := env.LastError.Error()
 	if !strings.Contains(errMsg, "timeout") && !strings.Contains(errMsg, "Warning") {
-		return ctx, fmt.Errorf("expected timeout warning, got: %v", env.LastError)
+		return ctx, fmt.Errorf("expected timeout warning, got: %w", env.LastError)
 	}
 
 	return ctx, nil
@@ -171,7 +171,7 @@ func sessionStillAttached(ctx context.Context, sessionName string) (context.Cont
 	// Verify session exists (wasn't killed on timeout)
 	exists, err := tmux.HasSession(sessionName)
 	if err != nil {
-		return ctx, fmt.Errorf("failed to check session: %v", err)
+		return ctx, fmt.Errorf("failed to check session: %w", err)
 	}
 	if !exists {
 		return ctx, fmt.Errorf("session %q should still exist after timeout", sessionName)

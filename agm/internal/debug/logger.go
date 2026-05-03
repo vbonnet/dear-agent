@@ -62,8 +62,8 @@ func Init(enabled bool, sessionName string) error {
 
 	// Write initial log entries directly (can't call Log() while holding mutex)
 	now := time.Now().Format("15:04:05.000")
-	file.WriteString(fmt.Sprintf("[%s] +%7dms | Debug logging initialized\n", now, 0))
-	file.WriteString(fmt.Sprintf("[%s] +%7dms | Log file: %s\n", now, 0, logPath))
+	fmt.Fprintf(file, "[%s] +%7dms | Debug logging initialized\n", now, 0)
+	fmt.Fprintf(file, "[%s] +%7dms | Log file: %s\n", now, 0, logPath)
 	file.Sync()
 
 	return nil
@@ -78,8 +78,8 @@ func Close() {
 		// Write final log entry directly (can't call Log() while holding mutex)
 		elapsed := time.Since(globalLogger.startTime)
 		timestamp := time.Now().Format("15:04:05.000")
-		globalLogger.file.WriteString(fmt.Sprintf("[%s] +%7dms | Debug session ended (total: %v)\n",
-			timestamp, elapsed.Milliseconds(), elapsed))
+		fmt.Fprintf(globalLogger.file, "[%s] +%7dms | Debug session ended (total: %v)\n",
+			timestamp, elapsed.Milliseconds(), elapsed)
 		globalLogger.file.Close()
 	}
 }

@@ -1,3 +1,4 @@
+// Package tasks provides tasks-related functionality.
 package tasks
 
 import (

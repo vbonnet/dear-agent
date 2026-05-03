@@ -466,9 +466,10 @@ func TestInitSequence_PromptVerified_SkipsWait(t *testing.T) {
 	seq := NewInitSequence(sessionName)
 	seq.PromptVerified = true // Caller already verified prompt
 
-	// Run should complete quickly without waiting for Claude prompt
+	// Run should complete quickly without waiting for Claude prompt; result
+	// error is intentionally ignored — this test only asserts on elapsed time.
 	start := time.Now()
-	err = seq.Run()
+	_ = seq.Run()
 	elapsed := time.Since(start)
 
 	// Should complete in under 10s (mostly just the 5s sleep in sendRename)

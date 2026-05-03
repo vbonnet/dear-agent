@@ -44,22 +44,6 @@ type PerformanceReport struct {
 	MemoryUsage          runtime.MemStats
 }
 
-// calculatePercentiles computes latency percentiles from a slice of durations
-func calculatePercentiles(latencies []time.Duration) (p50, p95, p99 time.Duration) {
-	if len(latencies) == 0 {
-		return 0, 0, 0
-	}
-
-	sort.Slice(latencies, func(i, j int) bool {
-		return latencies[i] < latencies[j]
-	})
-
-	n := len(latencies)
-	p50 = latencies[n*50/100]
-	p95 = latencies[n*95/100]
-	p99 = latencies[n*99/100]
-	return
-}
 
 // calculateLatencyMetrics computes comprehensive latency statistics
 func calculateLatencyMetrics(latencies []time.Duration) LatencyMetrics {

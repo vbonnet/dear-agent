@@ -1,9 +1,9 @@
+// Package scope provides scope-related functionality.
 package scope
 
 import (
 	"regexp"
 	"strings"
-	"unicode"
 )
 
 // Parser handles markdown section extraction and fuzzy matching
@@ -176,14 +176,4 @@ func max(a, b int) int {
 		return a
 	}
 	return b
-}
-
-// normalizeWhitespace collapses multiple spaces into single spaces
-func normalizeWhitespace(s string) string {
-	return strings.Join(strings.Fields(s), " ")
-}
-
-// isWhitespace checks if a rune is whitespace
-func isWhitespace(r rune) bool {
-	return unicode.IsSpace(r)
 }

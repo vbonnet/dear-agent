@@ -1,3 +1,4 @@
+// Package artifacts provides artifacts-related functionality.
 package artifacts
 
 import "time"

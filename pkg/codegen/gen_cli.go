@@ -164,20 +164,3 @@ func renderGoTemplate(name, tmplStr string, data any, outPath string, buildIgnor
 	return nil
 }
 
-func renderRawTemplate(name, tmplStr string, data any, outPath string) error {
-	tmpl, err := template.New(name).Parse(tmplStr)
-	if err != nil {
-		return fmt.Errorf("parsing %s template: %w", name, err)
-	}
-
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return fmt.Errorf("executing %s template: %w", name, err)
-	}
-
-	if err := os.WriteFile(outPath, []byte(buf.String()), 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", outPath, err)
-	}
-
-	return nil
-}

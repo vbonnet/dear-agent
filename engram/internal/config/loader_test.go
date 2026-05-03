@@ -64,11 +64,7 @@ func TestNewLoader(t *testing.T) {
 // TestLoad_CoreOnly verifies loading when only core config exists
 func TestLoad_CoreOnly(t *testing.T) {
 	// Create temporary directory for test configs
-	tmpDir, err := os.MkdirTemp("", "engram-config-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create core config
 	coreDir := filepath.Join(tmpDir, "core")
@@ -129,11 +125,7 @@ telemetry:
 
 // TestLoad_MultiTier verifies that higher tiers override lower tiers
 func TestLoad_MultiTier(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "engram-config-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Core config (lowest priority)
 	coreDir := filepath.Join(tmpDir, "core")
@@ -208,11 +200,7 @@ telemetry:
 
 // TestLoad_MissingCore verifies that missing core config returns error
 func TestLoad_MissingCore(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "engram-config-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	loader := &Loader{
 		paths: map[ConfigTier]string{
@@ -224,7 +212,7 @@ func TestLoad_MissingCore(t *testing.T) {
 		cachedMtimes: make(map[ConfigTier]time.Time),
 	}
 
-	_, err = loader.Load()
+	_, err := loader.Load()
 	if err == nil {
 		t.Fatal("Load() succeeded with missing core config, want error")
 	}
@@ -236,11 +224,7 @@ func TestLoad_MissingCore(t *testing.T) {
 
 // TestLoad_InvalidYAML verifies that invalid YAML returns error
 func TestLoad_InvalidYAML(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "engram-config-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	coreDir := filepath.Join(tmpDir, "core")
 	if err := os.MkdirAll(coreDir, 0755); err != nil {
@@ -266,7 +250,7 @@ func TestLoad_InvalidYAML(t *testing.T) {
 		cachedMtimes: make(map[ConfigTier]time.Time),
 	}
 
-	_, err = loader.Load()
+	_, err := loader.Load()
 	if err == nil {
 		t.Fatal("Load() succeeded with invalid YAML, want error")
 	}
@@ -366,11 +350,7 @@ func TestMerge_EmptyValues(t *testing.T) {
 
 // TestCache_PopulationAndHit verifies cache is populated and used on subsequent calls
 func TestCache_PopulationAndHit(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "engram-config-cache-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create core config
 	coreDir := filepath.Join(tmpDir, "core")
@@ -430,11 +410,7 @@ telemetry:
 
 // TestCache_InvalidationOnFileChange verifies cache invalidates when file mtime changes
 func TestCache_InvalidationOnFileChange(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "engram-config-cache-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create core config
 	coreDir := filepath.Join(tmpDir, "core")
@@ -498,11 +474,7 @@ telemetry:
 
 // TestCache_MissingOptionalFiles verifies cache handles missing optional files correctly
 func TestCache_MissingOptionalFiles(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "engram-config-cache-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create only core config (optional tiers missing)
 	coreDir := filepath.Join(tmpDir, "core")
@@ -574,11 +546,7 @@ telemetry:
 
 // TestCache_ThreadSafety verifies concurrent Load() calls are safe
 func TestCache_ThreadSafety(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "engram-config-cache-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create core config
 	coreDir := filepath.Join(tmpDir, "core")
@@ -806,11 +774,7 @@ func TestLoad_TildeExpansion_Integration(t *testing.T) {
 		t.Fatalf("failed to get home directory: %v", err)
 	}
 
-	tmpDir, err := os.MkdirTemp("", "engram-config-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create core config with tilde paths
 	coreDir := filepath.Join(tmpDir, "core")
@@ -927,11 +891,7 @@ func TestMerge_TildeExpansion_NoTilde(t *testing.T) {
 // TestLoad_W0Defaults verifies that W0 config defaults are loaded correctly
 func TestLoad_W0Defaults(t *testing.T) {
 	// Create temporary directory for test configs
-	tmpDir, err := os.MkdirTemp("", "engram-config-w0-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create loader with test paths using helper
 	loader := createTestLoader(t, tmpDir)
@@ -960,11 +920,7 @@ func TestLoad_W0Defaults(t *testing.T) {
 // TestLoad_W0UserOverride verifies that user can override W0 settings
 func TestLoad_W0UserOverride(t *testing.T) {
 	// Create temporary directory for test configs
-	tmpDir, err := os.MkdirTemp("", "engram-config-w0-override-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create core config
 	coreDir := filepath.Join(tmpDir, "core")

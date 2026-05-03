@@ -143,6 +143,7 @@ func main() {
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {
 			logger.Error("A2A HTTP listen failed", "addr", addr, "error", err)
+			stop() // explicit cleanup before exit (otherwise the deferred stop() at the top of main wouldn't run)
 			os.Exit(1)
 		}
 

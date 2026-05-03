@@ -117,7 +117,7 @@ func TestPluginContextEnricher_NonPluginExecution(t *testing.T) {
 	}
 
 	// Non-plugin_execution events should not be enriched
-	if enrichedEvent.Data != nil && len(enrichedEvent.Data) > 0 {
+	if len(enrichedEvent.Data) > 0 {
 		t.Errorf("Expected no enrichment for non-plugin_execution event, got: %v", enrichedEvent.Data)
 	}
 }

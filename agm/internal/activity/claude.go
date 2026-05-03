@@ -60,7 +60,7 @@ func (t *ClaudeActivityTracker) GetLastActivity(sessionID string) (time.Time, er
 			return time.Time{}, fmt.Errorf("%w: %s", ErrPermissionDenied, t.historyPath)
 		}
 		// Other errors (likely corrupted JSON)
-		return time.Time{}, fmt.Errorf("%w: %v", ErrHistoryCorrupted, err)
+		return time.Time{}, fmt.Errorf("%w: %w", ErrHistoryCorrupted, err)
 	}
 
 	// Find the session with matching sessionID

@@ -51,23 +51,23 @@ func formatRewindEntry(data *RewindEventData) string {
 	var sb strings.Builder
 
 	// Section header
-	sb.WriteString(fmt.Sprintf("\n---\n\n## Rewind: %s → %s (magnitude %d)\n\n",
-		data.FromPhase, data.ToPhase, data.Magnitude))
+	fmt.Fprintf(&sb, "\n---\n\n## Rewind: %s → %s (magnitude %d)\n\n",
+		data.FromPhase, data.ToPhase, data.Magnitude)
 
 	// Timestamp (ISO8601 format)
-	sb.WriteString(fmt.Sprintf("**Timestamp**: %s\n\n",
-		data.Timestamp.Format(time.RFC3339)))
+	fmt.Fprintf(&sb, "**Timestamp**: %s\n\n",
+		data.Timestamp.Format(time.RFC3339))
 
 	// Reason (always present for magnitude 1+)
 	if data.Reason != "" {
-		sb.WriteString(fmt.Sprintf("**Reason**: %s\n\n", data.Reason))
+		fmt.Fprintf(&sb, "**Reason**: %s\n\n", data.Reason)
 	} else {
 		sb.WriteString("**Reason**: _(not provided)_\n\n")
 	}
 
 	// Learnings (optional)
 	if data.Learnings != "" {
-		sb.WriteString(fmt.Sprintf("**Learnings**: %s\n\n", data.Learnings))
+		fmt.Fprintf(&sb, "**Learnings**: %s\n\n", data.Learnings)
 	}
 
 	// Context snapshot
@@ -75,28 +75,28 @@ func formatRewindEntry(data *RewindEventData) string {
 
 	// Git context
 	if data.Context.Git.Error != "" {
-		sb.WriteString(fmt.Sprintf("- Git: _(error: %s)_\n", data.Context.Git.Error))
+		fmt.Fprintf(&sb, "- Git: _(error: %s)_\n", data.Context.Git.Error)
 	} else {
 		uncommitted := "no"
 		if data.Context.Git.UncommittedChanges {
 			uncommitted = "yes"
 		}
-		sb.WriteString(fmt.Sprintf("- Git: %s@%s (uncommitted: %s)\n",
-			data.Context.Git.Branch, data.Context.Git.Commit, uncommitted))
+		fmt.Fprintf(&sb, "- Git: %s@%s (uncommitted: %s)\n",
+			data.Context.Git.Branch, data.Context.Git.Commit, uncommitted)
 	}
 
 	// Deliverables
 	if len(data.Context.Deliverables) > 0 {
-		sb.WriteString(fmt.Sprintf("- Deliverables: %s\n",
-			strings.Join(data.Context.Deliverables, ", ")))
+		fmt.Fprintf(&sb, "- Deliverables: %s\n",
+			strings.Join(data.Context.Deliverables, ", "))
 	} else {
 		sb.WriteString("- Deliverables: _(none)_\n")
 	}
 
 	// Completed phases
 	if len(data.Context.PhaseState.CompletedPhases) > 0 {
-		sb.WriteString(fmt.Sprintf("- Completed phases: %s\n",
-			strings.Join(data.Context.PhaseState.CompletedPhases, ", ")))
+		fmt.Fprintf(&sb, "- Completed phases: %s\n",
+			strings.Join(data.Context.PhaseState.CompletedPhases, ", "))
 	} else {
 		sb.WriteString("- Completed phases: _(none)_\n")
 	}

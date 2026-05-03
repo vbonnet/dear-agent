@@ -53,3 +53,6 @@ tests/test_helper/
 # Claude local settings
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Subagent worktrees (created by agent isolation harnesses)
+.worktrees/

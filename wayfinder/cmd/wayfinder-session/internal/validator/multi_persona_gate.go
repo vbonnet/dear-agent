@@ -280,7 +280,8 @@ func (g *MultiPersonaGate) aggregateVotes(votes []Vote, blockers []string, confi
 	}
 
 	// Apply tier-based decision rules
-	if config.Tier == GateTierBlocking {
+	switch config.Tier {
+	case GateTierBlocking:
 		// Tier 1: ALL personas must vote GO
 		if noGoCount > 0 {
 			return &GateResult{
@@ -295,7 +296,7 @@ func (g *MultiPersonaGate) aggregateVotes(votes []Vote, blockers []string, confi
 		if goCount == 0 && len(votes) > 0 {
 			return &GateResult{
 				Status:   "CONDITIONAL",
-				Message:  fmt.Sprintf("No GO votes collected (all abstained or failed)"),
+				Message:  "No GO votes collected (all abstained or failed)",
 				Votes:    votes,
 				Blockers: []string{"Not all required personas approved"},
 			}
@@ -317,7 +318,7 @@ func (g *MultiPersonaGate) aggregateVotes(votes []Vote, blockers []string, confi
 			Blockers: []string{},
 		}
 
-	} else if config.Tier == GateTierAdvisory {
+	case GateTierAdvisory:
 		// Tier 2: Majority GO recommended (tie counts as CAUTION)
 		if noGoCount >= goCount && noGoCount > 0 {
 			return &GateResult{
@@ -431,10 +432,8 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 
 	personaResult := review.Personas[0]
 
-	// Convert findings to vote
-	verdict := "GO"
-	confidence := "HIGH"
-	severity := "LOW"
+	// Convert findings to vote (verdict/confidence/severity are set per-branch below)
+	var verdict, confidence, severity string
 	var blockers []string
 	var recommendations []string
 

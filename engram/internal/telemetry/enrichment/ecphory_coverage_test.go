@@ -80,7 +80,7 @@ func TestEcphoryCoverageEnricher_NonEcphoryEvent(t *testing.T) {
 	}
 
 	// Non-ecphory_retrieval events should not be enriched
-	if enrichedEvent.Data != nil && len(enrichedEvent.Data) > 0 {
+	if len(enrichedEvent.Data) > 0 {
 		t.Errorf("Expected no enrichment for non-ecphory_retrieval event, got: %v", enrichedEvent.Data)
 	}
 }
@@ -104,7 +104,7 @@ func TestEcphoryCoverageEnricher_MissingEcphoryResult(t *testing.T) {
 	}
 
 	// Should not enrich if ecphory result is missing
-	if enrichedEvent.Data != nil && len(enrichedEvent.Data) > 0 {
+	if len(enrichedEvent.Data) > 0 {
 		t.Errorf("Expected no enrichment without ecphory result, got: %v", enrichedEvent.Data)
 	}
 }

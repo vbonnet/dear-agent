@@ -1,3 +1,4 @@
+// Package context provides context-related functionality.
 package context
 
 import (

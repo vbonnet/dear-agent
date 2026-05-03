@@ -1,3 +1,4 @@
+// Package jsonrpc provides jsonrpc-related functionality.
 package jsonrpc
 
 import (

@@ -1,7 +1,6 @@
 package ecphory
 
 import (
-	"os"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/internal/testutil"
@@ -25,14 +24,10 @@ func TestIndex_Build_ValidDirectory(t *testing.T) {
 }
 
 func TestIndex_Build_EmptyDirectory(t *testing.T) {
-	tmpdir, err := os.MkdirTemp("", "ecphory-empty-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	idx := NewIndex()
-	err = idx.Build(tmpdir)
+	err := idx.Build(tmpdir)
 
 	if err != nil {
 		t.Fatalf("Build() should succeed on empty directory, got: %v", err)

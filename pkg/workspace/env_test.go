@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,9 +11,7 @@ func TestEnvManagerLoadSave(t *testing.T) {
 	envMgr := NewEnvManager("")
 
 	// Override env file path to use temp dir
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create env vars
 	envVars := map[string]string{

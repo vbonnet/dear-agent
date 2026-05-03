@@ -2,6 +2,7 @@ package capacity
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -142,7 +143,8 @@ func countClaudeProcesses() (int, error) {
 	out, err := exec.Command("pgrep", "-f", "claude").Output()
 	if err != nil {
 		// pgrep exits 1 when no processes found — that's fine
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			return 0, nil
 		}
 		return 0, err

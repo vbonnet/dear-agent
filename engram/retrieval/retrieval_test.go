@@ -96,10 +96,7 @@ func TestService_ResolveEngramPath(t *testing.T) {
 		{
 			name: "absolute path exists",
 			setup: func(t *testing.T) string {
-				tmpdir, err := os.MkdirTemp("", "resolve-test-*")
-				if err != nil {
-					t.Fatalf("setup failed: %v", err)
-				}
+				tmpdir := t.TempDir()
 				t.Cleanup(func() { os.RemoveAll(tmpdir) })
 				return tmpdir
 			},
@@ -373,7 +370,7 @@ func TestService_Search_WithAPIFallback(t *testing.T) {
 		os.Unsetenv("ANTHROPIC_API_KEY")
 		defer func() {
 			if originalKey != "" {
-				os.Setenv("ANTHROPIC_API_KEY", originalKey)
+				t.Setenv("ANTHROPIC_API_KEY", originalKey)
 			}
 		}()
 
@@ -436,10 +433,7 @@ func TestService_Search_ParseErrors(t *testing.T) {
 
 	t.Run("skip unparseable engrams", func(t *testing.T) {
 		// Create temp directory
-		tmpdir, err := os.MkdirTemp("", "parse-test-*")
-		if err != nil {
-			t.Fatalf("setup failed: %v", err)
-		}
+		tmpdir := t.TempDir()
 		t.Cleanup(func() { os.RemoveAll(tmpdir) })
 
 		// Create valid engram
@@ -545,6 +539,7 @@ func TestService_Search_WithQuery(t *testing.T) {
 
 	t.Run("search with query and useAPI but no key", func(t *testing.T) {
 		// Ensure no API key
+		t.Setenv("ANTHROPIC_API_KEY", "") // restored on test cleanup
 		os.Unsetenv("ANTHROPIC_API_KEY")
 
 		tmpdir := testutil.SetupTestEngrams(t)

@@ -2,6 +2,7 @@ package delegation
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 )
@@ -186,7 +187,7 @@ func TestStrategyError(t *testing.T) {
 		err := NewStrategyError("TestStrategy", "test-operation", underlying)
 
 		unwrapped := err.Unwrap()
-		if unwrapped != underlying {
+		if !errors.Is(unwrapped, underlying) {
 			t.Errorf("Unwrap() = %v, want %v", unwrapped, underlying)
 		}
 	})

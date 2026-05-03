@@ -1,3 +1,4 @@
+// Package resume provides resume-related functionality.
 package resume
 
 import (

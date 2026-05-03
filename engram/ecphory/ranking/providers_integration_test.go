@@ -163,9 +163,9 @@ func TestProviderAutoDetection_Integration(t *testing.T) {
 		origUseGemini := os.Getenv("USE_VERTEX_GEMINI")
 
 		defer func() {
-			os.Setenv("ANTHROPIC_API_KEY", origAnthropicKey)
-			os.Setenv("GOOGLE_CLOUD_PROJECT", origGCPProject)
-			os.Setenv("USE_VERTEX_GEMINI", origUseGemini)
+			t.Setenv("ANTHROPIC_API_KEY", origAnthropicKey)
+			t.Setenv("GOOGLE_CLOUD_PROJECT", origGCPProject)
+			t.Setenv("USE_VERTEX_GEMINI", origUseGemini)
 		}()
 
 		// Test case 1: No credentials → Local
@@ -182,7 +182,7 @@ func TestProviderAutoDetection_Integration(t *testing.T) {
 
 		// Test case 2: Anthropic credentials → Anthropic
 		if origAnthropicKey != "" {
-			os.Setenv("ANTHROPIC_API_KEY", origAnthropicKey)
+			t.Setenv("ANTHROPIC_API_KEY", origAnthropicKey)
 
 			factory, err = ranking.NewFactory(nil)
 			require.NoError(t, err)

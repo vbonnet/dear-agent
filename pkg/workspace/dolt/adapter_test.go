@@ -13,9 +13,9 @@ import (
 
 func TestNewWorkspaceAdapter(t *testing.T) {
 	tests := []struct {
-		name      string
-		configFn  func(t *testing.T) *DoltConfig
-		wantErr   bool
+		name     string
+		configFn func(t *testing.T) *DoltConfig
+		wantErr  bool
 	}{
 		{
 			name:     "nil config",
@@ -116,11 +116,12 @@ func TestGetDefaultConfig(t *testing.T) {
 			assert.Equal(t, "127.0.0.1", config.Host)
 			assert.Equal(t, "workspace", config.DatabaseName)
 
-			if tt.workspaceName == "oss" {
+			switch tt.workspaceName {
+			case "oss":
 				assert.Equal(t, 3307, config.Port)
-			} else if tt.workspaceName == "acme" {
+			case "acme":
 				assert.Equal(t, 3308, config.Port)
-			} else {
+			default:
 				assert.GreaterOrEqual(t, config.Port, 3309)
 				assert.LessOrEqual(t, config.Port, 3409)
 			}

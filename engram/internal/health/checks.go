@@ -2,6 +2,7 @@ package health
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -526,7 +527,7 @@ func (hc *HealthChecker) checkPythonAvailable() CheckResult {
 		Name:     "python_available",
 		Category: "dependency",
 		Status:   "ok",
-		Message:  fmt.Sprintf("%s", version),
+		Message:  version,
 	}
 }
 
@@ -1410,7 +1411,8 @@ func (hc *HealthChecker) executePluginHealthCheck(plugin PluginInfo) CheckResult
 	// Other = error
 	exitCode := 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			return CheckResult{

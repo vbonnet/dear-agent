@@ -306,21 +306,23 @@ func mergePhaseSpecificData(v2Phase *status.PhaseHistory, v1Phase status.Phase) 
 
 	case "S9":
 		// S9 → S8: Add validation status
-		if v1Phase.Status == status.PhaseStatusCompleted {
+		switch v1Phase.Status {
+		case status.PhaseStatusCompleted:
 			v2Phase.ValidationStatus = status.ValidationStatusPassed
-		} else if v1Phase.Status == status.PhaseStatusInProgress {
+		case status.PhaseStatusInProgress:
 			v2Phase.ValidationStatus = status.ValidationStatusInProgress
-		} else {
+		default:
 			v2Phase.ValidationStatus = status.ValidationStatusPending
 		}
 
 	case "S10":
 		// S10 → S8: Add deployment status
-		if v1Phase.Status == status.PhaseStatusCompleted {
+		switch v1Phase.Status {
+		case status.PhaseStatusCompleted:
 			v2Phase.DeploymentStatus = status.DeploymentStatusDeployed
-		} else if v1Phase.Status == status.PhaseStatusInProgress {
+		case status.PhaseStatusInProgress:
 			v2Phase.DeploymentStatus = status.DeploymentStatusInProgress
-		} else {
+		default:
 			v2Phase.DeploymentStatus = status.DeploymentStatusPending
 		}
 	}

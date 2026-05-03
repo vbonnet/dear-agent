@@ -5,7 +5,6 @@ package broker
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/vbonnet/dear-agent/agm/internal/a2a/messaging"
 	"github.com/vbonnet/dear-agent/agm/internal/a2a/modelcard"
@@ -48,7 +47,6 @@ type MessageBroker interface {
 
 // Broker is the default in-process implementation of MessageBroker.
 type Broker struct {
-	mu     sync.RWMutex
 	cards  *modelcard.Registry
 	router *messaging.Router
 }

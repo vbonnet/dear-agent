@@ -65,12 +65,12 @@ func (e *TelemetryError) Render() string {
 func (e *TelemetryError) renderTechnical() string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("[%s] %s\n\n", e.Category, e.TechnicalMsg))
+	fmt.Fprintf(&sb, "[%s] %s\n\n", e.Category, e.TechnicalMsg)
 
 	if len(e.Context) > 0 {
 		sb.WriteString("Context:\n")
 		for k, v := range e.Context {
-			sb.WriteString(fmt.Sprintf("  %s: %v\n", k, v))
+			fmt.Fprintf(&sb, "  %s: %v\n", k, v)
 		}
 		sb.WriteString("\n")
 	}
@@ -78,17 +78,17 @@ func (e *TelemetryError) renderTechnical() string {
 	if len(e.Recommendations) > 0 {
 		sb.WriteString("Recommendations:\n")
 		for i, rec := range e.Recommendations {
-			sb.WriteString(fmt.Sprintf("  %d. %s\n", i+1, rec))
+			fmt.Fprintf(&sb, "  %d. %s\n", i+1, rec)
 		}
 		sb.WriteString("\n")
 	}
 
 	if e.DebugCommand != "" {
-		sb.WriteString(fmt.Sprintf("Debug: %s\n", e.DebugCommand))
+		fmt.Fprintf(&sb, "Debug: %s\n", e.DebugCommand)
 	}
 
 	if e.LearnMoreURL != "" {
-		sb.WriteString(fmt.Sprintf("Learn more: %s\n", e.LearnMoreURL))
+		fmt.Fprintf(&sb, "Learn more: %s\n", e.LearnMoreURL)
 	}
 
 	return sb.String()
@@ -104,14 +104,14 @@ func (e *TelemetryError) renderTechnical() string {
 func (e *TelemetryError) renderSimple() string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("%s\n\n", e.SimpleMsg))
+	fmt.Fprintf(&sb, "%s\n\n", e.SimpleMsg)
 
 	if len(e.Recommendations) > 0 {
 		sb.WriteString("What you can do:\n")
 		for i, rec := range e.Recommendations {
 			// Simplify technical recommendations
 			simplified := simplifyRecommendation(rec)
-			sb.WriteString(fmt.Sprintf("  %d. %s\n", i+1, simplified))
+			fmt.Fprintf(&sb, "  %d. %s\n", i+1, simplified)
 		}
 		sb.WriteString("\n")
 	}

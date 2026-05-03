@@ -391,10 +391,10 @@ func formatD3ValidationError(allResults, failedDocs []DocumentReviewResult) erro
 		if result.Score < minDocQualityScore {
 			status = "⚠️  FAILED"
 		}
-		msg.WriteString(fmt.Sprintf("- %s: %.1f/10 %s\n", result.DocumentName, result.Score, status))
+		fmt.Fprintf(&msg, "- %s: %.1f/10 %s\n", result.DocumentName, result.Score, status)
 	}
 
-	msg.WriteString(fmt.Sprintf("\nMinimum score required: %.1f/10\n\n", minDocQualityScore))
+	fmt.Fprintf(&msg, "\nMinimum score required: %.1f/10\n\n", minDocQualityScore)
 	msg.WriteString("Fix failing documents and re-run:\n")
 	msg.WriteString("  wayfinder session complete-phase D3\n\n")
 
@@ -403,7 +403,7 @@ func formatD3ValidationError(allResults, failedDocs []DocumentReviewResult) erro
 		msg.WriteString("Or review manually to see issues:\n")
 		firstFailed := failedDocs[0]
 		skillPath := filepath.Join("~/src/ws/oss/repos/engram/skills", firstFailed.SkillUsed, strings.ReplaceAll(firstFailed.SkillUsed, "-", "_")+".py")
-		msg.WriteString(fmt.Sprintf("  python3 %s %s --output-json /tmp/review.json\n", skillPath, firstFailed.DocumentName))
+		fmt.Fprintf(&msg, "  python3 %s %s --output-json /tmp/review.json\n", skillPath, firstFailed.DocumentName)
 		msg.WriteString("  cat /tmp/review.json\n\n")
 	}
 

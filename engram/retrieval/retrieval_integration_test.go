@@ -17,11 +17,7 @@ func TestRetrieval_WithConfig_Integration(t *testing.T) {
 	}
 
 	// Create temporary directory with test engrams
-	tmpDir, err := os.MkdirTemp("", "retrieval-integration-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create test engrams
 	testEngrams := []struct {

@@ -1,6 +1,7 @@
 package stophook
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -23,7 +24,8 @@ func GitUnpushedCommits(dir string) ([]string, error) {
 	out, err := cmd.Output()
 	if err != nil {
 		// No upstream configured — not an error for this check
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 128 {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("git log unpushed: %w", err)

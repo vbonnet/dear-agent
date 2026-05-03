@@ -187,10 +187,10 @@ func FindRelevantMemories(ctx context.Context, query string, files []MemoryFile,
 		age := "today"
 		days, err := MemoryAgeDays(f.Path)
 		if err == nil {
-			switch {
-			case days == 0:
+			switch days {
+			case 0:
 				age = "today"
-			case days == 1:
+			case 1:
 				age = "yesterday"
 			default:
 				age = fmt.Sprintf("%d days ago", days)

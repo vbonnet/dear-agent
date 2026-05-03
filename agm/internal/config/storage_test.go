@@ -83,8 +83,8 @@ func TestGetStoragePath(t *testing.T) {
 
 			// Setup test environment for centralized mode tests
 			if tt.expectedMode == "centralized" {
-				os.Setenv("ENGRAM_TEST_MODE", "1")
-				os.Setenv("ENGRAM_TEST_WORKSPACE", "/tmp/test-workspace")
+				t.Setenv("ENGRAM_TEST_MODE", "1")
+				t.Setenv("ENGRAM_TEST_WORKSPACE", "/tmp/test-workspace")
 				defer os.Unsetenv("ENGRAM_TEST_MODE")
 				defer os.Unsetenv("ENGRAM_TEST_WORKSPACE")
 
@@ -171,7 +171,7 @@ func TestDetectWorkspace(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set environment variables
 			for key, value := range tt.envVars {
-				os.Setenv(key, value)
+				t.Setenv(key, value)
 				defer os.Unsetenv(key)
 			}
 

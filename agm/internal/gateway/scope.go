@@ -93,10 +93,6 @@ func extractToolName(req mcp.Request) string {
 		return ""
 	}
 
-	// The CallToolParams has a Name field
-	type toolParams struct {
-		Name string `json:"name"`
-	}
 
 	// Try to get name from the params interface
 	switch p := params.(type) {

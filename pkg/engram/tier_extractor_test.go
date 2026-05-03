@@ -309,7 +309,7 @@ func TestExtractTier_LargeContent(t *testing.T) {
 	builder.WriteString("> [!T0]\n")
 	for i := 0; i < 1000; i++ {
 		builder.WriteString("> Line ")
-		builder.WriteString(fmt.Sprint(i))
+		fmt.Fprint(&builder, i)
 		builder.WriteString("\n")
 	}
 	builder.WriteString("\n> [!T1]\n> T1\n\n> [!T2]\n> T2\n")

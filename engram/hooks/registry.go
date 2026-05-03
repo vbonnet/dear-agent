@@ -78,7 +78,7 @@ func NewRegistryWithPath(path string) Registry {
 // Register adds a hook to the registry
 func (r *registryImpl) Register(hook Hook) error {
 	if err := validateHook(hook); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidHook, err)
+		return fmt.Errorf("%w: %w", ErrInvalidHook, err)
 	}
 
 	r.mu.Lock()

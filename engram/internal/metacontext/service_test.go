@@ -2,7 +2,6 @@ package metacontext
 
 import (
 	"context"
-	"os"
 	"testing"
 )
 
@@ -40,11 +39,7 @@ func (p *PanicScanner) Scan(ctx context.Context, req *AnalyzeRequest) ([]Signal,
 // TestService_Analyze_CacheMiss tests full analysis flow (cache miss)
 func TestService_Analyze_CacheMiss(t *testing.T) {
 	// Create temp directory
-	tmpdir, err := os.MkdirTemp("", "test-service-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	// Create cache
 	cache, err := NewUnifiedCache()
@@ -123,11 +118,7 @@ func TestService_Analyze_CacheMiss(t *testing.T) {
 
 // TestService_Analyze_CacheHit tests cache hit path
 func TestService_Analyze_CacheHit(t *testing.T) {
-	tmpdir, err := os.MkdirTemp("", "test-service-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	cache, err := NewUnifiedCache()
 	if err != nil {
@@ -217,11 +208,7 @@ func TestService_Analyze_InvalidWorkingDir(t *testing.T) {
 
 // TestService_Analyze_ScannerPanicRecovery tests panic recovery
 func TestService_Analyze_ScannerPanicRecovery(t *testing.T) {
-	tmpdir, err := os.MkdirTemp("", "test-service-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	cache, err := NewUnifiedCache()
 	if err != nil {
@@ -300,11 +287,7 @@ func TestService_GenerateCacheKey(t *testing.T) {
 
 // TestService_InvalidateCache tests cache invalidation
 func TestService_InvalidateCache(t *testing.T) {
-	tmpdir, err := os.MkdirTemp("", "test-service-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	cache, _ := NewUnifiedCache()
 	scanners := []Scanner{
@@ -327,7 +310,7 @@ func TestService_InvalidateCache(t *testing.T) {
 	}
 
 	// Invalidate cache
-	err = service.InvalidateCache(ctx)
+	err := service.InvalidateCache(ctx)
 	if err != nil {
 		t.Errorf("InvalidateCache() failed: %v", err)
 	}
@@ -341,11 +324,7 @@ func TestService_InvalidateCache(t *testing.T) {
 
 // TestService_GetCacheStats tests cache statistics
 func TestService_GetCacheStats(t *testing.T) {
-	tmpdir, err := os.MkdirTemp("", "test-service-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	cache, _ := NewUnifiedCache()
 	scanners := []Scanner{

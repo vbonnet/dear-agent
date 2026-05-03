@@ -171,7 +171,7 @@ func ExtractMetadataFromHistory(conversationUUID string) (*SessionMetadata, erro
 func ValidateNotDuplicate(conversationUUID string, adapter *dolt.Adapter) error {
 	// List all sessions from Dolt
 	if adapter == nil {
-		return fmt.Errorf("Dolt adapter not available")
+		return fmt.Errorf("dolt adapter not available")
 	}
 
 	manifests, err := adapter.ListSessions(&dolt.SessionFilter{})

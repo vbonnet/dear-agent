@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -28,9 +27,7 @@ func TestSessionImport_EndToEnd(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create test conversation file
 	testUUID := "integration-test-uuid-123"
@@ -70,9 +67,7 @@ func TestSessionImport_TmuxNameSanitization(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create test conversation file
 	testUUID := "sanitization-test-uuid"
@@ -130,9 +125,7 @@ func TestSessionImport_ManifestStructure(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create test conversation file
 	testUUID := "manifest-structure-test"
@@ -163,9 +156,7 @@ func TestSessionImport_WorkspaceSupport(t *testing.T) {
 			}
 
 			// Override home directory
-			oldHome := os.Getenv("HOME")
-			os.Setenv("HOME", tmpDir)
-			defer os.Setenv("HOME", oldHome)
+			t.Setenv("HOME", tmpDir)
 
 			// Create test conversation file
 			testUUID := "workspace-test-" + workspace
@@ -199,9 +190,7 @@ func TestSessionImport_ProjectPathInference(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create conversation files in different projects
 	tests := []struct {
@@ -251,9 +240,7 @@ func TestSessionImport_DuplicatePrevention_Integration(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create test conversation file
 	testUUID := "duplicate-prevention-test"
@@ -322,32 +309,5 @@ func TestSessionImport_ErrorHandling(t *testing.T) {
 			// Expected: Proper error message
 			t.Logf("Would verify error handling for: %s (expects: %s)", tt.uuid, tt.expectedErr)
 		})
-	}
-}
-
-// Helper function to verify manifest contents
-func verifyManifest(t *testing.T, manifestPath string, expectedUUID string, expectedWorkspace string) {
-	t.Helper()
-
-	m, err := manifest.Read(manifestPath)
-	if err != nil {
-		t.Fatalf("Failed to read manifest: %v", err)
-	}
-
-	if m.Claude.UUID != expectedUUID {
-		t.Errorf("Expected UUID %s, got: %s", expectedUUID, m.Claude.UUID)
-	}
-
-	if m.Workspace != expectedWorkspace {
-		t.Errorf("Expected workspace %s, got: %s", expectedWorkspace, m.Workspace)
-	}
-
-	if m.SchemaVersion != manifest.SchemaVersion {
-		t.Errorf("Expected schema version %s, got: %s", manifest.SchemaVersion, m.SchemaVersion)
-	}
-
-	// Verify tmux name is sanitized (no periods, special chars)
-	if strings.ContainsAny(m.Tmux.SessionName, ".@#$%^&*()+=[]{}|\\;:'\",<>?/") {
-		t.Errorf("Tmux session name contains invalid characters: %s", m.Tmux.SessionName)
 	}
 }

@@ -72,8 +72,9 @@ func traceContextFromHook(traceparent string) context.Context {
 
 func main() {
 	shutdown := otelsetup.InitTracer("posttool-cost-guard")
-	defer shutdown(context.Background()) //nolint:errcheck
-	os.Exit(run())
+	exitCode := run()
+	_ = shutdown(context.Background())
+	os.Exit(exitCode)
 }
 
 func run() int {

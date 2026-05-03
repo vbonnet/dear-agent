@@ -8,9 +8,13 @@ import (
 
 func TestLoadEngramConfig_Defaults(t *testing.T) {
 	// Clear environment variables
+	t.Setenv("AGM_ENGRAM_PATH", "") // restored on test cleanup
 	os.Unsetenv("AGM_ENGRAM_PATH")
+	t.Setenv("AGM_ENGRAM_LIMIT", "") // restored on test cleanup
 	os.Unsetenv("AGM_ENGRAM_LIMIT")
+	t.Setenv("AGM_ENGRAM_SCORE_THRESHOLD", "") // restored on test cleanup
 	os.Unsetenv("AGM_ENGRAM_SCORE_THRESHOLD")
+	t.Setenv("AGM_ENGRAM_TIMEOUT", "") // restored on test cleanup
 	os.Unsetenv("AGM_ENGRAM_TIMEOUT")
 
 	cfg := LoadEngramConfig()
@@ -30,10 +34,10 @@ func TestLoadEngramConfig_Defaults(t *testing.T) {
 }
 
 func TestLoadEngramConfig_EnvironmentVariables(t *testing.T) {
-	os.Setenv("AGM_ENGRAM_PATH", "/custom/path/engram")
-	os.Setenv("AGM_ENGRAM_LIMIT", "15")
-	os.Setenv("AGM_ENGRAM_SCORE_THRESHOLD", "0.8")
-	os.Setenv("AGM_ENGRAM_TIMEOUT", "10")
+	t.Setenv("AGM_ENGRAM_PATH", "/custom/path/engram")
+	t.Setenv("AGM_ENGRAM_LIMIT", "15")
+	t.Setenv("AGM_ENGRAM_SCORE_THRESHOLD", "0.8")
+	t.Setenv("AGM_ENGRAM_TIMEOUT", "10")
 	defer func() {
 		os.Unsetenv("AGM_ENGRAM_PATH")
 		os.Unsetenv("AGM_ENGRAM_LIMIT")
@@ -58,9 +62,9 @@ func TestLoadEngramConfig_EnvironmentVariables(t *testing.T) {
 }
 
 func TestLoadEngramConfig_InvalidValues(t *testing.T) {
-	os.Setenv("AGM_ENGRAM_LIMIT", "invalid")
-	os.Setenv("AGM_ENGRAM_SCORE_THRESHOLD", "2.0")
-	os.Setenv("AGM_ENGRAM_TIMEOUT", "-5")
+	t.Setenv("AGM_ENGRAM_LIMIT", "invalid")
+	t.Setenv("AGM_ENGRAM_SCORE_THRESHOLD", "2.0")
+	t.Setenv("AGM_ENGRAM_TIMEOUT", "-5")
 	defer func() {
 		os.Unsetenv("AGM_ENGRAM_LIMIT")
 		os.Unsetenv("AGM_ENGRAM_SCORE_THRESHOLD")

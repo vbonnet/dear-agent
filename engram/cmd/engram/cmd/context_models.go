@@ -296,7 +296,7 @@ func formatContextSizeLong(tokens int) string {
 		}
 		return fmt.Sprintf("%.1fM", millions)
 	} else if tokens >= 1000 {
-		return fmt.Sprintf("%s", formatWithCommas(tokens))
+		return formatWithCommas(tokens)
 	}
 	return fmt.Sprintf("%d", tokens)
 }

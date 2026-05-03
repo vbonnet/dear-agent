@@ -17,11 +17,7 @@ import (
 // TestFileScanner_LanguageDetection tests language detection by file extensions
 func TestFileScanner_LanguageDetection(t *testing.T) {
 	// Create temp directory with Go files
-	tmpdir, err := os.MkdirTemp("", "test-file-scanner-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	// Create Go files
 	for i := 0; i < 5; i++ {
@@ -59,15 +55,11 @@ func TestFileScanner_LanguageDetection(t *testing.T) {
 
 // TestFileScanner_FrameworkDetection tests framework detection by special files
 func TestFileScanner_FrameworkDetection(t *testing.T) {
-	tmpdir, err := os.MkdirTemp("", "test-file-scanner-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	// Create package.json (Node.js indicator)
 	packageJSON := filepath.Join(tmpdir, "package.json")
-	err = os.WriteFile(packageJSON, []byte(`{"name":"test"}`), 0644)
+	err := os.WriteFile(packageJSON, []byte(`{"name":"test"}`), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create package.json: %v", err)
 	}
@@ -99,11 +91,7 @@ func TestFileScanner_FrameworkDetection(t *testing.T) {
 
 // TestFileScanner_SensitiveFileExclusion tests Security Mitigation M3
 func TestFileScanner_SensitiveFileExclusion(t *testing.T) {
-	tmpdir, err := os.MkdirTemp("", "test-file-scanner-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	// Create sensitive files
 	sensitiveFiles := []string{".env", ".env.local", "credentials.json", "id_rsa", "secret.key"}
@@ -116,7 +104,7 @@ func TestFileScanner_SensitiveFileExclusion(t *testing.T) {
 
 	// Create normal Go file
 	goFile := filepath.Join(tmpdir, "main.go")
-	err = os.WriteFile(goFile, []byte("package main\n"), 0644)
+	err := os.WriteFile(goFile, []byte("package main\n"), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create Go file: %v", err)
 	}
@@ -147,15 +135,11 @@ func TestFileScanner_SensitiveFileExclusion(t *testing.T) {
 
 // TestFileScanner_HiddenDirectorySkip tests hidden directory exclusion
 func TestFileScanner_HiddenDirectorySkip(t *testing.T) {
-	tmpdir, err := os.MkdirTemp("", "test-file-scanner-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	// Create hidden directory with files
 	hiddenDir := filepath.Join(tmpdir, ".hidden")
-	err = os.Mkdir(hiddenDir, 0755)
+	err := os.Mkdir(hiddenDir, 0755)
 	if err != nil {
 		t.Fatalf("Failed to create hidden dir: %v", err)
 	}
@@ -201,15 +185,11 @@ func TestFileScanner_HiddenDirectorySkip(t *testing.T) {
 
 // TestFileScanner_LargeFileSkip tests >10MB file exclusion
 func TestFileScanner_LargeFileSkip(t *testing.T) {
-	tmpdir, err := os.MkdirTemp("", "test-file-scanner-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	// Create small file
 	smallFile := filepath.Join(tmpdir, "small.go")
-	err = os.WriteFile(smallFile, []byte("package main\n"), 0644)
+	err := os.WriteFile(smallFile, []byte("package main\n"), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create small file: %v", err)
 	}
@@ -253,11 +233,7 @@ func TestFileScanner_LargeFileSkip(t *testing.T) {
 
 // TestFileScanner_EmptyDirectory tests handling of empty directory
 func TestFileScanner_EmptyDirectory(t *testing.T) {
-	tmpdir, err := os.MkdirTemp("", "test-file-scanner-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	scanner := NewFileScanner()
 	ctx := context.Background()
@@ -276,11 +252,7 @@ func TestFileScanner_EmptyDirectory(t *testing.T) {
 
 // TestFileScanner_ContextCancellation tests cancellation handling
 func TestFileScanner_ContextCancellation(t *testing.T) {
-	tmpdir, err := os.MkdirTemp("", "test-file-scanner-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	// Create many files to give time for cancellation
 	for i := 0; i < 100; i++ {
@@ -297,7 +269,7 @@ func TestFileScanner_ContextCancellation(t *testing.T) {
 
 	req := &metacontext.AnalyzeRequest{WorkingDir: tmpdir}
 
-	_, err = scanner.Scan(ctx, req)
+	_, err := scanner.Scan(ctx, req)
 	// Should return error (context canceled)
 	if err == nil {
 		t.Error("Canceled context should return error")

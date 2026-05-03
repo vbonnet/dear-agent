@@ -739,12 +739,13 @@ func TestGetAllSessionsHierarchy(t *testing.T) {
 
 		// Verify tree structures
 		for _, node := range nodes {
-			if node.Session.SessionID == "complex-root1" {
+			switch node.Session.SessionID {
+			case "complex-root1":
 				assert.Len(t, node.Children, 2)
 				for _, child := range node.Children {
 					assert.Equal(t, 1, child.Depth)
 				}
-			} else if node.Session.SessionID == "complex-root2" {
+			case "complex-root2":
 				assert.Len(t, node.Children, 1)
 				assert.Equal(t, "complex-child2a", node.Children[0].Session.SessionID)
 				assert.Len(t, node.Children[0].Children, 1)

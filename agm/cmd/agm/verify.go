@@ -270,9 +270,10 @@ func runVerifyAll() error {
 
 	for _, r := range results {
 		icon := "PASS"
-		if r.Status == "FALSE_COMPLETION" {
+		switch r.Status {
+		case "FALSE_COMPLETION":
 			icon = "FAIL"
-		} else if r.Status == "ERROR" {
+		case "ERROR":
 			icon = "ERR "
 		}
 		fmt.Printf("  [%s] %s", icon, r.SessionName)

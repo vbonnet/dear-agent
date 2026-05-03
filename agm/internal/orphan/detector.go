@@ -101,7 +101,7 @@ func DetectOrphansWithAdapter(sessionsDir string, workspaceFilter string, adapte
 
 	// Step 2: Load all manifests from Dolt database
 	if adapter == nil {
-		return nil, fmt.Errorf("Dolt adapter required")
+		return nil, fmt.Errorf("dolt adapter required")
 	}
 	manifestUUIDs, err := loadManifestUUIDsWithAdapter(adapter)
 	if err != nil {

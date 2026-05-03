@@ -13,11 +13,7 @@ import (
 // This is an integration test covering scanners + security interaction
 func TestScanner_WithSecurity_Integration(t *testing.T) {
 	// Create temporary directory structure
-	tmpDir, err := os.MkdirTemp("", "scanner-integration-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create test files
 	testFiles := map[string]string{
@@ -151,10 +147,7 @@ func assertShouldSkip(t *testing.T, scanner *FileScanner, paths []string, expect
 // createSensitiveOnlyDir creates a temporary directory with only sensitive files
 func createSensitiveOnlyDir(t *testing.T) (string, func()) {
 	t.Helper()
-	sensDir, err := os.MkdirTemp("", "scanner-sensitive-*")
-	if err != nil {
-		t.Fatalf("failed to create sensitive dir: %v", err)
-	}
+	sensDir := t.TempDir()
 
 	sensitiveOnly := map[string]string{
 		".env":             "SECRET=abc\n",

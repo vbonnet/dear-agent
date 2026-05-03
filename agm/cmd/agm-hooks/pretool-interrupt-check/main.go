@@ -89,12 +89,15 @@ func run() int {
 }
 
 func main() {
+	os.Exit(safeRun())
+}
+
+func safeRun() (exitCode int) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "[interrupt-check] FATAL: panic (fail-open): %v\n", r)
-			os.Exit(0) // fail-open
+			exitCode = 0 // fail-open
 		}
 	}()
-
-	os.Exit(run())
+	return run()
 }

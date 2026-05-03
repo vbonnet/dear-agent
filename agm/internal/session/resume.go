@@ -98,7 +98,7 @@ func Resume(identifier string, cfg *config.Config, adapter *dolt.Adapter) error 
 
 	// Write to Dolt database
 	if adapter == nil {
-		return fmt.Errorf("Dolt adapter required")
+		return fmt.Errorf("dolt adapter required")
 	}
 	if err := adapter.UpdateSession(m); err != nil {
 		return fmt.Errorf("failed to update session in Dolt: %w", err)

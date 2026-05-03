@@ -2,6 +2,7 @@ package ops
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -185,7 +186,8 @@ func runSingleGate(gate QualityGate, repoDir, branch string) QualityGateCheckRes
 
 	exitCode := 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			return QualityGateCheckResult{
@@ -201,10 +203,8 @@ func runSingleGate(gate QualityGate, repoDir, branch string) QualityGateCheckRes
 
 	output := stdout.String() + stderr.String()
 
-	passed := true
-	if gate.ExpectExit != nil && exitCode != *gate.ExpectExit {
-		passed = false
-	}
+	passed := !(gate.ExpectExit != nil && exitCode != *gate.ExpectExit)
+
 	if gate.ExpectEmpty != nil && *gate.ExpectEmpty && len(strings.TrimSpace(output)) > 0 {
 		passed = false
 	}

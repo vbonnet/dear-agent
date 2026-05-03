@@ -95,7 +95,7 @@ func BuildOpIR(op Op, reqTypes, respTypes map[string]reflect.Type) (*OpIR, error
 
 // parseStructFields extracts FieldIR values from a reflected struct type.
 func parseStructFields(t reflect.Type) ([]FieldIR, error) {
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
@@ -185,7 +185,7 @@ func goTypeName(t reflect.Type) string {
 	switch t.Kind() { //nolint:exhaustive // reflect.Kind has too many values; default handles the rest
 	case reflect.Slice:
 		return "[]" + goTypeName(t.Elem())
-	case reflect.Ptr:
+	case reflect.Pointer:
 		return "*" + goTypeName(t.Elem())
 	case reflect.Map:
 		return "map[" + goTypeName(t.Key()) + "]" + goTypeName(t.Elem())

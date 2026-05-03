@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -349,7 +350,8 @@ func TestValidatePhaseQuestions(t *testing.T) {
 					t.Error("expected error, got nil")
 					return
 				}
-				valErr, ok := err.(*ValidationError)
+				valErr := &ValidationError{}
+				ok := errors.As(err, &valErr)
 				if !ok {
 					t.Errorf("expected ValidationError, got %T", err)
 					return

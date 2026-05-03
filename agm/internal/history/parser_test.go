@@ -267,7 +267,7 @@ func TestReadAll_MixedFormats(t *testing.T) {
 func createTestHistoryFile(t *testing.T, lines []string) string {
 	t.Helper()
 
-	tmpFile, err := os.CreateTemp("", "history-test-*.jsonl")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "history-test-*.jsonl")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}

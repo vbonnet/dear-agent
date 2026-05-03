@@ -1,3 +1,4 @@
+// Package history provides history-related functionality.
 package history
 
 import (

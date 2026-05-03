@@ -1,3 +1,4 @@
+// Package status provides status-related functionality.
 // Package nesting provides directory hierarchy detection and validation
 // for Wayfinder v2's unlimited tasks/ nesting feature.
 //

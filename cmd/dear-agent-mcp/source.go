@@ -13,7 +13,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/source"
@@ -105,8 +104,8 @@ func (s *Server) toolFetchSource(ctx context.Context, id any, args json.RawMessa
 		})
 	}
 	q := source.FetchQuery{
-		Query:  a.Query,
-		K:      a.K,
+		Query: a.Query,
+		K:     a.K,
 		Filters: source.Filters{
 			Cues:     a.Cues,
 			WorkItem: a.WorkItem,
@@ -205,10 +204,4 @@ func sourceToWire(s source.Source) map[string]any {
 			"custom":     s.Metadata.Custom,
 		},
 	}
-}
-
-// formatSourceErr is reserved for future error-shaping needs; kept so
-// callers across files have a single helper to reach for.
-func formatSourceErr(prefix string, err error) string {
-	return fmt.Sprintf("%s: %v", prefix, err)
 }

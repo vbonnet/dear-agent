@@ -15,7 +15,6 @@ import (
 type stallTestState struct {
 	stallEvents []ops.StallEvent
 	slo         *contracts.SLOContracts
-	detector    *ops.StallDetector
 }
 
 var stallState *stallTestState

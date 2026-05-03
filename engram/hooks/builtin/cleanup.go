@@ -1,3 +1,4 @@
+// Package builtin provides builtin-related functionality.
 package builtin
 
 import (

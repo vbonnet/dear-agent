@@ -1,3 +1,4 @@
+// Package benchmark provides benchmark-related functionality.
 package benchmark
 
 import (

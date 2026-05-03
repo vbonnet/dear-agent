@@ -54,18 +54,18 @@ func FormatErrorWithGuidance(err error, context string, suggestions []string) er
 	var sb strings.Builder
 
 	// Error prefix with icon
-	sb.WriteString(fmt.Sprintf("❌ Error: %s\n", err))
+	fmt.Fprintf(&sb, "❌ Error: %s\n", err)
 
 	// Context section
 	if context != "" {
-		sb.WriteString(fmt.Sprintf("\nContext: %s\n", context))
+		fmt.Fprintf(&sb, "\nContext: %s\n", context)
 	}
 
 	// Suggestions section
 	if len(suggestions) > 0 {
 		sb.WriteString("\nTo fix:\n")
 		for _, s := range suggestions {
-			sb.WriteString(fmt.Sprintf("- %s\n", s))
+			fmt.Fprintf(&sb, "- %s\n", s)
 		}
 	}
 

@@ -44,11 +44,9 @@ type Diagnosis struct {
 var (
 	// Regex patterns for parsing diagnosis files
 	titlePattern        = regexp.MustCompile(`^##\s+Incident Diagnosis:\s+(.+?)\s+-\s+(.+)$`)
-	symptomPattern      = regexp.MustCompile(`^###\s+Symptom`)
 	recoveryPattern     = regexp.MustCompile(`\*\*Recovery Time\*\*:\s+(.+?)(?:\s*\*\*|$)`)
 	recoveryMethodPat   = regexp.MustCompile(`\*\*Recovery Method\*\*:\s+(.+?)(?:\s*\*\*|$)`)
 	incidentTypePattern = regexp.MustCompile(`\*\*Incident Type\*\*:\s+(.+?)(?:\s*\*\*|$)`)
-	confidencePattern   = regexp.MustCompile(`^###\s+Confidence|^\*\*Confidence\*\*`)
 )
 
 // ParseDiagnosisFile parses a single Astrocyte diagnosis markdown file.

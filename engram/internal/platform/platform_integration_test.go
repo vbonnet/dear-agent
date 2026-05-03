@@ -22,11 +22,7 @@ func TestPlatform_WithTelemetry_Integration(t *testing.T) {
 	}
 
 	// Create temporary directory for test config and telemetry
-	tmpDir, err := os.MkdirTemp("", "platform-integration-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Test 1: Platform reports OS detection
 	t.Run("os_detection_reported", func(t *testing.T) {
@@ -107,10 +103,10 @@ telemetry:
 func withConfigEnv(t *testing.T, configPath string, fn func()) {
 	t.Helper()
 	oldConfigPath := os.Getenv("ENGRAM_CONFIG_PATH")
-	os.Setenv("ENGRAM_CONFIG_PATH", configPath)
+	t.Setenv("ENGRAM_CONFIG_PATH", configPath)
 	defer func() {
 		if oldConfigPath != "" {
-			os.Setenv("ENGRAM_CONFIG_PATH", oldConfigPath)
+			t.Setenv("ENGRAM_CONFIG_PATH", oldConfigPath)
 		} else {
 			os.Unsetenv("ENGRAM_CONFIG_PATH")
 		}

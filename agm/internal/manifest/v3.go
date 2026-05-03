@@ -67,11 +67,9 @@ func (m *ManifestV3) Validate() error {
 		"codex-cli":    true,
 		"opencode-cli": true,
 	}
-	if !knownHarnesses[m.Harness] {
-		// Note: This is a warning, not an error (forward compatible)
-		// In production, this would log to stderr via logMigration or similar
-		// For now, we allow unknown harnesses
-	}
+	// Unknown harness names are accepted (forward-compatible). A future
+	// version may surface this via a logMigration call.
+	_ = knownHarnesses[m.Harness]
 
 	// Verify harness_history is not nil (can be empty array)
 	if m.HarnessHistory == nil {

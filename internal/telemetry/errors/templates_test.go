@@ -11,9 +11,7 @@ import (
 func TestDetectUserType_ConfigFileExists(t *testing.T) {
 	// Create temporary config file
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	configDir := filepath.Join(tmpDir, ".engram")
 	os.MkdirAll(configDir, 0755)
@@ -30,9 +28,7 @@ func TestDetectUserType_ConfigFileExists(t *testing.T) {
 func TestDetectUserType_NoConfigFile(t *testing.T) {
 	// Use non-existent home directory
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", filepath.Join(tmpDir, "nonexistent"))
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", filepath.Join(tmpDir, "nonexistent"))
 
 	userType := DetectUserType(context.Background())
 
@@ -78,9 +74,7 @@ func TestPluginLoadingFailed_TechnicalMessage(t *testing.T) {
 func TestPluginLoadingFailed_SimpleMessage(t *testing.T) {
 	// Use default context (no config file, no CLI flags)
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", filepath.Join(tmpDir, "nonexistent"))
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", filepath.Join(tmpDir, "nonexistent"))
 
 	ctx := context.Background()
 
@@ -132,9 +126,7 @@ func TestVersionCompatibilityWarning_TechnicalMessage(t *testing.T) {
 
 func TestVersionCompatibilityWarning_SimpleMessage(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", filepath.Join(tmpDir, "nonexistent"))
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", filepath.Join(tmpDir, "nonexistent"))
 
 	ctx := context.Background()
 
@@ -186,9 +178,7 @@ func TestStorageNearLimit_Warning(t *testing.T) {
 
 func TestTelemetryDisabled_Message(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", filepath.Join(tmpDir, "nonexistent"))
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", filepath.Join(tmpDir, "nonexistent"))
 
 	ctx := context.Background()
 

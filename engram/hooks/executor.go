@@ -134,7 +134,8 @@ func (e *Executor) Execute(ctx context.Context, hook Hook) (*VerificationResult,
 		exitCode := 0
 		if err != nil {
 			exitCode = 1
-			if exitErr, ok := err.(*exec.ExitError); ok {
+			exitErr := &exec.ExitError{}
+			if errors.As(err, &exitErr) {
 				exitCode = exitErr.ExitCode()
 			}
 		}

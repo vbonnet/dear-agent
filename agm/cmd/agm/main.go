@@ -34,26 +34,25 @@ import (
 )
 
 var (
-	cfg               *config.Config
-	cfgFile           string
-	sessionsDir       string
-	logLevel          string
-	debugMode         bool
-	directory         string
-	timeout           time.Duration
-	skipHealthCheck   bool
-	noColor           bool
-	screenReader      bool
-	workspaceFlag     string
-	listCommandsJSON  bool
-	outputFormat      string   // "text" (default), "json"
-	fieldsFlag        []string // field mask for JSON output
-	globalHealthCheck *tmux.HealthChecker
-	tmuxClient        session.TmuxInterface // Injected dependency for testing
-	managerBackend    manager.Backend       // New abstraction layer (nil = legacy path)
-	usageTracker      *usage.Tracker
-	commandStartTime  time.Time
-	auditLogger       *ops.AuditLogger
+	cfg              *config.Config
+	cfgFile          string
+	sessionsDir      string
+	logLevel         string
+	debugMode        bool
+	directory        string
+	timeout          time.Duration
+	skipHealthCheck  bool
+	noColor          bool
+	screenReader     bool
+	workspaceFlag    string
+	listCommandsJSON bool
+	outputFormat     string                // "text" (default), "json"
+	fieldsFlag       []string              // field mask for JSON output
+	tmuxClient       session.TmuxInterface // Injected dependency for testing
+	managerBackend   manager.Backend       // New abstraction layer (nil = legacy path)
+	usageTracker     *usage.Tracker
+	commandStartTime time.Time
+	auditLogger      *ops.AuditLogger
 )
 
 var rootCmd = &cobra.Command{
@@ -134,14 +133,6 @@ Global Flags:
 		// - Manifest operations use manifest.AcquireLock() (in internal/manifest/lock.go)
 		// This allows multiple AGM commands to run concurrently (e.g., agm session list while agm my-session)
 		// while still preventing race conditions in tmux server updates and manifest modifications.
-
-		// Initialize health checker
-		if cfg.HealthCheck.Enabled && !skipHealthCheck {
-			globalHealthCheck = tmux.NewHealthChecker(
-				cfg.HealthCheck.CacheDuration,
-				cfg.HealthCheck.ProbeTimeout,
-			)
-		}
 
 		// Resolve working directory from -C flag
 		if directory != "" {
@@ -225,10 +216,7 @@ func init() {
 
 	// Check for AGM_DEBUG environment variable
 	// Flag will override this if explicitly set
-	debugDefault := false
-	if os.Getenv("AGM_DEBUG") == "true" || os.Getenv("AGM_DEBUG") == "1" {
-		debugDefault = true
-	}
+	debugDefault := os.Getenv("AGM_DEBUG") == "true" || os.Getenv("AGM_DEBUG") == "1"
 
 	rootCmd.PersistentFlags().StringVarP(&directory, "directory", "C", "", "Working directory")
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/agm/config.yaml)")
@@ -607,6 +595,11 @@ func ExecuteWithDeps(tmux session.TmuxInterface) error {
 }
 
 func main() {
+	exitCode := run()
+	os.Exit(exitCode)
+}
+
+func run() int {
 	shutdown := otelsetup.InitTracer("agm")
 	defer shutdown(context.Background()) //nolint:errcheck
 
@@ -627,6 +620,7 @@ func main() {
 	managerBackend = mgr
 
 	if err := ExecuteWithDeps(adapter); err != nil {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }

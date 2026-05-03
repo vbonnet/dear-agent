@@ -3,6 +3,7 @@ package hooks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -109,7 +110,7 @@ func TestExecutorTimeout(t *testing.T) {
 	ctx := context.Background()
 	result, err := executor.Execute(ctx, hook)
 
-	if err != ErrTimeout {
+	if !errors.Is(err, ErrTimeout) {
 		t.Errorf("Expected ErrTimeout, got: %v", err)
 	}
 

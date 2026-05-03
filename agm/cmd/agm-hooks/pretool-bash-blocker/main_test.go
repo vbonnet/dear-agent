@@ -200,8 +200,8 @@ func TestRun_Integration(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			os.Setenv("CLAUDE_TOOL_NAME", tt.toolName)
-			os.Setenv("CLAUDE_TOOL_INPUT", tt.toolInput)
+			t.Setenv("CLAUDE_TOOL_NAME", tt.toolName)
+			t.Setenv("CLAUDE_TOOL_INPUT", tt.toolInput)
 			defer func() {
 				os.Unsetenv("CLAUDE_TOOL_NAME")
 				os.Unsetenv("CLAUDE_TOOL_INPUT")

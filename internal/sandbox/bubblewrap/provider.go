@@ -125,12 +125,12 @@ func (p *Provider) Create(ctx context.Context, req sandbox.SandboxRequest) (*san
 
 	// Create sandbox metadata
 	sb := &sandbox.Sandbox{
-		ID:         req.SessionID,
-		MergedPath: mergedDir,
-		UpperPath:  upperDir,
-		WorkPath:   workDir,
-		Type:       p.Name(),
-		CreatedAt:  time.Now(),
+		ID:          req.SessionID,
+		MergedPath:  mergedDir,
+		UpperPath:   upperDir,
+		WorkPath:    workDir,
+		Type:        p.Name(),
+		CreatedAt:   time.Now(),
 		CleanupFunc: cleanupFn,
 	}
 
@@ -831,7 +831,7 @@ func (p *Provider) writeSecrets(upperDir string, secrets map[string]string) erro
 
 	for key, value := range secrets {
 		expandedValue := os.ExpandEnv(value)
-		buf.WriteString(fmt.Sprintf("%s=%s\n", key, expandedValue))
+		fmt.Fprintf(&buf, "%s=%s\n", key, expandedValue)
 	}
 
 	if err := os.WriteFile(envFile, []byte(buf.String()), 0600); err != nil {

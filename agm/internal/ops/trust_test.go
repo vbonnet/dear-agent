@@ -12,7 +12,7 @@ func setupTrustDir(t *testing.T) (cleanup func()) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	return func() {
-		os.Setenv("HOME", origHome)
+		t.Setenv("HOME", origHome)
 	}
 }
 

@@ -1,3 +1,4 @@
+// Package converter provides converter-related functionality.
 package converter
 
 import (

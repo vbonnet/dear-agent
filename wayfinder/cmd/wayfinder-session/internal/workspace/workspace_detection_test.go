@@ -16,7 +16,7 @@ func TestDetectWorkspacePriority(t *testing.T) {
 	originalWorkspace := os.Getenv("WORKSPACE")
 	defer func() {
 		if originalWorkspace != "" {
-			os.Setenv("WORKSPACE", originalWorkspace)
+			t.Setenv("WORKSPACE", originalWorkspace)
 		} else {
 			os.Unsetenv("WORKSPACE")
 		}
@@ -24,7 +24,7 @@ func TestDetectWorkspacePriority(t *testing.T) {
 
 	t.Run("Priority1_EnvironmentVariable", func(t *testing.T) {
 		// Set $WORKSPACE env var
-		os.Setenv("WORKSPACE", "env-workspace")
+		t.Setenv("WORKSPACE", "env-workspace")
 		defer os.Unsetenv("WORKSPACE")
 
 		// Should return env var value even with path that suggests different workspace
@@ -60,9 +60,7 @@ func TestDetectWorkspacePriority(t *testing.T) {
 		os.Symlink(sessionDir, currentSessionLink)
 
 		// Temporarily set HOME to tmpDir for this test
-		originalHome := os.Getenv("HOME")
-		os.Setenv("HOME", tmpDir)
-		defer os.Setenv("HOME", originalHome)
+		t.Setenv("HOME", tmpDir)
 
 		// Should return AGM workspace
 		testPath := "/tmp/different-workspace/wf/project"
@@ -88,7 +86,7 @@ func TestDetectWorkspacePriority(t *testing.T) {
 
 	t.Run("PriorityOrder_EnvOverridesAGM", func(t *testing.T) {
 		// Set up both env var and AGM manifest
-		os.Setenv("WORKSPACE", "env-wins")
+		t.Setenv("WORKSPACE", "env-wins")
 		defer os.Unsetenv("WORKSPACE")
 
 		// Create AGM manifest with different workspace
@@ -108,9 +106,7 @@ func TestDetectWorkspacePriority(t *testing.T) {
 		currentSessionLink := filepath.Join(agmDir, "current-session")
 		os.Symlink(sessionDir, currentSessionLink)
 
-		originalHome := os.Getenv("HOME")
-		os.Setenv("HOME", tmpDir)
-		defer os.Setenv("HOME", originalHome)
+		t.Setenv("HOME", tmpDir)
 
 		// Env var should win
 		testPath := "/tmp/path-loses/wf/project"
@@ -142,9 +138,7 @@ func TestDetectWorkspacePriority(t *testing.T) {
 		currentSessionLink := filepath.Join(agmDir, "current-session")
 		os.Symlink(sessionDir, currentSessionLink)
 
-		originalHome := os.Getenv("HOME")
-		os.Setenv("HOME", tmpDir)
-		defer os.Setenv("HOME", originalHome)
+		t.Setenv("HOME", tmpDir)
 
 		// AGM should win over path
 		testPath := "/tmp/path-loses/wf/project"
@@ -170,7 +164,7 @@ func TestDetectWorkspacePriority(t *testing.T) {
 
 	t.Run("InvalidWorkspaceName_Rejected", func(t *testing.T) {
 		// Set invalid workspace name in env var
-		os.Setenv("WORKSPACE", "invalid workspace")
+		t.Setenv("WORKSPACE", "invalid workspace")
 		defer os.Unsetenv("WORKSPACE")
 
 		testPath := "/tmp/test/wf/project"
@@ -186,12 +180,10 @@ func TestDetectWorkspacePriority(t *testing.T) {
 // TestQueryAGMWorkspace tests the AGM workspace query function directly
 func TestQueryAGMWorkspace(t *testing.T) {
 	// Save original HOME
-	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
 
 	t.Run("SuccessfulQuery_JSON", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		os.Setenv("HOME", tmpDir)
+		t.Setenv("HOME", tmpDir)
 
 		// Create AGM session with JSON manifest
 		agmDir := filepath.Join(tmpDir, ".agm")
@@ -217,7 +209,7 @@ func TestQueryAGMWorkspace(t *testing.T) {
 
 	t.Run("NoCurrentSession", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		os.Setenv("HOME", tmpDir)
+		t.Setenv("HOME", tmpDir)
 
 		// No .agm directory, should return empty
 		workspace := queryAGMWorkspace()
@@ -228,7 +220,7 @@ func TestQueryAGMWorkspace(t *testing.T) {
 
 	t.Run("ManifestMissingWorkspaceField", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		os.Setenv("HOME", tmpDir)
+		t.Setenv("HOME", tmpDir)
 
 		agmDir := filepath.Join(tmpDir, ".agm")
 		sessionDir := filepath.Join(agmDir, "test-session")
@@ -253,7 +245,7 @@ func TestQueryAGMWorkspace(t *testing.T) {
 
 	t.Run("FallbackToClaudeDirectory", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		os.Setenv("HOME", tmpDir)
+		t.Setenv("HOME", tmpDir)
 
 		// Create session in ~/.claude instead of ~/.agm
 		claudeDir := filepath.Join(tmpDir, ".claude")
@@ -325,6 +317,7 @@ func TestDetectWorkspaceFromPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Unset env var to test path detection only
+			t.Setenv("WORKSPACE", "") // restored on test cleanup
 			os.Unsetenv("WORKSPACE")
 
 			workspace := detectWorkspaceFromPath(tt.path)

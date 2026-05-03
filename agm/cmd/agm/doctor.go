@@ -137,7 +137,7 @@ Examples:
 		} else {
 			if lingerStatus.LoginctlExists {
 				if lingerStatus.Enabled {
-					ui.PrintSuccess(fmt.Sprintf("User lingering enabled (sessions persist after logout)"))
+					ui.PrintSuccess("User lingering enabled (sessions persist after logout)")
 				} else {
 					ui.PrintWarning("User lingering DISABLED - sessions will be killed on logout")
 					fmt.Printf("  • Fix: Run 'loginctl enable-linger %s'\n", lingerStatus.Username)

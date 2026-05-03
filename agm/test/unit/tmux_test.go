@@ -17,6 +17,7 @@ import (
 // TestSocketPath_DefaultPath tests default socket path construction
 func TestSocketPath_DefaultPath(t *testing.T) {
 	// Clear any override
+	t.Setenv("AGM_TMUX_SOCKET", "") // restored on test cleanup
 	os.Unsetenv("AGM_TMUX_SOCKET")
 
 	socketPath := tmux.GetSocketPath()
@@ -31,7 +32,7 @@ func TestSocketPath_DefaultPath(t *testing.T) {
 // TestSocketPath_EnvironmentOverride tests AGM_TMUX_SOCKET override
 func TestSocketPath_EnvironmentOverride(t *testing.T) {
 	customPath := "/custom/path/test.sock"
-	os.Setenv("AGM_TMUX_SOCKET", customPath)
+	t.Setenv("AGM_TMUX_SOCKET", customPath)
 	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	socketPath := tmux.GetSocketPath()
@@ -42,6 +43,7 @@ func TestSocketPath_EnvironmentOverride(t *testing.T) {
 // TestSocketPath_Consistency tests that socket path is consistent
 func TestSocketPath_Consistency(t *testing.T) {
 	// Clear any override
+	t.Setenv("AGM_TMUX_SOCKET", "") // restored on test cleanup
 	os.Unsetenv("AGM_TMUX_SOCKET")
 
 	path1 := tmux.GetSocketPath()
@@ -99,7 +101,7 @@ func TestCommandWithTimeout_ImmediateCancel(t *testing.T) {
 func TestCommandConstruction_SessionCreation(t *testing.T) {
 	// Test socket path + command construction pattern
 	socketPath := "/test/socket.sock"
-	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	t.Setenv("AGM_TMUX_SOCKET", socketPath)
 	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	ctx := context.Background()
@@ -181,6 +183,7 @@ func TestCommandConstruction_HasSession(t *testing.T) {
 // TestSocketPath_DirectoryCreation tests socket directory structure
 func TestSocketPath_DirectoryCreation(t *testing.T) {
 	// Clear override
+	t.Setenv("AGM_TMUX_SOCKET", "") // restored on test cleanup
 	os.Unsetenv("AGM_TMUX_SOCKET")
 
 	socketPath := tmux.GetSocketPath()
@@ -299,6 +302,7 @@ func TestCommandPath_TmuxLookup(t *testing.T) {
 // TestSocketPath_Simplicity tests socket path simplicity
 func TestSocketPath_Simplicity(t *testing.T) {
 	// Clear override
+	t.Setenv("AGM_TMUX_SOCKET", "") // restored on test cleanup
 	os.Unsetenv("AGM_TMUX_SOCKET")
 
 	socketPath := tmux.GetSocketPath()

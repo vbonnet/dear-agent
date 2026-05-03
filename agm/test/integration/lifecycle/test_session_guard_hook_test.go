@@ -1,6 +1,7 @@
 package lifecycle_test
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -33,7 +34,8 @@ func TestHookTestSessionGuard_BlocksTestPattern(t *testing.T) {
 		t.Fatal("Hook should have blocked test-* pattern (expected exit code 1, got 0)")
 	}
 
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	exitErr := &exec.ExitError{}
+	if errors.As(err, &exitErr) {
 		if exitErr.ExitCode() != 1 {
 			t.Fatalf("Expected exit code 1, got %d", exitErr.ExitCode())
 		}
@@ -236,7 +238,8 @@ func TestHookTestSessionGuard_EdgeCases(t *testing.T) {
 					t.Fatalf("%s: Hook should have blocked (expected exit code 1, got 0)", tc.description)
 				}
 
-				if exitErr, ok := err.(*exec.ExitError); ok {
+				exitErr := &exec.ExitError{}
+				if errors.As(err, &exitErr) {
 					if exitErr.ExitCode() != 1 {
 						t.Fatalf("%s: Expected exit code 1, got %d", tc.description, exitErr.ExitCode())
 					}

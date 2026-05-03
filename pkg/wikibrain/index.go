@@ -16,15 +16,15 @@ func GenerateIndex(pages []*Page, runAt time.Time) string {
 
 	var sb strings.Builder
 	sb.WriteString("# engram-kb — Page Index\n\n")
-	sb.WriteString(fmt.Sprintf("_Auto-generated %s. Do not edit by hand — run `agm wiki index` to refresh._\n\n",
-		runAt.Format("2006-01-02")))
-	sb.WriteString(fmt.Sprintf("**Total pages:** %d\n\n", len(pages)))
+	fmt.Fprintf(&sb, "_Auto-generated %s. Do not edit by hand — run `agm wiki index` to refresh._\n\n",
+		runAt.Format("2006-01-02"))
+	fmt.Fprintf(&sb, "**Total pages:** %d\n\n", len(pages))
 	sb.WriteString("---\n\n")
 
 	for _, dir := range dirOrder {
 		group := groups[dir]
 		label := dirLabel(dir)
-		sb.WriteString(fmt.Sprintf("## %s\n\n", label))
+		fmt.Fprintf(&sb, "## %s\n\n", label)
 
 		// Sort pages within group by RelPath for stable output
 		sort.Slice(group, func(i, j int) bool {
@@ -42,9 +42,9 @@ func GenerateIndex(pages []*Page, runAt time.Time) string {
 				summary = summary[:117] + "..."
 			}
 			if summary != "" {
-				sb.WriteString(fmt.Sprintf("- %s%s — %s\n", link, date, summary))
+				fmt.Fprintf(&sb, "- %s%s — %s\n", link, date, summary)
 			} else {
-				sb.WriteString(fmt.Sprintf("- %s%s\n", link, date))
+				fmt.Fprintf(&sb, "- %s%s\n", link, date)
 			}
 		}
 		sb.WriteString("\n")

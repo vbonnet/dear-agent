@@ -215,43 +215,6 @@ type HealthStatus struct {
 	Warnings          []string
 }
 
-// buildManifestPathMap scans the sessions directory and builds a map from SessionID to manifest file path
-// This handles legacy directory naming where the directory name doesn't match the SessionID
-func buildManifestPathMap(sessionsDir string) (map[string]string, error) {
-	paths := make(map[string]string)
-
-	entries, err := os.ReadDir(sessionsDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read sessions directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		// Skip archive directory
-		if entry.Name() == ".archive-old-format" {
-			continue
-		}
-
-		manifestPath := filepath.Join(sessionsDir, entry.Name(), "manifest.yaml")
-		if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
-			continue
-		}
-
-		// Extract SessionID from directory name
-		// Expected format: session-<sessionID> or <sessionID>
-		sessionID := entry.Name()
-		if strings.HasPrefix(sessionID, "session-") {
-			sessionID = strings.TrimPrefix(sessionID, "session-")
-		}
-
-		paths[sessionID] = manifestPath
-	}
-
-	return paths, nil
-}
 
 // resolveSessionIdentifier finds the Claude UUID and manifest path from various identifier types
 func resolveSessionIdentifier(adapter *dolt.Adapter, identifier string) (string, string, error) {

@@ -172,7 +172,7 @@ func (a *SSEAdapter) connect() error {
 	}
 
 	// Create HTTP request with context
-	req, err := http.NewRequestWithContext(a.ctx, "GET", a.serverURL+"/event", nil)
+	req, err := http.NewRequestWithContext(a.ctx, http.MethodGet, a.serverURL+"/event", nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}

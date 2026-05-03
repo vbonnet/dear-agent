@@ -119,13 +119,14 @@ func renderHierarchyMinimal(nodes []*db.SessionNode, statuses map[string]session
 		// Determine status and style
 		var status string
 		var style lipgloss.Style
-		if statusInfo.Status == "active" {
+		switch statusInfo.Status {
+		case "active":
 			status = "active"
 			style = getActiveStyle()
-		} else if statusInfo.Status == "stopped" {
+		case "stopped":
 			status = "stopped"
 			style = getStoppedStyle()
-		} else {
+		default:
 			status = statusInfo.Status
 			style = lipgloss.NewStyle()
 		}
@@ -216,13 +217,14 @@ func renderHierarchyCompact(nodes []*db.SessionNode, statuses map[string]session
 		// Determine status and style
 		var status string
 		var style lipgloss.Style
-		if statusInfo.Status == "active" {
+		switch statusInfo.Status {
+		case "active":
 			status = "active"
 			style = getActiveStyle()
-		} else if statusInfo.Status == "stopped" {
+		case "stopped":
 			status = "stopped"
 			style = getStoppedStyle()
-		} else {
+		default:
 			status = statusInfo.Status
 			style = lipgloss.NewStyle()
 		}
@@ -317,13 +319,14 @@ func renderHierarchyFull(nodes []*db.SessionNode, statuses map[string]session.St
 		// Determine status and style
 		var status string
 		var style lipgloss.Style
-		if statusInfo.Status == "active" {
+		switch statusInfo.Status {
+		case "active":
 			status = "active"
 			style = getActiveStyle()
-		} else if statusInfo.Status == "stopped" {
+		case "stopped":
 			status = "stopped"
 			style = getStoppedStyle()
-		} else {
+		default:
 			status = statusInfo.Status
 			style = lipgloss.NewStyle()
 		}

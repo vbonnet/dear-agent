@@ -296,9 +296,10 @@ func printVerifySummary(report *BatchVerifyReport) {
 
 	for _, r := range report.Results {
 		icon := "PASS"
-		if r.Status == "NEEDS_REMEDIATION" {
+		switch r.Status {
+		case "NEEDS_REMEDIATION":
 			icon = "FAIL"
-		} else if r.Status == "SKIPPED" {
+		case "SKIPPED":
 			icon = "SKIP"
 		}
 		fmt.Printf("  [%s] %s", icon, r.SessionName)

@@ -14,7 +14,7 @@ import (
 func TestCleanupBuffers_NoServer(t *testing.T) {
 	// When tmux server is not running, CleanupBuffers should return 0 without error
 	testSocket := fmt.Sprintf("/tmp/agm-test-buf-%d.sock", os.Getpid())
-	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	cleaned, err := CleanupBuffers()
@@ -30,7 +30,7 @@ func TestCleanupBuffers_WithBuffers(t *testing.T) {
 
 	// Create isolated socket
 	testSocket := fmt.Sprintf("/tmp/agm-test-buf2-%d.sock", os.Getpid())
-	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
 		os.Remove(testSocket)
@@ -71,7 +71,7 @@ func TestCleanupBuffers_WithBuffers(t *testing.T) {
 
 func TestBufferCount_NoServer(t *testing.T) {
 	testSocket := fmt.Sprintf("/tmp/agm-test-bufcnt-%d.sock", os.Getpid())
-	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	count, err := BufferCount()
@@ -86,7 +86,7 @@ func TestDeleteBuffer_NoBuffer(t *testing.T) {
 	}
 
 	testSocket := fmt.Sprintf("/tmp/agm-test-delbuf-%d.sock", os.Getpid())
-	os.Setenv("AGM_TMUX_SOCKET", testSocket)
+	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
 		os.Remove(testSocket)

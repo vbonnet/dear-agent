@@ -1,3 +1,4 @@
+// Package tableutil provides tableutil-related functionality.
 package tableutil
 
 import (

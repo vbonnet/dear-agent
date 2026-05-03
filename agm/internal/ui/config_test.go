@@ -70,10 +70,8 @@ func TestDefaultConfig(t *testing.T) {
 
 func TestLoadConfig_NoFile(t *testing.T) {
 	// Set HOME to a temp dir with no config file
-	origHome := os.Getenv("HOME")
 	tmpDir := t.TempDir()
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	cfg := LoadConfig()
 
@@ -90,9 +88,7 @@ func TestLoadConfig_NoFile(t *testing.T) {
 
 func TestLoadConfig_ValidFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	configDir := filepath.Join(tmpDir, ".config", "agm")
 	os.MkdirAll(configDir, 0755)
@@ -129,9 +125,7 @@ defaults:
 
 func TestLoadConfig_InvalidYAML(t *testing.T) {
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	configDir := filepath.Join(tmpDir, ".config", "agm")
 	os.MkdirAll(configDir, 0755)

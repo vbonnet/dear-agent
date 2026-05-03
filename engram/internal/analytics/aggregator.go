@@ -1,3 +1,4 @@
+// Package analytics provides analytics-related functionality.
 package analytics
 
 import (
@@ -61,9 +62,10 @@ func (a *Aggregator) AggregateSession(sessionID string, events []ParsedEvent) (*
 	var sessionEndEvent *ParsedEvent
 
 	for i := range events {
-		if events[i].EventTopic == "wayfinder.session.started" {
+		switch events[i].EventTopic {
+		case "wayfinder.session.started":
 			sessionStartEvent = &events[i]
-		} else if events[i].EventTopic == "wayfinder.session.completed" {
+		case "wayfinder.session.completed":
 			sessionEndEvent = &events[i]
 		}
 	}
@@ -120,9 +122,10 @@ func (a *Aggregator) buildPhases(events []ParsedEvent) ([]Phase, error) {
 			continue
 		}
 
-		if event.EventTopic == "wayfinder.phase.started" {
+		switch event.EventTopic {
+		case "wayfinder.phase.started":
 			phaseStarts[event.Phase] = event
-		} else if event.EventTopic == "wayfinder.phase.completed" {
+		case "wayfinder.phase.completed":
 			phaseEnds[event.Phase] = event
 		}
 	}
@@ -215,9 +218,10 @@ func (a *Aggregator) ComputeSummary(sessions []Session) SessionSummary {
 		totalCost += session.Metrics.EstimatedCost
 
 		// Count completed vs. failed
-		if session.Status == "completed" || session.Status == "success" {
+		switch session.Status {
+		case "completed", "success":
 			summary.CompletedSessions++
-		} else if session.Status == "failed" {
+		case "failed":
 			summary.FailedSessions++
 		}
 	}

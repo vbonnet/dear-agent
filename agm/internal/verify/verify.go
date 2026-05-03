@@ -1,3 +1,4 @@
+// Package verify provides verify-related functionality.
 package verify
 
 import (

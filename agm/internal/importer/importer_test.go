@@ -43,9 +43,7 @@ func TestInferProjectPath(t *testing.T) {
 	}
 
 	// Override home directory for testing
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	tests := []struct {
 		name    string
@@ -241,9 +239,7 @@ func TestImportOrphanedSession_DuplicatePrevention(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create test conversation file
 	testUUID := "duplicate-test-uuid"
@@ -288,9 +284,7 @@ func TestImportOrphanedSession_TmuxSanitization(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create test conversation file
 	testUUID := "sanitization-test-uuid"
@@ -340,9 +334,7 @@ func TestImportOrphanedSession_ManifestCreation(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create test conversation file
 	testUUID := "manifest-test-uuid"
@@ -412,9 +404,7 @@ func TestExtractMetadataFromHistory(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Test extracting metadata
 	metadata, err := ExtractMetadataFromHistory(testUUID)
@@ -450,9 +440,7 @@ func TestExtractMetadataFromHistory_NotFound(t *testing.T) {
 		t.Fatalf("Failed to write history file: %v", err)
 	}
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	_, err := ExtractMetadataFromHistory("non-existent-uuid")
 	if err == nil {
@@ -475,9 +463,7 @@ func TestExtractMetadataFromHistory_EmptyHistory(t *testing.T) {
 		t.Fatalf("Failed to write history file: %v", err)
 	}
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	_, err := ExtractMetadataFromHistory("any-uuid")
 	if err == nil {
@@ -525,9 +511,7 @@ func TestImportOrphanedSession_WithHistoryMetadata(t *testing.T) {
 	}
 
 	// Override home directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Import session
 	sessionID, err := ImportOrphanedSessionWithAdapter(testUUID, "test-with-history", "oss", adapter)
@@ -584,9 +568,7 @@ func TestImportOrphanedSession_WithoutHistoryMetadata(t *testing.T) {
 		t.Fatalf("Failed to create conversation file: %v", err)
 	}
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Import should still succeed (graceful fallback)
 	before := time.Now()
@@ -619,9 +601,7 @@ func TestInferProjectPath_NoProjectsDir(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Override home directory to location with no .claude/projects
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	_, err := InferProjectPath("any-uuid")
 	if err == nil {
@@ -653,9 +633,7 @@ func TestExtractMetadataFromHistory_MultipleEntries(t *testing.T) {
 		t.Fatalf("Failed to write history file: %v", err)
 	}
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	metadata, err := ExtractMetadataFromHistory(testUUID)
 	if err != nil {
@@ -717,9 +695,7 @@ func TestExtractMetadataFromHistory_NoEntries(t *testing.T) {
 		t.Fatalf("Failed to write history file: %v", err)
 	}
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	metadata, err := ExtractMetadataFromHistory(testUUID)
 	if err != nil {
@@ -735,9 +711,7 @@ func TestExtractMetadataFromHistory_NoEntries(t *testing.T) {
 func TestInferProjectPath_EmptyUUID(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Even with empty UUID, should get error about not finding file
 	_, err := InferProjectPath("")
@@ -762,9 +736,7 @@ func TestImportOrphanedSession_NoConversationFile(t *testing.T) {
 		t.Fatalf("Failed to create projects dir: %v", err)
 	}
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Should fail because conversation file doesn't exist
 	_, err := ImportOrphanedSessionWithAdapter("non-existent-uuid", "test", "oss", adapter)

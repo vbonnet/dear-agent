@@ -139,7 +139,7 @@ func bootstrapMean(values []float64) float64 {
 
 // EffectSizeResult holds Cohen's d and interpretation.
 type EffectSizeResult struct {
-	D             float64 // Cohen's d
+	D              float64 // Cohen's d
 	Interpretation string  // "negligible", "small", "medium", "large"
 }
 
@@ -189,7 +189,7 @@ func MinSampleSize(effectSize, alpha, power float64) int {
 	zAlpha := normalQuantile(1.0 - alpha/2.0)
 	zBeta := normalQuantile(power)
 
-	n := math.Ceil(math.Pow((zAlpha+zBeta)/effectSize, 2)) + 1
+	n := math.Ceil((zAlpha+zBeta)/effectSize*((zAlpha+zBeta)/effectSize)) + 1
 	if n < 2 {
 		n = 2
 	}
@@ -228,7 +228,7 @@ func regIncBeta(a, b, x float64) float64 {
 	}
 
 	lbeta := lgamma(a+b) - lgamma(a) - lgamma(b)
-	prefix := math.Exp(lbeta + a*math.Log(x) + b*math.Log(1-x)) / a
+	prefix := math.Exp(lbeta+a*math.Log(x)+b*math.Log(1-x)) / a
 
 	// Use Lentz's continued fraction
 	if x < (a+1)/(a+b+2) {

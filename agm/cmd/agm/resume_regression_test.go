@@ -16,7 +16,7 @@ import (
 func setupRegressionSocket(t *testing.T) string {
 	t.Helper()
 	socketPath := fmt.Sprintf("/tmp/agm-regression-test-%d.sock", os.Getpid())
-	os.Setenv("AGM_TMUX_SOCKET", socketPath)
+	t.Setenv("AGM_TMUX_SOCKET", socketPath)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", socketPath, "kill-server").Run()
 		os.Remove(socketPath)

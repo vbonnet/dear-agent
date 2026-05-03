@@ -332,9 +332,7 @@ func TestRunQualityGates(t *testing.T) {
 		if err := os.MkdirAll(trustDirPath, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		origHome := os.Getenv("HOME")
 		t.Setenv("HOME", dir)
-		defer func() { os.Setenv("HOME", origHome) }()
 
 		ctx := &OpContext{}
 		result, err := RunQualityGates(ctx, &RunQualityGatesRequest{
@@ -379,9 +377,7 @@ func TestRunQualityGates(t *testing.T) {
 		if err := os.MkdirAll(trustDirPath, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		origHome := os.Getenv("HOME")
 		t.Setenv("HOME", dir)
-		defer func() { os.Setenv("HOME", origHome) }()
 
 		ctx := &OpContext{}
 		result, err := RunQualityGates(ctx, &RunQualityGatesRequest{

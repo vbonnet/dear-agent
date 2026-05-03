@@ -311,5 +311,5 @@ func TestRegistration(t *testing.T) {
 		t.Fatalf("failed to get process backend: %v", err)
 	}
 
-	var _ backend.Backend = b
+	var _ = b
 }

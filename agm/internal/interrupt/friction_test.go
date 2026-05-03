@@ -1,7 +1,6 @@
 package interrupt
 
 import (
-	"os"
 	"testing"
 )
 
@@ -134,7 +133,7 @@ func TestEnforceFriction_FifthPassesWithReason(t *testing.T) {
 func TestFriction_IsolatedPerRecipient(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", tmpDir)
+	defer t.Setenv("HOME", tmpDir)
 
 	// Interrupt session-a twice
 	for i := 0; i < 2; i++ {

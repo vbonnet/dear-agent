@@ -73,12 +73,12 @@ func (f *MarkdownFormatter) Format(sessions []Session) (string, error) {
 func (f *MarkdownFormatter) FormatSession(session *Session) (string, error) {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("# Session: %s\n\n", session.ID))
-	sb.WriteString(fmt.Sprintf("**Project**: %s\n", session.ProjectPath))
-	sb.WriteString(fmt.Sprintf("**Start**: %s\n", session.StartTime.Format(time.RFC3339)))
-	sb.WriteString(fmt.Sprintf("**End**: %s\n", session.EndTime.Format(time.RFC3339)))
-	sb.WriteString(fmt.Sprintf("**Duration**: %s\n", formatDuration(session.Metrics.TotalDuration)))
-	sb.WriteString(fmt.Sprintf("**Status**: %s\n", formatStatus(session.Status)))
+	fmt.Fprintf(&sb, "# Session: %s\n\n", session.ID)
+	fmt.Fprintf(&sb, "**Project**: %s\n", session.ProjectPath)
+	fmt.Fprintf(&sb, "**Start**: %s\n", session.StartTime.Format(time.RFC3339))
+	fmt.Fprintf(&sb, "**End**: %s\n", session.EndTime.Format(time.RFC3339))
+	fmt.Fprintf(&sb, "**Duration**: %s\n", formatDuration(session.Metrics.TotalDuration))
+	fmt.Fprintf(&sb, "**Status**: %s\n", formatStatus(session.Status))
 	sb.WriteString("\n")
 
 	// Phase timeline
@@ -108,18 +108,18 @@ func (f *MarkdownFormatter) FormatSession(session *Session) (string, error) {
 
 	// Metrics
 	sb.WriteString("## Metrics\n\n")
-	sb.WriteString(fmt.Sprintf("- **Total Time**: %s\n", formatDuration(session.Metrics.TotalDuration)))
+	fmt.Fprintf(&sb, "- **Total Time**: %s\n", formatDuration(session.Metrics.TotalDuration))
 	if session.Metrics.AITime > 0 {
 		aiPercent := float64(session.Metrics.AITime) / float64(session.Metrics.TotalDuration) * 100
-		sb.WriteString(fmt.Sprintf("- **AI Time**: %s (%.0f%%)\n", formatDuration(session.Metrics.AITime), aiPercent))
+		fmt.Fprintf(&sb, "- **AI Time**: %s (%.0f%%)\n", formatDuration(session.Metrics.AITime), aiPercent)
 	}
 	if session.Metrics.WaitTime > 0 {
 		waitPercent := float64(session.Metrics.WaitTime) / float64(session.Metrics.TotalDuration) * 100
-		sb.WriteString(fmt.Sprintf("- **Wait Time**: %s (%.0f%%)\n", formatDuration(session.Metrics.WaitTime), waitPercent))
+		fmt.Fprintf(&sb, "- **Wait Time**: %s (%.0f%%)\n", formatDuration(session.Metrics.WaitTime), waitPercent)
 	}
-	sb.WriteString(fmt.Sprintf("- **Phase Count**: %d\n", session.Metrics.PhaseCount))
+	fmt.Fprintf(&sb, "- **Phase Count**: %d\n", session.Metrics.PhaseCount)
 	if session.Metrics.EstimatedCost > 0 {
-		sb.WriteString(fmt.Sprintf("- **Estimated Cost**: $%.2f\n", session.Metrics.EstimatedCost))
+		fmt.Fprintf(&sb, "- **Estimated Cost**: $%.2f\n", session.Metrics.EstimatedCost)
 	}
 
 	return sb.String(), nil
@@ -132,29 +132,29 @@ func (f *MarkdownFormatter) FormatSummary(summary SessionSummary) (string, error
 	sb.WriteString("# Wayfinder Session Summary\n\n")
 
 	sb.WriteString("## Session Counts\n\n")
-	sb.WriteString(fmt.Sprintf("- **Total Sessions**: %d\n", summary.TotalSessions))
-	sb.WriteString(fmt.Sprintf("- **Completed**: %d\n", summary.CompletedSessions))
-	sb.WriteString(fmt.Sprintf("- **Failed**: %d\n", summary.FailedSessions))
+	fmt.Fprintf(&sb, "- **Total Sessions**: %d\n", summary.TotalSessions)
+	fmt.Fprintf(&sb, "- **Completed**: %d\n", summary.CompletedSessions)
+	fmt.Fprintf(&sb, "- **Failed**: %d\n", summary.FailedSessions)
 
 	if summary.TotalSessions > 0 {
 		completionRate := float64(summary.CompletedSessions) / float64(summary.TotalSessions) * 100
-		sb.WriteString(fmt.Sprintf("- **Completion Rate**: %.1f%%\n", completionRate))
+		fmt.Fprintf(&sb, "- **Completion Rate**: %.1f%%\n", completionRate)
 	}
 
 	sb.WriteString("\n## Time Statistics\n\n")
-	sb.WriteString(fmt.Sprintf("- **Total Time**: %s\n", formatDuration(summary.TotalDuration)))
-	sb.WriteString(fmt.Sprintf("- **Average Duration**: %s\n", formatDuration(summary.AverageDuration)))
+	fmt.Fprintf(&sb, "- **Total Time**: %s\n", formatDuration(summary.TotalDuration))
+	fmt.Fprintf(&sb, "- **Average Duration**: %s\n", formatDuration(summary.AverageDuration))
 	if summary.TotalAITime > 0 {
-		sb.WriteString(fmt.Sprintf("- **Total AI Time**: %s\n", formatDuration(summary.TotalAITime)))
+		fmt.Fprintf(&sb, "- **Total AI Time**: %s\n", formatDuration(summary.TotalAITime))
 	}
 	if summary.TotalWaitTime > 0 {
-		sb.WriteString(fmt.Sprintf("- **Total Wait Time**: %s\n", formatDuration(summary.TotalWaitTime)))
+		fmt.Fprintf(&sb, "- **Total Wait Time**: %s\n", formatDuration(summary.TotalWaitTime))
 	}
 
 	if summary.TotalCost > 0 {
 		sb.WriteString("\n## Cost Statistics\n\n")
-		sb.WriteString(fmt.Sprintf("- **Total Cost**: $%.2f\n", summary.TotalCost))
-		sb.WriteString(fmt.Sprintf("- **Average Cost**: $%.2f\n", summary.AverageCost))
+		fmt.Fprintf(&sb, "- **Total Cost**: $%.2f\n", summary.TotalCost)
+		fmt.Fprintf(&sb, "- **Average Cost**: $%.2f\n", summary.AverageCost)
 	}
 
 	return sb.String(), nil

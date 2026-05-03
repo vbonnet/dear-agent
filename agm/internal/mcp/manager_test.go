@@ -28,15 +28,13 @@ func TestMCPManager_LoadGlobalConfig(t *testing.T) {
 	}
 
 	// Set up environment to use test config
-	homeDir := os.Getenv("HOME")
 	testConfigDir := filepath.Join(tmpDir, ".config", "agm")
 	os.MkdirAll(testConfigDir, 0755)
 	testConfigPath := filepath.Join(testConfigDir, "mcp.yaml")
 	os.WriteFile(testConfigPath, []byte(configContent), 0644)
 
 	// Temporarily override HOME
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", homeDir)
+	t.Setenv("HOME", tmpDir)
 
 	// Create manager
 	manager := NewMCPManager()
@@ -116,7 +114,7 @@ func TestMCPManager_DisconnectGlobalMCP(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"sessionId":"test-session-123","createdAt":"2024-01-01T00:00:00Z"}`))
 		default:
-			if r.Method == "DELETE" {
+			if r.Method == http.MethodDelete {
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte(`{"success":true}`))
 			} else {

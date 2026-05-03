@@ -563,9 +563,7 @@ func TestCheckClaudeBloat_SmallFile(t *testing.T) {
 	}
 
 	// Override HOME for this test
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpDir)
 
 	m := &manifest.Manifest{
 		Context: manifest.Context{
@@ -598,9 +596,7 @@ func TestCheckClaudeBloat_SearchAllProjectDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpDir)
 
 	m := &manifest.Manifest{
 		Context: manifest.Context{

@@ -120,7 +120,7 @@ func (p *OpenRouterProvider) Generate(ctx context.Context, req *GenerateRequest)
 	}
 
 	// Create HTTP request
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(reqBody))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, NewProviderError("openrouter", "generate", fmt.Errorf("failed to create HTTP request: %w", err))
 	}

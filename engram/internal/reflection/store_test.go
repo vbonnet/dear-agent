@@ -22,11 +22,7 @@ func TestNewStore(t *testing.T) {
 
 // TestSave_Success verifies saving a reflection
 func TestSave_Success(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "reflection-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	store := NewStore(tmpDir)
 
@@ -48,7 +44,7 @@ func TestSave_Success(t *testing.T) {
 		},
 	}
 
-	err = store.Save(reflection)
+	err := store.Save(reflection)
 	if err != nil {
 		t.Fatalf("Save() failed: %v", err)
 	}
@@ -108,11 +104,7 @@ func TestSave_Success(t *testing.T) {
 
 // TestSave_CreatesDirectory verifies directory creation
 func TestSave_CreatesDirectory(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "reflection-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Use nested path that doesn't exist
 	reflectionPath := filepath.Join(tmpDir, "nested", "reflections")
@@ -129,7 +121,7 @@ func TestSave_CreatesDirectory(t *testing.T) {
 		Metrics:  SessionMetrics{},
 	}
 
-	err = store.Save(reflection)
+	err := store.Save(reflection)
 	if err != nil {
 		t.Fatalf("Save() failed: %v", err)
 	}
@@ -142,11 +134,7 @@ func TestSave_CreatesDirectory(t *testing.T) {
 
 // TestSave_MinimalReflection verifies minimal reflection with no tags or metrics
 func TestSave_MinimalReflection(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "reflection-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	store := NewStore(tmpDir)
 
@@ -162,7 +150,7 @@ func TestSave_MinimalReflection(t *testing.T) {
 		Metrics:  SessionMetrics{}, // Zero metrics
 	}
 
-	err = store.Save(reflection)
+	err := store.Save(reflection)
 	if err != nil {
 		t.Fatalf("Save() failed with minimal reflection: %v", err)
 	}
@@ -194,11 +182,7 @@ func TestSave_MinimalReflection(t *testing.T) {
 
 // TestSave_FilenameFormat verifies filename generation
 func TestSave_FilenameFormat(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "reflection-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	store := NewStore(tmpDir)
 
@@ -265,11 +249,7 @@ func TestSave_FilenameFormat(t *testing.T) {
 
 // TestList_EmptyDirectory verifies List returns empty when no reflections
 func TestList_EmptyDirectory(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "reflection-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	store := NewStore(tmpDir)
 
@@ -366,11 +346,7 @@ func TestSessionMetrics_ZeroValues(t *testing.T) {
 
 // TestSave_FailureTracking verifies failure tracking fields (Task 1.1.1: Mistake Notebook)
 func TestSave_FailureTracking(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "reflection-failure-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	store := NewStore(tmpDir)
 
@@ -396,7 +372,7 @@ func TestSave_FailureTracking(t *testing.T) {
 		},
 	}
 
-	err = store.Save(reflection)
+	err := store.Save(reflection)
 	if err != nil {
 		t.Fatalf("Save() failed: %v", err)
 	}
@@ -493,11 +469,7 @@ func TestErrorCategories(t *testing.T) {
 
 // TestSaveWithAutoDetect verifies automatic failure detection (Task 1.1.2)
 func TestSaveWithAutoDetect(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "reflection-autodetect-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	store := NewStore(tmpDir)
 
@@ -531,7 +503,7 @@ func TestSaveWithAutoDetect(t *testing.T) {
 	}
 
 	// Save with auto-detect
-	err = store.SaveWithAutoDetect(reflection, context)
+	err := store.SaveWithAutoDetect(reflection, context)
 	if err != nil {
 		t.Fatalf("SaveWithAutoDetect() failed: %v", err)
 	}
@@ -580,11 +552,7 @@ func TestSaveWithAutoDetect(t *testing.T) {
 
 // TestSaveWithAutoDetect_Success verifies no enrichment for success (Task 1.1.2)
 func TestSaveWithAutoDetect_Success(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "reflection-success-autodetect-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	store := NewStore(tmpDir)
 
@@ -610,7 +578,7 @@ func TestSaveWithAutoDetect_Success(t *testing.T) {
 		SessionCompleted:  true,
 	}
 
-	err = store.SaveWithAutoDetect(reflection, context)
+	err := store.SaveWithAutoDetect(reflection, context)
 	if err != nil {
 		t.Fatalf("SaveWithAutoDetect() failed: %v", err)
 	}

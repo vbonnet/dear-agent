@@ -1,3 +1,4 @@
+// Package freshness provides freshness-related functionality.
 package freshness
 
 import (

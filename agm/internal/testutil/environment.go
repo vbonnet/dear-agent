@@ -37,7 +37,7 @@ func SetupTestEnvironment(t *testing.T) {
 
 	// Set test mode if not already set
 	if os.Getenv("ENGRAM_TEST_MODE") == "" {
-		os.Setenv("ENGRAM_TEST_MODE", "1")
+		t.Setenv("ENGRAM_TEST_MODE", "1")
 		t.Cleanup(func() {
 			os.Unsetenv("ENGRAM_TEST_MODE")
 		})
@@ -47,7 +47,7 @@ func SetupTestEnvironment(t *testing.T) {
 	// Note: Workspace is a NAME (e.g., "test"), not a file path
 	// Dolt uses workspace name to select database (workspace "test" → database "test")
 	if os.Getenv("ENGRAM_TEST_WORKSPACE") == "" {
-		os.Setenv("ENGRAM_TEST_WORKSPACE", "test")
+		t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 		t.Cleanup(func() {
 			os.Unsetenv("ENGRAM_TEST_WORKSPACE")
 		})
@@ -63,12 +63,12 @@ func SetupTestEnvironment(t *testing.T) {
 	originalWorkspace := os.Getenv("WORKSPACE")
 
 	// Set WORKSPACE to test workspace
-	os.Setenv("WORKSPACE", testWorkspace)
+	t.Setenv("WORKSPACE", testWorkspace)
 
 	// Register cleanup to restore original WORKSPACE
 	t.Cleanup(func() {
 		if originalWorkspace != "" {
-			os.Setenv("WORKSPACE", originalWorkspace)
+			t.Setenv("WORKSPACE", originalWorkspace)
 		} else {
 			os.Unsetenv("WORKSPACE")
 		}

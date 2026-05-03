@@ -89,7 +89,7 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 				Type:        "archive/active_tmux_session",
 				Code:        ErrCodeVerificationFailed,
 				Title:       "Cannot archive session with active tmux pane",
-				Detail:      fmt.Sprintf("cannot archive session with active tmux pane — use --force to override"),
+				Detail:      "cannot archive session with active tmux pane — use --force to override",
 				Suggestions: []string{"use --force to override and archive anyway"},
 			}
 		}
@@ -283,7 +283,6 @@ func cleanupSandboxDir(sessionID, mergedPath string) bool {
 	slog.Info("Removed sandbox directory", "session", sessionID, "path", sandboxDir)
 	return true
 }
-
 
 // preserveSettingsFromUpper copies .claude/settings.local.json from the sandbox
 // upper layer back to the first repo that has a .claude/ directory. This prevents
@@ -496,4 +495,3 @@ func deregisterMonitor(ctx *OpContext, sessionName string) {
 		}
 	}
 }
-

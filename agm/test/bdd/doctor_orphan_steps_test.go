@@ -6,21 +6,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/cucumber/godog"
-	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/orphan"
 )
 
 // DoctorOrphanContext holds the test context for doctor orphan scenarios
 type DoctorOrphanContext struct {
-	t             *testing.T
 	tmpDir        string
 	sessionsDir   string
-	adapter       *dolt.Adapter
 	orphanReport  *orphan.OrphanDetectionReport
 	orphanCount   int
 	lastError     error

@@ -701,9 +701,10 @@ func (a *Adapter) List(filter *manifest.Filter) ([]*manifest.Manifest, error) {
 		Offset:    filter.Offset,
 	}
 	// Map Status to Lifecycle filter
-	if filter.Status == "archived" {
+	switch filter.Status {
+	case "archived":
 		sf.Lifecycle = manifest.LifecycleArchived
-	} else if filter.Status == "active" {
+	case "active":
 		sf.ExcludeArchived = true
 	}
 	return a.ListSessions(sf)

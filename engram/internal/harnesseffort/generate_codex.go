@@ -73,10 +73,10 @@ func buildCodexBlock(cfg HarnessEffortConfig) string {
 		if !exists {
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("\n[profiles.%s]\n", tierName))
-		sb.WriteString(fmt.Sprintf("model = %q\n", prov.Model))
+		fmt.Fprintf(&sb, "\n[profiles.%s]\n", tierName)
+		fmt.Fprintf(&sb, "model = %q\n", prov.Model)
 		if prov.ReasoningEffort != "" {
-			sb.WriteString(fmt.Sprintf("reasoning_effort = %q\n", prov.ReasoningEffort))
+			fmt.Fprintf(&sb, "reasoning_effort = %q\n", prov.ReasoningEffort)
 		}
 	}
 

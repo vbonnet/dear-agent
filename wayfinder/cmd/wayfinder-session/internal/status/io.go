@@ -152,9 +152,10 @@ func (s *Status) formatPhaseList() string {
 		}
 
 		var suffix string
-		if phase.Status == PhaseStatusInProgress {
+		switch phase.Status {
+		case PhaseStatusInProgress:
 			suffix = "** (in progress)"
-		} else if phase.Status == PhaseStatusCompleted {
+		case PhaseStatusCompleted:
 			// Additional nil checks to prevent SIGSEGV
 			if phase.CompletedAt != nil && phase.StartedAt != nil {
 				duration := (*phase.CompletedAt).Sub(*phase.StartedAt)

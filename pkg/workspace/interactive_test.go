@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -134,7 +135,7 @@ func TestPromptWorkspace_NoEnabledWorkspaces(t *testing.T) {
 		t.Fatal("expected error when no enabled workspaces, got nil")
 	}
 
-	if err != ErrNoEnabledWorkspaces {
+	if !errors.Is(err, ErrNoEnabledWorkspaces) {
 		t.Errorf("expected ErrNoEnabledWorkspaces, got: %v", err)
 	}
 }
@@ -428,7 +429,7 @@ func TestNewPrompter(t *testing.T) {
 	}
 
 	// Verify it implements the interface
-	var _ Prompter = prompter
+	var _ = prompter
 }
 
 // TestPrompter_BoundaryConditions tests edge cases in workspace selection.

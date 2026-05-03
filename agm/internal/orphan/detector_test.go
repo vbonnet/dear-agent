@@ -1,8 +1,6 @@
 package orphan
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -209,29 +207,5 @@ func TestDetectionReport(t *testing.T) {
 
 	if len(report.Errors) != 0 {
 		t.Errorf("Expected no errors, got %d", len(report.Errors))
-	}
-}
-
-// Helper function to copy manifest files for testing
-func copyManifest(t *testing.T, srcDir, srcFile, dstDir, sessionID string) {
-	t.Helper()
-
-	// Read source manifest
-	srcPath := filepath.Join(srcDir, srcFile)
-	data, err := os.ReadFile(srcPath)
-	if err != nil {
-		t.Fatalf("Failed to read manifest %s: %v", srcPath, err)
-	}
-
-	// Create session directory
-	sessionDir := filepath.Join(dstDir, sessionID)
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
-		t.Fatalf("Failed to create session dir: %v", err)
-	}
-
-	// Write to destination
-	dstPath := filepath.Join(sessionDir, "manifest.yaml")
-	if err := os.WriteFile(dstPath, data, 0644); err != nil {
-		t.Fatalf("Failed to write manifest %s: %v", dstPath, err)
 	}
 }

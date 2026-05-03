@@ -89,8 +89,7 @@ func TestRegisterDuplicate(t *testing.T) {
 func TestGetBackend_Default(t *testing.T) {
 	// Don't unregister all - we need tmux to be registered
 	// Just ensure AGM_SESSION_BACKEND is not set
-	oldEnv := os.Getenv("AGM_SESSION_BACKEND")
-	defer os.Setenv("AGM_SESSION_BACKEND", oldEnv)
+	t.Setenv("AGM_SESSION_BACKEND", "") // restored on test cleanup
 	os.Unsetenv("AGM_SESSION_BACKEND")
 
 	backend, err := GetBackend()
@@ -109,8 +108,6 @@ func TestGetBackend_Default(t *testing.T) {
 
 func TestGetBackend_EnvVar(t *testing.T) {
 	// Save and restore env var
-	oldEnv := os.Getenv("AGM_SESSION_BACKEND")
-	defer os.Setenv("AGM_SESSION_BACKEND", oldEnv)
 
 	tests := []struct {
 		name        string
@@ -143,7 +140,7 @@ func TestGetBackend_EnvVar(t *testing.T) {
 			if tt.envValue == "" {
 				os.Unsetenv("AGM_SESSION_BACKEND")
 			} else {
-				os.Setenv("AGM_SESSION_BACKEND", tt.envValue)
+				t.Setenv("AGM_SESSION_BACKEND", tt.envValue)
 			}
 
 			backend, err := GetBackend()
@@ -298,7 +295,7 @@ func TestBackendInterfaceCompliance(t *testing.T) {
 
 			// Test that backend implements all interface methods
 			// (This is mainly a compile-time check, but we verify at runtime too)
-			var _ Backend = backend
+			var _ = backend
 		})
 	}
 }
@@ -327,10 +324,8 @@ func TestRegistryConcurrency(t *testing.T) {
 
 func TestGetBackendErrorMessages(t *testing.T) {
 	// Save and restore env var
-	oldEnv := os.Getenv("AGM_SESSION_BACKEND")
-	defer os.Setenv("AGM_SESSION_BACKEND", oldEnv)
 
-	os.Setenv("AGM_SESSION_BACKEND", "nonexistent")
+	t.Setenv("AGM_SESSION_BACKEND", "nonexistent")
 
 	_, err := GetBackend()
 	if err == nil {

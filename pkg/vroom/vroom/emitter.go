@@ -1,3 +1,4 @@
+// Package vroom provides vroom-related functionality.
 package vroom
 
 import (

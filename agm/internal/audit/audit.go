@@ -275,7 +275,7 @@ func checkMissingTmuxSessions(sessionsDir, workspaceFilter string, adapter *dolt
 
 	// Load all sessions from Dolt
 	if adapter == nil {
-		return nil, 0, fmt.Errorf("Dolt adapter required")
+		return nil, 0, fmt.Errorf("dolt adapter required")
 	}
 	manifests, err := adapter.ListSessions(&dolt.SessionFilter{})
 	if err != nil {
@@ -331,7 +331,7 @@ func checkStaleSessions(sessionsDir, workspaceFilter string, adapter *dolt.Adapt
 
 	// Load all sessions from Dolt
 	if adapter == nil {
-		return nil, fmt.Errorf("Dolt adapter required")
+		return nil, fmt.Errorf("dolt adapter required")
 	}
 	manifests, err := adapter.ListSessions(&dolt.SessionFilter{})
 	if err != nil {
@@ -379,7 +379,7 @@ func checkDuplicateUUIDs(sessionsDir, workspaceFilter string, adapter *dolt.Adap
 
 	// Load all sessions from Dolt
 	if adapter == nil {
-		return nil, fmt.Errorf("Dolt adapter required")
+		return nil, fmt.Errorf("dolt adapter required")
 	}
 	manifests, err := adapter.ListSessions(&dolt.SessionFilter{})
 	if err != nil {

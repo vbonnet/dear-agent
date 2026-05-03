@@ -369,28 +369,6 @@ func (ep *EscalationPipeline) approve(sessionName, command string) (*EscalationR
 	}, nil
 }
 
-func (ep *EscalationPipeline) reject(sessionName, command string) (*EscalationResult, error) {
-	reason := fmt.Sprintf("Astrocyte auto-rejected: dangerous operation (%s)", command)
-	ep.logger.Warn("Auto-rejecting dangerous command", "session", sessionName, "command", command)
-
-	output, err := ep.executor.Execute(ep.agmBinary, "send", "reject", sessionName, "--reason", reason)
-	if err != nil {
-		ep.logger.Error("Failed to reject", "session", sessionName, "error", err, "output", string(output))
-		return &EscalationResult{
-			Action:    ActionReject,
-			Success:   false,
-			Message:   fmt.Sprintf("reject failed: %s", string(output)),
-			Timestamp: time.Now(),
-		}, nil
-	}
-
-	return &EscalationResult{
-		Action:    ActionReject,
-		Success:   true,
-		Message:   fmt.Sprintf("Auto-rejected dangerous command: %s", command),
-		Timestamp: time.Now(),
-	}, nil
-}
 
 func (ep *EscalationPipeline) notifyUser(sessionName, message string) (*EscalationResult, error) {
 	ep.logger.Info("Notifying user", "session", sessionName, "message", message)

@@ -1,3 +1,4 @@
+// Package protocol provides protocol-related functionality.
 package protocol
 
 import (
@@ -79,10 +80,10 @@ func (m *Message) Format() string {
 
 	// Header
 	sb.WriteString("---\n")
-	sb.WriteString(fmt.Sprintf("**Agent ID**: %s\n", m.AgentID))
-	sb.WriteString(fmt.Sprintf("**Timestamp**: %s\n", m.Timestamp.Format("2006-01-02 15:04")))
-	sb.WriteString(fmt.Sprintf("**Status**: %s\n", m.Status))
-	sb.WriteString(fmt.Sprintf("**Message #**: %d\n", m.MessageNumber))
+	fmt.Fprintf(&sb, "**Agent ID**: %s\n", m.AgentID)
+	fmt.Fprintf(&sb, "**Timestamp**: %s\n", m.Timestamp.Format("2006-01-02 15:04"))
+	fmt.Fprintf(&sb, "**Status**: %s\n", m.Status)
+	fmt.Fprintf(&sb, "**Message #**: %d\n", m.MessageNumber)
 	sb.WriteString("---\n\n")
 
 	// Context
@@ -101,7 +102,7 @@ func (m *Message) Format() string {
 		sb.WriteString("None - all questions answered.\n")
 	} else {
 		for i, q := range m.Questions {
-			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, q))
+			fmt.Fprintf(&sb, "%d. %s\n", i+1, q)
 		}
 	}
 	sb.WriteString("\n")
@@ -112,7 +113,7 @@ func (m *Message) Format() string {
 		sb.WriteString("None - ready to proceed.\n")
 	} else {
 		for _, b := range m.Blockers {
-			sb.WriteString(fmt.Sprintf("- %s\n", b))
+			fmt.Fprintf(&sb, "- %s\n", b)
 		}
 	}
 	sb.WriteString("\n")
@@ -123,7 +124,7 @@ func (m *Message) Format() string {
 		sb.WriteString("1. Await response\n")
 	} else {
 		for i, s := range m.NextSteps {
-			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, s))
+			fmt.Fprintf(&sb, "%d. %s\n", i+1, s)
 		}
 	}
 	sb.WriteString("\n")

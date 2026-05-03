@@ -47,14 +47,14 @@ func (h *Hippocampus) renderConsolidation(c *Consolidation) string {
 // renderHeader renders the consolidation header with metadata
 func renderHeader(sb *strings.Builder, c *Consolidation) {
 	sb.WriteString("# Sleep Cycle Consolidation\n\n")
-	sb.WriteString(fmt.Sprintf("**Session ID**: %s\n", c.SessionID))
-	sb.WriteString(fmt.Sprintf("**Timestamp**: %s\n", c.Timestamp.Format("2006-01-02T15:04:05Z07:00")))
-	sb.WriteString(fmt.Sprintf("**Tokens Before**: %d\n", c.TokensBefore))
-	sb.WriteString(fmt.Sprintf("**Tokens After**: %d\n", c.TokensAfter))
+	fmt.Fprintf(sb, "**Session ID**: %s\n", c.SessionID)
+	fmt.Fprintf(sb, "**Timestamp**: %s\n", c.Timestamp.Format("2006-01-02T15:04:05Z07:00"))
+	fmt.Fprintf(sb, "**Tokens Before**: %d\n", c.TokensBefore)
+	fmt.Fprintf(sb, "**Tokens After**: %d\n", c.TokensAfter)
 
 	if c.TokensBefore > 0 {
 		reduction := 100.0 * float64(c.TokensBefore-c.TokensAfter) / float64(c.TokensBefore)
-		sb.WriteString(fmt.Sprintf("**Reduction**: %.1f%%\n\n", reduction))
+		fmt.Fprintf(sb, "**Reduction**: %.1f%%\n\n", reduction)
 	} else {
 		sb.WriteString("**Reduction**: N/A\n\n")
 	}
@@ -67,12 +67,12 @@ func renderDecisions(sb *strings.Builder, c *Consolidation) {
 	sb.WriteString("## Key Decisions\n\n")
 	if len(c.Decisions) > 0 {
 		for i, d := range c.Decisions {
-			sb.WriteString(fmt.Sprintf("%d. **%s**\n", i+1, d.Title))
+			fmt.Fprintf(sb, "%d. **%s**\n", i+1, d.Title)
 			if d.Rationale != "" {
-				sb.WriteString(fmt.Sprintf("   - Rationale: %s\n", d.Rationale))
+				fmt.Fprintf(sb, "   - Rationale: %s\n", d.Rationale)
 			}
 			if d.Impact != "" {
-				sb.WriteString(fmt.Sprintf("   - Impact: %s\n", d.Impact))
+				fmt.Fprintf(sb, "   - Impact: %s\n", d.Impact)
 			}
 			sb.WriteString("\n")
 		}
@@ -87,9 +87,9 @@ func renderOutcomes(sb *strings.Builder, c *Consolidation) {
 	sb.WriteString("## Outcomes Achieved\n\n")
 	if len(c.Outcomes) > 0 {
 		for _, o := range c.Outcomes {
-			sb.WriteString(fmt.Sprintf("- **%s**\n", o.Description))
+			fmt.Fprintf(sb, "- **%s**\n", o.Description)
 			if o.Evidence != "" {
-				sb.WriteString(fmt.Sprintf("  - Evidence: %s\n", o.Evidence))
+				fmt.Fprintf(sb, "  - Evidence: %s\n", o.Evidence)
 			}
 		}
 		sb.WriteString("\n")
@@ -112,12 +112,12 @@ func renderTechnicalLearnings(sb *strings.Builder, c *Consolidation) {
 	sb.WriteString("### Technical Learnings\n\n")
 	if len(c.TechnicalLearnings) > 0 {
 		for i, l := range c.TechnicalLearnings {
-			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, l.Learning))
+			fmt.Fprintf(sb, "%d. %s\n", i+1, l.Learning)
 			if l.Context != "" {
-				sb.WriteString(fmt.Sprintf("   - Context: %s\n", l.Context))
+				fmt.Fprintf(sb, "   - Context: %s\n", l.Context)
 			}
 			if l.Application != "" {
-				sb.WriteString(fmt.Sprintf("   - Application: %s\n", l.Application))
+				fmt.Fprintf(sb, "   - Application: %s\n", l.Application)
 			}
 		}
 		sb.WriteString("\n")
@@ -131,12 +131,12 @@ func renderProcessLearnings(sb *strings.Builder, c *Consolidation) {
 	sb.WriteString("### Process Learnings\n\n")
 	if len(c.ProcessLearnings) > 0 {
 		for i, l := range c.ProcessLearnings {
-			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, l.Learning))
+			fmt.Fprintf(sb, "%d. %s\n", i+1, l.Learning)
 			if l.Context != "" {
-				sb.WriteString(fmt.Sprintf("   - Context: %s\n", l.Context))
+				fmt.Fprintf(sb, "   - Context: %s\n", l.Context)
 			}
 			if l.Application != "" {
-				sb.WriteString(fmt.Sprintf("   - Application: %s\n", l.Application))
+				fmt.Fprintf(sb, "   - Application: %s\n", l.Application)
 			}
 		}
 		sb.WriteString("\n")
@@ -149,12 +149,12 @@ func renderProcessLearnings(sb *strings.Builder, c *Consolidation) {
 func renderActivePlan(sb *strings.Builder, c *Consolidation) {
 	sb.WriteString("## Active Plan\n\n")
 	if c.ActivePlan != nil {
-		sb.WriteString(fmt.Sprintf("**Status**: %s\n", c.ActivePlan.Status))
-		sb.WriteString(fmt.Sprintf("**Current Phase**: %s\n\n", c.ActivePlan.CurrentPhase))
+		fmt.Fprintf(sb, "**Status**: %s\n", c.ActivePlan.Status)
+		fmt.Fprintf(sb, "**Current Phase**: %s\n\n", c.ActivePlan.CurrentPhase)
 		if len(c.ActivePlan.NextSteps) > 0 {
 			sb.WriteString("**Next Steps**:\n")
 			for i, step := range c.ActivePlan.NextSteps {
-				sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, step))
+				fmt.Fprintf(sb, "%d. %s\n", i+1, step)
 			}
 			sb.WriteString("\n")
 		}
@@ -169,7 +169,7 @@ func renderEngrams(sb *strings.Builder, c *Consolidation) {
 	sb.WriteString("## Relevant Engrams\n\n")
 	if len(c.Engrams) > 0 {
 		for _, e := range c.Engrams {
-			sb.WriteString(fmt.Sprintf("- %s\n", e))
+			fmt.Fprintf(sb, "- %s\n", e)
 		}
 		sb.WriteString("\n")
 	} else {
@@ -181,7 +181,7 @@ func renderEngrams(sb *strings.Builder, c *Consolidation) {
 // renderFooter renders the consolidation footer
 func renderFooter(sb *strings.Builder, c *Consolidation) {
 	sb.WriteString("## Archived Context\n\n")
-	sb.WriteString(fmt.Sprintf("**Full session history archived to**: %s\n\n", c.ArchivePath))
+	fmt.Fprintf(sb, "**Full session history archived to**: %s\n\n", c.ArchivePath)
 	sb.WriteString("**Consolidation summary**: This consolidation captures essential context.\n\n")
 	sb.WriteString("---\n\n")
 	sb.WriteString("**Generated by**: Engram Hippocampus (Sleep Cycle consolidation)\n")

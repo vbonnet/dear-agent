@@ -1,3 +1,4 @@
+// Package compaction provides compaction-related functionality.
 package compaction
 
 import (

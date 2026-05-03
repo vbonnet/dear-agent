@@ -1,3 +1,4 @@
+// Package orchestrator provides orchestrator-related functionality.
 package orchestrator
 
 import (

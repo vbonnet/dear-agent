@@ -20,13 +20,13 @@ func TestGetAnthropicKey_Success(t *testing.T) {
 	oldVal := os.Getenv("ANTHROPIC_API_KEY")
 	defer func() {
 		if oldVal != "" {
-			os.Setenv("ANTHROPIC_API_KEY", oldVal)
+			t.Setenv("ANTHROPIC_API_KEY", oldVal)
 		} else {
 			os.Unsetenv("ANTHROPIC_API_KEY")
 		}
 	}()
 
-	os.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-key-123")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test-key-123")
 
 	manager := NewAPIKeyManager()
 	key, err := manager.GetAnthropicKey()
@@ -44,7 +44,7 @@ func TestGetAnthropicKey_NotSet(t *testing.T) {
 	oldVal := os.Getenv("ANTHROPIC_API_KEY")
 	defer func() {
 		if oldVal != "" {
-			os.Setenv("ANTHROPIC_API_KEY", oldVal)
+			t.Setenv("ANTHROPIC_API_KEY", oldVal)
 		}
 	}()
 
@@ -131,13 +131,13 @@ func TestSanitizeForLogs_EnvironmentVariable(t *testing.T) {
 	oldVal := os.Getenv("ANTHROPIC_API_KEY")
 	defer func() {
 		if oldVal != "" {
-			os.Setenv("ANTHROPIC_API_KEY", oldVal)
+			t.Setenv("ANTHROPIC_API_KEY", oldVal)
 		} else {
 			os.Unsetenv("ANTHROPIC_API_KEY")
 		}
 	}()
 
-	os.Setenv("ANTHROPIC_API_KEY", "sk-ant-env-key-789")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-env-key-789")
 
 	manager := NewAPIKeyManager()
 

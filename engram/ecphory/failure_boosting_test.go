@@ -33,11 +33,7 @@ func TestApplyFailureBoosting_NormalQuery(t *testing.T) {
 
 // TestApplyFailureBoosting_DebuggingQuery verifies boosting for debugging queries
 func TestApplyFailureBoosting_DebuggingQuery(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "boosting-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create reflection with syntax_error category
 	syntaxReflection := `---
@@ -52,7 +48,7 @@ outcome: failure
 Details about syntax error...
 `
 	syntaxPath := filepath.Join(tmpDir, "syntax-reflection.ai.md")
-	err = os.WriteFile(syntaxPath, []byte(syntaxReflection), 0644)
+	err := os.WriteFile(syntaxPath, []byte(syntaxReflection), 0644)
 	if err != nil {
 		t.Fatalf("failed to write syntax reflection: %v", err)
 	}
@@ -124,11 +120,7 @@ Always check error returns...
 
 // TestApplyFailureBoosting_ScoreCapping verifies relevance score is capped at 100.0
 func TestApplyFailureBoosting_ScoreCapping(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "boosting-cap-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create reflection with high initial score
 	highScoreReflection := `---
@@ -143,7 +135,7 @@ outcome: failure
 Details about timeout...
 `
 	reflectionPath := filepath.Join(tmpDir, "timeout-reflection.ai.md")
-	err = os.WriteFile(reflectionPath, []byte(highScoreReflection), 0644)
+	err := os.WriteFile(reflectionPath, []byte(highScoreReflection), 0644)
 	if err != nil {
 		t.Fatalf("failed to write reflection: %v", err)
 	}
@@ -168,11 +160,7 @@ Details about timeout...
 
 // TestApplyFailureBoosting_MultipleMatchingReflections verifies all matching reflections are boosted
 func TestApplyFailureBoosting_MultipleMatchingReflections(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "boosting-multi-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create multiple reflections with same category
 	reflection1 := `---
@@ -187,7 +175,7 @@ outcome: failure
 First tool misuse reflection...
 `
 	path1 := filepath.Join(tmpDir, "tool-misuse-1.ai.md")
-	err = os.WriteFile(path1, []byte(reflection1), 0644)
+	err := os.WriteFile(path1, []byte(reflection1), 0644)
 	if err != nil {
 		t.Fatalf("failed to write reflection 1: %v", err)
 	}

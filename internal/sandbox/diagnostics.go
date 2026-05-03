@@ -249,13 +249,13 @@ func GenerateDiagnosticReport(sandboxes []*Sandbox) (*DiagnosticReport, error) {
 
 	// Generate summary
 	var summary strings.Builder
-	summary.WriteString(fmt.Sprintf("Platform: %s\n", caps.Platform))
+	fmt.Fprintf(&summary, "Platform: %s\n", caps.Platform)
 	if caps.KernelVersion != "" {
-		summary.WriteString(fmt.Sprintf("Kernel: %s\n", caps.KernelVersion))
+		fmt.Fprintf(&summary, "Kernel: %s\n", caps.KernelVersion)
 	}
-	summary.WriteString(fmt.Sprintf("Sandboxes: %d active\n", len(report.Sandboxes)))
-	summary.WriteString(fmt.Sprintf("Warnings: %d system, %d resource\n",
-		len(caps.Warnings), len(resources.Warnings)))
+	fmt.Fprintf(&summary, "Sandboxes: %d active\n", len(report.Sandboxes))
+	fmt.Fprintf(&summary, "Warnings: %d system, %d resource\n",
+		len(caps.Warnings), len(resources.Warnings))
 	report.Summary = summary.String()
 
 	return report, nil

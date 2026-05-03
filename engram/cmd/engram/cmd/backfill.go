@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -174,7 +175,8 @@ func runBackfillSkillPython(skillName string, projectPath string) error {
 	pythonCmd.Env = os.Environ() // Pass through environment variables
 
 	if err := pythonCmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			// Preserve Python script's exit code
 			os.Exit(exitErr.ExitCode())
 		}

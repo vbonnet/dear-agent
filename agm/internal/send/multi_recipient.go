@@ -229,30 +229,6 @@ func resolveGlob(pattern string, allSessions []*manifest.Manifest) []string {
 	return matches
 }
 
-// resolveWorkspace filters sessions by workspace
-// Returns tmux session names of matching sessions
-func resolveWorkspace(workspace string, allSessions []*manifest.Manifest) []string {
-	var matches []string
-	seen := make(map[string]bool)
-
-	for _, session := range allSessions {
-		// Skip archived sessions
-		if session.Lifecycle == manifest.LifecycleArchived {
-			continue
-		}
-
-		// Match workspace (case-insensitive)
-		if strings.EqualFold(session.Workspace, workspace) {
-			// Deduplicate using tmux session name
-			if !seen[session.Tmux.SessionName] {
-				seen[session.Tmux.SessionName] = true
-				matches = append(matches, session.Tmux.SessionName)
-			}
-		}
-	}
-
-	return matches
-}
 
 // matchGlob performs simple glob pattern matching
 // Supports * (any chars) and ? (single char)

@@ -206,7 +206,7 @@ func (r *Ranker) buildRankingPrompt(query string, candidates []string) (string, 
 	var candidateList strings.Builder
 	candidateList.WriteString("Engram candidates:\n")
 	for i, candidate := range candidates {
-		candidateList.WriteString(fmt.Sprintf("%d. %s\n", i+1, candidate))
+		fmt.Fprintf(&candidateList, "%d. %s\n", i+1, candidate)
 	}
 
 	// Build task description
@@ -348,7 +348,7 @@ func (p *VertexAIProvider) Complete(ctx context.Context, prompt string) (string,
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}

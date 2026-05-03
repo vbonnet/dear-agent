@@ -17,7 +17,7 @@ import (
 // against the actual implementation.
 func TestSPECInvariants_TrustProtocol(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 	t.Cleanup(func() { contracts.ResetForTesting() })
 	contracts.ResetForTesting()
 
@@ -215,7 +215,7 @@ func TestSPECInvariants_AuditTrail(t *testing.T) {
 	})
 
 	t.Run("Invariant5_DefaultPathDeterministic", func(t *testing.T) {
-		os.Setenv("HOME", tmpDir)
+		t.Setenv("HOME", tmpDir)
 		t.Cleanup(func() { contracts.ResetForTesting() })
 		logger, err := ops.NewAuditLogger("")
 		if err != nil {

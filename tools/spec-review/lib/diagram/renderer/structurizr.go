@@ -115,7 +115,7 @@ func (r *StructurizrRenderer) Validate(ctx context.Context, source io.Reader) er
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("Structurizr validation failed: %s", stderr.String())
+		return fmt.Errorf("structurizr validation failed: %s", stderr.String())
 	}
 
 	return nil

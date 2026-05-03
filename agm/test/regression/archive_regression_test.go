@@ -32,21 +32,8 @@ func TestArchiveAttachedSessionRequiresForce(t *testing.T) {
 	// This is tested by the archive_regression test above
 }
 
-// Mock interfaces for testing (if real tmux operations are unavailable)
-type mockTmuxClient struct {
-	sessionExists      bool
-	attachedClients    []string
-	sessionExistsError error
-	listClientsError   error
-}
 
-func (m *mockTmuxClient) HasSession(name string) (bool, error) {
-	return m.sessionExists, m.sessionExistsError
-}
 
-func (m *mockTmuxClient) ListClients(name string) ([]string, error) {
-	return m.attachedClients, m.listClientsError
-}
 
 // TestArchiveLogicUsesListClientsNotHasSession ensures archive uses correct check
 //

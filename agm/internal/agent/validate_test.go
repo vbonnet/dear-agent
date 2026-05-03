@@ -100,7 +100,7 @@ func TestIsVertexAIConfigured(t *testing.T) {
 			defer func() {
 				for key, val := range originalValues {
 					if val != "" {
-						os.Setenv(key, val)
+						t.Setenv(key, val)
 					} else {
 						os.Unsetenv(key)
 					}
@@ -109,7 +109,7 @@ func TestIsVertexAIConfigured(t *testing.T) {
 
 			// Set test env vars
 			for key, val := range tt.envVars {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			}
 
 			result := isVertexAIConfigured()
@@ -150,7 +150,7 @@ func clearClaudeEnv(t *testing.T) {
 	t.Cleanup(func() {
 		for k, v := range saved {
 			if v != "" {
-				os.Setenv(k, v)
+				t.Setenv(k, v)
 			} else {
 				os.Unsetenv(k)
 			}
@@ -165,7 +165,7 @@ func TestValidateHarnessAvailability_VertexAI(t *testing.T) {
 	t.Run("Claude with Vertex AI configured", func(t *testing.T) {
 		clearClaudeEnv(t)
 		mockLookPath(t, map[string]bool{})
-		os.Setenv("CLOUD_ML_REGION", "us-east5")
+		t.Setenv("CLOUD_ML_REGION", "us-east5")
 
 		err := ValidateHarnessAvailability("claude-code")
 		if err != nil {
@@ -176,7 +176,7 @@ func TestValidateHarnessAvailability_VertexAI(t *testing.T) {
 	t.Run("Claude with ANTHROPIC_VERTEX_PROJECT_ID", func(t *testing.T) {
 		clearClaudeEnv(t)
 		mockLookPath(t, map[string]bool{})
-		os.Setenv("ANTHROPIC_VERTEX_PROJECT_ID", "my-project")
+		t.Setenv("ANTHROPIC_VERTEX_PROJECT_ID", "my-project")
 
 		err := ValidateHarnessAvailability("claude-code")
 		if err != nil {
@@ -187,7 +187,7 @@ func TestValidateHarnessAvailability_VertexAI(t *testing.T) {
 	t.Run("Claude with CLAUDE_CODE_USE_VERTEX", func(t *testing.T) {
 		clearClaudeEnv(t)
 		mockLookPath(t, map[string]bool{})
-		os.Setenv("CLAUDE_CODE_USE_VERTEX", "1")
+		t.Setenv("CLAUDE_CODE_USE_VERTEX", "1")
 
 		err := ValidateHarnessAvailability("claude-code")
 		if err != nil {
@@ -198,7 +198,7 @@ func TestValidateHarnessAvailability_VertexAI(t *testing.T) {
 	t.Run("Claude with ANTHROPIC_API_KEY", func(t *testing.T) {
 		clearClaudeEnv(t)
 		mockLookPath(t, map[string]bool{})
-		os.Setenv("ANTHROPIC_API_KEY", "test-key")
+		t.Setenv("ANTHROPIC_API_KEY", "test-key")
 
 		err := ValidateHarnessAvailability("claude-code")
 		if err != nil {
@@ -209,7 +209,7 @@ func TestValidateHarnessAvailability_VertexAI(t *testing.T) {
 	t.Run("Claude with Claude Code CLI", func(t *testing.T) {
 		clearClaudeEnv(t)
 		mockLookPath(t, map[string]bool{})
-		os.Setenv("CLAUDECODE", "1")
+		t.Setenv("CLAUDECODE", "1")
 
 		err := ValidateHarnessAvailability("claude-code")
 		if err != nil {
@@ -257,6 +257,7 @@ func TestValidateHarnessAvailability_BinaryOnPath(t *testing.T) {
 	t.Run("Codex available when binary on PATH", func(t *testing.T) {
 		clearClaudeEnv(t)
 		mockLookPath(t, map[string]bool{"codex": true})
+		t.Setenv("OPENAI_API_KEY", "") // restored on test cleanup
 		os.Unsetenv("OPENAI_API_KEY")
 
 		err := ValidateHarnessAvailability("codex-cli")
@@ -271,7 +272,7 @@ func TestValidateHarnessAvailability_BinaryOnPath(t *testing.T) {
 		os.Unsetenv("GEMINI_API_KEY")
 		t.Cleanup(func() {
 			if origKey != "" {
-				os.Setenv("GEMINI_API_KEY", origKey)
+				t.Setenv("GEMINI_API_KEY", origKey)
 			}
 		})
 

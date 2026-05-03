@@ -144,7 +144,7 @@ func (f *Factory) newGeminiProvider(authMethod auth.AuthMethod, model string) (P
 
 	case auth.AuthAPIKey:
 		// TODO: Implement GeminiProvider
-		return nil, fmt.Errorf("Gemini API provider not yet implemented")
+		return nil, fmt.Errorf("gemini API provider not yet implemented")
 
 	case auth.AuthLocal:
 		return nil, fmt.Errorf("gemini does not support local authentication")

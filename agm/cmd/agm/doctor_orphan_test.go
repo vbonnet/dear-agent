@@ -14,11 +14,7 @@ import (
 func TestDoctorOrphanDetection(t *testing.T) {
 	t.Skip("Phase 6: Test uses manifest.Write which is deleted - orphan detection should use Dolt")
 	// Create temporary test directory
-	tmpDir, err := os.MkdirTemp("", "doctor-orphan-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create test sessions directory
 	sessionsDir := filepath.Join(tmpDir, "sessions")
@@ -138,11 +134,7 @@ func TestDoctorOrphanCheckPerformance(t *testing.T) {
 
 	t.Run("CompletesInReasonableTime", func(t *testing.T) {
 		// Create temporary test directory
-		tmpDir, err := os.MkdirTemp("", "doctor-perf-test-*")
-		if err != nil {
-			t.Fatalf("Failed to create temp dir: %v", err)
-		}
-		defer os.RemoveAll(tmpDir)
+		tmpDir := t.TempDir()
 
 		sessionsDir := filepath.Join(tmpDir, "sessions")
 		if err := os.MkdirAll(sessionsDir, 0755); err != nil {
@@ -179,7 +171,7 @@ func TestDoctorOrphanCheckPerformance(t *testing.T) {
 
 		// Measure orphan detection time
 		start := time.Now()
-		_, err = orphan.DetectOrphans(sessionsDir, "", nil)
+		_, err := orphan.DetectOrphans(sessionsDir, "", nil)
 		duration := time.Since(start)
 
 		if err != nil {
@@ -199,11 +191,7 @@ func TestDoctorOrphanCheckWorkspaceFilter(t *testing.T) {
 	t.Skip("Phase 6: Test uses manifest.Write which is deleted - orphan detection should use Dolt")
 	t.Run("FiltersOrphansByWorkspace", func(t *testing.T) {
 		// Create temporary test directory
-		tmpDir, err := os.MkdirTemp("", "doctor-workspace-test-*")
-		if err != nil {
-			t.Fatalf("Failed to create temp dir: %v", err)
-		}
-		defer os.RemoveAll(tmpDir)
+		tmpDir := t.TempDir()
 
 		sessionsDir := filepath.Join(tmpDir, "sessions")
 		if err := os.MkdirAll(sessionsDir, 0755); err != nil {
@@ -254,11 +242,7 @@ func TestDoctorOrphanCheckErrorHandling(t *testing.T) {
 
 	t.Run("HandlesEmptySessionsDir", func(t *testing.T) {
 		// Create temporary empty directory
-		tmpDir, err := os.MkdirTemp("", "doctor-empty-test-*")
-		if err != nil {
-			t.Fatalf("Failed to create temp dir: %v", err)
-		}
-		defer os.RemoveAll(tmpDir)
+		tmpDir := t.TempDir()
 
 		// Should not crash on empty directory
 		// Note: This may find orphans from real history.jsonl since we're not

@@ -86,7 +86,7 @@ func testSessionResume(m *manifest.Manifest, timeout time.Duration) (string, err
 	if err := tmux.SendCommand(sessionName, resumeCmd); err != nil {
 		output, captureErr := capturePane(sessionName)
 		if captureErr != nil {
-			return "", fmt.Errorf("failed to send resume command: %w (capture error: %v)", err, captureErr)
+			return "", fmt.Errorf("failed to send resume command: %w (capture error: %w)", err, captureErr)
 		}
 		return output, fmt.Errorf("failed to send resume command: %w", err)
 	}
@@ -96,7 +96,7 @@ func testSessionResume(m *manifest.Manifest, timeout time.Duration) (string, err
 		if err := tmux.WaitForClaudeReady(sessionName, timeout); err != nil {
 			output, captureErr := capturePane(sessionName)
 			if captureErr != nil {
-				return "", fmt.Errorf("process not ready: %w (capture error: %v)", err, captureErr)
+				return "", fmt.Errorf("process not ready: %w (capture error: %w)", err, captureErr)
 			}
 			return output, err
 		}

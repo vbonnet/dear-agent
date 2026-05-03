@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -20,7 +21,8 @@ func VerifyOnMain(repoPath string, commitSHA string) (bool, error) {
 	cmd := exec.Command("git", "-C", repoPath, "merge-base", "--is-ancestor", commitSHA, "main")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			// Exit code 1 means the commit is NOT an ancestor of main.
 			if exitErr.ExitCode() == 1 {
 				return false, nil

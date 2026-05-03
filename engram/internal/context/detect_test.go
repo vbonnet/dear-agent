@@ -15,15 +15,8 @@ func TestDetectContext_GitRepo(t *testing.T) {
 	tmpDir := testutil.SetupTempDir(t)
 
 	// Change to temp directory
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	// Initialize git repo
 	cmd := exec.Command("git", "init")
@@ -53,15 +46,8 @@ func TestDetectContext_GitRepo(t *testing.T) {
 func TestDetectContext_GitHTTPS(t *testing.T) {
 	tmpDir := testutil.SetupTempDir(t)
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	cmd := exec.Command("git", "init")
 	if err := cmd.Run(); err != nil {
@@ -94,15 +80,8 @@ func TestDetectContext_DirectoryFallback(t *testing.T) {
 		t.Fatalf("failed to create test directory: %v", err)
 	}
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(testDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(testDir)
 
 	// No git repo, should use directory name
 	got, err := DetectContext()
@@ -203,15 +182,8 @@ func TestCleanName(t *testing.T) {
 func TestGetGitRepoName_NoGitRepo(t *testing.T) {
 	tmpDir := testutil.SetupTempDir(t)
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	// Should return error or empty string when not in a git repo
 	name, err := getGitRepoName()
@@ -224,15 +196,8 @@ func TestGetGitRepoName_NoGitRepo(t *testing.T) {
 func TestGetGitRepoName_WithGitSuffix(t *testing.T) {
 	tmpDir := testutil.SetupTempDir(t)
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	cmd := exec.Command("git", "init")
 	if err := cmd.Run(); err != nil {

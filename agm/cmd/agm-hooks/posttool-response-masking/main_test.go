@@ -148,11 +148,13 @@ func TestSessionIDInArchivePath(t *testing.T) {
 
 func TestNewResponseMasker_Defaults(t *testing.T) {
 	// Clear relevant env vars
+	t.Setenv("AGM_RESPONSE_MASK_THRESHOLD", "") // restored on test cleanup
 	os.Unsetenv("AGM_RESPONSE_MASK_THRESHOLD")
+	t.Setenv("AGM_RESPONSE_MASK_SKIP", "") // restored on test cleanup
 	os.Unsetenv("AGM_RESPONSE_MASK_SKIP")
-	os.Setenv("CLAUDE_SESSION_ID", "test-id")
-	os.Setenv("CLAUDE_TOOL_NAME", "Bash")
-	os.Setenv("CLAUDE_TOOL_RESULT", "hello")
+	t.Setenv("CLAUDE_SESSION_ID", "test-id")
+	t.Setenv("CLAUDE_TOOL_NAME", "Bash")
+	t.Setenv("CLAUDE_TOOL_RESULT", "hello")
 	defer func() {
 		os.Unsetenv("CLAUDE_SESSION_ID")
 		os.Unsetenv("CLAUDE_TOOL_NAME")
@@ -169,9 +171,9 @@ func TestNewResponseMasker_Defaults(t *testing.T) {
 }
 
 func TestNewResponseMasker_CustomConfig(t *testing.T) {
-	os.Setenv("AGM_RESPONSE_MASK_THRESHOLD", "3000")
-	os.Setenv("AGM_RESPONSE_MASK_SKIP", "Read,Agent,Glob")
-	os.Setenv("CLAUDE_SESSION_ID", "s1")
+	t.Setenv("AGM_RESPONSE_MASK_THRESHOLD", "3000")
+	t.Setenv("AGM_RESPONSE_MASK_SKIP", "Read,Agent,Glob")
+	t.Setenv("CLAUDE_SESSION_ID", "s1")
 	defer func() {
 		os.Unsetenv("AGM_RESPONSE_MASK_THRESHOLD")
 		os.Unsetenv("AGM_RESPONSE_MASK_SKIP")

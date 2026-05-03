@@ -134,7 +134,7 @@ func (a *Adapter) CreateToolCalls(calls []*ToolCall) error {
 
 		// Marshal arguments to JSON
 		var argumentsJSON []byte
-		if call.Arguments != nil && len(call.Arguments) > 0 {
+		if len(call.Arguments) > 0 {
 			argumentsJSON, err = json.Marshal(call.Arguments)
 			if err != nil {
 				return fmt.Errorf("failed to marshal arguments: %w", err)
@@ -143,7 +143,7 @@ func (a *Adapter) CreateToolCalls(calls []*ToolCall) error {
 
 		// Marshal result to JSON
 		var resultJSON []byte
-		if call.Result != nil && len(call.Result) > 0 {
+		if len(call.Result) > 0 {
 			resultJSON, err = json.Marshal(call.Result)
 			if err != nil {
 				return fmt.Errorf("failed to marshal result: %w", err)

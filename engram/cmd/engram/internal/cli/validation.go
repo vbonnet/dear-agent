@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,7 +76,8 @@ func expandPathVal(path string) string {
 // ValidateStruct validates a struct using go-playground/validator tags
 func ValidateStruct(s interface{}) error {
 	if err := GetValidator().Struct(s); err != nil {
-		if errs, ok := err.(validator.ValidationErrors); ok && len(errs) > 0 {
+		var errs validator.ValidationErrors
+		if errors.As(err, &errs) {
 			e := errs[0]
 			msg := fmt.Sprintf("Invalid %s", e.Field())
 			if e.Tag() == "oneof" {

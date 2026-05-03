@@ -11,11 +11,7 @@ import (
 // TestFixHookExtensionMismatches tests removing .py extensions when binaries exist
 func TestFixHookExtensionMismatches(t *testing.T) {
 	// Create temp directory for test
-	tmpDir, err := os.MkdirTemp("", "engram-fix-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create mock hook binary (without .py extension)
 	hookDir := filepath.Join(tmpDir, ".claude", "hooks")
@@ -83,11 +79,7 @@ func TestFixHookExtensionMismatches(t *testing.T) {
 // TestFixHookPaths tests correcting known wrong paths
 func TestFixHookPaths(t *testing.T) {
 	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "engram-fix-paths-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create correct hook directory structure
 	correctHookDir := filepath.Join(tmpDir, "src/ws/oss/repos/engram/hooks")
@@ -150,11 +142,7 @@ func TestFixHookPaths(t *testing.T) {
 // TestFixMarketplaceConfig tests fixing source="directory" entries
 func TestFixMarketplaceConfig(t *testing.T) {
 	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "engram-fix-marketplace-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create marketplace config directory
 	pluginsDir := filepath.Join(tmpDir, ".claude", "plugins")
@@ -175,9 +163,7 @@ func TestFixMarketplaceConfig(t *testing.T) {
 	}
 
 	// Set HOME to tmpDir for the fixer
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Run the fix
 	fixer := NewTier1Fixer(tmpDir)
@@ -224,11 +210,7 @@ func TestFixMarketplaceConfig(t *testing.T) {
 // TestRemoveNonExistentHooks tests removing missing hook references
 func TestRemoveNonExistentHooks(t *testing.T) {
 	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "engram-remove-hooks-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create settings directory
 	settingsDir := filepath.Join(tmpDir, ".claude")
@@ -276,9 +258,7 @@ func TestRemoveNonExistentHooks(t *testing.T) {
 	}
 
 	// Set HOME to tmpDir
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Run the fix
 	fixer := NewTier1Fixer(tmpDir)
@@ -319,11 +299,7 @@ func TestRemoveNonExistentHooks(t *testing.T) {
 // TestFixExtensionsNoChanges verifies no modification when hooks already correct
 func TestFixExtensionsNoChanges(t *testing.T) {
 	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "engram-no-change-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Load valid settings (no issues)
 	fixtureData, err := os.ReadFile("testdata/settings-valid.json")

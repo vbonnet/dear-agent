@@ -19,13 +19,13 @@ func TestSetupTestEnvironment(t *testing.T) {
 	t.Cleanup(func() {
 		// Restore originals
 		if origTestMode != "" {
-			os.Setenv("ENGRAM_TEST_MODE", origTestMode)
+			t.Setenv("ENGRAM_TEST_MODE", origTestMode)
 		}
 		if origTestWorkspace != "" {
-			os.Setenv("ENGRAM_TEST_WORKSPACE", origTestWorkspace)
+			t.Setenv("ENGRAM_TEST_WORKSPACE", origTestWorkspace)
 		}
 		if origWorkspace != "" {
-			os.Setenv("WORKSPACE", origWorkspace)
+			t.Setenv("WORKSPACE", origWorkspace)
 		}
 	})
 
@@ -52,25 +52,25 @@ func TestSetupTestEnvironmentPreservesExisting(t *testing.T) {
 
 	t.Cleanup(func() {
 		if origTestMode != "" {
-			os.Setenv("ENGRAM_TEST_MODE", origTestMode)
+			t.Setenv("ENGRAM_TEST_MODE", origTestMode)
 		} else {
 			os.Unsetenv("ENGRAM_TEST_MODE")
 		}
 		if origTestWorkspace != "" {
-			os.Setenv("ENGRAM_TEST_WORKSPACE", origTestWorkspace)
+			t.Setenv("ENGRAM_TEST_WORKSPACE", origTestWorkspace)
 		} else {
 			os.Unsetenv("ENGRAM_TEST_WORKSPACE")
 		}
 		if origWorkspace != "" {
-			os.Setenv("WORKSPACE", origWorkspace)
+			t.Setenv("WORKSPACE", origWorkspace)
 		} else {
 			os.Unsetenv("WORKSPACE")
 		}
 	})
 
 	// Pre-set values
-	os.Setenv("ENGRAM_TEST_MODE", "true")
-	os.Setenv("ENGRAM_TEST_WORKSPACE", "custom")
+	t.Setenv("ENGRAM_TEST_MODE", "true")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "custom")
 
 	t.Run("preserves_existing", func(t *testing.T) {
 		SetupTestEnvironment(t)
@@ -95,20 +95,20 @@ func TestRequireTestMode(t *testing.T) {
 
 	t.Cleanup(func() {
 		if origTestMode != "" {
-			os.Setenv("ENGRAM_TEST_MODE", origTestMode)
+			t.Setenv("ENGRAM_TEST_MODE", origTestMode)
 		} else {
 			os.Unsetenv("ENGRAM_TEST_MODE")
 		}
 		if origTestWorkspace != "" {
-			os.Setenv("ENGRAM_TEST_WORKSPACE", origTestWorkspace)
+			t.Setenv("ENGRAM_TEST_WORKSPACE", origTestWorkspace)
 		} else {
 			os.Unsetenv("ENGRAM_TEST_WORKSPACE")
 		}
 	})
 
 	// Set both required env vars
-	os.Setenv("ENGRAM_TEST_MODE", "1")
-	os.Setenv("ENGRAM_TEST_WORKSPACE", "test")
+	t.Setenv("ENGRAM_TEST_MODE", "1")
+	t.Setenv("ENGRAM_TEST_WORKSPACE", "test")
 
 	// This should not fatal
 	t.Run("succeeds_when_set", func(t *testing.T) {

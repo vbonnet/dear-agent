@@ -163,9 +163,7 @@ func TestHookRegistryOperations(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Override home directory for test
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Test: Load empty registry
 	registry, path, err := loadHookRegistry()

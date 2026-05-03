@@ -46,11 +46,7 @@ func TestParseV2(t *testing.T) {
 
 func TestWriteV2(t *testing.T) {
 	// Create temporary directory
-	tmpDir, err := os.MkdirTemp("", "wayfinder-test-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create a test status
 	status := NewStatusV2("Test Project", ProjectTypeFeature, RiskLevelM)
@@ -59,7 +55,7 @@ func TestWriteV2(t *testing.T) {
 
 	// Write to file
 	filePath := filepath.Join(tmpDir, "test-status.yaml")
-	err = WriteV2(status, filePath)
+	err := WriteV2(status, filePath)
 	if err != nil {
 		t.Fatalf("WriteV2() error = %v", err)
 	}
@@ -88,11 +84,7 @@ func TestWriteV2(t *testing.T) {
 
 func TestRoundTrip(t *testing.T) {
 	// Create temporary directory
-	tmpDir, err := os.MkdirTemp("", "wayfinder-test-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create a complex status with all fields
 	status := &StatusV2{

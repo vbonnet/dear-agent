@@ -1,3 +1,4 @@
+// Package quality provides quality-related functionality.
 package quality
 
 import (

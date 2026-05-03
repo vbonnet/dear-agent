@@ -1,7 +1,6 @@
 package corpus
 
 import (
-	"os"
 	"os/exec"
 	"testing"
 )
@@ -29,11 +28,9 @@ func TestIsCorpusCallosumAvailable(t *testing.T) {
 func TestRegisterEngramSchemas_GracefulDegradation(t *testing.T) {
 	// Test that registration gracefully handles missing cc CLI
 	// Save PATH
-	originalPath := os.Getenv("PATH")
-	defer os.Setenv("PATH", originalPath)
 
 	// Set empty PATH to simulate cc not being available
-	os.Setenv("PATH", "")
+	t.Setenv("PATH", "")
 
 	// Should not error when cc is unavailable (graceful degradation)
 	err := RegisterEngramSchemas("test-workspace")
@@ -44,11 +41,9 @@ func TestRegisterEngramSchemas_GracefulDegradation(t *testing.T) {
 
 func TestUnregisterEngramSchemas_GracefulDegradation(t *testing.T) {
 	// Save PATH
-	originalPath := os.Getenv("PATH")
-	defer os.Setenv("PATH", originalPath)
 
 	// Set empty PATH
-	os.Setenv("PATH", "")
+	t.Setenv("PATH", "")
 
 	// Should not error when cc is unavailable
 	err := UnregisterEngramSchemas("test-workspace")
@@ -59,11 +54,9 @@ func TestUnregisterEngramSchemas_GracefulDegradation(t *testing.T) {
 
 func TestGetRegistrationStatus_GracefulDegradation(t *testing.T) {
 	// Save PATH
-	originalPath := os.Getenv("PATH")
-	defer os.Setenv("PATH", originalPath)
 
 	// Set empty PATH
-	os.Setenv("PATH", "")
+	t.Setenv("PATH", "")
 
 	// Should return false when cc is unavailable
 	registered, err := GetRegistrationStatus("test-workspace")

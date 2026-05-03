@@ -83,7 +83,7 @@ func TestManager_ClearCache(t *testing.T) {
 	}
 
 	// Timestamps should differ (re-detected)
-	if id1.DetectedAt == id2.DetectedAt {
+	if id1.DetectedAt.Equal(id2.DetectedAt) {
 		t.Error("Cache not cleared: DetectedAt timestamps are same")
 	}
 }

@@ -1,3 +1,4 @@
+// Package corpus provides corpus-related functionality.
 package corpus
 
 import (

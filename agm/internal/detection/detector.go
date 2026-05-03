@@ -135,7 +135,7 @@ func (d *Detector) DetectAndAssociate(m *manifest.Manifest, manifestPath string,
 
 	// Write to Dolt
 	if d.adapter == nil {
-		return false, fmt.Errorf("Dolt adapter required")
+		return false, fmt.Errorf("dolt adapter required")
 	}
 	if err := d.adapter.UpdateSession(m); err != nil {
 		return false, fmt.Errorf("failed to update session in Dolt: %w", err)
@@ -149,7 +149,7 @@ func (d *Detector) DetectAndAssociate(m *manifest.Manifest, manifestPath string,
 func (d *Detector) ScanAndDetect(sessionsDir string) (map[string]*Result, error) {
 	// Query Dolt for all sessions
 	if d.adapter == nil {
-		return nil, fmt.Errorf("Dolt adapter not available")
+		return nil, fmt.Errorf("dolt adapter not available")
 	}
 
 	manifests, err := d.adapter.ListSessions(&dolt.SessionFilter{})

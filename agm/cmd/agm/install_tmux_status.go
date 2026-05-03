@@ -140,9 +140,8 @@ set -g status-right-length 80
 		fmt.Printf("✓ Set status-interval to %s on AGM socket\n", intervalStr)
 	}
 
-	if err := exec.Command("tmux", "-S", socketPath, "set-option", "-g", "status-right-length", "80").Run(); err != nil {
-		// Non-critical, don't warn
-	}
+	// Non-critical: set status-right-length on AGM socket; failure ignored.
+	_ = exec.Command("tmux", "-S", socketPath, "set-option", "-g", "status-right-length", "80").Run()
 
 	// Reload tmux configuration on the AGM socket
 	if err := exec.Command("tmux", "-S", socketPath, "source-file", tmuxConf).Run(); err != nil {

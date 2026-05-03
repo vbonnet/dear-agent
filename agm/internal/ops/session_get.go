@@ -1,9 +1,6 @@
 package ops
 
 import (
-	"context"
-
-	"github.com/vbonnet/dear-agent/agm/internal/manager"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -161,26 +158,4 @@ func computeSessionStatus(m *manifest.Manifest, tmux interface{}) string {
 		return "active"
 	}
 	return "stopped"
-}
-
-// computeSessionStatusViaManager uses the manager.Backend interface to determine
-// session status. This is the preferred path when a manager backend is available.
-func computeSessionStatusViaManager(m *manifest.Manifest, mgr manager.Backend) string {
-	if m.Lifecycle == "archived" {
-		return "archived"
-	}
-	if mgr == nil {
-		return "unknown"
-	}
-
-	tmuxName := m.Tmux.SessionName
-	if tmuxName == "" {
-		tmuxName = m.Name
-	}
-
-	_, err := mgr.GetSession(context.Background(), manager.SessionID(tmuxName))
-	if err != nil {
-		return "stopped"
-	}
-	return "active"
 }

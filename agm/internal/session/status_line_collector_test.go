@@ -814,9 +814,7 @@ func TestCollectStatusLineData_CostFallbackFromConversationLog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tempDir)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tempDir)
 
 	ClearDetectorCache()
 

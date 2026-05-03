@@ -102,7 +102,7 @@ func TestGetExceptionDBPath(t *testing.T) {
 			// Set test values
 			policyDBPath = tt.flagPath
 			if tt.envPath != "" {
-				os.Setenv("ENGRAM_EXCEPTION_DB", tt.envPath)
+				t.Setenv("ENGRAM_EXCEPTION_DB", tt.envPath)
 			}
 
 			// Test
@@ -111,7 +111,7 @@ func TestGetExceptionDBPath(t *testing.T) {
 			// Restore original state
 			policyDBPath = origFlag
 			if origEnv != "" {
-				os.Setenv("ENGRAM_EXCEPTION_DB", origEnv)
+				t.Setenv("ENGRAM_EXCEPTION_DB", origEnv)
 			} else {
 				os.Unsetenv("ENGRAM_EXCEPTION_DB")
 			}

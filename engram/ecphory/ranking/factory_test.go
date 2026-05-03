@@ -37,9 +37,13 @@ func TestFactory_NewFactory_NilConfig(t *testing.T) {
 
 func TestFactory_AutoDetect_NoCredentials(t *testing.T) {
 	// Clear all credentials
+	t.Setenv("ANTHROPIC_API_KEY", "") // restored on test cleanup
 	os.Unsetenv("ANTHROPIC_API_KEY")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "") // restored on test cleanup
 	os.Unsetenv("GOOGLE_CLOUD_PROJECT")
+	t.Setenv("USE_VERTEX_GEMINI", "") // restored on test cleanup
 	os.Unsetenv("USE_VERTEX_GEMINI")
+	t.Setenv("VERTEX_LOCATION", "") // restored on test cleanup
 	os.Unsetenv("VERTEX_LOCATION")
 
 	factory, err := ranking.NewFactory(nil)
@@ -52,12 +56,15 @@ func TestFactory_AutoDetect_NoCredentials(t *testing.T) {
 
 func TestFactory_AutoDetect_Anthropic(t *testing.T) {
 	// Clear other credentials
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "") // restored on test cleanup
 	os.Unsetenv("GOOGLE_CLOUD_PROJECT")
+	t.Setenv("USE_VERTEX_GEMINI", "") // restored on test cleanup
 	os.Unsetenv("USE_VERTEX_GEMINI")
+	t.Setenv("VERTEX_LOCATION", "") // restored on test cleanup
 	os.Unsetenv("VERTEX_LOCATION")
 
 	// Set Anthropic credentials
-	os.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	t.Cleanup(func() { os.Unsetenv("ANTHROPIC_API_KEY") })
 
 	factory, err := ranking.NewFactory(nil)
@@ -72,11 +79,12 @@ func TestFactory_AutoDetect_Anthropic(t *testing.T) {
 
 func TestFactory_AutoDetect_VertexGemini(t *testing.T) {
 	// Clear other credentials
+	t.Setenv("ANTHROPIC_API_KEY", "") // restored on test cleanup
 	os.Unsetenv("ANTHROPIC_API_KEY")
 
 	// Set Google Cloud credentials
-	os.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
-	os.Setenv("USE_VERTEX_GEMINI", "true")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+	t.Setenv("USE_VERTEX_GEMINI", "true")
 	t.Cleanup(func() {
 		os.Unsetenv("GOOGLE_CLOUD_PROJECT")
 		os.Unsetenv("USE_VERTEX_GEMINI")
@@ -97,8 +105,8 @@ func TestFactory_AutoDetect_VertexGemini(t *testing.T) {
 
 func TestFactory_AutoDetect_Precedence(t *testing.T) {
 	// Set both Anthropic and Google Cloud credentials
-	os.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-	os.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
 	t.Cleanup(func() {
 		os.Unsetenv("ANTHROPIC_API_KEY")
 		os.Unsetenv("GOOGLE_CLOUD_PROJECT")
@@ -170,12 +178,19 @@ func TestFactory_ListProviders(t *testing.T) {
 
 func TestFactory_Detect(t *testing.T) {
 	// Clear all credentials (standard GCP + Claude Code variables)
+	t.Setenv("ANTHROPIC_API_KEY", "") // restored on test cleanup
 	os.Unsetenv("ANTHROPIC_API_KEY")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "") // restored on test cleanup
 	os.Unsetenv("GOOGLE_CLOUD_PROJECT")
+	t.Setenv("ANTHROPIC_VERTEX_PROJECT_ID", "") // restored on test cleanup
 	os.Unsetenv("ANTHROPIC_VERTEX_PROJECT_ID")
+	t.Setenv("VERTEX_LOCATION", "") // restored on test cleanup
 	os.Unsetenv("VERTEX_LOCATION")
+	t.Setenv("CLOUD_ML_REGION", "") // restored on test cleanup
 	os.Unsetenv("CLOUD_ML_REGION")
+	t.Setenv("USE_VERTEX_GEMINI", "") // restored on test cleanup
 	os.Unsetenv("USE_VERTEX_GEMINI")
+	t.Setenv("GEMINI_API_KEY", "") // restored on test cleanup
 	os.Unsetenv("GEMINI_API_KEY")
 
 	factory, err := ranking.NewFactory(nil)
@@ -190,7 +205,7 @@ func TestFactory_Detect(t *testing.T) {
 
 func TestFactory_Detect_Anthropic(t *testing.T) {
 	// Set Anthropic credentials
-	os.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	t.Cleanup(func() { os.Unsetenv("ANTHROPIC_API_KEY") })
 
 	factory, err := ranking.NewFactory(nil)
@@ -207,9 +222,10 @@ func TestFactory_Detect_VertexClaude(t *testing.T) {
 	os.Unsetenv("ANTHROPIC_API_KEY")
 
 	// Set Google Cloud with us-east5
-	os.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
-	os.Setenv("VERTEX_LOCATION", "us-east5")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+	t.Setenv("VERTEX_LOCATION", "us-east5")
 	t.Cleanup(func() {
+		t.Setenv("GOOGLE_CLOUD_PROJECT", "") // restored on test cleanup
 		os.Unsetenv("GOOGLE_CLOUD_PROJECT")
 		os.Unsetenv("VERTEX_LOCATION")
 	})
@@ -225,7 +241,9 @@ func TestFactory_Detect_VertexClaude(t *testing.T) {
 
 func TestFactory_MustAutoDetect(t *testing.T) {
 	// Clear credentials to ensure local provider
+	t.Setenv("ANTHROPIC_API_KEY", "") // restored on test cleanup
 	os.Unsetenv("ANTHROPIC_API_KEY")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "") // restored on test cleanup
 	os.Unsetenv("GOOGLE_CLOUD_PROJECT")
 
 	factory, err := ranking.NewFactory(nil)

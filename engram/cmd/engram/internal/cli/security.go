@@ -180,7 +180,7 @@ func ValidateRelativePathSafe(field, relPath, basePath string) error {
 			Message: fmt.Sprintf("Expected relative path for %s, got absolute: %s", field, relPath),
 			Suggestions: []string{
 				"Use relative paths only",
-				fmt.Sprintf("Remove leading separator from path"),
+				"Remove leading separator from path",
 			},
 		}
 	}

@@ -16,10 +16,7 @@ func TestDetectEngramRepo(t *testing.T) {
 		{
 			name: "valid repo structure",
 			setup: func() string {
-				tmpDir, err := os.MkdirTemp("", "engram-test-*")
-				if err != nil {
-					t.Fatal(err)
-				}
+				tmpDir := t.TempDir()
 
 				// Create characteristic files
 				os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# Engram"), 0644)
@@ -37,10 +34,7 @@ func TestDetectEngramRepo(t *testing.T) {
 		{
 			name: "missing core directory",
 			setup: func() string {
-				tmpDir, err := os.MkdirTemp("", "engram-test-*")
-				if err != nil {
-					t.Fatal(err)
-				}
+				tmpDir := t.TempDir()
 
 				os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# Engram"), 0644)
 				os.MkdirAll(filepath.Join(tmpDir, "engrams"), 0755)
@@ -73,21 +67,15 @@ func TestDetectEngramRepo(t *testing.T) {
 
 func TestRunInit(t *testing.T) {
 	// Save original HOME
-	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
 
 	// Create temporary home directory
-	tmpHome, err := os.MkdirTemp("", "engram-home-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpHome)
+	tmpHome := t.TempDir()
 
 	// Set HOME to temp directory
-	os.Setenv("HOME", tmpHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Run init command
-	err = runInit(nil, []string{})
+	err := runInit(nil, []string{})
 	if err != nil {
 		t.Fatalf("runInit() failed: %v", err)
 	}
@@ -139,10 +127,9 @@ func TestRunInit(t *testing.T) {
 
 func TestRunInit_NoHome(t *testing.T) {
 	// Save original HOME
-	originalHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", originalHome)
 
 	// Unset HOME
+	t.Setenv("HOME", "") // restored on test cleanup
 	os.Unsetenv("HOME")
 
 	// Run init command - should fail

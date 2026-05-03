@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -355,7 +356,7 @@ func TestFindGitRoot(t *testing.T) {
 	// Test case 1: Not in git repo
 	tmpDir := t.TempDir()
 	_, err := findGitRoot(tmpDir)
-	if err != ErrNotInGitRepo {
+	if !errors.Is(err, ErrNotInGitRepo) {
 		t.Errorf("Expected ErrNotInGitRepo, got: %v", err)
 	}
 

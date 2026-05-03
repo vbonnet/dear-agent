@@ -240,18 +240,22 @@ func (b *BashBlocker) Run() int {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() (exitCode int) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "[BashBlocker] FATAL: hook panic (fail-closed): %v\n", r)
-			os.Exit(2)
+			exitCode = 2
 		}
 	}()
 
 	blocker, err := NewBashBlocker()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[BashBlocker] FATAL: failed to load rules (fail-closed): %v\n", err)
-		os.Exit(2)
+		return 2
 	}
 
-	os.Exit(blocker.Run())
+	return blocker.Run()
 }

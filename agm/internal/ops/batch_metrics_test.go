@@ -10,9 +10,7 @@ import (
 func TestCollectBatchMetrics_MixedStates(t *testing.T) {
 	// Use temp HOME to avoid loading stale merge data
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	sessions := []SessionSummary{
 		{Name: "w1", Status: "stopped"},
@@ -40,9 +38,7 @@ func TestCollectBatchMetrics_MixedStates(t *testing.T) {
 
 func TestCollectBatchMetrics_Empty(t *testing.T) {
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	m := CollectBatchMetrics(nil)
 
@@ -59,9 +55,7 @@ func TestCollectBatchMetrics_Empty(t *testing.T) {
 
 func TestCollectBatchMetrics_AllDone(t *testing.T) {
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	sessions := []SessionSummary{
 		{Name: "w1", Status: "stopped"},
@@ -84,9 +78,7 @@ func TestCollectBatchMetrics_AllDone(t *testing.T) {
 
 func TestRecordAndLoadMergeDuration(t *testing.T) {
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	// No existing record
 	d, err := LoadMergeDuration()
@@ -121,9 +113,7 @@ func TestRecordAndLoadMergeDuration(t *testing.T) {
 
 func TestCollectBatchMetrics_WithMergeDuration(t *testing.T) {
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Record a merge duration first
 	if err := RecordMergeDuration(5 * time.Second); err != nil {
@@ -143,9 +133,7 @@ func TestCollectBatchMetrics_WithMergeDuration(t *testing.T) {
 
 func TestLoadMergeDuration_InvalidJSON(t *testing.T) {
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	metricsDir := filepath.Join(tmpDir, ".agm", "metrics")
 	os.MkdirAll(metricsDir, 0o755)

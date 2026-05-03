@@ -8,8 +8,6 @@ import (
 
 func TestDetectTeamMembership(t *testing.T) {
 	// Save and restore original state
-	origEnv := os.Getenv("AGM_TEAM")
-	defer os.Setenv("AGM_TEAM", origEnv)
 
 	tests := []struct {
 		name     string
@@ -53,7 +51,7 @@ func TestDetectTeamMembership(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set up environment
 			if tt.envVar != "" {
-				os.Setenv("AGM_TEAM", tt.envVar)
+				t.Setenv("AGM_TEAM", tt.envVar)
 			} else {
 				os.Unsetenv("AGM_TEAM")
 			}
@@ -111,9 +109,7 @@ func TestSetTeamMembership(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Override home directory for testing
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	teamName := "engineering"
 	err := SetTeamMembership(teamName)
@@ -139,9 +135,7 @@ func TestListAvailableTeams(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Override home directory for testing
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create test team configs
 	teams := []string{"engineering", "research", "data-science"}
@@ -183,9 +177,7 @@ func TestCreateTeamConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Override home directory for testing
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	teamName := "test-team"
 	description := "Test Team"
@@ -232,9 +224,7 @@ func TestGetTeamInfo(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Override home directory for testing
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create team config
 	teamName := "engineering"
@@ -267,9 +257,7 @@ func TestGetTeamInfo_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Override home directory for testing
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	_, err := GetTeamInfo("nonexistent-team")
 	if err == nil {

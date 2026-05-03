@@ -47,21 +47,4 @@ func getStorage() (*dolt.Adapter, error) {
 	return adapter, nil
 }
 
-// ensureDoltServerRunning checks if Dolt server is accessible
-// Returns user-friendly error if server is not running
-func ensureDoltServerRunning() error {
-	adapter, err := getStorage()
-	if err != nil {
-		return err
-	}
-	defer adapter.Close()
-	return nil
-}
 
-// getDoltPort returns the Dolt port from environment or default
-func getDoltPort() string {
-	if port := os.Getenv("DOLT_PORT"); port != "" {
-		return port
-	}
-	return "3307" // Default OSS workspace port
-}

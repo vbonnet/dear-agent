@@ -76,18 +76,8 @@ func TestIndex_Clear(t *testing.T) {
 
 // P0-3 TEST: Engram count limit enforcement
 func TestIndex_Build_EngramLimitExceeded(t *testing.T) {
-	// Create temp directory with too many engrams
-	tmpdir, err := os.MkdirTemp("", "ecphory-limit-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
-
-	// To avoid creating 100k+ files which would be slow, we'll verify
-	// the limit check exists by simulating the scenario
-
-	// Alternative: Test with actual limit by creating many files
-	// This test verifies the limit check is in place
+	// To avoid creating 100k+ files which would be slow, we verify
+	// the limit check exists by simulating the scenario.
 	idx := NewIndex()
 
 	// First, fill the index to just below the limit
@@ -122,11 +112,7 @@ func TestIndex_Build_WithinLimit(t *testing.T) {
 // P0-4 TEST: Symlink cycle detection
 func TestIndex_Build_SymlinkCycle(t *testing.T) {
 	// Create directory with symlink cycle
-	tmpdir, err := os.MkdirTemp("", "ecphory-symlink-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	// Create two directories that link to each other
 	dir1 := filepath.Join(tmpdir, "dir1")
@@ -144,7 +130,7 @@ func TestIndex_Build_SymlinkCycle(t *testing.T) {
 
 	// Build index - should not hang or crash
 	idx := NewIndex()
-	err = idx.Build(tmpdir)
+	err := idx.Build(tmpdir)
 
 	if err != nil {
 		// Should not error, just skip the cycle
@@ -158,11 +144,7 @@ func TestIndex_Build_SymlinkCycle(t *testing.T) {
 // P0-4 TEST: Symlink depth limit
 func TestIndex_Build_SymlinkDepthLimit(t *testing.T) {
 	// Create directory with deep symlink chain
-	tmpdir, err := os.MkdirTemp("", "ecphory-symlink-depth-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	// Create chain of symlinks exceeding MaxSymlinkDepth
 	prevDir := tmpdir
@@ -182,7 +164,7 @@ func TestIndex_Build_SymlinkDepthLimit(t *testing.T) {
 
 	// Build index - should handle depth limit gracefully
 	idx := NewIndex()
-	err = idx.Build(tmpdir)
+	err := idx.Build(tmpdir)
 
 	if err != nil {
 		t.Logf("Build returned error (acceptable if depth limit exceeded): %v", err)
@@ -194,11 +176,7 @@ func TestIndex_Build_SymlinkDepthLimit(t *testing.T) {
 
 // P0-4 TEST: Normal symlinks work correctly
 func TestIndex_Build_ValidSymlink(t *testing.T) {
-	tmpdir, err := os.MkdirTemp("", "ecphory-symlink-valid-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	// Create a real engram file
 	realDir := filepath.Join(tmpdir, "real")
@@ -222,7 +200,7 @@ This is a test engram for symlink testing.
 
 	// Build index - should follow valid symlink
 	idx := NewIndex()
-	err = idx.Build(tmpdir)
+	err := idx.Build(tmpdir)
 
 	if err != nil {
 		t.Fatalf("Build() should succeed with valid symlink: %v", err)

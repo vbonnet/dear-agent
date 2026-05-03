@@ -153,15 +153,15 @@ func (p *VertexAIGeminiProvider) Rank(ctx context.Context, query string, candida
 // buildRankingPrompt builds the prompt for semantic ranking
 func (p *VertexAIGeminiProvider) buildRankingPrompt(query string, candidates []Candidate) string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("Query: %s\n\nCandidates:\n", query))
+	fmt.Fprintf(&builder, "Query: %s\n\nCandidates:\n", query)
 
 	for i, candidate := range candidates {
-		builder.WriteString(fmt.Sprintf("%d. Name: %s\n", i, candidate.Name))
+		fmt.Fprintf(&builder, "%d. Name: %s\n", i, candidate.Name)
 		if candidate.Description != "" {
-			builder.WriteString(fmt.Sprintf("   Description: %s\n", candidate.Description))
+			fmt.Fprintf(&builder, "   Description: %s\n", candidate.Description)
 		}
 		if len(candidate.Tags) > 0 {
-			builder.WriteString(fmt.Sprintf("   Tags: %v\n", candidate.Tags))
+			fmt.Fprintf(&builder, "   Tags: %v\n", candidate.Tags)
 		}
 		builder.WriteString("\n")
 	}

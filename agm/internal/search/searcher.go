@@ -47,7 +47,7 @@ func NewSearcher(adapter *dolt.Adapter) *Searcher {
 func (s *Searcher) Search(opts SearchOptions) ([]*SearchResult, error) {
 	// Step 1: Load all sessions from Dolt to get session-to-UUID mapping
 	if s.adapter == nil {
-		return nil, fmt.Errorf("Dolt adapter not available")
+		return nil, fmt.Errorf("dolt adapter not available")
 	}
 
 	manifests, err := s.adapter.ListSessions(&dolt.SessionFilter{})

@@ -16,11 +16,17 @@ import (
 var logger = logging.DefaultLogger()
 
 func main() {
+	if err := run(); err != nil {
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	// Get home directory
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		logger.Error("Failed to get home directory", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
 	baseDir := filepath.Join(homeDir, ".agm")
@@ -29,16 +35,14 @@ func main() {
 
 	// Create log directory
 	if err := os.MkdirAll(logDir, 0755); err != nil {
-		logger.Error("Failed to create log directory", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to create log directory: %w", err)
 	}
 
 	// Create daemon logger (uses slog.Logger with file output)
 	logPath := filepath.Join(logDir, "daemon.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		logger.Error("Failed to open log file", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to open log file: %w", err)
 	}
 	defer logFile.Close()
 
@@ -47,8 +51,7 @@ func main() {
 	// Open message queue
 	queue, err := messages.NewMessageQueue()
 	if err != nil {
-		logger.Error("Failed to open message queue", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to open message queue: %w", err)
 	}
 
 	// Create acknowledgment manager
@@ -121,15 +124,15 @@ func main() {
 
 	// Start daemon (blocks until stopped via signal)
 	if err := d.Start(); err != nil {
-		logger.Error("Daemon failed", "error", err)
 		if sentinel != nil {
 			sentinel.StopMonitoring()
 		}
-		os.Exit(1)
+		return fmt.Errorf("daemon failed: %w", err)
 	}
 
 	// Stop sentinel after daemon exits
 	if sentinel != nil {
 		sentinel.StopMonitoring()
 	}
+	return nil
 }

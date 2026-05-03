@@ -227,7 +227,7 @@ func (e *ReviewEngine) ReviewBatch(tasks []*status.Task) (*ReviewResult, error) 
 	// Aggregate all task files for batch review
 	var allFiles []string
 	var taskIDs []string
-	var maxRisk RiskLevel = RiskLevelXS
+	var maxRisk = RiskLevelXS
 
 	for _, task := range tasks {
 		taskIDs = append(taskIDs, task.ID)

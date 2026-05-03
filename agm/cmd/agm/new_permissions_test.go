@@ -289,10 +289,8 @@ func TestInheritPermissionsFlagRegistered(t *testing.T) {
 }
 
 func TestReadParentPermissions_NoFile(t *testing.T) {
-	origHome := os.Getenv("HOME")
 	tmpHome := t.TempDir()
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpHome)
 
 	result, err := rbac.ReadParentPermissions()
 	if err != nil {
@@ -304,10 +302,8 @@ func TestReadParentPermissions_NoFile(t *testing.T) {
 }
 
 func TestReadParentPermissions_WithPermissions(t *testing.T) {
-	origHome := os.Getenv("HOME")
 	tmpHome := t.TempDir()
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpHome)
 
 	claudeDir := filepath.Join(tmpHome, ".claude")
 	os.MkdirAll(claudeDir, 0755)
@@ -332,10 +328,8 @@ func TestReadParentPermissions_WithPermissions(t *testing.T) {
 }
 
 func TestResolvePermissions_InheritFromParent(t *testing.T) {
-	origHome := os.Getenv("HOME")
 	tmpHome := t.TempDir()
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpHome)
 
 	claudeDir := filepath.Join(tmpHome, ".claude")
 	os.MkdirAll(claudeDir, 0755)

@@ -144,14 +144,18 @@ func (g *TestSessionGuard) Run() int {
 }
 
 func main() {
-	// Don't block on hook errors (graceful degradation)
+	os.Exit(safeRun())
+}
+
+// Don't block on hook errors (graceful degradation).
+func safeRun() (exitCode int) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "[TestSessionGuard] Hook error: %v\n", r)
-			os.Exit(0)
+			exitCode = 0
 		}
 	}()
 
 	guard := NewTestSessionGuard()
-	os.Exit(guard.Run())
+	return guard.Run()
 }

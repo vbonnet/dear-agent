@@ -553,7 +553,7 @@ func TestCreateSession_ModelFromEnvVar(t *testing.T) {
 
 	// Set environment variable
 	testModel := "gpt-4o-mini"
-	os.Setenv("OPENAI_MODEL", testModel)
+	t.Setenv("OPENAI_MODEL", testModel)
 	defer os.Unsetenv("OPENAI_MODEL")
 
 	sessionID := "env-test-session"
@@ -577,6 +577,7 @@ func TestCreateSession_DefaultModel(t *testing.T) {
 	}
 
 	// Ensure OPENAI_MODEL is not set
+	t.Setenv("OPENAI_MODEL", "") // restored on test cleanup
 	os.Unsetenv("OPENAI_MODEL")
 
 	sessionID := "default-model-session"

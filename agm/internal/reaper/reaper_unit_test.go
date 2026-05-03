@@ -145,14 +145,14 @@ func TestReaperMethodsExist(t *testing.T) {
 	r := New("test", "/tmp/sessions")
 
 	// Verify methods exist via function values (compile-time check)
-	var _ func() error = r.Run
-	var _ func(time.Duration) error = r.waitForPrompt
-	var _ func() error = r.sendExit
-	var _ func(time.Duration) error = r.waitForPaneClose
-	var _ func() error = r.archiveSession
-	var _ func() error = r.markReaping
-	var _ func() = r.forceKillPaneProcess
-	var _ func(time.Time) time.Duration = r.timeRemaining
+	var _ = r.Run
+	var _ = r.waitForPrompt
+	var _ = r.sendExit
+	var _ = r.waitForPaneClose
+	var _ = r.archiveSession
+	var _ = r.markReaping
+	var _ = r.forceKillPaneProcess
+	var _ = r.timeRemaining
 }
 
 // --- Multiple reapers test ---

@@ -109,7 +109,7 @@ func TestCountEventsByType_NonexistentFile(t *testing.T) {
 }
 
 func TestCountEventsByType_WithEvents(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "event-log-*.jsonl")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "event-log-*.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,11 +146,7 @@ func TestCountEventsByType_WithEvents(t *testing.T) {
 }
 
 func TestCountFilesInDir(t *testing.T) {
-	dir, err := os.MkdirTemp("", "file-count-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0644)
 	os.WriteFile(filepath.Join(dir, "app.js"), []byte("console.log('hi')"), 0644)
@@ -164,11 +160,7 @@ func TestCountFilesInDir(t *testing.T) {
 }
 
 func TestCountLinesInDir(t *testing.T) {
-	dir, err := os.MkdirTemp("", "line-count-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte("line1\nline2\nline3\n"), 0644)
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("should be ignored\n"), 0644)
@@ -181,7 +173,7 @@ func TestCountLinesInDir(t *testing.T) {
 }
 
 func TestValidateGitCommits_FromEventLog(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "event-log-*.jsonl")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "event-log-*.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,11 +208,7 @@ func TestValidateGitCommits_FromEventLog(t *testing.T) {
 }
 
 func TestValidateFileCount(t *testing.T) {
-	dir, err := os.MkdirTemp("", "file-count-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	for i := 0; i < 5; i++ {
 		os.WriteFile(filepath.Join(dir, filepath.Base(
@@ -243,11 +231,7 @@ func TestValidateFileCount(t *testing.T) {
 }
 
 func TestValidateStubKeywords(t *testing.T) {
-	dir, err := os.MkdirTemp("", "stub-kw-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	// No stub keywords
 	os.WriteFile(filepath.Join(dir, "clean.go"), []byte("package main\nfunc main() {}\n"), 0644)
@@ -260,11 +244,7 @@ func TestValidateStubKeywords(t *testing.T) {
 }
 
 func TestValidate_ScoringLogic(t *testing.T) {
-	dir, err := os.MkdirTemp("", "validate-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	// Create enough files and lines to pass those signals
 	for i := 0; i < 5; i++ {
@@ -276,7 +256,7 @@ func TestValidate_ScoringLogic(t *testing.T) {
 	}
 
 	// Create event log with commits and tests
-	tmpFile, err := os.CreateTemp("", "event-log-*.jsonl")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "event-log-*.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,11 +292,7 @@ func TestValidate_ScoringLogic(t *testing.T) {
 
 func TestCanRunTests(t *testing.T) {
 	// Go project
-	dir, err := os.MkdirTemp("", "can-run-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	v := &Validator{workDir: dir}
 	if v.canRunTests() {

@@ -349,6 +349,7 @@ func TestGetStatusSymbol(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.UI.ScreenReader = false
 	SetGlobalConfig(cfg)
+	t.Setenv("AGM_SCREEN_READER", "") // restored on test cleanup
 	os.Unsetenv("AGM_SCREEN_READER")
 
 	tests := []struct {

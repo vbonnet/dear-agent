@@ -170,7 +170,7 @@ func CheckSessionDelivery(tmuxName string) state.CanReceive {
 func UpdateSessionState(manifestPath string, state string, source string, sessionID string, adapter *dolt.Adapter) error {
 	// Read from Dolt
 	if adapter == nil || sessionID == "" {
-		return fmt.Errorf("Dolt adapter and sessionID required")
+		return fmt.Errorf("dolt adapter and sessionID required")
 	}
 
 	m, err := adapter.GetSession(sessionID)

@@ -14,6 +14,13 @@ import (
 var logger = logging.DefaultLogger()
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	sessionName := flag.String("session", "", "Session name to archive")
 	logFile := flag.String("log-file", "", "Log file path")
 	sessionsDir := flag.String("sessions-dir", "", "Sessions directory")
@@ -21,17 +28,15 @@ func main() {
 
 	// Validate required flags
 	if *sessionName == "" {
-		fmt.Fprintln(os.Stderr, "Error: --session flag is required")
 		flag.Usage()
-		os.Exit(1)
+		return fmt.Errorf("--session flag is required")
 	}
 
 	// Set up logging
 	if *logFile != "" {
 		f, err := os.OpenFile(*logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to open log file %s: %v\n", *logFile, err)
-			os.Exit(1)
+			return fmt.Errorf("failed to open log file %s: %w", *logFile, err)
 		}
 		defer f.Close()
 		// Create logger with file output
@@ -47,9 +52,9 @@ func main() {
 	// Create and run reaper
 	r := reaper.New(*sessionName, *sessionsDir)
 	if err := r.Run(); err != nil {
-		logger.Error("Reaper failed", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("reaper failed: %w", err)
 	}
 
 	logger.Info("Reaper completed successfully")
+	return nil
 }

@@ -315,7 +315,7 @@ func BenchmarkWaitForPattern(b *testing.B) {
 	// Create a long input with pattern at the end
 	var sb strings.Builder
 	for i := 0; i < 100; i++ {
-		sb.WriteString(fmt.Sprintf("%%output %%0 Line %d\n", i))
+		fmt.Fprintf(&sb, "%%output %%0 Line %d\n", i)
 	}
 	sb.WriteString("%output %0 Target pattern\n")
 

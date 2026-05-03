@@ -82,7 +82,7 @@ func CreateManifest(session *claude.Session, sessionsDir string, tmuxName string
 
 	// Write to Dolt database
 	if adapter == nil {
-		return nil, fmt.Errorf("Dolt adapter required")
+		return nil, fmt.Errorf("dolt adapter required")
 	}
 	if err := adapter.CreateSession(m); err != nil {
 		return nil, fmt.Errorf("failed to create session in Dolt: %w", err)

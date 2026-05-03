@@ -187,9 +187,9 @@ func TestCheckHookExtensionMatch(t *testing.T) {
 
 				// Set HOME for test
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
+				t.Setenv("HOME", tmpDir)
 
-				return settingsPath, func() { os.Setenv("HOME", oldHome) }
+				return settingsPath, func() { t.Setenv("HOME", oldHome) }
 			},
 			expectedStatus: "ok",
 			expectedMsg:    "",
@@ -212,9 +212,9 @@ func TestCheckHookExtensionMatch(t *testing.T) {
 
 				// Set HOME for the test
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
+				t.Setenv("HOME", tmpDir)
 
-				return settingsPath, func() { os.Setenv("HOME", oldHome) }
+				return settingsPath, func() { t.Setenv("HOME", oldHome) }
 			},
 			expectedStatus: "warning",
 			expectedMsg:    "Extension mismatch",
@@ -266,9 +266,9 @@ func TestCheckHookPathsValid(t *testing.T) {
 				os.WriteFile(settingsPath, []byte(settings), 0644)
 
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
+				t.Setenv("HOME", tmpDir)
 
-				return settingsPath, func() { os.Setenv("HOME", oldHome) }
+				return settingsPath, func() { t.Setenv("HOME", oldHome) }
 			},
 			expectedStatus: "ok",
 			expectedMsg:    "",
@@ -292,9 +292,9 @@ func TestCheckHookPathsValid(t *testing.T) {
 				os.WriteFile(settingsPath, []byte(settings), 0644)
 
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
+				t.Setenv("HOME", tmpDir)
 
-				return settingsPath, func() { os.Setenv("HOME", oldHome) }
+				return settingsPath, func() { t.Setenv("HOME", oldHome) }
 			},
 			expectedStatus: "warning",
 			expectedMsg:    "Hook paths need correction",
@@ -312,9 +312,9 @@ func TestCheckHookPathsValid(t *testing.T) {
 				os.WriteFile(settingsPath, []byte(settings), 0644)
 
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
+				t.Setenv("HOME", tmpDir)
 
-				return settingsPath, func() { os.Setenv("HOME", oldHome) }
+				return settingsPath, func() { t.Setenv("HOME", oldHome) }
 			},
 			expectedStatus: "warning",
 			expectedMsg:    "Hook paths missing",
@@ -354,8 +354,8 @@ func TestCheckMarketplaceConfigValid(t *testing.T) {
 			setup: func(t *testing.T) string {
 				tmpDir := t.TempDir()
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
-				t.Cleanup(func() { os.Setenv("HOME", oldHome) })
+				t.Setenv("HOME", tmpDir)
+				t.Cleanup(func() { t.Setenv("HOME", oldHome) })
 				return tmpDir
 			},
 			expectedStatus: "ok",
@@ -374,8 +374,8 @@ func TestCheckMarketplaceConfigValid(t *testing.T) {
 				os.WriteFile(mktPath, []byte(invalidConfig), 0644)
 
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
-				t.Cleanup(func() { os.Setenv("HOME", oldHome) })
+				t.Setenv("HOME", tmpDir)
+				t.Cleanup(func() { t.Setenv("HOME", oldHome) })
 				return tmpDir
 			},
 			expectedStatus: "error",
@@ -403,8 +403,8 @@ func TestCheckMarketplaceConfigValid(t *testing.T) {
 				os.WriteFile(mktPath, []byte(validConfig), 0644)
 
 				oldHome := os.Getenv("HOME")
-				os.Setenv("HOME", tmpDir)
-				t.Cleanup(func() { os.Setenv("HOME", oldHome) })
+				t.Setenv("HOME", tmpDir)
+				t.Cleanup(func() { t.Setenv("HOME", oldHome) })
 				return tmpDir
 			},
 			expectedStatus: "ok",

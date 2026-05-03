@@ -7,21 +7,11 @@ import (
 	"os"
 
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
-	"golang.org/x/term"
 )
 
 // isJSONOutput returns true if the user requested JSON output via --output json.
 func isJSONOutput() bool {
 	return outputFormat == "json"
-}
-
-// isNonInteractive returns true if the session is non-interactive.
-// This is true when: --output json is set, or stdin is not a terminal.
-func isNonInteractive() bool {
-	if isJSONOutput() {
-		return true
-	}
-	return !term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 // printJSON marshals the value to JSON and prints it to stdout.
