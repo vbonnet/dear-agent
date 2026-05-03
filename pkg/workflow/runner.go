@@ -15,6 +15,8 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/vbonnet/dear-agent/pkg/workflow/roles"
 )
 
 // AIExecutor is the hook for invoking an LLM. Callers plug in their own —
@@ -66,6 +68,34 @@ type Runner struct {
 	// schedule id) recorded on the runs row.
 	TriggeredBy string
 
+	// RoleResolver maps an AI node's role: declaration to a concrete
+	// model id. Nil falls back to a Resolver backed by the built-in
+	// registry — Phase 1's ship criterion is "switching Opus 4.7 →
+	// Opus 5.0 is one line in roles.yaml", so any production caller
+	// should plug in a real registry-backed resolver here.
+	RoleResolver *roles.Resolver
+
+	// Budget is the run-level budget meter. Wraps every AI call via
+	// MeteredAIExecutor. Nil disables run-level budget enforcement;
+	// per-node Budget caps still apply if a node declares them and a
+	// MeteredAIExecutor is wired manually.
+	Budget *Meter
+
+	// Permissions is the bounded-permissions enforcer. Nil falls back
+	// to DefaultPermissionEnforcer (permissive when no allowlist is
+	// declared, strict when one is).
+	Permissions PermissionEnforcer
+
+	// OutputWriter materialises declared outputs and refuses to mark
+	// the node succeeded if any are missing. Nil disables Phase 1.6 —
+	// useful for tests that don't care about durability.
+	OutputWriter *OutputWriter
+
+	// WorkflowDir is the directory of the workflow YAML, threaded into
+	// the OutputWriter and gate evaluator. Empty falls back to
+	// DefaultWorkingDir.
+	WorkflowDir string
+
 	mu      sync.Mutex
 	signals map[string]chan struct{}
 }
@@ -93,6 +123,14 @@ func (r *Runner) audit() AuditSink {
 		return noopAuditSink{}
 	}
 	return r.Audit
+}
+
+// permissions returns the configured PermissionEnforcer or the default.
+func (r *Runner) permissions() PermissionEnforcer {
+	if r.Permissions == nil {
+		return DefaultPermissionEnforcer{}
+	}
+	return r.Permissions
 }
 
 // NewRunner returns a Runner with defaults applied. ai must be non-nil.
@@ -416,6 +454,26 @@ func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 	}
 
 	r.runWithRetry(childNC, node, &res, policy)
+
+	// Phase 1 substrate gate: exit gates run after the node body
+	// succeeded. Any failing gate transitions the node to failed.
+	if res.Error == nil && len(node.ExitGate) > 0 {
+		gctx := r.exitGateContext(nc, node, &res)
+		if err := EvaluateExitGates(childNC.ctx, node.ExitGate, gctx); err != nil {
+			res.Error = err
+		}
+	}
+
+	// Phase 1 substrate gate: declared outputs must exist (for non-
+	// ephemeral durability tiers) before we mark the node succeeded.
+	// This is what makes "succeeded" a contract — operators see a
+	// failure rather than a green check that hides a missing artifact.
+	if res.Error == nil && len(node.Outputs) > 0 && r.OutputWriter != nil {
+		if err := r.OutputWriter.MaterialiseOutputs(childNC.ctx, nc.runID, node.ID, node.Outputs, nc); err != nil {
+			res.Error = err
+		}
+	}
+
 	res.Finished = time.Now()
 
 	state := NodeStateSucceeded
@@ -426,6 +484,26 @@ func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 	}
 	r.recordNodeFinished(nc, node, &res, state, reason)
 	return res
+}
+
+// exitGateContext builds the ExitGateContext the gate evaluator
+// receives. Outputs are reified as a typed map keyed by node id so
+// gates can target outputs.<node-id> without a second naming layer.
+func (r *Runner) exitGateContext(nc *nodeContext, node *Node, res *Result) ExitGateContext {
+	outs := make(map[string]any, len(nc.outputs)+1)
+	for id, v := range nc.outputs {
+		outs[id] = v
+	}
+	// The current node's primary output is also exposed as outputs.<this-id>.
+	outs[node.ID] = res.Output
+	return ExitGateContext{
+		NodeID:      node.ID,
+		RunID:       nc.runID,
+		Inputs:      nc.inputs,
+		Outputs:     outs,
+		WorkflowDir: r.WorkflowDir,
+		Env:         nc.env,
+	}
 }
 
 // recordNodeStarted emits the pending → running transition and a
@@ -440,6 +518,7 @@ func (r *Runner) recordNodeStarted(nc *nodeContext, node *Node, res *Result) {
 		NodeID:    node.ID,
 		State:     NodeStateRunning,
 		StartedAt: res.Started,
+		RoleUsed:  nodeRole(node),
 		ModelUsed: nodeModel(node),
 	}); err != nil {
 		r.Logger.Warn("recorder UpsertNode(running) failed", "node", node.ID, "err", err)
@@ -464,15 +543,16 @@ func (r *Runner) recordNodeFinished(nc *nodeContext, node *Node, res *Result, st
 	}
 	attempts, _ := res.Meta["attempts"].(int)
 	if err := r.recorder().UpsertNode(nc.ctx, NodeRecord{
-		RunID:       nc.runID,
-		NodeID:      node.ID,
-		State:       state,
-		Attempts:    attempts,
-		ModelUsed:   nodeModel(node),
-		Output:      res.Output,
-		StartedAt:   res.Started,
-		FinishedAt:  res.Finished,
-		Error:       reason,
+		RunID:      nc.runID,
+		NodeID:     node.ID,
+		State:      state,
+		Attempts:   attempts,
+		RoleUsed:   nodeRole(node),
+		ModelUsed:  nodeModel(node),
+		Output:     res.Output,
+		StartedAt:  res.Started,
+		FinishedAt: res.Finished,
+		Error:      reason,
 	}); err != nil {
 		r.Logger.Warn("recorder UpsertNode(finish) failed", "node", node.ID, "err", err)
 	}
@@ -493,11 +573,30 @@ func (r *Runner) recordNodeFinished(nc *nodeContext, node *Node, res *Result, st
 	}
 }
 
-// nodeModel returns the model id for AI nodes (Phase 1 swaps this for the
-// resolved role). For non-AI nodes it returns "" — the column allows NULL.
+// nodeModel returns the model id for AI nodes. For non-AI nodes it
+// returns "" — the column allows NULL.
+//
+// Phase 1 introduces role-based resolution: the model field on an
+// AINode may be empty when role is set (resolution happens at run
+// time). The runner records the resolved model on the nodes row via
+// the recorder; this helper is the static-time fallback for nodes that
+// haven't run yet.
 func nodeModel(n *Node) string {
 	if n.Kind == KindAI && n.AI != nil {
-		return n.AI.Model
+		if n.AI.Model != "" {
+			return n.AI.Model
+		}
+	}
+	return ""
+}
+
+// nodeRole returns the declared role for AI nodes, or empty for any
+// other kind. Phase 1 records this on the nodes table so audit
+// queries can group by "what role was this node?" without inferring
+// from the model id.
+func nodeRole(n *Node) string {
+	if n.Kind == KindAI && n.AI != nil {
+		return n.AI.Role
 	}
 	return ""
 }
@@ -629,9 +728,13 @@ func retryDelay(policy *RetryPolicy, attempt int) time.Duration {
 	return delay
 }
 
-// executeAI renders templates and delegates to Runner.AI.
+// executeAI renders templates and delegates to Runner.AI. When a role
+// resolver is configured the model is resolved from node.AI.Role
+// before the executor is invoked; the resolved model is written back
+// into the rendered AINode so the underlying executor sees one
+// canonical field. Resolution failure is a node failure — a workflow
+// declaring an unknown role should fail loudly.
 func (r *Runner) executeAI(nc *nodeContext, node *Node) (string, error) {
-	// Render prompt + system templates.
 	prompt, err := renderTemplate(node.AI.Prompt, nc)
 	if err != nil {
 		return "", fmt.Errorf("render prompt: %w", err)
@@ -643,6 +746,40 @@ func (r *Runner) executeAI(nc *nodeContext, node *Node) (string, error) {
 	rendered := *node.AI
 	rendered.Prompt = prompt
 	rendered.System = system
+
+	if r.RoleResolver != nil && (node.AI.Role != "" || node.AI.ModelOverride != "") {
+		req := roles.Request{
+			Role:                 node.AI.Role,
+			Model:                node.AI.Model,
+			ModelOverride:        node.AI.ModelOverride,
+			RequiredCapabilities: node.AI.RequiredCapabilities,
+		}
+		if node.Budget != nil && node.Budget.MaxDollars > 0 {
+			req.MaxDollars = node.Budget.MaxDollars
+		}
+		resolved, err := r.RoleResolver.Resolve(req)
+		if err != nil {
+			return "", fmt.Errorf("resolve role %q: %w", node.AI.Role, err)
+		}
+		rendered.Model = resolved.Model
+		if rendered.Effort == "" {
+			rendered.Effort = resolved.Effort
+		}
+		// Hand the budget meter the per-node context so it can
+		// attribute spend to the right row when the executor returns.
+		if mx, ok := r.AI.(*MeteredAIExecutor); ok {
+			mx.CurrentNode = node
+			mx.CurrentNodeStarted = time.Now()
+			defer func() { mx.CurrentNode = nil; mx.CurrentNodeStarted = time.Time{} }()
+		}
+	} else if mx, ok := r.AI.(*MeteredAIExecutor); ok {
+		// Even when no role is set, a node with a Budget block needs
+		// the meter to know which node it's charging.
+		mx.CurrentNode = node
+		mx.CurrentNodeStarted = time.Now()
+		defer func() { mx.CurrentNode = nil; mx.CurrentNodeStarted = time.Time{} }()
+	}
+
 	return r.AI.Generate(nc.ctx, &rendered, nc.inputs, nc.outputs)
 }
 
@@ -668,6 +805,17 @@ func (r *Runner) executeBash(nc *nodeContext, node *Node) (string, int, error) {
 	cmd.Dir = node.Bash.WorkingDir
 	if cmd.Dir == "" {
 		cmd.Dir = r.DefaultWorkingDir
+	}
+	// Phase 1 permission gate: the working dir must be on the
+	// fs_write allowlist when one is declared. The check is
+	// permissive when no allowlist exists — see DefaultPermissionEnforcer.
+	if node.Permissions != nil {
+		enf := r.permissions()
+		if cmd.Dir != "" {
+			if err := enf.CheckPath(node.Permissions, cmd.Dir, AccessWrite); err != nil {
+				return "", 0, err
+			}
+		}
 	}
 	// Always start from a clean copy of the parent environment, then layer:
 	// 1. node-declared env overrides, 2. INPUT_* / OUTPUT_* from workflow state.
