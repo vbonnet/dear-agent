@@ -94,10 +94,8 @@ func (st *SessionTracker) CompletePhase(phase string, outcome string, metadata m
 	}
 
 	// Merge metadata if provided (files_modified, lines_added, etc.)
-	if metadata != nil {
-		for k, v := range metadata {
-			data[k] = v
-		}
+	for k, v := range metadata {
+		data[k] = v
 	}
 
 	event := eventbus.NewEvent("wayfinder.phase.completed", "wayfinder", data)

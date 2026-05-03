@@ -9,6 +9,24 @@ import (
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
 
+// Risk patterns are compiled once at package init so they can be reused
+// across deliverables without paying the regexp.Compile cost per call.
+//
+// Pattern 4 ("yaml.load(?!_safe)") used a Perl-only negative lookahead
+// (`(?!`) that Go's RE2 engine rejects. Replaced with a two-step check:
+// match `yaml.load` and reject the safe form separately.
+var (
+	rxSQLInjection         = regexp.MustCompile(`(?i)execute\(.*\+.*\)`)
+	rxEvalExec             = regexp.MustCompile(`\b(eval|exec)\s*\(`)
+	rxHardcodedSecret      = regexp.MustCompile(`(?i)(password|secret|api[_-]?key)\s*=\s*["']`)
+	rxUnsafePickle         = regexp.MustCompile(`pickle\.loads`)
+	rxYAMLLoad             = regexp.MustCompile(`yaml\.load`)
+	rxYAMLLoadSafe         = regexp.MustCompile(`yaml\.load_safe|yaml\.safe_load`)
+	rxShellInjection       = regexp.MustCompile(`os\.system\(|subprocess\.call\(.*shell=True`)
+	rxPanic                = regexp.MustCompile(`panic\(`)
+	rxIgnoredError         = regexp.MustCompile(`_\s*=.*error`)
+)
+
 // RiskLevel represents the risk level of a task
 type RiskLevel int
 
@@ -255,38 +273,26 @@ func (r *RiskAdapter) detectRiskyPatterns(task *status.Task, projectDir string) 
 		content := string(data)
 		fileCount++
 
-		// Pattern 1: SQL injection risk
-		if matched, _ := regexp.MatchString(`(?i)execute\(.*\+.*\)`, content); matched {
+		if rxSQLInjection.MatchString(content) {
 			riskScore += 200
 		}
-
-		// Pattern 2: Eval/exec usage
-		if matched, _ := regexp.MatchString(`\b(eval|exec)\s*\(`, content); matched {
+		if rxEvalExec.MatchString(content) {
 			riskScore += 300
 		}
-
-		// Pattern 3: Hardcoded secrets
-		if matched, _ := regexp.MatchString(`(?i)(password|secret|api[_-]?key)\s*=\s*["']`, content); matched {
+		if rxHardcodedSecret.MatchString(content) {
 			riskScore += 400
 		}
-
-		// Pattern 4: Unsafe deserialization
-		if matched, _ := regexp.MatchString(`pickle\.loads|yaml\.load(?!_safe)`, content); matched {
+		if rxUnsafePickle.MatchString(content) ||
+			(rxYAMLLoad.MatchString(content) && !rxYAMLLoadSafe.MatchString(content)) {
 			riskScore += 200
 		}
-
-		// Pattern 5: Shell command injection
-		if matched, _ := regexp.MatchString(`os\.system\(|subprocess\.call\(.*shell=True`, content); matched {
+		if rxShellInjection.MatchString(content) {
 			riskScore += 150
 		}
-
-		// Pattern 6: Panics without recovery
-		if matched, _ := regexp.MatchString(`panic\(`, content); matched {
+		if rxPanic.MatchString(content) {
 			riskScore += 100
 		}
-
-		// Pattern 7: Missing error handling
-		if matched, _ := regexp.MatchString(`_\s*=.*error`, content); matched {
+		if rxIgnoredError.MatchString(content) {
 			riskScore += 50
 		}
 	}

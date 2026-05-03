@@ -155,25 +155,25 @@ triggers:
 
 	// Evaluate phase.started event.
 	t.Run("phase.started matches", func(t *testing.T) {
-		from_registry := registry.Lookup("phase.started")
-		if len(from_registry) != 2 {
-			t.Fatalf("expected 2 entries for phase.started, got %d", len(from_registry))
+		fromRegistry := registry.Lookup("phase.started")
+		if len(fromRegistry) != 2 {
+			t.Fatalf("expected 2 entries for phase.started, got %d", len(fromRegistry))
 		}
 	})
 
 	// Evaluate task.assigned event.
 	t.Run("task.assigned matches", func(t *testing.T) {
-		from_registry := registry.Lookup("task.assigned")
-		if len(from_registry) != 1 {
-			t.Fatalf("expected 1 entry for task.assigned, got %d", len(from_registry))
+		fromRegistry := registry.Lookup("task.assigned")
+		if len(fromRegistry) != 1 {
+			t.Fatalf("expected 1 entry for task.assigned, got %d", len(fromRegistry))
 		}
 	})
 
 	// Evaluate unknown event.
 	t.Run("unknown event no matches", func(t *testing.T) {
-		from_registry := registry.Lookup("nonexistent.event")
-		if len(from_registry) != 0 {
-			t.Fatalf("expected 0 entries for nonexistent.event, got %d", len(from_registry))
+		fromRegistry := registry.Lookup("nonexistent.event")
+		if len(fromRegistry) != 0 {
+			t.Fatalf("expected 0 entries for nonexistent.event, got %d", len(fromRegistry))
 		}
 	})
 }
