@@ -1,3 +1,4 @@
+// Package capacity provides capacity-related functionality.
 package capacity
 
 import (

@@ -109,7 +109,7 @@ func extractOverlapPercentage(content string) (int, error) {
 
 	percentage, err := strconv.Atoi(matches[1])
 	if err != nil {
-		return 0, fmt.Errorf("invalid overlap percentage: %v", err)
+		return 0, fmt.Errorf("invalid overlap percentage: %w", err)
 	}
 
 	return percentage, nil

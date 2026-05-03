@@ -37,11 +37,7 @@ func TestEcphoryAuditLogger_MinLevel(t *testing.T) {
 
 // TestEcphoryAuditLogger_OnEvent_Success verifies event logging
 func TestEcphoryAuditLogger_OnEvent_Success(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	logger := NewEcphoryAuditLogger(tmpDir)
 
@@ -102,11 +98,7 @@ func TestEcphoryAuditLogger_OnEvent_Success(t *testing.T) {
 
 // TestEcphoryAuditLogger_OnEvent_IgnoresOtherEvents verifies event filtering
 func TestEcphoryAuditLogger_OnEvent_IgnoresOtherEvents(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	logger := NewEcphoryAuditLogger(tmpDir)
 
@@ -133,11 +125,7 @@ func TestEcphoryAuditLogger_OnEvent_IgnoresOtherEvents(t *testing.T) {
 
 // TestEcphoryAuditLogger_OnEvent_Concurrent verifies thread safety
 func TestEcphoryAuditLogger_OnEvent_Concurrent(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	logger := NewEcphoryAuditLogger(tmpDir)
 
@@ -211,11 +199,7 @@ func TestPersonaEffectivenessLogger_MinLevel(t *testing.T) {
 
 // TestPersonaEffectivenessLogger_OnEvent_Success verifies event logging
 func TestPersonaEffectivenessLogger_OnEvent_Success(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	logger := NewPersonaEffectivenessLogger(tmpDir)
 
@@ -267,11 +251,7 @@ func TestPersonaEffectivenessLogger_OnEvent_Success(t *testing.T) {
 
 // TestPersonaEffectivenessLogger_OnEvent_IgnoresOtherEvents verifies filtering
 func TestPersonaEffectivenessLogger_OnEvent_IgnoresOtherEvents(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	logger := NewPersonaEffectivenessLogger(tmpDir)
 
@@ -323,11 +303,7 @@ func TestWayfinderROILogger_MinLevel(t *testing.T) {
 
 // TestWayfinderROILogger_OnEvent_Success verifies event logging
 func TestWayfinderROILogger_OnEvent_Success(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	logger := NewWayfinderROILogger(tmpDir)
 
@@ -380,11 +356,7 @@ func TestWayfinderROILogger_OnEvent_Success(t *testing.T) {
 
 // TestWayfinderROILogger_OnEvent_IgnoresOtherEvents verifies filtering
 func TestWayfinderROILogger_OnEvent_IgnoresOtherEvents(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "telemetry-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	logger := NewWayfinderROILogger(tmpDir)
 

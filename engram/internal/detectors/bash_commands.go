@@ -48,7 +48,7 @@ func (d *BashCommandPatternDetector) Detect(ctx context.Context, input DetectorI
 		if pattern.MatchString(input.Content) {
 			// Find corresponding rule for message
 			var ruleMessage string
-			var ruleConfidence telemetry.Confidence = telemetry.ConfidenceHigh // Default
+			var ruleConfidence = telemetry.ConfidenceHigh // Default
 
 			for _, r := range input.Rules {
 				if r.ID == ruleID {

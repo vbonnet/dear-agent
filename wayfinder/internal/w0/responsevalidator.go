@@ -152,10 +152,11 @@ func CalculateClarityScore(response string, questionType QuestionType) float64 {
 	// Factor 1: Word count
 	optimalMin := 8
 	optimalMax := 40
-	if questionType == QuestionImpact {
+	switch questionType {
+	case QuestionImpact:
 		optimalMin = 20
 		optimalMax = 80
-	} else if questionType == QuestionProblem {
+	case QuestionProblem:
 		optimalMin = 10
 		optimalMax = 50
 	}

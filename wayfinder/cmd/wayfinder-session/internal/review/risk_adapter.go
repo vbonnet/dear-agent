@@ -228,9 +228,10 @@ func (r *RiskAdapter) calculateCoverageRisk(task *status.Task) float64 {
 
 	// If task has tests_status, use it as a proxy
 	if task.TestsStatus != nil {
-		if *task.TestsStatus == "passed" {
+		switch *task.TestsStatus {
+		case "passed":
 			return 0 // Good coverage
-		} else if *task.TestsStatus == "pending" {
+		case "pending":
 			return 200 // No coverage
 		}
 	}

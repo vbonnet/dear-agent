@@ -18,9 +18,7 @@ func TestBackupSession_CreatesValidTarball(t *testing.T) {
 	setupTestSession(t, tmpDir, "test-session-1", "test-backup-session")
 
 	// Override home directory for test
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	sessionID := "test-session-1"
 
@@ -73,9 +71,7 @@ func TestBackupSession_FilenameFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupTestSession(t, tmpDir, "test-session-2", "my-test-session")
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	sessionID := "test-session-2"
 
@@ -130,9 +126,7 @@ func TestRestoreSession_RestoresCorrectly(t *testing.T) {
 	sessionID := "test-session-3"
 	setupTestSession(t, tmpDir, sessionID, "restore-test")
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create backup
 	backupPath, err := BackupSession(sessionID)
@@ -192,9 +186,7 @@ func TestBackupRestore_Roundtrip(t *testing.T) {
 	sessionName := "roundtrip-test"
 	setupTestSession(t, tmpDir, sessionID, sessionName)
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Read original manifest
 	sessionDir := filepath.Join(tmpDir, ".claude", "sessions", sessionID)
@@ -235,9 +227,7 @@ func TestBackupRestore_Roundtrip(t *testing.T) {
 func TestListSessionBackups_ReturnsCorrectInfo(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Initially no backups
 	backups, err := ListAllSessionBackups()
@@ -312,9 +302,7 @@ func TestBackupSession_CreatesDirectory(t *testing.T) {
 	sessionID := "test-session-5"
 	setupTestSession(t, tmpDir, sessionID, "mkdir-test")
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Verify backup directory doesn't exist yet
 	backupDir := filepath.Join(tmpDir, ".agm", "backups", "sessions")
@@ -348,9 +336,7 @@ func TestBackupSession_CreatesDirectory(t *testing.T) {
 func TestBackupSession_NonExistentSession(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Try to backup non-existent session
 	_, err := BackupSession("non-existent-session")
@@ -367,9 +353,7 @@ func TestBackupSession_NonExistentSession(t *testing.T) {
 func TestRestoreSession_NonExistentBackup(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Try to restore non-existent backup
 	err := RestoreSession("/path/to/non-existent-backup.tar.gz")

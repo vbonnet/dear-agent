@@ -10,9 +10,7 @@ import (
 func TestLogInterrupt(t *testing.T) {
 	// Use temp dir for test isolation
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
 	t.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
 
 	entry := &AuditEntry{
 		Sender:    "orchestrator",

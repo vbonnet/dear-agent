@@ -16,7 +16,7 @@ import (
 // for this test, preventing cross-test contamination from persisted state.
 func setupIntegrationTestRetryDir(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("AGM_RETRY_BASE_DIR", tmpDir)
+	t.Setenv("AGM_RETRY_BASE_DIR", tmpDir)
 	t.Cleanup(func() {
 		os.Unsetenv("AGM_RETRY_BASE_DIR")
 	})

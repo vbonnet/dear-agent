@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,11 +25,13 @@ func HasSession(name string) (bool, error) {
 	_, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "has-session", "-t", FormatSessionTarget(normalizedName))
 	if err != nil {
 		// Check for timeout error
-		if _, ok := err.(*TimeoutError); ok {
+		timeoutError := &TimeoutError{}
+		if errors.As(err, &timeoutError) {
 			return false, err
 		}
 		// Exit code 1 means session doesn't exist
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to check tmux session: %w", err)
@@ -511,7 +514,8 @@ func Version() (string, error) {
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-V")
 	if err != nil {
 		// Check for timeout error
-		if _, ok := err.(*TimeoutError); ok {
+		timeoutError := &TimeoutError{}
+		if errors.As(err, &timeoutError) {
 			return "", err
 		}
 		return "", fmt.Errorf("failed to get tmux version: %w", err)
@@ -526,11 +530,13 @@ func ListSessions() ([]string, error) {
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-sessions", "-F", "#{session_name}")
 	if err != nil {
 		// Check for timeout error
-		if _, ok := err.(*TimeoutError); ok {
+		timeoutError := &TimeoutError{}
+		if errors.As(err, &timeoutError) {
 			return nil, err
 		}
 		// If no tmux server running, return empty list
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			return []string{}, nil
 		}
 		return nil, fmt.Errorf("failed to list tmux sessions: %w", err)
@@ -561,11 +567,13 @@ func ListSessionsWithInfo() ([]SessionInfo, error) {
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-sessions", "-F", "#{session_name}:#{session_attached}:#{session_attached_list}")
 	if err != nil {
 		// Check for timeout error
-		if _, ok := err.(*TimeoutError); ok {
+		timeoutError := &TimeoutError{}
+		if errors.As(err, &timeoutError) {
 			return nil, err
 		}
 		// If no tmux server running, return empty list
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			return []SessionInfo{}, nil
 		}
 		return nil, fmt.Errorf("failed to list tmux sessions: %w", err)
@@ -616,11 +624,13 @@ func ListClients(sessionName string) ([]ClientInfo, error) {
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-clients", "-t", FormatSessionTarget(normalizedName), "-F", "#{session_name}:#{client_tty}:#{client_pid}")
 	if err != nil {
 		// Check for timeout error
-		if _, ok := err.(*TimeoutError); ok {
+		timeoutError := &TimeoutError{}
+		if errors.As(err, &timeoutError) {
 			return nil, err
 		}
 		// If session not found or no clients, return empty list
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			return []ClientInfo{}, nil
 		}
 		return nil, fmt.Errorf("failed to list tmux clients: %w", err)
@@ -662,7 +672,8 @@ func GetCurrentSessionName() (string, error) {
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "display-message", "-p", "#S")
 	if err != nil {
 		// Check for timeout error
-		if _, ok := err.(*TimeoutError); ok {
+		timeoutError := &TimeoutError{}
+		if errors.As(err, &timeoutError) {
 			return "", err
 		}
 		return "", fmt.Errorf("failed to get current tmux session name: %w", err)
@@ -679,7 +690,8 @@ func GetPaneCommands(sessionName string) ([]string, error) {
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-panes", "-t", FormatSessionTarget(normalizedName),
 		"-F", "#{pane_current_command}")
 	if err != nil {
-		if _, ok := err.(*TimeoutError); ok {
+		timeoutError := &TimeoutError{}
+		if errors.As(err, &timeoutError) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("failed to list tmux pane commands: %w", err)
@@ -836,7 +848,8 @@ func GetCurrentWorkingDirectory(sessionName string) (string, error) {
 	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "display-message", "-t", normalizedName, "-p", "#{pane_current_path}")
 	if err != nil {
 		// Check for timeout error
-		if _, ok := err.(*TimeoutError); ok {
+		timeoutError := &TimeoutError{}
+		if errors.As(err, &timeoutError) {
 			return "", err
 		}
 		return "", fmt.Errorf("failed to get current working directory: %w", err)

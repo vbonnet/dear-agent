@@ -1,3 +1,4 @@
+// Package scanners provides scanners-related functionality.
 package scanners
 
 import (

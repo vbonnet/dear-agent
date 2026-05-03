@@ -34,6 +34,8 @@ func GenerateSynthesisPrompt(input SynthesisInput) string {
 
 	return fmt.Sprintf(`You are helping create a W0 Project Charter for a wayfinder project.
 
+Charter date: %s
+
 Context from conversation:
 - Q1 (Problem): %s
 - Q2 (Impact): %s
@@ -80,6 +82,7 @@ Q3: %s
 Q4: %s
 
 Follow the 6-step process above.`,
+		date,
 		input.Q1Answer, input.Q2Answer, input.Q3Answer, input.Q4Answer,
 		input.Q1Answer, input.Q2Answer, input.Q3Answer, input.Q4Answer)
 }

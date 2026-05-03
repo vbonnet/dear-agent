@@ -124,11 +124,11 @@ func (m *TmuxCaptureMatcher) FindPattern(pattern string) (*CaptureSnapshot, erro
 func (m *TmuxCaptureMatcher) GetTimeline() string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("Tmux Capture Timeline (%d snapshots):\n", len(m.Captures)))
+	fmt.Fprintf(&sb, "Tmux Capture Timeline (%d snapshots):\n", len(m.Captures))
 	sb.WriteString("========================================\n\n")
 
 	for i, capture := range m.Captures {
-		sb.WriteString(fmt.Sprintf("Snapshot %d @ %s\n", i+1, capture.Timestamp.Format("15:04:05.000")))
+		fmt.Fprintf(&sb, "Snapshot %d @ %s\n", i+1, capture.Timestamp.Format("15:04:05.000"))
 		sb.WriteString("----------------------------------------\n")
 		sb.WriteString(capture.Content)
 		sb.WriteString("\n\n")

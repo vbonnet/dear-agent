@@ -1,3 +1,4 @@
+// Package beads provides beads-related functionality.
 package beads
 
 import (

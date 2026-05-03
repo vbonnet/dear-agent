@@ -27,9 +27,7 @@ func TestStatusLineAutoDetection(t *testing.T) {
 	}
 
 	// Mock home directory
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tempDir)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tempDir)
 
 	// Clear cache
 	ClearDetectorCache()
@@ -149,9 +147,7 @@ func TestStatusLineAutoDetectionFallbackChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tempDir)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tempDir)
 
 	ClearDetectorCache()
 

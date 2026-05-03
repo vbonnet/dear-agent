@@ -20,13 +20,13 @@ func TestDetect_ClaudeCode_EnvVar(t *testing.T) {
 	oldVal := os.Getenv("CLAUDECODE")
 	defer func() {
 		if oldVal != "" {
-			os.Setenv("CLAUDECODE", oldVal)
+			t.Setenv("CLAUDECODE", oldVal)
 		} else {
 			os.Unsetenv("CLAUDECODE")
 		}
 	}()
 
-	os.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDECODE", "1")
 	detector := NewDetector()
 	agent := detector.Detect()
 
@@ -40,13 +40,13 @@ func TestDetect_ClaudeCode_EntrypointEnv(t *testing.T) {
 	oldVal := os.Getenv("CLAUDE_CODE_ENTRYPOINT")
 	defer func() {
 		if oldVal != "" {
-			os.Setenv("CLAUDE_CODE_ENTRYPOINT", oldVal)
+			t.Setenv("CLAUDE_CODE_ENTRYPOINT", oldVal)
 		} else {
 			os.Unsetenv("CLAUDE_CODE_ENTRYPOINT")
 		}
 	}()
 
-	os.Setenv("CLAUDE_CODE_ENTRYPOINT", "/some/path")
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "/some/path")
 	detector := NewDetector()
 	agent := detector.Detect()
 
@@ -70,7 +70,7 @@ func TestDetect_Cursor_EnvVar(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -81,7 +81,7 @@ func TestDetect_Cursor_EnvVar(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("CURSOR", "1")
+	t.Setenv("CURSOR", "1")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -106,7 +106,7 @@ func TestDetect_Cursor_SessionID(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -117,7 +117,7 @@ func TestDetect_Cursor_SessionID(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("CURSOR_SESSION_ID", "test-session-123")
+	t.Setenv("CURSOR_SESSION_ID", "test-session-123")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -140,7 +140,7 @@ func TestDetect_Windsurf_EnvVar(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -150,7 +150,7 @@ func TestDetect_Windsurf_EnvVar(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("WINDSURF", "1")
+	t.Setenv("WINDSURF", "1")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -173,7 +173,7 @@ func TestDetect_Aider_ModelEnv(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -183,7 +183,7 @@ func TestDetect_Aider_ModelEnv(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("AIDER_MODEL", "gpt-4")
+	t.Setenv("AIDER_MODEL", "gpt-4")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -206,7 +206,7 @@ func TestDetect_Aider_ArchitectEnv(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -216,7 +216,7 @@ func TestDetect_Aider_ArchitectEnv(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("AIDER_ARCHITECT", "1")
+	t.Setenv("AIDER_ARCHITECT", "1")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -238,7 +238,7 @@ func TestDetect_ClaudeCode_FileDetection(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
@@ -275,17 +275,13 @@ func TestDetect_Cursor_FileDetection(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
 
 	// Create temporary .cursorrules file
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	cursorRulesPath := filepath.Join(tmpDir, ".cursorrules")
 	if err := os.WriteFile(cursorRulesPath, []byte("test"), 0644); err != nil {
@@ -293,15 +289,8 @@ func TestDetect_Cursor_FileDetection(t *testing.T) {
 	}
 
 	// Change to temp directory for file detection
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -324,31 +313,20 @@ func TestDetect_Windsurf_FileDetection(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
 
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	windsurfRulesPath := filepath.Join(tmpDir, ".windsurfrules")
 	if err := os.WriteFile(windsurfRulesPath, []byte("test"), 0644); err != nil {
 		t.Fatalf("failed to create .windsurfrules: %v", err)
 	}
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -369,31 +347,20 @@ func TestDetect_Aider_FileDetection(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
 
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	aiderConfPath := filepath.Join(tmpDir, ".aider.conf.yml")
 	if err := os.WriteFile(aiderConfPath, []byte("model: gpt-4"), 0644); err != nil {
 		t.Fatalf("failed to create .aider.conf.yml: %v", err)
 	}
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -414,27 +381,16 @@ func TestDetect_Unknown(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
 
 	// Create temp directory with no agent files
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -450,7 +406,7 @@ func TestFileExists(t *testing.T) {
 	detector := NewDetector()
 
 	// Test with existing file
-	tmpFile, err := os.CreateTemp("", "test-*")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
@@ -467,11 +423,7 @@ func TestFileExists(t *testing.T) {
 	}
 
 	// Test with directory
-	tmpDir, err := os.MkdirTemp("", "test-dir-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	if !detector.fileExists(tmpDir) {
 		t.Errorf("fileExists(%q) = false, want true (directories should return true)", tmpDir)
@@ -491,7 +443,7 @@ func TestDetect_MultipleEnvVars(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -499,9 +451,9 @@ func TestDetect_MultipleEnvVars(t *testing.T) {
 	}()
 
 	// Claude Code should take priority
-	os.Setenv("CLAUDECODE", "1")
-	os.Setenv("CURSOR", "1")
-	os.Setenv("WINDSURF", "1")
+	t.Setenv("CLAUDECODE", "1")
+	t.Setenv("CURSOR", "1")
+	t.Setenv("WINDSURF", "1")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -514,11 +466,7 @@ func TestDetect_MultipleEnvVars(t *testing.T) {
 // TestDetect_FallbackPriority verifies file detection fallback order
 func TestDetect_FallbackPriority(t *testing.T) {
 	// Create temp directory for file detection tests
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Clear all env vars
 	envVars := []string{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CURSOR", "WINDSURF", "AIDER_MODEL", "AIDER_ARCHITECT"}
@@ -530,7 +478,7 @@ func TestDetect_FallbackPriority(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
@@ -539,9 +487,7 @@ func TestDetect_FallbackPriority(t *testing.T) {
 	os.WriteFile(filepath.Join(tmpDir, ".cursorrules"), []byte("test"), 0644)
 	os.WriteFile(filepath.Join(tmpDir, ".windsurfrules"), []byte("test"), 0644)
 
-	oldWd, _ := os.Getwd()
-	defer os.Chdir(oldWd)
-	os.Chdir(tmpDir)
+	t.Chdir(tmpDir)
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -567,7 +513,7 @@ func TestDetect_EdgeCase_ClaudeCodeNotSet(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -578,7 +524,7 @@ func TestDetect_EdgeCase_ClaudeCodeNotSet(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("CLAUDECODE", "0")
+	t.Setenv("CLAUDECODE", "0")
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -604,31 +550,20 @@ func TestDetect_AiderignoreFile(t *testing.T) {
 	defer func() {
 		for env, val := range savedEnvs {
 			if val != "" {
-				os.Setenv(env, val)
+				t.Setenv(env, val)
 			}
 		}
 	}()
 
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	aiderIgnorePath := filepath.Join(tmpDir, ".aiderignore")
 	if err := os.WriteFile(aiderIgnorePath, []byte("*.log"), 0644); err != nil {
 		t.Fatalf("failed to create .aiderignore: %v", err)
 	}
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	defer os.Chdir(oldWd)
 
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("failed to change directory: %v", err)
-	}
+	t.Chdir(tmpDir)
 
 	detector := NewDetector()
 	agent := detector.Detect()
@@ -653,7 +588,7 @@ func TestDetect_Caching(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -664,7 +599,7 @@ func TestDetect_Caching(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("CURSOR", "1")
+	t.Setenv("CURSOR", "1")
 
 	detector := NewDetector()
 
@@ -676,7 +611,7 @@ func TestDetect_Caching(t *testing.T) {
 
 	// Change env var to Claude Code
 	os.Unsetenv("CURSOR")
-	os.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDECODE", "1")
 
 	// Second call should still return cached Cursor (not re-detect)
 	agent2 := detector.Detect()
@@ -698,7 +633,7 @@ func TestDetect_CachingMultipleCalls(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -708,7 +643,7 @@ func TestDetect_CachingMultipleCalls(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("WINDSURF", "1")
+	t.Setenv("WINDSURF", "1")
 
 	detector := NewDetector()
 
@@ -741,7 +676,7 @@ func TestClearCache(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -751,7 +686,7 @@ func TestClearCache(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("AIDER_MODEL", "gpt-4")
+	t.Setenv("AIDER_MODEL", "gpt-4")
 
 	detector := NewDetector()
 
@@ -763,7 +698,7 @@ func TestClearCache(t *testing.T) {
 
 	// Change env var
 	os.Unsetenv("AIDER_MODEL")
-	os.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDECODE", "1")
 
 	// Before clear, should still get cached value
 	agent2 := detector.Detect()
@@ -808,7 +743,7 @@ func TestDetect_CachingPerInstance(t *testing.T) {
 	defer func() {
 		for key, val := range envVars {
 			if val != "" {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			} else {
 				os.Unsetenv(key)
 			}
@@ -818,7 +753,7 @@ func TestDetect_CachingPerInstance(t *testing.T) {
 	for key := range envVars {
 		os.Unsetenv(key)
 	}
-	os.Setenv("CURSOR", "1")
+	t.Setenv("CURSOR", "1")
 
 	// Create two detectors
 	detector1 := NewDetector()
@@ -832,7 +767,7 @@ func TestDetect_CachingPerInstance(t *testing.T) {
 
 	// Change env var to Windsurf
 	os.Unsetenv("CURSOR")
-	os.Setenv("WINDSURF", "1")
+	t.Setenv("WINDSURF", "1")
 
 	// First detector should still return cached Cursor
 	agent1Again := detector1.Detect()

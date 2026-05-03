@@ -12,7 +12,7 @@ import (
 // createTempRetrospective creates a temporary retrospective file for testing.
 func createTempRetrospective(t *testing.T, content string) string {
 	t.Helper()
-	tmpfile, err := os.CreateTemp("", "retrospective-*.md")
+	tmpfile, err := os.CreateTemp(t.TempDir(), "retrospective-*.md")
 	require.NoError(t, err)
 	t.Cleanup(func() { os.Remove(tmpfile.Name()) })
 

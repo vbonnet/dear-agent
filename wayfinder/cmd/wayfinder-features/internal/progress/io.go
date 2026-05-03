@@ -1,9 +1,10 @@
+// Package progress provides progress-related functionality.
 package progress
 
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+
 	"os"
 	"path/filepath"
 	"time"
@@ -11,7 +12,7 @@ import (
 
 // ReadProgress reads progress.json from the specified path
 func ReadProgress(path string) (*Progress, error) {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("progress file not found at %s\nRun 'wayfinder-features init' first", path)
@@ -59,7 +60,7 @@ func WriteProgress(path string, progress *Progress) error {
 
 	// Write to temporary file
 	tmpPath := path + ".tmp"
-	if err := ioutil.WriteFile(tmpPath, data, 0600); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write temporary file: %w", err)
 	}
 
@@ -97,11 +98,11 @@ func UpdateFeature(progress *Progress, featureID string, updater func(*Feature))
 
 // copyFile copies a file from src to dst
 func copyFile(src, dst string) error {
-	data, err := ioutil.ReadFile(src)
+	data, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	return ioutil.WriteFile(dst, data, 0600)
+	return os.WriteFile(dst, data, 0600)
 }
 
 // FindProgressFile searches up the directory tree for progress.json

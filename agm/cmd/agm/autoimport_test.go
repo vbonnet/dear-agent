@@ -154,9 +154,7 @@ func TestOfferToImportOrphanedSession_NoHistory(t *testing.T) {
 	}
 
 	// Set HOME to temp dir (no history.jsonl)
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Get adapter
 	adapter, err := getStorage()
@@ -194,9 +192,7 @@ func TestOfferToImportOrphanedSession_NoMatch(t *testing.T) {
 	}
 
 	// Set HOME to temp dir
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Get adapter
 	adapter, err := getStorage()
@@ -239,9 +235,7 @@ func TestOfferToImportOrphanedSession_MultipleMatches(t *testing.T) {
 	}
 
 	// Set HOME to temp dir
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Get adapter
 	adapter, err := getStorage()
@@ -303,9 +297,7 @@ func TestResolveSessionIdentifier_WithAutoImport(t *testing.T) {
 	}
 
 	// Set HOME to temp dir
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Get adapter
 	adapter, err := getStorage()

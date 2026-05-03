@@ -18,7 +18,7 @@ func TestOpenAIAdapterImplementsAgentInterface(t *testing.T) {
 	adapter := createTestAdapter(t, tmpDir)
 
 	// Verify adapter implements Agent interface
-	var _ Agent = adapter
+	var _ = adapter
 }
 
 // TestNewOpenAIAdapter tests OpenAI adapter creation
@@ -37,7 +37,7 @@ func TestNewOpenAIAdapter(t *testing.T) {
 				Model: "gpt-4-turbo-preview",
 			},
 			setupEnv: func() {
-				os.Setenv("OPENAI_API_KEY", "test-key-123")
+				t.Setenv("OPENAI_API_KEY", "test-key-123")
 			},
 			wantErr: false,
 			checkFunc: func(t *testing.T, a Agent) {
@@ -72,7 +72,7 @@ func TestNewOpenAIAdapter(t *testing.T) {
 			name:   "nil config uses defaults",
 			config: nil,
 			setupEnv: func() {
-				os.Setenv("OPENAI_API_KEY", "test-key-789")
+				t.Setenv("OPENAI_API_KEY", "test-key-789")
 			},
 			wantErr: false,
 			checkFunc: func(t *testing.T, a Agent) {

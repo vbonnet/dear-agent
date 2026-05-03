@@ -29,14 +29,18 @@ func TestDetectCLI(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clear all env vars
+			t.Setenv("CLAUDE_SESSION_ID", "") // restored on test cleanup
 			os.Unsetenv("CLAUDE_SESSION_ID")
+			t.Setenv("GEMINI_SESSION_ID", "") // restored on test cleanup
 			os.Unsetenv("GEMINI_SESSION_ID")
+			t.Setenv("OPENCODE_SESSION_ID", "") // restored on test cleanup
 			os.Unsetenv("OPENCODE_SESSION_ID")
+			t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
 			os.Unsetenv("CODEX_SESSION_ID")
 
 			// Set test env var
 			if tt.envVar != "" {
-				os.Setenv(tt.envVar, tt.envValue)
+				t.Setenv(tt.envVar, tt.envValue)
 				defer os.Unsetenv(tt.envVar)
 			}
 
@@ -210,9 +214,14 @@ func TestDetect(t *testing.T) {
 	detector := NewDetector(registry)
 
 	// Clear all CLI env vars to get unknown/heuristic fallback
+	t.Setenv("CLAUDE_SESSION_ID", "") // restored on test cleanup
 	os.Unsetenv("CLAUDE_SESSION_ID")
+	t.Setenv("GEMINI_SESSION_ID", "") // restored on test cleanup
 	os.Unsetenv("GEMINI_SESSION_ID")
+	t.Setenv("OPENCODE_SESSION_ID", "") // restored on test cleanup
 	os.Unsetenv("OPENCODE_SESSION_ID")
+	t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
+	t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
 	os.Unsetenv("CODEX_SESSION_ID")
 
 	usage, err := detector.Detect()
@@ -225,6 +234,7 @@ func TestDetectFromClaudeNoSession(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
+	t.Setenv("CLAUDE_SESSION_ID", "") // restored on test cleanup
 	os.Unsetenv("CLAUDE_SESSION_ID")
 
 	_, err := detector.DetectFromClaude()
@@ -284,6 +294,7 @@ func TestDetectFromClaudeSessionNoToolResult(t *testing.T) {
 	detector := NewDetector(registry)
 
 	// Ensure no CLAUDE_TOOL_RESULT env var
+	t.Setenv("CLAUDE_TOOL_RESULT", "") // restored on test cleanup
 	os.Unsetenv("CLAUDE_TOOL_RESULT")
 
 	// This will try to read a conversation file that doesn't exist
@@ -295,7 +306,7 @@ func TestDetectFromClaudeSessionWithToolResult(t *testing.T) {
 	registry := createTestRegistry(t)
 	detector := NewDetector(registry)
 
-	os.Setenv("CLAUDE_TOOL_RESULT", "Token usage: 50000/200000; 150000 remaining")
+	t.Setenv("CLAUDE_TOOL_RESULT", "Token usage: 50000/200000; 150000 remaining")
 	defer os.Unsetenv("CLAUDE_TOOL_RESULT")
 
 	usage, err := detector.DetectFromClaudeSession("test-session")
@@ -311,9 +322,13 @@ func TestDetectWithModel(t *testing.T) {
 	detector := NewDetector(registry)
 
 	// Clear all CLI env vars to get heuristic fallback
+	t.Setenv("CLAUDE_SESSION_ID", "") // restored on test cleanup
 	os.Unsetenv("CLAUDE_SESSION_ID")
+	t.Setenv("GEMINI_SESSION_ID", "") // restored on test cleanup
 	os.Unsetenv("GEMINI_SESSION_ID")
+	t.Setenv("OPENCODE_SESSION_ID", "") // restored on test cleanup
 	os.Unsetenv("OPENCODE_SESSION_ID")
+	t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
 	os.Unsetenv("CODEX_SESSION_ID")
 
 	usage, err := detector.DetectWithModel("test-model")
@@ -398,13 +413,15 @@ func TestDetectDispatchesByCLI(t *testing.T) {
 	detector := NewDetector(registry)
 
 	// Clear all env vars first
+	t.Setenv("CLAUDE_SESSION_ID", "") // restored on test cleanup
 	os.Unsetenv("CLAUDE_SESSION_ID")
 	os.Unsetenv("GEMINI_SESSION_ID")
 	os.Unsetenv("OPENCODE_SESSION_ID")
+	t.Setenv("CODEX_SESSION_ID", "") // restored on test cleanup
 	os.Unsetenv("CODEX_SESSION_ID")
 
 	t.Run("dispatches to gemini returns error", func(t *testing.T) {
-		os.Setenv("GEMINI_SESSION_ID", "g-session")
+		t.Setenv("GEMINI_SESSION_ID", "g-session")
 		defer os.Unsetenv("GEMINI_SESSION_ID")
 
 		_, err := detector.Detect()
@@ -413,7 +430,7 @@ func TestDetectDispatchesByCLI(t *testing.T) {
 	})
 
 	t.Run("dispatches to opencode returns error", func(t *testing.T) {
-		os.Setenv("OPENCODE_SESSION_ID", "oc-session")
+		t.Setenv("OPENCODE_SESSION_ID", "oc-session")
 		defer os.Unsetenv("OPENCODE_SESSION_ID")
 
 		_, err := detector.Detect()
@@ -422,7 +439,7 @@ func TestDetectDispatchesByCLI(t *testing.T) {
 	})
 
 	t.Run("dispatches to codex returns error", func(t *testing.T) {
-		os.Setenv("CODEX_SESSION_ID", "cx-session")
+		t.Setenv("CODEX_SESSION_ID", "cx-session")
 		defer os.Unsetenv("CODEX_SESSION_ID")
 
 		_, err := detector.Detect()

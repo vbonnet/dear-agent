@@ -132,7 +132,7 @@ func spawnWorker(w ops.WorkerSpec) error {
 	agmCmd.Env = os.Environ()
 	out, err := agmCmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%s\n%s", err, string(out))
+		return fmt.Errorf("%w\n%s", err, string(out))
 	}
 
 	return nil

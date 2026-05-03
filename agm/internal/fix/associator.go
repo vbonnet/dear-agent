@@ -96,7 +96,7 @@ func (a *Associator) Associate(m *manifest.Manifest, manifestPath string, uuid s
 
 	// Write to Dolt
 	if a.adapter == nil {
-		return fmt.Errorf("Dolt adapter required")
+		return fmt.Errorf("dolt adapter required")
 	}
 	if err := a.adapter.UpdateSession(m); err != nil {
 		return fmt.Errorf("failed to update session in Dolt: %w", err)
@@ -112,7 +112,7 @@ func (a *Associator) Clear(m *manifest.Manifest, manifestPath string) error {
 
 	// Write to Dolt
 	if a.adapter == nil {
-		return fmt.Errorf("Dolt adapter required")
+		return fmt.Errorf("dolt adapter required")
 	}
 	if err := a.adapter.UpdateSession(m); err != nil {
 		return fmt.Errorf("failed to update session in Dolt: %w", err)
@@ -125,7 +125,7 @@ func (a *Associator) Clear(m *manifest.Manifest, manifestPath string) error {
 func (a *Associator) ScanUnassociated(sessionsDir string) ([]*manifest.Manifest, error) {
 	// Query Dolt for all sessions
 	if a.adapter == nil {
-		return nil, fmt.Errorf("Dolt adapter not available")
+		return nil, fmt.Errorf("dolt adapter not available")
 	}
 
 	manifests, err := a.adapter.ListSessions(&dolt.SessionFilter{})
@@ -147,7 +147,7 @@ func (a *Associator) ScanUnassociated(sessionsDir string) ([]*manifest.Manifest,
 func (a *Associator) ScanBroken(sessionsDir string) ([]*manifest.Manifest, error) {
 	// Query Dolt for all sessions
 	if a.adapter == nil {
-		return nil, fmt.Errorf("Dolt adapter not available")
+		return nil, fmt.Errorf("dolt adapter not available")
 	}
 
 	manifests, err := a.adapter.ListSessions(&dolt.SessionFilter{})

@@ -123,9 +123,7 @@ func TestSessionSearchCmd_Integration(t *testing.T) {
 	}
 
 	// Override environment
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Override config for test
 	oldCfg := cfg
@@ -268,9 +266,7 @@ func TestSessionSearchCmd_Regex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	oldCfg := cfg
 	if cfg == nil {
@@ -364,9 +360,7 @@ func TestSessionSearchCmd_CaseSensitive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	oldCfg := cfg
 	if cfg == nil {

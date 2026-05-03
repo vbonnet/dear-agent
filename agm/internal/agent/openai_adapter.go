@@ -443,10 +443,7 @@ func (a *OpenAIAdapter) Capabilities() Capabilities {
 	}
 
 	// Determine vision support
-	supportsVision := false
-	if a.model == "gpt-4-turbo" || a.model == "gpt-4-turbo-preview" || a.model == "gpt-4-vision-preview" {
-		supportsVision = true
-	}
+	supportsVision := a.model == "gpt-4-turbo" || a.model == "gpt-4-turbo-preview" || a.model == "gpt-4-vision-preview"
 
 	return Capabilities{
 		SupportsSlashCommands: false, // API-based, no slash commands

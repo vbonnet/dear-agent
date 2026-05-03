@@ -81,7 +81,7 @@ func (f *TableFormatter) Format(v interface{}) ([]byte, error) {
 
 	// Get element type
 	elemType := val.Type().Elem()
-	if elemType.Kind() == reflect.Ptr {
+	if elemType.Kind() == reflect.Pointer {
 		elemType = elemType.Elem()
 	}
 
@@ -110,7 +110,7 @@ func (f *TableFormatter) formatStructSlice(val reflect.Value) ([]string, [][]str
 
 	// Get first element to extract field names
 	firstElem := val.Index(0)
-	if firstElem.Kind() == reflect.Ptr {
+	if firstElem.Kind() == reflect.Pointer {
 		firstElem = firstElem.Elem()
 	}
 
@@ -141,7 +141,7 @@ func (f *TableFormatter) formatStructSlice(val reflect.Value) ([]string, [][]str
 	rows := make([][]string, val.Len())
 	for i := 0; i < val.Len(); i++ {
 		elem := val.Index(i)
-		if elem.Kind() == reflect.Ptr {
+		if elem.Kind() == reflect.Pointer {
 			elem = elem.Elem()
 		}
 
@@ -198,7 +198,7 @@ func (f *TableFormatter) formatValue(v reflect.Value) string {
 	}
 
 	switch v.Kind() { //nolint:exhaustive // reflect.Kind has too many values; default handles the rest
-	case reflect.Ptr:
+	case reflect.Pointer:
 		if v.IsNil() {
 			return ""
 		}

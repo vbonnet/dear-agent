@@ -2,6 +2,7 @@ package delegation
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -15,7 +16,8 @@ func TestHeadlessExecute_NilInput(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for nil input")
 	}
-	se, ok := err.(*StrategyError)
+	se := &StrategyError{}
+	ok := errors.As(err, &se)
 	if !ok {
 		t.Fatalf("expected *StrategyError, got %T", err)
 	}
@@ -33,7 +35,8 @@ func TestHeadlessExecute_EmptyPrompt(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty prompt")
 	}
-	se, ok := err.(*StrategyError)
+	se := &StrategyError{}
+	ok := errors.As(err, &se)
 	if !ok {
 		t.Fatalf("expected *StrategyError, got %T", err)
 	}
@@ -48,7 +51,8 @@ func TestHeadlessExecute_UnsupportedProvider(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported provider")
 	}
-	se, ok := err.(*StrategyError)
+	se := &StrategyError{}
+	ok := errors.As(err, &se)
 	if !ok {
 		t.Fatalf("expected *StrategyError, got %T", err)
 	}
@@ -226,7 +230,8 @@ func TestExternalExecute_AuthNone(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no auth available")
 	}
-	se, ok := err.(*StrategyError)
+	se := &StrategyError{}
+	ok := errors.As(err, &se)
 	if !ok {
 		t.Fatalf("expected *StrategyError, got %T", err)
 	}
@@ -247,7 +252,8 @@ func TestExternalExecute_APIKeyInvalid(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid API key format")
 	}
-	se, ok := err.(*StrategyError)
+	se := &StrategyError{}
+	ok := errors.As(err, &se)
 	if !ok {
 		t.Fatalf("expected *StrategyError, got %T", err)
 	}

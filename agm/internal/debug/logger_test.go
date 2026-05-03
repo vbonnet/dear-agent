@@ -50,9 +50,7 @@ func TestInit_Enabled(t *testing.T) {
 
 	// Override HOME so we write to a temp dir
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	err := Init(true, "test-session")
 	if err != nil {

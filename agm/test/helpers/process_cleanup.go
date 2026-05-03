@@ -8,7 +8,6 @@ import (
 
 // ProcessGroup tracks a process group for cleanup.
 type ProcessGroup struct {
-	pgid int
 	cmd  *exec.Cmd
 }
 

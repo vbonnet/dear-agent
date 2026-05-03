@@ -42,12 +42,6 @@ func getHeaderStyle() lipgloss.Style {
 		Foreground(palette.Header)
 }
 
-func getDimStyle() lipgloss.Style {
-	cfg := GetGlobalConfig()
-	palette := GetPalette(cfg.UI.Theme)
-	return lipgloss.NewStyle().
-		Foreground(palette.Dim)
-}
 
 // LayoutMode represents the terminal width-based layout mode
 type LayoutMode int
@@ -552,14 +546,15 @@ func groupByStatus(manifests []*manifest.Manifest, statuses map[string]session.S
 		}
 
 		statusInfo := statuses[m.Name]
-		if statusInfo.Status == "active" {
+		switch statusInfo.Status {
+		case "active":
 			// Active sessions: distinguish attached vs detached
 			if statusInfo.AttachedClients > 0 {
 				groups["attached"] = append(groups["attached"], m)
 			} else {
 				groups["detached"] = append(groups["detached"], m)
 			}
-		} else if statusInfo.Status == "stopped" {
+		case "stopped":
 			groups["stopped"] = append(groups["stopped"], m)
 		}
 	}
@@ -895,98 +890,6 @@ func renderGroupTableWithWidths(group []*manifest.Manifest, status string, statu
 	return result.String()
 }
 
-// renderGroupTable renders a table for a single status group
-func renderGroupTable(group []*manifest.Manifest, status string, statuses map[string]session.StatusInfo, showTmuxColumn bool) string {
-	// First pass: format entire table without color to get proper alignment
-	var tableBuf bytes.Buffer
-	w := tabwriter.NewWriter(&tableBuf, 0, 0, 2, ' ', 0)
-
-	// No header row - the divider already has column labels
-
-	// Rows
-	for _, m := range group {
-		statusInfo := statuses[m.Name]
-
-		// Determine status symbol for the group
-		var symbol string
-		// For "active" group, distinguish between attached and detached
-		if status == "active" {
-			if statusInfo.AttachedClients > 0 {
-				symbol = getStatusSymbol("attached")
-			} else {
-				symbol = getStatusSymbol("detached")
-			}
-		} else {
-			symbol = getStatusSymbol(status)
-		}
-
-		project := compactPath(truncatePath(m.Context.Project, 40))
-		recency := formatTimeCompact(m.UpdatedAt)
-
-		// Format attachment count column (only for active sessions)
-		var attachmentText string
-		if status == "active" && statusInfo.AttachedClients > 0 {
-			attachmentText = fmt.Sprintf("%d attached", statusInfo.AttachedClients)
-		} else {
-			attachmentText = ""
-		}
-
-		if showTmuxColumn {
-			// Show "-" if session is its own parent (Name == Tmux.SessionName)
-			tmuxDisplay := m.Tmux.SessionName
-			if m.Name == m.Tmux.SessionName {
-				tmuxDisplay = "-"
-			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				symbol,
-				m.Name,
-				tmuxDisplay,
-				project,
-				attachmentText,
-				recency)
-		} else {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-				symbol,
-				m.Name,
-				project,
-				attachmentText,
-				recency)
-		}
-	}
-
-	w.Flush()
-
-	// Second pass: apply lipgloss styling to entire lines
-	var result bytes.Buffer
-	lines := bytes.Split(tableBuf.Bytes(), []byte("\n"))
-
-	// Choose style based on status
-	var style lipgloss.Style
-	switch status {
-	case "active":
-		style = getActiveStyle()
-	case "stopped":
-		style = getStoppedStyle()
-	default:
-		style = lipgloss.NewStyle() // No styling
-	}
-
-	// Color all data rows (no header row)
-	for i := range group {
-		if i >= len(lines) {
-			break
-		}
-		line := string(lines[i])
-		if line == "" {
-			continue
-		}
-
-		result.WriteString(style.Render(line))
-		result.WriteString("\n")
-	}
-
-	return result.String()
-}
 
 // FormatJSON formats manifests as JSON
 func FormatJSON(manifests []*manifest.Manifest) (string, error) {
@@ -1046,35 +949,6 @@ func formatTimeCompact(t time.Time) string {
 	return t.Format("Jan 02")
 }
 
-// getSessionActivity returns formatted activity time for a session using ActivityTracker.
-// Falls back to "unknown ⚠️" on errors (missing history, corrupted data, etc).
-// DEPRECATED: Use getSessionActivityBatch for better performance when processing multiple sessions.
-func getSessionActivity(m *manifest.Manifest) string {
-	var tracker activity.ActivityTracker
-	var sessionKey string
-
-	// Determine agent type and create appropriate tracker
-	switch m.Harness {
-	case "claude":
-		tracker = activity.NewClaudeActivityTracker()
-		sessionKey = m.Claude.UUID // Claude uses UUID from history.jsonl
-	case "gemini":
-		tracker = activity.NewGeminiActivityTracker()
-		sessionKey = m.SessionID // Gemini uses session ID for per-session files
-	default:
-		// Unknown agent type, fallback to UpdatedAt
-		return formatTimeCompact(m.UpdatedAt)
-	}
-
-	// Get last activity timestamp
-	timestamp, err := tracker.GetLastActivity(sessionKey)
-	if err != nil {
-		// History file not found, corrupted, or empty
-		return "unknown ⚠️"
-	}
-
-	return formatTimeCompact(timestamp)
-}
 
 // truncatePath truncates path with ... if too long
 func truncatePath(path string, maxLen int) string {

@@ -11,7 +11,7 @@ import (
 
 func setupTestRetryDir(t *testing.T) string {
 	tmpDir := t.TempDir()
-	os.Setenv("AGM_RETRY_BASE_DIR", tmpDir)
+	t.Setenv("AGM_RETRY_BASE_DIR", tmpDir)
 	t.Cleanup(func() {
 		os.Unsetenv("AGM_RETRY_BASE_DIR")
 	})

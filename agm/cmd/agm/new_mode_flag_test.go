@@ -102,7 +102,7 @@ func TestPointBGuardCondition(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reproduce the guard condition from new.go line ~1295
 			pointBFires := tt.modeFlagValue != "" &&
-				!(tt.harness == "claude-code" && tt.testRunID == "" && tt.testEnv == "")
+				(tt.harness != "claude-code" || tt.testRunID != "" || tt.testEnv != "")
 
 			if pointBFires != tt.expectPointB {
 				t.Errorf("Point B guard: got fires=%v, want fires=%v", pointBFires, tt.expectPointB)

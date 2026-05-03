@@ -131,8 +131,8 @@ func FormatSummary(records []ErrorRecord, maxEntries int) (string, int) {
 
 	for _, rec := range top {
 		age := formatAge(now.Sub(rec.LastSeen))
-		b.WriteString(fmt.Sprintf("  - Do NOT use %s -- %s (%sx, last %s ago)\n",
-			rec.Pattern, rec.Remediation, formatCount(rec.Count), age))
+		fmt.Fprintf(&b, "  - Do NOT use %s -- %s (%sx, last %s ago)\n",
+			rec.Pattern, rec.Remediation, formatCount(rec.Count), age)
 	}
 
 	text := b.String()

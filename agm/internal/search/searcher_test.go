@@ -96,9 +96,7 @@ func TestSearcher_Search_Keyword(t *testing.T) {
 	}
 
 	// Override home directory for test
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Test search with adapter
 	searcher := NewSearcher(adapter)
@@ -206,9 +204,7 @@ func TestSearcher_Search_Regex(t *testing.T) {
 	}
 
 	// Override home directory for test
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Test regex search with adapter
 	searcher := NewSearcher(adapter)
@@ -307,9 +303,7 @@ func TestSearcher_Search_CaseSensitive(t *testing.T) {
 	}
 
 	// Override home directory for test
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	searcher := NewSearcher(adapter)
 
@@ -442,9 +436,7 @@ func TestSearcher_Search_WorkspaceFilter(t *testing.T) {
 	}
 
 	// Override home directory for test
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	searcher := NewSearcher(adapter)
 
@@ -488,9 +480,7 @@ func TestSearcher_Search_NoMatches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	searcher := NewSearcher(adapter)
 	results, err := searcher.Search(SearchOptions{

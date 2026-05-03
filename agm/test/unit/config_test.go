@@ -176,8 +176,8 @@ log_level: debug
 		require.NoError(t, err)
 
 		// Set environment variables
-		os.Setenv("AGM_SESSIONS_DIR", "/tmp/env-sessions")
-		os.Setenv("AGM_LOG_LEVEL", "warn")
+		t.Setenv("AGM_SESSIONS_DIR", "/tmp/env-sessions")
+		t.Setenv("AGM_LOG_LEVEL", "warn")
 		defer os.Unsetenv("AGM_SESSIONS_DIR")
 		defer os.Unsetenv("AGM_LOG_LEVEL")
 
@@ -239,28 +239,28 @@ func TestConfig_IsolatedEnvironment(t *testing.T) {
 	origLogLevel := os.Getenv("AGM_LOG_LEVEL")
 	defer func() {
 		if origSessionsDir != "" {
-			os.Setenv("AGM_SESSIONS_DIR", origSessionsDir)
+			t.Setenv("AGM_SESSIONS_DIR", origSessionsDir)
 		} else {
 			os.Unsetenv("AGM_SESSIONS_DIR")
 		}
 		if origLogLevel != "" {
-			os.Setenv("AGM_LOG_LEVEL", origLogLevel)
+			t.Setenv("AGM_LOG_LEVEL", origLogLevel)
 		} else {
 			os.Unsetenv("AGM_LOG_LEVEL")
 		}
 	}()
 
 	// Set test environment
-	os.Setenv("AGM_SESSIONS_DIR", "/tmp/test1")
-	os.Setenv("AGM_LOG_LEVEL", "debug")
+	t.Setenv("AGM_SESSIONS_DIR", "/tmp/test1")
+	t.Setenv("AGM_LOG_LEVEL", "debug")
 
 	cfg1, err := config.Load("/nonexistent")
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/test1", cfg1.SessionsDir)
 
 	// Change environment
-	os.Setenv("AGM_SESSIONS_DIR", "/tmp/test2")
-	os.Setenv("AGM_LOG_LEVEL", "info")
+	t.Setenv("AGM_SESSIONS_DIR", "/tmp/test2")
+	t.Setenv("AGM_LOG_LEVEL", "info")
 
 	cfg2, err := config.Load("/nonexistent")
 	require.NoError(t, err)

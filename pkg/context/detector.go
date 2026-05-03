@@ -26,11 +26,11 @@ func (d *Detector) Detect() (*Usage, error) {
 	case CLIClaude:
 		return d.DetectFromClaude()
 	case CLIGemini:
-		return nil, fmt.Errorf("Gemini context detection not implemented")
+		return nil, fmt.Errorf("gemini context detection not implemented")
 	case CLIOpenCode:
 		return nil, fmt.Errorf("OpenCode context detection not implemented")
 	case CLICodex:
-		return nil, fmt.Errorf("Codex context detection not implemented")
+		return nil, fmt.Errorf("codex context detection not implemented")
 	case CLIUnknown:
 		return d.DetectFromHeuristic()
 	}
@@ -83,11 +83,11 @@ func (d *Detector) DetectFromSession(sessionID string, cli CLI) (*Usage, error) 
 	case CLIClaude:
 		return d.DetectFromClaudeSession(sessionID)
 	case CLIGemini:
-		return nil, fmt.Errorf("Gemini context detection not implemented")
+		return nil, fmt.Errorf("gemini context detection not implemented")
 	case CLIOpenCode:
 		return nil, fmt.Errorf("OpenCode context detection not implemented")
 	case CLICodex:
-		return nil, fmt.Errorf("Codex context detection not implemented")
+		return nil, fmt.Errorf("codex context detection not implemented")
 	case CLIUnknown:
 		return nil, fmt.Errorf("unsupported CLI type: %s", cli)
 	}

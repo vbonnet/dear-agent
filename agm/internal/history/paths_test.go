@@ -1,6 +1,7 @@
 package history
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -232,7 +233,8 @@ func TestGetClaudeCodePaths_MissingWorkingDir(t *testing.T) {
 		t.Error("getClaudeCodePaths() expected error for empty working dir, got nil")
 	}
 
-	locErr, ok := err.(*LocationError)
+	locErr := &LocationError{}
+	ok := errors.As(err, &locErr)
 	if !ok {
 		t.Errorf("getClaudeCodePaths() error type = %T, want *LocationError", err)
 	} else {
@@ -312,7 +314,7 @@ func TestGetOpenCodePaths(t *testing.T) {
 func TestGetOpenCodePaths_CustomDataDir(t *testing.T) {
 	// Set custom data dir
 	customDir := "/custom/opencode/path"
-	os.Setenv("OPENCODE_DATA_DIR", customDir)
+	t.Setenv("OPENCODE_DATA_DIR", customDir)
 	defer os.Unsetenv("OPENCODE_DATA_DIR")
 
 	uuid := "ses_ghi789"

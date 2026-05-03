@@ -14,9 +14,7 @@ func TestFindSessionsAcrossWorkspaces(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Mock HOME directory
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create workspace structure
 	workspaces := []string{"oss", "acme", "personal"}
@@ -74,9 +72,7 @@ func TestFindSessionsAcrossWorkspaces(t *testing.T) {
 
 func TestFindSessionsAcrossWorkspaces_EmptyWorkspace(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create workspace with no sessions directory
 	emptyWsDir := filepath.Join(tmpDir, "src", "ws", "empty")
@@ -95,9 +91,7 @@ func TestFindSessionsAcrossWorkspaces_EmptyWorkspace(t *testing.T) {
 
 func TestFindSessionsAcrossWorkspaces_CorruptedManifest(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create workspace with corrupted manifest
 	sessionsDir := filepath.Join(tmpDir, "src", "ws", "oss", "sessions")
@@ -125,9 +119,7 @@ func TestFindSessionsAcrossWorkspaces_CorruptedManifest(t *testing.T) {
 // This prevents regression of the bug where sessions in .agm/sessions were missed.
 func TestFindSessionsAcrossWorkspaces_DualDirectoryCheck(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create OSS workspace with .agm/sessions (new location)
 	ossSessionsDir := filepath.Join(tmpDir, "src", "ws", "oss", ".agm", "sessions")
@@ -220,9 +212,7 @@ func TestFindSessionsAcrossWorkspaces_DualDirectoryCheck(t *testing.T) {
 // ~/.agm/config.yaml and uses output_dir to find sessions.
 func TestFindSessionsAcrossWorkspaces_ConfigBased(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create workspace config with custom output_dir
 	agmDir := filepath.Join(tmpDir, ".agm")
@@ -295,9 +285,7 @@ workspaces:
 // disabled workspaces are skipped during config-based discovery.
 func TestFindSessionsAcrossWorkspaces_ConfigDisabledWorkspace(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create workspace config with one disabled workspace
 	agmDir := filepath.Join(tmpDir, ".agm")
@@ -354,9 +342,7 @@ workspaces:
 // (personal) and engram-research (oss) are both configured in ~/.agm/config.yaml.
 func TestFindSessionsAcrossWorkspaces_ConfigDriven(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create workspace config with two workspaces (personal + oss)
 	agmDir := filepath.Join(tmpDir, ".agm")
@@ -473,9 +459,7 @@ workspaces:
 // scans ~/.claude/sessions for non-workspace sessions (new fallback path).
 func TestFindSessionsAcrossWorkspaces_ClaudeFallback(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create sessions in ~/.claude/sessions (no workspace)
 	claudeSessionsDir := filepath.Join(tmpDir, ".claude", "sessions")
@@ -530,9 +514,7 @@ func TestFindSessionsAcrossWorkspaces_ClaudeFallback(t *testing.T) {
 // config-based discovery also scans ~/.claude/sessions in addition to workspace paths.
 func TestFindSessionsAcrossWorkspaces_ConfigWithClaudeFallback(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	t.Setenv("HOME", tmpDir)
 
 	// Create workspace config
 	agmDir := filepath.Join(tmpDir, ".agm")

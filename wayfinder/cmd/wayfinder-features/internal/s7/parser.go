@@ -1,8 +1,9 @@
+// Package s7 provides s7-related functionality.
 package s7
 
 import (
 	"fmt"
-	"io/ioutil"
+
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,7 +20,7 @@ type S7Feature struct {
 
 // ParseS7Plan parses the Feature Tracking table from S7 plan
 func ParseS7Plan(path string) (string, []S7Feature, error) {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to read S7 plan: %w", err)
 	}

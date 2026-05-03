@@ -1,3 +1,4 @@
+// Package slashcmd provides slashcmd-related functionality.
 package slashcmd
 
 import (

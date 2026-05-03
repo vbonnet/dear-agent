@@ -1,7 +1,7 @@
 # Workflow Engine — Backlog
 
 **Status:** Active
-**Last updated:** 2026-05-03 (later session — codemod, dev, Phase 5 lands)
+**Last updated:** 2026-05-03 (cross-phase X.5 + X.6 closed)
 **Source of truth for:** individual tickets within each phase. Phase-level
 status and architecture decisions live in
 [ROADMAP.md](../../ROADMAP.md) and
@@ -195,8 +195,8 @@ phase. Triage as they come up.
 | X.2 | Cost-per-mtok refresh in `roles.yaml` | ADR open question §3; punted to post-MVS |
 | X.3 | Per-tenant isolation | ADR open question §2; punted to post-MVS |
 | X.4 | GitHub-PR HITL backend | ADR open question §4; not in v1 |
-| DEAR-X.5 | Flaky `TestSQLiteStateConcurrentSaves` (SQLITE_BUSY on schema apply) | Pre-existing as of #38; reproduces on main with `-count=100`. Root cause: 10 concurrent `OpenSQLiteState` calls each call `db.PingContext` + `ExecContext(sqliteSchema)`, racing on the WAL-creation handshake. Fix is likely a once-per-path schema-apply guard, or move schema apply behind a file lock. |
-| DEAR-X.6 | Phase 2 wiring for Phase 1 schema fields | `permissions`, `hitl`, `context_policy`, and exit-gate failure modes are validated in Phase 1 but only partially enforced in the runner. Phase 2.* tickets cover the runner integration (HITL state, audit-row emission for permission denials, context_policy resolver). |
+| DEAR-X.5 | ~~Flaky `TestSQLiteStateConcurrentSaves` (SQLITE_BUSY on schema apply)~~ DONE | Fixed by `pingWithBusyRetry` + `execWithBusyRetry` retry loops in `state_sqlite.go` (see `openSQLiteDB` and `retryOnSQLiteBusy`). 100-iteration soak test now passes (`go test -count=100 -run TestSQLiteStateConcurrentSaves ./pkg/workflow/`). |
+| DEAR-X.6 | ~~Phase 2 wiring for Phase 1 schema fields~~ DONE | Wired by Phase 2.* tickets (#40). Runner now exposes `Permissions` and HITL backend hooks (`pkg/workflow/runner.go`) and the audit pipeline emits transition rows for permission denials and HITL approve/reject/timeout. |
 
 ---
 

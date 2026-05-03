@@ -169,17 +169,17 @@ func (c *Client) Search(ctx context.Context, req SearchRequest) ([]SearchResult,
 func (c *Client) buildSearchPrompt(req SearchRequest) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("Find archived Claude sessions related to: \"%s\"\n\n", req.Query))
+	fmt.Fprintf(&sb, "Find archived Claude sessions related to: \"%s\"\n\n", req.Query)
 	sb.WriteString("Available sessions:\n")
 
 	for i, s := range req.Sessions {
-		sb.WriteString(fmt.Sprintf("%d. Session ID: %s\n", i+1, s.SessionID))
-		sb.WriteString(fmt.Sprintf("   Name: %s\n", s.Name))
+		fmt.Fprintf(&sb, "%d. Session ID: %s\n", i+1, s.SessionID)
+		fmt.Fprintf(&sb, "   Name: %s\n", s.Name)
 		if len(s.Tags) > 0 {
-			sb.WriteString(fmt.Sprintf("   Tags: [%s]\n", strings.Join(s.Tags, ", ")))
+			fmt.Fprintf(&sb, "   Tags: [%s]\n", strings.Join(s.Tags, ", "))
 		}
 		if s.Project != "" {
-			sb.WriteString(fmt.Sprintf("   Project: %s\n", s.Project))
+			fmt.Fprintf(&sb, "   Project: %s\n", s.Project)
 		}
 		sb.WriteString("\n")
 	}

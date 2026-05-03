@@ -55,7 +55,7 @@ func runCleanupWorktrees(cmd *cobra.Command, args []string) error {
 
 	doltConfig, err := dolt.DefaultConfig()
 	if err != nil {
-		return fmt.Errorf("Dolt not configured: %w", err)
+		return fmt.Errorf("dolt not configured: %w", err)
 	}
 
 	adapter, err := dolt.New(doltConfig)

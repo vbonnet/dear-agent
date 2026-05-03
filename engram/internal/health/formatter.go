@@ -87,7 +87,7 @@ func (f *Formatter) renderSummary(output *strings.Builder) {
 func (f *Formatter) renderFooter(output *strings.Builder) {
 	summary := f.GetSummary()
 	status := f.getHealthStatus()
-	output.WriteString(fmt.Sprintf("Health Status: %s\n", status))
+	fmt.Fprintf(output, "Health Status: %s\n", status)
 
 	if summary.Warnings > 0 || summary.Failed > 0 {
 		output.WriteString("Run 'engram doctor --auto-fix' to apply safe fixes\n")
@@ -102,12 +102,12 @@ func (f *Formatter) FormatQuiet() string {
 	}
 
 	var output strings.Builder
-	output.WriteString(fmt.Sprintf("⚠️  Engram Health Issues (%d):\n", len(issues)))
+	fmt.Fprintf(&output, "⚠️  Engram Health Issues (%d):\n", len(issues))
 
 	for _, issue := range issues {
-		output.WriteString(fmt.Sprintf("  - %s", issue.Message))
+		fmt.Fprintf(&output, "  - %s", issue.Message)
 		if issue.Fix != "" {
-			output.WriteString(fmt.Sprintf(" (fix: %s)", issue.Fix))
+			fmt.Fprintf(&output, " (fix: %s)", issue.Fix)
 		}
 		output.WriteString("\n")
 	}

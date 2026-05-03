@@ -1,6 +1,7 @@
 package lock
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -59,7 +60,8 @@ func TestFileLock_TryLock_AlreadyLocked(t *testing.T) {
 	}
 
 	// Verify error is LockError with recovery guidance
-	lockErr, ok := err.(*LockError)
+	lockErr := &LockError{}
+	ok := errors.As(err, &lockErr)
 	if !ok {
 		t.Errorf("Expected LockError, got %T", err)
 	}

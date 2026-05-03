@@ -1,3 +1,4 @@
+// Package cmd provides cmd-related functionality.
 package cmd
 
 import (

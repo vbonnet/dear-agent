@@ -85,9 +85,7 @@ func TestKillTmuxServer_KillsAllSessions(t *testing.T) {
 	defer os.Remove(isolatedSocket)
 
 	// Override socket for this test
-	originalSocket := os.Getenv("AGM_TMUX_SOCKET")
-	os.Setenv("AGM_TMUX_SOCKET", isolatedSocket)
-	defer os.Setenv("AGM_TMUX_SOCKET", originalSocket)
+	t.Setenv("AGM_TMUX_SOCKET", isolatedSocket)
 
 	// Create multiple sessions on the isolated server
 	for i := 0; i < 3; i++ {

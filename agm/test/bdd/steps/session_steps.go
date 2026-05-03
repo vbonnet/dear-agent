@@ -193,7 +193,7 @@ func executeRealAGMCommand(ctx context.Context, args *CommandArgs) (context.Cont
 
 	env.LastError = err
 	if err != nil {
-		env.LastError = fmt.Errorf("agm command failed: %v\nOutput: %s", err, output)
+		env.LastError = fmt.Errorf("agm command failed: %w\nOutput: %s", err, output)
 		return ctx, nil // Don't fail here, let assertion step check
 	}
 

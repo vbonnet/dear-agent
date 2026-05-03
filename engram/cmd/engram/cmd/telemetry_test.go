@@ -13,9 +13,7 @@ import (
 func TestSetTelemetryEnabled_Enable(t *testing.T) {
 	// Create temporary home directory
 	tmpHome := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Enable telemetry
 	if err := setTelemetryEnabled(true); err != nil {
@@ -48,9 +46,7 @@ func TestSetTelemetryEnabled_Enable(t *testing.T) {
 func TestSetTelemetryEnabled_Disable(t *testing.T) {
 	// Create temporary home directory
 	tmpHome := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Disable telemetry
 	if err := setTelemetryEnabled(false); err != nil {
@@ -83,9 +79,7 @@ func TestSetTelemetryEnabled_Disable(t *testing.T) {
 func TestSetTelemetryEnabled_UpdateExisting(t *testing.T) {
 	// Create temporary home directory
 	tmpHome := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Create .engram directory
 	engramDir := filepath.Join(tmpHome, ".engram")
@@ -156,9 +150,7 @@ func TestSetTelemetryEnabled_UpdateExisting(t *testing.T) {
 func TestSetTelemetryEnabled_Toggle(t *testing.T) {
 	// Create temporary home directory
 	tmpHome := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Enable
 	if err := setTelemetryEnabled(true); err != nil {
@@ -204,9 +196,7 @@ func TestSetTelemetryEnabled_Toggle(t *testing.T) {
 func TestSetTelemetryEnabled_CreatesDirectory(t *testing.T) {
 	// Create temporary home directory (but NOT .engram subdirectory)
 	tmpHome := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Verify .engram doesn't exist yet
 	engramDir := filepath.Join(tmpHome, ".engram")
@@ -235,9 +225,7 @@ func TestSetTelemetryEnabled_CreatesDirectory(t *testing.T) {
 func TestSetTelemetryEnabled_InvalidYAML(t *testing.T) {
 	// Create temporary home directory
 	tmpHome := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Create .engram directory
 	engramDir := filepath.Join(tmpHome, ".engram")
@@ -272,9 +260,7 @@ func TestSetTelemetryEnabled_PermissionDenied(t *testing.T) {
 
 	// Create temporary home directory
 	tmpHome := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Create .engram directory with no write permissions
 	engramDir := filepath.Join(tmpHome, ".engram")
@@ -300,9 +286,7 @@ func TestSetTelemetryEnabled_FilePermissions(t *testing.T) {
 
 	// Create temporary home directory
 	tmpHome := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Enable telemetry
 	if err := setTelemetryEnabled(true); err != nil {
@@ -328,9 +312,7 @@ func TestSetTelemetryEnabled_FilePermissions(t *testing.T) {
 func TestSetTelemetryEnabled_YAMLFormatting(t *testing.T) {
 	// Create temporary home directory
 	tmpHome := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", originalHome)
+	t.Setenv("HOME", tmpHome)
 
 	// Create .engram directory
 	engramDir := filepath.Join(tmpHome, ".engram")

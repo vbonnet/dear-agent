@@ -1,3 +1,4 @@
+// Package migration provides migration-related functionality.
 package migration
 
 import (

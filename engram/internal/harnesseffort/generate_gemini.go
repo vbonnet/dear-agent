@@ -26,7 +26,7 @@ func GenerateGemini(cfg HarnessEffortConfig) string {
 
 	for _, tierName := range geminiTierOrder {
 		model := geminiTierModelFromCfg(cfg, tierName)
-		sb.WriteString(fmt.Sprintf("alias gemini-%s='gemini -m %s'\n", tierName, model))
+		fmt.Fprintf(&sb, "alias gemini-%s='gemini -m %s'\n", tierName, model)
 	}
 
 	return sb.String()

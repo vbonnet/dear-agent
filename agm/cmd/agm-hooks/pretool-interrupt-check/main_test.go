@@ -11,6 +11,7 @@ import (
 func TestRunNoSession(t *testing.T) {
 	t.Setenv("CLAUDE_SESSION_NAME", "")
 	os.Unsetenv("CLAUDE_SESSION_NAME")
+	t.Setenv("AGM_SESSION_NAME", "") // restored on test cleanup
 	os.Unsetenv("AGM_SESSION_NAME")
 
 	code := run()

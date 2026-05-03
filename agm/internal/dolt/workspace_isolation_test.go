@@ -23,8 +23,8 @@ func TestWorkspaceIsolation(t *testing.T) {
 	// OSS workspace: port 3307, Acme Corp workspace: port 3308
 
 	// OSS Workspace Adapter
-	os.Setenv("WORKSPACE", "testoss")
-	os.Setenv("DOLT_PORT", "3307")
+	t.Setenv("WORKSPACE", "testoss")
+	t.Setenv("DOLT_PORT", "3307")
 	os.Unsetenv("DOLT_DATABASE") // Let it default to workspace name
 
 	ossConfig, err := DefaultConfig()
@@ -45,8 +45,8 @@ func TestWorkspaceIsolation(t *testing.T) {
 	// Acme Corp Workspace Adapter
 	// Note: For testing, we use the same Dolt server (3307) but different database name
 	// In production, workspaces would use separate Dolt instances
-	os.Setenv("WORKSPACE", "testacme")
-	os.Setenv("DOLT_PORT", "3307") // Same server, different workspace database
+	t.Setenv("WORKSPACE", "testacme")
+	t.Setenv("DOLT_PORT", "3307") // Same server, different workspace database
 	os.Unsetenv("DOLT_DATABASE")   // Let it default to workspace name
 
 	acmeConfig, err := DefaultConfig()
@@ -473,8 +473,8 @@ func BenchmarkWorkspaceQueries(b *testing.B) {
 
 	// Setup
 	lookupEnv = os.LookupEnv
-	os.Setenv("WORKSPACE", "benchmark")
-	os.Setenv("DOLT_PORT", "3307")
+	b.Setenv("WORKSPACE", "benchmark")
+	b.Setenv("DOLT_PORT", "3307")
 
 	config, err := DefaultConfig()
 	if err != nil {
@@ -572,8 +572,8 @@ func TestWorkspaceFilterEdgeCases(t *testing.T) {
 	}
 
 	lookupEnv = os.LookupEnv
-	os.Setenv("WORKSPACE", "testedgecase")
-	os.Setenv("DOLT_PORT", "3307")
+	t.Setenv("WORKSPACE", "testedgecase")
+	t.Setenv("DOLT_PORT", "3307")
 	os.Unsetenv("DOLT_DATABASE") // Let it default to workspace name
 
 	config, err := DefaultConfig()

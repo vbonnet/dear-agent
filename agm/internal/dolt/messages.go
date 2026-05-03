@@ -124,7 +124,7 @@ func (a *Adapter) CreateMessages(messages []*Message) error {
 
 		// Marshal metadata to JSON
 		var metadataJSON []byte
-		if msg.Metadata != nil && len(msg.Metadata) > 0 {
+		if len(msg.Metadata) > 0 {
 			metadataJSON, err = json.Marshal(msg.Metadata)
 			if err != nil {
 				return fmt.Errorf("failed to marshal metadata: %w", err)

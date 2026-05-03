@@ -16,11 +16,7 @@ func TestMonitoringIntegration(t *testing.T) {
 	}
 
 	// Create temporary work directory
-	workDir, err := os.MkdirTemp("", "test-agent-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(workDir)
+	workDir := t.TempDir()
 
 	// Initialize git repo
 	cmd := exec.Command("git", "init", workDir)
@@ -107,11 +103,7 @@ func TestMonitoringIntegration(t *testing.T) {
 
 func TestValidationScoring(t *testing.T) {
 	// Create temp directory with fake implementation
-	workDir, err := os.MkdirTemp("", "test-fake-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(workDir)
+	workDir := t.TempDir()
 
 	// Create stub file
 	stubFile := filepath.Join(workDir, "stub.go")

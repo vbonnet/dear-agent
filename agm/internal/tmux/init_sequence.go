@@ -181,7 +181,7 @@ func (seq *InitSequence) sendRename() error {
 		debug.Log("sendRename: Calling WaitForClaudePrompt with 30s timeout")
 		if err := WaitForClaudePrompt(seq.SessionName, 30*time.Second); err != nil {
 			debug.Log("sendRename: WaitForClaudePrompt FAILED: %v", err)
-			return fmt.Errorf("Claude not ready for rename: %w", err)
+			return fmt.Errorf("claude not ready for rename: %w", err)
 		}
 		debug.Log("sendRename: WaitForClaudePrompt succeeded - prompt is visible")
 	}
@@ -206,7 +206,7 @@ func (seq *InitSequence) sendRename() error {
 			debug.Log("sendRename: Waiting for Claude prompt after trust confirmation")
 			if err := WaitForClaudePrompt(seq.SessionName, 30*time.Second); err != nil {
 				debug.Log("sendRename: WaitForClaudePrompt after trust failed: %v", err)
-				return fmt.Errorf("Claude not ready after trust confirmation: %w", err)
+				return fmt.Errorf("claude not ready after trust confirmation: %w", err)
 			}
 		}
 	}
@@ -238,7 +238,7 @@ func (seq *InitSequence) sendAssociation() error {
 		debug.Log("sendAssociation: Prompt pre-verified by caller, skipping WaitForClaudePrompt")
 	} else {
 		if err := WaitForClaudePrompt(seq.SessionName, 30*time.Second); err != nil {
-			return fmt.Errorf("Claude not ready for association: %w", err)
+			return fmt.Errorf("claude not ready for association: %w", err)
 		}
 	}
 

@@ -50,7 +50,7 @@ func (f *TOONFormatter) Format(v interface{}) ([]byte, error) {
 
 	// Get element type (must be struct)
 	elemType := val.Type().Elem()
-	if elemType.Kind() == reflect.Ptr {
+	if elemType.Kind() == reflect.Pointer {
 		elemType = elemType.Elem()
 	}
 
@@ -69,18 +69,17 @@ func (f *TOONFormatter) Format(v interface{}) ([]byte, error) {
 
 	// Header: arrayName[count]{field1,field2,...}
 	arrayName := f.getArrayName(elemType)
-	buf.WriteString(fmt.Sprintf("%s[%d]{%s}\n",
+	fmt.Fprintf(&buf, "%s[%d]{%s}\n",
 		arrayName,
 		val.Len(),
-		f.joinFields(fields),
-	))
+		f.joinFields(fields))
 
 	// Data rows (CSV format)
 	csvWriter := csv.NewWriter(&buf)
 
 	for i := 0; i < val.Len(); i++ {
 		elem := val.Index(i)
-		if elem.Kind() == reflect.Ptr {
+		if elem.Kind() == reflect.Pointer {
 			if elem.IsNil() {
 				continue // Skip nil pointers
 			}
@@ -200,7 +199,7 @@ func (f *TOONFormatter) formatValue(v reflect.Value) string {
 		return strconv.FormatFloat(v.Float(), 'f', -1, 64)
 	case reflect.String:
 		return v.String() // CSV writer handles quoting
-	case reflect.Ptr:
+	case reflect.Pointer:
 		if v.IsNil() {
 			return ""
 		}

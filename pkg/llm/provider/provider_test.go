@@ -944,22 +944,11 @@ func TestFactory_NewProvider_GeminiWithGoogleAPIKey(t *testing.T) {
 
 // --- OpenRouter Generate with httptest mock server ---
 
-func newTestOpenRouterProvider(t *testing.T, handler http.HandlerFunc) *OpenRouterProvider {
-	t.Helper()
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-
-	return &OpenRouterProvider{
-		apiKey: "sk-or-test-key-123",
-		client: &http.Client{Timeout: 5 * time.Second},
-		model:  "anthropic/claude-3-5-sonnet",
-	}
-}
 
 func TestOpenRouterProvider_Generate_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 		if r.Header.Get("Authorization") != "Bearer sk-or-test-key-123" {

@@ -2,6 +2,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -204,7 +205,8 @@ func RemoveMergedWorktrees(repoPath, baseBranch string) ([]CleanupResult, error)
 		if err := checkCmd.Run(); err != nil {
 			// Exit code 1 means not an ancestor (not merged) - this is expected
 			// Any other error is a real error
-			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			exitErr := &exec.ExitError{}
+			if errors.As(err, &exitErr) {
 				// Not merged, skip removal
 				results = append(results, result)
 				continue

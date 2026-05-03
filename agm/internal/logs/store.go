@@ -1,3 +1,4 @@
+// Package logs provides logs-related functionality.
 package logs
 
 import "time"

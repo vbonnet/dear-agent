@@ -20,9 +20,7 @@ func TestQuestionFilename(t *testing.T) {
 func TestWriteQuestion(t *testing.T) {
 	// Override home dir via questions dir
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
 	t.Setenv("HOME", tmpDir)
-	defer func() { _ = os.Setenv("HOME", origHome) }()
 
 	now := time.Date(2026, 4, 9, 14, 30, 0, 0, time.UTC)
 	q := &Question{

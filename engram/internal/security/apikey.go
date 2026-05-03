@@ -86,7 +86,7 @@ func (m *APIKeyManager) SanitizeForLogs(s string) string {
 
 	// Redact environment variables that look like keys
 	if strings.Contains(s, "ANTHROPIC_API_KEY") {
-		return strings.Replace(s, os.Getenv("ANTHROPIC_API_KEY"), "***REDACTED***", -1)
+		return strings.ReplaceAll(s, os.Getenv("ANTHROPIC_API_KEY"), "***REDACTED***")
 	}
 
 	return s

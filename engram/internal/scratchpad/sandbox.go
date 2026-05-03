@@ -1,7 +1,9 @@
+// Package scratchpad provides scratchpad-related functionality.
 package scratchpad
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -215,7 +217,8 @@ func (s *Sandbox) executeInContainer(ctx context.Context, req *ExecuteRequest, c
 	stderr = stderrBuf.String()
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			// Timeout or other error

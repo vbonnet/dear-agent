@@ -351,7 +351,7 @@ func TestExpandPaths_TildeExpansion(t *testing.T) {
 
 // TestExpandPaths_EnvVarExpansion tests expanding environment variables.
 func TestExpandPaths_EnvVarExpansion(t *testing.T) {
-	os.Setenv("TEST_WORKSPACE_ROOT", "/custom/path")
+	t.Setenv("TEST_WORKSPACE_ROOT", "/custom/path")
 	defer os.Unsetenv("TEST_WORKSPACE_ROOT")
 
 	config := &Config{

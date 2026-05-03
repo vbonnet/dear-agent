@@ -67,10 +67,10 @@ func (a *WorkspaceAdapter) Connect(ctx context.Context) error {
 			}
 			if err := db.PingContext(ctx); err != nil {
 				db.Close()
-				return fmt.Errorf("%w: %v", ErrDoltServerNotRunning, err)
+				return fmt.Errorf("%w: %w", ErrDoltServerNotRunning, err)
 			}
 		} else {
-			return fmt.Errorf("%w: %v", ErrDoltServerNotRunning, err)
+			return fmt.Errorf("%w: %w", ErrDoltServerNotRunning, err)
 		}
 	}
 
@@ -206,7 +206,7 @@ func (a *WorkspaceAdapter) ExecuteInTransaction(ctx context.Context, fn func(*sq
 
 	if err := fn(tx); err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {
-			return fmt.Errorf("transaction error: %w, rollback error: %v", err, rbErr)
+			return fmt.Errorf("transaction error: %w, rollback error: %w", err, rbErr)
 		}
 		return err
 	}

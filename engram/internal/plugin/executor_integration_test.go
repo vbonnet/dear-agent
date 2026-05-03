@@ -11,11 +11,7 @@ import (
 // TestPluginExecution verifies full plugin loading and execution pipeline
 func TestPluginExecution(t *testing.T) {
 	// Create temporary directory for test plugin
-	tmpDir, err := os.MkdirTemp("", "plugin-integration-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create test plugin directory
 	createTestPluginDir(t, tmpDir)
@@ -68,11 +64,7 @@ func TestPluginExecution(t *testing.T) {
 
 // TestPluginLoading_MultiplePlugins verifies loading multiple plugins from search path
 func TestPluginLoading_MultiplePlugins(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "plugin-multi-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create 3 test plugins
 	plugins := []struct {
@@ -138,11 +130,7 @@ pattern: ` + p.pattern + `
 
 // TestPluginLoading_InvalidManifest verifies handling of invalid plugin manifests
 func TestPluginLoading_InvalidManifest(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "plugin-invalid-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create plugin with invalid YAML
 	pluginDir := filepath.Join(tmpDir, "invalid-plugin")
@@ -173,11 +161,7 @@ version: 1.0.0
 
 // TestPluginLoading_MissingManifest verifies handling of directories without plugin.yaml
 func TestPluginLoading_MissingManifest(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "plugin-missing-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create directory without plugin.yaml
 	pluginDir := filepath.Join(tmpDir, "no-manifest")
@@ -213,11 +197,7 @@ func TestPluginLoading_NonexistentPath(t *testing.T) {
 
 // TestPluginExecution_InvalidPermissions verifies permission validation
 func TestPluginExecution_InvalidPermissions(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "plugin-perms-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	pluginDir := filepath.Join(tmpDir, "test-plugin")
 	if err := os.MkdirAll(pluginDir, 0755); err != nil {

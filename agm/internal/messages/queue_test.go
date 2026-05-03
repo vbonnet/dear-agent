@@ -15,9 +15,7 @@ import (
 func TestNewMessageQueue(t *testing.T) {
 	// Create temp config dir
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", tmpDir)
 
 	queue, err := NewMessageQueue()
 	require.NoError(t, err)
@@ -347,9 +345,9 @@ func TestGetStats(t *testing.T) {
 func setupTestQueue(t *testing.T) *MessageQueue {
 	tmpDir := t.TempDir()
 	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 	t.Cleanup(func() {
-		os.Setenv("HOME", origHome)
+		t.Setenv("HOME", origHome)
 	})
 
 	queue, err := NewMessageQueue()

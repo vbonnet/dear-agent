@@ -1,3 +1,4 @@
+// Package presets provides presets-related functionality.
 package presets
 
 import (

@@ -97,11 +97,7 @@ func TestValidateGitCommitStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create temp directory as git repo
-			tmpDir, err := os.MkdirTemp("", "git-claim-test-*")
-			if err != nil {
-				t.Fatalf("failed to create temp dir: %v", err)
-			}
-			defer os.RemoveAll(tmpDir)
+			tmpDir := t.TempDir()
 
 			// Initialize git repo
 			if err := exec.Command("git", "init", tmpDir).Run(); err != nil {
@@ -136,7 +132,7 @@ func TestValidateGitCommitStatus(t *testing.T) {
 			}
 
 			// Run validation
-			err = validateGitCommitStatus(tmpDir, tt.phaseName)
+			err := validateGitCommitStatus(tmpDir, tt.phaseName)
 
 			// Check result
 			if tt.wantErr {
@@ -156,11 +152,7 @@ func TestValidateGitCommitStatus(t *testing.T) {
 
 func TestValidateGitCommitStatus_NonGitRepo(t *testing.T) {
 	// Create temp directory WITHOUT git init
-	tmpDir, err := os.MkdirTemp("", "non-git-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Create untracked file
 	filePath := filepath.Join(tmpDir, "BUILD-implementation.md")
@@ -169,7 +161,7 @@ func TestValidateGitCommitStatus_NonGitRepo(t *testing.T) {
 	}
 
 	// Should not error - not a git repo
-	err = validateGitCommitStatus(tmpDir, "BUILD")
+	err := validateGitCommitStatus(tmpDir, "BUILD")
 	if err != nil {
 		t.Errorf("expected no error for non-git repo, got: %v", err)
 	}
@@ -177,11 +169,7 @@ func TestValidateGitCommitStatus_NonGitRepo(t *testing.T) {
 
 func TestValidateGitCommitStatus_PartiallyCommitted(t *testing.T) {
 	// Test the exact scenario from Instance 2: some files committed, some not
-	tmpDir, err := os.MkdirTemp("", "partial-commit-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Initialize git repo
 	exec.Command("git", "init", tmpDir).Run()
@@ -211,7 +199,7 @@ func TestValidateGitCommitStatus_PartiallyCommitted(t *testing.T) {
 	// but left ~76 phase deliverables uncommitted
 
 	// Validation should FAIL for RETRO
-	err = validateGitCommitStatus(tmpDir, "RETRO")
+	err := validateGitCommitStatus(tmpDir, "RETRO")
 	if err == nil {
 		t.Fatalf("expected error for partially committed files, got nil")
 	}
@@ -221,11 +209,7 @@ func TestValidateGitCommitStatus_PartiallyCommitted(t *testing.T) {
 }
 
 func TestGetUntrackedFilesInProjectDir(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "untracked-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Initialize git repo
 	exec.Command("git", "init", tmpDir).Run()

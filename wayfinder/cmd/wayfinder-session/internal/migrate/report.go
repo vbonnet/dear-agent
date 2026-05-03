@@ -288,24 +288,24 @@ func (r *MigrationReport) String() string {
 	// Project info
 	sb.WriteString("PROJECT INFORMATION\n")
 	sb.WriteString("═══════════════════\n")
-	sb.WriteString(fmt.Sprintf("  Name:         %s\n", r.ProjectName))
-	sb.WriteString(fmt.Sprintf("  Path:         %s\n", r.ProjectPath))
-	sb.WriteString(fmt.Sprintf("  Migrated:     %s\n", r.MigratedAt.Format("2006-01-02 15:04:05 MST")))
+	fmt.Fprintf(&sb, "  Name:         %s\n", r.ProjectName)
+	fmt.Fprintf(&sb, "  Path:         %s\n", r.ProjectPath)
+	fmt.Fprintf(&sb, "  Migrated:     %s\n", r.MigratedAt.Format("2006-01-02 15:04:05 MST"))
 	sb.WriteString("\n")
 
 	// Schema versions
 	sb.WriteString("SCHEMA VERSIONS\n")
 	sb.WriteString("═══════════════\n")
-	sb.WriteString(fmt.Sprintf("  Source:       %s\n", r.SourceVersion))
-	sb.WriteString(fmt.Sprintf("  Target:       %s\n", r.TargetVersion))
+	fmt.Fprintf(&sb, "  Source:       %s\n", r.SourceVersion)
+	fmt.Fprintf(&sb, "  Target:       %s\n", r.TargetVersion)
 	sb.WriteString("\n")
 
 	// Phase summary
 	sb.WriteString("PHASE SUMMARY\n")
 	sb.WriteString("═════════════\n")
-	sb.WriteString(fmt.Sprintf("  V1 Phases:    %d\n", r.TotalPhasesV1))
-	sb.WriteString(fmt.Sprintf("  V2 Phases:    %d\n", r.TotalPhasesV2))
-	sb.WriteString(fmt.Sprintf("  Merged:       %d\n", len(r.MergedPhases)))
+	fmt.Fprintf(&sb, "  V1 Phases:    %d\n", r.TotalPhasesV1)
+	fmt.Fprintf(&sb, "  V2 Phases:    %d\n", r.TotalPhasesV2)
+	fmt.Fprintf(&sb, "  Merged:       %d\n", len(r.MergedPhases))
 	sb.WriteString("\n")
 
 	// Merged phases
@@ -313,9 +313,9 @@ func (r *MigrationReport) String() string {
 		sb.WriteString("PHASE MERGES\n")
 		sb.WriteString("════════════\n")
 		for _, merge := range r.MergedPhases {
-			sb.WriteString(fmt.Sprintf("  %s → %s\n",
-				strings.Join(merge.SourcePhases, " + "), merge.TargetPhase))
-			sb.WriteString(fmt.Sprintf("    Reason: %s\n", merge.Reason))
+			fmt.Fprintf(&sb, "  %s → %s\n",
+				strings.Join(merge.SourcePhases, " + "), merge.TargetPhase)
+			fmt.Fprintf(&sb, "    Reason: %s\n", merge.Reason)
 		}
 		sb.WriteString("\n")
 	}
@@ -323,24 +323,24 @@ func (r *MigrationReport) String() string {
 	// Data preservation
 	sb.WriteString("DATA PRESERVATION\n")
 	sb.WriteString("═════════════════\n")
-	sb.WriteString(fmt.Sprintf("  Timestamps:   %d preserved\n", r.PreservedData.TimestampsPreserved))
-	sb.WriteString(fmt.Sprintf("  Outcomes:     %d preserved\n", r.PreservedData.OutcomesPreserved))
-	sb.WriteString(fmt.Sprintf("  Statuses:     %d preserved\n", r.PreservedData.StatusesPreserved))
-	sb.WriteString(fmt.Sprintf("  Deliverables: %d items\n", r.PreservedData.DeliverableCount))
+	fmt.Fprintf(&sb, "  Timestamps:   %d preserved\n", r.PreservedData.TimestampsPreserved)
+	fmt.Fprintf(&sb, "  Outcomes:     %d preserved\n", r.PreservedData.OutcomesPreserved)
+	fmt.Fprintf(&sb, "  Statuses:     %d preserved\n", r.PreservedData.StatusesPreserved)
+	fmt.Fprintf(&sb, "  Deliverables: %d items\n", r.PreservedData.DeliverableCount)
 	sb.WriteString("\n")
 
 	// Validation results
 	sb.WriteString("VALIDATION\n")
 	sb.WriteString("══════════\n")
-	sb.WriteString(fmt.Sprintf("  Schema Valid:     %s\n", checkmark(r.ValidationResults.SchemaValid)))
-	sb.WriteString(fmt.Sprintf("  Required Fields:  %s\n", checkmark(r.ValidationResults.RequiredFieldsSet)))
-	sb.WriteString(fmt.Sprintf("  Chronology:       %s\n", checkmark(r.ValidationResults.ChronologyValid)))
-	sb.WriteString(fmt.Sprintf("  Data Integrity:   %s\n", checkmark(r.ValidationResults.DataIntact)))
+	fmt.Fprintf(&sb, "  Schema Valid:     %s\n", checkmark(r.ValidationResults.SchemaValid))
+	fmt.Fprintf(&sb, "  Required Fields:  %s\n", checkmark(r.ValidationResults.RequiredFieldsSet))
+	fmt.Fprintf(&sb, "  Chronology:       %s\n", checkmark(r.ValidationResults.ChronologyValid))
+	fmt.Fprintf(&sb, "  Data Integrity:   %s\n", checkmark(r.ValidationResults.DataIntact))
 
 	if len(r.ValidationResults.Errors) > 0 {
 		sb.WriteString("\n  Errors:\n")
 		for _, err := range r.ValidationResults.Errors {
-			sb.WriteString(fmt.Sprintf("    ✗ %s\n", err))
+			fmt.Fprintf(&sb, "    ✗ %s\n", err)
 		}
 	}
 	sb.WriteString("\n")
@@ -350,7 +350,7 @@ func (r *MigrationReport) String() string {
 		sb.WriteString("WARNINGS\n")
 		sb.WriteString("════════\n")
 		for _, warning := range r.Warnings {
-			sb.WriteString(fmt.Sprintf("  ⚠  %s\n", warning))
+			fmt.Fprintf(&sb, "  ⚠  %s\n", warning)
 		}
 		sb.WriteString("\n")
 	}

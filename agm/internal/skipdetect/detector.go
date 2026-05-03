@@ -1,3 +1,4 @@
+// Package skipdetect provides skipdetect-related functionality.
 package skipdetect
 
 import (

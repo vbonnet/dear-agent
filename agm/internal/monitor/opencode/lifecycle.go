@@ -177,7 +177,7 @@ func (a *Adapter) healthProbe(parentCtx context.Context) error {
 	healthURL := a.config.ServerURL + a.config.HealthProbeURL
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "GET", healthURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create health probe request: %w", err)
 	}

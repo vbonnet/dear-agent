@@ -82,7 +82,7 @@ func (t *GeminiActivityTracker) GetLastActivity(sessionID string) (time.Time, er
 		var msg agent.Message
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
 			// JSON parsing failed - corrupted history
-			return time.Time{}, fmt.Errorf("%w: line %d: %v", ErrHistoryCorrupted, lineNum, err)
+			return time.Time{}, fmt.Errorf("%w: line %d: %w", ErrHistoryCorrupted, lineNum, err)
 		}
 
 		// Track maximum timestamp

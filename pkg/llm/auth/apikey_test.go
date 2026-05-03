@@ -103,14 +103,14 @@ func TestGetAPIKey(t *testing.T) {
 			defer func() {
 				for key, val := range originalEnv {
 					if val != "" {
-						os.Setenv(key, val)
+						t.Setenv(key, val)
 					}
 				}
 			}()
 
 			// Set test environment variables
 			for key, val := range tt.envVars {
-				os.Setenv(key, val)
+				t.Setenv(key, val)
 			}
 
 			// Execute test
@@ -357,12 +357,12 @@ func TestGetAPIKeyWithValidation(t *testing.T) {
 			originalVal := os.Getenv(tt.envVar)
 			defer func() {
 				if originalVal != "" {
-					os.Setenv(tt.envVar, originalVal)
+					t.Setenv(tt.envVar, originalVal)
 				} else {
 					os.Unsetenv(tt.envVar)
 				}
 			}()
-			os.Setenv(tt.envVar, tt.envValue)
+			t.Setenv(tt.envVar, tt.envValue)
 
 			// Test GetAPIKey
 			key, err := GetAPIKey(tt.provider)

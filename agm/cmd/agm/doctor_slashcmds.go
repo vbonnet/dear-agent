@@ -160,7 +160,7 @@ func checkSlashCmdFile(path, source string) slashCmdCheckResult {
 	if desc == "" {
 		// No frontmatter at all is acceptable (plain markdown command),
 		// but if frontmatter exists and description is missing, warn.
-		if fm != nil && len(fm) > 0 {
+		if len(fm) > 0 {
 			result.Error = "frontmatter present but missing required field: description"
 			return result
 		}

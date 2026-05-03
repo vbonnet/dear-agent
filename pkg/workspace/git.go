@@ -79,18 +79,18 @@ func (g *GitConfigManager) GenerateGitConfigFile(workspaceName string, config Gi
 	// Generate config content
 	var content strings.Builder
 
-	content.WriteString(fmt.Sprintf("# Git configuration for workspace: %s\n\n", workspaceName))
+	fmt.Fprintf(&content, "# Git configuration for workspace: %s\n\n", workspaceName)
 
 	if config.UserName != "" || config.UserEmail != "" {
 		content.WriteString("[user]\n")
 		if config.UserName != "" {
-			content.WriteString(fmt.Sprintf("    name = %s\n", config.UserName))
+			fmt.Fprintf(&content, "    name = %s\n", config.UserName)
 		}
 		if config.UserEmail != "" {
-			content.WriteString(fmt.Sprintf("    email = %s\n", config.UserEmail))
+			fmt.Fprintf(&content, "    email = %s\n", config.UserEmail)
 		}
 		if config.SigningKey != "" {
-			content.WriteString(fmt.Sprintf("    signingkey = %s\n", config.SigningKey))
+			fmt.Fprintf(&content, "    signingkey = %s\n", config.SigningKey)
 		}
 		content.WriteString("\n")
 	}
@@ -102,7 +102,7 @@ func (g *GitConfigManager) GenerateGitConfigFile(workspaceName string, config Gi
 
 	if config.SSHCommand != "" {
 		content.WriteString("[core]\n")
-		content.WriteString(fmt.Sprintf("    sshCommand = %s\n\n", config.SSHCommand))
+		fmt.Fprintf(&content, "    sshCommand = %s\n\n", config.SSHCommand)
 	}
 
 	// Write file
@@ -148,7 +148,7 @@ func (g *GitConfigManager) AddGitIncludeIf(workspaceRoot, configPath string) err
 
 	newContent.WriteString("\n")
 	newContent.WriteString(includeIfLine + "\n")
-	newContent.WriteString(fmt.Sprintf("    path = %s\n", configPath))
+	fmt.Fprintf(&newContent, "    path = %s\n", configPath)
 
 	// Write updated config
 	if err := os.WriteFile(globalConfigPath, []byte(newContent.String()), 0644); err != nil {

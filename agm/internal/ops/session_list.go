@@ -1,16 +1,11 @@
 package ops
 
 import (
-	"fmt"
-	"os"
 	"sort"
-	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
-	"github.com/vbonnet/dear-agent/agm/internal/state"
-	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // ListSessionsRequest defines the input for listing sessions.
@@ -56,12 +51,12 @@ type SessionSummary struct {
 
 // ListSessionsResult is the output of ListSessions.
 type ListSessionsResult struct {
-	Operation           string           `json:"operation"`
-	Sessions            []SessionSummary `json:"sessions"`
-	Total               int              `json:"total"`
-	Limit               int              `json:"limit"`
-	Offset              int              `json:"offset"`
-	OrphanTmuxSessions  []string         `json:"orphan_tmux_sessions,omitempty"`
+	Operation          string           `json:"operation"`
+	Sessions           []SessionSummary `json:"sessions"`
+	Total              int              `json:"total"`
+	Limit              int              `json:"limit"`
+	Offset             int              `json:"offset"`
+	OrphanTmuxSessions []string         `json:"orphan_tmux_sessions,omitempty"`
 }
 
 // ListSessions returns sessions matching the given filters.
@@ -150,7 +145,7 @@ func toSessionSummary(m *manifest.Manifest, statuses map[string]string, attached
 
 	estCost := m.LastKnownCost
 	if estCost == 0 && m.CostTracking != nil {
-		inCost := float64(m.CostTracking.TokensIn) / 1_000_000 * 15.0  // Opus input
+		inCost := float64(m.CostTracking.TokensIn) / 1_000_000 * 15.0   // Opus input
 		outCost := float64(m.CostTracking.TokensOut) / 1_000_000 * 75.0 // Opus output
 		estCost = inCost + outCost
 	}
@@ -168,62 +163,6 @@ func toSessionSummary(m *manifest.Manifest, statuses map[string]string, attached
 		EstimatedCost: estCost,
 	}
 }
-
-// autoRecoverOverlay attempts to dismiss a Background Tasks UI overlay and
-// re-resolves state. This prevents session list from showing a stale
-// BACKGROUND_TASKS state when the overlay can be automatically dismissed.
-//
-// This is the Fix 4 component of the pipeline deadlock prevention: when
-// agm session list detects BACKGROUND_TASKS_VIEW state, it auto-recovers
-// by sending Left/Escape keys to dismiss the overlay.
-func autoRecoverOverlay(tmuxName string, m *manifest.Manifest, fallbackState string) string {
-	fmt.Fprintf(os.Stderr, "Auto-recovering overlay on '%s'...\n", tmuxName)
-
-	// Step 1: Verify overlay is actually visible via capture-pane before sending keys.
-	// Bug fix: previously sent Left key without verifying overlay state first.
-	canReceive := session.CheckSessionDelivery(tmuxName)
-	if canReceive != state.CanReceiveOverlay {
-		// No overlay detected — don't send dismiss keys blindly
-		return fallbackState
-	}
-
-	// Step 2: Send Left arrow key to dismiss overlay (verified visible)
-	if err := tmux.SendKeys(tmuxName, "Left"); err != nil {
-		return fallbackState
-	}
-
-	// Step 3: Wait for overlay to close
-	time.Sleep(200 * time.Millisecond)
-
-	// Step 4: Re-check state
-	canReceive = session.CheckSessionDelivery(tmuxName)
-	if canReceive == state.CanReceiveYes {
-		// Overlay dismissed — re-resolve state
-		newState := session.ResolveSessionState(tmuxName, m.State, m.Claude.UUID, m.StateUpdatedAt)
-		fmt.Fprintf(os.Stderr, "Overlay dismissed on '%s' (now: %s)\n", tmuxName, newState)
-		return newState
-	}
-
-	if canReceive == state.CanReceiveOverlay {
-		// Try Escape as fallback (overlay still visible — verified)
-		if err := tmux.SendKeys(tmuxName, "Escape"); err != nil {
-			return fallbackState
-		}
-		time.Sleep(200 * time.Millisecond)
-
-		canReceive = session.CheckSessionDelivery(tmuxName)
-		if canReceive == state.CanReceiveYes {
-			newState := session.ResolveSessionState(tmuxName, m.State, m.Claude.UUID, m.StateUpdatedAt)
-			fmt.Fprintf(os.Stderr, "Overlay dismissed on '%s' with Escape (now: %s)\n", tmuxName, newState)
-			return newState
-		}
-	}
-
-	// Could not dismiss — return original state
-	return fallbackState
-}
-
-
 
 // tmuxInfoProvider is the interface needed for attachment-aware status computation.
 type tmuxInfoProvider interface {

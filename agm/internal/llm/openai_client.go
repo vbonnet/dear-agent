@@ -152,13 +152,13 @@ func validateConfig(config OpenAIConfig) error {
 
 	case ProviderAzure:
 		if config.AzureEndpoint == "" {
-			return fmt.Errorf("Azure endpoint is required for Azure provider")
+			return fmt.Errorf("Azure endpoint is required for Azure provider") //nolint:staticcheck // proper noun
 		}
 		if config.AzureDeployment == "" {
-			return fmt.Errorf("Azure deployment name is required for Azure provider")
+			return fmt.Errorf("Azure deployment name is required for Azure provider") //nolint:staticcheck // proper noun
 		}
 		if config.AzureAPIVersion == "" {
-			return fmt.Errorf("Azure API version is required for Azure provider")
+			return fmt.Errorf("Azure API version is required for Azure provider") //nolint:staticcheck // proper noun
 		}
 	}
 

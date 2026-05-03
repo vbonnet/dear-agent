@@ -29,6 +29,7 @@ func main() {
 	session, err := adapter.GetSession(sessionID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get session: %v\n", err)
+		adapter.Close()
 		os.Exit(1)
 	}
 

@@ -42,7 +42,7 @@ func (e *CLIError) Error() string {
 
 	// Symbol and message
 	if e.Symbol != "" {
-		sb.WriteString(fmt.Sprintf("[%s] ", e.Symbol))
+		fmt.Fprintf(&sb, "[%s] ", e.Symbol)
 	}
 	sb.WriteString(e.Message)
 
@@ -50,7 +50,7 @@ func (e *CLIError) Error() string {
 	if len(e.Suggestions) > 0 {
 		sb.WriteString("\n\nSuggestions:")
 		for i, suggestion := range e.Suggestions {
-			sb.WriteString(fmt.Sprintf("\n  %d. %s", i+1, suggestion))
+			fmt.Fprintf(&sb, "\n  %d. %s", i+1, suggestion)
 		}
 	}
 
@@ -58,7 +58,7 @@ func (e *CLIError) Error() string {
 	if len(e.RelatedCommands) > 0 {
 		sb.WriteString("\n\nRelated commands:")
 		for _, cmd := range e.RelatedCommands {
-			sb.WriteString(fmt.Sprintf("\n  - %s", cmd))
+			fmt.Fprintf(&sb, "\n  - %s", cmd)
 		}
 	}
 

@@ -220,11 +220,7 @@ func TestParse_FileNotFound(t *testing.T) {
 // TestParse_ValidFile verifies parsing from a real file
 func TestParse_ValidFile(t *testing.T) {
 	// Create temporary file
-	tmpDir, err := os.MkdirTemp("", "engram-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	content := []byte(`---
 type: pattern

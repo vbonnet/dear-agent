@@ -181,7 +181,7 @@ func TestCalculator_CriticalZone(t *testing.T) {
 }
 
 func TestCalculator_EnvOverride(t *testing.T) {
-	os.Setenv("AGM_MAX_SESSIONS", "3")
+	t.Setenv("AGM_MAX_SESSIONS", "3")
 	defer os.Unsetenv("AGM_MAX_SESSIONS")
 
 	c := NewCalculator()

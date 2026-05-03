@@ -1,7 +1,6 @@
 package status
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,11 +10,7 @@ import (
 // TestIntegrationV2Workflow tests the complete V2 workflow
 func TestIntegrationV2Workflow(t *testing.T) {
 	// Create temporary directory
-	tmpDir, err := os.MkdirTemp("", "wayfinder-integration-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	// Step 1: Create a new V2 status
 	t.Log("Step 1: Creating new V2 status")

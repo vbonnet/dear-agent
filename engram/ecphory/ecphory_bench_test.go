@@ -15,10 +15,7 @@ import (
 func createTestEngrams(b *testing.B, count int) string {
 	b.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "bench-engrams-*")
-	if err != nil {
-		b.Fatal(err)
-	}
+	tmpDir := b.TempDir()
 
 	categories := []string{"patterns", "workflows", "references"}
 	tags := [][]string{

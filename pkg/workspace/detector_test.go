@@ -84,7 +84,7 @@ func TestDetect_Priority2_EnvVar(t *testing.T) {
 	}
 
 	// Set environment variable
-	os.Setenv("TEST_WORKSPACE", "env-ws")
+	t.Setenv("TEST_WORKSPACE", "env-ws")
 	defer os.Unsetenv("TEST_WORKSPACE")
 
 	ws, err := detector.DetectWithEnv(tmpDir, "", "TEST_WORKSPACE")
@@ -115,7 +115,7 @@ func TestDetect_Priority2_EnvVar_InvalidWorkspace(t *testing.T) {
 		t.Fatalf("failed to create detector: %v", err)
 	}
 
-	os.Setenv("TEST_WORKSPACE", "invalid-ws")
+	t.Setenv("TEST_WORKSPACE", "invalid-ws")
 	defer os.Unsetenv("TEST_WORKSPACE")
 
 	_, err = detector.DetectWithEnv(tmpDir, "", "TEST_WORKSPACE")
@@ -253,7 +253,7 @@ func TestDetect_Priority6_Error(t *testing.T) {
 		t.Fatal("expected error when no workspace found, got nil")
 	}
 
-	if err != ErrNoWorkspaceFound {
+	if !errors.Is(err, ErrNoWorkspaceFound) {
 		t.Errorf("expected ErrNoWorkspaceFound, got %v", err)
 	}
 }
@@ -569,7 +569,7 @@ func TestDetect_PriorityOrder(t *testing.T) {
 
 	// Set env var and run from auto-detect path with explicit flag
 	// Flag should win
-	os.Setenv("TEST_WS", "env-ws")
+	t.Setenv("TEST_WS", "env-ws")
 	defer os.Unsetenv("TEST_WS")
 
 	ws, err := detector.DetectWithEnv(autoWsRoot, "flag-ws", "TEST_WS")

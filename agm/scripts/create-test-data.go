@@ -184,6 +184,10 @@ func main() {
 	ossList, err := ossAdapter.ListSessions(&dolt.SessionFilter{})
 	if err != nil {
 		logger.Error("Failed to list OSS sessions", "error", err)
+		ossAdapter.Close()
+		if acmeAdapter != nil {
+			acmeAdapter.Close()
+		}
 		os.Exit(1)
 	}
 	fmt.Printf("OSS Workspace: %d sessions\n", len(ossList))

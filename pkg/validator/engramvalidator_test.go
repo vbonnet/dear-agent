@@ -123,7 +123,7 @@ func TestMissingRequiredFields(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpfile, err := os.CreateTemp("", "test-*.ai.md")
+			tmpfile, err := os.CreateTemp(t.TempDir(), "test-*.ai.md")
 			require.NoError(t, err)
 			defer os.Remove(tmpfile.Name())
 
@@ -200,7 +200,7 @@ Optimize the database query by adding index on user_id column (target: <50ms).
 
 Improve error handling by adding try-catch for FileNotFoundError and PermissionError.
 `
-		tmpfile, err := os.CreateTemp("", "test-*.ai.md")
+		tmpfile, err := os.CreateTemp(t.TempDir(), "test-*.ai.md")
 		require.NoError(t, err)
 		defer os.Remove(tmpfile.Name())
 
@@ -360,7 +360,7 @@ func TestValidatorClass(t *testing.T) {
 // TestEdgeCases tests edge cases and boundary conditions.
 func TestEdgeCases(t *testing.T) {
 	t.Run("empty file", func(t *testing.T) {
-		tmpfile, err := os.CreateTemp("", "test-*.ai.md")
+		tmpfile, err := os.CreateTemp(t.TempDir(), "test-*.ai.md")
 		require.NoError(t, err)
 		defer os.Remove(tmpfile.Name())
 
@@ -381,7 +381,7 @@ func TestEdgeCases(t *testing.T) {
 
 	t.Run("malformed yaml", func(t *testing.T) {
 		content := "---\ntype: reference\ntitle: [unclosed\n---\n# Test"
-		tmpfile, err := os.CreateTemp("", "test-*.ai.md")
+		tmpfile, err := os.CreateTemp(t.TempDir(), "test-*.ai.md")
 		require.NoError(t, err)
 		defer os.Remove(tmpfile.Name())
 
@@ -404,7 +404,7 @@ func TestEdgeCases(t *testing.T) {
 
 	t.Run("unicode content", func(t *testing.T) {
 		content := "---\ntype: reference\ntitle: Unicode Test 你好\ndescription: Test\n---\n# Test 🎉"
-		tmpfile, err := os.CreateTemp("", "test-*.ai.md")
+		tmpfile, err := os.CreateTemp(t.TempDir(), "test-*.ai.md")
 		require.NoError(t, err)
 		defer os.Remove(tmpfile.Name())
 
@@ -427,7 +427,7 @@ func TestAllValidTypes(t *testing.T) {
 	for _, validType := range types {
 		t.Run(validType, func(t *testing.T) {
 			content := "---\ntype: " + validType + "\ntitle: Test\ndescription: Test\n---\n# Test"
-			tmpfile, err := os.CreateTemp("", "test-*.ai.md")
+			tmpfile, err := os.CreateTemp(t.TempDir(), "test-*.ai.md")
 			require.NoError(t, err)
 			defer os.Remove(tmpfile.Name())
 
@@ -462,7 +462,7 @@ func TestContextReferencePatterns(t *testing.T) {
 	for _, pattern := range patterns {
 		t.Run(pattern, func(t *testing.T) {
 			content := "---\ntype: reference\ntitle: Test\ndescription: Test\n---\n# Test\n\n" + pattern
-			tmpfile, err := os.CreateTemp("", "test-*.ai.md")
+			tmpfile, err := os.CreateTemp(t.TempDir(), "test-*.ai.md")
 			require.NoError(t, err)
 			defer os.Remove(tmpfile.Name())
 
@@ -532,7 +532,7 @@ func TestVagueVerbsWithCriteria(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			content := "---\ntype: reference\ntitle: Test\ndescription: Test\n---\n# Test\n\n" + tt.content
-			tmpfile, err := os.CreateTemp("", "test-*.ai.md")
+			tmpfile, err := os.CreateTemp(t.TempDir(), "test-*.ai.md")
 			require.NoError(t, err)
 			defer os.Remove(tmpfile.Name())
 
@@ -590,7 +590,7 @@ func TestPrincipleWithExamples(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			content := "---\ntype: reference\ntitle: Test\ndescription: Test\n---\n\n" + tt.content
-			tmpfile, err := os.CreateTemp("", "test-*.ai.md")
+			tmpfile, err := os.CreateTemp(t.TempDir(), "test-*.ai.md")
 			require.NoError(t, err)
 			defer os.Remove(tmpfile.Name())
 
@@ -653,7 +653,7 @@ func TestTasksWithConstraints(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			content := "---\ntype: reference\ntitle: Test\ndescription: Test\n---\n\n" + tt.content
-			tmpfile, err := os.CreateTemp("", "test-*.ai.md")
+			tmpfile, err := os.CreateTemp(t.TempDir(), "test-*.ai.md")
 			require.NoError(t, err)
 			defer os.Remove(tmpfile.Name())
 

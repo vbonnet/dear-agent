@@ -1,3 +1,4 @@
+// Package procguard provides procguard-related functionality.
 package procguard
 
 import (

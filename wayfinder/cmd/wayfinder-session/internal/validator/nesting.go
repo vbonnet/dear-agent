@@ -165,10 +165,7 @@ func isProjectCompleteWithDepth(dir string, depth int) (bool, error) {
 	}
 
 	// Check 2: Are all phases completed?
-	allPhasesComplete := true
-	if len(st.Phases) == 0 {
-		allPhasesComplete = false
-	}
+	allPhasesComplete := !(len(st.Phases) == 0)
 
 	for _, phase := range st.Phases {
 		if phase.Status != status.PhaseStatusCompleted {
@@ -186,7 +183,7 @@ func isProjectCompleteWithDepth(dir string, depth int) (bool, error) {
 		err := checkChildrenCompleteWithDepth(dir, depth)
 		if err != nil {
 			// Propagate critical errors like max depth exceeded
-			if err == status.ErrMaxDepthExceeded {
+			if errors.Is(err, status.ErrMaxDepthExceeded) {
 				return false, err
 			}
 			return false, nil // Children incomplete = project incomplete

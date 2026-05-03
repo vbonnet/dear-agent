@@ -112,7 +112,11 @@ func main() {
 	}
 
 	if err := generate(w, active); err != nil {
+		// fmt.Fprintf goes to stderr; close any open file before exit so the deferred close does run
 		fmt.Fprintf(os.Stderr, "error: generating output: %v\n", err)
+		if f, ok := w.(*os.File); ok && f != os.Stdout {
+			f.Close()
+		}
 		os.Exit(1)
 	}
 }

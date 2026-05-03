@@ -40,7 +40,7 @@ func TestAdminAudit_MultiWorkspace(t *testing.T) {
 
 		// Note: Orphan detection reads real history.jsonl which may contain many entries
 		// We can't assert exact issue counts, but we can verify structure
-		if report.IssuesByWorkspace != nil && len(report.IssuesByWorkspace) > 0 {
+		if len(report.IssuesByWorkspace) > 0 {
 			// Just verify the structure is valid, don't assert exact counts
 			t.Logf("Found %d workspaces with issues", len(report.IssuesByWorkspace))
 		}

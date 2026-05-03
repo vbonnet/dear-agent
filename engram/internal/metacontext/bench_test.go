@@ -68,11 +68,7 @@ func BenchmarkCache_Miss(b *testing.B) {
 // Target: p95 <10.1ms (cached path)
 func BenchmarkService_Analyze_CacheHit(b *testing.B) {
 	// Create temp directory
-	tmpdir, err := os.MkdirTemp("", "bench-service-*")
-	if err != nil {
-		b.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := b.TempDir()
 
 	cache, _ := NewUnifiedCache()
 	scanners := []Scanner{
@@ -131,10 +127,7 @@ func BenchmarkService_Analyze_CacheMiss(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Create unique temp dir each iteration (different cache key)
-		tmpdir, err := os.MkdirTemp("", "bench-miss-*")
-		if err != nil {
-			b.Fatalf("Failed to create temp dir: %v", err)
-		}
+		tmpdir := b.TempDir()
 
 		req := &AnalyzeRequest{WorkingDir: tmpdir}
 		mc, err := service.Analyze(ctx, req)

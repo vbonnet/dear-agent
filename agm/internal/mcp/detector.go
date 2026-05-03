@@ -60,7 +60,7 @@ func (d *GlobalMCPDetector) DetectGlobalMCP(ctx context.Context, serverConfig Se
 	client := retryClient.StandardClient()
 
 	// Create request with context
-	req, err := http.NewRequestWithContext(ctx, "GET", healthURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to create health check request: %w", err)
 		return result
