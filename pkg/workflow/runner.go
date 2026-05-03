@@ -96,6 +96,16 @@ type Runner struct {
 	// DefaultWorkingDir.
 	WorkflowDir string
 
+	// Hooks is the DEAR (Define/Enforce/Audit/Resolve) extension surface.
+	// Nil disables the hooks; the runner makes no calls.
+	Hooks *Hooks
+
+	// HITLBackend is the human-in-the-loop adjudicator. Nil means HITL
+	// policies are recorded but never block — the runner skips the
+	// awaiting_hitl state entirely. Phase 2.2 wires the SQLite-backed
+	// default; the Discord and MCP backends ship in Phase 2.5/2.6.
+	HITLBackend HITLBackend
+
 	mu      sync.Mutex
 	signals map[string]chan struct{}
 }
@@ -123,6 +133,17 @@ func (r *Runner) audit() AuditSink {
 		return noopAuditSink{}
 	}
 	return r.Audit
+}
+
+// emitAudit writes one event to the audit sink AND the OnAudit hook (if any).
+// Hook failures are logged at warn level — they never abort the run, matching
+// the substrate principle that observation must not affect execution.
+func (r *Runner) emitAudit(ctx context.Context, ev AuditEvent) error {
+	err := r.audit().Emit(ctx, ev)
+	if hookErr := r.Hooks.callAudit(ctx, AuditPayload{Event: ev}); hookErr != nil {
+		r.Logger.Warn("hook OnAudit returned error", "run_id", ev.RunID, "node_id", ev.NodeID, "err", hookErr)
+	}
+	return err
 }
 
 // permissions returns the configured PermissionEnforcer or the default.
@@ -248,6 +269,14 @@ func (r *Runner) run(ctx context.Context, w *Workflow, inputs map[string]string,
 
 	r.beginRunRecord(ctx, runID, w.Name, merged, snapStarted)
 
+	if err := r.Hooks.callDefine(ctx, DefinePayload{
+		RunID:    runID,
+		Workflow: w,
+		Inputs:   merged,
+	}); err != nil {
+		r.Logger.Warn("hook OnDefine returned error", "run_id", runID, "err", err)
+	}
+
 	order, err := topoOrder(w.Nodes)
 	if err != nil {
 		r.finishRunRecord(ctx, runID, RunStateFailed, err.Error())
@@ -311,7 +340,7 @@ func (r *Runner) beginRunRecord(ctx context.Context, runID, workflowName string,
 	}); err != nil {
 		r.Logger.Warn("recorder BeginRun failed", "run_id", runID, "err", err)
 	}
-	if err := r.audit().Emit(ctx, AuditEvent{
+	if err := r.emitAudit(ctx, AuditEvent{
 		RunID:      runID,
 		FromState:  string(RunStatePending),
 		ToState:    string(RunStateRunning),
@@ -329,7 +358,7 @@ func (r *Runner) finishRunRecord(ctx context.Context, runID string, state RunSta
 	if err := r.recorder().FinishRun(ctx, runID, state, now, errMsg); err != nil {
 		r.Logger.Warn("recorder FinishRun failed", "run_id", runID, "err", err)
 	}
-	if err := r.audit().Emit(ctx, AuditEvent{
+	if err := r.emitAudit(ctx, AuditEvent{
 		RunID:      runID,
 		FromState:  string(RunStateRunning),
 		ToState:    string(state),
@@ -355,7 +384,7 @@ func (r *Runner) markSkippedDownstream(ctx context.Context, runID string, all []
 			FinishedAt:  now,
 			Error:       reason,
 		})
-		_ = r.audit().Emit(ctx, AuditEvent{
+		_ = r.emitAudit(ctx, AuditEvent{
 			RunID:      runID,
 			NodeID:     id,
 			FromState:  string(NodeStatePending),
@@ -411,6 +440,8 @@ func (r *Runner) checkpoint(ctx context.Context, wfName, runID string, inputs ma
 
 // executeNode dispatches to the kind-specific executor. All executors
 // receive the same nodeContext so they can read inputs + upstream outputs.
+//
+//nolint:gocyclo // when-guard + retry + exit_gate + HITL + outputs are all sequential; splitting hurts locality
 func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 	res := Result{NodeID: node.ID, Started: time.Now(), Meta: make(map[string]any)}
 
@@ -464,6 +495,19 @@ func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 		}
 	}
 
+	// Phase 2.2 substrate gate: a node whose HITL policy fires transitions
+	// to awaiting_hitl, blocks until a human (or backend timeout) decides,
+	// then continues based on the decision. The block runs after exit_gate
+	// so reviewers see post-gate output, but before output materialisation
+	// so a rejected node never leaves a half-written artifact behind.
+	if res.Error == nil {
+		if blocked, reason := shouldBlockOnHITL(node, &res); blocked {
+			if err := r.handleHITL(childNC, node, &res, reason); err != nil {
+				res.Error = err
+			}
+		}
+	}
+
 	// Phase 1 substrate gate: declared outputs must exist (for non-
 	// ephemeral durability tiers) before we mark the node succeeded.
 	// This is what makes "succeeded" a contract — operators see a
@@ -483,6 +527,21 @@ func (r *Runner) executeNode(nc *nodeContext, node *Node) Result {
 		reason = res.Error.Error()
 	}
 	r.recordNodeFinished(nc, node, &res, state, reason)
+
+	// OnResolve fires only when a node terminates in failure. It runs
+	// after the audit row is written so callers reading the audit log can
+	// correlate with whatever follow-up the hook produces.
+	if res.Error != nil {
+		if err := r.Hooks.callResolve(nc.ctx, ResolvePayload{
+			RunID:      nc.runID,
+			Node:       node,
+			Result:     &res,
+			ErrorClass: classifyError(res.Error),
+			OccurredAt: res.Finished,
+		}); err != nil {
+			r.Logger.Warn("hook OnResolve returned error", "node", node.ID, "err", err)
+		}
+	}
 	return res
 }
 
@@ -523,7 +582,7 @@ func (r *Runner) recordNodeStarted(nc *nodeContext, node *Node, res *Result) {
 	}); err != nil {
 		r.Logger.Warn("recorder UpsertNode(running) failed", "node", node.ID, "err", err)
 	}
-	if err := r.audit().Emit(nc.ctx, AuditEvent{
+	if err := r.emitAudit(nc.ctx, AuditEvent{
 		RunID:      nc.runID,
 		NodeID:     node.ID,
 		FromState:  string(NodeStatePending),
@@ -560,7 +619,7 @@ func (r *Runner) recordNodeFinished(nc *nodeContext, node *Node, res *Result, st
 	if state == NodeStateSkipped {
 		from = NodeStatePending
 	}
-	if err := r.audit().Emit(nc.ctx, AuditEvent{
+	if err := r.emitAudit(nc.ctx, AuditEvent{
 		RunID:      nc.runID,
 		NodeID:     node.ID,
 		FromState:  string(from),
@@ -610,7 +669,19 @@ func (r *Runner) runWithRetry(nc *nodeContext, node *Node, res *Result, policy *
 	for {
 		attempts++
 		attemptStart := time.Now()
-		r.dispatchKind(nc, node, res)
+		// OnEnforce runs once per attempt, before dispatch. A non-nil error
+		// short-circuits the attempt — recorded as an enforcement denial.
+		if err := r.Hooks.callEnforce(nc.ctx, EnforcePayload{
+			RunID:   nc.runID,
+			Node:    node,
+			Inputs:  nc.inputs,
+			Outputs: nc.outputs,
+			Attempt: attempts,
+		}); err != nil {
+			res.Error = err
+		} else {
+			r.dispatchKind(nc, node, res)
+		}
 		attemptFinish := time.Now()
 		res.Meta["attempts"] = attempts
 
