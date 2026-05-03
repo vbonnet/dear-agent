@@ -41,17 +41,17 @@ past its size, split it before continuing.
 
 **Goal:** every node-execution is a queryable row, every state transition
 is an audit event. Existing workflows run unchanged.
-**Phase status:** `in-flight (claude/focused-saha-032d52)`
+**Phase status:** `done (#38)`
 **Estimated:** 4 weeks
 
 | # | Title | Files | Acceptance criteria | Dep | Size | Status |
 |---|---|---|---|---|---|---|
-| 0.1 | Add `SQLiteState` implementing existing `State` interface | `pkg/workflow/state_sqlite.go`, `state_sqlite_test.go` | Pass existing `state_test.go` semantics; new `runner_perf_test.go` passes targets in ADR-010 §6 | — | M | `in-flight (claude/focused-saha-032d52)` |
-| 0.2 | Migrate `Snapshot` representation to relational schema | `pkg/workflow/types.go`, `state_sqlite.go` | All existing snapshot fields representable; backward-compatible JSON dump retained for `workflow migrate` | 0.1 | S | `in-flight (claude/focused-saha-032d52)` |
-| 0.3 | Add `runs` + `nodes` + `node_attempts` tables; runner writes per-attempt rows | `pkg/workflow/runner.go`, `state_sqlite.go`, schema migration | After a 5-node run with one retry, `SELECT * FROM nodes` shows 5 rows and `SELECT * FROM node_attempts` shows 6 rows | 0.2 | M | `in-flight (claude/focused-saha-032d52)` |
-| 0.4 | Add `audit_events` table + `AuditSink` interface; runner emits transitions | `pkg/workflow/audit.go`, `runner.go` | Every state transition produces an `audit_events` row; replayable from sink | 0.3 | M | `in-flight (claude/focused-saha-032d52)` |
-| 0.5 | CLI `dear-agent workflow status <run-id>` reading from SQLite | `cmd/workflow-status/main.go` | Output matches the spec in `ROADMAP.md`; `--json` and `--watch` flags work | 0.4 | S | `in-flight (claude/focused-saha-032d52)` |
-| 0.6 | CLI `dear-agent workflow list / cancel / logs` | `cmd/workflow-list/`, `cmd/workflow-cancel/`, `cmd/workflow-logs/` | All three commands tested against a real SQLite DB; respect `--state=` filter | 0.5 | M | `in-flight (claude/focused-saha-032d52)` |
+| 0.1 | Add `SQLiteState` implementing existing `State` interface | `pkg/workflow/state_sqlite.go`, `state_sqlite_test.go` | Pass existing `state_test.go` semantics; new `runner_perf_test.go` passes targets in ADR-010 §6 | — | M | `done (#38)` |
+| 0.2 | Migrate `Snapshot` representation to relational schema | `pkg/workflow/types.go`, `state_sqlite.go` | All existing snapshot fields representable; backward-compatible JSON dump retained for `workflow migrate` | 0.1 | S | `done (#38)` |
+| 0.3 | Add `runs` + `nodes` + `node_attempts` tables; runner writes per-attempt rows | `pkg/workflow/runner.go`, `state_sqlite.go`, schema migration | After a 5-node run with one retry, `SELECT * FROM nodes` shows 5 rows and `SELECT * FROM node_attempts` shows 6 rows | 0.2 | M | `done (#38)` |
+| 0.4 | Add `audit_events` table + `AuditSink` interface; runner emits transitions | `pkg/workflow/audit.go`, `runner.go` | Every state transition produces an `audit_events` row; replayable from sink | 0.3 | M | `done (#38)` |
+| 0.5 | CLI `dear-agent workflow status <run-id>` reading from SQLite | `cmd/workflow-status/main.go` | Output matches the spec in `ROADMAP.md`; `--json` and `--watch` flags work | 0.4 | S | `done (#38)` |
+| 0.6 | CLI `dear-agent workflow list / cancel / logs` | `cmd/workflow-list/`, `cmd/workflow-cancel/`, `cmd/workflow-logs/` | All three commands tested against a real SQLite DB; respect `--state=` filter | 0.5 | M | `done (#38)` |
 
 **Phase 0 ship criterion:** existing workflows run unchanged. `SELECT *
 FROM audit_events WHERE run_id = ?` returns every transition for the run.
