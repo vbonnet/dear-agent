@@ -32,6 +32,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/vbonnet/dear-agent/pkg/source"
+	sqlitesource "github.com/vbonnet/dear-agent/pkg/source/sqlite"
 	"github.com/vbonnet/dear-agent/pkg/workflow"
 )
 
@@ -41,8 +43,9 @@ func main() {
 
 func run() int {
 	var (
-		dbPath   = flag.String("db", "runs.db", "path to runs.db")
-		httpAddr = flag.String("http", "", "if set, serve JSON-RPC over HTTP at this address (default: stdio)")
+		dbPath     = flag.String("db", "runs.db", "path to runs.db")
+		sourcePath = flag.String("sources", "", "path to sources.db (default: same as --db)")
+		httpAddr   = flag.String("http", "", "if set, serve JSON-RPC over HTTP at this address (default: stdio)")
 	)
 	flag.Parse()
 
@@ -53,7 +56,29 @@ func run() int {
 	}
 	defer db.Close()
 
-	srv := &Server{DB: db, DBPath: *dbPath}
+	// The sources adapter lives in the same SQLite file as runs by
+	// default — this makes JOINs across `sources` and `runs` cheap and
+	// keeps deployments to one file. Override with --sources to host
+	// the knowledge corpus elsewhere.
+	var srcAdapter source.Adapter
+	if *sourcePath == "" || *sourcePath == *dbPath {
+		a, err := sqlitesource.New(db)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		srcAdapter = a
+	} else {
+		a, err := sqlitesource.Open(*sourcePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		defer a.Close()
+		srcAdapter = a
+	}
+
+	srv := &Server{DB: db, DBPath: *dbPath, Source: srcAdapter}
 
 	if *httpAddr != "" {
 		mux := http.NewServeMux()
@@ -72,9 +97,12 @@ func run() int {
 // Server holds the state shared across requests. DB is the SQLite
 // connection used by every tool that doesn't open its own; DBPath is
 // retained so workflow_run can pass it back to the runner via state.
+// Source is the knowledge-store adapter behind FetchSource / AddSource;
+// nil disables those tools.
 type Server struct {
 	DB     *sql.DB
 	DBPath string
+	Source source.Adapter
 }
 
 // rpcRequest is the JSON-RPC 2.0 envelope. Method is the dotted MCP
@@ -115,7 +143,11 @@ func (s *Server) HandleRequest(ctx context.Context, req rpcRequest) rpcResponse 
 			},
 		}}
 	case "tools/list":
-		return rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": toolDescriptors()}}
+		tools := toolDescriptors()
+		if s.Source != nil {
+			tools = append(tools, sourceToolDescriptors()...)
+		}
+		return rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": tools}}
 	case "tools/call":
 		return s.handleToolCall(ctx, req)
 	default:
@@ -217,6 +249,10 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 		return s.toolDecide(ctx, req.ID, p.Arguments, workflow.HITLDecisionReject)
 	case "workflow_cancel":
 		return s.toolCancel(ctx, req.ID, p.Arguments)
+	case "FetchSource":
+		return s.toolFetchSource(ctx, req.ID, p.Arguments)
+	case "AddSource":
+		return s.toolAddSource(ctx, req.ID, p.Arguments)
 	}
 	return errResponse(req.ID, -32601, "unknown tool", p.Name)
 }
