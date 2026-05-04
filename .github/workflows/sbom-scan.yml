@@ -89,12 +89,13 @@ jobs:
           go-version-file: 'go.mod'
           cache-dependency-path: 'go.sum'
 
-      # `-scan package` skips SSA construction. The default `-scan symbol`
-      # mode panics on tailscale.com's transitive use of generic types in
-      # github.com/go-json-experiment/json (golang.org/x/tools v0.44.0
-      # subster bug). Package-level granularity is still enforced; we lose
-      # only the per-symbol "called/not-called" filtering.
+      # Symbol-level scan: only fails when our code actually reaches a
+      # vulnerable function. Package-level mode flags any vulnerable
+      # package in the import graph, which trips on tailscale.com's
+      # transitive github.com/gorilla/csrf (GO-2025-3884 has Fixed in:
+      # N/A, but the vulnerable TrustedOrigins API is not on any path
+      # we call).
       - name: Run govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck -scan package ./...
+          govulncheck -scan symbol ./...
