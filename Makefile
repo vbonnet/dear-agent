@@ -7,8 +7,9 @@
 #   install-hooks   Install git pre-push hook for act validation
 #   codegraph       Build a tree-sitter knowledge graph for this repo
 #   codegraph-all   Build graphs for dear-agent and brain-v2
+#   sync-main       Stash, fetch, rebase onto origin/main, then pop
 
-.PHONY: act-validate act-lint act-test install-hooks test-shell build-configure-settings uninstall codegraph codegraph-all codegraph-install
+.PHONY: act-validate act-lint act-test install-hooks test-shell build-configure-settings uninstall codegraph codegraph-all codegraph-install sync-main
 
 # Run full local CI validation via act
 act-validate: act-lint act-test
@@ -88,3 +89,8 @@ codegraph-all:
 # Bootstrap the graphify venv at ~/.local/venvs/graphify.
 codegraph-install:
 	@./scripts/codegraph install
+
+# Atomic stash / fetch / rebase / pop onto origin/main. Defaults to this
+# repo; pass REPO=<path> to target a different working copy.
+sync-main:
+	@./scripts/git-sync-main.sh $(if $(REPO),$(REPO),$(CURDIR))
