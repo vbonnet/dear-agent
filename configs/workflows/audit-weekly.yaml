@@ -17,8 +17,7 @@ nodes:
     kind: bash
     name: workflow-audit run --cadence weekly
     bash:
-      command: |
-        workflow-audit run \
-          --cadence weekly \
-          --db "{{ .Inputs.db }}" \
-          --repo "{{ .Inputs.repo }}"
+      cmd: |
+        set -euo pipefail
+        cd "$INPUT_repo"
+        workflow-audit run --cadence weekly --db "$INPUT_db"
