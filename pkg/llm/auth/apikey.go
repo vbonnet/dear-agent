@@ -66,6 +66,12 @@ func GetAPIKey(provider string) (string, error) {
 		}
 		return "", fmt.Errorf("OPENROUTER_API_KEY environment variable not set")
 
+	case "openai":
+		if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+			return key, nil
+		}
+		return "", fmt.Errorf("OPENAI_API_KEY environment variable not set")
+
 	default:
 		return "", fmt.Errorf("unsupported provider: %s", provider)
 	}
@@ -119,6 +125,13 @@ func ValidateAPIKey(provider, key string) error {
 	case "openrouter":
 		if !strings.HasPrefix(key, "sk-or-") {
 			return fmt.Errorf("invalid OpenRouter API key format: must start with 'sk-or-'")
+		}
+
+	case "openai":
+		// OpenAI keys start with "sk-" but project-scoped keys use "sk-proj-".
+		// Both are valid; reject anything that doesn't begin with "sk-".
+		if !strings.HasPrefix(key, "sk-") {
+			return fmt.Errorf("invalid OpenAI API key format: must start with 'sk-'")
 		}
 
 	default:
