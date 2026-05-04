@@ -145,6 +145,7 @@ func HasUncertaintyIndicators(text string) bool {
 }
 
 // CalculateClarityScore calculates a clarity score (0.0-1.0).
+//nolint:gocyclo // reason: linear scorer summing many independent clarity contributions
 func CalculateClarityScore(response string, questionType QuestionType) float64 {
 	score := 0.0
 	wc := countWords(response)

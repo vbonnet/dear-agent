@@ -281,86 +281,98 @@ func getRecentCommits(branch string, since string) []WorkerCommit {
 // printScanText renders scan results in human-readable format
 func printScanText(r *ScanCycleResult) {
 	fmt.Printf("\n=== AGM Orchestrator Scan — %s ===\n\n", r.Timestamp.Format("2006-01-02 15:04:05"))
+	printScanApprovals(r.Findings.SessionsNeedingApproval)
+	printScanSessions(r.Sessions)
+	printScanWorkerCommits(r.Findings.NewCommitsDetected, r.WorkerBranches)
+	printScanCrossCheck(r.CrossCheck)
+	printScanMetrics(r.Findings.HealthStatus, r.Findings.MetricsAlertCount, r.MetricsAlerts)
+	printScanErrors(r.Errors)
+	fmt.Println()
+}
 
-	// Sessions needing approval
-	fmt.Printf("Sessions Needing Approval: %d\n", len(r.Findings.SessionsNeedingApproval))
-	if len(r.Findings.SessionsNeedingApproval) > 0 {
-		for _, name := range r.Findings.SessionsNeedingApproval {
-			fmt.Printf("  • %s (PERMISSION_PROMPT)\n", name)
-		}
-	} else {
+func printScanApprovals(needApproval []string) {
+	fmt.Printf("Sessions Needing Approval: %d\n", len(needApproval))
+	if len(needApproval) == 0 {
 		fmt.Println("  (none)")
+		return
 	}
+	for _, name := range needApproval {
+		fmt.Printf("  • %s (PERMISSION_PROMPT)\n", name)
+	}
+}
 
-	// Sessions overview
-	if r.Sessions != nil {
-		fmt.Printf("\nSessions: %d total", r.Sessions.Total)
-		if r.Sessions.Total > 0 {
-			active := 0
-			for _, s := range r.Sessions.Sessions {
-				if s.Status == "active" {
-					active++
-				}
+func printScanSessions(s *ops.ListSessionsResult) {
+	if s == nil {
+		return
+	}
+	fmt.Printf("\nSessions: %d total", s.Total)
+	if s.Total > 0 {
+		active := 0
+		for _, sess := range s.Sessions {
+			if sess.Status == "active" {
+				active++
 			}
-			fmt.Printf(" (%d active)", active)
+		}
+		fmt.Printf(" (%d active)", active)
+	}
+	fmt.Println()
+}
+
+func printScanWorkerCommits(newCommits int, branches map[string][]WorkerCommit) {
+	fmt.Printf("\nWorker Commits (24h): %d total\n", newCommits)
+	if len(branches) == 0 {
+		return
+	}
+	for branch, commits := range branches {
+		fmt.Printf("  %s: %d commits\n", branch, len(commits))
+		for i, c := range commits {
+			if i >= 2 {
+				break
+			}
+			fmt.Printf("    • %s %s (%s)\n", c.Hash, c.Message, c.Author)
+		}
+	}
+}
+
+func printScanCrossCheck(cc *ops.CrossCheckReport) {
+	if cc == nil {
+		return
+	}
+	fmt.Printf("\nCross-Check Results:\n")
+	for _, cr := range cc.Results {
+		icon := "✓"
+		if cr.State != ops.StateHealthy {
+			icon = "✗"
+		}
+		fmt.Printf("  %s %s: %s", icon, cr.SessionName, cr.StateStr)
+		if cr.Action != "" {
+			fmt.Printf(" → %s", cr.Action)
 		}
 		fmt.Println()
 	}
-
-	// Worker branch commits
-	fmt.Printf("\nWorker Commits (24h): %d total\n", r.Findings.NewCommitsDetected)
-	if len(r.WorkerBranches) > 0 {
-		for branch, commits := range r.WorkerBranches {
-			fmt.Printf("  %s: %d commits\n", branch, len(commits))
-			// Show last 2 commits
-			for i, c := range commits {
-				if i >= 2 {
-					break
-				}
-				fmt.Printf("    • %s %s (%s)\n", c.Hash, c.Message, c.Author)
-			}
-		}
+	if len(cc.UnmanagedSessions) > 0 {
+		fmt.Printf("\n  Unmanaged Sessions: %s\n", strings.Join(cc.UnmanagedSessions, ", "))
 	}
+}
 
-	// Cross-check results
-	if r.CrossCheck != nil {
-		fmt.Printf("\nCross-Check Results:\n")
-		for _, cr := range r.CrossCheck.Results {
-			icon := "✓"
-			if cr.State != ops.StateHealthy {
-				icon = "✗"
-			}
-			fmt.Printf("  %s %s: %s", icon, cr.SessionName, cr.StateStr)
-			if cr.Action != "" {
-				fmt.Printf(" → %s", cr.Action)
-			}
-			fmt.Println()
+func printScanMetrics(healthStatus string, alertCount int, alerts []ops.Alert) {
+	fmt.Printf("\nHealth Status: %s\n", strings.ToUpper(healthStatus))
+	fmt.Printf("Metrics Alerts: %d\n", alertCount)
+	for _, alert := range alerts {
+		icon := "!"
+		if alert.Level == "critical" {
+			icon = "X"
 		}
-		if len(r.CrossCheck.UnmanagedSessions) > 0 {
-			fmt.Printf("\n  Unmanaged Sessions: %s\n", strings.Join(r.CrossCheck.UnmanagedSessions, ", "))
-		}
+		fmt.Printf("  [%s] %s: %s\n", icon, strings.ToUpper(alert.Type), alert.Message)
 	}
+}
 
-	// Metrics health
-	fmt.Printf("\nHealth Status: %s\n", strings.ToUpper(r.Findings.HealthStatus))
-	fmt.Printf("Metrics Alerts: %d\n", r.Findings.MetricsAlertCount)
-	if len(r.MetricsAlerts) > 0 {
-		for _, alert := range r.MetricsAlerts {
-			icon := "!"
-			if alert.Level == "critical" {
-				icon = "X"
-			}
-			fmt.Printf("  [%s] %s: %s\n", icon, strings.ToUpper(alert.Type), alert.Message)
-		}
+func printScanErrors(errs []string) {
+	if len(errs) == 0 {
+		return
 	}
-
-	// Errors
-	if len(r.Errors) > 0 {
-		fmt.Printf("\nErrors: %d\n", len(r.Errors))
-		for _, e := range r.Errors {
-			fmt.Printf("  ! %s\n", e)
-		}
+	fmt.Printf("\nErrors: %d\n", len(errs))
+	for _, e := range errs {
+		fmt.Printf("  ! %s\n", e)
 	}
-
-	fmt.Println()
 }

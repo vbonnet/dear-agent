@@ -85,23 +85,7 @@ func main() {
 	logger.Info("Registered MCP tools", "tools", "agm_list_sessions, agm_search_sessions, agm_get_session, agm_archive_session, agm_kill_session, agm_list_ops, engram_list_wayfinder_sessions, engram_get_wayfinder_session")
 	logger.Info("Wayfinder forwarding enabled", "engram_mcp_url", cfg.EngramMCPURL)
 
-	// Install MCP Gateway middleware (unless --no-gateway flag is set)
-	if !*noGateway && !slices.Contains(os.Args[1:], "--no-gateway") {
-		gatewayCfg, err := gateway.LoadConfig("~/.config/agm/gateway.yaml")
-		if err != nil {
-			logger.Warn("Gateway config load failed, using defaults", "error", err)
-			gatewayCfg = gateway.DefaultConfig()
-		}
-		if gatewayCfg.Enabled {
-			gw := gateway.New(gatewayCfg, logger)
-			gw.Install(server)
-			logger.Info("MCP Gateway installed")
-		} else {
-			logger.Info("MCP Gateway disabled in config")
-		}
-	} else {
-		logger.Info("MCP Gateway bypassed (--no-gateway flag)")
-	}
+	installGateway(server, *noGateway)
 
 	// Auto-register with Claude Code (optional)
 	if cfg.AutoRegister {
@@ -112,50 +96,13 @@ func main() {
 		}
 	}
 
-	// Determine A2A port: flag overrides config
-	effectiveA2APort := cfg.A2A.Port
-	if *a2aPort != 0 {
-		effectiveA2APort = *a2aPort
-	}
-	// Config can also enable via a2a.enabled without explicit port
-	if cfg.A2A.Enabled && effectiveA2APort == 0 {
-		effectiveA2APort = 8080
-	}
+	effectiveA2APort := resolveA2APort(cfg, *a2aPort)
 
 	// Set up signal-based shutdown context
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Start A2A HTTP server if enabled
-	var httpServer *http.Server
-	if effectiveA2APort > 0 {
-		bind := cfg.A2A.Bind
-		if bind == "" {
-			bind = "127.0.0.1"
-		}
-		addr := fmt.Sprintf("%s:%d", bind, effectiveA2APort)
-
-		handler := newA2AHandler(logger)
-		httpServer = &http.Server{
-			Addr:              addr,
-			Handler:           handler,
-			ReadHeaderTimeout: 10 * time.Second,
-		}
-
-		ln, err := net.Listen("tcp", addr) //nolint:noctx // TODO(context): plumb ctx through this layer
-		if err != nil {
-			logger.Error("A2A HTTP listen failed", "addr", addr, "error", err)
-			stop() // explicit cleanup before exit (otherwise the deferred stop() at the top of main wouldn't run)
-			os.Exit(1) //nolint:gocritic // stop() called explicitly above
-		}
-
-		logger.Info("A2A HTTP server listening", "addr", addr)
-		go func() {
-			if err := httpServer.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.Error("A2A HTTP server error", "error", err)
-			}
-		}()
-	}
+	httpServer := startA2AServerIfEnabled(cfg, effectiveA2APort, stop)
 
 	// Create stdio transport (v1.2.0 API)
 	transport := &mcp.StdioTransport{}
@@ -173,4 +120,73 @@ func main() {
 			logger.Error("A2A HTTP shutdown error", "error", err)
 		}
 	}
+}
+
+// installGateway installs the MCP gateway middleware unless disabled by flag.
+func installGateway(server *mcp.Server, noGateway bool) {
+	if noGateway || slices.Contains(os.Args[1:], "--no-gateway") {
+		logger.Info("MCP Gateway bypassed (--no-gateway flag)")
+		return
+	}
+	gatewayCfg, err := gateway.LoadConfig("~/.config/agm/gateway.yaml")
+	if err != nil {
+		logger.Warn("Gateway config load failed, using defaults", "error", err)
+		gatewayCfg = gateway.DefaultConfig()
+	}
+	if !gatewayCfg.Enabled {
+		logger.Info("MCP Gateway disabled in config")
+		return
+	}
+	gw := gateway.New(gatewayCfg, logger)
+	gw.Install(server)
+	logger.Info("MCP Gateway installed")
+}
+
+// resolveA2APort determines the effective A2A port: flag overrides config, and
+// if a2a.enabled is true with no explicit port, defaults to 8080.
+func resolveA2APort(cfg *Config, flagPort int) int {
+	port := cfg.A2A.Port
+	if flagPort != 0 {
+		port = flagPort
+	}
+	if cfg.A2A.Enabled && port == 0 {
+		port = 8080
+	}
+	return port
+}
+
+// startA2AServerIfEnabled launches the A2A HTTP server in a goroutine when
+// effectiveA2APort > 0. On listen failure it calls stop() and exits the process.
+// Returns nil when A2A is disabled.
+func startA2AServerIfEnabled(cfg *Config, effectiveA2APort int, stop func()) *http.Server {
+	if effectiveA2APort <= 0 {
+		return nil
+	}
+	bind := cfg.A2A.Bind
+	if bind == "" {
+		bind = "127.0.0.1"
+	}
+	addr := fmt.Sprintf("%s:%d", bind, effectiveA2APort)
+
+	handler := newA2AHandler(logger)
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	ln, err := net.Listen("tcp", addr) //nolint:noctx // TODO(context): plumb ctx through this layer
+	if err != nil {
+		logger.Error("A2A HTTP listen failed", "addr", addr, "error", err)
+		stop() // explicit cleanup before exit (otherwise the deferred stop() at the top of main wouldn't run)
+		os.Exit(1) //nolint:gocritic // stop() called explicitly above
+	}
+
+	logger.Info("A2A HTTP server listening", "addr", addr)
+	go func() {
+		if err := httpServer.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("A2A HTTP server error", "error", err)
+		}
+	}()
+	return httpServer
 }

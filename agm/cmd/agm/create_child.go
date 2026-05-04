@@ -78,47 +78,9 @@ func runCreateChild(cmd *cobra.Command, args []string) error {
 	}
 	defer adapter.Close()
 
-	// Determine parent session ID
-	var parentSessionID string
-	var childSessionName string
-
-	if len(args) == 0 {
-		// Try to detect from current tmux session
-		if os.Getenv("TMUX") != "" {
-			currentTmuxName, err := tmux.GetCurrentSessionName()
-			if err != nil {
-				ui.PrintError(err,
-					"Failed to get current tmux session name",
-					"  • Provide parent session ID explicitly: agm session create-child <parent-id>\n"+
-						"  • Verify you're inside tmux: echo $TMUX\n"+
-						"  • Check tmux is running: tmux list-sessions")
-				return err
-			}
-
-			// Look up parent session by tmux name
-			manifest, err := findManifestByTmuxName(adapter, currentTmuxName)
-			if err != nil {
-				ui.PrintError(err,
-					"Failed to find parent session",
-					"  • Provide parent session ID explicitly: agm session create-child <parent-id>\n"+
-						"  • Run 'agm session list' to see available sessions")
-				return err
-			}
-			parentSessionID = manifest.SessionID
-			fmt.Printf("Using current tmux session as parent: %s (%s)\n", currentTmuxName, parentSessionID)
-		} else {
-			ui.PrintError(
-				fmt.Errorf("no parent session ID provided"),
-				"Parent session ID required",
-				"  • Provide parent session ID: agm session create-child <parent-id>\n"+
-					"  • Or run from within a tmux session to auto-detect parent")
-			return fmt.Errorf("parent session ID required")
-		}
-	} else {
-		parentSessionID = args[0]
-		if len(args) > 1 {
-			childSessionName = args[1]
-		}
+	parentSessionID, childSessionName, err := resolveParentAndChild(adapter, args)
+	if err != nil {
+		return err
 	}
 
 	// Initialize debug logging
@@ -145,160 +107,32 @@ func runCreateChild(cmd *cobra.Command, args []string) error {
 	debug.Log("Parent session found: %s (harness: %s)", parentManifest.Name, parentManifest.Harness)
 	fmt.Printf("Parent session: %s (harness: %s)\n", parentManifest.Name, parentManifest.Harness)
 
-	// Prompt for child session name if not provided
 	if childSessionName == "" {
-		var inputName string
-		err = huh.NewInput().
-			Title("Enter child session name:").
-			Value(&inputName).
-			Validate(func(s string) error {
-				if s == "" {
-					return fmt.Errorf("session name cannot be empty")
-				}
-				return nil
-			}).
-			Run()
+		childSessionName, err = promptChildSessionName()
 		if err != nil {
-			ui.PrintError(err,
-				"Failed to read session name from prompt",
-				"  • Provide name as argument: agm session create-child <parent-id> <child-name>\n"+
-					"  • Check terminal is interactive (TTY)")
 			return err
-		}
-		childSessionName = inputName
-
-		if childSessionName == "" {
-			ui.PrintError(
-				fmt.Errorf("session name cannot be empty"),
-				"Invalid session name",
-				"  • Provide a non-empty session name")
-			return fmt.Errorf("empty session name")
 		}
 	}
 
 	debug.Log("Child session name: %s", childSessionName)
 
-	// Determine harness (inherit from parent unless --harness flag specified)
-	selectedHarness := harnessName
-	if selectedHarness == "" {
-		selectedHarness = parentManifest.Harness
-		debug.Log("Inheriting harness from parent: %s", selectedHarness)
-	} else {
-		debug.Log("Using explicit harness from flag: %s", selectedHarness)
-	}
-
-	// Validate harness
-	if err := agent.ValidateHarnessName(selectedHarness); err != nil {
-		ui.PrintError(err,
-			"Invalid harness specified",
-			"  • Valid harnesses: claude-code, gemini-cli, codex-cli, opencode-cli\n"+
-				"  • Run 'agm harness list' to see available harnesses")
+	selectedHarness, err := selectChildHarness(parentManifest)
+	if err != nil {
 		return err
 	}
 
-	// Warn if harness unavailable (but allow session creation)
-	if err := agent.ValidateHarnessAvailability(selectedHarness); err != nil {
-		ui.PrintWarning(fmt.Sprintf("⚠️  %s", err.Error()))
-	}
-
-	// Get working directory (inherit from parent)
 	workDir := parentManifest.Context.Project
 	debug.Log("Inheriting working directory from parent: %s", workDir)
 
-	// Get backend
-	backendAdapter, err := backend.GetDefaultBackendAdapter()
+	backendAdapter, err := getBackendAndCheckSessionFree(childSessionName)
 	if err != nil {
-		ui.PrintError(err,
-			"Failed to get backend adapter",
-			"  • Check AGM_SESSION_BACKEND environment variable\n"+
-				"  • Valid backends: tmux")
 		return err
 	}
 
-	// Check if child session name already exists
-	exists, err := backendAdapter.HasSession(childSessionName)
+	childManifest, err := buildAndPersistChildManifest(adapter, parentManifest, childSessionName, workDir, selectedHarness)
 	if err != nil {
-		ui.PrintError(err,
-			"Failed to check for existing session",
-			"  • Verify backend is available (tmux)\n"+
-				"  • Check session name is valid")
 		return err
 	}
-
-	if exists {
-		ui.PrintError(
-			fmt.Errorf("session already exists: %s", childSessionName),
-			"Session name conflict",
-			"  • Choose a different name\n"+
-				"  • Run 'agm session list' to see existing sessions")
-		return fmt.Errorf("session already exists: %s", childSessionName)
-	}
-
-	// Create child session
-	debug.Phase("Create Child Session Manifest")
-	sessionsDir := getSessionsDir()
-	manifestDir := filepath.Join(sessionsDir, childSessionName)
-	manifestPath := filepath.Join(manifestDir, "manifest.yaml")
-
-	if err := os.MkdirAll(manifestDir, 0700); err != nil {
-		ui.PrintError(err,
-			"Failed to create manifest directory",
-			"  • Check permissions on sessions directory\n"+
-				"  • Verify disk space available")
-		return err
-	}
-
-	// Create child manifest with parent reference
-	childSessionID := uuid.New().String()
-	debug.Log("Generated child session ID: %s", childSessionID)
-
-	childManifest := &manifest.Manifest{
-		SchemaVersion: manifest.SchemaVersion,
-		SessionID:     childSessionID,
-		Name:          childSessionName,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
-		Lifecycle:     "", // Empty = active/stopped
-		Context: manifest.Context{
-			Project: workDir,
-			Purpose: fmt.Sprintf("Child session of %s", parentManifest.Name),
-			Tags:    nil,
-			Notes:   "",
-		},
-		Tmux: manifest.Tmux{
-			SessionName: childSessionName,
-		},
-		Harness: selectedHarness,
-		Claude: manifest.Claude{
-			UUID: "", // Will be populated by SessionStart hook
-		},
-	}
-
-	// Inherit context if --context flag set
-	if inheritContext {
-		debug.Log("Inheriting context from parent")
-		childManifest.Context.Purpose = parentManifest.Context.Purpose
-		if len(parentManifest.Context.Tags) > 0 {
-			childManifest.Context.Tags = append([]string{}, parentManifest.Context.Tags...)
-		}
-		childManifest.Context.Notes = fmt.Sprintf("Child of %s\n\n%s",
-			parentManifest.Name, parentManifest.Context.Notes)
-	}
-
-	// Write manifest to Dolt
-	if err := adapter.CreateSession(childManifest); err != nil {
-		ui.PrintError(err,
-			"Failed to create session in Dolt",
-			"  • Check Dolt server is running\n"+
-				"  • Verify database connection")
-		return err
-	}
-
-	// Auto-commit manifest change if in git repo
-	_ = git.CommitManifest(manifestPath, "create-child", childManifest.Name) // Errors logged internally
-
-	debug.Log("Child session created in Dolt: %s", childSessionID)
-	ui.PrintSuccess(fmt.Sprintf("Created child session: %s", childSessionID))
 
 	// Write to database with parent reference
 	if err := writeSessionToDatabase(childManifest, &parentSessionID); err != nil {
@@ -336,6 +170,184 @@ func runCreateChild(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// buildAndPersistChildManifest creates the manifest directory, builds the v2
+// manifest (optionally inheriting parent context), writes it to Dolt, and
+// auto-commits it. Returns the persisted manifest.
+func buildAndPersistChildManifest(adapter *dolt.Adapter, parentManifest *manifest.Manifest, childSessionName, workDir, selectedHarness string) (*manifest.Manifest, error) {
+	debug.Phase("Create Child Session Manifest")
+	sessionsDir := getSessionsDir()
+	manifestDir := filepath.Join(sessionsDir, childSessionName)
+	manifestPath := filepath.Join(manifestDir, "manifest.yaml")
+	if err := os.MkdirAll(manifestDir, 0700); err != nil {
+		ui.PrintError(err,
+			"Failed to create manifest directory",
+			"  • Check permissions on sessions directory\n"+
+				"  • Verify disk space available")
+		return nil, err
+	}
+	childSessionID := uuid.New().String()
+	debug.Log("Generated child session ID: %s", childSessionID)
+	childManifest := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     childSessionID,
+		Name:          childSessionName,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Lifecycle:     "",
+		Context: manifest.Context{
+			Project: workDir,
+			Purpose: fmt.Sprintf("Child session of %s", parentManifest.Name),
+		},
+		Tmux:    manifest.Tmux{SessionName: childSessionName},
+		Harness: selectedHarness,
+		Claude:  manifest.Claude{},
+	}
+	if inheritContext {
+		debug.Log("Inheriting context from parent")
+		childManifest.Context.Purpose = parentManifest.Context.Purpose
+		if len(parentManifest.Context.Tags) > 0 {
+			childManifest.Context.Tags = append([]string{}, parentManifest.Context.Tags...)
+		}
+		childManifest.Context.Notes = fmt.Sprintf("Child of %s\n\n%s",
+			parentManifest.Name, parentManifest.Context.Notes)
+	}
+	if err := adapter.CreateSession(childManifest); err != nil {
+		ui.PrintError(err,
+			"Failed to create session in Dolt",
+			"  • Check Dolt server is running\n"+
+				"  • Verify database connection")
+		return nil, err
+	}
+	_ = git.CommitManifest(manifestPath, "create-child", childManifest.Name)
+	debug.Log("Child session created in Dolt: %s", childSessionID)
+	ui.PrintSuccess(fmt.Sprintf("Created child session: %s", childSessionID))
+	return childManifest, nil
+}
+
+// selectChildHarness picks the harness for the child session: --harness flag
+// (if set), else inherited from the parent. Validates the name and warns if
+// the binary is unavailable.
+func selectChildHarness(parentManifest *manifest.Manifest) (string, error) {
+	selectedHarness := harnessName
+	if selectedHarness == "" {
+		selectedHarness = parentManifest.Harness
+		debug.Log("Inheriting harness from parent: %s", selectedHarness)
+	} else {
+		debug.Log("Using explicit harness from flag: %s", selectedHarness)
+	}
+	if err := agent.ValidateHarnessName(selectedHarness); err != nil {
+		ui.PrintError(err,
+			"Invalid harness specified",
+			"  • Valid harnesses: claude-code, gemini-cli, codex-cli, opencode-cli\n"+
+				"  • Run 'agm harness list' to see available harnesses")
+		return "", err
+	}
+	if err := agent.ValidateHarnessAvailability(selectedHarness); err != nil {
+		ui.PrintWarning(fmt.Sprintf("⚠️  %s", err.Error()))
+	}
+	return selectedHarness, nil
+}
+
+// getBackendAndCheckSessionFree returns the default backend adapter and
+// guarantees the requested child session name is not already in use.
+func getBackendAndCheckSessionFree(childSessionName string) (*backend.BackendAdapter, error) {
+	backendAdapter, err := backend.GetDefaultBackendAdapter()
+	if err != nil {
+		ui.PrintError(err,
+			"Failed to get backend adapter",
+			"  • Check AGM_SESSION_BACKEND environment variable\n"+
+				"  • Valid backends: tmux")
+		return nil, err
+	}
+	exists, err := backendAdapter.HasSession(childSessionName)
+	if err != nil {
+		ui.PrintError(err,
+			"Failed to check for existing session",
+			"  • Verify backend is available (tmux)\n"+
+				"  • Check session name is valid")
+		return nil, err
+	}
+	if exists {
+		ui.PrintError(
+			fmt.Errorf("session already exists: %s", childSessionName),
+			"Session name conflict",
+			"  • Choose a different name\n"+
+				"  • Run 'agm session list' to see existing sessions")
+		return nil, fmt.Errorf("session already exists: %s", childSessionName)
+	}
+	return backendAdapter, nil
+}
+
+// resolveParentAndChild determines parentSessionID (from args[0] or by detecting
+// the current tmux session) and optional childSessionName (from args[1]).
+func resolveParentAndChild(adapter *dolt.Adapter, args []string) (string, string, error) {
+	if len(args) > 0 {
+		parentSessionID := args[0]
+		var childSessionName string
+		if len(args) > 1 {
+			childSessionName = args[1]
+		}
+		return parentSessionID, childSessionName, nil
+	}
+	if os.Getenv("TMUX") == "" {
+		ui.PrintError(
+			fmt.Errorf("no parent session ID provided"),
+			"Parent session ID required",
+			"  • Provide parent session ID: agm session create-child <parent-id>\n"+
+				"  • Or run from within a tmux session to auto-detect parent")
+		return "", "", fmt.Errorf("parent session ID required")
+	}
+	currentTmuxName, err := tmux.GetCurrentSessionName()
+	if err != nil {
+		ui.PrintError(err,
+			"Failed to get current tmux session name",
+			"  • Provide parent session ID explicitly: agm session create-child <parent-id>\n"+
+				"  • Verify you're inside tmux: echo $TMUX\n"+
+				"  • Check tmux is running: tmux list-sessions")
+		return "", "", err
+	}
+	m, err := findManifestByTmuxName(adapter, currentTmuxName)
+	if err != nil {
+		ui.PrintError(err,
+			"Failed to find parent session",
+			"  • Provide parent session ID explicitly: agm session create-child <parent-id>\n"+
+				"  • Run 'agm session list' to see available sessions")
+		return "", "", err
+	}
+	fmt.Printf("Using current tmux session as parent: %s (%s)\n", currentTmuxName, m.SessionID)
+	return m.SessionID, "", nil
+}
+
+// promptChildSessionName interactively prompts for a non-empty child session name.
+func promptChildSessionName() (string, error) {
+	var inputName string
+	err := huh.NewInput().
+		Title("Enter child session name:").
+		Value(&inputName).
+		Validate(func(s string) error {
+			if s == "" {
+				return fmt.Errorf("session name cannot be empty")
+			}
+			return nil
+		}).
+		Run()
+	if err != nil {
+		ui.PrintError(err,
+			"Failed to read session name from prompt",
+			"  • Provide name as argument: agm session create-child <parent-id> <child-name>\n"+
+				"  • Check terminal is interactive (TTY)")
+		return "", err
+	}
+	if inputName == "" {
+		ui.PrintError(
+			fmt.Errorf("session name cannot be empty"),
+			"Invalid session name",
+			"  • Provide a non-empty session name")
+		return "", fmt.Errorf("empty session name")
+	}
+	return inputName, nil
 }
 
 // validateParentSession validates that the parent session exists and returns its manifest

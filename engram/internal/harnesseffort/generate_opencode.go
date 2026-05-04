@@ -99,6 +99,7 @@ func agentName(tierName, providerName string) string {
 // GenerateOpenCode produces the content for opencode.json.
 // existingJSON is the current file content (empty string if file does not exist).
 // Engram-managed agents and commands WIN; user-defined ones not in the default set are preserved.
+//nolint:gocyclo // reason: linear template generator covering many fields
 func GenerateOpenCode(cfg HarnessEffortConfig, existingJSON string) ([]byte, error) {
 	// Start from existing doc or empty
 	doc := openCodeDoc{

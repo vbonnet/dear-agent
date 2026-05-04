@@ -371,6 +371,7 @@ func detectCyclicDependencies(tasks []Task) error {
 }
 
 // validateQualityMetrics checks quality metrics are within valid ranges
+//nolint:gocyclo // reason: linear validator with one branch per metric
 func validateQualityMetrics(status *StatusV2) error {
 	if status.QualityMetrics == nil {
 		return nil // Quality metrics are optional

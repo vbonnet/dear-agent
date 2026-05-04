@@ -228,98 +228,11 @@ func syncActiveTmuxSessions(adapter *dolt.Adapter, sessionsDir string, historyEn
 	fmt.Printf("\nScanning %d active tmux sessions running Claude...\n", claudeSessionCount)
 
 	for _, sessionName := range tmuxSessions {
-		// Check if this tmux session is running Claude
-		isRunning, err := tmux.IsClaudeRunning(sessionName)
-		if err != nil {
-			// Skip this session on error (might be transient)
-			continue
-		}
-
-		if !isRunning {
-			// Not running Claude, skip
-			continue
-		}
-
-		// This session is running Claude, ensure it has a proper manifest
-		manifestDir := filepath.Join(sessionsDir, fmt.Sprintf("session-%s", sessionName))
-		manifestPath := filepath.Join(manifestDir, "manifest.yaml")
-
-		// Check if manifest exists in Dolt
-		var m *manifest.Manifest
-		existingManifest := false
-
-		// Try to find by session ID
-		sessionID := fmt.Sprintf("session-%s", sessionName)
-		m, err = adapter.GetSession(sessionID)
-		if err == nil && m != nil {
-			existingManifest = true
-		}
-
-		if !existingManifest {
-			// Create new manifest with auto-detection of UUID
-			workDir, err := tmux.GetCurrentWorkingDirectory(sessionName)
-			if err != nil {
-				workDir = os.Getenv("HOME") // Fallback to home directory
-			}
-
-			if err := os.MkdirAll(manifestDir, 0700); err != nil {
-				ui.PrintWarning(fmt.Sprintf("Failed to create manifest directory for %s: %v", sessionName, err))
-				continue
-			}
-
-			m = &manifest.Manifest{
-				SchemaVersion: manifest.SchemaVersion,
-				SessionID:     fmt.Sprintf("session-%s", sessionName),
-				Name:          sessionName,
-				CreatedAt:     time.Now(),
-				UpdatedAt:     time.Now(),
-				Lifecycle:     "", // Empty = active
-				Context: manifest.Context{
-					Project: workDir,
-					Purpose: "",
-					Tags:    nil,
-					Notes:   "",
-				},
-				Claude: manifest.Claude{
-					UUID: "", // Will attempt auto-detection below
-				},
-				Tmux: manifest.Tmux{
-					SessionName: sessionName,
-				},
-			}
-
-			// Attempt to auto-detect UUID from history
-			homeDir, err := os.UserHomeDir()
-			if err == nil {
-				historyPath := filepath.Join(homeDir, ".claude", "history.jsonl")
-				detector := detection.NewDetector(historyPath, 5*time.Minute, adapter)
-				result, err := detector.DetectUUID(m)
-				if err == nil && result.UUID != "" && result.Confidence == "high" {
-					// Auto-populate UUID with high-confidence detection
-					m.Claude.UUID = result.UUID
-				}
-			}
-
-			if err := adapter.CreateSession(m); err != nil {
-				ui.PrintWarning(fmt.Sprintf("Failed to create session in Dolt for %s: %v", sessionName, err))
-				continue
-			}
-
-			// Auto-commit manifest change if in git repo
-			_ = git.CommitManifest(manifestPath, "sync", sessionName) // Errors logged internally
-
-			if m.Claude.UUID != "" {
-				ui.PrintSuccess(fmt.Sprintf("Created manifest for tmux session '%s' (UUID auto-detected)", sessionName))
-			} else {
-				ui.PrintSuccess(fmt.Sprintf("Created manifest for tmux session '%s'", sessionName))
-				fmt.Printf("  → Run 'agm session associate %s' to link Claude UUID\n", sessionName)
-				needsAssociationCount++
-			}
+		created, addAssoc := syncOneTmuxSession(adapter, sessionName, sessionsDir)
+		if created {
 			createdCount++
-		} else if m.Claude.UUID == "" {
-			// Manifest exists, check if UUID is empty
-			fmt.Printf("  ℹ Session '%s' needs Claude UUID association\n", sessionName)
-			fmt.Printf("    → Run 'agm session associate %s' to link\n", sessionName)
+		}
+		if addAssoc {
 			needsAssociationCount++
 		}
 	}
@@ -334,6 +247,77 @@ func syncActiveTmuxSessions(adapter *dolt.Adapter, sessionsDir string, historyEn
 	}
 
 	return nil
+}
+
+// syncOneTmuxSession ensures a single tmux session has a manifest in Dolt.
+// Returns (created, needsAssociation): created when a new manifest was
+// written; needsAssociation when the session lacks a Claude UUID and the
+// user must run agm session associate.
+func syncOneTmuxSession(adapter *dolt.Adapter, sessionName, sessionsDir string) (bool, bool) {
+	isRunning, err := tmux.IsClaudeRunning(sessionName)
+	if err != nil || !isRunning {
+		return false, false
+	}
+	manifestDir := filepath.Join(sessionsDir, fmt.Sprintf("session-%s", sessionName))
+	manifestPath := filepath.Join(manifestDir, "manifest.yaml")
+	sessionID := fmt.Sprintf("session-%s", sessionName)
+	m, err := adapter.GetSession(sessionID)
+	if err != nil || m == nil {
+		return createManifestForTmux(adapter, sessionName, manifestDir, manifestPath)
+	}
+	if m.Claude.UUID == "" {
+		fmt.Printf("  ℹ Session '%s' needs Claude UUID association\n", sessionName)
+		fmt.Printf("    → Run 'agm session associate %s' to link\n", sessionName)
+		return false, true
+	}
+	return false, false
+}
+
+// createManifestForTmux creates a new manifest record for a tmux session that
+// has no Dolt entry yet, attempting to auto-detect the Claude UUID from
+// history. Returns (created, needsAssociation): created is true when the
+// manifest was successfully written; needsAssociation is true when no UUID
+// could be auto-detected and the user must run `agm session associate`.
+func createManifestForTmux(adapter *dolt.Adapter, sessionName, manifestDir, manifestPath string) (bool, bool) {
+	workDir, err := tmux.GetCurrentWorkingDirectory(sessionName)
+	if err != nil {
+		workDir = os.Getenv("HOME")
+	}
+	if err := os.MkdirAll(manifestDir, 0700); err != nil {
+		ui.PrintWarning(fmt.Sprintf("Failed to create manifest directory for %s: %v", sessionName, err))
+		return false, false
+	}
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     fmt.Sprintf("session-%s", sessionName),
+		Name:          sessionName,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Lifecycle:     "",
+		Context:       manifest.Context{Project: workDir},
+		Claude:        manifest.Claude{},
+		Tmux:          manifest.Tmux{SessionName: sessionName},
+	}
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		historyPath := filepath.Join(homeDir, ".claude", "history.jsonl")
+		detector := detection.NewDetector(historyPath, 5*time.Minute, adapter)
+		result, err := detector.DetectUUID(m)
+		if err == nil && result.UUID != "" && result.Confidence == "high" {
+			m.Claude.UUID = result.UUID
+		}
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		ui.PrintWarning(fmt.Sprintf("Failed to create session in Dolt for %s: %v", sessionName, err))
+		return false, false
+	}
+	_ = git.CommitManifest(manifestPath, "sync", sessionName)
+	if m.Claude.UUID != "" {
+		ui.PrintSuccess(fmt.Sprintf("Created manifest for tmux session '%s' (UUID auto-detected)", sessionName))
+		return true, false
+	}
+	ui.PrintSuccess(fmt.Sprintf("Created manifest for tmux session '%s'", sessionName))
+	fmt.Printf("  → Run 'agm session associate %s' to link Claude UUID\n", sessionName)
+	return true, true
 }
 
 func init() {

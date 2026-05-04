@@ -121,45 +121,8 @@ func PrintText(report *Report) {
 	fmt.Printf("\n%s\n", ui.Bold(fmt.Sprintf("Session Resumability Validation (%d sessions)", report.TotalSessions)))
 	fmt.Printf("Validated at: %s\n\n", report.ValidatedAt.Format("2006-01-02 15:04:05"))
 
-	// Session results
 	for _, session := range report.Sessions {
-		switch session.Status {
-		case "resumable":
-			fmt.Printf("  %s %s\n", ui.Green("✓"), ui.Bold(session.Name))
-			if session.Path != "" {
-				fmt.Printf("    %s\n", ui.Blue(session.Path))
-			}
-
-		case "failed":
-			fmt.Printf("  %s %s\n", ui.Red("✗"), ui.Bold(session.Name))
-			if session.Path != "" {
-				fmt.Printf("    %s\n", ui.Blue(session.Path))
-			}
-			for i, issue := range session.Issues {
-				fmt.Printf("    %s %s\n", ui.Yellow("Issue:"), issue.Message)
-				if issue.Fix != "" {
-					fmt.Printf("    %s %s\n", ui.Green("Fix:"), issue.Fix)
-				}
-				if issue.AutoFixable {
-					fmt.Printf("    %s\n", ui.Green("(auto-fixable)"))
-				}
-				if i < len(session.Issues)-1 {
-					fmt.Println()
-				}
-			}
-
-		case "unknown":
-			fmt.Printf("  %s %s\n", ui.Yellow("?"), ui.Bold(session.Name))
-			if session.Path != "" {
-				fmt.Printf("    %s\n", ui.Blue(session.Path))
-			}
-			for _, issue := range session.Issues {
-				fmt.Printf("    %s %s\n", ui.Yellow("Issue:"), issue.Message)
-				if issue.Fix != "" {
-					fmt.Printf("    %s %s\n", ui.Green("Fix:"), issue.Fix)
-				}
-			}
-		}
+		printSessionStatus(session)
 		fmt.Println()
 	}
 
@@ -202,6 +165,46 @@ func PrintText(report *Report) {
 		fmt.Printf("%s All sessions can resume successfully!\n", ui.Green("✓"))
 	}
 	fmt.Println()
+}
+
+// printSessionStatus prints one block per validated session (header line plus
+// per-issue lines for failed/unknown statuses).
+func printSessionStatus(session SessionResult) {
+	switch session.Status {
+	case "resumable":
+		fmt.Printf("  %s %s\n", ui.Green("✓"), ui.Bold(session.Name))
+		if session.Path != "" {
+			fmt.Printf("    %s\n", ui.Blue(session.Path))
+		}
+	case "failed":
+		fmt.Printf("  %s %s\n", ui.Red("✗"), ui.Bold(session.Name))
+		if session.Path != "" {
+			fmt.Printf("    %s\n", ui.Blue(session.Path))
+		}
+		for i, issue := range session.Issues {
+			fmt.Printf("    %s %s\n", ui.Yellow("Issue:"), issue.Message)
+			if issue.Fix != "" {
+				fmt.Printf("    %s %s\n", ui.Green("Fix:"), issue.Fix)
+			}
+			if issue.AutoFixable {
+				fmt.Printf("    %s\n", ui.Green("(auto-fixable)"))
+			}
+			if i < len(session.Issues)-1 {
+				fmt.Println()
+			}
+		}
+	case "unknown":
+		fmt.Printf("  %s %s\n", ui.Yellow("?"), ui.Bold(session.Name))
+		if session.Path != "" {
+			fmt.Printf("    %s\n", ui.Blue(session.Path))
+		}
+		for _, issue := range session.Issues {
+			fmt.Printf("    %s %s\n", ui.Yellow("Issue:"), issue.Message)
+			if issue.Fix != "" {
+				fmt.Printf("    %s %s\n", ui.Green("Fix:"), issue.Fix)
+			}
+		}
+	}
 }
 
 // StandardReport represents the standardized health check JSON schema

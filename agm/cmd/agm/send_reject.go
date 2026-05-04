@@ -107,29 +107,9 @@ func runReject(cmd *cobra.Command, args []string) error {
 			sessionName, guardResult.Error())
 	}
 
-	// Get rejection reason
-	var reason string
-	if rejectReason != "" {
-		reason = rejectReason
-	} else if rejectReasonFile != "" {
-		// Read from file
-		content, err := os.ReadFile(rejectReasonFile)
-		if err != nil {
-			return fmt.Errorf("failed to read reason file: %w", err)
-		}
-
-		// For .md files, extract the standard prompt
-		if len(rejectReasonFile) > 3 && rejectReasonFile[len(rejectReasonFile)-3:] == ".md" {
-			// Try to extract "## Standard Prompt (Recommended)" section
-			extracted := extractStandardPrompt(string(content))
-			if extracted != "" {
-				reason = extracted
-			} else {
-				reason = string(content)
-			}
-		} else {
-			reason = string(content)
-		}
+	reason, err := loadRejectionReason()
+	if err != nil {
+		return err
 	}
 
 	// Get AGM socket path for all tmux commands
@@ -172,6 +152,28 @@ func runReject(cmd *cobra.Command, args []string) error {
 
 	ui.PrintSuccess(fmt.Sprintf("Rejected permission prompt in '%s' with reason (%d chars)", sessionName, len(reason)))
 	return nil
+}
+
+// loadRejectionReason reads the rejection reason from --reason or --reason-file.
+// For .md reason files it tries to extract the "## Standard Prompt (Recommended)"
+// section first, falling back to the raw file contents.
+func loadRejectionReason() (string, error) {
+	if rejectReason != "" {
+		return rejectReason, nil
+	}
+	if rejectReasonFile == "" {
+		return "", nil
+	}
+	content, err := os.ReadFile(rejectReasonFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read reason file: %w", err)
+	}
+	if len(rejectReasonFile) > 3 && rejectReasonFile[len(rejectReasonFile)-3:] == ".md" {
+		if extracted := extractStandardPrompt(string(content)); extracted != "" {
+			return extracted, nil
+		}
+	}
+	return string(content), nil
 }
 
 // detectNoOptionPosition detects how many Down presses are needed to reach "No" option

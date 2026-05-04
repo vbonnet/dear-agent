@@ -13,6 +13,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/backup"
 	"github.com/vbonnet/dear-agent/agm/internal/conversation"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
 
@@ -112,38 +113,7 @@ func runCleanupTestSessions(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to list sessions: %w", err)
 	}
 
-	// Step 2: Filter by pattern and analyze conversation
-	var candidates []sessionCandidate
-	for _, m := range manifests {
-		// Skip archived sessions
-		if m.Lifecycle == "archived" {
-			continue
-		}
-
-		// Filter by pattern
-		if !namePattern.MatchString(m.Name) {
-			continue
-		}
-
-		// Build conversation path
-		conversationPath := filepath.Join(sessionsDir, m.SessionID, "conversation.jsonl")
-
-		// Count messages
-		messageCount, err := conversation.CountMessages(conversationPath)
-		if err != nil {
-			// Log warning but continue
-			fmt.Fprintf(os.Stderr, "Warning: Failed to count messages for %s: %v\n", m.Name, err)
-			messageCount = 0
-		}
-
-		candidates = append(candidates, sessionCandidate{
-			SessionID:    m.SessionID,
-			Name:         m.Name,
-			MessageCount: messageCount,
-			LastActivity: m.UpdatedAt,
-			ManifestPath: filepath.Join(sessionsDir, m.SessionID),
-		})
-	}
+	candidates := buildCleanupCandidates(manifests, namePattern, sessionsDir)
 
 	if len(candidates) == 0 {
 		ui.PrintSuccess("No matching sessions found")
@@ -187,52 +157,7 @@ func runCleanupTestSessions(cmd *cobra.Command, args []string) error {
 	// Step 5: Delete selected sessions
 	fmt.Println()
 	fmt.Println(ui.Blue("Deleting selected sessions..."))
-	deletedCount := 0
-	backupPaths := []string{}
-
-	for _, sessionID := range selectedIDs {
-		// Find candidate info
-		var candidate *sessionCandidate
-		for i := range candidates {
-			if candidates[i].SessionID == sessionID {
-				candidate = &candidates[i]
-				break
-			}
-		}
-		if candidate == nil {
-			continue
-		}
-
-		fmt.Printf("\n  • %s (ID: %s, %d messages)\n", candidate.Name, sessionID[:8], candidate.MessageCount)
-
-		// Backup session
-		fmt.Printf("    Backing up... ")
-		backupPath, err := backup.BackupSessionFromDir(sessionID, sessionsDir)
-		if err != nil {
-			fmt.Printf("FAILED: %v\n", err)
-			fmt.Printf("    Skipping deletion for safety\n")
-			continue
-		}
-		fmt.Printf("✓ Backed up to %s\n", backupPath)
-		backupPaths = append(backupPaths, backupPath)
-
-		// Verify backup exists
-		if _, err := os.Stat(backupPath); os.IsNotExist(err) {
-			fmt.Printf("    ERROR: Backup verification failed\n")
-			fmt.Printf("    Skipping deletion for safety\n")
-			continue
-		}
-
-		// Delete session directory
-		fmt.Printf("    Deleting session directory... ")
-		sessionDir := filepath.Join(sessionsDir, sessionID)
-		if err := os.RemoveAll(sessionDir); err != nil {
-			fmt.Printf("FAILED: %v\n", err)
-			continue
-		}
-		fmt.Printf("✓ Deleted\n")
-		deletedCount++
-	}
+	deletedCount, backupPaths := deleteSelectedSessions(selectedIDs, candidates, sessionsDir)
 
 	// Step 6: Report results
 	fmt.Println()
@@ -250,6 +175,81 @@ func runCleanupTestSessions(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// buildCleanupCandidates filters manifests by namePattern (skipping archived
+// sessions) and returns one sessionCandidate per match, including its message
+// count read from the conversation file.
+func buildCleanupCandidates(manifests []*manifest.Manifest, namePattern *regexp.Regexp, sessionsDir string) []sessionCandidate {
+	var candidates []sessionCandidate
+	for _, m := range manifests {
+		if m.Lifecycle == "archived" {
+			continue
+		}
+		if !namePattern.MatchString(m.Name) {
+			continue
+		}
+		conversationPath := filepath.Join(sessionsDir, m.SessionID, "conversation.jsonl")
+		messageCount, err := conversation.CountMessages(conversationPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to count messages for %s: %v\n", m.Name, err)
+			messageCount = 0
+		}
+		candidates = append(candidates, sessionCandidate{
+			SessionID:    m.SessionID,
+			Name:         m.Name,
+			MessageCount: messageCount,
+			LastActivity: m.UpdatedAt,
+			ManifestPath: filepath.Join(sessionsDir, m.SessionID),
+		})
+	}
+	return candidates
+}
+
+// deleteSelectedSessions backs up and deletes each session in selectedIDs.
+// Returns (deletedCount, backupPaths). Sessions that fail backup are skipped.
+func deleteSelectedSessions(selectedIDs []string, candidates []sessionCandidate, sessionsDir string) (int, []string) {
+	deletedCount := 0
+	backupPaths := []string{}
+	for _, sessionID := range selectedIDs {
+		var candidate *sessionCandidate
+		for i := range candidates {
+			if candidates[i].SessionID == sessionID {
+				candidate = &candidates[i]
+				break
+			}
+		}
+		if candidate == nil {
+			continue
+		}
+		fmt.Printf("\n  • %s (ID: %s, %d messages)\n", candidate.Name, sessionID[:8], candidate.MessageCount)
+
+		fmt.Printf("    Backing up... ")
+		backupPath, err := backup.BackupSessionFromDir(sessionID, sessionsDir)
+		if err != nil {
+			fmt.Printf("FAILED: %v\n", err)
+			fmt.Printf("    Skipping deletion for safety\n")
+			continue
+		}
+		fmt.Printf("✓ Backed up to %s\n", backupPath)
+		backupPaths = append(backupPaths, backupPath)
+
+		if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+			fmt.Printf("    ERROR: Backup verification failed\n")
+			fmt.Printf("    Skipping deletion for safety\n")
+			continue
+		}
+
+		fmt.Printf("    Deleting session directory... ")
+		sessionDir := filepath.Join(sessionsDir, sessionID)
+		if err := os.RemoveAll(sessionDir); err != nil {
+			fmt.Printf("FAILED: %v\n", err)
+			continue
+		}
+		fmt.Printf("✓ Deleted\n")
+		deletedCount++
+	}
+	return deletedCount, backupPaths
 }
 
 func displayCandidatesTable(candidates []sessionCandidate) {

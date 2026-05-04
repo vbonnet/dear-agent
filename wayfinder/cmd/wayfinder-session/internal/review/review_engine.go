@@ -445,6 +445,7 @@ func (e *ReviewEngine) checkFile(filePath string, persona PersonaType, config Pe
 }
 
 // calculateMetrics aggregates metrics from all issues
+//nolint:gocyclo // reason: linear metric aggregator over many metric types
 func (e *ReviewEngine) calculateMetrics(issues []ReviewIssue) ReviewMetrics {
 	metrics := ReviewMetrics{}
 

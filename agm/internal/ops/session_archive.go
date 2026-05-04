@@ -67,85 +67,20 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 		return nil, ErrSessionArchived(m.Name)
 	}
 
-	// Check for supervisor session protection unless --force is set
-	if !req.Force && IsSupervisorSession(m.Name) {
-		return nil, &OpError{
-			Status:      403,
-			Type:        "archive/supervisor_protected",
-			Code:        ErrCodeVerificationFailed,
-			Title:       "Cannot archive protected supervisor session",
-			Detail:      fmt.Sprintf("Session '%s' is a protected supervisor session. Use --force to override.", m.Name),
-			Suggestions: []string{"use --force to override supervisor protection"},
-		}
+	if err := checkSupervisorProtection(m, req.Force); err != nil {
+		return nil, err
+	}
+	if err := checkActiveTmuxBlock(m, req.Force); err != nil {
+		return nil, err
 	}
 
-	// Check for active tmux session unless --force is set
-	if !req.Force && m.Tmux.SessionName != "" {
-		cmd := exec.Command("tmux", "has-session", "-t", m.Tmux.SessionName)
-		if err := cmd.Run(); err == nil {
-			// Session exists and is active
-			return nil, &OpError{
-				Status:      400,
-				Type:        "archive/active_tmux_session",
-				Code:        ErrCodeVerificationFailed,
-				Title:       "Cannot archive session with active tmux pane",
-				Detail:      "cannot archive session with active tmux pane — use --force to override",
-				Suggestions: []string{"use --force to override and archive anyway"},
-			}
-		}
-	}
-
-	// Compute current status for the result
 	previousStatus := computeSessionStatus(m, ctx.Tmux)
-
-	// Run completion verification against working directory
-	dir := m.WorkingDirectory
-	if dir == "" {
-		dir = m.Context.Project
+	verification := runArchiveVerification(m)
+	if err := blockOnVerification(verification, req.Force); err != nil {
+		return nil, err
 	}
-	verification := session.VerifyCompletion(dir)
-
-	// Block on critical verification failures unless --force
-	if verification.Critical() && !req.Force {
-		errs := verification.CriticalErrors()
-		detail := fmt.Sprintf("Cannot archive: %s. Fix and retry, or use --force to override.", strings.Join(errs, "; "))
-		return nil, &OpError{
-			Status:      400,
-			Type:        "archive/verification_failed",
-			Code:        ErrCodeVerificationFailed,
-			Title:       "Pre-archive verification failed",
-			Detail:      detail,
-			Suggestions: append(errs, "use --force to skip verification checks"),
-		}
-	}
-
-	// Check for pending delegations (warn, block unless --force)
-	if delegationDir, err := delegation.DefaultDir(); err == nil {
-		if tracker, err := delegation.NewTracker(delegationDir); err == nil {
-			if pending, err := tracker.Pending(m.Name); err == nil && len(pending) > 0 {
-				summaries := make([]string, 0, len(pending))
-				for _, d := range pending {
-					s := d.TaskSummary
-					if len(s) > 80 {
-						s = s[:77] + "..."
-					}
-					summaries = append(summaries, fmt.Sprintf("→ %s: %s [ID: %s]", d.To, s, d.MessageID))
-				}
-				if !req.Force {
-					detail := fmt.Sprintf("Cannot archive: %d pending delegation(s) have not been resolved:\n%s\n\nResolve with: agm delegation resolve-all %s\nOr use --force to override.",
-						len(pending), strings.Join(summaries, "\n"), m.Name)
-					return nil, &OpError{
-						Status:      400,
-						Type:        "archive/pending_delegations",
-						Code:        ErrCodeVerificationFailed,
-						Title:       "Pending delegations block archive",
-						Detail:      detail,
-						Suggestions: []string{"resolve delegations first", "use --force to skip"},
-					}
-				}
-				slog.Warn("Archiving with pending delegations", "session", m.Name, "count", len(pending))
-			}
-		}
+	if err := blockOnPendingDelegations(m, req.Force); err != nil {
+		return nil, err
 	}
 
 	// Dry run: return what would happen
@@ -160,21 +95,33 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 		}, nil
 	}
 
-	// Update lifecycle
 	m.Lifecycle = manifest.LifecycleArchived
 	m.UpdatedAt = time.Now()
-
 	if err := ctx.Storage.UpdateSession(m); err != nil {
 		return nil, ErrStorageError("archive_session", err)
 	}
 
-	// Best-effort: record trust event based on commit presence.
-	recordArchiveTrust(m.Name, m.WorkingDirectory, m.Context.Project, m.SessionID, m.CreatedAt)
+	mcpKilled, postCleanup := runArchiveCleanup(ctx, m, req.KeepSandbox)
 
-	// Best-effort: deregister this session from all monitor lists
+	return &ArchiveSessionResult{
+		Operation:           "archive_session",
+		SessionID:           m.SessionID,
+		Name:                m.Name,
+		PreviousStatus:      previousStatus,
+		Verification:        verification,
+		MCPProcessesCleaned: mcpKilled,
+		SandboxCleaned:      postCleanup.SandboxRemoved,
+		PostCleanup:         postCleanup,
+	}, nil
+}
+
+// runArchiveCleanup performs the post-update cleanup steps (trust event,
+// monitor deregister, MCP processes, tmux process group, worktree/sandbox
+// cleanup, additionalDirectories removal). Returns (mcpKilled, postCleanup).
+func runArchiveCleanup(ctx *OpContext, m *manifest.Manifest, keepSandbox bool) (int, *CleanupResult) {
+	recordArchiveTrust(m.Name, m.WorkingDirectory, m.Context.Project, m.SessionID, m.CreatedAt)
 	deregisterMonitor(ctx, m.Name)
 
-	// Best-effort MCP process cleanup
 	sandboxPath := ""
 	if m.Sandbox != nil {
 		sandboxPath = m.Sandbox.MergedPath
@@ -190,37 +137,13 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 		slog.Info("Cleaned up MCP processes during archive", "session", m.SessionID, "killed", mcpKilled)
 	}
 
-	// Best-effort: Kill process group before sandbox deletion to prevent zombie processes
-	if m.Tmux.SessionName != "" {
-		pidOut, err := exec.Command("tmux", "display-message", "-t", m.Tmux.SessionName, "-p", "#{pane_pid}").Output()
-		if err == nil {
-			pid := strings.TrimSpace(string(pidOut))
-			if pid != "" {
-				// Kill the entire process group (negative PID kills all processes in that group)
-				exec.Command("kill", "-TERM", "-"+pid).Run()
-				time.Sleep(contracts.Load().SessionLifecycle.ProcessKillGracePeriod.Duration)
-				slog.Info("Killed process group during archive", "session", m.SessionID, "pane_pid", pid)
-			}
-		}
-		// Kill tmux session
-		exec.Command("tmux", "kill-session", "-t", m.Tmux.SessionName).Run()
-		slog.Info("Killed tmux session during archive", "session", m.SessionID, "tmux", m.Tmux.SessionName)
-	}
-
-	// Post-archive resource cleanup: worktrees, branches, sandbox.
-	// WorkingDirectory is the sandbox merged path or repo root.
-	// The session name is used as the branch name by convention.
-	worktreePath := m.WorkingDirectory
-	repoPath := m.Context.Project
-	branchName := m.Name // session branch typically matches session name
+	killTmuxAndProcessGroup(m)
 
 	postCleanup := CleanupAfterArchive(
 		m.SessionID, m.Name,
-		worktreePath, repoPath, sandboxPath, branchName,
-		req.KeepSandbox,
+		m.WorkingDirectory, m.Context.Project, sandboxPath, m.Name,
+		keepSandbox,
 	)
-
-	// Also log sandbox cleanup to gc.jsonl for backward compatibility
 	if postCleanup.SandboxRemoved {
 		logGCEntry(gclog.Entry{
 			Operation:   "archive_sandbox_cleanup",
@@ -228,24 +151,130 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 			SessionName: m.Name,
 		})
 	}
-
-	// Best-effort: Remove sandbox path from Claude's additionalDirectories
 	if sandboxPath != "" {
 		if err := removeFromAdditionalDirectories(sandboxPath); err != nil {
 			slog.Warn("Failed to remove sandbox from additionalDirectories", "session", m.SessionID, "path", sandboxPath, "error", err)
 		}
 	}
+	return mcpKilled, postCleanup
+}
 
-	return &ArchiveSessionResult{
-		Operation:           "archive_session",
-		SessionID:           m.SessionID,
-		Name:                m.Name,
-		PreviousStatus:      previousStatus,
-		Verification:        verification,
-		MCPProcessesCleaned: mcpKilled,
-		SandboxCleaned:      postCleanup.SandboxRemoved,
-		PostCleanup:         postCleanup,
-	}, nil
+// checkSupervisorProtection blocks archive of supervisor sessions unless force.
+func checkSupervisorProtection(m *manifest.Manifest, force bool) error {
+	if force || !IsSupervisorSession(m.Name) {
+		return nil
+	}
+	return &OpError{
+		Status:      403,
+		Type:        "archive/supervisor_protected",
+		Code:        ErrCodeVerificationFailed,
+		Title:       "Cannot archive protected supervisor session",
+		Detail:      fmt.Sprintf("Session '%s' is a protected supervisor session. Use --force to override.", m.Name),
+		Suggestions: []string{"use --force to override supervisor protection"},
+	}
+}
+
+// checkActiveTmuxBlock blocks archive when the session has an active tmux pane.
+func checkActiveTmuxBlock(m *manifest.Manifest, force bool) error {
+	if force || m.Tmux.SessionName == "" {
+		return nil
+	}
+	cmd := exec.Command("tmux", "has-session", "-t", m.Tmux.SessionName)
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+	return &OpError{
+		Status:      400,
+		Type:        "archive/active_tmux_session",
+		Code:        ErrCodeVerificationFailed,
+		Title:       "Cannot archive session with active tmux pane",
+		Detail:      "cannot archive session with active tmux pane — use --force to override",
+		Suggestions: []string{"use --force to override and archive anyway"},
+	}
+}
+
+// runArchiveVerification runs completion verification on the session's working
+// directory (or context project as fallback).
+func runArchiveVerification(m *manifest.Manifest) *session.CompletionVerification {
+	dir := m.WorkingDirectory
+	if dir == "" {
+		dir = m.Context.Project
+	}
+	return session.VerifyCompletion(dir)
+}
+
+// blockOnVerification returns an error if verification flagged critical issues
+// and force is not set.
+func blockOnVerification(verification *session.CompletionVerification, force bool) error {
+	if !verification.Critical() || force {
+		return nil
+	}
+	errs := verification.CriticalErrors()
+	detail := fmt.Sprintf("Cannot archive: %s. Fix and retry, or use --force to override.", strings.Join(errs, "; "))
+	return &OpError{
+		Status:      400,
+		Type:        "archive/verification_failed",
+		Code:        ErrCodeVerificationFailed,
+		Title:       "Pre-archive verification failed",
+		Detail:      detail,
+		Suggestions: append(errs, "use --force to skip verification checks"),
+	}
+}
+
+// blockOnPendingDelegations errors when this session has unresolved
+// delegations (caller can pass force=true to override; warning is still logged).
+func blockOnPendingDelegations(m *manifest.Manifest, force bool) error {
+	delegationDir, err := delegation.DefaultDir()
+	if err != nil {
+		return nil
+	}
+	tracker, err := delegation.NewTracker(delegationDir)
+	if err != nil {
+		return nil
+	}
+	pending, err := tracker.Pending(m.Name)
+	if err != nil || len(pending) == 0 {
+		return nil
+	}
+	summaries := make([]string, 0, len(pending))
+	for _, d := range pending {
+		s := d.TaskSummary
+		if len(s) > 80 {
+			s = s[:77] + "..."
+		}
+		summaries = append(summaries, fmt.Sprintf("→ %s: %s [ID: %s]", d.To, s, d.MessageID))
+	}
+	if force {
+		slog.Warn("Archiving with pending delegations", "session", m.Name, "count", len(pending))
+		return nil
+	}
+	detail := fmt.Sprintf("Cannot archive: %d pending delegation(s) have not been resolved:\n%s\n\nResolve with: agm delegation resolve-all %s\nOr use --force to override.",
+		len(pending), strings.Join(summaries, "\n"), m.Name)
+	return &OpError{
+		Status:      400,
+		Type:        "archive/pending_delegations",
+		Code:        ErrCodeVerificationFailed,
+		Title:       "Pending delegations block archive",
+		Detail:      detail,
+		Suggestions: []string{"resolve delegations first", "use --force to skip"},
+	}
+}
+
+// killTmuxAndProcessGroup terminates the session's tmux process group and the
+// tmux session itself (best-effort).
+func killTmuxAndProcessGroup(m *manifest.Manifest) {
+	if m.Tmux.SessionName == "" {
+		return
+	}
+	if pidOut, err := exec.Command("tmux", "display-message", "-t", m.Tmux.SessionName, "-p", "#{pane_pid}").Output(); err == nil {
+		if pid := strings.TrimSpace(string(pidOut)); pid != "" {
+			exec.Command("kill", "-TERM", "-"+pid).Run()
+			time.Sleep(contracts.Load().SessionLifecycle.ProcessKillGracePeriod.Duration)
+			slog.Info("Killed process group during archive", "session", m.SessionID, "pane_pid", pid)
+		}
+	}
+	exec.Command("tmux", "kill-session", "-t", m.Tmux.SessionName).Run()
+	slog.Info("Killed tmux session during archive", "session", m.SessionID, "tmux", m.Tmux.SessionName)
 }
 
 // cleanupSandboxDir unmounts and removes the sandbox directory for a session.

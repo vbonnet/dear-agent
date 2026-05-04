@@ -90,45 +90,12 @@ func runCleanupWorktrees(cmd *cobra.Command, args []string) error {
 	errorCount := 0
 
 	for _, wt := range worktrees {
-		label := fmt.Sprintf("%s (branch: %s, session: %s)", wt.WorktreePath, wt.Branch, wt.SessionName)
-
-		if wtCleanupDryRun {
-			fmt.Printf("[dry-run] Would remove: %s\n", label)
-			continue
-		}
-
-		// Check if directory still exists
-		if _, statErr := os.Stat(wt.WorktreePath); os.IsNotExist(statErr) {
-			fmt.Printf("Already gone: %s\n", label)
-			if err := adapter.UntrackWorktree(ctx, wt.WorktreePath); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to untrack worktree %s: %v\n", wt.WorktreePath, err)
-			}
-			removedCount++
-			continue
-		}
-
-		// Remove the worktree
-		removeErr := gitpkg.RemoveWorktree(wt.RepoPath, wt.WorktreePath, wtCleanupForce)
-		if removeErr != nil {
-			fmt.Fprintf(os.Stderr, "Failed to remove %s: %v\n", label, removeErr)
+		removed, hadErr := cleanupOneWorktree(ctx, adapter, wt)
+		if hadErr {
 			errorCount++
-			continue
 		}
-
-		fmt.Printf("Removed: %s\n", label)
-		if err := adapter.UntrackWorktree(ctx, wt.WorktreePath); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to untrack worktree %s: %v\n", wt.WorktreePath, err)
-		}
-		removedCount++
-
-		// Optionally delete the branch
-		if wtCleanupDeleteBranches && wt.Branch != "" {
-			branchErr := gitpkg.DeleteBranch(wt.RepoPath, wt.Branch, wtCleanupForce)
-			if branchErr != nil {
-				fmt.Fprintf(os.Stderr, "  Warning: failed to delete branch %s: %v\n", wt.Branch, branchErr)
-			} else {
-				fmt.Printf("  Deleted branch: %s\n", wt.Branch)
-			}
+		if removed {
+			removedCount++
 		}
 	}
 
@@ -143,4 +110,44 @@ func runCleanupWorktrees(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// cleanupOneWorktree removes a single worktree (or reports it would be removed
+// in dry-run mode). Returns (removed, errored): removed counts both successful
+// removals and "already gone" entries that we untracked; errored signals a
+// non-fatal failure so the caller can keep going through the slice.
+func cleanupOneWorktree(ctx context.Context, adapter *dolt.Adapter, wt dolt.WorktreeRecord) (bool, bool) {
+	label := fmt.Sprintf("%s (branch: %s, session: %s)", wt.WorktreePath, wt.Branch, wt.SessionName)
+
+	if wtCleanupDryRun {
+		fmt.Printf("[dry-run] Would remove: %s\n", label)
+		return false, false
+	}
+
+	if _, statErr := os.Stat(wt.WorktreePath); os.IsNotExist(statErr) {
+		fmt.Printf("Already gone: %s\n", label)
+		if err := adapter.UntrackWorktree(ctx, wt.WorktreePath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to untrack worktree %s: %v\n", wt.WorktreePath, err)
+		}
+		return true, false
+	}
+
+	if removeErr := gitpkg.RemoveWorktree(wt.RepoPath, wt.WorktreePath, wtCleanupForce); removeErr != nil {
+		fmt.Fprintf(os.Stderr, "Failed to remove %s: %v\n", label, removeErr)
+		return false, true
+	}
+
+	fmt.Printf("Removed: %s\n", label)
+	if err := adapter.UntrackWorktree(ctx, wt.WorktreePath); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to untrack worktree %s: %v\n", wt.WorktreePath, err)
+	}
+
+	if wtCleanupDeleteBranches && wt.Branch != "" {
+		if branchErr := gitpkg.DeleteBranch(wt.RepoPath, wt.Branch, wtCleanupForce); branchErr != nil {
+			fmt.Fprintf(os.Stderr, "  Warning: failed to delete branch %s: %v\n", wt.Branch, branchErr)
+		} else {
+			fmt.Printf("  Deleted branch: %s\n", wt.Branch)
+		}
+	}
+	return true, false
 }

@@ -287,114 +287,12 @@ func ValidateArtifact(frontmatter map[string]interface{}) []WayfinderValidationE
 // validateCoreFields validates the core frontmatter fields.
 func validateCoreFields(fm map[string]interface{}) []WayfinderValidationError {
 	var errors []WayfinderValidationError
-
-	// Title validation
-	title, ok := fm["title"].(string)
-	switch {
-	case !ok:
-		errors = append(errors, WayfinderValidationError{Field: "title", Message: "missing or invalid (must be a string)"})
-	case len(title) < 10:
-		errors = append(errors, WayfinderValidationError{Field: "title", Message: "must be at least 10 characters"})
-	case len(title) > 150:
-		errors = append(errors, WayfinderValidationError{Field: "title", Message: "must be at most 150 characters"})
-	}
-
-	// Date validation
-	var dateStr string
-	switch v := fm["date"].(type) {
-	case string:
-		dateStr = v
-	case time.Time:
-		dateStr = v.Format("2006-01-02")
-	default:
-		errors = append(errors, WayfinderValidationError{Field: "date", Message: "missing or invalid (must be a string)"})
-	}
-	if dateStr != "" && !isValidDate(dateStr) {
-		errors = append(errors, WayfinderValidationError{Field: "date", Message: "invalid format (must be YYYY-MM-DD)"})
-	}
-
-	// Status validation
-	status, ok := fm["status"].(string)
-	if !ok {
-		errors = append(errors, WayfinderValidationError{Field: "status", Message: "missing or invalid (must be a string)"})
-	} else if !contains(ValidStatuses, status) {
-		errors = append(errors, WayfinderValidationError{
-			Field:   "status",
-			Message: fmt.Sprintf("invalid status '%s' (must be one of: %s)", status, strings.Join(ValidStatuses, ", ")),
-		})
-	}
-
-	// Project validation (kebab-case)
-	project, ok := fm["project"].(string)
-	if !ok {
-		errors = append(errors, WayfinderValidationError{Field: "project", Message: "missing or invalid (must be a string)"})
-	} else if !isValidProjectSlug(project) {
-		errors = append(errors, WayfinderValidationError{Field: "project", Message: "invalid format (must be kebab-case)"})
-	}
-
-	// Tags validation
-	tagsRaw, ok := fm["tags"]
-	if !ok {
-		errors = append(errors, WayfinderValidationError{Field: "tags", Message: "missing"})
-	} else {
-		tags, ok := tagsRaw.([]interface{})
-		switch {
-		case !ok:
-			errors = append(errors, WayfinderValidationError{Field: "tags", Message: "must be an array"})
-		case len(tags) == 0:
-			errors = append(errors, WayfinderValidationError{Field: "tags", Message: "must have at least one tag"})
-		default:
-			// Validate each tag
-			seen := make(map[string]bool)
-			for i, tagRaw := range tags {
-				tag, ok := tagRaw.(string)
-				if !ok {
-					errors = append(errors, WayfinderValidationError{
-						Field:   fmt.Sprintf("tags[%d]", i),
-						Message: "must be a string",
-					})
-					continue
-				}
-				if !isValidTag(tag) {
-					errors = append(errors, WayfinderValidationError{
-						Field:   fmt.Sprintf("tags[%d]", i),
-						Message: "invalid format (must be lowercase alphanumeric with hyphens)",
-					})
-				}
-				if seen[tag] {
-					errors = append(errors, WayfinderValidationError{
-						Field:   fmt.Sprintf("tags[%d]", i),
-						Message: fmt.Sprintf("duplicate tag '%s'", tag),
-					})
-				}
-				seen[tag] = true
-			}
-		}
-	}
-
-	// Schema version validation
-	schemaVersion, ok := fm["schema_version"].(string)
-	if !ok {
-		errors = append(errors, WayfinderValidationError{Field: "schema_version", Message: "missing or invalid (must be a string)"})
-	} else if !isValidSemver(schemaVersion) {
-		errors = append(errors, WayfinderValidationError{Field: "schema_version", Message: "invalid format (must be semver: X.Y or X.Y.Z)"})
-	}
-
-	// Wayfinder plugin version validation
-	wayfinderVersion, ok := fm["wayfinder_plugin_version"].(string)
-	if !ok {
-		errors = append(errors, WayfinderValidationError{Field: "wayfinder_plugin_version", Message: "missing or invalid (must be a string)"})
-	} else if !isValidFullSemver(wayfinderVersion) {
-		errors = append(errors, WayfinderValidationError{Field: "wayfinder_plugin_version", Message: "invalid format (must be semver: X.Y.Z)"})
-	}
-
-	// Template version validation
-	templateVersion, ok := fm["template_version"].(string)
-	if !ok {
-		errors = append(errors, WayfinderValidationError{Field: "template_version", Message: "missing or invalid (must be a string)"})
-	} else if !isValidFullSemver(templateVersion) {
-		errors = append(errors, WayfinderValidationError{Field: "template_version", Message: "invalid format (must be semver: X.Y.Z)"})
-	}
+	errors = append(errors, validateTitle(fm)...)
+	errors = append(errors, validateDate(fm)...)
+	errors = append(errors, validateStatus(fm)...)
+	errors = append(errors, validateProject(fm)...)
+	errors = append(errors, validateTags(fm)...)
+	errors = append(errors, validateVersionFields(fm)...)
 
 	// Blockers validation (optional)
 	if blockersRaw, exists := fm["blockers"]; exists {
@@ -420,6 +318,122 @@ func validateCoreFields(fm map[string]interface{}) []WayfinderValidationError {
 }
 
 // validatePhaseConstraints validates phase-specific constraints.
+func validateTitle(fm map[string]interface{}) []WayfinderValidationError {
+	var errs []WayfinderValidationError
+	title, ok := fm["title"].(string)
+	switch {
+	case !ok:
+		errs = append(errs, WayfinderValidationError{Field: "title", Message: "missing or invalid (must be a string)"})
+	case len(title) < 10:
+		errs = append(errs, WayfinderValidationError{Field: "title", Message: "must be at least 10 characters"})
+	case len(title) > 150:
+		errs = append(errs, WayfinderValidationError{Field: "title", Message: "must be at most 150 characters"})
+	}
+	return errs
+}
+
+func validateDate(fm map[string]interface{}) []WayfinderValidationError {
+	var errs []WayfinderValidationError
+	var dateStr string
+	switch v := fm["date"].(type) {
+	case string:
+		dateStr = v
+	case time.Time:
+		dateStr = v.Format("2006-01-02")
+	default:
+		errs = append(errs, WayfinderValidationError{Field: "date", Message: "missing or invalid (must be a string)"})
+	}
+	if dateStr != "" && !isValidDate(dateStr) {
+		errs = append(errs, WayfinderValidationError{Field: "date", Message: "invalid format (must be YYYY-MM-DD)"})
+	}
+	return errs
+}
+
+func validateStatus(fm map[string]interface{}) []WayfinderValidationError {
+	status, ok := fm["status"].(string)
+	if !ok {
+		return []WayfinderValidationError{{Field: "status", Message: "missing or invalid (must be a string)"}}
+	}
+	if !contains(ValidStatuses, status) {
+		return []WayfinderValidationError{{
+			Field:   "status",
+			Message: fmt.Sprintf("invalid status '%s' (must be one of: %s)", status, strings.Join(ValidStatuses, ", ")),
+		}}
+	}
+	return nil
+}
+
+func validateProject(fm map[string]interface{}) []WayfinderValidationError {
+	project, ok := fm["project"].(string)
+	if !ok {
+		return []WayfinderValidationError{{Field: "project", Message: "missing or invalid (must be a string)"}}
+	}
+	if !isValidProjectSlug(project) {
+		return []WayfinderValidationError{{Field: "project", Message: "invalid format (must be kebab-case)"}}
+	}
+	return nil
+}
+
+func validateTags(fm map[string]interface{}) []WayfinderValidationError {
+	var errs []WayfinderValidationError
+	tagsRaw, ok := fm["tags"]
+	if !ok {
+		return []WayfinderValidationError{{Field: "tags", Message: "missing"}}
+	}
+	tags, ok := tagsRaw.([]interface{})
+	switch {
+	case !ok:
+		return []WayfinderValidationError{{Field: "tags", Message: "must be an array"}}
+	case len(tags) == 0:
+		return []WayfinderValidationError{{Field: "tags", Message: "must have at least one tag"}}
+	}
+	seen := make(map[string]bool)
+	for i, tagRaw := range tags {
+		tag, ok := tagRaw.(string)
+		if !ok {
+			errs = append(errs, WayfinderValidationError{
+				Field:   fmt.Sprintf("tags[%d]", i),
+				Message: "must be a string",
+			})
+			continue
+		}
+		if !isValidTag(tag) {
+			errs = append(errs, WayfinderValidationError{
+				Field:   fmt.Sprintf("tags[%d]", i),
+				Message: "invalid format (must be lowercase alphanumeric with hyphens)",
+			})
+		}
+		if seen[tag] {
+			errs = append(errs, WayfinderValidationError{
+				Field:   fmt.Sprintf("tags[%d]", i),
+				Message: fmt.Sprintf("duplicate tag '%s'", tag),
+			})
+		}
+		seen[tag] = true
+	}
+	return errs
+}
+
+func validateVersionFields(fm map[string]interface{}) []WayfinderValidationError {
+	var errs []WayfinderValidationError
+	if schemaVersion, ok := fm["schema_version"].(string); !ok {
+		errs = append(errs, WayfinderValidationError{Field: "schema_version", Message: "missing or invalid (must be a string)"})
+	} else if !isValidSemver(schemaVersion) {
+		errs = append(errs, WayfinderValidationError{Field: "schema_version", Message: "invalid format (must be semver: X.Y or X.Y.Z)"})
+	}
+	if wayfinderVersion, ok := fm["wayfinder_plugin_version"].(string); !ok {
+		errs = append(errs, WayfinderValidationError{Field: "wayfinder_plugin_version", Message: "missing or invalid (must be a string)"})
+	} else if !isValidFullSemver(wayfinderVersion) {
+		errs = append(errs, WayfinderValidationError{Field: "wayfinder_plugin_version", Message: "invalid format (must be semver: X.Y.Z)"})
+	}
+	if templateVersion, ok := fm["template_version"].(string); !ok {
+		errs = append(errs, WayfinderValidationError{Field: "template_version", Message: "missing or invalid (must be a string)"})
+	} else if !isValidFullSemver(templateVersion) {
+		errs = append(errs, WayfinderValidationError{Field: "template_version", Message: "invalid format (must be semver: X.Y.Z)"})
+	}
+	return errs
+}
+
 func validatePhaseConstraints(fm map[string]interface{}, schema *PhaseSchema) []WayfinderValidationError {
 	var errors []WayfinderValidationError
 

@@ -3,6 +3,7 @@ package harnesseffort
 // MergeConfigs deep-merges src into dst and returns the result.
 // src wins on conflict. Unknown provider keys in src are preserved.
 // Neither dst nor src are mutated.
+//nolint:gocyclo // reason: linear field-by-field merger
 func MergeConfigs(dst, src HarnessEffortConfig) HarnessEffortConfig {
 	result := copyConfig(dst)
 

@@ -242,16 +242,25 @@ func runVerifyAll() error {
 
 	fmt.Printf("Verifying %d DONE/OFFLINE session(s)...\n\n", len(candidates))
 
+	results, successCount, falseCount, errorCount := runVerifyAllPass(adapter, candidates)
+	printVerifyAllSummary(results, successCount, falseCount, errorCount)
+
+	if falseCount > 0 {
+		return fmt.Errorf("%d session(s) had false completions", falseCount)
+	}
+	return nil
+}
+
+// runVerifyAllPass iterates verifyOneForAll over candidates and tallies the
+// per-status counts. Returns (results, successCount, falseCount, errorCount).
+func runVerifyAllPass(adapter *dolt.Adapter, candidates []*manifest.Manifest) ([]VerifyResult, int, int, int) {
 	var results []VerifyResult
 	var successCount, falseCount, errorCount int
-
 	for i, m := range candidates {
 		name := sessionDisplayNameVerify(m)
 		fmt.Printf("[%d/%d] %s\n", i+1, len(candidates), name)
-
 		result := verifyOneForAll(adapter, m)
 		results = append(results, result)
-
 		switch result.Status {
 		case "COMMITS_FOUND":
 			successCount++
@@ -261,8 +270,11 @@ func runVerifyAll() error {
 			errorCount++
 		}
 	}
+	return results, successCount, falseCount, errorCount
+}
 
-	// Print summary
+// printVerifyAllSummary prints the per-session table and aggregate counts.
+func printVerifyAllSummary(results []VerifyResult, successCount, falseCount, errorCount int) {
 	fmt.Println()
 	fmt.Println(strings.Repeat("=", 60))
 	fmt.Printf("Verify All Summary (%d sessions)\n", len(results))
@@ -296,11 +308,6 @@ func runVerifyAll() error {
 	if errorCount > 0 {
 		ui.PrintWarning(fmt.Sprintf("%d session(s) had errors", errorCount))
 	}
-
-	if falseCount > 0 {
-		return fmt.Errorf("%d session(s) had false completions", falseCount)
-	}
-	return nil
 }
 
 // verifyOneForAll verifies a single session in --all mode, capturing the result.

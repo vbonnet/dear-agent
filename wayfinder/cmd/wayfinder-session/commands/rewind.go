@@ -47,6 +47,7 @@ func init() {
 	RewindCmd.Flags().StringVar(&rewindLearnings, "learnings", "", "Pre-provide learnings (bypasses prompt)")
 }
 
+//nolint:gocyclo // reason: linear CLI driver covering many rewind targets
 func runRewind(cmd *cobra.Command, args []string) error {
 	targetPhase := args[0]
 

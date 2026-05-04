@@ -70,43 +70,27 @@ func (sr *StallRecovery) Recover(ctx context.Context, event StallEvent) (Recover
 		errorContext = fmt.Sprintf(" [Previous attempt: %s]", retryState.LastError)
 	}
 
+	var (
+		recovered RecoveryAction
+		recovErr  error
+	)
 	switch event.StallType {
 	case "permission_prompt":
-		action, err := sr.recoverPermissionPromptStall(ctx, event, errorContext)
-		if err != nil {
-			sr.recordFailure(event.SessionName, err.Error())
-			action.Error = err.Error()
-		}
-		if err == nil {
-			sr.publishRecovered(event, action)
-		}
-		return action, err
-
+		recovered, recovErr = sr.recoverPermissionPromptStall(ctx, event, errorContext)
 	case "no_commit":
-		action, err := sr.recoverNoCommitStall(ctx, event, errorContext)
-		if err != nil {
-			sr.recordFailure(event.SessionName, err.Error())
-			action.Error = err.Error()
-		}
-		if err == nil {
-			sr.publishRecovered(event, action)
-		}
-		return action, err
-
+		recovered, recovErr = sr.recoverNoCommitStall(ctx, event, errorContext)
 	case "error_loop":
-		action, err := sr.recoverErrorLoopStall(ctx, event, errorContext)
-		if err != nil {
-			sr.recordFailure(event.SessionName, err.Error())
-			action.Error = err.Error()
-		}
-		if err == nil {
-			sr.publishRecovered(event, action)
-		}
-		return action, err
-
+		recovered, recovErr = sr.recoverErrorLoopStall(ctx, event, errorContext)
 	default:
 		return action, fmt.Errorf("unknown stall type: %s", event.StallType)
 	}
+	if recovErr != nil {
+		sr.recordFailure(event.SessionName, recovErr.Error())
+		recovered.Error = recovErr.Error()
+	} else {
+		sr.publishRecovered(event, recovered)
+	}
+	return recovered, recovErr
 }
 
 // recoverPermissionPromptStall handles recovery from permission prompt stalls.

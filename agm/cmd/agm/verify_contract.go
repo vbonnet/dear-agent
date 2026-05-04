@@ -43,57 +43,58 @@ func runVerifyContractDrift() error {
 	}
 
 	return printResult(result, func() {
-		fmt.Fprintf(os.Stderr, "Specs dir:  %s\n", specsDir)
-		if verifyContractsFile != "" {
-			fmt.Fprintf(os.Stderr, "Contracts:  %s\n", verifyContractsFile)
-		} else {
-			fmt.Fprintf(os.Stderr, "Contracts:  embedded defaults\n")
-		}
-		fmt.Fprintf(os.Stderr, "SPECs:      %d\n", result.TotalSpecs)
-		fmt.Fprintln(os.Stderr)
+		printContractDriftReport(result, specsDir)
+	})
+}
 
-		// Group findings by SPEC file
-		bySpec := make(map[string][]ops.DriftFinding)
-		var specOrder []string
-		for _, f := range result.Findings {
-			if _, seen := bySpec[f.SPECFile]; !seen {
-				specOrder = append(specOrder, f.SPECFile)
+// printContractDriftReport prints the human-readable contract-drift report
+// (header, per-SPEC findings table, summary line).
+func printContractDriftReport(result *ops.ContractDriftResult, specsDir string) {
+	fmt.Fprintf(os.Stderr, "Specs dir:  %s\n", specsDir)
+	if verifyContractsFile != "" {
+		fmt.Fprintf(os.Stderr, "Contracts:  %s\n", verifyContractsFile)
+	} else {
+		fmt.Fprintf(os.Stderr, "Contracts:  embedded defaults\n")
+	}
+	fmt.Fprintf(os.Stderr, "SPECs:      %d\n", result.TotalSpecs)
+	fmt.Fprintln(os.Stderr)
+
+	bySpec := make(map[string][]ops.DriftFinding)
+	var specOrder []string
+	for _, f := range result.Findings {
+		if _, seen := bySpec[f.SPECFile]; !seen {
+			specOrder = append(specOrder, f.SPECFile)
+		}
+		bySpec[f.SPECFile] = append(bySpec[f.SPECFile], f)
+	}
+	for _, spec := range specOrder {
+		fmt.Fprintf(os.Stderr, "  %s\n", spec)
+		for _, f := range bySpec[spec] {
+			icon := "PASS"
+			//nolint:exhaustive // intentional partial: handles the relevant subset
+			switch f.Severity {
+			case ops.DriftWarn:
+				icon = "WARN"
+			case ops.DriftFail:
+				icon = "FAIL"
 			}
-			bySpec[f.SPECFile] = append(bySpec[f.SPECFile], f)
-		}
-
-		for _, spec := range specOrder {
-			findings := bySpec[spec]
-			fmt.Fprintf(os.Stderr, "  %s\n", spec)
-			for _, f := range findings {
-				icon := "PASS"
-				//nolint:exhaustive // intentional partial: handles the relevant subset
-				switch f.Severity {
-				case ops.DriftWarn:
-					icon = "WARN"
-				case ops.DriftFail:
-					icon = "FAIL"
-				}
-				fmt.Fprintf(os.Stderr, "    [%s] %s: %s", icon, f.Section, f.Metric)
-				if f.Severity == ops.DriftFail && f.Expected != "" {
-					fmt.Fprintf(os.Stderr, " (spec=%s, contract=%s)", f.Expected, f.Actual)
-				}
-				fmt.Fprintln(os.Stderr)
+			fmt.Fprintf(os.Stderr, "    [%s] %s: %s", icon, f.Section, f.Metric)
+			if f.Severity == ops.DriftFail && f.Expected != "" {
+				fmt.Fprintf(os.Stderr, " (spec=%s, contract=%s)", f.Expected, f.Actual)
 			}
 			fmt.Fprintln(os.Stderr)
 		}
-
-		// Summary
-		fmt.Fprintln(os.Stderr, strings.Repeat("=", 60))
-		switch result.OverallStatus {
-		case ops.DriftPass:
-			ui.PrintSuccess(fmt.Sprintf("No drift detected (%d checks passed)", result.PassCount))
-		case ops.DriftWarn:
-			ui.PrintWarning(fmt.Sprintf("%d warning(s), %d passed", result.WarnCount, result.PassCount))
-		case ops.DriftFail:
-			ui.PrintWarning(fmt.Sprintf("%d FAIL, %d warnings, %d passed", result.FailCount, result.WarnCount, result.PassCount))
-		}
-	})
+		fmt.Fprintln(os.Stderr)
+	}
+	fmt.Fprintln(os.Stderr, strings.Repeat("=", 60))
+	switch result.OverallStatus {
+	case ops.DriftPass:
+		ui.PrintSuccess(fmt.Sprintf("No drift detected (%d checks passed)", result.PassCount))
+	case ops.DriftWarn:
+		ui.PrintWarning(fmt.Sprintf("%d warning(s), %d passed", result.WarnCount, result.PassCount))
+	case ops.DriftFail:
+		ui.PrintWarning(fmt.Sprintf("%d FAIL, %d warnings, %d passed", result.FailCount, result.WarnCount, result.PassCount))
+	}
 }
 
 // resolveDefaultSpecsDir finds the specs directory relative to the binary location

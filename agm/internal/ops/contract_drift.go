@@ -174,43 +174,7 @@ func ContractDrift(_ *OpContext, req *ContractDriftRequest) (*ContractDriftResul
 		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "SPEC-") || !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
-
-		result.TotalSpecs++
-
-		data, err := os.ReadFile(filepath.Join(req.SpecsDir, entry.Name()))
-		if err != nil {
-			result.Findings = append(result.Findings, DriftFinding{
-				SPECFile: entry.Name(),
-				Section:  "file",
-				Metric:   "readable",
-				Severity: DriftFail,
-				Detail:   fmt.Sprintf("cannot read SPEC: %v", err),
-			})
-			result.FailCount++
-			continue
-		}
-
-		content := string(data)
-		section, ok := specSectionMap[entry.Name()]
-		if !ok {
-			result.Findings = append(result.Findings, DriftFinding{
-				SPECFile: entry.Name(),
-				Section:  "mapping",
-				Metric:   "section_mapping",
-				Severity: DriftWarn,
-				Detail:   "SPEC file has no known contract section mapping",
-			})
-			result.WarnCount++
-			continue
-		}
-
-		// Check SLO drift
-		sloFindings := checkSLODrift(entry.Name(), section, content, slo)
-		result.Findings = append(result.Findings, sloFindings...)
-
-		// Check invariant coverage
-		invFindings := checkInvariantCoverage(entry.Name(), content)
-		result.Findings = append(result.Findings, invFindings...)
+		processSpecFile(req.SpecsDir, entry.Name(), slo, result)
 	}
 
 	// Tally
@@ -232,6 +196,40 @@ func ContractDrift(_ *OpContext, req *ContractDriftRequest) (*ContractDriftResul
 	}
 
 	return result, nil
+}
+
+// processSpecFile loads a single SPEC file, runs SLO and invariant checks, and
+// appends any findings to result. Increments TotalSpecs and per-severity
+// counters as appropriate.
+func processSpecFile(specsDir, name string, slo *contracts.SLOContracts, result *ContractDriftResult) {
+	result.TotalSpecs++
+	data, err := os.ReadFile(filepath.Join(specsDir, name))
+	if err != nil {
+		result.Findings = append(result.Findings, DriftFinding{
+			SPECFile: name,
+			Section:  "file",
+			Metric:   "readable",
+			Severity: DriftFail,
+			Detail:   fmt.Sprintf("cannot read SPEC: %v", err),
+		})
+		result.FailCount++
+		return
+	}
+	content := string(data)
+	section, ok := specSectionMap[name]
+	if !ok {
+		result.Findings = append(result.Findings, DriftFinding{
+			SPECFile: name,
+			Section:  "mapping",
+			Metric:   "section_mapping",
+			Severity: DriftWarn,
+			Detail:   "SPEC file has no known contract section mapping",
+		})
+		result.WarnCount++
+		return
+	}
+	result.Findings = append(result.Findings, checkSLODrift(name, section, content, slo)...)
+	result.Findings = append(result.Findings, checkInvariantCoverage(name, content)...)
 }
 
 // checkSLODrift parses the SLO table from a SPEC and compares values against contracts.
@@ -453,61 +451,60 @@ func matchMetricToField(metric string) string {
 func normalizeValue(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.ToLower(s)
-
-	// Try parsing as pure integer
 	if _, err := strconv.Atoi(s); err == nil {
 		return s
 	}
-
-	// Try parsing as duration
 	if d, err := time.ParseDuration(s); err == nil {
 		return fmtDur(d)
 	}
-
-	// Extract leading number + optional unit
-	re := regexp.MustCompile(`^(\d+(?:\.\d+)?)\s*(ms|mb|kb|gb|min|s|m|h|entries|lines|occurrences|chars|per pass|per scan)?`)
-	m := re.FindStringSubmatch(s)
-	if m != nil {
-		num := m[1]
-		unit := strings.TrimSpace(m[2])
-
-		switch unit {
-		case "min":
-			if d, err := time.ParseDuration(num + "m"); err == nil {
-				return fmtDur(d)
-			}
-		case "s", "ms", "m", "h":
-			if d, err := time.ParseDuration(num + unit); err == nil {
-				return fmtDur(d)
-			}
-		case "mb":
-			if n, err := strconv.ParseInt(num, 10, 64); err == nil {
-				return fmtBytes(n * 1024 * 1024)
-			}
-		case "kb":
-			if n, err := strconv.ParseInt(num, 10, 64); err == nil {
-				return fmtBytes(n * 1024)
-			}
-		case "gb":
-			if n, err := strconv.ParseInt(num, 10, 64); err == nil {
-				return fmtBytes(n * 1024 * 1024 * 1024)
-			}
-		default:
-			return num
-		}
+	if v, ok := normalizeNumberWithUnit(s); ok {
+		return v
 	}
-
-	// Handle permission values like "0755"
 	if permRe := regexp.MustCompile(`^0[0-7]{3}$`); permRe.MatchString(s) {
 		return s
 	}
-
-	// Handle ranges like "-15 to +5"
 	if rangeRe := regexp.MustCompile(`^-?\d+\s+to\s+[+-]?\d+$`); rangeRe.MatchString(s) {
 		return strings.ReplaceAll(s, " ", "")
 	}
-
 	return s
+}
+
+// normalizeNumberWithUnit handles "<number><unit>" inputs (durations and byte
+// quantities). Returns (canonical, true) when matched, or ("", false) when
+// the input doesn't follow the expected shape.
+func normalizeNumberWithUnit(s string) (string, bool) {
+	re := regexp.MustCompile(`^(\d+(?:\.\d+)?)\s*(ms|mb|kb|gb|min|s|m|h|entries|lines|occurrences|chars|per pass|per scan)?`)
+	m := re.FindStringSubmatch(s)
+	if m == nil {
+		return "", false
+	}
+	num := m[1]
+	unit := strings.TrimSpace(m[2])
+	switch unit {
+	case "min":
+		if d, err := time.ParseDuration(num + "m"); err == nil {
+			return fmtDur(d), true
+		}
+	case "s", "ms", "m", "h":
+		if d, err := time.ParseDuration(num + unit); err == nil {
+			return fmtDur(d), true
+		}
+	case "mb":
+		if n, err := strconv.ParseInt(num, 10, 64); err == nil {
+			return fmtBytes(n * 1024 * 1024), true
+		}
+	case "kb":
+		if n, err := strconv.ParseInt(num, 10, 64); err == nil {
+			return fmtBytes(n * 1024), true
+		}
+	case "gb":
+		if n, err := strconv.ParseInt(num, 10, 64); err == nil {
+			return fmtBytes(n * 1024 * 1024 * 1024), true
+		}
+	default:
+		return num, true
+	}
+	return "", false
 }
 
 // fmtDur formats a duration to its canonical short form.

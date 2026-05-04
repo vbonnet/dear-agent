@@ -115,7 +115,13 @@ func runAuditErrors(_ *cobra.Command, _ []string) error {
 		return enc.Encode(report)
 	}
 
-	// Text output: group by category
+	printErrorAuditText(entries, since)
+	return nil
+}
+
+// printErrorAuditText prints the human-readable error audit grouped by
+// category, showing up to 5 most recent entries per category.
+func printErrorAuditText(entries []ops.ErrorEntry, since time.Time) {
 	grouped := groupByCategory(entries)
 
 	fmt.Printf("Error Log Summary (%d entries)\n", len(entries))
@@ -124,7 +130,6 @@ func runAuditErrors(_ *cobra.Command, _ []string) error {
 	}
 	fmt.Println(strings.Repeat("─", 60))
 
-	// Sort categories by count (descending)
 	type catCount struct {
 		category string
 		entries  []ops.ErrorEntry
@@ -139,7 +144,6 @@ func runAuditErrors(_ *cobra.Command, _ []string) error {
 
 	for _, cc := range sorted {
 		fmt.Printf("\n[%s] — %d error(s)\n", cc.category, len(cc.entries))
-		// Show up to 5 most recent per category
 		start := 0
 		if len(cc.entries) > 5 {
 			start = len(cc.entries) - 5
@@ -156,7 +160,6 @@ func runAuditErrors(_ *cobra.Command, _ []string) error {
 	}
 
 	fmt.Println()
-	return nil
 }
 
 // errorReport is the JSON representation of the audit errors output.

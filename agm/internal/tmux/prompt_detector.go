@@ -114,6 +114,7 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 //
 // Deprecated: Control mode only sees NEW output after attachment, missing historical output.
 // Preserved for reference but should not be used for session startup detection.
+//nolint:gocyclo // reason: stateful tmux control-mode loop with many concurrent termination conditions; helpers would obscure the per-event flow.
 func WaitForClaudePromptControlMode(sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting prompt detection for session: %s (control mode - DEPRECATED)", sessionName)
 
@@ -323,6 +324,7 @@ func WaitForPromptSimple(sessionName string, timeout time.Duration) error {
 // 1. Detects and auto-answers trust prompts ("Yes, proceed")
 // 2. Waits for SessionStart hooks to complete
 // 3. Waits for the Claude prompt (❯) to appear
+//nolint:gocyclo // reason: stateful readiness loop with many termination conditions; per-event helpers would obscure the polling protocol.
 func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
 	debug.Log("🔍 Waiting for Claude to be ready (session: %s)", sessionName)
 
@@ -477,19 +479,18 @@ func isVisibleContent(s string) bool {
 
 // stripANSI removes ANSI escape sequences from a string
 func stripANSI(s string) string {
-	// Remove all ANSI escape sequences
-	// Pattern: ESC [ ... m (color codes)
-	//          ESC ] ... (OSC sequences)
-	//          ESC ? ... (private modes like bracketed paste)
-	result := s
+	result := stripCSISequences(s)
+	result = stripOSCSequences(result)
+	return stripBracketedPasteSequences(result)
+}
 
-	// Remove CSI sequences (ESC [ ... letter)
+// stripCSISequences removes CSI sequences (ESC [ ... letter).
+func stripCSISequences(result string) string {
 	for {
 		start := strings.Index(result, "\x1b[")
 		if start == -1 {
-			break
+			return result
 		}
-		// Find the end of the sequence (a letter A-Z, a-z)
 		end := start + 2
 		for end < len(result) {
 			ch := result[end]
@@ -501,19 +502,20 @@ func stripANSI(s string) string {
 		}
 		result = result[:start] + result[end:]
 	}
+}
 
-	// Remove OSC sequences (ESC ] ... BEL/ST)
+// stripOSCSequences removes OSC sequences (ESC ] ... BEL or ESC \).
+func stripOSCSequences(result string) string {
 	for {
 		start := strings.Index(result, "\x1b]")
 		if start == -1 {
-			break
+			return result
 		}
-		// Find BEL (0x07) or ST (ESC \)
 		end := strings.IndexAny(result[start:], "\x07")
 		if end == -1 {
 			stIdx := strings.Index(result[start:], "\x1b\\")
 			if stIdx == -1 {
-				break
+				return result
 			}
 			end = stIdx + 2
 		} else {
@@ -521,12 +523,14 @@ func stripANSI(s string) string {
 		}
 		result = result[:start] + result[start+end:]
 	}
+}
 
-	// Remove bracketed paste mode sequences (ESC ? ... h/l)
+// stripBracketedPasteSequences removes ESC ? ... h/l sequences.
+func stripBracketedPasteSequences(result string) string {
 	for {
 		start := strings.Index(result, "\x1b?")
 		if start == -1 {
-			break
+			return result
 		}
 		end := start + 2
 		for end < len(result) && result[end] != 'h' && result[end] != 'l' {
@@ -537,8 +541,6 @@ func stripANSI(s string) string {
 		}
 		result = result[:start] + result[end:]
 	}
-
-	return result
 }
 
 // GeminiPromptPatterns are patterns that indicate Gemini is ready for input
@@ -559,6 +561,7 @@ var OpenCodePromptPatterns = []string{
 // WaitForGeminiPrompt waits for Gemini to return to the input prompt
 // Uses control mode to monitor output stream and detect prompt patterns
 // Similar to WaitForClaudePrompt but adapted for Gemini's UI patterns
+//nolint:gocyclo // reason: stateful tmux control-mode loop with many concurrent termination conditions; helpers would obscure the per-event flow.
 func WaitForGeminiPrompt(sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting Gemini prompt detection for session: %s", sessionName)
 
@@ -691,6 +694,7 @@ func containsOpenCodePromptPattern(content string) bool {
 
 // WaitForGeminiReady waits for Gemini to be fully ready
 // This function waits for the Gemini prompt to appear after startup
+//nolint:gocyclo // reason: stateful readiness loop with many termination conditions; per-event helpers would obscure the polling protocol.
 func WaitForGeminiReady(sessionName string, timeout time.Duration) error {
 	debug.Log("🔍 Waiting for Gemini to be ready (session: %s)", sessionName)
 

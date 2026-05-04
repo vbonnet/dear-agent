@@ -121,54 +121,8 @@ func ResolveRecipients(spec *RecipientSpec, resolver SessionResolver) (*Recipien
 		allSessions = sessions
 	}
 
-	// Resolve based on type
-	switch spec.Type {
-	case "direct":
-		// Single direct recipient - validate it exists
-		if len(spec.Recipients) != 1 {
-			return nil, fmt.Errorf("direct type should have exactly 1 recipient")
-		}
-		m, err := resolver.ResolveIdentifier(spec.Recipients[0])
-		if err != nil {
-			return nil, fmt.Errorf("recipient '%s' not found: %w", spec.Recipients[0], err)
-		}
-		resolved.Recipients = []string{m.Tmux.SessionName}
-
-	case "comma_list":
-		// Comma-separated list - validate each exists
-		seen := make(map[string]bool)
-		for _, recipient := range spec.Recipients {
-			m, err := resolver.ResolveIdentifier(recipient)
-			if err != nil {
-				return nil, fmt.Errorf("recipient '%s' not found: %w", recipient, err)
-			}
-			// Deduplicate using tmux session name
-			if !seen[m.Tmux.SessionName] {
-				seen[m.Tmux.SessionName] = true
-				resolved.Recipients = append(resolved.Recipients, m.Tmux.SessionName)
-			}
-		}
-
-	case "glob":
-		// Glob pattern - expand to matching sessions
-		if len(spec.Recipients) != 1 {
-			return nil, fmt.Errorf("glob type should have exactly 1 pattern")
-		}
-		pattern := spec.Recipients[0]
-		matches := resolveGlob(pattern, allSessions)
-		if len(matches) == 0 {
-			return nil, fmt.Errorf("no sessions match pattern: %s", pattern)
-		}
-		resolved.Recipients = matches
-
-	case "workspace":
-		// Workspace filter - filter sessions by workspace
-		// Note: workspace filtering is handled by the adapter's ListSessions
-		// This case shouldn't normally occur as workspace is combined with other types
-		return nil, fmt.Errorf("workspace-only filtering not yet implemented")
-
-	default:
-		return nil, fmt.Errorf("unknown recipient type: %s", spec.Type)
+	if err := dispatchRecipientResolution(spec, resolver, allSessions, resolved); err != nil {
+		return nil, err
 	}
 
 	// Exclude sender from recipients (Bug fix 2026-04-03: --all was delivering to self)
@@ -191,6 +145,51 @@ func ResolveRecipients(spec *RecipientSpec, resolver SessionResolver) (*Recipien
 	}
 
 	return resolved, nil
+}
+
+// dispatchRecipientResolution populates resolved.Recipients based on spec.Type
+// (direct / comma_list / glob / workspace).
+func dispatchRecipientResolution(spec *RecipientSpec, resolver SessionResolver, allSessions []*manifest.Manifest, resolved *RecipientSpec) error {
+	switch spec.Type {
+	case "direct":
+		if len(spec.Recipients) != 1 {
+			return fmt.Errorf("direct type should have exactly 1 recipient")
+		}
+		m, err := resolver.ResolveIdentifier(spec.Recipients[0])
+		if err != nil {
+			return fmt.Errorf("recipient '%s' not found: %w", spec.Recipients[0], err)
+		}
+		resolved.Recipients = []string{m.Tmux.SessionName}
+		return nil
+	case "comma_list":
+		seen := make(map[string]bool)
+		for _, recipient := range spec.Recipients {
+			m, err := resolver.ResolveIdentifier(recipient)
+			if err != nil {
+				return fmt.Errorf("recipient '%s' not found: %w", recipient, err)
+			}
+			if !seen[m.Tmux.SessionName] {
+				seen[m.Tmux.SessionName] = true
+				resolved.Recipients = append(resolved.Recipients, m.Tmux.SessionName)
+			}
+		}
+		return nil
+	case "glob":
+		if len(spec.Recipients) != 1 {
+			return fmt.Errorf("glob type should have exactly 1 pattern")
+		}
+		pattern := spec.Recipients[0]
+		matches := resolveGlob(pattern, allSessions)
+		if len(matches) == 0 {
+			return fmt.Errorf("no sessions match pattern: %s", pattern)
+		}
+		resolved.Recipients = matches
+		return nil
+	case "workspace":
+		return fmt.Errorf("workspace-only filtering not yet implemented")
+	default:
+		return fmt.Errorf("unknown recipient type: %s", spec.Type)
+	}
 }
 
 // resolveGlob expands glob pattern to matching sessions

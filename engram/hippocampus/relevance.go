@@ -164,6 +164,7 @@ type SideQueryFunc func(ctx context.Context, systemPrompt, userPrompt string, ma
 // FindRelevantMemories uses an LLM sideQuery to select the most relevant memory
 // files for a given query. Returns up to 5 results, sorted by relevance score.
 // Files in excludePaths are skipped (already surfaced).
+//nolint:gocyclo // reason: scoring loop with many independent feature contributions
 func FindRelevantMemories(ctx context.Context, query string, files []MemoryFile, sideQuery SideQueryFunc, excludePaths map[string]bool) ([]RelevanceResult, error) {
 	if len(files) == 0 || sideQuery == nil {
 		return nil, nil

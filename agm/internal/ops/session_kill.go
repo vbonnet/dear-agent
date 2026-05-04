@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/contracts"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 // KillSessionRequest defines the input for killing a session's tmux process.
@@ -36,6 +37,32 @@ type TmuxKiller interface {
 	SendKeys(session, keys string) error
 }
 
+// isTmuxSessionRunning queries the tmux backend (when available) for the
+// liveness of name.
+func isTmuxSessionRunning(ctx *OpContext, name string) bool {
+	if ctx.Tmux == nil {
+		return false
+	}
+	ti, ok := ctx.Tmux.(interface {
+		HasSession(name string) (bool, error)
+	})
+	if !ok {
+		return false
+	}
+	has, err := ti.HasSession(name)
+	return err == nil && has
+}
+
+// assessRecentActivity returns the last-activity timestamp pointer (or nil)
+// and a flag for whether the session was active within recentActivityThreshold.
+func assessRecentActivity(m *manifest.Manifest, recentActivityThreshold time.Duration) (*time.Time, bool) {
+	if m.UpdatedAt.IsZero() {
+		return nil, false
+	}
+	last := m.UpdatedAt
+	return &last, time.Since(m.UpdatedAt) < recentActivityThreshold
+}
+
 // KillSession terminates the tmux session for an AGM session.
 // If ctx.DryRun is true, returns what would happen without executing.
 func KillSession(ctx *OpContext, req *KillSessionRequest) (*KillSessionResult, error) {
@@ -62,27 +89,11 @@ func KillSession(ctx *OpContext, req *KillSessionRequest) (*KillSessionResult, e
 		return nil, ErrSessionArchived(m.Name)
 	}
 
-	// Determine tmux session name
 	tmuxName := m.Tmux.SessionName
 	if tmuxName == "" {
 		tmuxName = m.Name
 	}
-
-	// Check if session is running in tmux
-	wasRunning := false
-	if ctx.Tmux != nil {
-		ti, ok := ctx.Tmux.(interface {
-			HasSession(name string) (bool, error)
-		})
-		if ok {
-			has, hasErr := ti.HasSession(tmuxName)
-			if hasErr == nil && has {
-				wasRunning = true
-			}
-		}
-	}
-
-	// Active session safety: refuse to kill running sessions without --confirmed-stuck
+	wasRunning := isTmuxSessionRunning(ctx, tmuxName)
 	if wasRunning && !req.ConfirmedStuck {
 		return &KillSessionResult{
 			Operation:  "kill_session",
@@ -91,16 +102,7 @@ func KillSession(ctx *OpContext, req *KillSessionRequest) (*KillSessionResult, e
 			WasRunning: true,
 		}, ErrActiveSessionKill(m.Name)
 	}
-
-	// Check last activity timestamp for kill-protect
-	var lastActivity *time.Time
-	recentlyActive := false
-	if !m.UpdatedAt.IsZero() {
-		lastActivity = &m.UpdatedAt
-		if time.Since(m.UpdatedAt) < recentActivityThreshold {
-			recentlyActive = true
-		}
-	}
+	lastActivity, recentlyActive := assessRecentActivity(m, recentActivityThreshold)
 
 	// If recently active and not forced, return result with warning
 	// The CLI layer uses this to prompt for confirmation

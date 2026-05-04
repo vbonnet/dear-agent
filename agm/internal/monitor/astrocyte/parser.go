@@ -68,52 +68,20 @@ func ParseDiagnosisFile(filePath string) (*Diagnosis, error) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-
-		// Parse title line to extract session ID and timestamp
 		if matches := titlePattern.FindStringSubmatch(line); matches != nil {
 			diag.SessionID = strings.TrimSpace(matches[1])
 			diag.Timestamp = parseTimestamp(matches[2])
 			continue
 		}
-
-		// Track current section
 		if strings.HasPrefix(line, "###") {
 			currentSection = strings.TrimSpace(strings.TrimPrefix(line, "###"))
 			continue
 		}
-
-		// Parse symptom section
 		if currentSection == "Symptom" && line != "" && !strings.HasPrefix(line, "###") {
 			symptomLines = append(symptomLines, line)
 		}
-
-		// Extract recovery information
-		if matches := recoveryPattern.FindStringSubmatch(line); matches != nil {
-			diag.RecoveryTime = strings.TrimSpace(matches[1])
-		}
-
-		if matches := recoveryMethodPat.FindStringSubmatch(line); matches != nil {
-			diag.RecoveryMethod = strings.TrimSpace(matches[1])
-		}
-
-		if matches := incidentTypePattern.FindStringSubmatch(line); matches != nil {
-			typeStr := strings.TrimSpace(matches[1])
-			diag.Type = typeStr
-			// Check if incident type indicates success
-			if strings.Contains(strings.ToUpper(typeStr), "SUCCESS") {
-				diag.RecoverySuccess = true
-			}
-		}
-
-		// Extract confidence level
-		switch {
-		case strings.Contains(line, "**HIGH") || strings.Contains(line, "HIGH ("):
-			diag.Confidence = "HIGH"
-		case strings.Contains(line, "**MEDIUM") || strings.Contains(line, "MEDIUM ("):
-			diag.Confidence = "MEDIUM"
-		case strings.Contains(line, "**LOW") || strings.Contains(line, "LOW ("):
-			diag.Confidence = "LOW"
-		}
+		extractRecoveryFields(line, diag)
+		extractConfidenceLevel(line, diag)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -130,6 +98,37 @@ func ParseDiagnosisFile(filePath string) (*Diagnosis, error) {
 	}
 
 	return diag, nil
+}
+
+// extractRecoveryFields populates diag.RecoveryTime / RecoveryMethod / Type
+// from a single line if any of the recovery patterns match.
+func extractRecoveryFields(line string, diag *Diagnosis) {
+	if matches := recoveryPattern.FindStringSubmatch(line); matches != nil {
+		diag.RecoveryTime = strings.TrimSpace(matches[1])
+	}
+	if matches := recoveryMethodPat.FindStringSubmatch(line); matches != nil {
+		diag.RecoveryMethod = strings.TrimSpace(matches[1])
+	}
+	if matches := incidentTypePattern.FindStringSubmatch(line); matches != nil {
+		typeStr := strings.TrimSpace(matches[1])
+		diag.Type = typeStr
+		if strings.Contains(strings.ToUpper(typeStr), "SUCCESS") {
+			diag.RecoverySuccess = true
+		}
+	}
+}
+
+// extractConfidenceLevel sets diag.Confidence to HIGH/MEDIUM/LOW when the
+// corresponding marker appears in the line.
+func extractConfidenceLevel(line string, diag *Diagnosis) {
+	switch {
+	case strings.Contains(line, "**HIGH") || strings.Contains(line, "HIGH ("):
+		diag.Confidence = "HIGH"
+	case strings.Contains(line, "**MEDIUM") || strings.Contains(line, "MEDIUM ("):
+		diag.Confidence = "MEDIUM"
+	case strings.Contains(line, "**LOW") || strings.Contains(line, "LOW ("):
+		diag.Confidence = "LOW"
+	}
 }
 
 // ParseDiagnosisDirectory parses all diagnosis files in a directory.

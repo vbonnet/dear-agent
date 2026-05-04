@@ -251,60 +251,88 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 // runSendSingle handles single-recipient sends (original behavior, backward compatible)
 func runSendSingle(recipientSession string) (retErr error) {
-	// Audit trail: log sender, recipient, priority, delivery status
 	defer func() {
-		auditArgs := map[string]string{
-			"recipient": recipientSession,
-			"sender":    sessionSendSender,
-			"priority":  sessionSendPriority,
-		}
-		if sessionSendReplyTo != "" {
-			auditArgs["reply_to"] = sessionSendReplyTo
-		}
-		if msgDelegate {
-			auditArgs["delegate"] = "true"
-		}
-		logCommandAudit("send.msg", recipientSession, auditArgs, retErr)
+		logCommandAudit("send.msg", recipientSession, sendSingleAuditArgs(recipientSession), retErr)
 	}()
 
-	// Get Dolt adapter for session resolution
 	adapter, _ := getStorage()
 	if adapter != nil {
 		defer adapter.Close()
 	}
 
-	// Determine sender (auto-detect or use --sender flag)
 	senderName, err := determineSender(adapter)
 	if err != nil {
 		return err
 	}
+	if err := validateSenderAndReplyTo(senderName); err != nil {
+		return err
+	}
+	if err := enforceSendRateLimit(senderName); err != nil {
+		return err
+	}
+	if err := ensureRecipientReady(recipientSession, adapter); err != nil {
+		return err
+	}
 
-	// Validate sender name format
+	message, err := readSendMessageContent()
+	if err != nil {
+		return err
+	}
+
+	messageID, formattedMessage, err := buildAndLogMessage(senderName, recipientSession, message)
+	if err != nil {
+		return err
+	}
+
+	currentState, tmuxName := resolveRecipientState(recipientSession, adapter)
+	canReceive := session.CheckSessionDelivery(tmuxName)
+	return dispatchSendByCanReceive(recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState, canReceive, adapter)
+}
+
+// sendSingleAuditArgs builds the audit arg map for runSendSingle.
+func sendSingleAuditArgs(recipientSession string) map[string]string {
+	auditArgs := map[string]string{
+		"recipient": recipientSession,
+		"sender":    sessionSendSender,
+		"priority":  sessionSendPriority,
+	}
+	if sessionSendReplyTo != "" {
+		auditArgs["reply_to"] = sessionSendReplyTo
+	}
+	if msgDelegate {
+		auditArgs["delegate"] = "true"
+	}
+	return auditArgs
+}
+
+// validateSenderAndReplyTo enforces format/length checks on senderName and
+// the optional --reply-to message ID.
+func validateSenderAndReplyTo(senderName string) error {
 	if !senderNameRegex.MatchString(senderName) {
 		return fmt.Errorf("invalid sender name '%s': must match pattern ^[a-zA-Z0-9_-]+$ (alphanumeric, dash, underscore only)", senderName)
 	}
-
-	// Validate sender name length
 	if len(senderName) < 1 || len(senderName) > 64 {
 		return fmt.Errorf("invalid sender name '%s': must be 1-64 characters", senderName)
 	}
-
-	// Validate --reply-to if provided
-	if sessionSendReplyTo != "" {
-		if !messages.ValidateMessageID(sessionSendReplyTo) {
-			return fmt.Errorf("invalid --reply-to message ID format: '%s'\n\nExpected format: {timestamp}-{sender}-{seq}\nExample: 1738612345678-sender-001", sessionSendReplyTo)
-		}
+	if sessionSendReplyTo != "" && !messages.ValidateMessageID(sessionSendReplyTo) {
+		return fmt.Errorf("invalid --reply-to message ID format: '%s'\n\nExpected format: {timestamp}-{sender}-{seq}\nExample: 1738612345678-sender-001", sessionSendReplyTo)
 	}
+	return nil
+}
 
-	// Check rate limit
+// enforceSendRateLimit applies the per-sender rate limiter (10/min).
+func enforceSendRateLimit(senderName string) error {
 	rateLimiter := messages.GetRateLimiter(senderName)
-	allowed, remaining, err := rateLimiter.Allow()
+	allowed, _, err := rateLimiter.Allow()
 	if !allowed {
 		return fmt.Errorf("rate limit exceeded: %w\n\nLimit: 10 messages per minute\nTry again in a few seconds", err)
 	}
-	_ = remaining //nolint:wastedassign // reserved for future logging metadata
+	return nil
+}
 
-	// Check recipient session exists in tmux
+// ensureRecipientReady verifies the recipient tmux session exists, runs the
+// safety guard, and wakes any stale monitors.
+func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error {
 	exists, err := tmux.HasSession(recipientSession)
 	if err != nil {
 		return fmt.Errorf("failed to check tmux session: %w", err)
@@ -312,133 +340,115 @@ func runSendSingle(recipientSession string) (retErr error) {
 	if !exists {
 		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: agm session list\n  • Create session: agm session new %s", recipientSession, recipientSession)
 	}
-
-	// Safety guard check
-	guardResult := safety.Check(recipientSession, safety.GuardOptions{
-		SkipMidResponse: true, // send_msg handles this via state detection
-	})
+	guardResult := safety.Check(recipientSession, safety.GuardOptions{SkipMidResponse: true})
 	if !guardResult.Safe {
 		return fmt.Errorf("safety guard blocked send on session '%s':\n\n%s",
 			recipientSession, guardResult.Error())
 	}
-
-	// Fast-path: check if recipient has monitors with stale heartbeats.
-	// If so, wake the monitors before delivering the message.
 	checkAndWakeMonitors(recipientSession, adapter)
+	return nil
+}
 
-	// Get message content
-	var message string
+// readSendMessageContent reads the message body from --prompt, --prompt-file,
+// or stdin (whichever is set).
+func readSendMessageContent() (string, error) {
 	switch {
 	case sessionSendPrompt != "":
-		message = sessionSendPrompt
+		return sessionSendPrompt, nil
 	case sessionSendPromptFile != "":
-		// Read file content (max 10KB checked in SendPromptFileSafe)
 		fileContent, err := os.ReadFile(sessionSendPromptFile)
 		if err != nil {
-			return fmt.Errorf("failed to read prompt file: %w", err)
+			return "", fmt.Errorf("failed to read prompt file: %w", err)
 		}
-		message = string(fileContent)
+		return string(fileContent), nil
 	case sessionSendPromptStdin:
-		// Read from stdin
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
-			return fmt.Errorf("failed to read from stdin: %w", err)
+			return "", fmt.Errorf("failed to read from stdin: %w", err)
 		}
-		message = string(data)
+		return string(data), nil
 	}
+	return "", nil
+}
 
-	// Generate unique message ID
+// buildAndLogMessage generates the unique message ID, formats the body with
+// metadata, and writes a log entry. Returns (messageID, formattedMessage, err).
+func buildAndLogMessage(senderName, recipientSession, message string) (string, string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return "", "", fmt.Errorf("failed to get home directory: %w", err)
 	}
 	stateDir := filepath.Join(homeDir, ".agm", "state")
 	idGen, err := messages.NewMessageIDGenerator(senderName, stateDir)
 	if err != nil {
-		return fmt.Errorf("failed to create message ID generator: %w", err)
+		return "", "", fmt.Errorf("failed to create message ID generator: %w", err)
 	}
 	messageID, err := idGen.Next()
 	if err != nil {
-		return fmt.Errorf("failed to generate message ID: %w", err)
+		return "", "", fmt.Errorf("failed to generate message ID: %w", err)
 	}
-
-	// Format message with sender prefix and message ID
 	formattedMessage := formatMessageWithMetadata(senderName, messageID, sessionSendReplyTo, message)
-
-	// Log the message before sending
 	logsDir := filepath.Join(homeDir, ".agm", "logs", "messages")
 	logger, err := messages.NewMessageLogger(logsDir)
 	if err != nil {
-		return fmt.Errorf("failed to create logger: %w", err)
+		return "", "", fmt.Errorf("failed to create logger: %w", err)
 	}
-
 	logEntry := messages.CreateLogEntry(messageID, senderName, recipientSession, message, sessionSendReplyTo)
 	if err := logger.LogMessage(logEntry); err != nil {
-		// Log error but don't fail the send operation
 		fmt.Fprintf(os.Stderr, "Warning: failed to log message: %v\n", err)
 	}
+	return messageID, formattedMessage, nil
+}
 
-	// Two-axis delivery model:
-	// Axis 1 (Alive): Does the session exist? Checked via tmux + Dolt.
-	// Axis 2 (CanReceive): Can we type into it right now? Checked via pane content.
-	// These are independent — a session can be Alive=Yes but CanReceive=No (permission dialog).
-
-	// Resolve display state for persistence (still needed for agm list/status)
+// resolveRecipientState resolves the recipient's display state for persistence
+// and returns (currentState, tmuxName).
+func resolveRecipientState(recipientSession string, adapter *dolt.Adapter) (string, string) {
 	var currentState string
-	m, manifestPath, resolveErr := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter)
 	tmuxName := recipientSession
-	if resolveErr == nil {
-		if m.Tmux.SessionName != "" {
-			tmuxName = m.Tmux.SessionName
-		}
-		currentState = session.ResolveSessionState(tmuxName, m.State, m.Claude.UUID, m.StateUpdatedAt)
-		// Persist resolved state back to DB for future queries
-		if currentState != m.State {
-			if err := session.UpdateSessionState(manifestPath, currentState, "hybrid", m.SessionID, adapter); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to persist session state: %v\n", err)
-			}
+	m, manifestPath, resolveErr := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter)
+	if resolveErr != nil {
+		return currentState, tmuxName
+	}
+	if m.Tmux.SessionName != "" {
+		tmuxName = m.Tmux.SessionName
+	}
+	currentState = session.ResolveSessionState(tmuxName, m.State, m.Claude.UUID, m.StateUpdatedAt)
+	if currentState != m.State {
+		if err := session.UpdateSessionState(manifestPath, currentState, "hybrid", m.SessionID, adapter); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to persist session state: %v\n", err)
 		}
 	}
+	return currentState, tmuxName
+}
 
-	// Axis 2: Check delivery readiness via pane content (independent of display state)
-	canReceive := session.CheckSessionDelivery(tmuxName)
-
+// dispatchSendByCanReceive routes the formatted message to the appropriate
+// delivery path based on the CanReceive state read from the recipient pane.
+func dispatchSendByCanReceive(recipientSession, tmuxName, senderName, messageID, formattedMessage, message, currentState string, canReceive state.CanReceive, adapter *dolt.Adapter) error {
 	switch canReceive {
 	case state.CanReceiveYes:
-		// Prompt visible, no dialog blocking → send directly
 		if err := sendDirectly(recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter); err != nil {
 			return err
 		}
 		recordDelegation(senderName, recipientSession, messageID, message)
 		return nil
-
 	case state.CanReceiveNotFound:
-		// Tmux session vanished between HasSession check and delivery check
 		return fmt.Errorf("session '%s' tmux session disappeared during delivery", recipientSession)
-
 	case state.CanReceiveQueue:
-		// Session is busy → queue for later delivery
 		if err := queueMessage(recipientSession, senderName, messageID, formattedMessage, currentState); err != nil {
 			return err
 		}
 		recordDelegation(senderName, recipientSession, messageID, message)
 		return nil
-
 	case state.CanReceiveOverlay:
-		// Dismissible UI overlay (e.g., Background Tasks view) — auto-recover by
-		// sending Left arrow to close the overlay, then re-check and deliver.
 		fmt.Fprintf(os.Stderr, "⚠ Session '%s' has active overlay (Background Tasks) — attempting auto-recovery\n", recipientSession)
 		if err := dismissOverlayAndDeliver(tmuxName, recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter); err != nil {
 			return err
 		}
 		recordDelegation(senderName, recipientSession, messageID, message)
 		return nil
-
 	case state.CanReceiveNo:
-		// Permission dialog or other blocker → queue for delivery after user resolves it
 		fmt.Fprintf(os.Stderr, "⚠ Session '%s' has active permission prompt — message queued for delivery after resolution\n", recipientSession)
 		return queueMessage(recipientSession, senderName, messageID, formattedMessage, currentState)
-
 	default:
 		fmt.Fprintf(os.Stderr, "Warning: unknown CanReceive state '%s', queueing\n", canReceive)
 		if err := queueMessage(recipientSession, senderName, messageID, formattedMessage, currentState); err != nil {
@@ -660,177 +670,54 @@ func formatMessageWithMetadata(sender, messageID, replyTo, message string) strin
 
 // runSendMulti handles multi-recipient message delivery with sequential execution
 func runSendMulti(spec *send.RecipientSpec) (retErr error) {
-	// Audit trail: log multi-recipient send with recipient count
 	defer func() {
-		auditArgs := map[string]string{
-			"recipient_count": fmt.Sprintf("%d", len(spec.Recipients)),
-			"priority":        sessionSendPriority,
-			"type":            spec.Type,
-		}
-		if msgAll {
-			auditArgs["all"] = "true"
-		}
-		if msgWorkspace != "" {
-			auditArgs["workspace"] = msgWorkspace
-		}
-		if msgDelegate {
-			auditArgs["delegate"] = "true"
-		}
-		logCommandAudit("send.msg.multi", "", auditArgs, retErr)
+		logCommandAudit("send.msg.multi", "", multiAuditArgs(spec), retErr)
 	}()
 
-	// Create Dolt adapter for session resolution
 	adapter, err := getStorage()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
 	defer adapter.Close()
 
-	// Determine sender (auto-detect or use --sender flag)
 	senderName, err := determineSender(adapter)
 	if err != nil {
 		return err
 	}
-
-	// Validate sender name format
-	if !senderNameRegex.MatchString(senderName) {
-		return fmt.Errorf("invalid sender name '%s': must match pattern ^[a-zA-Z0-9_-]+$ (alphanumeric, dash, underscore only)", senderName)
+	if err := validateSenderAndReplyTo(senderName); err != nil {
+		return err
 	}
 
-	// Validate sender name length
-	if len(senderName) < 1 || len(senderName) > 64 {
-		return fmt.Errorf("invalid sender name '%s': must be 1-64 characters", senderName)
-	}
-
-	// Validate --reply-to if provided
-	if sessionSendReplyTo != "" {
-		if !messages.ValidateMessageID(sessionSendReplyTo) {
-			return fmt.Errorf("invalid --reply-to message ID format: '%s'\n\nExpected format: {timestamp}-{sender}-{seq}\nExample: 1738612345678-sender-001", sessionSendReplyTo)
-		}
-	}
-
-	// Exclude sender from recipients by default (Bug fix 2026-04-03: --all was sending to self)
 	if !msgIncludeSelf {
 		spec.ExcludeSender = senderName
 	}
-
-	// Wrap adapter to implement SessionResolver interface
 	resolver := &doltSessionResolver{adapter: adapter}
-
-	// Resolve recipients (expands globs, validates existence, excludes sender)
 	resolvedSpec, err := send.ResolveRecipients(spec, resolver)
 	if err != nil {
 		return err
 	}
 
-	recipients := resolvedSpec.Recipients
-
-	// Get message content
-	var message string
-	switch {
-	case sessionSendPrompt != "":
-		message = sessionSendPrompt
-	case sessionSendPromptFile != "":
-		// Validate file size before reading (max 10KB to prevent memory issues)
-		fileInfo, err := os.Stat(sessionSendPromptFile)
-		if err != nil {
-			return fmt.Errorf("failed to stat prompt file: %w", err)
-		}
-		const maxFileSize = 10 * 1024 // 10KB
-		if fileInfo.Size() > maxFileSize {
-			return fmt.Errorf("prompt file too large: %d bytes (max %d bytes)", fileInfo.Size(), maxFileSize)
-		}
-
-		// Read file content
-		fileContent, err := os.ReadFile(sessionSendPromptFile)
-		if err != nil {
-			return fmt.Errorf("failed to read prompt file: %w", err)
-		}
-		message = string(fileContent)
-	case sessionSendPromptStdin:
-		// Read from stdin
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("failed to read from stdin: %w", err)
-		}
-		message = string(data)
-	}
-
-	// Check rate limit (using total recipient count)
-	rateLimiter := messages.GetRateLimiter(senderName)
-	allowed, _, err := rateLimiter.Allow()
-	if !allowed {
-		return fmt.Errorf("rate limit exceeded: %w\n\nLimit: 10 messages per minute\nTry again in a few seconds", err)
-	}
-
-	// Setup message ID generator
-	homeDir, err := os.UserHomeDir()
+	message, err := readMultiSendMessageContent()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return err
 	}
-	stateDir := filepath.Join(homeDir, ".agm", "state")
-	idGen, err := messages.NewMessageIDGenerator(senderName, stateDir)
+	if err := enforceSendRateLimit(senderName); err != nil {
+		return err
+	}
+
+	jobs, homeDir, err := buildMultiDeliveryJobs(senderName, message, resolvedSpec.Recipients)
 	if err != nil {
-		return fmt.Errorf("failed to create message ID generator: %w", err)
+		return err
 	}
 
-	// Create delivery jobs for all recipients
-	jobs := make([]*send.DeliveryJob, 0, len(recipients))
-	for _, recipient := range recipients {
-		msgID, err := idGen.Next()
-		if err != nil {
-			return fmt.Errorf("failed to generate message ID: %w", err)
-		}
-
-		formattedMsg := formatMessageWithMetadata(senderName, msgID, sessionSendReplyTo, message)
-
-		job := &send.DeliveryJob{
-			Recipient:        recipient,
-			Sender:           senderName,
-			MessageID:        msgID,
-			FormattedMessage: formattedMsg,
-			PromptFile:       sessionSendPromptFile,
-			ShouldInterrupt:  false,
-			SessionsDir:      cfg.SessionsDir,
-		}
-		jobs = append(jobs, job)
-	}
-
-	// Execute sequential delivery with timeout (2 minutes for multi-recipient)
-	// Bug fix (2026-04-03): Switched from ParallelDeliver to SequentialDeliver.
-	// The tmux server lock is a process-global singleton — parallel goroutines
-	// calling withTmuxLock caused "double lock" errors (4/7 deliveries failed).
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	results := send.SequentialDeliver(ctx, jobs, deliveryFunc)
 
-	// Generate and print report
 	report := send.GenerateReport(results)
 	report.PrintReport()
 
-	// Log all successful messages
-	logsDir := filepath.Join(homeDir, ".agm", "logs", "messages")
-	logger, err := messages.NewMessageLogger(logsDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to create logger: %v\n", err)
-	} else {
-		for _, result := range results {
-			if result.Success {
-				// Find the corresponding job to get recipient info
-				for _, job := range jobs {
-					if job.MessageID == result.MessageID {
-						logEntry := messages.CreateLogEntry(job.MessageID, senderName, job.Recipient, message, sessionSendReplyTo)
-						if err := logger.LogMessage(logEntry); err != nil {
-							fmt.Fprintf(os.Stderr, "Warning: failed to log message to %s: %v\n", job.Recipient, err)
-						}
-						break
-					}
-				}
-			}
-		}
-	}
-
-	// Record delegations for successful deliveries
+	logMultiResults(homeDir, senderName, message, jobs, results)
 	if msgDelegate {
 		for _, result := range results {
 			if result.Success {
@@ -838,13 +725,118 @@ func runSendMulti(spec *send.RecipientSpec) (retErr error) {
 			}
 		}
 	}
-
-	// Return error if any deliveries failed
 	if report.HasFailures() {
 		return fmt.Errorf("some deliveries failed (see report above)")
 	}
-
 	return nil
+}
+
+// multiAuditArgs builds the audit map for runSendMulti.
+func multiAuditArgs(spec *send.RecipientSpec) map[string]string {
+	auditArgs := map[string]string{
+		"recipient_count": fmt.Sprintf("%d", len(spec.Recipients)),
+		"priority":        sessionSendPriority,
+		"type":            spec.Type,
+	}
+	if msgAll {
+		auditArgs["all"] = "true"
+	}
+	if msgWorkspace != "" {
+		auditArgs["workspace"] = msgWorkspace
+	}
+	if msgDelegate {
+		auditArgs["delegate"] = "true"
+	}
+	return auditArgs
+}
+
+// readMultiSendMessageContent reads the message body for runSendMulti, with an
+// extra 10KB cap on --prompt-file uploads to protect against accidental large
+// files in fan-out mode.
+func readMultiSendMessageContent() (string, error) {
+	switch {
+	case sessionSendPrompt != "":
+		return sessionSendPrompt, nil
+	case sessionSendPromptFile != "":
+		fileInfo, err := os.Stat(sessionSendPromptFile)
+		if err != nil {
+			return "", fmt.Errorf("failed to stat prompt file: %w", err)
+		}
+		const maxFileSize = 10 * 1024
+		if fileInfo.Size() > maxFileSize {
+			return "", fmt.Errorf("prompt file too large: %d bytes (max %d bytes)", fileInfo.Size(), maxFileSize)
+		}
+		fileContent, err := os.ReadFile(sessionSendPromptFile)
+		if err != nil {
+			return "", fmt.Errorf("failed to read prompt file: %w", err)
+		}
+		return string(fileContent), nil
+	case sessionSendPromptStdin:
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("failed to read from stdin: %w", err)
+		}
+		return string(data), nil
+	}
+	return "", nil
+}
+
+// buildMultiDeliveryJobs creates one DeliveryJob per recipient with a unique
+// message ID. Returns the jobs, the resolved homeDir (used by the caller for
+// logging), and any error from ID generation.
+func buildMultiDeliveryJobs(senderName, message string, recipients []string) ([]*send.DeliveryJob, string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	stateDir := filepath.Join(homeDir, ".agm", "state")
+	idGen, err := messages.NewMessageIDGenerator(senderName, stateDir)
+	if err != nil {
+		return nil, homeDir, fmt.Errorf("failed to create message ID generator: %w", err)
+	}
+	jobs := make([]*send.DeliveryJob, 0, len(recipients))
+	for _, recipient := range recipients {
+		msgID, err := idGen.Next()
+		if err != nil {
+			return nil, homeDir, fmt.Errorf("failed to generate message ID: %w", err)
+		}
+		formattedMsg := formatMessageWithMetadata(senderName, msgID, sessionSendReplyTo, message)
+		jobs = append(jobs, &send.DeliveryJob{
+			Recipient:        recipient,
+			Sender:           senderName,
+			MessageID:        msgID,
+			FormattedMessage: formattedMsg,
+			PromptFile:       sessionSendPromptFile,
+			ShouldInterrupt:  false,
+			SessionsDir:      cfg.SessionsDir,
+		})
+	}
+	return jobs, homeDir, nil
+}
+
+// logMultiResults writes a log entry for each successful delivery.
+func logMultiResults(homeDir, senderName, message string, jobs []*send.DeliveryJob, results []*send.DeliveryResult) {
+	logsDir := filepath.Join(homeDir, ".agm", "logs", "messages")
+	logger, err := messages.NewMessageLogger(logsDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create logger: %v\n", err)
+		return
+	}
+	for _, result := range results {
+		if !result.Success {
+			continue
+		}
+		for _, job := range jobs {
+			if job.MessageID != result.MessageID {
+				continue
+			}
+			logEntry := messages.CreateLogEntry(job.MessageID, senderName, job.Recipient, message, sessionSendReplyTo)
+			if err := logger.LogMessage(logEntry); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to log message to %s: %v\n", job.Recipient, err)
+			}
+			break
+		}
+	}
 }
 
 // deliveryFunc implements the actual message delivery for a single recipient

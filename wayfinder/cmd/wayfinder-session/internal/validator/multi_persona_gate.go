@@ -346,6 +346,7 @@ func (g *MultiPersonaGate) aggregateVotes(votes []Vote, blockers []string, confi
 }
 
 // invokePersonaReview calls multi-persona-review CLI to get persona vote
+//nolint:gocyclo // reason: linear multi-persona gate with one branch per persona
 func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, error) {
 	// Build command arguments
 	args := []string{

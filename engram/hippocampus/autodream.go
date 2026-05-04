@@ -240,6 +240,7 @@ type consolidationResult struct {
 }
 
 // consolidate merges signals into the memory document (Phase 3).
+//nolint:gocyclo // reason: linear consolidation pipeline with many guard checks
 func (a *Autodream) consolidate(ctx context.Context, state *MemoryState, signals []Signal) (*consolidationResult, error) {
 	result := &consolidationResult{}
 

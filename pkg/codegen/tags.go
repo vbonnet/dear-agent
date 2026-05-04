@@ -53,50 +53,59 @@ func ParseFieldTag(tag string) (*FieldTag, error) {
 
 	for _, opt := range parts[1:] {
 		key, val, hasVal := strings.Cut(opt, "=")
-		switch key {
-		case "pos":
-			if !hasVal {
-				return nil, fmt.Errorf("pos option requires a value")
-			}
-			n, err := strconv.Atoi(val)
-			if err != nil {
-				return nil, fmt.Errorf("pos value must be an integer: %w", err)
-			}
-			ft.Pos = n
-		case "short":
-			if !hasVal || len(val) != 1 {
-				return nil, fmt.Errorf("short option requires a single character")
-			}
-			ft.Short = val
-		case "default":
-			if !hasVal {
-				return nil, fmt.Errorf("default option requires a value")
-			}
-			ft.Default = val
-		case "enum":
-			if !hasVal || val == "" {
-				return nil, fmt.Errorf("enum option requires pipe-separated values")
-			}
-			ft.Enum = strings.Split(val, "|")
-		case "required":
-			ft.Required = true
-		case "flatten":
-			ft.Flatten = true
-		case "hidden":
-			ft.Hidden = true
-		case "omit":
-			if !hasVal || val == "" {
-				return nil, fmt.Errorf("omit option requires pipe-separated surface names")
-			}
-			for _, s := range strings.Split(val, "|") {
-				ft.Omit[s] = true
-			}
-		default:
-			return nil, fmt.Errorf("unknown ef tag option: %q", key)
+		if err := applyFieldTagOption(ft, key, val, hasVal); err != nil {
+			return nil, err
 		}
 	}
 
 	return ft, nil
+}
+
+// applyFieldTagOption applies a single key[=val] option to ft.
+//nolint:gocyclo // reason: linear switch over many tag options
+func applyFieldTagOption(ft *FieldTag, key, val string, hasVal bool) error {
+	switch key {
+	case "pos":
+		if !hasVal {
+			return fmt.Errorf("pos option requires a value")
+		}
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("pos value must be an integer: %w", err)
+		}
+		ft.Pos = n
+	case "short":
+		if !hasVal || len(val) != 1 {
+			return fmt.Errorf("short option requires a single character")
+		}
+		ft.Short = val
+	case "default":
+		if !hasVal {
+			return fmt.Errorf("default option requires a value")
+		}
+		ft.Default = val
+	case "enum":
+		if !hasVal || val == "" {
+			return fmt.Errorf("enum option requires pipe-separated values")
+		}
+		ft.Enum = strings.Split(val, "|")
+	case "required":
+		ft.Required = true
+	case "flatten":
+		ft.Flatten = true
+	case "hidden":
+		ft.Hidden = true
+	case "omit":
+		if !hasVal || val == "" {
+			return fmt.Errorf("omit option requires pipe-separated surface names")
+		}
+		for _, s := range strings.Split(val, "|") {
+			ft.Omit[s] = true
+		}
+	default:
+		return fmt.Errorf("unknown ef tag option: %q", key)
+	}
+	return nil
 }
 
 // ParseDescTag extracts the description from a desc:"..." struct tag value.

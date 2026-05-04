@@ -79,52 +79,8 @@ func reconcileRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	var mismatches []mismatch
-
-	// Detect zombies: tmux exists but Dolt says archived/reaping
-	for _, ts := range tmuxSessions {
-		normalized := tmux.NormalizeTmuxSessionName(ts)
-		m, found := doltByTmux[normalized]
-		if !found {
-			// tmux session with no Dolt record — not necessarily a problem
-			// (could be a non-AGM tmux session)
-			continue
-		}
-		if m.Lifecycle == manifest.LifecycleArchived || m.Lifecycle == manifest.LifecycleReaping {
-			mismatches = append(mismatches, mismatch{
-				Kind:          "zombie",
-				TmuxName:      ts,
-				DoltName:      m.Name,
-				SessionID:     m.SessionID,
-				DoltLifecycle: m.Lifecycle,
-				Description:   fmt.Sprintf("tmux pane alive but Dolt says %q", m.Lifecycle),
-			})
-		}
-	}
-
-	// Detect orphans: Dolt says active but no tmux session
-	for _, m := range allSessions {
-		if m.Lifecycle == manifest.LifecycleArchived {
-			continue
-		}
-		if m.Tmux.SessionName == "" {
-			continue
-		}
-		normalized := tmux.NormalizeTmuxSessionName(m.Tmux.SessionName)
-		if !tmuxSet[normalized] {
-			// Also check unnormalized name
-			if !tmuxSet[m.Tmux.SessionName] {
-				mismatches = append(mismatches, mismatch{
-					Kind:          "orphan",
-					TmuxName:      m.Tmux.SessionName,
-					DoltName:      m.Name,
-					SessionID:     m.SessionID,
-					DoltLifecycle: m.Lifecycle,
-					Description:   fmt.Sprintf("Dolt says %q but no tmux session", m.Lifecycle),
-				})
-			}
-		}
-	}
+	mismatches := detectZombies(tmuxSessions, doltByTmux)
+	mismatches = append(mismatches, detectOrphans(allSessions, tmuxSet)...)
 
 	// Report
 	fmt.Printf("tmux sessions: %d\n", len(tmuxSessions))
@@ -158,31 +114,7 @@ func reconcileRun(cmd *cobra.Command, args []string) error {
 
 	// Apply fixes
 	fmt.Println()
-	var fixed, failed int
-	for _, mm := range mismatches {
-		switch mm.Kind {
-		case "zombie":
-			// Unarchive: set lifecycle back to empty string (active)
-			fmt.Printf("Fixing zombie: unarchiving %s in Dolt...", mm.DoltName)
-			if err := setLifecycle(adapter, mm.SessionID, ""); err != nil {
-				fmt.Printf(" FAILED: %v\n", err)
-				failed++
-			} else {
-				fmt.Printf(" OK\n")
-				fixed++
-			}
-		case "orphan":
-			// Archive the orphan record
-			fmt.Printf("Fixing orphan: archiving %s in Dolt...", mm.DoltName)
-			if err := setLifecycle(adapter, mm.SessionID, manifest.LifecycleArchived); err != nil {
-				fmt.Printf(" FAILED: %v\n", err)
-				failed++
-			} else {
-				fmt.Printf(" OK\n")
-				fixed++
-			}
-		}
-	}
+	fixed, failed := applyReconcileFixes(adapter, mismatches)
 
 	fmt.Println()
 	if fixed > 0 {
@@ -193,6 +125,83 @@ func reconcileRun(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// detectZombies returns mismatches where a tmux session is alive but Dolt
+// records the corresponding session as archived/reaping.
+func detectZombies(tmuxSessions []string, doltByTmux map[string]*manifest.Manifest) []mismatch {
+	var out []mismatch
+	for _, ts := range tmuxSessions {
+		normalized := tmux.NormalizeTmuxSessionName(ts)
+		m, found := doltByTmux[normalized]
+		if !found {
+			continue
+		}
+		if m.Lifecycle == manifest.LifecycleArchived || m.Lifecycle == manifest.LifecycleReaping {
+			out = append(out, mismatch{
+				Kind:          "zombie",
+				TmuxName:      ts,
+				DoltName:      m.Name,
+				SessionID:     m.SessionID,
+				DoltLifecycle: m.Lifecycle,
+				Description:   fmt.Sprintf("tmux pane alive but Dolt says %q", m.Lifecycle),
+			})
+		}
+	}
+	return out
+}
+
+// detectOrphans returns mismatches where Dolt records a non-archived session
+// whose tmux session no longer exists.
+func detectOrphans(allSessions []*manifest.Manifest, tmuxSet map[string]bool) []mismatch {
+	var out []mismatch
+	for _, m := range allSessions {
+		if m.Lifecycle == manifest.LifecycleArchived || m.Tmux.SessionName == "" {
+			continue
+		}
+		normalized := tmux.NormalizeTmuxSessionName(m.Tmux.SessionName)
+		if tmuxSet[normalized] || tmuxSet[m.Tmux.SessionName] {
+			continue
+		}
+		out = append(out, mismatch{
+			Kind:          "orphan",
+			TmuxName:      m.Tmux.SessionName,
+			DoltName:      m.Name,
+			SessionID:     m.SessionID,
+			DoltLifecycle: m.Lifecycle,
+			Description:   fmt.Sprintf("Dolt says %q but no tmux session", m.Lifecycle),
+		})
+	}
+	return out
+}
+
+// applyReconcileFixes applies the fix action implied by each mismatch.
+// Returns (fixed, failed) counts.
+func applyReconcileFixes(adapter *dolt.Adapter, mismatches []mismatch) (int, int) {
+	var fixed, failed int
+	for _, mm := range mismatches {
+		switch mm.Kind {
+		case "zombie":
+			fmt.Printf("Fixing zombie: unarchiving %s in Dolt...", mm.DoltName)
+			if err := setLifecycle(adapter, mm.SessionID, ""); err != nil {
+				fmt.Printf(" FAILED: %v\n", err)
+				failed++
+			} else {
+				fmt.Printf(" OK\n")
+				fixed++
+			}
+		case "orphan":
+			fmt.Printf("Fixing orphan: archiving %s in Dolt...", mm.DoltName)
+			if err := setLifecycle(adapter, mm.SessionID, manifest.LifecycleArchived); err != nil {
+				fmt.Printf(" FAILED: %v\n", err)
+				failed++
+			} else {
+				fmt.Printf(" OK\n")
+				fixed++
+			}
+		}
+	}
+	return fixed, failed
 }
 
 func setLifecycle(adapter *dolt.Adapter, sessionID, lifecycle string) error {

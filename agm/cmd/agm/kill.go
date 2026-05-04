@@ -142,53 +142,15 @@ func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	defer cleanup()
 
-	// Use ops.KillSession for session resolution and validation
 	killResult, killErr := ops.KillSession(opCtx, &ops.KillSessionRequest{
 		Identifier:     sessionName,
 		Force:          forceKill,
 		ConfirmedStuck: confirmedStuck,
 	})
 	if killErr != nil {
-		var opErr *ops.OpError
-		if errors.As(killErr, &opErr) {
-			switch opErr.Code {
-			case ops.ErrCodeSessionNotFound:
-				return renderSessionNotFoundError(sessionName)
-			case ops.ErrCodeSessionArchived:
-				return renderSessionArchivedError(sessionName)
-			case ops.ErrCodeActiveSessionKill:
-				return renderActiveSessionError(sessionName)
-			case ops.ErrCodeKillProtected:
-				// Session is recently active — prompt for confirmation
-				ago := "recently"
-				if killResult != nil && killResult.LastActivity != nil {
-					ago = fmt.Sprintf("%s ago", time.Since(*killResult.LastActivity).Truncate(time.Second))
-				}
-				ui.PrintWarning(fmt.Sprintf("Session '%s' was active %s", sessionName, ago))
-				var confirmed bool
-				confirmErr := huh.NewConfirm().
-					Title("Kill recently active session?").
-					Description("This session has recent activity. Are you sure you want to kill it?").
-					Affirmative("Yes, kill it").
-					Negative("Cancel").
-					Value(&confirmed).
-					WithTheme(ui.GetTheme()).
-					Run()
-				if confirmErr != nil || !confirmed {
-					fmt.Println("Cancelled")
-					return nil
-				}
-				// Re-issue with force
-				killResult, killErr = ops.KillSession(opCtx, &ops.KillSessionRequest{
-					Identifier: sessionName,
-					Force:      true,
-				})
-				if killErr != nil {
-					return killErr
-				}
-			}
-		}
-		if killErr != nil {
+		var done bool
+		killResult, killErr, done = handleKillError(opCtx, sessionName, killResult, killErr)
+		if done {
 			return killErr
 		}
 	}
@@ -213,6 +175,54 @@ func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 	// Success message
 	renderSuccessMessage(sessionName)
 	return nil
+}
+
+// handleKillError dispatches an error from ops.KillSession into specific
+// rendering or interactive flows. Returns the (possibly updated) killResult,
+// the (possibly resolved) error, and a `done` flag indicating whether the
+// caller should return immediately. When done=false, the original killErr
+// has been resolved and the caller should continue with killResult.
+func handleKillError(opCtx *ops.OpContext, sessionName string, killResult *ops.KillSessionResult, killErr error) (*ops.KillSessionResult, error, bool) {
+	var opErr *ops.OpError
+	if !errors.As(killErr, &opErr) {
+		return killResult, killErr, true
+	}
+	switch opErr.Code {
+	case ops.ErrCodeSessionNotFound:
+		return killResult, renderSessionNotFoundError(sessionName), true
+	case ops.ErrCodeSessionArchived:
+		return killResult, renderSessionArchivedError(sessionName), true
+	case ops.ErrCodeActiveSessionKill:
+		return killResult, renderActiveSessionError(sessionName), true
+	case ops.ErrCodeKillProtected:
+		ago := "recently"
+		if killResult != nil && killResult.LastActivity != nil {
+			ago = fmt.Sprintf("%s ago", time.Since(*killResult.LastActivity).Truncate(time.Second))
+		}
+		ui.PrintWarning(fmt.Sprintf("Session '%s' was active %s", sessionName, ago))
+		var confirmed bool
+		confirmErr := huh.NewConfirm().
+			Title("Kill recently active session?").
+			Description("This session has recent activity. Are you sure you want to kill it?").
+			Affirmative("Yes, kill it").
+			Negative("Cancel").
+			Value(&confirmed).
+			WithTheme(ui.GetTheme()).
+			Run()
+		if confirmErr != nil || !confirmed {
+			fmt.Println("Cancelled")
+			return killResult, nil, true
+		}
+		newResult, err := ops.KillSession(opCtx, &ops.KillSessionRequest{
+			Identifier: sessionName,
+			Force:      true,
+		})
+		if err != nil {
+			return newResult, err, true
+		}
+		return newResult, nil, false
+	}
+	return killResult, killErr, true
 }
 
 func runHardKill(sessionName, tmuxSessionName string) error {

@@ -149,48 +149,68 @@ func mergeConfig(base, override *Config) {
 	if override.Version != "" {
 		base.Version = override.Version
 	}
-	if override.Workspace.Root != "" {
-		base.Workspace.Root = override.Workspace.Root
+	mergeWorkspace(&base.Workspace, &override.Workspace)
+	mergeA2A(&base.A2A, &override.A2A)
+	mergeEngram(&base.Engram, &override.Engram)
+	mergeAGM(&base.AGM, &override.AGM)
+	mergePreferences(&base.Preferences, &override.Preferences)
+}
+
+func mergeWorkspace(base, override *WorkspaceConfig) {
+	if override.Root != "" {
+		base.Root = override.Root
 	}
-	if override.Workspace.SwarmDir != "" {
-		base.Workspace.SwarmDir = override.Workspace.SwarmDir
+	if override.SwarmDir != "" {
+		base.SwarmDir = override.SwarmDir
 	}
-	if override.Workspace.WayfinderDir != "" {
-		base.Workspace.WayfinderDir = override.Workspace.WayfinderDir
+	if override.WayfinderDir != "" {
+		base.WayfinderDir = override.WayfinderDir
 	}
-	if override.Workspace.ReposDir != "" {
-		base.Workspace.ReposDir = override.Workspace.ReposDir
+	if override.ReposDir != "" {
+		base.ReposDir = override.ReposDir
 	}
-	if override.A2A.ChannelsDir != "" {
-		base.A2A.ChannelsDir = override.A2A.ChannelsDir
+}
+
+func mergeA2A(base, override *A2AConfig) {
+	if override.ChannelsDir != "" {
+		base.ChannelsDir = override.ChannelsDir
 	}
-	if override.A2A.RetentionDays != 0 {
-		base.A2A.RetentionDays = override.A2A.RetentionDays
+	if override.RetentionDays != 0 {
+		base.RetentionDays = override.RetentionDays
 	}
-	if override.A2A.PollInterval != 0 {
-		base.A2A.PollInterval = override.A2A.PollInterval
+	if override.PollInterval != 0 {
+		base.PollInterval = override.PollInterval
 	}
-	if override.Engram.PluginsDir != "" {
-		base.Engram.PluginsDir = override.Engram.PluginsDir
+}
+
+func mergeEngram(base, override *EngramConfig) {
+	if override.PluginsDir != "" {
+		base.PluginsDir = override.PluginsDir
 	}
-	if override.Engram.EngramsDir != "" {
-		base.Engram.EngramsDir = override.Engram.EngramsDir
+	if override.EngramsDir != "" {
+		base.EngramsDir = override.EngramsDir
 	}
-	if override.Engram.LogsDir != "" {
-		base.Engram.LogsDir = override.Engram.LogsDir
+	if override.LogsDir != "" {
+		base.LogsDir = override.LogsDir
 	}
-	if override.AGM.ManifestsDir != "" {
-		base.AGM.ManifestsDir = override.AGM.ManifestsDir
+}
+
+func mergeAGM(base, override *AGMConfig) {
+	if override.ManifestsDir != "" {
+		base.ManifestsDir = override.ManifestsDir
 	}
-	if override.AGM.DiagnosesDir != "" {
-		base.AGM.DiagnosesDir = override.AGM.DiagnosesDir
+	if override.DiagnosesDir != "" {
+		base.DiagnosesDir = override.DiagnosesDir
 	}
-	if override.Preferences.DefaultModel != "" {
-		base.Preferences.DefaultModel = override.Preferences.DefaultModel
+}
+
+func mergePreferences(base, override *PreferencesConfig) {
+	if override.DefaultModel != "" {
+		base.DefaultModel = override.DefaultModel
 	}
-	base.Preferences.AutoCommit = override.Preferences.AutoCommit
-	if override.Preferences.GitRemote != "" {
-		base.Preferences.GitRemote = override.Preferences.GitRemote
+	base.AutoCommit = override.AutoCommit
+	if override.GitRemote != "" {
+		base.GitRemote = override.GitRemote
 	}
 }
 

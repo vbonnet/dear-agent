@@ -156,48 +156,21 @@ Examples:
 
 // outputHistoryLocation constructs and outputs the history location
 func outputHistoryLocation(cmd *cobra.Command, agent, uuid, workingDir string, session *manifest.Manifest) error {
-	// Get history paths
 	location, err := history.GetHistoryPaths(agent, uuid, workingDir, historyVerifyPaths)
 	if err != nil {
 		if historyJSONOutput {
-			// Output error in JSON format using cliframe
-			errorLoc := &history.HistoryLocation{
-				Harness: agent,
-				UUID:    uuid,
-				Paths:   []string{},
-				Exists:  false,
-			}
-
-			// Try to extract error details
-			var locErr *history.LocationError
-			if errors.As(err, &locErr) {
-				errorLoc.Error = locErr
-			} else {
-				errorLoc.Error = &history.LocationError{
-					Code:    "PATH_CONSTRUCTION_FAILED",
-					Message: err.Error(),
-				}
-			}
-
-			formatter, _ := cliframe.NewFormatter(cliframe.FormatJSON, cliframe.WithPrettyPrint(true))
-			writer := cliframe.NewWriter(cmd.OutOrStdout(), cmd.ErrOrStderr())
-			writer = writer.WithFormatter(formatter)
-			if err := writer.Output(errorLoc); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to write error output: %v\n", err)
-			}
-			return nil // Don't return error since we output it as JSON
+			outputHistoryError(cmd, agent, uuid, err)
+			return nil
 		}
 		return err
 	}
 
-	// Add session name to output if available
 	if session != nil {
 		location.SessionName = session.Name
 		location.SessionID = session.SessionID
 	}
 
 	if historyJSONOutput {
-		// Output in JSON format using cliframe
 		formatter, err := cliframe.NewFormatter(cliframe.FormatJSON, cliframe.WithPrettyPrint(true))
 		if err != nil {
 			return fmt.Errorf("failed to create JSON formatter: %w", err)
@@ -206,7 +179,39 @@ func outputHistoryLocation(cmd *cobra.Command, agent, uuid, workingDir string, s
 		writer = writer.WithFormatter(formatter)
 		return writer.Output(location)
 	}
-	// Output in human-readable format
+	printHistoryHumanReadable(location)
+	return nil
+}
+
+// outputHistoryError emits a JSON HistoryLocation describing the failure when
+// path construction fails in --json mode.
+func outputHistoryError(cmd *cobra.Command, agent, uuid string, err error) {
+	errorLoc := &history.HistoryLocation{
+		Harness: agent,
+		UUID:    uuid,
+		Paths:   []string{},
+		Exists:  false,
+	}
+	var locErr *history.LocationError
+	if errors.As(err, &locErr) {
+		errorLoc.Error = locErr
+	} else {
+		errorLoc.Error = &history.LocationError{
+			Code:    "PATH_CONSTRUCTION_FAILED",
+			Message: err.Error(),
+		}
+	}
+	formatter, _ := cliframe.NewFormatter(cliframe.FormatJSON, cliframe.WithPrettyPrint(true))
+	writer := cliframe.NewWriter(cmd.OutOrStdout(), cmd.ErrOrStderr())
+	writer = writer.WithFormatter(formatter)
+	if outErr := writer.Output(errorLoc); outErr != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to write error output: %v\n", outErr)
+	}
+}
+
+// printHistoryHumanReadable prints the human-readable view of a successfully
+// resolved history location.
+func printHistoryHumanReadable(location *history.HistoryLocation) {
 	if location.SessionName != "" {
 		fmt.Printf("Session: %s\n", location.SessionName)
 	}
@@ -239,8 +244,6 @@ func outputHistoryLocation(cmd *cobra.Command, agent, uuid, workingDir string, s
 			fmt.Println("✗ Some files do not exist")
 		}
 	}
-
-	return nil
 }
 
 func init() {

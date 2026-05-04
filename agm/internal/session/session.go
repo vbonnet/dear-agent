@@ -340,55 +340,12 @@ func FindArchived(sessionsDir string, pattern string, adapter *dolt.Adapter) ([]
 		}
 	}
 
-	// Filter by glob pattern (match against session name and tmux name)
 	var matches []*ArchivedSession
 	for i, m := range allManifests {
-		nameMatches := false
-
-		// Try matching against manifest name
-		if m.Name != "" {
-			if matched, _ := filepath.Match(pattern, m.Name); matched {
-				nameMatches = true
-			}
+		if !manifestMatchesPattern(m, pattern) {
+			continue
 		}
-
-		// Try matching against tmux session name
-		if m.Tmux.SessionName != "" {
-			if matched, _ := filepath.Match(pattern, m.Tmux.SessionName); matched {
-				nameMatches = true
-			}
-		}
-
-		// Try matching against session ID
-		if matched, _ := filepath.Match(pattern, m.SessionID); matched {
-			nameMatches = true
-		}
-
-		if nameMatches {
-			// Determine display name
-			displayName := m.Name
-			if displayName == "" {
-				displayName = m.Tmux.SessionName
-			}
-			if displayName == "" {
-				displayName = m.SessionID
-			}
-
-			// Format archived date
-			archivedAt := "unknown"
-			if !m.UpdatedAt.IsZero() {
-				archivedAt = m.UpdatedAt.Format("2006-01-02")
-			}
-
-			matches = append(matches, &ArchivedSession{
-				SessionID:    m.SessionID,
-				Name:         displayName,
-				ArchivedAt:   archivedAt,
-				Tags:         m.Context.Tags,
-				Project:      m.Context.Project,
-				ManifestPath: manifestPaths[i],
-			})
-		}
+		matches = append(matches, buildArchivedSession(m, manifestPaths[i]))
 	}
 
 	// Sort by archived date (most recent first)
@@ -402,6 +359,46 @@ func FindArchived(sessionsDir string, pattern string, adapter *dolt.Adapter) ([]
 	}
 
 	return matches, nil
+}
+
+// manifestMatchesPattern returns true when pattern matches the manifest's
+// Name, tmux session name, or session ID (filepath.Match semantics).
+func manifestMatchesPattern(m *manifest.Manifest, pattern string) bool {
+	if m.Name != "" {
+		if matched, _ := filepath.Match(pattern, m.Name); matched {
+			return true
+		}
+	}
+	if m.Tmux.SessionName != "" {
+		if matched, _ := filepath.Match(pattern, m.Tmux.SessionName); matched {
+			return true
+		}
+	}
+	matched, _ := filepath.Match(pattern, m.SessionID)
+	return matched
+}
+
+// buildArchivedSession assembles the ArchivedSession DTO for a matched manifest.
+func buildArchivedSession(m *manifest.Manifest, manifestPath string) *ArchivedSession {
+	displayName := m.Name
+	if displayName == "" {
+		displayName = m.Tmux.SessionName
+	}
+	if displayName == "" {
+		displayName = m.SessionID
+	}
+	archivedAt := "unknown"
+	if !m.UpdatedAt.IsZero() {
+		archivedAt = m.UpdatedAt.Format("2006-01-02")
+	}
+	return &ArchivedSession{
+		SessionID:    m.SessionID,
+		Name:         displayName,
+		ArchivedAt:   archivedAt,
+		Tags:         m.Context.Tags,
+		Project:      m.Context.Project,
+		ManifestPath: manifestPath,
+	}
 }
 
 // validateIdentifier checks if a session identifier is safe to use in file paths

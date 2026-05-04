@@ -121,6 +121,7 @@ func extractSender(headerLine string) string {
 // Bug fix (2026-03-14): Added shouldInterrupt parameter to make ESC sending conditional.
 // ESC interrupts Claude's thinking state, which should only happen when explicitly requested.
 // When shouldInterrupt=false, prompts are queued instead of interrupting.
+//nolint:gocyclo // reason: linear protocol — capture pane, optional ESC, load-buffer, paste-buffer, C-m, retry — extracting each step into a helper would obscure the linear flow.
 func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
@@ -151,29 +152,9 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 			return fmt.Errorf("failed to capture pane: %w", err)
 		}
 
-		// Check if command line has text (look for "[Pasted text" or other input indicators)
-		// Bug fix (2026-03-31): shouldInterrupt=true (--force) bypasses ALL input detection.
-		// Previously --force only controlled ESC sending but did not bypass hasQueuedInput
-		// or InputLineHasContent checks, making it ineffective.
 		paneContent := string(output)
-		if !shouldInterrupt {
-			// Bug fix (2026-04-10): Skip human-input detection when AI is actively
-			// generating. The spinner characters (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏) cycle during
-			// generation, causing pane content changes between captures that were
-			// falsely classified as human typing.
-			if !hasActiveSpinner(paneContent) {
-				if hasQueuedInput(paneContent) {
-					_, msg := ClassifyQueuedInput(paneContent)
-					return fmt.Errorf("%s", msg)
-				}
-
-				// Bug fix (2026-03-31): Check if the input line has typed content.
-				// This catches the case where a human is actively typing on the prompt line.
-				// Without this check, the agent message would overwrite/append to human's text.
-				if InputLineHasContent(paneContent) {
-					return fmt.Errorf("input line has content — human is typing, aborting delivery. Retry on next poll cycle")
-				}
-			}
+		if err := checkPaneForExistingInput(paneContent, shouldInterrupt); err != nil {
+			return err
 		}
 
 		// Step 1: Conditionally send ESC to interrupt thinking state (Bug fix: only if shouldInterrupt=true)
@@ -271,41 +252,7 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 			return err
 		}
 
-		// Step 4: Post-send verification — handle edge case where session started
-		// inference between prompt detection and text delivery.
-		// Bug fix (2026-03-29): agm send msg pastes into input buffer instead of submitting
-		for retry := 0; retry < 5; retry++ {
-			time.Sleep(500 * time.Millisecond)
-
-			cmdCheck := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-S", "-5")
-			checkOutput, err := cmdCheck.Output()
-			if err != nil {
-				break
-			}
-
-			checkContent := string(checkOutput)
-			if !hasQueuedInput(checkContent) {
-				break // Message was submitted normally
-			}
-
-			// Text is queued — only re-send Enter if the prompt is visible
-			// (session has returned from inference and is ready for input)
-			if containsAnyHarnessPromptPattern(checkContent) {
-				if os.Getenv("AGM_DEBUG") == "1" {
-					slog.Debug("Detected queued [Pasted text] at prompt — re-sending Enter", "retry", retry+1)
-				}
-				cmdResubmit := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedTarget, "C-m")
-				_ = cmdResubmit.Run()
-				// Brief pause then re-check to confirm submission
-				time.Sleep(300 * time.Millisecond)
-				cmdVerify := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-S", "-5")
-				verifyOutput, err := cmdVerify.Output()
-				if err == nil && !hasQueuedInput(string(verifyOutput)) {
-					break // Successfully submitted
-				}
-			}
-			// Session still working — loop will wait and retry
-		}
+		verifyAndResubmitQueuedPrompt(socketPath, normalizedTarget)
 
 		if os.Getenv("AGM_DEBUG") == "1" {
 			hash := sha256.Sum256([]byte(prompt))
@@ -318,6 +265,58 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 
 // SendPromptFromFile reads prompt from file and sends it using literal mode
 // Bug fix (2026-03-14): Added shouldInterrupt parameter
+// checkPaneForExistingInput examines a fresh pane capture and returns an
+// error if a human is currently typing or the input box already holds queued
+// text. shouldInterrupt=true short-circuits all of these checks.
+func checkPaneForExistingInput(paneContent string, shouldInterrupt bool) error {
+	if shouldInterrupt {
+		return nil
+	}
+	if hasActiveSpinner(paneContent) {
+		return nil
+	}
+	if hasQueuedInput(paneContent) {
+		_, msg := ClassifyQueuedInput(paneContent)
+		return fmt.Errorf("%s", msg)
+	}
+	if InputLineHasContent(paneContent) {
+		return fmt.Errorf("input line has content — human is typing, aborting delivery. Retry on next poll cycle")
+	}
+	return nil
+}
+
+// verifyAndResubmitQueuedPrompt is Step 4 of SendPromptLiteral: detect when a
+// session was busy at submit time so the prompt remained queued, and re-send
+// Enter once the prompt returns. Up to 5 retries.
+func verifyAndResubmitQueuedPrompt(socketPath, normalizedTarget string) {
+	for retry := 0; retry < 5; retry++ {
+		time.Sleep(500 * time.Millisecond)
+		cmdCheck := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-S", "-5")
+		checkOutput, err := cmdCheck.Output()
+		if err != nil {
+			return
+		}
+		checkContent := string(checkOutput)
+		if !hasQueuedInput(checkContent) {
+			return
+		}
+		if !containsAnyHarnessPromptPattern(checkContent) {
+			continue
+		}
+		if os.Getenv("AGM_DEBUG") == "1" {
+			slog.Debug("Detected queued [Pasted text] at prompt — re-sending Enter", "retry", retry+1)
+		}
+		cmdResubmit := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedTarget, "C-m")
+		_ = cmdResubmit.Run()
+		time.Sleep(300 * time.Millisecond)
+		cmdVerify := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-S", "-5")
+		verifyOutput, err := cmdVerify.Output()
+		if err == nil && !hasQueuedInput(string(verifyOutput)) {
+			return
+		}
+	}
+}
+
 func SendPromptFromFile(target, filePath string, shouldInterrupt bool) error {
 	// Validate file exists and get size
 	stat, err := os.Stat(filePath)

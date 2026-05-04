@@ -36,6 +36,7 @@ func GenerateReport(stats HookLogStats, patterns []PatternAnalysis, logPath stri
 }
 
 // FormatTextReport renders a human-readable text report showing the top N patterns.
+//nolint:gocyclo // reason: linear report formatting with many sections
 func FormatTextReport(r Report, topN int) string {
 	var b strings.Builder
 

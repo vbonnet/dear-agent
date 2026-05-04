@@ -148,38 +148,8 @@ func (d *Daemon) Start() error {
 	d.cfg.Logger.Info("Poll interval configured", "interval", pollInterval)
 	d.cfg.Logger.Info("Max retries configured", "max_retries", maxRetries)
 
-	// Start OpenCode adapter if initialized
-	if d.opencodeAdapter != nil {
-		d.cfg.Logger.Info("Starting OpenCode SSE adapter...")
-		if err := d.opencodeAdapter.Start(d.ctx); err != nil {
-			d.cfg.Logger.Warn("OpenCode adapter failed to start", "error", err)
-			if d.cfg.AppConfig != nil && d.cfg.AppConfig.Adapters.OpenCode.FallbackTmux {
-				d.cfg.Logger.Info("Fallback enabled: OpenCode adapter will retry in background")
-				d.cfg.Logger.Info("Using Astrocyte tmux monitoring for OpenCode sessions until SSE adapter connects")
-			} else {
-				d.cfg.Logger.Error("OpenCode adapter start failed and fallback disabled")
-				d.cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter successfully starts")
-			}
-		} else {
-			d.cfg.Logger.Info("OpenCode SSE adapter started successfully")
-		}
-	} else if d.cfg.AppConfig != nil && d.cfg.AppConfig.Adapters.OpenCode.Enabled {
-		// Adapter was enabled but failed to initialize
-		d.cfg.Logger.Warn("OpenCode adapter enabled but not initialized (initialization failed)")
-		if d.cfg.AppConfig.Adapters.OpenCode.FallbackTmux {
-			d.cfg.Logger.Info("Using Astrocyte tmux monitoring as fallback for OpenCode sessions")
-		}
-	}
-
-	// Retry recently failed messages (failed within last 24 hours)
-	if d.cfg.Queue != nil {
-		retried, err := d.cfg.Queue.RetryRecentlyFailed(24 * time.Hour)
-		if err != nil {
-			d.cfg.Logger.Warn("Failed to retry recently failed messages", "error", err)
-		} else if retried > 0 {
-			d.cfg.Logger.Info("Reset recently failed messages for retry", "count", retried)
-		}
-	}
+	d.startOpenCodeAdapter()
+	d.retryFailedMessages()
 
 	// Setup signal handling for graceful shutdown
 	sigCh := make(chan os.Signal, 1)
@@ -204,38 +174,80 @@ func (d *Daemon) Start() error {
 			return nil
 
 		case <-d.ticker.C:
-			// Periodic delivery check
-			pollStart := time.Now()
-			if err := d.deliverPending(); err != nil {
-				d.cfg.Logger.Warn("Error during delivery", "error", err)
-			}
-			pollDuration := time.Since(pollStart)
-			d.metrics.RecordPoll(pollDuration)
+			d.runPollTick()
+		}
+	}
+}
 
-			// Check for acknowledgment timeouts if AckManager is configured
-			if d.cfg.AckManager != nil {
-				if timedOut, err := d.cfg.AckManager.CheckTimeout(); err != nil {
-					d.cfg.Logger.Warn("Error checking ack timeouts", "error", err)
-				} else if timedOut > 0 {
-					d.cfg.Logger.Info("Detected timed-out acknowledgments", "count", timedOut)
-				}
-			}
-
-			// Update queue depth metric
-			stats, err := d.cfg.Queue.GetStats()
-			if err == nil {
-				if queuedCount, ok := stats["queued"]; ok {
-					d.metrics.UpdateQueueDepth(queuedCount)
-				}
-			}
-
-			// Check alerts
-			metrics := d.metrics.GetMetrics()
-			alerts := CheckAlerts(metrics, d.alerts)
-			for _, alert := range alerts {
-				d.cfg.Logger.Info("Alert triggered", "level", alert.Level, "message", alert.Message, "value", alert.Value, "threshold", alert.Threshold)
+// startOpenCodeAdapter starts the OpenCode SSE adapter (when initialized) and
+// logs the appropriate fallback messaging when start fails or the adapter was
+// enabled but not initialized.
+func (d *Daemon) startOpenCodeAdapter() {
+	if d.opencodeAdapter == nil {
+		if d.cfg.AppConfig != nil && d.cfg.AppConfig.Adapters.OpenCode.Enabled {
+			d.cfg.Logger.Warn("OpenCode adapter enabled but not initialized (initialization failed)")
+			if d.cfg.AppConfig.Adapters.OpenCode.FallbackTmux {
+				d.cfg.Logger.Info("Using Astrocyte tmux monitoring as fallback for OpenCode sessions")
 			}
 		}
+		return
+	}
+	d.cfg.Logger.Info("Starting OpenCode SSE adapter...")
+	if err := d.opencodeAdapter.Start(d.ctx); err != nil {
+		d.cfg.Logger.Warn("OpenCode adapter failed to start", "error", err)
+		if d.cfg.AppConfig != nil && d.cfg.AppConfig.Adapters.OpenCode.FallbackTmux {
+			d.cfg.Logger.Info("Fallback enabled: OpenCode adapter will retry in background")
+			d.cfg.Logger.Info("Using Astrocyte tmux monitoring for OpenCode sessions until SSE adapter connects")
+		} else {
+			d.cfg.Logger.Error("OpenCode adapter start failed and fallback disabled")
+			d.cfg.Logger.Warn("OpenCode sessions will NOT be monitored until adapter successfully starts")
+		}
+		return
+	}
+	d.cfg.Logger.Info("OpenCode SSE adapter started successfully")
+}
+
+// retryFailedMessages re-enqueues messages that recently failed.
+func (d *Daemon) retryFailedMessages() {
+	if d.cfg.Queue == nil {
+		return
+	}
+	retried, err := d.cfg.Queue.RetryRecentlyFailed(24 * time.Hour)
+	if err != nil {
+		d.cfg.Logger.Warn("Failed to retry recently failed messages", "error", err)
+		return
+	}
+	if retried > 0 {
+		d.cfg.Logger.Info("Reset recently failed messages for retry", "count", retried)
+	}
+}
+
+// runPollTick performs the per-tick work: deliver pending, check acks, update
+// queue depth, and emit alert log entries.
+func (d *Daemon) runPollTick() {
+	pollStart := time.Now()
+	if err := d.deliverPending(); err != nil {
+		d.cfg.Logger.Warn("Error during delivery", "error", err)
+	}
+	d.metrics.RecordPoll(time.Since(pollStart))
+
+	if d.cfg.AckManager != nil {
+		if timedOut, err := d.cfg.AckManager.CheckTimeout(); err != nil {
+			d.cfg.Logger.Warn("Error checking ack timeouts", "error", err)
+		} else if timedOut > 0 {
+			d.cfg.Logger.Info("Detected timed-out acknowledgments", "count", timedOut)
+		}
+	}
+
+	if stats, err := d.cfg.Queue.GetStats(); err == nil {
+		if queuedCount, ok := stats["queued"]; ok {
+			d.metrics.UpdateQueueDepth(queuedCount)
+		}
+	}
+
+	metrics := d.metrics.GetMetrics()
+	for _, alert := range CheckAlerts(metrics, d.alerts) {
+		d.cfg.Logger.Info("Alert triggered", "level", alert.Level, "message", alert.Message, "value", alert.Value, "threshold", alert.Threshold)
 	}
 }
 

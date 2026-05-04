@@ -48,6 +48,7 @@ func init() {
 	startCmd.Flags().StringVar(&projectDirFlag, "project-dir", "", "Override project root directory (default: ~/src/ws/{workspace}/wf/)")
 }
 
+//nolint:gocyclo // reason: linear CLI driver covering many startup steps
 func runStart(cmd *cobra.Command, args []string) error {
 	// Join all args as the prompt
 	prompt := strings.Join(args, " ")

@@ -96,6 +96,7 @@ func (a *Aggregator) calculateSummary(report *AggregatedReport) Summary {
 }
 
 // FormatTerminal formats the report for terminal display with colors
+//nolint:gocyclo // reason: linear formatter assembling many subsections of terminal output
 func (a *Aggregator) FormatTerminal(report *AggregatedReport) string {
 	var buf bytes.Buffer
 
@@ -187,6 +188,7 @@ func (a *Aggregator) FormatTerminal(report *AggregatedReport) string {
 }
 
 // FormatMarkdown formats the report as markdown
+//nolint:gocyclo // reason: linear formatter assembling many subsections of markdown output
 func (a *Aggregator) FormatMarkdown(report *AggregatedReport) string {
 	var buf bytes.Buffer
 

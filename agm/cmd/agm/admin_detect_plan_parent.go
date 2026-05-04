@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 var (
@@ -75,96 +76,84 @@ func runDetectPlanParent(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to list sessions: %w", err)
 	}
 
-	// Filter candidates:
-	// 1. Created within time window
-	// 2. Has non-empty name (not "Unknown")
-	// 3. Matches CWD from context
-	// 4. If slug provided, matches slug
-	var candidates []*struct {
-		SessionID string
-		Name      string
-		CreatedAt time.Time
-		Score     int // Higher score = better match
+	candidates := scoreParentCandidates(allSessions, child.CreatedAt, windowStart, windowEnd)
+	if len(candidates) == 0 {
+		// Output empty (not an error - just no parent found)
+		return nil
 	}
 
+	best := pickBestCandidate(candidates)
+	// Output parent session ID (for shell script consumption)
+	fmt.Println(best.SessionID)
+
+	return nil
+}
+
+// detectCandidate is a flattened, scored view of a session used during parent
+// detection scoring.
+type detectCandidate struct {
+	SessionID string
+	Name      string
+	CreatedAt time.Time
+	Score     int
+}
+
+// scoreParentCandidates filters allSessions down to those eligible to be a
+// planning parent for the orphan and assigns each a relevance score.
+func scoreParentCandidates(allSessions []*manifest.Manifest, childCreatedAt, windowStart, windowEnd time.Time) []detectCandidate {
+	var candidates []detectCandidate
 	for _, session := range allSessions {
-		// Skip if outside time window
 		if session.CreatedAt.Before(windowStart) || session.CreatedAt.After(windowEnd) {
 			continue
 		}
-
-		// Skip if unnamed (execution sessions typically have "Unknown")
 		if session.Name == "" || session.Name == "Unknown" {
 			continue
 		}
-
-		// Skip if it's the child session itself
 		if session.SessionID == detectSessionID {
 			continue
 		}
-
-		// Check CWD match (from context.project)
 		if session.Context.Project != detectCWD {
 			continue
 		}
-
-		// Calculate match score
-		score := 1 // Base score for matching CWD and time window
-
-		// Bonus for slug match (if provided)
-		// Note: Slug is not stored in manifest, but we can check tmux session name pattern
-		if detectSlug != "" {
-			// Slug typically appears in tmux session name or can be inferred
-			// For now, just add bonus if names are similar
-			score++
-		}
-
-		// Bonus for being closer in time (more recent = likely parent)
-		timeDiff := child.CreatedAt.Sub(session.CreatedAt)
-		switch {
-		case timeDiff < 10*time.Second:
-			score += 3 // Very close in time
-		case timeDiff < 30*time.Second:
-			score += 2 // Reasonably close
-		default:
-			score++ // Within window
-		}
-
-		candidates = append(candidates, &struct {
-			SessionID string
-			Name      string
-			CreatedAt time.Time
-			Score     int
-		}{
+		score := scoreCandidate(session, childCreatedAt)
+		candidates = append(candidates, detectCandidate{
 			SessionID: session.SessionID,
 			Name:      session.Name,
 			CreatedAt: session.CreatedAt,
 			Score:     score,
 		})
 	}
+	return candidates
+}
 
-	// No candidates found
-	if len(candidates) == 0 {
-		// Output empty (not an error - just no parent found)
-		return nil
+// scoreCandidate assigns a relevance score for a parent candidate based on
+// time proximity and slug-matching heuristics.
+func scoreCandidate(session *manifest.Manifest, childCreatedAt time.Time) int {
+	score := 1
+	if detectSlug != "" {
+		score++
 	}
+	timeDiff := childCreatedAt.Sub(session.CreatedAt)
+	switch {
+	case timeDiff < 10*time.Second:
+		score += 3
+	case timeDiff < 30*time.Second:
+		score += 2
+	default:
+		score++
+	}
+	return score
+}
 
-	// Find best candidate (highest score, most recent if tied)
-	var best *struct {
-		SessionID string
-		Name      string
-		CreatedAt time.Time
-		Score     int
-	}
-	for _, candidate := range candidates {
-		if best == nil || candidate.Score > best.Score ||
-			(candidate.Score == best.Score && candidate.CreatedAt.After(best.CreatedAt)) {
-			best = candidate
+// pickBestCandidate returns the highest-scoring candidate, breaking ties by
+// most-recent CreatedAt.
+func pickBestCandidate(candidates []detectCandidate) detectCandidate {
+	best := candidates[0]
+	for _, c := range candidates[1:] {
+		if c.Score > best.Score ||
+			(c.Score == best.Score && c.CreatedAt.After(best.CreatedAt)) {
+			best = c
 		}
 	}
-
-	// Output parent session ID (for shell script consumption)
-	fmt.Println(best.SessionID)
-
-	return nil
+	return best
 }

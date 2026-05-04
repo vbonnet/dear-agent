@@ -42,6 +42,8 @@ func NewTestExecutor(projectRoot string, threshold float64) *TestExecutor {
 }
 
 // DetectFrameworks detects test frameworks in the project
+//
+//nolint:gocyclo // reason: linear list of framework-detection probes with one branch per framework.
 func (te *TestExecutor) DetectFrameworks() ([]TestFramework, error) {
 	var frameworks []TestFramework
 

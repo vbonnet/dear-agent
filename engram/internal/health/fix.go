@@ -447,6 +447,7 @@ func (f *Tier1Fixer) fixPathsInFile(filePath string, data []byte) error {
 }
 
 // removeNonExistentHooks removes references to missing/disabled hook files from settings.json.
+//nolint:gocyclo // reason: linear fixer scanning many hook locations
 func (f *Tier1Fixer) removeNonExistentHooks() error {
 	settingsPath := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
 	data, err := os.ReadFile(settingsPath)
