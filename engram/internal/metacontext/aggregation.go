@@ -92,7 +92,7 @@ func calculateImportance(sig Signal, context AnalyzeContext) float64 {
 }
 
 // buildAnalyzeContext constructs context for importance scoring.
-func buildAnalyzeContext(req *AnalyzeRequest, allSignals []Signal) AnalyzeContext {
+func buildAnalyzeContext(_ *AnalyzeRequest, allSignals []Signal) AnalyzeContext {
 	context := AnalyzeContext{
 		FileModTimes:        make(map[string]time.Time),
 		ConversationMatches: make(map[string]int),

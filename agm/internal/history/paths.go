@@ -131,7 +131,7 @@ func getClaudeCodePaths(uuid, workingDir string) ([]string, map[string]string, e
 }
 
 // getGeminiCLIPaths returns paths for Gemini CLI harness
-func getGeminiCLIPaths(uuid, workingDir string) ([]string, map[string]string, error) {
+func getGeminiCLIPaths(_, workingDir string) ([]string, map[string]string, error) {
 	if workingDir == "" {
 		return nil, nil, &LocationError{
 			Code:       "WORKING_DIR_MISSING",

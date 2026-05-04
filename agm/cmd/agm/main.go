@@ -514,7 +514,7 @@ func handleNoArgs(matchingSessions []*manifest.Manifest, projectDir string, uiCf
 		}
 
 		// Launch interactive form for new session
-		return runNewSessionFlow(nil, uiCfg)
+		return runNewSessionFlow(nil)
 	}
 
 	if len(matchingSessions) == 1 {
@@ -567,7 +567,7 @@ func performResume(m *manifest.Manifest) error {
 	return nil
 }
 
-func runNewSessionFlow(suggestedName *string, uiCfg *ui.Config) error {
+func runNewSessionFlow(suggestedName *string) error {
 	// TODO: Implement new session flow
 	// This will show the interactive form we built
 	if suggestedName != nil {

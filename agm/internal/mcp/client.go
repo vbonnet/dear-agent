@@ -51,7 +51,7 @@ type mcpClient interface {
 
 // connectMCPServer connects to MCP server at given URL
 // TODO: Implement actual MCP client connection using official SDK
-func connectMCPServer(ctx context.Context, serverURL string) (mcpClient, error) {
+func connectMCPServer(_ context.Context, serverURL string) (mcpClient, error) {
 	// V1 stub: Return mock client
 	return &mockMCPClient{url: serverURL}, nil
 }

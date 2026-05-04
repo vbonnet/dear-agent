@@ -115,11 +115,11 @@ func NewOpenAIAdapter(ctx context.Context, config *OpenAIConfig) (Agent, error) 
 
 // newOpenAIAdapterWithClient creates an adapter with a custom client (for testing).
 // This is an unexported function used by tests to inject mock clients.
-func newOpenAIAdapterWithClient(client openai.ClientInterface, sessionManager *openai.SessionManager, model string) *OpenAIAdapter {
+func newOpenAIAdapterWithClient(client openai.ClientInterface, sessionManager *openai.SessionManager) *OpenAIAdapter {
 	return &OpenAIAdapter{
 		client:         client,
 		sessionManager: sessionManager,
-		model:          model,
+		model:          "gpt-4",
 	}
 }
 

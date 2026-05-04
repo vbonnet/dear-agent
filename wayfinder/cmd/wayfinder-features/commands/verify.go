@@ -74,7 +74,7 @@ func runVerify(cmd *cobra.Command, args []string) error {
 }
 
 // loadProgressAndFeature loads progress file and finds the feature.
-func loadProgressAndFeature(featureID string, writer *cliframe.Writer) (string, *progress.Progress, *progress.Feature, error) {
+func loadProgressAndFeature(featureID string, _ *cliframe.Writer) (string, *progress.Progress, *progress.Feature, error) {
 	progressPath, err := progress.FindProgressFile()
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("failed to find progress file: %w", err)
@@ -147,7 +147,7 @@ func executeTests(cmd *cobra.Command, command, featureID string, feature *progre
 }
 
 // updateFeatureStatus updates feature to passing status and writes progress.
-func updateFeatureStatus(progressPath string, prog *progress.Progress, featureID string, writer *cliframe.Writer) error {
+func updateFeatureStatus(progressPath string, prog *progress.Progress, featureID string, _ *cliframe.Writer) error {
 	now := time.Now()
 	err := progress.UpdateFeature(prog, featureID, func(f *progress.Feature) {
 		f.Status = progress.StatusPassing

@@ -19,14 +19,7 @@ type Approach struct {
 // validateLateralThinkingEnhanced validates approach quality and distinctness
 func validateLateralThinkingEnhanced(content string, phaseName string, deliverablePath string) error {
 	// Extract approaches from content
-	approaches, err := extractApproaches(content)
-	if err != nil {
-		return NewValidationError(
-			"complete "+phaseName,
-			"failed to parse approaches",
-			err.Error(),
-		)
-	}
+	approaches := extractApproaches(content)
 
 	// Check minimum count
 	if len(approaches) < 3 {
@@ -82,10 +75,10 @@ func validateLateralThinkingEnhanced(content string, phaseName string, deliverab
 }
 
 // extractApproaches parses markdown to extract approaches
-func extractApproaches(content string) ([]Approach, error) {
+func extractApproaches(content string) []Approach {
 	matches := findApproachMatches(content)
 	if len(matches) == 0 {
-		return []Approach{}, nil
+		return []Approach{}
 	}
 
 	approaches := make([]Approach, 0, len(matches))
@@ -94,7 +87,7 @@ func extractApproaches(content string) ([]Approach, error) {
 		approaches = append(approaches, approach)
 	}
 
-	return approaches, nil
+	return approaches
 }
 
 // findApproachMatches finds all approach headers in the content.

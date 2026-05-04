@@ -181,8 +181,7 @@ func TestLoadEnvironmentConfig(t *testing.T) {
 			}
 
 			cfg := tt.initialCfg
-			err := loadEnvironmentConfig(&cfg)
-			require.NoError(t, err)
+			loadEnvironmentConfig(&cfg)
 
 			assert.Equal(t, tt.expectedCfg.Provider, cfg.Provider)
 			assert.Equal(t, tt.expectedCfg.APIKey, cfg.APIKey)

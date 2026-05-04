@@ -205,10 +205,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Run validation
-	summary, err := validateFiles(filesToValidate)
-	if err != nil {
-		return fmt.Errorf("validation failed: %w", err)
-	}
+	summary := validateFiles(filesToValidate)
 
 	// Output results
 	if validateJSON {
@@ -218,7 +215,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 }
 
 // validateFiles validates all files and returns summary
-func validateFiles(files []string) (*ValidationSummary, error) {
+func validateFiles(files []string) *ValidationSummary {
 	summary := &ValidationSummary{
 		TotalFiles: len(files),
 		Results:    make([]ValidationResult, 0),
@@ -252,7 +249,7 @@ func validateFiles(files []string) (*ValidationSummary, error) {
 		summary.Results = append(summary.Results, result)
 	}
 
-	return summary, nil
+	return summary
 }
 
 // detectValidatorType auto-detects the appropriate validator from filename

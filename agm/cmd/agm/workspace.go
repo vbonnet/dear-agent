@@ -654,7 +654,7 @@ func formatWorkspaceStatus(ws *workspace.Workspace, isDefault bool) string {
 
 // countWorkspaceSessions counts sessions in a workspace using Dolt
 // Note: Only works for the current workspace (Phase 3 limitation)
-func countWorkspaceSessions(workspaceName string, sessionsDir string) (int, []*manifest.Manifest, error) {
+func countWorkspaceSessions(workspaceName string, _ string) (int, []*manifest.Manifest, error) {
 	// Only query Dolt for the current workspace
 	if cfg.Workspace == workspaceName {
 		adapter, err := getStorage()

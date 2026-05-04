@@ -80,11 +80,11 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if loopMode {
 		return runScanLoop()
 	}
-	return runSingleScan(cmd)
+	return runSingleScan()
 }
 
 // runSingleScan executes one scan cycle
-func runSingleScan(cmd *cobra.Command) error {
+func runSingleScan() error {
 	result, err := performScanCycle()
 	if err != nil {
 		return handleError(err)

@@ -406,7 +406,7 @@ func runSendSingle(recipientSession string) (retErr error) {
 	switch canReceive {
 	case state.CanReceiveYes:
 		// Prompt visible, no dialog blocking → send directly
-		if err := sendDirectly(recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter, false); err != nil {
+		if err := sendDirectly(recipientSession, senderName, messageID, formattedMessage, sessionSendPromptFile, adapter); err != nil {
 			return err
 		}
 		recordDelegation(senderName, recipientSession, messageID, message)
@@ -457,7 +457,7 @@ func queueMessage(recipientSession, senderName, messageID, formattedMessage, cur
 		// Queue creation failed - fall back to direct send with warning
 		fmt.Fprintf(os.Stderr, "Warning: failed to create message queue: %v\n", err)
 		fallbackAdapter, _ := getStorage()
-		return sendDirectly(recipientSession, senderName, messageID, formattedMessage, "", fallbackAdapter, false)
+		return sendDirectly(recipientSession, senderName, messageID, formattedMessage, "", fallbackAdapter)
 	}
 	defer queue.Close()
 
@@ -477,7 +477,7 @@ func queueMessage(recipientSession, senderName, messageID, formattedMessage, cur
 		if fallbackAdapter != nil {
 			defer fallbackAdapter.Close()
 		}
-		return sendDirectly(recipientSession, senderName, messageID, formattedMessage, "", fallbackAdapter, false)
+		return sendDirectly(recipientSession, senderName, messageID, formattedMessage, "", fallbackAdapter)
 	}
 
 	// Create queue entry with mapped priority
@@ -513,15 +513,15 @@ func queueMessage(recipientSession, senderName, messageID, formattedMessage, cur
 // sendDirectly sends a message directly to a session without queuing.
 // Supports both tmux-based (Claude, Gemini) and API-based (OpenAI) sessions.
 //
-// shouldInterrupt controls whether an ESC keystroke is sent before the message.
-// For DONE-state sends, shouldInterrupt should be false because the session is
-// already at the prompt — sending ESC is redundant and can exit plan mode.
-func sendDirectly(recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter, shouldInterrupt bool) error {
+// For DONE-state sends, the underlying tmux send does not emit an ESC keystroke
+// because the session is already at the prompt — sending ESC is redundant and
+// can exit plan mode.
+func sendDirectly(recipientSession, senderName, messageID, formattedMessage, promptFile string, adapter *dolt.Adapter) error {
 	// Try to load manifest to determine agent type
 	m, _, err := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter)
 	if err != nil {
 		// No manifest found - fall back to tmux-based send for legacy sessions
-		return sendViaTmux(recipientSession, senderName, messageID, formattedMessage, promptFile, shouldInterrupt)
+		return sendViaTmux(recipientSession, senderName, messageID, formattedMessage, promptFile, false)
 	}
 
 	// Determine delivery method based on harness type
@@ -537,7 +537,7 @@ func sendDirectly(recipientSession, senderName, messageID, formattedMessage, pro
 	}
 
 	// Fall back to tmux for CLI-based harnesses (Claude Code, Gemini CLI)
-	return sendViaTmux(recipientSession, senderName, messageID, formattedMessage, promptFile, shouldInterrupt)
+	return sendViaTmux(recipientSession, senderName, messageID, formattedMessage, promptFile, false)
 }
 
 // sendViaTmux sends a message via tmux (for CLI-based agents like Claude, Gemini)
@@ -935,7 +935,7 @@ func dismissOverlayAndDeliver(tmuxName, recipientSession, senderName, messageID,
 	case state.CanReceiveYes:
 		// Overlay dismissed, prompt visible — deliver directly
 		fmt.Fprintf(os.Stderr, "✓ Overlay dismissed on '%s' — delivering message\n", recipientSession)
-		return sendDirectly(recipientSession, senderName, messageID, formattedMessage, promptFile, adapter, false)
+		return sendDirectly(recipientSession, senderName, messageID, formattedMessage, promptFile, adapter)
 
 	case state.CanReceiveOverlay:
 		// Overlay still visible — try Escape as fallback
@@ -949,7 +949,7 @@ func dismissOverlayAndDeliver(tmuxName, recipientSession, senderName, messageID,
 		canReceive = session.CheckSessionDelivery(tmuxName)
 		if canReceive == state.CanReceiveYes {
 			fmt.Fprintf(os.Stderr, "✓ Overlay dismissed with Escape on '%s' — delivering message\n", recipientSession)
-			return sendDirectly(recipientSession, senderName, messageID, formattedMessage, promptFile, adapter, false)
+			return sendDirectly(recipientSession, senderName, messageID, formattedMessage, promptFile, adapter)
 		}
 		// Give up — queue the message
 		fmt.Fprintf(os.Stderr, "⚠ Could not dismiss overlay on '%s' (state: %s) — queueing message\n", recipientSession, canReceive)

@@ -291,7 +291,7 @@ func (e *ReviewEngine) ReviewBatch(tasks []*status.Task) (*ReviewResult, error) 
 }
 
 // selectPersonasForTask determines which personas should review based on risk
-func (e *ReviewEngine) selectPersonasForTask(task *status.Task, riskLevel RiskLevel) []PersonaType {
+func (e *ReviewEngine) selectPersonasForTask(_ *status.Task, riskLevel RiskLevel) []PersonaType {
 	// Base personas for all reviews
 	personas := []PersonaType{
 		PersonaSecurity,
@@ -357,7 +357,7 @@ func (e *ReviewEngine) tryExternalReviewTool(persona PersonaType, files []string
 }
 
 // runGolangciLint executes golangci-lint for maintainability checks
-func (e *ReviewEngine) runGolangciLint(files []string) (PersonaResult, error) {
+func (e *ReviewEngine) runGolangciLint(_ []string) (PersonaResult, error) {
 	cmd := exec.Command("golangci-lint", "run", "./...")
 	cmd.Dir = e.projectDir
 

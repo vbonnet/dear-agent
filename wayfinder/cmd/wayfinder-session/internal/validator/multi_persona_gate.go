@@ -98,10 +98,7 @@ func ValidateGate(projectDir, phaseName string, st status.StatusInterface) error
 	}
 
 	// Execute Multi-Persona Review
-	result, err := gate.executeReview(phaseName, config)
-	if err != nil {
-		return err
-	}
+	result := gate.executeReview(phaseName, config)
 
 	// Enforce gate decision rules
 	return gate.enforceGate(result, config)
@@ -176,7 +173,7 @@ func (g *MultiPersonaGate) validateLateralThinking(phaseName string) error {
 }
 
 // executeReview invokes personas to review the deliverable
-func (g *MultiPersonaGate) executeReview(phaseName string, config *GateConfig) (*GateResult, error) {
+func (g *MultiPersonaGate) executeReview(phaseName string, config *GateConfig) *GateResult {
 	// Build deliverable path
 	deliverablePath := filepath.Join(g.projectDir, phaseName+"-"+strings.ToLower(strings.Replace(phaseName, "S", "step", 1))+".md")
 
@@ -213,7 +210,7 @@ func (g *MultiPersonaGate) executeReview(phaseName string, config *GateConfig) (
 	}
 
 	// Aggregate votes based on gate tier
-	return g.aggregateVotes(votes, blockers, config), nil
+	return g.aggregateVotes(votes, blockers, config)
 }
 
 // enforceGate applies decision rules based on gate tier and votes

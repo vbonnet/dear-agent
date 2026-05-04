@@ -131,7 +131,8 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	case captureYAML:
 		return outputCaptureYAML(sessionName, lines)
 	default:
-		return outputCaptureText(lines)
+		outputCaptureText(lines)
+		return nil
 	}
 }
 
@@ -150,11 +151,10 @@ func filterLines(lines []string, pattern string) ([]string, error) {
 	return filtered, nil
 }
 
-func outputCaptureText(lines []string) error {
+func outputCaptureText(lines []string) {
 	for _, line := range lines {
 		fmt.Println(line)
 	}
-	return nil
 }
 
 func outputCaptureJSON(sessionName string, lines []string) error {

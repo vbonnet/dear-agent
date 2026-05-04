@@ -118,10 +118,7 @@ func (a *Autodream) Run(ctx context.Context) (*ConsolidationReport, error) {
 	report.Contradictions = result.contradictions
 
 	// Phase 4: Prune
-	pruneResult, err := a.prune(ctx, state, result)
-	if err != nil {
-		return nil, fmt.Errorf("prune: %w", err)
-	}
+	pruneResult := a.prune(ctx, state, result)
 	report.EntriesPruned = pruneResult.entriesPruned
 
 	// Generate diff
@@ -339,7 +336,7 @@ type pruneResult struct {
 }
 
 // prune enforces size limits and manages topic files (Phase 4).
-func (a *Autodream) prune(_ context.Context, state *MemoryState, _ *consolidationResult) (*pruneResult, error) {
+func (a *Autodream) prune(_ context.Context, state *MemoryState, _ *consolidationResult) *pruneResult {
 	result := &pruneResult{
 		topicOverflow: make(map[string]string),
 	}
@@ -347,7 +344,7 @@ func (a *Autodream) prune(_ context.Context, state *MemoryState, _ *consolidatio
 	// Check if MEMORY.md exceeds line limit
 	lineCount := state.MemoryDoc.LineCount()
 	if lineCount <= a.config.MaxMemoryLines {
-		return result, nil // within limits
+		return result // within limits
 	}
 
 	// Overflow strategy: move large sections to topic files
@@ -378,7 +375,7 @@ func (a *Autodream) prune(_ context.Context, state *MemoryState, _ *consolidatio
 		}
 	}
 
-	return result, nil
+	return result
 }
 
 // archiveOldestTopics moves the oldest topic files to an archive subdirectory.

@@ -301,7 +301,7 @@ func getApplicationSummary(result *ApplicationResult) string {
 }
 
 // runDeepResearch executes the gemini-deep-research CLI and returns the report path.
-func (w *GeminiDeepResearch) runDeepResearch(sessionID, url string) (string, error) {
+func (w *GeminiDeepResearch) runDeepResearch(_, url string) (string, error) {
 	// Create context with timeout (60 minute max for deep research)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()

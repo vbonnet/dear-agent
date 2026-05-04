@@ -109,7 +109,7 @@ func runEstimateFiles(cmd *cobra.Command, args []string) error {
 }
 
 // runEstimateRetrieval handles retrieval mode (--query or --auto)
-func runEstimateRetrieval(cmd *cobra.Command, args []string) error {
+func runEstimateRetrieval(cmd *cobra.Command, _ []string) error {
 	// Get query (from --query flag or auto-detect)
 	var query string
 	var err error

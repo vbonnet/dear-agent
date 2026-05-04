@@ -387,10 +387,7 @@ description: A valid guide
 	}
 
 	// Validate files
-	summary, err := validateFiles(testPaths)
-	if err != nil {
-		t.Fatalf("validateFiles failed: %v", err)
-	}
+	summary := validateFiles(testPaths)
 
 	if summary.TotalFiles != 2 {
 		t.Errorf("Expected 2 total files, got %d", summary.TotalFiles)

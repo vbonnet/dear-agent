@@ -208,10 +208,7 @@ func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 	}
 
 	// Kill tmux session (idempotent)
-	killTmuxErr := killTmuxSession(killResult.Name)
-	if killTmuxErr != nil {
-		return renderKillError(sessionName, killTmuxErr)
-	}
+	killTmuxSession(killResult.Name)
 
 	// Success message
 	renderSuccessMessage(sessionName)
@@ -381,7 +378,7 @@ Resume with: agm session resume %s`, sessionName, tmuxName, sessionName)
 	return confirmed, err
 }
 
-func killTmuxSession(tmuxName string) error {
+func killTmuxSession(tmuxName string) {
 	socketPath := tmux.GetSocketPath()
 	ctx := context.Background()
 
@@ -397,8 +394,6 @@ func killTmuxSession(tmuxName string) error {
 	// Execute and ignore errors (idempotent behavior)
 	// Session may already be dead, which is OK
 	_ = cmd.Run()
-
-	return nil
 }
 
 func renderSessionNotFoundError(sessionName string) error {

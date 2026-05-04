@@ -422,10 +422,7 @@ func TestPrune_EnforcesMaxTopicFiles(t *testing.T) {
 	config.MaxMemoryLines = 200
 	dream := NewAutodream(memDir, nil, nil, config)
 
-	result, err := dream.prune(context.Background(), state, nil)
-	if err != nil {
-		t.Fatalf("prune failed: %v", err)
-	}
+	result := dream.prune(context.Background(), state, nil)
 
 	// Should have archived some oldest topic files
 	if len(result.archived) == 0 && len(result.topicOverflow) > 0 {

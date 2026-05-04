@@ -144,10 +144,7 @@ func TestAutodream_Prune_OverLimit(t *testing.T) {
 	config.StateFile = filepath.Join(tmpDir, "state.json")
 
 	dream := NewAutodream(memDir, &mockHarness{memoryDir: memDir}, nil, config)
-	result, err := dream.prune(context.Background(), state, &consolidationResult{})
-	if err != nil {
-		t.Fatalf("prune failed: %v", err)
-	}
+	result := dream.prune(context.Background(), state, &consolidationResult{})
 
 	if result.entriesPruned == 0 {
 		t.Error("expected entries to be pruned when over limit")
@@ -180,10 +177,7 @@ func TestAutodream_Prune_UnderLimit(t *testing.T) {
 	config.StateFile = filepath.Join(tmpDir, "state.json")
 
 	dream := NewAutodream(memDir, &mockHarness{memoryDir: memDir}, nil, config)
-	result, err := dream.prune(context.Background(), state, &consolidationResult{})
-	if err != nil {
-		t.Fatalf("prune failed: %v", err)
-	}
+	result := dream.prune(context.Background(), state, &consolidationResult{})
 
 	if result.entriesPruned != 0 {
 		t.Errorf("expected 0 pruned, got %d", result.entriesPruned)

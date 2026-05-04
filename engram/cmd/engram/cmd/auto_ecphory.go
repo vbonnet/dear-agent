@@ -166,7 +166,7 @@ func parseAutoEcphoryStdin(ctx context.Context) (*autoEcphoryInput, error) {
 }
 
 // resolveEngramPath determines where engrams live, given the cwd from the event.
-func resolveEngramPath(cwd string) (string, error) {
+func resolveEngramPath(_ string) (string, error) {
 	// Try the existing workspace detection first
 	basePath, err := getEngramBasePath()
 	if err == nil && basePath != "" {
@@ -275,7 +275,7 @@ func queryEngrams(ctx context.Context, engramPath string, input *autoEcphoryInpu
 
 // scoreEngram computes a simple relevance score using keyword overlap
 // between the prompt and the engram's metadata and content.
-func scoreEngram(eg *engram.Engram, promptWords []string, promptLower string) int {
+func scoreEngram(eg *engram.Engram, promptWords []string, _ string) int {
 	score := 0
 
 	titleLower := strings.ToLower(eg.Frontmatter.Title)

@@ -110,7 +110,7 @@ func (sr *StallRecovery) Recover(ctx context.Context, event StallEvent) (Recover
 }
 
 // recoverPermissionPromptStall handles recovery from permission prompt stalls.
-func (sr *StallRecovery) recoverPermissionPromptStall(ctx context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
+func (sr *StallRecovery) recoverPermissionPromptStall(_ context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
 	action := RecoveryAction{
 		SessionName: event.SessionName,
 		ActionType:  "alert_orchestrator",
@@ -140,7 +140,7 @@ func (sr *StallRecovery) recoverPermissionPromptStall(ctx context.Context, event
 }
 
 // recoverNoCommitStall handles recovery from no-commit stalls.
-func (sr *StallRecovery) recoverNoCommitStall(ctx context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
+func (sr *StallRecovery) recoverNoCommitStall(_ context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
 	action := RecoveryAction{
 		SessionName: event.SessionName,
 		ActionType:  "nudge",
@@ -165,7 +165,7 @@ func (sr *StallRecovery) recoverNoCommitStall(ctx context.Context, event StallEv
 }
 
 // recoverErrorLoopStall handles recovery from error loop stalls.
-func (sr *StallRecovery) recoverErrorLoopStall(ctx context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
+func (sr *StallRecovery) recoverErrorLoopStall(_ context.Context, event StallEvent, errorContext string) (RecoveryAction, error) {
 	action := RecoveryAction{
 		SessionName: event.SessionName,
 		ActionType:  "log_diagnostic",
@@ -235,7 +235,7 @@ func (sr *StallRecovery) recordFailure(sessionName string, errorMsg string) erro
 }
 
 // escalateFailure escalates a session to the orchestrator after max retries exceeded.
-func (sr *StallRecovery) escalateFailure(ctx context.Context, event StallEvent, retryState *RetryState) (RecoveryAction, error) {
+func (sr *StallRecovery) escalateFailure(_ context.Context, event StallEvent, retryState *RetryState) (RecoveryAction, error) {
 	action := RecoveryAction{
 		SessionName: event.SessionName,
 		ActionType:  "escalate",

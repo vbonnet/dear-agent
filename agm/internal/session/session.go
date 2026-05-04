@@ -120,7 +120,7 @@ func ResolveIdentifier(identifier string, sessionsDir string, adapter *dolt.Adap
 
 // findManifestPath returns the manifest path for a session ID
 // For Dolt-backed sessions, paths are always predictable
-func findManifestPath(sessionsDir string, sessionID string, adapter *dolt.Adapter) (string, error) {
+func findManifestPath(sessionsDir string, sessionID string, _ *dolt.Adapter) (string, error) {
 	// For Dolt-backed sessions, manifest path is always predictable
 	return filepath.Join(sessionsDir, sessionID, "manifest.yaml"), nil
 }

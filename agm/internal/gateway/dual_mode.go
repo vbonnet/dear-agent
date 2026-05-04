@@ -111,7 +111,7 @@ func (g *DualModeGateway) CreateHandoff(ctx context.Context, fromMode Mode, toMo
 	}
 
 	// Generate next steps based on transition
-	handoff.NextSteps = g.generateNextSteps(fromMode, toMode, summary)
+	handoff.NextSteps = g.generateNextSteps(fromMode, toMode)
 
 	return handoff, nil
 }
@@ -328,7 +328,7 @@ func (g *DualModeGateway) scoreToConfidence(score int) float64 {
 }
 
 // generateNextSteps creates action items for the target mode.
-func (g *DualModeGateway) generateNextSteps(fromMode Mode, toMode Mode, summary string) []string {
+func (g *DualModeGateway) generateNextSteps(fromMode Mode, toMode Mode) []string {
 	if fromMode == ModeArchitect && toMode == ModeImplementer {
 		return []string{
 			"Review the architecture plan from Architect mode",

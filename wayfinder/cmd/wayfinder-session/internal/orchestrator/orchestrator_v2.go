@@ -105,10 +105,7 @@ func (o *PhaseOrchestratorV2) RewindPhaseCtx(ctx context.Context, targetPhase st
 	}
 
 	// Execute rewind
-	if err := o.executeRewind(targetPhase, reason); err != nil {
-		span.RecordError(err)
-		return fmt.Errorf("failed to execute rewind: %w", err)
-	}
+	o.executeRewind(targetPhase, reason)
 
 	return nil
 }
@@ -161,7 +158,7 @@ func (o *PhaseOrchestratorV2) getNextPhaseInSequence(current string) (string, er
 }
 
 // executeTransition performs the phase transition
-func (o *PhaseOrchestratorV2) executeTransition(from, to string) error {
+func (o *PhaseOrchestratorV2) executeTransition(_, to string) error {
 	now := time.Now()
 
 	// Mark current phase as completed
@@ -185,7 +182,7 @@ func (o *PhaseOrchestratorV2) executeTransition(from, to string) error {
 }
 
 // executeRewind performs the phase rewind
-func (o *PhaseOrchestratorV2) executeRewind(targetPhase, reason string) error {
+func (o *PhaseOrchestratorV2) executeRewind(targetPhase, reason string) {
 	now := time.Now()
 
 	// Add rewind note to current phase
@@ -212,8 +209,6 @@ func (o *PhaseOrchestratorV2) executeRewind(targetPhase, reason string) error {
 		Notes:     fmt.Sprintf("Reworking after rewind. Original reason: %s", reason),
 	}
 	o.status.WaypointHistory = append(o.status.WaypointHistory, newEntry)
-
-	return nil
 }
 
 // completeCurrentPhase marks the current phase as completed

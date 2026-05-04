@@ -138,7 +138,7 @@ func deriveProjectName(v1 *status.Status, opts *ConvertOptions) string {
 }
 
 // deriveProjectType determines project type from V1 data or uses override
-func deriveProjectType(v1 *status.Status, opts *ConvertOptions) string {
+func deriveProjectType(_ *status.Status, opts *ConvertOptions) string {
 	if opts.ProjectType != "" {
 		return opts.ProjectType
 	}
@@ -148,7 +148,7 @@ func deriveProjectType(v1 *status.Status, opts *ConvertOptions) string {
 }
 
 // deriveRiskLevel determines risk level from V1 data or uses override
-func deriveRiskLevel(v1 *status.Status, opts *ConvertOptions) string {
+func deriveRiskLevel(_ *status.Status, opts *ConvertOptions) string {
 	if opts.RiskLevel != "" {
 		return opts.RiskLevel
 	}
@@ -237,7 +237,7 @@ func mergePhases(v2PhaseName string, v1Phases []status.Phase) (status.PhaseHisto
 	var deliverables []string
 	var notes []string
 
-	for i, phase := range v1Phases {
+	for _, phase := range v1Phases {
 		// Track start time
 		if phase.StartedAt != nil {
 			if earliestStart == nil || phase.StartedAt.Before(*earliestStart) {
@@ -256,9 +256,7 @@ func mergePhases(v2PhaseName string, v1Phases []status.Phase) (status.PhaseHisto
 		notes = append(notes, fmt.Sprintf("V1 %s: %s", phase.Name, phase.Status))
 
 		// Handle phase-specific merging
-		if err := mergePhaseSpecificData(&merged, phase); err != nil {
-			return merged, fmt.Errorf("failed to merge phase %d: %w", i, err)
-		}
+		mergePhaseSpecificData(&merged, phase)
 	}
 
 	// Set merged timestamps
@@ -285,7 +283,7 @@ func mergePhases(v2PhaseName string, v1Phases []status.Phase) (status.PhaseHisto
 }
 
 // mergePhaseSpecificData handles phase-specific field mapping
-func mergePhaseSpecificData(v2Phase *status.PhaseHistory, v1Phase status.Phase) error {
+func mergePhaseSpecificData(v2Phase *status.PhaseHistory, v1Phase status.Phase) {
 	switch v1Phase.Name {
 	case "S4":
 		// S4 → D4: Add stakeholder approval marker
@@ -326,8 +324,6 @@ func mergePhaseSpecificData(v2Phase *status.PhaseHistory, v1Phase status.Phase) 
 			v2Phase.DeploymentStatus = status.DeploymentStatusPending
 		}
 	}
-
-	return nil
 }
 
 // mapV1PhaseStatusToV2 maps V1 phase status to V2

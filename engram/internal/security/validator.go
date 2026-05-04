@@ -137,7 +137,7 @@ func (v *Validator) logSuspiciousPermission(original, clean string) {
 }
 
 // isHomeDirectoryPath checks if path accesses home directory
-func (v *Validator) isHomeDirectoryPath(original, clean string) bool {
+func (v *Validator) isHomeDirectoryPath(original, _ string) bool {
 	return strings.Contains(original, "$HOME") || strings.HasPrefix(original, "~")
 }
 
