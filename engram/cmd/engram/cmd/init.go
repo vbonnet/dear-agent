@@ -51,6 +51,7 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 }
 
+//nolint:gocyclo // reason: linear CLI bootstrap with many independent init steps
 func runInit(cmd *cobra.Command, args []string) error {
 	// Use workspace-aware base path instead of hardcoded ~/.engram
 	// This will detect workspace from $WORKSPACE env var or PWD,

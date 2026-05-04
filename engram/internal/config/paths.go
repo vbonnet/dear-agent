@@ -8,6 +8,7 @@ import (
 // ConfigTier represents a configuration tier in the hierarchy
 type ConfigTier string
 
+// Configuration tier values, ordered from most general to most specific.
 const (
 	TierCore    ConfigTier = "core"
 	TierCompany ConfigTier = "company"

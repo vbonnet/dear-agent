@@ -50,6 +50,7 @@ type GCRequest struct {
 // GCSkipReason describes why a session was skipped during GC.
 type GCSkipReason string
 
+// GCSkipReason values explaining why a session was skipped during GC.
 const (
 	GCSkipAlreadyArchived GCSkipReason = "already_archived"
 	GCSkipReaping         GCSkipReason = "lifecycle_reaping"
@@ -133,126 +134,28 @@ func GC(ctx *OpContext, req *GCRequest) (*GCResult, error) {
 
 	for _, m := range allSessions {
 		result.Scanned++
-		entry := GCSessionEntry{
-			Name:      m.Name,
-			SessionID: m.SessionID,
-		}
+		processGCSession(ctx, m, req, protectRoles, tmuxSessions, now, result)
+	}
 
-		// Check: already archived
-		if m.Lifecycle == manifest.LifecycleArchived {
-			entry.Action = "skipped"
-			entry.Reason = GCSkipAlreadyArchived
-			result.Skipped++
-			result.Sessions = append(result.Sessions, entry)
-			continue
-		}
+	return result, nil
+}
 
-		// Check: currently being reaped
-		if m.Lifecycle == manifest.LifecycleReaping {
-			entry.Action = "skipped"
-			entry.Reason = GCSkipReaping
-			result.Skipped++
-			result.Sessions = append(result.Sessions, entry)
-			continue
-		}
-
-		// P0 requirement: supervisor role exclusion
-		// Check both configurable protected roles AND hardcoded supervisor patterns
-		if matchesProtectedRole(m.Name, protectRoles) || IsSupervisorSession(m.Name) {
-			entry.Action = "skipped"
-			entry.Reason = GCSkipProtectedRole
-			result.Skipped++
-			result.Sessions = append(result.Sessions, entry)
-			logGCEntry(gclog.Entry{
-				Operation:   "gc_skip",
-				SessionID:   m.SessionID,
-				SessionName: m.Name,
-				Reason:      "protected_role",
-			})
-			continue
-		}
-
-		// P0 requirement: active tmux session exclusion
-		if tmuxSessions[m.Name] {
-			entry.Action = "skipped"
-			entry.Reason = GCSkipActiveTmux
-			result.Skipped++
-			result.Sessions = append(result.Sessions, entry)
-			logGCEntry(gclog.Entry{
-				Operation:   "gc_skip",
-				SessionID:   m.SessionID,
-				SessionName: m.Name,
-				Reason:      "active_tmux_session",
-			})
-			continue
-		}
-
-		// Additional safety: skip sessions in active manifest states
-		if activeStates[m.State] {
-			entry.Action = "skipped"
-			entry.Reason = GCSkipActiveState
-			result.Skipped++
-			result.Sessions = append(result.Sessions, entry)
-			logGCEntry(gclog.Entry{
-				Operation:   "gc_skip",
-				SessionID:   m.SessionID,
-				SessionName: m.Name,
-				Reason:      fmt.Sprintf("active_state:%s", m.State),
-			})
-			continue
-		}
-
-		// Apply age filter
-		if req.OlderThan > 0 {
-			lastActivity := m.UpdatedAt
-			if !m.StateUpdatedAt.IsZero() && m.StateUpdatedAt.After(lastActivity) {
-				lastActivity = m.StateUpdatedAt
-			}
-			if now.Sub(lastActivity) < req.OlderThan {
-				entry.Action = "skipped"
-				entry.Reason = GCSkipTooRecent
-				result.Skipped++
-				result.Sessions = append(result.Sessions, entry)
-				continue
-			}
-		}
-
-		// Session is eligible for GC — archive it
-		if ctx.DryRun {
-			entry.Action = "archived"
-			result.Archived++
-			result.Sessions = append(result.Sessions, entry)
-			logGCEntry(gclog.Entry{
-				Operation:   "gc_archive",
-				SessionID:   m.SessionID,
-				SessionName: m.Name,
-				Reason:      "eligible",
-				DryRun:      true,
-			})
-			continue
-		}
-
-		// Perform actual archive via the existing ArchiveSession path
-		_, archiveErr := ArchiveSession(ctx, &ArchiveSessionRequest{
-			Identifier: m.SessionID,
-			Force:      req.Force,
-		})
-		if archiveErr != nil {
-			entry.Action = "error"
-			entry.Error = archiveErr.Error()
-			result.Errors++
-			result.Sessions = append(result.Sessions, entry)
-			slog.Warn("GC archive failed", "session", m.Name, "error", archiveErr)
-			logGCEntry(gclog.Entry{
-				Operation:   "gc_archive_error",
-				SessionID:   m.SessionID,
-				SessionName: m.Name,
-				Reason:      "archive_failed",
-				Error:       archiveErr.Error(),
-			})
-			continue
-		}
-
+// processGCSession evaluates a single session for GC eligibility and either
+// skips, archives (or records dry-run intent), or records an error result.
+func processGCSession(ctx *OpContext, m *manifest.Manifest, req *GCRequest, protectRoles []string, tmuxSessions map[string]bool, now time.Time, result *GCResult) {
+	entry := GCSessionEntry{
+		Name:      m.Name,
+		SessionID: m.SessionID,
+	}
+	if reason, ok := gcSkipReason(m, protectRoles, tmuxSessions, req.OlderThan, now); ok {
+		entry.Action = "skipped"
+		entry.Reason = reason
+		result.Skipped++
+		result.Sessions = append(result.Sessions, entry)
+		logGCSkipIfMonitored(reason, m)
+		return
+	}
+	if ctx.DryRun {
 		entry.Action = "archived"
 		result.Archived++
 		result.Sessions = append(result.Sessions, entry)
@@ -261,18 +164,103 @@ func GC(ctx *OpContext, req *GCRequest) (*GCResult, error) {
 			SessionID:   m.SessionID,
 			SessionName: m.Name,
 			Reason:      "eligible",
+			DryRun:      true,
 		})
+		return
+	}
+	_, archiveErr := ArchiveSession(ctx, &ArchiveSessionRequest{
+		Identifier: m.SessionID,
+		Force:      req.Force,
+	})
+	if archiveErr != nil {
+		entry.Action = "error"
+		entry.Error = archiveErr.Error()
+		result.Errors++
+		result.Sessions = append(result.Sessions, entry)
+		slog.Warn("GC archive failed", "session", m.Name, "error", archiveErr)
+		logGCEntry(gclog.Entry{
+			Operation:   "gc_archive_error",
+			SessionID:   m.SessionID,
+			SessionName: m.Name,
+			Reason:      "archive_failed",
+			Error:       archiveErr.Error(),
+		})
+		return
+	}
+	entry.Action = "archived"
+	result.Archived++
+	result.Sessions = append(result.Sessions, entry)
+	logGCEntry(gclog.Entry{
+		Operation:   "gc_archive",
+		SessionID:   m.SessionID,
+		SessionName: m.Name,
+		Reason:      "eligible",
+	})
+	age := now.Sub(m.CreatedAt).Round(time.Second)
+	detail := fmt.Sprintf("gc collected, age: %s", age)
+	if err := RecordTrustEventForSession(m.Name, TrustEventGCArchived, detail); err != nil {
+		slog.Warn("Failed to record gc_archived trust event", "session", m.Name, "error", err)
+	}
+}
 
-		// Best-effort: record gc_archived trust event so auditors can see which
-		// sessions were cleaned up by the GC pass vs. manually archived.
-		age := now.Sub(m.CreatedAt).Round(time.Second)
-		detail := fmt.Sprintf("gc collected, age: %s", age)
-		if err := RecordTrustEventForSession(m.Name, TrustEventGCArchived, detail); err != nil {
-			slog.Warn("Failed to record gc_archived trust event", "session", m.Name, "error", err)
+// gcSkipReason returns the (skip-reason, true) pair when m should not be
+// considered for archive. Order matches the historical GC checks.
+func gcSkipReason(m *manifest.Manifest, protectRoles []string, tmuxSessions map[string]bool, olderThan time.Duration, now time.Time) (GCSkipReason, bool) {
+	if m.Lifecycle == manifest.LifecycleArchived {
+		return GCSkipAlreadyArchived, true
+	}
+	if m.Lifecycle == manifest.LifecycleReaping {
+		return GCSkipReaping, true
+	}
+	if matchesProtectedRole(m.Name, protectRoles) || IsSupervisorSession(m.Name) {
+		return GCSkipProtectedRole, true
+	}
+	if tmuxSessions[m.Name] {
+		return GCSkipActiveTmux, true
+	}
+	if activeStates[m.State] {
+		return GCSkipActiveState, true
+	}
+	if olderThan > 0 {
+		lastActivity := m.UpdatedAt
+		if !m.StateUpdatedAt.IsZero() && m.StateUpdatedAt.After(lastActivity) {
+			lastActivity = m.StateUpdatedAt
+		}
+		if now.Sub(lastActivity) < olderThan {
+			return GCSkipTooRecent, true
 		}
 	}
+	return "", false
+}
 
-	return result, nil
+// logGCSkipIfMonitored emits a gc_skip log entry for the skip reasons that
+// historically had logged entries.
+func logGCSkipIfMonitored(reason GCSkipReason, m *manifest.Manifest) {
+	switch reason {
+	case GCSkipProtectedRole:
+		logGCEntry(gclog.Entry{
+			Operation:   "gc_skip",
+			SessionID:   m.SessionID,
+			SessionName: m.Name,
+			Reason:      "protected_role",
+		})
+	case GCSkipActiveTmux:
+		logGCEntry(gclog.Entry{
+			Operation:   "gc_skip",
+			SessionID:   m.SessionID,
+			SessionName: m.Name,
+			Reason:      "active_tmux_session",
+		})
+	case GCSkipActiveState:
+		logGCEntry(gclog.Entry{
+			Operation:   "gc_skip",
+			SessionID:   m.SessionID,
+			SessionName: m.Name,
+			Reason:      fmt.Sprintf("active_state:%s", m.State),
+		})
+	case GCSkipAlreadyArchived, GCSkipReaping, GCSkipTooRecent:
+		// Reasons that historically had no logged gc_skip entry.
+	}
 }
 
 // SupervisorPatterns returns the list of name substrings that identify

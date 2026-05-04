@@ -69,7 +69,7 @@ func resume(dir string, state DirectoryState) error {
 
 // createInDifferentLocation handles [N] New action
 // Implements FR4 New Name requirement
-func createInDifferentLocation(projectName string, currentDir string, reader io.Reader) error {
+func createInDifferentLocation(_ string, currentDir string, reader io.Reader) error {
 	bufReader := bufio.NewReader(reader)
 
 	// Prompt for new project name

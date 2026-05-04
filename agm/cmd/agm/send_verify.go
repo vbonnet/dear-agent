@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/messages"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
@@ -175,7 +174,7 @@ func runSendVerify(cmd *cobra.Command, args []string) error {
 	}
 
 	// Send via tmux
-	return sendVerifyMessage(recipient, senderName, messageID, jsonStr, adapter)
+	return sendVerifyMessage(recipient, senderName, messageID, jsonStr)
 }
 
 // parseCheckResults parses pipe-separated check result strings
@@ -235,7 +234,7 @@ func parseGaps(raw []string) ([]GapEntry, error) {
 }
 
 // sendVerifyMessage delivers a verify-result JSON message to a recipient
-func sendVerifyMessage(recipient, sender, messageID, jsonPayload string, adapter *dolt.Adapter) error {
+func sendVerifyMessage(recipient, sender, messageID, jsonPayload string) error {
 	// Check recipient exists in tmux
 	exists, err := tmux.HasSession(recipient)
 	if err != nil {

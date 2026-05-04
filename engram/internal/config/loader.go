@@ -320,6 +320,7 @@ func mergeHarnessEffort(dst, src *harnesseffort.HarnessEffortConfig) {
 	}
 }
 
+//nolint:gocyclo // reason: linear field-by-field merger; helpers per group would just shuffle complexity
 func mergeVCS(dst, src *VCSConfig) {
 	// Bool fields: only override if VCS section was explicitly provided
 	// We detect this by checking if any field has a non-zero value

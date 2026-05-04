@@ -108,75 +108,68 @@ func WaitForReady(sessionName string, timeout time.Duration) error {
 	defer ticker.Stop()
 
 	for time.Now().Before(deadline) {
-		select {
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return fmt.Errorf("watcher closed unexpectedly")
-			}
-
-			// Ignore Chmod events (best practice from S5 research)
-			if event.Has(fsnotify.Chmod) {
-				continue
-			}
-
-			if event.Has(fsnotify.Create) && event.Name == readyFile {
-				debug.Log("Ready-file detected: %s", event.Name)
-
-				// Parse JSON to verify status
-				status, err := parseReadyFile(readyFile)
-				if err != nil {
-					debug.Log("Failed to parse ready-file: %v", err)
-					continue // Malformed JSON, keep waiting
-				}
-
-				if status == "ready" {
-					os.Remove(readyFile) // Cleanup
-					return nil
-				}
-
-				if status == "crashed" {
-					os.Remove(readyFile) // Cleanup
-					return fmt.Errorf("Claude crashed during startup") //nolint:staticcheck // proper noun (product name)
-				}
-
-				debug.Log("Unexpected status in ready-file: %s", status)
-			}
-
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return fmt.Errorf("watcher error channel closed")
-			}
-			debug.Log("Watcher error: %v", err)
-			// Continue waiting despite errors
-
-		case <-ticker.C:
-			// Periodic fallback check for race conditions
-			if fileExists(readyFile) {
-				debug.Log("Ready-file detected via fallback check")
-
-				// Parse JSON to verify status (crash detection)
-				status, err := parseReadyFile(readyFile)
-				if err != nil {
-					debug.Log("Failed to parse ready-file: %v", err)
-					continue // Malformed JSON, keep waiting
-				}
-
-				if status == "ready" {
-					os.Remove(readyFile)
-					return nil
-				}
-
-				if status == "crashed" {
-					os.Remove(readyFile)
-					return fmt.Errorf("Claude crashed during startup") //nolint:staticcheck // proper noun (product name)
-				}
-
-				debug.Log("Unexpected status in ready-file: %s", status)
-			}
+		done, err := waitForReadyTick(watcher, ticker.C, readyFile)
+		if done {
+			return err
 		}
 	}
 
 	return fmt.Errorf("timeout waiting for ready-file")
+}
+
+// waitForReadyTick processes one cycle of the WaitForReady select loop.
+// Returns (done, err): when done is true the caller should return err
+// (which is nil for "ready"). When done is false the caller continues waiting.
+func waitForReadyTick(watcher *fsnotify.Watcher, tickerCh <-chan time.Time, readyFile string) (bool, error) {
+	select {
+	case event, ok := <-watcher.Events:
+		if !ok {
+			return true, fmt.Errorf("watcher closed unexpectedly")
+		}
+		if event.Has(fsnotify.Chmod) {
+			return false, nil
+		}
+		if !event.Has(fsnotify.Create) || event.Name != readyFile {
+			return false, nil
+		}
+		debug.Log("Ready-file detected: %s", event.Name)
+		return interpretReadyFile(readyFile)
+	case err, ok := <-watcher.Errors:
+		if !ok {
+			return true, fmt.Errorf("watcher error channel closed")
+		}
+		debug.Log("Watcher error: %v", err)
+		return false, nil
+	case <-tickerCh:
+		if !fileExists(readyFile) {
+			return false, nil
+		}
+		debug.Log("Ready-file detected via fallback check")
+		return interpretReadyFile(readyFile)
+	}
+}
+
+// interpretReadyFile reads and parses readyFile, removes it, and returns
+// (done, err) for the surrounding select loop. status="ready" → (true, nil),
+// status="crashed" → (true, error). Returns (false, nil) on parse failure
+// so the caller can keep waiting.
+func interpretReadyFile(readyFile string) (bool, error) {
+	status, err := parseReadyFile(readyFile)
+	if err != nil {
+		debug.Log("Failed to parse ready-file: %v", err)
+		return false, nil
+	}
+	switch status {
+	case "ready":
+		os.Remove(readyFile)
+		return true, nil
+	case "crashed":
+		os.Remove(readyFile)
+		return true, fmt.Errorf("Claude crashed during startup") //nolint:staticcheck // proper noun (product name)
+	default:
+		debug.Log("Unexpected status in ready-file: %s", status)
+		return false, nil
+	}
 }
 
 // fileExists checks if a file exists and is not a directory.

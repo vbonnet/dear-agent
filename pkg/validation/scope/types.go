@@ -3,6 +3,7 @@ package scope
 // PhaseID represents a Wayfinder phase identifier
 type PhaseID string
 
+// PhaseID values for the Wayfinder workflow.
 const (
 	PhaseProblem  PhaseID = "PROBLEM"
 	PhaseResearch PhaseID = "RESEARCH"
@@ -17,6 +18,7 @@ const (
 // ViolationType represents the type of validation violation
 type ViolationType string
 
+// ViolationType values classifying validation findings.
 const (
 	ViolationAntiPattern       ViolationType = "anti-pattern"
 	ViolationMissingSection    ViolationType = "missing-section"
@@ -27,6 +29,7 @@ const (
 // ViolationSeverity represents the severity level
 type ViolationSeverity string
 
+// ViolationSeverity values: error blocks; warning logs only.
 const (
 	SeverityError   ViolationSeverity = "error"
 	SeverityWarning ViolationSeverity = "warning"

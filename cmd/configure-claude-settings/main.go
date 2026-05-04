@@ -18,6 +18,7 @@ import (
 	"strings"
 )
 
+//nolint:gocyclo // reason: linear CLI driver — extracting per-flag helpers would just shuffle complexity
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()

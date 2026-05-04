@@ -100,6 +100,7 @@ func (r *SettingsResolver) ResolveSetting(name string, hardcodedDefault interfac
 }
 
 // GetCascade returns the full cascade for a setting (for debugging).
+//nolint:gocyclo // reason: linear settings cascade with many layers
 func (r *SettingsResolver) GetCascade(name string, hardcodedDefault interface{}) []CascadeLevel {
 	levels := []CascadeLevel{}
 
@@ -340,6 +341,7 @@ type SettingDefinition struct {
 }
 
 // ValidateSetting validates a setting value against its definition.
+//nolint:gocyclo // reason: linear validator with one branch per setting type
 func ValidateSetting(def SettingDefinition, value interface{}) error {
 	// Check required
 	if def.Required && value == nil {

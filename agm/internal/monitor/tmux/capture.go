@@ -114,7 +114,7 @@ func CapturePaneHistory(sessionName string, lines int) (string, error) {
 	return string(output), nil
 }
 
-// GetSessionInfo returns basic information about a tmux session.
+// SessionInfo holds basic information about a tmux session.
 type SessionInfo struct {
 	Name     string
 	Windows  int

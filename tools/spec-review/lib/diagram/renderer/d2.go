@@ -19,6 +19,7 @@ func NewD2Renderer() *D2Renderer {
 }
 
 // Render generates output from D2 source using the d2 CLI
+//nolint:gocyclo // reason: linear renderer with many node-type branches
 func (r *D2Renderer) Render(ctx context.Context, source io.Reader, dest io.Writer, opts *RenderOptions) error {
 	if opts == nil {
 		opts = &RenderOptions{

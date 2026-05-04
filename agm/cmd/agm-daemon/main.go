@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -57,24 +58,7 @@ func run() error {
 	// Create acknowledgment manager
 	ackManager := messages.NewAckManager(queue)
 
-	// Create Dolt adapter for session resolution
-	var doltAdapter *dolt.Adapter
-	doltConfig, err := dolt.DefaultConfig()
-	if err != nil {
-		daemonLogger.Warn("Dolt config not available, session resolution will use YAML fallback", "error", err)
-	} else {
-		adapter, err := dolt.New(doltConfig)
-		if err != nil {
-			daemonLogger.Warn("Dolt connection failed, session resolution will use YAML fallback", "error", err)
-		} else {
-			if err := adapter.ApplyMigrations(); err != nil {
-				adapter.Close()
-				daemonLogger.Warn("Dolt migrations failed", "error", err)
-			} else {
-				doltAdapter = adapter
-			}
-		}
-	}
+	doltAdapter := initDoltAdapter(daemonLogger)
 	if doltAdapter != nil {
 		defer doltAdapter.Close()
 	}
@@ -93,27 +77,7 @@ func run() error {
 	// Create daemon
 	d := daemon.NewDaemon(cfg)
 
-	// Start sentinel (session monitor) as a background goroutine
-	sentinelCfg, err := sentinelcfg.LoadConfig(sentinelcfg.DefaultConfigPath())
-	if err != nil {
-		daemonLogger.Warn("Sentinel config load failed, sentinel disabled", "error", err)
-	}
-	var sentinel *sentineldaemon.SessionMonitor
-	if sentinelCfg != nil {
-		sentinelCfg.ExpandPaths()
-		monitor, err := sentineldaemon.NewSessionMonitor(sentinelCfg)
-		if err != nil {
-			daemonLogger.Warn("Sentinel init failed, sentinel disabled", "error", err)
-		} else {
-			sentinel = monitor
-			go func() {
-				daemonLogger.Info("Sentinel session monitor starting...")
-				if err := sentinel.StartMonitoring(); err != nil {
-					daemonLogger.Error("Sentinel monitor failed", "error", err)
-				}
-			}()
-		}
-	}
+	sentinel := startSentinel(daemonLogger)
 
 	// Log startup to both stdout and file
 	fmt.Println("AGM Daemon starting...")
@@ -135,4 +99,52 @@ func run() error {
 		sentinel.StopMonitoring()
 	}
 	return nil
+}
+
+// initDoltAdapter constructs the Dolt adapter and applies migrations. Returns
+// nil (with warnings logged) when Dolt is unavailable so the daemon can fall
+// back to YAML-only session resolution.
+func initDoltAdapter(daemonLogger *slog.Logger) *dolt.Adapter {
+	doltConfig, err := dolt.DefaultConfig()
+	if err != nil {
+		daemonLogger.Warn("Dolt config not available, session resolution will use YAML fallback", "error", err)
+		return nil
+	}
+	adapter, err := dolt.New(doltConfig)
+	if err != nil {
+		daemonLogger.Warn("Dolt connection failed, session resolution will use YAML fallback", "error", err)
+		return nil
+	}
+	if err := adapter.ApplyMigrations(); err != nil {
+		adapter.Close()
+		daemonLogger.Warn("Dolt migrations failed", "error", err)
+		return nil
+	}
+	return adapter
+}
+
+// startSentinel loads the sentinel config and launches the session monitor
+// goroutine. Returns nil (with warnings logged) if sentinel cannot start.
+func startSentinel(daemonLogger *slog.Logger) *sentineldaemon.SessionMonitor {
+	sentinelCfg, err := sentinelcfg.LoadConfig(sentinelcfg.DefaultConfigPath())
+	if err != nil {
+		daemonLogger.Warn("Sentinel config load failed, sentinel disabled", "error", err)
+		return nil
+	}
+	if sentinelCfg == nil {
+		return nil
+	}
+	sentinelCfg.ExpandPaths()
+	monitor, err := sentineldaemon.NewSessionMonitor(sentinelCfg)
+	if err != nil {
+		daemonLogger.Warn("Sentinel init failed, sentinel disabled", "error", err)
+		return nil
+	}
+	go func() {
+		daemonLogger.Info("Sentinel session monitor starting...")
+		if err := monitor.StartMonitoring(); err != nil {
+			daemonLogger.Error("Sentinel monitor failed", "error", err)
+		}
+	}()
+	return monitor
 }

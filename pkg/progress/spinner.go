@@ -29,11 +29,9 @@ func newSpinnerBackend(opts Options) *spinnerBackend {
 		// 100ms refresh rate for smooth animation
 		backend.spinner = spinner.New(spinner.CharSets[11], 100*time.Millisecond)
 		backend.spinner.Suffix = " " + opts.Label
-	} else {
+	} else if opts.Label != "" {
 		// Non-TTY mode: Print initial message once
-		if opts.Label != "" {
-			fmt.Println(opts.Label)
-		}
+		fmt.Println(opts.Label)
 	}
 
 	return backend

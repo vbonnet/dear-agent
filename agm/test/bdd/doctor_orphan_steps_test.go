@@ -274,13 +274,14 @@ func (c *DoctorOrphanContext) iRunCommand(command string) error {
 	c.orphanReport = report
 	c.lastError = err
 
-	if err == nil && report.TotalOrphans > 0 {
+	switch {
+	case err == nil && report.TotalOrphans > 0:
 		c.checkStatus = "WARNING"
 		c.currentOutput = fmt.Sprintf("Found %d orphaned sessions", report.TotalOrphans)
-	} else if err == nil {
+	case err == nil:
 		c.checkStatus = "OK"
 		c.currentOutput = "No orphaned sessions found"
-	} else {
+	default:
 		c.checkStatus = "ERROR"
 		c.currentOutput = fmt.Sprintf("Failed to detect orphans: %v", err)
 	}

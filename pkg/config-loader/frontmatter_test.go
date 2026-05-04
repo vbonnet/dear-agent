@@ -163,10 +163,8 @@ Body`,
 				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("ParseFrontmatterStrict() error = %q, want error containing %q", err.Error(), tt.errContains)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("ParseFrontmatterStrict() unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("ParseFrontmatterStrict() unexpected error: %v", err)
 			}
 		})
 	}

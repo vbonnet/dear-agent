@@ -15,6 +15,7 @@ import (
 // GateTier represents the enforcement level of a gate
 type GateTier int
 
+// GateTier values controlling enforcement strictness.
 const (
 	GateTierNone     GateTier = 0 // No gate (skip review)
 	GateTierAdvisory GateTier = 2 // Advisory gate (recommended but non-blocking)
@@ -97,10 +98,7 @@ func ValidateGate(projectDir, phaseName string, st status.StatusInterface) error
 	}
 
 	// Execute Multi-Persona Review
-	result, err := gate.executeReview(phaseName, config)
-	if err != nil {
-		return err
-	}
+	result := gate.executeReview(phaseName, config)
 
 	// Enforce gate decision rules
 	return gate.enforceGate(result, config)
@@ -175,7 +173,7 @@ func (g *MultiPersonaGate) validateLateralThinking(phaseName string) error {
 }
 
 // executeReview invokes personas to review the deliverable
-func (g *MultiPersonaGate) executeReview(phaseName string, config *GateConfig) (*GateResult, error) {
+func (g *MultiPersonaGate) executeReview(phaseName string, config *GateConfig) *GateResult {
 	// Build deliverable path
 	deliverablePath := filepath.Join(g.projectDir, phaseName+"-"+strings.ToLower(strings.Replace(phaseName, "S", "step", 1))+".md")
 
@@ -212,7 +210,7 @@ func (g *MultiPersonaGate) executeReview(phaseName string, config *GateConfig) (
 	}
 
 	// Aggregate votes based on gate tier
-	return g.aggregateVotes(votes, blockers, config), nil
+	return g.aggregateVotes(votes, blockers, config)
 }
 
 // enforceGate applies decision rules based on gate tier and votes
@@ -348,6 +346,7 @@ func (g *MultiPersonaGate) aggregateVotes(votes []Vote, blockers []string, confi
 }
 
 // invokePersonaReview calls multi-persona-review CLI to get persona vote
+//nolint:gocyclo // reason: linear multi-persona gate with one branch per persona
 func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, error) {
 	// Build command arguments
 	args := []string{
@@ -365,7 +364,8 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 	vertexModel := os.Getenv("VERTEX_MODEL")
 	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
 
-	if vertexProject != "" {
+	switch {
+	case vertexProject != "":
 		// Determine if using Claude via VertexAI or Gemini
 		isClaude := vertexModel != "" && strings.Contains(vertexModel, "claude")
 
@@ -394,16 +394,16 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 				args = append(args, "--model", vertexModel)
 			}
 		}
-	} else if anthropicKey != "" {
+	case anthropicKey != "":
 		// Use Anthropic (default provider, no extra flags needed)
 		args = append(args, "--provider", "anthropic")
-	} else {
+	default:
 		// No provider configured - will likely fail, but let multi-persona-review handle the error
 		return nil, fmt.Errorf("no AI provider configured: set VERTEX_PROJECT_ID (for VertexAI) or ANTHROPIC_API_KEY (for Anthropic)")
 	}
 
 	// Call multi-persona-review CLI
-	cmd := exec.Command("multi-persona-review", args...)
+	cmd := exec.Command("multi-persona-review", args...) //nolint:gosec // G702: command name is hardcoded; args built from validated config
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -461,7 +461,8 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 	}
 
 	// Determine verdict based on findings
-	if criticalCount > 0 || highCount > 0 {
+	switch {
+	case criticalCount > 0 || highCount > 0:
 		verdict = "NO-GO"
 		if criticalCount > 0 {
 			severity = "CRITICAL"
@@ -470,11 +471,11 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 			severity = "HIGH"
 			confidence = "MEDIUM"
 		}
-	} else if len(personaResult.Findings) == 0 {
+	case len(personaResult.Findings) == 0:
 		verdict = "GO"
 		severity = "LOW"
 		confidence = "HIGH"
-	} else {
+	default:
 		verdict = "GO"
 		severity = "MEDIUM"
 		confidence = "MEDIUM"

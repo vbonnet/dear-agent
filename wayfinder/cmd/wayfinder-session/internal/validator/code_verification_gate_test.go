@@ -137,10 +137,8 @@ func TestValidatePath(t *testing.T) {
 				if !contains(err.Error(), tt.errMsg) {
 					t.Errorf("validatePath() error = %q, want substring %q", err.Error(), tt.errMsg)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("validatePath() unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("validatePath() unexpected error: %v", err)
 			}
 		})
 	}
@@ -208,10 +206,8 @@ func TestValidateFilesExist(t *testing.T) {
 				if !contains(err.Error(), tt.errMsg) {
 					t.Errorf("validateFilesExist() error = %q, want substring %q", err.Error(), tt.errMsg)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("validateFilesExist() unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("validateFilesExist() unexpected error: %v", err)
 			}
 		})
 	}
@@ -427,10 +423,8 @@ func TestValidateCodeDeliverables_GracefulDegradation(t *testing.T) {
 				if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
 					t.Errorf("validateCodeDeliverables() error = %q, want substring %q", err.Error(), tt.errMsg)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("validateCodeDeliverables() unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("validateCodeDeliverables() unexpected error: %v", err)
 			}
 		})
 	}

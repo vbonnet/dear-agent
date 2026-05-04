@@ -139,34 +139,33 @@ func (m *ResponseMasker) formatSummary(archivePath string) string {
 		archivePath, preview, originalSize, estimatedTokens)
 }
 
-// Run executes the hook logic. Returns exit code.
-func (m *ResponseMasker) Run() int {
+// Run executes the hook logic.
+func (m *ResponseMasker) Run() {
 	m.log("INFO", fmt.Sprintf("Response masking hook started (tool=%s, result_len=%d)", m.toolName, len(m.toolResult)))
 
 	if m.shouldSkip() {
 		m.log("INFO", fmt.Sprintf("Skipping tool %s (in skip list)", m.toolName))
-		return 0
+		return
 	}
 
 	if !m.shouldMask() {
 		m.log("INFO", fmt.Sprintf("Below threshold (%d < %d), no masking", len(m.toolResult), m.threshold))
-		return 0
+		return
 	}
 
 	archivePath, err := m.archive()
 	if err != nil {
 		m.log("ERROR", fmt.Sprintf("Archive failed: %v (failing open)", err))
-		return 0 // fail open
+		return // fail open
 	}
 
 	summary := m.formatSummary(archivePath)
 	fmt.Print(summary)
 
 	m.log("INFO", fmt.Sprintf("Masked %d chars -> %d char summary, archived to %s", len(m.toolResult), len(summary), archivePath))
-	return 0
 }
 
 func main() {
 	masker := NewResponseMasker()
-	os.Exit(masker.Run())
+	masker.Run()
 }

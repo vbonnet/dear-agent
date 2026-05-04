@@ -27,6 +27,7 @@ var deniedRe = regexp.MustCompile(`^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] DE
 var rawInputRe = regexp.MustCompile(`Raw input`)
 
 // BackfillFromLog parses a pretool-bash-blocker.log file and returns deduplicated ErrorRecords.
+//nolint:gocyclo // reason: linear log-replay loop with many event-type branches
 func BackfillFromLog(logPath string) (*BackfillResult, error) {
 	f, err := os.Open(logPath)
 	if err != nil {

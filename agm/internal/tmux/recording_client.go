@@ -21,6 +21,7 @@ type RecordingTmuxClient struct {
 	Events []RecordedEvent
 }
 
+// NewRecordingTmuxClient returns a RecordingTmuxClient that wraps inner and records every call.
 func NewRecordingTmuxClient(inner TmuxClient) *RecordingTmuxClient {
 	return &RecordingTmuxClient{Inner: inner}
 }
@@ -39,36 +40,42 @@ func (r *RecordingTmuxClient) record(method string, args []string, result string
 	})
 }
 
+// CreateSession delegates to Inner and records the call.
 func (r *RecordingTmuxClient) CreateSession(name string) error {
 	err := r.Inner.CreateSession(name)
 	r.record("CreateSession", []string{name}, "", err)
 	return err
 }
 
+// KillSession delegates to Inner and records the call.
 func (r *RecordingTmuxClient) KillSession(name string) error {
 	err := r.Inner.KillSession(name)
 	r.record("KillSession", []string{name}, "", err)
 	return err
 }
 
+// SendKeys delegates to Inner and records the call.
 func (r *RecordingTmuxClient) SendKeys(session, keys string) error {
 	err := r.Inner.SendKeys(session, keys)
 	r.record("SendKeys", []string{session, keys}, "", err)
 	return err
 }
 
+// CapturePane delegates to Inner and records the call.
 func (r *RecordingTmuxClient) CapturePane(session string) (string, error) {
 	result, err := r.Inner.CapturePane(session)
 	r.record("CapturePane", []string{session}, result, err)
 	return result, err
 }
 
+// ListSessions delegates to Inner and records the call.
 func (r *RecordingTmuxClient) ListSessions() ([]string, error) {
 	result, err := r.Inner.ListSessions()
 	r.record("ListSessions", nil, "", err)
 	return result, err
 }
 
+// IsSessionAlive delegates to Inner and records the call.
 func (r *RecordingTmuxClient) IsSessionAlive(name string) (bool, error) {
 	alive, err := r.Inner.IsSessionAlive(name)
 	r.record("IsSessionAlive", []string{name}, "", err)

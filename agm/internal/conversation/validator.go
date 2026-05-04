@@ -83,52 +83,67 @@ func validateMessage(msg *Message, index int) error {
 func validateContentBlock(block ContentBlock, msgIndex, blockIndex int) error {
 	switch b := block.(type) {
 	case TextBlock:
-		if b.Type != "text" {
-			return fmt.Errorf("message %d, block %d: TextBlock has invalid type %q", msgIndex, blockIndex, b.Type)
-		}
-		if b.Text == "" {
-			return fmt.Errorf("message %d, block %d: TextBlock has empty text field", msgIndex, blockIndex)
-		}
-
+		return validateTextBlock(b, msgIndex, blockIndex)
 	case ImageBlock:
-		if b.Type != "image" {
-			return fmt.Errorf("message %d, block %d: ImageBlock has invalid type %q", msgIndex, blockIndex, b.Type)
-		}
-		if b.Source.Type != "base64" && b.Source.Type != "url" {
-			return fmt.Errorf("message %d, block %d: ImageBlock source type must be \"base64\" or \"url\"", msgIndex, blockIndex)
-		}
-		if b.Source.MediaType == "" {
-			return fmt.Errorf("message %d, block %d: ImageBlock missing media_type", msgIndex, blockIndex)
-		}
-		if b.Source.Type == "base64" && b.Source.Data == "" {
-			return fmt.Errorf("message %d, block %d: ImageBlock with base64 source missing data", msgIndex, blockIndex)
-		}
-		if b.Source.Type == "url" && b.Source.URL == "" {
-			return fmt.Errorf("message %d, block %d: ImageBlock with url source missing url", msgIndex, blockIndex)
-		}
-
+		return validateImageBlock(b, msgIndex, blockIndex)
 	case ToolUseBlock:
-		if b.Type != "tool_use" {
-			return fmt.Errorf("message %d, block %d: ToolUseBlock has invalid type %q", msgIndex, blockIndex, b.Type)
-		}
-		if b.ID == "" {
-			return fmt.Errorf("message %d, block %d: ToolUseBlock missing id", msgIndex, blockIndex)
-		}
-		if b.Name == "" {
-			return fmt.Errorf("message %d, block %d: ToolUseBlock missing name", msgIndex, blockIndex)
-		}
-
+		return validateToolUseBlock(b, msgIndex, blockIndex)
 	case ToolResultBlock:
-		if b.Type != "tool_result" {
-			return fmt.Errorf("message %d, block %d: ToolResultBlock has invalid type %q", msgIndex, blockIndex, b.Type)
-		}
-		if b.ToolUseID == "" {
-			return fmt.Errorf("message %d, block %d: ToolResultBlock missing tool_use_id", msgIndex, blockIndex)
-		}
-
+		return validateToolResultBlock(b, msgIndex, blockIndex)
 	default:
 		// Unknown block type - warning logged during parsing, not validation error
+		return nil
 	}
+}
 
+func validateTextBlock(b TextBlock, msgIndex, blockIndex int) error {
+	if b.Type != "text" {
+		return fmt.Errorf("message %d, block %d: TextBlock has invalid type %q", msgIndex, blockIndex, b.Type)
+	}
+	if b.Text == "" {
+		return fmt.Errorf("message %d, block %d: TextBlock has empty text field", msgIndex, blockIndex)
+	}
+	return nil
+}
+
+func validateImageBlock(b ImageBlock, msgIndex, blockIndex int) error {
+	if b.Type != "image" {
+		return fmt.Errorf("message %d, block %d: ImageBlock has invalid type %q", msgIndex, blockIndex, b.Type)
+	}
+	if b.Source.Type != "base64" && b.Source.Type != "url" {
+		return fmt.Errorf("message %d, block %d: ImageBlock source type must be \"base64\" or \"url\"", msgIndex, blockIndex)
+	}
+	if b.Source.MediaType == "" {
+		return fmt.Errorf("message %d, block %d: ImageBlock missing media_type", msgIndex, blockIndex)
+	}
+	if b.Source.Type == "base64" && b.Source.Data == "" {
+		return fmt.Errorf("message %d, block %d: ImageBlock with base64 source missing data", msgIndex, blockIndex)
+	}
+	if b.Source.Type == "url" && b.Source.URL == "" {
+		return fmt.Errorf("message %d, block %d: ImageBlock with url source missing url", msgIndex, blockIndex)
+	}
+	return nil
+}
+
+func validateToolUseBlock(b ToolUseBlock, msgIndex, blockIndex int) error {
+	if b.Type != "tool_use" {
+		return fmt.Errorf("message %d, block %d: ToolUseBlock has invalid type %q", msgIndex, blockIndex, b.Type)
+	}
+	if b.ID == "" {
+		return fmt.Errorf("message %d, block %d: ToolUseBlock missing id", msgIndex, blockIndex)
+	}
+	if b.Name == "" {
+		return fmt.Errorf("message %d, block %d: ToolUseBlock missing name", msgIndex, blockIndex)
+	}
+	return nil
+}
+
+func validateToolResultBlock(b ToolResultBlock, msgIndex, blockIndex int) error {
+	if b.Type != "tool_result" {
+		return fmt.Errorf("message %d, block %d: ToolResultBlock has invalid type %q", msgIndex, blockIndex, b.Type)
+	}
+	if b.ToolUseID == "" {
+		return fmt.Errorf("message %d, block %d: ToolResultBlock missing tool_use_id", msgIndex, blockIndex)
+	}
 	return nil
 }

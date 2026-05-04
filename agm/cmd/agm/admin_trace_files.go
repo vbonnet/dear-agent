@@ -182,58 +182,11 @@ func outputTraceHuman(results []*trace.TraceResult, opts trace.TraceOptions) err
 
 	for _, result := range results {
 		if len(result.Sessions) == 0 {
-			// No sessions found for this file
-			fmt.Println(ui.Yellow("File: " + result.FilePath))
-			if opts.Workspace != "" {
-				fmt.Printf("  %s\n", ui.Yellow("No sessions found (in workspace "+opts.Workspace+")"))
-			} else {
-				fmt.Printf("  %s\n", ui.Yellow("No sessions found"))
-			}
-			fmt.Println()
+			printNoSessions(result.FilePath, opts.Workspace)
 			continue
 		}
-
 		foundAny = true
-
-		// File header
-		fmt.Println(ui.Green("File: " + result.FilePath))
-		fmt.Println()
-
-		// Table header
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "Session UUID\tSession Name\tWorkspace\tModifications\t")
-		fmt.Fprintln(w, "------------\t------------\t---------\t-------------\t")
-
-		// Rows
-		for _, session := range result.Sessions {
-			workspace := session.Workspace
-			if workspace == "" {
-				workspace = "-"
-			}
-
-			// Format modification timestamps
-			var timestamps []string
-			for _, mod := range session.Modifications {
-				timestamps = append(timestamps, mod.Timestamp.Format("2006-01-02 15:04:05"))
-			}
-
-			// First row with session info
-			if len(timestamps) > 0 {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t\n",
-					session.SessionID,
-					session.SessionName,
-					workspace,
-					timestamps[0])
-			}
-
-			// Additional rows for remaining timestamps
-			for i := 1; i < len(timestamps); i++ {
-				fmt.Fprintf(w, "\t\t\t%s\t\n", timestamps[i])
-			}
-		}
-
-		w.Flush()
-		fmt.Println()
+		printTraceTable(result)
 	}
 
 	// Summary
@@ -256,4 +209,50 @@ func outputTraceHuman(results []*trace.TraceResult, opts trace.TraceOptions) err
 	}
 
 	return nil
+}
+
+// printNoSessions prints the "no sessions found" line for a single file in
+// human-readable trace output, qualifying with the workspace filter if set.
+func printNoSessions(filePath, workspace string) {
+	fmt.Println(ui.Yellow("File: " + filePath))
+	if workspace != "" {
+		fmt.Printf("  %s\n", ui.Yellow("No sessions found (in workspace "+workspace+")"))
+	} else {
+		fmt.Printf("  %s\n", ui.Yellow("No sessions found"))
+	}
+	fmt.Println()
+}
+
+// printTraceTable prints the per-file table of sessions and modification
+// timestamps for human-readable trace output.
+func printTraceTable(result *trace.TraceResult) {
+	fmt.Println(ui.Green("File: " + result.FilePath))
+	fmt.Println()
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "Session UUID\tSession Name\tWorkspace\tModifications\t")
+	fmt.Fprintln(w, "------------\t------------\t---------\t-------------\t")
+
+	for _, session := range result.Sessions {
+		workspace := session.Workspace
+		if workspace == "" {
+			workspace = "-"
+		}
+		var timestamps []string
+		for _, mod := range session.Modifications {
+			timestamps = append(timestamps, mod.Timestamp.Format("2006-01-02 15:04:05"))
+		}
+		if len(timestamps) > 0 {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t\n",
+				session.SessionID,
+				session.SessionName,
+				workspace,
+				timestamps[0])
+		}
+		for i := 1; i < len(timestamps); i++ {
+			fmt.Fprintf(w, "\t\t\t%s\t\n", timestamps[i])
+		}
+	}
+	w.Flush()
+	fmt.Println()
 }

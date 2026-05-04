@@ -230,14 +230,15 @@ func runDaemonHealth(cmd *cobra.Command, args []string) error {
 
 	// Recommendations
 	fmt.Printf("\n=== Recommendations ===\n")
-	if !health.Running {
+	switch {
+	case !health.Running:
 		fmt.Printf("  - Daemon is not running. Start it with: agm session daemon start\n")
-	} else if health.HealthStatusLevel == "critical" {
+	case health.HealthStatusLevel == "critical":
 		fmt.Printf("  - Queue depth is critically high (>100). Check daemon logs.\n")
 		fmt.Printf("  - Review failed messages with: agm queue dlq\n")
-	} else if health.HealthStatusLevel == "degraded" {
+	case health.HealthStatusLevel == "degraded":
 		fmt.Printf("  - Queue depth is elevated (>50). Monitor closely.\n")
-	} else {
+	default:
 		fmt.Printf("  - System is operating normally.\n")
 	}
 

@@ -125,30 +125,7 @@ func runVerifyCompletion(cmd *cobra.Command, args []string) error {
 
 	report := verify.Verify(sessionID, purpose, repoDir, assertions)
 
-	// Print results
-	for _, r := range report.Results {
-		if r.Pass {
-			if verifyShowAll {
-				fmt.Printf("  PASS  %s\n", r.Assertion.Description)
-				if r.Evidence != "" {
-					for _, line := range strings.Split(r.Evidence, "\n") {
-						if line != "" {
-							fmt.Printf("        %s\n", line)
-						}
-					}
-				}
-			}
-		} else {
-			fmt.Printf("  FAIL  %s\n", r.Assertion.Description)
-			if r.Evidence != "" {
-				for _, line := range strings.Split(r.Evidence, "\n") {
-					if line != "" {
-						fmt.Printf("        %s\n", line)
-					}
-				}
-			}
-		}
-	}
+	printVerifyAssertionResults(report.Results)
 
 	fmt.Println()
 	if report.Passed() {
@@ -158,6 +135,29 @@ func runVerifyCompletion(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("FAILED: %d/%d assertions failed\n", report.FailCount(), len(report.Results))
 	return fmt.Errorf("verification failed: %d assertion(s) did not pass", report.FailCount())
+}
+
+// printVerifyAssertionResults prints PASS/FAIL lines for each verification
+// result, including any associated evidence (PASS lines only when --show-all).
+func printVerifyAssertionResults(results []verify.Result) {
+	for _, r := range results {
+		if r.Pass {
+			if !verifyShowAll {
+				continue
+			}
+			fmt.Printf("  PASS  %s\n", r.Assertion.Description)
+		} else {
+			fmt.Printf("  FAIL  %s\n", r.Assertion.Description)
+		}
+		if r.Evidence == "" {
+			continue
+		}
+		for _, line := range strings.Split(r.Evidence, "\n") {
+			if line != "" {
+				fmt.Printf("        %s\n", line)
+			}
+		}
+	}
 }
 
 func parseExtraAssertion(s string) (verify.Assertion, error) {

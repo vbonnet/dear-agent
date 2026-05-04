@@ -11,6 +11,7 @@ import (
 // Role represents a session role with its own budget threshold.
 type Role string
 
+// Recognized session role values for budget tracking.
 const (
 	RoleOrchestrator Role = "orchestrator"
 	RoleWorker       Role = "worker"
@@ -31,6 +32,7 @@ var DefaultThresholds = map[Role]float64{
 // Level indicates the severity of context budget usage.
 type Level string
 
+// Budget usage severity levels.
 const (
 	LevelOK       Level = "OK"       // Under threshold
 	LevelWarning  Level = "WARNING"  // At or above threshold

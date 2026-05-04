@@ -26,10 +26,12 @@ func NewGitScanner() *GitScanner {
 	}
 }
 
+// Name returns the scanner's identifier.
 func (s *GitScanner) Name() string {
 	return s.name
 }
 
+// Priority returns the scanner's execution priority (lower runs earlier).
 func (s *GitScanner) Priority() int {
 	return s.priority
 }

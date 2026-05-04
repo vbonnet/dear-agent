@@ -69,42 +69,7 @@ func runCheckWorktrees(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Check which worktrees still exist on disk
-	var orphans []dolt.WorktreeRecord
-	for _, wt := range worktrees {
-		// Verify the worktree directory still exists
-		if _, statErr := os.Stat(wt.WorktreePath); os.IsNotExist(statErr) {
-			// Directory gone but DB says active - mark as removed
-			if err := adapter.UntrackWorktree(ctx, wt.WorktreePath); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to untrack worktree %s: %v\n", wt.WorktreePath, err)
-			}
-			continue
-		}
-
-		// Verify it's still a valid git worktree
-		listed, listErr := gitpkg.ListWorktrees(wt.RepoPath)
-		if listErr != nil {
-			orphans = append(orphans, wt)
-			continue
-		}
-
-		found := false
-		for _, lw := range listed {
-			if lw.Path == wt.WorktreePath {
-				found = true
-				break
-			}
-		}
-		if !found {
-			// Not in git worktree list but directory exists - stale
-			if err := adapter.UntrackWorktree(ctx, wt.WorktreePath); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to untrack stale worktree %s: %v\n", wt.WorktreePath, err)
-			}
-			continue
-		}
-
-		orphans = append(orphans, wt)
-	}
+	orphans := classifyWorktrees(ctx, adapter, worktrees)
 
 	if len(orphans) == 0 {
 		fmt.Println("No active worktrees found.")
@@ -122,4 +87,43 @@ func runCheckWorktrees(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "Run 'agm admin cleanup-worktrees' to remove them.\n")
 	cmd.SilenceUsage = true
 	return fmt.Errorf("found %d active worktree(s)", len(orphans))
+}
+
+// classifyWorktrees walks the candidate worktrees and returns those that still
+// reside on disk and in git. Records that are gone or stale are untracked
+// from Dolt as a side effect.
+func classifyWorktrees(ctx context.Context, adapter *dolt.Adapter, worktrees []dolt.WorktreeRecord) []dolt.WorktreeRecord {
+	var orphans []dolt.WorktreeRecord
+	for _, wt := range worktrees {
+		if _, statErr := os.Stat(wt.WorktreePath); os.IsNotExist(statErr) {
+			if err := adapter.UntrackWorktree(ctx, wt.WorktreePath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to untrack worktree %s: %v\n", wt.WorktreePath, err)
+			}
+			continue
+		}
+		listed, listErr := gitpkg.ListWorktrees(wt.RepoPath)
+		if listErr != nil {
+			orphans = append(orphans, wt)
+			continue
+		}
+		if !worktreeListed(listed, wt.WorktreePath) {
+			if err := adapter.UntrackWorktree(ctx, wt.WorktreePath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to untrack stale worktree %s: %v\n", wt.WorktreePath, err)
+			}
+			continue
+		}
+		orphans = append(orphans, wt)
+	}
+	return orphans
+}
+
+// worktreeListed reports whether path is present in the slice returned by
+// gitpkg.ListWorktrees.
+func worktreeListed(listed []gitpkg.Worktree, path string) bool {
+	for _, lw := range listed {
+		if lw.Path == path {
+			return true
+		}
+	}
+	return false
 }

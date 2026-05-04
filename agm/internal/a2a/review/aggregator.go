@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// Default aggregator scoring constants.
 const (
 	DefaultThreshold    = 7.0
 	DefaultMinReviews   = 3
@@ -20,6 +21,7 @@ const (
 // Status represents the consensus status of a channel
 type Status string
 
+// Channel consensus status values.
 const (
 	StatusConsensusReached Status = "consensus-reached"
 	StatusBlocked          Status = "blocked"

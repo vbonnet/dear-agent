@@ -115,10 +115,8 @@ func TestCanStartPhase(t *testing.T) {
 				if tt.errorMsg != "" && !contains(err.Error(), tt.errorMsg) {
 					t.Errorf("expected error to contain %q, got %q", tt.errorMsg, err.Error())
 				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
 	}
@@ -237,10 +235,8 @@ This is a test deliverable with enough content to pass the 100-byte minimum size
 				if tt.errorMsg != "" && !contains(err.Error(), tt.errorMsg) {
 					t.Errorf("expected error to contain %q, got %q", tt.errorMsg, err.Error())
 				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
 	}
@@ -343,10 +339,8 @@ func TestCanRewindTo(t *testing.T) {
 				if tt.errorMsg != "" && !contains(err.Error(), tt.errorMsg) {
 					t.Errorf("expected error to contain %q, got %q", tt.errorMsg, err.Error())
 				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
 	}

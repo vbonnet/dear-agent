@@ -137,7 +137,7 @@ func (v *Validator) logSuspiciousPermission(original, clean string) {
 }
 
 // isHomeDirectoryPath checks if path accesses home directory
-func (v *Validator) isHomeDirectoryPath(original, clean string) bool {
+func (v *Validator) isHomeDirectoryPath(original, _ string) bool {
 	return strings.Contains(original, "$HOME") || strings.HasPrefix(original, "~")
 }
 
@@ -292,6 +292,7 @@ func (v *Validator) classifyNetworkPermission(network string) (NetworkPermission
 //   - Labels contain only alphanumerics and hyphens
 //   - Labels start and end with alphanumeric
 //   - TLD is at least 2 letters
+//nolint:gocyclo // reason: linear domain validation with many character-class checks
 func (v *Validator) isValidDomain(domain string) bool {
 	// Length check
 	if len(domain) == 0 || len(domain) > 253 {

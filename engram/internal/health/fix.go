@@ -447,6 +447,7 @@ func (f *Tier1Fixer) fixPathsInFile(filePath string, data []byte) error {
 }
 
 // removeNonExistentHooks removes references to missing/disabled hook files from settings.json.
+//nolint:gocyclo // reason: linear fixer scanning many hook locations
 func (f *Tier1Fixer) removeNonExistentHooks() error {
 	settingsPath := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
 	data, err := os.ReadFile(settingsPath)
@@ -525,13 +526,14 @@ func (f *Tier1Fixer) removeNonExistentHooks() error {
 				}
 
 				// Update the hooks array
-				if len(filteredNested) > 0 {
+				switch {
+				case len(filteredNested) > 0:
 					entryMap["hooks"] = filteredNested
 					filteredEntries = append(filteredEntries, entryMap)
-				} else if len(filteredNested) != len(nestedHooks) {
+				case len(filteredNested) != len(nestedHooks):
 					// All nested hooks were removed, skip the entire entry
 					modified = true
-				} else {
+				default:
 					// Keep entry with all nested hooks
 					filteredEntries = append(filteredEntries, entry)
 				}

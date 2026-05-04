@@ -44,6 +44,7 @@ var harnessToAgent = map[string]string{
 	"opencode-cli": "opencode",
 }
 
+//nolint:gocyclo // reason: long switch over distinct BDD steps — each case is short and readable inline
 func parseCommand(command string) *CommandArgs {
 	parts := strings.Fields(command)
 	args := &CommandArgs{

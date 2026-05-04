@@ -138,23 +138,9 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		if len(args) > 0 {
 			sessionName = args[0]
 		}
-		auditArgs := map[string]string{
-			"async": fmt.Sprintf("%v", asyncArchive),
-			"force": fmt.Sprintf("%v", forceArchive),
-		}
-		if archiveAll {
-			auditArgs["bulk"] = "true"
-			if olderThan != "" {
-				auditArgs["older_than"] = olderThan
-			}
-			if dryRun {
-				auditArgs["dry_run"] = "true"
-			}
-		}
-		logCommandAudit("session.archive", sessionName, auditArgs, retErr)
+		logCommandAudit("session.archive", sessionName, archiveAuditArgs(), retErr)
 	}()
 
-	// Handle bulk archive mode
 	if archiveAll {
 		if len(args) > 0 {
 			return fmt.Errorf("cannot specify session name with --all flag")
@@ -172,14 +158,12 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 
 	sessionName := args[0]
 
-	// Construct OpContext with storage
 	opCtx, cleanup, err := newOpContextWithStorage()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt: %w", err)
 	}
 	defer cleanup()
 
-	// First, check active/async state using ops.GetSession for resolution
 	getResult, getErr := ops.GetSession(opCtx, &ops.GetSessionRequest{
 		Identifier: sessionName,
 	})
@@ -188,31 +172,8 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		return getErr
 	}
 
-	// Check if already archived (GetSession returns session details with lifecycle)
-	if getResult.Session.Lifecycle == "archived" {
-		msg := fmt.Sprintf("Session '%s' is already archived", sessionName)
-		ui.PrintWarning(msg)
-		fmt.Println("\nTo restore this session:")
-		fmt.Println("  1. Use: agm session list --all")
-		fmt.Println("  2. Find the session and note its ID")
-		fmt.Println("  3. Use: agm session unarchive <session-id>")
-		return nil
-	}
-
-	// Check if session is active for --async enforcement
-	isActive := getResult.Session.Status == "active"
-
-	// Enforce --async mutual exclusivity with session state
-	if isActive && !asyncArchive {
-		return fmt.Errorf("session '%s' is active; use --async to archive an active session", sessionName)
-	}
-	if !isActive && asyncArchive {
-		return fmt.Errorf("--async should only be used for active sessions; omit --async for stopped sessions")
-	}
-
-	// If --async flag is set, spawn reaper instead of archiving now
-	if asyncArchive {
-		return spawnReaper(sessionName)
+	if handled, err := handleAlreadyArchivedOrAsync(sessionName, getResult); handled {
+		return err
 	}
 
 	// Session is stopped - archive via ops layer
@@ -222,7 +183,6 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		fmt.Printf("  Project: %s\n", getResult.Session.Project)
 	}
 
-	// Call ops.ArchiveSession
 	archiveResult, archiveErr := ops.ArchiveSession(opCtx, &ops.ArchiveSessionRequest{
 		Identifier:  sessionName,
 		Force:       forceArchive,
@@ -232,65 +192,123 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		return handleError(archiveErr)
 	}
 
-	// Report success
 	ui.PrintSuccess(fmt.Sprintf("Archived session: %s", sessionName))
 	fmt.Printf("\nThe session is now hidden from 'agm session list'.\n")
 	fmt.Printf("Use 'agm session list --all' to see archived sessions.\n")
 	fmt.Printf("\nTo restore: agm session unarchive %s\n", sessionName)
 
-	// Report post-archive cleanup results
-	if archiveResult.PostCleanup != nil {
-		pc := archiveResult.PostCleanup
-		if pc.WorktreesRemoved > 0 {
-			fmt.Printf("Removed %d worktree(s)\n", pc.WorktreesRemoved)
-		}
-		if pc.WorktreesPruned {
-			fmt.Printf("Pruned orphaned worktree references\n")
-		}
-		if pc.BranchDeleted {
-			fmt.Printf("Deleted session branch\n")
-		}
-		if pc.SandboxBranchDeleted {
-			fmt.Printf("Deleted sandbox branch\n")
-		}
-		if pc.SandboxRemoved {
-			fmt.Printf("Removed sandbox directory\n")
-		}
-	}
-
-	// Best-effort session resource cleanup (worktrees, branches, /tmp files)
-	cleanupResult := runSessionCleanup(sessionName, opCtx)
-	if cleanupResult != nil {
-		if cleanupResult.WorktreesRemoved > 0 {
-			fmt.Printf("Cleaned up %d worktree(s)\n", cleanupResult.WorktreesRemoved)
-		}
-		if cleanupResult.BranchesDeleted > 0 {
-			fmt.Printf("Deleted %d branch(es)\n", cleanupResult.BranchesDeleted)
-		}
-		if cleanupResult.TmpFilesRemoved > 0 {
-			fmt.Printf("Removed %d tmp file(s)\n", cleanupResult.TmpFilesRemoved)
-		}
-	}
+	reportPostCleanup(archiveResult.PostCleanup)
+	reportSessionCleanup(runSessionCleanup(sessionName, opCtx))
 
 	// Best-effort cleanup of stale additionalDirectories in Claude settings
 	runSettingsCleanup()
 
 	// Clean up merged worktrees if requested (legacy flag, additional to automatic cleanup)
 	if cleanupWorktrees && getResult.Session.WorkingDirectory != "" {
-		results, err := gitpkg.RemoveMergedWorktrees(getResult.Session.WorkingDirectory, "main")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: worktree cleanup failed: %v\n", err)
-		}
-		for _, r := range results {
-			if r.Removed {
-				fmt.Fprintf(os.Stderr, "Cleaned up merged worktree: %s\n", r.Branch)
-			} else if r.Err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not clean worktree %s: %v\n", r.Branch, r.Err)
-			}
-		}
+		cleanupMergedWorktrees(getResult.Session.WorkingDirectory)
 	}
 
 	return nil
+}
+
+// archiveAuditArgs builds the audit arg map for the archive command from the
+// global archive flags.
+func archiveAuditArgs() map[string]string {
+	auditArgs := map[string]string{
+		"async": fmt.Sprintf("%v", asyncArchive),
+		"force": fmt.Sprintf("%v", forceArchive),
+	}
+	if archiveAll {
+		auditArgs["bulk"] = "true"
+		if olderThan != "" {
+			auditArgs["older_than"] = olderThan
+		}
+		if dryRun {
+			auditArgs["dry_run"] = "true"
+		}
+	}
+	return auditArgs
+}
+
+// handleAlreadyArchivedOrAsync handles three early-exit cases for archive:
+// session is already archived (no-op), session is active without --async
+// (error), or --async is set (spawn reaper). Returns (handled, err) — when
+// handled is true the caller should propagate err immediately.
+func handleAlreadyArchivedOrAsync(sessionName string, getResult *ops.GetSessionResult) (bool, error) {
+	if getResult.Session.Lifecycle == "archived" {
+		msg := fmt.Sprintf("Session '%s' is already archived", sessionName)
+		ui.PrintWarning(msg)
+		fmt.Println("\nTo restore this session:")
+		fmt.Println("  1. Use: agm session list --all")
+		fmt.Println("  2. Find the session and note its ID")
+		fmt.Println("  3. Use: agm session unarchive <session-id>")
+		return true, nil
+	}
+	isActive := getResult.Session.Status == "active"
+	if isActive && !asyncArchive {
+		return true, fmt.Errorf("session '%s' is active; use --async to archive an active session", sessionName)
+	}
+	if !isActive && asyncArchive {
+		return true, fmt.Errorf("--async should only be used for active sessions; omit --async for stopped sessions")
+	}
+	if asyncArchive {
+		return true, spawnReaper(sessionName)
+	}
+	return false, nil
+}
+
+// reportPostCleanup prints the per-step cleanup results from ops.ArchiveSession.
+func reportPostCleanup(pc *ops.CleanupResult) {
+	if pc == nil {
+		return
+	}
+	if pc.WorktreesRemoved > 0 {
+		fmt.Printf("Removed %d worktree(s)\n", pc.WorktreesRemoved)
+	}
+	if pc.WorktreesPruned {
+		fmt.Printf("Pruned orphaned worktree references\n")
+	}
+	if pc.BranchDeleted {
+		fmt.Printf("Deleted session branch\n")
+	}
+	if pc.SandboxBranchDeleted {
+		fmt.Printf("Deleted sandbox branch\n")
+	}
+	if pc.SandboxRemoved {
+		fmt.Printf("Removed sandbox directory\n")
+	}
+}
+
+// reportSessionCleanup prints results from runSessionCleanup if non-nil.
+func reportSessionCleanup(cleanupResult *cleanup.Result) {
+	if cleanupResult == nil {
+		return
+	}
+	if cleanupResult.WorktreesRemoved > 0 {
+		fmt.Printf("Cleaned up %d worktree(s)\n", cleanupResult.WorktreesRemoved)
+	}
+	if cleanupResult.BranchesDeleted > 0 {
+		fmt.Printf("Deleted %d branch(es)\n", cleanupResult.BranchesDeleted)
+	}
+	if cleanupResult.TmpFilesRemoved > 0 {
+		fmt.Printf("Removed %d tmp file(s)\n", cleanupResult.TmpFilesRemoved)
+	}
+}
+
+// cleanupMergedWorktrees removes worktrees whose branches have been merged into
+// main, printing per-result messages to stderr.
+func cleanupMergedWorktrees(workingDirectory string) {
+	results, err := gitpkg.RemoveMergedWorktrees(workingDirectory, "main")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: worktree cleanup failed: %v\n", err)
+	}
+	for _, r := range results {
+		if r.Removed {
+			fmt.Fprintf(os.Stderr, "Cleaned up merged worktree: %s\n", r.Branch)
+		} else if r.Err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not clean worktree %s: %v\n", r.Branch, r.Err)
+		}
+	}
 }
 
 // parseDuration parses duration strings like "30d", "7d", "1w", "24h"
@@ -342,7 +360,6 @@ func archiveBulk() error {
 	}
 	defer adapter.Close()
 
-	// Get all manifests from Dolt
 	allManifests, err := adapter.ListSessions(&dolt.SessionFilter{})
 	if err != nil {
 		ui.PrintError(err,
@@ -357,56 +374,9 @@ func archiveBulk() error {
 		return nil
 	}
 
-	// Get active tmux sessions for filtering
-	activeSessions := make(map[string]bool)
-	if tmuxClient != nil {
-		activeList, err := tmuxClient.ListSessions()
-		if err == nil {
-			for _, name := range activeList {
-				activeSessions[name] = true
-			}
-		}
-	}
-
-	// Filter sessions to archive
-	var candidates []*manifest.Manifest
-	var skipped []string
-
+	activeSessions := collectActiveTmuxNames()
 	now := time.Now()
-	for _, m := range allManifests {
-		// Skip already archived
-		if m.Lifecycle == manifest.LifecycleArchived {
-			continue
-		}
-
-		// Skip active sessions
-		if activeSessions[m.Tmux.SessionName] {
-			skipped = append(skipped, fmt.Sprintf("%s (active)", m.Name))
-			continue
-		}
-
-		// Skip supervisor sessions unless --include-supervisors
-		if !includeSupervisors && ops.IsSupervisorSession(m.Name) {
-			skipped = append(skipped, fmt.Sprintf("%s (supervisor)", m.Name))
-			continue
-		}
-
-		// Check updated_at timestamp
-		if m.UpdatedAt.IsZero() {
-			ui.PrintWarning(fmt.Sprintf("Session '%s' has empty updated_at, skipping", m.Name))
-			continue
-		}
-
-		// Apply age filter if specified
-		if maxAge > 0 {
-			age := now.Sub(m.UpdatedAt)
-			if age < maxAge {
-				continue
-			}
-		}
-
-		candidates = append(candidates, m)
-	}
+	candidates, skipped := selectArchiveCandidates(allManifests, activeSessions, maxAge, now)
 
 	if len(candidates) == 0 {
 		fmt.Println("No sessions match the criteria for archival.")
@@ -419,7 +389,50 @@ func archiveBulk() error {
 		return nil
 	}
 
-	// Display preview
+	printArchivePreview(candidates, skipped, now)
+
+	if dryRun {
+		ui.PrintSuccess("Dry run completed - no sessions were archived")
+		fmt.Println("\nTo perform the archive, run without --dry-run flag")
+		return nil
+	}
+
+	confirmed, err := confirmBulkArchive(len(candidates))
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		fmt.Println("Cancelled.")
+		return nil
+	}
+
+	// Build OpContext for cleanup operations
+	opCtx := &ops.OpContext{
+		Storage: adapter,
+		Tmux:    tmuxClient,
+	}
+
+	successCount, failCount := bulkArchiveCandidates(adapter, candidates, opCtx)
+
+	// Report results
+	fmt.Println()
+	if successCount > 0 {
+		ui.PrintSuccess(fmt.Sprintf("Archived %d session(s)", successCount))
+		fmt.Println("\nArchived sessions remain in their original locations with lifecycle: archived")
+	}
+	if failCount > 0 {
+		ui.PrintWarning(fmt.Sprintf("Failed to archive %d session(s)", failCount))
+	}
+
+	fmt.Printf("\nUse 'agm session list --all' to see archived sessions.\n")
+	fmt.Printf("To restore: edit manifest.yaml and change lifecycle from 'archived' to ''\n")
+
+	return nil
+}
+
+// printArchivePreview prints the per-candidate preview block and the skipped
+// list (if any) for archiveBulk.
+func printArchivePreview(candidates []*manifest.Manifest, skipped []string, now time.Time) {
 	fmt.Printf("Found %d session(s) to archive:\n\n", len(candidates))
 	for _, m := range candidates {
 		age := now.Sub(m.UpdatedAt)
@@ -432,7 +445,6 @@ func archiveBulk() error {
 		fmt.Printf("    Last activity: %s (%d days ago)\n", m.UpdatedAt.Format("2006-01-02 15:04:05"), daysAgo)
 		fmt.Println()
 	}
-
 	if len(skipped) > 0 {
 		fmt.Printf("Skipped %d active session(s):\n", len(skipped))
 		for _, s := range skipped {
@@ -440,61 +452,94 @@ func archiveBulk() error {
 		}
 		fmt.Println()
 	}
+}
 
-	// Dry run mode
-	if dryRun {
-		ui.PrintSuccess("Dry run completed - no sessions were archived")
-		fmt.Println("\nTo perform the archive, run without --dry-run flag")
-		return nil
-	}
-
-	// Confirmation prompt
-	var confirmed bool
+// confirmBulkArchive prompts the user (or auto-confirms in test mode) before
+// proceeding with the bulk archive.
+func confirmBulkArchive(count int) (bool, error) {
 	if os.Getenv("ENGRAM_TEST_MODE") == "1" {
-		confirmed = true // Auto-confirm in test mode
-	} else {
-		err = huh.NewConfirm().
-			Title(fmt.Sprintf("Archive %d session(s)?", len(candidates))).
-			Description("This will mark sessions as archived (in-place, no files deleted).").
-			Affirmative("Yes").
-			Negative("No").
-			Value(&confirmed).
-			WithTheme(ui.GetTheme()).
-			Run()
-		if err != nil {
-			ui.PrintError(err,
-				"Failed to read confirmation prompt",
-				"  • Check terminal is interactive (TTY)")
-			return err
+		return true, nil
+	}
+	var confirmed bool
+	err := huh.NewConfirm().
+		Title(fmt.Sprintf("Archive %d session(s)?", count)).
+		Description("This will mark sessions as archived (in-place, no files deleted).").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&confirmed).
+		WithTheme(ui.GetTheme()).
+		Run()
+	if err != nil {
+		ui.PrintError(err,
+			"Failed to read confirmation prompt",
+			"  • Check terminal is interactive (TTY)")
+		return false, err
+	}
+	return confirmed, nil
+}
+
+// collectActiveTmuxNames returns the set of active tmux session names from
+// tmuxClient (or an empty set if the client is unset or query fails).
+func collectActiveTmuxNames() map[string]bool {
+	active := make(map[string]bool)
+	if tmuxClient == nil {
+		return active
+	}
+	list, err := tmuxClient.ListSessions()
+	if err != nil {
+		return active
+	}
+	for _, name := range list {
+		active[name] = true
+	}
+	return active
+}
+
+// selectArchiveCandidates filters allManifests into the set eligible for bulk
+// archive given the active tmux names, age cutoff, and `now` reference time.
+// Returns (candidates, skipped) where skipped is a list of human-readable
+// reasons for each filtered-out session that the caller wants to surface.
+func selectArchiveCandidates(allManifests []*manifest.Manifest, activeSessions map[string]bool, maxAge time.Duration, now time.Time) ([]*manifest.Manifest, []string) {
+	var candidates []*manifest.Manifest
+	var skipped []string
+	for _, m := range allManifests {
+		if m.Lifecycle == manifest.LifecycleArchived {
+			continue
 		}
+		if activeSessions[m.Tmux.SessionName] {
+			skipped = append(skipped, fmt.Sprintf("%s (active)", m.Name))
+			continue
+		}
+		if !includeSupervisors && ops.IsSupervisorSession(m.Name) {
+			skipped = append(skipped, fmt.Sprintf("%s (supervisor)", m.Name))
+			continue
+		}
+		if m.UpdatedAt.IsZero() {
+			ui.PrintWarning(fmt.Sprintf("Session '%s' has empty updated_at, skipping", m.Name))
+			continue
+		}
+		if maxAge > 0 && now.Sub(m.UpdatedAt) < maxAge {
+			continue
+		}
+		candidates = append(candidates, m)
 	}
+	return candidates, skipped
+}
 
-	if !confirmed {
-		fmt.Println("Cancelled.")
-		return nil
-	}
-
-	// Build OpContext for cleanup operations
-	opCtx := &ops.OpContext{
-		Storage: adapter,
-		Tmux:    tmuxClient,
-	}
-
-	// Perform archival with cleanup
+// bulkArchiveCandidates writes the lifecycle update for each candidate session
+// and runs best-effort cleanup. Returns (successCount, failCount).
+func bulkArchiveCandidates(adapter *dolt.Adapter, candidates []*manifest.Manifest, opCtx *ops.OpContext) (int, int) {
 	var successCount, failCount int
 	for _, m := range candidates {
-		// Update lifecycle field
 		m.Lifecycle = manifest.LifecycleArchived
 		m.UpdatedAt = time.Now()
 
-		// Write to Dolt
 		if err := adapter.UpdateSession(m); err != nil {
 			ui.PrintWarning(fmt.Sprintf("Failed to update session in Dolt for %s: %v", m.Name, err))
 			failCount++
 			continue
 		}
 
-		// Best-effort post-archive resource cleanup (worktrees, branches, sandbox)
 		sandboxPath := ""
 		if m.Sandbox != nil {
 			sandboxPath = m.Sandbox.MergedPath
@@ -512,7 +557,6 @@ func archiveBulk() error {
 			fmt.Printf("  Deleted sandbox branch: agm/%s\n", m.SessionID)
 		}
 
-		// Best-effort session resource cleanup (database-driven worktrees)
 		cleanupResult := runSessionCleanup(m.Name, opCtx)
 		if cleanupResult != nil {
 			if cleanupResult.WorktreesRemoved > 0 {
@@ -522,24 +566,9 @@ func archiveBulk() error {
 				fmt.Printf("  Deleted %d branch(es)\n", cleanupResult.BranchesDeleted)
 			}
 		}
-
 		successCount++
 	}
-
-	// Report results
-	fmt.Println()
-	if successCount > 0 {
-		ui.PrintSuccess(fmt.Sprintf("Archived %d session(s)", successCount))
-		fmt.Println("\nArchived sessions remain in their original locations with lifecycle: archived")
-	}
-	if failCount > 0 {
-		ui.PrintWarning(fmt.Sprintf("Failed to archive %d session(s)", failCount))
-	}
-
-	fmt.Printf("\nUse 'agm session list --all' to see archived sessions.\n")
-	fmt.Printf("To restore: edit manifest.yaml and change lifecycle from 'archived' to ''\n")
-
-	return nil
+	return successCount, failCount
 }
 
 // spawnReaper spawns a detached agm-reaper process for async archival

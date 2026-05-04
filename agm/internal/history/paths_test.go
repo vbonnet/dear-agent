@@ -96,7 +96,7 @@ func TestHashDirectory(t *testing.T) {
 
 			// Verify hash contains only hex characters
 			for _, c := range result {
-				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+				if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 					t.Errorf("HashDirectory(%q) = %q contains non-hex character %c", tt.input, result, c)
 				}
 			}
@@ -237,10 +237,8 @@ func TestGetClaudeCodePaths_MissingWorkingDir(t *testing.T) {
 	ok := errors.As(err, &locErr)
 	if !ok {
 		t.Errorf("getClaudeCodePaths() error type = %T, want *LocationError", err)
-	} else {
-		if locErr.Code != "WORKING_DIR_MISSING" {
-			t.Errorf("LocationError.Code = %q, want 'WORKING_DIR_MISSING'", locErr.Code)
-		}
+	} else if locErr.Code != "WORKING_DIR_MISSING" {
+		t.Errorf("LocationError.Code = %q, want 'WORKING_DIR_MISSING'", locErr.Code)
 	}
 }
 

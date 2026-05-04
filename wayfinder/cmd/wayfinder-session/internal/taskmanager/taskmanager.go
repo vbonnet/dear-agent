@@ -33,6 +33,8 @@ func NewWithRepoRoot(projectDir, repoRoot string) *TaskManager {
 }
 
 // AddTask adds a new task to the specified phase
+//
+//nolint:gocyclo // reason: linear add-task pipeline with many validation guards.
 func (tm *TaskManager) AddTask(phaseID, title string, opts *TaskOptions) (*status.Task, error) {
 	// Load current status
 	st, err := status.ParseV2(tm.statusFile)
@@ -132,6 +134,8 @@ func (tm *TaskManager) AddTask(phaseID, title string, opts *TaskOptions) (*statu
 }
 
 // UpdateTask updates an existing task
+//
+//nolint:gocyclo // reason: linear update-task pipeline with many independent field updates.
 func (tm *TaskManager) UpdateTask(taskID string, opts *UpdateOptions) (*status.Task, error) {
 	// Load current status
 	st, err := status.ParseV2(tm.statusFile)

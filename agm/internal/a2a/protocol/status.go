@@ -8,6 +8,7 @@ import (
 // Status represents the status of an A2A message
 type Status string
 
+// A2A protocol status values.
 const (
 	StatusPending            Status = "pending"
 	StatusAwaitingResponse   Status = "awaiting-response"

@@ -224,15 +224,7 @@ func serveAndShutdown(ctx context.Context, logger *slog.Logger, httpSrv *http.Se
 	// The shutdown goroutine deliberately uses a fresh detached
 	// context after the parent ctx fires: ctx is the cancel signal,
 	// and we want a bounded deadline that survives ctx's cancellation.
-	go func() { //nolint:gosec // G118: detached shutdown deadline is the intended pattern
-		defer wg.Done()
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-			logger.Warn("http shutdown", "err", err)
-		}
-	}()
+	go shutdownOnContextDone(ctx, logger, httpSrv, &wg) //nolint:gosec // G118: detached shutdown deadline is the intended pattern
 
 	var err error
 	if ln != nil {
@@ -247,6 +239,18 @@ func serveAndShutdown(ctx context.Context, logger *slog.Logger, httpSrv *http.Se
 	}
 	wg.Wait()
 	return 0
+}
+
+// shutdownOnContextDone waits for ctx to fire then runs httpSrv.Shutdown with
+// a fresh 10s deadline that survives ctx's cancellation.
+func shutdownOnContextDone(ctx context.Context, logger *slog.Logger, httpSrv *http.Server, wg *sync.WaitGroup) {
+	defer wg.Done()
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second) //nolint:gosec // G118: detached shutdown deadline is the intended pattern
+	defer cancel()
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("http shutdown", "err", err)
+	}
 }
 
 func openSQLite(path string) (*sql.DB, error) {

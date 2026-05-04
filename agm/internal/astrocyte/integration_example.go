@@ -70,7 +70,7 @@ func ExampleIntegration() {
 	port := eventbus.GetPort()
 	go func() {
 		logger.Info("WebSocket server listening", "port", port)
-		if err := http.ListenAndServe(":8080", nil); err != nil {
+		if err := http.ListenAndServe(":8080", nil); err != nil { //nolint:gosec // G114: example/demo code
 			logger.Warn("WebSocket server error", "error", err)
 		}
 	}()

@@ -337,48 +337,77 @@ func readHeartbeatRecord(id string) (*heartbeatRecord, error) {
 	return &rec, nil
 }
 
-func runSupervisorStatus(cmd *cobra.Command, args []string) error {
-	// Without an id, list all supervisors with state dirs.
-	var ids []string
-	if len(args) > 0 {
-		ids = args
-	} else {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("home: %w", err)
-		}
-		base := filepath.Join(home, ".agm", "supervisors")
-		entries, err := os.ReadDir(base)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintln(cmd.OutOrStdout(), "no supervisors registered")
-				return nil
-			}
-			return err
-		}
-		for _, e := range entries {
-			if e.IsDir() {
-				ids = append(ids, e.Name())
-			}
-		}
-	}
+// supervisorRow is the per-supervisor row produced by status reporting.
+type supervisorRow struct {
+	ID      string           `json:"id"`
+	AgeSecs float64          `json:"age_secs"`
+	Stale   bool             `json:"stale"`
+	Missing bool             `json:"missing"`
+	Record  *heartbeatRecord `json:"record,omitempty"`
+}
 
-	now := time.Now().UTC()
-	type row struct {
-		ID      string        `json:"id"`
-		AgeSecs float64       `json:"age_secs"`
-		Stale   bool          `json:"stale"`
-		Missing bool          `json:"missing"`
-		Record  *heartbeatRecord `json:"record,omitempty"`
+func runSupervisorStatus(cmd *cobra.Command, args []string) error {
+	ids, err := resolveSupervisorIDs(cmd, args)
+	if err != nil {
+		return err
 	}
-	var rows []row
+	if ids == nil {
+		return nil
+	}
+	rows, anyStale, err := buildSupervisorStatusRows(ids)
+	if err != nil {
+		return err
+	}
+	if err := emitSupervisorStatus(cmd, rows); err != nil {
+		return err
+	}
+	if anyStale {
+		os.Exit(3)
+	}
+	return nil
+}
+
+// resolveSupervisorIDs returns the supervisor IDs to inspect: either the
+// user-supplied args, or all directories under ~/.agm/supervisors. Returns
+// (nil, nil) when no supervisors are registered (and prints a friendly note).
+func resolveSupervisorIDs(cmd *cobra.Command, args []string) ([]string, error) {
+	if len(args) > 0 {
+		return args, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("home: %w", err)
+	}
+	base := filepath.Join(home, ".agm", "supervisors")
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintln(cmd.OutOrStdout(), "no supervisors registered")
+			return nil, nil
+		}
+		return nil, err
+	}
+	var ids []string
+	for _, e := range entries {
+		if e.IsDir() {
+			ids = append(ids, e.Name())
+		}
+	}
+	return ids, nil
+}
+
+// buildSupervisorStatusRows reads each supervisor's heartbeat and returns
+// (rows, anyStale, err).
+func buildSupervisorStatusRows(ids []string) ([]supervisorRow, bool, error) {
+	now := time.Now().UTC()
+	var rows []supervisorRow
 	anyStale := false
 	for _, id := range ids {
 		rec, err := readHeartbeatRecord(id)
 		if err != nil {
-			return fmt.Errorf("read %s: %w", id, err)
+			return nil, false, fmt.Errorf("read %s: %w", id, err)
 		}
-		r := row{ID: id, Record: rec}
+		r := supervisorRow{ID: id, Record: rec}
 		if rec == nil {
 			r.Missing = true
 			r.Stale = true
@@ -392,38 +421,35 @@ func runSupervisorStatus(cmd *cobra.Command, args []string) error {
 		}
 		rows = append(rows, r)
 	}
+	return rows, anyStale, nil
+}
 
+// emitSupervisorStatus writes rows in the requested format (JSON or columnar).
+func emitSupervisorStatus(cmd *cobra.Command, rows []supervisorRow) error {
 	if supervisorStatusJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(rows); err != nil {
-			return err
-		}
-	} else {
-		w := cmd.OutOrStdout()
-		fmt.Fprintf(w, "%-16s %-12s %-10s %s\n", "SUPERVISOR", "AGE", "STATE", "MESH")
-		for _, r := range rows {
-			age := "—"
-			mesh := ""
-			if !r.Missing {
-				age = fmt.Sprintf("%.1fs", r.AgeSecs)
-				if r.Record != nil {
-					mesh = fmt.Sprintf("primary-for=%s tertiary-for=%s", r.Record.PrimaryFor, r.Record.TertiaryFor)
-				}
-			}
-			state := "ok"
-			if r.Stale {
-				state = "STALE"
-				if r.Missing {
-					state = "NEVER"
-				}
-			}
-			fmt.Fprintf(w, "%-16s %-12s %-10s %s\n", r.ID, age, state, mesh)
-		}
+		return enc.Encode(rows)
 	}
-
-	if anyStale {
-		os.Exit(3)
+	w := cmd.OutOrStdout()
+	fmt.Fprintf(w, "%-16s %-12s %-10s %s\n", "SUPERVISOR", "AGE", "STATE", "MESH")
+	for _, r := range rows {
+		age := "—"
+		mesh := ""
+		if !r.Missing {
+			age = fmt.Sprintf("%.1fs", r.AgeSecs)
+			if r.Record != nil {
+				mesh = fmt.Sprintf("primary-for=%s tertiary-for=%s", r.Record.PrimaryFor, r.Record.TertiaryFor)
+			}
+		}
+		state := "ok"
+		if r.Stale {
+			state = "STALE"
+			if r.Missing {
+				state = "NEVER"
+			}
+		}
+		fmt.Fprintf(w, "%-16s %-12s %-10s %s\n", r.ID, age, state, mesh)
 	}
 	return nil
 }

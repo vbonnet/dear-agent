@@ -198,6 +198,7 @@ type Alert struct {
 // AlertLevel represents the severity of an alert
 type AlertLevel int
 
+// Alert severity levels, in increasing order.
 const (
 	AlertLevelInfo AlertLevel = iota
 	AlertLevelWarning

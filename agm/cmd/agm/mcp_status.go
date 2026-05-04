@@ -64,10 +64,11 @@ func runMCPStatus(cmd *cobra.Command, args []string) error {
 		return outputJSONMCP(cmd, results)
 	}
 
-	return outputTableMCP(cmd, results)
+	outputTableMCP(cmd, results)
+	return nil
 }
 
-func outputTableMCP(cmd *cobra.Command, results map[string]mcp.DetectionResult) error {
+func outputTableMCP(cmd *cobra.Command, results map[string]mcp.DetectionResult) {
 	out := cmd.OutOrStdout()
 
 	fmt.Fprintln(out, "Global MCP Server Status:")
@@ -118,8 +119,6 @@ func outputTableMCP(cmd *cobra.Command, results map[string]mcp.DetectionResult) 
 	}
 
 	fmt.Fprintf(out, "Summary: %d/%d global MCPs available\n", available, len(results))
-
-	return nil
 }
 
 func outputJSONMCP(cmd *cobra.Command, results map[string]mcp.DetectionResult) error {

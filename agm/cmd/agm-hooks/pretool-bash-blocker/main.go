@@ -56,7 +56,7 @@ var braceExpansionRegex = regexp.MustCompile(`\{[^{}]*,[^{}]*\}`)
 var goPathContext = regexp.MustCompile(`/\{[^{}]*,[^{}]*\}(/|\.|\s|$)`)
 
 // isDangerousBraceExpansion returns true if the brace expansion looks dangerous.
-func isDangerousBraceExpansion(cmd string, match string) bool {
+func isDangerousBraceExpansion(_ string, match string) bool {
 	inner := match[1 : len(match)-1]
 	parts := strings.Split(inner, ",")
 	for _, part := range parts {
@@ -158,9 +158,9 @@ func NewBashBlocker() (*BashBlocker, error) {
 	}, nil
 }
 
-func (b *BashBlocker) log(level, message string) {
+func (b *BashBlocker) log(message string) {
 	if b.debug {
-		fmt.Fprintf(os.Stderr, "[BashBlocker] %s: %s\n", level, message)
+		fmt.Fprintf(os.Stderr, "[BashBlocker] INFO: %s\n", message)
 	}
 }
 
@@ -192,10 +192,10 @@ func (b *BashBlocker) CheckCommand(cmd string) *Rule {
 		if match == "" {
 			continue
 		}
-		b.log("INFO", fmt.Sprintf("Rule %s matched: %q", rule.ID, match))
+		b.log(fmt.Sprintf("Rule %s matched: %q", rule.ID, match))
 
 		if rule.IsExempt != nil && rule.IsExempt(cmd, match) {
-			b.log("INFO", fmt.Sprintf("Rule %s exempted for match: %q", rule.ID, match))
+			b.log(fmt.Sprintf("Rule %s exempted for match: %q", rule.ID, match))
 			continue
 		}
 
@@ -210,26 +210,26 @@ func (b *BashBlocker) CheckCommand(cmd string) *Rule {
 //   - 0: allow execution
 //   - 2: block execution (Claude Code hook protocol)
 func (b *BashBlocker) Run() int {
-	b.log("INFO", fmt.Sprintf("Hook started for tool: %s", b.toolName))
+	b.log(fmt.Sprintf("Hook started for tool: %s", b.toolName))
 
 	if b.toolName != "Bash" {
-		b.log("INFO", fmt.Sprintf("Skipping non-Bash tool: %s", b.toolName))
+		b.log(fmt.Sprintf("Skipping non-Bash tool: %s", b.toolName))
 		return 0
 	}
 
 	cmd := extractCommand(b.toolInput)
 	if cmd == "" {
-		b.log("INFO", "Empty command — allowing")
+		b.log("Empty command — allowing")
 		return 0
 	}
 
 	rule := b.CheckCommand(cmd)
 	if rule == nil {
-		b.log("INFO", "No violations found — command allowed")
+		b.log("No violations found — command allowed")
 		return 0
 	}
 
-	b.log("INFO", fmt.Sprintf("BLOCKING: rule %s — %s", rule.ID, rule.PatternName))
+	b.log(fmt.Sprintf("BLOCKING: rule %s — %s", rule.ID, rule.PatternName))
 
 	msg := fmt.Sprintf("Blocked by %s: %s", rule.ID, rule.PatternName)
 	if rule.Remediation != "" {

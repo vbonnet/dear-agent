@@ -44,6 +44,7 @@ type TextBlock struct {
 	Text string `json:"text"`
 }
 
+// BlockType returns "text".
 func (t TextBlock) BlockType() string { return "text" }
 
 // ImageBlock represents image content.
@@ -57,6 +58,7 @@ type ImageBlock struct {
 	} `json:"source"`
 }
 
+// BlockType returns "image".
 func (i ImageBlock) BlockType() string { return "image" }
 
 // ToolUseBlock represents a tool invocation.
@@ -67,6 +69,7 @@ type ToolUseBlock struct {
 	Input json.RawMessage `json:"input"` // Arbitrary JSON input
 }
 
+// BlockType returns "tool_use".
 func (t ToolUseBlock) BlockType() string { return "tool_use" }
 
 // ToolResultBlock represents tool execution result.
@@ -76,6 +79,7 @@ type ToolResultBlock struct {
 	Content   string `json:"content"`     // Result string
 }
 
+// BlockType returns "tool_result".
 func (t ToolResultBlock) BlockType() string { return "tool_result" }
 
 // UnmarshalJSON implements custom JSON deserialization for Message.

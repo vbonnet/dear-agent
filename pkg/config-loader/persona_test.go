@@ -250,10 +250,8 @@ func TestPersona_Validate(t *testing.T) {
 				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("Validate() error = %q, want error containing %q", err.Error(), tt.errContains)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("Validate() unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("Validate() unexpected error: %v", err)
 			}
 		})
 	}
@@ -743,10 +741,8 @@ func TestPersona_Validate_AllFields(t *testing.T) {
 				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("Validate() error = %q, want error containing %q", err.Error(), tt.errContains)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("Validate() unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("Validate() unexpected error: %v", err)
 			}
 		})
 	}

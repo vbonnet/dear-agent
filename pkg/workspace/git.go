@@ -158,7 +158,7 @@ func (g *GitConfigManager) AddGitIncludeIf(workspaceRoot, configPath string) err
 	return nil
 }
 
-// ValidateGitConfig checks if git config is correctly set for a workspace.
+// GitConfigValidation reports whether a workspace's git config matches the expected email.
 type GitConfigValidation struct {
 	WorkspaceName string
 	ExpectedEmail string
@@ -195,7 +195,7 @@ func (g *GitConfigManager) ValidateGitConfigForWorkspace(workspaceRoot, expected
 	return validation, nil
 }
 
-// GitConfigDoctor performs health checks on git configuration.
+// GitConfigDoctorResult aggregates outcomes from git-config health checks.
 type GitConfigDoctorResult struct {
 	Checks   []GitConfigCheck
 	Passed   int

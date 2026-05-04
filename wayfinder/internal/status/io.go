@@ -151,7 +151,7 @@ func (s *Status) formatPhaseList() string {
 		if phase.Status == PhaseStatusInProgress {
 			suffix = "** (in progress)"
 		} else if phase.Status == PhaseStatusCompleted && phase.CompletedAt != nil && phase.StartedAt != nil {
-			duration := (*phase.CompletedAt).Sub(*phase.StartedAt)
+			duration := phase.CompletedAt.Sub(*phase.StartedAt)
 			suffix = fmt.Sprintf(" (%s)", formatDuration(duration))
 		}
 

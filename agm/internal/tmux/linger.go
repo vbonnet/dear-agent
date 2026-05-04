@@ -123,7 +123,7 @@ func IsLingerSupported() bool {
 	return err == nil
 }
 
-// GetLingerInfo provides detailed information about lingering status
+// LingerInfo describes the system's loginctl-linger status.
 type LingerInfo struct {
 	Supported      bool
 	Enabled        bool

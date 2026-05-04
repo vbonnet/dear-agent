@@ -9,6 +9,7 @@ import (
 // Severity indicates how serious a finding is.
 type Severity int
 
+// Severity values, in increasing seriousness.
 const (
 	SeverityPass Severity = iota
 	SeverityWarn

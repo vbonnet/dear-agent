@@ -115,11 +115,11 @@ func NewOpenAIAdapter(ctx context.Context, config *OpenAIConfig) (Agent, error) 
 
 // newOpenAIAdapterWithClient creates an adapter with a custom client (for testing).
 // This is an unexported function used by tests to inject mock clients.
-func newOpenAIAdapterWithClient(client openai.ClientInterface, sessionManager *openai.SessionManager, model string) *OpenAIAdapter {
+func newOpenAIAdapterWithClient(client openai.ClientInterface, sessionManager *openai.SessionManager) *OpenAIAdapter {
 	return &OpenAIAdapter{
 		client:         client,
 		sessionManager: sessionManager,
-		model:          model,
+		model:          "gpt-4",
 	}
 }
 
@@ -477,105 +477,85 @@ func (a *OpenAIAdapter) ExecuteCommand(cmd Command) error {
 
 	switch cmd.Type {
 	case CommandRename:
-		// Update session title
-		newName, err := getStringParam(cmd.Params, "name")
-		if err != nil {
-			return fmt.Errorf("rename command: %w", err)
-		}
-
-		if err := a.sessionManager.UpdateTitle(sessionIDStr, newName); err != nil {
-			return fmt.Errorf("failed to update session title: %w", err)
-		}
-
-		return nil
-
+		return a.openAIRename(cmd, sessionIDStr)
 	case CommandSetDir:
-		// Update working directory
-		newPath, err := getStringParam(cmd.Params, "path")
-		if err != nil {
-			return fmt.Errorf("setdir command: %w", err)
-		}
-
-		if err := a.sessionManager.UpdateWorkingDirectory(sessionIDStr, newPath); err != nil {
-			return fmt.Errorf("failed to update working directory: %w", err)
-		}
-
-		return nil
-
+		return a.openAISetDir(cmd, sessionIDStr)
 	case CommandAuthorize:
-		// OpenAI API doesn't have directory authorization
-		// This is a no-op for API-based adapters
 		return nil
-
 	case CommandClearHistory:
-		// Clear conversation history
-		// We do this by deleting and recreating the session
-		sessionInfo, err := a.sessionManager.GetSession(sessionIDStr)
-		if err != nil {
-			return fmt.Errorf("failed to get session info: %w", err)
-		}
-
-		// Delete old session
-		if err := a.sessionManager.DeleteSession(sessionIDStr); err != nil {
-			return fmt.Errorf("failed to delete session: %w", err)
-		}
-
-		// Recreate with same ID
-		_, err = a.sessionManager.CreateSession(
-			sessionIDStr,
-			sessionInfo.Model,
-			sessionInfo.WorkingDirectory,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to recreate session: %w", err)
-		}
-
-		// Restore title
-		if sessionInfo.Title != "" {
-			if err := a.sessionManager.UpdateTitle(sessionIDStr, sessionInfo.Title); err != nil {
-				return fmt.Errorf("failed to restore session title: %w", err)
-			}
-		}
-
-		return nil
-
+		return a.openAIClearHistory(sessionIDStr)
 	case CommandSetSystemPrompt:
-		// Add system prompt message
-		prompt, err := getStringParam(cmd.Params, "prompt")
-		if err != nil {
-			return fmt.Errorf("set_system_prompt command: %w", err)
-		}
-
-		systemMsg := openai.Message{
-			Role:      "system",
-			Content:   prompt,
-			Timestamp: time.Now(),
-		}
-
-		if err := a.sessionManager.AddMessage(sessionIDStr, systemMsg); err != nil {
-			return fmt.Errorf("failed to add system prompt: %w", err)
-		}
-
-		return nil
-
+		return a.openAISetSystemPrompt(cmd, sessionIDStr)
 	case CommandRunHook:
-		// Execute hook via OpenAI adapter lifecycle
-		hookName, err := getStringParam(cmd.Params, "hook_name")
-		if err != nil {
-			return fmt.Errorf("run_hook command: %w", err)
-		}
-
-		// Get session info for hook execution
-		sessionInfo, err := a.sessionManager.GetSession(sessionIDStr)
-		if err != nil {
-			return fmt.Errorf("failed to get session info: %w", err)
-		}
-
-		return a.executeHook(SessionID(sessionIDStr), sessionInfo, hookName)
-
+		return a.openAIRunHook(cmd, sessionIDStr)
 	default:
 		return fmt.Errorf("unsupported command type: %s", cmd.Type)
 	}
+}
+
+func (a *OpenAIAdapter) openAIRename(cmd Command, sessionIDStr string) error {
+	newName, err := getStringParam(cmd.Params, "name")
+	if err != nil {
+		return fmt.Errorf("rename command: %w", err)
+	}
+	if err := a.sessionManager.UpdateTitle(sessionIDStr, newName); err != nil {
+		return fmt.Errorf("failed to update session title: %w", err)
+	}
+	return nil
+}
+
+func (a *OpenAIAdapter) openAISetDir(cmd Command, sessionIDStr string) error {
+	newPath, err := getStringParam(cmd.Params, "path")
+	if err != nil {
+		return fmt.Errorf("setdir command: %w", err)
+	}
+	if err := a.sessionManager.UpdateWorkingDirectory(sessionIDStr, newPath); err != nil {
+		return fmt.Errorf("failed to update working directory: %w", err)
+	}
+	return nil
+}
+
+func (a *OpenAIAdapter) openAIClearHistory(sessionIDStr string) error {
+	sessionInfo, err := a.sessionManager.GetSession(sessionIDStr)
+	if err != nil {
+		return fmt.Errorf("failed to get session info: %w", err)
+	}
+	if err := a.sessionManager.DeleteSession(sessionIDStr); err != nil {
+		return fmt.Errorf("failed to delete session: %w", err)
+	}
+	if _, err := a.sessionManager.CreateSession(sessionIDStr, sessionInfo.Model, sessionInfo.WorkingDirectory); err != nil {
+		return fmt.Errorf("failed to recreate session: %w", err)
+	}
+	if sessionInfo.Title != "" {
+		if err := a.sessionManager.UpdateTitle(sessionIDStr, sessionInfo.Title); err != nil {
+			return fmt.Errorf("failed to restore session title: %w", err)
+		}
+	}
+	return nil
+}
+
+func (a *OpenAIAdapter) openAISetSystemPrompt(cmd Command, sessionIDStr string) error {
+	prompt, err := getStringParam(cmd.Params, "prompt")
+	if err != nil {
+		return fmt.Errorf("set_system_prompt command: %w", err)
+	}
+	systemMsg := openai.Message{Role: "system", Content: prompt, Timestamp: time.Now()}
+	if err := a.sessionManager.AddMessage(sessionIDStr, systemMsg); err != nil {
+		return fmt.Errorf("failed to add system prompt: %w", err)
+	}
+	return nil
+}
+
+func (a *OpenAIAdapter) openAIRunHook(cmd Command, sessionIDStr string) error {
+	hookName, err := getStringParam(cmd.Params, "hook_name")
+	if err != nil {
+		return fmt.Errorf("run_hook command: %w", err)
+	}
+	sessionInfo, err := a.sessionManager.GetSession(sessionIDStr)
+	if err != nil {
+		return fmt.Errorf("failed to get session info: %w", err)
+	}
+	return a.executeHook(SessionID(sessionIDStr), sessionInfo, hookName)
 }
 
 // RunHook executes a session lifecycle hook for OpenAI.

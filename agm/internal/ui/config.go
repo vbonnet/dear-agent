@@ -30,6 +30,7 @@ type Config struct {
 	Advanced AdvancedConfig `yaml:"advanced"`
 }
 
+// DefaultsConfig holds default behavior toggles for the AGM UI.
 type DefaultsConfig struct {
 	Interactive          bool `yaml:"interactive"`
 	AutoAssociateUUID    bool `yaml:"auto_associate_uuid"`
@@ -38,6 +39,7 @@ type DefaultsConfig struct {
 	ArchiveThresholdDays int  `yaml:"archive_threshold_days"`
 }
 
+// UIConfig holds presentation/theming settings.
 type UIConfig struct {
 	Theme            string `yaml:"theme"`
 	PickerHeight     int    `yaml:"picker_height"`
@@ -48,6 +50,7 @@ type UIConfig struct {
 	ScreenReader     bool   `yaml:"screen_reader"` // Use text symbols instead of Unicode
 }
 
+// AdvancedConfig holds tunable timeouts and detection windows.
 type AdvancedConfig struct {
 	TmuxTimeout         string `yaml:"tmux_timeout"`
 	HealthCheckCache    string `yaml:"health_check_cache"`

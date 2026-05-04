@@ -114,14 +114,12 @@ func TestArchiveSession_SupervisorProtection(t *testing.T) {
 				if opErr.Type != tt.errorType {
 					t.Errorf("expected error type %q, got %q", tt.errorType, opErr.Type)
 				}
-			} else {
-				if err != nil {
-					// Allow verification errors (e.g., directory not found) — we only
-					// care that the supervisor guard didn't fire
-					var opErr *OpError
-					if errors.As(err, &opErr) && opErr.Type == "archive/supervisor_protected" {
-						t.Fatalf("unexpected supervisor protection error for %q", tt.sessName)
-					}
+			} else if err != nil {
+				// Allow verification errors (e.g., directory not found) — we only
+				// care that the supervisor guard didn't fire
+				var opErr *OpError
+				if errors.As(err, &opErr) && opErr.Type == "archive/supervisor_protected" {
+					t.Fatalf("unexpected supervisor protection error for %q", tt.sessName)
 				}
 			}
 		})

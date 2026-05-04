@@ -36,23 +36,33 @@ func (s *Storage) Query(params QueryParams) ([]BenchmarkRun, error) {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	// Order by
+	// Order by — whitelist columns and direction to avoid SQL injection
 	orderBy := "timestamp"
-	if params.OrderBy != "" {
-		orderBy = params.OrderBy
+	switch params.OrderBy {
+	case "timestamp", "quality_score", "cost_usd", "":
+		if params.OrderBy != "" {
+			orderBy = params.OrderBy
+		}
+	default:
+		return nil, fmt.Errorf("invalid OrderBy: %q", params.OrderBy)
 	}
 	orderDir := "DESC"
-	if params.OrderDirection != "" {
-		orderDir = params.OrderDirection
+	switch strings.ToUpper(params.OrderDirection) {
+	case "ASC", "DESC":
+		orderDir = strings.ToUpper(params.OrderDirection)
+	case "":
+		// keep default
+	default:
+		return nil, fmt.Errorf("invalid OrderDirection: %q", params.OrderDirection)
 	}
-	query += fmt.Sprintf(" ORDER BY %s %s", orderBy, orderDir)
+	query += fmt.Sprintf(" ORDER BY %s %s", orderBy, orderDir) //nolint:gosec // G202: orderBy/orderDir are whitelisted above
 
 	// Limit
 	limit := 100
 	if params.Limit > 0 {
 		limit = params.Limit
 	}
-	query += fmt.Sprintf(" LIMIT %d", limit)
+	query += fmt.Sprintf(" LIMIT %d", limit) //nolint:gosec // G202: limit is an int, not injectable
 
 	// Execute query
 	rows, err := s.db.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer

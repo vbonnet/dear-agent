@@ -32,6 +32,7 @@ type ErrorSummaryEntry struct {
 	LastSeen    string `json:"last_seen"`
 }
 
+// Defaults and source identifiers for the error-memory store.
 const (
 	DefaultTTL        = 30 * 24 * time.Hour
 	DefaultDBPath     = "~/.agm/error-memory.jsonl"

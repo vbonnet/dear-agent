@@ -62,7 +62,8 @@ func parseWorktreeOutput(output string) []Worktree {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 
-		if strings.HasPrefix(line, "worktree ") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
 			// If we already have a worktree in progress, save it
 			if current.Path != "" {
 				if isFirst {
@@ -74,11 +75,11 @@ func parseWorktreeOutput(output string) []Worktree {
 			current = Worktree{
 				Path: strings.TrimPrefix(line, "worktree "),
 			}
-		} else if strings.HasPrefix(line, "branch ") {
+		case strings.HasPrefix(line, "branch "):
 			ref := strings.TrimPrefix(line, "branch ")
 			// Strip refs/heads/ prefix to get branch name
 			current.Branch = strings.TrimPrefix(ref, "refs/heads/")
-		} else if line == "" && current.Path != "" {
+		case line == "" && current.Path != "":
 			// Blank line = end of block
 			if isFirst {
 				current.IsMain = true

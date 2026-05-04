@@ -154,7 +154,7 @@ func findAGMSession(sessionID string) string {
 	return ""
 }
 
-func run() int {
+func run() {
 	debug := os.Getenv("AGM_HOOK_DEBUG") == "1"
 
 	// Read hook input from stdin
@@ -162,23 +162,23 @@ func run() int {
 	decoder := json.NewDecoder(os.Stdin)
 	if err := decoder.Decode(&input); err != nil {
 		log(debug, "INFO", fmt.Sprintf("Failed to decode stdin: %v", err))
-		return 0 // Non-fatal: stdin may not be JSON
+		return // Non-fatal: stdin may not be JSON
 	}
 
 	// Only process Bash tool calls
 	if input.ToolName != "Bash" {
-		return 0
+		return
 	}
 
 	// Only process successful commands
 	if input.ToolResult.ExitCode != 0 {
-		return 0
+		return
 	}
 
 	command := input.ToolInput.Command
 	event := detectWorktreeEvent(command)
 	if event == nil {
-		return 0
+		return
 	}
 
 	log(debug, "INFO", fmt.Sprintf("Detected worktree %s: path=%s branch=%s", event.Operation, event.WorktreePath, event.Branch))
@@ -188,7 +188,7 @@ func run() int {
 	sessionName := findAGMSession(sessionID)
 	if sessionName == "" {
 		log(debug, "INFO", "Not an AGM session, skipping worktree tracking")
-		return 0
+		return
 	}
 
 	// Record the event via agm CLI
@@ -204,10 +204,8 @@ func run() int {
 		log(debug, "INFO", fmt.Sprintf("WORKTREE_REMOVE session=%s path=%s",
 			sessionName, event.WorktreePath))
 	}
-
-	return 0
 }
 
 func main() {
-	os.Exit(run())
+	run()
 }

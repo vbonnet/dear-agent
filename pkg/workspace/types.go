@@ -34,6 +34,7 @@ type Detector interface {
 // DetectionMethod indicates how workspace was determined.
 type DetectionMethod int
 
+// DetectionMethod values describing how a workspace was selected.
 const (
 	MethodFlag DetectionMethod = iota
 	MethodEnvVar

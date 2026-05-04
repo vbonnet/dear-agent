@@ -18,6 +18,7 @@ var (
 	rewindLearnings string
 )
 
+// RewindCmd is the cobra command that rewinds the session to a previous phase.
 var RewindCmd = &cobra.Command{
 	Use:   "rewind-to <phase-name>",
 	Short: "Rewind to a previous phase in V2 sequence",
@@ -46,6 +47,7 @@ func init() {
 	RewindCmd.Flags().StringVar(&rewindLearnings, "learnings", "", "Pre-provide learnings (bypasses prompt)")
 }
 
+//nolint:gocyclo // reason: linear CLI driver covering many rewind targets
 func runRewind(cmd *cobra.Command, args []string) error {
 	targetPhase := args[0]
 

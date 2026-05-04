@@ -6,6 +6,7 @@ package phaseisolation
 // PhaseID identifies a Wayfinder phase.
 type PhaseID string
 
+// PhaseID values for the 12-phase Wayfinder workflow.
 const (
 	PhaseD1  PhaseID = "D1"
 	PhaseD2  PhaseID = "D2"
@@ -33,6 +34,7 @@ func AllPhaseIDs() []PhaseID {
 // PhaseStatus represents the status of a phase execution.
 type PhaseStatus string
 
+// PhaseStatus values for tracking phase execution state.
 const (
 	StatusPending    PhaseStatus = "pending"
 	StatusInProgress PhaseStatus = "in_progress"
@@ -139,6 +141,7 @@ type PhaseExecutionStrategy interface {
 // LoadStrategy determines how dependency artifacts are loaded.
 type LoadStrategy string
 
+// LoadStrategy values controlling how prior artifacts are loaded into context.
 const (
 	LoadFull    LoadStrategy = "full"
 	LoadSummary LoadStrategy = "summary"
@@ -147,6 +150,7 @@ const (
 // V2PhaseName is the phase name used by Go wayfinder-session.
 type V2PhaseName string
 
+// V2 phase name values used by the Go wayfinder-session.
 const (
 	V2Charter  V2PhaseName = "CHARTER"
 	V2Problem  V2PhaseName = "PROBLEM"

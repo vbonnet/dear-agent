@@ -90,6 +90,7 @@ type RevocationChecker interface {
 // RevocationReason indicates why a certificate was revoked
 type RevocationReason string
 
+// Recognized certificate RevocationReason values.
 const (
 	ReasonUnspecified          RevocationReason = "unspecified"
 	ReasonKeyCompromise        RevocationReason = "key_compromise"
