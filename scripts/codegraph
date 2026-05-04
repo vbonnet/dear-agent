@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# codegraph — build a tree-sitter knowledge graph of a codebase via graphify.
+#
+# Wraps `graphify update` so outputs land in a known per-repo location
+# (~/.local/share/codegraph/<repo>/) instead of a graphify-out/ directory
+# inside the source tree. This keeps source repos clean and lets multiple
+# Claude sessions share the same generated graph.
+#
+# Usage:
+#   scripts/codegraph                              # build graph for $PWD
+#   scripts/codegraph PATH                         # build graph for PATH
+#   scripts/codegraph install                      # bootstrap graphify venv
+#   scripts/codegraph query "question" [PATH]     # BFS query an existing graph
+#   scripts/codegraph explain "Symbol"   [PATH]   # explain a node and neighbors
+#   scripts/codegraph path "A" "B"       [PATH]   # shortest path between nodes
+#   scripts/codegraph where                        # print the output dir for $PWD
+#
+# Environment:
+#   CODEGRAPH_VENV     graphify venv path  (default: ~/.local/venvs/graphify)
+#   CODEGRAPH_OUT_BASE output base dir     (default: ~/.local/share/codegraph)
+
+set -euo pipefail
+
+VENV=${CODEGRAPH_VENV:-"$HOME/.local/venvs/graphify"}
+GRAPHIFY_BIN="$VENV/bin/graphify"
+OUT_BASE=${CODEGRAPH_OUT_BASE:-"$HOME/.local/share/codegraph"}
+
+ensure_installed() {
+    if [ -x "$GRAPHIFY_BIN" ]; then return 0; fi
+    echo "codegraph: graphify not found at $GRAPHIFY_BIN" >&2
+    echo "codegraph: run \`scripts/codegraph install\` to bootstrap a venv" >&2
+    exit 1
+}
+
+install_graphify() {
+    echo "codegraph: installing graphify into $VENV"
+    python3 -m venv "$VENV"
+    "$VENV/bin/pip" install --quiet --upgrade pip
+    "$VENV/bin/pip" install --quiet graphifyy
+    echo "codegraph: installed $("$GRAPHIFY_BIN" 2>&1 | head -1 | sed 's/Usage: //')"
+}
+
+repo_name() {
+    local p; p=$(cd "$1" && pwd)
+    if git -C "$p" rev-parse --show-toplevel >/dev/null 2>&1; then
+        local top; top=$(git -C "$p" rev-parse --show-toplevel)
+        local remote; remote=$(git -C "$top" config --get remote.origin.url 2>/dev/null || true)
+        if [ -n "$remote" ]; then
+            basename "${remote%.git}"
+            return
+        fi
+        basename "$top"
+        return
+    fi
+    basename "$p"
+}
+
+out_dir_for() {
+    echo "$OUT_BASE/$(repo_name "$1")"
+}
+
+build_graph() {
+    ensure_installed
+    local target=${1:-$PWD}
+    if [ ! -d "$target" ]; then
+        echo "codegraph: $target is not a directory" >&2
+        exit 1
+    fi
+    local target_abs; target_abs=$(cd "$target" && pwd)
+    local out; out=$(out_dir_for "$target_abs")
+    mkdir -p "$out"
+    echo "codegraph: $target_abs -> $out"
+    # graphify writes a manifest to graphify-out/manifest.json relative to cwd;
+    # cd into the output dir so it lands beside the real outputs instead of
+    # polluting the source tree.
+    ( cd "$out" && GRAPHIFY_OUT="$out" "$GRAPHIFY_BIN" update "$target_abs" )
+    echo
+    echo "Outputs:"
+    echo "  Report : $out/GRAPH_REPORT.md"
+    echo "  Graph  : $out/graph.json"
+    if [ -f "$out/graph.html" ]; then
+        echo "  Visual : $out/graph.html"
+    fi
+}
+
+cmd=${1:-build}
+case "$cmd" in
+    install)
+        install_graphify
+        ;;
+    where)
+        out_dir_for "${2:-$PWD}"
+        ;;
+    query)
+        ensure_installed
+        question=${2:?question required}
+        target=${3:-$PWD}
+        out=$(out_dir_for "$target")
+        "$GRAPHIFY_BIN" query "$question" --graph "$out/graph.json"
+        ;;
+    explain)
+        ensure_installed
+        symbol=${2:?symbol required}
+        target=${3:-$PWD}
+        out=$(out_dir_for "$target")
+        "$GRAPHIFY_BIN" explain "$symbol" --graph "$out/graph.json"
+        ;;
+    path)
+        ensure_installed
+        a=${2:?source node required}
+        b=${3:?target node required}
+        target=${4:-$PWD}
+        out=$(out_dir_for "$target")
+        "$GRAPHIFY_BIN" path "$a" "$b" --graph "$out/graph.json"
+        ;;
+    build)
+        build_graph "${2:-$PWD}"
+        ;;
+    -h|--help|help)
+        sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
+        ;;
+    *)
+        # Treat any other arg as a path to build.
+        build_graph "$cmd"
+        ;;
+esac
