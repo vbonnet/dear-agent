@@ -19,7 +19,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/cucumber/godog v0.15.1
 	github.com/fatih/color v1.19.0
-	github.com/fsnotify/fsnotify v1.9.0
+	github.com/fsnotify/fsnotify v1.10.0
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
