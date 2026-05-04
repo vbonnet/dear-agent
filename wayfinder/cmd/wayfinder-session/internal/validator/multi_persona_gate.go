@@ -280,6 +280,7 @@ func (g *MultiPersonaGate) aggregateVotes(votes []Vote, blockers []string, confi
 	}
 
 	// Apply tier-based decision rules
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch config.Tier {
 	case GateTierBlocking:
 		// Tier 1: ALL personas must vote GO

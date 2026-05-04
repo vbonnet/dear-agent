@@ -44,7 +44,7 @@ func TestRegistry_Register_Duplicate(t *testing.T) {
 func TestRegistry_Get(t *testing.T) {
 	registry := NewRegistry()
 	detector := NewBashCommandPatternDetector()
-	registry.Register(detector) // nolint:errcheck
+	registry.Register(detector) //nolint:errcheck
 
 	tests := []struct {
 		name         string
@@ -76,7 +76,7 @@ func TestRegistry_Get(t *testing.T) {
 func TestRegistry_DetectorsForInstructionType(t *testing.T) {
 	registry := NewRegistry()
 	detector := NewBashCommandPatternDetector()
-	registry.Register(detector) // nolint:errcheck
+	registry.Register(detector) //nolint:errcheck
 
 	tests := []struct {
 		name            string
@@ -109,7 +109,7 @@ func TestRegistry_DetectorsForInstructionType(t *testing.T) {
 func TestRegistry_RunAll(t *testing.T) {
 	registry := NewRegistry()
 	detector := NewBashCommandPatternDetector()
-	registry.Register(detector) // nolint:errcheck
+	registry.Register(detector) //nolint:errcheck
 
 	input := DetectorInput{
 		Content: "cd /path && ls",

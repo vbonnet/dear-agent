@@ -107,6 +107,7 @@ func TrustAwareDispatch(sessionNames []string) (*DispatchResult, error) {
 // human-readable reason.
 func TrustPenalty(score int) (restricted bool, reason string) {
 	tier := ClassifyTrust(score)
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch tier {
 	case TrustTierBlocked:
 		return true, "trust score below minimum dispatch threshold — no unsupervised work"

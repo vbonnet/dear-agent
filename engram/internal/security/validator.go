@@ -320,7 +320,8 @@ func (v *Validator) isValidDomain(domain string) bool {
 
 		// All characters must be alphanumeric or hyphen
 		for _, c := range label {
-			if !isAlphanumeric(byte(c)) && c != '-' {
+			// Domain labels are ASCII per RFC 1035; non-ASCII is rejected.
+			if c > 0xFF || (!isAlphanumeric(byte(c)) && c != '-') { //nolint:gosec // bounded above
 				return false
 			}
 		}
@@ -332,7 +333,8 @@ func (v *Validator) isValidDomain(domain string) bool {
 		return false
 	}
 	for _, c := range tld {
-		if !isLetter(byte(c)) {
+		// TLDs are ASCII letters; reject anything else.
+		if c > 0xFF || !isLetter(byte(c)) { //nolint:gosec // bounded above
 			return false
 		}
 	}

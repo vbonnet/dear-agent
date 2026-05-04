@@ -30,6 +30,7 @@ func CheckAndAlert(status Status, cfg Config, signalDir string) *Alert {
 		Timestamp: time.Now(),
 	}
 
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch status.Level {
 	case LevelWarning:
 		alert.Message = fmt.Sprintf(

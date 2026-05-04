@@ -97,7 +97,7 @@ func GlobalRegistry() *Registry {
 	once.Do(func() {
 		globalRegistry = NewRegistry()
 		// Register default detectors
-		globalRegistry.Register(NewBashCommandPatternDetector()) // nolint:errcheck
+		globalRegistry.Register(NewBashCommandPatternDetector()) //nolint:errcheck
 	})
 	return globalRegistry
 }

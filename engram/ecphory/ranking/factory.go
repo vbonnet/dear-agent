@@ -58,6 +58,7 @@ func (f *Factory) registerProviders() error {
 
 	// Detect auth method for Anthropic/Claude
 	anthropicAuth := llmauth.DetectAuthMethod("anthropic")
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch anthropicAuth {
 	case llmauth.AuthVertexAI:
 		// Vertex AI Claude (requires Google Cloud credentials + us-east5)

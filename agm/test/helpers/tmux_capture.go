@@ -96,13 +96,14 @@ func (m *TmuxCaptureMatcher) VerifySequence(expectedSequence []string, allowGaps
 			return fmt.Errorf("sequence item %d not found: %q (searched from position %d)", i, expected, lastIndex)
 		}
 
-		// Update position for next search
-		if allowGaps {
-			lastIndex = lastIndex + index + len(expected)
-		} else {
-			// If gaps not allowed, next item must appear immediately after
-			lastIndex = lastIndex + index + len(expected)
+		// If gaps not allowed, the expected string must start exactly at lastIndex
+		// (i.e., index relative to that substring must be 0).
+		if !allowGaps && index != 0 {
+			return fmt.Errorf("sequence item %d found at offset %d but gaps disallowed: %q (expected at position %d)", i, index, expected, lastIndex)
 		}
+
+		// Update position for next search
+		lastIndex = lastIndex + index + len(expected)
 	}
 
 	return nil

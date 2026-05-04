@@ -205,6 +205,7 @@ func formatBudget(bs *budget.Status) string {
 	if bs == nil {
 		return "—"
 	}
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch bs.Level {
 	case budget.LevelCritical:
 		return fmt.Sprintf("!! %.0f%%", bs.PercentageUsed)
