@@ -28,8 +28,10 @@ nodes:
     kind: bash
     name: workflow-audit run --cadence daily
     bash:
-      command: |
-        workflow-audit run \
-          --cadence daily \
-          --db "{{ .Inputs.db }}" \
-          --repo "{{ .Inputs.repo }}"
+      # workflow-audit infers the repo from cwd. Inputs are exposed as
+      # $INPUT_* env vars by the runner — see pkg/workflow/runner.go on
+      # why {{ .Inputs }} interpolation is unsafe here.
+      cmd: |
+        set -euo pipefail
+        cd "$INPUT_repo"
+        workflow-audit run --cadence daily --db "$INPUT_db"
