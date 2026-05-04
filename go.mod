@@ -3,7 +3,7 @@ module github.com/vbonnet/dear-agent
 go 1.25.9
 
 require (
-	cloud.google.com/go/aiplatform v1.124.0
+	cloud.google.com/go/aiplatform v1.125.0
 	github.com/BurntSushi/toml v1.6.0
 	github.com/Netflix/go-expect v0.0.0-20220104043353-73e0943537d2
 	github.com/a2aproject/a2a-go v0.3.15
