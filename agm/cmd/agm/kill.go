@@ -433,19 +433,6 @@ To work with this session:
 	return fmt.Errorf("session is archived")
 }
 
-func renderKillError(sessionName string, err error) error {
-	ui.PrintError(
-		err,
-		"Failed to kill tmux session",
-		fmt.Sprintf(`Check if tmux is installed and accessible.
-
-If session is stuck, try:
-  • Manually kill: tmux kill-session -t %s
-  • Check tmux socket: %s`, sessionName, tmux.GetSocketPath()),
-	)
-	return err
-}
-
 func renderSuccessMessage(sessionName string) {
 	ui.PrintSuccess(fmt.Sprintf("Tmux session killed for '%s'", sessionName))
 	fmt.Println()

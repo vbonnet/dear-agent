@@ -181,7 +181,7 @@ func (bl *BuildLoop) Execute() (*TaskResult, error) {
 		}
 
 		// Record transition
-		bl.recordTransition(bl.currentState, nextState, transition.Trigger, "")
+		bl.recordTransition(bl.currentState, nextState, transition.Trigger)
 
 		// Transition to next state
 		bl.currentState = nextState
@@ -449,14 +449,13 @@ func (bl *BuildLoop) executeIntegrateFail() (State, error) {
 }
 
 // recordTransition records a state transition
-func (bl *BuildLoop) recordTransition(from, to State, trigger string, errMsg string) {
+func (bl *BuildLoop) recordTransition(from, to State, trigger string) {
 	record := StateTransitionRecord{
 		From:      from,
 		To:        to,
 		Timestamp: time.Now(),
 		Trigger:   trigger,
 		Success:   true,
-		Error:     errMsg,
 	}
 	bl.stateHistory = append(bl.stateHistory, record)
 }

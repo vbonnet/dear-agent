@@ -90,10 +90,7 @@ func ResolveIdentifier(identifier string, sessionsDir string, adapter *dolt.Adap
 
 		if m.Tmux.SessionName == identifier {
 			// Find actual directory path (don't assume it matches session ID)
-			actualPath, err := findManifestPath(sessionsDir, m.SessionID, adapter)
-			if err != nil {
-				return nil, "", fmt.Errorf("found session but couldn't locate manifest: %w", err)
-			}
+			actualPath := findManifestPath(sessionsDir, m.SessionID)
 			return m, actualPath, nil
 		}
 	}
@@ -107,10 +104,7 @@ func ResolveIdentifier(identifier string, sessionsDir string, adapter *dolt.Adap
 
 		if m.Name == identifier {
 			// Find actual directory path (don't assume it matches session ID)
-			actualPath, err := findManifestPath(sessionsDir, m.SessionID, adapter)
-			if err != nil {
-				return nil, "", fmt.Errorf("found session but couldn't locate manifest: %w", err)
-			}
+			actualPath := findManifestPath(sessionsDir, m.SessionID)
 			return m, actualPath, nil
 		}
 	}
@@ -120,9 +114,8 @@ func ResolveIdentifier(identifier string, sessionsDir string, adapter *dolt.Adap
 
 // findManifestPath returns the manifest path for a session ID
 // For Dolt-backed sessions, paths are always predictable
-func findManifestPath(sessionsDir string, sessionID string, _ *dolt.Adapter) (string, error) {
-	// For Dolt-backed sessions, manifest path is always predictable
-	return filepath.Join(sessionsDir, sessionID, "manifest.yaml"), nil
+func findManifestPath(sessionsDir string, sessionID string) string {
+	return filepath.Join(sessionsDir, sessionID, "manifest.yaml")
 }
 
 // HealthReport contains health check results
@@ -341,11 +334,7 @@ func FindArchived(sessionsDir string, pattern string, adapter *dolt.Adapter) ([]
 
 	for _, m := range manifests {
 		if m.Lifecycle == manifest.LifecycleArchived {
-			// Find the actual manifest path
-			actualPath, err := findManifestPath(sessionsDir, m.SessionID, adapter)
-			if err != nil {
-				continue // Skip if can't find path
-			}
+			actualPath := findManifestPath(sessionsDir, m.SessionID)
 			allManifests = append(allManifests, m)
 			manifestPaths = append(manifestPaths, actualPath)
 		}
