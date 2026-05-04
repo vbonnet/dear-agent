@@ -13,6 +13,7 @@ import (
 
 var sessionStatus string
 
+// EndCmd is the cobra command that ends the current Wayfinder session.
 var EndCmd = &cobra.Command{
 	Use:   "end",
 	Short: "End the current Wayfinder V2 session",

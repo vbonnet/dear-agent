@@ -204,7 +204,7 @@ func (m *LoopMonitor) escalate(session string, ws *WakeAttemptState) {
 	payloadJSON, _ := json.Marshal(payload)
 
 	cmd := exec.Command("sh", "-c", m.escalationCommand)
-	cmd.Stdin = bytes_NewReader(payloadJSON)
+	cmd.Stdin = bytesNewReader(payloadJSON)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		m.logger.Error("Escalation command failed",
@@ -290,9 +290,9 @@ func (m *LoopMonitor) saveState() {
 	}
 }
 
-// bytes_NewReader is a helper to avoid importing bytes package name collision.
+// bytesNewReader is a helper to avoid importing bytes package name collision.
 // Returns an *os.File-like reader for use with exec.Command.Stdin.
-func bytes_NewReader(data []byte) *os.File {
+func bytesNewReader(data []byte) *os.File {
 	r, w, err := os.Pipe()
 	if err != nil {
 		return nil

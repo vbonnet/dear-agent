@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// DefaultArtifactsDir is the default filesystem location for A2A artifacts.
 const DefaultArtifactsDir = "~/src/a2a-artifacts"
 
 // Artifact represents stored artifact metadata

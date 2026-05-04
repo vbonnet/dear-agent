@@ -19,6 +19,7 @@ func NewExecClient() *ExecClient {
 	return &ExecClient{}
 }
 
+// CreateContainer runs `docker create` with the given options and returns the container ID.
 func (c *ExecClient) CreateContainer(ctx context.Context, opts ContainerCreateOpts) (string, error) {
 	args := []string{"create", "--name", opts.Name}
 
@@ -49,11 +50,13 @@ func (c *ExecClient) CreateContainer(ctx context.Context, opts ContainerCreateOp
 	return strings.TrimSpace(out), nil
 }
 
+// StartContainer runs `docker start` on containerID.
 func (c *ExecClient) StartContainer(ctx context.Context, containerID string) error {
 	_, err := runDocker(ctx, "start", containerID)
 	return err
 }
 
+// StopContainer runs `docker stop` on containerID with the given timeout.
 func (c *ExecClient) StopContainer(ctx context.Context, containerID string, timeout time.Duration) error {
 	secs := int(timeout.Seconds())
 	if secs < 1 {
@@ -63,11 +66,13 @@ func (c *ExecClient) StopContainer(ctx context.Context, containerID string, time
 	return err
 }
 
+// RemoveContainer runs `docker rm -f` on containerID.
 func (c *ExecClient) RemoveContainer(ctx context.Context, containerID string) error {
 	_, err := runDocker(ctx, "rm", "-f", containerID)
 	return err
 }
 
+// InspectContainer runs `docker inspect` and returns the parsed container state.
 func (c *ExecClient) InspectContainer(ctx context.Context, containerID string) (ContainerState, error) {
 	out, err := runDocker(ctx, "inspect", "--format", "{{json .State}}", containerID)
 	if err != nil {
@@ -97,6 +102,7 @@ func (c *ExecClient) InspectContainer(ctx context.Context, containerID string) (
 	return state, nil
 }
 
+// ListContainers runs `docker ps -a` filtered by the given labels.
 func (c *ExecClient) ListContainers(ctx context.Context, labels map[string]string) ([]ContainerInfo, error) {
 	args := []string{"ps", "-a", "--format", "{{json .}}"}
 	for k, v := range labels {
@@ -131,6 +137,7 @@ func (c *ExecClient) ListContainers(ctx context.Context, labels map[string]strin
 	return results, nil
 }
 
+// Exec runs `docker exec` against containerID, optionally piping stdin, and returns stdout.
 func (c *ExecClient) Exec(ctx context.Context, containerID string, cmd []string, stdin string) (string, error) {
 	args := []string{"exec"}
 	if stdin != "" {

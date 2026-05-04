@@ -294,7 +294,7 @@ func TestGetCommitHash(t *testing.T) {
 
 	// Verify hash is valid hex
 	for _, c := range hash {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			t.Errorf("GetCommitHash() returned invalid hex character: %c", c)
 		}
 	}

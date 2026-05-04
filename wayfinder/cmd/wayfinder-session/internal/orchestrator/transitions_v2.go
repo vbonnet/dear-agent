@@ -135,6 +135,7 @@ func (o *PhaseOrchestratorV2) buildPhaseSkippingError(current, next string) erro
 }
 
 // checkTransitionWarnings checks for transition-specific warnings
+//nolint:gocyclo // reason: linear warning checker enumerating each precondition
 func (o *PhaseOrchestratorV2) checkTransitionWarnings(current, next string) TransitionValidation {
 	result := TransitionValidation{
 		Valid:    true,

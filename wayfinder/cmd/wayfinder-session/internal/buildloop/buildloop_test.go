@@ -221,7 +221,7 @@ func TestRecordTransition(t *testing.T) {
 	task := &Task{ID: "T1"}
 	bl := NewBuildLoop(task, nil)
 
-	bl.recordTransition(StateTestFirst, StateCoding, "tests analyzed", true, "")
+	bl.recordTransition(StateTestFirst, StateCoding, "tests analyzed")
 
 	history := bl.GetStateHistory()
 	if len(history) != 1 {
@@ -521,8 +521,8 @@ func TestBuildLoop_SequentialExecution_WithParallelDisabled(t *testing.T) {
 	}
 
 	// Verify sequential progression through state history
-	bl.recordTransition(StateTestFirst, StateCoding, "tests fail", true, "")
-	bl.recordTransition(StateCoding, StateGreen, "tests pass", true, "")
+	bl.recordTransition(StateTestFirst, StateCoding, "tests fail")
+	bl.recordTransition(StateCoding, StateGreen, "tests pass")
 
 	history := bl.GetStateHistory()
 	if len(history) < 2 {

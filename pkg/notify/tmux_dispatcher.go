@@ -19,8 +19,10 @@ func NewTmuxDispatcher(target string) *TmuxDispatcher {
 	return &TmuxDispatcher{Target: target}
 }
 
+// Name returns the dispatcher name "tmux".
 func (d *TmuxDispatcher) Name() string { return "tmux" }
 
+// Dispatch shows the notification via `tmux display-message`.
 func (d *TmuxDispatcher) Dispatch(ctx context.Context, n *Notification) error {
 	msg := n.Title
 	if n.Body != "" {
@@ -46,4 +48,5 @@ func (d *TmuxDispatcher) Dispatch(ctx context.Context, n *Notification) error {
 	return nil
 }
 
+// Close is a no-op for TmuxDispatcher.
 func (d *TmuxDispatcher) Close() error { return nil }

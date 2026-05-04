@@ -109,19 +109,13 @@ func (a *Autodream) Run(ctx context.Context) (*ConsolidationReport, error) {
 	}
 
 	// Phase 3: Consolidate
-	result, err := a.consolidate(ctx, state, signals)
-	if err != nil {
-		return nil, fmt.Errorf("consolidate: %w", err)
-	}
+	result := a.consolidate(ctx, state, signals)
 	report.EntriesAdded = len(result.added)
 	report.EntriesUpdated = len(result.updated)
 	report.Contradictions = result.contradictions
 
 	// Phase 4: Prune
-	pruneResult, err := a.prune(ctx, state, result)
-	if err != nil {
-		return nil, fmt.Errorf("prune: %w", err)
-	}
+	pruneResult := a.prune(ctx, state, result)
 	report.EntriesPruned = pruneResult.entriesPruned
 
 	// Generate diff
@@ -243,7 +237,9 @@ type consolidationResult struct {
 }
 
 // consolidate merges signals into the memory document (Phase 3).
-func (a *Autodream) consolidate(ctx context.Context, state *MemoryState, signals []Signal) (*consolidationResult, error) {
+//
+//nolint:gocyclo // reason: linear consolidation pipeline with many guard checks
+func (a *Autodream) consolidate(ctx context.Context, state *MemoryState, signals []Signal) *consolidationResult {
 	result := &consolidationResult{}
 
 	// Collect incoming entries for contradiction detection
@@ -308,7 +304,7 @@ func (a *Autodream) consolidate(ctx context.Context, state *MemoryState, signals
 		result.added = append(result.added, entry)
 	}
 
-	return result, nil
+	return result
 }
 
 // removeEntry removes the first entry containing the target text.
@@ -339,7 +335,7 @@ type pruneResult struct {
 }
 
 // prune enforces size limits and manages topic files (Phase 4).
-func (a *Autodream) prune(_ context.Context, state *MemoryState, _ *consolidationResult) (*pruneResult, error) {
+func (a *Autodream) prune(_ context.Context, state *MemoryState, _ *consolidationResult) *pruneResult {
 	result := &pruneResult{
 		topicOverflow: make(map[string]string),
 	}
@@ -347,7 +343,7 @@ func (a *Autodream) prune(_ context.Context, state *MemoryState, _ *consolidatio
 	// Check if MEMORY.md exceeds line limit
 	lineCount := state.MemoryDoc.LineCount()
 	if lineCount <= a.config.MaxMemoryLines {
-		return result, nil // within limits
+		return result // within limits
 	}
 
 	// Overflow strategy: move large sections to topic files
@@ -378,7 +374,7 @@ func (a *Autodream) prune(_ context.Context, state *MemoryState, _ *consolidatio
 		}
 	}
 
-	return result, nil
+	return result
 }
 
 // archiveOldestTopics moves the oldest topic files to an archive subdirectory.

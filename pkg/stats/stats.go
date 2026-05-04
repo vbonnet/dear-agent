@@ -132,7 +132,7 @@ func bootstrapMean(values []float64) float64 {
 	n := len(values)
 	sum := 0.0
 	for range n {
-		sum += values[rand.IntN(n)]
+		sum += values[rand.IntN(n)] //nolint:gosec // G404: non-cryptographic statistical sampling
 	}
 	return sum / float64(n)
 }

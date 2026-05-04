@@ -51,7 +51,7 @@ func (i *Inspector) Middleware() mcp.Middleware {
 // isValidMethod checks that a method name contains only valid characters.
 func isValidMethod(method string) bool {
 	for _, r := range method {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '/' || r == '_' || r == '.' || r == '$') {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '/' && r != '_' && r != '.' && r != '$' {
 			return false
 		}
 	}

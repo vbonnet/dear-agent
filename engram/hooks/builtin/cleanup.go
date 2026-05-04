@@ -29,8 +29,8 @@ func (cc *CleanupChecker) CheckCleanup(ctx context.Context) (*hooks.Verification
 	var violations []hooks.Violation
 
 	// Check for temporary files
-	tempFiles, err := cc.detectTempFiles()
-	if err == nil && len(tempFiles) > 0 {
+	tempFiles := cc.detectTempFiles()
+	if len(tempFiles) > 0 {
 		violations = append(violations, hooks.Violation{
 			Severity:   "low",
 			Message:    fmt.Sprintf("Found %d temporary files", len(tempFiles)),
@@ -71,7 +71,7 @@ func (cc *CleanupChecker) CheckCleanup(ctx context.Context) (*hooks.Verification
 }
 
 // detectTempFiles finds temporary files in the project
-func (cc *CleanupChecker) detectTempFiles() ([]string, error) {
+func (cc *CleanupChecker) detectTempFiles() []string {
 	var tempFiles []string
 
 	tempPatterns := []string{
@@ -98,7 +98,7 @@ func (cc *CleanupChecker) detectTempFiles() ([]string, error) {
 		}
 	}
 
-	return tempFiles, nil
+	return tempFiles
 }
 
 // detectMergedBranches finds branches that have been merged

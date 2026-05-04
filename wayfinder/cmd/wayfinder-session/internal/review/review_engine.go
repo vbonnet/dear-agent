@@ -119,6 +119,7 @@ type ReviewIssue struct {
 // IssueSeverity defines the severity levels for review issues
 type IssueSeverity string
 
+// Issue severity levels.
 const (
 	SeverityP0 IssueSeverity = "P0" // Critical - MUST fix before deploy
 	SeverityP1 IssueSeverity = "P1" // High - MUST fix before deploy
@@ -129,6 +130,7 @@ const (
 // ReviewType defines whether review is per-task or batch
 type ReviewType string
 
+// ReviewType values.
 const (
 	ReviewTypePerTask ReviewType = "per_task"
 	ReviewTypeBatch   ReviewType = "batch"
@@ -289,7 +291,7 @@ func (e *ReviewEngine) ReviewBatch(tasks []*status.Task) (*ReviewResult, error) 
 }
 
 // selectPersonasForTask determines which personas should review based on risk
-func (e *ReviewEngine) selectPersonasForTask(task *status.Task, riskLevel RiskLevel) []PersonaType {
+func (e *ReviewEngine) selectPersonasForTask(_ *status.Task, riskLevel RiskLevel) []PersonaType {
 	// Base personas for all reviews
 	personas := []PersonaType{
 		PersonaSecurity,
@@ -355,7 +357,7 @@ func (e *ReviewEngine) tryExternalReviewTool(persona PersonaType, files []string
 }
 
 // runGolangciLint executes golangci-lint for maintainability checks
-func (e *ReviewEngine) runGolangciLint(files []string) (PersonaResult, error) {
+func (e *ReviewEngine) runGolangciLint(_ []string) (PersonaResult, error) {
 	cmd := exec.Command("golangci-lint", "run", "./...")
 	cmd.Dir = e.projectDir
 
@@ -443,6 +445,7 @@ func (e *ReviewEngine) checkFile(filePath string, persona PersonaType, config Pe
 }
 
 // calculateMetrics aggregates metrics from all issues
+//nolint:gocyclo // reason: linear metric aggregator over many metric types
 func (e *ReviewEngine) calculateMetrics(issues []ReviewIssue) ReviewMetrics {
 	metrics := ReviewMetrics{}
 

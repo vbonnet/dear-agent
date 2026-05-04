@@ -94,13 +94,14 @@ func discoverFiles(t *testing.T, root string, pattern string, maxFiles int) []st
 
 		// Match pattern
 		matched := false
-		if strings.HasSuffix(pattern, "*.ai.md") && strings.HasSuffix(path, ".ai.md") {
+		switch {
+		case strings.HasSuffix(pattern, "*.ai.md") && strings.HasSuffix(path, ".ai.md"):
 			matched = true
-		} else if strings.HasSuffix(pattern, "*.yaml") && strings.HasSuffix(path, ".yaml") {
+		case strings.HasSuffix(pattern, "*.yaml") && strings.HasSuffix(path, ".yaml"):
 			matched = true
-		} else if strings.HasSuffix(pattern, "*.yml") && strings.HasSuffix(path, ".yml") {
+		case strings.HasSuffix(pattern, "*.yml") && strings.HasSuffix(path, ".yml"):
 			matched = true
-		} else if strings.Contains(pattern, "retrospective") && strings.Contains(path, "retrospective") && strings.HasSuffix(path, ".md") {
+		case strings.Contains(pattern, "retrospective") && strings.Contains(path, "retrospective") && strings.HasSuffix(path, ".md"):
 			matched = true
 		}
 

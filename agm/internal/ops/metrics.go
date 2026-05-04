@@ -364,7 +364,7 @@ func statfsDisk(mount string) DiskMetrics {
 // NOTE: PERMISSION_PROMPT alert was removed — State field produced false
 // positives that caused hours of deadlock. Will be reimplemented with
 // capture-pane-based ground truth.
-func generateAlerts(res ResourceMetrics, tp ThroughputMetrics, sessions []SessionSummary, now time.Time) []Alert {
+func generateAlerts(res ResourceMetrics, tp ThroughputMetrics, _ []SessionSummary, _ time.Time) []Alert {
 	slo := contracts.Load()
 	oa := slo.OpsAlerts
 

@@ -356,13 +356,14 @@ func parseTime(s string) *int64 {
 
 	// Determine unit
 	var ms int64
-	if strings.Contains(s, "h") {
+	switch {
+	case strings.Contains(s, "h"):
 		ms = int64(num * 3600000) // hours to ms
-	} else if strings.Contains(s, "min") || strings.Contains(s, "m") {
+	case strings.Contains(s, "min") || strings.Contains(s, "m"):
 		ms = int64(num * 60000) // minutes to ms
-	} else if strings.Contains(s, "s") {
+	case strings.Contains(s, "s"):
 		ms = int64(num * 1000) // seconds to ms
-	} else {
+	default:
 		ms = int64(num * 60000) // default to minutes
 	}
 

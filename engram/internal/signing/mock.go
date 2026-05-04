@@ -91,7 +91,7 @@ func (s *MockSigner) SignPlugin(pluginDir string) (*Signature, error) {
 		}
 
 		// Compute SHA-256 hash
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //nolint:gosec // G122: trusted local paths, symlink TOCTOU not in threat model
 		if err != nil {
 			return err
 		}

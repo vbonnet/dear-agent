@@ -18,6 +18,7 @@ type SessionID string
 // State represents the current state of an agent session.
 type State string
 
+// Session state values reported by managers.
 const (
 	StateCreating         State = "CREATING"
 	StateIdle             State = "IDLE"

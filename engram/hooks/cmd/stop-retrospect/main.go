@@ -188,7 +188,7 @@ func extractText(raw json.RawMessage) string {
 	return ""
 }
 
-func findConversationFile(cwd, sessionID string) string {
+func findConversationFile(_, sessionID string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""

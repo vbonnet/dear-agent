@@ -57,6 +57,7 @@ type ProjectStatus struct {
 // EventType defines critical events
 type EventType string
 
+// Recognized monitor EventType values.
 const (
 	EventProjectStarted   EventType = "project.started"
 	EventProjectFailed    EventType = "project.failed"

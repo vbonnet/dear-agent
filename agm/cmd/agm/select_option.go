@@ -129,43 +129,8 @@ func runSelectOption(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("no option prompt detected in session '%s' — capture-pane shows no permission prompt or numbered options; refusing to send keys blindly", sessionName)
 	}
 
-	// Strategy: Navigate using arrow keys, then submit
-	// Option 1 is the default (already selected), so:
-	//   - Option 1: 0 presses
-	//   - Option 2: 1 press
-	//   - Option 3: 2 presses
-	//   - etc.
-
-	numPresses := int(optionNumber[0] - '1') // Convert '1' to 0, '2' to 1, etc.
-
-	// Send Down arrow key presses to navigate to the option
-	for i := 0; i < numPresses; i++ {
-		if err := tmux.SendKeys(sessionName, "Down"); err != nil {
-			return fmt.Errorf("failed to send Down key (press %d/%d): %w", i+1, numPresses, err)
-		}
-		time.Sleep(100 * time.Millisecond) // Small delay between key presses
-	}
-
-	// If --prompt provided, use Tab to access custom input field
-	if selectOptionPrompt != "" {
-		// Send Tab key to switch to custom input field
-		if err := tmux.SendKeys(sessionName, "Tab"); err != nil {
-			return fmt.Errorf("failed to send Tab key: %w", err)
-		}
-		time.Sleep(100 * time.Millisecond)
-
-		// Send the custom text using literal mode (prevents special char interpretation)
-		// Bug fix (2026-03-14): Use shouldInterrupt=true for UI interaction (needs to clear state)
-		if err := tmux.SendPromptLiteral(sessionName, selectOptionPrompt, true); err != nil {
-			return fmt.Errorf("failed to send custom prompt: %w", err)
-		}
-
-		// Note: SendPromptLiteral already sends Enter at the end
-	} else {
-		// No custom prompt - just submit the selection with Enter
-		if err := tmux.SendKeys(sessionName, "Enter"); err != nil {
-			return fmt.Errorf("failed to send Enter key: %w", err)
-		}
+	if err := navigateAndSubmitOption(sessionName, optionNumber); err != nil {
+		return err
 	}
 
 	// Print success message
@@ -175,6 +140,34 @@ func runSelectOption(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	ui.PrintSuccess(successMsg)
 
+	return nil
+}
+
+// navigateAndSubmitOption sends the necessary Down-arrow presses to land on
+// the requested option (1 = no presses, 2 = one Down, etc.), then either
+// submits with Enter or — if --prompt is set — Tab into the custom input
+// field, types the prompt, and submits it.
+func navigateAndSubmitOption(sessionName, optionNumber string) error {
+	numPresses := int(optionNumber[0] - '1')
+	for i := 0; i < numPresses; i++ {
+		if err := tmux.SendKeys(sessionName, "Down"); err != nil {
+			return fmt.Errorf("failed to send Down key (press %d/%d): %w", i+1, numPresses, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if selectOptionPrompt == "" {
+		if err := tmux.SendKeys(sessionName, "Enter"); err != nil {
+			return fmt.Errorf("failed to send Enter key: %w", err)
+		}
+		return nil
+	}
+	if err := tmux.SendKeys(sessionName, "Tab"); err != nil {
+		return fmt.Errorf("failed to send Tab key: %w", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if err := tmux.SendPromptLiteral(sessionName, selectOptionPrompt, true); err != nil {
+		return fmt.Errorf("failed to send custom prompt: %w", err)
+	}
 	return nil
 }
 

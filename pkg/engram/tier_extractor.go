@@ -11,6 +11,7 @@ import (
 // TierLevel represents tier hierarchy
 type TierLevel int
 
+// Tier levels, ordered from most condensed to most detailed.
 const (
 	Tier0 TierLevel = iota // Summary (50-150 tokens)
 	Tier1                  // Overview (150-500 tokens)

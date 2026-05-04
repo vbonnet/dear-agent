@@ -71,6 +71,7 @@ const (
 // This is orthogonal to display state and CanReceive (defined in state package).
 type Alive string
 
+// Session liveness values.
 const (
 	AliveYes      Alive = "YES"
 	AliveStopped  Alive = "STOPPED"

@@ -227,7 +227,7 @@ func validatePrefix(prefix string) error {
 
 	// Check characters (lowercase, alphanumeric, underscore only)
 	for _, c := range prefix {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
 			return fmt.Errorf("prefix must contain only lowercase letters, numbers, and underscores: %s", prefix)
 		}
 	}
@@ -278,7 +278,7 @@ AND status = 'installed'
 	return dependents, nil
 }
 
-// GetComponentsByPrefix returns the component that owns a given prefix.
+// GetComponentByPrefix returns the component that owns the given table prefix.
 func (a *WorkspaceAdapter) GetComponentByPrefix(ctx context.Context, prefix string) (*ComponentInfo, error) {
 	if a.db == nil {
 		return nil, fmt.Errorf("not connected to database")

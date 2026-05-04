@@ -40,7 +40,7 @@ func init() {
 }
 
 type conversationLine struct {
-	ParentUuid string `json:"parentUuid"`
+	ParentUUID string `json:"parentUuid"`
 	Type       string `json:"type"`
 }
 
@@ -85,61 +85,7 @@ func runLinkFromConversation(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Track relationships to set up
-	type relationship struct {
-		ChildUUID  string
-		ChildName  string
-		ChildID    string
-		ParentUUID string
-		ParentName string
-		ParentID   string
-	}
-
-	var relationships []relationship
-
-	// Scan each session's conversation file
-	for _, session := range allSessions {
-		if session.Claude.UUID == "" {
-			continue
-		}
-
-		// Skip if already has parent
-		if session.ParentSessionID != nil && *session.ParentSessionID != "" {
-			continue
-		}
-
-		// Read conversation file
-		conversationFile := filepath.Join(sessionsDir, session.Claude.UUID+".jsonl")
-		if _, err := os.Stat(conversationFile); os.IsNotExist(err) {
-			continue
-		}
-
-		// Look for parentUuid in first 20 lines
-		parentUUID, err := extractParentUUID(conversationFile)
-		if err != nil {
-			continue // Skip on error
-		}
-
-		if parentUUID == "" {
-			continue // No parentUuid found
-		}
-
-		// Look up parent session
-		parentSession, exists := sessionsByUUID[parentUUID]
-		if !exists {
-			// Parent not in AGM database - skip
-			continue
-		}
-
-		relationships = append(relationships, relationship{
-			ChildUUID:  session.Claude.UUID,
-			ChildName:  session.Name,
-			ChildID:    session.SessionID,
-			ParentUUID: parentUUID,
-			ParentName: parentSession.Name,
-			ParentID:   parentSession.SessionID,
-		})
-	}
+	relationships := buildLinkRelationships(allSessions, sessionsByUUID, sessionsDir)
 
 	if len(relationships) == 0 {
 		fmt.Println("✓ No orphaned execution sessions found")
@@ -176,6 +122,51 @@ func runLinkFromConversation(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// linkRelationship records a discovered child→parent link awaiting application.
+type linkRelationship struct {
+	ChildUUID  string
+	ChildName  string
+	ChildID    string
+	ParentUUID string
+	ParentName string
+	ParentID   string
+}
+
+// buildLinkRelationships scans each candidate session's conversation file for
+// a parentUuid and pairs it with the matching session in sessionsByUUID.
+func buildLinkRelationships(allSessions []*manifest.Manifest, sessionsByUUID map[string]*manifest.Manifest, sessionsDir string) []linkRelationship {
+	var rels []linkRelationship
+	for _, session := range allSessions {
+		if session.Claude.UUID == "" {
+			continue
+		}
+		if session.ParentSessionID != nil && *session.ParentSessionID != "" {
+			continue
+		}
+		conversationFile := filepath.Join(sessionsDir, session.Claude.UUID+".jsonl")
+		if _, err := os.Stat(conversationFile); os.IsNotExist(err) {
+			continue
+		}
+		parentUUID, err := extractParentUUID(conversationFile)
+		if err != nil || parentUUID == "" {
+			continue
+		}
+		parentSession, exists := sessionsByUUID[parentUUID]
+		if !exists {
+			continue
+		}
+		rels = append(rels, linkRelationship{
+			ChildUUID:  session.Claude.UUID,
+			ChildName:  session.Name,
+			ChildID:    session.SessionID,
+			ParentUUID: parentUUID,
+			ParentName: parentSession.Name,
+			ParentID:   parentSession.SessionID,
+		})
+	}
+	return rels
+}
+
 func extractParentUUID(conversationFile string) (string, error) {
 	f, err := os.Open(conversationFile)
 	if err != nil {
@@ -194,8 +185,8 @@ func extractParentUUID(conversationFile string) (string, error) {
 			continue
 		}
 
-		if line.ParentUuid != "" {
-			return line.ParentUuid, nil
+		if line.ParentUUID != "" {
+			return line.ParentUUID, nil
 		}
 	}
 

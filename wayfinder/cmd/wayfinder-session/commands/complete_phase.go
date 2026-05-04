@@ -21,6 +21,7 @@ var (
 	hashMismatchReason string
 )
 
+// CompletePhaseCmd is the cobra command that marks a phase as completed.
 var CompletePhaseCmd = &cobra.Command{
 	Use:   "complete-phase <phase-name>",
 	Short: "Mark a phase as completed",

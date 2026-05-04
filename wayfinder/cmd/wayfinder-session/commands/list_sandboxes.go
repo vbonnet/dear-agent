@@ -8,6 +8,7 @@ import (
 	"github.com/vbonnet/dear-agent/wayfinder/pkg/sandbox"
 )
 
+// ListSandboxesCmd is the cobra command that lists all sandboxes.
 var ListSandboxesCmd = &cobra.Command{
 	Use:   "list-sandboxes",
 	Short: "List all sandboxes",

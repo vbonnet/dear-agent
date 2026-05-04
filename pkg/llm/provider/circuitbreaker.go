@@ -10,10 +10,11 @@ import (
 // CBState represents circuit breaker state.
 type CBState int
 
+// Circuit breaker state values.
 const (
 	CBClosed   CBState = iota // Normal — requests flow through
 	CBOpen                    // Tripped — requests rejected
-	CBHalfOpen               // Probing — one request allowed
+	CBHalfOpen                // Probing — one request allowed
 )
 
 func (s CBState) String() string {
@@ -66,10 +67,12 @@ func NewCircuitBreaker(primary Provider, cfg CircuitBreakerConfig) *CircuitBreak
 	}
 }
 
+// Name returns the underlying primary provider's name.
 func (cb *CircuitBreaker) Name() string {
 	return cb.primary.Name()
 }
 
+// Capabilities returns the underlying primary provider's capabilities.
 func (cb *CircuitBreaker) Capabilities() Capabilities {
 	return cb.primary.Capabilities()
 }

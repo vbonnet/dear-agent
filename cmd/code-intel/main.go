@@ -66,6 +66,7 @@ func detectLanguages(dir string) error {
 	return nil
 }
 
+//nolint:gocyclo // reason: linear CLI driver dispatching to many independent check helpers
 func runCheck(args []string) error {
 	dir := "."
 	format := "text"

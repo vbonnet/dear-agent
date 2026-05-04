@@ -119,16 +119,17 @@ func runMemoryStore(cmd *cobra.Command, args []string) error {
 
 	// Get content from --content or --content-stdin
 	var content string
-	if storeContentStdin {
+	switch {
+	case storeContentStdin:
 		// Read from stdin
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return fmt.Errorf("failed to read from stdin: %w", err)
 		}
 		content = string(data)
-	} else if storeContent != "" {
+	case storeContent != "":
 		content = storeContent
-	} else {
+	default:
 		return fmt.Errorf("either --content or --content-stdin is required")
 	}
 

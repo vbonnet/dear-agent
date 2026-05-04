@@ -7,6 +7,7 @@ import (
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
 
+// NextPhaseCmd is the cobra command that prints the next phase in the V2 sequence.
 var NextPhaseCmd = &cobra.Command{
 	Use:   "next-phase",
 	Short: "Get the next phase in the V2 sequence",

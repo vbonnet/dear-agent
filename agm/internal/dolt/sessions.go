@@ -12,6 +12,44 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
+// defaultIfEmpty returns dflt when s is empty, otherwise s.
+func defaultIfEmpty(s, dflt string) string {
+	if s == "" {
+		return dflt
+	}
+	return s
+}
+
+// marshalCreateSessionJSON serializes the JSON-typed fields needed by the
+// agm_sessions INSERT (context tags, engram metadata, monitors).
+func marshalCreateSessionJSON(session *manifest.Manifest) ([]byte, []byte, interface{}, error) {
+	contextTags, err := json.Marshal(session.Context.Tags)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to marshal context tags: %w", err)
+	}
+	metadata := make(map[string]any)
+	if session.EngramMetadata != nil {
+		metadata["engram_enabled"] = session.EngramMetadata.Enabled
+		metadata["engram_query"] = session.EngramMetadata.Query
+		metadata["engram_ids"] = session.EngramMetadata.EngramIDs
+		metadata["engram_loaded_at"] = session.EngramMetadata.LoadedAt
+		metadata["engram_count"] = session.EngramMetadata.Count
+	}
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+	var monitorsJSON interface{}
+	if len(session.Monitors) > 0 {
+		monitorsData, err := json.Marshal(session.Monitors)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to marshal monitors: %w", err)
+		}
+		monitorsJSON = string(monitorsData)
+	}
+	return contextTags, metadataJSON, monitorsJSON, nil
+}
+
 // CreateSession inserts a new session into the database
 func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 	if session == nil {
@@ -26,57 +64,17 @@ func (a *Adapter) CreateSession(session *manifest.Manifest) error {
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
-	// Marshal context tags to JSON
-	contextTags, err := json.Marshal(session.Context.Tags)
+	contextTags, metadataJSON, monitorsJSON, err := marshalCreateSessionJSON(session)
 	if err != nil {
-		return fmt.Errorf("failed to marshal context tags: %w", err)
+		return err
 	}
-
-	// Build metadata JSON from EngramMetadata
-	metadata := make(map[string]any)
-	if session.EngramMetadata != nil {
-		metadata["engram_enabled"] = session.EngramMetadata.Enabled
-		metadata["engram_query"] = session.EngramMetadata.Query
-		metadata["engram_ids"] = session.EngramMetadata.EngramIDs
-		metadata["engram_loaded_at"] = session.EngramMetadata.LoadedAt
-		metadata["engram_count"] = session.EngramMetadata.Count
-	}
-	metadataJSON, err := json.Marshal(metadata)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-
-	// Determine harness (default to claude-code for backward compatibility)
-	harness := session.Harness
-	if harness == "" {
-		harness = "claude-code"
-	}
-
-	// Determine status from lifecycle
+	harness := defaultIfEmpty(session.Harness, "claude-code")
 	status := "active"
 	if session.Lifecycle == manifest.LifecycleArchived {
 		status = "archived"
 	}
-
-	// Initialize permission mode fields for new sessions
-	permissionMode := session.PermissionMode
-	if permissionMode == "" {
-		permissionMode = "default"
-	}
-	permissionModeSource := session.PermissionModeSource
-	if permissionModeSource == "" {
-		permissionModeSource = "init"
-	}
-
-	// Marshal monitors to JSON
-	var monitorsJSON interface{}
-	if len(session.Monitors) > 0 {
-		monitorsData, err := json.Marshal(session.Monitors)
-		if err != nil {
-			return fmt.Errorf("failed to marshal monitors: %w", err)
-		}
-		monitorsJSON = string(monitorsData)
-	}
+	permissionMode := defaultIfEmpty(session.PermissionMode, "default")
+	permissionModeSource := defaultIfEmpty(session.PermissionModeSource, "init")
 
 	query := `
 		INSERT INTO agm_sessions (
@@ -347,6 +345,51 @@ func (a *Adapter) ListActiveSessions(ctx context.Context) ([]string, error) {
 	return names, rows.Err()
 }
 
+// applyListSessionsFilter appends the WHERE clauses for the optional filter
+// (lifecycle/test/harness/tags) and returns the updated query+args.
+func applyListSessionsFilter(query string, args []any, filter *SessionFilter) (string, []any) {
+	if filter == nil {
+		return query, args
+	}
+	if filter.ExcludeArchived {
+		query += " AND status != 'archived'"
+	} else if filter.Lifecycle != "" {
+		if filter.Lifecycle == manifest.LifecycleArchived {
+			query += " AND status = 'archived'"
+		} else {
+			query += " AND status = 'active'"
+		}
+	}
+	if filter.ExcludeTest {
+		query += " AND (is_test = FALSE OR is_test IS NULL)"
+	}
+	if filter.Harness != "" {
+		query += " AND harness = ?"
+		args = append(args, filter.Harness)
+	}
+	for _, tag := range filter.Tags {
+		query += " AND JSON_CONTAINS(context_tags, ?)"
+		args = append(args, fmt.Sprintf("%q", tag))
+	}
+	return query, args
+}
+
+// applyListSessionsLimit appends LIMIT/OFFSET clauses from filter.
+func applyListSessionsLimit(query string, args []any, filter *SessionFilter) (string, []any) {
+	if filter == nil {
+		return query, args
+	}
+	if filter.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, filter.Limit)
+	}
+	if filter.Offset > 0 {
+		query += " OFFSET ?"
+		args = append(args, filter.Offset)
+	}
+	return query, args
+}
+
 // ListSessions returns a list of sessions matching the filter criteria
 func (a *Adapter) ListSessions(filter *SessionFilter) ([]*manifest.Manifest, error) {
 	// Ensure migrations are applied
@@ -368,50 +411,9 @@ func (a *Adapter) ListSessions(filter *SessionFilter) ([]*manifest.Manifest, err
 
 	args := []any{a.workspace}
 
-	// Apply filters
-	if filter != nil {
-		// ExcludeArchived takes precedence over Lifecycle filter
-		if filter.ExcludeArchived {
-			query += " AND status != 'archived'"
-		} else if filter.Lifecycle != "" {
-			if filter.Lifecycle == manifest.LifecycleArchived {
-				query += " AND status = 'archived'"
-			} else {
-				query += " AND status = 'active'"
-			}
-		}
-
-		if filter.ExcludeTest {
-			query += " AND (is_test = FALSE OR is_test IS NULL)"
-		}
-
-		if filter.Harness != "" {
-			query += " AND harness = ?"
-			args = append(args, filter.Harness)
-		}
-
-		// Tag filtering: each tag must exist in the context_tags JSON array
-		for _, tag := range filter.Tags {
-			query += " AND JSON_CONTAINS(context_tags, ?)"
-			args = append(args, fmt.Sprintf("%q", tag))
-		}
-	}
-
-	// Order by updated_at descending
+	query, args = applyListSessionsFilter(query, args, filter)
 	query += " ORDER BY updated_at DESC"
-
-	// Apply limit and offset
-	if filter != nil {
-		if filter.Limit > 0 {
-			query += " LIMIT ?"
-			args = append(args, filter.Limit)
-		}
-
-		if filter.Offset > 0 {
-			query += " OFFSET ?"
-			args = append(args, filter.Offset)
-		}
-	}
+	query, args = applyListSessionsLimit(query, args, filter)
 
 	rows, err := a.conn.Query(query, args...) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
@@ -583,7 +585,22 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 	// Note: parent_session_id temporarily removed from SELECT due to schema migration issues
 	// Will be re-added once migration 007 is reliably applied across all environments
 
-	// Set permission mode fields (nullable, for backward compatibility)
+	applyNullableScanFields(&session, permissionMode, permissionModeUpdatedAt, permissionModeSource, isTest, ctxTotalTokens, ctxUsedTokens, ctxPercentageUsed)
+	if err := unmarshalContextTags(&session, contextTagsJSON); err != nil {
+		return nil, err
+	}
+	if err := unmarshalMonitors(&session, monitorsJSON); err != nil {
+		return nil, err
+	}
+	if err := unmarshalEngramMetadata(&session, metadataJSON); err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
+// applyNullableScanFields copies the nullable sql.Null* values from a Scan call
+// into the corresponding manifest fields when valid.
+func applyNullableScanFields(session *manifest.Manifest, permissionMode sql.NullString, permissionModeUpdatedAt sql.NullTime, permissionModeSource sql.NullString, isTest sql.NullBool, ctxTotalTokens, ctxUsedTokens sql.NullInt64, ctxPercentageUsed sql.NullFloat64) {
 	if permissionMode.Valid {
 		session.PermissionMode = permissionMode.String
 	}
@@ -596,8 +613,6 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 	if isTest.Valid {
 		session.IsTest = isTest.Bool
 	}
-
-	// Reconstruct ContextUsage if any column is set
 	if ctxTotalTokens.Valid || ctxUsedTokens.Valid || ctxPercentageUsed.Valid {
 		session.ContextUsage = &manifest.ContextUsage{}
 		if ctxTotalTokens.Valid {
@@ -610,60 +625,61 @@ func (a *Adapter) scanSession(row scanner) (*manifest.Manifest, error) {
 			session.ContextUsage.PercentageUsed = ctxPercentageUsed.Float64
 		}
 	}
+}
 
-	// Unmarshal context tags
-	if len(contextTagsJSON) > 0 {
-		if err := json.Unmarshal(contextTagsJSON, &session.Context.Tags); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal context tags: %w", err)
-		}
+func unmarshalContextTags(session *manifest.Manifest, contextTagsJSON []byte) error {
+	if len(contextTagsJSON) == 0 {
+		return nil
 	}
-
-	// Unmarshal monitors
-	if monitorsJSON.Valid && monitorsJSON.String != "" {
-		if err := json.Unmarshal([]byte(monitorsJSON.String), &session.Monitors); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal monitors: %w", err)
-		}
+	if err := json.Unmarshal(contextTagsJSON, &session.Context.Tags); err != nil {
+		return fmt.Errorf("failed to unmarshal context tags: %w", err)
 	}
+	return nil
+}
 
-	// Unmarshal metadata and reconstruct EngramMetadata
-	if len(metadataJSON) > 0 {
-		var metadata map[string]any
-		if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-		}
+func unmarshalMonitors(session *manifest.Manifest, monitorsJSON sql.NullString) error {
+	if !monitorsJSON.Valid || monitorsJSON.String == "" {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(monitorsJSON.String), &session.Monitors); err != nil {
+		return fmt.Errorf("failed to unmarshal monitors: %w", err)
+	}
+	return nil
+}
 
-		// Reconstruct EngramMetadata if present
-		if enabled, ok := metadata["engram_enabled"].(bool); ok && enabled {
-			session.EngramMetadata = &manifest.EngramMetadata{
-				Enabled: enabled,
-			}
-
-			if query, ok := metadata["engram_query"].(string); ok {
-				session.EngramMetadata.Query = query
-			}
-
-			if count, ok := metadata["engram_count"].(float64); ok {
-				session.EngramMetadata.Count = int(count)
-			}
-
-			if ids, ok := metadata["engram_ids"].([]any); ok {
-				session.EngramMetadata.EngramIDs = make([]string, len(ids))
-				for i, id := range ids {
-					if idStr, ok := id.(string); ok {
-						session.EngramMetadata.EngramIDs[i] = idStr
-					}
-				}
-			}
-
-			if loadedAtStr, ok := metadata["engram_loaded_at"].(string); ok {
-				if loadedAt, err := time.Parse(time.RFC3339, loadedAtStr); err == nil {
-					session.EngramMetadata.LoadedAt = loadedAt
-				}
+func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) error {
+	if len(metadataJSON) == 0 {
+		return nil
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
+		return fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+	enabled, ok := metadata["engram_enabled"].(bool)
+	if !ok || !enabled {
+		return nil
+	}
+	session.EngramMetadata = &manifest.EngramMetadata{Enabled: enabled}
+	if query, ok := metadata["engram_query"].(string); ok {
+		session.EngramMetadata.Query = query
+	}
+	if count, ok := metadata["engram_count"].(float64); ok {
+		session.EngramMetadata.Count = int(count)
+	}
+	if ids, ok := metadata["engram_ids"].([]any); ok {
+		session.EngramMetadata.EngramIDs = make([]string, len(ids))
+		for i, id := range ids {
+			if idStr, ok := id.(string); ok {
+				session.EngramMetadata.EngramIDs[i] = idStr
 			}
 		}
 	}
-
-	return &session, nil
+	if loadedAtStr, ok := metadata["engram_loaded_at"].(string); ok {
+		if loadedAt, err := time.Parse(time.RFC3339, loadedAtStr); err == nil {
+			session.EngramMetadata.LoadedAt = loadedAt
+		}
+	}
+	return nil
 }
 
 // --- manifest.Store implementation (delegates to legacy methods) ---

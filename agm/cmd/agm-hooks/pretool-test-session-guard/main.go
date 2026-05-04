@@ -24,9 +24,9 @@ func NewTestSessionGuard() *TestSessionGuard {
 }
 
 // log writes debug messages to stderr if debug is enabled
-func (g *TestSessionGuard) log(level, message string) {
+func (g *TestSessionGuard) log(message string) {
 	if g.debug {
-		fmt.Fprintf(os.Stderr, "[TestSessionGuard] %s: %s\n", level, message)
+		fmt.Fprintf(os.Stderr, "[TestSessionGuard] INFO: %s\n", message)
 	}
 }
 
@@ -46,7 +46,7 @@ func (g *TestSessionGuard) extractSessionName(command string) string {
 
 	if len(match) > 1 {
 		sessionName := match[1]
-		g.log("INFO", fmt.Sprintf("Extracted session name: %s", sessionName))
+		g.log(fmt.Sprintf("Extracted session name: %s", sessionName))
 		return sessionName
 	}
 
@@ -101,41 +101,41 @@ For more info: agm session new --help
 //   - 0: allow execution (no violation or override present)
 //   - 1: block execution (test-* pattern without --test flag)
 func (g *TestSessionGuard) Run() int {
-	g.log("INFO", fmt.Sprintf("Hook started for tool: %s", g.toolName))
+	g.log(fmt.Sprintf("Hook started for tool: %s", g.toolName))
 
 	// Only check Bash tool invocations
 	if g.toolName != "Bash" {
-		g.log("INFO", fmt.Sprintf("Skipping non-Bash tool: %s", g.toolName))
+		g.log(fmt.Sprintf("Skipping non-Bash tool: %s", g.toolName))
 		return 0
 	}
 
 	// Extract session name from command
 	sessionName := g.extractSessionName(g.toolInput)
 	if sessionName == "" {
-		g.log("INFO", "Not a session creation command")
+		g.log("Not a session creation command")
 		return 0
 	}
 
 	// Check if it matches test-* pattern
 	if !g.isTestPattern(sessionName) {
-		g.log("INFO", fmt.Sprintf("Session name '%s' doesn't match test-* pattern", sessionName))
+		g.log(fmt.Sprintf("Session name '%s' doesn't match test-* pattern", sessionName))
 		return 0
 	}
 
 	// Check for --test flag (allowed)
 	if g.hasTestFlag(g.toolInput) {
-		g.log("INFO", "--test flag present, allowing")
+		g.log("--test flag present, allowing")
 		return 0
 	}
 
 	// Check for --allow-test-name override (allowed)
 	if g.hasOverrideFlag(g.toolInput) {
-		g.log("INFO", "--allow-test-name flag present, allowing")
+		g.log("--allow-test-name flag present, allowing")
 		return 0
 	}
 
 	// BLOCK: test-* pattern without --test or --allow-test-name
-	g.log("INFO", fmt.Sprintf("BLOCKING: test-* pattern '%s' without --test flag", sessionName))
+	g.log(fmt.Sprintf("BLOCKING: test-* pattern '%s' without --test flag", sessionName))
 
 	// Print error message to stderr (will be shown to user)
 	fmt.Fprintln(os.Stderr, g.generateErrorMessage(sessionName))

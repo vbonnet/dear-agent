@@ -46,7 +46,7 @@ func EnsureRepo(dir, remoteName, remoteURL, branch string) (*Repo, error) {
 	}
 
 	// Initialize git repo
-	if err := r.run("git", "init"); err != nil {
+	if err := r.run("init"); err != nil {
 		return nil, fmt.Errorf("git init: %w", err)
 	}
 
@@ -55,7 +55,7 @@ func EnsureRepo(dir, remoteName, remoteURL, branch string) (*Repo, error) {
 		branch = "main"
 	}
 	// Rename default branch to configured name
-	if err := r.run("git", "branch", "-M", branch); err != nil {
+	if err := r.run("branch", "-M", branch); err != nil {
 		// Non-fatal: branch rename may fail if no commits yet
 		_ = err
 	}
@@ -68,10 +68,10 @@ func EnsureRepo(dir, remoteName, remoteURL, branch string) (*Repo, error) {
 	}
 
 	// Stage and create initial commit
-	if err := r.run("git", "add", ".gitignore"); err != nil {
+	if err := r.run("add", ".gitignore"); err != nil {
 		return nil, fmt.Errorf("stage .gitignore: %w", err)
 	}
-	if err := r.run("git", "commit", "-m", "vcs: initialize memory repository"); err != nil {
+	if err := r.run("commit", "-m", "vcs: initialize memory repository"); err != nil {
 		return nil, fmt.Errorf("initial commit: %w", err)
 	}
 
@@ -80,7 +80,7 @@ func EnsureRepo(dir, remoteName, remoteURL, branch string) (*Repo, error) {
 		if remoteName == "" {
 			remoteName = "origin"
 		}
-		if err := r.run("git", "remote", "add", remoteName, remoteURL); err != nil {
+		if err := r.run("remote", "add", remoteName, remoteURL); err != nil {
 			return nil, fmt.Errorf("add remote: %w", err)
 		}
 	}
@@ -94,7 +94,7 @@ func (r *Repo) StageFiles(paths ...string) error {
 		return nil
 	}
 	args := append([]string{"add", "--"}, paths...)
-	return r.run("git", args...)
+	return r.run(args...)
 }
 
 // StageDeleted stages deleted files
@@ -103,7 +103,7 @@ func (r *Repo) StageDeleted(paths ...string) error {
 		return nil
 	}
 	args := append([]string{"rm", "--cached", "--"}, paths...)
-	return r.run("git", args...)
+	return r.run(args...)
 }
 
 // Commit creates a git commit with the given message.
@@ -188,7 +188,7 @@ func (r *Repo) Diff(path, fromRef, toRef string) (string, error) {
 
 // Restore reverts a file to a specific commit
 func (r *Repo) Restore(path, commitHash string) error {
-	if err := r.run("git", "checkout", commitHash, "--", path); err != nil {
+	if err := r.run("checkout", commitHash, "--", path); err != nil {
 		return fmt.Errorf("git checkout: %w", err)
 	}
 	return nil
@@ -213,16 +213,16 @@ func (r *Repo) Push(remoteName, branch string) error {
 	if branch == "" {
 		branch = "main"
 	}
-	return r.run("git", "push", remoteName, branch)
+	return r.run("push", remoteName, branch)
 }
 
-// run executes a command in the repo directory
-func (r *Repo) run(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+// run executes a git command in the repo directory
+func (r *Repo) run(args ...string) error {
+	cmd := exec.Command("git", args...)
 	cmd.Dir = r.dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%s %s: %w (output: %s)", name, strings.Join(args, " "), err, string(output))
+		return fmt.Errorf("git %s: %w (output: %s)", strings.Join(args, " "), err, string(output))
 	}
 	return nil
 }

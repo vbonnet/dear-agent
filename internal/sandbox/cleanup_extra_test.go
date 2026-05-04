@@ -137,7 +137,7 @@ func TestDetectOrphanedDirectories_SkipsFiles(t *testing.T) {
 }
 
 func TestRemoveWithRetry_NonexistentPath(t *testing.T) {
-	err := removeWithRetry("/nonexistent/path/that/does/not/exist", 3)
+	err := removeWithRetry("/nonexistent/path/that/does/not/exist")
 	assert.NoError(t, err) // should succeed because os.IsNotExist is OK
 }
 

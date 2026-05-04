@@ -83,11 +83,12 @@ func (a *Aggregator) calculateSummary(report *AggregatedReport) Summary {
 	summary.WarningHooks += len(report.Warnings)
 
 	// Determine exit code
-	if summary.FailedHooks > 0 {
+	switch {
+	case summary.FailedHooks > 0:
 		summary.ExitCode = 1 // Fail
-	} else if summary.WarningHooks > 0 {
+	case summary.WarningHooks > 0:
 		summary.ExitCode = 2 // Warnings
-	} else {
+	default:
 		summary.ExitCode = 0 // Pass
 	}
 
@@ -95,6 +96,7 @@ func (a *Aggregator) calculateSummary(report *AggregatedReport) Summary {
 }
 
 // FormatTerminal formats the report for terminal display with colors
+//nolint:gocyclo // reason: linear formatter assembling many subsections of terminal output
 func (a *Aggregator) FormatTerminal(report *AggregatedReport) string {
 	var buf bytes.Buffer
 
@@ -186,6 +188,7 @@ func (a *Aggregator) FormatTerminal(report *AggregatedReport) string {
 }
 
 // FormatMarkdown formats the report as markdown
+//nolint:gocyclo // reason: linear formatter assembling many subsections of markdown output
 func (a *Aggregator) FormatMarkdown(report *AggregatedReport) string {
 	var buf bytes.Buffer
 

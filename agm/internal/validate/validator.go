@@ -252,6 +252,7 @@ func RunValidation(manifests []*manifest.Manifest, opts *Options) (*Report, erro
 }
 
 // classifyResumeError analyzes tmux output and error to determine the specific issue type.
+//nolint:gocyclo // reason: linear classification — switch over many error patterns is the clearest representation
 func classifyResumeError(output string, err error) *Issue {
 	// Check for specific error patterns in tmux output
 	switch {

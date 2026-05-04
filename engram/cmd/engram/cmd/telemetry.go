@@ -367,10 +367,7 @@ func runTelemetryLoaded(cmd *cobra.Command, args []string) error {
 	events, errs := analysis.ParseJSONL(telemetryPath)
 
 	// Filter and extract loaded engrams
-	engrams, err := filterLoadedEngrams(events, errs)
-	if err != nil {
-		return err
-	}
+	engrams := filterLoadedEngrams(events, errs)
 
 	// Handle empty state
 	if len(engrams) == 0 {
@@ -383,7 +380,7 @@ func runTelemetryLoaded(cmd *cobra.Command, args []string) error {
 }
 
 // filterLoadedEngrams filters events for engram_loaded type within session window
-func filterLoadedEngrams(events <-chan *analysis.TelemetryEvent, errs <-chan error) ([]LoadedEngram, error) {
+func filterLoadedEngrams(events <-chan *analysis.TelemetryEvent, errs <-chan error) []LoadedEngram {
 	sessionCutoff := time.Now().Add(-30 * time.Minute)
 	var engrams []LoadedEngram
 
@@ -417,7 +414,7 @@ func filterLoadedEngrams(events <-chan *analysis.TelemetryEvent, errs <-chan err
 		}
 	}
 
-	return engrams, nil
+	return engrams
 }
 
 // extractEngramFields extracts required fields from telemetry event

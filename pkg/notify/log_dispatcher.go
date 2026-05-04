@@ -18,8 +18,10 @@ func NewLogDispatcher(logger *slog.Logger) *LogDispatcher {
 	return &LogDispatcher{logger: logger}
 }
 
+// Name returns the dispatcher name "log".
 func (d *LogDispatcher) Name() string { return "log" }
 
+// Dispatch logs the notification via the configured slog.Logger.
 func (d *LogDispatcher) Dispatch(_ context.Context, n *Notification) error {
 	d.logger.Log(context.Background(), n.Level,
 		"notification",
@@ -31,4 +33,5 @@ func (d *LogDispatcher) Dispatch(_ context.Context, n *Notification) error {
 	return nil
 }
 
+// Close is a no-op for LogDispatcher.
 func (d *LogDispatcher) Close() error { return nil }

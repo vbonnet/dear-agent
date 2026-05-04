@@ -8,6 +8,7 @@ import (
 // SessionType represents the type of agent session for threshold selection.
 type SessionType string
 
+// SessionType values for selecting compaction thresholds.
 const (
 	SessionOrchestrator     SessionType = "orchestrator"
 	SessionWorker           SessionType = "worker"
@@ -17,6 +18,7 @@ const (
 // Strategy controls compaction aggressiveness.
 type Strategy string
 
+// Strategy values controlling compaction aggressiveness.
 const (
 	StrategyConservative Strategy = "conservative"
 	StrategyAggressive   Strategy = "aggressive"

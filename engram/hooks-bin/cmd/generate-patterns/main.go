@@ -46,6 +46,7 @@ type Pattern struct {
 	ConsolidatedInto string   `yaml:"consolidated_into"`
 }
 
+//nolint:gocyclo // reason: linear CLI driver
 func main() {
 	yamlPath := flag.String("yaml", "../../patterns/bash-anti-patterns.yaml", "path to YAML patterns file")
 	outputPath := flag.String("output", "", "output file path (default: stdout)")

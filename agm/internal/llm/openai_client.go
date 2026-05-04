@@ -52,9 +52,7 @@ func NewOpenAIClient(config OpenAIConfig) (*OpenAIClient, error) {
 	}
 
 	// Load environment variables if config fields are empty
-	if err := loadEnvironmentConfig(&config); err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
+	loadEnvironmentConfig(&config)
 
 	// Validate configuration
 	if err := validateConfig(config); err != nil {
@@ -63,19 +61,14 @@ func NewOpenAIClient(config OpenAIConfig) (*OpenAIClient, error) {
 
 	// Create the underlying client based on provider
 	var client *openai.Client
-	var err error
 
 	switch config.Provider {
 	case ProviderOpenAI:
-		client, err = createOpenAIClient(config)
+		client = createOpenAIClient(config)
 	case ProviderAzure:
-		client, err = createAzureClient(config)
+		client = createAzureClient(config)
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", config.Provider)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create client: %w", err)
 	}
 
 	return &OpenAIClient{
@@ -97,7 +90,7 @@ func detectProvider() ProviderType {
 }
 
 // loadEnvironmentConfig loads configuration from environment variables
-func loadEnvironmentConfig(config *OpenAIConfig) error {
+func loadEnvironmentConfig(config *OpenAIConfig) {
 	switch config.Provider {
 	case ProviderOpenAI:
 		if config.APIKey == "" {
@@ -134,8 +127,6 @@ func loadEnvironmentConfig(config *OpenAIConfig) error {
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 1000
 	}
-
-	return nil
 }
 
 // validateConfig validates the configuration for the selected provider
@@ -166,13 +157,13 @@ func validateConfig(config OpenAIConfig) error {
 }
 
 // createOpenAIClient creates a standard OpenAI client
-func createOpenAIClient(config OpenAIConfig) (*openai.Client, error) {
+func createOpenAIClient(config OpenAIConfig) *openai.Client {
 	clientConfig := openai.DefaultConfig(config.APIKey)
-	return openai.NewClientWithConfig(clientConfig), nil
+	return openai.NewClientWithConfig(clientConfig)
 }
 
 // createAzureClient creates an Azure OpenAI client
-func createAzureClient(config OpenAIConfig) (*openai.Client, error) {
+func createAzureClient(config OpenAIConfig) *openai.Client {
 	// Azure OpenAI requires special configuration
 	azureConfig := openai.DefaultAzureConfig(config.APIKey, config.AzureEndpoint)
 
@@ -182,7 +173,7 @@ func createAzureClient(config OpenAIConfig) (*openai.Client, error) {
 	// Note: Azure uses deployment names instead of model names
 	// The deployment name will be set in the request, not here
 
-	return openai.NewClientWithConfig(azureConfig), nil
+	return openai.NewClientWithConfig(azureConfig)
 }
 
 // CreateChatCompletion creates a chat completion using the configured provider

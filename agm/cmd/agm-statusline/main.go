@@ -200,35 +200,25 @@ type providerResult struct {
 	output string
 }
 
-// runProviders discovers and executes provider scripts in parallel.
-func runProviders(cfg config, raw []byte, sd sessionData) []string {
-	dir := providersDir
-	if dir == "" {
-		dir = defaultProvidersDir()
-	}
+// providerEntry captures a discovered provider script.
+type providerEntry struct {
+	name string
+	path string
+}
 
+// discoverProviders enumerates executable provider scripts in dir, skipping
+// directories, non-executables, and entries listed in disabled.
+func discoverProviders(dir string, disabled map[string]bool) []providerEntry {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
-
-	disabled := make(map[string]bool, len(cfg.Disable))
-	for _, d := range cfg.Disable {
-		disabled[d] = true
-	}
-
-	// Filter to executable files with NN- prefix.
-	type provider struct {
-		name string
-		path string
-	}
-	var providers []provider
+	var providers []providerEntry
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
 		name := e.Name()
-		// Skip disabled providers (match by full name or name without prefix).
 		if disabled[name] || disabled[stripPrefix(name)] {
 			continue
 		}
@@ -236,28 +226,40 @@ func runProviders(cfg config, raw []byte, sd sessionData) []string {
 		if err != nil {
 			continue
 		}
-		// Must be executable.
 		if info.Mode()&0o111 == 0 {
 			continue
 		}
-		providers = append(providers, provider{name: name, path: filepath.Join(dir, name)})
+		providers = append(providers, providerEntry{name: name, path: filepath.Join(dir, name)})
 	}
-
-	if len(providers) == 0 {
-		return nil
-	}
-
-	// Sort by filename (NN- prefix gives ordering).
 	sort.Slice(providers, func(i, j int) bool {
 		return providers[i].name < providers[j].name
 	})
+	return providers
+}
+
+// runProviders discovers and executes provider scripts in parallel.
+func runProviders(cfg config, raw []byte, sd sessionData) []string {
+	dir := providersDir
+	if dir == "" {
+		dir = defaultProvidersDir()
+	}
+
+	disabled := make(map[string]bool, len(cfg.Disable))
+	for _, d := range cfg.Disable {
+		disabled[d] = true
+	}
+
+	providers := discoverProviders(dir, disabled)
+	if len(providers) == 0 {
+		return nil
+	}
 
 	// Run all providers in parallel.
 	results := make([]providerResult, len(providers))
 	done := make(chan int, len(providers))
 
 	for i, p := range providers {
-		go func(idx int, p provider) {
+		go func(idx int, p providerEntry) {
 			defer func() { done <- idx }()
 			ctx, cancel := context.WithTimeout(context.Background(), providerTimeout)
 			defer cancel()

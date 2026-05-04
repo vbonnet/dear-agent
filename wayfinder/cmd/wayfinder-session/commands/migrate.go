@@ -72,6 +72,7 @@ func init() {
 	MigrateCmd.Flags().BoolVar(&migrateVerbose, "verbose", false, "Show detailed migration report")
 }
 
+//nolint:gocyclo // reason: linear CLI driver dispatching migration steps
 func runMigrate(cmd *cobra.Command, args []string) error {
 	// Determine project path
 	projectPath := "."

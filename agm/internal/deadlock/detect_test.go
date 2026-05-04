@@ -210,10 +210,7 @@ func TestProcessInfo_DeadlockCriteria(t *testing.T) {
 
 func TestCountConnections_NoProcess(t *testing.T) {
 	// lsof for PID 0 (or non-existent) should return 0 gracefully
-	count, err := countConnections(0)
-	if err != nil {
-		t.Errorf("countConnections(0) should not error, got: %v", err)
-	}
+	count := countConnections(0)
 	if count != 0 {
 		t.Errorf("countConnections(0) = %d, want 0", count)
 	}

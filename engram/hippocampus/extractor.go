@@ -9,7 +9,7 @@ import (
 //
 // Phase 5 V1: Simple pattern matching for markdown decision markers.
 // Phase 5 V2+: Enhanced with LLM-based semantic extraction.
-func (h *Hippocampus) extractDecisions(history string) ([]Decision, error) {
+func (h *Hippocampus) extractDecisions(history string) []Decision {
 	decisions := []Decision{}
 
 	// Pattern: "## Decision: <title>" or "**Decision**: <title>"
@@ -28,11 +28,11 @@ func (h *Hippocampus) extractDecisions(history string) ([]Decision, error) {
 		}
 	}
 
-	return decisions, nil
+	return decisions
 }
 
 // extractOutcomes scans for concrete results achieved.
-func (h *Hippocampus) extractOutcomes(history string) ([]Outcome, error) {
+func (h *Hippocampus) extractOutcomes(history string) []Outcome {
 	outcomes := []Outcome{}
 
 	// Pattern: "Completed:", "Implemented:", "Created:", etc.
@@ -51,11 +51,11 @@ func (h *Hippocampus) extractOutcomes(history string) ([]Outcome, error) {
 		}
 	}
 
-	return outcomes, nil
+	return outcomes
 }
 
 // extractTechnicalLearnings scans for technical insights.
-func (h *Hippocampus) extractTechnicalLearnings(history string) ([]Learning, error) {
+func (h *Hippocampus) extractTechnicalLearnings(history string) []Learning {
 	learnings := []Learning{}
 
 	// Pattern: "Learned:", "Discovered:", "Found that", etc.
@@ -74,11 +74,11 @@ func (h *Hippocampus) extractTechnicalLearnings(history string) ([]Learning, err
 		}
 	}
 
-	return learnings, nil
+	return learnings
 }
 
 // extractProcessLearnings scans for process insights.
-func (h *Hippocampus) extractProcessLearnings(history string) ([]Learning, error) {
+func (h *Hippocampus) extractProcessLearnings(history string) []Learning {
 	learnings := []Learning{}
 
 	// Pattern: "Faster than estimated", "Should have", "Next time", etc.
@@ -96,11 +96,11 @@ func (h *Hippocampus) extractProcessLearnings(history string) ([]Learning, error
 		}
 	}
 
-	return learnings, nil
+	return learnings
 }
 
 // extractActivePlan scans for Wayfinder Plan state.
-func (h *Hippocampus) extractActivePlan(history string) (*Plan, error) {
+func (h *Hippocampus) extractActivePlan(history string) *Plan {
 	// Pattern: "Current Phase:", "Next Steps:", etc.
 	// Match without header marker requirement
 	phasePattern := regexp.MustCompile(`(?mi)Current Phase:?\s*(.+)$`)
@@ -111,15 +111,15 @@ func (h *Hippocampus) extractActivePlan(history string) (*Plan, error) {
 			Status:       "active",
 			CurrentPhase: strings.TrimSpace(matches[1]),
 			NextSteps:    []string{}, // Extracted in V2
-		}, nil
+		}
 	}
 
 	// No active plan found
-	return nil, nil
+	return nil
 }
 
 // extractEngrams scans for loaded engrams mentioned in history.
-func (h *Hippocampus) extractEngrams(history string) ([]string, error) {
+func (h *Hippocampus) extractEngrams(history string) []string {
 	engrams := []string{}
 
 	// Pattern: "*.ai.md" references
@@ -137,5 +137,5 @@ func (h *Hippocampus) extractEngrams(history string) ([]string, error) {
 		}
 	}
 
-	return engrams, nil
+	return engrams
 }

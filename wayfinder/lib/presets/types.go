@@ -58,19 +58,21 @@ type PresetOverrides struct {
 	EconomicTuning *EconomicTuningOverrides `yaml:"economic_tuning,omitempty"`
 }
 
-// Override structs (pointer fields for optional overrides)
+// TestCoverageOverrides overrides preset test-coverage thresholds; nil fields keep defaults.
 type TestCoverageOverrides struct {
 	MinimumPercentage    *int  `yaml:"minimum_percentage,omitempty"`
 	MinimumTestCount     *int  `yaml:"minimum_test_count,omitempty"`
 	EnforceCreativeTests *bool `yaml:"enforce_creative_tests,omitempty"`
 }
 
+// SpecAlignmentOverrides overrides spec-alignment policy; nil fields keep preset defaults.
 type SpecAlignmentOverrides struct {
 	AllowDrift                  *bool   `yaml:"allow_drift,omitempty"`
 	CheckpointAuditorStrictness *string `yaml:"checkpoint_auditor_strictness,omitempty"`
 	FreezeDuringBuild           *bool   `yaml:"freeze_during_build,omitempty"`
 }
 
+// PhaseGatesOverrides overrides phase-gate enforcement settings.
 type PhaseGatesOverrides struct {
 	S8BuildVerification *bool   `yaml:"s8_build_verification,omitempty"`
 	S9ValidationDepth   *string `yaml:"s9_validation_depth,omitempty"`
@@ -78,11 +80,13 @@ type PhaseGatesOverrides struct {
 	DeployGate          *string `yaml:"deploy_gate,omitempty"`
 }
 
+// RetrospectiveOverrides overrides retrospective requirements for a phase.
 type RetrospectiveOverrides struct {
 	Mandatory           *bool `yaml:"mandatory,omitempty"`
 	StructuredLearnings *bool `yaml:"structured_learnings,omitempty"`
 }
 
+// EconomicTuningOverrides overrides reputation/cost-economy parameters.
 type EconomicTuningOverrides struct {
 	ReputationMultiplier *float64 `yaml:"reputation_multiplier,omitempty"`
 	TokenCostMultiplier  *float64 `yaml:"token_cost_multiplier,omitempty"`

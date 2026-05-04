@@ -166,7 +166,7 @@ func analyzeStructure(lines []string) *ContentStructure {
 }
 
 // extractT0 extracts T0 content (first paragraph, 50-150 tokens)
-func extractT0(lines []string, structure *ContentStructure) []string {
+func extractT0(_ []string, structure *ContentStructure) []string {
 	if len(structure.Paragraphs) == 0 {
 		return []string{"TODO: Add summary"}
 	}

@@ -21,6 +21,7 @@ const (
 // Zone represents a capacity zone indicating system pressure.
 type Zone string
 
+// Capacity zone values describing system pressure.
 const (
 	ZoneGreen    Zone = "GREEN"    // <60% RAM usage — launch freely
 	ZoneYellow   Zone = "YELLOW"   // 60-80% — be cautious

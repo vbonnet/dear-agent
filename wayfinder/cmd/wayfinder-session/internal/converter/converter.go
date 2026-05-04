@@ -97,11 +97,12 @@ func inferRiskLevel(v1 *status.Status) string {
 	phaseCount := len(v1.Phases)
 
 	// Simple heuristic based on project complexity
-	if phaseCount <= 3 {
+	switch {
+	case phaseCount <= 3:
 		return status.RiskLevelS
-	} else if phaseCount <= 6 {
+	case phaseCount <= 6:
 		return status.RiskLevelM
-	} else if phaseCount <= 9 {
+	case phaseCount <= 9:
 		return status.RiskLevelL
 	}
 

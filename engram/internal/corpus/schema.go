@@ -4,7 +4,10 @@ package corpus
 // These schemas allow other components (AGM, Wayfinder, Swarm) to
 // discover and query Engram's bead and memory data.
 
+// EngramComponentName is the corpus-callosum component name for Engram.
 const EngramComponentName = "engram"
+
+// EngramComponentVersion is the schema version Engram registers with corpus callosum.
 const EngramComponentVersion = "1.0.0"
 
 // GetEngramSchema returns the complete Engram schema definition for corpus callosum.

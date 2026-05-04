@@ -60,6 +60,8 @@ func NewIndex() *Index {
 }
 
 // Build builds the index by scanning an engram directory
+//
+//nolint:gocyclo // reason: linear index-build pipeline; each step has its own small concerns.
 func (idx *Index) Build(engramPath string) error {
 	// Walk directory tree looking for .ai.md files
 	return filepath.Walk(engramPath, func(path string, info os.FileInfo, err error) error {

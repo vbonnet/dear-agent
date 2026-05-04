@@ -6,6 +6,7 @@ package review
 // review personas participate.
 type HarnessProfile string
 
+// HarnessProfile values selected based on task risk.
 const (
 	ProfileLite     HarnessProfile = "lite"     // XS/S risk — minimal scaffolding
 	ProfileStandard HarnessProfile = "standard" // M risk — full phase sequence

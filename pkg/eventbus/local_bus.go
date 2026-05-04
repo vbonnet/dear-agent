@@ -127,7 +127,28 @@ func (b *LocalBus) Emit(ctx context.Context, event *Event) error {
 
 	var wg sync.WaitGroup
 	done := make(chan struct{})
+	b.dispatchHandlers(ctx, event, handlers, &wg)
+	b.dispatchSinks(ctx, event, &wg)
 
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		select {
+		case <-done:
+		case <-time.After(100 * time.Millisecond):
+		}
+		return ctx.Err()
+	}
+}
+
+// dispatchHandlers fans out the event to subscriber handlers, recovering panics.
+func (b *LocalBus) dispatchHandlers(ctx context.Context, event *Event, handlers []handlerEntry, wg *sync.WaitGroup) {
 	for _, entry := range handlers {
 		wg.Add(1)
 		go func(e handlerEntry) {
@@ -140,13 +161,11 @@ func (b *LocalBus) Emit(ctx context.Context, event *Event) error {
 						"panic", fmt.Sprintf("%v", r))
 				}
 			}()
-
 			select {
 			case <-ctx.Done():
 				return
 			default:
 			}
-
 			response, err := e.handler(ctx, event)
 			if err != nil {
 				return
@@ -156,8 +175,10 @@ func (b *LocalBus) Emit(ctx context.Context, event *Event) error {
 			}
 		}(entry)
 	}
+}
 
-	// Dispatch to sinks (concurrent, best-effort)
+// dispatchSinks fans out the event to all registered sinks (best-effort).
+func (b *LocalBus) dispatchSinks(ctx context.Context, event *Event, wg *sync.WaitGroup) {
 	for _, se := range b.sinks {
 		if se.filter != nil && !se.filter.Matches(event) {
 			continue
@@ -180,22 +201,6 @@ func (b *LocalBus) Emit(ctx context.Context, event *Event) error {
 					"error", err)
 			}
 		}(se.sink)
-	}
-
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		select {
-		case <-done:
-		case <-time.After(100 * time.Millisecond):
-		}
-		return ctx.Err()
 	}
 }
 

@@ -65,6 +65,7 @@ func (e *ExecCommandExecutor) Execute(name string, args ...string) ([]byte, erro
 // EscalationAction defines what to do when circuit breaker fires.
 type EscalationAction string
 
+// EscalationAction values controlling circuit-breaker response.
 const (
 	ActionApprove    EscalationAction = "approve"
 	ActionReject     EscalationAction = "reject"
@@ -75,6 +76,7 @@ const (
 // SafetyClassification is the result of command safety analysis.
 type SafetyClassification string
 
+// SafetyClassification values for analyzed commands.
 const (
 	ClassificationSafe      SafetyClassification = "safe"
 	ClassificationDangerous SafetyClassification = "dangerous"

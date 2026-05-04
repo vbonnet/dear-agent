@@ -131,7 +131,7 @@ func (l *MessageLogger) CleanupOldLogs(retentionDays int) (int, error) {
 	return deletedCount, nil
 }
 
-// GetLogStats returns statistics about logged messages
+// LogStats summarizes logged-message counts and date range.
 type LogStats struct {
 	TotalFiles    int
 	TotalMessages int

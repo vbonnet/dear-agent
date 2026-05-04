@@ -2,7 +2,6 @@ package dolt
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"math"
 	"time"
@@ -207,63 +206,12 @@ func scanSessionFrecency(row scanner) (*manifest.Manifest, int, *time.Time, erro
 	m.Model = model
 	m.SchemaVersion = "2.0"
 
-	if permissionMode.Valid {
-		m.PermissionMode = permissionMode.String
+	applyNullableScanFields(&m, permissionMode, permissionModeUpdatedAt, permissionModeSource, isTest, ctxTotalTokens, ctxUsedTokens, ctxPercentageUsed)
+	if err := unmarshalContextTags(&m, contextTagsJSON); err != nil {
+		return nil, 0, nil, err
 	}
-	if permissionModeUpdatedAt.Valid {
-		m.PermissionModeUpdatedAt = &permissionModeUpdatedAt.Time
-	}
-	if permissionModeSource.Valid {
-		m.PermissionModeSource = permissionModeSource.String
-	}
-	if isTest.Valid {
-		m.IsTest = isTest.Bool
-	}
-	if ctxTotalTokens.Valid || ctxUsedTokens.Valid || ctxPercentageUsed.Valid {
-		m.ContextUsage = &manifest.ContextUsage{}
-		if ctxTotalTokens.Valid {
-			m.ContextUsage.TotalTokens = int(ctxTotalTokens.Int64)
-		}
-		if ctxUsedTokens.Valid {
-			m.ContextUsage.UsedTokens = int(ctxUsedTokens.Int64)
-		}
-		if ctxPercentageUsed.Valid {
-			m.ContextUsage.PercentageUsed = ctxPercentageUsed.Float64
-		}
-	}
-
-	if len(contextTagsJSON) > 0 {
-		if err := json.Unmarshal(contextTagsJSON, &m.Context.Tags); err != nil {
-			return nil, 0, nil, fmt.Errorf("failed to unmarshal context tags: %w", err)
-		}
-	}
-	if len(metadataJSON) > 0 {
-		var metadata map[string]any
-		if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
-			return nil, 0, nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-		}
-		if enabled, ok := metadata["engram_enabled"].(bool); ok && enabled {
-			m.EngramMetadata = &manifest.EngramMetadata{Enabled: enabled}
-			if query, ok := metadata["engram_query"].(string); ok {
-				m.EngramMetadata.Query = query
-			}
-			if count, ok := metadata["engram_count"].(float64); ok {
-				m.EngramMetadata.Count = int(count)
-			}
-			if ids, ok := metadata["engram_ids"].([]any); ok {
-				m.EngramMetadata.EngramIDs = make([]string, len(ids))
-				for i, id := range ids {
-					if idStr, ok := id.(string); ok {
-						m.EngramMetadata.EngramIDs[i] = idStr
-					}
-				}
-			}
-			if loadedAtStr, ok := metadata["engram_loaded_at"].(string); ok {
-				if loadedAt, err := time.Parse(time.RFC3339, loadedAtStr); err == nil {
-					m.EngramMetadata.LoadedAt = loadedAt
-				}
-			}
-		}
+	if err := unmarshalEngramMetadata(&m, metadataJSON); err != nil {
+		return nil, 0, nil, err
 	}
 
 	var lap *time.Time

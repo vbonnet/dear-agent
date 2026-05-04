@@ -445,11 +445,12 @@ func fuseSignals(signals []Signal) (confidence float64, level RigorLevelName) {
 
 	// Determine level based on fused confidence
 	suggestedLevel := RigorLevelMinimal
-	if fusedConfidence >= 0.85 {
+	switch {
+	case fusedConfidence >= 0.85:
 		suggestedLevel = RigorLevelComprehensive
-	} else if fusedConfidence >= 0.70 {
+	case fusedConfidence >= 0.70:
 		suggestedLevel = RigorLevelThorough
-	} else if fusedConfidence >= 0.50 {
+	case fusedConfidence >= 0.50:
 		suggestedLevel = RigorLevelStandard
 	}
 
@@ -515,15 +516,16 @@ func AnalyzeContext(ctx Context) EscalationDecision {
 	var userAction UserAction
 	var shouldEscalate bool
 
-	if confidence >= confidenceAutoEscalate {
+	switch {
+	case confidence >= confidenceAutoEscalate:
 		// High confidence → auto-escalate
 		userAction = UserActionAuto
 		shouldEscalate = level != RigorLevelMinimal
-	} else if confidence >= confidenceOfferEscalate {
+	case confidence >= confidenceOfferEscalate:
 		// Medium confidence → offer escalation
 		userAction = UserActionOffer
 		shouldEscalate = level != RigorLevelMinimal
-	} else {
+	default:
 		// Low confidence → stay minimal
 		userAction = UserActionNone
 		shouldEscalate = false

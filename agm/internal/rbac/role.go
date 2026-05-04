@@ -10,6 +10,7 @@ import "fmt"
 // Role represents an AGM session role in the VROOM agent hierarchy.
 type Role string
 
+// Recognized session role values.
 const (
 	RoleMetaOrchestrator Role = "meta-orchestrator"
 	RoleOrchestrator     Role = "orchestrator"
@@ -27,6 +28,7 @@ const (
 // TrustLevel indicates the privilege tier for a role.
 type TrustLevel int
 
+// Trust level values, ordered from least to most privileged.
 const (
 	TrustSandboxed TrustLevel = 1
 	TrustStandard  TrustLevel = 2

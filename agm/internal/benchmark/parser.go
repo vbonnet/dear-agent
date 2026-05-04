@@ -135,11 +135,12 @@ func Evaluate(results []BenchmarkResult, targets []PerformanceTarget) *Benchmark
 			}
 		}
 
-		if eval.Target == nil {
+		switch {
+		case eval.Target == nil:
 			report.Summary.NoTarget++
-		} else if eval.Pass {
+		case eval.Pass:
 			report.Summary.Passed++
-		} else {
+		default:
 			report.Summary.Failed++
 		}
 

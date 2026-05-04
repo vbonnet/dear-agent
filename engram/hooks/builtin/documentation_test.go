@@ -75,10 +75,8 @@ func TestDocumentationCheckerPartialDocs(t *testing.T) {
 	// Check violation message mentions missing docs
 	if len(result.Violations) == 0 {
 		t.Error("Expected violations for missing docs")
-	} else {
-		if !contains2(result.Violations[0].Message, "SPEC.md") {
-			t.Error("Expected violation to mention SPEC.md")
-		}
+	} else if !contains2(result.Violations[0].Message, "SPEC.md") {
+		t.Error("Expected violation to mention SPEC.md")
 	}
 }
 

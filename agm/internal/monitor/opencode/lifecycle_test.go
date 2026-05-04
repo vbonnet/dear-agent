@@ -208,10 +208,8 @@ func TestAdapter_HealthProbe_Failure(t *testing.T) {
 				if !contains(err.Error(), tt.errContains) {
 					t.Errorf("healthProbe() error = %q, want error containing %q", err.Error(), tt.errContains)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("healthProbe() unexpected error = %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("healthProbe() unexpected error = %v", err)
 			}
 		})
 	}

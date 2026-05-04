@@ -18,7 +18,7 @@ type SessionSelector interface {
 	SelectSession(sessions []*Session) (*Session, error)
 }
 
-// FormData represents data collected from interactive forms
+// NewSessionFormData holds fields collected from the new-session form.
 type NewSessionFormData struct {
 	Name    string
 	Project string

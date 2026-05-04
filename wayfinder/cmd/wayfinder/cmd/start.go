@@ -48,6 +48,7 @@ func init() {
 	startCmd.Flags().StringVar(&projectDirFlag, "project-dir", "", "Override project root directory (default: ~/src/ws/{workspace}/wf/)")
 }
 
+//nolint:gocyclo // reason: linear CLI driver covering many startup steps
 func runStart(cmd *cobra.Command, args []string) error {
 	// Join all args as the prompt
 	prompt := strings.Join(args, " ")
@@ -101,7 +102,8 @@ func runStart(cmd *cobra.Command, args []string) error {
 	st := status.New(projectDir)
 
 	// Handle depth and auto-classification
-	if autoClassifyFlag {
+	switch {
+	case autoClassifyFlag:
 		classification, estimatedTime, err := runClassification(prompt)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: auto-classification failed: %v\n", err)
@@ -121,7 +123,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "  Estimated time: %s\n", estimatedTime)
 			fmt.Fprintf(os.Stderr, "  Rationale: %s\n\n", classification.Rationale)
 		}
-	} else if depthFlag != "" {
+	case depthFlag != "":
 		// Validate manual depth
 		validDepths := []string{status.DepthXS, status.DepthS, status.DepthM, status.DepthL, status.DepthXL}
 		isValid := false
@@ -136,7 +138,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 		st.Depth = depthFlag
 		st.DepthSource = status.DepthSourceUserOverride
-	} else {
+	default:
 		// Default depth
 		st.Depth = status.DefaultDepth
 		st.DepthSource = status.DepthSourceUserOverride
@@ -579,7 +581,7 @@ func runClassification(prompt string) (*status.Classification, string, error) {
 	}
 
 	// Execute classification
-	cmd := exec.Command(classifyPath, "--charter-text", prompt, "--format", "json")
+	cmd := exec.Command(classifyPath, "--charter-text", prompt, "--format", "json") //nolint:gosec // G702: classifyPath is internally constructed; prompt passed as separate arg, not shell-composed
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to run wayfinder-classify: %w", err)

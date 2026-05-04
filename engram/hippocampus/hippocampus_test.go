@@ -117,10 +117,7 @@ CSM uses internal/ packages.
 Multiple plugins became single directory.
 `
 
-	decisions, err := h.extractDecisions(history)
-	if err != nil {
-		t.Fatalf("Extract decisions failed: %v", err)
-	}
+	decisions := h.extractDecisions(history)
 
 	if len(decisions) != 2 {
 		t.Errorf("Expected 2 decisions, got %d", len(decisions))
@@ -143,10 +140,7 @@ func TestExtractOutcomes(t *testing.T) {
 - Created: core/thalamus/ module
 `
 
-	outcomes, err := h.extractOutcomes(history)
-	if err != nil {
-		t.Fatalf("Extract outcomes failed: %v", err)
-	}
+	outcomes := h.extractOutcomes(history)
 
 	if len(outcomes) != 3 {
 		t.Errorf("Expected 3 outcomes, got %d", len(outcomes))
@@ -164,10 +158,7 @@ Using bash-command-simplification.ai.md and claude-code-tool-usage.ai.md.
 Also referenced ask-user-question-usage.ai.md.
 `
 
-	engrams, err := h.extractEngrams(history)
-	if err != nil {
-		t.Fatalf("Extract engrams failed: %v", err)
-	}
+	engrams := h.extractEngrams(history)
 
 	if len(engrams) != 3 {
 		t.Errorf("Expected 3 engrams, got %d", len(engrams))

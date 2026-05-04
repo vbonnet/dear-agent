@@ -26,10 +26,12 @@ func NewDependencyScanner() *DependencyScanner {
 	}
 }
 
+// Name returns the scanner's identifier.
 func (s *DependencyScanner) Name() string {
 	return s.name
 }
 
+// Priority returns the scanner's execution priority (lower runs earlier).
 func (s *DependencyScanner) Priority() int {
 	return s.priority
 }

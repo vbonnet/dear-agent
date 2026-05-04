@@ -244,17 +244,18 @@ func (a *SSEAdapter) readEvents(ctx context.Context, body io.ReadCloser) {
 		line := scanner.Text()
 
 		// SSE format: "data: {json}"
-		if strings.HasPrefix(line, "data: ") {
+		switch {
+		case strings.HasPrefix(line, "data: "):
 			eventData := strings.TrimPrefix(line, "data: ")
 			a.handleEvent([]byte(eventData))
-		} else if strings.HasPrefix(line, "event: ") {
+		case strings.HasPrefix(line, "event: "):
 			// Event type line (we'll handle this if needed)
 			continue
-		} else if strings.HasPrefix(line, ":") {
+		case strings.HasPrefix(line, ":"):
 			// Comment line (often used for heartbeats)
 			a.lastHeartbeat.Store(time.Now())
 			continue
-		} else if line == "" {
+		case line == "":
 			// Empty line separates events
 			continue
 		}
@@ -296,7 +297,7 @@ func (a *SSEAdapter) scheduleReconnect(ctx context.Context) {
 			}
 
 			// Exponential backoff
-			delay = delay * time.Duration(a.config.Reconnect.Multiplier)
+			delay *= time.Duration(a.config.Reconnect.Multiplier)
 			if delay > a.config.Reconnect.MaxDelay {
 				delay = a.config.Reconnect.MaxDelay
 			}

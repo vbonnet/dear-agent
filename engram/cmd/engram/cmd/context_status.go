@@ -74,15 +74,16 @@ func runContextStatus(cmd *cobra.Command, args []string) error {
 
 	// Detect usage
 	var usage *context.Usage
-	if statusSessionID != "" && statusCLI != "" {
+	switch {
+	case statusSessionID != "" && statusCLI != "":
 		// Explicit session and CLI
 		cliType := parseCLIType(statusCLI)
 		usage, err = detector.DetectFromSession(statusSessionID, cliType)
-	} else if statusSessionID != "" {
+	case statusSessionID != "":
 		// Explicit session, auto-detect CLI
 		cliType := detector.DetectCLI()
 		usage, err = detector.DetectFromSession(statusSessionID, cliType)
-	} else {
+	default:
 		// Auto-detect everything
 		usage, err = detector.Detect()
 	}

@@ -137,10 +137,8 @@ func TestGC_SkipsProtectedRoles(t *testing.T) {
 						t.Errorf("expected reason %s, got %s", GCSkipProtectedRole, s.Reason)
 					}
 				}
-			} else {
-				if result.Archived != 1 {
-					t.Errorf("expected unprotected session to be archived, got %d archived", result.Archived)
-				}
+			} else if result.Archived != 1 {
+				t.Errorf("expected unprotected session to be archived, got %d archived", result.Archived)
 			}
 		})
 	}

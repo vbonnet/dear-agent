@@ -85,7 +85,7 @@ func RegisterAssociationSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the ready-file creation fails$`, theReadyFileCreationFails)
 }
 
-// Association test context holds state for association scenarios
+// AssociationContext holds shared state for association BDD scenarios.
 type AssociationContext struct {
 	SessionName       string
 	SessionNameA      string

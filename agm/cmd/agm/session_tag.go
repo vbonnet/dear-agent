@@ -36,11 +36,12 @@ func runSessionTag(_ *cobra.Command, args []string) error {
 	identifier := args[0]
 
 	var addTag, removeTag string
-	if tagRemove != "" {
+	switch {
+	case tagRemove != "":
 		removeTag = tagRemove
-	} else if len(args) < 2 {
+	case len(args) < 2:
 		return fmt.Errorf("provide a tag to add, or use --remove <tag>")
-	} else {
+	default:
 		addTag = args[1]
 	}
 

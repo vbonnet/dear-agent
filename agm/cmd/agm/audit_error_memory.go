@@ -58,42 +58,9 @@ func runAuditErrorMemory(_ *cobra.Command, _ []string) error {
 	// Prune expired records from display
 	records = errormemory.PruneExpired(records)
 
-	// Filter by --since
-	if auditEMSince != "" {
-		d, err := parseDuration(auditEMSince)
-		if err != nil {
-			return fmt.Errorf("invalid --since value: %w", err)
-		}
-		since := time.Now().Add(-d)
-		var filtered []errormemory.ErrorRecord
-		for _, r := range records {
-			if r.LastSeen.After(since) {
-				filtered = append(filtered, r)
-			}
-		}
-		records = filtered
-	}
-
-	// Filter by --category
-	if auditEMCategory != "" {
-		var filtered []errormemory.ErrorRecord
-		for _, r := range records {
-			if r.ErrorCategory == auditEMCategory {
-				filtered = append(filtered, r)
-			}
-		}
-		records = filtered
-	}
-
-	// Filter by --source
-	if auditEMSource != "" {
-		var filtered []errormemory.ErrorRecord
-		for _, r := range records {
-			if r.Source == auditEMSource {
-				filtered = append(filtered, r)
-			}
-		}
-		records = filtered
+	records, err = filterErrorRecords(records)
+	if err != nil {
+		return err
 	}
 
 	if len(records) == 0 {
@@ -137,4 +104,42 @@ func runAuditErrorMemory(_ *cobra.Command, _ []string) error {
 
 	fmt.Println()
 	return nil
+}
+
+// filterErrorRecords applies the --since, --category, and --source flag filters
+// to the loaded error-memory records.
+func filterErrorRecords(records []errormemory.ErrorRecord) ([]errormemory.ErrorRecord, error) {
+	if auditEMSince != "" {
+		d, err := parseDuration(auditEMSince)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --since value: %w", err)
+		}
+		since := time.Now().Add(-d)
+		var filtered []errormemory.ErrorRecord
+		for _, r := range records {
+			if r.LastSeen.After(since) {
+				filtered = append(filtered, r)
+			}
+		}
+		records = filtered
+	}
+	if auditEMCategory != "" {
+		var filtered []errormemory.ErrorRecord
+		for _, r := range records {
+			if r.ErrorCategory == auditEMCategory {
+				filtered = append(filtered, r)
+			}
+		}
+		records = filtered
+	}
+	if auditEMSource != "" {
+		var filtered []errormemory.ErrorRecord
+		for _, r := range records {
+			if r.Source == auditEMSource {
+				filtered = append(filtered, r)
+			}
+		}
+		records = filtered
+	}
+	return records, nil
 }
