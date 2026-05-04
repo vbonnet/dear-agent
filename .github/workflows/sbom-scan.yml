@@ -89,13 +89,31 @@ jobs:
           go-version-file: 'go.mod'
           cache-dependency-path: 'go.sum'
 
-      # Symbol-level scan: only fails when our code actually reaches a
-      # vulnerable function. Package-level mode flags any vulnerable
-      # package in the import graph, which trips on tailscale.com's
-      # transitive github.com/gorilla/csrf (GO-2025-3884 has Fixed in:
-      # N/A, but the vulnerable TrustedOrigins API is not on any path
-      # we call).
+      # `-scan package` instead of default `-scan symbol`: the latter
+      # builds SSA and panics inside golang.org/x/tools v0.44.0 lift on
+      # tailscale.com's generic-heavy code paths. Package mode skips
+      # SSA but flags any vulnerable package in the import graph,
+      # including transitive ones we don't actually call. The jq pass
+      # filters known-not-called false positives by GO ID.
+      #
+      # Allowlist (review on every dep bump):
+      #   GO-2025-3884 — github.com/gorilla/csrf TrustedOrigins.
+      #     Pulled in via tailscale.com/client/web. Fixed in: N/A.
+      #     Our code never invokes csrf.Protect / TrustedOrigins.
       - name: Run govulncheck
         run: |
+          set -euo pipefail
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck -scan symbol ./...
+          govulncheck -format json -scan package ./... > vulncheck.json
+          unhandled=$(jq -c \
+            --argjson allow '["GO-2025-3884"]' \
+            'select(.finding != null)
+             | select(.finding.osv as $id | $allow | index($id) | not)
+             | .finding' \
+            vulncheck.json)
+          if [ -n "$unhandled" ]; then
+            echo "Unallowed vulnerabilities found:"
+            echo "$unhandled"
+            exit 1
+          fi
+          echo "No unallowed vulnerabilities."
