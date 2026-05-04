@@ -477,7 +477,7 @@ func TestRunnerBashEnvVarExposure(t *testing.T) {
 		Version: "1",
 		Inputs:  []InputSpec{{Name: "greeting", Required: true}},
 		Nodes: []Node{
-			{ID: "n", Kind: KindBash, Bash: &BashNode{Cmd: "echo $INPUT_GREETING"}},
+			{ID: "n", Kind: KindBash, Bash: &BashNode{Cmd: "echo $INPUT_greeting"}},
 		},
 	}
 	rep, err := r.Run(context.Background(), w, map[string]string{"greeting": "hello"})
@@ -486,7 +486,96 @@ func TestRunnerBashEnvVarExposure(t *testing.T) {
 	}
 	got := strings.TrimSpace(rep.Results[0].Output)
 	if got != "hello" {
-		t.Errorf("INPUT_GREETING = %q, want hello", got)
+		t.Errorf("INPUT_greeting = %q, want hello", got)
+	}
+}
+
+// TestRunnerBashEnvVarPreservesCase guards Bug 1 — the shipped templates
+// in configs/workflows/*.yaml reference inputs in their declared casing
+// (e.g. $INPUT_db, $INPUT_repos_root). The runner used to uppercase
+// every key, which silently broke every template that used a lowercase
+// or mixed-case input name.
+func TestRunnerBashEnvVarPreservesCase(t *testing.T) {
+	r := NewRunner(&fakeAI{})
+	w := &Workflow{
+		Name:    "case-preserve",
+		Version: "1",
+		Inputs: []InputSpec{
+			{Name: "repos_root", Required: true},
+			{Name: "MixedCase", Required: true},
+		},
+		Nodes: []Node{
+			{ID: "n", Kind: KindBash, Bash: &BashNode{
+				Cmd: `printf '%s\n%s\n' "$INPUT_repos_root" "$INPUT_MixedCase"`,
+			}},
+		},
+	}
+	rep, err := r.Run(context.Background(), w, map[string]string{
+		"repos_root": "/srv/repos",
+		"MixedCase":  "preserved",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got := strings.TrimSpace(rep.Results[0].Output)
+	want := "/srv/repos\npreserved"
+	if got != want {
+		t.Errorf("output = %q, want %q (case must be preserved when exposing $INPUT_*)", got, want)
+	}
+}
+
+// TestRunnerBashCapturesStderr guards Bug 4 — the comment on executeBash
+// promises stderr is captured into the Meta map, but cmd.Output() only
+// captures stdout. A failing bash node must surface its stderr via
+// Result.Meta["stderr"] for diagnostics.
+func TestRunnerBashCapturesStderr(t *testing.T) {
+	r := NewRunner(&fakeAI{})
+	w := &Workflow{
+		Name: "stderr-capture", Version: "1",
+		Nodes: []Node{
+			{ID: "n", Kind: KindBash, Bash: &BashNode{
+				Cmd:              `echo on-stdout; echo on-stderr 1>&2; exit 7`,
+				AllowNonzeroExit: true,
+			}},
+		},
+	}
+	rep, err := r.Run(context.Background(), w, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	res := rep.Results[0]
+	if got := strings.TrimSpace(res.Output); got != "on-stdout" {
+		t.Errorf("stdout = %q, want %q (stderr must not bleed into Output)", got, "on-stdout")
+	}
+	stderr, ok := res.Meta["stderr"].(string)
+	if !ok {
+		t.Fatalf("Meta[\"stderr\"] missing or wrong type: %#v", res.Meta["stderr"])
+	}
+	if !strings.Contains(stderr, "on-stderr") {
+		t.Errorf("Meta[\"stderr\"] = %q, want it to contain %q", stderr, "on-stderr")
+	}
+	if code, _ := res.Meta["exit_code"].(int); code != 7 {
+		t.Errorf("exit_code = %v, want 7", code)
+	}
+}
+
+// TestRunnerBashStderrAbsentWhenSilent makes sure the runner does not
+// add an empty "stderr" key when nothing was written to stderr — keeps
+// Meta tidy for the common case.
+func TestRunnerBashStderrAbsentWhenSilent(t *testing.T) {
+	r := NewRunner(&fakeAI{})
+	w := &Workflow{
+		Name: "silent-stderr", Version: "1",
+		Nodes: []Node{
+			{ID: "n", Kind: KindBash, Bash: &BashNode{Cmd: `echo quiet`}},
+		},
+	}
+	rep, err := r.Run(context.Background(), w, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, present := rep.Results[0].Meta["stderr"]; present {
+		t.Errorf("Meta[\"stderr\"] should be absent when stderr is empty; got %#v", rep.Results[0].Meta["stderr"])
 	}
 }
 
@@ -511,10 +600,17 @@ func TestRunnerBashShellQuoteFunction(t *testing.T) {
 }
 
 func TestEnvVarKey(t *testing.T) {
+	// Case is preserved so shell var refs match the YAML-declared input name
+	// exactly. Non-alphanumeric characters become underscores.
 	cases := []struct{ in, want string }{
-		{"foo", "INPUT_FOO"},
-		{"my-key", "INPUT_MY_KEY"},
-		{"stage.output", "INPUT_STAGE_OUTPUT"},
+		{"foo", "INPUT_foo"},
+		{"FOO", "INPUT_FOO"},
+		{"my-key", "INPUT_my_key"},
+		{"stage.output", "INPUT_stage_output"},
+		{"repos_root", "INPUT_repos_root"},
+		{"lookback_days", "INPUT_lookback_days"},
+		{"MixedCase", "INPUT_MixedCase"},
+		{"with9digit", "INPUT_with9digit"},
 	}
 	for _, tc := range cases {
 		if got := envVarKey("INPUT_", tc.in); got != tc.want {

@@ -32,7 +32,9 @@ func TestExitGateBashCustomSuccessExit(t *testing.T) {
 }
 
 func TestExitGateBashSeesEnvAndInputs(t *testing.T) {
-	g := []ExitGate{{Kind: GateBash, Cmd: `[ "$INPUT_NAME" = "vbonnet" ] && [ "$WORKFLOW_VAR" = "abc" ]`}}
+	// envVarKey preserves case; the input name "name" is exposed as
+	// $INPUT_name, not $INPUT_NAME — see TestEnvVarKey for the contract.
+	g := []ExitGate{{Kind: GateBash, Cmd: `[ "$INPUT_name" = "vbonnet" ] && [ "$WORKFLOW_VAR" = "abc" ]`}}
 	gctx := ExitGateContext{
 		Env:    map[string]string{"WORKFLOW_VAR": "abc"},
 		Inputs: map[string]string{"name": "vbonnet"},
