@@ -56,6 +56,31 @@ func TestParseGolangCILintMalformed(t *testing.T) {
 	}
 }
 
+// golangci-lint v2 appends a human-readable summary after the JSON
+// document on stdout. Verify the parser stops at the JSON object's
+// closing brace and ignores the trailing summary instead of failing
+// with "invalid character '3' after top-level value".
+func TestParseGolangCILintV2TrailingSummary(t *testing.T) {
+	t.Parallel()
+	const v2Output = `{"Issues":[{"FromLinter":"typecheck","Text":"declared and not used: x","Pos":{"Filename":"main.go"}}],"Report":{"Linters":[{"Name":"errcheck","Enabled":true}]}}
+3 issues:
+* typecheck: 3
+`
+	sigs, err := parseGolangCILint([]byte(v2Output))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(sigs) != 1 {
+		t.Fatalf("got %d signals, want 1", len(sigs))
+	}
+	if sigs[0].Subject != "main.go" {
+		t.Errorf("Subject = %q, want main.go", sigs[0].Subject)
+	}
+	if sigs[0].Value != 1 {
+		t.Errorf("Value = %v, want 1", sigs[0].Value)
+	}
+}
+
 func TestLintTrendInputFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
