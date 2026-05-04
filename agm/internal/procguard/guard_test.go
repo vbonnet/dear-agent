@@ -30,10 +30,8 @@ func TestValidateSpawn_DepthLimit(t *testing.T) {
 				if !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("expected error to contain %q, got: %v", tt.errContains, err)
 				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error for depth %d: %v", tt.depth, err)
-				}
+			} else if err != nil {
+				t.Fatalf("unexpected error for depth %d: %v", tt.depth, err)
 			}
 		})
 	}
@@ -63,10 +61,8 @@ func TestValidateSpawn_ChildrenLimit(t *testing.T) {
 				if !strings.Contains(err.Error(), "children") {
 					t.Errorf("expected error to mention children, got: %v", err)
 				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error for %d children: %v", tt.children, err)
-				}
+			} else if err != nil {
+				t.Fatalf("unexpected error for %d children: %v", tt.children, err)
 			}
 		})
 	}
@@ -96,10 +92,8 @@ func TestValidateSpawn_TotalActiveLimit(t *testing.T) {
 				if !strings.Contains(err.Error(), "active sessions") {
 					t.Errorf("expected error to mention active sessions, got: %v", err)
 				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error for %d active: %v", tt.total, err)
-				}
+			} else if err != nil {
+				t.Fatalf("unexpected error for %d active: %v", tt.total, err)
 			}
 		})
 	}

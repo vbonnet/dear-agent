@@ -17,6 +17,7 @@ import (
 // Severity levels for audit issues
 type Severity string
 
+// Audit issue severity levels.
 const (
 	SeverityCritical Severity = "critical"
 	SeverityWarning  Severity = "warning"
@@ -26,6 +27,7 @@ const (
 // IssueType identifies the type of audit issue
 type IssueType string
 
+// Audit issue type values.
 const (
 	IssueOrphanedConversation IssueType = "orphaned_conversation"
 	IssueCorruptedManifest    IssueType = "corrupted_manifest"

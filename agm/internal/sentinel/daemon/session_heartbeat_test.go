@@ -358,7 +358,7 @@ func TestSessionHeartbeatMonitor_EmptyDir(t *testing.T) {
 
 	monitor, err := NewSessionHeartbeatMonitor(tmpDir, nil)
 	require.NoError(t, err)
-	monitor.nowFunc = func() time.Time { return time.Now() }
+	monitor.nowFunc = time.Now
 
 	results := monitor.CheckAll()
 	assert.Empty(t, results)

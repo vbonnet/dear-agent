@@ -220,12 +220,15 @@ func FormatFileList(files []string, maxFiles int) string {
 	var result strings.Builder
 	count := len(files)
 	displayed := count
-	if count > maxFiles {
+	if maxFiles >= 0 && count > maxFiles {
 		displayed = maxFiles
 	}
 
-	for i := 0; i < displayed; i++ {
-		fmt.Fprintf(&result, "- %s\n", files[i])
+	for i, f := range files {
+		if i >= displayed {
+			break
+		}
+		fmt.Fprintf(&result, "- %s\n", f)
 	}
 
 	if count > maxFiles {

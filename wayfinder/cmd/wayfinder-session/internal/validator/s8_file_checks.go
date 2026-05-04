@@ -143,7 +143,7 @@ func validateArtifactPath(projectDir, artifact string) error {
 }
 
 // formatMissingArtifacts formats artifact list with exists/missing markers
-func formatMissingArtifacts(projectDir string, all []string, missing []string) string {
+func formatMissingArtifacts(_ string, all []string, missing []string) string {
 	missingSet := make(map[string]bool)
 	for _, m := range missing {
 		missingSet[m] = true

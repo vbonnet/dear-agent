@@ -91,24 +91,7 @@ func runGC(cmd *cobra.Command, args []string) error {
 		fmt.Println("DRY RUN — no sessions were archived")
 	}
 
-	// Show archived sessions
-	for _, s := range result.Sessions {
-		switch s.Action {
-		case "archived":
-			if gcDryRun {
-				fmt.Printf("  [would archive] %s (%s)\n", s.Name, s.SessionID[:8])
-			} else {
-				fmt.Printf("  [archived] %s (%s)\n", s.Name, s.SessionID[:8])
-			}
-		case "skipped":
-			// Only show skipped in verbose/dry-run mode
-			if gcDryRun {
-				fmt.Printf("  [skip: %s] %s\n", s.Reason, s.Name)
-			}
-		case "error":
-			fmt.Printf("  [error] %s: %s\n", s.Name, s.Error)
-		}
-	}
+	printGCSessionResults(result.Sessions)
 
 	fmt.Println()
 
@@ -119,11 +102,12 @@ func runGC(cmd *cobra.Command, args []string) error {
 		summary += fmt.Sprintf(", errors %d", result.Errors)
 	}
 
-	if gcDryRun {
+	switch {
+	case gcDryRun:
 		ui.PrintSuccess(fmt.Sprintf("Dry run: %s", summary))
-	} else if result.Archived > 0 {
+	case result.Archived > 0:
 		ui.PrintSuccess(summary)
-	} else {
+	default:
 		fmt.Println(summary)
 	}
 
@@ -132,6 +116,26 @@ func runGC(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// printGCSessionResults prints one line per session-action result from GC.
+func printGCSessionResults(sessions []ops.GCSessionEntry) {
+	for _, s := range sessions {
+		switch s.Action {
+		case "archived":
+			if gcDryRun {
+				fmt.Printf("  [would archive] %s (%s)\n", s.Name, s.SessionID[:8])
+			} else {
+				fmt.Printf("  [archived] %s (%s)\n", s.Name, s.SessionID[:8])
+			}
+		case "skipped":
+			if gcDryRun {
+				fmt.Printf("  [skip: %s] %s\n", s.Reason, s.Name)
+			}
+		case "error":
+			fmt.Printf("  [error] %s: %s\n", s.Name, s.Error)
+		}
+	}
 }
 
 // parseDurationSafe parses a duration string, returning 0 on empty/error.

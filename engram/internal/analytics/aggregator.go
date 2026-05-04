@@ -96,11 +96,7 @@ func (a *Aggregator) AggregateSession(sessionID string, events []ParsedEvent) (*
 	}
 
 	// Build phases from phase.started/completed events
-	phases, err := a.buildPhases(events)
-	if err != nil {
-		return nil, err
-	}
-	session.Phases = phases
+	session.Phases = a.buildPhases(events)
 
 	// Calculate metrics
 	session.Metrics = a.calculateMetrics(session)
@@ -109,7 +105,7 @@ func (a *Aggregator) AggregateSession(sessionID string, events []ParsedEvent) (*
 }
 
 // buildPhases matches phase.started with phase.completed events
-func (a *Aggregator) buildPhases(events []ParsedEvent) ([]Phase, error) {
+func (a *Aggregator) buildPhases(events []ParsedEvent) []Phase {
 	// Map of phase name → start event
 	phaseStarts := make(map[string]*ParsedEvent)
 	// Map of phase name → end event
@@ -168,7 +164,7 @@ func (a *Aggregator) buildPhases(events []ParsedEvent) ([]Phase, error) {
 		return phases[i].StartTime.Before(phases[j].StartTime)
 	})
 
-	return phases, nil
+	return phases
 }
 
 // calculateMetrics computes session metrics

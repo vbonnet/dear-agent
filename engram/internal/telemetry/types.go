@@ -20,6 +20,7 @@ type ViolationEvent struct {
 // Confidence represents detection confidence level
 type Confidence string
 
+// Confidence level values for telemetry events.
 const (
 	ConfidenceHigh   Confidence = "HIGH"
 	ConfidenceMedium Confidence = "MEDIUM"
@@ -29,6 +30,7 @@ const (
 // DetectionMethod represents how violation was detected
 type DetectionMethod string
 
+// DetectionMethod values describing how a violation was detected.
 const (
 	DetectionExternal     DetectionMethod = "external"
 	DetectionSelfReported DetectionMethod = "self_reported"

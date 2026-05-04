@@ -114,7 +114,8 @@ func runResumeAll(cmd *cobra.Command, args []string) error {
 	}
 
 	// 9. Resume sessions with progress
-	return resumeSessionsBatch(adapter, stoppedSessions)
+	resumeSessionsBatch(adapter, stoppedSessions)
+	return nil
 }
 
 // filterNonArchived removes archived sessions from list
@@ -140,7 +141,7 @@ func filterByWorkspace(manifests []*manifest.Manifest, workspace string) []*mani
 }
 
 // resumeSessionsBatch resumes sessions sequentially with progress UI
-func resumeSessionsBatch(adapter *dolt.Adapter, sessions []*manifest.Manifest) error {
+func resumeSessionsBatch(adapter *dolt.Adapter, sessions []*manifest.Manifest) {
 	var successCount, failCount int
 	var errors []string
 
@@ -230,8 +231,6 @@ func resumeSessionsBatch(adapter *dolt.Adapter, sessions []*manifest.Manifest) e
 			fmt.Printf("  • %s\n", errMsg)
 		}
 	}
-
-	return nil
 }
 
 // writeResumeTimestamp creates .agm/resume-timestamp file for orchestrator coordination

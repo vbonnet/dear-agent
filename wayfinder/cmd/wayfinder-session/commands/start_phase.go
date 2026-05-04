@@ -18,6 +18,7 @@ var (
 	allowDirty bool
 )
 
+// StartPhaseCmd is the cobra command that marks a phase as started.
 var StartPhaseCmd = &cobra.Command{
 	Use:   "start-phase <phase-name>",
 	Short: "Mark a phase as started",

@@ -49,8 +49,10 @@ func NewWebhookDispatcher(url string, opts ...WebhookOption) *WebhookDispatcher 
 	return d
 }
 
+// Name returns the dispatcher name "webhook".
 func (d *WebhookDispatcher) Name() string { return "webhook" }
 
+// Dispatch POSTs the notification as JSON, retrying transient failures.
 func (d *WebhookDispatcher) Dispatch(ctx context.Context, n *Notification) error {
 	body, err := json.Marshal(n)
 	if err != nil {
@@ -93,4 +95,5 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, n *Notification) error
 	return fmt.Errorf("webhook failed after %d attempts: %w", d.maxRetries+1, lastErr)
 }
 
+// Close is a no-op for WebhookDispatcher.
 func (d *WebhookDispatcher) Close() error { return nil }

@@ -61,6 +61,7 @@ func init() {
 	migrateCmd.Flags().BoolVar(&migrateForce, "force", false, "Force migration even if target exists")
 }
 
+//nolint:gocyclo // reason: linear CLI driver dispatching across multiple migration commands
 func runMigrate(cmd *cobra.Command, args []string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {

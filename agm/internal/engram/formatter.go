@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// MaxContentLength caps the formatted system message size in characters.
 const MaxContentLength = 2000
 
 // FormatSystemMessage formats engram results as system message for Claude

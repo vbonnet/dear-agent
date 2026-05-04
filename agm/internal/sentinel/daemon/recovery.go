@@ -230,43 +230,10 @@ func ApplyRecovery(sessionName string, strategy RecoveryStrategy, client *tmux.C
 		}
 	}
 
-	// Execute recovery based on strategy.
-	// Uses the tmux Client which validates exact session match via = prefix
-	// before sending keys, preventing prefix-match cross-session interference.
-	switch strategy {
-	case RecoveryEscape:
-		err = client.SendKeys(sessionName, "Escape")
-	case RecoveryEnter:
-		err = client.SendKeys(sessionName, "Enter")
-	case RecoveryCtrlC:
-		// Check if a flag-based interrupt was already written and is still pending.
-		// If the flag was written less than FlagEscalationTimeout ago, don't inject
-		// Ctrl-C yet — give the hook time to pick it up.
-		if shouldDeferToFlag(sessionName) {
-			result.Strategy = RecoveryFlagInterrupt
-			result.Success = false
-			result.Error = fmt.Errorf("flag-based interrupt pending, deferring Ctrl-C for up to %s", FlagEscalationTimeout)
-			result.DurationMs = time.Since(startTime).Milliseconds()
-			return result, nil
-		}
-		err = client.SendKeys(sessionName, "C-c")
-	case RecoveryFlagInterrupt:
-		flagResult, flagErr := applyFlagInterrupt(sessionName, "sentinel recovery")
-		if flagErr != nil {
-			err = flagErr
-		} else {
-			result.Success = flagResult.Success
-			result.DurationMs = flagResult.DurationMs
-			return result, nil
-		}
-	case RecoveryRestart:
-		err = restartSession(sessionName)
-	case RecoveryManual:
-		// Manual strategy doesn't perform automated recovery
-		err = nil
-		result.Success = false
-	default:
-		err = fmt.Errorf("unknown recovery strategy: %d", strategy)
+	var done bool
+	done, err = dispatchRecoveryStrategy(strategy, sessionName, client, result, startTime)
+	if done {
+		return result, nil
 	}
 
 	// Record duration
@@ -278,25 +245,61 @@ func ApplyRecovery(sessionName string, strategy RecoveryStrategy, client *tmux.C
 		return result, err
 	}
 
-	// For automated strategies, verify recovery by checking cursor movement
 	if strategy != RecoveryManual {
-		// Wait brief moment for tmux to process keys
-		time.Sleep(500 * time.Millisecond)
-
-		// Get cursor position after recovery
-		afterPaneInfo, err := client.GetPaneInfo(sessionName)
-		if err == nil && afterPaneInfo != nil {
-			result.AfterCursor = CursorPosition{X: afterPaneInfo.CursorX, Y: afterPaneInfo.CursorY}
-			// Success if cursor moved (indicates session responded)
-			result.Success = (result.BeforeCursor.X != result.AfterCursor.X ||
-				result.BeforeCursor.Y != result.AfterCursor.Y)
-		} else {
-			// Couldn't verify, assume success if no error occurred
-			result.Success = true
-		}
+		verifyCursorMovedAfterRecovery(client, sessionName, result)
 	}
-
 	return result, nil
+}
+
+// verifyCursorMovedAfterRecovery sleeps briefly so tmux can process the
+// recovery keystroke, then re-reads the cursor position. result.Success is
+// set to true when the cursor moved (or when read fails).
+func verifyCursorMovedAfterRecovery(client *tmux.Client, sessionName string, result *RecoveryResult) {
+	time.Sleep(500 * time.Millisecond)
+	afterPaneInfo, err := client.GetPaneInfo(sessionName)
+	if err == nil && afterPaneInfo != nil {
+		result.AfterCursor = CursorPosition{X: afterPaneInfo.CursorX, Y: afterPaneInfo.CursorY}
+		result.Success = result.BeforeCursor.X != result.AfterCursor.X ||
+			result.BeforeCursor.Y != result.AfterCursor.Y
+		return
+	}
+	result.Success = true
+}
+
+// dispatchRecoveryStrategy executes the per-strategy keystroke or process
+// action and returns (done, err). When done is true the caller should return
+// result immediately (used for the flag-interrupt early-return cases).
+func dispatchRecoveryStrategy(strategy RecoveryStrategy, sessionName string, client *tmux.Client, result *RecoveryResult, startTime time.Time) (bool, error) {
+	switch strategy {
+	case RecoveryEscape:
+		return false, client.SendKeys(sessionName, "Escape")
+	case RecoveryEnter:
+		return false, client.SendKeys(sessionName, "Enter")
+	case RecoveryCtrlC:
+		if shouldDeferToFlag(sessionName) {
+			result.Strategy = RecoveryFlagInterrupt
+			result.Success = false
+			result.Error = fmt.Errorf("flag-based interrupt pending, deferring Ctrl-C for up to %s", FlagEscalationTimeout)
+			result.DurationMs = time.Since(startTime).Milliseconds()
+			return true, nil
+		}
+		return false, client.SendKeys(sessionName, "C-c")
+	case RecoveryFlagInterrupt:
+		flagResult, flagErr := applyFlagInterrupt(sessionName, "sentinel recovery")
+		if flagErr != nil {
+			return false, flagErr
+		}
+		result.Success = flagResult.Success
+		result.DurationMs = flagResult.DurationMs
+		return true, nil
+	case RecoveryRestart:
+		return false, restartSession(sessionName)
+	case RecoveryManual:
+		result.Success = false
+		return false, nil
+	default:
+		return false, fmt.Errorf("unknown recovery strategy: %d", strategy)
+	}
 }
 
 // restartSession kills and restarts a tmux session.

@@ -369,6 +369,7 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 // CanReceive represents whether a session can accept input right now.
 type CanReceive string
 
+// CanReceive values describing whether a session can accept input.
 const (
 	CanReceiveYes      CanReceive = "YES"       // Prompt visible, send directly
 	CanReceiveNo       CanReceive = "NO"        // Permission dialog, needs human

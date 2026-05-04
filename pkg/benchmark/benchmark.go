@@ -29,6 +29,7 @@ type RunResult struct {
 // Metric identifies which metric to compare across variants.
 type Metric string
 
+// Recognized benchmark Metric values.
 const (
 	MetricDuration Metric = "duration_ms"
 	MetricCost     Metric = "cost_usd"

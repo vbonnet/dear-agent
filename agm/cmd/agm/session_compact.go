@@ -116,11 +116,12 @@ func runSessionCompact(_ *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	return monitorCompaction(tmuxName, s.Name, sessionCompactTimeout)
+	monitorCompaction(tmuxName, s.Name, sessionCompactTimeout)
+	return nil
 }
 
 // monitorCompaction polls session state until compaction completes or timeout.
-func monitorCompaction(tmuxName, displayName string, timeout time.Duration) error {
+func monitorCompaction(tmuxName, displayName string, timeout time.Duration) {
 	const pollInterval = 2 * time.Second
 
 	start := time.Now()
@@ -145,12 +146,11 @@ func monitorCompaction(tmuxName, displayName string, timeout time.Duration) erro
 
 		if state == manifest.StateDone {
 			ui.PrintSuccess(fmt.Sprintf("Compaction completed in %s", elapsed))
-			return nil
+			return
 		}
 	}
 
 	elapsed := time.Since(start).Round(time.Second)
 	ui.PrintWarning(fmt.Sprintf("Monitoring timed out after %s. Compaction may still be running.", elapsed))
 	fmt.Printf("\nCheck status:\n  agm session get %s\n  agm session context %s\n", displayName, displayName)
-	return nil
 }

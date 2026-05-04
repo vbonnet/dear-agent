@@ -12,6 +12,7 @@ import (
 // ErrorCategory classifies the type of error recorded.
 type ErrorCategory string
 
+// Recognized error category values.
 const (
 	CategoryHookError         ErrorCategory = "hook-error"
 	CategoryPermissionBlocked ErrorCategory = "permission-blocked"

@@ -63,7 +63,7 @@ Examples:
 
 		// Handle --all flag
 		if fixAll {
-			return autoFixAll(adapter, detector, associator)
+			return autoFixAll(adapter, detector)
 		}
 
 		// Handle specific session
@@ -99,7 +99,7 @@ func clearUUID(adapter *dolt.Adapter, sessionName string, associator *fix.Associ
 	return nil
 }
 
-func autoFixAll(adapter *dolt.Adapter, detector *detection.Detector, associator *fix.Associator) error {
+func autoFixAll(adapter *dolt.Adapter, detector *detection.Detector) error {
 	fmt.Println("Scanning for sessions to auto-fix...")
 
 	// Get all sessions from Dolt

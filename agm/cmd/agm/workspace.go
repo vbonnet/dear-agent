@@ -479,43 +479,7 @@ func runWorkspaceNew(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Prompt for workspace root path
-	var rootPath string
-	err = huh.NewInput().
-		Title("Workspace root path").
-		Description("Enter the root directory for this workspace (will be created if doesn't exist)").
-		Placeholder("~/src/my-project").
-		Value(&rootPath).
-		Validate(func(s string) error {
-			if s == "" {
-				return fmt.Errorf("root path cannot be empty")
-			}
-			// Expand home directory
-			expanded := workspace.ExpandHome(s)
-			// Must be absolute path
-			if !filepath.IsAbs(expanded) {
-				return fmt.Errorf("path must be absolute: %s", expanded)
-			}
-			// Check if path exists
-			if _, err := os.Stat(expanded); os.IsNotExist(err) {
-				// Path doesn't exist - check if parent is writable
-				parent := filepath.Dir(expanded)
-				if _, err := os.Stat(parent); os.IsNotExist(err) {
-					return fmt.Errorf("parent directory does not exist: %s", parent)
-				}
-				// Try to create a test file in parent to check writability
-				testFile := filepath.Join(parent, ".agm-test-"+filepath.Base(expanded))
-				if f, err := os.Create(testFile); err == nil {
-					f.Close()
-					os.Remove(testFile)
-				} else {
-					return fmt.Errorf("parent directory is not writable: %s", parent)
-				}
-			}
-			return nil
-		}).
-		Run()
-
+	rootPath, err := promptWorkspaceRoot()
 	if err != nil {
 		return err
 	}
@@ -568,6 +532,47 @@ func runWorkspaceNew(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\n")
 
 	return nil
+}
+
+// promptWorkspaceRoot interactively prompts for a workspace root directory
+// and validates it (must be absolute, parent must exist + be writable when the
+// path itself doesn't exist).
+func promptWorkspaceRoot() (string, error) {
+	var rootPath string
+	err := huh.NewInput().
+		Title("Workspace root path").
+		Description("Enter the root directory for this workspace (will be created if doesn't exist)").
+		Placeholder("~/src/my-project").
+		Value(&rootPath).
+		Validate(func(s string) error {
+			if s == "" {
+				return fmt.Errorf("root path cannot be empty")
+			}
+			expanded := workspace.ExpandHome(s)
+			if !filepath.IsAbs(expanded) {
+				return fmt.Errorf("path must be absolute: %s", expanded)
+			}
+			if _, err := os.Stat(expanded); !os.IsNotExist(err) {
+				return nil
+			}
+			parent := filepath.Dir(expanded)
+			if _, err := os.Stat(parent); os.IsNotExist(err) {
+				return fmt.Errorf("parent directory does not exist: %s", parent)
+			}
+			testFile := filepath.Join(parent, ".agm-test-"+filepath.Base(expanded))
+			f, err := os.Create(testFile)
+			if err != nil {
+				return fmt.Errorf("parent directory is not writable: %s", parent)
+			}
+			f.Close()
+			os.Remove(testFile)
+			return nil
+		}).
+		Run()
+	if err != nil {
+		return "", err
+	}
+	return rootPath, nil
 }
 
 // saveWorkspaceConfigAtomic saves workspace config atomically with backup
@@ -654,7 +659,7 @@ func formatWorkspaceStatus(ws *workspace.Workspace, isDefault bool) string {
 
 // countWorkspaceSessions counts sessions in a workspace using Dolt
 // Note: Only works for the current workspace (Phase 3 limitation)
-func countWorkspaceSessions(workspaceName string, sessionsDir string) (int, []*manifest.Manifest, error) {
+func countWorkspaceSessions(workspaceName string, _ string) (int, []*manifest.Manifest, error) {
 	// Only query Dolt for the current workspace
 	if cfg.Workspace == workspaceName {
 		adapter, err := getStorage()

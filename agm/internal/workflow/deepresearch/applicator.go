@@ -1,5 +1,5 @@
-// Package deep_research provides deep_research functionality.
-package deep_research
+// Package deepresearch provides deepresearch functionality.
+package deepresearch
 
 import (
 	"context"

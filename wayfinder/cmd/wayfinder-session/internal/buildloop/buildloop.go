@@ -92,6 +92,7 @@ type MonitoringResult struct {
 // RiskLevel represents task risk level
 type RiskLevel string
 
+// Task RiskLevel values, sized roughly by lines-of-code impact.
 const (
 	RiskXS RiskLevel = "XS" // Extra small (< 50 LOC)
 	RiskS  RiskLevel = "S"  // Small (50-200 LOC)
@@ -180,7 +181,7 @@ func (bl *BuildLoop) Execute() (*TaskResult, error) {
 		}
 
 		// Record transition
-		bl.recordTransition(bl.currentState, nextState, transition.Trigger, true, "")
+		bl.recordTransition(bl.currentState, nextState, transition.Trigger)
 
 		// Transition to next state
 		bl.currentState = nextState
@@ -448,14 +449,13 @@ func (bl *BuildLoop) executeIntegrateFail() (State, error) {
 }
 
 // recordTransition records a state transition
-func (bl *BuildLoop) recordTransition(from, to State, trigger string, success bool, errMsg string) {
+func (bl *BuildLoop) recordTransition(from, to State, trigger string) {
 	record := StateTransitionRecord{
 		From:      from,
 		To:        to,
 		Timestamp: time.Now(),
 		Trigger:   trigger,
-		Success:   success,
-		Error:     errMsg,
+		Success:   true,
 	}
 	bl.stateHistory = append(bl.stateHistory, record)
 }

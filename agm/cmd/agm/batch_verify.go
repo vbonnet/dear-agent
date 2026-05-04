@@ -99,10 +99,7 @@ func runBatchVerify(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		names := strings.Split(batchVerifySessions, ",")
-		manifests, err = loadNamedSessions(adapter, names)
-		if err != nil {
-			return err
-		}
+		manifests = loadNamedSessions(adapter, names)
 	}
 
 	if len(manifests) == 0 {
@@ -146,7 +143,7 @@ func loadAllArchivedSessions(adapter *dolt.Adapter) ([]*manifest.Manifest, error
 	return filtered, nil
 }
 
-func loadNamedSessions(adapter *dolt.Adapter, names []string) ([]*manifest.Manifest, error) {
+func loadNamedSessions(adapter *dolt.Adapter, names []string) []*manifest.Manifest {
 	var manifests []*manifest.Manifest
 	for _, name := range names {
 		name = strings.TrimSpace(name)
@@ -164,7 +161,7 @@ func loadNamedSessions(adapter *dolt.Adapter, names []string) ([]*manifest.Manif
 		}
 		manifests = append(manifests, m)
 	}
-	return manifests, nil
+	return manifests
 }
 
 func verifyBatch(manifests []*manifest.Manifest) *BatchVerifyReport {

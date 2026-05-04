@@ -8,8 +8,10 @@ import (
 	"github.com/vbonnet/dear-agent/agm/test/bdd/internal/adapters/mock"
 )
 
-// Type aliases for easier use in step definitions
+// CreateSessionRequest aliases mock.CreateSessionRequest for step definitions.
 type CreateSessionRequest = mock.CreateSessionRequest
+
+// SendMessageRequest aliases mock.SendMessageRequest for step definitions.
 type SendMessageRequest = mock.SendMessageRequest
 
 // Environment manages test state and adapters

@@ -23,6 +23,7 @@ var (
 	clean    = flag.Bool("clean", false, "Clean up test data before creating")
 )
 
+//nolint:gocyclo // reason: linear test-data setup — extracting per-step helpers would obscure the linear setup script
 func main() {
 	flag.Parse()
 

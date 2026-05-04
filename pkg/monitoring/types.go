@@ -85,7 +85,7 @@ const (
 	EventFileDeleted  = "sub_agent.file.deleted"
 	EventGitCommit    = "sub_agent.git.commit"
 	EventTestStarted  = "sub_agent.test.started"
-	EventTestPassed   = "sub_agent.test.passed"
+	EventTestPassed   = "sub_agent.test.passed" //nolint:gosec // G101: event name constant, not a credential
 	EventTestFailed   = "sub_agent.test.failed"
 	EventAgentStarted = "sub_agent.started"
 	EventAgentDone    = "sub_agent.completed"

@@ -29,12 +29,13 @@ type TaskDefinition struct {
 // TaskStatus represents the execution state of a task.
 type TaskStatus string
 
+// Task execution state values.
 const (
-	TaskStatusPending  TaskStatus = "pending"
-	TaskStatusRunning  TaskStatus = "running"
-	TaskStatusSuccess  TaskStatus = "success"
-	TaskStatusFailed   TaskStatus = "failed"
-	TaskStatusSkipped  TaskStatus = "skipped"
+	TaskStatusPending TaskStatus = "pending"
+	TaskStatusRunning TaskStatus = "running"
+	TaskStatusSuccess TaskStatus = "success"
+	TaskStatusFailed  TaskStatus = "failed"
+	TaskStatusSkipped TaskStatus = "skipped"
 )
 
 // TaskResult holds the result of executing a single task.

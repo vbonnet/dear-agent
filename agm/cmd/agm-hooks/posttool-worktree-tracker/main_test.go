@@ -478,10 +478,7 @@ func TestRun_NonBashTool(t *testing.T) {
 	cleanup := mockStdin(t, data)
 	defer cleanup()
 
-	exitCode := run()
-	if exitCode != 0 {
-		t.Errorf("Expected exit code 0 for non-Bash tool, got %d", exitCode)
-	}
+	run()
 }
 
 func TestRun_FailedCommand(t *testing.T) {
@@ -500,10 +497,7 @@ func TestRun_FailedCommand(t *testing.T) {
 	cleanup := mockStdin(t, data)
 	defer cleanup()
 
-	exitCode := run()
-	if exitCode != 0 {
-		t.Errorf("Expected exit code 0 for failed command (non-fatal skip), got %d", exitCode)
-	}
+	run()
 }
 
 func TestRun_NonWorktreeCommand(t *testing.T) {
@@ -522,10 +516,7 @@ func TestRun_NonWorktreeCommand(t *testing.T) {
 	cleanup := mockStdin(t, data)
 	defer cleanup()
 
-	exitCode := run()
-	if exitCode != 0 {
-		t.Errorf("Expected exit code 0 for non-worktree command, got %d", exitCode)
-	}
+	run()
 }
 
 func TestRun_WorktreeAddNoSession(t *testing.T) {
@@ -546,10 +537,7 @@ func TestRun_WorktreeAddNoSession(t *testing.T) {
 	cleanup := mockStdin(t, data)
 	defer cleanup()
 
-	exitCode := run()
-	if exitCode != 0 {
-		t.Errorf("Expected exit code 0 (no session = skip), got %d", exitCode)
-	}
+	run()
 }
 
 func TestRun_WorktreeRemoveNoSession(t *testing.T) {
@@ -570,30 +558,21 @@ func TestRun_WorktreeRemoveNoSession(t *testing.T) {
 	cleanup := mockStdin(t, data)
 	defer cleanup()
 
-	exitCode := run()
-	if exitCode != 0 {
-		t.Errorf("Expected exit code 0 (no session = skip), got %d", exitCode)
-	}
+	run()
 }
 
 func TestRun_MalformedStdin(t *testing.T) {
 	cleanup := mockStdin(t, []byte("this is not json"))
 	defer cleanup()
 
-	exitCode := run()
-	if exitCode != 0 {
-		t.Errorf("Expected exit code 0 for malformed stdin (non-fatal), got %d", exitCode)
-	}
+	run()
 }
 
 func TestRun_EmptyStdin(t *testing.T) {
 	cleanup := mockStdin(t, []byte(""))
 	defer cleanup()
 
-	exitCode := run()
-	if exitCode != 0 {
-		t.Errorf("Expected exit code 0 for empty stdin (non-fatal), got %d", exitCode)
-	}
+	run()
 }
 
 func TestRun_DebugLogging(t *testing.T) {
@@ -619,16 +598,13 @@ func TestRun_DebugLogging(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stderr = w
 
-	exitCode := run()
+	run()
 
 	w.Close()
 	var buf bytes.Buffer
 	buf.ReadFrom(r)
 	os.Stderr = origStderr
 
-	if exitCode != 0 {
-		t.Errorf("Expected exit code 0, got %d", exitCode)
-	}
 
 	output := buf.String()
 	if !strings.Contains(output, "Detected worktree add") {

@@ -84,19 +84,13 @@ func ExtractOutputContent(line string) string {
 	content := parts[2]
 
 	// Unescape octal sequences
-	unescaped, err := unescapeOctal(content)
-	if err != nil {
-		// Return original if unescape fails
-		return content
-	}
-
-	return unescaped
+	return unescapeOctal(content)
 }
 
 // unescapeOctal converts tmux octal escapes to actual characters
 // Example: "hello\040world\012" → "hello world\n"
 // tmux uses \NNN format where NNN are octal digits (0-7)
-func unescapeOctal(s string) (string, error) {
+func unescapeOctal(s string) string {
 	var result strings.Builder
 	i := 0
 
@@ -119,7 +113,7 @@ func unescapeOctal(s string) (string, error) {
 		i++
 	}
 
-	return result.String(), nil
+	return result.String()
 }
 
 // isOctal checks if string contains only octal digits (0-7)

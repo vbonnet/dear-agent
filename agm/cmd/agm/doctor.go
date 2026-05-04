@@ -374,14 +374,15 @@ func detectDuplicateSessionDirs(sessionsDir string) []DuplicateSessionDir {
 		var format string
 
 		// Check for old format: claude-N-session or <name>-session
-		if strings.HasSuffix(dirName, "-session") {
+		switch {
+		case strings.HasSuffix(dirName, "-session"):
 			sessionName = strings.TrimSuffix(dirName, "-session")
 			format = "old"
-		} else if strings.HasPrefix(dirName, "session-") {
+		case strings.HasPrefix(dirName, "session-"):
 			// New format: session-<name>
 			sessionName = strings.TrimPrefix(dirName, "session-")
 			format = "new"
-		} else {
+		default:
 			// Unknown format, skip
 			continue
 		}

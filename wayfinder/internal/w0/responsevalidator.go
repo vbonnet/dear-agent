@@ -9,6 +9,7 @@ import (
 // TechnicalLevel indicates the technical sophistication of a response.
 type TechnicalLevel string
 
+// TechnicalLevel values for response validation.
 const (
 	TechLevelHigh TechnicalLevel = "high"
 	TechLevelLow  TechnicalLevel = "low"
@@ -144,6 +145,7 @@ func HasUncertaintyIndicators(text string) bool {
 }
 
 // CalculateClarityScore calculates a clarity score (0.0-1.0).
+//nolint:gocyclo // reason: linear scorer summing many independent clarity contributions
 func CalculateClarityScore(response string, questionType QuestionType) float64 {
 	score := 0.0
 	wc := countWords(response)
@@ -162,11 +164,12 @@ func CalculateClarityScore(response string, questionType QuestionType) float64 {
 		optimalMax = 50
 	}
 
-	if wc >= optimalMin && wc <= optimalMax {
+	switch {
+	case wc >= optimalMin && wc <= optimalMax:
 		score += 0.3
-	} else if wc < optimalMin {
+	case wc < optimalMin:
 		score += float64(wc) / float64(optimalMin) * 0.3
-	} else {
+	default:
 		score += 0.2
 	}
 

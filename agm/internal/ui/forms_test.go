@@ -105,10 +105,8 @@ func TestValidateSessionName(t *testing.T) {
 				if tt.errorMsg != "" && !contains(err.Error(), tt.errorMsg) {
 					t.Errorf("expected error containing '%s', got '%s'", tt.errorMsg, err.Error())
 				}
-			} else {
-				if err != nil {
-					t.Errorf("expected no error, got: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("expected no error, got: %v", err)
 			}
 		})
 	}
@@ -174,10 +172,8 @@ func TestValidateProjectPath(t *testing.T) {
 				if tt.errorMsg != "" && !contains(err.Error(), tt.errorMsg) {
 					t.Errorf("expected error containing '%s', got '%s'", tt.errorMsg, err.Error())
 				}
-			} else {
-				if err != nil {
-					t.Errorf("expected no error, got: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("expected no error, got: %v", err)
 			}
 		})
 	}

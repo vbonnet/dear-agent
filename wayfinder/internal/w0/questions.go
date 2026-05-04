@@ -8,6 +8,7 @@ import (
 // QuestionType categorizes W0 questions.
 type QuestionType string
 
+// W0 QuestionType values.
 const (
 	QuestionProblem     QuestionType = "problem"
 	QuestionImpact      QuestionType = "impact"

@@ -120,7 +120,7 @@ var (
 	ErrDuplicateMigration   = errors.New("migration already applied")
 )
 
-// Reserved prefixes that cannot be used by components
+// ReservedPrefixes are table-name prefixes that components are forbidden to claim.
 var ReservedPrefixes = []string{
 	"dolt_",
 	"mysql_",
@@ -132,6 +132,7 @@ var ReservedPrefixes = []string{
 // ComponentStatus represents the status of a component.
 type ComponentStatus string
 
+// Component installation status values.
 const (
 	StatusInstalled   ComponentStatus = "installed"
 	StatusUninstalled ComponentStatus = "uninstalled"

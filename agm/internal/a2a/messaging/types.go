@@ -12,6 +12,7 @@ import (
 // MessageType identifies the kind of A2A message.
 type MessageType string
 
+// A2A MessageType values.
 const (
 	TypeRequest      MessageType = "request"      // Ask another agent to do something
 	TypeResponse     MessageType = "response"     // Reply to a request
@@ -22,6 +23,7 @@ const (
 // RoutingMode determines how a message is delivered.
 type RoutingMode string
 
+// RoutingMode values controlling delivery scope.
 const (
 	RouteDirect    RoutingMode = "direct"    // To a specific agent by ID
 	RouteBroadcast RoutingMode = "broadcast" // To all agents
@@ -31,6 +33,7 @@ const (
 // Priority indicates message urgency.
 type Priority string
 
+// Priority values for message urgency.
 const (
 	PriorityLow    Priority = "low"
 	PriorityNormal Priority = "normal"

@@ -90,6 +90,7 @@ type ContentBlock struct {
 // DenialOutcome classifies what happened after a denial.
 type DenialOutcome int
 
+// DenialOutcome values describing what an agent did after a denial.
 const (
 	OutcomeUnknown           DenialOutcome = iota
 	OutcomeRetrySuccess                    // Agent retried with modified command and succeeded

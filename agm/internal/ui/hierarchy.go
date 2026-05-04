@@ -145,11 +145,12 @@ func renderHierarchyMinimal(nodes []*db.SessionNode, statuses map[string]session
 
 		// Tree connector
 		var connector string
-		if node.Depth == 0 {
+		switch {
+		case node.Depth == 0:
 			connector = ""
-		} else if isLast {
+		case isLast:
 			connector = "└─ "
-		} else {
+		default:
 			connector = "├─ "
 		}
 
@@ -243,11 +244,12 @@ func renderHierarchyCompact(nodes []*db.SessionNode, statuses map[string]session
 
 		// Tree connector
 		var connector string
-		if node.Depth == 0 {
+		switch {
+		case node.Depth == 0:
 			connector = ""
-		} else if isLast {
+		case isLast:
 			connector = "└─ "
-		} else {
+		default:
 			connector = "├─ "
 		}
 
@@ -345,11 +347,12 @@ func renderHierarchyFull(nodes []*db.SessionNode, statuses map[string]session.St
 
 		// Tree connector
 		var connector string
-		if node.Depth == 0 {
+		switch {
+		case node.Depth == 0:
 			connector = ""
-		} else if isLast {
+		case isLast:
 			connector = "└─ "
-		} else {
+		default:
 			connector = "├─ "
 		}
 

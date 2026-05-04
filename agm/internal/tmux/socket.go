@@ -125,7 +125,7 @@ func CheckSocketPermissions() error {
 	return nil
 }
 
-// GetSocketInfo returns information about the current socket
+// SocketInfo describes the current tmux socket's path, mode, and accessibility.
 type SocketInfo struct {
 	Path       string
 	Exists     bool

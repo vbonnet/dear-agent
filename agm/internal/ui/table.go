@@ -46,6 +46,7 @@ func getHeaderStyle() lipgloss.Style {
 // LayoutMode represents the terminal width-based layout mode
 type LayoutMode int
 
+// Terminal-width-based layout modes.
 const (
 	LayoutMinimal LayoutMode = iota
 	LayoutCompact
@@ -405,7 +406,11 @@ func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) str
 	sections = append(sections, "")
 
 	// Merge attached and detached into single "ACTIVE" group
-	activeGroup := append(groups["attached"], groups["detached"]...)
+	attached := groups["attached"]
+	detached := groups["detached"]
+	activeGroup := make([]*manifest.Manifest, 0, len(attached)+len(detached))
+	activeGroup = append(activeGroup, attached...)
+	activeGroup = append(activeGroup, detached...)
 	combinedGroups := map[string][]*manifest.Manifest{
 		"active":   activeGroup,
 		"stopped":  groups["stopped"],
@@ -749,67 +754,61 @@ type columnWidths struct {
 }
 
 // calculateMaxColumnWidths calculates the maximum width for each column across all groups
-func calculateMaxColumnWidths(groups map[string][]*manifest.Manifest, statuses map[string]session.StatusInfo, showTmuxColumn bool) columnWidths {
+func calculateMaxColumnWidths(groups map[string][]*manifest.Manifest, _ map[string]session.StatusInfo, showTmuxColumn bool) columnWidths {
 	widths := columnWidths{}
-
 	for _, group := range groups {
 		for _, m := range group {
-			// Name column
-			if len(m.Name) > widths.name {
-				widths.name = len(m.Name)
-			}
-
-			// Tmux column
-			if showTmuxColumn && len(m.Tmux.SessionName) > widths.tmux {
-				widths.tmux = len(m.Tmux.SessionName)
-			}
-
-			// UUID column (short UUID before first "-")
-			shortUUID := extractShortUUID(m.Claude.UUID)
-			if len(shortUUID) > widths.uuid {
-				widths.uuid = len(shortUUID)
-			}
-
-			// Workspace column
-			workspace := m.Workspace
-			if workspace == "" {
-				workspace = "-"
-			}
-			if len(workspace) > widths.workspace {
-				widths.workspace = len(workspace)
-			}
-
-			// Agent column
-			if len(m.Harness) > widths.agent {
-				widths.agent = len(m.Harness)
-			}
-
-			// Project column
-			project := compactPath(truncatePath(m.Context.Project, 40))
-			if len(project) > widths.project {
-				widths.project = len(project)
-			}
+			updateRowWidths(&widths, m, showTmuxColumn)
 		}
 	}
+	enforceMinHeaderWidths(&widths)
+	return widths
+}
 
-	// Ensure minimum widths for column headers
+// updateRowWidths grows widths to accommodate a single manifest row.
+func updateRowWidths(widths *columnWidths, m *manifest.Manifest, showTmuxColumn bool) {
+	if len(m.Name) > widths.name {
+		widths.name = len(m.Name)
+	}
+	if showTmuxColumn && len(m.Tmux.SessionName) > widths.tmux {
+		widths.tmux = len(m.Tmux.SessionName)
+	}
+	if shortUUID := extractShortUUID(m.Claude.UUID); len(shortUUID) > widths.uuid {
+		widths.uuid = len(shortUUID)
+	}
+	workspace := m.Workspace
+	if workspace == "" {
+		workspace = "-"
+	}
+	if len(workspace) > widths.workspace {
+		widths.workspace = len(workspace)
+	}
+	if len(m.Harness) > widths.agent {
+		widths.agent = len(m.Harness)
+	}
+	project := compactPath(truncatePath(m.Context.Project, 40))
+	if len(project) > widths.project {
+		widths.project = len(project)
+	}
+}
+
+// enforceMinHeaderWidths ensures each column is wide enough for its header.
+func enforceMinHeaderWidths(widths *columnWidths) {
 	if widths.name < 4 {
-		widths.name = 4 // "NAME" header
+		widths.name = 4
 	}
 	if widths.uuid < 4 {
-		widths.uuid = 4 // "UUID" header
+		widths.uuid = 4
 	}
 	if widths.workspace < 9 {
-		widths.workspace = 9 // "WORKSPACE" header
+		widths.workspace = 9
 	}
 	if widths.agent < 5 {
-		widths.agent = 5 // "AGENT" header
+		widths.agent = 5
 	}
 	if widths.project < 7 {
-		widths.project = 7 // "PROJECT" header
+		widths.project = 7
 	}
-
-	return widths
 }
 
 // renderGroupTableWithWidths renders a table with fixed column widths for consistent alignment

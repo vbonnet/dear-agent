@@ -84,7 +84,7 @@ func (w *StreamErrorWriter) WriteItem(item *StreamErrorItem) error {
 	return nil
 }
 
-// BuildItem constructs a StreamErrorItem from accumulator state.
+// BuildStreamErrorItem constructs a StreamErrorItem from accumulator state.
 func BuildStreamErrorItem(acc *PatternAccumulator, patternID string) *StreamErrorItem {
 	acc.mu.Lock()
 	defer acc.mu.Unlock()

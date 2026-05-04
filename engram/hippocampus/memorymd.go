@@ -38,14 +38,15 @@ func ParseMemoryMD(content string) (*MemoryDocument, error) {
 
 	for _, line := range lines {
 		level, heading := parseHeading(line)
-		if level > 0 {
+		switch {
+		case level > 0:
 			inPreamble = false
 			levels = append(levels, level)
 			headings = append(headings, heading)
 			contents = append(contents, nil)
-		} else if inPreamble {
+		case inPreamble:
 			preambleLines = append(preambleLines, line)
-		} else if len(levels) > 0 {
+		case len(levels) > 0:
 			idx := len(contents) - 1
 			contents[idx] = append(contents[idx], line)
 		}

@@ -19,6 +19,7 @@ const (
 // Mode controls how a category is enforced.
 type Mode string
 
+// Enforcement mode values for pattern categories.
 const (
 	ModeBlock Mode = "block"
 	ModeWarn  Mode = "warn"

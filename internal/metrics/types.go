@@ -7,6 +7,7 @@ import "time"
 // Category classifies a metric.
 type Category string
 
+// Category values for metric records.
 const (
 	CategoryOutcomeQuality Category = "outcome_quality"
 	CategoryHealth         Category = "health"
@@ -15,6 +16,7 @@ const (
 // MetricName identifies a specific metric.
 type MetricName string
 
+// Metric name values.
 const (
 	MetricTestPassRateDelta   MetricName = "test_pass_rate_delta"
 	MetricFalseCompletionRate MetricName = "false_completion_rate"

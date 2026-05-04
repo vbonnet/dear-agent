@@ -43,11 +43,9 @@ func newProgressBarBackend(opts Options) *progressBarBackend {
 				BarEnd:        "]",
 			}),
 		)
-	} else {
+	} else if opts.Label != "" {
 		// Non-TTY mode: Print initial message
-		if opts.Label != "" {
-			fmt.Println(opts.Label)
-		}
+		fmt.Println(opts.Label)
 	}
 
 	return backend
@@ -70,15 +68,13 @@ func (p *progressBarBackend) Update(current int, message string) {
 		}
 		// Set current progress value
 		p.bar.Set(current)
-	} else {
+	} else if p.total > 0 {
 		// Non-TTY mode: Print progress percentage
-		if p.total > 0 {
-			pct := (current * 100) / p.total
-			if message != "" {
-				fmt.Printf("%s %d%%\n", message, pct)
-			} else {
-				fmt.Printf("%d%%\n", pct)
-			}
+		pct := (current * 100) / p.total
+		if message != "" {
+			fmt.Printf("%s %d%%\n", message, pct)
+		} else {
+			fmt.Printf("%d%%\n", pct)
 		}
 	}
 }

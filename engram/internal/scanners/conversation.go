@@ -47,10 +47,12 @@ func NewConversationScanner() *ConversationScanner {
 	}
 }
 
+// Name returns the scanner's identifier.
 func (s *ConversationScanner) Name() string {
 	return s.name
 }
 
+// Priority returns the scanner's execution priority (lower runs earlier).
 func (s *ConversationScanner) Priority() int {
 	return s.priority
 }

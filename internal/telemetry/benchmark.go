@@ -62,16 +62,10 @@ func RunControlVariantBenchmark(
 	}
 
 	// Run control variant
-	controlRuns, err := executeBenchmarkVariant(controlFn, VariantControl, sampleSize)
-	if err != nil {
-		return nil, fmt.Errorf("control variant failed: %w", err)
-	}
+	controlRuns := executeBenchmarkVariant(controlFn, VariantControl, sampleSize)
 
 	// Run experiment variant
-	experimentRuns, err := executeBenchmarkVariant(experimentFn, VariantExperiment, sampleSize)
-	if err != nil {
-		return nil, fmt.Errorf("experiment variant failed: %w", err)
-	}
+	experimentRuns := executeBenchmarkVariant(experimentFn, VariantExperiment, sampleSize)
 
 	// Compute statistics
 	result := computeBenchmarkStatistics(controlRuns, experimentRuns)
@@ -79,7 +73,7 @@ func RunControlVariantBenchmark(
 }
 
 // executeBenchmarkVariant runs a variant N times and collects results.
-func executeBenchmarkVariant(fn func() error, variant BenchmarkVariant, n int) ([]BenchmarkRun, error) {
+func executeBenchmarkVariant(fn func() error, variant BenchmarkVariant, n int) []BenchmarkRun {
 	runs := make([]BenchmarkRun, n)
 
 	for i := 0; i < n; i++ {
@@ -99,7 +93,7 @@ func executeBenchmarkVariant(fn func() error, variant BenchmarkVariant, n int) (
 		}
 	}
 
-	return runs, nil
+	return runs
 }
 
 // computeBenchmarkStatistics analyzes control vs experiment results.

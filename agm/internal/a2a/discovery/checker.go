@@ -164,35 +164,44 @@ func (c *Checker) ParseMessageHeader(content string) *MessageHeader {
 		return nil
 	}
 
-	headerBlock := lines[headerStart+1 : headerEnd]
+	message := parseMessageHeaderFields(lines[headerStart+1 : headerEnd])
+	message.ProposalPreview = extractProposalPreview(lines, headerEnd)
+	return message
+}
 
+// parseMessageHeaderFields walks the **Field**: lines in a header block and
+// populates the corresponding MessageHeader fields.
+func parseMessageHeaderFields(headerBlock []string) *MessageHeader {
 	message := &MessageHeader{}
 	for _, line := range headerBlock {
 		line = strings.TrimSpace(line)
-
-		if strings.HasPrefix(line, "**Agent ID**:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				message.AgentID = strings.TrimSpace(parts[1])
-			}
-		} else if strings.HasPrefix(line, "**Timestamp**:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				message.Timestamp = strings.TrimSpace(parts[1])
-			}
-		} else if strings.HasPrefix(line, "**Status**:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				message.Status = strings.TrimSpace(parts[1])
-			}
-		} else if strings.HasPrefix(line, "**Message #**:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				message.MessageNumber = strings.TrimSpace(parts[1])
-			}
+		switch {
+		case strings.HasPrefix(line, "**Agent ID**:"):
+			message.AgentID = trimAfterColon(line)
+		case strings.HasPrefix(line, "**Timestamp**:"):
+			message.Timestamp = trimAfterColon(line)
+		case strings.HasPrefix(line, "**Status**:"):
+			message.Status = trimAfterColon(line)
+		case strings.HasPrefix(line, "**Message #**:"):
+			message.MessageNumber = trimAfterColon(line)
 		}
 	}
+	return message
+}
 
+// trimAfterColon returns the trimmed value after the first colon in line,
+// or "" if there is no colon.
+func trimAfterColon(line string) string {
+	parts := strings.SplitN(line, ":", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
+}
+
+// extractProposalPreview pulls a 200-char preview from the first ### Proposal
+// or ### Response section that appears after headerEnd.
+func extractProposalPreview(lines []string, headerEnd int) string {
 	proposalStart := -1
 	for i := headerEnd; i < len(lines); i++ {
 		if strings.Contains(lines[i], "### Proposal") || strings.Contains(lines[i], "### Response") {
@@ -200,23 +209,21 @@ func (c *Checker) ParseMessageHeader(content string) *MessageHeader {
 			break
 		}
 	}
-
-	if proposalStart >= 0 && proposalStart < len(lines) {
-		var proposalLines []string
-		for i := proposalStart; i < len(lines); i++ {
-			if strings.HasPrefix(lines[i], "###") {
-				break
-			}
-			proposalLines = append(proposalLines, lines[i])
-		}
-		preview := strings.Join(proposalLines, " ")
-		if len(preview) > 200 {
-			preview = preview[:200]
-		}
-		message.ProposalPreview = strings.TrimSpace(preview)
+	if proposalStart < 0 || proposalStart >= len(lines) {
+		return ""
 	}
-
-	return message
+	var proposalLines []string
+	for i := proposalStart; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "###") {
+			break
+		}
+		proposalLines = append(proposalLines, lines[i])
+	}
+	preview := strings.Join(proposalLines, " ")
+	if len(preview) > 200 {
+		preview = preview[:200]
+	}
+	return strings.TrimSpace(preview)
 }
 
 // CheckChannel checks if channel has updates requiring notification

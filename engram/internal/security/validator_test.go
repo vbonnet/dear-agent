@@ -351,10 +351,8 @@ func TestSuspiciousPermissionLogging(t *testing.T) {
 				if _, ok := logEntry["risk"].(string); !ok {
 					t.Error("Log missing 'risk' field")
 				}
-			} else {
-				if logOutput != "" {
-					t.Errorf("Expected no log output for path %q, got: %s", tt.path, logOutput)
-				}
+			} else if logOutput != "" {
+				t.Errorf("Expected no log output for path %q, got: %s", tt.path, logOutput)
 			}
 		})
 	}

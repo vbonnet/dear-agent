@@ -11,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ValidatorVersion is the version stamped into validator signatures.
 const ValidatorVersion = "1.0.0"
 
 // AddSignature adds validation signature to file frontmatter

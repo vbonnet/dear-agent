@@ -5,6 +5,7 @@ import "os"
 // Platform identifies an AI coding platform.
 type Platform string
 
+// Recognized AI coding platform values.
 const (
 	PlatformClaudeCode Platform = "claude-code"
 	PlatformCursor     Platform = "cursor"

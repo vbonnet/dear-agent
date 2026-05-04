@@ -104,7 +104,8 @@ func runAudit(cmd *cobra.Command, args []string) error {
 		return outputAuditJSON(report)
 	}
 
-	return outputHuman(report)
+	outputHuman(report)
+	return nil
 }
 
 // outputAuditJSON outputs the audit report in JSON format
@@ -115,7 +116,7 @@ func outputAuditJSON(report *audit.AuditReport) error {
 }
 
 // outputHuman outputs the audit report in human-readable format
-func outputHuman(report *audit.AuditReport) error {
+func outputHuman(report *audit.AuditReport) {
 	// Header
 	fmt.Println(ui.Blue("═══ AGM Session Audit ═══"))
 	fmt.Println()
@@ -149,7 +150,7 @@ func outputHuman(report *audit.AuditReport) error {
 	// Health status
 	if report.Healthy {
 		ui.PrintSuccess(fmt.Sprintf("✓ All checks passed! (%d sessions audited)", report.ManifestsScanned))
-		return nil
+		return
 	}
 
 	// Issues summary
@@ -205,8 +206,6 @@ func outputHuman(report *audit.AuditReport) error {
 		fmt.Println(ui.Blue("Recommended Actions:"))
 		displayRecommendationsSummary(report.Issues)
 	}
-
-	return nil
 }
 
 // groupBySeverity groups issues by severity level

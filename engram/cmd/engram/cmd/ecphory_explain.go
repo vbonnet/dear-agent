@@ -174,11 +174,12 @@ func getExplainQuery(args []string) (string, error) {
 	}
 
 	var query string
-	if explainCfg.Query != "" {
+	switch {
+	case explainCfg.Query != "":
 		query = explainCfg.Query
-	} else if len(args) > 0 {
+	case len(args) > 0:
 		query = args[0]
-	} else {
+	default:
 		return "", cli.InvalidInputError("query", "", "provide either --query flag or positional argument")
 	}
 

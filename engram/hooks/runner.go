@@ -143,11 +143,12 @@ func calculateSummary(results []VerificationResult, warnings []HookWarning) Summ
 
 	// Determine exit code
 	// 0 = all pass, 1 = any fail, 2 = warnings only
-	if summary.FailedHooks > 0 {
+	switch {
+	case summary.FailedHooks > 0:
 		summary.ExitCode = 1
-	} else if summary.WarningHooks > 0 || len(warnings) > 0 {
+	case summary.WarningHooks > 0 || len(warnings) > 0:
 		summary.ExitCode = 2
-	} else {
+	default:
 		summary.ExitCode = 0
 	}
 

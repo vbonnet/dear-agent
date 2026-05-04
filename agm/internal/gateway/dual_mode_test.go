@@ -281,7 +281,7 @@ func TestCreateHandoff(t *testing.T) {
 func TestGenerateNextSteps_ArchitectToImplementer(t *testing.T) {
 	gateway := NewDualModeGateway(ModeImplementer)
 
-	steps := gateway.generateNextSteps(ModeArchitect, ModeImplementer, "Design complete")
+	steps := gateway.generateNextSteps(ModeArchitect, ModeImplementer)
 
 	if len(steps) == 0 {
 		t.Error("Expected next steps, got empty list")
@@ -304,7 +304,7 @@ func TestGenerateNextSteps_ArchitectToImplementer(t *testing.T) {
 func TestGenerateNextSteps_ImplementerToArchitect(t *testing.T) {
 	gateway := NewDualModeGateway(ModeImplementer)
 
-	steps := gateway.generateNextSteps(ModeImplementer, ModeArchitect, "Implementation complete")
+	steps := gateway.generateNextSteps(ModeImplementer, ModeArchitect)
 
 	if len(steps) == 0 {
 		t.Error("Expected next steps, got empty list")

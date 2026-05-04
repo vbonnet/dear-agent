@@ -42,9 +42,7 @@ func NewSessionForm(existingSessions []*Session, cfg *Config) (*NewSessionFormDa
 			Description("Path to your project (absolute or relative)").
 			Placeholder(cwd).
 			Value(&data.Project).
-			Validate(func(s string) error {
-				return validateProjectPath(s)
-			}),
+			Validate(validateProjectPath),
 	)
 
 	// Step 3: Purpose/description (optional)

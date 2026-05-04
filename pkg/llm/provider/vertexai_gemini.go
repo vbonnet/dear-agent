@@ -314,7 +314,7 @@ func (p *VertexAIGeminiProvider) calculateUsage(resp *aiplatformpb.PredictRespon
 }
 
 // recordCost records API usage costs via cost sink.
-func (p *VertexAIGeminiProvider) recordCost(ctx context.Context, model string, resp *aiplatformpb.PredictResponse, usage Usage) error {
+func (p *VertexAIGeminiProvider) recordCost(ctx context.Context, model string, _ *aiplatformpb.PredictResponse, usage Usage) error {
 	tokens := costtrack.Tokens{
 		Input:      usage.InputTokens,
 		Output:     usage.OutputTokens,

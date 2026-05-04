@@ -455,7 +455,7 @@ func TestSendMessage(t *testing.T) {
 			}
 
 			// Create adapter with mock client
-			adapter := newOpenAIAdapterWithClient(mockClient, sessionManager, "gpt-4")
+			adapter := newOpenAIAdapterWithClient(mockClient, sessionManager)
 
 			// Send message
 			err = adapter.SendMessage(sessionID, tt.message)
@@ -503,7 +503,7 @@ func TestSendMessage_NonExistentSession(t *testing.T) {
 		capturedModel: "gpt-4",
 	}
 
-	adapter := newOpenAIAdapterWithClient(mockClient, sessionManager, "gpt-4")
+	adapter := newOpenAIAdapterWithClient(mockClient, sessionManager)
 
 	// Try to send message to non-existent session
 	err = adapter.SendMessage("non-existent-session", Message{
@@ -554,7 +554,7 @@ func TestSendMessage_ContextPropagation(t *testing.T) {
 		capturedModel: "gpt-4",
 	}
 
-	adapter := newOpenAIAdapterWithClient(mockClient, sessionManager, "gpt-4")
+	adapter := newOpenAIAdapterWithClient(mockClient, sessionManager)
 
 	// Send new message
 	err = adapter.SendMessage(sessionID, Message{
@@ -607,7 +607,7 @@ func TestSendMessage_MultipleConsecutive(t *testing.T) {
 		capturedModel: "gpt-4",
 	}
 
-	adapter := newOpenAIAdapterWithClient(mockClient, sessionManager, "gpt-4")
+	adapter := newOpenAIAdapterWithClient(mockClient, sessionManager)
 
 	// Send three messages in sequence
 	messages := []string{"Message 1", "Message 2", "Message 3"}

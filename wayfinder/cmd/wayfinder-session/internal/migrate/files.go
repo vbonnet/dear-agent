@@ -420,7 +420,7 @@ func (fm *FileMigrator) generateOutlineFromD4(d4Content string) string {
 	return outline
 }
 
-func (fm *FileMigrator) generateFeatureFromS6(s6Content string) string {
+func (fm *FileMigrator) generateFeatureFromS6(_ string) string {
 	feature := `Feature: Project Implementation
 
   Generated from S6-design.md on ` + time.Now().Format("2006-01-02") + `

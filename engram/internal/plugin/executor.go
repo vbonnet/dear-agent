@@ -147,7 +147,9 @@ func (e *Executor) execute(ctx context.Context, plugin *Plugin, cmdName string, 
 	}
 
 	// Combine manifest args with runtime args
-	cmdArgs := append(cmd.Args, args...)
+	cmdArgs := make([]string, 0, len(cmd.Args)+len(args))
+	cmdArgs = append(cmdArgs, cmd.Args...)
+	cmdArgs = append(cmdArgs, args...)
 
 	e.logger.Debug(ctx, "Building sandboxed command",
 		errCtx.WithExtra("executable", executable).WithExtra("args", cmdArgs))

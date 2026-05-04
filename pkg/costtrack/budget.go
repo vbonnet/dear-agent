@@ -11,6 +11,7 @@ import (
 // BudgetPeriod represents the time window for a budget limit.
 type BudgetPeriod string
 
+// Recognized BudgetPeriod values.
 const (
 	BudgetDaily   BudgetPeriod = "daily"
 	BudgetWeekly  BudgetPeriod = "weekly"

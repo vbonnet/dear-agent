@@ -262,11 +262,11 @@ func (p *Provider) copyDirectoryRecursive(src, dst string) error {
 			if err != nil {
 				return err
 			}
-			return os.Symlink(target, dstPath)
+			return os.Symlink(target, dstPath) //nolint:gosec // G122: trusted local paths, symlink TOCTOU not in threat model
 		}
 
 		// Handle regular files
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //nolint:gosec // G122: trusted local paths, symlink TOCTOU not in threat model
 		if err != nil {
 			return err
 		}

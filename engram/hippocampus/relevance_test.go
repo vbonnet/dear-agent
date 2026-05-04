@@ -65,10 +65,8 @@ Use real database in tests, not mocks.
 
 	if f, ok := found["feedback_testing.md"]; !ok {
 		t.Error("missing feedback_testing.md")
-	} else {
-		if f.Type != "feedback" {
-			t.Errorf("type = %q, want %q", f.Type, "feedback")
-		}
+	} else if f.Type != "feedback" {
+		t.Errorf("type = %q, want %q", f.Type, "feedback")
 	}
 }
 

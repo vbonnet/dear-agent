@@ -122,6 +122,7 @@ func (v *Validator) Validate() []ValidationError {
 }
 
 // validateFrontmatter validates YAML frontmatter structure and required fields.
+//nolint:gocyclo // reason: linear field-by-field frontmatter validation
 func (v *Validator) validateFrontmatter(content string) {
 	// Extract frontmatter using regex
 	frontmatterRegex := regexp.MustCompile(`(?s)^---\s*\n(.*?)\n---\s*\n`)

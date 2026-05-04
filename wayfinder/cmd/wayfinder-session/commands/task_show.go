@@ -21,6 +21,7 @@ Examples:
 	RunE: runTaskShow,
 }
 
+//nolint:gocyclo // reason: linear CLI driver formatting many task fields
 func runTaskShow(cmd *cobra.Command, args []string) error {
 	projectDir := GetProjectDirectory()
 	taskID := args[0]

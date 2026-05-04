@@ -155,7 +155,7 @@ func (f *Factory) newAnthropicProvider(authMethod auth.AuthMethod, model string)
 }
 
 // newGeminiProvider creates Gemini/Google provider based on auth hierarchy.
-func (f *Factory) newGeminiProvider(authMethod auth.AuthMethod, model string) (Provider, error) {
+func (f *Factory) newGeminiProvider(authMethod auth.AuthMethod, _ string) (Provider, error) {
 	switch authMethod {
 	case auth.AuthVertexAI:
 		// TODO: Implement VertexAIGeminiProvider
@@ -176,7 +176,7 @@ func (f *Factory) newGeminiProvider(authMethod auth.AuthMethod, model string) (P
 }
 
 // newOpenRouterProvider creates OpenRouter provider based on auth hierarchy.
-func (f *Factory) newOpenRouterProvider(authMethod auth.AuthMethod, model string) (Provider, error) {
+func (f *Factory) newOpenRouterProvider(authMethod auth.AuthMethod, _ string) (Provider, error) {
 	switch authMethod {
 	case auth.AuthAPIKey:
 		// TODO: Implement OpenRouterProvider

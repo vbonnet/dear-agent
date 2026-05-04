@@ -149,10 +149,7 @@ func (v *ContentValidator) loadTokenBudgets() error {
 // ValidateFile runs all validation checks on a single file.
 func (v *ContentValidator) ValidateFile(filepath string) error {
 	// Get relative path for reporting
-	relPath, err := v.getRelativePath(filepath)
-	if err != nil {
-		return fmt.Errorf("failed to get relative path: %w", err)
-	}
+	relPath := v.getRelativePath(filepath)
 
 	// Read file content
 	content, err := os.ReadFile(filepath)
@@ -274,13 +271,13 @@ func (v *ContentValidator) findAllAiMdFiles() ([]string, error) {
 }
 
 // getRelativePath returns the path relative to the content directory.
-func (v *ContentValidator) getRelativePath(absPath string) (string, error) {
+func (v *ContentValidator) getRelativePath(absPath string) string {
 	relPath, err := filepath.Rel(v.contentDir, absPath)
 	if err != nil {
 		// If we can't get relative path, use the filename
-		return filepath.Base(absPath), nil //nolint:nilerr // intentional: caller signals via separate bool/optional
+		return filepath.Base(absPath)
 	}
-	return relPath, nil
+	return relPath
 }
 
 // GetErrors returns all validation errors.
@@ -453,7 +450,7 @@ func (v *ContentValidator) checkCoreStructure(filepath, content string) {
 }
 
 // checkTokenBloat detects significant token count increases via git history.
-func (v *ContentValidator) checkTokenBloat(relPath, absPath string, metadata map[string]interface{}) {
+func (v *ContentValidator) checkTokenBloat(relPath, _ string, metadata map[string]interface{}) {
 	// Get current token count
 	tokensVal, ok := metadata["tokens"]
 	if !ok {

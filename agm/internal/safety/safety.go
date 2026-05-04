@@ -15,6 +15,7 @@ import "fmt"
 // GuardViolation identifies which safety condition was triggered.
 type GuardViolation string
 
+// Recognized safety guard violation values.
 const (
 	ViolationHumanTyping          GuardViolation = "human_typing"
 	ViolationSessionUninitialized GuardViolation = "session_uninitialized"

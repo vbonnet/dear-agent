@@ -118,35 +118,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Create session ID set for filtering
-	archivedIDs := make(map[string]bool)
-	for _, s := range archivedSessions {
-		archivedIDs[s.SessionID] = true
-	}
-
-	// Build metadata for LLM search (only archived sessions)
-	var sessionMetadata []llm.SessionMetadata
-	for _, s := range sessions {
-		if archivedIDs[s.SessionID] {
-			// Find archived session details
-			var archivedSession *session.ArchivedSession
-			for _, a := range archivedSessions {
-				if a.SessionID == s.SessionID {
-					archivedSession = a
-					break
-				}
-			}
-
-			if archivedSession != nil {
-				sessionMetadata = append(sessionMetadata, llm.SessionMetadata{
-					SessionID: s.SessionID,
-					Name:      archivedSession.Name,
-					Tags:      archivedSession.Tags,
-					Project:   s.Project,
-				})
-			}
-		}
-	}
+	sessionMetadata := buildSearchMetadata(sessions, archivedSessions)
 
 	if len(sessionMetadata) == 0 {
 		fmt.Printf("No archived sessions with conversation history found\n")
@@ -208,6 +180,40 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	searchCache.Set(query, results)
 
 	return handleSearchResults(adapter, query, results)
+}
+
+// buildSearchMetadata cross-references conversation history sessions against
+// the archived-sessions list, producing per-session metadata blobs for the LLM
+// search backend. Only conversation entries with a matching archived session
+// are included.
+func buildSearchMetadata(sessions []*history.SessionHistory, archivedSessions []*session.ArchivedSession) []llm.SessionMetadata {
+	archivedIDs := make(map[string]bool)
+	for _, s := range archivedSessions {
+		archivedIDs[s.SessionID] = true
+	}
+	var sessionMetadata []llm.SessionMetadata
+	for _, s := range sessions {
+		if !archivedIDs[s.SessionID] {
+			continue
+		}
+		var archivedSession *session.ArchivedSession
+		for _, a := range archivedSessions {
+			if a.SessionID == s.SessionID {
+				archivedSession = a
+				break
+			}
+		}
+		if archivedSession == nil {
+			continue
+		}
+		sessionMetadata = append(sessionMetadata, llm.SessionMetadata{
+			SessionID: s.SessionID,
+			Name:      archivedSession.Name,
+			Tags:      archivedSession.Tags,
+			Project:   s.Project,
+		})
+	}
+	return sessionMetadata
 }
 
 func handleSearchResults(adapter *dolt.Adapter, query string, results []llm.SearchResult) error {

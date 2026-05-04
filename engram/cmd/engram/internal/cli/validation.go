@@ -94,6 +94,7 @@ func ValidateStruct(s interface{}) error {
 
 // Simplified validation functions
 
+// ValidateEnum returns an error if value is non-empty and not in allowed.
 func ValidateEnum(field string, value string, allowed []string) error {
 	if value == "" {
 		return nil
@@ -106,6 +107,7 @@ func ValidateEnum(field string, value string, allowed []string) error {
 	return InvalidInputError(field, value, strings.Join(allowed, "|"))
 }
 
+// ValidateEnumRequired returns an error if value is empty or not in allowed.
 func ValidateEnumRequired(field string, value string, allowed []string) error {
 	if value == "" {
 		return fmt.Errorf("%s is required (must be one of: %s)", field, strings.Join(allowed, "|"))
@@ -113,20 +115,23 @@ func ValidateEnumRequired(field string, value string, allowed []string) error {
 	return ValidateEnum(field, value, allowed)
 }
 
-func ValidateRange(field string, value float64, min float64, max float64) error {
-	if value < min || value > max {
-		return InvalidInputError(field, fmt.Sprintf("%.2f", value), fmt.Sprintf("%.2f to %.2f", min, max))
+// ValidateRange returns an error if value is outside [minVal, maxVal].
+func ValidateRange(field string, value float64, minVal float64, maxVal float64) error {
+	if value < minVal || value > maxVal {
+		return InvalidInputError(field, fmt.Sprintf("%.2f", value), fmt.Sprintf("%.2f to %.2f", minVal, maxVal))
 	}
 	return nil
 }
 
-func ValidateRangeInt(field string, value int, min int, max int) error {
-	if value < min || value > max {
-		return InvalidInputError(field, fmt.Sprintf("%d", value), fmt.Sprintf("%d to %d", min, max))
+// ValidateRangeInt returns an error if value is outside [minVal, maxVal].
+func ValidateRangeInt(field string, value int, minVal int, maxVal int) error {
+	if value < minVal || value > maxVal {
+		return InvalidInputError(field, fmt.Sprintf("%d", value), fmt.Sprintf("%d to %d", minVal, maxVal))
 	}
 	return nil
 }
 
+// ValidatePositive returns an error if value is negative.
 func ValidatePositive(field string, value int) error {
 	if value < 0 {
 		return InvalidInputError(field, fmt.Sprintf("%d", value), "must be >= 0")
@@ -134,6 +139,7 @@ func ValidatePositive(field string, value int) error {
 	return nil
 }
 
+// ValidateNonEmpty returns an error if value is empty after trimming whitespace.
 func ValidateNonEmpty(field string, value string) error {
 	if strings.TrimSpace(value) == "" {
 		return fmt.Errorf("%s cannot be empty", field)
@@ -141,6 +147,7 @@ func ValidateNonEmpty(field string, value string) error {
 	return nil
 }
 
+// ValidateAtLeastOne returns an error if all fields are empty after trimming whitespace.
 func ValidateAtLeastOne(fields map[string]string, description string) error {
 	for _, value := range fields {
 		if strings.TrimSpace(value) != "" {
@@ -158,6 +165,7 @@ func ValidateAtLeastOne(fields map[string]string, description string) error {
 	}
 }
 
+// ValidateNamespace returns an error if namespace is empty or violates component limits.
 func ValidateNamespace(namespace string) error {
 	if namespace == "" {
 		return fmt.Errorf("namespace cannot be empty")
@@ -165,6 +173,7 @@ func ValidateNamespace(namespace string) error {
 	return ValidateNamespaceComponents(namespace, MaxComponents, MaxComponentLength)
 }
 
+// ValidatePathExists returns an error if a non-empty path does not exist or has the wrong type.
 func ValidatePathExists(field string, path string, expectDir bool) error {
 	if path == "" {
 		return nil
@@ -190,6 +199,7 @@ func ValidatePathExists(field string, path string, expectDir bool) error {
 	return nil
 }
 
+// ValidatePathExistsRequired returns an error if path is empty or fails ValidatePathExists.
 func ValidatePathExistsRequired(field string, path string, expectDir bool) error {
 	if path == "" {
 		typ := "file"
@@ -203,8 +213,10 @@ func ValidatePathExistsRequired(field string, path string, expectDir bool) error
 
 // Type definitions
 
+// OutputFormat names a CLI output rendering format.
 type OutputFormat string
 
+// Supported output format values for OutputFormat.
 const (
 	FormatJSON     OutputFormat = "json"
 	FormatText     OutputFormat = "text"
@@ -214,6 +226,7 @@ const (
 	FormatPaths    OutputFormat = "paths"
 )
 
+// ValidateOutputFormat returns an error if format is non-empty and not in allowed.
 func ValidateOutputFormat(format string, allowed ...OutputFormat) error {
 	if format == "" {
 		return nil
@@ -225,8 +238,10 @@ func ValidateOutputFormat(format string, allowed ...OutputFormat) error {
 	return ValidateEnum("format", format, allowedStr)
 }
 
+// ShellType names a supported shell for completion installation.
 type ShellType string
 
+// Supported shell type values for ShellType.
 const (
 	ShellBash       ShellType = "bash"
 	ShellZsh        ShellType = "zsh"
@@ -234,14 +249,17 @@ const (
 	ShellPowerShell ShellType = "powershell"
 )
 
+// ValidateShellType returns an error if shell is empty or not a supported ShellType.
 func ValidateShellType(shell string) error {
 	return ValidateEnumRequired("shell", shell, []string{
 		string(ShellBash), string(ShellZsh), string(ShellFish), string(ShellPowerShell),
 	})
 }
 
+// TierType names a knowledge tier (user, team, company, etc.).
 type TierType string
 
+// Supported tier values for TierType.
 const (
 	TierUser    TierType = "user"
 	TierTeam    TierType = "team"
@@ -250,6 +268,7 @@ const (
 	TierAll     TierType = "all"
 )
 
+// ValidateTier returns an error if tier is non-empty and not a supported TierType.
 func ValidateTier(tier string) error {
 	return ValidateEnum("tier", tier, []string{
 		string(TierUser), string(TierTeam), string(TierCompany), string(TierCore), string(TierAll),

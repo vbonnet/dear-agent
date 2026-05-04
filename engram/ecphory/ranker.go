@@ -420,7 +420,7 @@ func (p *VertexAIProvider) Complete(ctx context.Context, prompt string) (string,
 func (p *VertexAIProvider) getAccessToken(ctx context.Context) (string, error) {
 	// Use gcloud command to get access token
 	// This works if user has run: gcloud auth application-default login
-	cmd := exec.CommandContext(ctx, "gcloud", "auth", "application-default", "print-access-token")
+	cmd := exec.CommandContext(ctx, "gcloud", "auth", "application-default", "print-access-token") //nolint:gosec // G702: hardcoded command and args, no user input
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get access token (run: gcloud auth application-default login): %w", err)

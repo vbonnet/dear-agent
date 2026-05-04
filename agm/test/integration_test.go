@@ -55,10 +55,8 @@ func TestConcurrentExecution_Locked(t *testing.T) {
 	var lockErr *lock.LockError
 	if !errors.As(err, &lockErr) {
 		t.Errorf("Expected LockError, got %T", err)
-	} else {
-		if lockErr.Problem == "" || lockErr.Recovery == "" {
-			t.Error("LockError missing Problem or Recovery guidance")
-		}
+	} else if lockErr.Problem == "" || lockErr.Recovery == "" {
+		t.Error("LockError missing Problem or Recovery guidance")
 	}
 }
 

@@ -79,6 +79,7 @@ func LoadConfig(path string) (*Config, error) {
 //   - providerFamily: Provider family to use (e.g., "anthropic", "gemini")
 //
 // Returns the model identifier string, or empty string if the provider is unknown.
+//nolint:gocyclo // reason: linear model selection with many independent guards
 func SelectModel(config *Config, toolName, providerFamily string) string {
 	if config == nil {
 		config = getDefaultConfig()

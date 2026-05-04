@@ -11,6 +11,7 @@ import (
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/tracker"
 )
 
+// StartCmd is the cobra command that starts a new Wayfinder session.
 var StartCmd = &cobra.Command{
 	Use:   "start <project-name>",
 	Short: "Start a new Wayfinder session",

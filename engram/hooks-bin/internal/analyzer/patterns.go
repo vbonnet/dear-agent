@@ -34,17 +34,18 @@ func AnalyzePatterns(classified []ClassifiedDenial) []PatternAnalysis {
 		}
 
 		for _, cd := range denials {
-			if cd.IsFalsePositive {
+			switch {
+			case cd.IsFalsePositive:
 				pa.FalsePositives++
 				if len(pa.ExampleFPs) < 5 {
 					pa.ExampleFPs = append(pa.ExampleFPs, cd)
 				}
-			} else if cd.Outcome != OutcomeUnknown && cd.Outcome != OutcomeTranscriptMissing {
+			case cd.Outcome != OutcomeUnknown && cd.Outcome != OutcomeTranscriptMissing:
 				pa.TruePositives++
 				if len(pa.ExampleTPs) < 3 {
 					pa.ExampleTPs = append(pa.ExampleTPs, cd)
 				}
-			} else {
+			default:
 				pa.Uncertain++
 			}
 		}
@@ -75,90 +76,101 @@ func ProposePatternFixes(analyses []PatternAnalysis, allDenials []ClassifiedDeni
 	}
 
 	for i := range analyses {
-		pa := &analyses[i]
-		if pa.FalsePositiveRate <= 0.2 || pa.TotalDenials <= 5 {
-			continue
-		}
-
-		denials := byPattern[pa.PatternName]
-		if len(denials) == 0 {
-			continue
-		}
-
-		// Collect FP and TP commands.
-		var fpCmds, tpCmds []string
-		for _, cd := range denials {
-			if cd.IsFalsePositive {
-				fpCmds = append(fpCmds, cd.Denial.Command)
-			} else if cd.Outcome != OutcomeUnknown && cd.Outcome != OutcomeTranscriptMissing {
-				tpCmds = append(tpCmds, cd.Denial.Command)
-			}
-		}
-
-		if len(fpCmds) == 0 {
-			continue
-		}
-
-		// Simple heuristic: try adding (^|\s) prefix to the pattern.
-		// This helps when the pattern word appears inside a path/token in FPs.
-		proposedRegex := tryWordBoundaryPrefix(pa.PatternRegex)
-		if proposedRegex == pa.PatternRegex {
-			continue
-		}
-
-		proposed, err := regexp.Compile(proposedRegex)
-		if err != nil {
-			continue
-		}
-
-		original, err := regexp.Compile(pa.PatternRegex)
-		if err != nil {
-			continue
-		}
-
-		// Count how many FPs the proposed regex fixes.
-		var fpsFixed int
-		var exampleFixed []string
-		for _, cmd := range fpCmds {
-			if original.MatchString(cmd) && !proposed.MatchString(cmd) {
-				fpsFixed++
-				if len(exampleFixed) < 3 {
-					exampleFixed = append(exampleFixed, cmd)
-				}
-			}
-		}
-
-		// Count how many TPs the proposed regex preserves vs loses.
-		var tpsPreserved, tpsLost int
-		var exampleStillCaught []string
-		for _, cmd := range tpCmds {
-			if proposed.MatchString(cmd) {
-				tpsPreserved++
-				if len(exampleStillCaught) < 3 {
-					exampleStillCaught = append(exampleStillCaught, cmd)
-				}
-			} else {
-				tpsLost++
-			}
-		}
-
-		// Only propose if no TPs are lost and at least one FP is fixed.
-		if tpsLost > 0 || fpsFixed == 0 {
-			continue
-		}
-
-		pa.ProposedFix = &PatternFix{
-			OriginalRegex:      pa.PatternRegex,
-			ProposedRegex:      proposedRegex,
-			FPsFixed:           fpsFixed,
-			TPsPreserved:       tpsPreserved,
-			TPsLost:            tpsLost,
-			ExampleFixed:       exampleFixed,
-			ExampleStillCaught: exampleStillCaught,
-		}
+		proposePatternFix(&analyses[i], byPattern)
 	}
 
 	return analyses
+}
+
+// proposePatternFix evaluates a single pattern: when its FP rate is high
+// enough, attempt a stricter regex and attach pa.ProposedFix if the new regex
+// drops at least one FP without losing any TPs.
+func proposePatternFix(pa *PatternAnalysis, byPattern map[string][]ClassifiedDenial) {
+	if pa.FalsePositiveRate <= 0.2 || pa.TotalDenials <= 5 {
+		return
+	}
+	denials := byPattern[pa.PatternName]
+	if len(denials) == 0 {
+		return
+	}
+	fpCmds, tpCmds := splitFPsAndTPs(denials)
+	if len(fpCmds) == 0 {
+		return
+	}
+	proposedRegex := tryWordBoundaryPrefix(pa.PatternRegex)
+	if proposedRegex == pa.PatternRegex {
+		return
+	}
+	proposed, err := regexp.Compile(proposedRegex)
+	if err != nil {
+		return
+	}
+	original, err := regexp.Compile(pa.PatternRegex)
+	if err != nil {
+		return
+	}
+	fpsFixed, exampleFixed := countFPsFixed(fpCmds, original, proposed)
+	tpsPreserved, tpsLost, exampleStillCaught := countTPsKept(tpCmds, proposed)
+	if tpsLost > 0 || fpsFixed == 0 {
+		return
+	}
+	pa.ProposedFix = &PatternFix{
+		OriginalRegex:      pa.PatternRegex,
+		ProposedRegex:      proposedRegex,
+		FPsFixed:           fpsFixed,
+		TPsPreserved:       tpsPreserved,
+		TPsLost:            tpsLost,
+		ExampleFixed:       exampleFixed,
+		ExampleStillCaught: exampleStillCaught,
+	}
+}
+
+// splitFPsAndTPs separates denials by whether they were judged false positives
+// or true positives (excluding unknown/missing-transcript outcomes).
+func splitFPsAndTPs(denials []ClassifiedDenial) ([]string, []string) {
+	var fpCmds, tpCmds []string
+	for _, cd := range denials {
+		if cd.IsFalsePositive {
+			fpCmds = append(fpCmds, cd.Denial.Command)
+		} else if cd.Outcome != OutcomeUnknown && cd.Outcome != OutcomeTranscriptMissing {
+			tpCmds = append(tpCmds, cd.Denial.Command)
+		}
+	}
+	return fpCmds, tpCmds
+}
+
+// countFPsFixed returns how many FP commands the proposed regex no longer
+// matches (vs. the original) plus up to 3 example fixed commands.
+func countFPsFixed(fpCmds []string, original, proposed *regexp.Regexp) (int, []string) {
+	var fpsFixed int
+	var exampleFixed []string
+	for _, cmd := range fpCmds {
+		if original.MatchString(cmd) && !proposed.MatchString(cmd) {
+			fpsFixed++
+			if len(exampleFixed) < 3 {
+				exampleFixed = append(exampleFixed, cmd)
+			}
+		}
+	}
+	return fpsFixed, exampleFixed
+}
+
+// countTPsKept returns how many TP commands the proposed regex still matches
+// vs. has lost, plus up to 3 example still-caught commands.
+func countTPsKept(tpCmds []string, proposed *regexp.Regexp) (int, int, []string) {
+	var tpsPreserved, tpsLost int
+	var exampleStillCaught []string
+	for _, cmd := range tpCmds {
+		if proposed.MatchString(cmd) {
+			tpsPreserved++
+			if len(exampleStillCaught) < 3 {
+				exampleStillCaught = append(exampleStillCaught, cmd)
+			}
+		} else {
+			tpsLost++
+		}
+	}
+	return tpsPreserved, tpsLost, exampleStillCaught
 }
 
 // tryWordBoundaryPrefix attempts to add a (^|\s) prefix to a regex pattern

@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-// AlertThreshold defines when a budget alert fires.
+// AlertThresholds are the budget-utilization percentages at which alerts fire.
 var AlertThresholds = []float64{50, 75, 90, 100}
 
 // AlertManager tracks which alerts have been sent to avoid duplicates.
@@ -50,11 +50,12 @@ func (a *AlertManager) CheckAndAlert(project, model string, statuses []BudgetSta
 				status.Period, threshold, project, model, status.Spent, status.Limit, status.Percent,
 			)
 
-			if threshold >= 100 {
+			switch {
+			case threshold >= 100:
 				a.logger.Error(msg)
-			} else if threshold >= 90 {
+			case threshold >= 90:
 				a.logger.Warn(msg)
-			} else {
+			default:
 				a.logger.Info(msg)
 			}
 

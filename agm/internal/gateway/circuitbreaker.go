@@ -13,6 +13,7 @@ import (
 // CircuitState represents the state of a circuit breaker.
 type CircuitState int
 
+// Circuit breaker state values.
 const (
 	CircuitClosed   CircuitState = iota // Normal operation
 	CircuitOpen                         // Failures exceeded threshold, rejecting calls

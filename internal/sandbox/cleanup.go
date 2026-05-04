@@ -148,7 +148,7 @@ func CleanupOrphanedDirectories(dirs []OrphanedResource) CleanupStats {
 		}
 
 		// Try to remove with retries
-		err := removeWithRetry(dir.Path, 3)
+		err := removeWithRetry(dir.Path)
 		if err != nil {
 			stats.Errors = append(stats.Errors, fmt.Errorf("failed to remove %s: %w", dir.Path, err))
 			continue
@@ -223,8 +223,11 @@ func unmountWithRetry(mountPoint string, maxRetries int) error {
 }
 
 // removeWithRetry attempts to remove a directory with exponential backoff.
-func removeWithRetry(dirPath string, maxRetries int) error {
-	const retryDelay = 50 * time.Millisecond
+func removeWithRetry(dirPath string) error {
+	const (
+		maxRetries = 3
+		retryDelay = 50 * time.Millisecond
+	)
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {

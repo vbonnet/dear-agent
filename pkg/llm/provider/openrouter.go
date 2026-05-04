@@ -235,7 +235,7 @@ func (p *OpenRouterProvider) calculateUsage(model string, usage openRouterUsage)
 }
 
 // recordCost records API usage costs via cost sink.
-func (p *OpenRouterProvider) recordCost(ctx context.Context, model string, resp openRouterResponse, metadata map[string]any) error {
+func (p *OpenRouterProvider) recordCost(ctx context.Context, model string, resp openRouterResponse, _ map[string]any) error {
 	tokens := costtrack.Tokens{
 		Input:  resp.Usage.PromptTokens,
 		Output: resp.Usage.CompletionTokens,

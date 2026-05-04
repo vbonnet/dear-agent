@@ -301,7 +301,7 @@ func createTarGz(sourceDir, targetPath string) error {
 		}
 
 		// Write file content
-		file, err := os.Open(path)
+		file, err := os.Open(path) //nolint:gosec // G122: trusted local paths, symlink TOCTOU not in threat model
 		if err != nil {
 			return err
 		}
@@ -341,10 +341,12 @@ func extractTarGz(archivePath, targetDir string) error {
 			return err
 		}
 
+		// Check for directory traversal (zip slip) before joining
+		if strings.Contains(header.Name, "..") {
+			return fmt.Errorf("invalid file path in archive: %s", header.Name)
+		}
 		// Calculate target path
-		targetPath := filepath.Join(targetDir, header.Name)
-
-		// Check for directory traversal
+		targetPath := filepath.Join(targetDir, header.Name) //nolint:gosec // G305: header.Name validated above
 		if !strings.HasPrefix(targetPath, filepath.Clean(targetDir)+string(os.PathSeparator)) {
 			return fmt.Errorf("invalid file path in archive: %s", header.Name)
 		}
@@ -370,8 +372,9 @@ func extractTarGz(archivePath, targetDir string) error {
 				return err
 			}
 
-			// Copy content
-			if _, err := io.Copy(outFile, tarReader); err != nil {
+			// Copy content (limit to 1GB per file to prevent decompression bomb)
+			const maxFileSize = 1 << 30 // 1 GiB
+			if _, err := io.Copy(outFile, io.LimitReader(tarReader, maxFileSize)); err != nil {
 				outFile.Close()
 				return err
 			}

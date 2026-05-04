@@ -73,10 +73,7 @@ func (t *Tracer) TraceFiles(opts TraceOptions) ([]*TraceResult, error) {
 	}
 
 	// Parse all history entries
-	allEntries, err := t.parseAllHistoryFiles(historyFiles)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse history files: %w", err)
-	}
+	allEntries := t.parseAllHistoryFiles(historyFiles)
 
 	// Load manifests for session name lookup
 	manifests, err := t.loadManifests()
@@ -126,7 +123,7 @@ func (t *Tracer) findHistoryFiles() ([]string, error) {
 }
 
 // parseAllHistoryFiles parses all history.jsonl files and returns entries
-func (t *Tracer) parseAllHistoryFiles(historyFiles []string) ([]HistoryEntry, error) {
+func (t *Tracer) parseAllHistoryFiles(historyFiles []string) []HistoryEntry {
 	var allEntries []HistoryEntry
 
 	for _, historyFile := range historyFiles {
@@ -139,7 +136,7 @@ func (t *Tracer) parseAllHistoryFiles(historyFiles []string) ([]HistoryEntry, er
 		allEntries = append(allEntries, entries...)
 	}
 
-	return allEntries, nil
+	return allEntries
 }
 
 // parseHistoryFile parses a single history.jsonl file with null-byte resilience
@@ -260,16 +257,17 @@ func (t *Tracer) parseManifest(path string) (*SessionInfo, error) {
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "name:") {
+		switch {
+		case strings.HasPrefix(line, "name:"):
 			name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
 			name = strings.Trim(name, `"'`)
-		} else if strings.HasPrefix(line, "workspace:") {
+		case strings.HasPrefix(line, "workspace:"):
 			workspace = strings.TrimSpace(strings.TrimPrefix(line, "workspace:"))
 			workspace = strings.Trim(workspace, `"'`)
-		} else if strings.HasPrefix(line, "uuid:") {
+		case strings.HasPrefix(line, "uuid:"):
 			uuid = strings.TrimSpace(strings.TrimPrefix(line, "uuid:"))
 			uuid = strings.Trim(uuid, `"'`)
-		} else if strings.HasPrefix(line, "project:") {
+		case strings.HasPrefix(line, "project:"):
 			project = strings.TrimSpace(strings.TrimPrefix(line, "project:"))
 			project = strings.Trim(project, `"'`)
 		}

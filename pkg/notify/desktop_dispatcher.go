@@ -16,8 +16,10 @@ func NewDesktopDispatcher() *DesktopDispatcher {
 	return &DesktopDispatcher{}
 }
 
+// Name returns the dispatcher name "desktop".
 func (d *DesktopDispatcher) Name() string { return "desktop" }
 
+// Dispatch shows the notification via the platform's native desktop notifier.
 func (d *DesktopDispatcher) Dispatch(ctx context.Context, n *Notification) error {
 	switch runtime.GOOS {
 	case "linux":
@@ -50,4 +52,5 @@ func (d *DesktopDispatcher) osascript(ctx context.Context, n *Notification) erro
 	return nil
 }
 
+// Close is a no-op for DesktopDispatcher.
 func (d *DesktopDispatcher) Close() error { return nil }

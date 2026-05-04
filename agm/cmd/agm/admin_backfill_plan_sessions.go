@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
 
@@ -78,99 +79,7 @@ func runBackfillPlanSessions(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Found %d total sessions, scanning for orphaned executions...\n\n", len(allSessions))
 
-	// Find orphaned execution sessions and their potential parents
-	type parentChildPair struct {
-		parent *struct {
-			SessionID string
-			Name      string
-			CreatedAt time.Time
-			CWD       string
-		}
-		child *struct {
-			SessionID string
-			Name      string
-			CreatedAt time.Time
-			CWD       string
-		}
-		timeDiff time.Duration
-	}
-
-	var pairs []parentChildPair
-
-	// Identify orphaned children (no parent_session_id, regardless of name)
-	for _, child := range allSessions {
-		// Skip if already has parent
-		if child.ParentSessionID != nil && *child.ParentSessionID != "" {
-			continue
-		}
-
-		// Search for potential parent: created 1-30 seconds before, same CWD, has a name
-		var bestParent *struct {
-			SessionID string
-			Name      string
-			CreatedAt time.Time
-			CWD       string
-		}
-		var bestTimeDiff time.Duration
-
-		for _, parent := range allSessions {
-			// Must have a name
-			if parent.Name == "" || parent.Name == "Unknown" {
-				continue
-			}
-
-			// Skip if it's the child itself
-			if parent.SessionID == child.SessionID {
-				continue
-			}
-
-			// Must match CWD
-			if parent.Context.Project != child.Context.Project {
-				continue
-			}
-
-			// Must be created before child
-			timeDiff := child.CreatedAt.Sub(parent.CreatedAt)
-			if timeDiff < 1*time.Second || timeDiff > 30*time.Second {
-				continue
-			}
-
-			// Keep the most recent parent (closest in time)
-			if bestParent == nil || timeDiff < bestTimeDiff {
-				bestParent = &struct {
-					SessionID string
-					Name      string
-					CreatedAt time.Time
-					CWD       string
-				}{
-					SessionID: parent.SessionID,
-					Name:      parent.Name,
-					CreatedAt: parent.CreatedAt,
-					CWD:       parent.Context.Project,
-				}
-				bestTimeDiff = timeDiff
-			}
-		}
-
-		// If we found a parent, record the pair
-		if bestParent != nil {
-			pairs = append(pairs, parentChildPair{
-				parent: bestParent,
-				child: &struct {
-					SessionID string
-					Name      string
-					CreatedAt time.Time
-					CWD       string
-				}{
-					SessionID: child.SessionID,
-					Name:      child.Name,
-					CreatedAt: child.CreatedAt,
-					CWD:       child.Context.Project,
-				},
-				timeDiff: bestTimeDiff,
-			})
-		}
-	}
+	pairs := findOrphanedPairs(allSessions)
 
 	// Display results
 	if len(pairs) == 0 {
@@ -215,35 +124,7 @@ func runBackfillPlanSessions(cmd *cobra.Command, args []string) error {
 	fmt.Println(ui.Yellow("Applying changes..."))
 	fmt.Println()
 
-	successCount := 0
-	failureCount := 0
-
-	for i, pair := range pairs {
-		fmt.Printf("[%d/%d] Linking %s → %s...\n",
-			i+1, len(pairs), pair.child.SessionID[:8], pair.parent.SessionID[:8])
-
-		// Fetch full child session
-		child, err := adapter.GetSession(pair.child.SessionID)
-		if err != nil {
-			fmt.Printf("  %s Failed to load child session: %v\n", ui.Red("✗"), err)
-			failureCount++
-			continue
-		}
-
-		// Update child session
-		child.ParentSessionID = &pair.parent.SessionID
-		child.Name = pair.parent.Name + "-exec"
-
-		if err := adapter.UpdateSession(child); err != nil {
-			fmt.Printf("  %s Failed to update session: %v\n", ui.Red("✗"), err)
-			failureCount++
-			continue
-		}
-
-		fmt.Printf("  %s Set parent_session_id = %s\n", ui.Green("✓"), pair.parent.SessionID[:8])
-		fmt.Printf("  %s Set name = '%s'\n", ui.Green("✓"), child.Name)
-		successCount++
-	}
+	successCount, failureCount := applyBackfillPairs(adapter, pairs)
 
 	fmt.Println()
 
@@ -256,4 +137,114 @@ func runBackfillPlanSessions(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// backfillCandidate is a flattened view of a session used for matching.
+type backfillCandidate struct {
+	SessionID string
+	Name      string
+	CreatedAt time.Time
+	CWD       string
+}
+
+// parentChildPair holds a candidate planning parent paired with its orphaned
+// execution child along with the time gap between their creation timestamps.
+type parentChildPair struct {
+	parent   backfillCandidate
+	child    backfillCandidate
+	timeDiff time.Duration
+}
+
+// findOrphanedPairs scans allSessions and returns parent/child candidate pairs
+// for orphaned execution sessions (no parent_session_id) that match a planning
+// session created 1–30s earlier in the same CWD.
+func findOrphanedPairs(allSessions []*manifest.Manifest) []parentChildPair {
+	var pairs []parentChildPair
+	for _, child := range allSessions {
+		if child.ParentSessionID != nil && *child.ParentSessionID != "" {
+			continue
+		}
+		bestParent, bestTimeDiff, ok := findBestParent(child, allSessions)
+		if !ok {
+			continue
+		}
+		pairs = append(pairs, parentChildPair{
+			parent: bestParent,
+			child: backfillCandidate{
+				SessionID: child.SessionID,
+				Name:      child.Name,
+				CreatedAt: child.CreatedAt,
+				CWD:       child.Context.Project,
+			},
+			timeDiff: bestTimeDiff,
+		})
+	}
+	return pairs
+}
+
+// findBestParent returns the closest preceding (1–30s) planning session for child
+// with a matching CWD, if any exists.
+func findBestParent(child *manifest.Manifest, allSessions []*manifest.Manifest) (backfillCandidate, time.Duration, bool) {
+	var best backfillCandidate
+	var bestDiff time.Duration
+	found := false
+	for _, parent := range allSessions {
+		if parent.Name == "" || parent.Name == "Unknown" {
+			continue
+		}
+		if parent.SessionID == child.SessionID {
+			continue
+		}
+		if parent.Context.Project != child.Context.Project {
+			continue
+		}
+		diff := child.CreatedAt.Sub(parent.CreatedAt)
+		if diff < 1*time.Second || diff > 30*time.Second {
+			continue
+		}
+		if !found || diff < bestDiff {
+			best = backfillCandidate{
+				SessionID: parent.SessionID,
+				Name:      parent.Name,
+				CreatedAt: parent.CreatedAt,
+				CWD:       parent.Context.Project,
+			}
+			bestDiff = diff
+			found = true
+		}
+	}
+	return best, bestDiff, found
+}
+
+// applyBackfillPairs iterates the discovered pairs and updates each child
+// session in Dolt to point at its parent. Returns (successCount, failureCount).
+func applyBackfillPairs(adapter *dolt.Adapter, pairs []parentChildPair) (int, int) {
+	successCount := 0
+	failureCount := 0
+	for i, pair := range pairs {
+		fmt.Printf("[%d/%d] Linking %s → %s...\n",
+			i+1, len(pairs), pair.child.SessionID[:8], pair.parent.SessionID[:8])
+
+		child, err := adapter.GetSession(pair.child.SessionID)
+		if err != nil {
+			fmt.Printf("  %s Failed to load child session: %v\n", ui.Red("✗"), err)
+			failureCount++
+			continue
+		}
+
+		parentID := pair.parent.SessionID
+		child.ParentSessionID = &parentID
+		child.Name = pair.parent.Name + "-exec"
+
+		if err := adapter.UpdateSession(child); err != nil {
+			fmt.Printf("  %s Failed to update session: %v\n", ui.Red("✗"), err)
+			failureCount++
+			continue
+		}
+
+		fmt.Printf("  %s Set parent_session_id = %s\n", ui.Green("✓"), pair.parent.SessionID[:8])
+		fmt.Printf("  %s Set name = '%s'\n", ui.Green("✓"), child.Name)
+		successCount++
+	}
+	return successCount, failureCount
 }

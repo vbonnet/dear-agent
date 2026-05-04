@@ -136,39 +136,7 @@ func CheckDeadCodeTier1(cwd string, languages []LanguageSpec, changedFiles []str
 
 	var suspects []string
 	for langName, files := range langFiles {
-		spec := langSpecMap[langName]
-		ruleFile := filepath.Join(rd, spec.ASTGrepRulesDir, "dead-function.yml")
-		if _, err := os.Stat(ruleFile); err != nil {
-			continue
-		}
-
-		findings, err := RunAstGrepRules(ruleFile, files)
-		if err != nil {
-			continue
-		}
-
-		for _, f := range findings {
-			funcName := ""
-			if v, ok := f.MetaVariables.Single["FUNC"]; ok {
-				funcName = v.Text
-			}
-			if funcName == "" {
-				continue
-			}
-			if entryPoints[funcName] {
-				continue
-			}
-
-			// Cross-reference: check if function is used elsewhere in the project.
-			absFile := f.File
-			if !filepath.IsAbs(absFile) {
-				absFile = filepath.Join(cwd, absFile)
-			}
-			if !hasReferencesElsewhere(cwd, funcName, absFile, spec) {
-				relFile := relPath(cwd, absFile)
-				suspects = append(suspects, fmt.Sprintf("%s:%d: %s()", relFile, f.Range.Start.Line+1, funcName))
-			}
-		}
+		suspects = append(suspects, deadFuncSuspectsForLang(cwd, rd, langName, files, langSpecMap[langName])...)
 	}
 
 	if len(suspects) > 0 {
@@ -177,6 +145,40 @@ func CheckDeadCodeTier1(cwd string, languages []LanguageSpec, changedFiles []str
 		result.Details = suspects
 	}
 	return result
+}
+
+// deadFuncSuspectsForLang runs the per-language dead-function rule against
+// files and returns a list of "file:line: funcName()" entries for functions
+// not declared as entry points and not referenced elsewhere in cwd.
+func deadFuncSuspectsForLang(cwd, rd, langName string, files []string, spec LanguageSpec) []string {
+	_ = langName
+	ruleFile := filepath.Join(rd, spec.ASTGrepRulesDir, "dead-function.yml")
+	if _, err := os.Stat(ruleFile); err != nil {
+		return nil
+	}
+	findings, err := RunAstGrepRules(ruleFile, files)
+	if err != nil {
+		return nil
+	}
+	var suspects []string
+	for _, f := range findings {
+		funcName := ""
+		if v, ok := f.MetaVariables.Single["FUNC"]; ok {
+			funcName = v.Text
+		}
+		if funcName == "" || entryPoints[funcName] {
+			continue
+		}
+		absFile := f.File
+		if !filepath.IsAbs(absFile) {
+			absFile = filepath.Join(cwd, absFile)
+		}
+		if !hasReferencesElsewhere(cwd, funcName, absFile, spec) {
+			relFile := relPath(cwd, absFile)
+			suspects = append(suspects, fmt.Sprintf("%s:%d: %s()", relFile, f.Range.Start.Line+1, funcName))
+		}
+	}
+	return suspects
 }
 
 // CheckPatterns runs all ast-grep pattern rules (except dead-function)

@@ -64,6 +64,7 @@ var codeExtensions = map[string]bool{
 // FileKind classifies a file as code, docs, or other.
 type FileKind string
 
+// FileKind classification values.
 const (
 	KindCode  FileKind = "code"
 	KindDocs  FileKind = "docs"

@@ -13,6 +13,7 @@ var (
 	statusFormat string
 )
 
+// StatusCmd is the cobra command that shows feature progress.
 var StatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show feature progress",
@@ -92,16 +93,17 @@ func outputStatus(cmd *cobra.Command, prog *progress.Progress) error {
 			Status: formatStatus(f.Status),
 		}
 
-		if f.Status == progress.StatusPassing && f.VerifiedAt != nil {
+		switch {
+		case f.Status == progress.StatusPassing && f.VerifiedAt != nil:
 			row.Timestamp = formatTimestamp(*f.VerifiedAt)
 			passing++
-		} else if f.Status == progress.StatusInProgress && f.StartedAt != nil {
+		case f.Status == progress.StatusInProgress && f.StartedAt != nil:
 			row.Timestamp = formatTimestamp(*f.StartedAt)
 			inProgress++
 			if nextFeature == "" {
 				nextFeature = f.ID
 			}
-		} else {
+		default:
 			if nextFeature == "" && inProgress == 0 {
 				nextFeature = f.ID
 			}

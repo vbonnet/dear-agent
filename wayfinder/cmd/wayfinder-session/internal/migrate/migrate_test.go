@@ -120,10 +120,7 @@ func TestMigrator_ConvertV1ToV2(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := NewMigrator("/tmp/test")
-			v2, err := m.convertV1ToV2(tt.v1Status)
-			if err != nil {
-				t.Fatalf("convertV1ToV2() error = %v", err)
-			}
+			v2 := m.convertV1ToV2(tt.v1Status)
 
 			if v2.CurrentWaypoint != tt.wantPhase {
 				t.Errorf("CurrentPhase = %s, want %s", v2.CurrentWaypoint, tt.wantPhase)

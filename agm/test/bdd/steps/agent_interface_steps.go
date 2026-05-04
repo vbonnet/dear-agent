@@ -9,6 +9,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/test/bdd/internal/testenv"
 )
 
+// RegisterAgentInterfaceSteps registers godog step bindings for agent-interface scenarios.
 func RegisterAgentInterfaceSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the adapter should have method (\w+)$`, adapterShouldHaveMethod)
 	ctx.Step(`^the adapter should return name "([^"]*)"$`, adapterShouldReturnName)

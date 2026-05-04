@@ -158,8 +158,7 @@ func TestGetBackend_EnvVar(t *testing.T) {
 				}
 
 				// Check type
-				switch tt.expectType.(type) {
-				case *TmuxBackend:
+				if _, ok := tt.expectType.(*TmuxBackend); ok {
 					if _, ok := backend.(*TmuxBackend); !ok {
 						t.Errorf("expected TmuxBackend, got %T", backend)
 					}
@@ -207,8 +206,7 @@ func TestGetBackendByName(t *testing.T) {
 				}
 
 				// Check type
-				switch tt.expectType.(type) {
-				case *TmuxBackend:
+				if _, ok := tt.expectType.(*TmuxBackend); ok {
 					if _, ok := backend.(*TmuxBackend); !ok {
 						t.Errorf("expected TmuxBackend, got %T", backend)
 					}

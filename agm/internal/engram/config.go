@@ -18,6 +18,7 @@ type EngramConfig struct {
 	Timeout        time.Duration // Query timeout (AGM_ENGRAM_TIMEOUT, default 5s)
 }
 
+// Default values for EngramConfig fields.
 const (
 	DefaultEngramLimit    = 10
 	DefaultScoreThreshold = 0.7

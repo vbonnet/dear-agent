@@ -142,7 +142,7 @@ func (s *Service) runScanners(ctx context.Context, req *AnalyzeRequest) <-chan S
 
 // aggregateSignals collects scanner results and builds metacontext.
 // Implements Section 3.3: Signal Aggregation.
-func (s *Service) aggregateSignals(ctx context.Context, results <-chan ScanResult, req *AnalyzeRequest) *Metacontext {
+func (s *Service) aggregateSignals(_ context.Context, results <-chan ScanResult, req *AnalyzeRequest) *Metacontext {
 	mc := &Metacontext{
 		Languages:   []Signal{},
 		Frameworks:  []Signal{},

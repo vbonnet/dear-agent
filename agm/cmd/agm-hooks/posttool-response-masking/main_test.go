@@ -194,8 +194,7 @@ func TestRun_SkippedTool(t *testing.T) {
 		skipTools:  []string{"Read", "Agent"},
 	}
 
-	exitCode := m.Run()
-	assert.Equal(t, 0, exitCode)
+	m.Run()
 }
 
 func TestRun_BelowThreshold(t *testing.T) {
@@ -206,6 +205,5 @@ func TestRun_BelowThreshold(t *testing.T) {
 		skipTools:  []string{"Read", "Agent"},
 	}
 
-	exitCode := m.Run()
-	assert.Equal(t, 0, exitCode)
+	m.Run()
 }

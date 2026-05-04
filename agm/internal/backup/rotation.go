@@ -12,6 +12,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/fileutil"
 )
 
+// MaxBackups is the maximum number of numbered backup files retained per source.
 const MaxBackups = 10
 
 // CreateBackup creates a numbered backup of a file

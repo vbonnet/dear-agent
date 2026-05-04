@@ -63,6 +63,36 @@ type SessionMonitor struct {
 	CrossSessionThreshold int
 }
 
+// loadViolationDetectors loads bash/beads/git pattern databases and constructs
+// the corresponding enforcement.Detector instances.
+func loadViolationDetectors(cfg *config.Config) (*enforcement.ViolationDetector, *enforcement.ViolationDetector, *enforcement.ViolationDetector, error) {
+	bashPatterns, err := enforcement.LoadPatterns(cfg.Patterns.Bash)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load bash patterns: %w", err)
+	}
+	beadsPatterns, err := enforcement.LoadPatterns(cfg.Patterns.Beads)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load beads patterns: %w", err)
+	}
+	gitPatterns, err := enforcement.LoadPatterns(cfg.Patterns.Git)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load git patterns: %w", err)
+	}
+	bashDetector, err := enforcement.NewDetector(bashPatterns)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create bash detector: %w", err)
+	}
+	beadsDetector, err := enforcement.NewDetector(beadsPatterns)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create beads detector: %w", err)
+	}
+	gitDetector, err := enforcement.NewDetector(gitPatterns)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create git detector: %w", err)
+	}
+	return bashDetector, beadsDetector, gitDetector, nil
+}
+
 // NewSessionMonitor creates a new session monitor with given configuration.
 func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 	// Create tmux client
@@ -71,36 +101,9 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 	// Create stuck session detector
 	detector := NewStuckSessionDetector()
 
-	// Load pattern databases for violation detection
-	bashPatterns, err := enforcement.LoadPatterns(cfg.Patterns.Bash)
+	bashDetector, beadsDetector, gitDetector, err := loadViolationDetectors(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load bash patterns: %w", err)
-	}
-
-	beadsPatterns, err := enforcement.LoadPatterns(cfg.Patterns.Beads)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load beads patterns: %w", err)
-	}
-
-	gitPatterns, err := enforcement.LoadPatterns(cfg.Patterns.Git)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load git patterns: %w", err)
-	}
-
-	// Create violation detectors
-	bashDetector, err := enforcement.NewDetector(bashPatterns)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create bash detector: %w", err)
-	}
-
-	beadsDetector, err := enforcement.NewDetector(beadsPatterns)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create beads detector: %w", err)
-	}
-
-	gitDetector, err := enforcement.NewDetector(gitPatterns)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create git detector: %w", err)
+		return nil, err
 	}
 
 	// Create incident logger
@@ -290,61 +293,57 @@ func (m *SessionMonitor) CheckAllSessions() error {
 		m.logger.Debug("Checking tmux sessions", "count", len(sessions))
 	}
 
-	// Check each session
+	if !m.checkSessionsLoop(sessions) {
+		return nil
+	}
+	m.runPostCheckMaintenance(sessions, err)
+	return nil
+}
+
+// checkSessionsLoop iterates through sessions and runs the per-session check.
+// Returns false if the stop signal was received (caller should return nil).
+func (m *SessionMonitor) checkSessionsLoop(sessions []string) bool {
 	for _, sessionName := range sessions {
-		// Check if we should stop (non-blocking check)
 		select {
 		case <-m.stopChan:
-			// Stop signal received, abort checking remaining sessions
-			return nil
+			return false
 		default:
-			// Continue processing
 		}
-
 		sessionErr := m.checkSession(sessionName)
 		if sessionErr != nil {
 			m.logger.Error("Error checking session", "session", sessionName, "error", sessionErr)
-			// Continue to next session even if one fails
 		}
-
-		// Write per-session heartbeat.
 		if m.sessionHeartbeatWriter != nil {
 			if beatErr := m.sessionHeartbeatWriter.Beat(sessionName, sessionErr == nil); beatErr != nil {
 				m.logger.Error("Failed to write session heartbeat", "session", sessionName, "error", beatErr)
 			}
 		}
 	}
+	return true
+}
 
-	// Check session heartbeat freshness and alert on stale sessions.
+// runPostCheckMaintenance performs the after-loop housekeeping (heartbeat
+// freshness checks, metric flush, heartbeat write, systemd watchdog).
+func (m *SessionMonitor) runPostCheckMaintenance(sessions []string, listErr error) {
 	if m.sessionHeartbeatMonitor != nil {
 		m.sessionHeartbeatMonitor.CheckAll()
 	}
-
-	// Check loop heartbeat freshness and trigger wakes for stale loops.
 	if m.loopMonitor != nil {
 		m.loopMonitor.CheckAll()
 	}
-
 	if m.metrics != nil {
 		if _, err := m.metrics.FlushIfDue(); err != nil {
 			m.logger.Error("Failed to flush metrics", "error", err)
 		}
 	}
-
-	// Write heartbeat after successful scan cycle.
 	if m.heartbeatWriter != nil {
-		scanOK := err == nil
-		if beatErr := m.heartbeatWriter.Beat(len(sessions), scanOK); beatErr != nil {
+		if beatErr := m.heartbeatWriter.Beat(len(sessions), listErr == nil); beatErr != nil {
 			m.logger.Error("Failed to write heartbeat", "error", beatErr)
 		}
 	}
-
-	// Notify systemd watchdog (no-op if not running under systemd).
 	if notifyErr := NotifySystemdWatchdog(); notifyErr != nil {
 		m.logger.Error("Failed to notify systemd watchdog", "error", notifyErr)
 	}
-
-	return nil
 }
 
 // checkSession checks a single session for stuck state and performs recovery if needed.

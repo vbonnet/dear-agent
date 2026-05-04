@@ -25,10 +25,12 @@ func NewFileScanner() *FileScanner {
 	}
 }
 
+// Name returns the scanner's identifier.
 func (s *FileScanner) Name() string {
 	return s.name
 }
 
+// Priority returns the scanner's execution priority (lower runs earlier).
 func (s *FileScanner) Priority() int {
 	return s.priority
 }

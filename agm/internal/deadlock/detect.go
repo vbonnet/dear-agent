@@ -154,7 +154,7 @@ func getProcessInfo(pid int) (*ProcessInfo, error) {
 	info.Command = strings.Join(fields[4:], " ")
 
 	// Count network connections (lsof)
-	connections, _ := countConnections(pid) // Ignore errors
+	connections := countConnections(pid)
 	info.Connections = connections
 
 	return info, nil
@@ -203,12 +203,12 @@ func parseTime(timeStr string) (int, error) {
 }
 
 // countConnections counts network connections for a process
-func countConnections(pid int) (int, error) {
+func countConnections(pid int) int {
 	cmd := exec.Command("lsof", "-p", strconv.Itoa(pid), "-a", "-i")
 	output, err := cmd.Output()
 	if err != nil {
 		// lsof may fail if no connections, that's OK
-		return 0, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
+		return 0
 	}
 
 	lines := strings.Split(string(output), "\n")
@@ -221,7 +221,7 @@ func countConnections(pid int) (int, error) {
 		count++
 	}
 
-	return count, nil
+	return count
 }
 
 // FormatProcessInfo formats process information for display

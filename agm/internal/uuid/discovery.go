@@ -272,11 +272,10 @@ func Discover(sessionName string, manifestSearchFunc func(string) (*manifest.Man
 					if verifyUUID == m.Claude.UUID {
 						// Manifest UUID verified via /rename
 						return m.Claude.UUID, nil
-					} else {
-						// Manifest has wrong UUID - trust /rename instead
-						logf("  - manifest UUID mismatch, using /rename result: %s", verifyUUID)
-						return verifyUUID, nil
 					}
+					// Manifest has wrong UUID - trust /rename instead
+					logf("  - manifest UUID mismatch, using /rename result: %s", verifyUUID)
+					return verifyUUID, nil
 				}
 				// Can't verify via /rename, but manifest UUID exists - trust it
 				logf("  - manifest UUID not verified (no /rename found), using manifest value")

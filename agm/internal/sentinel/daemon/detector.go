@@ -227,49 +227,11 @@ func (d *StuckSessionDetector) IsSessionStuck(pane *tmux.PaneInfo) (bool, string
 		return true, "stuck_zero_token_waiting"
 	}
 
-	// Check for permission prompt — only stuck if content is stale (no token production).
-	// This prevents false positives when permission-prompt-like text appears in output
-	// while the session is still actively producing tokens.
-	if indicators["permission_prompt"] {
-		// Track when we first saw the permission prompt for this session
-		if _, seen := d.permissionFirstSeen[pane.SessionName]; !seen {
-			d.permissionFirstSeen[pane.SessionName] = time.Now()
-		}
-
-		history, exists := d.sessionHistories[pane.SessionName]
-		if exists {
-			staleDuration := time.Duration(d.PermissionPromptDuration) * time.Minute
-			if history.IsContentStale(staleDuration) {
-				// Check if we've exceeded the escalation threshold
-				firstSeen := d.permissionFirstSeen[pane.SessionName]
-				escalationDuration := time.Duration(d.PermissionEscalationDuration) * time.Minute
-				if time.Since(firstSeen) >= escalationDuration {
-					return true, "stuck_permission_prompt_escalate"
-				}
-				return true, "stuck_permission_prompt"
-			}
-		}
-		// Content still changing — session is producing tokens, not stuck
-	} else {
-		// Permission prompt no longer visible — clear tracking
-		delete(d.permissionFirstSeen, pane.SessionName)
+	if stuck, reason := d.checkPermissionPromptStuck(pane, indicators); stuck {
+		return true, reason
 	}
-
-	// Check for cursor frozen (requires history)
-	history, exists := d.sessionHistories[pane.SessionName]
-	if exists {
-		frozenDuration := time.Duration(d.CursorFrozenTimeout) * time.Minute
-		if history.IsCursorFrozen(frozenDuration) {
-			// Don't mark as stuck if session shows completion language
-			if indicators["completed"] {
-				return false, ""
-			}
-			// Don't mark as stuck if idle prompt is visible
-			if indicators["idle_prompt"] {
-				return false, ""
-			}
-			return true, "cursor_frozen"
-		}
+	if stuck, reason := d.checkCursorFrozen(pane, indicators); stuck {
+		return true, reason
 	}
 
 	// Check for general waiting without completion
@@ -278,6 +240,49 @@ func (d *StuckSessionDetector) IsSessionStuck(pane *tmux.PaneInfo) (bool, string
 	}
 
 	return false, ""
+}
+
+// checkPermissionPromptStuck handles the permission_prompt branch of stuck
+// detection: tracks first-seen timestamp, only flags as stuck when content is
+// also stale, and escalates after the escalation threshold.
+func (d *StuckSessionDetector) checkPermissionPromptStuck(pane *tmux.PaneInfo, indicators map[string]bool) (bool, string) {
+	if !indicators["permission_prompt"] {
+		delete(d.permissionFirstSeen, pane.SessionName)
+		return false, ""
+	}
+	if _, seen := d.permissionFirstSeen[pane.SessionName]; !seen {
+		d.permissionFirstSeen[pane.SessionName] = time.Now()
+	}
+	history, exists := d.sessionHistories[pane.SessionName]
+	if !exists {
+		return false, ""
+	}
+	staleDuration := time.Duration(d.PermissionPromptDuration) * time.Minute
+	if !history.IsContentStale(staleDuration) {
+		return false, ""
+	}
+	escalationDuration := time.Duration(d.PermissionEscalationDuration) * time.Minute
+	if time.Since(d.permissionFirstSeen[pane.SessionName]) >= escalationDuration {
+		return true, "stuck_permission_prompt_escalate"
+	}
+	return true, "stuck_permission_prompt"
+}
+
+// checkCursorFrozen marks a session stuck when the cursor has been frozen past
+// the timeout (and the session isn't showing completion / idle prompt).
+func (d *StuckSessionDetector) checkCursorFrozen(pane *tmux.PaneInfo, indicators map[string]bool) (bool, string) {
+	history, exists := d.sessionHistories[pane.SessionName]
+	if !exists {
+		return false, ""
+	}
+	frozenDuration := time.Duration(d.CursorFrozenTimeout) * time.Minute
+	if !history.IsCursorFrozen(frozenDuration) {
+		return false, ""
+	}
+	if indicators["completed"] || indicators["idle_prompt"] {
+		return false, ""
+	}
+	return true, "cursor_frozen"
 }
 
 // GetStuckReason returns a detailed reason why a session is stuck.

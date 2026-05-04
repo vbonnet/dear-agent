@@ -30,6 +30,7 @@ import (
 // UserType represents the detected user expertise level
 type UserType int
 
+// User expertise level values.
 const (
 	UserTypeSimple UserType = iota
 	UserTypeTechnical

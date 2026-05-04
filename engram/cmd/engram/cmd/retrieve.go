@@ -152,9 +152,10 @@ func getRetrieveQuery(args []string) (string, error) {
 	var err error
 
 	// Priority: --query flag > --auto > positional arg
-	if retrieveCfg.Query != "" {
+	switch {
+	case retrieveCfg.Query != "":
 		query = retrieveCfg.Query
-	} else if retrieveCfg.Auto {
+	case retrieveCfg.Auto:
 		query, err = contextdetect.DetectContext()
 		if err != nil {
 			return "", &cli.EngramError{
@@ -168,9 +169,9 @@ func getRetrieveQuery(args []string) (string, error) {
 				},
 			}
 		}
-	} else if len(args) > 0 {
+	case len(args) > 0:
 		query = args[0]
-	} else {
+	default:
 		return "", cli.InvalidInputError("query", "", "provide either --query flag or positional argument")
 	}
 

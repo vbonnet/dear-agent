@@ -43,6 +43,7 @@ func (b *JSONLBackend) Write(_ context.Context, rec *TraceRecord) error {
 	return b.writer.WriteByte('\n')
 }
 
+// Flush flushes the buffered writer and fsyncs the underlying file.
 func (b *JSONLBackend) Flush(_ context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -52,6 +53,7 @@ func (b *JSONLBackend) Flush(_ context.Context) error {
 	return b.file.Sync()
 }
 
+// Close flushes any buffered output and closes the underlying file.
 func (b *JSONLBackend) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

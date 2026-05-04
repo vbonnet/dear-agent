@@ -27,6 +27,7 @@ func NewClaudeCodeAdapter(claudeDir string) *ClaudeCodeAdapter {
 	return &ClaudeCodeAdapter{claudeDir: claudeDir}
 }
 
+// Name returns the adapter identifier "claude-code".
 func (c *ClaudeCodeAdapter) Name() string {
 	return "claude-code"
 }

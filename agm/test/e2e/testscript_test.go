@@ -144,8 +144,7 @@ func TestAGM(t *testing.T) {
 			return nil
 		},
 		Condition: func(cond string) (bool, error) {
-			switch cond {
-			case "can-create-tmux-session":
+			if cond == "can-create-tmux-session" {
 				// Check if agm can create sessions in a sandboxed environment.
 				socketDir := t.TempDir()
 				homeDir := t.TempDir()

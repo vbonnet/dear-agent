@@ -112,8 +112,7 @@ func TestUnescapeOctal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := unescapeOctal(tt.input)
-			assert.NoError(t, err, "should not error on valid input")
+			result := unescapeOctal(tt.input)
 			assert.Equal(t, tt.expected, result, "unescaped string should match expected")
 		})
 	}

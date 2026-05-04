@@ -11,6 +11,7 @@ import (
 	"github.com/vbonnet/dear-agent/wayfinder/pkg/sandbox"
 )
 
+// CleanupSandboxesCmd is the cobra command that removes all sandboxes.
 var CleanupSandboxesCmd = &cobra.Command{
 	Use:   "cleanup-sandboxes",
 	Short: "Remove all sandboxes",

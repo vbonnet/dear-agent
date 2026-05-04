@@ -33,10 +33,7 @@ var vcsInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize VCS tracking for memory files",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := loadVCSConfig()
-		if err != nil {
-			return err
-		}
+		cfg := loadVCSConfig()
 
 		m, err := vcs.New(cfg)
 		if err != nil {
@@ -158,10 +155,7 @@ var vcsValidateCmd = &cobra.Command{
 	Use:   "validate [files...]",
 	Short: "Run validation checks on memory files",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := loadVCSConfig()
-		if err != nil {
-			return err
-		}
+		cfg := loadVCSConfig()
 
 		repoPath := expandHomePath(cfg.RepoPath)
 
@@ -299,12 +293,12 @@ func init() {
 }
 
 // loadVCSConfig loads VCS configuration from engram config
-func loadVCSConfig() (*vcs.Config, error) {
+func loadVCSConfig() *vcs.Config {
 	loader := config.NewLoader()
 	cfg, err := loader.Load()
 	if err != nil {
 		// Fall back to defaults if config loading fails
-		return vcs.DefaultConfig(), nil //nolint:nilerr // intentional: caller signals via separate bool/optional
+		return vcs.DefaultConfig()
 	}
 
 	return &vcs.Config{
@@ -324,15 +318,12 @@ func loadVCSConfig() (*vcs.Config, error) {
 			EcphoryMetadata: cfg.VCS.OptIn.EcphoryMetadata,
 			Logs:            cfg.VCS.OptIn.Logs,
 		},
-	}, nil
+	}
 }
 
 // loadVCS creates a MemoryVCS instance from configuration
 func loadVCS() (*vcs.MemoryVCS, error) {
-	cfg, err := loadVCSConfig()
-	if err != nil {
-		return nil, err
-	}
+	cfg := loadVCSConfig()
 
 	m, err := vcs.New(cfg)
 	if err != nil {

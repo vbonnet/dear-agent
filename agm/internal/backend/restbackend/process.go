@@ -15,6 +15,7 @@ import (
 // ProcessState represents the lifecycle state of a managed process.
 type ProcessState string
 
+// Lifecycle state values for managed processes.
 const (
 	ProcessStateStarting ProcessState = "starting"
 	ProcessStateRunning  ProcessState = "running"

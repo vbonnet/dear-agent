@@ -192,7 +192,7 @@ func (c *Client) buildSearchPrompt(req SearchRequest) string {
 }
 
 // parseSearchResponse extracts session IDs from the LLM response
-func (c *Client) parseSearchResponse(resp *aiplatformpb.PredictResponse, sessions []SessionMetadata) ([]SearchResult, error) {
+func (c *Client) parseSearchResponse(resp *aiplatformpb.PredictResponse, _ []SessionMetadata) ([]SearchResult, error) {
 	if len(resp.Predictions) == 0 {
 		return []SearchResult{}, nil
 	}

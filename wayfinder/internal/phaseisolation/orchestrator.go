@@ -52,6 +52,7 @@ func NewPhaseOrchestrator(config OrchestratorConfig, strategy PhaseExecutionStra
 }
 
 // ExecuteWorkflow executes the full Wayfinder workflow with phase isolation.
+//
 // Deprecated: Use ExecuteWorkflowCtx for OTel span propagation.
 func (po *PhaseOrchestrator) ExecuteWorkflow() (*WorkflowResult, error) {
 	return po.ExecuteWorkflowCtx(context.Background())
@@ -140,6 +141,7 @@ func (po *PhaseOrchestrator) ExecuteWorkflowCtx(ctx context.Context) (*WorkflowR
 }
 
 // ExecutePhase executes a single phase.
+//
 // Deprecated: Use ExecutePhaseCtx for OTel span propagation.
 func (po *PhaseOrchestrator) ExecutePhase(phase PhaseDefinition, opts *PhaseExecutionOptions) (*PhaseArtifact, error) {
 	return po.ExecutePhaseCtx(context.Background(), phase, opts)

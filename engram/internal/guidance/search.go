@@ -240,7 +240,7 @@ func calculateScore(fm *Frontmatter, query string) int {
 	// Tag match: 1 point
 	for _, tag := range fm.Tags {
 		if strings.Contains(strings.ToLower(tag), queryLower) {
-			score += 1
+			score++
 			break // Only count tags once
 		}
 	}

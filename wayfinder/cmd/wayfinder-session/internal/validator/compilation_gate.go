@@ -40,14 +40,7 @@ func validateCompilation(projectDir, phaseName string) error {
 	}
 
 	// Run build verification
-	buildResult, err := runBuild(projectDir, lang)
-	if err != nil {
-		return NewValidationError(
-			"complete BUILD",
-			fmt.Sprintf("failed to run build command: %v", err),
-			"Check build tool installation and try again",
-		)
-	}
+	buildResult := runBuild(projectDir, lang)
 
 	if !buildResult.Success {
 		return NewValidationError(
@@ -163,7 +156,7 @@ func detectProjectLanguage(projectDir string) (string, error) {
 }
 
 // runBuild executes the build command for the detected language
-func runBuild(projectDir, lang string) (*CompilationResult, error) {
+func runBuild(projectDir, lang string) *CompilationResult {
 	var cmd *exec.Cmd
 
 	switch lang {
@@ -184,7 +177,7 @@ func runBuild(projectDir, lang string) (*CompilationResult, error) {
 			cmd = exec.Command("npm", "run", "build")
 		} else {
 			// No build script, skip build validation
-			return &CompilationResult{Success: true}, nil
+			return &CompilationResult{Success: true}
 		}
 	case "rust":
 		cmd = exec.Command("cargo", "build")
@@ -197,11 +190,11 @@ func runBuild(projectDir, lang string) (*CompilationResult, error) {
 		}
 	default:
 		// Unknown language, skip build validation
-		return &CompilationResult{Success: true}, nil
+		return &CompilationResult{Success: true}
 	}
 
 	if cmd == nil {
-		return &CompilationResult{Success: true}, nil
+		return &CompilationResult{Success: true}
 	}
 
 	cmd.Dir = projectDir
@@ -217,7 +210,7 @@ func runBuild(projectDir, lang string) (*CompilationResult, error) {
 		Output:       string(output),
 		ExitCode:     exitCode,
 		ErrorMessage: "",
-	}, nil
+	}
 }
 
 // runTests executes the test command for the detected language

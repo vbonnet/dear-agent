@@ -74,10 +74,7 @@ func TestDetectTempFiles(t *testing.T) {
 	}
 
 	checker := NewCleanupChecker(tmpDir)
-	detected, err := checker.detectTempFiles()
-	if err != nil {
-		t.Fatalf("detectTempFiles failed: %v", err)
-	}
+	detected := checker.detectTempFiles()
 
 	if len(detected) == 0 {
 		t.Error("Expected to detect temp files")

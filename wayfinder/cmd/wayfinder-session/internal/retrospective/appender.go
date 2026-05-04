@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// S11Filename is the standard filename for the S11 retrospective document.
 const S11Filename = "S11-retrospective.md"
 
 // AppendToS11 formats RewindEventData as markdown and appends to S11-retrospective.md

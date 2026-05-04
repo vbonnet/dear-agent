@@ -8,6 +8,7 @@ import (
 // Color represents ANSI color codes
 type Color int
 
+// ANSI color identifiers.
 const (
 	ColorRed Color = iota
 	ColorGreen

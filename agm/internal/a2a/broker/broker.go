@@ -61,6 +61,7 @@ func New() *Broker {
 	}
 }
 
+// RegisterAgent registers an agent's model card with the broker.
 func (b *Broker) RegisterAgent(card *modelcard.ModelCard) error {
 	if err := b.cards.Register(card); err != nil {
 		return fmt.Errorf("broker: %w", err)
@@ -68,39 +69,48 @@ func (b *Broker) RegisterAgent(card *modelcard.ModelCard) error {
 	return nil
 }
 
+// UnregisterAgent removes an agent's card and any registered handler.
 func (b *Broker) UnregisterAgent(agentID string) {
 	b.cards.Unregister(agentID)
 	b.router.UnregisterHandler(agentID)
 }
 
+// Send routes a message via the router and returns the recipient agent IDs.
 func (b *Broker) Send(msg *messaging.Message) ([]string, error) {
 	return b.router.Send(msg)
 }
 
+// OnMessage registers a handler that receives messages addressed to agentID.
 func (b *Broker) OnMessage(agentID string, handler messaging.Handler) {
 	b.router.RegisterHandler(agentID, handler)
 }
 
+// DrainInbox returns and clears the buffered messages for agentID.
 func (b *Broker) DrainInbox(agentID string) []*messaging.Message {
 	return b.router.DrainInbox(agentID)
 }
 
+// FindAgentsByRole returns all registered agents matching the given role.
 func (b *Broker) FindAgentsByRole(role string) []*modelcard.ModelCard {
 	return b.cards.FindByRole(role)
 }
 
+// FindAgentsByCapability returns all registered agents that advertise the capability.
 func (b *Broker) FindAgentsByCapability(capability string) []*modelcard.ModelCard {
 	return b.cards.FindByCapability(capability)
 }
 
+// GetAgent returns the model card for agentID and whether it was found.
 func (b *Broker) GetAgent(agentID string) (*modelcard.ModelCard, bool) {
 	return b.cards.Get(agentID)
 }
 
+// ActiveAgents returns model cards for all currently active agents.
 func (b *Broker) ActiveAgents() []*modelcard.ModelCard {
 	return b.cards.ActiveAgents()
 }
 
+// UpdateStatus updates the registered status of agentID.
 func (b *Broker) UpdateStatus(agentID string, status modelcard.Status) error {
 	return b.cards.UpdateStatus(agentID, status)
 }

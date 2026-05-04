@@ -15,6 +15,7 @@ import (
 // TrustEventType classifies the type of trust event recorded.
 type TrustEventType string
 
+// Recognized TrustEventType values.
 const (
 	TrustEventSuccess            TrustEventType = "success"
 	TrustEventFalseCompletion    TrustEventType = "false_completion"

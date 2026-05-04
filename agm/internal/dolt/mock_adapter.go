@@ -125,57 +125,10 @@ func (m *MockAdapter) ListSessions(filter *SessionFilter) ([]*manifest.Manifest,
 	}
 
 	var results []*manifest.Manifest
-
 	for _, session := range m.sessions {
-		// Apply filters
-		if filter != nil {
-			// ExcludeArchived takes precedence over Lifecycle filter
-			if filter.ExcludeArchived && session.Lifecycle == manifest.LifecycleArchived {
-				continue
-			}
-
-			// Lifecycle filter
-			if filter.Lifecycle != "" && session.Lifecycle != filter.Lifecycle {
-				continue
-			}
-
-			// Harness filter
-			if filter.Harness != "" && session.Harness != filter.Harness {
-				continue
-			}
-
-			// ParentSessionID filter (pointer comparison)
-			if filter.ParentSessionID != nil {
-				// Skip sessions without parent_session_id support
-				// TODO: Add ParentSessionID field to manifest.Manifest if needed
-				continue
-			}
-
-			// Workspace filter
-			if filter.Workspace != "" && session.Workspace != filter.Workspace {
-				continue
-			}
-
-			// Tag filter: all specified tags must be present
-			if len(filter.Tags) > 0 {
-				tagSet := make(map[string]bool, len(session.Context.Tags))
-				for _, t := range session.Context.Tags {
-					tagSet[t] = true
-				}
-				allMatch := true
-				for _, t := range filter.Tags {
-					if !tagSet[t] {
-						allMatch = false
-						break
-					}
-				}
-				if !allMatch {
-					continue
-				}
-			}
+		if !mockSessionMatchesFilter(session, filter) {
+			continue
 		}
-
-		// Add matching session (deep copy)
 		results = append(results, m.copyManifest(session))
 	}
 
@@ -194,6 +147,42 @@ func (m *MockAdapter) ListSessions(filter *SessionFilter) ([]*manifest.Manifest,
 	}
 
 	return results, nil
+}
+
+// mockSessionMatchesFilter returns true when session passes every constraint
+// in filter (lifecycle, harness, workspace, tags). nil filter accepts all.
+func mockSessionMatchesFilter(session *manifest.Manifest, filter *SessionFilter) bool {
+	if filter == nil {
+		return true
+	}
+	if filter.ExcludeArchived && session.Lifecycle == manifest.LifecycleArchived {
+		return false
+	}
+	if filter.Lifecycle != "" && session.Lifecycle != filter.Lifecycle {
+		return false
+	}
+	if filter.Harness != "" && session.Harness != filter.Harness {
+		return false
+	}
+	if filter.ParentSessionID != nil {
+		// Mock has no parent_session_id support yet.
+		return false
+	}
+	if filter.Workspace != "" && session.Workspace != filter.Workspace {
+		return false
+	}
+	if len(filter.Tags) > 0 {
+		tagSet := make(map[string]bool, len(session.Context.Tags))
+		for _, t := range session.Context.Tags {
+			tagSet[t] = true
+		}
+		for _, t := range filter.Tags {
+			if !tagSet[t] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // Close marks the adapter as closed
@@ -361,7 +350,7 @@ func (m *MockAdapter) GetByFrecency(limit int) ([]FrecencyResult, error) {
 	return results, nil
 }
 
-// Helper function to create a test session manifest
+// NewTestManifest creates a session manifest populated with sensible test defaults.
 func NewTestManifest(sessionID string, name string) *manifest.Manifest {
 	now := time.Now()
 	return &manifest.Manifest{

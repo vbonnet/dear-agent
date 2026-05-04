@@ -168,7 +168,7 @@ func TestRemoveWithRetry(t *testing.T) {
 	}
 
 	// Remove should succeed
-	err := removeWithRetry(testDir, 3)
+	err := removeWithRetry(testDir)
 	if err != nil {
 		t.Errorf("removeWithRetry failed: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestRemoveWithRetry(t *testing.T) {
 	}
 
 	// Remove again should be idempotent
-	err = removeWithRetry(testDir, 3)
+	err = removeWithRetry(testDir)
 	if err != nil {
 		t.Errorf("removeWithRetry should be idempotent, got error: %v", err)
 	}

@@ -359,10 +359,8 @@ func TestValidatePhaseQuestions(t *testing.T) {
 				if !strings.Contains(strings.ToLower(valErr.Reason), tt.errorReason) {
 					t.Errorf("expected reason to contain %q, got %q", tt.errorReason, valErr.Reason)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
 	}

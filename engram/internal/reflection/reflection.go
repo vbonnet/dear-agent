@@ -79,25 +79,30 @@ type Trigger struct {
 // TriggerType represents different reflection triggers
 type TriggerType string
 
+// Smart trigger values for TriggerType (see ADR-005).
 const (
-	// Smart triggers (see ADR-005)
+	// TriggerRepeatedFailureToSuccess fires when a sequence of failures finally succeeded.
 	TriggerRepeatedFailureToSuccess TriggerType = "repeated_failure_to_success"
-	TriggerWorkDiscarded            TriggerType = "work_discarded"
-	TriggerUnusualPattern           TriggerType = "unusual_pattern"
-	TriggerExplicitRequest          TriggerType = "explicit_request"
+	// TriggerWorkDiscarded fires when completed work was thrown away.
+	TriggerWorkDiscarded TriggerType = "work_discarded"
+	// TriggerUnusualPattern fires when the session shows an anomalous interaction pattern.
+	TriggerUnusualPattern TriggerType = "unusual_pattern"
+	// TriggerExplicitRequest fires when the user explicitly asked for a reflection.
+	TriggerExplicitRequest TriggerType = "explicit_request"
 )
 
 // OutcomeType represents the result of a session or operation
 type OutcomeType string
 
+// Outcome values for OutcomeType.
 const (
-	// Session completed successfully
+	// OutcomeSuccess indicates the session achieved its goal.
 	OutcomeSuccess OutcomeType = "success"
 
-	// Session failed to achieve goal
+	// OutcomeFailure indicates the session failed to achieve its goal.
 	OutcomeFailure OutcomeType = "failure"
 
-	// Session partially achieved goal
+	// OutcomePartial indicates the session partially achieved its goal.
 	OutcomePartial OutcomeType = "partial"
 )
 
@@ -105,20 +110,21 @@ const (
 // (Task 1.1.1: Start with 5 categories, extensible for future)
 type ErrorCategory string
 
+// ErrorCategory values for ErrorCategory.
 const (
-	// Code syntax errors, parse failures
+	// ErrorCategorySyntax covers code syntax errors and parse failures.
 	ErrorCategorySyntax ErrorCategory = "syntax_error"
 
-	// Incorrect tool usage, wrong parameters, API misuse
+	// ErrorCategoryToolMisuse covers incorrect tool usage, wrong parameters, and API misuse.
 	ErrorCategoryToolMisuse ErrorCategory = "tool_misuse"
 
-	// Permission denied, authorization failures
+	// ErrorCategoryPermissionDenied covers permission-denied and authorization failures.
 	ErrorCategoryPermissionDenied ErrorCategory = "permission_denied"
 
-	// Operation timeouts, hung processes
+	// ErrorCategoryTimeout covers operation timeouts and hung processes.
 	ErrorCategoryTimeout ErrorCategory = "timeout"
 
-	// Uncategorized errors (catchall for future classification)
+	// ErrorCategoryOther is the catchall for uncategorized errors.
 	ErrorCategoryOther ErrorCategory = "other"
 )
 

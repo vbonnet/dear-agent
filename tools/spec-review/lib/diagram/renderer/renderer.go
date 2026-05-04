@@ -9,6 +9,7 @@ import (
 // Format represents a diagram format type
 type Format string
 
+// Supported diagram source formats.
 const (
 	FormatD2          Format = "d2"
 	FormatStructurizr Format = "structurizr"
@@ -19,6 +20,7 @@ const (
 // OutputFormat represents the output rendering format
 type OutputFormat string
 
+// Supported diagram output formats.
 const (
 	OutputSVG  OutputFormat = "svg"
 	OutputPNG  OutputFormat = "png"
@@ -29,6 +31,7 @@ const (
 // LayoutEngine represents the layout algorithm to use
 type LayoutEngine string
 
+// Supported layout engine names.
 const (
 	LayoutELK   LayoutEngine = "elk"
 	LayoutDagre LayoutEngine = "dagre"

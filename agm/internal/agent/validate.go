@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -155,7 +156,13 @@ func validateOpenCodeServerAvailable() error {
 		Timeout: 2 * time.Second,
 	}
 
-	resp, err := client.Get(serverURL + "/health")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL+"/health", nil) //nolint:gosec // G704: URL is internally constructed, not user-controlled
+	if err != nil {
+		return fmt.Errorf("OpenCode server not running. Start with: opencode serve --port 4096")
+	}
+	resp, err := client.Do(req) //nolint:gosec // G704: URL is internally constructed, not user-controlled
 	if err != nil {
 		return fmt.Errorf("OpenCode server not running. Start with: opencode serve --port 4096")
 	}

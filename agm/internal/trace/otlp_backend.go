@@ -65,10 +65,12 @@ func (b *OTLPBackend) Write(ctx context.Context, rec *TraceRecord) error {
 	return nil
 }
 
+// Flush forces the underlying OTLP provider to send any buffered spans.
 func (b *OTLPBackend) Flush(ctx context.Context) error {
 	return b.provider.ForceFlush(ctx)
 }
 
+// Close shuts down the underlying OTLP provider.
 func (b *OTLPBackend) Close() error {
 	return b.provider.Shutdown(context.Background())
 }

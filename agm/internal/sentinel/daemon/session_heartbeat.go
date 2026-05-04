@@ -276,112 +276,114 @@ func (m *SessionHeartbeatMonitor) CheckAll() []SessionStalenessResult {
 	alertsSentThisCycle := 0
 
 	for _, path := range entries {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			m.logger.Error("Failed to read heartbeat file", "path", path, "error", err)
+		hb, sessionName, ok := readHeartbeatEntry(path, m.logger)
+		if !ok {
 			continue
 		}
-
-		var hb SessionHeartbeat
-		if err := json.Unmarshal(data, &hb); err != nil {
-			m.logger.Error("Failed to parse heartbeat file", "path", path, "error", err)
-			continue
-		}
-
 		age := now.Sub(hb.Timestamp)
-		sessionName := hb.SessionName
-		if sessionName == "" {
-			// Derive from filename if not in JSON.
-			base := filepath.Base(path)
-			sessionName = strings.TrimSuffix(base, ".json")
-		}
-
-		result := SessionStalenessResult{
-			SessionName: sessionName,
-			Age:         age,
-			Level:       "ok",
-		}
-
-		if age > m.alertAge {
-			result.Level = "alert"
-
-			// Skip exempt sessions.
-			if m.isExempt(sessionName) {
-				results = append(results, result)
-				continue
-			}
-
-			// Skip sessions not present in tmux (stale heartbeat for deleted session).
-			if tmuxSet != nil {
-				if _, exists := tmuxSet[sessionName]; !exists {
-					m.logger.Debug("Skipping alert for session not in tmux",
-						"session", sessionName)
-					results = append(results, result)
-					continue
-				}
-			}
-
-			// Rate limit: max alerts per cycle.
-			if alertsSentThisCycle >= m.maxAlertsPerCycle {
-				m.logger.Debug("Per-cycle alert limit reached, skipping",
-					"session", sessionName, "limit", m.maxAlertsPerCycle)
-				results = append(results, result)
-				continue
-			}
-
-			// Rate limit: max 1 alert per session per hour.
-			lastAlert, alerted := m.alertedSessions[sessionName]
-			if alerted && now.Sub(lastAlert) < m.alertCooldown {
-				m.logger.Debug("Per-session cooldown active, skipping alert",
-					"session", sessionName,
-					"last_alert", lastAlert,
-					"cooldown", m.alertCooldown)
-				results = append(results, result)
-				continue
-			}
-
-			// Send alert.
-			prompt := fmt.Sprintf("Session %s heartbeat stale: %s (threshold %s)",
-				sessionName, age.Round(time.Second), m.alertAge)
-
-			output, cmdErr := m.runCommand(m.agmBinary, "send", "msg",
-				m.orchestratorSession,
-				"--sender", "astrocyte",
-				"--priority", "urgent",
-				"--prompt", prompt)
-
-			if cmdErr != nil {
-				m.logger.Error("Failed to send staleness alert",
-					"session", sessionName, "error", cmdErr, "output", string(output))
-			} else {
-				m.logger.Info("Sent staleness alert",
-					"session", sessionName, "age", age.Round(time.Second))
-			}
-
-			m.alertedSessions[sessionName] = now
-			m.alertTimestamps = append(m.alertTimestamps, now)
-			alertsSentThisCycle++
-
-			// Check circuit breaker after each alert.
-			m.checkCircuitBreaker(now)
-			if !m.circuitBreakerUntil.IsZero() && now.Before(m.circuitBreakerUntil) {
-				break
-			}
-		} else if age > m.warnAge {
-			result.Level = "warn"
-			m.logger.Warn("Session heartbeat stale",
-				"session", sessionName,
-				"age", age.Round(time.Second),
-				"threshold", m.warnAge)
-		}
-
+		result := SessionStalenessResult{SessionName: sessionName, Age: age, Level: "ok"}
+		broke := m.processHeartbeatEntry(&result, sessionName, age, tmuxSet, &alertsSentThisCycle, now)
 		results = append(results, result)
+		if broke {
+			break
+		}
 	}
 
 	// Persist state after each scan.
 	m.saveAlertState()
 
 	return results
+}
+
+// readHeartbeatEntry reads and unmarshals a single heartbeat file. Returns
+// (hb, sessionName, true) on success; on any error the error is logged and
+// the function returns ok=false so the caller skips the entry.
+func readHeartbeatEntry(path string, logger *slog.Logger) (SessionHeartbeat, string, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		logger.Error("Failed to read heartbeat file", "path", path, "error", err)
+		return SessionHeartbeat{}, "", false
+	}
+	var hb SessionHeartbeat
+	if err := json.Unmarshal(data, &hb); err != nil {
+		logger.Error("Failed to parse heartbeat file", "path", path, "error", err)
+		return SessionHeartbeat{}, "", false
+	}
+	sessionName := hb.SessionName
+	if sessionName == "" {
+		base := filepath.Base(path)
+		sessionName = strings.TrimSuffix(base, ".json")
+	}
+	return hb, sessionName, true
+}
+
+// processHeartbeatEntry applies alert / warn logic to a single heartbeat
+// result. Returns true if the circuit breaker tripped and the caller should
+// stop processing further entries.
+func (m *SessionHeartbeatMonitor) processHeartbeatEntry(result *SessionStalenessResult, sessionName string, age time.Duration, tmuxSet map[string]struct{}, alertsSentThisCycle *int, now time.Time) bool {
+	switch {
+	case age > m.alertAge:
+		result.Level = "alert"
+		if !m.shouldSendAlert(sessionName, *alertsSentThisCycle, tmuxSet, now) {
+			return false
+		}
+		m.sendStalenessAlert(sessionName, age)
+		m.alertedSessions[sessionName] = now
+		m.alertTimestamps = append(m.alertTimestamps, now)
+		*alertsSentThisCycle++
+		m.checkCircuitBreaker(now)
+		return !m.circuitBreakerUntil.IsZero() && now.Before(m.circuitBreakerUntil)
+	case age > m.warnAge:
+		result.Level = "warn"
+		m.logger.Warn("Session heartbeat stale",
+			"session", sessionName,
+			"age", age.Round(time.Second),
+			"threshold", m.warnAge)
+	}
+	return false
+}
+
+// shouldSendAlert returns true if the per-session, per-cycle, and tmux-presence
+// guards all permit sending an alert.
+func (m *SessionHeartbeatMonitor) shouldSendAlert(sessionName string, alertsSentThisCycle int, tmuxSet map[string]struct{}, now time.Time) bool {
+	if m.isExempt(sessionName) {
+		return false
+	}
+	if tmuxSet != nil {
+		if _, exists := tmuxSet[sessionName]; !exists {
+			m.logger.Debug("Skipping alert for session not in tmux", "session", sessionName)
+			return false
+		}
+	}
+	if alertsSentThisCycle >= m.maxAlertsPerCycle {
+		m.logger.Debug("Per-cycle alert limit reached, skipping",
+			"session", sessionName, "limit", m.maxAlertsPerCycle)
+		return false
+	}
+	if lastAlert, alerted := m.alertedSessions[sessionName]; alerted && now.Sub(lastAlert) < m.alertCooldown {
+		m.logger.Debug("Per-session cooldown active, skipping alert",
+			"session", sessionName, "last_alert", lastAlert, "cooldown", m.alertCooldown)
+		return false
+	}
+	return true
+}
+
+// sendStalenessAlert dispatches the urgent staleness alert to the orchestrator.
+func (m *SessionHeartbeatMonitor) sendStalenessAlert(sessionName string, age time.Duration) {
+	prompt := fmt.Sprintf("Session %s heartbeat stale: %s (threshold %s)",
+		sessionName, age.Round(time.Second), m.alertAge)
+	output, cmdErr := m.runCommand(m.agmBinary, "send", "msg",
+		m.orchestratorSession,
+		"--sender", "astrocyte",
+		"--priority", "urgent",
+		"--prompt", prompt)
+	if cmdErr != nil {
+		m.logger.Error("Failed to send staleness alert",
+			"session", sessionName, "error", cmdErr, "output", string(output))
+	} else {
+		m.logger.Info("Sent staleness alert",
+			"session", sessionName, "age", age.Round(time.Second))
+	}
 }
 
 // activeTmuxSessions returns a set of active tmux session names, or nil if

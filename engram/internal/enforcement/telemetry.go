@@ -97,27 +97,28 @@ func (v *Validator) emitViolationEvent(ctx context.Context, bus *eventbus.LocalB
 	}
 
 	// Determine violation type from error message
-	if containsStr(errMsg, "domain") && containsStr(errMsg, "not in allowed list") {
+	switch {
+	case containsStr(errMsg, "domain") && containsStr(errMsg, "not in allowed list"):
 		violationData["type"] = "domain"
 		if v.identity != nil {
 			violationData["domain"] = v.identity.Domain
 		}
-	} else if containsStr(errMsg, "missing required plugins") {
+	case containsStr(errMsg, "missing required plugins"):
 		violationData["type"] = "plugin_missing"
 		// Extract plugin name from error if possible
 		if parts := extractPluginNames(errMsg); len(parts) > 0 {
 			violationData["plugin"] = parts[0] // First missing plugin
 		}
-	} else if containsStr(errMsg, "version mismatches") {
+	case containsStr(errMsg, "version mismatches"):
 		violationData["type"] = "plugin_version"
 		// Extract plugin and version info
 		if parts := extractVersionMismatch(errMsg); len(parts) >= 2 {
 			violationData["plugin"] = parts[0]
 			violationData["version"] = parts[1]
 		}
-	} else if containsStr(errMsg, "no identity detected") {
+	case containsStr(errMsg, "no identity detected"):
 		violationData["type"] = "identity_missing"
-	} else {
+	default:
 		violationData["type"] = "config"
 	}
 

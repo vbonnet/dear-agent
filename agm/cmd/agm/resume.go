@@ -250,63 +250,7 @@ func resolveSessionIdentifier(adapter *dolt.Adapter, identifier string) (string,
 	// Build tmux mapping using Dolt adapter
 	tmuxMapping, _ := discovery.GetTmuxMappingWithAdapter(sessionsDir, adapter)
 
-	// Try matching strategies in order
-	var matches []*manifest.Manifest
-	var matchType string
-
-	// Strategy 1: SessionID match (full or partial - v2: SessionID is top-level)
-	for _, m := range manifests {
-		if strings.HasPrefix(m.SessionID, identifier) || m.SessionID == identifier {
-			matches = append(matches, m)
-			matchType = "session ID"
-		}
-	}
-
-	// Strategy 2: Tmux session name match
-	if len(matches) == 0 {
-		for sessionID, tmuxName := range tmuxMapping {
-			if tmuxName == identifier {
-				// Find manifest with this SessionID
-				for _, m := range manifests {
-					if m.SessionID == sessionID {
-						matches = append(matches, m)
-						matchType = "tmux name"
-						break
-					}
-				}
-			}
-		}
-	}
-
-	// Strategy 3: Fuzzy match on project path (v2: Context.Project)
-	if len(matches) == 0 {
-		for _, m := range manifests {
-			if strings.Contains(m.Context.Project, identifier) {
-				matches = append(matches, m)
-				matchType = "project path"
-			}
-		}
-	}
-
-	// Strategy 4: Match on manifest Name (v2 field)
-	if len(matches) == 0 {
-		for _, m := range manifests {
-			if m.Name == identifier {
-				matches = append(matches, m)
-				matchType = "manifest name"
-			}
-		}
-	}
-
-	// Strategy 4: Fuzzy match on session ID
-	if len(matches) == 0 {
-		for _, m := range manifests {
-			if strings.Contains(m.SessionID, identifier) {
-				matches = append(matches, m)
-				matchType = "session ID"
-			}
-		}
-	}
+	matches, matchType := matchSessionIdentifier(manifests, tmuxMapping, identifier)
 
 	// Handle results
 	if len(matches) == 0 {
@@ -334,46 +278,103 @@ func resolveSessionIdentifier(adapter *dolt.Adapter, identifier string) (string,
 		return "", "", fmt.Errorf("ambiguous identifier - please be more specific")
 	}
 
-	// Single match found
-	m := matches[0]
-
-	// Check if matched session has children (execution sessions)
-	// If so, prefer the most recent non-archived child over the parent
-	// UNLESS --force-parent flag is set
-	if !resumeForceParent {
-		children, err := adapter.GetChildren(m.SessionID)
-		if err == nil && len(children) > 0 {
-			// Find most recent non-archived child
-			var mostRecentChild *manifest.Manifest
-			for _, child := range children {
-				if child.Lifecycle != manifest.LifecycleArchived {
-					if mostRecentChild == nil || child.UpdatedAt.After(mostRecentChild.UpdatedAt) {
-						mostRecentChild = child
-					}
-				}
-			}
-
-			// Prefer child over parent (execution over planning)
-			if mostRecentChild != nil {
-				ui.PrintSuccess(fmt.Sprintf(
-					"Found planning session '%s' with execution session '%s'",
-					m.Name, mostRecentChild.Name))
-				fmt.Println(ui.Blue("  → Resuming execution session (use --force-parent to resume planning session)"))
-
-				// Use child session instead
-				m = mostRecentChild
-			}
-		}
-	} else {
-		// User explicitly requested parent session
-		fmt.Println(ui.Yellow("  ⚠ Using --force-parent: Resuming planning session"))
-	}
+	// Single match found - prefer child execution over planning parent
+	m := preferExecutionChild(adapter, matches[0])
 
 	manifestPath, ok := manifestPaths[m.SessionID]
 	if !ok {
 		return "", "", fmt.Errorf("manifest path not found for session ID %s", m.SessionID)
 	}
 	return m.SessionID, manifestPath, nil
+}
+
+// matchSessionIdentifier runs the layered match strategies (session ID prefix,
+// tmux name, project path, manifest name, session ID substring) against the
+// list of known manifests. Returns the first non-empty match list and the
+// human-readable match-type label.
+func matchSessionIdentifier(manifests []*manifest.Manifest, tmuxMapping map[string]string, identifier string) ([]*manifest.Manifest, string) {
+	if matches := filterManifests(manifests, func(m *manifest.Manifest) bool {
+		return strings.HasPrefix(m.SessionID, identifier) || m.SessionID == identifier
+	}); len(matches) > 0 {
+		return matches, "session ID"
+	}
+	if matches := matchByTmuxName(manifests, tmuxMapping, identifier); len(matches) > 0 {
+		return matches, "tmux name"
+	}
+	if matches := filterManifests(manifests, func(m *manifest.Manifest) bool {
+		return strings.Contains(m.Context.Project, identifier)
+	}); len(matches) > 0 {
+		return matches, "project path"
+	}
+	if matches := filterManifests(manifests, func(m *manifest.Manifest) bool {
+		return m.Name == identifier
+	}); len(matches) > 0 {
+		return matches, "manifest name"
+	}
+	return filterManifests(manifests, func(m *manifest.Manifest) bool {
+		return strings.Contains(m.SessionID, identifier)
+	}), "session ID"
+}
+
+// filterManifests returns the subset of manifests for which pred returns true.
+func filterManifests(manifests []*manifest.Manifest, pred func(*manifest.Manifest) bool) []*manifest.Manifest {
+	var out []*manifest.Manifest
+	for _, m := range manifests {
+		if pred(m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// matchByTmuxName returns manifests whose SessionID is mapped to the literal
+// tmux session name `identifier` in tmuxMapping.
+func matchByTmuxName(manifests []*manifest.Manifest, tmuxMapping map[string]string, identifier string) []*manifest.Manifest {
+	var matches []*manifest.Manifest
+	for sessionID, tmuxName := range tmuxMapping {
+		if tmuxName != identifier {
+			continue
+		}
+		for _, m := range manifests {
+			if m.SessionID == sessionID {
+				matches = append(matches, m)
+				break
+			}
+		}
+	}
+	return matches
+}
+
+// preferExecutionChild returns the most recent non-archived execution child of
+// m if any exist (so that resume targets the execution session, not the
+// planning session). When --force-parent is set, the parent is returned
+// unchanged with a warning.
+func preferExecutionChild(adapter *dolt.Adapter, m *manifest.Manifest) *manifest.Manifest {
+	if resumeForceParent {
+		fmt.Println(ui.Yellow("  ⚠ Using --force-parent: Resuming planning session"))
+		return m
+	}
+	children, err := adapter.GetChildren(m.SessionID)
+	if err != nil || len(children) == 0 {
+		return m
+	}
+	var mostRecentChild *manifest.Manifest
+	for _, child := range children {
+		if child.Lifecycle == manifest.LifecycleArchived {
+			continue
+		}
+		if mostRecentChild == nil || child.UpdatedAt.After(mostRecentChild.UpdatedAt) {
+			mostRecentChild = child
+		}
+	}
+	if mostRecentChild == nil {
+		return m
+	}
+	ui.PrintSuccess(fmt.Sprintf(
+		"Found planning session '%s' with execution session '%s'",
+		m.Name, mostRecentChild.Name))
+	fmt.Println(ui.Blue("  → Resuming execution session (use --force-parent to resume planning session)"))
+	return mostRecentChild
 }
 
 // checkSessionHealth validates that a session can be resumed (v2 schema)
@@ -534,132 +535,14 @@ func resumeSession(adapter *dolt.Adapter, sessionID, manifestPath, harnessName s
 		return fmt.Errorf("failed to read session from Dolt: %w", err)
 	}
 
-	// Only send commands if needed
 	if sendCommands {
-		// Build agent-specific resume command
-		var fullCmd string
-
-		switch harnessName {
-		case "opencode-cli":
-			// OpenCode uses simple attach (server maintains session state)
-			fullCmd = fmt.Sprintf("cd %s && opencode attach && exit", shellQuote(health.WorktreePath))
-
-		case "claude-code":
-			// Claude uses UUID-based resume
-			resumeUUID := m.Claude.UUID
-
-			// If UUID is not in Dolt, try uuid.Discover as fallback
-			if resumeUUID == "" {
-				findInManifests := func(name string) (*manifest.Manifest, error) {
-					manifests, listErr := adapter.ListSessions(&dolt.SessionFilter{})
-					if listErr != nil {
-						return nil, listErr
-					}
-					for _, ms := range manifests {
-						if ms.Tmux.SessionName == name || ms.Name == name {
-							return ms, nil
-						}
-					}
-					return nil, fmt.Errorf("no session found for: %s", name)
-				}
-				discoveredUUID, discoverErr := uuidpkg.Discover(health.TmuxSessionName, findInManifests, false)
-				if discoverErr == nil && discoveredUUID != "" {
-					resumeUUID = discoveredUUID
-					ui.PrintSuccess(fmt.Sprintf("Discovered Claude UUID via fallback: %s", resumeUUID[:8]))
-				}
-			}
-
-			if resumeUUID != "" {
-				fullCmd = fmt.Sprintf("cd %s && claude --resume %s && exit",
-					shellQuote(health.WorktreePath),
-					shellQuote(resumeUUID))
-			} else {
-				// Fallback to starting a new Claude session if UUID is not set
-				fullCmd = fmt.Sprintf("cd %s && claude && exit", shellQuote(health.WorktreePath))
-				ui.PrintWarning("No Claude UUID found - starting new Claude session")
-			}
-
-		default:
-			// Other harnesses - start without resume support
-			fullCmd = fmt.Sprintf("cd %s && exit", shellQuote(health.WorktreePath))
-			ui.PrintWarning(fmt.Sprintf("Harness '%s' does not support resume - starting in working directory", harnessName))
+		if err := dispatchResumeCommand(adapter, m, harnessName, health); err != nil {
+			return err
 		}
-
-		// Send combined command to tmux
-		if err := tmux.SendCommand(health.TmuxSessionName, fullCmd); err != nil {
-			return fmt.Errorf("failed to send resume command: %w", err)
+		if err := waitForResumedClaude(health); err != nil {
+			return err
 		}
-
-		// Wait for Claude process to appear first (quick check)
-		var processWaitErr error
-		spinErr := spinner.New().
-			Title("Waiting for Claude process to start...").
-			Accessible(true).
-			Action(func() {
-				processWaitErr = tmux.WaitForProcessReady(health.TmuxSessionName, "claude", 15*time.Second)
-			}).
-			Run()
-		if spinErr != nil {
-			return fmt.Errorf("spinner error: %w", spinErr)
-		}
-
-		// Ensure clean line after spinner
-		fmt.Println()
-
-		if processWaitErr != nil {
-			ui.PrintWarning("Claude process is taking longer than expected")
-			fmt.Println("  Continuing to wait for conversation to load...")
-		} else {
-			ui.PrintSuccess("Claude process started!")
-		}
-
-		// Wait for conversation to load (detect prompt)
-		var promptWaitErr error
-		spinErr = spinner.New().
-			Title("Waiting for conversation to load...").
-			Accessible(true).
-			Action(func() {
-				// Increased timeout to 60s for resume operations (conversation loading can be slow)
-				promptWaitErr = tmux.WaitForPromptSimple(health.TmuxSessionName, 60*time.Second)
-			}).
-			Run()
-		if spinErr != nil {
-			return fmt.Errorf("spinner error: %w", spinErr)
-		}
-
-		// Ensure clean line after spinner
-		fmt.Println()
-
-		if promptWaitErr != nil {
-			ui.PrintWarning("Conversation is taking longer than expected to load")
-			fmt.Println("  Attaching now - conversation should appear shortly")
-		} else {
-			ui.PrintSuccess("Conversation loaded and ready!")
-		}
-
-		// Restore permission mode if saved and different from default
-		if supportsPermissionMode(harnessName) && m.PermissionMode != "" && m.PermissionMode != "default" {
-			shiftTabCount := calculateShiftTabCount(m.PermissionMode)
-
-			if shiftTabCount > 0 {
-				// Verify session is at idle prompt via capture-pane before sending mode keys.
-				// Bug fix: S-Tab keys must not be sent blindly without state verification.
-				canReceive := session.CheckSessionDelivery(health.TmuxSessionName)
-				if canReceive != state.CanReceiveYes {
-					ui.PrintWarning(fmt.Sprintf("Cannot restore permission mode: session not at idle prompt (state: %s)", canReceive))
-				} else {
-					ui.PrintSuccess(fmt.Sprintf("Restoring permission mode: %s", m.PermissionMode))
-
-					for i := 0; i < shiftTabCount; i++ {
-						if err := tmux.SendKeys(health.TmuxSessionName, "S-Tab"); err != nil {
-							ui.PrintWarning(fmt.Sprintf("Failed to restore mode: %v", err))
-							break
-						}
-						time.Sleep(100 * time.Millisecond) // Allow tmux to process
-					}
-				}
-			}
-		}
+		restorePermissionMode(harnessName, m, health)
 	}
 
 	// Update manifest last_activity (best effort - don't fail if this errors)
@@ -705,6 +588,125 @@ func resumeSession(adapter *dolt.Adapter, sessionID, manifestPath, harnessName s
 	}
 
 	return nil
+}
+
+// dispatchResumeCommand builds the harness-specific resume command and sends
+// it to the tmux session. For Claude, falls back to uuid.Discover if the
+// stored UUID is missing.
+func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessName string, health *HealthStatus) error {
+	var fullCmd string
+	switch harnessName {
+	case "opencode-cli":
+		fullCmd = fmt.Sprintf("cd %s && opencode attach && exit", shellQuote(health.WorktreePath))
+	case "claude-code":
+		fullCmd = buildClaudeResumeCommand(adapter, m, health)
+	default:
+		fullCmd = fmt.Sprintf("cd %s && exit", shellQuote(health.WorktreePath))
+		ui.PrintWarning(fmt.Sprintf("Harness '%s' does not support resume - starting in working directory", harnessName))
+	}
+	if err := tmux.SendCommand(health.TmuxSessionName, fullCmd); err != nil {
+		return fmt.Errorf("failed to send resume command: %w", err)
+	}
+	return nil
+}
+
+// buildClaudeResumeCommand assembles `claude --resume <uuid>` (or a bare
+// `claude` if no UUID can be discovered).
+func buildClaudeResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, health *HealthStatus) string {
+	resumeUUID := m.Claude.UUID
+	if resumeUUID == "" {
+		findInManifests := func(name string) (*manifest.Manifest, error) {
+			manifests, listErr := adapter.ListSessions(&dolt.SessionFilter{})
+			if listErr != nil {
+				return nil, listErr
+			}
+			for _, ms := range manifests {
+				if ms.Tmux.SessionName == name || ms.Name == name {
+					return ms, nil
+				}
+			}
+			return nil, fmt.Errorf("no session found for: %s", name)
+		}
+		discoveredUUID, discoverErr := uuidpkg.Discover(health.TmuxSessionName, findInManifests, false)
+		if discoverErr == nil && discoveredUUID != "" {
+			resumeUUID = discoveredUUID
+			ui.PrintSuccess(fmt.Sprintf("Discovered Claude UUID via fallback: %s", resumeUUID[:8]))
+		}
+	}
+	if resumeUUID != "" {
+		return fmt.Sprintf("cd %s && claude --resume %s && exit",
+			shellQuote(health.WorktreePath),
+			shellQuote(resumeUUID))
+	}
+	ui.PrintWarning("No Claude UUID found - starting new Claude session")
+	return fmt.Sprintf("cd %s && claude && exit", shellQuote(health.WorktreePath))
+}
+
+// waitForResumedClaude waits first for the claude process to appear, then for
+// the conversation prompt to render (60s timeout each behind a spinner).
+func waitForResumedClaude(health *HealthStatus) error {
+	var processWaitErr error
+	spinErr := spinner.New().
+		Title("Waiting for Claude process to start...").
+		Accessible(true).
+		Action(func() {
+			processWaitErr = tmux.WaitForProcessReady(health.TmuxSessionName, "claude", 15*time.Second)
+		}).
+		Run()
+	if spinErr != nil {
+		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	fmt.Println()
+	if processWaitErr != nil {
+		ui.PrintWarning("Claude process is taking longer than expected")
+		fmt.Println("  Continuing to wait for conversation to load...")
+	} else {
+		ui.PrintSuccess("Claude process started!")
+	}
+	var promptWaitErr error
+	spinErr = spinner.New().
+		Title("Waiting for conversation to load...").
+		Accessible(true).
+		Action(func() {
+			promptWaitErr = tmux.WaitForPromptSimple(health.TmuxSessionName, 60*time.Second)
+		}).
+		Run()
+	if spinErr != nil {
+		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	fmt.Println()
+	if promptWaitErr != nil {
+		ui.PrintWarning("Conversation is taking longer than expected to load")
+		fmt.Println("  Attaching now - conversation should appear shortly")
+	} else {
+		ui.PrintSuccess("Conversation loaded and ready!")
+	}
+	return nil
+}
+
+// restorePermissionMode replays the saved permission-mode S-Tab cycles when
+// the session supports it and the saved mode differs from default.
+func restorePermissionMode(harnessName string, m *manifest.Manifest, health *HealthStatus) {
+	if !supportsPermissionMode(harnessName) || m.PermissionMode == "" || m.PermissionMode == "default" {
+		return
+	}
+	shiftTabCount := calculateShiftTabCount(m.PermissionMode)
+	if shiftTabCount <= 0 {
+		return
+	}
+	canReceive := session.CheckSessionDelivery(health.TmuxSessionName)
+	if canReceive != state.CanReceiveYes {
+		ui.PrintWarning(fmt.Sprintf("Cannot restore permission mode: session not at idle prompt (state: %s)", canReceive))
+		return
+	}
+	ui.PrintSuccess(fmt.Sprintf("Restoring permission mode: %s", m.PermissionMode))
+	for i := 0; i < shiftTabCount; i++ {
+		if err := tmux.SendKeys(health.TmuxSessionName, "S-Tab"); err != nil {
+			ui.PrintWarning(fmt.Sprintf("Failed to restore mode: %v", err))
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // updateManifestActivity updates the updated_at field and state in manifest (v2: auto-updated by Write)

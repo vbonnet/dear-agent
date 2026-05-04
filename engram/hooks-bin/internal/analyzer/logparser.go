@@ -84,135 +84,25 @@ func ParseLog(path string, since *time.Time) ([]DenialEntry, []ApprovalEntry, Ho
 
 	for scanner.Scan() {
 		line := scanner.Text()
-
-		// Detect new entry boundary.
 		if strings.Contains(line, "=== Hook invoked ===") {
 			ts := extractTimestamp(line)
-			// If we had an active state that was never finalized (malformed), discard it.
 			state = parseState{active: true, timestamp: ts}
 			stats.TotalInvocations++
 			updateTimeRange(ts)
 			continue
 		}
-
 		if !state.active {
 			continue
 		}
-
-		// Parse Raw input JSON.
-		if idx := strings.Index(line, "Raw input: "); idx >= 0 {
-			jsonStr := line[idx+len("Raw input: "):]
-			// Try standard format first.
-			var ri RawHookInput
-			if err := json.Unmarshal([]byte(jsonStr), &ri); err == nil {
-				state.rawInput = ri
-				// Handle legacy format: if tool_input.command is empty, try parameters.command.
-				if ri.ToolInput.Command == "" {
-					var legacy legacyInput
-					if err2 := json.Unmarshal([]byte(jsonStr), &legacy); err2 == nil && legacy.Parameters.Command != "" {
-						state.rawInput.ToolInput.Command = legacy.Parameters.Command
-					}
-				}
-			}
+		if updateStateFromLine(&state, line) {
 			continue
 		}
-
-		// Parse "Parsed command:" line.
-		if idx := strings.Index(line, "Parsed command: "); idx >= 0 {
-			state.command = line[idx+len("Parsed command: "):]
-			continue
-		}
-
-		// Parse VALIDATOR pattern match.
-		if m := rePatternMatch.FindStringSubmatch(line); m != nil {
-			state.patternIdx, _ = strconv.Atoi(m[1])
-			state.patternName = m[2]
-			state.patternRe = m[3]
-			continue
-		}
-
-		// Parse Validation result line.
-		if m := reValidation.FindStringSubmatch(line); m != nil {
-			if m[2] != "" {
-				state.patternName = m[2]
-			}
-			state.remediation = m[3]
-			continue
-		}
-
-		// Detect DENIED.
 		if reDenied.MatchString(line) {
-			ts := extractTimestamp(line)
-			if !ts.IsZero() {
-				state.timestamp = ts
-			}
-
-			// Apply since filter.
-			if since != nil && state.timestamp.Before(*since) {
-				state.active = false
-				continue
-			}
-
-			cmd := state.rawInput.ToolInput.Command
-			if cmd == "" {
-				cmd = state.command
-			}
-
-			if state.rawInput.SessionID != "" {
-				sessions[state.rawInput.SessionID] = struct{}{}
-			}
-
-			denials = append(denials, DenialEntry{
-				Timestamp:      state.timestamp,
-				SessionID:      state.rawInput.SessionID,
-				TranscriptPath: state.rawInput.TranscriptPath,
-				ToolUseID:      state.rawInput.ToolUseID,
-				Command:        cmd,
-				PatternName:    state.patternName,
-				PatternIndex:   state.patternIdx,
-				PatternRegex:   state.patternRe,
-				Remediation:    state.remediation,
-				CWD:            state.rawInput.CWD,
-			})
-			stats.TotalDenials++
-			if state.patternName != "" {
-				stats.DenialsByPattern[state.patternName]++
-			}
-			state.active = false
+			handleDenied(line, &state, since, sessions, &denials, &stats)
 			continue
 		}
-
-		// Detect APPROVED.
 		if strings.Contains(line, "APPROVED") && !strings.Contains(line, "VALIDATOR") {
-			ts := extractTimestamp(line)
-			if !ts.IsZero() {
-				state.timestamp = ts
-			}
-
-			if since != nil && state.timestamp.Before(*since) {
-				state.active = false
-				continue
-			}
-
-			cmd := state.rawInput.ToolInput.Command
-			if cmd == "" {
-				cmd = state.command
-			}
-
-			if state.rawInput.SessionID != "" {
-				sessions[state.rawInput.SessionID] = struct{}{}
-			}
-
-			approvals = append(approvals, ApprovalEntry{
-				Timestamp:      state.timestamp,
-				SessionID:      state.rawInput.SessionID,
-				TranscriptPath: state.rawInput.TranscriptPath,
-				ToolUseID:      state.rawInput.ToolUseID,
-				Command:        cmd,
-			})
-			stats.TotalApprovals++
-			state.active = false
-			continue
+			handleApproved(line, &state, since, sessions, &approvals, &stats)
 		}
 	}
 
@@ -226,6 +116,106 @@ func ParseLog(path string, since *time.Time) ([]DenialEntry, []ApprovalEntry, Ho
 	}
 
 	return denials, approvals, stats, nil
+}
+
+// updateStateFromLine applies any "Raw input:", "Parsed command:", VALIDATOR
+// pattern match, or Validation result line to state. Returns true when the
+// line was consumed (caller should `continue`).
+func updateStateFromLine(state *parseState, line string) bool {
+	if idx := strings.Index(line, "Raw input: "); idx >= 0 {
+		jsonStr := line[idx+len("Raw input: "):]
+		var ri RawHookInput
+		if err := json.Unmarshal([]byte(jsonStr), &ri); err == nil {
+			state.rawInput = ri
+			if ri.ToolInput.Command == "" {
+				var legacy legacyInput
+				if err2 := json.Unmarshal([]byte(jsonStr), &legacy); err2 == nil && legacy.Parameters.Command != "" {
+					state.rawInput.ToolInput.Command = legacy.Parameters.Command
+				}
+			}
+		}
+		return true
+	}
+	if idx := strings.Index(line, "Parsed command: "); idx >= 0 {
+		state.command = line[idx+len("Parsed command: "):]
+		return true
+	}
+	if m := rePatternMatch.FindStringSubmatch(line); m != nil {
+		state.patternIdx, _ = strconv.Atoi(m[1])
+		state.patternName = m[2]
+		state.patternRe = m[3]
+		return true
+	}
+	if m := reValidation.FindStringSubmatch(line); m != nil {
+		if m[2] != "" {
+			state.patternName = m[2]
+		}
+		state.remediation = m[3]
+		return true
+	}
+	return false
+}
+
+// handleDenied records a DENIED log line as a DenialEntry.
+func handleDenied(line string, state *parseState, since *time.Time, sessions map[string]struct{}, denials *[]DenialEntry, stats *HookLogStats) {
+	if ts := extractTimestamp(line); !ts.IsZero() {
+		state.timestamp = ts
+	}
+	if since != nil && state.timestamp.Before(*since) {
+		state.active = false
+		return
+	}
+	cmd := state.rawInput.ToolInput.Command
+	if cmd == "" {
+		cmd = state.command
+	}
+	if state.rawInput.SessionID != "" {
+		sessions[state.rawInput.SessionID] = struct{}{}
+	}
+	*denials = append(*denials, DenialEntry{
+		Timestamp:      state.timestamp,
+		SessionID:      state.rawInput.SessionID,
+		TranscriptPath: state.rawInput.TranscriptPath,
+		ToolUseID:      state.rawInput.ToolUseID,
+		Command:        cmd,
+		PatternName:    state.patternName,
+		PatternIndex:   state.patternIdx,
+		PatternRegex:   state.patternRe,
+		Remediation:    state.remediation,
+		CWD:            state.rawInput.CWD,
+	})
+	stats.TotalDenials++
+	if state.patternName != "" {
+		stats.DenialsByPattern[state.patternName]++
+	}
+	state.active = false
+}
+
+// handleApproved records an APPROVED log line as an ApprovalEntry.
+func handleApproved(line string, state *parseState, since *time.Time, sessions map[string]struct{}, approvals *[]ApprovalEntry, stats *HookLogStats) {
+	if ts := extractTimestamp(line); !ts.IsZero() {
+		state.timestamp = ts
+	}
+	if since != nil && state.timestamp.Before(*since) {
+		state.active = false
+		return
+	}
+	cmd := state.rawInput.ToolInput.Command
+	if cmd == "" {
+		cmd = state.command
+	}
+	if state.rawInput.SessionID != "" {
+		sessions[state.rawInput.SessionID] = struct{}{}
+	}
+	*approvals = append(*approvals, ApprovalEntry{
+		Timestamp:      state.timestamp,
+		SessionID:      state.rawInput.SessionID,
+		TranscriptPath: state.rawInput.TranscriptPath,
+		ToolUseID:      state.rawInput.ToolUseID,
+		Command:        cmd,
+	})
+	stats.TotalApprovals++
+	state.active = false
 }
 
 // extractTimestamp pulls a timestamp from a log line's bracket prefix.

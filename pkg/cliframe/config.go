@@ -76,7 +76,7 @@ func (l *ConfigLoader) Load() (*Config, error) {
 		if source == "" {
 			source = "environment"
 		} else {
-			source = source + " + environment"
+			source += " + environment"
 		}
 	}
 

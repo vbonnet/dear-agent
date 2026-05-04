@@ -3,6 +3,7 @@ package outputformatter
 // StatusLevel represents the severity/status of a result
 type StatusLevel string
 
+// Output StatusLevel values.
 const (
 	StatusOK      StatusLevel = "ok"      // Success, no issues
 	StatusSuccess StatusLevel = "success" // Explicitly successful (alias for ok)

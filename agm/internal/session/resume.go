@@ -57,13 +57,14 @@ func Resume(identifier string, cfg *config.Config, adapter *dolt.Adapter) error 
 	} else {
 		// Check if Claude is already running
 		claudeRunning, err := tmux.IsClaudeRunning(m.Tmux.SessionName)
-		if err != nil {
+		switch {
+		case err != nil:
 			// Detection failed - skip commands for safety
 			sendCommands = false
-		} else if claudeRunning {
+		case claudeRunning:
 			// Claude already running - skip commands
 			sendCommands = false
-		} else {
+		default:
 			// Claude not running - send commands
 			sendCommands = true
 		}

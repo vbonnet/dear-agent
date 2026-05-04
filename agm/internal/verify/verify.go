@@ -79,22 +79,20 @@ func (r *Report) PassCount() int {
 func ExtractAssertions(purpose string) []Assertion {
 	var assertions []Assertion
 
-	lower := strings.ToLower(purpose)
-
 	// Pattern: "remove X" / "delete X" / "rip out X"
-	assertions = append(assertions, extractRemovalAssertions(lower, purpose)...)
+	assertions = append(assertions, extractRemovalAssertions(purpose)...)
 
 	// Pattern: "add X" / "create X" / "implement X" / "build X"
-	assertions = append(assertions, extractCreationAssertions(lower, purpose)...)
+	assertions = append(assertions, extractCreationAssertions(purpose)...)
 
 	// Pattern: "fix X" / "repair X"
-	assertions = append(assertions, extractFixAssertions(lower, purpose)...)
+	assertions = append(assertions, extractFixAssertions(purpose)...)
 
 	// Pattern: specific dependency removal (go.mod / package.json patterns)
-	assertions = append(assertions, extractDependencyAssertions(lower, purpose)...)
+	assertions = append(assertions, extractDependencyAssertions(purpose)...)
 
 	// Pattern: directory deletion
-	assertions = append(assertions, extractDirectoryAssertions(lower, purpose)...)
+	assertions = append(assertions, extractDirectoryAssertions(purpose)...)
 
 	return assertions
 }
@@ -114,7 +112,7 @@ var fixPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(?:fix|repair|correct|patch|update)\s+(?:the\s+)?(\w+(?:\.\w+)?)`),
 }
 
-func extractRemovalAssertions(lower, original string) []Assertion {
+func extractRemovalAssertions(original string) []Assertion {
 	var assertions []Assertion
 
 	for _, pat := range negativePatterns {
@@ -143,7 +141,7 @@ func extractRemovalAssertions(lower, original string) []Assertion {
 	return assertions
 }
 
-func extractCreationAssertions(lower, original string) []Assertion {
+func extractCreationAssertions(original string) []Assertion {
 	var assertions []Assertion
 
 	for _, pat := range positivePatterns {
@@ -171,7 +169,7 @@ func extractCreationAssertions(lower, original string) []Assertion {
 	return assertions
 }
 
-func extractFixAssertions(lower, original string) []Assertion {
+func extractFixAssertions(original string) []Assertion {
 	var assertions []Assertion
 
 	for _, pat := range fixPatterns {
@@ -202,7 +200,7 @@ var depRemovalContext = regexp.MustCompile(`(?i)\b(?:remove|delete|rip\s+out|eli
 // depModulePath matches module-path-like strings (e.g., go.temporal.io/sdk)
 var depModulePath = regexp.MustCompile(`((?:[a-z0-9-]+\.)+(?:io|com|org|net|dev)(?:/[\w.-]+)*)`)
 
-func extractDependencyAssertions(lower, original string) []Assertion {
+func extractDependencyAssertions(original string) []Assertion {
 	var assertions []Assertion
 
 	lines := strings.Split(original, "\n")
@@ -238,7 +236,7 @@ func extractDependencyAssertions(lower, original string) []Assertion {
 // dirPattern matches "delete coordinator/" or "remove the coordinator/ directory"
 var dirPattern = regexp.MustCompile(`(?i)\b(?:remove|delete|rip\s+out)\s+(?:the\s+)?(\w+(?:/\w+)*)/?\s*(?:directory|dir|folder)?`)
 
-func extractDirectoryAssertions(lower, original string) []Assertion {
+func extractDirectoryAssertions(original string) []Assertion {
 	var assertions []Assertion
 
 	matches := dirPattern.FindAllStringSubmatch(original, -1)

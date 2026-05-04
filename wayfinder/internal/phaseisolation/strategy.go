@@ -175,7 +175,7 @@ func (s *FileBasedExecutionStrategy) readStatus(phaseDir string) PhaseStatus {
 func (s *FileBasedExecutionStrategy) launchSubAgent(
 	phaseDir string,
 	phase PhaseDefinition,
-	context PhaseContext,
+	_ PhaseContext,
 	config OrchestratorConfig,
 ) error {
 	fmt.Printf("\n  Launching sub-agent for %s\n\n", phase.ID)
@@ -261,7 +261,7 @@ func (s *FileBasedExecutionStrategy) monitorCompletion(phaseDir string, timeout 
 }
 
 func (s *FileBasedExecutionStrategy) collectArtifact(
-	phaseDir string,
+	_ string,
 	phase PhaseDefinition,
 	context PhaseContext,
 ) (*PhaseArtifact, error) {

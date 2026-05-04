@@ -9,6 +9,7 @@ import (
 // These stubs exist only for backward compatibility during test migration
 // All tests should be updated to use Dolt adapter directly
 
+// ErrYAMLBackendRemoved is returned by deprecated stubs to flag callers still on the removed YAML backend.
 var ErrYAMLBackendRemoved = errors.New("YAML backend removed in Phase 6 - use Dolt adapter directly")
 
 // Write is a deprecated stub (YAML backend removed in Phase 6)

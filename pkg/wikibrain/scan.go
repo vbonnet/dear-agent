@@ -68,6 +68,7 @@ func ScanKB(kbPath string) ([]*Page, error) {
 	return pages, err
 }
 
+//nolint:gocyclo // reason: linear wiki page parser with many section types
 func parsePage(absPath, relPath string) (*Page, error) {
 	f, err := os.Open(absPath)
 	if err != nil {

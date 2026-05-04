@@ -5,6 +5,7 @@ import "context"
 // Status represents the severity level of a check result
 type Status string
 
+// Health-check Status severity values.
 const (
 	StatusOK      Status = "ok"      // Check passed successfully
 	StatusInfo    Status = "info"    // Informational, not an issue

@@ -1,4 +1,4 @@
-package deep_research
+package deepresearch
 
 import (
 	"github.com/vbonnet/dear-agent/agm/internal/workflow"

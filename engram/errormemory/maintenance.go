@@ -34,30 +34,30 @@ func TopN(records []ErrorRecord, n int) []ErrorRecord {
 		score  float64
 	}
 
-	scored_records := make([]scored, len(records))
+	scoredRecords := make([]scored, len(records))
 	for i, rec := range records {
 		daysSince := now.Sub(rec.LastSeen).Hours() / 24.0
 		if daysSince < 0 {
 			daysSince = 0
 		}
 		recencyFactor := 1.0 / (daysSince + 1.0)
-		scored_records[i] = scored{
+		scoredRecords[i] = scored{
 			record: rec,
 			score:  float64(rec.Count) * recencyFactor,
 		}
 	}
 
-	sort.Slice(scored_records, func(i, j int) bool {
-		return scored_records[i].score > scored_records[j].score
+	sort.Slice(scoredRecords, func(i, j int) bool {
+		return scoredRecords[i].score > scoredRecords[j].score
 	})
 
-	if n > len(scored_records) {
-		n = len(scored_records)
+	if n > len(scoredRecords) {
+		n = len(scoredRecords)
 	}
 
 	result := make([]ErrorRecord, n)
 	for i := 0; i < n; i++ {
-		result[i] = scored_records[i].record
+		result[i] = scoredRecords[i].record
 	}
 	return result
 }

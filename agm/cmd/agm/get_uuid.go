@@ -15,7 +15,7 @@ var (
 	verboseFlag bool
 )
 
-var getUuidCmd = &cobra.Command{
+var getUUIDCmd = &cobra.Command{
 	Use:   "get-uuid [session-name]",
 	Short: "Get Claude UUID for a session",
 	Long: `Returns the Claude session UUID for a given session.
@@ -117,6 +117,6 @@ Examples:
 }
 
 func init() {
-	rootCmd.AddCommand(getUuidCmd)
-	getUuidCmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "Show UUID discovery path")
+	rootCmd.AddCommand(getUUIDCmd)
+	getUUIDCmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "Show UUID discovery path")
 }

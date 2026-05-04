@@ -220,7 +220,7 @@ func (v *Validator) countLinesInDir(dir string) int {
 			return nil
 		}
 		if !info.IsDir() && v.isSourceFile(path) {
-			file, err := os.Open(path)
+			file, err := os.Open(path) //nolint:gosec // G122: trusted local paths, symlink TOCTOU not in threat model
 			if err != nil {
 				return nil
 			}

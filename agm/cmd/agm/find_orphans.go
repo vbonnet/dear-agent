@@ -122,7 +122,8 @@ func runFindOrphans(cmd *cobra.Command, args []string) error {
 	// Auto-import mode
 	if findOrphansAutoImport {
 		fmt.Println()
-		return runAutoImport(report.Orphans)
+		runAutoImport(report.Orphans)
+		return nil
 	}
 
 	// Suggest remediation
@@ -175,7 +176,7 @@ func displayOrphansTable(orphans []*orphan.OrphanedSession) {
 	}
 }
 
-func runAutoImport(orphans []*orphan.OrphanedSession) error {
+func runAutoImport(orphans []*orphan.OrphanedSession) {
 	fmt.Println(ui.Blue("=== Auto-Import Mode ==="))
 	fmt.Printf("Found %d orphaned session(s)\n\n", len(orphans))
 
@@ -194,6 +195,4 @@ func runAutoImport(orphans []*orphan.OrphanedSession) error {
 		}
 		fmt.Printf("  agm session import %s\n", o.UUID)
 	}
-
-	return nil
 }

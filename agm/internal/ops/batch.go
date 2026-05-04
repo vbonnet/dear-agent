@@ -209,91 +209,15 @@ func BatchMerge(ctx *OpContext, req *BatchMergeRequest) (*BatchMergeResult, erro
 		return nil, ErrStorageError("batch_merge", err)
 	}
 
-	// Filter to requested sessions or all DONE/OFFLINE
-	if len(req.Sessions) > 0 {
-		nameSet := make(map[string]bool, len(req.Sessions))
-		for _, s := range req.Sessions {
-			nameSet[s] = true
-		}
-		var filtered []*manifest.Manifest
-		for _, m := range manifests {
-			if nameSet[m.Name] {
-				filtered = append(filtered, m)
-			}
-		}
-		manifests = filtered
-	} else {
-		// Default: only merge from DONE or OFFLINE sessions
-		var filtered []*manifest.Manifest
-		for _, m := range manifests {
-			if m.State == manifest.StateDone || m.State == manifest.StateOffline {
-				filtered = append(filtered, m)
-			}
-		}
-		manifests = filtered
-	}
+	manifests = filterMergeCandidates(manifests, req.Sessions)
 
 	mergeStart := time.Now()
-
 	result := &BatchMergeResult{
 		Operation: "batch_merge",
 		DryRun:    req.DryRun,
 	}
-
 	for _, m := range manifests {
-		branch := fmt.Sprintf("agm/%s", m.SessionID)
-
-		// Get commits on this branch that are not on target
-		commits, err := getBranchCommits(req.RepoDir, branch, req.TargetBranch)
-		if err != nil {
-			result.Skipped = append(result.Skipped, SkippedWorker{
-				Name:   m.Name,
-				Reason: fmt.Sprintf("failed to list commits: %v", err),
-			})
-			result.Summary.Skipped++
-			result.Summary.Total++
-			continue
-		}
-
-		if len(commits) == 0 {
-			result.Skipped = append(result.Skipped, SkippedWorker{
-				Name:   m.Name,
-				Reason: "no commits to merge",
-			})
-			result.Summary.Skipped++
-			result.Summary.Total++
-			continue
-		}
-
-		if req.DryRun {
-			result.Merged = append(result.Merged, MergedWorker{
-				Name:    m.Name,
-				Branch:  branch,
-				Commits: commits,
-			})
-			result.Summary.Merged++
-			result.Summary.Total++
-			continue
-		}
-
-		// Cherry-pick each commit
-		if err := cherryPickCommits(req.RepoDir, commits); err != nil {
-			result.Skipped = append(result.Skipped, SkippedWorker{
-				Name:   m.Name,
-				Reason: fmt.Sprintf("cherry-pick failed: %v", err),
-			})
-			result.Summary.Skipped++
-			result.Summary.Total++
-			continue
-		}
-
-		result.Merged = append(result.Merged, MergedWorker{
-			Name:    m.Name,
-			Branch:  branch,
-			Commits: commits,
-		})
-		result.Summary.Merged++
-		result.Summary.Total++
+		mergeOneCandidate(m, req, result)
 	}
 
 	// Record merge duration for observability
@@ -302,6 +226,75 @@ func BatchMerge(ctx *OpContext, req *BatchMergeRequest) (*BatchMergeResult, erro
 	}
 
 	return result, nil
+}
+
+// filterMergeCandidates narrows manifests to the requested sessions, or to
+// DONE/OFFLINE sessions when no explicit list is supplied.
+func filterMergeCandidates(manifests []*manifest.Manifest, requested []string) []*manifest.Manifest {
+	if len(requested) > 0 {
+		nameSet := make(map[string]bool, len(requested))
+		for _, s := range requested {
+			nameSet[s] = true
+		}
+		var out []*manifest.Manifest
+		for _, m := range manifests {
+			if nameSet[m.Name] {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
+	var out []*manifest.Manifest
+	for _, m := range manifests {
+		if m.State == manifest.StateDone || m.State == manifest.StateOffline {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// mergeOneCandidate runs the per-session merge step for a single worker:
+// list commits ahead of target, cherry-pick (unless dry-run), and append the
+// per-session entry to result.
+func mergeOneCandidate(m *manifest.Manifest, req *BatchMergeRequest, result *BatchMergeResult) {
+	branch := fmt.Sprintf("agm/%s", m.SessionID)
+	commits, err := getBranchCommits(req.RepoDir, branch, req.TargetBranch)
+	if err != nil {
+		result.Skipped = append(result.Skipped, SkippedWorker{
+			Name:   m.Name,
+			Reason: fmt.Sprintf("failed to list commits: %v", err),
+		})
+		result.Summary.Skipped++
+		result.Summary.Total++
+		return
+	}
+	if len(commits) == 0 {
+		result.Skipped = append(result.Skipped, SkippedWorker{
+			Name:   m.Name,
+			Reason: "no commits to merge",
+		})
+		result.Summary.Skipped++
+		result.Summary.Total++
+		return
+	}
+	if !req.DryRun {
+		if err := cherryPickCommits(req.RepoDir, commits); err != nil {
+			result.Skipped = append(result.Skipped, SkippedWorker{
+				Name:   m.Name,
+				Reason: fmt.Sprintf("cherry-pick failed: %v", err),
+			})
+			result.Summary.Skipped++
+			result.Summary.Total++
+			return
+		}
+	}
+	result.Merged = append(result.Merged, MergedWorker{
+		Name:    m.Name,
+		Branch:  branch,
+		Commits: commits,
+	})
+	result.Summary.Merged++
+	result.Summary.Total++
 }
 
 // countBranchCommits counts commits on a branch ahead of main.

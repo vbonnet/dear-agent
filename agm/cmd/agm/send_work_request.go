@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/messages"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
@@ -165,11 +164,11 @@ func runSendWorkRequest(cmd *cobra.Command, args []string) error {
 	}
 
 	// Send via tmux (same pattern as sendDirectly)
-	return sendWorkRequestMessage(recipient, senderName, messageID, jsonStr, adapter)
+	return sendWorkRequestMessage(recipient, senderName, messageID, jsonStr)
 }
 
 // sendWorkRequestMessage delivers a work-request JSON message to a recipient
-func sendWorkRequestMessage(recipient, sender, messageID, jsonPayload string, adapter *dolt.Adapter) error {
+func sendWorkRequestMessage(recipient, sender, messageID, jsonPayload string) error {
 	// Check recipient exists in tmux
 	exists, err := tmux.HasSession(recipient)
 	if err != nil {

@@ -13,29 +13,30 @@ import (
 )
 
 func main() {
-	os.Exit(run())
+	run()
 }
 
-func run() int {
+func run() {
 	// Hard timeout to avoid blocking session start
-	done := make(chan int, 1)
+	done := make(chan struct{}, 1)
 	go func() {
-		done <- check()
+		check()
+		done <- struct{}{}
 	}()
 
 	select {
-	case code := <-done:
-		return code
+	case <-done:
+		return
 	case <-time.After(3 * time.Second):
-		return 0 // timeout silently
+		return // timeout silently
 	}
 }
 
-func check() int {
+func check() {
 	// Check if chezmoi is available
 	chezmoiPath, err := exec.LookPath("chezmoi")
 	if err != nil {
-		return 0 // chezmoi not installed, skip silently
+		return // chezmoi not installed, skip silently
 	}
 
 	// Run chezmoi diff on settings.json
@@ -49,7 +50,7 @@ func check() int {
 
 	output := strings.TrimSpace(stdout.String())
 	if output == "" {
-		return 0 // no drift
+		return // no drift
 	}
 
 	// Count changed lines (rough estimate)
@@ -67,6 +68,4 @@ func check() int {
 
 	fmt.Fprintf(os.Stderr, "[chezmoi-drift] settings.json has drifted from chezmoi template (+%d/-%d lines). Run 'chezmoi diff ~/.claude/settings.json' to review, 'chezmoi apply --force ~/.claude/settings.json' to sync.\n",
 		additions, deletions)
-
-	return 0
 }

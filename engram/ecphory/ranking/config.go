@@ -62,7 +62,7 @@ func DefaultConfig() *Config {
 	c.Ecphory.Ranking.Provider = "auto"
 	c.Ecphory.Ranking.Fallback = "local"
 
-	c.Ecphory.Providers.Anthropic = AnthropicConfig{
+	c.Ecphory.Providers.Anthropic = AnthropicConfig{ //nolint:gosec // G101: APIKeyEnv is an env var name, not a credential
 		APIKeyEnv: "ANTHROPIC_API_KEY",
 		Model:     "claude-3-5-haiku-20241022",
 		MaxTokens: 4096,

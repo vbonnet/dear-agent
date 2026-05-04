@@ -83,37 +83,12 @@ func (h *Hippocampus) ConsolidateMemory(sessionID string, history string) (*Cons
 	}
 
 	// Extract key information
-	var err error
-
-	consolidation.Decisions, err = h.extractDecisions(history)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract decisions: %w", err)
-	}
-
-	consolidation.Outcomes, err = h.extractOutcomes(history)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract outcomes: %w", err)
-	}
-
-	consolidation.TechnicalLearnings, err = h.extractTechnicalLearnings(history)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract technical learnings: %w", err)
-	}
-
-	consolidation.ProcessLearnings, err = h.extractProcessLearnings(history)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract process learnings: %w", err)
-	}
-
-	consolidation.ActivePlan, err = h.extractActivePlan(history)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract plan: %w", err)
-	}
-
-	consolidation.Engrams, err = h.extractEngrams(history)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract engrams: %w", err)
-	}
+	consolidation.Decisions = h.extractDecisions(history)
+	consolidation.Outcomes = h.extractOutcomes(history)
+	consolidation.TechnicalLearnings = h.extractTechnicalLearnings(history)
+	consolidation.ProcessLearnings = h.extractProcessLearnings(history)
+	consolidation.ActivePlan = h.extractActivePlan(history)
+	consolidation.Engrams = h.extractEngrams(history)
 
 	// Archive full history
 	archivePath, err := h.archiveSession(sessionID, history)

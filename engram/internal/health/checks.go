@@ -1190,6 +1190,8 @@ func (hc *HealthChecker) checkMarketplaceConfigValid() CheckResult {
 }
 
 // Check 16: Enabled plugins have registered marketplaces
+//
+//nolint:gocyclo // reason: linear health check enumerating each marketplace.
 func (hc *HealthChecker) checkEnabledPluginMarketplaces() CheckResult {
 	settingsPath := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
 	settingsData, err := os.ReadFile(settingsPath)

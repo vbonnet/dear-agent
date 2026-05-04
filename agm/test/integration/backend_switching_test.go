@@ -216,8 +216,7 @@ func TestBackendSwitching_GetBackendByName(t *testing.T) {
 			}
 
 			// Check type
-			switch tt.expectType.(type) {
-			case *backend.TmuxBackend:
+			if _, ok := tt.expectType.(*backend.TmuxBackend); ok {
 				if _, ok := b.(*backend.TmuxBackend); !ok {
 					t.Errorf("expected TmuxBackend, got %T", b)
 				}

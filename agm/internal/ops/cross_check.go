@@ -366,6 +366,15 @@ func checkSingleSession(session SessionSummary, cfg *CrossCheckConfig) CrossChec
 	result.State = state
 	result.StateStr = state.String()
 
+	applyCrossCheckAction(state, &result, captureOutput, session.Name, cfg)
+
+	return result
+}
+
+// applyCrossCheckAction populates result.Detail/Action and triggers any
+// recovery side-effects (auto-approve permission, send Enter, nudge supervisor)
+// based on the detected state.
+func applyCrossCheckAction(state CrossCheckState, result *CrossCheckResult, captureOutput, sessionName string, cfg *CrossCheckConfig) {
 	switch state {
 	case StateStuck:
 		result.Detail = "permission prompt visible for too long"
@@ -375,16 +384,15 @@ func checkSingleSession(session SessionSummary, cfg *CrossCheckConfig) CrossChec
 			"",
 			"Auto-approve safe patterns or escalate to orchestrator",
 			SourceAGMCrossCheck,
-			session.Name,
+			sessionName,
 		)
 		if !cfg.DryRun && MatchesRBACAllowlist(captureOutput, cfg.RBACAllowlist) {
-			if err := autoApprovePermission(session.Name); err != nil {
+			if err := autoApprovePermission(sessionName); err != nil {
 				result.Detail += fmt.Sprintf("; auto-approve failed: %v", err)
 			} else {
 				result.Action = "auto-approved via select-option"
 			}
 		}
-
 	case StateEnterBug:
 		result.Detail = "unsent [From: message in input buffer"
 		recordErrorMemory(
@@ -393,16 +401,15 @@ func checkSingleSession(session SessionSummary, cfg *CrossCheckConfig) CrossChec
 			ExtractInputLine(captureOutput),
 			"Send Enter key to deliver stuck message",
 			SourceAGMCrossCheck,
-			session.Name,
+			sessionName,
 		)
 		if !cfg.DryRun {
-			if err := sendEnterKey(session.Name); err != nil {
+			if err := sendEnterKey(sessionName); err != nil {
 				result.Detail += fmt.Sprintf("; Enter send failed: %v", err)
 			} else {
 				result.Action = "sent Enter to deliver stuck message"
 			}
 		}
-
 	case StateNotLooping:
 		result.Detail = "no scan output detected in recent capture"
 		recordErrorMemory(
@@ -411,40 +418,31 @@ func checkSingleSession(session SessionSummary, cfg *CrossCheckConfig) CrossChec
 			"",
 			"Send restart nudge to supervisor session",
 			SourceAGMCrossCheck,
-			session.Name,
+			sessionName,
 		)
 		if !cfg.DryRun {
-			// Guard: don't send another nudge if a previous one is stuck in the input buffer.
-			// The nudge itself uses `agm send msg` which can trigger the ENTER bug,
-			// compounding the problem instead of fixing it.
 			if HasStuckCrossCheckNudge(captureOutput) {
 				result.Detail += "; skipped nudge (previous nudge stuck in input)"
 				result.Action = "nudge skipped (stuck)"
+			} else if err := nudgeSupervisor(sessionName); err != nil {
+				result.Detail += fmt.Sprintf("; nudge failed: %v", err)
 			} else {
-				if err := nudgeSupervisor(session.Name); err != nil {
-					result.Detail += fmt.Sprintf("; nudge failed: %v", err)
-				} else {
-					result.Action = "sent restart nudge to supervisor"
-				}
+				result.Action = "sent restart nudge to supervisor"
 			}
 		}
-
 	case StateDown:
 		result.Detail = "tmux session is down"
 		recordErrorMemory(
-			fmt.Sprintf("tmux session %s no longer exists", session.Name),
+			fmt.Sprintf("tmux session %s no longer exists", sessionName),
 			ErrMemCatSessionDown,
 			"",
 			"Check if session was killed; review process logs",
 			SourceAGMCrossCheck,
-			session.Name,
+			sessionName,
 		)
-
 	case StateHealthy:
 		result.Detail = "operating normally"
 	}
-
-	return result
 }
 
 // capturePaneForCrossCheck captures the last 30 lines from a session.

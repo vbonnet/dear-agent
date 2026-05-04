@@ -9,6 +9,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/test/bdd/internal/testenv"
 )
 
+// RegisterErrorHandlingSteps registers godog step bindings for error-handling scenarios.
 func RegisterErrorHandlingSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^an error should occur$`, anErrorShouldOccur)
 	ctx.Step(`^the error message should contain "([^"]*)"$`, errorMessageShouldContain)

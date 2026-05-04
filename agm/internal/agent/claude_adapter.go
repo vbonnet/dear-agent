@@ -146,13 +146,14 @@ func (a *ClaudeAdapter) ResumeSession(sessionID SessionID) error {
 	} else {
 		// Check if Claude is already running
 		claudeRunning, err := tmux.IsClaudeRunning(metadata.TmuxName)
-		if err != nil {
+		switch {
+		case err != nil:
 			// Detection failed - skip commands for safety
 			sendCommands = false
-		} else if claudeRunning {
+		case claudeRunning:
 			// Claude already running - skip commands
 			sendCommands = false
-		} else {
+		default:
 			// Claude not running - send commands
 			sendCommands = true
 		}

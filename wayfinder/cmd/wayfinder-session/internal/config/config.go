@@ -25,14 +25,17 @@ type StorageConfig struct {
 }
 
 const (
-	// Storage modes
-	ModeDotfile     = "dotfile"
+	// ModeDotfile selects per-user dotfile-based storage at DefaultDotfilePath.
+	ModeDotfile = "dotfile"
+	// ModeCentralized selects centralized-path storage.
 	ModeCentralized = "centralized"
 
-	// Default paths
-	DefaultDotfilePath  = "~/.wayfinder"
+	// DefaultDotfilePath is the default dotfile-mode root.
+	DefaultDotfilePath = "~/.wayfinder"
+	// DefaultRelativePath is the workspace-relative directory holding Wayfinder state.
 	DefaultRelativePath = "wf" // Changed from .wayfinder to wf (Wayfinder uses wf/ not .wayfinder/)
-	DefaultWorkspace    = "engram-research"
+	// DefaultWorkspace is the default workspace name when none is configured.
+	DefaultWorkspace = "engram-research"
 )
 
 // Load loads configuration from ~/.wayfinder/config.yaml

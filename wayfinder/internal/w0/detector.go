@@ -12,6 +12,7 @@ import (
 // VaguenessSignal represents a vagueness indicator in a request.
 type VaguenessSignal string
 
+// VaguenessSignal values describing why a request looks vague.
 const (
 	SignalShort              VaguenessSignal = "short"
 	SignalNoProblemStatement VaguenessSignal = "no_problem_statement"

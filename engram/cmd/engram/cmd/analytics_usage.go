@@ -64,6 +64,7 @@ type commandStats struct {
 	FailureCount int
 }
 
+//nolint:gocyclo // reason: linear CLI flag handling and report rendering
 func runAnalyticsUsage(cmd *cobra.Command, args []string) error {
 	// Find usage file
 	home, err := os.UserHomeDir()

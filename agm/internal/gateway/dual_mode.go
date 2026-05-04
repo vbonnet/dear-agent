@@ -10,6 +10,7 @@ import (
 // Mode represents the agent operating mode.
 type Mode string
 
+// Agent operating mode values.
 const (
 	ModeArchitect   Mode = "architect"   // Planning, design, architecture (Opus)
 	ModeImplementer Mode = "implementer" // Coding, execution, testing (Sonnet/Haiku)
@@ -18,6 +19,7 @@ const (
 // TaskComplexity represents the assessed complexity of a task.
 type TaskComplexity string
 
+// Task complexity tier values.
 const (
 	ComplexityLow    TaskComplexity = "low"    // Simple, well-defined tasks
 	ComplexityMedium TaskComplexity = "medium" // Moderate complexity
@@ -109,7 +111,7 @@ func (g *DualModeGateway) CreateHandoff(ctx context.Context, fromMode Mode, toMo
 	}
 
 	// Generate next steps based on transition
-	handoff.NextSteps = g.generateNextSteps(fromMode, toMode, summary)
+	handoff.NextSteps = g.generateNextSteps(fromMode, toMode)
 
 	return handoff, nil
 }
@@ -326,7 +328,7 @@ func (g *DualModeGateway) scoreToConfidence(score int) float64 {
 }
 
 // generateNextSteps creates action items for the target mode.
-func (g *DualModeGateway) generateNextSteps(fromMode Mode, toMode Mode, summary string) []string {
+func (g *DualModeGateway) generateNextSteps(fromMode Mode, toMode Mode) []string {
 	if fromMode == ModeArchitect && toMode == ModeImplementer {
 		return []string{
 			"Review the architecture plan from Architect mode",

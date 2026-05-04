@@ -581,10 +581,8 @@ func TestValidateModel(t *testing.T) {
 				if clientErr.Type != tt.errType {
 					t.Errorf("expected error type %q, got %q", tt.errType, clientErr.Type)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error for model %q: %v", tt.model, err)
-				}
+			} else if err != nil {
+				t.Errorf("unexpected error for model %q: %v", tt.model, err)
 			}
 		})
 	}

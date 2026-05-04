@@ -337,7 +337,7 @@ func (e *Ecphory) loadEngrams(paths []string) []*engram.Engram {
 		eg, err := e.parser.Parse(path)
 		if err != nil {
 			// P0-4: Log parse errors instead of silently ignoring
-			log.Printf("ecphory: failed to load engram at %s: %v", path, err)
+			log.Printf("ecphory: failed to load engram at %q: %v", path, err) //nolint:gosec // G706: path from internal disk scan; %q escapes any control chars
 			continue
 		}
 		result = append(result, eg)
@@ -421,7 +421,7 @@ func (e *Ecphory) updateFrontmatterMetadata(engrams []*engram.Engram) {
 	go func() {
 		for _, eg := range engrams {
 			if err := e.incrementRetrievalCount(eg.Path); err != nil {
-				log.Printf("ecphory: failed to update metadata for %s: %v", eg.Path, err)
+				log.Printf("ecphory: failed to update metadata for %q: %v", eg.Path, err) //nolint:gosec // G706: path from internal disk scan; %q escapes any control chars
 			}
 		}
 	}()

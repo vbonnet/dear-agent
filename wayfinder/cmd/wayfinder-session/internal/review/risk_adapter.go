@@ -30,6 +30,7 @@ var (
 // RiskLevel represents the risk level of a task
 type RiskLevel int
 
+// Task RiskLevel values, ordered from least to most risk.
 const (
 	RiskLevelXS RiskLevel = iota // Extra Small (1-50 LOC)
 	RiskLevelS                   // Small (51-200 LOC)
@@ -147,12 +148,13 @@ func (r *RiskAdapter) calculateFileCriticality(files []string) float64 {
 		fileLower := strings.ToLower(file)
 
 		// Critical file patterns (high risk)
-		if r.matchesCriticalPattern(fileLower) {
+		switch {
+		case r.matchesCriticalPattern(fileLower):
 			score += 500
-		} else if r.matchesImportantPattern(fileLower) {
+		case r.matchesImportantPattern(fileLower):
 			// Important file patterns (medium risk)
 			score += 200
-		} else {
+		default:
 			// Standard files (low risk)
 			score += 50
 		}
@@ -306,15 +308,16 @@ func (r *RiskAdapter) detectRiskyPatterns(task *status.Task, projectDir string) 
 
 // scoreToRiskLevel maps composite score to risk level
 func (r *RiskAdapter) scoreToRiskLevel(score float64) RiskLevel {
-	if score <= 50 {
+	switch {
+	case score <= 50:
 		return RiskLevelXS
-	} else if score <= 200 {
+	case score <= 200:
 		return RiskLevelS
-	} else if score <= 500 {
+	case score <= 500:
 		return RiskLevelM
-	} else if score <= 1000 {
+	case score <= 1000:
 		return RiskLevelL
-	} else {
+	default:
 		return RiskLevelXL
 	}
 }

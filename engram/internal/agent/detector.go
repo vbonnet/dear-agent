@@ -38,6 +38,7 @@ import (
 // Agent represents a detected AI coding agent platform
 type Agent string
 
+// Recognized AI agent platform values.
 const (
 	AgentClaudeCode Agent = "claude-code"
 	AgentCursor     Agent = "cursor"

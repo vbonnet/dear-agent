@@ -127,7 +127,7 @@ type SourcedValue struct {
 }
 
 // loadEffectiveConfig loads configuration and tracks which tier provides each setting
-func loadEffectiveConfig(loader *config.Loader) (*EffectiveConfig, error) {
+func loadEffectiveConfig(_ *config.Loader) (*EffectiveConfig, error) {
 	effective := &EffectiveConfig{
 		Platform:  make(map[string]SourcedValue),
 		Plugins:   make(map[string]SourcedValue),
@@ -412,7 +412,7 @@ func outputConfigJSON(eff *EffectiveConfig, section string) error {
 }
 
 // outputConfigMarkdown outputs configuration in markdown format
-func outputConfigMarkdown(cfg *config.Config, eff *EffectiveConfig, section string) error {
+func outputConfigMarkdown(_ *config.Config, eff *EffectiveConfig, section string) error {
 	fmt.Println("Effective Configuration")
 	fmt.Println()
 

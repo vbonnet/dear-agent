@@ -424,89 +424,83 @@ func (a *GeminiCLIAdapter) ExecuteCommand(cmd Command) error {
 
 	switch cmd.Type {
 	case CommandRename:
-		// Send /chat save command to Gemini CLI
-		newName, err := getStringParam(cmd.Params, "name")
-		if err != nil {
-			return fmt.Errorf("rename command: %w", err)
-		}
-
-		// 1. Send to Gemini CLI (creates checkpoint with name)
-		if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("/chat save %s\r", newName)); err != nil {
-			return fmt.Errorf("failed to send chat save command: %w", err)
-		}
-
-		// 2. Update AGM metadata (dual tracking)
-		metadata.Title = newName
-		if err := a.sessionStore.Set(SessionID(sessionIDStr), metadata); err != nil {
-			return fmt.Errorf("failed to update session title: %w", err)
-		}
-
-		return nil
-
+		return a.cmdRename(cmd, sessionIDStr, metadata)
 	case CommandSetDir:
-		// Send cd command to Gemini session and update metadata
-		newPath, err := getStringParam(cmd.Params, "path")
-		if err != nil {
-			return fmt.Errorf("setdir command: %w", err)
-		}
-
-		// 1. Send cd command to tmux session
-		if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("cd %s\r", newPath)); err != nil {
-			return fmt.Errorf("failed to send cd command: %w", err)
-		}
-
-		// 2. Update AGM metadata
-		metadata.WorkingDir = newPath
-		if err := a.sessionStore.Set(SessionID(sessionIDStr), metadata); err != nil {
-			return fmt.Errorf("failed to update working directory: %w", err)
-		}
-
-		return nil
-
+		return a.cmdSetDir(cmd, sessionIDStr, metadata)
 	case CommandAuthorize:
 		// Gemini CLI doesn't have runtime directory authorization
 		// (directories are pre-authorized via --include-directories at session creation)
 		return nil
-
 	case CommandClearHistory:
-		// Remove Gemini history file for this session
-		historyPath, err := a.getHistoryPath(metadata)
-		if err != nil {
-			return fmt.Errorf("failed to get history path: %w", err)
-		}
-
-		// Remove history file (ignore if doesn't exist)
-		if err := os.Remove(historyPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to remove history file: %w", err)
-		}
-
-		return nil
-
+		return a.cmdClearHistory(metadata)
 	case CommandSetSystemPrompt:
-		// Update system prompt in session metadata
-		prompt, err := getStringParam(cmd.Params, "prompt")
-		if err != nil {
-			return fmt.Errorf("set_system_prompt command: %w", err)
-		}
-
-		metadata.SystemPrompt = prompt
-		if err := a.sessionStore.Set(SessionID(sessionIDStr), metadata); err != nil {
-			return fmt.Errorf("failed to update system prompt: %w", err)
-		}
-
-		return nil
-
+		return a.cmdSetSystemPrompt(cmd, sessionIDStr, metadata)
 	case CommandRunHook:
-		// Execute hook via Gemini CLI lifecycle
-		hookName, err := getStringParam(cmd.Params, "hook_name")
-		if err != nil {
-			return fmt.Errorf("run_hook command: %w", err)
-		}
-		return a.executeHook(SessionID(sessionIDStr), metadata.TmuxName, hookName)
-
+		return a.cmdRunHook(cmd, sessionIDStr, metadata)
 	default:
 		return fmt.Errorf("unsupported command type: %s", cmd.Type)
 	}
+}
+
+func (a *GeminiCLIAdapter) cmdRename(cmd Command, sessionIDStr string, metadata *SessionMetadata) error {
+	newName, err := getStringParam(cmd.Params, "name")
+	if err != nil {
+		return fmt.Errorf("rename command: %w", err)
+	}
+	if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("/chat save %s\r", newName)); err != nil {
+		return fmt.Errorf("failed to send chat save command: %w", err)
+	}
+	metadata.Title = newName
+	if err := a.sessionStore.Set(SessionID(sessionIDStr), metadata); err != nil {
+		return fmt.Errorf("failed to update session title: %w", err)
+	}
+	return nil
+}
+
+func (a *GeminiCLIAdapter) cmdSetDir(cmd Command, sessionIDStr string, metadata *SessionMetadata) error {
+	newPath, err := getStringParam(cmd.Params, "path")
+	if err != nil {
+		return fmt.Errorf("setdir command: %w", err)
+	}
+	if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("cd %s\r", newPath)); err != nil {
+		return fmt.Errorf("failed to send cd command: %w", err)
+	}
+	metadata.WorkingDir = newPath
+	if err := a.sessionStore.Set(SessionID(sessionIDStr), metadata); err != nil {
+		return fmt.Errorf("failed to update working directory: %w", err)
+	}
+	return nil
+}
+
+func (a *GeminiCLIAdapter) cmdClearHistory(metadata *SessionMetadata) error {
+	historyPath, err := a.getHistoryPath(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to get history path: %w", err)
+	}
+	if err := os.Remove(historyPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove history file: %w", err)
+	}
+	return nil
+}
+
+func (a *GeminiCLIAdapter) cmdSetSystemPrompt(cmd Command, sessionIDStr string, metadata *SessionMetadata) error {
+	prompt, err := getStringParam(cmd.Params, "prompt")
+	if err != nil {
+		return fmt.Errorf("set_system_prompt command: %w", err)
+	}
+	metadata.SystemPrompt = prompt
+	if err := a.sessionStore.Set(SessionID(sessionIDStr), metadata); err != nil {
+		return fmt.Errorf("failed to update system prompt: %w", err)
+	}
+	return nil
+}
+
+func (a *GeminiCLIAdapter) cmdRunHook(cmd Command, sessionIDStr string, metadata *SessionMetadata) error {
+	hookName, err := getStringParam(cmd.Params, "hook_name")
+	if err != nil {
+		return fmt.Errorf("run_hook command: %w", err)
+	}
+	return a.executeHook(SessionID(sessionIDStr), metadata.TmuxName, hookName)
 }
 
 // RunHook executes a session lifecycle hook for the Gemini CLI.

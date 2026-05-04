@@ -11,6 +11,7 @@ import (
 
 var startForce bool
 
+// StartCmd is the cobra command that marks a feature as in_progress.
 var StartCmd = &cobra.Command{
 	Use:   "start <feature-id>",
 	Short: "Start working on a feature",

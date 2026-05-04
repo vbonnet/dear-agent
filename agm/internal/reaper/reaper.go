@@ -382,7 +382,15 @@ func (r *Reaper) archiveSession() error {
 	}
 	r.logger.Info("Dolt database updated to archived")
 
-	// Best-effort session resource cleanup (worktrees, branches, /tmp files)
+	r.runReaperResourceCleanup(adapter)
+	r.cleanupPendingDir()
+	r.archiveLegacySessionDir(sessionsDir, manifestPath)
+	return nil
+}
+
+// runReaperResourceCleanup performs best-effort worktree/branch/tmp cleanup
+// during reap and logs the per-category counts.
+func (r *Reaper) runReaperResourceCleanup(adapter *dolt.Adapter) {
 	store := &cleanup.DoltWorktreeStore{Adapter: adapter}
 	cleanupResult := cleanup.SessionResources(context.Background(), r.SessionName, store, cleanup.RealGitOps{}, r.logger)
 	if cleanupResult.WorktreesRemoved > 0 {
@@ -394,52 +402,55 @@ func (r *Reaper) archiveSession() error {
 	if cleanupResult.TmpFilesRemoved > 0 {
 		r.logger.Info("Removed tmp files during reap", "count", cleanupResult.TmpFilesRemoved)
 	}
+}
 
-	// Best-effort: clean up pending message directory for this session
+// cleanupPendingDir removes the pending-message directory for the reaped session.
+func (r *Reaper) cleanupPendingDir() {
 	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		pendingDir := filepath.Join(homeDir, ".agm", "pending", r.SessionName)
-		if _, statErr := os.Stat(pendingDir); statErr == nil {
-			if removeErr := os.RemoveAll(pendingDir); removeErr != nil {
-				r.logger.Warn("Failed to remove pending directory", "path", pendingDir, "error", removeErr)
-			} else {
-				r.logger.Info("Cleaned up pending message directory", "path", pendingDir)
-			}
-		}
+	if err != nil {
+		return
 	}
+	pendingDir := filepath.Join(homeDir, ".agm", "pending", r.SessionName)
+	if _, err := os.Stat(pendingDir); err != nil {
+		return
+	}
+	if removeErr := os.RemoveAll(pendingDir); removeErr != nil {
+		r.logger.Warn("Failed to remove pending directory", "path", pendingDir, "error", removeErr)
+		return
+	}
+	r.logger.Info("Cleaned up pending message directory", "path", pendingDir)
+}
 
-	// Best-effort: move legacy session directory to .archive-old-format/ if it exists.
-	// Sessions are now pure-Dolt, so filesystem directories may not exist.
+// archiveLegacySessionDir moves a session's filesystem directory to
+// .archive-old-format/ when one exists (pure-Dolt sessions skip this).
+func (r *Reaper) archiveLegacySessionDir(sessionsDir, manifestPath string) {
 	sessionDir := filepath.Dir(manifestPath)
-	if _, err := os.Stat(sessionDir); os.IsNotExist(err) {
+	info, err := os.Stat(sessionDir)
+	if os.IsNotExist(err) {
 		r.logger.Info("No filesystem directory to move (pure-Dolt session)", "path", sessionDir)
-	} else if err != nil {
-		r.logger.Warn("Could not stat session directory, skipping move", "path", sessionDir, "error", err)
-	} else {
-		archiveBaseDir := filepath.Join(sessionsDir, ".archive-old-format")
-		archiveTargetDir := filepath.Join(archiveBaseDir, filepath.Base(sessionDir))
-
-		// Create archive directory
-		if err := os.MkdirAll(archiveBaseDir, 0700); err != nil {
-			r.logger.Warn("Failed to create archive dir, skipping move", "error", err)
-		} else {
-			// Handle conflicts with timestamp
-			if _, err := os.Stat(archiveTargetDir); err == nil {
-				timestamp := time.Now().Format("20060102T150405Z")
-				archiveTargetDir = archiveTargetDir + "-" + timestamp
-				r.logger.Warn("Archive conflict - renaming", "target", filepath.Base(archiveTargetDir))
-			}
-
-			// Move directory (best-effort)
-			if err := os.Rename(sessionDir, archiveTargetDir); err != nil {
-				r.logger.Warn("Failed to move session directory to archive", "error", err)
-			} else {
-				r.logger.Info("Session moved to archive", "path", archiveTargetDir)
-			}
-		}
+		return
 	}
-
-	return nil
+	if err != nil {
+		r.logger.Warn("Could not stat session directory, skipping move", "path", sessionDir, "error", err)
+		return
+	}
+	_ = info
+	archiveBaseDir := filepath.Join(sessionsDir, ".archive-old-format")
+	archiveTargetDir := filepath.Join(archiveBaseDir, filepath.Base(sessionDir))
+	if err := os.MkdirAll(archiveBaseDir, 0700); err != nil {
+		r.logger.Warn("Failed to create archive dir, skipping move", "error", err)
+		return
+	}
+	if _, err := os.Stat(archiveTargetDir); err == nil {
+		timestamp := time.Now().Format("20060102T150405Z")
+		archiveTargetDir = archiveTargetDir + "-" + timestamp
+		r.logger.Warn("Archive conflict - renaming", "target", filepath.Base(archiveTargetDir))
+	}
+	if err := os.Rename(sessionDir, archiveTargetDir); err != nil {
+		r.logger.Warn("Failed to move session directory to archive", "error", err)
+		return
+	}
+	r.logger.Info("Session moved to archive", "path", archiveTargetDir)
 }
 
 // getSessionsDir returns the configured sessions directory path

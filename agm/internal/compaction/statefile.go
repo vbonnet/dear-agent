@@ -58,6 +58,53 @@ func LoadSessionState(baseDir, sessionName string) (*SessionState, string, error
 	return &state, path, nil
 }
 
+// buildManagedSummary returns the "Managing N workers: [...]" summary string
+// (or empty if no sessions are managed).
+func buildManagedSummary(state *SessionState) string {
+	if len(state.ManagedSessions) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(state.ManagedSessions))
+	for name := range state.ManagedSessions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return fmt.Sprintf("Managing %d workers: [%s]", len(state.ManagedSessions), strings.Join(names, ", "))
+}
+
+// buildPolicyRules returns the policy rule values sorted by key.
+func buildPolicyRules(state *SessionState) []string {
+	if len(state.Policy) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(state.Policy))
+	for k := range state.Policy {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, state.Policy[k])
+	}
+	return out
+}
+
+// buildStateParts returns the human-readable state-summary fragments to splice
+// into the PRESERVE prompt.
+func buildStateParts(state *SessionState, managedSummary string) []string {
+	var stateParts []string
+	if managedSummary != "" {
+		stateParts = append(stateParts, managedSummary)
+	}
+	if state.CompletedCount > 0 {
+		stateParts = append(stateParts, fmt.Sprintf("%d completed sessions", state.CompletedCount))
+	}
+	if len(state.Queued) > 0 {
+		stateParts = append(stateParts, fmt.Sprintf("Queue has %d items", len(state.Queued)))
+	}
+	return stateParts
+}
+
 // GeneratePreservePrompt builds a PRESERVE prompt from a state file.
 // targetSessionName is the name of the session being compacted — it is used as the
 // identity in the PRESERVE prompt so the target retains its own identity, not the sender's.
@@ -71,41 +118,9 @@ func GeneratePreservePrompt(state *SessionState, stateFilePath string, focusText
 		identity = "worker"
 	}
 
-	// Build managed sessions summary
-	var managedSummary string
-	if len(state.ManagedSessions) > 0 {
-		names := make([]string, 0, len(state.ManagedSessions))
-		for name := range state.ManagedSessions {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		managedSummary = fmt.Sprintf("Managing %d workers: [%s]", len(state.ManagedSessions), strings.Join(names, ", "))
-	}
-
-	// Build policy rules
-	var policyRules []string
-	if len(state.Policy) > 0 {
-		keys := make([]string, 0, len(state.Policy))
-		for k := range state.Policy {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			policyRules = append(policyRules, state.Policy[k])
-		}
-	}
-
-	// Build state summary parts
-	var stateParts []string
-	if managedSummary != "" {
-		stateParts = append(stateParts, managedSummary)
-	}
-	if state.CompletedCount > 0 {
-		stateParts = append(stateParts, fmt.Sprintf("%d completed sessions", state.CompletedCount))
-	}
-	if len(state.Queued) > 0 {
-		stateParts = append(stateParts, fmt.Sprintf("Queue has %d items", len(state.Queued)))
-	}
+	managedSummary := buildManagedSummary(state)
+	policyRules := buildPolicyRules(state)
+	stateParts := buildStateParts(state, managedSummary)
 
 	// Build scan loop instruction
 	var resumeLoop string

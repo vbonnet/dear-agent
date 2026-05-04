@@ -238,15 +238,16 @@ func TestCountTokens_MethodSelection(t *testing.T) {
 	_, method, _ := counter.CountTokens(text)
 
 	// Verify method selection logic
-	if tikTok != nil && tikTok.Available() {
+	switch {
+	case tikTok != nil && tikTok.Available():
 		if method != "tiktoken" {
 			t.Logf("Note: tiktoken available but method=%s (may be expected if tiktoken failed)", method)
 		}
-	} else if simpleTok != nil && simpleTok.Available() {
+	case simpleTok != nil && simpleTok.Available():
 		if method != "simple" && method != "heuristic-fallback" {
 			t.Errorf("Expected simple or heuristic-fallback, got %s", method)
 		}
-	} else {
+	default:
 		if method != "heuristic-fallback" {
 			t.Errorf("Expected heuristic-fallback when no tokenizers available, got %s", method)
 		}

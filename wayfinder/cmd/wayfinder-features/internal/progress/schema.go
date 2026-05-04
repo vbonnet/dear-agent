@@ -33,7 +33,7 @@ const (
 	WaypointS5 = "S5"
 )
 
-// Schema version
+// SchemaVersion is the progress.json schema version.
 const SchemaVersion = "1.0"
 
 // DefaultProgressFile is the standard location for progress.json

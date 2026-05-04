@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// SchemaVersion is the metrics-file schema version; TokenBudgetLimit caps per-channel tokens.
 const (
 	SchemaVersion    = "1.0"
 	TokenBudgetLimit = 2000

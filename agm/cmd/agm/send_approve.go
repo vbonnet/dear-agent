@@ -122,29 +122,9 @@ func runApprove(cmd *cobra.Command, args []string) error {
 			sessionName, guardResult.Error())
 	}
 
-	// Get approval reason (optional)
-	var reason string
-	if approveReason != "" {
-		reason = approveReason
-	} else if approveReasonFile != "" {
-		// Read from file
-		content, err := os.ReadFile(approveReasonFile)
-		if err != nil {
-			return fmt.Errorf("failed to read reason file: %w", err)
-		}
-
-		// For .md files, extract the standard prompt
-		if len(approveReasonFile) > 3 && approveReasonFile[len(approveReasonFile)-3:] == ".md" {
-			// Try to extract "## Standard Prompt (Recommended)" section
-			extracted := extractApprovalPrompt(string(content))
-			if extracted != "" {
-				reason = extracted
-			} else {
-				reason = string(content)
-			}
-		} else {
-			reason = string(content)
-		}
+	reason, err := loadApprovalReason()
+	if err != nil {
+		return err
 	}
 
 	// Get AGM socket path for all tmux commands
@@ -189,6 +169,28 @@ func runApprove(cmd *cobra.Command, args []string) error {
 		ui.PrintSuccess(fmt.Sprintf("Approved permission prompt in '%s'", sessionName))
 	}
 	return nil
+}
+
+// loadApprovalReason reads the approval reason from --reason or --reason-file.
+// For .md reason files it tries to extract the "## Standard Prompt (Recommended)"
+// section first, falling back to the raw file contents.
+func loadApprovalReason() (string, error) {
+	if approveReason != "" {
+		return approveReason, nil
+	}
+	if approveReasonFile == "" {
+		return "", nil
+	}
+	content, err := os.ReadFile(approveReasonFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read reason file: %w", err)
+	}
+	if len(approveReasonFile) > 3 && approveReasonFile[len(approveReasonFile)-3:] == ".md" {
+		if extracted := extractApprovalPrompt(string(content)); extracted != "" {
+			return extracted, nil
+		}
+	}
+	return string(content), nil
 }
 
 // detectYesOptionPresent verifies that a permission prompt with "Yes" option is present

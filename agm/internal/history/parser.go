@@ -187,10 +187,25 @@ func (p *Parser) GetRecentEntries(limit int) ([]*Entry, error) {
 
 // ReadConversations reads conversation entries from history.jsonl and groups by session ID
 func (p *Parser) ReadConversations(limit int) ([]*SessionHistory, error) {
+	allEntries, err := p.readAndSortConversationEntries()
+	if err != nil {
+		return nil, err
+	}
+	if limit > 0 && limit < len(allEntries) {
+		allEntries = allEntries[:limit]
+	}
+	sessions := groupAndOrderByMostRecent(allEntries)
+	return sessions, nil
+}
+
+// readAndSortConversationEntries opens the history file and returns all valid
+// ConversationEntry rows sorted by Timestamp descending. Returns an empty slice
+// when the history file doesn't exist (matching the prior behavior).
+func (p *Parser) readAndSortConversationEntries() ([]*ConversationEntry, error) {
 	file, err := os.Open(p.historyPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []*SessionHistory{}, nil
+			return []*ConversationEntry{}, nil
 		}
 		return nil, fmt.Errorf("failed to open history file: %w", err)
 	}
@@ -199,37 +214,23 @@ func (p *Parser) ReadConversations(limit int) ([]*SessionHistory, error) {
 	var allEntries []*ConversationEntry
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), scannerBufSize)
-	lineNum := 0
-
 	for scanner.Scan() {
-		lineNum++
 		line := scanner.Bytes()
-
-		// Strip null bytes from corrupted lines
 		if bytes.ContainsRune(line, 0) {
 			line = bytes.ReplaceAll(line, []byte{0}, nil)
 		}
-
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-
 		var entry ConversationEntry
 		if err := json.Unmarshal(line, &entry); err != nil {
-			// Failed to parse as new format - skip silently
 			continue
 		}
-
-		// Only include entries with sessionId for grouping
 		if entry.SessionID != "" {
 			allEntries = append(allEntries, &entry)
 		}
 	}
-
-	// On scanner error, return partial results instead of failing
 	_ = scanner.Err()
-
-	// Sort by timestamp descending (most recent first)
 	for i := 0; i < len(allEntries); i++ {
 		for j := i + 1; j < len(allEntries); j++ {
 			if allEntries[j].Timestamp > allEntries[i].Timestamp {
@@ -237,16 +238,14 @@ func (p *Parser) ReadConversations(limit int) ([]*SessionHistory, error) {
 			}
 		}
 	}
+	return allEntries, nil
+}
 
-	// Limit to N most recent entries
-	if limit > 0 && limit < len(allEntries) {
-		allEntries = allEntries[:limit]
-	}
-
-	// Group by sessionId
+// groupAndOrderByMostRecent groups entries by SessionID, picks the most-frequent
+// project per session, and returns the sessions ordered by most-recent entry.
+func groupAndOrderByMostRecent(allEntries []*ConversationEntry) []*SessionHistory {
 	sessionMap := make(map[string]*SessionHistory)
-	projectCounts := make(map[string]map[string]int) // sessionID -> project -> count
-
+	projectCounts := make(map[string]map[string]int)
 	for _, entry := range allEntries {
 		if _, exists := sessionMap[entry.SessionID]; !exists {
 			sessionMap[entry.SessionID] = &SessionHistory{
@@ -255,16 +254,11 @@ func (p *Parser) ReadConversations(limit int) ([]*SessionHistory, error) {
 			}
 			projectCounts[entry.SessionID] = make(map[string]int)
 		}
-
 		sessionMap[entry.SessionID].Entries = append(sessionMap[entry.SessionID].Entries, entry)
-
-		// Track project frequency
 		if entry.Project != "" {
 			projectCounts[entry.SessionID][entry.Project]++
 		}
 	}
-
-	// Determine most common project for each session
 	for sessionID, session := range sessionMap {
 		maxCount := 0
 		mostCommonProject := ""
@@ -276,14 +270,10 @@ func (p *Parser) ReadConversations(limit int) ([]*SessionHistory, error) {
 		}
 		session.Project = mostCommonProject
 	}
-
-	// Convert map to slice
 	var sessions []*SessionHistory
 	for _, session := range sessionMap {
 		sessions = append(sessions, session)
 	}
-
-	// Sort sessions by most recent conversation timestamp
 	for i := 0; i < len(sessions); i++ {
 		for j := i + 1; j < len(sessions); j++ {
 			if len(sessions[j].Entries) > 0 && len(sessions[i].Entries) > 0 {
@@ -293,8 +283,7 @@ func (p *Parser) ReadConversations(limit int) ([]*SessionHistory, error) {
 			}
 		}
 	}
-
-	return sessions, nil
+	return sessions
 }
 
 // GetConversationSummary returns a text summary of conversations for a session (for LLM)

@@ -51,10 +51,7 @@ func (m *Migrator) Migrate() (*status.StatusV2, error) {
 	}
 
 	// 3. Convert V1 to V2 schema
-	v2Status, err := m.convertV1ToV2(v1Status)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert V1 to V2: %w", err)
-	}
+	v2Status := m.convertV1ToV2(v1Status)
 
 	// 4. Migrate phase files
 	if err := m.fileMigrator.MigrateFiles(v2Status); err != nil {
@@ -91,7 +88,7 @@ func (m *Migrator) Migrate() (*status.StatusV2, error) {
 }
 
 // convertV1ToV2 converts V1 Status to V2 StatusV2
-func (m *Migrator) convertV1ToV2(v1 *status.Status) (*status.StatusV2, error) {
+func (m *Migrator) convertV1ToV2(v1 *status.Status) *status.StatusV2 {
 	now := time.Now()
 
 	// Create V2 status with basic fields
@@ -127,7 +124,7 @@ func (m *Migrator) convertV1ToV2(v1 *status.Status) (*status.StatusV2, error) {
 		AssertionDensityTarget: 3.0,
 	}
 
-	return v2, nil
+	return v2
 }
 
 // convertPhaseHistory converts V1 phases to V2 phase history
@@ -277,13 +274,14 @@ func (m *Migrator) calculateRiskLevel(v1 *status.Status) string {
 	}
 
 	// Simple heuristic based on phase count
-	if completedPhases <= 2 {
+	switch {
+	case completedPhases <= 2:
 		return status.RiskLevelXS
-	} else if completedPhases <= 4 {
+	case completedPhases <= 4:
 		return status.RiskLevelS
-	} else if completedPhases <= 6 {
+	case completedPhases <= 6:
 		return status.RiskLevelM
-	} else if completedPhases <= 8 {
+	case completedPhases <= 8:
 		return status.RiskLevelL
 	}
 	return status.RiskLevelXL

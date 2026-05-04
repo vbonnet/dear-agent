@@ -77,33 +77,38 @@ func runVerifyQualityGate(sessionName string) error {
 	}
 
 	return printResult(result, func() {
-		fmt.Fprintf(os.Stderr, "Session:  %s\n", displayName)
-		fmt.Fprintf(os.Stderr, "Branch:   %s\n", branch)
-		fmt.Fprintf(os.Stderr, "Repo:     %s\n", repoDir)
-		fmt.Fprintf(os.Stderr, "Config:   %s\n", configPath)
-		fmt.Fprintln(os.Stderr)
-
-		for _, g := range result.Gates {
-			status := "PASS"
-			if !g.Passed {
-				status = "FAIL"
-			}
-			fmt.Fprintf(os.Stderr, "  [%s] %s (%dms)\n", status, g.Name, g.DurationMs)
-			if !g.Passed && g.Output != "" {
-				// Show first 200 chars of output for failed gates
-				out := g.Output
-				if len(out) > 200 {
-					out = out[:200] + "..."
-				}
-				fmt.Fprintf(os.Stderr, "         %s\n", out)
-			}
-		}
-
-		fmt.Fprintln(os.Stderr)
-		if result.Passed {
-			ui.PrintSuccess(fmt.Sprintf("All %d quality gates passed", result.TotalGates))
-		} else {
-			ui.PrintWarning(fmt.Sprintf("%d/%d quality gates failed", result.FailedCount, result.TotalGates))
-		}
+		printQualityGateReport(result, displayName, branch, repoDir, configPath)
 	})
+}
+
+// printQualityGateReport prints the human-readable quality-gate report
+// (header, per-gate PASS/FAIL lines, summary).
+func printQualityGateReport(result *ops.RunQualityGatesResult, displayName, branch, repoDir, configPath string) {
+	fmt.Fprintf(os.Stderr, "Session:  %s\n", displayName)
+	fmt.Fprintf(os.Stderr, "Branch:   %s\n", branch)
+	fmt.Fprintf(os.Stderr, "Repo:     %s\n", repoDir)
+	fmt.Fprintf(os.Stderr, "Config:   %s\n", configPath)
+	fmt.Fprintln(os.Stderr)
+
+	for _, g := range result.Gates {
+		status := "PASS"
+		if !g.Passed {
+			status = "FAIL"
+		}
+		fmt.Fprintf(os.Stderr, "  [%s] %s (%dms)\n", status, g.Name, g.DurationMs)
+		if !g.Passed && g.Output != "" {
+			out := g.Output
+			if len(out) > 200 {
+				out = out[:200] + "..."
+			}
+			fmt.Fprintf(os.Stderr, "         %s\n", out)
+		}
+	}
+
+	fmt.Fprintln(os.Stderr)
+	if result.Passed {
+		ui.PrintSuccess(fmt.Sprintf("All %d quality gates passed", result.TotalGates))
+	} else {
+		ui.PrintWarning(fmt.Sprintf("%d/%d quality gates failed", result.FailedCount, result.TotalGates))
+	}
 }
