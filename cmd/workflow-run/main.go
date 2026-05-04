@@ -6,9 +6,12 @@
 // Usage:
 //
 //	workflow-run -file workflows/research-pipeline.yaml -input topics_file=in.jsonl -input output_file=out.jsonl
+//	workflow-run -file workflows/signals-collect.yaml -trigger cron -db ./runs.db
 //
 // Repeatable -input flag sets workflow inputs. Use -dry-run to validate
-// without executing.
+// without executing. -trigger labels how the run was started ("cli",
+// "cron", "mcp", ...) and is recorded on the runs row when -db points
+// at a SQLite file.
 package main
 
 import (
@@ -33,76 +36,92 @@ func (m *multiString) String() string     { return strings.Join(*m, ",") }
 func (m *multiString) Set(v string) error { *m = append(*m, v); return nil }
 
 func main() {
+	os.Exit(run(os.Args[1:], os.Stderr))
+}
+
+// run is main() factored to be testable: it accepts argv-style flags
+// and a stderr destination, and returns a process exit code instead of
+// calling os.Exit. Tests in main_test.go use this entrypoint.
+func run(args []string, stderr *os.File) int {
+	fs := flag.NewFlagSet("workflow-run", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	var (
-		file    = flag.String("file", "", "path to workflow YAML (required)")
-		dryRun  = flag.Bool("dry-run", false, "validate the workflow and exit without executing")
-		verbose = flag.Bool("verbose", false, "debug logging")
-		cwd     = flag.String("cwd", "", "default working directory for bash nodes")
-		roles   = flag.String("roles", "", "path to roles.yaml for the model router (defaults to config/roles.yaml if present)")
+		file    = fs.String("file", "", "path to workflow YAML (required)")
+		dryRun  = fs.Bool("dry-run", false, "validate the workflow and exit without executing")
+		verbose = fs.Bool("verbose", false, "debug logging")
+		cwd     = fs.String("cwd", "", "default working directory for bash nodes")
+		roles   = fs.String("roles", "", "path to roles.yaml for the model router (defaults to config/roles.yaml if present)")
+		dbPath  = fs.String("db", "runs.db", "path to SQLite runs.db (created if missing); empty disables persistence")
+		trigger = fs.String("trigger", "cli", `how this run was started ("cli", "cron", "mcp", ...) — recorded on the runs row`)
 		inputs  multiString
 	)
-	flag.Var(&inputs, "input", "workflow input as name=value (repeatable)")
-	flag.Parse()
+	fs.Var(&inputs, "input", "workflow input as name=value (repeatable)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 
 	if *file == "" {
-		flag.Usage()
-		fmt.Fprintln(os.Stderr, "\n-file is required")
-		os.Exit(2)
+		fs.Usage()
+		fmt.Fprintln(stderr, "\n-file is required")
+		return 2
 	}
 
 	level := slog.LevelInfo
 	if *verbose {
 		level = slog.LevelDebug
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: level}))
 
 	w, err := workflow.LoadFile(*file)
 	if err != nil {
 		logger.Error("load workflow", "err", err)
-		os.Exit(1)
+		return 1
 	}
 	logger.Info("workflow loaded", "name", w.Name, "version", w.Version, "nodes", len(w.Nodes))
 
 	if *dryRun {
 		logger.Info("dry-run: validation passed; exiting")
-		return
+		return 0
 	}
 
-	inputMap := make(map[string]string, len(inputs))
-	for _, kv := range inputs {
-		idx := strings.IndexByte(kv, '=')
-		if idx <= 0 {
-			logger.Error("bad -input; expect name=value", "value", kv)
-			os.Exit(2)
-		}
-		inputMap[kv[:idx]] = kv[idx+1:]
+	inputMap, err := parseInputs(inputs)
+	if err != nil {
+		logger.Error("bad -input; expect name=value", "err", err)
+		return 2
 	}
 
-	// Wire the AI executor. A nil executor lets workflows that only use
-	// bash/gate/loop still run (useful for CI scripts that want the DAG
-	// primitives without an LLM).
-	var ai workflow.AIExecutor
-	if hasAINode(w.Nodes) {
-		exec, err := buildExecutor(*roles, logger)
-		if err != nil {
-			logger.Error("init AI executor", "err", err)
-			os.Exit(1)
-		}
-		ai = exec
-	} else {
-		ai = nopAI{}
+	ai, err := selectAIExecutor(w.Nodes, *roles, logger)
+	if err != nil {
+		logger.Error("init AI executor", "err", err)
+		return 1
 	}
 
 	runner := workflow.NewRunner(ai)
 	runner.Logger = logger
 	runner.DefaultWorkingDir = *cwd
+	runner.Trigger = *trigger
+
+	if *dbPath != "" {
+		ss, err := workflow.OpenSQLiteState(*dbPath)
+		if err != nil {
+			logger.Error("open runs.db", "path", *dbPath, "err", err)
+			return 1
+		}
+		defer func() {
+			if err := ss.Close(); err != nil {
+				logger.Warn("close runs.db", "err", err)
+			}
+		}()
+		runner.UseSQLiteState(ss)
+		logger.Info("runs.db wired", "path", *dbPath)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	rep, err := runner.Run(ctx, w, inputMap)
-	if err != nil {
-		logger.Error("run failed", "err", err)
+	rep, runErr := runner.Run(ctx, w, inputMap)
+	if runErr != nil {
+		logger.Error("run failed", "err", runErr)
 	}
 	logger.Info("run finished",
 		"workflow", w.Name,
@@ -114,10 +133,34 @@ func main() {
 			return len(rep.Results)
 		}())
 
-	if err != nil {
-		cancel() // explicit since deferred cancel won't run after os.Exit
-		os.Exit(1) //nolint:gocritic // cancel() called explicitly above
+	if runErr != nil {
+		return 1
 	}
+	return 0
+}
+
+// parseInputs decodes name=value flag values into a map. The leading
+// idx<=0 check rejects both "=foo" (empty key) and "novalue" (no equals).
+func parseInputs(inputs multiString) (map[string]string, error) {
+	out := make(map[string]string, len(inputs))
+	for _, kv := range inputs {
+		idx := strings.IndexByte(kv, '=')
+		if idx <= 0 {
+			return nil, fmt.Errorf("bad -input %q; expect name=value", kv)
+		}
+		out[kv[:idx]] = kv[idx+1:]
+	}
+	return out, nil
+}
+
+// selectAIExecutor returns a real AIExecutor when the DAG contains an AI
+// node and a no-op stub otherwise. Keeping the LLM-provider init lazy
+// lets bash-only workflows run in CI without ANTHROPIC_API_KEY set.
+func selectAIExecutor(nodes []workflow.Node, rolesPath string, logger *slog.Logger) (workflow.AIExecutor, error) {
+	if !hasAINode(nodes) {
+		return nopAI{}, nil
+	}
+	return buildExecutor(rolesPath, logger)
 }
 
 // hasAINode returns true if any node in the (possibly-nested) DAG is an

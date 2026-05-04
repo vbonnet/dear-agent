@@ -750,9 +750,12 @@ func (r *Runner) dispatchKind(nc *nodeContext, node *Node, res *Result) {
 		out, err := r.executeAI(nc, node)
 		res.Output, res.Error = out, err
 	case KindBash:
-		out, code, err := r.executeBash(nc, node)
+		out, stderr, code, err := r.executeBash(nc, node)
 		res.Output = out
 		res.Meta["exit_code"] = code
+		if stderr != "" {
+			res.Meta["stderr"] = stderr
+		}
 		res.Error = err
 	case KindGate:
 		res.Error = r.executeGate(nc, node)
@@ -860,18 +863,20 @@ func (r *Runner) executeAI(nc *nodeContext, node *Node) (string, error) {
 }
 
 // executeBash runs the rendered command under /bin/sh -c and returns its
-// stdout + exit code. Stderr is captured into the Meta map.
+// stdout, the captured stderr, and the exit code. The stderr buffer is
+// recorded by the caller in Result.Meta["stderr"] so failures stay
+// observable without stdout/stderr being interleaved.
 //
 // WARNING — injection risk: {{.Inputs.foo}} in the Cmd template interpolates
 // values directly into the shell command string. If those values contain shell
 // metacharacters (;, &&, $(...), backticks) arbitrary commands can execute.
 // Prefer the safe alternatives:
-//   - Reference values as $INPUT_FOO / $OUTPUT_FOO env vars (auto-injected).
+//   - Reference values as $INPUT_<name> / $OUTPUT_<name> env vars (auto-injected).
 //   - Use the {{shq .Inputs.foo}} template function for explicit shell-quoting.
-func (r *Runner) executeBash(nc *nodeContext, node *Node) (string, int, error) {
+func (r *Runner) executeBash(nc *nodeContext, node *Node) (string, string, int, error) {
 	rendered, err := renderTemplate(node.Bash.Cmd, nc)
 	if err != nil {
-		return "", 0, fmt.Errorf("render cmd: %w", err)
+		return "", "", 0, fmt.Errorf("render cmd: %w", err)
 	}
 	shell := r.DefaultBashShell
 	if shell == "" {
@@ -889,7 +894,7 @@ func (r *Runner) executeBash(nc *nodeContext, node *Node) (string, int, error) {
 		enf := r.permissions()
 		if cmd.Dir != "" {
 			if err := enf.CheckPath(node.Permissions, cmd.Dir, AccessWrite); err != nil {
-				return "", 0, err
+				return "", "", 0, err
 			}
 		}
 	}
@@ -899,8 +904,8 @@ func (r *Runner) executeBash(nc *nodeContext, node *Node) (string, int, error) {
 	if len(node.Bash.Env) > 0 {
 		env = append(env, envSlice(node.Bash.Env)...)
 	}
-	// Auto-expose workflow inputs/outputs so scripts can use $INPUT_FOO /
-	// $OUTPUT_FOO without interpolating untrusted values into the command string.
+	// Auto-expose workflow inputs/outputs so scripts can use $INPUT_<name> /
+	// $OUTPUT_<name> without interpolating untrusted values into the command string.
 	for k, v := range nc.inputs {
 		env = append(env, envVarKey("INPUT_", k)+"="+v)
 	}
@@ -908,18 +913,21 @@ func (r *Runner) executeBash(nc *nodeContext, node *Node) (string, int, error) {
 		env = append(env, envVarKey("OUTPUT_", k)+"="+v)
 	}
 	cmd.Env = env
-	out, err := cmd.Output()
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
 	code := cmd.ProcessState.ExitCode()
 	if err != nil {
 		// Non-zero exit is wrapped into ExitError. If the node allows it,
 		// succeed with the exit code in Meta.
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && node.Bash.AllowNonzeroExit {
-			return string(out), code, nil
+			return stdout.String(), stderr.String(), code, nil
 		}
-		return string(out), code, fmt.Errorf("bash: %w", err)
+		return stdout.String(), stderr.String(), code, fmt.Errorf("bash: %w", err)
 	}
-	return string(out), code, nil
+	return stdout.String(), stderr.String(), code, nil
 }
 
 // executeGate blocks until the signal arrives or the context/Timeout expires.
@@ -1252,11 +1260,14 @@ func envSlice(m map[string]string) []string {
 
 // envVarKey converts a workflow key name to a safe env var name with the
 // given prefix. Non-alphanumeric characters are replaced with underscores.
+// Case is preserved: shell variable names are case-sensitive and the
+// shipped templates (configs/workflows/*.yaml) reference inputs in their
+// declared casing (e.g. $INPUT_db, $INPUT_repos_root).
 func envVarKey(prefix, name string) string {
 	var b strings.Builder
 	b.WriteString(prefix)
-	for _, r := range strings.ToUpper(name) {
-		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+	for _, r := range name {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 			b.WriteRune(r)
 		} else {
 			b.WriteByte('_')
