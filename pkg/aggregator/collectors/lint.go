@@ -1,10 +1,12 @@
 package collectors
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 
@@ -87,12 +89,18 @@ type golangCILintOutput struct {
 
 // parseGolangCILint turns golangci-lint JSON into one signal per file.
 // Files with zero findings are not emitted.
+//
+// golangci-lint v2 prints a human-readable summary after the JSON
+// document on stdout (e.g. "1 issues:\n* typecheck: 1"), so we decode
+// just the first JSON value from the stream and ignore trailing
+// content rather than calling json.Unmarshal on the full buffer.
 func parseGolangCILint(raw []byte) ([]aggregator.Signal, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	var out golangCILintOutput
-	if err := json.Unmarshal(raw, &out); err != nil {
+	if err := dec.Decode(&out); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("collectors.LintTrend: parse JSON: %w", err)
 	}
 	perFile := map[string]int{}
