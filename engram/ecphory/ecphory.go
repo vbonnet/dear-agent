@@ -169,7 +169,7 @@ func (e *Ecphory) Query(ctx context.Context, query string, sessionID string, tra
 		results := e.loadEngrams(candidates)
 		tokensUsed := e.estimateTokens(results)
 		e.publishEcphoryEvent(ctx, query, sessionID, transcript, tags, agent, results, tokensUsed, time.Since(startTime))
-		return results, nil // nolint:nilerr // Intentional: fallback succeeded
+		return results, nil //nolint:nilerr // Intentional: fallback succeeded
 	}
 
 	// Task 1.3.2: Apply failure boosting for debugging queries

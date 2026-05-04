@@ -188,7 +188,7 @@ func main() {
 		if acmeAdapter != nil {
 			acmeAdapter.Close()
 		}
-		os.Exit(1)
+		os.Exit(1) //nolint:gocritic // adapter Close()s called explicitly above
 	}
 	fmt.Printf("OSS Workspace: %d sessions\n", len(ossList))
 	for _, s := range ossList {

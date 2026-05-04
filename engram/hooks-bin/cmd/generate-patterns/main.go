@@ -117,7 +117,7 @@ func main() {
 		if f, ok := w.(*os.File); ok && f != os.Stdout {
 			f.Close()
 		}
-		os.Exit(1)
+		os.Exit(1) //nolint:gocritic // file closed explicitly above
 	}
 }
 

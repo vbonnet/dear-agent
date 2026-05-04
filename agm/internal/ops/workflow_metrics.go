@@ -31,6 +31,7 @@ func CollectWorkflowMetrics(result *WorkflowResult, dagDepth int) *WorkflowMetri
 	}
 
 	for _, t := range result.Tasks {
+		//nolint:exhaustive // intentional partial: handles the relevant subset
 		switch t.Status {
 		case TaskStatusSuccess:
 			m.TasksCompleted++

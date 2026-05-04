@@ -84,6 +84,7 @@ func (s Status) IsOverThreshold() bool {
 
 // RoleFromString converts a string to a Role, returning RoleDefault for unknown values.
 func RoleFromString(s string) Role {
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch Role(s) {
 	case RoleOrchestrator, RoleWorker, RolePlanner, RoleMonitor:
 		return Role(s)

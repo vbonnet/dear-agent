@@ -288,7 +288,8 @@ func formatNumber(n int) string {
 		if i > 0 && (len(s)-i)%3 == 0 {
 			result = append(result, ',')
 		}
-		result = append(result, byte(c))
+		// s comes from fmt.Sprintf("%d", n) — pure ASCII digits.
+		result = append(result, byte(c)) //nolint:gosec // ASCII-only source
 	}
 	return string(result)
 }

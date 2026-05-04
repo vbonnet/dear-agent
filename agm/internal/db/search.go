@@ -102,16 +102,9 @@ func BuildFTS5Query(terms []string, operator string) string {
 		if term == "" {
 			continue
 		}
-		// Check if it's already a phrase (quoted)
-		if strings.HasPrefix(term, `"`) && strings.HasSuffix(term, `"`) {
-			escapedTerms = append(escapedTerms, escapeFTS5String(term))
-		} else if strings.Contains(term, ":") {
-			// Column-specific search (e.g., "name:value")
-			escapedTerms = append(escapedTerms, escapeFTS5String(term))
-		} else {
-			// Regular term - just escape
-			escapedTerms = append(escapedTerms, escapeFTS5String(term))
-		}
+		// All three of {already-quoted phrase, column:value, regular term}
+		// route through escapeFTS5String, which handles each shape internally.
+		escapedTerms = append(escapedTerms, escapeFTS5String(term))
 	}
 
 	if len(escapedTerms) == 0 {

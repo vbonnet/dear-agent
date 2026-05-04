@@ -240,26 +240,24 @@ func (s *FileBasedExecutionStrategy) monitorCompletion(phaseDir string, timeout 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			status := s.readStatus(phaseDir)
-			if status == StatusCompleted {
-				return true
-			}
-			if status == StatusFailed || status == StatusBlocked {
-				return false
-			}
+	for range ticker.C {
+		status := s.readStatus(phaseDir)
+		if status == StatusCompleted {
+			return true
+		}
+		if status == StatusFailed || status == StatusBlocked {
+			return false
+		}
 
-			elapsed := time.Since(start)
-			if elapsed > timeout {
-				return false
-			}
-			if int(elapsed.Seconds())%30 == 0 && elapsed.Seconds() > 1 {
-				fmt.Printf("  Still waiting... (%ds elapsed)\n", int(elapsed.Seconds()))
-			}
+		elapsed := time.Since(start)
+		if elapsed > timeout {
+			return false
+		}
+		if int(elapsed.Seconds())%30 == 0 && elapsed.Seconds() > 1 {
+			fmt.Printf("  Still waiting... (%ds elapsed)\n", int(elapsed.Seconds()))
 		}
 	}
+	return false
 }
 
 func (s *FileBasedExecutionStrategy) collectArtifact(

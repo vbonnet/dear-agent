@@ -108,8 +108,8 @@ func unescapeOctal(s string) (string, error) {
 				// Parse octal to byte
 				var code int
 				_, err := fmt.Sscanf(octalStr, "%o", &code)
-				if err == nil && code <= 255 {
-					result.WriteByte(byte(code))
+				if err == nil && code >= 0 && code <= 255 {
+					result.WriteByte(byte(code)) //nolint:gosec // bounded above
 					i += 4
 					continue
 				}

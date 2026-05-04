@@ -244,6 +244,7 @@ func runWorkflowStatus(_ *cobra.Command, args []string) error {
 }
 
 func statusSymbol(s ops.TaskStatus) string {
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch s {
 	case ops.TaskStatusSuccess:
 		return "[OK]"

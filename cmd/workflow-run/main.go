@@ -114,7 +114,7 @@ func main() {
 
 	if err != nil {
 		cancel() // explicit since deferred cancel won't run after os.Exit
-		os.Exit(1)
+		os.Exit(1) //nolint:gocritic // cancel() called explicitly above
 	}
 }
 

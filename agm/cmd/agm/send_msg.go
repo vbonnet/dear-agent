@@ -928,6 +928,7 @@ func dismissOverlayAndDeliver(tmuxName, recipientSession, senderName, messageID,
 	// Step 3: Re-check delivery readiness
 	canReceive := session.CheckSessionDelivery(tmuxName)
 
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch canReceive {
 	case state.CanReceiveYes:
 		// Overlay dismissed, prompt visible — deliver directly

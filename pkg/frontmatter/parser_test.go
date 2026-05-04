@@ -345,7 +345,7 @@ func TestParser_FuzzyMatch(t *testing.T) {
 	})
 
 	t.Run("matches with typos", func(t *testing.T) {
-		// nolint:misspell // intentional typo for testing fuzzy matching
+		//nolint:misspell // intentional typo for testing fuzzy matching
 		if !parser.FuzzyMatch("Acceptence Criteria", "Acceptance Criteria", 0.80) {
 			t.Error("expected match with typos")
 		}

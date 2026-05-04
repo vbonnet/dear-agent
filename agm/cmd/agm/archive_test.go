@@ -85,8 +85,8 @@ func createArchiveTestSession(t testingTB, sessionsDir, sessionID, name, tmuxNam
 	adapter, err := getStorage()
 	if err != nil {
 		// Skip test if Dolt server is not available (infrastructure test)
-		if t, ok := t.(*testing.T); ok {
-			t.Skipf("Dolt server not available (infrastructure test): %v", err)
+		if tt, ok := t.(*testing.T); ok {
+			tt.Skipf("Dolt server not available (infrastructure test): %v", err)
 		} else {
 			// For benchmarks, fail
 			t.Fatalf("Failed to connect to Dolt in test setup: %v", err)

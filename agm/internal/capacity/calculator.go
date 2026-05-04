@@ -68,7 +68,9 @@ func (c *Calculator) Calculate(info SystemInfo) CapacityResult {
 	// RAM-based max: (availableRAM - reserved) / perSession
 	result.RAMBasedMax = 0
 	if info.AvailableRAMBytes > c.ReservedRAMBytes {
-		result.RAMBasedMax = int((info.AvailableRAMBytes - c.ReservedRAMBytes) / c.PerSessionRAMBytes)
+		// Bounded by perSessionRAMBytes (>= 1 byte) so the quotient fits in int
+		// for any realistic RAM size; explicit conversion safe here.
+		result.RAMBasedMax = int((info.AvailableRAMBytes - c.ReservedRAMBytes) / c.PerSessionRAMBytes) //nolint:gosec // bounded by per-session RAM, fits in int
 	}
 
 	// CPU-based max: numCPUs * 2

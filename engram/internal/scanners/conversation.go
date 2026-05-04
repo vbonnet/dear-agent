@@ -4,6 +4,7 @@ package scanners
 import (
 	"context"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/vbonnet/dear-agent/engram/internal/metacontext"
@@ -84,7 +85,7 @@ func (s *ConversationScanner) Scan(ctx context.Context, req *metacontext.Analyze
 				Confidence: confidence,
 				Source:     "conversation",
 				Metadata: map[string]string{
-					"mentions": string(rune(len(matches))),
+					"mentions": strconv.Itoa(len(matches)),
 				},
 			})
 		}

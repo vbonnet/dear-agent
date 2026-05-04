@@ -179,6 +179,7 @@ func TrustRecord(_ *OpContext, req *TrustRecordRequest) (*TrustRecordResult, err
 	}
 
 	// Record negative trust events to error memory for learning loop
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch TrustEventType(req.EventType) {
 	case TrustEventFalseCompletion:
 		recordErrorMemory(

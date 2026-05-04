@@ -76,8 +76,9 @@ func TestSelectorProperty_KeywordMatching(t *testing.T) {
 			lowerSessionName := "test-" + keyword + "-session"
 			lowerResult := SelectHarness(lowerSessionName, config)
 
-			// Both should return the same agent (case-insensitive matching)
-			return upperResult == lowerResult && upperResult == agentName
+			// Both should return the same agent (case-insensitive matching).
+			// Transitive: upper==lower AND upper==agentName implies lower==agentName.
+			return upperResult == lowerResult && upperResult == agentName //nolint:gocritic // intentional transitive check
 		},
 		gen.AlphaString().SuchThat(func(s string) bool { return s != "" }),
 		gen.OneConstOf("claude", "gemini", "gpt4"),

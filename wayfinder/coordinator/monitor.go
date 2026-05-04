@@ -102,10 +102,11 @@ func NewMonitor(interval time.Duration, logDir string) *Monitor {
 // Start begins monitoring
 func (m *Monitor) Start(ctx context.Context, projectDirs []string) {
 	// Ensure log directory exists
-	os.MkdirAll(m.logDir, 0755)
+	_ = os.MkdirAll(m.logDir, 0o700)
 
-	// Start status polling
-	pollerCtx, pollerCancel := context.WithCancel(ctx)
+	// Start status polling. The cancel is stored on the poller for a future
+	// explicit Stop(); shutdown today is driven by the parent ctx.
+	pollerCtx, pollerCancel := context.WithCancel(ctx) //nolint:gosec // TODO(stop): wire cancel through a Monitor.Stop()
 	m.statusPoller.ctx = pollerCtx
 	m.statusPoller.cancel = pollerCancel
 

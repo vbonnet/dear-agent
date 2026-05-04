@@ -63,6 +63,7 @@ var allRoles = []Role{
 // IsSupervisorRole returns true if the role is a supervisor-tier role
 // (meta-orchestrator, orchestrator, overseer, or the supervisor alias).
 func IsSupervisorRole(name string) bool {
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch Role(name) {
 	case RoleMetaOrchestrator, RoleOrchestrator, RoleOverseer, RoleSupervisor:
 		return true

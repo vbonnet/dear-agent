@@ -67,6 +67,7 @@ func runVerifyContractDrift() error {
 			fmt.Fprintf(os.Stderr, "  %s\n", spec)
 			for _, f := range findings {
 				icon := "PASS"
+				//nolint:exhaustive // intentional partial: handles the relevant subset
 				switch f.Severity {
 				case ops.DriftWarn:
 					icon = "WARN"

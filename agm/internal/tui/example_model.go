@@ -148,6 +148,7 @@ func formatEventNotification(event *eventbus.Event) string {
 	var icon string
 	var color lipgloss.Color
 
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch event.Type {
 	case eventbus.EventSessionEscalated:
 		icon = "🚨"

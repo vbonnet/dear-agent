@@ -144,7 +144,7 @@ func main() {
 		if err != nil {
 			logger.Error("A2A HTTP listen failed", "addr", addr, "error", err)
 			stop() // explicit cleanup before exit (otherwise the deferred stop() at the top of main wouldn't run)
-			os.Exit(1)
+			os.Exit(1) //nolint:gocritic // stop() called explicitly above
 		}
 
 		logger.Info("A2A HTTP server listening", "addr", addr)

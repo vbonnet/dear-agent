@@ -263,6 +263,7 @@ func (b *TmuxBackend) CheckDelivery(_ context.Context, id manager.SessionID) (ma
 	canReceive := detector.CheckCanReceive(paneContent)
 
 	// Map state.CanReceive to manager.CanReceive
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch canReceive {
 	case state.CanReceiveYes:
 		return manager.CanReceiveYes, nil
@@ -286,6 +287,7 @@ func (b *TmuxBackend) HealthCheck(_ context.Context) error {
 
 // mapTerminalState converts state.State to manager.State.
 func mapTerminalState(s state.State) manager.State {
+	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch s {
 	case state.StateReady:
 		return manager.StateIdle
