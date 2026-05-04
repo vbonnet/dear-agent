@@ -258,6 +258,8 @@ func logGCSkipIfMonitored(reason GCSkipReason, m *manifest.Manifest) {
 			SessionName: m.Name,
 			Reason:      fmt.Sprintf("active_state:%s", m.State),
 		})
+	case GCSkipAlreadyArchived, GCSkipReaping, GCSkipTooRecent:
+		// Reasons that historically had no logged gc_skip entry.
 	}
 }
 

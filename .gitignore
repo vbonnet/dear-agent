@@ -56,3 +56,8 @@ tests/test_helper/
 
 # Subagent worktrees (created by agent isolation harnesses)
 .worktrees/
+
+# Build artifacts (binaries from `go build ./...` at repo root)
+/agm-daemon
+/agm-mcp-server
+/agm-statusline

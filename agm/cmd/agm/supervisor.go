@@ -408,12 +408,11 @@ func buildSupervisorStatusRows(ids []string) ([]supervisorRow, bool, error) {
 			return nil, false, fmt.Errorf("read %s: %w", id, err)
 		}
 		r := supervisorRow{ID: id, Record: rec}
-		switch {
-		case rec == nil:
+		if rec == nil {
 			r.Missing = true
 			r.Stale = true
 			anyStale = true
-		default:
+		} else {
 			r.AgeSecs = now.Sub(rec.LastBeatUTC).Seconds()
 			if now.Sub(rec.LastBeatUTC) > supervisorStatusStaleAfter {
 				r.Stale = true

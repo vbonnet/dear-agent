@@ -198,7 +198,7 @@ Examples:
 
 // syncActiveTmuxSessions scans all active tmux sessions for Claude conversations
 // and ensures they have proper manifests (without auto-assigning UUIDs)
-func syncActiveTmuxSessions(adapter *dolt.Adapter, sessionsDir string, historyEntries []claude.RawEntry) error {
+func syncActiveTmuxSessions(adapter *dolt.Adapter, sessionsDir string, _ []claude.RawEntry) error {
 	// Get all active tmux sessions
 	tmuxSessions, err := tmux.ListSessions()
 	if err != nil {

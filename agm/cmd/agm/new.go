@@ -793,6 +793,8 @@ func ensureTmuxSession(sessionName, workDir string) (bool, string, error) {
 			return exists, newName, nil
 		case existingActionCancel:
 			return exists, "", handleErr
+		case existingActionReuse:
+			// Fall through to clear stale interrupt and proceed with existing session.
 		}
 	} else if err := createNewTmuxSession(sessionName, workDir); err != nil {
 		return exists, "", err
@@ -1251,7 +1253,7 @@ func startGeminiDirect(sessionName string, exists bool) error {
 	trustCheckCmd := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedName, "-p", "-S", "-20")
 	trustOutput, err := trustCheckCmd.CombinedOutput()
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // best-effort capture; failure means no auto-accept this run
 	}
 	content := string(trustOutput)
 	if !strings.Contains(content, "Do you trust") && !strings.Contains(content, "trust the files") {
@@ -1473,7 +1475,7 @@ func runClaudePostCreate(sessionName string, modeAppliedAtStartup bool) error {
 	}
 	if readyErr != nil {
 		reportClaudeReadyFailure(sessionName, readyErr)
-		return nil
+		return nil //nolint:nilerr // failure already surfaced via reportClaudeReadyFailure; CLI continues
 	}
 	debug.Log("Ready-file detected - agm binary completed")
 	waitForSkillCompletion(sessionName)
@@ -1509,15 +1511,13 @@ func waitForSkillCompletion(sessionName string) {
 	if err := tmux.WaitForPattern(sessionName, "[AGM_SKILL_COMPLETE]", 5*time.Second); err == nil {
 		debug.Log("✓ Skill completion marker detected")
 		return
-	} else {
-		debug.Log("Pattern detection timeout (non-fatal): %v", err)
 	}
+	debug.Log("Pattern detection timeout (non-fatal)")
 	if err := tmux.WaitForOutputIdle(sessionName, 1*time.Second, 15*time.Second); err == nil {
 		debug.Log("✓ Output idle detected - skill appears complete")
 		return
-	} else {
-		debug.Log("Idle detection failed: %v", err)
 	}
+	debug.Log("Idle detection failed")
 	if err := tmux.WaitForClaudePrompt(sessionName, 5*time.Second); err != nil {
 		debug.Log("Prompt detection failed (non-fatal): %v", err)
 		time.Sleep(1 * time.Second)

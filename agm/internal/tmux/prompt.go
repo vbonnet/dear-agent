@@ -317,6 +317,8 @@ func verifyAndResubmitQueuedPrompt(socketPath, normalizedTarget string) {
 	}
 }
 
+// SendPromptFromFile sends the contents of filePath to the tmux target as a
+// prompt, optionally interrupting any running command first.
 func SendPromptFromFile(target, filePath string, shouldInterrupt bool) error {
 	// Validate file exists and get size
 	stat, err := os.Stat(filePath)

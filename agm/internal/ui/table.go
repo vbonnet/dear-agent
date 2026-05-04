@@ -754,7 +754,7 @@ type columnWidths struct {
 }
 
 // calculateMaxColumnWidths calculates the maximum width for each column across all groups
-func calculateMaxColumnWidths(groups map[string][]*manifest.Manifest, statuses map[string]session.StatusInfo, showTmuxColumn bool) columnWidths {
+func calculateMaxColumnWidths(groups map[string][]*manifest.Manifest, _ map[string]session.StatusInfo, showTmuxColumn bool) columnWidths {
 	widths := columnWidths{}
 	for _, group := range groups {
 		for _, m := range group {

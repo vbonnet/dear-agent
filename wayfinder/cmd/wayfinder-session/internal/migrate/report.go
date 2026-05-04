@@ -72,8 +72,9 @@ func GenerateReport(v1 *status.Status, v2 *status.StatusV2, opts *ConvertOptions
 }
 
 // analyzeMerges identifies phase merge operations
+//
 //nolint:gocyclo // reason: linear merge analyzer covering many event types
-func analyzeMerges(v1 *status.Status, v2 *status.StatusV2) []PhaseMerge {
+func analyzeMerges(v1 *status.Status, _ *status.StatusV2) []PhaseMerge {
 	merges := []PhaseMerge{}
 
 	// Check for S4 → D4 merge

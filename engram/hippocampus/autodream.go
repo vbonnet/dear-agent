@@ -109,10 +109,7 @@ func (a *Autodream) Run(ctx context.Context) (*ConsolidationReport, error) {
 	}
 
 	// Phase 3: Consolidate
-	result, err := a.consolidate(ctx, state, signals)
-	if err != nil {
-		return nil, fmt.Errorf("consolidate: %w", err)
-	}
+	result := a.consolidate(ctx, state, signals)
 	report.EntriesAdded = len(result.added)
 	report.EntriesUpdated = len(result.updated)
 	report.Contradictions = result.contradictions
@@ -240,8 +237,9 @@ type consolidationResult struct {
 }
 
 // consolidate merges signals into the memory document (Phase 3).
+//
 //nolint:gocyclo // reason: linear consolidation pipeline with many guard checks
-func (a *Autodream) consolidate(ctx context.Context, state *MemoryState, signals []Signal) (*consolidationResult, error) {
+func (a *Autodream) consolidate(ctx context.Context, state *MemoryState, signals []Signal) *consolidationResult {
 	result := &consolidationResult{}
 
 	// Collect incoming entries for contradiction detection
@@ -306,7 +304,7 @@ func (a *Autodream) consolidate(ctx context.Context, state *MemoryState, signals
 		result.added = append(result.added, entry)
 	}
 
-	return result, nil
+	return result
 }
 
 // removeEntry removes the first entry containing the target text.

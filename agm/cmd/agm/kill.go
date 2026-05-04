@@ -149,7 +149,7 @@ func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 	})
 	if killErr != nil {
 		var done bool
-		killResult, killErr, done = handleKillError(opCtx, sessionName, killResult, killErr)
+		killResult, done, killErr = handleKillError(opCtx, sessionName, killResult, killErr)
 		if done {
 			return killErr
 		}
@@ -182,18 +182,18 @@ func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 // the (possibly resolved) error, and a `done` flag indicating whether the
 // caller should return immediately. When done=false, the original killErr
 // has been resolved and the caller should continue with killResult.
-func handleKillError(opCtx *ops.OpContext, sessionName string, killResult *ops.KillSessionResult, killErr error) (*ops.KillSessionResult, error, bool) {
+func handleKillError(opCtx *ops.OpContext, sessionName string, killResult *ops.KillSessionResult, killErr error) (*ops.KillSessionResult, bool, error) {
 	var opErr *ops.OpError
 	if !errors.As(killErr, &opErr) {
-		return killResult, killErr, true
+		return killResult, true, killErr
 	}
 	switch opErr.Code {
 	case ops.ErrCodeSessionNotFound:
-		return killResult, renderSessionNotFoundError(sessionName), true
+		return killResult, true, renderSessionNotFoundError(sessionName)
 	case ops.ErrCodeSessionArchived:
-		return killResult, renderSessionArchivedError(sessionName), true
+		return killResult, true, renderSessionArchivedError(sessionName)
 	case ops.ErrCodeActiveSessionKill:
-		return killResult, renderActiveSessionError(sessionName), true
+		return killResult, true, renderActiveSessionError(sessionName)
 	case ops.ErrCodeKillProtected:
 		ago := "recently"
 		if killResult != nil && killResult.LastActivity != nil {
@@ -211,18 +211,18 @@ func handleKillError(opCtx *ops.OpContext, sessionName string, killResult *ops.K
 			Run()
 		if confirmErr != nil || !confirmed {
 			fmt.Println("Cancelled")
-			return killResult, nil, true
+			return killResult, true, nil //nolint:nilerr // user cancellation is not an error
 		}
 		newResult, err := ops.KillSession(opCtx, &ops.KillSessionRequest{
 			Identifier: sessionName,
 			Force:      true,
 		})
 		if err != nil {
-			return newResult, err, true
+			return newResult, true, err
 		}
-		return newResult, nil, false
+		return newResult, false, nil
 	}
-	return killResult, killErr, true
+	return killResult, true, killErr
 }
 
 func runHardKill(sessionName, tmuxSessionName string) error {

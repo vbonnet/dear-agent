@@ -271,16 +271,12 @@ func assessHealth(d SessionHealthDetail, status string) (string, []string) {
 	return health, warnings
 }
 
-// promote returns "critical" if either old or candidate is critical, else
-// the most-severe of the two (warning > healthy).
-func promote(old, candidate string) string {
-	if old == "critical" || candidate == "critical" {
+// promoteToWarning returns "critical" if old is critical, otherwise "warning".
+func promoteToWarning(old string) string {
+	if old == "critical" {
 		return "critical"
 	}
-	if old == "warning" || candidate == "warning" {
-		return "warning"
-	}
-	return "healthy"
+	return "warning"
 }
 
 func assessResponsiveness(d SessionHealthDetail, sh contracts.SessionHealth, health string, warnings []string) (string, []string) {
@@ -291,7 +287,7 @@ func assessResponsiveness(d SessionHealthDetail, sh contracts.SessionHealth, hea
 	}
 	if sinceUpdate > sh.ResponsivenessWarningTimeout.Duration {
 		warnings = append(warnings, fmt.Sprintf("No manifest update in %s", d.TimeSinceLastUpdate))
-		return promote(health, "warning"), warnings
+		return promoteToWarning(health), warnings
 	}
 	return health, warnings
 }
@@ -301,7 +297,7 @@ func assessState(d SessionHealthDetail, health string, warnings []string) (strin
 		return health, warnings
 	}
 	warnings = append(warnings, "Session waiting on permission prompt")
-	return promote(health, "warning"), warnings
+	return promoteToWarning(health), warnings
 }
 
 func assessErrorRate(d SessionHealthDetail, sh contracts.SessionHealth, health string, warnings []string) (string, []string) {
@@ -311,7 +307,7 @@ func assessErrorRate(d SessionHealthDetail, sh contracts.SessionHealth, health s
 	}
 	if d.ErrorLines > sh.ErrorLinesWarning {
 		warnings = append(warnings, fmt.Sprintf("Elevated error rate: %d error lines in recent output", d.ErrorLines))
-		return promote(health, "warning"), warnings
+		return promoteToWarning(health), warnings
 	}
 	return health, warnings
 }
@@ -321,7 +317,7 @@ func assessCPU(d SessionHealthDetail, sh contracts.SessionHealth, health string,
 		return health, warnings
 	}
 	warnings = append(warnings, fmt.Sprintf("High CPU usage: %.1f%%", d.CPUPct))
-	return promote(health, "warning"), warnings
+	return promoteToWarning(health), warnings
 }
 
 func assessMemory(d SessionHealthDetail, sh contracts.SessionHealth, health string, warnings []string) (string, []string) {
@@ -329,7 +325,7 @@ func assessMemory(d SessionHealthDetail, sh contracts.SessionHealth, health stri
 		return health, warnings
 	}
 	warnings = append(warnings, fmt.Sprintf("High memory usage: %.0f MB", d.MemoryMB))
-	return promote(health, "warning"), warnings
+	return promoteToWarning(health), warnings
 }
 
 func assessTrustScore(d SessionHealthDetail, sh contracts.SessionHealth, health string, warnings []string) (string, []string) {
@@ -337,7 +333,7 @@ func assessTrustScore(d SessionHealthDetail, sh contracts.SessionHealth, health 
 		return health, warnings
 	}
 	warnings = append(warnings, fmt.Sprintf("Low trust score: %d", *d.TrustScore))
-	return promote(health, "warning"), warnings
+	return promoteToWarning(health), warnings
 }
 
 // parseDurationFromFormatted parses a formatted duration string back to time.Duration.

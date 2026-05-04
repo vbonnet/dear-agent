@@ -181,7 +181,7 @@ func checkActiveTmuxBlock(m *manifest.Manifest, force bool) error {
 	}
 	cmd := exec.Command("tmux", "has-session", "-t", m.Tmux.SessionName)
 	if err := cmd.Run(); err != nil {
-		return nil
+		return nil //nolint:nilerr // tmux has-session failure means session doesn't exist; nothing to block
 	}
 	return &OpError{
 		Status:      400,
@@ -226,15 +226,15 @@ func blockOnVerification(verification *session.CompletionVerification, force boo
 func blockOnPendingDelegations(m *manifest.Manifest, force bool) error {
 	delegationDir, err := delegation.DefaultDir()
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // best-effort: missing delegation dir doesn't block archive
 	}
 	tracker, err := delegation.NewTracker(delegationDir)
 	if err != nil {
-		return nil
+		return nil //nolint:nilerr // best-effort: tracker init failure doesn't block archive
 	}
 	pending, err := tracker.Pending(m.Name)
 	if err != nil || len(pending) == 0 {
-		return nil
+		return nil //nolint:nilerr // best-effort: tracker query failure or no pending = don't block
 	}
 	summaries := make([]string, 0, len(pending))
 	for _, d := range pending {
