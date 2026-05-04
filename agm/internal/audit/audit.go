@@ -32,6 +32,7 @@ const (
 	IssueMissingTmuxSession   IssueType = "missing_tmux_session"
 	IssueStaleSession         IssueType = "stale_session"
 	IssueDuplicateUUID        IssueType = "duplicate_uuid"
+	IssueChezmoiDrift         IssueType = "chezmoi_drift"
 )
 
 // AuditIssue represents a single audit finding
@@ -136,6 +137,17 @@ func RunAudit(opts AuditOptions) (*AuditReport, error) {
 		report.Errors = append(report.Errors, fmt.Sprintf("duplicate check failed: %v", err))
 	} else {
 		report.Issues = append(report.Issues, duplicateIssues...)
+	}
+
+	// Check 6: Chezmoi drift (system-level, not session-scoped).
+	// Skipped silently when chezmoi is not installed or no workspace filter clash.
+	if opts.WorkspaceFilter == "" {
+		chezmoiIssues, err := checkChezmoiDrift()
+		if err != nil {
+			report.Errors = append(report.Errors, fmt.Sprintf("chezmoi check failed: %v", err))
+		} else {
+			report.Issues = append(report.Issues, chezmoiIssues...)
+		}
 	}
 
 	// Apply severity filter
