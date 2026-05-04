@@ -83,15 +83,16 @@ func (a *SSEAdapter) Start(ctx context.Context) error {
 	a.mu.Lock()
 	a.cancel() // Cancel old context
 	a.ctx, a.cancel = context.WithCancel(ctx)
+	curCtx := a.ctx
 	a.mu.Unlock()
 
 	// Attempt initial connection
-	if err := a.connect(); err != nil {
+	if err := a.connect(curCtx); err != nil {
 		// Initial connection failed - start reconnect loop in background
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
-			a.scheduleReconnect()
+			a.scheduleReconnect(curCtx)
 		}()
 		return fmt.Errorf("initial connection failed (will retry): %w", err)
 	}
@@ -161,8 +162,11 @@ func (a *SSEAdapter) Name() string {
 	return "opencode-sse"
 }
 
-// connect establishes the SSE connection to the OpenCode server
-func (a *SSEAdapter) connect() error {
+// connect establishes the SSE connection to the OpenCode server.
+// ctx is the lifecycle context captured at Start() time and used for both the
+// HTTP request and the goroutines spawned here, so that subsequent Start/Stop
+// cycles cannot rewrite the context out from under in-flight goroutines.
+func (a *SSEAdapter) connect(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -172,7 +176,7 @@ func (a *SSEAdapter) connect() error {
 	}
 
 	// Create HTTP request with context
-	req, err := http.NewRequestWithContext(a.ctx, http.MethodGet, a.serverURL+"/event", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.serverURL+"/event", nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -208,21 +212,21 @@ func (a *SSEAdapter) connect() error {
 
 	// Start read pump in goroutine
 	a.wg.Add(1)
-	go a.readEvents(resp.Body)
+	go a.readEvents(ctx, resp.Body)
 
 	return nil
 }
 
 // readEvents reads and processes SSE events from the connection
-func (a *SSEAdapter) readEvents(body io.ReadCloser) {
+func (a *SSEAdapter) readEvents(ctx context.Context, body io.ReadCloser) {
 	defer func() {
 		_ = body.Close()
 		a.connected.Store(false)
 		a.wg.Done()
 
 		// Schedule reconnect if context not cancelled
-		if a.ctx.Err() == nil {
-			a.scheduleReconnect()
+		if ctx.Err() == nil {
+			a.scheduleReconnect(ctx)
 		}
 	}()
 
@@ -232,7 +236,7 @@ func (a *SSEAdapter) readEvents(body io.ReadCloser) {
 	for scanner.Scan() {
 		// Check context cancellation
 		select {
-		case <-a.ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 		}
@@ -259,7 +263,7 @@ func (a *SSEAdapter) readEvents(body io.ReadCloser) {
 	// Check for scanner error
 	if err := scanner.Err(); err != nil {
 		// Only log if not context cancelled
-		if a.ctx.Err() == nil {
+		if ctx.Err() == nil {
 			// Scanner error (connection issue)
 			a.failureCount.Add(1)
 		}
@@ -267,19 +271,19 @@ func (a *SSEAdapter) readEvents(body io.ReadCloser) {
 }
 
 // scheduleReconnect attempts to reconnect with exponential backoff
-func (a *SSEAdapter) scheduleReconnect() {
+func (a *SSEAdapter) scheduleReconnect(ctx context.Context) {
 	delay := a.config.Reconnect.InitialDelay
 	attempts := 0
 
 	for {
 		select {
-		case <-a.ctx.Done():
+		case <-ctx.Done():
 			return // Shutdown requested
 		case <-time.After(delay):
 			attempts++
 
 			// Attempt reconnection
-			err := a.connect()
+			err := a.connect(ctx)
 			if err == nil {
 				// Successfully reconnected
 				return

@@ -12,7 +12,7 @@ import (
 func initTestRepo(t *testing.T, tmpDir string) {
 	t.Helper()
 
-	if err := exec.Command("git", "init", tmpDir).Run(); err != nil {
+	if err := exec.Command("git", "init", "-b", "main", tmpDir).Run(); err != nil {
 		t.Fatalf("Failed to init git repo: %v", err)
 	}
 	if err := exec.Command("git", "-C", tmpDir, "config", "user.name", "Test").Run(); err != nil {

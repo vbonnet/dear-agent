@@ -321,7 +321,7 @@ func TestIntegration_WorktreeConflictPrevention(t *testing.T) {
 
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
-	runGit(t, dir, "init")
+	runGit(t, dir, "init", "-b", "main")
 	runGit(t, dir, "config", "user.name", "Test User")
 	runGit(t, dir, "config", "user.email", "test@example.com")
 
