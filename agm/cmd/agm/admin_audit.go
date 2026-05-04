@@ -29,6 +29,7 @@ Audit checks include:
   • Missing tmux sessions (manifest exists but tmux session doesn't)
   • Stale sessions (>30 days inactive, based on manifest.updated_at)
   • Duplicate UUIDs (multiple manifests claiming same Claude conversation UUID)
+  • Chezmoi drift (managed dotfiles edited outside chezmoi; system-level)
 
 Output is grouped by severity (Critical/Warning/Info) with actionable recommendations.
 
@@ -271,6 +272,7 @@ func displayRecommendationsSummary(issues []*audit.AuditIssue) {
 	missingTmuxCount := 0
 	staleCount := 0
 	duplicateCount := 0
+	chezmoiCount := 0
 
 	for _, issue := range issues {
 		switch issue.Type {
@@ -284,6 +286,8 @@ func displayRecommendationsSummary(issues []*audit.AuditIssue) {
 			staleCount++
 		case audit.IssueDuplicateUUID:
 			duplicateCount++
+		case audit.IssueChezmoiDrift:
+			chezmoiCount++
 		}
 	}
 
@@ -302,5 +306,8 @@ func displayRecommendationsSummary(issues []*audit.AuditIssue) {
 	}
 	if staleCount > 0 {
 		fmt.Printf("  • Archive %d stale session(s) to clean up inactive sessions\n", staleCount)
+	}
+	if chezmoiCount > 0 {
+		fmt.Printf("  • Reconcile %d drifted dotfile(s) with `chezmoi re-add` (or edit the source for templates)\n", chezmoiCount)
 	}
 }
