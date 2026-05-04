@@ -1,0 +1,106 @@
+# Multi-repo DEAR audit workflow.
+#
+# `workflow-audit run` operates against a single repo (the cwd it is
+# launched in). This template fans out a configured cadence over several
+# repos in one run so cron / launchd only needs to launch one job per
+# cadence regardless of how many repos are tracked. See
+# configs/workflows/audit-daily.yaml for the single-repo equivalent.
+#
+# Failure model: each repo runs inside a single bash node that loops
+# internally with `set +e`. The workflow exits non-zero only when every
+# repo's audit failed; a P0/P1 finding in one repo doesn't suppress the
+# others' results. Because workflow-audit's exit code reflects severity
+# policy (non-zero on a P0/P1 finding) the per-repo result line shows
+# both whether the audit *ran* and whether it found high-severity issues.
+#
+# Scheduling: stateless; schedule externally. Typical setup:
+#
+#   # cron — daily at 04:00, weekly on Sunday at 04:30, monthly on the 1st
+#   0 4 * * *    workflow-run -file configs/workflows/audit-multi.yaml \
+#                  -input cadence=daily   -trigger cron
+#   30 4 * * 0   workflow-run -file configs/workflows/audit-multi.yaml \
+#                  -input cadence=weekly  -trigger cron
+#   0 5 1 * *    workflow-run -file configs/workflows/audit-multi.yaml \
+#                  -input cadence=monthly -trigger cron
+#
+# Inputs:
+#   db          — sqlite database for findings. One DB shared across
+#                 repos; rows are scoped by repo path internally.
+#   repos       — comma-separated list of repo directory names under
+#                 repos_root.
+#   repos_root  — directory holding the repo checkouts.
+#   cadence     — daily | weekly | monthly | on-demand.
+name: audit-multi
+version: "1"
+description: |
+  Run a single DEAR audit cadence against a configured set of repos in
+  one workflow invocation. Designed to be scheduled externally; the
+  workflow engine provides audit logging and graceful partial-failure
+  semantics.
+inputs:
+  - name: db
+    description: SQLite database path for audit findings
+    default: "$HOME/.local/share/dear-agent/audit.db"
+  - name: repos
+    description: comma-separated list of repo directory names under repos_root
+    default: "dear-agent,brain-v2"
+  - name: repos_root
+    description: parent directory holding the repo checkouts
+    default: "$HOME/src"
+  - name: cadence
+    description: audit cadence — daily | weekly | monthly | on-demand
+    default: "daily"
+
+nodes:
+  - id: audit
+    kind: bash
+    name: run DEAR audit across configured repos
+    bash:
+      cmd: |
+        set -uo pipefail
+        db_path="$(eval echo "$INPUT_db")"
+        root="$(eval echo "$INPUT_repos_root")"
+        mkdir -p "$(dirname "$db_path")"
+
+        case "$INPUT_cadence" in
+          daily|weekly|monthly|on-demand) ;;
+          *)
+            echo "invalid cadence: $INPUT_cadence (want daily|weekly|monthly|on-demand)"
+            exit 2
+            ;;
+        esac
+
+        ok=0; failed=0; skipped=0
+        IFS=',' read -ra repo_list <<< "$INPUT_repos"
+        for raw in "${repo_list[@]}"; do
+          repo="$(echo "$raw" | tr -d '[:space:]')"
+          [ -z "$repo" ] && continue
+          path="$root/$repo"
+          if [ ! -d "$path" ]; then
+            echo "[$repo] SKIP: $path not found"
+            skipped=$((skipped + 1))
+            continue
+          fi
+          echo "[$repo] running $INPUT_cadence audit (db=$db_path)"
+          # workflow-audit infers the repo from the cwd. cd into the
+          # repo dir for each invocation so the same DB collects
+          # findings from every tracked repo.
+          if (cd "$path" && workflow-audit run \
+                --cadence "$INPUT_cadence" \
+                --db "$db_path"); then
+            echo "[$repo] OK"
+            ok=$((ok + 1))
+          else
+            rc=$?
+            echo "[$repo] FAILED rc=$rc"
+            failed=$((failed + 1))
+          fi
+        done
+
+        echo "audit-multi summary: cadence=$INPUT_cadence ok=$ok failed=$failed skipped=$skipped"
+        # Same partial-failure rule as signals-collect: succeed if any
+        # repo's audit ran cleanly; fail only when every repo failed.
+        if [ "$ok" -eq 0 ] && [ "$failed" -gt 0 ]; then
+          exit 1
+        fi
+        exit 0

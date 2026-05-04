@@ -1,0 +1,110 @@
+# Periodic signal collection workflow.
+#
+# Wraps `dear-agent-signals collect` for one or more repos so the run is
+# observable through the workflow engine (audit log, retries, run
+# history) instead of executing the CLI directly from cron. This is
+# "dogfooding" — operators schedule the workflow, the workflow drives
+# the underlying CLI per repo.
+#
+# Failure model: every repo is collected inside a single bash node that
+# loops internally with `set +e`, capturing each repo's exit code into
+# its own log line. The workflow exits 0 if at least one repo succeeded
+# (partial collection is intentional) and non-zero only when every repo
+# failed, so cron-style alerting still fires when collection is fully
+# broken.
+#
+# Why a single node instead of `spawn` per repo:
+#   spawn writes only its summary header into Outputs.<spawn-id>; the
+#   children's stdout lives in Outputs.<spawn-id>/<child-id> keyed by
+#   names that are not knowable at template-authoring time, so a
+#   downstream summary node can't compute aggregate status. The single
+#   node keeps per-repo log lines visible in `workflow logs` while
+#   making the partial-failure decision deterministic.
+#
+# Scheduling: this template is stateless. Schedule it externally:
+#
+#   # cron — daily at 03:00 local time
+#   0 3 * * *  workflow-run -file configs/workflows/signals-collect.yaml -trigger cron
+#
+#   # systemd timer / launchd: same idea, your platform's preferred
+#   # scheduler. The -trigger flag is recorded on the runs row so
+#   # ad-hoc invocations can be distinguished from scheduled ones.
+#
+# Inputs:
+#   db            — sqlite database path. Default targets the user's
+#                   XDG data dir so the same DB is shared across
+#                   scheduled runs and ad-hoc CLI use.
+#   repos         — comma-separated list of repo directory names under
+#                   repos_root.
+#   repos_root    — directory holding the repo checkouts (each entry in
+#                   `repos` is appended as a subdirectory).
+#   lookback_days — git activity window forwarded to --lookback-days.
+name: signals-collect
+version: "1"
+description: |
+  Run `dear-agent-signals collect` against a configured set of repos
+  and persist the results to a single shared SQLite database. Designed
+  to be scheduled externally (cron / launchd / systemd timer); the
+  workflow engine provides audit logging and graceful partial-failure
+  semantics.
+inputs:
+  - name: db
+    description: SQLite database path for collected signals
+    default: "$HOME/.local/share/dear-agent/signals.db"
+  - name: repos
+    description: comma-separated list of repo directory names under repos_root
+    default: "dear-agent,brain-v2"
+  - name: repos_root
+    description: parent directory holding the repo checkouts
+    default: "$HOME/src"
+  - name: lookback_days
+    description: git activity lookback window passed to --lookback-days
+    default: "7"
+
+nodes:
+  - id: collect
+    kind: bash
+    name: collect signals across configured repos
+    bash:
+      # All inputs are exposed as $INPUT_* env vars by the runner; never
+      # interpolate them via {{ .Inputs }} into the shell command (that
+      # path is shell-injectable per pkg/workflow/runner.go).
+      cmd: |
+        set -uo pipefail
+        db_path="$(eval echo "$INPUT_db")"
+        root="$(eval echo "$INPUT_repos_root")"
+        mkdir -p "$(dirname "$db_path")"
+
+        ok=0; failed=0; skipped=0
+        IFS=',' read -ra repo_list <<< "$INPUT_repos"
+        for raw in "${repo_list[@]}"; do
+          repo="$(echo "$raw" | tr -d '[:space:]')"
+          [ -z "$repo" ] && continue
+          path="$root/$repo"
+          if [ ! -d "$path" ]; then
+            echo "[$repo] SKIP: $path not found"
+            skipped=$((skipped + 1))
+            continue
+          fi
+          echo "[$repo] starting collection (db=$db_path lookback=$INPUT_lookback_days)"
+          if dear-agent-signals collect \
+              --db "$db_path" \
+              --repo "$path" \
+              --lookback-days "$INPUT_lookback_days"; then
+            echo "[$repo] OK"
+            ok=$((ok + 1))
+          else
+            rc=$?
+            echo "[$repo] FAILED rc=$rc"
+            failed=$((failed + 1))
+          fi
+        done
+
+        echo "signals collect summary: ok=$ok failed=$failed skipped=$skipped"
+        # Exit non-zero only when every repo failed. Partial success
+        # (some repos OK, some failed) returns 0 by design so a single
+        # broken repo doesn't suppress the others' fresh signals.
+        if [ "$ok" -eq 0 ] && [ "$failed" -gt 0 ]; then
+          exit 1
+        fi
+        exit 0
