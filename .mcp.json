@@ -5,6 +5,12 @@
       "command": "gopls",
       "args": ["mcp"],
       "env": {}
+    },
+    "dear-agent-recommendations": {
+      "type": "stdio",
+      "command": "recommendation-mcp",
+      "args": ["--db", ".dear-agent/signals.db"],
+      "env": {}
     }
   }
 }
