@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 type TestWebSocketServer struct {
 	server   *httptest.Server
 	upgrader websocket.Upgrader
+	mu       sync.Mutex
 	clients  []*websocket.Conn
 	events   chan *eventbus.Event
 	done     chan struct{}
@@ -48,7 +50,9 @@ func (tws *TestWebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	tws.mu.Lock()
 	tws.clients = append(tws.clients, conn)
+	tws.mu.Unlock()
 
 	// Read messages from client
 	go func() {
@@ -70,7 +74,11 @@ func (tws *TestWebSocketServer) BroadcastEvent(event *eventbus.Event) error {
 		return err
 	}
 
-	for _, conn := range tws.clients {
+	tws.mu.Lock()
+	clients := append([]*websocket.Conn(nil), tws.clients...)
+	tws.mu.Unlock()
+
+	for _, conn := range clients {
 		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 			return err
 		}
@@ -82,7 +90,11 @@ func (tws *TestWebSocketServer) BroadcastEvent(event *eventbus.Event) error {
 // Close shuts down the test server
 func (tws *TestWebSocketServer) Close() {
 	close(tws.done)
-	for _, conn := range tws.clients {
+	tws.mu.Lock()
+	clients := tws.clients
+	tws.clients = nil
+	tws.mu.Unlock()
+	for _, conn := range clients {
 		conn.Close()
 	}
 	tws.server.Close()
@@ -310,10 +322,12 @@ func TestReconnect(t *testing.T) {
 	assert.True(t, client.IsConnected())
 
 	// Close server connection to trigger reconnect
+	server.mu.Lock()
 	for _, conn := range server.clients {
 		conn.Close()
 	}
 	server.clients = make([]*websocket.Conn, 0)
+	server.mu.Unlock()
 
 	// Wait for reconnect (should happen within a few seconds)
 	time.Sleep(3 * time.Second)
@@ -469,16 +483,21 @@ func TestResubscribeAfterReconnect(t *testing.T) {
 	require.NoError(t, err)
 
 	// Close server connection to trigger reconnect
+	server.mu.Lock()
 	for _, conn := range server.clients {
 		conn.Close()
 	}
 	server.clients = make([]*websocket.Conn, 0)
+	server.mu.Unlock()
 
 	// Wait for reconnect
 	time.Sleep(3 * time.Second)
 
 	// Client should still have the session ID
-	assert.Equal(t, "test-session-789", client.sessionID)
+	client.mu.Lock()
+	gotSessionID := client.sessionID
+	client.mu.Unlock()
+	assert.Equal(t, "test-session-789", gotSessionID)
 
 	// Should be reconnected
 	assert.True(t, client.IsConnected())

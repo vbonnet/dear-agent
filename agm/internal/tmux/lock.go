@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/vbonnet/dear-agent/agm/internal/lock"
 )
@@ -14,7 +15,10 @@ import (
 //
 // Lock scope: Only tmux server mutations (NewSession settings, SendCommand, InitSequence)
 // NOT locked: Read operations (HasSession, ListSessions) and AttachSession (can block indefinitely)
-var tmuxServerLock *lock.FileLock
+var (
+	tmuxServerLock   *lock.FileLock
+	tmuxServerLockMu sync.Mutex
+)
 
 // getStateDir returns the AGM state directory.
 // Uses AGM_STATE_DIR environment variable if set (for test isolation),
@@ -36,6 +40,9 @@ func getStateDir() string {
 //
 // Returns error if lock is already held by another process.
 func AcquireTmuxLock() error {
+	tmuxServerLockMu.Lock()
+	defer tmuxServerLockMu.Unlock()
+
 	if tmuxServerLock != nil {
 		// Already locked by this process - this is a bug
 		return fmt.Errorf("tmux lock already held by this process (double lock)")
@@ -44,23 +51,25 @@ func AcquireTmuxLock() error {
 	stateDir := getStateDir()
 	lockPath := filepath.Join(stateDir, "tmux-server.lock")
 
-	var err error
-	tmuxServerLock, err = lock.New(lockPath)
+	fl, err := lock.New(lockPath)
 	if err != nil {
 		return fmt.Errorf("failed to create tmux lock: %w", err)
 	}
 
-	if err := tmuxServerLock.TryLock(); err != nil {
-		tmuxServerLock = nil // Reset on failure
+	if err := fl.TryLock(); err != nil {
 		return err
 	}
 
+	tmuxServerLock = fl
 	return nil
 }
 
 // ReleaseTmuxLock releases the tmux server lock.
 // Safe to call multiple times (subsequent calls are no-ops).
 func ReleaseTmuxLock() error {
+	tmuxServerLockMu.Lock()
+	defer tmuxServerLockMu.Unlock()
+
 	if tmuxServerLock == nil {
 		return nil
 	}

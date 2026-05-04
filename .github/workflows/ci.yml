@@ -26,6 +26,10 @@ jobs:
           cache: true
           cache-dependency-path: "go.sum"
 
+      - name: Install tmux (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install tmux
+
       - name: Download dependencies
         run: go mod download
 

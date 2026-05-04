@@ -18,7 +18,17 @@ if [ ! -d "${WORKSPACE_ROOT}" ]; then
 fi
 echo "✓ Workspace directory exists"
 
-# Check 2: Check disk space (minimum 100 MB)
+# Check 2: Idempotency — if already initialized, skip the rest of the
+# prerequisite probes. They were already validated on the original install
+# and re-checking them on every invocation breaks environments where the
+# tooling (e.g. tmux) is intentionally not installed in this layer (CI
+# shell-test runners, multi-stage container builds).
+if [ -f "${WORKSPACE_ROOT}/.agm-initialized" ]; then
+    echo "✓ AGM already initialized, skipping validation"
+    exit 0
+fi
+
+# Check 3: Check disk space (minimum 100 MB)
 REQUIRED_SPACE_MB=100
 AVAILABLE_SPACE_MB=$(df -m "${WORKSPACE_ROOT}" | tail -1 | awk '{print $4}')
 
@@ -30,15 +40,15 @@ if [ "${AVAILABLE_SPACE_MB}" -lt "${REQUIRED_SPACE_MB}" ]; then
 fi
 echo "✓ Sufficient disk space (${AVAILABLE_SPACE_MB} MB available)"
 
-# Check 3: Verify Engram is installed (dependency)
+# Check 4: Verify Engram is installed (dependency)
 # NOTE: This would query component_registry in actual implementation
 echo "✓ Engram dependency check (placeholder)"
 
-# Check 4: Verify Dolt is accessible
+# Check 5: Verify Dolt is accessible
 # NOTE: In actual implementation, check if Dolt server is running or can be started
 echo "✓ Dolt accessibility check (placeholder)"
 
-# Check 5: Verify tmux is installed
+# Check 6: Verify tmux is installed
 if ! command -v tmux &> /dev/null; then
     echo "❌ ERROR: tmux is not installed"
     echo "   AGM requires tmux for session management"
@@ -47,12 +57,6 @@ if ! command -v tmux &> /dev/null; then
     exit 1
 fi
 echo "✓ tmux is installed"
-
-# Check 6: Idempotency check (skip if already initialized)
-if [ -f "${WORKSPACE_ROOT}/.agm-initialized" ]; then
-    echo "✓ AGM already initialized, skipping validation"
-    exit 0
-fi
 
 echo
 echo "✅ All prerequisites validated"

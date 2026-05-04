@@ -103,7 +103,7 @@ func TestPruneWorktrees_RealGitRepo(t *testing.T) {
 
 	// Create a real git repo
 	repoDir := t.TempDir()
-	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "init", "-b", "main")
 	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
 
 	// pruneWorktrees should succeed on a clean repo
@@ -125,7 +125,7 @@ func TestForceDeleteBranch_MergedBranch(t *testing.T) {
 	}
 
 	repoDir := t.TempDir()
-	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "init", "-b", "main")
 	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
 
 	// Create and merge a branch
@@ -145,7 +145,7 @@ func TestForceDeleteBranch_UnmergedBranch(t *testing.T) {
 	}
 
 	repoDir := t.TempDir()
-	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "init", "-b", "main")
 	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
 
 	// Create a branch with work NOT merged to main
@@ -172,7 +172,7 @@ func TestForceDeleteBranch_NonexistentBranch(t *testing.T) {
 	}
 
 	repoDir := t.TempDir()
-	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "init", "-b", "main")
 	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
 
 	if err := forceDeleteBranch(repoDir, "does-not-exist"); err == nil {
@@ -186,7 +186,7 @@ func TestCleanupAfterArchive_SandboxBranchDeleted(t *testing.T) {
 	}
 
 	repoDir := t.TempDir()
-	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "init", "-b", "main")
 	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
 
 	// Create a sandbox branch agm/<sessionID>
@@ -243,7 +243,7 @@ func TestRemoveWorktreeCmd_RealWorktree(t *testing.T) {
 	}
 
 	repoDir := t.TempDir()
-	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "init", "-b", "main")
 	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
 
 	// Create a worktree
@@ -314,7 +314,7 @@ func TestCleanupAfterArchive_WithRealGitWorktree(t *testing.T) {
 	}
 
 	repoDir := t.TempDir()
-	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "init", "-b", "main")
 	runGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
 
 	// Create a worktree with unmerged work (the common case for worker sessions)
