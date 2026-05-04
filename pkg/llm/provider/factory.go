@@ -94,12 +94,31 @@ func (f *Factory) NewProvider(providerFamily, model string) (Provider, error) {
 	case "openrouter":
 		return f.newOpenRouterProvider(authMethod, model)
 
+	case "openai":
+		return f.newOpenAIProvider(authMethod, model)
+
 	case "ollama", "local":
 		return f.newOllamaProvider(model)
 
 	default:
 		return nil, fmt.Errorf("unsupported provider family: %s", providerFamily)
 	}
+}
+
+// newOpenAIProvider creates a native OpenAI provider. The auth hierarchy
+// for OpenAI is API-key only — Vertex AI and ADC don't apply.
+func (f *Factory) newOpenAIProvider(authMethod auth.AuthMethod, model string) (Provider, error) {
+	switch authMethod {
+	case auth.AuthAPIKey:
+		return NewOpenAIProvider(OpenAIConfig{Model: model})
+	case auth.AuthVertexAI:
+		return nil, fmt.Errorf("openai does not support Vertex AI authentication")
+	case auth.AuthLocal:
+		return nil, fmt.Errorf("openai does not support local authentication")
+	case auth.AuthNone:
+		return nil, fmt.Errorf("no authentication available for OpenAI (need OPENAI_API_KEY)")
+	}
+	return nil, fmt.Errorf("unsupported auth method for OpenAI")
 }
 
 // newAnthropicProvider creates Anthropic/Claude provider based on auth hierarchy.

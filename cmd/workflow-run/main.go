@@ -22,6 +22,7 @@ import (
 	"syscall"
 
 	llmprovider "github.com/vbonnet/dear-agent/pkg/llm/provider"
+	"github.com/vbonnet/dear-agent/pkg/llm/router"
 	"github.com/vbonnet/dear-agent/pkg/workflow"
 )
 
@@ -33,11 +34,12 @@ func (m *multiString) Set(v string) error { *m = append(*m, v); return nil }
 
 func main() {
 	var (
-		file     = flag.String("file", "", "path to workflow YAML (required)")
-		dryRun   = flag.Bool("dry-run", false, "validate the workflow and exit without executing")
-		verbose  = flag.Bool("verbose", false, "debug logging")
-		cwd      = flag.String("cwd", "", "default working directory for bash nodes")
-		inputs   multiString
+		file    = flag.String("file", "", "path to workflow YAML (required)")
+		dryRun  = flag.Bool("dry-run", false, "validate the workflow and exit without executing")
+		verbose = flag.Bool("verbose", false, "debug logging")
+		cwd     = flag.String("cwd", "", "default working directory for bash nodes")
+		roles   = flag.String("roles", "", "path to roles.yaml for the model router (defaults to config/roles.yaml if present)")
+		inputs  multiString
 	)
 	flag.Var(&inputs, "input", "workflow input as name=value (repeatable)")
 	flag.Parse()
@@ -81,12 +83,12 @@ func main() {
 	// primitives without an LLM).
 	var ai workflow.AIExecutor
 	if hasAINode(w.Nodes) {
-		prov, err := llmprovider.NewAnthropicProvider(llmprovider.AnthropicConfig{})
+		exec, err := buildExecutor(*roles, logger)
 		if err != nil {
-			logger.Error("init anthropic provider", "err", err)
+			logger.Error("init AI executor", "err", err)
 			os.Exit(1)
 		}
-		ai = &providerAI{inner: prov}
+		ai = exec
 	} else {
 		ai = nopAI{}
 	}
@@ -133,6 +135,45 @@ func hasAINode(nodes []workflow.Node) bool {
 		}
 	}
 	return false
+}
+
+// buildExecutor returns a workflow.AIExecutor wired to the role-based
+// model router when a roles config is available, falling back to the
+// historical direct-Anthropic path when no config is found.
+//
+// Resolution of the roles config path:
+//  1. The explicit -roles flag (if non-empty).
+//  2. The repo-relative default config/roles.yaml (if it exists in the
+//     current working directory).
+//  3. Direct-Anthropic fallback so existing single-provider setups keep
+//     working without forcing every operator to ship a roles.yaml.
+func buildExecutor(rolesPath string, logger *slog.Logger) (workflow.AIExecutor, error) {
+	if rolesPath == "" {
+		const defaultPath = "config/roles.yaml"
+		if _, err := os.Stat(defaultPath); err == nil {
+			rolesPath = defaultPath
+		}
+	}
+
+	if rolesPath != "" {
+		cfg, err := router.LoadConfig(rolesPath)
+		if err != nil {
+			return nil, fmt.Errorf("load roles config: %w", err)
+		}
+		r, err := router.New(router.Options{Config: cfg})
+		if err != nil {
+			return nil, fmt.Errorf("init router: %w", err)
+		}
+		logger.Info("AI executor: router-backed", "roles", rolesPath, "default_role", r.DefaultRole())
+		return router.NewAIExecutor(r), nil
+	}
+
+	logger.Info("AI executor: direct Anthropic (no roles.yaml found)")
+	prov, err := llmprovider.NewAnthropicProvider(llmprovider.AnthropicConfig{})
+	if err != nil {
+		return nil, fmt.Errorf("init anthropic provider: %w", err)
+	}
+	return &providerAI{inner: prov}, nil
 }
 
 // providerAI adapts pkg/llm/provider to workflow.AIExecutor.

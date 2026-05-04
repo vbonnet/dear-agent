@@ -148,6 +148,14 @@ func DetectAuthMethod(providerFamily string) AuthMethod {
 			return AuthAPIKey
 		}
 
+	case "openai":
+		// OpenAI uses an API key. Azure OpenAI uses a different env var
+		// surface and is handled by agm/internal/llm; this hierarchy
+		// covers direct OpenAI only.
+		if os.Getenv("OPENAI_API_KEY") != "" {
+			return AuthAPIKey
+		}
+
 	case "ollama", "local":
 		// Local providers require no authentication
 		return AuthLocal
