@@ -158,7 +158,7 @@ func (s *Status) formatPhaseList() string {
 		case PhaseStatusCompleted:
 			// Additional nil checks to prevent SIGSEGV
 			if phase.CompletedAt != nil && phase.StartedAt != nil {
-				duration := (*phase.CompletedAt).Sub(*phase.StartedAt)
+				duration := phase.CompletedAt.Sub(*phase.StartedAt)
 				suffix = fmt.Sprintf(" (%s)", formatDuration(duration))
 			}
 		}

@@ -24,6 +24,7 @@ func NewPhaseOrchestratorV2(st *status.StatusV2) *PhaseOrchestratorV2 {
 }
 
 // AdvancePhase attempts to advance from current phase to next phase.
+//
 // Deprecated: Use AdvancePhaseCtx for OTel span propagation.
 func (o *PhaseOrchestratorV2) AdvancePhase() (string, error) {
 	return o.AdvancePhaseCtx(context.Background())
@@ -70,6 +71,7 @@ func (o *PhaseOrchestratorV2) AdvancePhaseCtx(ctx context.Context) (string, erro
 }
 
 // RewindPhase rewinds to a previous phase with reason.
+//
 // Deprecated: Use RewindPhaseCtx for OTel span propagation.
 func (o *PhaseOrchestratorV2) RewindPhase(targetPhase string, reason string) error {
 	return o.RewindPhaseCtx(context.Background(), targetPhase, reason)

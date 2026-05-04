@@ -365,7 +365,8 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 	vertexModel := os.Getenv("VERTEX_MODEL")
 	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
 
-	if vertexProject != "" {
+	switch {
+	case vertexProject != "":
 		// Determine if using Claude via VertexAI or Gemini
 		isClaude := vertexModel != "" && strings.Contains(vertexModel, "claude")
 
@@ -394,10 +395,10 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 				args = append(args, "--model", vertexModel)
 			}
 		}
-	} else if anthropicKey != "" {
+	case anthropicKey != "":
 		// Use Anthropic (default provider, no extra flags needed)
 		args = append(args, "--provider", "anthropic")
-	} else {
+	default:
 		// No provider configured - will likely fail, but let multi-persona-review handle the error
 		return nil, fmt.Errorf("no AI provider configured: set VERTEX_PROJECT_ID (for VertexAI) or ANTHROPIC_API_KEY (for Anthropic)")
 	}
@@ -461,7 +462,8 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 	}
 
 	// Determine verdict based on findings
-	if criticalCount > 0 || highCount > 0 {
+	switch {
+	case criticalCount > 0 || highCount > 0:
 		verdict = "NO-GO"
 		if criticalCount > 0 {
 			severity = "CRITICAL"
@@ -470,11 +472,11 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 			severity = "HIGH"
 			confidence = "MEDIUM"
 		}
-	} else if len(personaResult.Findings) == 0 {
+	case len(personaResult.Findings) == 0:
 		verdict = "GO"
 		severity = "LOW"
 		confidence = "HIGH"
-	} else {
+	default:
 		verdict = "GO"
 		severity = "MEDIUM"
 		confidence = "MEDIUM"

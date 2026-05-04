@@ -277,13 +277,14 @@ func (m *Migrator) calculateRiskLevel(v1 *status.Status) string {
 	}
 
 	// Simple heuristic based on phase count
-	if completedPhases <= 2 {
+	switch {
+	case completedPhases <= 2:
 		return status.RiskLevelXS
-	} else if completedPhases <= 4 {
+	case completedPhases <= 4:
 		return status.RiskLevelS
-	} else if completedPhases <= 6 {
+	case completedPhases <= 6:
 		return status.RiskLevelM
-	} else if completedPhases <= 8 {
+	case completedPhases <= 8:
 		return status.RiskLevelL
 	}
 	return status.RiskLevelXL

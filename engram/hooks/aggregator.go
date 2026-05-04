@@ -83,11 +83,12 @@ func (a *Aggregator) calculateSummary(report *AggregatedReport) Summary {
 	summary.WarningHooks += len(report.Warnings)
 
 	// Determine exit code
-	if summary.FailedHooks > 0 {
+	switch {
+	case summary.FailedHooks > 0:
 		summary.ExitCode = 1 // Fail
-	} else if summary.WarningHooks > 0 {
+	case summary.WarningHooks > 0:
 		summary.ExitCode = 2 // Warnings
-	} else {
+	default:
 		summary.ExitCode = 0 // Pass
 	}
 

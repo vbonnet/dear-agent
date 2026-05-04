@@ -54,14 +54,15 @@ func stripQuotedContents(cmd string) string {
 			result = append(result, '"')
 			i++
 			for i < len(cmd) && cmd[i] != '"' {
-				if cmd[i] == '\\' && i+1 < len(cmd) {
+				switch {
+				case cmd[i] == '\\' && i+1 < len(cmd):
 					// Skip escaped character pairs
 					i += 2
-				} else if cmd[i] == '$' && i+1 < len(cmd) && cmd[i+1] == '(' {
+				case cmd[i] == '$' && i+1 < len(cmd) && cmd[i+1] == '(':
 					// Preserve $( — it's an executable substitution
 					result = append(result, '$', '(')
 					i += 2
-				} else {
+				default:
 					// Drop other content
 					i++
 				}

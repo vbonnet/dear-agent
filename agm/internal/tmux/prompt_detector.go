@@ -111,8 +111,9 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 }
 
 // WaitForClaudePromptControlMode is the old control-mode based implementation
-// DEPRECATED: Control mode only sees NEW output after attachment, missing historical output
-// Preserved for reference but should not be used for session startup detection
+//
+// Deprecated: Control mode only sees NEW output after attachment, missing historical output.
+// Preserved for reference but should not be used for session startup detection.
 func WaitForClaudePromptControlMode(sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting prompt detection for session: %s (control mode - DEPRECATED)", sessionName)
 

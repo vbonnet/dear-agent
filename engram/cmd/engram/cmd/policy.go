@@ -439,11 +439,12 @@ func outputStatusTable(status PolicyStatus) error {
 
 			// Color code by urgency
 			var daysStr string
-			if exc.DaysUntilSunset <= 7 {
+			switch {
+			case exc.DaysUntilSunset <= 7:
 				daysStr = red.Sprintf("%d", exc.DaysUntilSunset)
-			} else if exc.DaysUntilSunset <= 14 {
+			case exc.DaysUntilSunset <= 14:
 				daysStr = yellow.Sprintf("%d", exc.DaysUntilSunset)
-			} else {
+			default:
 				daysStr = fmt.Sprintf("%d", exc.DaysUntilSunset)
 			}
 
@@ -585,15 +586,16 @@ func outputExceptionsTable(exceptions []ExceptionDetail) error {
 
 		// Format days left
 		var daysStr string
-		if exc.Status == "expired" || exc.Status == "resolved" {
+		switch {
+		case exc.Status == "expired" || exc.Status == "resolved":
 			daysStr = "-"
-		} else if exc.DaysUntilSunset < 0 {
+		case exc.DaysUntilSunset < 0:
 			daysStr = color.RedString("EXPIRED")
-		} else if exc.DaysUntilSunset <= 7 {
+		case exc.DaysUntilSunset <= 7:
 			daysStr = color.RedString("%d", exc.DaysUntilSunset)
-		} else if exc.DaysUntilSunset <= 30 {
+		case exc.DaysUntilSunset <= 30:
 			daysStr = color.YellowString("%d", exc.DaysUntilSunset)
-		} else {
+		default:
 			daysStr = fmt.Sprintf("%d", exc.DaysUntilSunset)
 		}
 

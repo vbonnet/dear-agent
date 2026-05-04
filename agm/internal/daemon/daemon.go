@@ -279,11 +279,12 @@ func (d *Daemon) deliverPending() error {
 
 	for _, entry := range entries {
 		err := d.deliverMessage(*entry)
-		if err == nil {
+		switch {
+		case err == nil:
 			delivered++
-		} else if errors.Is(err, errDeferred) {
+		case errors.Is(err, errDeferred):
 			deferred++
-		} else {
+		default:
 			d.cfg.Logger.Warn("Failed to deliver message", "message_id", entry.MessageID, "error", err)
 			failed++
 		}
@@ -563,18 +564,20 @@ func GetHealthStatus(pidFile string, queue *messages.MessageQueue) (*HealthStatu
 	}
 
 	// Determine overall health level
-	if !status.Running {
+	switch {
+	case !status.Running:
 		status.HealthStatusLevel = "critical"
-	} else if status.QueueStats != nil {
+	case status.QueueStats != nil:
 		queuedCount := status.QueueStats["queued"]
-		if queuedCount > da.QueueDepthCritical {
+		switch {
+		case queuedCount > da.QueueDepthCritical:
 			status.HealthStatusLevel = "critical"
-		} else if queuedCount > da.QueueDepthWarning {
+		case queuedCount > da.QueueDepthWarning:
 			status.HealthStatusLevel = "degraded"
-		} else {
+		default:
 			status.HealthStatusLevel = "healthy"
 		}
-	} else {
+	default:
 		status.HealthStatusLevel = "healthy"
 	}
 

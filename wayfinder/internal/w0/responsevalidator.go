@@ -162,11 +162,12 @@ func CalculateClarityScore(response string, questionType QuestionType) float64 {
 		optimalMax = 50
 	}
 
-	if wc >= optimalMin && wc <= optimalMax {
+	switch {
+	case wc >= optimalMin && wc <= optimalMax:
 		score += 0.3
-	} else if wc < optimalMin {
+	case wc < optimalMin:
 		score += float64(wc) / float64(optimalMin) * 0.3
-	} else {
+	default:
 		score += 0.2
 	}
 

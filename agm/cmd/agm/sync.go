@@ -316,13 +316,11 @@ func syncActiveTmuxSessions(adapter *dolt.Adapter, sessionsDir string, historyEn
 				needsAssociationCount++
 			}
 			createdCount++
-		} else {
+		} else if m.Claude.UUID == "" {
 			// Manifest exists, check if UUID is empty
-			if m.Claude.UUID == "" {
-				fmt.Printf("  ℹ Session '%s' needs Claude UUID association\n", sessionName)
-				fmt.Printf("    → Run 'agm session associate %s' to link\n", sessionName)
-				needsAssociationCount++
-			}
+			fmt.Printf("  ℹ Session '%s' needs Claude UUID association\n", sessionName)
+			fmt.Printf("    → Run 'agm session associate %s' to link\n", sessionName)
+			needsAssociationCount++
 		}
 	}
 

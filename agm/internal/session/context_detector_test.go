@@ -511,10 +511,8 @@ func TestFindConversationLog(t *testing.T) {
 				if tt.wantPath != "" && !filepath.IsAbs(path) {
 					t.Errorf("expected absolute path, got: %s", path)
 				}
-			} else {
-				if err == nil {
-					t.Errorf("expected error, got path: %s", path)
-				}
+			} else if err == nil {
+				t.Errorf("expected error, got path: %s", path)
 			}
 		})
 	}

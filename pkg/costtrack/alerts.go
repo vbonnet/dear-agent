@@ -50,11 +50,12 @@ func (a *AlertManager) CheckAndAlert(project, model string, statuses []BudgetSta
 				status.Period, threshold, project, model, status.Spent, status.Limit, status.Percent,
 			)
 
-			if threshold >= 100 {
+			switch {
+			case threshold >= 100:
 				a.logger.Error(msg)
-			} else if threshold >= 90 {
+			case threshold >= 90:
 				a.logger.Warn(msg)
-			} else {
+			default:
 				a.logger.Info(msg)
 			}
 

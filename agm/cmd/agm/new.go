@@ -1338,7 +1338,8 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 	// Skip init sequence (rename + agm-assoc) in test environments because:
 	// 1. HOME is overridden, so Claude can't find ~/.claude/skills/agm/
 	// 2. Test sessions don't need UUID association
-	if harnessName == "claude-code" && os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "" {
+	switch {
+	case harnessName == "claude-code" && os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "":
 		// NOTE: No need to release global lock - using fine-grained tmux lock instead
 		// InitSequence will acquire/release tmux lock only during actual operations
 
@@ -1460,7 +1461,7 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 				}
 			}
 		}
-	} else if harnessName == "claude-code" {
+	case harnessName == "claude-code":
 		// Test environment: skip init sequence (rename/assoc) because HOME override
 		// prevents Claude from finding ~/.claude/skills/agm/ and test sessions
 		// don't need UUID association.
@@ -1468,14 +1469,15 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 		debug.Log("Skipping InitSequence: AGM_TEST_RUN_ID=%s AGM_TEST_ENV=%s",
 			os.Getenv("AGM_TEST_RUN_ID"), os.Getenv("AGM_TEST_ENV"))
 		ui.PrintSuccess("Test session ready (init sequence skipped)")
-	} else if harnessName == "gemini-cli" {
+	case harnessName == "gemini-cli":
 		// Gemini CLI: no rename/assoc init sequence, but wait for prompt readiness
 		// in non-test mode so that --prompt flag delivery works reliably.
 		debug.Phase("Gemini Post-Create")
-		if os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "" {
+		switch {
+		case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
 			debug.Log("Test environment: skipping Gemini prompt wait")
 			ui.PrintSuccess("Gemini test session ready (init sequence skipped)")
-		} else if !detached {
+		case !detached:
 			debug.Log("Waiting for Gemini prompt readiness before prompt delivery")
 			if err := tmux.WaitForPromptSimple(sessionName, 30*time.Second); err != nil {
 				debug.Log("Gemini prompt readiness wait failed (non-fatal): %v", err)
@@ -1505,17 +1507,18 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 					})
 				}
 			}
-		} else {
+		default:
 			debug.Log("Detached mode: skipping Gemini prompt wait and prompt delivery")
 		}
-	} else if harnessName == "opencode-cli" {
+	case harnessName == "opencode-cli":
 		// OpenCode CLI: no rename/assoc init sequence, but wait for prompt readiness
 		// in non-test mode so that --prompt flag delivery works reliably.
 		debug.Phase("OpenCode Post-Create")
-		if os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "" {
+		switch {
+		case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
 			debug.Log("Test environment: skipping OpenCode prompt wait")
 			ui.PrintSuccess("OpenCode test session ready (init sequence skipped)")
-		} else if !detached {
+		case !detached:
 			debug.Log("Waiting for OpenCode prompt readiness before prompt delivery")
 			if err := tmux.WaitForPromptSimple(sessionName, 30*time.Second); err != nil {
 				debug.Log("OpenCode prompt readiness wait failed (non-fatal): %v", err)
@@ -1545,10 +1548,10 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 					})
 				}
 			}
-		} else {
+		default:
 			debug.Log("Detached mode: skipping OpenCode prompt wait and prompt delivery")
 		}
-	} else {
+	default:
 		// Other CLI harnesses (codex-cli) - no initialization sequence needed
 		debug.Log("Skipping initialization sequence for harness: %s", harnessName)
 	}

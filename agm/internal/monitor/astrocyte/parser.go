@@ -106,11 +106,12 @@ func ParseDiagnosisFile(filePath string) (*Diagnosis, error) {
 		}
 
 		// Extract confidence level
-		if strings.Contains(line, "**HIGH") || strings.Contains(line, "HIGH (") {
+		switch {
+		case strings.Contains(line, "**HIGH") || strings.Contains(line, "HIGH ("):
 			diag.Confidence = "HIGH"
-		} else if strings.Contains(line, "**MEDIUM") || strings.Contains(line, "MEDIUM (") {
+		case strings.Contains(line, "**MEDIUM") || strings.Contains(line, "MEDIUM ("):
 			diag.Confidence = "MEDIUM"
-		} else if strings.Contains(line, "**LOW") || strings.Contains(line, "LOW (") {
+		case strings.Contains(line, "**LOW") || strings.Contains(line, "LOW ("):
 			diag.Confidence = "LOW"
 		}
 	}

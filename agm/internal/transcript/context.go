@@ -156,11 +156,12 @@ func wordWrap(text string, width int) string {
 	var currentLine string
 
 	for _, word := range words {
-		if len(currentLine) == 0 {
+		switch {
+		case len(currentLine) == 0:
 			currentLine = word
-		} else if len(currentLine)+1+len(word) <= width {
+		case len(currentLine)+1+len(word) <= width:
 			currentLine += " " + word
-		} else {
+		default:
 			lines = append(lines, currentLine)
 			currentLine = word
 		}

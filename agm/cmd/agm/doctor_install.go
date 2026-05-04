@@ -67,13 +67,14 @@ func runInstallChecks() bool {
 
 	for _, hookPath := range hookPaths {
 		info, err := os.Stat(hookPath)
-		if err != nil {
+		switch {
+		case err != nil:
 			ui.PrintWarning(fmt.Sprintf("Hook missing: %s", hookPath))
 			hookMissing = true
-		} else if info.Mode()&0111 == 0 {
+		case info.Mode()&0111 == 0:
 			ui.PrintWarning(fmt.Sprintf("Hook not executable: %s", hookPath))
 			hookMissing = true
-		} else {
+		default:
 			hookCount++
 		}
 	}

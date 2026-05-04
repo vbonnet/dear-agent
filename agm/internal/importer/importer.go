@@ -65,11 +65,9 @@ func ImportOrphanedSession(conversationUUID, sessionName, workspace string, adap
 			ProjectPath:  projectPath,
 			LastModified: time.Now(),
 		}
-	} else {
+	} else if metadata.ProjectPath != "" {
 		// Override project path if history has more accurate info
-		if metadata.ProjectPath != "" {
-			projectPath = metadata.ProjectPath
-		}
+		projectPath = metadata.ProjectPath
 	}
 
 	// 5. Generate new session ID
@@ -239,11 +237,9 @@ func ImportOrphanedSessionWithAdapter(conversationUUID, sessionName, workspace s
 			ProjectPath:  projectPath,
 			LastModified: time.Now(),
 		}
-	} else {
+	} else if metadata.ProjectPath != "" {
 		// Override project path if history has more accurate info
-		if metadata.ProjectPath != "" {
-			projectPath = metadata.ProjectPath
-		}
+		projectPath = metadata.ProjectPath
 	}
 
 	// 5. Generate new session ID

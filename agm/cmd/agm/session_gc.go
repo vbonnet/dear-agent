@@ -119,11 +119,12 @@ func runGC(cmd *cobra.Command, args []string) error {
 		summary += fmt.Sprintf(", errors %d", result.Errors)
 	}
 
-	if gcDryRun {
+	switch {
+	case gcDryRun:
 		ui.PrintSuccess(fmt.Sprintf("Dry run: %s", summary))
-	} else if result.Archived > 0 {
+	case result.Archived > 0:
 		ui.PrintSuccess(summary)
-	} else {
+	default:
 		fmt.Println(summary)
 	}
 

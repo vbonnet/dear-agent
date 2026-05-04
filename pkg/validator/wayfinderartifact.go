@@ -290,11 +290,12 @@ func validateCoreFields(fm map[string]interface{}) []WayfinderValidationError {
 
 	// Title validation
 	title, ok := fm["title"].(string)
-	if !ok {
+	switch {
+	case !ok:
 		errors = append(errors, WayfinderValidationError{Field: "title", Message: "missing or invalid (must be a string)"})
-	} else if len(title) < 10 {
+	case len(title) < 10:
 		errors = append(errors, WayfinderValidationError{Field: "title", Message: "must be at least 10 characters"})
-	} else if len(title) > 150 {
+	case len(title) > 150:
 		errors = append(errors, WayfinderValidationError{Field: "title", Message: "must be at most 150 characters"})
 	}
 
@@ -337,11 +338,12 @@ func validateCoreFields(fm map[string]interface{}) []WayfinderValidationError {
 		errors = append(errors, WayfinderValidationError{Field: "tags", Message: "missing"})
 	} else {
 		tags, ok := tagsRaw.([]interface{})
-		if !ok {
+		switch {
+		case !ok:
 			errors = append(errors, WayfinderValidationError{Field: "tags", Message: "must be an array"})
-		} else if len(tags) == 0 {
+		case len(tags) == 0:
 			errors = append(errors, WayfinderValidationError{Field: "tags", Message: "must have at least one tag"})
-		} else {
+		default:
 			// Validate each tag
 			seen := make(map[string]bool)
 			for i, tagRaw := range tags {

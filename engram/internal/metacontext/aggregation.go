@@ -135,11 +135,12 @@ func groupByType(signals []Signal) (languages, frameworks, tools []Signal) {
 			tools = append(tools, sig)
 		case "conversation":
 			// Conversation signals can be any type
-			if isLanguage(sig.Name) {
+			switch {
+			case isLanguage(sig.Name):
 				languages = append(languages, sig)
-			} else if isFramework(sig.Name) {
+			case isFramework(sig.Name):
 				frameworks = append(frameworks, sig)
-			} else {
+			default:
 				tools = append(tools, sig)
 			}
 		default:

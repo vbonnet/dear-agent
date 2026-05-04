@@ -260,16 +260,17 @@ func (t *Tracer) parseManifest(path string) (*SessionInfo, error) {
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "name:") {
+		switch {
+		case strings.HasPrefix(line, "name:"):
 			name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
 			name = strings.Trim(name, `"'`)
-		} else if strings.HasPrefix(line, "workspace:") {
+		case strings.HasPrefix(line, "workspace:"):
 			workspace = strings.TrimSpace(strings.TrimPrefix(line, "workspace:"))
 			workspace = strings.Trim(workspace, `"'`)
-		} else if strings.HasPrefix(line, "uuid:") {
+		case strings.HasPrefix(line, "uuid:"):
 			uuid = strings.TrimSpace(strings.TrimPrefix(line, "uuid:"))
 			uuid = strings.Trim(uuid, `"'`)
-		} else if strings.HasPrefix(line, "project:") {
+		case strings.HasPrefix(line, "project:"):
 			project = strings.TrimSpace(strings.TrimPrefix(line, "project:"))
 			project = strings.Trim(project, `"'`)
 		}

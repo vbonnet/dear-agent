@@ -334,7 +334,9 @@ func detectCyclicDependencies(tasks []Task) error {
 				}
 			}
 			if cycleStart >= 0 {
-				cycle := append(path[cycleStart:], taskID)
+				cycle := make([]string, 0, len(path)-cycleStart+1)
+				cycle = append(cycle, path[cycleStart:]...)
+				cycle = append(cycle, taskID)
 				return fmt.Errorf("cyclic dependency detected: %s", strings.Join(cycle, " -> "))
 			}
 		}

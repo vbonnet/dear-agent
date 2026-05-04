@@ -166,7 +166,7 @@ func (f *TOONFormatter) getArrayName(t reflect.Type) string {
 	// Simple pluralization (add 's')
 	// TODO: Handle irregular plurals (person→people, etc.)
 	if !strings.HasSuffix(name, "s") {
-		name = name + "s"
+		name += "s"
 	}
 
 	return name
@@ -221,7 +221,7 @@ func toLowerCamelCase(s string) string {
 	}
 	// Convert first character to lowercase
 	runes := []rune(s)
-	runes[0] = runes[0] + 32 // ASCII lowercase conversion
+	runes[0] += 32 // ASCII lowercase conversion
 	return string(runes)
 }
 

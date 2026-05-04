@@ -328,16 +328,17 @@ func runSendSingle(recipientSession string) (retErr error) {
 
 	// Get message content
 	var message string
-	if sessionSendPrompt != "" {
+	switch {
+	case sessionSendPrompt != "":
 		message = sessionSendPrompt
-	} else if sessionSendPromptFile != "" {
+	case sessionSendPromptFile != "":
 		// Read file content (max 10KB checked in SendPromptFileSafe)
 		fileContent, err := os.ReadFile(sessionSendPromptFile)
 		if err != nil {
 			return fmt.Errorf("failed to read prompt file: %w", err)
 		}
 		message = string(fileContent)
-	} else if sessionSendPromptStdin {
+	case sessionSendPromptStdin:
 		// Read from stdin
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -726,9 +727,10 @@ func runSendMulti(spec *send.RecipientSpec) (retErr error) {
 
 	// Get message content
 	var message string
-	if sessionSendPrompt != "" {
+	switch {
+	case sessionSendPrompt != "":
 		message = sessionSendPrompt
-	} else if sessionSendPromptFile != "" {
+	case sessionSendPromptFile != "":
 		// Validate file size before reading (max 10KB to prevent memory issues)
 		fileInfo, err := os.Stat(sessionSendPromptFile)
 		if err != nil {
@@ -745,7 +747,7 @@ func runSendMulti(spec *send.RecipientSpec) (retErr error) {
 			return fmt.Errorf("failed to read prompt file: %w", err)
 		}
 		message = string(fileContent)
-	} else if sessionSendPromptStdin {
+	case sessionSendPromptStdin:
 		// Read from stdin
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {

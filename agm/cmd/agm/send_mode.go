@@ -211,12 +211,13 @@ func printDryRunDetails(harness, targetMode, currentMode, sessionName string) {
 				presses, socketPath, normalizedName)
 		}
 	case "gemini-cli":
-		if targetMode == "plan" {
+		switch {
+		case targetMode == "plan":
 			fmt.Printf("  Would send: /plan slash command\n")
-		} else if targetMode == "auto" {
+		case targetMode == "auto":
 			fmt.Printf("  Would send: Ctrl+Y via tmux -S %s send-keys -t %s C-y\n",
 				socketPath, normalizedName)
-		} else if currentMode == "auto" {
+		case currentMode == "auto":
 			fmt.Printf("  Would send: Ctrl+Y via tmux -S %s send-keys -t %s C-y\n",
 				socketPath, normalizedName)
 		}

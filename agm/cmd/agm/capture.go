@@ -98,15 +98,16 @@ func runCapture(cmd *cobra.Command, args []string) error {
 
 	// Capture content based on mode
 	var lines []string
-	if captureHistory {
+	switch {
+	case captureHistory:
 		lines, err = tmux.CapturePaneHistoryLines(tmuxSessionName, 0)
-	} else if captureTail > 0 {
+	case captureTail > 0:
 		lines, err = tmux.CapturePaneLines(tmuxSessionName, captureTail)
 		// Get last N lines
 		if len(lines) > captureTail {
 			lines = lines[len(lines)-captureTail:]
 		}
-	} else {
+	default:
 		lines, err = tmux.CapturePaneLines(tmuxSessionName, captureLines)
 	}
 
@@ -124,11 +125,12 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output in requested format
-	if captureJSON {
+	switch {
+	case captureJSON:
 		return outputCaptureJSON(sessionName, lines)
-	} else if captureYAML {
+	case captureYAML:
 		return outputCaptureYAML(sessionName, lines)
-	} else {
+	default:
 		return outputCaptureText(lines)
 	}
 }

@@ -336,17 +336,18 @@ func parseLatestMessageHeader(content string) map[string]string {
 	for i := headerStart + 1; i < headerEnd && i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
 
-		if strings.HasPrefix(line, "**Agent ID**:") {
+		switch {
+		case strings.HasPrefix(line, "**Agent ID**:"):
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				header["agent_id"] = strings.TrimSpace(parts[1])
 			}
-		} else if strings.HasPrefix(line, "**Timestamp**:") {
+		case strings.HasPrefix(line, "**Timestamp**:"):
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				header["timestamp"] = strings.TrimSpace(parts[1])
 			}
-		} else if strings.HasPrefix(line, "**Status**:") {
+		case strings.HasPrefix(line, "**Status**:"):
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				header["status"] = strings.TrimSpace(parts[1])

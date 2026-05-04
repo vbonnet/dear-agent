@@ -27,11 +27,12 @@ func (c *Calculator) CalculateZone(percentage float64, modelID string) (Zone, er
 	// Convert percentage to decimal (0.0-1.0)
 	pct := percentage / 100.0
 
-	if pct >= model.CriticalThreshold {
+	switch {
+	case pct >= model.CriticalThreshold:
 		return ZoneCritical, nil
-	} else if pct >= model.DangerThreshold {
+	case pct >= model.DangerThreshold:
 		return ZoneDanger, nil
-	} else if pct >= model.WarningThreshold {
+	case pct >= model.WarningThreshold:
 		return ZoneWarning, nil
 	}
 

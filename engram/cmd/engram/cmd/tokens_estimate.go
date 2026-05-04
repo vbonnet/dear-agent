@@ -118,14 +118,15 @@ func runEstimateRetrieval(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot specify both --query and --auto flags")
 	}
 
-	if estimateQuery != "" {
+	switch {
+	case estimateQuery != "":
 		query = estimateQuery
-	} else if estimateAuto {
+	case estimateAuto:
 		query, err = contextdetect.DetectContext()
 		if err != nil {
 			return fmt.Errorf("auto-detection failed: %w", err)
 		}
-	} else {
+	default:
 		return fmt.Errorf("retrieval mode requires --query or --auto flag")
 	}
 

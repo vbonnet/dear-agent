@@ -237,10 +237,8 @@ func TestExpandHome(t *testing.T) {
 				if tt.input == "~" && result != homeDir {
 					t.Errorf("expandHome(~) = %s, expected %s", result, homeDir)
 				}
-			} else {
-				if result != tt.input {
-					t.Errorf("expandHome(%s) = %s, should not expand", tt.input, result)
-				}
+			} else if result != tt.input {
+				t.Errorf("expandHome(%s) = %s, should not expand", tt.input, result)
 			}
 		})
 	}

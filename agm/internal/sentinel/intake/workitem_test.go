@@ -106,7 +106,9 @@ func TestParseWorkItems_JSONL(t *testing.T) {
 
 	line1, _ := json.Marshal(item1)
 	line2, _ := json.Marshal(item2)
-	data := append(line1, '\n')
+	var data []byte
+	data = append(data, line1...)
+	data = append(data, '\n')
 	data = append(data, line2...)
 	data = append(data, '\n')
 

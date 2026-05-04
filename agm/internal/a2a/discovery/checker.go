@@ -170,22 +170,23 @@ func (c *Checker) ParseMessageHeader(content string) *MessageHeader {
 	for _, line := range headerBlock {
 		line = strings.TrimSpace(line)
 
-		if strings.HasPrefix(line, "**Agent ID**:") {
+		switch {
+		case strings.HasPrefix(line, "**Agent ID**:"):
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				message.AgentID = strings.TrimSpace(parts[1])
 			}
-		} else if strings.HasPrefix(line, "**Timestamp**:") {
+		case strings.HasPrefix(line, "**Timestamp**:"):
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				message.Timestamp = strings.TrimSpace(parts[1])
 			}
-		} else if strings.HasPrefix(line, "**Status**:") {
+		case strings.HasPrefix(line, "**Status**:"):
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				message.Status = strings.TrimSpace(parts[1])
 			}
-		} else if strings.HasPrefix(line, "**Message #**:") {
+		case strings.HasPrefix(line, "**Message #**:"):
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				message.MessageNumber = strings.TrimSpace(parts[1])

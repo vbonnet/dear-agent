@@ -285,11 +285,9 @@ func TestParseJSONLSync_MalformedJSON(t *testing.T) {
 	// The function returns an error but still provides all successfully parsed events
 	if err == nil {
 		t.Error("Expected error for malformed JSON, got nil")
-	} else {
+	} else if err.Error() == "" {
 		// Verify error message mentions the parsing errors
-		if err.Error() == "" {
-			t.Error("Error message should not be empty")
-		}
+		t.Error("Error message should not be empty")
 	}
 
 	// Should still return the valid events

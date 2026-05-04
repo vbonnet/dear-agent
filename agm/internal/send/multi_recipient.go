@@ -44,18 +44,20 @@ func ParseRecipients(args []string, toFlag string, workspaceFlag string, allFlag
 
 	// Priority: --to flag > args[0]
 	var rawInput string
-	if toFlag != "" {
+	switch {
+	case toFlag != "":
 		rawInput = toFlag
 		spec.Raw = toFlag
-	} else if len(args) > 0 {
+	case len(args) > 0:
 		rawInput = args[0]
 		spec.Raw = args[0]
-	} else {
+	default:
 		return nil, fmt.Errorf("no recipient specified (use recipient, --to, or --all flag)")
 	}
 
 	// Detect input type and parse
-	if strings.Contains(rawInput, ",") {
+	switch {
+	case strings.Contains(rawInput, ","):
 		// Comma-separated list: "session1,session2,session3"
 		spec.Type = "comma_list"
 		recipients := strings.Split(rawInput, ",")
@@ -65,11 +67,11 @@ func ParseRecipients(args []string, toFlag string, workspaceFlag string, allFlag
 				spec.Recipients = append(spec.Recipients, r)
 			}
 		}
-	} else if strings.Contains(rawInput, "*") || strings.Contains(rawInput, "?") {
+	case strings.Contains(rawInput, "*") || strings.Contains(rawInput, "?"):
 		// Glob pattern: "*research*", "test-*"
 		spec.Type = "glob"
 		spec.Recipients = []string{rawInput} // Store pattern, will resolve later
-	} else {
+	default:
 		// Direct single recipient: "session-name"
 		spec.Type = "direct"
 		spec.Recipients = []string{rawInput}

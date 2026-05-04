@@ -405,7 +405,11 @@ func FormatTable(manifests []*manifest.Manifest, tmux session.TmuxInterface) str
 	sections = append(sections, "")
 
 	// Merge attached and detached into single "ACTIVE" group
-	activeGroup := append(groups["attached"], groups["detached"]...)
+	attached := groups["attached"]
+	detached := groups["detached"]
+	activeGroup := make([]*manifest.Manifest, 0, len(attached)+len(detached))
+	activeGroup = append(activeGroup, attached...)
+	activeGroup = append(activeGroup, detached...)
 	combinedGroups := map[string][]*manifest.Manifest{
 		"active":   activeGroup,
 		"stopped":  groups["stopped"],

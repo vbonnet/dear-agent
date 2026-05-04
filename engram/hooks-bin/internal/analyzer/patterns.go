@@ -34,17 +34,18 @@ func AnalyzePatterns(classified []ClassifiedDenial) []PatternAnalysis {
 		}
 
 		for _, cd := range denials {
-			if cd.IsFalsePositive {
+			switch {
+			case cd.IsFalsePositive:
 				pa.FalsePositives++
 				if len(pa.ExampleFPs) < 5 {
 					pa.ExampleFPs = append(pa.ExampleFPs, cd)
 				}
-			} else if cd.Outcome != OutcomeUnknown && cd.Outcome != OutcomeTranscriptMissing {
+			case cd.Outcome != OutcomeUnknown && cd.Outcome != OutcomeTranscriptMissing:
 				pa.TruePositives++
 				if len(pa.ExampleTPs) < 3 {
 					pa.ExampleTPs = append(pa.ExampleTPs, cd)
 				}
-			} else {
+			default:
 				pa.Uncertain++
 			}
 		}

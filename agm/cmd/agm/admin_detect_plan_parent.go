@@ -121,11 +121,12 @@ func runDetectPlanParent(cmd *cobra.Command, args []string) error {
 
 		// Bonus for being closer in time (more recent = likely parent)
 		timeDiff := child.CreatedAt.Sub(session.CreatedAt)
-		if timeDiff < 10*time.Second {
+		switch {
+		case timeDiff < 10*time.Second:
 			score += 3 // Very close in time
-		} else if timeDiff < 30*time.Second {
+		case timeDiff < 30*time.Second:
 			score += 2 // Reasonably close
-		} else {
+		default:
 			score += 1 // Within window
 		}
 

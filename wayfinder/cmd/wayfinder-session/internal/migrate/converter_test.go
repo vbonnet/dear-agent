@@ -340,10 +340,8 @@ func TestConvertV1ToV2_ValidationChecks(t *testing.T) {
 				if tt.errString != "" && !contains(err.Error(), tt.errString) {
 					t.Errorf("expected error containing %q, got %q", tt.errString, err.Error())
 				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
 	}
