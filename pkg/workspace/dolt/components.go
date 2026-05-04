@@ -227,7 +227,7 @@ func validatePrefix(prefix string) error {
 
 	// Check characters (lowercase, alphanumeric, underscore only)
 	for _, c := range prefix {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
 			return fmt.Errorf("prefix must contain only lowercase letters, numbers, and underscores: %s", prefix)
 		}
 	}

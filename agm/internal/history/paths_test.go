@@ -96,7 +96,7 @@ func TestHashDirectory(t *testing.T) {
 
 			// Verify hash contains only hex characters
 			for _, c := range result {
-				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+				if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 					t.Errorf("HashDirectory(%q) = %q contains non-hex character %c", tt.input, result, c)
 				}
 			}

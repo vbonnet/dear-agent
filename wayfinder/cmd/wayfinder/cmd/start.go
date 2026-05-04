@@ -580,7 +580,7 @@ func runClassification(prompt string) (*status.Classification, string, error) {
 	}
 
 	// Execute classification
-	cmd := exec.Command(classifyPath, "--charter-text", prompt, "--format", "json")
+	cmd := exec.Command(classifyPath, "--charter-text", prompt, "--format", "json") //nolint:gosec // G702: classifyPath is internally constructed; prompt passed as separate arg, not shell-composed
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to run wayfinder-classify: %w", err)

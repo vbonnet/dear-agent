@@ -30,7 +30,7 @@ import (
 	// Import manager backends to trigger registration
 	_ "github.com/vbonnet/dear-agent/agm/internal/manager/tmuxbackend"
 	// Import workflows to trigger registration
-	_ "github.com/vbonnet/dear-agent/agm/internal/workflow/deep_research"
+	_ "github.com/vbonnet/dear-agent/agm/internal/workflow/deepresearch"
 )
 
 var (

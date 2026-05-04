@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"slices"
 	"syscall"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vbonnet/dear-agent/agm/internal/gateway"
@@ -136,8 +137,9 @@ func main() {
 
 		handler := newA2AHandler(logger)
 		httpServer = &http.Server{
-			Addr:    addr,
-			Handler: handler,
+			Addr:              addr,
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
 		}
 
 		ln, err := net.Listen("tcp", addr) //nolint:noctx // TODO(context): plumb ctx through this layer

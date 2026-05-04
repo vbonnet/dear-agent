@@ -405,7 +405,7 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 	}
 
 	// Call multi-persona-review CLI
-	cmd := exec.Command("multi-persona-review", args...)
+	cmd := exec.Command("multi-persona-review", args...) //nolint:gosec // G702: command name is hardcoded; args built from validated config
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

@@ -2,6 +2,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -238,7 +239,10 @@ func NotifySystemdWatchdog() error {
 		return nil
 	}
 
-	conn, err := net.Dial("unixgram", socketAddr)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "unixgram", socketAddr) //nolint:gosec // G704: socket address from systemd-set env var, not user-controlled
 	if err != nil {
 		return fmt.Errorf("failed to connect to notify socket: %w", err)
 	}
@@ -259,7 +263,10 @@ func NotifySystemdReady() error {
 		return nil
 	}
 
-	conn, err := net.Dial("unixgram", socketAddr)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "unixgram", socketAddr) //nolint:gosec // G704: socket address from systemd-set env var, not user-controlled
 	if err != nil {
 		return fmt.Errorf("failed to connect to notify socket: %w", err)
 	}

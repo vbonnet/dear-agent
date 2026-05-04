@@ -161,7 +161,7 @@ func hasReferencesElsewhere(cwd, funcName, defFile string, spec LanguageSpec) bo
 			if strings.HasPrefix(rel, "vendor/") || strings.HasPrefix(rel, "node_modules/") {
 				return filepath.SkipDir
 			}
-			data, err := os.ReadFile(path)
+			data, err := os.ReadFile(path) //nolint:gosec // G122: trusted local paths, symlink TOCTOU not in threat model
 			if err != nil {
 				return nil //nolint:nilerr // intentional: caller signals via separate bool/optional
 			}
