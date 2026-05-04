@@ -23,6 +23,7 @@ var (
 // ValidatorType represents the type of validator to run
 type ValidatorType string
 
+// Recognized ValidatorType values.
 const (
 	ValidatorEngram           ValidatorType = "engram"
 	ValidatorContent          ValidatorType = "content"

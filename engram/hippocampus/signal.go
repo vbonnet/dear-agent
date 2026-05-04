@@ -5,6 +5,7 @@ import "time"
 // SignalType categorizes cross-session memory signals.
 type SignalType string
 
+// SignalType values categorizing memory signals.
 const (
 	SignalCorrection SignalType = "correction"
 	SignalPreference SignalType = "preference"

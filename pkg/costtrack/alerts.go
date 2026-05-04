@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-// AlertThreshold defines when a budget alert fires.
+// AlertThresholds are the budget-utilization percentages at which alerts fire.
 var AlertThresholds = []float64{50, 75, 90, 100}
 
 // AlertManager tracks which alerts have been sent to avoid duplicates.

@@ -205,39 +205,38 @@ func outputHistoryLocation(cmd *cobra.Command, agent, uuid, workingDir string, s
 		writer := cliframe.NewWriter(cmd.OutOrStdout(), cmd.ErrOrStderr())
 		writer = writer.WithFormatter(formatter)
 		return writer.Output(location)
-	} else {
-		// Output in human-readable format
-		if location.SessionName != "" {
-			fmt.Printf("Session: %s\n", location.SessionName)
-		}
-		fmt.Printf("Harness: %s\n", location.Harness)
-		fmt.Printf("UUID:    %s\n\n", location.UUID)
+	}
+	// Output in human-readable format
+	if location.SessionName != "" {
+		fmt.Printf("Session: %s\n", location.SessionName)
+	}
+	fmt.Printf("Harness: %s\n", location.Harness)
+	fmt.Printf("UUID:    %s\n\n", location.UUID)
 
-		fmt.Println("Conversation History:")
-		for _, path := range location.Paths {
-			fmt.Printf("  %s\n", path)
-		}
+	fmt.Println("Conversation History:")
+	for _, path := range location.Paths {
+		fmt.Printf("  %s\n", path)
+	}
 
-		if location.Metadata != nil {
-			fmt.Println("\nMetadata:")
-			if workingDir, ok := location.Metadata["working_directory"]; ok {
-				fmt.Printf("  Working Directory: %s\n", workingDir)
-			}
-			if encoding, ok := location.Metadata["encoding_method"]; ok {
-				fmt.Printf("  Encoding Method:   %s\n", encoding)
-			}
-			if hashMethod, ok := location.Metadata["hash_method"]; ok {
-				fmt.Printf("  Hash Method:       %s\n", hashMethod)
-			}
+	if location.Metadata != nil {
+		fmt.Println("\nMetadata:")
+		if workingDir, ok := location.Metadata["working_directory"]; ok {
+			fmt.Printf("  Working Directory: %s\n", workingDir)
 		}
+		if encoding, ok := location.Metadata["encoding_method"]; ok {
+			fmt.Printf("  Encoding Method:   %s\n", encoding)
+		}
+		if hashMethod, ok := location.Metadata["hash_method"]; ok {
+			fmt.Printf("  Hash Method:       %s\n", hashMethod)
+		}
+	}
 
-		if historyVerifyPaths {
-			fmt.Println()
-			if location.Exists {
-				fmt.Println("✓ All files exist")
-			} else {
-				fmt.Println("✗ Some files do not exist")
-			}
+	if historyVerifyPaths {
+		fmt.Println()
+		if location.Exists {
+			fmt.Println("✓ All files exist")
+		} else {
+			fmt.Println("✗ Some files do not exist")
 		}
 	}
 

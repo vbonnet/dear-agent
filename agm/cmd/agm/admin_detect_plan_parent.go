@@ -116,7 +116,7 @@ func runDetectPlanParent(cmd *cobra.Command, args []string) error {
 		if detectSlug != "" {
 			// Slug typically appears in tmux session name or can be inferred
 			// For now, just add bonus if names are similar
-			score += 1
+			score++
 		}
 
 		// Bonus for being closer in time (more recent = likely parent)
@@ -127,7 +127,7 @@ func runDetectPlanParent(cmd *cobra.Command, args []string) error {
 		case timeDiff < 30*time.Second:
 			score += 2 // Reasonably close
 		default:
-			score += 1 // Within window
+			score++ // Within window
 		}
 
 		candidates = append(candidates, &struct {

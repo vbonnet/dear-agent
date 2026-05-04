@@ -5,6 +5,7 @@ import (
 	"fmt"
 )
 
+// Token budgeting constants for A2A messages.
 const (
 	MinTokenBudget = 800
 	MaxTokenBudget = 1000

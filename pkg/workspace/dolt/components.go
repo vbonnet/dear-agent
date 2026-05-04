@@ -278,7 +278,7 @@ AND status = 'installed'
 	return dependents, nil
 }
 
-// GetComponentsByPrefix returns the component that owns a given prefix.
+// GetComponentByPrefix returns the component that owns the given table prefix.
 func (a *WorkspaceAdapter) GetComponentByPrefix(ctx context.Context, prefix string) (*ComponentInfo, error) {
 	if a.db == nil {
 		return nil, fmt.Errorf("not connected to database")

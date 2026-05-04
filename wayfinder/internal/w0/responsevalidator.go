@@ -9,6 +9,7 @@ import (
 // TechnicalLevel indicates the technical sophistication of a response.
 type TechnicalLevel string
 
+// TechnicalLevel values for response validation.
 const (
 	TechLevelHigh TechnicalLevel = "high"
 	TechLevelLow  TechnicalLevel = "low"

@@ -18,6 +18,7 @@ var (
 	rewindLearnings string
 )
 
+// RewindCmd is the cobra command that rewinds the session to a previous phase.
 var RewindCmd = &cobra.Command{
 	Use:   "rewind-to <phase-name>",
 	Short: "Rewind to a previous phase in V2 sequence",

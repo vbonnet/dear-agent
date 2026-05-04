@@ -14,6 +14,7 @@ import (
 // HarnessType represents a supported coding agent harness
 type HarnessType string
 
+// Recognized HarnessType values.
 const (
 	HarnessCodex    HarnessType = "codex"
 	HarnessGemini   HarnessType = "gemini"

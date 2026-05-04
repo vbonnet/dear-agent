@@ -36,10 +36,12 @@ type GitOps interface {
 // RealGitOps implements GitOps using real git commands.
 type RealGitOps struct{}
 
+// RemoveWorktree removes a git worktree via the gitpkg helper.
 func (RealGitOps) RemoveWorktree(repoPath, worktreePath string, force bool) error {
 	return gitpkg.RemoveWorktree(repoPath, worktreePath, force)
 }
 
+// DeleteBranch deletes a git branch via the gitpkg helper.
 func (RealGitOps) DeleteBranch(repoPath, branchName string, force bool) error {
 	return gitpkg.DeleteBranch(repoPath, branchName, force)
 }

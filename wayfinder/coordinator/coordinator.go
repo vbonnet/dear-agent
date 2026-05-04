@@ -53,6 +53,7 @@ type ProjectExecution struct {
 // ExecutionStatus represents project execution states
 type ExecutionStatus string
 
+// Project execution status values.
 const (
 	StatusQueued    ExecutionStatus = "queued"
 	StatusRunning   ExecutionStatus = "running"

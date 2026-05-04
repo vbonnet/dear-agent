@@ -9,6 +9,7 @@ import (
 // PersonaType represents the different review personas
 type PersonaType string
 
+// Built-in persona type values.
 const (
 	PersonaSecurity        PersonaType = "security"
 	PersonaPerformance     PersonaType = "performance"
@@ -20,6 +21,7 @@ const (
 // Confidence represents the confidence level of a review result
 type Confidence string
 
+// Confidence level values.
 const (
 	ConfidenceHigh   Confidence = "high"
 	ConfidenceMedium Confidence = "medium"

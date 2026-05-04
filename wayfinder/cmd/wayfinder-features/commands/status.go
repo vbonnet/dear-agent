@@ -13,6 +13,7 @@ var (
 	statusFormat string
 )
 
+// StatusCmd is the cobra command that shows feature progress.
 var StatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show feature progress",

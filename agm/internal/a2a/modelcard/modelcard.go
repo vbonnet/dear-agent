@@ -13,6 +13,7 @@ import (
 // Status represents the runtime status of an agent.
 type Status string
 
+// Recognized agent runtime status values.
 const (
 	StatusActive  Status = "active"
 	StatusBusy    Status = "busy"

@@ -59,6 +59,7 @@ type Issue struct {
 // IssueType represents the category of resumability issue.
 type IssueType string
 
+// Recognized resumability issue type values.
 const (
 	IssueVersionMismatch   IssueType = "version_mismatch"
 	IssueEmptySessionEnv   IssueType = "empty_session_env"

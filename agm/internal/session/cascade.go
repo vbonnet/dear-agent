@@ -13,6 +13,7 @@ import (
 // CascadeAction represents the action to take on child sessions when parent terminates
 type CascadeAction string
 
+// CascadeAction values for child sessions when a parent terminates.
 const (
 	CascadeTerminate CascadeAction = "terminate" // Terminate all children
 	CascadeSkip      CascadeAction = "skip"      // Leave children running

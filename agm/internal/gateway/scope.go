@@ -12,6 +12,7 @@ import (
 // ScopePolicy determines the default behavior for unlisted tools.
 type ScopePolicy string
 
+// ScopePolicy values for default tool access.
 const (
 	PolicyAllow ScopePolicy = "allow" // Allow unless explicitly denied
 	PolicyDeny  ScopePolicy = "deny"  // Deny unless explicitly allowed

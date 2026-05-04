@@ -16,6 +16,7 @@ import (
 // DriftSeverity indicates the severity of a drift finding.
 type DriftSeverity string
 
+// Drift severity values.
 const (
 	DriftPass DriftSeverity = "PASS"
 	DriftWarn DriftSeverity = "WARN"

@@ -10,6 +10,7 @@ import (
 // Severity classifies the urgency of a lint issue.
 type Severity int
 
+// Severity levels for lint findings.
 const (
 	SeverityError   Severity = iota // 🔴 must fix — structural breakage
 	SeverityWarning                 // 🟡 should fix — quality degradation
@@ -29,6 +30,7 @@ func (s Severity) String() string {
 	}
 }
 
+// Emoji returns a single-character emoji representation of the severity.
 func (s Severity) Emoji() string {
 	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch s {
@@ -44,12 +46,13 @@ func (s Severity) Emoji() string {
 // LintCode identifies the specific check that fired.
 type LintCode string
 
+// Lint check codes emitted by the linter.
 const (
 	CodeBrokenLink  LintCode = "BROKEN_LINK"  // target page does not exist
-	CodeOrphanPage  LintCode = "ORPHAN_PAGE"   // page has no inbound links
-	CodeStalePage   LintCode = "STALE_PAGE"    // last-updated > 6 months ago
-	CodeMissingMeta LintCode = "MISSING_META"  // no last-updated or status field
-	CodeCoverageGap LintCode = "COVERAGE_GAP"  // page has very few outbound links (likely stub)
+	CodeOrphanPage  LintCode = "ORPHAN_PAGE"  // page has no inbound links
+	CodeStalePage   LintCode = "STALE_PAGE"   // last-updated > 6 months ago
+	CodeMissingMeta LintCode = "MISSING_META" // no last-updated or status field
+	CodeCoverageGap LintCode = "COVERAGE_GAP" // page has very few outbound links (likely stub)
 )
 
 // LintIssue is a single finding from the linter.

@@ -10,6 +10,7 @@ import (
 // Mode represents the agent operating mode.
 type Mode string
 
+// Agent operating mode values.
 const (
 	ModeArchitect   Mode = "architect"   // Planning, design, architecture (Opus)
 	ModeImplementer Mode = "implementer" // Coding, execution, testing (Sonnet/Haiku)
@@ -18,6 +19,7 @@ const (
 // TaskComplexity represents the assessed complexity of a task.
 type TaskComplexity string
 
+// Task complexity tier values.
 const (
 	ComplexityLow    TaskComplexity = "low"    // Simple, well-defined tasks
 	ComplexityMedium TaskComplexity = "medium" // Moderate complexity

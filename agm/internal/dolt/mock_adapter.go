@@ -361,7 +361,7 @@ func (m *MockAdapter) GetByFrecency(limit int) ([]FrecencyResult, error) {
 	return results, nil
 }
 
-// Helper function to create a test session manifest
+// NewTestManifest creates a session manifest populated with sensible test defaults.
 func NewTestManifest(sessionID string, name string) *manifest.Manifest {
 	now := time.Now()
 	return &manifest.Manifest{

@@ -30,6 +30,7 @@ var (
 // RiskLevel represents the risk level of a task
 type RiskLevel int
 
+// Task RiskLevel values, ordered from least to most risk.
 const (
 	RiskLevelXS RiskLevel = iota // Extra Small (1-50 LOC)
 	RiskLevelS                   // Small (51-200 LOC)

@@ -92,6 +92,7 @@ type MonitoringResult struct {
 // RiskLevel represents task risk level
 type RiskLevel string
 
+// Task RiskLevel values, sized roughly by lines-of-code impact.
 const (
 	RiskXS RiskLevel = "XS" // Extra small (< 50 LOC)
 	RiskS  RiskLevel = "S"  // Small (50-200 LOC)

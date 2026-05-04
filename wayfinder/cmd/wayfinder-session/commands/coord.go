@@ -255,6 +255,7 @@ func newSimpleSandboxManager(baseDir string) *SimpleSandboxManager {
 	return &SimpleSandboxManager{baseDir: baseDir}
 }
 
+// CreateSandbox creates a new sandbox directory under baseDir and returns its descriptor.
 func (sm *SimpleSandboxManager) CreateSandbox(name string) (*coordinator.Sandbox, error) {
 	// For MVP, just create a directory (no git worktree)
 	// Full implementation would use wp11 sandbox package
@@ -271,6 +272,7 @@ func (sm *SimpleSandboxManager) CreateSandbox(name string) (*coordinator.Sandbox
 	}, nil
 }
 
+// ListSandboxes returns descriptors for all sandboxes currently in baseDir.
 func (sm *SimpleSandboxManager) ListSandboxes() ([]*coordinator.Sandbox, error) {
 	entries, err := os.ReadDir(sm.baseDir)
 	if err != nil {
@@ -293,6 +295,7 @@ func (sm *SimpleSandboxManager) ListSandboxes() ([]*coordinator.Sandbox, error) 
 	return sandboxes, nil
 }
 
+// CleanupSandbox removes the sandbox directory matching nameOrID.
 func (sm *SimpleSandboxManager) CleanupSandbox(nameOrID string) error {
 	sandboxPath := filepath.Join(sm.baseDir, nameOrID)
 	return os.RemoveAll(sandboxPath)

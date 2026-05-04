@@ -117,5 +117,5 @@ const (
 	EventTypeTelemetryHealth  = "telemetry_health"
 )
 
-// Schema version constant
+// SchemaVersion is the telemetry-enrichment schema version.
 const SchemaVersion = "1.0.0"

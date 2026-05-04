@@ -7,6 +7,7 @@ import (
 	"github.com/vbonnet/dear-agent/wayfinder/pkg/sandbox"
 )
 
+// CreateSandboxCmd is the cobra command that creates a new isolated sandbox.
 var CreateSandboxCmd = &cobra.Command{
 	Use:   "create-sandbox <name>",
 	Short: "Create a new isolated sandbox",

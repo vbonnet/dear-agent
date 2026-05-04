@@ -303,7 +303,7 @@ func scoreEngram(eg *engram.Engram, promptWords []string, promptLower string) in
 			}
 		}
 		if strings.Contains(contentLower, w) {
-			score += 1
+			score++
 		}
 	}
 

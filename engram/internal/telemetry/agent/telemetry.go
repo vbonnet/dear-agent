@@ -8,7 +8,7 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/eventbus"
 )
 
-// EventType for agent launches
+// EventAgentLaunch is the event type emitted when an agent launches.
 const EventAgentLaunch = "agent_launch"
 
 // Telemetry provides the public API for agent telemetry logging.

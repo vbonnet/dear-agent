@@ -13,6 +13,7 @@ import (
 
 var initForce bool
 
+// InitCmd is the cobra command that initializes feature tracking from an S7 plan.
 var InitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize feature tracking from S7 plan",

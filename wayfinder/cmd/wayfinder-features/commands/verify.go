@@ -14,6 +14,7 @@ import (
 
 var testCommand string
 
+// VerifyCmd is the cobra command that verifies a feature by running its tests.
 var VerifyCmd = &cobra.Command{
 	Use:   "verify <feature-id>",
 	Short: "Verify a feature by running tests",

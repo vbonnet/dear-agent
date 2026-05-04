@@ -46,6 +46,7 @@ func getHeaderStyle() lipgloss.Style {
 // LayoutMode represents the terminal width-based layout mode
 type LayoutMode int
 
+// Terminal-width-based layout modes.
 const (
 	LayoutMinimal LayoutMode = iota
 	LayoutCompact

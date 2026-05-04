@@ -40,7 +40,7 @@ func init() {
 }
 
 type conversationLine struct {
-	ParentUuid string `json:"parentUuid"`
+	ParentUUID string `json:"parentUuid"`
 	Type       string `json:"type"`
 }
 
@@ -194,8 +194,8 @@ func extractParentUUID(conversationFile string) (string, error) {
 			continue
 		}
 
-		if line.ParentUuid != "" {
-			return line.ParentUuid, nil
+		if line.ParentUUID != "" {
+			return line.ParentUUID, nil
 		}
 	}
 

@@ -16,6 +16,7 @@ const maxPromptFileSize = 10 * 1024 // 10KB
 // QueuedInputType classifies what kind of input is queued in a session
 type QueuedInputType int
 
+// QueuedInputType values classifying input observed in a session pane.
 const (
 	QueuedInputNone  QueuedInputType = iota // No queued input detected
 	QueuedInputAGM                          // Queued input is a stuck AGM message ([From: header)

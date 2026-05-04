@@ -45,10 +45,12 @@ func NewRateLimitedProvider(inner Provider, cfg RateLimiterConfig) *RateLimitedP
 	}
 }
 
+// Name returns the inner provider's name.
 func (r *RateLimitedProvider) Name() string {
 	return r.inner.Name()
 }
 
+// Capabilities returns the inner provider's capabilities.
 func (r *RateLimitedProvider) Capabilities() Capabilities {
 	return r.inner.Capabilities()
 }

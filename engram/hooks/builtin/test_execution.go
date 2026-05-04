@@ -16,6 +16,7 @@ import (
 // TestFramework represents a detected test framework
 type TestFramework string
 
+// Recognized TestFramework values.
 const (
 	FrameworkGo         TestFramework = "go"
 	FrameworkPython     TestFramework = "python"

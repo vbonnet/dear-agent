@@ -119,6 +119,7 @@ type ReviewIssue struct {
 // IssueSeverity defines the severity levels for review issues
 type IssueSeverity string
 
+// Issue severity levels.
 const (
 	SeverityP0 IssueSeverity = "P0" // Critical - MUST fix before deploy
 	SeverityP1 IssueSeverity = "P1" // High - MUST fix before deploy
@@ -129,6 +130,7 @@ const (
 // ReviewType defines whether review is per-task or batch
 type ReviewType string
 
+// ReviewType values.
 const (
 	ReviewTypePerTask ReviewType = "per_task"
 	ReviewTypeBatch   ReviewType = "batch"

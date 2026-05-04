@@ -15,6 +15,7 @@ import (
 // GateTier represents the enforcement level of a gate
 type GateTier int
 
+// GateTier values controlling enforcement strictness.
 const (
 	GateTierNone     GateTier = 0 // No gate (skip review)
 	GateTierAdvisory GateTier = 2 // Advisory gate (recommended but non-blocking)

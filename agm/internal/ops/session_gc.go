@@ -50,6 +50,7 @@ type GCRequest struct {
 // GCSkipReason describes why a session was skipped during GC.
 type GCSkipReason string
 
+// GCSkipReason values explaining why a session was skipped during GC.
 const (
 	GCSkipAlreadyArchived GCSkipReason = "already_archived"
 	GCSkipReaping         GCSkipReason = "lifecycle_reaping"
