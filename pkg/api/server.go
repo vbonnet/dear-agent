@@ -418,7 +418,7 @@ func (e *ExecRunner) Run(_ context.Context, req RunRequest, caller Caller) (RunR
 	// binary is an operator-supplied flag value; every argv element
 	// above this line is validated for shell-safe content, so the
 	// only "taint" is the operator's own input.
-	cmd := exec.Command(binary, args...) //nolint:gosec // G204: argv pre-validated; binary is an operator-controlled flag
+	cmd := exec.Command(binary, args...) //nolint:gosec // G204/G702: argv pre-validated; binary is an operator-controlled flag
 	cmd.Env = append(cmd.Environ(),
 		"DEAR_AGENT_API_TRIGGERED_BY="+caller.LoginName,
 	)
