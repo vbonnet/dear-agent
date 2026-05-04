@@ -56,7 +56,7 @@ require (
 	golang.org/x/term v0.42.0
 	golang.org/x/text v0.36.0
 	golang.org/x/time v0.15.0
-	google.golang.org/api v0.276.0
+	google.golang.org/api v0.277.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.50.0
@@ -133,8 +133,8 @@ require (
 	github.com/google/nftables v0.2.1-0.20240414091927-5e242ec57806 // indirect
 	github.com/google/pprof v0.0.0-20260115054156-294ebfa9ad83 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.14 // indirect
-	github.com/googleapis/gax-go/v2 v2.21.0 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.15 // indirect
+	github.com/googleapis/gax-go/v2 v2.22.0 // indirect
 	github.com/gorilla/csrf v1.7.3 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
@@ -218,7 +218,7 @@ require (
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
 	google.golang.org/genproto v0.0.0-20260319201613-d00831a3d3e7 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260427160629-7cedc36a6bc4 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
 	gvisor.dev/gvisor v0.0.0-20250205023644-9414b50a5633 // indirect
 	modernc.org/libc v1.72.0 // indirect
