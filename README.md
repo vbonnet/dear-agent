@@ -3,28 +3,30 @@
 Writing code isn't the hard part. Software engineering is.
 
 A personal experiment in agent harness design — a pluggable meta-harness for
-AI coding agents. Manage sessions, isolate workspaces, and orchestrate
-multi-agent workflows, regardless of which AI CLI you use.
+AI coding agents. The core idea: keep the harness thin, keep the substrate
+queryable, and let loops do the recurring work.
 
 ## Why
 
-Modern AI coding agents (Claude Code, Gemini CLI, Codex CLI, OpenCode) are
-powerful but isolated. Switching between them means rebuilding your workflow.
-Running them in parallel means managing state by hand. dear-agent wraps them
-behind a unified adapter and gives you session lifecycle, sandbox isolation,
-and async coordination on top.
+Modern AI coding agents (Claude Code, Gemini CLI, Codex CLI) are powerful but
+isolated. dear-agent wraps them with:
 
-The architecture is intentionally unsophisticated. Tmux sessions as the
-execution backend. SQLite as the store. Files as the coordination primitive.
-The goal isn't to build a platform — it's to understand what a minimal,
-correct harness looks like, and let the tooling surface evolve from that.
+- **Loops** — named, recurring bash commands that run on a cadence and store
+  every run in SQLite. `agm loop new babysit-prs --cadence 5m --cmd "gh pr list"`.
+- **Sessions** — isolated tmux workspaces with lifecycle management.
+- **Workflows** — YAML DAG engine for multi-step, multi-agent orchestration.
+- **Engram** — persistent memory with cue-based retrieval across sessions.
+
+The architecture stays deliberately unsophisticated: tmux sessions, SQLite
+stores, files as coordination primitives. The substrate is queryable — when
+something breaks you open a terminal, not a dashboard.
 
 ## Components
 
 | Component | Directory | Description |
 |-----------|-----------|-------------|
-| **AGM** | `agm/` | Agent Gateway Manager — session lifecycle, orchestration, monitoring |
-| **Engram** | `engram/` | Persistent memory with cue-based retrieval for AI sessions |
+| **AGM** | `agm/` | Agent Gateway Manager — sessions, loops, orchestration |
+| **Engram** | `engram/` | Persistent memory with cue-based retrieval |
 | **Wayfinder** | `wayfinder/` | 9-phase SDLC workflow plugin with validation gates |
 
 ## Quick Start
@@ -38,33 +40,56 @@ correct harness looks like, and let the tooling surface evolve from that.
 ### Install
 
 ```bash
-# Install AGM (session manager)
 go install github.com/vbonnet/dear-agent/agm/cmd/agm@latest
-
-# Install Engram (persistent memory)
 go install github.com/vbonnet/dear-agent/engram/cmd/engram@latest
 ```
 
-### Basic Usage
+## Loops — the primary UX
+
+Loops are the simplest way to run recurring background work. A loop is a named
+bash command that fires on a cadence and stores every run in SQLite.
 
 ```bash
-# Create a new session
-agm session new my-feature
+# Create loops for things you want to keep an eye on.
+agm loop new babysit-prs  --cadence 5m  --cmd "gh pr list --author @me"
+agm loop new watch-ci     --cadence 2m  --cmd "gh run list --limit 5"
+agm loop new dep-freshness --cadence 24h --cmd "./scripts/check-outdated.sh"
 
-# List active sessions
-agm session list
+# See what's defined and when it last ran.
+agm loop list
 
-# Resume a session
-agm session resume my-feature
+# Trigger one immediately (outside its cadence).
+agm loop run babysit-prs
 
-# Send a message to a session
-agm session send my-feature "run the tests"
+# Wire tick to cron so loops fire automatically.
+# crontab: * * * * * agm loop tick
 
-# Archive when done
-agm session archive my-feature
+# Inspect run history — stdout, stderr, exit codes, durations.
+agm loop logs babysit-prs
+
+# Pause when you don't need it; resume when you do.
+agm loop pause dep-freshness
+agm loop resume dep-freshness
 ```
 
-### Session Lifecycle
+Every run is persisted to `~/.agm/loops.db` (WAL-mode SQLite). Query it
+directly when you need to understand what happened:
+
+```sql
+SELECT l.name, r.started_at, r.success, r.exit_code
+FROM loop_runs r JOIN loops l USING (loop_id)
+ORDER BY r.started_at DESC LIMIT 20;
+```
+
+## Sessions
+
+```bash
+# Create and resume named sessions.
+agm session new my-feature
+agm session resume my-feature
+agm session list
+agm session archive my-feature
+```
 
 ```
 create → associate → work → archive
@@ -75,15 +100,43 @@ create → associate → work → archive
   └─ Provision sandbox, create manifest, start tmux session
 ```
 
+## Workflows — multi-step DAGs
+
+For tasks that need more than one step, the workflow engine provides a YAML DAG
+with bash and AI nodes, retry policies, gate conditions, and full audit
+logging.
+
+```bash
+agm workflow create build-pipeline -f pipeline.yaml
+agm workflow run build-pipeline
+```
+
+```yaml
+# pipeline.yaml
+name: build-and-test
+tasks:
+  - id: lint
+    command: golangci-lint run ./...
+  - id: build
+    command: go build ./...
+    depends_on: [lint]
+  - id: test
+    command: go test ./...
+    depends_on: [build]
+```
+
+Every node state transition is logged to SQLite with actor, from-state,
+to-state, and reason. When a run fails at 3am you query `audit_events` —
+not a dashboard.
+
 ## Architecture
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│                    AGM CLI                            │
-│  session · admin · workflow · send                   │
+│              AGM CLI  ·  MCP Server  ·  Skills        │
 ├──────────────────────────────────────────────────────┤
 │              Shared Operations Layer                  │
-│  (CLI, MCP server, and Skills all route here)        │
+│  (all three API surfaces route through agm/internal/ops/) │
 ├──────────┬───────────┬───────────┬───────────────────┤
 │  Claude  │  Gemini   │  Codex    │  OpenCode         │
 │  Adapter │  Adapter  │  Adapter  │  Adapter          │
@@ -92,13 +145,13 @@ create → associate → work → archive
 │  Tmux (current)  ·  Temporal (planned)               │
 ├──────────────────────────────────────────────────────┤
 │              Storage & Coordination                   │
-│  SQLite · Manifests · Message Queue · Sandbox        │
+│  loops.db  ·  runs.db  ·  Manifests  ·  Sandbox     │
 └──────────────────────────────────────────────────────┘
 ```
 
-All three API surfaces — CLI, MCP server, and Claude Code Skills — share a
-common operations layer (`agm/internal/ops/`), ensuring consistent behavior
-regardless of how you interact with AGM.
+Three API surfaces — CLI, MCP server, Claude Code Skills — share a common
+operations layer (`agm/internal/ops/`). An operation implemented once is
+available everywhere.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full component breakdown.
 
@@ -106,29 +159,27 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full component breakdown.
 
 ```
 dear-agent/
-├── agm/              # AGM (session management, orchestration)
+├── agm/              # AGM (session management, loops, orchestration)
 ├── engram/           # Engram (persistent memory)
 ├── wayfinder/        # Wayfinder (SDLC workflow)
 ├── tools/            # Standalone CLI tools
 ├── cmd/              # Additional CLI entry points
 ├── codegen/          # Code generation framework
 ├── pkg/              # Shared Go packages
+│   └── workflow/     # Workflow engine (YAML DAG, SQLite substrate)
 ├── internal/         # Private implementation packages
 ├── scripts/          # Build and utility scripts
-└── docs/             # Documentation
+└── docs/             # ADRs and design documents
 ```
 
 ## Build & Test
 
 ```bash
-# Build individual products
 go build ./agm/cmd/agm
 go build ./engram/cmd/engram
 
-# Run all tests
 GOWORK=off go test ./...
 
-# Lint
 golangci-lint run ./...
 ```
 
@@ -136,11 +187,24 @@ golangci-lint run ./...
 
 | Tool | Directory | Description |
 |------|-----------|-------------|
-| `benchmark-query` | `tools/benchmark-query/` | Query benchmark metrics from test runs |
+| `benchmark-query` | `tools/benchmark-query/` | Query benchmark metrics |
 | `devlog` | `tools/devlog/` | Development log management |
 | `dod-enforcer` | `tools/dod-enforcer/` | Definition-of-done enforcement |
 | `schema-registry` | `tools/schema-registry/` | Schema validation registry |
 | `spec-review` | `tools/spec-review/` | Specification review tooling |
+
+## Design Philosophy
+
+- **Loops over dashboards.** Recurring, purpose-specific background work beats
+  manual polling. If you're checking something more than once a day, it should
+  be a loop.
+- **Substrate quality.** Every state transition is written to SQLite. Debugging
+  is `SELECT * FROM audit_events WHERE run_id = ?`, not log-grep.
+- **Role-based model abstraction.** Workflows declare roles (`analyst`,
+  `implementer`), not model IDs. One edit to `roles.yaml` moves the whole
+  system to a new model.
+- **Pre-committed to deletion.** The harness should thin out as models improve.
+  Nothing here is designed to be permanent.
 
 ## Contributing
 
