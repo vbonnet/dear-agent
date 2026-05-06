@@ -10,6 +10,9 @@
 //	dear-agent-signals report [--db PATH] [--kind KIND]
 //	                          [--since DURATION] [--limit N] [--json]
 //	                          [--score]
+//	dear-agent-signals salience [--input PATH] [--window DURATION]
+//	                            [--capacity N] [--bypass TIER]
+//	                            [--json] [--keep-noise]
 package main
 
 import (
@@ -32,6 +35,8 @@ func run(ctx context.Context, args []string) int {
 		return runCollect(ctx, args[1:])
 	case "report":
 		return runReport(ctx, args[1:])
+	case "salience":
+		return runSalience(ctx, args[1:])
 	case "-h", "--help", "help":
 		usage(os.Stdout)
 		return 0
@@ -46,8 +51,9 @@ func usage(w *os.File) {
 	fmt.Fprintf(w, `dear-agent-signals — collect and report project-health signals (ADR-015)
 
 Usage:
-  dear-agent-signals collect [flags]
-  dear-agent-signals report  [flags]
+  dear-agent-signals collect  [flags]
+  dear-agent-signals report   [flags]
+  dear-agent-signals salience [flags]
 
 Run 'dear-agent-signals <subcommand> -h' for subcommand-specific flags.
 `)
