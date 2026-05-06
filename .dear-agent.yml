@@ -41,6 +41,19 @@ forbidden-paths:
     - research/*.md
     - research/*.txt
 
+# DEAR Define-phase exit conditions for tasks in this repo. The list
+# is informational, not a blocking gate: workers see it at session
+# start (via `agm acceptance show`) and the Audit phase verifies the
+# runnable rows after completion. Recognized types are tests-pass,
+# lint-clean, no-regressions, and custom — see pkg/acceptance.
+acceptance-criteria:
+  - type: tests-pass
+    command: "go test ./..."
+  - type: lint-clean
+    command: "golangci-lint run ./..."
+  - type: no-regressions
+    description: "No previously-passing test is now failing"
+
 # DEAR Audit subsystem configuration. See ADR-011 and pkg/audit/config.
 # This is the dogfood configuration: dear-agent itself runs the daily
 # checks below on every push (via the workflow-audit CLI in CI). The
