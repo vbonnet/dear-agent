@@ -156,6 +156,7 @@ ship incrementally without breaking anything.
 | 3 | FetchSource / AddSource | 2 weeks | `done` | [BACKLOG §3](docs/workflow-engine/BACKLOG.md#phase-3--fetchsource--addsource) |
 | 4 | Migration + `workflow dev` | 4 weeks | `done` | [BACKLOG §4](docs/workflow-engine/BACKLOG.md#phase-4--migration--workflow-dev) |
 | 5 | Adapters + visual inspector + `kind: spawn` | open-ended | `done` (5.3 ships as stub) | [BACKLOG §5](docs/workflow-engine/BACKLOG.md#phase-5--adapters--visual-inspector--kind-spawn) |
+| 6 | Mozilla/Mythos insights — adversarial review + comprehensibility | open-ended | `in-flight` | [§Phase 6](#phase-6--mozillamythos-insights) |
 
 ### Parallelism map
 
@@ -273,6 +274,92 @@ have been migrated.
 - `kind: spawn` for emergent DAG growth.
 - Visual run inspector (web UI reading SQLite).
 - Plugin packaging.
+
+### Phase 6 — Mozilla/Mythos insights
+
+**Origin.** A research pass on Mozilla's "AI reads code the way attackers do"
+talk and on Anthropic's Mythos (vulnerability discovery via cross-model
+review) surfaced seven improvements that fit dear-agent's existing
+substrate. The thread is the same on both sides: **a model's blind spots
+when it writes are a different shape from its blind spots when it reads.**
+The Audit phase already exists conceptually (ADR-011); these tickets
+extend it from "tool-runner that aggregates findings" into "a place where
+*another* model audits what *this* model produced."
+
+**Goal.** Make adversarial review, comprehensibility, and confidence into
+first-class signals — and provide the seams that let an external
+verification backend plug in without dear-agent owning the verifier.
+
+**Tickets** (priority order; pick `pending`, mark `in-flight`):
+
+| id | Priority | Title | Slot |
+|----|----------|-------|------|
+| 6.1 | HIGH | Cross-model adversarial review in Audit | `pkg/audit` + `pkg/llm/router` |
+| 6.2 | HIGH | Comprehensibility check (`complexity`) | `pkg/audit/checks/complexity.go` |
+| 6.3 | HIGH | Confidence scoring per DEAR phase | `pkg/audit` + `pkg/workflow` exit gates |
+| 6.4 | MED  | Constitutional designer mode (schema-validated invariants) | `pkg/workflow` Define hooks |
+| 6.5 | MED  | Trust inversion tracking (verified-vs-casual review) | `pkg/audit` finding metadata |
+| 6.6 | MED  | External verification backend interface (`VerifierProvider`) | `pkg/plugin` |
+| 6.7 | LOW  | A/B model testing per DEAR phase | `pkg/workflow/roles` + bench |
+
+**6.1 — Cross-model adversarial review in Audit (HIGH).** When a node's
+`role` resolves to a model in family X, the Audit phase should be able to
+run the same artifact through a *different* family (Y). The role registry
+already has cross-provider tiers wired; this ticket adds a `reviewer-cross`
+role binding and an `OnAudit` hook that calls it. Output is a Finding with
+the reviewing model recorded in `Evidence`.
+
+**6.2 — Comprehensibility check (HIGH).** Code that passes tests but is
+incomprehensible is a security risk: future readers (human or AI) cannot
+spot defects in code they cannot model. Adds an `audit.Check` with id
+`complexity` (matching ADR-011 §A2's pre-named slot) that walks `.go`
+files, computes per-function cyclomatic complexity via `go/ast`, and
+emits one P2 finding per function above a configurable threshold
+(default 15). Recommended cadence is monthly per ADR-011, but the
+operator may promote it in `.dear-agent.yml`. **Starting ticket.**
+
+**6.3 — Confidence scoring per DEAR phase (HIGH).** Today, exit gates
+*validate* a confidence field on outputs but no phase produces one. Wire
+each phase to emit a confidence number into `audit_events.payload`:
+compile = binary, tests = coverage %, comprehensibility = 1 − (max_cc /
+ceiling), correctness = reviewer log-prob, right-problem = HITL approval.
+Roll up at run level so `workflow status` prints a single phase-confidence
+vector.
+
+**6.4 — Constitutional designer mode (MED).** Make the Define-phase
+"humans declare invariants, agents implement" workflow explicit. Adds a
+JSON-Schema-validated `invariants:` block to workflow YAML; the Define
+hook fails the run if the schema is missing. Plays into 6.5 — invariants
+are what gets adversarially verified.
+
+**6.5 — Trust inversion tracking (MED).** Each Finding records *how* it
+was verified (`evidence.verifier_role`, `evidence.review_depth: casual |
+adversarial`). Once a code path has been adversarially verified by a
+different family, it earns a `verified_at` timestamp; subsequent edits
+reset it. The trusted set becomes the verified set, regardless of author.
+
+**6.6 — External verification backend interface (MED).** dear-agent
+should not implement its own vuln-scanner / fuzzer / property checker.
+Adds a `VerifierProvider` interface to `pkg/plugin` (`Verify(ctx, target)
+([]Finding, error)`) and lets Audit dispatch to all registered providers.
+Mythos and similar tools plug in here.
+
+**6.7 — A/B model testing per DEAR phase (LOW).** Connects to the AGM
+routing vision: run a task through {role=implementer-A, role=implementer-B}
+in parallel, score the outputs, write the result to `bench/` so the
+registry can be tuned per-phase. Skeleton lives in `internal/benchmark`;
+this ticket promotes it to a per-phase A/B harness.
+
+**Ship criterion (phase).** Two artifacts demonstrate the thesis:
+
+1. A workflow run on dear-agent itself produces an Audit phase report
+   that lists per-function complexity findings (6.2), at least one
+   cross-model review finding (6.1), and a per-phase confidence vector
+   (6.3).
+2. A no-op `VerifierProvider` example plugin compiles and is dispatched
+   from the Audit runner end-to-end (6.6).
+
+Items 6.4, 6.5, 6.7 are tracked but post-ship-criterion.
 
 ---
 
