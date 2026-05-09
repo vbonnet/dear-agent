@@ -197,6 +197,8 @@ phase. Triage as they come up.
 | X.4 | GitHub-PR HITL backend | ADR open question §4; not in v1 |
 | DEAR-X.5 | ~~Flaky `TestSQLiteStateConcurrentSaves` (SQLITE_BUSY on schema apply)~~ DONE | Fixed by `pingWithBusyRetry` + `execWithBusyRetry` retry loops in `state_sqlite.go` (see `openSQLiteDB` and `retryOnSQLiteBusy`). 100-iteration soak test now passes (`go test -count=100 -run TestSQLiteStateConcurrentSaves ./pkg/workflow/`). |
 | DEAR-X.6 | ~~Phase 2 wiring for Phase 1 schema fields~~ DONE | Wired by Phase 2.* tickets (#40). Runner now exposes `Permissions` and HITL backend hooks (`pkg/workflow/runner.go`) and the audit pipeline emits transition rows for permission denials and HITL approve/reject/timeout. |
+| DEAR-X.7 | `spec.staleness` audit check | Outcomes framework tier 2: a SPEC.md whose mtime is substantially older than its directory's most-recent commit is a finding. Same shape as `spec.coverage` (`pkg/audit/checks/spec_coverage.go`); reads `git log` for the comparison. Default threshold 10 commits, configurable. See [outcomes-framework.md](../design/outcomes-framework.md). |
+| DEAR-X.8 | `spec.conformance` audit check (LLM-assisted) | Outcomes framework tier 3: identifiers / file paths referenced in `SPEC.md` resolve in the codebase. Cheap mode: regex-extract file paths and verify they exist. Expensive mode: bind to `tools/spec-review` for prose-level claims. See [outcomes-framework.md](../design/outcomes-framework.md). |
 
 ---
 
