@@ -166,13 +166,30 @@ type CheckOutcome struct {
 	Err error
 }
 
+// VerifierOutcome is the per-verifier observation produced by
+// Runner.Run. Parallel in shape to CheckOutcome so the CLI rendering
+// code can treat the two uniformly. Findings have been upserted via
+// the Store and carry the runner-stamped verifier_role / review_depth
+// keys in Evidence (Phase 6.5 trust-inversion contract).
+type VerifierOutcome struct {
+	VerifierName string
+	WorkingDir   string
+	Findings     []Finding
+	// Err is the error returned by Verifier.Verify, if any. Non-nil
+	// Err transitions the audit run state to AuditRunPartial; remaining
+	// verifiers continue to run.
+	Err error
+}
+
 // RunReport is what Run returns. The audit_runs row mirrors AuditRun;
-// CheckOutcomes lists per-check detail. Proposals is the (possibly
-// empty) list emitted by registered Refiners.
+// CheckOutcomes lists per-check detail; VerifierOutcomes lists per-
+// verifier detail. Proposals is the (possibly empty) list emitted by
+// registered Refiners.
 type RunReport struct {
-	AuditRun      AuditRunRecord
-	CheckOutcomes []CheckOutcome
-	Proposals     []Proposal
+	AuditRun         AuditRunRecord
+	CheckOutcomes    []CheckOutcome
+	VerifierOutcomes []VerifierOutcome
+	Proposals        []Proposal
 }
 
 // Run executes plan and returns a RunReport. Blocking. Honors
@@ -204,6 +221,10 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (*RunReport, error) {
 
 	report := &RunReport{AuditRun: auditRun}
 	allFindings, checkErr, policyFail := r.executePlanChecks(ctx, plan, policy, report)
+	verifierFindings, verifierErr, verifierPolicyFail := r.executeVerifiers(ctx, plan, policy, report)
+	allFindings = append(allFindings, verifierFindings...)
+	checkErr = checkErr || verifierErr
+	policyFail = policyFail || verifierPolicyFail
 	r.executeRefiners(ctx, auditRun.AuditRunID, allFindings, report)
 
 	auditRun = r.finalizeAuditRun(ctx, auditRun, plan.Repo, ctx.Err(), checkErr, policyFail)
@@ -244,6 +265,139 @@ func (r *Runner) executePlanChecks(
 		}
 	}
 	return allFindings, checkErr, policyFail
+}
+
+// executeVerifiers walks every registered Verifier over each tree of
+// the plan, persists their findings via the store, and stamps the
+// runner-owned Evidence keys (verifier_role, review_depth). Mirrors
+// executePlanChecks shape so the runner state machine treats the two
+// uniformly.
+//
+// A verifier returning an error is recorded as VerifierOutcome.Err
+// and triggers the AuditRunPartial transition the same way a Check
+// error does. A verifier that returns Findings whose Severity meets
+// the policy.FailRun bar triggers policyFail just like a Check.
+func (r *Runner) executeVerifiers(
+	ctx context.Context,
+	plan Plan,
+	policy map[Severity]SeverityRule,
+	report *RunReport,
+) (allFindings []Finding, verifierErr, policyFail bool) {
+	verifiers := r.Registry.Verifiers()
+	if len(verifiers) == 0 {
+		return nil, false, false
+	}
+	allFindings = make([]Finding, 0, len(verifiers))
+	for _, tree := range plan.Trees {
+		for _, v := range verifiers {
+			outcome := r.runOneVerifier(ctx, plan, tree, v, policy)
+			if outcome.Err != nil {
+				verifierErr = true
+			}
+			for i := range outcome.Findings {
+				if rule, ok := policy[outcome.Findings[i].Severity]; ok && rule.FailRun {
+					policyFail = true
+				}
+				allFindings = append(allFindings, outcome.Findings[i])
+			}
+			report.VerifierOutcomes = append(report.VerifierOutcomes, outcome)
+		}
+	}
+	return allFindings, verifierErr, policyFail
+}
+
+// runOneVerifier executes one Verifier against one tree, stamps the
+// verifier-role / review-depth Evidence keys, and persists findings
+// via the store. Pure with respect to runner aggregation state.
+func (r *Runner) runOneVerifier(
+	ctx context.Context,
+	plan Plan,
+	tree TreePlan,
+	v Verifier,
+	policy map[Severity]SeverityRule,
+) VerifierOutcome {
+	logger := r.Logger.With("verifier", v.Name(), "tree", tree.WorkingDir)
+
+	target := VerifyTarget{
+		RepoRoot:   plan.RepoRoot,
+		WorkingDir: tree.WorkingDir,
+	}
+
+	verifyCtx := ctx
+	var cancel context.CancelFunc
+	if r.CheckTimeout > 0 {
+		verifyCtx, cancel = context.WithTimeout(ctx, r.CheckTimeout)
+		defer cancel()
+	}
+
+	findings, err := v.Verify(verifyCtx, target)
+	outcome := VerifierOutcome{VerifierName: v.Name(), WorkingDir: tree.WorkingDir, Err: err}
+	if err != nil {
+		logger.Warn("audit: verifier returned error", "err", err)
+		return outcome
+	}
+
+	depth := v.ReviewDepth()
+	if depth == "" {
+		depth = ReviewDepthAdversarial
+	}
+
+	for i := range findings {
+		stored, ok := r.persistVerifierFinding(ctx, findings[i], plan, v, depth, policy, logger)
+		if !ok {
+			continue
+		}
+		outcome.Findings = append(outcome.Findings, stored)
+	}
+	return outcome
+}
+
+// persistVerifierFinding stamps the runner-owned Evidence keys onto a
+// Finding produced by a Verifier and upserts via the Store. Mirrors
+// persistFinding but treats the verifier name as the CheckID so the
+// (repo, fingerprint) uniqueness contract on audit_findings carries a
+// stable namespace. Verifier-emitted CheckIDs are conventionally
+// prefixed "verify." to distinguish them in CLI rendering.
+func (r *Runner) persistVerifierFinding(
+	ctx context.Context,
+	f Finding,
+	plan Plan,
+	v Verifier,
+	depth string,
+	policy map[Severity]SeverityRule,
+	logger *slog.Logger,
+) (Finding, bool) {
+	f.Repo = plan.Repo
+	f.CheckID = "verify." + v.Name()
+	if f.Evidence == nil {
+		f.Evidence = make(map[string]any, 2)
+	}
+	if _, ok := f.Evidence[EvidenceVerifierRole]; !ok {
+		f.Evidence[EvidenceVerifierRole] = v.Name()
+	}
+	if _, ok := f.Evidence[EvidenceReviewDepth]; !ok {
+		f.Evidence[EvidenceReviewDepth] = depth
+	}
+	if !f.Severity.IsValid() {
+		// Default to P2 — verifier findings are drift / hypothesis-grade
+		// unless the verifier explicitly raises severity.
+		f.Severity = SeverityP2
+	}
+	if err := f.Validate(); err != nil {
+		logger.Warn("audit: invalid verifier finding emitted; skipping", "err", err)
+		return Finding{}, false
+	}
+	if f.Suggested.Strategy == StrategyUnspecified {
+		if rule, ok := policy[f.Severity]; ok {
+			f.Suggested.Strategy = rule.DefaultStrategy
+		}
+	}
+	stored, upErr := r.Store.UpsertFinding(ctx, f)
+	if upErr != nil {
+		logger.Warn("audit: UpsertFinding (verifier) failed", "err", upErr, "fp", f.Fingerprint)
+		return Finding{}, false
+	}
+	return stored, true
 }
 
 // executeRefiners walks every registered Refiner over the pooled
