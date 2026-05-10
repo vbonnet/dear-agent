@@ -87,17 +87,24 @@ func checkCapabilityCoherence(p Plugin, m Manifest) error {
 	}
 	_, hasHooks := p.(HookProvider)
 	_, hasChecks := p.(CheckProvider)
+	_, hasVerifiers := p.(VerifierProvider)
 	if declared[CapabilityHooks] && !hasHooks {
 		return fmt.Errorf("declares %q but does not implement HookProvider", CapabilityHooks)
 	}
 	if declared[CapabilityChecks] && !hasChecks {
 		return fmt.Errorf("declares %q but does not implement CheckProvider", CapabilityChecks)
 	}
+	if declared[CapabilityVerifiers] && !hasVerifiers {
+		return fmt.Errorf("declares %q but does not implement VerifierProvider", CapabilityVerifiers)
+	}
 	if hasHooks && !declared[CapabilityHooks] {
 		return fmt.Errorf("implements HookProvider but does not declare %q in manifest", CapabilityHooks)
 	}
 	if hasChecks && !declared[CapabilityChecks] {
 		return fmt.Errorf("implements CheckProvider but does not declare %q in manifest", CapabilityChecks)
+	}
+	if hasVerifiers && !declared[CapabilityVerifiers] {
+		return fmt.Errorf("implements VerifierProvider but does not declare %q in manifest", CapabilityVerifiers)
 	}
 	return nil
 }
@@ -298,6 +305,34 @@ func (r *Registry) ApplyChecks(target *audit.Registry) error {
 		for _, c := range cp.Checks() {
 			if err := target.Register(c); err != nil {
 				return fmt.Errorf("plugin: ApplyChecks: plugin %q: %w", name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// ApplyVerifiers walks every registered VerifierProvider and registers
+// each returned audit.Verifier into target via target.RegisterVerifier.
+// Symmetric to ApplyChecks: validation and idempotency are the audit
+// registry's job; ApplyVerifiers threads the plugin name through any
+// returned error so a collision attributes the failing plugin.
+//
+// Returns the first error encountered. Does not auto-rollback
+// previously-registered verifiers; consistent with ApplyChecks.
+func (r *Registry) ApplyVerifiers(target *audit.Registry) error {
+	if target == nil {
+		return errors.New("plugin: Registry.ApplyVerifiers: nil target audit.Registry")
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, name := range r.order {
+		vp, ok := r.plugins[name].(VerifierProvider)
+		if !ok {
+			continue
+		}
+		for _, v := range vp.Verifiers() {
+			if err := target.RegisterVerifier(v); err != nil {
+				return fmt.Errorf("plugin: ApplyVerifiers: plugin %q: %w", name, err)
 			}
 		}
 	}

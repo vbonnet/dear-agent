@@ -17,9 +17,10 @@ import (
 // silently overwriting. This avoids the common subtle-bug pattern
 // where two init()s race on registration order.
 type Registry struct {
-	mu       sync.RWMutex
-	checks   map[string]Check
-	refiners map[string]Refiner
+	mu        sync.RWMutex
+	checks    map[string]Check
+	refiners  map[string]Refiner
+	verifiers map[string]Verifier
 }
 
 // NewRegistry returns an empty registry. Callers wire in their own

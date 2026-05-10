@@ -32,17 +32,23 @@ type Capability string
 // validators; a manifest declaring them today will fail
 // Capability.IsValid().
 const (
-	CapabilityHooks  Capability = "hooks"
-	CapabilityChecks Capability = "checks"
+	CapabilityHooks     Capability = "hooks"
+	CapabilityChecks    Capability = "checks"
+	CapabilityVerifiers Capability = "verifiers"
 )
 
 // IsValid reports whether c names a capability Phase 1 understands.
 // Reserved-but-unimplemented capabilities return false on purpose:
 // a manifest that declares them should fail validation today rather
 // than load a plugin whose declared surface is partially nonexistent.
+//
+// CapabilityVerifiers ships in Phase 6.6 (ROADMAP §Phase 6). It marks
+// a plugin that contributes external verification — the seam that
+// lets a Mythos-style or similar deep-analysis tool plug in without
+// dear-agent owning the verifier implementation.
 func (c Capability) IsValid() bool {
 	switch c {
-	case CapabilityHooks, CapabilityChecks:
+	case CapabilityHooks, CapabilityChecks, CapabilityVerifiers:
 		return true
 	}
 	return false

@@ -83,3 +83,31 @@ type CheckProvider interface {
 	// equivalent checks; ApplyChecks reads it once during registration.
 	Checks() []audit.Check
 }
+
+// VerifierProvider is implemented by plugins that contribute external
+// verifiers (ROADMAP §Phase 6 6.6). Registry.ApplyVerifiers(target)
+// walks every VerifierProvider and calls target.RegisterVerifier on
+// each returned verifier, propagating the audit registry's
+// idempotency rules.
+//
+// Verifiers exist because dear-agent should not implement its own
+// vuln-scanner / fuzzer / property checker — those live in external
+// tools (Mythos, llm-judge, semgrep, …) and plug in here. The Audit
+// runner dispatches to every registered verifier alongside its
+// existing Check loop; the runner stamps each Finding's Evidence with
+// verifier_role and review_depth so the trust-inversion accounting
+// (6.5) can tell internal review apart from external adversarial
+// review.
+//
+// A verifier's Name must be non-empty and unique within the registry;
+// the audit registry rejects collisions the same way it rejects
+// duplicate check ids.
+type VerifierProvider interface {
+	Plugin
+
+	// Verifiers returns the audit.Verifier values this plugin
+	// contributes. May return an empty slice. Each call should return
+	// logically equivalent verifiers; ApplyVerifiers reads it once
+	// during registration.
+	Verifiers() []audit.Verifier
+}
