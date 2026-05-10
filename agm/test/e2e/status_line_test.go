@@ -417,9 +417,8 @@ func findRepoRoot() (string, error) {
 	for {
 		goModPath := filepath.Join(dir, "go.mod")
 		if _, err := os.Stat(goModPath); err == nil {
-			// Found go.mod, verify it's ai-tools
 			content, err := os.ReadFile(goModPath)
-			if err == nil && strings.Contains(string(content), "ai-tools") {
+			if err == nil && strings.Contains(string(content), "github.com/vbonnet/dear-agent") {
 				return dir, nil
 			}
 		}

@@ -1,0 +1,78 @@
+name: CI Health Monitor
+
+# Honors action item #1 from docs/retros/2026-05-09-ci-red-streak.md:
+# "Add a scheduled GitHub Action that runs every 6 hours, checks the latest
+# CI conclusion on main, and opens (or comments on) a `ci-red` GitHub issue
+# if it has been failing." See docs/retros/2026-05-10-ci-cascade-cleanup.md
+# for why this exists as code rather than a TODO.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  actions: read
+
+jobs:
+  check-ci-health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Audit last 5 CI runs on main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Pull the last 5 conclusions of the "CI" workflow on main.
+          conclusions=$(gh run list \
+            --repo "$REPO" \
+            --workflow CI \
+            --branch main \
+            --limit 5 \
+            --json conclusion,databaseId,createdAt,headSha)
+          echo "Recent runs:"
+          echo "$conclusions" | jq -r '.[] | "  \(.createdAt) \(.conclusion) \(.headSha[0:7])"'
+          fail_count=$(echo "$conclusions" | jq '[.[] | select(.conclusion == "failure")] | length')
+          echo "Failures in last 5: $fail_count"
+          echo "fail_count=$fail_count" >> "$GITHUB_ENV"
+          # Latest commit SHA — used in the issue body for triage.
+          latest_sha=$(echo "$conclusions" | jq -r '.[0].headSha[0:7]')
+          echo "latest_sha=$latest_sha" >> "$GITHUB_ENV"
+
+      - name: Open or update ci-red issue
+        if: ${{ env.fail_count >= '3' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="ci-red: main has been failing"
+          body=$(cat <<EOF
+          The CI Health Monitor observed **${fail_count} of the last 5 CI runs on \`main\` failing** as of $(date -u +"%Y-%m-%dT%H:%M:%SZ").
+          Latest commit: \`${latest_sha}\`.
+
+          See [\`docs/retros/2026-05-09-ci-red-streak.md\`](../blob/main/docs/retros/2026-05-09-ci-red-streak.md) for the playbook on diagnosing this class of failure.
+
+          This issue is opened/updated automatically by \`.github/workflows/ci-health-monitor.yml\`. It will close itself once the next 5 main runs are green.
+          EOF
+          )
+          existing=$(gh issue list --repo "$REPO" --label ci-red --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$title" --body "$body" --label ci-red
+          fi
+
+      - name: Auto-close ci-red issue when main is healthy
+        if: ${{ env.fail_count == '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --repo "$REPO" --label ci-red --state open --json number --jq '.[].number')
+          for n in $existing; do
+            gh issue close "$n" --repo "$REPO" --comment "Last 5 CI runs on \`main\` are green; auto-closing."
+          done
