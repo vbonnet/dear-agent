@@ -297,7 +297,7 @@ verification backend plug in without dear-agent owning the verifier.
 | 6.1 | HIGH | Cross-model adversarial review in Audit | `pkg/audit` + `pkg/llm/router` |
 | 6.2 | HIGH | Comprehensibility check (`complexity`) — `done` (7483251d6) | `pkg/audit/checks/complexity.go` |
 | 6.3 | HIGH | Confidence scoring per DEAR phase | `pkg/audit` + `pkg/workflow` exit gates |
-| 6.4 | MED  | Constitutional designer mode (schema-validated invariants) | `pkg/workflow` Define hooks |
+| 6.4 | MED  | Constitutional designer mode (schema-validated invariants) | `pkg/workflow` Define hooks — **in-flight** |
 | 6.5 | MED  | Trust inversion tracking (verified-vs-casual review) | `pkg/audit` finding metadata |
 | 6.6 | MED  | External verification backend interface (`VerifierProvider`) | `pkg/plugin` + `pkg/audit` (in-flight) |
 | 6.7 | LOW  | A/B model testing per DEAR phase | `pkg/workflow/roles` + bench |
