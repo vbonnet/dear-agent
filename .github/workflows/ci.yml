@@ -48,6 +48,10 @@ jobs:
           go build -ldflags="${LDFLAGS}" -o build/agm-reaper ./agm/cmd/agm-reaper
           go build -ldflags="${LDFLAGS}" -o build/agm-mcp-server ./agm/cmd/agm-mcp-server
           go build ./...
+          # testscript_test.go in agm/test/e2e looks up agm at $HOME/go/bin/agm
+          # before falling back to `go install <import-path>`; the install
+          # fallback can fail in CI (proxy/sandbox), so pre-install here.
+          go install ./agm/cmd/agm
 
       - name: Vet
         run: go vet ./...
