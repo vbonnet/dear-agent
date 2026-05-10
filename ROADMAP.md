@@ -295,7 +295,7 @@ verification backend plug in without dear-agent owning the verifier.
 | id | Priority | Title | Slot |
 |----|----------|-------|------|
 | 6.1 | HIGH | Cross-model adversarial review in Audit | `pkg/audit` + `pkg/llm/router` |
-| 6.2 | HIGH | Comprehensibility check (`complexity`) | `pkg/audit/checks/complexity.go` |
+| 6.2 | HIGH | Comprehensibility check (`complexity`) — `done` (7483251d6) | `pkg/audit/checks/complexity.go` |
 | 6.3 | HIGH | Confidence scoring per DEAR phase | `pkg/audit` + `pkg/workflow` exit gates |
 | 6.4 | MED  | Constitutional designer mode (schema-validated invariants) | `pkg/workflow` Define hooks |
 | 6.5 | MED  | Trust inversion tracking (verified-vs-casual review) | `pkg/audit` finding metadata |
@@ -309,14 +309,15 @@ already has cross-provider tiers wired; this ticket adds a `reviewer-cross`
 role binding and an `OnAudit` hook that calls it. Output is a Finding with
 the reviewing model recorded in `Evidence`.
 
-**6.2 — Comprehensibility check (HIGH).** Code that passes tests but is
-incomprehensible is a security risk: future readers (human or AI) cannot
-spot defects in code they cannot model. Adds an `audit.Check` with id
-`complexity` (matching ADR-011 §A2's pre-named slot) that walks `.go`
-files, computes per-function cyclomatic complexity via `go/ast`, and
-emits one P2 finding per function above a configurable threshold
-(default 15). Recommended cadence is monthly per ADR-011, but the
-operator may promote it in `.dear-agent.yml`. **Starting ticket.**
+**6.2 — Comprehensibility check (HIGH) — `done` (commit 7483251d6).**
+Code that passes tests but is incomprehensible is a security risk:
+future readers (human or AI) cannot spot defects in code they cannot
+model. Adds an `audit.Check` with id `complexity` (matching ADR-011
+§A2's pre-named slot) that walks `.go` files, computes per-function
+cyclomatic complexity via `go/ast`, and emits one P2 finding per
+function above a configurable threshold (default 15). Recommended
+cadence is monthly per ADR-011, but the operator may promote it in
+`.dear-agent.yml`.
 
 **6.3 — Confidence scoring per DEAR phase (HIGH).** Today, exit gates
 *validate* a confidence field on outputs but no phase produces one. Wire
