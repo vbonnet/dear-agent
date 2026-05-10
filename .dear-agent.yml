@@ -91,3 +91,11 @@ audits:
     # Leaving the bucket declared but empty documents the cadence so
     # the schedule lines up with future check additions.
     monthly: []
+
+    # On-demand bucket: the spec.coverage check (Outcomes framework,
+    # docs/design/outcomes-framework.md) lives here because its signal
+    # moves slowly and a missing SPEC.md is informational drift, not
+    # breakage. Promote to weekly once dear-agent itself reaches
+    # full coverage.
+    on-demand:
+      - check: spec.coverage
