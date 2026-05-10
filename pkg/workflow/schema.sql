@@ -33,7 +33,10 @@ CREATE TABLE IF NOT EXISTS runs (
     total_dollars REAL    NOT NULL DEFAULT 0,
     error         TEXT,
     trigger       TEXT,
-    triggered_by  TEXT
+    triggered_by  TEXT,
+    -- model_variant tags which model configuration was used for A/B testing.
+    -- Set via Runner.ModelVariant; empty means "default / no variant".
+    model_variant TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_runs_state       ON runs (state);
 CREATE INDEX IF NOT EXISTS idx_runs_started_at  ON runs (started_at);

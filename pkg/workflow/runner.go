@@ -67,6 +67,12 @@ type Runner struct {
 	// TriggeredBy is a free-form actor label (user name, MCP client id,
 	// schedule id) recorded on the runs row.
 	TriggeredBy string
+	// ModelVariant is an optional A/B testing label that identifies which
+	// model configuration was active for this run (e.g. "opus-4-7",
+	// "sonnet-4-6-fast", "control"). Persisted to runs.model_variant so
+	// callers can compare cost and quality across variants.
+	// Empty means "default / no variant".
+	ModelVariant string
 
 	// RoleResolver maps an AI node's role: declaration to a concrete
 	// model id. Nil falls back to a Resolver backed by the built-in
@@ -320,6 +326,10 @@ func (r *Runner) run(ctx context.Context, w *Workflow, inputs map[string]string,
 	}
 	rep.Finished = time.Now()
 	rep.Succeeded = executed > 0
+	rep.ModelVariant = r.ModelVariant
+	if r.Budget != nil {
+		rep.TotalTokens, rep.TotalDollars = r.Budget.Totals()
+	}
 	r.finishRunRecord(ctx, runID, finalState, "")
 	return rep, nil
 }
@@ -337,6 +347,7 @@ func (r *Runner) beginRunRecord(ctx context.Context, runID, workflowName string,
 		StartedAt:    started,
 		Trigger:      r.triggerOrDefault(),
 		TriggeredBy:  r.TriggeredBy,
+		ModelVariant: r.ModelVariant,
 	}); err != nil {
 		r.Logger.Warn("recorder BeginRun failed", "run_id", runID, "err", err)
 	}

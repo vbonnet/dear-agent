@@ -153,6 +153,10 @@ type RunRecord struct {
 	Error        string
 	Trigger      string
 	TriggeredBy  string
+	// ModelVariant tags which model configuration was active for this run,
+	// enabling cost-vs-quality comparisons across variants. Empty means
+	// "default / no variant". Set via Runner.ModelVariant.
+	ModelVariant string
 }
 
 // RunRecorder is the substrate-grade hook for per-run, per-node, and
