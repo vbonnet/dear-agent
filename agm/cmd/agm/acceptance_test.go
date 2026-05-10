@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,8 +74,10 @@ func TestAnnounceAcceptanceCriteriaSilentWhenEmpty(t *testing.T) {
 }
 
 // captureStdout redirects os.Stdout for the duration of fn and returns
-// what was written. Reasonable for short banners; not a full pipe so
-// it caps at a few KB before blocking, which suits our use here.
+// what was written. The reader drains until EOF so multi-write banners
+// don't get truncated when the pipe wakes the reader between writes
+// (a single Read on a pipe is allowed to return short — Linux/CI hits
+// this routinely while macOS often coalesces).
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	orig := os.Stdout
@@ -85,9 +88,8 @@ func captureStdout(t *testing.T, fn func()) string {
 	os.Stdout = w
 	done := make(chan string, 1)
 	go func() {
-		buf := make([]byte, 8192)
-		n, _ := r.Read(buf)
-		done <- string(buf[:n])
+		b, _ := io.ReadAll(r)
+		done <- string(b)
 	}()
 	fn()
 	_ = w.Close()
