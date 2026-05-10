@@ -139,7 +139,32 @@ func openSQLiteDB(path string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("workflow: apply schema: %w", err)
 	}
+	if err := migrateSchema(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("workflow: migrate schema: %w", err)
+	}
 	return db, nil
+}
+
+// migrateSchema applies additive schema changes that may not be present on
+// databases created before a given column was added. Each migration is
+// idempotent: "duplicate column name" errors are silently ignored so the same
+// migration runs safely on both fresh and existing databases.
+func migrateSchema(ctx context.Context, db *sql.DB) error {
+	migrations := []string{
+		// Added when cost-to-intelligence tracking landed: tags a run with
+		// which model variant was used so A/B comparisons are queryable.
+		`ALTER TABLE runs ADD COLUMN model_variant TEXT`,
+	}
+	for _, m := range migrations {
+		if _, err := db.ExecContext(ctx, m); err != nil {
+			if strings.Contains(err.Error(), "duplicate column name") {
+				continue // column already exists; this DB is up to date
+			}
+			return fmt.Errorf("migration %q: %w", m, err)
+		}
+	}
+	return nil
 }
 
 // pingWithBusyRetry retries PingContext on SQLITE_BUSY for up to 5s.
@@ -337,10 +362,10 @@ func (s *SQLiteState) BeginRun(ctx context.Context, rec RunRecord) error {
 		return fmt.Errorf("workflow: BeginRun: upsert workflow: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO runs (run_id, workflow_id, state, inputs_json, started_at, trigger, triggered_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO runs (run_id, workflow_id, state, inputs_json, started_at, trigger, triggered_by, model_variant)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (run_id) DO NOTHING
-	`, rec.RunID, wfID, state, rec.InputsJSON, rec.StartedAt, trigger, rec.TriggeredBy); err != nil {
+	`, rec.RunID, wfID, state, rec.InputsJSON, rec.StartedAt, trigger, rec.TriggeredBy, nullableString(rec.ModelVariant)); err != nil {
 		return fmt.Errorf("workflow: BeginRun: insert run: %w", err)
 	}
 

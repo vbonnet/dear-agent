@@ -614,6 +614,14 @@ type RunReport struct {
 	// Succeeded is true iff every attempted node returned without an
 	// error AND at least one node was attempted.
 	Succeeded bool
+	// TotalTokens and TotalDollars are accumulated from the run-level
+	// budget Meter (Runner.Budget). Both are zero when no Meter is wired
+	// or when the executor does not implement CostReporter.
+	TotalTokens  int
+	TotalDollars float64
+	// ModelVariant mirrors Runner.ModelVariant — the A/B testing label
+	// that was active for this run. Empty means "default / no variant".
+	ModelVariant string
 }
 
 // Context threads through node execution. The runner fills these in from

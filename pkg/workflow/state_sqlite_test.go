@@ -258,6 +258,75 @@ func TestSQLiteStateRunnerIntegration(t *testing.T) {
 	}
 }
 
+// TestModelVariantPersistedToRuns verifies that Runner.ModelVariant is written
+// to the runs row via BeginRun so cost-vs-quality queries can filter by variant.
+func TestModelVariantPersistedToRuns(t *testing.T) {
+	ss := openTestState(t)
+	ctx := context.Background()
+
+	r := NewRunner(&fakeAI{})
+	r.UseSQLiteState(ss)
+	r.ModelVariant = "opus-4-7-test"
+
+	w := &Workflow{
+		Name: "variant-test", Version: "1",
+		Nodes: []Node{
+			{ID: "n1", Kind: KindBash, Bash: &BashNode{Cmd: "echo hi"}},
+		},
+	}
+	if _, err := r.Run(ctx, w, nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var variant string
+	if err := ss.DB().QueryRowContext(ctx,
+		`SELECT COALESCE(model_variant, '') FROM runs LIMIT 1`,
+	).Scan(&variant); err != nil {
+		t.Fatalf("query model_variant: %v", err)
+	}
+	if variant != "opus-4-7-test" {
+		t.Errorf("model_variant = %q, want %q", variant, "opus-4-7-test")
+	}
+}
+
+// TestModelVariantInRunReport verifies that Runner.ModelVariant is surfaced in
+// the RunReport returned from Run, so callers don't need to query the DB.
+func TestModelVariantInRunReport(t *testing.T) {
+	ss := openTestState(t)
+	ctx := context.Background()
+
+	r := NewRunner(&fakeAI{})
+	r.UseSQLiteState(ss)
+	r.ModelVariant = "sonnet-4-6-control"
+
+	w := &Workflow{
+		Name: "report-variant-test", Version: "1",
+		Nodes: []Node{
+			{ID: "n1", Kind: KindBash, Bash: &BashNode{Cmd: "echo done"}},
+		},
+	}
+	rep, err := r.Run(ctx, w, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rep.ModelVariant != "sonnet-4-6-control" {
+		t.Errorf("RunReport.ModelVariant = %q, want %q", rep.ModelVariant, "sonnet-4-6-control")
+	}
+}
+
+// TestMigrateSchema verifies that migrateSchema is idempotent: running it
+// twice on a database that already has model_variant does not return an error.
+func TestMigrateSchema(t *testing.T) {
+	ss := openTestState(t)
+	ctx := context.Background()
+
+	// migrateSchema is called inside openSQLiteDB; run it again manually
+	// to verify the "duplicate column name" path is swallowed.
+	if err := migrateSchema(ctx, ss.db); err != nil {
+		t.Errorf("second migrateSchema: %v", err)
+	}
+}
+
 // ----- helpers -----
 
 func openTestState(t *testing.T) *SQLiteState {
