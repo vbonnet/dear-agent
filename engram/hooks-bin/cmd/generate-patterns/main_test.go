@@ -354,9 +354,10 @@ func TestIntegration_RoundTrip(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 	// Locate the YAML relative to this test file's directory.
-	// The generator lives at hooks/cmd/generate-patterns/ and the YAML at
-	// patterns/bash-anti-patterns.yaml (three levels up from hooks/, then patterns/).
-	yamlPath := filepath.Join("..", "..", "..", "patterns", "bash-anti-patterns.yaml")
+	// Test file is at engram/hooks-bin/cmd/generate-patterns/, YAML lives
+	// in the bash-blocker hook directory under agm/.
+	yamlPath := filepath.Join("..", "..", "..", "..",
+		"agm", "cmd", "agm-hooks", "pretool-bash-blocker", "bash-anti-patterns.yaml")
 	committedPath := filepath.Join("..", "..", "internal", "validator", "patterns.go")
 
 	// Read YAML.

@@ -66,7 +66,7 @@ func TestEnsureRepo_WithRemote(t *testing.T) {
 	// Create a bare repo to act as remote
 	bareDir := t.TempDir()
 	bareRepo := &Repo{dir: bareDir}
-	if err := bareRepo.run("git", "init", "--bare"); err != nil {
+	if err := bareRepo.run("init", "--bare"); err != nil {
 		t.Fatalf("init bare repo: %v", err)
 	}
 
@@ -543,7 +543,7 @@ func TestMemoryVCS_Push_ToLocalBare(t *testing.T) {
 	// Create a bare repo as "remote"
 	bareDir := t.TempDir()
 	bareRepo := &Repo{dir: bareDir}
-	if err := bareRepo.run("git", "init", "--bare"); err != nil {
+	if err := bareRepo.run("init", "--bare"); err != nil {
 		t.Fatalf("init bare: %v", err)
 	}
 
@@ -580,7 +580,7 @@ func TestMemoryVCS_Push_ToLocalBare(t *testing.T) {
 	// Verify remote received the commit by cloning
 	cloneDir := t.TempDir()
 	cloneRepo := &Repo{dir: cloneDir}
-	if err := cloneRepo.run("git", "clone", bareDir, cloneDir); err != nil {
+	if err := cloneRepo.run("clone", bareDir, cloneDir); err != nil {
 		t.Fatalf("clone: %v", err)
 	}
 

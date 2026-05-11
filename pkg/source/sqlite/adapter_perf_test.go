@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -19,6 +20,9 @@ import (
 func TestAdapter_Perf_Fetch10K(t *testing.T) {
 	if testing.Short() {
 		t.Skip("perf test skipped under -short")
+	}
+	if os.Getenv("CI") != "" {
+		t.Skip("perf test skipped in CI: 10K-row seed exceeds the 10m default timeout on shared runners")
 	}
 	dir := t.TempDir()
 	a, err := sqliteadapter.Open(filepath.Join(dir, "sources.db"))

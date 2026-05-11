@@ -581,11 +581,6 @@ func outputValidationJSON(summary *ValidationSummary) error {
 
 // outputValidationText outputs results in text format
 func outputValidationText(summary *ValidationSummary) error {
-	if len(summary.Results) == 0 {
-		fmt.Println("No files validated")
-		return nil
-	}
-
 	// Print results for each file
 	for _, result := range summary.Results {
 		if len(result.Errors) == 0 && len(result.Warnings) == 0 && len(result.FixesApplied) == 0 {
