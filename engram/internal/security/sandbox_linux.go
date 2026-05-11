@@ -42,11 +42,13 @@ func (s *Sandbox) applyLinux(cmd string, args []string, permissions Permissions)
 	// Attempt to load profile with apparmor_parser
 	loadCmd := exec.Command("apparmor_parser", "-r", profilePath)
 	if err := loadCmd.Run(); err != nil {
-		// Profile loading failed (likely permission denied)
-		// Fall back to validation-only mode
+		// Profile loading failed (likely permission denied — apparmor_parser
+		// needs CAP_MAC_ADMIN). This is an intentional graceful-degradation
+		// path: fall back to validation-only mode rather than blocking the
+		// caller. Returning nil err is correct here.
 		// Clean up the profile file
 		os.Remove(profilePath)
-		return append([]string{cmd}, args...), nil
+		return append([]string{cmd}, args...), nil //nolint:nilerr // intentional fallback to validation-only mode
 	}
 
 	// Profile loaded successfully, use aa-exec
@@ -80,8 +82,10 @@ func isAppArmorAvailable() bool {
 	return strings.TrimSpace(string(data)) == "Y"
 }
 
-// generateAppArmorProfile generates an AppArmor profile from permissions
-func generateAppArmorProfile(cmd string, permissions Permissions) (string, error) {
+// generateAppArmorProfile generates an AppArmor profile from permissions.
+// The error result is reserved for future failure modes (e.g., template
+// rendering with constraints) and is always nil today.
+func generateAppArmorProfile(cmd string, permissions Permissions) (string, error) { //nolint:unparam // future error path reserved
 	var profile strings.Builder
 
 	// Profile header
@@ -89,13 +93,13 @@ func generateAppArmorProfile(cmd string, permissions Permissions) (string, error
 
 	// Profile name (based on command hash for uniqueness)
 	profileName := fmt.Sprintf("engram_%s", hashCommand(cmd))
-	profile.WriteString(fmt.Sprintf("profile %s {\n", profileName))
+	fmt.Fprintf(&profile, "profile %s {\n", profileName)
 
 	// Base abstractions (essential system libraries)
 	profile.WriteString("  #include <abstractions/base>\n\n")
 
 	// Command execution permission
-	profile.WriteString(fmt.Sprintf("  %s rix,\n\n", cmd))
+	fmt.Fprintf(&profile, "  %s rix,\n\n", cmd)
 
 	// Filesystem permissions
 	if len(permissions.Filesystem) > 0 {
@@ -105,11 +109,11 @@ func generateAppArmorProfile(cmd string, permissions Permissions) (string, error
 			expandedPath := expandPath(path)
 
 			// Grant read/write access
-			profile.WriteString(fmt.Sprintf("  %s rw,\n", expandedPath))
+			fmt.Fprintf(&profile, "  %s rw,\n", expandedPath)
 
 			// If directory, allow subdirectory access
 			if strings.HasSuffix(expandedPath, "/") {
-				profile.WriteString(fmt.Sprintf("  %s** rw,\n", expandedPath))
+				fmt.Fprintf(&profile, "  %s** rw,\n", expandedPath)
 			}
 		}
 		profile.WriteString("\n")
@@ -148,7 +152,7 @@ func generateAppArmorProfile(cmd string, permissions Permissions) (string, error
 				// If not found, use the command as-is
 				cmdPath = allowedCmd
 			}
-			profile.WriteString(fmt.Sprintf("  %s ix,\n", cmdPath))
+			fmt.Fprintf(&profile, "  %s ix,\n", cmdPath)
 		}
 		profile.WriteString("\n")
 	}
@@ -164,7 +168,9 @@ func writeAppArmorProfile(profile, cmd string) (string, error) {
 	profileName := fmt.Sprintf("engram_%s", hashCommand(cmd))
 	profilePath := filepath.Join("/tmp", fmt.Sprintf("%s.profile", profileName))
 
-	err := os.WriteFile(profilePath, []byte(profile), 0644)
+	// 0600: the profile must be readable by aa-exec running as the same
+	// user; other users have no business reading it.
+	err := os.WriteFile(profilePath, []byte(profile), 0600)
 	if err != nil {
 		return "", err
 	}

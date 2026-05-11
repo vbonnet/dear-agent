@@ -462,7 +462,7 @@ func (p *Provider) writeSecrets(upperDir string, secrets map[string]string) erro
 	for key, value := range secrets {
 		// Expand environment variables in value
 		expandedValue := os.ExpandEnv(value)
-		buf.WriteString(fmt.Sprintf("%s=%s\n", key, expandedValue))
+		fmt.Fprintf(&buf, "%s=%s\n", key, expandedValue)
 	}
 
 	// Write with restricted permissions (0600 - owner read/write only)

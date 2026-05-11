@@ -201,11 +201,9 @@ func TestApplyLinux_WithoutAppArmor(t *testing.T) {
 		if len(result) < 4 {
 			t.Errorf("aa-exec wrapper should have at least 4 elements, got %d", len(result))
 		}
-	} else {
+	} else if result[0] != cmd {
 		// Most common case: profile loading failed, graceful fallback
-		if result[0] != cmd {
-			t.Errorf("applyLinux() should return unmodified command on fallback, got %v", result)
-		}
+		t.Errorf("applyLinux() should return unmodified command on fallback, got %v", result)
 	}
 }
 
