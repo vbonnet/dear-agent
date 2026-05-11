@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main, develop]
 
+# Principle of least privilege: jobs only need to read the repo and the
+# go module cache. They never push branches, comment on PRs, or write to
+# the security tab.
+permissions:
+  contents: read
+
 jobs:
   ci:
     name: Build & Test (${{ matrix.os }})

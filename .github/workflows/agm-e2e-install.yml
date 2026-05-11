@@ -12,6 +12,9 @@ on:
       - 'agm/**'
       - '.github/workflows/agm-e2e-install.yml'
 
+permissions:
+  contents: read
+
 jobs:
   e2e-install:
     name: AGM E2E Install (${{ matrix.distro }})
