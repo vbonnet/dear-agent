@@ -9,6 +9,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   bash-line-limit:
     name: Bash Script Size Check (20-line limit)

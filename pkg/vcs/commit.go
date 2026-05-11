@@ -85,7 +85,7 @@ func (r *Repo) TrackDelete(path, message string) (string, error) {
 	}
 
 	// Stage the deletion
-	if err := r.run("git", "add", "--", relPath); err != nil {
+	if err := r.run("add", "--", relPath); err != nil {
 		return "", fmt.Errorf("stage deletion: %w", err)
 	}
 
@@ -95,7 +95,7 @@ func (r *Repo) TrackDelete(path, message string) (string, error) {
 		compRel, err := filepath.Rel(r.dir, comp)
 		if err == nil {
 			// Try to stage companion deletion (ignore errors if it still exists)
-			_ = r.run("git", "add", "--", compRel)
+			_ = r.run("add", "--", compRel)
 		}
 	}
 

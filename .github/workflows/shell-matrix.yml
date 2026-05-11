@@ -14,6 +14,9 @@ on:
       - 'tests/bats/**'
       - '.github/workflows/shell-matrix.yml'
 
+permissions:
+  contents: read
+
 jobs:
   shell-matrix:
     name: Bats (${{ matrix.shell }})

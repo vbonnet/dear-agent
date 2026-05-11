@@ -3,12 +3,24 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// skipPerfOnCI guards P95 perf tests from running on shared CI runners where
+// wall-clock latency is dominated by noisy neighbors rather than the code under
+// test. The ADR targets (status_read < 5ms, audit_append < 1ms, list < 10ms)
+// are floors for production hardware, not for ubuntu-latest VMs.
+func skipPerfOnCI(t *testing.T) {
+	t.Helper()
+	if os.Getenv("CI") != "" {
+		t.Skip("perf P95 test skipped in CI: shared runners produce unreliable latency numbers (set CI= to run)")
+	}
+}
 
 // Performance targets (ADR-010 §6):
 //
@@ -37,6 +49,7 @@ const (
 // TestPerf_StatusReadP95 measures end-to-end run-status reads — runs JOIN
 // nodes — for a synthetic 100-node DAG.
 func TestPerf_StatusReadP95(t *testing.T) {
+	skipPerfOnCI(t)
 	ss := openTestState(t)
 	runID := seedRunWithNodes(t, ss, perfNodeCount)
 
@@ -53,6 +66,7 @@ func TestPerf_StatusReadP95(t *testing.T) {
 // audit_events table. The runner emits one of these per state transition,
 // so they must stay cheap to keep the engine's overhead invisible.
 func TestPerf_AuditAppendP95(t *testing.T) {
+	skipPerfOnCI(t)
 	ss := openTestState(t)
 	runID := seedRun(t, ss)
 
@@ -74,6 +88,7 @@ func TestPerf_AuditAppendP95(t *testing.T) {
 // TestPerf_ListRecentRunsP95 measures the cost of `workflow list`-style
 // queries: select the 50 most recent runs by started_at.
 func TestPerf_ListRecentRunsP95(t *testing.T) {
+	skipPerfOnCI(t)
 	ss := openTestState(t)
 	for i := 0; i < perfRunsForListing*4; i++ {
 		seedRunNamed(t, ss, fmt.Sprintf("perf-list-%d", i))
