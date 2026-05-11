@@ -21,70 +21,50 @@ var forbiddenPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(^|\s)(python3?)\s+<<`),
 	// 5. command separator (;)
 	regexp.MustCompile(`;`),
-	// 6. command substitution $()
-	regexp.MustCompile(`\$\(`),
-	// 7. bash test ([/[[/test)
+	// 6. bash test ([/[[/test)
 	regexp.MustCompile(`(^test\s+|\[\[?\s*)`),
-	// 8. redirection to system path
+	// 7. redirection to system path
 	regexp.MustCompile(`([^2&]|^)>\s*/(etc|sys|proc|boot|dev|usr|var|sbin)/`),
-	// 9. recursive rm (rm -r / rm -rf)
+	// 8. recursive rm (rm -r / rm -rf)
 	regexp.MustCompile(`(^|\s)rm\s+(-[a-zA-Z]*r[a-zA-Z]*)\b`),
-	// 10. sed in-place edit (sed -i)
+	// 9. sed in-place edit (sed -i)
 	regexp.MustCompile(`(^|\s)sed\s+(-[a-zA-Z]*i|--in-place)\b`),
-	// 11. find command
+	// 10. find command
 	regexp.MustCompile(`(^|\s)find\s+`),
-	// 12. git checkout main/master (worktree safety)
+	// 11. git checkout main/master (worktree safety)
 	regexp.MustCompile(`\bgit\s+(-C\s+\S+\s+)?checkout\s+(main|master)\b`),
-	// 13. git switch (branch-level operation)
+	// 12. git switch (branch-level operation)
 	regexp.MustCompile(`\bgit\s+(-C\s+\S+\s+)?switch\b`),
-	// 14. git stash (contaminates shared state)
+	// 13. git stash (contaminates shared state)
 	regexp.MustCompile(`\bgit\s+(-C\s+\S+\s+)?stash\b`),
-	// 15. git add (broad staging: . -A --all -u --update)
+	// 14. git add (broad staging: . -A --all -u --update)
 	regexp.MustCompile(`\bgit\s+(-C\s+\S+\s+)?add\s+(\.|--all|--update|-A|-u)(\s|$)`),
-	// 16. git --no-verify flag (hook bypass)
+	// 15. git --no-verify flag (hook bypass)
 	regexp.MustCompile(`\bgit\s+[^|&;]*?(--no-verify\b|-n(\s+[^0-9]|\s*$))`),
-	// 17. stat (causes shell expansion permission prompt)
+	// 16. stat (causes shell expansion permission prompt)
 	regexp.MustCompile(`(^|\s)stat(\s|$)`),
-	// 18. checksum (sha256sum/sha1sum/md5sum/cksum)
+	// 17. checksum (sha256sum/sha1sum/md5sum/cksum)
 	regexp.MustCompile(`\b(sha256sum|sha1sum|sha512sum|md5sum|cksum)\b`),
-	// 19. AGM_SKIP_TEST_GATE (test gate bypass)
+	// 18. AGM_SKIP_TEST_GATE (test gate bypass)
 	regexp.MustCompile(`AGM_SKIP_TEST_GATE`),
-	// 20. sensitive dotdir access (~/.ssh, ~/.aws, ~/.gnupg)
+	// 19. sensitive dotdir access (~/.ssh, ~/.aws, ~/.gnupg)
 	regexp.MustCompile(`(~|/home/\w+)/\.(ssh|aws|gnupg|gpg)/`),
-	// 21. ls (standalone)
+	// 20. ls (standalone)
 	regexp.MustCompile(`(^|\s)ls\b`),
-	// 22. grep/rg (standalone)
+	// 21. grep/rg (standalone)
 	regexp.MustCompile(`(^|\s)(grep|rg)\b`),
-	// 23. cat (standalone)
+	// 22. cat (standalone)
 	regexp.MustCompile(`(^|\s)cat\b`),
-	// 24. head/tail (standalone)
+	// 23. head/tail (standalone)
 	regexp.MustCompile(`(^|\s)(head|tail)\b`),
-	// 25. sed (standalone)
+	// 24. sed (standalone)
 	regexp.MustCompile(`(^|\s)sed\b`),
-	// 26. awk (standalone)
+	// 25. awk (standalone)
 	regexp.MustCompile(`(^|\s)awk\b`),
-	// 27. echo/printf (standalone)
+	// 26. echo/printf (standalone)
 	regexp.MustCompile(`(^|\s)(echo|printf)\b`),
-	// 28. touch (standalone)
-	regexp.MustCompile(`(^|\s)touch\b`),
-	// 29. wc (standalone)
-	regexp.MustCompile(`(^|\s)wc\b`),
-	// 30. sort (standalone)
-	regexp.MustCompile(`(^|\s)sort\b`),
-	// 31. mkdir (standalone)
-	regexp.MustCompile(`(^|\s)mkdir\b`),
-	// 32. cp (standalone)
-	regexp.MustCompile(`(^|\s)cp\b`),
-	// 33. mv (standalone)
-	regexp.MustCompile(`(^|\s)mv\b`),
-	// 34. cut (standalone)
-	regexp.MustCompile(`(^|\s)cut\b`),
-	// 35. uniq (standalone)
-	regexp.MustCompile(`(^|\s)uniq\b`),
-	// 36. tee (standalone)
-	regexp.MustCompile(`(^|\s)tee\b`),
-	// 37. rm (standalone)
-	regexp.MustCompile(`(^|[;&|]\s*)rm\b`),
+	// 27. command substitution $()
+	regexp.MustCompile(`\$\(`),
 }
 
 var patternNames = []string{
@@ -94,7 +74,6 @@ var patternNames = []string{
 	"python one-liner (python3 -c / python -c)",
 	"python heredoc (python3 << / python <<)",
 	"command separator (;)",
-	"command substitution $()",
 	"bash test ([/[[/test)",
 	"redirection to system path",
 	"recursive rm (rm -r / rm -rf)",
@@ -116,16 +95,7 @@ var patternNames = []string{
 	"sed (standalone)",
 	"awk (standalone)",
 	"echo/printf (standalone)",
-	"touch (standalone)",
-	"wc (standalone)",
-	"sort (standalone)",
-	"mkdir (standalone)",
-	"cp (standalone)",
-	"mv (standalone)",
-	"cut (standalone)",
-	"uniq (standalone)",
-	"tee (standalone)",
-	"rm (standalone)",
+	"command substitution $()",
 }
 
 // remediations provides actionable fix instructions for each forbidden pattern.
@@ -137,7 +107,6 @@ var remediations = []string{
 	"Use the Write tool to create a .py file, then run it with Bash",
 	"Use the Write tool to create a .py file, then run it with Bash",
 	"Run as separate Bash calls instead of chaining with ';'",
-	"Use --prompt-file flag instead of command substitution in arguments",
 	"Use the Grep tool for searching, not bash test/[/[[ expressions",
 	"Do not redirect output to system directories. Write to project paths or /tmp/ instead.",
 	"Use git rm for tracked files, or ask the user to confirm directory deletion.",
@@ -159,14 +128,5 @@ var remediations = []string{
 	"Use Read tool with offset/limit parameters, or Edit tool for modifications",
 	"Use Edit tool",
 	"Use Write tool to create files",
-	"Use Write tool to create files",
-	"Use Read tool and count in conversation",
-	"Use Read tool and sort in conversation",
-	"Use Write tool (auto-creates parent dirs)",
-	"Use Read tool to read source, then Write tool to create dest",
-	"Use Read + Write tools, then git mv for tracked files",
-	"Use Read tool and parse in conversation",
-	"Use Read tool and deduplicate in conversation",
-	"Use Read + Write tools",
-	"Use git rm for tracked files, or ask user to confirm file deletion",
+	"Use --prompt-file flag instead of command substitution in arguments",
 }

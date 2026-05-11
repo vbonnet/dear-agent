@@ -1006,12 +1006,9 @@ patterns:
     tier2_validation: true
 
   # --- order 470: rm (standalone) ---
-  # Match `rm` at the start of a command (line start or after a shell control
-  # operator: ; && || |). Plain whitespace doesn't count as a separator —
-  # that excludes false positives like "git rm" where rm is a subcommand.
   - id: rm-standalone
     order: 470
-    re2_regex: '(^|[;&|]\s*)rm\b'
+    re2_regex: '(^|\s)rm\b'
     pattern_name: 'rm (standalone)'
     remediation: "Use git rm for tracked files, or ask user to confirm file deletion"
     examples:
