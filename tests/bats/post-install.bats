@@ -17,6 +17,10 @@ setup() {
 }
 
 teardown() {
+    # post-install.sh runs `go build` with HOME=$TEST_DIR, which may download
+    # the Go toolchain into $TEST_DIR/go/pkg/mod with read-only permissions.
+    # Restore write permission so rm -rf can clean up.
+    chmod -R u+w "$TEST_DIR" 2>/dev/null || true
     rm -rf "$TEST_DIR"
 }
 

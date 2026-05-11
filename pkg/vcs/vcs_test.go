@@ -66,7 +66,7 @@ func TestEnsureRepo_WithRemote(t *testing.T) {
 	// Create a bare repo to act as remote
 	bareDir := t.TempDir()
 	bareRepo := &Repo{dir: bareDir}
-	if err := bareRepo.run("git", "init", "--bare"); err != nil {
+	if err := bareRepo.run("init", "--bare"); err != nil {
 		t.Fatalf("init bare repo: %v", err)
 	}
 
@@ -540,10 +540,13 @@ func TestMemoryVCS_EndToEnd(t *testing.T) {
 }
 
 func TestMemoryVCS_Push_ToLocalBare(t *testing.T) {
-	// Create a bare repo as "remote"
+	// Create a bare repo as "remote". Use --initial-branch=main so the bare
+	// repo's HEAD points at main; without this, init.defaultBranch determines
+	// HEAD (often "master" on CI runners), so a clone after pushing main
+	// would check out an empty default branch and miss the pushed file.
 	bareDir := t.TempDir()
 	bareRepo := &Repo{dir: bareDir}
-	if err := bareRepo.run("git", "init", "--bare"); err != nil {
+	if err := bareRepo.run("init", "--bare", "--initial-branch=main"); err != nil {
 		t.Fatalf("init bare: %v", err)
 	}
 
@@ -580,7 +583,7 @@ func TestMemoryVCS_Push_ToLocalBare(t *testing.T) {
 	// Verify remote received the commit by cloning
 	cloneDir := t.TempDir()
 	cloneRepo := &Repo{dir: cloneDir}
-	if err := cloneRepo.run("git", "clone", bareDir, cloneDir); err != nil {
+	if err := cloneRepo.run("clone", bareDir, cloneDir); err != nil {
 		t.Fatalf("clone: %v", err)
 	}
 

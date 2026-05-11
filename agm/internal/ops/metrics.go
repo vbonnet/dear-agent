@@ -338,9 +338,13 @@ func statfsDisk(mount string) DiskMetrics {
 		return DiskMetrics{Mount: mount}
 	}
 
-	totalBytes := stat.Blocks * uint64(stat.Bsize)
-	freeBytes := stat.Bavail * uint64(stat.Bsize)
-	usedBytes := totalBytes - (stat.Bfree * uint64(stat.Bsize))
+	// stat.Bsize is int64 on Linux (gosec G115 warns on the cast) and
+	// uint32 on darwin (a widening cast is trivially safe). Filesystem
+	// block sizes are non-negative by kernel contract on both platforms.
+	bsize := uint64(stat.Bsize) //nolint:gosec // filesystem block size is non-negative
+	totalBytes := stat.Blocks * bsize
+	freeBytes := stat.Bavail * bsize
+	usedBytes := totalBytes - (stat.Bfree * bsize)
 
 	totalGB := float64(totalBytes) / (1024 * 1024 * 1024)
 	usedGB := float64(usedBytes) / (1024 * 1024 * 1024)
