@@ -23,9 +23,8 @@ This MCP server exposes AGM session metadata via the Model Context Protocol, ena
 ## Implementation Status
 
 **Phase 2.5 Bead - V1 Implementation**:
-- ✅ MCP server structure (main.go, config.go, tools.go, transform.go, cache.go)
+- ✅ MCP server structure (main.go, config.go, tools.go)
 - ✅ 3 AGM MCP tools implemented
-- ✅ Session list caching (performance optimization)
 - ✅ Configuration system (YAML + defaults)
 - ⏳ Auto-registration (placeholder for V2)
 - ⏳ MCP client in AGM CLI (placeholder for V2)
@@ -53,8 +52,6 @@ cmd/agm-mcp-server/
 ├── main.go          # Entry point, server setup, tool registration
 ├── config.go        # YAML config parsing, smart defaults
 ├── tools.go         # 3 MCP tools: list/search/get sessions
-├── transform.go     # Manifest → MCP metadata transformation
-├── cache.go         # Session list caching (5s TTL)
 └── README.md        # This file
 ```
 

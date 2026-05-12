@@ -6,6 +6,16 @@ import (
 	"time"
 )
 
+// pickLoader picks the per-run override loader if set, otherwise the suite's
+// default. Centralized so every suite's Run() honors RunConfig.Loader the same
+// way.
+func pickLoader(override, defaultLoader TaskLoader) TaskLoader {
+	if override != nil {
+		return override
+	}
+	return defaultLoader
+}
+
 // runOptions is the internal config used by runTasks. Suite implementations
 // build it from their public RunConfig + their TaskLoader / TaskExecutor.
 type runOptions struct {
