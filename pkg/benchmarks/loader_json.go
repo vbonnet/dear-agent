@@ -135,7 +135,10 @@ func decodeNDJSON(r io.Reader) ([]TaskSpec, error) {
 		tasks = append(tasks, t)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		// line points at the last line successfully scanned; the scanner
+		// failure (e.g. SplitFunc returned, buffer overflow) happened on
+		// the next one.
+		return nil, fmt.Errorf("line %d: %w", line+1, err)
 	}
 	return tasks, nil
 }
