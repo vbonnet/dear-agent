@@ -41,6 +41,20 @@ forbidden-paths:
     - research/*.md
     - research/*.txt
 
+# Framework-level defaults applied to every task in this repo. These
+# travel with the session, not the prompt, so a worker (and any
+# sub-agent it spawns) cannot accidentally forget them.
+#
+# `graceful-exit` is the no-overfit guardrail: "nothing fits" is a
+# first-class valid outcome — saying so is better than inflating a
+# weak match. See pkg/gracefulexit and ADR-018. The default is ON.
+# To opt out (rare; e.g. a synthetic generator that must always emit
+# a row), set `disabled: true` and document `why:`.
+framework-defaults:
+  graceful-exit:
+    # disabled: false  # default — leave the guardrail on
+    # why: ""          # required only when disabled: true
+
 # DEAR Define-phase exit conditions for tasks in this repo. The list
 # is informational, not a blocking gate: workers see it at session
 # start (via `agm acceptance show`) and the Audit phase verifies the

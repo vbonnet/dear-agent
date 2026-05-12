@@ -17,6 +17,8 @@
 //	    command: "golangci-lint run ./..."
 //	  - type: no-regressions
 //	    description: "No existing tests broken"
+//	  - type: graceful-exit
+//	    description: "Empty findings are a valid completion"
 //
 // Recognized types are validated at load time so a typo surfaces
 // immediately rather than at task-completion time. Callers that want
@@ -47,6 +49,14 @@ const (
 	// Verification is the Audit phase's job; the criterion is the
 	// declaration that this property must hold.
 	TypeNoRegressions Type = "no-regressions"
+	// TypeGracefulExit means "an empty result is a valid completion".
+	// It is the typed form of the framework-level no-overfit guardrail
+	// (pkg/gracefulexit): the agent is explicitly permitted — and
+	// expected — to report "nothing fits" when the evidence does not
+	// support a positive finding, rather than inflating a weak match.
+	// The Audit phase can later refuse a deliverable whose findings
+	// are judged inflated against this criterion.
+	TypeGracefulExit Type = "graceful-exit"
 	// TypeCustom is an escape hatch: a free-form criterion identified
 	// only by a description and (optionally) a command. Use sparingly —
 	// the more criteria are typed, the more the Audit phase can do.
@@ -56,7 +66,7 @@ const (
 // IsValid reports whether t is a known criterion type.
 func (t Type) IsValid() bool {
 	switch t {
-	case TypeTestsPass, TypeLintClean, TypeNoRegressions, TypeCustom:
+	case TypeTestsPass, TypeLintClean, TypeNoRegressions, TypeGracefulExit, TypeCustom:
 		return true
 	default:
 		return false
@@ -126,15 +136,15 @@ func ParseBytes(data []byte) ([]Criterion, error) {
 func Validate(crits []Criterion) error {
 	for i, c := range crits {
 		if !c.Type.IsValid() {
-			return fmt.Errorf("acceptance-criteria[%d]: unknown type %q (want one of: tests-pass, lint-clean, no-regressions, custom)", i, c.Type)
+			return fmt.Errorf("acceptance-criteria[%d]: unknown type %q (want one of: tests-pass, lint-clean, no-regressions, graceful-exit, custom)", i, c.Type)
 		}
 		switch c.Type {
 		case TypeTestsPass, TypeLintClean:
 			if strings.TrimSpace(c.Command) == "" {
 				return fmt.Errorf("acceptance-criteria[%d]: type %q requires a non-empty command", i, c.Type)
 			}
-		case TypeNoRegressions:
-			// Description-only is fine; this criterion is declarative.
+		case TypeNoRegressions, TypeGracefulExit:
+			// Description-only is fine; these criteria are declarative.
 		case TypeCustom:
 			if strings.TrimSpace(c.Description) == "" && strings.TrimSpace(c.Command) == "" {
 				return fmt.Errorf("acceptance-criteria[%d]: type %q requires either description or command", i, c.Type)

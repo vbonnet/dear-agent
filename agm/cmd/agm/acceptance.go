@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/pkg/acceptance"
+	"github.com/vbonnet/dear-agent/pkg/gracefulexit"
 )
 
 var acceptanceCmd = &cobra.Command{
@@ -126,6 +127,43 @@ func announceAcceptanceCriteria(workDir string) {
 		fmt.Printf("  • %s\n", c.String())
 	}
 	fmt.Println()
+}
+
+// announceFrameworkGuardrails prints the framework-level guardrails
+// every dear-agent task inherits unless explicitly opted out in
+// .dear-agent.yml. Today there is one guardrail (graceful exit /
+// no-overfit); more may follow.
+//
+// This is deliberately decoupled from announceAcceptanceCriteria:
+// acceptance criteria are per-repo declarations that may be empty,
+// while framework guardrails apply by default to every task. The
+// design intent is that a worker should never need a per-prompt
+// reminder to be honest about empty results — the banner publishes
+// the contract once, at session start, where every sub-prompt will
+// see it.
+//
+// Failures are ignored: a malformed config or unreadable file must
+// not block session creation. Worst case the worker doesn't see the
+// banner and falls back to the in-context CLAUDE.md guidance.
+func announceFrameworkGuardrails(workDir string) {
+	root := findDearAgentRootFrom(workDir)
+	// When there is no .dear-agent.yml we still print the default
+	// guardrail — the whole point is that this is framework-level,
+	// not per-repo. Load on an empty path simply returns the zero
+	// Config, which is "enabled".
+	var cfg gracefulexit.Config
+	if root != "" {
+		loaded, err := gracefulexit.Load(root)
+		if err != nil {
+			return
+		}
+		cfg = loaded
+	}
+	banner := gracefulexit.Banner(cfg)
+	if banner == "" {
+		return
+	}
+	fmt.Print(banner)
 }
 
 // findDearAgentRootFrom is the workDir-rooted variant of

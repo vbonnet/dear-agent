@@ -101,6 +101,29 @@ func TestValidateAllowsDescriptionOnlyForNoRegressions(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsGracefulExit(t *testing.T) {
+	if err := Validate([]Criterion{{Type: TypeGracefulExit, Description: "empty is fine"}}); err != nil {
+		t.Errorf("graceful-exit with description should pass: %v", err)
+	}
+	if err := Validate([]Criterion{{Type: TypeGracefulExit}}); err != nil {
+		t.Errorf("bare graceful-exit should pass (it is declarative): %v", err)
+	}
+}
+
+func TestParseBytesAcceptsGracefulExit(t *testing.T) {
+	yml := []byte(`acceptance-criteria:
+  - type: graceful-exit
+    description: "Empty findings are a valid completion"
+`)
+	got, err := ParseBytes(yml)
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+	if len(got) != 1 || got[0].Type != TypeGracefulExit {
+		t.Errorf("got %+v", got)
+	}
+}
+
 func TestValidateRejectsEmptyCustom(t *testing.T) {
 	if err := Validate([]Criterion{{Type: TypeCustom}}); err == nil {
 		t.Error("empty custom should fail")
