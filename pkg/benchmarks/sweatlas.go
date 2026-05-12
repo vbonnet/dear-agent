@@ -46,7 +46,7 @@ func (s *SWEAtlas) Run(ctx context.Context, cfg RunConfig) (*Results, error) {
 		suite:    SuiteSWEAtlas,
 		model:    cfg.Model,
 		mode:     cfg.Mode,
-		loader:   s.Loader,
+		loader:   pickLoader(cfg.Loader, s.Loader),
 		executor: s.Executor,
 		limit:    cfg.Limit,
 		budget:   cfg.BudgetUSD,

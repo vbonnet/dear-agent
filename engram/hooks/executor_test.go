@@ -122,8 +122,11 @@ func TestExecutorTimeout(t *testing.T) {
 		t.Errorf("Expected warning status for timeout, got %s", result.Status)
 	}
 
-	if result.Duration < time.Second || result.Duration > 2*time.Second {
-		t.Errorf("Expected duration around 1s, got %v", result.Duration)
+	// 1s timeout: shared-runner clocks can fire the cancel a few ms early
+	// (observed 997.1 ms on macOS CI). Allow a 50 ms lower tolerance so the
+	// test pins down "timeout was honoured" rather than "timer was exact".
+	if result.Duration < 950*time.Millisecond || result.Duration > 2*time.Second {
+		t.Errorf("Expected duration around 1s (±50ms low, +1s high), got %v", result.Duration)
 	}
 }
 

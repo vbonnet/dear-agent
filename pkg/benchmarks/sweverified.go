@@ -35,7 +35,7 @@ func (s *SWEBenchVerified) Run(ctx context.Context, cfg RunConfig) (*Results, er
 		suite:    SuiteSWEBenchVerified,
 		model:    cfg.Model,
 		mode:     cfg.Mode,
-		loader:   s.Loader,
+		loader:   pickLoader(cfg.Loader, s.Loader),
 		executor: s.Executor,
 		limit:    cfg.Limit,
 		budget:   cfg.BudgetUSD,

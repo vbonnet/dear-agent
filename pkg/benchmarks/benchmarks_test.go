@@ -166,6 +166,42 @@ func TestRun_StubExecutorMarksTasksAsErrored(t *testing.T) {
 	}
 }
 
+// fakeLoader is a TaskLoader stub that returns the configured task list.
+type fakeLoader struct{ tasks []TaskSpec }
+
+func (l fakeLoader) Load(_ context.Context, _ Suite, limit int) ([]TaskSpec, error) {
+	out := l.tasks
+	if limit > 0 && limit < len(out) {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func TestRun_CfgLoaderOverridesDefault(t *testing.T) {
+	// The suite is registered with the built-in fixture (3 tasks); the
+	// per-run cfg.Loader should win and feed the executor exactly one task.
+	exec := FuncExecutor(func(ctx context.Context, task TaskSpec, mode Mode, model string) (TaskResult, error) {
+		return TaskResult{Solved: true}, nil
+	})
+	bench := NewSWEBenchLite(nil, exec)
+
+	cfg := RunConfig{
+		Mode:   ModeRaw,
+		Model:  "x",
+		Loader: fakeLoader{tasks: []TaskSpec{{ID: "override-only", Suite: SuiteSWEBenchLite}}},
+	}
+	results, err := bench.Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(results.Tasks); got != 1 {
+		t.Fatalf("Tasks = %d, want 1 (override loader had one task)", got)
+	}
+	if results.Tasks[0].TaskID != "override-only" {
+		t.Fatalf("TaskID = %q, want override-only", results.Tasks[0].TaskID)
+	}
+}
+
 func TestRun_PropagatesContextCancellation(t *testing.T) {
 	called := 0
 	exec := FuncExecutor(func(ctx context.Context, task TaskSpec, mode Mode, model string) (TaskResult, error) {
