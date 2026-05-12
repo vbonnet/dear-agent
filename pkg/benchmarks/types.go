@@ -70,6 +70,11 @@ type RunConfig struct {
 	Concurrency int     `json:"concurrency,omitempty"`  // 0 = serial
 	Seed        int64   `json:"seed,omitempty"`
 	Tags        map[string]string `json:"tags,omitempty"`
+
+	// Loader, when non-nil, overrides the suite's default TaskLoader for this
+	// run. It lets callers point a registered scaffold at a real dataset
+	// without re-registering the suite. Not serialized.
+	Loader TaskLoader `json:"-"`
 }
 
 // Summary aggregates Results metrics for at-a-glance reporting.

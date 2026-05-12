@@ -11,12 +11,14 @@ import (
 )
 
 var (
-	benchRunSuiteFlag      string
-	benchRunModeFlag       string
-	benchRunModelFlag      string
-	benchRunLimitFlag      int
-	benchRunBudgetFlag     float64
-	benchRunResultsDirFlag string
+	benchRunSuiteFlag         string
+	benchRunModeFlag          string
+	benchRunModelFlag         string
+	benchRunLimitFlag         int
+	benchRunBudgetFlag        float64
+	benchRunResultsDirFlag    string
+	benchRunTasksFileFlag     string
+	benchRunFilterBySuiteFlag bool
 )
 
 var benchmarkRunCmd = &cobra.Command{
@@ -35,7 +37,8 @@ silently report misleading scores.
 Examples:
   agm benchmark run --suite swe-bench-lite --mode dear-agent
   agm benchmark run --suite swe-bench-lite --mode raw --model claude-opus-4-7
-  agm benchmark run --suite vibe-bench --limit 5 --results-dir docs/benchmarks/`,
+  agm benchmark run --suite vibe-bench --limit 5 --results-dir docs/benchmarks/
+  agm benchmark run --suite swe-bench-lite --tasks-file ./swe-bench-lite-tasks.json`,
 	Args: cobra.NoArgs,
 	RunE: runBenchmarkRun,
 }
@@ -51,6 +54,10 @@ func init() {
 	benchmarkRunCmd.Flags().Float64Var(&benchRunBudgetFlag, "budget", 0, "Spending cap in USD (0 = unbounded)")
 	benchmarkRunCmd.Flags().StringVar(&benchRunResultsDirFlag, "results-dir", "",
 		"Directory to write the JSON results file (e.g. docs/benchmarks/)")
+	benchmarkRunCmd.Flags().StringVar(&benchRunTasksFileFlag, "tasks-file", "",
+		"Path to a JSON or NDJSON file of TaskSpecs (overrides the suite's built-in fixture loader)")
+	benchmarkRunCmd.Flags().BoolVar(&benchRunFilterBySuiteFlag, "filter-by-suite", false,
+		"With --tasks-file: only run tasks whose suite field matches --suite")
 	_ = benchmarkRunCmd.MarkFlagRequired("suite")
 }
 
@@ -72,6 +79,12 @@ func runBenchmarkRun(cmd *cobra.Command, _ []string) error {
 		Limit:      benchRunLimitFlag,
 		BudgetUSD:  benchRunBudgetFlag,
 		ResultsDir: benchRunResultsDirFlag,
+	}
+	if benchRunTasksFileFlag != "" {
+		cfg.Loader = &benchmarks.JSONFileLoader{
+			Path:          benchRunTasksFileFlag,
+			FilterBySuite: benchRunFilterBySuiteFlag,
+		}
 	}
 
 	results, err := bench.Run(cmd.Context(), cfg)
