@@ -73,6 +73,55 @@ func TestAnnounceAcceptanceCriteriaSilentWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestAnnounceFrameworkGuardrailsPrintsByDefault(t *testing.T) {
+	// No .dear-agent.yml in the workdir; the default guardrail still
+	// fires because it's a framework-level default, not a per-repo one.
+	stdout := captureStdout(t, func() { announceFrameworkGuardrails(t.TempDir()) })
+	if !strings.Contains(stdout, "graceful exit") {
+		t.Errorf("default banner missing graceful-exit label: %q", stdout)
+	}
+	if !strings.Contains(stdout, "Nothing found") {
+		t.Errorf("default banner missing canonical phrase: %q", stdout)
+	}
+}
+
+func TestAnnounceFrameworkGuardrailsRespectsOptOut(t *testing.T) {
+	root := t.TempDir()
+	yml := `version: 1
+framework-defaults:
+  graceful-exit:
+    disabled: true
+    why: "this repo's job is to always produce a row"
+`
+	if err := os.WriteFile(filepath.Join(root, ".dear-agent.yml"), []byte(yml), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	stdout := captureStdout(t, func() { announceFrameworkGuardrails(root) })
+	if stdout != "" {
+		t.Errorf("opt-out must silence the banner, got %q", stdout)
+	}
+}
+
+func TestAnnounceFrameworkGuardrailsFailsSafeToDefault(t *testing.T) {
+	root := t.TempDir()
+	// Disable without `why:` is rejected by the config validator. A
+	// broken opt-out must NOT silently turn the guardrail off — that
+	// is the exact failure mode the guardrail exists to prevent. The
+	// announce helper must therefore swallow the error and fall back
+	// to the default (banner printed, guardrail enabled).
+	yml := `framework-defaults:
+  graceful-exit:
+    disabled: true
+`
+	if err := os.WriteFile(filepath.Join(root, ".dear-agent.yml"), []byte(yml), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	stdout := captureStdout(t, func() { announceFrameworkGuardrails(root) })
+	if !strings.Contains(stdout, "graceful exit") {
+		t.Errorf("malformed config should fall back to default banner, got %q", stdout)
+	}
+}
+
 // captureStdout redirects os.Stdout for the duration of fn and returns
 // what was written. The reader drains until EOF so multi-write banners
 // don't get truncated when the pipe wakes the reader between writes
