@@ -678,6 +678,7 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 		return err
 	}
 	fmt.Printf("Creating new tmux session: %s (in %s)\n", sessionName, workDir)
+	announceFrameworkGuardrails(workDir)
 	announceAcceptanceCriteria(workDir)
 
 	ctx := context.Background()
