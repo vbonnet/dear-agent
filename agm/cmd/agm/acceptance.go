@@ -142,9 +142,11 @@ func announceAcceptanceCriteria(workDir string) {
 // the contract once, at session start, where every sub-prompt will
 // see it.
 //
-// Failures are ignored: a malformed config or unreadable file must
-// not block session creation. Worst case the worker doesn't see the
-// banner and falls back to the in-context CLAUDE.md guidance.
+// **Fail-safe to default ON.** A malformed or unreadable config is
+// ignored: gracefulexit.Load returns the zero-value Config (which is
+// "enabled") alongside the error, so the banner still prints. A
+// broken opt-out must never silently turn the guardrail off — that
+// is the exact failure mode the guardrail exists to prevent.
 func announceFrameworkGuardrails(workDir string) {
 	root := findDearAgentRootFrom(workDir)
 	// When there is no .dear-agent.yml we still print the default
@@ -153,11 +155,10 @@ func announceFrameworkGuardrails(workDir string) {
 	// Config, which is "enabled".
 	var cfg gracefulexit.Config
 	if root != "" {
-		loaded, err := gracefulexit.Load(root)
-		if err != nil {
-			return
-		}
-		cfg = loaded
+		// Errors are intentionally ignored: the loader returns the
+		// zero value on parse / validation failure, which keeps the
+		// guardrail on. See the function-level comment.
+		cfg, _ = gracefulexit.Load(root)
 	}
 	banner := gracefulexit.Banner(cfg)
 	if banner == "" {

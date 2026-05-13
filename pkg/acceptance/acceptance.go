@@ -63,14 +63,36 @@ const (
 	TypeCustom Type = "custom"
 )
 
+// validTypes is the canonical list of recognised criterion types.
+// Keep it in declaration order; the validator's "want one of:" error
+// is derived from this slice so adding a new type updates both
+// IsValid and the user-facing message in one place.
+var validTypes = []Type{
+	TypeTestsPass,
+	TypeLintClean,
+	TypeNoRegressions,
+	TypeGracefulExit,
+	TypeCustom,
+}
+
 // IsValid reports whether t is a known criterion type.
 func (t Type) IsValid() bool {
-	switch t {
-	case TypeTestsPass, TypeLintClean, TypeNoRegressions, TypeGracefulExit, TypeCustom:
-		return true
-	default:
-		return false
+	for _, v := range validTypes {
+		if t == v {
+			return true
+		}
 	}
+	return false
+}
+
+// validTypesList returns the recognised types as a comma-separated
+// string, suitable for embedding in error messages.
+func validTypesList() string {
+	parts := make([]string, len(validTypes))
+	for i, v := range validTypes {
+		parts[i] = string(v)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // Criterion is one row from acceptance-criteria:.
@@ -136,7 +158,7 @@ func ParseBytes(data []byte) ([]Criterion, error) {
 func Validate(crits []Criterion) error {
 	for i, c := range crits {
 		if !c.Type.IsValid() {
-			return fmt.Errorf("acceptance-criteria[%d]: unknown type %q (want one of: tests-pass, lint-clean, no-regressions, graceful-exit, custom)", i, c.Type)
+			return fmt.Errorf("acceptance-criteria[%d]: unknown type %q (want one of: %s)", i, c.Type, validTypesList())
 		}
 		switch c.Type {
 		case TypeTestsPass, TypeLintClean:

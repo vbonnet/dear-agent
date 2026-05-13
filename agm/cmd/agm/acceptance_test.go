@@ -102,11 +102,13 @@ framework-defaults:
 	}
 }
 
-func TestAnnounceFrameworkGuardrailsSilentOnMalformedConfig(t *testing.T) {
+func TestAnnounceFrameworkGuardrailsFailsSafeToDefault(t *testing.T) {
 	root := t.TempDir()
-	// Disable without `why:` should fail the config validator. The
-	// announce helper must swallow that and stay silent — surfacing
-	// guardrails is never allowed to block session creation.
+	// Disable without `why:` is rejected by the config validator. A
+	// broken opt-out must NOT silently turn the guardrail off — that
+	// is the exact failure mode the guardrail exists to prevent. The
+	// announce helper must therefore swallow the error and fall back
+	// to the default (banner printed, guardrail enabled).
 	yml := `framework-defaults:
   graceful-exit:
     disabled: true
@@ -115,8 +117,8 @@ func TestAnnounceFrameworkGuardrailsSilentOnMalformedConfig(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	stdout := captureStdout(t, func() { announceFrameworkGuardrails(root) })
-	if stdout != "" {
-		t.Errorf("malformed config must keep banner silent, got %q", stdout)
+	if !strings.Contains(stdout, "graceful exit") {
+		t.Errorf("malformed config should fall back to default banner, got %q", stdout)
 	}
 }
 

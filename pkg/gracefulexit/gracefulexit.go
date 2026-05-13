@@ -68,17 +68,29 @@ const Rationale = "Inflated findings poison downstream consumers: a low-confiden
 	"of stretched judgments compounds. A graceful exit (\"nothing fits\") preserves " +
 	"handoff signal."
 
-// Applies enumerates the task kinds the guardrail is most relevant
+// applies enumerates the task kinds the guardrail is most relevant
 // to. The list is informational — the framework applies the
 // guardrail to ALL tasks by default — but a worker that wants to
-// self-check "should I be especially careful here?" can consult it.
-var Applies = []string{
+// self-check "should I be especially careful here?" can consult it
+// via Applies(). The slice is unexported so a downstream package
+// cannot accidentally mutate the canonical list; callers receive a
+// defensive copy.
+var applies = []string{
 	"search",         // codebase / web / corpus search
 	"research",       // analysis, literature review, synthesis
 	"pattern-match",  // grep-like discovery, dead code, duplicates
 	"code-review",    // findings enumeration
 	"backfill",       // ingestion, retrofit pipelines
 	"recommendation", // suggestion / recommendation surfaces
+}
+
+// Applies returns a copy of the task-kind catalog. The catalog is
+// informational only; the framework applies the guardrail to every
+// task regardless of kind.
+func Applies() []string {
+	out := make([]string, len(applies))
+	copy(out, applies)
+	return out
 }
 
 // Config is the .dear-agent.yml > framework-defaults > graceful-exit
@@ -164,7 +176,7 @@ func Banner(cfg Config) string {
 	var b strings.Builder
 	b.WriteString("\nFramework guardrail — graceful exit (no-overfit):\n")
 	b.WriteString("  " + Guardrail + "\n")
-	b.WriteString("  Applies to: " + strings.Join(Applies, ", ") + ".\n")
+	b.WriteString("  Applies to: " + strings.Join(applies, ", ") + ".\n")
 	b.WriteString("  To opt out for this repo, set framework-defaults.graceful-exit.disabled: true in .dear-agent.yml (a `why:` is required).\n")
 	return b.String()
 }

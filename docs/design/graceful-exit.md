@@ -52,9 +52,9 @@ common and the guardrail matters most:
 | `recommendation`  | Surfaces low-confidence suggestions as recommendations.               |
 
 A worker that wants to self-check "is this task one of the
-risky kinds?" can read `gracefulexit.Applies`. The framework still
-applies the guardrail to every kind; the list is a hint, not a
-gate.
+risky kinds?" can read `gracefulexit.Applies()`. The framework
+still applies the guardrail to every kind; the list is a hint, not
+a gate.
 
 ## How a worker is told
 

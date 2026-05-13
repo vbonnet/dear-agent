@@ -80,10 +80,25 @@ func TestBannerNonEmptyByDefault(t *testing.T) {
 	if !strings.Contains(b, "graceful exit") {
 		t.Errorf("banner missing label: %q", b)
 	}
-	for _, kind := range Applies {
+	for _, kind := range Applies() {
 		if !strings.Contains(b, kind) {
 			t.Errorf("banner missing applies-kind %q", kind)
 		}
+	}
+}
+
+func TestAppliesReturnsACopy(t *testing.T) {
+	// Mutating the returned slice must not affect subsequent calls —
+	// otherwise a downstream package could silently shrink the
+	// canonical list.
+	got := Applies()
+	if len(got) == 0 {
+		t.Fatal("Applies() returned empty list")
+	}
+	got[0] = "MUTATED"
+	again := Applies()
+	if again[0] == "MUTATED" {
+		t.Errorf("Applies() must return a fresh copy; mutation leaked back into the canonical list")
 	}
 }
 
