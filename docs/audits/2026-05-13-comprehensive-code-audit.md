@@ -52,12 +52,14 @@ Categorized totals: **0 CRITICAL**, **22 IMPROVE**, **15 MINOR**.
 These pass-rates are real and worth preserving — see the "DEAR Enforcement
 Candidates" section.
 
-One caveat: `.golangci.yml` excludes `gosec` rules **G104, G204, G301, G703**
-(text: `"G204|G301|G104|G703"`). G204 (subprocess from variable) and G703
-(path traversal taint) are the two most relevant rules for a tool that
-shells out 437 times. The exclusion is defensible (most exec sites are
-internal commands with internal data) but it means the codebase is
-trusting itself on the entire surface this audit had to inspect manually.
+One caveat: the root `.golangci.yml:102` excludes `gosec` rules
+**G104, G204, G301, G703** (text: `"G204|G301|G104|G703"`).
+`agm/.golangci.yml:89` is narrower (`"G204|G301|G104"`, no G703).
+G204 (subprocess from variable) and G703 (path traversal taint) are
+the two most relevant rules for a tool that shells out 437 times.
+The exclusion is defensible (most exec sites are internal commands
+with internal data) but it means the codebase is trusting itself on
+the entire surface this audit had to inspect manually.
 
 ---
 
@@ -438,7 +440,7 @@ package, or specify the methods.
 | 33| Tech debt | 6 `Deprecated:` markers — verify each is still needed                    | grep `// Deprecated` |
 | 34| Arch      | `internal/sandbox` at repo root vs `agm/internal/*` siblings — inconsistent | repo root |
 | 35| Arch      | 4 `workspace` packages                                                    | `pkg/workspace`, `tools/devlog/internal/workspace`, `wayfinder/.../workspace`, `agm/cmd/agm/workspace` |
-| 36| Arch      | `golangci-lint` excludes G204, G703 — re-enable in CI when feasible      | `.golangci.yml:75` |
+| 36| Arch      | `golangci-lint` excludes G204, G703 — re-enable in CI when feasible      | `.golangci.yml:102` (root), `agm/.golangci.yml:89` |
 | 37| Style     | `App.Harness` field paired with `agent` constructor parameter             | `agm/internal/app/app.go:22,26` |
 
 ---
@@ -533,7 +535,8 @@ renamed.
 
 ### Candidate H — `gosec` G204/G703 — quarantine, don't blanket-exclude
 
-**Why:** `.golangci.yml:75` excludes `G204|G301|G104|G703` repo-wide.
+**Why:** root `.golangci.yml:102` excludes `G204|G301|G104|G703`
+repo-wide (and `agm/.golangci.yml:89` excludes `G204|G301|G104`).
 This is the right pragmatic choice for `agm/` shell-outs (operator
 input is trusted) but the wrong choice for the HTTP/MCP boundary
 where untrusted input does enter.
