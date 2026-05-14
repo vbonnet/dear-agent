@@ -450,11 +450,6 @@ func (s *StatusV2) GetPhaseStatus(waypointName string) string {
 	return s.GetWaypointStatus(waypointName)
 }
 
-// FindPhaseHistory is a backward-compatibility alias for FindWaypointHistory
-func (s *StatusV2) FindPhaseHistory(waypointName string) *WaypointHistory {
-	return s.FindWaypointHistory(waypointName)
-}
-
 // ============================================================================
 // Type Aliases (for backward compatibility during transition)
 // ============================================================================
@@ -483,7 +478,6 @@ const (
 	PhaseStatusV2Pending    = WaypointStatusV2Pending
 	PhaseStatusV2InProgress = WaypointStatusV2InProgress
 	PhaseStatusV2Completed  = WaypointStatusV2Completed
-	PhaseStatusV2Blocked    = WaypointStatusV2Blocked
 	PhaseStatusV2Skipped    = WaypointStatusV2Skipped
 )
 

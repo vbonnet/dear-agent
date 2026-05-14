@@ -57,8 +57,6 @@ func init() {
 	StartCmd.Flags().String("risk-level", "M", "Risk level: XS, S, M, L, XL")
 	// Add --skip-roadmap flag for V2 schema (for small projects)
 	StartCmd.Flags().Bool("skip-roadmap", false, "Skip roadmap.* phases (for small projects <3-4 weeks)")
-	// Add --version flag for backward compatibility with old tests
-	StartCmd.Flags().String("version", "v2", "Wayfinder version (v2 only, flag kept for backward compatibility)")
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
