@@ -47,6 +47,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -88,9 +89,7 @@ var applies = []string{
 // informational only; the framework applies the guardrail to every
 // task regardless of kind.
 func Applies() []string {
-	out := make([]string, len(applies))
-	copy(out, applies)
-	return out
+	return slices.Clone(applies)
 }
 
 // Config is the .dear-agent.yml > framework-defaults > graceful-exit
@@ -151,7 +150,7 @@ func ParseBytes(data []byte) (Config, error) {
 	if err := yaml.Unmarshal(data, &f); err != nil {
 		return Config{}, fmt.Errorf("gracefulexit: parse: %w", err)
 	}
-	cfg := Config{}
+	var cfg Config
 	if f.FrameworkDefaults.GracefulExit != nil {
 		cfg = *f.FrameworkDefaults.GracefulExit
 	}
