@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -77,12 +78,7 @@ var validTypes = []Type{
 
 // IsValid reports whether t is a known criterion type.
 func (t Type) IsValid() bool {
-	for _, v := range validTypes {
-		if t == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(validTypes, t)
 }
 
 // validTypesList returns the recognised types as a comma-separated
