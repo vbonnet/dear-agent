@@ -232,9 +232,6 @@ dear-agent/
 ├── wayfinder/           # Wayfinder: SDLC workflow
 │   ├── cmd/             #   CLI entry point
 │   └── review/          #   Phase review tooling
-├── research/            # Research: deep research & feeds
-│   ├── cmd/             #   CLI entry points
-│   └── autonomous/      #   Autonomous research engine
 ├── pkg/                 # Shared packages
 │   ├── cliframe/        #   CLI framework utilities
 │   ├── llm/             #   Unified LLM provider interface

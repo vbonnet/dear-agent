@@ -173,26 +173,6 @@ var V1ToV2PhaseMap = map[string]string{
 	"S11": "retrospective",
 }
 
-// V2ToV1PhaseMap maps v2 phase names to v1 equivalents (for backward compat reference)
-var V2ToV1PhaseMap = map[string]string{
-	"discovery.problem":      "D1",
-	"discovery.solutions":    "D2",
-	"discovery.approach":     "D3",
-	"discovery.requirements": "D4",
-	"definition":             "S4",
-	"design.tech-lead":       "S6",
-	"design.security":        "S6",
-	"design.qa":              "S6",
-	"roadmap.planning":       "S7",
-	"roadmap.breakdown":      "S7",
-	"roadmap.dependencies":   "S7",
-	"build.implement":        "S8",
-	"build.test":             "S9",
-	"build.integrate":        "S9",
-	"deploy":                 "S10",
-	"retrospective":          "S11",
-}
-
 // Nesting-related errors
 var (
 	// ErrMaxDepthExceeded is returned when nesting depth exceeds MaxNestingDepth
