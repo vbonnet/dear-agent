@@ -33,7 +33,7 @@ func TestE2E_V2FullWorkflow(t *testing.T) {
 	defer os.RemoveAll(projectDir)
 
 	// Initialize V2 project
-	runCmd(t, projectDir, "wayfinder-session", "start", "v2-full-workflow", "--version", "v2", "--skip-roadmap")
+	runCmd(t, projectDir, "wayfinder-session", "start", "v2-full-workflow", "--skip-roadmap")
 
 	// Verify STATUS file created with V2 schema
 	st := readStatus(t, projectDir)
@@ -240,7 +240,7 @@ func TestD4_StakeholderApproval(t *testing.T) {
 	defer os.RemoveAll(projectDir)
 
 	// Initialize V2 project
-	runCmd(t, projectDir, "wayfinder-session", "start", "v2-d4-approval", "--version", "v2", "--skip-roadmap")
+	runCmd(t, projectDir, "wayfinder-session", "start", "v2-d4-approval", "--skip-roadmap")
 
 	// Start and complete W0 (required before D1)
 	runCmd(t, projectDir, "wayfinder-session", "start-phase", status.PhaseV2Charter, "--allow-dirty")
@@ -373,7 +373,7 @@ func TestS6_TestsFeatureGeneration(t *testing.T) {
 	defer os.RemoveAll(projectDir)
 
 	// Initialize V2 project
-	runCmd(t, projectDir, "wayfinder-session", "start", "v2-s6-tests", "--version", "v2", "--skip-roadmap")
+	runCmd(t, projectDir, "wayfinder-session", "start", "v2-s6-tests", "--skip-roadmap")
 
 	// Start and complete W0 (required before D1)
 	runCmd(t, projectDir, "wayfinder-session", "start-phase", status.PhaseV2Charter, "--allow-dirty")
@@ -579,7 +579,7 @@ func TestS8_BuildLoop(t *testing.T) {
 	defer os.RemoveAll(projectDir)
 
 	// Initialize V2 project and progress to S8 (BUILD Loop)
-	runCmd(t, projectDir, "wayfinder-session", "start", "v2-s8-build", "--version", "v2", "--skip-roadmap")
+	runCmd(t, projectDir, "wayfinder-session", "start", "v2-s8-build", "--skip-roadmap")
 
 	// Start and complete W0 (required before D1)
 	runCmd(t, projectDir, "wayfinder-session", "start-phase", status.PhaseV2Charter, "--allow-dirty")
@@ -794,7 +794,7 @@ func TestRiskAdaptiveReview(t *testing.T) {
 
 			// Initialize V2 project with size-appropriate settings
 			projectName := "v2-risk-" + scenario.size
-			args := []string{"start", projectName, "--version", "v2"}
+			args := []string{"start", projectName}
 			if scenario.skipRoadmap {
 				args = append(args, "--skip-roadmap")
 			}
@@ -836,7 +836,7 @@ func TestPhaseTransitions(t *testing.T) {
 	defer os.RemoveAll(projectDir)
 
 	// Initialize V2 project
-	runCmd(t, projectDir, "wayfinder-session", "start", "v2-transitions", "--version", "v2", "--skip-roadmap")
+	runCmd(t, projectDir, "wayfinder-session", "start", "v2-transitions", "--skip-roadmap")
 
 	// Start and complete W0 (required before D1)
 	runCmd(t, projectDir, "wayfinder-session", "start-phase", status.PhaseV2Charter, "--allow-dirty")
@@ -882,7 +882,7 @@ func TestSchemaValidation(t *testing.T) {
 	defer os.RemoveAll(projectDir)
 
 	// Initialize V2 project
-	runCmd(t, projectDir, "wayfinder-session", "start", "v2-schema", "--version", "v2", "--skip-roadmap")
+	runCmd(t, projectDir, "wayfinder-session", "start", "v2-schema", "--skip-roadmap")
 
 	// Start and complete W0 (required before D1)
 	runCmd(t, projectDir, "wayfinder-session", "start-phase", status.PhaseV2Charter, "--allow-dirty")
@@ -987,7 +987,7 @@ func writeStatus(t *testing.T, projectDir string, st *status.StatusV2) {
 }
 
 func findPhase(st *status.StatusV2, phaseName string) *status.WaypointHistory {
-	return st.FindPhaseHistory(phaseName)
+	return st.FindWaypointHistory(phaseName)
 }
 
 func createPhaseDeliverable(t *testing.T, projectDir string, phaseName string) {
