@@ -327,14 +327,28 @@ func TestLoadNonexistentAllowlist(t *testing.T) {
 func TestValidateCommandWithPath(t *testing.T) {
 	cv := NewCommandValidator()
 
-	// Test with full path (should extract base command)
-	if err := cv.ValidateCommand("/usr/bin/git"); err != nil {
-		t.Errorf("ValidateCommand should handle full paths, got error: %v", err)
+	// Path-shaped commands must NOT be accepted via basename matching —
+	// that was the bypass behind deepsec-scan-auth-bypass-eb2af23a18.
+	// They are accepted only when the *exact* path is on the allowlist.
+	cases := []string{
+		"/usr/bin/git",
+		"./git",
+		"/tmp/evil/git",
+		"git.sh",
+		"git.py",
+		"git.exe",
+	}
+	for _, c := range cases {
+		if err := cv.ValidateCommand(c); err == nil {
+			t.Errorf("ValidateCommand(%q) should be rejected; basename/extension bypass would re-open the path-prefix RCE", c)
+		}
 	}
 
-	// Test with relative path
-	if err := cv.ValidateCommand("./git"); err != nil {
-		t.Errorf("ValidateCommand should handle relative paths, got error: %v", err)
+	// When the operator explicitly adds the exact path to the allowlist,
+	// the path-shaped command is accepted (opt-in path).
+	cv.AddCommand("/usr/bin/git")
+	if err := cv.ValidateCommand("/usr/bin/git"); err != nil {
+		t.Errorf("ValidateCommand should accept exact-path allowlist entry, got: %v", err)
 	}
 }
 

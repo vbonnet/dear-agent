@@ -183,18 +183,33 @@ func (cv *CommandValidator) IsAllowed(command string) bool {
 	return cv.allowedCommands[command]
 }
 
-// ValidateCommand validates that a command is in the allowlist
+// ValidateCommand validates that a command is in the allowlist.
+//
+// The check is exact-name: the command must match an entry in the
+// allowlist verbatim. We deliberately do NOT:
+//   - take filepath.Base, which used to let `/tmp/evil/git` pass (basename
+//     "git" is allowlisted) while the executor then runs the attacker's
+//     binary at the literal path it was given;
+//   - strip filepath.Ext, which used to let `git.sh`/`git.exe` pass while
+//     the executor runs a different file.
+// Hook config that needs a non-PATH binary must add the absolute path to
+// allowed-commands.toml explicitly so the operator opts in.
 func (cv *CommandValidator) ValidateCommand(command string) error {
-	// Extract base command (handle paths)
-	baseCmd := filepath.Base(command)
-
-	// Also check without any path or extension
-	baseCmd = strings.TrimSuffix(baseCmd, filepath.Ext(baseCmd))
-
-	if !cv.IsAllowed(baseCmd) && !cv.IsAllowed(command) {
+	if command == "" {
+		return fmt.Errorf("%w: empty command", ErrCommandNotAllowed)
+	}
+	if strings.ContainsAny(command, "/\\") {
+		// Only allow path-shaped commands if the *exact* string was
+		// explicitly added to the allowlist; basename matching is unsafe
+		// because the executor runs the literal path.
+		if !cv.IsAllowed(command) {
+			return fmt.Errorf("%w: %s (path-shaped commands must be added to the allowlist by exact path)", ErrCommandNotAllowed, command)
+		}
+		return nil
+	}
+	if !cv.IsAllowed(command) {
 		return fmt.Errorf("%w: %s (not in allowlist)", ErrCommandNotAllowed, command)
 	}
-
 	return nil
 }
 

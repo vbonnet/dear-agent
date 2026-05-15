@@ -115,6 +115,16 @@ func (a *Adapter) Add(ctx context.Context, s source.Source) (source.Ref, error) 
 		return source.Ref{}, fmt.Errorf("source/llmwiki: empty URI")
 	}
 	abs := filepath.Join(a.root, rel)
+	// Defense against URI-driven traversal: pathFromURI runs filepath.Clean
+	// but Clean preserves leading `..`, so a URI like `wiki://../../.bashrc`
+	// would join into a path that escapes the wiki root and let an
+	// attacker-controlled `s.Content` land at e.g. ~/.bashrc. Reject any
+	// abs that, after Clean, is not contained in a.root.
+	cleanRoot := filepath.Clean(a.root)
+	cleanAbs := filepath.Clean(abs)
+	if cleanAbs != cleanRoot && !strings.HasPrefix(cleanAbs, cleanRoot+string(filepath.Separator)) {
+		return source.Ref{}, fmt.Errorf("source/llmwiki: URI %q resolves outside wiki root", s.URI)
+	}
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return source.Ref{}, fmt.Errorf("source/llmwiki: mkdir parent: %w", err)
 	}

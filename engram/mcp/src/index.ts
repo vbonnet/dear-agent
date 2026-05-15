@@ -15,7 +15,7 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
@@ -87,14 +87,23 @@ const TOOLS: Tool[] = [
 ];
 
 /**
- * Execute engram CLI command
+ * Execute engram CLI command.
+ *
+ * Uses execFileSync with an argv array so no shell is involved — argument
+ * values are passed verbatim to the child process, never expanded as a
+ * shell string. This is the load-bearing defense against command injection
+ * via MCP tool arguments: callers (handleEngramRetrieve, …) push
+ * untrusted strings (query, tag, …) onto `args`, and we must not let shell
+ * metacharacters like `;`, `|`, `$(...)`, backticks, redirections, or
+ * spaces break out of an argument boundary.
  */
 function execEngram(args: string[]): string {
   try {
-    return execSync(`${ENGRAM_CLI} ${args.join(' ')}`, {
+    return execFileSync(ENGRAM_CLI, args, {
       encoding: 'utf-8',
       maxBuffer: 10 * 1024 * 1024, // 10MB
       timeout: 30000, // 30s
+      shell: false,
     });
   } catch (error: any) {
     throw new Error(`Engram CLI error: ${error.message}`);
@@ -107,7 +116,18 @@ function execEngram(args: string[]): string {
 async function handleEngramRetrieve(args: any): Promise<string> {
   const { query, tag, limit = 5 } = args;
 
-  const cacheKey = `retrieve:${query}:${tag || ''}:${limit}`;
+  if (typeof query !== 'string' || query.length === 0) {
+    throw new Error('query must be a non-empty string');
+  }
+  if (tag !== undefined && tag !== null && typeof tag !== 'string') {
+    throw new Error('tag must be a string');
+  }
+  const limitNum = Number(limit);
+  if (!Number.isInteger(limitNum) || limitNum <= 0 || limitNum > 1000) {
+    throw new Error('limit must be a positive integer <= 1000');
+  }
+
+  const cacheKey = `retrieve:${query}:${tag || ''}:${limitNum}`;
   const cached = cache.get(cacheKey);
   if (cached !== undefined) return cached;
 
@@ -115,8 +135,8 @@ async function handleEngramRetrieve(args: any): Promise<string> {
   if (tag) {
     cliArgs.push('--tag', tag);
   }
-  if (limit !== 5) {
-    cliArgs.push('--limit', String(limit));
+  if (limitNum !== 5) {
+    cliArgs.push('--limit', String(limitNum));
   }
 
   try {

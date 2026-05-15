@@ -39,8 +39,11 @@ func (p *SimpleFileProvider) StoreMemory(ctx context.Context, namespace []string
 		}
 	}()
 
-	// 1. Validate namespace
+	// 1. Validate namespace and memory ID
 	if err = validateNamespace(namespace); err != nil {
+		return fmt.Errorf("store memory: %w", err)
+	}
+	if err = validateMemoryID(memory.ID); err != nil {
 		return fmt.Errorf("store memory: %w", err)
 	}
 
@@ -49,8 +52,12 @@ func (p *SimpleFileProvider) StoreMemory(ctx context.Context, namespace []string
 		memory.SchemaVersion = "1.0"
 	}
 
-	// 3. Construct file path
-	filePath := p.getMemoryPath(namespace, memory.ID)
+	// 3. Construct file path (containment-checked)
+	filePath, pathErr := p.getMemoryPath(namespace, memory.ID)
+	if pathErr != nil {
+		err = pathErr
+		return fmt.Errorf("store memory: %w", err)
+	}
 
 	// 4. Create parent directories
 	if err = os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
@@ -192,13 +199,20 @@ func (p *SimpleFileProvider) UpdateMemory(ctx context.Context, namespace []strin
 		}
 	}()
 
-	// 1. Validate namespace
+	// 1. Validate namespace and memory ID
 	if err = validateNamespace(namespace); err != nil {
 		return fmt.Errorf("update memory: %w", err)
 	}
+	if err = validateMemoryID(memoryID); err != nil {
+		return fmt.Errorf("update memory: %w", err)
+	}
 
-	// 2. Construct file path
-	filePath := p.getMemoryPath(namespace, memoryID)
+	// 2. Construct file path (containment-checked)
+	filePath, pathErr := p.getMemoryPath(namespace, memoryID)
+	if pathErr != nil {
+		err = pathErr
+		return fmt.Errorf("update memory: %w", err)
+	}
 
 	// 3. Read existing memory
 	data, readErr := os.ReadFile(filePath)
@@ -273,13 +287,20 @@ func (p *SimpleFileProvider) DeleteMemory(ctx context.Context, namespace []strin
 		}
 	}()
 
-	// 1. Validate namespace
+	// 1. Validate namespace and memory ID
 	if err = validateNamespace(namespace); err != nil {
 		return fmt.Errorf("delete memory: %w", err)
 	}
+	if err = validateMemoryID(memoryID); err != nil {
+		return fmt.Errorf("delete memory: %w", err)
+	}
 
-	// 2. Construct file path
-	filePath := p.getMemoryPath(namespace, memoryID)
+	// 2. Construct file path (containment-checked)
+	filePath, pathErr := p.getMemoryPath(namespace, memoryID)
+	if pathErr != nil {
+		err = pathErr
+		return fmt.Errorf("delete memory: %w", err)
+	}
 
 	// 3. Check file exists
 	if _, statErr := os.Stat(filePath); os.IsNotExist(statErr) {
@@ -306,16 +327,40 @@ func (p *SimpleFileProvider) DeleteMemory(ctx context.Context, namespace []strin
 	return nil
 }
 
-// getMemoryPath constructs the file path for a memory.
-func (p *SimpleFileProvider) getMemoryPath(namespace []string, memoryID string) string {
+// getMemoryPath constructs the file path for a memory and verifies that the
+// result stays inside the configured storage root.
+//
+// Callers pass namespace components and memoryID that ultimately reach this
+// function from CLI flags, MCP tool arguments, and workflow YAML values —
+// all of which the project threat model treats as hostile. validateNamespace
+// and validateMemoryID reject the obvious traversal shapes, but `filepath.Join`
+// runs `Clean` which collapses `..` segments, so any leaked traversal token
+// would silently escape the storage root and let StoreMemory write attacker
+// JSON to e.g. ~/.docker/config.json or DeleteMemory remove arbitrary .json
+// files the invoking user can write. The post-join HasPrefix containment
+// check below is the load-bearing defense and is intentionally redundant
+// with validateNamespace/validateMemoryID.
+func (p *SimpleFileProvider) getMemoryPath(namespace []string, memoryID string) (string, error) {
 	parts := append([]string{p.storagePath}, namespace...)
 	parts = append(parts, memoryID+".json")
-	return filepath.Join(parts...)
+	joined := filepath.Join(parts...)
+
+	cleanStorage := filepath.Clean(p.storagePath)
+	cleanJoined := filepath.Clean(joined)
+	prefix := cleanStorage + string(filepath.Separator)
+	if cleanJoined != cleanStorage && !strings.HasPrefix(cleanJoined, prefix) {
+		return "", consolidation.ErrInvalidNamespace
+	}
+	return joined, nil
 }
 
 // validateNamespace checks that namespace is valid.
 //
-// Rejects empty namespaces, empty parts, and path traversal attempts.
+// Rejects empty namespaces, empty parts, and path traversal attempts. The
+// per-component substring checks (not just equality against `..`) close the
+// `--namespace "../escape,foo"` bypass — equality-only checks would let the
+// component through validateNamespace and rely on the downstream join to
+// catch it, which we no longer want to depend on.
 func validateNamespace(namespace []string) error {
 	if len(namespace) == 0 {
 		return consolidation.ErrInvalidNamespace
@@ -324,6 +369,27 @@ func validateNamespace(namespace []string) error {
 		if part == "" || part == "." || part == ".." {
 			return consolidation.ErrInvalidNamespace
 		}
+		if strings.Contains(part, "..") || strings.ContainsAny(part, "/\\") {
+			return consolidation.ErrInvalidNamespace
+		}
+		if strings.ContainsRune(part, 0) {
+			return consolidation.ErrInvalidNamespace
+		}
+	}
+	return nil
+}
+
+// validateMemoryID rejects memory IDs that would escape the storage root
+// once joined into a path. Mirrors validateNamespace's per-component rules.
+func validateMemoryID(memoryID string) error {
+	if memoryID == "" || memoryID == "." || memoryID == ".." {
+		return consolidation.ErrInvalidNamespace
+	}
+	if strings.Contains(memoryID, "..") || strings.ContainsAny(memoryID, "/\\") {
+		return consolidation.ErrInvalidNamespace
+	}
+	if strings.ContainsRune(memoryID, 0) {
+		return consolidation.ErrInvalidNamespace
 	}
 	return nil
 }

