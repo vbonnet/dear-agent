@@ -1,0 +1,112 @@
+name: Deepsec (incremental)
+
+# Runs deepsec on PR-changed files only (vs origin/main). Posts findings
+# as a PR comment via `--comment-out`. Non-blocking by default — the
+# `success_if_findings` job-level check below makes the workflow report
+# success even when findings exist, so merges aren't gated on this yet.
+# Promote to required once signal-to-noise stabilises.
+#
+# Cost: each `deepsec process` invocation calls the configured LLM. The
+# job runs only when ANTHROPIC_API_KEY is set as a repo secret, so forks
+# and unconfigured clones don't burn credits. Local runs use the developer's
+# `claude` CLI subscription (free) — see docs/deepsec.md.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: deepsec-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    # Skip PRs from forks — they don't have access to repo secrets and would
+    # fail-noisy. Internal PRs still run.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on secret presence
+        id: gate
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::notice ::ANTHROPIC_API_KEY not set; skipping deepsec. Add the secret to enable PR scans."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v6
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          # Need history so `--diff origin/main` can resolve the base.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        if: steps.gate.outputs.skip != 'true'
+        run: npm install -g pnpm@9
+
+      - name: Install deepsec workspace
+        if: steps.gate.outputs.skip != 'true'
+        working-directory: .deepsec
+        run: pnpm install --frozen-lockfile
+
+      - name: Run incremental scan
+        if: steps.gate.outputs.skip != 'true'
+        id: scan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set +e
+          ./scripts/deepsec-incremental.sh \
+            --since "origin/${{ github.event.pull_request.base.ref }}" \
+            --comment-out /tmp/deepsec-comment.md
+          rc=$?
+          set -e
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          if [ -f /tmp/deepsec-comment.md ] && [ -s /tmp/deepsec-comment.md ]; then
+            echo "has_findings=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_findings=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post PR comment
+        if: steps.gate.outputs.skip != 'true' && steps.scan.outputs.has_findings == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # Stamp the comment so future runs can find-and-replace rather
+          # than spam. `gh pr comment` doesn't support edit-by-marker, so
+          # we delete previous deepsec comments first.
+          MARKER="<!-- deepsec-incremental -->"
+          # Prepend marker if absent.
+          if ! head -1 /tmp/deepsec-comment.md | grep -q "$MARKER"; then
+            { echo "$MARKER"; cat /tmp/deepsec-comment.md; } > /tmp/deepsec-comment.body
+            mv /tmp/deepsec-comment.body /tmp/deepsec-comment.md
+          fi
+          # Delete prior bot comments that carry the marker.
+          gh api "repos/${{ github.repository }}/issues/$PR/comments" \
+            --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" \
+            | xargs -r -I {} gh api -X DELETE "repos/${{ github.repository }}/issues/comments/{}"
+          gh pr comment "$PR" --body-file /tmp/deepsec-comment.md
+
+      - name: Summarise (non-blocking)
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          if [ "${{ steps.scan.outputs.has_findings }}" = "true" ]; then
+            echo "::warning ::Deepsec found candidate issues — see PR comment. Not blocking the merge."
+          else
+            echo "::notice ::Deepsec found no issues on changed files."
+          fi
