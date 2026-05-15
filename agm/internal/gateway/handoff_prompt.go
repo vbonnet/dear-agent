@@ -56,11 +56,20 @@ func (g *HandoffPromptGenerator) SerializeContext(handoff *HandoffContext) (stri
 	return string(data), nil
 }
 
-// DeserializeContext loads handoff context from JSON.
+// DeserializeContext loads handoff context from JSON. A confidence block,
+// if present, is re-validated: a hand-edited or corrupted handoff file
+// with an inconsistent level/score is rejected rather than silently
+// trusted by the receiving agent.
 func (g *HandoffPromptGenerator) DeserializeContext(data string) (*HandoffContext, error) {
 	var handoff HandoffContext
 	if err := json.Unmarshal([]byte(data), &handoff); err != nil {
 		return nil, fmt.Errorf("failed to deserialize context: %w", err)
+	}
+
+	if handoff.Confidence != nil {
+		if err := handoff.Confidence.Validate(); err != nil {
+			return nil, fmt.Errorf("failed to deserialize context: %w", err)
+		}
 	}
 
 	return &handoff, nil
@@ -72,6 +81,9 @@ func (g *HandoffPromptGenerator) registerTemplates() error {
 	funcMap := template.FuncMap{
 		"add": func(a, b int) int {
 			return a + b
+		},
+		"upper": func(l HandoffConfidenceLevel) string {
+			return strings.ToUpper(string(l))
 		},
 	}
 
@@ -127,6 +139,10 @@ const architectToImplementerTemplate = `# Mode Transition: Architect → Impleme
 
 {{.Summary}}
 
+## Handoff Confidence
+
+{{template "confidence" .}}
+
 ## Design Artifacts
 
 {{template "artifacts" .}}
@@ -160,6 +176,14 @@ You are now in Implementer mode. Your task is to execute the plan created by Arc
 {{template "next_steps" .}}
 {{define "next_steps"}}{{if .NextSteps}}{{range $i, $step := .NextSteps}}{{add $i 1}}. {{$step}}
 {{end}}{{else}}No specific next steps{{end}}{{end}}
+
+{{define "confidence"}}{{if .Confidence}}- **Level:** {{upper .Confidence.Level}}
+- **Score:** {{printf "%.2f" .Confidence.Score}} / 1.00
+- **Rationale:** {{.Confidence.Rationale}}
+{{if .Confidence.Gaps}}- **Known gaps** (verify these before relying on the context above):
+{{range .Confidence.Gaps}}  - {{.}}
+{{end}}{{else}}- **Known gaps:** none reported by the sender (absence of reported gaps is not proof of completeness)
+{{end}}{{else}}**CONFIDENCE NOT ASSESSED.** The sending agent did not vouch for this context. Treat every claim above as unverified and re-establish critical facts before acting.{{end}}{{end}}
 `
 
 // Template: Implementer → Architect
@@ -168,6 +192,10 @@ const implementerToArchitectTemplate = `# Mode Transition: Implementer → Archi
 ## Context from Implementer Mode
 
 {{.Summary}}
+
+## Handoff Confidence
+
+{{template "confidence" .}}
 
 ## Implementation Artifacts
 
@@ -202,6 +230,14 @@ You are now in Architect mode. Your task is to review the implementation and pla
 {{template "next_steps" .}}
 {{define "next_steps"}}{{if .NextSteps}}{{range $i, $step := .NextSteps}}{{add $i 1}}. {{$step}}
 {{end}}{{else}}No specific next steps{{end}}{{end}}
+
+{{define "confidence"}}{{if .Confidence}}- **Level:** {{upper .Confidence.Level}}
+- **Score:** {{printf "%.2f" .Confidence.Score}} / 1.00
+- **Rationale:** {{.Confidence.Rationale}}
+{{if .Confidence.Gaps}}- **Known gaps** (verify these before relying on the context above):
+{{range .Confidence.Gaps}}  - {{.}}
+{{end}}{{else}}- **Known gaps:** none reported by the sender (absence of reported gaps is not proof of completeness)
+{{end}}{{else}}**CONFIDENCE NOT ASSESSED.** The sending agent did not vouch for this context. Treat every claim above as unverified and re-establish critical facts before acting.{{end}}{{end}}
 `
 
 // Template: Generic handoff
@@ -210,6 +246,10 @@ const genericHandoffTemplate = `# Mode Transition: {{.FromMode}} → {{.ToMode}}
 ## Context Summary
 
 {{.Summary}}
+
+## Handoff Confidence
+
+{{template "confidence" .}}
 
 ## Artifacts
 
@@ -234,4 +274,12 @@ const genericHandoffTemplate = `# Mode Transition: {{.FromMode}} → {{.ToMode}}
 {{template "next_steps" .}}
 {{define "next_steps"}}{{if .NextSteps}}{{range $i, $step := .NextSteps}}{{add $i 1}}. {{$step}}
 {{end}}{{else}}No specific next steps{{end}}{{end}}
+
+{{define "confidence"}}{{if .Confidence}}- **Level:** {{upper .Confidence.Level}}
+- **Score:** {{printf "%.2f" .Confidence.Score}} / 1.00
+- **Rationale:** {{.Confidence.Rationale}}
+{{if .Confidence.Gaps}}- **Known gaps** (verify these before relying on the context above):
+{{range .Confidence.Gaps}}  - {{.}}
+{{end}}{{else}}- **Known gaps:** none reported by the sender (absence of reported gaps is not proof of completeness)
+{{end}}{{else}}**CONFIDENCE NOT ASSESSED.** The sending agent did not vouch for this context. Treat every claim above as unverified and re-establish critical facts before acting.{{end}}{{end}}
 `
