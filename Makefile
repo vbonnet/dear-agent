@@ -1,15 +1,19 @@
 # Root Makefile for dear-agent
 #
 # Targets:
-#   act-validate    Run full local CI validation via act
-#   act-lint        Run lint job via act
-#   act-test        Run test job via act
-#   install-hooks   Install git pre-push hook for act validation
-#   codegraph       Build a tree-sitter knowledge graph for this repo
-#   codegraph-all   Build graphs for dear-agent and brain-v2
-#   sync-main       Stash, fetch, rebase onto origin/main, then pop
+#   act-validate            Run full local CI validation via act
+#   act-lint                Run lint job via act
+#   act-test                Run test job via act
+#   install-hooks           Install git pre-push hook for act validation
+#   codegraph               Build a tree-sitter knowledge graph for this repo
+#   codegraph-all           Build graphs for dear-agent and brain-v2
+#   sync-main               Stash, fetch, rebase onto origin/main, then pop
+#   deepsec-incremental     Scan files changed since origin/main with deepsec
+#   deepsec-staged          Scan staged files only with deepsec
+#   install-deepsec-hook    Install pre-push hook for incremental deepsec scans
+#   uninstall-deepsec-hook  Remove the deepsec pre-push hook
 
-.PHONY: act-validate act-lint act-test install-hooks test-shell build-configure-settings uninstall codegraph codegraph-all codegraph-install sync-main
+.PHONY: act-validate act-lint act-test install-hooks test-shell build-configure-settings uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook
 
 # Run full local CI validation via act
 act-validate: act-lint act-test
@@ -94,3 +98,21 @@ codegraph-install:
 # repo; pass REPO=<path> to target a different working copy.
 sync-main:
 	@./scripts/git-sync-main.sh $(if $(REPO),$(REPO),$(CURDIR))
+
+# Run deepsec on files changed since origin/main. Free locally — uses the
+# `claude` CLI subscription if you have it logged in. See docs/deepsec.md.
+deepsec-incremental:
+	@./scripts/deepsec-incremental.sh
+
+# Run deepsec on staged files only (use as a manual pre-commit check).
+deepsec-staged:
+	@./scripts/deepsec-incremental.sh --staged
+
+# Install a pre-push hook that runs deepsec on the push delta. Soft-fail
+# by default (warns, doesn't block). Use STRICT=1 to block pushes on
+# findings; bypass once with DEEPSEC_SKIP=1 git push.
+install-deepsec-hook:
+	@./scripts/install-deepsec-hook.sh $(if $(STRICT),--strict,--soft)
+
+uninstall-deepsec-hook:
+	@./scripts/install-deepsec-hook.sh --uninstall
