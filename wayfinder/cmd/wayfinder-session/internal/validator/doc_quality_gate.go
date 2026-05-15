@@ -359,16 +359,27 @@ func findReviewSkillScript(skillName string) (string, error) {
 		return "", fmt.Errorf("unknown skill: %s", skillName)
 	}
 
-	// Search common skill locations
-	skillPaths := []string{
-		filepath.Join(".", "skills", skillName, scriptFile),
+	// Search common skill locations. The CWD-relative `./skills/...` entry
+	// used to be first here, but that allowed an adversarial PR contributor
+	// to land `skills/review-spec/review_spec.py` in any repo and get
+	// arbitrary Python execution (with the reviewer's ambient creds —
+	// ANTHROPIC_API_KEY is intentionally NOT stripped from the env) the
+	// moment the reviewer ran `cd <project> && wayfinder-session
+	// complete-phase D3/D4/S6`. Skills now resolve only from install-time
+	// locations under the user's home or system prefixes, plus an explicit
+	// opt-in via WAYFINDER_SKILLS_DIR.
+	skillPaths := []string{}
+	if dir := strings.TrimSpace(os.Getenv("WAYFINDER_SKILLS_DIR")); dir != "" {
+		skillPaths = append(skillPaths, filepath.Join(dir, skillName, scriptFile))
+	}
+	skillPaths = append(skillPaths,
 		filepath.Join(homeDir, "src", "ws", "oss", "repos", "engram", "skills", skillName, scriptFile),
 		filepath.Join(homeDir, "src", "engram", "skills", skillName, scriptFile),
 		filepath.Join(homeDir, "engram", "skills", skillName, scriptFile),
 		filepath.Join(homeDir, ".local/share/engram/skills", skillName, scriptFile),
 		filepath.Join("/usr/local/share/engram/skills", skillName, scriptFile),
 		filepath.Join("/opt/engram/skills", skillName, scriptFile),
-	}
+	)
 
 	for _, path := range skillPaths {
 		if _, err := os.Stat(path); err == nil {

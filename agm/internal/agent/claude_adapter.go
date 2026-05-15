@@ -434,6 +434,9 @@ func (a *ClaudeAdapter) ExecuteCommand(cmd Command) error {
 		if err != nil {
 			return fmt.Errorf("setdir command: %w", err)
 		}
+		if err := ValidateSendDirPath(newPath); err != nil {
+			return fmt.Errorf("setdir command: %w", err)
+		}
 		if err := tmux.SendCommand(metadata.TmuxName, fmt.Sprintf("cd %s\r", newPath)); err != nil {
 			return fmt.Errorf("failed to send cd command: %w", err)
 		}

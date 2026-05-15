@@ -109,6 +109,12 @@ func (a *Adapter) Add(ctx context.Context, s source.Source) (source.Ref, error) 
 		return source.Ref{}, err
 	}
 	abs := filepath.Join(a.root, rel)
+	// Defense against URI-driven traversal — see the matching llmwiki guard.
+	cleanRoot := filepath.Clean(a.root)
+	cleanAbs := filepath.Clean(abs)
+	if cleanAbs != cleanRoot && !strings.HasPrefix(cleanAbs, cleanRoot+string(filepath.Separator)) {
+		return source.Ref{}, fmt.Errorf("source/obsidian: URI %q resolves outside vault root", s.URI)
+	}
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return source.Ref{}, fmt.Errorf("source/obsidian: mkdir parent: %w", err)
 	}
