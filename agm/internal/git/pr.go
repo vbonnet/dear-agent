@@ -42,9 +42,14 @@ func PRMergedState(repoPath, branch string) (merged bool, known bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), prCheckTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "gh", "pr", "view", branch,
+	// Flags first, then `--`, then the branch as the final positional: the
+	// `--` terminates flag parsing so a branch that begins with `-` can
+	// never be misread as a flag. (Order matters — `--` before the flags
+	// would make --json/--jq positional and break the call.)
+	cmd := exec.CommandContext(ctx, "gh", "pr", "view",
 		"--json", "state,headRefName",
-		"--jq", `.state + "\t" + .headRefName`)
+		"--jq", `.state + "\t" + .headRefName`,
+		"--", branch)
 	cmd.Dir = gitRoot
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",
