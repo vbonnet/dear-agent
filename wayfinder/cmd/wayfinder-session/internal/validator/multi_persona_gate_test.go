@@ -497,6 +497,62 @@ func TestVoteAggregation(t *testing.T) {
 			expectedStatus: "CONDITIONAL",
 		},
 		{
+			// Regression: fail-open bug. A required persona abstaining
+			// must NOT lower the GO threshold. With the pre-fix logic
+			// `goCount < required-abstainCount` => `2 < 3-1` => false =>
+			// the gate incorrectly PASSED on only 2 of 3 approvals.
+			name: "Tier 1 - One ABSTAIN must not lower GO threshold (CONDITIONAL)",
+			tier: GateTierBlocking,
+			votes: []Vote{
+				{Verdict: "GO", Persona: "tech-lead"},
+				{Verdict: "ABSTAIN", Persona: "security-engineer"},
+				{Verdict: "GO", Persona: "qa-engineer"},
+			},
+			blockers:       []string{},
+			requiredCount:  3,
+			expectedStatus: "CONDITIONAL",
+		},
+		{
+			// A failed/errored required review records no vote (see
+			// executeReview). The missing vote must not be treated as
+			// implicit approval: 2 GO of 3 required => not unanimous.
+			name: "Tier 1 - Missing vote from failed review (CONDITIONAL)",
+			tier: GateTierBlocking,
+			votes: []Vote{
+				{Verdict: "GO", Persona: "tech-lead"},
+				{Verdict: "GO", Persona: "qa-engineer"},
+			},
+			blockers:       []string{},
+			requiredCount:  3,
+			expectedStatus: "CONDITIONAL",
+		},
+		{
+			// Smaller degenerate case: 2 required, 1 GO + 1 ABSTAIN.
+			// Pre-fix: `1 < 2-1` => `1 < 1` => false => wrongly PASSED.
+			name: "Tier 1 - Two required, one ABSTAIN (CONDITIONAL)",
+			tier: GateTierBlocking,
+			votes: []Vote{
+				{Verdict: "GO", Persona: "tech-lead"},
+				{Verdict: "ABSTAIN", Persona: "security-engineer"},
+			},
+			blockers:       []string{},
+			requiredCount:  2,
+			expectedStatus: "CONDITIONAL",
+		},
+		{
+			// ABSTAIN alongside a NO-GO still hard-blocks (NO-GO wins).
+			name: "Tier 1 - NO-GO with an ABSTAIN (BLOCKED)",
+			tier: GateTierBlocking,
+			votes: []Vote{
+				{Verdict: "NO-GO", Persona: "tech-lead"},
+				{Verdict: "ABSTAIN", Persona: "security-engineer"},
+				{Verdict: "GO", Persona: "qa-engineer"},
+			},
+			blockers:       []string{"Threat model missing"},
+			requiredCount:  3,
+			expectedStatus: "BLOCKED",
+		},
+		{
 			name: "Tier 2 - Majority GO (PASSED)",
 			tier: GateTierAdvisory,
 			votes: []Vote{
