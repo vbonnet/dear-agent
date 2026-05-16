@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -99,6 +100,82 @@ func parseWorktreeOutput(output string) []Worktree {
 	}
 
 	return worktrees
+}
+
+// HasUncommittedChanges reports whether the worktree at worktreePath has any
+// staged, unstaged, or untracked changes (i.e. `git status --porcelain` is
+// non-empty). A true result means the worktree is NOT safe to remove.
+//
+// On any error determining status it returns (true, err): the caller must
+// treat "unknown" as "dirty" so a status failure can never cause data loss.
+func HasUncommittedChanges(worktreePath string) (bool, error) {
+	cmd := exec.Command("git", "-C", worktreePath, "status", "--porcelain")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return true, fmt.Errorf("failed to get status for %s: %w\nOutput: %s", worktreePath, err, string(output))
+	}
+	return strings.TrimSpace(string(output)) != "", nil
+}
+
+// ResolveBaseRef returns the ref that worktree branches are measured against
+// when deciding whether they hold unmerged work. Resolution order:
+//
+//  1. origin/HEAD (the remote's default branch)
+//  2. origin/main
+//  3. main
+//
+// Returns "" if none of these resolve, which the caller MUST treat as
+// "cannot determine base" — and therefore must not remove the worktree.
+func ResolveBaseRef(repoPath string) string {
+	gitRoot, err := findGitRoot(repoPath)
+	if err != nil {
+		return ""
+	}
+	if out, err := exec.Command("git", "-C", gitRoot,
+		"symbolic-ref", "--short", "refs/remotes/origin/HEAD").Output(); err == nil {
+		if ref := strings.TrimSpace(string(out)); ref != "" {
+			return ref
+		}
+	}
+	for _, ref := range []string{"origin/main", "main"} {
+		if exec.Command("git", "-C", gitRoot,
+			"rev-parse", "--verify", "--quiet", ref).Run() == nil {
+			return ref
+		}
+	}
+	return ""
+}
+
+// CommitsAhead returns the number of commits reachable from ref but not from
+// base (equivalent to `git rev-list --count base..ref`). A return of 0 means
+// ref carries no unmerged commits relative to base.
+//
+// On any error it returns (-1, err): the caller MUST treat a negative count
+// as "has unmerged work" so a counting failure can never cause data loss.
+//
+// Note: a squash-merged branch reports a positive count even though its
+// content is already on base. This is intentional for a cleanup gate — it
+// keeps such worktrees rather than risking removal of work that only looks
+// merged. Reclaiming squash-merged trees is the job of `agm audit resources`
+// / scripts/cleanup-worktrees.sh, not this conservative path.
+func CommitsAhead(repoPath, ref, base string) (int, error) {
+	gitRoot, err := findGitRoot(repoPath)
+	if err != nil {
+		return -1, fmt.Errorf("not a git repository: %w", err)
+	}
+	if ref == "" || base == "" {
+		return -1, fmt.Errorf("ref and base must both be set (ref=%q base=%q)", ref, base)
+	}
+	out, err := exec.Command("git", "-C", gitRoot,
+		"rev-list", "--count", base+".."+ref).Output()
+	if err != nil {
+		return -1, fmt.Errorf("failed to count commits %s..%s: %w", base, ref, err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return -1, fmt.Errorf("unexpected rev-list output %q: %w", string(out), err)
+	}
+	return n, nil
 }
 
 // RemoveWorktree removes a single git worktree by path.

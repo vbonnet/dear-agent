@@ -2,24 +2,32 @@
 # Claude Code hook: Clean up session resources on stop
 # Triggered when Claude Code session ends (Stop event)
 #
-# Purpose: Remove git worktrees and branches declared in the session manifest.
-# This ensures resources are cleaned up deterministically rather than relying
-# on agent judgment.
+# Purpose: Remove git worktrees and branches left behind by the session.
+# Two layers, both best-effort and non-blocking:
+#
+#   1. Manifest/Dolt cleanup ('agm session cleanup') — removes worktrees the
+#      session explicitly tracked. Only fires for AGM/tmux sessions.
+#   2. Filesystem reaper ('agm session reap-worktrees') — the safety net for
+#      worktrees created by a raw 'git worktree add' that were never tracked
+#      (root cause of the recurring sprawl). It removes a worktree ONLY when
+#      it is clean, zero commits ahead of base, on a claude/ branch, under
+#      ~/worktrees, and not the worktree this hook is running in. It runs
+#      whether or not the session is AGM-tracked.
 #
 # Installation: Copy to ~/.claude/hooks/stop-agm-resource-cleanup
 # Permissions: chmod +x ~/.claude/hooks/stop-agm-resource-cleanup
 
 set -euo pipefail
 
-# Get current tmux session name (AGM session identifier)
+# Layer 1: manifest/Dolt cleanup for AGM-tracked sessions only.
 AGM_SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "")
-
-if [ -z "$AGM_SESSION" ]; then
-    # Not in tmux - skip hook
-    exit 0
+if [ -n "$AGM_SESSION" ]; then
+    agm session cleanup "$AGM_SESSION" 2>/dev/null || true
 fi
 
-# Run resource cleanup for this session (best-effort: never block session exit)
-agm session cleanup "$AGM_SESSION" 2>/dev/null || true
+# Layer 2: conservative filesystem reaper. Runs from the session's worktree
+# (cwd); --repo defaults to cwd and the running worktree excludes itself.
+# Best-effort: a failure here must never block session exit.
+agm session reap-worktrees 2>/dev/null || true
 
 exit 0
