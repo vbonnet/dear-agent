@@ -114,11 +114,19 @@ describe('TTLCache', () => {
     cache.set('wayfinder:/proj', 'cached-status');
     assert.equal(cache.watchFile(filePath, 'wayfinder:'), true);
 
+    // Give the OS watcher a moment to arm before triggering. Without this,
+    // the write can land before fs.watch is active and the event is lost.
+    await new Promise((r) => setTimeout(r, 100));
+
     // Modify the file
     writeFileSync(filePath, 'changed');
 
-    // Wait for fs.watch to fire
-    await new Promise((r) => setTimeout(r, 200));
+    // Poll for fs.watch to fire. A fixed sleep is flaky: macOS FSEvents
+    // latency varies and can exceed a few hundred ms. Poll with a deadline.
+    const deadline = Date.now() + 5_000;
+    while (cache.get('wayfinder:/proj') !== undefined && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
 
     assert.equal(cache.get('wayfinder:/proj'), undefined);
 
