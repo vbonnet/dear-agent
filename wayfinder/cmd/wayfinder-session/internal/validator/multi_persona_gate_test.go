@@ -540,6 +540,113 @@ func TestVoteAggregation(t *testing.T) {
 	}
 }
 
+// TestDeriveVote_FailClosed is the regression test for the PR #18 gemini
+// security P0: an empty/degenerate persona review must NOT default to
+// GO/HIGH (fail-open). It must ABSTAIN so the aggregator cannot count it
+// as an approval.
+func TestDeriveVote_FailClosed(t *testing.T) {
+	tests := []struct {
+		name           string
+		review         personaReview
+		wantVerdict    string
+		wantConfidence string
+		wantSeverity   string
+	}{
+		{
+			// THE bug: zero findings + no rationale used to be GO/HIGH.
+			name:           "empty findings, empty summary -> ABSTAIN (degenerate review)",
+			review:         personaReview{Name: "security-engineer"},
+			wantVerdict:    "ABSTAIN",
+			wantConfidence: "LOW",
+			wantSeverity:   "HIGH",
+		},
+		{
+			// No over-rotation: a genuine clean review still passes.
+			name:           "empty findings, real summary -> GO",
+			review:         personaReview{Name: "security-engineer", Summary: "Reviewed thoroughly; no issues found."},
+			wantVerdict:    "GO",
+			wantConfidence: "HIGH",
+			wantSeverity:   "LOW",
+		},
+		{
+			name:           "whitespace-only summary -> still ABSTAIN",
+			review:         personaReview{Name: "x", Summary: "   \n\t "},
+			wantVerdict:    "ABSTAIN",
+			wantConfidence: "LOW",
+			wantSeverity:   "HIGH",
+		},
+		{
+			name: "critical finding -> NO-GO",
+			review: personaReview{
+				Name:     "security-engineer",
+				Findings: []personaFinding{{Severity: "critical", Message: "secret in repo"}},
+				Summary:  "found a leak",
+			},
+			wantVerdict:    "NO-GO",
+			wantConfidence: "HIGH",
+			wantSeverity:   "CRITICAL",
+		},
+		{
+			name: "high finding -> NO-GO",
+			review: personaReview{
+				Name:     "qa",
+				Findings: []personaFinding{{Severity: "HIGH", Message: "no tests"}},
+			},
+			wantVerdict:    "NO-GO",
+			wantConfidence: "MEDIUM",
+			wantSeverity:   "HIGH",
+		},
+		{
+			name: "only medium/low findings -> GO",
+			review: personaReview{
+				Name:     "tech-lead",
+				Findings: []personaFinding{{Severity: "medium", Message: "nit"}, {Severity: "low", Message: "style"}},
+				Summary:  "minor only",
+			},
+			wantVerdict:    "GO",
+			wantConfidence: "MEDIUM",
+			wantSeverity:   "MEDIUM",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := deriveVote(tt.review, tt.review.Name, "SPEC")
+			if got.Verdict != tt.wantVerdict {
+				t.Errorf("Verdict = %q, want %q", got.Verdict, tt.wantVerdict)
+			}
+			if got.Confidence != tt.wantConfidence {
+				t.Errorf("Confidence = %q, want %q", got.Confidence, tt.wantConfidence)
+			}
+			if got.Severity != tt.wantSeverity {
+				t.Errorf("Severity = %q, want %q", got.Severity, tt.wantSeverity)
+			}
+		})
+	}
+}
+
+// TestDeriveVote_DegenerateReviewCannotPassBlockingGate ties the unit fix
+// to the security outcome: a degenerate review (empty findings + empty
+// summary) must not let a Tier-1 blocking gate reach PASSED.
+func TestDeriveVote_DegenerateReviewCannotPassBlockingGate(t *testing.T) {
+	tmpDir := t.TempDir()
+	st := &status.Status{ProjectPath: tmpDir, CurrentPhase: "S6"}
+	gate := NewMultiPersonaGate(tmpDir, st)
+
+	// Three personas all return degenerate (empty) reviews.
+	var votes []Vote
+	for _, p := range []string{"tech-lead", "security-engineer", "qa-engineer"} {
+		votes = append(votes, *deriveVote(personaReview{Name: p}, p, "SPEC"))
+	}
+
+	config := &GateConfig{Tier: GateTierBlocking, RequiredPersonas: make([]string, 3)}
+	result := gate.aggregateVotes(votes, nil, config)
+
+	if result.Status == "PASSED" {
+		t.Fatalf("fail-open: degenerate reviews PASSED a Tier-1 blocking gate (votes=%+v)", votes)
+	}
+}
+
 // TestGateEnforcement tests gate enforcement logic
 func TestGateEnforcement(t *testing.T) {
 	tmpDir := t.TempDir()
