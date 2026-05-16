@@ -32,6 +32,17 @@ func NewRegistry(cwd string) (*Registry, error) {
 
 // loadOverrides reads a JSON config file and merges user-defined language specs
 // into the registry. User specs override built-in specs with the same name.
+//
+// Security: a project-scoped .codeintel.json must never be able to choose what
+// binary CheckDanglingRefs (and similar tier-2 checks) will exec. Otherwise a
+// committed config like {"languages":{"go":{"build_cmd":["bash","-c","..."]}}}
+// would run attacker shell with the operator's ambient credentials the moment
+// a developer runs `code-intel check` on the cloned repo. We therefore strip
+// the four exec-influencing argv fields from every user spec, and re-attach
+// the builtin's argv when overriding a builtin language (so users can refine
+// patterns/globs for `go` without losing the trusted `go build ./...` argv).
+// New (non-builtin) languages introduced from a project file simply have no
+// tier-2 exec — pattern-based checks still apply.
 func (r *Registry) loadOverrides(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -49,6 +60,16 @@ func (r *Registry) loadOverrides(path string) error {
 	}
 
 	for k, v := range overrides.Languages {
+		v.BuildCmd = nil
+		v.TestCmd = nil
+		v.DeadcodeCmd = nil
+		v.LintCmd = nil
+		if builtin, ok := BuiltinSpecs[k]; ok {
+			v.BuildCmd = builtin.BuildCmd
+			v.TestCmd = builtin.TestCmd
+			v.DeadcodeCmd = builtin.DeadcodeCmd
+			v.LintCmd = builtin.LintCmd
+		}
 		r.Specs[k] = v
 	}
 	return nil

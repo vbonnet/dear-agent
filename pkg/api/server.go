@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -384,6 +385,16 @@ type ExecRunner struct {
 	// WorkingDir is the cwd handed to bash nodes via -cwd. Empty =
 	// inherit the API process's cwd.
 	WorkingDir string
+	// AllowedWorkflowRoots restricts the RunRequest.File paths that the
+	// runner will accept: the resolved absolute path must be inside one of
+	// these roots (also resolved absolute). Empty means the runner refuses
+	// every request — operators must opt in to specific directories at
+	// startup. Without this, any tailnet-authenticated caller could point
+	// `file` at any YAML on the API host's filesystem (e.g., a malicious
+	// YAML placed under /tmp or a cloned repo in a shared homedir) and the
+	// workflow runner would execute its bash nodes with the API user's
+	// ambient credentials.
+	AllowedWorkflowRoots []string
 	// Logger receives spawn / lifecycle logs.
 	Logger *slog.Logger
 }
@@ -402,7 +413,11 @@ func (e *ExecRunner) Run(_ context.Context, req RunRequest, caller Caller) (RunR
 	if err := validateExecArg(req.File); err != nil {
 		return RunResponse{}, fmt.Errorf("api: bad file arg: %w", err)
 	}
-	args := []string{"-file", req.File}
+	resolvedFile, err := resolveWorkflowFile(req.File, e.AllowedWorkflowRoots)
+	if err != nil {
+		return RunResponse{}, fmt.Errorf("api: workflow file rejected: %w", err)
+	}
+	args := []string{"-file", resolvedFile}
 	if e.WorkingDir != "" {
 		if err := validateExecArg(e.WorkingDir); err != nil {
 			return RunResponse{}, fmt.Errorf("api: bad cwd: %w", err)
@@ -441,6 +456,42 @@ func (e *ExecRunner) Run(_ context.Context, req RunRequest, caller Caller) (RunR
 		}
 	}()
 	return RunResponse{PID: pid}, nil
+}
+
+// resolveWorkflowFile turns req.File (which the API caller supplied) into a
+// clean absolute path that is contained in one of the allowed roots, or
+// returns an error. The function intentionally refuses to operate when no
+// roots are configured: a fresh server should not have an implicit "anywhere
+// on the filesystem" policy. Symlink escapes are blocked via EvalSymlinks.
+func resolveWorkflowFile(file string, allowedRoots []string) (string, error) {
+	if len(allowedRoots) == 0 {
+		return "", errors.New("no workflow roots configured; set ExecRunner.AllowedWorkflowRoots at startup")
+	}
+	absFile, err := filepath.Abs(file)
+	if err != nil {
+		return "", fmt.Errorf("absolute path: %w", err)
+	}
+	resolvedFile, err := filepath.EvalSymlinks(absFile)
+	if err != nil {
+		// Don't accept paths that fail symlink resolution — they would
+		// surprise the runner anyway and we don't want partial guarantees.
+		return "", fmt.Errorf("resolve symlinks: %w", err)
+	}
+	for _, root := range allowedRoots {
+		absRoot, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		resolvedRoot, err := filepath.EvalSymlinks(absRoot)
+		if err != nil {
+			continue
+		}
+		cleanRoot := filepath.Clean(resolvedRoot)
+		if resolvedFile == cleanRoot || strings.HasPrefix(resolvedFile, cleanRoot+string(filepath.Separator)) {
+			return resolvedFile, nil
+		}
+	}
+	return "", fmt.Errorf("path %q not under any allowed workflow root", file)
 }
 
 // validateExecArg rejects arguments that contain shell metacharacters

@@ -128,10 +128,24 @@ func determineTestCommand(featureID string, writer *cliframe.Writer) (string, er
 }
 
 // executeTests runs the test command and handles failures.
+//
+// Security: `command` reaches us either from `--test-command` (which the
+// invoking user typed explicitly) or from inferTestCommand parsing an S7
+// plan markdown file under cwd. The latter is project-scoped and so the
+// project's threat model treats it as hostile. Before we hand argv[0] to
+// exec.Command, validateTestProgram enforces an allowlist of recognized
+// test runners so a row like `| feat-x | desc | 5d | sh -c uname |` cannot
+// reach exec.Command("sh", "-c", "uname").
 func executeTests(cmd *cobra.Command, command, featureID string, feature *progress.Feature, writer *cliframe.Writer) ([]byte, error) {
 	writer.Info(fmt.Sprintf("Running tests: %s", command))
 
 	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("empty test command")
+	}
+	if err := validateTestProgram(parts[0]); err != nil {
+		return nil, err
+	}
 	testCmd := exec.Command(parts[0], parts[1:]...)
 	testOutput, err := testCmd.CombinedOutput()
 
@@ -187,31 +201,72 @@ func suggestNextFeature(cmd *cobra.Command, prog *progress.Progress, writer *cli
 	writer.Success("All features verified! 🎉")
 }
 
-// inferTestCommand tries to infer the test command from verification path
+// inferTestCommand tries to infer the test command from the S7 plan's
+// Verification cell. The previous implementation accepted any cell
+// containing a space as a verbatim command — a row like `sh -c uname` then
+// flowed straight to exec.Command("sh", "-c", "uname") inside any repo
+// containing an S7 plan. We now only emit recognized test-runner shapes
+// over a validated path, and we reject the verbatim-command branch.
 func inferTestCommand(verification string) string {
+	verification = strings.TrimSpace(verification)
 	if verification == "" {
 		return ""
 	}
-
-	// Try to infer based on file extension
-	if strings.HasSuffix(verification, ".test.ts") || strings.HasSuffix(verification, ".spec.ts") {
-		return fmt.Sprintf("npm test %s", verification)
+	if !isSafeTestPath(verification) {
+		return ""
 	}
-	if strings.HasSuffix(verification, ".test.js") || strings.HasSuffix(verification, ".spec.js") {
+	switch {
+	case strings.HasSuffix(verification, ".test.ts"),
+		strings.HasSuffix(verification, ".spec.ts"),
+		strings.HasSuffix(verification, ".test.js"),
+		strings.HasSuffix(verification, ".spec.js"):
 		return fmt.Sprintf("npm test %s", verification)
-	}
-	if strings.HasSuffix(verification, "_test.go") {
+	case strings.HasSuffix(verification, "_test.go"):
 		return fmt.Sprintf("go test %s", verification)
-	}
-	if strings.HasSuffix(verification, ".py") {
+	case strings.HasSuffix(verification, ".py"):
 		return fmt.Sprintf("pytest %s", verification)
 	}
+	// Without a recognized test extension we refuse to guess. The user
+	// can still supply --test-command explicitly.
+	return ""
+}
 
-	// If it looks like a command already, use it
-	if strings.Contains(verification, " ") {
-		return verification
+// isSafeTestPath restricts S7-plan-derived paths to a shape that cannot
+// inject extra argv: no shell metacharacters, no whitespace, no traversal,
+// no absolute path. The set is intentionally narrow.
+func isSafeTestPath(p string) bool {
+	if p == "" || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "-") {
+		return false
 	}
+	if strings.Contains(p, "..") {
+		return false
+	}
+	for _, r := range p {
+		if !isSafeTestPathRune(r) {
+			return false
+		}
+	}
+	return true
+}
 
-	// Default: assume it's a test file path and try npm test
-	return fmt.Sprintf("npm test %s", verification)
+func isSafeTestPathRune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		return true
+	case r == '.' || r == '_' || r == '-' || r == '/':
+		return true
+	}
+	return false
+}
+
+// validateTestProgram restricts the argv[0] passed to exec.Command to a
+// fixed set of test runners. Defense in depth — inferTestCommand already
+// only emits these shapes for S7-plan-derived input, but --test-command
+// is also a vector and we want one chokepoint.
+func validateTestProgram(prog string) error {
+	switch prog {
+	case "npm", "go", "pytest", "jest", "yarn", "pnpm":
+		return nil
+	}
+	return fmt.Errorf("test program %q is not on the allowlist (npm, go, pytest, jest, yarn, pnpm)", prog)
 }

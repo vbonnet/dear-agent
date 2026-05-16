@@ -584,7 +584,9 @@ Examples:
 				modelName = selectedModel
 			}
 		} else {
-			agent.ValidateModel(harnessName, modelName)
+			if err := agent.ValidateModel(harnessName, modelName); err != nil {
+				return fmt.Errorf("invalid --model: %w", err)
+			}
 		}
 
 		// Test mode: default to cheapest model unless explicitly overridden

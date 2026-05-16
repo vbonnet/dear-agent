@@ -5,12 +5,34 @@ package security
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
+
+// isPermissionDeniedError reports whether err comes from running
+// apparmor_parser without CAP_MAC_ADMIN. We treat that case as the normal
+// dev/CI path (validation-only fallback). Anything else — including
+// syntactically invalid profiles produced by attacker-influenced
+// permissions — fails closed.
+func isPermissionDeniedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		if status, ok := ee.Sys().(syscall.WaitStatus); ok {
+			if status.ExitStatus() == 13 {
+				return true
+			}
+		}
+	}
+	return errors.Is(err, os.ErrPermission)
+}
 
 // applyLinux applies AppArmor sandboxing on Linux
 // Falls back to validation-only mode if AppArmor is unavailable
@@ -39,16 +61,33 @@ func (s *Sandbox) applyLinux(cmd string, args []string, permissions Permissions)
 		return nil, fmt.Errorf("failed to write AppArmor profile: %w", err)
 	}
 
-	// Attempt to load profile with apparmor_parser
+	// Attempt to load profile with apparmor_parser.
+	//
+	// The previous implementation collapsed any apparmor_parser failure
+	// (permission denied, syntactically invalid profile, kernel module
+	// missing, …) into "run the command unsandboxed." Together with the
+	// permission-validator's narrow filtering, that turned a profile-text
+	// injection (e.g., a plugin manifest with a newline in its filesystem
+	// permission entry) into a privilege escalation: craft a value that
+	// breaks the profile syntax, and apparmor_parser's failure dropped
+	// the sandbox entirely.
+	//
+	// Now we distinguish:
+	//   - exit code 13 / "permission denied" → keep the validation-only
+	//     fallback (apparmor_parser needs CAP_MAC_ADMIN; legitimate dev
+	//     setups don't have it). The validators we run upstream already
+	//     reject the dangerous AppArmor metacharacters, so the profile we
+	//     would have loaded is the only thing missing.
+	//   - any other failure → fail closed. A profile that parses on the
+	//     reviewer's CI machine but not on this one is a signal worth
+	//     surfacing, not papering over.
 	loadCmd := exec.Command("apparmor_parser", "-r", profilePath)
 	if err := loadCmd.Run(); err != nil {
-		// Profile loading failed (likely permission denied — apparmor_parser
-		// needs CAP_MAC_ADMIN). This is an intentional graceful-degradation
-		// path: fall back to validation-only mode rather than blocking the
-		// caller. Returning nil err is correct here.
-		// Clean up the profile file
 		os.Remove(profilePath)
-		return append([]string{cmd}, args...), nil //nolint:nilerr // intentional fallback to validation-only mode
+		if isPermissionDeniedError(err) {
+			return append([]string{cmd}, args...), nil //nolint:nilerr // intentional fallback to validation-only mode
+		}
+		return nil, fmt.Errorf("apparmor_parser failed to load profile (failing closed; refusing unsandboxed exec): %w", err)
 	}
 
 	// Profile loaded successfully, use aa-exec

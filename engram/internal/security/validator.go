@@ -75,8 +75,21 @@ func (v *Validator) ValidatePermissions(permissions Permissions) error {
 	return nil
 }
 
-// validateFilesystemPath ensures a path is not overly broad
+// validateFilesystemPath ensures a path is not overly broad.
+//
+// Security: this entry point also serves as a hard gate against AppArmor
+// profile-text injection. generateAppArmorProfile concatenates each
+// permissions.Filesystem entry directly into AppArmor profile text without
+// escaping, so a value like `"/tmp rw, # \n  /** rwix, # "` would graft an
+// extra `/** rwix,` rule onto the profile (or, if the resulting profile is
+// syntactically invalid, fall back to the unsandboxed exec path). The
+// rejected character set below covers all of AppArmor's profile-grammar
+// metacharacters; we also reject control characters and embedded NULs.
 func (v *Validator) validateFilesystemPath(path string) error {
+	if err := validateAppArmorSafeToken(path, "filesystem path"); err != nil {
+		return err
+	}
+
 	// Clean path
 	clean := filepath.Clean(path)
 
@@ -88,6 +101,25 @@ func (v *Validator) validateFilesystemPath(path string) error {
 	// Log suspicious permission patterns
 	v.logSuspiciousPermission(path, clean)
 
+	return nil
+}
+
+// validateAppArmorSafeToken rejects strings that contain characters with
+// special meaning in an AppArmor profile (or that could break the
+// surrounding line). Called from both validateFilesystemPath and
+// validateCommand because both fields land in generateAppArmorProfile.
+func validateAppArmorSafeToken(s, label string) error {
+	if s == "" {
+		return fmt.Errorf("%s is empty", label)
+	}
+	for _, r := range s {
+		switch r {
+		case '\n', '\r', 0:
+			return fmt.Errorf("%s contains control character", label)
+		case ',', '#', '{', '}', '"', '\\':
+			return fmt.Errorf("%s contains AppArmor metacharacter %q", label, r)
+		}
+	}
 	return nil
 }
 
@@ -481,6 +513,9 @@ func isLetter(b byte) bool {
 
 // validateCommand ensures command is on allowlist
 func (v *Validator) validateCommand(cmd string) error {
+	if err := validateAppArmorSafeToken(cmd, "command"); err != nil {
+		return err
+	}
 	// Command should be absolute path or well-known binary
 	if !filepath.IsAbs(cmd) && !v.isWellKnownCommand(cmd) {
 		return fmt.Errorf("command must be absolute path or well-known binary")
