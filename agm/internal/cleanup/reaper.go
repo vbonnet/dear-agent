@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"time"
 
 	gitpkg "github.com/vbonnet/dear-agent/agm/internal/git"
 )
@@ -29,6 +30,15 @@ type ReaperGitOps interface {
 	ResolveBaseRef(repoPath string) string
 	CommitsAhead(repoPath, ref, base string) (int, error)
 	RemoveWorktree(repoPath, worktreePath string, force bool) error
+	// DeleteBranch removes the local branch left behind by a reaped worktree.
+	// force selects `git branch -D` (needed for squash-merged branches git
+	// still considers unmerged) over the safe `-d`.
+	DeleteBranch(repoPath, branch string, force bool) error
+	// PRMerged reports whether the pull request whose head is `branch` has
+	// been merged. The second return ("known") is false when the answer
+	// cannot be established (gh missing/unauthenticated, no PR, timeout,
+	// network error); callers MUST treat unknown as "not safe to remove".
+	PRMerged(repoPath, branch string) (merged bool, known bool)
 }
 
 // RealReaperGitOps implements ReaperGitOps against the real git CLI.
@@ -59,6 +69,16 @@ func (RealReaperGitOps) RemoveWorktree(repoPath, worktreePath string, force bool
 	return gitpkg.RemoveWorktree(repoPath, worktreePath, force)
 }
 
+// DeleteBranch deletes a local branch via the gitpkg helper.
+func (RealReaperGitOps) DeleteBranch(repoPath, branch string, force bool) error {
+	return gitpkg.DeleteBranch(repoPath, branch, force)
+}
+
+// PRMerged resolves the branch's PR merge state via the gitpkg helper (gh).
+func (RealReaperGitOps) PRMerged(repoPath, branch string) (bool, bool) {
+	return gitpkg.PRMergedState(repoPath, branch)
+}
+
 // ReaperOptions configures a single reap pass.
 type ReaperOptions struct {
 	// RepoPath is the repository whose worktrees are enumerated. Any path
@@ -76,6 +96,19 @@ type ReaperOptions struct {
 	SelfPath string
 	// DryRun reports what would be removed without removing anything.
 	DryRun bool
+	// CheckMergedPR enables the authoritative merged-PR escape: a clean
+	// worktree that is commits-ahead of base (the squash-merge fingerprint)
+	// is still reclaimed when its PR is provably MERGED on the remote.
+	// When false the reaper keeps every commits-ahead worktree — the
+	// historic conservative behavior. Off by the zero value so unit tests
+	// of the core decision matrix are unaffected; the CLI defaults it on.
+	CheckMergedPR bool
+	// PRCheckBudget bounds the wall-clock spent on remote PR-state lookups
+	// across the whole pass so the Stop hook's own timeout is never the
+	// thing that kills the reaper. Past the budget, commits-ahead worktrees
+	// are kept (unknown ⇒ conservative). Zero means unbounded (test default;
+	// fakes answer instantly).
+	PRCheckBudget time.Duration
 }
 
 // ReapResult records the outcome of a reap pass.
@@ -86,15 +119,19 @@ type ReapResult struct {
 }
 
 // ReapStaleWorktrees removes agent-created worktrees that are provably safe to
-// drop: clean working tree AND zero commits ahead of the repo's base ref AND
-// on a claude/ branch AND located under WorktreesBase. Every other worktree —
+// drop. A worktree is reclaimed when it is on a claude/ branch, located under
+// WorktreesBase, not the caller's own worktree, has a clean working tree, and
+// EITHER carries zero commits ahead of the repo's base ref OR (when
+// CheckMergedPR is set) its pull request is provably MERGED on the remote.
+// On removal the backing local branch is deleted too. Every other worktree —
 // and any worktree whose safety cannot be positively established — is kept and
 // the reason is recorded.
 //
 // It is best-effort and non-blocking: it never returns an error and a failure
-// on one worktree does not stop the others. Removal uses non-force
+// on one worktree does not stop the others. Worktree removal uses non-force
 // `git worktree remove`, so git itself is the final guard against deleting a
-// dirty or locked tree even if a status probe raced.
+// dirty or locked tree even if a status probe raced; a failed local-branch
+// delete is logged but never undoes the (already safe) worktree removal.
 func ReapStaleWorktrees(opts ReaperOptions, git ReaperGitOps, logger *slog.Logger) *ReapResult {
 	if logger == nil {
 		logger = slog.Default()
@@ -118,43 +155,28 @@ func ReapStaleWorktrees(opts ReaperOptions, git ReaperGitOps, logger *slog.Logge
 	}
 
 	selfPath := cleanPath(opts.SelfPath)
+	var prDeadline time.Time
+	if opts.PRCheckBudget > 0 {
+		prDeadline = time.Now().Add(opts.PRCheckBudget)
+	}
 
 	for _, wt := range worktrees {
-		path := cleanPath(wt.Path)
+		d := classifyWorktree(opts, git, wt, cleanPath(wt.Path), selfPath, base, prDeadline)
 
-		if keep, reason := ineligibleReason(wt, path, selfPath, opts.WorktreesBase); keep {
-			res.Kept[wt.Path] = reason
-			logger.Debug("reaper: keep", "path", wt.Path, "reason", reason)
-			continue
-		}
-
-		dirty, err := git.HasUncommittedChanges(wt.Path)
-		if err != nil {
-			res.Kept[wt.Path] = "status-check-failed"
-			logger.Warn("reaper: status check failed; keeping", "path", wt.Path, "error", err)
-			continue
-		}
-		if dirty {
-			res.Kept[wt.Path] = "uncommitted-changes"
-			logger.Info("reaper: keep (dirty)", "path", wt.Path)
-			continue
-		}
-
-		ahead, err := git.CommitsAhead(opts.RepoPath, wt.Branch, base)
-		if err != nil {
-			res.Kept[wt.Path] = "ahead-check-failed"
-			logger.Warn("reaper: ahead check failed; keeping", "path", wt.Path, "error", err)
-			continue
-		}
-		if ahead != 0 {
-			res.Kept[wt.Path] = "commits-ahead"
-			logger.Info("reaper: keep (unmerged commits)", "path", wt.Path, "branch", wt.Branch, "ahead", ahead)
+		if !d.remove {
+			res.Kept[wt.Path] = d.reason
+			if d.reason == "uncommitted-changes" {
+				// Spec: a dirty worktree is left in place with a warning.
+				logger.Warn("reaper: keep (uncommitted changes)", "path", wt.Path, "branch", wt.Branch)
+			} else {
+				logger.Debug("reaper: keep", "path", wt.Path, "branch", wt.Branch, "reason", d.reason)
+			}
 			continue
 		}
 
 		if opts.DryRun {
 			res.Removed = append(res.Removed, wt.Path)
-			logger.Info("reaper: would remove", "path", wt.Path, "branch", wt.Branch)
+			logger.Info("reaper: would remove", "path", wt.Path, "branch", wt.Branch, "via", d.reason)
 			continue
 		}
 
@@ -165,11 +187,81 @@ func ReapStaleWorktrees(opts ReaperOptions, git ReaperGitOps, logger *slog.Logge
 			logger.Warn("reaper: remove failed; keeping", "path", wt.Path, "error", err)
 			continue
 		}
+		// Worktree (the sprawl artifact) is gone. Delete the now-orphaned
+		// local branch best-effort: a leftover branch is cheap and a delete
+		// failure must not undo or mask the successful worktree removal.
+		if err := git.DeleteBranch(opts.RepoPath, wt.Branch, d.forceBranchDelete); err != nil {
+			logger.Warn("reaper: worktree removed but local branch delete failed (left dangling)",
+				"path", wt.Path, "branch", wt.Branch, "error", err)
+		} else {
+			logger.Info("reaper: deleted local branch", "branch", wt.Branch)
+		}
 		res.Removed = append(res.Removed, wt.Path)
-		logger.Info("reaper: removed", "path", wt.Path, "branch", wt.Branch)
+		logger.Info("reaper: removed", "path", wt.Path, "branch", wt.Branch, "via", d.reason)
 	}
 
 	return res
+}
+
+// reapDecision is the verdict for one worktree. When remove is false, reason
+// is the recorded Kept reason; when true, reason is the removal tag
+// ("clean-zero-ahead" or "pr-merged") and forceBranchDelete selects `-D`.
+type reapDecision struct {
+	remove            bool
+	reason            string
+	forceBranchDelete bool
+}
+
+func keep(reason string) reapDecision { return reapDecision{reason: reason} }
+func remove(reason string, force bool) reapDecision {
+	return reapDecision{remove: true, reason: reason, forceBranchDelete: force}
+}
+
+// classifyWorktree decides a single worktree's fate without mutating
+// anything. A worktree is removable only when it passes the allowlist, is
+// clean, and is either zero commits ahead of base or has a provably MERGED
+// PR. Every uncertain or unprovable state resolves to keep (fail-safe).
+func classifyWorktree(opts ReaperOptions, git ReaperGitOps, wt gitpkg.Worktree,
+	path, selfPath, base string, prDeadline time.Time) reapDecision {
+
+	if ineligible, reason := ineligibleReason(wt, path, selfPath, opts.WorktreesBase); ineligible {
+		return keep(reason)
+	}
+
+	dirty, err := git.HasUncommittedChanges(wt.Path)
+	if err != nil {
+		return keep("status-check-failed")
+	}
+	if dirty {
+		// Uncommitted work always wins, even over a merged PR: a clean
+		// reap must never destroy edits the agent never committed.
+		return keep("uncommitted-changes")
+	}
+
+	ahead, err := git.CommitsAhead(opts.RepoPath, wt.Branch, base)
+	if err != nil {
+		return keep("ahead-check-failed")
+	}
+	if ahead == 0 {
+		// No unmerged work; safe `-d` branch delete.
+		return remove("clean-zero-ahead", false)
+	}
+
+	// ahead > 0: either genuine unmerged work or a squash-merge artifact.
+	// Only an authoritative MERGED PR distinguishes the latter.
+	if !opts.CheckMergedPR {
+		return keep("commits-ahead")
+	}
+	if !prDeadline.IsZero() && !time.Now().Before(prDeadline) {
+		return keep("commits-ahead") // PR-check budget exhausted ⇒ keep
+	}
+	merged, known := git.PRMerged(opts.RepoPath, wt.Branch)
+	if !known || !merged {
+		return keep("commits-ahead")
+	}
+	// PR provably MERGED: ahead>0 is the squash artifact. git still sees the
+	// branch as unmerged, so the local branch needs force delete (`-D`).
+	return remove("pr-merged", true)
 }
 
 // ineligibleReason returns (true, reason) when a worktree must not even be
