@@ -226,7 +226,7 @@ func pathFromURI(uri string) (string, error) {
 	if err != nil {
 		// Treat unparseable URIs as literal slugs — the caller's URI
 		// is opaque to us and we just want a stable file path.
-		return slugFile(uri), nil //nolint:nilerr // intentional: treat parse error as "use uri as slug"
+		return safeVaultRel(uri, slugFile(uri)) //nolint:nilerr // intentional: treat parse error as "use uri as slug"
 	}
 	if u.Scheme == "obsidian" {
 		// obsidian://Note%20Title or obsidian:///path/to/file.md
@@ -241,9 +241,29 @@ func pathFromURI(uri string) (string, error) {
 		if filepath.Ext(path) == "" {
 			path += ".md"
 		}
-		return filepath.Clean(path), nil
+		return safeVaultRel(uri, path)
 	}
-	return slugFile(uri), nil
+	return safeVaultRel(uri, slugFile(uri))
+}
+
+// safeVaultRel cleans candidate and fails closed if it escapes the vault
+// root (an absolute path, the bare "..", or a leading "../"). It returns
+// the cleaned vault-relative path on success.
+//
+// The PR #46 traversal fix was incomplete: it added a containment check
+// only at the Add() call site, while pathFromURI/slugFile still returned
+// `../../secret.md` for a URI like `obsidian:///../../secret` (cleaning
+// alone preserves a leading `..`). Hardening the sanitiser is the
+// defense-in-depth the original fix omitted (gemini P0).
+func safeVaultRel(uri, candidate string) (string, error) {
+	clean := filepath.Clean(candidate)
+	if clean == "" || clean == "." {
+		return "", fmt.Errorf("source/obsidian: empty path in URI %q", uri)
+	}
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("source/obsidian: invalid path in URI %q (path traversal)", uri)
+	}
+	return clean, nil
 }
 
 // slugFile returns a safe vault filename derived from an arbitrary

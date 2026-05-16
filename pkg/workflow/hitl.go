@@ -30,17 +30,17 @@ const (
 // with the node's policy: backends that subscribe via a poll/notify loop
 // can reconstruct the human-facing message from this alone.
 type HITLRequest struct {
-	ApprovalID    string
-	RunID         string
-	NodeID        string
-	WorkflowName  string
-	ApproverRole  string
-	Reason        string
-	RequestedAt   time.Time
-	Timeout       time.Duration
-	OnTimeout     string
-	Confidence    float64 // populated when policy was on_low_confidence
-	NodeOutput    string
+	ApprovalID   string
+	RunID        string
+	NodeID       string
+	WorkflowName string
+	ApproverRole string
+	Reason       string
+	RequestedAt  time.Time
+	Timeout      time.Duration
+	OnTimeout    string
+	Confidence   float64 // populated when policy was on_low_confidence
+	NodeOutput   string
 }
 
 // HITLResolution is what a backend hands back when a human (or a timeout)
@@ -205,7 +205,12 @@ func RecordHITLDecision(ctx context.Context, db *sql.DB, approvalID string, dec 
 	if resolvedCol.Valid {
 		return fmt.Errorf("%w: %s", ErrApprovalAlreadyResolved, approvalID)
 	}
-	if requiredRole.Valid && requiredRole.String != "" && role != "" && requiredRole.String != role {
+	// Fail closed: when a required approver role is set, the decision must
+	// carry a role that matches it. An empty/absent role must NOT bypass the
+	// check — that was the role-enforcement bypass (PR #40 gemini P0): the
+	// prior `role != ""` clause let an approver omit their role and skip
+	// enforcement entirely.
+	if requiredRole.Valid && requiredRole.String != "" && requiredRole.String != role {
 		return fmt.Errorf("%w: required %q, got %q", ErrApproverRoleMismatch, requiredRole.String, role)
 	}
 
@@ -287,11 +292,11 @@ func LoadHITLRequest(ctx context.Context, db *sql.DB, approvalID string) (*HITLR
 		return nil, fmt.Errorf("workflow: LoadHITLRequest: approvalID required")
 	}
 	var (
-		req           HITLRequest
-		approverRole  sql.NullString
-		reason        sql.NullString
-		workflowName  sql.NullString
-		nodeOutput    sql.NullString
+		req          HITLRequest
+		approverRole sql.NullString
+		reason       sql.NullString
+		workflowName sql.NullString
+		nodeOutput   sql.NullString
 	)
 	err := db.QueryRowContext(ctx, `
 		SELECT a.approval_id, a.run_id, a.node_id, a.approver_role, a.reason, a.requested_at,

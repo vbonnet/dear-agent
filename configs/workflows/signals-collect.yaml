@@ -71,8 +71,23 @@ nodes:
       # path is shell-injectable per pkg/workflow/runner.go).
       cmd: |
         set -uo pipefail
-        db_path="$(eval echo "$INPUT_db")"
-        root="$(eval echo "$INPUT_repos_root")"
+        # Expand a leading ~ or literal $HOME WITHOUT eval. `eval echo
+        # "$INPUT_db"` was a command-injection vector (PR #77 gemini P0):
+        # an input like '$(rm -rf ~)', 'x; reboot', or a backtick payload
+        # would be executed by eval. expand_path handles only the two safe
+        # prefixes and treats everything else as a literal path, so hostile
+        # shell metacharacters are inert. POSIX-safe (sh/dash/bash).
+        expand_path() {
+          case "$1" in
+            "~")       printf '%s\n' "$HOME" ;;
+            "~/"*)     printf '%s\n' "$HOME/${1#'~/'}" ;;
+            '$HOME')   printf '%s\n' "$HOME" ;;
+            '$HOME/'*) printf '%s\n' "$HOME/${1#'$HOME/'}" ;;
+            *)         printf '%s\n' "$1" ;;
+          esac
+        }
+        db_path="$(expand_path "$INPUT_db")"
+        root="$(expand_path "$INPUT_repos_root")"
         mkdir -p "$(dirname "$db_path")"
 
         ok=0; failed=0; skipped=0

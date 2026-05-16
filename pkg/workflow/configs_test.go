@@ -2,6 +2,7 @@ package workflow_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -148,6 +149,115 @@ func TestAuditSingleRepoTemplatesUseCmdField(t *testing.T) {
 			}
 		})
 	}
+}
+
+// templatesWithInputExpansion are the shipped templates that expand a
+// user-controlled path input ($INPUT_db / $INPUT_repos_root). They used
+// `eval echo "$INPUT_db"`, which executes shell metacharacters in the
+// input — the PR #77 gemini security P0 (command injection). The fix
+// replaces eval with a POSIX expand_path helper that only expands a
+// leading ~ / $HOME prefix and treats everything else literally.
+var templatesWithInputExpansion = []string{"audit-multi.yaml", "signals-collect.yaml"}
+
+// TestShippedTemplatesNoEval is the static regression guard: no shipped
+// template's bash node may use `eval`, and the path-expanding templates
+// must carry the expand_path helper. A drive-by edit reintroducing
+// `eval echo` trips this immediately, without needing a shell.
+func TestShippedTemplatesNoEval(t *testing.T) {
+	dir := configsDir(t)
+	matches, err := filepath.Glob(filepath.Join(dir, "*.yaml"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	for _, path := range matches {
+		w := loadShippedTemplate(t, filepath.Base(path))
+		for _, n := range w.Nodes {
+			if n.Bash == nil {
+				continue
+			}
+			if line := evalInvocationLine(n.Bash.Cmd); line != "" {
+				t.Errorf("%s node %q: bash.cmd invokes `eval` — command-injection vector (PR #77 P0): %q",
+					filepath.Base(path), n.ID, line)
+			}
+		}
+	}
+	for _, name := range templatesWithInputExpansion {
+		w := loadShippedTemplate(t, name)
+		if !strings.Contains(w.Nodes[0].Bash.Cmd, "expand_path") {
+			t.Errorf("%s: expected expand_path helper to replace `eval echo`", name)
+		}
+	}
+}
+
+// TestShippedTemplatesInputInjectionInert proves end to end that a
+// hostile $INPUT_db / $INPUT_repos_root cannot execute commands. It runs
+// the *actual shipped bash.cmd* with injection payloads and asserts no
+// sentinel file is created. The runner shell is a separate concern; this
+// test pins bash so it exercises the real script (which uses read -ra /
+// here-strings) deterministically.
+func TestShippedTemplatesInputInjectionInert(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skipf("bash not available: %v", err)
+	}
+
+	payloads := map[string]string{
+		"command-substitution": "$(touch %s)",
+		"semicolon":            "x; touch %s",
+		"backtick":             "`touch %s`",
+		"and-chain":            "y && touch %s",
+	}
+
+	for _, name := range templatesWithInputExpansion {
+		name := name
+		w := loadShippedTemplate(t, name)
+		cmd := w.Nodes[0].Bash.Cmd
+		for label, tmpl := range payloads {
+			label, tmpl := label, tmpl
+			t.Run(name+"/"+label, func(t *testing.T) {
+				tmp := t.TempDir()
+				sentinel := filepath.Join(tmp, "pwned")
+				payload := strings.Replace(tmpl, "%s", sentinel, 1)
+
+				c := exec.Command(bashPath, "-c", cmd) //nolint:gosec // fixed shell + shipped template
+				c.Env = append(os.Environ(),
+					"HOME="+tmp,
+					"INPUT_db="+payload,
+					"INPUT_repos_root="+payload,
+					"INPUT_repos=", // empty: loop body never runs
+					"INPUT_cadence=daily",
+					"INPUT_lookback_days=7",
+				)
+				// Exit code is irrelevant — the script may bail under
+				// `set -u`/bash-isms. The only assertion is that the
+				// injection did not execute.
+				out, _ := c.CombinedOutput()
+				if _, statErr := os.Stat(sentinel); statErr == nil {
+					t.Fatalf("INJECTION EXECUTED for %s payload %q — sentinel created.\nscript output:\n%s",
+						name, payload, out)
+				}
+			})
+		}
+	}
+}
+
+// evalInvocationLine returns the first non-comment script line that
+// invokes the `eval` builtin, or "" if none. Comment lines (trimmed,
+// starting with #) are ignored so the explanatory comment documenting
+// *why eval was removed* does not trip the guard.
+func evalInvocationLine(script string) string {
+	for _, raw := range strings.Split(script, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		for _, tok := range strings.Fields(line) {
+			if tok == "eval" {
+				return line
+			}
+		}
+	}
+	return ""
 }
 
 func loadShippedTemplate(t *testing.T, filename string) *workflow.Workflow {

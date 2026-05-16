@@ -362,6 +362,7 @@ func (g *MultiPersonaGate) aggregateVotes(votes []Vote, blockers []string, confi
 }
 
 // invokePersonaReview calls multi-persona-review CLI to get persona vote
+//
 //nolint:gocyclo // reason: linear multi-persona gate with one branch per persona
 func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, error) {
 	// Build command arguments
@@ -428,15 +429,7 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 
 	// Parse JSON output
 	var review struct {
-		Personas []struct {
-			Name     string `json:"name"`
-			Findings []struct {
-				Severity    string   `json:"severity"`
-				Message     string   `json:"message"`
-				Suggestions []string `json:"suggestions"`
-			} `json:"findings"`
-			Summary string `json:"summary"`
-		} `json:"personas"`
+		Personas []personaReview `json:"personas"`
 	}
 
 	if err := json.Unmarshal(output, &review); err != nil {
@@ -447,18 +440,51 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 		return nil, fmt.Errorf("no persona results in review output")
 	}
 
-	personaResult := review.Personas[0]
+	return deriveVote(review.Personas[0], persona, phaseName), nil
+}
 
-	// Convert findings to vote (verdict/confidence/severity are set per-branch below)
-	var verdict, confidence, severity string
+// personaFinding / personaReview are the named decode targets for the
+// multi-persona-review JSON. They were anonymous structs inline in
+// invokePersonaReview; naming them lets deriveVote be unit-tested without
+// shelling out to the external CLI.
+type personaFinding struct {
+	Severity    string   `json:"severity"`
+	Message     string   `json:"message"`
+	Suggestions []string `json:"suggestions"`
+}
+
+type personaReview struct {
+	Name     string           `json:"name"`
+	Findings []personaFinding `json:"findings"`
+	Summary  string           `json:"summary"`
+}
+
+// deriveVote converts one persona's review into a Vote.
+//
+// Fail-closed (PR #18 gemini security P0): the prior code initialised
+// verdict/confidence to a passing state and treated *zero findings* as an
+// unconditional GO/HIGH. An empty findings list is ambiguous — it means
+// either "reviewed and clean" OR "the review never really ran" (model
+// refused, truncated/empty output, empty deliverable). Resolving that
+// ambiguity toward GO is fail-open: a degenerate review silently passed
+// the gate.
+//
+// Now the vote starts at ABSTAIN/LOW (a non-approval that does not count
+// toward the GO quorum a Tier-1 gate requires) and is only promoted to GO
+// when there is positive evidence a real review happened: a non-empty
+// rationale (Summary). A degenerate empty review stays ABSTAIN, which the
+// aggregator turns into CONDITIONAL ("human must look") rather than PASSED.
+func deriveVote(pr personaReview, persona, phaseName string) *Vote {
+	// Fail-closed defaults: if no branch below establishes a clean or
+	// blocking outcome, the vote is a non-approving ABSTAIN.
+	verdict, confidence, severity := "ABSTAIN", "LOW", "HIGH"
 	var blockers []string
 	var recommendations []string
 
-	// Analyze findings to determine verdict
 	criticalCount := 0
 	highCount := 0
 
-	for _, finding := range personaResult.Findings {
+	for _, finding := range pr.Findings {
 		switch strings.ToUpper(finding.Severity) {
 		case "CRITICAL":
 			criticalCount++
@@ -476,7 +502,6 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 		recommendations = append(recommendations, finding.Suggestions...)
 	}
 
-	// Determine verdict based on findings
 	switch {
 	case criticalCount > 0 || highCount > 0:
 		verdict = "NO-GO"
@@ -487,11 +512,18 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 			severity = "HIGH"
 			confidence = "MEDIUM"
 		}
-	case len(personaResult.Findings) == 0:
-		verdict = "GO"
-		severity = "LOW"
-		confidence = "HIGH"
+	case len(pr.Findings) == 0:
+		// Zero findings is an approval ONLY if the reviewer actually
+		// produced a rationale. An empty Summary means the persona block
+		// was degenerate — keep the fail-closed ABSTAIN default rather
+		// than converting "nothing came back" into GO/HIGH.
+		if strings.TrimSpace(pr.Summary) != "" {
+			verdict = "GO"
+			severity = "LOW"
+			confidence = "HIGH"
+		}
 	default:
+		// Only MEDIUM/LOW findings — non-blocking by severity policy.
 		verdict = "GO"
 		severity = "MEDIUM"
 		confidence = "MEDIUM"
@@ -504,8 +536,8 @@ func invokePersonaReview(persona, deliverablePath, phaseName string) (*Vote, err
 		Verdict:         verdict,
 		Confidence:      confidence,
 		Severity:        severity,
-		Rationale:       personaResult.Summary,
+		Rationale:       pr.Summary,
 		Blockers:        blockers,
 		Recommendations: recommendations,
-	}, nil
+	}
 }
