@@ -268,7 +268,7 @@ func pathFromURI(uri string) string {
 		if filepath.Ext(stem) == "" {
 			stem += ".md"
 		}
-		return filepath.Clean(stem)
+		return safeWikiRel(stem)
 	}
 	// Generic: turn the URI into a filesystem-safe slug rooted at the
 	// wiki dir. Hash-prefix would be more compact but harder to
@@ -293,7 +293,28 @@ func pathFromURI(uri string) string {
 	if filepath.Ext(out) == "" {
 		out += ".md"
 	}
-	return filepath.Clean(out)
+	return safeWikiRel(out)
+}
+
+// safeWikiRel cleans candidate and fails closed if it escapes the wiki
+// root: it returns "" for an absolute path, the bare "..", or anything
+// beginning with "../". Callers treat "" as an invalid URI and reject
+// the write.
+//
+// The PR #46 traversal fix was incomplete: it added a containment check
+// only at the Add() call site and left pathFromURI itself returning
+// `../../etc/passwd.md` for a URI like `wiki://../../etc/passwd`. Cleaning
+// alone preserves a leading `..`. Hardening the sanitiser is the
+// defense-in-depth the original fix omitted (gemini P0).
+func safeWikiRel(candidate string) string {
+	clean := filepath.Clean(candidate)
+	if clean == "" || clean == "." {
+		return ""
+	}
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return clean
 }
 
 // matchFilters mirrors the obsidian adapter — same predicate set, same
