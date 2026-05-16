@@ -260,10 +260,10 @@ func TestHITL_OnLowConfidence_BlocksWhenBelow(t *testing.T) {
 	// Direct test of shouldBlockOnHITL — the runner integration is
 	// covered by the always/reject/timeout cases above.
 	cases := []struct {
-		name       string
-		conf       float64
-		threshold  float64
-		wantBlock  bool
+		name      string
+		conf      float64
+		threshold float64
+		wantBlock bool
 	}{
 		{"low-blocks", 0.3, 0.5, true},
 		{"high-passes", 0.9, 0.5, false},
@@ -351,5 +351,71 @@ func TestRecordHITLDecision_RoleMismatch(t *testing.T) {
 	err = RecordHITLDecision(ctx, ss.DB(), approvalID, HITLDecisionReject, "bob", "reviewer", "", time.Now())
 	if !errors.Is(err, ErrApprovalAlreadyResolved) {
 		t.Errorf("expected ErrApprovalAlreadyResolved, got %v", err)
+	}
+}
+
+// TestRecordHITLDecision_EmptyRoleCannotBypassRequiredRole is the regression
+// test for the PR #40 gemini P0: a required approver role must not be
+// bypassable by submitting a decision with an empty role string. Before the
+// fix the guard was `requiredRole.Valid && requiredRole.String != "" &&
+// role != "" && requiredRole.String != role`, so role="" skipped the
+// mismatch check entirely and the approval went through.
+func TestRecordHITLDecision_EmptyRoleCannotBypassRequiredRole(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "runs.db")
+	ss, err := OpenSQLiteState(dbPath)
+	if err != nil {
+		t.Fatalf("OpenSQLiteState: %v", err)
+	}
+	defer ss.Close()
+
+	ctx := context.Background()
+	if err := ss.BeginRun(ctx, RunRecord{RunID: "r1", WorkflowName: "wf", State: RunStateRunning, InputsJSON: "{}", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := ss.UpsertNode(ctx, NodeRecord{RunID: "r1", NodeID: "n1", State: NodeStateRunning}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	approvalID, err := CreateHITLRequest(ctx, ss.DB(), "r1", "n1", "reviewer", "needs human", time.Now())
+	if err != nil {
+		t.Fatalf("CreateHITLRequest: %v", err)
+	}
+
+	// Empty role with a required role set must be rejected (fail closed).
+	err = RecordHITLDecision(ctx, ss.DB(), approvalID, HITLDecisionApprove, "mallory", "", "lgtm", time.Now())
+	if !errors.Is(err, ErrApproverRoleMismatch) {
+		t.Fatalf("empty role must not bypass required role: expected ErrApproverRoleMismatch, got %v", err)
+	}
+
+	// The approval must remain unresolved so the correct role can still act.
+	if err := RecordHITLDecision(ctx, ss.DB(), approvalID, HITLDecisionApprove, "bob", "reviewer", "lgtm", time.Now()); err != nil {
+		t.Fatalf("legitimate reviewer decision after blocked bypass: %v", err)
+	}
+}
+
+// TestRecordHITLDecision_NoRequiredRoleAllowsEmptyRole verifies the fix did
+// not over-rotate: when no approver role is required, an empty role is still
+// a valid decision (the common no-RBAC path).
+func TestRecordHITLDecision_NoRequiredRoleAllowsEmptyRole(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "runs.db")
+	ss, err := OpenSQLiteState(dbPath)
+	if err != nil {
+		t.Fatalf("OpenSQLiteState: %v", err)
+	}
+	defer ss.Close()
+
+	ctx := context.Background()
+	if err := ss.BeginRun(ctx, RunRecord{RunID: "r1", WorkflowName: "wf", State: RunStateRunning, InputsJSON: "{}", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := ss.UpsertNode(ctx, NodeRecord{RunID: "r1", NodeID: "n1", State: NodeStateRunning}); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+	// No required role passed to CreateHITLRequest.
+	approvalID, err := CreateHITLRequest(ctx, ss.DB(), "r1", "n1", "", "needs human", time.Now())
+	if err != nil {
+		t.Fatalf("CreateHITLRequest: %v", err)
+	}
+	if err := RecordHITLDecision(ctx, ss.DB(), approvalID, HITLDecisionApprove, "alice", "", "lgtm", time.Now()); err != nil {
+		t.Fatalf("no required role should accept empty role: %v", err)
 	}
 }
