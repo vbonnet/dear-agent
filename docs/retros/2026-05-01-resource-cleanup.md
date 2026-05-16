@@ -170,3 +170,41 @@ Run `agm audit resources` weekly or add it to the `agm session list` output as a
 | DB not available | `agm audit resources` is filesystem-based (no DB needed) |
 | New repos not scanned | `--repos` flag; default scans `~/src/` and `~/worktrees/` |
 | This retro itself orphans a worktree | ecstatic-sinoussi-9a19da cleaned up by stop hook after merge |
+
+---
+
+## Update — 2026-05-16: the Stop hook was wired but ineffective
+
+**What we found:** The Stop hook *was* registered (`agm admin install-hooks`
+writes `stop-agm-resource-cleanup` into `~/.claude/settings.json`), but its
+only action was `agm session cleanup`, which removes **manifest/Dolt-tracked**
+worktrees. Per root cause #1 of this very retro, agents create worktrees with
+raw `git worktree add` that are never tracked — so the hook reclaimed *zero*
+of them. Sprawl recurred (82 worktrees before manual cleanup).
+
+**Fix shipped (this change):** A filesystem/git reaper —
+`agm session reap-worktrees`, logic in `agm/internal/cleanup/reaper.go` — now
+runs from the same already-registered Stop hook. It removes a worktree only
+when **all** hold: under `~/worktrees`, branch `claude/*`, not the worktree the
+session is running in, clean working tree, and **either** zero commits ahead of
+the base ref **or** its PR is provably `MERGED` on the remote. On removal the
+orphaned local branch is deleted too. Non-force `git worktree remove` is the
+final guard; a failed branch delete never undoes the worktree removal.
+
+**Squash-merge handling — the dominant case:** a squash-merged branch reports
+commits-ahead > 0 and looks unmerged to plain git, so a local-only check would
+keep it forever (the live audit found 14 of 21 worktrees in exactly this
+state — the bulk of the sprawl). The reaper closes this with an *authoritative*
+signal: `gh pr view <branch>` must return `state == MERGED` for that exact head
+branch before such a worktree is reclaimed (then `git branch -D`). Anything
+unknown — gh missing/unauthenticated, no PR, timeout, ambiguous head — is
+treated as "keep" (fail-safe). The lookup is hard-bounded (8s/call, ~22s/pass)
+so it can never block session exit, and `--no-pr-check` reverts to the
+strictly-local conservative behavior. Uncommitted changes always win over a
+merged PR: dirty worktrees are never reaped.
+
+**Lesson:** "hook registered" ≠ "hook effective", and a local-only safety
+check that keeps the *common* failure mode (squash-merged) forever is barely
+more effective. A cleanup hook must be verified against the *untracked* and
+*squash-merged* failure modes it exists to catch — using an authoritative
+remote signal, fail-safe on uncertainty — not just the tracked happy path.

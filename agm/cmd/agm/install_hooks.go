@@ -27,6 +27,7 @@ Hooks installed:
   • session-start/agm-plan-continuity - Link execution sessions to planning parents
   • agm-pretool-test-session-guard        - Block test-* sessions without --test flag
   • pretool-agm-mode-tracker          - Track permission mode changes for persistence
+  • stop-agm-resource-cleanup         - Reap stale agent worktrees on session end
 
 These hooks enable accurate state detection with <1% false positive rate,
 replacing the fragile tmux pane parsing method (37.5% false positive rate).
