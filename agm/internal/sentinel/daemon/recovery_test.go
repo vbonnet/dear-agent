@@ -103,9 +103,13 @@ func TestRecoveryHistory_RecordAttempt(t *testing.T) {
 	assert.Equal(t, RecoveryEscape, attempt.Strategy)
 	assert.True(t, attempt.Success)
 	assert.Equal(t, "stuck_mustering", attempt.Reason)
-	assert.True(t, attempt.Timestamp.After(beforeTime))
-	assert.True(t, attempt.Timestamp.Before(afterTime))
-	assert.True(t, history.LastAttempt.After(beforeTime))
+	// Timestamps are captured around an effectively-instantaneous call.
+	// The OS clock resolution can make beforeTime, the recorded timestamp,
+	// and afterTime compare equal, so assert the closed interval
+	// [beforeTime, afterTime] rather than strict (open-interval) ordering.
+	assert.False(t, attempt.Timestamp.Before(beforeTime))
+	assert.False(t, attempt.Timestamp.After(afterTime))
+	assert.False(t, history.LastAttempt.Before(beforeTime))
 
 	// Record failed attempt
 	history.RecordAttempt(RecoveryCtrlC, false, "stuck_frozen")
