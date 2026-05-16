@@ -281,7 +281,28 @@ func (g *MultiPersonaGate) aggregateVotes(votes []Vote, blockers []string, confi
 	//nolint:exhaustive // intentional partial: handles the relevant subset
 	switch config.Tier {
 	case GateTierBlocking:
-		// Tier 1: ALL personas must vote GO
+		// Tier 1 (blocking / mandatory-approval) gate. This is a
+		// fail-CLOSED control: the phase transition may proceed ONLY when
+		// every required persona has explicitly voted GO. Anything short
+		// of unanimous, explicit approval from the required reviewers must
+		// NOT pass.
+		//
+		// Verdict handling:
+		//   - NO-GO from any persona      -> BLOCKED (resolve blockers)
+		//   - All required personas GO    -> PASSED
+		//   - Otherwise (any ABSTAIN, or
+		//     a required persona's review
+		//     failed so no vote recorded) -> CONDITIONAL (needs resolution)
+		//
+		// ABSTAIN is deliberately NOT treated as approval and deliberately
+		// does NOT lower the approval threshold. Treating "declined to
+		// opine" (or a failed/errored review) as consent is a fail-open
+		// vulnerability: a required reviewer who abstains -- or whose
+		// review crashes -- would otherwise silently let the gate pass on
+		// fewer affirmative votes than required. The required-persona count
+		// is the fixed denominator; abstentions never shrink it.
+		required := len(config.RequiredPersonas)
+
 		if noGoCount > 0 {
 			return &GateResult{
 				Status:   "BLOCKED",
@@ -291,30 +312,25 @@ func (g *MultiPersonaGate) aggregateVotes(votes []Vote, blockers []string, confi
 			}
 		}
 
-		// If no GO votes at all (all abstained or failed), return CONDITIONAL
-		if goCount == 0 && len(votes) > 0 {
+		// PASSED only when every required persona explicitly voted GO:
+		// no objections, no abstentions, and one GO per required persona.
+		// Note goCount is bounded above by len(votes) <= required, so a
+		// missing vote from a failed review keeps goCount < required and
+		// the gate stays closed.
+		if noGoCount == 0 && abstainCount == 0 && goCount == required {
 			return &GateResult{
-				Status:   "CONDITIONAL",
-				Message:  "No GO votes collected (all abstained or failed)",
+				Status:   "PASSED",
+				Message:  fmt.Sprintf("All %d required persona(s) voted GO", required),
 				Votes:    votes,
-				Blockers: []string{"Not all required personas approved"},
-			}
-		}
-
-		if goCount < len(config.RequiredPersonas)-abstainCount {
-			return &GateResult{
-				Status:   "CONDITIONAL",
-				Message:  fmt.Sprintf("Insufficient GO votes: %d/%d (excluding %d abstentions)", goCount, len(config.RequiredPersonas), abstainCount),
-				Votes:    votes,
-				Blockers: []string{"Not all required personas approved"},
+				Blockers: []string{},
 			}
 		}
 
 		return &GateResult{
-			Status:   "PASSED",
-			Message:  fmt.Sprintf("All %d persona(s) voted GO", goCount),
+			Status:   "CONDITIONAL",
+			Message:  fmt.Sprintf("Insufficient approvals: %d/%d required personas voted GO (%d abstained or did not vote)", goCount, required, required-goCount),
 			Votes:    votes,
-			Blockers: []string{},
+			Blockers: []string{"Not all required personas approved"},
 		}
 
 	case GateTierAdvisory:
