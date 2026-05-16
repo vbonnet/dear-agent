@@ -710,6 +710,34 @@ class SubAgentImpl implements SubAgent {
       const timeout = this.config.timeout || 120000;
       const location = this.config.vertexLocation || 'us-east5';
 
+      // Validate location, project, and model against strict allowlists before
+      // they are interpolated into the URL. Without this, a location like
+      // `evil.com/x` re-points the request to `https://evil.com/x-aiplatform...`,
+      // which fetch resolves with authority `evil.com` — exfiltrating both
+      // the Google Cloud bearer token (Authorization header below) and the
+      // source code in the request body.
+      const safeIdent = /^[A-Za-z0-9._-]+$/;
+      const safeModel = /^[A-Za-z0-9._:@-]+$/;
+      if (!safeIdent.test(location)) {
+        throw new SubAgentError(
+          SUB_AGENT_ERROR_CODES.API_KEY_MISSING,
+          `Invalid vertexLocation: ${location}`
+        );
+      }
+      const project = this.config.vertexProject ?? '';
+      if (!safeIdent.test(project)) {
+        throw new SubAgentError(
+          SUB_AGENT_ERROR_CODES.API_KEY_MISSING,
+          `Invalid vertexProject: ${project}`
+        );
+      }
+      if (!safeModel.test(model)) {
+        throw new SubAgentError(
+          SUB_AGENT_ERROR_CODES.API_KEY_MISSING,
+          `Invalid model: ${model}`
+        );
+      }
+
       // Build user prompt
       const userPrompt = buildReviewPrompt(input);
 
@@ -724,8 +752,17 @@ class SubAgentImpl implements SubAgent {
         );
       }
 
-      // Build VertexAI Anthropic endpoint URL
-      const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${this.config.vertexProject}/locations/${location}/publishers/anthropic/models/${model}:streamRawPredict`;
+      // Build VertexAI Anthropic endpoint URL. Belt-and-braces: assert the
+      // resulting hostname matches the expected `<location>-aiplatform.googleapis.com`
+      // shape even though the regexes above already preclude host pivots.
+      const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/anthropic/models/${model}:streamRawPredict`;
+      const endpointHost = new URL(endpoint).hostname;
+      if (endpointHost !== `${location}-aiplatform.googleapis.com`) {
+        throw new SubAgentError(
+          SUB_AGENT_ERROR_CODES.API_KEY_MISSING,
+          `Vertex endpoint host failed allowlist check: ${endpointHost}`
+        );
+      }
 
       // Build request body (Anthropic format via VertexAI)
       // Note: VertexAI does not support prompt caching yet, so we omit cache_control

