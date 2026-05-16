@@ -21,7 +21,14 @@ type fakeReaperGit struct {
 	aheadErr  map[string]error
 	removeErr map[string]error
 
-	removed []string
+	// PR state keyed by branch. prKnown[b] absent ⇒ unknown (false,false).
+	prKnown         map[string]bool
+	prMerged        map[string]bool
+	deleteBranchErr map[string]error
+
+	removed           []string
+	branchDeleted     []string
+	branchDeleteForce map[string]bool
 }
 
 func (f *fakeReaperGit) ListWorktrees(string) ([]gitpkg.Worktree, error) {
@@ -50,6 +57,26 @@ func (f *fakeReaperGit) RemoveWorktree(_, worktreePath string, _ bool) error {
 	}
 	f.removed = append(f.removed, worktreePath)
 	return nil
+}
+
+func (f *fakeReaperGit) DeleteBranch(_, branch string, force bool) error {
+	if err := f.deleteBranchErr[branch]; err != nil {
+		return err
+	}
+	if f.branchDeleteForce == nil {
+		f.branchDeleteForce = map[string]bool{}
+	}
+	f.branchDeleteForce[branch] = force
+	f.branchDeleted = append(f.branchDeleted, branch)
+	return nil
+}
+
+func (f *fakeReaperGit) PRMerged(_, branch string) (bool, bool) {
+	known := f.prKnown[branch]
+	if !known {
+		return false, false
+	}
+	return f.prMerged[branch], true
 }
 
 func wt(path, branch string, main bool) gitpkg.Worktree {
@@ -246,6 +273,174 @@ func TestReap_ListErrorIsNonFatal(t *testing.T) {
 	res := ReapStaleWorktrees(ReaperOptions{RepoPath: "/r", WorktreesBase: base}, g, nil)
 	if len(res.Removed) != 0 || len(res.Kept) != 0 {
 		t.Fatalf("list error should yield empty result, got %+v", res)
+	}
+}
+
+// --- branch deletion + merged-PR escape (spec points 2 & 4) ---
+
+func TestReap_CleanZeroAheadDeletesLocalBranchSafely(t *testing.T) {
+	p := base + "/dear-agent/clean"
+	g := &fakeReaperGit{
+		worktrees: []gitpkg.Worktree{wt(p, "claude/clean", false)},
+		base:      "origin/main",
+		dirty:     map[string]bool{},
+		ahead:     map[string]int{"claude/clean": 0},
+	}
+	res := ReapStaleWorktrees(ReaperOptions{RepoPath: "/r", WorktreesBase: base}, g, nil)
+
+	if len(res.Removed) != 1 || res.Removed[0] != p {
+		t.Fatalf("expected %s removed, got removed=%v kept=%v", p, res.Removed, res.Kept)
+	}
+	if len(g.branchDeleted) != 1 || g.branchDeleted[0] != "claude/clean" {
+		t.Fatalf("expected local branch claude/clean deleted, got %v", g.branchDeleted)
+	}
+	if g.branchDeleteForce["claude/clean"] {
+		t.Fatalf("zero-ahead branch must be deleted with safe -d, not -D")
+	}
+}
+
+func TestReap_MergedPRReclaimsCommitsAheadWorktree(t *testing.T) {
+	p := base + "/dear-agent/merged"
+	g := &fakeReaperGit{
+		worktrees: []gitpkg.Worktree{wt(p, "claude/merged", false)},
+		base:      "origin/main",
+		dirty:     map[string]bool{},
+		ahead:     map[string]int{"claude/merged": 4}, // squash-merge fingerprint
+		prKnown:   map[string]bool{"claude/merged": true},
+		prMerged:  map[string]bool{"claude/merged": true},
+	}
+	res := ReapStaleWorktrees(ReaperOptions{
+		RepoPath: "/r", WorktreesBase: base, CheckMergedPR: true,
+	}, g, nil)
+
+	if len(res.Removed) != 1 || res.Removed[0] != p {
+		t.Fatalf("merged-PR worktree should be reclaimed, got removed=%v kept=%v", res.Removed, res.Kept)
+	}
+	if !g.branchDeleteForce["claude/merged"] {
+		t.Fatalf("squash-merged branch must be force-deleted (-D), git still sees it unmerged")
+	}
+}
+
+func TestReap_CommitsAheadKeptWhenPRStateUnknown(t *testing.T) {
+	p := base + "/dear-agent/unknownpr"
+	g := &fakeReaperGit{
+		worktrees: []gitpkg.Worktree{wt(p, "claude/unknownpr", false)},
+		base:      "origin/main",
+		dirty:     map[string]bool{},
+		ahead:     map[string]int{"claude/unknownpr": 2},
+		// prKnown absent ⇒ PRMerged returns (false,false) = unknown
+	}
+	res := ReapStaleWorktrees(ReaperOptions{
+		RepoPath: "/r", WorktreesBase: base, CheckMergedPR: true,
+	}, g, nil)
+
+	if len(res.Removed) != 0 || len(g.removed) != 0 {
+		t.Fatalf("unknown PR state must be conservative (keep): %v", res.Removed)
+	}
+	if res.Kept[p] != "commits-ahead" {
+		t.Fatalf("kept reason = %q, want commits-ahead", res.Kept[p])
+	}
+}
+
+func TestReap_CommitsAheadKeptWhenPROpenNotMerged(t *testing.T) {
+	p := base + "/dear-agent/openpr"
+	g := &fakeReaperGit{
+		worktrees: []gitpkg.Worktree{wt(p, "claude/openpr", false)},
+		base:      "origin/main",
+		dirty:     map[string]bool{},
+		ahead:     map[string]int{"claude/openpr": 1},
+		prKnown:   map[string]bool{"claude/openpr": true}, // known, but not merged
+	}
+	res := ReapStaleWorktrees(ReaperOptions{
+		RepoPath: "/r", WorktreesBase: base, CheckMergedPR: true,
+	}, g, nil)
+
+	if len(res.Removed) != 0 || res.Kept[p] != "commits-ahead" {
+		t.Fatalf("open (unmerged) PR must be kept, got removed=%v kept=%v", res.Removed, res.Kept)
+	}
+}
+
+func TestReap_DirtyWorktreeKeptEvenWhenPRMerged(t *testing.T) {
+	p := base + "/dear-agent/dirtymerged"
+	g := &fakeReaperGit{
+		worktrees: []gitpkg.Worktree{wt(p, "claude/dirtymerged", false)},
+		base:      "origin/main",
+		dirty:     map[string]bool{p: true},
+		ahead:     map[string]int{"claude/dirtymerged": 3},
+		prKnown:   map[string]bool{"claude/dirtymerged": true},
+		prMerged:  map[string]bool{"claude/dirtymerged": true},
+	}
+	res := ReapStaleWorktrees(ReaperOptions{
+		RepoPath: "/r", WorktreesBase: base, CheckMergedPR: true,
+	}, g, nil)
+
+	if len(res.Removed) != 0 || len(g.removed) != 0 {
+		t.Fatalf("uncommitted work must never be reaped even if PR merged: %v", res.Removed)
+	}
+	if res.Kept[p] != "uncommitted-changes" {
+		t.Fatalf("kept reason = %q, want uncommitted-changes", res.Kept[p])
+	}
+	if len(g.branchDeleted) != 0 {
+		t.Fatalf("dirty worktree's branch must not be deleted: %v", g.branchDeleted)
+	}
+}
+
+func TestReap_PRCheckBudgetExhaustedKeepsCommitsAhead(t *testing.T) {
+	p := base + "/dear-agent/budget"
+	g := &fakeReaperGit{
+		worktrees: []gitpkg.Worktree{wt(p, "claude/budget", false)},
+		base:      "origin/main",
+		dirty:     map[string]bool{},
+		ahead:     map[string]int{"claude/budget": 5},
+		prKnown:   map[string]bool{"claude/budget": true},
+		prMerged:  map[string]bool{"claude/budget": true},
+	}
+	// 1ns budget ⇒ deadline already in the past by the time the loop runs.
+	res := ReapStaleWorktrees(ReaperOptions{
+		RepoPath: "/r", WorktreesBase: base, CheckMergedPR: true, PRCheckBudget: 1,
+	}, g, nil)
+
+	if len(res.Removed) != 0 || res.Kept[p] != "commits-ahead" {
+		t.Fatalf("budget exhaustion must keep (no PR lookup), got removed=%v kept=%v", res.Removed, res.Kept)
+	}
+}
+
+func TestReap_BranchDeleteFailureStillCountsWorktreeRemoved(t *testing.T) {
+	p := base + "/dear-agent/brfail"
+	g := &fakeReaperGit{
+		worktrees:       []gitpkg.Worktree{wt(p, "claude/brfail", false)},
+		base:            "origin/main",
+		dirty:           map[string]bool{},
+		ahead:           map[string]int{"claude/brfail": 0},
+		deleteBranchErr: map[string]error{"claude/brfail": fmt.Errorf("branch checked out elsewhere")},
+	}
+	res := ReapStaleWorktrees(ReaperOptions{RepoPath: "/r", WorktreesBase: base}, g, nil)
+
+	// Worktree is the sprawl artifact: its removal stands even if the
+	// best-effort branch cleanup fails.
+	if len(res.Removed) != 1 || res.Removed[0] != p {
+		t.Fatalf("worktree removal must stand despite branch-delete failure: %v", res.Removed)
+	}
+	if _, kept := res.Kept[p]; kept {
+		t.Fatalf("worktree must not be in Kept after successful removal: %v", res.Kept)
+	}
+}
+
+func TestReap_NoPRCheckKeepsSquashMergedConservatively(t *testing.T) {
+	p := base + "/dear-agent/nocheck"
+	g := &fakeReaperGit{
+		worktrees: []gitpkg.Worktree{wt(p, "claude/nocheck", false)},
+		base:      "origin/main",
+		dirty:     map[string]bool{},
+		ahead:     map[string]int{"claude/nocheck": 2},
+		prKnown:   map[string]bool{"claude/nocheck": true},
+		prMerged:  map[string]bool{"claude/nocheck": true},
+	}
+	// CheckMergedPR false ⇒ historic conservative behavior, no gh lookup.
+	res := ReapStaleWorktrees(ReaperOptions{RepoPath: "/r", WorktreesBase: base}, g, nil)
+
+	if len(res.Removed) != 0 || res.Kept[p] != "commits-ahead" {
+		t.Fatalf("with PR check off, commits-ahead must be kept, got removed=%v kept=%v", res.Removed, res.Kept)
 	}
 }
 

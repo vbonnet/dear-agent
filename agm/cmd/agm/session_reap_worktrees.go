@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/cleanup"
@@ -27,13 +28,17 @@ one only when ALL of the following hold:
   • it lives under the worktrees base dir (default: ~/worktrees)
   • its branch starts with 'claude/' (agent session marker)
   • its working tree is clean (git status --porcelain is empty)
-  • it has zero commits ahead of the repo's base ref (origin/HEAD)
   • it is not the worktree this command is running in
+  • AND EITHER it has zero commits ahead of the repo's base ref
+    (origin/HEAD) OR its pull request is provably MERGED on the remote
+
+On removal the now-orphaned local branch is deleted too.
 
 Anything that fails a check — or whose state cannot be positively
-determined — is kept. A squash-merged branch reports commits-ahead > 0
-and is therefore kept: reclaiming those is the job of
-'agm audit resources' / scripts/cleanup-worktrees.sh, not this path.
+determined — is kept. A squash-merged branch looks commits-ahead to
+plain git; it is reclaimed only when 'gh' confirms the PR state is
+MERGED. Pass --no-pr-check to disable that remote lookup and fall back
+to the strictly-local conservative behavior (squash-merged kept).
 
 It is invoked automatically by the Stop lifecycle hook so sessions clean
 up after themselves. It is best-effort and never blocks session exit.
@@ -41,6 +46,7 @@ up after themselves. It is best-effort and never blocks session exit.
 Examples:
   agm session reap-worktrees --dry-run
   agm session reap-worktrees
+  agm session reap-worktrees --no-pr-check
   agm session reap-worktrees --worktrees-dir ~/worktrees --repo ~/src/dear-agent`,
 	Args: cobra.NoArgs,
 	RunE: runSessionReapWorktrees,
@@ -50,7 +56,13 @@ var (
 	reapDryRun       bool
 	reapWorktreesDir string
 	reapRepoPath     string
+	reapNoPRCheck    bool
 )
+
+// prCheckBudget bounds total wall-clock spent on remote PR-state lookups in a
+// single pass. The Stop hook is registered with a 30s timeout; staying well
+// under it keeps the reaper, not Claude Code, in control of when it stops.
+const prCheckBudget = 22 * time.Second
 
 func init() {
 	sessionCmd.AddCommand(sessionReapWorktreesCmd)
@@ -60,6 +72,8 @@ func init() {
 		"Base directory containing agent worktrees (default: ~/worktrees)")
 	sessionReapWorktreesCmd.Flags().StringVar(&reapRepoPath, "repo", "",
 		"Repository path to enumerate worktrees for (default: current directory)")
+	sessionReapWorktreesCmd.Flags().BoolVar(&reapNoPRCheck, "no-pr-check", false,
+		"Disable the remote merged-PR lookup; keep all commits-ahead worktrees")
 }
 
 func runSessionReapWorktrees(cmd *cobra.Command, args []string) error {
@@ -95,6 +109,8 @@ func buildReaperOptions() cleanup.ReaperOptions {
 		WorktreesBase: worktreesBase,
 		SelfPath:      currentWorktreeTopLevel(repoPath),
 		DryRun:        reapDryRun,
+		CheckMergedPR: !reapNoPRCheck,
+		PRCheckBudget: prCheckBudget,
 	}
 }
 
