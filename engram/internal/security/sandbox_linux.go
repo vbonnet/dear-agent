@@ -34,6 +34,50 @@ func isPermissionDeniedError(err error) bool {
 	return errors.Is(err, os.ErrPermission)
 }
 
+// apparmorProbeProfile is a constant, trivially-valid AppArmor profile used
+// only to answer "can this process load *any* profile at all?". It is fixed
+// source code and never incorporates attacker-influenced input, so its load
+// result is an unambiguous environmental signal, not a property of the
+// generated, permission-derived profile.
+const apparmorProbeProfile = "#include <tunables/global>\nprofile engram_probe_noop flags=(complain) {\n  #include <abstractions/base>\n}\n"
+
+// canLoadAppArmorProfiles reports whether this process is able to load an
+// AppArmor profile into the kernel. It attempts to load apparmorProbeProfile;
+// because that profile is constant (never derived from permissions), a
+// failure here can only mean the environment forbids policy loading at all —
+// missing CAP_MAC_ADMIN in dev/CI, a sandboxed CI runner, apparmor_parser
+// absent, securityfs unavailable, etc. This is what lets applyLinux
+// distinguish an environmental inability to sandbox (safe to fall back to
+// validation-only, same intent as the historical exit-code-13 check) from a
+// failure specific to the *generated*, permission-derived profile (a possible
+// profile-text injection — must fail closed).
+//
+// It deliberately does not parse apparmor_parser's exit code or stderr
+// wording, which vary across distro and runner image: classic setups exit 13
+// when unprivileged, but GitHub's ubuntu runner exits 1. That brittle
+// exit-code heuristic is exactly what broke CI.
+func canLoadAppArmorProfiles() bool {
+	f, err := os.CreateTemp("", "engram_apparmor_probe_*.profile")
+	if err != nil {
+		return false
+	}
+	probePath := f.Name()
+	defer os.Remove(probePath)
+	if _, err := f.WriteString(apparmorProbeProfile); err != nil {
+		f.Close()
+		return false
+	}
+	if err := f.Close(); err != nil {
+		return false
+	}
+	if err := exec.Command("apparmor_parser", "-r", probePath).Run(); err != nil {
+		return false
+	}
+	// Best effort: unload the probe so it does not linger until reboot.
+	_ = exec.Command("apparmor_parser", "-R", probePath).Run()
+	return true
+}
+
 // applyLinux applies AppArmor sandboxing on Linux
 // Falls back to validation-only mode if AppArmor is unavailable
 func (s *Sandbox) applyLinux(cmd string, args []string, permissions Permissions) ([]string, error) {
@@ -73,18 +117,23 @@ func (s *Sandbox) applyLinux(cmd string, args []string, permissions Permissions)
 	// the sandbox entirely.
 	//
 	// Now we distinguish:
-	//   - exit code 13 / "permission denied" → keep the validation-only
-	//     fallback (apparmor_parser needs CAP_MAC_ADMIN; legitimate dev
-	//     setups don't have it). The validators we run upstream already
-	//     reject the dangerous AppArmor metacharacters, so the profile we
-	//     would have loaded is the only thing missing.
-	//   - any other failure → fail closed. A profile that parses on the
-	//     reviewer's CI machine but not on this one is a signal worth
-	//     surfacing, not papering over.
+	//   - the environment cannot load *any* profile (no CAP_MAC_ADMIN in
+	//     dev/CI, sandboxed runner, apparmor_parser absent, securityfs
+	//     unavailable) → keep the validation-only fallback. The validators
+	//     we run upstream already reject the dangerous AppArmor
+	//     metacharacters, so the profile we would have loaded is the only
+	//     thing missing. We detect this with a constant known-good probe
+	//     rather than apparmor_parser's exit code, which is 13 on classic
+	//     setups but 1 on (e.g.) GitHub's ubuntu runner — the brittle
+	//     exit-code check is what broke CI.
+	//   - the environment *can* load the probe but not this profile →
+	//     fail closed. The only difference between the two is the
+	//     permission-derived, attacker-influenceable profile text, so a
+	//     failure there is a real signal worth surfacing, not papering over.
 	loadCmd := exec.Command("apparmor_parser", "-r", profilePath)
 	if err := loadCmd.Run(); err != nil {
 		os.Remove(profilePath)
-		if isPermissionDeniedError(err) {
+		if isPermissionDeniedError(err) || !canLoadAppArmorProfiles() {
 			return append([]string{cmd}, args...), nil //nolint:nilerr // intentional fallback to validation-only mode
 		}
 		return nil, fmt.Errorf("apparmor_parser failed to load profile (failing closed; refusing unsandboxed exec): %w", err)
