@@ -170,3 +170,33 @@ Run `agm audit resources` weekly or add it to the `agm session list` output as a
 | DB not available | `agm audit resources` is filesystem-based (no DB needed) |
 | New repos not scanned | `--repos` flag; default scans `~/src/` and `~/worktrees/` |
 | This retro itself orphans a worktree | ecstatic-sinoussi-9a19da cleaned up by stop hook after merge |
+
+---
+
+## Update — 2026-05-16: the Stop hook was wired but ineffective
+
+**What we found:** The Stop hook *was* registered (`agm admin install-hooks`
+writes `stop-agm-resource-cleanup` into `~/.claude/settings.json`), but its
+only action was `agm session cleanup`, which removes **manifest/Dolt-tracked**
+worktrees. Per root cause #1 of this very retro, agents create worktrees with
+raw `git worktree add` that are never tracked — so the hook reclaimed *zero*
+of them. Sprawl recurred (82 worktrees before manual cleanup).
+
+**Fix shipped (this change):** A conservative filesystem/git reaper —
+`agm session reap-worktrees`, logic in `agm/internal/cleanup/reaper.go` — now
+runs from the same already-registered Stop hook. It removes a worktree only
+when **all** hold: under `~/worktrees`, branch `claude/*`, clean working tree,
+zero commits ahead of the base ref, and not the worktree the session is
+running in. It uses non-force `git worktree remove` as a final guard.
+
+**Known limitation (deliberate):** a squash-merged branch reports
+commits-ahead > 0, so the reaper keeps it rather than risk removing work that
+only *looks* merged. Reclaiming squash-merged trees stays the job of
+`agm audit resources --fix` / `scripts/cleanup-worktrees.sh`. Dry-run against
+the live environment confirmed: of 21 worktrees, 20 kept (14 squash-merged,
+plus main / nested-sandbox / human-branch / self) and 1 genuine no-op orphan
+reaped — the safe direction.
+
+**Lesson:** "hook registered" ≠ "hook effective". A cleanup hook must be
+verified against the *untracked* failure mode it exists to catch, not just
+the tracked happy path.
