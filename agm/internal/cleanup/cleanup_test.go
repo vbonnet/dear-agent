@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -32,11 +33,19 @@ func (m *mockWorktreeStore) UntrackWorktree(_ context.Context, path string) erro
 }
 
 // mockGitOps implements GitOps for testing.
+//
+// Fields are zero-value-friendly so a bare &mockGitOps{} represents the
+// common "clean and merged" worktree (dirty=false → clean, unmerged=false →
+// merged), which is the auto-remove path the original tests exercise.
 type mockGitOps struct {
 	removedWorktrees []string
 	deletedBranches  []string
 	removeErr        error
 	deleteErr        error
+	dirty            bool  // true → IsWorktreeClean reports not clean
+	unmerged         bool  // true → IsBranchMerged reports not merged
+	cleanErr         error // non-nil → IsWorktreeClean returns this error
+	mergedErr        error // non-nil → IsBranchMerged returns this error
 }
 
 func (m *mockGitOps) RemoveWorktree(_, worktreePath string, _ bool) error {
@@ -53,6 +62,20 @@ func (m *mockGitOps) DeleteBranch(_, branchName string, _ bool) error {
 	}
 	m.deletedBranches = append(m.deletedBranches, branchName)
 	return nil
+}
+
+func (m *mockGitOps) IsWorktreeClean(_ string) (bool, error) {
+	if m.cleanErr != nil {
+		return false, m.cleanErr
+	}
+	return !m.dirty, nil
+}
+
+func (m *mockGitOps) IsBranchMerged(_, _, _ string) (bool, error) {
+	if m.mergedErr != nil {
+		return false, m.mergedErr
+	}
+	return !m.unmerged, nil
 }
 
 func TestSessionResources_WorktreeCleanup(t *testing.T) {
@@ -237,5 +260,116 @@ func TestSessionResources_ListError(t *testing.T) {
 
 	if len(result.Errors) != 1 {
 		t.Errorf("Expected 1 error from list failure, got %d", len(result.Errors))
+	}
+}
+
+// mkWorktreeStore builds a store with a single existing worktree dir.
+func mkWorktreeStore(t *testing.T, repo, branch, session string) (*mockWorktreeStore, string) {
+	t.Helper()
+	wtPath := filepath.Join(t.TempDir(), "wt")
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	return &mockWorktreeStore{
+		worktrees: []WorktreeRecord{
+			{WorktreePath: wtPath, RepoPath: repo, Branch: branch, SessionName: session},
+		},
+	}, wtPath
+}
+
+// TestSessionResources_DirtyWorktreePreserved verifies that a worktree with
+// uncommitted changes is left in place, warned about (with its path), and not
+// untracked or branch-deleted. This is the data-loss class the fix targets.
+func TestSessionResources_DirtyWorktreePreserved(t *testing.T) {
+	store, wtPath := mkWorktreeStore(t, "/repo/a", "my-session", "my-session")
+	git := &mockGitOps{dirty: true}
+
+	result := SessionResources(context.Background(), "my-session", store, git, nil)
+
+	if result.WorktreesRemoved != 0 {
+		t.Errorf("dirty worktree must not be removed, WorktreesRemoved=%d", result.WorktreesRemoved)
+	}
+	if result.WorktreesPreserved != 1 {
+		t.Errorf("expected 1 preserved worktree, got %d", result.WorktreesPreserved)
+	}
+	if len(git.removedWorktrees) != 0 {
+		t.Errorf("git RemoveWorktree must not be called for dirty worktree, got %v", git.removedWorktrees)
+	}
+	if len(git.deletedBranches) != 0 {
+		t.Errorf("branch must not be deleted for preserved worktree, got %v", git.deletedBranches)
+	}
+	if len(store.untracked) != 0 {
+		t.Errorf("preserved worktree must stay tracked, untracked=%v", store.untracked)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], wtPath) {
+		t.Errorf("expected one warning naming %s, got %v", wtPath, result.Warnings)
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("preserving is not an error, got %v", result.Errors)
+	}
+}
+
+// TestSessionResources_CleanButUnmergedPreserved verifies that a clean
+// worktree whose branch is not merged into base (genuinely unpushed work, or
+// an indistinguishable squash-merge) is preserved rather than destroyed.
+func TestSessionResources_CleanButUnmergedPreserved(t *testing.T) {
+	store, wtPath := mkWorktreeStore(t, "/repo/a", "my-session", "my-session")
+	git := &mockGitOps{unmerged: true}
+
+	result := SessionResources(context.Background(), "my-session", store, git, nil)
+
+	if result.WorktreesRemoved != 0 || result.WorktreesPreserved != 1 {
+		t.Errorf("clean+unmerged must be preserved: removed=%d preserved=%d",
+			result.WorktreesRemoved, result.WorktreesPreserved)
+	}
+	if len(git.deletedBranches) != 0 {
+		t.Errorf("unmerged branch must not be deleted, got %v", git.deletedBranches)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], wtPath) {
+		t.Errorf("expected warning naming %s, got %v", wtPath, result.Warnings)
+	}
+}
+
+// TestSessionResources_CleanMergedRemovesWorktreeAndBranch covers the
+// PR-merged path: a clean, merged worktree is removed and its local branch
+// deleted (requirement: merged PR → delete worktree + local branch).
+func TestSessionResources_CleanMergedRemovesWorktreeAndBranch(t *testing.T) {
+	store, wtPath := mkWorktreeStore(t, "/repo/a", "my-session", "my-session")
+	git := &mockGitOps{} // zero value: clean + merged
+
+	result := SessionResources(context.Background(), "my-session", store, git, nil)
+
+	if result.WorktreesRemoved != 1 {
+		t.Errorf("expected clean+merged worktree removed, got %d", result.WorktreesRemoved)
+	}
+	if result.WorktreesPreserved != 0 {
+		t.Errorf("expected nothing preserved, got %d", result.WorktreesPreserved)
+	}
+	if len(git.removedWorktrees) != 1 || git.removedWorktrees[0] != wtPath {
+		t.Errorf("expected worktree %s removed, got %v", wtPath, git.removedWorktrees)
+	}
+	if result.BranchesDeleted != 1 ||
+		len(git.deletedBranches) != 1 || git.deletedBranches[0] != "my-session" {
+		t.Errorf("expected branch my-session deleted, got %v", git.deletedBranches)
+	}
+	if len(store.untracked) != 1 {
+		t.Errorf("expected removed worktree untracked, got %v", store.untracked)
+	}
+}
+
+// TestSessionResources_StatusCheckErrorPreserves verifies the fail-safe: if
+// cleanliness cannot be determined, the worktree is preserved, not removed.
+func TestSessionResources_StatusCheckErrorPreserves(t *testing.T) {
+	store, _ := mkWorktreeStore(t, "/repo/a", "my-session", "my-session")
+	git := &mockGitOps{cleanErr: fmt.Errorf("git status exploded")}
+
+	result := SessionResources(context.Background(), "my-session", store, git, nil)
+
+	if result.WorktreesRemoved != 0 || result.WorktreesPreserved != 1 {
+		t.Errorf("status-check error must fail safe to preserve: removed=%d preserved=%d",
+			result.WorktreesRemoved, result.WorktreesPreserved)
+	}
+	if len(git.removedWorktrees) != 0 {
+		t.Errorf("must not remove when status is unknown, got %v", git.removedWorktrees)
 	}
 }

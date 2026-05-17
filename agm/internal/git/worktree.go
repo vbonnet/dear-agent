@@ -142,6 +142,50 @@ func DeleteBranch(repoPath, branchName string, force bool) error {
 	return nil
 }
 
+// IsWorktreeClean reports whether the worktree at worktreePath has no
+// uncommitted or untracked changes (i.e. `git status --porcelain` is empty).
+// A clean worktree can be removed without --force, so this is the gate that
+// distinguishes "safe to auto-remove" from "has unsaved work, preserve it".
+//
+// Any failure to determine status returns (false, err) so callers fail safe
+// toward preserving the worktree rather than risking data loss.
+func IsWorktreeClean(worktreePath string) (bool, error) {
+	cmd := exec.Command("git", "-C", worktreePath, "status", "--porcelain")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("failed to check worktree status for %s: %w\nOutput: %s",
+			worktreePath, err, string(output))
+	}
+	return len(strings.TrimSpace(string(output))) == 0, nil
+}
+
+// IsBranchMerged reports whether branch has been fully merged into baseBranch,
+// i.e. branch's tip is an ancestor of baseBranch. This is the same check used
+// by RemoveMergedWorktrees.
+//
+// Caveat: a squash-merged branch is NOT an ancestor of baseBranch (the squash
+// commit has a different SHA), so this returns false for squash-merged PRs.
+// Callers must treat a false result conservatively (preserve, do not
+// force-delete) rather than assuming the work is unmerged and disposable.
+func IsBranchMerged(repoPath, branch, baseBranch string) (bool, error) {
+	gitRoot, err := findGitRoot(repoPath)
+	if err != nil {
+		return false, fmt.Errorf("not a git repository: %w", err)
+	}
+
+	cmd := exec.Command("git", "-C", gitRoot, "merge-base", "--is-ancestor", branch, baseBranch)
+	if runErr := cmd.Run(); runErr != nil {
+		// Exit code 1 means "not an ancestor" (not merged) — expected, not an error.
+		exitErr := &exec.ExitError{}
+		if errors.As(runErr, &exitErr) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check merge status of %s into %s: %w",
+			branch, baseBranch, runErr)
+	}
+	return true, nil
+}
+
 // AddWorktree creates a new git worktree at the given path on a new branch.
 // If branch is empty, a detached HEAD worktree is created from the current HEAD.
 func AddWorktree(repoPath, worktreePath, branch string) error {
