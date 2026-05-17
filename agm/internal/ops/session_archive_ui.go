@@ -29,6 +29,7 @@ type ArchiveUISessionsRequest struct {
 	Unarchive bool          // reverse: flip isArchived true -> false
 	Apply     bool          // perform the flip; false (default) = dry-run
 	Backup    bool          // back up each file before mutating (default true at CLI)
+	Force     bool          // archive even when safety warnings are present
 	BackupDir string        // override backup root; default ~/.agm/backups/claude-ui-sessions/<ts>
 	Device    string        // optional device-dir selector ("" = autodetect single)
 	Account   string        // optional account-dir selector ("" = autodetect single)
@@ -38,6 +39,11 @@ type ArchiveUISessionsRequest struct {
 	HomeDir        string
 	StoreRoot      string
 	PIDRegistryDir string
+	ProjectsDir    string // ~/.claude/projects override (transcript heuristic)
+
+	// Safety probes; nil = real git/gh/transcript implementations.
+	inspector  wtInspector
+	transcript transcriptScanner
 }
 
 // UISessionOutcome is the per-session result of a plan/apply pass.
@@ -53,6 +59,11 @@ type UISessionOutcome struct {
 	Reason       string  `json:"reason,omitempty"`
 	BackupPath   string  `json:"backup_path,omitempty"`
 	Error        string  `json:"error,omitempty"`
+
+	// Warnings is non-empty when the session is archive-eligible but Claude
+	// Desktop would caution against it (uncommitted work, open PR, looks like
+	// it is waiting on the user). Present even when --force archived anyway.
+	Warnings []SafetyWarning `json:"warnings,omitempty"`
 }
 
 // ArchiveUISessionsResult is the aggregate result.
@@ -66,6 +77,7 @@ type ArchiveUISessionsResult struct {
 	Scanned   int                `json:"scanned"`
 	Changed   int                `json:"changed"`
 	Skipped   int                `json:"skipped"`
+	Warned    int                `json:"warned"` // sessions with >=1 safety warning
 	Errors    int                `json:"errors"`
 	Sessions  []UISessionOutcome `json:"sessions"`
 }
@@ -77,8 +89,47 @@ const (
 	uiSkipLive              = "live"
 	uiSkipTooRecent         = "too-recent"
 	uiSkipUnknownSchema     = "unknown-schema"
+	uiSkipSafetyWarnings    = "safety-warnings"
 	uiActionError           = "write-failed"
 )
+
+// safetyEnv bundles the git/gh/transcript probes, defaulted to real
+// implementations when the request leaves them nil.
+type safetyEnv struct {
+	inspector  wtInspector
+	transcript transcriptScanner
+}
+
+// runSafetyGate returns the session's safety warnings and whether it must be
+// skipped for them. Only the archive direction is gated; --force downgrades a
+// skip to "archive anyway, warnings retained".
+func runSafetyGate(s *claudeui.Session, c uiConfig, force bool, env safetyEnv) (warns []SafetyWarning, skip bool) {
+	if !c.target {
+		return nil, false // unarchiving cannot bury in-progress work
+	}
+	warns = evalSafetyWarnings(s, env.inspector, env.transcript)
+	if len(warns) == 0 {
+		return nil, false
+	}
+	return warns, !force
+}
+
+// newSafetyEnv resolves the safety probes, defaulting to the real git/gh and
+// ~/.claude/projects transcript implementations when the request omits them.
+func newSafetyEnv(req *ArchiveUISessionsRequest, c uiConfig) safetyEnv {
+	env := safetyEnv{inspector: req.inspector, transcript: req.transcript}
+	if env.inspector == nil {
+		env.inspector = realInspector{}
+	}
+	if env.transcript == nil {
+		projectsDir := req.ProjectsDir
+		if projectsDir == "" {
+			projectsDir = filepath.Join(c.home, ".claude", "projects")
+		}
+		env.transcript = realTranscriptScanner(projectsDir)
+	}
+	return env
+}
 
 // uiConfig is the validated, defaults-resolved view of a request.
 type uiConfig struct {
@@ -176,6 +227,7 @@ func ArchiveUISessions(opCtx *OpContext, req *ArchiveUISessionsRequest) (*Archiv
 	}
 
 	liveIDs, liveCwds := readPIDRegistry(c.pidDir)
+	env := newSafetyEnv(req, c)
 
 	result := &ArchiveUISessionsResult{
 		Operation: "session.archive-ui",
@@ -203,6 +255,21 @@ func ArchiveUISessions(opCtx *OpContext, req *ArchiveUISessionsRequest) (*Archiv
 
 		if skip, reason := uiSkipReason(s.IsArchived, oc.Live, c, ageMsOf(s, c.now)); skip {
 			oc.Action, oc.Reason = "skip", reason
+			result.Skipped++
+			result.Sessions = append(result.Sessions, oc)
+			continue
+		}
+
+		// Safety-warning gate: surface (dry-run) or block-unless-force (apply)
+		// sessions that still have work, an open PR, or look like they are
+		// waiting on the user.
+		warns, warnSkip := runSafetyGate(s, c, req.Force, env)
+		oc.Warnings = warns
+		if len(warns) > 0 {
+			result.Warned++
+		}
+		if warnSkip {
+			oc.Action, oc.Reason = "skip", uiSkipSafetyWarnings
 			result.Skipped++
 			result.Sessions = append(result.Sessions, oc)
 			continue
