@@ -263,9 +263,9 @@ func TestPermissionProfiles_Required(t *testing.T) {
 				"Bash(agm session health *)",         // Session health
 				"Bash(agm session summary *)",        // Session summary
 				"Bash(agm session tag *)",            // Session tagging
-				"Bash(agm session select-option *)",  // Interactive selection
 				"Bash(agm send *)",                   // Messaging
 				"Bash(agm send msg *)",               // Explicit msg subcommand
+				"Bash(agm send select-option *)",     // Interactive selection
 				"Bash(agm verify *)",                 // Verification
 				"Bash(agm trust score *)",            // Trust scoring
 				"Bash(agm trust record *)",           // Trust recording

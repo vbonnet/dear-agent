@@ -33,13 +33,13 @@ Key Features:
 
 Examples:
   # Select option 2 (simple selection)
-  agm session select-option my-session 2
+  agm send select-option my-session 2
 
   # Select option 1 and provide custom text
-  agm session select-option my-session 1 --prompt "Custom configuration details"
+  agm send select-option my-session 1 --prompt "Custom configuration details"
 
   # Select "Yes, and don't ask again" option (typically option 2)
-  agm session select-option my-session 2
+  agm send select-option my-session 2
 
 Use Cases:
   • Orchestrator answering session questions automatically
@@ -53,8 +53,9 @@ Requirements:
   • Session must be active and responsive
 
 See Also:
-  • agm send - Send custom prompts to sessions
-  • agm reject - Reject permission prompts`,
+  • agm send msg - Send custom prompts to sessions
+  • agm send approve - Approve a permission prompt
+  • agm send reject - Reject a permission prompt`,
 	Args: cobra.ExactArgs(2),
 	RunE: runSelectOption,
 }
@@ -73,7 +74,7 @@ func init() {
 		"Bypass safety guards (human typing/attached detection)",
 	)
 
-	sessionCmd.AddCommand(selectOptionCmd)
+	sendGroupCmd.AddCommand(selectOptionCmd)
 }
 
 func runSelectOption(cmd *cobra.Command, args []string) (retErr error) {
@@ -89,7 +90,7 @@ func runSelectOption(cmd *cobra.Command, args []string) (retErr error) {
 		if selectOptionPrompt != "" {
 			auditArgs["has_prompt"] = "true"
 		}
-		logCommandAudit("session.select-option", sessionName, auditArgs, retErr)
+		logCommandAudit("send.select-option", sessionName, auditArgs, retErr)
 	}()
 
 	// Validate option number (1-4 is typical for AskUserQuestion)
@@ -113,7 +114,7 @@ func runSelectOption(cmd *cobra.Command, args []string) (retErr error) {
 			SkipMidResponse:   true, // selecting options is for prompt UIs
 		})
 		if !guardResult.Safe {
-			return fmt.Errorf("safety guard blocked select-option on session '%s':\n\n%sTo bypass: agm session select-option %s %s --force",
+			return fmt.Errorf("safety guard blocked select-option on session '%s':\n\n%sTo bypass: agm send select-option %s %s --force",
 				sessionName, guardResult.Error(), sessionName, optionNumber)
 		}
 	}
