@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Moved `select-option` from the `session` group to the `send` group** (2026-05-17):
+  Programmatic AskUserQuestion answering is now `agm send select-option <session> <N>`
+  instead of `agm session select-option <session> <N>`. This co-locates it with the
+  other remote-unblock commands (`send approve`, `send reject`, `send msg`) where
+  operators look first. The audit event was renamed `session.select-option` →
+  `send.select-option` for consistency with `send.enter`/`send.msg`. Behavior, flags
+  (`--prompt`, `--force`), and arrow-key navigation logic are unchanged. Internal
+  callers (scan-loop auto-approve) and the orchestrator RBAC profile were updated.
+  **Breaking:** external scripts invoking `agm session select-option` must switch to
+  `agm send select-option`.
+
 ### Fixed
 
 - **Resume command skipped when tmux session existed** (2026-03-28): `agm session resume` always skipped sending `claude --resume <uuid>` when the tmux session already existed, even if Claude was not running. Now checks `tmux.IsClaudeRunning()` before deciding. Also adds UUID discovery fallback when Dolt has no UUID stored, and preserves previous UUID for recovery.
