@@ -43,6 +43,10 @@ const defaultACLPath = "~/.agm/bus-acl.yaml"
 // means ops sees all the mesh's durable state in one dir.
 const defaultSupervisorsDir = "~/.agm/supervisors"
 
+// defaultDiscordAgentsPath is the multi-bot portal config (ADR-026). Holds
+// per-agent bot tokens; must be chmod 600 and is gitignored.
+const defaultDiscordAgentsPath = "~/.agm/discord-agents.yaml"
+
 // runE signatures match cobra's RunE so we can adopt cobra later without
 // reshaping; for now, keep dependencies minimal and use stdlib flag.
 type runE func(args []string) error
@@ -63,6 +67,8 @@ func main() {
 		fn = cmdStatus
 	case "socket":
 		fn = cmdSocket
+	case "discord-reset":
+		fn = cmdDiscordReset
 	case "-h", "--help", "help":
 		usage(os.Stdout)
 		return
@@ -80,9 +86,10 @@ func main() {
 func usage(w *os.File) {
 	fmt.Fprintln(w, "Usage: agm-bus <serve|status|socket> [flags]")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  serve    Run the broker daemon until SIGINT/SIGTERM.")
-	fmt.Fprintln(w, "  status   Print whether a broker is currently responding on the socket.")
-	fmt.Fprintln(w, "  socket   Print the effective socket path.")
+	fmt.Fprintln(w, "  serve          Run the broker daemon until SIGINT/SIGTERM.")
+	fmt.Fprintln(w, "  status         Print whether a broker is currently responding on the socket.")
+	fmt.Fprintln(w, "  socket         Print the effective socket path.")
+	fmt.Fprintln(w, "  discord-reset  Purge one Discord channel (gated; requires --confirm).")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Environment:")
 	fmt.Fprintln(w, "  AGM_BUS_SOCKET  Override socket path (default ~/.agm/bus.sock).")
@@ -99,6 +106,8 @@ func cmdServe(args []string) error {
 	discordEnabled := fs.Bool("discord", false, "enable Discord adapter (requires -discord-token or DISCORD_BOT_TOKEN)")
 	discordToken := fs.String("discord-token", "", "Discord bot token (default: DISCORD_BOT_TOKEN env var)")
 	discordAllowlist := fs.String("discord-allowlist", "", "comma-separated Discord user IDs allowed to DM the bot")
+	discordMultibot := fs.Bool("discord-multibot", false, "enable the multi-bot Discord portal (ADR-026; requires -discord-agents config)")
+	discordAgentsPath := fs.String("discord-agents", "", "multi-bot portal config path (default ~/.agm/discord-agents.yaml)")
 	matrixEnabled := fs.Bool("matrix", false, "enable Matrix adapter (requires -matrix-homeserver, -matrix-token, -matrix-room)")
 	matrixHomeserver := fs.String("matrix-homeserver", "", "Matrix homeserver URL (default: MATRIX_HOMESERVER env var)")
 	matrixToken := fs.String("matrix-token", "", "Matrix access token (default: MATRIX_ACCESS_TOKEN env var)")
@@ -223,6 +232,45 @@ func cmdServe(args []string) error {
 		}
 	} else {
 		logger.Info("discord adapter disabled (pass -discord to enable)")
+	}
+
+	// Multi-bot Discord portal — opt-in via -discord-multibot (ADR-026).
+	// Independent of the single-bot DM adapter above; can run alongside it.
+	if *discordMultibot {
+		path := *discordAgentsPath
+		if path == "" {
+			path = defaultDiscordAgentsPath
+		}
+		expanded, err := expandHome(path)
+		if err != nil {
+			return fmt.Errorf("resolve discord-agents path: %w", err)
+		}
+		cfg, loose, err := bus.LoadDiscordAgentsConfig(expanded)
+		if err != nil {
+			logger.Error("discord-multibot config error; portal disabled", "err", err)
+		} else {
+			if loose {
+				logger.Warn("discord-multibot: config is group/other-readable; chmod 600 it", "path", expanded)
+			}
+			portal := &bus.MultiBotDiscordAdapter{
+				Agents:          cfg.ToAgents(),
+				ChannelID:       cfg.Channel,
+				GuildID:         cfg.Guild,
+				AuthorAllowlist: cfg.AuthorAllowlist,
+				Registry:        srv.Registry,
+				ACL:             srv.ACL,
+				Logger:          logger,
+			}
+			go func() {
+				if err := portal.Start(ctx); err != nil {
+					logger.Error("discord-multibot portal stopped with error", "err", err)
+				}
+			}()
+			logger.Info("discord-multibot portal starting",
+				"agents", len(cfg.Agents), "channel", cfg.Channel)
+		}
+	} else {
+		logger.Info("discord-multibot portal disabled (pass -discord-multibot to enable)")
 	}
 
 	// Matrix adapter — opt-in via -matrix flag. Plays the same role as
@@ -385,4 +433,68 @@ func cmdSocket(args []string) error {
 	}
 	fmt.Println(p)
 	return nil
+}
+
+// cmdDiscordReset purges a single Discord channel. Destructive and explicitly
+// gated: without -confirm it only prints what it would do (dry run). It is
+// never invoked from serve. The acting bot (default: first agent in the
+// portal config) must have MANAGE_MESSAGES in the target channel.
+func cmdDiscordReset(args []string) error {
+	fs := flag.NewFlagSet("discord-reset", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	agentsPath := fs.String("agents", "", "portal config path (default ~/.agm/discord-agents.yaml)")
+	agentName := fs.String("agent", "", "which configured agent's bot to act as (default: first)")
+	channelOverride := fs.String("channel", "", "channel id to purge (default: config 'channel')")
+	confirm := fs.Bool("confirm", false, "actually delete; without this it is a dry run")
+	verbose := fs.Bool("verbose", false, "debug logging")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	level := slog.LevelInfo
+	if *verbose {
+		level = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+
+	path := *agentsPath
+	if path == "" {
+		path = defaultDiscordAgentsPath
+	}
+	expanded, err := expandHome(path)
+	if err != nil {
+		return fmt.Errorf("resolve agents path: %w", err)
+	}
+	cfg, _, err := bus.LoadDiscordAgentsConfig(expanded)
+	if err != nil {
+		return err
+	}
+
+	// Pick the acting bot token.
+	token := ""
+	actor := ""
+	for _, a := range cfg.Agents {
+		if *agentName == "" || a.Name == *agentName {
+			token, actor = a.Token, a.Name
+			break
+		}
+	}
+	if token == "" {
+		return fmt.Errorf("discord-reset: agent %q not found in config", *agentName)
+	}
+
+	channelID := cfg.Channel
+	if *channelOverride != "" {
+		channelID = *channelOverride
+	}
+
+	if !*confirm {
+		fmt.Printf("DRY RUN: would purge ALL messages in channel %s acting as bot %q.\n", channelID, actor)
+		fmt.Println("Re-run with -confirm to actually delete. This is irreversible.")
+		return nil
+	}
+
+	n, err := bus.ResetChannelByToken(token, channelID, logger)
+	fmt.Printf("discord-reset: deleted %d message(s) from channel %s\n", n, channelID)
+	return err
 }
