@@ -9,6 +9,7 @@ import (
 	"time"
 
 	gitpkg "github.com/vbonnet/dear-agent/agm/internal/git"
+	"github.com/vbonnet/dear-agent/agm/internal/ops/wtpolicy"
 )
 
 // Classification is the verdict for one worktree. Exactly one of these is
@@ -27,6 +28,12 @@ const (
 	// ref (fast-forward / merge-commit) OR its PR state is MERGED (squash).
 	// The only reapable class.
 	ClassMerged Classification = "MERGED"
+	// ClassAwaitingInput means the session's transcript ends with the
+	// assistant waiting on the user (an AskUserQuestion tool call, or a
+	// trailing question / question phrase). Kept and surfaced even if it
+	// would otherwise look merged/clean — the user must be able to return
+	// and answer. Outranks the merge/dirty oracles.
+	ClassAwaitingInput Classification = "AWAITING_INPUT"
 	// ClassDirty means uncommitted or untracked changes are present. Never
 	// reaped — a clean reap must never destroy work never committed.
 	ClassDirty Classification = "DIRTY"
@@ -91,9 +98,17 @@ type SweepDeps interface {
 	// cannot be positively established.
 	PRState(repoPath, branch string) (state string, known bool)
 	HasUnpushedCommits(worktreePath, branch string) (bool, error)
+	// AwaitingInput reports whether the session that ran in worktreePath
+	// ended waiting on the user (detail is a short tag for the report).
+	// Positive only — see wtpolicy.AwaitingInput for the fail-safe stance.
+	AwaitingInput(worktreePath string) (awaiting bool, detail string)
 	RemoveWorktree(repoPath, worktreePath string, force bool) error
 	DeleteBranch(repoPath, branch string, force bool) error
 }
+
+// Compile-time proof that SweepDeps is a superset of the safety surface
+// shared with archive-ui, so the shared oracles cannot drift from it.
+var _ wtpolicy.GitProbe = (SweepDeps)(nil)
 
 // SweepOptions configures one sweep pass.
 type SweepOptions struct {
@@ -225,19 +240,6 @@ func ownershipClass(opts SweepOptions, dw DiscoveredWorktree, selfPath string) (
 	return "", "", false
 }
 
-// resolvePRState collapses the gh oracle to a single display/decision string:
-// the real state when known, "UNKNOWN" when gh could not answer, or
-// "(pr-check-off)" when the oracle is disabled.
-func resolvePRState(opts SweepOptions, deps SweepDeps, mainRepo, branch string) string {
-	if !opts.CheckPR {
-		return "(pr-check-off)"
-	}
-	if state, known := deps.PRState(mainRepo, branch); known {
-		return state
-	}
-	return "UNKNOWN"
-}
-
 // huskReason names the husk sub-case for a clean, not-active, not-merged
 // worktree. unpushed-commits (commits on no remote) is real, unrecoverable
 // data-loss risk and outranks any PR state.
@@ -272,8 +274,19 @@ func classify(opts SweepOptions, deps SweepDeps, dw DiscoveredWorktree, selfPath
 		return setClass(st, c, reason)
 	}
 
-	dirty, err := deps.IsDirty(dw.Path)
-	if err != nil {
+	// A session blocked on a pending question outranks every reap path:
+	// its worktree must survive even when it otherwise looks merged and
+	// clean, so the user can come back and answer. (Checked before the
+	// merge/dirty oracles, exactly as the requirement specifies — see
+	// wtpolicy.AwaitingInput for the heuristic and its fail-safe stance.)
+	if awaiting, detail := deps.AwaitingInput(dw.Path); awaiting {
+		return setClass(st, ClassAwaitingInput, "awaiting-input:"+detail)
+	}
+
+	// Dirty-check (shared with archive-ui via wtpolicy): unknown status is
+	// treated as not-safe, distinctly labeled from a genuinely dirty tree.
+	dirty, known := wtpolicy.Dirty(deps, dw.Path)
+	if !known {
 		return setClass(st, ClassUnknown, "status-check-failed")
 	}
 	st.Dirty = dirty
@@ -292,22 +305,16 @@ func classify(opts SweepOptions, deps SweepDeps, dw DiscoveredWorktree, selfPath
 		return setClass(st, ClassUnknown, "base-ref-unresolved")
 	}
 
-	// Squash-SAFE merge oracle, part 1: fast-forward / merge-commit landing.
-	anc, err := deps.IsAncestor(mainRepo, dw.Branch, base)
-	if err != nil {
+	// Squash-safe merge oracle (shared with archive-ui via wtpolicy):
+	// ancestor-of-base OR authoritative PR==MERGED, never ahead/behind.
+	mv := wtpolicy.ProvablyMerged(deps, mainRepo, dw.Branch, base, opts.CheckPR)
+	if mv.AncestorErr != nil {
 		return setClass(st, ClassUnknown, "ancestor-check-failed")
 	}
-	if anc {
-		st.Pushed, st.PRState = true, "(ancestor)"
-		return setClass(st, ClassMerged, "ancestor-of-base")
-	}
-
-	// Part 2: squash merge — ahead/behind is meaningless, the PR head-ref
-	// state is the only authoritative signal (the core retro finding).
-	st.PRState = resolvePRState(opts, deps, mainRepo, dw.Branch)
-	if st.PRState == "MERGED" {
+	st.PRState = mv.PRState
+	if mv.Merged {
 		st.Pushed = true
-		return setClass(st, ClassMerged, "pr-merged")
+		return setClass(st, ClassMerged, mv.Reason)
 	}
 
 	// Clean, not active, not provably merged ⇒ husk.
@@ -464,6 +471,12 @@ func (RealSweepDeps) PRState(repoPath, branch string) (string, bool) {
 // HasUnpushedCommits reports whether branch has commits on no remote ref.
 func (RealSweepDeps) HasUnpushedCommits(worktreePath, branch string) (bool, error) {
 	return gitpkg.HasUnpushedCommits(worktreePath, branch)
+}
+
+// AwaitingInput reports whether the worktree's Claude Code transcript ends
+// with the assistant waiting on the user.
+func (RealSweepDeps) AwaitingInput(worktreePath string) (bool, string) {
+	return wtpolicy.AwaitingInput(worktreePath)
 }
 
 // RemoveWorktree removes the worktree (non-force lets git guard a dirty tree).

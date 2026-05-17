@@ -49,16 +49,19 @@ worktree or whether that session ever fired its Stop hook.
 
 Each worktree is classified as exactly one of:
 
-  ACTIVE    a live AGM/tmux session (or a running session's nested sandbox,
-            or this sweep's own worktree) owns it — never touched
-  MERGED    branch is an ancestor of the base ref OR its PR is MERGED, and
-            the tree is clean — the ONLY class reaped by --execute
-  DIRTY     uncommitted or untracked changes — never touched
-  ORPHANED  clean but not provably merged: a husk (no PR / open PR / closed
-            unmerged / unpushed commits). Kept; 'unpushed-commits' is real
-            data-loss risk and is surfaced loudly
-  UNKNOWN   safety could not be established (probe failed / detached HEAD) —
-            kept, fail-safe
+  ACTIVE         a live AGM/tmux session (or a running session's nested
+                 sandbox, or this sweep's own worktree) owns it — untouched
+  AWAITING_INPUT the session transcript ends with the assistant waiting on
+                 the user (AskUserQuestion, or a trailing question) — kept
+                 even if it looks merged, so the user can return and answer
+  MERGED         branch is an ancestor of the base ref OR its PR is MERGED,
+                 and the tree is clean — the ONLY class reaped by --execute
+  DIRTY          uncommitted or untracked changes — never touched
+  ORPHANED       clean but not provably merged: a husk (no PR / open PR /
+                 closed-unmerged / unpushed commits). Kept; 'unpushed-commits'
+                 is real data-loss risk and is surfaced loudly
+  UNKNOWN        safety could not be established (probe failed / detached
+                 HEAD) — kept, fail-safe
 
 The merge test is squash-safe: it never uses ahead/behind (which a
 squash-merge inflates to "ahead>0", the bug that lets husks accumulate). It
@@ -172,8 +175,8 @@ func printSweepReport(out io.Writer, res *ops.SweepResult, execute bool) {
 
 	counts := res.Counts()
 	classOrder := []ops.Classification{
-		ops.ClassActive, ops.ClassMerged, ops.ClassDirty,
-		ops.ClassOrphaned, ops.ClassUnknown,
+		ops.ClassActive, ops.ClassAwaitingInput, ops.ClassMerged,
+		ops.ClassDirty, ops.ClassOrphaned, ops.ClassUnknown,
 	}
 	fmt.Fprintf(out, "\n%d worktree(s):", len(res.Worktrees))
 	for _, c := range classOrder {

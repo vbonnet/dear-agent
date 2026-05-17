@@ -35,6 +35,9 @@ type fakeSweepDeps struct {
 	unpushed    map[string]bool // keyed by branch
 	unpushedErr map[string]error
 
+	awaiting       map[string]bool   // keyed by worktree path
+	awaitingDetail map[string]string // keyed by worktree path
+
 	removeErr  map[string]error
 	deleteErr  map[string]error
 	removed    []string
@@ -87,6 +90,13 @@ func (f *fakeSweepDeps) HasUnpushedCommits(_, branch string) (bool, error) {
 		return true, err
 	}
 	return f.unpushed[branch], nil
+}
+func (f *fakeSweepDeps) AwaitingInput(p string) (bool, string) {
+	d := f.awaitingDetail[p]
+	if d == "" {
+		d = "test"
+	}
+	return f.awaiting[p], d
 }
 func (f *fakeSweepDeps) RemoveWorktree(_, p string, force bool) error {
 	if err := f.removeErr[p]; err != nil {
@@ -270,6 +280,38 @@ func TestClassify_Matrix(t *testing.T) {
 			dw:         DiscoveredWorktree{Path: wt, Branch: br},
 			wantClass:  ClassOrphaned,
 			wantReason: "no-pr",
+		},
+		{
+			name: "awaiting input outranks a provably-merged tree (never reaped)",
+			opts: SweepOptions{CheckPR: true},
+			setup: func(f *fakeSweepDeps) {
+				f.ancestor = map[string]bool{br: true} // would be MERGED
+				f.awaiting = map[string]bool{wt: true}
+				f.awaitingDetail = map[string]string{wt: "AskUserQuestion"}
+			},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassAwaitingInput,
+			wantReason: "awaiting-input:AskUserQuestion",
+		},
+		{
+			name: "awaiting input outranks a dirty tree",
+			setup: func(f *fakeSweepDeps) {
+				f.dirty = map[string]bool{wt: true}
+				f.awaiting = map[string]bool{wt: true}
+			},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassAwaitingInput,
+			wantReason: "awaiting-input:test",
+		},
+		{
+			name: "awaiting input does NOT override a live session (ACTIVE wins)",
+			opts: SweepOptions{ActiveSessions: map[string]bool{"a": true}},
+			setup: func(f *fakeSweepDeps) {
+				f.awaiting = map[string]bool{wt: true}
+			},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassActive,
+			wantReason: "live-session",
 		},
 	}
 
