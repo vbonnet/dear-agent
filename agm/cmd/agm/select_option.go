@@ -53,9 +53,9 @@ Requirements:
   • Session must be active and responsive
 
 See Also:
-  • agm send msg - Send custom prompts to sessions
-  • agm send approve - Approve a permission prompt
-  • agm send reject - Reject a permission prompt`,
+  • agm send msg - Send a message/prompt to a running session
+  • agm send approve - Approve a permission prompt with optional reason
+  • agm send reject - Reject a permission prompt with custom reason`,
 	Args: cobra.ExactArgs(2),
 	RunE: runSelectOption,
 }
