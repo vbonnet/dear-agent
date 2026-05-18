@@ -1,5 +1,12 @@
 # ADR-011: DEAR Audit Subsystem
 
+> **Terminology (added 2026-05-17):** "DEAR" in this ADR is the **workflow-engine
+> *code* lifecycle** — Define / **Enforce** / Audit / **Resolve & Refine** — not
+> the canonical **process** retrospective loop (Define / **Execute** / Audit /
+> **Retro**) in [/CONTEXT.md](../../CONTEXT.md). This is documented collision
+> (2b) in CONTEXT.md § Known Terminology Collisions; no code rename is implied,
+> it is tracked as a follow-up. Read "DEAR" below as the code lifecycle.
+
 **Status**: Proposed
 **Date**: 2026-05-03
 **Context**: Builds on

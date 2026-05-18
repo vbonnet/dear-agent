@@ -33,6 +33,16 @@ make the AGM / VROOM / DEAR / Wayfinder relationship explicit.
   `agm/docs/adr/README.md`.
 - Dated audit/retro records got non-destructive forward banners (point-in-time
   history is preserved, not rewritten — per the append-only audit-trail value).
+- **ADR prune (scoped):** ran a repo-wide ADR audit against the
+  hard-to-reverse + surprising + real-trade-off test —
+  [docs/audits/2026-05-17-adr-inventory-prune.md](../audits/2026-05-17-adr-inventory-prune.md).
+  Executed only the in-theme, unambiguous subset here: deleted
+  `docs/adrs/ADR-008` (obsolete Draft) and the exact-duplicate
+  `engram/internal/telemetry/enrichment/ADR-001`; added DEAR-collision
+  disambiguation banners to `docs/adrs/ADR-010/011/018`. The ~80 nested
+  code-local ADR changes are deferred to follow-up surgical PRs (FU-1…FU-6 in
+  the audit) — bundling them here would have been an unreviewable mega-diff
+  that violates the repo's own surgical-commit rule.
 
 ## Audit
 

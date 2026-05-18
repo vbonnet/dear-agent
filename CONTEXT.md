@@ -291,9 +291,17 @@ needs follow-up work tracked on the roadmap.
 
 4. **Two top-level ADR directories.**
    `docs/adr/` (singular; foundational/above-AGM ADRs) and `docs/adrs/` (plural;
-   ADR-008…022) coexist. This PR places the VROOM ADR in the **singular**
+   ADR-009…022) coexist. This PR places the VROOM ADR in the **singular**
    `docs/adr/` to signal "above AGM", but the split itself remains. Recommended
    follow-up: consolidate to one directory.
+
+5. **ADR sprawl (~100+ ADRs of mixed quality).**
+   Most ADRs in the repo fail the "hard-to-reverse + surprising + real
+   trade-off" test (many are bug-fix notes, standard-pattern conventions, or
+   LLM-padded design dumps). A full repo-wide audit with per-ADR dispositions
+   is in [docs/audits/2026-05-17-adr-inventory-prune.md](docs/audits/2026-05-17-adr-inventory-prune.md).
+   Only the top-level governance set + one exact duplicate are pruned in the
+   originating PR; the rest are grouped into follow-up surgical PRs.
 
 ---
 
