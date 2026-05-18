@@ -1,5 +1,12 @@
 # ADR-011: DEAR Audit Subsystem
 
+> **Terminology (added 2026-05-17):** "DEAR" in this ADR is the **workflow-engine
+> *code* lifecycle** — Define / **Enforce** / Audit / **Resolve & Refine** — not
+> the canonical **process** retrospective loop (Define / **Execute** / Audit /
+> **Retro**) in [/CONTEXT.md](../../CONTEXT.md). This is documented collision
+> (2b) in CONTEXT.md § Known Terminology Collisions; no code rename is implied,
+> it is tracked as a follow-up. Read "DEAR" below as the code lifecycle.
+
 **Status**: Proposed
 **Date**: 2026-05-03
 **Context**: Builds on
@@ -394,7 +401,7 @@ linters already in `.golangci.yml`.
 | `configs/workflows/audit-*.yaml` (new) | Three starter workflow templates             |
 | `.dear-agent.yml` (this repo)  | Add an `audits:` section configuring the daily set   |
 | `~/src/brain-v2/.dear-agent.yml` | Add an `audits:` section across its sub-trees      |
-| `docs/adrs/ADR-011-...md`      | This file                                            |
+| `docs/adr/ADR-011-...md`      | This file                                            |
 
 ## What does **not** change
 

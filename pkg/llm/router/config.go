@@ -3,7 +3,7 @@
 // "implementer") and the router picks a concrete model+provider, falling
 // through a primary→secondary→tertiary chain when calls fail.
 //
-// See docs/adrs/ADR-012-provider-transport-layer.md for the design.
+// See docs/adr/ADR-012-provider-transport-layer.md for the design.
 package router
 
 import (

@@ -53,7 +53,7 @@ git -C ~/src/engram-research show origin/main:WORKFLOW-ENGINE-RESEARCH-ECOSYSTEM
 ```
 
 The architectural decisions are captured in
-[`docs/adrs/ADR-010-workflow-engine-architecture.md`](docs/adrs/ADR-010-workflow-engine-architecture.md).
+[`docs/adr/ADR-010-workflow-engine-architecture.md`](docs/adr/ADR-010-workflow-engine-architecture.md).
 The per-ticket backlog (one row per work item) is at
 [`docs/workflow-engine/BACKLOG.md`](docs/workflow-engine/BACKLOG.md). Read both
 before picking up work.
@@ -103,7 +103,7 @@ holds process state; Engram holds knowledge state; the workflow engine holds
    └──────────────────────────────────────────────────────────────┘
 ```
 
-Full diagram and justification: [ADR-010](docs/adrs/ADR-010-workflow-engine-architecture.md).
+Full diagram and justification: [ADR-010](docs/adr/ADR-010-workflow-engine-architecture.md).
 
 ---
 
@@ -188,7 +188,7 @@ an audit event. Existing workflows run unchanged.
 
 **Ship criterion:** existing workflows run unchanged; `SELECT * FROM
 audit_events WHERE run_id = ?` returns every transition; perf targets met
-(see [ADR-010 §6](docs/adrs/ADR-010-workflow-engine-architecture.md#6-performance-targets)):
+(see [ADR-010 §6](docs/adr/ADR-010-workflow-engine-architecture.md#6-performance-targets)):
 read run status for 100-node DAG P95 < 5 ms; append audit event P95 < 1 ms.
 
 ### Phase 1 — Roles + budget (MVS pt. 2)
@@ -615,7 +615,7 @@ Every transition emits an `audit_events` row. Every retry adds a
 
 ## SQLite tables (canonical)
 
-Full DDL: see [ADR-010 §5](docs/adrs/ADR-010-workflow-engine-architecture.md#5-storage-schema-canonical-sqlite).
+Full DDL: see [ADR-010 §5](docs/adr/ADR-010-workflow-engine-architecture.md#5-storage-schema-canonical-sqlite).
 
 | Table | Purpose |
 |---|---|
@@ -658,7 +658,7 @@ The engine is successful if all of these are true 12 months from now:
 ## How to pick up work
 
 1. Read this file for the phase landscape.
-2. Read [ADR-010](docs/adrs/ADR-010-workflow-engine-architecture.md) for
+2. Read [ADR-010](docs/adr/ADR-010-workflow-engine-architecture.md) for
    the architectural decisions and their justifications.
 3. Read [BACKLOG.md](docs/workflow-engine/BACKLOG.md) for individual
    tickets.
@@ -676,8 +676,8 @@ implementing against it.
 
 ## References
 
-- [ADR-009 — Work Item as First-Class Substrate](docs/adrs/ADR-009-work-item-as-first-class-substrate.md)
-- [ADR-010 — Workflow Engine Architecture](docs/adrs/ADR-010-workflow-engine-architecture.md)
+- [ADR-009 — Work Item as First-Class Substrate](docs/adr/ADR-009-work-item-as-first-class-substrate.md)
+- [ADR-010 — Workflow Engine Architecture](docs/adr/ADR-010-workflow-engine-architecture.md)
 - [BACKLOG — per-ticket tracking](docs/workflow-engine/BACKLOG.md)
 - `~/src/engram-research/WORKFLOW-ENGINE-SYNTHESIS.md` (origin/main, 2026-05-02)
 - `~/src/engram-research/WORKFLOW-ENGINE-RESEARCH-ENGINEERING.md` (origin/main, 2026-05-02)

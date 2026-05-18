@@ -2,10 +2,13 @@
 
 **Status**: Accepted
 **Date**: 2026-05-12
-**Context**: Extends the DEAR protocol (Define, Enforce, Audit, Resolve & Refine)
-captured in [ADR-011](ADR-011-dear-audit-subsystem.md). Builds on the
-two-tier (instruction + configuration) routing model documented in
-[AGENTS.why.md](../../AGENTS.why.md).
+**Context**: Extends the workflow-engine *code* DEAR lifecycle (Define,
+**Enforce**, Audit, **Resolve & Refine**) captured in
+[ADR-011](ADR-011-dear-audit-subsystem.md) — distinct from the canonical
+**process** DEAR (Define / **Execute** / Audit / **Retro**) in
+[/CONTEXT.md](../../CONTEXT.md); see CONTEXT.md § Known Terminology Collisions
+(2b). Builds on the two-tier (instruction + configuration) routing model
+documented in [AGENTS.why.md](../../AGENTS.why.md).
 
 ---
 

@@ -310,7 +310,7 @@ Reserved (not implemented):
 | `pkg/plugin/registry.go` | New: `Registry`, `Register`, `Plugins`, `Hooks`, `ApplyChecks`. |
 | `pkg/plugin/loader.go` | New: `FilesystemLoader.LoadFromDir(path) ([]Manifest, error)`. |
 | `pkg/plugin/*_test.go` | New: tests for every public surface. |
-| `docs/adrs/ADR-014-plugin-system.md` | This ADR. |
+| `docs/adr/ADR-014-plugin-system.md` | This ADR. |
 
 ## What does **not** change
 

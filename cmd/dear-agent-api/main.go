@@ -1,6 +1,6 @@
 // Command dear-agent-api serves dear-agent's JSON HTTP control surface
 // over a Tailscale-internal listener. The API mirrors the workflow- and
-// audit-CLI surfaces; see docs/adrs/ADR-013-tailscale-api.md for the
+// audit-CLI surfaces; see docs/adr/ADR-013-tailscale-api.md for the
 // design.
 //
 // Usage:
