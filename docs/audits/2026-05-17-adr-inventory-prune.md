@@ -10,7 +10,7 @@ superseded), `MERGE` (redundant with a named ADR), or `CONSOLIDATE→CONTEXT.md`
 (it only documents vocabulary/architecture). Passing all three but written
 poorly ⇒ `KEEP-rewrite`.
 
-**Provenance note.** The top-level set (`docs/adr/`, `docs/adrs/`) was audited
+**Provenance note.** The top-level set (`docs/adr/`) was audited
 directly. Clusters B–E were audited by parallel delegated reviewers reading
 each file in full. Their verdicts are **decision-grade recommendations to be
 confirmed by the subsystem owner during the follow-up PR** — not blind-execute
@@ -42,19 +42,26 @@ would be an unreviewable, hard-to-revert mega-diff that violates this repo's
 own surgical-commit rule (`GOAL.md`, `AGENTS.md`). So this PR executes only the
 **in-theme, unambiguous, low-risk** subset:
 
-- **DELETE** `docs/adrs/ADR-008-HTTP-Retry-Consolidation.md` — Status `Draft`,
+- **DELETE** `docs/adr/ADR-008-HTTP-Retry-Consolidation.md` — Status `Draft`,
   never accepted, references the dead `ai-tools` repo and non-existent paths;
   routine library swap (fails all three). No inbound refs.
 - **DELETE** `engram/internal/telemetry/enrichment/ADR-001-circuit-breaker-custom-implementation.md`
   — confirmed **byte-identical duplicate** of
   `internal/telemetry/enrichment/ADR-001-...`; zero inbound refs.
 - **DEAR terminology reconciliation** — disambiguation banners added to
-  `docs/adrs/ADR-010`, `ADR-011`, `ADR-018` (they propagated the workflow-engine
+  `docs/adr/ADR-010`, `ADR-011`, `ADR-018` (they propagated the workflow-engine
   *code* DEAR — Define/Enforce/Audit/Resolve — as if it were the canonical
   *process* DEAR — Define/Execute/Audit/Retro). No code renamed; collision
   registered in `CONTEXT.md`.
 - The VROOM ADR set (`agm/docs/adr/ADR-020…025`) was already superseded to
   redirect stubs in this PR.
+- **CONSOLIDATED the two top-level ADR directories**: `docs/adrs/` (plural) was
+  merged into `docs/adr/` (singular — the conventional name, also used by
+  `agm/docs/adr/`). ADR numbers were left unchanged (gaps are fine; renumbering
+  would break inbound refs and ADR identity). All inbound references (Go doc
+  comments, ROADMAP, CONTEXT.md, etc.) were repointed. Nested per-package dirs
+  (`pkg/engram/docs/adrs/`, `pkg/progress/docs/adrs/`, …) are a separate
+  concern and were intentionally left alone.
 
 Everything else is **deferred to the follow-up surgical PRs** below.
 
@@ -77,24 +84,24 @@ Each is independently reviewable by someone with that subsystem's context.
 
 ## Full audit tables
 
-### Top-level — `docs/adr/`, `docs/adrs/` (audited directly)
+### Top-level — `docs/adr/` (audited directly)
 
 | Path | Decision | Hard? | Surpr? | Tradeoff? | Disposition | Reason |
 |---|---|---|---|---|---|---|
 | docs/adr/ADR-001-monorepo-consolidation | One monorepo, one go.mod | Y | Y | Y | **KEEP** | Concise, passes all three |
 | docs/adr/ADR-002-vroom-execution-architecture | 3-supervisor mesh above AGM | Y | Y | Y | **KEEP** | New canonical (this PR) |
-| docs/adrs/ADR-008-HTTP-Retry-Consolidation | go-retryablehttp swap | N | N | N | **DELETE ✓PR** | Draft, dead-repo refs, lib swap |
-| docs/adrs/ADR-009-work-item-substrate | WorkItem ≠ Session | Y | Y | Y | KEEP-rewrite | Defer to ADR-010; stop restating diagnostic prose |
-| docs/adrs/ADR-010-workflow-engine-architecture | pkg/workflow → SQLite substrate | Y | Y | Y | **KEEP** (DEAR banner ✓PR) | Real; retitle/trim in FU-5 |
-| docs/adrs/ADR-011-dear-audit-subsystem | Scheduled repo audit on shared DB | Y | Y | Y | KEEP-rewrite (DEAR banner ✓PR) | Retitle to drop "DEAR" ambiguity (FU-5) |
-| docs/adrs/ADR-012-provider-transport-layer | Resolver + role router over Provider | ~ | Y | Y | KEEP-rewrite | Drop rotting line-number refs |
-| docs/adrs/ADR-013-tailscale-api | tsnet-bound API, tailnet = auth | Y | Y | Y | **KEEP** | Strong; concise |
-| docs/adrs/ADR-014-plugin-system | Compiled-in trust only, no .so/WASM | Y | Y | Y | **KEEP** | Strong surprising trade-off |
-| docs/adrs/ADR-015-signal-aggregator | 2nd SQLite DB; pkg/aggregator | ~ | ~ | Y | KEEP-rewrite | Compress to the naming-collision + 2nd-DB call |
-| docs/adrs/ADR-016-recommendation-mcp-server | Read-only MCP over signals.db | N | N | ~ | **MERGE→ADR-015** | Mostly schema spec; fold as a section |
-| docs/adrs/ADR-017-gateway-platform-adapters | In-process bus + Adapter iface | ~ | ~ | Y | KEEP-rewrite | Trim design-doc prose to the binding choices |
-| docs/adrs/ADR-018-graceful-exit-default | On-by-default; opt-out needs `why:` | Y | Y | Y | **KEEP** (DEAR banner ✓PR) | Accepted; sound |
-| docs/adrs/ADR-022-backlog-suggestion-system | Task-driven pickup ranking | Y | ~ | Y | KEEP-rewrite | VROOM refs already fixed (this PR) |
+| docs/adr/ADR-008-HTTP-Retry-Consolidation | go-retryablehttp swap | N | N | N | **DELETE ✓PR** | Draft, dead-repo refs, lib swap |
+| docs/adr/ADR-009-work-item-substrate | WorkItem ≠ Session | Y | Y | Y | KEEP-rewrite | Defer to ADR-010; stop restating diagnostic prose |
+| docs/adr/ADR-010-workflow-engine-architecture | pkg/workflow → SQLite substrate | Y | Y | Y | **KEEP** (DEAR banner ✓PR) | Real; retitle/trim in FU-5 |
+| docs/adr/ADR-011-dear-audit-subsystem | Scheduled repo audit on shared DB | Y | Y | Y | KEEP-rewrite (DEAR banner ✓PR) | Retitle to drop "DEAR" ambiguity (FU-5) |
+| docs/adr/ADR-012-provider-transport-layer | Resolver + role router over Provider | ~ | Y | Y | KEEP-rewrite | Drop rotting line-number refs |
+| docs/adr/ADR-013-tailscale-api | tsnet-bound API, tailnet = auth | Y | Y | Y | **KEEP** | Strong; concise |
+| docs/adr/ADR-014-plugin-system | Compiled-in trust only, no .so/WASM | Y | Y | Y | **KEEP** | Strong surprising trade-off |
+| docs/adr/ADR-015-signal-aggregator | 2nd SQLite DB; pkg/aggregator | ~ | ~ | Y | KEEP-rewrite | Compress to the naming-collision + 2nd-DB call |
+| docs/adr/ADR-016-recommendation-mcp-server | Read-only MCP over signals.db | N | N | ~ | **MERGE→ADR-015** | Mostly schema spec; fold as a section |
+| docs/adr/ADR-017-gateway-platform-adapters | In-process bus + Adapter iface | ~ | ~ | Y | KEEP-rewrite | Trim design-doc prose to the binding choices |
+| docs/adr/ADR-018-graceful-exit-default | On-by-default; opt-out needs `why:` | Y | Y | Y | **KEEP** (DEAR banner ✓PR) | Accepted; sound |
+| docs/adr/ADR-022-backlog-suggestion-system | Task-driven pickup ranking | Y | ~ | Y | KEEP-rewrite | VROOM refs already fixed (this PR) |
 
 ### Cluster B — `agm/docs/adr/ADR-001…019`
 

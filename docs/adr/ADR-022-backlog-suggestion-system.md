@@ -8,7 +8,7 @@
 signals → weighted score). They deliberately did not rank *declared work
 items*. The VROOM Orchestrator (the COO supervisor — see
 [/CONTEXT.md](../../CONTEXT.md) and
-[docs/adr/ADR-002](../adr/ADR-002-vroom-execution-architecture.md); the
+[docs/adr/ADR-002](ADR-002-vroom-execution-architecture.md); the
 decision-trail concept is described there) needs the *task-driven*
 counterpart: given the backlog of tickets, which one should be picked up next.
 This ADR specifies that system. It is the DEAR **Define** artifact for the
@@ -36,7 +36,7 @@ agent picking up work must read those markdown files by eye, resolve the
 `Dep` column against `Status` columns, eyeball phase order, and judge effort
 from the `Size` column. That is exactly the deterministic work the VROOM
 Orchestrator (COO supervisor — see
-[docs/adr/ADR-002](../adr/ADR-002-vroom-execution-architecture.md)) should do
+[docs/adr/ADR-002](ADR-002-vroom-execution-architecture.md)) should do
 before its agentic step. Three concrete gaps:
 
 1. **No machine-readable backlog.** The ranking inputs (priority, deps,
@@ -219,5 +219,5 @@ dispatch decision is a write to the decision trail and must be explicit.
 - [ADR-015: Signal Aggregator](ADR-015-signal-aggregator.md)
 - [ADR-016: Recommendation MCP Server](ADR-016-recommendation-mcp-server.md)
 - [/CONTEXT.md](../../CONTEXT.md) — VROOM vocabulary (Orchestrator role, decision trail)
-- [docs/adr/ADR-002: VROOM Execution Architecture](../adr/ADR-002-vroom-execution-architecture.md) — dispatch-rule + decision-trail source (supersedes agm ADR-020/023)
+- [docs/adr/ADR-002: VROOM Execution Architecture](ADR-002-vroom-execution-architecture.md) — dispatch-rule + decision-trail source (supersedes agm ADR-020/023)
 - `docs/workflow-engine/BACKLOG.md`, `ROADMAP.md` — the parsed sources

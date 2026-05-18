@@ -289,11 +289,14 @@ needs follow-up work tracked on the roadmap.
    the *role enum* is stale. Not changed in the docs PR (breaking API change) —
    tracked as a follow-up.
 
-4. **Two top-level ADR directories.**
-   `docs/adr/` (singular; foundational/above-AGM ADRs) and `docs/adrs/` (plural;
-   ADR-009…022) coexist. This PR places the VROOM ADR in the **singular**
-   `docs/adr/` to signal "above AGM", but the split itself remains. Recommended
-   follow-up: consolidate to one directory.
+4. **Two top-level ADR directories — RESOLVED (2026-05-17).**
+   There used to be both `docs/adr/` (singular) and `docs/adrs/` (plural).
+   They are now **consolidated into `docs/adr/`** (the conventional name, also
+   used by `agm/docs/adr/`). The canonical top-level ADR directory is
+   **`docs/adr/`**; `docs/adrs/` no longer exists. ADR numbers were left
+   unchanged (gaps are fine; renumbering would break inbound references and
+   ADR identity). Nested per-package dirs like `pkg/engram/docs/adrs/` are a
+   separate concern and were intentionally left alone.
 
 5. **ADR sprawl (~100+ ADRs of mixed quality).**
    Most ADRs in the repo fail the "hard-to-reverse + surprising + real

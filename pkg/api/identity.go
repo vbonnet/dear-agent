@@ -34,7 +34,7 @@ func (f IdentifierFunc) Identify(ctx context.Context, r *http.Request) (Caller, 
 
 // AnonymousIdentifier is the loopback fallback. It tags every request
 // with the same synthetic caller. Only safe on a private listener
-// (e.g. 127.0.0.1) — see docs/adrs/ADR-013-tailscale-api.md.
+// (e.g. 127.0.0.1) — see docs/adr/ADR-013-tailscale-api.md.
 func AnonymousIdentifier(loginName string) Identifier {
 	if loginName == "" {
 		loginName = "loopback"

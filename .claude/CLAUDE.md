@@ -17,7 +17,7 @@ session that produces artifacts.
 
 | Artifact kind                                              | Destination                  |
 |------------------------------------------------------------|------------------------------|
-| Source code, ADRs (`docs/adrs/`), design docs (`docs/design/`) | this repo                |
+| Source code, ADRs (`docs/adr/`), design docs (`docs/design/`) | this repo                |
 | Research analysis (substrate/architecture studies, etc.)   | `~/src/engram-research`      |
 | Source transcripts (YouTube, podcasts, interviews)         | `~/src/engram-research`      |
 | Conversation/session logs                                  | `~/src/ai-conversation-logs` |

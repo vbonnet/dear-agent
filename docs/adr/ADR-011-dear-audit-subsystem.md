@@ -401,7 +401,7 @@ linters already in `.golangci.yml`.
 | `configs/workflows/audit-*.yaml` (new) | Three starter workflow templates             |
 | `.dear-agent.yml` (this repo)  | Add an `audits:` section configuring the daily set   |
 | `~/src/brain-v2/.dear-agent.yml` | Add an `audits:` section across its sub-trees      |
-| `docs/adrs/ADR-011-...md`      | This file                                            |
+| `docs/adr/ADR-011-...md`      | This file                                            |
 
 ## What does **not** change
 

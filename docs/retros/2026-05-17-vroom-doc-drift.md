@@ -29,7 +29,7 @@ make the AGM / VROOM / DEAR / Wayfinder relationship explicit.
   removed).
 - Swept: `docs/alignment/{MISSION,VALUES,VISION,GOALS}.md` (repointed
   `adr_ref`, removed the dead "Verifier role"), `ARCHITECTURE.md`,
-  `docs/adrs/ADR-022`, `agm/docs/meta-orchestrator-mission.md`,
+  `docs/adr/ADR-022`, `agm/docs/meta-orchestrator-mission.md`,
   `agm/docs/adr/README.md`.
 - Dated audit/retro records got non-destructive forward banners (point-in-time
   history is preserved, not rewritten — per the append-only audit-trail value).
@@ -37,12 +37,16 @@ make the AGM / VROOM / DEAR / Wayfinder relationship explicit.
   hard-to-reverse + surprising + real-trade-off test —
   [docs/audits/2026-05-17-adr-inventory-prune.md](../audits/2026-05-17-adr-inventory-prune.md).
   Executed only the in-theme, unambiguous subset here: deleted
-  `docs/adrs/ADR-008` (obsolete Draft) and the exact-duplicate
+  `docs/adr/ADR-008` (obsolete Draft) and the exact-duplicate
   `engram/internal/telemetry/enrichment/ADR-001`; added DEAR-collision
-  disambiguation banners to `docs/adrs/ADR-010/011/018`. The ~80 nested
+  disambiguation banners to `docs/adr/ADR-010/011/018`. The ~80 nested
   code-local ADR changes are deferred to follow-up surgical PRs (FU-1…FU-6 in
   the audit) — bundling them here would have been an unreviewable mega-diff
   that violates the repo's own surgical-commit rule.
+- **Consolidated the dual top-level ADR directories:** `docs/adrs/` (plural)
+  merged into `docs/adr/` (singular, the conventional name); all inbound
+  references repointed (Go doc comments, ROADMAP, CONTEXT.md). ADR numbers
+  unchanged. Nested per-package `*/docs/adrs/` dirs intentionally untouched.
 
 ## Audit
 
@@ -76,7 +80,8 @@ not added to the roadmap here):**
 - "DEAR" has three live meanings (process loop / workflow-engine code hooks /
   backlog phase prefix). Recommend renaming the code-level lifecycle so it
   stops shadowing the process loop.
-- Two top-level ADR directories (`docs/adr/` vs `docs/adrs/`) should be
-  consolidated.
 - `agm/docs/adr/README.md` index is stale (stops at ADR-011) and needs a full
   reindex.
+
+(The "two top-level ADR directories" follow-up was resolved in this PR — see
+the Execute section.)
