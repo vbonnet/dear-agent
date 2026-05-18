@@ -3,7 +3,8 @@ title: Goals
 version: "1.0"
 status: active
 date: "2026-04-05"
-adr_ref: ADR-020
+adr_ref: docs/adr/ADR-002-vroom-execution-architecture
+context_ref: CONTEXT.md
 optimization_weights:
   auditability: 0.30
   alignment_fidelity: 0.25
@@ -29,10 +30,12 @@ trustworthy.
 
 ## 2. Alignment Fidelity (0.25)
 
-Agent behavior conforms to VALUES.md as verified by the Verifier role. Value
-violations are caught before outputs are delivered, not after. Alignment is
-measured by the rate at which the Verifier rejects work versus the rate at
-which rejected work would have caused harm if delivered.
+Agent behavior conforms to VALUES.md as confirmed by the **verification step**
+(a Secondary responsibility in VROOM — see [CONTEXT.md](../../CONTEXT.md); there
+is no standing "Verifier" role). Value violations are caught before outputs are
+delivered, not after. Alignment is measured by the rate at which verification
+rejects work versus the rate at which rejected work would have caused harm if
+delivered.
 
 ## 3. Task Throughput (0.20)
 

@@ -143,8 +143,16 @@ AGM supports coordinated parallel agent work through several mechanisms:
   edits
 - **A2A Agent Cards** (`internal/a2a/`) — A2A Protocol agent discovery via
   generated Agent Cards
-- **VROOM Architecture** — Five-role supervisory model: Verifier, Requester,
-  Orchestrator, Overseer, Meta-Orchestrator
+
+> **VROOM is not an AGM-internal component.** VROOM is the supervisory
+> **execution framework** that sits *above* AGM and drives it as a tool —
+> three supervisors (Meta-Orchestrator / Orchestrator / Overseer) plus per-task
+> Primary/Secondary/Tertiary ownership, Workers, Auditors, and SRE agents. It
+> is intentionally *not* an `internal/` package here. See
+> [CONTEXT.md](CONTEXT.md) and
+> [docs/adr/ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md). (The
+> earlier "five-role Verifier/Requester/…" description was inaccurate and is
+> superseded.)
 
 ### State Monitor — Astrocyte (`internal/monitor/`)
 

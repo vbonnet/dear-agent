@@ -5,6 +5,14 @@
 **Scope:** Full codebase audit against spec-driven autonomous pipeline principles
 **Source Material:** Nate B Jones, "I Looked At Amazon After They Fired 16,000 Engineers" (2026-04-13)
 
+> **Historical record — read with a correction (added 2026-05-17).** This
+> point-in-time audit describes VROOM as "Verifier, Requester, Orchestrator,
+> Overseer, Meta-Orchestrator" and refers to "ADRs 020–025". That five-role
+> model was later found inaccurate and is **superseded**. The body below is
+> preserved unedited as a historical record; for the correct VROOM model see
+> [/CONTEXT.md](../../CONTEXT.md) and
+> [docs/adr/ADR-002](../adr/ADR-002-vroom-execution-architecture.md).
+
 ---
 
 ## Context & Naming
