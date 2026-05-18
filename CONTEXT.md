@@ -162,7 +162,7 @@ AGM workspaces**. Start with a single set; expand only if necessary.
 |------|------|
 | **Process — missing tools** | If an agent was not given a tool it needs, that is a **bug**: run a [DEAR](#dear--define--execute--audit--retro) retro and grant the right permissions to that worker role. Track these; if enough get approved, grant by default (don't burn tokens re-approving). |
 | **Process — needs access it lacks** | The agent asks its **manager** (whoever spawned it), who approves or denies. Track the pattern via DEAR retros and periodic audits. |
-| **AskUserQuestion** | Worker unsure → asks its supervisor → if the supervisor is confident it answers directly, else it asks *its* supervisor → chain continues until it reaches the human. **Blocking for the Worker** (it needs the answer); **non-blocking for supervisors** (they supervise many sessions and must not stall the whole pipeline on one question). |
+| **AskUserQuestion** | Worker unsure → asks its **manager** (the Requester that spawned it) → if the manager is confident it answers directly, else it escalates up the management chain → terminating at the **Meta-Orchestrator**, which asks the human if still unsure. (Note: "manager" is the spawn/Requester relationship, distinct from the three named *supervisor roles* — the chain follows who-spawned-whom and ends at the Meta-Orchestrator, so it cannot loop on the supervisors' cyclic Secondary mesh.) **Blocking for the Worker** (it needs the answer); **non-blocking for the manager/supervisor roles** (they supervise many sessions and must not stall the whole pipeline on one question). |
 | **Proposing work** | Anyone may propose work via a formal [Work Order](#work-order). It goes to the Meta-Orchestrator. |
 
 ### Lifecycle summary
@@ -171,9 +171,10 @@ AGM workspaces**. Start with a single set; expand only if necessary.
   work. With active work they periodically check progress; problems trigger a
   DEAR retro → remediation → an enqueued long-term fix. Spare capacity → spin up
   more Workers.
-- **Workers** do the work, report back to their supervisor, may ask questions
-  upward, and on completion run a DEAR retro whose findings feed the
-  backlog/roadmap (filtered through the Meta-Orchestrator).
+- **Workers** do the work, report back to their **manager** (the Requester
+  that spawned them), may ask questions upward, and on completion run a DEAR
+  retro whose findings feed the backlog/roadmap (filtered through the
+  Meta-Orchestrator).
 - **Auditors** trigger periodically; results feed the Meta-Orchestrator.
 - **SREs** triage fire vs. merely-slow process. If it can wait, they say so and
   fix nothing. If it is a real fire, they act.
