@@ -9,6 +9,13 @@ on `engram-research/main` as of 2026-05-02. Builds directly on
 Implementation tracking: [ROADMAP.md](../../ROADMAP.md) and
 [docs/workflow-engine/BACKLOG.md](../workflow-engine/BACKLOG.md).
 
+> **Terminology (added 2026-05-17):** the "DEAR hooks" in this ADR
+> (`OnDefine/OnEnforce/OnAudit/OnResolve`) are the **workflow-engine *code*
+> lifecycle** — Define / **Enforce** / Audit / **Resolve** — *not* the
+> canonical **process** retrospective loop (Define / **Execute** / Audit /
+> **Retro**) in [/CONTEXT.md](../../CONTEXT.md). Documented collision (2b) in
+> CONTEXT.md § Known Terminology Collisions; no code rename is implied here.
+
 This ADR captures the architectural decisions surfaced by the workflow-engine
 research. Acceptance authorizes the work plan in `ROADMAP.md` to proceed.
 
