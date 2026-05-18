@@ -23,3 +23,21 @@ func TestPRMergedState_NotAGitRepoIsUnknown(t *testing.T) {
 		t.Fatalf("non-git path must be unknown, got merged=%v known=%v", merged, known)
 	}
 }
+
+// The sweep's safety likewise rests on PRState answering unknown ("",false)
+// whenever it cannot positively prove a PR's state.
+
+func TestPRState_EmptyBranchIsUnknown(t *testing.T) {
+	state, known := PRState("/anything", "")
+	if state != "" || known {
+		t.Fatalf("empty branch must be unknown, got state=%q known=%v", state, known)
+	}
+}
+
+func TestPRState_NotAGitRepoIsUnknown(t *testing.T) {
+	dir := t.TempDir()
+	state, known := PRState(filepath.Join(dir, "nope"), "claude/x")
+	if state != "" || known {
+		t.Fatalf("non-git path must be unknown, got state=%q known=%v", state, known)
+	}
+}

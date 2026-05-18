@@ -28,15 +28,34 @@ const prCheckTimeout = 8 * time.Second
 // the call is hard-bounded by prCheckTimeout, so it is safe on the Stop-hook
 // path that must never block session exit.
 func PRMergedState(repoPath, branch string) (merged bool, known bool) {
-	if branch == "" {
+	state, ok := PRState(repoPath, branch)
+	if !ok {
 		return false, false
 	}
+	return state == "MERGED", true
+}
+
+// PRState returns the state of the pull request whose head is exactly
+// `branch` — one of "MERGED", "OPEN", "CLOSED". `known` is false whenever
+// the answer cannot be positively established: gh not installed, not
+// authenticated, no PR for the branch, the resolved PR's head is some other
+// branch, a timeout, or any network/parse error. Callers MUST treat
+// (_, false) as "do not act on this".
+//
+// It shares PRMergedState's hard timeout, prompt-disabling and
+// exact-head-match guard, so it is equally safe on a hook path. The sweep
+// uses the full state (not just merged?) so it can tell an OPEN PR
+// (in-flight work — keep) from a worktree with no PR at all (husk).
+func PRState(repoPath, branch string) (state string, known bool) {
+	if branch == "" {
+		return "", false
+	}
 	if _, err := exec.LookPath("gh"); err != nil {
-		return false, false
+		return "", false
 	}
 	gitRoot, err := findGitRoot(repoPath)
 	if err != nil {
-		return false, false
+		return "", false
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), prCheckTimeout)
@@ -60,18 +79,18 @@ func PRMergedState(repoPath, branch string) (merged bool, known bool) {
 	out, err := cmd.Output()
 	if err != nil {
 		// No PR for this branch, auth failure, timeout, offline, etc.
-		return false, false
+		return "", false
 	}
 
 	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 2)
 	if len(parts) != 2 {
-		return false, false
+		return "", false
 	}
-	state, head := parts[0], parts[1]
+	st, head := parts[0], parts[1]
 	if head != branch {
 		// gh resolved a PR whose head is not this exact branch — refuse to
 		// act on an ambiguous match.
-		return false, false
+		return "", false
 	}
-	return state == "MERGED", true
+	return st, true
 }
