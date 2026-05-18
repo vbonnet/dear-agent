@@ -1,0 +1,445 @@
+package ops
+
+import (
+	"errors"
+	"testing"
+	"time"
+)
+
+// fakeSweepDeps drives the classification matrix with no real repo. Every
+// probe is keyed by worktree path or branch so each test wires exactly the
+// state it exercises; an unset key yields the zero value (the conservative
+// answer for the bool/known probes).
+type fakeSweepDeps struct {
+	discovered  []DiscoveredWorktree
+	discoverErr error
+
+	dirty    map[string]bool
+	dirtyErr map[string]error
+
+	last    map[string]time.Time
+	subject map[string]string
+	lastErr map[string]error
+
+	mainRepo    map[string]string
+	mainRepoErr map[string]error
+
+	base map[string]string // keyed by mainRepo
+
+	ancestor    map[string]bool // keyed by branch
+	ancestorErr map[string]error
+
+	prState map[string]string // keyed by branch
+	prKnown map[string]bool   // keyed by branch
+
+	unpushed    map[string]bool // keyed by branch
+	unpushedErr map[string]error
+
+	awaiting       map[string]bool   // keyed by worktree path
+	awaitingDetail map[string]string // keyed by worktree path
+
+	removeErr  map[string]error
+	deleteErr  map[string]error
+	removed    []string
+	delBranch  []string
+	delForce   map[string]bool
+	removeArgs map[string]bool // path -> force used
+}
+
+func (f *fakeSweepDeps) Discover(string) ([]DiscoveredWorktree, error) {
+	return f.discovered, f.discoverErr
+}
+func (f *fakeSweepDeps) IsDirty(p string) (bool, error) {
+	if err := f.dirtyErr[p]; err != nil {
+		return true, err
+	}
+	return f.dirty[p], nil
+}
+func (f *fakeSweepDeps) LastCommit(p string) (time.Time, string, error) {
+	if err := f.lastErr[p]; err != nil {
+		return time.Time{}, "", err
+	}
+	return f.last[p], f.subject[p], nil
+}
+func (f *fakeSweepDeps) MainRepo(p string) (string, error) {
+	if err := f.mainRepoErr[p]; err != nil {
+		return "", err
+	}
+	if v, ok := f.mainRepo[p]; ok {
+		return v, nil
+	}
+	return "/repo", nil
+}
+func (f *fakeSweepDeps) BaseRef(repo string) string {
+	if v, ok := f.base[repo]; ok {
+		return v
+	}
+	return "origin/main"
+}
+func (f *fakeSweepDeps) IsAncestor(_, branch, _ string) (bool, error) {
+	if err := f.ancestorErr[branch]; err != nil {
+		return false, err
+	}
+	return f.ancestor[branch], nil
+}
+func (f *fakeSweepDeps) PRState(_, branch string) (string, bool) {
+	return f.prState[branch], f.prKnown[branch]
+}
+func (f *fakeSweepDeps) HasUnpushedCommits(_, branch string) (bool, error) {
+	if err := f.unpushedErr[branch]; err != nil {
+		return true, err
+	}
+	return f.unpushed[branch], nil
+}
+func (f *fakeSweepDeps) AwaitingInput(p string) (bool, string) {
+	d := f.awaitingDetail[p]
+	if d == "" {
+		d = "test"
+	}
+	return f.awaiting[p], d
+}
+func (f *fakeSweepDeps) RemoveWorktree(_, p string, force bool) error {
+	if err := f.removeErr[p]; err != nil {
+		return err
+	}
+	if f.removeArgs == nil {
+		f.removeArgs = map[string]bool{}
+	}
+	f.removeArgs[p] = force
+	f.removed = append(f.removed, p)
+	return nil
+}
+func (f *fakeSweepDeps) DeleteBranch(_, b string, force bool) error {
+	if err := f.deleteErr[b]; err != nil {
+		return err
+	}
+	if f.delForce == nil {
+		f.delForce = map[string]bool{}
+	}
+	f.delForce[b] = force
+	f.delBranch = append(f.delBranch, b)
+	return nil
+}
+
+// classifyOne runs the pure classifier for a single discovered worktree.
+func classifyOne(opts SweepOptions, d SweepDeps, dw DiscoveredWorktree) WorktreeStatus {
+	return classify(opts, d, dw, cleanPath(opts.SelfPath))
+}
+
+func TestClassify_Matrix(t *testing.T) {
+	const wt = "/wt/a"
+	const br = "claude/a"
+
+	tests := []struct {
+		name       string
+		opts       SweepOptions
+		setup      func(*fakeSweepDeps)
+		dw         DiscoveredWorktree
+		wantClass  Classification
+		wantReason string
+	}{
+		{
+			name:       "self worktree is ACTIVE",
+			opts:       SweepOptions{SelfPath: wt},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassActive,
+			wantReason: "self-worktree",
+		},
+		{
+			name:       "nested sandbox is ACTIVE",
+			dw:         DiscoveredWorktree{Path: "/wt/x/.worktrees/uuid", Branch: br},
+			wantClass:  ClassActive,
+			wantReason: "nested-sandbox-worktree",
+		},
+		{
+			name:       "live session by dir name is ACTIVE",
+			opts:       SweepOptions{ActiveSessions: map[string]bool{"a": true}},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassActive,
+			wantReason: "live-session",
+		},
+		{
+			name:       "live session by branch is ACTIVE",
+			opts:       SweepOptions{ActiveSessions: map[string]bool{br: true}},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassActive,
+			wantReason: "live-session",
+		},
+		{
+			name:       "detached HEAD is UNKNOWN never reaped",
+			dw:         DiscoveredWorktree{Path: wt, Branch: ""},
+			wantClass:  ClassUnknown,
+			wantReason: "detached-head",
+		},
+		{
+			name:       "status probe failure is UNKNOWN",
+			setup:      func(f *fakeSweepDeps) { f.dirtyErr = map[string]error{wt: errors.New("x")} },
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassUnknown,
+			wantReason: "status-check-failed",
+		},
+		{
+			name:       "dirty tree is DIRTY",
+			setup:      func(f *fakeSweepDeps) { f.dirty = map[string]bool{wt: true} },
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassDirty,
+			wantReason: "uncommitted-changes",
+		},
+		{
+			name:       "main repo unresolved is UNKNOWN",
+			setup:      func(f *fakeSweepDeps) { f.mainRepoErr = map[string]error{wt: errors.New("x")} },
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassUnknown,
+			wantReason: "main-repo-unresolved",
+		},
+		{
+			name:       "base ref unresolved is UNKNOWN",
+			setup:      func(f *fakeSweepDeps) { f.base = map[string]string{"/repo": ""} },
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassUnknown,
+			wantReason: "base-ref-unresolved",
+		},
+		{
+			name:       "ancestor probe failure is UNKNOWN",
+			setup:      func(f *fakeSweepDeps) { f.ancestorErr = map[string]error{br: errors.New("x")} },
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassUnknown,
+			wantReason: "ancestor-check-failed",
+		},
+		{
+			name:       "ancestor of base is MERGED",
+			opts:       SweepOptions{CheckPR: true},
+			setup:      func(f *fakeSweepDeps) { f.ancestor = map[string]bool{br: true} },
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassMerged,
+			wantReason: "ancestor-of-base",
+		},
+		{
+			name: "squash-merged via PR MERGED is MERGED",
+			opts: SweepOptions{CheckPR: true},
+			setup: func(f *fakeSweepDeps) {
+				f.prState = map[string]string{br: "MERGED"}
+				f.prKnown = map[string]bool{br: true}
+			},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassMerged,
+			wantReason: "pr-merged",
+		},
+		{
+			name: "open PR pushed not merged is ORPHANED",
+			opts: SweepOptions{CheckPR: true},
+			setup: func(f *fakeSweepDeps) {
+				f.prState = map[string]string{br: "OPEN"}
+				f.prKnown = map[string]bool{br: true}
+			},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassOrphaned,
+			wantReason: "open-pr-unmerged",
+		},
+		{
+			name: "closed unmerged PR is ORPHANED",
+			opts: SweepOptions{CheckPR: true},
+			setup: func(f *fakeSweepDeps) {
+				f.prState = map[string]string{br: "CLOSED"}
+				f.prKnown = map[string]bool{br: true}
+			},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassOrphaned,
+			wantReason: "pr-closed-unmerged",
+		},
+		{
+			name:       "no PR pushed is ORPHANED no-pr",
+			opts:       SweepOptions{CheckPR: true},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassOrphaned,
+			wantReason: "no-pr",
+		},
+		{
+			name: "unpushed commits beat an open PR (data-loss risk)",
+			opts: SweepOptions{CheckPR: true},
+			setup: func(f *fakeSweepDeps) {
+				f.prState = map[string]string{br: "OPEN"}
+				f.prKnown = map[string]bool{br: true}
+				f.unpushed = map[string]bool{br: true}
+			},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassOrphaned,
+			wantReason: "unpushed-commits",
+		},
+		{
+			name:       "push probe failure is UNKNOWN",
+			opts:       SweepOptions{CheckPR: true},
+			setup:      func(f *fakeSweepDeps) { f.unpushedErr = map[string]error{br: errors.New("x")} },
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassUnknown,
+			wantReason: "push-check-failed",
+		},
+		{
+			name:       "no-pr-check keeps squash-merged conservatively (not MERGED)",
+			opts:       SweepOptions{CheckPR: false},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassOrphaned,
+			wantReason: "no-pr",
+		},
+		{
+			name: "awaiting input outranks a provably-merged tree (never reaped)",
+			opts: SweepOptions{CheckPR: true},
+			setup: func(f *fakeSweepDeps) {
+				f.ancestor = map[string]bool{br: true} // would be MERGED
+				f.awaiting = map[string]bool{wt: true}
+				f.awaitingDetail = map[string]string{wt: "AskUserQuestion"}
+			},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassAwaitingInput,
+			wantReason: "awaiting-input:AskUserQuestion",
+		},
+		{
+			name: "awaiting input outranks a dirty tree",
+			setup: func(f *fakeSweepDeps) {
+				f.dirty = map[string]bool{wt: true}
+				f.awaiting = map[string]bool{wt: true}
+			},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassAwaitingInput,
+			wantReason: "awaiting-input:test",
+		},
+		{
+			name: "awaiting input does NOT override a live session (ACTIVE wins)",
+			opts: SweepOptions{ActiveSessions: map[string]bool{"a": true}},
+			setup: func(f *fakeSweepDeps) {
+				f.awaiting = map[string]bool{wt: true}
+			},
+			dw:         DiscoveredWorktree{Path: wt, Branch: br},
+			wantClass:  ClassActive,
+			wantReason: "live-session",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeSweepDeps{}
+			if tc.setup != nil {
+				tc.setup(f)
+			}
+			got := classifyOne(tc.opts, f, tc.dw)
+			if got.Class != tc.wantClass || got.Reason != tc.wantReason {
+				t.Fatalf("class=%s reason=%q, want class=%s reason=%q",
+					got.Class, got.Reason, tc.wantClass, tc.wantReason)
+			}
+			if got.Class.Reapable() && got.Class != ClassMerged {
+				t.Fatalf("only MERGED may be reapable; %s was", got.Class)
+			}
+		})
+	}
+}
+
+func TestSweep_DryRunListsMergedButMutatesNothing(t *testing.T) {
+	f := &fakeSweepDeps{
+		discovered: []DiscoveredWorktree{
+			{Path: "/wt/m", Repo: "r", Branch: "claude/m"},
+			{Path: "/wt/d", Repo: "r", Branch: "claude/d"},
+		},
+		ancestor: map[string]bool{"claude/m": true},
+		dirty:    map[string]bool{"/wt/d": true},
+	}
+	res, err := Sweep(SweepOptions{Execute: false, CheckPR: true}, f, nil)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(res.Removed) != 1 || res.Removed[0] != "/wt/m" {
+		t.Fatalf("dry-run Removed = %v, want [/wt/m]", res.Removed)
+	}
+	if len(f.removed) != 0 || len(f.delBranch) != 0 {
+		t.Fatalf("dry-run must not mutate: removed=%v delBranch=%v", f.removed, f.delBranch)
+	}
+	if c := res.Counts(); c[ClassMerged] != 1 || c[ClassDirty] != 1 {
+		t.Fatalf("counts = %v", c)
+	}
+}
+
+func TestSweep_ExecuteRemovesOnlyMergedAndForceDeletesBranch(t *testing.T) {
+	f := &fakeSweepDeps{
+		discovered: []DiscoveredWorktree{
+			{Path: "/wt/m", Repo: "r", Branch: "claude/m"},
+			{Path: "/wt/o", Repo: "r", Branch: "claude/o"}, // orphaned, must survive
+		},
+		ancestor: map[string]bool{"claude/m": true},
+		mainRepo: map[string]string{"/wt/m": "/repo"},
+	}
+	res, err := Sweep(SweepOptions{Execute: true, CheckPR: true}, f, nil)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(f.removed) != 1 || f.removed[0] != "/wt/m" {
+		t.Fatalf("executed removal = %v, want [/wt/m] only", f.removed)
+	}
+	if f.removeArgs["/wt/m"] != false {
+		t.Fatalf("worktree removal must be non-force (git is the last guard)")
+	}
+	if !f.delForce["claude/m"] {
+		t.Fatalf("orphaned local branch of a (squash-)merged worktree needs -D")
+	}
+	if len(res.Removed) != 1 || res.Removed[0] != "/wt/m" {
+		t.Fatalf("res.Removed = %v", res.Removed)
+	}
+}
+
+func TestSweep_RemoveFailureIsRecordedNotFatal(t *testing.T) {
+	f := &fakeSweepDeps{
+		discovered: []DiscoveredWorktree{{Path: "/wt/m", Repo: "r", Branch: "claude/m"}},
+		ancestor:   map[string]bool{"claude/m": true},
+		removeErr:  map[string]error{"/wt/m": errors.New("locked")},
+	}
+	res, err := Sweep(SweepOptions{Execute: true, CheckPR: true}, f, nil)
+	if err != nil {
+		t.Fatalf("Sweep must be non-fatal: %v", err)
+	}
+	if len(res.Removed) != 0 {
+		t.Fatalf("failed removal must not be counted removed: %v", res.Removed)
+	}
+	if res.Failed["/wt/m"] == "" {
+		t.Fatalf("failure must be recorded in res.Failed")
+	}
+}
+
+func TestSweep_BranchDeleteFailureStillCountsWorktreeRemoved(t *testing.T) {
+	f := &fakeSweepDeps{
+		discovered: []DiscoveredWorktree{{Path: "/wt/m", Repo: "r", Branch: "claude/m"}},
+		ancestor:   map[string]bool{"claude/m": true},
+		deleteErr:  map[string]error{"claude/m": errors.New("still referenced")},
+	}
+	res, err := Sweep(SweepOptions{Execute: true, CheckPR: true}, f, nil)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(res.Removed) != 1 {
+		t.Fatalf("worktree removal must stand even if branch delete fails: %v", res.Removed)
+	}
+}
+
+func TestSweep_DiscoverErrorIsFatal(t *testing.T) {
+	f := &fakeSweepDeps{discoverErr: errors.New("boom")}
+	if _, err := Sweep(SweepOptions{}, f, nil); err == nil {
+		t.Fatal("a discovery error must surface (the sweep cannot proceed blind)")
+	}
+}
+
+func TestAnnotateDuplicates(t *testing.T) {
+	wts := []WorktreeStatus{
+		{Path: "/a", Repo: "r1", Subject: "fix bug"},
+		{Path: "/b", Repo: "r1", Subject: "fix bug"},
+		{Path: "/c", Repo: "r1", Subject: "lone"},
+		{Path: "/d", Repo: "r2", Subject: "fix bug"}, // different repo, not grouped
+		{Path: "/e", Repo: "r1", Subject: ""},        // empty subject skipped
+	}
+	annotateDuplicates(wts)
+
+	if wts[0].DupCount != 2 || wts[1].DupCount != 2 || wts[0].DupGroup != "fix bug" {
+		t.Fatalf("r1 'fix bug' pair not grouped: %+v / %+v", wts[0], wts[1])
+	}
+	for _, i := range []int{2, 3, 4} {
+		if wts[i].DupCount != 0 {
+			t.Fatalf("index %d should not be a dup: %+v", i, wts[i])
+		}
+	}
+}
