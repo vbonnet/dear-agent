@@ -179,7 +179,7 @@ the Tools table exist, "9-phase" Wayfinder claim matches `wayfinder/README.md:3`
 |------|----------|-------|-----|
 | 5 | Medium | "organized around **four products**" — `README.md:26-31` and `CONTRIBUTING.md:114-125` list **three** (AGM/Engram/Wayfinder). The 4th is never named. | State the four explicitly or correct to three. |
 | 52-55, 76-78, 107, 216 | Medium-High | "Dolt DB"/"Dolt Storage" contradicts README/ROADMAP SQLite (S4). | Reconcile. |
-| 71, 86, 101, 112, 137-150, 158, 213-218 | Medium | Paths written as `internal/ops/`, `internal/agent/`, `internal/backend/`, `internal/session/`, `internal/sandbox/`, `internal/dolt/`, `internal/workflow/` etc. — these live under **`agm/internal/`** (verified `agm/internal/dolt`, `agm/internal/workflow`). `README.md:154` correctly says `agm/internal/ops/`, directly contradicting this file. | Prefix `agm/` (or note the package root). |
+| 71, 86, 101, 112, 137-150, 158, 213-218 | Medium | Paths written as `internal/ops/`, `internal/agent/`, `internal/backend/`, `internal/session/`, `internal/sandbox/`, `internal/dolt/`, `internal/workflow/` etc. — these live under **`agm/internal/`** (verified `agm/internal/dolt`, `agm/internal/workflow`). `README.md:153` correctly says `agm/internal/ops/`, directly contradicting this file. | Prefix `agm/` (or note the package root). |
 | 146-147 | High | VROOM "Five-role supervisory model: Verifier, Requester, Orchestrator, Overseer, Meta-Orchestrator" — non-canonical (S2). | Rewrite to 3 supervisors + Workers/Auditors/SREs. |
 | 216 | Low | "`internal/dolt/`" → actual path `agm/internal/dolt/`. | Correct path. |
 | whole file | Medium | DEAR never mentioned despite repo name (S1). | Add. |
