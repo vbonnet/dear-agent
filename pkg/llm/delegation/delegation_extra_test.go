@@ -86,8 +86,8 @@ func TestParseOutput_PlainTextDefaultModels(t *testing.T) {
 		provider      string
 		expectedModel string
 	}{
-		{"gemini", "gemini-2.0-flash-exp"},
-		{"google", "gemini-2.0-flash-exp"},
+		{"gemini", "gemini-3.5-flash"},
+		{"google", "gemini-3.5-flash"},
 		{"anthropic", "claude-sonnet-4"},
 		{"claude", "claude-sonnet-4"},
 		{"codex", "codex-default"},

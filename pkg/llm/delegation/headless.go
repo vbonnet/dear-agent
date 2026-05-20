@@ -170,7 +170,7 @@ func (s *HeadlessStrategy) parseOutput(outputText string, input *AgentInput) *Ag
 		// Set default models based on provider
 		switch s.provider {
 		case "gemini", "google":
-			model = "gemini-2.0-flash-exp"
+			model = "gemini-3.5-flash"
 		case "anthropic", "claude":
 			model = "claude-sonnet-4"
 		case "codex":
