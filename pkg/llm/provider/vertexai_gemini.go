@@ -222,8 +222,10 @@ func (p *VertexAIGeminiProvider) Capabilities() Capabilities {
 		MaxTokensPerRequest:   1000000, // 1M token context window
 		MaxConcurrentRequests: 10,
 		SupportedModels: []string{
-			"gemini-2.0-flash-exp",
-			"gemini-2.5-pro-exp",
+			"gemini-3.5-flash",
+			"gemini-3.1-pro",
+			"gemini-2.5-pro",
+			"gemini-2.5-flash-lite",
 			"gemini-1.5-pro",
 			"gemini-1.5-flash",
 		},

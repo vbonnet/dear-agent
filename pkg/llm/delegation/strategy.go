@@ -46,7 +46,7 @@ type AgentInput struct {
 	// Prompt is the text prompt to send to the agent.
 	Prompt string
 
-	// Model is the specific model to use (e.g., "claude-opus-4-6", "gemini-2.0-flash-exp").
+	// Model is the specific model to use (e.g., "claude-opus-4-6", "gemini-3.5-flash").
 	// If empty, the strategy will use a default model.
 	Model string
 
