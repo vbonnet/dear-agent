@@ -13,7 +13,7 @@ Builds on / aligns with:
 
 - [ADR-007 (agm): Hook-Based State Detection](../../agm/docs/adr/ADR-007-hook-based-state-detection.md)
   — the DONE/WORKING/COMPACTING/USER_PROMPT/OFFLINE state machine the
-  `is_stuck` classifier (§F5) derives from.
+  `is_stuck` classifier (§F6) derives from.
 - [ADR-011: DEAR Audit Subsystem](ADR-011-dear-audit-subsystem.md) — friction
   reports are an Audit-phase finding stream; the triage agent (§F4) is an
   Audit consumer.
@@ -185,7 +185,7 @@ A report is structured so it is clusterable and auditable without NLP:
   "task_id": "6.3",                  // backlog/acceptance id if known
   "category": "permission|tooling|docs|flaky-test|missing-capability|spec-ambiguity|environment",
   "severity": "low|medium|high",     // impact on the current task
-  "is_stuck": false,                 // set true if the is_stuck classifier (§F5) co-fired
+  "is_stuck": false,                 // set true if the is_stuck classifier (§F6) co-fired
   "description": "free text — what was hit",
   "evidence": "command + error excerpt (verbatim, truncated)",
   "suggested_fix": "optional — what would have unblocked me"
@@ -365,9 +365,13 @@ The discipline is: capture the ref, check the ref, surface the drift.
 
 These are **two layers, not two implementations of one thing**:
 
-- **VROOM role transitions** (Requester → Orchestrator → Verifier → Overseer →
-  Meta-Orchestrator) are handoffs of *authority and decision* within a mission
-  — the governance layer (ADR-002, CONTEXT.md).
+- **VROOM role transitions** among the three supervisors (Orchestrator →
+  Overseer → Meta-Orchestrator) — and the per-task Primary / Secondary /
+  Tertiary responsibilities beneath them — are handoffs of *authority and
+  decision* within a mission, the governance layer (ADR-002, CONTEXT.md). (Note:
+  there is no standing "Verifier" or "Requester" *role*; verification is the
+  Secondary's responsibility. The old five-role expansion is superseded — see
+  CONTEXT.md § Status note.)
 - **Session handoff** (`--from`) is the *execution-substrate* mechanism — the
   plumbing.
 
@@ -377,7 +381,7 @@ session `--from` the mission session, and the manifest's
 `parent_last_decision_event` links into the VROOM trail. But not every session
 handoff is a VROOM transition (a worker can hand a sub-problem to a fresh
 session without changing roles), and not every VROOM transition needs a new
-session (the Verifier may inspect in place). Keeping the layers distinct
+session (the Secondary may verify in place). Keeping the layers distinct
 prevents the conflation CONTEXT.md already had to untangle once.
 
 ---
@@ -433,7 +437,7 @@ non-trivial item will get its own Define artifact / ADR before implementation.
 
 | # | Item | Provenance | Lands in / builds on |
 |---|------|------------|----------------------|
-| R1 | **Council-of-agents / multi-model review** — formalize the multi-model review pattern (each model reviews independently, results merged). | Delivery Hero | *Validates the existing VROOM pattern* — Verifier role (agm ADR-021) + cross-model handoff (§H5). Formalization, not new architecture. |
+| R1 | **Council-of-agents / multi-model review** — formalize the multi-model review pattern (each model reviews independently, results merged). | Delivery Hero | *Validates the existing VROOM pattern* — verification as the Secondary's responsibility (agm ADR-021 is the superseded "Verifier role" stub) + cross-model handoff (§H5). Formalization, not new architecture. |
 | R2 | **Agent friction reporting** (`agm friction`). | Lovable `/vent`, reframed | **This ADR, Part A.** |
 | R3 | **Session handoff** (`agm session new --from --scope`). | Matt Pocock `/handoff` | **This ADR, Part B.** |
 | R4 | **`is_stuck` behavioral classifier** — derive a "stuck" state from telemetry (failure loops, no-progress, state thrash). | Lovable | Extends agm ADR-007 hook state machine; co-fires into friction reports (§F6). |
