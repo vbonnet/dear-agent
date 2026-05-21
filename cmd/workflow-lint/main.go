@@ -42,6 +42,7 @@ var defaultDeprecatedModels = []string{
 	"gpt-4-turbo",
 	"gpt-3.5-turbo",
 	"gemini-1.5-pro",
+	"gemini-2.0-flash-exp",
 }
 
 func main() {
