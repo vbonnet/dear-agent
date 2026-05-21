@@ -161,13 +161,16 @@ func registerWithClaudeCode(claudeConfigPath string) error {
 		servers = nested
 	}
 
-	// Idempotency: skip the write when already pointing at this command.
+	// Update only the command, preserving any user-defined fields (args, env)
+	// on an existing entry. Skip the write entirely when already current.
 	if cur, ok := servers["agm"].(map[string]any); ok {
 		if cmd, _ := cur["command"].(string); cmd == exePath {
 			return nil
 		}
+		cur["command"] = exePath
+	} else {
+		servers["agm"] = map[string]any{"command": exePath}
 	}
-	servers["agm"] = map[string]any{"command": exePath}
 
 	out, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
@@ -177,6 +180,7 @@ func registerWithClaudeCode(claudeConfigPath string) error {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	tmp := claudeConfigPath + ".tmp"
+	defer os.Remove(tmp) // best-effort cleanup if we return before the rename
 	if err := os.WriteFile(tmp, append(out, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}

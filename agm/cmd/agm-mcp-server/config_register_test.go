@@ -78,6 +78,37 @@ func TestRegisterWithClaudeCode_PreservesNestedShapeAndOtherServers(t *testing.T
 	}
 }
 
+func TestRegisterWithClaudeCode_PreservesUserFieldsOnCommandUpdate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp_servers.json")
+	// Pre-existing agm entry with a stale command plus user-defined fields.
+	seed := map[string]any{
+		"agm": map[string]any{
+			"command": "/old/path/agm-mcp-server",
+			"args":    []any{"--no-gateway"},
+			"env":     map[string]any{"AGM_SESSIONS_DIR": "/custom"},
+		},
+	}
+	data, _ := json.MarshalIndent(seed, "", "  ")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := registerWithClaudeCode(path); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	entry := readServers(t, path)["agm"].(map[string]any)
+	if cmd, _ := entry["command"].(string); cmd == "/old/path/agm-mcp-server" {
+		t.Errorf("command was not updated: %v", entry["command"])
+	}
+	if _, ok := entry["args"]; !ok {
+		t.Errorf("user-defined args dropped: %#v", entry)
+	}
+	if _, ok := entry["env"]; !ok {
+		t.Errorf("user-defined env dropped: %#v", entry)
+	}
+}
+
 func TestRegisterWithClaudeCode_Idempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp_servers.json")
 
