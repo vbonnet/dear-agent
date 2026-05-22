@@ -108,7 +108,7 @@ func addSearchSessionsTool(server *mcp.Server, _ *Config) {
 
 func addGetSessionMetadataTool(server *mcp.Server, _ *Config) {
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "agm_get_session",
+		Name:        "agm_get_session_metadata",
 		Description: "Get detailed metadata for an AGM session. Use when you need full session details by ID or name.",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, input GetSessionInput) (*mcp.CallToolResult, any, error) {
 		if input.Identifier == "" {
@@ -178,7 +178,6 @@ func mcpError(err error) *mcp.CallToolResult {
 		IsError: true,
 	}
 }
-
 
 // --- Mutation tools ---
 
