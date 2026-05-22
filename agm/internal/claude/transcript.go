@@ -6,7 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 )
+
+// uuidPattern matches a canonical Claude session UUID (8-4-4-4-12 hex). It is
+// used to reject malformed identifiers before they reach filesystem globs.
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // FindTranscriptCwd locates the transcript for a Claude conversation UUID under
 // ~/.claude/projects/<project-slug>/<uuid>.jsonl and returns the original
@@ -22,6 +27,11 @@ import (
 func FindTranscriptCwd(homeDir, uuid string) (string, error) {
 	if uuid == "" {
 		return "", fmt.Errorf("empty UUID")
+	}
+	// Reject malformed identifiers before globbing: a value containing path
+	// separators or glob metacharacters could match unintended transcripts.
+	if !uuidPattern.MatchString(uuid) {
+		return "", fmt.Errorf("invalid UUID format: %q", uuid)
 	}
 
 	projectsDir := filepath.Join(homeDir, ".claude", "projects")

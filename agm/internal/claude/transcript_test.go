@@ -54,6 +54,19 @@ func TestFindTranscriptCwd_EmptyUUID(t *testing.T) {
 	}
 }
 
+func TestFindTranscriptCwd_MalformedUUID(t *testing.T) {
+	for _, bad := range []string{
+		"../../etc/passwd",
+		"*",
+		"61163f27",          // too short
+		"not-a-uuid-at-all", // wrong shape
+	} {
+		if _, err := FindTranscriptCwd(t.TempDir(), bad); err == nil {
+			t.Errorf("expected error for malformed UUID %q, got nil", bad)
+		}
+	}
+}
+
 func TestFindTranscriptCwd_NoCwdEntry(t *testing.T) {
 	home := t.TempDir()
 	uuid := "11111111-2222-3333-4444-555555555555"

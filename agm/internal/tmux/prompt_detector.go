@@ -373,8 +373,9 @@ func WaitForPromptOrResumeFailure(sessionName string, timeout time.Duration) err
 	for time.Now().Before(deadline) {
 		checkCount++
 
-		// Capture last 10 lines so a multi-line failure message (error +
-		// returned shell prompt) is visible in a single check.
+		// Capture the recent pane tail (from 10 lines into scrollback through
+		// the visible region) so a multi-line failure message - the error plus
+		// the returned shell prompt - is visible in a single check.
 		output, err := exec.Command("tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-10").Output()
 		if err != nil {
 			time.Sleep(500 * time.Millisecond)
