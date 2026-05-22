@@ -319,6 +319,97 @@ func WaitForPromptSimple(sessionName string, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for harness prompt (waited %v, performed %d checks)", timeout, checkCount)
 }
 
+// ResumeFailurePatterns are substrings that indicate `claude --resume` failed
+// fatally and will never reach a prompt. The canonical example is a UUID that
+// has no matching conversation in the current project directory. Detecting
+// these lets resume abort fast with an actionable error instead of waiting out
+// the full prompt timeout and then attaching to a dead pane.
+//
+// Keep these in sync with the patterns classified in
+// internal/validate/validator.go (classifyResumeError).
+var ResumeFailurePatterns = []string{
+	"No conversation found",
+	"No messages returned",
+}
+
+// ResumeFailureError signals that a fatal `claude --resume` error string was
+// detected in the pane before any harness prompt appeared. Detail holds the
+// offending line so callers can surface it to the user.
+type ResumeFailureError struct {
+	Detail string
+}
+
+func (e *ResumeFailureError) Error() string {
+	return fmt.Sprintf("claude resume failed: %s", e.Detail)
+}
+
+// containsResumeFailurePattern reports whether line contains a known fatal
+// resume-failure substring, returning the matched substring for context.
+func containsResumeFailurePattern(line string) (string, bool) {
+	for _, pattern := range ResumeFailurePatterns {
+		if strings.Contains(line, pattern) {
+			return pattern, true
+		}
+	}
+	return "", false
+}
+
+// WaitForPromptOrResumeFailure polls the pane for either a harness prompt
+// (success, returns nil) or a known fatal resume-failure pattern (returns a
+// *ResumeFailureError). It otherwise behaves like WaitForPromptSimple,
+// returning a timeout error if neither appears before the deadline.
+//
+// This is the resume-aware variant of WaitForPromptSimple: when
+// `claude --resume <uuid>` cannot find the conversation, it prints
+// "No conversation found ..." and the shell prompt returns, so the harness
+// prompt never renders. Without this check the caller would block for the
+// full timeout and then attach to a broken pane.
+func WaitForPromptOrResumeFailure(sessionName string, timeout time.Duration) error {
+	debug.Log("\n🔍 Starting resume-aware prompt detection for session: %s", sessionName)
+
+	deadline := time.Now().Add(timeout)
+	checkCount := 0
+
+	for time.Now().Before(deadline) {
+		checkCount++
+
+		// Capture last 10 lines so a multi-line failure message (error +
+		// returned shell prompt) is visible in a single check.
+		output, err := exec.Command("tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-10").Output()
+		if err != nil {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		lines := strings.Split(string(output), "\n")
+
+		// Check for a fatal resume failure first - it is the more specific
+		// signal and a returned shell prompt could otherwise look like success.
+		for _, line := range lines {
+			if _, ok := containsResumeFailurePattern(line); ok {
+				debug.Log("✗ Resume failure detected (check #%d): %q", checkCount, strings.TrimSpace(line))
+				return &ResumeFailureError{Detail: strings.TrimSpace(line)}
+			}
+		}
+
+		for i, line := range lines {
+			if containsAnyHarnessPromptPattern(line) {
+				debug.Log("✓ Harness prompt detected in line %d (check #%d): %q", i, checkCount, strings.TrimSpace(line))
+				time.Sleep(500 * time.Millisecond)
+				return nil
+			}
+		}
+
+		if checkCount%10 == 0 {
+			debug.Log("⏳ Still waiting for prompt... (check #%d)", checkCount)
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return fmt.Errorf("timeout waiting for harness prompt (waited %v, performed %d checks)", timeout, checkCount)
+}
+
 // WaitForClaudeReady waits for Claude to be fully ready, handling trust prompts if needed
 // This function:
 // 1. Detects and auto-answers trust prompts ("Yes, proceed")
