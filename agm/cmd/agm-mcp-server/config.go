@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,13 +11,13 @@ import (
 
 // Config represents AGM MCP server configuration
 type Config struct {
-	Enabled          bool     `yaml:"enabled"`
-	Transport        string   `yaml:"transport"`
-	Tools            []string `yaml:"tools"`
-	AutoRegister     bool     `yaml:"auto_register"`
-	ClaudeConfigPath string   `yaml:"claude_config_path"`
-	SessionsDir      string   `yaml:"sessions_dir"`
-	EngramMCPURL     string   `yaml:"engram_mcp_url"` // Phase 7.1: Engram MCP server URL for forwarding
+	Enabled          bool      `yaml:"enabled"`
+	Transport        string    `yaml:"transport"`
+	Tools            []string  `yaml:"tools"`
+	AutoRegister     bool      `yaml:"auto_register"`
+	ClaudeConfigPath string    `yaml:"claude_config_path"`
+	SessionsDir      string    `yaml:"sessions_dir"`
+	EngramMCPURL     string    `yaml:"engram_mcp_url"` // Phase 7.1: Engram MCP server URL for forwarding
 	A2A              A2AConfig `yaml:"a2a"`
 }
 
@@ -118,9 +119,73 @@ func expandHomeDir(path string) string {
 	return path
 }
 
-// registerWithClaudeCode registers the MCP server with Claude Code
+// registerWithClaudeCode idempotently registers the AGM MCP server in the
+// Claude Code MCP config at claudeConfigPath. It merges an "agm" entry pointing
+// at the current executable while preserving any servers already configured,
+// and is a no-op when the entry already points at the same command.
+//
+// Two on-disk shapes are supported: the flat name->entry map documented for
+// mcp_servers.json, and the nested {"mcpServers": {...}} shape used by
+// ~/.claude.json / .mcp.json. The existing shape is preserved; a missing file
+// is created in the flat shape.
 func registerWithClaudeCode(claudeConfigPath string) error {
-	// TODO: Implement registration (write to mcp_servers.json)
-	// For V1, this is a placeholder - manual registration via Claude Code settings
-	return fmt.Errorf("auto-registration not yet implemented - register manually via Claude Code settings")
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable path: %w", err)
+	}
+	if resolved, rerr := filepath.EvalSymlinks(exePath); rerr == nil {
+		exePath = resolved
+	}
+
+	// Load existing config, tolerating a missing or empty file.
+	root := map[string]any{}
+	switch data, rerr := os.ReadFile(claudeConfigPath); {
+	case rerr == nil:
+		if len(data) > 0 {
+			if jerr := json.Unmarshal(data, &root); jerr != nil {
+				return fmt.Errorf("parse %s: %w", claudeConfigPath, jerr)
+			}
+		}
+	case !os.IsNotExist(rerr):
+		return fmt.Errorf("read %s: %w", claudeConfigPath, rerr)
+	}
+
+	// Servers live under a nested "mcpServers" object when present, otherwise
+	// at the top level (the flat mcp_servers.json shape).
+	servers := root
+	if existing, ok := root["mcpServers"]; ok {
+		nested, ok := existing.(map[string]any)
+		if !ok {
+			return fmt.Errorf("unexpected mcpServers type in %s", claudeConfigPath)
+		}
+		servers = nested
+	}
+
+	// Update only the command, preserving any user-defined fields (args, env)
+	// on an existing entry. Skip the write entirely when already current.
+	if cur, ok := servers["agm"].(map[string]any); ok {
+		if cmd, _ := cur["command"].(string); cmd == exePath {
+			return nil
+		}
+		cur["command"] = exePath
+	} else {
+		servers["agm"] = map[string]any{"command": exePath}
+	}
+
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(claudeConfigPath), 0o755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	tmp := claudeConfigPath + ".tmp"
+	defer os.Remove(tmp) // best-effort cleanup if we return before the rename
+	if err := os.WriteFile(tmp, append(out, '\n'), 0o600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	if err := os.Rename(tmp, claudeConfigPath); err != nil {
+		return fmt.Errorf("replace config: %w", err)
+	}
+	return nil
 }
