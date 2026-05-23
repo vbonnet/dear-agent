@@ -224,23 +224,16 @@ func RegisterSession(conversationUUID, sessionName, workspace, fallbackWorkspace
 	}, nil
 }
 
-// FindByUUID returns the manifest for a tracked conversation UUID, or nil if no
-// manifest exists for it. Unlike ValidateNotDuplicate it does not treat an
-// existing manifest as an error — callers decide what to do with it.
+// FindByUUID returns the manifest for a tracked conversation UUID, or nil if
+// no manifest exists for it. Unlike ValidateNotDuplicate it does not treat an
+// existing manifest as an error — callers decide what to do with it. Backed by
+// an indexed lookup on agm_sessions.claude_uuid (see Adapter.GetSessionByUUID),
+// so it stays O(1) instead of scanning the full session list.
 func FindByUUID(conversationUUID string, adapter *dolt.Adapter) (*manifest.Manifest, error) {
 	if adapter == nil {
-		return nil, fmt.Errorf("dolt adapter not available")
+		return nil, fmt.Errorf("Dolt adapter not available") //nolint:staticcheck // proper noun
 	}
-	manifests, err := adapter.ListSessions(&dolt.SessionFilter{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list sessions from Dolt: %w", err)
-	}
-	for _, m := range manifests {
-		if m.Claude.UUID == conversationUUID {
-			return m, nil
-		}
-	}
-	return nil, nil
+	return adapter.GetSessionByUUID(conversationUUID)
 }
 
 // InferWorkspaceFromProject derives a workspace label from a project directory
@@ -280,7 +273,7 @@ func InferWorkspaceFromProject(projectPath string) string {
 // deriveSessionName builds a stable, non-empty session name from the project
 // path, falling back to a short UUID prefix so register never needs to prompt.
 func deriveSessionName(projectPath, conversationUUID string) string {
-	base := filepath.Base(strings.TrimRight(projectPath, "/"))
+	base := filepath.Base(projectPath) // filepath.Base trims trailing separators.
 	if base != "" && base != "." && base != "/" {
 		short := conversationUUID
 		if len(short) > 8 {
