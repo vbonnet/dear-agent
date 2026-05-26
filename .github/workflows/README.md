@@ -1,8 +1,25 @@
 # GitHub Actions Workflows
 
-## AGM E2E Installation Tests
+## CI (`ci.yml`)
 
-The `csm-e2e-install.yml` workflow tests AGM installation from source across multiple Linux distributions.
+Required-status workflow. Two test jobs:
+
+- **Build & Test** — runs `go test -race -count=1 ./...` on Ubuntu and
+  macOS. The full unit-test surface, every PR, no exceptions.
+- **Integration Tests (affected)** — PR-only. Uses
+  [`cmd/test-affected`](../../cmd/test-affected) to compute which
+  `-tags=integration` test packages are reachable from the PR's diff and
+  runs only those. Empty result = clean pass. See
+  [ADR-024](../../docs/adr/ADR-024-smart-integration-test-selection.md)
+  for the algorithm and trust boundaries; `make test-affected-print`
+  shows the live decision locally.
+
+Plus a `govulncheck` job that gates on known-vuln deps.
+
+## AGM E2E Installation Tests (`agm-e2e-install.yml`)
+
+Tests AGM installation from source across multiple Linux distributions.
+Path-filtered to `agm/**` so it only runs when AGM itself changes.
 
 No special setup or secrets required - the workflow runs automatically on push/PR.
 

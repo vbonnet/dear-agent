@@ -5,6 +5,10 @@
 #   act-lint                Run lint job via act
 #   act-test                Run test job via act
 #   install-hooks           Install git pre-push hook for act validation
+#   test                    Run the full unit-test suite (go test ./...)
+#   test-affected           Run only the integration tests affected by
+#                           the current diff vs. origin/main
+#   test-affected-print     Print the affected package list (no run)
 #   codegraph               Build a tree-sitter knowledge graph for this repo
 #   codegraph-all           Build graphs for dear-agent and brain-v2
 #   sync-main               Stash, fetch, rebase onto origin/main, then pop
@@ -13,7 +17,7 @@
 #   install-deepsec-hook    Install pre-push hook for incremental deepsec scans
 #   uninstall-deepsec-hook  Remove the deepsec pre-push hook
 
-.PHONY: act-validate act-lint act-test install-hooks test-shell build-configure-settings uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook
+.PHONY: act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook
 
 # Run full local CI validation via act
 act-validate: act-lint act-test
@@ -28,6 +32,26 @@ act-lint:
 act-test:
 	@echo "[act] running unit-tests job..."
 	act -j unit-tests -e .github/act/event-push.json
+
+# Run the full Go test suite. Mirrors what CI's "Build & Test" job does
+# locally so a green `make test` is the same answer as a green CI.
+test:
+	go test -race -count=1 ./...
+
+# Run only the integration tests whose packages (or their transitive
+# dependencies) changed vs. origin/main. See cmd/test-affected and
+# docs/adr/ADR-024 for the algorithm and trust boundaries.
+#
+# Safety nets baked into the selector: go.mod / go.sum / Makefile /
+# .github/workflows / the selector itself fall back to a full run, so
+# this target is safe to default to locally before pushing.
+test-affected:
+	@./scripts/test-affected.sh
+
+# Print the affected package list without running anything. Useful for
+# debugging "why did CI run/skip this suite?"
+test-affected-print:
+	@./scripts/test-affected.sh --dry-run
 
 # Run Bats shell tests
 test-shell:

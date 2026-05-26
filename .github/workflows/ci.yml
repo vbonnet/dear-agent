@@ -73,6 +73,62 @@ jobs:
         with:
           version: latest
 
+  # Smart integration-test selection. The selector (cmd/test-affected)
+  # walks the dependency graph from this branch vs. origin/main and runs
+  # `go test -tags=integration` on only the packages whose deps actually
+  # changed. Files that invalidate the graph itself (go.mod, go.sum,
+  # Makefile, .github/workflows/, the selector source) deliberately fall
+  # back to a full integration run — see cmd/test-affected/main.go.
+  #
+  # This is *additive*. The "Build & Test" job above still runs every
+  # unit test on every PR; this job just narrows the integration suite
+  # down to what the PR actually touches. Empty output = clean pass.
+  #
+  # Linux-only on purpose: integration tests rely on real tmux and
+  # process behaviour that's flaky on the macOS runner. Mirror the
+  # exclusion the unit-test job already encodes via CI_SKIP_TMUX.
+  integration-tests:
+    name: Integration Tests (affected)
+    runs-on: ubuntu-latest
+    # Only meaningful on PRs — we need a base ref to diff against. For
+    # pushes to main/develop, the unit-test matrix above is the gate;
+    # full integration sweeps belong in a scheduled or release workflow,
+    # not on every commit to a long-lived branch.
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Full history so we can git diff against the PR base ref.
+          # Shallow clones make git diff $base...HEAD lie about which
+          # files changed.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: "go.sum"
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run affected integration tests
+        env:
+          # The selector talks to origin/<base>; make sure the ref is
+          # fetched even though checkout@v6 with fetch-depth: 0 already
+          # gave us full history.
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=0 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          ./scripts/test-affected.sh --base="origin/${BASE_REF}" --tags=integration
+
   # govulncheck runs inside the *required* CI workflow (not only the
   # separate, non-blocking Security Scan / SBOM workflows) so a known-vuln
   # dependency regression cannot merge to main. Mirrors the proven
