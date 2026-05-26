@@ -495,7 +495,7 @@ living_updates:
 - **Variance:** [+/-X]%
 
 **Phases Completed:** [List: D1, D2, D3, D4, S4, S5, S6, S7, S8, S9, S10, S11]
-**Phases Skipped:** [None - all 12 phases required]
+**Phases Skipped:** [None - all 12 V1 phase IDs (= 9 canonical V2 phases) required]
 
 **Multi-Persona Review:**
 - Total personas invoked: [X]
