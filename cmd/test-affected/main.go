@@ -150,6 +150,20 @@ func (p *goListPackage) isTestBearing() bool {
 	return len(p.TestGoFiles) > 0 || len(p.XTestGoFiles) > 0
 }
 
+// isMainModulePkg reports whether p belongs to the main module under
+// test (i.e., the repo this command was run in). Standard library and
+// third-party deps are excluded so the output is something the caller
+// can hand to `go test`.
+func isMainModulePkg(p *goListPackage) bool {
+	if p.Standard {
+		return false
+	}
+	if p.Module == nil {
+		return false
+	}
+	return p.Module.Main
+}
+
 // listPackages runs `go list -deps -test -json ./...` rooted at root and
 // returns the decoded packages. We pass -test so that go list synthesises
 // the _test variants and includes their imports in Deps — without it, a
@@ -181,9 +195,17 @@ func listPackages(root, tags string) ([]*goListPackage, error) {
 			}
 			return nil, fmt.Errorf("decode go list output: %w", err)
 		}
-		// `-test` synthesises ".test" variants with the same Dir; we keep
-		// only the first occurrence per ImportPath so callers don't see
-		// duplicates. Both forms agree on Deps, which is what matters.
+		// `-test` synthesises three records per testable package: the
+		// real one ("x/y"), an instrumented variant whose ImportPath
+		// embeds a space and a [bracketed] form, and a binary record
+		// ending in ".test". We only want the real one — its Deps
+		// already includes the test-only edges thanks to -test.
+		if strings.ContainsAny(p.ImportPath, " [") {
+			continue
+		}
+		if strings.HasSuffix(p.ImportPath, ".test") {
+			continue
+		}
 		if _, ok := seen[p.ImportPath]; ok {
 			continue
 		}
@@ -318,11 +340,14 @@ func decide(opts options, changed []string, pkgs []*goListPackage) decision {
 // "Transitively depends on" is computed against the union of Imports,
 // TestImports, XTestImports, and Deps. Deps is the closure as reported by
 // the go tool, so a single membership check per dependency is enough.
+//
+// Only packages belonging to the main module are returned — third-party
+// deps and stdlib are noise from the caller's perspective.
 func selectPackages(pkgs []*goListPackage, d decision, emitAll bool) []string {
 	if d.forceFull {
 		var out []string
 		for _, p := range pkgs {
-			if p.Standard {
+			if !isMainModulePkg(p) {
 				continue
 			}
 			if !emitAll && !p.isTestBearing() {
@@ -338,7 +363,7 @@ func selectPackages(pkgs []*goListPackage, d decision, emitAll bool) []string {
 
 	var out []string
 	for _, p := range pkgs {
-		if p.Standard {
+		if !isMainModulePkg(p) {
 			continue
 		}
 		if !emitAll && !p.isTestBearing() {
