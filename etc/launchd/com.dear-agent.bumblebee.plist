@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.dear-agent.bumblebee — daily Bumblebee endpoint scan.
+
+  This file is a TEMPLATE. scripts/install-bumblebee-launchagent.sh substitutes
+  __USER_HOME__ and __REPO_ROOT__ at install time, because launchd does not
+  expand ~ or shell variables in plists.
+
+  Schedule: 04:00 local time, every day. Chosen to be (a) outside likely
+  active-use hours and (b) matched to the recommendation in
+  docs/design/2026-05-23-security-pipeline-bumblebee-deepsec.md §4.1.
+
+  Logs go to ~/Library/Logs/dear-agent/bumblebee.log. The scan wrapper emits
+  a one-line summary to stderr; the NDJSON output goes to
+  ~/Library/Application Support/dear-agent/bumblebee/<date>.ndjson via
+  atomic rename inside the wrapper.
+
+  RunAtLoad is intentionally false. We do not want this firing on every login;
+  the calendar entry runs it once per day at 04:00. Run on demand with
+  `make bumblebee-scan` or `launchctl kickstart gui/$UID/com.dear-agent.bumblebee`.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dear-agent.bumblebee</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__REPO_ROOT__/scripts/bumblebee-scan.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__USER_HOME__/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__USER_HOME__</string>
+    </dict>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/bumblebee.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/bumblebee.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
