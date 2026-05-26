@@ -2,6 +2,7 @@ package synchub
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -35,12 +36,19 @@ func (h *LockHandle) Deadline() time.Time { return h.acquired.Add(h.deadline) }
 
 // Release frees the lock. Safe to call from any goroutine, exactly once;
 // later calls are no-ops. Also a no-op if the auto-release sweeper has
-// already reclaimed the lock (detected via fence mismatch).
+// already reclaimed the lock (detected via fence mismatch) — the spec
+// promises stale Release is silent, since the caller has no signal the
+// reclaim happened and there's nothing they could do about it anyway.
 func (h *LockHandle) Release() error {
 	if h.released.Swap(true) {
 		return nil
 	}
-	return h.hub.releaseLock(h.key, h.fence, "explicit")
+	err := h.hub.releaseLock(h.key, h.fence, "explicit")
+	if errors.Is(err, ErrLockClosed) {
+		// Auto-reclaim got there first; not a caller error.
+		return nil
+	}
+	return err
 }
 
 type lock struct {
