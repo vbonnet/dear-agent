@@ -50,10 +50,10 @@ base ref and HEAD, and run only those under `-tags=integration` in CI.
 1. `git diff --name-only $BASE_REF...HEAD` produces the list of changed
    repo-relative paths.
 2. A small **force-full** allowlist (`go.mod`, `go.sum`, `go.work*`,
-   `Makefile`, `.github/workflows/`, the selector's own source, the
-   wrapper script) short-circuits to "run every test-bearing package."
-   The rule: if a change can plausibly affect any test we can't see in
-   the graph, we run everything. Keep this list short and obvious.
+   `Makefile`, `.github/workflows/`, the selector's own source)
+   short-circuits to "run every test-bearing package." The rule: if a
+   change can plausibly affect any test we can't see in the graph, we
+   run everything. Keep this list short and obvious.
 3. For each remaining path, walk up directories until we hit a known
    package directory (per `go list`'s `Dir` field), record the package
    as **changed**.
@@ -68,13 +68,18 @@ base ref and HEAD, and run only those under `-tags=integration` in CI.
 
 ### Wiring
 
-- `make test-affected` runs the wrapper (`scripts/test-affected.sh`) with
-  the integration tag against `origin/main`. `make
-  test-affected-print` prints the package list without running anything.
+- `cmd/test-affected --run` is the single entry point: with `--run` it
+  execs `go test`, without it just prints the package list. No shell
+  wrapper sits between the Go tool and the caller — keeping the
+  orchestration in Go means it survives `bash -e`, doesn't trip the
+  20-line bash policy, and is unit-testable.
+- `make test-affected` shells out to `go run ./cmd/test-affected
+  --base=origin/main --tags=integration --run`. `make
+  test-affected-print` omits `--run` to show what *would* run.
 - A new `integration-tests` job in `ci.yml` runs only on `pull_request`
   events. It checks out with `fetch-depth: 0`, fetches the base ref by
-  name, installs tmux, and invokes the wrapper. The unit-test matrix is
-  untouched.
+  name, installs tmux, and invokes the Go tool directly. The unit-test
+  matrix is untouched.
 - The selector defaults to falling back to "run everything" if it
   errors. Smart selection is *additive* — losing it should never block
   CI, only un-narrow it.

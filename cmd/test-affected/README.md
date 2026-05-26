@@ -8,11 +8,12 @@ output into `go test`, and you only run what the PR actually touches.
 
 ```
 # From the repo root:
-go run ./cmd/test-affected --base=origin/main --tags=integration
-
-# Easier wrapper that handles the pipeline:
 make test-affected        # run affected integration tests
-make test-affected-print  # show what *would* run (dry-run)
+make test-affected-print  # show what *would* run (no test execution)
+
+# Direct invocation:
+go run ./cmd/test-affected --base=origin/main --tags=integration         # print
+go run ./cmd/test-affected --base=origin/main --tags=integration --run   # exec `go test`
 ```
 
 ## How it works
@@ -43,6 +44,7 @@ Falls back to running everything if `go list` errors. Smart selection is
 | `--tags`    | (empty)        | Comma-separated build tags forwarded to `go list`                |
 | `--root`    | repo root      | Override repo root (default: `git rev-parse --show-toplevel`)    |
 | `--all`     | `false`        | Emit *every* affected package, not just test-bearing ones        |
+| `--run`     | `false`        | Exec `go test -race -count=1` on the selection instead of printing |
 | `--verbose` | `false`        | Log per-package decisions to stderr                              |
 
 ## Trust boundary

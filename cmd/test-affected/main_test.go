@@ -190,7 +190,6 @@ func TestIsForceFullPath(t *testing.T) {
 		{".github/workflows/ci.yml", true},
 		{".github/workflows/agm-e2e-install.yml", true},
 		{"cmd/test-affected/main.go", true},
-		{"scripts/test-affected.sh", true},
 		{"agm/cmd/agm/main.go", false},
 		{"docs/adr/ADR-001-monorepo-consolidation.md", false},
 		{"README.md", false},

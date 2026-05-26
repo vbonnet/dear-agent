@@ -46,12 +46,12 @@ test:
 # .github/workflows / the selector itself fall back to a full run, so
 # this target is safe to default to locally before pushing.
 test-affected:
-	@./scripts/test-affected.sh
+	@go run ./cmd/test-affected --base=origin/main --tags=integration --run
 
 # Print the affected package list without running anything. Useful for
 # debugging "why did CI run/skip this suite?"
 test-affected-print:
-	@./scripts/test-affected.sh --dry-run
+	@go run ./cmd/test-affected --base=origin/main --tags=integration
 
 # Run Bats shell tests
 test-shell:

@@ -120,14 +120,14 @@ jobs:
 
       - name: Run affected integration tests
         env:
-          # The selector talks to origin/<base>; make sure the ref is
-          # fetched even though checkout@v6 with fetch-depth: 0 already
-          # gave us full history.
+          # checkout@v6 with fetch-depth: 0 already gave us full history
+          # for all branches the runner cloned; we just need to make sure
+          # the PR base ref is present as a local remote-tracking ref so
+          # the selector can `git diff origin/<base>...HEAD`.
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=0 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          ./scripts/test-affected.sh --base="origin/${BASE_REF}" --tags=integration
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          go run ./cmd/test-affected --base="origin/${BASE_REF}" --tags=integration --run
 
   # govulncheck runs inside the *required* CI workflow (not only the
   # separate, non-blocking Security Scan / SBOM workflows) so a known-vuln

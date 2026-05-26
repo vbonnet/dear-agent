@@ -58,6 +58,9 @@ type options struct {
 	// emitAll: if true, output every package, not just test-bearing ones.
 	// Useful for sanity checks; the default matches the CI contract.
 	emitAll bool
+	// run: if true, exec `go test` on the selected packages instead of
+	// just printing them. Removes the need for a shell wrapper.
+	run bool
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
@@ -70,6 +73,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&opts.root, "root", "", "repo root (default: git rev-parse --show-toplevel)")
 	fs.BoolVar(&opts.verbose, "verbose", false, "log decisions to stderr")
 	fs.BoolVar(&opts.emitAll, "all", false, "emit all affected packages, not just test-bearing ones")
+	fs.BoolVar(&opts.run, "run", false, "exec `go test -race -count=1` on the selected packages instead of printing them")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -111,6 +115,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	out := selectPackages(pkgs, decision, opts.emitAll)
 	sort.Strings(out)
+
+	if opts.run {
+		return runTests(opts, out, stdout, stderr)
+	}
+
 	w := bufio.NewWriter(stdout)
 	for _, p := range out {
 		fmt.Fprintln(w, p)
@@ -122,6 +131,35 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	if opts.verbose {
 		fmt.Fprintf(stderr, "test-affected: %d test packages affected (out of %d total)\n", len(out), len(pkgs))
+	}
+	return 0
+}
+
+// runTests shells out to `go test -race -count=1` on the selected
+// packages. Empty selection is a clean pass — there are no affected
+// tests, and that is a valid CI outcome, not an error.
+func runTests(opts options, pkgs []string, stdout, stderr io.Writer) int {
+	if len(pkgs) == 0 {
+		fmt.Fprintf(stderr, "test-affected: no packages affected (base=%s tags=%s)\n", opts.base, opts.tags)
+		return 0
+	}
+	fmt.Fprintf(stderr, "test-affected: running %d package(s) (base=%s tags=%s)\n", len(pkgs), opts.base, opts.tags)
+	args := []string{"test", "-race", "-count=1"}
+	if opts.tags != "" {
+		args = append(args, "-tags="+opts.tags)
+	}
+	args = append(args, pkgs...)
+	cmd := exec.Command("go", args...)
+	cmd.Dir = opts.root
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return exitErr.ExitCode()
+		}
+		fmt.Fprintf(stderr, "test-affected: go test failed to start: %v\n", err)
+		return 2
 	}
 	return 0
 }
@@ -260,9 +298,8 @@ var forceFullPatterns = []string{
 	"go.work",
 	"go.work.sum",
 	"Makefile",
-	".github/workflows/",   // CI wiring changes — re-run everything
-	"cmd/test-affected/",   // changing the selector itself
-	"scripts/test-affected", // wrapper
+	".github/workflows/", // CI wiring changes — re-run everything
+	"cmd/test-affected/", // changing the selector itself
 }
 
 func isForceFullPath(p string) bool {
@@ -344,56 +381,59 @@ func decide(opts options, changed []string, pkgs []*goListPackage) decision {
 // Only packages belonging to the main module are returned — third-party
 // deps and stdlib are noise from the caller's perspective.
 func selectPackages(pkgs []*goListPackage, d decision, emitAll bool) []string {
-	if d.forceFull {
-		var out []string
-		for _, p := range pkgs {
-			if !isMainModulePkg(p) {
-				continue
-			}
-			if !emitAll && !p.isTestBearing() {
-				continue
-			}
-			out = append(out, p.ImportPath)
-		}
-		return out
-	}
-	if len(d.changedPkgs) == 0 {
+	if !d.forceFull && len(d.changedPkgs) == 0 {
 		return nil
 	}
-
 	var out []string
 	for _, p := range pkgs {
-		if !isMainModulePkg(p) {
+		if !shouldEmitPackage(p, emitAll) {
 			continue
 		}
-		if !emitAll && !p.isTestBearing() {
-			continue
-		}
-		if _, ok := d.changedPkgs[p.ImportPath]; ok {
-			out = append(out, p.ImportPath)
-			continue
-		}
-		// Check the dependency closure plus the test-only edges that
-		// `go list -deps -test` may not have folded into Deps for every
-		// variant.
-		matched := false
-		for _, dep := range p.Deps {
-			if _, ok := d.changedPkgs[dep]; ok {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			for _, dep := range append(append([]string{}, p.TestImports...), p.XTestImports...) {
-				if _, ok := d.changedPkgs[dep]; ok {
-					matched = true
-					break
-				}
-			}
-		}
-		if matched {
+		if d.forceFull || isAffectedByChanges(p, d.changedPkgs) {
 			out = append(out, p.ImportPath)
 		}
 	}
 	return out
+}
+
+// shouldEmitPackage encodes the "is this even a candidate?" filter:
+// main-module-only, and (unless emitAll) only test-bearing packages.
+func shouldEmitPackage(p *goListPackage, emitAll bool) bool {
+	if !isMainModulePkg(p) {
+		return false
+	}
+	if !emitAll && !p.isTestBearing() {
+		return false
+	}
+	return true
+}
+
+// isAffectedByChanges reports whether p is the changed package itself or
+// transitively depends on one. The dependency closure check uses Deps
+// (the full transitive set reported by `go list -deps -test`), plus the
+// raw TestImports/XTestImports edges in case a corner of the graph isn't
+// folded into Deps for the variant we're inspecting.
+func isAffectedByChanges(p *goListPackage, changed map[string]struct{}) bool {
+	if _, ok := changed[p.ImportPath]; ok {
+		return true
+	}
+	if anyIn(p.Deps, changed) {
+		return true
+	}
+	if anyIn(p.TestImports, changed) {
+		return true
+	}
+	if anyIn(p.XTestImports, changed) {
+		return true
+	}
+	return false
+}
+
+func anyIn(needles []string, haystack map[string]struct{}) bool {
+	for _, n := range needles {
+		if _, ok := haystack[n]; ok {
+			return true
+		}
+	}
+	return false
 }
