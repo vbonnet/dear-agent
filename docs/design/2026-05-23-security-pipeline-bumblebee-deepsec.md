@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-23
 **Author:** research pass (no changes yet)
-**Status:** recommendation — not yet acted on
+**Status:** §4.1 accepted — see [ADR-027](../adr/ADR-027-bumblebee-endpoint-scanner.md); §4.2 (don't add DeepSec to scheduled task) accepted; §4.3 (audit-task sandbox host-access fix) and §3 (DeepSec cost levers) remain open follow-ups
 **Scope:** assess Perplexity's Bumblebee and check our DeepSec integration; recommend
 whether/how to fold them into the existing scheduled audit pipeline.
 
