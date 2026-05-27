@@ -200,6 +200,7 @@ func TestAuditEcphoryRetrieval_AllAppropriate(t *testing.T) {
 	defer mu.Unlock()
 	if capturedEvent == nil {
 		t.Fatal("No event was emitted to registry")
+		return
 	}
 
 	if capturedEvent.Type != EventEcphoryAuditCompleted {

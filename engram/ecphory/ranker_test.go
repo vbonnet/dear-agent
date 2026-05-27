@@ -141,6 +141,7 @@ func TestNewRanker_ValidAPIKeyFormat(t *testing.T) {
 
 	if ranker == nil {
 		t.Fatal("NewRanker() should return non-nil ranker with valid API key")
+		return
 	}
 
 	if ranker.rateLimiter == nil {

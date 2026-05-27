@@ -11,6 +11,7 @@ func TestDefaultLogger(t *testing.T) {
 	logger := DefaultLogger()
 	if logger == nil {
 		t.Fatal("DefaultLogger() returned nil")
+		return
 	}
 
 	// Verify it can log without error
@@ -31,6 +32,7 @@ func TestJSONLogger(t *testing.T) {
 	logger := JSONLogger()
 	if logger == nil {
 		t.Fatal("JSONLogger() returned nil")
+		return
 	}
 
 	// Verify it can log without error
@@ -69,6 +71,7 @@ func TestNewTextLogger(t *testing.T) {
 	logger := NewTextLogger(&buf)
 	if logger == nil {
 		t.Fatal("NewTextLogger() returned nil")
+		return
 	}
 
 	logger.Info("hello", "key", "value")

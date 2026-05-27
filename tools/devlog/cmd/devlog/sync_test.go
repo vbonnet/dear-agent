@@ -35,6 +35,7 @@ func TestSyncCommand_Help(t *testing.T) {
 
 	if syncCmd == nil {
 		t.Fatal("sync command not found")
+		return
 	}
 
 	if syncCmd.Short == "" {

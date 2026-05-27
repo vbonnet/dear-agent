@@ -15,6 +15,7 @@ func TestNewService(t *testing.T) {
 	service := NewService()
 	if service == nil {
 		t.Fatal("NewService() returned nil")
+		return
 	}
 	if service.parser == nil {
 		t.Error("NewService() did not initialize parser")

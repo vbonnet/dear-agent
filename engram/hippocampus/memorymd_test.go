@@ -215,6 +215,7 @@ func TestMemoryDocument_AddEntry(t *testing.T) {
 	newSec := doc.FindSection("New Section")
 	if newSec == nil {
 		t.Fatal("FindSection returned nil for newly created 'New Section'")
+		return
 	}
 	if newSec.Level != 2 {
 		t.Errorf("expected new section level 2, got %d", newSec.Level)
@@ -286,6 +287,7 @@ func TestMemoryDocument_FindSection(t *testing.T) {
 	top := doc.FindSection("Workspace Memory")
 	if top == nil {
 		t.Fatal("FindSection returned nil for 'Workspace Memory'")
+		return
 	}
 	if top.Level != 1 {
 		t.Errorf("expected level 1, got %d", top.Level)
@@ -295,6 +297,7 @@ func TestMemoryDocument_FindSection(t *testing.T) {
 	keyFiles := doc.FindSection("Key Files")
 	if keyFiles == nil {
 		t.Fatal("FindSection returned nil for 'Key Files'")
+		return
 	}
 	if keyFiles.Level != 2 {
 		t.Errorf("expected level 2, got %d", keyFiles.Level)

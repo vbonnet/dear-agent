@@ -36,6 +36,7 @@ func TestNewFactory(t *testing.T) {
 	f := NewFactory()
 	if f == nil {
 		t.Fatal("NewFactory() returned nil")
+		return
 	}
 	if f.providers == nil {
 		t.Fatal("providers map is nil")
@@ -207,6 +208,7 @@ func TestFactory_NewProvider_AnthropicWithAPIKey(t *testing.T) {
 	}
 	if p == nil {
 		t.Fatal("expected non-nil provider")
+		return
 	}
 	if p.Name() != "anthropic" {
 		t.Errorf("Name() = %q, want %q", p.Name(), "anthropic")
@@ -432,6 +434,7 @@ func TestNewOpenRouterProvider_Success(t *testing.T) {
 	}
 	if p == nil {
 		t.Fatal("expected non-nil provider")
+		return
 	}
 	if p.Name() != "openrouter" {
 		t.Errorf("Name() = %q, want %q", p.Name(), "openrouter")

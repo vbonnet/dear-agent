@@ -91,6 +91,7 @@ func TestNewClient_WithAPIKey(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("expected non-nil client")
+		return
 	}
 	if client.config.APIKey != "test-api-key" {
 		t.Errorf("expected API key %q, got %q", "test-api-key", client.config.APIKey)
@@ -416,6 +417,7 @@ func TestCreateChatCompletion_Integration(t *testing.T) {
 
 	if resp == nil {
 		t.Fatal("expected non-nil response")
+		return
 	}
 	if resp.Content == "" {
 		t.Error("expected non-empty response content")
@@ -678,6 +680,7 @@ func TestNewClient_ModelFromEnvVar(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("expected non-nil client")
+		return
 	}
 	if client.config.Model != testModel {
 		t.Errorf("expected model %q from env var, got %q", testModel, client.config.Model)

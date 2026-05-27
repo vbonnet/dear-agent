@@ -9,6 +9,7 @@ import (
 func TestRootCommand_Initialization(t *testing.T) {
 	if rootCmd == nil {
 		t.Fatal("rootCmd is nil")
+		return
 	}
 
 	if rootCmd.Use == "" {
@@ -67,6 +68,7 @@ func TestRootCommand_Version(t *testing.T) {
 func TestCompletionCommand_Initialization(t *testing.T) {
 	if completionCmd == nil {
 		t.Fatal("completionCmd is nil")
+		return
 	}
 
 	if completionCmd.Use == "" {

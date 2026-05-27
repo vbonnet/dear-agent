@@ -233,6 +233,7 @@ func TestLoadOrDefault(t *testing.T) {
 			cfg := LoadOrDefault(tt.path, defaults)
 			if cfg == nil {
 				t.Fatal("LoadOrDefault() returned nil")
+				return
 			}
 			if cfg.Name != tt.wantName {
 				t.Errorf("Name = %q, want %q (from %s)", cfg.Name, tt.wantName, tt.checkFrom)

@@ -33,6 +33,7 @@ func TestSessionTagCmd_RemoveFlag(t *testing.T) {
 	flag := sessionTagCmd.Flags().Lookup("remove")
 	if flag == nil {
 		t.Fatal("--remove flag should be registered")
+		return
 	}
 	if flag.DefValue != "" {
 		t.Errorf("--remove default = %q, want %q", flag.DefValue, "")

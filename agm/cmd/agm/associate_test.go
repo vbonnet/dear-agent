@@ -140,6 +140,7 @@ func TestAssociateRenameFlag(t *testing.T) {
 	flag := associateCmd.Flags().Lookup("rename")
 	if flag == nil {
 		t.Fatal("expected --rename flag to be registered on associate command")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("expected default value false, got %s", flag.DefValue)

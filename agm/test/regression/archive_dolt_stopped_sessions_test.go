@@ -188,6 +188,7 @@ func TestDoltStorageBackendConsistency(t *testing.T) {
 	_, err = adapter.ResolveIdentifier("nonexistent")
 	if err == nil {
 		t.Fatal("Expected error for nonexistent session")
+		return
 	}
 
 	// The error message should indicate Dolt storage is being used

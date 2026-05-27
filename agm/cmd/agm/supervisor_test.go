@@ -110,6 +110,7 @@ func TestHeartbeatRoundTrip(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("readHeartbeatRecord returned nil for just-written record")
+		return
 	}
 	if got.ID != rec.ID || got.PrimaryFor != rec.PrimaryFor ||
 		got.TertiaryFor != rec.TertiaryFor || got.PID != rec.PID {

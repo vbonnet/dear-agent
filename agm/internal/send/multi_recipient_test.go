@@ -251,6 +251,7 @@ func TestResolveRecipients_CommaListNotFound(t *testing.T) {
 	_, err := ResolveRecipients(spec, resolver)
 	if err == nil {
 		t.Fatal("expected error for nonexistent session, got nil")
+		return
 	}
 
 	if err.Error() != "recipient 'nonexistent' not found: session not found: nonexistent" {
@@ -295,6 +296,7 @@ func TestResolveRecipients_GlobNoMatches(t *testing.T) {
 	_, err := ResolveRecipients(spec, resolver)
 	if err == nil {
 		t.Fatal("expected error for no matches, got nil")
+		return
 	}
 
 	if err.Error() != "no sessions match pattern: nonexistent-*" {

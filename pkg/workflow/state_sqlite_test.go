@@ -34,6 +34,7 @@ func TestSQLiteStateSaveLoad(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("Load returned nil after Save")
+		return
 	}
 	if got.Workflow != "test-wf" {
 		t.Errorf("Workflow = %q, want test-wf", got.Workflow)
@@ -203,6 +204,7 @@ func TestSQLiteStateResume(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("Load returned nil after resume")
+		return
 	}
 	if got.Workflow != "resume-wf" {
 		t.Errorf("Workflow = %q, want resume-wf", got.Workflow)

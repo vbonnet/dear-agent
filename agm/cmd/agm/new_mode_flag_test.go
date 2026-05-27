@@ -116,6 +116,7 @@ func TestModeFlagRegistered(t *testing.T) {
 	flag := newCmd.Flags().Lookup("mode")
 	if flag == nil {
 		t.Fatal("--mode flag not registered on newCmd")
+		return
 	}
 	if flag.DefValue != "" {
 		t.Errorf("--mode default should be empty string, got %q", flag.DefValue)
@@ -233,6 +234,7 @@ func TestModeFlagCompletionValues(t *testing.T) {
 	flag := newCmd.Flags().Lookup("mode")
 	if flag == nil {
 		t.Fatal("--mode flag not registered")
+		return
 	}
 	// String type flag
 	if flag.Value.Type() != "string" {

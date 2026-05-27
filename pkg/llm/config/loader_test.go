@@ -14,6 +14,7 @@ func TestLoadConfig_NonExistentFile(t *testing.T) {
 
 	if config == nil {
 		t.Fatal("LoadConfig should return default config when file doesn't exist")
+		return
 	}
 
 	// Verify defaults are set
@@ -77,6 +78,7 @@ defaults:
 	ecphory := config.Tools["ecphory"]
 	if ecphory == nil {
 		t.Fatal("ecphory tool config should exist")
+		return
 	}
 	if ecphory.Gemini.Model != "gemini-2.0-flash-exp" {
 		t.Errorf("Expected gemini-2.0-flash-exp for ecphory, got %s", ecphory.Gemini.Model)
@@ -88,6 +90,7 @@ defaults:
 	review := config.Tools["multi-persona-review"]
 	if review == nil {
 		t.Fatal("multi-persona-review tool config should exist")
+		return
 	}
 	if review.Anthropic.Model != "claude-opus-4-6" {
 		t.Errorf("Expected claude-opus-4-6 for review, got %s", review.Anthropic.Model)
