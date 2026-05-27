@@ -44,6 +44,7 @@ func TestCheckSupervisorEnvRequiresOAuth(t *testing.T) {
 	err := checkSupervisorEnv(env, false)
 	if err == nil {
 		t.Fatal("expected refusal, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Errorf("error = %q, want mention of CLAUDE_CODE_OAUTH_TOKEN", err)

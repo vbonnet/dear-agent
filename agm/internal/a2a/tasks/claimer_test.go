@@ -166,6 +166,7 @@ func TestClaimTask(t *testing.T) {
 		ok, err := c.ClaimTask("test-channel", "another-agent", "second claim")
 		if err == nil {
 			t.Fatal("expected error when re-claiming, got nil")
+			return
 		}
 		if ok {
 			t.Fatal("expected false when re-claiming")
@@ -182,6 +183,7 @@ func TestClaimTask(t *testing.T) {
 		_, err := c.ClaimTask("nonexistent", "my-agent", "reason")
 		if err == nil {
 			t.Fatal("expected error for nonexistent channel")
+			return
 		}
 		if !strings.Contains(err.Error(), "channel not found") {
 			t.Errorf("expected 'channel not found' in error, got: %v", err)
@@ -239,6 +241,7 @@ func TestUnclaimTask(t *testing.T) {
 		err = c.UnclaimTask("test-channel", "wrong-agent", "stealing")
 		if err == nil {
 			t.Fatal("expected error when wrong agent tries to unclaim")
+			return
 		}
 		if !strings.Contains(err.Error(), "only owner") {
 			t.Errorf("expected 'only owner' in error, got: %v", err)
@@ -252,6 +255,7 @@ func TestUnclaimTask(t *testing.T) {
 		err := c.UnclaimTask("nonexistent", "my-agent", "reason")
 		if err == nil {
 			t.Fatal("expected error for nonexistent channel")
+			return
 		}
 		if !strings.Contains(err.Error(), "channel not found") {
 			t.Errorf("expected 'channel not found' in error, got: %v", err)

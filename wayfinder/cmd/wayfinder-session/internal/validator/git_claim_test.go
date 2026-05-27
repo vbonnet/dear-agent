@@ -202,6 +202,7 @@ func TestValidateGitCommitStatus_PartiallyCommitted(t *testing.T) {
 	err := validateGitCommitStatus(tmpDir, "RETRO")
 	if err == nil {
 		t.Fatalf("expected error for partially committed files, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "RETRO-retrospective.md") {
 		t.Errorf("error should mention RETRO-retrospective.md, got: %v", err)

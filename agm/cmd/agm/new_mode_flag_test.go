@@ -191,6 +191,7 @@ func TestDispatchModeSwitch_UnsupportedHarness(t *testing.T) {
 	err := dispatchModeSwitch("fake-harness", "test-session", "plan", "default")
 	if err == nil {
 		t.Fatal("expected error for unsupported harness, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "unsupported harness") {
 		t.Errorf("error should mention 'unsupported harness', got: %s", err.Error())

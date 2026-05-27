@@ -598,6 +598,7 @@ func TestDetectContextFromStatusLine_CumulativeExceedsWindow(t *testing.T) {
 	}
 	if usage == nil {
 		t.Fatal("expected usage, got nil")
+		return
 	}
 	// UsedTokens must be derived from percentage × window, not TotalInputTokens
 	wantUsed := int(math.Round(41.0 / 100.0 * 200000)) // 82000
@@ -638,6 +639,7 @@ func TestDetectContextFromStatusLine_PostCompactNearZero(t *testing.T) {
 	}
 	if usage == nil {
 		t.Fatal("expected usage, got nil")
+		return
 	}
 	wantUsed := int(math.Round(6.0 / 100.0 * 200000)) // 12000
 	if usage.UsedTokens != wantUsed {

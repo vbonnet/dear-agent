@@ -202,6 +202,7 @@ func TestMemoryDocument_AddEntry(t *testing.T) {
 	sec := doc.FindSection("Repo Roles")
 	if sec == nil {
 		t.Fatal("FindSection returned nil for 'Repo Roles'")
+		return
 	}
 
 	lastLine := sec.Content[len(sec.Content)-1]
@@ -243,6 +244,7 @@ func TestMemoryDocument_RemoveEntry(t *testing.T) {
 	sec := doc.FindSection("Repo Roles")
 	if sec == nil {
 		t.Fatal("FindSection returned nil")
+		return
 	}
 	for _, line := range sec.Content {
 		if line == "- **engram** = real code" {
@@ -379,6 +381,7 @@ func TestParseMemoryMD_BlankLinesPreserved(t *testing.T) {
 	sec := doc.FindSection("Section")
 	if sec == nil {
 		t.Fatal("FindSection returned nil")
+		return
 	}
 
 	// Content should include blank lines.

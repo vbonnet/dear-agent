@@ -254,6 +254,7 @@ func TestSQLiteStateRunnerIntegration(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("Load returned nil after run")
+		return
 	}
 	if !got.Completed["a"] || !got.Completed["b"] {
 		t.Errorf("expected both nodes completed, got %+v", got.Completed)

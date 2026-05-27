@@ -518,6 +518,7 @@ func TestResolveRecipients_ExcludeSender_AllExcluded(t *testing.T) {
 	_, err := ResolveRecipients(spec, resolver)
 	if err == nil {
 		t.Fatal("expected error when all recipients excluded, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "excluding sender") {

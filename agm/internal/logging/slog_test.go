@@ -53,6 +53,7 @@ func TestDebugLogger(t *testing.T) {
 	logger := DebugLogger()
 	if logger == nil {
 		t.Fatal("DebugLogger() returned nil")
+		return
 	}
 
 	// Verify handler is enabled at DEBUG level

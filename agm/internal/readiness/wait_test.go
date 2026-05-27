@@ -202,6 +202,7 @@ func TestParseReadyFile_Malformed(t *testing.T) {
 	status, err := parseReadyFile(readyFile)
 	if err == nil {
 		t.Fatal("Expected error for malformed JSON, got nil")
+		return
 	}
 
 	if status != "" {
@@ -226,6 +227,7 @@ func TestParseReadyFile_MissingStatus(t *testing.T) {
 	status, err := parseReadyFile(readyFile)
 	if err == nil {
 		t.Fatal("Expected error for missing status field, got nil")
+		return
 	}
 
 	if status != "" {

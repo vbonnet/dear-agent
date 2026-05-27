@@ -265,6 +265,7 @@ defaults:
 	}
 	if config == nil {
 		t.Fatal("Config should not be nil")
+		return
 	}
 
 	// Verify the expansion logic by checking a path

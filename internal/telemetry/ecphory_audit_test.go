@@ -279,6 +279,7 @@ func TestAuditEcphoryRetrieval_MixedResults(t *testing.T) {
 	defer mu.Unlock()
 	if capturedEvent == nil {
 		t.Fatal("No event was emitted")
+		return
 	}
 
 	data := capturedEvent.Data
@@ -338,6 +339,7 @@ func TestAuditEcphoryRetrieval_EmptyEngrams(t *testing.T) {
 	defer mu.Unlock()
 	if capturedEvent == nil {
 		t.Fatal("No event was emitted")
+		return
 	}
 
 	data := capturedEvent.Data

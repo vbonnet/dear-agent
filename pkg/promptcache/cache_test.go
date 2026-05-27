@@ -167,6 +167,7 @@ func TestDetector_DiffFileContent(t *testing.T) {
 	event := d.CheckCacheBreak("test_source", 0, "new prompt content after change")
 	if event == nil {
 		t.Fatal("expected cache break")
+		return
 	}
 
 	data, err := os.ReadFile(event.DiffPath)

@@ -139,6 +139,7 @@ func TestNewClient_AzureConfig(t *testing.T) {
 	}
 	if client == nil {
 		t.Fatal("expected non-nil client")
+		return
 	}
 	if !client.config.IsAzure {
 		t.Error("expected IsAzure to be true")
@@ -484,6 +485,7 @@ func TestCreateChatCompletion_ConversationHistory(t *testing.T) {
 
 	if resp == nil {
 		t.Fatal("expected non-nil response")
+		return
 	}
 
 	t.Logf("Response: %s", resp.Content)
