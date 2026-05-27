@@ -44,9 +44,15 @@ preflight-full:
 
 # Install a git pre-push hook that runs `make preflight`. Pushing to a PR
 # branch will then fail-fast before the GitHub round-trip if lint/build/vet
-# is broken. Does NOT replace CI — only shifts left.
+# is broken. Does NOT replace CI — only shifts left. Refuses to overwrite
+# an existing hook (deepsec, husky, etc.) — merge manually if you have one.
 install-preflight-hook:
 	@HOOK="$$(git rev-parse --git-dir)/hooks/pre-push"; \
+	if [ -e "$$HOOK" ]; then \
+		echo "Error: a pre-push hook already exists at $$HOOK"; \
+		echo "Merge 'exec make preflight' into it manually, or remove it first."; \
+		exit 1; \
+	fi; \
 	printf '#!/bin/sh\nexec make preflight\n' > "$$HOOK"; \
 	chmod +x "$$HOOK"; \
 	echo "Installed: $$HOOK -> make preflight"

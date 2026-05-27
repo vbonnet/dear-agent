@@ -100,11 +100,20 @@ if [[ "$MODE" == "full" ]]; then
   if ! command -v govulncheck >/dev/null 2>&1; then
     fail "govulncheck not installed. Run: go install golang.org/x/vuln/cmd/govulncheck@latest"
   fi
+  if ! command -v jq >/dev/null 2>&1; then
+    fail "jq not installed. Run: brew install jq"
+  fi
   # Mirror ci.yml: package-scan mode + the GO-2025-3884 allowlist for the
   # not-called gorilla/csrf finding pulled in via tailscale.com/client/web.
-  TMP_VULN=$(mktemp -t preflight-vuln.XXXXXX.json)
+  # `mktemp` with no arg is portable across macOS BSD and GNU; using a
+  # `-t prefix.XXX.json` template tripping GNU mktemp's "must end in XXX"
+  # rule is not worth the prettier filename.
+  TMP_VULN=$(mktemp)
   trap 'rm -f "$TMP_VULN"' EXIT
-  govulncheck -format json -scan package ./... > "$TMP_VULN"
+  # govulncheck exits 3 when findings exist (even allowlisted ones); without
+  # `|| true` the `set -e` at the top of this script kills the run before
+  # jq can filter — defeating the whole point of the allowlist.
+  govulncheck -format json -scan package ./... > "$TMP_VULN" || true
   unhandled=$(jq -c \
     --argjson allow '["GO-2025-3884"]' \
     'select(.finding != null)
