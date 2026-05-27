@@ -121,7 +121,11 @@ func installLaunchAgent(home, domain, target string) error {
 	}
 
 	rendered := renderPlist(plistTemplate, home, binPath)
-	if err := os.WriteFile(target, []byte(rendered), 0o644); err != nil {
+	// 0o600: per-user LaunchAgent plist contains the absolute path to the
+	// installed binary. Other local users have no need to read it; tightening
+	// to user-only also clears gosec G306. launchd is happy at 0o600 — it
+	// runs as the owning user and only requires read access for that uid.
+	if err := os.WriteFile(target, []byte(rendered), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", target, err)
 	}
 
