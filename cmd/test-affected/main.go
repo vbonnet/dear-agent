@@ -64,30 +64,12 @@ type options struct {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("test-affected", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	opts := options{}
-	fs.StringVar(&opts.base, "base", "origin/main", "git base ref to diff against")
-	fs.StringVar(&opts.head, "head", "HEAD", "git head ref")
-	fs.StringVar(&opts.tags, "tags", "", "comma-separated build tags (passed to go list and emitted to caller)")
-	fs.StringVar(&opts.root, "root", "", "repo root (default: git rev-parse --show-toplevel)")
-	fs.BoolVar(&opts.verbose, "verbose", false, "log decisions to stderr")
-	fs.BoolVar(&opts.emitAll, "all", false, "emit all affected packages, not just test-bearing ones")
-	fs.BoolVar(&opts.run, "run", false, "exec `go test -race -count=1` on the selected packages instead of printing them")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	opts, code := parseFlags(args, stderr)
+	if code != 0 {
+		return code
 	}
-
-	if opts.root == "" {
-		out, err := gitOutput("", "rev-parse", "--show-toplevel")
-		if err != nil {
-			fmt.Fprintf(stderr, "test-affected: cannot find repo root: %v\n", err)
-			return 2
-		}
-		opts.root = strings.TrimSpace(out)
+	if code := resolveOptions(&opts, stderr); code != 0 {
+		return code
 	}
 
 	changed, err := changedFiles(opts.root, opts.base, opts.head)
@@ -131,6 +113,58 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	if opts.verbose {
 		fmt.Fprintf(stderr, "test-affected: %d test packages affected (out of %d total)\n", len(out), len(pkgs))
+	}
+	return 0
+}
+
+// parseFlags wires the CLI surface and returns a non-zero code on
+// parse failure (other than -h/--help, which is a clean exit).
+func parseFlags(args []string, stderr io.Writer) (options, int) {
+	fs := flag.NewFlagSet("test-affected", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	opts := options{}
+	fs.StringVar(&opts.base, "base", "origin/main", "git base ref to diff against")
+	fs.StringVar(&opts.head, "head", "HEAD", "git head ref")
+	fs.StringVar(&opts.tags, "tags", "", "comma-separated build tags (passed to go list and emitted to caller)")
+	fs.StringVar(&opts.root, "root", "", "repo root (default: git rev-parse --show-toplevel)")
+	fs.BoolVar(&opts.verbose, "verbose", false, "log decisions to stderr")
+	fs.BoolVar(&opts.emitAll, "all", false, "emit all affected packages, not just test-bearing ones")
+	fs.BoolVar(&opts.run, "run", false, "exec `go test -race -count=1` on the selected packages instead of printing them")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return opts, 0
+		}
+		return opts, 2
+	}
+	return opts, 0
+}
+
+// resolveOptions fills in the defaults that need a side-effecting
+// lookup (repo root) and validates inputs that other steps assume are
+// non-empty. Returns a non-zero exit code if validation fails.
+func resolveOptions(opts *options, stderr io.Writer) int {
+	if opts.root == "" {
+		out, err := gitOutput("", "rev-parse", "--show-toplevel")
+		if err != nil {
+			fmt.Fprintf(stderr, "test-affected: cannot find repo root: %v\n", err)
+			return 2
+		}
+		opts.root = strings.TrimSpace(out)
+	}
+	// `go list` emits absolute Dir; if a caller passed --root relatively
+	// (e.g. "."), filepath.Rel(opts.root, p.Dir) would fail with a
+	// "can't make absolute path relative to relative root" error. Resolve
+	// once, here.
+	absRoot, err := filepath.Abs(opts.root)
+	if err != nil {
+		fmt.Fprintf(stderr, "test-affected: cannot resolve --root: %v\n", err)
+		return 2
+	}
+	opts.root = absRoot
+
+	if opts.base == "" || opts.head == "" {
+		fmt.Fprintln(stderr, "test-affected: --base and --head must be non-empty refs")
+		return 2
 	}
 	return 0
 }
@@ -344,12 +378,18 @@ func decide(opts options, changed []string, pkgs []*goListPackage) decision {
 			// verbose mode is useful, but the caller will ignore it.
 		}
 		dir := filepath.Dir(f)
-		// Walk up until we hit a known package dir or repo root. This
-		// handles _test.go files in subpackages, testdata/ children,
-		// fixtures, and assorted siblings.
-		for dir != "." && dir != "/" && dir != "" {
+		// Walk up until we hit a known package dir, including the repo
+		// root ("."). A Go file at the repo root would be a valid
+		// package and previously got silently dropped because the loop
+		// terminated before consulting dirToPkg["."]. Handles _test.go
+		// files in subpackages, testdata/ children, fixtures, and
+		// assorted siblings.
+		for {
 			if pkg, ok := dirToPkg[dir]; ok {
 				d.changedPkgs[pkg] = struct{}{}
+				break
+			}
+			if dir == "." || dir == "/" || dir == "" {
 				break
 			}
 			dir = filepath.Dir(dir)

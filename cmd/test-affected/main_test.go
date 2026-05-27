@@ -131,6 +131,29 @@ func TestDecide_TestdataChangeMapsToParentPackage(t *testing.T) {
 	}
 }
 
+func TestDecide_RootLevelPackageIsCaughtByWalkUp(t *testing.T) {
+	// Synthetic package at the repo root: Dir == "/repo", which
+	// filepath.Rel(opts.root, p.Dir) renders as ".".
+	rootPkg := &goListPackage{
+		ImportPath:  "example.com/m",
+		Dir:         "/repo",
+		GoFiles:     []string{"root.go"},
+		TestGoFiles: []string{"root_test.go"},
+		Module: &struct {
+			Path string
+			Main bool
+		}{Path: "example.com/m", Main: true},
+	}
+	pkgs := append([]*goListPackage{rootPkg}, pkgFixture()...)
+	d := decide(options{root: "/repo"}, []string{"root.go"}, pkgs)
+	if d.forceFull {
+		t.Fatal("root.go change must not force full")
+	}
+	if _, ok := d.changedPkgs["example.com/m"]; !ok {
+		t.Fatalf("walk-up should have reached the root package; got %v", d.changedPkgs)
+	}
+}
+
 func TestDecide_UnknownPathIsIgnored(t *testing.T) {
 	pkgs := pkgFixture()
 	d := decide(options{root: "/repo"}, []string{"docs/some-note.md"}, pkgs)
