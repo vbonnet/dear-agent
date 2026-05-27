@@ -54,6 +54,12 @@ type Server struct {
 
 	rlMu sync.Mutex
 	rl   map[string]*rateLimit
+
+	// acqHandles maps fence -> server-side LockHandle. Per-server (not
+	// package-global) so multiple Servers in one process don't share
+	// state and a Server's Close empties the map. Findings: F-Sc1.
+	acqMu      sync.Mutex
+	acqHandles map[uint64]*LockHandle
 }
 
 // NewServer constructs the Server but does not start it. Call Start to
@@ -91,11 +97,12 @@ func NewServer(hub *Hub, opts ServerOptions) (*Server, error) {
 		return nil, fmt.Errorf("synchub: token generation: %w", err)
 	}
 	return &Server{
-		hub:    hub,
-		opts:   opts,
-		token:  token,
-		closed: make(chan struct{}),
-		rl:     make(map[string]*rateLimit),
+		hub:        hub,
+		opts:       opts,
+		token:      token,
+		closed:     make(chan struct{}),
+		rl:         make(map[string]*rateLimit),
+		acqHandles: make(map[uint64]*LockHandle),
 	}, nil
 }
 
@@ -151,9 +158,15 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/v1/lock/inspect", s.handle(s.handleInspectLock))
 
 	s.srv = &http.Server{
-		Handler:      mux,
-		ReadTimeout:  s.opts.ReadTimeout,
-		WriteTimeout: s.opts.WriteTimeout,
+		Handler: mux,
+		// F-Sc7: explicit keep-alive bounds. ReadHeaderTimeout is the
+		// slowloris guard; IdleTimeout closes connections that go silent
+		// so per-IP keep-alive doesn't pin server FDs forever.
+		ReadTimeout:       s.opts.ReadTimeout,
+		WriteTimeout:      s.opts.WriteTimeout,
+		ReadHeaderTimeout: 2 * time.Second,
+		IdleTimeout:       30 * time.Second,
+		MaxHeaderBytes:    16 << 10,
 	}
 	go func() {
 		_ = s.srv.Serve(ln)
@@ -205,13 +218,32 @@ type rateLimit struct {
 	reset time.Time
 }
 
+// checkRate is per-client = per-remote-IP. For Tailnet that's the
+// Tailscale IP, which is identity-rich for our threat model.
+//
+// WARNING (F-S2 from multi-persona review): if synchub is exposed
+// through an HTTP reverse proxy, all clients appear to come from the
+// proxy's IP and rate limiting collapses to a single bucket. Do not
+// reverse-proxy synchub; expose it directly on the bound interface.
+//
+// The bucket map is GC'd opportunistically: each call, we evict
+// entries whose reset window has been gone for >1 minute, which keeps
+// the map bounded to roughly active-IPs-per-minute (F-Sc5).
 func (s *Server) checkRate(r *http.Request) bool {
-	// Per-client = per-remote-IP. For Tailnet that's the Tailscale IP,
-	// which is identity-rich enough for our threat model.
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
 	now := time.Now()
 	s.rlMu.Lock()
 	defer s.rlMu.Unlock()
+
+	// Opportunistic GC: cheap (single iter) and bounded amortized.
+	if len(s.rl) > 64 {
+		for k, v := range s.rl {
+			if now.Sub(v.reset) > time.Minute {
+				delete(s.rl, k)
+			}
+		}
+	}
+
 	rl, ok := s.rl[host]
 	if !ok || now.After(rl.reset) {
 		s.rl[host] = &rateLimit{count: 1, reset: now.Add(time.Second)}
@@ -325,14 +357,6 @@ func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, snap)
 }
 
-// acquireHandles is a per-server map of fence -> *LockHandle so the
-// client doesn't have to serialize handles across the wire. The fence
-// is the public key.
-var (
-	acqMu      sync.Mutex
-	acqHandles = make(map[uint64]*LockHandle)
-)
-
 func (s *Server) handleAcquire(w http.ResponseWriter, r *http.Request) {
 	var req acquireReq
 	if !readJSON(w, r, &req) {
@@ -346,9 +370,9 @@ func (s *Server) handleAcquire(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, err)
 		return
 	}
-	acqMu.Lock()
-	acqHandles[hdl.Fence()] = hdl
-	acqMu.Unlock()
+	s.acqMu.Lock()
+	s.acqHandles[hdl.Fence()] = hdl
+	s.acqMu.Unlock()
 	writeJSON(w, acquireResp{
 		Fence:    hdl.Fence(),
 		Acquired: hdl.acquired,
@@ -361,12 +385,12 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	acqMu.Lock()
-	hdl, ok := acqHandles[req.Fence]
+	s.acqMu.Lock()
+	hdl, ok := s.acqHandles[req.Fence]
 	if ok {
-		delete(acqHandles, req.Fence)
+		delete(s.acqHandles, req.Fence)
 	}
-	acqMu.Unlock()
+	s.acqMu.Unlock()
 	if !ok {
 		// Already released or never held by us. Match the Release()
 		// no-op semantics: 200 OK with empty body.
@@ -410,16 +434,32 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// httpErr maps synchub sentinels to HTTP statuses. We send a small JSON
-// body so clients can disambiguate the category without parsing strings.
+// httpErr maps synchub sentinels to HTTP statuses. The body carries
+// both `code` (machine-readable category) and `details` (typed metadata
+// extracted from typed errors). Discord/Desktop surfaces can reformat
+// without parsing strings (F-U3 from multi-persona review).
 func httpErr(w http.ResponseWriter, err error) {
 	type body struct {
-		Code  string `json:"code"`
-		Error string `json:"error"`
+		Code    string         `json:"code"`
+		Error   string         `json:"error"`
+		Details map[string]any `json:"details,omitempty"`
 	}
 	code := "internal"
 	status := http.StatusInternalServerError
+	details := map[string]any{}
+
+	var ce *ClosedError
+	var ee *ExpiredError
 	switch {
+	case errors.As(err, &ce):
+		code, status = "closed", http.StatusConflict
+		details["winner"] = string(ce.Winner)
+		details["at_unix_ms"] = ce.At.UnixMilli()
+		details["question_id"] = string(ce.QuestionID)
+	case errors.As(err, &ee):
+		code, status = "expired", http.StatusGone
+		details["at_unix_ms"] = ee.At.UnixMilli()
+		details["question_id"] = string(ee.QuestionID)
 	case errors.Is(err, ErrNotFound):
 		code, status = "not_found", http.StatusNotFound
 	case errors.Is(err, ErrClosed):
@@ -435,7 +475,11 @@ func httpErr(w http.ResponseWriter, err error) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body{Code: code, Error: err.Error()})
+	resp := body{Code: code, Error: err.Error()}
+	if len(details) > 0 {
+		resp.Details = details
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func generateToken() (string, error) {
@@ -448,12 +492,28 @@ func generateToken() (string, error) {
 
 // writeToken writes "{addr}\n{token}\n" so the client can discover both
 // in one file read. Mode 0600 so only the session owner can read it.
+//
+// Uses O_CREATE|O_EXCL to avoid a TOCTOU race on the path: if a hostile
+// local process pre-created a symlink at `path` between MkdirAll and
+// WriteFile, the open would follow it and the token would land
+// wherever the attacker wanted. O_EXCL refuses to open an existing
+// path (including a dangling symlink), so we unlink-then-exclusively-
+// create. Findings: F-S1 in the multi-persona review.
 func writeToken(path, token, addr string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("synchub: mkdir token dir: %w", err)
 	}
-	contents := addr + "\n" + token + "\n"
-	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+	// Remove any stale file first; the exclusive create below will then
+	// fail closed if something races us to repopulate it.
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("synchub: clear token file: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("synchub: exclusively create token: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(addr + "\n" + token + "\n"); err != nil {
 		return fmt.Errorf("synchub: write token: %w", err)
 	}
 	return nil

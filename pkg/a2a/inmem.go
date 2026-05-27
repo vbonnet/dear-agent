@@ -3,25 +3,42 @@ package a2a
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 )
 
 // NewInMemoryBus returns a Bus backed by per-topic channel fan-out, good
 // for tests and single-process operation. Subscribers get their own
-// buffered channel; a slow subscriber blocks only itself once the buffer
-// fills.
+// buffered channel; a slow subscriber's buffer-full sends are DROPPED
+// (lossy delivery — see Drops()) so the publisher never blocks.
+//
+// NOTE for stub users: this in-memory bus is for tests and short-lived
+// processes. The cleanup goroutine spawned per Subscribe blocks until
+// the subscriber's ctx is canceled or Close is called, so sustained
+// subscribe/unsubscribe churn will accumulate goroutines until close
+// (F-S3 from multi-persona review). The real pkg/a2a implementation
+// will replace this; surfaces should not depend on its delivery
+// semantics.
 func NewInMemoryBus() Bus {
 	return &inmemBus{
 		subs: make(map[string][]*inmemSub),
 	}
 }
 
-const inmemSubBuffer = 64
+// Wider than 64 to reduce the drop rate at fan-out heavy steady state
+// (F-Sc4: 3 surfaces × 10 Hz events × N sessions hits 64 quickly).
+const inmemSubBuffer = 256
 
 type inmemBus struct {
 	mu     sync.RWMutex
 	subs   map[string][]*inmemSub
 	closed bool
+	drops  atomic.Uint64
 }
+
+// Drops returns the number of messages dropped because a subscriber's
+// buffer was full when Publish ran. Tests and operators can read this
+// to detect when surfaces are falling behind. Non-resetting.
+func (b *inmemBus) Drops() uint64 { return b.drops.Load() }
 
 type inmemSub struct {
 	topic string
@@ -49,7 +66,9 @@ func (b *inmemBus) Publish(ctx context.Context, m Message) error {
 		default:
 			// Subscriber buffer full: drop to keep the bus moving.
 			// The real A2A will choose a backpressure policy; for the
-			// stub we prefer liveness over delivery guarantees.
+			// stub we prefer liveness over delivery guarantees and
+			// surface the count via Drops().
+			b.drops.Add(1)
 		}
 	}
 	return nil

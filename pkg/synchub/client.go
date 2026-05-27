@@ -138,11 +138,12 @@ func (c *Client) do(ctx context.Context, path string, req, resp any) error {
 
 	if httpResp.StatusCode >= 400 {
 		var errBody struct {
-			Code  string `json:"code"`
-			Error string `json:"error"`
+			Code    string         `json:"code"`
+			Error   string         `json:"error"`
+			Details map[string]any `json:"details"`
 		}
 		_ = json.Unmarshal(respBody, &errBody)
-		return clientErr(errBody.Code, errBody.Error, httpResp.StatusCode)
+		return clientErr(errBody.Code, errBody.Error, errBody.Details, httpResp.StatusCode)
 	}
 	if resp == nil {
 		return nil
@@ -151,13 +152,15 @@ func (c *Client) do(ctx context.Context, path string, req, resp any) error {
 }
 
 // clientErr maps a server error code to the package's sentinel so
-// callers can errors.Is(err, ErrClosed) etc.
-func clientErr(code, message string, status int) error {
+// callers can errors.Is(err, ErrClosed) etc. The Details map (F-U3
+// from multi-persona review) is preserved so surfaces can extract
+// `winner`, `at_unix_ms`, etc. without parsing the error string.
+func clientErr(code, message string, details map[string]any, status int) error {
 	wrap := func(sentinel error) error {
 		if message == "" {
 			message = sentinel.Error()
 		}
-		return &remoteError{code: code, message: message, sentinel: sentinel, status: status}
+		return &RemoteError{code: code, message: message, sentinel: sentinel, status: status, details: details}
 	}
 	switch code {
 	case "not_found":
@@ -176,15 +179,22 @@ func clientErr(code, message string, status int) error {
 	return fmt.Errorf("synchub: server %d: %s", status, message)
 }
 
-type remoteError struct {
+// RemoteError is the wire-error type returned by Client calls. It
+// satisfies errors.Is against the package's sentinels (so client code
+// can branch identically to in-process code) and carries structured
+// details so surfaces can reformat for humans.
+type RemoteError struct {
 	code     string
 	message  string
 	sentinel error
 	status   int
+	details  map[string]any
 }
 
-func (e *remoteError) Error() string { return e.message }
-func (e *remoteError) Is(target error) bool {
+func (e *RemoteError) Error() string { return e.message }
+func (e *RemoteError) Is(target error) bool {
 	return target == e.sentinel || errors.Is(e.sentinel, target)
 }
-func (e *remoteError) Unwrap() error { return e.sentinel }
+func (e *RemoteError) Unwrap() error          { return e.sentinel }
+func (e *RemoteError) Code() string           { return e.code }
+func (e *RemoteError) Details() map[string]any { return e.details }

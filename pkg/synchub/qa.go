@@ -43,11 +43,20 @@ type round struct {
 	id        QuestionID
 	prompt    string
 	openedAt  time.Time
+	ttl       time.Duration // per-round TTL; 0 means use Hub.RoundTTL
 	state     roundState
 	winner    Surface
 	answer    []byte
 	closedAt  time.Time
 	closeNote string // why it closed (for diagnostics)
+}
+
+// effectiveTTL returns the round's TTL or the hub's default.
+func (r *round) effectiveTTL(hubDefault time.Duration) time.Duration {
+	if r.ttl > 0 {
+		return r.ttl
+	}
+	return hubDefault
 }
 
 // Answer is what AwaitAnswer returns: who won, what they sent, and when.
@@ -87,11 +96,33 @@ func (e *ExpiredError) Error() string {
 
 func (e *ExpiredError) Is(target error) bool { return target == ErrExpired }
 
+// AskOption tunes a single AskQuestion call. Variadic so the call site
+// stays clean for the common "use defaults" case (F-U8 from the
+// multi-persona review).
+type AskOption func(*askConfig)
+
+type askConfig struct {
+	ttl time.Duration // 0 = use hub default
+}
+
+// WithTTL overrides RoundTTL for this round only. Useful for
+// agent-asked "Deploy?" (want minutes) vs "Continue?" (want seconds).
+func WithTTL(d time.Duration) AskOption { return func(c *askConfig) { c.ttl = d } }
+
 // AskQuestion opens a new Q&A round and returns its ID. The caller is
 // the agent (terminal-side), not a surface. Two consecutive calls produce
 // two distinct IDs — surfaces that have not yet noticed the first
 // question is closed will be safely rejected when they try to answer it.
-func (h *Hub) AskQuestion(ctx context.Context, prompt string) (QuestionID, error) {
+func (h *Hub) AskQuestion(ctx context.Context, prompt string, opts ...AskOption) (QuestionID, error) {
+	var cfg askConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	ttl := cfg.ttl
+	if ttl == 0 {
+		ttl = h.opts.RoundTTL
+	}
+
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
@@ -104,6 +135,7 @@ func (h *Hub) AskQuestion(ctx context.Context, prompt string) (QuestionID, error
 		id:       id,
 		prompt:   prompt,
 		openedAt: h.opts.now(),
+		ttl:      ttl,
 		state:    roundOpen,
 	}
 	h.rounds[id] = r
@@ -113,6 +145,7 @@ func (h *Hub) AskQuestion(ctx context.Context, prompt string) (QuestionID, error
 		"id":     id,
 		"prompt": prompt,
 		"seq":    seq,
+		"ttl_ms": ttl.Milliseconds(),
 	}))
 	return id, nil
 }
@@ -144,12 +177,12 @@ func (h *Hub) Answer(ctx context.Context, qid QuestionID, surface Surface, paylo
 		return Answer{}, ErrClosed
 	}
 
-	// Lazy expiry check: if we've passed the TTL, close the round now
-	// rather than accept a stale answer. Uses h.opts.now() (set to
-	// time.Now in production, injectable in tests). The Time values
-	// returned by time.Now carry monotonic readings, so .Sub is
-	// monotonic-safe in production.
-	if h.opts.now().Sub(r.openedAt) > h.opts.RoundTTL {
+	// Lazy expiry check: if we've passed the (per-round or hub-default)
+	// TTL, close the round now rather than accept a stale answer.
+	// Uses h.opts.now() (set to time.Now in production, injectable in
+	// tests). The Time values returned by time.Now carry monotonic
+	// readings, so .Sub is monotonic-safe in production.
+	if h.opts.now().Sub(r.openedAt) > r.effectiveTTL(h.opts.RoundTTL) {
 		r.state = roundExpired
 		r.closedAt = h.opts.now()
 		r.closeNote = "lazy-expiry"
@@ -235,34 +268,35 @@ type RoundSnapshot struct {
 	ClosedAt time.Time
 }
 
-// sweep is called by the hub sweeper goroutine. It expires open rounds
-// past TTL and drops tombstones older than TombstoneTTL. Called with the
-// hub mutex unheld; acquires it briefly.
+// sweepRounds expires open rounds past TTL and drops tombstones older
+// than TombstoneTTL. Collects expirations under the lock, publishes
+// after releasing — F-Sc3 from the multi-persona review: holding the
+// hub mutex while talking to the bus stalls concurrent Q&A work if the
+// bus is slow.
 func (h *Hub) sweepRounds(now time.Time) {
+	var expired []QuestionID
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	for id, r := range h.rounds {
 		switch r.state {
 		case roundOpen:
-			// Use the captured openedAt; time.Since with a wall-clock
-			// time.Now value still computes a monotonic delta because
-			// time.Time carries a monotonic reading.
-			if now.Sub(r.openedAt) > h.opts.RoundTTL {
+			if now.Sub(r.openedAt) > r.effectiveTTL(h.opts.RoundTTL) {
 				r.state = roundExpired
 				r.closedAt = now
 				r.closeNote = "sweeper-expiry"
-				// We publish outside the lock would be nicer, but the
-				// bus is async (in-memory uses default-case drop) so
-				// holding it here is fine.
-				h.publish(context.Background(), topicQAExpired(h.opts.SessionID), mustJSON(map[string]any{
-					"id": id,
-				}))
+				expired = append(expired, id)
 			}
 		case roundAnswered, roundExpired, roundCanceled:
 			if !r.closedAt.IsZero() && now.Sub(r.closedAt) > h.opts.TombstoneTTL {
 				delete(h.rounds, id)
 			}
 		}
+	}
+	h.mu.Unlock()
+
+	for _, id := range expired {
+		h.publish(context.Background(), topicQAExpired(h.opts.SessionID), mustJSON(map[string]any{
+			"id": id,
+		}))
 	}
 }
 
