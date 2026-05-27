@@ -40,8 +40,8 @@ const (
 	StatusFilename = "WAYFINDER-STATUS.md"
 
 	// Wayfinder versions
-	WayfinderV1 = "v1" // Legacy W0-W12 phases
-	WayfinderV2 = "v2" // Dot-notation phases (discovery.problem, build.implement, etc.)
+	WayfinderV1 = "v1" // Legacy 12-ID phase model (W0 + D1-D4 + S4-S11)
+	WayfinderV2 = "v2" // Canonical 9-phase model (CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, RETRO)
 
 	// Session status
 	StatusInProgress = "in_progress"
