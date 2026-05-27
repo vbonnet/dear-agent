@@ -74,16 +74,19 @@ Two load-bearing invariants:
 
 **Workers** (do one task, hand back for verification; Secondary = the Requester
 that spawned them, Tertiary = that Requester's Secondary), **Auditors**
-(periodically mine logs/DEAR retros → roadmap via Meta-Orchestrator), and
+(periodically mine logs/DEASR retros → roadmap via Meta-Orchestrator), and
 **SRE agents** (emergency-only, privileged, must first decide if there is a real
 fire, cannot be spawned to bypass rules). Full definitions in
 [/CONTEXT.md](../../CONTEXT.md).
 
 ### Relationship to the other frameworks
 
-Wayfinder plans → VROOM executes → AGM is the tool VROOM drives → DEAR (Define →
-Execute → Audit → Retro) is the per-task retrospective loop whose findings
-return to the roadmap through the Meta-Orchestrator. See
+Wayfinder plans → VROOM executes → AGM is the tool VROOM drives → **DEASR**
+(Diagnose → Evaluate → scAle-test → Act → Review — formerly "DEAR"; see
+[ADR-024](ADR-024-deasr-push-bike-philosophy.md)) is the per-task
+retrospective loop whose findings return to the roadmap through the
+Meta-Orchestrator, under the **push-bike, not training wheels** design
+constraint. See
 [/CONTEXT.md § The Four Frameworks](../../CONTEXT.md#the-four-frameworks--and-how-they-relate).
 
 ### Decision trail
