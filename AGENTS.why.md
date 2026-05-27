@@ -62,52 +62,62 @@ there keeps:
 |------|----------|---------|
 | 2026-05-02 | Created `.dear-agent.yml` + CLAUDE.md "Output Routing" section | Second incident of research artifacts committed to the canonical code repo (ai-tools, predecessor) instead of engram-research; added deterministic config lookup so agents don't have to infer routing |
 | 2026-05-02 | Deferred enforcement-tier hook | Two-tier approach addresses the observed failure (agents not reading CLAUDE.md rules); a hook adds maintenance cost and is forward-looking only since dear-agent has no `research/` tree yet. Revisit if a leak occurs. |
-| 2026-05-26 | Extended the `.why.md` pattern to be the **rip-out-tax tracker** for caps (ADR-024 / DEASR) | Meta-retro over recent retros surfaced that throttles, denylists, retry ceilings, and "skip in CI" toggles ship as "temporary" without removal triggers. The `.why.md` pattern already lives next to the code it explains; reusing it for caps avoids a parallel ledger that would drift. See § Why the `.why.md` pattern is also the rip-out-tax tracker below. |
+| 2026-05-26 | Extended the `.why.md` pattern to be the **rip-out-tax tracker** for caps (per [ADR-024](docs/adr/ADR-024-push-bike-and-dear-retro-extensions.md), dear-agent's project additions to the DEAR retro) | Meta-retro over recent retros surfaced that throttles, denylists, retry ceilings, and "skip in CI" toggles ship as "temporary" without removal triggers. The `.why.md` pattern already lives next to the code it explains; reusing it for caps avoids a parallel ledger that would drift. See § Why the `.why.md` pattern is also the rip-out-tax tracker below. |
 
 ## Why the `.why.md` pattern is also the rip-out-tax tracker
 
-[ADR-024](docs/adr/ADR-024-deasr-push-bike-philosophy.md) renames the process
-retrospective loop from DEAR to **DEASR** (adds a Scale-test phase) under the
-**push-bike, not training wheels** design constraint. One of its forcing
-functions — D5: the rip-out tax — reuses this file's pattern instead of
-inventing a new ledger.
+[ADR-024](docs/adr/ADR-024-push-bike-and-dear-retro-extensions.md) adds
+four **project-specific MANDATORY additions** to every DEAR retro written
+in this repo (Scaling model, Ideal-first solution, Scale-test scoring,
+Rip-out tax declarations) under the **push-bike, not training wheels**
+design constraint. DEAR itself — the four-letter Define / Execute / Audit
+/ Retro loop — is unchanged; the additions are dear-agent project-scope
+and other repos that adopt DEAR are not bound by them (see
+[ADR-024 § D4 Per-project extension mechanism](docs/adr/ADR-024-push-bike-and-dear-retro-extensions.md)).
 
-**The extended rule.** Any code that scores `caps` on any axis of a DEASR
-Scale-test (throttle, cap, denylist, retry ceiling, hard-coded ID, feature
-flag set to a non-default value, "skip in CI" toggle, etc.) MUST ship with a
-co-located `.why.md` file. The file states:
+One of those additions — D2: the rip-out tax — reuses **this file's
+pattern** instead of inventing a new ledger.
+
+**The extended rule.** Any code that scores `caps` on any axis of a DEAR
+retro's Scale-test (throttle, cap, denylist, retry ceiling, hard-coded
+ID, feature flag set to a non-default value, "skip in CI" toggle, etc.)
+MUST ship with a co-located `.why.md` file. The file states:
 
 - **Type:** cap (rip-out tax)
 - **Date:** YYYY-MM-DD
 - **Why this is here:** the load it relieves, the regression it prevents
 - **What it costs to remove:** files / packages / call sites touched;
   migration shape
-- **Removal trigger:** the observable signal that says "now safe to remove"
-- **Related retro:** link to the DEASR retro that introduced it
+- **Removal trigger:** the observable signal that says "now safe to
+  remove"
+- **Related retro:** link to the DEAR retro that introduced it
 
 **Why this pattern, not a parallel ledger.** Three reasons:
 
 1. **Locality.** The `.why.md` lives next to the code it explains. A
    reviewer looking at the cap sees the rationale without leaving the
    directory. A central ledger needs cross-referencing that decays.
-2. **Drift resistance.** When the code moves, the `.why.md` moves with it
-   (mv-the-pair is a single mental operation). A central ledger drifts every
-   time the cap is refactored.
+2. **Drift resistance.** When the code moves, the `.why.md` moves with
+   it (mv-the-pair is a single mental operation). A central ledger
+   drifts every time the cap is refactored.
 3. **Continuity.** The pattern already exists in this repo (this file,
-   `wayfinder/review/AGENTS.why.md`, the engram MCP `.why.md` filtering).
-   Reusing it costs nothing; inventing a new ledger costs cognitive load on
-   every author and reviewer.
+   `wayfinder/review/AGENTS.why.md`, the engram MCP `.why.md`
+   filtering). Reusing it costs nothing; inventing a new ledger costs
+   cognitive load on every author and reviewer.
 
-**What does *not* change.** This is purely additive — the existing decision-log
-use of `.why.md` (this file, output-routing rationale, etc.) is untouched. A
-`.why.md` may now also document a cap; the original "decisions deserve
-co-located rationale" purpose is preserved.
+**What does *not* change.** This is purely additive — the existing
+decision-log use of `.why.md` (this file, output-routing rationale,
+etc.) is untouched. A `.why.md` may now also document a cap; the
+original "decisions deserve co-located rationale" purpose is preserved.
 
 **Cross-references.**
 
-- [ADR-024 § D5: Rip-out tax](docs/adr/ADR-024-deasr-push-bike-philosophy.md)
+- [ADR-024 § D2: Any cap ships with a co-located `.why.md` (rip-out tax)](docs/adr/ADR-024-push-bike-and-dear-retro-extensions.md)
   — the binding decision.
-- [/CONTEXT.md § DEASR](CONTEXT.md#deasr--diagnose--evaluate--scale-test--act--review)
-  — the loop this rule is part of.
-- [docs/retros/_TEMPLATE.md](docs/retros/_TEMPLATE.md) — the retro template
-  that produces the Scale-test scores driving when a `.why.md` is required.
+- [/CONTEXT.md § Push-bike, not training wheels — design constraint for DEAR retros (dear-agent)](CONTEXT.md#push-bike-not-training-wheels--design-constraint-for-dear-retros-dear-agent)
+  — the project-level design constraint.
+- [/CONTEXT.md § dear-agent's additions to the standard DEAR retro](CONTEXT.md#dear-agents-additions-to-the-standard-dear-retro)
+  — the four mandatory sections this rule is part of.
+- [docs/retros/_TEMPLATE.md](docs/retros/_TEMPLATE.md) — the template
+  that produces the Scale-test scores driving when a `.why.md` is
+  required.

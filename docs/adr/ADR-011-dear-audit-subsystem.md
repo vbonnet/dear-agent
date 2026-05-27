@@ -1,15 +1,11 @@
 # ADR-011: DEAR Audit Subsystem
 
-> **Terminology (added 2026-05-17; updated 2026-05-26):** "DEAR" in this ADR
-> is the **workflow-engine *code* lifecycle** — Define / **Enforce** / Audit /
-> **Resolve & Refine** — not the **process** retrospective loop, which was
-> renamed to **DEASR** (Diagnose → Evaluate → scAle-test → Act → Review) by
-> [ADR-024](ADR-024-deasr-push-bike-philosophy.md). The two no longer expand
-> to the same string; the remaining collision is the shared *code-side* name
-> "DEAR", tracked as a follow-up in
-> [/CONTEXT.md § Known Terminology Collisions (2b)](../../CONTEXT.md#known-terminology-collisions).
-> No code rename is implied by ADR-024 — read "DEAR" below as the workflow-engine
-> code lifecycle.
+> **Terminology (added 2026-05-17):** "DEAR" in this ADR is the **workflow-engine
+> *code* lifecycle** — Define / **Enforce** / Audit / **Resolve & Refine** — not
+> the canonical **process** retrospective loop (Define / **Execute** / Audit /
+> **Retro**) in [/CONTEXT.md](../../CONTEXT.md). This is documented collision
+> (2b) in CONTEXT.md § Known Terminology Collisions; no code rename is implied,
+> it is tracked as a follow-up. Read "DEAR" below as the code lifecycle.
 
 **Status**: Proposed
 **Date**: 2026-05-03

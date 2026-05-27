@@ -29,9 +29,8 @@ These four names are easy to conflate. They operate at different levels and do
 different jobs. The one-sentence relationship:
 
 > **Wayfinder** plans the work, **VROOM** executes the work, **AGM** is the tool
-> VROOM drives to run agent sessions, and **DEASR** is the retrospective loop
-> that feeds lessons from finished work back into the plan — under the
-> **push-bike, not training wheels** design constraint.
+> VROOM drives to run agent sessions, and **DEAR** is the retrospective loop that
+> feeds lessons from finished work back into the plan.
 
 ```
             ┌─────────────────────────────────────────────────────┐
@@ -53,11 +52,9 @@ different jobs. The one-sentence relationship:
                                      │ every finished unit of work runs
                                      ▼
             ┌─────────────────────────────────────────────────────┐
-            │  DEASR  — Diagnose → Evaluate → scAle-test → Act →    │
-            │           Review                                      │
+            │  DEAR  — Define → Execute → Audit → Retro             │
             │  retrospective loop; findings flow back to Wayfinder/ │
-            │  the roadmap (via the Meta-Orchestrator). Push-bike,  │
-            │  not training wheels.                                 │
+            │  the roadmap (via the Meta-Orchestrator)              │
             └─────────────────────────────────────────────────────┘
 ```
 
@@ -66,7 +63,7 @@ different jobs. The one-sentence relationship:
 | **Wayfinder** | Planning | The research / planning / prep phase that precedes execution. |
 | **VROOM** | Execution | The supervisory framework that governs how agents do work. **Higher level than AGM.** |
 | **AGM** | Tooling | Agent Gateway Manager — the CLI/runtime that actually spawns and drives agent sessions. A *tool VROOM uses*, not the framework itself. |
-| **DEASR** | Process | Diagnose → Evaluate → scAle-test → Act → Review — the per-task retrospective loop, governed by the **push-bike, not training wheels** design constraint. (Successor to "DEAR"; see [ADR-024](docs/adr/ADR-024-deasr-push-bike-philosophy.md).) |
+| **DEAR** | Process | Define → Execute → Audit → Retro — the per-task retrospective loop. |
 
 ---
 
@@ -132,7 +129,7 @@ A **Worker** does one assigned task, then hands it back for verification.
 
 ### Auditors
 
-**Auditors** examine logs, [DEASR](#deasr--diagnose--evaluate--scale-test--act--review) retros,
+**Auditors** examine logs, [DEAR](#dear--define--execute--audit--retro) retros,
 and other records to find patterns that need addressing. Findings loop back to
 the roadmap (through the Meta-Orchestrator) and are prioritized by severity.
 Auditors trigger periodically.
@@ -163,8 +160,8 @@ AGM workspaces**. Start with a single set; expand only if necessary.
 
 | Kind | Rule |
 |------|------|
-| **Process — missing tools** | If an agent was not given a tool it needs, that is a **bug**: run a [DEASR](#deasr--diagnose--evaluate--scale-test--act--review) retro and grant the right permissions to that worker role. Track these; if enough get approved, grant by default (don't burn tokens re-approving). |
-| **Process — needs access it lacks** | The agent asks its **manager** (whoever spawned it), who approves or denies. Track the pattern via DEASR retros and periodic audits. |
+| **Process — missing tools** | If an agent was not given a tool it needs, that is a **bug**: run a [DEAR](#dear--define--execute--audit--retro) retro and grant the right permissions to that worker role. Track these; if enough get approved, grant by default (don't burn tokens re-approving). |
+| **Process — needs access it lacks** | The agent asks its **manager** (whoever spawned it), who approves or denies. Track the pattern via DEAR retros and periodic audits. |
 | **AskUserQuestion** | Worker unsure → asks its **manager** (the Requester that spawned it) → if the manager is confident it answers directly, else it escalates up the management chain → terminating at the **Meta-Orchestrator**, which asks the human if still unsure. (Note: "manager" is the spawn/Requester relationship, distinct from the three named *supervisor roles* — the chain follows who-spawned-whom and ends at the Meta-Orchestrator, so it cannot loop on the supervisors' cyclic Secondary mesh.) **Blocking for the Worker** (it needs the answer); **non-blocking for the manager/supervisor roles** (they supervise many sessions and must not stall the whole pipeline on one question). |
 | **Proposing work** | Anyone may propose work via a formal [Work Order](#work-order). It goes to the Meta-Orchestrator. |
 
@@ -172,10 +169,10 @@ AGM workspaces**. Start with a single set; expand only if necessary.
 
 - **Supervisors** run continuously while there is backlog and/or active enqueued
   work. With active work they periodically check progress; problems trigger a
-  DEASR retro → remediation → an enqueued long-term fix. Spare capacity → spin
-  up more Workers.
+  DEAR retro → remediation → an enqueued long-term fix. Spare capacity → spin up
+  more Workers.
 - **Workers** do the work, report back to their **manager** (the Requester
-  that spawned them), may ask questions upward, and on completion run a DEASR
+  that spawned them), may ask questions upward, and on completion run a DEAR
   retro whose findings feed the backlog/roadmap (filtered through the
   Meta-Orchestrator).
 - **Auditors** trigger periodically; results feed the Meta-Orchestrator.
@@ -208,67 +205,90 @@ VROOM) belongs in the top-level [`docs/adr/`](docs/adr/), not under `agm/`.**
 
 ---
 
-## DEASR — Diagnose → Evaluate → scAle-test → Act → Review
+## DEAR — Define → Execute → Audit → Retro
 
-**DEASR is the per-task retrospective loop.** Canonical expansion in this
-repo's **process/governance** vocabulary:
+**DEAR is the per-task retrospective loop.** Canonical expansion in this repo's
+**process/governance** vocabulary:
 
-| Letter | Phase           | Meaning |
-|--------|-----------------|---------|
-| **D**  | **Diagnose**    | State the task / incident, **current scale**, **target scale**, and the **scaling model** that connects them. A retro that cannot fill the scale block is sizing a fix to unmeasured load. |
-| **E**  | **Evaluate**    | Two passes, in order: (1) describe the **ideal scalable solution first** — no reference to current code or this-week constraints; (2) describe the **minimum** we can ship now that is **on the path to the ideal**. If the minimum has to be ripped out to reach the ideal, reject it and restart at (1). |
-| **A**  | **scAle-test** (Assay) | Score every proposed fix against three axes — **10× agents**, **10× machines**, **10× users** — as **scales** / **neutral** / **caps**. A fix scoring `caps` on any axis MUST carry a co-located `.why.md` declaring the **rip-out tax** (see below). |
-| **S**  | (S)cope-down → Act | Build the path-compatible minimum from Evaluate (2). Every Act item must appear in the Scale-test table. |
-| **R**  | **Review**      | Capture what was learned; findings flow to the backlog/roadmap via the Meta-Orchestrator. |
+| Letter | Phase | Meaning |
+|--------|-------|---------|
+| **D** | **Define** | State the task and its exit conditions (acceptance criteria). |
+| **E** | **Execute** | Do the work. |
+| **A** | **Audit** | Verify the runnable exit conditions actually hold. |
+| **R** | **Retro** | Retrospective: capture what was learned; findings flow to the backlog/roadmap via the Meta-Orchestrator. |
 
-> **Push-bike, not training wheels** — the design constraint that governs
-> every DEASR retro.
->
+This is the expansion used by `.claude/CLAUDE.md` and by the VROOM lifecycle
+above. ⚠️ It **collides** with two other in-repo uses of "DEAR" — see
+[Known Terminology Collisions](#known-terminology-collisions).
+
+DEAR is a **framework-level** loop. dear-agent (this repo) layers additional
+project-specific requirements on top — see
+[§ dear-agent's additions to the standard DEAR retro](#dear-agents-additions-to-the-standard-dear-retro)
+below — but the four letters and their canonical meanings are not changed
+by anything in this repo.
+
+---
+
+## Push-bike, not training wheels — design constraint for DEAR retros (dear-agent)
+
+This is **dear-agent's** project-level design constraint that governs every
+DEAR retro and every non-trivial change in this repo. It is **not** part of
+DEAR itself; other repos that adopt DEAR are not bound by it. Rationale and
+mechanism in [ADR-024](docs/adr/ADR-024-push-bike-and-dear-retro-extensions.md).
+
 > A **push-bike** is the simplest shape of the *eventual* bike — frame,
 > wheels, no pedals — that a child rides on the path to a real bike.
-> Everything they learn (balance, steering, momentum) transfers. Nothing has
-> to be ripped out when pedals arrive.
+> Everything they learn (balance, steering, momentum) transfers. Nothing
+> has to be ripped out when pedals arrive.
 >
-> **Training wheels** are bolted-on caps that prevent the child from learning
-> the thing that actually matters (balance) and must be removed before they
-> can ride for real. Every training-wheel solution buys time at the cost of
-> teaching the wrong reflex.
+> **Training wheels** are bolted-on caps that prevent the child from
+> learning the thing that actually matters (balance) and must be removed
+> before they can ride for real. Every training-wheel solution buys time
+> at the cost of teaching the wrong reflex.
 >
 > Prefer push-bike solutions. When a training-wheel solution is the only
-> option this week, **declare it as one** (rip-out tax, below) and schedule
-> its removal.
->
-> Citing "push-bike, not training wheels" in a review is a legitimate veto —
-> it forces the proposer to either reframe the fix or attach a rip-out tax.
+> option this week, **declare it as one** (rip-out tax, below) and
+> schedule its removal.
+
+Citing "push-bike, not training wheels" in a review or retro is a legitimate
+veto — it forces the proposer to either reframe the fix or attach a rip-out
+tax.
 
 ### Rip-out tax — the `.why.md` for every cap
 
-Any solution that scores `caps` on any axis MUST declare, in the same change,
-a `.why.md` file co-located with the code it caps. This reuses the existing
-`.why.md` decision-log pattern (see [AGENTS.why.md](AGENTS.why.md)) — caps
-are deliberate decisions deserving co-located rationale, not silent
-constants. The file states:
+Any solution that scores **caps** on any Scale-test axis (see additions
+below) MUST declare, in the same change, a `.why.md` file co-located with
+the code it caps. This reuses the existing `.why.md` decision-log pattern
+(see [AGENTS.why.md](AGENTS.why.md)) — caps are deliberate decisions
+deserving co-located rationale, not silent constants. The file states:
 
 - **Type:** cap (rip-out tax)
 - **Why this is here:** the load it relieves, the regression it prevents
 - **What it costs to remove:** code touched, migration shape
 - **Removal trigger:** the observable signal that says "now safe to remove"
-- **Related retro:** link to the DEASR retro that introduced it
+- **Related retro:** link to the DEAR retro that introduced it
 
-### Where this lives
+---
 
-- **Process source of truth:** this section + [ADR-024](docs/adr/ADR-024-deasr-push-bike-philosophy.md).
-- **Retro template:** [docs/retros/_TEMPLATE.md](docs/retros/_TEMPLATE.md).
-- **Agent instruction:** [.claude/CLAUDE.md § DEASR loop](.claude/CLAUDE.md).
-- **Historical retros** under `docs/retros/` are not retroactively renamed
-  (append-only audit trail per `docs/alignment/VALUES.md`); new retros use
-  the DEASR template.
+## dear-agent's additions to the standard DEAR retro
 
-⚠️ The letters **DEASR** are distinct from the workflow-engine *code*
-lifecycle (`OnDefine` / `OnEnforce` / `OnAudit` / `OnResolve` — historically
-also abbreviated "DEAR"); they no longer collapse to the same acronym. The
-remaining naming collision is documented in
-[Known Terminology Collisions](#known-terminology-collisions).
+dear-agent imposes four MANDATORY additions on every DEAR retro written in
+this repo. They are project-scope, not framework-scope — other repos that
+adopt DEAR may declare their own (see
+[ADR-024 § D4 Per-project extension mechanism](docs/adr/ADR-024-push-bike-and-dear-retro-extensions.md)).
+The template at [docs/retros/_TEMPLATE.md](docs/retros/_TEMPLATE.md) carries
+all four; copying it is the easiest way to comply.
+
+| DEAR phase   | dear-agent addition (MANDATORY in this repo)                                                                                                                                                                                                                                                                                                                                                                |
+|--------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Define**   | **Scaling model** — current scale, target scale, scaling model (linear / sub-linear / super-linear in what dimension), binding constraint at target. Unknowns get "unknown — needs measurement" and a Retro action item, not deletion.                                                                                                                                                              |
+| **Execute**  | **Ideal-first solution** — two passes, in order: (1) describe the ideal scalable solution with no reference to current code or this-week constraints; (2) describe the path-compatible minimum on the way to it. If the minimum has to be ripped out to reach the ideal, reject it and restart at (1).                                                                                                |
+| **Audit**    | **Scale-test** — score every proposed fix as **scales** / **neutral** / **caps** on three axes: 10× agents, 10× machines, 10× users. A `caps` score on any axis is permitted only if the fix carries a rip-out tax `.why.md` (see push-bike section above).                                                                                                                                          |
+| **Audit**    | **Rip-out tax declarations** — for every `caps`-scored fix from Scale-test, the co-located `.why.md` file. Same `.why.md` pattern as AGENTS.why.md decision logs.                                                                                                                                                                                                                                  |
+
+Discovery path for new contributors / agents landing in this repo:
+[.claude/CLAUDE.md](.claude/CLAUDE.md) → [ADR-024](docs/adr/ADR-024-push-bike-and-dear-retro-extensions.md)
+→ [docs/retros/_TEMPLATE.md](docs/retros/_TEMPLATE.md).
 
 ---
 
@@ -294,14 +314,15 @@ of Wayfinder feeds the roadmap that the Meta-Orchestrator owns.
 | **Overseer** | CRO supervisor. Resource/leak/cleanup reliability. Secondary: Orchestrator; Tertiary: Meta-Orchestrator. |
 | **Worker** | Does one task, hands back for verification. Secondary = its Requester; Tertiary = the Requester's Secondary. |
 | **Requester** | *Relationship, not a standing role:* the agent that spawned a given Worker. |
-| **Auditor** | Periodically mines logs/DEASR retros for patterns; feeds the Meta-Orchestrator. |
+| **Auditor** | Periodically mines logs/DEAR retros for patterns; feeds the Meta-Orchestrator. |
 | **SRE agent** | Emergency-only, privileged firefighter. First decides if there is a real fire. |
 | **Work Order** | <a id="work-order"></a>The formal artifact for proposing work. Required fields include **the reason the work should be added**. Routed to the Meta-Orchestrator, who alone may add it to the roadmap. |
 | **AGM** | Agent Gateway Manager — the session-driving tool VROOM uses. |
 | **VROOM** | The supervisory execution framework (proper name; old V/R/O/O/M backronym retired). |
-| **DEASR** | Diagnose → Evaluate → scAle-test → Act → Review retrospective loop (process sense). Successor to "DEAR"; see [ADR-024](docs/adr/ADR-024-deasr-push-bike-philosophy.md). |
-| **Push-bike, not training wheels** | Design constraint applied across DEASR: prefer fixes that teach the system the right reflex at target scale over bolted-on caps that have to be removed later. See [DEASR § Push-bike, not training wheels](#deasr--diagnose--evaluate--scale-test--act--review). |
-| **Rip-out tax** | The co-located `.why.md` that every `caps`-scored fix MUST carry, declaring removal cost, code touched, and removal trigger. Same pattern as [AGENTS.why.md](AGENTS.why.md) decision logs. |
+| **DEAR** | Define → Execute → Audit → Retro retrospective loop (process sense). |
+| **Push-bike, not training wheels** | dear-agent's project-level design constraint for DEAR retros: prefer fixes that teach the system the right reflex at target scale over bolted-on caps that have to be removed later. See [§ Push-bike, not training wheels](#push-bike-not-training-wheels--design-constraint-for-dear-retros-dear-agent) and [ADR-024](docs/adr/ADR-024-push-bike-and-dear-retro-extensions.md). |
+| **Rip-out tax** | The co-located `.why.md` that any cap MUST carry in dear-agent (per ADR-024 D2): removal cost, code touched, removal trigger. Same pattern as [AGENTS.why.md](AGENTS.why.md) decision logs. |
+| **Scale-test** | dear-agent's MANDATORY addition to the Audit phase of a DEAR retro: score every proposed fix as **scales** / **neutral** / **caps** on 10× agents, 10× machines, 10× users. |
 | **Wayfinder** | The research/planning/prep phase preceding execution. |
 
 ---
@@ -319,28 +340,20 @@ needs follow-up work tracked on the roadmap.
    [docs/adr/ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md). The
    superseded ADRs (`agm/docs/adr/ADR-020`…`ADR-025`) are stubbed with redirects.
 
-2. **"DEAR" — historically three meanings; one resolved by [ADR-024](docs/adr/ADR-024-deasr-push-bike-philosophy.md).**
-   - **(a) Process / retrospective loop — RENAMED to "DEASR" (2026-05-26).**
-     Was Define → Execute → Audit → Retro; now **Diagnose → Evaluate →
-     scAle-test → Act → Review** under the **push-bike, not training wheels**
-     design constraint. See [§ DEASR](#deasr--diagnose--evaluate--scale-test--act--review)
-     and [ADR-024](docs/adr/ADR-024-deasr-push-bike-philosophy.md). Historical
-     retros under `docs/retros/` keep their "DEAR Retro:" titles (append-only
-     audit trail); new retros use the DEASR template.
-   - **(b) Workflow-engine code lifecycle hooks — UNCHANGED:**
-     `pkg/workflow.Hooks` and ADR-010/ADR-011 use **Define → Enforce → Audit →
-     Resolve & Refine** for the `OnDefine/OnEnforce/OnAudit/OnResolve`
-     callbacks. The acronym collision is **smaller** now (DEASR vs.
-     workflow-engine DEAR — they no longer expand to the same string), but the
-     code-side name "DEAR" persists. Renaming exported callback names is a
-     hard-to-reverse API change deserving its own ADR; tracked as a follow-up.
+2. **"DEAR" — three different meanings.**
+   - **(a) Process / retrospective loop:** Define → **Execute** → Audit →
+     **Retro**. *This is the canonical meaning above.*
+   - **(b) Workflow-engine code lifecycle hooks:** `pkg/workflow.Hooks` and
+     ADR-010/ADR-011 use **Define → Enforce → Audit → Resolve & Refine** for the
+     workflow-engine's `OnDefine/OnEnforce/OnAudit/OnResolve` callbacks. This is
+     a *code concept* with a different "E" and "R". It is **not** renamed by this
+     change (renaming exported code is a hard-to-reverse API change deserving its
+     own ADR); it is flagged here as drift.
    - **(c) Backlog phase prefix:** `DEAR-X.*` identifiers in
      `docs/workflow-engine/BACKLOG.md` / ROADMAP are a numbering convention for
-     framework-improvement items, unrelated to either loop. Untouched —
-     renaming established issue IDs would break inbound references for no
-     benefit.
-   *Resolution owner:* Meta-Orchestrator (roadmap). Remaining work: rename the
-   code-level lifecycle so it stops shadowing the historical "DEAR" name.
+     framework-improvement items, unrelated to either loop.
+   *Resolution owner:* Meta-Orchestrator (roadmap). Recommended: rename the
+   code-level lifecycle so it stops shadowing the process loop.
 
 3. **`pkg/vroom` code encodes the superseded model.**
    `pkg/vroom/vroom/topics.go` defines decision-trail topics

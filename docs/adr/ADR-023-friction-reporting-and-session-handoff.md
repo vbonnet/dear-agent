@@ -5,8 +5,8 @@
 **Context**: Two AGM capabilities surfaced by external practice — Lovable's
 `/vent` self-report tool and Matt Pocock's `/handoff` skill — examined for
 dear-agent fit. This is a **design** ADR: it fixes vocabulary, command
-surface, and integration seams so that a later implementation ADR (or a DEASR
-Diagnose artifact) can proceed without re-litigating naming or shape. No code
+surface, and integration seams so that a later implementation ADR (or a DEAR
+Define artifact) can proceed without re-litigating naming or shape. No code
 ships with this ADR.
 
 Builds on / aligns with:
@@ -101,26 +101,24 @@ Two names were **rejected outright**:
 Decision: the command is **`agm friction`**; the artifact it produces is a
 **friction report**.
 
-### F2. Where it sits in the DEASR loop
+### F2. Where it sits in the DEAR loop
 
-Friction reporting is the **real-time Act → Review bridge** that DEASR
-(formerly "DEAR"; see [ADR-024](ADR-024-deasr-push-bike-philosophy.md))
+Friction reporting is the **real-time Execute→Audit→Retro bridge** that DEAR
 currently lacks. Today the loop is:
 
 ```
-Diagnose → Evaluate → scAle-test → Act → Review
-                                          ↑ friction reconstructed from memory here (lossy)
+Define → Execute → Audit → Retro
+                            ↑ friction reconstructed from memory here (lossy)
 ```
 
 With `agm friction` the worker emits the impediment at the moment of contact,
-during Act. The report lands in the ADR-011 *code-lifecycle* Audit finding
-stream (still named "Audit" — see CONTEXT.md collision 2b) and is carried,
-already structured, into Review:
+during Execute. The report lands in the Audit finding stream (ADR-011) and is
+carried, already structured, into Retro:
 
 ```
-Diagnose → Evaluate → scAle-test → Act ──(agm friction)──> Audit finding stream ──> Review (data-driven)
-                                    │                            │
-                                    └── continues working ───────┘  (reporting is non-blocking)
+Define → Execute ──(agm friction)──> Audit finding stream ──> Retro (data-driven)
+            │                              │
+            └── continues working ─────────┘  (reporting is non-blocking)
 ```
 
 The key property: **reporting does not interrupt the work.** `agm friction`
@@ -392,7 +390,7 @@ prevents the conflation CONTEXT.md already had to untangle once.
 
 ### Positive
 
-- DEASR gains a real-time Act → Review channel; retros become data-driven
+- DEAR gains a real-time Execute→Audit channel; retros become data-driven
   (clustered friction) instead of memory-driven.
 - Friction routes through dear-agent's own surfaces (ledger + VROOM trail +
   backlog ranker), dogfooding the mesh instead of exporting to Slack.
@@ -451,7 +449,7 @@ non-trivial item will get its own Define artifact / ADR before implementation.
 
 ## Implementation (deferred — design only)
 
-This ADR ships no code. A subsequent implementation ADR / DEASR Diagnose artifact
+This ADR ships no code. A subsequent implementation ADR / DEAR Define artifact
 would cover, at minimum:
 
 - `agm friction` command + `~/.agm/friction/<date>.jsonl` ledger +
@@ -473,8 +471,7 @@ would cover, at minimum:
 - [ADR-018: Graceful Exit as a Framework Default](ADR-018-graceful-exit-framework-default.md)
 - [ADR-022: Backlog Suggestion System](ADR-022-backlog-suggestion-system.md)
 - [pkg/engram ADR-003: Memory Strength Tracking Fields](../../pkg/engram/docs/adrs/ADR-003-memory-strength-tracking-fields.md)
-- [/CONTEXT.md](../../CONTEXT.md) — VROOM vocabulary, DEASR loop, terminology collisions
-- [ADR-024: DEASR Retrospective Loop and Push-Bike-First Design](ADR-024-deasr-push-bike-philosophy.md) — the process loop this ADR's `agm friction` feeds
+- [/CONTEXT.md](../../CONTEXT.md) — VROOM vocabulary, DEAR loop, terminology collisions
 - `agm/cmd/agm/send_compact.go`, `agm/cmd/agm/session_compact.go` — the
   existing compaction surface this ADR is careful not to duplicate.
 - `agm/cmd/agm/admin_link_session_parent.go` — the `parent_session_id` chain

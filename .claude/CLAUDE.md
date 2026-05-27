@@ -52,13 +52,15 @@ instead of bypassing them.
 - **VROOM** for multi-step or governance-relevant work: route consequential
   decisions through the supervisory mesh (the MISSION.md framework), so the
   append-only audit log captures rationale and gates.
-- **Diagnose → Evaluate → scAle-test → Act → Review (DEASR)** loop: when
-  finishing a non-trivial change, write or update the matching artifacts in
-  `docs/retros/` if the change exposes a process gap. Use the template at
-  [docs/retros/_TEMPLATE.md](../docs/retros/_TEMPLATE.md). DEASR is the
-  successor to "DEAR"; see
-  [ADR-024](../docs/adr/ADR-024-deasr-push-bike-philosophy.md) and
-  [/CONTEXT.md § DEASR](../CONTEXT.md#deasr--diagnose--evaluate--scale-test--act--review).
+- **Define → Execute → Audit → Retro (DEAR)** loop: when finishing a
+  non-trivial change, write or update the matching artifacts in
+  `docs/retros/` if the change exposes a process gap. **dear-agent layers
+  four MANDATORY project-specific additions** on top of the standard DEAR
+  shape (Scaling-model block, ideal-first solution, Scale-test scoring,
+  rip-out tax `.why.md`) — see the template at
+  [docs/retros/_TEMPLATE.md](../docs/retros/_TEMPLATE.md),
+  [ADR-024](../docs/adr/ADR-024-push-bike-and-dear-retro-extensions.md),
+  and the "Push-bike, not training wheels" section below.
 
 **Why this is a rule, not a suggestion:** dogfooding surfaces real gaps
 before users hit them. Every time we route around our own tools, we lose a
@@ -72,32 +74,44 @@ an issue or write a retro before moving on).
 
 ## Push-bike, not training wheels (MANDATORY design constraint)
 
+This is **dear-agent's** project-level design constraint for every DEAR
+retro and every non-trivial change in this repo. It is **not** part of
+DEAR itself — DEAR's four-letter loop stays unchanged. Rationale,
+mechanism, and the per-project extension model are in
+[ADR-024](../docs/adr/ADR-024-push-bike-and-dear-retro-extensions.md).
+
 Prefer fixes that teach the system the right reflex at target scale over
 bolted-on caps that have to be removed before the system can ride for real.
-This is the core design constraint that governs every DEASR retro and every
-non-trivial change in this repo.
 
 **A push-bike** is the simplest shape of the *eventual* bike — frame,
 wheels, no pedals. Everything learned on it (balance, steering, momentum)
 transfers. Nothing has to be ripped out when pedals arrive.
 
-**Training wheels** are bolted-on caps that prevent the rider from learning
-the thing that actually matters. They buy time at the cost of teaching the
-wrong reflex.
+**Training wheels** are bolted-on caps that prevent the rider from
+learning the thing that actually matters. They buy time at the cost of
+teaching the wrong reflex.
 
-**When working on this repo:**
+**When working on this repo (dear-agent's four MANDATORY additions to its
+DEAR retros):**
 
-1. **Describe the ideal scalable solution first.** Then scope down to the
-   minimum that is *on the path to it*. Reject any solution that has to be
-   ripped out later.
-2. **Score every proposed fix:** *scales* / *neutral* / *caps* on 10× agents,
-   10× machines, 10× users. A `caps` score on any axis is allowed *only*
-   when the fix carries a co-located `.why.md` declaring the **rip-out
-   tax** — removal cost, code touched, and removal trigger.
-3. **Cite "push-bike, not training wheels"** as a legitimate veto when
+1. **Define → Scaling model.** State current scale, target scale, scaling
+   model (linear / sub-linear / super-linear in what dimension), and the
+   binding constraint at target. Unknowns get "unknown — needs
+   measurement" and a Retro action item, not deletion.
+2. **Execute → Ideal-first solution.** Describe the ideal scalable
+   solution first, with no reference to current code or this-week
+   constraints. Then scope down to the minimum on the path to it. Reject
+   any minimum that has to be ripped out later.
+3. **Audit → Scale-test.** Score every proposed fix *scales* / *neutral*
+   / *caps* on 10× agents, 10× machines, 10× users. A `caps` score on any
+   axis is allowed *only* when the fix carries a co-located `.why.md`
+   declaring the **rip-out tax** — removal cost, code touched, removal
+   trigger.
+4. **Cite "push-bike, not training wheels"** as a legitimate veto when
    reviewing a proposed fix. It forces the proposer to either reframe the
    fix or attach a rip-out tax.
 
-See [/CONTEXT.md § DEASR](../CONTEXT.md#deasr--diagnose--evaluate--scale-test--act--review),
-[ADR-024](../docs/adr/ADR-024-deasr-push-bike-philosophy.md), and
+See [/CONTEXT.md § Push-bike, not training wheels](../CONTEXT.md#push-bike-not-training-wheels--design-constraint-for-dear-retros-dear-agent),
+[/CONTEXT.md § dear-agent's additions to the standard DEAR retro](../CONTEXT.md#dear-agents-additions-to-the-standard-dear-retro),
+[ADR-024](../docs/adr/ADR-024-push-bike-and-dear-retro-extensions.md), and
 [AGENTS.why.md](../AGENTS.why.md) for the rip-out-tax `.why.md` pattern.

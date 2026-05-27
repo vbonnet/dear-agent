@@ -4,13 +4,11 @@
 **Date**: 2026-05-12
 **Context**: Extends the workflow-engine *code* DEAR lifecycle (Define,
 **Enforce**, Audit, **Resolve & Refine**) captured in
-[ADR-011](ADR-011-dear-audit-subsystem.md) — distinct from the **process**
-retrospective loop, which was renamed to **DEASR** (Diagnose → Evaluate →
-scAle-test → Act → Review) by
-[ADR-024](ADR-024-deasr-push-bike-philosophy.md). See
-[/CONTEXT.md § Known Terminology Collisions (2b)](../../CONTEXT.md#known-terminology-collisions).
-Builds on the two-tier (instruction + configuration) routing model documented
-in [AGENTS.why.md](../../AGENTS.why.md).
+[ADR-011](ADR-011-dear-audit-subsystem.md) — distinct from the canonical
+**process** DEAR (Define / **Execute** / Audit / **Retro**) in
+[/CONTEXT.md](../../CONTEXT.md); see CONTEXT.md § Known Terminology Collisions
+(2b). Builds on the two-tier (instruction + configuration) routing model
+documented in [AGENTS.why.md](../../AGENTS.why.md).
 
 ---
 
@@ -80,8 +78,8 @@ and the `.dear-agent.yml` config loader all live in
   any sub-agent it spawns) sees the contract before composing its
   first response.
 - `pkg/acceptance` recognises `graceful-exit` as a typed criterion
-  so the DEASR **Diagnose** phase can record it alongside `tests-pass` and
-  `lint-clean`. This is what gives the Scale-test / Act phases a hook later.
+  so the DEAR Define phase can record it alongside `tests-pass` and
+  `lint-clean`. This is what gives the Audit phase a hook later.
 - Future: a `gracefulexit` audit check (see deferred Enforcement
   below) can compare findings against the criterion.
 
