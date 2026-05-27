@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.dear-agent.bumblebee — daily Bumblebee endpoint scan. Per ADR-027.
+
+  Source template:
+      cmd/dear-agent-bumblebee/templates/com.dear-agent.bumblebee.plist
+  Installed by `dear-agent-bumblebee install-launchagent`, which substitutes
+  __USER_HOME__ and __BUMBLEBEE_BINARY__ before writing this file (launchd
+  does not expand ~ or shell variables).
+
+  Schedule: 04:00 local time, every day.
+  Logs:     <home>/Library/Logs/dear-agent/bumblebee.log
+  Output:   <home>/Library/Application Support/dear-agent/bumblebee/<date>.ndjson
+            (written atomically by the scan subcommand)
+
+  RunAtLoad is intentionally false. The calendar entry fires once per day;
+  trigger ad-hoc runs with `make bumblebee-scan` or
+  `launchctl kickstart gui/$UID/com.dear-agent.bumblebee`.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dear-agent.bumblebee</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__BUMBLEBEE_BINARY__</string>
+        <string>scan</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__USER_HOME__/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__USER_HOME__</string>
+    </dict>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/bumblebee.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/bumblebee.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
