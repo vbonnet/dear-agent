@@ -21,6 +21,10 @@ import (
 	"time"
 )
 
+// testHTTPClient is a per-package http.Client with a bounded timeout so a
+// hung server doesn't translate to a hung test (Gemini PR #159 review).
+var testHTTPClient = &http.Client{Timeout: 10 * time.Second}
+
 // postJSON is a small helper that POSTs a JSON body with the server's
 // bearer token. Tests that go around the Client use this so we can
 // observe raw status codes and error envelopes.
@@ -36,7 +40,7 @@ func postJSON(t *testing.T, srv *Server, path string, body any) *http.Response {
 	}
 	req.Header.Set("Authorization", "Bearer "+srv.Token())
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := testHTTPClient.Do(req)
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
@@ -259,7 +263,7 @@ func TestServer_HandleCancel_RejectsGET(t *testing.T) {
 	_, srv, _ := startTestServer(t)
 	req, _ := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+"/v1/qa/cancel", nil)
 	req.Header.Set("Authorization", "Bearer "+srv.Token())
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := testHTTPClient.Do(req)
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
