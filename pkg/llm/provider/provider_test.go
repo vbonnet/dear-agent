@@ -36,6 +36,7 @@ func TestNewFactory(t *testing.T) {
 	f := NewFactory()
 	if f == nil {
 		t.Fatal("NewFactory() returned nil")
+		return
 	}
 	if f.providers == nil {
 		t.Fatal("providers map is nil")
@@ -110,6 +111,7 @@ func TestFactory_GetProvider(t *testing.T) {
 		_, err := f.GetProvider("nonexistent")
 		if err == nil {
 			t.Fatal("expected error for nonexistent provider")
+			return
 		}
 		if got := err.Error(); got != "provider not found: nonexistent" {
 			t.Errorf("error = %q, want %q", got, "provider not found: nonexistent")
@@ -166,6 +168,7 @@ func TestFactory_NewProvider_UnsupportedFamily(t *testing.T) {
 	_, err := f.NewProvider("unknown-family", "some-model")
 	if err == nil {
 		t.Fatal("expected error for unsupported provider family")
+		return
 	}
 	if got := err.Error(); got != "unsupported provider family: unknown-family" {
 		t.Errorf("error = %q, want %q", got, "unsupported provider family: unknown-family")
@@ -207,6 +210,7 @@ func TestFactory_NewProvider_AnthropicWithAPIKey(t *testing.T) {
 	}
 	if p == nil {
 		t.Fatal("expected non-nil provider")
+		return
 	}
 	if p.Name() != "anthropic" {
 		t.Errorf("Name() = %q, want %q", p.Name(), "anthropic")
@@ -246,6 +250,7 @@ func TestFactory_NewProvider_GeminiWithVertexAI(t *testing.T) {
 	_, err := f.NewProvider("gemini", "")
 	if err == nil {
 		t.Fatal("expected error (Gemini via Vertex AI not implemented)")
+		return
 	}
 	// Should mention "not yet implemented"
 	if got := err.Error(); got == "" {
@@ -432,6 +437,7 @@ func TestNewOpenRouterProvider_Success(t *testing.T) {
 	}
 	if p == nil {
 		t.Fatal("expected non-nil provider")
+		return
 	}
 	if p.Name() != "openrouter" {
 		t.Errorf("Name() = %q, want %q", p.Name(), "openrouter")

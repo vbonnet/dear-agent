@@ -245,6 +245,7 @@ func TestGetQuestionByID(t *testing.T) {
 	q := GetQuestionByID("q1-problem")
 	if q == nil {
 		t.Fatal("expected question, got nil")
+		return
 	}
 	if q.Type != QuestionProblem {
 		t.Errorf("expected problem type, got %s", q.Type)

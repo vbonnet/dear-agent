@@ -67,6 +67,7 @@ func TestWriteAndRead(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("Read() returned nil")
+		return
 	}
 
 	if got.Type != flag.Type {
@@ -116,6 +117,7 @@ func TestConsume(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("Consume() returned nil")
+		return
 	}
 	if got.Type != TypeSteer {
 		t.Errorf("Consumed Type = %v, want steer", got.Type)

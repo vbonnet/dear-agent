@@ -58,6 +58,7 @@ func TestClearOldToolResults_ClearsOldGrepResult(t *testing.T) {
 	tr := findToolResult(result[0])
 	if tr == nil {
 		t.Fatal("expected tool result block in message 0")
+		return
 	}
 	if tr.Content != ClearedPlaceholder {
 		t.Errorf("old Grep result not cleared, got length %d", len(tr.Content))

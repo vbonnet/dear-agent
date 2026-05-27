@@ -177,6 +177,7 @@ func TestHITL_Reject_FailsNode(t *testing.T) {
 	_, err = r.Run(context.Background(), wf, nil)
 	if err == nil {
 		t.Fatal("expected run error from rejection, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "rejected") {
 		t.Errorf("error %q does not mention rejection", err.Error())

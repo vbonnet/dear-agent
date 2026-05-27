@@ -19,6 +19,7 @@ func TestNewOllamaProvider(t *testing.T) {
 		}
 		if p == nil {
 			t.Fatal("expected non-nil provider")
+			return
 		}
 		if p.Name() != "ollama" {
 			t.Errorf("Name() = %q, want %q", p.Name(), "ollama")

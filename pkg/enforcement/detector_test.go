@@ -66,6 +66,7 @@ func TestDetect(t *testing.T) {
 	p := d.Detect("cd /repo")
 	if p == nil {
 		t.Fatal("expected violation for 'cd /repo'")
+		return
 	}
 	if p.ID != "cd-command" {
 		t.Errorf("expected pattern 'cd-command', got %q", p.ID)
@@ -186,6 +187,7 @@ func TestValidateCommandOrderMatters(t *testing.T) {
 	p := d.ValidateCommand("cd /repo && make build")
 	if p == nil {
 		t.Fatal("expected violation")
+		return
 	}
 	if p.ID != "cd-command" {
 		t.Errorf("expected cd-command (order 20) to match first, got %q", p.ID)

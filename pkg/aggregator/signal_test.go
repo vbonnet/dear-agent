@@ -53,6 +53,7 @@ func TestSignalValidate(t *testing.T) {
 			err := s.Validate()
 			if err == nil {
 				t.Fatal("expected error, got nil")
+				return
 			}
 			if !strings.Contains(err.Error(), tc.wantSub) {
 				t.Errorf("err = %q, want substring %q", err, tc.wantSub)

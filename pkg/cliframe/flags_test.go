@@ -69,6 +69,7 @@ func TestAddFormatFlag(t *testing.T) {
 	flag := cmd.Flags().Lookup("format")
 	if flag == nil {
 		t.Fatal("Expected --format flag to be added")
+		return
 	}
 
 	// Check default value
@@ -93,6 +94,7 @@ func TestAddVerboseFlag(t *testing.T) {
 	flag := cmd.Flags().Lookup("verbose")
 	if flag == nil {
 		t.Fatal("Expected --verbose flag to be added")
+		return
 	}
 
 	if flag.Shorthand != "v" {
@@ -323,6 +325,7 @@ func TestCommonFlags_FlagShorthands(t *testing.T) {
 			flag := cmd.Flags().Lookup(tt.flagName)
 			if flag == nil {
 				t.Fatalf("Flag %s not found", tt.flagName)
+				return
 			}
 
 			if flag.Shorthand != tt.shorthand {
@@ -343,6 +346,7 @@ func TestCommonFlags_LogLevelDefault(t *testing.T) {
 	flag := cmd.Flags().Lookup("log-level")
 	if flag == nil {
 		t.Fatal("Expected --log-level flag")
+		return
 	}
 
 	if flag.DefValue != "info" {

@@ -55,6 +55,7 @@ func TestStopFlagBlocks(t *testing.T) {
 	}
 	if consumed == nil {
 		t.Fatal("Consume() returned nil for stop flag")
+		return
 	}
 	if consumed.Type != interrupt.TypeStop {
 		t.Errorf("consumed type = %v, want stop", consumed.Type)
@@ -117,6 +118,7 @@ func TestSteerFlagConsumed(t *testing.T) {
 	}
 	if consumed == nil {
 		t.Fatal("Consume() returned nil")
+		return
 	}
 	if consumed.Type != interrupt.TypeSteer {
 		t.Errorf("consumed type = %v, want steer", consumed.Type)

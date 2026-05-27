@@ -12,6 +12,7 @@ func TestNewTokenSummaryListener(t *testing.T) {
 	listener := NewTokenSummaryListener()
 	if listener == nil {
 		t.Fatal("NewTokenSummaryListener() returned nil")
+		return
 	}
 
 	summary := listener.GetSummary()

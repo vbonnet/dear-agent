@@ -327,6 +327,7 @@ func TestTmuxLock_DoubleLock(t *testing.T) {
 	err := AcquireTmuxLock()
 	if err == nil {
 		t.Fatal("Second AcquireTmuxLock() should have failed but succeeded")
+		return
 	}
 
 	// Verify error message mentions double lock

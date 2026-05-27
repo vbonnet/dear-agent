@@ -8,6 +8,7 @@ func TestApproveCommand(t *testing.T) {
 	// Test command exists and is registered
 	if sendApproveCmd == nil {
 		t.Fatal("sendApproveCmd is nil")
+		return
 	}
 
 	if sendApproveCmd.Use != "approve <session-name>" {

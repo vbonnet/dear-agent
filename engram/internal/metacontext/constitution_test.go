@@ -27,6 +27,7 @@ This is the constitution.`
 
 	if cs == nil {
 		t.Fatal("ConstitutionService is nil")
+		return
 	}
 
 	// Verify GetConstitution
@@ -56,6 +57,7 @@ func TestNewConstitutionService_MissingFile(t *testing.T) {
 	cs, err := NewConstitutionService(tmpDir)
 	if err == nil {
 		t.Fatal("Expected error for missing constitution files, got nil")
+		return
 	}
 
 	if cs != nil {
@@ -115,6 +117,7 @@ func TestValidateIntegrity_RuntimeModification(t *testing.T) {
 	err = cs.ValidateIntegrity(ctx, tmpDir)
 	if err == nil {
 		t.Fatal("Expected error for runtime modification, got nil")
+		return
 	}
 
 	// Verify error message mentions forbidden runtime edits
@@ -148,6 +151,7 @@ func TestValidateIntegrity_RuntimeDeletion(t *testing.T) {
 	err = cs.ValidateIntegrity(ctx, tmpDir)
 	if err == nil {
 		t.Fatal("Expected error for runtime deletion, got nil")
+		return
 	}
 
 	expectedMsg := "constitution file deleted at runtime"
@@ -202,6 +206,7 @@ This is the constitution for Claude Code.`
 
 	if cs == nil {
 		t.Fatal("ConstitutionService is nil")
+		return
 	}
 
 	ctx := context.Background()
@@ -307,6 +312,7 @@ func TestValidateIntegrity_ClaudeMd_RuntimeModification(t *testing.T) {
 	err = cs.ValidateIntegrity(ctx, tmpDir)
 	if err == nil {
 		t.Fatal("Expected error for runtime modification of CLAUDE.md, got nil")
+		return
 	}
 
 	expectedMsg := "constitution file modified at runtime"
@@ -339,6 +345,7 @@ func TestValidateIntegrity_ClaudeMd_RuntimeDeletion(t *testing.T) {
 	err = cs.ValidateIntegrity(ctx, tmpDir)
 	if err == nil {
 		t.Fatal("Expected error for runtime deletion of CLAUDE.md, got nil")
+		return
 	}
 
 	expectedMsg := "constitution file deleted at runtime"
@@ -389,6 +396,7 @@ func TestNewConstitutionService_AgentsMdReadError(t *testing.T) {
 	cs, err := NewConstitutionService(tmpDir)
 	if err == nil {
 		t.Fatal("Expected error for unreadable AGENTS.md, got nil")
+		return
 	}
 
 	if cs != nil {

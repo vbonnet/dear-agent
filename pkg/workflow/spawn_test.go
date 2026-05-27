@@ -92,6 +92,7 @@ nodes:
 	rep, err := r.Run(context.Background(), w, nil)
 	if err == nil {
 		t.Fatalf("expected cycle error, got nil; report=%+v", rep)
+		return
 	}
 	if !strings.Contains(err.Error(), "cycle") {
 		t.Errorf("expected cycle error, got %v", err)
@@ -187,6 +188,7 @@ nodes:
 	_, err := r.Run(context.Background(), w, nil)
 	if err == nil {
 		t.Fatal("expected child failure to propagate")
+		return
 	}
 	if !strings.Contains(err.Error(), "spawner/doomed") {
 		t.Errorf("expected failed-child id in error, got %v", err)

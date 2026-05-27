@@ -55,6 +55,7 @@ func TestResolveEngramPath_UnknownPhase(t *testing.T) {
 	_, err := ResolveEngramPath("NONEXISTENT")
 	if err == nil {
 		t.Fatal("expected error for unknown phase, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "unknown phase") {
 		t.Errorf("expected 'unknown phase' error, got: %v", err)
@@ -146,6 +147,7 @@ func TestFindEngramRepoRoot_EnvVarInvalid(t *testing.T) {
 	_, err := findEngramRepoRoot()
 	if err == nil {
 		t.Fatal("expected error when no engram repo found, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "engram repo not found") {
 		t.Errorf("expected 'engram repo not found' error, got: %v", err)
@@ -189,6 +191,7 @@ func TestResolveEngramPath_FileNotFound(t *testing.T) {
 	_, err := ResolveEngramPath("CHARTER")
 	if err == nil {
 		t.Fatal("expected error when engram file missing, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "engram file not found") {
 		t.Errorf("expected 'engram file not found' error, got: %v", err)
@@ -199,6 +202,7 @@ func TestResolveEngramHash_UnknownPhase(t *testing.T) {
 	_, err := ResolveEngramHash("NONEXISTENT")
 	if err == nil {
 		t.Fatal("expected error for unknown phase, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "unknown phase") {
 		t.Errorf("expected 'unknown phase' error, got: %v", err)
@@ -209,6 +213,7 @@ func TestResolveEngramPathAndHash_UnknownPhase(t *testing.T) {
 	_, _, err := ResolveEngramPathAndHash("NONEXISTENT")
 	if err == nil {
 		t.Fatal("expected error for unknown phase, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "unknown phase") {
 		t.Errorf("expected 'unknown phase' error, got: %v", err)

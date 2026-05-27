@@ -35,6 +35,7 @@ func TestFileStateSaveLoad(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("Load returned nil, want snapshot")
+		return
 	}
 	if got.Workflow != snap.Workflow {
 		t.Errorf("Workflow = %q, want %q", got.Workflow, snap.Workflow)

@@ -145,6 +145,7 @@ func TestRouter_Generate_AllFail(t *testing.T) {
 	_, err := r.Generate(context.Background(), "research", &provider.GenerateRequest{Prompt: "hi"})
 	if err == nil {
 		t.Fatal("expected error when all candidates fail")
+		return
 	}
 	// The error message should mention both candidates and the role.
 	msg := err.Error()
