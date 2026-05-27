@@ -85,6 +85,18 @@ ok "lint clean"
 
 if [[ "$MODE" == "tests" || "$MODE" == "full" ]]; then
   step "go test ./... ${MODE_FLAGS:-}"
+  # Mirror ci.yml: CI_SKIP_TMUX=true on macOS, false on Linux. The tmux
+  # tests assume an isolated tmux server; on a developer's macOS box
+  # there's nearly always a stray attached tmux that turns these tests
+  # into a flake parade (TmuxLock_CrossProcess et al — see
+  # memory/dear-agent-ci-flakes.md). CI gets away with `false` only on
+  # ubuntu where every job starts a fresh sandbox.
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    export CI_SKIP_TMUX=true
+    warn "CI_SKIP_TMUX=true on macOS (mirrors ci.yml)"
+  else
+    export CI_SKIP_TMUX=false
+  fi
   # In --full we match CI exactly: -race -count=1. In --tests we skip -race
   # so contributors who just want a quick sanity check have a faster path.
   if [[ "$MODE" == "full" ]]; then
