@@ -1,12 +1,19 @@
-// Package phaseisolation implements the Wayfinder phase isolation system.
-// It manages 12-phase workflow execution with isolated contexts,
-// ported from the TypeScript implementation in cortex/lib/.
+// Package phaseisolation implements the Wayfinder V1 phase orchestrator
+// with per-phase isolated contexts.
+//
+// V1 walks 12 detailed phase IDs (D1-D4 + S4-S11). These map to the 9
+// canonical V2 phases (CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN,
+// SETUP, BUILD, RETRO) via V1ToV2PhaseMap below and the migration
+// bridge in wayfinder/cmd/wayfinder-session/internal/migrate. The V2
+// model is the canonical Wayfinder model — see wayfinder/PHASES.md for
+// the full truth table.
 package phaseisolation
 
-// PhaseID identifies a Wayfinder phase.
+// PhaseID identifies a Wayfinder V1 phase.
 type PhaseID string
 
-// PhaseID values for the 12-phase Wayfinder workflow.
+// PhaseID values for the V1 12-ID Wayfinder workflow
+// (= 9 canonical V2 phases after consolidation; see V1ToV2PhaseMap).
 const (
 	PhaseD1  PhaseID = "D1"
 	PhaseD2  PhaseID = "D2"
