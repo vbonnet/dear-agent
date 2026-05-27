@@ -121,20 +121,27 @@ func defaultOutputPath(now time.Time) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve $HOME: %w", err)
 	}
-	var dir string
-	switch runtime.GOOS {
+	return filepath.Join(outputDir(runtime.GOOS, home, os.Getenv("XDG_DATA_HOME")), now.Format("2006-01-02")+".ndjson"), nil
+}
+
+// outputDir resolves the per-platform NDJSON parent directory. Split out
+// from defaultOutputPath so tests can exercise every branch (darwin /
+// linux-with-XDG / linux-without-XDG / other) without depending on the
+// dev machine's runtime.GOOS — the macOS dev loop never executed the
+// XDG branch before this split, see the 2026-05-27 coverage audit.
+func outputDir(goos, home, xdgDataHome string) string {
+	switch goos {
 	case "darwin":
-		dir = filepath.Join(home, "Library", "Application Support", "dear-agent", "bumblebee")
+		return filepath.Join(home, "Library", "Application Support", "dear-agent", "bumblebee")
 	case "linux":
-		base := os.Getenv("XDG_DATA_HOME")
+		base := xdgDataHome
 		if base == "" {
 			base = filepath.Join(home, ".local", "share")
 		}
-		dir = filepath.Join(base, "dear-agent", "bumblebee")
+		return filepath.Join(base, "dear-agent", "bumblebee")
 	default:
-		dir = filepath.Join(home, ".dear-agent", "bumblebee")
+		return filepath.Join(home, ".dear-agent", "bumblebee")
 	}
-	return filepath.Join(dir, now.Format("2006-01-02")+".ndjson"), nil
 }
 
 // discoverCatalog honors $BUMBLEBEE_CATALOG if it points at a real file,

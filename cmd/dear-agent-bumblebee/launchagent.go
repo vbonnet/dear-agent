@@ -27,6 +27,13 @@ import (
 // launchAgentLabel matches the plist <key>Label</key> string.
 const launchAgentLabel = "com.dear-agent.bumblebee"
 
+// launchctlRun is the seam used to shell out to launchctl(1). Tests
+// override it to assert the call sequence without invoking launchd.
+// Production calls exec.Command("launchctl", args...).CombinedOutput().
+var launchctlRun = func(args ...string) ([]byte, error) {
+	return exec.Command("launchctl", args...).CombinedOutput()
+}
+
 // plistTemplate is the source-of-truth LaunchAgent definition, embedded at
 // build time. The template carries two placeholders, substituted at install:
 //
@@ -66,8 +73,7 @@ func runInstallLaunchAgent(args []string) error {
 }
 
 func statusLaunchAgent(domain string) error {
-	cmd := exec.Command("launchctl", "print", domain+"/"+launchAgentLabel)
-	out, err := cmd.CombinedOutput()
+	out, err := launchctlRun("print", domain+"/"+launchAgentLabel)
 	if err != nil {
 		fmt.Printf("%s is not loaded in %s\n", launchAgentLabel, domain)
 		return errors.New("not loaded")
@@ -85,7 +91,7 @@ func statusLaunchAgent(domain string) error {
 func uninstallLaunchAgent(domain, target string) error {
 	// bootout is the load-counterpart of bootstrap. Returns non-zero if the
 	// service wasn't loaded, which is fine on uninstall — swallow it.
-	_ = exec.Command("launchctl", "bootout", domain+"/"+launchAgentLabel).Run()
+	_, _ = launchctlRun("bootout", domain+"/"+launchAgentLabel)
 
 	if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
 		fmt.Printf("Not installed at %s (nothing to do)\n", target)
@@ -132,8 +138,8 @@ func installLaunchAgent(home, domain, target string) error {
 	// Reload: bootout the old (if any), bootstrap the new. bootstrap fails if
 	// the label is already loaded, so the bootout-first sequence is required
 	// for idempotent reinstall.
-	_ = exec.Command("launchctl", "bootout", domain+"/"+launchAgentLabel).Run()
-	if out, err := exec.Command("launchctl", "bootstrap", domain, target).CombinedOutput(); err != nil {
+	_, _ = launchctlRun("bootout", domain+"/"+launchAgentLabel)
+	if out, err := launchctlRun("bootstrap", domain, target); err != nil {
 		return fmt.Errorf("launchctl bootstrap %s %s: %w\n%s", domain, target, err, out)
 	}
 
