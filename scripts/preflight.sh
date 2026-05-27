@@ -78,13 +78,13 @@ fi
 # differ — drift between local and CI staticcheck versions has burned us
 # before (SA5011 false-positives, PR #158). Surface the version so it's
 # visible in the log.
-LINT_VER="$(golangci-lint version 2>&1 | head -1 || true)"
+LINT_VER="$(golangci-lint version 2>&1 | head -n 1 || true)"
 warn "local linter: ${LINT_VER}"
 golangci-lint run --timeout=5m ./... || fail "lint failed (see above)"
 ok "lint clean"
 
 if [[ "$MODE" == "tests" || "$MODE" == "full" ]]; then
-  step "go test ./... ${MODE_FLAGS:-}"
+  step "go test ./..."
   # Mirror ci.yml: CI_SKIP_TMUX=true on macOS, false on Linux. The tmux
   # tests assume an isolated tmux server; on a developer's macOS box
   # there's nearly always a stray attached tmux that turns these tests
@@ -122,10 +122,16 @@ if [[ "$MODE" == "full" ]]; then
   # rule is not worth the prettier filename.
   TMP_VULN=$(mktemp)
   trap 'rm -f "$TMP_VULN"' EXIT
-  # govulncheck exits 3 when findings exist (even allowlisted ones); without
-  # `|| true` the `set -e` at the top of this script kills the run before
-  # jq can filter — defeating the whole point of the allowlist.
-  govulncheck -format json -scan package ./... > "$TMP_VULN" || true
+  # govulncheck exit codes: 0 = no findings, 3 = findings (allowlisted or
+  # not). Anything else (compile error, panic, module load failure) is a
+  # real failure we must not mask. A blanket `|| true` would let those
+  # silently pass through with $TMP_VULN empty and jq returning "no
+  # findings" — a security-critical false-positive.
+  VULN_EXIT=0
+  govulncheck -format json -scan package ./... > "$TMP_VULN" || VULN_EXIT=$?
+  if [[ $VULN_EXIT -ne 0 && $VULN_EXIT -ne 3 ]]; then
+    fail "govulncheck failed to run (exit code $VULN_EXIT)"
+  fi
   unhandled=$(jq -c \
     --argjson allow '["GO-2025-3884"]' \
     'select(.finding != null)

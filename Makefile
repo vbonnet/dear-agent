@@ -47,7 +47,7 @@ preflight-full:
 # is broken. Does NOT replace CI — only shifts left. Refuses to overwrite
 # an existing hook (deepsec, husky, etc.) — merge manually if you have one.
 install-preflight-hook:
-	@HOOK="$$(git rev-parse --git-dir)/hooks/pre-push"; \
+	@HOOK="$$(git rev-parse --git-path hooks/pre-push)"; \
 	if [ -e "$$HOOK" ]; then \
 		echo "Error: a pre-push hook already exists at $$HOOK"; \
 		echo "Merge 'exec make preflight' into it manually, or remove it first."; \
