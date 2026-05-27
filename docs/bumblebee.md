@@ -31,8 +31,9 @@ decision record.
 
 The binary is pinned to a specific release with an SHA-256 checksum
 verified before the tarball is opened. The pin and the digests live in
-`scripts/bumblebee-install.sh`; bumping them is a deliberate, reviewed
-change. Re-uploaded or MITM'd releases fail closed.
+`cmd/dear-agent-bumblebee/install.go` (`BumblebeeVersion` + `pinnedDigests`);
+bumping them is a deliberate, reviewed change. Re-uploaded or MITM'd
+releases fail closed.
 
 ```bash
 make bumblebee-install
@@ -59,8 +60,8 @@ record-count summary to stderr.
 Profile, root, and extra args pass through:
 
 ```bash
-scripts/bumblebee-scan.sh --profile baseline
-scripts/bumblebee-scan.sh --profile deep --root "$HOME"
+dear-agent-bumblebee scan --profile baseline
+dear-agent-bumblebee scan --profile deep --root "$HOME"
 ```
 
 ## Run on a schedule (macOS)
@@ -68,7 +69,7 @@ scripts/bumblebee-scan.sh --profile deep --root "$HOME"
 ```bash
 make install-bumblebee-launchagent      # daily at 04:00 local
 make uninstall-bumblebee-launchagent
-scripts/install-bumblebee-launchagent.sh --status
+dear-agent-bumblebee install-launchagent --status
 ```
 
 LaunchAgent (per-user), **not** LaunchDaemon (root). Bumblebee inventories
@@ -83,7 +84,7 @@ launchctl kickstart gui/$UID/com.dear-agent.bumblebee
 ```
 
 On Linux, set up an equivalent `systemd --user` timer or a cron entry that
-runs `scripts/bumblebee-scan.sh`. We don't ship one yet; see ADR-027 for
+runs `dear-agent-bumblebee scan`. We don't ship one yet; see ADR-027 for
 why.
 
 ## Exposure catalog (optional, recommended later)

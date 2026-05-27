@@ -54,10 +54,11 @@ Bumblebee is *the* tool we're installing because we don't trust silent
 updates to other tools on this machine — so the install path itself must
 not be a TOFU step.
 
-`scripts/bumblebee-install.sh` downloads a specific tagged tarball
-(`v0.1.1`) and verifies the SHA-256 against a digest embedded in the
-script *before* the tarball is opened. The digests were captured
-2026-05-26 from two independent sources that matched:
+`dear-agent-bumblebee install` (in `cmd/dear-agent-bumblebee/install.go`)
+downloads a specific tagged tarball (`v0.1.1`) and verifies the SHA-256
+against a digest embedded in the binary *before* the tarball is opened.
+The digests were captured 2026-05-26 from two independent sources that
+matched:
 
 1. The GitHub release-asset digest API
 2. The upstream `checksums.txt` artifact

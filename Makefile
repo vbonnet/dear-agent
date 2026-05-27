@@ -12,12 +12,13 @@
 #   deepsec-staged          Scan staged files only with deepsec
 #   install-deepsec-hook    Install pre-push hook for incremental deepsec scans
 #   uninstall-deepsec-hook  Remove the deepsec pre-push hook
+#   build-bumblebee         Build the dear-agent-bumblebee Go binary
 #   bumblebee-install       Install pinned, checksum-verified Bumblebee binary
 #   bumblebee-scan          Run a one-shot Bumblebee endpoint scan
 #   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 
-.PHONY: act-validate act-lint act-test install-hooks test-shell build-configure-settings uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent
+.PHONY: act-validate act-lint act-test install-hooks test-shell build-configure-settings uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent
 
 # Run full local CI validation via act
 act-validate: act-lint act-test
@@ -121,22 +122,35 @@ install-deepsec-hook:
 uninstall-deepsec-hook:
 	@./scripts/install-deepsec-hook.sh --uninstall
 
+# Build the bumblebee installer + scan-wrapper Go binary. Drops into
+# bin/dear-agent-bumblebee; the LaunchAgent points at the installed copy
+# (see install-bumblebee-launchagent below), so a `go install`'d binary on
+# PATH is preferable for the scheduled case.
+build-bumblebee:
+	@echo "Building dear-agent-bumblebee..."
+	go build $(GOFLAGS) -o bin/dear-agent-bumblebee ./cmd/dear-agent-bumblebee/
+	@echo "Built: bin/dear-agent-bumblebee"
+
 # Install a pinned, checksum-verified Bumblebee binary into ~/.local/bin
 # (override with BUMBLEBEE_PREFIX=/path). Verifies SHA-256 before extracting
-# the tarball — see ADR-027 and scripts/bumblebee-install.sh.
-bumblebee-install:
-	@./scripts/bumblebee-install.sh $(if $(BUMBLEBEE_PREFIX),--prefix $(BUMBLEBEE_PREFIX),)
+# the tarball — see ADR-027 and cmd/dear-agent-bumblebee/install.go.
+bumblebee-install: build-bumblebee
+	@./bin/dear-agent-bumblebee install $(if $(BUMBLEBEE_PREFIX),--prefix $(BUMBLEBEE_PREFIX),)
 
 # Run a one-shot Bumblebee endpoint scan. NDJSON output lands in the per-user
 # data dir; the wrapper prints a one-line summary. Honours BUMBLEBEE_BIN
 # (binary override) and BUMBLEBEE_CATALOG (exposure catalog).
-bumblebee-scan:
-	@./scripts/bumblebee-scan.sh
+bumblebee-scan: build-bumblebee
+	@./bin/dear-agent-bumblebee scan
 
 # Install the daily Bumblebee LaunchAgent (macOS, per-user). Runs at 04:00
-# local. See docs/bumblebee.md and ADR-027.
-install-bumblebee-launchagent:
-	@./scripts/install-bumblebee-launchagent.sh
+# local. See docs/bumblebee.md and ADR-027. The LaunchAgent invokes the
+# installed dear-agent-bumblebee binary, so this target installs into
+# $HOME/.local/bin first so the plist references a stable path.
+install-bumblebee-launchagent: build-bumblebee
+	@mkdir -p $(HOME)/.local/bin
+	@install -m 0755 bin/dear-agent-bumblebee $(HOME)/.local/bin/dear-agent-bumblebee
+	@$(HOME)/.local/bin/dear-agent-bumblebee install-launchagent
 
-uninstall-bumblebee-launchagent:
-	@./scripts/install-bumblebee-launchagent.sh --uninstall
+uninstall-bumblebee-launchagent: build-bumblebee
+	@./bin/dear-agent-bumblebee install-launchagent --uninstall
