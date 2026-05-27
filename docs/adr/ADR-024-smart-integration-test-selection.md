@@ -134,6 +134,18 @@ matrix, which still runs `./...` without tags. We keep the property
 changed." We do not yet claim "green CI ⇒ all integration tests pass" —
 that lives in a release workflow.
 
+**Day-one posture: informational, not blocking.** The
+`integration-tests` job ships with `continue-on-error: true`. The
+`-tags=integration` suites have been running only in local worktrees, so
+the first PR to wire them into CI inevitably surfaces latent failures
+(build errors, package-level regressions, fixture drift) in code this
+ADR did not touch. Blocking the rollout PR on those would be a chicken-
+and-egg deadlock. The job runs, posts results, and links to the failing
+suites so we can fix them on follow-up PRs — but a red light here does
+not block merge. **Ratchet path:** drive the suite green on main, then
+flip `continue-on-error` off in `ci.yml` and add `CI / Integration
+Tests (affected)` to the branch-protection required-status-checks list.
+
 ---
 
 ## Alternatives considered
