@@ -31,13 +31,16 @@ func extractText(t *testing.T, r *mcp.CallToolResult) string {
 	t.Helper()
 	if r == nil {
 		t.Fatal("nil CallToolResult")
+		return ""
 	}
 	if len(r.Content) != 1 {
 		t.Fatalf("Content len = %d, want 1", len(r.Content))
+		return ""
 	}
 	tc, ok := r.Content[0].(*mcp.TextContent)
 	if !ok {
 		t.Fatalf("Content[0] = %T, want *mcp.TextContent", r.Content[0])
+		return ""
 	}
 	return tc.Text
 }
@@ -289,6 +292,7 @@ func TestAddListOpsTool_EndToEnd(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatalf("agm_list_ops not registered; got %v", tools.Tools)
+		return
 	}
 	if !strings.Contains(found.Description, "schema discovery") {
 		t.Errorf("description %q should mention schema discovery", found.Description)
