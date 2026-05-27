@@ -15,6 +15,7 @@ func TestNewBuildLoopExecutor(t *testing.T) {
 
 	if executor == nil {
 		t.Fatal("expected executor, got nil")
+		return
 	}
 
 	if executor.context.CurrentState != BuildLoopStateIdle {
@@ -453,6 +454,7 @@ func TestUpdatePhaseHistory(t *testing.T) {
 
 	if s8Entry == nil {
 		t.Fatal("S8 entry not found in history")
+		return
 	}
 
 	if s8Entry.BuildIterations != 5 {

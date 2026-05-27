@@ -175,6 +175,7 @@ func TestNewHealthChecker(t *testing.T) {
 
 	if hc == nil {
 		t.Fatal("NewHealthChecker returned nil")
+		return
 	}
 
 	if hc.cacheDuration != cacheDuration {

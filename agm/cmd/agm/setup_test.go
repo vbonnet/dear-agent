@@ -94,6 +94,7 @@ func TestSetupCommand_CheckFlag(t *testing.T) {
 	flag := setupCmd.Flags().Lookup("check")
 	if flag == nil {
 		t.Fatal("expected --check flag to be registered")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("expected default false, got %s", flag.DefValue)

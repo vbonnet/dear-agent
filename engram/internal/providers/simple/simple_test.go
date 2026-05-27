@@ -257,6 +257,7 @@ func TestSimpleFileProvider_UpdateMemory_AppendNonString(t *testing.T) {
 	err := provider.UpdateMemory(ctx, namespace, "mem-struct", updates)
 	if err == nil {
 		t.Fatal("Expected error for appending to non-string content, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "cannot append to non-string content") {

@@ -47,6 +47,7 @@ func TestPlatform_WithTelemetry_Integration(t *testing.T) {
 			cfg := platform.Config()
 			if cfg == nil {
 				t.Fatal("Platform.Config() returned nil")
+				return
 			}
 			if cfg.Platform.TokenBudget != 5000 {
 				t.Errorf("Config.Platform.TokenBudget = %d, want 5000", cfg.Platform.TokenBudget)

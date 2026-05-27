@@ -71,6 +71,7 @@ func TestWebhookDispatcher_DoesNotRetry4xx(t *testing.T) {
 	err := d.Dispatch(context.Background(), &Notification{ID: "x"})
 	if err == nil {
 		t.Fatal("expected error from 400 response")
+		return
 	}
 	if !strings.Contains(err.Error(), "400") {
 		t.Errorf("error should mention 400, got: %v", err)
@@ -119,6 +120,7 @@ func TestWebhookDispatcher_Retries5xxExhausts(t *testing.T) {
 	err := d.Dispatch(context.Background(), &Notification{ID: "x"})
 	if err == nil {
 		t.Fatal("expected error after retries exhausted")
+		return
 	}
 	// maxRetries=2 → initial attempt + 2 retries = 3 calls.
 	if got := atomic.LoadInt32(&calls); got != 3 {

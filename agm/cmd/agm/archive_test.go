@@ -620,6 +620,7 @@ func TestArchiveSession_AsyncFlag(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("Expected error when using --async on a stopped session, got nil")
+		return
 	}
 
 	expectedMsg := "--async should only be used for active sessions"
@@ -687,6 +688,7 @@ func TestArchiveSession_AsyncIncompatibleWithAll(t *testing.T) {
 	err := archiveSession(nil, []string{})
 	if err == nil {
 		t.Fatal("Expected error for --async + --all, got nil")
+		return
 	}
 
 	expectedMsg := "--async flag is not compatible with --all"
@@ -741,6 +743,7 @@ func TestSpawnReaper_SessionNameSanitization(t *testing.T) {
 			// Should get error about missing binary (expected in tests)
 			if err == nil {
 				t.Fatal("Expected error about missing binary, got nil")
+				return
 			}
 
 			// Verify error message mentions expected log path (sanitized)

@@ -35,6 +35,7 @@ func TestInitCommand_Help(t *testing.T) {
 
 	if initCmd == nil {
 		t.Fatal("init command not found")
+		return
 	}
 
 	if initCmd.Short == "" {

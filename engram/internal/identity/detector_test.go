@@ -19,6 +19,7 @@ func TestManager_Detect_Success(t *testing.T) {
 
 	if id == nil {
 		t.Fatal("Detect() returned nil identity")
+		return
 	}
 
 	// Verify identity fields are populated

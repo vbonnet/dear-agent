@@ -65,6 +65,7 @@ commands:
 		// Should timeout
 		if err == nil {
 			t.Fatal("Execute() succeeded, want timeout error")
+			return
 		}
 
 		// Verify error message
@@ -157,6 +158,7 @@ commands:
 		// Should be cancelled
 		if err == nil {
 			t.Fatal("Execute() succeeded, want cancellation error")
+			return
 		}
 
 		// Verify error message indicates cancellation
@@ -235,6 +237,7 @@ commands:
 
 		if err == nil {
 			t.Fatal("Execute() succeeded for slow command, want timeout error")
+			return
 		}
 
 		if !strings.Contains(err.Error(), "timeout") {
@@ -310,6 +313,7 @@ commands:
 	_, err = executor.Execute(context.Background(), plugin, "my-command", []string{})
 	if err == nil {
 		t.Fatal("Execute() succeeded, want timeout error")
+		return
 	}
 
 	errMsg := err.Error()

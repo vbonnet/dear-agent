@@ -69,6 +69,7 @@ func TestParseJSONL_EmptyFile(t *testing.T) {
 	_, err := ParseJSONL(path)
 	if err == nil {
 		t.Fatal("expected error for empty file, got nil")
+		return
 	}
 	if err.Error() != "empty file" {
 		t.Errorf("expected 'empty file' error, got: %v", err)

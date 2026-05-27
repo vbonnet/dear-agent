@@ -47,6 +47,7 @@ func TestNewLoader(t *testing.T) {
 
 	if loader == nil {
 		t.Fatal("NewLoader() returned nil")
+		return
 	}
 
 	if loader.paths == nil {
