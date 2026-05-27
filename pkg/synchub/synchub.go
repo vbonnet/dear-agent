@@ -28,6 +28,7 @@ import (
 // surfaces (Slack, web preview, …) can be added without a type change.
 type Surface string
 
+// Known surface identifiers. Add new constants here as surfaces come online.
 const (
 	SurfaceTerminal Surface = "terminal"
 	SurfaceDesktop  Surface = "desktop"

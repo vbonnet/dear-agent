@@ -81,6 +81,7 @@ func (e *ClosedError) Error() string {
 		e.QuestionID, e.Winner, e.At.Format(time.RFC3339Nano))
 }
 
+// Is reports whether target is ErrClosed, enabling errors.Is matching.
 func (e *ClosedError) Is(target error) bool { return target == ErrClosed }
 
 // ExpiredError is returned when a round timed out before any answer landed.
@@ -94,6 +95,7 @@ func (e *ExpiredError) Error() string {
 		e.QuestionID, e.At.Format(time.RFC3339Nano))
 }
 
+// Is reports whether target is ErrExpired, enabling errors.Is matching.
 func (e *ExpiredError) Is(target error) bool { return target == ErrExpired }
 
 // AskOption tunes a single AskQuestion call. Variadic so the call site
@@ -164,6 +166,8 @@ func (h *Hub) Answer(ctx context.Context, qid QuestionID, surface Surface, paylo
 		return Answer{}, ErrNotFound
 	}
 	switch r.state {
+	case roundOpen:
+		// Happy path: fall through to TTL check + arbitration below.
 	case roundAnswered:
 		err := &ClosedError{QuestionID: qid, Winner: r.winner, At: r.closedAt}
 		h.mu.Unlock()

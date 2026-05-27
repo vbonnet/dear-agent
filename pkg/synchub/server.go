@@ -137,7 +137,8 @@ func (s *Server) Addr() string {
 // loop runs in its own goroutine. Token is written to TokenFile before
 // the listener accepts the first connection.
 func (s *Server) Start(ctx context.Context) error {
-	ln, err := net.Listen("tcp", s.opts.Listen)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", s.opts.Listen)
 	if err != nil {
 		return fmt.Errorf("synchub: listen %s: %w", s.opts.Listen, err)
 	}

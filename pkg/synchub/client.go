@@ -100,11 +100,19 @@ type ClientLockHandle struct {
 	deadline time.Time
 }
 
-func (h *ClientLockHandle) Key() string         { return h.key }
-func (h *ClientLockHandle) Holder() string      { return h.holder }
-func (h *ClientLockHandle) Fence() uint64       { return h.fence }
+// Key returns the lock key this handle holds.
+func (h *ClientLockHandle) Key() string { return h.key }
+
+// Holder returns the holder identity recorded when the lock was acquired.
+func (h *ClientLockHandle) Holder() string { return h.holder }
+
+// Fence returns the monotonically increasing fence token issued by the server.
+func (h *ClientLockHandle) Fence() uint64 { return h.fence }
+
+// Deadline returns the server-side auto-release deadline for this handle.
 func (h *ClientLockHandle) Deadline() time.Time { return h.deadline }
 
+// Release sends the fence token back to the server to drop the lock.
 func (h *ClientLockHandle) Release(ctx context.Context) error {
 	var resp struct{}
 	return h.client.do(ctx, "/v1/lock/release", releaseReq{Key: h.key, Fence: h.fence}, &resp)
@@ -192,9 +200,15 @@ type RemoteError struct {
 }
 
 func (e *RemoteError) Error() string { return e.message }
+
+// Is reports whether target matches the wrapped sentinel, enabling errors.Is.
 func (e *RemoteError) Is(target error) bool {
 	return target == e.sentinel || errors.Is(e.sentinel, target)
 }
-func (e *RemoteError) Unwrap() error          { return e.sentinel }
-func (e *RemoteError) Code() string           { return e.code }
+func (e *RemoteError) Unwrap() error { return e.sentinel }
+
+// Code returns the machine-readable error category from the server response.
+func (e *RemoteError) Code() string { return e.code }
+
+// Details returns structured metadata the server attached to the error.
 func (e *RemoteError) Details() map[string]any { return e.details }
