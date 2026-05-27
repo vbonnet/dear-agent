@@ -11,6 +11,7 @@ func TestDisposableFlag_Registered(t *testing.T) {
 	flag := newCmd.Flags().Lookup("disposable")
 	if flag == nil {
 		t.Fatal("expected --disposable flag to be registered on newCmd")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("expected default value 'false', got %q", flag.DefValue)
@@ -22,6 +23,7 @@ func TestDisposableTTLFlag_Registered(t *testing.T) {
 	flag := newCmd.Flags().Lookup("disposable-ttl")
 	if flag == nil {
 		t.Fatal("expected --disposable-ttl flag to be registered on newCmd")
+		return
 	}
 	if flag.DefValue != "4h" {
 		t.Errorf("expected default value '4h', got %q", flag.DefValue)

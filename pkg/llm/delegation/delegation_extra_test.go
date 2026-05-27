@@ -326,6 +326,7 @@ func TestSelectStrategyWithFallback_EmptyProviderFallback(t *testing.T) {
 	}
 	if strategy == nil {
 		t.Fatal("expected non-nil strategy")
+		return
 	}
 	// Empty provider with fallback → ExternalAPI with default "anthropic"
 	if strategy.Name() != "ExternalAPI" {

@@ -16,6 +16,7 @@ func TestNewValidator(t *testing.T) {
 
 	if v == nil {
 		t.Fatal("NewValidator returned nil")
+		return
 	}
 
 	if v.status != s {

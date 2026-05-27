@@ -108,6 +108,7 @@ func TestNewGeminiDeepResearch(t *testing.T) {
 	w := NewGeminiDeepResearch()
 	if w == nil {
 		t.Fatal("NewGeminiDeepResearch() returned nil")
+		return
 	}
 	if w.cliPath == "" {
 		t.Error("NewGeminiDeepResearch() produced empty cliPath")

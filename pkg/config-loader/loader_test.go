@@ -233,6 +233,7 @@ func TestLoadOrDefault(t *testing.T) {
 			cfg := LoadOrDefault(tt.path, defaults)
 			if cfg == nil {
 				t.Fatal("LoadOrDefault() returned nil")
+				return
 			}
 			if cfg.Name != tt.wantName {
 				t.Errorf("Name = %q, want %q (from %s)", cfg.Name, tt.wantName, tt.checkFrom)
@@ -295,6 +296,7 @@ func TestLoadErrorMessages(t *testing.T) {
 			_, err := Load[SimpleConfig](tt.path)
 			if err == nil {
 				t.Fatal("Load() expected error, got nil")
+				return
 			}
 			if !strings.Contains(err.Error(), tt.wantContain) {
 				t.Errorf("Error message %q does not contain %q", err.Error(), tt.wantContain)

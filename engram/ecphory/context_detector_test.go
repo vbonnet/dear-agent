@@ -11,6 +11,7 @@ func TestNewContextDetector(t *testing.T) {
 	detector := NewContextDetector()
 	if detector == nil {
 		t.Fatal("NewContextDetector() returned nil")
+		return
 	}
 
 	if detector.debuggingKeywords == nil {
