@@ -1,7 +1,11 @@
 # Root Makefile for dear-agent
 #
 # Targets:
-#   act-validate            Run full local CI validation via act
+#   preflight               Fast local CI-parity gates: vet + build + lint  (~25s)
+#   preflight-tests         preflight + go test (no -race) — quick sanity
+#   preflight-full          preflight + go test -race + govulncheck (full parity)
+#   install-preflight-hook  Install a git pre-push hook that runs preflight
+#   act-validate            Run full local CI validation via act (needs Docker)
 #   act-lint                Run lint job via act
 #   act-test                Run test job via act
 #   install-hooks           Install git pre-push hook for act validation
@@ -18,9 +22,43 @@
 #   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 
-.PHONY: act-validate act-lint act-test install-hooks test-shell build-configure-settings uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent
+.PHONY: preflight preflight-tests preflight-full install-preflight-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent
 
-# Run full local CI validation via act
+# Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
+# CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm
+# build cache. See docs/retros/2026-05-27-ci-shift-left.md for the rationale
+# (CI on GitHub is not part of the inner dev loop).
+preflight:
+	@./scripts/preflight.sh --fast
+
+# preflight + `go test` without -race. Faster than full CI parity but still
+# catches behaviour regressions a lint-only sweep misses.
+preflight-tests:
+	@./scripts/preflight.sh --tests
+
+# Full CI parity: preflight + `go test -race -count=1` + govulncheck with
+# the same allowlist as ci.yml. Slower but gives the highest confidence
+# before pushing.
+preflight-full:
+	@./scripts/preflight.sh --full
+
+# Install a git pre-push hook that runs `make preflight`. Pushing to a PR
+# branch will then fail-fast before the GitHub round-trip if lint/build/vet
+# is broken. Does NOT replace CI — only shifts left. Refuses to overwrite
+# an existing hook (deepsec, husky, etc.) — merge manually if you have one.
+install-preflight-hook:
+	@HOOK="$$(git rev-parse --git-path hooks/pre-push)"; \
+	if [ -e "$$HOOK" ]; then \
+		echo "Error: a pre-push hook already exists at $$HOOK"; \
+		echo "Merge 'exec make preflight' into it manually, or remove it first."; \
+		exit 1; \
+	fi; \
+	printf '#!/bin/sh\nexec make preflight\n' > "$$HOOK"; \
+	chmod +x "$$HOOK"; \
+	echo "Installed: $$HOOK -> make preflight"
+
+# Run full local CI validation via act. Requires Docker + act installed.
+# Prefer `make preflight-full` for the same gates without containerisation.
 act-validate: act-lint act-test
 	@echo "All act jobs passed."
 
