@@ -49,6 +49,7 @@ func TestAuditResourcesCmd_FixFlag(t *testing.T) {
 	flag := auditResourcesCmd.Flags().Lookup("fix")
 	if flag == nil {
 		t.Fatal("Expected --fix flag")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("Expected default false, got %q", flag.DefValue)
@@ -59,6 +60,7 @@ func TestAuditResourcesCmd_WorktreesDirFlag(t *testing.T) {
 	flag := auditResourcesCmd.Flags().Lookup("worktrees-dir")
 	if flag == nil {
 		t.Fatal("Expected --worktrees-dir flag")
+		return
 	}
 	if flag.DefValue != "" {
 		t.Errorf("Expected empty default, got %q", flag.DefValue)

@@ -40,6 +40,7 @@ func TestTryAutoStart_ScriptNotFound(t *testing.T) {
 	err := tryAutoStart("/nonexistent/script.sh")
 	if err == nil {
 		t.Fatal("expected error for non-existent script")
+		return
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("error should mention 'not found': %v", err)
@@ -58,6 +59,7 @@ func TestTryAutoStart_ScriptNotExecutable(t *testing.T) {
 	err = tryAutoStart(f.Name())
 	if err == nil {
 		t.Fatal("expected error for non-executable script")
+		return
 	}
 	if !strings.Contains(err.Error(), "not executable") {
 		t.Errorf("error should mention 'not executable': %v", err)
@@ -81,6 +83,7 @@ func TestTryAutoStart_ScriptFails(t *testing.T) {
 	err := tryAutoStart(script)
 	if err == nil {
 		t.Fatal("expected error for failing script")
+		return
 	}
 	if !strings.Contains(err.Error(), "failed") {
 		t.Errorf("error should mention 'failed': %v", err)
@@ -91,6 +94,7 @@ func TestNewAdapter_NilConfig(t *testing.T) {
 	_, err := New(nil)
 	if err == nil {
 		t.Fatal("expected error for nil config")
+		return
 	}
 	if !strings.Contains(err.Error(), "config cannot be nil") {
 		t.Errorf("unexpected error: %v", err)
@@ -101,6 +105,7 @@ func TestNewAdapter_EmptyWorkspace(t *testing.T) {
 	_, err := New(&Config{Port: "3307"})
 	if err == nil {
 		t.Fatal("expected error for empty workspace")
+		return
 	}
 	if !strings.Contains(err.Error(), "workspace cannot be empty") {
 		t.Errorf("unexpected error: %v", err)
@@ -111,6 +116,7 @@ func TestNewAdapter_EmptyPort(t *testing.T) {
 	_, err := New(&Config{Workspace: "test"})
 	if err == nil {
 		t.Fatal("expected error for empty port")
+		return
 	}
 	if !strings.Contains(err.Error(), "port cannot be empty") {
 		t.Errorf("unexpected error: %v", err)
@@ -128,6 +134,7 @@ func TestNewAdapter_ConnectionFailsNoScript(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error when server not running")
+		return
 	}
 	if !strings.Contains(err.Error(), "failed to connect to Dolt") {
 		t.Errorf("error should mention connection failure: %v", err)
@@ -153,6 +160,7 @@ func TestNewAdapter_ConnectionFailsWithScript(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error when server not running")
+		return
 	}
 	// In test mode, auto-start is skipped, so we get the hint message
 	if !strings.Contains(err.Error(), "Hint:") {

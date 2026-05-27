@@ -15,6 +15,7 @@ func TestEcphoryAuditLogger_New(t *testing.T) {
 
 	if logger == nil {
 		t.Fatal("NewEcphoryAuditLogger() returned nil")
+		return
 	}
 
 	if logger.logDir != "/tmp/test-logs" {
@@ -177,6 +178,7 @@ func TestPersonaEffectivenessLogger_New(t *testing.T) {
 
 	if logger == nil {
 		t.Fatal("NewPersonaEffectivenessLogger() returned nil")
+		return
 	}
 
 	if logger.logDir != "/tmp/test-logs" {
@@ -281,6 +283,7 @@ func TestWayfinderROILogger_New(t *testing.T) {
 
 	if logger == nil {
 		t.Fatal("NewWayfinderROILogger() returned nil")
+		return
 	}
 
 	if logger.logDir != "/tmp/test-logs" {

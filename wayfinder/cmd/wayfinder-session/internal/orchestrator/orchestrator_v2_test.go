@@ -14,6 +14,7 @@ func TestNewPhaseOrchestratorV2(t *testing.T) {
 
 	if orch == nil {
 		t.Fatal("expected orchestrator, got nil")
+		return
 	}
 
 	if orch.status != st {

@@ -46,6 +46,7 @@ func TestNewRegistry(t *testing.T) {
 	registry := NewRegistry()
 	if registry == nil {
 		t.Fatal("NewRegistry() returned nil")
+		return
 	}
 	if registry.plugins == nil {
 		t.Fatal("Registry plugins map is nil")
@@ -201,6 +202,7 @@ func TestAutoDetect(t *testing.T) {
 	detected := registry.AutoDetect("/test/session")
 	if detected == nil {
 		t.Fatal("AutoDetect() returned nil, expected plugin2")
+		return
 	}
 
 	if detected.Metadata().Name != "plugin2" {

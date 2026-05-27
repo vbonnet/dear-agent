@@ -53,6 +53,7 @@ func TestCleanupWorktreesCmd_ForceFlag(t *testing.T) {
 	flag := cleanupWorktreesCmd.Flags().Lookup("force")
 	if flag == nil {
 		t.Fatal("Expected --force flag to be registered")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("Expected default value 'false' for --force, got %q", flag.DefValue)
@@ -66,6 +67,7 @@ func TestCleanupWorktreesCmd_DeleteBranchesFlag(t *testing.T) {
 	flag := cleanupWorktreesCmd.Flags().Lookup("delete-branches")
 	if flag == nil {
 		t.Fatal("Expected --delete-branches flag to be registered")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("Expected default value 'false' for --delete-branches, got %q", flag.DefValue)
@@ -79,6 +81,7 @@ func TestCleanupWorktreesCmd_DryRunFlag(t *testing.T) {
 	flag := cleanupWorktreesCmd.Flags().Lookup("dry-run")
 	if flag == nil {
 		t.Fatal("Expected --dry-run flag to be registered")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("Expected default value 'false' for --dry-run, got %q", flag.DefValue)
@@ -92,6 +95,7 @@ func TestCleanupWorktreesCmd_SessionFlag(t *testing.T) {
 	flag := cleanupWorktreesCmd.Flags().Lookup("session")
 	if flag == nil {
 		t.Fatal("Expected --session flag to be registered")
+		return
 	}
 	if flag.DefValue != "" {
 		t.Errorf("Expected default value '' for --session, got %q", flag.DefValue)

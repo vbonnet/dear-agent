@@ -158,6 +158,7 @@ func TestNewClaudeActivityTracker_DefaultPath(t *testing.T) {
 	tracker := NewClaudeActivityTracker()
 	if tracker == nil {
 		t.Fatalf("Expected tracker, got nil")
+		return
 	}
 
 	// Check that historyPath is set (should be ~/.claude/history.jsonl)

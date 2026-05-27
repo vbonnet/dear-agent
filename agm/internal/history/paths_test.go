@@ -465,6 +465,7 @@ func TestGetHistoryPaths(t *testing.T) {
 				}
 				if result == nil {
 					t.Fatal("GetHistoryPaths() result is nil")
+					return
 				}
 				if result.Harness != tt.wantHarness {
 					t.Errorf("GetHistoryPaths() agent = %q, want %q", result.Harness, tt.wantHarness)

@@ -270,6 +270,7 @@ func TestRegistry_Hooks_OnAudit_AccumulatesErrors(t *testing.T) {
 	err := composed.OnAudit(context.Background(), workflow.AuditPayload{})
 	if err == nil {
 		t.Fatal("expected joined error")
+		return
 	}
 	// All three plugins should have run: substrate guarantee.
 	if len(ran) != 3 {
@@ -375,6 +376,7 @@ func TestRegistry_ApplyChecks_ConflictingCheckIDs(t *testing.T) {
 	err := r.ApplyChecks(target)
 	if err == nil {
 		t.Fatal("expected duplicate-ID error")
+		return
 	}
 	// The error should attribute the conflict to one of the plugins.
 	if !strings.Contains(err.Error(), `plugin "`) {

@@ -49,6 +49,7 @@ func TestExecutor_Run_Success(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("result should not be nil")
+		return
 	}
 
 	if len(result.Timings) != 5 {

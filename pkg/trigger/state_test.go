@@ -77,6 +77,7 @@ func TestLoadMissingFile(t *testing.T) {
 
 	if state == nil {
 		t.Fatal("expected non-nil state")
+		return
 	}
 
 	if len(state.LastInjected) != 0 {

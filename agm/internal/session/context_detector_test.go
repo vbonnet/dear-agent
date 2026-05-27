@@ -60,6 +60,7 @@ func TestExtractTokenUsage(t *testing.T) {
 
 			if usage == nil {
 				t.Fatal("expected usage, got nil")
+				return
 			}
 
 			if usage.UsedTokens != tt.wantUsed {
@@ -148,6 +149,7 @@ func TestDetectContextFromConversationLog(t *testing.T) {
 
 	if usage == nil {
 		t.Fatal("expected usage, got nil")
+		return
 	}
 
 	// Should get most recent token usage (75000/200000 = 37.5%)
@@ -342,6 +344,7 @@ func TestExtractUsageFromJSONL(t *testing.T) {
 			}
 			if usage == nil {
 				t.Fatal("expected usage, got nil")
+				return
 			}
 			if usage.UsedTokens != tt.wantUsed {
 				t.Errorf("UsedTokens = %d, want %d", usage.UsedTokens, tt.wantUsed)
@@ -418,6 +421,7 @@ func TestExtractUsageFromJSONL_Integration(t *testing.T) {
 	}
 	if usage == nil {
 		t.Fatal("expected usage, got nil")
+		return
 	}
 
 	// Last assistant: input=800 + cache_creation=6000 + cache_read=40000 = 46800
@@ -550,6 +554,7 @@ func TestDetectContextFromStatusLine(t *testing.T) {
 	}
 	if usage == nil {
 		t.Fatal("expected usage, got nil")
+		return
 	}
 	if usage.TotalTokens != 200000 {
 		t.Errorf("TotalTokens = %d, want 200000", usage.TotalTokens)
@@ -593,6 +598,7 @@ func TestDetectContextFromStatusLine_CumulativeExceedsWindow(t *testing.T) {
 	}
 	if usage == nil {
 		t.Fatal("expected usage, got nil")
+		return
 	}
 	// UsedTokens must be derived from percentage × window, not TotalInputTokens
 	wantUsed := int(math.Round(41.0 / 100.0 * 200000)) // 82000
@@ -633,6 +639,7 @@ func TestDetectContextFromStatusLine_PostCompactNearZero(t *testing.T) {
 	}
 	if usage == nil {
 		t.Fatal("expected usage, got nil")
+		return
 	}
 	wantUsed := int(math.Round(6.0 / 100.0 * 200000)) // 12000
 	if usage.UsedTokens != wantUsed {
@@ -867,6 +874,7 @@ func TestScanConversationLog(t *testing.T) {
 		}
 		if usage == nil {
 			t.Fatal("expected usage, got nil")
+			return
 		}
 		// Last JSONL assistant entry should be the final context reading
 		// 2000 input / 200000 = 1%
@@ -952,6 +960,7 @@ func TestExtractUsageFromJSONL_ProgressType(t *testing.T) {
 			}
 			if usage == nil {
 				t.Fatal("expected usage, got nil")
+				return
 			}
 			if usage.UsedTokens != tt.wantUsed {
 				t.Errorf("UsedTokens = %d, want %d", usage.UsedTokens, tt.wantUsed)
@@ -1042,6 +1051,7 @@ func TestDetectContextFromStatusLine_1MContext(t *testing.T) {
 	}
 	if usage == nil {
 		t.Fatal("expected usage, got nil")
+		return
 	}
 	if usage.TotalTokens != 1000000 {
 		t.Errorf("TotalTokens = %d, want 1000000 (1M context window)", usage.TotalTokens)

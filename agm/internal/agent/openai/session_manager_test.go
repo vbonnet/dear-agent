@@ -17,6 +17,7 @@ func TestNewSessionManager(t *testing.T) {
 
 	if sm == nil {
 		t.Fatal("Expected non-nil session manager")
+		return
 	}
 
 	if sm.baseDir != tempDir {

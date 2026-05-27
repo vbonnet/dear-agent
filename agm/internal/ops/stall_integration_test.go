@@ -63,6 +63,7 @@ func TestIntegration_DetectAndRecover_PermissionPrompt(t *testing.T) {
 	}
 	if permEvent == nil {
 		t.Fatal("Expected permission_prompt stall event for worker-1")
+		return
 	}
 	if permEvent.Severity != "critical" {
 		t.Errorf("Severity = %q, want %q", permEvent.Severity, "critical")
@@ -471,6 +472,7 @@ func TestIntegration_StallEventFields(t *testing.T) {
 	}
 	if event == nil {
 		t.Fatal("Expected permission_prompt event")
+		return
 	}
 
 	// Validate all fields are populated
