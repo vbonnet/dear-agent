@@ -90,7 +90,11 @@ func OpenJSONL(path string) (*JSONLTrail, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("decisiontrail: mkdir %q: %w", filepath.Dir(path), err)
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	// 0o600 keeps the decision trail readable only by the owning user.
+	// Multi-process sharing of the trail (CONTEXT.md §"Decision trail") is
+	// always same-user; cross-user readability would broaden the threat
+	// surface without a use case, so prefer the tighter mode.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("decisiontrail: open %q: %w", path, err)
 	}

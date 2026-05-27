@@ -20,6 +20,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -39,120 +40,137 @@ func main() {
 	}
 }
 
-func run(args []string, stdout, stderr io.Writer) error {
+// runConfig holds the parsed flag values for run(). Keeping them in a
+// struct lets the seed / build helpers take one parameter instead of a
+// dozen, and keeps run() under the gocyclo budget.
+type runConfig struct {
+	interval   time.Duration
+	duration   time.Duration
+	threshold  float64
+	diskFrac   float64
+	memFrac    float64
+	cpuFrac    float64
+	stranded   int
+	orphaned   int
+	trailPath  string
+	nProposals int
+	nTasks     int
+}
+
+func parseFlags(args []string, stderr io.Writer) (*runConfig, error) {
 	fs := flag.NewFlagSet("vroom-mesh", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	var (
-		interval   = fs.Duration("interval", 1*time.Second, "loop interval per supervisor")
-		duration   = fs.Duration("duration", 0, "stop after this duration (0 = run until SIGINT/SIGTERM)")
-		threshold  = fs.Float64("threshold", 0.9, "Overseer escalation threshold for fraction metrics")
-		diskFrac   = fs.Float64("disk", 0.2, "simulated disk usage fraction (0..1)")
-		memFrac    = fs.Float64("memory", 0.3, "simulated memory usage fraction (0..1)")
-		cpuFrac    = fs.Float64("cpu", 0.1, "simulated CPU usage fraction (0..1)")
-		stranded   = fs.Int("stranded-worktrees", 0, "simulated stranded-worktree count")
-		orphaned   = fs.Int("orphaned-sessions", 0, "simulated orphaned-session count")
-		trailPath  = fs.String("trail", "", "optional path to append the decision trail to (also written to stdout)")
-		nProposals = fs.Int("proposals", 2, "number of sample Work Order proposals to seed the roadmap with")
-		nTasks     = fs.Int("tasks", 2, "number of sample tasks to seed the queue with")
-	)
+	cfg := &runConfig{}
+	fs.DurationVar(&cfg.interval, "interval", 1*time.Second, "loop interval per supervisor")
+	fs.DurationVar(&cfg.duration, "duration", 0, "stop after this duration (0 = run until SIGINT/SIGTERM)")
+	fs.Float64Var(&cfg.threshold, "threshold", 0.9, "Overseer escalation threshold for fraction metrics")
+	fs.Float64Var(&cfg.diskFrac, "disk", 0.2, "simulated disk usage fraction (0..1)")
+	fs.Float64Var(&cfg.memFrac, "memory", 0.3, "simulated memory usage fraction (0..1)")
+	fs.Float64Var(&cfg.cpuFrac, "cpu", 0.1, "simulated CPU usage fraction (0..1)")
+	fs.IntVar(&cfg.stranded, "stranded-worktrees", 0, "simulated stranded-worktree count")
+	fs.IntVar(&cfg.orphaned, "orphaned-sessions", 0, "simulated orphaned-session count")
+	fs.StringVar(&cfg.trailPath, "trail", "", "optional path to append the decision trail to (also written to stdout)")
+	fs.IntVar(&cfg.nProposals, "proposals", 2, "number of sample Work Order proposals to seed the roadmap with")
+	fs.IntVar(&cfg.nTasks, "tasks", 2, "number of sample tasks to seed the queue with")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return nil, err
 	}
+	return cfg, nil
+}
 
-	// stdout trail — one JSON object per line.
+// openTrail returns the Trail run() should write to plus a close func.
+// When trailPath is empty the stdout-only trail is returned; otherwise a
+// tee that fans out to both stdout and the file. The close func must be
+// invoked on shutdown to flush the file.
+func openTrail(stdout io.Writer, trailPath string) (decisiontrail.Trail, func(), error) {
 	stdoutTrail := decisiontrail.NewJSONLTrail(nopWriteCloser{stdout})
-
-	// Optional fan-out to a file trail.
-	var trail decisiontrail.Trail = stdoutTrail
-	if *trailPath != "" {
-		file, err := decisiontrail.OpenJSONL(*trailPath)
-		if err != nil {
-			return fmt.Errorf("open trail: %w", err)
-		}
-		trail = &teeTrail{a: stdoutTrail, b: file}
-		defer file.Close()
+	if trailPath == "" {
+		return stdoutTrail, func() {}, nil
 	}
+	file, err := decisiontrail.OpenJSONL(trailPath)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("open trail: %w", err)
+	}
+	return &teeTrail{a: stdoutTrail, b: file}, func() { _ = file.Close() }, nil
+}
 
-	// Substrates.
-	roadmap := supervisor.NewInMemoryRoadmap()
-	for i := 0; i < *nProposals; i++ {
+func seedRoadmap(n int) (*supervisor.InMemoryRoadmap, error) {
+	rm := supervisor.NewInMemoryRoadmap()
+	for i := 0; i < n; i++ {
 		id := fmt.Sprintf("p%d", i+1)
-		if err := roadmap.Submit(supervisor.WorkProposal{
+		if err := rm.Submit(supervisor.WorkProposal{
 			ID:     id,
 			Title:  fmt.Sprintf("sample proposal %d", i+1),
 			Reason: "demo seed",
 		}); err != nil {
-			return fmt.Errorf("seed roadmap: %w", err)
+			return nil, fmt.Errorf("seed roadmap: %w", err)
 		}
 	}
+	return rm, nil
+}
 
-	queue := supervisor.NewInMemoryQueue()
-	for i := 0; i < *nTasks; i++ {
+func seedQueue(n int) (*supervisor.InMemoryQueue, error) {
+	q := supervisor.NewInMemoryQueue()
+	for i := 0; i < n; i++ {
 		id := fmt.Sprintf("t%d", i+1)
-		if err := queue.Enqueue(supervisor.Task{
+		if err := q.Enqueue(supervisor.Task{
 			ID: id, Title: fmt.Sprintf("sample task %d", i+1), Worker: "coder",
 		}); err != nil {
-			return fmt.Errorf("seed queue: %w", err)
+			return nil, fmt.Errorf("seed queue: %w", err)
 		}
 	}
+	return q, nil
+}
 
-	probe := supervisor.NewInMemoryResourceProbe()
-	probe.Set(supervisor.ResourceSnapshot{
-		DiskUsedFraction:   *diskFrac,
-		MemoryUsedFraction: *memFrac,
-		CPUUsedFraction:    *cpuFrac,
-		StrandedWorktrees:  *stranded,
-		OrphanedSessions:   *orphaned,
-	})
-
-	// Supervisors.
+// buildMesh assembles the three supervisors, wraps each in a Loop, and
+// returns the Mesh. NewMesh rewires each Loop's mesh pointer to the real
+// Mesh, so the placeholderMesh passed to NewLoop is only there to satisfy
+// validation.
+func buildMesh(trail decisiontrail.Trail, roadmap *supervisor.InMemoryRoadmap, queue *supervisor.InMemoryQueue, probe *supervisor.InMemoryResourceProbe, cfg *runConfig) (*supervisor.Mesh, error) {
 	metaSup, err := supervisor.NewMetaOrchestrator(trail, roadmap)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	orchSup, err := supervisor.NewOrchestrator(trail, queue)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	overSup, err := supervisor.NewOverseer(trail, probe, supervisor.EscalationThreshold{Fraction: *threshold})
+	overSup, err := supervisor.NewOverseer(trail, probe, supervisor.EscalationThreshold{Fraction: cfg.threshold})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	check := &supervisor.HeartbeatCheckSkill{Threshold: 3 * *interval}
+	check := &supervisor.HeartbeatCheckSkill{Threshold: 3 * cfg.interval}
 	mkLoop := func(s supervisor.Supervisor) (*supervisor.Loop, error) {
 		return supervisor.NewLoop(supervisor.LoopConfig{
 			Supervisor: s,
 			Mesh:       placeholderMesh{},
 			Check:      check,
 			Trail:      trail,
-			Interval:   *interval,
+			Interval:   cfg.interval,
 		})
 	}
 	metaLoop, err := mkLoop(metaSup)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	orchLoop, err := mkLoop(orchSup)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	overLoop, err := mkLoop(overSup)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	return supervisor.NewMesh(metaLoop, orchLoop, overLoop)
+}
 
-	mesh, err := supervisor.NewMesh(metaLoop, orchLoop, overLoop)
-	if err != nil {
-		return err
-	}
-
-	// Build context with optional duration and signal handling.
+// runContext returns a context that fires on SIGINT/SIGTERM, on the
+// optional duration deadline, or on its returned cancel func.
+func runContext(duration time.Duration, stderr io.Writer) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if *duration > 0 {
-		ctx, cancel = context.WithTimeout(ctx, *duration)
-		defer cancel()
+	if duration > 0 {
+		ctx, cancel = context.WithTimeout(ctx, duration)
 	}
 	go func() {
 		sigCh := make(chan os.Signal, 1)
@@ -164,6 +182,45 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case <-ctx.Done():
 		}
 	}()
+	return ctx, cancel
+}
+
+func run(args []string, stdout, stderr io.Writer) error {
+	cfg, err := parseFlags(args, stderr)
+	if err != nil {
+		return err
+	}
+
+	trail, closeTrail, err := openTrail(stdout, cfg.trailPath)
+	if err != nil {
+		return err
+	}
+	defer closeTrail()
+
+	roadmap, err := seedRoadmap(cfg.nProposals)
+	if err != nil {
+		return err
+	}
+	queue, err := seedQueue(cfg.nTasks)
+	if err != nil {
+		return err
+	}
+	probe := supervisor.NewInMemoryResourceProbe()
+	probe.Set(supervisor.ResourceSnapshot{
+		DiskUsedFraction:   cfg.diskFrac,
+		MemoryUsedFraction: cfg.memFrac,
+		CPUUsedFraction:    cfg.cpuFrac,
+		StrandedWorktrees:  cfg.stranded,
+		OrphanedSessions:   cfg.orphaned,
+	})
+
+	mesh, err := buildMesh(trail, roadmap, queue, probe, cfg)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := runContext(cfg.duration, stderr)
+	defer cancel()
 
 	if err := mesh.Run(ctx); err != nil && !isCancellation(err) {
 		return fmt.Errorf("mesh: %w", err)
@@ -172,7 +229,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 func isCancellation(err error) bool {
-	return err == context.Canceled || err == context.DeadlineExceeded
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // teeTrail writes every record to two underlying trails (typically stdout

@@ -229,7 +229,7 @@ func TestLoop_Tick_RecordsErrorButContinues(t *testing.T) {
 
 	l.iterate(context.Background())
 
-	if got := l.LastTickError(); got != wantErr {
+	if got := l.LastTickError(); !errors.Is(got, wantErr) {
 		t.Errorf("LastTickError = %v, want %v", got, wantErr)
 	}
 	if l.LastHeartbeat().IsZero() {
