@@ -608,6 +608,7 @@ func TestNewYAMLTokenCounter(t *testing.T) {
 			counter := NewYAMLTokenCounter(tt.options)
 			if counter == nil {
 				t.Fatal("NewYAMLTokenCounter() returned nil")
+				return
 			}
 			if counter.options != tt.options {
 				t.Errorf("counter.options = %+v, want %+v", counter.options, tt.options)

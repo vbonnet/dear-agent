@@ -35,6 +35,7 @@ func TestStatusCommand_Help(t *testing.T) {
 
 	if statusCmd == nil {
 		t.Fatal("status command not found")
+		return
 	}
 
 	if statusCmd.Short == "" {

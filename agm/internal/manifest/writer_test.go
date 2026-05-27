@@ -149,6 +149,7 @@ func TestWriteManifestHelper_MarshalFailure(t *testing.T) {
 	err := writeManifestHelper(testPath, validateFn, marshalFn, 0600)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "failed to marshal manifest") {
 		t.Errorf("expected marshal error message, got: %v", err)
@@ -190,6 +191,7 @@ func TestWriteManifestHelper_BackupFailure(t *testing.T) {
 	err := writeManifestHelper(testPath, validateFn, marshalFn, 0600)
 	if err == nil {
 		t.Fatal("expected backup error, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "failed to create backup before write") {
 		t.Errorf("expected backup error message, got: %v", err)

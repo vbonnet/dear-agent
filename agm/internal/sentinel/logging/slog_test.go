@@ -10,6 +10,7 @@ func TestDefaultLogger(t *testing.T) {
 	logger := DefaultLogger()
 	if logger == nil {
 		t.Fatal("DefaultLogger returned nil")
+		return
 	}
 
 	// Verify it's enabled at Info level
@@ -26,6 +27,7 @@ func TestJSONLogger(t *testing.T) {
 	logger := JSONLogger()
 	if logger == nil {
 		t.Fatal("JSONLogger returned nil")
+		return
 	}
 
 	if !logger.Enabled(context.TODO(), slog.LevelInfo) {
@@ -43,6 +45,7 @@ func TestDebugLogger(t *testing.T) {
 	logger := DebugLogger()
 	if logger == nil {
 		t.Fatal("DebugLogger returned nil")
+		return
 	}
 
 	// Debug logger should enable all levels

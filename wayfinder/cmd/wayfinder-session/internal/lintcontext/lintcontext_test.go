@@ -116,6 +116,7 @@ func TestParseGolangCI_Settings(t *testing.T) {
 	}
 	if config == nil {
 		t.Fatal("expected non-nil config")
+		return
 	}
 
 	if len(config.Linters) != 5 {
@@ -135,6 +136,7 @@ func TestParsePyproject_RuffAndPyright(t *testing.T) {
 	}
 	if config == nil {
 		t.Fatal("expected non-nil config")
+		return
 	}
 
 	if len(config.Linters) != 2 {

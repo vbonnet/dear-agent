@@ -342,6 +342,7 @@ func TestBackupSession_NonExistentSession(t *testing.T) {
 	_, err := BackupSession("non-existent-session")
 	if err == nil {
 		t.Fatal("BackupSession should fail for non-existent session")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "not found") {
@@ -359,6 +360,7 @@ func TestRestoreSession_NonExistentBackup(t *testing.T) {
 	err := RestoreSession("/path/to/non-existent-backup.tar.gz")
 	if err == nil {
 		t.Fatal("RestoreSession should fail for non-existent backup")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "not found") {

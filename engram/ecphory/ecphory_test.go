@@ -25,6 +25,7 @@ func TestNewEcphory_ValidPath(t *testing.T) {
 
 	if ecphory == nil {
 		t.Fatal("NewEcphory() should return non-nil ecphory")
+		return
 	}
 
 	if ecphory.tokenBudget != 10000 {

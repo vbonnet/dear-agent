@@ -76,6 +76,7 @@ func TestBuiltinRegistry(t *testing.T) {
 	reg := BuiltinRegistry()
 	if reg == nil {
 		t.Fatal("BuiltinRegistry returned nil")
+		return
 	}
 	if err := reg.Validate(); err != nil {
 		t.Fatalf("BuiltinRegistry failed Validate: %v", err)

@@ -12,6 +12,7 @@ func TestDefault(t *testing.T) {
 
 	if cfg == nil {
 		t.Fatal("Default() returned nil")
+		return
 	}
 
 	// Check existing fields
@@ -95,6 +96,7 @@ func TestLoad_DefaultsWhenMissing(t *testing.T) {
 
 	if cfg == nil {
 		t.Fatal("Load() returned nil config")
+		return
 	}
 
 	// Should have default values
@@ -501,6 +503,7 @@ func TestValidate_OpenCodeEnabled_RequiresServerURL(t *testing.T) {
 	_, err := Load(configFile)
 	if err == nil {
 		t.Fatal("Load() should fail when enabled=true but server_url is empty")
+		return
 	}
 	if err.Error() != "config validation failed: adapters.opencode.server_url is required when enabled" {
 		t.Errorf("Unexpected error: %v", err)
@@ -527,6 +530,7 @@ func TestValidate_OpenCodeReconnect_InitialDelayPositive(t *testing.T) {
 	_, err := Load(configFile)
 	if err == nil {
 		t.Fatal("Load() should fail when initial_delay <= 0")
+		return
 	}
 	if err.Error() != "config validation failed: adapters.opencode.reconnect.initial_delay must be > 0" {
 		t.Errorf("Unexpected error: %v", err)
@@ -554,6 +558,7 @@ func TestValidate_OpenCodeReconnect_MaxDelayPositive(t *testing.T) {
 	_, err := Load(configFile)
 	if err == nil {
 		t.Fatal("Load() should fail when max_delay <= 0")
+		return
 	}
 	if err.Error() != "config validation failed: adapters.opencode.reconnect.max_delay must be > 0" {
 		t.Errorf("Unexpected error: %v", err)
@@ -581,6 +586,7 @@ func TestValidate_OpenCodeReconnect_MaxDelayGreaterThanInitial(t *testing.T) {
 	_, err := Load(configFile)
 	if err == nil {
 		t.Fatal("Load() should fail when max_delay < initial_delay")
+		return
 	}
 	if err.Error() != "config validation failed: adapters.opencode.reconnect.max_delay must be >= initial_delay" {
 		t.Errorf("Unexpected error: %v", err)
@@ -609,6 +615,7 @@ func TestValidate_OpenCodeReconnect_MultiplierValid(t *testing.T) {
 	_, err := Load(configFile)
 	if err == nil {
 		t.Fatal("Load() should fail when multiplier < 1")
+		return
 	}
 	if err.Error() != "config validation failed: adapters.opencode.reconnect.multiplier must be >= 1" {
 		t.Errorf("Unexpected error: %v", err)

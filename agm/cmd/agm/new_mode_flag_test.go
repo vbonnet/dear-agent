@@ -116,6 +116,7 @@ func TestModeFlagRegistered(t *testing.T) {
 	flag := newCmd.Flags().Lookup("mode")
 	if flag == nil {
 		t.Fatal("--mode flag not registered on newCmd")
+		return
 	}
 	if flag.DefValue != "" {
 		t.Errorf("--mode default should be empty string, got %q", flag.DefValue)
@@ -190,6 +191,7 @@ func TestDispatchModeSwitch_UnsupportedHarness(t *testing.T) {
 	err := dispatchModeSwitch("fake-harness", "test-session", "plan", "default")
 	if err == nil {
 		t.Fatal("expected error for unsupported harness, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "unsupported harness") {
 		t.Errorf("error should mention 'unsupported harness', got: %s", err.Error())
@@ -233,6 +235,7 @@ func TestModeFlagCompletionValues(t *testing.T) {
 	flag := newCmd.Flags().Lookup("mode")
 	if flag == nil {
 		t.Fatal("--mode flag not registered")
+		return
 	}
 	// String type flag
 	if flag.Value.Type() != "string" {

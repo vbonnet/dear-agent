@@ -151,6 +151,7 @@ func TestPlanExecuteResumeWorkflow(t *testing.T) {
 
 	if detectedParent == nil {
 		t.Fatal("Failed to detect parent session")
+		return
 	}
 	if detectedParent.SessionID != planningSession.SessionID {
 		t.Errorf("Expected to detect planning session, got session: %s", detectedParent.SessionID)
@@ -189,6 +190,7 @@ func TestPlanExecuteResumeWorkflow(t *testing.T) {
 	}
 	if parent == nil {
 		t.Fatal("Expected parent to be returned")
+		return
 	}
 	if parent.SessionID != planningSession.SessionID {
 		t.Errorf("Expected parent ID '%s', got '%s'", planningSession.SessionID, parent.SessionID)
@@ -242,6 +244,7 @@ func TestPlanExecuteResumeWorkflow(t *testing.T) {
 
 	if mostRecentChild == nil {
 		t.Fatal("Expected to find most recent child for resume")
+		return
 	}
 	if mostRecentChild.SessionID != executionSession.SessionID {
 		t.Errorf("Expected resume to prefer execution session, got: %s", mostRecentChild.SessionID)
@@ -362,6 +365,7 @@ func TestResumePreferenceWithArchivedChild(t *testing.T) {
 
 	if mostRecentChild == nil {
 		t.Fatal("Expected to find active child")
+		return
 	}
 	if mostRecentChild.SessionID != activeChild.SessionID {
 		t.Errorf("Expected resume to prefer active child, got: %s", mostRecentChild.SessionID)
@@ -474,6 +478,7 @@ func TestMultipleExecutionSessions(t *testing.T) {
 
 	if mostRecentChild == nil {
 		t.Fatal("Expected to find most recent child")
+		return
 	}
 	if mostRecentChild.SessionID != exec2.SessionID {
 		t.Errorf("Expected resume to prefer exec2 (most recent), got: %s", mostRecentChild.SessionID)
