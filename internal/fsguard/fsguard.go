@@ -57,10 +57,12 @@ func (g *Guard) expand(path, cwd string) string {
 		path = g.Home
 	case strings.HasPrefix(path, "~/"):
 		path = g.Home + path[1:]
-	case path == "$HOME":
+	case path == "$HOME" || path == "${HOME}":
 		path = g.Home
 	case strings.HasPrefix(path, "$HOME/"):
 		path = g.Home + path[len("$HOME"):]
+	case strings.HasPrefix(path, "${HOME}/"):
+		path = g.Home + path[len("${HOME}"):]
 	}
 	if !filepath.IsAbs(path) {
 		base := cwd
@@ -73,18 +75,27 @@ func (g *Guard) expand(path, cwd string) string {
 }
 
 // under reports whether path is base itself or lives somewhere beneath it.
+// It tolerates a base that is the root directory or already carries a trailing
+// separator, so prefix classification stays correct in those edge cases.
 func under(path, base string) bool {
-	return path == base || strings.HasPrefix(path, base+string(os.PathSeparator))
+	if path == base {
+		return true
+	}
+	if !strings.HasSuffix(base, string(os.PathSeparator)) {
+		base += string(os.PathSeparator)
+	}
+	return strings.HasPrefix(path, base)
 }
 
 // isWritableCarveout reports locations that are always writable regardless of
 // the worktree-only policy. These are not protected source trees — they are
 // agent scratch space and I/O plumbing that necessary operations depend on:
 //
-//   - /dev/...        -> pseudo-devices (/dev/null, /dev/stdout, /dev/stderr)
-//   - ~/.auto-memory/ -> the agent's persistent memory store
-//   - /tmp, /var/tmp  -> temporary files (macOS /tmp -> /private/tmp symlink)
-//   - /sessions/...   -> Cowork sandbox session directories
+//   - /dev/...         -> pseudo-devices (/dev/null, /dev/stdout, /dev/stderr)
+//   - ~/.auto-memory/  -> the agent's persistent memory store
+//   - /tmp, /var/tmp   -> temporary files (macOS /tmp -> /private/tmp symlink)
+//   - /var/folders/... -> macOS's default $TMPDIR (os.TempDir/t.TempDir land here)
+//   - /sessions/...    -> Cowork sandbox session directories
 func (g *Guard) isWritableCarveout(p string) bool {
 	if under(p, "/dev") {
 		return true
@@ -92,7 +103,11 @@ func (g *Guard) isWritableCarveout(p string) bool {
 	if under(p, filepath.Join(g.Home, ".auto-memory")) {
 		return true
 	}
-	for _, tmp := range []string{"/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp"} {
+	tmpDirs := []string{
+		"/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp",
+		"/var/folders", "/private/var/folders",
+	}
+	for _, tmp := range tmpDirs {
 		if under(p, tmp) {
 			return true
 		}

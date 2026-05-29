@@ -52,6 +52,25 @@ var gitAllowedWriteInSrc = map[string]bool{
 	"worktree": true, "push": true,
 }
 
+// Command runners that prefix and exec another command. They must be stripped
+// to reach the real command word, else `sudo rm ~/src/f` or `env rm ~/src/f`
+// would slip past the per-command analysis.
+var commandRunners = map[string]bool{
+	"env": true, "sudo": true, "doas": true, "nohup": true, "setsid": true,
+	"exec": true, "time": true, "nice": true, "ionice": true, "stdbuf": true,
+	"command": true, "builtin": true,
+}
+
+// Shells whose `-c SCRIPT` argument is itself a command to inspect recursively.
+var shellCmds = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true,
+}
+
+// maxShellDepth bounds recursive inspection of `bash -c`/`eval` nesting so a
+// pathological command can never loop forever; beyond it we fail open and let
+// the settings.json deny rules be the backstop.
+const maxShellDepth = 8
+
 // punctuation chars that, in a run, form a standalone operator token. Mirrors
 // Python shlex's punctuation_chars default set.
 const punctuation = ";|&<>()"
@@ -63,6 +82,10 @@ const punctuation = ";|&<>()"
 // next). It returns ok=false on unterminated quotes so the caller can fail
 // open.
 func tokenize(command string) (tokens []string, ok bool) {
+	// Merge backslash-newline line continuations first: otherwise splitting on
+	// "\n" would scatter a single statement (e.g. `rm \<newline> ~/src/f`)
+	// across lines and let the write target slip past the per-segment check.
+	command = strings.ReplaceAll(command, "\\\n", "")
 	for _, line := range strings.Split(command, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
@@ -215,6 +238,69 @@ func realArgs(tokens []string) []string {
 		out = append(out, tok)
 	}
 	return out
+}
+
+// stripRunners peels off leading command-runner prefixes (env, sudo, nohup,
+// setsid, exec, ...) along with their options/assignments so the returned
+// slice begins with the actual command word. `sudo -u root rm ~/src/f` and
+// `env FOO=bar rm ~/src/f` both reduce to `rm ~/src/f`.
+func stripRunners(args []string) []string {
+	for len(args) > 0 && commandRunners[args[0]] {
+		runner := args[0]
+		args = args[1:]
+		for len(args) > 0 {
+			a := args[0]
+			if a == "--" {
+				args = args[1:]
+				break
+			}
+			if isOption(a) {
+				args = args[1:]
+				if runnerOptTakesValue(runner, a) && len(args) > 0 {
+					args = args[1:]
+				}
+				continue
+			}
+			if runner == "env" && isEnvAssignment(a) {
+				args = args[1:]
+				continue
+			}
+			break
+		}
+	}
+	return args
+}
+
+// runnerOptTakesValue reports whether a runner option consumes the following
+// token as its value (so the value is not mistaken for the command word).
+func runnerOptTakesValue(runner, opt string) bool {
+	switch runner {
+	case "sudo", "doas":
+		return opt == "-u" || opt == "--user" || opt == "-g" || opt == "--group"
+	case "nice":
+		return opt == "-n" || opt == "--adjustment"
+	case "ionice":
+		return opt == "-c" || opt == "-n" || opt == "-p"
+	default:
+		return false
+	}
+}
+
+// shellWrapped reports whether cmd runs another command supplied as a string
+// (a shell's `-c SCRIPT`, or `eval ...`), returning that nested command so the
+// caller can inspect it recursively.
+func shellWrapped(cmd string, rest []string) (nested string, ok bool) {
+	if cmd == "eval" {
+		return strings.Join(rest, " "), len(rest) > 0
+	}
+	if shellCmds[filepath.Base(cmd)] {
+		for i, a := range rest {
+			if a == "-c" && i+1 < len(rest) {
+				return rest[i+1], true
+			}
+		}
+	}
+	return "", false
 }
 
 func isEnvAssignment(tok string) bool {
@@ -397,6 +483,13 @@ func (g *Guard) checkGit(args []string, currentDir string) (allowed bool, messag
 // trips no write pattern — pure reads like cat/grep/ls/git log — is allowed.
 // cwd anchors relative paths and `cd` tracking.
 func (g *Guard) InspectCommand(command, cwd string) (allowed bool, message string) {
+	return g.inspect(command, cwd, 0)
+}
+
+func (g *Guard) inspect(command, cwd string, depth int) (allowed bool, message string) {
+	if depth > maxShellDepth {
+		return true, "" // runaway nesting -> fail open, deny rules backstop
+	}
 	if strings.TrimSpace(command) == "" {
 		return true, ""
 	}
@@ -407,7 +500,7 @@ func (g *Guard) InspectCommand(command, cwd string) (allowed bool, message strin
 	if allowed, msg := g.checkRedirections(tokens, cwd); !allowed {
 		return false, msg
 	}
-	return g.checkSegments(tokens, cwd)
+	return g.checkSegments(tokens, cwd, depth)
 }
 
 // checkRedirections classifies the target of every redirection operator,
@@ -431,10 +524,10 @@ func (g *Guard) checkRedirections(tokens []string, cwd string) (allowed bool, me
 
 // checkSegments runs per-simple-command write analysis, tracking `cd` so a
 // chained `cd ~/src/repo && git commit` is attributed to the right directory.
-func (g *Guard) checkSegments(tokens []string, cwd string) (allowed bool, message string) {
+func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed bool, message string) {
 	currentDir := g.expand(cwd, cwd)
 	for _, segment := range splitSegments(tokens) {
-		args := realArgs(segment)
+		args := stripRunners(realArgs(segment))
 		if len(args) == 0 {
 			continue
 		}
@@ -446,6 +539,12 @@ func (g *Guard) checkSegments(tokens []string, cwd string) (allowed bool, messag
 		}
 		if cmd == "git" {
 			if ok, msg := g.checkGit(args[1:], currentDir); !ok {
+				return false, msg
+			}
+			continue
+		}
+		if nested, ok := shellWrapped(cmd, args[1:]); ok {
+			if allowed, msg := g.inspect(nested, currentDir, depth+1); !allowed {
 				return false, msg
 			}
 			continue

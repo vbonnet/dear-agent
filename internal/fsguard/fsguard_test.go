@@ -26,11 +26,15 @@ func TestClassify(t *testing.T) {
 		{"tmp carveout", "/tmp/scratch", true, ""},
 		{"private tmp carveout", "/private/tmp/scratch", true, ""},
 		{"var tmp carveout", "/var/tmp/scratch", true, ""},
+		{"var folders tmpdir carveout", "/var/folders/ab/xyz/T/scratch", true, ""},
+		{"private var folders carveout", "/private/var/folders/ab/xyz/T/scratch", true, ""},
 		{"dev null carveout", "/dev/null", true, ""},
 		{"sessions carveout", "/sessions/abc/file", true, ""},
 		{"src blocked names repo", "~/src/dear-agent/cmd/main.go", false,
 			"git -C ~/src/dear-agent worktree add ~/worktrees/dear-agent/{branch}"},
 		{"src root blocked placeholder", "~/src", false, "~/src which is protected"},
+		{"brace HOME src blocked", "${HOME}/src/dear-agent/f", false, "~/src which is protected"},
+		{"brace HOME worktree allowed", "${HOME}/worktrees/x/f", true, ""},
 		{"dotfile blocked", "~/.gitconfig", false, "modify a dotfile"},
 		{"dotdir blocked", "~/.config/claude/settings.json", false, "chezmoi"},
 		{"home non-dotfile generic", "~/Documents/notes.txt", false,
@@ -136,6 +140,22 @@ func TestInspectCommand(t *testing.T) {
 
 		// Empty / noop.
 		{"empty command allowed", "   ", home, true, ""},
+
+		// Bypass defenses (Gemini review).
+		{"line continuation rm src blocked", "rm \\\n  ~/src/dear-agent/f", home, false, "~/src"},
+		{"sudo rm src blocked", "sudo rm ~/src/dear-agent/f", home, false, "~/src"},
+		{"sudo -u rm src blocked", "sudo -u root rm ~/src/dear-agent/f", home, false, "~/src"},
+		{"env rm src blocked", "env rm ~/src/dear-agent/f", home, false, "~/src"},
+		{"env assign rm src blocked", "env FOO=bar rm ~/src/dear-agent/f", home, false, "~/src"},
+		{"nohup rm src blocked", "nohup rm ~/src/dear-agent/f", home, false, "~/src"},
+		{"sudo -n rm src blocked", "sudo -n rm ~/src/dear-agent/f", home, false, "~/src"},
+		{"bash -c rm src blocked", `bash -c "rm ~/src/dear-agent/f"`, home, false, "~/src"},
+		{"sh -c redirect src blocked", `sh -c "echo x > ~/src/dear-agent/f"`, home, false, "~/src"},
+		{"sudo bash -c rm src blocked", `sudo bash -c "rm ~/src/dear-agent/f"`, home, false, "~/src"},
+		{"eval rm src blocked", `eval rm ~/src/dear-agent/f`, home, false, "~/src"},
+		{"brace HOME redirect src blocked", "echo x > ${HOME}/src/dear-agent/f", home, false, "~/src"},
+		{"bash -c read allowed", `bash -c "cat ~/src/dear-agent/f"`, home, true, ""},
+		{"sudo ls allowed", "sudo ls ~/src", home, true, ""},
 	}
 
 	for _, tc := range tests {
