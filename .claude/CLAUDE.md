@@ -35,7 +35,7 @@ them.
    Rust or TypeScript are permitted *only* with strong, stated justification
    (e.g. an ecosystem that has no Go equivalent). Python is not an option for
    code we own and ship. *Why:* a single primary language keeps the codebase
-   navigable, the toolchain (`make preflight`, lint, vulncheck) uniform, and
+   navigable, the toolchain (`make preflight`, `lint`, `vulncheck`) uniform, and
    the build reproducible.
 
 5. **Use `/wayfinder` for all plans and execution.** Plan and drive
@@ -49,7 +49,7 @@ them.
    governance-relevant decisions through the VROOM supervisory mesh, and
    prefer our surfaces over bypassing them. *Why:* routing around our own
    tooling silently widens the gap between what we ship and what we trust.
-   See **Dogfooding — Use AGM and VROOM** below for the operational detail.
+   See [Dogfooding — Use AGM and VROOM](#dogfooding--use-agm-and-vroom-mandatory) below for the operational detail.
 
 7. **JIT access model — escalate permission blocks into fixes.** When you hit
    a permission/access block, do not work around it and do not retry. Stop,
