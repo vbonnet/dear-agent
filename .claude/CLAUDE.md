@@ -2,7 +2,7 @@
 
 ## Core Engineering Principles (MANDATORY)
 
-These eight principles govern *how* work happens in this repo, regardless of
+These nine principles govern *how* work happens in this repo, regardless of
 *what* the task is. They were distilled from the 2026-05-28 working session
 and version-controlled here so every agent on every machine inherits them.
 The more specific sections below (Output Routing, Dogfooding, Agent
@@ -64,6 +64,31 @@ them.
    canonical store is the `context-engine` Beads DB (`~/beads/context-engine`).
    *Why:* untracked work is invisible work — it cannot be prioritized,
    handed off, or audited.
+
+9. **Atomic action wrappers — wrap unsafe command chains, deny the raw form.**
+   When an action only succeeds as an all-or-nothing chain (e.g. `chezmoi
+   apply` → commit → push), or when a raw command cannot be permission-granted
+   without over-granting (e.g. allowing `git push` also allows `git push
+   --force`), do not trust an agent to sequence the steps correctly or to
+   avoid the dangerous flags. Build a wrapper instead:
+   - Write a small, deterministic wrapper — a shell script (< 50 lines) or Go
+     binary (< 200 lines) — that performs the whole action as one unit.
+   - Enforce safety by construction: strip dangerous flags, chain the steps in
+     the required order, and roll back (or fail loudly into a clean state) if
+     any step fails. The "do A then B then C, and B must not be skipped"
+     guarantee lives in code, not in agent discipline.
+   - Deny the raw command via a `PreToolUse` hook that exits with code 2 and
+     points the agent at the wrapper.
+   - `ALWAYS_ALLOW` the wrapper — its safety is guaranteed by construction, so
+     it needs no per-invocation approval.
+   Examples: `chezmoi-deploy` (`chezmoi apply` → commit → push atomically);
+   `safe-push` (`git push` with force-push stripped); any future "do A then B
+   then C, and B must not be skipped" action. *Why:* an agent merely *told* to
+   run three commands in order will eventually run two of them, or reach for a
+   forbidden flag under pressure. A wrapper makes the safe path the only path,
+   and turns a fuzzy permission question ("can this agent push?") into a crisp,
+   auditable one ("can this agent run the binary we vetted?"). Prefer building
+   the wrapper over loosening a permission rule.
 
 ## Output Routing — Where Artifacts Belong (MANDATORY)
 
