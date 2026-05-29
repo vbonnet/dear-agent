@@ -181,9 +181,9 @@ func nonEmptyLines(s string) []string {
 
 // stream runs a command, forwarding stdout/stderr to the user in real time.
 func stream(name string, args ...string) error {
-	// #nosec G702 -- command names are compile-time literals ("chezmoi",
-	// "git") at every call site, and exec.Command runs no shell, so the
-	// user-supplied target paths cannot inject commands or shell metachars.
+	// Command names are compile-time literals ("chezmoi", "git") at every
+	// call site, and exec.Command runs no shell, so user-supplied target
+	// paths are passed as argv elements and cannot inject commands.
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
