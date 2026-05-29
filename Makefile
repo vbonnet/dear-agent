@@ -16,13 +16,15 @@
 #   deepsec-staged          Scan staged files only with deepsec
 #   install-deepsec-hook    Install pre-push hook for incremental deepsec scans
 #   uninstall-deepsec-hook  Remove the deepsec pre-push hook
+#   build-write-guards      Build the PreToolUse fs/bash write-guard hooks
+#   install-write-guards    Install the write-guard hooks into the hooks dir
 #   build-bumblebee         Build the dear-agent-bumblebee Go binary
 #   bumblebee-install       Install pinned, checksum-verified Bumblebee binary
 #   bumblebee-scan          Run a one-shot Bumblebee endpoint scan
 #   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 
-.PHONY: preflight preflight-tests preflight-full install-preflight-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent
+.PHONY: preflight preflight-tests preflight-full install-preflight-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings install-configure-settings build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent
 
 # Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
 # CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm
@@ -114,6 +116,24 @@ build-configure-settings:
 install-configure-settings: build-configure-settings
 	cp bin/configure-claude-settings $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/configure-claude-settings"
+
+# Build the PreToolUse filesystem write-guard hooks. These enforce the
+# worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
+# gates Edit/Write/MultiEdit, pretool-bash-write-guard gates Bash. They are
+# the Go replacements for the lost ai-tools Python stopgaps.
+build-write-guards:
+	@echo "Building pretool-fs-write-guard, pretool-bash-write-guard..."
+	go build $(GOFLAGS) -o bin/pretool-fs-write-guard ./cmd/pretool-fs-write-guard/
+	go build $(GOFLAGS) -o bin/pretool-bash-write-guard ./cmd/pretool-bash-write-guard/
+	@echo "Built: bin/pretool-fs-write-guard bin/pretool-bash-write-guard"
+
+# Install the write-guard hooks where settings.json references them
+# (~/.config/claude-code/hooks). Override the dir with HOOKS_DIR=/path.
+HOOKS_DIR ?= $(HOME)/.config/claude-code/hooks
+install-write-guards: build-write-guards
+	@mkdir -p $(HOOKS_DIR)
+	cp bin/pretool-fs-write-guard bin/pretool-bash-write-guard $(HOOKS_DIR)/
+	@echo "Installed: $(HOOKS_DIR)/pretool-fs-write-guard $(HOOKS_DIR)/pretool-bash-write-guard"
 
 # Uninstall AGM components
 uninstall:
