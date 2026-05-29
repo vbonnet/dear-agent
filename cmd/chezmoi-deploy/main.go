@@ -33,38 +33,60 @@ func main() {
 	}
 }
 
-func run(argv []string) error {
-	var message string
-	var dryRun bool
-	var targets []string
+// options holds the parsed command line.
+type options struct {
+	message string
+	dryRun  bool
+	help    bool
+	targets []string
+}
 
+// parseArgs turns argv into options, returning an error for malformed or
+// refused flags. The --help case sets help so the caller can print usage.
+func parseArgs(argv []string) (options, error) {
+	var o options
 	for i := 0; i < len(argv); i++ {
 		arg := argv[i]
 		switch {
 		case arg == "-m" || arg == "--message":
 			if i+1 >= len(argv) {
-				return fmt.Errorf("%s requires a commit message argument", arg)
+				return o, fmt.Errorf("%s requires a commit message argument", arg)
 			}
+			// Read the value before advancing; the guard above proves
+			// i+1 is in range, which also keeps gosec's bounds analysis happy.
+			o.message = argv[i+1]
 			i++
-			message = argv[i]
 		case strings.HasPrefix(arg, "-m="):
-			message = strings.TrimPrefix(arg, "-m=")
+			o.message = strings.TrimPrefix(arg, "-m=")
 		case strings.HasPrefix(arg, "--message="):
-			message = strings.TrimPrefix(arg, "--message=")
+			o.message = strings.TrimPrefix(arg, "--message=")
 		case arg == "--dry-run" || arg == "-n":
-			dryRun = true
+			o.dryRun = true
 		case arg == "--force" || arg == "-f" || arg == "--force-with-lease":
-			return fmt.Errorf("refusing %s: chezmoi-deploy only does safe pushes, "+
+			return o, fmt.Errorf("refusing %s: chezmoi-deploy only does safe pushes, "+
 				"force-push would clobber the remote dotfiles history", arg)
 		case arg == "-h" || arg == "--help":
-			fmt.Print(usage)
-			return nil
+			o.help = true
+			return o, nil
 		case strings.HasPrefix(arg, "-"):
-			return fmt.Errorf("unknown flag %q (see --help)", arg)
+			return o, fmt.Errorf("unknown flag %q (see --help)", arg)
 		default:
-			targets = append(targets, arg)
+			o.targets = append(o.targets, arg)
 		}
 	}
+	return o, nil
+}
+
+func run(argv []string) error {
+	opts, err := parseArgs(argv)
+	if err != nil {
+		return err
+	}
+	if opts.help {
+		fmt.Print(usage)
+		return nil
+	}
+	message, dryRun, targets := opts.message, opts.dryRun, opts.targets
 
 	source, err := capture("chezmoi", "source-path")
 	if err != nil {
@@ -159,6 +181,9 @@ func nonEmptyLines(s string) []string {
 
 // stream runs a command, forwarding stdout/stderr to the user in real time.
 func stream(name string, args ...string) error {
+	// Command names are compile-time literals ("chezmoi", "git") at every
+	// call site, and exec.Command runs no shell, so user-supplied target
+	// paths are passed as argv elements and cannot inject commands.
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
