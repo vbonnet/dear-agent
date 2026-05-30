@@ -19,7 +19,7 @@ func Example_basicUsage() {
 tools:
   ecphory:
     gemini:
-      model: gemini-2.0-flash-exp
+      model: gemini-3.5-flash
       max_tokens: 8192
     default_family: gemini
 
@@ -27,7 +27,7 @@ defaults:
   anthropic:
     model: claude-3-5-sonnet-20241022
   gemini:
-    model: gemini-2.0-flash-exp
+    model: gemini-3.5-flash
 `
 	os.WriteFile(configPath, []byte(yamlContent), 0644)
 
@@ -51,7 +51,7 @@ defaults:
 	fmt.Printf("ecphory gemini max_tokens: %d\n", maxTokens)
 
 	// Output:
-	// ecphory + gemini: gemini-2.0-flash-exp
+	// ecphory + gemini: gemini-3.5-flash
 	// other-tool + anthropic: claude-3-5-sonnet-20241022
 	// ecphory gemini max_tokens: 8192
 }
@@ -131,5 +131,5 @@ func Example_noConfigFile() {
 	// Error: <nil>
 	// Config is nil: false
 	// Default anthropic model: claude-3-5-sonnet-20241022
-	// Default gemini model: gemini-2.0-flash-exp
+	// Default gemini model: gemini-3.5-flash
 }

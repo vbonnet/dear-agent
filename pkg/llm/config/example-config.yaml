@@ -12,7 +12,7 @@ tools:
       model: claude-3-5-sonnet-20241022
       max_tokens: 4096
     gemini:
-      model: gemini-2.0-flash-exp
+      model: gemini-3.5-flash
       max_tokens: 8192
     default_family: gemini  # Prefer Gemini for cost efficiency
 
@@ -32,7 +32,7 @@ tools:
       model: claude-3-5-sonnet-20241022
       max_tokens: 4096
     gemini:
-      model: gemini-2.0-flash-exp
+      model: gemini-3.5-flash
       max_tokens: 4096
     default_family: gemini
 
@@ -42,5 +42,5 @@ defaults:
     model: claude-3-5-sonnet-20241022
     max_tokens: 4096
   gemini:
-    model: gemini-2.0-flash-exp
+    model: gemini-3.5-flash
     max_tokens: 8192

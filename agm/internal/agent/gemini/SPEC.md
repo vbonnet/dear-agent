@@ -27,7 +27,7 @@ Provide a production-ready adapter that:
 - **Description:** Adapter MUST implement all 12 methods of `agent.Agent` interface
 - **Methods:**
   - `Name() string` - Returns "gemini"
-  - `Version() string` - Returns model name (e.g., "gemini-2.0-flash-exp")
+  - `Version() string` - Returns model name (e.g., "gemini-3.5-flash")
   - `Capabilities() Capabilities` - Returns feature support flags
   - `CreateSession(SessionContext) (SessionID, error)` - Creates new session
   - `ResumeSession(SessionID) error` - Validates session exists
@@ -61,7 +61,7 @@ Provide a production-ready adapter that:
 - **Description:** Adapter MUST integrate with Google Generative AI API
 - **Implementation:**
   - Uses official `github.com/google/generative-ai-go/genai` SDK
-  - Default model: `gemini-2.0-flash-exp` (2M token context window)
+  - Default model: `gemini-3.5-flash` (GA 2026-05-19, 1M input / 65K output context)
   - API key from `GEMINI_API_KEY` environment variable
   - Full conversation history sent with each request
   - Chat session created with historical context
@@ -174,7 +174,7 @@ type GeminiAdapter struct {
 ### GeminiConfig
 ```go
 type GeminiConfig struct {
-    ModelName    string       // Default: gemini-2.0-flash-exp
+    ModelName    string       // Default: gemini-3.5-flash
     APIKey       string       // From env or explicit
     SessionStore SessionStore // Custom store or default JSON
 }
@@ -222,12 +222,12 @@ Capabilities{
     SupportsSlashCommands: false,   // API agent, not CLI
     SupportsHooks:         false,   // AGM-level feature
     SupportsTools:         true,    // Gemini supports function calling
-    SupportsVision:        true,    // Gemini 2.0 supports vision
-    SupportsMultimodal:    true,    // Gemini 2.0 supports audio/video
+    SupportsVision:        true,    // Gemini 3.x supports vision
+    SupportsMultimodal:    true,    // Gemini 3.x supports audio/video
     SupportsStreaming:     true,    // Gemini API supports streaming (not impl in V1)
     SupportsSystemPrompts: true,    // Gemini supports system instructions
-    MaxContextWindow:      1000000, // 1M tokens (2M for 2.0 Flash Thinking)
-    ModelName:             "gemini-2.0-flash-exp",
+    MaxContextWindow:      1048576, // 1M input tokens (3.5 Flash, GA 2026-05-19)
+    ModelName:             "gemini-3.5-flash",
 }
 ```
 

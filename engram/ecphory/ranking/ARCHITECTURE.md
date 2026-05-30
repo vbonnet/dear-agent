@@ -153,7 +153,7 @@ anthropic:
 
 ### 4. Vertex AI Gemini Provider
 
-**Model**: gemini-2.0-flash-exp
+**Model**: gemini-3.5-flash
 
 **Implementation**:
 ```go
@@ -183,7 +183,7 @@ type VertexAIGeminiProvider struct {
 vertexai:
   project_id_env: GOOGLE_CLOUD_PROJECT
   location: us-central1
-  model: gemini-2.0-flash-exp
+  model: gemini-3.5-flash
 ```
 
 ### 5. Vertex AI Claude Provider
@@ -297,7 +297,7 @@ func DefaultConfig() *Config {
                 VertexAI: VertexAIConfig{
                     ProjectIDEnv: "GOOGLE_CLOUD_PROJECT",
                     Location:     "us-central1",
-                    Model:        "gemini-2.0-flash-exp",
+                    Model:        "gemini-3.5-flash",
                 },
                 VertexAIClaude: VertexAIClaudeConfig{
                     ProjectIDEnv: "GOOGLE_CLOUD_PROJECT",
