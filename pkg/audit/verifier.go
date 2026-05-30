@@ -23,6 +23,21 @@ const EvidenceVerifierRole = "verifier_role"
 // defined; consumers should treat unknown values as ReviewDepthCasual.
 const EvidenceReviewDepth = "review_depth"
 
+// EvidenceVerifiedAt is the canonical Evidence map key under which the
+// runner stamps the wall-clock timestamp at which an adversarial
+// verifier last produced this Finding. Value is an RFC3339-encoded
+// string so it round-trips through encoding/json without loss; consume
+// via Finding.VerifiedAt to reify a time.Time.
+//
+// Phase 6.5 trust-inversion contract: a Finding with EvidenceVerifiedAt
+// set is in the *verified set* — adversarially reviewed by a different
+// family from the implementer. Casual-depth verifiers do NOT stamp
+// this key. The complementary "subsequent edits reset the timestamp"
+// half of the contract lives in pkg/workflow (the writer that touches
+// the source) and is tracked in ROADMAP §6.5 — this seam is just the
+// place to read and write the timestamp.
+const EvidenceVerifiedAt = "verified_at"
+
 // Review depth values. Casual is the default for internal Checks
 // (static analysis, linters); Adversarial is reserved for verifiers
 // that exercise the artifact dynamically (fuzzers, property checkers,
