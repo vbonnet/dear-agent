@@ -62,7 +62,7 @@ GeminiAdapter implementation:
 - Uses Google Generative AI Go SDK (`github.com/google/generative-ai-go`)
 - Client-side conversation history persistence
 - Stores sessions in `~/.agm/gemini/<session-id>/history.jsonl`
-- Default model: `gemini-2.0-flash-exp`
+- Default model: `gemini-3.5-flash`
 - API key from `GEMINI_API_KEY` environment variable
 
 ### session_store.go
@@ -253,7 +253,7 @@ ok  	github.com/vbonnet/dear-agent/agm/internal/agent	0.035s
 | Backend | tmux + Claude CLI | Google Gen AI SDK | OpenAI SDK |
 | Session Storage | `~/.claude/sessions/` | `~/.agm/gemini/` | TBD |
 | API Key | Built into CLI | `GEMINI_API_KEY` | `OPENAI_API_KEY` |
-| Default Model | claude-sonnet-4.5 | gemini-2.0-flash-exp | TBD |
+| Default Model | claude-sonnet-4.5 | gemini-3.5-flash | TBD |
 | Slash Commands | ✅ | ❌ | ❌ |
 | Function Calling | ✅ | ✅ | ✅ |
 | Vision | ✅ | ✅ | ✅ |
