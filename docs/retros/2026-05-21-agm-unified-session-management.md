@@ -6,6 +6,12 @@
 import/remote-control verified working; two goals found architecturally
 infeasible as posed and documented below.
 
+**Update (2026-05-22):** Follow-up #1 (idempotent `agm session register`) is
+**implemented** — see [§ Recommended follow-ups](#recommended-follow-ups). This
+unblocks #2 (correct workspace attribution) and is the prerequisite for #3
+(safe SessionStart auto-import hook), which remains deferred pending the hook
+wiring itself.
+
 This is the **Audit + Retro** record for the multi-part goal "Fix AGM so it can
 manage Claude Code sessions end-to-end: import, unblock, archive, and expose via
 MCP." It exists because the goal rested partly on an inaccurate mental model of
@@ -115,11 +121,24 @@ has none. No tmux server is even running.
   `agm_kill_session`, `agm_list_ops`.
 
 ## Recommended follow-ups (smallest first)
-1. **Idempotent `agm session register <uuid>`** that upserts and infers
+1. ~~**Idempotent `agm session register <uuid>`** that upserts and infers
    workspace from the session's cwd — unblocks #2 (correct attribution) and #3
-   (safe auto-import hook).
+   (safe auto-import hook).~~ **DONE (2026-05-22).** `importer.RegisterSession`
+   + `agm session register` (`agm/internal/importer/importer.go`,
+   `agm/cmd/agm/register.go`). Re-running on a tracked UUID is a no-op that
+   returns the existing session (`AlreadyTracked`) instead of minting a
+   duplicate; it never prompts (derives the name from the project) so it is
+   hook-callable; and when `--workspace` is omitted it infers the label from the
+   conversation's own project root (`InferWorkspaceFromProject`, the nearest
+   `.git`/`WORKSPACE.yaml`) instead of blindly using the active config
+   workspace. A `--quiet` flag prints only the session ID for hooks. Covered by
+   pure-function tables + Dolt-backed idempotency tests
+   (`agm/internal/importer/register_test.go`).
 2. **SessionStart auto-import hook** built on (1), gated to skip already-tracked
-   sessions.
+   sessions. The building block now exists: a hook can shell out to
+   `agm session register "$CLAUDE_SESSION_ID" --quiet` (idempotent, no prompt,
+   self-attributing). Still deferred until the hook wiring + an
+   already-tracked fast-path are added to `agm/cmd/agm/install_hooks.go`.
 3. **Desktop-session adoption** — the harder, higher-value gap: for AGM to
    *manage* (not just list) Desktop sessions it needs a non-tmux delivery
    channel. Options: an `agm answer` path that writes to a Desktop-readable
