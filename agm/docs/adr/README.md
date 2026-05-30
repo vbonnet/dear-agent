@@ -94,6 +94,12 @@ Each ADR follows this structure:
 
 **Related to ADR-005**: Manifest versioning and schema evolution
 
+**[ADR-026: Programmatic Archival of Claude Code UI Sessions](ADR-026-claude-ui-session-archival.md)**
+- **Status**: Proposed (2026-05-17)
+- **Summary**: `agm session archive-ui` reconciles the local Claude desktop session store (`claude-code-sessions/.../local_*.json` `isArchived` flip) to declutter the claude.ai/code list — dry-run by default, reversible, no credentials, no delete
+- **Key Decision**: Local `isArchived` reconciler in shared `ops` vs undocumented claude.ai web API, Compliance API, skill-only, or extending `gc`
+- **Impact**: Replaces a ~400-row manual chore; documents the two-namespace session model; avoids cookie harvesting (which the harness correctly blocks)
+
 ---
 
 ### Infrastructure
