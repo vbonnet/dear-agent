@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -93,4 +94,58 @@ func PRState(repoPath, branch string) (state string, known bool) {
 		return "", false
 	}
 	return st, true
+}
+
+// OpenPRForBranch reports the number of an OPEN pull request whose head is
+// exactly `branch`, if one exists.
+//
+// "known" is false whenever the answer cannot be positively established — gh
+// missing/unauthenticated, no PR for the branch, the resolved PR's head is a
+// different branch, a timeout, or any network/parse error. It uses the same
+// hard-bounded, non-prompting invocation as PRMergedState so it is safe on
+// latency-sensitive paths.
+func OpenPRForBranch(repoPath, branch string) (number int, known bool) {
+	if branch == "" {
+		return 0, false
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		return 0, false
+	}
+	gitRoot, err := findGitRoot(repoPath)
+	if err != nil {
+		return 0, false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), prCheckTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "gh", "pr", "view",
+		"--json", "state,headRefName,number",
+		"--jq", `.state + "\t" + .headRefName + "\t" + (.number|tostring)`,
+		"--", branch)
+	cmd.Dir = gitRoot
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GH_PROMPT_DISABLED=1",
+		"GH_NO_UPDATE_NOTIFIER=1",
+	)
+
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, false
+	}
+
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 3)
+	if len(parts) != 3 {
+		return 0, false
+	}
+	state, head, numStr := parts[0], parts[1], parts[2]
+	if head != branch || state != "OPEN" {
+		return 0, false
+	}
+	n, convErr := strconv.Atoi(numStr)
+	if convErr != nil {
+		return 0, false
+	}
+	return n, true
 }
