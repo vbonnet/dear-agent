@@ -26,14 +26,28 @@ type SWETask struct {
 }
 
 // SWEResult holds the outcome of running a single SWE-bench task.
+//
+// Resolved means "test-verified pass" and is only ever true when a real
+// grader (Docker-based SWE-bench harness or the sb-cli cloud evaluator)
+// confirmed the patch. This harness does not grade locally, so in --clone
+// runs Resolved stays false and PatchProduced is the honest signal: the
+// agent produced a non-empty repo diff that can be graded offline from the
+// emitted predictions file. Reporting a heuristic stdout match as Resolved
+// (the previous behavior) produced false positives — e.g. resolved=true
+// with a zero-length patch — so it is no longer used in clone mode.
 type SWEResult struct {
-	InstanceID string        `json:"instance_id"`
-	Repo       string        `json:"repo"`
-	Resolved   bool          `json:"resolved"`
-	Duration   time.Duration `json:"duration_ns"`
-	CostUSD    float64       `json:"cost_usd"`
-	PatchLen   int           `json:"patch_length"`
-	Error      string        `json:"error,omitempty"`
+	InstanceID    string        `json:"instance_id"`
+	Repo          string        `json:"repo"`
+	Resolved      bool          `json:"resolved"`
+	PatchProduced bool          `json:"patch_produced"`
+	Duration      time.Duration `json:"duration_ns"`
+	CostUSD       float64       `json:"cost_usd"`
+	PatchLen      int           `json:"patch_length"`
+	Error         string        `json:"error,omitempty"`
+	// ModelPatch is the real unified diff captured from the cloned workdir
+	// (clone mode only). Kept out of the report JSON — it is large and is
+	// written separately to the SWE-bench predictions file.
+	ModelPatch string `json:"-"`
 }
 
 // SWEReport is the full benchmark report.
@@ -47,14 +61,19 @@ type SWEReport struct {
 }
 
 // SWESummary aggregates metrics across all tasks.
+//
+// Resolved/ResolveRate are test-verified counts (always 0 unless an offline
+// grader filled them in). PatchesProduced is the locally observable signal:
+// how many tasks the agent produced a non-empty diff for.
 type SWESummary struct {
-	Total       int     `json:"total"`
-	Resolved    int     `json:"resolved"`
-	Failed      int     `json:"failed"`
-	Errored     int     `json:"errored"`
-	ResolveRate float64 `json:"resolve_rate"`
-	TotalCost   float64 `json:"total_cost_usd"`
-	AvgDuration string  `json:"avg_duration"`
+	Total           int     `json:"total"`
+	Resolved        int     `json:"resolved"`
+	PatchesProduced int     `json:"patches_produced"`
+	Failed          int     `json:"failed"`
+	Errored         int     `json:"errored"`
+	ResolveRate     float64 `json:"resolve_rate"`
+	TotalCost       float64 `json:"total_cost_usd"`
+	AvgDuration     string  `json:"avg_duration"`
 }
 
 var sweLiteCmd = &cobra.Command{
@@ -207,7 +226,13 @@ func runSWETasks(ctx context.Context, tasks []SWETask, agent string) *SWEReport 
 		result := runSingleSWETask(ctx, task, agent)
 		report.Tasks = append(report.Tasks, result)
 
-		status := "FAIL"
+		// Mirror the honest taxonomy used by printSWETable: PASS only when
+		// an offline grader verified tests; otherwise report whether the
+		// agent produced a patch. Never print FAIL for an ungraded patch.
+		status := "NONE"
+		if result.PatchProduced {
+			status = "PATCH"
+		}
 		if result.Resolved {
 			status = "PASS"
 		}
@@ -263,10 +288,48 @@ func runSingleSWETask(ctx context.Context, task SWETask, agent string) SWEResult
 	}
 
 	agentOutput := string(output)
-	result.Resolved = evaluatePatch(task, agentOutput)
 	result.CostUSD = estimateSWECost(agentOutput)
-	result.PatchLen = countPatchLines(agentOutput)
+
+	if sweCloneFlag {
+		// Real artifact: the diff the agent actually made in the repo,
+		// captured before the deferred RemoveAll wipes the workdir. This
+		// is what an offline grader (Docker harness / sb-cli) evaluates.
+		patch := captureGitDiff(ctx, workdir)
+		result.ModelPatch = patch
+		result.PatchProduced = strings.TrimSpace(patch) != ""
+		result.PatchLen = countPatchLines(patch)
+		// No local grader available (SWE-bench grading requires Docker).
+		// We do not assert test-pass from a heuristic — Resolved stays
+		// false; PatchProduced + the predictions file are the outputs.
+		result.Resolved = false
+	} else {
+		// Scaffold mode (no cloned repo to diff): fall back to the stdout
+		// heuristic. This is an explicit proxy ("agent emitted something
+		// patch-shaped"), never a test-verified result.
+		result.PatchProduced = evaluatePatch(task, agentOutput)
+		result.Resolved = false
+		result.PatchLen = countPatchLines(agentOutput)
+	}
 	return result
+}
+
+// captureGitDiff stages every change the agent made in the cloned workdir
+// (including new files) and returns the unified diff. An empty string means
+// the agent produced no change. Errors are folded into an empty diff rather
+// than failing the task: a missing diff is itself a gradable outcome.
+func captureGitDiff(ctx context.Context, workdir string) string {
+	addCmd := exec.CommandContext(ctx, "git", "-C", workdir, "add", "-A")
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "  warn: git add failed: %v\n%s\n", err, truncate(string(out), 200))
+		return ""
+	}
+	diffCmd := exec.CommandContext(ctx, "git", "-C", workdir, "diff", "--cached", "--binary")
+	out, err := diffCmd.Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  warn: git diff failed: %v\n", err)
+		return ""
+	}
+	return string(out)
 }
 
 func buildSWEPrompt(task SWETask) string {
@@ -407,6 +470,9 @@ func computeSWESummary(results []SWEResult) SWESummary {
 		default:
 			s.Failed++
 		}
+		if r.PatchProduced {
+			s.PatchesProduced++
+		}
 		s.TotalCost += r.CostUSD
 		totalDur += r.Duration
 	}
@@ -424,12 +490,18 @@ func printSWETable(report *SWEReport) {
 	fmt.Printf("Agent: %s\n\n", report.Agent)
 
 	for _, r := range report.Tasks {
-		status := "FAIL"
+		// PASS only when an offline grader actually verified tests.
+		// Otherwise report whether a patch was produced — never conflate
+		// "agent emitted a diff" with "task resolved".
+		status := "NONE"
+		if r.PatchProduced {
+			status = "PATCH"
+		}
 		if r.Resolved {
-			status = "PASS"
+			status = "PASS "
 		}
 		if r.Error != "" {
-			status = "ERR "
+			status = "ERR  "
 		}
 		dur := r.Duration.Round(time.Second)
 		if r.Error != "" {
@@ -439,20 +511,30 @@ func printSWETable(report *SWEReport) {
 			}
 			fmt.Printf("  %-40s  %s  (%s) %s\n", r.InstanceID, status, dur, errMsg)
 		} else {
-			fmt.Printf("  %-40s  %s  %s  $%.4f  %d lines\n",
+			fmt.Printf("  %-40s  %s  %s  $%.4f  %d diff lines\n",
 				r.InstanceID, status, dur, r.CostUSD, r.PatchLen)
 		}
 	}
 
+	s := report.Summary
 	fmt.Printf("\n"+
-		"Summary: %d/%d resolved (%.0f%%)\n"+
-		"  Errored:  %d\n"+
-		"  Cost:     $%.4f\n"+
-		"  Avg time: %s\n",
-		report.Summary.Resolved, report.Summary.Total,
-		report.Summary.ResolveRate*100,
-		report.Summary.Errored,
-		report.Summary.TotalCost, report.Summary.AvgDuration)
+		"Summary (%d tasks)\n"+
+		"  Test-verified resolved: %d/%d (%.0f%%)\n"+
+		"  Patches produced:       %d/%d\n"+
+		"  Errored:                %d\n"+
+		"  Cost (estimate):        $%.4f\n"+
+		"  Avg time:               %s\n",
+		s.Total,
+		s.Resolved, s.Total, s.ResolveRate*100,
+		s.PatchesProduced, s.Total,
+		s.Errored,
+		s.TotalCost, s.AvgDuration)
+	if s.Resolved == 0 && s.PatchesProduced > 0 {
+		fmt.Printf("\n  NOTE: resolved=0 does not mean failure — local grading is\n" +
+			"  unavailable (SWE-bench scoring needs Docker). Patches were\n" +
+			"  written to a predictions file for offline grading via the\n" +
+			"  swebench harness or sb-cli. See results dir.\n")
+	}
 }
 
 // persistSWEReport writes the report and per-task results to the results directory.
@@ -462,7 +544,50 @@ func persistSWEReport(report *SWEReport, dir string) error {
 	}
 
 	reportPath := filepath.Join(dir, report.RunID+".json")
-	return WriteSWEReportJSON(report, reportPath)
+	if err := WriteSWEReportJSON(report, reportPath); err != nil {
+		return err
+	}
+	return writeSWEPredictions(report, dir)
+}
+
+// writeSWEPredictions emits a SWE-bench predictions file (JSONL) that the
+// official swebench harness or the sb-cli cloud evaluator can grade. Each
+// line is {"instance_id","model_name_or_path","model_patch"} — the schema
+// those graders expect. Tasks with no captured patch are skipped. Returns
+// nil (no file) when nothing was produced.
+func writeSWEPredictions(report *SWEReport, dir string) error {
+	type prediction struct {
+		InstanceID      string `json:"instance_id"`
+		ModelNameOrPath string `json:"model_name_or_path"`
+		ModelPatch      string `json:"model_patch"`
+	}
+	var b strings.Builder
+	n := 0
+	for _, r := range report.Tasks {
+		if strings.TrimSpace(r.ModelPatch) == "" {
+			continue
+		}
+		line, err := json.Marshal(prediction{
+			InstanceID:      r.InstanceID,
+			ModelNameOrPath: report.Agent,
+			ModelPatch:      r.ModelPatch,
+		})
+		if err != nil {
+			return fmt.Errorf("marshal prediction %s: %w", r.InstanceID, err)
+		}
+		b.Write(line)
+		b.WriteByte('\n')
+		n++
+	}
+	if n == 0 {
+		return nil
+	}
+	path := filepath.Join(dir, report.RunID+"-predictions.jsonl")
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		return fmt.Errorf("write predictions: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Predictions (%d) written to %s\n", n, path)
+	return nil
 }
 
 // WriteSWEReportJSON writes the report to a JSON file.
