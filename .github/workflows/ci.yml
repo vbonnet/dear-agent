@@ -71,7 +71,11 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # Pin to a specific version so linter upgrades are deliberate, not
+          # silent. `latest` lets golangci-lint bump on its own schedule,
+          # which can introduce new findings (e.g. SA5011) on an unrelated PR
+          # and red main without any code change. Bump this intentionally.
+          version: v2.12.2
 
   # govulncheck runs inside the *required* CI workflow (not only the
   # separate, non-blocking Security Scan / SBOM workflows) so a known-vuln
