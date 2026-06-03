@@ -120,20 +120,20 @@ func printTableFormat(ws *session.WorkspaceStatus, cmd *cobra.Command) {
 
 	// Print header
 	if ws.Workspace != "" {
-		fmt.Fprintf(out, "Workspace: %s\n", ws.Workspace)
+		_, _ = fmt.Fprintf(out, "Workspace: %s\n", ws.Workspace)
 	} else {
-		fmt.Fprintln(out, "Workspace: all")
+		_, _ = fmt.Fprintln(out, "Workspace: all")
 	}
 
-	fmt.Fprintf(out, "Sessions: %d total (%d DONE, %d WORKING)\n\n", ws.TotalSessions, ws.DoneSessions, ws.WorkingSessions)
+	_, _ = fmt.Fprintf(out, "Sessions: %d total (%d DONE, %d WORKING)\n\n", ws.TotalSessions, ws.DoneSessions, ws.WorkingSessions)
 
 	if len(ws.Sessions) == 0 {
-		fmt.Fprintln(out, "No sessions found.")
+		_, _ = fmt.Fprintln(out, "No sessions found.")
 		return
 	}
 
 	// Print table header
-	fmt.Fprintf(out, "%-25s %-20s %-18s %-12s %-12s %-15s\n",
+	_, _ = fmt.Fprintf(out, "%-25s %-20s %-18s %-12s %-12s %-15s\n",
 		"Session Name",
 		"Branch",
 		"State",
@@ -141,7 +141,7 @@ func printTableFormat(ws *session.WorkspaceStatus, cmd *cobra.Command) {
 		"Budget",
 		"Worktree",
 	)
-	fmt.Fprintln(out, strings.Repeat("─", 120))
+	_, _ = fmt.Fprintln(out, strings.Repeat("─", 120))
 
 	// Print each session
 	for _, s := range ws.Sessions {
@@ -153,7 +153,7 @@ func printTableFormat(ws *session.WorkspaceStatus, cmd *cobra.Command) {
 		budgetStr := formatBudget(s.Budget)
 		worktree := formatWorktree(s.WorktreePath)
 
-		fmt.Fprintf(out, "%-25s %-20s %-18s %-12s %-12s %-15s\n",
+		_, _ = fmt.Fprintf(out, "%-25s %-20s %-18s %-12s %-12s %-15s\n",
 			sessionName,
 			branch,
 			state,
@@ -163,7 +163,7 @@ func printTableFormat(ws *session.WorkspaceStatus, cmd *cobra.Command) {
 		)
 	}
 
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out)
 }
 
 func truncate(s string, maxLen int) string {
@@ -229,25 +229,25 @@ func formatWorktree(path string) string {
 func printOpsStatusTable(cmd *cobra.Command, result *ops.GetStatusResult) {
 	out := cmd.OutOrStdout()
 
-	fmt.Fprintf(out, "Sessions: %d total (%d active, %d stopped, %d archived)\n\n",
+	_, _ = fmt.Fprintf(out, "Sessions: %d total (%d active, %d stopped, %d archived)\n\n",
 		result.Summary.Total, result.Summary.Active, result.Summary.Stopped, result.Summary.Archived)
 
 	if len(result.Sessions) == 0 {
-		fmt.Fprintln(out, "No sessions found.")
+		_, _ = fmt.Fprintln(out, "No sessions found.")
 		return
 	}
 
-	fmt.Fprintf(out, "%-25s %-10s %-15s\n",
+	_, _ = fmt.Fprintf(out, "%-25s %-10s %-15s\n",
 		"Session Name", "Status", "Harness")
-	fmt.Fprintln(out, strings.Repeat("-", 70))
+	_, _ = fmt.Fprintln(out, strings.Repeat("-", 70))
 
 	for _, s := range result.Sessions {
 		name := s.Name
 		if len(name) > 24 {
 			name = name[:21] + "..."
 		}
-		fmt.Fprintf(out, "%-25s %-10s %-15s\n",
+		_, _ = fmt.Fprintf(out, "%-25s %-10s %-15s\n",
 			name, s.Status, s.Harness)
 	}
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out)
 }

@@ -52,7 +52,7 @@ func runCheckWorktrees(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: Cannot connect to Dolt (%v), skipping worktree check\n", err)
 		return nil
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	var worktrees []dolt.WorktreeRecord
 	if checkWorktreesSession != "" {

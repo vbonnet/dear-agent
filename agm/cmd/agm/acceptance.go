@@ -90,7 +90,7 @@ func printAcceptance(crits []acceptance.Criterion, root string) error {
 		fmt.Printf("Acceptance criteria from %s/.dear-agent.yml:\n\n", root)
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "TYPE\tCOMMAND\tDESCRIPTION")
+	_, _ = fmt.Fprintln(w, "TYPE\tCOMMAND\tDESCRIPTION")
 	for _, c := range crits {
 		cmd := c.Command
 		if cmd == "" {
@@ -100,7 +100,7 @@ func printAcceptance(crits []acceptance.Criterion, root string) error {
 		if desc == "" {
 			desc = "-"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", c.Type, cmd, desc)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", c.Type, cmd, desc)
 	}
 	return w.Flush()
 }

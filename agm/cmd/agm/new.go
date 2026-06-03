@@ -676,7 +676,7 @@ func applyCreationModeSwitch(sessionName, harness, targetMode string) {
 		debug.Log("Could not connect to storage for mode manifest update: %v", err)
 		return
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 	updateModeManifest(adapter, sessionName, targetMode, "creation")
 }
 
@@ -806,17 +806,17 @@ func init() {
 	// harness and workspace flags are now optional - prompts shown if omitted
 	newCmd.Flags().StringVar(&modeFlagValue, "mode", "", "Permission mode after init (plan, auto, default) (env: AGM_DEFAULT_MODE)")
 	newCmd.Flags().BoolVar(&noAutoMode, "no-auto-mode", false, "Disable --enable-auto-mode flag for Claude (env: AGM_DISABLE_AUTO_MODE)")
-	newCmd.RegisterFlagCompletionFunc("mode", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = newCmd.RegisterFlagCompletionFunc("mode", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"plan", "auto", "default"}, cobra.ShellCompDirectiveNoFileComp
 	})
 	newCmd.Flags().StringVar(&roleName, "role", "", "Role tag for the session (e.g., orchestrator, worker, researcher)")
 	newCmd.Flags().StringSliceVar(&sessionTags, "tags", nil, "Context tags for the session (e.g., 'cap:web-search,cap:claude-code')")
-	newCmd.RegisterFlagCompletionFunc("role", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = newCmd.RegisterFlagCompletionFunc("role", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"orchestrator", "meta-orchestrator", "researcher", "worker", "reviewer"}, cobra.ShellCompDirectiveNoFileComp
 	})
 	newCmd.Flags().StringSliceVar(&permissionsAllow, "permissions-allow", nil, "Permission patterns to pre-approve (e.g., 'Bash(tmux:*),Read(~/src/**)') — written to project .claude/settings.local.json")
 	newCmd.Flags().StringVar(&permissionProfile, "permission-profile", "", "Predefined permission profile (worker, monitor, audit)")
-	newCmd.RegisterFlagCompletionFunc("permission-profile", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = newCmd.RegisterFlagCompletionFunc("permission-profile", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return rbac.ProfileNames(), cobra.ShellCompDirectiveNoFileComp
 	})
 	newCmd.Flags().BoolVar(&inheritPermissions, "inherit-permissions", false, "Inherit permission allowlist from parent's ~/.claude/settings.json")
@@ -824,11 +824,11 @@ func init() {
 	newCmd.Flags().StringVar(&disposableTTL, "disposable-ttl", "4h", "TTL for disposable sessions (e.g., 1h, 4h, 30m)")
 
 	// Tab completion for --harness flag
-	newCmd.RegisterFlagCompletionFunc("harness", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = newCmd.RegisterFlagCompletionFunc("harness", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli"}, cobra.ShellCompDirectiveNoFileComp
 	})
 	// Tab completion for --model flag (context-sensitive based on --harness value)
-	newCmd.RegisterFlagCompletionFunc("model", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	_ = newCmd.RegisterFlagCompletionFunc("model", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		h, _ := cmd.Flags().GetString("harness")
 		if h == "" {
 			return nil, cobra.ShellCompDirectiveNoFileComp

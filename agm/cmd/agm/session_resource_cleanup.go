@@ -126,7 +126,7 @@ func cleanupFromDolt(ctx context.Context, sessionName string) (worktreesRemoved,
 	if err != nil {
 		return
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	if srcDryRun {
 		listDoltWorktreesDryRun(ctx, adapter, sessionName)
@@ -174,7 +174,7 @@ func loadManifestResources(sessionName string) (*manifest.ResourceManifest, erro
 	if err != nil {
 		return nil, err
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	m, err := adapter.GetSession(sessionName)
 	if err != nil {

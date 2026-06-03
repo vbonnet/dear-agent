@@ -107,10 +107,10 @@ Examples:
 
 		// Show orphan tmux sessions if any
 		if len(result.OrphanTmuxSessions) > 0 {
-			fmt.Fprintln(cmd.OutOrStdout())
+			_, _ = fmt.Fprintln(cmd.OutOrStdout())
 			ui.PrintWarning("Orphan tmux sessions (no AGM counterpart):")
 			for _, name := range result.OrphanTmuxSessions {
-				fmt.Fprintf(cmd.OutOrStdout(), "  - %s\n", name)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  - %s\n", name)
 			}
 		}
 		return nil
@@ -191,20 +191,20 @@ func printSessionSummaryTable(cmd *cobra.Command, sessions []ops.SessionSummary,
 	})
 
 	// Legend on separate lines
-	fmt.Fprintln(out, "Status  (S): ●=active & attached  ◐=active & detached  ○=stopped")
-	fmt.Fprintln(out, "Harness (H): cc=claude  gem=gemini  cdx=codex  oc=opencode")
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Status  (S): ●=active & attached  ◐=active & detached  ○=stopped")
+	_, _ = fmt.Fprintln(out, "Harness (H): cc=claude  gem=gemini  cdx=codex  oc=opencode")
+	_, _ = fmt.Fprintln(out)
 
 	// Header
 	if showTrust {
-		fmt.Fprintf(out, "%-28s %s %-3s %5s %-24s %s\n",
+		_, _ = fmt.Fprintf(out, "%-28s %s %-3s %5s %-24s %s\n",
 			"NAME", "S", "H", "TRUST", "PROJECT", "TAGS")
-		fmt.Fprintf(out, "%-28s %s %-3s %5s %-24s %s\n",
+		_, _ = fmt.Fprintf(out, "%-28s %s %-3s %5s %-24s %s\n",
 			"---", "-", "--", "-----", "-------", "----")
 	} else {
-		fmt.Fprintf(out, "%-28s %s %-3s %-24s %s\n",
+		_, _ = fmt.Fprintf(out, "%-28s %s %-3s %-24s %s\n",
 			"NAME", "S", "H", "PROJECT", "TAGS")
-		fmt.Fprintf(out, "%-28s %s %-3s %-24s %s\n",
+		_, _ = fmt.Fprintf(out, "%-28s %s %-3s %-24s %s\n",
 			"---", "-", "--", "-------", "----")
 	}
 
@@ -220,10 +220,10 @@ func printSessionSummaryTable(cmd *cobra.Command, sessions []ops.SessionSummary,
 		}
 		if showTrust {
 			trustScore := lookupTrustScore(s.Name)
-			fmt.Fprintf(out, "%-28s %s %-3s %5d %-24s %s\n",
+			_, _ = fmt.Fprintf(out, "%-28s %s %-3s %5d %-24s %s\n",
 				name, shortStatus(s), shortHarness(s.Harness), trustScore, project, tags)
 		} else {
-			fmt.Fprintf(out, "%-28s %s %-3s %-24s %s\n",
+			_, _ = fmt.Fprintf(out, "%-28s %s %-3s %-24s %s\n",
 				name, shortStatus(s), shortHarness(s.Harness), project, tags)
 		}
 	}

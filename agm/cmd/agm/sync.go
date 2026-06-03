@@ -88,7 +88,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// List existing manifests from Dolt
 		manifests, err := adapter.ListSessions(&dolt.SessionFilter{})

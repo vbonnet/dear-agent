@@ -54,7 +54,7 @@ Examples:
 			// Fail gracefully - return empty list if can't connect to Dolt
 			return []string{}, cobra.ShellCompDirectiveNoFileComp
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// List sessions from Dolt (exclude archived sessions from completion)
 		filter := &dolt.SessionFilter{
@@ -94,7 +94,7 @@ func runRecoverCommand(cmd *cobra.Command, args []string) error {
 	// Get Dolt adapter for session resolution
 	adapter, _ := getStorage()
 	if adapter != nil {
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 	}
 
 	// Step 1: Resolve session identifier

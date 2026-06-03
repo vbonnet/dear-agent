@@ -66,9 +66,9 @@ func init() {
 	contextCompactCmd.Flags().StringVar(&compactTokens, "tokens", "", "Token usage USED/TOTAL (required)")
 	contextCompactCmd.Flags().BoolVar(&compactJSON, "json", false, "Output as JSON")
 
-	contextCompactCmd.MarkFlagRequired("focus")
-	contextCompactCmd.MarkFlagRequired("model")
-	contextCompactCmd.MarkFlagRequired("tokens")
+	_ = contextCompactCmd.MarkFlagRequired("focus")
+	_ = contextCompactCmd.MarkFlagRequired("model")
+	_ = contextCompactCmd.MarkFlagRequired("tokens")
 }
 
 func runContextCompact(cmd *cobra.Command, args []string) error {
