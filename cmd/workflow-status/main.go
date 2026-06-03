@@ -56,7 +56,7 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "open %s: %v\n", *dbPath, err)
 		return 1
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
