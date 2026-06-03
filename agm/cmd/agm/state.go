@@ -160,7 +160,7 @@ func runStateSet(cmd *cobra.Command, args []string) error {
 	// Get Dolt adapter for session resolution
 	adapter, _ := getStorage()
 	if adapter != nil {
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 	}
 
 	// Resolve session

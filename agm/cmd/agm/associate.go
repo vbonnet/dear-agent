@@ -126,7 +126,7 @@ Examples:
 				// Silently fail in hook mode (Dolt not available)
 				return nil
 			}
-			defer adapter.Close()
+			defer func() { _ = adapter.Close() }()
 
 			// Try to find existing manifest
 			m, manifestPath, err := session.ResolveIdentifier(sessionName, sessionsDir, adapter)
@@ -193,7 +193,7 @@ Examples:
 			if adapterErr != nil {
 				return fmt.Errorf("failed to connect to Dolt storage: %w", adapterErr)
 			}
-			defer adapter.Close()
+			defer func() { _ = adapter.Close() }()
 
 			// Create manifest search function for uuid.Discover
 			findInManifests := func(name string) (*manifest.Manifest, error) {
@@ -265,7 +265,7 @@ Examples:
 					"  • Check WORKSPACE environment variable is set")
 			return doltErr
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// Try to find existing manifest
 		manifestPath := ""

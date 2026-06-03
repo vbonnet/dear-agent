@@ -70,7 +70,7 @@ func WriteProgress(path string, progress *Progress) error {
 	}
 
 	// Delete backup on success
-	os.Remove(backupPath)
+	_ = os.Remove(backupPath)
 
 	return nil
 }

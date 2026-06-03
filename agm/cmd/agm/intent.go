@@ -249,7 +249,7 @@ func filterOverlapping(rows []intent.Intent) []intent.Intent {
 
 func printIntentTable(rows []intent.Intent) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tSESSION\tFILES\tPACKAGES\tEXPIRES\tDESCRIPTION")
+	_, _ = fmt.Fprintln(w, "ID\tSESSION\tFILES\tPACKAGES\tEXPIRES\tDESCRIPTION")
 	for _, r := range rows {
 		files := strings.Join(r.Files, ",")
 		if files == "" {
@@ -263,7 +263,7 @@ func printIntentTable(rows []intent.Intent) {
 		if desc == "" {
 			desc = "-"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			r.ID, r.SessionID, files, packages, r.ExpiresAt.Format(time.RFC3339), desc)
 	}
 	_ = w.Flush()

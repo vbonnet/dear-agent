@@ -181,7 +181,7 @@ Examples:
 			ui.PrintSuccess("Run 'agm admin sync' to sync sessions")
 			return nil
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		manifests, err := adapter.ListSessions(&dolt.SessionFilter{})
 		if err != nil {

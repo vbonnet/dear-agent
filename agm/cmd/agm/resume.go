@@ -78,7 +78,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// Resolve identifier to SessionID
 		sessionID, manifestPath, err := resolveSessionIdentifier(adapter, identifier)
@@ -167,7 +167,7 @@ Examples:
 			// Fail gracefully - return empty list if can't connect to Dolt
 			return []string{}, cobra.ShellCompDirectiveNoFileComp
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// List sessions from Dolt (exclude archived sessions from completion)
 		filter := &dolt.SessionFilter{

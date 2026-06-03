@@ -147,7 +147,7 @@ func newMCPOpContext() (*ops.OpContext, func(), error) {
 		return nil, func() {}, fmt.Errorf("dolt connect: %w", err)
 	}
 
-	cleanup := func() { adapter.Close() }
+	cleanup := func() { _ = adapter.Close() }
 
 	return &ops.OpContext{
 		Storage:    adapter,
@@ -356,7 +356,7 @@ func forwardToEngramMCP(ctx context.Context, toolName string, arguments map[stri
 	if err != nil {
 		return "", fmt.Errorf("HTTP request failed: %w (is Engram MCP server running at %s?)", err, engramURL)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -40,7 +40,7 @@ func getStorage() (*dolt.Adapter, error) {
 
 	// Apply migrations to ensure schema is up to date
 	if err := adapter.ApplyMigrations(); err != nil {
-		adapter.Close()
+		_ = adapter.Close()
 		return nil, fmt.Errorf("failed to apply Dolt migrations: %w", err)
 	}
 
