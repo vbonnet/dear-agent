@@ -9,6 +9,11 @@
 # the repo's sanctioned shell-test path (shell-tests.yml + shell-matrix.yml).
 
 setup() {
+    # The hook parses its JSON payload with jq; without it the hook fails open
+    # (no-op) and there is nothing to assert. The shell-interpreter matrix runs
+    # in minimal containers that omit jq, so skip there — full coverage still
+    # runs under shell-tests.yml (ubuntu, jq preinstalled) and locally.
+    command -v jq >/dev/null 2>&1 || skip "hook requires jq, not installed here"
     HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/.claude/hooks/pretool-spawn-routing"
 }
 
