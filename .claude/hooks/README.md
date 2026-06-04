@@ -31,9 +31,10 @@ it fails **open** — any unparseable input exits 0 silently.
   in-session hook's reach. This is a best-effort net for the *programmatic* path,
   not a complete gate. See [`AGENTS.why.md`](../../AGENTS.why.md).
 
-**Tests.** `bash pretool-spawn-routing.test.sh` (13 cases; asserts the nudge
-fires on spawns, stays silent on the AGM path and ordinary commands, and never
-emits a `permissionDecision`).
+**Tests.** `bats tests/bats/pretool-spawn-routing.bats` (13 cases; asserts the
+nudge fires on spawns, stays silent on the AGM path and ordinary commands, and
+never emits a `permissionDecision`). Lives under `tests/bats/` — the repo's
+sanctioned shell-test path, run by `shell-tests.yml` and `shell-matrix.yml`.
 
 **First run.** Claude Code reviews new/changed hooks before they take effect;
 approve it once when prompted.
