@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/freshness"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -61,6 +63,8 @@ USAGE MODES:
    - Sessions with empty/missing Claude UUIDs
    - Orphaned session directories
    - Invalid manifest files
+   - Per-harness health for every harness in use (claude-code, gemini-cli,
+     codex-cli, opencode-cli): CLI binary on PATH, auth/config, config dir
 
    Use when: You want a quick overview of system health
 
@@ -326,6 +330,12 @@ Examples:
 					ui.PrintSuccess("No orphaned sessions found")
 				}
 			}
+
+			// 6. Per-harness health (gated by the harness each session uses)
+			fmt.Println(ui.Blue("\n--- Checking per-harness health ---"))
+			if !checkHarnessHealth(manifests) {
+				allHealthy = false
+			}
 		}
 
 		// Overall status
@@ -408,6 +418,90 @@ func detectDuplicateSessionDirs(sessionsDir string) []DuplicateSessionDir {
 	}
 
 	return duplicates
+}
+
+// checkHarnessHealth runs per-harness health checks for every harness in use
+// across the session manifests. AGM supports claude-code, gemini-cli,
+// codex-cli, and opencode-cli; this surfaces a missing binary, missing
+// auth/config, or absent config dir for whichever harnesses the sessions
+// actually use — without privileging Claude.
+//
+// Sessions with an empty harness field are treated as claude-code (the
+// historical default), and claude-code is always checked even when no session
+// references it, so the Claude path is never skipped. Returns false (failing
+// the overall health check) only when a harness with at least one live session
+// is unhealthy; the always-on default check is informational.
+func checkHarnessHealth(manifests []*manifest.Manifest) bool {
+	inUse := map[string]int{}
+	for _, m := range manifests {
+		h := m.Harness
+		if h == "" {
+			h = "claude-code"
+		}
+		inUse[h]++
+	}
+	// Always verify the default harness, even with zero sessions.
+	if _, ok := inUse["claude-code"]; !ok {
+		inUse["claude-code"] = 0
+	}
+
+	names := make([]string, 0, len(inUse))
+	for name := range inUse {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	healthy := true
+	for _, name := range names {
+		count := inUse[name]
+		// A harness with no live sessions is informational only — never fail
+		// the overall check on it.
+		if !reportHarnessHealth(name, count) && count > 0 {
+			healthy = false
+		}
+	}
+	return healthy
+}
+
+// reportHarnessHealth prints the health of a single harness and returns whether
+// it is healthy. count is the number of live sessions using it (0 for the
+// always-on default check).
+func reportHarnessHealth(name string, count int) bool {
+	hh := agent.CheckHarnessHealth(name)
+
+	var label string
+	if count > 0 {
+		label = fmt.Sprintf("%s (%d session(s))", name, count)
+	} else {
+		label = fmt.Sprintf("%s (default, no sessions)", name)
+	}
+
+	if hh.IsHealthy() {
+		detail := fmt.Sprintf("binary '%s' on PATH, auth configured", hh.BinaryName)
+		if hh.ConfigDir != "" && hh.ConfigDirFound {
+			detail += fmt.Sprintf(", config dir %s", hh.ConfigDir)
+		}
+		ui.PrintSuccessWithDetail(label, "  • "+detail)
+		return true
+	}
+
+	// Unhealthy: report which sub-check failed and how to fix it.
+	ui.PrintWarning(fmt.Sprintf("Harness '%s' unhealthy", label))
+	switch {
+	case !hh.Known:
+		fmt.Printf("  • Unknown harness — valid harnesses: claude-code, gemini-cli, codex-cli, opencode-cli\n")
+	case !hh.BinaryPresent:
+		fmt.Printf("  • CLI binary '%s' not found on PATH — install it or migrate these sessions\n", hh.BinaryName)
+	}
+	// The unknown-harness line above already explains the failure; the auth
+	// hint would just repeat "unknown harness".
+	if hh.Known && !hh.AuthConfigured && hh.AuthHint != "" {
+		fmt.Printf("  • %s\n", strings.ReplaceAll(hh.AuthHint, "\n", "\n    "))
+	}
+	if hh.ConfigDir != "" && !hh.ConfigDirFound {
+		fmt.Printf("  • Config dir %s not found (harness may be uninitialized)\n", hh.ConfigDir)
+	}
+	return false
 }
 
 func runValidation(manifests []*manifest.Manifest, fix bool, json bool) error {
