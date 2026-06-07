@@ -5,6 +5,7 @@
 #   preflight-tests         preflight + go test (no -race) — quick sanity
 #   preflight-full          preflight + go test -race + govulncheck (full parity)
 #   install-preflight-hook  Install a git pre-push hook that runs preflight
+#   install-post-merge-hook Install a post-merge hook that reaps merged worktrees
 #   act-validate            Run full local CI validation via act (needs Docker)
 #   act-lint                Run lint job via act
 #   act-test                Run test job via act
@@ -24,7 +25,7 @@
 #   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 
-.PHONY: preflight preflight-tests preflight-full install-preflight-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings install-configure-settings build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent
+.PHONY: preflight preflight-tests preflight-full install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings install-configure-settings build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent
 
 # Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
 # CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm
@@ -58,6 +59,14 @@ install-preflight-hook:
 	printf '#!/bin/sh\nexec make preflight\n' > "$$HOOK"; \
 	chmod +x "$$HOOK"; \
 	echo "Installed: $$HOOK -> make preflight"
+
+# Install the post-merge worktree-sweep trigger. After a PR lands on the
+# default branch locally (e.g. `git pull` on main), it kicks off the canonical
+# fail-safe reaper `agm worktree sweep --execute`. The installer honours
+# core.hooksPath and refuses to clobber a chezmoi-managed hooks dir — see
+# scripts/install-post-merge-hook.sh for the resolution and safety logic.
+install-post-merge-hook:
+	@bash scripts/install-post-merge-hook.sh
 
 # Run full local CI validation via act. Requires Docker + act installed.
 # Prefer `make preflight-full` for the same gates without containerisation.
