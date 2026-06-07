@@ -45,7 +45,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// Create detector and associator
 		historyPath := "" // Use default ~/.claude/history.jsonl

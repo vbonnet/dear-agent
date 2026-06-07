@@ -80,7 +80,7 @@ Examples:
 					// Can't connect to AGM, default to Claude
 					return outputHistoryLocation(cmd, "claude-code", currentUUID, "", nil)
 				}
-				defer adapter.Close()
+				defer func() { _ = adapter.Close() }()
 
 				// Search for session by UUID
 				manifests, err := adapter.ListSessions(&dolt.SessionFilter{})
@@ -112,7 +112,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// Create manifest search function for uuid.Discover
 		findInManifests := func(name string) (*manifest.Manifest, error) {
@@ -205,7 +205,7 @@ func outputHistoryError(cmd *cobra.Command, agent, uuid string, err error) {
 	writer := cliframe.NewWriter(cmd.OutOrStdout(), cmd.ErrOrStderr())
 	writer = writer.WithFormatter(formatter)
 	if outErr := writer.Output(errorLoc); outErr != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to write error output: %v\n", outErr)
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to write error output: %v\n", outErr)
 	}
 }
 

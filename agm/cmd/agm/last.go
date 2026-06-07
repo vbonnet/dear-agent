@@ -50,7 +50,7 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("failed to connect to storage: %w", err)
 			}
-			defer adapter.Close()
+			defer func() { _ = adapter.Close() }()
 
 			// Use the resume flow with the session name as identifier
 			sessionID, manifestPath, err := resolveSessionIdentifier(adapter, result.Session.Name)

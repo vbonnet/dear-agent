@@ -62,7 +62,7 @@ func runLinkFromConversation(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	// Get sessions dir - use default Claude Code location
 	home, err := os.UserHomeDir()
@@ -172,7 +172,7 @@ func extractParentUUID(conversationFile string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	lineCount := 0

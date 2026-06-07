@@ -230,8 +230,8 @@ func printTraceTable(result *trace.TraceResult) {
 	fmt.Println()
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "Session UUID\tSession Name\tWorkspace\tModifications\t")
-	fmt.Fprintln(w, "------------\t------------\t---------\t-------------\t")
+	_, _ = fmt.Fprintln(w, "Session UUID\tSession Name\tWorkspace\tModifications\t")
+	_, _ = fmt.Fprintln(w, "------------\t------------\t---------\t-------------\t")
 
 	for _, session := range result.Sessions {
 		workspace := session.Workspace
@@ -243,16 +243,16 @@ func printTraceTable(result *trace.TraceResult) {
 			timestamps = append(timestamps, mod.Timestamp.Format("2006-01-02 15:04:05"))
 		}
 		if len(timestamps) > 0 {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t\n",
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t\n",
 				session.SessionID,
 				session.SessionName,
 				workspace,
 				timestamps[0])
 		}
 		for i := 1; i < len(timestamps); i++ {
-			fmt.Fprintf(w, "\t\t\t%s\t\n", timestamps[i])
+			_, _ = fmt.Fprintf(w, "\t\t\t%s\t\n", timestamps[i])
 		}
 	}
-	w.Flush()
+	_ = w.Flush()
 	fmt.Println()
 }

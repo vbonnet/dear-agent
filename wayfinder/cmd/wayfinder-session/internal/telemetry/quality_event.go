@@ -92,7 +92,7 @@ func EmitQualityEvent(ctx context.Context, event QualityAssessedEvent, telemetry
 	if err != nil {
 		return fmt.Errorf("failed to open telemetry file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Write JSON line with newline
 	data = append(data, '\n')

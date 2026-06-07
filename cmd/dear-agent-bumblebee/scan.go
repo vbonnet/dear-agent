@@ -69,7 +69,7 @@ func runScan(args []string) error {
 		return fmt.Errorf("mktemp adjacent to %s: %w", outPath, err)
 	}
 	tmpName := tmpOut.Name()
-	defer os.Remove(tmpName) // no-op after a successful rename
+	defer func() { _ = os.Remove(tmpName) }() // no-op after a successful rename
 
 	cmd := exec.Command(bin, cmdArgs...)
 	cmd.Stdout = tmpOut
@@ -82,7 +82,7 @@ func runScan(args []string) error {
 	fmt.Fprintf(os.Stderr, "[bumblebee-scan] profile=%s%s → %s\n", *profile, catalogStr, outPath)
 
 	if err := cmd.Run(); err != nil {
-		tmpOut.Close()
+		_ = tmpOut.Close()
 		return fmt.Errorf("bumblebee scan: %w", err)
 	}
 	if err := tmpOut.Close(); err != nil {

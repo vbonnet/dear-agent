@@ -42,7 +42,7 @@ Exit codes:
 		if err != nil {
 			return fmt.Errorf("failed to connect to Dolt: %w", err)
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// Get current session name using shared function
 		sessionName, err := session.GetCurrentSessionName(cfg.SessionsDir, adapter)

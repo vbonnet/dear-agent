@@ -106,7 +106,7 @@ func runCleanupTestSessions(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	manifests, err := adapter.ListSessions(&dolt.SessionFilter{})
 	if err != nil {
@@ -254,11 +254,11 @@ func deleteSelectedSessions(selectedIDs []string, candidates []sessionCandidate,
 
 func displayCandidatesTable(candidates []sessionCandidate) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	defer w.Flush()
+	defer func() { _ = w.Flush() }()
 
 	// Header
-	fmt.Fprintln(w, "Session Name\tMessages\tLast Activity\tSession ID")
-	fmt.Fprintln(w, "------------\t--------\t-------------\t----------")
+	_, _ = fmt.Fprintln(w, "Session Name\tMessages\tLast Activity\tSession ID")
+	_, _ = fmt.Fprintln(w, "------------\t--------\t-------------\t----------")
 
 	// Rows
 	for _, c := range candidates {
@@ -278,7 +278,7 @@ func displayCandidatesTable(candidates []sessionCandidate) {
 			nameDisplay = ui.Yellow(c.Name)
 		}
 
-		fmt.Fprintf(w, "%s\t%d\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%d\t%s\t%s\n",
 			nameDisplay, c.MessageCount, lastActivity, sessionID)
 	}
 }
