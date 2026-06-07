@@ -101,7 +101,7 @@ Examples:
 			// Fail gracefully - return empty list if can't connect to Dolt
 			return []string{}, cobra.ShellCompDirectiveNoFileComp
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// List sessions from Dolt (exclude archived)
 		filter := &dolt.SessionFilter{
@@ -358,7 +358,7 @@ func archiveBulk() error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	allManifests, err := adapter.ListSessions(&dolt.SessionFilter{})
 	if err != nil {

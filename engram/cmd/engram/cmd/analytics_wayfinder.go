@@ -112,7 +112,7 @@ func parseWayfinderTransitions(filename string) ([]wayfinderTransition, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var transitions []wayfinderTransition
 	scanner := bufio.NewScanner(file)
