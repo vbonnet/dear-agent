@@ -64,9 +64,9 @@ install-preflight-hook:
 # default branch locally (e.g. `git pull` on main), it kicks off the canonical
 # fail-safe reaper `agm worktree sweep --execute`. The installer honours
 # core.hooksPath and refuses to clobber a chezmoi-managed hooks dir — see
-# scripts/install-post-merge-hook.sh for the resolution and safety logic.
+# cmd/install-post-merge-hook for the resolution and safety logic.
 install-post-merge-hook:
-	@bash scripts/install-post-merge-hook.sh
+	@go run ./cmd/install-post-merge-hook
 
 # Run full local CI validation via act. Requires Docker + act installed.
 # Prefer `make preflight-full` for the same gates without containerisation.

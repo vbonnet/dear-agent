@@ -36,7 +36,7 @@
 # (deterministic for tests; also handy if you want `git pull` to wait).
 #
 # Install: `make install-post-merge-hook` (honours core.hooksPath and never
-# clobbers a chezmoi-managed hooks dir — see scripts/install-post-merge-hook.sh).
+# clobbers a chezmoi-managed hooks dir — see cmd/install-post-merge-hook).
 
 set -u
 
