@@ -111,7 +111,7 @@ func (e *JSONLExporter) ExportSpans(_ context.Context, spans []sdktrace.ReadOnly
 		if attrs := s.Attributes(); len(attrs) > 0 {
 			js.Attributes = make(map[string]string, len(attrs))
 			for _, kv := range attrs {
-				js.Attributes[string(kv.Key)] = kv.Value.Emit()
+				js.Attributes[string(kv.Key)] = kv.Value.String()
 			}
 		}
 
@@ -124,7 +124,7 @@ func (e *JSONLExporter) ExportSpans(_ context.Context, spans []sdktrace.ReadOnly
 			if len(ev.Attributes) > 0 {
 				je.Attributes = make(map[string]string, len(ev.Attributes))
 				for _, kv := range ev.Attributes {
-					je.Attributes[string(kv.Key)] = kv.Value.Emit()
+					je.Attributes[string(kv.Key)] = kv.Value.String()
 				}
 			}
 			js.Events = append(js.Events, je)
