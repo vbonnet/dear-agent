@@ -238,6 +238,7 @@ jobs:
           while IFS= read -r f; do
             [ -z "$f" ] && continue
             case "$f" in */*) top="${f%%/*}";; *) continue;; esac
+            case "$top" in .*) continue;; esac   # dot-dirs (.github, .claude) are infra, not source layout
             case " $known " in *" $top "*) ;; *) echo "$top" ;; esac
           done < /tmp/added.txt | sort -u | while IFS= read -r d; do
             [ -z "$d" ] && continue
