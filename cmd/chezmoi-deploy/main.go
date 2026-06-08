@@ -24,6 +24,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/vbonnet/dear-agent/internal/safegit"
 )
 
 func main() {
@@ -132,13 +134,21 @@ func run(argv []string) error {
 			"inspect with: git -C %s status): %w", source, source, err)
 	}
 
-	// Step 3: safe push (never force).
+	// Step 3: safe push (never force). Resolve gh and reset the credential
+	// helper chain to gh-only so this push can never hang on the osxkeychain
+	// GUI prompt — see internal/safegit for the full rationale. (Appending a
+	// helper without the empty reset, as this step used to, leaves osxkeychain
+	// first in the chain and reintroduces the hang.)
 	fmt.Printf("\n[3/3] git -C %s push\n", source)
-	if err := stream("git", "-C", source,
-		"-c", "credential.helper=!gh auth git-credential", "push"); err != nil {
+	gh, err := safegit.ResolveGh()
+	if err != nil {
+		return fmt.Errorf("apply + commit succeeded; cannot push without gh: %w", err)
+	}
+	pushArgs := append([]string{"-C", source}, safegit.CredentialResetArgs(gh)...)
+	pushArgs = append(pushArgs, "push")
+	if err := stream("git", pushArgs...); err != nil {
 		return fmt.Errorf("git push failed (apply + commit succeeded; the commit is local only — "+
-			"retry the push with: git -C %s -c credential.helper='!gh auth git-credential' push): %w",
-			source, err)
+			"retry the push with: safe-push -C %s): %w", source, err)
 	}
 
 	fmt.Println("\n✓ applied, committed, and pushed.")
