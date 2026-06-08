@@ -1,0 +1,196 @@
+package earslint
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func newDefault(t *testing.T) *Linter {
+	t.Helper()
+	l, err := New(Config{})
+	if err != nil {
+		t.Fatalf("New(default): %v", err)
+	}
+	return l
+}
+
+func TestLint_ValidPatterns(t *testing.T) {
+	l := newDefault(t)
+	cases := map[string]string{
+		"event-driven":   "When the user submits the form, the system shall validate all fields.",
+		"state-driven":   "While the connection is active, the system shall stream telemetry.",
+		"feature-driven": "Where the premium feature is enabled, the system shall show analytics.",
+		"option":         "If the token is expired, then the system shall reject the request.",
+		"unwanted":       "The system shall not store plaintext passwords.",
+		"ubiquitous":     "The system shall log every authentication attempt.",
+	}
+	for name, line := range cases {
+		t.Run(name, func(t *testing.T) {
+			res, err := l.Lint("SPEC.md", strings.NewReader(line))
+			if err != nil {
+				t.Fatalf("Lint: %v", err)
+			}
+			if res.ValidRequirements != 1 {
+				t.Errorf("want 1 valid requirement, got %d (findings: %v)", res.ValidRequirements, res.Findings)
+			}
+			if res.NonConforming() != 0 {
+				t.Errorf("want 0 non-conforming, got %d", res.NonConforming())
+			}
+			if res.Failed(true) {
+				t.Errorf("valid requirement should not fail even in strict mode")
+			}
+		})
+	}
+}
+
+func TestLint_MarkdownListAndEmphasis(t *testing.T) {
+	l := newDefault(t)
+	doc := strings.Join([]string{
+		"# Requirements",
+		"",
+		"- When the user logs in, the system shall create a session.",
+		"1. The system shall not leak credentials.",
+		"* **While** the job runs, the system shall report progress.",
+	}, "\n")
+	res, err := l.Lint("SPEC.md", strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+	if res.ValidRequirements != 3 {
+		t.Fatalf("want 3 valid, got %d (findings: %v)", res.ValidRequirements, res.Findings)
+	}
+}
+
+func TestLint_NonConforming(t *testing.T) {
+	l := newDefault(t)
+	doc := strings.Join([]string{
+		"The system shall log requests.",            // valid ubiquitous
+		"Eventually the thing shall work somehow.",  // non-conforming (no "the X shall")
+	}, "\n")
+	res, err := l.Lint("SPEC.md", strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+	if res.ValidRequirements != 1 {
+		t.Errorf("want 1 valid, got %d", res.ValidRequirements)
+	}
+	if res.NonConforming() != 1 {
+		t.Errorf("want 1 non-conforming, got %d", res.NonConforming())
+	}
+	// Non-strict: a non-conforming line alongside a valid one does NOT fail.
+	if res.Failed(false) {
+		t.Errorf("non-strict should not fail when at least one valid requirement exists")
+	}
+	// Strict: any non-conforming requirement fails.
+	if !res.Failed(true) {
+		t.Errorf("strict should fail on non-conforming requirement")
+	}
+	// The non-conforming line should be reported with its text and line number.
+	var found bool
+	for _, f := range res.Findings {
+		if f.Line == 2 && f.Severity == SeverityError && strings.Contains(f.Text, "Eventually") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a finding for the non-conforming line 2, got %+v", res.Findings)
+	}
+}
+
+func TestLint_ZeroRequirements(t *testing.T) {
+	l := newDefault(t)
+	doc := "# Spec\n\nThis is just prose with no requirements.\n"
+	res, err := l.Lint("SPEC.md", strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+	if res.ValidRequirements != 0 {
+		t.Errorf("want 0 valid, got %d", res.ValidRequirements)
+	}
+	if !res.Failed(false) {
+		t.Errorf("zero-requirement file must fail even in non-strict mode")
+	}
+	var hasZeroFinding bool
+	for _, f := range res.Findings {
+		if strings.Contains(f.Message, "no valid EARS requirements") {
+			hasZeroFinding = true
+		}
+	}
+	if !hasZeroFinding {
+		t.Errorf("expected a zero-requirements finding, got %+v", res.Findings)
+	}
+}
+
+func TestLint_IgnoresFencedCode(t *testing.T) {
+	l := newDefault(t)
+	doc := strings.Join([]string{
+		"The system shall expose an API.",
+		"```go",
+		"// the parser shall not be confused by this comment",
+		"var shall = true",
+		"```",
+		"~~~",
+		"the tilde fence shall also be ignored",
+		"~~~",
+	}, "\n")
+	res, err := l.Lint("SPEC.md", strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+	if res.TotalRequirements != 1 || res.ValidRequirements != 1 {
+		t.Errorf("fenced code should be ignored: total=%d valid=%d findings=%v",
+			res.TotalRequirements, res.ValidRequirements, res.Findings)
+	}
+}
+
+func TestLint_CustomKeyword(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.RequirementKeyword = "must"
+	cfg.Patterns = []Pattern{{Name: "ubiquitous-must", Regex: `(?i)^the\s+.+\s+must\s+.+`}}
+	l, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := l.Lint("SPEC.md", strings.NewReader("The system must persist state."))
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+	if res.ValidRequirements != 1 {
+		t.Errorf("custom keyword: want 1 valid, got %d", res.ValidRequirements)
+	}
+}
+
+func TestNew_InvalidRegex(t *testing.T) {
+	_, err := New(Config{Patterns: []Pattern{{Name: "bad", Regex: "("}}})
+	if err == nil {
+		t.Fatal("expected error for invalid regex")
+	}
+}
+
+func TestLintFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "SPEC.md")
+	if err := os.WriteFile(path, []byte("The system shall work.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l := newDefault(t)
+	res, err := l.LintFile(path)
+	if err != nil {
+		t.Fatalf("LintFile: %v", err)
+	}
+	if res.ValidRequirements != 1 {
+		t.Errorf("want 1 valid, got %d", res.ValidRequirements)
+	}
+	if res.File != path {
+		t.Errorf("want File=%s, got %s", path, res.File)
+	}
+}
+
+func TestLintFile_Missing(t *testing.T) {
+	l := newDefault(t)
+	if _, err := l.LintFile(filepath.Join(t.TempDir(), "nope.md")); err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}

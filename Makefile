@@ -1,6 +1,7 @@
 # Root Makefile for dear-agent
 #
 # Targets:
+#   lint-specs              Validate EARS requirements in SPEC.md files
 #   preflight               Fast local CI-parity gates: vet + build + lint  (~25s)
 #   preflight-tests         preflight + go test (no -race) — quick sanity
 #   preflight-full          preflight + go test -race + govulncheck (full parity)
@@ -30,7 +31,17 @@
 #   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 
-.PHONY: preflight preflight-tests preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline
+.PHONY: lint-specs preflight preflight-tests preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline
+
+# Validate EARS-formatted requirements in SPEC.md files using the same
+# deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
+# Scans the whole repo by default; override PATHS to narrow the scope and set
+# STRICT=1 to fail on any non-conforming requirement (not just files with zero
+# valid requirements). Examples:
+#   make lint-specs
+#   make lint-specs PATHS=internal/sandbox/SPEC.md STRICT=1
+lint-specs:
+	@go run ./cmd/ears-lint $(if $(STRICT),--strict) $(if $(PATHS),$(PATHS),.)
 
 # Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
 # CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm
