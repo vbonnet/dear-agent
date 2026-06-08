@@ -148,6 +148,7 @@ jobs:
           echo "binary check done"
 
       - name: Lint delta (informational — CI lint is the gate)
+        continue-on-error: true
         run: |
           set -uo pipefail
           # ci.yml runs golangci-lint as a *blocking* required check. Here we
@@ -171,6 +172,7 @@ jobs:
           echo "lint delta: ${new} new"
 
       - name: Coverage of changed packages (informational)
+        continue-on-error: true
         run: |
           set -uo pipefail
           # A true main-vs-PR coverage delta means running the suite twice,
@@ -178,7 +180,9 @@ jobs:
           # memo). Instead we report coverage of the packages this PR touches,
           # time-boxed and non-blocking, so a drop is visible without wedging
           # the queue on a flake.
-          pkgs=$(grep -E '\.go$' /tmp/changed.txt | grep -v '_test.go$' | xargs -r -n1 dirname | sort -u | sed 's#^#./#' | tr '\n' ' ')
+          # `|| true`: grep exits 1 when there are no Go changes, which would
+          # otherwise trip GitHub's default `bash -e` before the guard below.
+          pkgs=$(grep -E '\.go$' /tmp/changed.txt | grep -v '_test.go$' | xargs -r -n1 dirname | sort -u | sed 's#^#./#' | tr '\n' ' ' || true)
           if [ -z "${pkgs// }" ]; then echo "No Go packages changed; skipping coverage."; exit 0; fi
           set +e
           cov=$(timeout 300 go test -cover $pkgs 2>/dev/null | grep -E 'coverage:' | sed -E 's#^ok[[:space:]]+([^[:space:]]+).*coverage: ([0-9.]+%).*#- `\1` — \2#')
