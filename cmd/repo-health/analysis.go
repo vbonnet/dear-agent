@@ -25,7 +25,9 @@ var excludedDirs = map[string]bool{
 func walkRepoFiles(root string, fn func(path string)) error {
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // unreadable entry: skip, don't abort the whole scan
+			//nolint:nilerr // an unreadable entry is skipped, not fatal: a
+			// single permission error must not blind the whole audit.
+			return nil
 		}
 		if d.IsDir() {
 			if path != root && excludedDirs[d.Name()] {

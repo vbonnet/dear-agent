@@ -166,13 +166,13 @@ func extractCycle(stack []string, target string) []string {
 // cycleKey produces a rotation-stable key so the same cycle discovered from
 // different entry points is only reported once.
 func cycleKey(cyc []string) string {
-	min := 0
+	lo := 0
 	for i := range cyc {
-		if cyc[i] < cyc[min] {
-			min = i
+		if cyc[i] < cyc[lo] {
+			lo = i
 		}
 	}
-	rotated := append(append([]string{}, cyc[min:]...), cyc[:min]...)
+	rotated := append(append([]string{}, cyc[lo:]...), cyc[:lo]...)
 	return strings.Join(rotated, "->")
 }
 

@@ -33,9 +33,10 @@ func (s Status) ExitCode() int {
 		return 2
 	case StatusDegraded:
 		return 1
-	default:
+	case StatusHealthy:
 		return 0
 	}
+	return 0
 }
 
 // Issue is one actionable finding. Check is the metric family it came from
