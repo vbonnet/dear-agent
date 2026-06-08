@@ -64,7 +64,7 @@ func cli(argv []string) int {
 		}
 	}
 	if *mdOut != "" {
-		if err := os.WriteFile(*mdOut, []byte(renderMarkdown(report)), 0o644); err != nil {
+		if err := os.WriteFile(*mdOut, []byte(renderMarkdown(report)), 0o600); err != nil {
 			fmt.Fprintf(os.Stderr, "repo-health: writing %s: %v\n", *mdOut, err)
 			return 2
 		}
@@ -127,5 +127,5 @@ func writeJSON(path string, r Report) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return os.WriteFile(path, append(data, '\n'), 0o600)
 }

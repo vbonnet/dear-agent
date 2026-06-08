@@ -13,9 +13,10 @@ func statusEmoji(s Status) string {
 		return "🔴"
 	case StatusDegraded:
 		return "🟡"
-	default:
+	case StatusHealthy:
 		return "🟢"
 	}
+	return "🟢"
 }
 
 // renderMarkdown produces the human-readable summary. It leads with the
@@ -105,9 +106,10 @@ func sevMarker(s Severity) string {
 		return "🔴"
 	case SeverityWarn:
 		return "🟡"
-	default:
+	case SeverityInfo:
 		return "ℹ️"
 	}
+	return "ℹ️"
 }
 
 func availInt(m Metric, v int) string {
