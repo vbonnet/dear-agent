@@ -25,7 +25,7 @@
 #   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 
-.PHONY: preflight preflight-tests preflight-full install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings install-configure-settings build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent
+.PHONY: preflight preflight-tests preflight-full install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent
 
 # Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
 # CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm
@@ -125,6 +125,19 @@ build-configure-settings:
 install-configure-settings: build-configure-settings
 	cp bin/configure-claude-settings $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/configure-claude-settings"
+
+# Build safe-push: a git-push wrapper that resets the credential helper chain
+# to gh-only (never osxkeychain, which can hang on a headless GUI prompt) and
+# never force-pushes. See internal/safegit and docs/retros/2026-06-08-git-push-credential-hang.md.
+build-safe-push:
+	@echo "Building safe-push..."
+	go build $(GOFLAGS) -o bin/safe-push ./cmd/safe-push/
+	@echo "Built: bin/safe-push"
+
+# Install safe-push to GOPATH/bin so it is on PATH for every agent session.
+install-safe-push: build-safe-push
+	cp bin/safe-push $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-push"
 
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
