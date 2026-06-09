@@ -100,10 +100,10 @@
       "wayfinder/cmd/wayfinder-session/internal/integration/wayfinder_v2_test.go"
     ],
     "goroutine-recover": [
-      "agm/cmd/agm-bus/main.go:181",
-      "agm/cmd/agm-bus/main.go:217",
-      "agm/cmd/agm-bus/main.go:276",
-      "agm/cmd/agm-bus/main.go:309",
+      "agm/cmd/agm-bus/main.go:190",
+      "agm/cmd/agm-bus/main.go:226",
+      "agm/cmd/agm-bus/main.go:329",
+      "agm/cmd/agm-bus/main.go:362",
       "agm/cmd/agm-daemon/main.go:143",
       "agm/cmd/agm-mcp-server/main.go:186",
       "agm/cmd/agm-statusline/main.go:262",
