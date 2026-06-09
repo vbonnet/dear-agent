@@ -36,7 +36,7 @@ func TestEmitHandedOff(t *testing.T) {
 	if score, ok := ev.Data["confidence_score"].(float64); !ok || score != 0.25 {
 		t.Errorf("confidence_score = %v, want 0.25", ev.Data["confidence_score"])
 	}
-	gaps, ok := ev.Data["gaps"].([]interface{})
+	gaps, ok := ev.Data["gaps"].([]any)
 	if !ok || len(gaps) != 2 {
 		t.Fatalf("gaps = %v, want 2 entries", ev.Data["gaps"])
 	}
