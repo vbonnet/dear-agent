@@ -78,6 +78,29 @@ func TestDetect(t *testing.T) {
 	}
 }
 
+func TestHasPattern(t *testing.T) {
+	db := newTestDB()
+	d, err := NewDetector(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Patterns present in the database, regardless of whether they compile or
+	// are relaxed/consolidated, should be reported as owned.
+	for _, id := range []string{"cd-command", "command-chaining", "file-operations", "relaxed-pattern", "consolidated-pattern"} {
+		if !d.HasPattern(id) {
+			t.Errorf("expected HasPattern(%q) to be true", id)
+		}
+	}
+
+	// IDs not in the database should not be reported as owned.
+	for _, id := range []string{"nonexistent", "", "cd"} {
+		if d.HasPattern(id) {
+			t.Errorf("expected HasPattern(%q) to be false", id)
+		}
+	}
+}
+
 func TestDetectAll(t *testing.T) {
 	db := newTestDB()
 	d, err := NewDetector(db)
