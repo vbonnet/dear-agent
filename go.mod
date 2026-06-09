@@ -35,7 +35,7 @@ require (
 	github.com/pact-foundation/pact-go/v2 v2.4.3
 	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/pkoukk/tiktoken-go v0.1.8
-	github.com/rogpeppe/go-internal v1.14.1
+	github.com/rogpeppe/go-internal v1.15.0
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/schollz/progressbar/v3 v3.19.0
 	github.com/sebdah/goldie/v2 v2.8.0
