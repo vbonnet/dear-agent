@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/vbonnet/dear-agent/internal/fileutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -84,20 +85,14 @@ func Load() (*Config, error) {
 func (c *Config) Save() error {
 	configPath := getConfigPath()
 
-	// Ensure config directory exists
-	configDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(configDir, 0o700); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
-	}
-
 	// Marshal to YAML
 	data, err := yaml.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// Write to file
-	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+	// Write atomically (helper creates the parent dir and fsyncs before rename)
+	if err := fileutil.AtomicWrite(configPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 

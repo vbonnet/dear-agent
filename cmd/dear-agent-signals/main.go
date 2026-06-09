@@ -48,7 +48,7 @@ func run(ctx context.Context, args []string) int {
 }
 
 func usage(w *os.File) {
-	fmt.Fprintf(w, `dear-agent-signals — collect and report project-health signals (ADR-015)
+	_, _ = fmt.Fprintf(w, `dear-agent-signals — collect and report project-health signals (ADR-015)
 
 Usage:
   dear-agent-signals collect  [flags]

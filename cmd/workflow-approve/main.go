@@ -76,7 +76,7 @@ func runList(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	pending, err := workflow.ListPendingHITLRequests(context.Background(), db)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -133,7 +133,7 @@ func runDecision(args []string, dec workflow.HITLDecision) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := workflow.RecordHITLDecision(context.Background(), db, approvalID, dec, approver, *role, *reason, time.Now()); err != nil {
 		fmt.Fprintln(os.Stderr, err)

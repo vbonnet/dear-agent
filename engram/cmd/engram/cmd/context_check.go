@@ -67,8 +67,8 @@ func init() {
 	contextCheckCmd.Flags().StringVar(&checkPhaseState, "phase-state", "middle", "Phase state: start, middle, end")
 	contextCheckCmd.Flags().BoolVar(&checkJSON, "json", false, "Output as JSON")
 
-	contextCheckCmd.MarkFlagRequired("model")
-	contextCheckCmd.MarkFlagRequired("tokens")
+	_ = contextCheckCmd.MarkFlagRequired("model")
+	_ = contextCheckCmd.MarkFlagRequired("tokens")
 }
 
 func runContextCheck(cmd *cobra.Command, args []string) error {

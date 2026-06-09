@@ -1,0 +1,11 @@
+# Defense-in-depth: the injection test (TestShippedTemplatesInputInjectionInert
+# in configs_test.go) feeds shell-metacharacter payloads to the shipped bash
+# templates. The payloads are inert (never executed), but a regression that
+# lets the script's relative `mkdir -p` escape its t.TempDir() would create
+# literal directories named with the payloads under this package. The test
+# asserts no such leak occurs; these patterns are a backstop so any stray
+# artifact can never be `git add`ed by accident.
+$(touch *
+`touch *
+x; touch *
+y && touch *

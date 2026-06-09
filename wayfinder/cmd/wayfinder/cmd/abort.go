@@ -59,7 +59,7 @@ func runAbort(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to initialize tracker: %v\n", err)
 		} else {
-			defer tr.Close(context.Background())
+			defer func() { _ = tr.Close(context.Background()) }()
 
 			// Publish session.completed with abandoned status
 			if err := tr.EndSession("abandoned"); err != nil {
