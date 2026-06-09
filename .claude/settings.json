@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|mcp__scheduled-tasks__create_scheduled_task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/pretool-spawn-routing",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
