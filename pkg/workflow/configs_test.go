@@ -220,6 +220,15 @@ func TestShippedTemplatesInputInjectionInert(t *testing.T) {
 				payload := strings.Replace(tmpl, "%s", sentinel, 1)
 
 				c := exec.Command(bashPath, "-c", cmd) //nolint:gosec // fixed shell + shipped template
+				// Run inside the per-test temp dir, which t.TempDir() removes on
+				// cleanup. The shipped script does `mkdir -p "$(dirname …)"` on
+				// the (injected) db path; with the default CWD that created the
+				// literal payload string (e.g. "`touch …", "$(touch …") as a
+				// directory tree under pkg/workflow, leaking junk into the repo.
+				// Anchoring relative writes here keeps them inside tmp. The
+				// assertion is unaffected: `sentinel` is an absolute path, so an
+				// injection that actually executed would still create it.
+				c.Dir = tmp
 				c.Env = append(os.Environ(),
 					"HOME="+tmp,
 					"INPUT_db="+payload,

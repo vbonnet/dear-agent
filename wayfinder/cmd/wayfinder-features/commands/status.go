@@ -168,7 +168,7 @@ func outputStatus(cmd *cobra.Command, prog *progress.Progress) error {
 
 func outputStatusText(cmd *cobra.Command, output StatusOutput) error {
 	// Use custom text format for better readability
-	fmt.Fprintf(cmd.OutOrStdout(), "S5 Progress (%s):\n", output.Project)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "S5 Progress (%s):\n", output.Project)
 
 	for _, f := range output.Features {
 		statusIcon := getStatusIcon(f.Status)
@@ -176,11 +176,11 @@ func outputStatusText(cmd *cobra.Command, output StatusOutput) error {
 		if f.Timestamp != "" {
 			line += fmt.Sprintf(" %s", f.Timestamp)
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), line)
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), line)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "\nNext: %s\n", output.NextAction)
-	fmt.Fprintf(cmd.OutOrStdout(), "Progress: %d/%d features verified (%d%%)\n",
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nNext: %s\n", output.NextAction)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Progress: %d/%d features verified (%d%%)\n",
 		output.Summary.Passing, output.Summary.Total, output.Summary.Percentage)
 
 	return nil

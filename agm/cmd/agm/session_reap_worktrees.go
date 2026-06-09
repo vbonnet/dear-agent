@@ -158,13 +158,13 @@ func printReapSummary(w io.Writer, res *cleanup.ReapResult, dryRun bool) {
 	}
 
 	if len(res.Removed) == 0 {
-		fmt.Fprintln(w, "No stale agent worktrees to reap.")
+		_, _ = fmt.Fprintln(w, "No stale agent worktrees to reap.")
 	} else {
 		sort.Strings(res.Removed)
 		for _, p := range res.Removed {
-			fmt.Fprintf(w, "%s: %s\n", verb, p)
+			_, _ = fmt.Fprintf(w, "%s: %s\n", verb, p)
 		}
-		fmt.Fprintf(w, "\n%s %d worktree(s).\n", verb, len(res.Removed))
+		_, _ = fmt.Fprintf(w, "\n%s %d worktree(s).\n", verb, len(res.Removed))
 	}
 
 	if len(res.Kept) > 0 {
@@ -173,9 +173,9 @@ func printReapSummary(w io.Writer, res *cleanup.ReapResult, dryRun bool) {
 			paths = append(paths, p)
 		}
 		sort.Strings(paths)
-		fmt.Fprintf(w, "\nKept %d worktree(s):\n", len(paths))
+		_, _ = fmt.Fprintf(w, "\nKept %d worktree(s):\n", len(paths))
 		for _, p := range paths {
-			fmt.Fprintf(w, "  %s (%s)\n", p, res.Kept[p])
+			_, _ = fmt.Fprintf(w, "  %s (%s)\n", p, res.Kept[p])
 		}
 	}
 }

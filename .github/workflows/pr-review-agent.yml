@@ -1,0 +1,314 @@
+name: PR Review Agent (Codebase Health)
+
+# A dedicated "codebase health maintainer" that reviews every PR against the
+# repo's engineering principles (.claude/CLAUDE.md) and surfaces its findings
+# as a single sticky PR comment.
+#
+# Design notes:
+#   * Two severities. CRITICAL findings fail the job (and therefore block
+#     merge *if* this check is added to branch protection's required list —
+#     see "Making this a required check" below). WARNINGS never fail the job;
+#     they are advisory and recorded in the comment so a human can judge.
+#     This implements the spec's "block on critical, allow-merge-with-warnings".
+#   * Escape hatch. A reviewer who has consciously accepted the critical
+#     findings can apply the `health-check:override` label to the PR. The job
+#     then still posts the comment but exits 0. The override is auditable (the
+#     label is on the PR) and is the positive-guidance alternative to an
+#     un-bypassable wall (CLAUDE.md principle 2).
+#   * No duplication. golangci-lint and govulncheck already run as blocking
+#     gates in ci.yml; this workflow does NOT re-run them as pass/fail gates.
+#     Where it touches lint, it only reports *new* findings introduced by the
+#     diff (informational) and defers the authoritative verdict to CI.
+#   * Robustness over precision. Heuristic checks (coverage delta, BDD
+#     coverage, architecture drift) are intentionally non-blocking: a false
+#     positive must never wedge the merge queue. Only deterministic, unambiguous
+#     violations (newly-added Python, non-test dot-imports, large committed
+#     binaries) are allowed to be critical.
+#
+# Making this a required check (admin, one-time — mirrors ci.yml/govulncheck,
+# tracked alongside BL-061): add the job's check name
+#   "PR Review Agent (Codebase Health) / Codebase health review"
+# to the `main` branch-protection required-status-checks list. Until then the
+# job runs and comments but cannot block merge on its own.
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+# Least privilege: read the tree, write PR comments, read labels.
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-review-agent-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  GIT_TERMINAL_PROMPT: "0"
+  OVERRIDE_LABEL: "health-check:override"
+  BINARY_CRITICAL_BYTES: "262144" # 256 KiB: larger added binaries are critical
+
+jobs:
+  review:
+    name: Codebase health review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for diff)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Compute changed-file sets
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Ensure the base commit is present (checkout@v6 fetches it with
+          # fetch-depth:0, but be defensive on shallow edge cases).
+          git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || \
+            git fetch --no-tags origin "$BASE_SHA" || true
+          echo "BASE_SHA=$BASE_SHA" >> "$GITHUB_ENV"
+          # Changed (added/copied/modified/renamed) and added-only file lists.
+          git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" > /tmp/changed.txt || true
+          git diff --name-only --diff-filter=A   "$BASE_SHA" "$HEAD_SHA" > /tmp/added.txt   || true
+          : > /tmp/critical.md
+          : > /tmp/warnings.md
+          echo "Changed files:"; cat /tmp/changed.txt || true
+
+      - name: Banned patterns (Python, non-test dot-imports, computer-use)
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          # --- Newly-added Python files (CLAUDE.md principle 4: Go is default,
+          #     Python is banned for code we own). Scoped to ADDED files only —
+          #     the repo still carries legacy *.py under engram/mcp and
+          #     wayfinder/lib/metacontext, and we don't retro-block those.
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              *.py) echo "- **New Python file** \`$f\` — Go is the default language (CLAUDE.md principle 4). Port to Go, or apply the \`$OVERRIDE_LABEL\` label with justification." >> /tmp/critical.md ;;
+            esac
+          done < /tmp/added.txt
+
+          # --- Dot-imports in NON-test Go files. Ginkgo/Gomega legitimately
+          #     dot-import in *_test.go, so those are exempt; production code
+          #     must not. Only inspect added (+) lines of changed .go files.
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              *_test.go) continue ;;
+              *.go) ;;
+              *) continue ;;
+            esac
+            if git diff "$BASE_SHA" "$HEAD_SHA" -- "$f" | grep -qE '^\+[[:space:]]*\.[[:space:]]+"'; then
+              echo "- **Dot-import in production code** \`$f\` — dot-imports are only allowed in \`*_test.go\` (Ginkgo/Gomega). Use a named import." >> /tmp/critical.md
+            fi
+          done < /tmp/changed.txt
+
+          # --- Computer-use access requests added to code (advisory). This repo
+          #     ships agent tooling; a request_access/computer-use call sneaking
+          #     into committed code is worth a human glance. Non-blocking.
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in *.go|*.ts|*.js|*.sh) ;; *) continue ;; esac
+            if git diff "$BASE_SHA" "$HEAD_SHA" -- "$f" | grep -qE '^\+.*(mcp__computer-use|request_teach_access|computer_use_request)'; then
+              echo "- **computer-use request added** \`$f\` — confirm this belongs in committed code, not a one-off session action." >> /tmp/warnings.md
+            fi
+          done < /tmp/changed.txt
+          echo "banned-patterns check done"
+
+      - name: Committed binaries
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          # git marks binary files with "-\t-" in numstat. Only consider ADDED
+          # binaries; size them and split critical (large) vs warning (small,
+          # e.g. testdata fixtures).
+          git diff --numstat "$BASE_SHA" "$HEAD_SHA" | awk -F'\t' '$1=="-" && $2=="-" {print $3}' > /tmp/bins.txt || true
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            grep -qxF "$f" /tmp/added.txt || continue   # added only
+            sz=$(git cat-file -s "$HEAD_SHA:$f" 2>/dev/null || echo 0)
+            if [ "$sz" -ge "$BINARY_CRITICAL_BYTES" ]; then
+              echo "- **Large committed binary** \`$f\` (${sz} bytes) — binaries don't belong in git. Use release assets / Git LFS, or remove." >> /tmp/critical.md
+            else
+              echo "- **Committed binary** \`$f\` (${sz} bytes) — confirm this is an intentional fixture, not a stray build artifact." >> /tmp/warnings.md
+            fi
+          done < /tmp/bins.txt
+          echo "binary check done"
+
+      - name: Lint delta (informational — CI lint is the gate)
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          # ci.yml runs golangci-lint as a *blocking* required check. Here we
+          # only surface lint findings NEW to this diff, as advisory context in
+          # the comment. Never fails the job (--issues-exit-code=0).
+          if ! grep -qE '\.go$' /tmp/changed.txt; then
+            echo "No Go changes; skipping lint delta."; exit 0
+          fi
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" v2.12.2 >/dev/null 2>&1 || { echo "::notice::golangci-lint install failed; lint delta skipped"; exit 0; }
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          # golangci-lint v2 default text output is "path:line:col: message".
+          # --new-from-rev reports only findings introduced since BASE_SHA.
+          set +e
+          new=$(timeout 240 golangci-lint run --new-from-rev "$BASE_SHA" --issues-exit-code=0 2>/dev/null | grep -cE '^[^[:space:]]+\.go:[0-9]+:[0-9]+:')
+          set -e
+          new=${new:-0}
+          if [ "$new" -gt 0 ]; then
+            echo "- **Lint delta:** ${new} new finding(s) introduced by this diff (see CI \"Build & Test\" lint step for the authoritative, blocking result)." >> /tmp/warnings.md
+          fi
+          echo "lint delta: ${new} new"
+
+      - name: Coverage of changed packages (informational)
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          # A true main-vs-PR coverage delta means running the suite twice,
+          # which this repo's known-flaky tests make unreliable (see CI flakes
+          # memo). Instead we report coverage of the packages this PR touches,
+          # time-boxed and non-blocking, so a drop is visible without wedging
+          # the queue on a flake.
+          # `|| true`: grep exits 1 when there are no Go changes, which would
+          # otherwise trip GitHub's default `bash -e` before the guard below.
+          pkgs=$(grep -E '\.go$' /tmp/changed.txt | grep -v '_test.go$' | xargs -r -n1 dirname | sort -u | sed 's#^#./#' | tr '\n' ' ' || true)
+          if [ -z "${pkgs// }" ]; then echo "No Go packages changed; skipping coverage."; exit 0; fi
+          set +e
+          cov=$(timeout 300 go test -cover $pkgs 2>/dev/null | grep -E 'coverage:' | sed -E 's#^ok[[:space:]]+([^[:space:]]+).*coverage: ([0-9.]+%).*#- `\1` — \2#')
+          rc=$?
+          set -e
+          if [ $rc -ne 0 ] || [ -z "$cov" ]; then
+            echo "- **Coverage:** changed-package coverage run skipped or timed out (non-blocking; CI runs the full suite)." >> /tmp/warnings.md
+          else
+            { echo "- **Coverage of changed packages:**"; echo "$cov" | sed 's/^/  /'; } >> /tmp/warnings.md
+          fi
+          echo "coverage check done"
+
+      - name: Dependency, BDD, EARS, routing & cleanup heuristics
+        run: |
+          set -uo pipefail
+          # --- New direct dependencies (want a justification in the PR body).
+          if grep -qxF 'go.mod' /tmp/changed.txt; then
+            deps=$(git diff "$BASE_SHA" "${{ github.event.pull_request.head.sha }}" -- go.mod \
+              | grep -E '^\+[[:space:]]' | grep -v '// indirect' \
+              | grep -vE '^\+\+\+' | grep -oE '[a-z0-9./-]+ v[0-9][^ ]*' || true)
+            if [ -n "$deps" ]; then
+              { echo "- **New direct dependencies** — ensure each is justified in the PR description:";
+                echo "$deps" | sed 's/^/  - `/; s/$/`/'; } >> /tmp/warnings.md
+            fi
+          fi
+
+          # --- BDD coverage: new top-level command code without a .feature file.
+          newcmd=$(grep -E '^(cmd|agm/cmd)/.*\.go$' /tmp/added.txt || true)
+          feat=$(grep -E '\.feature$' /tmp/changed.txt || true)
+          if [ -n "$newcmd" ] && [ -z "$feat" ]; then
+            echo "- **BDD coverage:** new command code added without a \`.feature\` spec. If this is user-facing behaviour, add a BDD scenario." >> /tmp/warnings.md
+          fi
+
+          # --- EARS spec lint: only if SPEC.md changed AND a lint-specs target
+          #     exists (it does not today — don't hard-call a missing target).
+          if grep -qE 'SPEC\.md$' /tmp/changed.txt; then
+            if make -n lint-specs >/dev/null 2>&1; then
+              set +e; out=$(make lint-specs 2>&1); rc=$?; set -e
+              if [ $rc -ne 0 ]; then
+                echo "- **EARS spec lint failed** — \`make lint-specs\` reported issues:" >> /tmp/warnings.md
+                echo "$out" | tail -20 | sed 's/^/    /' >> /tmp/warnings.md
+              fi
+            else
+              echo "- **SPEC.md changed** but no \`make lint-specs\` target is wired — review EARS phrasing manually." >> /tmp/warnings.md
+            fi
+          fi
+
+          # --- Output routing / architecture drift (.dear-agent.yml).
+          if grep -qE '^research/.*\.(md|txt)$' /tmp/added.txt; then
+            echo "- **Output-routing violation:** research \`*.md\`/\`*.txt\` added under \`research/\` — per \`.dear-agent.yml\` these belong in \`engram-research\`, not this code repo." >> /tmp/critical.md
+          fi
+          known='agm build cmd codegen config configs docs engram internal pkg scripts tests tools wayfinder'
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in */*) top="${f%%/*}";; *) continue;; esac
+            case "$top" in .*) continue;; esac   # dot-dirs (.github, .claude) are infra, not source layout
+            case " $known " in *" $top "*) ;; *) echo "$top" ;; esac
+          done < /tmp/added.txt | sort -u | while IFS= read -r d; do
+            [ -z "$d" ] && continue
+            echo "- **Architecture drift:** new top-level directory \`$d/\` — confirm it fits the established layout (agm, pkg, engram, wayfinder, cmd, internal, …)." >> /tmp/warnings.md
+          done
+
+          # --- Resource cleanup: hardcoded worktree paths leaking into code.
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in .github/workflows/pr-review-agent.yml) continue;; esac
+            if git diff "$BASE_SHA" "${{ github.event.pull_request.head.sha }}" -- "$f" 2>/dev/null | grep -qE '^\+.*(/worktrees/|~/worktrees)'; then
+              echo "- **Stale worktree reference** in \`$f\` — hardcoded \`~/worktrees/...\` paths shouldn't be committed." >> /tmp/warnings.md
+            fi
+          done < /tmp/changed.txt
+          echo "heuristics done"
+
+      - name: Compose, post comment & decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          MARKER="<!-- pr-review-agent -->"
+          crit_n=$(grep -c '^- ' /tmp/critical.md || true)
+          warn_n=$(grep -c '^- ' /tmp/warnings.md || true)
+          crit_n=${crit_n:-0}; warn_n=${warn_n:-0}
+
+          # Is the override label present?
+          override=false
+          if gh pr view "$PR" --json labels --jq '.labels[].name' 2>/dev/null | grep -qxF "$OVERRIDE_LABEL"; then
+            override=true
+          fi
+
+          {
+            echo "$MARKER"
+            echo "## 🩺 Codebase Health Review"
+            echo
+            if [ "$crit_n" -eq 0 ] && [ "$warn_n" -eq 0 ]; then
+              echo "✅ No health issues found. Nice and clean."
+            else
+              echo "Reviewed against the engineering principles in \`.claude/CLAUDE.md\`."
+            fi
+            if [ "$crit_n" -gt 0 ]; then
+              echo; echo "### ❌ Critical (${crit_n}) — blocks merge"; echo
+              cat /tmp/critical.md
+              if [ "$override" = "true" ]; then
+                echo; echo "> ⚠️ \`$OVERRIDE_LABEL\` label present — critical findings **overridden**; this check will pass. The override is recorded on the PR."
+              else
+                echo; echo "> To merge anyway after conscious review, apply the \`$OVERRIDE_LABEL\` label."
+              fi
+            fi
+            if [ "$warn_n" -gt 0 ]; then
+              echo; echo "### ⚠️ Warnings (${warn_n}) — advisory, does not block"; echo
+              cat /tmp/warnings.md
+            fi
+            echo; echo "<sub>Posted by the PR Review Agent. Lint & vulncheck verdicts are owned by the blocking CI job.</sub>"
+          } > /tmp/review-comment.md
+
+          # Sticky comment: delete prior marked comments, then repost.
+          gh api "repos/${{ github.repository }}/issues/$PR/comments" \
+            --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" 2>/dev/null \
+            | xargs -r -I {} gh api -X DELETE "repos/${{ github.repository }}/issues/comments/{}" || true
+          gh pr comment "$PR" --body-file /tmp/review-comment.md
+
+          # Decide exit status.
+          if [ "$crit_n" -gt 0 ] && [ "$override" != "true" ]; then
+            echo "::error::${crit_n} critical health finding(s) — see PR comment. Apply '$OVERRIDE_LABEL' to override."
+            exit 1
+          fi
+          if [ "$crit_n" -gt 0 ]; then
+            echo "::warning::${crit_n} critical finding(s) overridden via '$OVERRIDE_LABEL'."
+          fi
+          echo "::notice::Codebase health review passed (${warn_n} warning(s))."

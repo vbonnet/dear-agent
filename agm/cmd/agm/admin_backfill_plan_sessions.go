@@ -69,7 +69,7 @@ func runBackfillPlanSessions(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	// Get all sessions
 	allSessions, err := adapter.ListSessions(&dolt.SessionFilter{})
@@ -91,8 +91,8 @@ func runBackfillPlanSessions(cmd *cobra.Command, args []string) error {
 
 	// Print table of pairs
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "PARENT\tCHILD\tTIME GAP\tCWD")
-	fmt.Fprintln(w, "------\t-----\t--------\t---")
+	_, _ = fmt.Fprintln(w, "PARENT\tCHILD\tTIME GAP\tCWD")
+	_, _ = fmt.Fprintln(w, "------\t-----\t--------\t---")
 
 	for _, pair := range pairs {
 		parentID := pair.parent.SessionID[:8]
@@ -107,10 +107,10 @@ func runBackfillPlanSessions(cmd *cobra.Command, args []string) error {
 			cwd = "..." + cwd[len(cwd)-37:]
 		}
 
-		fmt.Fprintf(w, "%s (%s)\t%s (Unknown)\t%.1fs\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s (%s)\t%s (Unknown)\t%.1fs\t%s\n",
 			parentID, parentName, childID, pair.timeDiff.Seconds(), cwd)
 	}
-	w.Flush()
+	_ = w.Flush()
 	fmt.Println()
 
 	// If dry-run, stop here

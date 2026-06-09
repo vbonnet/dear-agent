@@ -83,7 +83,7 @@ func runAudit(cmd *cobra.Command, args []string) error {
 	// Get Dolt adapter for audit
 	adapter, _ := getStorage()
 	if adapter != nil {
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 	}
 
 	// Run audit
@@ -220,11 +220,11 @@ func groupBySeverity(issues []*audit.AuditIssue) map[audit.Severity][]*audit.Aud
 // displayIssues displays a list of issues in table format
 func displayIssues(issues []*audit.AuditIssue) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	defer w.Flush()
+	defer func() { _ = w.Flush() }()
 
 	// Header
-	fmt.Fprintln(w, "Session ID\tType\tWorkspace\tMessage\tRecommendation")
-	fmt.Fprintln(w, "----------\t----\t---------\t-------\t--------------")
+	_, _ = fmt.Fprintln(w, "Session ID\tType\tWorkspace\tMessage\tRecommendation")
+	_, _ = fmt.Fprintln(w, "----------\t----\t---------\t-------\t--------------")
 
 	// Sort by session ID for consistent output
 	sort.Slice(issues, func(i, j int) bool {
@@ -258,7 +258,7 @@ func displayIssues(issues []*audit.AuditIssue) {
 			recommendation = recommendation[:47] + "..."
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			sessionID, issueType, workspace, message, recommendation)
 	}
 }

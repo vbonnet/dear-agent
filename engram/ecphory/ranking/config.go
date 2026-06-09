@@ -71,7 +71,7 @@ func DefaultConfig() *Config {
 	c.Ecphory.Providers.VertexAI = VertexAIConfig{
 		ProjectIDEnv: "GOOGLE_CLOUD_PROJECT",
 		Location:     "us-central1",
-		Model:        "gemini-2.0-flash-exp",
+		Model:        "gemini-3.5-flash",
 	}
 
 	c.Ecphory.Providers.VertexAIClaude = VertexAIClaudeConfig{

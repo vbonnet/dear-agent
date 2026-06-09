@@ -86,7 +86,7 @@ Tool-specific config → Global defaults → Hardcoded defaults
 tools:
   ecphory:  # Cost-optimized (runs 100x/day)
     gemini:
-      model: gemini-2.0-flash-exp
+      model: gemini-3.5-flash
       max_tokens: 8192
     default_family: gemini
 
@@ -196,7 +196,7 @@ type Provider interface {
 3. Load config:
    config = LoadConfig("~/.engram/llm-config.yaml")
    model = SelectModel(config, "review", "gemini")
-   // Returns: "gemini-2.0-flash-exp"
+   // Returns: "gemini-3.5-flash"
 
 4. Detect auth:
    method = DetectAuthMethod("gemini")

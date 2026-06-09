@@ -783,25 +783,26 @@ func (m *SessionMonitor) detectViolationPattern(command, _ string) *enforcement.
 }
 
 // detectPatternType determines pattern type (bash/beads/git) from pattern.
+// It identifies which detector's pattern database owns the pattern by its ID.
 func (m *SessionMonitor) detectPatternType(pattern *enforcement.Pattern) string {
-	// Try to match against loaded pattern databases
-	// This is a simple heuristic - in production, pattern should include type field
-	if m.bashDetector != nil {
-		if p := m.bashDetector.Detect(""); p != nil && p.ID == pattern.ID {
-			return "bash"
-		}
+	if pattern == nil {
+		return "bash"
 	}
-	if m.beadsDetector != nil {
-		if p := m.beadsDetector.Detect(""); p != nil && p.ID == pattern.ID {
-			return "beads"
-		}
+	// Match the pattern back to the detector that owns it by ID. The previous
+	// implementation called Detect("") — running each detector against an empty
+	// string, which never matches — so every pattern silently fell through to
+	// the "bash" default. HasPattern checks membership in the detector's loaded
+	// database instead, which is what the classification actually needs.
+	if m.bashDetector != nil && m.bashDetector.HasPattern(pattern.ID) {
+		return "bash"
 	}
-	if m.gitDetector != nil {
-		if p := m.gitDetector.Detect(""); p != nil && p.ID == pattern.ID {
-			return "git"
-		}
+	if m.beadsDetector != nil && m.beadsDetector.HasPattern(pattern.ID) {
+		return "beads"
 	}
-	return "bash" // Default to bash
+	if m.gitDetector != nil && m.gitDetector.HasPattern(pattern.ID) {
+		return "git"
+	}
+	return "bash" // Default to bash when no detector claims the pattern
 }
 
 // writeDiagnosis creates a diagnosis markdown file for the incident.

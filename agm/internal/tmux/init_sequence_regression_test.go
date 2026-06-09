@@ -99,6 +99,9 @@ func TestInitSequence_NoDoubleLock(t *testing.T) {
 	require.NoError(t, err)
 
 	seq := NewInitSequence(sessionName)
+	// Short prompt timeout: this test only cares that Run() produces no lock
+	// errors, not that it waits the full production 30s budget.
+	seq.PromptTimeout = 2 * time.Second
 
 	// Run will fail (bash prompt != Claude prompt), but should NOT have lock errors
 	err = seq.Run()
