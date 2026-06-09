@@ -24,10 +24,11 @@ type Judge interface {
 
 // DetailedJudge represents an LLM-based evaluator with detailed responses
 type DetailedJudge interface {
-	// EvaluateDetailed assesses the actual output against the expected output and
-	// criteria. The judge grades actualOutput; expectedOutput is the reference it
-	// is compared against. Returns a detailed response with pass/fail, score, and
-	// reasoning.
+	// EvaluateDetailed assesses the actual output against the expected output
+	// and criteria. Both outputs are required: the judge compares actualOutput
+	// (what was produced) against expectedOutput (the reference) — passing the
+	// same value for both makes the comparison vacuous.
+	// Returns detailed response with pass/fail, score, and reasoning.
 	EvaluateDetailed(ctx context.Context, input, expectedOutput, actualOutput string, criteria EvaluationCriteria) (*JudgeResponse, error)
 }
 
