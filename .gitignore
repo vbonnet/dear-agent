@@ -61,5 +61,10 @@ tests/test_helper/
 /agm-daemon
 /agm-mcp-server
 /agm-statusline
+/workflow-audit
+
+# Local audit database (created by `workflow-audit run`)
+.dear-agent/
+
 # `make preflight` mirrors ci.yml and writes the three matrix binaries here.
 /build/

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/telemetry"
 )
 
 // createAndRegisterManifest writes the manifest directory, builds the v2
@@ -38,6 +40,9 @@ func createAndRegisterManifest(sessionID, sessionName, workDir string, sandboxIn
 		return err
 	}
 	_ = git.CommitManifest(manifestPath, "create", sessionName)
+
+	// Telemetry: agm.session.start span + active-task metric.
+	telemetry.SessionStarted(context.Background(), m.SessionID, m.Model, m.Harness, m.State)
 	return nil
 }
 

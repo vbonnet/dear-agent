@@ -22,6 +22,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/telemetry/usage"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/telemetry"
 	"github.com/vbonnet/dear-agent/pkg/otelsetup"
 	"github.com/vbonnet/dear-agent/pkg/workspace"
 
@@ -601,6 +602,12 @@ func main() {
 func run() int {
 	shutdown := otelsetup.InitTracer("agm")
 	defer shutdown(context.Background()) //nolint:errcheck
+
+	// Metrics counterpart to the tracer above (agent.tasks.*, agent.tokens.*,
+	// agent.stall.*). No-op until OTEL_EXPORTER_OTLP_ENDPOINT is set.
+	if _, err := telemetry.InitMeter("agm"); err == nil {
+		defer func() { _ = telemetry.Shutdown(context.Background()) }()
+	}
 
 	// Use backend adapter to support multiple backends
 	// The backend is selected via AGM_SESSION_BACKEND env var (defaults to tmux)

@@ -21,6 +21,10 @@ permissions:
 jobs:
   sbom-generation:
     name: Generate SBOM
+    # SBOM artifacts are consumed for release/compliance, not per-PR review.
+    # Skip on pull_request to save a Trivy run on every PR; still generated
+    # on push to main, on release, and on the weekly schedule.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -84,6 +88,11 @@ jobs:
 
   go-vulnerability-check:
     name: Go Vulnerability Check
+    # On pull_request this is fully redundant with the required `govulncheck`
+    # job in ci.yml (identical -scan package invocation + allowlist). Run it
+    # only off-PR so the weekly schedule still catches vulns disclosed against
+    # unchanged dependencies, without paying for a third govulncheck per PR.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
