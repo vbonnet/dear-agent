@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -643,12 +644,39 @@ func buildClaudeResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, healt
 		}
 	}
 	if resumeUUID != "" {
+		// `claude --resume` is scoped to the current directory's project slug.
+		// If the conversation was started in a different directory than the
+		// recorded worktree (e.g. an associated pre-existing session), resuming
+		// from the worktree yields "No conversation found". Resume from the
+		// conversation's actual cwd when it can be located.
+		resumeDir := resolveResumeDir(resumeUUID, health.WorktreePath)
 		return fmt.Sprintf("cd %s && claude --resume %s && exit",
-			shellQuote(health.WorktreePath),
+			shellQuote(resumeDir),
 			shellQuote(resumeUUID))
 	}
 	ui.PrintWarning("No Claude UUID found - starting new Claude session")
 	return fmt.Sprintf("cd %s && claude && exit", shellQuote(health.WorktreePath))
+}
+
+// resolveResumeDir returns the directory `claude --resume` should run from for
+// the given conversation UUID. It prefers the conversation's recorded cwd (so
+// the project slug matches and the transcript is found); if that cannot be
+// determined it falls back to the worktree path.
+func resolveResumeDir(resumeUUID, worktreePath string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return worktreePath
+	}
+	cwd, err := claude.FindTranscriptCwd(homeDir, resumeUUID)
+	if err != nil || cwd == "" {
+		return worktreePath
+	}
+	if cwd != worktreePath {
+		ui.PrintWarning(fmt.Sprintf(
+			"Conversation lives in %s, not the worktree %s - resuming from there",
+			cwd, worktreePath))
+	}
+	return cwd
 }
 
 // waitForResumedClaude waits first for the claude process to appear, then for
@@ -677,13 +705,23 @@ func waitForResumedClaude(health *HealthStatus) error {
 		Title("Waiting for conversation to load...").
 		Accessible(true).
 		Action(func() {
-			promptWaitErr = tmux.WaitForPromptSimple(health.TmuxSessionName, 60*time.Second)
+			promptWaitErr = tmux.WaitForPromptOrResumeFailure(health.TmuxSessionName, 60*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
 		return fmt.Errorf("spinner error: %w", spinErr)
 	}
 	fmt.Println()
+	// A fatal resume failure (e.g. "No conversation found") means the harness
+	// will never reach a prompt - abort instead of attaching to a dead pane.
+	var resumeFailure *tmux.ResumeFailureError
+	if errors.As(promptWaitErr, &resumeFailure) {
+		return fmt.Errorf("claude could not resume this conversation: %s\n"+
+			"  • The stored Claude UUID may not match a conversation in the worktree's project directory\n"+
+			"  • Verify the UUID: agm session list --all\n"+
+			"  • Diagnose resumability: agm admin doctor --validate",
+			resumeFailure.Detail)
+	}
 	if promptWaitErr != nil {
 		ui.PrintWarning("Conversation is taking longer than expected to load")
 		fmt.Println("  Attaching now - conversation should appear shortly")
