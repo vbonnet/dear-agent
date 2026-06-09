@@ -784,22 +784,20 @@ func (m *SessionMonitor) detectViolationPattern(command, _ string) *enforcement.
 
 // detectPatternType determines pattern type (bash/beads/git) from pattern.
 func (m *SessionMonitor) detectPatternType(pattern *enforcement.Pattern) string {
-	// Try to match against loaded pattern databases
-	// This is a simple heuristic - in production, pattern should include type field
-	if m.bashDetector != nil {
-		if p := m.bashDetector.Detect(""); p != nil && p.ID == pattern.ID {
-			return "bash"
-		}
+	// Identify which database the pattern originated from by looking up its ID.
+	// (The Pattern struct carries no type field, so the owning database is the
+	// authoritative source of truth.)
+	if pattern == nil {
+		return "bash" // Default to bash
 	}
-	if m.beadsDetector != nil {
-		if p := m.beadsDetector.Detect(""); p != nil && p.ID == pattern.ID {
-			return "beads"
-		}
+	if m.bashDetector != nil && m.bashDetector.HasPattern(pattern.ID) {
+		return "bash"
 	}
-	if m.gitDetector != nil {
-		if p := m.gitDetector.Detect(""); p != nil && p.ID == pattern.ID {
-			return "git"
-		}
+	if m.beadsDetector != nil && m.beadsDetector.HasPattern(pattern.ID) {
+		return "beads"
+	}
+	if m.gitDetector != nil && m.gitDetector.HasPattern(pattern.ID) {
+		return "git"
 	}
 	return "bash" // Default to bash
 }
