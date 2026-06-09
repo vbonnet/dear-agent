@@ -1,7 +1,7 @@
 # dear-agent Roadmap
 
 **Status:** Active
-**Last updated:** 2026-05-03
+**Last updated:** 2026-05-10
 **Owner:** vbonnet
 **Source of truth for:** what work needs to happen on the workflow engine, in
 what order, and who/what is currently doing it.
@@ -53,7 +53,7 @@ git -C ~/src/engram-research show origin/main:WORKFLOW-ENGINE-RESEARCH-ECOSYSTEM
 ```
 
 The architectural decisions are captured in
-[`docs/adrs/ADR-010-workflow-engine-architecture.md`](docs/adrs/ADR-010-workflow-engine-architecture.md).
+[`docs/adr/ADR-010-workflow-engine-architecture.md`](docs/adr/ADR-010-workflow-engine-architecture.md).
 The per-ticket backlog (one row per work item) is at
 [`docs/workflow-engine/BACKLOG.md`](docs/workflow-engine/BACKLOG.md). Read both
 before picking up work.
@@ -103,7 +103,7 @@ holds process state; Engram holds knowledge state; the workflow engine holds
    └──────────────────────────────────────────────────────────────┘
 ```
 
-Full diagram and justification: [ADR-010](docs/adrs/ADR-010-workflow-engine-architecture.md).
+Full diagram and justification: [ADR-010](docs/adr/ADR-010-workflow-engine-architecture.md).
 
 ---
 
@@ -157,6 +157,9 @@ ship incrementally without breaking anything.
 | 4 | Migration + `workflow dev` | 4 weeks | `done` | [BACKLOG §4](docs/workflow-engine/BACKLOG.md#phase-4--migration--workflow-dev) |
 | 5 | Adapters + visual inspector + `kind: spawn` | open-ended | `done` (5.3 ships as stub) | [BACKLOG §5](docs/workflow-engine/BACKLOG.md#phase-5--adapters--visual-inspector--kind-spawn) |
 | 6 | Mozilla/Mythos insights — adversarial review + comprehensibility | open-ended | `in-flight` | [§Phase 6](#phase-6--mozillamythos-insights) |
+| 7 | CI security hardening (default-deny, SHA-pin, OIDC, cooldown) | 2 weeks | `pending` | [§Phase 7](#phase-7--ci-security-hardening) |
+| 8 | Benchmark capability — real datasets, executors, model proposer | 4 weeks | `pending` | [§Phase 8](#phase-8--benchmark-capability) |
+| 9 | Agent UX — visual self-verification, semantic constraints, traces | open-ended | `pending` | [§Phase 9](#phase-9--agent-ux) |
 
 ### Parallelism map
 
@@ -188,7 +191,7 @@ an audit event. Existing workflows run unchanged.
 
 **Ship criterion:** existing workflows run unchanged; `SELECT * FROM
 audit_events WHERE run_id = ?` returns every transition; perf targets met
-(see [ADR-010 §6](docs/adrs/ADR-010-workflow-engine-architecture.md#6-performance-targets)):
+(see [ADR-010 §6](docs/adr/ADR-010-workflow-engine-architecture.md#6-performance-targets)):
 read run status for 100-node DAG P95 < 5 ms; append audit event P95 < 1 ms.
 
 ### Phase 1 — Roles + budget (MVS pt. 2)
@@ -361,6 +364,204 @@ this ticket promotes it to a per-phase A/B harness.
    from the Audit runner end-to-end (6.6).
 
 Items 6.4, 6.5, 6.7 are tracked but post-ship-criterion.
+
+### Phase 7 — CI security hardening
+
+**Origin.** Research pass on 2026-05-10 reviewed the CI threat surface in
+the wake of the `tj-actions/changed-files` incident and several adjacent
+supply-chain compromises. Pattern: the most damaging incidents all
+chained `pull_request_target` + write-scope tokens + mutable action tags.
+The daily audit workflows landing in the same PR (`security-audit.yml`,
+`branch-protection-audit.yml`) close the detection gap; this phase closes
+the *fix* gap.
+
+**Goal.** Move from "we audit for these issues daily" to "they cannot
+exist in our CI by construction."
+
+**Tickets** (priority order; security impact first per the roadmap
+ranking):
+
+| id | Priority | Title | Slot |
+|----|----------|-------|------|
+| 7.1 | HIGH | Default `GITHUB_TOKEN` to read-only org-wide | org settings + per-workflow audit |
+| 7.2 | HIGH | SHA-pin every third-party action | `.github/workflows/*.yml` |
+| 7.3 | HIGH | Audit + remove `pull_request_target` | `.github/workflows/*.yml` |
+| 7.4 | MED  | Replace PATs with GitHub Apps / OIDC | `secrets.*` audit |
+| 7.5 | MED  | Dependency cooldown policy (delay merges by N days) | `.github/dependabot.yml` + merge bot |
+
+**7.1 — Default read-only token (HIGH).** Set the org-wide default
+permissions for `GITHUB_TOKEN` to `contents: read`. Every workflow that
+needs more must declare it explicitly at the top level. The daily
+`security-audit.yml` already flags workflows with no `permissions:` block;
+this ticket flips the default so a missing block becomes safe.
+
+**7.2 — SHA-pin third-party actions (HIGH).** Every `uses:` line that
+references a non-`actions/*` or non-`github/*` action must pin to a 40-char
+commit SHA, not a tag or branch. The daily audit already warns on
+violations. This ticket lands the codemod that converts current refs to
+SHAs and updates `.github/dependabot.yml` so the SHA updates flow as PRs.
+
+**7.3 — Remove `pull_request_target` (HIGH).** Audit all workflows; the
+trigger is dangerous because it runs with the *target* repo's secrets
+against PR-author-controlled code. If a workflow genuinely needs cross-fork
+access (e.g. labeling community PRs), split into a `pull_request` job that
+produces an artifact and a separate, narrowly-scoped `workflow_run` job
+that consumes it.
+
+**7.4 — Replace PATs with GitHub Apps / OIDC (MED).** Inventory every
+`secrets.*` reference; for anything that uses a personal access token,
+migrate to either a GitHub App installation token (for cross-repo writes)
+or OIDC federation (for cloud-provider auth — AWS / GCP / etc.). PATs
+inherit the user's full scope and outlive the user's involvement.
+
+**7.5 — Dependency cooldown policy (MED).** Delay automerge of dependabot
+PRs by a configurable cooldown (default 3 days) so that backdoored
+releases have time to be reported before we adopt them. Implement as a
+`merge-gate` workflow that defers automerge until `createdAt + 3d`. Pairs
+with the new `dependency-freshness.yml` summary so stale-but-safe PRs
+remain visible.
+
+**Ship criterion (phase).**
+- Every workflow declares a `permissions:` block, and the org-default is
+  read-only.
+- The daily Security Audit issue is empty (no compromised refs, no
+  unpinned third-party actions, no `pull_request_target`).
+- No PATs in `secrets.*`; either GitHub App tokens or OIDC.
+- Dependabot automerge has a 3-day cooldown by default.
+
+### Phase 8 — Benchmark capability
+
+**Origin.** The recursive self-improvement benchmark loop landed as a
+scaffold in #91, but the executor, dataset loaders, and model proposer are
+stubs. A 2026-05-10 research pass surveyed SWE-Bench, Atlas, and VibeBench
+to map what "real" looks like.
+
+**Goal.** Turn the scaffold into a system that can produce signed,
+reproducible benchmark numbers — and propose its own improvements based on
+those numbers.
+
+**Tickets** (priority order):
+
+| id | Priority | Title | Slot |
+|----|----------|-------|------|
+| 8.1 | HIGH | Real dataset loaders (HuggingFace, Scale AI, Replit) | `internal/benchmark/datasets/` |
+| 8.2 | HIGH | Real `TaskExecutor` wired to model harness | `internal/benchmark/executor/` |
+| 8.3 | MED  | `GitApplier` with worktree isolation | `internal/benchmark/applier/` |
+| 8.4 | MED  | `ModelProposer` for multi-model improvement hypotheses | `internal/benchmark/proposer/` |
+
+**8.1 — Real dataset loaders (HIGH).** Replace the in-memory fixtures with
+adapters for the three canonical sources:
+- **HuggingFace** — `datasets` HTTP API for SWE-Bench, SWE-Bench-Verified,
+  SWE-Bench-Lite. Cache locally under `~/.cache/dear-agent/datasets/`.
+- **Scale AI / Atlas** — REST API; needs a `SCALE_API_TOKEN`. Frame the
+  cost gate in `internal/benchmark/datasets/scale.go` so accidental
+  full-set pulls fail fast.
+- **Replit / VibeBench** — public JSON manifest. Mirror the schema in
+  `datasets/vibebench.go`.
+
+**8.2 — Real TaskExecutor (HIGH).** Today the executor returns a canned
+diff. Wire it to the model harness so a benchmark task → role-resolved
+model → patch → test run is a single function call. Reuse `pkg/llm/router`
+for provider selection and `pkg/workflow/roles` for role resolution; the
+executor itself stays thin.
+
+**8.3 — GitApplier with worktree isolation (MED).** Each benchmark
+attempt must run in a disposable worktree under `~/.cache/dear-agent/
+benchmark-worktrees/` so failed patches cannot pollute the host repo.
+Mirror the global `~/src/` read-only invariant: applier code must use
+`git -C <worktree>` exclusively and refuse to operate on any path that is
+not in the disposable tree.
+
+**8.4 — ModelProposer (MED).** Given a benchmark result vector (per-model,
+per-phase), propose hypotheses about what to change in the role registry,
+prompts, or workflow shape. Output is a structured `improvement-proposal.
+json` consumed by Phase 9's trace pipeline. This is the recursive part of
+"recursive self-improvement" — the proposer's outputs feed back into the
+next benchmark run.
+
+**Ship criterion (phase).**
+- `dear-agent benchmark run --suite swe-bench-lite` returns a real score
+  on at least 50 tasks, against at least two models.
+- The worktree applier passes a fuzz test where it is asked to escape its
+  sandbox and fails to.
+- One end-to-end proposer cycle produces a `roles.yaml` diff that, when
+  applied, measurably moves the score (positive or negative is fine — the
+  bar is observable causality).
+
+### Phase 9 — Agent UX
+
+**Origin.** Two research passes on 2026-05-10 — Cursor Cloud Agents (their
+"proof of work" UX) and the LangChain agent-lifecycle observability stack
+— converged on the same idea: an agent's outputs need to be self-evident,
+not asserted. Today dear-agent says "I did X" in a PR description; this
+phase makes the artifacts back the claim.
+
+**Goal.** Every non-trivial agent run leaves verifiable evidence behind:
+screenshots, traces, datasets, structured constraints. Reviewers (human
+or downstream model) should be able to confirm the run without re-running
+it.
+
+**Tickets** (priority order):
+
+| id | Priority | Title | Slot |
+|----|----------|-------|------|
+| 9.1 | HIGH | Visual self-verification — browser screenshots as Audit proof | `pkg/audit/checks/visual.go` |
+| 9.2 | HIGH | Semantic constraint enforcement (declared rules, not OS sandbox) | `pkg/workflow/permissions` |
+| 9.3 | MED  | Constraint-aware error messages in Enforce phase | `pkg/workflow/exit_gate` |
+| 9.4 | MED  | Artifact-based proof of work attached to PRs | `pkg/source` + PR template |
+| 9.5 | MED  | Trace-to-dataset pipeline (turn live runs into benchmark seeds) | `internal/benchmark/datasets/trace.go` |
+| 9.6 | LOW  | Multi-turn simulation testing (synthetic user conversations) | `internal/benchmark/simulator/` |
+| 9.7 | LOW  | Context hubs for agent state (shared per-run knowledge store) | `pkg/workflow/context` |
+
+**9.1 — Visual self-verification (HIGH).** When a node's `outputs[]`
+includes a URL or HTML artifact, the Audit phase should automatically
+screenshot it (headless Chromium) and attach the image as Evidence. A
+finding fires if the screenshot doesn't match the declared expectation
+(blank page, error banner, etc.). Reuses the existing browser MCP path.
+
+**9.2 — Semantic constraint enforcement (HIGH).** The current
+`permissions:` block is checked at the OS level (fs_read / fs_write
+allowlists). Add a semantic layer: declared constraints like "must not
+introduce new dependencies," "must not touch files outside `pkg/X`," "must
+preserve public API surface." Enforce at exit_gate time by diffing the
+artifact against the constraints. Cursor's "rules" surface is the
+reference UX.
+
+**9.3 — Constraint-aware error messages (MED).** When an exit_gate fails,
+the error today says "regex_match failed." It should say "expected
+\`X\`, found \`Y\`; the constraint was added by node N to enforce
+invariant Z." Wires into 9.2's semantic constraints so each violation
+carries its declared rationale.
+
+**9.4 — Artifact-based proof of work (MED).** Extend the PR template so
+every dear-agent-authored PR links to:
+- the `run_id` in SQLite,
+- the audit_events timeline,
+- attached artifacts (screenshots, test logs, benchmark scores).
+Reviewers shouldn't have to ask "what did you actually run?"
+
+**9.5 — Trace-to-dataset pipeline (MED).** Live runs are already logged
+to SQLite. Add a sampler that promotes interesting runs (failures,
+near-misses, HITL approvals) into the benchmark dataset under
+`internal/benchmark/datasets/trace.go`. Closes the loop with Phase 8 —
+benchmarks improve as the agent runs.
+
+**9.6 — Multi-turn simulation testing (LOW).** Spawn a "user" model that
+interacts with the agent over multiple turns, scoring its responses
+against a rubric. Useful for HITL paths where the real user is a slow,
+expensive signal. Lives next to 8.x because it is benchmark-shaped.
+
+**9.7 — Context hubs (LOW).** A per-run shared knowledge store that nodes
+can write to and read from without going through outputs[]. Avoids
+the "every node passes the same blob" anti-pattern from LangChain's
+state-machine examples. Backed by the same SQLite DB as audit_events.
+
+**Ship criterion (phase).**
+- A workflow run on dear-agent itself produces a PR whose description
+  contains an embedded screenshot, a trace summary, and one semantic
+  constraint violation explained in human terms.
+- The trace-to-dataset pipeline has promoted ≥10 real runs into the
+  benchmark dataset.
 
 ---
 
@@ -615,7 +816,7 @@ Every transition emits an `audit_events` row. Every retry adds a
 
 ## SQLite tables (canonical)
 
-Full DDL: see [ADR-010 §5](docs/adrs/ADR-010-workflow-engine-architecture.md#5-storage-schema-canonical-sqlite).
+Full DDL: see [ADR-010 §5](docs/adr/ADR-010-workflow-engine-architecture.md#5-storage-schema-canonical-sqlite).
 
 | Table | Purpose |
 |---|---|
@@ -658,7 +859,7 @@ The engine is successful if all of these are true 12 months from now:
 ## How to pick up work
 
 1. Read this file for the phase landscape.
-2. Read [ADR-010](docs/adrs/ADR-010-workflow-engine-architecture.md) for
+2. Read [ADR-010](docs/adr/ADR-010-workflow-engine-architecture.md) for
    the architectural decisions and their justifications.
 3. Read [BACKLOG.md](docs/workflow-engine/BACKLOG.md) for individual
    tickets.
@@ -676,8 +877,8 @@ implementing against it.
 
 ## References
 
-- [ADR-009 — Work Item as First-Class Substrate](docs/adrs/ADR-009-work-item-as-first-class-substrate.md)
-- [ADR-010 — Workflow Engine Architecture](docs/adrs/ADR-010-workflow-engine-architecture.md)
+- [ADR-009 — Work Item as First-Class Substrate](docs/adr/ADR-009-work-item-as-first-class-substrate.md)
+- [ADR-010 — Workflow Engine Architecture](docs/adr/ADR-010-workflow-engine-architecture.md)
 - [BACKLOG — per-ticket tracking](docs/workflow-engine/BACKLOG.md)
 - `~/src/engram-research/WORKFLOW-ENGINE-SYNTHESIS.md` (origin/main, 2026-05-02)
 - `~/src/engram-research/WORKFLOW-ENGINE-RESEARCH-ENGINEERING.md` (origin/main, 2026-05-02)

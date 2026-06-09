@@ -50,6 +50,7 @@ func TestSessionResourceCleanupCmd_DryRunFlag(t *testing.T) {
 	flag := sessionResourceCleanupCmd.Flags().Lookup("dry-run")
 	if flag == nil {
 		t.Fatal("Expected --dry-run flag")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("Expected default false, got %q", flag.DefValue)
@@ -60,6 +61,7 @@ func TestSessionResourceCleanupCmd_ForceFlag(t *testing.T) {
 	flag := sessionResourceCleanupCmd.Flags().Lookup("force")
 	if flag == nil {
 		t.Fatal("Expected --force flag")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("Expected default false, got %q", flag.DefValue)

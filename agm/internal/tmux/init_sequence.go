@@ -18,6 +18,23 @@ type InitSequence struct {
 	SessionName    string
 	SocketPath     string
 	PromptVerified bool // When true, skip redundant WaitForClaudePrompt calls (caller already verified)
+	// PromptTimeout bounds each WaitForClaudePrompt poll. Zero means the
+	// defaultPromptTimeout (30s). Exposed so tests can exercise the timeout
+	// path without burning a real 30s wait.
+	PromptTimeout time.Duration
+}
+
+// defaultPromptTimeout is the production wait budget for the Claude prompt to
+// appear during init. Kept as a named constant so the value lives in one place.
+const defaultPromptTimeout = 30 * time.Second
+
+// promptTimeout returns the configured prompt-wait budget, defaulting to
+// defaultPromptTimeout when unset.
+func (seq *InitSequence) promptTimeout() time.Duration {
+	if seq.PromptTimeout > 0 {
+		return seq.PromptTimeout
+	}
+	return defaultPromptTimeout
 }
 
 // NewInitSequence creates a new initialization sequencer
@@ -178,8 +195,8 @@ func (seq *InitSequence) sendRename() error {
 	if seq.PromptVerified {
 		debug.Log("sendRename: Prompt pre-verified by caller, skipping WaitForClaudePrompt")
 	} else {
-		debug.Log("sendRename: Calling WaitForClaudePrompt with 30s timeout")
-		if err := WaitForClaudePrompt(seq.SessionName, 30*time.Second); err != nil {
+		debug.Log("sendRename: Calling WaitForClaudePrompt with %s timeout", seq.promptTimeout())
+		if err := WaitForClaudePrompt(seq.SessionName, seq.promptTimeout()); err != nil {
 			debug.Log("sendRename: WaitForClaudePrompt FAILED: %v", err)
 			return fmt.Errorf("claude not ready for rename: %w", err)
 		}
@@ -204,7 +221,7 @@ func (seq *InitSequence) sendRename() error {
 			time.Sleep(3 * time.Second)
 			// Re-wait for the actual Claude prompt (❯) after trust is confirmed
 			debug.Log("sendRename: Waiting for Claude prompt after trust confirmation")
-			if err := WaitForClaudePrompt(seq.SessionName, 30*time.Second); err != nil {
+			if err := WaitForClaudePrompt(seq.SessionName, seq.promptTimeout()); err != nil {
 				debug.Log("sendRename: WaitForClaudePrompt after trust failed: %v", err)
 				return fmt.Errorf("claude not ready after trust confirmation: %w", err)
 			}
@@ -237,7 +254,7 @@ func (seq *InitSequence) sendAssociation() error {
 	if seq.PromptVerified {
 		debug.Log("sendAssociation: Prompt pre-verified by caller, skipping WaitForClaudePrompt")
 	} else {
-		if err := WaitForClaudePrompt(seq.SessionName, 30*time.Second); err != nil {
+		if err := WaitForClaudePrompt(seq.SessionName, seq.promptTimeout()); err != nil {
 			return fmt.Errorf("claude not ready for association: %w", err)
 		}
 	}

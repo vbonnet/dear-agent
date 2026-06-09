@@ -81,10 +81,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	writer.Success("Initialized S5 feature tracking")
-	fmt.Fprintf(cmd.OutOrStdout(), "Created: %s\n", progressPath)
-	fmt.Fprintf(cmd.OutOrStdout(), "\nNext steps:\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "  wayfinder-features status        # View progress\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "  wayfinder-features start <id>    # Start a feature\n")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Created: %s\n", progressPath)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nNext steps:\n")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  wayfinder-features status        # View progress\n")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  wayfinder-features start <id>    # Start a feature\n")
 
 	return nil
 }

@@ -308,7 +308,7 @@ client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
 
 **Model Selection:**
 ```go
-model := client.GenerativeModel("gemini-2.0-flash-exp")
+model := client.GenerativeModel("gemini-3.5-flash")
 ```
 
 **Chat Session:**
@@ -410,7 +410,7 @@ error: failed to send message
 ```
 failed to send message to Gemini: authentication failed
 session: abc-123
-model: gemini-2.0-flash-exp
+model: gemini-3.5-flash
 ```
 
 ### No Retry Logic (V1)
@@ -445,13 +445,16 @@ for attempt := 0; attempt < maxRetries; attempt++ {
 
 ### Model Configuration
 
-**Current:** Hardcoded `gemini-2.0-flash-exp`
+**Current:** Hardcoded `gemini-3.5-flash` (GA 2026-05-19; 1M input / 65K output).
 ```go
-modelName: "gemini-2.0-flash-exp"
+modelName: "gemini-3.5-flash"
 ```
 
 **Alternative Models:**
-- `gemini-2.0-flash-thinking-exp` - 2M context, thinking mode
+- `gemini-3.1-pro` - frontier reasoning, 1M context
+- `gemini-2.5-pro` - 2M context, complex tasks
+- `gemini-2.5-flash-lite` - budget multimodal
+- `gemini-2.0-flash-thinking-exp` - 2M context, thinking mode (legacy)
 - `gemini-1.5-pro` - 2M context, previous generation
 - `gemini-1.5-flash` - 1M context, faster
 

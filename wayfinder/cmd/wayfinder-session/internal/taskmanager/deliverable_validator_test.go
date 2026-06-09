@@ -36,6 +36,7 @@ func TestValidateDeliverables_SomeMissing(t *testing.T) {
 	err := ValidateDeliverables(tmpDir, []string{"exists.go", "missing.go", "also_missing.go"})
 	if err == nil {
 		t.Fatal("expected error for missing files, got nil")
+		return
 	}
 
 	errMsg := err.Error()
@@ -138,6 +139,7 @@ func TestAddTask_BeadWithInvalidDeliverables(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for non-existent deliverables with bead, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "deliverable validation failed") {
 		t.Errorf("expected 'deliverable validation failed' in error, got: %v", err)
@@ -175,6 +177,7 @@ func TestUpdateTask_BeadWithInvalidDeliverables(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for non-existent deliverables on update with bead, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "deliverable validation failed") {
 		t.Errorf("expected 'deliverable validation failed' in error, got: %v", err)

@@ -46,7 +46,7 @@ func NewVertexAIGeminiProvider(config VertexAIConfig) (Provider, error) {
 	// Default model
 	model := config.Model
 	if model == "" {
-		model = "gemini-2.0-flash-exp"
+		model = "gemini-3.5-flash"
 	}
 
 	// Create Vertex AI client

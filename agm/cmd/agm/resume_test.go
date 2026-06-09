@@ -191,6 +191,7 @@ func TestSendPostResumePrompt_FileNotFound(t *testing.T) {
 	err := sendPostResumePrompt("any-session", "", "/nonexistent/path/prompt.txt")
 	if err == nil {
 		t.Fatal("expected error for missing prompt file, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "failed to read prompt file") {
 		t.Errorf("unexpected error message: %v", err)
@@ -213,6 +214,7 @@ func TestSendPostResumePrompt_FileTooLarge(t *testing.T) {
 	err := sendPostResumePrompt("any-session", "", tmp)
 	if err == nil {
 		t.Fatal("expected error for oversized prompt file, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "too large") {
 		t.Errorf("unexpected error message: %v", err)

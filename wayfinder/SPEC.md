@@ -405,8 +405,103 @@ const signals = detector.detect({
 
 ---
 
+## EARS Requirements (Phase Lifecycle)
+
+This section captures behavioural requirements derived from the implementation
+(`wayfinder/internal/`, `wayfinder/cmd/wayfinder-session/`). Where these
+contradict the narrative sections above, the EARS requirements reflect the
+**actual behaviour of the code as of 2026-06-07**; the narrative reflects the
+original design intent.
+
+### Session Lifecycle
+
+**WAY-01** When a Wayfinder session is started, the system shall create a
+`WAYFINDER-STATUS.md` file in the project directory using the V2 schema.
+
+**WAY-02** When `wayfinder-session status --force-fs` is called, the system
+shall reconstruct session state from artifact frontmatter without requiring
+`WAYFINDER-STATUS.md` to be present.
+
+**WAY-03** While a session is active, the system shall enforce sequential phase
+order; no phase may be started or completed out of order.
+
+**WAY-04** When a V1 session file is detected, the system shall migrate it to
+the V2 schema with 100% data preservation via `internal/migrate/`.
+
+### Phase Progression (V2 — CHARTER → RETRO)
+
+**WAY-05** When the user request contains 5 or more vagueness signals with a
+combined score ≥ 0.60, the system shall activate the W0 framing-questions path
+before allowing progression to any other phase.
+
+**WAY-06** When a phase artifact is written, the system shall embed a
+cryptographic frontmatter checksum (signature) in the artifact.
+
+**WAY-07** When `complete-phase` is called, the system shall verify the
+artifact signature before marking the phase complete; a missing or invalid
+signature shall block completion.
+
+**WAY-08** When a phase artifact contains content appropriate only to a future
+phase, the scope validator shall detect the violation and block phase completion
+(target: 95%+ detection rate).
+
+**WAY-09** When a phase is 2 or more steps behind the current phase, the system
+shall load its artifact as a context summary (100–200 tokens) rather than in
+full.
+
+**WAY-10** When a phase is 1 step behind the current phase, the system shall
+load its artifact in full.
+
+### Progressive Rigor
+
+**WAY-11** When the signal detector's confidence reaches ≥ 0.80 (e.g. keywords
+OAuth, HIPAA, compliance), the system shall auto-escalate to Thorough rigor
+without prompting the user, and shall log the triggering keywords, effort
+estimate, and confidence score.
+
+**WAY-12** Where a project is active, the system shall support 4 rigor levels:
+Minimal, Standard, Thorough, and Comprehensive.
+
+### BUILD Phase (V2)
+
+**WAY-13** While in the BUILD phase, the system shall enforce that a failing
+test exists before implementation begins (TDD discipline).
+
+**WAY-14** When assertion density falls below 0.3 assertions per 10 lines of
+test code, the system shall reject the coverage claim.
+
+**WAY-15** When test coverage is below 80%, the BUILD phase shall not be marked
+complete.
+
+**WAY-16** When the reviewer role fails the build, the system shall loop back
+to the CODING sub-state up to a maximum of 3 retries before halting.
+
+**WAY-17** When any P0 or P1 issues remain open at the BUILD exit gate, the
+system shall block phase completion.
+
+### Multi-Persona Review (`wayfinder-session review`)
+
+**WAY-18** When the project risk level is L or XL, the system shall run
+per-task review rather than batch review.
+
+**WAY-19** When a finding's confidence score falls below the configured
+`--min-confidence` threshold, the system shall exclude it from the report.
+
+**WAY-20** When two or more personas report similar findings (similarity ≥
+0.80), the system shall deduplicate them to the highest severity and combine
+their attributions.
+
+**WAY-21** When the weighted vote sum divided by total weight is at or below the
+`--vote-threshold`, the decision shall be NO-GO.
+
+**WAY-22** Where a persona is Tier 1, its vote shall carry 3× weight; Tier 2
+personas shall carry 1× weight; Tier 3 personas shall carry 0.5× weight.
+
+---
+
 ## Version History
 
+- **0.2.0** (2026-06-07): Added EARS requirements section (backfilled from implementation)
 - **0.1.0** (2026-02-11): Initial specification and documentation backfill
 
 ---

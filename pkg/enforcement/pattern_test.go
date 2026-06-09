@@ -79,6 +79,7 @@ func TestGetPattern(t *testing.T) {
 	p := db.GetPattern("beta")
 	if p == nil {
 		t.Fatal("expected to find pattern 'beta'")
+		return
 	}
 	if p.Reason != "reason-b" {
 		t.Errorf("expected reason 'reason-b', got %q", p.Reason)

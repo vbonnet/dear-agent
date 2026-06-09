@@ -457,7 +457,7 @@ func capturePaneForCrossCheck(sessionName string) (string, error) {
 
 // autoApprovePermission approves a permission prompt by selecting option 1.
 func autoApprovePermission(sessionName string) error {
-	cmd := exec.Command("agm", "session", "select-option", sessionName, "1", "--force")
+	cmd := exec.Command("agm", "send", "select-option", sessionName, "1", "--force")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("select-option failed: %w (%s)", err, string(output))

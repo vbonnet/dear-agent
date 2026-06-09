@@ -328,6 +328,7 @@ func TestParseJSONL_TimestampParsing(t *testing.T) {
 
 	if event == nil {
 		t.Fatal("Expected 1 event, got none")
+		return
 	}
 
 	// Verify timestamp was parsed correctly

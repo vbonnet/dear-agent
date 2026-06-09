@@ -262,6 +262,7 @@ func TestRetrievalWorkflow_NoAPIKey(t *testing.T) {
 	_, err := NewEcphory(tmpDir, 10000)
 	if err == nil {
 		t.Fatal("NewEcphory() succeeded without API key, expected error")
+		return
 	}
 
 	// Error should mention API key

@@ -29,7 +29,7 @@ tools:
       model: claude-3-5-sonnet-20241022
       max_tokens: 4096
     gemini:
-      model: gemini-2.0-flash-exp
+      model: gemini-3.5-flash
       max_tokens: 8192
     default_family: gemini
 
@@ -46,7 +46,7 @@ defaults:
   anthropic:
     model: claude-3-5-sonnet-20241022
   gemini:
-    model: gemini-2.0-flash-exp
+    model: gemini-3.5-flash
 ```
 
 ## Usage
@@ -62,7 +62,7 @@ if err != nil {
 
 // Select model for a tool
 model := config.SelectModel(cfg, "ecphory", "gemini")
-// Returns: "gemini-2.0-flash-exp"
+// Returns: "gemini-3.5-flash"
 
 // Get max_tokens setting
 maxTokens := config.GetMaxTokens(cfg, "ecphory", "gemini")
@@ -87,7 +87,7 @@ Different tools have different cost/accuracy tradeoffs:
 When no configuration file exists:
 
 - Anthropic: `claude-3-5-sonnet-20241022`
-- Gemini: `gemini-2.0-flash-exp`
+- Gemini: `gemini-3.5-flash`
 
 ## Testing
 

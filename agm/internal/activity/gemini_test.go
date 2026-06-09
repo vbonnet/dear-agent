@@ -173,6 +173,7 @@ func TestNewGeminiActivityTracker_DefaultPath(t *testing.T) {
 	tracker := NewGeminiActivityTracker()
 	if tracker == nil {
 		t.Fatalf("Expected tracker, got nil")
+		return
 	}
 
 	// Check that baseDir is set (should be ~/.agm/gemini)

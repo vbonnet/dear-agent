@@ -1,5 +1,6 @@
 {
   "name": "dear-agent",
+  "description": "DEAR (Define, Execute, Audit, Retro) agent tooling: AGM session management, Wayfinder SDLC workflow, and YouTube transcript extraction.",
   "owner": {
     "name": "dear-agent",
     "email": "tools@example.com"
@@ -10,6 +11,12 @@
       "source": "./agm/agm-plugin",
       "description": "AGM (Agent Gateway Manager) commands for managing Claude sessions with tmux",
       "version": "0.4.1"
+    },
+    {
+      "name": "wayfinder",
+      "source": "./wayfinder",
+      "description": "Wayfinder SDLC workflow management: 9-phase methodology (CHARTER through RETRO) with phase-gate validation",
+      "version": "0.2.0"
     },
     {
       "name": "youtube",

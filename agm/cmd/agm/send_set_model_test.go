@@ -85,6 +85,7 @@ func TestRunSendSetModelInvalidModel(t *testing.T) {
 	err := runSendSetModel(nil, []string{"test-session", "gpt-4"})
 	if err == nil {
 		t.Fatal("expected error for invalid model")
+		return
 	}
 	if !strings.Contains(err.Error(), "unknown model") {
 		t.Errorf("error should mention 'unknown model', got: %s", err.Error())

@@ -44,6 +44,25 @@ go install github.com/vbonnet/dear-agent/agm/cmd/agm@latest
 go install github.com/vbonnet/dear-agent/engram/cmd/engram@latest
 ```
 
+### Install the Claude Code plugins (`/agm:*`, `/wayfinder:*`, `/youtube`)
+
+This repo also ships as a Claude Code plugin marketplace. To install the
+namespaced slash commands and skills (`/agm:agm-assoc`, `/wayfinder:validate-phase`,
+etc.), run:
+
+```bash
+./scripts/install-claude-plugins.sh             # from a local clone (default)
+./scripts/install-claude-plugins.sh --github    # from github.com/vbonnet/dear-agent
+./scripts/install-claude-plugins.sh --dry-run   # preview without changes
+./scripts/install-claude-plugins.sh --uninstall # remove
+```
+
+The script registers the `dear-agent` marketplace with the Claude CLI, then
+installs (or updates) every plugin declared in
+[`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json). It is
+idempotent — re-running on an up-to-date repo just refreshes the marketplace.
+Restart Claude Code afterward to pick up the new commands.
+
 ## Loops — the primary UX
 
 Loops are the simplest way to run recurring background work. A loop is a named

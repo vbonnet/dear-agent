@@ -27,6 +27,7 @@ func TestEdgeCases_EmptyPhases(t *testing.T) {
 	// Should succeed with empty phase history
 	if v2 == nil {
 		t.Fatal("expected non-nil V2 status")
+		return
 	}
 
 	if len(v2.WaypointHistory) != 0 {

@@ -1,7 +1,12 @@
 # Root Makefile for dear-agent
 #
 # Targets:
-#   act-validate            Run full local CI validation via act
+#   preflight               Fast local CI-parity gates: vet + build + lint  (~25s)
+#   preflight-tests         preflight + go test (no -race) — quick sanity
+#   preflight-full          preflight + go test -race + govulncheck (full parity)
+#   install-preflight-hook  Install a git pre-push hook that runs preflight
+#   install-post-merge-hook Install a post-merge hook that reaps merged worktrees
+#   act-validate            Run full local CI validation via act (needs Docker)
 #   act-lint                Run lint job via act
 #   act-test                Run test job via act
 #   install-hooks           Install git pre-push hook for act validation
@@ -12,10 +17,59 @@
 #   deepsec-staged          Scan staged files only with deepsec
 #   install-deepsec-hook    Install pre-push hook for incremental deepsec scans
 #   uninstall-deepsec-hook  Remove the deepsec pre-push hook
+#   build-write-guards      Build the PreToolUse fs/bash write-guard hooks
+#   install-write-guards    Install the write-guard hooks into the hooks dir
+#   build-bumblebee         Build the dear-agent-bumblebee Go binary
+#   bumblebee-install       Install pinned, checksum-verified Bumblebee binary
+#   bumblebee-scan          Run a one-shot Bumblebee endpoint scan
+#   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
+#   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 
-.PHONY: act-validate act-lint act-test install-hooks test-shell build-configure-settings uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook
+.PHONY: preflight preflight-tests preflight-full install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline
 
-# Run full local CI validation via act
+# Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
+# CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm
+# build cache. See docs/retros/2026-05-27-ci-shift-left.md for the rationale
+# (CI on GitHub is not part of the inner dev loop).
+preflight:
+	@./scripts/preflight.sh --fast
+
+# preflight + `go test` without -race. Faster than full CI parity but still
+# catches behaviour regressions a lint-only sweep misses.
+preflight-tests:
+	@./scripts/preflight.sh --tests
+
+# Full CI parity: preflight + `go test -race -count=1` + govulncheck with
+# the same allowlist as ci.yml. Slower but gives the highest confidence
+# before pushing.
+preflight-full:
+	@./scripts/preflight.sh --full
+
+# Install a git pre-push hook that runs `make preflight`. Pushing to a PR
+# branch will then fail-fast before the GitHub round-trip if lint/build/vet
+# is broken. Does NOT replace CI — only shifts left. Refuses to overwrite
+# an existing hook (deepsec, husky, etc.) — merge manually if you have one.
+install-preflight-hook:
+	@HOOK="$$(git rev-parse --git-path hooks/pre-push)"; \
+	if [ -e "$$HOOK" ]; then \
+		echo "Error: a pre-push hook already exists at $$HOOK"; \
+		echo "Merge 'exec make preflight' into it manually, or remove it first."; \
+		exit 1; \
+	fi; \
+	printf '#!/bin/sh\nexec make preflight\n' > "$$HOOK"; \
+	chmod +x "$$HOOK"; \
+	echo "Installed: $$HOOK -> make preflight"
+
+# Install the post-merge worktree-sweep trigger. After a PR lands on the
+# default branch locally (e.g. `git pull` on main), it kicks off the canonical
+# fail-safe reaper `agm worktree sweep --execute`. The installer honours
+# core.hooksPath and refuses to clobber a chezmoi-managed hooks dir — see
+# cmd/install-post-merge-hook for the resolution and safety logic.
+install-post-merge-hook:
+	@go run ./cmd/install-post-merge-hook
+
+# Run full local CI validation via act. Requires Docker + act installed.
+# Prefer `make preflight-full` for the same gates without containerisation.
 act-validate: act-lint act-test
 	@echo "All act jobs passed."
 
@@ -72,6 +126,37 @@ install-configure-settings: build-configure-settings
 	cp bin/configure-claude-settings $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/configure-claude-settings"
 
+# Build safe-push: a git-push wrapper that resets the credential helper chain
+# to gh-only (never osxkeychain, which can hang on a headless GUI prompt) and
+# never force-pushes. See internal/safegit and docs/retros/2026-06-08-git-push-credential-hang.md.
+build-safe-push:
+	@echo "Building safe-push..."
+	go build $(GOFLAGS) -o bin/safe-push ./cmd/safe-push/
+	@echo "Built: bin/safe-push"
+
+# Install safe-push to GOPATH/bin so it is on PATH for every agent session.
+install-safe-push: build-safe-push
+	cp bin/safe-push $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-push"
+
+# Build the PreToolUse filesystem write-guard hooks. These enforce the
+# worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
+# gates Edit/Write/MultiEdit, pretool-bash-write-guard gates Bash. They are
+# the Go replacements for the lost ai-tools Python stopgaps.
+build-write-guards:
+	@echo "Building pretool-fs-write-guard, pretool-bash-write-guard..."
+	go build $(GOFLAGS) -o bin/pretool-fs-write-guard ./cmd/pretool-fs-write-guard/
+	go build $(GOFLAGS) -o bin/pretool-bash-write-guard ./cmd/pretool-bash-write-guard/
+	@echo "Built: bin/pretool-fs-write-guard bin/pretool-bash-write-guard"
+
+# Install the write-guard hooks where settings.json references them
+# (~/.config/claude-code/hooks). Override the dir with HOOKS_DIR=/path.
+HOOKS_DIR ?= $(HOME)/.config/claude-code/hooks
+install-write-guards: build-write-guards
+	@mkdir -p $(HOOKS_DIR)
+	cp bin/pretool-fs-write-guard bin/pretool-bash-write-guard $(HOOKS_DIR)/
+	@echo "Installed: $(HOOKS_DIR)/pretool-fs-write-guard $(HOOKS_DIR)/pretool-bash-write-guard"
+
 # Uninstall AGM components
 uninstall:
 	@./scripts/uninstall.sh
@@ -108,6 +193,16 @@ deepsec-incremental:
 deepsec-staged:
 	@./scripts/deepsec-incremental.sh --staged
 
+# Run the structural-health scans and diff against the checked-in baseline.
+# Fails only on regressions. Mirrors the Structural Health CI job.
+structural-health:
+	@go run ./cmd/structural-health
+
+# Re-snapshot the structural-health baseline after fixing findings. Commit
+# the resulting .structural-health-baseline.json to tighten the ratchet.
+structural-health-baseline:
+	@go run ./cmd/structural-health --update-baseline
+
 # Install a pre-push hook that runs deepsec on the push delta. Soft-fail
 # by default (warns, doesn't block). Use STRICT=1 to block pushes on
 # findings; bypass once with DEEPSEC_SKIP=1 git push.
@@ -116,3 +211,36 @@ install-deepsec-hook:
 
 uninstall-deepsec-hook:
 	@./scripts/install-deepsec-hook.sh --uninstall
+
+# Build the bumblebee installer + scan-wrapper Go binary. Drops into
+# bin/dear-agent-bumblebee; the LaunchAgent points at the installed copy
+# (see install-bumblebee-launchagent below), so a `go install`'d binary on
+# PATH is preferable for the scheduled case.
+build-bumblebee:
+	@echo "Building dear-agent-bumblebee..."
+	go build $(GOFLAGS) -o bin/dear-agent-bumblebee ./cmd/dear-agent-bumblebee/
+	@echo "Built: bin/dear-agent-bumblebee"
+
+# Install a pinned, checksum-verified Bumblebee binary into ~/.local/bin
+# (override with BUMBLEBEE_PREFIX=/path). Verifies SHA-256 before extracting
+# the tarball — see ADR-027 and cmd/dear-agent-bumblebee/install.go.
+bumblebee-install: build-bumblebee
+	@./bin/dear-agent-bumblebee install $(if $(BUMBLEBEE_PREFIX),--prefix $(BUMBLEBEE_PREFIX),)
+
+# Run a one-shot Bumblebee endpoint scan. NDJSON output lands in the per-user
+# data dir; the wrapper prints a one-line summary. Honours BUMBLEBEE_BIN
+# (binary override) and BUMBLEBEE_CATALOG (exposure catalog).
+bumblebee-scan: build-bumblebee
+	@./bin/dear-agent-bumblebee scan
+
+# Install the daily Bumblebee LaunchAgent (macOS, per-user). Runs at 04:00
+# local. See docs/bumblebee.md and ADR-027. The LaunchAgent invokes the
+# installed dear-agent-bumblebee binary, so this target installs into
+# $HOME/.local/bin first so the plist references a stable path.
+install-bumblebee-launchagent: build-bumblebee
+	@mkdir -p $(HOME)/.local/bin
+	@install -m 0755 bin/dear-agent-bumblebee $(HOME)/.local/bin/dear-agent-bumblebee
+	@$(HOME)/.local/bin/dear-agent-bumblebee install-launchagent
+
+uninstall-bumblebee-launchagent: build-bumblebee
+	@./bin/dear-agent-bumblebee install-launchagent --uninstall

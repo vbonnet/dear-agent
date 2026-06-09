@@ -137,7 +137,7 @@ Anthropic, OpenAI, and Google. The benefits:
 | `research`     | `gemini-3.1-pro` (Google)    | `claude-opus-4-7` | `gpt-5.5-pro` | 1M-context window, strong synthesis      |
 | `implementer`  | `claude-opus-4-7` (Anthropic)| `gpt-5.5-pro`   | `gemini-3.1-pro`| Highest accepted-patch rate in evals     |
 | `reviewer`     | `gpt-5.5-pro` (OpenAI)       | `claude-opus-4-7` | `gemini-2.5-pro` | Off-vendor critic — different blind spots |
-| `orchestrator` | `claude-sonnet-4-6` (Anthropic)| `gemini-2.5-flash` | `gpt-5.4-mini` | Cheap/fast for high-volume routing       |
+| `orchestrator` | `claude-sonnet-4-6` (Anthropic)| `gemini-3.5-flash` | `gpt-5.4-mini` | Cheap/fast for high-volume routing       |
 
 The `Resolver` walks tiers in order and skips any tier whose model fails the
 node's capability or budget filters, or that the optional

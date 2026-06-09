@@ -153,6 +153,7 @@ func TestCheckAndAlert(t *testing.T) {
 		alert := CheckAndAlert(status, cfg, "")
 		if alert == nil {
 			t.Fatal("expected alert for WARNING level")
+			return
 		}
 		if alert.Level != LevelWarning {
 			t.Errorf("alert level = %s, want WARNING", alert.Level)

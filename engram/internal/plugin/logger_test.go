@@ -69,6 +69,7 @@ func TestNewLogger(t *testing.T) {
 	logger := NewLogger(LevelDebug)
 	if logger == nil {
 		t.Fatal("NewLogger() returned nil")
+		return
 	}
 	if logger.level != LevelDebug {
 		t.Errorf("NewLogger() level = %v, want %v", logger.level, LevelDebug)
@@ -82,6 +83,7 @@ func TestNewDefaultLogger(t *testing.T) {
 	logger := NewDefaultLogger()
 	if logger == nil {
 		t.Fatal("NewDefaultLogger() returned nil")
+		return
 	}
 	if logger.level != LevelInfo {
 		t.Errorf("NewDefaultLogger() level = %v, want %v", logger.level, LevelInfo)
