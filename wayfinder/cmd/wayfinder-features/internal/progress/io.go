@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/fileutil"
 )
 
 // ReadProgress reads progress.json from the specified path
@@ -58,15 +60,9 @@ func WriteProgress(path string, progress *Progress) error {
 		}
 	}
 
-	// Write to temporary file
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
-		return fmt.Errorf("failed to write temporary file: %w", err)
-	}
-
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("failed to rename temporary file: %w", err)
+	// Write atomically: temp file in the same dir, fsync, then rename into place.
+	if err := fileutil.AtomicWrite(path, data, 0600); err != nil {
+		return fmt.Errorf("failed to write progress file: %w", err)
 	}
 
 	// Delete backup on success
