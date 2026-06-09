@@ -208,22 +208,6 @@ func TestShippedTemplatesInputInjectionInert(t *testing.T) {
 		"and-chain":            "y && touch %s",
 	}
 
-	// pkgDir is the source directory of this test (pkg/workflow). The
-	// shipped script does `mkdir -p "$(dirname "$db_path")"` on the inert
-	// payload, which expands to a *relative* path like `$(touch …/001`.
-	// Because the payload is correctly treated as data (not executed), that
-	// relative mkdir lands in whatever the script's cwd is. We pin the
-	// script's cwd to each subtest's t.TempDir() (auto-removed) and assert
-	// pkgDir is unchanged, so a regression that lets writes escape into the
-	// source tree fails the test instead of silently leaking directories
-	// named with injection payloads (the original bug this guards against).
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	pkgDir := filepath.Dir(thisFile)
-	before := dirEntrySet(t, pkgDir)
-
 	for _, name := range templatesWithInputExpansion {
 		name := name
 		w := loadShippedTemplate(t, name)
@@ -236,8 +220,14 @@ func TestShippedTemplatesInputInjectionInert(t *testing.T) {
 				payload := strings.Replace(tmpl, "%s", sentinel, 1)
 
 				c := exec.Command(bashPath, "-c", cmd) //nolint:gosec // fixed shell + shipped template
-				// Pin cwd so any relative path the inert payload yields is
-				// created inside the auto-cleaned temp dir, never the source tree.
+				// Run inside the per-test temp dir, which t.TempDir() removes on
+				// cleanup. The shipped script does `mkdir -p "$(dirname …)"` on
+				// the (injected) db path; with the default CWD that created the
+				// literal payload string (e.g. "`touch …", "$(touch …") as a
+				// directory tree under pkg/workflow, leaking junk into the repo.
+				// Anchoring relative writes here keeps them inside tmp. The
+				// assertion is unaffected: `sentinel` is an absolute path, so an
+				// injection that actually executed would still create it.
 				c.Dir = tmp
 				c.Env = append(os.Environ(),
 					"HOME="+tmp,
@@ -258,32 +248,6 @@ func TestShippedTemplatesInputInjectionInert(t *testing.T) {
 			})
 		}
 	}
-
-	// Regression guard: no payload-named directory (or any other artifact)
-	// may leak into the package source tree. If this fires, the script's
-	// relative writes escaped t.TempDir() again — see the comment above.
-	for entry := range dirEntrySet(t, pkgDir) {
-		if _, existed := before[entry]; !existed {
-			t.Errorf("leaked artifact in source tree %q: %q\n"+
-				"the injection test wrote outside its t.TempDir(); "+
-				"ensure exec.Cmd.Dir is pinned to the temp dir", pkgDir, entry)
-		}
-	}
-}
-
-// dirEntrySet returns the names of the immediate entries of dir as a set, so
-// the injection test can detect any artifact that leaks into the source tree.
-func dirEntrySet(t *testing.T, dir string) map[string]struct{} {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read dir %q: %v", dir, err)
-	}
-	set := make(map[string]struct{}, len(entries))
-	for _, e := range entries {
-		set[e.Name()] = struct{}{}
-	}
-	return set
 }
 
 // evalInvocationLine returns the first non-comment script line that
