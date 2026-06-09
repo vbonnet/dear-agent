@@ -114,6 +114,45 @@ func (w *GeminiDeepResearch) executeSingleURL(ctx workflow.WorkflowContext, url 
 	}, nil
 }
 
+// researchResult is the outcome of researching a single URL.
+type researchResult struct {
+	url        string
+	reportPath string
+	err        error
+}
+
+// runResearchWorkers runs fn for each URL concurrently and returns exactly one
+// researchResult per URL.
+//
+// A panic inside fn (or anything it calls) is recovered and surfaced as a
+// result with a non-nil err. This is the critical invariant: the previous
+// implementation sent to the result channel only on the normal path, so a
+// panicking worker would unwind without sending and the collector — which
+// expects len(urls) sends — would block forever on a permanent deadlock.
+// Recovering and always sending means one bad URL degrades to an error instead
+// of hanging the whole workflow.
+func runResearchWorkers(urls []string, fn func(index int, url string) (string, error)) []researchResult {
+	results := make(chan researchResult, len(urls))
+	for i, url := range urls {
+		go func(index int, url string) {
+			res := researchResult{url: url}
+			defer func() {
+				if r := recover(); r != nil {
+					res.err = fmt.Errorf("research panicked for %s: %v", url, r)
+				}
+				results <- res
+			}()
+			res.reportPath, res.err = fn(index, url)
+		}(i, url)
+	}
+
+	out := make([]researchResult, 0, len(urls))
+	for range urls {
+		out = append(out, <-results)
+	}
+	return out
+}
+
 // executeMultiURL handles parallel research for multiple URLs.
 func (w *GeminiDeepResearch) executeMultiURL(ctx workflow.WorkflowContext, urls []string, startTime time.Time) (workflow.WorkflowResult, error) {
 	// Create crash-resilient logger
@@ -167,36 +206,20 @@ func (w *GeminiDeepResearch) executeMultiURL(ctx workflow.WorkflowContext, urls 
 		}, nil
 	}
 
-	type researchResult struct {
-		url        string
-		reportPath string
-		err        error
-	}
-
-	results := make(chan researchResult, len(pendingURLs))
-
-	// Start parallel research workflows for pending URLs only
-	for i, url := range pendingURLs {
-		go func(index int, url string) {
-			fmt.Printf("[%d/%d] Starting research: %s\n", index+1, len(urls), url)
-			logger.MarkStarted(url)
-
-			reportPath, err := w.runDeepResearch(string(ctx.SessionID), url)
-			results <- researchResult{
-				url:        url,
-				reportPath: reportPath,
-				err:        err,
-			}
-		}(i, url)
-	}
+	// Run the pending URLs concurrently. runResearchWorkers guarantees one
+	// result per URL even if a worker panics, so the collection loop below can
+	// never deadlock waiting on a send that never happens.
+	researchResults := runResearchWorkers(pendingURLs, func(index int, url string) (string, error) {
+		fmt.Printf("[%d/%d] Starting research: %s\n", index+1, len(urls), url)
+		logger.MarkStarted(url)
+		return w.runDeepResearch(string(ctx.SessionID), url)
+	})
 
 	// Collect results
 	successCount := len(completedURLs) // Count already-completed URLs
 	var errors []string
 
-	for i := 0; i < len(pendingURLs); i++ {
-		result := <-results
-
+	for _, result := range researchResults {
 		if result.err != nil {
 			// Track error but continue with other results
 			logger.MarkFailed(result.url, result.err)
