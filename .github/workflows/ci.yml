@@ -115,7 +115,7 @@ jobs:
     # only in local worktrees, so the first time CI runs them on a PR
     # we'll surface latent failures (build errors, search-package
     # regressions, etc.) in code this PR didn't touch. The job reports
-    # them as informational rather than blocking — see ADR-024's
+    # them as informational rather than blocking — see ADR-028's
     # "trust boundary" section. Ratchet path: drive the suite green on
     # main, then flip continue-on-error off and add this check to
     # branch-protection required-status-checks (admin step).

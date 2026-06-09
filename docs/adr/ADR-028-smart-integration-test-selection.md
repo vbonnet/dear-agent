@@ -1,4 +1,4 @@
-# ADR-024: Smart Integration Test Selection
+# ADR-028: Smart Integration Test Selection
 
 **Status**: Accepted
 **Date**: 2026-05-26

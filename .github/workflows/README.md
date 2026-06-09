@@ -10,7 +10,7 @@ Required-status workflow. Two test jobs:
   [`cmd/test-affected`](../../cmd/test-affected) to compute which
   `-tags=integration` test packages are reachable from the PR's diff and
   runs only those. Empty result = clean pass. See
-  [ADR-024](../../docs/adr/ADR-024-smart-integration-test-selection.md)
+  [ADR-028](../../docs/adr/ADR-028-smart-integration-test-selection.md)
   for the algorithm and trust boundaries; `make test-affected-print`
   shows the live decision locally.
 
