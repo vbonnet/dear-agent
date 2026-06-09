@@ -62,8 +62,8 @@ func TestSessionCreation_FullLifecycle(t *testing.T) {
 		if m.Name != sessionName {
 			t.Errorf("Expected session name %s, got %s", sessionName, m.Name)
 		}
-		if m.Agent != "claude" {
-			t.Errorf("Expected agent 'claude', got %s", m.Agent)
+		if m.Harness != "claude" {
+			t.Errorf("Expected agent 'claude', got %s", m.Harness)
 		}
 		if m.Lifecycle != "" {
 			t.Errorf("Expected empty lifecycle for new session, got %s", m.Lifecycle)
@@ -321,7 +321,7 @@ func TestSessionCreation_ManifestFields(t *testing.T) {
 		{"SchemaVersion", m.SchemaVersion, "schema_version"},
 		{"SessionID", m.SessionID, "session_id"},
 		{"Name", m.Name, "name"},
-		{"Agent", m.Agent, "agent"},
+		{"Agent", m.Harness, "agent"},
 	}
 
 	for _, tt := range tests {
@@ -598,7 +598,7 @@ func TestSessionArchive_PreservesMetadata(t *testing.T) {
 		Tmux: manifest.Tmux{
 			SessionName: sessionName,
 		},
-		Agent: "claude",
+		Harness: "claude",
 		Claude: manifest.Claude{
 			UUID: "test-claude-uuid",
 		},

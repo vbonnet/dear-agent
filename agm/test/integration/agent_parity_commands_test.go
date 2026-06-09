@@ -23,9 +23,7 @@ var _ = Describe("Agent Parity - Command Execution", func() {
 		adapters["claude"] = claudeAdapter
 
 		os.Setenv("GEMINI_API_KEY", "test-api-key-for-testing")
-		geminiAdapter, err := agent.NewGeminiAdapter(&agent.GeminiConfig{
-			APIKey: "test-api-key-for-testing",
-		})
+		geminiAdapter, err := agent.NewGeminiCLIAdapter(nil)
 		Expect(err).ToNot(HaveOccurred())
 		adapters["gemini"] = geminiAdapter
 

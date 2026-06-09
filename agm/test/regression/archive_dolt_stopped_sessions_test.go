@@ -62,7 +62,7 @@ func TestArchiveStoppedSessionsFromDolt(t *testing.T) {
 		SchemaVersion: "2.0",
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
-		Agent:         "claude",
+		Harness:       "claude",
 		Lifecycle:     "", // Active, not archived
 		Context: manifest.Context{
 			Project: "/tmp/test",
