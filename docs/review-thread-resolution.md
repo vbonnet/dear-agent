@@ -88,28 +88,32 @@ List → filter `isResolved == false` (optionally by `author ==
 "gemini-code-assist"`) → call `resolveReviewThread` per `id`. Implemented in the
 wrapper below.
 
-## Wrapper script
+## Wrapper command
 
-`scripts/resolve-review-threads.sh` (in this repo) wraps all of the above:
+`cmd/resolve-review-threads` (in this repo) is a Go binary wrapping all of the
+above. Go — not a shell script — because this repo enforces a 20-line limit on
+bash (`language-policy.yml`) and defaults to Go (CLAUDE.md principle #4); the
+tool also adds cursor pagination so PRs with >100 threads work.
 
 ```
-resolve-review-threads.sh list        <owner> <repo> <pr>           # unresolved threads (JSON lines)
-resolve-review-threads.sh list-all    <owner> <repo> <pr>           # every thread
-resolve-review-threads.sh resolve     <threadId>                    # one thread
-resolve-review-threads.sh resolve-all <owner> <repo> <pr> [author]  # all unresolved, optional author filter
-resolve-review-threads.sh unresolve   <threadId>                    # re-open
+resolve-review-threads list        <owner> <repo> <pr>           # unresolved threads (JSON lines)
+resolve-review-threads list-all    <owner> <repo> <pr>           # every thread
+resolve-review-threads resolve     <threadId>                    # one thread
+resolve-review-threads resolve-all <owner> <repo> <pr> [author]  # all unresolved, optional author filter
+resolve-review-threads unresolve   <threadId>                    # re-open
 ```
 
 Example — resolve every open Gemini thread on PR 231:
 
 ```bash
-scripts/resolve-review-threads.sh resolve-all vbonnet dear-agent 231 gemini-code-assist
+go run ./cmd/resolve-review-threads resolve-all vbonnet dear-agent 231 gemini-code-assist
 ```
 
 ## Verification status
 
-- **Read path** (`list`, `list-all`) — live-tested against PR #162: returns its
-  4 `gemini-code-assist` threads correctly.
+- **Read path** (`list`, `list-all`) — live-tested against real PRs (#162, #275):
+  returns their `gemini-code-assist` threads correctly. The Go binary builds,
+  vets, lints (`golangci-lint`, 0 issues) and unit-tests clean.
 - **Mutation** (`resolve`/`unresolve`) — verified by schema introspection
   (input `threadId: ID!`, return `thread { id isResolved }`). A live round-trip
   was intentionally **not** run: it mutates shared, collaborator-facing PR state,
