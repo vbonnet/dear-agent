@@ -32,10 +32,15 @@ func TestEndToEndEnrichmentFlow(t *testing.T) {
 	jsonlPath := filepath.Join(tmpDir, "events.jsonl")
 
 	ec := createTestEnrichmentContext()
+	// Use a generous per-enricher timeout. This is an end-to-end correctness
+	// test: a tight 500µs budget makes enrichers silently time out under CI
+	// load, dropping the very enrichment fields this test asserts on. 5s
+	// guarantees enrichment completes; SafeEnricher timeout behaviour is
+	// covered by dedicated unit tests.
 	pipeline := NewPipeline([]Enricher{
 		NewPluginContextEnricher(),
 		NewEcphoryCoverageEnricher(),
-	}, 500*time.Microsecond)
+	}, 5*time.Second)
 
 	pluginEvent, ecphoryEvent := createTestEvents()
 	enrichedPluginEvent := pipeline.Enrich(context.Background(), pluginEvent, ec)
