@@ -12,6 +12,10 @@ on:
       - 'agm/**'
       - '.github/workflows/agm-e2e-install.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -19,6 +23,7 @@ jobs:
   e2e-install:
     name: AGM E2E Install (${{ matrix.distro }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false

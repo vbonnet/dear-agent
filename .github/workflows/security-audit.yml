@@ -33,6 +33,7 @@ env:
 jobs:
   govulncheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -67,6 +68,7 @@ jobs:
 
   workflow-hygiene:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
