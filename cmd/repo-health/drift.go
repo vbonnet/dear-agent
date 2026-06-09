@@ -30,7 +30,7 @@ func chezmoiDrift(sc *scanCtx) (Metric, []string) {
 		return Metric{Available: false, Note: "chezmoi status failed: " + firstLine(res.stderr)}, nil
 	}
 	var drifted []string
-	for _, line := range strings.Split(res.stdout, "\n") {
+	for line := range strings.SplitSeq(res.stdout, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -67,7 +67,7 @@ func hookDrift(sc *scanCtx) (Metric, []string) {
 
 	// Collect source hooks: <root>/**/.githooks/<standard-hook-name>.
 	sources := map[string]string{} // basename -> source path
-	_ = walkRepoFiles(sc.root, func(path string) {
+	if err := walkRepoFiles(sc.root, func(path string) {
 		if filepath.Base(filepath.Dir(path)) != ".githooks" {
 			return
 		}
@@ -75,7 +75,9 @@ func hookDrift(sc *scanCtx) (Metric, []string) {
 		if gitHookNames[name] {
 			sources[name] = path // last one wins; basenames are unique enough
 		}
-	})
+	}); err != nil {
+		return Metric{Available: false, Note: "hook source scan failed: " + err.Error()}, nil
+	}
 	if len(sources) == 0 {
 		return Metric{Available: false, Note: "no .githooks/ source hooks found to compare"}, nil
 	}
@@ -123,14 +125,16 @@ func activeHooksDir(sc *scanCtx) string {
 // reported only as an informational note, not a failure.
 func docPairingDrift(sc *scanCtx) (Metric, []string) {
 	var why, ai []string
-	_ = walkRepoFiles(sc.root, func(path string) {
+	if err := walkRepoFiles(sc.root, func(path string) {
 		switch {
 		case strings.HasSuffix(path, ".why.md"):
 			why = append(why, path)
 		case strings.HasSuffix(path, ".ai.md"):
 			ai = append(ai, path)
 		}
-	})
+	}); err != nil {
+		return Metric{Available: false, Note: "doc pairing scan failed: " + err.Error()}, nil
+	}
 
 	exists := func(p string) bool { _, err := os.Stat(p); return err == nil }
 	var unpaired []string

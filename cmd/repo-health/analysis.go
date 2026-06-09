@@ -62,7 +62,7 @@ type goSource struct {
 // fail to parse are skipped (with their path returned) rather than aborting
 // — a single syntactically-broken file should not blind the whole audit.
 func parseGoFiles(root string) (sources []goSource, skipped []string) {
-	_ = goFileWalk(root, func(path string) {
+	err := goFileWalk(root, func(path string) {
 		fset := token.NewFileSet()
 		f, err := parser.ParseFile(fset, path, nil, 0)
 		if err != nil {
@@ -81,6 +81,9 @@ func parseGoFiles(root string) (sources []goSource, skipped []string) {
 			isTest: strings.HasSuffix(path, "_test.go"),
 		})
 	})
+	if err != nil {
+		skipped = append(skipped, root+" (walk error: "+err.Error()+")")
+	}
 	return sources, skipped
 }
 

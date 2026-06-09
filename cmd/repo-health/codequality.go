@@ -110,7 +110,7 @@ func coverage(sc *scanCtx) (Metric, float64, []PkgCoverage) {
 	// makes `go test` exit non-zero but the passing packages still report.
 	var pkgs []PkgCoverage
 	var sum float64
-	for _, line := range strings.Split(res.stdout, "\n") {
+	for line := range strings.SplitSeq(res.stdout, "\n") {
 		m := coverageLine.FindStringSubmatch(strings.TrimSpace(line))
 		if m == nil {
 			continue

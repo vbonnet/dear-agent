@@ -28,7 +28,7 @@ func worktreeCount(sc *scanCtx) (Metric, int) {
 		return Metric{Available: false, Note: "git worktree list failed: " + firstLine(res.stderr)}, 0
 	}
 	n := 0
-	for _, line := range strings.Split(res.stdout, "\n") {
+	for line := range strings.SplitSeq(res.stdout, "\n") {
 		if strings.HasPrefix(line, "worktree ") {
 			n++
 		}
@@ -53,7 +53,7 @@ func staleBranches(sc *scanCtx) (Metric, int) {
 	protected := map[string]bool{"main": true, "develop": true, "master": true, "HEAD": true}
 	seen := map[string]bool{}
 	stale := 0
-	for _, line := range strings.Split(res.stdout, "\n") {
+	for line := range strings.SplitSeq(res.stdout, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != 2 {
 			continue
