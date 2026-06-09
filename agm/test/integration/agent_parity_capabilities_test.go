@@ -23,9 +23,7 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 		adapters["claude"] = claudeAdapter
 
 		os.Setenv("GEMINI_API_KEY", "test-api-key-for-testing")
-		geminiAdapter, err := agent.NewGeminiAdapter(&agent.GeminiConfig{
-			APIKey: "test-api-key-for-testing",
-		})
+		geminiAdapter, err := agent.NewGeminiCLIAdapter(nil)
 		Expect(err).ToNot(HaveOccurred())
 		adapters["gemini"] = geminiAdapter
 
@@ -266,8 +264,8 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 
 			// Same for Gemini
 			os.Setenv("GEMINI_API_KEY", "test-key")
-			gemini1, _ := agent.NewGeminiAdapter(&agent.GeminiConfig{APIKey: "test-key"})
-			gemini2, _ := agent.NewGeminiAdapter(&agent.GeminiConfig{APIKey: "test-key"})
+			gemini1, _ := agent.NewGeminiCLIAdapter(nil)
+			gemini2, _ := agent.NewGeminiCLIAdapter(nil)
 
 			geminiCaps1 := gemini1.Capabilities()
 			geminiCaps2 := gemini2.Capabilities()
