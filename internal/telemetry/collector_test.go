@@ -534,11 +534,19 @@ func TestAsyncNotification(t *testing.T) {
 			"synchronous dispatch would block for the full %v)", duration, listenerDelay)
 	}
 
-	// Wait for the slow listener to finish before inspecting its events.
-	time.Sleep(listenerDelay + 50*time.Millisecond)
-
-	// Verify listener was called
-	events := slowListener.getEvents()
+	// Wait for the slow listener to finish before inspecting its events. Poll
+	// with a generous deadline rather than a fixed sleep: the listener returns
+	// after ~listenerDelay, but a heavily loaded runner (especially under
+	// -race) can add scheduling delay after its sleep ends, which a fixed
+	// sleep could race against. Polling completes as soon as the event lands.
+	var events []*Event
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if events = slowListener.getEvents(); len(events) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if len(events) != 1 {
 		t.Errorf("Listener should have received 1 event, got %d", len(events))
 	}
