@@ -91,69 +91,7 @@ Examples:
 
 		ui.PrintSuccess(fmt.Sprintf("Resolved identifier %q to session: %s", identifier, sessionID))
 
-		// Read manifest from Dolt to check lifecycle
-		m, err := adapter.GetSession(sessionID)
-		if err != nil {
-			ui.PrintError(err, "Failed to read session from Dolt",
-				"  • Session may not exist in database\n"+
-					"  • Try: agm session list --all")
-			return err
-		}
-
-		// Auto-detect harness from manifest
-		harnessName := m.Harness
-		if harnessName == "" {
-			harnessName = "claude-code" // Default for backward compatibility
-		}
-
-		// Warn if harness unavailable
-		if err := agent.ValidateHarnessAvailability(harnessName); err != nil {
-			ui.PrintWarning(fmt.Sprintf("⚠️  %s", err.Error()))
-		}
-
-		fmt.Printf("Using harness: %s\n", harnessName)
-
-		// Check if session is archived
-		if m.Lifecycle == manifest.LifecycleArchived {
-			ui.PrintArchivedSessionError(sessionID)
-			return fmt.Errorf("cannot resume archived session")
-		}
-
-		// Check session health
-		health, err := checkSessionHealth(adapter, sessionID, manifestPath)
-		if err != nil {
-			ui.PrintError(err,
-				"Session health check failed",
-				"  • Run diagnostics: agmdoctor\n"+
-					"  • List all sessions: agmlist --all")
-			return err
-		}
-
-		// Display health status
-		displayHealthStatus(health)
-
-		// If critical issues, abort
-		if !health.CanResume {
-			ui.PrintError(
-				fmt.Errorf("session cannot be resumed"),
-				"Critical issues prevent resuming this session",
-				"  • Fix the issues above and try again",
-			)
-			return fmt.Errorf("session health check failed")
-		}
-
-		// Resume the session
-		if err := resumeSession(adapter, sessionID, manifestPath, harnessName, health); err != nil {
-			ui.PrintError(err,
-				"Failed to resume session",
-				"  • Check tmux is running: tmux list-sessions\n"+
-					"  • Verify session health: agmdoctor\n"+
-					"  • Try manual attach: tmux attach -t "+health.TmuxSessionName)
-			return err
-		}
-
-		ui.PrintSuccess(fmt.Sprintf("Successfully resumed session %s", sessionID))
-		return nil
+		return resumeResolvedSession(adapter, sessionID, manifestPath)
 	},
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		// Only complete first argument (session identifier)
@@ -512,6 +450,77 @@ func sendPostResumePrompt(sessionName, promptText, promptFile string) error {
 	if err := tmux.SendMultiLinePromptSafe(sessionName, message, false); err != nil {
 		return fmt.Errorf("failed to send prompt: %w", err)
 	}
+	return nil
+}
+
+// resumeResolvedSession runs the full resume workflow (harness detection,
+// archived/health checks, and the tmux+harness resume) for a session that has
+// already been resolved to a sessionID and manifestPath. It is shared by the
+// `agm session resume` command and the bare `agm` default-command resume path,
+// so both routes perform a real resume instead of a no-op placeholder.
+func resumeResolvedSession(adapter *dolt.Adapter, sessionID, manifestPath string) error {
+	// Read manifest from Dolt to check lifecycle
+	m, err := adapter.GetSession(sessionID)
+	if err != nil {
+		ui.PrintError(err, "Failed to read session from Dolt",
+			"  • Session may not exist in database\n"+
+				"  • Try: agm session list --all")
+		return err
+	}
+
+	// Auto-detect harness from manifest
+	harnessName := m.Harness
+	if harnessName == "" {
+		harnessName = "claude-code" // Default for backward compatibility
+	}
+
+	// Warn if harness unavailable
+	if err := agent.ValidateHarnessAvailability(harnessName); err != nil {
+		ui.PrintWarning(fmt.Sprintf("⚠️  %s", err.Error()))
+	}
+
+	fmt.Printf("Using harness: %s\n", harnessName)
+
+	// Check if session is archived
+	if m.Lifecycle == manifest.LifecycleArchived {
+		ui.PrintArchivedSessionError(sessionID)
+		return fmt.Errorf("cannot resume archived session")
+	}
+
+	// Check session health
+	health, err := checkSessionHealth(adapter, sessionID, manifestPath)
+	if err != nil {
+		ui.PrintError(err,
+			"Session health check failed",
+			"  • Run diagnostics: agmdoctor\n"+
+				"  • List all sessions: agmlist --all")
+		return err
+	}
+
+	// Display health status
+	displayHealthStatus(health)
+
+	// If critical issues, abort
+	if !health.CanResume {
+		ui.PrintError(
+			fmt.Errorf("session cannot be resumed"),
+			"Critical issues prevent resuming this session",
+			"  • Fix the issues above and try again",
+		)
+		return fmt.Errorf("session health check failed")
+	}
+
+	// Resume the session
+	if err := resumeSession(adapter, sessionID, manifestPath, harnessName, health); err != nil {
+		ui.PrintError(err,
+			"Failed to resume session",
+			"  • Check tmux is running: tmux list-sessions\n"+
+				"  • Verify session health: agmdoctor\n"+
+				"  • Try manual attach: tmux attach -t "+health.TmuxSessionName)
+		return err
+	}
+
+	ui.PrintSuccess(fmt.Sprintf("Successfully resumed session %s", sessionID))
 	return nil
 }
 
