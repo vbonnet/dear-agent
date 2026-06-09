@@ -503,10 +503,14 @@ func TestAsyncNotification(t *testing.T) {
 	}
 	defer collector.Close()
 
-	// Add slow listener (1ms delay)
+	// Add a deliberately slow listener. The delay is large (200ms) so the
+	// async-vs-synchronous gap dwarfs goroutine-scheduling and -race
+	// instrumentation jitter on a loaded CI runner. The old 1ms/500μs combo
+	// left almost no headroom and flaked on macOS under `go test -race`.
+	const listenerDelay = 200 * time.Millisecond
 	slowListener := &mockListener{
 		minLevel:  LevelInfo,
-		callDelay: time.Millisecond,
+		callDelay: listenerDelay,
 	}
 	collector.AddListener(slowListener)
 
@@ -519,14 +523,19 @@ func TestAsyncNotification(t *testing.T) {
 		t.Fatalf("Record() failed: %v", err)
 	}
 
-	// Record() should complete in <500μs despite slow listener (1ms delay)
-	// This proves notification is async (would be >1ms if synchronous)
-	if duration > 500*time.Microsecond {
-		t.Errorf("Record() took %v, want <500μs (async notification failed)", duration)
+	// Record() must return well before the listener finishes — proving the
+	// notification is dispatched asynchronously. A synchronous implementation
+	// would block for the full listenerDelay (200ms). 50ms sits far below that
+	// (catching a regression to synchronous dispatch) while leaving ~50ms of
+	// slack above Record()'s real cost (a JSONL append + goroutine spawn),
+	// which is a few ms even under the race detector.
+	if duration > 50*time.Millisecond {
+		t.Errorf("Record() took %v, want <50ms (async notification failed; "+
+			"synchronous dispatch would block for the full %v)", duration, listenerDelay)
 	}
 
-	// Wait for listener to complete
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the slow listener to finish before inspecting its events.
+	time.Sleep(listenerDelay + 50*time.Millisecond)
 
 	// Verify listener was called
 	events := slowListener.getEvents()
