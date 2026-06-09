@@ -158,6 +158,40 @@ to file (or fix), not a reason to bypass.
 literal bootstrap case where the tool itself is broken (in which case: file
 an issue or write a retro before moving on).
 
+## Anti-Stall — Continuous Execution (MANDATORY)
+
+**Keep going. The default is to continue.** When you are working a
+backlog, a plan, or a multi-step task, do the next item — do **not** stop
+to ask "should I keep going?". The human is watching and will interrupt
+if priorities changed; asking permission to continue work you were
+already asked to do is the stall this rule exists to prevent.
+
+The full behavioural contract — with the boundary cases where stopping
+*is* correct — is the single authoritative spec at
+[docs/design/anti-stall.md](../docs/design/anti-stall.md). Read it once
+per session that does multi-step work. Its five directives:
+
+1. **Continue through backlogs without asking.** More items in the
+   plan/backlog → do the next one. Never ask whether to pick up a backlog
+   item; just do it.
+2. **"Nothing found" is always a valid outcome.** Never inflate a weak
+   match to avoid an empty result, and never stall asking whether empty
+   is acceptable — it is (see [graceful-exit.md](../docs/design/graceful-exit.md)).
+3. **Present decisions, not questions.** At a fork, decide and state the
+   decision with a clean interrupt point ("using A because B is blocked;
+   say so if you'd rather B") instead of asking which way to go.
+4. **Minimize blocking on human input.** Resolve from context, code, and
+   defaults first; batch genuinely necessary questions; keep working on
+   the unblocked parts.
+5. **If genuinely blocked, file it and move on.** Create a Beads task for
+   the blocker, note it in your summary, and pick up the next independent
+   item — do not idle the whole backlog on one stuck item.
+
+This is the **keep-going** half of the contract; the section below is the
+**when-to-stop** half. They are complements, not contradictions: stop for
+supervisor commands, repeated failure, irreversible actions, and
+decisions only a human can make — never for permission to continue.
+
 ## Agent Delegation Enforcement (MANDATORY)
 
 These rules come from the 2026-05-13 DEAR retro on stuck tasks
