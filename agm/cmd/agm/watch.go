@@ -98,7 +98,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 			return fmt.Errorf("failed to create filesystem watcher: %w", err)
 		}
 	}
-	defer fsw.Close()
+	defer func() { _ = fsw.Close() }()
 
 	if err := os.MkdirAll(w.directiveDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directive directory %s: %w", w.directiveDir, err)
@@ -197,7 +197,7 @@ func (w *Watcher) pollQueue() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer q.Close()
+	defer func() { _ = q.Close() }()
 	stats, err := q.GetStats()
 	if err != nil {
 		return 0, err

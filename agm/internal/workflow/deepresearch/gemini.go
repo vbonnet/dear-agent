@@ -20,6 +20,20 @@ import (
 // It extracts content, analyzes topics, and generates comprehensive research reports.
 type GeminiDeepResearch struct {
 	cliPath string
+
+	// runResearch performs the actual deep-research CLI invocation for a single
+	// URL. Production code leaves it nil and the default (runDeepResearch) is
+	// used; tests inject it to deterministically simulate failures and panics
+	// without shelling out to the real CLI.
+	runResearch func(sessionID, url string) (string, error)
+}
+
+// researchResult is the outcome of researching a single URL. Each parallel
+// goroutine sends exactly one of these on the results channel.
+type researchResult struct {
+	url        string
+	reportPath string
+	err        error
 }
 
 // NewGeminiDeepResearch creates a new Gemini deep-research workflow.
@@ -167,26 +181,36 @@ func (w *GeminiDeepResearch) executeMultiURL(ctx workflow.WorkflowContext, urls 
 		}, nil
 	}
 
-	type researchResult struct {
-		url        string
-		reportPath string
-		err        error
-	}
-
 	results := make(chan researchResult, len(pendingURLs))
 
-	// Start parallel research workflows for pending URLs only
+	// Start parallel research workflows for pending URLs only.
+	//
+	// Each goroutine is the sole sender of exactly one researchResult for its
+	// URL, and the collector loop below expects exactly len(pendingURLs)
+	// results. If a goroutine panicked before sending (e.g. inside MarkStarted
+	// or runDeepResearch), the collector would block forever on <-results — a
+	// permanent deadlock. researchOne recovers from panics and always returns a
+	// result, keeping the channel send-count in lockstep with the receive-count.
 	for i, url := range pendingURLs {
 		go func(index int, url string) {
+			// researchOne recovers from panics internally, but guard the
+			// goroutine body too: a panic anywhere here must still produce
+			// exactly one result. The send lives in the deferred closure so it
+			// runs exactly once whether the body completes or panics — keeping
+			// the channel send-count in lockstep with the collector below and
+			// preventing a stray panic from deadlocking it.
+			res := researchResult{url: url}
+			defer func() {
+				if r := recover(); r != nil {
+					res = researchResult{
+						url: url,
+						err: fmt.Errorf("research goroutine panicked: %v", r),
+					}
+				}
+				results <- res
+			}()
 			fmt.Printf("[%d/%d] Starting research: %s\n", index+1, len(urls), url)
-			logger.MarkStarted(url)
-
-			reportPath, err := w.runDeepResearch(string(ctx.SessionID), url)
-			results <- researchResult{
-				url:        url,
-				reportPath: reportPath,
-				err:        err,
-			}
+			res = w.researchOne(string(ctx.SessionID), url, logger)
 		}(i, url)
 	}
 
@@ -255,6 +279,36 @@ func (w *GeminiDeepResearch) executeMultiURL(ctx workflow.WorkflowContext, urls 
 		ExecutionTime: time.Since(startTime),
 		Metadata:      metadata,
 	}, nil
+}
+
+// researchOne runs deep research for a single URL and always returns a
+// researchResult, even if the underlying work panics.
+//
+// This is the sole sender's payload for the results channel in
+// executeMultiURL. Because the collector expects exactly one result per
+// pending URL, a panic that escaped this function would starve the channel and
+// deadlock the collector permanently. The deferred recover converts any panic
+// (e.g. from MarkStarted or the CLI invocation) into a failed result so the
+// send always happens.
+func (w *GeminiDeepResearch) researchOne(sessionID, url string, logger *ResearchLogger) (res researchResult) {
+	res.url = url
+
+	defer func() {
+		if r := recover(); r != nil {
+			res.reportPath = ""
+			res.err = fmt.Errorf("research goroutine panicked: %v", r)
+		}
+	}()
+
+	logger.MarkStarted(url)
+
+	run := w.runDeepResearch
+	if w.runResearch != nil {
+		run = w.runResearch
+	}
+
+	res.reportPath, res.err = run(sessionID, url)
+	return res
 }
 
 // applyResearch applies research insights and updates the log.

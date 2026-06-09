@@ -77,8 +77,8 @@ func init() {
 	// Required flags
 	memoryUpdateCmd.Flags().StringVar(&updateNamespace, "namespace", "", "Namespace path (comma-separated)")
 	memoryUpdateCmd.Flags().StringVar(&updateMemoryID, "memory-id", "", "Memory ID to update")
-	memoryUpdateCmd.MarkFlagRequired("namespace")
-	memoryUpdateCmd.MarkFlagRequired("memory-id")
+	_ = memoryUpdateCmd.MarkFlagRequired("namespace")
+	_ = memoryUpdateCmd.MarkFlagRequired("memory-id")
 
 	// Optional update flags
 	memoryUpdateCmd.Flags().StringVar(&updateSetContent, "set-content", "", "Replace entire content")
@@ -117,7 +117,7 @@ func runMemoryUpdate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer provider.Close(ctx)
+	defer func() { _ = provider.Close(ctx) }()
 
 	if err := provider.UpdateMemory(ctx, namespace, updateMemoryID, updates); err != nil {
 		return fmt.Errorf("failed to update memory: %w", err)

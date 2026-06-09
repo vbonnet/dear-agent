@@ -71,8 +71,8 @@ func runMCPStatus(cmd *cobra.Command, args []string) error {
 func outputTableMCP(cmd *cobra.Command, results map[string]mcp.DetectionResult) {
 	out := cmd.OutOrStdout()
 
-	fmt.Fprintln(out, "Global MCP Server Status:")
-	fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "Global MCP Server Status:")
+	_, _ = fmt.Fprintln(out, "")
 
 	// Calculate column widths
 	nameWidth := 15
@@ -80,8 +80,8 @@ func outputTableMCP(cmd *cobra.Command, results map[string]mcp.DetectionResult) 
 	urlWidth := 40
 
 	// Header
-	fmt.Fprintf(out, "%-*s  %-*s  %-*s  %s\n", nameWidth, "NAME", statusWidth, "STATUS", urlWidth, "URL", "ERROR")
-	fmt.Fprintf(out, "%-*s  %-*s  %-*s  %s\n", nameWidth, "----", statusWidth, "------", urlWidth, "---", "-----")
+	_, _ = fmt.Fprintf(out, "%-*s  %-*s  %-*s  %s\n", nameWidth, "NAME", statusWidth, "STATUS", urlWidth, "URL", "ERROR")
+	_, _ = fmt.Fprintf(out, "%-*s  %-*s  %-*s  %s\n", nameWidth, "----", statusWidth, "------", urlWidth, "---", "-----")
 
 	// Rows
 	for name, result := range results {
@@ -105,10 +105,10 @@ func outputTableMCP(cmd *cobra.Command, results map[string]mcp.DetectionResult) 
 			url = url[:urlWidth-3] + "..."
 		}
 
-		fmt.Fprintf(out, "%-*s  %-*s  %-*s  %s\n", nameWidth, name, statusWidth, status, urlWidth, url, errorMsg)
+		_, _ = fmt.Fprintf(out, "%-*s  %-*s  %-*s  %s\n", nameWidth, name, statusWidth, status, urlWidth, url, errorMsg)
 	}
 
-	fmt.Fprintln(out, "")
+	_, _ = fmt.Fprintln(out, "")
 
 	// Summary
 	available := 0
@@ -118,7 +118,7 @@ func outputTableMCP(cmd *cobra.Command, results map[string]mcp.DetectionResult) 
 		}
 	}
 
-	fmt.Fprintf(out, "Summary: %d/%d global MCPs available\n", available, len(results))
+	_, _ = fmt.Fprintf(out, "Summary: %d/%d global MCPs available\n", available, len(results))
 }
 
 func outputJSONMCP(cmd *cobra.Command, results map[string]mcp.DetectionResult) error {

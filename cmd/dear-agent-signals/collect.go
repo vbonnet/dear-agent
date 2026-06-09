@@ -56,7 +56,7 @@ func runCollect(ctx context.Context, args []string) int {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "COLLECTOR\tSIGNALS\tSTATUS")
+	_, _ = fmt.Fprintln(tw, "COLLECTOR\tSIGNALS\tSTATUS")
 	names := make([]string, 0, len(report.Collected))
 	for name := range report.Collected {
 		names = append(names, name)
@@ -67,7 +67,7 @@ func runCollect(ctx context.Context, args []string) int {
 		if msg := report.ErrorMsgs[name]; msg != "" {
 			status = msg
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%s\n", name, report.Collected[name], status)
+		_, _ = fmt.Fprintf(tw, "%s\t%d\t%s\n", name, report.Collected[name], status)
 	}
 	_ = tw.Flush()
 	fmt.Printf("\nfinished in %s\n",
