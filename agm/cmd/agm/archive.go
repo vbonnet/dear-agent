@@ -200,7 +200,7 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 
 	// Telemetry: agm.session.complete span + terminal metrics (active -1,
 	// completed +1{status=archived}).
-	telemetry.SessionCompleted(context.Background(), getResult.Session.ID, "archived")
+	telemetry.SessionCompleted(context.Background(), getResult.Session.ID, getResult.Session.Model, getResult.Session.Harness, "archived")
 
 	reportPostCleanup(archiveResult.PostCleanup)
 	reportSessionCleanup(runSessionCleanup(sessionName, opCtx))

@@ -73,25 +73,44 @@ func newAgentMetrics(mp metric.MeterProvider) *AgentMetrics {
 	}
 }
 
-// TaskStarted records that a task became active (active counter +1).
-func (a *AgentMetrics) TaskStarted(ctx context.Context, attrs ...attribute.KeyValue) {
+// taskAttrs builds the low-cardinality attribute set shared by the active and
+// completed task metrics. session_id is deliberately excluded: it is a
+// high-cardinality value (one per session) that belongs on spans, not metrics,
+// and tagging the up/down active counter with it would also unbalance the
+// increment/decrement (they would land on distinct timeseries and leak).
+func taskAttrs(provider, model string) []attribute.KeyValue {
+	attrs := make([]attribute.KeyValue, 0, 3)
+	if provider != "" {
+		attrs = append(attrs, attribute.String("provider", provider))
+	}
+	if model != "" {
+		attrs = append(attrs, attribute.String("model", model))
+	}
+	return attrs
+}
+
+// TaskStarted records that a task became active (active counter +1), tagged
+// with the low-cardinality provider/model pair.
+func (a *AgentMetrics) TaskStarted(ctx context.Context, provider, model string) {
 	if a == nil || a.tasksActive == nil {
 		return
 	}
-	a.tasksActive.Add(ctx, 1, metric.WithAttributes(attrs...))
+	a.tasksActive.Add(ctx, 1, metric.WithAttributes(taskAttrs(provider, model)...))
 }
 
-// TaskCompleted records a terminal task outcome: active counter -1 and the
-// completed counter +1, tagged with status (e.g. "archived", "error").
-func (a *AgentMetrics) TaskCompleted(ctx context.Context, status string, attrs ...attribute.KeyValue) {
+// TaskCompleted records a terminal task outcome: active counter -1 (with the
+// same provider/model attributes TaskStarted used, so the up/down counter
+// balances) and the completed counter +1, additionally tagged with status
+// (e.g. "archived", "error").
+func (a *AgentMetrics) TaskCompleted(ctx context.Context, provider, model, status string) {
 	if a == nil {
 		return
 	}
-	withStatus := append([]attribute.KeyValue{attribute.String("status", status)}, attrs...)
 	if a.tasksActive != nil {
-		a.tasksActive.Add(ctx, -1, metric.WithAttributes(attrs...))
+		a.tasksActive.Add(ctx, -1, metric.WithAttributes(taskAttrs(provider, model)...))
 	}
 	if a.tasksCompleted != nil {
+		withStatus := append(taskAttrs(provider, model), attribute.String("status", status))
 		a.tasksCompleted.Add(ctx, 1, metric.WithAttributes(withStatus...))
 	}
 }
@@ -144,7 +163,7 @@ func SessionStarted(ctx context.Context, sessionID, model, provider, status stri
 	attrs := sessionAttrs(sessionID, model, provider, status)
 	_, span := sessionTracer().Start(ctx, "agm.session.start", trace.WithAttributes(attrs...))
 	span.End()
-	Agent().TaskStarted(ctx, attrs...)
+	Agent().TaskStarted(ctx, provider, model)
 }
 
 // SessionExecute starts an agm.session.execute span for a unit of work (e.g.
@@ -156,11 +175,12 @@ func SessionExecute(ctx context.Context, sessionID string) (context.Context, tra
 }
 
 // SessionCompleted emits an agm.session.complete span and records the terminal
-// metric (active -1, completed +1{status}). Call once a session finishes
-// (archived/closed).
-func SessionCompleted(ctx context.Context, sessionID, status string) {
-	attrs := sessionAttrs(sessionID, "", "", status)
+// metric (active -1, completed +1{status}). The model/provider must match those
+// passed to SessionStarted so the active up/down counter balances. Call once a
+// session finishes (archived/closed).
+func SessionCompleted(ctx context.Context, sessionID, model, provider, status string) {
+	attrs := sessionAttrs(sessionID, model, provider, status)
 	_, span := sessionTracer().Start(ctx, "agm.session.complete", trace.WithAttributes(attrs...))
 	span.End()
-	Agent().TaskCompleted(ctx, status, attribute.String("session_id", sessionID))
+	Agent().TaskCompleted(ctx, provider, model, status)
 }

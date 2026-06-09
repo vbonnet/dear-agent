@@ -26,8 +26,8 @@ func TestInitMeterNoEndpoint(t *testing.T) {
 	// Recording against the no-op provider must be safe.
 	ctx := context.Background()
 	a := newAgentMetrics(otel.GetMeterProvider())
-	a.TaskStarted(ctx)
-	a.TaskCompleted(ctx, "ok")
+	a.TaskStarted(ctx, "anthropic", "claude-opus-4-8")
+	a.TaskCompleted(ctx, "anthropic", "claude-opus-4-8", "ok")
 	a.TokensUsed(ctx, "anthropic", "claude-opus-4-8", 123)
 	a.StallDuration(ctx, 42.0)
 
@@ -49,8 +49,8 @@ func TestAgentMetricsRecord(t *testing.T) {
 
 	a := newAgentMetrics(mp)
 	ctx := context.Background()
-	a.TaskStarted(ctx)
-	a.TaskCompleted(ctx, "archived")
+	a.TaskStarted(ctx, "anthropic", "claude-opus-4-8")
+	a.TaskCompleted(ctx, "anthropic", "claude-opus-4-8", "archived")
 	a.TokensUsed(ctx, "anthropic", "claude-opus-4-8", 1000)
 	a.StallDuration(ctx, 250.5)
 
@@ -75,6 +75,30 @@ func TestAgentMetricsRecord(t *testing.T) {
 			t.Errorf("expected metric %q to be recorded; got %v", name, got)
 		}
 	}
+
+	// The active up/down counter must balance back to zero: TaskStarted(+1)
+	// and TaskCompleted(-1) carry identical provider/model attributes, so they
+	// accumulate on a single timeseries. Regression guard for the prior bug
+	// where the increment and decrement used mismatched attribute sets and the
+	// gauge leaked.
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "agent.tasks.active" {
+				continue
+			}
+			sum, ok := m.Data.(sdkmetricdata.Sum[int64])
+			if !ok {
+				t.Fatalf("agent.tasks.active: unexpected data type %T", m.Data)
+			}
+			var total int64
+			for _, dp := range sum.DataPoints {
+				total += dp.Value
+			}
+			if total != 0 {
+				t.Errorf("agent.tasks.active must balance to 0 after start+complete, got %d", total)
+			}
+		}
+	}
 }
 
 // TestSessionLifecycleHelpers exercises the span+metric convenience helpers to
@@ -84,5 +108,5 @@ func TestSessionLifecycleHelpers(t *testing.T) {
 	SessionStarted(ctx, "sess-1", "claude-opus-4-8", "anthropic", "WORKING")
 	_, span := SessionExecute(ctx, "sess-1")
 	span.End()
-	SessionCompleted(ctx, "sess-1", "archived")
+	SessionCompleted(ctx, "sess-1", "claude-opus-4-8", "anthropic", "archived")
 }
