@@ -72,6 +72,21 @@ type Workflow struct {
 	Inputs      []InputSpec       `yaml:"inputs,omitempty"`
 	Nodes       []Node            `yaml:"nodes"`
 	Env         map[string]string `yaml:"env,omitempty"`
+
+	// Constitutional opts the workflow into "humans declare invariants,
+	// agents implement" mode (ROADMAP §6.4). Nil means "off" — the
+	// workflow runs without the contract. When non-nil and Enforce is
+	// true, the Define hook fails the run unless Invariants is
+	// non-empty. The block plays into adversarial review (§6.5):
+	// invariants are what the cross-model verifier checks against.
+	Constitutional *Constitutional `yaml:"constitutional,omitempty"`
+
+	// Invariants is the ordered list of declarative claims about what
+	// the workflow must produce. Each entry's shape is enforced by
+	// Invariant.Validate; uniqueness of ID is enforced at the workflow
+	// level. The block may be present without Constitutional.Enforce
+	// (informational) but is required when constitutional mode is on.
+	Invariants []Invariant `yaml:"invariants,omitempty"`
 }
 
 // InputSpec declares a required or optional input to the workflow. Inputs
@@ -359,6 +374,9 @@ func (w *Workflow) Validate() error {
 		}
 	}
 	if err := detectCycle(w.Nodes); err != nil {
+		return fmt.Errorf("workflow %q: %w", w.Name, err)
+	}
+	if err := validateInvariants(w.Invariants); err != nil {
 		return fmt.Errorf("workflow %q: %w", w.Name, err)
 	}
 	return nil
