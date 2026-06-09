@@ -65,11 +65,11 @@ func TestScanDocPaths(t *testing.T) {
 func TestScanFileSize(t *testing.T) {
 	root := t.TempDir()
 	small := make([]byte, 0)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		small = append(small, []byte("package p\n")...)
 	}
 	big := make([]byte, 0)
-	for i := 0; i < fileSizeThreshold+5; i++ {
+	for range fileSizeThreshold + 5 {
 		big = append(big, '\n')
 	}
 	if err := os.WriteFile(filepath.Join(root, "small.go"), small, 0o644); err != nil {

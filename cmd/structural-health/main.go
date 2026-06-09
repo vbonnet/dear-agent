@@ -225,7 +225,7 @@ func listPackages(root string) ([]goPackage, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("%v: %s", err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 
 	var pkgs []goPackage
@@ -364,7 +364,7 @@ func scanDocPaths(root string) []finding {
 // embedded diagrams don't leak tokens.
 func backtickPaths(md string) []string {
 	var refs []string
-	for _, line := range strings.Split(md, "\n") {
+	for line := range strings.SplitSeq(md, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
 			continue
 		}
@@ -416,7 +416,7 @@ func scanGoroutineRecover(root string) ([]finding, error) {
 		if err != nil {
 			// Unparseable file: let go build/vet be the source of truth for
 			// syntax errors; skip rather than fail the structural scan.
-			return nil
+			return nil //nolint:nilerr // intentional skip; build/vet reports syntax errors
 		}
 		ast.Inspect(file, func(n ast.Node) bool {
 			gostmt, ok := n.(*ast.GoStmt)
@@ -638,5 +638,5 @@ func writeBaseline(path string, current map[string][]finding) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
