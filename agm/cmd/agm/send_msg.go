@@ -24,6 +24,8 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/telemetry"
+	"go.opentelemetry.io/otel/codes"
 )
 
 var (
@@ -251,6 +253,16 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 // runSendSingle handles single-recipient sends (original behavior, backward compatible)
 func runSendSingle(recipientSession string) (retErr error) {
+	// Telemetry: agm.session.execute span covering message dispatch.
+	_, span := telemetry.SessionExecute(context.Background(), recipientSession)
+	defer func() {
+		if retErr != nil {
+			span.RecordError(retErr)
+			span.SetStatus(codes.Error, retErr.Error())
+		}
+		span.End()
+	}()
+
 	defer func() {
 		logCommandAudit("send.msg", recipientSession, sendSingleAuditArgs(recipientSession), retErr)
 	}()
