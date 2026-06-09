@@ -40,6 +40,7 @@ func TestWatchStalledCommand_Flags(t *testing.T) {
 			flag := watchStalledCmd.Flags().Lookup(tt.name)
 			if flag == nil {
 				t.Fatalf("expected --%s flag to be registered", tt.name)
+				return
 			}
 			if flag.DefValue != tt.defValue {
 				t.Errorf("flag --%s default = %q, want %q", tt.name, flag.DefValue, tt.defValue)

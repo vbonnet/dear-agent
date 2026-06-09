@@ -1,0 +1,109 @@
+name: Dependency Freshness
+
+# Weekly summary that surfaces stalled dependency work. Dependabot opens the
+# PRs; this workflow tells us when they pile up or when critical/high
+# severity items linger past the 3-day SLA.
+
+on:
+  schedule:
+    - cron: "0 15 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: read
+  contents: read
+
+env:
+  GIT_TERMINAL_PROMPT: "0"
+  STALE_DAYS: "3"
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Collect open dependabot PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          prs=$(timeout 30 gh pr list \
+            --repo "$REPO" \
+            --state open \
+            --author "app/dependabot" \
+            --limit 100 \
+            --json number,title,createdAt,labels,url)
+
+          total=$(echo "$prs" | jq 'length')
+          echo "total=$total" >> "$GITHUB_ENV"
+
+          cutoff_iso=$(date -u -d "${STALE_DAYS} days ago" +"%Y-%m-%dT%H:%M:%SZ")
+
+          stale_high=$(echo "$prs" | jq -r --arg cutoff "$cutoff_iso" '
+            [ .[]
+              | select(.createdAt < $cutoff)
+              | select([.labels[].name] | any(test("^(severity:|sev-)?(critical|high)$"; "i")))
+              | "- [#\(.number)](\(.url)) \(.title) (opened \(.createdAt))"
+            ] | join("\n")
+          ')
+
+          all_stale=$(echo "$prs" | jq -r --arg cutoff "$cutoff_iso" '
+            [ .[]
+              | select(.createdAt < $cutoff)
+              | "- [#\(.number)](\(.url)) \(.title) (opened \(.createdAt))"
+            ] | join("\n")
+          ')
+
+          {
+            echo "stale_high<<__EOF__"
+            echo "${stale_high:-_(none)_}"
+            echo "__EOF__"
+            echo "all_stale<<__EOF__"
+            echo "${all_stale:-_(none)_}"
+            echo "__EOF__"
+          } >> "$GITHUB_ENV"
+
+      - name: Open / update dependency-freshness issue
+        if: ${{ env.total != '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="dependency-freshness: ${total} dependabot PR(s) open"
+          body=$(cat <<EOF
+          Weekly dependency snapshot as of $(date -u +"%Y-%m-%dT%H:%M:%SZ").
+
+          **Open dependabot PRs:** ${total}
+          **Stale threshold:** ${STALE_DAYS} days
+
+          ### Critical / high severity, stale (>${STALE_DAYS} days)
+          ${stale_high}
+
+          ### All stale (>${STALE_DAYS} days)
+          ${all_stale}
+
+          Auto-managed by \`.github/workflows/dependency-freshness.yml\`; closes when no open dependabot PRs remain.
+          EOF
+          )
+          existing=$(timeout 30 gh issue list --repo "$REPO" --label dependency-freshness --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            timeout 30 gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            timeout 30 gh issue create --repo "$REPO" --title "$title" --body "$body" --label dependency-freshness
+          fi
+
+      - name: Auto-close when no open dependabot PRs
+        if: ${{ env.total == '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          existing=$(timeout 30 gh issue list --repo "$REPO" --label dependency-freshness --state open --json number --jq '.[].number')
+          for n in $existing; do
+            timeout 30 gh issue close "$n" --repo "$REPO" --comment "No open dependabot PRs; auto-closing."
+          done

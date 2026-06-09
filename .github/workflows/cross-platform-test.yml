@@ -1,0 +1,143 @@
+name: Cross-Platform Clean Install
+
+# Verifies that a fresh clone builds and core packages pass tests on
+# Linux, macOS (arm64), and Windows. This is a weekly canary, not a
+# per-PR gate — the regular CI workflow (ci.yml) is the gate. The goal
+# here is to catch platform-specific drift early (e.g. an engram file
+# path that breaks on Windows) without burning CI minutes on every push.
+#
+# Windows runs a subset of packages: the AGM CLI uses Unix syscalls
+# (syscall.Flock, syscall.Statfs) and depends on tmux, so it can't
+# build on Windows today. The portable packages (engram, pkg/benchmarks)
+# are exercised on Windows to keep dreaming/memory file-ops honest.
+
+on:
+  schedule:
+    # Weekly on Sunday at 06:00 UTC
+    - cron: "0 6 * * 0"
+  workflow_dispatch:
+
+concurrency:
+  group: cross-platform-test
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  unix:
+    name: Clean Install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout (clean)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: 'go.sum'
+
+      - name: Install tmux (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install tmux
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Build all binaries from scratch
+        # Mirrors ci.yml's build layout: the repo has directories that
+        # collide with binary names (./agm, ./agm-reaper) so binaries
+        # must be written to build/.
+        run: |
+          GIT_COMMIT=$(git rev-parse --short HEAD)
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          LDFLAGS="-s -w -X main.Version=2.0.0-dev -X main.GitCommit=${GIT_COMMIT} -X main.BuildDate=${BUILD_DATE} -X main.BuiltBy=cross-platform-test"
+          mkdir -p build
+          go build -ldflags="${LDFLAGS}" -o build/agm ./agm/cmd/agm
+          go build -ldflags="${LDFLAGS}" -o build/agm-reaper ./agm/cmd/agm-reaper
+          go build -ldflags="${LDFLAGS}" -o build/agm-mcp-server ./agm/cmd/agm-mcp-server
+          go build ./...
+
+      - name: Smoke-test AGM CLI
+        run: |
+          ./build/agm --version
+          ./build/agm --help > /dev/null
+          ./build/agm benchmark --help > /dev/null
+
+      - name: Unit tests — dreaming / engram memory
+        run: go test -count=1 -timeout 10m ./engram/...
+
+      - name: Unit tests — benchmarks scaffolding
+        run: go test -count=1 -timeout 5m ./pkg/benchmarks/...
+
+      - name: Unit tests — AGM core (race detector)
+        run: go test -race -count=1 -timeout 15m ./agm/internal/...
+        env:
+          CI_SKIP_TMUX: ${{ matrix.os == 'macos-latest' && 'true' || 'false' }}
+
+  windows:
+    name: Clean Install (windows-latest, portable subset)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout (clean)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: 'go.sum'
+
+      - name: Download modules
+        run: go mod download
+
+      # The AGM CLI uses POSIX syscalls (Flock, Statfs) and tmux, so it
+      # can't build on Windows. Only the portable packages are tested
+      # here so we surface Windows regressions in the engram/dreaming
+      # path without blocking on Unix-only code.
+      - name: Build portable packages
+        run: |
+          go build ./engram/...
+          go build ./pkg/benchmarks/...
+
+      - name: Unit tests — engram / dreaming
+        run: go test -count=1 -timeout 10m ./engram/...
+
+      - name: Unit tests — benchmarks scaffolding
+        run: go test -count=1 -timeout 5m ./pkg/benchmarks/...
+
+  summary:
+    name: Summary
+    needs: [unix, windows]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Report
+        run: |
+          {
+            echo "## Cross-Platform Clean Install"
+            echo ""
+            echo "| Job | Status |"
+            echo "|---|---|"
+            echo "| unix matrix | ${{ needs.unix.result }} |"
+            echo "| windows (portable subset) | ${{ needs.windows.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

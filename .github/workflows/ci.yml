@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, develop]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 # Principle of least privilege: jobs only need to read the repo and the
 # go module cache. They never push branches, comment on PRs, or write to
 # the security tab.
@@ -16,6 +20,7 @@ jobs:
   ci:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -24,6 +29,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Full history so golangci-lint's `new-from-merge-base: origin/main`
+          # (see .golangci.yml) can compute the merge base and report findings
+          # only for code changed relative to main. With the default shallow
+          # clone the merge base is unreachable and the baseline silently
+          # degrades to reporting the entire backlog.
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -71,7 +83,11 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # Pin to a specific version so linter upgrades are deliberate, not
+          # silent. `latest` lets golangci-lint bump on its own schedule,
+          # which can introduce new findings (e.g. SA5011) on an unrelated PR
+          # and red main without any code change. Bump this intentionally.
+          version: v2.12.2
 
   # govulncheck runs inside the *required* CI workflow (not only the
   # separate, non-blocking Security Scan / SBOM workflows) so a known-vuln
@@ -82,6 +98,7 @@ jobs:
   govulncheck:
     name: govulncheck
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6

@@ -1,4 +1,4 @@
-.PHONY: build test lint install clean test-unit test-coverage coverage test-e2e-docker test-all install-skills init test-hooks test-bdd verify-contracts verify-specs
+.PHONY: build test lint install clean test-unit test-coverage coverage test-e2e-docker test-all install-skills init test-hooks test-bdd verify-contracts
 
 # Version information
 VERSION ?= 2.0.0-dev
@@ -119,20 +119,6 @@ verify-contracts: ## Run contract drift detection against SPECs
 	go test -v -run TestContractDrift ./test/bdd/...
 	@echo ""
 	@echo "✓ Contract drift check completed"
-
-verify-specs: ## Run all SPEC verification: contract drift + BDD features + invariant tests
-	@echo "=== SPEC Verification Suite ==="
-	@echo ""
-	@echo "--- Contract Drift Detection ---"
-	go test -v -run TestContractDrift ./test/bdd/...
-	@echo ""
-	@echo "--- SPEC Invariant Tests ---"
-	go test -v -run TestSPECInvariants ./test/bdd/...
-	@echo ""
-	@echo "--- BDD Feature Tests ---"
-	go test -v -run TestFeatures ./test/bdd/...
-	@echo ""
-	@echo "✓ All SPEC verification passed"
 
 test-all: test-unit test-bdd test-e2e-docker
 	@echo ""

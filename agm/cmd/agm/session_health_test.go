@@ -36,6 +36,7 @@ func TestSessionHealthAllFlag(t *testing.T) {
 	flag := sessionHealthCmd.Flags().Lookup("all")
 	if flag == nil {
 		t.Fatal("--all flag should be registered")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("--all default = %q, want %q", flag.DefValue, "false")

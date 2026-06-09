@@ -26,5 +26,5 @@
 // NodeKindProvider, and SourceAdapter are reserved names for later
 // phases; see ADR-014 §D7.
 //
-// See docs/adrs/ADR-014-plugin-system.md for the full design.
+// See docs/adr/ADR-014-plugin-system.md for the full design.
 package plugin

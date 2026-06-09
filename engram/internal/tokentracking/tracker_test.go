@@ -14,6 +14,7 @@ func TestNewTokenTracker(t *testing.T) {
 	tracker := NewTokenTracker()
 	if tracker == nil {
 		t.Fatal("NewTokenTracker() returned nil")
+		return
 	}
 	if tracker.listener == nil {
 		t.Error("Tracker listener is nil")
@@ -62,6 +63,7 @@ func TestRecordResponse_ValidJSON(t *testing.T) {
 
 	if usage == nil {
 		t.Fatal("RecordResponse() returned nil usage")
+		return
 	}
 
 	// Verify extracted values

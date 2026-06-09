@@ -79,6 +79,7 @@ func TestGetParent(t *testing.T) {
 	}
 	if parent == nil {
 		t.Fatal("Expected parent to be returned")
+		return
 	}
 	if parent.SessionID != rootSession.SessionID {
 		t.Errorf("Expected parent ID '%s', got '%s'", rootSession.SessionID, parent.SessionID)

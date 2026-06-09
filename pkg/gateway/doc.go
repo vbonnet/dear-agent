@@ -5,7 +5,7 @@
 // returns Responses. It also broadcasts Events from handlers (or future
 // runs.db tailers) to every subscribed adapter.
 //
-// See docs/adrs/ADR-017-gateway-platform-adapters.md for the design
+// See docs/adr/ADR-017-gateway-platform-adapters.md for the design
 // rationale and the rules an Adapter must follow.
 //
 // The package is in-process only. Multi-process topologies (gateway

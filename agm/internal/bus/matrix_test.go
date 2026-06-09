@@ -160,6 +160,7 @@ func TestMatrixAdapterRefusesIfBotNotInRoom(t *testing.T) {
 	err := a.Start(context.Background())
 	if err == nil {
 		t.Fatal("expected error when bot is not in room")
+		return
 	}
 	if !strings.Contains(err.Error(), "not in room") {
 		t.Errorf("error = %v, want mention of 'not in room'", err)

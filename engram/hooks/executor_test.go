@@ -32,6 +32,7 @@ func TestExecutorValidateCommand(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("Expected result even on security error")
+		return
 	}
 
 	if result.Status != VerificationStatusFail {
@@ -116,6 +117,7 @@ func TestExecutorTimeout(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("Expected result even on timeout")
+		return
 	}
 
 	if result.Status != VerificationStatusWarning {

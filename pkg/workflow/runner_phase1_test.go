@@ -80,6 +80,7 @@ func TestRunnerRoleResolverFailureFailsNode(t *testing.T) {
 	_, err := r.Run(context.Background(), wf, nil)
 	if err == nil {
 		t.Fatal("expected error from unknown role")
+		return
 	}
 	if !strings.Contains(err.Error(), "ghost") {
 		t.Errorf("error = %v", err)

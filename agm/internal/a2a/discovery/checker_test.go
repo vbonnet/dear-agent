@@ -12,6 +12,7 @@ func TestNewChecker_NilOptions(t *testing.T) {
 	c := NewChecker(nil)
 	if c == nil {
 		t.Fatal("NewChecker(nil) returned nil")
+		return
 	}
 	if c.channelsDir == "" {
 		t.Error("expected non-empty channelsDir with nil options")
@@ -61,6 +62,7 @@ func TestLoadState_FreshState(t *testing.T) {
 	}
 	if state == nil {
 		t.Fatal("LoadState() returned nil state")
+		return
 	}
 	if state.LastCheckTime == "" {
 		t.Error("expected non-empty LastCheckTime")
@@ -172,6 +174,7 @@ This is a test proposal.
 	header := c.ParseMessageHeader(content)
 	if header == nil {
 		t.Fatal("ParseMessageHeader() returned nil for valid content")
+		return
 	}
 	if header.AgentID != "test-agent" {
 		t.Errorf("AgentID = %q, want %q", header.AgentID, "test-agent")
@@ -297,6 +300,7 @@ This is a test proposal.
 	notification := c.CheckChannel(channelFile, state)
 	if notification == nil {
 		t.Fatal("CheckChannel() returned nil, expected a notification for awaiting-response")
+		return
 	}
 	if notification.ChannelName != "test-channel" {
 		t.Errorf("ChannelName = %q, want %q", notification.ChannelName, "test-channel")

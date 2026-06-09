@@ -73,6 +73,7 @@ func TestAdd_TraversalWritesNothingOutsideRoot(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Add accepted a traversal URI — expected rejection")
+		return
 	}
 	if !strings.Contains(err.Error(), "traversal") && !strings.Contains(err.Error(), "invalid path") {
 		t.Logf("note: rejection error was %q", err)

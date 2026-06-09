@@ -71,6 +71,7 @@ func TestDetector_RecordAndCheck_Break(t *testing.T) {
 	event := d.CheckCacheBreak("system_prompt", 0, newContent)
 	if event == nil {
 		t.Fatal("expected cache break with 0% hit rate")
+		return
 	}
 
 	if event.Source != "system_prompt" {
@@ -166,6 +167,7 @@ func TestDetector_DiffFileContent(t *testing.T) {
 	event := d.CheckCacheBreak("test_source", 0, "new prompt content after change")
 	if event == nil {
 		t.Fatal("expected cache break")
+		return
 	}
 
 	data, err := os.ReadFile(event.DiffPath)
@@ -193,6 +195,7 @@ func TestDetector_NoDiffWhenContentUnchanged(t *testing.T) {
 	event := d.CheckCacheBreak("same", 0, content)
 	if event == nil {
 		t.Fatal("expected cache break event")
+		return
 	}
 	if event.DiffPath != "" {
 		t.Error("expected no diff file when content unchanged")

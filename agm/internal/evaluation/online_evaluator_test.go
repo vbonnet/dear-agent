@@ -61,6 +61,7 @@ func TestNewOnlineEvaluator(t *testing.T) {
 
 	if evaluator == nil {
 		t.Fatal("Expected non-nil evaluator")
+		return
 	}
 
 	if evaluator.judge != judge {

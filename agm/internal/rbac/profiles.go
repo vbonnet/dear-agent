@@ -52,7 +52,6 @@ var (
 		"Bash(agm session health *)",
 		"Bash(agm session summary *)",
 		"Bash(agm session tag *)",
-		"Bash(agm session select-option *)",
 		"Bash(agm session status *)",
 		"Bash(agm session new *)",
 		"Bash(agm session resume *)",
@@ -60,6 +59,7 @@ var (
 		// Messaging
 		"Bash(agm send *)",
 		"Bash(agm send msg *)",
+		"Bash(agm send select-option *)",
 		// Verification & trust
 		"Bash(agm verify *)",
 		"Bash(agm trust score *)",

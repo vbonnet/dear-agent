@@ -42,7 +42,7 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "open %s: %v\n", *dbPath, err)
 		return 1
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	rows, err := workflow.List(context.Background(), db, workflow.ListOptions{
 		State: workflow.RunState(*state),
@@ -64,13 +64,13 @@ func run() int {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN_ID\tWORKFLOW\tSTATE\tSTARTED\tDURATION")
+	_, _ = fmt.Fprintln(tw, "RUN_ID\tWORKFLOW\tSTATE\tSTARTED\tDURATION")
 	for _, r := range rows {
 		duration := "-"
 		if r.FinishedAt != nil {
 			duration = r.FinishedAt.Sub(r.StartedAt).Round(time.Millisecond).String()
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 			r.RunID, r.Workflow, r.State,
 			r.StartedAt.Format(time.RFC3339), duration)
 	}

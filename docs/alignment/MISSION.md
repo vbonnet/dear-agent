@@ -3,27 +3,30 @@ title: Mission
 version: "1.0"
 status: active
 date: "2026-04-05"
-adr_ref: ADR-020
-scope: ai-tools
-role_mapping:
-  verifier: "VALUES.md compliance"
-  requester: "GOALS.md decomposition"
-  orchestrator: "session dispatch"
-  overseer: "anomaly detection"
-  meta_orchestrator: "state machine governance"
+adr_ref: docs/adr/ADR-002-vroom-execution-architecture
+context_ref: CONTEXT.md
+scope: dear-agent
+supervisors:
+  meta_orchestrator: "roadmap, prioritization, tech consistency (CTO); sole roadmap-add authority"
+  orchestrator: "work enqueue/dequeue, worker monitoring, steady progress (COO)"
+  overseer: "resource usage, leak detection, session cleanup (CRO)"
+task_ownership: "Primary (does it) / Secondary (verifies it) / Tertiary (unsticks them)"
 ---
 
 # Mission
 
-AGM exists to make autonomous multi-agent orchestration **safe, auditable, and
-aligned** with its operator's intent.
+This project exists to make autonomous multi-agent orchestration **safe,
+auditable, and aligned** with its operator's intent.
 
 ## Purpose
 
-Provide a supervisory framework (VROOM) where AI agents collaborate on software
-engineering tasks under structured governance. Every consequential decision is
-evaluated against declared values, traced in an append-only log, and subject to
-human-in-the-loop gates when confidence is insufficient.
+Provide a supervisory **execution framework — VROOM** (see
+[CONTEXT.md](../../CONTEXT.md) and
+[docs/adr/ADR-002](../adr/ADR-002-vroom-execution-architecture.md)) — where AI
+agents collaborate on software engineering tasks under structured governance.
+VROOM drives **AGM** (a tool) to run agent sessions. Every consequential
+decision is evaluated against declared values, traced in an append-only log,
+and subject to human-in-the-loop gates when confidence is insufficient.
 
 ## Scope
 

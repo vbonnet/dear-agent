@@ -23,6 +23,7 @@ func TestNewReviewEngine(t *testing.T) {
 
 	if engine == nil {
 		t.Fatal("Expected non-nil engine")
+		return
 	}
 
 	if engine.projectDir != tmpDir {
@@ -217,6 +218,7 @@ func main() {
 
 	if result == nil {
 		t.Fatal("Expected non-nil result")
+		return
 	}
 
 	if result.TaskID != task.ID {
@@ -277,6 +279,7 @@ func TestReviewBatch(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("Expected non-nil result")
+		return
 	}
 
 	if result.ReviewType != ReviewTypeBatch {

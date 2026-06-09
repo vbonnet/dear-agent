@@ -1,7 +1,7 @@
 // Command backlog-suggest ranks the declared backlog (BACKLOG.md +
 // ROADMAP.md) and suggests what to pick up next. It is the CLI surface of
 // pkg/backlog and the executable form of the VROOM Orchestrator's
-// deterministic dispatch scan (agm ADR-023). See docs/adrs/ADR-022.
+// deterministic dispatch scan (agm ADR-023). See docs/adr/ADR-022.
 //
 //	backlog-suggest list                     # every parsed item
 //	backlog-suggest suggest                   # top-N eligible + blocked

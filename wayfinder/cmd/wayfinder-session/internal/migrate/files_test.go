@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -391,34 +392,34 @@ func TestFileMigrator_GenerateTestsOutlineIfNeeded(t *testing.T) {
 
 func TestFileMigrator_GenerateTestsFeatureIfNeeded(t *testing.T) {
 	tests := []struct {
-		name               string
-		s6Content          string
-		existingFeature    string
-		wantFeatureCreated bool
-		wantFeatureContent string
+		name            string
+		s6Content       string
+		existingFeature string
+		wantErr         error // sentinel expected via errors.Is, or nil
 	}{
 		{
-			name: "generate feature from S6",
+			// We cannot honestly derive Gherkin from S6 yet, so the migrator
+			// must refuse rather than fabricate a boilerplate feature file.
+			name: "S6 exists, feature missing -> not implemented (no fabrication)",
 			s6Content: `# S6 Design
 ## Implementation Plan
 - Implement login API
 - Add authentication middleware
 `,
-			existingFeature:    "",
-			wantFeatureCreated: true,
-			wantFeatureContent: "Feature:",
+			existingFeature: "",
+			wantErr:         ErrFeatureGenNotImplemented,
 		},
 		{
-			name:               "S6 exists but feature already exists",
-			s6Content:          "# S6 Design",
-			existingFeature:    "Feature: existing",
-			wantFeatureCreated: false,
+			name:            "S6 exists but feature already exists -> no-op",
+			s6Content:       "# S6 Design",
+			existingFeature: "Feature: existing",
+			wantErr:         nil,
 		},
 		{
-			name:               "S6 doesn't exist",
-			s6Content:          "",
-			existingFeature:    "",
-			wantFeatureCreated: false,
+			name:            "S6 doesn't exist -> no-op",
+			s6Content:       "",
+			existingFeature: "",
+			wantErr:         nil,
 		},
 	}
 
@@ -442,29 +443,30 @@ func TestFileMigrator_GenerateTestsFeatureIfNeeded(t *testing.T) {
 				}
 			}
 
-			// Run generation
 			fm := NewFileMigrator(tmpDir)
 			err := fm.generateTestsFeatureIfNeeded()
-			if err != nil {
-				t.Fatalf("generateTestsFeatureIfNeeded() error = %v", err)
+
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("generateTestsFeatureIfNeeded() error = %v, want %v", err, tt.wantErr)
 			}
 
-			// Check if feature was created
+			// The migrator must never fabricate a TESTS.feature. The only way
+			// the file exists afterward is if we created it as a fixture above.
 			featurePath := filepath.Join(tmpDir, "TESTS.feature")
-			featureContent, err := os.ReadFile(featurePath)
-			featureExists := err == nil
-
-			// Check if feature was created (didn't exist before, exists now)
-			wasCreated := (tt.existingFeature == "") && featureExists
-			if wasCreated != tt.wantFeatureCreated {
-				t.Errorf("feature created = %v, want %v (existed before: %v, exists now: %v)",
-					wasCreated, tt.wantFeatureCreated, tt.existingFeature != "", featureExists)
-			}
-
-			// Verify content if feature should be created
-			if tt.wantFeatureCreated && !strings.Contains(string(featureContent), tt.wantFeatureContent) {
-				t.Errorf("feature does not contain expected text: %q\nGot: %s",
-					tt.wantFeatureContent, string(featureContent))
+			content, readErr := os.ReadFile(featurePath)
+			if tt.existingFeature == "" {
+				if readErr == nil {
+					t.Errorf("TESTS.feature must not be fabricated; got content:\n%s", string(content))
+				}
+			} else {
+				// A pre-existing feature must be left exactly as-is.
+				if readErr != nil {
+					t.Fatalf("pre-existing TESTS.feature should remain: %v", readErr)
+				}
+				if string(content) != tt.existingFeature {
+					t.Errorf("pre-existing TESTS.feature was modified: got %q, want %q",
+						string(content), tt.existingFeature)
+				}
 			}
 		})
 	}
@@ -602,13 +604,15 @@ func TestFileMigrator_MigrateFiles_Integration(t *testing.T) {
 		t.Fatalf("MigrateFiles() error = %v", err)
 	}
 
-	// Verify all expected outputs
+	// Verify all expected outputs. Note: TESTS.feature is intentionally NOT
+	// generated — automatic EARS→BDD generation is not implemented, and the
+	// migrator must not fabricate a boilerplate feature (see
+	// ErrFeatureGenNotImplemented). Its absence is asserted separately below.
 	expectedFiles := []string{
 		"D4-requirements.md", // Should contain stakeholder section
 		"S6-design.md",       // Should contain research section
 		"S8-build.md",        // Should contain unified S8/S9/S10
-		"TESTS.outline",      // Should be generated
-		"TESTS.feature",      // Should be generated
+		"TESTS.outline",      // Should be generated from D4
 	}
 
 	for _, filename := range expectedFiles {
@@ -637,11 +641,12 @@ func TestFileMigrator_MigrateFiles_Integration(t *testing.T) {
 			if !strings.Contains(string(content), "AC") {
 				t.Error("TESTS.outline should contain acceptance criteria")
 			}
-		case "TESTS.feature":
-			if !strings.Contains(string(content), "Feature:") {
-				t.Error("TESTS.feature should contain Feature definition")
-			}
 		}
+	}
+
+	// TESTS.feature must NOT be fabricated by migration.
+	if _, err := os.Stat(filepath.Join(tmpDir, "TESTS.feature")); err == nil {
+		t.Error("TESTS.feature should not be generated by migration (EARS→BDD generation is not implemented)")
 	}
 }
 
@@ -687,27 +692,6 @@ Nothing about requirements here`,
 					acCount, tt.wantACs, outline)
 			}
 		})
-	}
-}
-
-func TestFileMigrator_GenerateFeatureFromS6(t *testing.T) {
-	fm := NewFileMigrator("")
-	feature := fm.generateFeatureFromS6("Sample S6 content")
-
-	// Verify feature file structure
-	requiredElements := []string{
-		"Feature:",
-		"Scenario:",
-		"Given",
-		"When",
-		"Then",
-	}
-
-	for _, elem := range requiredElements {
-		if !strings.Contains(feature, elem) {
-			t.Errorf("generateFeatureFromS6() missing required element: %s\nFeature: %s",
-				elem, feature)
-		}
 	}
 }
 

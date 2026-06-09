@@ -65,3 +65,6 @@ tests/test_helper/
 
 # Local audit database (created by `workflow-audit run`)
 .dear-agent/
+
+# `make preflight` mirrors ci.yml and writes the three matrix binaries here.
+/build/
