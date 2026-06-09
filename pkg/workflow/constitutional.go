@@ -124,6 +124,13 @@ func (inv *Invariant) Validate() error {
 	if strings.TrimSpace(inv.Description) == "" {
 		return fmt.Errorf("invariant %q: description is required", inv.ID)
 	}
+	return inv.validateKind()
+}
+
+// validateKind enforces the per-kind shape requirements for an Invariant.
+// It is split out of Validate to keep each method's cyclomatic complexity
+// within the gocyclo budget.
+func (inv *Invariant) validateKind() error {
 	switch inv.Kind {
 	case InvariantJSONSchema:
 		if inv.Target == "" || inv.Schema == "" {
