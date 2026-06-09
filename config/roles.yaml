@@ -107,8 +107,9 @@ roles:
   # Orchestrator (general / coordinator): routes between other roles, makes
   # cheap decisions, summarises state for HITL. High call volume, low per-
   # call complexity — so the primary is the cheapest capable Anthropic model
-  # (Sonnet 4.6). Secondary spills to Gemini 2.5 Flash, then GPT 5.4 Mini —
-  # both also in the "fast and cheap" tier.
+  # (Sonnet 4.6). Secondary spills to Gemini 3.5 Flash (GA 2026-05-19, ~4×
+  # faster than 2.5 Flash on agentic benchmarks), then GPT 5.4 Mini — both
+  # also in the "fast and cheap" tier.
   orchestrator:
     description: "Routing, coordination, and cheap decisions across the workflow"
     capabilities: [tool_use, structured_output]
@@ -116,7 +117,7 @@ roles:
       model: claude-sonnet-4-6
       effort: high
     secondary:
-      model: gemini-2.5-flash
+      model: gemini-3.5-flash
       effort: high
     tertiary:
       model: gpt-5.4-mini

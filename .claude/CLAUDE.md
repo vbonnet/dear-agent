@@ -2,7 +2,7 @@
 
 ## Core Engineering Principles (MANDATORY)
 
-These eight principles govern *how* work happens in this repo, regardless of
+These nine principles govern *how* work happens in this repo, regardless of
 *what* the task is. They were distilled from the 2026-05-28 working session
 and version-controlled here so every agent on every machine inherits them.
 The more specific sections below (Output Routing, Dogfooding, Agent
@@ -64,6 +64,31 @@ them.
    canonical store is the `context-engine` Beads DB (`~/beads/context-engine`).
    *Why:* untracked work is invisible work — it cannot be prioritized,
    handed off, or audited.
+
+9. **Atomic action wrappers — wrap unsafe command chains, deny the raw form.**
+   When an action only succeeds as an all-or-nothing chain (e.g. `chezmoi
+   apply` → commit → push), or when a raw command cannot be permission-granted
+   without over-granting (e.g. allowing `git push` also allows `git push
+   --force`), do not trust an agent to sequence the steps correctly or to
+   avoid the dangerous flags. Build a wrapper instead:
+   - Write a small, deterministic wrapper — a shell script (< 50 lines) or Go
+     binary (< 200 lines) — that performs the whole action as one unit.
+   - Enforce safety by construction: strip dangerous flags, chain the steps in
+     the required order, and roll back (or fail loudly into a clean state) if
+     any step fails. The "do A then B then C, and B must not be skipped"
+     guarantee lives in code, not in agent discipline.
+   - Deny the raw command via a `PreToolUse` hook that exits with code 2 and
+     points the agent at the wrapper.
+   - `ALWAYS_ALLOW` the wrapper — its safety is guaranteed by construction, so
+     it needs no per-invocation approval.
+   Examples: `chezmoi-deploy` (`chezmoi apply` → commit → push atomically);
+   `safe-push` (`git push` with force-push stripped); any future "do A then B
+   then C, and B must not be skipped" action. *Why:* an agent merely *told* to
+   run three commands in order will eventually run two of them, or reach for a
+   forbidden flag under pressure. A wrapper makes the safe path the only path,
+   and turns a fuzzy permission question ("can this agent push?") into a crisp,
+   auditable one ("can this agent run the binary we vetted?"). Prefer building
+   the wrapper over loosening a permission rule.
 
 ## Output Routing — Where Artifacts Belong (MANDATORY)
 
@@ -130,3 +155,90 @@ to file (or fix), not a reason to bypass.
 **Acceptable bypass:** trivial single-file edits, one-shot reads, and the
 literal bootstrap case where the tool itself is broken (in which case: file
 an issue or write a retro before moving on).
+
+## Agent Delegation Enforcement (MANDATORY)
+
+These rules come from the 2026-05-13 DEAR retro on stuck tasks
+(`~/ai-conversation-logs/dear-retros/2026-05-13-enforcement-rules.md`).
+The pattern they correct: long agent runs that produced uncommitted work,
+ignored supervisor pings, retried the same failing approach indefinitely,
+and left worktrees and feature branches stranded after merge. Turn budgets
+were considered and rejected — they are training wheels that punish careful
+work and reward rushed work. The discipline below is causal: commit early,
+listen to the supervisor, stop retrying, clean up.
+
+### 1. Incremental commit discipline
+
+**Uncommitted work is nonexistent work.** Commit after each logical
+sub-task — not at the end, not when "everything is perfect." If the worker
+process is killed (OOM, timeout, supervisor stop), only what is in git
+survives. The cost of an extra commit is ~zero; the cost of losing 90
+minutes of work is large.
+
+- First commit within the first meaningful unit of progress (scaffold,
+  failing test, skeleton). Do not let the first commit be "everything done."
+- Commit on every sub-task boundary. Use clear, conventional messages.
+- WIP commits are fine — they can be squashed at PR time.
+
+### 2. Supervisor messages are commands
+
+When an orchestrator/supervisor sends a message (AGM `send`, VROOM
+intervention, user redirect), it is a **command**, not a suggestion.
+Goal-pursuit does not override it.
+
+- **Acknowledge within 2 turns** of receipt.
+- **Comply within 5 turns** — even if compliance means committing WIP and
+  returning early.
+- `wrap up` → commit current state, return summary.
+- `status?` → report progress, remaining work, blockers in one turn.
+- `stop` → commit immediately and return. Do not continue.
+
+### 3. Two-retry maximum, then escalate
+
+If an approach fails twice with the same error, **stop**. Do not keep
+trying. Retry loops burn time and budget without converging.
+
+- After 2 failures: try a materially different approach, OR report failure
+  with two concrete alternatives and ask for direction.
+- Permission/access errors: 0 retries. Report immediately — retrying will
+  not change the answer.
+- Death loops (same error 3+ times in a row) are an immediate stop-and-ask.
+
+### 4. `git push` with timeout and no prompts
+
+On this host, `git push` over HTTPS can hang on a keychain prompt and look
+like a network failure (see `memory/macos-env-gaps.md`). Always:
+
+```
+GIT_TERMINAL_PROMPT=0 gtimeout 30 git push -u origin <branch>
+```
+
+If push fails or times out: **leave the branch local**, report the failure,
+and let the supervisor decide. Do not retry with different flags hoping to
+get past the prompt.
+
+### 5. Worktree and branch cleanup after merge
+
+A merged branch with a stranded worktree is a leak that compounds over time.
+After a successful merge to `main`:
+
+```
+git -C ~/src/dear-agent worktree remove <worktree-path>
+git -C ~/src/dear-agent branch -D <branch>   # local
+git -C ~/src/dear-agent push origin --delete <branch>   # remote, if pushed
+```
+
+If `gh pr merge --squash --delete-branch` was used, the remote branch is
+already gone — still remove the local worktree and branch.
+
+### 6. Definition of Done includes "committed to branch"
+
+Every delegated task's DoD must **explicitly** list:
+
+- [ ] Changes committed to the working branch
+- [ ] (If applicable) Branch pushed to origin
+- [ ] (If applicable) Tests + lint pass on the committed tree
+
+A task that says "the code works on disk" but is not in git is **not done**.
+Delegation prompts that omit this line have produced the exact failure mode
+this section exists to prevent — include it verbatim.

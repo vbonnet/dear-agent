@@ -150,7 +150,7 @@ type ClaudeJudge struct {
 }
 
 // EvaluateDetailed assesses output using Claude with Chain of Thought reasoning
-func (c *ClaudeJudge) EvaluateDetailed(ctx context.Context, input, expectedOutput string, criteria EvaluationCriteria) (*JudgeResponse, error) {
+func (c *ClaudeJudge) EvaluateDetailed(ctx context.Context, input, expectedOutput, actualOutput string, criteria EvaluationCriteria) (*JudgeResponse, error) {
 	tracer := otel.Tracer("engram/evaluation")
 	ctx, span := tracer.Start(ctx, "judge_evaluation",
 		trace.WithAttributes(
@@ -193,7 +193,7 @@ Provide your evaluation as JSON with:
 1. chain_of_thought: Your step-by-step reasoning process
 2. pass: boolean (true if score >= %.2f)
 3. score: float between 0.0 and 1.0
-4. reasoning: summary of your final judgment`, input, expectedOutput, expectedOutput, criteria.Name, criteria.Description, criteria.Threshold, criteria.Threshold, criteria.Threshold)
+4. reasoning: summary of your final judgment`, input, expectedOutput, actualOutput, criteria.Name, criteria.Description, criteria.Threshold, criteria.Threshold, criteria.Threshold)
 
 	req := ClaudeRequest{
 		Model:       c.config.Model,
@@ -258,7 +258,10 @@ func (c *ClaudeJudge) Evaluate(ctx context.Context, prompt string, response stri
 		Description: "Evaluate response quality",
 		Threshold:   0.7,
 	}
-	result, err := c.EvaluateDetailed(ctx, prompt, response, criteria)
+	// The simple Judge interface has no reference output, so there is no
+	// expected value to compare against — the response is judged on its own
+	// quality. Pass it as the actual output with an empty expected output.
+	result, err := c.EvaluateDetailed(ctx, prompt, "", response, criteria)
 	if err != nil {
 		return 0, err
 	}

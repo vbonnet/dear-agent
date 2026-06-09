@@ -45,7 +45,7 @@ func runClearInput(cmd *cobra.Command, args []string) error {
 
 	switch inputType {
 	case tmux.QueuedInputNone:
-		fmt.Fprintf(os.Stdout, "No queued input detected in session '%s'\n", sessionName)
+		_, _ = fmt.Fprintf(os.Stdout, "No queued input detected in session '%s'\n", sessionName)
 		return nil
 
 	case tmux.QueuedInputHuman:
@@ -53,7 +53,7 @@ func runClearInput(cmd *cobra.Command, args []string) error {
 
 	case tmux.QueuedInputAGM:
 		// Stuck AGM message — safe to submit by sending Enter
-		fmt.Fprintf(os.Stdout, "Detected stuck AGM message in session '%s'. Sending Enter to submit...\n", sessionName)
+		_, _ = fmt.Fprintf(os.Stdout, "Detected stuck AGM message in session '%s'. Sending Enter to submit...\n", sessionName)
 
 		if err := tmux.SendKeys(sessionName, "C-m"); err != nil {
 			return fmt.Errorf("failed to send Enter to session '%s': %w", sessionName, err)
@@ -74,14 +74,14 @@ func runClearInput(cmd *cobra.Command, args []string) error {
 				fmt.Fprintf(os.Stderr, "Warning: failed to send keys to session %s: %v\n", sessionName, err)
 			}
 			time.Sleep(300 * time.Millisecond)
-			fmt.Fprintf(os.Stdout, "Sent additional Enter (input may still be processing)\n")
+			_, _ = fmt.Fprintf(os.Stdout, "Sent additional Enter (input may still be processing)\n")
 		} else {
-			fmt.Fprintf(os.Stdout, "Stuck AGM message cleared successfully from session '%s'\n", sessionName)
+			_, _ = fmt.Fprintf(os.Stdout, "Stuck AGM message cleared successfully from session '%s'\n", sessionName)
 		}
 
 		// Log the action
 		if os.Getenv("AGM_DEBUG") == "1" {
-			fmt.Fprintf(os.Stdout, "DEBUG: clear-input action=submit session=%s type=agm description=%q\n", sessionName, description)
+			_, _ = fmt.Fprintf(os.Stdout, "DEBUG: clear-input action=submit session=%s type=agm description=%q\n", sessionName, description)
 		}
 
 		return nil
