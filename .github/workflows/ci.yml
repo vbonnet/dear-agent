@@ -25,6 +25,19 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        # Run the race detector on Linux only. Data races are
+        # platform-independent in practice, so the ubuntu leg catches them;
+        # the macOS leg runs the same suite without -race. This trims ~5 min
+        # off every PR's macOS job and removes the instrumentation-induced
+        # timing pressure that made the sub-millisecond timing tests flaky on
+        # macOS. (A matrix var, not an inline `&& '' || '-race'` ternary,
+        # because GitHub treats '' as falsy and the ternary would wrongly
+        # re-add -race on macOS.)
+        include:
+          - os: ubuntu-latest
+            race: "-race"
+          - os: macos-latest
+            race: ""
 
     steps:
       - name: Checkout
@@ -75,7 +88,7 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -race -count=1 ./...
+        run: go test ${{ matrix.race }} -count=1 ./...
         env:
           # Skip tmux-dependent tests on macOS CI
           CI_SKIP_TMUX: ${{ matrix.os == 'macos-latest' && 'true' || 'false' }}
