@@ -193,8 +193,24 @@ func (w *GeminiDeepResearch) executeMultiURL(ctx workflow.WorkflowContext, urls 
 	// result, keeping the channel send-count in lockstep with the receive-count.
 	for i, url := range pendingURLs {
 		go func(index int, url string) {
+			// researchOne recovers from panics internally, but guard the
+			// goroutine body too: a panic anywhere here must still produce
+			// exactly one result. The send lives in the deferred closure so it
+			// runs exactly once whether the body completes or panics — keeping
+			// the channel send-count in lockstep with the collector below and
+			// preventing a stray panic from deadlocking it.
+			res := researchResult{url: url}
+			defer func() {
+				if r := recover(); r != nil {
+					res = researchResult{
+						url: url,
+						err: fmt.Errorf("research goroutine panicked: %v", r),
+					}
+				}
+				results <- res
+			}()
 			fmt.Printf("[%d/%d] Starting research: %s\n", index+1, len(urls), url)
-			results <- w.researchOne(string(ctx.SessionID), url, logger)
+			res = w.researchOne(string(ctx.SessionID), url, logger)
 		}(i, url)
 	}
 
