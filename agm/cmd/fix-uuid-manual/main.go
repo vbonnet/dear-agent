@@ -22,14 +22,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
 		os.Exit(1)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	// Get the session
 	sessionID := "1d24de72-41df-4ec8-8731-4230174e45d9"
 	session, err := adapter.GetSession(sessionID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get session: %v\n", err)
-		adapter.Close()
+		_ = adapter.Close()
 		os.Exit(1) //nolint:gocritic // adapter.Close() called explicitly above
 	}
 

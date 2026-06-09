@@ -180,7 +180,7 @@ func registerWithClaudeCode(claudeConfigPath string) error {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	tmp := claudeConfigPath + ".tmp"
-	defer os.Remove(tmp) // best-effort cleanup if we return before the rename
+	defer func() { _ = os.Remove(tmp) }() // best-effort cleanup if we return before the rename
 	if err := os.WriteFile(tmp, append(out, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}

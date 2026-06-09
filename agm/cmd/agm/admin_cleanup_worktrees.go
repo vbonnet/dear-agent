@@ -62,7 +62,7 @@ func runCleanupWorktrees(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("cannot connect to Dolt: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	var worktrees []dolt.WorktreeRecord
 	if wtCleanupSession != "" {

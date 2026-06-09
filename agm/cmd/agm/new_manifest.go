@@ -94,7 +94,7 @@ func registerSessionInDolt(m *manifest.Manifest) error {
 				"  • Check WORKSPACE environment variable is set")
 		return err
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	if err := adapter.CreateSession(m); err != nil {
 		debug.Log("Failed to save session to Dolt: %v", err)

@@ -54,7 +54,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// The sources adapter lives in the same SQLite file as runs by
 	// default — this makes JOINs across `sources` and `runs` cheap and
@@ -74,7 +74,7 @@ func run() int {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-		defer a.Close()
+		defer func() { _ = a.Close() }()
 		srcAdapter = a
 	}
 
@@ -297,7 +297,9 @@ func (s *Server) toolRun(ctx context.Context, id any, args json.RawMessage) rpcR
 }
 
 func (s *Server) toolStatus(ctx context.Context, id any, args json.RawMessage) rpcResponse {
-	var a struct{ RunID string `json:"run_id"` }
+	var a struct {
+		RunID string `json:"run_id"`
+	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return errResponse(id, -32602, "invalid arguments", err.Error())
 	}
@@ -425,7 +427,7 @@ func (s *Server) ServeStdio() int {
 // ServeHTTP is the test/debug surface. Each request is one JSON-RPC
 // envelope; the response is exactly one envelope.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

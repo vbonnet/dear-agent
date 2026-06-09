@@ -95,15 +95,15 @@ func runA2AListCards(_ *cobra.Command, _ []string) error {
 
 	// Table output
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tDESCRIPTION\tSKILLS\tVERSION")
+	_, _ = fmt.Fprintln(w, "NAME\tDESCRIPTION\tSKILLS\tVERSION")
 	for _, card := range cards {
 		desc := card.Description
 		if len(desc) > 60 {
 			desc = desc[:57] + "..."
 		}
-		fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", card.Name, desc, len(card.Skills), card.ProtocolVersion)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", card.Name, desc, len(card.Skills), card.ProtocolVersion)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	return nil
 }
@@ -136,7 +136,7 @@ func runA2ASync(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	// List all sessions
 	manifests, err := adapter.ListSessions(&dolt.SessionFilter{})

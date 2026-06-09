@@ -104,7 +104,7 @@ func printArchiveUITable(r *ops.ArchiveUISessionsResult) {
 
 	if len(r.Sessions) > 0 {
 		tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintln(tw, "AGE\tLIVE\tARCHIVED\tWARN\tACTION\tTITLE\tCWD")
+		_, _ = fmt.Fprintln(tw, "AGE\tLIVE\tARCHIVED\tWARN\tACTION\tTITLE\tCWD")
 		for _, s := range r.Sessions {
 			action := s.Action
 			if s.Reason != "" {
@@ -114,11 +114,11 @@ func printArchiveUITable(r *ops.ArchiveUISessionsResult) {
 			if len(s.Warnings) > 0 {
 				warn = fmt.Sprintf("⚠%d", len(s.Warnings))
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%t\t%s\t%s\t%s\t%s\n",
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%t\t%s\t%s\t%s\t%s\n",
 				humanAge(s.AgeHours), yesNo(s.Live), s.IsArchived, warn,
 				action, truncate(s.Title, 40), truncate(s.Cwd, 48))
 		}
-		tw.Flush()
+		_ = tw.Flush()
 		fmt.Println()
 	}
 

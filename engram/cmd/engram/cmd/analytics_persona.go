@@ -110,7 +110,7 @@ func parsePersonaReviews(filename string) ([]personaReview, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var reviews []personaReview
 	scanner := bufio.NewScanner(file)

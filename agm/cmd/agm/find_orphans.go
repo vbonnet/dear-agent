@@ -70,7 +70,7 @@ func runFindOrphans(cmd *cobra.Command, args []string) error {
 	// Get Dolt adapter for orphan detection
 	adapter, _ := getStorage()
 	if adapter != nil {
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 	}
 
 	// Run orphan detection
@@ -137,11 +137,11 @@ func runFindOrphans(cmd *cobra.Command, args []string) error {
 
 func displayOrphansTable(orphans []*orphan.OrphanedSession) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	defer w.Flush()
+	defer func() { _ = w.Flush() }()
 
 	// Header
-	fmt.Fprintln(w, "UUID\tProject Path\tLast Modified\tWorkspace\tStatus")
-	fmt.Fprintln(w, "----\t------------\t-------------\t---------\t------")
+	_, _ = fmt.Fprintln(w, "UUID\tProject Path\tLast Modified\tWorkspace\tStatus")
+	_, _ = fmt.Fprintln(w, "----\t------------\t-------------\t---------\t------")
 
 	// Rows
 	for _, o := range orphans {
@@ -171,7 +171,7 @@ func displayOrphansTable(orphans []*orphan.OrphanedSession) {
 
 		status := o.Status
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			uuid, projectPath, lastModified, workspace, status)
 	}
 }

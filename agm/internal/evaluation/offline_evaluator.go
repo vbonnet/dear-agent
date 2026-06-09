@@ -82,7 +82,7 @@ func EvaluateOffline(ctx context.Context, testCases []TestCase, judge DetailedJu
 
 	// Evaluate each test case
 	for _, tc := range testCases {
-		result, err := judge.EvaluateDetailed(ctx, tc.Input, tc.ExpectedOutput, tc.Criteria)
+		result, err := judge.EvaluateDetailed(ctx, tc.Input, tc.ExpectedOutput, tc.ActualOutput, tc.Criteria)
 		if err != nil {
 			return nil, fmt.Errorf("failed to evaluate test case %s: %w", tc.ID, err)
 		}

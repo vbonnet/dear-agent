@@ -188,7 +188,7 @@ func runDaemonHealth(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open message queue: %w", err)
 	}
-	defer queue.Close()
+	defer func() { _ = queue.Close() }()
 
 	// Get health status
 	health, err := daemon.GetHealthStatus(pidFile, queue)

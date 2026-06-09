@@ -148,10 +148,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 	tr, err := tracker.New(st.SessionID)
 	if err != nil {
 		// Clean up directory on failure
-		os.RemoveAll(projectDir)
+		_ = os.RemoveAll(projectDir)
 		return fmt.Errorf("failed to initialize tracker: %w", err)
 	}
-	defer tr.Close(context.Background())
+	defer func() { _ = tr.Close(context.Background()) }()
 
 	// Publish session.started event
 	if err := tr.StartSession(projectDir); err != nil {
@@ -160,7 +160,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	// Write STATUS file
 	if err := st.WriteTo(projectDir); err != nil {
-		os.RemoveAll(projectDir)
+		_ = os.RemoveAll(projectDir)
 		return fmt.Errorf("failed to write STATUS file: %w", err)
 	}
 

@@ -5,6 +5,7 @@
 #   preflight-tests         preflight + go test (no -race) — quick sanity
 #   preflight-full          preflight + go test -race + govulncheck (full parity)
 #   install-preflight-hook  Install a git pre-push hook that runs preflight
+#   install-post-merge-hook Install a post-merge hook that reaps merged worktrees
 #   act-validate            Run full local CI validation via act (needs Docker)
 #   act-lint                Run lint job via act
 #   act-test                Run test job via act
@@ -24,7 +25,7 @@
 #   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 
-.PHONY: preflight preflight-tests preflight-full install-preflight-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings install-configure-settings build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent
+.PHONY: preflight preflight-tests preflight-full install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline
 
 # Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
 # CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm
@@ -58,6 +59,14 @@ install-preflight-hook:
 	printf '#!/bin/sh\nexec make preflight\n' > "$$HOOK"; \
 	chmod +x "$$HOOK"; \
 	echo "Installed: $$HOOK -> make preflight"
+
+# Install the post-merge worktree-sweep trigger. After a PR lands on the
+# default branch locally (e.g. `git pull` on main), it kicks off the canonical
+# fail-safe reaper `agm worktree sweep --execute`. The installer honours
+# core.hooksPath and refuses to clobber a chezmoi-managed hooks dir — see
+# cmd/install-post-merge-hook for the resolution and safety logic.
+install-post-merge-hook:
+	@go run ./cmd/install-post-merge-hook
 
 # Run full local CI validation via act. Requires Docker + act installed.
 # Prefer `make preflight-full` for the same gates without containerisation.
@@ -117,6 +126,19 @@ install-configure-settings: build-configure-settings
 	cp bin/configure-claude-settings $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/configure-claude-settings"
 
+# Build safe-push: a git-push wrapper that resets the credential helper chain
+# to gh-only (never osxkeychain, which can hang on a headless GUI prompt) and
+# never force-pushes. See internal/safegit and docs/retros/2026-06-08-git-push-credential-hang.md.
+build-safe-push:
+	@echo "Building safe-push..."
+	go build $(GOFLAGS) -o bin/safe-push ./cmd/safe-push/
+	@echo "Built: bin/safe-push"
+
+# Install safe-push to GOPATH/bin so it is on PATH for every agent session.
+install-safe-push: build-safe-push
+	cp bin/safe-push $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-push"
+
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
 # gates Edit/Write/MultiEdit, pretool-bash-write-guard gates Bash. They are
@@ -170,6 +192,16 @@ deepsec-incremental:
 # Run deepsec on staged files only (use as a manual pre-commit check).
 deepsec-staged:
 	@./scripts/deepsec-incremental.sh --staged
+
+# Run the structural-health scans and diff against the checked-in baseline.
+# Fails only on regressions. Mirrors the Structural Health CI job.
+structural-health:
+	@go run ./cmd/structural-health
+
+# Re-snapshot the structural-health baseline after fixing findings. Commit
+# the resulting .structural-health-baseline.json to tighten the ratchet.
+structural-health-baseline:
+	@go run ./cmd/structural-health --update-baseline
 
 # Install a pre-push hook that runs deepsec on the push delta. Soft-fail
 # by default (warns, doesn't block). Use STRICT=1 to block pushes on
