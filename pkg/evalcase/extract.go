@@ -107,13 +107,8 @@ func selectExcerpts(t Trace, maxPerPillar int) []SpanExcerpt {
 	return out
 }
 
+// excerptOf converts a Span into a SpanExcerpt. The two structs have identical
+// fields, so this is a direct conversion.
 func excerptOf(s Span) SpanExcerpt {
-	return SpanExcerpt{
-		Pillar:      s.Pillar,
-		Name:        s.Name,
-		Attributes:  s.Attributes,
-		ErrorType:   s.ErrorType,
-		StatusError: s.StatusError,
-		DurationMS:  s.DurationMS,
-	}
+	return SpanExcerpt(s)
 }

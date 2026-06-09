@@ -190,8 +190,6 @@ func parseJSONL(data []byte, path string) ([]evalcase.Trace, error) {
 }
 
 func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
+	first, _, _ := strings.Cut(s, "\n")
+	return first
 }

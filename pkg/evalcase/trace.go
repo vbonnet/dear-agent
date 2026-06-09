@@ -9,6 +9,8 @@ import "time"
 // so the bridge in bridge.go maps one to the other without translation.
 type Pillar string
 
+// Pillar values, one per trace pillar plus PillarOther for non-pillar spans.
+// They mirror the agenttrace.Pillar string values.
 const (
 	PillarToolCall        Pillar = "tool_call"
 	PillarReasoning       Pillar = "reasoning"
@@ -104,8 +106,8 @@ type Trace struct {
 	// Spans are the four-pillar spans of the run.
 	Spans []Span `json:"spans,omitempty"`
 	// StartedAt / EndedAt bound the run, when known.
-	StartedAt time.Time `json:"started_at,omitempty"`
-	EndedAt   time.Time `json:"ended_at,omitempty"`
+	StartedAt time.Time `json:"started_at,omitzero"`
+	EndedAt   time.Time `json:"ended_at,omitzero"`
 }
 
 // spansByPillar groups the trace's spans by pillar, preserving order.

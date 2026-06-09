@@ -136,7 +136,11 @@ func readAttrs(kvs []attribute.KeyValue) (attrs map[string]any, errType, evalNam
 	return attrs, errType, evalName, evalScore, haveEval
 }
 
-// attrValue unwraps an OTel attribute value into a plain Go value.
+// attrValue unwraps an OTel attribute value into a plain Go value. Scalar types
+// keep their Go type so the classifier can read numeric attributes; slice and
+// empty types fall through to their string form (default case).
+//
+//nolint:exhaustive // slice/empty attribute types are intentionally stringified by the default
 func attrValue(v attribute.Value) any {
 	switch v.Type() {
 	case attribute.STRING:
@@ -148,7 +152,7 @@ func attrValue(v attribute.Value) any {
 	case attribute.BOOL:
 		return v.AsBool()
 	default:
-		return v.Emit()
+		return v.String()
 	}
 }
 

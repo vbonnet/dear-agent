@@ -82,88 +82,107 @@ type Verdict struct {
 	Reasons []string `json:"reasons,omitempty"`
 }
 
+// collector accumulates matched classes and their reasons during classification.
+type collector struct {
+	matched map[FailureClass]bool
+	reasons []string
+}
+
+func (cc *collector) add(class FailureClass, reason string) {
+	cc.matched[class] = true
+	cc.reasons = append(cc.reasons, reason)
+}
+
 // Classify inspects a completed trace and returns a Verdict. A trace is
 // problematic if any pillar span errored, an eval score is below threshold, a
 // memory read is low-relevance, or the outcome is error/stalled. A clean,
 // successful trace yields a non-problematic Verdict (Primary == ClassNone).
 func (c ClassifierConfig) Classify(t Trace) Verdict {
-	matched := map[FailureClass]bool{}
-	var reasons []string
+	cc := &collector{matched: map[FailureClass]bool{}}
 
-	add := func(class FailureClass, reason string) {
-		matched[class] = true
-		reasons = append(reasons, reason)
-	}
-
-	// Pillar span errors + per-pillar heuristics.
 	for _, s := range t.Spans {
-		switch s.Pillar {
-		case PillarToolCall:
-			if s.failed() {
-				add(ClassToolError, fmt.Sprintf("tool call %q errored: %s", s.str(agenttrace.AttrToolName), s.errDesc()))
-			}
-			if c.MaxToolRetries > 0 {
-				if n, ok := s.num(agenttrace.AttrToolRetryCount); ok && int(n) >= c.MaxToolRetries {
-					add(ClassStall, fmt.Sprintf("tool call %q retried %d times (>= %d)", s.str(agenttrace.AttrToolName), int(n), c.MaxToolRetries))
-				}
-			}
-		case PillarReasoning:
-			if s.failed() {
-				add(ClassReasoningError, fmt.Sprintf("reasoning step %q errored: %s", s.str(agenttrace.AttrReasoningStep), s.errDesc()))
-			}
-		case PillarStateTransition:
-			if s.failed() {
-				add(ClassStateLoss, fmt.Sprintf("state transition %s→%s errored: %s", s.str(agenttrace.AttrStateFrom), s.str(agenttrace.AttrStateTo), s.errDesc()))
-			}
-		case PillarMemory:
-			if s.failed() {
-				add(ClassMemoryError, fmt.Sprintf("memory %s on %q errored: %s", s.str(agenttrace.AttrMemoryOperation), s.str(agenttrace.AttrMemoryStore), s.errDesc()))
-			}
-			if c.MinMemoryRelevance > 0 && isMemoryRead(s) {
-				if rel, ok := s.num(agenttrace.AttrMemoryRelevance); ok && rel < c.MinMemoryRelevance {
-					add(ClassMemoryError, fmt.Sprintf("memory %s on %q returned low relevance %.3f (< %.3f)", s.str(agenttrace.AttrMemoryOperation), s.str(agenttrace.AttrMemoryStore), rel, c.MinMemoryRelevance))
-				}
-			}
-		}
+		c.classifySpan(s, cc)
 	}
-
-	// Eval scores below threshold.
 	for name, score := range t.EvalScores {
 		if score < c.MinEvalScore {
-			add(ClassLowEvalScore, fmt.Sprintf("eval %q scored %.3f (< %.3f)", name, score, c.MinEvalScore))
+			cc.add(ClassLowEvalScore, fmt.Sprintf("eval %q scored %.3f (< %.3f)", name, score, c.MinEvalScore))
 		}
 	}
+	c.classifyOutcome(t.Outcome, cc)
 
-	// Terminal outcome.
-	switch t.Outcome {
-	case OutcomeStalled:
-		add(ClassStall, "run outcome was stalled")
-	case OutcomeError:
-		// Only surface the generic error-outcome class if nothing more specific
-		// already explained the failure.
-		if !matched[ClassToolError] && !matched[ClassReasoningError] &&
-			!matched[ClassStateLoss] && !matched[ClassMemoryError] {
-			add(ClassErrorOutcome, "run outcome was error")
-		}
-	}
-
-	if len(matched) == 0 {
+	if len(cc.matched) == 0 {
 		return Verdict{Problematic: false, Primary: ClassNone}
 	}
-
-	classes := make([]FailureClass, 0, len(matched))
+	classes := make([]FailureClass, 0, len(cc.matched))
 	for _, class := range classPriority {
-		if matched[class] {
+		if cc.matched[class] {
 			classes = append(classes, class)
 		}
 	}
-	// Stable, readable reason ordering.
-	sort.Strings(reasons)
+	sort.Strings(cc.reasons) // stable, readable ordering
 	return Verdict{
 		Problematic: true,
 		Primary:     classes[0],
 		Classes:     classes,
-		Reasons:     reasons,
+		Reasons:     cc.reasons,
+	}
+}
+
+// classifySpan applies the per-pillar failure heuristics for one span.
+func (c ClassifierConfig) classifySpan(s Span, cc *collector) {
+	switch s.Pillar {
+	case PillarToolCall:
+		c.classifyTool(s, cc)
+	case PillarReasoning:
+		if s.failed() {
+			cc.add(ClassReasoningError, fmt.Sprintf("reasoning step %q errored: %s", s.str(agenttrace.AttrReasoningStep), s.errDesc()))
+		}
+	case PillarStateTransition:
+		if s.failed() {
+			cc.add(ClassStateLoss, fmt.Sprintf("state transition %s→%s errored: %s", s.str(agenttrace.AttrStateFrom), s.str(agenttrace.AttrStateTo), s.errDesc()))
+		}
+	case PillarMemory:
+		c.classifyMemory(s, cc)
+	case PillarOther:
+		// Non-pillar spans (e.g. agm.session.*) carry no failure heuristic.
+	}
+}
+
+func (c ClassifierConfig) classifyTool(s Span, cc *collector) {
+	if s.failed() {
+		cc.add(ClassToolError, fmt.Sprintf("tool call %q errored: %s", s.str(agenttrace.AttrToolName), s.errDesc()))
+	}
+	if c.MaxToolRetries > 0 {
+		if n, ok := s.num(agenttrace.AttrToolRetryCount); ok && int(n) >= c.MaxToolRetries {
+			cc.add(ClassStall, fmt.Sprintf("tool call %q retried %d times (>= %d)", s.str(agenttrace.AttrToolName), int(n), c.MaxToolRetries))
+		}
+	}
+}
+
+func (c ClassifierConfig) classifyMemory(s Span, cc *collector) {
+	if s.failed() {
+		cc.add(ClassMemoryError, fmt.Sprintf("memory %s on %q errored: %s", s.str(agenttrace.AttrMemoryOperation), s.str(agenttrace.AttrMemoryStore), s.errDesc()))
+	}
+	if c.MinMemoryRelevance > 0 && isMemoryRead(s) {
+		if rel, ok := s.num(agenttrace.AttrMemoryRelevance); ok && rel < c.MinMemoryRelevance {
+			cc.add(ClassMemoryError, fmt.Sprintf("memory %s on %q returned low relevance %.3f (< %.3f)", s.str(agenttrace.AttrMemoryOperation), s.str(agenttrace.AttrMemoryStore), rel, c.MinMemoryRelevance))
+		}
+	}
+}
+
+func (c ClassifierConfig) classifyOutcome(o Outcome, cc *collector) {
+	switch o {
+	case OutcomeStalled:
+		cc.add(ClassStall, "run outcome was stalled")
+	case OutcomeError:
+		// Only surface the generic error-outcome class if nothing more specific
+		// already explained the failure.
+		if !cc.matched[ClassToolError] && !cc.matched[ClassReasoningError] &&
+			!cc.matched[ClassStateLoss] && !cc.matched[ClassMemoryError] {
+			cc.add(ClassErrorOutcome, "run outcome was error")
+		}
+	case OutcomeSuccess, OutcomeUnknown:
+		// No failure signal from a successful or unrecorded outcome.
 	}
 }
 
