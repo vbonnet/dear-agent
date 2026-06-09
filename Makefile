@@ -25,7 +25,7 @@
 #   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 
-.PHONY: preflight preflight-tests preflight-full install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent
+.PHONY: preflight preflight-tests preflight-full install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline
 
 # Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
 # CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm
@@ -192,6 +192,16 @@ deepsec-incremental:
 # Run deepsec on staged files only (use as a manual pre-commit check).
 deepsec-staged:
 	@./scripts/deepsec-incremental.sh --staged
+
+# Run the structural-health scans and diff against the checked-in baseline.
+# Fails only on regressions. Mirrors the Structural Health CI job.
+structural-health:
+	@go run ./cmd/structural-health
+
+# Re-snapshot the structural-health baseline after fixing findings. Commit
+# the resulting .structural-health-baseline.json to tighten the ratchet.
+structural-health-baseline:
+	@go run ./cmd/structural-health --update-baseline
 
 # Install a pre-push hook that runs deepsec on the push delta. Soft-fail
 # by default (warns, doesn't block). Use STRICT=1 to block pushes on

@@ -1,0 +1,219 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestIsPathLike(t *testing.T) {
+	cases := []struct {
+		tok  string
+		want bool
+	}{
+		{"internal/ops/", true},
+		{"agm/cmd/agm/", true},
+		{"docs/adr/ADR-027.md", true},
+		{"Agent", false},     // no slash — prose token
+		{"--fields", false},  // flag, no slash
+		{"", false},          // empty span
+		{"a/b c/d", false},   // contains space
+		{"glob/*.go", false}, // glob pattern
+		{"https://x/y", false},
+		{"/etc/passwd", false},               // absolute, not repo-relative
+		{"~/.agm/pending/{session}/", false}, // home-dir + template placeholder
+	}
+	for _, c := range cases {
+		if got := isPathLike(c.tok); got != c.want {
+			t.Errorf("isPathLike(%q) = %v, want %v", c.tok, got, c.want)
+		}
+	}
+}
+
+func TestBacktickPaths(t *testing.T) {
+	md := "See `internal/ops/` and `Agent`.\n" +
+		"```\nfenced/code/should/be/skipped\n```\n" +
+		"Also `agm/cmd/agm/` plus `--flag`.\n"
+	got := backtickPaths(md)
+	want := map[string]bool{"internal/ops/": true, "agm/cmd/agm/": true}
+	if len(got) != len(want) {
+		t.Fatalf("backtickPaths returned %v, want keys %v", got, want)
+	}
+	for _, g := range got {
+		if !want[g] {
+			t.Errorf("unexpected path ref %q", g)
+		}
+	}
+}
+
+func TestScanDocPaths(t *testing.T) {
+	root := t.TempDir()
+	// Create one real path and reference one missing path.
+	if err := os.MkdirAll(filepath.Join(root, "internal", "ops"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doc := "Real: `internal/ops/`\nGone: `internal/ghost/`\n"
+	if err := os.WriteFile(filepath.Join(root, architectureDoc), []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := scanDocPaths(root)
+	if len(got) != 1 || got[0].Key != "internal/ghost/" {
+		t.Fatalf("scanDocPaths = %+v, want single finding internal/ghost/", got)
+	}
+}
+
+func TestScanFileSize(t *testing.T) {
+	root := t.TempDir()
+	small := make([]byte, 0)
+	for i := 0; i < 10; i++ {
+		small = append(small, []byte("package p\n")...)
+	}
+	big := make([]byte, 0)
+	for i := 0; i < fileSizeThreshold+5; i++ {
+		big = append(big, '\n')
+	}
+	if err := os.WriteFile(filepath.Join(root, "small.go"), small, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "big.go"), big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := scanFileSize(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Key != "big.go" {
+		t.Fatalf("scanFileSize = %+v, want single finding big.go", got)
+	}
+}
+
+func TestScanGoroutineRecover(t *testing.T) {
+	root := t.TempDir()
+	src := `package p
+
+func bad() {
+	go func() {
+		work()
+	}()
+}
+
+func good() {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_ = r
+			}
+		}()
+		work()
+	}()
+}
+
+func work() {}
+`
+	if err := os.WriteFile(filepath.Join(root, "g.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := scanGoroutineRecover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("scanGoroutineRecover = %+v, want exactly one finding (the unguarded goroutine)", got)
+	}
+}
+
+func TestScanGoroutineRecoverSkipsTests(t *testing.T) {
+	root := t.TempDir()
+	src := `package p
+
+func f() {
+	go func() { work() }()
+}
+
+func work() {}
+`
+	if err := os.WriteFile(filepath.Join(root, "g_test.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := scanGoroutineRecover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("scanGoroutineRecover flagged a _test.go goroutine: %+v", got)
+	}
+}
+
+func TestDiffDetectsRegressionAndFixed(t *testing.T) {
+	current := map[string][]finding{
+		"dead-package":      {{Key: "pkg/new"}},
+		"file-size":         {},
+		"zero-test":         {},
+		"doc-path":          {},
+		"goroutine-recover": {},
+	}
+	bl := baseline{
+		Version: 1,
+		Findings: map[string][]string{
+			"dead-package": {"pkg/old"},
+		},
+	}
+	rep := diff(current, bl)
+	if rep.regressionCount() != 1 {
+		t.Fatalf("regressionCount = %d, want 1", rep.regressionCount())
+	}
+	var dead scanReport
+	for _, s := range rep.Scans {
+		if s.Scan == "dead-package" {
+			dead = s
+		}
+	}
+	if len(dead.Regressions) != 1 || dead.Regressions[0] != "pkg/new" {
+		t.Errorf("regressions = %v, want [pkg/new]", dead.Regressions)
+	}
+	if len(dead.Fixed) != 1 || dead.Fixed[0] != "pkg/old" {
+		t.Errorf("fixed = %v, want [pkg/old]", dead.Fixed)
+	}
+}
+
+func TestDiffNoRegressionWhenWithinBaseline(t *testing.T) {
+	current := map[string][]finding{
+		"dead-package": {{Key: "pkg/a"}, {Key: "pkg/b"}},
+	}
+	bl := baseline{
+		Version:  1,
+		Findings: map[string][]string{"dead-package": {"pkg/a", "pkg/b", "pkg/c"}},
+	}
+	rep := diff(current, bl)
+	if rep.regressionCount() != 0 {
+		t.Fatalf("regressionCount = %d, want 0 (all current findings are baselined)", rep.regressionCount())
+	}
+}
+
+func TestWriteAndReadBaselineRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, defaultBaselinePath)
+	current := map[string][]finding{
+		"dead-package":      {{Key: "pkg/z"}, {Key: "pkg/a"}},
+		"file-size":         {{Key: "big.go"}},
+		"zero-test":         {},
+		"doc-path":          {},
+		"goroutine-recover": {},
+	}
+	if err := writeBaseline(path, current); err != nil {
+		t.Fatal(err)
+	}
+	bl, err := readBaseline(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keys must be sorted on disk.
+	got := bl.Findings["dead-package"]
+	if len(got) != 2 || got[0] != "pkg/a" || got[1] != "pkg/z" {
+		t.Errorf("dead-package baseline = %v, want sorted [pkg/a pkg/z]", got)
+	}
+	// Empty scans must serialize as [] (not absent) so the schema is stable.
+	if bl.Findings["zero-test"] == nil {
+		t.Errorf("zero-test should round-trip as empty slice, got nil")
+	}
+}
