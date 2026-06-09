@@ -265,8 +265,9 @@ func (g *GPT4Judge) Evaluate(ctx context.Context, prompt string, response string
 		Description: "Evaluate response quality",
 		Threshold:   0.7,
 	}
-	// The simple interface has no reference answer, so grade the response as the
-	// actual output with no expected output to compare against.
+	// The simple Judge interface has no reference output, so there is no
+	// expected value to compare against — the response is judged on its own
+	// quality. Pass it as the actual output with an empty expected output.
 	result, err := g.EvaluateDetailed(ctx, prompt, "", response, criteria)
 	if err != nil {
 		return 0, err

@@ -131,7 +131,7 @@ func TestClaudeJudge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", "actual", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "expected", "actual", criteria)
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "API call failed")
@@ -155,7 +155,7 @@ func TestClaudeJudge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", "actual", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "expected", "actual", criteria)
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "no response from API")
@@ -184,7 +184,7 @@ func TestClaudeJudge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", "actual", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "expected", "actual", criteria)
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "no text content in response")
@@ -213,7 +213,7 @@ func TestClaudeJudge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", "actual", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "expected", "actual", criteria)
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "failed to parse JSON response")
@@ -230,7 +230,7 @@ func TestClaudeJudge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", "actual", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "expected", "actual", criteria)
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "client not initialized")
@@ -267,58 +267,13 @@ func TestClaudeJudge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.7,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", "actual", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "expected", "actual", criteria)
 		require.NoError(t, err)
 		assert.Contains(t, result.Reasoning, "Chain of Thought:")
 		assert.Contains(t, result.Reasoning, "Detailed step-by-step analysis here")
 		assert.Contains(t, result.Reasoning, "Summary:")
 		assert.Contains(t, result.Reasoning, "Final verdict")
 	})
-}
-
-// TestClaudeJudge_GradesActualNotExpected is a regression test for a bug where
-// the judge passed expectedOutput into both the Expected and Actual prompt
-// slots, so it always graded expected-vs-expected and could never detect a
-// wrong answer. The prompt must place the distinct actual output into the
-// Actual Output slot.
-func TestClaudeJudge_GradesActualNotExpected(t *testing.T) {
-	judgeOutput := ClaudeJudgeOutput{
-		ChainOfThought: "reasoning",
-		Pass:           false,
-		Score:          0.1,
-		Reasoning:      "actual does not match expected",
-	}
-	outputJSON, _ := json.Marshal(judgeOutput)
-
-	mockClient := &MockClaudeClient{
-		Response: &ClaudeResponse{
-			Content: []struct {
-				Type string `json:"type"`
-				Text string `json:"text,omitempty"`
-			}{
-				{Type: "text", Text: string(outputJSON)},
-			},
-		},
-	}
-
-	judge := NewClaudeJudge(mockClient, DefaultClaudeConfig("test-api-key"))
-	criteria := EvaluationCriteria{Name: "correctness", Threshold: 0.8}
-
-	const expected = "REFERENCE_ANSWER_42"
-	const actual = "WRONG_ANSWER_99"
-
-	_, err := judge.EvaluateDetailed(context.Background(), "input", expected, actual, criteria)
-	require.NoError(t, err)
-
-	require.Len(t, mockClient.LastRequest.Messages, 1)
-	prompt := mockClient.LastRequest.Messages[0].Content
-
-	// The actual output must reach the Actual Output slot; the expected output
-	// the Expected Output slot. The bug filled both slots with expected.
-	assert.Contains(t, prompt, "Expected Output: "+expected)
-	assert.Contains(t, prompt, "Actual Output: "+actual)
-	assert.NotContains(t, prompt, "Actual Output: "+expected,
-		"actual slot must contain the actual output, not the expected output")
 }
 
 func TestClaudeJudge_Evaluate(t *testing.T) {
@@ -381,4 +336,32 @@ func TestClaudeRequestStructure(t *testing.T) {
 		assert.Contains(t, string(data), "user")
 		assert.Contains(t, string(data), "You are a judge")
 	})
+}
+
+// TestClaudeJudge_PromptUsesActualOutput is a regression test for the bug
+// where actualOutput was never threaded into the prompt — the expected output
+// was rendered into both the "Expected Output" and "Actual Output" slots, so
+// the judge always graded expected-vs-expected.
+func TestClaudeJudge_PromptUsesActualOutput(t *testing.T) {
+	judgeOutput := ClaudeJudgeOutput{Pass: true, Score: 0.9, Reasoning: "ok"}
+	outputJSON, _ := json.Marshal(judgeOutput)
+	mockClient := &MockClaudeClient{
+		Response: &ClaudeResponse{
+			Content: []struct {
+				Type string `json:"type"`
+				Text string `json:"text,omitempty"`
+			}{{Type: "text", Text: string(outputJSON)}},
+		},
+	}
+	judge := NewClaudeJudge(mockClient, DefaultClaudeConfig("test-key"))
+	criteria := EvaluationCriteria{Name: "correctness", Description: "match", Threshold: 0.8}
+
+	_, err := judge.EvaluateDetailed(context.Background(),
+		"the-input", "the-EXPECTED-output", "the-ACTUAL-output", criteria)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, mockClient.LastRequest.Messages)
+	prompt := mockClient.LastRequest.Messages[0].Content
+	assert.Contains(t, prompt, "Expected Output: the-EXPECTED-output")
+	assert.Contains(t, prompt, "Actual Output: the-ACTUAL-output")
 }
