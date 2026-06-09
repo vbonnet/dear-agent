@@ -52,7 +52,7 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "open %s: %v\n", *dbPath, err)
 		return 1
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	events, err := workflow.Logs(context.Background(), db, runID, workflow.LogsOptions{
 		NodeID: *nodeID,
@@ -77,7 +77,7 @@ func run() int {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "TIME\tNODE\tFROM→TO\tACTOR\tREASON")
+	_, _ = fmt.Fprintln(tw, "TIME\tNODE\tFROM→TO\tACTOR\tREASON")
 	for _, ev := range events {
 		nodeCol := ev.NodeID
 		if nodeCol == "" {
@@ -87,7 +87,7 @@ func run() int {
 		if from == "" {
 			from = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s→%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s→%s\t%s\t%s\n",
 			ev.OccurredAt.Format(time.RFC3339),
 			nodeCol, from, ev.ToState, ev.Actor, ev.Reason,
 		)

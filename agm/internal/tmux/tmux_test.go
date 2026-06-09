@@ -264,7 +264,10 @@ func TestNewSession_BuildEnvVars(t *testing.T) {
 	expectedVars := map[string]string{
 		"GOCACHE":    filepath.Join(homeDir, ".cache", "go-build"),
 		"GOMODCACHE": filepath.Join(homeDir, "go", "pkg", "mod"),
-		"GOMAXPROCS": strconv.Itoa(max(runtime.NumCPU()/2, 1)),
+		// Mirror the production cap in NewSession: half the cores, floored at 1,
+		// capped at 4. A bare max(NumCPU()/2, 1) over-counts on >8-core hosts
+		// (e.g. 12 cores -> test expected 6 while the session sets 4).
+		"GOMAXPROCS": strconv.Itoa(min(max(runtime.NumCPU()/2, 1), 4)),
 		"GOWORK":     "off",
 	}
 	for k, v := range expectedVars {

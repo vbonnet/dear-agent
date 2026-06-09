@@ -1,4 +1,3 @@
-@implemented
 Feature: Trust Protocol
   As an AGM operator
   I want trust scores to accurately reflect agent reliability

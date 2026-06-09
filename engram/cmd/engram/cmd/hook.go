@@ -94,9 +94,9 @@ func init() {
 	hookInstallCmd.Flags().IntVar(&hookTimeout, "timeout", 60, "Timeout in seconds")
 	hookInstallCmd.Flags().StringVar(&hookType, "type", "binary", "Hook type: binary, skill, script")
 
-	hookInstallCmd.MarkFlagRequired("name")
-	hookInstallCmd.MarkFlagRequired("event")
-	hookInstallCmd.MarkFlagRequired("command")
+	_ = hookInstallCmd.MarkFlagRequired("name")
+	_ = hookInstallCmd.MarkFlagRequired("event")
+	_ = hookInstallCmd.MarkFlagRequired("command")
 }
 
 func runHookInstall(cmd *cobra.Command, args []string) error {
@@ -277,7 +277,7 @@ func calculateCommandHash(command string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
@@ -327,19 +327,19 @@ func saveHookRegistry(registry *HookRegistry, path string) error {
 	// Encode TOML
 	encoder := toml.NewEncoder(f)
 	if err := encoder.Encode(registry); err != nil {
-		f.Close()
-		os.Remove(tmpPath)
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
 		return err
 	}
 
 	if err := f.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return err
 	}
 
 	// Atomic rename
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return err
 	}
 

@@ -84,8 +84,8 @@ func init() {
 	memoryStoreCmd.Flags().StringVar(&storeType, "type", "", "Memory type (episodic|semantic|procedural|working)")
 	memoryStoreCmd.Flags().StringVar(&storeContent, "content", "", "Memory content")
 	memoryStoreCmd.Flags().BoolVar(&storeContentStdin, "content-stdin", false, "Read memory content from stdin")
-	memoryStoreCmd.MarkFlagRequired("namespace")
-	memoryStoreCmd.MarkFlagRequired("type")
+	_ = memoryStoreCmd.MarkFlagRequired("namespace")
+	_ = memoryStoreCmd.MarkFlagRequired("type")
 	// Note: content OR content-stdin is required, validated in runMemoryStore
 
 	// Mutually exclusive: --content and --content-stdin
@@ -171,7 +171,7 @@ func runMemoryStore(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer provider.Close(ctx)
+	defer func() { _ = provider.Close(ctx) }()
 
 	// 3. Create memory
 	memory := consolidation.Memory{

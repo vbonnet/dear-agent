@@ -97,7 +97,7 @@ func newOpContextWithStorage() (*ops.OpContext, func(), error) {
 		return nil, func() {}, err
 	}
 
-	cleanup := func() { adapter.Close() }
+	cleanup := func() { _ = adapter.Close() }
 
 	return &ops.OpContext{
 		Storage:    adapter,

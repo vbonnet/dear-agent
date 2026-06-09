@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/vbonnet/dear-agent/internal/fileutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -78,7 +79,7 @@ func (s *Status) WriteTo(dir string) error {
 		s.formatPhaseList(),
 	)
 
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+	if err := fileutil.AtomicWrite(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to write %s: %w", StatusFilename, err)
 	}
 
