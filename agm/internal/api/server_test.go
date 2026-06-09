@@ -16,6 +16,7 @@ func TestNewServer(t *testing.T) {
 
 	if s == nil {
 		t.Fatal("NewServer returned nil")
+		return
 	}
 	if s.port != 8080 {
 		t.Errorf("port = %d, want 8080", s.port)

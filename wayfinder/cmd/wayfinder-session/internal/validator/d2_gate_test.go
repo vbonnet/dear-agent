@@ -21,6 +21,7 @@ func TestValidateD2Content_FileNotFound(t *testing.T) {
 	err := validateD2Content(projectDir, st)
 	if err == nil {
 		t.Fatal("expected error for missing D2 file, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "does not exist") {
@@ -46,6 +47,7 @@ func TestValidateD2Content_FileTooLarge(t *testing.T) {
 	err := validateD2Content(tmpDir, st)
 	if err == nil {
 		t.Fatal("expected error for large file, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "too large") {
@@ -76,6 +78,7 @@ func TestValidateD2Content_MissingOverlap(t *testing.T) {
 	err = validateD2Content(tmpDir, st)
 	if err == nil {
 		t.Fatal("expected error for missing overlap, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "overlap") {
@@ -106,6 +109,7 @@ func TestValidateD2Content_MissingSearchMethodology(t *testing.T) {
 	err = validateD2Content(tmpDir, st)
 	if err == nil {
 		t.Fatal("expected error for missing search methodology, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "methodology") {
@@ -162,6 +166,7 @@ func TestValidateD2Content_TooShort(t *testing.T) {
 	err = validateD2Content(tmpDir, st)
 	if err == nil {
 		t.Fatal("expected error for short file, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "too short") {

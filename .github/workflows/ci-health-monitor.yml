@@ -8,16 +8,20 @@ name: CI Health Monitor
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "0 */4 * * *"
   workflow_dispatch:
 
 permissions:
   issues: write
   actions: read
 
+env:
+  GIT_TERMINAL_PROMPT: "0"
+
 jobs:
   check-ci-health:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Audit last 5 CI runs on main
         env:
@@ -26,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           # Pull the last 5 conclusions of the "CI" workflow on main.
-          conclusions=$(gh run list \
+          conclusions=$(timeout 30 gh run list \
             --repo "$REPO" \
             --workflow CI \
             --branch main \

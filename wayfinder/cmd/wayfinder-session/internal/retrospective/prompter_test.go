@@ -30,6 +30,7 @@ func TestPromptUserForContext_NoPromptFlag(t *testing.T) {
 	}
 	if ctx == nil {
 		t.Fatal("Expected context, got nil")
+		return
 	}
 	if ctx.Reason != "test reason" {
 		t.Errorf("Expected reason 'test reason', got '%s'", ctx.Reason)
@@ -52,6 +53,7 @@ func TestPromptUserForContext_PreProvidedReason(t *testing.T) {
 	}
 	if ctx == nil {
 		t.Fatal("Expected context, got nil")
+		return
 	}
 	if ctx.Reason != "pre-provided reason" {
 		t.Errorf("Expected reason 'pre-provided reason', got '%s'", ctx.Reason)

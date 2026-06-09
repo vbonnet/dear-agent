@@ -170,6 +170,7 @@ nodes:
 	_, err := LoadBytes([]byte(y))
 	if err == nil {
 		t.Fatal("expected validation error for parallel+until")
+		return
 	}
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("error = %v, want mutually exclusive", err)

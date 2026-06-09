@@ -12,7 +12,7 @@ import (
 // when a specific tool/provider combination is not configured.
 const (
 	DefaultAnthropicModel = "claude-3-5-sonnet-20241022"
-	DefaultGeminiModel    = "gemini-2.0-flash-exp"
+	DefaultGeminiModel    = "gemini-3.5-flash"
 )
 
 // LoadConfig loads the LLM configuration from the specified path.

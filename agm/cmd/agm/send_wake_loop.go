@@ -58,7 +58,7 @@ func runSendWakeLoop(_ *cobra.Command, args []string) error {
 	adapter, err := getStorage()
 	var currentState string
 	if err == nil {
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 		// Resolve session state
 		m, manifestPath, resolveErr := session.ResolveIdentifier(targetSession, cfg.SessionsDir, adapter)
 		if resolveErr == nil && m != nil {

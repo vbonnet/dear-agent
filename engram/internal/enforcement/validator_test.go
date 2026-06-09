@@ -179,6 +179,7 @@ func TestValidator_ErrorTemplate(t *testing.T) {
 	err := validator.Validate(ctx)
 	if err == nil {
 		t.Fatal("Validate() should return error")
+		return
 	}
 
 	errMsg := err.Error()
@@ -210,6 +211,7 @@ func TestValidator_ErrorTemplate_Invalid(t *testing.T) {
 	err := validator.Validate(ctx)
 	if err == nil {
 		t.Fatal("Validate() should return error")
+		return
 	}
 
 	// Should fallback to simple error (not panic)

@@ -164,7 +164,7 @@ func runSendMode(_ *cobra.Command, args []string) error {
 
 	info := loadModeSessionInfo(sessionName)
 	if info.adapter != nil {
-		defer info.adapter.Close()
+		defer func() { _ = info.adapter.Close() }()
 	}
 
 	if info.currentMode == targetMode {

@@ -3,7 +3,8 @@ title: Vision
 version: "1.0"
 status: active
 date: "2026-04-05"
-adr_ref: ADR-020
+adr_ref: docs/adr/ADR-002-vroom-execution-architecture
+context_ref: CONTEXT.md
 horizon: "6-12 months"
 heuristic_style: if_then
 ---
@@ -29,8 +30,9 @@ If a VROOM role's interface contract changes, then all downstream roles must
 be re-validated before the change is deployed.
 
 If the system detects value drift --- actions that technically pass quality
-gates but trend away from declared values --- then the Overseer should flag
-the pattern for human review.
+gates but trend away from declared values --- then an Auditor should flag the
+pattern (findings route to the roadmap via the Meta-Orchestrator; see
+[CONTEXT.md](../../CONTEXT.md)).
 
 If a new capability is added to an agent, then its scope boundary in the
 Orchestrator's dispatch table must be updated before the capability is used

@@ -194,6 +194,7 @@ func TestPublish_NilEventError(t *testing.T) {
 	err := publisher.Publish(nil)
 	if err == nil {
 		t.Fatal("Expected error when publishing nil event, got nil")
+		return
 	}
 	if !contains(err.Error(), "cannot be nil") {
 		t.Errorf("Expected error message to contain 'cannot be nil', got '%s'", err.Error())
@@ -229,6 +230,7 @@ func TestCircuitBreaker_Activation(t *testing.T) {
 	// The 10th failure should trigger circuit breaker
 	if lastErr == nil {
 		t.Fatal("Expected error from PublishWithBackpressure")
+		return
 	}
 	if !contains(lastErr.Error(), "circuit breaker open") {
 		t.Errorf("Expected circuit breaker error, got %v", lastErr)

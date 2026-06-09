@@ -16,6 +16,7 @@ func TestParseWorktreeAdd_BasicPath(t *testing.T) {
 	event := parseWorktreeAdd("git worktree add /tmp/my-worktree")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.Operation != "add" {
 		t.Errorf("Expected operation 'add', got %q", event.Operation)
@@ -29,6 +30,7 @@ func TestParseWorktreeAdd_WithBranchFlag(t *testing.T) {
 	event := parseWorktreeAdd("git worktree add /tmp/wt -b feature-branch")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.WorktreePath != "/tmp/wt" {
 		t.Errorf("Expected path '/tmp/wt', got %q", event.WorktreePath)
@@ -42,6 +44,7 @@ func TestParseWorktreeAdd_WithBranchArg(t *testing.T) {
 	event := parseWorktreeAdd("git worktree add /tmp/wt existing-branch")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.WorktreePath != "/tmp/wt" {
 		t.Errorf("Expected path '/tmp/wt', got %q", event.WorktreePath)
@@ -55,6 +58,7 @@ func TestParseWorktreeAdd_WithCFlag(t *testing.T) {
 	event := parseWorktreeAdd("git -C ~/repo worktree add /tmp/wt -b feat")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.RepoPath != "~/repo" {
 		t.Errorf("Expected repo '~/repo', got %q", event.RepoPath)
@@ -78,6 +82,7 @@ func TestParseWorktreeAdd_WithDetachFlag(t *testing.T) {
 	event := parseWorktreeAdd("git worktree add --detach /tmp/wt HEAD")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.WorktreePath != "/tmp/wt" {
 		t.Errorf("Expected path '/tmp/wt', got %q", event.WorktreePath)
@@ -88,6 +93,7 @@ func TestParseWorktreeAdd_LeadingTrailingWhitespace(t *testing.T) {
 	event := parseWorktreeAdd("  git worktree add /tmp/wt  ")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.WorktreePath != "/tmp/wt" {
 		t.Errorf("Expected path '/tmp/wt', got %q", event.WorktreePath)
@@ -98,6 +104,7 @@ func TestParseWorktreeAdd_MultipleSpaces(t *testing.T) {
 	event := parseWorktreeAdd("git  worktree  add  /tmp/wt")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.WorktreePath != "/tmp/wt" {
 		t.Errorf("Expected path '/tmp/wt', got %q", event.WorktreePath)
@@ -108,6 +115,7 @@ func TestParseWorktreeAdd_RelativePath(t *testing.T) {
 	event := parseWorktreeAdd("git worktree add ../my-worktree -b feat")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.WorktreePath != "../my-worktree" {
 		t.Errorf("Expected path '../my-worktree', got %q", event.WorktreePath)
@@ -128,6 +136,7 @@ func TestParseWorktreeAdd_NoBranch(t *testing.T) {
 	event := parseWorktreeAdd("git worktree add /tmp/wt")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.Branch != "" {
 		t.Errorf("Expected empty branch, got %q", event.Branch)
@@ -141,6 +150,7 @@ func TestParseWorktreeAdd_BranchWithSlash(t *testing.T) {
 	event := parseWorktreeAdd("git worktree add /tmp/wt -b feature/my-feature")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.Branch != "feature/my-feature" {
 		t.Errorf("Expected branch 'feature/my-feature', got %q", event.Branch)
@@ -151,6 +161,7 @@ func TestParseWorktreeAdd_WithForceFlag(t *testing.T) {
 	event := parseWorktreeAdd("git worktree add --force /tmp/wt -b feat")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.WorktreePath != "/tmp/wt" {
 		t.Errorf("Expected path '/tmp/wt', got %q", event.WorktreePath)
@@ -165,6 +176,7 @@ func TestParseWorktreeRemove_Basic(t *testing.T) {
 	event := parseWorktreeRemove("git worktree remove /tmp/my-worktree")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.Operation != "remove" {
 		t.Errorf("Expected operation 'remove', got %q", event.Operation)
@@ -178,6 +190,7 @@ func TestParseWorktreeRemove_WithForce(t *testing.T) {
 	event := parseWorktreeRemove("git worktree remove --force /tmp/wt")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.WorktreePath != "/tmp/wt" {
 		t.Errorf("Expected path '/tmp/wt', got %q", event.WorktreePath)
@@ -188,6 +201,7 @@ func TestParseWorktreeRemove_WithCFlag(t *testing.T) {
 	event := parseWorktreeRemove("git -C ~/repo worktree remove /tmp/wt")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.RepoPath != "~/repo" {
 		t.Errorf("Expected repo '~/repo', got %q", event.RepoPath)
@@ -215,6 +229,7 @@ func TestParseWorktreeRemove_LeadingTrailingWhitespace(t *testing.T) {
 	event := parseWorktreeRemove("  git worktree remove /tmp/wt  ")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.WorktreePath != "/tmp/wt" {
 		t.Errorf("Expected path '/tmp/wt', got %q", event.WorktreePath)
@@ -225,6 +240,7 @@ func TestParseWorktreeRemove_WithCFlagAndForce(t *testing.T) {
 	event := parseWorktreeRemove("git -C /repo worktree remove --force /tmp/wt")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.RepoPath != "/repo" {
 		t.Errorf("Expected repo '/repo', got %q", event.RepoPath)
@@ -238,6 +254,7 @@ func TestParseWorktreeRemove_BranchAlwaysEmpty(t *testing.T) {
 	event := parseWorktreeRemove("git worktree remove /tmp/wt")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.Branch != "" {
 		t.Errorf("Expected empty branch for remove, got %q", event.Branch)
@@ -252,6 +269,7 @@ func TestDetectWorktreeEvent_Add(t *testing.T) {
 	event := detectWorktreeEvent("git worktree add /tmp/wt -b feat")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.Operation != "add" {
 		t.Errorf("Expected 'add', got %q", event.Operation)
@@ -262,6 +280,7 @@ func TestDetectWorktreeEvent_Remove(t *testing.T) {
 	event := detectWorktreeEvent("git worktree remove /tmp/wt")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.Operation != "remove" {
 		t.Errorf("Expected 'remove', got %q", event.Operation)
@@ -316,6 +335,7 @@ func TestDetectWorktreeEvent_AddWithCFlag(t *testing.T) {
 	event := detectWorktreeEvent("git -C /repo worktree add /tmp/wt -b feat")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.Operation != "add" {
 		t.Errorf("Expected 'add', got %q", event.Operation)
@@ -329,6 +349,7 @@ func TestDetectWorktreeEvent_RemoveWithCFlag(t *testing.T) {
 	event := detectWorktreeEvent("git -C /repo worktree remove /tmp/wt")
 	if event == nil {
 		t.Fatal("Expected event, got nil")
+		return
 	}
 	if event.Operation != "remove" {
 		t.Errorf("Expected 'remove', got %q", event.Operation)

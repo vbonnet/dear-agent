@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,19 @@ import (
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
+
+// ErrFeatureGenNotImplemented signals that automatic EARS→BDD generation
+// (deriving a TESTS.feature from S6-design.md) is not yet implemented.
+//
+// It deliberately replaces an earlier stub that DISCARDED its S6 input and
+// wrote a fixed block of boilerplate Gherkin. That fabricated feature file
+// passed no real assertions yet still satisfied the orchestrator's
+// hasTestsFeature() test-first gate — masking the absence of real tests.
+// Emitting an honest "not implemented" error is strictly better than a
+// passing-looking lie: callers that cannot generate the feature should say
+// so and let a human author it from S6, not pretend the work is done.
+var ErrFeatureGenNotImplemented = errors.New(
+	"EARS→BDD generation not yet implemented: author TESTS.feature manually from S6-design.md")
 
 // FileMigrator handles migration of phase files from V1 to V2
 type FileMigrator struct {
@@ -44,8 +58,13 @@ func (fm *FileMigrator) MigrateFiles(v2Status *status.StatusV2) error {
 		return fmt.Errorf("TESTS.outline generation failed: %w", err)
 	}
 
-	// 5. Generate TESTS.feature if S6 exists but feature missing
-	if err := fm.generateTestsFeatureIfNeeded(); err != nil {
+	// 5. TESTS.feature: automatic EARS→BDD generation is not yet implemented.
+	//    We intentionally do NOT fabricate a boilerplate feature file — a
+	//    hardcoded TESTS.feature would falsely satisfy the orchestrator's
+	//    test-first gate. The missing feature is left for a human to author
+	//    from S6; ErrFeatureGenNotImplemented is therefore expected and
+	//    non-fatal here. Any other error is a real failure and aborts.
+	if err := fm.generateTestsFeatureIfNeeded(); err != nil && !errors.Is(err, ErrFeatureGenNotImplemented) {
 		return fmt.Errorf("TESTS.feature generation failed: %w", err)
 	}
 
@@ -208,36 +227,32 @@ func (fm *FileMigrator) generateTestsOutlineIfNeeded() error {
 	return nil
 }
 
-// generateTestsFeatureIfNeeded creates TESTS.feature if S6 exists but feature missing
+// generateTestsFeatureIfNeeded reports whether a TESTS.feature would need to be
+// generated from S6 — and, when it would, returns ErrFeatureGenNotImplemented
+// rather than fabricating one.
+//
+// It does NOT write a file. Deriving real Gherkin scenarios from an S6 design
+// is genuine work that this migrator cannot yet do; the previous
+// implementation faked it with hardcoded boilerplate (see
+// ErrFeatureGenNotImplemented). Returning a clear error keeps the limitation
+// visible to any caller instead of silently shipping a feature file that
+// asserts nothing.
 func (fm *FileMigrator) generateTestsFeatureIfNeeded() error {
 	s6Path := filepath.Join(fm.projectDir, "S6-design.md")
 	featurePath := filepath.Join(fm.projectDir, "TESTS.feature")
 
 	// Check if S6 exists
 	if _, err := os.Stat(s6Path); os.IsNotExist(err) {
-		return nil // S6 doesn't exist, skip
+		return nil // S6 doesn't exist, nothing to derive a feature from
 	}
 
 	// Check if TESTS.feature already exists
 	if _, err := os.Stat(featurePath); err == nil {
-		return nil // Already exists, skip
+		return nil // Already authored, nothing to do
 	}
 
-	// Read S6 content
-	s6Content, err := os.ReadFile(s6Path)
-	if err != nil {
-		return fmt.Errorf("failed to read S6 file: %w", err)
-	}
-
-	// Generate feature from S6 content
-	feature := fm.generateFeatureFromS6(string(s6Content))
-
-	// Write TESTS.feature
-	if err := os.WriteFile(featurePath, []byte(feature), 0o600); err != nil {
-		return fmt.Errorf("failed to write TESTS.feature: %w", err)
-	}
-
-	return nil
+	// S6 exists but no TESTS.feature: we cannot honestly generate one.
+	return ErrFeatureGenNotImplemented
 }
 
 // Template creation methods
@@ -418,33 +433,6 @@ func (fm *FileMigrator) generateOutlineFromD4(d4Content string) string {
 	}
 
 	return outline
-}
-
-func (fm *FileMigrator) generateFeatureFromS6(_ string) string {
-	feature := `Feature: Project Implementation
-
-  Generated from S6-design.md on ` + time.Now().Format("2006-01-02") + `
-
-  Scenario: Basic functionality works
-    Given the system is properly configured
-    When a user performs basic operations
-    Then the system responds correctly
-    And all validations pass
-
-  Scenario: Edge cases are handled
-    Given the system encounters edge cases
-    When unexpected input is provided
-    Then the system handles it gracefully
-    And appropriate error messages are shown
-
-  Scenario: Performance requirements are met
-    Given the system is under normal load
-    When operations are performed
-    Then response time is acceptable
-    And resource usage is within limits
-`
-
-	return feature
 }
 
 // Cleanup removes old V1 phase files after successful migration

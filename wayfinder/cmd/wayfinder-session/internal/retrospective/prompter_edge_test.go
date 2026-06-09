@@ -88,6 +88,7 @@ func TestPromptUserForContext_OnlyReason(t *testing.T) {
 
 	if ctx == nil {
 		t.Fatal("Expected non-nil context")
+		return
 	}
 
 	if ctx.Reason != "Only reason provided" {
@@ -113,6 +114,7 @@ func TestPromptUserForContext_BothFlagsProvided(t *testing.T) {
 
 	if ctx == nil {
 		t.Fatal("Expected non-nil context")
+		return
 	}
 
 	if ctx.Reason != "Test reason" {
@@ -138,6 +140,7 @@ func TestPromptUserForContext_NoPromptWithoutFlags(t *testing.T) {
 
 	if ctx == nil {
 		t.Fatal("Expected non-nil context")
+		return
 	}
 
 	// Should return empty context (no prompting)

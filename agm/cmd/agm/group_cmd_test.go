@@ -25,6 +25,7 @@ func TestGroupRunE_UnknownSubcommand(t *testing.T) {
 	err := groupRunE(parent, []string{"bogus"})
 	if err == nil {
 		t.Fatal("expected error for unknown subcommand, got nil")
+		return
 	}
 	if got := err.Error(); got != `unknown command "bogus" for "parent"` {
 		t.Errorf("unexpected error message: %s", got)

@@ -378,6 +378,17 @@ func (r *Runner) persistVerifierFinding(
 	if _, ok := f.Evidence[EvidenceReviewDepth]; !ok {
 		f.Evidence[EvidenceReviewDepth] = depth
 	}
+	// Trust-inversion contract (ROADMAP §6.5): an *adversarial* review
+	// promotes the finding into the verified set. We resolve the depth
+	// the same way the runner did above — caller-set overrides win —
+	// and only stamp verified_at when the effective depth is
+	// adversarial. Casual-depth verifiers (and Checks, which never run
+	// through this path) do not earn the timestamp.
+	if effectiveDepth, _ := f.Evidence[EvidenceReviewDepth].(string); effectiveDepth == ReviewDepthAdversarial {
+		if _, ok := f.Evidence[EvidenceVerifiedAt]; !ok {
+			f.Evidence[EvidenceVerifiedAt] = r.Now().UTC().Format(time.RFC3339Nano)
+		}
+	}
 	if !f.Severity.IsValid() {
 		// Default to P2 — verifier findings are drift / hypothesis-grade
 		// unless the verifier explicitly raises severity.

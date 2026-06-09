@@ -52,6 +52,25 @@ const (
 	ReaperTimeout = 10 * time.Minute
 )
 
+// Seams for the tmux + process boundary.
+//
+// These default to the real tmux/safety/syscall implementations and are
+// overridden in tests so the reap loop (Run, stopProcess, sendExit,
+// forceKillPaneProcess) can be exercised against a fake pane/process instead
+// of a live tmux session. They are package-level function values rather than
+// an injected interface so the production call graph stays exactly as it was —
+// only the test seam is new. Tests must restore the originals (t.Cleanup).
+var (
+	checkSafetyFn      = safety.Check
+	waitForPromptFn    = tmux.WaitForPromptSimple
+	sendPromptSafeFn   = tmux.SendMultiLinePromptSafe
+	waitForPaneCloseFn = tmux.WaitForPaneClose
+	isPaneActiveFn     = tmux.IsPaneActive
+	killSessionFn      = tmux.KillSession
+	getPanePIDFn       = tmux.GetPanePID
+	processKillFn      = syscall.Kill
+)
+
 // Reaper manages the async archival process for a AGM session
 // It waits for Claude to return to prompt, sends /exit, and archives the session
 type Reaper struct {
@@ -91,7 +110,7 @@ func (r *Reaper) Run() error {
 	r.logger.Info("Starting reaper sequence (two-phase)", "session", r.SessionName, "timeout", ReaperTimeout)
 
 	// Step 0: Safety guard check - don't /exit if a human is present
-	guardResult := safety.Check(r.SessionName, safety.GuardOptions{
+	guardResult := checkSafetyFn(r.SessionName, safety.GuardOptions{
 		SkipUninitialized: true, // reaper only runs on initialized sessions
 		SkipMidResponse:   true, // reaper already waits for prompt
 	})
@@ -116,10 +135,10 @@ func (r *Reaper) Run() error {
 
 	// Step 6: Kill tmux session as final cleanup (idempotent, always runs)
 	r.logger.Info("Killing tmux session (final cleanup)")
-	tmux.KillSession(r.SessionName)
+	killSessionFn(r.SessionName)
 
 	// Verify pane is actually gone
-	if active, _ := tmux.IsPaneActive(r.SessionName); active {
+	if active, _ := isPaneActiveFn(r.SessionName); active {
 		r.logger.Error("CRITICAL: pane still alive after all kill attempts — refusing to archive")
 		return fmt.Errorf("pane for session '%s' is still alive after SIGKILL + kill-session; refusing to archive to prevent zombie", r.SessionName)
 	}
@@ -172,7 +191,7 @@ func (r *Reaper) stopProcess(startTime time.Time) bool {
 	r.logger.Info("Sending /exit to exit Claude")
 	if err := r.sendExit(); err != nil {
 		r.logger.Warn("Failed to send /exit (session may have already exited)", "error", err)
-		if active, _ := tmux.IsPaneActive(r.SessionName); !active {
+		if active, _ := isPaneActiveFn(r.SessionName); !active {
 			paneAlive = false
 			r.logger.Info("Pane already closed")
 		}
@@ -214,14 +233,14 @@ func (r *Reaper) timeRemaining(startTime time.Time) time.Duration {
 // pane process is dead. Called when /exit + wait times out.
 func (r *Reaper) forceKillPaneProcess() {
 	// Get the PID of the process in the pane
-	pid, err := tmux.GetPanePID(r.SessionName)
+	pid, err := getPanePIDFn(r.SessionName)
 	if err != nil {
 		r.logger.Warn("Could not get pane PID (pane may already be gone)", "error", err)
 		return
 	}
 
 	r.logger.Info("Sending SIGTERM to pane process", "pid", pid)
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if err := processKillFn(pid, syscall.SIGTERM); err != nil {
 		r.logger.Warn("SIGTERM failed (process may already be gone)", "pid", pid, "error", err)
 		return
 	}
@@ -235,7 +254,7 @@ func (r *Reaper) forceKillPaneProcess() {
 
 	// Escalate to SIGKILL
 	r.logger.Warn("Process did not exit after SIGTERM, sending SIGKILL", "pid", pid)
-	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+	if err := processKillFn(pid, syscall.SIGKILL); err != nil {
 		r.logger.Warn("SIGKILL failed", "pid", pid, "error", err)
 	}
 
@@ -292,7 +311,7 @@ func (r *Reaper) markReaping() error {
 // waitForPrompt monitors output stream for Claude prompt
 // Uses tmux control mode to detect when Claude is ready for input
 func (r *Reaper) waitForPrompt(timeout time.Duration) error {
-	return tmux.WaitForPromptSimple(r.SessionName, timeout)
+	return waitForPromptFn(r.SessionName, timeout)
 }
 
 // sendExit sends /exit command to exit Claude Code cleanly
@@ -305,7 +324,7 @@ func (r *Reaper) sendExit() error {
 	// 2. Sends ESC to interrupt any thinking (shouldInterrupt=true)
 	// 3. Sends /exit in literal mode (not as a message)
 	// 4. Sends Enter to execute
-	if err := tmux.SendMultiLinePromptSafe(r.SessionName, "/exit", true); err != nil {
+	if err := sendPromptSafeFn(r.SessionName, "/exit", true); err != nil {
 		return fmt.Errorf("failed to send /exit: %w", err)
 	}
 
@@ -315,7 +334,7 @@ func (r *Reaper) sendExit() error {
 
 // waitForPaneClose waits for tmux pane to close
 func (r *Reaper) waitForPaneClose(timeout time.Duration) error {
-	return tmux.WaitForPaneClose(r.SessionName, timeout)
+	return waitForPaneCloseFn(r.SessionName, timeout)
 }
 
 // archiveSession updates manifest and moves directory

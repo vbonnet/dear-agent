@@ -45,6 +45,7 @@ func TestFrameValidate(t *testing.T) {
 			}
 			if err == nil {
 				t.Fatalf("Validate() = nil, want error containing %q", tc.wantErr)
+				return
 			}
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("Validate() error = %q, want substring %q", err.Error(), tc.wantErr)
@@ -114,6 +115,7 @@ func TestReadFrameRejectsBadJSON(t *testing.T) {
 	_, err := ReadFrame(r)
 	if err == nil {
 		t.Fatal("expected error")
+		return
 	}
 	if !strings.Contains(err.Error(), "decode frame") {
 		t.Errorf("unexpected error: %v", err)
@@ -126,6 +128,7 @@ func TestReadFrameTruncated(t *testing.T) {
 	_, err := ReadFrame(r)
 	if err == nil {
 		t.Fatal("expected error")
+		return
 	}
 	if !strings.Contains(err.Error(), "truncated") {
 		t.Errorf("unexpected error: %v", err)

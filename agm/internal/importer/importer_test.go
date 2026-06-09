@@ -261,6 +261,7 @@ func TestImportOrphanedSession_DuplicatePrevention(t *testing.T) {
 	_, err = ImportOrphanedSessionWithAdapter(testUUID, "second-import", "oss", adapter)
 	if err == nil {
 		t.Fatal("Expected duplicate import to fail, but it succeeded")
+		return
 	}
 	if !strings.Contains(err.Error(), "already has manifest") {
 		t.Errorf("Expected duplicate error, got: %v", err)
@@ -445,6 +446,7 @@ func TestExtractMetadataFromHistory_NotFound(t *testing.T) {
 	_, err := ExtractMetadataFromHistory("non-existent-uuid")
 	if err == nil {
 		t.Fatal("Expected error for non-existent UUID, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "no history entries found") {
 		t.Errorf("Expected 'no history entries found' error, got: %v", err)
@@ -742,6 +744,7 @@ func TestImportOrphanedSession_NoConversationFile(t *testing.T) {
 	_, err := ImportOrphanedSessionWithAdapter("non-existent-uuid", "test", "oss", adapter)
 	if err == nil {
 		t.Fatal("Expected error for missing conversation file, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "no conversation file found") {
 		t.Errorf("Expected 'no conversation file found' error, got: %v", err)

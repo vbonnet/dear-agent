@@ -84,15 +84,15 @@ func main() {
 }
 
 func usage(w *os.File) {
-	fmt.Fprintln(w, "Usage: agm-bus <serve|status|socket> [flags]")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  serve          Run the broker daemon until SIGINT/SIGTERM.")
-	fmt.Fprintln(w, "  status         Print whether a broker is currently responding on the socket.")
-	fmt.Fprintln(w, "  socket         Print the effective socket path.")
-	fmt.Fprintln(w, "  discord-reset  Purge one Discord channel (gated; requires --confirm).")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Environment:")
-	fmt.Fprintln(w, "  AGM_BUS_SOCKET  Override socket path (default ~/.agm/bus.sock).")
+	_, _ = fmt.Fprintln(w, "Usage: agm-bus <serve|status|socket> [flags]")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  serve          Run the broker daemon until SIGINT/SIGTERM.")
+	_, _ = fmt.Fprintln(w, "  status         Print whether a broker is currently responding on the socket.")
+	_, _ = fmt.Fprintln(w, "  socket         Print the effective socket path.")
+	_, _ = fmt.Fprintln(w, "  discord-reset  Purge one Discord channel (gated; requires --confirm).")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "Environment:")
+	_, _ = fmt.Fprintln(w, "  AGM_BUS_SOCKET  Override socket path (default ~/.agm/bus.sock).")
 }
 
 //nolint:gocyclo // linear init: queue + ACL + Discord + heartbeat watcher; splitting obscures the flow

@@ -81,7 +81,7 @@ The scan loop is the orchestrator's heartbeat. It runs periodic scan cycles that
 - `internal/ops.RunCrossCheck` — tmux-based state verification
 - `git` CLI — branch listing and commit log queries
 - `tmux` CLI — capture-pane, send-keys, list-sessions
-- `agm session select-option` — auto-approve permission prompts
+- `agm send select-option` — auto-approve permission prompts
 - `agm send msg` — nudge stalled supervisors
 
 ### Depended on by

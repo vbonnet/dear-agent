@@ -11,6 +11,7 @@ func TestNewSandbox(t *testing.T) {
 	sandbox := NewSandbox()
 	if sandbox == nil {
 		t.Fatal("NewSandbox() returned nil")
+		return
 	}
 
 	if sandbox.platform != runtime.GOOS {

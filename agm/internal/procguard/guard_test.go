@@ -26,6 +26,7 @@ func TestValidateSpawn_DepthLimit(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Fatalf("expected error for depth %d, got nil", tt.depth)
+					return
 				}
 				if !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("expected error to contain %q, got: %v", tt.errContains, err)
@@ -57,6 +58,7 @@ func TestValidateSpawn_ChildrenLimit(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Fatalf("expected error for %d children, got nil", tt.children)
+					return
 				}
 				if !strings.Contains(err.Error(), "children") {
 					t.Errorf("expected error to mention children, got: %v", err)
@@ -88,6 +90,7 @@ func TestValidateSpawn_TotalActiveLimit(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Fatalf("expected error for %d active, got nil", tt.total)
+					return
 				}
 				if !strings.Contains(err.Error(), "active sessions") {
 					t.Errorf("expected error to mention active sessions, got: %v", err)
@@ -146,6 +149,7 @@ func TestValidateSpawn_PriorityOrder(t *testing.T) {
 	err := ValidateSpawn(limits, 10, 10, 100)
 	if err == nil {
 		t.Fatal("expected error when all limits exceeded")
+		return
 	}
 	if !strings.Contains(err.Error(), "depth") {
 		t.Errorf("expected depth violation first, got: %v", err)
@@ -201,6 +205,7 @@ func TestProcessGroupAttr(t *testing.T) {
 	attr := ProcessGroupAttr()
 	if attr == nil {
 		t.Fatal("ProcessGroupAttr returned nil")
+		return
 	}
 	if !attr.Setpgid {
 		t.Error("expected Setpgid to be true")

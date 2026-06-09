@@ -13,6 +13,7 @@ func TestNewRetrospectiveParser(t *testing.T) {
 	parser := NewRetrospectiveParser()
 	if parser == nil {
 		t.Fatal("NewRetrospectiveParser() returned nil")
+		return
 	}
 
 	if parser.improvementHeaderPattern == nil {

@@ -34,8 +34,8 @@ type VertexAIGeminiConfig struct {
 	// Location is the Vertex AI region (default: "us-central1")
 	Location string
 
-	// Model is the Gemini model identifier (e.g., "gemini-2.0-flash-exp")
-	// If empty, defaults to gemini-2.0-flash-exp
+	// Model is the Gemini model identifier (e.g., "gemini-3.5-flash")
+	// If empty, defaults to gemini-3.5-flash
 	Model string
 
 	// CostSink is optional cost tracking sink
@@ -49,8 +49,10 @@ type VertexAIGeminiConfig struct {
 // Requires GOOGLE_CLOUD_PROJECT environment variable.
 //
 // Supported models:
-//   - gemini-2.0-flash-exp (default)
-//   - gemini-2.5-pro-exp
+//   - gemini-3.5-flash (default; GA 2026-05-19, 1M ctx, $1.50/$9.00 per MTok)
+//   - gemini-3.1-pro
+//   - gemini-2.5-pro
+//   - gemini-2.5-flash-lite
 //   - gemini-1.5-pro
 //   - gemini-1.5-flash
 //
@@ -83,7 +85,7 @@ func NewVertexAIGeminiProvider(config VertexAIGeminiConfig) (*VertexAIGeminiProv
 	// Default model
 	model := config.Model
 	if model == "" {
-		model = "gemini-2.0-flash-exp"
+		model = "gemini-3.5-flash"
 	}
 
 	// Create Vertex AI Prediction client with regional endpoint
@@ -220,8 +222,10 @@ func (p *VertexAIGeminiProvider) Capabilities() Capabilities {
 		MaxTokensPerRequest:   1000000, // 1M token context window
 		MaxConcurrentRequests: 10,
 		SupportedModels: []string{
-			"gemini-2.0-flash-exp",
-			"gemini-2.5-pro-exp",
+			"gemini-3.5-flash",
+			"gemini-3.1-pro",
+			"gemini-2.5-pro",
+			"gemini-2.5-flash-lite",
 			"gemini-1.5-pro",
 			"gemini-1.5-flash",
 		},
