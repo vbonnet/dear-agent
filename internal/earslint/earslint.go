@@ -231,9 +231,14 @@ func stripMarkdown(s string) string {
 	// Strip heading markers.
 	s = strings.TrimLeft(s, "#")
 	s = strings.TrimSpace(s)
-	// Remove bold/italic emphasis markers but keep the inner words.
+	// Remove bold/italic emphasis markers but keep the inner words. Strip the
+	// double markers first, then the single emphasis/code markers, so that
+	// requirements wrapped in *, _, or `backticks` are still recognized.
 	s = strings.ReplaceAll(s, "**", "")
 	s = strings.ReplaceAll(s, "__", "")
+	s = strings.ReplaceAll(s, "*", "")
+	s = strings.ReplaceAll(s, "_", "")
+	s = strings.ReplaceAll(s, "`", "")
 	// Drop a trailing requirement id like "(REQ-1)" left at the very end? Keep
 	// as-is; patterns are anchored loosely enough to tolerate it.
 	return strings.TrimSpace(s)

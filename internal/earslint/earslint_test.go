@@ -63,6 +63,41 @@ func TestLint_MarkdownListAndEmphasis(t *testing.T) {
 	}
 }
 
+func TestLint_SingleEmphasisAndBackticks(t *testing.T) {
+	l := newDefault(t)
+	doc := strings.Join([]string{
+		"- `When` the request arrives, the system shall respond.",
+		"- _While_ the job runs, the system shall report progress.",
+	}, "\n")
+	res, err := l.Lint("SPEC.md", strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+	if res.ValidRequirements != 2 {
+		t.Fatalf("want 2 valid (backtick/underscore wrapped), got %d (findings: %v)",
+			res.ValidRequirements, res.Findings)
+	}
+	if res.NonConforming() != 0 {
+		t.Errorf("want 0 non-conforming, got %d", res.NonConforming())
+	}
+}
+
+func TestLint_OptionWithoutThen(t *testing.T) {
+	l := newDefault(t)
+	// EARS "option" form, written without the optional "then".
+	res, err := l.Lint("SPEC.md", strings.NewReader("If the token is expired, the system shall reject the request."))
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+	if res.ValidRequirements != 1 {
+		t.Fatalf("want 1 valid (no-then option), got %d (findings: %v)",
+			res.ValidRequirements, res.Findings)
+	}
+	if res.NonConforming() != 0 {
+		t.Errorf("want 0 non-conforming, got %d", res.NonConforming())
+	}
+}
+
 func TestLint_NonConforming(t *testing.T) {
 	l := newDefault(t)
 	doc := strings.Join([]string{
