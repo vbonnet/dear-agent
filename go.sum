@@ -568,8 +568,8 @@ github.com/onsi/ginkgo/v2 v2.29.0 h1:rfh+ZFjgJhYWRoIqVf3Uwx/W20yLrcrE2h2GmYVRaag
 github.com/onsi/ginkgo/v2 v2.29.0/go.mod h1:+aXOY+vzZ5mu2iI2HpTZUPmM//oQfsNFX6gU9kNcA44=
 github.com/onsi/gomega v1.41.0 h1:OwKp4pXNgVxf6sCplzYo794OFNuoL2q2SBMU5NSWOjA=
 github.com/onsi/gomega v1.41.0/go.mod h1:M/Uqpu/8qTjtzCLUA2zJHX9Iilrau25x1PdoSRbWh5A=
-github.com/pact-foundation/pact-go/v2 v2.4.3 h1:JpkGP+qk77bZk//GrkOPqj9v6VG3K9D1ss1xs4wJNNw=
-github.com/pact-foundation/pact-go/v2 v2.4.3/go.mod h1:tQlnfB4h9huomS3S8xj3z75qUoL9W2zBCUnSGARw27w=
+github.com/pact-foundation/pact-go/v2 v2.5.1 h1:ygrc0KXmF1RM/5cYoOqQXTWPus+110FZLdU+39InWG0=
+github.com/pact-foundation/pact-go/v2 v2.5.1/go.mod h1:luXsS0lGNgcBh8FEfRiem5bLRh2vtHrYlazQxL7WXm0=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
 github.com/pelletier/go-toml v1.9.3/go.mod h1:u1nR/EPcESfeI/szUZKdtJ0xRNbUoANCkoOuaOx1Y+c=
 github.com/pelletier/go-toml/v2 v2.3.1 h1:MYEvvGnQjeNkRF1qUuGolNtNExTDwct51yp7olPtrEc=
