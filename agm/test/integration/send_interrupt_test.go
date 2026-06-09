@@ -96,7 +96,7 @@ var _ = Describe("AGM Send Interrupt Control", func() {
 				Tmux: manifest.Tmux{
 					SessionName: sessionName,
 				},
-				Agent:          "claude",
+				Harness:          "claude",
 				State:          manifest.StateDone,
 				StateUpdatedAt: time.Now(),
 			}
@@ -197,7 +197,7 @@ var _ = Describe("AGM Send Interrupt Control", func() {
 				Tmux: manifest.Tmux{
 					SessionName: sessionName,
 				},
-				Agent:          "claude",
+				Harness:          "claude",
 				State:          manifest.StateDone,
 				StateUpdatedAt: time.Now(),
 			}
@@ -246,7 +246,7 @@ var _ = Describe("AGM Send Interrupt Control", func() {
 				Tmux: manifest.Tmux{
 					SessionName: sessionName,
 				},
-				Agent:          "claude",
+				Harness:          "claude",
 				State:          manifest.StateCompacting,
 				StateUpdatedAt: time.Now(),
 			}
@@ -315,7 +315,7 @@ var _ = Describe("AGM Send Interrupt Control", func() {
 				Tmux: manifest.Tmux{
 					SessionName: sessionName,
 				},
-				Agent:          "claude",
+				Harness:          "claude",
 				State:          manifest.StateDone,
 				StateUpdatedAt: time.Now(),
 			}
@@ -404,7 +404,7 @@ var _ = Describe("AGM Send Interrupt Control", func() {
 				Tmux: manifest.Tmux{
 					SessionName: sessionName,
 				},
-				Agent:          "claude",
+				Harness:          "claude",
 				State:          manifest.StateDone,
 				StateUpdatedAt: time.Now(),
 			}
