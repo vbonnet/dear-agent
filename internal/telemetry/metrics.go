@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"go.opentelemetry.io/otel"
@@ -23,6 +24,12 @@ type AgentMetrics struct {
 	tasksCompleted metric.Int64Counter       // agent.tasks.completed{status}
 	tokensUsed     metric.Int64Counter       // agent.tokens.used{provider,model}
 	stallDuration  metric.Float64Histogram   // agent.stall.duration_ms
+
+	// Eval / DEAR instruments. These back the eval-as-span-attribute loop
+	// (see RecordEvalScore / TraceToEvalCase) and DEAR cycle timing.
+	evalScore          metric.Float64Histogram // agent.eval.score{gen_ai.eval.name}
+	evalCasesGenerated metric.Int64Counter     // agent.eval.cases_generated
+	dearCycleDuration  metric.Float64Histogram // dear.cycle.duration_ms{dear.phase}
 }
 
 var (
@@ -65,11 +72,29 @@ func newAgentMetrics(mp metric.MeterProvider) *AgentMetrics {
 		metric.WithDescription("Duration of agent stalls (no progress) in milliseconds"),
 		metric.WithUnit("ms"),
 	)
+	evalScore, _ := m.Float64Histogram(
+		"agent.eval.score",
+		metric.WithDescription("Eval scores attached to agent traces, by eval name"),
+		metric.WithUnit("1"),
+	)
+	evalCasesGenerated, _ := m.Int64Counter(
+		"agent.eval.cases_generated",
+		metric.WithDescription("Total production traces converted into eval cases"),
+		metric.WithUnit("{case}"),
+	)
+	dearCycleDuration, _ := m.Float64Histogram(
+		"dear.cycle.duration_ms",
+		metric.WithDescription("Duration of a DEAR (Define-Execute-Audit-Retro) cycle in milliseconds"),
+		metric.WithUnit("ms"),
+	)
 	return &AgentMetrics{
-		tasksActive:    tasksActive,
-		tasksCompleted: tasksCompleted,
-		tokensUsed:     tokensUsed,
-		stallDuration:  stallDuration,
+		tasksActive:        tasksActive,
+		tasksCompleted:     tasksCompleted,
+		tokensUsed:         tokensUsed,
+		stallDuration:      stallDuration,
+		evalScore:          evalScore,
+		evalCasesGenerated: evalCasesGenerated,
+		dearCycleDuration:  dearCycleDuration,
 	}
 }
 
@@ -183,4 +208,91 @@ func SessionCompleted(ctx context.Context, sessionID, model, provider, status st
 	_, span := sessionTracer().Start(ctx, "agm.session.complete", trace.WithAttributes(attrs...))
 	span.End()
 	Agent().TaskCompleted(ctx, provider, model, status)
+}
+
+// Eval-as-span-attribute instrumentation.
+//
+// These support the eval feedback loop popularised by Arize/Braintrust: an
+// evaluator (online or offline) scores a production trace, the score is
+// attached back to that trace for correlation in the trace UI, and high-signal
+// traces are promoted into a regression eval dataset. Scores also flow to the
+// agent.eval.score histogram for aggregate dashboards/alerting.
+
+// RecordEvalScore attaches an eval result to telemetry two ways: as attributes
+// on the active span in ctx (so the score is visible alongside the trace it
+// grades) and as an agent.eval.score histogram sample tagged with evalName.
+//
+// spanCtx identifies the trace/span the eval pertains to; its IDs are recorded
+// as span attributes for correlation but deliberately kept off the metric to
+// avoid high-cardinality timeseries (see taskAttrs). A zero spanCtx is fine —
+// the correlation attributes are simply omitted. Safe to call with the default
+// no-op providers.
+func RecordEvalScore(ctx context.Context, spanCtx trace.SpanContext, evalName string, score float64) {
+	if span := trace.SpanFromContext(ctx); span.IsRecording() {
+		attrs := []attribute.KeyValue{
+			attribute.String("gen_ai.eval.name", evalName),
+			attribute.Float64("gen_ai.eval.score", score),
+		}
+		if spanCtx.IsValid() {
+			attrs = append(attrs,
+				attribute.String("gen_ai.eval.trace_id", spanCtx.TraceID().String()),
+				attribute.String("gen_ai.eval.span_id", spanCtx.SpanID().String()),
+			)
+		}
+		span.SetAttributes(attrs...)
+	}
+	Agent().recordEvalScore(ctx, evalName, score)
+}
+
+func (a *AgentMetrics) recordEvalScore(ctx context.Context, evalName string, score float64) {
+	if a == nil || a.evalScore == nil {
+		return
+	}
+	a.evalScore.Record(ctx, score, metric.WithAttributes(attribute.String("gen_ai.eval.name", evalName)))
+}
+
+// TraceToEvalCase marks a production trace for conversion into an eval case: it
+// adds a gen_ai.eval.case_generated event to the active span (carrying the source
+// trace ID) and increments the agent.eval.cases_generated counter. This is the
+// "trace → eval dataset" half of the loop, turning high-signal production
+// traces into regression cases.
+//
+// It returns an error for an empty traceID and is otherwise safe to call with
+// the default no-op providers.
+func TraceToEvalCase(ctx context.Context, traceID string) error {
+	if traceID == "" {
+		return fmt.Errorf("telemetry: empty trace ID")
+	}
+	if span := trace.SpanFromContext(ctx); span.IsRecording() {
+		span.AddEvent("gen_ai.eval.case_generated",
+			trace.WithAttributes(attribute.String("gen_ai.eval.source_trace_id", traceID)))
+	}
+	Agent().recordEvalCaseGenerated(ctx)
+	return nil
+}
+
+func (a *AgentMetrics) recordEvalCaseGenerated(ctx context.Context) {
+	if a == nil || a.evalCasesGenerated == nil {
+		return
+	}
+	a.evalCasesGenerated.Add(ctx, 1)
+}
+
+// RecordDEARCycleDuration records the wall-clock duration of one DEAR
+// (Define-Execute-Audit-Retro) cycle in milliseconds, tagged with the phase
+// that just completed (low cardinality, e.g. "define", "execute", "audit",
+// "retro"). An empty phase records the sample untagged.
+func RecordDEARCycleDuration(ctx context.Context, phase string, ms float64) {
+	Agent().recordDEARCycle(ctx, phase, ms)
+}
+
+func (a *AgentMetrics) recordDEARCycle(ctx context.Context, phase string, ms float64) {
+	if a == nil || a.dearCycleDuration == nil {
+		return
+	}
+	var attrs []attribute.KeyValue
+	if phase != "" {
+		attrs = append(attrs, attribute.String("dear.phase", phase))
+	}
+	a.dearCycleDuration.Record(ctx, ms, metric.WithAttributes(attrs...))
 }
