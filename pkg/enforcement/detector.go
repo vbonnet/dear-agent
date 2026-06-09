@@ -81,6 +81,17 @@ func (d *ViolationDetector) GetSkippedPatterns() []string {
 	return d.skippedPatterns
 }
 
+// HasPattern reports whether the detector's database contains a pattern with
+// the given ID. Used to determine which database a pattern originated from.
+func (d *ViolationDetector) HasPattern(id string) bool {
+	for i := range d.patterns.Patterns {
+		if d.patterns.Patterns[i].ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // Detect finds the first violation in the given content.
 // Returns the matched pattern or nil if no violation is found.
 func (d *ViolationDetector) Detect(content string) *Pattern {
