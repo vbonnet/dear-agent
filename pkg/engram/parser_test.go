@@ -178,6 +178,7 @@ Content here.
 	_, err := parser.ParseBytes("/template.ai.md", content)
 	if err == nil {
 		t.Fatal("ParseBytes() succeeded with unquoted array syntax in type field, want error")
+		return
 	}
 	// Verify error message mentions type mismatch or unmarshal
 	if err != nil && !contains(err.Error(), "unmarshal") {

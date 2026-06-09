@@ -62,6 +62,7 @@ func TestCache_PutAndGet(t *testing.T) {
 	}
 	if retrieved == nil {
 		t.Fatal("Retrieved metacontext should not be nil")
+		return
 	}
 	if len(retrieved.Languages) != 1 || retrieved.Languages[0].Name != "Go" {
 		t.Error("Retrieved metacontext does not match stored value")

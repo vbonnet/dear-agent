@@ -85,7 +85,7 @@ The diagram illustrates:
 **LLM Providers**
 - Anthropic Provider (claude-3-5-haiku)
 - Vertex AI Claude (claude-sonnet-4-5, us-east5)
-- Vertex AI Gemini (gemini-2.0-flash, us-central1)
+- Vertex AI Gemini (gemini-3.5-flash, us-central1)
 - Local Provider (tag-based fallback, no API calls)
 
 **Failure Boosting System**

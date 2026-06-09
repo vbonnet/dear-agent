@@ -45,6 +45,7 @@ func TestRetryExhaustsAttemptsAndFails(t *testing.T) {
 	_, err := r.Run(context.Background(), w, nil)
 	if err == nil {
 		t.Fatal("expected error after exhausting attempts")
+		return
 	}
 	got := ai.calls.Load()
 	if got != 3 {
@@ -153,6 +154,7 @@ func TestRetryGateNeverRetries(t *testing.T) {
 	// out via SignalTimeout — retry policy is ignored for gates).
 	if err == nil {
 		t.Fatal("expected timeout error")
+		return
 	}
 	if !strings.Contains(err.Error(), "timed out") {
 		t.Errorf("error = %v, expected gate timed out", err)

@@ -86,6 +86,7 @@ func TestDetectPermissionPromptStall_Stall(t *testing.T) {
 	event := detector.detectPermissionPromptStall(session, now)
 	if event == nil {
 		t.Fatal("Expected stall event, got nil")
+		return
 	}
 	if event.StallType != "permission_prompt" {
 		t.Errorf("StallType = %v, want permission_prompt", event.StallType)

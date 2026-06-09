@@ -82,7 +82,7 @@ func main() {
 	addListWayfinderSessionsTool(server, cfg)
 	addGetWayfinderSessionTool(server, cfg)
 
-	logger.Info("Registered MCP tools", "tools", "agm_list_sessions, agm_search_sessions, agm_get_session, agm_archive_session, agm_kill_session, agm_list_ops, engram_list_wayfinder_sessions, engram_get_wayfinder_session")
+	logger.Info("Registered MCP tools", "tools", "agm_list_sessions, agm_search_sessions, agm_get_session_metadata, agm_archive_session, agm_kill_session, agm_list_ops, engram_list_wayfinder_sessions, engram_get_wayfinder_session")
 	logger.Info("Wayfinder forwarding enabled", "engram_mcp_url", cfg.EngramMCPURL)
 
 	installGateway(server, *noGateway)
@@ -178,7 +178,7 @@ func startA2AServerIfEnabled(cfg *Config, effectiveA2APort int, stop func()) *ht
 	ln, err := net.Listen("tcp", addr) //nolint:noctx // TODO(context): plumb ctx through this layer
 	if err != nil {
 		logger.Error("A2A HTTP listen failed", "addr", addr, "error", err)
-		stop() // explicit cleanup before exit (otherwise the deferred stop() at the top of main wouldn't run)
+		stop()     // explicit cleanup before exit (otherwise the deferred stop() at the top of main wouldn't run)
 		os.Exit(1) //nolint:gocritic // stop() called explicitly above
 	}
 

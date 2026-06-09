@@ -51,6 +51,7 @@ func TestNewCoordinator(t *testing.T) {
 
 	if coord == nil {
 		t.Fatal("NewCoordinator returned nil")
+		return
 	}
 
 	if coord.maxConcurrent != 4 {
@@ -169,6 +170,7 @@ func TestGetOrCreateSandbox_Create(t *testing.T) {
 
 	if sb == nil {
 		t.Fatal("Expected sandbox, got nil")
+		return
 	}
 
 	if sb.Name != "oss-wp12" {

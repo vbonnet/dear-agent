@@ -262,6 +262,7 @@ func TestPermissionProfileFlagRegistered(t *testing.T) {
 	flag := newCmd.Flags().Lookup("permission-profile")
 	if flag == nil {
 		t.Fatal("--permission-profile flag not registered on newCmd")
+		return
 	}
 	if flag.DefValue != "" {
 		t.Errorf("--permission-profile default should be empty string, got %q", flag.DefValue)
@@ -272,6 +273,7 @@ func TestPermissionsAllowFlagRegistered(t *testing.T) {
 	flag := newCmd.Flags().Lookup("permissions-allow")
 	if flag == nil {
 		t.Fatal("--permissions-allow flag not registered on newCmd")
+		return
 	}
 	if flag.Value.Type() != "stringSlice" {
 		t.Errorf("--permissions-allow should be stringSlice type, got %q", flag.Value.Type())
@@ -282,6 +284,7 @@ func TestInheritPermissionsFlagRegistered(t *testing.T) {
 	flag := newCmd.Flags().Lookup("inherit-permissions")
 	if flag == nil {
 		t.Fatal("--inherit-permissions flag not registered on newCmd")
+		return
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("--inherit-permissions default should be false, got %q", flag.DefValue)

@@ -27,7 +27,7 @@ func AppendToS11(projectDir string, data *RewindEventData) error {
 	if err != nil {
 		return fmt.Errorf("failed to open %s: %w", S11Filename, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Write markdown entry
 	if _, err := file.WriteString(entry); err != nil {

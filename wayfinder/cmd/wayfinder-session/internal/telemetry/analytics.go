@@ -19,7 +19,7 @@ func ReadQualityEvents(telemetryPath string) ([]QualityAssessedEvent, error) {
 		}
 		return nil, fmt.Errorf("failed to open telemetry file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var events []QualityAssessedEvent
 	scanner := bufio.NewScanner(f)

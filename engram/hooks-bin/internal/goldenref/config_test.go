@@ -60,6 +60,7 @@ func TestLoadConfigFrom_MissingFile(t *testing.T) {
 
 	if cfg == nil {
 		t.Fatal("Expected non-nil config for missing file")
+		return
 	}
 
 	if len(cfg.WorkspaceRoots) != 0 {
@@ -86,6 +87,7 @@ func TestLoadConfigFrom_InvalidYAML(t *testing.T) {
 
 	if cfg == nil {
 		t.Fatal("Expected non-nil config for invalid YAML")
+		return
 	}
 
 	if len(cfg.WorkspaceRoots) != 0 {

@@ -1,7 +1,7 @@
 ---
 model: haiku
 effort: low
-content-hash: 8c8746046c930f2728b52e4c680d310312c99e5bde4f4ace71afb0112d2d7b40
+content-hash: 55b6fc976c5c0364782390f03a8d6695fe8a22707e5f7563dc6b281c7f5cb571
 description: Associate Claude session with AGM (auto-detects tmux session)
 argument-hint: "{session-name}"
 allowed-tools: Bash(agm session associate *), Bash(tmux display-message *), Bash(tmux -S * display-message *), Bash(pwd)
@@ -43,7 +43,7 @@ Run the appropriate command using SESSION_NAME from Step 1.
 
 **Step 3: Handle result**
 - If exit code is 0:
-  - Extract manifest path from output
+  - Note the storage location from output (see Step 4)
   - Continue to Step 4
 - If output contains "session not found":
   - Session needs to be created with --create flag
@@ -58,12 +58,16 @@ Run the appropriate command using SESSION_NAME from Step 1.
   - Exit
 
 **Step 4: Show completion message**
-Extract session name and manifest path from the `agm session associate` output and display:
+Extract the session name and the storage location from the `agm session
+associate` output. AGM persists sessions in Dolt, so the output reports the
+storage location as either a `Manifest:` line (when a manifest file exists on
+disk) or `Session ID:` + `Storage:` lines (Dolt). Use whichever lines are
+present, then display:
 ```
 Session associated successfully
 
 Session: {session_name}
-Manifest: {manifest_path}
+Storage: {storage_location}
 
 To rename the Claude session to match: /rename {session_name}
 ```

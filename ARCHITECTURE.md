@@ -68,7 +68,7 @@ The primary user interface. Cobra-based command tree with these groups:
 - **Workflow commands** — `deep-research`, `code-review`, `architect`
 - **Communication** — `send`, `compact`
 
-### Shared Operations Layer (`internal/ops/`)
+### Shared Operations Layer (`agm/internal/ops/`)
 
 The abstraction that makes AGM accessible from three API surfaces:
 
@@ -83,7 +83,7 @@ Skills (.md)   →  CLI --json    →  internal/ops  →  Dolt Storage
 - Field masks via `--fields` for token-efficient output
 - JSON output mode for programmatic consumers
 
-### Harness Adapters (`internal/agent/`)
+### Harness Adapters (`agm/internal/agent/`)
 
 The adapter pattern is central to AGM's multi-harness support. Each adapter
 implements the `Agent` interface, encapsulating all harness-specific logic:
@@ -98,7 +98,7 @@ implements the `Agent` interface, encapsulating all harness-specific logic:
 Adding a new harness requires implementing the `Agent` interface — no changes
 to the core operations layer.
 
-### Session Management (`internal/session/`)
+### Session Management (`agm/internal/session/`)
 
 Sessions are the primary resource. Each session has:
 
@@ -134,19 +134,27 @@ up on `archive`.
 
 AGM supports coordinated parallel agent work through several mechanisms:
 
-- **Coordination Daemon** (`internal/daemon/`) — Background process polling
+- **Coordination Daemon** (`agm/internal/daemon/`) — Background process polling
   every 30s for pending messages, delivering when target sessions are READY
-- **Pending Messages** (`internal/messages/`) — File-based inter-agent
+- **Pending Messages** (`agm/internal/messages/`) — File-based inter-agent
   messaging via `~/.agm/pending/{session}/` directories
-- **Advisory File Reservations** (`internal/reservation/`) — Glob-pattern
+- **Advisory File Reservations** (`agm/internal/reservation/`) — Glob-pattern
   based file locks (advisory, not enforced) to prevent destructive concurrent
   edits
-- **A2A Agent Cards** (`internal/a2a/`) — A2A Protocol agent discovery via
+- **A2A Agent Cards** (`agm/internal/a2a/`) — A2A Protocol agent discovery via
   generated Agent Cards
-- **VROOM Architecture** — Five-role supervisory model: Verifier, Requester,
-  Orchestrator, Overseer, Meta-Orchestrator
 
-### State Monitor — Astrocyte (`internal/monitor/`)
+> **VROOM is not an AGM-internal component.** VROOM is the supervisory
+> **execution framework** that sits *above* AGM and drives it as a tool —
+> three supervisors (Meta-Orchestrator / Orchestrator / Overseer) plus per-task
+> Primary/Secondary/Tertiary ownership, Workers, Auditors, and SRE agents. It
+> is intentionally *not* an `internal/` package here. See
+> [CONTEXT.md](CONTEXT.md) and
+> [docs/adr/ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md). (The
+> earlier "five-role Verifier/Requester/…" description was inaccurate and is
+> superseded.)
+
+### State Monitor — Astrocyte (`agm/internal/monitor/`)
 
 Real-time agent state detection with harness-specific strategies:
 
@@ -155,7 +163,7 @@ Real-time agent state detection with harness-specific strategies:
 - SSE event streams (OpenCode)
 - Health check caching to avoid probe storms
 
-### Identifier Resolution (`internal/session/`)
+### Identifier Resolution (`agm/internal/session/`)
 
 Multi-strategy session lookup: exact match → UUID prefix → fuzzy match →
 interactive picker. Users never need to type exact session names.
@@ -210,12 +218,12 @@ User → Completion verified (no pending work)
 
 | Extension | How |
 |-----------|-----|
-| New AI harness | Implement the `Agent` interface in `internal/agent/` |
-| New backend | Implement the `Backend` interface in `internal/backend/` |
+| New AI harness | Implement the `Agent` interface in `agm/internal/agent/` |
+| New backend | Implement the `Backend` interface in `agm/internal/backend/` |
 | New sandbox provider | Implement the `Provider` interface in `internal/sandbox/` |
-| New storage backend | Implement the storage interface in `internal/dolt/` |
-| New workflow | Add workflow definition in `internal/workflow/` |
-| Custom state detection | Add monitor strategy in `internal/monitor/` |
+| New storage backend | Implement the storage interface in `agm/internal/dolt/` |
+| New workflow | Add workflow definition in `agm/internal/workflow/` |
+| Custom state detection | Add monitor strategy in `agm/internal/monitor/` |
 
 ## Monorepo Structure
 

@@ -126,7 +126,7 @@ Examples:
 				// Silently fail in hook mode (Dolt not available)
 				return nil
 			}
-			defer adapter.Close()
+			defer func() { _ = adapter.Close() }()
 
 			// Try to find existing manifest
 			m, manifestPath, err := session.ResolveIdentifier(sessionName, sessionsDir, adapter)
@@ -193,7 +193,7 @@ Examples:
 			if adapterErr != nil {
 				return fmt.Errorf("failed to connect to Dolt storage: %w", adapterErr)
 			}
-			defer adapter.Close()
+			defer func() { _ = adapter.Close() }()
 
 			// Create manifest search function for uuid.Discover
 			findInManifests := func(name string) (*manifest.Manifest, error) {
@@ -265,7 +265,7 @@ Examples:
 					"  • Check WORKSPACE environment variable is set")
 			return doltErr
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// Try to find existing manifest
 		manifestPath := ""
@@ -286,24 +286,19 @@ Examples:
 			// Check for existing session with same name before creating
 			existingByName, _ := adapter.GetSessionByName(sessionName)
 			if existingByName != nil {
-				// Reuse existing session instead of creating a duplicate
+				// Reuse existing session instead of creating a duplicate.
+				// manifestPath is resolved canonically below, once the session
+				// ID is known (see "Resolve canonical manifest path").
 				fmt.Printf("Reusing existing AGM session: %s (ID: %s)\n", sessionName, existingByName.SessionID)
 				m = existingByName
-				manifestPath = filepath.Join(sessionsDir, fmt.Sprintf("session-%s", sessionName), "manifest.yaml")
 			} else {
-				// Create new manifest
+				// Create a new session. Session data is persisted to Dolt (the
+				// source of truth) by adapter.CreateSession below; we no longer
+				// mkdir an empty session-<name>/ directory or write a YAML
+				// manifest file here. The historical code did both, then printed
+				// "Manifest: <empty dir path>" — a path to a file that never
+				// existed.
 				fmt.Printf("Creating new AGM session: %s\n", sessionName)
-				manifestDir := filepath.Join(sessionsDir, fmt.Sprintf("session-%s", sessionName))
-				manifestPath = filepath.Join(manifestDir, "manifest.yaml")
-
-				if err := os.MkdirAll(manifestDir, 0700); err != nil {
-					ui.PrintError(err,
-						"Failed to create manifest directory",
-						"  • Check sessions directory: ls -ld "+sessionsDir+"\n"+
-							"  • Verify disk space: df -h "+sessionsDir+"\n"+
-							"  • Check permissions: ls -ld "+filepath.Dir(manifestDir))
-					return err
-				}
 
 				cwd := ""
 				if wd, err := os.Getwd(); err == nil {
@@ -356,6 +351,14 @@ Examples:
 				m.SessionID = uuid.New().String()
 			}
 
+			// Resolve canonical manifest path. AGM keys on-disk manifests by
+			// session ID (matching session.ResolveIdentifier), not by session
+			// name. Compute it here once the ID is known so any downstream
+			// consumers (git commit, ready-file) reference a consistent path.
+			if manifestPath == "" {
+				manifestPath = filepath.Join(sessionsDir, m.SessionID, "manifest.yaml")
+			}
+
 			// Report progress (softer message to allow skill continuation)
 			if oldUUID == "" {
 				fmt.Printf("Session association in progress: '%s' linked to Claude UUID %s\n", sessionName, targetUUID[:8])
@@ -394,7 +397,11 @@ Examples:
 			fmt.Printf("Warning: Failed to create ready-file signal: %v\n", err)
 		}
 
-		fmt.Printf("\nManifest: %s\n", manifestPath)
+		// Report where the session is actually stored. Only prints a
+		// "Manifest:" path when a manifest file genuinely exists on disk;
+		// otherwise reports the Dolt storage location. Avoids the historical
+		// bug of printing a path to a manifest file that was never written.
+		fmt.Printf("\n%s\n", describeAssociationStorage(m, adapter.Workspace(), manifestPath))
 
 		// Show completion with softer language to allow skill continuation
 		fmt.Printf("\nSession association complete. You can now proceed to the next step.\n")

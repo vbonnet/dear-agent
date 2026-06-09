@@ -380,8 +380,8 @@ func logBypass() {
 	logFile := ".git/ci-gate-bypass.log"
 	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err == nil {
-		fmt.Fprintln(f, logEntry)
-		f.Close()
+		_, _ = fmt.Fprintln(f, logEntry)
+		_ = f.Close()
 		fmt.Printf("📝 Bypass logged to %s\n", logFile)
 	} else {
 		// Fallback to stderr

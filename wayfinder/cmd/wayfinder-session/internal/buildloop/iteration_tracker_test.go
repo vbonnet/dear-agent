@@ -12,6 +12,7 @@ func TestNewIterationTracker(t *testing.T) {
 
 	if tracker == nil {
 		t.Fatal("NewIterationTracker() returned nil")
+		return
 	}
 	if tracker.taskID != taskID {
 		t.Errorf("taskID = %q, want %q", tracker.taskID, taskID)

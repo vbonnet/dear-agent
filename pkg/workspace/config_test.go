@@ -91,6 +91,7 @@ workspaces:
 	_, err := LoadConfig(configPath)
 	if err == nil {
 		t.Fatal("expected error for invalid YAML, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "parse config YAML") {
@@ -103,6 +104,7 @@ func TestLoadConfig_FileNotFound(t *testing.T) {
 	_, err := LoadConfig("/nonexistent/config.yaml")
 	if err == nil {
 		t.Fatal("expected error for non-existent file, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "config file not found") {
@@ -249,6 +251,7 @@ func TestValidateConfig_DuplicateNames(t *testing.T) {
 	err := ValidateConfig(config)
 	if err == nil {
 		t.Fatal("expected error for duplicate workspace names, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "duplicate workspace name") {
@@ -321,6 +324,7 @@ func TestValidateConfig_InvalidDefaultWorkspace(t *testing.T) {
 	err := ValidateConfig(config)
 	if err == nil {
 		t.Fatal("expected error for invalid default workspace, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "default workspace") {

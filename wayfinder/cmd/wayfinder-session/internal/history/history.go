@@ -44,7 +44,7 @@ func (h *History) AppendEvent(eventType, phase string, data map[string]interface
 	if err != nil {
 		return fmt.Errorf("failed to open history file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Write event as single line (JSON + newline)
 	if _, err := file.Write(append(jsonData, '\n')); err != nil {
@@ -65,7 +65,7 @@ func (h *History) Read() ([]Event, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open history file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var events []Event
 	scanner := bufio.NewScanner(file)

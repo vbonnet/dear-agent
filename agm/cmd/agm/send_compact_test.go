@@ -68,6 +68,7 @@ func TestSendCompactFlagRegistration(t *testing.T) {
 			flag := sendCompactCmd.Flags().Lookup(f.name)
 			if flag == nil {
 				t.Fatalf("--%s flag should be registered", f.name)
+				return
 			}
 			if flag.DefValue != f.defValue {
 				t.Errorf("--%s default = %q, want %q", f.name, flag.DefValue, f.defValue)
