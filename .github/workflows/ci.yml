@@ -24,6 +24,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Full history so golangci-lint's `new-from-merge-base: origin/main`
+          # (see .golangci.yml) can compute the merge base and report findings
+          # only for code changed relative to main. With the default shallow
+          # clone the merge base is unreachable and the baseline silently
+          # degrades to reporting the entire backlog.
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
