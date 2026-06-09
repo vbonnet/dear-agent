@@ -134,6 +134,27 @@ func TestLint_NonConforming(t *testing.T) {
 	}
 }
 
+// TestLint_PreservesSnakeCaseAndMath guards against stripMarkdown corrupting
+// intra-word underscores (snake_case identifiers) or spaced asterisks (math /
+// wildcards) when removing markdown emphasis. The reported finding text must
+// match the source requirement verbatim.
+func TestLint_PreservesSnakeCaseAndMath(t *testing.T) {
+	l := newDefault(t)
+	doc := "Eventually the system shall update the user_id when count > a * b."
+	res, err := l.Lint("SPEC.md", strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+	if len(res.Findings) == 0 {
+		t.Fatal("expected a finding for the non-conforming requirement")
+	}
+	got := res.Findings[0].Text
+	want := "Eventually the system shall update the user_id when count > a * b."
+	if got != want {
+		t.Errorf("stripMarkdown corrupted snake_case/math: got %q, want %q", got, want)
+	}
+}
+
 func TestLint_ZeroRequirements(t *testing.T) {
 	l := newDefault(t)
 	doc := "# Spec\n\nThis is just prose with no requirements.\n"

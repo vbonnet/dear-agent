@@ -231,17 +231,26 @@ func stripMarkdown(s string) string {
 	// Strip heading markers.
 	s = strings.TrimLeft(s, "#")
 	s = strings.TrimSpace(s)
-	// Remove bold/italic emphasis markers but keep the inner words. Strip the
-	// double markers first, then the single emphasis/code markers, so that
-	// requirements wrapped in *, _, or `backticks` are still recognized.
-	s = strings.ReplaceAll(s, "**", "")
-	s = strings.ReplaceAll(s, "__", "")
-	s = strings.ReplaceAll(s, "*", "")
-	s = strings.ReplaceAll(s, "_", "")
+	// Remove bold/italic emphasis markers but keep the inner words. Strip
+	// underscores and asterisks only when they sit at a word boundary (i.e.
+	// act as emphasis delimiters), so snake_case identifiers (user_id) and
+	// spaced math/wildcard asterisks (a * b) survive intact in the reported
+	// finding text and in pattern matching. The `+` runs cover **bold**/__bold__.
+	s = leadingUnderscore.ReplaceAllString(s, "")
+	s = trailingUnderscore.ReplaceAllString(s, "")
+	s = leadingAsterisk.ReplaceAllString(s, "")
+	s = trailingAsterisk.ReplaceAllString(s, "")
+	// Backticks are never part of an identifier, so strip code spans entirely.
 	s = strings.ReplaceAll(s, "`", "")
 	// Drop a trailing requirement id like "(REQ-1)" left at the very end? Keep
 	// as-is; patterns are anchored loosely enough to tolerate it.
 	return strings.TrimSpace(s)
 }
 
-var listMarker = regexp.MustCompile(`^(\s*[-*+]\s+|\s*\d+[.)]\s+)`)
+var (
+	listMarker         = regexp.MustCompile(`^(\s*[-*+]\s+|\s*\d+[.)]\s+)`)
+	leadingUnderscore  = regexp.MustCompile(`\b_+`)
+	trailingUnderscore = regexp.MustCompile(`_+\b`)
+	leadingAsterisk    = regexp.MustCompile(`\*+\b`)
+	trailingAsterisk   = regexp.MustCompile(`\b\*+`)
+)
