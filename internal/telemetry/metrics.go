@@ -27,7 +27,7 @@ type AgentMetrics struct {
 
 	// Eval / DEAR instruments. These back the eval-as-span-attribute loop
 	// (see RecordEvalScore / TraceToEvalCase) and DEAR cycle timing.
-	evalScore          metric.Float64Histogram // agent.eval.score{eval.name}
+	evalScore          metric.Float64Histogram // agent.eval.score{gen_ai.eval.name}
 	evalCasesGenerated metric.Int64Counter     // agent.eval.cases_generated
 	dearCycleDuration  metric.Float64Histogram // dear.cycle.duration_ms{dear.phase}
 }
@@ -248,7 +248,7 @@ func (a *AgentMetrics) recordEvalScore(ctx context.Context, evalName string, sco
 	if a == nil || a.evalScore == nil {
 		return
 	}
-	a.evalScore.Record(ctx, score, metric.WithAttributes(attribute.String("eval.name", evalName)))
+	a.evalScore.Record(ctx, score, metric.WithAttributes(attribute.String("gen_ai.eval.name", evalName)))
 }
 
 // TraceToEvalCase marks a production trace for conversion into an eval case: it
