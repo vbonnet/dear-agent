@@ -33,6 +33,7 @@ package agenttrace
 
 import (
 	"strconv"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -101,15 +102,20 @@ const (
 // value was clipped rather than empty.
 const maxAttrLen = 8 * 1024
 
-// truncate clips s to maxAttrLen runes, appending a marker noting how many
-// bytes were dropped. It is byte-oriented to keep the bound cheap and
-// predictable; the marker keeps truncation visible in the trace UI.
+// truncate clips s to at most maxAttrLen bytes, appending a marker noting how
+// many bytes were dropped. The cut is backed up to a UTF-8 rune boundary so a
+// multi-byte rune is never split — emitting invalid UTF-8 can make collectors
+// reject the span. The marker keeps truncation visible in the trace UI.
 func truncate(s string) string {
 	if len(s) <= maxAttrLen {
 		return s
 	}
-	dropped := len(s) - maxAttrLen
-	return s[:maxAttrLen] + "…[truncated " + strconv.Itoa(dropped) + " bytes]"
+	end := maxAttrLen
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	dropped := len(s) - end
+	return s[:end] + "…[truncated " + strconv.Itoa(dropped) + " bytes]"
 }
 
 // tracer returns the shared tracer for this package. It resolves the global

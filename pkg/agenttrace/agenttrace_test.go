@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -238,6 +239,39 @@ func TestTruncateUnit(t *testing.T) {
 	if got := truncate(strings.Repeat("a", maxAttrLen)); len(got) != maxAttrLen {
 		t.Errorf("value at exactly the cap should not be truncated, len = %d", len(got))
 	}
+}
+
+func TestTruncateNeverSplitsRune(t *testing.T) {
+	// A run of 3-byte runes (… = U+2026, 3 bytes) so the byte cap at maxAttrLen
+	// would land mid-rune if truncation were byte-oriented.
+	s := strings.Repeat("…", maxAttrLen) // 3*maxAttrLen bytes
+	got := truncate(s)
+	prefix := strings.TrimSuffix(got, got[strings.LastIndex(got, "…[truncated"):])
+	if !utf8.ValidString(prefix) {
+		t.Fatalf("truncated prefix is not valid UTF-8")
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncated value is not valid UTF-8")
+	}
+	if len(prefix) > maxAttrLen {
+		t.Fatalf("prefix %d bytes exceeds cap %d", len(prefix), maxAttrLen)
+	}
+}
+
+func TestInstrumentToolCall_PanicClosesSpanAndReraises(t *testing.T) {
+	sr := newRecorder(t)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("expected panic to propagate")
+		}
+		// Span must still have been ended despite the panic.
+		s := soleSpan(t, sr)
+		if s.Status().Code != codes.Error {
+			t.Errorf("panicked span should be marked Error, got %v", s.Status().Code)
+		}
+	}()
+	_, _ = InstrumentToolCall(context.Background(), "boom", "",
+		func(ctx context.Context) (string, error) { panic("kaboom") })
 }
 
 func TestInstrumentToolCall(t *testing.T) {
