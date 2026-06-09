@@ -196,7 +196,7 @@ func runPolicyStatus() error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	status := PolicyStatus{
 		Timestamp: time.Now(),
@@ -262,7 +262,7 @@ func getComplianceRates(db *sql.DB, rates *ComplianceRates) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	ruleCounts := make(map[string]int)
 	for rows.Next() {
@@ -312,7 +312,7 @@ func getExpiringExceptions(db *sql.DB, exceptions *[]ExceptionDetail, days int) 
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var exc ExceptionDetail
@@ -355,7 +355,7 @@ func getRuleBreakdown(db *sql.DB, breakdown *[]RuleBreakdown) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var rb RuleBreakdown
@@ -388,27 +388,27 @@ func outputStatusTable(status PolicyStatus) {
 	yellow := color.New(color.FgYellow)
 	red := color.New(color.FgRed)
 
-	bold.Println("\n╔════════════════════════════════════════════════════════════════════╗")
-	bold.Println("║          Language Policy Compliance Dashboard                     ║")
-	bold.Println("╚════════════════════════════════════════════════════════════════════╝")
+	_, _ = bold.Println("\n╔════════════════════════════════════════════════════════════════════╗")
+	_, _ = bold.Println("║          Language Policy Compliance Dashboard                     ║")
+	_, _ = bold.Println("╚════════════════════════════════════════════════════════════════════╝")
 	fmt.Printf("Generated: %s\n\n", status.Timestamp.Format("2006-01-02 15:04:05"))
 
 	// Exception Summary
-	bold.Println("═══ EXCEPTION SUMMARY ═══")
+	_, _ = bold.Println("═══ EXCEPTION SUMMARY ═══")
 	fmt.Printf("Total Exceptions:   %d\n", status.ExceptionSummary.Total)
-	green.Printf("  ✓ Active:         %d\n", status.ExceptionSummary.TotalActive)
-	yellow.Printf("  ⚠ Pending:        %d\n", status.ExceptionSummary.TotalPending)
-	red.Printf("  ✗ Expired:        %d\n", status.ExceptionSummary.TotalExpired)
+	_, _ = green.Printf("  ✓ Active:         %d\n", status.ExceptionSummary.TotalActive)
+	_, _ = yellow.Printf("  ⚠ Pending:        %d\n", status.ExceptionSummary.TotalPending)
+	_, _ = red.Printf("  ✗ Expired:        %d\n", status.ExceptionSummary.TotalExpired)
 	fmt.Printf("  ✓ Resolved:       %d\n\n", status.ExceptionSummary.TotalResolved)
 
 	// Compliance Rates
-	bold.Println("═══ COMPLIANCE STATUS ═══")
+	_, _ = bold.Println("═══ COMPLIANCE STATUS ═══")
 	fmt.Printf("bash-20-line-limit:           %s\n", status.ComplianceRates.BashCompliance)
 	fmt.Printf("python-import-justification:  %s\n", status.ComplianceRates.PythonCompliance)
 	fmt.Printf("validator-location:           %s\n\n", status.ComplianceRates.ValidatorCompliance)
 
 	// Rule Breakdown
-	bold.Println("═══ RULE BREAKDOWN ═══")
+	_, _ = bold.Println("═══ RULE BREAKDOWN ═══")
 	table := tablewriter.NewWriter(os.Stdout)
 	table.Header("Rule", "Active", "Expired", "Resolved", "Total", "Earliest Sunset")
 
@@ -429,7 +429,7 @@ func outputStatusTable(status PolicyStatus) {
 
 	// Expiring Exceptions
 	if len(status.ExpiringExceptions) > 0 {
-		yellow.Printf("\n⚠ EXPIRING SOON (within 30 days): %d exceptions\n\n", len(status.ExpiringExceptions))
+		_, _ = yellow.Printf("\n⚠ EXPIRING SOON (within 30 days): %d exceptions\n\n", len(status.ExpiringExceptions))
 
 		expTable := tablewriter.NewWriter(os.Stdout)
 		expTable.Header("ID", "Rule", "File", "Sunset Date", "Days Left")
@@ -460,7 +460,7 @@ func outputStatusTable(status PolicyStatus) {
 		expTable.Render()
 		fmt.Println()
 	} else {
-		green.Println("✓ No exceptions expiring in the next 30 days")
+		_, _ = green.Println("✓ No exceptions expiring in the next 30 days")
 	}
 
 	// Footer
@@ -477,7 +477,7 @@ func runPolicyExceptions() error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Build query
 	query := `
@@ -515,7 +515,7 @@ func runPolicyExceptions() error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var exceptions []ExceptionDetail
 	for rows.Next() {
@@ -554,9 +554,9 @@ func runPolicyExceptions() error {
 func outputExceptionsTable(exceptions []ExceptionDetail) {
 	bold := color.New(color.Bold)
 
-	bold.Println("\n╔════════════════════════════════════════════════════════════════════╗")
-	bold.Println("║                    Policy Exceptions                               ║")
-	bold.Println("╚════════════════════════════════════════════════════════════════════╝")
+	_, _ = bold.Println("\n╔════════════════════════════════════════════════════════════════════╗")
+	_, _ = bold.Println("║                    Policy Exceptions                               ║")
+	_, _ = bold.Println("╚════════════════════════════════════════════════════════════════════╝")
 	fmt.Printf("Total: %d exceptions\n\n", len(exceptions))
 
 	if len(exceptions) == 0 {
@@ -635,7 +635,7 @@ func runPolicyExpiring() error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	var exceptions []ExceptionDetail
 	if err := getExpiringExceptions(db, &exceptions, 30); err != nil {
@@ -650,9 +650,9 @@ func runPolicyExpiring() error {
 	bold := color.New(color.Bold)
 	yellow := color.New(color.FgYellow)
 
-	bold.Println("\n╔════════════════════════════════════════════════════════════════════╗")
-	bold.Println("║              Exceptions Expiring Within 30 Days                    ║")
-	bold.Println("╚════════════════════════════════════════════════════════════════════╝")
+	_, _ = bold.Println("\n╔════════════════════════════════════════════════════════════════════╗")
+	_, _ = bold.Println("║              Exceptions Expiring Within 30 Days                    ║")
+	_, _ = bold.Println("╚════════════════════════════════════════════════════════════════════╝")
 
 	if len(exceptions) == 0 {
 		fmt.Println()
@@ -661,7 +661,7 @@ func runPolicyExpiring() error {
 		return nil
 	}
 
-	yellow.Printf("\n⚠ %d exceptions expiring soon\n\n", len(exceptions))
+	_, _ = yellow.Printf("\n⚠ %d exceptions expiring soon\n\n", len(exceptions))
 
 	outputExceptionsTable(exceptions)
 	return nil

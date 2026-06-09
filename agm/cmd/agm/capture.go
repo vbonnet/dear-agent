@@ -73,7 +73,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	// Get Dolt adapter for session resolution
 	adapter, _ := getStorage()
 	if adapter != nil {
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 	}
 
 	// Resolve session
@@ -179,6 +179,6 @@ func outputCaptureYAML(sessionName string, lines []string) error {
 	}
 
 	encoder := yaml.NewEncoder(os.Stdout)
-	defer encoder.Close()
+	defer func() { _ = encoder.Close() }()
 	return encoder.Encode(output)
 }

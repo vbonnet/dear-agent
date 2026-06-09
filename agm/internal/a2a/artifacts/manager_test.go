@@ -308,6 +308,7 @@ func TestStoreArtifact(t *testing.T) {
 		_, err = mgr.StoreArtifact("channel-1", "/no/such/file.txt", "desc")
 		if err == nil {
 			t.Fatal("expected error for non-existent source file")
+			return
 		}
 		if !strings.Contains(err.Error(), "artifact not found") {
 			t.Errorf("expected 'artifact not found' in error, got: %v", err)

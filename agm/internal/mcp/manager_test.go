@@ -88,6 +88,7 @@ func TestMCPManager_ConnectToGlobalMCP(t *testing.T) {
 
 	if conn == nil {
 		t.Fatal("Connection is nil")
+		return
 	}
 
 	if conn.Name != "test-mcp" {

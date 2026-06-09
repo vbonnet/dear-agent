@@ -83,6 +83,7 @@ func ValidateToken(token string) bool {
 	// Validate review result
 	if result == nil {
 		t.Fatal("Expected non-nil review result")
+		return
 	}
 
 	if result.ReviewType != ReviewTypePerTask {
@@ -195,6 +196,7 @@ func ProcessUserInput(input string) {
 
 	if securityResult == nil {
 		t.Fatal("Security persona should have reviewed the code")
+		return
 	}
 
 	// Should detect multiple security issues
@@ -285,6 +287,7 @@ func ProcessItems(items []string) {
 
 	if perfResult == nil {
 		t.Fatal("Performance persona should have reviewed the code")
+		return
 	}
 
 	// Should detect performance issues
@@ -354,6 +357,7 @@ func complexFunction() {
 
 	if maintResult == nil {
 		t.Fatal("Maintainability persona should have reviewed the code")
+		return
 	}
 
 	// Should detect maintainability issues (TODO, FIXME, etc.)
@@ -429,6 +433,7 @@ func doSomething() error {
 
 	if relResult == nil {
 		t.Fatal("Reliability persona should have reviewed the code")
+		return
 	}
 
 	// Should detect reliability issues

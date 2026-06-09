@@ -9,6 +9,13 @@ framework-improvement item "backlog suggestion system" (BACKLOG.md
 DEAR-X.9, P2). The **Define** half is
 [ADR-022](../adrs/ADR-022-backlog-suggestion-system.md).
 
+> **Note (added 2026-05-17):** where this retro references the VROOM role
+> model / "agm ADR-023", the authoritative model is now
+> [/CONTEXT.md](../../CONTEXT.md) and
+> [docs/adr/ADR-002](../adr/ADR-002-vroom-execution-architecture.md). The
+> Orchestrator-dispatch + decision-trail concepts this work relies on are
+> unchanged; only the role taxonomy and ADR location moved.
+
 ## Define
 
 **The invariant:** the rule stated at the top of `BACKLOG.md` — *"find the

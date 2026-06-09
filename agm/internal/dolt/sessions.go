@@ -478,6 +478,46 @@ func (a *Adapter) ResolveIdentifier(identifier string) (*manifest.Manifest, erro
 	return m, nil
 }
 
+// GetSessionByUUID returns the session that owns the given Claude conversation
+// UUID, regardless of lifecycle (active or archived), or (nil, nil) if no
+// session is tracking that UUID. A Claude conversation UUID identifies the
+// underlying transcript and is globally unique, so no workspace scoping is
+// applied — re-registering an already-imported UUID must find it even if the
+// caller's active workspace differs from the one it was first attributed to.
+func (a *Adapter) GetSessionByUUID(conversationUUID string) (*manifest.Manifest, error) {
+	if conversationUUID == "" {
+		return nil, fmt.Errorf("conversation UUID cannot be empty")
+	}
+
+	if err := a.ApplyMigrations(); err != nil {
+		return nil, fmt.Errorf("failed to apply migrations: %w", err)
+	}
+
+	query := `
+		SELECT id, created_at, updated_at, status, workspace, model, name, harness,
+			context_project, context_purpose, context_tags, context_notes,
+			claude_uuid, tmux_session_name, metadata,
+			permission_mode, permission_mode_updated_at, permission_mode_source,
+			is_test,
+			context_total_tokens, context_used_tokens, context_percentage_used,
+			monitors
+		FROM agm_sessions
+		WHERE claude_uuid = ?
+		LIMIT 1
+	`
+
+	row := a.conn.QueryRow(query, conversationUUID) //nolint:noctx // TODO(context): plumb ctx through this layer
+	m, err := a.scanSession(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "session not found") {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return m, nil
+}
+
 // GetSessionByName returns the first non-archived session matching the given name
 func (a *Adapter) GetSessionByName(name string) (*manifest.Manifest, error) {
 	if name == "" {

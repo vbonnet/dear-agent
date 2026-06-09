@@ -17,7 +17,7 @@ import (
 //
 // Two syntaxes are accepted:
 //
-//	1. Bare id        e.g. "claude-opus-4-7", "gpt-4o", "gemini-2.5-flash"
+//	1. Bare id        e.g. "claude-opus-4-7", "gpt-4o", "gemini-3.5-flash"
 //	2. Prefixed id    e.g. "openai/gpt-4o", "anthropic:claude-opus-4-7",
 //	                  "ollama:llama3.2", "openrouter/anthropic/claude-3-5-sonnet"
 //

@@ -81,6 +81,7 @@ func TestE2E_V2FullWorkflow(t *testing.T) {
 		phaseObj := findPhase(st, phase)
 		if phaseObj == nil {
 			t.Fatalf("Phase %s: not found in status", phase)
+			return
 		}
 		if phaseObj.Status != status.PhaseStatusV2InProgress {
 			t.Fatalf("Phase %s: expected status=in_progress, got %s", phase, phaseObj.Status)
@@ -196,6 +197,7 @@ Integration test specification for Wayfinder V2 E2E workflow.
 		phaseObj = findPhase(st, phase)
 		if phaseObj == nil {
 			t.Fatalf("Phase %s: not found in status after completion", phase)
+			return
 		}
 		if phaseObj.Status != status.PhaseStatusV2Completed {
 			t.Fatalf("Phase %s: expected status=completed, got %s", phase, phaseObj.Status)

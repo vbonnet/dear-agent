@@ -131,6 +131,7 @@ func TestLoadJSONLMalformedLine(t *testing.T) {
 	outcomes, err := a.LoadJSONLString(input)
 	if err == nil {
 		t.Fatal("expected error on malformed JSON")
+		return
 	}
 	if !strings.Contains(err.Error(), "line 2") {
 		t.Errorf("error should mention line 2: %v", err)

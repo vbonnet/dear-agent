@@ -67,6 +67,7 @@ func TestParseHistory(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.errContains)
+					return
 				}
 				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("error %q does not contain %q", err.Error(), tt.errContains)
@@ -121,6 +122,7 @@ func TestParseHistory_PermissionDenied(t *testing.T) {
 	_, _, err := ParseHistory(tmpFile)
 	if err == nil {
 		t.Fatal("expected permission denied error, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "permission denied") {

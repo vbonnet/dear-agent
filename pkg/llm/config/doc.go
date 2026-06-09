@@ -12,7 +12,7 @@
 //	tools:
 //	  ecphory:
 //	    gemini:
-//	      model: gemini-2.0-flash-exp
+//	      model: gemini-3.5-flash
 //	      max_tokens: 8192
 //	    default_family: gemini
 //	  multi-persona-review:
@@ -24,7 +24,7 @@
 //	  anthropic:
 //	    model: claude-3-5-sonnet-20241022
 //	  gemini:
-//	    model: gemini-2.0-flash-exp
+//	    model: gemini-3.5-flash
 //
 // # Usage Example
 //
@@ -35,7 +35,7 @@
 //
 //	// Select model for ecphory with Gemini provider
 //	model := config.SelectModel(config, "ecphory", "gemini")
-//	// Returns: "gemini-2.0-flash-exp" (from tool-specific config)
+//	// Returns: "gemini-3.5-flash" (from tool-specific config)
 //
 //	// Select model for review with Claude (no tool-specific config)
 //	model = config.SelectModel(config, "review", "anthropic")

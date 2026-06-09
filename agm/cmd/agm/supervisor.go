@@ -196,17 +196,17 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 	env := realSupervisorEnv{}
 	if err := checkSupervisorEnv(env, supervisorSkipOAuthCheck); err != nil {
 		// Print to our stderr (so hooks see it) and exit with a stable code.
-		fmt.Fprintln(cmd.ErrOrStderr(), err)
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)
 		os.Exit(2)
 	}
 	bin, err := env.LookPath(supervisorClaudeBin)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "supervisor: cannot locate claude binary %q: %v\n", supervisorClaudeBin, err)
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "supervisor: cannot locate claude binary %q: %v\n", supervisorClaudeBin, err)
 		os.Exit(2)
 	}
 
 	// Announce the role so downstream logs attribute correctly.
-	fmt.Fprintf(cmd.ErrOrStderr(),
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 		"agm supervisor: id=%q primary-for=%q tertiary-for=%q binary=%q\n",
 		supervisorID, supervisorPrimaryFor, supervisorTertiaryFor, bin)
 
@@ -382,7 +382,7 @@ func resolveSupervisorIDs(cmd *cobra.Command, args []string) ([]string, error) {
 	entries, err := os.ReadDir(base)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintln(cmd.OutOrStdout(), "no supervisors registered")
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "no supervisors registered")
 			return nil, nil
 		}
 		return nil, err
@@ -432,7 +432,7 @@ func emitSupervisorStatus(cmd *cobra.Command, rows []supervisorRow) error {
 		return enc.Encode(rows)
 	}
 	w := cmd.OutOrStdout()
-	fmt.Fprintf(w, "%-16s %-12s %-10s %s\n", "SUPERVISOR", "AGE", "STATE", "MESH")
+	_, _ = fmt.Fprintf(w, "%-16s %-12s %-10s %s\n", "SUPERVISOR", "AGE", "STATE", "MESH")
 	for _, r := range rows {
 		age := "—"
 		mesh := ""
@@ -449,7 +449,7 @@ func emitSupervisorStatus(cmd *cobra.Command, rows []supervisorRow) error {
 				state = "NEVER"
 			}
 		}
-		fmt.Fprintf(w, "%-16s %-12s %-10s %s\n", r.ID, age, state, mesh)
+		_, _ = fmt.Fprintf(w, "%-16s %-12s %-10s %s\n", r.ID, age, state, mesh)
 	}
 	return nil
 }

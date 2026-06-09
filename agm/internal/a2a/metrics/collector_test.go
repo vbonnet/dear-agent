@@ -26,6 +26,7 @@ func TestNewCollector(t *testing.T) {
 		}
 		if c == nil {
 			t.Fatal("expected non-nil collector")
+			return
 		}
 		if c.channelsDir != tmpDir {
 			t.Errorf("channelsDir = %q, want %q", c.channelsDir, tmpDir)

@@ -38,6 +38,7 @@ func TestDiskCache_GetSet(t *testing.T) {
 
 	if retrieved == nil {
 		t.Fatal("Get() returned nil")
+		return
 	}
 
 	if retrieved.Email != id.Email {

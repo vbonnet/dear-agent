@@ -6,5 +6,5 @@
 // tsnet. The cmd/dear-agent-api binary wires this handler onto a
 // tailnet listener and adapts tsnet's WhoIs into an Identifier.
 //
-// See docs/adrs/ADR-013-tailscale-api.md for the design.
+// See docs/adr/ADR-013-tailscale-api.md for the design.
 package api

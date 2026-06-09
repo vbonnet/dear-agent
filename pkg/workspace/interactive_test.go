@@ -112,6 +112,7 @@ func TestPromptWorkspace_NonTTY(t *testing.T) {
 	_, err := prompter.PromptWorkspace(workspaces)
 	if err == nil {
 		t.Fatal("expected error in non-TTY mode, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "non-interactive") {
@@ -280,6 +281,7 @@ func TestPromptConfirm_NonTTY(t *testing.T) {
 	_, err := prompter.PromptConfirm("Continue?")
 	if err == nil {
 		t.Fatal("expected error in non-TTY mode, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "non-interactive") {

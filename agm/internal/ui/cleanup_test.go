@@ -220,6 +220,7 @@ func TestCleanupMultiSelect_NoEligible(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("CleanupMultiSelect returned nil result")
+		return
 	}
 	if len(result.ToArchive) != 0 {
 		t.Errorf("expected 0 ToArchive, got %d", len(result.ToArchive))
@@ -238,6 +239,7 @@ func TestCleanupMultiSelect_EmptySessions(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("CleanupMultiSelect returned nil result")
+		return
 	}
 	if len(result.ToArchive) != 0 || len(result.ToDelete) != 0 {
 		t.Error("expected empty result for empty sessions")

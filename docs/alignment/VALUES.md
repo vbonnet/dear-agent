@@ -3,7 +3,8 @@ title: Values
 version: "1.0"
 status: active
 date: "2026-04-05"
-adr_ref: ADR-020
+adr_ref: docs/adr/ADR-002-vroom-execution-architecture
+context_ref: CONTEXT.md
 lexicographic_hierarchy:
   - values_compliance
   - goal_alignment
@@ -19,12 +20,15 @@ evaluation_rule: >
 
 These values govern every VROOM decision. They are evaluated in strict
 lexicographic order: each level is a hard constraint before the next is
-considered.
+considered. This ordering is a **values-prioritization heuristic**; it is
+decoupled from role mechanics (there is no "Verifier" role — see
+[CONTEXT.md](../../CONTEXT.md)).
 
 ## 1. Values Compliance
 
-Every action must conform to this document. The Verifier role rejects work that
-violates declared values regardless of efficiency or goal progress.
+Every action must conform to this document. Verification — a **Secondary
+responsibility** in each task's Primary/Secondary/Tertiary ownership — rejects
+work that violates declared values regardless of efficiency or goal progress.
 
 ## 2. Goal Alignment
 

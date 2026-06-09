@@ -133,7 +133,7 @@ func TestLogCommandAudit_AllKeyCommands(t *testing.T) {
 		cmdErr  error
 	}{
 		{
-			command: "session.select-option",
+			command: "send.select-option",
 			session: "worker-1",
 			args:    map[string]string{"option": "2", "force": "false"},
 		},

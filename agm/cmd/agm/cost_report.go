@@ -45,7 +45,7 @@ func runCostReport(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	filter := &dolt.SessionFilter{
 		ExcludeArchived: !costAll,
@@ -57,14 +57,14 @@ func runCostReport(cmd *cobra.Command, _ []string) error {
 	}
 
 	if len(manifests) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "No sessions found.")
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No sessions found.")
 		return nil
 	}
 
 	totalCost := printCostReport(cmd, manifests)
 
 	if costBudget > 0 && totalCost > costBudget {
-		fmt.Fprintf(cmd.ErrOrStderr(), "\n⚠ BUDGET ALERT: Total spend $%.2f exceeds budget $%.2f (%.0f%% over)\n",
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "\n⚠ BUDGET ALERT: Total spend $%.2f exceeds budget $%.2f (%.0f%% over)\n",
 			totalCost, costBudget, (totalCost-costBudget)/costBudget*100)
 	}
 
@@ -207,9 +207,9 @@ func printCostReport(cmd *cobra.Command, manifests []*manifest.Manifest) float64
 	}
 
 	// MODEL column lets readers verify which price tier was applied.
-	fmt.Fprintf(out, "%-28s %-8s %10s %10s %8s %10s %8s %12s\n",
+	_, _ = fmt.Fprintf(out, "%-28s %-8s %10s %10s %8s %10s %8s %12s\n",
 		"SESSION", "MODEL", "TOKENS IN", "TOKENS OUT", "DURATION", "EST. COST", "COMMITS", "COST/COMMIT")
-	fmt.Fprintln(out, strings.Repeat("─", 108))
+	_, _ = fmt.Fprintln(out, strings.Repeat("─", 108))
 
 	for _, r := range rows {
 		name := r.Name
@@ -221,7 +221,7 @@ func printCostReport(cmd *cobra.Command, manifests []*manifest.Manifest) float64
 			cpc = fmt.Sprintf("$%.2f", r.CostPerCommit)
 		}
 
-		fmt.Fprintf(out, "%-28s %-8s %10s %10s %8s %10s %8s %12s\n",
+		_, _ = fmt.Fprintf(out, "%-28s %-8s %10s %10s %8s %10s %8s %12s\n",
 			name,
 			formatModelCell(r.Model),
 			costFormatTokens(r.TokensIn),
@@ -233,8 +233,8 @@ func printCostReport(cmd *cobra.Command, manifests []*manifest.Manifest) float64
 		)
 	}
 
-	fmt.Fprintln(out, strings.Repeat("─", 108))
-	fmt.Fprintf(out, "%-28s %-8s %10s %10s %8s %10s\n",
+	_, _ = fmt.Fprintln(out, strings.Repeat("─", 108))
+	_, _ = fmt.Fprintf(out, "%-28s %-8s %10s %10s %8s %10s\n",
 		fmt.Sprintf("TOTAL (%d sessions)", len(rows)),
 		"",
 		costFormatTokens(totalIn),
@@ -245,7 +245,7 @@ func printCostReport(cmd *cobra.Command, manifests []*manifest.Manifest) float64
 
 	// Per-model price reference — only list models that actually appeared.
 	shownPrices := map[string]bool{}
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out)
 	for _, r := range rows {
 		key := formatModelCell(r.Model)
 		if shownPrices[key] || key == "?" {
@@ -255,12 +255,12 @@ func printCostReport(cmd *cobra.Command, manifests []*manifest.Manifest) float64
 		if p == pricing.UnknownModel {
 			continue
 		}
-		fmt.Fprintf(out, "Pricing: %-8s $%.2f/M input, $%.2f/M output\n",
+		_, _ = fmt.Fprintf(out, "Pricing: %-8s $%.2f/M input, $%.2f/M output\n",
 			key, p.InputPerMillion, p.OutputPerMillion)
 		shownPrices[key] = true
 	}
 	if unpricedSessions > 0 {
-		fmt.Fprintf(out, "\nNote: %d session(s) had tokens but no known model — costs shown as $0.00\n",
+		_, _ = fmt.Fprintf(out, "\nNote: %d session(s) had tokens but no known model — costs shown as $0.00\n",
 			unpricedSessions)
 	}
 

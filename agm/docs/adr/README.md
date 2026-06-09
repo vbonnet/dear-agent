@@ -2,6 +2,15 @@
 
 This directory contains Architecture Decision Records (ADRs) for AGM (AI/Agent Gateway Manager).
 
+> **Superseded: ADR-020 through ADR-025 (VROOM).** These six ADRs described an
+> inaccurate five-role VROOM model and were misfiled here — VROOM is *above*
+> AGM, not an AGM feature. They are now redirect stubs. The authoritative
+> records are
+> [`docs/adr/ADR-002: VROOM Execution Architecture`](../../../docs/adr/ADR-002-vroom-execution-architecture.md)
+> and the repo-root [`CONTEXT.md`](../../../CONTEXT.md) (vocabulary source of
+> truth). This index below is itself stale (it stops at ADR-011); reindexing is
+> tracked separately.
+
 ## What are ADRs?
 
 ADRs document significant architectural decisions made during the development of AGM. Each ADR captures:
@@ -84,6 +93,12 @@ Each ADR follows this structure:
 ### Data & Storage
 
 **Related to ADR-005**: Manifest versioning and schema evolution
+
+**[ADR-026: Programmatic Archival of Claude Code UI Sessions](ADR-026-claude-ui-session-archival.md)**
+- **Status**: Proposed (2026-05-17)
+- **Summary**: `agm session archive-ui` reconciles the local Claude desktop session store (`claude-code-sessions/.../local_*.json` `isArchived` flip) to declutter the claude.ai/code list — dry-run by default, reversible, no credentials, no delete
+- **Key Decision**: Local `isArchived` reconciler in shared `ops` vs undocumented claude.ai web API, Compliance API, skill-only, or extending `gc`
+- **Impact**: Replaces a ~400-row manual chore; documents the two-namespace session model; avoids cookie harvesting (which the harness correctly blocks)
 
 ---
 

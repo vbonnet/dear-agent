@@ -47,6 +47,7 @@ func TestNewBackendAdapter(t *testing.T) {
 	adapter := NewBackendAdapter(fb)
 	if adapter == nil {
 		t.Fatal("NewBackendAdapter returned nil")
+		return
 	}
 	if adapter.backend != fb {
 		t.Error("adapter.backend should be the wrapped backend")

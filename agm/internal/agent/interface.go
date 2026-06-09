@@ -200,7 +200,7 @@ type Capabilities struct {
 	MaxContextWindow int
 
 	// ModelName is the underlying model identifier.
-	// Examples: "claude-sonnet-4.5", "gpt-4-turbo", "gemini-2.0-flash".
+	// Examples: "claude-sonnet-4.5", "gpt-4-turbo", "gemini-3.5-flash".
 	ModelName string
 }
 

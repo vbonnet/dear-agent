@@ -48,7 +48,7 @@ func run(args []string, stdout, stderr *os.File) int {
 		dryRun      = fs.Bool("dry-run", false, "report what would be written without committing")
 	)
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "Usage: %s [flags] <snapshot.json>\n\nFlags:\n", "workflow-migrate")
+		_, _ = fmt.Fprintf(stderr, "Usage: %s [flags] <snapshot.json>\n\nFlags:\n", "workflow-migrate")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -62,7 +62,7 @@ func run(args []string, stdout, stderr *os.File) int {
 
 	snap, err := readSnapshot(snapPath)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 	wfName := snap.Workflow
@@ -70,7 +70,7 @@ func run(args []string, stdout, stderr *os.File) int {
 		wfName = *workflowArg
 	}
 	if wfName == "" {
-		fmt.Fprintln(stderr, "snapshot has no workflow name; pass --workflow")
+		_, _ = fmt.Fprintln(stderr, "snapshot has no workflow name; pass --workflow")
 		return 2
 	}
 	runID := snap.RunID
@@ -88,23 +88,23 @@ func run(args []string, stdout, stderr *os.File) int {
 		Completed:    snap.Completed,
 	}
 	if *dryRun {
-		fmt.Fprintln(stdout, plan.summary())
+		_, _ = fmt.Fprintln(stdout, plan.summary())
 		return 0
 	}
 
 	ss, err := workflow.OpenSQLiteState(*dbPath)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	defer ss.Close()
+	defer func() { _ = ss.Close() }()
 
 	if err := apply(context.Background(), ss, plan); err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	fmt.Fprintln(stdout, plan.summary())
-	fmt.Fprintf(stdout, "wrote run %s to %s\n", plan.RunID, *dbPath)
+	_, _ = fmt.Fprintln(stdout, plan.summary())
+	_, _ = fmt.Fprintf(stdout, "wrote run %s to %s\n", plan.RunID, *dbPath)
 	return 0
 }
 
@@ -283,4 +283,3 @@ func sortStrings(s []string) {
 		}
 	}
 }
-

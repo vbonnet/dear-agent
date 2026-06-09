@@ -66,6 +66,7 @@ func TestDetect(t *testing.T) {
 	p := d.Detect("cd /repo")
 	if p == nil {
 		t.Fatal("expected violation for 'cd /repo'")
+		return
 	}
 	if p.ID != "cd-command" {
 		t.Errorf("expected pattern 'cd-command', got %q", p.ID)
@@ -74,6 +75,48 @@ func TestDetect(t *testing.T) {
 	p = d.Detect("git status")
 	if p != nil {
 		t.Errorf("expected no violation for 'git status', got %q", p.ID)
+	}
+}
+
+func TestHasPattern(t *testing.T) {
+	db := newTestDB()
+	d, err := NewDetector(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Patterns present in the database, regardless of whether they compile or
+	// are relaxed/consolidated, should be reported as owned.
+	for _, id := range []string{"cd-command", "command-chaining", "file-operations", "relaxed-pattern", "consolidated-pattern"} {
+		if !d.HasPattern(id) {
+			t.Errorf("expected HasPattern(%q) to be true", id)
+		}
+	}
+
+	// IDs not in the database should not be reported as owned.
+	for _, id := range []string{"nonexistent", "", "cd"} {
+		if d.HasPattern(id) {
+			t.Errorf("expected HasPattern(%q) to be false", id)
+		}
+	}
+
+	// A pattern whose regex failed to compile is still owned by the detector
+	// (it lives in the source database even though it never compiled).
+	skipDB := &PatternDatabase{
+		Patterns: []Pattern{{ID: "bad-regex", Regex: `(?=lookahead)`, Reason: "unsupported"}},
+	}
+	sd, err := NewDetector(skipDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sd.HasPattern("bad-regex") {
+		t.Error("HasPattern(\"bad-regex\") = false for a skipped pattern, want true")
+	}
+
+	// Nil receiver and nil database are safe and report no membership.
+	var nilDetector *ViolationDetector
+	if nilDetector.HasPattern("anything") {
+		t.Error("nil detector HasPattern = true, want false")
 	}
 }
 
@@ -186,6 +229,7 @@ func TestValidateCommandOrderMatters(t *testing.T) {
 	p := d.ValidateCommand("cd /repo && make build")
 	if p == nil {
 		t.Fatal("expected violation")
+		return
 	}
 	if p.ID != "cd-command" {
 		t.Errorf("expected cd-command (order 20) to match first, got %q", p.ID)

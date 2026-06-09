@@ -41,7 +41,7 @@ The system SHALL support multiple provider implementations:
   - Max concurrency: 5 concurrent requests
 
 - **FR-2.2**: Vertex AI Gemini provider using Google Cloud
-  - Model: gemini-2.0-flash-exp
+  - Model: gemini-3.5-flash
   - Project ID from GOOGLE_CLOUD_PROJECT
   - Location from VERTEX_LOCATION (default: us-central1)
   - Supports structured output (JSON mode)
@@ -195,7 +195,7 @@ ecphory:
     vertexai:
       project_id_env: GOOGLE_CLOUD_PROJECT
       location: us-central1
-      model: gemini-2.0-flash-exp
+      model: gemini-3.5-flash
 
     vertexai-claude:
       project_id_env: GOOGLE_CLOUD_PROJECT
