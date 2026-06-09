@@ -64,6 +64,9 @@ func NewFromEndpoint(ctx context.Context, invokeURL string) (*Client, error) {
 // follow-up message. answer may be nil only if the caller is confident
 // the agent will never pause — otherwise a pause returns an error.
 func (c *Client) Send(ctx context.Context, prompt string, answer AnswerFunc) (string, error) {
+	if c == nil || c.inner == nil {
+		return "", errors.New("a2a/client: client is not initialized")
+	}
 	msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.TextPart{Text: prompt})
 	return c.drive(ctx, &a2a.MessageSendParams{Message: msg}, answer)
 }
@@ -81,9 +84,15 @@ func (c *Client) drive(ctx context.Context, params *a2a.MessageSendParams, answe
 		case *a2a.Message:
 			// The agent replied with a bare Message (no task) — common
 			// for one-shot exchanges.
+			if r == nil {
+				return "", errors.New("a2a/client: send returned a nil *a2a.Message")
+			}
 			return extractText(r), nil
 
 		case *a2a.Task:
+			if r == nil {
+				return "", errors.New("a2a/client: send returned a nil *a2a.Task")
+			}
 			switch r.Status.State {
 			case a2a.TaskStateCompleted:
 				return finalAgentText(r), nil
@@ -171,6 +180,9 @@ func finalAgentText(t *a2a.Task) string {
 		return txt
 	}
 	for _, msg := range slices.Backward(t.History) {
+		if msg == nil {
+			continue
+		}
 		if msg.Role == a2a.MessageRoleAgent {
 			return extractText(msg)
 		}

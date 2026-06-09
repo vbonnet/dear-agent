@@ -127,6 +127,15 @@ func (s *Server) Start() error {
 	s.mu.Unlock()
 
 	go func() {
+		// Guard the serving goroutine: a panic in the HTTP stack must not
+		// crash the whole process. Convert it into a serveCh error so
+		// Shutdown observes it instead of the process aborting.
+		defer func() {
+			if r := recover(); r != nil {
+				s.serveCh <- fmt.Errorf("a2a: serve goroutine panic: %v", r)
+				close(s.serveCh)
+			}
+		}()
 		err := s.http.Serve(s.listener)
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
@@ -161,8 +170,20 @@ func (s *Server) CardBaseURL() string {
 	return fmt.Sprintf("http://%s", s.Addr())
 }
 
-// Shutdown gracefully stops the server.
+// Shutdown gracefully stops the server. It is safe to call before Start:
+// in that case there is no serving goroutine to wait on, so it simply
+// closes the listener and returns.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	started := s.started
+	s.mu.Unlock()
+
+	if !started {
+		// Never served: no goroutine will ever write to serveCh, so
+		// waiting on it would block forever. Just release the listener.
+		return s.listener.Close()
+	}
+
 	if err := s.http.Shutdown(ctx); err != nil {
 		return err
 	}
