@@ -136,9 +136,11 @@ instead of bypassing them.
 **When to dogfood — by default, for any non-trivial task in this repo:**
 
 - **AGM** for session orchestration: spawn isolated work via
-  `agm new` / `agm send` instead of opening ad-hoc terminals; use
-  `agm acceptance show` at the start of a task and check
-  `agm admin doctor` if something looks off.
+  `agm session new` / `agm send` instead of opening ad-hoc terminals;
+  read the `acceptance-criteria:` block of `.dear-agent.yml` at the
+  start of a task (the `pkg/acceptance` loader formalizes it — there is
+  no `agm acceptance` subcommand) and check `agm admin doctor` if
+  something looks off.
 - **VROOM** for multi-step or governance-relevant work: route consequential
   decisions through the supervisory mesh (the MISSION.md framework), so the
   append-only audit log captures rationale and gates.
