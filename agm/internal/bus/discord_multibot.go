@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -55,7 +56,7 @@ type guildBotClient interface {
 	ChannelMessagesBulkDelete(channelID string, messageIDs []string) error
 
 	// AddHandler registers a discordgo gateway handler. Returns a remover.
-	AddHandler(handler interface{}) func()
+	AddHandler(handler any) func()
 
 	// Open connects the gateway websocket (only the listener calls this).
 	Open() error
@@ -85,7 +86,7 @@ func (g *guildBotSession) ChannelMessagesBulkDelete(channelID string, messageIDs
 	return g.s.ChannelMessagesBulkDelete(channelID, messageIDs)
 }
 
-func (g *guildBotSession) AddHandler(handler interface{}) func() { return g.s.AddHandler(handler) }
+func (g *guildBotSession) AddHandler(handler any) func() { return g.s.AddHandler(handler) }
 func (g *guildBotSession) Open() error                           { return g.s.Open() }
 func (g *guildBotSession) Close() error                          { return g.s.Close() }
 
@@ -239,13 +240,15 @@ func (a *MultiBotDiscordAdapter) Start(ctx context.Context) error {
 		}
 		c, err := a.newClient(ag.Token)
 		if err != nil {
+			_ = a.Stop() // close any already-built clients; don't leak them
 			return fmt.Errorf("discord-multibot: agent %q: %w", ag.Name, err)
 		}
+		ag.client = c
 		me, err := c.Me()
 		if err != nil {
+			_ = a.Stop() // close this client and earlier ones; don't leak them
 			return fmt.Errorf("discord-multibot: agent %q identify: %w", ag.Name, err)
 		}
-		ag.client = c
 		ag.userID = me.ID
 
 		a.mu.Lock()
@@ -266,7 +269,7 @@ func (a *MultiBotDiscordAdapter) Start(ctx context.Context) error {
 	a.listener = a.Agents[0].client
 	a.listener.AddHandler(a.handleMessageCreate)
 	if err := a.listener.Open(); err != nil {
-		a.unregisterAll()
+		_ = a.Stop() // unregister sessions AND close every client; don't leak them
 		return fmt.Errorf("discord-multibot: open listener gateway: %w", err)
 	}
 	a.mu.Lock()
@@ -301,7 +304,7 @@ func (a *MultiBotDiscordAdapter) unregisterAll() {
 
 // handleMessageCreate routes a channel message to every mentioned agent.
 // Signature mirrors discord.go's proven handler shape (interface{} first arg).
-func (a *MultiBotDiscordAdapter) handleMessageCreate(_ interface{}, m *discordgo.MessageCreate) {
+func (a *MultiBotDiscordAdapter) handleMessageCreate(_ any, m *discordgo.MessageCreate) {
 	if m == nil || m.Author == nil || m.Author.Bot {
 		return
 	}
@@ -444,7 +447,7 @@ func chunkMessage(s string, limit int) []string {
 }
 
 func lastIndexRune(r []rune, target rune) int {
-	for i := len(r) - 1; i >= 0; i-- {
+	for i := range slices.Backward(r) {
 		if r[i] == target {
 			return i
 		}
@@ -473,9 +476,12 @@ func ResetChannel(client guildBotClient, channelID string, logger *slog.Logger) 
 		logger = slog.Default()
 	}
 	deleted := 0
-	before := ""
 	for {
-		msgs, err := client.ChannelMessages(channelID, 100, before, "", "")
+		// Page with an empty before each iteration: every message returned here
+		// is about to be deleted, so the previous page's IDs drop out and the
+		// newest-remaining message advances the window naturally. Using the last
+		// message's ID as the cursor would point at a just-deleted message.
+		msgs, err := client.ChannelMessages(channelID, 100, "", "", "")
 		if err != nil {
 			return deleted, fmt.Errorf("discord-reset: list messages: %w", err)
 		}
@@ -485,7 +491,6 @@ func ResetChannel(client guildBotClient, channelID string, logger *slog.Logger) 
 		var bulk []string
 		cutoff := time.Now().Add(-14 * 24 * time.Hour)
 		for _, msg := range msgs {
-			before = msg.ID // page older on next iteration
 			if msg.Timestamp.After(cutoff) {
 				bulk = append(bulk, msg.ID)
 				continue
@@ -495,7 +500,14 @@ func ResetChannel(client guildBotClient, channelID string, logger *slog.Logger) 
 			}
 			deleted++
 		}
-		if len(bulk) > 0 {
+		// ChannelMessagesBulkDelete rejects batches with fewer than 2 IDs, so a
+		// lone recent message must go through the single-delete path instead.
+		if len(bulk) == 1 {
+			if err := client.ChannelMessageDelete(channelID, bulk[0]); err != nil {
+				return deleted, fmt.Errorf("discord-reset: delete %s: %w", bulk[0], err)
+			}
+			deleted++
+		} else if len(bulk) > 1 {
 			if err := client.ChannelMessagesBulkDelete(channelID, bulk); err != nil {
 				return deleted, fmt.Errorf("discord-reset: bulk delete: %w", err)
 			}

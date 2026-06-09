@@ -262,6 +262,11 @@ func cmdServe(args []string) error {
 				Logger:          logger,
 			}
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("discord-multibot portal panicked", "panic", r)
+					}
+				}()
 				if err := portal.Start(ctx); err != nil {
 					logger.Error("discord-multibot portal stopped with error", "err", err)
 				}

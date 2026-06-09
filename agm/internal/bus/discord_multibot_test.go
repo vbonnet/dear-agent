@@ -24,7 +24,7 @@ type mockGuildClient struct {
 	openErr   error
 	sendErr   error
 	closed    bool
-	handlers  []interface{}
+	handlers  []any
 }
 
 type sentMsg struct {
@@ -69,7 +69,7 @@ func (m *mockGuildClient) ChannelMessagesBulkDelete(channelID string, ids []stri
 	return nil
 }
 
-func (m *mockGuildClient) AddHandler(h interface{}) func() {
+func (m *mockGuildClient) AddHandler(h any) func() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.handlers = append(m.handlers, h)
@@ -323,13 +323,18 @@ func TestHandleMessageCreate_OfflineAgentPostsNotice(t *testing.T) {
 
 func TestResetChannel(t *testing.T) {
 	now := time.Now()
+	// Each page carries >=2 recent messages so bulk delete (which Discord
+	// rejects for <2 IDs) is genuinely exercised; the lone-recent case is
+	// covered separately by TestResetChannel_SingleRecentMessage.
 	m := &mockGuildClient{pages: [][]*discordgo.Message{
 		{
 			{ID: "a", Timestamp: now.Add(-1 * time.Hour)},       // recent -> bulk
+			{ID: "a2", Timestamp: now.Add(-90 * time.Minute)},   // recent -> bulk
 			{ID: "b", Timestamp: now.Add(-20 * 24 * time.Hour)}, // old -> single
 		},
 		{
-			{ID: "c", Timestamp: now.Add(-2 * time.Hour)}, // recent -> bulk
+			{ID: "c", Timestamp: now.Add(-2 * time.Hour)},  // recent -> bulk
+			{ID: "c2", Timestamp: now.Add(-3 * time.Hour)}, // recent -> bulk
 		},
 		nil, // end
 	}}
@@ -337,14 +342,40 @@ func TestResetChannel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	if n != 3 {
-		t.Errorf("deleted = %d, want 3", n)
+	if n != 5 {
+		t.Errorf("deleted = %d, want 5", n)
 	}
 	if len(m.singleDel) != 1 || m.singleDel[0] != "b" {
 		t.Errorf("single deletes = %v, want [b]", m.singleDel)
 	}
 	if len(m.bulkDel) != 2 {
 		t.Errorf("expected two bulk-delete calls, got %d", len(m.bulkDel))
+	}
+}
+
+// TestResetChannel_SingleRecentMessage covers the case where a page yields
+// exactly one recent message: Discord's bulk-delete rejects batches of <2, so
+// the lone message must fall through to the single-delete path.
+func TestResetChannel_SingleRecentMessage(t *testing.T) {
+	now := time.Now()
+	m := &mockGuildClient{pages: [][]*discordgo.Message{
+		{
+			{ID: "x", Timestamp: now.Add(-1 * time.Hour)}, // lone recent -> single delete, NOT bulk
+		},
+		nil, // end
+	}}
+	n, err := ResetChannel(m, "chan-y", nil)
+	if err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("deleted = %d, want 1", n)
+	}
+	if len(m.singleDel) != 1 || m.singleDel[0] != "x" {
+		t.Errorf("single deletes = %v, want [x]", m.singleDel)
+	}
+	if len(m.bulkDel) != 0 {
+		t.Errorf("expected no bulk-delete calls for a lone message, got %d", len(m.bulkDel))
 	}
 }
 
