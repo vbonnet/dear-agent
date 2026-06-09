@@ -1,7 +1,7 @@
 name: Security Audit
 
-# Daily defense-in-depth scan that complements security-scan.yml (govulncheck
-# on PRs). This workflow inspects the CI surface itself:
+# Daily defense-in-depth scan that complements the govulncheck gate in ci.yml
+# (run on every PR). This workflow inspects the CI surface itself:
 #
 #   1. govulncheck against the current main (catches transitive bumps that
 #      land between PRs).
@@ -44,9 +44,9 @@ jobs:
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
-      # Mirrors security-scan.yml's package-mode + allowlist filter so the
-      # daily run agrees with the PR gate. See security-scan.yml for the
-      # rationale behind `-scan package` and the GO-2025-3884 entry.
+      # Mirrors ci.yml's govulncheck package-mode + allowlist filter so the
+      # daily run agrees with the PR gate. See ci.yml's `govulncheck` job for
+      # the rationale behind `-scan package` and the GO-2025-3884 entry.
       - name: Run govulncheck
         run: |
           set -euo pipefail
