@@ -59,6 +59,7 @@ func (e *Emitter) EmitHandedOff(p HandedOffPayload) {
 // dropped (fire-and-forget).
 func (e *Emitter) emit(topic string, payload interface{}) {
 	go func() {
+		defer func() { _ = recover() }() // fire-and-forget: never crash the caller
 		data, err := structToMap(payload)
 		if err != nil {
 			return
