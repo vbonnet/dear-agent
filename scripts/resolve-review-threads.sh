@@ -35,6 +35,7 @@ command -v jq >/dev/null || die "jq not found"
 #   {id, isResolved, isOutdated, path, author, body}
 _list_threads() {
   local owner=$1 repo=$2 pr=$3
+  # shellcheck disable=SC2016  # $vars below are GraphQL query variables, not shell — must not expand
   gh api graphql -f owner="$owner" -f repo="$repo" -F pr="$pr" -f query='
     query($owner:String!, $repo:String!, $pr:Int!) {
       repository(owner:$owner, name:$repo) {
@@ -64,6 +65,7 @@ _list_threads() {
 
 _resolve() {
   local thread=$1
+  # shellcheck disable=SC2016  # $threadId is a GraphQL variable, not shell — must not expand
   gh api graphql -f threadId="$thread" -f query='
     mutation($threadId:ID!) {
       resolveReviewThread(input:{threadId:$threadId}) {
@@ -74,6 +76,7 @@ _resolve() {
 
 _unresolve() {
   local thread=$1
+  # shellcheck disable=SC2016  # $threadId is a GraphQL variable, not shell — must not expand
   gh api graphql -f threadId="$thread" -f query='
     mutation($threadId:ID!) {
       unresolveReviewThread(input:{threadId:$threadId}) {
@@ -118,7 +121,8 @@ case "$cmd" in
     echo "resolved $n thread(s)"
     ;;
   *)
-    grep '^#' "$0" | sed 's/^# \{0,1\}//'
+    # Print the header comment block as usage help (skip the shebang on line 1).
+    sed '1d' "$0" | grep '^#' | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac
