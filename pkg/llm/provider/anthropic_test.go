@@ -18,6 +18,7 @@ func TestNewAnthropicProvider(t *testing.T) {
 
 		if provider == nil {
 			t.Fatal("Expected non-nil provider")
+			return
 		}
 
 		if provider.Name() != "anthropic" {

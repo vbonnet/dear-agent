@@ -36,6 +36,7 @@ func TestSessionCompactFlags(t *testing.T) {
 			flag := sessionCompactCmd.Flags().Lookup(tt.flag)
 			if flag == nil {
 				t.Fatalf("--%s flag should be registered", tt.flag)
+				return
 			}
 			if flag.DefValue != tt.defValue {
 				t.Errorf("--%s default = %q, want %q", tt.flag, flag.DefValue, tt.defValue)
@@ -64,6 +65,7 @@ func TestSessionCompactTimeoutDefault(t *testing.T) {
 	flag := sessionCompactCmd.Flags().Lookup("timeout")
 	if flag == nil {
 		t.Fatal("--timeout flag should be registered")
+		return
 	}
 
 	// Parse the default value to verify it's a valid duration

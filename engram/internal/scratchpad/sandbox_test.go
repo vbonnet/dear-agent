@@ -315,6 +315,7 @@ func TestExecute_UnsupportedLanguage(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("Expected error for unsupported language, got nil")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "unsupported language") {

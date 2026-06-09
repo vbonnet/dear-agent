@@ -39,6 +39,7 @@ func TestNewBuildLoop(t *testing.T) {
 
 			if bl == nil {
 				t.Fatal("NewBuildLoop() returned nil")
+				return
 			}
 			if bl.currentState != StateTestFirst {
 				t.Errorf("initial state = %v, want %v", bl.currentState, StateTestFirst)

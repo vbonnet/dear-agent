@@ -51,27 +51,43 @@ func SendMessage(ctx *OpContext, req *SendMessageRequest) (*SendMessageResult, e
 		return nil, ErrSessionArchived(m.Name)
 	}
 
-	// Use manager backend for delivery if available
-	if ctx.Manager != nil {
-		tmuxName := m.Tmux.SessionName
-		if tmuxName == "" {
-			tmuxName = m.Name
-		}
-		result, sendErr := ctx.Manager.SendMessage(context.Background(), manager.SessionID(tmuxName), req.Message)
-		delivered := sendErr == nil && result.Delivered
+	// Resolve the tmux session name once; both delivery paths target it.
+	tmuxName := m.Tmux.SessionName
+	if tmuxName == "" {
+		tmuxName = m.Name
+	}
+
+	newResult := func(delivered bool) *SendMessageResult {
 		return &SendMessageResult{
 			Operation:     "send_message",
 			Recipient:     m.Name,
 			MessageLength: len(req.Message),
 			Delivered:     delivered,
-		}, sendErr
+		}
 	}
 
-	// Legacy stub: no backend available for actual delivery
-	return &SendMessageResult{
-		Operation:     "send_message",
-		Recipient:     m.Name,
-		MessageLength: len(req.Message),
-		Delivered:     false,
-	}, nil
+	// Preferred path: deliver through the manager.Backend abstraction.
+	if ctx.Manager != nil {
+		result, sendErr := ctx.Manager.SendMessage(context.Background(), manager.SessionID(tmuxName), req.Message)
+		return newResult(sendErr == nil && result.Delivered), sendErr
+	}
+
+	// Legacy path: no manager backend was wired in. Deliver directly through
+	// the tmux abstraction when one is available — this is the same underlying
+	// send-keys mechanism the manager backend uses, so callers constructed with
+	// only a Tmux client (rather than the newer Backend) still reach the
+	// recipient instead of silently dropping the message. This closes the
+	// long-standing "AGM message delivery is undeliverable" gap (ce-6as.36).
+	if ctx.Tmux != nil {
+		if err := ctx.Tmux.SendKeys(tmuxName, req.Message); err != nil {
+			return newResult(false), err
+		}
+		return newResult(true), nil
+	}
+
+	// No delivery mechanism configured at all (neither a manager Backend nor a
+	// Tmux client). Report non-delivery without an error: best-effort callers
+	// such as stall recovery rely on this to surface "could not send" via the
+	// Delivered flag rather than failing the whole operation.
+	return newResult(false), nil
 }

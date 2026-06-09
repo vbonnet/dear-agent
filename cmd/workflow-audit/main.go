@@ -57,21 +57,21 @@ func run(args []string, stdout, stderr *os.File) int {
 		usage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "workflow-audit: unknown subcommand %q\n\n", sub)
+		_, _ = fmt.Fprintf(stderr, "workflow-audit: unknown subcommand %q\n\n", sub)
 		usage(stderr)
 		return 2
 	}
 }
 
 func usage(w *os.File) {
-	fmt.Fprintln(w, "Usage: workflow-audit <subcommand> [flags]")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Subcommands:")
-	fmt.Fprintln(w, "  run     execute the configured audits for a cadence")
-	fmt.Fprintln(w, "  list    list findings (filterable)")
-	fmt.Fprintln(w, "  show    print one finding in full")
-	fmt.Fprintln(w, "  ack     mark a finding as acknowledged")
-	fmt.Fprintln(w, "  resolve mark a finding as resolved")
+	_, _ = fmt.Fprintln(w, "Usage: workflow-audit <subcommand> [flags]")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "Subcommands:")
+	_, _ = fmt.Fprintln(w, "  run     execute the configured audits for a cadence")
+	_, _ = fmt.Fprintln(w, "  list    list findings (filterable)")
+	_, _ = fmt.Fprintln(w, "  show    print one finding in full")
+	_, _ = fmt.Fprintln(w, "  ack     mark a finding as acknowledged")
+	_, _ = fmt.Fprintln(w, "  resolve mark a finding as resolved")
 }
 
 // commonStoreFlags wires the --db flag every subcommand needs.
@@ -92,13 +92,13 @@ func defaultDBPath() string {
 func openStore(stderr *os.File, path string) (*audit.SQLiteStore, bool) {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			fmt.Fprintf(stderr, "workflow-audit: create db dir %s: %v\n", dir, err)
+			_, _ = fmt.Fprintf(stderr, "workflow-audit: create db dir %s: %v\n", dir, err)
 			return nil, false
 		}
 	}
 	store, err := audit.OpenSQLiteStore(path)
 	if err != nil {
-		fmt.Fprintf(stderr, "workflow-audit: open store %s: %v\n", path, err)
+		_, _ = fmt.Fprintf(stderr, "workflow-audit: open store %s: %v\n", path, err)
 		return nil, false
 	}
 	return store, true
@@ -124,19 +124,19 @@ func runAudit(args []string, stdout, stderr *os.File) int {
 
 	root, err := filepath.Abs(*repoRoot)
 	if err != nil {
-		fmt.Fprintf(stderr, "workflow-audit: abs %s: %v\n", *repoRoot, err)
+		_, _ = fmt.Fprintf(stderr, "workflow-audit: abs %s: %v\n", *repoRoot, err)
 		return 1
 	}
 
 	cfg, err := auditconfig.Load(root)
 	if err != nil {
-		fmt.Fprintf(stderr, "workflow-audit: load config: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "workflow-audit: load config: %v\n", err)
 		return 1
 	}
 
 	plan, err := auditconfig.BuildPlan(cfg, root, audit.Cadence(*cadence), audit.Default, "cli")
 	if err != nil {
-		fmt.Fprintf(stderr, "workflow-audit: build plan: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "workflow-audit: build plan: %v\n", err)
 		return 1
 	}
 	plan.DryRun = *dryRun
@@ -153,7 +153,7 @@ func runAudit(args []string, stdout, stderr *os.File) int {
 
 	report, err := runner.Run(context.Background(), plan)
 	if err != nil {
-		fmt.Fprintf(stderr, "workflow-audit: run failed: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "workflow-audit: run failed: %v\n", err)
 		if report != nil {
 			printReport(stdout, report)
 		}
@@ -167,7 +167,7 @@ func runAudit(args []string, stdout, stderr *os.File) int {
 }
 
 func printReport(w *os.File, r *audit.RunReport) {
-	fmt.Fprintf(w, "audit run %s state=%s repo=%s cadence=%s findings_open=%d new=%d resolved=%d\n",
+	_, _ = fmt.Fprintf(w, "audit run %s state=%s repo=%s cadence=%s findings_open=%d new=%d resolved=%d\n",
 		r.AuditRun.AuditRunID, r.AuditRun.State, r.AuditRun.Repo, r.AuditRun.Cadence,
 		r.AuditRun.FindingsOpen, r.AuditRun.FindingsNew, r.AuditRun.FindingsResolved)
 	for _, oc := range r.CheckOutcomes {
@@ -175,16 +175,16 @@ func printReport(w *os.File, r *audit.RunReport) {
 		if oc.Err != nil {
 			errStr = " err=" + oc.Err.Error()
 		}
-		fmt.Fprintf(w, "  - check=%s tree=%s status=%s findings=%d duration=%s%s\n",
+		_, _ = fmt.Fprintf(w, "  - check=%s tree=%s status=%s findings=%d duration=%s%s\n",
 			oc.CheckID, oc.WorkingDir, oc.Result.Status, len(oc.Findings), oc.Result.Duration, errStr)
 		for _, f := range oc.Findings {
-			fmt.Fprintf(w, "      %s %s %s\n", f.Severity, f.FindingID, f.Title)
+			_, _ = fmt.Fprintf(w, "      %s %s %s\n", f.Severity, f.FindingID, f.Title)
 		}
 	}
 	if len(r.Proposals) > 0 {
-		fmt.Fprintf(w, "  proposals (%d):\n", len(r.Proposals))
+		_, _ = fmt.Fprintf(w, "  proposals (%d):\n", len(r.Proposals))
 		for _, p := range r.Proposals {
-			fmt.Fprintf(w, "    - %s %s\n", p.Layer, p.Title)
+			_, _ = fmt.Fprintf(w, "    - %s %s\n", p.Layer, p.Title)
 		}
 	}
 }
@@ -212,30 +212,30 @@ func runList(args []string, stdout, stderr *os.File) int {
 	if *state != "all" {
 		filter.State = audit.FindingState(*state)
 		if !filter.State.IsValid() {
-			fmt.Fprintf(stderr, "workflow-audit: invalid state %q\n", *state)
+			_, _ = fmt.Fprintf(stderr, "workflow-audit: invalid state %q\n", *state)
 			return 2
 		}
 	}
 	if *severity != "" {
 		filter.Severity = audit.Severity(*severity)
 		if !filter.Severity.IsValid() {
-			fmt.Fprintf(stderr, "workflow-audit: invalid severity %q\n", *severity)
+			_, _ = fmt.Fprintf(stderr, "workflow-audit: invalid severity %q\n", *severity)
 			return 2
 		}
 	}
 
 	findings, err := store.ListFindings(context.Background(), filter)
 	if err != nil {
-		fmt.Fprintf(stderr, "workflow-audit: list: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "workflow-audit: list: %v\n", err)
 		return 1
 	}
 	if len(findings) == 0 {
-		fmt.Fprintln(stdout, "no findings")
+		_, _ = fmt.Fprintln(stdout, "no findings")
 		return 0
 	}
-	fmt.Fprintf(stdout, "%-4s  %-36s  %-22s  %s\n", "SEV", "ID", "CHECK", "TITLE")
+	_, _ = fmt.Fprintf(stdout, "%-4s  %-36s  %-22s  %s\n", "SEV", "ID", "CHECK", "TITLE")
 	for _, f := range findings {
-		fmt.Fprintf(stdout, "%-4s  %-36s  %-22s  %s\n", f.Severity, f.FindingID, f.CheckID, truncateTitle(f.Title, 80))
+		_, _ = fmt.Fprintf(stdout, "%-4s  %-36s  %-22s  %s\n", f.Severity, f.FindingID, f.CheckID, truncateTitle(f.Title, 80))
 	}
 	return 0
 }
@@ -255,7 +255,7 @@ func runShow(args []string, stdout, stderr *os.File) int {
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "workflow-audit: show <finding-id>")
+		_, _ = fmt.Fprintln(stderr, "workflow-audit: show <finding-id>")
 		return 2
 	}
 	store, ok := openStore(stderr, common.dbPath)
@@ -266,23 +266,23 @@ func runShow(args []string, stdout, stderr *os.File) int {
 
 	f, err := store.GetFinding(context.Background(), fs.Arg(0))
 	if err != nil {
-		fmt.Fprintf(stderr, "workflow-audit: show: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "workflow-audit: show: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "id:          %s\n", f.FindingID)
-	fmt.Fprintf(stdout, "repo:        %s\n", f.Repo)
-	fmt.Fprintf(stdout, "check:       %s\n", f.CheckID)
-	fmt.Fprintf(stdout, "severity:    %s\n", f.Severity)
-	fmt.Fprintf(stdout, "state:       %s\n", f.State)
-	fmt.Fprintf(stdout, "first_seen:  %s\n", f.FirstSeen.Format("2006-01-02 15:04:05"))
-	fmt.Fprintf(stdout, "last_seen:   %s\n", f.LastSeen.Format("2006-01-02 15:04:05"))
-	fmt.Fprintf(stdout, "title:       %s\n", f.Title)
-	fmt.Fprintln(stdout, "detail:")
+	_, _ = fmt.Fprintf(stdout, "id:          %s\n", f.FindingID)
+	_, _ = fmt.Fprintf(stdout, "repo:        %s\n", f.Repo)
+	_, _ = fmt.Fprintf(stdout, "check:       %s\n", f.CheckID)
+	_, _ = fmt.Fprintf(stdout, "severity:    %s\n", f.Severity)
+	_, _ = fmt.Fprintf(stdout, "state:       %s\n", f.State)
+	_, _ = fmt.Fprintf(stdout, "first_seen:  %s\n", f.FirstSeen.Format("2006-01-02 15:04:05"))
+	_, _ = fmt.Fprintf(stdout, "last_seen:   %s\n", f.LastSeen.Format("2006-01-02 15:04:05"))
+	_, _ = fmt.Fprintf(stdout, "title:       %s\n", f.Title)
+	_, _ = fmt.Fprintln(stdout, "detail:")
 	for _, ln := range strings.Split(f.Detail, "\n") {
-		fmt.Fprintf(stdout, "  %s\n", ln)
+		_, _ = fmt.Fprintf(stdout, "  %s\n", ln)
 	}
 	if f.Suggested.Strategy != audit.StrategyUnspecified {
-		fmt.Fprintf(stdout, "suggested:   strategy=%s command=%q\n", f.Suggested.Strategy, f.Suggested.Command)
+		_, _ = fmt.Fprintf(stdout, "suggested:   strategy=%s command=%q\n", f.Suggested.Strategy, f.Suggested.Command)
 	}
 	return 0
 }
@@ -304,7 +304,7 @@ func runStateChange(name string, target audit.FindingState, args []string, stdou
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintf(stderr, "workflow-audit: %s <finding-id>\n", name)
+		_, _ = fmt.Fprintf(stderr, "workflow-audit: %s <finding-id>\n", name)
 		return 2
 	}
 	store, ok := openStore(stderr, common.dbPath)
@@ -315,9 +315,9 @@ func runStateChange(name string, target audit.FindingState, args []string, stdou
 
 	f, err := store.SetFindingState(context.Background(), fs.Arg(0), target, *note)
 	if err != nil {
-		fmt.Fprintf(stderr, "workflow-audit: %s: %v\n", name, err)
+		_, _ = fmt.Fprintf(stderr, "workflow-audit: %s: %v\n", name, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "%s %s state=%s\n", name, f.FindingID, f.State)
+	_, _ = fmt.Fprintf(stdout, "%s %s state=%s\n", name, f.FindingID, f.State)
 	return 0
 }

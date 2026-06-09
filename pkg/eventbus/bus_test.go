@@ -12,6 +12,7 @@ func TestNewLocalBus(t *testing.T) {
 	bus := NewLocalBus()
 	if bus == nil {
 		t.Fatal("NewLocalBus() returned nil")
+		return
 	}
 	if bus.handlers == nil {
 		t.Error("handlers map is nil")

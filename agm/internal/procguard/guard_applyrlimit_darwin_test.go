@@ -12,6 +12,7 @@ func TestApplyNprocLimit(t *testing.T) {
 	err := ApplyNprocLimit(1, 128)
 	if err == nil {
 		t.Fatal("expected error: prlimit not supported on macOS")
+		return
 	}
 	if !strings.Contains(err.Error(), "not supported") {
 		t.Errorf("expected 'not supported' in error, got: %v", err)

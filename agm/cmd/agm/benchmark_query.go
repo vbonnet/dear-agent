@@ -112,8 +112,8 @@ func runBenchmarkQuery(cmd *cobra.Command, args []string) error {
 
 func printBenchmarkTable(report *benchmark.BenchmarkReport) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tDURATION\tTARGET\tSTATUS")
-	fmt.Fprintln(w, "----\t--------\t------\t------")
+	_, _ = fmt.Fprintln(w, "NAME\tDURATION\tTARGET\tSTATUS")
+	_, _ = fmt.Fprintln(w, "----\t--------\t------\t------")
 
 	for _, eval := range report.Evaluations {
 		dur := formatDuration(eval.Result.Duration)
@@ -129,10 +129,10 @@ func printBenchmarkTable(report *benchmark.BenchmarkReport) {
 			}
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", eval.Result.Name, dur, target, status)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", eval.Result.Name, dur, target, status)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 
 	fmt.Printf("\nSummary: %d passed, %d failed, %d no target",
 		report.Summary.Passed, report.Summary.Failed, report.Summary.NoTarget)

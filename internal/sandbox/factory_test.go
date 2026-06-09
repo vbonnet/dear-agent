@@ -68,6 +68,7 @@ func TestNewMockProvider(t *testing.T) {
 
 	if provider == nil {
 		t.Fatal("Provider is nil")
+		return
 	}
 
 	if provider.Name() != "mock" {

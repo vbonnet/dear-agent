@@ -66,7 +66,7 @@ key, _ := auth.GetAPIKey("gemini")
 tools:
   ecphory:
     gemini:
-      model: gemini-2.0-flash-exp
+      model: gemini-3.5-flash
       max_tokens: 8192
     anthropic:
       model: claude-3-5-sonnet-20241022
@@ -86,7 +86,7 @@ defaults:
   anthropic:
     model: claude-3-5-sonnet-20241022
   gemini:
-    model: gemini-2.0-flash-exp
+    model: gemini-3.5-flash
 ```
 
 **API**:
@@ -112,7 +112,7 @@ config, _ := config.LoadConfig("~/.engram/llm-config.yaml")
 
 // Cost-optimized tool
 model := config.SelectModel(config, "ecphory", "gemini")
-// Returns: "gemini-2.0-flash-exp"
+// Returns: "gemini-3.5-flash"
 
 // High-stakes tool
 model = config.SelectModel(config, "multi-persona-review", "anthropic")
@@ -330,11 +330,11 @@ Created 3 SKILL definitions in `~/.claude/skills/`:
    - Natural language detection: "using Gemini", "with Claude"
 
 2. **review-spec.md** - SPEC.md validation
-   - Default model: `gemini-2.0-flash-exp` (cost-optimized)
+   - Default model: `gemini-3.5-flash` (cost-optimized)
    - LLM-as-judge with 0-10 scoring
 
 3. **ecphory-explain.md** - Semantic search
-   - Default model: `gemini-2.0-flash-exp` (ultra-cheap)
+   - Default model: `gemini-3.5-flash` (ultra-cheap)
    - Shows tier-by-tier retrieval and cost breakdown
 
 ### Gemini CLI Agents

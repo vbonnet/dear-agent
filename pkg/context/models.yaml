@@ -226,6 +226,19 @@ models:
     confidence: "MEDIUM"
     last_updated: "2026-03-18T00:00:00Z"
 
+  - model_id: "gemini-3.5-flash"
+    provider: "google"
+    max_context_tokens: 1048576
+    sweet_spot_threshold: 0.50
+    warning_threshold: 0.65
+    danger_threshold: 0.80
+    critical_threshold: 0.90
+    benchmark_sources:
+      - "Google I/O 2026 launch announcement (2026-05-19): leads agent benchmarks at Flash tier"
+    notes: "GA 2026-05-19 at I/O 2026. 1M input / 65K output, $1.50/$9.00 per MTok. Stronger agentic + coding performance than 2.5 Flash; thresholds tightened vs 2.0 Flash pending independent NeedleBench/RULER data."
+    confidence: "MEDIUM"
+    last_updated: "2026-05-19T00:00:00Z"
+
   - model_id: "gemini-2.0-flash-thinking"
     provider: "google"
     max_context_tokens: 1000000

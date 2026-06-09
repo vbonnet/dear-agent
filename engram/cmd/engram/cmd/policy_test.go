@@ -250,6 +250,7 @@ func TestGetRuleBreakdown(t *testing.T) {
 
 	if bashRule == nil {
 		t.Fatal("bash-20-line-limit rule not found")
+		return
 	}
 
 	if bashRule.Active != 2 {

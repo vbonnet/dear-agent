@@ -28,6 +28,7 @@ func TestCache_GetSet(t *testing.T) {
 	actual := cache.Get()
 	if actual == nil {
 		t.Fatal("Get() returned nil after Set()")
+		return
 	}
 
 	if actual.Email != expected.Email {

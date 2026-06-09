@@ -60,7 +60,7 @@ func run(args []string, stdout, stderr *os.File) int {
 	)
 	fs.Var(&cues, "cue", "filter by cue; repeat for AND")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "Usage: %s [flags] <query>\n\nFlags:\n", "dear-agent-search")
+		_, _ = fmt.Fprintf(stderr, "Usage: %s [flags] <query>\n\nFlags:\n", "dear-agent-search")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -81,17 +81,17 @@ func run(args []string, stdout, stderr *os.File) int {
 	}
 	db, err := openDB(srcDB)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	a, err := sqliteadapter.New(db)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	defer a.Close()
+	defer func() { _ = a.Close() }()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -107,7 +107,7 @@ func run(args []string, stdout, stderr *os.File) int {
 	if *since != "" {
 		ts, err := parseSince(*since, time.Now().UTC())
 		if err != nil {
-			fmt.Fprintf(stderr, "invalid --since: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "invalid --since: %v\n", err)
 			return 2
 		}
 		q.Filters.After = &ts
@@ -115,7 +115,7 @@ func run(args []string, stdout, stderr *os.File) int {
 	if *until != "" {
 		ts, err := parseSince(*until, time.Now().UTC())
 		if err != nil {
-			fmt.Fprintf(stderr, "invalid --until: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "invalid --until: %v\n", err)
 			return 2
 		}
 		q.Filters.Before = &ts
@@ -123,7 +123,7 @@ func run(args []string, stdout, stderr *os.File) int {
 
 	got, err := a.Fetch(ctx, q)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 
@@ -134,7 +134,7 @@ func run(args []string, stdout, stderr *os.File) int {
 		_ = enc.Encode(map[string]any{"results": annotated})
 		return 0
 	}
-	fmt.Fprint(stdout, formatText(query, annotated))
+	_, _ = fmt.Fprint(stdout, formatText(query, annotated))
 	return 0
 }
 

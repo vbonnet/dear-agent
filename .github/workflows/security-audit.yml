@@ -1,0 +1,210 @@
+name: Security Audit
+
+# Daily defense-in-depth scan that complements security-scan.yml (govulncheck
+# on PRs). This workflow inspects the CI surface itself:
+#
+#   1. govulncheck against the current main (catches transitive bumps that
+#      land between PRs).
+#   2. Unpinned GitHub Actions — every third-party action MUST be pinned by
+#      commit SHA. Tags can be moved.
+#   3. Overly permissive GITHUB_TOKEN — flags workflows that grant
+#      write-all or omit a top-level `permissions:` block.
+#   4. pull_request_target usage — known-dangerous trigger that runs with
+#      the target repo's secrets against an untrusted PR.
+#   5. Known-compromised action versions — small static list, expand as we
+#      learn about new incidents.
+#
+# Opens a rolling `security-audit` issue when any of the static checks fire
+# (govulncheck failure already kills the job, which is enough signal).
+
+on:
+  schedule:
+    - cron: "30 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+  security-events: read
+
+env:
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      # Mirrors security-scan.yml's package-mode + allowlist filter so the
+      # daily run agrees with the PR gate. See security-scan.yml for the
+      # rationale behind `-scan package` and the GO-2025-3884 entry.
+      - name: Run govulncheck
+        run: |
+          set -euo pipefail
+          govulncheck -format json -scan package ./... > vulncheck.json
+          unhandled=$(jq -c \
+            --argjson allow '["GO-2025-3884"]' \
+            'select(.finding != null)
+             | select(.finding.osv as $id | $allow | index($id) | not)
+             | .finding' \
+            vulncheck.json)
+          if [ -n "$unhandled" ]; then
+            echo "::error::Unallowed vulnerabilities found:"
+            echo "$unhandled"
+            exit 1
+          fi
+          echo "No unallowed vulnerabilities."
+        env:
+          GOWORK: "off"
+
+  workflow-hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      # Static list of known-compromised action versions. Expand when
+      # incidents are reported. Format: `owner/repo@ref`.
+      - name: Check for known-compromised actions
+        id: compromised
+        run: |
+          set -euo pipefail
+          compromised=(
+            "tj-actions/changed-files@v44.5.1"
+            "tj-actions/changed-files@v44.5.2"
+            "tj-actions/changed-files@v44.5.3"
+            "tj-actions/changed-files@v44.5.4"
+            "tj-actions/changed-files@v44.5.5"
+            "tj-actions/changed-files@v44.5.6"
+            "tj-actions/changed-files@v44.5.7"
+            "reviewdog/action-setup@v1.3.0"
+          )
+          hits=""
+          for ref in "${compromised[@]}"; do
+            if grep -rn "uses:[[:space:]]*${ref}" .github/workflows/ 2>/dev/null; then
+              hits="${hits}\n- ${ref}"
+            fi
+          done
+          if [ -n "$hits" ]; then
+            {
+              echo "compromised<<__EOF__"
+              printf '%b\n' "$hits"
+              echo "__EOF__"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Check for unpinned third-party actions
+        run: |
+          set -euo pipefail
+          # First-party actions (actions/*, github/*) and reusable workflows
+          # in this repo are excluded — the threat is third-party
+          # mutable refs. Everything else must be a 40-char hex SHA.
+          violations=$(grep -rEn "uses:[[:space:]]+[^[:space:]]+" .github/workflows/ \
+            | grep -vE "uses:[[:space:]]+(actions|github)/" \
+            | grep -vE "uses:[[:space:]]+\./" \
+            | grep -vE "uses:[[:space:]]+[^@]+@[0-9a-f]{40}( |$)" || true)
+          if [ -n "$violations" ]; then
+            echo "::warning::Third-party actions not pinned by SHA:"
+            echo "$violations"
+            {
+              echo "unpinned<<__EOF__"
+              echo "$violations"
+              echo "__EOF__"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Check for missing or overly permissive permissions
+        run: |
+          set -euo pipefail
+          findings=""
+          for f in .github/workflows/*.yml; do
+            # 1) No top-level permissions block at all — token defaults
+            #    to the repo's setting, which may be write-all.
+            if ! grep -qE "^permissions:" "$f"; then
+              findings="${findings}\n- ${f}: no top-level \`permissions:\` block"
+              continue
+            fi
+            # 2) Explicit write-all.
+            if grep -qE "^permissions:[[:space:]]*write-all" "$f"; then
+              findings="${findings}\n- ${f}: \`permissions: write-all\`"
+            fi
+          done
+          if [ -n "$findings" ]; then
+            {
+              echo "perm_findings<<__EOF__"
+              printf '%b\n' "$findings"
+              echo "__EOF__"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Check for pull_request_target usage
+        run: |
+          set -euo pipefail
+          hits=$(grep -rn "pull_request_target" .github/workflows/ || true)
+          if [ -n "$hits" ]; then
+            echo "::warning::pull_request_target detected:"
+            echo "$hits"
+            {
+              echo "prt_hits<<__EOF__"
+              echo "$hits"
+              echo "__EOF__"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Open / update security-audit issue
+        if: ${{ env.compromised != '' || env.unpinned != '' || env.perm_findings != '' || env.prt_hits != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="security-audit: workflow findings"
+          body=$(cat <<EOF
+          The Security Audit found CI hygiene issues as of $(date -u +"%Y-%m-%dT%H:%M:%SZ"):
+
+          ### Known-compromised action versions
+          ${compromised:-_(none)_}
+
+          ### Third-party actions not pinned by SHA
+          \`\`\`
+          ${unpinned:-(none)}
+          \`\`\`
+
+          ### Permissions findings
+          ${perm_findings:-_(none)_}
+
+          ### pull_request_target usage
+          \`\`\`
+          ${prt_hits:-(none)}
+          \`\`\`
+
+          See \`.github/workflows/security-audit.yml\` for the rules. Auto-managed; closes once every check passes.
+          EOF
+          )
+          existing=$(timeout 30 gh issue list --repo "$REPO" --label security-audit --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            timeout 30 gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            timeout 30 gh issue create --repo "$REPO" --title "$title" --body "$body" --label security-audit
+          fi
+
+      - name: Auto-close security-audit issue when clean
+        if: ${{ env.compromised == '' && env.unpinned == '' && env.perm_findings == '' && env.prt_hits == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          existing=$(timeout 30 gh issue list --repo "$REPO" --label security-audit --state open --json number --jq '.[].number')
+          for n in $existing; do
+            timeout 30 gh issue close "$n" --repo "$REPO" --comment "All workflow hygiene checks pass; auto-closing."
+          done

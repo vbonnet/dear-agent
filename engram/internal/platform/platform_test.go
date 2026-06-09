@@ -250,6 +250,7 @@ func TestConfig(t *testing.T) {
 	cfg := platform.Config()
 	if cfg == nil {
 		t.Fatal("Config() returned nil, want non-nil")
+		return
 	}
 
 	// Agent may be overridden by detection, just verify config is non-nil and has values

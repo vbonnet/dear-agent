@@ -75,7 +75,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&f.workingDir, "cwd", "", "working directory passed to spawned workflow-run processes")
 	fs.BoolVar(&f.verbose, "verbose", false, "debug logging")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: dear-agent-api [flags]")
+		_, _ = fmt.Fprintln(stderr, "Usage: dear-agent-api [flags]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -90,19 +90,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	runsDB, err := openSQLite(f.runsDBPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "open runs db %s: %v\n", f.runsDBPath, err)
+		_, _ = fmt.Fprintf(stderr, "open runs db %s: %v\n", f.runsDBPath, err)
 		return 1
 	}
-	defer runsDB.Close()
+	defer func() { _ = runsDB.Close() }()
 
 	var auditStore audit.Store
 	if f.auditDBPath != "" {
 		s, err := audit.OpenSQLiteStore(f.auditDBPath)
 		if err != nil {
-			fmt.Fprintf(stderr, "open audit db %s: %v\n", f.auditDBPath, err)
+			_, _ = fmt.Fprintf(stderr, "open audit db %s: %v\n", f.auditDBPath, err)
 			return 1
 		}
-		defer s.Close()
+		defer func() { _ = s.Close() }()
 		auditStore = s
 	}
 
@@ -137,7 +137,7 @@ func runLoopback(ctx context.Context, logger *slog.Logger, srv *api.Server, addr
 		Handler:           srv,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	fmt.Fprintf(stdout, "dear-agent-api: listening on %s (loopback, no auth)\n", addr)
+	_, _ = fmt.Fprintf(stdout, "dear-agent-api: listening on %s (loopback, no auth)\n", addr)
 	return serveAndShutdown(ctx, logger, httpSrv, nil, stderr)
 }
 
@@ -148,13 +148,13 @@ func runTailscale(ctx context.Context, logger *slog.Logger, srv *api.Server, f f
 	if stateDir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			fmt.Fprintf(stderr, "resolve home dir: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "resolve home dir: %v\n", err)
 			return 1
 		}
 		stateDir = filepath.Join(home, ".config", "dear-agent-api", f.hostname)
 	}
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		fmt.Fprintf(stderr, "create state dir %s: %v\n", stateDir, err)
+		_, _ = fmt.Fprintf(stderr, "create state dir %s: %v\n", stateDir, err)
 		return 1
 	}
 
@@ -168,18 +168,18 @@ func runTailscale(ctx context.Context, logger *slog.Logger, srv *api.Server, f f
 		},
 		AuthKey: os.Getenv("TS_AUTHKEY"),
 	}
-	defer ts.Close()
+	defer func() { _ = ts.Close() }()
 
 	startCtx, startCancel := context.WithTimeout(ctx, 60*time.Second)
 	defer startCancel()
 	if _, err := ts.Up(startCtx); err != nil {
-		fmt.Fprintf(stderr, "bring tsnet up: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "bring tsnet up: %v\n", err)
 		return 1
 	}
 
 	lc, err := ts.LocalClient()
 	if err != nil {
-		fmt.Fprintf(stderr, "tsnet local client: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "tsnet local client: %v\n", err)
 		return 1
 	}
 	srv.Identifier = api.IdentifierFunc(func(ctx context.Context, r *http.Request) (api.Caller, error) {
@@ -199,7 +199,7 @@ func runTailscale(ctx context.Context, logger *slog.Logger, srv *api.Server, f f
 
 	ln, err := ts.ListenTLS("tcp", ":443")
 	if err != nil {
-		fmt.Fprintf(stderr, "listen :443 over tsnet: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "listen :443 over tsnet: %v\n", err)
 		return 1
 	}
 	httpSrv := &http.Server{
@@ -209,9 +209,9 @@ func runTailscale(ctx context.Context, logger *slog.Logger, srv *api.Server, f f
 	}
 
 	ip4, ip6 := ts.TailscaleIPs()
-	fmt.Fprintf(stdout, "dear-agent-api: tailnet hostname=%q ipv4=%s ipv6=%s\n",
+	_, _ = fmt.Fprintf(stdout, "dear-agent-api: tailnet hostname=%q ipv4=%s ipv6=%s\n",
 		f.hostname, addrOrDash(ip4), addrOrDash(ip6))
-	fmt.Fprintf(stdout, "dear-agent-api: serving HTTPS on tailnet :443\n")
+	_, _ = fmt.Fprintf(stdout, "dear-agent-api: serving HTTPS on tailnet :443\n")
 
 	return serveAndShutdown(ctx, logger, httpSrv, ln, stderr)
 }
@@ -233,7 +233,7 @@ func serveAndShutdown(ctx context.Context, logger *slog.Logger, httpSrv *http.Se
 		err = httpSrv.ListenAndServe()
 	}
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		fmt.Fprintf(stderr, "serve: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "serve: %v\n", err)
 		wg.Wait()
 		return 1
 	}

@@ -16,6 +16,7 @@ func TestLoadContext_FileNotExists(t *testing.T) {
 	}
 	if ctx == nil {
 		t.Fatal("expected non-nil empty context")
+		return
 	}
 	if ctx.SessionID != "" {
 		t.Errorf("expected empty SessionID, got %q", ctx.SessionID)
@@ -33,6 +34,7 @@ func TestLoadContext_InvalidJSON(t *testing.T) {
 	}
 	if ctx == nil {
 		t.Fatal("expected non-nil empty context")
+		return
 	}
 	if ctx.SessionID != "" {
 		t.Errorf("expected empty SessionID, got %q", ctx.SessionID)

@@ -19,6 +19,7 @@ func TestArchiveSession_SessionNotFound(t *testing.T) {
 	err := r.archiveSession()
 	if err == nil {
 		t.Fatal("archiveSession() should fail for non-existent session, but succeeded")
+		return
 	}
 
 	// Error should mention "session not found"

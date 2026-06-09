@@ -8,8 +8,8 @@ import (
 // geminiTierModelMap maps effort tiers to Gemini model names.
 // flash is used for low/medium effort tiers; pro for high effort tiers.
 var geminiTierModelMap = map[string]string{
-	"lookup":      "gemini-2.5-flash",
-	"operational": "gemini-2.5-flash",
+	"lookup":      "gemini-3.5-flash",
+	"operational": "gemini-3.5-flash",
 	"analysis":    "gemini-2.5-pro",
 	"deep":        "gemini-2.5-pro",
 }
@@ -45,5 +45,5 @@ func geminiTierModelFromCfg(cfg HarnessEffortConfig, tierName string) string {
 	if model, ok := geminiTierModelMap[tierName]; ok {
 		return model
 	}
-	return "gemini-2.5-flash"
+	return "gemini-3.5-flash"
 }

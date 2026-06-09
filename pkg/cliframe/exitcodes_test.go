@@ -37,6 +37,7 @@ func TestGetExitCodeInfo_KnownCode(t *testing.T) {
 
 	if info == nil {
 		t.Fatal("Expected non-nil info")
+		return
 	}
 
 	if info.Code != ExitServiceUnavailable {
@@ -61,6 +62,7 @@ func TestGetExitCodeInfo_UnknownCode(t *testing.T) {
 
 	if info == nil {
 		t.Fatal("Expected non-nil info for unknown code")
+		return
 	}
 
 	if info.Code != 999 {

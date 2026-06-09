@@ -7,6 +7,7 @@ import (
 func TestRootCommand_Exists(t *testing.T) {
 	if rootCmd == nil {
 		t.Fatal("rootCmd is nil, want initialized command")
+		return
 	}
 
 	if rootCmd.Use != "devlog" {

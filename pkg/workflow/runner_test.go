@@ -423,6 +423,7 @@ func TestRunnerWhenClauseMalformedFails(t *testing.T) {
 	_, err := r.Run(context.Background(), w, nil)
 	if err == nil {
 		t.Fatal("malformed When should fail the node (and the run)")
+		return
 	}
 	if !strings.Contains(err.Error(), "when") {
 		t.Errorf("error = %v, want mention of when", err)

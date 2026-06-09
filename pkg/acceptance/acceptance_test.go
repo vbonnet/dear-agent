@@ -73,6 +73,7 @@ func TestValidateRejectsUnknownType(t *testing.T) {
 	err := Validate([]Criterion{{Type: "bogus", Command: "x"}})
 	if err == nil {
 		t.Fatal("unknown type should fail")
+		return
 	}
 	if !strings.Contains(err.Error(), "unknown type") {
 		t.Errorf("error should mention unknown type: %v", err)

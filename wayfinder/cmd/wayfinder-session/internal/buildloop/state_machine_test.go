@@ -358,6 +358,7 @@ func TestStateMachineMetricsCollection(t *testing.T) {
 	metrics := result.Metrics
 	if metrics == nil {
 		t.Fatal("Metrics not collected")
+		return
 	}
 
 	// Verify metrics fields

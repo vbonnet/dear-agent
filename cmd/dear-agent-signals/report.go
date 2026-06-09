@@ -97,10 +97,10 @@ func renderRows(
 		return 0
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "KIND\tSUBJECT\tVALUE\tCOLLECTED")
+	_, _ = fmt.Fprintln(tw, "KIND\tSUBJECT\tVALUE\tCOLLECTED")
 	for _, k := range kinds {
 		for _, s := range all[k] {
-			fmt.Fprintf(tw, "%s\t%s\t%v\t%s\n",
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%v\t%s\n",
 				s.Kind, s.Subject, s.Value,
 				s.CollectedAt.UTC().Format(time.RFC3339))
 		}
@@ -135,9 +135,9 @@ func renderScore(
 		return 0
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "KIND\tSUBJECT\tRAW\tNORM\tWEIGHT\tWEIGHTED")
+	_, _ = fmt.Fprintln(tw, "KIND\tSUBJECT\tRAW\tNORM\tWEIGHT\tWEIGHTED")
 	for _, s := range scores {
-		fmt.Fprintf(tw, "%s\t%s\t%.2f\t%.3f\t%.2f\t%.3f\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%.2f\t%.3f\t%.2f\t%.3f\n",
 			s.Kind, s.Subject, s.Raw, s.Norm, s.Weight, s.Weighted)
 	}
 	_ = tw.Flush()

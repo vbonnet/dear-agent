@@ -216,6 +216,7 @@ func TestValidatePermissions_MultipleErrors(t *testing.T) {
 	err := validator.ValidatePermissions(permissions)
 	if err == nil {
 		t.Fatal("ValidatePermissions() succeeded with multiple errors, want error")
+		return
 	}
 
 	// Should return filesystem error first (checked before commands)
@@ -476,6 +477,7 @@ func TestNewValidatorWithLogger(t *testing.T) {
 	validator := NewValidatorWithLogger(logger)
 	if validator == nil {
 		t.Fatal("NewValidatorWithLogger() returned nil")
+		return
 	}
 	if validator.logger != logger {
 		t.Error("Validator logger not set correctly")

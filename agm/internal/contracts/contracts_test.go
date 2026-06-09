@@ -155,6 +155,7 @@ func TestLoadEmbedded(t *testing.T) {
 	c := Load()
 	if c == nil {
 		t.Fatal("Load() returned nil")
+		return
 	}
 	d := Defaults()
 	if c.Compaction.ContextThresholdWarn != d.Compaction.ContextThresholdWarn {

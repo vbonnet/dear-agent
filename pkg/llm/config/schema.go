@@ -32,7 +32,7 @@ type ToolConfig struct {
 // ProviderConfig specifies model and token limits for a provider.
 type ProviderConfig struct {
 	// Model is the specific model identifier to use.
-	// Examples: "claude-3-5-sonnet-20241022", "gemini-2.0-flash-exp"
+	// Examples: "claude-3-5-sonnet-20241022", "gemini-3.5-flash"
 	Model string `yaml:"model"`
 
 	// MaxTokens is the maximum number of tokens to generate.

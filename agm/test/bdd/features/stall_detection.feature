@@ -1,4 +1,3 @@
-@implemented
 Feature: Stall Detection
   As an AGM orchestrator
   I want stalled sessions to be detected and recovered

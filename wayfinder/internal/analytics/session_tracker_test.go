@@ -56,6 +56,7 @@ func TestNewSessionTracker(t *testing.T) {
 
 	if tracker == nil {
 		t.Fatal("NewSessionTracker() returned nil")
+		return
 	}
 
 	if tracker.sessionID == "" {

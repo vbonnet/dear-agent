@@ -41,6 +41,7 @@ func TestValidateConversation_InvalidSchemaVersion(t *testing.T) {
 	err := ValidateConversation(conv)
 	if err == nil {
 		t.Fatal("expected validation error for invalid schema version")
+		return
 	}
 	if !strings.Contains(err.Error(), "schema_version") {
 		t.Errorf("expected schema_version error, got: %v", err)
@@ -57,6 +58,7 @@ func TestValidateConversation_MissingFields(t *testing.T) {
 	err := ValidateConversation(conv)
 	if err == nil {
 		t.Fatal("expected validation error for missing fields")
+		return
 	}
 	errMsg := err.Error()
 	if !strings.Contains(errMsg, "created_at") {
@@ -91,6 +93,7 @@ func TestValidateConversation_InvalidMessageRole(t *testing.T) {
 	err := ValidateConversation(conv)
 	if err == nil {
 		t.Fatal("expected validation error for invalid role")
+		return
 	}
 	if !strings.Contains(err.Error(), "role") {
 		t.Errorf("expected role validation error, got: %v", err)
@@ -116,6 +119,7 @@ func TestValidateConversation_EmptyContent(t *testing.T) {
 	err := ValidateConversation(conv)
 	if err == nil {
 		t.Fatal("expected validation error for empty content")
+		return
 	}
 	if !strings.Contains(err.Error(), "content array is empty") {
 		t.Errorf("expected content validation error, got: %v", err)

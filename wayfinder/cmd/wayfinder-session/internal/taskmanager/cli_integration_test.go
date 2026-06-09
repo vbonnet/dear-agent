@@ -169,6 +169,7 @@ func TestCLIWorkflow(t *testing.T) {
 
 	if s8Phase == nil {
 		t.Fatal("expected S8 phase to exist")
+		return
 	}
 
 	if len(s8Phase.Tasks) != 2 {

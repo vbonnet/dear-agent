@@ -99,13 +99,39 @@ class EngramMCPServer:
         else:
             return self._error_response(request_id, -32601, f"Method not found: {method}")
 
+    # Known MCP protocol versions this server is wire-compatible with.
+    # Newest first. The server speaks the basic stdio JSON-RPC subset
+    # (initialize + tools/list + tools/call), which is stable across these
+    # revisions, so we accept any of them and echo the client's pick back.
+    # Anything else gets the fallback below.
+    SUPPORTED_PROTOCOL_VERSIONS = (
+        "2025-11-25",
+        "2025-06-18",
+        "2025-03-26",
+        "2024-11-05",
+    )
+    FALLBACK_PROTOCOL_VERSION = "2024-11-05"
+
     def _handle_initialize(self, request_id: int, params: Dict) -> Dict:
-        """Handle initialize request."""
+        """Handle initialize request.
+
+        Per the MCP spec, the server SHOULD echo the client's requested
+        protocol version when supported; otherwise return a version the
+        server does support and let the client decide whether to proceed.
+        The previous "0.1.0" advertisement is not a real MCP version and
+        is rejected by Claude Desktop with
+        "Server's protocol version is not supported: 0.1.0".
+        """
+        client_version = params.get("protocolVersion")
+        if client_version in self.SUPPORTED_PROTOCOL_VERSIONS:
+            negotiated = client_version
+        else:
+            negotiated = self.FALLBACK_PROTOCOL_VERSION
         return {
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
-                "protocolVersion": "0.1.0",
+                "protocolVersion": negotiated,
                 "serverInfo": {
                     "name": self.name,
                     "version": self.version
