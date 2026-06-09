@@ -1,12 +1,12 @@
 # Mergify configuration for dear-agent.
 #
 # Conditions here are kept in lock-step with the branch-protection rules on
-# `main`. As of 2026-06-08 the required status checks are:
+# `main`. As of 2026-06-09 the required status checks are:
 #   - Build & Test (ubuntu-latest)
 #   - Build & Test (macos-latest)
 #   - Analyze Go Code (go)
 #   - govulncheck
-#   - Trivy
+#   - Vulnerability Scan
 #   - Bash Script Size Check (20-line limit)
 # plus required_conversation_resolution=true (modelled by
 # `#review-threads-unresolved=0`).
@@ -25,7 +25,7 @@ queue_rules:
       - check-success=Build & Test (macos-latest)
       - check-success=Analyze Go Code (go)
       - check-success=govulncheck
-      - check-success=Trivy
+      - check-success=Vulnerability Scan
       - check-success=Bash Script Size Check (20-line limit)
       - "#review-threads-unresolved=0"
 
@@ -39,7 +39,7 @@ pull_request_rules:
       - check-success=Build & Test (macos-latest)
       - check-success=Analyze Go Code (go)
       - check-success=govulncheck
-      - check-success=Trivy
+      - check-success=Vulnerability Scan
       - check-success=Bash Script Size Check (20-line limit)
     actions:
       queue:
@@ -47,7 +47,7 @@ pull_request_rules:
         merge_method: squash
 
   # Dependabot bumps follow the SAME gate as everything else — in particular
-  # they must pass govulncheck and Trivy, since a dependency bump is exactly
+  # they must pass govulncheck and Vulnerability Scan, since a dependency bump is exactly
   # where a vulnerability scan matters most. No relaxed path.
   - name: Queue dependabot under the full required-check gate
     conditions:
@@ -59,7 +59,7 @@ pull_request_rules:
       - check-success=Build & Test (macos-latest)
       - check-success=Analyze Go Code (go)
       - check-success=govulncheck
-      - check-success=Trivy
+      - check-success=Vulnerability Scan
       - check-success=Bash Script Size Check (20-line limit)
     actions:
       queue:
