@@ -81,9 +81,14 @@ func (d *ViolationDetector) GetSkippedPatterns() []string {
 	return d.skippedPatterns
 }
 
-// HasPattern reports whether the detector's database contains a pattern with
-// the given ID. Used to determine which database a pattern originated from.
+// HasPattern reports whether this detector's pattern database contains a
+// pattern with the given ID. It checks the source database rather than the
+// compiled-regex map, so patterns skipped at compile time are still
+// recognised as belonging to this detector.
 func (d *ViolationDetector) HasPattern(id string) bool {
+	if d == nil || d.patterns == nil {
+		return false
+	}
 	for i := range d.patterns.Patterns {
 		if d.patterns.Patterns[i].ID == id {
 			return true

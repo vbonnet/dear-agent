@@ -99,6 +99,25 @@ func TestHasPattern(t *testing.T) {
 			t.Errorf("expected HasPattern(%q) to be false", id)
 		}
 	}
+
+	// A pattern whose regex failed to compile is still owned by the detector
+	// (it lives in the source database even though it never compiled).
+	skipDB := &PatternDatabase{
+		Patterns: []Pattern{{ID: "bad-regex", Regex: `(?=lookahead)`, Reason: "unsupported"}},
+	}
+	sd, err := NewDetector(skipDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sd.HasPattern("bad-regex") {
+		t.Error("HasPattern(\"bad-regex\") = false for a skipped pattern, want true")
+	}
+
+	// Nil receiver and nil database are safe and report no membership.
+	var nilDetector *ViolationDetector
+	if nilDetector.HasPattern("anything") {
+		t.Error("nil detector HasPattern = true, want false")
+	}
 }
 
 func TestDetectAll(t *testing.T) {
