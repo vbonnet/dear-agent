@@ -204,8 +204,15 @@ func (g *Guard) repoName(p, src string) string {
 // proceed. The returned message does NOT include Escalation; callers append
 // it when emitting.
 func (g *Guard) Classify(path, cwd string) (allowed bool, message string) {
+	return g.ClassifyResolved(g.resolve(g.expand(path, cwd)))
+}
+
+// ClassifyResolved is Classify for a path that is already expanded and
+// symlink-resolved (see Resolve). Callers that need both the resolved path and
+// its verdict — e.g. to log the resolved target on a block — use Resolve +
+// ClassifyResolved to avoid resolving (and hitting the disk) twice.
+func (g *Guard) ClassifyResolved(p string) (allowed bool, message string) {
 	pol := g.pol()
-	p := g.resolve(g.expand(path, cwd))
 	src := filepath.Join(g.Home, "src")
 
 	if g.isWritableCarveout(p) {

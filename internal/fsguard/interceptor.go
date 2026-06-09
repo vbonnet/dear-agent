@@ -58,7 +58,10 @@ func NewInterceptorWith(g *Guard, rec Recorder) *Interceptor {
 // named tool (Edit/Write/MultiEdit). On a block it records a Violation and
 // returns guidance with the escalation hint appended.
 func (i *Interceptor) CheckWrite(tool, path, cwd string) Decision {
-	allowed, msg := i.guard.Classify(path, cwd)
+	// Resolve once and reuse: ClassifyResolved and the Violation share the same
+	// expanded+symlink-resolved target, avoiding a second EvalSymlinks pass.
+	resolved := i.guard.Resolve(path, cwd)
+	allowed, msg := i.guard.ClassifyResolved(resolved)
 	if allowed {
 		return Decision{Allowed: true}
 	}
@@ -66,7 +69,7 @@ func (i *Interceptor) CheckWrite(tool, path, cwd string) Decision {
 		Tool:     tool,
 		Path:     path,
 		CWD:      cwd,
-		Resolved: i.guard.Resolve(path, cwd),
+		Resolved: resolved,
 		Reason:   msg,
 	}
 	_ = i.rec.Record(v)

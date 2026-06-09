@@ -173,8 +173,13 @@ func splitList(s string) []string {
 	return out
 }
 
-// expandHome resolves a leading ~ or $HOME to home and cleans the result.
+// expandHome resolves a leading ~ or $HOME to home and cleans the result. An
+// empty input returns empty rather than filepath.Clean's ".", so a blank config
+// entry can never silently resolve to (and protect/allow) the cwd.
 func expandHome(p, home string) string {
+	if p == "" {
+		return ""
+	}
 	switch {
 	case p == "~" || p == "$HOME" || p == "${HOME}":
 		return filepath.Clean(home)

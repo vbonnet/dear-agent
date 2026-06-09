@@ -48,8 +48,9 @@ func (NopRecorder) Record(Violation) error { return nil }
 type FileRecorder struct {
 	Path string
 
-	mu  sync.Mutex
-	now func() time.Time // injectable clock for tests
+	mu         sync.Mutex
+	now        func() time.Time // injectable clock for tests
+	dirCreated bool             // memoizes the one-time parent MkdirAll
 }
 
 // NewFileRecorder returns a FileRecorder writing to path.
@@ -77,10 +78,13 @@ func (r *FileRecorder) Record(v Violation) error {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if dir := filepath.Dir(r.Path); dir != "" {
-		if err := os.MkdirAll(dir, 0o750); err != nil {
-			return err
+	if !r.dirCreated {
+		if dir := filepath.Dir(r.Path); dir != "" {
+			if err := os.MkdirAll(dir, 0o750); err != nil {
+				return err
+			}
 		}
+		r.dirCreated = true
 	}
 	f, err := os.OpenFile(r.Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {

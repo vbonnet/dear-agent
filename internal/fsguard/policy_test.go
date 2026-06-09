@@ -154,6 +154,18 @@ func TestConfiguredProtectedPathBlocks(t *testing.T) {
 	}
 }
 
+func TestExpandHomeEmpty(t *testing.T) {
+	t.Parallel()
+	// A blank entry must not resolve to "." (the cwd); it stays empty so it can
+	// never accidentally protect or allow the working directory.
+	if got := expandHome("", "/home/tester"); got != "" {
+		t.Errorf("expandHome(\"\") = %q, want empty", got)
+	}
+	if got := expandHome("~/x", "/home/tester"); got != "/home/tester/x" {
+		t.Errorf("expandHome(~/x) = %q", got)
+	}
+}
+
 func contains(haystack []string, needle string) bool {
 	return slices.Contains(haystack, needle)
 }
