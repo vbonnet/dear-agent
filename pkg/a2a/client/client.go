@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/a2aproject/a2a-go/a2a"
@@ -105,6 +106,16 @@ func (c *Client) drive(ctx context.Context, params *a2a.MessageSendParams, answe
 				return "", fmt.Errorf("a2a/client: task %s ended in state %s: %s",
 					r.ID, r.Status.State, statusText(r.Status))
 
+			// Submitted/Working are non-terminal: SendMessage is expected
+			// to return only once the task settles into a terminal or
+			// input-required state, so observing them here is unexpected.
+			// Unspecified/Unknown are invalid sentinels, and AuthRequired
+			// is not supported by this client. All are surfaced as errors.
+			case a2a.TaskStateSubmitted, a2a.TaskStateWorking,
+				a2a.TaskStateAuthRequired, a2a.TaskStateUnspecified,
+				a2a.TaskStateUnknown:
+				return "", fmt.Errorf("a2a/client: task %s in unexpected state %s", r.ID, r.Status.State)
+
 			default:
 				return "", fmt.Errorf("a2a/client: task %s in unexpected state %s", r.ID, r.Status.State)
 			}
@@ -159,9 +170,9 @@ func finalAgentText(t *a2a.Task) string {
 	if txt := statusText(t.Status); txt != "" {
 		return txt
 	}
-	for i := len(t.History) - 1; i >= 0; i-- {
-		if t.History[i].Role == a2a.MessageRoleAgent {
-			return extractText(t.History[i])
+	for _, msg := range slices.Backward(t.History) {
+		if msg.Role == a2a.MessageRoleAgent {
+			return extractText(msg)
 		}
 	}
 	return ""

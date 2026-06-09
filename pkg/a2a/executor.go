@@ -97,7 +97,13 @@ func (e *sessionExecutor) Execute(ctx context.Context, reqCtx *a2asrv.RequestCon
 			return fmt.Errorf("a2a: write working: %w", err)
 		}
 		prompt := extractText(reqCtx.Message)
-		go e.runHandler(run, reqCtx, prompt)
+		// Detach from the request context: the handler may sit in
+		// input-required across multiple HTTP requests, each with its own
+		// short-lived ctx, so it must outlive this Execute call. We keep
+		// the request's values (deadlines/cancellation aside) via
+		// WithoutCancel.
+		handlerCtx := context.WithoutCancel(ctx)
+		go e.runHandler(handlerCtx, run, reqCtx, prompt)
 	} else {
 		// Resume. Emit a working transition so the client observes
 		// progress, then deliver the follow-up to the parked goroutine.
@@ -143,21 +149,21 @@ func (e *sessionExecutor) Cancel(ctx context.Context, reqCtx *a2asrv.RequestCont
 }
 
 func safeClose(ch chan string) {
-	defer func() { _ = recover() }()
+	defer func() {
+		// Recover from a panic if ch was already closed; the recovered
+		// value is intentionally discarded.
+		recover() //nolint:errcheck // recover's return is deliberately ignored
+	}()
 	close(ch)
 }
 
 // runHandler executes the user's SessionHandler.Handle and writes the
 // terminal status event when it returns.
-func (e *sessionExecutor) runHandler(run *runtime, reqCtx *a2asrv.RequestContext, prompt string) {
+func (e *sessionExecutor) runHandler(ctx context.Context, run *runtime, reqCtx *a2asrv.RequestContext, prompt string) {
 	defer close(run.done)
 	defer e.sessions.Delete(run.taskID)
 
 	io := &sessionIO{run: run, reqCtx: reqCtx}
-
-	// Detached context: the handler may sit in input-required across
-	// multiple HTTP requests, each with its own short-lived ctx.
-	ctx := context.Background()
 
 	handleErr := e.handler.Handle(ctx, prompt, io)
 

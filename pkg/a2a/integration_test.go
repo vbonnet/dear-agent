@@ -178,7 +178,7 @@ func startTestServer(t *testing.T, h a2a.SessionHandler) *a2a.Server {
 		SessionID:   "test-" + t.Name(),
 		Description: "test session for " + t.Name(),
 	}.Build()
-	srv, err := a2a.NewServer(a2a.ServerConfig{
+	srv, err := a2a.NewServer(context.Background(), a2a.ServerConfig{
 		Card:    card,
 		Handler: h,
 		Addr:    "127.0.0.1:0",

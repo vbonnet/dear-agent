@@ -57,8 +57,9 @@ type Server struct {
 }
 
 // NewServer validates the configuration and binds the listener. The
-// server does not begin serving until Start is called.
-func NewServer(cfg ServerConfig) (*Server, error) {
+// provided context governs the bind operation only. The server does not
+// begin serving until Start is called.
+func NewServer(ctx context.Context, cfg ServerConfig) (*Server, error) {
 	if cfg.Handler == nil {
 		return nil, errors.New("a2a: ServerConfig.Handler is required")
 	}
@@ -72,7 +73,8 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		cfg.Addr = ":0"
 	}
 
-	listener, err := net.Listen("tcp", cfg.Addr)
+	var lc net.ListenConfig
+	listener, err := lc.Listen(ctx, "tcp", cfg.Addr)
 	if err != nil {
 		return nil, fmt.Errorf("a2a: listen %s: %w", cfg.Addr, err)
 	}
