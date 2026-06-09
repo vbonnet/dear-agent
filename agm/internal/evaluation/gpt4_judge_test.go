@@ -11,11 +11,13 @@ import (
 
 // MockGPT4Client is a test implementation of GPT4Client
 type MockGPT4Client struct {
-	Response *GPT4Response
-	Err      error
+	Response    *GPT4Response
+	Err         error
+	LastRequest GPT4Request // captures the most recent request for assertions
 }
 
 func (m *MockGPT4Client) CreateChatCompletion(ctx context.Context, req GPT4Request) (*GPT4Response, error) {
+	m.LastRequest = req
 	if m.Err != nil {
 		return nil, m.Err
 	}
@@ -73,7 +75,7 @@ func TestGPT4Judge_EvaluateDetailed(t *testing.T) {
 			Threshold:   0.7,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "test input", "expected output", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "test input", "expected output", "actual output", criteria)
 		require.NoError(t, err)
 		assert.NotNil(t, result)
 		assert.True(t, result.Pass)
@@ -121,7 +123,7 @@ func TestGPT4Judge_EvaluateDetailed(t *testing.T) {
 			Threshold:   0.9,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "test input", "expected output", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "test input", "expected output", "actual output", criteria)
 		require.NoError(t, err)
 		assert.NotNil(t, result)
 		assert.False(t, result.Pass)
@@ -142,7 +144,7 @@ func TestGPT4Judge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", "actual", criteria)
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "API call failed")
@@ -170,7 +172,7 @@ func TestGPT4Judge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", "actual", criteria)
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "no response from API")
@@ -208,7 +210,7 @@ func TestGPT4Judge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", "actual", criteria)
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "failed to parse JSON response")
@@ -225,11 +227,65 @@ func TestGPT4Judge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", "actual", criteria)
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "client not initialized")
 	})
+}
+
+// TestGPT4Judge_GradesActualNotExpected is a regression test for a bug where
+// the judge passed expectedOutput into both the Expected and Actual prompt
+// slots, so it always graded expected-vs-expected and could never detect a
+// wrong answer. The prompt must place the distinct actual output into the
+// Actual Output slot.
+func TestGPT4Judge_GradesActualNotExpected(t *testing.T) {
+	judgeOutput := JudgeOutput{
+		Pass:      false,
+		Score:     0.1,
+		Reasoning: "actual does not match expected",
+	}
+	outputJSON, _ := json.Marshal(judgeOutput)
+
+	mockClient := &MockGPT4Client{
+		Response: &GPT4Response{
+			Choices: []struct {
+				Index   int `json:"index"`
+				Message struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"message"`
+				FinishReason string `json:"finish_reason"`
+			}{
+				{
+					Message: struct {
+						Role    string `json:"role"`
+						Content string `json:"content"`
+					}{Role: "assistant", Content: string(outputJSON)},
+				},
+			},
+		},
+	}
+
+	judge := NewGPT4Judge(mockClient, DefaultGPT4Config("test-api-key"))
+	criteria := EvaluationCriteria{Name: "correctness", Threshold: 0.8}
+
+	const expected = "REFERENCE_ANSWER_42"
+	const actual = "WRONG_ANSWER_99"
+
+	_, err := judge.EvaluateDetailed(context.Background(), "input", expected, actual, criteria)
+	require.NoError(t, err)
+
+	// Messages are [system, user]; the user message carries the evaluation prompt.
+	require.Len(t, mockClient.LastRequest.Messages, 2)
+	prompt := mockClient.LastRequest.Messages[1].Content
+
+	// The actual output must reach the Actual Output slot; the expected output
+	// the Expected Output slot. The bug filled both slots with expected.
+	assert.Contains(t, prompt, "Expected Output: "+expected)
+	assert.Contains(t, prompt, "Actual Output: "+actual)
+	assert.NotContains(t, prompt, "Actual Output: "+expected,
+		"actual slot must contain the actual output, not the expected output")
 }
 
 func TestGPT4Judge_Evaluate(t *testing.T) {
