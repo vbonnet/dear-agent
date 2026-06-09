@@ -230,13 +230,13 @@ func SessionCompleted(ctx context.Context, sessionID, model, provider, status st
 func RecordEvalScore(ctx context.Context, spanCtx trace.SpanContext, evalName string, score float64) {
 	if span := trace.SpanFromContext(ctx); span.IsRecording() {
 		attrs := []attribute.KeyValue{
-			attribute.String("eval.name", evalName),
-			attribute.Float64("eval.score", score),
+			attribute.String("gen_ai.eval.name", evalName),
+			attribute.Float64("gen_ai.eval.score", score),
 		}
-		if spanCtx.HasTraceID() {
+		if spanCtx.IsValid() {
 			attrs = append(attrs,
-				attribute.String("eval.trace_id", spanCtx.TraceID().String()),
-				attribute.String("eval.span_id", spanCtx.SpanID().String()),
+				attribute.String("gen_ai.eval.trace_id", spanCtx.TraceID().String()),
+				attribute.String("gen_ai.eval.span_id", spanCtx.SpanID().String()),
 			)
 		}
 		span.SetAttributes(attrs...)
@@ -252,7 +252,7 @@ func (a *AgentMetrics) recordEvalScore(ctx context.Context, evalName string, sco
 }
 
 // TraceToEvalCase marks a production trace for conversion into an eval case: it
-// adds an eval.case_generated event to the active span (carrying the source
+// adds a gen_ai.eval.case_generated event to the active span (carrying the source
 // trace ID) and increments the agent.eval.cases_generated counter. This is the
 // "trace → eval dataset" half of the loop, turning high-signal production
 // traces into regression cases.
@@ -261,11 +261,11 @@ func (a *AgentMetrics) recordEvalScore(ctx context.Context, evalName string, sco
 // the default no-op providers.
 func TraceToEvalCase(ctx context.Context, traceID string) error {
 	if traceID == "" {
-		return fmt.Errorf("telemetry: TraceToEvalCase requires a non-empty traceID")
+		return fmt.Errorf("telemetry: empty trace ID")
 	}
 	if span := trace.SpanFromContext(ctx); span.IsRecording() {
-		span.AddEvent("eval.case_generated",
-			trace.WithAttributes(attribute.String("eval.source_trace_id", traceID)))
+		span.AddEvent("gen_ai.eval.case_generated",
+			trace.WithAttributes(attribute.String("gen_ai.eval.source_trace_id", traceID)))
 	}
 	Agent().recordEvalCaseGenerated(ctx)
 	return nil
