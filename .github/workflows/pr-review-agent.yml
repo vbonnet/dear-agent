@@ -53,6 +53,7 @@ jobs:
   review:
     name: Codebase health review
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout (full history for diff)
         uses: actions/checkout@v6

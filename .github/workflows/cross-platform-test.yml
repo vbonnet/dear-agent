@@ -129,6 +129,7 @@ jobs:
     needs: [unix, windows]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Report
         run: |
