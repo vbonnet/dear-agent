@@ -61,3 +61,5 @@ tests/test_helper/
 /agm-daemon
 /agm-mcp-server
 /agm-statusline
+# `make preflight` mirrors ci.yml and writes the three matrix binaries here.
+/build/

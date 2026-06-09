@@ -100,7 +100,7 @@ import "github.com/vbonnet/dear-agent/agm/internal/agent"
 
 // Custom model
 gemini, err := agent.NewGeminiAdapter(&agent.GeminiConfig{
-    ModelName: "gemini-2.0-flash-thinking-exp", // Default: gemini-2.0-flash-exp
+    ModelName: "gemini-2.0-flash-thinking-exp", // Default: gemini-3.5-flash
     APIKey:    "your-key",                      // Optional: uses env var if empty
 })
 ```
@@ -109,8 +109,11 @@ gemini, err := agent.NewGeminiAdapter(&agent.GeminiConfig{
 
 | Model | Context Window | Features |
 |-------|----------------|----------|
-| `gemini-2.0-flash-exp` | 1M tokens (2M thinking) | Fast, general-purpose |
-| `gemini-2.0-flash-thinking-exp` | 2M tokens | Extended thinking mode |
+| `gemini-3.5-flash` (default) | 1M input / 65K output | GA 2026-05-19, agentic + coding lead at Flash tier |
+| `gemini-3.1-pro` | 1M tokens | Frontier reasoning |
+| `gemini-2.5-pro` | 2M tokens | Stable, complex tasks |
+| `gemini-2.5-flash-lite` | 1M tokens | Budget multimodal |
+| `gemini-2.0-flash-thinking-exp` | 2M tokens | Extended thinking mode (legacy) |
 | `gemini-1.5-pro` | 2M tokens | Previous generation |
 | `gemini-1.5-flash` | 1M tokens | Faster, previous gen |
 

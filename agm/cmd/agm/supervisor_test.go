@@ -44,6 +44,7 @@ func TestCheckSupervisorEnvRequiresOAuth(t *testing.T) {
 	err := checkSupervisorEnv(env, false)
 	if err == nil {
 		t.Fatal("expected refusal, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Errorf("error = %q, want mention of CLAUDE_CODE_OAUTH_TOKEN", err)
@@ -110,6 +111,7 @@ func TestHeartbeatRoundTrip(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("readHeartbeatRecord returned nil for just-written record")
+		return
 	}
 	if got.ID != rec.ID || got.PrimaryFor != rec.PrimaryFor ||
 		got.TertiaryFor != rec.TertiaryFor || got.PID != rec.PID {

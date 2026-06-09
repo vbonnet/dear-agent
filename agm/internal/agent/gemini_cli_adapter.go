@@ -47,7 +47,7 @@ func (a *GeminiCLIAdapter) Name() string {
 
 // Version returns the model name
 func (a *GeminiCLIAdapter) Version() string {
-	return "gemini-2.0-flash-exp"
+	return "gemini-3.5-flash"
 }
 
 // CreateSession creates a new Gemini session.
@@ -398,12 +398,12 @@ func (a *GeminiCLIAdapter) Capabilities() Capabilities {
 		SupportsSlashCommands: true,    // Gemini CLI supports /chat, /memory, etc.
 		SupportsHooks:         true,    // Gemini CLI supports hooks (SessionStart, SessionEnd, etc.)
 		SupportsTools:         true,    // Gemini supports function calling
-		SupportsVision:        true,    // Gemini 2.0 supports vision
-		SupportsMultimodal:    true,    // Gemini 2.0 supports audio/video
+		SupportsVision:        true,    // Gemini 3.x supports vision
+		SupportsMultimodal:    true,    // Gemini 3.x supports audio/video
 		SupportsStreaming:     true,    // Gemini CLI supports streaming
 		SupportsSystemPrompts: true,    // Gemini supports system instructions
-		MaxContextWindow:      1000000, // 1M tokens (2M for 2.0 Flash)
-		ModelName:             "gemini-2.0-flash-exp",
+		MaxContextWindow:      1048576, // 1M input tokens (3.5 Flash, GA 2026-05-19)
+		ModelName:             "gemini-3.5-flash",
 	}
 }
 

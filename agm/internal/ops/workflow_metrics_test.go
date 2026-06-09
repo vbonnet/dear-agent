@@ -140,6 +140,7 @@ func TestRecordAndLoadWorkflowMetrics(t *testing.T) {
 	}
 	if loaded == nil {
 		t.Fatal("loaded metrics should not be nil")
+		return
 	}
 	if loaded.TasksTotal != 5 {
 		t.Errorf("TasksTotal = %d, want 5", loaded.TasksTotal)

@@ -1,5 +1,6 @@
-// tools.go implements the three MCP tools that ADR-016 ships:
-// get_signals, get_recommendations, get_signal_trends.
+// tools.go implements the three MCP tools (ADR-015 Part B;
+// ADR-016 is a redirect): get_signals, get_recommendations,
+// get_signal_trends.
 //
 // Every tool is read-only. The server never writes; collection is the
 // aggregator's job.
@@ -16,8 +17,8 @@ import (
 )
 
 // Per-tool caps prevent a misconfigured client from over-fetching. See
-// ADR-016 §D2 / §D3 / §D4 for the rationale (one JSON-RPC envelope per
-// response, stdio buffer + client render budgets).
+// ADR-015 §D-MCP-1 / §D-MCP-2 / §D-MCP-3 for the rationale (one
+// JSON-RPC envelope per response, stdio buffer + client render budgets).
 const (
 	defaultSignalsLimit = 100
 	maxSignalsLimit     = 1000

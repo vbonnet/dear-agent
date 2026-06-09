@@ -1,0 +1,150 @@
+name: Branch Protection Audit
+
+# Daily check that the `main` branch on every repo we care about has its
+# protection rules configured (required status checks, PR reviews, no force
+# push, no deletion). Opens a single rolling `branch-protection` issue when
+# anything is missing and auto-closes it once every repo is back in spec.
+#
+# This workflow needs cross-repo read access. The default GITHUB_TOKEN can
+# only see the repo it runs in, so it reads a PAT from `secrets.AUDIT_PAT`
+# with `repo` + `read:org` scope. If the secret is absent the job no-ops
+# with a warning rather than failing — the CI Health Monitor will catch any
+# resulting issue.
+
+on:
+  schedule:
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+env:
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Audit branch protections across repos
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_PAT || secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::No GH_TOKEN available; skipping branch protection audit."
+            echo "skipped=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          # Repos under audit. Edit this list when new repos come online.
+          repos=(
+            "dear-agent"
+            "brain-v2"
+            "vbonnet.ai"
+            "gdoc-sync"
+            "engram-research"
+            "engram-kb"
+          )
+
+          findings=""
+
+          for repo in "${repos[@]}"; do
+            slug="${OWNER}/${repo}"
+            echo "=== $slug ==="
+
+            # 404 from this endpoint = no protection rules at all.
+            if ! protection=$(timeout 30 gh api \
+                "repos/${slug}/branches/main/protection" \
+                -H "Accept: application/vnd.github+json" 2>/dev/null); then
+              # Distinguish "repo not found" from "no protection set".
+              if ! timeout 30 gh api "repos/${slug}" >/dev/null 2>&1; then
+                echo "  skip — repo not accessible (private or missing)"
+                continue
+              fi
+              findings="${findings}\n- **${slug}**: branch \`main\` has no protection rules"
+              continue
+            fi
+
+            problems=$(echo "$protection" | jq -r '
+              [
+                (if (.required_status_checks // null) == null
+                  then "missing required_status_checks"
+                  else empty end),
+                (if (.required_pull_request_reviews // null) == null
+                  then "missing required_pull_request_reviews"
+                  else empty end),
+                (if (.allow_force_pushes.enabled // false)
+                  then "force pushes enabled"
+                  else empty end),
+                (if (.allow_deletions.enabled // false)
+                  then "branch deletion enabled"
+                  else empty end),
+                (if (.required_pull_request_reviews.required_approving_review_count // 0) < 1
+                  then "approving_review_count < 1"
+                  else empty end)
+              ] | join(", ")
+            ')
+
+            if [ -n "$problems" ]; then
+              findings="${findings}\n- **${slug}**: ${problems}"
+              echo "  PROBLEMS: $problems"
+            else
+              echo "  ok"
+            fi
+          done
+
+          # Persist findings (use newline-delimited heredoc so the body
+          # round-trips through GITHUB_ENV cleanly).
+          {
+            echo "findings<<__EOF__"
+            printf '%b\n' "$findings"
+            echo "__EOF__"
+          } >> "$GITHUB_ENV"
+
+      - name: Open / update branch-protection issue
+        if: ${{ env.skipped != 'true' && env.findings != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="branch-protection: misconfigured repos detected"
+          body=$(cat <<EOF
+          The Branch Protection Audit found one or more repos missing required protections as of $(date -u +"%Y-%m-%dT%H:%M:%SZ"):
+
+          ${findings}
+
+          **Required for every repo** (per the workflow):
+          - \`required_status_checks\` configured
+          - \`required_pull_request_reviews\` with \`required_approving_review_count >= 1\`
+          - \`allow_force_pushes.enabled = false\`
+          - \`allow_deletions.enabled = false\`
+
+          To fix a repo: \`gh api -X PUT repos/<owner>/<repo>/branches/main/protection ...\` — see [GitHub's branch protection docs](https://docs.github.com/en/rest/branches/branch-protection).
+
+          Auto-managed by \`.github/workflows/branch-protection-audit.yml\`; closes once every repo passes.
+          EOF
+          )
+          existing=$(timeout 30 gh issue list --repo "$REPO" --label branch-protection --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            timeout 30 gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            timeout 30 gh issue create --repo "$REPO" --title "$title" --body "$body" --label branch-protection
+          fi
+
+      - name: Auto-close branch-protection issue when all repos pass
+        if: ${{ env.skipped != 'true' && env.findings == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          existing=$(timeout 30 gh issue list --repo "$REPO" --label branch-protection --state open --json number --jq '.[].number')
+          for n in $existing; do
+            timeout 30 gh issue close "$n" --repo "$REPO" --comment "All audited repos have branch protection configured; auto-closing."
+          done

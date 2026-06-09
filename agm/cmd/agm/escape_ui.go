@@ -67,23 +67,23 @@ func runEscapeUI(cmd *cobra.Command, args []string) error {
 
 	case state.CanReceiveOverlay:
 		// Overlay detected — attempt recovery
-		fmt.Fprintf(cmd.ErrOrStderr(), "Overlay detected on '%s' — sending Left key to dismiss...\n", sessionName)
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Overlay detected on '%s' — sending Left key to dismiss...\n", sessionName)
 		return attemptOverlayDismissal(cmd, sessionName)
 
 	case state.CanReceiveNo:
-		fmt.Fprintf(cmd.ErrOrStderr(), "Session '%s' has a permission prompt (not an overlay). Use 'agm send approve' or 'agm send reject' instead.\n", sessionName)
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Session '%s' has a permission prompt (not an overlay). Use 'agm send approve' or 'agm send reject' instead.\n", sessionName)
 		return fmt.Errorf("session has permission prompt, not a UI overlay")
 
 	case state.CanReceiveQueue:
 		// Session is busy — try sending Left anyway in case state detection missed an overlay
-		fmt.Fprintf(cmd.ErrOrStderr(), "Session '%s' appears busy. Attempting overlay dismissal anyway...\n", sessionName)
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Session '%s' appears busy. Attempting overlay dismissal anyway...\n", sessionName)
 		return attemptOverlayDismissal(cmd, sessionName)
 
 	case state.CanReceiveNotFound:
 		return fmt.Errorf("session '%s' tmux session not found", sessionName)
 
 	default:
-		fmt.Fprintf(cmd.ErrOrStderr(), "Session '%s' in unknown state '%s'. Attempting overlay dismissal...\n", sessionName, canReceive)
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Session '%s' in unknown state '%s'. Attempting overlay dismissal...\n", sessionName, canReceive)
 		return attemptOverlayDismissal(cmd, sessionName)
 	}
 }
@@ -102,13 +102,13 @@ func attemptOverlayDismissal(cmd *cobra.Command, sessionName string) error {
 	canReceive := session.CheckSessionDelivery(sessionName)
 
 	if canReceive == state.CanReceiveYes {
-		fmt.Fprintf(cmd.OutOrStdout(), "OK: overlay dismissed on '%s' (Left key worked)\n", sessionName)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "OK: overlay dismissed on '%s' (Left key worked)\n", sessionName)
 		return nil
 	}
 
 	if canReceive == state.CanReceiveOverlay {
 		// Left didn't work — try Escape
-		fmt.Fprintf(cmd.ErrOrStderr(), "Left key did not dismiss overlay. Trying Escape...\n")
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Left key did not dismiss overlay. Trying Escape...\n")
 		if err := tmux.SendKeys(sessionName, "Escape"); err != nil {
 			return fmt.Errorf("failed to send Escape key: %w", err)
 		}
@@ -117,7 +117,7 @@ func attemptOverlayDismissal(cmd *cobra.Command, sessionName string) error {
 
 		canReceive = session.CheckSessionDelivery(sessionName)
 		if canReceive == state.CanReceiveYes {
-			fmt.Fprintf(cmd.OutOrStdout(), "OK: overlay dismissed on '%s' (Escape key worked)\n", sessionName)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "OK: overlay dismissed on '%s' (Escape key worked)\n", sessionName)
 			return nil
 		}
 
@@ -125,6 +125,6 @@ func attemptOverlayDismissal(cmd *cobra.Command, sessionName string) error {
 	}
 
 	// Overlay might have been dismissed but session is in another state
-	fmt.Fprintf(cmd.OutOrStdout(), "OK: overlay dismissed on '%s' (session now in state: %s)\n", sessionName, canReceive)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "OK: overlay dismissed on '%s' (session now in state: %s)\n", sessionName, canReceive)
 	return nil
 }

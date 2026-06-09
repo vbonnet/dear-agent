@@ -266,7 +266,7 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, "claude-3-5-haiku-20241022", config.Ecphory.Providers.Anthropic.Model)
 
 	assert.Equal(t, "GOOGLE_CLOUD_PROJECT", config.Ecphory.Providers.VertexAI.ProjectIDEnv)
-	assert.Equal(t, "gemini-2.0-flash-exp", config.Ecphory.Providers.VertexAI.Model)
+	assert.Equal(t, "gemini-3.5-flash", config.Ecphory.Providers.VertexAI.Model)
 
 	assert.Equal(t, "us-east5", config.Ecphory.Providers.VertexAIClaude.Location)
 	assert.Equal(t, "claude-sonnet-4-5@20250929", config.Ecphory.Providers.VertexAIClaude.Model)

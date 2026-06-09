@@ -53,9 +53,9 @@ func runStart(cmd *cobra.Command, args []string) error {
 	feature, err := progress.FindFeature(prog, featureID)
 	if err != nil {
 		writer.Error(err.Error())
-		fmt.Fprintf(cmd.OutOrStdout(), "\nAvailable features:\n")
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nAvailable features:\n")
 		for _, f := range prog.Features {
-			fmt.Fprintf(cmd.OutOrStdout(), "  - %s (%s)\n", f.ID, f.Status)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  - %s (%s)\n", f.ID, f.Status)
 		}
 		return err
 	}
@@ -96,11 +96,11 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	writer.Success(fmt.Sprintf("Started: %s", featureID))
-	fmt.Fprintf(cmd.OutOrStdout(), "Status: in_progress\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "\nNext steps:\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "  1. Implement the feature\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "  2. Run tests to verify\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "  3. wayfinder-features verify %s\n", featureID)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Status: in_progress\n")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nNext steps:\n")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  1. Implement the feature\n")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  2. Run tests to verify\n")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  3. wayfinder-features verify %s\n", featureID)
 
 	return nil
 }

@@ -90,6 +90,72 @@ type Finding struct {
 	ResolvedAt time.Time
 }
 
+// VerifierRole returns the value of Evidence[EvidenceVerifierRole]
+// when present, "" otherwise. The convention is "<provider>.<name>"
+// for external Verifiers and the check id for internal Checks.
+func (f Finding) VerifierRole() string {
+	if f.Evidence == nil {
+		return ""
+	}
+	s, _ := f.Evidence[EvidenceVerifierRole].(string)
+	return s
+}
+
+// ReviewDepth returns the value of Evidence[EvidenceReviewDepth]
+// when present, ReviewDepthCasual otherwise. The default matches
+// the documented "treat unknown values as casual" rule from
+// verifier.go so downstream consumers can call this safely on any
+// Finding without checking presence first.
+func (f Finding) ReviewDepth() string {
+	if f.Evidence == nil {
+		return ReviewDepthCasual
+	}
+	s, ok := f.Evidence[EvidenceReviewDepth].(string)
+	if !ok || s == "" {
+		return ReviewDepthCasual
+	}
+	return s
+}
+
+// VerifiedAt returns (timestamp, true) when the Finding has been
+// adversarially verified — i.e. Evidence[EvidenceVerifiedAt] carries
+// a parseable RFC3339 timestamp. Returns (zero, false) when the key
+// is absent or malformed. Phase 6.5 trust-inversion contract: a
+// Finding for which VerifiedAt returns true is in the verified set.
+//
+// Callers querying the *verified set* should prefer this helper over
+// reaching into Evidence so the encoding stays the runner's concern.
+func (f Finding) VerifiedAt() (time.Time, bool) {
+	if f.Evidence == nil {
+		return time.Time{}, false
+	}
+	raw, ok := f.Evidence[EvidenceVerifiedAt]
+	if !ok {
+		return time.Time{}, false
+	}
+	s, ok := raw.(string)
+	if !ok || s == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		// Try the shorter RFC3339 spelling — JSON consumers often drop
+		// the nanos when the original write was time.Now().Truncate.
+		t, err = time.Parse(time.RFC3339, s)
+		if err != nil {
+			return time.Time{}, false
+		}
+	}
+	return t, true
+}
+
+// IsVerified is a thin convenience over VerifiedAt for callers that
+// only need the boolean answer.
+func (f Finding) IsVerified() bool {
+	_, ok := f.VerifiedAt()
+	return ok
+}
+
 // Validate returns a non-nil error if the finding is missing fields
 // the store requires. It does NOT validate lifecycle fields — those
 // are the store's concern.

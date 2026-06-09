@@ -54,6 +54,7 @@ func TestPluginExecution(t *testing.T) {
 		_, err := executor.Execute(context.Background(), plugin, "nonexistent", []string{})
 		if err == nil {
 			t.Fatal("Execute() succeeded with nonexistent command, want error")
+			return
 		}
 
 		if !strings.Contains(err.Error(), "not found") {
@@ -237,6 +238,7 @@ commands:
 	_, err = executor.Execute(context.Background(), plugins[0], "test", []string{})
 	if err == nil {
 		t.Fatal("Execute() succeeded with invalid permissions, want error")
+		return
 	}
 
 	if !strings.Contains(err.Error(), "invalid permissions") {

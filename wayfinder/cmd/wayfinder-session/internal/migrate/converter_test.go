@@ -373,6 +373,7 @@ func TestConvertV1ToV2_DryRun(t *testing.T) {
 	// In dry-run mode, we should still get a valid V2 object
 	if v2 == nil {
 		t.Fatal("expected non-nil result in dry-run mode")
+		return
 	}
 
 	if v2.SchemaVersion != status.SchemaVersionV2 {

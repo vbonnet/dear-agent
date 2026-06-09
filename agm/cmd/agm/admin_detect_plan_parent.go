@@ -48,8 +48,8 @@ func init() {
 	detectPlanParentCmd.Flags().DurationVar(&detectTimeout, "timeout",
 		60*time.Second, "Maximum time window to search backwards")
 
-	detectPlanParentCmd.MarkFlagRequired("session-id")
-	detectPlanParentCmd.MarkFlagRequired("cwd")
+	_ = detectPlanParentCmd.MarkFlagRequired("session-id")
+	_ = detectPlanParentCmd.MarkFlagRequired("cwd")
 }
 
 func runDetectPlanParent(cmd *cobra.Command, args []string) error {
@@ -58,7 +58,7 @@ func runDetectPlanParent(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	// Get the child session to extract its creation time
 	child, err := adapter.GetSession(detectSessionID)

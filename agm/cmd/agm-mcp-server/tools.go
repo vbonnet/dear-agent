@@ -147,7 +147,7 @@ func newMCPOpContext() (*ops.OpContext, func(), error) {
 		return nil, func() {}, fmt.Errorf("dolt connect: %w", err)
 	}
 
-	cleanup := func() { adapter.Close() }
+	cleanup := func() { _ = adapter.Close() }
 
 	return &ops.OpContext{
 		Storage:    adapter,
@@ -308,11 +308,16 @@ func addGetWayfinderSessionTool(server *mcp.Server, cfg *Config) {
 	})
 }
 
+// defaultEngramMCPURL is the documented out-of-the-box URL for the
+// Engram MCP server. Surface here so tests can assert on a constant
+// instead of inferring it from a real network error.
+const defaultEngramMCPURL = "http://localhost:8081"
+
 // forwardToEngramMCP forwards MCP tool call to Engram MCP server via HTTP
 func forwardToEngramMCP(ctx context.Context, toolName string, arguments map[string]interface{}, cfg *Config) (string, error) {
 	engramURL := cfg.EngramMCPURL
 	if engramURL == "" {
-		engramURL = "http://localhost:8081"
+		engramURL = defaultEngramMCPURL
 	}
 
 	// Inject W3C trace context into _meta for downstream propagation
@@ -351,7 +356,7 @@ func forwardToEngramMCP(ctx context.Context, toolName string, arguments map[stri
 	if err != nil {
 		return "", fmt.Errorf("HTTP request failed: %w (is Engram MCP server running at %s?)", err, engramURL)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {

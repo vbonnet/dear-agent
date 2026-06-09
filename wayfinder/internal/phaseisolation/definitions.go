@@ -16,7 +16,10 @@ var PhaseDependencyGraph = map[PhaseID]map[PhaseID]LoadStrategy{
 	PhaseS11: {PhaseD4: LoadSummary, PhaseS8: LoadSummary, PhaseS10: LoadFull},
 }
 
-// V1ToV2PhaseMap maps TypeScript phase IDs to Go wayfinder-session phase names.
+// V1ToV2PhaseMap maps V1 phase IDs (12 IDs: D1-D4, S4-S11) to the 9
+// canonical V2 phase names used by wayfinder-session. The mapping is
+// lossy: S4 collapses into Spec, S5 into Plan, and S9/S10 into Build.
+// See wayfinder/PHASES.md for the full truth table.
 var V1ToV2PhaseMap = map[PhaseID]V2PhaseName{
 	PhaseD1:  V2Problem,
 	PhaseD2:  V2Research,

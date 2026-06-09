@@ -76,6 +76,16 @@ var (
 		CacheWrite: 0.00, // No caching
 		CacheRead:  0.00, // No caching
 	}
+
+	// Gemini 3.5 Flash (GA 2026-05-19 at I/O 2026)
+	// Source: cloud.google.com/vertex-ai/generative-ai/pricing
+	// Standard tier; non-global regions priced higher ($1.65 / $9.90).
+	Gemini35Flash = Pricing{
+		Input:      1.50, // $1.50 per 1M tokens
+		Output:     9.00, // $9 per 1M tokens
+		CacheWrite: 0.00, // Context caching priced separately; sink not yet tracking it
+		CacheRead:  0.15, // $0.15 per 1M tokens (cached input)
+	}
 )
 
 // ModelAliases maps short aliases to canonical model IDs.
@@ -95,6 +105,7 @@ var PricingTable = map[string]Pricing{
 	"claude-sonnet-4-5@20250929": Claude35Sonnet20241022, // Vertex AI naming
 	"gemini-2.0-flash-exp":       Gemini20FlashExp,
 	"gemini-1.5-pro":             Gemini15Pro,
+	"gemini-3.5-flash":           Gemini35Flash,
 	"local-jaccard-v1":           {}, // Local provider is free
 }
 

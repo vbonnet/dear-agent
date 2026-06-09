@@ -9,6 +9,7 @@ func TestNewSearchCache(t *testing.T) {
 	cache := NewSearchCache(5 * time.Minute)
 	if cache == nil {
 		t.Fatal("NewSearchCache returned nil")
+		return
 	}
 	if cache.ttl != 5*time.Minute {
 		t.Errorf("expected TTL 5m, got %v", cache.ttl)

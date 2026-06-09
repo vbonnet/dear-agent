@@ -1,0 +1,78 @@
+package supervisor
+
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+// CheckSkill is the "supervisor-check skill" referenced in CONTEXT.md §"The
+// three supervisors" and ADR-002 §"Two load-bearing invariants" — the first
+// action of every loop iteration, run against the two peer supervisors. A
+// non-nil error means "peer appears blocked"; the Loop records that to the
+// decision trail and (in future iterations) takes corrective action.
+//
+// CheckSkill is an interface rather than a fixed implementation because:
+//
+//   - In PR 1 the supervisors run in-process and "blocked" reduces to "no
+//     fresh heartbeat" (HeartbeatCheckSkill). That is enough to validate
+//     the loop-and-mesh wiring.
+//   - In follow-up PRs the supervisors run as separate AGM sessions and
+//     "blocked" includes "child Claude process awaiting a permission
+//     prompt" (the historically dominant blockage per CONTEXT.md). That
+//     CheckSkill will read AGM session state and may send AGM messages to
+//     unblock — but the Loop's contract with CheckSkill stays the same.
+type CheckSkill interface {
+	// Check inspects peer. A nil return means "peer looks healthy"; a
+	// non-nil error means "peer appears blocked, and here is why". The
+	// Loop is responsible for recording either outcome and for any
+	// follow-up action — Check itself is a pure observer.
+	Check(ctx context.Context, peer LoopStatus) error
+}
+
+// CheckSkillFunc adapts a plain function to CheckSkill.
+type CheckSkillFunc func(ctx context.Context, peer LoopStatus) error
+
+// Check implements CheckSkill.
+func (f CheckSkillFunc) Check(ctx context.Context, peer LoopStatus) error {
+	return f(ctx, peer)
+}
+
+// HeartbeatCheckSkill is the PR-1 default: a peer is considered blocked if
+// its LastHeartbeat is older than Threshold. A zero LastHeartbeat (no ticks
+// completed yet) is treated as "blocked" if the Loop has been running long
+// enough for at least one heartbeat — but HeartbeatCheckSkill itself has no
+// notion of "long enough", so it reports the zero case as blocked
+// unconditionally. The Loop deliberately publishes a startup heartbeat
+// before the first Check call (see Loop.Run) so the zero case only fires
+// when a supervisor never started at all.
+type HeartbeatCheckSkill struct {
+	// Threshold is the maximum age of a heartbeat before the peer is
+	// considered blocked. A reasonable default is 3x the Loop interval,
+	// so transient lag in one tick does not trigger a false positive.
+	Threshold time.Duration
+
+	// Now returns the current time. Defaults to time.Now if nil; tests
+	// inject a fake clock here.
+	Now func() time.Time
+}
+
+// Check reports an error if peer's heartbeat is too stale.
+func (h *HeartbeatCheckSkill) Check(_ context.Context, peer LoopStatus) error {
+	if h.Threshold <= 0 {
+		return fmt.Errorf("supervisor: HeartbeatCheckSkill.Threshold must be positive")
+	}
+	now := time.Now
+	if h.Now != nil {
+		now = h.Now
+	}
+	hb := peer.LastHeartbeat()
+	if hb.IsZero() {
+		return fmt.Errorf("peer %q has not heartbeated yet", peer.Role())
+	}
+	age := now().Sub(hb)
+	if age > h.Threshold {
+		return fmt.Errorf("peer %q heartbeat is %s old (threshold %s)", peer.Role(), age, h.Threshold)
+	}
+	return nil
+}

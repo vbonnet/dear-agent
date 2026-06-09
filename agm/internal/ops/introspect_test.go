@@ -7,6 +7,7 @@ func TestListOps_ReturnsOperations(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("ListOps() returned nil")
+		return
 	}
 
 	if result.Operation != "list_ops" {

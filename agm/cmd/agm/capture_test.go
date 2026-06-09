@@ -7,6 +7,7 @@ import (
 func TestCaptureCommand(t *testing.T) {
 	if captureCmd == nil {
 		t.Fatal("captureCmd is nil")
+		return
 	}
 
 	if captureCmd.Use != "capture <session-name>" {

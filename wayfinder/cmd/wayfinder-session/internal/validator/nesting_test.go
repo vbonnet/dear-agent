@@ -409,6 +409,7 @@ func TestCheckChildrenComplete_ErrorMessage(t *testing.T) {
 	err := CheckChildrenComplete(tmpDir)
 	if err == nil {
 		t.Fatal("Expected error, got nil")
+		return
 	}
 
 	errMsg := err.Error()

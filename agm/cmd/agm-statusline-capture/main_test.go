@@ -201,6 +201,7 @@ func TestRunInvalidJSON(t *testing.T) {
 	err := run()
 	if err == nil {
 		t.Fatal("expected error for invalid JSON, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "parse JSON") {
 		t.Errorf("error = %q, want it to contain 'parse JSON'", err)
@@ -214,6 +215,7 @@ func TestRunMissingSessionID(t *testing.T) {
 	err := run()
 	if err == nil {
 		t.Fatal("expected error for missing session_id, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "missing session_id") {
 		t.Errorf("error = %q, want it to contain 'missing session_id'", err)
@@ -227,6 +229,7 @@ func TestRunEmptySessionID(t *testing.T) {
 	err := run()
 	if err == nil {
 		t.Fatal("expected error for empty session_id, got nil")
+		return
 	}
 	if !strings.Contains(err.Error(), "missing session_id") {
 		t.Errorf("error = %q, want 'missing session_id'", err)

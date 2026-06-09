@@ -49,6 +49,7 @@ tasks:
 	_, err := ParseWorkflow([]byte(yaml))
 	if err == nil {
 		t.Fatal("expected error for missing name")
+		return
 	}
 	if !strings.Contains(err.Error(), "name is required") {
 		t.Errorf("unexpected error: %v", err)
@@ -63,6 +64,7 @@ tasks: []
 	_, err := ParseWorkflow([]byte(yaml))
 	if err == nil {
 		t.Fatal("expected error for empty tasks")
+		return
 	}
 	if !strings.Contains(err.Error(), "at least one task") {
 		t.Errorf("unexpected error: %v", err)
@@ -81,6 +83,7 @@ tasks:
 	_, err := ParseWorkflow([]byte(yaml))
 	if err == nil {
 		t.Fatal("expected error for duplicate ID")
+		return
 	}
 	if !strings.Contains(err.Error(), "duplicate task ID") {
 		t.Errorf("unexpected error: %v", err)
@@ -124,6 +127,7 @@ tasks:
 	_, err := ParseWorkflow([]byte(yaml))
 	if err == nil {
 		t.Fatal("expected error for unknown dependency")
+		return
 	}
 	if !strings.Contains(err.Error(), "unknown task") {
 		t.Errorf("unexpected error: %v", err)
@@ -141,6 +145,7 @@ tasks:
 	_, err := ParseWorkflow([]byte(yaml))
 	if err == nil {
 		t.Fatal("expected error for self dependency")
+		return
 	}
 	if !strings.Contains(err.Error(), "cannot depend on itself") {
 		t.Errorf("unexpected error: %v", err)
@@ -239,6 +244,7 @@ func TestTopologicalSort_Cycle(t *testing.T) {
 	_, err := TopologicalSort(w)
 	if err == nil {
 		t.Fatal("expected error for cycle")
+		return
 	}
 	if !strings.Contains(err.Error(), "cycle") {
 		t.Errorf("unexpected error: %v", err)

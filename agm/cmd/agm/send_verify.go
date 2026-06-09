@@ -127,7 +127,7 @@ func runSendVerify(cmd *cobra.Command, args []string) error {
 	// Get adapter and determine sender
 	adapter, _ := getStorage()
 	if adapter != nil {
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 	}
 
 	senderName, err := determineSender(adapter)

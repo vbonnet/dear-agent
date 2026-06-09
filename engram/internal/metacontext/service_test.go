@@ -87,6 +87,7 @@ func TestService_Analyze_CacheMiss(t *testing.T) {
 	// Verify metacontext
 	if mc == nil {
 		t.Fatal("Metacontext should not be nil")
+		return
 	}
 	if mc.Metadata.CacheHit {
 		t.Error("First analysis should be cache miss")

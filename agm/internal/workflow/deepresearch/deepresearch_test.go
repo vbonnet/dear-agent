@@ -108,6 +108,7 @@ func TestNewGeminiDeepResearch(t *testing.T) {
 	w := NewGeminiDeepResearch()
 	if w == nil {
 		t.Fatal("NewGeminiDeepResearch() returned nil")
+		return
 	}
 	if w.cliPath == "" {
 		t.Error("NewGeminiDeepResearch() produced empty cliPath")
@@ -131,6 +132,119 @@ func TestGeminiDeepResearchGetters(t *testing.T) {
 	}
 	if harnesses[0] != "gemini-cli" {
 		t.Errorf("SupportedHarnesses()[0] = %q, want %q", harnesses[0], "gemini-cli")
+	}
+}
+
+// TestResearchOnePanicRecovery verifies that a panic inside the deep-research
+// work is converted into a failed result rather than escaping the goroutine.
+// Before the fix, a panic in the sole channel-sender goroutine left the
+// collector blocked on <-results forever — a permanent deadlock.
+func TestResearchOnePanicRecovery(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger, err := NewResearchLogger("panic-recovery", []string{"https://panic.com"}, tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := &GeminiDeepResearch{
+		runResearch: func(_, _ string) (string, error) {
+			panic("boom")
+		},
+	}
+
+	res := w.researchOne("session", "https://panic.com", logger)
+
+	if res.url != "https://panic.com" {
+		t.Errorf("res.url = %q, want %q", res.url, "https://panic.com")
+	}
+	if res.err == nil {
+		t.Fatal("researchOne() recovered a panic but returned nil error")
+	}
+	if !strings.Contains(res.err.Error(), "panicked") {
+		t.Errorf("res.err = %q, want it to mention the panic", res.err)
+	}
+	if res.reportPath != "" {
+		t.Errorf("res.reportPath = %q, want empty after panic", res.reportPath)
+	}
+}
+
+// TestResearchOnePassThrough verifies the normal (non-panicking) paths return
+// the underlying run result unchanged.
+func TestResearchOnePassThrough(t *testing.T) {
+	tmpDir := t.TempDir()
+	logger, err := NewResearchLogger("passthrough", []string{"https://ok.com", "https://err.com"}, tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("success", func(t *testing.T) {
+		w := &GeminiDeepResearch{
+			runResearch: func(_, _ string) (string, error) {
+				return "/tmp/report.md", nil
+			},
+		}
+		res := w.researchOne("session", "https://ok.com", logger)
+		if res.err != nil {
+			t.Fatalf("unexpected error: %v", res.err)
+		}
+		if res.reportPath != "/tmp/report.md" {
+			t.Errorf("res.reportPath = %q, want /tmp/report.md", res.reportPath)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		wantErr := fmt.Errorf("cli failed")
+		w := &GeminiDeepResearch{
+			runResearch: func(_, _ string) (string, error) {
+				return "", wantErr
+			},
+		}
+		res := w.researchOne("session", "https://err.com", logger)
+		if res.err == nil || !strings.Contains(res.err.Error(), "cli failed") {
+			t.Errorf("res.err = %v, want it to wrap %q", res.err, wantErr)
+		}
+		if res.reportPath != "" {
+			t.Errorf("res.reportPath = %q, want empty on error", res.reportPath)
+		}
+	})
+}
+
+// TestResearchOneNoDeadlockUnderPanic exercises the exact channel pattern used
+// by executeMultiURL: N sole-sender goroutines feeding a results channel, where
+// every goroutine panics. The collector must still receive exactly N results.
+// A regression in the panic recovery would make this test hang and trip the
+// timeout instead of completing.
+func TestResearchOneNoDeadlockUnderPanic(t *testing.T) {
+	tmpDir := t.TempDir()
+	urls := []string{"https://a.com", "https://b.com", "https://c.com"}
+	logger, err := NewResearchLogger("no-deadlock", urls, tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := &GeminiDeepResearch{
+		runResearch: func(_, _ string) (string, error) {
+			panic("every goroutine panics")
+		},
+	}
+
+	results := make(chan researchResult, len(urls))
+	for _, url := range urls {
+		go func(url string) {
+			results <- w.researchOne("session", url, logger)
+		}(url)
+	}
+
+	deadline := time.After(5 * time.Second)
+	for i := 0; i < len(urls); i++ {
+		select {
+		case res := <-results:
+			if res.err == nil {
+				t.Errorf("result %d: expected panic-derived error, got nil", i)
+			}
+		case <-deadline:
+			t.Fatalf("deadlock: collector received only %d of %d results", i, len(urls))
+		}
 	}
 }
 

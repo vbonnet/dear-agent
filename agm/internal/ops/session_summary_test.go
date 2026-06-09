@@ -204,6 +204,7 @@ func TestComputeDuration_Normal(t *testing.T) {
 	dur := computeDuration(start, commits)
 	if dur == nil {
 		t.Fatal("expected non-nil duration")
+		return
 	}
 	if dur.StartTime != "2026-04-13T10:00:00Z" {
 		t.Errorf("expected start 2026-04-13T10:00:00Z, got %s", dur.StartTime)
@@ -226,6 +227,7 @@ func TestComputeDuration_FirstCommitBeforeSessionStart(t *testing.T) {
 	dur := computeDuration(start, commits)
 	if dur == nil {
 		t.Fatal("expected non-nil duration")
+		return
 	}
 	if dur.StartTime != "2026-04-13T10:00:00Z" {
 		t.Errorf("expected start adjusted to first commit, got %s", dur.StartTime)

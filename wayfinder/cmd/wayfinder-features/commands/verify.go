@@ -151,9 +151,9 @@ func executeTests(cmd *cobra.Command, command, featureID string, feature *progre
 
 	if err != nil {
 		writer.Error(fmt.Sprintf("Verification failed: %s", featureID))
-		fmt.Fprintf(cmd.OutOrStdout(), "\nTest output:\n%s\n", string(testOutput))
-		fmt.Fprintf(cmd.OutOrStdout(), "\nStatus remains: %s\n", feature.Status)
-		fmt.Fprintf(cmd.OutOrStdout(), "Fix errors and retry: wayfinder-features verify %s\n", featureID)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nTest output:\n%s\n", string(testOutput))
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nStatus remains: %s\n", feature.Status)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Fix errors and retry: wayfinder-features verify %s\n", featureID)
 		return nil, fmt.Errorf("tests failed")
 	}
 
@@ -182,9 +182,9 @@ func updateFeatureStatus(progressPath string, prog *progress.Progress, featureID
 func displayResults(cmd *cobra.Command, featureID string, testOutput []byte, prog *progress.Progress, writer *cliframe.Writer) {
 	writer.Success(fmt.Sprintf("Verified: %s", featureID))
 	if len(testOutput) > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "\nTest output:\n%s\n", string(testOutput))
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nTest output:\n%s\n", string(testOutput))
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "\nStatus: passing\n")
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nStatus: passing\n")
 
 	suggestNextFeature(cmd, prog, writer)
 }
@@ -193,7 +193,7 @@ func displayResults(cmd *cobra.Command, featureID string, testOutput []byte, pro
 func suggestNextFeature(cmd *cobra.Command, prog *progress.Progress, writer *cliframe.Writer) {
 	for _, f := range prog.Features {
 		if f.Status == progress.StatusFailing {
-			fmt.Fprintf(cmd.OutOrStdout(), "\nNext: wayfinder-features start %s\n", f.ID)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\nNext: wayfinder-features start %s\n", f.ID)
 			return
 		}
 	}

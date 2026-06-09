@@ -55,7 +55,7 @@ func run(args []string, in io.Reader, stdout, stderr io.Writer) int {
 		debounce = fs.Duration("debounce", 200*time.Millisecond, "watcher debounce interval")
 	)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: workflow-dev [--fixtures path] [--watch] <workflow.yaml>")
+		_, _ = fmt.Fprintln(stderr, "Usage: workflow-dev [--fixtures path] [--watch] <workflow.yaml>")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -69,7 +69,7 @@ func run(args []string, in io.Reader, stdout, stderr io.Writer) int {
 
 	sess, err := dev.NewSession(wfPath, *fixtures)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 
@@ -82,19 +82,19 @@ func run(args []string, in io.Reader, stdout, stderr io.Writer) int {
 			err := dev.HotReload(ctx, paths, dev.WatchOptions{Debounce: *debounce}, func(p string) {
 				n, f, err := sess.Reload()
 				if err != nil {
-					fmt.Fprintf(stdout, "[watch] reload failed (%s): %v\n", p, err)
+					_, _ = fmt.Fprintf(stdout, "[watch] reload failed (%s): %v\n", p, err)
 					return
 				}
-				fmt.Fprintf(stdout, "[watch] reloaded after %s: %d node(s), %d fixture(s)\n", p, n, f)
+				_, _ = fmt.Fprintf(stdout, "[watch] reloaded after %s: %d node(s), %d fixture(s)\n", p, n, f)
 			})
 			if err != nil && ctx.Err() == nil {
-				fmt.Fprintf(stderr, "[watch] %v\n", err)
+				_, _ = fmt.Fprintf(stderr, "[watch] %v\n", err)
 			}
 		}()
 	}
 
 	if err := dev.REPL(ctx, sess, in, stdout); err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 	return 0
