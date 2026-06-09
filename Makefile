@@ -4,6 +4,7 @@
 #   preflight               Fast local CI-parity gates: vet + build + lint  (~25s)
 #   preflight-tests         preflight + go test (no -race) — quick sanity
 #   preflight-full          preflight + go test -race + govulncheck (full parity)
+#   health-check            Run the codebase health auditor (cmd/repo-health)
 #   install-preflight-hook  Install a git pre-push hook that runs preflight
 #   install-post-merge-hook Install a post-merge hook that reaps merged worktrees
 #   act-validate            Run full local CI validation via act (needs Docker)
@@ -25,7 +26,7 @@
 #   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 
-.PHONY: preflight preflight-tests preflight-full install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline
+.PHONY: preflight preflight-tests preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline
 
 # Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
 # CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm
@@ -44,6 +45,16 @@ preflight-tests:
 # before pushing.
 preflight-full:
 	@./scripts/preflight.sh --full
+
+# Build and run the codebase health auditor against this repo. Prints a
+# markdown summary and exits 0 (healthy) / 1 (degraded) / 2 (critical).
+# Pass ARGS to forward flags, e.g. `make health-check ARGS=--coverage` or
+# `make health-check ARGS="--json-out health.json --md-out health.md"`.
+# The scheduled .github/workflows/health-check.yml runs the same binary.
+health-check:
+	@mkdir -p build
+	@GOWORK=off go build -o build/repo-health ./cmd/repo-health
+	@./build/repo-health --root . $(ARGS)
 
 # Install a git pre-push hook that runs `make preflight`. Pushing to a PR
 # branch will then fail-fast before the GitHub round-trip if lint/build/vet
