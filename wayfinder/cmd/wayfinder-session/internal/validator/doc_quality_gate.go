@@ -284,8 +284,8 @@ func runReviewSkill(skillName string, docPath string) (float64, []string, error)
 		)
 	}
 	tmpPath := tmpFile.Name()
-	tmpFile.Close()
-	defer os.Remove(tmpPath)
+	_ = tmpFile.Close()
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	// Execute Python skill with JSON output
 	args := []string{scriptPath, docPath, "--output-json", tmpPath}
@@ -456,7 +456,7 @@ func calculateFileHash(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {

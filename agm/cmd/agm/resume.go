@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -78,7 +79,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// Resolve identifier to SessionID
 		sessionID, manifestPath, err := resolveSessionIdentifier(adapter, identifier)
@@ -91,69 +92,7 @@ Examples:
 
 		ui.PrintSuccess(fmt.Sprintf("Resolved identifier %q to session: %s", identifier, sessionID))
 
-		// Read manifest from Dolt to check lifecycle
-		m, err := adapter.GetSession(sessionID)
-		if err != nil {
-			ui.PrintError(err, "Failed to read session from Dolt",
-				"  • Session may not exist in database\n"+
-					"  • Try: agm session list --all")
-			return err
-		}
-
-		// Auto-detect harness from manifest
-		harnessName := m.Harness
-		if harnessName == "" {
-			harnessName = "claude-code" // Default for backward compatibility
-		}
-
-		// Warn if harness unavailable
-		if err := agent.ValidateHarnessAvailability(harnessName); err != nil {
-			ui.PrintWarning(fmt.Sprintf("⚠️  %s", err.Error()))
-		}
-
-		fmt.Printf("Using harness: %s\n", harnessName)
-
-		// Check if session is archived
-		if m.Lifecycle == manifest.LifecycleArchived {
-			ui.PrintArchivedSessionError(sessionID)
-			return fmt.Errorf("cannot resume archived session")
-		}
-
-		// Check session health
-		health, err := checkSessionHealth(adapter, sessionID, manifestPath)
-		if err != nil {
-			ui.PrintError(err,
-				"Session health check failed",
-				"  • Run diagnostics: agmdoctor\n"+
-					"  • List all sessions: agmlist --all")
-			return err
-		}
-
-		// Display health status
-		displayHealthStatus(health)
-
-		// If critical issues, abort
-		if !health.CanResume {
-			ui.PrintError(
-				fmt.Errorf("session cannot be resumed"),
-				"Critical issues prevent resuming this session",
-				"  • Fix the issues above and try again",
-			)
-			return fmt.Errorf("session health check failed")
-		}
-
-		// Resume the session
-		if err := resumeSession(adapter, sessionID, manifestPath, harnessName, health); err != nil {
-			ui.PrintError(err,
-				"Failed to resume session",
-				"  • Check tmux is running: tmux list-sessions\n"+
-					"  • Verify session health: agmdoctor\n"+
-					"  • Try manual attach: tmux attach -t "+health.TmuxSessionName)
-			return err
-		}
-
-		ui.PrintSuccess(fmt.Sprintf("Successfully resumed session %s", sessionID))
-		return nil
+		return resumeResolvedSession(adapter, sessionID, manifestPath)
 	},
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		// Only complete first argument (session identifier)
@@ -167,7 +106,7 @@ Examples:
 			// Fail gracefully - return empty list if can't connect to Dolt
 			return []string{}, cobra.ShellCompDirectiveNoFileComp
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// List sessions from Dolt (exclude archived sessions from completion)
 		filter := &dolt.SessionFilter{
@@ -515,6 +454,77 @@ func sendPostResumePrompt(sessionName, promptText, promptFile string) error {
 	return nil
 }
 
+// resumeResolvedSession runs the full resume workflow (harness detection,
+// archived/health checks, and the tmux+harness resume) for a session that has
+// already been resolved to a sessionID and manifestPath. It is shared by the
+// `agm session resume` command and the bare `agm` default-command resume path,
+// so both routes perform a real resume instead of a no-op placeholder.
+func resumeResolvedSession(adapter *dolt.Adapter, sessionID, manifestPath string) error {
+	// Read manifest from Dolt to check lifecycle
+	m, err := adapter.GetSession(sessionID)
+	if err != nil {
+		ui.PrintError(err, "Failed to read session from Dolt",
+			"  • Session may not exist in database\n"+
+				"  • Try: agm session list --all")
+		return err
+	}
+
+	// Auto-detect harness from manifest
+	harnessName := m.Harness
+	if harnessName == "" {
+		harnessName = "claude-code" // Default for backward compatibility
+	}
+
+	// Warn if harness unavailable
+	if err := agent.ValidateHarnessAvailability(harnessName); err != nil {
+		ui.PrintWarning(fmt.Sprintf("⚠️  %s", err.Error()))
+	}
+
+	fmt.Printf("Using harness: %s\n", harnessName)
+
+	// Check if session is archived
+	if m.Lifecycle == manifest.LifecycleArchived {
+		ui.PrintArchivedSessionError(sessionID)
+		return fmt.Errorf("cannot resume archived session")
+	}
+
+	// Check session health
+	health, err := checkSessionHealth(adapter, sessionID, manifestPath)
+	if err != nil {
+		ui.PrintError(err,
+			"Session health check failed",
+			"  • Run diagnostics: agmdoctor\n"+
+				"  • List all sessions: agmlist --all")
+		return err
+	}
+
+	// Display health status
+	displayHealthStatus(health)
+
+	// If critical issues, abort
+	if !health.CanResume {
+		ui.PrintError(
+			fmt.Errorf("session cannot be resumed"),
+			"Critical issues prevent resuming this session",
+			"  • Fix the issues above and try again",
+		)
+		return fmt.Errorf("session health check failed")
+	}
+
+	// Resume the session
+	if err := resumeSession(adapter, sessionID, manifestPath, harnessName, health); err != nil {
+		ui.PrintError(err,
+			"Failed to resume session",
+			"  • Check tmux is running: tmux list-sessions\n"+
+				"  • Verify session health: agmdoctor\n"+
+				"  • Try manual attach: tmux attach -t "+health.TmuxSessionName)
+		return err
+	}
+
+	ui.PrintSuccess(fmt.Sprintf("Successfully resumed session %s", sessionID))
+	return nil
+}
+
 // resumeSession performs the complete resume workflow
 func resumeSession(adapter *dolt.Adapter, sessionID, manifestPath, harnessName string, health *HealthStatus) error {
 	sendCommands := shouldSendResumeCommands(health.TmuxExists)
@@ -634,12 +644,39 @@ func buildClaudeResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, healt
 		}
 	}
 	if resumeUUID != "" {
+		// `claude --resume` is scoped to the current directory's project slug.
+		// If the conversation was started in a different directory than the
+		// recorded worktree (e.g. an associated pre-existing session), resuming
+		// from the worktree yields "No conversation found". Resume from the
+		// conversation's actual cwd when it can be located.
+		resumeDir := resolveResumeDir(resumeUUID, health.WorktreePath)
 		return fmt.Sprintf("cd %s && claude --resume %s && exit",
-			shellQuote(health.WorktreePath),
+			shellQuote(resumeDir),
 			shellQuote(resumeUUID))
 	}
 	ui.PrintWarning("No Claude UUID found - starting new Claude session")
 	return fmt.Sprintf("cd %s && claude && exit", shellQuote(health.WorktreePath))
+}
+
+// resolveResumeDir returns the directory `claude --resume` should run from for
+// the given conversation UUID. It prefers the conversation's recorded cwd (so
+// the project slug matches and the transcript is found); if that cannot be
+// determined it falls back to the worktree path.
+func resolveResumeDir(resumeUUID, worktreePath string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return worktreePath
+	}
+	cwd, err := claude.FindTranscriptCwd(homeDir, resumeUUID)
+	if err != nil || cwd == "" {
+		return worktreePath
+	}
+	if cwd != worktreePath {
+		ui.PrintWarning(fmt.Sprintf(
+			"Conversation lives in %s, not the worktree %s - resuming from there",
+			cwd, worktreePath))
+	}
+	return cwd
 }
 
 // waitForResumedClaude waits first for the claude process to appear, then for
@@ -668,13 +705,23 @@ func waitForResumedClaude(health *HealthStatus) error {
 		Title("Waiting for conversation to load...").
 		Accessible(true).
 		Action(func() {
-			promptWaitErr = tmux.WaitForPromptSimple(health.TmuxSessionName, 60*time.Second)
+			promptWaitErr = tmux.WaitForPromptOrResumeFailure(health.TmuxSessionName, 60*time.Second)
 		}).
 		Run()
 	if spinErr != nil {
 		return fmt.Errorf("spinner error: %w", spinErr)
 	}
 	fmt.Println()
+	// A fatal resume failure (e.g. "No conversation found") means the harness
+	// will never reach a prompt - abort instead of attaching to a dead pane.
+	var resumeFailure *tmux.ResumeFailureError
+	if errors.As(promptWaitErr, &resumeFailure) {
+		return fmt.Errorf("claude could not resume this conversation: %s\n"+
+			"  • The stored Claude UUID may not match a conversation in the worktree's project directory\n"+
+			"  • Verify the UUID: agm session list --all\n"+
+			"  • Diagnose resumability: agm admin doctor --validate",
+			resumeFailure.Detail)
+	}
 	if promptWaitErr != nil {
 		ui.PrintWarning("Conversation is taking longer than expected to load")
 		fmt.Println("  Attaching now - conversation should appear shortly")

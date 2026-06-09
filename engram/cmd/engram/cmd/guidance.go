@@ -199,7 +199,7 @@ func resolveEngramPathForGuidance(customPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to initialize platform: %w", err)
 	}
-	defer plat.Close()
+	defer func() { _ = plat.Close() }()
 
 	// Get engram path from config
 	engramPath := plat.Config().Platform.EngramPath

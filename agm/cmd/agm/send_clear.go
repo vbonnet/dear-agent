@@ -49,12 +49,12 @@ func runSendClear(cmd *cobra.Command, args []string) error {
 	hasTyped := tmux.InputLineHasContent(beforeContent)
 
 	if !hasQueued && !hasTyped {
-		fmt.Fprintf(os.Stdout, "Input already empty in session '%s' — nothing to clear\n", sessionName)
+		_, _ = fmt.Fprintf(os.Stdout, "Input already empty in session '%s' — nothing to clear\n", sessionName)
 		return nil
 	}
 
 	if os.Getenv("AGM_DEBUG") == "1" {
-		fmt.Fprintf(os.Stdout, "DEBUG: send-clear session=%s queued=%v typed=%v inputType=%d\n",
+		_, _ = fmt.Fprintf(os.Stdout, "DEBUG: send-clear session=%s queued=%v typed=%v inputType=%d\n",
 			sessionName, hasQueued, hasTyped, inputType)
 	}
 
@@ -77,7 +77,7 @@ func runSendClear(cmd *cobra.Command, args []string) error {
 	afterContent, err := tmux.CapturePaneOutput(sessionName, 50)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not verify input was cleared: %v\n", err)
-		fmt.Fprintf(os.Stdout, "Clear keys sent to session '%s' (verification skipped)\n", sessionName)
+		_, _ = fmt.Fprintf(os.Stdout, "Clear keys sent to session '%s' (verification skipped)\n", sessionName)
 		return nil
 	}
 
@@ -92,13 +92,13 @@ func runSendClear(cmd *cobra.Command, args []string) error {
 				_ = tmux.SendKeys(sessionName, "C-k")
 			}
 			time.Sleep(300 * time.Millisecond)
-			fmt.Fprintf(os.Stdout, "Force-cleared input in session '%s' (sent C-c C-u C-a C-k)\n", sessionName)
+			_, _ = fmt.Fprintf(os.Stdout, "Force-cleared input in session '%s' (sent C-c C-u C-a C-k)\n", sessionName)
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Warning: input may not be fully cleared in session '%s'\n", sessionName)
 		return fmt.Errorf("input not fully cleared — try with --force")
 	}
 
-	fmt.Fprintf(os.Stdout, "Input cleared in session '%s'\n", sessionName)
+	_, _ = fmt.Fprintf(os.Stdout, "Input cleared in session '%s'\n", sessionName)
 	return nil
 }

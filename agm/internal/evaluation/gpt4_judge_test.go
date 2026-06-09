@@ -11,11 +11,13 @@ import (
 
 // MockGPT4Client is a test implementation of GPT4Client
 type MockGPT4Client struct {
-	Response *GPT4Response
-	Err      error
+	Response    *GPT4Response
+	Err         error
+	LastRequest GPT4Request // captures the most recent request for assertions
 }
 
 func (m *MockGPT4Client) CreateChatCompletion(ctx context.Context, req GPT4Request) (*GPT4Response, error) {
+	m.LastRequest = req
 	if m.Err != nil {
 		return nil, m.Err
 	}
@@ -73,7 +75,7 @@ func TestGPT4Judge_EvaluateDetailed(t *testing.T) {
 			Threshold:   0.7,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "test input", "expected output", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "test input", "expected output", "actual output", criteria)
 		require.NoError(t, err)
 		assert.NotNil(t, result)
 		assert.True(t, result.Pass)
@@ -121,7 +123,7 @@ func TestGPT4Judge_EvaluateDetailed(t *testing.T) {
 			Threshold:   0.9,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "test input", "expected output", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "test input", "expected output", "actual output", criteria)
 		require.NoError(t, err)
 		assert.NotNil(t, result)
 		assert.False(t, result.Pass)
@@ -142,7 +144,7 @@ func TestGPT4Judge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "expected", "actual", criteria)
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "API call failed")
@@ -170,7 +172,7 @@ func TestGPT4Judge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "expected", "actual", criteria)
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "no response from API")
@@ -208,7 +210,7 @@ func TestGPT4Judge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "expected", "actual", criteria)
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "failed to parse JSON response")
@@ -225,7 +227,7 @@ func TestGPT4Judge_EvaluateDetailed(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := judge.EvaluateDetailed(context.Background(), "input", "output", criteria)
+		result, err := judge.EvaluateDetailed(context.Background(), "input", "expected", "actual", criteria)
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "client not initialized")
@@ -327,4 +329,48 @@ func TestGPT4RequestStructure(t *testing.T) {
 		assert.Contains(t, string(data), "json_schema")
 		assert.Contains(t, string(data), "test_schema")
 	})
+}
+
+// TestGPT4Judge_PromptUsesActualOutput is a regression test for the bug where
+// actualOutput was never threaded into the prompt — the expected output was
+// rendered into both the "Expected Output" and "Actual Output" slots, so the
+// judge always graded expected-vs-expected.
+func TestGPT4Judge_PromptUsesActualOutput(t *testing.T) {
+	judgeOutput := JudgeOutput{Pass: true, Score: 0.9, Reasoning: "ok"}
+	outputJSON, _ := json.Marshal(judgeOutput)
+	mockClient := &MockGPT4Client{
+		Response: &GPT4Response{
+			Choices: []struct {
+				Index   int `json:"index"`
+				Message struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"message"`
+				FinishReason string `json:"finish_reason"`
+			}{
+				{
+					Message: struct {
+						Role    string `json:"role"`
+						Content string `json:"content"`
+					}{Role: "assistant", Content: string(outputJSON)},
+				},
+			},
+		},
+	}
+	judge := NewGPT4Judge(mockClient, DefaultGPT4Config("test-key"))
+	criteria := EvaluationCriteria{Name: "correctness", Description: "match", Threshold: 0.7}
+
+	_, err := judge.EvaluateDetailed(context.Background(),
+		"the-input", "the-EXPECTED-output", "the-ACTUAL-output", criteria)
+	require.NoError(t, err)
+
+	var userPrompt string
+	for _, m := range mockClient.LastRequest.Messages {
+		if m.Role == "user" {
+			userPrompt = m.Content
+		}
+	}
+	require.NotEmpty(t, userPrompt)
+	assert.Contains(t, userPrompt, "Expected Output: the-EXPECTED-output")
+	assert.Contains(t, userPrompt, "Actual Output: the-ACTUAL-output")
 }

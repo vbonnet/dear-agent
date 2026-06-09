@@ -64,13 +64,10 @@ func TestGetSessionsDir(t *testing.T) {
 	})
 }
 
-// Note: The Run() method and its sub-methods (waitForPrompt, sendExit,
-// waitForPaneClose, archiveSession) require:
-// 1. A running tmux session
-// 2. A AGM session manifest
-// 3. Claude Code running in the session
-//
-// These would be tested in integration tests rather than unit tests.
+// Note: The reap loop (Run, stopProcess, sendExit) is exercised behaviorally
+// in reaper_reaploop_test.go by substituting the tmux + process boundary
+// seams declared in reaper.go with fakes. End-to-end coverage against a live
+// tmux session + Claude process still lives in the integration tests.
 // Here we just verify the Reaper struct is properly constructed.
 
 func TestReaperStructure(t *testing.T) {
@@ -88,7 +85,4 @@ func TestReaperStructure(t *testing.T) {
 	if r.SocketPath == "" {
 		t.Error("Reaper.SocketPath should not be empty")
 	}
-
-	// Verify Run method exists (compile-time check)
-	var _ = r.Run
 }

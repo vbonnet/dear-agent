@@ -56,7 +56,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		result, err := importer.RegisterSession(conversationUUID, registerName, registerWorkspace, cfg.Workspace, adapter)
 		if err != nil {
