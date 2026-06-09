@@ -56,7 +56,7 @@ func DefaultConfig() Config {
 			},
 			{
 				Name:        "option",
-				Regex:       `(?i)^if\s+.+,?\s+then\s+the\s+.+\s+shall\s+.+`,
+				Regex:       `(?i)^if\s+.+,?\s+(?:then\s+)?the\s+.+\s+shall\s+.+`,
 				Description: "If <condition>, then the <system> shall <behavior>",
 			},
 			{

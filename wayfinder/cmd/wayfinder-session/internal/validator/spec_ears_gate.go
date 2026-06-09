@@ -49,7 +49,8 @@ func validateSpecEARS(projectDir, phaseName string) error {
 
 	// Load per-project pattern overrides if present, else use defaults.
 	cfg := earslint.DefaultConfig()
-	if cfgPath := filepath.Join(projectDir, earsConfigFile); fileExists(cfgPath) {
+	cfgPath := filepath.Join(projectDir, earsConfigFile)
+	if _, statErr := os.Stat(cfgPath); statErr == nil {
 		loaded, err := earslint.LoadConfig(cfgPath)
 		if err != nil {
 			return NewValidationError(
@@ -59,6 +60,12 @@ func validateSpecEARS(projectDir, phaseName string) error {
 			)
 		}
 		cfg = loaded
+	} else if !os.IsNotExist(statErr) {
+		return NewValidationError(
+			"complete "+phaseName,
+			fmt.Sprintf("failed to check EARS config %s: %v", cfgPath, statErr),
+			"Check file permissions and try again",
+		)
 	}
 
 	linter, err := earslint.New(cfg)
@@ -85,7 +92,7 @@ func validateSpecEARS(projectDir, phaseName string) error {
 			"complete "+phaseName,
 			fmt.Sprintf("%s has %d valid EARS requirement(s) and %d non-conforming",
 				docFile, res.ValidRequirements, res.NonConforming()),
-			formatEARSFix(res),
+			formatEARSFix(res, cfg),
 		)
 	}
 
@@ -95,7 +102,7 @@ func validateSpecEARS(projectDir, phaseName string) error {
 
 // formatEARSFix builds an actionable help message listing the offending lines
 // and the accepted EARS templates, so authors can correct the SPEC directly.
-func formatEARSFix(res earslint.Result) string {
+func formatEARSFix(res earslint.Result, cfg earslint.Config) string {
 	var b strings.Builder
 	if res.ValidRequirements == 0 {
 		b.WriteString("SPEC.md must contain at least one EARS-formatted requirement.\n")
@@ -109,16 +116,10 @@ func formatEARSFix(res earslint.Result) string {
 		}
 	}
 	b.WriteString("\nAccepted EARS templates:\n")
-	for _, p := range earslint.DefaultConfig().Patterns {
+	for _, p := range cfg.Patterns {
 		if p.Description != "" {
 			fmt.Fprintf(&b, "  - %s: %s\n", p.Name, p.Description)
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
-}
-
-// fileExists reports whether path exists and is a regular file.
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
 }
