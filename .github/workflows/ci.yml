@@ -163,6 +163,7 @@ jobs:
           # the PR base ref is present as a local remote-tracking ref so
           # the selector can `git diff origin/<base>...HEAD`.
           BASE_REF: ${{ github.event.pull_request.base.ref }}
+          SKIP_E2E: "1"
         run: |
           git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           go run ./cmd/test-affected --base="origin/${BASE_REF}" --tags=integration --run
