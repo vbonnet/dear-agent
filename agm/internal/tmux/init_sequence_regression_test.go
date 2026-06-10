@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -294,12 +295,10 @@ func BenchmarkSendCommandLiteral(b *testing.B) {
 		b.Skip("tmux not available")
 	}
 
-	testSocket := fmt.Sprintf("/tmp/agm-test-%d.sock", os.Getpid())
+	testSocket := filepath.Join(socketDir(b), "agm.sock")
 	b.Setenv("AGM_TMUX_SOCKET", testSocket)
 	b.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
-		os.Remove(testSocket)
-		os.Unsetenv("AGM_TMUX_SOCKET")
 	})
 
 	sessionName := "bench-sendcmd-" + time.Now().Format("20060102-150405")
