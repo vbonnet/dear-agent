@@ -15,6 +15,7 @@ type ModelSpec struct {
 // HarnessModels defines known models per harness.
 var HarnessModels = map[string][]ModelSpec{
 	"claude-code": {
+		{Alias: "fable", FullName: "claude-fable-5", Description: "Mythos-class, most capable, 1M context, 128k max output"},
 		{Alias: "opus", FullName: "claude-opus-4-6[1m]", Description: "Latest Opus, 1M context"},
 		{Alias: "sonnet", FullName: "claude-sonnet-4-6[1m]", Description: "Latest Sonnet, 1M context"},
 		{Alias: "haiku", FullName: "claude-haiku-4-5", Description: "Fast, 200k context"},

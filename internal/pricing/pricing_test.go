@@ -8,6 +8,8 @@ func TestLookup_Alias(t *testing.T) {
 		in    float64
 		out   float64
 	}{
+		{"fable", 10.00, 50.00},
+		{"claude-fable-5", 10.00, 50.00}, // full name resolves via substring
 		{"opus", 15.00, 75.00},
 		{"sonnet", 3.00, 15.00},
 		{"haiku", 1.00, 5.00},

@@ -19,6 +19,7 @@ func TestResolveModelFullName(t *testing.T) {
 		input    string
 		expected string
 	}{
+		{"claude-code", "fable", "claude-fable-5"},
 		{"claude-code", "sonnet", "claude-sonnet-4-6[1m]"},
 		{"claude-code", "opus", "claude-opus-4-6[1m]"},
 		{"claude-code", "haiku", "claude-haiku-4-5"},
