@@ -198,8 +198,13 @@ func (c *Coordinator) Stop(ctx context.Context) error {
 
 	done := make(chan struct{})
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "coordinator: shutdown goroutine panicked: %v\n", r)
+			}
+			close(done)
+		}()
 		c.wg.Wait()
-		close(done)
 	}()
 
 	select {
