@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/trace"
 )
 
 var stateCmd = &cobra.Command{
@@ -176,6 +178,12 @@ func runStateSet(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Updated session '%s' state: %s (source: %s)\n", m.Name, newState, stateSetSource)
+
+	// Emit a session lifecycle span when a hook signals the session has ended.
+	// exitCode is -1 because state-reporter hooks do not receive the exit code.
+	if stateSetSource == "sessionend-hook" || stateSetSource == "stop-hook" {
+		trace.RecordSessionLifecycleSpan(cmd.Context(), m, time.Now(), -1)
+	}
 
 	return nil
 }

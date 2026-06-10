@@ -1,15 +1,15 @@
-package integration
+//go:build integration
+
+package lifecycle
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"testing"
 )
 
 func TestMain(m *testing.M) {
-	flag.Parse()
-	if testing.Short() || os.Getenv("SKIP_E2E") != "" {
+	if os.Getenv("SKIP_E2E") != "" {
 		fmt.Println("Skipping: requires infrastructure not available in CI")
 		os.Exit(0)
 	}
