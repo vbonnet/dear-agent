@@ -17,6 +17,9 @@ var _ = Describe("Agent Parity - Data Exchange", func() {
 	var adapters map[string]agent.Agent
 
 	BeforeEach(func() {
+		if os.Getenv("OPENCODE_AVAILABLE") == "" {
+			Skip("requires running OpenCode server; set OPENCODE_AVAILABLE=1 to run")
+		}
 		adapters = make(map[string]agent.Agent)
 
 		claudeAdapter, err := agent.NewClaudeAdapter(nil)
