@@ -111,7 +111,7 @@ func skipIfNoTmux(t *testing.T) {
 // exceeding the 104-byte sockaddr_un.sun_path limit. /tmp-based paths are ~30 chars.
 func socketDir(tb testing.TB) string {
 	tb.Helper()
-	dir, err := os.MkdirTemp("", "agm") //nolint:usetesting
+	dir, err := os.MkdirTemp("", "agm") //nolint:usetesting // t.TempDir() paths exceed 104-byte Unix socket limit on macOS
 	if err != nil {
 		tb.Fatalf("socketDir: %v", err)
 	}

@@ -17,7 +17,7 @@ import (
 // generates paths > 104 bytes, which exceeds the Unix socket path limit.
 func setupRegressionSocket(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "agm") //nolint:usetesting
+	dir, err := os.MkdirTemp("", "agm") //nolint:usetesting // t.TempDir() paths exceed 104-byte Unix socket limit on macOS
 	if err != nil {
 		t.Fatalf("setupRegressionSocket: %v", err)
 	}
