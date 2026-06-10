@@ -17,6 +17,9 @@ var _ = Describe("Agent Parity - Session Management", func() {
 	var adapters map[string]agent.Agent
 
 	BeforeEach(func() {
+		if os.Getenv("OPENCODE_AVAILABLE") == "" {
+			Skip("requires running OpenCode server; set OPENCODE_AVAILABLE=1 to run")
+		}
 		// Initialize adapters for all agents
 		adapters = make(map[string]agent.Agent)
 
