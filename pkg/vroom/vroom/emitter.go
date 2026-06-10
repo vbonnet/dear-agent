@@ -49,10 +49,22 @@ func (e *Emitter) EmitGated(p GatedPayload) {
 	e.emit(TopicDecisionGated, p)
 }
 
+// EmitHandedOff fires a TopicDecisionHandedOff event recording a context
+// handoff and the sender's confidence in it.
+func (e *Emitter) EmitHandedOff(p HandedOffPayload) {
+	e.emit(TopicDecisionHandedOff, p)
+}
+
 // emit marshals the payload and publishes asynchronously. Errors are silently
 // dropped (fire-and-forget).
 func (e *Emitter) emit(topic string, payload interface{}) {
 	go func() {
+		defer func() {
+			// fire-and-forget: swallow a panic in marshalling/publish so it never crashes the caller.
+			if r := recover(); r != nil {
+				_ = r
+			}
+		}()
 		data, err := structToMap(payload)
 		if err != nil {
 			return

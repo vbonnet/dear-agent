@@ -1,0 +1,58 @@
+name: Structural Health
+
+# Purpose: surface and ratchet down structural drift in the codebase.
+# The structural-health tool runs five scans (dead packages, oversized
+# files, untested packages, broken ARCHITECTURE.md path references, and
+# unguarded goroutines) and compares them against a checked-in baseline.
+#
+# This job FAILS ONLY ON REGRESSIONS — a finding that is new relative to
+# .structural-health-baseline.json. The large pile of pre-existing findings
+# is baselined, so the job is green today and only goes red when a change
+# makes things structurally worse. To tighten the ratchet after fixing
+# findings, regenerate the baseline:
+#
+#   go run ./cmd/structural-health --update-baseline
+#
+# and commit the smaller baseline. See cmd/structural-health/main.go and
+# docs/retros/ (DEAR retro, Tier 0 recommendation) for the rationale.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Principle of least privilege: this job only reads the repo. It never
+# pushes branches, comments on PRs, or writes to the security tab.
+permissions:
+  contents: read
+
+jobs:
+  structural-health:
+    name: Structural Health (baselined)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: 'go.sum'
+
+      - name: Download dependencies
+        run: go mod download
+
+      # The scan shells out to `go list ./...` to build the import graph,
+      # so the module must resolve. `go mod download` above primes the
+      # cache; no build of the full tree is required.
+      - name: Run structural-health scan
+        run: go run ./cmd/structural-health

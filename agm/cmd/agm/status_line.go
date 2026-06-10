@@ -154,7 +154,7 @@ func findManifestBySession(sessionName string) (*manifest.Manifest, error) {
 		// Dolt not available - gracefully degrade (don't error)
 		return nil, fmt.Errorf("dolt not available: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	// List all sessions and find the one with matching tmux session name
 	// This is not the most efficient but works for status line use case

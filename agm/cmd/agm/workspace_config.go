@@ -212,7 +212,7 @@ func runWorkspaceConfigShow(cmd *cobra.Command, _ []string) error {
 	if len(config.ReviewGates) > 0 {
 		fmt.Printf("\nReview Gates:\n")
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintf(w, "  TYPE\tREQUIRED\tREVIEWERS\tCHECKS\n")
+		_, _ = fmt.Fprintf(w, "  TYPE\tREQUIRED\tREVIEWERS\tCHECKS\n")
 		for changeType, gate := range config.ReviewGates {
 			required := "no"
 			if gate.Required {
@@ -222,9 +222,9 @@ func runWorkspaceConfigShow(cmd *cobra.Command, _ []string) error {
 			if len(gate.CheckSuites) > 0 {
 				checks = strings.Join(gate.CheckSuites, ", ")
 			}
-			fmt.Fprintf(w, "  %s\t%s\t%d\t%s\n", changeType, required, gate.Reviewers, checks)
+			_, _ = fmt.Fprintf(w, "  %s\t%s\t%d\t%s\n", changeType, required, gate.Reviewers, checks)
 		}
-		w.Flush()
+		_ = w.Flush()
 	}
 
 	fmt.Printf("\n")

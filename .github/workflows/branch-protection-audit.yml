@@ -26,6 +26,7 @@ env:
 jobs:
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Audit branch protections across repos
         env:

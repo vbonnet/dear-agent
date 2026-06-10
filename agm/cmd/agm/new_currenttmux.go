@@ -88,7 +88,7 @@ func createCurrentTmuxManifest(sessionName, workDir string) {
 		ui.PrintWarning(fmt.Sprintf("Failed to connect to Dolt: %v", err))
 		return
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 	if err := adapter.CreateSession(m); err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to create session in Dolt: %v", err))
 		return
@@ -289,7 +289,7 @@ func monitorAndAnswerTrustPrompt(sessionName string, timeout time.Duration) erro
 	if err != nil {
 		return fmt.Errorf("failed to start control mode: %w", err)
 	}
-	defer ctrl.Close()
+	defer func() { _ = ctrl.Close() }()
 
 	// Create output watcher
 	watcher := tmux.NewOutputWatcher(ctrl.Stdout)
@@ -329,7 +329,7 @@ func monitorAndAnswerTrustPrompt(sessionName string, timeout time.Duration) erro
 			debug.Log("Sending Enter to select 'Yes, proceed'")
 
 			// Close control mode before sending keys (mixing control + send-keys doesn't work well)
-			ctrl.Close()
+			_ = ctrl.Close()
 
 			// Send Enter key via regular tmux
 			if err := tmux.SendCommand(sessionName, "C-m"); err != nil {

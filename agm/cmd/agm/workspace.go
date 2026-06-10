@@ -133,7 +133,7 @@ Examples:
 			if isCurrent {
 				adapter, err := getStorage()
 				if err == nil {
-					defer adapter.Close()
+					defer func() { _ = adapter.Close() }()
 					manifests, err := adapter.ListSessions(&dolt.SessionFilter{})
 					if err == nil {
 						sessionCount = len(manifests)
@@ -186,7 +186,7 @@ func formatWorkspaceTable(workspaces []workspaceInfo) string {
 	w := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
 
 	// Header
-	fmt.Fprintf(w, "%s\t%s\t%s\n",
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n",
 		"NAME",
 		"PATH",
 		"SESSIONS")
@@ -202,14 +202,14 @@ func formatWorkspaceTable(workspaces []workspaceInfo) string {
 			indicator = "● " // Current workspace indicator
 		}
 
-		fmt.Fprintf(w, "%s%s\t%s\t%d\n",
+		_, _ = fmt.Fprintf(w, "%s%s\t%s\t%d\n",
 			indicator,
 			ws.name,
 			displayPath,
 			ws.sessionCount)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 
 	// Apply styling to output
 	var result bytes.Buffer
@@ -564,8 +564,8 @@ func promptWorkspaceRoot() (string, error) {
 			if err != nil {
 				return fmt.Errorf("parent directory is not writable: %s", parent)
 			}
-			f.Close()
-			os.Remove(testFile)
+			_ = f.Close()
+			_ = os.Remove(testFile)
 			return nil
 		}).
 		Run()
@@ -595,7 +595,7 @@ func saveWorkspaceConfigAtomic(path string, config *workspace.Config) error {
 			fmt.Fprintf(os.Stderr, "Warning: failed to create backup: %v\n", err)
 		} else {
 			// Remove backup on success
-			defer os.Remove(backupPath)
+			defer func() { _ = os.Remove(backupPath) }()
 		}
 	}
 
@@ -666,7 +666,7 @@ func countWorkspaceSessions(workspaceName string, _ string) (int, []*manifest.Ma
 		if err != nil {
 			return 0, nil, fmt.Errorf("failed to connect to Dolt: %w", err)
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		manifests, err := adapter.ListSessions(&dolt.SessionFilter{})
 		if err != nil {

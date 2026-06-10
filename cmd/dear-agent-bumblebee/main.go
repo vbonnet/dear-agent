@@ -50,7 +50,7 @@ func main() {
 }
 
 func printUsage(w *os.File) {
-	fmt.Fprint(w, `dear-agent-bumblebee — installer + scan wrapper for Bumblebee (ADR-027).
+	_, _ = fmt.Fprint(w, `dear-agent-bumblebee — installer + scan wrapper for Bumblebee (ADR-027).
 
 Usage:
   dear-agent-bumblebee <subcommand> [flags]
