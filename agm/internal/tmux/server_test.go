@@ -3,9 +3,8 @@ package tmux
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -61,12 +60,10 @@ func TestServerAlive_WithServer(t *testing.T) {
 		t.Skip("tmux not available")
 	}
 
-	testSocket := fmt.Sprintf("/tmp/agm-test-alive-%d.sock", os.Getpid())
+	testSocket := filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
-		os.Remove(testSocket)
-		os.Unsetenv("AGM_TMUX_SOCKET")
 	})
 
 	// Create a session so server is running
@@ -84,9 +81,8 @@ func TestServerAlive_WithServer(t *testing.T) {
 
 func TestServerAlive_NoServer(t *testing.T) {
 	// Point to non-existent socket
-	testSocket := fmt.Sprintf("/tmp/agm-test-dead-%d.sock", os.Getpid())
+	testSocket := filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", testSocket)
-	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	err := ServerAlive()
 	assert.Error(t, err, "Server should be dead with no socket")
@@ -95,9 +91,8 @@ func TestServerAlive_NoServer(t *testing.T) {
 
 func TestServerAliveOrRecover_DeadServer(t *testing.T) {
 	// Point to non-existent socket
-	testSocket := fmt.Sprintf("/tmp/agm-test-recover-%d.sock", os.Getpid())
+	testSocket := filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", testSocket)
-	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	// Should succeed (nothing to clean up = recovery successful)
 	err := ServerAliveOrRecover()

@@ -1,9 +1,9 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,15 +12,20 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
-// setupRegressionSocket creates an isolated tmux socket for regression tests
+// setupRegressionSocket creates an isolated tmux socket for regression tests.
+// Uses os.MkdirTemp under /tmp to keep the path short — t.TempDir() on macOS
+// generates paths > 104 bytes, which exceeds the Unix socket path limit.
 func setupRegressionSocket(t *testing.T) string {
 	t.Helper()
-	socketPath := fmt.Sprintf("/tmp/agm-regression-test-%d.sock", os.Getpid())
+	dir, err := os.MkdirTemp("", "agm")
+	if err != nil {
+		t.Fatalf("setupRegressionSocket: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", socketPath)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", socketPath, "kill-server").Run()
-		os.Remove(socketPath)
-		os.Unsetenv("AGM_TMUX_SOCKET")
 	})
 	return socketPath
 }
