@@ -14,6 +14,10 @@ import (
 
 // TestMain sets up the testscript environment
 func TestMain(m *testing.M) {
+	if os.Getenv("SKIP_E2E") != "" {
+		fmt.Println("Skipping: requires infrastructure not available in CI")
+		os.Exit(0)
+	}
 	testscript.Main(m, map[string]func(){
 		"agm": agmMain,
 	})
