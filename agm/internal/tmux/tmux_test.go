@@ -106,15 +106,26 @@ func skipIfNoTmux(t *testing.T) {
 	}
 }
 
+// socketDir creates a short-path temp dir suitable for Unix socket files.
+// t.TempDir() on macOS generates paths up to ~108 chars for long test names,
+// exceeding the 104-byte sockaddr_un.sun_path limit. /tmp-based paths are ~30 chars.
+func socketDir(tb testing.TB) string {
+	tb.Helper()
+	dir, err := os.MkdirTemp("", "agm") //nolint:usetesting // t.TempDir() paths exceed 104-byte Unix socket limit on macOS
+	if err != nil {
+		tb.Fatalf("socketDir: %v", err)
+	}
+	tb.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
 // setupTestSocket creates an isolated tmux socket for testing
 func setupTestSocket(t *testing.T) (socketPath string, cleanup func()) {
 	t.Helper()
-	socketPath = fmt.Sprintf("/tmp/agm-test-%d.sock", os.Getpid())
+	socketPath = filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", socketPath)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", socketPath, "kill-server").Run()
-		os.Remove(socketPath)
-		os.Unsetenv("AGM_TMUX_SOCKET")
 	})
 	return socketPath, func() {}
 }
