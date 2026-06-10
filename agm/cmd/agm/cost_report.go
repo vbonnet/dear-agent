@@ -176,7 +176,7 @@ func formatModelCell(model string) string {
 		return "?"
 	}
 	short := strings.ToLower(model)
-	for _, alias := range []string{"opus", "sonnet", "haiku"} {
+	for _, alias := range []string{"opus", "sonnet", "haiku", "fable"} {
 		if strings.Contains(short, alias) {
 			return alias
 		}
