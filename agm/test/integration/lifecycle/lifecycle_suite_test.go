@@ -19,6 +19,10 @@ import (
 )
 
 func TestLifecycle(t *testing.T) {
+	if os.Getenv("SKIP_E2E") != "" {
+		t.Skip("SKIP_E2E environment variable is set")
+		return
+	}
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "AGM Lifecycle Tests Suite")
 }
@@ -26,9 +30,6 @@ func TestLifecycle(t *testing.T) {
 var testEnv *helpers.TestEnv
 
 var _ = BeforeSuite(func() {
-	if os.Getenv("SKIP_E2E") != "" {
-		Skip("SKIP_E2E environment variable is set")
-	}
 	// Verify tmux is installed
 	_, err := exec.LookPath("tmux")
 	Expect(err).ToNot(HaveOccurred(), "tmux must be installed for lifecycle tests")

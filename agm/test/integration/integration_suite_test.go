@@ -8,7 +8,6 @@
 package integration_test
 
 import (
-	"os"
 	"os/exec"
 	"testing"
 
@@ -26,9 +25,6 @@ func TestIntegration(t *testing.T) {
 var testEnv *helpers.TestEnv
 
 var _ = BeforeSuite(func() {
-	if os.Getenv("SKIP_E2E") != "" {
-		Skip("SKIP_E2E environment variable is set")
-	}
 	// Verify tmux is installed
 	_, err := exec.LookPath("tmux")
 	Expect(err).ToNot(HaveOccurred(), "tmux must be installed for integration tests")
