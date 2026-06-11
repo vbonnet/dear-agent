@@ -1,6 +1,8 @@
 package ops
 
 import (
+	"errors"
+
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -61,7 +63,8 @@ func GetSession(ctx *OpContext, req *GetSessionRequest) (*GetSessionResult, erro
 		var nameErr error
 		m, nameErr = findByName(ctx, req.Identifier)
 		if nameErr != nil {
-			if opErr, ok := nameErr.(*OpError); !ok || opErr.Code != ErrCodeSessionNotFound {
+			var opErr *OpError
+			if !errors.As(nameErr, &opErr) || opErr.Code != ErrCodeSessionNotFound {
 				return nil, nameErr
 			}
 			// nameErr is "not found" — continue to Claude UUID fallback.
