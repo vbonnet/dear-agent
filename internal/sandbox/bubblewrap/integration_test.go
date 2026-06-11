@@ -14,16 +14,34 @@ import (
 	"github.com/vbonnet/dear-agent/internal/sandbox/bubblewrap"
 )
 
+// skipUnlessBwrapFunctional skips t when bubblewrap is unavailable or when
+// the host does not support user namespaces (required for --unshare-all).
+// Some CI environments (e.g. GitHub Actions Ubuntu runners) install bwrap but
+// block unprivileged user namespace creation, causing sandbox tests to fail.
+func skipUnlessBwrapFunctional(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("bubblewrap only available on Linux")
+	}
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bubblewrap (bwrap) not installed")
+	}
+	// Probe: attempt a minimal bwrap execution that exercises user namespaces.
+	probe := exec.Command("bwrap",
+		"--unshare-all", "--share-net",
+		"--ro-bind", "/", "/",
+		"--proc", "/proc",
+		"--dev", "/dev",
+		"/bin/true",
+	)
+	if err := probe.Run(); err != nil {
+		t.Skipf("bubblewrap user namespaces not supported in this environment: %v", err)
+	}
+}
+
 // TestBubblewrap_E2E tests end-to-end Bubblewrap lifecycle
 func TestBubblewrap_E2E(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("Bubblewrap only available on Linux")
-	}
-
-	// Check if bwrap is installed
-	if _, err := exec.LookPath("bwrap"); err != nil {
-		t.Skip("Bubblewrap (bwrap) not installed")
-	}
+	skipUnlessBwrapFunctional(t)
 
 	provider := bubblewrap.NewProvider()
 	ctx := context.Background()
@@ -93,13 +111,7 @@ func TestBubblewrap_E2E(t *testing.T) {
 
 // TestBubblewrap_MultiRepo tests with multiple lower directories
 func TestBubblewrap_MultiRepo(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("Bubblewrap only available on Linux")
-	}
-
-	if _, err := exec.LookPath("bwrap"); err != nil {
-		t.Skip("Bubblewrap (bwrap) not installed")
-	}
+	skipUnlessBwrapFunctional(t)
 
 	provider := bubblewrap.NewProvider()
 	ctx := context.Background()
@@ -138,11 +150,10 @@ func TestBubblewrap_MultiRepo(t *testing.T) {
 // TestBubblewrap_ValidationErrors tests validation error handling
 func TestBubblewrap_ValidationErrors(t *testing.T) {
 	if runtime.GOOS != "linux" {
-		t.Skip("Bubblewrap only available on Linux")
+		t.Skip("bubblewrap only available on Linux")
 	}
-
 	if _, err := exec.LookPath("bwrap"); err != nil {
-		t.Skip("Bubblewrap (bwrap) not installed")
+		t.Skip("bubblewrap (bwrap) not installed")
 	}
 
 	provider := bubblewrap.NewProvider()
@@ -214,13 +225,7 @@ func TestBubblewrap_ValidationErrors(t *testing.T) {
 
 // TestBubblewrap_IdempotentDestroy tests destroy idempotency
 func TestBubblewrap_IdempotentDestroy(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("Bubblewrap only available on Linux")
-	}
-
-	if _, err := exec.LookPath("bwrap"); err != nil {
-		t.Skip("Bubblewrap (bwrap) not installed")
-	}
+	skipUnlessBwrapFunctional(t)
 
 	provider := bubblewrap.NewProvider()
 	ctx := context.Background()
