@@ -59,10 +59,9 @@ func (SpecStalenessCheck) Run(ctx context.Context, env audit.Env) (audit.Result,
 
 	out := audit.Result{Status: audit.StatusOK}
 
-	// Verify git is present; staleness checks are a no-op without it.
 	// git not present or not a git repo — staleness check is a no-op.
-	if runCommand(ctx, env.RepoRoot, "git", "rev-parse", "--git-dir").Err != nil { //nolint:nilerr
-		return out, nil
+	if runCommand(ctx, env.RepoRoot, "git", "rev-parse", "--git-dir").Err != nil {
+		return out, nil //nolint:nilerr // git-absent is a valid skip, not an error to propagate
 	}
 
 	var findings []audit.Finding
