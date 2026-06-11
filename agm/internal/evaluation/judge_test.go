@@ -14,7 +14,7 @@ type MockDetailedJudge struct {
 	Err      error
 }
 
-func (m *MockDetailedJudge) EvaluateDetailed(ctx context.Context, input, expectedOutput string, criteria EvaluationCriteria) (*JudgeResponse, error) {
+func (m *MockDetailedJudge) EvaluateDetailed(ctx context.Context, input, expectedOutput, actualOutput string, criteria EvaluationCriteria) (*JudgeResponse, error) {
 	if m.Err != nil {
 		return nil, m.Err
 	}
@@ -42,7 +42,7 @@ func TestDetailedJudgeInterface(t *testing.T) {
 			Threshold:   0.7,
 		}
 
-		result, err := mock.EvaluateDetailed(ctx, "input", "expected", criteria)
+		result, err := mock.EvaluateDetailed(ctx, "input", "expected", "actual", criteria)
 		require.NoError(t, err)
 		assert.Equal(t, expectedResponse, result)
 	})
@@ -57,7 +57,7 @@ func TestDetailedJudgeInterface(t *testing.T) {
 			Threshold: 0.5,
 		}
 
-		result, err := mock.EvaluateDetailed(ctx, "input", "expected", criteria)
+		result, err := mock.EvaluateDetailed(ctx, "input", "expected", "actual", criteria)
 		assert.ErrorIs(t, err, expectedErr)
 		assert.Nil(t, result)
 	})

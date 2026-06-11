@@ -70,10 +70,10 @@ func runSendEnter(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("failed to send Enter to session '%s': %w", sessionName, err)
 	}
 
-	fmt.Fprintf(os.Stdout, "Enter sent to session '%s'\n", sessionName)
+	_, _ = fmt.Fprintf(os.Stdout, "Enter sent to session '%s'\n", sessionName)
 
 	if os.Getenv("AGM_DEBUG") == "1" {
-		fmt.Fprintf(os.Stdout, "DEBUG: send-enter session=%s force=%v\n", sessionName, sendEnterForce)
+		_, _ = fmt.Fprintf(os.Stdout, "DEBUG: send-enter session=%s force=%v\n", sessionName, sendEnterForce)
 	}
 
 	return nil

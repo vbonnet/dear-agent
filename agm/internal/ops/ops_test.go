@@ -11,9 +11,17 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
+// sentKey records a single SendKeys call for assertions.
+type sentKey struct {
+	session string
+	keys    string
+}
+
 // mockTmux implements the tmux interfaces needed by ops.
 type mockTmux struct {
 	sessions map[string]bool
+	sent     []sentKey
+	sendErr  error
 }
 
 func newMockTmux(sessions ...string) *mockTmux {
@@ -53,7 +61,13 @@ func (m *mockTmux) ListClients(string) ([]session.ClientInfo, error) {
 
 func (m *mockTmux) CreateSession(name, workdir string) error { return nil }
 func (m *mockTmux) AttachSession(name string) error          { return nil }
-func (m *mockTmux) SendKeys(session, keys string) error      { return nil }
+func (m *mockTmux) SendKeys(session, keys string) error {
+	if m.sendErr != nil {
+		return m.sendErr
+	}
+	m.sent = append(m.sent, sentKey{session: session, keys: keys})
+	return nil
+}
 
 // testCtx creates an OpContext with mock storage and tmux.
 func testCtx(sessions []*manifest.Manifest, tmuxSessions ...string) *OpContext {

@@ -11,6 +11,6 @@ context:
   notes: ""
 tmux:
   session_name: "test-session"
-agent: "claude"
+harness: "claude"
 claude:
   uuid: ""

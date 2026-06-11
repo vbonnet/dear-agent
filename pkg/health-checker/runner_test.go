@@ -57,10 +57,13 @@ func TestRunner_RunAll_Sequential(t *testing.T) {
 }
 
 func TestRunner_RunAll_Parallel(t *testing.T) {
+	// Use 50ms delays so the parallel/sequential gap (150ms vs ~50ms) dwarfs
+	// macOS goroutine-scheduling jitter. The old 10ms/25ms combo left too
+	// little headroom and flaked on CI.
 	checks := []Check{
-		mockCheck{name: "check1", category: "core", status: StatusOK, delay: 10 * time.Millisecond},
-		mockCheck{name: "check2", category: "dependency", status: StatusWarning, delay: 10 * time.Millisecond},
-		mockCheck{name: "check3", category: "core", status: StatusError, delay: 10 * time.Millisecond},
+		mockCheck{name: "check1", category: "core", status: StatusOK, delay: 50 * time.Millisecond},
+		mockCheck{name: "check2", category: "dependency", status: StatusWarning, delay: 50 * time.Millisecond},
+		mockCheck{name: "check3", category: "core", status: StatusError, delay: 50 * time.Millisecond},
 	}
 
 	runner := NewRunner(checks...).WithParallel(true)
@@ -76,10 +79,12 @@ func TestRunner_RunAll_Parallel(t *testing.T) {
 		t.Errorf("RunAll() returned %d results, want 3", len(results))
 	}
 
-	// Parallel execution should be faster than sequential
-	// (30ms sequential vs ~10ms parallel)
-	if duration > 25*time.Millisecond {
-		t.Errorf("Parallel execution took %v, expected < 25ms", duration)
+	// Parallel execution should be far faster than sequential (150ms
+	// sequential vs ~50ms parallel). 120ms sits safely below the sequential
+	// time (catching a regression to serial execution) with ~70ms of slack
+	// above the expected parallel time.
+	if duration > 120*time.Millisecond {
+		t.Errorf("Parallel execution took %v, expected < 120ms", duration)
 	}
 }
 

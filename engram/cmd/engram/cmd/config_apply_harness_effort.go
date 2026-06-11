@@ -55,28 +55,28 @@ func runConfigApplyHarnessEffort(cmd *cobra.Command, args []string) error {
 	}
 
 	if opts.DryRun {
-		fmt.Fprintln(cmd.OutOrStdout(), "[DRY RUN] No files will be written.")
-		fmt.Fprintln(cmd.OutOrStdout())
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "[DRY RUN] No files will be written.")
+		_, _ = fmt.Fprintln(cmd.OutOrStdout())
 	}
 
 	for _, out := range outputs {
 		if opts.DryRun {
-			fmt.Fprintf(cmd.OutOrStdout(), "=== %s ===\n", out.Path)
-			fmt.Fprintln(cmd.OutOrStdout(), string(out.Content))
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "=== %s ===\n", out.Path)
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(out.Content))
 		} else {
 			if err := writeOutputFile(out); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "  wrote: %s\n", out.Path)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  wrote: %s\n", out.Path)
 		}
 	}
 
 	if geminiSuggestions != "" {
 		if !opts.DryRun {
-			fmt.Fprintln(cmd.OutOrStdout())
-			fmt.Fprintln(cmd.OutOrStdout(), "Gemini alias suggestions (no file written):")
+			_, _ = fmt.Fprintln(cmd.OutOrStdout())
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Gemini alias suggestions (no file written):")
 		}
-		fmt.Fprint(cmd.OutOrStdout(), geminiSuggestions)
+		_, _ = fmt.Fprint(cmd.OutOrStdout(), geminiSuggestions)
 	}
 
 	return nil

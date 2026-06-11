@@ -18,9 +18,15 @@ const (
 )
 
 // BenchmarkRun represents a single benchmark execution.
+//
+// DurationMs is recorded with sub-millisecond precision (float). Truncating to
+// integer milliseconds quantizes each sample by ±1ms, which at small base
+// durations (e.g. 50ms) is ±2% — large enough to swamp the 5% regression
+// threshold and make comparisons flaky. Retaining microsecond resolution keeps
+// the overhead percentage stable across runs.
 type BenchmarkRun struct {
 	Variant    BenchmarkVariant       `json:"variant"`
-	DurationMs int64                  `json:"duration_ms"`
+	DurationMs float64                `json:"duration_ms"`
 	Successful bool                   `json:"successful"`
 	ErrorCount int                    `json:"error_count"`
 	Metadata   map[string]interface{} `json:"metadata,omitempty"`
@@ -83,7 +89,7 @@ func executeBenchmarkVariant(fn func() error, variant BenchmarkVariant, n int) [
 
 		runs[i] = BenchmarkRun{
 			Variant:    variant,
-			DurationMs: duration.Milliseconds(),
+			DurationMs: float64(duration.Microseconds()) / 1000.0,
 			Successful: err == nil,
 			ErrorCount: 0, // Could be enhanced to track error count
 		}
@@ -132,12 +138,12 @@ func calculateMean(runs []BenchmarkRun) float64 {
 		return 0.0
 	}
 
-	sum := int64(0)
+	sum := 0.0
 	for _, run := range runs {
 		sum += run.DurationMs
 	}
 
-	return float64(sum) / float64(len(runs))
+	return sum / float64(len(runs))
 }
 
 // estimatePower estimates statistical power based on sample size.

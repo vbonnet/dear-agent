@@ -56,11 +56,20 @@ func (g *HandoffPromptGenerator) SerializeContext(handoff *HandoffContext) (stri
 	return string(data), nil
 }
 
-// DeserializeContext loads handoff context from JSON.
+// DeserializeContext loads handoff context from JSON. A confidence block,
+// if present, is re-validated: a hand-edited or corrupted handoff file
+// with an inconsistent level/score is rejected rather than silently
+// trusted by the receiving agent.
 func (g *HandoffPromptGenerator) DeserializeContext(data string) (*HandoffContext, error) {
 	var handoff HandoffContext
 	if err := json.Unmarshal([]byte(data), &handoff); err != nil {
 		return nil, fmt.Errorf("failed to deserialize context: %w", err)
+	}
+
+	if handoff.Confidence != nil {
+		if err := handoff.Confidence.Validate(); err != nil {
+			return nil, fmt.Errorf("failed to deserialize context: %w", err)
+		}
 	}
 
 	return &handoff, nil
@@ -72,6 +81,9 @@ func (g *HandoffPromptGenerator) registerTemplates() error {
 	funcMap := template.FuncMap{
 		"add": func(a, b int) int {
 			return a + b
+		},
+		"upper": func(l HandoffConfidenceLevel) string {
+			return strings.ToUpper(string(l))
 		},
 	}
 
@@ -120,12 +132,48 @@ func FormatNextSteps(steps []string) string {
 	return strings.Join(parts, "\n")
 }
 
+// sharedHandoffDefines holds the {{define}} blocks (and the trailing
+// re-render invocations) common to every handoff template: artifacts,
+// next_steps, and confidence. It is concatenated onto every template body
+// below. text/template parses each named template independently, so these
+// definitions must be present in each one — keeping a single copy here is
+// what prevents the three renderings from drifting apart (the maintenance
+// hazard flagged in review of PR #108).
+//
+// The confidence score is rendered with %.3f rather than %.2f: the band
+// floors are 0.40 (MEDIUM) and 0.75 (HIGH), so a MEDIUM score of 0.749
+// rounded to %.2f would print "0.75" — the inclusive HIGH floor —
+// contradicting the "Level: MEDIUM" line. Three decimals keeps the score
+// unambiguous across band boundaries and matches the precision already
+// used in handoff_confidence.go validation errors.
+const sharedHandoffDefines = `
+{{template "artifacts" .}}
+{{define "artifacts"}}{{if .Artifacts}}{{range $name, $path := .Artifacts}}- {{$name}}: {{$path}}
+{{end}}{{else}}No artifacts{{end}}{{end}}
+
+{{template "next_steps" .}}
+{{define "next_steps"}}{{if .NextSteps}}{{range $i, $step := .NextSteps}}{{add $i 1}}. {{$step}}
+{{end}}{{else}}No specific next steps{{end}}{{end}}
+
+{{define "confidence"}}{{if .Confidence}}- **Level:** {{upper .Confidence.Level}}
+- **Score:** {{printf "%.3f" .Confidence.Score}} / 1.00
+- **Rationale:** {{.Confidence.Rationale}}
+{{if .Confidence.Gaps}}- **Known gaps** (verify these before relying on the context above):
+{{range .Confidence.Gaps}}  - {{.}}
+{{end}}{{else}}- **Known gaps:** none reported by the sender (absence of reported gaps is not proof of completeness)
+{{end}}{{else}}**CONFIDENCE NOT ASSESSED.** The sending agent did not vouch for this context. Treat every claim above as unverified and re-establish critical facts before acting.{{end}}{{end}}
+`
+
 // Template: Architect → Implementer
 const architectToImplementerTemplate = `# Mode Transition: Architect → Implementer
 
 ## Context from Architect Mode
 
 {{.Summary}}
+
+## Handoff Confidence
+
+{{template "confidence" .}}
 
 ## Design Artifacts
 
@@ -152,15 +200,7 @@ You are now in Implementer mode. Your task is to execute the plan created by Arc
 - Current mode: {{.ToMode}}
 
 ---
-
-{{template "artifacts" .}}
-{{define "artifacts"}}{{if .Artifacts}}{{range $name, $path := .Artifacts}}- {{$name}}: {{$path}}
-{{end}}{{else}}No artifacts{{end}}{{end}}
-
-{{template "next_steps" .}}
-{{define "next_steps"}}{{if .NextSteps}}{{range $i, $step := .NextSteps}}{{add $i 1}}. {{$step}}
-{{end}}{{else}}No specific next steps{{end}}{{end}}
-`
+` + sharedHandoffDefines
 
 // Template: Implementer → Architect
 const implementerToArchitectTemplate = `# Mode Transition: Implementer → Architect
@@ -168,6 +208,10 @@ const implementerToArchitectTemplate = `# Mode Transition: Implementer → Archi
 ## Context from Implementer Mode
 
 {{.Summary}}
+
+## Handoff Confidence
+
+{{template "confidence" .}}
 
 ## Implementation Artifacts
 
@@ -194,15 +238,7 @@ You are now in Architect mode. Your task is to review the implementation and pla
 - Current mode: {{.ToMode}}
 
 ---
-
-{{template "artifacts" .}}
-{{define "artifacts"}}{{if .Artifacts}}{{range $name, $path := .Artifacts}}- {{$name}}: {{$path}}
-{{end}}{{else}}No artifacts{{end}}{{end}}
-
-{{template "next_steps" .}}
-{{define "next_steps"}}{{if .NextSteps}}{{range $i, $step := .NextSteps}}{{add $i 1}}. {{$step}}
-{{end}}{{else}}No specific next steps{{end}}{{end}}
-`
+` + sharedHandoffDefines
 
 // Template: Generic handoff
 const genericHandoffTemplate = `# Mode Transition: {{.FromMode}} → {{.ToMode}}
@@ -210,6 +246,10 @@ const genericHandoffTemplate = `# Mode Transition: {{.FromMode}} → {{.ToMode}}
 ## Context Summary
 
 {{.Summary}}
+
+## Handoff Confidence
+
+{{template "confidence" .}}
 
 ## Artifacts
 
@@ -226,12 +266,4 @@ const genericHandoffTemplate = `# Mode Transition: {{.FromMode}} → {{.ToMode}}
 - Current mode: {{.ToMode}}
 
 ---
-
-{{template "artifacts" .}}
-{{define "artifacts"}}{{if .Artifacts}}{{range $name, $path := .Artifacts}}- {{$name}}: {{$path}}
-{{end}}{{else}}No artifacts{{end}}{{end}}
-
-{{template "next_steps" .}}
-{{define "next_steps"}}{{if .NextSteps}}{{range $i, $step := .NextSteps}}{{add $i 1}}. {{$step}}
-{{end}}{{else}}No specific next steps{{end}}{{end}}
-`
+` + sharedHandoffDefines

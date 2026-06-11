@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.dear-agent.worktree-sweep — daily cross-repo worktree GC.
+
+  Source template:
+      agm/cmd/agm/schedules/com.dear-agent.worktree-sweep.plist
+  Installed by `agm admin install-sweep-schedule`, which substitutes
+  __USER_HOME__ and __AGM_BINARY__ before writing this file (launchd
+  does not expand ~ or shell variables).
+
+  Schedule: 03:00 local time, every day.
+  Logs:     <home>/Library/Logs/dear-agent/worktree-sweep.log
+
+  RunAtLoad is intentionally false. The calendar entry fires once per
+  day; trigger ad-hoc runs with:
+    agm worktree sweep [--execute]
+    launchctl kickstart gui/$UID/com.dear-agent.worktree-sweep
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dear-agent.worktree-sweep</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__AGM_BINARY__</string>
+        <string>worktree</string>
+        <string>sweep</string>
+        <string>--execute</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__USER_HOME__/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__USER_HOME__</string>
+    </dict>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/worktree-sweep.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/worktree-sweep.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

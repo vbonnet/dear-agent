@@ -61,8 +61,8 @@ func init() {
 	// Required flags
 	memoryDeleteCmd.Flags().StringVar(&deleteNamespace, "namespace", "", "Namespace path (comma-separated)")
 	memoryDeleteCmd.Flags().StringVar(&deleteMemoryID, "memory-id", "", "Memory ID to delete")
-	memoryDeleteCmd.MarkFlagRequired("namespace")
-	memoryDeleteCmd.MarkFlagRequired("memory-id")
+	_ = memoryDeleteCmd.MarkFlagRequired("namespace")
+	_ = memoryDeleteCmd.MarkFlagRequired("memory-id")
 
 	// Optional flags
 	memoryDeleteCmd.Flags().BoolVar(&deleteConfirm, "confirm", false, "Skip confirmation prompt")
@@ -111,7 +111,7 @@ func runMemoryDelete(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer provider.Close(ctx)
+	defer func() { _ = provider.Close(ctx) }()
 
 	// 4. Delete memory
 	if err := provider.DeleteMemory(ctx, namespace, deleteMemoryID); err != nil {

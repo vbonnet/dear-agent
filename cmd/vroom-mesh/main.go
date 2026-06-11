@@ -177,7 +177,7 @@ func runContext(duration time.Duration, stderr io.Writer) (context.Context, cont
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		select {
 		case <-sigCh:
-			fmt.Fprintln(stderr, "vroom-mesh: shutdown signal received")
+			_, _ = fmt.Fprintln(stderr, "vroom-mesh: shutdown signal received")
 			cancel()
 		case <-ctx.Done():
 		}

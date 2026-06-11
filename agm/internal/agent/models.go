@@ -15,6 +15,7 @@ type ModelSpec struct {
 // HarnessModels defines known models per harness.
 var HarnessModels = map[string][]ModelSpec{
 	"claude-code": {
+		{Alias: "fable", FullName: "claude-fable-5", Description: "Mythos-class, most capable, 1M context, 128k max output (free on Pro/Max/Team through 2026-06-23)"},
 		{Alias: "opus", FullName: "claude-opus-4-6[1m]", Description: "Latest Opus, 1M context"},
 		{Alias: "sonnet", FullName: "claude-sonnet-4-6[1m]", Description: "Latest Sonnet, 1M context"},
 		{Alias: "haiku", FullName: "claude-haiku-4-5", Description: "Fast, 200k context"},
@@ -45,11 +46,13 @@ var HarnessModels = map[string][]ModelSpec{
 // Only tier names that differ across harnesses need entries.
 var CrossHarnessAliases = map[string]map[string]string{
 	"gemini-cli": {
+		"fable":  "3.1-pro",   // mythos-tier → gemini-3.1-pro-preview (best available)
 		"opus":   "2.5-pro",   // highest-tier → gemini-2.5-pro
 		"sonnet": "3.1-pro",   // mid-tier → gemini-3.1-pro-preview
 		"haiku":  "3.5-flash", // fast-tier → gemini-3.5-flash
 	},
 	"codex-cli": {
+		"fable":  "5.4",      // mythos-tier → gpt-5.4 (best available)
 		"opus":   "5.4",      // highest-tier → gpt-5.4
 		"sonnet": "5.4",      // mid-tier → gpt-5.4 (no direct equivalent)
 		"haiku":  "5.4-mini", // fast-tier → gpt-5.4-mini

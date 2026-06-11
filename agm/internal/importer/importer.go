@@ -127,11 +127,15 @@ type RegisterResult struct {
 //     the active config workspace, which mis-attributes every imported session
 //     to a single workspace (see the 2026-05-21 unified-session-management retro).
 //   - When sessionName is empty, it is derived from the project basename.
+//   - projectDir, when non-empty, is used as the project directory directly,
+//     skipping the InferProjectPath scan. This is the fix for the SessionStart
+//     timing window: the hook payload includes cwd but the conversation
+//     .jsonl file has not been written yet when SessionStart fires.
 //
 // Parameters mirror ImportOrphanedSession. fallbackWorkspace is used only when
 // neither an explicit workspace nor an inferable one is available (typically the
 // caller's cfg.Workspace).
-func RegisterSession(conversationUUID, sessionName, workspace, fallbackWorkspace string, adapter *dolt.Adapter) (*RegisterResult, error) {
+func RegisterSession(conversationUUID, sessionName, workspace, fallbackWorkspace, projectDir string, adapter *dolt.Adapter) (*RegisterResult, error) {
 	if conversationUUID == "" {
 		return nil, fmt.Errorf("conversation UUID cannot be empty")
 	}
@@ -154,10 +158,18 @@ func RegisterSession(conversationUUID, sessionName, workspace, fallbackWorkspace
 		}, nil
 	}
 
-	// 2. Resolve the conversation's real project path (history is authoritative).
-	projectPath, err := InferProjectPath(conversationUUID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to infer project path: %w", err)
+	// 2. Resolve the conversation's real project path.
+	//
+	// projectDir wins when provided (SessionStart hook knows cwd before the
+	// .jsonl is written). When absent, fall back to the conversation file scan.
+	var projectPath string
+	if projectDir != "" {
+		projectPath = projectDir
+	} else {
+		projectPath, err = InferProjectPath(conversationUUID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to infer project path: %w", err)
+		}
 	}
 	metadata, err := ExtractMetadataFromHistory(conversationUUID)
 	if err != nil {
@@ -167,6 +179,7 @@ func RegisterSession(conversationUUID, sessionName, workspace, fallbackWorkspace
 			LastModified: time.Now(),
 		}
 	} else if metadata.ProjectPath != "" {
+		// History is more authoritative when available; prefer it over cwd hint.
 		projectPath = metadata.ProjectPath
 	}
 
