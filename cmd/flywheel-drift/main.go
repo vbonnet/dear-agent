@@ -180,6 +180,7 @@ func (c *beadsStaleCheck) Run(ctx context.Context) healthchecker.Result {
 		ageDays := int(time.Since(b.UpdatedAt).Hours() / 24)
 		fmt.Fprintf(&sb, "\n      %s (%dd) — %s", b.ID, ageDays, b.Title)
 	}
+	msg := sb.String()
 	return healthchecker.Result{
 		Name:     c.Name(),
 		Category: c.Category(),
