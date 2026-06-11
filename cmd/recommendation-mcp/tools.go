@@ -613,4 +613,3 @@ func suggestionToWire(sg backlog.Suggestion) map[string]any {
 	}
 	return m
 }
-
