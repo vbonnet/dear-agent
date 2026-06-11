@@ -52,20 +52,18 @@ func (r PRApplier) remote() string {
 }
 
 // gitC runs a git subcommand in RepoRoot with the given extra env vars.
-func (r PRApplier) gitC(ctx context.Context, extraEnv []string, args ...string) (string, error) {
+func (r PRApplier) gitC(ctx context.Context, extraEnv []string, args ...string) error {
 	allArgs := append([]string{"-C", r.RepoRoot}, args...)
 	cmd := exec.CommandContext(ctx, "git", allArgs...)
 	if len(extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), extraEnv...)
 	}
-	var out bytes.Buffer
 	var errOut bytes.Buffer
-	cmd.Stdout = &out
 	cmd.Stderr = &errOut
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git %v: %w\nstderr: %s", args, err, errOut.String())
+		return fmt.Errorf("git %v: %w\nstderr: %s", args, err, errOut.String())
 	}
-	return strings.TrimSpace(out.String()), nil
+	return nil
 }
 
 // Apply creates a branch, writes the hypothesis doc, commits, pushes, and
@@ -74,7 +72,7 @@ func (r PRApplier) Apply(ctx context.Context, h Hypothesis) (Patch, error) {
 	branch := "selfimprove/" + sanitizeBranchName(h.ID)
 
 	// 1. Create and switch to the new branch.
-	if _, err := r.gitC(ctx, nil, "checkout", "-b", branch); err != nil {
+	if err := r.gitC(ctx, nil, "checkout", "-b", branch); err != nil {
 		return Patch{}, fmt.Errorf("pr_applier: checkout: %w", err)
 	}
 
@@ -89,23 +87,23 @@ func (r PRApplier) Apply(ctx context.Context, h Hypothesis) (Patch, error) {
 		"# Hypothesis: %s\n\n**ID:** %s\n**Source:** %s\n**Confidence:** %.2f\n\n## Rationale\n\n%s\n",
 		h.Description, h.ID, h.Source, h.Confidence, h.Rationale,
 	)
-	if err := os.WriteFile(docPath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(docPath, []byte(content), 0o600); err != nil {
 		return Patch{}, fmt.Errorf("pr_applier: write doc: %w", err)
 	}
 
 	// 3. Stage and commit.
-	if _, err := r.gitC(ctx, nil, "add", "docs/hypotheses/"); err != nil {
+	if err := r.gitC(ctx, nil, "add", "docs/hypotheses/"); err != nil {
 		return Patch{}, fmt.Errorf("pr_applier: git add: %w", err)
 	}
 	commitMsg := "selfimprove: propose " + h.ID
-	if _, err := r.gitC(ctx, nil, "commit", "-m", commitMsg); err != nil {
+	if err := r.gitC(ctx, nil, "commit", "-m", commitMsg); err != nil {
 		return Patch{}, fmt.Errorf("pr_applier: git commit: %w", err)
 	}
 
 	// 4. Push with a 30-second timeout and no terminal prompt.
 	pushCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if _, err := r.gitC(pushCtx,
+	if err := r.gitC(pushCtx,
 		[]string{"GIT_TERMINAL_PROMPT=0"},
 		"push", r.remote(), branch,
 	); err != nil {
@@ -152,7 +150,7 @@ func (r PRApplier) Apply(ctx context.Context, h Hypothesis) (Patch, error) {
 func (r PRApplier) Revert(ctx context.Context, p Patch) error {
 	branch := "selfimprove/" + sanitizeBranchName(p.Hypothesis.ID)
 	// Switch back to main first so we can delete the branch.
-	_, _ = r.gitC(ctx, nil, "checkout", "main")
-	_, _ = r.gitC(ctx, nil, "branch", "-D", branch)
+	_ = r.gitC(ctx, nil, "checkout", "main")
+	_ = r.gitC(ctx, nil, "branch", "-D", branch)
 	return nil
 }

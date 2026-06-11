@@ -148,10 +148,11 @@ func readSpans(path string, cutoff time.Time) ([]span, error) {
 	return out, scanner.Err()
 }
 
-// short returns the first n bytes of s, or the whole string if shorter.
-func short(s string, n int) string {
-	if len(s) >= n {
-		return s[:n]
+// short8 returns the first 8 bytes of s, or the whole string if shorter.
+// Used to truncate trace/span IDs to a readable prefix.
+func short8(s string) string {
+	if len(s) >= 8 {
+		return s[:8]
 	}
 	return s
 }
@@ -174,7 +175,7 @@ func formatReport(
 	} else {
 		for _, e := range errors {
 			b = fmt.Appendf(b, "- `%s/%s` — **%s**: %s\n",
-				short(e.TraceID, 8), short(e.SpanID, 8), e.Name, e.Msg)
+				short8(e.TraceID), short8(e.SpanID), e.Name, e.Msg)
 		}
 	}
 
@@ -184,7 +185,7 @@ func formatReport(
 	} else {
 		for _, s := range slows {
 			b = fmt.Appendf(b, "- `%s/%s` — **%s**: %.0fms\n",
-				short(s.TraceID, 8), short(s.SpanID, 8), s.Name, s.DurationMs)
+				short8(s.TraceID), short8(s.SpanID), s.Name, s.DurationMs)
 		}
 	}
 	b = fmt.Appendf(b, "\n---\n\n")
@@ -197,7 +198,7 @@ func appendToFile(path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}
