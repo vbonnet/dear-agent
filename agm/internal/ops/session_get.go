@@ -1,6 +1,8 @@
 package ops
 
 import (
+	"errors"
+
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -52,13 +54,20 @@ func GetSession(ctx *OpContext, req *GetSessionRequest) (*GetSessionResult, erro
 		return nil, ErrInvalidInput("identifier", "Session identifier is required. Provide a session ID, name, or UUID prefix.")
 	}
 
-	// Try exact ID match first
+	// Try exact ID match first.
 	m, err := ctx.Storage.GetSession(req.Identifier)
 	if err != nil {
-		// Try name-based lookup via list
-		m, err = findByName(ctx, req.Identifier)
-		if err != nil {
-			return nil, err
+		// Try name-based lookup; propagate real storage errors but fall through
+		// to the UUID lookup below on not-found — Stop hooks pass a Claude UUID
+		// that won't match any AGM ID or session name.
+		var nameErr error
+		m, nameErr = findByName(ctx, req.Identifier)
+		if nameErr != nil {
+			var opErr *OpError
+			if !errors.As(nameErr, &opErr) || opErr.Code != ErrCodeSessionNotFound {
+				return nil, nameErr
+			}
+			// nameErr is "not found" — continue to Claude UUID fallback.
 		}
 	}
 
