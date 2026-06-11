@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/lifecycle"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
-	"github.com/vbonnet/dear-agent/agm/internal/trace"
+	agmtrace "github.com/vbonnet/dear-agent/agm/internal/trace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 var stateCmd = &cobra.Command{
@@ -140,6 +145,9 @@ func runStateSet(cmd *cobra.Command, args []string) error {
 	sessionName := args[0]
 	newState := args[1]
 
+	ctx, span := startStateSetSpan(cmd.Context(), sessionName, newState, stateSetSource)
+	defer span.End()
+
 	// Validate state
 	validStates := []string{
 		"READY",
@@ -159,7 +167,10 @@ func runStateSet(cmd *cobra.Command, args []string) error {
 	}
 
 	if !isValid {
-		return fmt.Errorf("invalid state '%s'. Valid states: %s", newState, validStates)
+		err := fmt.Errorf("invalid state '%s'. Valid states: %s", newState, validStates)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
 
 	// Get Dolt adapter for session resolution
@@ -171,24 +182,42 @@ func runStateSet(cmd *cobra.Command, args []string) error {
 	// Resolve session
 	m, manifestPath, err := session.ResolveIdentifier(sessionName, cfg.SessionsDir, adapter)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to resolve session: %w", err)
 	}
+
+	span.SetAttributes(attribute.String("session.id", m.SessionID))
 
 	// Update state
 	err = session.UpdateSessionState(manifestPath, newState, stateSetSource, m.SessionID, adapter)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to update state: %w", err)
 	}
 
-	lifecycle.RecordSessionLifecycleSpan(cmd.Context(), m.Name, newState, stateSetSource)
+	// Propagate trace context into lifecycle span calls so they appear as children.
+	lifecycle.RecordSessionLifecycleSpan(ctx, m.Name, newState, stateSetSource)
 
 	fmt.Printf("Updated session '%s' state: %s (source: %s)\n", m.Name, newState, stateSetSource)
 
 	// Emit a session lifecycle span when a hook signals the session has ended.
 	// exitCode is -1 because state-reporter hooks do not receive the exit code.
 	if stateSetSource == "sessionend-hook" || stateSetSource == "stop-hook" {
-		trace.RecordSessionLifecycleSpan(cmd.Context(), m, time.Now(), -1)
+		agmtrace.RecordSessionLifecycleSpan(ctx, m, time.Now(), -1)
 	}
 
 	return nil
+}
+
+// startStateSetSpan starts an OTel span for the session state set operation.
+func startStateSetSpan(ctx context.Context, sessionName, state, source string) (context.Context, oteltrace.Span) {
+	return otel.Tracer("agm").Start(ctx, "agm.session.state_set",
+		oteltrace.WithAttributes(
+			attribute.String("session.name", sessionName),
+			attribute.String("operation", "state_set"),
+			attribute.String("session.state", state),
+			attribute.String("state.source", source),
+		))
 }

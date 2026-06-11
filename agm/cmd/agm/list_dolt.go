@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os/user"
 	"path/filepath"
@@ -12,6 +13,10 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/pkg/cliframe"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -48,12 +53,18 @@ Examples:
 			}
 		}
 
+		ctx, span := startListSpan(cmd.Context(), listAll, len(listTags)+len(listFilters))
+		defer span.End()
+
 		// Construct OpContext with storage
 		opCtx, cleanup, err := newOpContextWithStorage()
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 		}
 		defer cleanup()
+		_ = ctx // span propagation to future sub-operations
 
 		// Determine status filter
 		status := "active"
@@ -74,8 +85,12 @@ Examples:
 			ExcludeStopped: !listAll,
 		})
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return handleError(err)
 		}
+
+		span.SetAttributes(attribute.Int("session.count", len(result.Sessions)))
 
 		if len(result.Sessions) == 0 {
 			if !listAll {
@@ -115,6 +130,16 @@ Examples:
 		}
 		return nil
 	},
+}
+
+// startListSpan starts an OTel span for the session list operation.
+func startListSpan(ctx context.Context, all bool, filterCount int) (context.Context, trace.Span) {
+	return otel.Tracer("agm").Start(ctx, "agm.session.list",
+		trace.WithAttributes(
+			attribute.String("operation", "list"),
+			attribute.Bool("filter.all", all),
+			attribute.Int("filter.tag_count", filterCount),
+		))
 }
 
 func init() {
