@@ -101,6 +101,25 @@ func TestAgentMetricsRecord(t *testing.T) {
 	}
 }
 
+// TestInitMeterURLEndpoint verifies that an http:// or https:// prefixed endpoint
+// is accepted without error (the scheme is stripped before the gRPC dial).
+func TestInitMeterURLEndpoint(t *testing.T) {
+	for _, ep := range []string{"http://localhost:4317", "https://localhost:4317"} {
+		t.Run(ep, func(t *testing.T) {
+			t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", ep)
+			shutdown, err := InitMeter("test-service")
+			if err != nil {
+				t.Fatalf("InitMeter(%q) returned error: %v", ep, err)
+			}
+			if shutdown == nil {
+				t.Fatal("InitMeter returned nil shutdown func")
+			}
+			_ = shutdown(context.Background())
+			_ = Shutdown(context.Background())
+		})
+	}
+}
+
 // TestSessionLifecycleHelpers exercises the span+metric convenience helpers to
 // ensure they are panic-safe with the default (no-op) global providers.
 func TestSessionLifecycleHelpers(t *testing.T) {
