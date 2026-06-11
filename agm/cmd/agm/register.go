@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/importer"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -56,14 +61,21 @@ Examples:
 			return fmt.Errorf("invalid UUID format: %s (too short)", conversationUUID)
 		}
 
+		ctx, span := startRegisterSpan(cmd.Context(), conversationUUID, registerWorkspace)
+		defer span.End()
+
 		adapter, err := getStorage()
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 		}
 		defer func() { _ = adapter.Close() }()
 
 		result, err := importer.RegisterSession(conversationUUID, registerName, registerWorkspace, cfg.Workspace, registerProjectDir, adapter)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			ui.PrintError(err,
 				"Failed to register session",
 				"  • Verify UUID exists: ls ~/.claude/projects/*/<uuid>.jsonl\n"+
@@ -71,6 +83,13 @@ Examples:
 					"  • Check existing sessions: agm session list")
 			return err
 		}
+
+		span.SetAttributes(
+			attribute.Bool("session.already_tracked", result.AlreadyTracked),
+			attribute.String("session.id", result.SessionID),
+		)
+
+		_ = ctx // span propagation to future sub-operations
 
 		if registerQuiet {
 			fmt.Println(result.SessionID)
@@ -89,6 +108,16 @@ Examples:
 		fmt.Printf("  Project:           %s\n", result.Project)
 		return nil
 	},
+}
+
+// startRegisterSpan starts an OTel span for the session register operation.
+func startRegisterSpan(ctx context.Context, sessionUUID, workspace string) (context.Context, trace.Span) {
+	return otel.Tracer("agm").Start(ctx, "agm.session.register",
+		trace.WithAttributes(
+			attribute.String("session.uuid", sessionUUID),
+			attribute.String("operation", "register"),
+			attribute.String("workspace", workspace),
+		))
 }
 
 func init() {
