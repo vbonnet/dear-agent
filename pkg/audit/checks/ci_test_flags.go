@@ -134,9 +134,9 @@ func (CITestFlagsCheck) Run(ctx context.Context, env audit.Env) (audit.Result, e
 				Strategy: audit.StrategyNoop,
 			},
 			Evidence: map[string]any{
-				"affected_files":    affectedFiles,
-				"ci_passes_short":   false,
-				"affected_count":    len(affectedFiles),
+				"affected_files":  affectedFiles,
+				"ci_passes_short": false,
+				"affected_count":  len(affectedFiles),
 			},
 		},
 	}
@@ -177,7 +177,7 @@ func ciWorkflowPassesShort(dir string) (bool, error) {
 // and "-short" is a hit. This covers the common single-line invocation
 // ("run: go test -short -race ./...") without requiring a YAML parser.
 func fileContainsGoTestShort(path string) (bool, error) {
-	f, err := os.Open(path) //nolint:gosec // operator-supplied path from workflow scan
+	f, err := os.Open(path)
 	if err != nil {
 		return false, err
 	}
@@ -223,7 +223,7 @@ func findTestFilesWithShort(root string) ([]string, error) {
 
 // fileContainsTestingShort returns true if the file contains "testing.Short()".
 func fileContainsTestingShort(path string) (bool, error) {
-	f, err := os.Open(path) //nolint:gosec // path from WalkDir within WorkingDir
+	f, err := os.Open(path)
 	if err != nil {
 		return false, err
 	}
