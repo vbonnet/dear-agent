@@ -79,6 +79,11 @@ func parseChezmoiDiffPaths(out string) []string {
 			continue
 		}
 		path := "/" + rest[:i]
+		// .chezmoiscripts/ entries are run_* scripts that chezmoi treats as
+		// always-new; they appear in every `chezmoi diff` and are not drift.
+		if strings.HasPrefix(path, "/.chezmoiscripts/") {
+			continue
+		}
 		if _, ok := seen[path]; ok {
 			continue
 		}

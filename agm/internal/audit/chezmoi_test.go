@@ -59,6 +59,19 @@ some other line
 	assert.Equal(t, []string{"/.zshrc"}, paths)
 }
 
+func TestParseChezmoiDiffPaths_SkipsChezmoiscripts(t *testing.T) {
+	out := `diff --git a/.chezmoiscripts/run_once_install.sh b/.chezmoiscripts/run_once_install.sh
+@@ -0,0 +1 @@
++#!/bin/bash
+diff --git a/.bashrc b/.bashrc
+@@ -1 +1 @@
+-old
++new
+`
+	paths := parseChezmoiDiffPaths(out)
+	assert.Equal(t, []string{"/.bashrc"}, paths)
+}
+
 // TestCheckChezmoiDrift_NoBinary verifies the check is a no-op when chezmoi
 // is not on PATH. We invoke the function with a sanitized PATH so LookPath
 // fails regardless of host setup.
