@@ -33,6 +33,7 @@ import (
 // Severity is P2 — stale documentation is drift, not breakage.
 type SpecStalenessCheck struct{}
 
+// Meta returns the check metadata for SpecStalenessCheck.
 func (SpecStalenessCheck) Meta() audit.CheckMeta {
 	return audit.CheckMeta{
 		ID:              "spec.staleness",
@@ -59,9 +60,9 @@ func (SpecStalenessCheck) Run(ctx context.Context, env audit.Env) (audit.Result,
 	out := audit.Result{Status: audit.StatusOK}
 
 	// Verify git is present; staleness checks are a no-op without it.
-	gitRes := runCommand(ctx, env.RepoRoot, "git", "rev-parse", "--git-dir")
-	if gitRes.Err != nil {
-		return out, nil // not a git repo or git binary missing — skip silently
+	// git not present or not a git repo — staleness check is a no-op.
+	if runCommand(ctx, env.RepoRoot, "git", "rev-parse", "--git-dir").Err != nil { //nolint:nilerr
+		return out, nil
 	}
 
 	var findings []audit.Finding
@@ -126,9 +127,9 @@ func (SpecStalenessCheck) Run(ctx context.Context, env audit.Env) (audit.Result,
 					Strategy: audit.StrategyNoop,
 				},
 				Evidence: map[string]any{
-					"directory":          rel,
-					"commits_behind":     count,
-					"threshold":          threshold,
+					"directory":      rel,
+					"commits_behind": count,
+					"threshold":      threshold,
 				},
 			})
 		}
@@ -176,7 +177,7 @@ func commitsBehind(ctx context.Context, repoRoot, dirRel, specRel string) (int, 
 
 // intConfig reads an int from env.Config[key]. Non-int values and missing
 // keys fall back to the provided default.
-func intConfig(cfg map[string]any, key string, fallback int) int {
+func intConfig(cfg map[string]any, key string, fallback int) int { //nolint:unparam // key varies across callers
 	v, ok := cfg[key]
 	if !ok || v == nil {
 		return fallback
