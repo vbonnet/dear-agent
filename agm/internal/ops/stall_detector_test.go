@@ -51,6 +51,7 @@ func (m *mockStorage) ApplyMigrations() error                   { return nil }
 // Stub out CreateSession, GetSession, UpdateSession, DeleteSession (legacy dolt.Storage methods)
 func (m *mockStorage) CreateSession(*manifest.Manifest) error { return nil }
 func (m *mockStorage) DeleteSession(string) error             { return nil }
+func (m *mockStorage) GetSessionByUUID(string) (*manifest.Manifest, error) { return nil, nil }
 
 // testManifest creates a test manifest with defaults.
 func testManifest(name, state string, stateUpdatedAt time.Time) *manifest.Manifest {

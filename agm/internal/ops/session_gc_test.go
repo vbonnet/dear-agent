@@ -556,3 +556,4 @@ func (f *failingStorageImpl) GetSession(string) (*manifest.Manifest, error)     
 func (f *failingStorageImpl) UpdateSession(*manifest.Manifest) error                         { return errors.New("unreachable") }
 func (f *failingStorageImpl) DeleteSession(string) error                                     { return errors.New("unreachable") }
 func (f *failingStorageImpl) ListSessions(*dolt.SessionFilter) ([]*manifest.Manifest, error) { return nil, errors.New("unreachable") }
+func (f *failingStorageImpl) GetSessionByUUID(string) (*manifest.Manifest, error)            { return nil, errors.New("unreachable") }

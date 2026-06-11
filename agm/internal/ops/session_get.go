@@ -62,6 +62,16 @@ func GetSession(ctx *OpContext, req *GetSessionRequest) (*GetSessionResult, erro
 		}
 	}
 
+	// Fall back to Claude UUID lookup — Stop hooks pass the Claude session_id
+	// which is distinct from the AGM session ID. This lookup finds the session
+	// whose manifest.Claude.UUID matches, enabling lifecycle spans from hooks.
+	if m == nil {
+		m, err = ctx.Storage.GetSessionByUUID(req.Identifier)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if m == nil {
 		return nil, ErrSessionNotFound(req.Identifier)
 	}
