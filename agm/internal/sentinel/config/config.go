@@ -161,12 +161,12 @@ func DefaultConfig() *Config {
 
 	return &Config{
 		Patterns: PatternConfig{
-			Bash:  filepath.Join(homeDir, "src/engram/patterns/bash-anti-patterns.yaml"),
-			Beads: filepath.Join(homeDir, "src/engram/patterns/beads-anti-patterns.yaml"),
-			Git:   filepath.Join(homeDir, "src/engram/patterns/git-anti-patterns.yaml"),
+			Bash:  "",
+			Beads: "",
+			Git:   "",
 		},
 		Violations: ViolationsConfig{
-			Directory: filepath.Join(homeDir, "src/engram/violations"),
+			Directory: filepath.Join(homeDir, ".local/share/dear-agent/sentinel/violations"),
 		},
 		Monitoring: MonitoringConfig{
 			Interval:               "60s", // Check every 60 seconds
