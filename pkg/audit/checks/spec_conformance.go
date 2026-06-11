@@ -36,6 +36,7 @@ import (
 // Severity is P2 — a dead path reference is drift, not a runtime failure.
 type SpecConformanceCheck struct{}
 
+// Meta returns the check metadata for SpecConformanceCheck.
 func (SpecConformanceCheck) Meta() audit.CheckMeta {
 	return audit.CheckMeta{
 		ID:              "spec.conformance",
@@ -113,8 +114,8 @@ func (SpecConformanceCheck) Run(ctx context.Context, env audit.Env) (audit.Resul
 						Strategy: audit.StrategyNoop,
 					},
 					Evidence: map[string]any{
-						"directory":  rel,
-						"dead_ref":   ref,
+						"directory": rel,
+						"dead_ref":  ref,
 					},
 				})
 			}
