@@ -29,9 +29,6 @@ func TestE2E_WorkerLifecycle(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping E2E test in short mode")
 	}
-	if os.Getenv("SKIP_E2E") != "" {
-		t.Skip("SKIP_E2E is set")
-	}
 
 	// Check prerequisites
 	for _, bin := range []string{"tmux", "claude", "agm", "git"} {

@@ -110,7 +110,7 @@ func parseEcphoryAudits(filename string) ([]ecphoryAudit, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var audits []ecphoryAudit
 	scanner := bufio.NewScanner(file)

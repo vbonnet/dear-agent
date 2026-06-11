@@ -1,0 +1,91 @@
+name: Repo Health
+
+# Weekly codebase-health audit. Builds and runs cmd/repo-health, publishes
+# the markdown summary to the run's Step Summary, and uploads the JSON +
+# markdown report as artifacts. This is a *visibility* job, not a merge gate:
+# it is not on any branch-protection required-checks list, and it does not
+# fail on a merely "degraded" verdict (which a large repo will routinely hit
+# on structural metrics). It fails the run only on a "critical" verdict, so a
+# genuine regression (e.g. import cycle, runaway worktree accumulation) shows
+# up as a red scheduled run without weekly degraded-noise.
+
+on:
+  schedule:
+    # Mondays 14:00 UTC, an hour before the dependency-freshness sweep.
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GIT_TERMINAL_PROMPT: "0"
+  # Match the golangci-lint version pinned in ci.yml so the lint-findings
+  # metric counts the same rule set CI enforces. Bump in lockstep with ci.yml.
+  GOLANGCI_VERSION: "v2.12.2"
+
+jobs:
+  audit:
+    name: Codebase health audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Full history so stale-branch and commit metrics see real data.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: "go.sum"
+
+      - name: Install golangci-lint
+        # Installs the pinned binary onto PATH so repo-health's lint metric is
+        # available; without it the metric degrades to n/a (not a failure).
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" "${GOLANGCI_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Build repo-health
+        run: |
+          mkdir -p build
+          go build -o build/repo-health ./cmd/repo-health
+
+      - name: Run health audit
+        # --exit-zero so artifact + summary steps always run; the dedicated
+        # gate step below decides the job's pass/fail from the JSON verdict.
+        run: |
+          ./build/repo-health \
+            --root . \
+            --json-out health-report.json \
+            --md-out health-report.md \
+            --exit-zero
+
+      - name: Publish summary
+        if: always()
+        run: cat health-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-health-report
+          path: |
+            health-report.json
+            health-report.md
+          retention-days: 90
+
+      - name: Gate on critical verdict
+        # Degraded (exit 1) is informational and stays green; only a critical
+        # verdict reds the scheduled run so it surfaces without weekly noise.
+        run: |
+          status=$(jq -r '.status' health-report.json)
+          echo "Repo health verdict: ${status}"
+          if [ "${status}" = "critical" ]; then
+            echo "::error::Repo health is CRITICAL — see the run summary and artifacts."
+            exit 1
+          fi

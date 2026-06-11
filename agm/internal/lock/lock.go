@@ -77,6 +77,26 @@ func (fl *FileLock) TryLock() error {
 	return nil
 }
 
+// Lock acquires the lock, blocking until it is available.
+// Use this in production code so concurrent callers wait rather than fail.
+func (fl *FileLock) Lock() error {
+	// LOCK_EX = exclusive lock (no LOCK_NB = block until available)
+	err := syscall.Flock(int(fl.file.Fd()), syscall.LOCK_EX)
+	if err != nil {
+		return &LockError{
+			Problem:  "Failed to acquire tmux lock",
+			Recovery: "Check if another AGM process is stuck; run 'agm unlock' if needed",
+		}
+	}
+
+	pid := fmt.Sprintf("%d\n", os.Getpid())
+	fl.file.Truncate(0)
+	fl.file.Seek(0, 0)
+	fl.file.WriteString(pid)
+
+	return nil
+}
+
 // Unlock releases the lock and closes the file.
 // Safe to call multiple times (subsequent calls are no-ops).
 func (fl *FileLock) Unlock() error {

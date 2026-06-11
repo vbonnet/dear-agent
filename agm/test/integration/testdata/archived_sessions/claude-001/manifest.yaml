@@ -1,5 +1,5 @@
 session_id: claude-001
-agent: claude
+harness: claude
 status: archived
 created_at: "2026-01-20T18:00:00Z"
 archived_at: "2026-01-20T19:00:00Z"

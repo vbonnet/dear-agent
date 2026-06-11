@@ -47,7 +47,7 @@ var _ = Describe("Manifest Validation", func() {
 					Tmux: manifest.Tmux{
 						SessionName: sessionName,
 					},
-					Agent: "claude",
+					Harness: "claude",
 				}
 
 				err := manifest.Write(manifestPath, m)
@@ -83,7 +83,7 @@ var _ = Describe("Manifest Validation", func() {
 					Tmux: manifest.Tmux{
 						SessionName: sessionName,
 					},
-					Agent: "claude",
+					Harness: "claude",
 					Claude: manifest.Claude{
 						UUID: "",
 					},
@@ -101,7 +101,7 @@ var _ = Describe("Manifest Validation", func() {
 				Expect(readManifest.SessionID).To(Equal(testUUID))
 				Expect(readManifest.Name).To(Equal(sessionName))
 				Expect(readManifest.Tmux.SessionName).To(Equal(sessionName))
-				Expect(readManifest.Agent).To(Equal("claude"))
+				Expect(readManifest.Harness).To(Equal("claude"))
 			})
 		})
 
@@ -121,7 +121,7 @@ var _ = Describe("Manifest Validation", func() {
 					Tmux: manifest.Tmux{
 						SessionName: sessionName,
 					},
-					Agent: "claude",
+					Harness: "claude",
 				}
 
 				err := manifest.Write(manifestPath, m)
@@ -149,7 +149,7 @@ var _ = Describe("Manifest Validation", func() {
 				Expect(m.SchemaVersion).To(Equal("2.0"))
 				Expect(m.SessionID).ToNot(BeEmpty())
 				Expect(m.Name).To(Equal("test-session"))
-				Expect(m.Agent).To(Equal("claude"))
+				Expect(m.Harness).To(Equal("claude"))
 			})
 		})
 
@@ -197,7 +197,7 @@ var _ = Describe("Manifest Validation", func() {
 						Tmux: manifest.Tmux{
 							SessionName: sessionName,
 						},
-						Agent: agent,
+						Harness: agent,
 					}
 
 					testPath := filepath.Join(testEnv.ManifestDir(sessionName), agent+"-manifest.yaml")
@@ -206,7 +206,7 @@ var _ = Describe("Manifest Validation", func() {
 
 					readManifest, err := manifest.Read(testPath)
 					Expect(err).ToNot(HaveOccurred())
-					Expect(readManifest.Agent).To(Equal(agent))
+					Expect(readManifest.Harness).To(Equal(agent))
 				}
 			})
 		})
@@ -226,7 +226,7 @@ var _ = Describe("Manifest Validation", func() {
 					Tmux: manifest.Tmux{
 						SessionName: sessionName,
 					},
-					Agent: "opencode",
+					Harness: "opencode",
 					OpenCode: &manifest.OpenCode{
 						ServerPort: 4096,
 						ServerHost: "localhost",
@@ -240,7 +240,7 @@ var _ = Describe("Manifest Validation", func() {
 
 				readManifest, err := manifest.Read(testPath)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(readManifest.Agent).To(Equal("opencode"))
+				Expect(readManifest.Harness).To(Equal("opencode"))
 				Expect(readManifest.OpenCode).ToNot(BeNil())
 				Expect(readManifest.OpenCode.ServerPort).To(Equal(4096))
 				Expect(readManifest.OpenCode.ServerHost).To(Equal("localhost"))
