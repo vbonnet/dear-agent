@@ -1,0 +1,165 @@
+name: Multi-Agent Orchestration
+
+# Exercises the multi-agent surfaces — the agm-bus broker, supervisor
+# heartbeats, and VROOM emitters — end to end. We don't need a real
+# Claude session for this: the bus, supervisor protocol, and VROOM
+# topics are all addressable via the binaries themselves plus the
+# unit/integration tests under agm/internal/bus and pkg/vroom.
+#
+# This is a weekly canary on Ubuntu only (the bus uses unix sockets,
+# and Docker Compose is Linux-native on hosted runners). Per-PR
+# coverage lives in ci.yml.
+
+on:
+  schedule:
+    # Weekly on Sunday at 07:00 UTC (one hour after cross-platform-test
+    # to keep the dashboard readable)
+    - cron: "0 7 * * 0"
+  workflow_dispatch:
+
+concurrency:
+  group: multi-agent-test
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  bus-and-supervisor:
+    name: Bus + supervisor mesh smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: 'go.sum'
+
+      - name: Install tmux (required by AGM session tooling)
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Build agm orchestration binaries
+        run: |
+          mkdir -p build
+          go build -o build/agm ./agm/cmd/agm
+          go build -o build/agm-bus ./agm/cmd/agm-bus
+          go build -o build/agm-daemon ./agm/cmd/agm-daemon
+          go build -o build/agm-reaper ./agm/cmd/agm-reaper
+
+      - name: Start agm-bus broker in background
+        run: |
+          mkdir -p "$HOME/.agm"
+          ./build/agm-bus socket
+          nohup ./build/agm-bus serve > bus.log 2>&1 &
+          echo $! > bus.pid
+          # Give it a moment to bind the socket.
+          for i in 1 2 3 4 5; do
+            if ./build/agm-bus status >/dev/null 2>&1; then
+              echo "agm-bus is up"
+              break
+            fi
+            sleep 1
+          done
+          ./build/agm-bus status
+
+      - name: Cross-agent communication tests (bus integration suite)
+        # The bus package has the in-process server/client integration
+        # tests (server_test.go, queue_test.go, heartbeat_watcher_test.go,
+        # matrix_test.go) that drive the multi-session message-routing
+        # contract. Running them with -race surfaces concurrent-emitter
+        # bugs that show up only under load.
+        run: go test -race -count=1 -timeout 10m ./agm/internal/bus/...
+
+      - name: VROOM supervisor / emitter tests
+        run: go test -race -count=1 -timeout 5m ./pkg/vroom/...
+
+      - name: Agent selector + reservation tests
+        run: |
+          go test -race -count=1 -timeout 5m ./agm/internal/agents/...
+          go test -race -count=1 -timeout 5m ./agm/internal/reservation/...
+
+      - name: Tail bus log on failure
+        if: failure()
+        run: |
+          echo "::group::agm-bus.log"
+          cat bus.log || true
+          echo "::endgroup::"
+
+      - name: Stop agm-bus
+        if: always()
+        run: |
+          if [ -f bus.pid ]; then
+            kill "$(cat bus.pid)" 2>/dev/null || true
+            wait "$(cat bus.pid)" 2>/dev/null || true
+          fi
+
+  reaper-e2e-compose:
+    name: Reaper E2E (docker compose)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: 'go.sum'
+
+      - name: Build binaries for compose mount
+        # docker-compose.yml under agm/test/e2e/docker mounts
+        # ../../../bin/{agm,agm-reaper} into the container.
+        run: |
+          mkdir -p bin
+          go build -o bin/agm ./agm/cmd/agm
+          go build -o bin/agm-reaper ./agm/cmd/agm-reaper
+
+      - name: Run the reaper compose stack
+        working-directory: agm/test/e2e/docker
+        run: |
+          mkdir -p test-results
+          docker compose up --build --abort-on-container-exit --exit-code-from reaper-e2e-test
+
+      - name: Upload reaper test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reaper-e2e-results
+          path: agm/test/e2e/docker/test-results
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Tear down compose stack
+        if: always()
+        working-directory: agm/test/e2e/docker
+        run: docker compose down -v --remove-orphans || true
+
+  summary:
+    name: Summary
+    needs: [bus-and-supervisor, reaper-e2e-compose]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Report
+        run: |
+          {
+            echo "## Multi-Agent Orchestration"
+            echo ""
+            echo "| Job | Status |"
+            echo "|---|---|"
+            echo "| bus + supervisor | ${{ needs.bus-and-supervisor.result }} |"
+            echo "| reaper compose | ${{ needs.reaper-e2e-compose.result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

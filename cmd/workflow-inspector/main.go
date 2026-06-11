@@ -53,7 +53,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		addr   = fs.String("addr", "127.0.0.1:8080", "listen address (default loopback only)")
 	)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: workflow-inspector [--db ./runs.db] [--addr :8080]")
+		_, _ = fmt.Fprintln(stderr, "Usage: workflow-inspector [--db ./runs.db] [--addr :8080]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -61,10 +61,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	db, err := sql.Open("sqlite", *dbPath+"?_pragma=busy_timeout(5000)")
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	srv := NewServer(db)
 	httpSrv := &http.Server{
@@ -85,9 +85,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		_ = httpSrv.Shutdown(shutdownCtx)
 	}()
 
-	fmt.Fprintf(stdout, "workflow-inspector: serving %s on http://%s\n", *dbPath, *addr)
+	_, _ = fmt.Fprintf(stdout, "workflow-inspector: serving %s on http://%s\n", *dbPath, *addr)
 	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 	wg.Wait()

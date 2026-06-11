@@ -140,6 +140,8 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 		return s.toolGetRecommendations(ctx, req.ID, p.Arguments)
 	case "get_signal_trends":
 		return s.toolGetSignalTrends(ctx, req.ID, p.Arguments)
+	case "suggest_backlog":
+		return s.toolSuggestBacklog(ctx, req.ID, p.Arguments)
 	}
 	return errResponse(req.ID, -32601, "unknown tool", p.Name)
 }

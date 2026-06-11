@@ -61,37 +61,29 @@ make act-lint
 # Run tests only
 make act-test
 
-# Install git pre-push hook
-make install-hooks
+# Install the preflight pre-push hook (recommended)
+make install-preflight-hook
 ```
 
-## Pre-commit Hooks
+## Pre-push Hook
 
-This project includes a pre-push hook that runs local CI checks before pushing.
-
-### Install
+This project ships a pre-push hook that runs `make preflight` (lint + build + vet)
+before allowing a push. Install it once after cloning:
 
 ```bash
-make install-hooks
+make install-preflight-hook
 ```
 
-This installs a Git pre-push hook that runs `go vet`, `go test`, and `golangci-lint`
-before allowing a push. If any check fails, the push is aborted so you can fix the issue.
+If any preflight check fails the push is aborted so you can fix the issue
+before the GitHub round-trip.
 
-### Manual Installation
+### What `make preflight` checks
 
-```bash
-cp scripts/hooks/pre-push .git/hooks/pre-push
-chmod +x .git/hooks/pre-push
-```
-
-### What the Hook Checks
-
-| Check | Command | Purpose |
-|-------|---------|---------|
-| Vet | `go vet ./...` | Catches common Go mistakes |
-| Test | `go test -race ./...` | Runs the full test suite with race detection |
-| Lint | `golangci-lint run ./...` | Enforces code style and quality |
+| Check | Purpose |
+|-------|---------|
+| `go build ./...` | Catches compile errors |
+| `go vet ./...` | Catches common Go mistakes |
+| `golangci-lint run ./...` | Enforces code style and quality |
 
 ## Making Changes
 

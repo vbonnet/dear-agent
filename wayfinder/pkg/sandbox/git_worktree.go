@@ -98,13 +98,31 @@ func (g *GitWorktreeManager) CreateWorktree(sandboxID, repoRoot, branch string) 
 	return worktreePath, nil
 }
 
-// RemoveWorktree removes a git worktree
+// RemoveWorktree removes a git worktree.
 func (g *GitWorktreeManager) RemoveWorktree(sandboxID, repoRoot string) error {
+	return g.removeWorktree(sandboxID, repoRoot, false)
+}
+
+// DryRunRemoveWorktree returns the path that RemoveWorktree would delete
+// without performing any filesystem or git operations.
+func (g *GitWorktreeManager) DryRunRemoveWorktree(sandboxID, repoRoot string) (string, error) {
+	path := filepath.Join(repoRoot, ".worktrees", sandboxID)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return "", nil // nothing to remove
+	}
+	return path, nil
+}
+
+func (g *GitWorktreeManager) removeWorktree(sandboxID, repoRoot string, dryRun bool) error {
 	worktreePath := filepath.Join(repoRoot, ".worktrees", sandboxID)
 
 	// Check if worktree exists
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
 		// Already removed
+		return nil
+	}
+
+	if dryRun {
 		return nil
 	}
 

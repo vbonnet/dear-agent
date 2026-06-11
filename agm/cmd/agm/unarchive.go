@@ -59,7 +59,7 @@ func runUnarchive(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	// Find matching archived sessions
 	matches, err := session.FindArchived(cfg.SessionsDir, pattern, adapter)
@@ -245,7 +245,7 @@ func unarchiveCompletion(cmd *cobra.Command, args []string, toComplete string) (
 		// Fail gracefully - return empty list if can't connect to Dolt
 		return []string{}, cobra.ShellCompDirectiveNoFileComp
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	// List archived sessions from Dolt
 	filter := &dolt.SessionFilter{

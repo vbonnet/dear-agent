@@ -160,7 +160,7 @@ type GPT4Judge struct {
 }
 
 // EvaluateDetailed assesses output using GPT-4 with structured JSON output
-func (g *GPT4Judge) EvaluateDetailed(ctx context.Context, input, expectedOutput string, criteria EvaluationCriteria) (*JudgeResponse, error) {
+func (g *GPT4Judge) EvaluateDetailed(ctx context.Context, input, expectedOutput, actualOutput string, criteria EvaluationCriteria) (*JudgeResponse, error) {
 	tracer := otel.Tracer("engram/evaluation")
 	ctx, span := tracer.Start(ctx, "judge_evaluation",
 		trace.WithAttributes(
@@ -193,7 +193,7 @@ Provide your evaluation in JSON format with:
 - pass: boolean (true if score >= threshold)
 - score: float between 0.0 and 1.0
 - reasoning: string explaining your judgment
-`, input, expectedOutput, expectedOutput, criteria.Name, criteria.Description, criteria.Threshold)
+`, input, expectedOutput, actualOutput, criteria.Name, criteria.Description, criteria.Threshold)
 
 	// Create JSON schema for structured output
 	schema := &JSONSchema{
@@ -265,7 +265,10 @@ func (g *GPT4Judge) Evaluate(ctx context.Context, prompt string, response string
 		Description: "Evaluate response quality",
 		Threshold:   0.7,
 	}
-	result, err := g.EvaluateDetailed(ctx, prompt, response, criteria)
+	// The simple Judge interface has no reference output, so there is no
+	// expected value to compare against — the response is judged on its own
+	// quality. Pass it as the actual output with an empty expected output.
+	result, err := g.EvaluateDetailed(ctx, prompt, "", response, criteria)
 	if err != nil {
 		return 0, err
 	}

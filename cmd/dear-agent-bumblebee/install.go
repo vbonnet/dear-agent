@@ -100,7 +100,7 @@ func installBinary(prefix, target string) error {
 	if err != nil {
 		return fmt.Errorf("mktemp: %w", err)
 	}
-	defer os.RemoveAll(tmpdir)
+	defer func() { _ = os.RemoveAll(tmpdir) }()
 
 	fmt.Printf("→ Downloading %s (%s)...\n", asset, BumblebeeVersion)
 	tarPath := filepath.Join(tmpdir, asset)
@@ -162,7 +162,7 @@ func download(url, dst string) error {
 	if err != nil {
 		return fmt.Errorf("GET %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
 	}
@@ -170,7 +170,7 @@ func download(url, dst string) error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", dst, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := io.Copy(f, resp.Body); err != nil {
 		return fmt.Errorf("write %s: %w", dst, err)
 	}
@@ -182,7 +182,7 @@ func sha256File(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", fmt.Errorf("hash %s: %w", path, err)
@@ -209,7 +209,7 @@ func installFile(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return fmt.Errorf("open %s: %w", src, err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	tmp, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("create temp in %s: %w", filepath.Dir(dst), err)
@@ -217,12 +217,12 @@ func installFile(src, dst string, mode os.FileMode) error {
 	tmpName := tmp.Name()
 	cleanup := func() { _ = os.Remove(tmpName) }
 	if _, err := io.Copy(tmp, in); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		cleanup()
 		return fmt.Errorf("copy to %s: %w", tmpName, err)
 	}
 	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		cleanup()
 		return fmt.Errorf("chmod %s: %w", tmpName, err)
 	}

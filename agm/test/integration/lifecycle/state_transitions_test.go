@@ -214,7 +214,7 @@ func TestStateTransition_InvalidTransitions(t *testing.T) {
 		Tmux: manifest.Tmux{
 			SessionName: sessionName,
 		},
-		Agent: "claude",
+		Harness: "claude",
 	}
 
 	manifestPath := filepath.Join(sessionDir, "manifest.yaml")
@@ -421,7 +421,7 @@ func TestStateTransition_PreservesMetadataOnTransition(t *testing.T) {
 		Tmux: manifest.Tmux{
 			SessionName: sessionName,
 		},
-		Agent: "claude",
+		Harness: "claude",
 	}
 
 	manifestPath := filepath.Join(sessionDir, "manifest.yaml")

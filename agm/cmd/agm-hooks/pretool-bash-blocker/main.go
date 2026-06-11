@@ -235,8 +235,28 @@ func (b *BashBlocker) Run() int {
 	if rule.Remediation != "" {
 		msg += "\n" + rule.Remediation
 	}
+	msg += "\n\nTo allow this specific command, add to settings.json → permissions.allow:\n"
+	msg += fmt.Sprintf("  %q", allowSnippet(cmd))
 	fmt.Fprintf(os.Stderr, "%s\n", msg)
 	return 2
+}
+
+// allowSnippet returns the exact permissions.allow entry needed to pass
+// this command through Claude Code's permission system.
+// Produces "Bash(<prefix>*)" where prefix is the first ~60 characters of
+// the command, trimmed at the last word boundary.
+func allowSnippet(cmd string) string {
+	const maxLen = 60
+	prefix := cmd
+	if len(prefix) > maxLen {
+		prefix = prefix[:maxLen]
+		// trim to last word boundary to avoid splitting a token
+		if i := strings.LastIndexAny(prefix, " \t"); i > 0 {
+			prefix = prefix[:i]
+		}
+		prefix += "*"
+	}
+	return "Bash(" + prefix + ")"
 }
 
 func main() {

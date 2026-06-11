@@ -22,6 +22,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/telemetry/usage"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/telemetry"
 	"github.com/vbonnet/dear-agent/pkg/otelsetup"
 	"github.com/vbonnet/dear-agent/pkg/workspace"
 
@@ -463,7 +464,7 @@ func runDefaultCommand(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	// List all sessions
 	manifests, err := adapter.ListSessions(&dolt.SessionFilter{})
@@ -482,7 +483,7 @@ func runDefaultCommand(cmd *cobra.Command, args []string) error {
 
 	// Case 1: No arguments provided - smart picker behavior
 	if len(args) == 0 {
-		return handleNoArgs(matchingSessions, projectDir, uiCfg)
+		return handleNoArgs(adapter, matchingSessions, projectDir, uiCfg)
 	}
 
 	// Case 2: Arguments provided - this is an error (removed 'agm <name>' shortcut)
@@ -499,7 +500,7 @@ func runDefaultCommand(cmd *cobra.Command, args []string) error {
 	return fmt.Errorf("unknown command: %q", sessionName)
 }
 
-func handleNoArgs(matchingSessions []*manifest.Manifest, projectDir string, uiCfg *ui.Config) error {
+func handleNoArgs(adapter *dolt.Adapter, matchingSessions []*manifest.Manifest, projectDir string, uiCfg *ui.Config) error {
 	if len(matchingSessions) == 0 {
 		// No sessions - offer to create new
 		fmt.Println("No sessions found in current directory.")
@@ -520,17 +521,17 @@ func handleNoArgs(matchingSessions []*manifest.Manifest, projectDir string, uiCf
 	if len(matchingSessions) == 1 {
 		// Single session - resume it directly
 		fmt.Printf("Resuming session: %s\n", matchingSessions[0].Name)
-		return performResume(matchingSessions[0])
+		return performResume(adapter, matchingSessions[0])
 	}
 
 	// Multiple sessions - show picker
-	return showSessionPicker(matchingSessions, uiCfg)
+	return showSessionPicker(adapter, matchingSessions, uiCfg)
 }
 
 // handleNamedSession removed - 'agm <name>' shortcut no longer supported
 // Use 'agm session resume <name>' or 'agm session new <name>' instead
 
-func showSessionPicker(sessions []*manifest.Manifest, uiCfg *ui.Config) error {
+func showSessionPicker(adapter *dolt.Adapter, sessions []*manifest.Manifest, uiCfg *ui.Config) error {
 	// Convert to UI sessions with status
 	uiSessions := make([]*ui.Session, len(sessions))
 
@@ -552,19 +553,18 @@ func showSessionPicker(sessions []*manifest.Manifest, uiCfg *ui.Config) error {
 	}
 
 	fmt.Printf("Resuming session: %s\n", selected.Name)
-	return performResume(selected.Manifest)
+	return performResume(adapter, selected.Manifest)
 }
 
-func performResume(m *manifest.Manifest) error {
-	// TODO: Implement actual resume logic
-	// This will integrate with tmux and claude CLI
-	fmt.Printf("  Project: %s\n", m.Context.Project)
-	fmt.Printf("  Status: %s\n", session.ComputeStatus(m, tmuxClient))
-	if m.Claude.UUID != "" {
-		fmt.Printf("  UUID: %s\n", m.Claude.UUID)
-	}
-	fmt.Println("\n[Resume logic placeholder - full implementation in next iteration]")
-	return nil
+// performResume runs the full resume workflow for an already-selected session.
+// The bare `agm` default command resolved the session from the current directory
+// (or the interactive picker), so we delegate to the same resumeResolvedSession
+// helper that backs `agm session resume` rather than reimplementing the workflow.
+func performResume(adapter *dolt.Adapter, m *manifest.Manifest) error {
+	// Reconstruct the manifest path the same way resolveSessionIdentifier does,
+	// so resumeResolvedSession can update last-activity and auto-commit.
+	manifestPath := filepath.Join(cfg.SessionsDir, m.SessionID, "manifest.yaml")
+	return resumeResolvedSession(adapter, m.SessionID, manifestPath)
 }
 
 func runNewSessionFlow(suggestedName *string) error {
@@ -602,6 +602,12 @@ func main() {
 func run() int {
 	shutdown := otelsetup.InitTracer("agm")
 	defer shutdown(context.Background()) //nolint:errcheck
+
+	// Metrics counterpart to the tracer above (agent.tasks.*, agent.tokens.*,
+	// agent.stall.*). No-op until OTEL_EXPORTER_OTLP_ENDPOINT is set.
+	if _, err := telemetry.InitMeter("agm"); err == nil {
+		defer func() { _ = telemetry.Shutdown(context.Background()) }()
+	}
 
 	// Use backend adapter to support multiple backends
 	// The backend is selected via AGM_SESSION_BACKEND env var (defaults to tmux)

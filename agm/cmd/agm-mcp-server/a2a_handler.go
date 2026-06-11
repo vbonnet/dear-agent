@@ -146,7 +146,7 @@ func newA2AStorage() (dolt.Storage, func(), error) {
 		return nil, func() {}, fmt.Errorf("dolt connect: %w", err)
 	}
 
-	return adapter, func() { adapter.Close() }, nil
+	return adapter, func() { _ = adapter.Close() }, nil
 }
 
 func (h *a2aHandler) writeJSON(w http.ResponseWriter, v any) {

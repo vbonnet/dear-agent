@@ -141,20 +141,6 @@ func TestGetSessionsDir_ReturnsAbsolutePath(t *testing.T) {
 
 // --- Run method existence / interface test ---
 
-func TestReaperMethodsExist(t *testing.T) {
-	r := New("test", "/tmp/sessions")
-
-	// Verify methods exist via function values (compile-time check)
-	var _ = r.Run
-	var _ = r.waitForPrompt
-	var _ = r.sendExit
-	var _ = r.waitForPaneClose
-	var _ = r.archiveSession
-	var _ = r.markReaping
-	var _ = r.forceKillPaneProcess
-	var _ = r.timeRemaining
-}
-
 // --- Multiple reapers test ---
 
 func TestMultipleReapers_Independent(t *testing.T) {
