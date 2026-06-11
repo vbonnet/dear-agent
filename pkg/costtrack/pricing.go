@@ -53,8 +53,16 @@ var (
 		CacheRead:  1.50,  // $1.50 per 1M tokens
 	}
 
-	// Claude 4.6 Opus (newest, most capable)
+	// Claude 4.6 Opus
 	Claude4Opus4_6 = Pricing{
+		Input:      15.00, // $15 per 1M tokens
+		Output:     75.00, // $75 per 1M tokens
+		CacheWrite: 18.75, // $18.75 per 1M tokens
+		CacheRead:  1.50,  // $1.50 per 1M tokens
+	}
+
+	// Claude 4.8 Opus (newest, most capable)
+	Claude4Opus4_8 = Pricing{
 		Input:      15.00, // $15 per 1M tokens
 		Output:     75.00, // $75 per 1M tokens
 		CacheWrite: 18.75, // $18.75 per 1M tokens
@@ -90,7 +98,7 @@ var (
 
 // ModelAliases maps short aliases to canonical model IDs.
 var ModelAliases = map[string]string{
-	"opus":   "claude-opus-4-6",
+	"opus":   "claude-opus-4-8",
 	"sonnet": "claude-sonnet-4-5@20250929",
 	"haiku":  "claude-3-5-haiku-20241022",
 }
@@ -102,6 +110,7 @@ var PricingTable = map[string]Pricing{
 	"claude-3-haiku-20240307":    Claude3Haiku20240307,
 	"claude-3-opus-20240229":     Claude3Opus20240229,
 	"claude-opus-4-6":            Claude4Opus4_6,
+	"claude-opus-4-8":            Claude4Opus4_8,
 	"claude-sonnet-4-5@20250929": Claude35Sonnet20241022, // Vertex AI naming
 	"gemini-2.0-flash-exp":       Gemini20FlashExp,
 	"gemini-1.5-pro":             Gemini15Pro,
