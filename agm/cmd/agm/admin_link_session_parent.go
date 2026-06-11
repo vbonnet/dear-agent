@@ -46,8 +46,8 @@ func init() {
 	linkSessionParentCmd.Flags().BoolVar(&linkInheritName, "inherit-name", false,
 		"Inherit parent name if child name is 'Unknown'")
 
-	linkSessionParentCmd.MarkFlagRequired("child")
-	linkSessionParentCmd.MarkFlagRequired("parent")
+	_ = linkSessionParentCmd.MarkFlagRequired("child")
+	_ = linkSessionParentCmd.MarkFlagRequired("parent")
 }
 
 func runLinkSessionParent(cmd *cobra.Command, args []string) error {
@@ -56,7 +56,7 @@ func runLinkSessionParent(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	// Validate child session exists
 	child, err := adapter.GetSession(linkChildID)

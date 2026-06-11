@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"syscall"
 	"testing"
 
@@ -14,6 +16,10 @@ import (
 
 // TestMain sets up the testscript environment
 func TestMain(m *testing.M) {
+	if os.Getenv("SKIP_E2E") != "" {
+		fmt.Println("Skipping: requires infrastructure not available in CI")
+		os.Exit(0)
+	}
 	testscript.Main(m, map[string]func(){
 		"agm": agmMain,
 	})
@@ -49,16 +55,21 @@ func runAGM() int {
 	}
 	agmPath := userHome + "/go/bin/agm"
 
-	// If not found, build from module
+	// If not found, build from the local source tree.
+	// "go install <module-path>" is avoided here: the testscript work dir is
+	// outside the module, so Go would try to fetch the private module from the
+	// network and fail. Instead we locate the source relative to this test file
+	// and use "go build" with an explicit output path.
 	if _, err := os.Stat(agmPath); os.IsNotExist(err) {
-		// Use go install to build and cache the binary
-		buildCmd := exec.Command("go", "install", "github.com/vbonnet/dear-agent/agm/cmd/agm")
-		if err := buildCmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to build agm: %v\n", err)
+		_, testFile, _, _ := runtime.Caller(0)
+		// testFile: agm/test/e2e/testscript_test.go → go up 3 dirs to reach agm/
+		agmModRoot := filepath.Join(filepath.Dir(testFile), "../..")
+		buildCmd := exec.Command("go", "build", "-o", agmPath, "./cmd/agm")
+		buildCmd.Dir = agmModRoot
+		if out, err := buildCmd.CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to build agm: %v\n%s\n", err, out)
 			return 1
 		}
-		// After go install, binary should be at $GOBIN or $GOPATH/bin or $HOME/go/bin
-		agmPath = userHome + "/go/bin/agm"
 	}
 
 	// Execute the binary with the current args

@@ -136,7 +136,7 @@ func runEstimateRetrieval(cmd *cobra.Command, _ []string) error {
 
 	// Create retrieval service
 	svc := retrieval.NewService()
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	// Build search options (NO API ranking - we only want candidates)
 	opts := retrieval.SearchOptions{
@@ -349,6 +349,6 @@ func outputTokenEstimate(cmd *cobra.Command, est *tokens.Estimate, files []strin
 	}
 
 	// Custom text output (preserved for human readability)
-	fmt.Fprint(cmd.OutOrStdout(), formatTokensText(est, files, query))
+	_, _ = fmt.Fprint(cmd.OutOrStdout(), formatTokensText(est, files, query))
 	return nil
 }

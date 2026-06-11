@@ -392,7 +392,7 @@ func checkDuplicateSessionName(sessionName string) error {
 		// If Dolt is unavailable, skip the check (non-fatal)
 		return nil
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	sessions, err := adapter.ListSessions(nil)
 	if err != nil {

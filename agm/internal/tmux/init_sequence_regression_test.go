@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -99,6 +100,9 @@ func TestInitSequence_NoDoubleLock(t *testing.T) {
 	require.NoError(t, err)
 
 	seq := NewInitSequence(sessionName)
+	// Short prompt timeout: this test only cares that Run() produces no lock
+	// errors, not that it waits the full production 30s budget.
+	seq.PromptTimeout = 2 * time.Second
 
 	// Run will fail (bash prompt != Claude prompt), but should NOT have lock errors
 	err = seq.Run()
@@ -291,12 +295,10 @@ func BenchmarkSendCommandLiteral(b *testing.B) {
 		b.Skip("tmux not available")
 	}
 
-	testSocket := fmt.Sprintf("/tmp/agm-test-%d.sock", os.Getpid())
+	testSocket := filepath.Join(socketDir(b), "agm.sock")
 	b.Setenv("AGM_TMUX_SOCKET", testSocket)
 	b.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
-		os.Remove(testSocket)
-		os.Unsetenv("AGM_TMUX_SOCKET")
 	})
 
 	sessionName := "bench-sendcmd-" + time.Now().Format("20060102-150405")

@@ -136,9 +136,11 @@ instead of bypassing them.
 **When to dogfood — by default, for any non-trivial task in this repo:**
 
 - **AGM** for session orchestration: spawn isolated work via
-  `agm new` / `agm send` instead of opening ad-hoc terminals; use
-  `agm acceptance show` at the start of a task and check
-  `agm admin doctor` if something looks off.
+  `agm session new` / `agm send` instead of opening ad-hoc terminals;
+  read the `acceptance-criteria:` block of `.dear-agent.yml` at the
+  start of a task (the `pkg/acceptance` loader formalizes it — there is
+  no `agm acceptance` subcommand) and check `agm admin doctor` if
+  something looks off.
 - **VROOM** for multi-step or governance-relevant work: route consequential
   decisions through the supervisory mesh (the MISSION.md framework), so the
   append-only audit log captures rationale and gates.
@@ -155,3 +157,124 @@ to file (or fix), not a reason to bypass.
 **Acceptable bypass:** trivial single-file edits, one-shot reads, and the
 literal bootstrap case where the tool itself is broken (in which case: file
 an issue or write a retro before moving on).
+
+## Anti-Stall — Continuous Execution (MANDATORY)
+
+**Keep going. The default is to continue.** When you are working a
+backlog, a plan, or a multi-step task, do the next item — do **not** stop
+to ask "should I keep going?". The human is watching and will interrupt
+if priorities changed; asking permission to continue work you were
+already asked to do is the stall this rule exists to prevent.
+
+The full behavioural contract — with the boundary cases where stopping
+*is* correct — is the single authoritative spec at
+[docs/design/anti-stall.md](../docs/design/anti-stall.md). Read it once
+per session that does multi-step work. Its five directives:
+
+1. **Continue through backlogs without asking.** More items in the
+   plan/backlog → do the next one. Never ask whether to pick up a backlog
+   item; just do it.
+2. **"Nothing found" is always a valid outcome.** Never inflate a weak
+   match to avoid an empty result, and never stall asking whether empty
+   is acceptable — it is (see [graceful-exit.md](../docs/design/graceful-exit.md)).
+3. **Present decisions, not questions.** At a fork, decide and state the
+   decision with a clean interrupt point ("using A because B is blocked;
+   say so if you'd rather B") instead of asking which way to go.
+4. **Minimize blocking on human input.** Resolve from context, code, and
+   defaults first; batch genuinely necessary questions; keep working on
+   the unblocked parts.
+5. **If genuinely blocked, file it and move on.** Create a Beads task for
+   the blocker, note it in your summary, and pick up the next independent
+   item — do not idle the whole backlog on one stuck item.
+
+This is the **keep-going** half of the contract; the section below is the
+**when-to-stop** half. They are complements, not contradictions: stop for
+supervisor commands, repeated failure, irreversible actions, and
+decisions only a human can make — never for permission to continue.
+
+## Agent Delegation Enforcement (MANDATORY)
+
+These rules come from the 2026-05-13 DEAR retro on stuck tasks
+(`~/ai-conversation-logs/dear-retros/2026-05-13-enforcement-rules.md`).
+The pattern they correct: long agent runs that produced uncommitted work,
+ignored supervisor pings, retried the same failing approach indefinitely,
+and left worktrees and feature branches stranded after merge. Turn budgets
+were considered and rejected — they are training wheels that punish careful
+work and reward rushed work. The discipline below is causal: commit early,
+listen to the supervisor, stop retrying, clean up.
+
+### 1. Incremental commit discipline
+
+**Uncommitted work is nonexistent work.** Commit after each logical
+sub-task — not at the end, not when "everything is perfect." If the worker
+process is killed (OOM, timeout, supervisor stop), only what is in git
+survives. The cost of an extra commit is ~zero; the cost of losing 90
+minutes of work is large.
+
+- First commit within the first meaningful unit of progress (scaffold,
+  failing test, skeleton). Do not let the first commit be "everything done."
+- Commit on every sub-task boundary. Use clear, conventional messages.
+- WIP commits are fine — they can be squashed at PR time.
+
+### 2. Supervisor messages are commands
+
+When an orchestrator/supervisor sends a message (AGM `send`, VROOM
+intervention, user redirect), it is a **command**, not a suggestion.
+Goal-pursuit does not override it.
+
+- **Acknowledge within 2 turns** of receipt.
+- **Comply within 5 turns** — even if compliance means committing WIP and
+  returning early.
+- `wrap up` → commit current state, return summary.
+- `status?` → report progress, remaining work, blockers in one turn.
+- `stop` → commit immediately and return. Do not continue.
+
+### 3. Two-retry maximum, then escalate
+
+If an approach fails twice with the same error, **stop**. Do not keep
+trying. Retry loops burn time and budget without converging.
+
+- After 2 failures: try a materially different approach, OR report failure
+  with two concrete alternatives and ask for direction.
+- Permission/access errors: 0 retries. Report immediately — retrying will
+  not change the answer.
+- Death loops (same error 3+ times in a row) are an immediate stop-and-ask.
+
+### 4. `git push` with timeout and no prompts
+
+On this host, `git push` over HTTPS can hang on a keychain prompt and look
+like a network failure (see `memory/macos-env-gaps.md`). Always:
+
+```
+GIT_TERMINAL_PROMPT=0 gtimeout 30 git push -u origin <branch>
+```
+
+If push fails or times out: **leave the branch local**, report the failure,
+and let the supervisor decide. Do not retry with different flags hoping to
+get past the prompt.
+
+### 5. Worktree and branch cleanup after merge
+
+A merged branch with a stranded worktree is a leak that compounds over time.
+After a successful merge to `main`:
+
+```
+git -C ~/src/dear-agent worktree remove <worktree-path>
+git -C ~/src/dear-agent branch -D <branch>   # local
+git -C ~/src/dear-agent push origin --delete <branch>   # remote, if pushed
+```
+
+If `gh pr merge --squash --delete-branch` was used, the remote branch is
+already gone — still remove the local worktree and branch.
+
+### 6. Definition of Done includes "committed to branch"
+
+Every delegated task's DoD must **explicitly** list:
+
+- [ ] Changes committed to the working branch
+- [ ] (If applicable) Branch pushed to origin
+- [ ] (If applicable) Tests + lint pass on the committed tree
+
+A task that says "the code works on disk" but is not in git is **not done**.
+Delegation prompts that omit this line have produced the exact failure mode
+this section exists to prevent — include it verbatim.

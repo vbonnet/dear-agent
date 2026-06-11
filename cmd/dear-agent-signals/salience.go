@@ -40,13 +40,13 @@ func runSalienceWith(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 
 	bypass, err := salience.ParseTier(*bypassStr)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 2
 	}
 
 	r, closer, err := openSalienceInput(*input, stdin)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 	if closer != nil {
@@ -62,11 +62,11 @@ func runSalienceWith(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 
 	outcomes, err := agg.LoadJSONL(r)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 	if len(outcomes) == 0 {
-		fmt.Fprintln(stderr, salience.ErrEmptyInput)
+		_, _ = fmt.Fprintln(stderr, salience.ErrEmptyInput)
 		return 1
 	}
 
@@ -98,7 +98,7 @@ func renderSalienceJSON(stdout, stderr io.Writer, outcomes []salience.Outcome) i
 		Summary:  toJSONSummary(salience.Summarize(outcomes)),
 	}
 	if err := enc.Encode(payload); err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 	return 0
@@ -139,29 +139,29 @@ func renderSalienceText(stdout io.Writer, outcomes []salience.Outcome) int {
 	summary := salience.Summarize(outcomes)
 
 	tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "TIER\tKIND\tSUBJECT\tDECISION\tREASON")
+	_, _ = fmt.Fprintln(tw, "TIER\tKIND\tSUBJECT\tDECISION\tREASON")
 	for _, o := range outcomes {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 			o.Signal.Salience, o.Signal.Kind, truncate(o.Signal.Subject, 40),
 			decisionLabel(o), o.Reason)
 	}
 	_ = tw.Flush()
 
-	fmt.Fprintln(stdout)
-	fmt.Fprintf(stdout, "total: %d  notified: %d  suppressed: %d  notify-ratio: %.0f%%\n",
+	_, _ = fmt.Fprintln(stdout)
+	_, _ = fmt.Fprintf(stdout, "total: %d  notified: %d  suppressed: %d  notify-ratio: %.0f%%\n",
 		summary.Total, summary.Notified, summary.Suppressed, 100*summary.NotifyRatio)
 
 	tiers := sortedTiers(summary.ByTier)
 	if len(tiers) > 0 {
-		fmt.Fprintln(stdout, "by tier:")
+		_, _ = fmt.Fprintln(stdout, "by tier:")
 		for _, t := range tiers {
-			fmt.Fprintf(stdout, "  %-9s %d\n", t.String(), summary.ByTier[t])
+			_, _ = fmt.Fprintf(stdout, "  %-9s %d\n", t.String(), summary.ByTier[t])
 		}
 	}
 	if len(summary.ByReason) > 0 {
-		fmt.Fprintln(stdout, "suppressed because:")
+		_, _ = fmt.Fprintln(stdout, "suppressed because:")
 		for _, r := range sortedKeys(summary.ByReason) {
-			fmt.Fprintf(stdout, "  %-20s %d\n", r, summary.ByReason[r])
+			_, _ = fmt.Fprintf(stdout, "  %-20s %d\n", r, summary.ByReason[r])
 		}
 	}
 	return 0
@@ -202,4 +202,3 @@ func sortedKeys(m map[string]int) []string {
 	sort.Strings(out)
 	return out
 }
-

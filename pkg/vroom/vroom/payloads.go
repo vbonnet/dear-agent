@@ -31,3 +31,17 @@ type GatedPayload struct {
 	Approved  bool   `json:"approved"`
 	Rationale string `json:"rationale"`
 }
+
+// HandedOffPayload is the payload for TopicDecisionHandedOff events. It
+// records who handed context to whom and — crucially — how much the
+// sender trusted that context, so a reviewer can later find every
+// low-confidence handoff in the append-only decision trail.
+type HandedOffPayload struct {
+	SessionID       string   `json:"session_id"`
+	FromRole        string   `json:"from_role"`
+	ToRole          string   `json:"to_role"`
+	ConfidenceLevel string   `json:"confidence_level"`
+	ConfidenceScore float64  `json:"confidence_score"`
+	Rationale       string   `json:"rationale"`
+	Gaps            []string `json:"gaps,omitempty"`
+}

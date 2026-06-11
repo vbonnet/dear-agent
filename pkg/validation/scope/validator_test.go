@@ -748,8 +748,11 @@ More content
 		if result.Metadata.PhaseID != PhaseDesign {
 			t.Error("validation should complete")
 		}
-		if duration > 100*time.Millisecond {
-			t.Errorf("validation too slow: %v (expected <100ms)", duration)
+		// Generous upper bound: validation is normally sub-millisecond, but
+		// macOS CI scheduling jitter makes a tight 100ms threshold flaky. 2s
+		// still catches a catastrophic O(n^2)-style regression.
+		if duration > 2*time.Second {
+			t.Errorf("validation too slow: %v (expected <2s)", duration)
 		}
 	})
 

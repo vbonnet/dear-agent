@@ -53,7 +53,9 @@ func validateDocQuality(phaseName, projectDir string) error {
 	case "D3", "DESIGN":
 		return validateD3Documents(projectDir)
 	case "D4", "SPEC":
-		return validateSingleDocument(projectDir, phaseName, "SPEC.md", "review-spec")
+		// SPEC.md is gated by the deterministic EARS linter (replaces the
+		// former Python LLM "review-spec" rubric). See spec_ears_gate.go.
+		return validateSpecEARS(projectDir, phaseName)
 	case "S6", "PLAN":
 		return validateSingleDocument(projectDir, phaseName, "ARCHITECTURE.md", "review-architecture")
 	default:
@@ -282,8 +284,8 @@ func runReviewSkill(skillName string, docPath string) (float64, []string, error)
 		)
 	}
 	tmpPath := tmpFile.Name()
-	tmpFile.Close()
-	defer os.Remove(tmpPath)
+	_ = tmpFile.Close()
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	// Execute Python skill with JSON output
 	args := []string{scriptPath, docPath, "--output-json", tmpPath}
@@ -454,7 +456,7 @@ func calculateFileHash(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {

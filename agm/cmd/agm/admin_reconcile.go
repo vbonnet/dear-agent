@@ -63,7 +63,7 @@ func reconcileRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	allSessions, err := adapter.ListSessions(&dolt.SessionFilter{})
 	if err != nil {
@@ -95,17 +95,17 @@ func reconcileRun(cmd *cobra.Command, args []string) error {
 	// Print mismatch table
 	fmt.Printf("Found %d mismatch(es):\n\n", len(mismatches))
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(w, "TYPE\tSESSION\tDOLT LIFECYCLE\tDESCRIPTION\n")
-	fmt.Fprintf(w, "----\t-------\t--------------\t-----------\n")
+	_, _ = fmt.Fprintf(w, "TYPE\tSESSION\tDOLT LIFECYCLE\tDESCRIPTION\n")
+	_, _ = fmt.Fprintf(w, "----\t-------\t--------------\t-----------\n")
 	for _, mm := range mismatches {
 		name := mm.DoltName
 		if name == "" {
 			name = mm.TmuxName
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			strings.ToUpper(mm.Kind), name, mm.DoltLifecycle, mm.Description)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	if !reconcileFix {
 		fmt.Printf("\nRun with --fix to automatically resolve these mismatches\n")
