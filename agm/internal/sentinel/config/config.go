@@ -48,10 +48,11 @@ type Config struct {
 }
 
 // PatternConfig specifies paths to pattern database YAML files.
+// All fields are optional; empty string disables that pattern type.
 type PatternConfig struct {
-	Bash  string `yaml:"bash" validate:"required"`
-	Beads string `yaml:"beads" validate:"required"`
-	Git   string `yaml:"git" validate:"required"`
+	Bash  string `yaml:"bash"`
+	Beads string `yaml:"beads"`
+	Git   string `yaml:"git"`
 }
 
 // ViolationsConfig configures violation logging.
@@ -283,12 +284,6 @@ func (c *Config) Validate() error {
 
 				// Provide user-friendly error messages
 				switch {
-				case field == "Bash":
-					return fmt.Errorf("patterns.bash path is required")
-				case field == "Beads":
-					return fmt.Errorf("patterns.beads path is required")
-				case field == "Git":
-					return fmt.Errorf("patterns.git path is required")
 				case field == "Directory":
 					return fmt.Errorf("violations.directory is required")
 				case field == "Interval":

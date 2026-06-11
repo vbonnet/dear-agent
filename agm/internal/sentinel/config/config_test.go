@@ -13,10 +13,10 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	// Verify defaults
-	assert.NotEmpty(t, cfg.Patterns.Bash)
-	assert.NotEmpty(t, cfg.Patterns.Beads)
-	assert.NotEmpty(t, cfg.Patterns.Git)
+	// Verify defaults: pattern paths are intentionally empty (no default source since engram repo archived)
+	assert.Empty(t, cfg.Patterns.Bash)
+	assert.Empty(t, cfg.Patterns.Beads)
+	assert.Empty(t, cfg.Patterns.Git)
 	assert.NotEmpty(t, cfg.Violations.Directory)
 	assert.Equal(t, "60s", cfg.Monitoring.Interval)
 	assert.Equal(t, "10m", cfg.Monitoring.StuckThreshold)
@@ -216,27 +216,6 @@ func TestConfigValidation(t *testing.T) {
 			wantErr: "",
 		},
 		{
-			name: "missing bash pattern path",
-			modifyConfig: func(cfg *Config) {
-				cfg.Patterns.Bash = ""
-			},
-			wantErr: "patterns.bash path is required",
-		},
-		{
-			name: "missing beads pattern path",
-			modifyConfig: func(cfg *Config) {
-				cfg.Patterns.Beads = ""
-			},
-			wantErr: "patterns.beads path is required",
-		},
-		{
-			name: "missing git pattern path",
-			modifyConfig: func(cfg *Config) {
-				cfg.Patterns.Git = ""
-			},
-			wantErr: "patterns.git path is required",
-		},
-		{
 			name: "missing violations directory",
 			modifyConfig: func(cfg *Config) {
 				cfg.Violations.Directory = ""
@@ -417,7 +396,7 @@ recovery:
 	assert.Equal(t, "ctrl_c", cfg.Recovery.Strategy)
 
 	// Default values should still be present
-	assert.NotEmpty(t, cfg.Patterns.Bash)
+	assert.Empty(t, cfg.Patterns.Bash) // pattern paths are optional; no default since engram repo archived
 	assert.True(t, cfg.Recovery.Enabled)
 	assert.Equal(t, 3, cfg.Recovery.MaxAttempts)
 }
