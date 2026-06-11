@@ -167,3 +167,39 @@ them here so they version-control alongside the protocol.
 - `.github/workflows/review.yml` — CI wiring (when present).
 - Chezmoi `docs/REVIEW.md` — the *dotfiles* review protocol (different bar,
   same philosophy).
+
+---
+
+## 8. Reviewer standards quick reference
+
+### Severity calibration
+
+**Important** (blocking): findings that would break behavior, leak data, cause a
+security vulnerability, or break CI/CD. Logic errors, unscoped operations, PII
+exposure, and backward-incompatible changes qualify. Style, naming, and
+refactoring suggestions are **Nit** at most.
+
+**Cap nits:** report at most five Nits per review. If more found, say "plus N
+similar items" in the summary.
+
+### Do not report
+
+- Anything CI already enforces: lint (golangci-lint), formatting (gofmt), type errors.
+- Generated files, `go.sum` changes, vendor directory.
+- Test-only code that intentionally violates production rules (test helpers, mocks).
+
+### Always check
+
+- New exported functions have godoc comments.
+- Error handling: errors wrapped with context (`fmt.Errorf` with `%w`), not silently dropped.
+- Concurrency: goroutines have `recover()`, channels properly closed, mutexes not held across I/O.
+- No PII in log statements or error messages.
+- File operations use atomic writes (`internal/fileutil`) not direct `os.WriteFile`.
+- New CLI commands registered in the Makefile install targets.
+
+### Repo-specific rules
+
+- Go is the default language. Python/JS only with strong justification.
+- All work happens in worktrees, never in `~/src/`.
+- Force push is blocked at the settings level.
+- OTel spans use `gen_ai.*` attribute naming conventions where applicable.
