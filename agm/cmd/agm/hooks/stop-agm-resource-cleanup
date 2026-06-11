@@ -3,7 +3,7 @@
 # Triggered when Claude Code session ends (Stop event)
 #
 # Purpose: Remove git worktrees and branches left behind by the session.
-# Two layers, both best-effort and non-blocking:
+# Three layers, all best-effort and non-blocking:
 #
 #   1. Manifest/Dolt cleanup ('agm session cleanup') — removes worktrees the
 #      session explicitly tracked. Only fires for AGM/tmux sessions.
@@ -13,6 +13,11 @@
 #      it is clean, zero commits ahead of base, on a claude/ branch, under
 #      ~/worktrees, and not the worktree this hook is running in. It runs
 #      whether or not the session is AGM-tracked.
+#   3. Cross-repo backfill sweep ('agm worktree sweep --execute') — runs in
+#      the background (fire-and-forget) so it does not count against the
+#      hook timeout. Reclaims merged worktrees across ALL repos under
+#      ~/worktrees that Layers 1/2 structurally cannot reach (they are
+#      single-repo or DB-scoped). Safe: only MERGED worktrees are removed.
 #
 # Installation: Copy to ~/.claude/hooks/stop-agm-resource-cleanup
 # Permissions: chmod +x ~/.claude/hooks/stop-agm-resource-cleanup
@@ -29,5 +34,10 @@ fi
 # (cwd); --repo defaults to cwd and the running worktree excludes itself.
 # Best-effort: a failure here must never block session exit.
 agm session reap-worktrees 2>/dev/null || true
+
+# Layer 3: cross-repo backfill sweep (fire-and-forget, does not block exit).
+# disown prevents SIGHUP from killing the child when the hook shell exits.
+agm worktree sweep --execute >/dev/null 2>&1 &
+disown $!
 
 exit 0

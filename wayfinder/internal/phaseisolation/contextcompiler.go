@@ -114,6 +114,13 @@ func (cc *ContextCompiler) buildSystemPrompt(phase PhaseDefinition, priorArtifac
 	}, true)
 
 	tb.Text(cc.getPhaseSpecificGuidance(phase))
+
+	if rationalizations := GetAntiRationalizations(phase.ID); len(rationalizations) > 0 {
+		tb.Heading(2, "Anti-Rationalization Table")
+		tb.Text("Common shortcuts agents take in this phase — and why they backfire:")
+		tb.Text(FormatAntiRationalizations(rationalizations))
+	}
+
 	return tb.Build()
 }
 

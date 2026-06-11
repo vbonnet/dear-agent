@@ -257,7 +257,7 @@ func getActiveSessions(ctx context.Context) (map[string]bool, error) {
 	if err == nil {
 		adapter, err := dolt.New(doltConfig)
 		if err == nil {
-			defer adapter.Close()
+			defer func() { _ = adapter.Close() }()
 			sessions, err := adapter.ListActiveSessions(ctx)
 			if err == nil {
 				for _, s := range sessions {
@@ -327,14 +327,14 @@ func collectPruneTargets(orphans []orphanedWorktree, repoDirs []string) []string
 
 func printOrphanReport(orphans []orphanedWorktree) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(w, "Found %d orphaned worktree(s):\n\n", len(orphans))
-	fmt.Fprintln(w, "PATH\tBRANCH\tREASON")
+	_, _ = fmt.Fprintf(w, "Found %d orphaned worktree(s):\n\n", len(orphans))
+	_, _ = fmt.Fprintln(w, "PATH\tBRANCH\tREASON")
 	for _, o := range orphans {
 		branch := o.Branch
 		if branch == "" {
 			branch = "(detached)"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", o.Path, branch, o.Reason)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", o.Path, branch, o.Reason)
 	}
 	_ = w.Flush()
 }

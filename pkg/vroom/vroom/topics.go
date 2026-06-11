@@ -26,4 +26,10 @@ const (
 
 	// TopicDecisionGated is emitted when the Meta-Orchestrator gates a state transition.
 	TopicDecisionGated = "vroom.decision.gated"
+
+	// TopicDecisionHandedOff is emitted when an agent serializes its
+	// context for a successor (the /handoff pattern). It carries the
+	// sender's confidence in that context so a low-confidence handoff
+	// is a first-class, auditable decision rather than a silent one.
+	TopicDecisionHandedOff = "vroom.decision.handed_off"
 )

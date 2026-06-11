@@ -153,12 +153,12 @@ func runWorktreeSweep(cmd *cobra.Command, args []string) error {
 
 func printSweepReport(out io.Writer, res *ops.SweepResult, execute bool) {
 	if len(res.Worktrees) == 0 {
-		fmt.Fprintln(out, "No worktrees found.")
+		_, _ = fmt.Fprintln(out, "No worktrees found.")
 		return
 	}
 
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "CLASS\tREPO\tBRANCH\tAGE\tPR\tREASON\tPATH")
+	_, _ = fmt.Fprintln(w, "CLASS\tREPO\tBRANCH\tAGE\tPR\tREASON\tPATH")
 	for _, s := range res.Worktrees {
 		branch := s.Branch
 		if branch == "" {
@@ -168,7 +168,7 @@ func printSweepReport(out io.Writer, res *ops.SweepResult, execute bool) {
 		if s.DupCount > 1 {
 			reason = fmt.Sprintf("%s [dup x%d]", reason, s.DupCount)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			s.Class, s.Repo, branch, age(s.LastCommit), prCol(s.PRState), reason, s.Path)
 	}
 	_ = w.Flush()
@@ -178,13 +178,13 @@ func printSweepReport(out io.Writer, res *ops.SweepResult, execute bool) {
 		ops.ClassActive, ops.ClassAwaitingInput, ops.ClassMerged,
 		ops.ClassDirty, ops.ClassOrphaned, ops.ClassUnknown,
 	}
-	fmt.Fprintf(out, "\n%d worktree(s):", len(res.Worktrees))
+	_, _ = fmt.Fprintf(out, "\n%d worktree(s):", len(res.Worktrees))
 	for _, c := range classOrder {
 		if n := counts[c]; n > 0 {
-			fmt.Fprintf(out, " %s=%d", c, n)
+			_, _ = fmt.Fprintf(out, " %s=%d", c, n)
 		}
 	}
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out)
 
 	if len(res.Removed) > 0 {
 		sort.Strings(res.Removed)
@@ -192,16 +192,16 @@ func printSweepReport(out io.Writer, res *ops.SweepResult, execute bool) {
 		if execute {
 			verb = "Reaped"
 		}
-		fmt.Fprintf(out, "\n%s %d provably-merged worktree(s):\n", verb, len(res.Removed))
+		_, _ = fmt.Fprintf(out, "\n%s %d provably-merged worktree(s):\n", verb, len(res.Removed))
 		for _, p := range res.Removed {
-			fmt.Fprintf(out, "  %s\n", p)
+			_, _ = fmt.Fprintf(out, "  %s\n", p)
 		}
 	} else {
-		fmt.Fprintln(out, "\nNothing is provably reapable.")
+		_, _ = fmt.Fprintln(out, "\nNothing is provably reapable.")
 	}
 
 	if !execute && len(res.Removed) > 0 {
-		fmt.Fprintln(out, "\nRe-run with --execute to remove the MERGED worktrees above.")
+		_, _ = fmt.Fprintln(out, "\nRe-run with --execute to remove the MERGED worktrees above.")
 	}
 
 	if len(res.Failed) > 0 {
@@ -210,9 +210,9 @@ func printSweepReport(out io.Writer, res *ops.SweepResult, execute bool) {
 			paths = append(paths, p)
 		}
 		sort.Strings(paths)
-		fmt.Fprintf(out, "\n%d removal(s) failed:\n", len(paths))
+		_, _ = fmt.Fprintf(out, "\n%d removal(s) failed:\n", len(paths))
 		for _, p := range paths {
-			fmt.Fprintf(out, "  %s: %s\n", p, res.Failed[p])
+			_, _ = fmt.Fprintf(out, "  %s: %s\n", p, res.Failed[p])
 		}
 	}
 }

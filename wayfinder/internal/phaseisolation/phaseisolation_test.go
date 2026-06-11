@@ -420,6 +420,60 @@ func TestV1ToV2PhaseMap(t *testing.T) {
 	}
 }
 
+func TestAntiRationalizationsAllPhasesCovered(t *testing.T) {
+	for _, id := range AllPhaseIDs() {
+		entries := GetAntiRationalizations(id)
+		if len(entries) == 0 {
+			t.Errorf("phase %s has no anti-rationalizations", id)
+		}
+		for i, e := range entries {
+			if e.Excuse == "" {
+				t.Errorf("phase %s entry %d has empty Excuse", id, i)
+			}
+			if e.Rebuttal == "" {
+				t.Errorf("phase %s entry %d has empty Rebuttal", id, i)
+			}
+		}
+	}
+}
+
+func TestFormatAntiRationalizations(t *testing.T) {
+	entries := []AntiRationalization{
+		{Excuse: "Skip tests to save time.", Rebuttal: "Tests catch bugs that take 10x longer to fix."},
+	}
+	result := FormatAntiRationalizations(entries)
+	if !strings.Contains(result, "| Excuse |") {
+		t.Error("expected table header row with 'Excuse'")
+	}
+	if !strings.Contains(result, "Skip tests to save time.") {
+		t.Error("expected excuse text in output")
+	}
+	if !strings.Contains(result, "Tests catch bugs") {
+		t.Error("expected rebuttal text in output")
+	}
+}
+
+func TestFormatAntiRationalizationsEmpty(t *testing.T) {
+	result := FormatAntiRationalizations(nil)
+	if result != "" {
+		t.Error("empty rationalizations should produce empty string")
+	}
+}
+
+func TestContextCompilerIncludesAntiRationalizations(t *testing.T) {
+	cc := NewContextCompiler()
+	phase := PhaseDefinitions[PhaseS8]
+
+	ctx := cc.Compile(phase, map[PhaseID]*PhaseArtifact{}, "session-123", "/tmp/project")
+
+	if !strings.Contains(ctx.PhaseSystemPrompt, "Anti-Rationalization Table") {
+		t.Error("system prompt should contain anti-rationalization table heading")
+	}
+	if !strings.Contains(ctx.PhaseSystemPrompt, "| Excuse |") {
+		t.Error("system prompt should contain table header")
+	}
+}
+
 func TestPhaseDefinitionsComplete(t *testing.T) {
 	for _, id := range AllPhaseIDs() {
 		def, ok := PhaseDefinitions[id]

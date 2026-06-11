@@ -62,7 +62,7 @@ Examples:
 			ui.PrintError(err, "Failed to connect to Dolt storage", "")
 			return err
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// Resolve old session
 		m, manifestPath, err := session.ResolveIdentifier(oldName, sessionsDir, adapter)
@@ -249,7 +249,7 @@ func renameHeartbeatFile(oldName, newName string) (bool, error) {
 	}
 
 	// Remove old file
-	os.Remove(oldPath)
+	_ = os.Remove(oldPath)
 	return true, nil
 }
 
@@ -275,7 +275,7 @@ func renameMessageQueueEntries(oldName, newName string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer queue.Close()
+	defer func() { _ = queue.Close() }()
 
 	count, err := queue.RenameSession(oldName, newName)
 	if err != nil {

@@ -28,6 +28,7 @@ Hooks installed:
   • agm-pretool-test-session-guard        - Block test-* sessions without --test flag
   • pretool-agm-mode-tracker          - Track permission mode changes for persistence
   • stop-agm-resource-cleanup         - Reap stale agent worktrees on session end
+  • sessionend-closeout               - Flag leftover worktrees/branches/uncommitted work on SessionEnd
 
 These hooks enable accurate state detection with <1% false positive rate,
 replacing the fragile tmux pane parsing method (37.5% false positive rate).
@@ -84,6 +85,7 @@ func runInstallHooks(cmd *cobra.Command, args []string) error {
 		"hooks/agm-pretool-test-session-guard":    filepath.Join(hooksDir, "agm-pretool-test-session-guard"),
 		"hooks/pretool-agm-mode-tracker":          filepath.Join(hooksDir, "pretool-agm-mode-tracker"),
 		"hooks/stop-agm-resource-cleanup":         filepath.Join(hooksDir, "stop-agm-resource-cleanup"),
+		"hooks/sessionend-closeout":               filepath.Join(hooksDir, "sessionend-closeout"),
 	}
 
 	installed := 0
@@ -144,6 +146,11 @@ func runInstallHooks(cmd *cobra.Command, args []string) error {
 		{
 			Event:   "Stop",
 			Command: "~/.claude/hooks/stop-agm-resource-cleanup",
+			Timeout: 30,
+		},
+		{
+			Event:   "SessionEnd",
+			Command: "~/.claude/hooks/sessionend-closeout",
 			Timeout: 30,
 		},
 	}

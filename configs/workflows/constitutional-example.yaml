@@ -1,0 +1,60 @@
+# Constitutional designer example (ROADMAP §6.4).
+#
+# Demonstrates the "humans declare invariants, agents implement" mode.
+# This workflow opts into constitutional enforcement: the Define hook
+# refuses to start the run unless the invariants block is non-empty,
+# and every invariant must validate against its declared kind's schema.
+#
+# Adversarial verification of these invariants is the job of §6.5
+# (trust inversion) and §6.1 (cross-model review); this YAML only
+# declares the contract.
+name: constitutional-example
+version: "1"
+description: |
+  Tiny demonstration workflow showing the constitutional/invariants
+  block. The single bash node is a stand-in — what matters here is
+  that the workflow shape parses and the Define hook accepts it.
+
+constitutional:
+  enforce: true
+  description: |
+    Every artifact this workflow produces must (a) be a JSON document
+    matching the report schema, and (b) ship with a confidence floor
+    high enough that downstream consumers can rely on it.
+
+invariants:
+  - id: report-shape
+    description: The report artifact conforms to the canonical schema.
+    kind: json_schema
+    target: outputs.report.path
+    schema: ./schemas/report.json
+
+  - id: confidence-floor
+    description: Reviewer confidence in the report is at least 0.7.
+    kind: confidence_floor
+    target: outputs.report.frontmatter.confidence
+    min: 0.7
+    verifier_role: reviewer-cross
+
+  - id: report-has-summary
+    description: |
+      The report body opens with a "## Summary" section — a shape
+      check that humans use to skim the artifact.
+    kind: regex_match
+    target: outputs.report.body
+    pattern: "(?m)^## Summary"
+
+  - id: human-review-noted
+    description: |
+      A human reviewer has confirmed the work item is in scope. Stored
+      as a free-text predicate; verification is the auditor's job, not
+      the runner's.
+    kind: predicate
+    predicate: "Run targets one work item, scoped before kickoff."
+
+nodes:
+  - id: stub
+    kind: bash
+    name: placeholder
+    bash:
+      cmd: "echo 'replace with the real work; invariants apply to outputs'"

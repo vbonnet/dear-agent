@@ -43,7 +43,7 @@ func runQueueList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open message queue: %w", err)
 	}
-	defer queue.Close()
+	defer func() { _ = queue.Close() }()
 
 	// Show summary counts
 	stats, err := queue.GetStats()

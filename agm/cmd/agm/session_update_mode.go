@@ -45,7 +45,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("failed to connect to Dolt: %w", err)
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// Get session manifest
 		m, err := adapter.GetSession(sessionID)
