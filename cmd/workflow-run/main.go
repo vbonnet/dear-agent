@@ -62,7 +62,7 @@ func run(args []string, stderr *os.File) int {
 
 	if *file == "" {
 		fs.Usage()
-		fmt.Fprintln(stderr, "\n-file is required")
+		_, _ = fmt.Fprintln(stderr, "\n-file is required")
 		return 2
 	}
 

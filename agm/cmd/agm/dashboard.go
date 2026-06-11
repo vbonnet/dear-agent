@@ -88,7 +88,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal JSON: %w", err)
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), string(data))
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
 		return nil
 	}
 
@@ -100,9 +100,9 @@ func printDashboardTable(cmd *cobra.Command, result *ops.DashboardResult) {
 	out := cmd.OutOrStdout()
 
 	// Header
-	fmt.Fprintf(out, "%-25s %-18s %-10s %-10s %-5s %-20s\n",
+	_, _ = fmt.Fprintf(out, "%-25s %-18s %-10s %-10s %-5s %-20s\n",
 		"NAME", "STATE", "DURATION", "MODE", "INTR", "MODEL")
-	fmt.Fprintf(out, "%-25s %-18s %-10s %-10s %-5s %-20s\n",
+	_, _ = fmt.Fprintf(out, "%-25s %-18s %-10s %-10s %-5s %-20s\n",
 		"----", "-----", "--------", "----", "----", "-----")
 
 	for _, e := range result.Entries {
@@ -126,11 +126,11 @@ func printDashboardTable(cmd *cobra.Command, result *ops.DashboardResult) {
 
 		intrStr := fmt.Sprintf("%d", e.InterruptCount)
 
-		fmt.Fprintf(out, "%-25s %-18s %-10s %-10s %-5s %-20s\n",
+		_, _ = fmt.Fprintf(out, "%-25s %-18s %-10s %-10s %-5s %-20s\n",
 			name, stateDisplay, e.TimeInState, e.PermissionMode, intrStr, model)
 	}
 
-	fmt.Fprintf(out, "\n%d session(s) | %s\n", result.Total, result.Timestamp)
+	_, _ = fmt.Fprintf(out, "\n%d session(s) | %s\n", result.Total, result.Timestamp)
 }
 
 func stateWithIndicator(state string) string {
@@ -161,7 +161,7 @@ func runOrchestratorDashboard(cmd *cobra.Command, opCtx *ops.OpContext, outputFo
 		if err != nil {
 			return fmt.Errorf("failed to marshal JSON: %w", err)
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), string(data))
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
 		return nil
 	}
 
@@ -172,38 +172,38 @@ func runOrchestratorDashboard(cmd *cobra.Command, opCtx *ops.OpContext, outputFo
 func printOrchestratorDashboardTable(cmd *cobra.Command, result *ops.OrchestratorDashboardResult) {
 	out := cmd.OutOrStdout()
 
-	fmt.Fprintf(out, "=== AGM ORCHESTRATOR DASHBOARD ===\n\n")
-	fmt.Fprintf(out, "Timestamp: %s\n\n", result.Timestamp)
+	_, _ = fmt.Fprintf(out, "=== AGM ORCHESTRATOR DASHBOARD ===\n\n")
+	_, _ = fmt.Fprintf(out, "Timestamp: %s\n\n", result.Timestamp)
 
 	// Sessions summary
-	fmt.Fprintf(out, "SESSIONS\n")
-	fmt.Fprintf(out, "  Total:    %d\n", result.Sessions.Total)
-	fmt.Fprintf(out, "  Active:   %d\n", result.Sessions.Active)
-	fmt.Fprintf(out, "  Stopped:  %d\n", result.Sessions.Stopped)
-	fmt.Fprintf(out, "  Archived: %d\n\n", result.Sessions.Archived)
+	_, _ = fmt.Fprintf(out, "SESSIONS\n")
+	_, _ = fmt.Fprintf(out, "  Total:    %d\n", result.Sessions.Total)
+	_, _ = fmt.Fprintf(out, "  Active:   %d\n", result.Sessions.Active)
+	_, _ = fmt.Fprintf(out, "  Stopped:  %d\n", result.Sessions.Stopped)
+	_, _ = fmt.Fprintf(out, "  Archived: %d\n\n", result.Sessions.Archived)
 
 	// Resources
-	fmt.Fprintf(out, "RESOURCES\n")
-	fmt.Fprintf(out, "  Load:  %.2f, %.2f, %.2f (1m, 5m, 15m)\n",
+	_, _ = fmt.Fprintf(out, "RESOURCES\n")
+	_, _ = fmt.Fprintf(out, "  Load:  %.2f, %.2f, %.2f (1m, 5m, 15m)\n",
 		result.Resources.Load.Load1, result.Resources.Load.Load5, result.Resources.Load.Load15)
-	fmt.Fprintf(out, "  Memory: %d/%d MB (%.1f%% used)\n",
+	_, _ = fmt.Fprintf(out, "  Memory: %d/%d MB (%.1f%% used)\n",
 		result.Resources.Memory.UsedMB, result.Resources.Memory.TotalMB, result.Resources.Memory.UsedPercent)
 	if len(result.Resources.Disk) > 0 {
 		disk := result.Resources.Disk[0]
-		fmt.Fprintf(out, "  Disk:  %.1f/%.1f GB (%.1f%% used) at %s\n\n",
+		_, _ = fmt.Fprintf(out, "  Disk:  %.1f/%.1f GB (%.1f%% used) at %s\n\n",
 			disk.UsedGB, disk.TotalGB, disk.UsedPercent, disk.Mount)
 	} else {
-		fmt.Fprintf(out, "\n")
+		_, _ = fmt.Fprintf(out, "\n")
 	}
 
 	// Throughput
-	fmt.Fprintf(out, "THROUGHPUT\n")
-	fmt.Fprintf(out, "  Commits/hour:   %d\n", result.Metrics.CommitsPerHour)
-	fmt.Fprintf(out, "  Workers launched: %d\n\n", result.Metrics.WorkersLaunched)
+	_, _ = fmt.Fprintf(out, "THROUGHPUT\n")
+	_, _ = fmt.Fprintf(out, "  Commits/hour:   %d\n", result.Metrics.CommitsPerHour)
+	_, _ = fmt.Fprintf(out, "  Workers launched: %d\n\n", result.Metrics.WorkersLaunched)
 
 	// Alerts
 	if len(result.Alerts) > 0 {
-		fmt.Fprintf(out, "ALERTS\n")
+		_, _ = fmt.Fprintf(out, "ALERTS\n")
 		for _, alert := range result.Alerts {
 			level := alert.Level
 			if level == "critical" {
@@ -211,38 +211,38 @@ func printOrchestratorDashboardTable(cmd *cobra.Command, result *ops.Orchestrato
 			} else {
 				level = "⚠️  " + level
 			}
-			fmt.Fprintf(out, "  [%s] %s (%s)\n", level, alert.Message, alert.Value)
+			_, _ = fmt.Fprintf(out, "  [%s] %s (%s)\n", level, alert.Message, alert.Value)
 		}
-		fmt.Fprintf(out, "\n")
+		_, _ = fmt.Fprintf(out, "\n")
 	}
 
 	// Trust leaderboard
-	fmt.Fprintf(out, "TRUST LEADERBOARD (Total: %d sessions)\n", result.Trust.Total)
+	_, _ = fmt.Fprintf(out, "TRUST LEADERBOARD (Total: %d sessions)\n", result.Trust.Total)
 	if len(result.Trust.Top) > 0 {
-		fmt.Fprintf(out, "  Top 5:\n")
+		_, _ = fmt.Fprintf(out, "  Top 5:\n")
 		for i, entry := range result.Trust.Top {
-			fmt.Fprintf(out, "    %d. %s (score: %d, events: %d)\n",
+			_, _ = fmt.Fprintf(out, "    %d. %s (score: %d, events: %d)\n",
 				i+1, entry.SessionName, entry.Score, entry.TotalEvents)
 		}
 	}
 	if len(result.Trust.Bottom) > 0 {
-		fmt.Fprintf(out, "  Bottom 5:\n")
+		_, _ = fmt.Fprintf(out, "  Bottom 5:\n")
 		for i, entry := range result.Trust.Bottom {
-			fmt.Fprintf(out, "    %d. %s (score: %d, events: %d)\n",
+			_, _ = fmt.Fprintf(out, "    %d. %s (score: %d, events: %d)\n",
 				i+1, entry.SessionName, entry.Score, entry.TotalEvents)
 		}
 	}
-	fmt.Fprintf(out, "\n")
+	_, _ = fmt.Fprintf(out, "\n")
 
 	// Backlog
-	fmt.Fprintf(out, "BACKLOG (Total: %d tasks)\n", result.Backlog.Total)
+	_, _ = fmt.Fprintf(out, "BACKLOG (Total: %d tasks)\n", result.Backlog.Total)
 	if len(result.Backlog.Next) > 0 {
-		fmt.Fprintf(out, "  Next:\n")
+		_, _ = fmt.Fprintf(out, "  Next:\n")
 		for i, task := range result.Backlog.Next {
-			fmt.Fprintf(out, "    %d. [%s] %s\n", i+1, task.Status, task.Description)
+			_, _ = fmt.Fprintf(out, "    %d. [%s] %s\n", i+1, task.Status, task.Description)
 		}
 	} else {
-		fmt.Fprintf(out, "  No tasks pending\n")
+		_, _ = fmt.Fprintf(out, "  No tasks pending\n")
 	}
-	fmt.Fprintf(out, "\n")
+	_, _ = fmt.Fprintf(out, "\n")
 }

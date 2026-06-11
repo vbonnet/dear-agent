@@ -129,7 +129,7 @@ func runAutoEcphoryInner(cmd *cobra.Command) {
 		output += formatMemoryOutput(memoryContents)
 	}
 	if output != "" {
-		fmt.Fprint(cmd.OutOrStdout(), output)
+		_, _ = fmt.Fprint(cmd.OutOrStdout(), output)
 	}
 }
 

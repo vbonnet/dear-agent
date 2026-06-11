@@ -175,9 +175,9 @@ func (c *Coordinator) Status() map[string]*ProjectExecution {
 // Stop gracefully stops all running projects
 func (c *Coordinator) Stop(ctx context.Context) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Send SIGTERM to all running processes
+	// Send SIGTERM to all running processes before releasing the lock.
+	// Status is set to Cancelled here so runProject goroutines know they
+	// were intentionally stopped (not failed).
 	for _, proj := range c.projects {
 		proj.mu.Lock()
 		if proj.Process != nil && proj.Status == StatusRunning {
@@ -188,6 +188,9 @@ func (c *Coordinator) Stop(ctx context.Context) error {
 		}
 		proj.mu.Unlock()
 	}
+	// Release before wg.Wait(): runProject goroutines need c.mu to update
+	// their status and complete. Holding it here deadlocks the shutdown.
+	c.mu.Unlock()
 
 	// Wait for graceful shutdown (up to 10s)
 	shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -195,24 +198,30 @@ func (c *Coordinator) Stop(ctx context.Context) error {
 
 	done := make(chan struct{})
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "coordinator: shutdown goroutine panicked: %v\n", r)
+			}
+			close(done)
+		}()
 		c.wg.Wait()
-		close(done)
 	}()
 
 	select {
 	case <-done:
 		return nil
 	case <-shutdownCtx.Done():
-		// Force kill remaining processes
+		// Force kill any processes that haven't exited (Running or Cancelled)
+		c.mu.RLock()
 		for _, proj := range c.projects {
 			proj.mu.Lock()
-			if proj.Process != nil && proj.Status == StatusRunning {
-				if proj.Process.Process != nil {
-					proj.Process.Process.Kill()
-				}
+			if proj.Process != nil && proj.Process.Process != nil &&
+				(proj.Status == StatusRunning || proj.Status == StatusCancelled) {
+				proj.Process.Process.Kill()
 			}
 			proj.mu.Unlock()
 		}
+		c.mu.RUnlock()
 		return fmt.Errorf("forced shutdown after timeout")
 	}
 }

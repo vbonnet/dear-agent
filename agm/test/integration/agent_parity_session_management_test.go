@@ -17,6 +17,9 @@ var _ = Describe("Agent Parity - Session Management", func() {
 	var adapters map[string]agent.Agent
 
 	BeforeEach(func() {
+		if os.Getenv("OPENCODE_AVAILABLE") == "" {
+			Skip("requires running OpenCode server; set OPENCODE_AVAILABLE=1 to run")
+		}
 		// Initialize adapters for all agents
 		adapters = make(map[string]agent.Agent)
 
@@ -27,9 +30,7 @@ var _ = Describe("Agent Parity - Session Management", func() {
 
 		// Gemini adapter with test API key
 		os.Setenv("GEMINI_API_KEY", "test-api-key-for-testing")
-		geminiAdapter, err := agent.NewGeminiAdapter(&agent.GeminiConfig{
-			APIKey: "test-api-key-for-testing",
-		})
+		geminiAdapter, err := agent.NewGeminiCLIAdapter(nil)
 		Expect(err).ToNot(HaveOccurred())
 		adapters["gemini"] = geminiAdapter
 
@@ -254,9 +255,7 @@ var _ = Describe("Agent Parity - Session Management", func() {
 				if agentName == "claude" {
 					newAdapter, err = agent.NewClaudeAdapter(nil)
 				} else {
-					newAdapter, err = agent.NewGeminiAdapter(&agent.GeminiConfig{
-						APIKey: "test-api-key-for-testing",
-					})
+					newAdapter, err = agent.NewGeminiCLIAdapter(nil)
 				}
 				Expect(err).ToNot(HaveOccurred())
 

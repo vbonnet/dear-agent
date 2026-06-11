@@ -110,7 +110,7 @@ set -g status-right-length 80
 	if err != nil {
 		return fmt.Errorf("failed to open tmux.conf: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := f.WriteString(statusLineConfig); err != nil {
 		return fmt.Errorf("failed to write to tmux.conf: %w", err)

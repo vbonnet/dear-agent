@@ -134,7 +134,7 @@ func Success(message string) {
 	if os.Getenv("NO_COLOR") != "" {
 		fmt.Println("✅", message)
 	} else {
-		green.Println("✅", message)
+		_, _ = green.Println("✅", message)
 	}
 }
 
@@ -143,7 +143,7 @@ func Error(message string) {
 	if os.Getenv("NO_COLOR") != "" {
 		fmt.Fprintln(os.Stderr, "❌", message)
 	} else {
-		color.New(color.FgRed).Fprintln(os.Stderr, "❌", message)
+		_, _ = color.New(color.FgRed).Fprintln(os.Stderr, "❌", message)
 	}
 }
 
@@ -152,6 +152,6 @@ func Info(message string) {
 	if os.Getenv("NO_COLOR") != "" {
 		fmt.Println("ℹ️", message)
 	} else {
-		color.New(color.FgCyan).Println("ℹ️", message)
+		_, _ = color.New(color.FgCyan).Println("ℹ️", message)
 	}
 }

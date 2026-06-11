@@ -547,7 +547,7 @@ func calculateFilesHash(filePaths []string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		if _, err := io.Copy(hasher, file); err != nil {
 			return "", err

@@ -61,7 +61,7 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "open %s: %v\n", *dbPath, err)
 		return 1
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := workflow.Cancel(context.Background(), db, runID, *reason, *actor); err != nil {
 		fmt.Fprintln(os.Stderr, err)

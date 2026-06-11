@@ -196,15 +196,17 @@ func TestPluginNameIsAGM(t *testing.T) {
 
 	contentStr := string(content)
 
-	// Should reference 'agm@ai-tools'
-	assert.Contains(t, contentStr, "agm@ai-tools",
-		"Plugin installation should use 'agm@ai-tools'")
+	// Should reference the agm plugin in the current marketplace (`dear-agent`).
+	// The marketplace was renamed from `ai-tools` to `dear-agent` in April 2026.
+	assert.Contains(t, contentStr, "agm@dear-agent",
+		"Plugin installation should reference 'agm@dear-agent'")
 
-	// Should reference '/agm:assoc' command
-	assert.Contains(t, contentStr, "/agm:assoc",
-		"Plugin command should be '/agm:assoc'")
+	// Should reference the `/agm:agm-assoc` command (the current name of
+	// what was once documented as `/agm:assoc`).
+	assert.Contains(t, contentStr, "/agm:agm-assoc",
+		"Plugin command should reference '/agm:agm-assoc'")
 
-	// Should NOT reference old names (except in historical context)
+	// Should NOT reference old names (except in historical context).
 	if !strings.Contains(contentStr, "renamed from") {
 		assert.NotContains(t, contentStr, "csm-tools@ai-tools",
 			"Should not use old plugin name 'csm-tools'")

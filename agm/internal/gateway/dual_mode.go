@@ -55,6 +55,24 @@ type HandoffContext struct {
 	Artifacts map[string]string `json:"artifacts"`  // Files, designs, etc.
 	Metadata  map[string]string `json:"metadata"`   // Additional context
 	Timestamp int64             `json:"timestamp"`  // When hand-off occurred
+	// Confidence is the sender's self-assessment of how complete and
+	// accurate this context is. nil means "not assessed" — which a
+	// receiver must read as "no warranty", never as "fully confident".
+	Confidence *HandoffConfidence `json:"confidence,omitempty"`
+}
+
+// SetConfidence attaches a validated confidence assessment to the
+// handoff. The qualitative level is derived from score, so callers only
+// supply the number, a rationale, and any known gaps. It returns an
+// error (and leaves the handoff unchanged) for an out-of-range score or
+// an empty rationale.
+func (h *HandoffContext) SetConfidence(score float64, rationale string, gaps ...string) error {
+	hc, err := NewHandoffConfidence(score, rationale, gaps...)
+	if err != nil {
+		return err
+	}
+	h.Confidence = hc
+	return nil
 }
 
 // DualModeGateway routes tasks between Architect and Implementer modes.
