@@ -47,8 +47,10 @@ func TestRelaxedPatternsNotLoaded(t *testing.T) {
 	}
 	for _, relaxed := range []string{
 		"inline-env-var-prefix", "command-chaining", "error-suppression-hook",
-		"bash-conditional", "for-loop", "file-operations", "text-processing",
+		"bash-conditional", "file-operations", "text-processing",
 		"backtick-substitution",
+		"combined-redirect", "combined-redirect-append", "heredoc",
+		"output-redirect", "output-redirect-append", "triple-redirect",
 	} {
 		assert.False(t, ids[relaxed], "relaxed rule should not be loaded: %s", relaxed)
 	}
