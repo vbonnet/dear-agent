@@ -38,7 +38,7 @@ func run() int {
 
 	checkTests(result, dir)
 	checkDocs(result, dir)
-	checkTODOs(result, dir)
+	checkCodeMarkers(result, dir)
 
 	result.Report()
 	return result.ExitCode()
@@ -126,33 +126,47 @@ func checkDocs(r *stophook.Result, dir string) {
 	}
 }
 
-func checkTODOs(r *stophook.Result, dir string) {
-	// Quick grep for TODO comments in tracked files
-	cmd := exec.Command("git", "-C", dir, "grep", "-c", "TODO", "--", "*.go", "*.py", "*.js", "*.ts")
+// grepCount returns the total number of matches for keyword across tracked
+// source files in dir, or 0 on error/no-match.
+func grepCount(dir, keyword string) int {
+	cmd := exec.Command("git", "-C", dir, "grep", "-c", keyword, "--", "*.go", "*.py", "*.js", "*.ts")
 	out, err := cmd.Output()
 	if err != nil {
-		// exit 1 = no matches, which is fine
-		r.Pass("todos", "no TODO comments found")
-		return
+		return 0
 	}
-
-	lines := strings.TrimSpace(string(out))
-	if lines == "" {
-		r.Pass("todos", "no TODO comments found")
-		return
-	}
-
 	count := 0
-	for _, line := range strings.Split(lines, "\n") {
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) == 2 {
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if parts := strings.SplitN(line, ":", 2); len(parts) == 2 {
 			var n int
 			fmt.Sscanf(parts[1], "%d", &n)
 			count += n
 		}
 	}
+	return count
+}
 
-	r.Warn("todos",
-		fmt.Sprintf("%d TODO comment(s) in source files", count),
-		"review and address TODO items")
+// checkCodeMarkers checks for TODO (advisory), FIXME, and HACK (both warned).
+func checkCodeMarkers(r *stophook.Result, dir string) {
+	todos := grepCount(dir, "TODO")
+	fixmes := grepCount(dir, "FIXME")
+	hacks := grepCount(dir, "HACK")
+
+	if todos > 0 {
+		r.Warn("todos",
+			fmt.Sprintf("%d TODO comment(s) in source files", todos),
+			"review and address TODO items before closing the session")
+	}
+	if fixmes > 0 {
+		r.Warn("fixmes",
+			fmt.Sprintf("%d FIXME comment(s) in source files", fixmes),
+			"FIXME markers indicate known bugs — address or create a tracking bead before closing")
+	}
+	if hacks > 0 {
+		r.Warn("hacks",
+			fmt.Sprintf("%d HACK comment(s) in source files", hacks),
+			"HACK markers indicate technical debt — document the trade-off or create a tracking bead")
+	}
+	if todos == 0 && fixmes == 0 && hacks == 0 {
+		r.Pass("code-markers", "no TODO/FIXME/HACK markers found")
+	}
 }
