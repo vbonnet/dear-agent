@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/vbonnet/dear-agent/agm/internal/eventbus"
+	"github.com/vbonnet/dear-agent/agm/internal/testutil"
 )
 
 // LatencyMetrics holds latency measurements
@@ -111,9 +112,7 @@ type EventWithTimestamp struct {
 
 // TestBaseline tests a single client receiving events
 func TestBaseline(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping baseline test in short mode")
-	}
+	testutil.SkipOnCI(t)
 
 	hub := eventbus.NewHub()
 	go hub.Run()
@@ -227,9 +226,7 @@ func TestBaseline(t *testing.T) {
 
 // TestLoad tests 100 concurrent clients
 func TestLoad(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping load test in short mode")
-	}
+	testutil.SkipOnCI(t)
 
 	hub := eventbus.NewHub()
 	go hub.Run()
@@ -380,9 +377,7 @@ func TestLoad(t *testing.T) {
 
 // TestBurst tests 100 clients receiving 100 events in rapid succession
 func TestBurst(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping burst test in short mode")
-	}
+	testutil.SkipOnCI(t)
 
 	hub := eventbus.NewHub()
 	go hub.Run()
@@ -512,9 +507,7 @@ func TestBurst(t *testing.T) {
 
 // TestSustained tests sustained load over 5 minutes
 func TestSustained(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping sustained test in short mode")
-	}
+	testutil.SkipOnCI(t)
 
 	hub := eventbus.NewHub()
 	go hub.Run()
@@ -702,9 +695,7 @@ func printReport(t *testing.T, report PerformanceReport) {
 // TestFilteredLoad tests performance when clients use session filters.
 // Verifies that filtering doesn't degrade p99 latency.
 func TestFilteredLoad(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping filtered load test in short mode")
-	}
+	testutil.SkipOnCI(t)
 
 	hub := eventbus.NewHub()
 	go hub.Run()
@@ -850,9 +841,7 @@ func TestFilteredLoad(t *testing.T) {
 
 // TestConnectionChurn tests event delivery while clients connect and disconnect.
 func TestConnectionChurn(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping connection churn test in short mode")
-	}
+	testutil.SkipOnCI(t)
 
 	hub := eventbus.NewHub()
 	go hub.Run()
