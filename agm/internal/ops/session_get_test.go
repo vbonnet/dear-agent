@@ -7,6 +7,30 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
+// --- GetSession by Claude UUID tests ---
+
+func TestGetSession_ByClaudeUUID(t *testing.T) {
+	m := newManifest("agm-id-uuid", "uuid-session", "~/project")
+	m.Claude.UUID = "bbbbbbbb-1111-2222-3333-444444444444"
+	ctx := testCtx([]*manifest.Manifest{m})
+
+	result, err := GetSession(ctx, &GetSessionRequest{
+		Identifier: "bbbbbbbb-1111-2222-3333-444444444444",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error looking up by Claude UUID: %v", err)
+	}
+	if result.Session.ID != "agm-id-uuid" {
+		t.Errorf("expected AGM ID agm-id-uuid, got %s", result.Session.ID)
+	}
+	if result.Session.Name != "uuid-session" {
+		t.Errorf("expected name uuid-session, got %s", result.Session.Name)
+	}
+	if result.Session.ClaudeUUID != "bbbbbbbb-1111-2222-3333-444444444444" {
+		t.Errorf("expected claude_uuid preserved, got %s", result.Session.ClaudeUUID)
+	}
+}
+
 // --- computeSessionStatus tests ---
 
 func TestComputeSessionStatus_Archived(t *testing.T) {
