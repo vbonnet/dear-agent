@@ -92,7 +92,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// Get sessions directory for this workspace (for YAML backward compat)
 		sessionsDir := cfg.SessionsDir

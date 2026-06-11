@@ -12,6 +12,7 @@ jobs:
   release:
     name: Build & Release
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -41,8 +42,6 @@ jobs:
             ["agm-reaper"]="./agm/cmd/agm-reaper"
             ["agm-mcp-server"]="./agm/cmd/agm-mcp-server"
             ["engram"]="./engram/cmd/engram"
-            ["deep-research"]="./research/cmd/deep-research"
-            ["research-feed"]="./research/cmd/research-feed"
             ["benchmark-query"]="./tools/benchmark-query"
           )
 

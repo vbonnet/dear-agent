@@ -138,7 +138,7 @@ func TestRegisterSession_Idempotent(t *testing.T) {
 	_, project := setupConversation(t, uuid, "alpha")
 
 	// First registration creates a new session.
-	first, err := RegisterSession(uuid, "", "", "", adapter)
+	first, err := RegisterSession(uuid, "", "", "", "", adapter)
 	if err != nil {
 		t.Fatalf("first register failed: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestRegisterSession_Idempotent(t *testing.T) {
 	}
 
 	// Second registration must be a no-op returning the same session.
-	second, err := RegisterSession(uuid, "", "", "", adapter)
+	second, err := RegisterSession(uuid, "", "", "", "", adapter)
 	if err != nil {
 		t.Fatalf("second register failed: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestRegisterSession_FallbackWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := RegisterSession(uuid, "", "", "cfg-default", adapter)
+	res, err := RegisterSession(uuid, "", "", "cfg-default", "", adapter)
 	if err != nil {
 		t.Fatalf("register failed: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestRegisterSession_ExplicitWorkspaceWins(t *testing.T) {
 	uuid := "expl-1234-5678-90ab-cdef12345678"
 	setupConversation(t, uuid, "alpha") // would infer "alpha"
 
-	res, err := RegisterSession(uuid, "custom-name", "explicit-ws", "cfg-default", adapter)
+	res, err := RegisterSession(uuid, "custom-name", "explicit-ws", "cfg-default", "", adapter)
 	if err != nil {
 		t.Fatalf("register failed: %v", err)
 	}
@@ -241,8 +241,45 @@ func TestRegisterSession_ExplicitWorkspaceWins(t *testing.T) {
 	}
 }
 
+// TestRegisterSession_WithProjectDir_NoJSONL covers the SessionStart timing gap:
+// at hook fire time, the conversation .jsonl has not been written yet, but the
+// hook payload includes cwd which the caller passes as --project-dir.
+func TestRegisterSession_WithProjectDir_NoJSONL(t *testing.T) {
+	adapter := dolt.GetTestAdapter(t)
+	if adapter == nil {
+		t.Skip("Dolt not available for testing")
+	}
+	defer adapter.Close()
+
+	// Set up a home with NO conversation file — simulates SessionStart timing.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Project dir with a .git marker so workspace inference resolves.
+	project := filepath.Join(home, "repos", "my-project")
+	if err := os.MkdirAll(filepath.Join(project, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately do NOT create ~/.claude/projects/<encoded>/<uuid>.jsonl.
+
+	uuid := "pdir-1234-5678-90ab-cdef12345678"
+	res, err := RegisterSession(uuid, "", "", "", project, adapter)
+	if err != nil {
+		t.Fatalf("register with --project-dir failed when .jsonl absent: %v", err)
+	}
+	if res.AlreadyTracked {
+		t.Error("should not be already tracked on first call")
+	}
+	if res.Project != project {
+		t.Errorf("project = %q, want %q", res.Project, project)
+	}
+	if res.Workspace != "my-project" {
+		t.Errorf("inferred workspace = %q, want %q", res.Workspace, "my-project")
+	}
+}
+
 func TestRegisterSession_EmptyUUID(t *testing.T) {
-	if _, err := RegisterSession("", "", "", "", nil); err == nil {
+	if _, err := RegisterSession("", "", "", "", "", nil); err == nil {
 		t.Error("expected error for empty UUID")
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/telemetry"
 )
 
 var (
@@ -101,7 +102,7 @@ Examples:
 			// Fail gracefully - return empty list if can't connect to Dolt
 			return []string{}, cobra.ShellCompDirectiveNoFileComp
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// List sessions from Dolt (exclude archived)
 		filter := &dolt.SessionFilter{
@@ -196,6 +197,10 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 	fmt.Printf("\nThe session is now hidden from 'agm session list'.\n")
 	fmt.Printf("Use 'agm session list --all' to see archived sessions.\n")
 	fmt.Printf("\nTo restore: agm session unarchive %s\n", sessionName)
+
+	// Telemetry: agm.session.complete span + terminal metrics (active -1,
+	// completed +1{status=archived}).
+	telemetry.SessionCompleted(context.Background(), getResult.Session.ID, getResult.Session.Model, getResult.Session.Harness, "archived")
 
 	reportPostCleanup(archiveResult.PostCleanup)
 	reportSessionCleanup(runSessionCleanup(sessionName, opCtx))
@@ -358,7 +363,7 @@ func archiveBulk() error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	allManifests, err := adapter.ListSessions(&dolt.SessionFilter{})
 	if err != nil {

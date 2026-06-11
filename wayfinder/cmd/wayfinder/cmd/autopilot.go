@@ -121,7 +121,7 @@ func executeTraditionalWorkflow(projectDir string) error {
 		st.CurrentPhase = nextPhase
 		st.UpdatePhase(nextPhase, status.PhaseStatusInProgress, "")
 		if err := st.WriteTo(projectDir); err != nil {
-			tr.Close(context.Background())
+			_ = tr.Close(context.Background())
 			return fmt.Errorf("failed to update status: %w", err)
 		}
 
@@ -129,7 +129,7 @@ func executeTraditionalWorkflow(projectDir string) error {
 
 		// Execute the phase using Claude CLI
 		if err := executePhaseWithRetry(nextPhase, projectDir); err != nil {
-			tr.Close(context.Background())
+			_ = tr.Close(context.Background())
 			return fmt.Errorf("failed to execute phase %s: %w", nextPhase, err)
 		}
 
@@ -141,11 +141,11 @@ func executeTraditionalWorkflow(projectDir string) error {
 		// Update status
 		st.UpdatePhase(nextPhase, status.PhaseStatusCompleted, "success")
 		if err := st.WriteTo(projectDir); err != nil {
-			tr.Close(context.Background())
+			_ = tr.Close(context.Background())
 			return fmt.Errorf("failed to update status: %w", err)
 		}
 
-		tr.Close(context.Background())
+		_ = tr.Close(context.Background())
 
 		fmt.Printf("Phase %s completed\n\n", nextPhase)
 

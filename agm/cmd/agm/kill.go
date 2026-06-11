@@ -15,6 +15,10 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var hardKill bool
@@ -82,7 +86,7 @@ Examples:
 			// Fail gracefully - return empty list if can't connect to Dolt
 			return []string{}, cobra.ShellCompDirectiveNoFileComp
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// List sessions from Dolt (exclude archived sessions from completion)
 		filter := &dolt.SessionFilter{
@@ -123,6 +127,15 @@ func init() {
 func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 	sessionName := args[0]
 
+	ctx, span := startKillSpan(cmd.Context(), sessionName, hardKill, forceKill)
+	defer func() {
+		if retErr != nil {
+			span.RecordError(retErr)
+			span.SetStatus(codes.Error, retErr.Error())
+		}
+		span.End()
+	}()
+
 	// Audit trail: log who killed what session and mode
 	defer func() {
 		mode := "soft"
@@ -134,6 +147,8 @@ func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 			"force": fmt.Sprintf("%v", forceKill),
 		}, retErr)
 	}()
+
+	_ = ctx // span propagation to future sub-operations
 
 	// Construct OpContext with storage
 	opCtx, cleanup, err := newOpContextWithStorage()
@@ -448,4 +463,19 @@ func renderSuccessMessage(sessionName string) {
 	fmt.Println()
 	fmt.Printf("  The session can be resumed with:\n")
 	fmt.Printf("    agm session resume %s\n", sessionName)
+}
+
+// startKillSpan starts an OTel span for the session kill operation.
+func startKillSpan(ctx context.Context, sessionName string, hard, force bool) (context.Context, trace.Span) {
+	mode := "soft"
+	if hard {
+		mode = "hard"
+	}
+	return otel.Tracer("agm").Start(ctx, "agm.session.kill",
+		trace.WithAttributes(
+			attribute.String("session.name", sessionName),
+			attribute.String("operation", "kill"),
+			attribute.String("kill.mode", mode),
+			attribute.Bool("kill.force", force),
+		))
 }

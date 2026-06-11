@@ -271,7 +271,7 @@ func runAsk(_ *cobra.Command, args []string) error {
 	// Determine sender (auto-detect from current AGM session)
 	adapter, _ := getStorage()
 	if adapter != nil {
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 	}
 
 	senderName := "unknown"

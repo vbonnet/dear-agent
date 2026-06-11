@@ -1,14 +1,21 @@
 # Root Makefile for dear-agent
 #
 # Targets:
+#   lint-specs              Validate EARS requirements in SPEC.md files
 #   preflight               Fast local CI-parity gates: vet + build + lint  (~25s)
 #   preflight-tests         preflight + go test (no -race) — quick sanity
 #   preflight-full          preflight + go test -race + govulncheck (full parity)
+#   health-check            Run the codebase health auditor (cmd/repo-health)
 #   install-preflight-hook  Install a git pre-push hook that runs preflight
+#   install-post-merge-hook Install a post-merge hook that reaps merged worktrees
 #   act-validate            Run full local CI validation via act (needs Docker)
 #   act-lint                Run lint job via act
 #   act-test                Run test job via act
 #   install-hooks           Install git pre-push hook for act validation
+#   test                    Run the full unit-test suite (go test ./...)
+#   test-affected           Run only the integration tests affected by
+#                           the current diff vs. origin/main
+#   test-affected-print     Print the affected package list (no run)
 #   codegraph               Build a tree-sitter knowledge graph for this repo
 #   codegraph-all           Build graphs for dear-agent and brain-v2
 #   sync-main               Stash, fetch, rebase onto origin/main, then pop
@@ -24,7 +31,17 @@
 #   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 
-.PHONY: preflight preflight-tests preflight-full install-preflight-hook act-validate act-lint act-test install-hooks test-shell build-configure-settings install-configure-settings build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent
+.PHONY: lint-specs preflight preflight-tests preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline
+
+# Validate EARS-formatted requirements in SPEC.md files using the same
+# deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
+# Scans the whole repo by default; override PATHS to narrow the scope and set
+# STRICT=1 to fail on any non-conforming requirement (not just files with zero
+# valid requirements). Examples:
+#   make lint-specs
+#   make lint-specs PATHS=internal/sandbox/SPEC.md STRICT=1
+lint-specs:
+	@go run ./cmd/ears-lint $(if $(STRICT),--strict) $(if $(PATHS),$(PATHS),.)
 
 # Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
 # CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm
@@ -44,6 +61,16 @@ preflight-tests:
 preflight-full:
 	@./scripts/preflight.sh --full
 
+# Build and run the codebase health auditor against this repo. Prints a
+# markdown summary and exits 0 (healthy) / 1 (degraded) / 2 (critical).
+# Pass ARGS to forward flags, e.g. `make health-check ARGS=--coverage` or
+# `make health-check ARGS="--json-out health.json --md-out health.md"`.
+# The scheduled .github/workflows/health-check.yml runs the same binary.
+health-check:
+	@mkdir -p build
+	@GOWORK=off go build -o build/repo-health ./cmd/repo-health
+	@./build/repo-health --root . $(ARGS)
+
 # Install a git pre-push hook that runs `make preflight`. Pushing to a PR
 # branch will then fail-fast before the GitHub round-trip if lint/build/vet
 # is broken. Does NOT replace CI — only shifts left. Refuses to overwrite
@@ -59,6 +86,14 @@ install-preflight-hook:
 	chmod +x "$$HOOK"; \
 	echo "Installed: $$HOOK -> make preflight"
 
+# Install the post-merge worktree-sweep trigger. After a PR lands on the
+# default branch locally (e.g. `git pull` on main), it kicks off the canonical
+# fail-safe reaper `agm worktree sweep --execute`. The installer honours
+# core.hooksPath and refuses to clobber a chezmoi-managed hooks dir — see
+# cmd/install-post-merge-hook for the resolution and safety logic.
+install-post-merge-hook:
+	@go run ./cmd/install-post-merge-hook
+
 # Run full local CI validation via act. Requires Docker + act installed.
 # Prefer `make preflight-full` for the same gates without containerisation.
 act-validate: act-lint act-test
@@ -73,6 +108,26 @@ act-lint:
 act-test:
 	@echo "[act] running unit-tests job..."
 	act -j unit-tests -e .github/act/event-push.json
+
+# Run the full Go test suite. Mirrors what CI's "Build & Test" job does
+# locally so a green `make test` is the same answer as a green CI.
+test:
+	go test -race -count=1 ./...
+
+# Run only the integration tests whose packages (or their transitive
+# dependencies) changed vs. origin/main. See cmd/test-affected and
+# docs/adr/ADR-024 for the algorithm and trust boundaries.
+#
+# Safety nets baked into the selector: go.mod / go.sum / Makefile /
+# .github/workflows / the selector itself fall back to a full run, so
+# this target is safe to default to locally before pushing.
+test-affected:
+	@go run ./cmd/test-affected --base=origin/main --tags=integration --run
+
+# Print the affected package list without running anything. Useful for
+# debugging "why did CI run/skip this suite?"
+test-affected-print:
+	@go run ./cmd/test-affected --base=origin/main --tags=integration
 
 # Run Bats shell tests
 test-shell:
@@ -116,6 +171,19 @@ build-configure-settings:
 install-configure-settings: build-configure-settings
 	cp bin/configure-claude-settings $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/configure-claude-settings"
+
+# Build safe-push: a git-push wrapper that resets the credential helper chain
+# to gh-only (never osxkeychain, which can hang on a headless GUI prompt) and
+# never force-pushes. See internal/safegit and docs/retros/2026-06-08-git-push-credential-hang.md.
+build-safe-push:
+	@echo "Building safe-push..."
+	go build $(GOFLAGS) -o bin/safe-push ./cmd/safe-push/
+	@echo "Built: bin/safe-push"
+
+# Install safe-push to GOPATH/bin so it is on PATH for every agent session.
+install-safe-push: build-safe-push
+	cp bin/safe-push $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-push"
 
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
@@ -170,6 +238,16 @@ deepsec-incremental:
 # Run deepsec on staged files only (use as a manual pre-commit check).
 deepsec-staged:
 	@./scripts/deepsec-incremental.sh --staged
+
+# Run the structural-health scans and diff against the checked-in baseline.
+# Fails only on regressions. Mirrors the Structural Health CI job.
+structural-health:
+	@go run ./cmd/structural-health
+
+# Re-snapshot the structural-health baseline after fixing findings. Commit
+# the resulting .structural-health-baseline.json to tighten the ratchet.
+structural-health-baseline:
+	@go run ./cmd/structural-health --update-baseline
 
 # Install a pre-push hook that runs deepsec on the push delta. Soft-fail
 # by default (warns, doesn't block). Use STRICT=1 to block pushes on

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -26,12 +27,10 @@ func TestSendPromptLiteral_AcquiresLock(t *testing.T) {
 		t.Skip("Skipping tmux integration test in CI")
 	}
 
-	testSocket := fmt.Sprintf("/tmp/agm-spl-lock-%d.sock", os.Getpid())
+	testSocket := filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
-		os.Remove(testSocket)
-		os.Unsetenv("AGM_TMUX_SOCKET")
 	})
 	setupTestState(t)
 
@@ -112,12 +111,10 @@ func TestCrossSessionIsolation_Sequential(t *testing.T) {
 		t.Skip("Skipping tmux integration test in CI")
 	}
 
-	testSocket := fmt.Sprintf("/tmp/agm-isolation-%d.sock", os.Getpid())
+	testSocket := filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
-		os.Remove(testSocket)
-		os.Unsetenv("AGM_TMUX_SOCKET")
 	})
 	setupTestState(t)
 
@@ -176,12 +173,10 @@ func TestCrossSessionLocking_NoCopyMode(t *testing.T) {
 		t.Skip("Skipping tmux integration test in CI")
 	}
 
-	testSocket := fmt.Sprintf("/tmp/agm-copymode-test-%d.sock", os.Getpid())
+	testSocket := filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
-		os.Remove(testSocket)
-		os.Unsetenv("AGM_TMUX_SOCKET")
 	})
 	setupTestState(t)
 
