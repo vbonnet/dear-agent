@@ -103,6 +103,12 @@ func scanOldFormatDirs(dir string) ([]oldFormatEntry, error) {
 		if strings.HasPrefix(name, ".") {
 			continue
 		}
+		// Skip already-migrated directories so re-running is safe.
+		// session-foo-session ends with -session but is already in the
+		// new format; processing it would produce session-session-foo.
+		if strings.HasPrefix(name, "session-") {
+			continue
+		}
 		if !strings.HasSuffix(name, "-session") {
 			continue
 		}
