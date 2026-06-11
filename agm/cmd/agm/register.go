@@ -9,9 +9,10 @@ import (
 )
 
 var (
-	registerName      string
-	registerWorkspace string
-	registerQuiet     bool
+	registerName       string
+	registerWorkspace  string
+	registerProjectDir string
+	registerQuiet      bool
 )
 
 var registerCmd = &cobra.Command{
@@ -37,14 +38,17 @@ Arguments:
   uuid - Claude conversation UUID to register
 
 Flags:
-  --name      - Name for the AGM session (optional; derived from project if omitted)
-  --workspace - Workspace label (optional; inferred from the project if omitted)
-  --quiet     - Suppress success output (print only the session ID); useful in hooks
+  --name        - Name for the AGM session (optional; derived from project if omitted)
+  --workspace   - Workspace label (optional; inferred from the project if omitted)
+  --project-dir - Project directory to use directly (skips conversation file scan;
+                  use in SessionStart hooks where the .jsonl has not been written yet)
+  --quiet       - Suppress success output (print only the session ID); useful in hooks
 
 Examples:
   agm session register 370980e1-e16c-48a1-9d17-caca0d3910ba
   agm session register <uuid> --workspace oss --name recovered-work
-  agm session register <uuid> --quiet   # hook-friendly`,
+  agm session register <uuid> --quiet   # hook-friendly
+  agm session register <uuid> --project-dir /Users/me/src/my-repo --quiet  # SessionStart hook`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		conversationUUID := args[0]
@@ -58,7 +62,7 @@ Examples:
 		}
 		defer func() { _ = adapter.Close() }()
 
-		result, err := importer.RegisterSession(conversationUUID, registerName, registerWorkspace, cfg.Workspace, adapter)
+		result, err := importer.RegisterSession(conversationUUID, registerName, registerWorkspace, cfg.Workspace, registerProjectDir, adapter)
 		if err != nil {
 			ui.PrintError(err,
 				"Failed to register session",
@@ -92,5 +96,6 @@ func init() {
 
 	registerCmd.Flags().StringVar(&registerName, "name", "", "Name for the session (derived from project if omitted)")
 	registerCmd.Flags().StringVar(&registerWorkspace, "workspace", "", "Workspace label (inferred from project if omitted)")
+	registerCmd.Flags().StringVar(&registerProjectDir, "project-dir", "", "Project directory (skips .jsonl scan; pass cwd from SessionStart hook payload)")
 	registerCmd.Flags().BoolVar(&registerQuiet, "quiet", false, "Print only the session ID (hook-friendly)")
 }
