@@ -1,0 +1,88 @@
+{
+  "version": "1",
+  "captured_at": "2026-06-11T04:30:35.618333Z",
+  "git_sha": "1ad4bdcf9f",
+  "benchmark": {
+    "suite": "swe-bench-lite",
+    "mode": "dear-agent",
+    "model": "stub",
+    "run_id": "swe-bench-lite-dear-agent-1781152235",
+    "started_at": "2026-06-11T04:30:35.610178Z",
+    "finished_at": "2026-06-11T04:30:35.61019Z",
+    "tasks": [
+      {
+        "task_id": "astropy__astropy-12907",
+        "suite": "swe-bench-lite",
+        "mode": "dear-agent",
+        "solved": false,
+        "duration_ns": 0,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0,
+        "error": "stub executor: task \"astropy__astropy-12907\" not executed (no TaskExecutor wired for mode \"dear-agent\" model \"stub\")"
+      },
+      {
+        "task_id": "django__django-11099",
+        "suite": "swe-bench-lite",
+        "mode": "dear-agent",
+        "solved": false,
+        "duration_ns": 0,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0,
+        "error": "stub executor: task \"django__django-11099\" not executed (no TaskExecutor wired for mode \"dear-agent\" model \"stub\")"
+      },
+      {
+        "task_id": "sympy__sympy-20154",
+        "suite": "swe-bench-lite",
+        "mode": "dear-agent",
+        "solved": false,
+        "duration_ns": 0,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0,
+        "error": "stub executor: task \"sympy__sympy-20154\" not executed (no TaskExecutor wired for mode \"dear-agent\" model \"stub\")"
+      }
+    ],
+    "summary": {
+      "total": 3,
+      "solved": 0,
+      "failed": 0,
+      "errored": 3,
+      "solve_rate": 0,
+      "total_cost_usd": 0,
+      "cost_per_solved_usd": null,
+      "total_tokens_in": 0,
+      "total_tokens_out": 0,
+      "avg_duration_ns": 0
+    }
+  },
+  "operational": {
+    "jaeger_url": "http://localhost:16686",
+    "lookback": "720h",
+    "services": [
+      "agm"
+    ],
+    "spans": {
+      "trace_count": 3,
+      "span_count": 3,
+      "by_operation": {
+        "agm.session.list": 1,
+        "session.lifecycle": 2
+      },
+      "by_session_state": {
+        "STOPPED": 2
+      },
+      "error_count": 0,
+      "success_rate": 1,
+      "avg_duration_ms": 4.825
+    },
+    "notes": [
+      "3 traces / 3 spans across 1 service(s) (pre-flywheel baseline)"
+    ]
+  },
+  "notes": [
+    "stub executor used — solve_rate=0 is the day-0 structural marker, not a real score",
+    "rerun with a real TaskExecutor wired to measure true solve rate improvement"
+  ]
+}
