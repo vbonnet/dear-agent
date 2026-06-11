@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -38,11 +39,11 @@ func main() {
 
 func run() int {
 	var (
-		jaegerURL  = flag.String("jaeger-url", "http://localhost:16686", "Jaeger base URL")
-		staleDays  = flag.Int("stale-days", 7, "days before an open bead is considered stale")
-		otelHours  = flag.Int("otel-hours", 24, "hours to look back for OTel traces")
-		otelSvc    = flag.String("otel-service", "agm", "OTel service name to check in Jaeger")
-		asJSON     = flag.Bool("json", false, "emit machine-readable JSON")
+		jaegerURL = flag.String("jaeger-url", "http://localhost:16686", "Jaeger base URL")
+		staleDays = flag.Int("stale-days", 7, "days before an open bead is considered stale")
+		otelHours = flag.Int("otel-hours", 24, "hours to look back for OTel traces")
+		otelSvc   = flag.String("otel-service", "agm", "OTel service name to check in Jaeger")
+		asJSON    = flag.Bool("json", false, "emit machine-readable JSON")
 	)
 	flag.Parse()
 
@@ -81,11 +82,11 @@ func run() int {
 // jsonResult is a JSON-serializable view of a healthchecker.Result that omits
 // the Fix.Apply function field, which cannot be marshaled.
 type jsonResult struct {
-	Name     string             `json:"name"`
-	Category string             `json:"category"`
+	Name     string               `json:"name"`
+	Category string               `json:"category"`
 	Status   healthchecker.Status `json:"status"`
-	Message  string             `json:"message"`
-	Fixable  bool               `json:"fixable,omitempty"`
+	Message  string               `json:"message"`
+	Fixable  bool                 `json:"fixable,omitempty"`
 }
 
 func toJSONResults(results []healthchecker.Result) []jsonResult {
@@ -173,16 +174,17 @@ func (c *beadsStaleCheck) Run(ctx context.Context) healthchecker.Result {
 		}
 	}
 
-	msg := fmt.Sprintf("%d stale bead(s) (no activity >%dd):", len(stale), c.staleDays)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%d stale bead(s) (no activity >%dd):", len(stale), c.staleDays)
 	for _, b := range stale {
 		ageDays := int(time.Since(b.UpdatedAt).Hours() / 24)
-		msg += fmt.Sprintf("\n      %s (%dd) — %s", b.ID, ageDays, b.Title)
+		fmt.Fprintf(&sb, "\n      %s (%dd) — %s", b.ID, ageDays, b.Title)
 	}
 	return healthchecker.Result{
 		Name:     c.Name(),
 		Category: c.Category(),
 		Status:   healthchecker.StatusWarning,
-		Message:  msg,
+		Message:  sb.String(),
 	}
 }
 
@@ -245,7 +247,7 @@ func (c *jaegerHealthCheck) Run(ctx context.Context) healthchecker.Result {
 			Message:  fmt.Sprintf("jaeger unreachable (%s): %v — is Jaeger running?", c.baseURL, err),
 		}
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 
 	var jResp jaegerTracesResp
 	if err := json.NewDecoder(resp.Body).Decode(&jResp); err != nil {
