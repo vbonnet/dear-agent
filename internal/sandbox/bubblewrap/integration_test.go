@@ -27,7 +27,7 @@ func skipUnlessBwrapFunctional(t *testing.T) {
 		t.Skip("bubblewrap (bwrap) not installed")
 	}
 	// Probe: attempt a minimal bwrap execution that exercises user namespaces.
-	probe := exec.Command("bwrap", //nolint:gosec // intentional probe with fixed args
+	probe := exec.Command("bwrap",
 		"--unshare-all", "--share-net",
 		"--ro-bind", "/", "/",
 		"--proc", "/proc",
