@@ -35,9 +35,6 @@ linters:
     # Complexity
     - gocyclo
 
-    # Formatting
-    - gofmt        # enforce standard Go formatting; two unformatted files landed on main
-
     # Best practices
     - gocritic     # subtle style and performance issues
     - exhaustive   # switch statement exhaustiveness on enums
@@ -115,6 +112,10 @@ linters:
       - third_party
       - vendor
       - mcp-wizard/node_modules
+
+formatters:
+  enable:
+    - gofmt        # enforce standard Go formatting; two unformatted files reached main
 
 output:
   formats:
