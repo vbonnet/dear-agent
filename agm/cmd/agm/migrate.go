@@ -89,6 +89,11 @@ type oldFormatEntry struct {
 
 // scanOldFormatDirs returns all directories under dir whose name ends with
 // "-session" (the old format), sorted alphabetically.
+//
+// Idempotency guarantee: directories already in the unified "session-{name}"
+// format are skipped even if their name happens to end with "-session" (e.g.
+// "session-foo-session"). Without this guard, a second run would corrupt
+// "session-foo-session" → "session-session-foo".
 func scanOldFormatDirs(dir string) ([]oldFormatEntry, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -101,6 +106,10 @@ func scanOldFormatDirs(dir string) ([]oldFormatEntry, error) {
 		}
 		name := e.Name()
 		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		// Already in the unified format — skip to keep the migration idempotent.
+		if strings.HasPrefix(name, "session-") {
 			continue
 		}
 		if !strings.HasSuffix(name, "-session") {

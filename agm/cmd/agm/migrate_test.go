@@ -165,6 +165,85 @@ func TestScanOldFormatDirs_SortedAlphabetically(t *testing.T) {
 	}
 }
 
+func TestScanOldFormatDirs_SkipsAlreadyUnifiedFormat(t *testing.T) {
+	dir := t.TempDir()
+	// "session-foo" is already in unified format — must be ignored.
+	mkdirs(t, dir, "session-foo", "old-session")
+
+	entries, err := scanOldFormatDirs(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("got %d entries, want 1 (session-foo must be skipped)", len(entries))
+	}
+	if len(entries) == 1 && entries[0].OldName != "old-session" {
+		t.Errorf("entries[0].OldName = %q, want %q", entries[0].OldName, "old-session")
+	}
+}
+
+// TestScanOldFormatDirs_IdempotentOnRerun reproduces the session-*-session
+// double-prefix corruption: a session named "foo-session" produces old dir
+// "foo-session-session"; after migration it becomes "session-foo-session",
+// which still ends with "-session". Without the session- prefix guard a second
+// run would corrupt it to "session-session-foo".
+func TestScanOldFormatDirs_IdempotentOnRerun(t *testing.T) {
+	dir := t.TempDir()
+	// Simulate state after first migration run: "session-foo-session" exists.
+	// This directory still ends with "-session" but must not be picked up again.
+	mkdirs(t, dir, "session-foo-session")
+
+	entries, err := scanOldFormatDirs(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("got %d entries, want 0 — session-foo-session is already in unified format "+
+			"(it starts with 'session-') and must not be renamed again", len(entries))
+	}
+}
+
+// TestMigrateClaudeToUnified_Idempotent ensures that running the migration
+// twice does not corrupt directories whose names end with "-session" after
+// the first migration (e.g. the session was named "foo-session").
+func TestMigrateClaudeToUnified_Idempotent(t *testing.T) {
+	dir, restore := migrateTestSetup(t)
+	defer restore()
+	// "foo-session-session" is the old-format dir for a session named "foo-session".
+	// After first run it becomes "session-foo-session".
+	mkdirs(t, dir, "foo-session-session")
+
+	migrateDryRun = false
+
+	var buf bytes.Buffer
+	migrateClaudeToUnifiedCmd.SetOut(&buf)
+	defer migrateClaudeToUnifiedCmd.SetOut(nil)
+
+	// First run: should rename foo-session-session → session-foo-session.
+	if err := runMigrateClaudeToUnified(migrateClaudeToUnifiedCmd, nil); err != nil {
+		t.Fatalf("first run error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "session-foo-session")); os.IsNotExist(err) {
+		t.Fatal("first run: session-foo-session not created")
+	}
+
+	buf.Reset()
+
+	// Second run: session-foo-session must NOT be renamed to session-session-foo.
+	if err := runMigrateClaudeToUnified(migrateClaudeToUnifiedCmd, nil); err != nil {
+		t.Fatalf("second run error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "session-session-foo")); err == nil {
+		t.Error("second run corrupted session-foo-session → session-session-foo (double-prefix bug)")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "session-foo-session")); os.IsNotExist(err) {
+		t.Error("second run: session-foo-session no longer exists (should be preserved)")
+	}
+	if !strings.Contains(buf.String(), "No old-format") {
+		t.Errorf("second run output %q should indicate no old-format dirs found", buf.String())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // runMigrateClaudeToUnified integration tests
 // ---------------------------------------------------------------------------
