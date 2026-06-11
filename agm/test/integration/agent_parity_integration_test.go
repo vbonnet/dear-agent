@@ -17,6 +17,9 @@ var _ = Describe("Agent Parity - End-to-End Integration", func() {
 	var adapters map[string]agent.Agent
 
 	BeforeEach(func() {
+		if os.Getenv("OPENCODE_AVAILABLE") == "" {
+			Skip("requires running OpenCode server; set OPENCODE_AVAILABLE=1 to run")
+		}
 		adapters = make(map[string]agent.Agent)
 
 		claudeAdapter, err := agent.NewClaudeAdapter(nil)
@@ -24,9 +27,7 @@ var _ = Describe("Agent Parity - End-to-End Integration", func() {
 		adapters["claude"] = claudeAdapter
 
 		os.Setenv("GEMINI_API_KEY", "test-api-key-for-testing")
-		geminiAdapter, err := agent.NewGeminiAdapter(&agent.GeminiConfig{
-			APIKey: "test-api-key-for-testing",
-		})
+		geminiAdapter, err := agent.NewGeminiCLIAdapter(nil)
 		Expect(err).ToNot(HaveOccurred())
 		adapters["gemini"] = geminiAdapter
 
@@ -184,9 +185,7 @@ var _ = Describe("Agent Parity - End-to-End Integration", func() {
 				if agentName == "claude" {
 					newAdapter, err = agent.NewClaudeAdapter(nil)
 				} else if agentName == "gemini" {
-					newAdapter, err = agent.NewGeminiAdapter(&agent.GeminiConfig{
-						APIKey: "test-api-key-for-testing",
-					})
+					newAdapter, err = agent.NewGeminiCLIAdapter(nil)
 				} else if agentName == "opencode" {
 					newAdapter, err = agent.NewOpenCodeAdapter(nil)
 				}

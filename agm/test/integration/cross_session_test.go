@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/vbonnet/dear-agent/agm/internal/daemon"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/messages"
 	"github.com/vbonnet/dear-agent/agm/test/integration/helpers"
@@ -25,17 +23,9 @@ var _ = Describe("Cross-Session Integration Tests (Task 2.4, bead oss-ji5p)", fu
 		session3Name string
 		workDir      string
 		queue        *messages.MessageQueue
-		testStarted  time.Time
 	)
 
 	BeforeEach(func() {
-		// Skip if SKIP_E2E is set
-		if os.Getenv("SKIP_E2E") != "" {
-			Skip("SKIP_E2E environment variable is set")
-		}
-
-		testStarted = time.Now()
-
 		// Create unique session names
 		session1Name = testEnv.UniqueSessionName("cross-session-1")
 		session2Name = testEnv.UniqueSessionName("cross-session-2")
@@ -281,7 +271,6 @@ var _ = Describe("Cross-Session Integration Tests (Task 2.4, bead oss-ji5p)", fu
 
 				// If session is READY, deliver immediately
 				if getSessionState(session2Name) == manifest.StateDone {
-					deliveryStart := time.Now()
 					err = deliverPendingMessages(queue, session2Name)
 					Expect(err).ToNot(HaveOccurred())
 
@@ -452,7 +441,7 @@ func createTestSession(sessionName, workDir string) error {
 		Tmux: manifest.Tmux{
 			SessionName: sessionName,
 		},
-		Agent: "claude",
+		Harness: "claude",
 	}
 
 	if err := manifest.Write(manifestPath, m); err != nil {

@@ -64,7 +64,7 @@ Examples:
 		if err != nil {
 			return err
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 
 		l, err := store.CreateLoop(cmd.Context(), name, loopNewDescription, loopNewCmdFlag, cadence)
 		if err != nil {
@@ -94,7 +94,7 @@ var loopListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 
 		loops, err := store.ListLoops(cmd.Context())
 		if err != nil {
@@ -136,7 +136,7 @@ period from when this run finishes, so the scheduled cadence resumes correctly.`
 		if err != nil {
 			return err
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 
 		fmt.Printf("Running loop %q...\n", name)
 		r, err := store.RunLoop(cmd.Context(), name)
@@ -177,7 +177,7 @@ var loopLogsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 
 		runs, err := store.GetRuns(cmd.Context(), name, loopLogsLimit)
 		if err != nil {
@@ -242,7 +242,7 @@ var loopDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 
 		if err := store.DeleteLoop(cmd.Context(), name); err != nil {
 			return err
@@ -271,7 +271,7 @@ Tick is silent when there is nothing due, making it safe to call frequently.`,
 		if err != nil {
 			return err
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 
 		due, err := store.DueLoops(cmd.Context())
 		if err != nil {
@@ -311,7 +311,7 @@ func setLoopStatus(cmd *cobra.Command, name string, status ops.LoopStatus) error
 	if err != nil {
 		return err
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if err := store.SetStatus(cmd.Context(), name, status); err != nil {
 		return err

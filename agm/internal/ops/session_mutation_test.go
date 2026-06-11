@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -431,9 +432,57 @@ func TestSendMessage_Success(t *testing.T) {
 	if result.MessageLength != 11 {
 		t.Errorf("expected message length 11, got %d", result.MessageLength)
 	}
-	// Stub always returns false for delivered
+	// With a Tmux client available, the legacy path delivers via send-keys.
+	if !result.Delivered {
+		t.Error("expected Delivered=true via tmux delivery")
+	}
+	mt := ctx.Tmux.(*mockTmux)
+	if len(mt.sent) != 1 {
+		t.Fatalf("expected 1 send-keys call, got %d", len(mt.sent))
+	}
+	if mt.sent[0].session != "my-session" || mt.sent[0].keys != "hello world" {
+		t.Errorf("unexpected send-keys: %+v", mt.sent[0])
+	}
+}
+
+// TestSendMessage_NoDeliveryMechanism verifies that when neither a manager
+// Backend nor a Tmux client is configured, SendMessage reports non-delivery
+// without an error — the best-effort contract stall recovery depends on.
+func TestSendMessage_NoDeliveryMechanism(t *testing.T) {
+	mock := dolt.NewMockAdapter()
+	_ = mock.CreateSession(newManifest("id-1", "my-session", "~/project"))
+	ctx := &OpContext{Storage: mock} // no Tmux, no Manager
+
+	result, err := SendMessage(ctx, &SendMessageRequest{
+		Recipient: "id-1",
+		Message:   "hello world",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if result.Delivered {
-		t.Error("expected Delivered=false (stub)")
+		t.Error("expected Delivered=false when no delivery mechanism is configured")
+	}
+}
+
+// TestSendMessage_DeliveryError verifies that a tmux send failure surfaces as
+// an error with Delivered=false.
+func TestSendMessage_DeliveryError(t *testing.T) {
+	sessions := []*manifest.Manifest{
+		newManifest("id-1", "my-session", "~/project"),
+	}
+	ctx := testCtx(sessions, "my-session")
+	ctx.Tmux.(*mockTmux).sendErr = errors.New("tmux send failed")
+
+	result, err := SendMessage(ctx, &SendMessageRequest{
+		Recipient: "id-1",
+		Message:   "hello world",
+	})
+	if err == nil {
+		t.Fatal("expected error when tmux delivery fails")
+	}
+	if result.Delivered {
+		t.Error("expected Delivered=false on delivery failure")
 	}
 }
 

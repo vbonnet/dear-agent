@@ -21,6 +21,7 @@ env:
 jobs:
   check-ci-health:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Audit last 5 CI runs on main
         env:

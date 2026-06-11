@@ -17,6 +17,9 @@ var _ = Describe("Agent Parity - Data Exchange", func() {
 	var adapters map[string]agent.Agent
 
 	BeforeEach(func() {
+		if os.Getenv("OPENCODE_AVAILABLE") == "" {
+			Skip("requires running OpenCode server; set OPENCODE_AVAILABLE=1 to run")
+		}
 		adapters = make(map[string]agent.Agent)
 
 		claudeAdapter, err := agent.NewClaudeAdapter(nil)
@@ -24,9 +27,7 @@ var _ = Describe("Agent Parity - Data Exchange", func() {
 		adapters["claude"] = claudeAdapter
 
 		os.Setenv("GEMINI_API_KEY", "test-api-key-for-testing")
-		geminiAdapter, err := agent.NewGeminiAdapter(&agent.GeminiConfig{
-			APIKey: "test-api-key-for-testing",
-		})
+		geminiAdapter, err := agent.NewGeminiCLIAdapter(nil)
 		Expect(err).ToNot(HaveOccurred())
 		adapters["gemini"] = geminiAdapter
 

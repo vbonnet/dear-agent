@@ -51,7 +51,7 @@ func runSendStash(cmd *cobra.Command, args []string) error {
 	hasTyped := tmux.InputLineHasContent(paneContent)
 
 	if !hasQueued && !hasTyped {
-		fmt.Fprintf(os.Stdout, "Input already empty in session '%s' — nothing to stash\n", sessionName)
+		_, _ = fmt.Fprintf(os.Stdout, "Input already empty in session '%s' — nothing to stash\n", sessionName)
 		return nil
 	}
 
@@ -66,7 +66,7 @@ func runSendStash(cmd *cobra.Command, args []string) error {
 	afterContent, err := tmux.CapturePaneOutput(sessionName, 50)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not verify stash worked: %v\n", err)
-		fmt.Fprintf(os.Stdout, "Stash sent to session '%s' (verification skipped)\n", sessionName)
+		_, _ = fmt.Fprintf(os.Stdout, "Stash sent to session '%s' (verification skipped)\n", sessionName)
 		return nil
 	}
 
@@ -78,11 +78,11 @@ func runSendStash(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stdout, "Message stashed in session '%s'\n", sessionName)
-	fmt.Fprintf(os.Stdout, "Note: stashed message will be restored automatically on next send\n")
+	_, _ = fmt.Fprintf(os.Stdout, "Message stashed in session '%s'\n", sessionName)
+	_, _ = fmt.Fprintf(os.Stdout, "Note: stashed message will be restored automatically on next send\n")
 
 	if os.Getenv("AGM_DEBUG") == "1" {
-		fmt.Fprintf(os.Stdout, "DEBUG: send-stash session=%s\n", sessionName)
+		_, _ = fmt.Fprintf(os.Stdout, "DEBUG: send-stash session=%s\n", sessionName)
 	}
 
 	return nil

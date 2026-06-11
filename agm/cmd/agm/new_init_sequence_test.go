@@ -19,10 +19,6 @@ import (
 // TestNewCommand_InitSequence_Detached tests the initialization sequence
 // for sessions created with --detached flag (from within tmux)
 func TestNewCommand_InitSequence_Detached(t *testing.T) {
-	if os.Getenv("SKIP_E2E") != "" {
-		t.Skip("Skipping E2E test (SKIP_E2E set)")
-	}
-
 	// Skip if no TTY available - this test requires interactive Claude Code prompts
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		t.Skip("Skipping E2E test - requires TTY for Claude Code interaction")
@@ -171,10 +167,6 @@ func TestNewCommand_BothPathsUseSameInitSequence(t *testing.T) {
 
 // TestReadyFileCreation verifies ready-file is created by agm associate
 func TestReadyFileCreation(t *testing.T) {
-	if os.Getenv("SKIP_E2E") != "" {
-		t.Skip("Skipping E2E test (SKIP_E2E set)")
-	}
-
 	sessionName := "test-ready-file-" + time.Now().Format("150405")
 	tmpDir := t.TempDir()
 

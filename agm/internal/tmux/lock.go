@@ -56,7 +56,7 @@ func AcquireTmuxLock() error {
 		return fmt.Errorf("failed to create tmux lock: %w", err)
 	}
 
-	if err := fl.TryLock(); err != nil {
+	if err := fl.Lock(); err != nil {
 		return err
 	}
 

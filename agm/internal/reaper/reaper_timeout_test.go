@@ -68,15 +68,3 @@ func TestTimeRemaining_ExactlyAtLimit(t *testing.T) {
 		t.Errorf("timeRemaining() = %v, should be ~0 at exact timeout", remaining)
 	}
 }
-
-func TestTimeRemainingMethod_Exists(t *testing.T) {
-	r := New("test", "/tmp")
-	// Compile-time check that the method exists
-	var _ = r.timeRemaining
-}
-
-func TestStopProcess_Exists(t *testing.T) {
-	r := New("test", "/tmp")
-	// Compile-time check that the method exists
-	var _ = r.stopProcess
-}

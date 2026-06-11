@@ -85,7 +85,7 @@ func runStartPhase(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize tracker: %w", err)
 	}
-	defer tr.Close(context.Background())
+	defer func() { _ = tr.Close(context.Background()) }()
 
 	// Publish phase.started event
 	if err := tr.StartPhase(phaseName); err != nil {
