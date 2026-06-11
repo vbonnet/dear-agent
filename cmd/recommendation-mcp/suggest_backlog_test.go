@@ -72,8 +72,6 @@ func TestSuggestBacklog_EmptyArgs_UsesDefaults(t *testing.T) {
 	}
 }
 
-
-
 func TestSuggestBacklog_WithMarkdown_ReturnsSuggestions(t *testing.T) {
 	backlogMD := `## Phase 1
 
