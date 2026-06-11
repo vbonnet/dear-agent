@@ -483,40 +483,32 @@ func (p *Provider) checkBubblewrapInstalled() error {
 	return nil
 }
 
-// testBubblewrap runs a quick test to verify bubblewrap works correctly.
-func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, shareNetwork bool) error { //nolint:unparam // mergedDir used in future overlay tests
-	// Create a simple test file
-	testFile := filepath.Join(upperDir, ".bwrap-test")
-	testContent := "bubblewrap-test"
-	if err := os.WriteFile(testFile, []byte(testContent), 0600); err != nil {
-		return sandbox.WrapError(sandbox.ErrCodePermissionDenied,
-			"failed to create test file", err)
-	}
-	defer os.Remove(testFile)
-
-	// Build bwrap command to test isolation
+// buildBwrapArgs constructs the bwrap argument list for the sandbox self-test.
+// It is a pure function — no filesystem access or exec — so it can be
+// unit-tested on any platform (including macOS).
+//
+// Security invariants expressed in the returned args:
+//   - --unshare-all: every kernel namespace is isolated (PID, net, IPC, UTS, …)
+//   - --die-with-parent: the sandbox process tree is killed when the Go parent exits
+//   - lowerDirs are mounted --ro-bind (read-only); the sandbox cannot modify source repos
+//   - shareNetwork=false (the default) omits --share-net, keeping the network namespace isolated
+//
+// extraROPaths is a list of host paths to mount read-only in addition to the
+// base system directories (/usr, /lib, /bin). Used to conditionally include
+// /lib64 and /sbin when they exist on the host.
+func buildBwrapArgs(lowerDirs []string, upperDir string, shareNetwork bool, extraROPaths []string) []string {
 	args := []string{
-		// System directories (required for bash and commands)
+		// System directories required for /bin/sh and basic commands.
 		"--ro-bind", "/usr", "/usr",
 		"--ro-bind", "/lib", "/lib",
 		"--ro-bind", "/bin", "/bin",
 	}
-
-	// Add /lib64 and /sbin if they exist
-	if _, err := os.Stat("/lib64"); err == nil {
-		args = append(args, "--ro-bind", "/lib64", "/lib64")
+	for _, p := range extraROPaths {
+		args = append(args, "--ro-bind", p, p)
 	}
-	if _, err := os.Stat("/sbin"); err == nil {
-		args = append(args, "--ro-bind", "/sbin", "/sbin")
-	}
-
-	// Bind lower directories as read-only
 	for i, dir := range lowerDirs {
-		args = append(args,
-			"--ro-bind", dir, fmt.Sprintf("/sandbox/lower%d", i))
+		args = append(args, "--ro-bind", dir, fmt.Sprintf("/sandbox/lower%d", i))
 	}
-
-	// Bind upper directory as writable
 	args = append(args,
 		"--bind", upperDir, "/sandbox/upper",
 		"--tmpfs", "/tmp",
@@ -524,28 +516,46 @@ func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, shareN
 		"--dev", "/dev",
 		"--unshare-all",
 	)
-
-	// Only share host network if explicitly configured; default is isolated
 	if shareNetwork {
 		args = append(args, "--share-net")
 	}
-
 	args = append(args,
 		"--die-with-parent",
-		"/bin/sh", "-c", "test -f /sandbox/upper/.bwrap-test && echo ok")
+		"/bin/sh", "-c", "test -f /sandbox/upper/.bwrap-test && echo ok",
+	)
+	return args
+}
 
+// testBubblewrap runs a quick self-test to verify bubblewrap works on this host.
+func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, shareNetwork bool) error { //nolint:unparam // mergedDir used in future overlay tests
+	// Create a sentinel file that the sandbox command will verify.
+	testFile := filepath.Join(upperDir, ".bwrap-test")
+	if err := os.WriteFile(testFile, []byte("bubblewrap-test"), 0600); err != nil {
+		return sandbox.WrapError(sandbox.ErrCodePermissionDenied,
+			"failed to create test file", err)
+	}
+	defer os.Remove(testFile)
+
+	// Probe optional host paths; include them only when they exist so the
+	// bwrap invocation does not fail on minimalist Linux installs.
+	var extra []string
+	for _, p := range []string{"/lib64", "/sbin"} {
+		if _, err := os.Stat(p); err == nil {
+			extra = append(extra, p)
+		}
+	}
+
+	args := buildBwrapArgs(lowerDirs, upperDir, shareNetwork, extra)
 	cmd := exec.Command("bwrap", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return sandbox.WrapError(sandbox.ErrCodeMountFailed,
 			fmt.Sprintf("bubblewrap test failed: %s", string(output)), err)
 	}
-
 	if !strings.Contains(string(output), "ok") {
 		return sandbox.NewError(sandbox.ErrCodeMountFailed,
 			"bubblewrap test did not produce expected output")
 	}
-
 	return nil
 }
 
