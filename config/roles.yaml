@@ -22,7 +22,7 @@
 #
 # Per-role primary assignment (see comments on each role for rationale):
 #   research      → Google     (Gemini 3.1 Pro — long context + synthesis)
-#   implementer   → Anthropic  (Claude Opus 4.7 — strongest at code)
+#   implementer   → Anthropic  (Claude Opus 4.8 — strongest at code)
 #   reviewer      → OpenAI     (GPT 5.5 Pro — independent critic, off-vendor)
 #   orchestrator  → Anthropic  (Claude Sonnet 4.6 — fast/cheap default)
 # ---------------------------------------------------------------------------
@@ -50,7 +50,7 @@ roles:
         input: 1.25
         output: 10.00
     secondary:
-      model: claude-opus-4-7
+      model: claude-opus-4-8
       effort: max
       max_context: 1000000
       cost_per_mtok:
@@ -72,7 +72,7 @@ roles:
     description: "Code synthesis with tool use and patch application"
     capabilities: [tool_use, code_synthesis, structured_output]
     primary:
-      model: claude-opus-4-7
+      model: claude-opus-4-8
       effort: high
       cost_per_mtok:
         input: 15.00
@@ -107,7 +107,7 @@ roles:
         input: 15.00
         output: 60.00
     secondary:
-      model: claude-opus-4-7
+      model: claude-opus-4-8
       effort: max
       cost_per_mtok:
         input: 15.00

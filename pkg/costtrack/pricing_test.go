@@ -187,7 +187,7 @@ func TestResolveModelAlias(t *testing.T) {
 		input string
 		want  string
 	}{
-		{name: "opus alias", input: "opus", want: "claude-opus-4-6"},
+		{name: "opus alias", input: "opus", want: "claude-opus-4-8"},
 		{name: "sonnet alias", input: "sonnet", want: "claude-sonnet-4-5@20250929"},
 		{name: "haiku alias", input: "haiku", want: "claude-3-5-haiku-20241022"},
 		{name: "full model ID passthrough", input: "claude-opus-4-6", want: "claude-opus-4-6"},
