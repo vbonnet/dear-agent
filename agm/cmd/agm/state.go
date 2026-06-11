@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/lifecycle"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/trace"
 )
@@ -76,6 +77,7 @@ Valid states:
   • PERMISSION_PROMPT - Session waiting for user permission
   • COMPACTING       - Session compacting/summarizing context
   • OFFLINE          - Session doesn't exist in tmux
+  • STOPPED          - Session has ended (terminal; emits session.lifecycle OTel span)
 
 Examples:
   # Set state from hook
@@ -145,6 +147,7 @@ func runStateSet(cmd *cobra.Command, args []string) error {
 		"PERMISSION_PROMPT",
 		"COMPACTING",
 		"OFFLINE",
+		"STOPPED",
 	}
 
 	isValid := false
@@ -176,6 +179,8 @@ func runStateSet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to update state: %w", err)
 	}
+
+	lifecycle.RecordSessionLifecycleSpan(cmd.Context(), m.Name, newState, stateSetSource)
 
 	fmt.Printf("Updated session '%s' state: %s (source: %s)\n", m.Name, newState, stateSetSource)
 
