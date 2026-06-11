@@ -26,11 +26,6 @@ var _ = Describe("Cross-Session Integration Tests (Task 2.4, bead oss-ji5p)", fu
 	)
 
 	BeforeEach(func() {
-		// Skip if SKIP_E2E is set
-		if os.Getenv("SKIP_E2E") != "" {
-			Skip("SKIP_E2E environment variable is set")
-		}
-
 		// Create unique session names
 		session1Name = testEnv.UniqueSessionName("cross-session-1")
 		session2Name = testEnv.UniqueSessionName("cross-session-2")
