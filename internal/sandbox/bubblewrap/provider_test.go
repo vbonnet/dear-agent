@@ -2,6 +2,7 @@ package bubblewrap
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 	"testing"
 
@@ -126,4 +127,133 @@ func TestProvider_checkBubblewrapInstalled(t *testing.T) {
 	} else {
 		assert.NoError(t, err)
 	}
+}
+
+// ---- buildBwrapArgs unit tests (cross-platform, no exec) ----
+
+func TestBuildBwrapArgs_SecurityInvariants(t *testing.T) {
+	// These invariants must hold on any OS; they are the security contract
+	// for the bubblewrap sandbox layer.
+	args := buildBwrapArgs(
+		[]string{"/repo"},
+		"/upper",
+		false, // network isolated by default
+		nil,   // no extra ro paths
+	)
+
+	argSet := toArgSet(args)
+	t.Run("unshare_all_present", func(t *testing.T) {
+		assert.Contains(t, args, "--unshare-all",
+			"--unshare-all must be present to isolate all kernel namespaces")
+	})
+	t.Run("die_with_parent_present", func(t *testing.T) {
+		assert.Contains(t, args, "--die-with-parent",
+			"--die-with-parent must be present so orphaned sandboxes are killed")
+	})
+	t.Run("lower_dirs_are_readonly", func(t *testing.T) {
+		// The repo is mounted read-only; --bind (writable) must not appear
+		// for lower dirs.
+		idx := indexArg(args, "--ro-bind")
+		found := false
+		for _, i := range idx {
+			if i+1 < len(args) && args[i+1] == "/repo" {
+				found = true
+			}
+		}
+		assert.True(t, found, "lower dir /repo must be mounted --ro-bind")
+		// Verify /repo does NOT appear after a --bind flag.
+		bindIdx := indexArg(args, "--bind")
+		for _, i := range bindIdx {
+			if i+1 < len(args) {
+				assert.NotEqual(t, "/repo", args[i+1],
+					"lower dir /repo must never be mounted --bind (writable)")
+			}
+		}
+	})
+	t.Run("upper_dir_is_writable", func(t *testing.T) {
+		// upper dir is bind-mounted writable so the sandbox can write output.
+		bindIdx := indexArg(args, "--bind")
+		found := false
+		for _, i := range bindIdx {
+			if i+1 < len(args) && args[i+1] == "/upper" {
+				found = true
+			}
+		}
+		assert.True(t, found, "upper dir must be --bind (writable)")
+	})
+	t.Run("proc_and_dev_present", func(t *testing.T) {
+		assert.True(t, argSet["--proc"], "--proc /proc must be present")
+		assert.True(t, argSet["--dev"], "--dev /dev must be present")
+	})
+}
+
+func TestBuildBwrapArgs_NetworkIsolated_NoShareNet(t *testing.T) {
+	args := buildBwrapArgs([]string{"/repo"}, "/upper", false, nil)
+	assert.NotContains(t, args, "--share-net",
+		"shareNetwork=false must omit --share-net (network namespace isolated)")
+}
+
+func TestBuildBwrapArgs_NetworkShared_HasShareNet(t *testing.T) {
+	args := buildBwrapArgs([]string{"/repo"}, "/upper", true, nil)
+	assert.Contains(t, args, "--share-net",
+		"shareNetwork=true must include --share-net")
+}
+
+func TestBuildBwrapArgs_MultipleLowerDirs_AllReadOnly(t *testing.T) {
+	dirs := []string{"/repo-a", "/repo-b", "/repo-c"}
+	args := buildBwrapArgs(dirs, "/upper", false, nil)
+	for i, dir := range dirs {
+		t.Run(dir, func(t *testing.T) {
+			// Every lower dir must appear as --ro-bind <dir> /sandbox/lowerN.
+			expectedDest := fmt.Sprintf("/sandbox/lower%d", i)
+			idx := indexArg(args, "--ro-bind")
+			found := false
+			for _, j := range idx {
+				if j+1 < len(args) && args[j+1] == dir {
+					require.True(t, j+2 < len(args), "missing destination after --ro-bind %s", dir)
+					assert.Equal(t, expectedDest, args[j+2])
+					found = true
+				}
+			}
+			assert.True(t, found, "--ro-bind for %s not found", dir)
+		})
+	}
+}
+
+func TestBuildBwrapArgs_ExtraROPaths_IncludedReadOnly(t *testing.T) {
+	extra := []string{"/lib64", "/sbin"}
+	args := buildBwrapArgs([]string{"/repo"}, "/upper", false, extra)
+	for _, p := range extra {
+		t.Run(p, func(t *testing.T) {
+			idx := indexArg(args, "--ro-bind")
+			found := false
+			for _, i := range idx {
+				if i+1 < len(args) && args[i+1] == p {
+					found = true
+				}
+			}
+			assert.True(t, found, "%s must appear as --ro-bind", p)
+		})
+	}
+}
+
+// toArgSet converts an arg slice to a set of flags (values omitted) for
+// quick membership tests.
+func toArgSet(args []string) map[string]bool {
+	s := make(map[string]bool, len(args))
+	for _, a := range args {
+		s[a] = true
+	}
+	return s
+}
+
+// indexArg returns all indices where flag appears in args.
+func indexArg(args []string, flag string) []int {
+	var out []int
+	for i, a := range args {
+		if a == flag {
+			out = append(out, i)
+		}
+	}
+	return out
 }
