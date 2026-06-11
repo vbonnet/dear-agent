@@ -28,8 +28,24 @@ const Escalation = "\n\nIf you need this permission, escalate: " +
 
 // Guard classifies write targets against the worktree-only policy. Home is
 // resolved once at construction; tests inject a temporary directory.
+//
+// A Guard built directly as &Guard{Home: ...} (as tests do) classifies with
+// the default policy and performs no filesystem symlink resolution, so it stays
+// pure string logic. New() and NewWithPolicy enable symlink resolution of write
+// targets, which closes the symlink-escape hole (a worktree symlink pointing
+// into ~/src).
 type Guard struct {
 	Home string
+
+	// policy is the effective classification policy. When nil, the default
+	// policy derived from Home is used, so the zero-value &Guard{Home: ...}
+	// remains valid.
+	policy *Policy
+
+	// resolveSymlinks enables EvalSymlinks resolution of write targets before
+	// classification. Off for the pure &Guard{} form so unit tests need no real
+	// filesystem; on for New()/NewWithPolicy used by hooks and the interceptor.
+	resolveSymlinks bool
 }
 
 // New builds a Guard rooted at the current user's home directory, resolving
@@ -43,7 +59,68 @@ func New() *Guard {
 	if resolved, rerr := filepath.EvalSymlinks(home); rerr == nil {
 		home = resolved
 	}
-	return &Guard{Home: filepath.Clean(home)}
+	return &Guard{Home: filepath.Clean(home), resolveSymlinks: true}
+}
+
+// NewWithPolicy builds a Guard with an explicit policy (typically from
+// LoadConfig), rooted at the same resolved home as New(). Symlink resolution of
+// write targets is enabled.
+func NewWithPolicy(p Policy) *Guard {
+	g := New()
+	g.policy = &p
+	return g
+}
+
+// pol returns the effective policy: the explicit one if set, else the default
+// derived from Home.
+func (g *Guard) pol() Policy {
+	if g.policy != nil {
+		return *g.policy
+	}
+	return DefaultPolicy(g.Home)
+}
+
+// resolve applies symlink resolution to an absolute, cleaned path when enabled,
+// so a symlink that escapes the sandbox (e.g. ~/worktrees/x -> ~/src/repo) is
+// classified by its real destination.
+func (g *Guard) resolve(p string) string {
+	if !g.resolveSymlinks {
+		return p
+	}
+	return resolveTarget(p)
+}
+
+// resolveTarget resolves symlinks in p. If p itself does not exist (a new file
+// or dir), it resolves the deepest existing ancestor and re-appends the missing
+// components, so a write into a symlinked directory is still seen through the
+// link. On any failure it returns p unchanged (fail safe to lexical form).
+func resolveTarget(p string) string {
+	if !filepath.IsAbs(p) {
+		return p
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	rest := ""
+	cur := p
+	for {
+		parent := filepath.Dir(cur)
+		rest = filepath.Join(filepath.Base(cur), rest)
+		if parent == cur { // reached the root without resolving
+			return p
+		}
+		if r, err := filepath.EvalSymlinks(parent); err == nil {
+			return filepath.Join(r, rest)
+		}
+		cur = parent
+	}
+}
+
+// Resolve expands path (anchored at cwd) and applies symlink resolution,
+// returning the absolute path that classification actually judges. Exposed so
+// callers (the interceptor) can record the resolved target in violation logs.
+func (g *Guard) Resolve(path, cwd string) string {
+	return g.resolve(g.expand(path, cwd))
 }
 
 // expand resolves a possibly ~/$HOME/relative path to an absolute, cleaned
@@ -89,30 +166,23 @@ func under(path, base string) bool {
 
 // isWritableCarveout reports locations that are always writable regardless of
 // the worktree-only policy. These are not protected source trees — they are
-// agent scratch space and I/O plumbing that necessary operations depend on:
+// agent scratch space and I/O plumbing that necessary operations depend on. The
+// concrete set is the policy's Writable list; defaults (see DefaultPolicy)
+// cover:
 //
 //   - /dev/...         -> pseudo-devices (/dev/null, /dev/stdout, /dev/stderr)
 //   - ~/.auto-memory/  -> the agent's persistent memory store
 //   - /tmp, /var/tmp   -> temporary files (macOS /tmp -> /private/tmp symlink)
 //   - /var/folders/... -> macOS's default $TMPDIR (os.TempDir/t.TempDir land here)
 //   - /sessions/...    -> Cowork sandbox session directories
+//   - ~/beads/...      -> the canonical Beads tracker store (bd/dolt writes)
 func (g *Guard) isWritableCarveout(p string) bool {
-	if under(p, "/dev") {
-		return true
-	}
-	if under(p, filepath.Join(g.Home, ".auto-memory")) {
-		return true
-	}
-	tmpDirs := []string{
-		"/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp",
-		"/var/folders", "/private/var/folders",
-	}
-	for _, tmp := range tmpDirs {
-		if under(p, tmp) {
+	for _, w := range g.pol().Writable {
+		if under(p, w) {
 			return true
 		}
 	}
-	return under(p, "/sessions")
+	return false
 }
 
 // repoName extracts the first path component beneath ~/src for use in the
@@ -134,22 +204,37 @@ func (g *Guard) repoName(p, src string) string {
 // proceed. The returned message does NOT include Escalation; callers append
 // it when emitting.
 func (g *Guard) Classify(path, cwd string) (allowed bool, message string) {
-	p := g.expand(path, cwd)
-	worktrees := filepath.Join(g.Home, "worktrees")
+	return g.ClassifyResolved(g.resolve(g.expand(path, cwd)))
+}
+
+// ClassifyResolved is Classify for a path that is already expanded and
+// symlink-resolved (see Resolve). Callers that need both the resolved path and
+// its verdict — e.g. to log the resolved target on a block — use Resolve +
+// ClassifyResolved to avoid resolving (and hitting the disk) twice.
+func (g *Guard) ClassifyResolved(p string) (allowed bool, message string) {
+	pol := g.pol()
 	src := filepath.Join(g.Home, "src")
 
 	if g.isWritableCarveout(p) {
 		return true, ""
 	}
-	if under(p, worktrees) {
+	if under(p, pol.WorktreesDir) {
 		return true, ""
 	}
-	if under(p, src) {
-		repo := g.repoName(p, src)
-		return false, "You're trying to write to ~/src which is protected. " +
-			"Create a worktree first: git -C ~/src/" + repo +
-			" worktree add ~/worktrees/" + repo + "/{branch} -b {branch}, " +
-			"then make your changes there."
+	for _, prot := range pol.Protected {
+		if !under(p, prot) {
+			continue
+		}
+		if prot == src {
+			repo := g.repoName(p, src)
+			return false, "You're trying to write to ~/src which is protected. " +
+				"Create a worktree first: git -C ~/src/" + repo +
+				" worktree add ~/worktrees/" + repo + "/{branch} -b {branch}, " +
+				"then make your changes there."
+		}
+		return false, "You're trying to write to " + prot + ", a protected " +
+			"path. Do your work in a worktree under ~/worktrees/ instead, then " +
+			"merge back."
 	}
 	if under(p, g.Home) {
 		rest := strings.TrimPrefix(p, g.Home+string(os.PathSeparator))
