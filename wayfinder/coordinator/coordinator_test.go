@@ -342,7 +342,7 @@ func TestStop_NoConcurrentDeadlock(t *testing.T) {
 	// Register N "running" projects and spawn goroutines that simulate runProject:
 	// sleep briefly (so Stop enters its wait path first), then call updateProjectStatus
 	// (which acquires c.mu) before calling wg.Done.
-	for i := 0; i < N; i++ {
+	for i := range N {
 		dir := fmt.Sprintf("/test/deadlock-%d", i)
 		coord.mu.Lock()
 		coord.projects[dir] = &ProjectExecution{
