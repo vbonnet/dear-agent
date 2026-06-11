@@ -3,13 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/lifecycle"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	agmtrace "github.com/vbonnet/dear-agent/agm/internal/trace"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 var stateCmd = &cobra.Command{
@@ -79,6 +82,7 @@ Valid states:
   • PERMISSION_PROMPT - Session waiting for user permission
   • COMPACTING       - Session compacting/summarizing context
   • OFFLINE          - Session doesn't exist in tmux
+  • STOPPED          - Session has ended (terminal; emits session.lifecycle OTel span)
 
 Examples:
   # Set state from hook
@@ -151,6 +155,7 @@ func runStateSet(cmd *cobra.Command, args []string) error {
 		"PERMISSION_PROMPT",
 		"COMPACTING",
 		"OFFLINE",
+		"STOPPED",
 	}
 
 	isValid := false
@@ -171,7 +176,7 @@ func runStateSet(cmd *cobra.Command, args []string) error {
 	// Get Dolt adapter for session resolution
 	adapter, _ := getStorage()
 	if adapter != nil {
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 	}
 
 	// Resolve session
@@ -192,17 +197,24 @@ func runStateSet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to update state: %w", err)
 	}
 
-	_ = ctx // span propagation to future sub-operations
+	// Propagate trace context into lifecycle span calls so they appear as children.
+	lifecycle.RecordSessionLifecycleSpan(ctx, m.Name, newState, stateSetSource)
 
 	fmt.Printf("Updated session '%s' state: %s (source: %s)\n", m.Name, newState, stateSetSource)
+
+	// Emit a session lifecycle span when a hook signals the session has ended.
+	// exitCode is -1 because state-reporter hooks do not receive the exit code.
+	if stateSetSource == "sessionend-hook" || stateSetSource == "stop-hook" {
+		agmtrace.RecordSessionLifecycleSpan(ctx, m, time.Now(), -1)
+	}
 
 	return nil
 }
 
 // startStateSetSpan starts an OTel span for the session state set operation.
-func startStateSetSpan(ctx context.Context, sessionName, state, source string) (context.Context, trace.Span) {
+func startStateSetSpan(ctx context.Context, sessionName, state, source string) (context.Context, oteltrace.Span) {
 	return otel.Tracer("agm").Start(ctx, "agm.session.state_set",
-		trace.WithAttributes(
+		oteltrace.WithAttributes(
 			attribute.String("session.name", sessionName),
 			attribute.String("operation", "state_set"),
 			attribute.String("session.state", state),

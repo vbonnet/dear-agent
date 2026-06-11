@@ -65,16 +65,15 @@ func InitTracer(serviceName string) (shutdown func(context.Context) error) {
 		return noopShutdown
 	}
 
-	res, err := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName(serviceName),
-			semconv.ServiceVersion(serviceVersion),
-		),
+	svcRes := resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.ServiceName(serviceName),
+		semconv.ServiceVersion(serviceVersion),
 	)
+	res, err := resource.Merge(resource.Default(), svcRes)
 	if err != nil {
-		res = resource.Default()
+		// Schema URL conflict between SDK default and semconv — keep service name.
+		res = svcRes
 	}
 
 	opts := []sdktrace.TracerProviderOption{

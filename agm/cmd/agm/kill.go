@@ -86,7 +86,7 @@ Examples:
 			// Fail gracefully - return empty list if can't connect to Dolt
 			return []string{}, cobra.ShellCompDirectiveNoFileComp
 		}
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 
 		// List sessions from Dolt (exclude archived sessions from completion)
 		filter := &dolt.SessionFilter{

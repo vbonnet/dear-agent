@@ -267,6 +267,60 @@ func TestContainsTrustPromptPattern(t *testing.T) {
 	}
 }
 
+func TestContainsResumeFailurePattern(t *testing.T) {
+	tests := []struct {
+		name        string
+		line        string
+		wantMatched string
+		wantOK      bool
+	}{
+		{
+			name:        "No conversation found",
+			line:        "No conversation found with session ID: 61163f27-a35e-4370-be49-f8456401a872",
+			wantMatched: "No conversation found",
+			wantOK:      true,
+		},
+		{
+			name:        "No messages returned",
+			line:        "Error: No messages returned for this session",
+			wantMatched: "No messages returned",
+			wantOK:      true,
+		},
+		{
+			name:   "Harness prompt is not a failure",
+			line:   "❯ ",
+			wantOK: false,
+		},
+		{
+			name:   "Shell prompt is not a failure",
+			line:   "vbonnet@mac install-skills %",
+			wantOK: false,
+		},
+		{
+			name:   "Empty line",
+			line:   "",
+			wantOK: false,
+		},
+		{
+			name:   "Unrelated error",
+			line:   "fatal: not a git repository",
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matched, ok := containsResumeFailurePattern(tt.line)
+			if ok != tt.wantOK {
+				t.Errorf("containsResumeFailurePattern(%q) ok = %v, want %v", tt.line, ok, tt.wantOK)
+			}
+			if ok && matched != tt.wantMatched {
+				t.Errorf("containsResumeFailurePattern(%q) matched = %q, want %q", tt.line, matched, tt.wantMatched)
+			}
+		})
+	}
+}
+
 func TestClaudePromptPatterns(t *testing.T) {
 	// Verify that all expected patterns are defined
 	expectedPatterns := map[string]bool{

@@ -85,7 +85,7 @@ func runSessionSearch(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	// Create searcher
 	searcher := search.NewSearcher(adapter)
@@ -120,11 +120,11 @@ func runSessionSearch(cmd *cobra.Command, args []string) error {
 
 func displaySearchResults(results []*search.SearchResult) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	defer w.Flush()
+	defer func() { _ = w.Flush() }()
 
 	// Header
-	fmt.Fprintln(w, "UUID\tSession Name\tMatches\tWorkspace\tContext")
-	fmt.Fprintln(w, "----\t------------\t-------\t---------\t-------")
+	_, _ = fmt.Fprintln(w, "UUID\tSession Name\tMatches\tWorkspace\tContext")
+	_, _ = fmt.Fprintln(w, "----\t------------\t-------\t---------\t-------")
 
 	// Rows
 	for _, r := range results {
@@ -156,7 +156,7 @@ func displaySearchResults(results []*search.SearchResult) {
 			context = context[:37] + "..."
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n",
 			uuid, sessionName, r.MatchCount, workspace, context)
 	}
 }

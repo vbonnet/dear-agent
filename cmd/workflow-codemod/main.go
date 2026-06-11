@@ -48,30 +48,30 @@ func run(args []string, stdout, stderr io.Writer) int {
 		printUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "unknown subcommand %q\n", args[0])
+		_, _ = fmt.Fprintf(stderr, "unknown subcommand %q\n", args[0])
 		printUsage(stderr)
 		return 2
 	}
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  workflow-codemod upgrade [--write] [--add-budget] [--drop-model] <file>...")
-	fmt.Fprintln(w, "  workflow-codemod from-wayfinder --out <file> <wayfinder-session.yaml>")
-	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Run --help on a subcommand for full flag listings.")
+	_, _ = fmt.Fprintln(w, "Usage:")
+	_, _ = fmt.Fprintln(w, "  workflow-codemod upgrade [--write] [--add-budget] [--drop-model] <file>...")
+	_, _ = fmt.Fprintln(w, "  workflow-codemod from-wayfinder --out <file> <wayfinder-session.yaml>")
+	_, _ = fmt.Fprintln(w, "")
+	_, _ = fmt.Fprintln(w, "Run --help on a subcommand for full flag listings.")
 }
 
 func runUpgrade(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		write      = fs.Bool("write", false, "overwrite the input files in place (default: dry-run to stdout)")
-		addBudget  = fs.Bool("add-budget", false, "insert a default budget block on AI nodes that lack one")
-		dropModel  = fs.Bool("drop-model", false, "remove the model: field once role: is added (default: keep both for back-compat)")
+		write     = fs.Bool("write", false, "overwrite the input files in place (default: dry-run to stdout)")
+		addBudget = fs.Bool("add-budget", false, "insert a default budget block on AI nodes that lack one")
+		dropModel = fs.Bool("drop-model", false, "remove the model: field once role: is added (default: keep both for back-compat)")
 	)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: workflow-codemod upgrade [--write] [--add-budget] [--drop-model] <file>...")
+		_, _ = fmt.Fprintln(stderr, "Usage: workflow-codemod upgrade [--write] [--add-budget] [--drop-model] <file>...")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -89,19 +89,19 @@ func runUpgrade(args []string, stdout, stderr io.Writer) int {
 	for _, path := range fs.Args() {
 		in, err := os.ReadFile(path) //nolint:gosec // path is a CLI arg
 		if err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err)
 			failed = true
 			continue
 		}
 		r, err := codemod.UpgradeV01ToV02(in, opts)
 		if err != nil {
-			fmt.Fprintf(stderr, "%s: %v\n", path, err)
+			_, _ = fmt.Fprintf(stderr, "%s: %v\n", path, err)
 			failed = true
 			continue
 		}
 		r.Path = path
 		if err := codemod.WriteResult(stdout, r); err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err)
 			failed = true
 			continue
 		}
@@ -115,11 +115,11 @@ func runUpgrade(args []string, stdout, stderr io.Writer) int {
 				mode = info.Mode().Perm()
 			}
 			if err := os.WriteFile(path, r.Output, mode); err != nil {
-				fmt.Fprintln(stderr, err)
+				_, _ = fmt.Fprintln(stderr, err)
 				failed = true
 				continue
 			}
-			fmt.Fprintf(stdout, "  wrote %s\n", path)
+			_, _ = fmt.Fprintf(stdout, "  wrote %s\n", path)
 		}
 	}
 	if failed {
@@ -133,7 +133,7 @@ func runFromWayfinder(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	out := fs.String("out", "", "output workflow YAML path (required; '-' for stdout)")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: workflow-codemod from-wayfinder --out <file> <wayfinder-session.yaml>")
+		_, _ = fmt.Fprintln(stderr, "Usage: workflow-codemod from-wayfinder --out <file> <wayfinder-session.yaml>")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -146,27 +146,27 @@ func runFromWayfinder(args []string, stdout, stderr io.Writer) int {
 	src := fs.Arg(0)
 	in, err := os.ReadFile(src) //nolint:gosec // path is a CLI arg
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 	r, err := codemod.FromWayfinder(in, src)
 	if err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", src, err)
+		_, _ = fmt.Fprintf(stderr, "%s: %v\n", src, err)
 		return 1
 	}
 	if *out == "-" {
 		if _, err := stdout.Write(r.Output); err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err)
 			return 1
 		}
 	} else {
 		if err := os.WriteFile(*out, r.Output, 0o600); err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err)
 			return 1
 		}
 	}
 	if err := codemod.WriteResult(stdout, r); err != nil {
-		fmt.Fprintln(stderr, err)
+		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
 	return 0

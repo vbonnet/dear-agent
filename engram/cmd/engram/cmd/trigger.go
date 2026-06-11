@@ -135,7 +135,7 @@ func runTriggerList(cmd *cobra.Command, args []string) error {
 	sort.Strings(eventTypes)
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(w, "EVENT TYPE\tENGRAM PATH\tPRIORITY\tSCOPE\tCOOLDOWN\n")
+	_, _ = fmt.Fprintf(w, "EVENT TYPE\tENGRAM PATH\tPRIORITY\tSCOPE\tCOOLDOWN\n")
 
 	for _, et := range eventTypes {
 		seen := make(map[string]bool)
@@ -160,11 +160,11 @@ func runTriggerList(cmd *cobra.Command, args []string) error {
 				if cooldown == "" {
 					cooldown = "-"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", et, e.path, priority, scope, cooldown)
+				_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", et, e.path, priority, scope, cooldown)
 			}
 		}
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	fmt.Fprintf(os.Stderr, "\n%d triggered engram(s) across %d event type(s)\n", len(entries), len(eventTypes))
 	return nil
@@ -205,7 +205,7 @@ func runTriggerEvaluate(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(w, "PRIORITY\tENGRAM PATH\tSCOPE\tCOOLDOWN\n")
+	_, _ = fmt.Fprintf(w, "PRIORITY\tENGRAM PATH\tSCOPE\tCOOLDOWN\n")
 	for _, r := range results {
 		scope := r.Trigger.Scope
 		if scope == "" {
@@ -215,9 +215,9 @@ func runTriggerEvaluate(cmd *cobra.Command, args []string) error {
 		if cooldown == "" {
 			cooldown = "-"
 		}
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", r.Priority, r.EngramPath, scope, cooldown)
+		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", r.Priority, r.EngramPath, scope, cooldown)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	fmt.Fprintf(os.Stderr, "\n%d engram(s) matched event %q\n", len(results), eventType)
 	return nil
@@ -253,11 +253,11 @@ func runTriggerHistory(cmd *cobra.Command, args []string) error {
 	})
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(w, "ENGRAM PATH\tLAST INJECTED\n")
+	_, _ = fmt.Fprintf(w, "ENGRAM PATH\tLAST INJECTED\n")
 	for _, h := range history {
-		fmt.Fprintf(w, "%s\t%s\n", h.path, h.ts.Format(time.RFC3339))
+		_, _ = fmt.Fprintf(w, "%s\t%s\n", h.path, h.ts.Format(time.RFC3339))
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	fmt.Fprintf(os.Stderr, "\n%d injection(s) recorded\n", len(history))
 	return nil

@@ -45,7 +45,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 
 	daemonLogger := logging.NewTextLogger(logFile)
 
@@ -60,7 +60,7 @@ func run() error {
 
 	doltAdapter := initDoltAdapter(daemonLogger)
 	if doltAdapter != nil {
-		defer doltAdapter.Close()
+		defer func() { _ = doltAdapter.Close() }()
 	}
 
 	// Create daemon config
@@ -116,7 +116,7 @@ func initDoltAdapter(daemonLogger *slog.Logger) *dolt.Adapter {
 		return nil
 	}
 	if err := adapter.ApplyMigrations(); err != nil {
-		adapter.Close()
+		_ = adapter.Close()
 		daemonLogger.Warn("Dolt migrations failed", "error", err)
 		return nil
 	}

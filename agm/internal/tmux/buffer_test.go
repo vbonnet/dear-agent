@@ -2,8 +2,8 @@ package tmux
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,9 +13,8 @@ import (
 
 func TestCleanupBuffers_NoServer(t *testing.T) {
 	// When tmux server is not running, CleanupBuffers should return 0 without error
-	testSocket := fmt.Sprintf("/tmp/agm-test-buf-%d.sock", os.Getpid())
+	testSocket := filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", testSocket)
-	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	cleaned, err := CleanupBuffers()
 	assert.Equal(t, 0, cleaned)
@@ -29,12 +28,10 @@ func TestCleanupBuffers_WithBuffers(t *testing.T) {
 	}
 
 	// Create isolated socket
-	testSocket := fmt.Sprintf("/tmp/agm-test-buf2-%d.sock", os.Getpid())
+	testSocket := filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
-		os.Remove(testSocket)
-		os.Unsetenv("AGM_TMUX_SOCKET")
 	})
 	setupTestState(t)
 
@@ -70,9 +67,8 @@ func TestCleanupBuffers_WithBuffers(t *testing.T) {
 }
 
 func TestBufferCount_NoServer(t *testing.T) {
-	testSocket := fmt.Sprintf("/tmp/agm-test-bufcnt-%d.sock", os.Getpid())
+	testSocket := filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", testSocket)
-	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	count, err := BufferCount()
 	assert.Equal(t, 0, count)
@@ -85,12 +81,10 @@ func TestDeleteBuffer_NoBuffer(t *testing.T) {
 		t.Skip("tmux not available")
 	}
 
-	testSocket := fmt.Sprintf("/tmp/agm-test-delbuf-%d.sock", os.Getpid())
+	testSocket := filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
-		os.Remove(testSocket)
-		os.Unsetenv("AGM_TMUX_SOCKET")
 	})
 
 	sessionName := "test-delete-buffer"
