@@ -65,7 +65,8 @@ type contextDetectorCache struct {
 // More-specific prefixes must be checked before less-specific ones;
 // getModelContextWindow uses longest-prefix matching to ensure correctness.
 var modelContextWindows = map[string]int{
-	// Opus 4.6+ has a 1M context window by default.
+	// Opus 4.8+ and 4.6 have a 1M context window by default.
+	"claude-opus-4-8": 1000000,
 	"claude-opus-4-6": 1000000,
 	"claude-opus-4":   200000,
 	"claude-sonnet-4": 200000,

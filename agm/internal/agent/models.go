@@ -16,10 +16,10 @@ type ModelSpec struct {
 var HarnessModels = map[string][]ModelSpec{
 	"claude-code": {
 		{Alias: "fable", FullName: "claude-fable-5", Description: "Mythos-class, most capable, 1M context, 128k max output (free on Pro/Max/Team through 2026-06-23)"},
-		{Alias: "opus", FullName: "claude-opus-4-6[1m]", Description: "Latest Opus, 1M context"},
+		{Alias: "opus", FullName: "claude-opus-4-8[1m]", Description: "Latest Opus, 1M context"},
 		{Alias: "sonnet", FullName: "claude-sonnet-4-6[1m]", Description: "Latest Sonnet, 1M context"},
 		{Alias: "haiku", FullName: "claude-haiku-4-5", Description: "Fast, 200k context"},
-		{Alias: "opus-200k", FullName: "claude-opus-4-6", Description: "Opus with default 200k context"},
+		{Alias: "opus-200k", FullName: "claude-opus-4-8", Description: "Opus with default 200k context"},
 		{Alias: "sonnet-200k", FullName: "claude-sonnet-4-6", Description: "Sonnet with default 200k context"},
 		{Alias: "opusplan", FullName: "opusplan", Description: "Opus for planning, Sonnet for execution"},
 	},
