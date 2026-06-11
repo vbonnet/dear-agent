@@ -10,9 +10,9 @@ import (
 )
 
 var (
-	dashboardJSON       bool
-	dashboardAll        bool
-	dashboardOutput     string
+	dashboardJSON         bool
+	dashboardAll          bool
+	dashboardOutput       string
 	dashboardOrchestrator bool
 )
 

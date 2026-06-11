@@ -17,9 +17,9 @@ import (
 //
 // Two syntaxes are accepted:
 //
-//	1. Bare id        e.g. "claude-opus-4-7", "gpt-4o", "gemini-3.5-flash"
-//	2. Prefixed id    e.g. "openai/gpt-4o", "anthropic:claude-opus-4-7",
-//	                  "ollama:llama3.2", "openrouter/anthropic/claude-3-5-sonnet"
+//  1. Bare id        e.g. "claude-opus-4-7", "gpt-4o", "gemini-3.5-flash"
+//  2. Prefixed id    e.g. "openai/gpt-4o", "anthropic:claude-opus-4-7",
+//     "ollama:llama3.2", "openrouter/anthropic/claude-3-5-sonnet"
 //
 // Prefixed ids let operators force-route a model that the heuristic
 // would otherwise misclassify (or that lives only on OpenRouter).
@@ -56,13 +56,13 @@ func (r *Resolver) Register(prefix, family string) {
 //
 // Resolution rules, in order:
 //
-//	1. Explicit prefix syntaxes ("family://model", "family:model",
-//	     "family/model") force routing when the prefix is a known family.
-//	2. Built-in heuristic against the bare id (gpt-/o1- → openai,
-//	     claude- → anthropic, gemini- → gemini, llama/mistral/qwen/phi →
-//	     ollama).
-//	3. Registered extra prefix mappings (longest match wins).
-//	4. Return an error if nothing matched.
+//  1. Explicit prefix syntaxes ("family://model", "family:model",
+//     "family/model") force routing when the prefix is a known family.
+//  2. Built-in heuristic against the bare id (gpt-/o1- → openai,
+//     claude- → anthropic, gemini- → gemini, llama/mistral/qwen/phi →
+//     ollama).
+//  3. Registered extra prefix mappings (longest match wins).
+//  4. Return an error if nothing matched.
 func (r *Resolver) Resolve(id string) (family, model string, err error) {
 	id = strings.TrimSpace(id)
 	if id == "" {

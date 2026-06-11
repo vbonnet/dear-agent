@@ -17,10 +17,10 @@ import (
 )
 
 var (
-	compactFocus string
+	compactFocus  string
 	compactVerify bool
 	compactDryRun bool
-	compactForce bool
+	compactForce  bool
 )
 
 var sendCompactCmd = &cobra.Command{

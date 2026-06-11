@@ -95,7 +95,6 @@ func extractToolName(req mcp.Request) string {
 		return ""
 	}
 
-
 	// Try to get name from the params interface
 	switch p := params.(type) {
 	case *mcp.CallToolParams:

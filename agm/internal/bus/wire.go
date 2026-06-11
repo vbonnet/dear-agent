@@ -80,18 +80,18 @@ const (
 // correlation: Acks and Errors echo the ID of the originating Send or
 // PermissionRequest.
 type Frame struct {
-	Type    FrameType `json:"type"`
-	ID      string    `json:"id,omitempty"`
-	From    string    `json:"from,omitempty"`
-	To      string    `json:"to,omitempty"`
-	Text    string    `json:"text,omitempty"`
-	TS      time.Time `json:"ts,omitempty"`
+	Type FrameType `json:"type"`
+	ID   string    `json:"id,omitempty"`
+	From string    `json:"from,omitempty"`
+	To   string    `json:"to,omitempty"`
+	Text string    `json:"text,omitempty"`
+	TS   time.Time `json:"ts,omitempty"`
 
 	// Permission-relay fields.
-	ToolName     string    `json:"tool_name,omitempty"`
-	Description  string    `json:"description,omitempty"`
-	InputPreview string    `json:"input_preview,omitempty"`
-	Verdict      string    `json:"verdict,omitempty"` // "allow" | "deny"
+	ToolName     string `json:"tool_name,omitempty"`
+	Description  string `json:"description,omitempty"`
+	InputPreview string `json:"input_preview,omitempty"`
+	Verdict      string `json:"verdict,omitempty"` // "allow" | "deny"
 
 	// Error-frame fields.
 	Code    ErrorCode `json:"code,omitempty"`

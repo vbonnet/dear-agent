@@ -32,9 +32,6 @@ func TestArchiveAttachedSessionRequiresForce(t *testing.T) {
 	// This is tested by the archive_regression test above
 }
 
-
-
-
 // TestArchiveLogicUsesListClientsNotHasSession ensures archive uses correct check
 //
 // This is a unit-level test that verifies the archive decision logic

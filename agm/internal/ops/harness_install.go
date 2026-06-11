@@ -37,13 +37,13 @@ func ValidateHarness(harness string) (HarnessType, error) {
 
 // HarnessInstallResult represents the result of an installation attempt
 type HarnessInstallResult struct {
-	Success       bool   `json:"success"`
-	Harness       string `json:"harness"`
-	Message       string `json:"message"`
-	Version       string `json:"version,omitempty"`
-	Path          string `json:"path,omitempty"`
-	SkipReason    string `json:"skip_reason,omitempty"`
-	ErrorDetails  string `json:"error_details,omitempty"`
+	Success      bool   `json:"success"`
+	Harness      string `json:"harness"`
+	Message      string `json:"message"`
+	Version      string `json:"version,omitempty"`
+	Path         string `json:"path,omitempty"`
+	SkipReason   string `json:"skip_reason,omitempty"`
+	ErrorDetails string `json:"error_details,omitempty"`
 }
 
 // IsInstalled checks if a harness is available in the system PATH

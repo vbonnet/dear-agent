@@ -46,7 +46,6 @@ func TestDetectContext_GitRepo(t *testing.T) {
 func TestDetectContext_GitHTTPS(t *testing.T) {
 	tmpDir := testutil.SetupTempDir(t)
 
-
 	t.Chdir(tmpDir)
 
 	cmd := exec.Command("git", "init")
@@ -79,7 +78,6 @@ func TestDetectContext_DirectoryFallback(t *testing.T) {
 	if err := os.MkdirAll(testDir, 0755); err != nil {
 		t.Fatalf("failed to create test directory: %v", err)
 	}
-
 
 	t.Chdir(testDir)
 
@@ -182,7 +180,6 @@ func TestCleanName(t *testing.T) {
 func TestGetGitRepoName_NoGitRepo(t *testing.T) {
 	tmpDir := testutil.SetupTempDir(t)
 
-
 	t.Chdir(tmpDir)
 
 	// Should return error or empty string when not in a git repo
@@ -195,7 +192,6 @@ func TestGetGitRepoName_NoGitRepo(t *testing.T) {
 // TestGetGitRepoName_WithGitSuffix verifies .git suffix is removed
 func TestGetGitRepoName_WithGitSuffix(t *testing.T) {
 	tmpDir := testutil.SetupTempDir(t)
-
 
 	t.Chdir(tmpDir)
 

@@ -28,13 +28,13 @@ type EventCallback func(event WatchEvent)
 
 // Watcher monitors multiple event sources and dispatches callbacks.
 type Watcher struct {
-	directiveDir  string
-	pollInterval  time.Duration
-	callback      EventCallback
-	queueFactory  func() (QueuePoller, error) // factory for testability
-	fsWatcher     *fsnotify.Watcher           // nil = use real fsnotify
-	mu            sync.Mutex
-	events        []WatchEvent // recorded events (for testing)
+	directiveDir string
+	pollInterval time.Duration
+	callback     EventCallback
+	queueFactory func() (QueuePoller, error) // factory for testability
+	fsWatcher    *fsnotify.Watcher           // nil = use real fsnotify
+	mu           sync.Mutex
+	events       []WatchEvent // recorded events (for testing)
 }
 
 // QueuePoller abstracts message queue polling for testability.

@@ -16,9 +16,9 @@ type stubCollector struct {
 	err     error
 }
 
-func (s *stubCollector) Name() string                                  { return s.name }
-func (s *stubCollector) Kind() Kind                                    { return s.kind }
-func (s *stubCollector) Collect(_ context.Context) ([]Signal, error)   { return s.signals, s.err }
+func (s *stubCollector) Name() string                                { return s.name }
+func (s *stubCollector) Kind() Kind                                  { return s.kind }
+func (s *stubCollector) Collect(_ context.Context) ([]Signal, error) { return s.signals, s.err }
 
 func TestAggregatorRunHappyPath(t *testing.T) {
 	t.Parallel()

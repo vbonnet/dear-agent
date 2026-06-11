@@ -11,9 +11,9 @@ import (
 // recordingDelivery is a test Delivery that captures everything written to it
 // and counts Close calls. Safe for concurrent Deliver.
 type recordingDelivery struct {
-	mu      sync.Mutex
-	frames  []*Frame
-	closed  atomic.Bool
+	mu         sync.Mutex
+	frames     []*Frame
+	closed     atomic.Bool
 	deliverErr error
 }
 

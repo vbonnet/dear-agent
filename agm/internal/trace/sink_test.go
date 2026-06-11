@@ -15,10 +15,10 @@ import (
 
 // memoryBackend captures records in memory for testing.
 type memoryBackend struct {
-	mu      sync.Mutex
-	records []*TraceRecord
-	flushed bool
-	closed  bool
+	mu       sync.Mutex
+	records  []*TraceRecord
+	flushed  bool
+	closed   bool
 	writeErr error
 }
 

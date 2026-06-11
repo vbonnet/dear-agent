@@ -224,4 +224,3 @@ func (s *SQLiteStore) queryRows(ctx context.Context, q string, args ...any) ([]S
 	}
 	return out, nil
 }
-

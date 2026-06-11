@@ -22,11 +22,11 @@ import (
 )
 
 var (
-	asyncArchive     bool // Spawn background reaper for async archival
-	archiveAll       bool
-	olderThan        string
-	dryRun           bool
-	cleanupWorktrees bool
+	asyncArchive       bool // Spawn background reaper for async archival
+	archiveAll         bool
+	olderThan          string
+	dryRun             bool
+	cleanupWorktrees   bool
 	forceArchive       bool // Skip pre-archive verification checks
 	keepSandbox        bool // Preserve sandbox directory for debugging
 	includeSupervisors bool // Include supervisor sessions in bulk archive

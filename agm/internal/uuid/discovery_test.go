@@ -15,7 +15,6 @@ import (
 
 // Test helpers
 
-
 // TestSearchHistoryByRename tests the SearchHistoryByRename function
 func TestSearchHistoryByRename(t *testing.T) {
 	// Create sample history entries in NEW format (ConversationEntry)

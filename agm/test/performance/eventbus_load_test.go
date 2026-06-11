@@ -44,7 +44,6 @@ type PerformanceReport struct {
 	MemoryUsage          runtime.MemStats
 }
 
-
 // calculateLatencyMetrics computes comprehensive latency statistics
 func calculateLatencyMetrics(latencies []time.Duration) LatencyMetrics {
 	if len(latencies) == 0 {

@@ -223,7 +223,6 @@ func (v *IsolationVerifier) Cleanup() {
 	}
 }
 
-
 // Benchmark isolation overhead
 func BenchmarkWorkspaceConfigCreation(b *testing.B) {
 	tmpDir := b.TempDir()

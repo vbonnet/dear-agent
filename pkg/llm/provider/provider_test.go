@@ -950,7 +950,6 @@ func TestFactory_NewProvider_GeminiWithGoogleAPIKey(t *testing.T) {
 
 // --- OpenRouter Generate with httptest mock server ---
 
-
 func TestOpenRouterProvider_Generate_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request

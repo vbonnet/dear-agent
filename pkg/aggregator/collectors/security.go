@@ -15,9 +15,9 @@ import (
 // JSON file) and emits one signal per distinct vulnerability ID, with
 // Value=1 and Metadata recording the affected packages.
 type SecurityAlerts struct {
-	Repo       string         // path to the Go module root
-	InputFile  string         // optional precomputed JSON output
-	Exec       Exec           // nil → DefaultExec
+	Repo       string                       // path to the Go module root
+	InputFile  string                       // optional precomputed JSON output
+	Exec       Exec                         // nil → DefaultExec
 	LookPathFn func(string) (string, error) // nil → LookPath
 }
 

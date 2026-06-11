@@ -402,11 +402,11 @@ func TestReportResults(t *testing.T) {
 				RequireAllPassing: true,
 			},
 			results: map[string]*act.WorkflowResult{
-				path("a.yml"):         pass(time.Second),
-				path("o-pass.yml"):    pass(time.Second),
-				path("o-fail.yml"):    fail(1, ""),
-				path("o-skip.yml"):    skip("upstream failed"),
-				path("o-err.yml"):     infraErr("network down"),
+				path("a.yml"):      pass(time.Second),
+				path("o-pass.yml"): pass(time.Second),
+				path("o-fail.yml"): fail(1, ""),
+				path("o-skip.yml"): skip("upstream failed"),
+				path("o-err.yml"):  infraErr("network down"),
 				// o-missing.yml deliberately absent
 			},
 			want: 0,
@@ -615,11 +615,11 @@ func TestRun_FailingExecutor_RespectsFailureBehavior(t *testing.T) {
 	// error → exit code 1 from that helper. run() then decides what to do
 	// based on the policy's failure_behavior. We sweep all three.
 	tests := []struct {
-		name        string
-		behavior    string
-		want        int
-		mustStdout  string
-		mustStderr  string
+		name       string
+		behavior   string
+		want       int
+		mustStdout string
+		mustStderr string
 	}{
 		{
 			name:       "warn keeps the merge",

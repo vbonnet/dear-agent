@@ -42,12 +42,12 @@ func (s *OTelAuditSink) Emit(ctx context.Context, ev AuditEvent) error {
 		occurred = time.Now()
 	}
 	attrs := map[string]any{
-		"workflow.run_id":      ev.RunID,
-		"workflow.event_id":    ev.EventID,
-		"workflow.from_state":  ev.FromState,
-		"workflow.to_state":    ev.ToState,
-		"workflow.reason":      ev.Reason,
-		"workflow.actor":       ev.Actor,
+		"workflow.run_id":     ev.RunID,
+		"workflow.event_id":   ev.EventID,
+		"workflow.from_state": ev.FromState,
+		"workflow.to_state":   ev.ToState,
+		"workflow.reason":     ev.Reason,
+		"workflow.actor":      ev.Actor,
 	}
 	if ev.NodeID != "" {
 		attrs["workflow.node_id"] = ev.NodeID

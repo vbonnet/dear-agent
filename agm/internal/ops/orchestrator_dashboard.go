@@ -27,14 +27,14 @@ type BacklogSummary struct {
 
 // OrchestratorDashboardResult contains unified orchestrator view.
 type OrchestratorDashboardResult struct {
-	Operation  string                   `json:"operation"`
-	Timestamp  string                   `json:"timestamp"`
-	Sessions   SessionMetrics           `json:"sessions"`
-	Metrics    ThroughputMetrics        `json:"throughput"`
-	Resources  ResourceMetrics          `json:"resources"`
-	Alerts     []Alert                  `json:"alerts"`
-	Trust      OrchestratorTrustSummary `json:"trust"`
-	Backlog    BacklogSummary           `json:"backlog"`
+	Operation string                   `json:"operation"`
+	Timestamp string                   `json:"timestamp"`
+	Sessions  SessionMetrics           `json:"sessions"`
+	Metrics   ThroughputMetrics        `json:"throughput"`
+	Resources ResourceMetrics          `json:"resources"`
+	Alerts    []Alert                  `json:"alerts"`
+	Trust     OrchestratorTrustSummary `json:"trust"`
+	Backlog   BacklogSummary           `json:"backlog"`
 }
 
 // OrchestratorDashboard returns a unified view for orchestrators.

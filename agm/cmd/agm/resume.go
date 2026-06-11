@@ -215,7 +215,6 @@ type HealthStatus struct {
 	Warnings          []string
 }
 
-
 // resolveSessionIdentifier finds the Claude UUID and manifest path from various identifier types
 func resolveSessionIdentifier(adapter *dolt.Adapter, identifier string) (string, string, error) {
 	// Defensive check: ensure cfg is initialized

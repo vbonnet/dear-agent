@@ -4,41 +4,41 @@ import "time"
 
 // Manifest represents a Claude session manifest (v2 schema)
 type Manifest struct {
-	SchemaVersion           string          `yaml:"schema_version"`
-	SessionID               string          `yaml:"session_id"`
-	Name                    string          `yaml:"name"`
-	ParentSessionID         *string         `yaml:"parent_session_id,omitempty"` // Parent session ID for execution sessions
-	State                   string          `yaml:"state,omitempty"`             // Session readiness state (DONE|WORKING|USER_PROMPT|COMPACTING|OFFLINE)
-	StateUpdatedAt          time.Time       `yaml:"state_updated_at,omitempty"`  // When state was last updated
-	StateSource             string          `yaml:"state_source,omitempty"`      // How state was detected (hook|tmux|manual)
-	CreatedAt               time.Time       `yaml:"created_at"`
-	UpdatedAt               time.Time       `yaml:"updated_at"`
-	Lifecycle               string          `yaml:"lifecycle"`           // "" (active/stopped) or "archived"
-	Workspace               string          `yaml:"workspace,omitempty"` // Workspace name (e.g., "oss", "acme")
-	Context                 Context         `yaml:"context"`
-	Claude                  Claude          `yaml:"claude"`
-	Tmux                    Tmux            `yaml:"tmux"`
-	OpenCode                *OpenCode       `yaml:"opencode,omitempty"` // OpenCode session metadata
-	Harness                 string          `yaml:"harness,omitempty"`  // Harness specifies the AI harness (claude-code, gemini-cli, codex-cli, opencode-cli)
-	Model                   string          `yaml:"model,omitempty"`    // Model specifies the AI model within the harness
-	EngramMetadata          *EngramMetadata `yaml:"engram_metadata,omitempty"`
-	ContextUsage            *ContextUsage   `yaml:"context_usage,omitempty"`              // Context usage tracking for status line
-	PermissionMode          string          `yaml:"permission_mode,omitempty"`            // Claude Code permission mode (default, plan, ask, allow)
-	PermissionModeUpdatedAt *time.Time      `yaml:"permission_mode_updated_at,omitempty"` // When mode was last changed
-	PermissionModeSource    string          `yaml:"permission_mode_source,omitempty"`     // How mode was detected (hook, manual, resume)
-	IsTest                  bool            `yaml:"is_test,omitempty"`                    // Whether this is a test session (created with --test)
-	Sandbox                 *SandboxConfig  `yaml:"sandbox,omitempty"`                    // Sandbox isolation metadata
-	WorkingDirectory        string          `yaml:"working_directory,omitempty"`          // Working directory when session was associated
-	LastKnownCost           float64         `yaml:"last_known_cost,omitempty"`            // Cached cost from statusline file
-	LastKnownModel          string          `yaml:"last_known_model,omitempty"`           // Cached model display name from statusline file
-	LastKnownModelAt        time.Time       `yaml:"last_known_model_at,omitempty"`        // When model was last cached
-	Disposable              bool            `yaml:"disposable,omitempty"`                 // Whether this is a disposable session with TTL-based auto-archive
-	DisposableTTL           string          `yaml:"disposable_ttl,omitempty"`             // TTL for disposable sessions (e.g., "1h", "4h", "30m")
-	Monitors                []string        `yaml:"monitors,omitempty"`                   // Sessions that monitor this session's loop heartbeat
-	WorkflowPhase           string          `yaml:"workflow_phase,omitempty"`             // Session workflow phase: research, delegate, wait, verify, exit
-	WorkflowPhaseUpdatedAt  *time.Time      `yaml:"workflow_phase_updated_at,omitempty"`  // When workflow phase was last changed
-	CostTracking            *CostTracking   `yaml:"cost_tracking,omitempty"`              // Token usage and cost tracking
-	Resources               *ResourceManifest `yaml:"resources,omitempty"`                // Git worktrees and branches created by this session
+	SchemaVersion           string            `yaml:"schema_version"`
+	SessionID               string            `yaml:"session_id"`
+	Name                    string            `yaml:"name"`
+	ParentSessionID         *string           `yaml:"parent_session_id,omitempty"` // Parent session ID for execution sessions
+	State                   string            `yaml:"state,omitempty"`             // Session readiness state (DONE|WORKING|USER_PROMPT|COMPACTING|OFFLINE)
+	StateUpdatedAt          time.Time         `yaml:"state_updated_at,omitempty"`  // When state was last updated
+	StateSource             string            `yaml:"state_source,omitempty"`      // How state was detected (hook|tmux|manual)
+	CreatedAt               time.Time         `yaml:"created_at"`
+	UpdatedAt               time.Time         `yaml:"updated_at"`
+	Lifecycle               string            `yaml:"lifecycle"`           // "" (active/stopped) or "archived"
+	Workspace               string            `yaml:"workspace,omitempty"` // Workspace name (e.g., "oss", "acme")
+	Context                 Context           `yaml:"context"`
+	Claude                  Claude            `yaml:"claude"`
+	Tmux                    Tmux              `yaml:"tmux"`
+	OpenCode                *OpenCode         `yaml:"opencode,omitempty"` // OpenCode session metadata
+	Harness                 string            `yaml:"harness,omitempty"`  // Harness specifies the AI harness (claude-code, gemini-cli, codex-cli, opencode-cli)
+	Model                   string            `yaml:"model,omitempty"`    // Model specifies the AI model within the harness
+	EngramMetadata          *EngramMetadata   `yaml:"engram_metadata,omitempty"`
+	ContextUsage            *ContextUsage     `yaml:"context_usage,omitempty"`              // Context usage tracking for status line
+	PermissionMode          string            `yaml:"permission_mode,omitempty"`            // Claude Code permission mode (default, plan, ask, allow)
+	PermissionModeUpdatedAt *time.Time        `yaml:"permission_mode_updated_at,omitempty"` // When mode was last changed
+	PermissionModeSource    string            `yaml:"permission_mode_source,omitempty"`     // How mode was detected (hook, manual, resume)
+	IsTest                  bool              `yaml:"is_test,omitempty"`                    // Whether this is a test session (created with --test)
+	Sandbox                 *SandboxConfig    `yaml:"sandbox,omitempty"`                    // Sandbox isolation metadata
+	WorkingDirectory        string            `yaml:"working_directory,omitempty"`          // Working directory when session was associated
+	LastKnownCost           float64           `yaml:"last_known_cost,omitempty"`            // Cached cost from statusline file
+	LastKnownModel          string            `yaml:"last_known_model,omitempty"`           // Cached model display name from statusline file
+	LastKnownModelAt        time.Time         `yaml:"last_known_model_at,omitempty"`        // When model was last cached
+	Disposable              bool              `yaml:"disposable,omitempty"`                 // Whether this is a disposable session with TTL-based auto-archive
+	DisposableTTL           string            `yaml:"disposable_ttl,omitempty"`             // TTL for disposable sessions (e.g., "1h", "4h", "30m")
+	Monitors                []string          `yaml:"monitors,omitempty"`                   // Sessions that monitor this session's loop heartbeat
+	WorkflowPhase           string            `yaml:"workflow_phase,omitempty"`             // Session workflow phase: research, delegate, wait, verify, exit
+	WorkflowPhaseUpdatedAt  *time.Time        `yaml:"workflow_phase_updated_at,omitempty"`  // When workflow phase was last changed
+	CostTracking            *CostTracking     `yaml:"cost_tracking,omitempty"`              // Token usage and cost tracking
+	Resources               *ResourceManifest `yaml:"resources,omitempty"`                  // Git worktrees and branches created by this session
 }
 
 // IsExpired returns true if the session is disposable and its TTL has elapsed.
@@ -55,16 +55,16 @@ func (m *Manifest) IsExpired() bool {
 
 // State constants for session display state
 const (
-	StateReady             = "READY"
-	StateDone              = "DONE"
-	StateWorking           = "WORKING"
-	StateUserPrompt        = "USER_PROMPT"
-	StatePermissionPrompt  = "PERMISSION_PROMPT"
-	StateCompacting        = "COMPACTING"
-	StateOffline           = "OFFLINE"
-	StateWaitingAgent      = "WAITING_AGENT"
-	StateLooping           = "LOOPING"
-	StateBackgroundTasks   = "BACKGROUND_TASKS"
+	StateReady            = "READY"
+	StateDone             = "DONE"
+	StateWorking          = "WORKING"
+	StateUserPrompt       = "USER_PROMPT"
+	StatePermissionPrompt = "PERMISSION_PROMPT"
+	StateCompacting       = "COMPACTING"
+	StateOffline          = "OFFLINE"
+	StateWaitingAgent     = "WAITING_AGENT"
+	StateLooping          = "LOOPING"
+	StateBackgroundTasks  = "BACKGROUND_TASKS"
 )
 
 // Alive represents whether a session exists and is running.
@@ -138,7 +138,7 @@ type SandboxConfig struct {
 // Agents that create worktrees should update this field so cleanup is deterministic.
 type ResourceManifest struct {
 	Worktrees []WorktreeResource `yaml:"worktrees,omitempty"`
-	Branches  []BranchResource  `yaml:"branches,omitempty"`
+	Branches  []BranchResource   `yaml:"branches,omitempty"`
 }
 
 // WorktreeResource describes a git worktree created during a session.
@@ -158,11 +158,11 @@ type BranchResource struct {
 
 // CostTracking holds token usage and cost data for a session
 type CostTracking struct {
-	TokensIn     int64     `yaml:"tokens_in"`               // Total input tokens consumed
-	TokensOut    int64     `yaml:"tokens_out"`               // Total output tokens consumed
-	APICallCount int       `yaml:"api_call_count"`           // Number of API calls made
-	StartTime    time.Time `yaml:"start_time,omitempty"`     // When the session started work
-	EndTime      time.Time `yaml:"end_time,omitempty"`       // When the session finished work
+	TokensIn     int64     `yaml:"tokens_in"`            // Total input tokens consumed
+	TokensOut    int64     `yaml:"tokens_out"`           // Total output tokens consumed
+	APICallCount int       `yaml:"api_call_count"`       // Number of API calls made
+	StartTime    time.Time `yaml:"start_time,omitempty"` // When the session started work
+	EndTime      time.Time `yaml:"end_time,omitempty"`   // When the session finished work
 }
 
 // ManifestV1 represents the legacy v1 manifest schema (for migration)

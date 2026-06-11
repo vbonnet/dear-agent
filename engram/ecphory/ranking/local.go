@@ -140,7 +140,6 @@ func jaccardSimilarity(setA, setB []string) (float64, []string) {
 	return similarity, matched
 }
 
-
 // formatReasoningWithDesc creates reasoning string that includes both tag and description matches.
 func formatReasoningWithDesc(tagMatched, descMatched []string) string {
 	parts := make([]string, 0, 2)

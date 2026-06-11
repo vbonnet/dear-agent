@@ -14,10 +14,10 @@ import (
 // Metadata records the lookback window in days and the branch counted
 // (HEAD by default).
 type GitActivity struct {
-	Repo         string         // absolute path to the git work tree
-	LookbackDays int            // 0 → 7
-	Branch       string         // empty → HEAD
-	Exec         Exec           // nil → DefaultExec
+	Repo         string                       // absolute path to the git work tree
+	LookbackDays int                          // 0 → 7
+	Branch       string                       // empty → HEAD
+	Exec         Exec                         // nil → DefaultExec
 	LookPathFn   func(string) (string, error) // nil → LookPath
 }
 
@@ -89,4 +89,3 @@ func countLines(b []byte) int {
 	}
 	return strings.Count(s, "\n") + 1
 }
-

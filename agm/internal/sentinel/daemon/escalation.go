@@ -17,8 +17,8 @@ import (
 type DecisionRecord struct {
 	Timestamp      string `json:"timestamp"`
 	SessionName    string `json:"session_name"`
-	Action         string `json:"action"`          // approve, notify, rate_limited
-	Classification string `json:"classification"`  // safe, dangerous, unknown
+	Action         string `json:"action"`         // approve, notify, rate_limited
+	Classification string `json:"classification"` // safe, dangerous, unknown
 	Command        string `json:"command,omitempty"`
 	Symptom        string `json:"symptom"`
 	Reason         string `json:"reason"`
@@ -370,7 +370,6 @@ func (ep *EscalationPipeline) approve(sessionName, command string) (*EscalationR
 		Timestamp: time.Now(),
 	}, nil
 }
-
 
 func (ep *EscalationPipeline) notifyUser(sessionName, message string) (*EscalationResult, error) {
 	ep.logger.Info("Notifying user", "session", sessionName, "message", message)

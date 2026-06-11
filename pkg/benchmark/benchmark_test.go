@@ -185,4 +185,3 @@ func TestBenchmarkOrchestrator_TooFewVariants(t *testing.T) {
 		t.Error("expected error for < 2 variants")
 	}
 }
-

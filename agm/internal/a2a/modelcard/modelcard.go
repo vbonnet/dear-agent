@@ -31,9 +31,9 @@ type ModelCard struct {
 
 	// Capabilities
 	Capabilities []string `json:"capabilities"` // e.g. ["code-review", "testing", "refactoring"]
-	Tools        []string `json:"tools"`         // e.g. ["Read", "Write", "Bash", "Grep"]
-	InputModes   []string `json:"input_modes"`   // e.g. ["text/plain", "application/json"]
-	OutputModes  []string `json:"output_modes"`  // e.g. ["text/plain", "application/json"]
+	Tools        []string `json:"tools"`        // e.g. ["Read", "Write", "Bash", "Grep"]
+	InputModes   []string `json:"input_modes"`  // e.g. ["text/plain", "application/json"]
+	OutputModes  []string `json:"output_modes"` // e.g. ["text/plain", "application/json"]
 
 	// Runtime state
 	Status    Status    `json:"status"`

@@ -42,11 +42,11 @@ func heartbeatPath(id string) (string, error) {
 // heartbeatRecord is the JSON shape written by `agm supervisor heartbeat`
 // and consumed by `agm supervisor status` and the sentinel loop_monitor.
 type heartbeatRecord struct {
-	ID           string    `json:"id"`
-	PrimaryFor   string    `json:"primary_for,omitempty"`
-	TertiaryFor  string    `json:"tertiary_for,omitempty"`
-	LastBeatUTC  time.Time `json:"last_beat_utc"`
-	PID          int       `json:"pid,omitempty"`
+	ID          string    `json:"id"`
+	PrimaryFor  string    `json:"primary_for,omitempty"`
+	TertiaryFor string    `json:"tertiary_for,omitempty"`
+	LastBeatUTC time.Time `json:"last_beat_utc"`
+	PID         int       `json:"pid,omitempty"`
 }
 
 // supervisorCmd exposes the agm supervisor subcommand group. Supervisor
@@ -185,8 +185,8 @@ type supervisorEnv interface {
 
 type realSupervisorEnv struct{}
 
-func (realSupervisorEnv) Getenv(key string) string              { return os.Getenv(key) }
-func (realSupervisorEnv) LookPath(bin string) (string, error)   { return exec.LookPath(bin) }
+func (realSupervisorEnv) Getenv(key string) string            { return os.Getenv(key) }
+func (realSupervisorEnv) LookPath(bin string) (string, error) { return exec.LookPath(bin) }
 
 // errToSRefusal signals that the supervisor refuses to start due to the
 // API-key-present guard. Unwrapped as exit code 2.

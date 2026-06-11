@@ -5,7 +5,10 @@ import (
 	"testing"
 )
 
-type stubCheck struct{ id string; cad Cadence }
+type stubCheck struct {
+	id  string
+	cad Cadence
+}
 
 func (s stubCheck) Meta() CheckMeta {
 	cad := s.cad
@@ -75,5 +78,5 @@ func TestRegistryRefinerDuplicateRejected(t *testing.T) {
 
 type stubRefiner struct{ name string }
 
-func (s stubRefiner) Name() string                                                  { return s.name }
-func (stubRefiner) Propose(_ context.Context, _ []Finding) ([]Proposal, error)      { return nil, nil }
+func (s stubRefiner) Name() string                                             { return s.name }
+func (stubRefiner) Propose(_ context.Context, _ []Finding) ([]Proposal, error) { return nil, nil }

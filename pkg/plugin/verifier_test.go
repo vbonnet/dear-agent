@@ -24,9 +24,9 @@ func (v *verifierFakePlugin) Verifiers() []audit.Verifier { return v.verifiers }
 // export a test helper.
 type stubVerifier struct{ name string }
 
-func (s stubVerifier) Name() string                                           { return s.name }
-func (stubVerifier) Description() string                                      { return "" }
-func (stubVerifier) ReviewDepth() string                                      { return audit.ReviewDepthAdversarial }
+func (s stubVerifier) Name() string      { return s.name }
+func (stubVerifier) Description() string { return "" }
+func (stubVerifier) ReviewDepth() string { return audit.ReviewDepthAdversarial }
 func (stubVerifier) Verify(context.Context, audit.VerifyTarget) ([]audit.Finding, error) {
 	return nil, nil
 }

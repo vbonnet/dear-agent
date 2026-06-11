@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/contracts"
-	"github.com/vbonnet/dear-agent/agm/internal/eventbus"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
+	"github.com/vbonnet/dear-agent/agm/internal/eventbus"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -29,9 +29,9 @@ type StallEvent struct {
 type StallDetector struct {
 	ctx *OpContext
 	// Configuration
-	PermissionTimeout   time.Duration // Timeout for permission prompts (default 5m)
-	NoCommitTimeout     time.Duration // Timeout for no commits (default 15m)
-	ErrorRepeatThreshold int           // How many repeats = loop (default 3)
+	PermissionTimeout    time.Duration        // Timeout for permission prompts (default 5m)
+	NoCommitTimeout      time.Duration        // Timeout for no commits (default 15m)
+	ErrorRepeatThreshold int                  // How many repeats = loop (default 3)
 	bus                  eventbus.Broadcaster // Optional: publishes StallDetected events
 }
 
@@ -85,7 +85,6 @@ func (sd *StallDetector) DetectStalls(ctx context.Context) ([]StallEvent, error)
 			events = append(events, *event)
 		}
 	}
-
 
 	// Publish detected stalls to EventBus
 	sd.publishStallEvents(events)
@@ -316,7 +315,6 @@ func normalizeErrorMessage(line string) string {
 
 	return line
 }
-
 
 // publishStallEvents publishes StallDetected events to the EventBus for each detected stall.
 func (sd *StallDetector) publishStallEvents(events []StallEvent) {

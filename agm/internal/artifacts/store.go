@@ -22,8 +22,8 @@ type Store interface {
 type Artifact struct {
 	ID        string                 `json:"id"`
 	SessionID string                 `json:"session_id"`
-	Type      string                 `json:"type"`       // "research-report", "code-review", etc.
-	Path      string                 `json:"path"`       // filesystem path
+	Type      string                 `json:"type"` // "research-report", "code-review", etc.
+	Path      string                 `json:"path"` // filesystem path
 	Size      int64                  `json:"size"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt time.Time              `json:"created_at"`

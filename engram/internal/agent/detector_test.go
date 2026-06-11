@@ -325,7 +325,6 @@ func TestDetect_Windsurf_FileDetection(t *testing.T) {
 		t.Fatalf("failed to create .windsurfrules: %v", err)
 	}
 
-
 	t.Chdir(tmpDir)
 
 	detector := NewDetector()
@@ -359,7 +358,6 @@ func TestDetect_Aider_FileDetection(t *testing.T) {
 		t.Fatalf("failed to create .aider.conf.yml: %v", err)
 	}
 
-
 	t.Chdir(tmpDir)
 
 	detector := NewDetector()
@@ -388,7 +386,6 @@ func TestDetect_Unknown(t *testing.T) {
 
 	// Create temp directory with no agent files
 	tmpDir := t.TempDir()
-
 
 	t.Chdir(tmpDir)
 
@@ -561,7 +558,6 @@ func TestDetect_AiderignoreFile(t *testing.T) {
 	if err := os.WriteFile(aiderIgnorePath, []byte("*.log"), 0644); err != nil {
 		t.Fatalf("failed to create .aiderignore: %v", err)
 	}
-
 
 	t.Chdir(tmpDir)
 

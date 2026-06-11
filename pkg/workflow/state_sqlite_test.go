@@ -347,4 +347,3 @@ func mustOpen(t *testing.T, path string) *SQLiteState {
 	t.Cleanup(func() { _ = ss.Close() })
 	return ss
 }
-

@@ -98,9 +98,9 @@ func TestMockAIExecutor_PlaceholderWhenLenient(t *testing.T) {
 
 func TestFixtureFile_ConventionalCompanion(t *testing.T) {
 	cases := map[string]string{
-		"hello.yaml":           "hello.fixtures.yaml",
-		"a/b/c.yml":            "a/b/c.fixtures.yaml",
-		"workflow":             "workflow.fixtures.yaml",
+		"hello.yaml": "hello.fixtures.yaml",
+		"a/b/c.yml":  "a/b/c.fixtures.yaml",
+		"workflow":   "workflow.fixtures.yaml",
 	}
 	for in, want := range cases {
 		got := FixtureFile(in)

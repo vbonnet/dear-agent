@@ -10,14 +10,14 @@ import (
 
 // WorkflowMetrics holds observability data for workflow executions.
 type WorkflowMetrics struct {
-	TasksTotal    int     `json:"tasks_total"`
-	TasksCompleted int    `json:"tasks_completed"`
-	TasksFailed   int     `json:"tasks_failed"`
-	TasksSkipped  int     `json:"tasks_skipped"`
-	DurationSecs  float64 `json:"execution_duration_seconds"`
-	DAGDepth      int     `json:"dag_depth"`
-	WorkflowName  string  `json:"workflow_name"`
-	RecordedAt    string  `json:"recorded_at"`
+	TasksTotal     int     `json:"tasks_total"`
+	TasksCompleted int     `json:"tasks_completed"`
+	TasksFailed    int     `json:"tasks_failed"`
+	TasksSkipped   int     `json:"tasks_skipped"`
+	DurationSecs   float64 `json:"execution_duration_seconds"`
+	DAGDepth       int     `json:"dag_depth"`
+	WorkflowName   string  `json:"workflow_name"`
+	RecordedAt     string  `json:"recorded_at"`
 }
 
 // CollectWorkflowMetrics extracts metrics from a WorkflowResult and its definition.

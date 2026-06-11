@@ -128,8 +128,8 @@ func (fw *FileWatcher) handleEvent(event fsnotify.Event) {
 
 	// Publish event to EventBus
 	fw.eventBus.Publish(context.Background(), &eventbus.Event{
-		Type:      eventType,
-		Source:    "file-watcher",
+		Type:   eventType,
+		Source: "file-watcher",
 		Data: map[string]interface{}{
 			"agent_id":  fw.agentID,
 			"path":      event.Name,

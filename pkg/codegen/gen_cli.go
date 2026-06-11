@@ -163,4 +163,3 @@ func renderGoTemplate(name, tmplStr string, data any, outPath string, buildIgnor
 
 	return nil
 }
-

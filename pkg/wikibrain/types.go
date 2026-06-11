@@ -66,10 +66,10 @@ type LintIssue struct {
 
 // LintReport is the complete output of a lint run.
 type LintReport struct {
-	KBPath  string
-	RunAt   time.Time
-	Issues  []LintIssue
-	Stats   LintStats
+	KBPath string
+	RunAt  time.Time
+	Issues []LintIssue
+	Stats  LintStats
 }
 
 // LintStats summarises a lint run.

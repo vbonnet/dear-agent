@@ -37,12 +37,12 @@ type Emitter struct {
 	// is down.
 	DialTimeout time.Duration
 
-	mu       sync.Mutex
-	conn     net.Conn
-	writer   *bufio.Writer
-	stopped  bool
-	lastErr  error
-	lastTry  time.Time
+	mu      sync.Mutex
+	conn    net.Conn
+	writer  *bufio.Writer
+	stopped bool
+	lastErr error
+	lastTry time.Time
 }
 
 // NewEmitter returns an Emitter ready to use. No network I/O until the

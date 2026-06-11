@@ -230,7 +230,6 @@ func resolveGlob(pattern string, allSessions []*manifest.Manifest) []string {
 	return matches
 }
 
-
 // matchGlob performs simple glob pattern matching
 // Supports * (any chars) and ? (single char)
 func matchGlob(pattern, name string) bool {

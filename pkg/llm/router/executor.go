@@ -13,11 +13,11 @@ import (
 //
 // Resolution rules at call time:
 //
-//	1. If node.Model is set, route that literal model id (the workflow
-//	   author asked for a specific model — honour it).
-//	2. Else if node.Role is set, route via the role chain.
-//	3. Else use the router's configured default role. If neither is set,
-//	   return an error.
+//  1. If node.Model is set, route that literal model id (the workflow
+//     author asked for a specific model — honour it).
+//  2. Else if node.Role is set, route via the role chain.
+//  3. Else use the router's configured default role. If neither is set,
+//     return an error.
 type AIExecutor struct {
 	router *Router
 }

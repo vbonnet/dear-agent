@@ -598,4 +598,3 @@ func WriteSWEReportJSON(report *SWEReport, path string) error {
 	}
 	return os.WriteFile(path, data, 0o600)
 }
-

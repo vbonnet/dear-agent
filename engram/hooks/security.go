@@ -192,6 +192,7 @@ func (cv *CommandValidator) IsAllowed(command string) bool {
 //     binary at the literal path it was given;
 //   - strip filepath.Ext, which used to let `git.sh`/`git.exe` pass while
 //     the executor runs a different file.
+//
 // Hook config that needs a non-PATH binary must add the absolute path to
 // allowed-commands.toml explicitly so the operator opts in.
 func (cv *CommandValidator) ValidateCommand(command string) error {

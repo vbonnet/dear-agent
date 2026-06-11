@@ -39,12 +39,12 @@ Examples:
 
 // mismatch represents a single tmux/Dolt inconsistency.
 type mismatch struct {
-	Kind         string // "zombie" or "orphan"
-	TmuxName     string
-	DoltName     string
-	SessionID    string
+	Kind          string // "zombie" or "orphan"
+	TmuxName      string
+	DoltName      string
+	SessionID     string
 	DoltLifecycle string
-	Description  string
+	Description   string
 }
 
 func reconcileRun(cmd *cobra.Command, args []string) error {

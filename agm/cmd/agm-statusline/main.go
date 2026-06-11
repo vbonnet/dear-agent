@@ -53,9 +53,9 @@ type sessionData struct {
 
 // config holds compositor configuration from config.yaml.
 type config struct {
-	Separator  string   `yaml:"separator"`
-	TimeoutMs  int      `yaml:"timeout_ms"`
-	Disable    []string `yaml:"disable"`
+	Separator string   `yaml:"separator"`
+	TimeoutMs int      `yaml:"timeout_ms"`
+	Disable   []string `yaml:"disable"`
 }
 
 func defaultProvidersDir() string {

@@ -167,7 +167,7 @@ func TestFilter_Types(t *testing.T) {
 }
 
 func TestFilter_MinLevel(t *testing.T) {
-	f := &Filter{MinLevel: 4} // slog.LevelWarn
+	f := &Filter{MinLevel: 4}                    // slog.LevelWarn
 	info := NewEvent("telemetry.test", "s", nil) // default info level (0)
 	if f.Matches(info) {
 		t.Error("filter should not match info event with warn min level")

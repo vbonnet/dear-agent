@@ -16,9 +16,9 @@ type StallMetricsSink struct {
 	escalated atomic.Int64
 
 	// Per-type counters
-	mu       sync.RWMutex
-	byType   map[string]int64 // stall_type -> count
-	bySess   map[string]int64 // session -> count
+	mu     sync.RWMutex
+	byType map[string]int64 // stall_type -> count
+	bySess map[string]int64 // session -> count
 
 	logger *slog.Logger
 }

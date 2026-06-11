@@ -1,9 +1,9 @@
 package ops
 
 import (
-	"strings"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -251,4 +251,3 @@ func TestTaskNotFound(t *testing.T) {
 		t.Errorf("Expected not found error, got: %v", err)
 	}
 }
-

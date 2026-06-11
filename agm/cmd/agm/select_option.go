@@ -84,8 +84,8 @@ func runSelectOption(cmd *cobra.Command, args []string) (retErr error) {
 	// Audit trail: log enriched event on exit (captures both success and failure)
 	defer func() {
 		auditArgs := map[string]string{
-			"option":  optionNumber,
-			"force":   fmt.Sprintf("%v", selectOptionForce),
+			"option": optionNumber,
+			"force":  fmt.Sprintf("%v", selectOptionForce),
 		}
 		if selectOptionPrompt != "" {
 			auditArgs["has_prompt"] = "true"

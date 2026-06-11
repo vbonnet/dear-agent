@@ -101,7 +101,7 @@ func NewMessageQueue() (*MessageQueue, error) {
 	// We ignore errors since the column might already exist
 	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_required INTEGER NOT NULL DEFAULT 1;`) //nolint:noctx // TODO(context): plumb ctx through this layer
 	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_received INTEGER NOT NULL DEFAULT 0;`) //nolint:noctx // TODO(context): plumb ctx through this layer
-	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_timeout TIMESTAMP;`) //nolint:noctx // TODO(context): plumb ctx through this layer
+	db.Exec(`ALTER TABLE message_queue ADD COLUMN ack_timeout TIMESTAMP;`)                   //nolint:noctx // TODO(context): plumb ctx through this layer
 
 	// Create index if it doesn't exist (idempotent) - must be after ALTER TABLE
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_ack_required ON message_queue(ack_required, ack_received);`) //nolint:noctx // TODO(context): plumb ctx through this layer

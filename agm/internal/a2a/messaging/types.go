@@ -48,7 +48,7 @@ type Message struct {
 	Type          MessageType `json:"type"`
 
 	// Routing
-	Sender      string      `json:"sender"`               // Agent ID of sender
+	Sender      string      `json:"sender"`                // Agent ID of sender
 	Recipient   string      `json:"recipient,omitempty"`   // Agent ID for direct routing
 	TargetRole  string      `json:"target_role,omitempty"` // Role for role-based routing
 	RoutingMode RoutingMode `json:"routing_mode"`

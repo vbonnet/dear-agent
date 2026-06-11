@@ -11,8 +11,8 @@ import (
 
 func TestFrameValidate(t *testing.T) {
 	cases := []struct {
-		name  string
-		frame Frame
+		name    string
+		frame   Frame
 		wantErr string // substring; empty means expect nil
 	}{
 		{"hello ok", Frame{Type: FrameHello, From: "s1"}, ""},

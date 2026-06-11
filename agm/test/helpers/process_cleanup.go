@@ -8,7 +8,7 @@ import (
 
 // ProcessGroup tracks a process group for cleanup.
 type ProcessGroup struct {
-	cmd  *exec.Cmd
+	cmd *exec.Cmd
 }
 
 // TrackProcessGroup starts a command in a new process group for easier cleanup.

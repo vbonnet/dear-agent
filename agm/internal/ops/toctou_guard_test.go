@@ -54,10 +54,10 @@ func TestWithSessionLock_MutualExclusion(t *testing.T) {
 	session := "test-mutex-" + t.Name()
 
 	var (
-		mu        sync.Mutex
-		maxConc   int32
-		curConc   int32
-		wg        sync.WaitGroup
+		mu         sync.Mutex
+		maxConc    int32
+		curConc    int32
+		wg         sync.WaitGroup
 		goroutines = 5
 	)
 

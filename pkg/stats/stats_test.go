@@ -61,9 +61,9 @@ func TestWelchTTest_InsufficientSamples(t *testing.T) {
 
 func TestEffectSize(t *testing.T) {
 	tests := []struct {
-		name   string
-		a, b   []float64
-		wantD  string // "negligible", "small", "medium", "large"
+		name  string
+		a, b  []float64
+		wantD string // "negligible", "small", "medium", "large"
 	}{
 		{
 			name:  "large effect",

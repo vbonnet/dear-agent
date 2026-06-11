@@ -27,8 +27,8 @@ func (f fakeSupervisorEnv) LookPath(bin string) (string, error) {
 
 func TestCheckSupervisorEnvRefusesAPIKey(t *testing.T) {
 	env := fakeSupervisorEnv{envs: map[string]string{
-		"ANTHROPIC_API_KEY":        "sk-fake",
-		"CLAUDE_CODE_OAUTH_TOKEN":  "oauth-token",
+		"ANTHROPIC_API_KEY":       "sk-fake",
+		"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token",
 	}}
 	err := checkSupervisorEnv(env, false)
 	if err == nil {

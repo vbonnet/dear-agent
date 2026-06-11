@@ -147,10 +147,10 @@ func TestSummarize(t *testing.T) {
 	a.Budget = NewNotificationBudget(time.Hour, 1)
 
 	outcomes := []Outcome{
-		a.Ingest(Signal{Kind: KindBuildFailure}),    // notify, critical, bypass
-		a.Ingest(Signal{Kind: KindDocOnly}),          // notify, low, slot 1
-		a.Ingest(Signal{Kind: KindDocOnly}),          // suppress, budget exhausted
-		a.Ingest(Signal{Kind: KindCosmetic}),         // suppress, noise_dropped
+		a.Ingest(Signal{Kind: KindBuildFailure}), // notify, critical, bypass
+		a.Ingest(Signal{Kind: KindDocOnly}),      // notify, low, slot 1
+		a.Ingest(Signal{Kind: KindDocOnly}),      // suppress, budget exhausted
+		a.Ingest(Signal{Kind: KindCosmetic}),     // suppress, noise_dropped
 	}
 	s := Summarize(outcomes)
 	if s.Total != 4 {

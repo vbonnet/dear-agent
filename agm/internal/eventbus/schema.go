@@ -97,9 +97,9 @@ type StallDetectedPayload struct {
 // StallRecoveredPayload contains data for stall.recovered events
 type StallRecoveredPayload struct {
 	StallType      string        `json:"stall_type"`      // Original stall type
-	Session        string        `json:"session"`          // Session name
-	RecoveryAction string        `json:"recovery_action"`  // Action taken
-	Duration       time.Duration `json:"duration"`         // Stall duration before recovery
+	Session        string        `json:"session"`         // Session name
+	RecoveryAction string        `json:"recovery_action"` // Action taken
+	Duration       time.Duration `json:"duration"`        // Stall duration before recovery
 }
 
 // StallEscalatedPayload contains data for stall.escalated events

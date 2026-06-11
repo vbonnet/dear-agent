@@ -40,13 +40,13 @@ func (m *mockStorage) UpdateSession(session *manifest.Manifest) error {
 }
 
 // Stub out remaining manifest.Store methods (inherited by dolt.Storage)
-func (m *mockStorage) Create(*manifest.Manifest) error          { return nil }
-func (m *mockStorage) Get(string) (*manifest.Manifest, error)   { return nil, nil }
-func (m *mockStorage) Update(*manifest.Manifest) error          { return nil }
-func (m *mockStorage) Delete(string) error                      { return nil }
+func (m *mockStorage) Create(*manifest.Manifest) error                     { return nil }
+func (m *mockStorage) Get(string) (*manifest.Manifest, error)              { return nil, nil }
+func (m *mockStorage) Update(*manifest.Manifest) error                     { return nil }
+func (m *mockStorage) Delete(string) error                                 { return nil }
 func (m *mockStorage) List(*manifest.Filter) ([]*manifest.Manifest, error) { return nil, nil }
-func (m *mockStorage) Close() error                             { return nil }
-func (m *mockStorage) ApplyMigrations() error                   { return nil }
+func (m *mockStorage) Close() error                                        { return nil }
+func (m *mockStorage) ApplyMigrations() error                              { return nil }
 
 // Stub out CreateSession, GetSession, UpdateSession, DeleteSession (legacy dolt.Storage methods)
 func (m *mockStorage) CreateSession(*manifest.Manifest) error { return nil }

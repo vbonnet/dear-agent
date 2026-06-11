@@ -94,13 +94,13 @@ func TestGitActivityZeroCommits(t *testing.T) {
 func TestCountLines(t *testing.T) {
 	t.Parallel()
 	cases := map[string]int{
-		"":           0,
-		"a":          1,
-		"a\n":        1,
-		"a\nb":       2,
-		"a\nb\n":     2,
-		"a\nb\nc\n":  3,
-		"\n":         0,
+		"":          0,
+		"a":         1,
+		"a\n":       1,
+		"a\nb":      2,
+		"a\nb\n":    2,
+		"a\nb\nc\n": 3,
+		"\n":        0,
 	}
 	for in, want := range cases {
 		if got := countLines([]byte(in)); got != want {

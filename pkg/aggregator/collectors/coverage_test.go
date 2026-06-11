@@ -84,9 +84,9 @@ func TestTestCoverageEmptyPath(t *testing.T) {
 func TestPkgOfPath(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"a/b/c.go":           "a/b",
-		"single.go":          "single.go",
-		"github.com/x/y.go":  "github.com/x",
+		"a/b/c.go":          "a/b",
+		"single.go":         "single.go",
+		"github.com/x/y.go": "github.com/x",
 	}
 	for in, want := range cases {
 		if got := pkgOfPath(in); got != want {

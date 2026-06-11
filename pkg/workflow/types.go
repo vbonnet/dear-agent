@@ -203,9 +203,9 @@ type AINode struct {
 // BashNode configures a shell command. Cmd is interpreted by /bin/sh -c.
 // Env entries are appended to os.Environ() at runtime.
 type BashNode struct {
-	Cmd               string            `yaml:"cmd"`
-	Env               map[string]string `yaml:"env,omitempty"`
-	AllowNonzeroExit  bool              `yaml:"allow_nonzero_exit,omitempty"`
+	Cmd              string            `yaml:"cmd"`
+	Env              map[string]string `yaml:"env,omitempty"`
+	AllowNonzeroExit bool              `yaml:"allow_nonzero_exit,omitempty"`
 	// WorkingDir overrides the runner's default cwd for this node only.
 	WorkingDir string `yaml:"working_dir,omitempty"`
 }
@@ -222,12 +222,12 @@ type GateNode struct {
 // by /bin/sh -c (matching BashNode); its stdout must be a YAML list
 // of Node values, e.g.
 //
-//	- id: child-1
-//	  kind: bash
-//	  bash: { cmd: "echo first child" }
-//	- id: child-2
-//	  kind: bash
-//	  bash: { cmd: "echo second child" }
+//   - id: child-1
+//     kind: bash
+//     bash: { cmd: "echo first child" }
+//   - id: child-2
+//     kind: bash
+//     bash: { cmd: "echo second child" }
 //
 // Each spawned node inherits a depends edge on the spawn node's id
 // (added automatically by the runner if absent), so the new work

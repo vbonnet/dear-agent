@@ -42,8 +42,8 @@ func TestRecorderRunsNodesAttempts(t *testing.T) {
 
 	// runs: exactly one row, succeeded.
 	var (
-		runID   string
-		state   string
+		runID string
+		state string
 	)
 	if err := ss.DB().QueryRow(`SELECT run_id, state FROM runs`).Scan(&runID, &state); err != nil {
 		t.Fatalf("query runs: %v", err)
@@ -123,6 +123,7 @@ func TestRecorderRunsNodesAttempts(t *testing.T) {
 // workflow we expect:
 //   - run-level: pending→running, running→succeeded (2 rows)
 //   - per node: pending→running, running→succeeded (2 rows × 2 nodes = 4)
+//
 // Total: 6.
 func TestAuditEventsEveryTransition(t *testing.T) {
 	ss := openTestState(t)

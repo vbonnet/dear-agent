@@ -20,7 +20,7 @@ import (
 // existing profile is faster and avoids inflating run time. Operators
 // that want a fresh profile can run go test before this collector.
 type TestCoverage struct {
-	ProfilePath string // path to coverage profile (required in v1)
+	ProfilePath string                       // path to coverage profile (required in v1)
 	ReadFile    func(string) ([]byte, error) // nil → readFile
 }
 

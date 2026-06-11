@@ -49,9 +49,9 @@ func (op *OutputParser) ParseLine(line string) {
 
 			// Publish event
 			op.eventBus.Publish(context.Background(), &eventbus.Event{
-				Type:      pattern.EventType,
-				Source:    "output-parser",
-				Data:      data,
+				Type:   pattern.EventType,
+				Source: "output-parser",
+				Data:   data,
 			})
 
 			// Only match first pattern

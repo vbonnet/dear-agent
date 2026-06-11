@@ -46,5 +46,3 @@ func getStorage() (*dolt.Adapter, error) {
 
 	return adapter, nil
 }
-
-

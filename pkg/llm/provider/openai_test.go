@@ -193,17 +193,17 @@ func TestOpenAIProvider_Generate_EmptyChoicesIsError(t *testing.T) {
 
 func TestLooksLikeOpenAIModel(t *testing.T) {
 	cases := map[string]bool{
-		"gpt-4o":             true,
-		"gpt-4-turbo":        true,
-		"gpt-5-pro":          true,
-		"o1":                 true,
-		"o1-mini":            true,
-		"o3-mini":            true,
-		"chatgpt-4o-latest":  true,
-		"claude-opus-4-7":    false,
-		"gemini-1.5-pro":     false,
-		"llama3.2":           false,
-		"":                   false,
+		"gpt-4o":            true,
+		"gpt-4-turbo":       true,
+		"gpt-5-pro":         true,
+		"o1":                true,
+		"o1-mini":           true,
+		"o3-mini":           true,
+		"chatgpt-4o-latest": true,
+		"claude-opus-4-7":   false,
+		"gemini-1.5-pro":    false,
+		"llama3.2":          false,
+		"":                  false,
 	}
 	for in, want := range cases {
 		if got := looksLikeOpenAIModel(in); got != want {

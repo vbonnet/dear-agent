@@ -7,7 +7,7 @@ import (
 
 const (
 	staleThreshold   = 6 * 30 * 24 * time.Hour // ~6 months
-	coverageMinLinks = 2                         // pages with fewer outbound links are flagged
+	coverageMinLinks = 2                       // pages with fewer outbound links are flagged
 )
 
 // Lint runs all checks against the scanned pages and returns a report.

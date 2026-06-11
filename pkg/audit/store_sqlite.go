@@ -512,10 +512,10 @@ func (s *SQLiteStore) ListProposals(ctx context.Context, filter ProposalFilter) 
 	out := []Proposal{}
 	for rows.Next() {
 		var (
-			p        Proposal
-			layer    string
-			state    string
-			decided  sql.NullTime
+			p       Proposal
+			layer   string
+			state   string
+			decided sql.NullTime
 		)
 		if err := rows.Scan(&p.ProposalID, &p.AuditRunID, &layer, &p.Title, &p.Rationale,
 			&p.Patch, &state, &p.ProposedAt, &decided, &p.DecidedBy, &p.Decision); err != nil {

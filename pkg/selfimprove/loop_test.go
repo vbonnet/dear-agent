@@ -12,10 +12,10 @@ import (
 // fakeBench is a Benchmark stub that returns canned Results per call. It
 // drives the loop without touching any real benchmark infrastructure.
 type fakeBench struct {
-	suite     benchmarks.Suite
-	calls     int
-	scripted  []*benchmarks.Results
-	analyze   *benchmarks.Insights
+	suite      benchmarks.Suite
+	calls      int
+	scripted   []*benchmarks.Results
+	analyze    *benchmarks.Insights
 	analyzeErr error
 }
 
@@ -50,9 +50,9 @@ func (p *fakeProposer) Propose(_ context.Context, _ *benchmarks.Insights, _ stri
 }
 
 type fakeApplier struct {
-	mu       sync.Mutex
-	applied  []Patch
-	reverted []Patch
+	mu        sync.Mutex
+	applied   []Patch
+	reverted  []Patch
 	failApply bool
 }
 

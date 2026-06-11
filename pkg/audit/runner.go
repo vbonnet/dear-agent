@@ -98,9 +98,9 @@ type ScheduledCheck struct {
 // a Finding fails the audit run, what default Strategy to apply when
 // the check did not specify one, and whether to notify.
 type SeverityRule struct {
-	FailRun        bool
+	FailRun         bool
 	DefaultStrategy Strategy
-	Notify         bool
+	Notify          bool
 }
 
 // DefaultSeverityPolicy returns the recommended defaults from

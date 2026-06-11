@@ -28,7 +28,7 @@ type Store interface {
 // Filter specifies criteria for listing manifests.
 type Filter struct {
 	Workspace string
-	Status    string   // "active", "archived"
+	Status    string // "active", "archived"
 	Harness   string
 	Tags      []string
 	Limit     int

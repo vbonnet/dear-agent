@@ -28,12 +28,12 @@ const (
 
 // Delegation represents a tracked outbound task delegation.
 type Delegation struct {
-	MessageID   string    `json:"message_id"`
-	From        string    `json:"from"`
-	To          string    `json:"to"`
-	TaskSummary string    `json:"task_summary"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
+	MessageID   string     `json:"message_id"`
+	From        string     `json:"from"`
+	To          string     `json:"to"`
+	TaskSummary string     `json:"task_summary"`
+	Status      string     `json:"status"`
+	CreatedAt   time.Time  `json:"created_at"`
 	ResolvedAt  *time.Time `json:"resolved_at,omitempty"`
 }
 

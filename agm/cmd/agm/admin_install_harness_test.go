@@ -48,11 +48,11 @@ func TestInstallHarnessCmd_ValidHarness(t *testing.T) {
 func TestInstallHarnessCmd_JSONOutput(t *testing.T) {
 	// Test that JSON output can be parsed
 	result := &ops.HarnessInstallResult{
-		Success:  true,
-		Harness:  "codex",
-		Message:  "Test message",
-		Version:  "1.0.0",
-		Path:     "/usr/bin/codex",
+		Success: true,
+		Harness: "codex",
+		Message: "Test message",
+		Version: "1.0.0",
+		Path:    "/usr/bin/codex",
 	}
 
 	jsonStr, err := ops.ResultToJSON(result)
@@ -116,4 +116,3 @@ func TestInstallHarnessJSONFlag(t *testing.T) {
 		t.Fatal("--quiet flag not found")
 	}
 }
-

@@ -80,7 +80,7 @@ func WaitForReady(sessionName string, timeout time.Duration) error {
 		}
 
 		if status == "crashed" {
-			os.Remove(readyFile) // Cleanup
+			os.Remove(readyFile)                               // Cleanup
 			return fmt.Errorf("Claude crashed during startup") //nolint:staticcheck // proper noun (product name)
 		}
 

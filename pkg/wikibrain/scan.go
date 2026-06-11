@@ -11,10 +11,10 @@ import (
 )
 
 var (
-	reH1         = regexp.MustCompile(`^#\s+(.+)`)
-	reWikiLink   = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
-	reMDLink     = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`)
-	reLastUpdate = regexp.MustCompile(`(?i)(?:\*\*last[ -]updated:\*\*|last[ -]updated:)\s*(.+)`)
+	reH1          = regexp.MustCompile(`^#\s+(.+)`)
+	reWikiLink    = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
+	reMDLink      = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`)
+	reLastUpdate  = regexp.MustCompile(`(?i)(?:\*\*last[ -]updated:\*\*|last[ -]updated:)\s*(.+)`)
 	reDateFormats = []string{
 		"2006-01-02",
 		"January 2, 2006",
@@ -28,15 +28,15 @@ var (
 func ScanKB(kbPath string) ([]*Page, error) {
 	var pages []*Page
 	skipDirs := map[string]bool{
-		".git":      true,
-		".obsidian": true,
-		".claude":   true,
-		".sync":     true,
-		"scripts":   true,
-		"docs":      true,
-		"config":    true,
-		"tests":     true,
-		"templates": true,
+		".git":       true,
+		".obsidian":  true,
+		".claude":    true,
+		".sync":      true,
+		"scripts":    true,
+		"docs":       true,
+		"config":     true,
+		"tests":      true,
+		"templates":  true,
 		"00-private": true, // private tier — excluded from analysis
 	}
 

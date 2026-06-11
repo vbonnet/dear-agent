@@ -42,7 +42,6 @@ func getHeaderStyle() lipgloss.Style {
 		Foreground(palette.Header)
 }
 
-
 // LayoutMode represents the terminal width-based layout mode
 type LayoutMode int
 
@@ -893,7 +892,6 @@ func renderGroupTableWithWidths(group []*manifest.Manifest, status string, statu
 	return result.String()
 }
 
-
 // FormatJSON formats manifests as JSON
 func FormatJSON(manifests []*manifest.Manifest) (string, error) {
 	data, err := json.MarshalIndent(manifests, "", "  ")
@@ -951,7 +949,6 @@ func formatTimeCompact(t time.Time) string {
 
 	return t.Format("Jan 02")
 }
-
 
 // truncatePath truncates path with ... if too long
 func truncatePath(path string, maxLen int) string {

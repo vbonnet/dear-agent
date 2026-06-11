@@ -197,12 +197,12 @@ func detectEngramRepo() (string, error) {
 
 	// Strategy 2: Check common installation locations
 	commonPaths := []string{
-		filepath.Join(home, "src/engram"),                                // Common dev location
-		filepath.Join(home, "engram"),                                    // Simple clone
+		filepath.Join(home, "src/engram"),                                  // Common dev location
+		filepath.Join(home, "engram"),                                      // Simple clone
 		filepath.Join(home, "go/src/github.com/vbonnet/dear-agent/engram"), // GOPATH location
-		filepath.Join(home, ".local/share/engram"),                       // User install
-		"/usr/local/share/engram",                                        // System install
-		"/opt/engram",                                                    // Alternative system install
+		filepath.Join(home, ".local/share/engram"),                         // User install
+		"/usr/local/share/engram",                                          // System install
+		"/opt/engram",                                                      // Alternative system install
 	}
 
 	for _, path := range commonPaths {

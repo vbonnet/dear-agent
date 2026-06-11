@@ -29,10 +29,10 @@ type CleanupAction struct {
 
 // CleanupResult summarises all post-archive cleanup work.
 type CleanupResult struct {
-	WorktreesRemoved    int  `json:"worktrees_removed"`
-	WorktreesPruned     bool `json:"worktrees_pruned"`
-	SandboxRemoved      bool `json:"sandbox_removed"`
-	BranchDeleted       bool `json:"branch_deleted"`
+	WorktreesRemoved     int  `json:"worktrees_removed"`
+	WorktreesPruned      bool `json:"worktrees_pruned"`
+	SandboxRemoved       bool `json:"sandbox_removed"`
+	BranchDeleted        bool `json:"branch_deleted"`
 	SandboxBranchDeleted bool `json:"sandbox_branch_deleted"`
 }
 

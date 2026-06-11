@@ -8,11 +8,11 @@ import (
 
 // LogPrefix constants for parseable log entries.
 const (
-	LogPrefixIngest  = "INGEST"
-	LogPrefixLint    = "LINT"
-	LogPrefixIndex   = "INDEX"
-	LogPrefixQuery   = "QUERY"
-	LogPrefixUpdate  = "UPDATE"
+	LogPrefixIngest   = "INGEST"
+	LogPrefixLint     = "LINT"
+	LogPrefixIndex    = "INDEX"
+	LogPrefixQuery    = "QUERY"
+	LogPrefixUpdate   = "UPDATE"
 	LogPrefixBacklink = "BACKLINK"
 )
 

@@ -208,8 +208,8 @@ func TestCleanupMultiSelect_NoEligible(t *testing.T) {
 	// Recent sessions that don't meet threshold
 	sessions := []*Session{
 		{
-			Manifest: &manifest.Manifest{Name: "s1"},
-			Status:   "stopped",
+			Manifest:  &manifest.Manifest{Name: "s1"},
+			Status:    "stopped",
 			UpdatedAt: time.Now(),
 		},
 	}

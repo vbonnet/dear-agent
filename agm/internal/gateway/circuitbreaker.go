@@ -35,11 +35,11 @@ func (s CircuitState) String() string {
 
 // CircuitBreaker stops forwarding after N consecutive failures.
 type CircuitBreaker struct {
-	mu              sync.Mutex
-	circuits        map[string]*circuit
+	mu               sync.Mutex
+	circuits         map[string]*circuit
 	failureThreshold int
-	resetTimeout    time.Duration
-	logger          *slog.Logger
+	resetTimeout     time.Duration
+	logger           *slog.Logger
 }
 
 type circuit struct {

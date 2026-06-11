@@ -47,7 +47,7 @@ func TestWorkspaceIsolation(t *testing.T) {
 	// In production, workspaces would use separate Dolt instances
 	t.Setenv("WORKSPACE", "testacme")
 	t.Setenv("DOLT_PORT", "3307") // Same server, different workspace database
-	os.Unsetenv("DOLT_DATABASE")   // Let it default to workspace name
+	os.Unsetenv("DOLT_DATABASE")  // Let it default to workspace name
 
 	acmeConfig, err := DefaultConfig()
 	if err != nil {

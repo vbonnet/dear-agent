@@ -15,7 +15,6 @@ import (
 	"time"
 )
 
-
 // ErrOutputMissing is returned when a node finishes but at least one
 // declared output does not exist on disk. The runner uses this to
 // refuse the succeeded transition.

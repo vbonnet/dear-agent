@@ -53,9 +53,9 @@ func (f *fakePeerLookup) Get(r Role) (LoopStatus, bool) {
 
 // fakePeerStatus implements LoopStatus with hard-coded values.
 type fakePeerStatus struct {
-	role     Role
-	beat     time.Time
-	tickErr  error
+	role    Role
+	beat    time.Time
+	tickErr error
 }
 
 func (f *fakePeerStatus) Role() Role               { return f.role }

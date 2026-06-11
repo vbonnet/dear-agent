@@ -54,9 +54,9 @@ type createSessionRequest struct {
 }
 
 type sessionResponse struct {
-	Name   string       `json:"name"`
-	State  ProcessState `json:"state"`
-	Alive  bool         `json:"alive"`
+	Name  string       `json:"name"`
+	State ProcessState `json:"state"`
+	Alive bool         `json:"alive"`
 }
 
 type sendMessageRequest struct {

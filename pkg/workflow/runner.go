@@ -389,11 +389,11 @@ func (r *Runner) markSkippedDownstream(ctx context.Context, runID string, all []
 	now := time.Now()
 	for _, id := range remaining {
 		_ = r.recorder().UpsertNode(ctx, NodeRecord{
-			RunID:       runID,
-			NodeID:      id,
-			State:       NodeStateSkipped,
-			FinishedAt:  now,
-			Error:       reason,
+			RunID:      runID,
+			NodeID:     id,
+			State:      NodeStateSkipped,
+			FinishedAt: now,
+			Error:      reason,
 		})
 		_ = r.emitAudit(ctx, AuditEvent{
 			RunID:      runID,

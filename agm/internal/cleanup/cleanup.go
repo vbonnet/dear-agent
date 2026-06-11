@@ -48,11 +48,11 @@ func (RealGitOps) DeleteBranch(repoPath, branchName string, force bool) error {
 
 // Result holds the outcome of a session cleanup operation.
 type Result struct {
-	WorktreesRemoved    int      `json:"worktrees_removed"`
-	BranchesDeleted     int      `json:"branches_deleted"`
-	TmpFilesRemoved     int      `json:"tmp_files_removed"`
-	InterruptFlagCleared bool    `json:"interrupt_flag_cleared"`
-	Errors              []string `json:"errors,omitempty"`
+	WorktreesRemoved     int      `json:"worktrees_removed"`
+	BranchesDeleted      int      `json:"branches_deleted"`
+	TmpFilesRemoved      int      `json:"tmp_files_removed"`
+	InterruptFlagCleared bool     `json:"interrupt_flag_cleared"`
+	Errors               []string `json:"errors,omitempty"`
 }
 
 // SessionResources cleans up resources associated with a session during archive.

@@ -66,9 +66,9 @@ func runUpgrade(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		write      = fs.Bool("write", false, "overwrite the input files in place (default: dry-run to stdout)")
-		addBudget  = fs.Bool("add-budget", false, "insert a default budget block on AI nodes that lack one")
-		dropModel  = fs.Bool("drop-model", false, "remove the model: field once role: is added (default: keep both for back-compat)")
+		write     = fs.Bool("write", false, "overwrite the input files in place (default: dry-run to stdout)")
+		addBudget = fs.Bool("add-budget", false, "insert a default budget block on AI nodes that lack one")
+		dropModel = fs.Bool("drop-model", false, "remove the model: field once role: is added (default: keep both for back-compat)")
 	)
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: workflow-codemod upgrade [--write] [--add-budget] [--drop-model] <file>...")

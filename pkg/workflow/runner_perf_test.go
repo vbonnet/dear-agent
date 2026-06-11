@@ -38,11 +38,11 @@ func skipPerfOnCI(t *testing.T) {
 // floor every backend must clear.
 
 const (
-	perfSampleCount   = 200
-	statusReadP95     = 5 * time.Millisecond
-	auditAppendP95    = 1 * time.Millisecond
-	listRecentP95     = 10 * time.Millisecond
-	perfNodeCount     = 100
+	perfSampleCount    = 200
+	statusReadP95      = 5 * time.Millisecond
+	auditAppendP95     = 1 * time.Millisecond
+	listRecentP95      = 10 * time.Millisecond
+	perfNodeCount      = 100
 	perfRunsForListing = 50
 )
 
@@ -74,9 +74,9 @@ func TestPerf_AuditAppendP95(t *testing.T) {
 	for i := 0; i < perfSampleCount; i++ {
 		start := time.Now()
 		if err := ss.Emit(context.Background(), AuditEvent{
-			RunID:     runID,
-			ToState:   "running",
-			Actor:     "system",
+			RunID:   runID,
+			ToState: "running",
+			Actor:   "system",
 		}); err != nil {
 			t.Fatalf("Emit: %v", err)
 		}
@@ -215,4 +215,3 @@ func assertP95(t *testing.T, label string, samples []time.Duration, limit time.D
 			label, p95, limit, median, len(samples))
 	}
 }
-

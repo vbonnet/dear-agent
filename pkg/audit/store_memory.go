@@ -20,10 +20,10 @@ type MemoryStore struct {
 	now       func() time.Time
 	idGen     func() string
 	runs      map[string]AuditRunRecord
-	findings  map[string]Finding   // keyed by FindingID
-	byFP      map[string]string    // (repo|fp) -> FindingID
+	findings  map[string]Finding // keyed by FindingID
+	byFP      map[string]string  // (repo|fp) -> FindingID
 	proposals map[string]Proposal
-	propByKey map[string]string    // (run|layer|title) -> ProposalID
+	propByKey map[string]string // (run|layer|title) -> ProposalID
 }
 
 // NewMemoryStore returns an empty MemoryStore using time.Now and

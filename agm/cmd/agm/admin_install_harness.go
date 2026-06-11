@@ -112,8 +112,8 @@ Output is in JSON format.
 
 Example:
   agm admin install-codex`,
-	Args:  cobra.NoArgs,
-	RunE:  runInstallCodex,
+	Args:   cobra.NoArgs,
+	RunE:   runInstallCodex,
 	Hidden: true, // Hidden since install-harness is the canonical command
 }
 

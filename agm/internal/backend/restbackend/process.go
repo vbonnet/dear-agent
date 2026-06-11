@@ -35,7 +35,7 @@ type managedProcess struct {
 	output *ringBuffer
 	cancel context.CancelFunc
 	done   chan struct{} // closed when process exits
-	err    error        // exit error, if any
+	err    error         // exit error, if any
 }
 
 // streamMessage is the JSON format for sending messages to Claude via stdin.

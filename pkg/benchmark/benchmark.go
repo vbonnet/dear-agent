@@ -44,29 +44,29 @@ type VariantResult struct {
 
 // Comparison holds the statistical comparison between two variants for one metric.
 type Comparison struct {
-	Metric     Metric
-	ControlVar string
-	TestVar    string
-	TTest      stats.TTestResult
-	Effect     stats.EffectSizeResult
-	CI         stats.ConfidenceInterval
+	Metric      Metric
+	ControlVar  string
+	TestVar     string
+	TTest       stats.TTestResult
+	Effect      stats.EffectSizeResult
+	CI          stats.ConfidenceInterval
 	Significant bool
 }
 
 // Decision represents the automated decision about which variant is better.
 type Decision struct {
-	Winner     string // variant name or "inconclusive"
-	Reason     string
+	Winner      string // variant name or "inconclusive"
+	Reason      string
 	Comparisons []Comparison
 }
 
 // Report holds the complete benchmark report.
 type Report struct {
-	Task       string
-	Variants   map[string]*VariantResult
-	Decisions  []Decision
-	StartTime  time.Time
-	EndTime    time.Time
+	Task      string
+	Variants  map[string]*VariantResult
+	Decisions []Decision
+	StartTime time.Time
+	EndTime   time.Time
 }
 
 // TaskRegistry manages benchmark tasks.
@@ -258,9 +258,9 @@ func (de *DecisionEngine) Decide(controlVar, testVar string, comparisons []Compa
 
 // Config configures the benchmark orchestrator.
 type Config struct {
-	Variants []string // Variant names to test (first is control)
+	Variants       []string // Variant names to test (first is control)
 	RunsPerVariant int
-	Metrics  []Metric
+	Metrics        []Metric
 }
 
 // BenchmarkOrchestrator connects all components to run a complete benchmark.

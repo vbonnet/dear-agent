@@ -4,23 +4,23 @@
 //
 // # Mental model
 //
-//	   ┌───────────────────────── Mesh ─────────────────────────┐
-//	   │                                                          │
-//	   │   Meta-Orchestrator       Orchestrator       Overseer    │
-//	   │     ┌─────────┐            ┌─────────┐       ┌─────────┐ │
-//	   │     │  Loop   │            │  Loop   │       │  Loop   │ │
-//	   │     └────┬────┘            └────┬────┘       └────┬────┘ │
-//	   │          │                      │                 │      │
-//	   │          ▼                      ▼                 ▼      │
-//	   │   1. check(orch)         1. check(over)    1. check(meta)│
-//	   │   2. check(over)         2. check(meta)    2. check(orch)│
-//	   │   3. Tick:scan roadmap   3. Tick:dispatch  3. Tick:probe │
-//	   │   4. heartbeat           4. heartbeat      4. heartbeat  │
-//	   │   5. sleep(interval)     5. sleep          5. sleep      │
-//	   └──────────────────────────────────────────────────────────┘
-//	                              │
-//	                              ▼
-//	               decisiontrail.Trail (append-only JSONL)
+//	┌───────────────────────── Mesh ─────────────────────────┐
+//	│                                                          │
+//	│   Meta-Orchestrator       Orchestrator       Overseer    │
+//	│     ┌─────────┐            ┌─────────┐       ┌─────────┐ │
+//	│     │  Loop   │            │  Loop   │       │  Loop   │ │
+//	│     └────┬────┘            └────┬────┘       └────┬────┘ │
+//	│          │                      │                 │      │
+//	│          ▼                      ▼                 ▼      │
+//	│   1. check(orch)         1. check(over)    1. check(meta)│
+//	│   2. check(over)         2. check(meta)    2. check(orch)│
+//	│   3. Tick:scan roadmap   3. Tick:dispatch  3. Tick:probe │
+//	│   4. heartbeat           4. heartbeat      4. heartbeat  │
+//	│   5. sleep(interval)     5. sleep          5. sleep      │
+//	└──────────────────────────────────────────────────────────┘
+//	                           │
+//	                           ▼
+//	            decisiontrail.Trail (append-only JSONL)
 //
 // # Vocabulary
 //

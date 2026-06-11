@@ -23,11 +23,11 @@ type RetrySessionRequest struct {
 
 // RetrySessionResult is the output of RetrySession.
 type RetrySessionResult struct {
-	Operation   string     `json:"operation"`
-	SessionName string     `json:"session_name"`
+	Operation   string      `json:"operation"`
+	SessionName string      `json:"session_name"`
 	RetryState  *RetryState `json:"retry_state"`
-	Status      string     `json:"status"`
-	Description string     `json:"description,omitempty"`
+	Status      string      `json:"status"`
+	Description string      `json:"description,omitempty"`
 }
 
 // RetrySession manually retries a session with error context from previous failure.

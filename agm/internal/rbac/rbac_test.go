@@ -237,66 +237,66 @@ func TestPermissionProfiles_Required(t *testing.T) {
 		"worker": {
 			role: "worker",
 			required: []string{
-				"Edit(~/src/**)",     // Code write access
-				"Bash(git:*)",        // Git access
-				"Bash(go:*)",         // Go build tools
+				"Edit(~/src/**)", // Code write access
+				"Bash(git:*)",    // Git access
+				"Bash(go:*)",     // Go build tools
 			},
 		},
 		"researcher": {
 			role: "researcher",
 			required: []string{
-				"WebSearch(*)",  // Web search
-				"WebFetch(*)",   // Web fetch
-				"Bash(git:*)",   // Git access
+				"WebSearch(*)",   // Web search
+				"WebFetch(*)",    // Web fetch
+				"Bash(git:*)",    // Git access
 				"Edit(~/src/**)", // Code write access
 			},
 		},
 		"orchestrator": {
 			role: "orchestrator",
 			required: []string{
-				"Bash(tmux:*)",                      // Tmux wildcard
-				"Bash(agm:*)",                       // AGM wildcard
-				"Bash(git:*)",                       // Git wildcard
-				"Bash(agm session list *)",           // Session listing
-				"Bash(agm session archive *)",        // Session archival
-				"Bash(agm session gc *)",             // Session garbage collection
-				"Bash(agm session health *)",         // Session health
-				"Bash(agm session summary *)",        // Session summary
-				"Bash(agm session tag *)",            // Session tagging
-				"Bash(agm send *)",                   // Messaging
-				"Bash(agm send msg *)",               // Explicit msg subcommand
-				"Bash(agm send select-option *)",     // Interactive selection
-				"Bash(agm verify *)",                 // Verification
-				"Bash(agm trust score *)",            // Trust scoring
-				"Bash(agm trust record *)",           // Trust recording
-				"Bash(agm metrics *)",                // Metrics
-				"Bash(agm dashboard *)",              // Dashboard
-				"Bash(agm scan *)",                   // Scanning
-				"Bash(agm escape-ui *)",              // UI escape
-				"Bash(tmux capture-pane *)",           // Pane monitoring
-				"Bash(tmux list-sessions *)",          // Session listing
-				"Bash(tmux send-keys *)",              // Key sending
-				"Bash(git -C *)",                     // Cross-repo git
+				"Bash(tmux:*)",                   // Tmux wildcard
+				"Bash(agm:*)",                    // AGM wildcard
+				"Bash(git:*)",                    // Git wildcard
+				"Bash(agm session list *)",       // Session listing
+				"Bash(agm session archive *)",    // Session archival
+				"Bash(agm session gc *)",         // Session garbage collection
+				"Bash(agm session health *)",     // Session health
+				"Bash(agm session summary *)",    // Session summary
+				"Bash(agm session tag *)",        // Session tagging
+				"Bash(agm send *)",               // Messaging
+				"Bash(agm send msg *)",           // Explicit msg subcommand
+				"Bash(agm send select-option *)", // Interactive selection
+				"Bash(agm verify *)",             // Verification
+				"Bash(agm trust score *)",        // Trust scoring
+				"Bash(agm trust record *)",       // Trust recording
+				"Bash(agm metrics *)",            // Metrics
+				"Bash(agm dashboard *)",          // Dashboard
+				"Bash(agm scan *)",               // Scanning
+				"Bash(agm escape-ui *)",          // UI escape
+				"Bash(tmux capture-pane *)",      // Pane monitoring
+				"Bash(tmux list-sessions *)",     // Session listing
+				"Bash(tmux send-keys *)",         // Key sending
+				"Bash(git -C *)",                 // Cross-repo git
 			},
 		},
 		"supervisor": {
 			role: "supervisor",
 			required: []string{
-				"Bash(git:*)",                       // Git wildcard
-				"Bash(tmux:*)",                      // Tmux wildcard
-				"Bash(agm:*)",                       // AGM wildcard
-				"Read(~/.agm/**)",                   // .agm/ read
-				"Write(~/.agm/**)",                  // .agm/ write
-				"Read(docs/**)",                     // docs/ read
-				"Bash(tmux capture-pane *)",          // Pane monitoring
-				"Bash(agm session list *)",           // Session listing
+				"Bash(git:*)",               // Git wildcard
+				"Bash(tmux:*)",              // Tmux wildcard
+				"Bash(agm:*)",               // AGM wildcard
+				"Read(~/.agm/**)",           // .agm/ read
+				"Write(~/.agm/**)",          // .agm/ write
+				"Read(docs/**)",             // docs/ read
+				"Bash(tmux capture-pane *)", // Pane monitoring
+				"Bash(agm session list *)",  // Session listing
 			},
 		},
 		"auditor": {
 			role: "auditor",
 			required: []string{
-				"Bash(git log *)",   // Git log
-				"Bash(git diff *)",  // Git diff
+				"Bash(git log *)",  // Git log
+				"Bash(git diff *)", // Git diff
 			},
 		},
 	}

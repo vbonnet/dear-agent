@@ -106,12 +106,12 @@ type s2Response struct {
 }
 
 type s2Paper struct {
-	PaperID      string     `json:"paperId"`
-	Title        string     `json:"title"`
-	Abstract     *string    `json:"abstract"`
-	Authors      []s2Author `json:"authors"`
-	Year         *int       `json:"year"`
-	CitationCount int       `json:"citationCount"`
+	PaperID       string     `json:"paperId"`
+	Title         string     `json:"title"`
+	Abstract      *string    `json:"abstract"`
+	Authors       []s2Author `json:"authors"`
+	Year          *int       `json:"year"`
+	CitationCount int        `json:"citationCount"`
 }
 
 type s2Author struct {

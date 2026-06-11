@@ -115,8 +115,8 @@ func TestAppend_ConcurrentWritesAreLineAtomic(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < perGoroutine; j++ {
 				_ = trail.Append(context.Background(), Record{
-					Role: "orchestrator",
-					Kind: "supervisor.tick",
+					Role:    "orchestrator",
+					Kind:    "supervisor.tick",
 					Payload: map[string]any{"i": i, "j": j},
 				})
 			}

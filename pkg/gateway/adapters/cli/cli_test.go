@@ -31,8 +31,8 @@ func (p *pipeReader) write(s string) {
 	_, _ = p.w.Write([]byte(s))
 }
 
-func (p *pipeReader) close()                                { _ = p.w.Close() }
-func (p *pipeReader) Read(b []byte) (int, error)            { return p.r.Read(b) }
+func (p *pipeReader) close()                     { _ = p.w.Close() }
+func (p *pipeReader) Read(b []byte) (int, error) { return p.r.Read(b) }
 
 // safeBuffer is a bytes.Buffer guarded by a mutex; the adapter writes
 // concurrently with the test reading.

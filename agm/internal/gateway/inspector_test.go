@@ -89,9 +89,9 @@ func TestInspector_BlocksMalformedMethod(t *testing.T) {
 	})
 
 	malformedMethods := []string{
-		"tools call",          // space
-		"method;injection",    // semicolon
-		"tools/call\n--drop",  // newline
+		"tools call",             // space
+		"method;injection",       // semicolon
+		"tools/call\n--drop",     // newline
 		"<script>alert</script>", // HTML
 	}
 

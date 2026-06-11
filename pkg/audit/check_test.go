@@ -45,7 +45,7 @@ func TestCheckMetaValidate(t *testing.T) {
 	}
 
 	cases := []CheckMeta{
-		{},                                    // empty id
+		{}, // empty id
 		{ID: "x", Cadence: "invalid", SeverityCeiling: SeverityP0},
 		{ID: "x", Cadence: CadenceDaily, SeverityCeiling: "P9"},
 		{ID: "with\x07ctrl", Cadence: CadenceDaily, SeverityCeiling: SeverityP0},

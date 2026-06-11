@@ -162,4 +162,3 @@ func levenshteinDistance(s1, s2 string) int {
 
 	return prevRow[len2]
 }
-

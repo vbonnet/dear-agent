@@ -121,6 +121,7 @@ func extractSender(headerLine string) string {
 // Bug fix (2026-03-14): Added shouldInterrupt parameter to make ESC sending conditional.
 // ESC interrupts Claude's thinking state, which should only happen when explicitly requested.
 // When shouldInterrupt=false, prompts are queued instead of interrupting.
+//
 //nolint:gocyclo // reason: linear protocol — capture pane, optional ESC, load-buffer, paste-buffer, C-m, retry — extracting each step into a helper would obscure the linear flow.
 func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 	ctx := context.Background()

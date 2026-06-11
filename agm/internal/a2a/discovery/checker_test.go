@@ -85,7 +85,7 @@ func TestLoadState_SaveAndLoad(t *testing.T) {
 		ChannelsChecked: map[string]ChannelState{
 			"test-channel": {
 				LastSeenMessageTimestamp: "2024-01-15",
-				LastStatus:              "awaiting-response",
+				LastStatus:               "awaiting-response",
 			},
 		},
 	}

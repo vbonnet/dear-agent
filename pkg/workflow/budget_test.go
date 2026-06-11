@@ -10,10 +10,10 @@ import (
 // budgetFakeAI is a minimal AIExecutor used by budget tests. It records the
 // last cost it was configured to report and exposes it via CostReporter.
 type budgetFakeAI struct {
-	out     string
-	err     error
-	cost    CostEstimate
-	calls   int
+	out   string
+	err   error
+	cost  CostEstimate
+	calls int
 }
 
 func (f *budgetFakeAI) Generate(ctx context.Context, n *AINode, _ map[string]string, _ map[string]string) (string, error) {

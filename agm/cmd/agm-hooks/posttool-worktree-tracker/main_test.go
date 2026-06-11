@@ -626,7 +626,6 @@ func TestRun_DebugLogging(t *testing.T) {
 	buf.ReadFrom(r)
 	os.Stderr = origStderr
 
-
 	output := buf.String()
 	if !strings.Contains(output, "Detected worktree add") {
 		t.Errorf("Expected debug output about worktree detection, got: %q", output)

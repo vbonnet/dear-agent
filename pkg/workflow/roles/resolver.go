@@ -67,10 +67,10 @@ type Request struct {
 // itself so the caller can pass effort, max_context, etc. through to
 // the AI executor.
 type Resolved struct {
-	Model     string
-	TierName  string // "primary"|"secondary"|"tertiary"|"override"|"model"
-	RoleName  string
-	Effort    string
+	Model        string
+	TierName     string // "primary"|"secondary"|"tertiary"|"override"|"model"
+	RoleName     string
+	Effort       string
 	Capabilities []string
 }
 
@@ -80,14 +80,14 @@ var ErrNoModelAvailable = errors.New("roles: no model available")
 
 // Resolve runs the algorithm:
 //
-//   1. ModelOverride wins if set.
-//   2. Role lookup; for each tier in primary, secondary, tertiary:
-//      - capability filter
-//      - capacity filter
-//      - cost filter (max_dollars vs cost_per_mtok.input)
-//      - first match wins
-//   3. Falls back to Model verbatim if Role is empty.
-//   4. Returns ErrNoModelAvailable if nothing matches.
+//  1. ModelOverride wins if set.
+//  2. Role lookup; for each tier in primary, secondary, tertiary:
+//     - capability filter
+//     - capacity filter
+//     - cost filter (max_dollars vs cost_per_mtok.input)
+//     - first match wins
+//  3. Falls back to Model verbatim if Role is empty.
+//  4. Returns ErrNoModelAvailable if nothing matches.
 //
 // Cost is O(tiers); tiers ≤ 3.
 //
@@ -139,10 +139,10 @@ func (r *Resolver) Resolve(req Request) (Resolved, error) {
 			effort = reg.Defaults.Effort
 		}
 		return Resolved{
-			Model:    nt.tier.Model,
-			TierName: nt.name,
-			RoleName: req.Role,
-			Effort:   effort,
+			Model:        nt.tier.Model,
+			TierName:     nt.name,
+			RoleName:     req.Role,
+			Effort:       effort,
 			Capabilities: mergeCapabilities(role.Capabilities, nt.tier.Capabilities),
 		}, nil
 	}

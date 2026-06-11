@@ -11,13 +11,13 @@ import (
 
 // Config represents the gateway configuration loaded from gateway.yaml.
 type Config struct {
-	Enabled       bool          `yaml:"enabled"`
-	DefaultPolicy ScopePolicy   `yaml:"default_policy"` // "allow" or "deny"
-	Allowlist     []string      `yaml:"allowlist"`
-	Denylist      []string      `yaml:"denylist"`
-	RateLimits    RateLimitCfg  `yaml:"rate_limits"`
+	Enabled        bool         `yaml:"enabled"`
+	DefaultPolicy  ScopePolicy  `yaml:"default_policy"` // "allow" or "deny"
+	Allowlist      []string     `yaml:"allowlist"`
+	Denylist       []string     `yaml:"denylist"`
+	RateLimits     RateLimitCfg `yaml:"rate_limits"`
 	CircuitBreaker CBCfg        `yaml:"circuit_breaker"`
-	Audit         AuditCfg      `yaml:"audit"`
+	Audit          AuditCfg     `yaml:"audit"`
 }
 
 // RateLimitCfg holds rate limit settings from config.

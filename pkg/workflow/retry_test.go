@@ -11,7 +11,7 @@ import (
 
 // countingAI returns an error for the first N calls, then succeeds.
 type countingAI struct {
-	failFor int32       // fail for the first N calls
+	failFor int32 // fail for the first N calls
 	calls   atomic.Int32
 	succeed string // output to return on success
 }

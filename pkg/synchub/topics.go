@@ -9,6 +9,12 @@ func topicQAOpened(session string) string   { return fmt.Sprintf("synchub.%s.qa.
 func topicQAAnswered(session string) string { return fmt.Sprintf("synchub.%s.qa.answered", session) }
 func topicQAExpired(session string) string  { return fmt.Sprintf("synchub.%s.qa.expired", session) }
 
-func topicLockAcquired(session string) string { return fmt.Sprintf("synchub.%s.lock.acquired", session) }
-func topicLockReleased(session string) string { return fmt.Sprintf("synchub.%s.lock.released", session) }
-func topicLockTimedOut(session string) string { return fmt.Sprintf("synchub.%s.lock.timed-out", session) }
+func topicLockAcquired(session string) string {
+	return fmt.Sprintf("synchub.%s.lock.acquired", session)
+}
+func topicLockReleased(session string) string {
+	return fmt.Sprintf("synchub.%s.lock.released", session)
+}
+func topicLockTimedOut(session string) string {
+	return fmt.Sprintf("synchub.%s.lock.timed-out", session)
+}

@@ -292,4 +292,3 @@ func TestParseLine_TimestampPresent(t *testing.T) {
 		t.Error("expected timestamp in event data")
 	}
 }
-

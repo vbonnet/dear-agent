@@ -94,12 +94,12 @@ func contains(s, substr string) bool {
 // after the session is resumed.
 func TestResumePromptFlagParsing(t *testing.T) {
 	tests := []struct {
-		name         string
-		args         []string
-		wantPrompt   string
-		wantFile     string
-		expectError  bool
-		description  string
+		name        string
+		args        []string
+		wantPrompt  string
+		wantFile    string
+		expectError bool
+		description string
 	}{
 		{
 			name:        "accepts --prompt flag",
@@ -220,7 +220,6 @@ func TestSendPostResumePrompt_FileTooLarge(t *testing.T) {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
-
 
 // Regression tests for session-resume fix (commit e7cacf8)
 // Bug: resume sent commands to existing tmux sessions, injecting text

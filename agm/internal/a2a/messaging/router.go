@@ -14,9 +14,9 @@ type Handler func(msg *Message) error
 // It uses the modelcard.Registry for role-based routing resolution.
 type Router struct {
 	mu       sync.RWMutex
-	handlers map[string]Handler          // agent_id -> handler
-	cards    *modelcard.Registry         // for role-based lookups
-	inbox    map[string][]*Message       // agent_id -> pending messages
+	handlers map[string]Handler    // agent_id -> handler
+	cards    *modelcard.Registry   // for role-based lookups
+	inbox    map[string][]*Message // agent_id -> pending messages
 }
 
 // NewRouter creates a router with a model card registry for role resolution.

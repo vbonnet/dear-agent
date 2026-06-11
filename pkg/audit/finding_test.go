@@ -55,9 +55,9 @@ func TestFindingValidate(t *testing.T) {
 	}
 
 	cases := []Finding{
-		{Fingerprint: "fp", Severity: SeverityP1, Title: "t"},   // missing CheckID
-		{CheckID: "x", Severity: SeverityP1, Title: "t"},        // missing Fingerprint
-		{CheckID: "x", Fingerprint: "fp", Title: "t"},           // missing Severity
+		{Fingerprint: "fp", Severity: SeverityP1, Title: "t"}, // missing CheckID
+		{CheckID: "x", Severity: SeverityP1, Title: "t"},      // missing Fingerprint
+		{CheckID: "x", Fingerprint: "fp", Title: "t"},         // missing Severity
 		{CheckID: "x", Fingerprint: "fp", Severity: "P9", Title: "t"},
 		{CheckID: "x", Fingerprint: "fp", Severity: SeverityP1}, // missing Title
 	}

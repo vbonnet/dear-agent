@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/engram/cmd/engram/internal/cli"
 	contextdetect "github.com/vbonnet/dear-agent/engram/internal/context"
-	"github.com/vbonnet/dear-agent/pkg/cliframe"
 	"github.com/vbonnet/dear-agent/engram/retrieval"
+	"github.com/vbonnet/dear-agent/pkg/cliframe"
 )
 
 var retrieveCmd = &cobra.Command{

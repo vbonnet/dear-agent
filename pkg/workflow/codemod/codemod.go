@@ -154,12 +154,12 @@ func UpgradeV01ToV02(in []byte, opts UpgradeOptions) (Result, error) {
 func BuiltinModelToRole() map[string]string {
 	return map[string]string{
 		// Long-context analysis → research tier.
-		"claude-opus-4-7":  "research",
-		"claude-opus-4-5":  "research",
-		"claude-opus-3":    "research",
-		"gemini-3.1-pro":   "research",
-		"gemini-2.5-pro":   "research",
-		"gpt-5.5-pro":      "research",
+		"claude-opus-4-7": "research",
+		"claude-opus-4-5": "research",
+		"claude-opus-3":   "research",
+		"gemini-3.1-pro":  "research",
+		"gemini-2.5-pro":  "research",
+		"gpt-5.5-pro":     "research",
 
 		// Code synthesis → implementer tier.
 		"claude-sonnet-4-6": "implementer",

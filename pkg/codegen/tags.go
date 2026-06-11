@@ -62,6 +62,7 @@ func ParseFieldTag(tag string) (*FieldTag, error) {
 }
 
 // applyFieldTagOption applies a single key[=val] option to ft.
+//
 //nolint:gocyclo // reason: linear switch over many tag options
 func applyFieldTagOption(ft *FieldTag, key, val string, hasVal bool) error {
 	switch key {

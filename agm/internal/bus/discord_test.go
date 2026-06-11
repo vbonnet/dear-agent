@@ -140,9 +140,9 @@ func TestParseOutboundMessage(t *testing.T) {
 		{"to:s1 hello there", "s1", "hello there", true},
 		{"s1 hello there", "s1", "hello there", true},
 		{"to:session-abc   lots of words here", "session-abc", "lots of words here", true},
-		{"s1", "", "", false},   // no text
-		{"", "", "", false},     // empty
-		{"   ", "", "", false},  // whitespace only
+		{"s1", "", "", false},  // no text
+		{"", "", "", false},    // empty
+		{"   ", "", "", false}, // whitespace only
 	}
 	for _, tc := range tests {
 		id, text, ok := parseOutboundMessage(tc.input)
@@ -172,8 +172,8 @@ func TestParseVerdictReply(t *testing.T) {
 		{"no req-456", "deny", "req-456", true},
 		{"YES req-789", "allow", "req-789", true},
 		{"NO req-000", "deny", "req-000", true},
-		{"yes", "", "", false},   // missing id
-		{"no", "", "", false},    // missing id
+		{"yes", "", "", false}, // missing id
+		{"no", "", "", false},  // missing id
 		{"maybe req-1", "", "", false},
 		{"yesno req-1", "", "", false},
 	}

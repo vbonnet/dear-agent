@@ -55,14 +55,14 @@ type DetectionResult struct {
 // Detector provides visual parsing of Claude Code session state
 type Detector struct {
 	// Regex patterns for state detection
-	thinkingPattern            *regexp.Regexp
-	blockedAuthPattern         *regexp.Regexp
-	blockedInputPattern        *regexp.Regexp
-	blockedPermissionPattern   *regexp.Regexp
-	readyPattern               *regexp.Regexp
-	waitingAgentPattern        *regexp.Regexp
-	loopingPattern             *regexp.Regexp
-	backgroundTasksPattern     *regexp.Regexp
+	thinkingPattern          *regexp.Regexp
+	blockedAuthPattern       *regexp.Regexp
+	blockedInputPattern      *regexp.Regexp
+	blockedPermissionPattern *regexp.Regexp
+	readyPattern             *regexp.Regexp
+	waitingAgentPattern      *regexp.Regexp
+	loopingPattern           *regexp.Regexp
+	backgroundTasksPattern   *regexp.Regexp
 
 	// Stuck detection threshold
 	stuckThreshold time.Duration

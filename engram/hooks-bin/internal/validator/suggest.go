@@ -20,7 +20,6 @@ var (
 	// git switch branch → extract branch
 	gitSwitchRe = regexp.MustCompile(`\bgit\s+(?:-C\s+\S+\s+)?switch\s+(?:-c\s+)?(\S+)`)
 
-
 	// git add . / git add -A → extract what was being added
 	gitAddBroadRe = regexp.MustCompile(`\bgit\s+(?:-C\s+(\S+)\s+)?add\s+(\.|--all|--update|-A|-u)`)
 
@@ -56,20 +55,28 @@ type suggestionFn func(string) string
 //
 //nolint:gochecknoglobals // intentional immutable lookup table
 var suggestionByPattern = map[int]suggestionFn{
-	0:  suggestSubshellCD,
-	1:  suggestCD,
-	2:  func(string) string { return "Run as separate Bash calls or use TaskCreate for polling" },
-	3:  suggestPythonOneLiner,
-	4:  func(string) string { return "Use: Write(file_path='/tmp/script.py', content='...') then Bash(command='python3 /tmp/script.py')" },
-	5:  suggestSemicolon,
-	6:  func(string) string { return "Use: Read(file_path='...') to check file existence, or Grep(pattern='...') for searching" },
+	0: suggestSubshellCD,
+	1: suggestCD,
+	2: func(string) string { return "Run as separate Bash calls or use TaskCreate for polling" },
+	3: suggestPythonOneLiner,
+	4: func(string) string {
+		return "Use: Write(file_path='/tmp/script.py', content='...') then Bash(command='python3 /tmp/script.py')"
+	},
+	5: suggestSemicolon,
+	6: func(string) string {
+		return "Use: Read(file_path='...') to check file existence, or Grep(pattern='...') for searching"
+	},
 	7:  suggestSystemRedirect,
 	8:  suggestRecursiveRm,
 	9:  suggestSedI,
 	10: suggestFind,
-	11: func(string) string { return "Do not checkout main in worktrees. Use git -C for read-only operations on main." },
+	11: func(string) string {
+		return "Do not checkout main in worktrees. Use git -C for read-only operations on main."
+	},
 	12: suggestGitSwitch,
-	13: func(string) string { return "Use a git worktree instead: Bash(command='git worktree add /path/to/worktree -b <branch>')" },
+	13: func(string) string {
+		return "Use a git worktree instead: Bash(command='git worktree add /path/to/worktree -b <branch>')"
+	},
 	14: suggestGitAddBroad,
 	15: suggestGitNoVerify,
 	16: suggestStat,
@@ -80,7 +87,9 @@ var suggestionByPattern = map[int]suggestionFn{
 	21: func(string) string { return "Use Grep tool (for grep), Glob tool (for find)" },
 	22: func(string) string { return "Use Read tool to view file contents" },
 	23: func(string) string { return "Use Read tool (with offset/limit for partial reads)" },
-	24: func(string) string { return "Use Read tool with offset/limit parameters, or Edit tool for modifications" },
+	24: func(string) string {
+		return "Use Read tool with offset/limit parameters, or Edit tool for modifications"
+	},
 	25: func(string) string { return "Use Edit tool for structured text processing" },
 	26: func(string) string { return "Use Write tool to create files" },
 	27: func(string) string { return "Use --prompt-file flag instead of command substitution in arguments" },

@@ -90,8 +90,8 @@ func (am *AgentMonitor) Start() error {
 
 	// Publish agent started event
 	am.eventBus.Publish(context.Background(), &eventbus.Event{
-		Type:      EventAgentStarted,
-		Source:    "agent-monitor",
+		Type:   EventAgentStarted,
+		Source: "agent-monitor",
 		Data: map[string]interface{}{
 			"agent_id":  am.AgentID,
 			"workdir":   am.WorkDir,
@@ -137,8 +137,8 @@ func (am *AgentMonitor) Stop() error {
 	// Publish agent completed event
 	duration := am.stopTime.Sub(am.startTime)
 	am.eventBus.Publish(context.Background(), &eventbus.Event{
-		Type:      EventAgentDone,
-		Source:    "agent-monitor",
+		Type:   EventAgentDone,
+		Source: "agent-monitor",
 		Data: map[string]interface{}{
 			"agent_id":     am.AgentID,
 			"duration_sec": duration.Seconds(),

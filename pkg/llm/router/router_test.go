@@ -25,7 +25,7 @@ type fakeProvider struct {
 	errOnce bool
 }
 
-func (f *fakeProvider) Name() string                  { return f.name }
+func (f *fakeProvider) Name() string                        { return f.name }
 func (f *fakeProvider) Capabilities() provider.Capabilities { return provider.Capabilities{} }
 
 func (f *fakeProvider) Generate(_ context.Context, req *provider.GenerateRequest) (*provider.GenerateResponse, error) {
@@ -276,8 +276,8 @@ func TestRouter_ProviderCachedAcrossCalls(t *testing.T) {
 
 func TestRouter_HasRoleAndDefaultRole(t *testing.T) {
 	cfg := &Config{Version: 1, DefaultRole: "research", Roles: map[string]RoleSpec{
-		"research":     {Primary: "gpt-4o"},
-		"implementer":  {Primary: "claude-opus-4-7"},
+		"research":    {Primary: "gpt-4o"},
+		"implementer": {Primary: "claude-opus-4-7"},
 	}}
 	r, err := New(Options{Config: cfg, Factory: func(_, _ string) (provider.Provider, error) {
 		return &fakeProvider{}, nil

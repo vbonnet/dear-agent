@@ -134,8 +134,8 @@ type errorRoadmap struct {
 func (e *errorRoadmap) PendingProposals(context.Context) ([]WorkProposal, error) {
 	return nil, e.err
 }
-func (e *errorRoadmap) Accept(context.Context, string) error          { return nil }
-func (e *errorRoadmap) Reject(context.Context, string, string) error  { return nil }
+func (e *errorRoadmap) Accept(context.Context, string) error         { return nil }
+func (e *errorRoadmap) Reject(context.Context, string, string) error { return nil }
 
 // flakyRoadmap fails Accept for specific IDs.
 type flakyRoadmap struct {

@@ -24,10 +24,10 @@ type WorkerSpec struct {
 
 // BatchSpawnResult holds the outcome of a batch spawn.
 type BatchSpawnResult struct {
-	Operation string              `json:"operation"`
-	Spawned   []SpawnedWorker     `json:"spawned"`
-	Failed    []FailedWorker      `json:"failed,omitempty"`
-	Summary   BatchSpawnSummary   `json:"summary"`
+	Operation string            `json:"operation"`
+	Spawned   []SpawnedWorker   `json:"spawned"`
+	Failed    []FailedWorker    `json:"failed,omitempty"`
+	Summary   BatchSpawnSummary `json:"summary"`
 }
 
 // SpawnedWorker records a successfully spawned worker.

@@ -64,4 +64,3 @@ func FindSimilar(input string, candidates []string, threshold float64) []Match {
 
 	return matches
 }
-

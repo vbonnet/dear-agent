@@ -3,11 +3,11 @@
 //
 // Behavior by interrupt type:
 //   - stop: Blocks the tool call (exit 2) with a message telling the agent to stop.
-//           Consumes the flag so it only fires once.
+//     Consumes the flag so it only fires once.
 //   - kill: Blocks the tool call (exit 2) with a hard stop message.
-//           Does NOT consume the flag — all subsequent calls are also blocked.
+//     Does NOT consume the flag — all subsequent calls are also blocked.
 //   - steer: Allows the tool call (exit 0) but prints guidance to stderr.
-//            Consumes the flag so guidance is only shown once.
+//     Consumes the flag so guidance is only shown once.
 //
 // Exit codes (Claude Code hook protocol):
 //   - 0: allow tool execution

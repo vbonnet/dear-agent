@@ -18,8 +18,8 @@ import (
 // because semver distance is not meaningful across modules, and the
 // recommendation engine cares about *count* of stale deps per repo.
 type DepFreshness struct {
-	Repo       string         // path to the Go module root
-	Exec       Exec           // nil → DefaultExec
+	Repo       string                       // path to the Go module root
+	Exec       Exec                         // nil → DefaultExec
 	LookPathFn func(string) (string, error) // nil → LookPath
 }
 

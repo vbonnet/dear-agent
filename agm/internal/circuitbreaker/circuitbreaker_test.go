@@ -9,15 +9,25 @@ import (
 
 // --- test doubles ---
 
-type stubLoad struct{ load float64; err error }
+type stubLoad struct {
+	load float64
+	err  error
+}
 
 func (s stubLoad) Load5() (float64, error) { return s.load, s.err }
 
-type stubWorkers struct{ count int; err error }
+type stubWorkers struct {
+	count int
+	err   error
+}
 
 func (s stubWorkers) CountWorkers() (int, error) { return s.count, s.err }
 
-type stubTimer struct{ t time.Time; err error; recorded time.Time }
+type stubTimer struct {
+	t        time.Time
+	err      error
+	recorded time.Time
+}
 
 func (s *stubTimer) LastSpawnTime() (time.Time, error) { return s.t, s.err }
 func (s *stubTimer) RecordSpawn(t time.Time) error     { s.recorded = t; return nil }

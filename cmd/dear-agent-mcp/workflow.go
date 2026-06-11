@@ -297,7 +297,9 @@ func (s *Server) toolRun(ctx context.Context, id any, args json.RawMessage) rpcR
 }
 
 func (s *Server) toolStatus(ctx context.Context, id any, args json.RawMessage) rpcResponse {
-	var a struct{ RunID string `json:"run_id"` }
+	var a struct {
+		RunID string `json:"run_id"`
+	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return errResponse(id, -32602, "invalid arguments", err.Error())
 	}

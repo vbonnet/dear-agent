@@ -119,9 +119,9 @@ func extractKeywords(text string) []string {
 // as delivery verification keywords.
 func isCommonWord(word string) bool {
 	common := map[string]bool{
-		"please": true, "should": true, "would":  true, "could":  true,
-		"their":  true, "there":  true, "these":  true, "those":  true,
-		"which":  true, "where":  true, "about":  true, "after":  true,
+		"please": true, "should": true, "would": true, "could": true,
+		"their": true, "there": true, "these": true, "those": true,
+		"which": true, "where": true, "about": true, "after": true,
 		"before": true, "between": true, "through": true, "during": true,
 	}
 	return common[strings.ToLower(word)]

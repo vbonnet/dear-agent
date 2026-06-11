@@ -114,6 +114,7 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 //
 // Deprecated: Control mode only sees NEW output after attachment, missing historical output.
 // Preserved for reference but should not be used for session startup detection.
+//
 //nolint:gocyclo // reason: stateful tmux control-mode loop with many concurrent termination conditions; helpers would obscure the per-event flow.
 func WaitForClaudePromptControlMode(sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting prompt detection for session: %s (control mode - DEPRECATED)", sessionName)
@@ -324,6 +325,7 @@ func WaitForPromptSimple(sessionName string, timeout time.Duration) error {
 // 1. Detects and auto-answers trust prompts ("Yes, proceed")
 // 2. Waits for SessionStart hooks to complete
 // 3. Waits for the Claude prompt (❯) to appear
+//
 //nolint:gocyclo // reason: stateful readiness loop with many termination conditions; per-event helpers would obscure the polling protocol.
 func WaitForClaudeReady(sessionName string, timeout time.Duration) error {
 	debug.Log("🔍 Waiting for Claude to be ready (session: %s)", sessionName)
@@ -553,14 +555,15 @@ var GeminiPromptPatterns = []string{
 
 // OpenCodePromptPatterns are patterns that indicate OpenCode is ready for input
 var OpenCodePromptPatterns = []string{
-	"> ",   // OpenCode input prompt
-	"❯",    // OpenCode may use similar prompt to Claude
-	">> ",  // Alternative OpenCode prompt pattern
+	"> ",  // OpenCode input prompt
+	"❯",   // OpenCode may use similar prompt to Claude
+	">> ", // Alternative OpenCode prompt pattern
 }
 
 // WaitForGeminiPrompt waits for Gemini to return to the input prompt
 // Uses control mode to monitor output stream and detect prompt patterns
 // Similar to WaitForClaudePrompt but adapted for Gemini's UI patterns
+//
 //nolint:gocyclo // reason: stateful tmux control-mode loop with many concurrent termination conditions; helpers would obscure the per-event flow.
 func WaitForGeminiPrompt(sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting Gemini prompt detection for session: %s", sessionName)
@@ -694,6 +697,7 @@ func containsOpenCodePromptPattern(content string) bool {
 
 // WaitForGeminiReady waits for Gemini to be fully ready
 // This function waits for the Gemini prompt to appear after startup
+//
 //nolint:gocyclo // reason: stateful readiness loop with many termination conditions; per-event helpers would obscure the polling protocol.
 func WaitForGeminiReady(sessionName string, timeout time.Duration) error {
 	debug.Log("🔍 Waiting for Gemini to be ready (session: %s)", sessionName)

@@ -108,9 +108,9 @@ func TestCheckSingleSession_OrchestratorExcludedFromNotLooping(t *testing.T) {
 	// We test the name-based logic directly since checkSingleSession is not exported
 	// and requires tmux. This tests the classification logic.
 	tests := []struct {
-		name             string
-		sessionName      string
-		wantScanLoop     bool
+		name         string
+		sessionName  string
+		wantScanLoop bool
 	}{
 		{"supervisor session", "supervisor-main", true},
 		{"scan session", "scan-loop-1", true},
@@ -635,10 +635,10 @@ func TestFilterCrossCheckTargets(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		caller        string
-		wantNames     []string
-		wantExcluded  []string
+		name         string
+		caller       string
+		wantNames    []string
+		wantExcluded []string
 	}{
 		{
 			name:         "only supervisors included, workers excluded",

@@ -58,8 +58,8 @@ type matrixClient interface {
 // matrixSyncResponse is the trimmed shape the adapter needs from /sync.
 // Full response is larger; we only decode timeline events per joined room.
 type matrixSyncResponse struct {
-	NextBatch string                     `json:"next_batch"`
-	Rooms     matrixSyncRooms            `json:"rooms"`
+	NextBatch string          `json:"next_batch"`
+	Rooms     matrixSyncRooms `json:"rooms"`
 }
 
 type matrixSyncRooms struct {

@@ -102,8 +102,8 @@ type errorQueue struct {
 	err error
 }
 
-func (e *errorQueue) Pending(context.Context) ([]Task, error)             { return nil, e.err }
-func (e *errorQueue) Dispatch(context.Context, string, string) error      { return nil }
+func (e *errorQueue) Pending(context.Context) ([]Task, error)        { return nil, e.err }
+func (e *errorQueue) Dispatch(context.Context, string, string) error { return nil }
 
 type flakyQueue struct {
 	*InMemoryQueue

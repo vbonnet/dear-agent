@@ -17,9 +17,9 @@ import (
 // a precomputed JSON file) and emits one signal per file with
 // findings, where Value is the per-file finding count.
 type LintTrend struct {
-	Repo       string         // path to the Go module root
-	InputFile  string         // optional precomputed JSON output
-	Exec       Exec           // nil → DefaultExec
+	Repo       string                       // path to the Go module root
+	InputFile  string                       // optional precomputed JSON output
+	Exec       Exec                         // nil → DefaultExec
 	LookPathFn func(string) (string, error) // nil → LookPath
 }
 

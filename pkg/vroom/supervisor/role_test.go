@@ -28,9 +28,9 @@ func TestRole_Peers_TableMatchesContextMD(t *testing.T) {
 	// Source of truth: CONTEXT.md § "The three supervisors". This test
 	// encodes the table; if CONTEXT.md changes, this test must change with it.
 	cases := []struct {
-		role             Role
-		wantVerifies     Role
-		wantUnsticks     Role
+		role         Role
+		wantVerifies Role
+		wantUnsticks Role
 	}{
 		// Meta-O is Secondary FOR Orchestrator, Tertiary FOR Overseer.
 		// Inverse: Meta-O is verified by Overseer, unstuck by Orchestrator —

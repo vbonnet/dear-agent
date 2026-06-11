@@ -733,4 +733,3 @@ func mustEvent(t *testing.T, eventType EventType, sessionID string, payload any)
 	require.NoError(t, err)
 	return event
 }
-

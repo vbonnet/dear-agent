@@ -184,9 +184,9 @@ type RunRecorder interface {
 // call recorder methods unconditionally without nil checks.
 type noopRunRecorder struct{}
 
-func (noopRunRecorder) BeginRun(context.Context, RunRecord) error           { return nil }
-func (noopRunRecorder) UpsertNode(context.Context, NodeRecord) error        { return nil }
-func (noopRunRecorder) RecordAttempt(context.Context, AttemptRecord) error  { return nil }
+func (noopRunRecorder) BeginRun(context.Context, RunRecord) error          { return nil }
+func (noopRunRecorder) UpsertNode(context.Context, NodeRecord) error       { return nil }
+func (noopRunRecorder) RecordAttempt(context.Context, AttemptRecord) error { return nil }
 func (noopRunRecorder) FinishRun(context.Context, string, RunState, time.Time, string) error {
 	return nil
 }

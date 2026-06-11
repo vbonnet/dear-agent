@@ -500,4 +500,3 @@ func (s *Server) toolGetSignalTrends(ctx context.Context, id any, args json.RawM
 		"buckets": wireBuckets,
 	}}
 }
-

@@ -10,14 +10,14 @@ import (
 // handleHITL drives the awaiting_hitl portion of the node lifecycle.
 //
 // Flow:
-//   1. Build a HITLRequest from the node's policy + result.
-//   2. Persist it (via the recorder, if it can store approvals) and emit
-//      the running → awaiting_hitl audit row.
-//   3. Notify the backend so it can surface the request to humans.
-//   4. Wait for a decision, applying the OnTimeout policy when no backend
-//      resolution arrives in time.
-//   5. Translate the decision back into a node outcome (resume, fail, or
-//      escalate-as-fail in v1).
+//  1. Build a HITLRequest from the node's policy + result.
+//  2. Persist it (via the recorder, if it can store approvals) and emit
+//     the running → awaiting_hitl audit row.
+//  3. Notify the backend so it can surface the request to humans.
+//  4. Wait for a decision, applying the OnTimeout policy when no backend
+//     resolution arrives in time.
+//  5. Translate the decision back into a node outcome (resume, fail, or
+//     escalate-as-fail in v1).
 //
 // Returning a non-nil error from handleHITL fails the node (the caller
 // stores the error in res.Error). Returning nil means "approved" and the

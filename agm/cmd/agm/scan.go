@@ -22,14 +22,14 @@ var (
 
 // ScanCycleResult holds the aggregated results of one scan cycle
 type ScanCycleResult struct {
-	Timestamp      time.Time                     `json:"timestamp"`
-	Sessions       *ops.ListSessionsResult       `json:"sessions,omitempty"`
-	Metrics        *ops.MetricsResult            `json:"metrics,omitempty"`
-	MetricsAlerts  []ops.Alert                   `json:"metrics_alerts,omitempty"`
-	WorkerBranches map[string][]WorkerCommit     `json:"worker_branches,omitempty"`
-	CrossCheck     *ops.CrossCheckReport         `json:"cross_check,omitempty"`
-	Findings       ScanFindings                  `json:"findings"`
-	Errors         []string                      `json:"errors,omitempty"`
+	Timestamp      time.Time                 `json:"timestamp"`
+	Sessions       *ops.ListSessionsResult   `json:"sessions,omitempty"`
+	Metrics        *ops.MetricsResult        `json:"metrics,omitempty"`
+	MetricsAlerts  []ops.Alert               `json:"metrics_alerts,omitempty"`
+	WorkerBranches map[string][]WorkerCommit `json:"worker_branches,omitempty"`
+	CrossCheck     *ops.CrossCheckReport     `json:"cross_check,omitempty"`
+	Findings       ScanFindings              `json:"findings"`
+	Errors         []string                  `json:"errors,omitempty"`
 }
 
 // WorkerCommit represents a recent commit on a worker branch

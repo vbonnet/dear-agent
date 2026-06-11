@@ -129,4 +129,3 @@ func loadResolved(filePath string) (*roles.Registry, string, error) {
 	home, _ := os.UserHomeDir()
 	return roles.AutoLoad(envPath, cwd, home)
 }
-

@@ -26,21 +26,21 @@ type stallEventOutput struct {
 
 // recoveryActionOutput represents the JSON output for a recovery action.
 type recoveryActionOutput struct {
-	Timestamp       string `json:"timestamp"`
-	SessionName     string `json:"session_name"`
-	ActionType      string `json:"action_type"`
-	Description     string `json:"description"`
-	Sent            bool   `json:"sent"`
-	Error           string `json:"error,omitempty"`
+	Timestamp   string `json:"timestamp"`
+	SessionName string `json:"session_name"`
+	ActionType  string `json:"action_type"`
+	Description string `json:"description"`
+	Sent        bool   `json:"sent"`
+	Error       string `json:"error,omitempty"`
 }
 
 var (
-	stalledCheckInterval      time.Duration
-	stalledPermissionTimeout  time.Duration
-	stalledNoCommitTimeout    time.Duration
+	stalledCheckInterval        time.Duration
+	stalledPermissionTimeout    time.Duration
+	stalledNoCommitTimeout      time.Duration
 	stalledErrorRepeatThreshold int
-	stalledOrchestratorName   string
-	stalledDryRun             bool
+	stalledOrchestratorName     string
+	stalledDryRun               bool
 )
 
 var watchStalledCmd = &cobra.Command{

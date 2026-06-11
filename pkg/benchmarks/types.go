@@ -48,27 +48,27 @@ type TaskSpec struct {
 
 // TaskResult is the outcome of running a single benchmark task.
 type TaskResult struct {
-	TaskID     string         `json:"task_id"`
-	Suite      Suite          `json:"suite"`
-	Mode       Mode           `json:"mode"`
-	Solved     bool           `json:"solved"`
-	Duration   time.Duration  `json:"duration_ns"`
-	TokensIn   int            `json:"tokens_in"`
-	TokensOut  int            `json:"tokens_out"`
-	CostUSD    float64        `json:"cost_usd"`
-	Error      string         `json:"error,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
+	TaskID    string         `json:"task_id"`
+	Suite     Suite          `json:"suite"`
+	Mode      Mode           `json:"mode"`
+	Solved    bool           `json:"solved"`
+	Duration  time.Duration  `json:"duration_ns"`
+	TokensIn  int            `json:"tokens_in"`
+	TokensOut int            `json:"tokens_out"`
+	CostUSD   float64        `json:"cost_usd"`
+	Error     string         `json:"error,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
 // RunConfig configures a single benchmark run.
 type RunConfig struct {
-	Mode        Mode    `json:"mode"`
-	Model       string  `json:"model"`
-	Limit       int     `json:"limit,omitempty"`        // 0 = run all
-	BudgetUSD   float64 `json:"budget_usd,omitempty"`   // 0 = unbounded
-	ResultsDir  string  `json:"results_dir,omitempty"`
-	Concurrency int     `json:"concurrency,omitempty"`  // 0 = serial
-	Seed        int64   `json:"seed,omitempty"`
+	Mode        Mode              `json:"mode"`
+	Model       string            `json:"model"`
+	Limit       int               `json:"limit,omitempty"`      // 0 = run all
+	BudgetUSD   float64           `json:"budget_usd,omitempty"` // 0 = unbounded
+	ResultsDir  string            `json:"results_dir,omitempty"`
+	Concurrency int               `json:"concurrency,omitempty"` // 0 = serial
+	Seed        int64             `json:"seed,omitempty"`
 	Tags        map[string]string `json:"tags,omitempty"`
 
 	// Loader, when non-nil, overrides the suite's default TaskLoader for this
@@ -87,7 +87,7 @@ type Summary struct {
 	Solved         int           `json:"solved"`
 	Failed         int           `json:"failed"`
 	Errored        int           `json:"errored"`
-	SolveRate      float64       `json:"solve_rate"`     // Solved / Total
+	SolveRate      float64       `json:"solve_rate"` // Solved / Total
 	TotalCostUSD   float64       `json:"total_cost_usd"`
 	CostPerSolved  float64       `json:"-"` // first-class cost-per-intelligence metric; serialized via MarshalJSON
 	TotalTokensIn  int           `json:"total_tokens_in"`

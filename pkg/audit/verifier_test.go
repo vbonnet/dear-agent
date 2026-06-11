@@ -262,9 +262,9 @@ func TestRunnerVerifiersRunPerTree(t *testing.T) {
 // hitting the (repo, fingerprint) UNIQUE constraint.
 type treeAwareVerifier struct{ name string }
 
-func (t treeAwareVerifier) Name() string        { return t.name }
-func (treeAwareVerifier) Description() string   { return "" }
-func (treeAwareVerifier) ReviewDepth() string   { return ReviewDepthAdversarial }
+func (t treeAwareVerifier) Name() string      { return t.name }
+func (treeAwareVerifier) Description() string { return "" }
+func (treeAwareVerifier) ReviewDepth() string { return ReviewDepthAdversarial }
 func (treeAwareVerifier) Verify(_ context.Context, target VerifyTarget) ([]Finding, error) {
 	return []Finding{{
 		Fingerprint: "tw-" + strings.ReplaceAll(target.WorkingDir, "/", "_"),

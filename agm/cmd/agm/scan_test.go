@@ -121,10 +121,10 @@ func TestScanCommandFlags(t *testing.T) {
 
 func TestScanCycleResultFindings(t *testing.T) {
 	tests := []struct {
-		name            string
-		alertCount      int
-		alertLevels     []string
-		expectedStatus  string
+		name           string
+		alertCount     int
+		alertLevels    []string
+		expectedStatus string
 	}{
 		{
 			name:           "no alerts means healthy",
@@ -222,9 +222,9 @@ func TestPrintScanText(t *testing.T) {
 	result := &ScanCycleResult{
 		Timestamp: time.Now(),
 		Sessions: &ops.ListSessionsResult{
-			Total:      2,
-			Sessions:   []ops.SessionSummary{},
-			Operation:  "list",
+			Total:     2,
+			Sessions:  []ops.SessionSummary{},
+			Operation: "list",
 		},
 		Metrics: &ops.MetricsResult{},
 		WorkerBranches: map[string][]WorkerCommit{

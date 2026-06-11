@@ -35,6 +35,9 @@ linters:
     # Complexity
     - gocyclo
 
+    # Formatting
+    - gofmt        # enforce standard Go formatting; two unformatted files landed on main
+
     # Best practices
     - gocritic     # subtle style and performance issues
     - exhaustive   # switch statement exhaustiveness on enums

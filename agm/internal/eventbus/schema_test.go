@@ -321,29 +321,27 @@ func TestPayloadSerializationRoundTrip(t *testing.T) {
 		},
 		{
 
-			name:      "SessionCompletedPayload",
+			name: "SessionCompletedPayload",
 
 			eventType: EventSessionCompleted,
 
 			payload: SessionCompletedPayload{
 
-				ExitCode:     0,
+				ExitCode: 0,
 
-				Duration:     45 * time.Minute,
+				Duration: 45 * time.Minute,
 
 				MessageCount: 100,
 
-				TokensUsed:   25000,
+				TokensUsed: 25000,
 
-				FinalState:   "success",
-
+				FinalState: "success",
 			},
-
 		},
 
 		{
 
-			name:      "StallDetectedPayload",
+			name: "StallDetectedPayload",
 
 			eventType: EventStallDetected,
 
@@ -351,56 +349,50 @@ func TestPayloadSerializationRoundTrip(t *testing.T) {
 
 				StallType: "permission_prompt",
 
-				Session:   "worker-1",
+				Session: "worker-1",
 
-				Duration:  10 * time.Minute,
+				Duration: 10 * time.Minute,
 
-				Details:   "Permission dialog open for 10m",
+				Details: "Permission dialog open for 10m",
 
-				Severity:  "critical",
-
+				Severity: "critical",
 			},
-
 		},
 
 		{
 
-			name:      "StallRecoveredPayload",
+			name: "StallRecoveredPayload",
 
 			eventType: EventStallRecovered,
 
 			payload: StallRecoveredPayload{
 
-				StallType:      "no_commit",
+				StallType: "no_commit",
 
-				Session:        "worker-1",
+				Session: "worker-1",
 
 				RecoveryAction: "nudge",
 
-				Duration:       15 * time.Minute,
-
+				Duration: 15 * time.Minute,
 			},
-
 		},
 
 		{
 
-			name:      "StallEscalatedPayload",
+			name: "StallEscalatedPayload",
 
 			eventType: EventStallEscalated,
 
 			payload: StallEscalatedPayload{
 
-				StallType:    "error_loop",
+				StallType: "error_loop",
 
-				Session:      "worker-2",
+				Session: "worker-2",
 
-				Reason:       "max retries exceeded",
+				Reason: "max retries exceeded",
 
 				AttemptCount: 3,
-
 			},
-
 		},
 	}
 

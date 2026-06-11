@@ -175,7 +175,6 @@ func stripTierMarkers(content string) string {
 	return strings.Join(result, "\n")
 }
 
-
 func abs(n int) int {
 	if n < 0 {
 		return -n
