@@ -185,7 +185,7 @@ func (c *beadsStaleCheck) Run(ctx context.Context) healthchecker.Result {
 		Name:     c.Name(),
 		Category: c.Category(),
 		Status:   healthchecker.StatusWarning,
-		Message:  sb.String(),
+		Message:  msg,
 	}
 }
 
