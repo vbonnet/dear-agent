@@ -24,7 +24,8 @@ func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(t *testing.T) {
 		t.Skip("Skipping comprehensive lifecycle test in short mode")
 	}
 
-	agents := []string{"claude", "gemini", "gpt"}
+	// Harness identifiers as accepted by `agm session new --harness`.
+	agents := []string{"claude-code", "gemini-cli", "codex-cli"}
 
 	for _, agent := range agents {
 		t.Run(fmt.Sprintf("Agent_%s", agent), func(t *testing.T) {
@@ -43,7 +44,7 @@ func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(t *testing.T) {
 				cmd := exec.Command("agm", "session", "new", sessionName,
 					"--sessions-dir", env.SessionsDir,
 					"--detached",
-					"--agent", agent)
+					"--harness", agent)
 
 				output, err := cmd.CombinedOutput()
 				if err != nil {
@@ -62,8 +63,8 @@ func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(t *testing.T) {
 					t.Fatalf("Failed to read manifest: %v", err)
 				}
 
-				if m.Agent != agent {
-					t.Errorf("Expected agent %s, got %s", agent, m.Agent)
+				if m.Harness != agent {
+					t.Errorf("Expected agent %s, got %s", agent, m.Harness)
 				}
 				if m.Lifecycle != "" {
 					t.Errorf("New session should have empty lifecycle, got %s", m.Lifecycle)
@@ -108,9 +109,8 @@ func TestSessionLifecycle_ComprehensiveCreateResumeTerminate(t *testing.T) {
 				time.Sleep(200 * time.Millisecond)
 
 				// Verify tmux session is gone
-				cmd = helpers.BuildTmuxCmd("has-session", "-t", sessionName)
-				err = cmd.Run()
-				if err == nil {
+				cmd := helpers.BuildTmuxCmd("has-session", "-t", sessionName)
+				if err := cmd.Run(); err == nil {
 					t.Error("Tmux session should be terminated")
 				}
 
@@ -251,7 +251,7 @@ func TestSessionStateTransitions(t *testing.T) {
 			sessionName := "test-transition-" + helpers.RandomString(6)
 
 			// Create session in initial state
-			if err := helpers.CreateSessionManifest(env.SessionsDir, sessionName, "claude"); err != nil {
+			if err := helpers.CreateSessionManifest(env.SessionsDir, sessionName, "claude-code"); err != nil {
 				t.Fatalf("Failed to create session: %v", err)
 			}
 
@@ -337,7 +337,7 @@ func TestConcurrentSessionOperations(t *testing.T) {
 
 			go func(name string) {
 				defer wg.Done()
-				if err := helpers.CreateSessionManifest(env.SessionsDir, name, "claude"); err != nil {
+				if err := helpers.CreateSessionManifest(env.SessionsDir, name, "claude-code"); err != nil {
 					errors <- fmt.Errorf("create %s: %w", name, err)
 				}
 			}(sessionNames[i])
@@ -418,7 +418,8 @@ func TestConcurrentSessionOperations(t *testing.T) {
 
 // TestSessionErrorHandling_AgentParity tests error handling across all agent types
 func TestSessionErrorHandling_AgentParity(t *testing.T) {
-	agents := []string{"claude", "gemini", "gpt"}
+	// Harness identifiers as accepted by `agm session new --harness`.
+	agents := []string{"claude-code", "gemini-cli", "codex-cli"}
 
 	for _, agent := range agents {
 		t.Run(fmt.Sprintf("Agent_%s", agent), func(t *testing.T) {
@@ -470,7 +471,7 @@ func TestSessionErrorHandling_AgentParity(t *testing.T) {
 					Tmux: manifest.Tmux{
 						SessionName: sessionName,
 					},
-					Agent: agent,
+					Harness: agent,
 				}
 
 				manifestPath := filepath.Join(sessionDir, "manifest.yaml")
@@ -506,7 +507,7 @@ func TestSessionEdgeCases_CrossAgent(t *testing.T) {
 		sessionName := "test-switch-agent-" + helpers.RandomString(6)
 
 		// Create with Claude
-		if err := helpers.CreateSessionManifest(env.SessionsDir, sessionName, "claude"); err != nil {
+		if err := helpers.CreateSessionManifest(env.SessionsDir, sessionName, "claude-code"); err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
@@ -517,7 +518,7 @@ func TestSessionEdgeCases_CrossAgent(t *testing.T) {
 		}
 
 		// Switch to Gemini
-		m.Agent = "gemini"
+		m.Harness = "gemini-cli"
 		if err := manifest.Write(manifestPath, m); err != nil {
 			t.Fatalf("Failed to write manifest: %v", err)
 		}
@@ -528,8 +529,8 @@ func TestSessionEdgeCases_CrossAgent(t *testing.T) {
 			t.Fatalf("Failed to read updated manifest: %v", err)
 		}
 
-		if m.Agent != "gemini" {
-			t.Errorf("Agent should be gemini, got %s", m.Agent)
+		if m.Harness != "gemini-cli" {
+			t.Errorf("Harness should be gemini-cli, got %s", m.Harness)
 		}
 	})
 
@@ -541,7 +542,7 @@ func TestSessionEdgeCases_CrossAgent(t *testing.T) {
 		sessionName := "test-cross-resume-" + helpers.RandomString(6)
 
 		// Create with one agent
-		if err := helpers.CreateSessionManifest(env.SessionsDir, sessionName, "claude"); err != nil {
+		if err := helpers.CreateSessionManifest(env.SessionsDir, sessionName, "claude-code"); err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
@@ -552,7 +553,7 @@ func TestSessionEdgeCases_CrossAgent(t *testing.T) {
 			t.Fatalf("Failed to read manifest: %v", err)
 		}
 
-		m.Agent = "gemini"
+		m.Harness = "gemini-cli"
 		if err := manifest.Write(manifestPath, m); err != nil {
 			t.Fatalf("Failed to write manifest: %v", err)
 		}
@@ -571,7 +572,7 @@ func TestSessionEdgeCases_CrossAgent(t *testing.T) {
 		defer env.Cleanup(t)
 
 		sessionName := "test-concurrent-same-" + helpers.RandomString(6)
-		if err := helpers.CreateSessionManifest(env.SessionsDir, sessionName, "claude"); err != nil {
+		if err := helpers.CreateSessionManifest(env.SessionsDir, sessionName, "claude-code"); err != nil {
 			t.Fatalf("Failed to create session: %v", err)
 		}
 
@@ -687,7 +688,7 @@ func TestSessionMetadataPreservation(t *testing.T) {
 		Tmux: manifest.Tmux{
 			SessionName: sessionName,
 		},
-		Agent: "claude",
+		Harness: "claude-code",
 	}
 
 	manifestPath := filepath.Join(sessionDir, "manifest.yaml")

@@ -18,6 +18,9 @@ var _ = Describe("Error Scenarios", func() {
 	var sessionName string
 
 	BeforeEach(func() {
+		if os.Getenv("SKIP_E2E") != "" {
+			Skip("SKIP_E2E environment variable is set")
+		}
 		sessionName = testEnv.UniqueSessionName("error")
 	})
 

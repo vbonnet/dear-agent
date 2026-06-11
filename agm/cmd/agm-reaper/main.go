@@ -38,7 +38,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("failed to open log file %s: %w", *logFile, err)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		// Create logger with file output
 		opts := &slog.HandlerOptions{Level: slog.LevelInfo}
 		logger = slog.New(slog.NewTextHandler(f, opts))

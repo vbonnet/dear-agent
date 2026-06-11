@@ -1,105 +1,92 @@
 # Plugin Installation
 
-This repository provides Claude Code slash commands through the plugin marketplace system.
+This repository ships its slash commands and skills through the Claude Code
+plugin marketplace system. The marketplace is named **`dear-agent`** and is
+defined by [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json)
+at the repo root.
 
-## Installation
+## Recommended: the install script
 
-### Option 1: Add Marketplace via Command (Recommended)
+From a local clone of this repo:
 
-From within any Claude Code session, run:
-
-```
-/plugin marketplace add ~/src/repos/ai-tools/main/agm
-```
-
-Then install plugins:
-
-```
-/plugin install agm@ai-tools
-/plugin install youtube@ai-tools
+```bash
+./scripts/install-claude-plugins.sh
 ```
 
-### Option 2: Configure in Settings
+This registers the marketplace and installs every plugin it declares (`agm`,
+`wayfinder`, `youtube`). It is idempotent — re-running just refreshes the
+marketplace and updates each plugin to the version declared in
+`marketplace.json`. Restart Claude Code afterward to pick up the new commands.
 
-Add to your `.claude/settings.json`:
+Common flags:
 
-```json
-{
-  "extraKnownMarketplaces": {
-    "ai-tools": {
-      "source": "~/src/repos/ai-tools/main/agm"
-    }
-  }
-}
+```bash
+./scripts/install-claude-plugins.sh --github     # install from github.com/vbonnet/dear-agent
+./scripts/install-claude-plugins.sh --dry-run    # preview without changes
+./scripts/install-claude-plugins.sh --uninstall  # remove every dear-agent plugin
+./scripts/install-claude-plugins.sh --scope user # forward --scope to claude plugin install
+./scripts/install-claude-plugins.sh --help       # full help
 ```
 
-Then restart Claude Code and run:
+## Manual install (equivalent commands)
 
+If you prefer to run the underlying `claude` CLI yourself:
+
+```bash
+# From a local clone:
+claude plugin marketplace add ~/src/dear-agent
+claude plugin install agm@dear-agent
+claude plugin install wayfinder@dear-agent
+claude plugin install youtube@dear-agent
+
+# Or from GitHub:
+claude plugin marketplace add vbonnet/dear-agent
+claude plugin install agm@dear-agent wayfinder@dear-agent youtube@dear-agent
 ```
-/plugin install agm
-```
 
-### Option 3: GitHub-based (For Shared Teams)
+## Available plugins
 
-If this repo is on GitHub:
+After install, the following are exposed:
 
-```
-/plugin marketplace add your-org/ai-tools
-/plugin install agm@ai-tools
-```
-
-## Available Plugins
-
-### AGM (`/plugin install agm@ai-tools`)
-
-- `/agm:assoc <session-name>` - Associate current Claude session with an AGM session
-- `/agm:exit` - Exit Claude and archive AGM session automatically
-
-### YouTube (`/plugin install youtube@ai-tools`)
-
-- `/youtube <url-or-video-id>` - Extract transcript from a YouTube video
-
-Requires: `yt-dlp` (`brew install yt-dlp`)
+- **`agm@dear-agent`** — session and orchestration commands: `/agm:agm-assoc`,
+  `/agm:agm-exit`, `/agm:agm-list`, `/agm:agm-new`, `/agm:agm-resume`,
+  `/agm:agm-search`, `/agm:agm-send`, `/agm:agm-status`,
+  `/agm:audit-completion`, `/agm:wiki-ingest`, `/agm:wiki-lint`,
+  `/agm:wiki-query-save`, and the `scan-health` skill.
+- **`wayfinder@dear-agent`** — `/wayfinder:validate-phase` plus the
+  top-level `wayfinder` skill (9-phase SDLC workflow).
+- **`youtube@dear-agent`** — `/youtube:youtube` for transcript extraction
+  (needs `yt-dlp`).
 
 ## Verification
 
-List installed plugins:
-
-```
-/plugin list
-```
-
-View available commands:
-
-```
-/help
+```bash
+claude plugin list                    # confirms each plugin is enabled
+claude plugin details agm@dear-agent  # lists exposed commands/skills
 ```
 
-The commands should appear with their plugin suffix (e.g., "(agm)", "(youtube)").
+Slash commands also appear in `/help` once Claude Code is restarted.
 
 ## Updating
 
-When commands are updated in the repository:
-
-```
-/plugin update agm
-```
-
-Or reinstall:
-
-```
-/plugin uninstall agm
-/plugin install agm@ai-tools
+```bash
+./scripts/install-claude-plugins.sh           # re-run; idempotent
+# or
+claude plugin update agm@dear-agent
 ```
 
-## Requirements
+## External prerequisites
 
-- Claude Code CLI installed
-- This repository cloned locally
-- **AGM plugin**: AGM binary installed (`make install`)
-- **YouTube plugin**: yt-dlp installed (`brew install yt-dlp`)
+The plugins themselves install cleanly without these, but some commands won't
+work until you also install:
 
-## See Also
+- **`agm` plugin** — `agm` binary (`go install
+  github.com/vbonnet/dear-agent/agm/cmd/agm@latest`) and `tmux`.
+- **`youtube` plugin** — `yt-dlp` (`brew install yt-dlp` /
+  `pipx install yt-dlp`).
+
+## See also
 
 - [Claude Code Plugin Marketplaces](https://code.claude.com/docs/en/plugin-marketplaces)
-- [Slash Commands Documentation](https://code.claude.com/docs/en/slash-commands)
+- [Slash Commands](https://code.claude.com/docs/en/slash-commands)
+- `tests/bats/install-claude-plugins.bats` — coverage for the install script.

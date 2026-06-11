@@ -57,7 +57,7 @@ func runSetContextUsage(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	// Determine session name
 	sessionName := contextUsageSession

@@ -262,7 +262,7 @@ func runSingleSWETask(ctx context.Context, task SWETask, agent string) SWEResult
 			Error:      fmt.Sprintf("workdir setup: %v", err),
 		}
 	}
-	defer os.RemoveAll(workdir)
+	defer func() { _ = os.RemoveAll(workdir) }()
 
 	prompt := buildSWEPrompt(task)
 
@@ -364,19 +364,19 @@ func prepareTaskWorkdir(task SWETask) (string, error) {
 		repoURL := fmt.Sprintf("https://github.com/%s.git", task.Repo)
 		cloneCmd := exec.Command("git", "clone", "--depth", "1", repoURL, dir)
 		if out, err := cloneCmd.CombinedOutput(); err != nil {
-			os.RemoveAll(dir)
+			_ = os.RemoveAll(dir)
 			return "", fmt.Errorf("clone %s: %w\n%s", task.Repo, err, truncate(string(out), 200))
 		}
 
 		fetchCmd := exec.Command("git", "-C", dir, "fetch", "--depth", "1", "origin", task.BaseCommit)
 		if out, err := fetchCmd.CombinedOutput(); err != nil {
-			os.RemoveAll(dir)
+			_ = os.RemoveAll(dir)
 			return "", fmt.Errorf("fetch base commit: %w\n%s", err, truncate(string(out), 200))
 		}
 
 		checkoutCmd := exec.Command("git", "-C", dir, "checkout", task.BaseCommit)
 		if out, err := checkoutCmd.CombinedOutput(); err != nil {
-			os.RemoveAll(dir)
+			_ = os.RemoveAll(dir)
 			return "", fmt.Errorf("checkout base commit: %w\n%s", err, truncate(string(out), 200))
 		}
 
@@ -390,7 +390,7 @@ func prepareTaskWorkdir(task SWETask) (string, error) {
 		readme += fmt.Sprintf("\n## Problem Statement\n\n%s\n", task.ProblemStatement)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(readme), 0o600); err != nil {
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 		return "", err
 	}
 	return dir, nil

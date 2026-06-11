@@ -1,15 +1,18 @@
 package bdd
 
 import (
-	"context"
 	"testing"
 
 	"github.com/cucumber/godog"
 
-	"github.com/vbonnet/dear-agent/agm/test/bdd/internal/testenv"
 	"github.com/vbonnet/dear-agent/agm/test/bdd/steps"
 )
 
+// TestFeatures runs every Gherkin scenario under features/. There is no tag
+// filter on purpose: any feature file that exists in this directory MUST run.
+// A scenario whose steps are not implemented fails as "undefined" rather than
+// being silently skipped, so dead/aspirational specs cannot accumulate. If you
+// add a feature file, add its step definitions in the same change.
 func TestFeatures(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: InitializeScenario,
@@ -17,7 +20,6 @@ func TestFeatures(t *testing.T) {
 			Format:   "pretty",
 			Paths:    []string{"features"},
 			TestingT: t,
-			Tags:     "@implemented", // Only run scenarios with step definitions
 		},
 	}
 
@@ -27,36 +29,8 @@ func TestFeatures(t *testing.T) {
 }
 
 func InitializeScenario(ctx *godog.ScenarioContext) {
-	var env *testenv.Environment
-	var t *testing.T
-
-	// Before each scenario: Setup environment
-	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		// Note: testing.T is not directly accessible in hooks
-		// For now, we create environment without t
-		// In production, we'd extract t from context or use a different approach
-		env = testenv.NewEnvironment(t)
-		return testenv.ContextWithEnv(ctx, env), nil
-	})
-
-	// After each scenario: Cleanup
-	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
-		if env != nil {
-			env.Cleanup()
-		}
-		return ctx, nil
-	})
-
-	// Register step definitions
-	steps.RegisterSetupSteps(ctx)
-	steps.RegisterSessionSteps(ctx)
-	steps.RegisterConversationSteps(ctx)
-	steps.RegisterAgentInterfaceSteps(ctx)
-	steps.RegisterErrorHandlingSteps(ctx)
-	steps.RegisterAssociationSteps(ctx)
-	steps.RegisterInitializationSteps(ctx)
-
-	// SPEC invariant step definitions
+	// Each step group registers its own per-scenario Before hook to set up
+	// state, so there is no shared environment to wire here.
 	steps.RegisterTrustProtocolSteps(ctx)
 	steps.RegisterScanLoopSteps(ctx)
 	steps.RegisterStallDetectionSteps(ctx)

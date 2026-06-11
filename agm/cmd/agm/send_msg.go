@@ -24,6 +24,8 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/telemetry"
+	"go.opentelemetry.io/otel/codes"
 )
 
 var (
@@ -251,13 +253,23 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 // runSendSingle handles single-recipient sends (original behavior, backward compatible)
 func runSendSingle(recipientSession string) (retErr error) {
+	// Telemetry: agm.session.execute span covering message dispatch.
+	_, span := telemetry.SessionExecute(context.Background(), recipientSession)
+	defer func() {
+		if retErr != nil {
+			span.RecordError(retErr)
+			span.SetStatus(codes.Error, retErr.Error())
+		}
+		span.End()
+	}()
+
 	defer func() {
 		logCommandAudit("send.msg", recipientSession, sendSingleAuditArgs(recipientSession), retErr)
 	}()
 
 	adapter, _ := getStorage()
 	if adapter != nil {
-		defer adapter.Close()
+		defer func() { _ = adapter.Close() }()
 	}
 
 	senderName, err := determineSender(adapter)
@@ -469,7 +481,7 @@ func queueMessage(recipientSession, senderName, messageID, formattedMessage, cur
 		fallbackAdapter, _ := getStorage()
 		return sendDirectly(recipientSession, senderName, messageID, formattedMessage, "", fallbackAdapter)
 	}
-	defer queue.Close()
+	defer func() { _ = queue.Close() }()
 
 	// Check if daemon is running before queueing
 	homeDir, err := os.UserHomeDir()
@@ -485,7 +497,7 @@ func queueMessage(recipientSession, senderName, messageID, formattedMessage, cur
 		fmt.Fprintf(os.Stderr, "⚠ Daemon not running — falling back to direct tmux delivery for '%s'\n", recipientSession)
 		fallbackAdapter, _ := getStorage()
 		if fallbackAdapter != nil {
-			defer fallbackAdapter.Close()
+			defer func() { _ = fallbackAdapter.Close() }()
 		}
 		return sendDirectly(recipientSession, senderName, messageID, formattedMessage, "", fallbackAdapter)
 	}
@@ -678,7 +690,7 @@ func runSendMulti(spec *send.RecipientSpec) (retErr error) {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	senderName, err := determineSender(adapter)
 	if err != nil {

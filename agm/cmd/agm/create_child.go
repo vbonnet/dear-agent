@@ -76,7 +76,7 @@ func runCreateChild(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	parentSessionID, childSessionName, err := resolveParentAndChild(adapter, args)
 	if err != nil {
@@ -363,7 +363,7 @@ func validateParentSession(adapter *dolt.Adapter, parentSessionID string) (*mani
 	// Try database fallback (SQLite)
 	database, dbErr := openDatabase()
 	if dbErr == nil {
-		defer database.Close()
+		defer func() { _ = database.Close() }()
 
 		parentManifest, err := database.GetSession(parentSessionID)
 		if err == nil {
@@ -401,7 +401,7 @@ func writeSessionToDatabase(session *manifest.Manifest, parentSessionID *string)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	// Note: The current db.CreateSession doesn't support parent_session_id parameter
 	// We need to create the session first, then update it with the parent reference

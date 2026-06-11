@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+#
+# Claude Code SessionEnd hook — flags session resources left behind.
+#
+# When a session closes it is easy to forget leftover worktrees, uncommitted
+# work, unmerged branches, and in-progress tasks. This hook scans for them and
+# *flags* them. It never deletes, commits, or mutates anything — it only makes
+# forgotten resources visible so the next session (or the user) can decide.
+#
+# This is the "Audit" layer of the worktree/branch cleanup discipline in
+# .claude/CLAUDE.md (Agent Delegation Enforcement §5). That section is the
+# rule ("clean up after merge"); this hook does not enforce it, it reports
+# what was skipped. Authoritative classification + reaping is the job of
+# `agm worktree sweep` (and the post-merge hook that now triggers it) — this
+# hook deliberately stays local-only and side-effect-free.
+#
+# Canonical source: this file lives in the repo at
+# agm/cmd/agm/hooks/sessionend-closeout and is installed to
+# ~/.claude/hooks/sessionend-closeout (and registered for the SessionEnd event)
+# by `agm admin install-hooks`. Edit it here, not in ~/.claude.
+#
+# SessionEnd hooks cannot block and run for side effects only, so this hook
+# always exits 0. It self-skips reason="clear" (a /clear is not a real session
+# end), so context clears do not spam the close-out summary.
+#
+# Reads:  stdin JSON {session_id, reason, cwd, ...}  (payload is best-effort)
+# Writes: ~/.claude/logs/session-closeout.log    (append, timestamped)
+#         ~/.claude/state/session-closeout.txt   (latest summary, or removed
+#                                                  when nothing is outstanding)
+#
+# Attribution caveat: Claude Code does not expose which worktrees a given
+# session created. We use recency as a proxy — only worktrees modified within
+# CLOSEOUT_RECENT_HOURS (default 12, ~one session) are surfaced; older
+# outstanding worktrees are reported as a single backlog count and left to the
+# dedicated reaper (`agm worktree sweep`), not this hook.
+
+set -u
+
+LOG_DIR="${HOME}/.claude/logs"
+STATE_DIR="${HOME}/.claude/state"
+LOG_FILE="${LOG_DIR}/session-closeout.log"
+SUMMARY_FILE="${STATE_DIR}/session-closeout.txt"
+WORKTREE_ROOT="${HOME}/worktrees"
+RECENT_HOURS="${CLOSEOUT_RECENT_HOURS:-12}"
+
+mkdir -p "${LOG_DIR}" "${STATE_DIR}"
+
+# ── Read the hook payload (best-effort; tolerate missing jq) ───────────────
+payload="$(cat 2>/dev/null || true)"
+session_id="unknown"
+reason="unknown"
+if [[ -n "${payload}" ]] && command -v jq >/dev/null 2>&1; then
+  session_id="$(printf '%s' "${payload}" | jq -r '.session_id // "unknown"' 2>/dev/null || echo unknown)"
+  reason="$(printf '%s' "${payload}" | jq -r '.reason // "unknown"' 2>/dev/null || echo unknown)"
+fi
+
+ts="$(date -u +%FT%TZ)"
+
+# A /clear is not a genuine session end — skip the scan so context clears do
+# not churn the close-out summary. (Belt-and-suspenders alongside any
+# SessionEnd matcher configured in settings.json.)
+if [[ "${reason}" == "clear" ]]; then
+  printf '[%s] sessionend-closeout: session=%s reason=clear skipped\n' \
+    "${ts}" "${session_id}" >> "${LOG_FILE}"
+  exit 0
+fi
+
+now="$(date +%s)"
+recent_cutoff=$(( now - RECENT_HOURS * 3600 ))
+
+findings=()       # surfaced lines (recent worktrees only)
+old_worktrees=0   # outstanding worktrees too old to attribute to this session
+
+# mtime() prints a file/dir's modification time as a unix epoch, portably
+# across macOS (stat -f) and Linux (stat -c). Prints 0 if it cannot stat.
+mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+
+# ── 1-3. Scan worktrees under ~/worktrees for leftover state ──────────────
+# Each worktree is checked for uncommitted work and for commits not yet
+# merged into its default branch (origin/HEAD, else local main/master).
+if [[ -d "${WORKTREE_ROOT}" ]]; then
+  for wt in "${WORKTREE_ROOT}"/*/*; do
+    [[ -d "${wt}" ]] || continue
+    git -C "${wt}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
+
+    branch="$(git -C "${wt}" branch --show-current 2>/dev/null)"
+    [[ -n "${branch}" ]] || branch="(detached)"
+
+    dirty=""
+    [[ -n "$(git -C "${wt}" status --porcelain 2>/dev/null)" ]] && dirty="yes"
+
+    # Commits relative to the default branch. NOTE: a non-zero count does NOT
+    # prove the branch is unmerged — a squash-merged branch still shows commits
+    # "not in" base because the squash commit has a different hash. We surface
+    # it as a question and defer the authoritative call to `agm worktree sweep`
+    # (which checks gh PR==MERGED), rather than overclaim here. There is no
+    # reliable local-only squash-merge signal worth a network call in a hook.
+    base="$(git -C "${wt}" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"
+    if [[ -z "${base}" ]]; then
+      for cand in main master; do
+        git -C "${wt}" rev-parse --verify --quiet "${cand}" >/dev/null 2>&1 && { base="${cand}"; break; }
+      done
+    fi
+    ahead=0
+    if [[ -n "${base}" && "${branch}" != "(detached)" ]]; then
+      ahead="$(git -C "${wt}" rev-list --count "${base}..HEAD" 2>/dev/null || echo 0)"
+    fi
+
+    # Nothing outstanding for this worktree → skip entirely.
+    [[ -z "${dirty}" && "${ahead}" -eq 0 ]] && continue
+
+    # Outstanding, but is it recent enough to be this session's work?
+    if (( "$(mtime "${wt}")" < recent_cutoff )); then
+      old_worktrees=$(( old_worktrees + 1 ))
+      continue
+    fi
+
+    [[ -n "${dirty}" ]] && findings+=("uncommitted work  : ${wt} [${branch}]")
+    if [[ "${ahead}" -gt 0 ]]; then
+      findings+=("unmerged branch?  : ${wt} [${branch}] (${ahead} commit(s) not in ${base}; may already be squash-merged — verify: agm worktree sweep)")
+    fi
+  done
+fi
+
+# ── 4. Unfinished tasks (best-effort; only when Beads + jq are available) ──
+# "Trackable" means `bd` is installed, supports --json, and a database
+# resolves. Any failure is treated as "not trackable" — never a hook error.
+if command -v bd >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  inprog="$(bd list --status in_progress --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
+  if [[ "${inprog}" =~ ^[0-9]+$ && "${inprog}" -gt 0 ]]; then
+    findings+=("in-progress tasks : ${inprog} Beads item(s) still in_progress (bd list --status in_progress)")
+  fi
+fi
+
+# ── Report ────────────────────────────────────────────────────────────────
+count="${#findings[@]}"
+printf '[%s] sessionend-closeout: session=%s reason=%s flagged=%s old_backlog=%s\n' \
+  "${ts}" "${session_id}" "${reason}" "${count}" "${old_worktrees}" >> "${LOG_FILE}"
+
+if (( count > 0 || old_worktrees > 0 )); then
+  {
+    printf 'Session close-out (%s): %s recent resource(s) flagged.\n' "${ts}" "${count}"
+    printf 'Nothing was deleted — review and clean up manually.\n'
+    for line in "${findings[@]+"${findings[@]}"}"; do
+      printf '  - %s\n' "${line}"
+    done
+    if (( old_worktrees > 0 )); then
+      printf '  (+%s older outstanding worktree(s) beyond %sh — see log; run `agm worktree sweep`)\n' \
+        "${old_worktrees}" "${RECENT_HOURS}"
+    fi
+  } | tee -a "${LOG_FILE}" > "${SUMMARY_FILE}"
+else
+  # Clean exit — clear any stale summary from a previous session.
+  rm -f "${SUMMARY_FILE}"
+fi
+
+exit 0

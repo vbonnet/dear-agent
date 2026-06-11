@@ -76,8 +76,8 @@ func TestConcurrent_CreateMultipleSessions(t *testing.T) {
 		if m.Name != sessionName {
 			t.Errorf("Expected name %s, got %s", sessionName, m.Name)
 		}
-		if m.Agent != "claude" {
-			t.Errorf("Expected agent 'claude', got %s", m.Agent)
+		if m.Harness != "claude" {
+			t.Errorf("Expected agent 'claude', got %s", m.Harness)
 		}
 	}
 
@@ -457,7 +457,7 @@ func TestConcurrent_ManifestCorruptionRecovery(t *testing.T) {
 			Tmux: manifest.Tmux{
 				SessionName: sessionName,
 			},
-			Agent: "claude",
+			Harness: "claude",
 		}
 
 		if err := manifest.Write(manifestPath, m); err != nil {

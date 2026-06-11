@@ -25,7 +25,7 @@ func runVerifyQualityGate(sessionName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	m, err := adapter.GetSessionByName(sessionName)
 	if err != nil {

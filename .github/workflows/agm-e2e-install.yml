@@ -12,6 +12,10 @@ on:
       - 'agm/**'
       - '.github/workflows/agm-e2e-install.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -19,6 +23,7 @@ jobs:
   e2e-install:
     name: AGM E2E Install (${{ matrix.distro }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false
@@ -50,7 +55,14 @@ jobs:
         tags: agm-test-${{ matrix.distro }}:latest
         load: true
         cache-from: type=local,src=/tmp/.buildx-cache
-        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+        # mode=min caches only the layers of the final image, not every
+        # intermediate build stage. mode=max roughly doubled the on-disk
+        # cache (~1 GB per distro × 2 = ~2 GB) and was the dominant driver
+        # of the repo's Actions cache crossing the 10 GB ceiling, which
+        # triggers LRU eviction of the Go build caches and cold rebuilds.
+        # The final-image layers are what cache-from restores anyway, so
+        # min preserves the speedup at a fraction of the size.
+        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=min
 
     - name: Run ${{ matrix.distro }} E2E tests
       run: docker run --rm agm-test-${{ matrix.distro }}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql" // MySQL driver for Dolt
+	"gopkg.in/yaml.v3"
 )
 
 func init() {
@@ -52,11 +53,45 @@ type Config struct {
 	StartScript string // Path to auto-start script (empty = disabled)
 }
 
+// agmConfigPath is the path to the AGM workspace config, overridable in tests.
+var agmConfigPath = "~/.agm/config.yaml"
+
+// readDefaultWorkspaceFromConfig reads default_workspace from the AGM config file.
+// Returns empty string on any error (file missing, malformed YAML, etc.).
+func readDefaultWorkspaceFromConfig() string {
+	path := agmConfigPath
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		path = filepath.Join(home, path[2:])
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		DefaultWorkspace string `yaml:"default_workspace"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return ""
+	}
+	return cfg.DefaultWorkspace
+}
+
 // DefaultConfig returns default configuration from environment
 func DefaultConfig() (*Config, error) {
 	workspace := getEnv("WORKSPACE", "")
 	if workspace == "" {
-		return nil, fmt.Errorf("WORKSPACE environment variable not set (workspace protocol not activated)")
+		// Fall back to default_workspace from ~/.agm/config.yaml so the MCP
+		// server works when invoked outside a workspace context (e.g. Dispatch
+		// or Cowork where WORKSPACE is not set in the environment).
+		workspace = readDefaultWorkspaceFromConfig()
+	}
+	if workspace == "" {
+		return nil, fmt.Errorf("WORKSPACE environment variable not set (workspace protocol not activated)\n" +
+			"Hint: Set WORKSPACE=<name> or configure default_workspace in ~/.agm/config.yaml")
 	}
 
 	// CRITICAL: Fail-fast enforcement to prevent test pollution
