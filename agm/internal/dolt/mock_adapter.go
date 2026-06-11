@@ -403,6 +403,17 @@ func (m *MockAdapter) Delete(sessionID string) error {
 }
 
 // List implements manifest.Store by converting manifest.Filter to SessionFilter.
+func (m *MockAdapter) GetSessionByUUID(conversationUUID string) (*manifest.Manifest, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, s := range m.sessions {
+		if s.Claude.UUID == conversationUUID {
+			return m.copyManifest(s), nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *MockAdapter) List(filter *manifest.Filter) ([]*manifest.Manifest, error) {
 	if filter == nil {
 		return m.ListSessions(nil)
