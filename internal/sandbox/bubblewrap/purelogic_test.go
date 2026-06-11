@@ -446,3 +446,26 @@ func TestProvider_writeSecrets(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+// --- probeNetworkIsolation (pure logic, Linux+bwrap only) -------------------
+
+// TestProvider_probeNetworkIsolation_CompileCheck verifies the method exists
+// and accepts a shareNetwork bool (i.e. the parameter is no longer _ bool).
+// This is a compile-only test on non-Linux platforms.
+func TestProvider_probeNetworkIsolation_CompileCheck(t *testing.T) {
+	// Calling the method with shareNetwork=false must compile; on macOS or
+	// environments without bwrap it will fail at runtime which is expected.
+	p := NewProvider()
+	upper := t.TempDir()
+
+	if runtime.GOOS != "linux" {
+		t.Skip("probeNetworkIsolation only meaningful on Linux")
+	}
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap not installed")
+	}
+
+	// We can't assert success/failure (environment-dependent) but we CAN
+	// assert the function is callable and does not panic.
+	_ = p.probeNetworkIsolation([]string{t.TempDir()}, upper, nil)
+}

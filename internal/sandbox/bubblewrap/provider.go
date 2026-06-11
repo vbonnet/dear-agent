@@ -527,7 +527,17 @@ func buildBwrapArgs(lowerDirs []string, upperDir string, shareNetwork bool, extr
 }
 
 // testBubblewrap runs a quick self-test to verify bubblewrap works on this host.
-func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, _ bool) error {
+//
+// The basic exec test always uses --share-net for CI compatibility: unsharing
+// the network namespace on some runners (e.g. GitHub Actions Ubuntu) requires
+// RTM_NEWADDR and fails with EPERM. The exec-capability check is therefore
+// separated from the network-isolation check.
+//
+// When shareNetwork is false (isolation requested) an additional probe is run
+// via probeNetworkIsolation. That probe is non-fatal: if the environment does
+// not support --unshare-net a warning is logged, but Create still succeeds
+// because the exec capability was already confirmed above.
+func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, shareNetwork bool) error {
 	// Create a sentinel file that the sandbox command will verify.
 	testFile := filepath.Join(upperDir, ".bwrap-test")
 	if err := os.WriteFile(testFile, []byte("bubblewrap-test"), 0600); err != nil {
@@ -545,10 +555,7 @@ func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, _ bool
 		}
 	}
 
-	// Always share the network for the self-test probe: we're only checking
-	// whether bwrap can execute at all, not testing network isolation.
-	// Unsharing the network namespace requires setting up loopback via
-	// RTM_NEWADDR, which GitHub Actions Ubuntu runners prohibit.
+	// Basic exec test: always shares the network (see function comment).
 	args := buildBwrapArgs(lowerDirs, upperDir, true, extra)
 	cmd := exec.Command("bwrap", args...)
 	output, err := cmd.CombinedOutput()
@@ -559,6 +566,53 @@ func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, _ bool
 	if !strings.Contains(string(output), "ok") {
 		return sandbox.NewError(sandbox.ErrCodeMountFailed,
 			"bubblewrap test did not produce expected output")
+	}
+
+	// Network-isolation probe: only when isolation is actually requested.
+	// Non-fatal — log and continue if the environment cannot support it.
+	if !shareNetwork {
+		if err := p.probeNetworkIsolation(lowerDirs, upperDir, extra); err != nil {
+			fmt.Fprintf(os.Stderr,
+				"bubblewrap: network-isolation probe skipped (env may not support --unshare-net): %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+// probeNetworkIsolation verifies that bwrap can run with network namespaces
+// actually isolated (--unshare-net, i.e. no --share-net flag). This is a
+// stronger check than the basic exec test, which always uses --share-net.
+//
+// Returns nil if isolation is confirmed, or a descriptive error when the
+// environment blocks it (e.g. EPERM on RTM_NEWADDR, container-within-container).
+// Callers should treat a non-nil return as a warning, not a hard failure.
+func (p *Provider) probeNetworkIsolation(lowerDirs []string, upperDir string, extraROPaths []string) error {
+	// Use a temporary sentinel so the probe does not depend on the upper dir
+	// already having .bwrap-test present (deferred Remove may have run).
+	probeFile := filepath.Join(upperDir, ".bwrap-netprobe")
+	if err := os.WriteFile(probeFile, []byte("probe"), 0600); err != nil {
+		return fmt.Errorf("cannot create probe sentinel: %w", err)
+	}
+	defer os.Remove(probeFile)
+
+	// Override the exec command to check for the probe file; reuse buildBwrapArgs
+	// with shareNetwork=false to get the --unshare-net args.
+	args := buildBwrapArgs(lowerDirs, upperDir, false, extraROPaths)
+	// Replace the sentinel check command: use the probe file name.
+	for i, a := range args {
+		if a == "test -f /sandbox/upper/.bwrap-test && echo ok" {
+			args[i] = "test -f /sandbox/upper/.bwrap-netprobe && echo net-ok"
+			break
+		}
+	}
+	cmd := exec.Command("bwrap", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("bwrap --unshare-net probe failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	if !strings.Contains(string(output), "net-ok") {
+		return fmt.Errorf("bwrap --unshare-net probe produced unexpected output: %q", string(output))
 	}
 	return nil
 }

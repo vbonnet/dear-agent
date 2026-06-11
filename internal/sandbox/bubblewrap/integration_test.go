@@ -223,6 +223,54 @@ func TestBubblewrap_ValidationErrors(t *testing.T) {
 	}
 }
 
+// skipUnlessNetworkIsolationSupported skips t when the host blocks bwrap's
+// --unshare-net. On GitHub Actions Ubuntu runners, creating a new network
+// namespace requires RTM_NEWADDR which is blocked by the seccomp profile —
+// bwrap exits non-zero when trying to configure loopback in the new ns.
+func skipUnlessNetworkIsolationSupported(t *testing.T) {
+	t.Helper()
+	probe := exec.Command("bwrap",
+		"--unshare-all", // no --share-net → isolates the network namespace
+		"--ro-bind", "/", "/",
+		"--proc", "/proc",
+		"--dev", "/dev",
+		"/bin/true",
+	)
+	if err := probe.Run(); err != nil {
+		t.Skipf("bwrap --unshare-net not supported in this environment (RTM_NEWADDR blocked?): %v", err)
+	}
+}
+
+// TestBubblewrap_NetworkIsolation_Enforced confirms that when a sandbox is
+// created with network isolation (ShareNetwork=false, the default), the
+// network namespace inside bwrap contains only the loopback interface and no
+// routes — proving real isolation, not just the correct --share-net flag.
+//
+// Skipped on macOS and on Linux environments where --unshare-net is blocked
+// (e.g. GitHub Actions Ubuntu runners behind a restricting seccomp profile).
+func TestBubblewrap_NetworkIsolation_Enforced(t *testing.T) {
+	skipUnlessBwrapFunctional(t)
+	skipUnlessNetworkIsolationSupported(t)
+
+	// Run bwrap with --unshare-net and inspect /proc/net/route inside the
+	// sandbox. In an isolated network namespace the routing table is empty
+	// (no routes have been added), confirming the host network is invisible.
+	cmd := exec.Command("bwrap",
+		"--unshare-all",
+		"--ro-bind", "/", "/",
+		"--proc", "/proc",
+		"--dev", "/dev",
+		"/bin/sh", "-c",
+		// /proc/net/route has a header line plus one line per route.
+		// In an isolated namespace with no routes, only the header is present.
+		"lines=$(cat /proc/net/route | wc -l); [ $lines -le 1 ] && echo isolated || echo leaking",
+	)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "bwrap --unshare-net failed: %s", string(output))
+	require.Contains(t, string(output), "isolated",
+		"/proc/net/route inside sandbox should be empty (only header line), got: %q", string(output))
+}
+
 // TestBubblewrap_IdempotentDestroy tests destroy idempotency
 func TestBubblewrap_IdempotentDestroy(t *testing.T) {
 	skipUnlessBwrapFunctional(t)
