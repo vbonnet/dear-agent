@@ -62,7 +62,7 @@ func init() {
 
 	// Required flags
 	memoryRetrieveCmd.Flags().StringVar(&retrieveNamespace, "namespace", "", "Namespace path (comma-separated)")
-	memoryRetrieveCmd.MarkFlagRequired("namespace")
+	_ = memoryRetrieveCmd.MarkFlagRequired("namespace")
 
 	// Optional flags
 	memoryRetrieveCmd.Flags().StringVar(&retrieveType, "type", "", "Filter by memory type")
@@ -116,7 +116,7 @@ func runMemoryRetrieve(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer provider.Close(ctx)
+	defer func() { _ = provider.Close(ctx) }()
 
 	// 3. Build query
 	query := consolidation.Query{

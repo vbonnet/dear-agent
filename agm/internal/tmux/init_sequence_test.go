@@ -302,12 +302,12 @@ func TestInitSequence_Run_Timeout(t *testing.T) {
 
 	// Session starts with default shell (likely bash), which won't have Claude "❯" prompt
 
-	// Create init sequence
+	// Create init sequence with a short prompt timeout so the timeout path is
+	// exercised without burning the production 30s budget.
 	seq := NewInitSequence(sessionName)
+	seq.PromptTimeout = 2 * time.Second
 
-	// Run should fail with timeout error
-	// Note: This will take 30 seconds (WaitForClaudePrompt timeout in sendRename)
-	// We could make timeout configurable, but for now accepting the delay
+	// Run should fail with timeout error (WaitForClaudePrompt times out in sendRename)
 	err = seq.Run()
 
 	// Verify we got an error
@@ -499,19 +499,26 @@ func TestInitSequence_PromptVerified_False_StillWaits(t *testing.T) {
 	require.NoError(t, err)
 
 	seq := NewInitSequence(sessionName)
-	// PromptVerified defaults to false - should wait for prompt
+	// PromptVerified defaults to false - should wait for the prompt.
+	// Inject a short timeout so we exercise the full-wait path without burning
+	// the production 30s budget (the behavior under test is "waits the full
+	// configured timeout", not the specific duration).
+	const testTimeout = 2 * time.Second
+	seq.PromptTimeout = testTimeout
 
 	// Run should timeout waiting for Claude prompt
 	start := time.Now()
 	err = seq.Run()
 	elapsed := time.Since(start)
 
-	// Should wait full 30s timeout period (WaitForClaudePrompt in sendRename)
+	// Should wait the full configured timeout period (WaitForClaudePrompt in sendRename)
 	assert.Error(t, err, "Should timeout when Claude not ready")
-	assert.GreaterOrEqual(t, elapsed.Seconds(), 30.0,
-		"Without PromptVerified, should wait full 30s timeout")
-	assert.Contains(t, err.Error(), "Claude not ready",
+	assert.GreaterOrEqual(t, elapsed, testTimeout,
+		"Without PromptVerified, should wait the full configured timeout")
+	// Match the production error string, which is lowercase
+	// ("claude not ready for rename: ...") — see init_sequence.go sendRename.
+	assert.Contains(t, err.Error(), "claude not ready",
 		"Error should mention Claude not being ready")
 
-	t.Logf("Timed out after %v (expected ≥30s without PromptVerified)", elapsed)
+	t.Logf("Timed out after %v (expected ≥%v without PromptVerified)", elapsed, testTimeout)
 }

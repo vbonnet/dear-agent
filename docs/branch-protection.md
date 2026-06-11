@@ -26,7 +26,7 @@ These settings must be configured manually in GitHub under **Settings > Branches
 4. Enable the settings listed above
 5. Under **Require status checks to pass**, search for and add:
    - `Build & Test` (from `ci.yml`)
-   - `Security Scan / govulncheck` (from `security-scan.yml`)
+   - `govulncheck` (from `ci.yml`)
 6. Click **Create** / **Save changes**
 
 ## Notes

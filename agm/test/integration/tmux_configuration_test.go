@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 
@@ -18,6 +19,9 @@ var _ = Describe("Tmux Configuration", func() {
 	var workDir string
 
 	BeforeEach(func() {
+		if os.Getenv("SKIP_E2E") != "" {
+			Skip("SKIP_E2E environment variable is set")
+		}
 		// Clean up any stale tmux lock from previous tests
 		tmux.ReleaseTmuxLock()
 

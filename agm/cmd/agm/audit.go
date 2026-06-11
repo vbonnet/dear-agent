@@ -130,7 +130,7 @@ func printAuditJSON(events []ops.AuditEvent) error {
 
 func printAuditTable(events []ops.AuditEvent) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "TIMESTAMP\tCOMMAND\tSESSION\tRESULT\tDURATION")
+	_, _ = fmt.Fprintln(w, "TIMESTAMP\tCOMMAND\tSESSION\tRESULT\tDURATION")
 	for _, ev := range events {
 		ts := ev.Timestamp.Format(time.RFC3339)
 		sess := ev.Session
@@ -138,7 +138,7 @@ func printAuditTable(events []ops.AuditEvent) error {
 			sess = "-"
 		}
 		dur := fmt.Sprintf("%dms", ev.DurationMs)
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", ts, ev.Command, sess, ev.Result, dur)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", ts, ev.Command, sess, ev.Result, dur)
 	}
 	return w.Flush()
 }

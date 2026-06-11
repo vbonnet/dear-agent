@@ -19,6 +19,8 @@
 //	    description: "No existing tests broken"
 //	  - type: graceful-exit
 //	    description: "Empty findings are a valid completion"
+//	  - type: handoff-confidence
+//	    description: "Every context handoff carries a confidence assessment"
 //
 // Recognized types are validated at load time so a typo surfaces
 // immediately rather than at task-completion time. Callers that want
@@ -58,6 +60,13 @@ const (
 	// The Audit phase can later refuse a deliverable whose findings
 	// are judged inflated against this criterion.
 	TypeGracefulExit Type = "graceful-exit"
+	// TypeHandoffConfidence means "every context handoff this task
+	// produces must carry a confidence assessment". It is declarative,
+	// like TypeNoRegressions: the criterion is the standing requirement
+	// that a handing-off agent state how much it trusts the serialized
+	// context (see agm/internal/gateway HandoffConfidence). The Audit
+	// phase can later refuse a deliverable whose handoffs omit it.
+	TypeHandoffConfidence Type = "handoff-confidence"
 	// TypeCustom is an escape hatch: a free-form criterion identified
 	// only by a description and (optionally) a command. Use sparingly —
 	// the more criteria are typed, the more the Audit phase can do.
@@ -73,6 +82,7 @@ var validTypes = []Type{
 	TypeLintClean,
 	TypeNoRegressions,
 	TypeGracefulExit,
+	TypeHandoffConfidence,
 	TypeCustom,
 }
 
@@ -161,7 +171,7 @@ func Validate(crits []Criterion) error {
 			if strings.TrimSpace(c.Command) == "" {
 				return fmt.Errorf("acceptance-criteria[%d]: type %q requires a non-empty command", i, c.Type)
 			}
-		case TypeNoRegressions, TypeGracefulExit:
+		case TypeNoRegressions, TypeGracefulExit, TypeHandoffConfidence:
 			// Description-only is fine; these criteria are declarative.
 		case TypeCustom:
 			if strings.TrimSpace(c.Description) == "" && strings.TrimSpace(c.Command) == "" {

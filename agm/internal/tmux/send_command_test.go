@@ -1,9 +1,9 @@
 package tmux
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -52,12 +52,10 @@ func TestSendCommand_SpecialCharacters(t *testing.T) {
 	}
 
 	// Create isolated socket for this test
-	testSocket := fmt.Sprintf("/tmp/agm-test-%d.sock", os.Getpid())
+	testSocket := filepath.Join(socketDir(t), "agm.sock")
 	t.Setenv("AGM_TMUX_SOCKET", testSocket)
 	t.Cleanup(func() {
 		exec.Command("tmux", "-S", testSocket, "kill-server").Run()
-		os.Remove(testSocket)
-		os.Unsetenv("AGM_TMUX_SOCKET")
 	})
 	setupTestState(t)
 
@@ -186,7 +184,6 @@ func BenchmarkSendCommand(b *testing.B) {
 	tmpDir := b.TempDir()
 	testSocket := tmpDir + "/bench-send-command.sock"
 	b.Setenv("AGM_TMUX_SOCKET", testSocket)
-	defer os.Unsetenv("AGM_TMUX_SOCKET")
 
 	sessionName := "bench-send-cmd"
 	cmd := exec.Command("tmux", "-S", testSocket, "new-session", "-d", "-s", sessionName)

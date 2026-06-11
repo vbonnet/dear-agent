@@ -194,7 +194,7 @@ func CleanupArchivedSession(env *TestEnv, sessionID string) error {
 
 // CreateSessionManifest creates a manifest file for a test session
 // This registers the session with AGM so commands like resume/archive can find it
-func CreateSessionManifest(sessionsDir, sessionName, agent string) error {
+func CreateSessionManifest(sessionsDir, sessionName, harness string) error {
 	// Validate session name
 	if sessionName == "" {
 		return fmt.Errorf("session name cannot be empty")
@@ -241,10 +241,10 @@ context:
   notes: ""
 tmux:
   session_name: "%s"
-agent: "%s"
+harness: "%s"
 claude:
   uuid: ""
-`, sessionID, sessionName, now, now, projectDir, sessionName, agent)
+`, sessionID, sessionName, now, now, projectDir, sessionName, harness)
 
 	// Write manifest file (path already declared for duplicate check above)
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0644); err != nil {
