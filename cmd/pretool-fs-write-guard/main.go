@@ -56,11 +56,13 @@ func run(in io.Reader, errOut io.Writer) int {
 		return 0
 	}
 
-	g := fsguard.New()
-	allowed, message := g.Classify(path, env.CWD)
-	if allowed {
+	// A malformed FSGUARD_CONFIG degrades to safe defaults rather than failing
+	// open, so we deliberately ignore the construction error and keep enforcing.
+	itc, _ := fsguard.NewInterceptor()
+	d := itc.CheckWrite(env.ToolName, path, env.CWD)
+	if d.Allowed {
 		return 0
 	}
-	_, _ = fmt.Fprintln(errOut, message+fsguard.Escalation)
+	_, _ = fmt.Fprintln(errOut, d.Message)
 	return 2
 }
