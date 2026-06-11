@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+// SkipOnCI skips t when running under CI (CI env var set) or in -short mode.
+// Use for tests that are timing-bound or require a dedicated environment.
+func SkipOnCI(t testing.TB) {
+	t.Helper()
+	if testing.Short() || os.Getenv("CI") != "" {
+		t.Skip("skipping: requires dedicated environment (set CI= to run locally)")
+	}
+}
+
 // RequireTestMode ensures ENGRAM_TEST_MODE is set, preventing test pollution
 // Call this at the start of any test that creates sessions
 func RequireTestMode(t *testing.T) {
