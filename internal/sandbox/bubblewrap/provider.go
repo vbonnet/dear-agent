@@ -527,7 +527,7 @@ func buildBwrapArgs(lowerDirs []string, upperDir string, shareNetwork bool, extr
 }
 
 // testBubblewrap runs a quick self-test to verify bubblewrap works on this host.
-func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, shareNetwork bool) error {
+func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, _ bool) error {
 	// Create a sentinel file that the sandbox command will verify.
 	testFile := filepath.Join(upperDir, ".bwrap-test")
 	if err := os.WriteFile(testFile, []byte("bubblewrap-test"), 0600); err != nil {
@@ -545,7 +545,11 @@ func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, shareN
 		}
 	}
 
-	args := buildBwrapArgs(lowerDirs, upperDir, shareNetwork, extra)
+	// Always share the network for the self-test probe: we're only checking
+	// whether bwrap can execute at all, not testing network isolation.
+	// Unsharing the network namespace requires setting up loopback via
+	// RTM_NEWADDR, which GitHub Actions Ubuntu runners prohibit.
+	args := buildBwrapArgs(lowerDirs, upperDir, true, extra)
 	cmd := exec.Command("bwrap", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
