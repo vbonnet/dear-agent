@@ -156,6 +156,10 @@ issues:
   max-issues-per-linter: 0
   max-same-issues: 0
 
+formatters:
+  enable:
+    - gofmt  # two unformatted files reached main; gate new regressions
+
 output:
   formats:
     text:
