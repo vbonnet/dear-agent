@@ -29,18 +29,46 @@ func TestNew(t *testing.T) {
 }
 
 func TestDefaultConfig(t *testing.T) {
-	// Save original lookupEnv
+	// Save originals
 	originalLookupEnv := lookupEnv
-	defer func() { lookupEnv = originalLookupEnv }()
+	originalAgmConfigPath := agmConfigPath
+	defer func() {
+		lookupEnv = originalLookupEnv
+		agmConfigPath = originalAgmConfigPath
+	}()
 
-	// Test missing WORKSPACE env var
+	// Test missing WORKSPACE env var and no config file fallback → error
 	lookupEnv = func(key string) (string, bool) {
 		return "", false
 	}
+	agmConfigPath = "/nonexistent/path/config.yaml"
 
 	_, err := DefaultConfig()
 	if err == nil {
-		t.Fatal("Expected error when WORKSPACE not set")
+		t.Fatal("Expected error when WORKSPACE not set and no config file")
+	}
+
+	// Test missing WORKSPACE env var but config file provides default_workspace
+	tmpCfg := t.TempDir() + "/config.yaml"
+	if writeErr := os.WriteFile(tmpCfg, []byte("version: 1\ndefault_workspace: config-workspace\n"), 0o644); writeErr != nil {
+		t.Fatalf("Failed to write temp config: %v", writeErr)
+	}
+	agmConfigPath = tmpCfg
+	lookupEnv = func(key string) (string, bool) {
+		switch key {
+		case "ENGRAM_TEST_MODE":
+			return "1", true
+		default:
+			return "", false
+		}
+	}
+
+	config, err := DefaultConfig()
+	if err != nil {
+		t.Fatalf("Expected fallback to config file workspace, got error: %v", err)
+	}
+	if config.Workspace != "config-workspace" {
+		t.Errorf("Expected workspace 'config-workspace' from config file, got '%s'", config.Workspace)
 	}
 
 	// Test with WORKSPACE set
@@ -57,21 +85,21 @@ func TestDefaultConfig(t *testing.T) {
 		}
 	}
 
-	config, err := DefaultConfig()
-	if err != nil {
-		t.Fatalf("Failed to get default config: %v", err)
+	config2, err2 := DefaultConfig()
+	if err2 != nil {
+		t.Fatalf("Failed to get default config: %v", err2)
 	}
 
-	if config.Workspace != "test-workspace" {
-		t.Errorf("Expected workspace 'test-workspace', got '%s'", config.Workspace)
+	if config2.Workspace != "test-workspace" {
+		t.Errorf("Expected workspace 'test-workspace', got '%s'", config2.Workspace)
 	}
 
-	if config.Port != "3307" {
-		t.Errorf("Expected port '3307', got '%s'", config.Port)
+	if config2.Port != "3307" {
+		t.Errorf("Expected port '3307', got '%s'", config2.Port)
 	}
 
-	if config.Host != "127.0.0.1" {
-		t.Errorf("Expected default host '127.0.0.1', got '%s'", config.Host)
+	if config2.Host != "127.0.0.1" {
+		t.Errorf("Expected default host '127.0.0.1', got '%s'", config2.Host)
 	}
 }
 

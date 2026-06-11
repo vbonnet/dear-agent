@@ -19,6 +19,7 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "opus", FullName: "claude-opus-4-6[1m]", Description: "Latest Opus, 1M context"},
 		{Alias: "sonnet", FullName: "claude-sonnet-4-6[1m]", Description: "Latest Sonnet, 1M context"},
 		{Alias: "haiku", FullName: "claude-haiku-4-5", Description: "Fast, 200k context"},
+		{Alias: "fable", FullName: "claude-fable-5", Description: "Fable 5 (free on Pro/Max/Team through 2026-06-23, then $10/$50 per M I/O)"},
 		{Alias: "opus-200k", FullName: "claude-opus-4-6", Description: "Opus with default 200k context"},
 		{Alias: "sonnet-200k", FullName: "claude-sonnet-4-6", Description: "Sonnet with default 200k context"},
 		{Alias: "opusplan", FullName: "opusplan", Description: "Opus for planning, Sonnet for execution"},

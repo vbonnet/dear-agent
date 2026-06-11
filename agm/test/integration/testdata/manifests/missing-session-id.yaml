@@ -8,4 +8,4 @@ context:
   project: "/tmp/test-project"
 tmux:
   session_name: "test-session"
-agent: "claude"
+harness: "claude"

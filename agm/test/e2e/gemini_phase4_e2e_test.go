@@ -175,14 +175,15 @@ func TestE2E_Gemini_CommandExecutionUnderLoad(t *testing.T) {
 			testDir := filepath.Join(tempDir, fmt.Sprintf("test-dir-%d", i))
 			os.MkdirAll(testDir, 0755)
 
-			cmd := agent.SessionCommand{
+			cmd := agent.Command{
 				Type: agent.CommandSetDir,
 				Params: map[string]interface{}{
-					"path": testDir,
+					"session_id": string(sessionID),
+					"path":       testDir,
 				},
 			}
 
-			if err := adapter.ExecuteCommand(sessionID, cmd); err != nil {
+			if err := adapter.ExecuteCommand(cmd); err != nil {
 				t.Errorf("ExecuteCommand %d failed: %v", i, err)
 			}
 
@@ -204,14 +205,15 @@ func TestE2E_Gemini_CommandExecutionUnderLoad(t *testing.T) {
 	// Test 2: Error recovery (execute invalid commands and verify recovery)
 	t.Run("ErrorRecovery", func(t *testing.T) {
 		// Execute invalid command
-		invalidCmd := agent.SessionCommand{
+		invalidCmd := agent.Command{
 			Type: agent.CommandSetDir,
 			Params: map[string]interface{}{
-				"path": "/nonexistent/invalid/path/that/does/not/exist",
+				"session_id": string(sessionID),
+				"path":       "/nonexistent/invalid/path/that/does/not/exist",
 			},
 		}
 
-		err := adapter.ExecuteCommand(sessionID, invalidCmd)
+		err := adapter.ExecuteCommand(invalidCmd)
 		// Error expected, but session should still be active
 
 		// Verify session is still operational
@@ -226,14 +228,15 @@ func TestE2E_Gemini_CommandExecutionUnderLoad(t *testing.T) {
 
 		// Execute valid command to verify recovery
 		validDir := t.TempDir()
-		validCmd := agent.SessionCommand{
+		validCmd := agent.Command{
 			Type: agent.CommandSetDir,
 			Params: map[string]interface{}{
-				"path": validDir,
+				"session_id": string(sessionID),
+				"path":       validDir,
 			},
 		}
 
-		if err := adapter.ExecuteCommand(sessionID, validCmd); err != nil {
+		if err := adapter.ExecuteCommand(validCmd); err != nil {
 			t.Errorf("Failed to recover from error: %v", err)
 		}
 
@@ -316,7 +319,7 @@ func TestE2E_Gemini_CrossAgentCompatibility(t *testing.T) {
 			t.Fatalf("failed to create Gemini adapter: %v", err)
 		}
 
-		geminiSessionID, err := geminiAdapter.ImportConversation(exportFile, agent.FormatJSONL)
+		geminiSessionID, err := geminiAdapter.ImportConversation(exportData, agent.FormatJSONL)
 		if err != nil {
 			t.Fatalf("Gemini ImportConversation failed: %v", err)
 		}
@@ -388,7 +391,7 @@ func TestE2E_Gemini_CrossAgentCompatibility(t *testing.T) {
 			t.Fatalf("failed to create Claude adapter: %v", err)
 		}
 
-		claudeSessionID, err := claudeAdapter.ImportConversation(exportFile, agent.FormatJSONL)
+		claudeSessionID, err := claudeAdapter.ImportConversation(exportData, agent.FormatJSONL)
 		if err != nil {
 			t.Fatalf("Claude ImportConversation failed: %v", err)
 		}

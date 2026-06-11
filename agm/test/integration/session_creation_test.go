@@ -17,6 +17,9 @@ var _ = Describe("Session Creation", func() {
 	var workDir string
 
 	BeforeEach(func() {
+		if os.Getenv("SKIP_E2E") != "" {
+			Skip("SKIP_E2E environment variable is set")
+		}
 		sessionName = testEnv.UniqueSessionName("creation")
 		workDir = "/tmp"
 	})
@@ -71,7 +74,7 @@ var _ = Describe("Session Creation", func() {
 					Tmux: manifest.Tmux{
 						SessionName: sessionName,
 					},
-					Agent: "claude",
+					Harness: "claude",
 				}
 
 				err = manifest.Write(manifestPath, m)
@@ -85,7 +88,7 @@ var _ = Describe("Session Creation", func() {
 				readManifest, err := manifest.Read(manifestPath)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(readManifest.Name).To(Equal(sessionName))
-				Expect(readManifest.Agent).To(Equal("claude"))
+				Expect(readManifest.Harness).To(Equal("claude"))
 			})
 		})
 	})
@@ -122,7 +125,7 @@ var _ = Describe("Session Creation", func() {
 					Tmux: manifest.Tmux{
 						SessionName: agentSessionName,
 					},
-					Agent: agent,
+					Harness: agent,
 				}
 
 				err = manifest.Write(manifestPath, m)
@@ -131,7 +134,7 @@ var _ = Describe("Session Creation", func() {
 				// Read and verify agent field
 				readManifest, err := manifest.Read(manifestPath)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(readManifest.Agent).To(Equal(agent))
+				Expect(readManifest.Harness).To(Equal(agent))
 			},
 			Entry("claude agent", "claude"),
 			Entry("gemini agent", "gemini"),

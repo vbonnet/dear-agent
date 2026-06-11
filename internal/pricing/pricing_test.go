@@ -13,8 +13,10 @@ func TestLookup_Alias(t *testing.T) {
 		{"opus", 15.00, 75.00},
 		{"sonnet", 3.00, 15.00},
 		{"haiku", 1.00, 5.00},
+		{"fable", 10.00, 50.00},
 		{"Opus", 15.00, 75.00},  // case-insensitive
 		{"SONNET", 3.00, 15.00}, // case-insensitive
+		{"FABLE", 10.00, 50.00}, // case-insensitive
 	}
 	for _, c := range cases {
 		p := Lookup(c.model)
@@ -34,6 +36,7 @@ func TestLookup_FullName(t *testing.T) {
 		{"claude-opus-4-6[1m]", "opus"},
 		{"claude-sonnet-4-6", "sonnet"},
 		{"claude-haiku-4-5", "haiku"},
+		{"claude-fable-5", "fable"},
 	}
 	for _, c := range cases {
 		p := Lookup(c.model)

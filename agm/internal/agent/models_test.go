@@ -23,6 +23,7 @@ func TestResolveModelFullName(t *testing.T) {
 		{"claude-code", "sonnet", "claude-sonnet-4-6[1m]"},
 		{"claude-code", "opus", "claude-opus-4-6[1m]"},
 		{"claude-code", "haiku", "claude-haiku-4-5"},
+		{"claude-code", "fable", "claude-fable-5"},
 		{"gemini-cli", "3.5-flash", "gemini-3.5-flash"},
 		{"codex-cli", "5.4", "gpt-5.4"},
 		// Unknown alias passthrough

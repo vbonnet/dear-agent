@@ -139,7 +139,7 @@ func TestEdgeCase_ManifestWithoutProjectDirectory(t *testing.T) {
 		Tmux: manifest.Tmux{
 			SessionName: sessionName,
 		},
-		Agent: "claude",
+		Harness: "claude",
 	}
 
 	manifestPath := filepath.Join(sessionDir, "manifest.yaml")
@@ -229,7 +229,7 @@ func TestEdgeCase_ManifestWithFutureTimestamp(t *testing.T) {
 		Tmux: manifest.Tmux{
 			SessionName: sessionName,
 		},
-		Agent: "claude",
+		Harness: "claude",
 	}
 
 	manifestPath := filepath.Join(sessionDir, "manifest.yaml")
@@ -389,7 +389,7 @@ func TestEdgeCase_SessionWithSymlinkedProject(t *testing.T) {
 		Tmux: manifest.Tmux{
 			SessionName: sessionName,
 		},
-		Agent: "claude",
+		Harness: "claude",
 	}
 
 	manifestPath := filepath.Join(sessionDir, "manifest.yaml")
@@ -533,7 +533,7 @@ func TestEdgeCase_TimestampPrecision(t *testing.T) {
 		Tmux: manifest.Tmux{
 			SessionName: sessionName,
 		},
-		Agent: "claude",
+		Harness: "claude",
 	}
 
 	manifestPath := filepath.Join(sessionDir, "manifest.yaml")
