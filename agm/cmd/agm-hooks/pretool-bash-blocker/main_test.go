@@ -214,6 +214,35 @@ func TestRun_Integration(t *testing.T) {
 	}
 }
 
+func TestAllowSnippet(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want string
+	}{
+		{
+			name: "short command unchanged",
+			cmd:  "git status",
+			want: `Bash(git status)`,
+		},
+		{
+			name: "long command truncated at word boundary with wildcard",
+			cmd:  "GIT_TERMINAL_PROMPT=0 gtimeout 30 git push -u origin my-feature-branch --set-upstream",
+			want: `Bash(GIT_TERMINAL_PROMPT=0 gtimeout 30 git push -u origin*)`,
+		},
+		{
+			name: "exactly 60 chars not truncated",
+			cmd:  "123456789012345678901234567890123456789012345678901234567890",
+			want: `Bash(123456789012345678901234567890123456789012345678901234567890)`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, allowSnippet(tt.cmd))
+		})
+	}
+}
+
 func TestBraceExpansionRegex(t *testing.T) {
 	tests := []struct {
 		name      string
