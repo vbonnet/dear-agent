@@ -96,7 +96,7 @@ deferred-cost, not progress.
 | 1  | CI-health alerting workflow                       | ✅ shipped (this PR) |
 | 2  | govulncheck in main `CI` workflow                 | TODO     |
 | 3  | Auto-bump `go` directive in go.mod                | TODO     |
-| 4  | Bash-policy: print exact INSERT snippet on miss   | TODO     |
+| 4  | Bash-policy: print exact INSERT snippet on miss   | ✅ shipped (ce-6as.48, PR #304) |
 | 5  | Quarantine broken e2e tests with `t.Skip` + issue | TODO     |
 
 Items 2-5 are inherited from the 5/9 retro and remain unwired. Per the
