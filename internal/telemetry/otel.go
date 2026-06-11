@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 
 	"go.opentelemetry.io/otel"
@@ -78,7 +79,13 @@ func InitMeter(serviceName string, opts ...Option) (shutdown func(context.Contex
 
 	ctx := context.Background()
 
-	exporter, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithEndpoint(cfg.endpoint))
+	// Normalize endpoint: strip http:// or https:// scheme — WithEndpoint expects
+	// bare host:port for the gRPC transport.
+	grpcEndpoint := cfg.endpoint
+	if i := strings.Index(grpcEndpoint, "://"); i >= 0 {
+		grpcEndpoint = grpcEndpoint[i+3:]
+	}
+	exporter, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithEndpoint(grpcEndpoint))
 	if err != nil {
 		// Fall back to no-op rather than crashing the host binary; the
 		// exporter error is deliberately swallowed so a missing collector
@@ -87,16 +94,15 @@ func InitMeter(serviceName string, opts ...Option) (shutdown func(context.Contex
 		return noopShutdown, nil //nolint:nilerr // graceful no-op fallback
 	}
 
-	res, mergeErr := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName(serviceName),
-			semconv.ServiceVersion(serviceVersion()),
-		),
+	svcRes := resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.ServiceName(serviceName),
+		semconv.ServiceVersion(serviceVersion()),
 	)
+	res, mergeErr := resource.Merge(resource.Default(), svcRes)
 	if mergeErr != nil {
-		res = resource.Default()
+		// Schema URL conflict — keep service name rather than silently losing it.
+		res = svcRes
 	}
 
 	mp := sdkmetric.NewMeterProvider(
