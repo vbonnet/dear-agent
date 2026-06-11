@@ -527,7 +527,7 @@ func buildBwrapArgs(lowerDirs []string, upperDir string, shareNetwork bool, extr
 }
 
 // testBubblewrap runs a quick self-test to verify bubblewrap works on this host.
-func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, shareNetwork bool) error { //nolint:unparam // mergedDir used in future overlay tests
+func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, shareNetwork bool) error {
 	// Create a sentinel file that the sandbox command will verify.
 	testFile := filepath.Join(upperDir, ".bwrap-test")
 	if err := os.WriteFile(testFile, []byte("bubblewrap-test"), 0600); err != nil {
