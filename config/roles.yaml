@@ -59,6 +59,9 @@ roles:
     tertiary:
       model: gpt-5.5-pro
       effort: high
+      cost_per_mtok:
+        input: 15.00
+        output: 60.00
 
   # Implementer (a.k.a. "code role"): code synthesis, tool use, patch
   # application. Anthropic Opus has the highest accepted-patch rate in our
@@ -77,10 +80,16 @@ roles:
     secondary:
       model: gpt-5.5-pro
       effort: high
+      cost_per_mtok:
+        input: 15.00
+        output: 60.00
     tertiary:
       model: gemini-3.1-pro
       effort: high
       max_context: 1000000
+      cost_per_mtok:
+        input: 1.25
+        output: 10.00
 
   # Reviewer (a.k.a. "review/audit role"): adversarial critique of artifacts
   # produced by the implementer. We deliberately put a different vendor
@@ -94,6 +103,9 @@ roles:
     primary:
       model: gpt-5.5-pro
       effort: max
+      cost_per_mtok:
+        input: 15.00
+        output: 60.00
     secondary:
       model: claude-opus-4-7
       effort: max
@@ -103,6 +115,9 @@ roles:
     tertiary:
       model: gemini-2.5-pro
       effort: high
+      cost_per_mtok:
+        input: 1.25
+        output: 5.00
 
   # Orchestrator (general / coordinator): routes between other roles, makes
   # cheap decisions, summarises state for HITL. High call volume, low per-
@@ -116,9 +131,18 @@ roles:
     primary:
       model: claude-sonnet-4-6
       effort: high
+      cost_per_mtok:
+        input: 3.00
+        output: 15.00
     secondary:
       model: gemini-3.5-flash
       effort: high
+      cost_per_mtok:
+        input: 0.075
+        output: 0.30
     tertiary:
       model: gpt-5.4-mini
       effort: high
+      cost_per_mtok:
+        input: 0.15
+        output: 0.60
