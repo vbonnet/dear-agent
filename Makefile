@@ -33,8 +33,10 @@
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 #   build-jaeger-health     Build the Jaeger health-check CLI (cmd/jaeger-health)
 #   install-jaeger-health   Install jaeger-health to ~/go/bin
+#   build-safe-pr           Build the safe-pr wrapper (cmd/safe-pr)
+#   install-safe-pr         Install safe-pr to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-safe-pr install-safe-pr
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -227,6 +229,19 @@ build-jaeger-health:
 install-jaeger-health: build-jaeger-health
 	cp bin/jaeger-health $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/jaeger-health"
+
+# Guarded wrapper around gh pr create/close. Enforces open-PR cap and
+# one-PR-per-bead before delegating to gh. ALWAYS_ALLOW this binary and
+# deny raw 'gh pr create/close' via PreToolUse hook.
+build-safe-pr:
+	@echo "Building safe-pr..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/safe-pr ./cmd/safe-pr/
+	@echo "Built: bin/safe-pr"
+
+install-safe-pr: build-safe-pr
+	cp bin/safe-pr $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-pr"
 
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
