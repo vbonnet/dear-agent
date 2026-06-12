@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -27,7 +29,18 @@ type ProcessKiller interface {
 	Kill(pid int) error
 }
 
+// DefaultProcessFinder returns a platform-appropriate ProcessFinder.
+// On Linux it uses /proc for efficiency; on macOS and other platforms it
+// falls back to PSFinder which shells out to `ps`.
+func DefaultProcessFinder() ProcessFinder {
+	if runtime.GOOS == "linux" {
+		return &ProcFSFinder{}
+	}
+	return &PSFinder{}
+}
+
 // ProcFSFinder scans /proc/*/cmdline to find processes by command line content.
+// Only works on Linux; use DefaultProcessFinder() to get the right impl.
 type ProcFSFinder struct{}
 
 // FindByCommandLine scans /proc for processes whose cmdline contains substring.
@@ -71,6 +84,48 @@ func (f *ProcFSFinder) FindByCommandLine(substring string) ([]ProcessInfo, error
 	return results, nil
 }
 
+// PSFinder uses `ps -ax -o pid=,args=` to find processes by command line.
+// Works on macOS and Linux — use this where /proc is not available.
+type PSFinder struct{}
+
+// FindByCommandLine runs ps to find processes whose args contain substring.
+func (f *PSFinder) FindByCommandLine(substring string) ([]ProcessInfo, error) {
+	if substring == "" {
+		return nil, nil
+	}
+
+	out, err := exec.Command("ps", "-ax", "-o", "pid=,args=").Output()
+	if err != nil {
+		return nil, fmt.Errorf("ps failed: %w", err)
+	}
+
+	var results []ProcessInfo
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// First field is PID, rest is args.
+		fields := strings.SplitN(line, " ", 2)
+		if len(fields) < 2 {
+			continue
+		}
+		if !strings.Contains(fields[1], substring) {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(fields[0]))
+		if err != nil {
+			continue
+		}
+		results = append(results, ProcessInfo{
+			PID:     pid,
+			CmdLine: fields[1],
+		})
+	}
+
+	return results, nil
+}
+
 // SignalKiller kills a process using SIGTERM then SIGKILL after a grace period.
 type SignalKiller struct{}
 
@@ -97,6 +152,7 @@ func (k *SignalKiller) Kill(pid int) error {
 	// Wait up to 5 seconds for graceful exit
 	done := make(chan struct{})
 	go func() {
+		defer func() { recover() }() //nolint:errcheck // intentional: close(done) is safe to call twice if somehow called after channel is closed
 		for i := 0; i < 50; i++ {
 			if err := process.Signal(syscall.Signal(0)); err != nil {
 				close(done)
