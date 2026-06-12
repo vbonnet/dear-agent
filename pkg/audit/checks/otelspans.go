@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/audit"
@@ -38,13 +39,14 @@ func (OTelSpansCheck) Meta() audit.CheckMeta {
 // fields the check needs.  We avoid importing pkg/otelsetup to keep the
 // dependency graph clean; the on-disk JSON format is stable.
 type jsonlSpan struct {
-	TraceID    string    `json:"trace_id"`
-	SpanID     string    `json:"span_id"`
-	Name       string    `json:"name"`
-	StartTime  time.Time `json:"start_time"`
-	DurationMs float64   `json:"duration_ms"`
-	StatusCode string    `json:"status_code"`
-	StatusMsg  string    `json:"status_message"`
+	TraceID     string    `json:"trace_id"`
+	SpanID      string    `json:"span_id"`
+	ServiceName string    `json:"service_name"`
+	Name        string    `json:"name"`
+	StartTime   time.Time `json:"start_time"`
+	DurationMs  float64   `json:"duration_ms"`
+	StatusCode  string    `json:"status_code"`
+	StatusMsg   string    `json:"status_message"`
 }
 
 // Run discovers spans.jsonl files under tracesDir, decodes spans within the
@@ -114,6 +116,34 @@ func (c OTelSpansCheck) processFile(
 		}
 		if s.StartTime.Before(cutoff) {
 			continue // outside the lookback window
+		}
+		if s.ServiceName == "" || strings.HasPrefix(s.ServiceName, "unknown_service") {
+			// Deduplicate: a binary with no service name emits the missing-service
+			// finding on every span it produces. Report it at most once per
+			// (file, unique service name) to avoid flooding the audit results.
+			fp := audit.Fingerprint("otel.unknown-service", path, s.ServiceName)
+			hasUnknownServiceFinding := false
+			for i := range findings {
+				if findings[i].Fingerprint == fp {
+					hasUnknownServiceFinding = true
+					break
+				}
+			}
+			if !hasUnknownServiceFinding {
+				findings = append(findings, audit.Finding{
+					CheckID:     "otel.span-errors",
+					Fingerprint: fp,
+					Severity:    audit.SeverityP2,
+					Title:       "OTel span missing service name: " + s.Name,
+					Detail:      "service_name is empty or 'unknown_service' — wire InitTracer(name) in this binary's main()",
+					Evidence: map[string]any{
+						"trace_id":     s.TraceID,
+						"span_id":      s.SpanID,
+						"service_name": s.ServiceName,
+						"file":         path,
+					},
+				})
+			}
 		}
 		if s.StatusCode == "Error" {
 			msg := s.StatusMsg
