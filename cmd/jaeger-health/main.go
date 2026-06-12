@@ -123,7 +123,7 @@ func fetchServices(ctx context.Context, c *http.Client, base string) ([]string, 
 		return nil, fmt.Errorf("decode /api/services: %w", err)
 	}
 	if len(sr.Errors) > 0 {
-		return nil, fmt.Errorf("Jaeger errors: %s", strings.Join(sr.Errors, "; "))
+		return nil, fmt.Errorf("jaeger errors: %s", strings.Join(sr.Errors, "; "))
 	}
 	return sr.Data, nil
 }
