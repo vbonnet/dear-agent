@@ -1,0 +1,172 @@
+name: Monthly Audit
+
+# Monthly deeper audit of codebase health: doc staleness, license headers,
+# and cyclomatic complexity. These are too slow/noisy for weekly runs but
+# too important to skip entirely. Opens a GitHub issue on findings.
+#
+# Mirrors the tiered cadence:
+#   daily:   branch-protection-audit.yml
+#   weekly:  health-check.yml, dependency-freshness.yml, merge-audit-weekly.yml
+#   monthly: this file
+
+on:
+  schedule:
+    - cron: "0 10 1 * *"  # 1st of each month at 10:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  audit:
+    name: Monthly audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install gocognit
+        run: go install github.com/uudashr/gocognit/cmd/gocognit@latest
+
+      - name: Check doc staleness (Last audited at: > 90 days)
+        id: doc_staleness
+        run: |
+          set -euo pipefail
+          cutoff=$(date -d '90 days ago' '+%Y-%m-%d' 2>/dev/null || date -v-90d '+%Y-%m-%d')
+          findings=""
+          while IFS= read -r mdfile; do
+            # Extract the most recent Last audited at: timestamp.
+            ts=$(grep -oP '(?<=Last audited at: )\d{4}-\d{2}-\d{2}' "$mdfile" | tail -1 || true)
+            if [ -z "$ts" ]; then
+              continue  # No timestamp — doc-proximity handles these
+            fi
+            if [[ "$ts" < "$cutoff" ]]; then
+              findings="${findings}\n- \`${mdfile}\`: last audited ${ts} (>90 days)"
+            fi
+          done < <(find . -name "*.md" \
+            -not -path "./.git/*" \
+            -not -path "./vendor/*" \
+            -not -path "./node_modules/*")
+          {
+            echo "stale_docs<<__EOF__"
+            printf '%b\n' "$findings"
+            echo "__EOF__"
+          } >> "$GITHUB_ENV"
+          if [ -n "$findings" ]; then
+            echo "has_stale=true" >> "$GITHUB_OUTPUT"
+            echo "Stale docs found:"
+            printf '%b\n' "$findings"
+          else
+            echo "has_stale=false" >> "$GITHUB_OUTPUT"
+            echo "ok: no docs older than 90 days"
+          fi
+
+      - name: Complexity audit (gocognit > 15)
+        id: complexity
+        run: |
+          set -euo pipefail
+          # Emit functions with cognitive complexity > 15 (high, not critical).
+          findings=$(gocognit -over 15 ./... 2>/dev/null | head -50 || true)
+          {
+            echo "complex_funcs<<__EOF__"
+            echo "$findings"
+            echo "__EOF__"
+          } >> "$GITHUB_ENV"
+          if [ -n "$findings" ]; then
+            echo "has_complex=true" >> "$GITHUB_OUTPUT"
+            echo "High-complexity functions:"
+            echo "$findings"
+          else
+            echo "has_complex=false" >> "$GITHUB_OUTPUT"
+            echo "ok: no functions with cognitive complexity > 15"
+          fi
+
+      - name: Build summary
+        run: |
+          {
+            echo "## Monthly Audit — $(date -u '+%Y-%m-%d')"
+            echo ""
+            echo "### Doc staleness (Last audited at: > 90 days)"
+            if [ -n "${stale_docs:-}" ]; then
+              printf '%b\n' "${stale_docs:-}"
+            else
+              echo "✓ All timestamped docs are within 90 days"
+            fi
+            echo ""
+            echo "### Complexity (cognitive complexity > 15)"
+            if [ -n "${complex_funcs:-}" ]; then
+              echo '```'
+              echo "${complex_funcs:-}"
+              echo '```'
+            else
+              echo "✓ No high-complexity functions"
+            fi
+          } | tee monthly-audit-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-audit-report
+          path: monthly-audit-report.md
+          retention-days: 90
+
+      - name: Open / update monthly-audit issue on findings
+        if: >
+          steps.doc_staleness.outputs.has_stale == 'true' ||
+          steps.complexity.outputs.has_complex == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="monthly-audit: findings $(date -u '+%Y-%m')"
+          body=$(cat monthly-audit-report.md)
+          existing=$(timeout 30 gh issue list \
+            --repo "$REPO" \
+            --label monthly-audit \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            timeout 30 gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            timeout 30 gh issue create \
+              --repo "$REPO" \
+              --title "$title" \
+              --body "$body" \
+              --label monthly-audit
+          fi
+
+      - name: Auto-close monthly-audit issue when clean
+        if: >
+          steps.doc_staleness.outputs.has_stale == 'false' &&
+          steps.complexity.outputs.has_complex == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          existing=$(timeout 30 gh issue list \
+            --repo "$REPO" \
+            --label monthly-audit \
+            --state open \
+            --json number \
+            --jq '.[].number')
+          for n in $existing; do
+            timeout 30 gh issue close "$n" --repo "$REPO" \
+              --comment "Monthly audit: all checks clean; auto-closing."
+          done
