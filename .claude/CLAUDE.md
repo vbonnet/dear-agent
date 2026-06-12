@@ -349,6 +349,47 @@ cross-references closed beads citing `#NNN` PR refs against live PR state and
 reopens any DoD violators. If you find a closed bead whose PR is still open,
 that is a defect — reopen the bead and let the reconciler catch the class.
 
+## PR Lifecycle — Wayfinder-Only (MANDATORY)
+
+PR **open and close are denied by default** in this repo and allowed only
+through the `safe-pr` wrapper, which requires a wayfinder session trace.
+This is the enforcement tier of principles 5 (use `/wayfinder`) and 9
+(atomic action wrappers): raw `gh pr create|close|reopen` in Bash is blocked
+by the PreToolUse hook `.claude/hooks/pretool-pr-guard` (exit 2, positive
+guidance), wired in `.claude/settings.json`.
+
+**Why:** untraced PRs have no plan/session/bead attribution and no telemetry,
+and PR spray from burndown workers has repeatedly outrun the serial merge
+pipeline (required checks + linear history), burning CI and bot-review quota
+(2026-06-11/12 logjams). Instruction-tier rules alone did not stop it.
+
+**The sanctioned path:**
+
+```
+safe-pr create --wayfinder <wayfinder-project-dir> --title "..." --body "..." [gh flags]
+safe-pr close  --wayfinder <wayfinder-project-dir> <number|url>
+```
+
+- The project dir (or `WAYFINDER_PROJECT_DIR`) must hold a
+  `WAYFINDER-STATUS.md` with `status: in_progress`; the session id is stamped
+  into the PR body (create) or close comment (close).
+- Every invocation appends a JSONL audit record to
+  `~/.local/state/dear-agent/safe-pr.log` and emits an OTel span
+  (`safepr.<verb>`).
+- `make install-safe-pr` installs the binary; `Bash(safe-pr:*)` is
+  allow-listed in `.claude/settings.json` (vetted wrapper, no per-call
+  approval).
+- **Emergency hatch** (no session exists and the work genuinely cannot wait):
+  `safe-pr <verb> --emergency --reason "<why>"` — audited and stamped on the
+  PR, never silent. Do not use it to skip starting a wayfinder session.
+- Unchanged: read-only `gh pr view|list|checks|diff`, and `gh pr merge`
+  (already governed by required checks + review gates).
+
+Scope today: this repo (project-scoped hook). Global rollout across repos is
+ce-20en; routing the in-code PR creators through safe-pr is ce-ijsq
+(pkg/selfimprove) and ce-jzqa (agm evaluation); the burndown worker prompt
+update is ce-gzmr.
+
 ## Living Documentation Policy (MANDATORY)
 
 Documentation in this repo must be **living** — it describes the current

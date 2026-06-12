@@ -19,6 +19,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -40,49 +41,9 @@ func main() {
 }
 
 func run(argv []string) error {
-	if len(argv) == 0 || argv[0] == "-h" || argv[0] == "--help" {
-		fmt.Print(usage)
-		return nil
-	}
-
-	req := safepr.Request{Verb: argv[0]}
-	wayfinderDir := ""
-	timeout := safepr.DefaultTimeout
-
-	for i := 1; i < len(argv); i++ {
-		arg := argv[i]
-		switch arg {
-		case "-h", "--help":
-			fmt.Print(usage)
-			return nil
-		case "--wayfinder":
-			if i+1 >= len(argv) {
-				return fmt.Errorf("--wayfinder requires a wayfinder project directory argument")
-			}
-			wayfinderDir = argv[i+1]
-			i++
-		case "--emergency":
-			req.Emergency = true
-		case "--reason":
-			if i+1 >= len(argv) {
-				return fmt.Errorf("--reason requires a text argument")
-			}
-			req.Reason = argv[i+1]
-			i++
-		case "--timeout":
-			if i+1 >= len(argv) {
-				return fmt.Errorf("--timeout requires a duration argument (e.g. 60s)")
-			}
-			d, err := time.ParseDuration(argv[i+1])
-			if err != nil {
-				return fmt.Errorf("invalid --timeout %q: %w", argv[i+1], err)
-			}
-			timeout = d
-			i++
-		default:
-			// Everything else is forwarded to `gh pr <verb>` (after stamping).
-			req.GhArgs = append(req.GhArgs, arg)
-		}
+	req, wayfinderDir, timeout, done, err := parseArgs(argv)
+	if done || err != nil {
+		return err
 	}
 
 	if !req.Emergency {
@@ -101,9 +62,59 @@ func run(argv []string) error {
 	}
 
 	shutdown := otelsetup.InitTracer("safe-pr")
-	defer func() { _ = shutdown(context.Background()) }()
+	defer shutdown(context.Background()) //nolint:errcheck // span flush failure at exit has nowhere to go
 
-	return execGh(&req, timeout)
+	return execGh(req, timeout)
+}
+
+// parseArgs splits argv into the request, wrapper-owned flags, and the
+// pass-through gh arguments. done=true means help was printed and the run
+// should end successfully.
+func parseArgs(argv []string) (req *safepr.Request, wayfinderDir string, timeout time.Duration, done bool, err error) {
+	if len(argv) == 0 || argv[0] == "-h" || argv[0] == "--help" {
+		fmt.Print(usage)
+		return nil, "", 0, true, nil
+	}
+
+	req = &safepr.Request{Verb: argv[0]}
+	timeout = safepr.DefaultTimeout
+
+	for i := 1; i < len(argv); i++ {
+		arg := argv[i]
+		switch arg {
+		case "-h", "--help":
+			fmt.Print(usage)
+			return nil, "", 0, true, nil
+		case "--wayfinder":
+			if i+1 >= len(argv) {
+				return nil, "", 0, false, fmt.Errorf("--wayfinder requires a wayfinder project directory argument")
+			}
+			wayfinderDir = argv[i+1]
+			i++
+		case "--emergency":
+			req.Emergency = true
+		case "--reason":
+			if i+1 >= len(argv) {
+				return nil, "", 0, false, fmt.Errorf("--reason requires a text argument")
+			}
+			req.Reason = argv[i+1]
+			i++
+		case "--timeout":
+			if i+1 >= len(argv) {
+				return nil, "", 0, false, fmt.Errorf("--timeout requires a duration argument (e.g. 60s)")
+			}
+			d, derr := time.ParseDuration(argv[i+1])
+			if derr != nil {
+				return nil, "", 0, false, fmt.Errorf("invalid --timeout %q: %w", argv[i+1], derr)
+			}
+			timeout = d
+			i++
+		default:
+			// Everything else is forwarded to `gh pr <verb>` (after stamping).
+			req.GhArgs = append(req.GhArgs, arg)
+		}
+	}
+	return req, wayfinderDir, timeout, false, nil
 }
 
 // prURLRe matches the PR URL gh prints on success.
@@ -120,6 +131,9 @@ func execGh(req *safepr.Request, timeout time.Duration) error {
 	defer cancel()
 
 	args := req.StampedArgs()
+	// #nosec G702 -- argv is the literal "pr <verb>" plus caller flags; exec
+	// runs no shell, so every argument reaches the trusted gh binary as inert
+	// argv (same justification as internal/safegit).
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	var out bytes.Buffer
 	cmd.Stdout = io.MultiWriter(os.Stdout, &out)
@@ -134,7 +148,8 @@ func execGh(req *safepr.Request, timeout time.Duration) error {
 	errText := ""
 	if runErr != nil {
 		exitCode = 1
-		if ee, ok := runErr.(*exec.ExitError); ok {
+		var ee *exec.ExitError
+		if errors.As(runErr, &ee) {
 			exitCode = ee.ExitCode()
 		}
 		errText = runErr.Error()

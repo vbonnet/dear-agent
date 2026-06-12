@@ -1,4 +1,9 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(safe-pr:*)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -7,6 +12,16 @@
           {
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/pretool-spawn-routing",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/pretool-pr-guard",
             "timeout": 5
           }
         ]

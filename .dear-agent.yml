@@ -34,6 +34,18 @@ output-dirs:
   research: ~/src/engram-research
   logs: ~/src/ai-conversation-logs
 
+# PR lifecycle policy (informational mirror of the enforcement in
+# .claude/settings.json + .claude/hooks/pretool-pr-guard; the authoritative
+# rationale lives in .claude/CLAUDE.md §"PR Lifecycle — Wayfinder-Only").
+# Agents read this file at session start: PR open/close in this repo goes
+# through the safe-pr wrapper, which requires an active wayfinder session
+# (WAYFINDER-STATUS.md status: in_progress) and stamps the session trace on
+# the PR. Raw `gh pr create|close|reopen` in Bash is denied with exit 2.
+pr-policy:
+  create: safe-pr   # safe-pr create --wayfinder <project-dir> --title … --body …
+  close: safe-pr    # safe-pr close  --wayfinder <project-dir> <number|url>
+  emergency: "safe-pr <verb> --emergency --reason \"<why>\"  # audited, never silent"
+
 forbidden-paths:
   research:
     # Research artifacts — analysis docs, transcripts, literature reviews,

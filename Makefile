@@ -35,8 +35,10 @@
 #   install-jaeger-health   Install jaeger-health to ~/go/bin
 #   build-bead-pr-guard     Build the bead-PR duplicate-guard CLI (cmd/bead-pr-guard)
 #   install-bead-pr-guard   Install bead-pr-guard to ~/go/bin
+#   build-safe-pr           Build safe-pr, the wayfinder-traced PR wrapper
+#   install-safe-pr         Install safe-pr to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -197,6 +199,23 @@ build-safe-push:
 install-safe-push: build-safe-push
 	cp bin/safe-push $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/safe-push"
+
+# Build safe-pr: the one sanctioned path for opening/closing GitHub PRs from
+# agent sessions. It requires an active wayfinder session (WAYFINDER-STATUS.md
+# status: in_progress) and stamps the session trace into the PR body/comment;
+# .claude/hooks/pretool-pr-guard denies the raw gh verbs and points here.
+# See internal/safepr and CLAUDE.md §PR Lifecycle (bead ce-p17s).
+build-safe-pr:
+	@echo "Building safe-pr..."
+	go build $(GOFLAGS) -o bin/safe-pr ./cmd/safe-pr/
+	@echo "Built: bin/safe-pr"
+
+# Install safe-pr to GOPATH/bin so it is on PATH for every agent session.
+# `Bash(safe-pr:*)` is allow-listed in .claude/settings.json — its safety is
+# guaranteed by construction (CLAUDE.md principle 9).
+install-safe-pr: build-safe-pr
+	cp bin/safe-pr $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-pr"
 
 # Build src-recovery: the one sanctioned writer to ~/src/**. It restores a
 # golden checkout to a clean, current default branch via exactly stash ->
