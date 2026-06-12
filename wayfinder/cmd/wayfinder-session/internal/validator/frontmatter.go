@@ -1,7 +1,6 @@
 package validator
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"strings"
@@ -56,15 +55,13 @@ func extractFrontmatter(filePath string) (*DeliverableFrontmatter, error) {
 	// Extract YAML content (between delimiters)
 	yamlContent := strings.Join(lines[1:closingIdx], "\n")
 
-	// Parse YAML
+	// Parse YAML (lenient: tolerate unknown fields from future schema versions)
 	var fm DeliverableFrontmatter
-	decoder := yaml.NewDecoder(bytes.NewBufferString(yamlContent))
-	decoder.KnownFields(true) // Strict mode: error on unknown fields
-	if err := decoder.Decode(&fm); err != nil {
+	if err := yaml.Unmarshal([]byte(yamlContent), &fm); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML frontmatter: %w", err)
 	}
 
-	// Validate required fields
+	// Validate required fields (phase_engram_hash/path are pipeline-internal, optional here)
 	var missing []string
 	if fm.Phase == "" {
 		missing = append(missing, "phase")
@@ -77,12 +74,6 @@ func extractFrontmatter(filePath string) (*DeliverableFrontmatter, error) {
 	}
 	if fm.CreatedAt == "" {
 		missing = append(missing, "created_at")
-	}
-	if fm.PhaseEngramHash == "" {
-		missing = append(missing, "phase_engram_hash")
-	}
-	if fm.PhaseEngramPath == "" {
-		missing = append(missing, "phase_engram_path")
 	}
 
 	if len(missing) > 0 {
