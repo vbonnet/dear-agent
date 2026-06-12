@@ -70,8 +70,8 @@ func sysSwapUsedFraction() float64 {
 	if err != nil || len(raw) < 24 {
 		return 0
 	}
-	total := *(*uint64)(unsafe.Pointer(&raw[0])) //nolint:gosec // raw is 32 bytes, offset 0 is safe
-	used := *(*uint64)(unsafe.Pointer(&raw[16])) //nolint:gosec // raw is 32 bytes, offset 16 is safe
+	total := *(*uint64)(unsafe.Pointer(&raw[0]))  // raw is 32 bytes, offset 0 is safe
+	used := *(*uint64)(unsafe.Pointer(&raw[16])) // raw is 32 bytes, offset 16 is safe
 	if total == 0 {
 		return 0
 	}
