@@ -33,8 +33,10 @@
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 #   build-jaeger-health     Build the Jaeger health-check CLI (cmd/jaeger-health)
 #   install-jaeger-health   Install jaeger-health to ~/go/bin
+#   build-resource-monitor  Build the resource health monitor (cmd/resource-monitor)
+#   install-resource-monitor Install resource-monitor to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-resource-monitor install-resource-monitor
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -333,3 +335,9 @@ install-bumblebee-launchagent: build-bumblebee
 
 uninstall-bumblebee-launchagent: build-bumblebee
 	@./bin/dear-agent-bumblebee install-launchagent --uninstall
+
+build-resource-monitor:
+	@go build -o $(HOME)/go/bin/resource-monitor ./cmd/resource-monitor
+
+install-resource-monitor: build-resource-monitor
+	@echo "resource-monitor installed to $(HOME)/go/bin/resource-monitor"
