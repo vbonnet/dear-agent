@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -122,6 +123,126 @@ func TestMetaOrchestrator_Tick_AcceptErrorRecordedButContinues(t *testing.T) {
 	}
 	if !saw {
 		t.Error("no supervisor.metao.roadmap.accept_failed record in trail")
+	}
+}
+
+// TestWorkProposal_Validate covers required-field enforcement.
+func TestWorkProposal_Validate(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		p       WorkProposal
+		wantErr bool
+		errFrag string // non-empty: substring that must appear in error
+	}{
+		{
+			name: "valid_minimal",
+			p:    WorkProposal{ID: "x", Title: "T", Reason: "R"},
+		},
+		{
+			name: "valid_with_optional_fields",
+			p: WorkProposal{
+				ID:             "x",
+				Title:          "T",
+				Reason:         "R",
+				SubmittedBy:    "worker/sess-abc",
+				SubmitterChain: []string{"orchestrator/sess-000", "worker/sess-abc"},
+				ScopeHint:      ScopeFeature,
+				Tags:           []string{"vroom", "ce-6as80"},
+			},
+		},
+		{
+			name:    "missing_id",
+			p:       WorkProposal{Title: "T", Reason: "R"},
+			wantErr: true,
+			errFrag: "ID required",
+		},
+		{
+			name:    "missing_title",
+			p:       WorkProposal{ID: "x", Reason: "R"},
+			wantErr: true,
+			errFrag: "Title required",
+		},
+		{
+			name:    "missing_reason",
+			p:       WorkProposal{ID: "x", Title: "T"},
+			wantErr: true,
+			errFrag: "Reason required",
+		},
+		{
+			name:    "all_required_missing",
+			p:       WorkProposal{},
+			wantErr: true,
+			errFrag: "ID required",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := tc.p.Validate()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tc.wantErr)
+			}
+			if tc.errFrag != "" && err != nil && !strings.Contains(err.Error(), tc.errFrag) {
+				t.Errorf("Validate() error = %q, want it to contain %q", err, tc.errFrag)
+			}
+		})
+	}
+}
+
+// TestWorkProposal_Validate_MultiError verifies that all missing required
+// fields are reported in a single error rather than short-circuiting on the first.
+func TestWorkProposal_Validate_MultiError(t *testing.T) {
+	t.Parallel()
+	err := WorkProposal{ID: "x"}.Validate() // missing Title + Reason
+	if err == nil {
+		t.Fatal("expected error for missing Title and Reason, got nil")
+	}
+	for _, frag := range []string{"Title required", "Reason required"} {
+		if !strings.Contains(err.Error(), frag) {
+			t.Errorf("error %q missing fragment %q", err, frag)
+		}
+	}
+}
+
+// TestWorkProposal_ScopeHint_Constants verifies declared constants are stable
+// strings so they are safe for use in decision-trail payloads.
+func TestWorkProposal_ScopeHint_Constants(t *testing.T) {
+	t.Parallel()
+	want := map[ScopeHint]string{
+		ScopeUnspecified: "",
+		ScopeFix:         "fix",
+		ScopeRefactor:    "refactor",
+		ScopeFeature:     "feature",
+		ScopeResearch:    "research",
+		ScopeInfra:       "infra",
+	}
+	for hint, str := range want {
+		if string(hint) != str {
+			t.Errorf("ScopeHint %q has value %q, want %q", hint, string(hint), str)
+		}
+	}
+}
+
+// TestMetaOrchestrator_Tick_RejectsMissingID confirms that the Validate-based
+// admission policy rejects proposals missing required fields beyond Reason.
+func TestMetaOrchestrator_Tick_RejectsMissingID(t *testing.T) {
+	t.Parallel()
+	rm := NewInMemoryRoadmap()
+	// Submit via the in-memory roadmap's internal store to bypass its ID guard,
+	// so we test that evaluate/Validate is the enforcement point.
+	rm.pending[""] = WorkProposal{ID: "", Title: "No-ID proposal", Reason: "test"}
+
+	trail, _ := newBufferTrail()
+	m, err := NewMetaOrchestrator(trail, rm)
+	if err != nil {
+		t.Fatalf("NewMetaOrchestrator: %v", err)
+	}
+	if err := m.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if got := rm.Accepted(); len(got) != 0 {
+		t.Errorf("expected no accepted proposals, got %v", got)
 	}
 }
 

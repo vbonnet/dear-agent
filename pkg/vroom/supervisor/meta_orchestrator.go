@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/vbonnet/dear-agent/pkg/vroom/decisiontrail"
 )
@@ -32,32 +33,74 @@ type Roadmap interface {
 	Reject(ctx context.Context, proposalID, reason string) error
 }
 
-// WorkProposal is one Work Order awaiting Meta-Orchestrator decision. The
-// shape is deliberately small for PR 1; the real Work Order schema (with
-// reason, submitter chain, scope hints, etc.) lands in follow-up PRs.
+// ScopeHint classifies the breadth and depth of a Work Order, giving the
+// Meta-Orchestrator a signal for sequencing and resource allocation.
+type ScopeHint string
+
+// Recognised ScopeHint values. Unknown strings are tolerated by the
+// Meta-Orchestrator and treated as ScopeUnspecified.
+const (
+	ScopeUnspecified ScopeHint = ""
+	ScopeFix         ScopeHint = "fix"      // targeted correction with narrow blast radius
+	ScopeRefactor    ScopeHint = "refactor" // internal restructuring, no new capability
+	ScopeFeature     ScopeHint = "feature"  // new end-user capability
+	ScopeResearch    ScopeHint = "research" // open-ended exploration / spike
+	ScopeInfra       ScopeHint = "infra"    // plumbing, CI, toolchain
+)
+
+// WorkProposal is the formal Work Order artifact (CONTEXT.md §"Work Order").
+// Required fields: ID, Title, Reason. Call Validate to surface all violations.
 type WorkProposal struct {
-	// ID uniquely identifies the proposal within a Roadmap.
+	// ID uniquely identifies the proposal within a Roadmap. Required.
 	ID string
 
-	// Title is a short human-readable summary.
+	// Title is a short human-readable summary. Required.
 	Title string
 
-	// Reason is the proposer's justification (required by CONTEXT.md
-	// §"Work Order").
+	// Reason is the proposer's justification. Required; CONTEXT.md §"Work Order"
+	// mandates at least one non-empty reason.
 	Reason string
 
-	// SubmittedBy names the agent that submitted the proposal. Free-form
-	// for now; eventually a role + session identifier.
+	// SubmittedBy is the role + session identifier of the submitting agent.
+	// Recommended format: "<role>/<session-id>" (e.g. "worker/sess-abc123").
 	SubmittedBy string
+
+	// SubmitterChain is the ordered delegation chain from the original
+	// requester to the immediate submitter. Entry 0 is the originator.
+	SubmitterChain []string
+
+	// ScopeHint classifies the work's breadth to aid Meta-Orchestrator sequencing.
+	ScopeHint ScopeHint
+
+	// Tags are free-form labels for categorization (e.g. "vroom", "agm", "ci").
+	Tags []string
+}
+
+// Validate returns a combined error describing all schema violations, or nil
+// when the proposal satisfies every required-field invariant.
+func (p WorkProposal) Validate() error {
+	var errs []string
+	if p.ID == "" {
+		errs = append(errs, "ID required")
+	}
+	if p.Title == "" {
+		errs = append(errs, "Title required")
+	}
+	if p.Reason == "" {
+		errs = append(errs, "Reason required (CONTEXT.md §Work Order)")
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.New("WorkProposal: " + strings.Join(errs, "; "))
 }
 
 // MetaOrchestrator is the CTO-analogue supervisor. Its Tick scans the
 // roadmap for pending Work Order proposals and decides which to admit.
 //
-// PR-1 policy is deliberately trivial: accept everything that has a
-// non-empty Reason (the only Work Order invariant CONTEXT.md mentions
-// explicitly), reject the rest. Real anti-duplication / scope-expansion
-// logic lands in the follow-up that wires this to the actual roadmap.
+// Admission policy: accept every proposal that passes Validate (required
+// fields present). Anti-duplication and scope-expansion logic are
+// follow-up work that wires the MetaOrchestrator to the actual roadmap.
 type MetaOrchestrator struct {
 	trail   decisiontrail.Trail
 	roadmap Roadmap
@@ -127,12 +170,12 @@ func (m *MetaOrchestrator) Tick(ctx context.Context) error {
 	return nil
 }
 
-// evaluate returns (accepted, reason). The PR-1 policy: accept if Reason is
-// non-empty; reject otherwise. The reason field in the return is either the
-// proposal's own Reason (on accept) or the rejection cause.
+// evaluate returns (accepted, reason). A proposal passes iff it satisfies
+// the full WorkProposal schema (Validate returns nil). The reason field on
+// success is the proposal's own Reason; on rejection it is the validation error.
 func (m *MetaOrchestrator) evaluate(p WorkProposal) (bool, string) {
-	if p.Reason == "" {
-		return false, "Work Order missing required Reason field (CONTEXT.md §Work Order)"
+	if err := p.Validate(); err != nil {
+		return false, err.Error()
 	}
 	return true, p.Reason
 }
