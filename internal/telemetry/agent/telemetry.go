@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/eventbus"
@@ -88,9 +89,7 @@ func (t *Telemetry) LogAgentLaunchFull(ctx context.Context, prompt, model, taskD
 	if t.bus != nil {
 		event := createLaunchEvent(id, prompt, model, taskDesc, sessionID, parentID, features)
 		if err := t.bus.Publish(ctx, event); err != nil {
-			// Log error but don't fail (telemetry is non-critical)
-			// TODO: Use proper logger
-			_ = err
+			slog.WarnContext(ctx, "agent telemetry: EventBus publish failed (non-fatal)", "error", err)
 		}
 	}
 

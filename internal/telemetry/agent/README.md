@@ -1,3 +1,4 @@
+<!-- Last audited at: 2026-06-12 -->
 # Agent Telemetry
 
 Sub-agent telemetry logging for Claude Code to enable learning from execution patterns.
