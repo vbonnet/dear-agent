@@ -334,3 +334,34 @@ living_updates:
 
 **Project Status:** In Progress
 **Next Update:** [After current phase completes]
+
+---
+
+## Living updates — 2026-06-11 (CHARTER through PLAN)
+
+**Discovery (CHARTER/PROBLEM/RESEARCH):** Problem was pre-validated by the
+DEAR retro (`docs/retros/2026-06-11-scheduled-task-sandbox.md`) — running
+the retro first made D1 nearly free. Biggest research surprise: the
+solution mostly already existed in-repo (`agm loop`, Bumblebee launchd
+installer, dev-tools-update's headless `claude -p`); the project shrank
+from "build a scheduler" to "wire what exists + placement rule."
+
+**Design:** launchd → `agm loop tick` → `agm-job` wrapper (mandatory effect
+verification) chosen over per-job plists, Temporal, new daemon, and MCP
+bridge. Key design move: making verify mandatory in the wrapper turns the
+retro's "no-op runs are silent" failure class into a structural
+impossibility.
+
+**Process friction (wayfinder CLI):** `wayfinder start` wrote
+WAYFINDER-STATUS.md into the project dir but `session next-phase` looks
+for it at repo root (worked around with `-C <projectdir>`);
+`complete-phase` deliverable validation demands `phase_engram_hash/path`
+frontmatter pointing at engram files no documented command generates —
+unbootstrappable outside the engram pipeline; corpus-callosum publish
+shells out to something that resolves to `clang` (PATH bug). CHARTER
+completed via CLI; PROBLEM onward tracked manually per the two-retry rule.
+Beads filed.
+
+**Implementation/deployment:** handed off as Phases A–D in
+PLAN-implementation.md via Beads (`scheduled-tasks` tag); BUILD does not
+happen on this branch (principle 1).
