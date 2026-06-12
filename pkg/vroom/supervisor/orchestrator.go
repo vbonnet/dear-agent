@@ -42,13 +42,27 @@ type Task struct {
 	Worker string
 }
 
+// idleEscalationThreshold is the number of consecutive idle ticks after which
+// the Orchestrator emits a supervisor.orch.idle_escalation record. Seven
+// consecutive no-dispatch ticks is the limit per the DEAR retro (ce-6as.7):
+// an Orchestrator that never dispatches is either mis-configured or deadlocked
+// and must surface the problem rather than silently spinning.
+const idleEscalationThreshold = 7
+
 // Orchestrator is the COO-analogue supervisor. Its Tick scans the work
 // queue and dispatches pending tasks to Workers — one per task, no
 // prioritisation beyond Queue ordering. Real prioritisation, capacity
 // limiting, and worker-health monitoring land in follow-up PRs.
+//
+// The Orchestrator tracks consecutive idle ticks (Tick calls where no tasks
+// were dispatched). When the streak reaches idleEscalationThreshold it emits
+// a supervisor.orch.idle_escalation trail record so an operator or the
+// Meta-Orchestrator can investigate. Each successful dispatch resets the
+// streak to zero.
 type Orchestrator struct {
-	trail decisiontrail.Trail
-	queue Queue
+	trail           decisiontrail.Trail
+	queue           Queue
+	consecutiveIdle int
 }
 
 // NewOrchestrator constructs the Orchestrator supervisor.
@@ -65,12 +79,16 @@ func NewOrchestrator(trail decisiontrail.Trail, queue Queue) (*Orchestrator, err
 // Role implements Supervisor.
 func (o *Orchestrator) Role() Role { return RoleOrchestrator }
 
-// Tick dispatches every pending task.
+// Tick dispatches every pending task. When no tasks are pending it records a
+// supervisor.orch.no_work entry and, if the no-work streak reaches
+// idleEscalationThreshold, additionally emits supervisor.orch.idle_escalation.
 func (o *Orchestrator) Tick(ctx context.Context) error {
 	tasks, err := o.queue.Pending(ctx)
 	if err != nil {
 		return fmt.Errorf("orchestrator: list pending: %w", err)
 	}
+
+	dispatched := 0
 	for _, t := range tasks {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -94,6 +112,34 @@ func (o *Orchestrator) Tick(ctx context.Context) error {
 				"task_id": t.ID,
 				"title":   t.Title,
 				"worker":  t.Worker,
+			},
+		})
+		dispatched++
+	}
+
+	if dispatched > 0 {
+		o.consecutiveIdle = 0
+		return nil
+	}
+
+	// No tasks dispatched this tick.
+	o.consecutiveIdle++
+	_ = o.trail.Append(ctx, decisiontrail.Record{
+		Role: string(RoleOrchestrator),
+		Kind: "supervisor.orch.no_work",
+		Payload: map[string]any{
+			"consecutive_idle": o.consecutiveIdle,
+		},
+	})
+
+	if o.consecutiveIdle >= idleEscalationThreshold {
+		_ = o.trail.Append(ctx, decisiontrail.Record{
+			Role: string(RoleOrchestrator),
+			Kind: "supervisor.orch.idle_escalation",
+			Payload: map[string]any{
+				"consecutive_idle": o.consecutiveIdle,
+				"threshold":        idleEscalationThreshold,
+				"action":           "investigate: queue empty or roadmap not admitting work",
 			},
 		})
 	}
