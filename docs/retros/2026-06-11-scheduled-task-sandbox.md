@@ -7,7 +7,8 @@
 fictional).
 **Status:** Diagnosed. Root cause is an architectural mismatch, not a bug.
 Remediation is designed via the Wayfinder process in
-`docs/wayfinder/2026-06-11-host-scheduler/` (same PR) and tracked in Beads.
+`wf/host-side-scheduled-automation-substrate-replacing/` (same PR) and
+tracked in Beads (epic `ce-cd14`).
 
 ## Define
 
@@ -238,18 +239,23 @@ in a host-less environment.
    narrow-audited-surface model, with `approvedPermissions` scoping and
    gateway audit logging.
 
-**Beads to file** (epic + children, `--tags scheduled-tasks`):
+**Beads filed** (label `scheduled-tasks`, `~/beads/context-engine`):
 
-- P0: Host scheduler epic — launchd → `agm loop tick` substrate + installer.
-- P0: Migrate bead-burndown maintenance to host scheduler; disable Cowork shell.
-- P1: Migrate dep/security audit (govulncheck/npm audit/brew) to host loop.
-- P1: Migrate src-repo-health-audit to host loop with real git checks.
-- P1: Split linkedin-cross-post (host-side Vale gate; Cowork keeps MCP post).
-- P1: Effect-verification + stale-effect watchdog for host loops.
-- P2: Placement rule documented in CLAUDE.md + task-creation skill.
-- P2: Verb-scoped host MCP tools on agm-mcp-server (design gate before build).
-- P2: brain-v2 host-worker is crash-looping and writing a 976 MB error log
-  into read-only `~/src/brain-v2` (separate repo; filed for visibility).
+- `ce-cd14` (P0 epic): Host scheduler — launchd → `agm loop tick` substrate.
+  - `ce-cd14.1` (P0): Phase A — installer + `agm-job` wrapper + src-health
+    canary (subsumes the src-repo-health-audit migration).
+  - `ce-cd14.2` (P0): Phase B — migrate bead-burndown maintenance; disable
+    Cowork shell.
+  - `ce-cd14.3` (P1): Phase B — migrate dep/security audit; retire
+    orchestrator-loop with tombstone.
+  - `ce-cd14.4` (P1): Phase C — linkedin-cross-post split (host Vale gate).
+  - `ce-cd14.5` (P1): Phase C — loops-watchdog + cross-scheduler heartbeat.
+  - `ce-cd14.6` (P2): Phase D — placement rule in CLAUDE.md + skill.
+  - `ce-cd14.7` (P2): Phase D — design gate for verb-scoped host MCP tools.
+- `ce-wd0l` (P2): brain-v2 host-worker crash-looping, 976 MB error log in
+  read-only `~/src/brain-v2` (cross-repo, filed for visibility).
+- `ce-fvkz` (P1): wayfinder CLI deliverable validator unbootstrappable
+  outside the engram pipeline (found while running this Wayfinder process).
 
 **Lessons.**
 
