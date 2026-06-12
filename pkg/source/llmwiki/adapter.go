@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -143,9 +144,7 @@ func (a *Adapter) Add(ctx context.Context, s source.Source) (source.Ref, error) 
 		if err := a.commit(ctx, rel, s); err != nil {
 			// Don't fail the Add on a commit error — the file is on
 			// disk, the worst case is the operator commits manually.
-			// We surface the error via context but keep the Add
-			// successful for the caller's purposes.
-			_ = err
+			slog.WarnContext(ctx, "llmwiki: git commit failed (non-fatal)", "path", rel, "error", err)
 		}
 	}
 	return source.Ref{URI: s.URI, Backend: Name, IndexedAt: now}, nil

@@ -22,6 +22,7 @@ package vcs
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -127,8 +128,7 @@ func New(cfg *Config) (*MemoryVCS, error) {
 	// Install pre-commit hook if validation is enabled
 	if cfg.Validation.RequireWhyFile || cfg.Validation.LintOnCommit {
 		if err := InstallPreCommitHook(repoPath); err != nil {
-			// Non-fatal: log but continue
-			_ = err
+			slog.Warn("pre-commit hook install failed (non-fatal)", "path", repoPath, "error", err)
 		}
 	}
 
