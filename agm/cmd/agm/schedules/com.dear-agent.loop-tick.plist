@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.dear-agent.loop-tick — drives the agm loop scheduler every 300s.
+
+  Source template:
+      agm/cmd/agm/schedules/com.dear-agent.loop-tick.plist
+  Installed by `agm loop install-launchd`, which substitutes
+  __USER_HOME__ and __AGM_BINARY__ before writing this file (launchd
+  does not expand ~ or shell variables).
+
+  Schedule: every 300 seconds (StartInterval=300).
+  Logs:     ~/.agm/logs/loop-tick.log (self-rotating via agm loop tick)
+
+  Never combined with StartCalendarInterval (double-fire risk).
+  RunAtLoad fires one tick on install, which is intentional — populates
+  loops.db first run timestamps immediately.
+
+  To trigger manually:
+    launchctl kickstart gui/$UID/com.dear-agent.loop-tick
+  To inspect:
+    launchctl print gui/$UID/com.dear-agent.loop-tick
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dear-agent.loop-tick</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__AGM_BINARY__</string>
+        <string>loop</string>
+        <string>tick</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__USER_HOME__/go/bin:__USER_HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__USER_HOME__</string>
+        <key>GIT_TERMINAL_PROMPT</key>
+        <string>0</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>__USER_HOME__</string>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>Nice</key>
+    <integer>10</integer>
+
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__USER_HOME__/.agm/logs/loop-tick.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__USER_HOME__/.agm/logs/loop-tick.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
