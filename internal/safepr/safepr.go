@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -70,9 +71,17 @@ func ResolveSessionDir(flagDir string) (string, error) {
 }
 
 // LoadSession reads <dir>/WAYFINDER-STATUS.md and returns the session it
-// describes. It fails unless the file exists, parses, carries a session_id,
-// and is status: in_progress — a completed or abandoned session is not a
-// valid attribution target for new PRs.
+// describes. It fails unless the file exists, parses, and is status:
+// in_progress — a completed or abandoned session is not a valid attribution
+// target for new PRs.
+//
+// session_id is taken from the status frontmatter when present, but the
+// wayfinder CLI's phase transitions currently rewrite the status file with a
+// schema that drops session_id (bug ce-6kl1; 179/589 corpus status files are
+// affected), so an empty id falls back to the wayfinder_session_id recorded
+// in the phase deliverables' frontmatter. A session with no recoverable id
+// is still valid — the project path is the trace anchor — and the trailer
+// says so explicitly rather than failing the PR.
 func LoadSession(dir string) (Session, error) {
 	path := filepath.Join(dir, "WAYFINDER-STATUS.md")
 	raw, err := os.ReadFile(path)
@@ -88,19 +97,43 @@ func LoadSession(dir string) (Session, error) {
 	if err := yaml.Unmarshal([]byte(fm), &st); err != nil {
 		return Session{}, fmt.Errorf("%s: cannot parse YAML frontmatter: %w", path, err)
 	}
-	if st.SessionID == "" {
-		return Session{}, fmt.Errorf("%s has no session_id in its frontmatter", path)
-	}
 	if st.Status != "in_progress" {
-		return Session{}, fmt.Errorf("wayfinder session %s is %q, not in_progress — start or resume "+
+		return Session{}, fmt.Errorf("wayfinder session at %s is %q, not in_progress — start or resume "+
 			"a session (wayfinder start / wayfinder session) before opening PRs against it",
-			st.SessionID, st.Status)
+			dir, st.Status)
+	}
+	if st.SessionID == "" {
+		st.SessionID = sessionIDFromDeliverables(dir)
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		abs = dir
 	}
 	return Session{ID: st.SessionID, ProjectPath: abs}, nil
+}
+
+// deliverableSessionIDRe matches the wayfinder_session_id line wayfinder
+// phase deliverables carry in their frontmatter.
+var deliverableSessionIDRe = regexp.MustCompile(`(?m)^wayfinder_session_id:\s*"?([0-9a-fA-F-]+)"?`)
+
+// sessionIDFromDeliverables recovers the session id from any phase
+// deliverable's frontmatter when the status file has lost it (ce-6kl1).
+// Returns "" when no deliverable records one.
+func sessionIDFromDeliverables(dir string) string {
+	matches, err := filepath.Glob(filepath.Join(dir, "*.md"))
+	if err != nil {
+		return ""
+	}
+	for _, m := range matches {
+		raw, err := os.ReadFile(m)
+		if err != nil {
+			continue
+		}
+		if got := deliverableSessionIDRe.FindSubmatch(raw); got != nil {
+			return string(got[1])
+		}
+	}
+	return ""
 }
 
 // frontmatter extracts the YAML between the leading "---" fence pair.
@@ -139,10 +172,25 @@ var deniedCreateFlags = map[string]string{
 		"--title and --body explicitly",
 	"--fill-verbose": "derives the body from commits, so the wayfinder trace cannot be stamped — pass " +
 		"--title and --body explicitly",
+	"-f": "derives the body from commits (short for --fill), so the wayfinder trace cannot be " +
+		"stamped — pass --title and --body explicitly",
 	"--body-file": "supplies the body from a file safe-pr will not rewrite — pass --body instead",
 	"-F":          "supplies the body from a file safe-pr will not rewrite — pass --body instead",
 	"--editor":    "is interactive — agents must pass --title and --body explicitly",
 	"-e":          "is interactive — agents must pass --title and --body explicitly",
+	"--template": "supplies the body from a template safe-pr will not rewrite — pass --body " +
+		"instead",
+	"-T": "supplies the body from a template safe-pr will not rewrite — pass --body instead",
+}
+
+// deniedAlwaysFlags are refused for every verb: safe-pr operates on the repo
+// of the current working directory, so the allow-listed wrapper cannot be
+// steered at arbitrary repositories the user's gh auth happens to reach.
+var deniedAlwaysFlags = map[string]string{
+	"--repo": "safe-pr operates on the repository of the current directory — run it from the " +
+		"repo (or worktree) the PR belongs to instead of targeting another repo",
+	"-R": "safe-pr operates on the repository of the current directory — run it from the " +
+		"repo (or worktree) the PR belongs to instead of targeting another repo",
 }
 
 // Validate enforces the request invariants. Error messages follow principle 2:
@@ -151,33 +199,37 @@ func (r *Request) Validate() error {
 	switch r.Verb {
 	case "create", "close":
 	default:
-		return fmt.Errorf("safe-pr only supports `create` and `close`, not %q — other gh pr verbs "+
-			"(view, list, checks, diff) are read-only and need no wrapper; `merge` keeps its existing "+
-			"review-gated path", r.Verb)
+		return fmt.Errorf("safe-pr only supports `create` and `close`, not %q — read-only gh pr verbs "+
+			"(view, list, checks, diff) need no wrapper, `merge` keeps its existing review-gated path, "+
+			"and `reopen` has no sanctioned automated path: reopening a closed PR is a human decision, "+
+			"so ask the supervisor/user to do it", r.Verb)
 	}
 	if r.Emergency {
 		if strings.TrimSpace(r.Reason) == "" {
 			return fmt.Errorf("--emergency requires --reason \"<why no wayfinder session exists>\" — " +
 				"the reason is stamped on the PR and audit-logged so emergencies stay reviewable")
 		}
-	} else if r.Session == nil || r.Session.ID == "" {
+	} else if r.Session == nil {
 		return fmt.Errorf("no wayfinder session resolved and --emergency not set; this is a wrapper " +
 			"bug — Validate must run after session resolution")
 	}
-	if r.Verb == "create" {
-		for _, a := range r.GhArgs {
-			flag := a
-			if i := strings.IndexByte(a, '='); i > 0 {
-				flag = a[:i]
-			}
+	for _, a := range r.GhArgs {
+		flag := a
+		if i := strings.IndexByte(a, '='); i > 0 {
+			flag = a[:i]
+		}
+		if why, bad := deniedAlwaysFlags[flag]; bad {
+			return fmt.Errorf("refusing %q: %s", a, why)
+		}
+		if r.Verb == "create" {
 			if why, bad := deniedCreateFlags[flag]; bad {
 				return fmt.Errorf("refusing %q: it %s", a, why)
 			}
 		}
-		if !hasFlag(r.GhArgs, "--title", "-t") {
-			return fmt.Errorf("safe-pr create requires an explicit --title (and --body) so the run " +
-				"is deterministic and headless-safe — gh would otherwise drop into an interactive prompt")
-		}
+	}
+	if r.Verb == "create" && !hasFlag(r.GhArgs, "--title", "-t") {
+		return fmt.Errorf("safe-pr create requires an explicit --title (and --body) so the run " +
+			"is deterministic and headless-safe — gh would otherwise drop into an interactive prompt")
 	}
 	return nil
 }
@@ -187,8 +239,14 @@ func (r *Request) Trailer() string {
 	if r.Emergency {
 		return fmt.Sprintf("---\nEMERGENCY (no wayfinder session): %s", strings.TrimSpace(r.Reason))
 	}
+	id := r.Session.ID
+	if id == "" {
+		// Honest trace: the project is the anchor; the id was lost by the
+		// wayfinder CLI's status rewrite (ce-6kl1), not omitted by the caller.
+		id = "unrecorded (status file lacks session_id — wayfinder bug ce-6kl1)"
+	}
 	return fmt.Sprintf("---\nWayfinder-Session: %s\nWayfinder-Project: %s",
-		r.Session.ID, filepath.Base(r.Session.ProjectPath))
+		id, filepath.Base(r.Session.ProjectPath))
 }
 
 // StampedArgs returns the final gh argv (after "gh"): the verb mapped to
@@ -204,8 +262,11 @@ func (r *Request) StampedArgs() []string {
 }
 
 // stampFlag appends trailer to the value of `long`/`short` in args, handling
-// both the split ("--body", "x") and inline ("--body=x") forms; when the flag
-// is absent it is appended with the trailer as its whole value.
+// the split ("--body", "x"), inline long ("--body=x"), and combined short
+// ("-bx" / "-b=x") forms; when the flag is absent it is appended with the
+// trailer as its whole value. Covering every spelling matters: a missed form
+// would make the appended --body win under gh's last-flag-wins parsing and
+// silently replace the caller's body with just the trailer.
 func stampFlag(args []string, long, short, trailer string) []string {
 	out := make([]string, 0, len(args)+2)
 	stamped := false
@@ -217,6 +278,10 @@ func stampFlag(args []string, long, short, trailer string) []string {
 			i++
 			stamped = true
 		case strings.HasPrefix(a, long+"="):
+			out = append(out, a+"\n\n"+trailer)
+			stamped = true
+		case strings.HasPrefix(a, short) && len(a) > len(short):
+			// Combined short form: -bvalue or -b=value.
 			out = append(out, a+"\n\n"+trailer)
 			stamped = true
 		default:
@@ -231,7 +296,8 @@ func stampFlag(args []string, long, short, trailer string) []string {
 
 func hasFlag(args []string, long, short string) bool {
 	for _, a := range args {
-		if a == long || a == short || strings.HasPrefix(a, long+"=") {
+		if a == long || a == short || strings.HasPrefix(a, long+"=") ||
+			(strings.HasPrefix(a, short) && len(a) > len(short)) {
 			return true
 		}
 	}

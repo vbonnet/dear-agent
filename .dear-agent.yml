@@ -13,6 +13,8 @@
 #     research           where research artifacts go (analysis docs,
 #                        transcripts, findings, literature reviews)
 #     logs               where conversation logs / session transcripts go
+#   pr-policy            informational map of PR verbs -> sanctioned command
+#                        (mirrors the enforcement in .claude/settings.json)
 #   forbidden-paths      directories where new files of a given kind MUST NOT
 #                        be created in THIS repo. Maps kind -> list of globs
 #                        relative to repo root.

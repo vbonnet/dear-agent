@@ -45,7 +45,6 @@ func TestLoadSession_Failures(t *testing.T) {
 	}{
 		{"missing file", "", "cannot read"},
 		{"completed session", "---\nsession_id: x\nstatus: completed\n---\n", "not in_progress"},
-		{"no session id", "---\nstatus: in_progress\n---\n", "no session_id"},
 		{"no frontmatter", "# just markdown\n", "frontmatter"},
 		{"unterminated frontmatter", "---\nsession_id: x\n", "unterminated"},
 	}
@@ -101,6 +100,14 @@ func TestValidate(t *testing.T) {
 			GhArgs: []string{"--title", "t", "--body-file=b.md"}}, "--body instead"},
 		{"title required", Request{Verb: "create", Session: sess(),
 			GhArgs: []string{"--body", "b"}}, "--title"},
+		{"fill short form refused", Request{Verb: "create", Session: sess(),
+			GhArgs: []string{"--title", "t", "-f"}}, "stamped"},
+		{"template refused", Request{Verb: "create", Session: sess(),
+			GhArgs: []string{"--title", "t", "-T", "x.md"}}, "--body instead"},
+		{"repo retarget refused on create", Request{Verb: "create", Session: sess(),
+			GhArgs: []string{"--title", "t", "--repo", "other/repo"}}, "current directory"},
+		{"repo retarget refused on close", Request{Verb: "close", Session: sess(),
+			GhArgs: []string{"1", "-R", "other/repo"}}, "current directory"},
 		{"emergency needs reason", Request{Verb: "create", Emergency: true,
 			GhArgs: []string{"--title", "t"}}, "--reason"},
 		{"emergency with reason ok", Request{Verb: "create", Emergency: true, Reason: "hotfix",
@@ -173,6 +180,66 @@ func TestStampedArgs(t *testing.T) {
 			t.Errorf("comment not stamped: %q", joined)
 		}
 	})
+	t.Run("combined short body keeps caller content", func(t *testing.T) {
+		// A missed -bhello would add a second --body and gh's last-wins
+		// parsing would silently replace the caller's body with the trailer.
+		r := Request{Verb: "create", Session: sess(),
+			GhArgs: []string{"--title", "t", "-bhello"}}
+		got := r.StampedArgs()
+		joined := strings.Join(got, "\x00")
+		if !strings.Contains(joined, "-bhello\n\n---\nWayfinder-Session") {
+			t.Errorf("combined short body not stamped in place: %v", got)
+		}
+		if strings.Count(joined, "Wayfinder-Session") != 1 {
+			t.Errorf("trailer stamped more than once: %v", got)
+		}
+	})
+}
+
+func TestValidate_CombinedShortTitleAccepted(t *testing.T) {
+	r := Request{Verb: "create", Session: sess(), GhArgs: []string{"-tMyTitle", "--body", "b"}}
+	if err := r.Validate(); err != nil {
+		t.Errorf("combined short --title form should satisfy the title requirement: %v", err)
+	}
+}
+
+func TestTrailer_MissingSessionIDIsHonest(t *testing.T) {
+	r := Request{Verb: "create", Session: &Session{ID: "", ProjectPath: "/x/proj"}}
+	tr := r.Trailer()
+	if !strings.Contains(tr, "unrecorded") || !strings.Contains(tr, "Wayfinder-Project: proj") {
+		t.Errorf("trailer should state the id loss and keep the project anchor: %q", tr)
+	}
+}
+
+func TestLoadSession_RecoversIDFromDeliverables(t *testing.T) {
+	// The wayfinder CLI's phase transitions rewrite WAYFINDER-STATUS.md and
+	// drop session_id (ce-6kl1); the id must be recovered from a phase
+	// deliverable's frontmatter.
+	dir := t.TempDir()
+	writeStatus(t, dir, "---\nschema_version: \"2.0\"\nstatus: in_progress\n---\n")
+	deliverable := "---\nphase: \"CHARTER\"\nwayfinder_session_id: \"87a5378c-2398-412c-af48-094287b11b79\"\n---\n# x\n"
+	if err := os.WriteFile(filepath.Join(dir, "CHARTER-x.md"), []byte(deliverable), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := LoadSession(dir)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if s.ID != "87a5378c-2398-412c-af48-094287b11b79" {
+		t.Errorf("id not recovered from deliverable: %q", s.ID)
+	}
+}
+
+func TestLoadSession_MissingIDEverywhereStillValid(t *testing.T) {
+	dir := t.TempDir()
+	writeStatus(t, dir, "---\nstatus: in_progress\n---\n")
+	s, err := LoadSession(dir)
+	if err != nil {
+		t.Fatalf("an in_progress session without a recoverable id must still load: %v", err)
+	}
+	if s.ID != "" {
+		t.Errorf("expected empty id, got %q", s.ID)
+	}
 }
 
 func TestAppendAudit(t *testing.T) {

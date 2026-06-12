@@ -113,3 +113,34 @@ assert_allowed() {
     hook ''
     assert_allowed
 }
+
+@test "blocks create behind gtimeout prefix (repo-taught habit)" {
+    bash_cmd 'gtimeout 30 gh pr create --title t'
+    assert_blocked
+}
+
+@test "blocks create behind env/command/sudo launchers" {
+    bash_cmd 'env gh pr create --title t'
+    assert_blocked
+    bash_cmd 'command gh pr create --title t'
+    assert_blocked
+    bash_cmd 'sudo gh pr close 1'
+    assert_blocked
+}
+
+@test "blocks create split across backslash continuations" {
+    bash_cmd $'gh \\\npr create --title t'
+    assert_blocked
+}
+
+@test "allows gtimeout-prefixed read-only pr verbs" {
+    bash_cmd 'gtimeout 30 gh pr view 123'
+    assert_allowed
+}
+
+@test "reopen denial points at a human path, not safe-pr" {
+    bash_cmd 'gh pr reopen 123'
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"human decision"* ]]
+    [[ "$output" != *"safe-pr reopen"* ]]
+}

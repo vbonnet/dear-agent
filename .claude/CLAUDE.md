@@ -351,12 +351,16 @@ that is a defect — reopen the bead and let the reconciler catch the class.
 
 ## PR Lifecycle — Wayfinder-Only (MANDATORY)
 
-PR **open and close are denied by default** in this repo and allowed only
-through the `safe-pr` wrapper, which requires a wayfinder session trace.
-This is the enforcement tier of principles 5 (use `/wayfinder`) and 9
-(atomic action wrappers): raw `gh pr create|close|reopen` in Bash is blocked
-by the PreToolUse hook `.claude/hooks/pretool-pr-guard` (exit 2, positive
-guidance), wired in `.claude/settings.json`.
+Raw `gh pr create|close|reopen` in Bash is **denied** in this repo; PR open
+and close are allowed only through the `safe-pr` wrapper, which requires a
+wayfinder session trace. This is the enforcement tier of principles 5 (use
+`/wayfinder`) and 9 (atomic action wrappers): the PreToolUse hook
+`.claude/hooks/pretool-pr-guard` (exit 2, positive guidance) is wired in
+`.claude/settings.json`. The hook matches the literal command forms a
+cooperative agent types (including `gtimeout`/`env`/`sudo` prefixes and
+line continuations) — it is a best-effort net for the forgetful-agent path,
+not a security boundary; `gh api` mutations and in-code creators are tracked
+separately (see follow-ups below).
 
 **Why:** untraced PRs have no plan/session/bead attribution and no telemetry,
 and PR spray from burndown workers has repeatedly outrun the serial merge
@@ -383,7 +387,9 @@ safe-pr close  --wayfinder <wayfinder-project-dir> <number|url>
   `safe-pr <verb> --emergency --reason "<why>"` — audited and stamped on the
   PR, never silent. Do not use it to skip starting a wayfinder session.
 - Unchanged: read-only `gh pr view|list|checks|diff`, and `gh pr merge`
-  (already governed by required checks + review gates).
+  (already governed by required checks + review gates). `gh pr reopen` has
+  no sanctioned automated path — reopening is a human decision; ask the
+  supervisor/user.
 
 Scope today: this repo (project-scoped hook). Global rollout across repos is
 ce-20en; routing the in-code PR creators through safe-pr is ce-ijsq

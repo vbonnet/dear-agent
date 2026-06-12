@@ -36,6 +36,12 @@ import (
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "\nsafe-pr: %v\n", err)
+		// Propagate gh's own exit code when the failure came from gh, so
+		// scripted callers can distinguish failure classes.
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() > 0 {
+			os.Exit(ee.ExitCode())
+		}
 		os.Exit(1)
 	}
 }
@@ -49,22 +55,44 @@ func run(argv []string) error {
 	if !req.Emergency {
 		dir, err := safepr.ResolveSessionDir(wayfinderDir)
 		if err != nil {
-			return err
+			return auditRefusal(req, err)
 		}
 		s, err := safepr.LoadSession(dir)
 		if err != nil {
-			return err
+			return auditRefusal(req, err)
 		}
 		req.Session = &s
 	}
 	if err := req.Validate(); err != nil {
-		return err
+		return auditRefusal(req, err)
 	}
 
 	shutdown := otelsetup.InitTracer("safe-pr")
 	defer shutdown(context.Background()) //nolint:errcheck // span flush failure at exit has nowhere to go
 
 	return execGh(req, timeout)
+}
+
+// auditRefusal records a request safe-pr refused before gh ever ran —
+// refused emergency attempts and missing-session denials are exactly what an
+// after-the-fact audit needs to see. The original error is always returned;
+// a failed audit write is reported but never masks it.
+func auditRefusal(req *safepr.Request, cause error) error {
+	cwd, _ := os.Getwd()
+	home, _ := os.UserHomeDir()
+	sessionID := ""
+	if req.Session != nil {
+		sessionID = req.Session.ID
+	}
+	rec := safepr.AuditRecord{
+		Time: time.Now().UTC().Format(time.RFC3339), Verb: req.Verb, Dir: cwd,
+		Args: req.GhArgs, SessionID: sessionID, Emergency: req.Emergency,
+		Reason: req.Reason, ExitCode: 1, Error: "refused: " + cause.Error(),
+	}
+	if auditErr := safepr.AppendAudit(home, rec); auditErr != nil {
+		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: audit log write failed: %v\n", auditErr)
+	}
+	return cause
 }
 
 // parseArgs splits argv into the request, wrapper-owned flags, and the
@@ -139,6 +167,11 @@ func execGh(req *safepr.Request, timeout time.Duration) error {
 	cmd.Stdout = io.MultiWriter(os.Stdout, &out)
 	cmd.Stderr = io.MultiWriter(os.Stderr, &out)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1")
+	// Without WaitDelay, Run() blocks until every inheritor of the stdout/
+	// stderr pipes exits — so a gh grandchild (e.g. a hung credential helper)
+	// would defeat the timeout exactly when it matters. WaitDelay forces the
+	// pipes closed shortly after the context kills gh itself.
+	cmd.WaitDelay = 3 * time.Second
 
 	_, span := otel.Tracer("safe-pr").Start(ctx, "safepr."+req.Verb)
 	runErr := cmd.Run()
