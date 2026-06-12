@@ -183,7 +183,10 @@ func TestParseReviewThreads_Empty(t *testing.T) {
 
 // --- parseSoak ---
 
-func makeSoakJSON(committedAt time.Time, botLogin string) []byte {
+// makeSoakJSON constructs gh pr view JSON. reviewedAt is when the bot posted;
+// if zero, no review is included. The review timestamp must be after
+// committedAt for the freshness check to accept it.
+func makeSoakJSON(committedAt time.Time, botLogin string, reviewedAt time.Time) []byte {
 	type commitEntry struct {
 		CommittedDate time.Time `json:"committedDate"`
 	}
@@ -191,7 +194,8 @@ func makeSoakJSON(committedAt time.Time, botLogin string) []byte {
 		Author struct {
 			Login string `json:"login"`
 		} `json:"author"`
-		State string `json:"state"`
+		State     string    `json:"state"`
+		CreatedAt time.Time `json:"createdAt"`
 	}
 	type doc struct {
 		HeadRefOid string        `json:"headRefOid"`
@@ -202,8 +206,8 @@ func makeSoakJSON(committedAt time.Time, botLogin string) []byte {
 	if !committedAt.IsZero() {
 		d.Commits = []commitEntry{{CommittedDate: committedAt}}
 	}
-	if botLogin != "" {
-		r := reviewEntry{State: "APPROVED"}
+	if botLogin != "" && !reviewedAt.IsZero() {
+		r := reviewEntry{State: "APPROVED", CreatedAt: reviewedAt}
 		r.Author.Login = botLogin
 		d.Reviews = []reviewEntry{r}
 	}
@@ -214,8 +218,10 @@ func makeSoakJSON(committedAt time.Time, botLogin string) []byte {
 func TestParseSoak_OldCommitWithBotReview(t *testing.T) {
 	now := time.Now()
 	past := now.Add(-10 * time.Minute)
-	data := makeSoakJSON(past, ReviewBot)
-	if err := parseSoak(data, now); err != nil {
+	// Review posted 1 minute after the commit — fresh relative to the head.
+	reviewedAt := past.Add(1 * time.Minute)
+	data := makeSoakJSON(past, ReviewBot, reviewedAt)
+	if err := parseSoak(data, now, []string{ReviewBot}); err != nil {
 		t.Fatalf("old commit with bot review should pass, got: %v", err)
 	}
 }
@@ -223,8 +229,9 @@ func TestParseSoak_OldCommitWithBotReview(t *testing.T) {
 func TestParseSoak_TooRecent(t *testing.T) {
 	now := time.Now()
 	recent := now.Add(-1 * time.Minute)
-	data := makeSoakJSON(recent, ReviewBot)
-	err := parseSoak(data, now)
+	reviewedAt := recent.Add(30 * time.Second)
+	data := makeSoakJSON(recent, ReviewBot, reviewedAt)
+	err := parseSoak(data, now, []string{ReviewBot})
 	if err == nil {
 		t.Fatal("expected error for too-recent commit, got nil")
 	}
@@ -236,8 +243,8 @@ func TestParseSoak_TooRecent(t *testing.T) {
 func TestParseSoak_NoBotReview(t *testing.T) {
 	now := time.Now()
 	past := now.Add(-10 * time.Minute)
-	data := makeSoakJSON(past, "")
-	err := parseSoak(data, now)
+	data := makeSoakJSON(past, "", time.Time{})
+	err := parseSoak(data, now, []string{ReviewBot})
 	if err == nil {
 		t.Fatal("expected error for missing bot review, got nil")
 	}
@@ -249,10 +256,36 @@ func TestParseSoak_NoBotReview(t *testing.T) {
 func TestParseSoak_OtherBotReview(t *testing.T) {
 	now := time.Now()
 	past := now.Add(-10 * time.Minute)
-	data := makeSoakJSON(past, "some-other-bot")
-	err := parseSoak(data, now)
+	reviewedAt := past.Add(1 * time.Minute)
+	data := makeSoakJSON(past, "some-other-bot", reviewedAt)
+	err := parseSoak(data, now, []string{ReviewBot})
 	if err == nil {
 		t.Fatal("expected error when wrong bot reviewed, got nil")
+	}
+}
+
+func TestParseSoak_StaleReviewDoesNotCount(t *testing.T) {
+	// Review posted BEFORE the head commit should not satisfy the gate.
+	now := time.Now()
+	commitTime := now.Add(-10 * time.Minute)
+	staleReviewTime := commitTime.Add(-5 * time.Minute) // before the commit
+	data := makeSoakJSON(commitTime, ReviewBot, staleReviewTime)
+	err := parseSoak(data, now, []string{ReviewBot})
+	if err == nil {
+		t.Fatal("expected error: review predates head commit should not count")
+	}
+	if !strings.Contains(err.Error(), ReviewBot) {
+		t.Errorf("error should mention the reviewer, got: %v", err)
+	}
+}
+
+func TestParseSoak_CustomExpectedReviewers(t *testing.T) {
+	now := time.Now()
+	past := now.Add(-10 * time.Minute)
+	reviewedAt := past.Add(1 * time.Minute)
+	data := makeSoakJSON(past, "custom-bot[bot]", reviewedAt)
+	if err := parseSoak(data, now, []string{"custom-bot[bot]"}); err != nil {
+		t.Fatalf("custom reviewer should pass, got: %v", err)
 	}
 }
 
@@ -315,6 +348,45 @@ func TestAuditEntry_MultipleEntries(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) != 2 {
 		t.Errorf("expected 2 audit entries, got %d: %s", len(lines), data)
+	}
+}
+
+// --- extractRunID ---
+
+func TestExtractRunID(t *testing.T) {
+	tests := []struct {
+		url  string
+		want string
+	}{
+		{"https://github.com/owner/repo/actions/runs/12345678/job/99", "12345678"},
+		{"https://github.com/owner/repo/actions/runs/12345678", "12345678"},
+		{"https://github.com/owner/repo/pull/42", ""},
+		{"", ""},
+		{"https://github.com/owner/repo/actions/runs/", ""},
+	}
+	for _, tc := range tests {
+		got := extractRunID(tc.url)
+		if got != tc.want {
+			t.Errorf("extractRunID(%q) = %q, want %q", tc.url, got, tc.want)
+		}
+	}
+}
+
+// --- defaultRepoConfig ---
+
+func TestDefaultRepoConfig(t *testing.T) {
+	cfg := defaultRepoConfig()
+	if len(cfg.ExpectedReviewers) == 0 {
+		t.Fatal("default config should have at least one expected reviewer")
+	}
+	found := false
+	for _, r := range cfg.ExpectedReviewers {
+		if r == ReviewBot {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("default expected reviewers should include %q, got %v", ReviewBot, cfg.ExpectedReviewers)
 	}
 }
 

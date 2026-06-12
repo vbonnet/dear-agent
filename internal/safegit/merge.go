@@ -26,7 +26,8 @@ const MinSoak = 5 * time.Minute
 // DefaultWatchTimeout is the default time limit for watch mode.
 const DefaultWatchTimeout = 45 * time.Minute
 
-// ReviewBot is the GitHub login of the required code-review bot.
+// ReviewBot is the default required code-review bot login.
+// Overridable per repo via .safe-merge.yml expected_reviewers.
 const ReviewBot = "gemini-code-assist[bot]"
 
 // MergeConfig holds options for a safe merge.
@@ -118,8 +119,15 @@ func attemptMerge(cfg MergeConfig) error {
 
 	fmt.Fprintf(os.Stderr, "safe-merge: checking PR #%d in %s\n", cfg.PRNumber, cfg.Repo)
 
+	// Load per-repo config (.safe-merge.yml). A missing file is not an error.
+	repoCfg, err := loadRepoConfig(cfg.Repo)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "safe-merge: warning: .safe-merge.yml: %v; using defaults\n", err)
+	}
+
 	// Gate 1: ALL CI checks must pass (not just required ones).
-	if err := checkAllCI(cfg.PRNumber, cfg.Repo); err != nil {
+	// Known-flaky checks get one automatic rerun before blocking.
+	if err := checkAllCIWithFlakeValve(cfg.PRNumber, cfg.Repo, repoCfg.FlakyChecks); err != nil {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "CI: "+err.Error())
 		fmt.Fprintf(os.Stderr, "safe-merge: guidance: run `gh pr checks %d --repo %s --watch`\n", cfg.PRNumber, cfg.Repo)
 		return fmt.Errorf("CI gate: %w", err)
@@ -134,12 +142,12 @@ func attemptMerge(cfg MergeConfig) error {
 	}
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ no unresolved review threads")
 
-	// Gate 3: minimum soak time + bot review.
-	if err := checkSoak(cfg.PRNumber, cfg.Repo, now); err != nil {
+	// Gate 3: minimum soak time + expected reviewer(s) have posted on the current head.
+	if err := checkSoakWithReviewers(cfg.PRNumber, cfg.Repo, now, repoCfg.ExpectedReviewers); err != nil {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "soak: "+err.Error())
 		return fmt.Errorf("soak gate: %w", err)
 	}
-	fmt.Fprintln(os.Stderr, "safe-merge: ✓ soak time and bot review OK")
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ soak time and reviewer check OK")
 
 	if cfg.DryRun {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "dry_run", "all gates passed; merge skipped")
@@ -218,24 +226,104 @@ func auditLogDir() string {
 // --- gate implementations ---
 
 type checkRun struct {
-	Name     string `json:"name"`
-	State    string `json:"state"`
-	Required bool   `json:"required"`
+	Name      string `json:"name"`
+	State     string `json:"state"`
+	Required  bool   `json:"required"`
+	TargetURL string `json:"targetUrl"` // e.g. https://github.com/owner/repo/actions/runs/<id>/job/<jid>
 }
 
-// checkAllCI verifies that ALL CI checks (required and non-required) on the PR
-// have completed successfully. This is stricter than checking only required
-// checks: every check on the head SHA must be green before a merge proceeds.
-func checkAllCI(prNum int, repo string) error {
+// checkAllCIWithFlakeValve checks CI and, if the only failing checks are in
+// flakyChecks, triggers one gh run rerun --failed per unique workflow run and
+// returns an error asking the caller to retry. A second consecutive failure on
+// a flaky check is surfaced as a real failure (the rerun is not repeated).
+func checkAllCIWithFlakeValve(prNum int, repo string, flakyChecks []string) error {
 	out, err := exec.Command("gh", "pr", "checks",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
-		"--json", "name,state,required",
+		"--json", "name,state,required,targetUrl",
 	).Output()
 	if err != nil {
 		return fmt.Errorf("gh pr checks failed: %w", err)
 	}
+
+	if len(flakyChecks) == 0 {
+		return parseCheckRuns(out)
+	}
+
+	var checks []checkRun
+	if err := json.Unmarshal(out, &checks); err != nil {
+		return fmt.Errorf("parsing check output: %w", err)
+	}
+
+	flakySet := make(map[string]bool, len(flakyChecks))
+	for _, f := range flakyChecks {
+		flakySet[f] = true
+	}
+
+	var nonFlakyFailing []string
+	rerunIDs := make(map[string]bool) // deduplicate run IDs
+	for _, c := range checks {
+		switch strings.ToLower(c.State) {
+		case "success", "pass", "neutral", "skipping":
+			// OK
+		case "pending", "queued", "in_progress", "waiting", "requested":
+			// Still running — treated as pending (not a flaky failure)
+		default:
+			if flakySet[c.Name] {
+				if id := extractRunID(c.TargetURL); id != "" {
+					rerunIDs[id] = true
+				}
+			} else {
+				qualifier := ""
+				if !c.Required {
+					qualifier = " (non-required)"
+				}
+				nonFlakyFailing = append(nonFlakyFailing, fmt.Sprintf("%s%s (%s)", c.Name, qualifier, c.State))
+			}
+		}
+	}
+
+	// If there are non-flaky failures, surface them immediately.
+	if len(nonFlakyFailing) > 0 {
+		return fmt.Errorf("checks failed: %s", strings.Join(nonFlakyFailing, ", "))
+	}
+
+	// If there are flaky failures, trigger reruns and ask the caller to retry.
+	if len(rerunIDs) > 0 {
+		var reruns []string
+		for id := range rerunIDs {
+			reruns = append(reruns, id)
+			if out, rerr := exec.Command("gh", "run", "rerun", "--failed",
+				"--repo", repo, id).CombinedOutput(); rerr != nil {
+				fmt.Fprintf(os.Stderr, "safe-merge: flake rerun for run %s: %v: %s\n", id, rerr, out)
+			} else {
+				fmt.Fprintf(os.Stderr, "safe-merge: triggered rerun for run %s (flaky check)\n", id)
+			}
+		}
+		return fmt.Errorf("triggered rerun for %d flaky check run(s) (%s); poll again once the rerun completes",
+			len(rerunIDs), strings.Join(reruns, ", "))
+	}
+
+	// No failures — run the standard check for pending/etc.
 	return parseCheckRuns(out)
+}
+
+// extractRunID parses a GitHub Actions run ID from a targetUrl of the form
+// https://github.com/<owner>/<repo>/actions/runs/<run_id>[/job/<job_id>].
+// Returns empty string if the URL does not match.
+func extractRunID(targetURL string) string {
+	const marker = "/actions/runs/"
+	_, rest, ok := strings.Cut(targetURL, marker)
+	if !ok {
+		return ""
+	}
+	if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+		rest = rest[:slash]
+	}
+	if rest == "" || strings.ContainsAny(rest, " ?#") {
+		return ""
+	}
+	return rest
 }
 
 // parseCheckRuns validates that ALL checks in the JSON output pass (both
@@ -369,11 +457,12 @@ type prViewResult struct {
 		Author struct {
 			Login string `json:"login"`
 		} `json:"author"`
-		State string `json:"state"`
+		State     string    `json:"state"`
+		CreatedAt time.Time `json:"createdAt"`
 	} `json:"reviews"`
 }
 
-func checkSoak(prNum int, repo string, now time.Time) error {
+func checkSoakWithReviewers(prNum int, repo string, now time.Time, expectedReviewers []string) error {
 	out, err := exec.Command("gh", "pr", "view",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
@@ -382,27 +471,33 @@ func checkSoak(prNum int, repo string, now time.Time) error {
 	if err != nil {
 		return fmt.Errorf("gh pr view failed: %w", err)
 	}
-	return parseSoak(out, now)
+	return parseSoak(out, now, expectedReviewers)
 }
 
-// parseSoak checks the soak constraints from the gh pr view JSON output.
-// Exported for testing.
-func parseSoak(data []byte, now time.Time) error {
+// parseSoak checks the soak and reviewer constraints from the gh pr view JSON.
+// For each expected reviewer, their review must post-date the head commit's
+// committedDate — a stale review on an earlier SHA does not count. "Never
+// arrived" is surfaced as a distinct error, not a silent pass. Exported for
+// testing.
+func parseSoak(data []byte, now time.Time, expectedReviewers []string) error {
 	var pr prViewResult
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return fmt.Errorf("parsing pr view: %w", err)
 	}
+	if len(expectedReviewers) == 0 {
+		expectedReviewers = []string{ReviewBot}
+	}
 
-	// Find the most recent commit time.
-	var newest time.Time
+	// Find the most recent commit time (used for soak + reviewer freshness).
+	var headCommitTime time.Time
 	for _, c := range pr.Commits {
-		if c.CommittedDate.After(newest) {
-			newest = c.CommittedDate
+		if c.CommittedDate.After(headCommitTime) {
+			headCommitTime = c.CommittedDate
 		}
 	}
 
-	if !newest.IsZero() {
-		age := now.Sub(newest)
+	if !headCommitTime.IsZero() {
+		age := now.Sub(headCommitTime)
 		if age < MinSoak {
 			remaining := MinSoak - age
 			return fmt.Errorf("head commit is only %s old (need ≥%s); retry in %s",
@@ -410,16 +505,29 @@ func parseSoak(data []byte, now time.Time) error {
 		}
 	}
 
-	// Check review bot posted.
-	botPosted := false
+	// Build a map of reviewer login → most recent review time for reviews that
+	// post-date the head commit (stale reviews on older SHAs do not count).
+	freshReviews := make(map[string]time.Time)
 	for _, r := range pr.Reviews {
-		if r.Author.Login == ReviewBot {
-			botPosted = true
-			break
+		login := r.Author.Login
+		if headCommitTime.IsZero() || r.CreatedAt.After(headCommitTime) {
+			if prev, seen := freshReviews[login]; !seen || r.CreatedAt.After(prev) {
+				freshReviews[login] = r.CreatedAt
+			}
 		}
 	}
-	if !botPosted {
-		return fmt.Errorf("review bot (%s) has not posted a review yet", ReviewBot)
+
+	// Every expected reviewer must have a fresh review.
+	var missing []string
+	for _, reviewer := range expectedReviewers {
+		if _, ok := freshReviews[reviewer]; !ok {
+			missing = append(missing, reviewer)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("reviewer(s) have not posted on the current head SHA: %s — "+
+			"this is a required gate (never a silent pass); wait for the review to arrive",
+			strings.Join(missing, ", "))
 	}
 
 	return nil
