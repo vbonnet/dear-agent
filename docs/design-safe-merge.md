@@ -262,7 +262,9 @@ path — never a flag on the fast one:
 
 Phases are independently shippable, ordered by leverage-per-effort.
 Each phase = one scoped plan, one agent, one PR (principle 1). Beads
-filed under tag `safe-merge`.
+filed under label `safe-merge`: P1 `ce-5i6o`, P2 `ce-nwlf`, P3 `ce-ebt4`
+(blocked by P2), P4 `ce-3k3o` (blocked by P2), P5 `ce-j2m5` (blocked by
+P2), P6 `ce-5vog`.
 
 | Phase | Deliverable | Notes |
 |---|---|---|
