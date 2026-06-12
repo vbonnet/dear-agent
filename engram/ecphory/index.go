@@ -2,7 +2,7 @@ package ecphory
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,14 +81,14 @@ func (idx *Index) Build(engramPath string) error {
 			if idx.visitedSymlinks[absPath] {
 				idx.mu.Unlock()
 				// Cycle detected, skip this path
-				log.Printf("ecphory: symlink cycle detected at %s, skipping", path)
+				slog.Warn("ecphory: symlink cycle detected, skipping", "path", path)
 				return nil
 			}
 
 			// Check symlink depth limit
 			if idx.symlinkDepth >= MaxSymlinkDepth {
 				idx.mu.Unlock()
-				log.Printf("ecphory: max symlink depth (%d) exceeded at %s, skipping", MaxSymlinkDepth, path)
+				slog.Warn("ecphory: max symlink depth exceeded, skipping", "depth", MaxSymlinkDepth, "path", path)
 				return nil
 			}
 
@@ -125,9 +125,7 @@ func (idx *Index) Build(engramPath string) error {
 		// Parse just frontmatter (not full content)
 		eg, err := idx.parser.Parse(path)
 		if err != nil {
-			// P0-4: Log parse errors instead of silently ignoring
-			log.Printf("ecphory: failed to parse engram at %s: %v", path, err)
-			// TODO: Add telemetry here when telemetry system is available
+			slog.Warn("ecphory: failed to parse engram", "path", path, "error", err)
 			return nil
 		}
 

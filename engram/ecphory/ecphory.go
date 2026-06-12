@@ -27,7 +27,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -165,7 +165,7 @@ func (e *Ecphory) Query(ctx context.Context, query string, sessionID string, tra
 	ranked, err := e.ranker.Rank(ctx, query, candidates)
 	if err != nil {
 		// Fall back to unranked candidates on API error (resilient design)
-		log.Printf("ecphory: ranking failed, falling back to unranked candidates: %v", err)
+		slog.WarnContext(ctx, "ecphory: ranking failed, falling back to unranked candidates", "error", err)
 		results := e.loadEngrams(candidates)
 		tokensUsed := e.estimateTokens(results)
 		e.publishEcphoryEvent(ctx, query, sessionID, transcript, tags, agent, results, tokensUsed, time.Since(startTime))
@@ -308,8 +308,7 @@ func (e *Ecphory) loadWithinBudget(ranked []RankingResult) []*engram.Engram {
 	for _, r := range ranked {
 		eg, err := e.parser.Parse(r.Path)
 		if err != nil {
-			// P0-4: Log parse errors instead of silently ignoring
-			log.Printf("ecphory: failed to load engram at %s: %v", r.Path, err)
+			slog.Warn("ecphory: failed to load engram", "path", r.Path, "error", err)
 			continue
 		}
 
@@ -336,8 +335,7 @@ func (e *Ecphory) loadEngrams(paths []string) []*engram.Engram {
 	for _, path := range paths {
 		eg, err := e.parser.Parse(path)
 		if err != nil {
-			// P0-4: Log parse errors instead of silently ignoring
-			log.Printf("ecphory: failed to load engram at %q: %v", path, err) //nolint:gosec // G706: path from internal disk scan; %q escapes any control chars
+			slog.Warn("ecphory: failed to load engram", "path", path, "error", err)
 			continue
 		}
 		result = append(result, eg)
@@ -405,8 +403,7 @@ func (e *Ecphory) publishEcphoryEvent(ctx context.Context, query string, session
 	// Publish asynchronously (non-blocking)
 	go func() {
 		if err := e.eventBus.Publish(ctx, event); err != nil {
-			// Log publish errors (eventbus may also log internally)
-			log.Printf("failed to publish ecphory event: %v", err)
+			slog.WarnContext(ctx, "ecphory: failed to publish event", "error", err)
 		}
 	}()
 }
@@ -421,7 +418,7 @@ func (e *Ecphory) updateFrontmatterMetadata(engrams []*engram.Engram) {
 	go func() {
 		for _, eg := range engrams {
 			if err := e.incrementRetrievalCount(eg.Path); err != nil {
-				log.Printf("ecphory: failed to update metadata for %q: %v", eg.Path, err) //nolint:gosec // G706: path from internal disk scan; %q escapes any control chars
+				slog.Warn("ecphory: failed to update metadata", "path", eg.Path, "error", err)
 			}
 		}
 	}()
