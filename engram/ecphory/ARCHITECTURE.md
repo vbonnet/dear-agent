@@ -1,3 +1,4 @@
+<!-- Last audited at: 2026-06-12 -->
 # Ecphory - Architecture
 
 ## System Overview
