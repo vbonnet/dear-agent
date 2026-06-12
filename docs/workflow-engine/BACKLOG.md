@@ -1,7 +1,7 @@
 # Workflow Engine — Backlog
 
 **Status:** Active
-**Last updated:** 2026-05-03 (cross-phase X.5 + X.6 closed)
+**Last updated:** 2026-06-12 (X.1 decided; DEAR-X.7 and DEAR-X.8 shipped in pkg/audit/checks)
 **Source of truth for:** individual tickets within each phase. Phase-level
 status and architecture decisions live in
 [ROADMAP.md](../../ROADMAP.md) and
@@ -196,14 +196,14 @@ phase. Triage as they come up.
 
 | # | Title | Status | Notes |
 |---|---|---|---|
-| X.1 | Schema evolution policy (additive vs. ALTER) | pending | ADR open question §5; needs a decision before Phase 2 lands |
+| X.1 | ~~Schema evolution policy (additive vs. ALTER)~~ DECIDED | done | **Policy: additive `ALTER TABLE … ADD COLUMN` only.** Implemented in `migrateSchema()` in `pkg/workflow/state_sqlite.go`: each migration is idempotent (ignores "duplicate column name"), runs on both fresh and existing DBs, never drops or renames columns. Phase 2 has already landed using this policy (bead ce-6as.15 closed). |
 | X.2 | Cost-per-mtok refresh in `roles.yaml` | pending | ADR open question §3; punted to post-MVS |
 | X.3 | Per-tenant isolation | pending | ADR open question §2; punted to post-MVS |
 | X.4 | GitHub-PR HITL backend | pending | ADR open question §4; not in v1 |
 | DEAR-X.5 | ~~Flaky `TestSQLiteStateConcurrentSaves` (SQLITE_BUSY on schema apply)~~ DONE | done | Fixed by `pingWithBusyRetry` + `execWithBusyRetry` retry loops in `state_sqlite.go` (see `openSQLiteDB` and `retryOnSQLiteBusy`). 100-iteration soak test now passes (`go test -count=100 -run TestSQLiteStateConcurrentSaves ./pkg/workflow/`). |
 | DEAR-X.6 | ~~Phase 2 wiring for Phase 1 schema fields~~ DONE | done | Wired by Phase 2.* tickets (#40). Runner now exposes `Permissions` and HITL backend hooks (`pkg/workflow/runner.go`) and the audit pipeline emits transition rows for permission denials and HITL approve/reject/timeout. |
-| DEAR-X.7 | `spec.staleness` audit check | pending | Outcomes framework tier 2: a SPEC.md whose mtime is substantially older than its directory's most-recent commit is a finding. Same shape as `spec.coverage` (`pkg/audit/checks/spec_coverage.go`); reads `git log` for the comparison. Default threshold 10 commits, configurable. See [outcomes-framework.md](../design/outcomes-framework.md). |
-| DEAR-X.8 | `spec.conformance` audit check (LLM-assisted) | pending | Outcomes framework tier 3: identifiers / file paths referenced in `SPEC.md` resolve in the codebase. Cheap mode: regex-extract file paths and verify they exist. Expensive mode: bind to `tools/spec-review` for prose-level claims. See [outcomes-framework.md](../design/outcomes-framework.md). |
+| DEAR-X.7 | ~~`spec.staleness` audit check~~ DONE | done | Shipped in `pkg/audit/checks/spec_staleness.go` (`spec.staleness` check ID). Reads `git log` for the comparison. |
+| DEAR-X.8 | ~~`spec.conformance` audit check (LLM-assisted)~~ DONE | done | Shipped in `pkg/audit/checks/spec_conformance.go` (cheap mode: regex-extract file paths and verify they exist). |
 | DEAR-X.9 | ~~Backlog suggestion system (framework improvement, P2)~~ DONE | done | Task-driven "what to pick up next", complementing the metric-driven ADR-015/016 surface. `pkg/backlog` parses this file + `ROADMAP.md` (header-aware, both table layouts), ranks by the VROOM Orchestrator dispatch rules (dependency+status eligibility, priority, unblocking leverage, effort), and emits `vroom.decision.dispatched` so pickup lands on the decision trail. CLI: `cmd/backlog-suggest list/suggest`. See [ADR-022](../adrs/ADR-022-backlog-suggestion-system.md). |
 
 ---
