@@ -8,6 +8,8 @@ import (
 	"sync"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/vbonnet/dear-agent/pkg/workspace"
 )
 
 // Config represents the engram and A2A configuration
@@ -214,19 +216,10 @@ func mergePreferences(base, override *PreferencesConfig) {
 	}
 }
 
-// ExpandPath expands ~ and environment variables in path
+// ExpandPath expands ~ and environment variables in path.
+// Deprecated: use workspace.ExpandPath directly.
 func ExpandPath(path string) string {
-	expanded := os.ExpandEnv(path)
-	if len(expanded) > 0 && expanded[0] == '~' {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			if len(expanded) == 1 {
-				return home
-			}
-			return filepath.Join(home, expanded[1:])
-		}
-	}
-	return expanded
+	return workspace.ExpandPath(path)
 }
 
 // GetChannelsDir returns the expanded A2A channels directory path

@@ -3,10 +3,11 @@ package gateway
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/vbonnet/dear-agent/pkg/workspace"
 )
 
 // Config represents the gateway configuration loaded from gateway.yaml.
@@ -104,10 +105,5 @@ func (c *Config) ToCircuitBreakerConfig() CircuitBreakerConfig {
 }
 
 func expandPath(path string) string {
-	if len(path) > 0 && path[0] == '~' {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, path[1:])
-		}
-	}
-	return path
+	return workspace.ExpandPath(path)
 }
