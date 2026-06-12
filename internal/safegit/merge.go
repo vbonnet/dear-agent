@@ -1,0 +1,377 @@
+// Package safegit merge.go provides the safe-merge gate that enforces CLAUDE.md
+// principle 9: an atomic, vetted wrapper for PR merges that cannot be bypassed.
+//
+// Required before any merge:
+//   - All REQUIRED CI checks pass (no red, no pending)
+//   - No unresolved review threads exist
+//   - Minimum soak: head commit is at least 5 minutes old
+//   - Review bot (gemini-code-assist[bot]) has posted
+//
+// After merge: worktree + branch are cleaned up automatically.
+package safegit
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+// MinSoak is the minimum age the head commit must be before merging.
+const MinSoak = 5 * time.Minute
+
+// ReviewBot is the GitHub login of the required code-review bot.
+const ReviewBot = "gemini-code-assist[bot]"
+
+// MergeConfig holds options for a safe merge.
+type MergeConfig struct {
+	PRNumber int
+	Repo     string    // "owner/repo"
+	Now      time.Time // injectable for tests; zero → time.Now()
+}
+
+// SafeMerge gates and executes a squash-merge of the given PR.
+//
+// It checks required CI, review threads, soak time, and bot review before
+// calling `gh pr merge --squash --delete-branch`. Post-merge it attempts
+// worktree+branch cleanup, reporting cleanup failures without returning them
+// as errors (the merge is already done and irreversible).
+func SafeMerge(cfg MergeConfig) error {
+	if cfg.PRNumber <= 0 {
+		return fmt.Errorf("--pr must be a positive integer")
+	}
+	if cfg.Repo == "" {
+		return fmt.Errorf("--repo is required (owner/repo format)")
+	}
+	if !strings.Contains(cfg.Repo, "/") {
+		return fmt.Errorf("--repo must be in owner/repo format, got %q", cfg.Repo)
+	}
+	now := cfg.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	fmt.Fprintf(os.Stderr, "safe-merge: checking PR #%d in %s\n", cfg.PRNumber, cfg.Repo)
+
+	// Gate 1: all required CI checks must pass.
+	if err := checkRequiredCI(cfg.PRNumber, cfg.Repo); err != nil {
+		fmt.Fprintf(os.Stderr, "safe-merge: guidance: run `gh pr checks %d --repo %s --watch`\n", cfg.PRNumber, cfg.Repo)
+		return fmt.Errorf("CI gate: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ all required CI checks pass")
+
+	// Gate 2: no unresolved review threads.
+	if err := checkReviewThreads(cfg.PRNumber, cfg.Repo); err != nil {
+		fmt.Fprintln(os.Stderr, "safe-merge: guidance: resolve open review threads; security-* threads need a written triage verdict")
+		return fmt.Errorf("review-thread gate: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ no unresolved review threads")
+
+	// Gate 3: minimum soak time + bot review.
+	if err := checkSoak(cfg.PRNumber, cfg.Repo, now); err != nil {
+		return fmt.Errorf("soak gate: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ soak time and bot review OK")
+
+	// Execute the merge.
+	fmt.Fprintf(os.Stderr, "safe-merge: merging PR #%d (squash)…\n", cfg.PRNumber)
+	headBranch, err := prHeadBranch(cfg.PRNumber, cfg.Repo)
+	if err != nil {
+		// Non-fatal: cleanup will just skip.
+		fmt.Fprintf(os.Stderr, "safe-merge: warning: could not read head branch: %v\n", err)
+	}
+
+	mergeCmd := exec.Command("gh", "pr", "merge",
+		fmt.Sprintf("%d", cfg.PRNumber),
+		"--repo", cfg.Repo,
+		"--squash",
+		"--delete-branch",
+	)
+	mergeCmd.Stdout = os.Stdout
+	mergeCmd.Stderr = os.Stderr
+	if err := mergeCmd.Run(); err != nil {
+		return fmt.Errorf("gh pr merge failed: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ merge complete")
+
+	// Post-merge cleanup (best-effort, non-fatal).
+	if headBranch != "" {
+		cleanupWorktree(headBranch)
+	}
+	return nil
+}
+
+// --- gate implementations ---
+
+type checkRun struct {
+	Name     string `json:"name"`
+	State    string `json:"state"`
+	Required bool   `json:"required"`
+}
+
+func checkRequiredCI(prNum int, repo string) error {
+	out, err := exec.Command("gh", "pr", "checks",
+		fmt.Sprintf("%d", prNum),
+		"--repo", repo,
+		"--json", "name,state,required",
+	).Output()
+	if err != nil {
+		return fmt.Errorf("gh pr checks failed: %w", err)
+	}
+	return parseCheckRuns(out)
+}
+
+// parseCheckRuns validates that all required checks in the JSON output pass.
+// Exported for testing.
+func parseCheckRuns(data []byte) error {
+	var checks []checkRun
+	if err := json.Unmarshal(data, &checks); err != nil {
+		return fmt.Errorf("parsing check output: %w", err)
+	}
+
+	var failing []string
+	var pending []string
+	for _, c := range checks {
+		if !c.Required {
+			continue
+		}
+		switch strings.ToLower(c.State) {
+		case "success", "pass", "neutral", "skipping":
+			// acceptable
+		case "pending", "queued", "in_progress", "waiting", "requested":
+			pending = append(pending, c.Name)
+		default:
+			failing = append(failing, fmt.Sprintf("%s (%s)", c.Name, c.State))
+		}
+	}
+	if len(failing) > 0 {
+		return fmt.Errorf("required checks failed: %s", strings.Join(failing, ", "))
+	}
+	if len(pending) > 0 {
+		return fmt.Errorf("required checks still pending: %s", strings.Join(pending, ", "))
+	}
+	return nil
+}
+
+const reviewThreadsQuery = `
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          isResolved
+          isOutdated
+          comments(first: 1) {
+            nodes {
+              body
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+
+type gqlReviewResult struct {
+	Data struct {
+		Repository struct {
+			PullRequest struct {
+				ReviewThreads struct {
+					Nodes []struct {
+						IsResolved bool `json:"isResolved"`
+						IsOutdated bool `json:"isOutdated"`
+						Comments   struct {
+							Nodes []struct {
+								Body string `json:"body"`
+							} `json:"nodes"`
+						} `json:"comments"`
+					} `json:"nodes"`
+				} `json:"reviewThreads"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	} `json:"data"`
+}
+
+func checkReviewThreads(prNum int, repo string) error {
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid repo %q", repo)
+	}
+	owner, name := parts[0], parts[1]
+
+	out, err := exec.Command("gh", "api", "graphql",
+		"--field", fmt.Sprintf("owner=%s", owner),
+		"--field", fmt.Sprintf("name=%s", name),
+		"--field", fmt.Sprintf("number=%d", prNum),
+		"--field", fmt.Sprintf("query=%s", reviewThreadsQuery),
+	).Output()
+	if err != nil {
+		return fmt.Errorf("GraphQL query failed: %w", err)
+	}
+	return parseReviewThreads(out)
+}
+
+// parseReviewThreads returns an error if any unresolved, non-outdated review
+// threads exist in the GraphQL response. Exported for testing.
+func parseReviewThreads(data []byte) error {
+	var result gqlReviewResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("parsing GraphQL response: %w", err)
+	}
+
+	var unresolved []string
+	for i, t := range result.Data.Repository.PullRequest.ReviewThreads.Nodes {
+		if t.IsResolved || t.IsOutdated {
+			continue
+		}
+		label := fmt.Sprintf("thread #%d", i+1)
+		if len(t.Comments.Nodes) > 0 {
+			body := t.Comments.Nodes[0].Body
+			if len(body) > 60 {
+				body = body[:60] + "…"
+			}
+			label = fmt.Sprintf("thread #%d: %q", i+1, body)
+		}
+		unresolved = append(unresolved, label)
+	}
+
+	if len(unresolved) > 0 {
+		return fmt.Errorf("%d unresolved review thread(s):\n  %s",
+			len(unresolved), strings.Join(unresolved, "\n  "))
+	}
+	return nil
+}
+
+type prViewResult struct {
+	HeadRefOid string `json:"headRefOid"`
+	Commits    []struct {
+		CommittedDate time.Time `json:"committedDate"`
+	} `json:"commits"`
+	Reviews []struct {
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		State string `json:"state"`
+	} `json:"reviews"`
+}
+
+func checkSoak(prNum int, repo string, now time.Time) error {
+	out, err := exec.Command("gh", "pr", "view",
+		fmt.Sprintf("%d", prNum),
+		"--repo", repo,
+		"--json", "headRefOid,commits,reviews",
+	).Output()
+	if err != nil {
+		return fmt.Errorf("gh pr view failed: %w", err)
+	}
+	return parseSoak(out, now)
+}
+
+// parseSoak checks the soak constraints from the gh pr view JSON output.
+// Exported for testing.
+func parseSoak(data []byte, now time.Time) error {
+	var pr prViewResult
+	if err := json.Unmarshal(data, &pr); err != nil {
+		return fmt.Errorf("parsing pr view: %w", err)
+	}
+
+	// Find the most recent commit time.
+	var newest time.Time
+	for _, c := range pr.Commits {
+		if c.CommittedDate.After(newest) {
+			newest = c.CommittedDate
+		}
+	}
+
+	if !newest.IsZero() {
+		age := now.Sub(newest)
+		if age < MinSoak {
+			remaining := MinSoak - age
+			return fmt.Errorf("head commit is only %s old (need ≥%s); retry in %s",
+				age.Round(time.Second), MinSoak, remaining.Round(time.Second))
+		}
+	}
+
+	// Check review bot posted.
+	botPosted := false
+	for _, r := range pr.Reviews {
+		if r.Author.Login == ReviewBot {
+			botPosted = true
+			break
+		}
+	}
+	if !botPosted {
+		return fmt.Errorf("review bot (%s) has not posted a review yet", ReviewBot)
+	}
+
+	return nil
+}
+
+type prInfoResult struct {
+	HeadRefName string `json:"headRefName"`
+}
+
+func prHeadBranch(prNum int, repo string) (string, error) {
+	out, err := exec.Command("gh", "pr", "view",
+		fmt.Sprintf("%d", prNum),
+		"--repo", repo,
+		"--json", "headRefName",
+	).Output()
+	if err != nil {
+		return "", err
+	}
+	var info prInfoResult
+	if err := json.Unmarshal(out, &info); err != nil {
+		return "", err
+	}
+	return info.HeadRefName, nil
+}
+
+// cleanupWorktree removes any local worktrees tracking the given branch and
+// then deletes the local branch. This mirrors the post-merge cleanup in
+// CLAUDE.md §5. Failures are printed as warnings, not returned as errors.
+func cleanupWorktree(branch string) {
+	// List worktrees in JSON format.
+	out, err := exec.Command("git", "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: git worktree list: %v\n", err)
+		return
+	}
+
+	// Parse porcelain output: blocks separated by blank lines.
+	// Each block has "worktree <path>", optionally "branch refs/heads/<branch>".
+	var toRemove []string
+	var currentPath string
+	for line := range strings.SplitSeq(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "worktree "); ok {
+			currentPath = after
+		} else if line == "branch refs/heads/"+branch && currentPath != "" {
+			// Skip the main worktree (it's typically not a feature branch worktree).
+			if !strings.HasSuffix(currentPath, ".git") {
+				toRemove = append(toRemove, currentPath)
+			}
+			currentPath = ""
+		}
+	}
+
+	for _, path := range toRemove {
+		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: removing worktree %s\n", path)
+		if out, err := exec.Command("git", "worktree", "remove", path).CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "safe-merge: cleanup: worktree remove %s: %v: %s\n", path, err, out)
+		}
+	}
+
+	// Delete the local branch if it exists.
+	if out, err := exec.Command("git", "branch", "-d", branch).CombinedOutput(); err != nil {
+		// -d refuses to delete if unmerged; that's fine — we already merged.
+		// Suppress the error if it's just "branch not found".
+		if !strings.Contains(string(out), "not found") {
+			fmt.Fprintf(os.Stderr, "safe-merge: cleanup: branch -d %s: %v\n", branch, err)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: removed local branch %s\n", branch)
+	}
+}

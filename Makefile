@@ -31,7 +31,7 @@
 #   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 
-.PHONY: lint-specs preflight preflight-tests preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline
+.PHONY: lint-specs preflight preflight-tests preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -184,6 +184,20 @@ build-safe-push:
 install-safe-push: build-safe-push
 	cp bin/safe-push $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/safe-push"
+
+# Build safe-merge: the vetted, gated PR merger that replaces raw `gh pr merge`.
+# Enforces CLAUDE.md principle 9: required CI gates, review thread check, soak
+# time, and bot review before merge. Raw `gh pr merge` should be denied via a
+# PreToolUse hook pointing at this binary (see docs/design/safe-merge.md).
+build-safe-merge:
+	@echo "Building safe-merge..."
+	go build $(GOFLAGS) -o bin/safe-merge ./cmd/safe-merge/
+	@echo "Built: bin/safe-merge"
+
+# Install safe-merge to GOPATH/bin so it is on PATH for every agent session.
+install-safe-merge: build-safe-merge
+	cp bin/safe-merge $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-merge"
 
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
