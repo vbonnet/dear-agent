@@ -3,6 +3,8 @@ package safegit
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -10,14 +12,29 @@ import (
 
 // --- parseCheckRuns ---
 
-func TestParseCheckRuns_AllRequiredPass(t *testing.T) {
+func TestParseCheckRuns_AllChecksPass(t *testing.T) {
 	data := marshalJSON([]checkRun{
 		{Name: "Build", State: "success", Required: true},
 		{Name: "Lint", State: "pass", Required: true},
-		{Name: "Optional", State: "failure", Required: false},
+		{Name: "Optional", State: "success", Required: false},
 	})
 	if err := parseCheckRuns(data); err != nil {
 		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestParseCheckRuns_NonRequiredFails(t *testing.T) {
+	// All checks (required AND non-required) must pass.
+	data := marshalJSON([]checkRun{
+		{Name: "Build", State: "success", Required: true},
+		{Name: "Optional", State: "failure", Required: false},
+	})
+	err := parseCheckRuns(data)
+	if err == nil {
+		t.Fatal("expected error: non-required failing check should also block merge")
+	}
+	if !strings.Contains(err.Error(), "Optional") {
+		t.Errorf("error should mention failing check name, got: %v", err)
 	}
 }
 
@@ -261,6 +278,43 @@ func TestSafeMerge_InvalidConfig(t *testing.T) {
 				t.Errorf("error = %q, want substring %q", err.Error(), tc.want)
 			}
 		})
+	}
+}
+
+// --- appendAuditEntry / auditLogDir ---
+
+func TestAuditEntry_WrittenToFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SAFE_MERGE_AUDIT_DIR", dir)
+
+	appendAuditEntry("owner/repo", 42, "merged", "squash merge complete")
+
+	data, err := os.ReadFile(filepath.Join(dir, "safe-merge-audit.jsonl"))
+	if err != nil {
+		t.Fatalf("audit log not created: %v", err)
+	}
+	if !strings.Contains(string(data), `"merged"`) {
+		t.Errorf("audit log should contain event type, got: %s", data)
+	}
+	if !strings.Contains(string(data), `"pr":42`) {
+		t.Errorf("audit log should contain PR number, got: %s", data)
+	}
+}
+
+func TestAuditEntry_MultipleEntries(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SAFE_MERGE_AUDIT_DIR", dir)
+
+	appendAuditEntry("owner/repo", 1, "gate_check", "CI: checks failed")
+	appendAuditEntry("owner/repo", 1, "merged", "ok")
+
+	data, err := os.ReadFile(filepath.Join(dir, "safe-merge-audit.jsonl"))
+	if err != nil {
+		t.Fatalf("audit log not created: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Errorf("expected 2 audit entries, got %d: %s", len(lines), data)
 	}
 }
 
