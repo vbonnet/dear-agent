@@ -102,22 +102,41 @@ session that produces artifacts.
 - New `*.md` or `*.txt` files under `research/`. dear-agent does not
   currently have a `research/` tree, and any such file should be redirected
   to `~/src/engram-research`.
+- **Temporal docs** — DEAR retros (`docs/retros/`), design docs
+  (`docs/design/`), W0/problem statements, and Wayfinder artifacts (`wf/`).
+  These are research/planning output, not code, and **ALWAYS** belong in
+  `~/src/engram-research` (under `projects/<name>/`), **never** in this live
+  coding repo — *even when the doc is about code in this repo*. Polluting
+  code history with planning artifacts strands the work away from the corpus
+  where it belongs.
 
 **Where things go:**
 
 | Artifact kind                                              | Destination                  |
 |------------------------------------------------------------|------------------------------|
-| Source code, ADRs (`docs/adr/`), design docs (`docs/design/`) | this repo                |
+| Source code, build config, ADRs (`docs/adr/`)              | this repo                    |
+| Design docs (`docs/design/`), DEAR retros (`docs/retros/`) | `~/src/engram-research`      |
+| W0 / problem statements, Wayfinder artifacts (`wf/`)       | `~/src/engram-research`      |
 | Research analysis (substrate/architecture studies, etc.)   | `~/src/engram-research`      |
 | Source transcripts (YouTube, podcasts, interviews)         | `~/src/engram-research`      |
 | Conversation/session logs                                  | `~/src/ai-conversation-logs` |
 
+Only **code, build config, and ADRs** (durable decision records that
+constrain code) live here. Everything narrative/temporal — plans, designs,
+retros, W0s, research, Wayfinder runs — routes to `engram-research`.
+
+> **Pre-existing exception:** a few behavioural *specs* already in
+> `docs/design/` (e.g. `anti-stall.md`, `graceful-exit.md`,
+> `outcomes-framework.md`) are referenced by this CLAUDE.md and by code as
+> authoritative and remain in-repo for now; migrating them is tracked
+> separately. New temporal docs follow the table above without exception.
+
 **Decision procedure** when writing a new file:
-1. If it is code, build config, ADR, or design doc that constrains code in
-   this repo → write here.
-2. Otherwise check `.dear-agent.yml > output-dirs` for the matching kind and
-   write there instead.
-3. If unsure, ask the user — do **not** default to `research/` in this repo.
+1. If it is code, build config, or an ADR (`docs/adr/`) → write here.
+2. Otherwise (design doc, retro, W0, Wayfinder artifact, research,
+   transcript, log) check `.dear-agent.yml > output-dirs` for the matching
+   kind and write there — for temporal docs that is `~/src/engram-research`.
+3. If unsure, ask the user — do **not** default to writing it in this repo.
 
 This rule exists because research artifacts were committed to the predecessor
 code repo (ai-tools) in error multiple times, polluting code-repo history and
