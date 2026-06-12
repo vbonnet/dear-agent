@@ -75,16 +75,24 @@ func CredentialResetArgs(ghPath string) []string {
 	}
 }
 
-// ForceFlag reports the first force-push flag in args, if any. Force-push is
-// rejected by construction: a wrapper that can clobber shared history is not a
-// wrapper worth allow-listing.
+// ForceFlag reports the first force-push flag or force refspec in args, if any.
+// Force-push is rejected by construction: a wrapper that can clobber shared
+// history is not a wrapper worth allow-listing.
+//
+// Detected forms:
+//   - -f / --force / --force-with-lease / --force-if-includes (flags)
+//   - --mirror (rewrites remote refs wholesale, equivalent to force-push)
+//   - +<refspec>  (a leading '+' in a refspec means "force this ref")
 func ForceFlag(args []string) (string, bool) {
 	for _, a := range args {
 		switch {
-		case a == "-f" || a == "--force" || a == "--force-with-lease":
+		case a == "-f" || a == "--force" || a == "--force-with-lease" || a == "--mirror":
 			return a, true
 		case strings.HasPrefix(a, "--force-with-lease=") ||
 			strings.HasPrefix(a, "--force-if-includes"):
+			return a, true
+		case strings.HasPrefix(a, "+") && !strings.HasPrefix(a, "--"):
+			// A '+' prefix on a refspec forces that ref; block it.
 			return a, true
 		}
 	}
@@ -111,8 +119,8 @@ func PushArgs(repoDir, ghPath string, pushArgs []string) []string {
 // package exists to convert from "hang forever" into "fail in seconds".
 func Push(repoDir string, pushArgs []string, timeout time.Duration) error {
 	if flag, ok := ForceFlag(pushArgs); ok {
-		return fmt.Errorf("refusing %s: safe-push never force-pushes — "+
-			"clobbering remote history is exactly what this wrapper exists to prevent", flag)
+		return fmt.Errorf("refusing %q: safe-push blocks force-pushes, --mirror, and +refspec "+
+			"(any of these can overwrite remote history) — remove the flag/refspec to proceed", flag)
 	}
 	gh, err := ResolveGh()
 	if err != nil {
