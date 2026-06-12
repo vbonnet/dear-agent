@@ -30,8 +30,10 @@
 #   bumblebee-scan          Run a one-shot Bumblebee endpoint scan
 #   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
+#   build-safe-merge        Build safe-merge: disciplined PR merge wrapper
+#   install-safe-merge      Install safe-merge to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline
+.PHONY: lint-specs preflight preflight-tests preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-safe-merge install-safe-merge
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -184,6 +186,24 @@ build-safe-push:
 install-safe-push: build-safe-push
 	cp bin/safe-push $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/safe-push"
+
+
+# Build safe-merge: the only approved path for merging a GitHub PR.
+# Enforces: OPEN non-draft PR, no conflicts, all checks SUCCESS/NEUTRAL/SKIPPED,
+# no unresolved review threads, TOCTOU-safe --match-head-commit merge, post-merge
+# worktree+branch cleanup. Raw `gh pr merge` is blocked by the pretool-bash-write-guard
+# hook; this wrapper is ALWAYS_ALLOW'd because its safety is guaranteed by construction.
+# See docs/design-safe-merge.md and cmd/safe-merge.
+build-safe-merge:
+	@echo "Building safe-merge..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/safe-merge ./cmd/safe-merge/
+	@echo "Built: bin/safe-merge"
+
+install-safe-merge: build-safe-merge
+	cp bin/safe-merge $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-merge"
+
 
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
