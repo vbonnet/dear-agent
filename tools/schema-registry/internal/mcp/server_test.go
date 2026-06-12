@@ -11,7 +11,7 @@ func TestNewServer_NotNil(t *testing.T) {
 
 func TestHandleRequest_UnknownMethod_ReturnsError(t *testing.T) {
 	s := NewServer(t.TempDir(), false)
-	resp := s.HandleRequest(map[string]interface{}{
+	resp := s.HandleRequest(map[string]any{
 		"id":     1,
 		"method": "nonexistent/method",
 	})
