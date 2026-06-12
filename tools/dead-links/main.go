@@ -11,7 +11,6 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -83,23 +82,23 @@ func run() int {
 }
 
 func checkFile(mdFile, root string, verbose bool) ([]finding, error) {
-	f, err := os.Open(mdFile)
+	// Read the whole file rather than scanning line-by-line: bufio.Scanner
+	// has a 64KB token limit and would silently stop on long lines (large
+	// tables, embedded SVG, base64 images).
+	content, err := os.ReadFile(mdFile)
 	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", mdFile, err)
+		return nil, fmt.Errorf("reading %s: %w", mdFile, err)
 	}
-	defer f.Close()
 
 	dir := filepath.Dir(mdFile)
 	rel, _ := filepath.Rel(root, mdFile)
 
 	var findings []finding
 
-	scanner := bufio.NewScanner(f)
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		text := scanner.Text()
-		matches := linkRe.FindAllStringSubmatch(text, -1)
+	lines := strings.Split(string(content), "\n")
+	for i, line := range lines {
+		lineNum := i + 1
+		matches := linkRe.FindAllStringSubmatch(line, -1)
 		for _, m := range matches {
 			target := m[1]
 			if isExternalLink(target) {
@@ -110,7 +109,15 @@ func checkFile(mdFile, root string, verbose bool) ([]finding, error) {
 			if path == "" {
 				continue // pure anchor reference is always valid
 			}
-			abs := filepath.Join(dir, path)
+			// A leading "/" is a repository-root-relative link on GitHub
+			// and similar platforms; resolve it against root, not the
+			// file's own directory.
+			var abs string
+			if strings.HasPrefix(path, "/") {
+				abs = filepath.Join(root, path)
+			} else {
+				abs = filepath.Join(dir, path)
+			}
 			abs = filepath.Clean(abs)
 			if verbose {
 				fmt.Printf("  check: %s:%d: %s\n", rel, lineNum, path)
@@ -119,9 +126,6 @@ func checkFile(mdFile, root string, verbose bool) ([]finding, error) {
 				findings = append(findings, finding{file: rel, line: lineNum, target: target})
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("reading %s: %w", mdFile, err)
 	}
 	return findings, nil
 }
@@ -147,8 +151,11 @@ func findMarkdown(root string) ([]string, error) {
 		}
 		name := d.Name()
 		if d.IsDir() {
-			// Skip hidden dirs, vendor, node_modules, .git.
-			if strings.HasPrefix(name, ".") || name == "vendor" || name == "node_modules" {
+			// Skip hidden dirs, vendor, node_modules, .git — but never the
+			// root itself, whose base name may legitimately be "." (e.g.
+			// when invoked with --root .), which would otherwise abort the
+			// entire walk and scan zero files.
+			if path != root && (strings.HasPrefix(name, ".") || name == "vendor" || name == "node_modules") {
 				return filepath.SkipDir
 			}
 			return nil
