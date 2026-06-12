@@ -166,7 +166,6 @@
       "github.com/vbonnet/dear-agent/agm/internal/a2a/modelcard",
       "github.com/vbonnet/dear-agent/agm/internal/manager/tmuxbackend",
       "github.com/vbonnet/dear-agent/agm/internal/surface/cmd/generate",
-      "github.com/vbonnet/dear-agent/agm/internal/telemetry/usage",
       "github.com/vbonnet/dear-agent/agm/scripts",
       "github.com/vbonnet/dear-agent/agm/test/bdd/steps",
       "github.com/vbonnet/dear-agent/cmd/code-intel",
@@ -189,18 +188,13 @@
       "github.com/vbonnet/dear-agent/pkg/validation",
       "github.com/vbonnet/dear-agent/tools/benchmark-query",
       "github.com/vbonnet/dear-agent/tools/devlog",
-      "github.com/vbonnet/dear-agent/tools/dod-enforcer/hooks/cmd/stop-quality-guard",
       "github.com/vbonnet/dear-agent/tools/schema-registry/internal/mcp",
       "github.com/vbonnet/dear-agent/tools/skill-lint",
       "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/validator",
       "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/commands",
       "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/output",
       "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/progress",
-      "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/s7",
-      "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/tracker",
-      "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder/cmd",
-      "github.com/vbonnet/dear-agent/wayfinder/hooks/cmd/stop-wayfinder-guard",
-      "github.com/vbonnet/dear-agent/wayfinder/internal/tracker"
+      "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/s7"
     ]
   }
 }
