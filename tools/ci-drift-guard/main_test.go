@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -74,6 +75,47 @@ jobs:
 	assert.True(t, names["Build & Test (ubuntu-latest)"])
 	assert.True(t, names["Build & Test (macos-latest)"])
 	assert.True(t, names["build"])
+}
+
+// TestFetchRequiredChecks_RejectsMalformedInput verifies that repo/branch are
+// allowlist-validated before any URL is built, so untrusted values cannot redirect
+// the request to a different host or path (the SSRF guard behind the G704 finding).
+func TestFetchRequiredChecks_RejectsMalformedInput(t *testing.T) {
+	cases := []struct {
+		name        string
+		repo        string
+		branch      string
+		wantErrPart string
+	}{
+		{"host injection in repo", "evil.com/x/repo", "main", "invalid repo"},
+		{"scheme in repo", "http://evil.com/o/r", "main", "invalid repo"},
+		{"too few segments", "owner", "main", "invalid repo"},
+		{"too many segments", "owner/repo/extra", "main", "invalid repo"},
+		{"at sign credential", "user@host/r", "main", "invalid repo"},
+		{"branch with scheme", "owner/repo", "http://evil.com", "invalid branch"},
+		{"branch with query", "owner/repo", "main?x=1", "invalid branch"},
+		{"branch with space", "owner/repo", "ma in", "invalid branch"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := fetchRequiredChecks(context.Background(), "token", tc.repo, tc.branch)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErrPart)
+		})
+	}
+}
+
+func TestFetchRequiredChecks_AcceptsValidRefShapes(t *testing.T) {
+	// Valid owner/repo + slash-bearing branch should pass the validation guard and
+	// only fail later at the network call. A pre-cancelled context makes Do() return
+	// immediately (no real request), so we can assert the failure is not a validation
+	// rejection without depending on the network.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := fetchRequiredChecks(ctx, "token", "owner-1/repo.go_x", "release/v1.2")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "invalid repo")
+	assert.NotContains(t, err.Error(), "invalid branch")
 }
 
 func TestCollectJobNames_CodeQL(t *testing.T) {
