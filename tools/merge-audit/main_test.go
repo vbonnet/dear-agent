@@ -176,6 +176,28 @@ func TestFetchCheckRuns_RejectsInvalidSHA(t *testing.T) {
 	}
 }
 
+func TestFetchSinglePR_RejectsInvalidRepo(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := fetchSinglePR(ctx, "token", "not-a-repo", 42)
+	if err == nil || !containsStr(err.Error(), "invalid repo") {
+		t.Errorf("expected invalid repo error, got: %v", err)
+	}
+}
+
+func TestFetchSinglePR_AcceptsValidRepo(t *testing.T) {
+	// Pre-cancel context so no real HTTP request is made.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := fetchSinglePR(ctx, "token", "owner/repo", 42)
+	if err == nil {
+		t.Error("expected error (cancelled context), got nil")
+	}
+	if containsStr(err.Error(), "invalid repo") {
+		t.Errorf("should not be a validation error, got: %v", err)
+	}
+}
+
 func containsStr(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
 		func() bool {

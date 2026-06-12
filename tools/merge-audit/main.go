@@ -1,11 +1,10 @@
-// merge-audit checks recent merges on a GitHub repo for CI bypass or
-// non-squash strategy. It fetches PRs merged within the lookback window,
-// verifies all required status checks were green before merge, and flags
-// merge commits with more than one parent (non-squash strategy).
+// merge-audit checks merges on a GitHub repo for CI bypass or non-squash
+// strategy. It can audit a single PR (--pr) or scan PRs merged within a
+// lookback window (--lookback, default 24h).
 //
 // Usage:
 //
-//	merge-audit [--repo owner/repo] [--branch main] [--lookback 24h]
+//	merge-audit [--repo owner/repo] [--branch main] [--pr N] [--lookback 24h]
 //
 // Exit codes: 0=clean, 1=bypassed merges found, 2=usage/setup error.
 //
@@ -38,7 +37,8 @@ func main() {
 func run() int {
 	repoFlag := flag.String("repo", "", "GitHub repo as owner/repo (default: GITHUB_REPOSITORY env var)")
 	branch := flag.String("branch", "main", "branch to audit merges on")
-	lookback := flag.String("lookback", "24h", "how far back to look for merges")
+	lookback := flag.String("lookback", "24h", "how far back to look for merges (ignored when --pr is set)")
+	prNum := flag.Int("pr", 0, "single PR number to audit (default 0 = use --lookback)")
 	flag.Parse()
 
 	repo, token, since, code := parseArgs(*repoFlag, *branch, *lookback)
@@ -54,10 +54,25 @@ func run() int {
 		return 2
 	}
 
-	prs, err := fetchMergedPRs(ctx, token, repo, since)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error fetching merged PRs: %v\n", err)
-		return 2
+	var prs []PullRequest
+
+	if *prNum != 0 {
+		pr, err := fetchSinglePR(ctx, token, repo, *prNum)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error fetching PR #%d: %v\n", *prNum, err)
+			return 2
+		}
+		if pr.MergedAt == "" {
+			fmt.Fprintf(os.Stderr, "PR #%d is not merged; nothing to audit\n", *prNum)
+			return 0
+		}
+		prs = []PullRequest{*pr}
+	} else {
+		prs, err = fetchMergedPRs(ctx, token, repo, since)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error fetching merged PRs: %v\n", err)
+			return 2
+		}
 	}
 
 	if len(prs) == 0 {
@@ -68,13 +83,16 @@ func run() int {
 	findings := auditPRs(ctx, token, repo, required, prs)
 
 	if len(findings) == 0 {
-		fmt.Printf("ok: %d PR(s) merged on %s/%s since %s — all clean\n",
-			len(prs), repo, *branch, since.Format(time.RFC3339))
+		if *prNum != 0 {
+			fmt.Printf("ok: PR #%d on %s/%s — all checks clean\n", *prNum, repo, *branch)
+		} else {
+			fmt.Printf("ok: %d PR(s) merged on %s/%s since %s — all clean\n",
+				len(prs), repo, *branch, since.Format(time.RFC3339))
+		}
 		return 0
 	}
 
-	fmt.Printf("BYPASS DETECTED: %d issue(s) on %s/%s since %s\n",
-		len(findings), repo, *branch, since.Format(time.RFC3339))
+	fmt.Printf("BYPASS DETECTED: %d issue(s) on %s/%s\n", len(findings), repo, *branch)
 	for _, f := range findings {
 		fmt.Printf("\n  PR #%d: %s\n", f.PR, f.Title)
 		for _, issue := range f.Issues {
@@ -320,6 +338,22 @@ func fetchMergedPRs(ctx context.Context, token, repo string, since time.Time) ([
 		merged = append(merged, pr)
 	}
 	return merged, nil
+}
+
+func fetchSinglePR(ctx context.Context, token, repo string, prNum int) (*PullRequest, error) {
+	if !repoRe.MatchString(repo) {
+		return nil, fmt.Errorf("invalid repo %q", repo)
+	}
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/pulls/%d", repo, prNum)
+	body, err := githubGET(ctx, token, apiURL)
+	if err != nil {
+		return nil, err
+	}
+	var pr PullRequest
+	if err := json.Unmarshal(body, &pr); err != nil {
+		return nil, fmt.Errorf("parsing PR: %w", err)
+	}
+	return &pr, nil
 }
 
 func fetchCheckRuns(ctx context.Context, token, repo, sha string) ([]CheckRun, error) {

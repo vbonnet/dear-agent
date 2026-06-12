@@ -1,0 +1,137 @@
+name: Weekly Merge Audit
+
+# Weekly scan of all tracked repos for CI-bypass merges and non-squash
+# strategy over the past 7 days. Opens a single rolling issue on findings;
+# auto-closes when all repos are clean.
+#
+# Mirrors the branch-protection-audit pattern for cross-repo scanning.
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # Mondays at 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build merge-audit
+        run: go build -o build/merge-audit ./tools/merge-audit
+
+      - name: Run weekly merge audit across repos
+        env:
+          GITHUB_TOKEN: ${{ secrets.AUDIT_PAT || secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          # Repos under audit — edit when new repos come online.
+          repos=(
+            "dear-agent"
+            "brain-v2"
+            "vbonnet.ai"
+            "gdoc-sync"
+            "engram-research"
+            "engram-kb"
+          )
+
+          findings=""
+
+          for repo in "${repos[@]}"; do
+            slug="${OWNER}/${repo}"
+            echo "=== $slug ==="
+
+            # Skip repos we cannot access.
+            if ! timeout 30 gh api "repos/${slug}" >/dev/null 2>&1; then
+              echo "  skip — repo not accessible (private or missing)"
+              continue
+            fi
+
+            result=$(build/merge-audit \
+              --repo "${slug}" \
+              --lookback 168h \
+              2>&1 || true)
+
+            echo "$result"
+
+            if echo "$result" | grep -q "^BYPASS DETECTED"; then
+              findings="${findings}\n### ${slug}\n\`\`\`\n${result}\n\`\`\`\n"
+            fi
+          done
+
+          {
+            echo "findings<<__EOF__"
+            printf '%b\n' "$findings"
+            echo "__EOF__"
+          } >> "$GITHUB_ENV"
+
+      - name: Open / update merge-audit issue
+        if: ${{ env.findings != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="merge-audit: bypass detected across tracked repos"
+          body=$(cat <<EOF
+          The Weekly Merge Audit found CI bypass or non-squash merges in the past 7 days:
+
+          ${findings}
+
+          **Required for every merged PR:**
+          - All required CI checks green before merge
+          - Squash merge strategy (no merge commits)
+
+          Use \`safe-merge --pr <N>\` for the gated merge path.
+
+          Auto-managed by \`.github/workflows/merge-audit-weekly.yml\`; closes once all repos are clean.
+          EOF
+          )
+          existing=$(timeout 30 gh issue list \
+            --repo "$REPO" \
+            --label merge-audit \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            timeout 30 gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            timeout 30 gh issue create \
+              --repo "$REPO" \
+              --title "$title" \
+              --body "$body" \
+              --label merge-audit
+          fi
+
+      - name: Auto-close merge-audit issue when all repos clean
+        if: ${{ env.findings == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          existing=$(timeout 30 gh issue list \
+            --repo "$REPO" \
+            --label merge-audit \
+            --state open \
+            --json number \
+            --jq '.[].number')
+          for n in $existing; do
+            timeout 30 gh issue close "$n" --repo "$REPO" \
+              --comment "Weekly merge audit: all tracked repos clean; auto-closing."
+          done

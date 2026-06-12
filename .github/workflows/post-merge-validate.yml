@@ -1,0 +1,91 @@
+name: Post-Merge Validate
+
+# Runs merge-audit against the just-merged PR to detect CI bypass or
+# non-squash strategy after the fact. Opens a rolling GitHub issue on
+# violation — detect and alert only, no auto-revert.
+#
+# Triggered only when a PR is closed via merge (not just closed).
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  validate:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build merge-audit
+        run: go build -o build/merge-audit ./tools/merge-audit
+
+      - name: Run post-merge validation
+        id: audit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          if build/merge-audit --repo "$REPO" --pr "$PR_NUMBER" > findings.txt 2>&1; then
+            echo "status=clean" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=violation" >> "$GITHUB_OUTPUT"
+          fi
+          cat findings.txt
+
+      - name: Open / update violation issue
+        if: steps.audit.outputs.status == 'violation'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          findings=$(cat findings.txt)
+          title="merge-audit: bypass detected (PR #${PR_NUMBER})"
+          body=$(cat <<EOF
+          The post-merge validation found issues for PR #${PR_NUMBER} ("${PR_TITLE}"):
+
+          \`\`\`
+          ${findings}
+          \`\`\`
+
+          **Required:** all CI checks must be green and squash strategy must be used before merge.
+
+          See [safe-merge](../blob/main/cmd/safe-merge/main.go) for the gated merge path.
+
+          Auto-managed by \`.github/workflows/post-merge-validate.yml\`.
+          EOF
+          )
+          existing=$(timeout 30 gh issue list \
+            --repo "$REPO" \
+            --label merge-audit \
+            --state open \
+            --json number,title \
+            --jq ".[] | select(.title | startswith(\"merge-audit: bypass detected (PR #${PR_NUMBER})\")) | .number" \
+            | head -1)
+          if [ -n "$existing" ]; then
+            timeout 30 gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            timeout 30 gh issue create \
+              --repo "$REPO" \
+              --title "$title" \
+              --body "$body" \
+              --label merge-audit
+          fi
