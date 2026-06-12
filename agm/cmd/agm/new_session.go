@@ -35,6 +35,7 @@ func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
 
 	ctx := context.Background()
 	sessionID := uuid.New().String() // Generate session ID early for sandbox
+	spawnSessionID = sessionID       // Expose to otelEnvArgs() for OTel injection
 	var sandboxInfo *manifest.SandboxConfig
 	defer func() {
 		if retErr != nil && sandboxInfo != nil {

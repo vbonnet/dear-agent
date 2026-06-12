@@ -1,3 +1,4 @@
+<!-- Last audited at: 2026-06-12 -->
 # ADR-001: CLI Command Structure and Organization
 
 **Status:** Accepted
