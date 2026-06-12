@@ -9,8 +9,8 @@ import (
 
 // TestLoopInstallLaunchd_PlistWritten verifies the plist is rendered correctly
 // without touching real launchd (launchctlRun is replaced with a no-op).
+// Not parallel: mutates the package-level launchctlRun variable.
 func TestLoopInstallLaunchd_PlistWritten(t *testing.T) {
-	t.Parallel()
 	tmpHome := t.TempDir()
 
 	// Stub launchctlRun so the test works without real launchd.
@@ -88,8 +88,8 @@ func TestLoopTickPlistPath(t *testing.T) {
 // TestLoopInstallUninstallLaunchd_NopLaunchctl exercises install then
 // uninstall with a stubbed launchctlRun, verifying the plist is written and
 // then removed.
+// Not parallel: mutates the package-level launchctlRun variable.
 func TestLoopInstallUninstallLaunchd_NopLaunchctl(t *testing.T) {
-	t.Parallel()
 	tmpHome := t.TempDir()
 
 	orig := launchctlRun
