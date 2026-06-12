@@ -43,11 +43,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          # Full history so golangci-lint's `new-from-merge-base: origin/main`
-          # (see .golangci.yml) can compute the merge base and report findings
-          # only for code changed relative to main. With the default shallow
-          # clone the merge base is unreachable and the baseline silently
-          # degrades to reporting the entire backlog.
+          # Full history required for two reasons:
+          # (1) PR runs: golangci-lint new-from-merge-base needs the merge-base reachable.
+          # (2) Push-to-main runs: golangci-lint --new-from-rev=HEAD~1 needs HEAD~1 reachable.
+          # Without fetch-depth: 0 both baselines silently degrade to a full backlog scan.
           fetch-depth: 0
 
       - name: Set up Go
@@ -105,6 +104,12 @@ jobs:
           # which can introduce new findings (e.g. SA5011) on an unrelated PR
           # and red main without any code change. Bump this intentionally.
           version: v2.12.2
+          # On push-to-main: diff against the previous commit (HEAD~1) so
+          # admin-bypass-merged PRs that skipped CI are still caught. On PRs:
+          # pass nothing — .golangci.yml's new-from-merge-base: origin/main
+          # takes effect and reports only code changed relative to main.
+          # CLI args override config-file settings in golangci-lint v2.
+          args: ${{ github.event_name == 'push' && '--new-from-rev=HEAD~1' || '' }}
 
   # Smart integration-test selection. The selector (cmd/test-affected)
   # walks the dependency graph from this branch vs. origin/main and runs

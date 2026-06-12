@@ -12,6 +12,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -20,10 +21,16 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+)
+
+var (
+	repoRe   = regexp.MustCompile(`^[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+$`)
+	branchRe = regexp.MustCompile(`^[A-Za-z0-9_./\-]+$`)
 )
 
 func main() {
@@ -64,7 +71,7 @@ func run() int {
 		return 0
 	}
 
-	required, err := fetchRequiredChecks(token, repo, *branch)
+	required, err := fetchRequiredChecks(context.Background(), token, repo, *branch)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error fetching branch protection: %v\n", err)
 		return 2
@@ -131,39 +138,47 @@ func collectJobNames(dir string) (map[string]bool, error) {
 			continue
 		}
 		for jobID, jobDef := range wf.Jobs {
-			names[jobID] = true
-			m, ok := jobDef.(map[string]any)
-			if !ok {
-				continue
-			}
-			nameVal, _ := m["name"].(string)
-			if nameVal == "" {
-				continue
-			}
-			// Extract matrix values for template expansion.
-			matrixValues := extractMatrix(m)
-			for _, expanded := range expandName(nameVal, matrixValues) {
-				names[expanded] = true
-			}
-			// CodeQL registers checks as "{job-name} ({language})" rather than
-			// using the job's name directly. Detect jobs that use the CodeQL
-			// analyze action and generate those synthetic check names.
-			if isCodeQLJob(m) {
-				langs, ok := matrixValues["language"]
-				if !ok {
-					langs = []string{"go"} // sensible default
-				}
-				baseName := nameVal
-				if baseName == "" {
-					baseName = jobID
-				}
-				for _, lang := range langs {
-					names[baseName+" ("+lang+")"] = true
-				}
-			}
+			collectNamesFromJob(names, jobID, jobDef)
 		}
 	}
 	return names, nil
+}
+
+// collectNamesFromJob registers all check names produced by a single job
+// definition into the names set.
+func collectNamesFromJob(names map[string]bool, jobID string, jobDef any) {
+	names[jobID] = true
+	m, ok := jobDef.(map[string]any)
+	if !ok {
+		return
+	}
+	nameVal, _ := m["name"].(string)
+	if nameVal == "" {
+		return
+	}
+	matrixValues := extractMatrix(m)
+	for _, expanded := range expandName(nameVal, matrixValues) {
+		names[expanded] = true
+	}
+	if isCodeQLJob(m) {
+		collectCodeQLNames(names, jobID, nameVal, matrixValues)
+	}
+}
+
+// collectCodeQLNames adds synthetic "{name} ({language})" check names that
+// CodeQL registers instead of the plain job name.
+func collectCodeQLNames(names map[string]bool, jobID, nameVal string, matrix map[string][]string) {
+	langs, ok := matrix["language"]
+	if !ok {
+		langs = []string{"go"}
+	}
+	baseName := nameVal
+	if baseName == "" {
+		baseName = jobID
+	}
+	for _, lang := range langs {
+		names[baseName+" ("+lang+")"] = true
+	}
 }
 
 // extractMatrix returns a map of matrix variable name → slice of string values
@@ -249,9 +264,19 @@ type branchProtectionResponse struct {
 	} `json:"required_status_checks"`
 }
 
-func fetchRequiredChecks(token, repo, branch string) ([]string, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/branches/%s/protection", repo, branch)
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+func fetchRequiredChecks(ctx context.Context, token, repo, branch string) ([]string, error) {
+	if !repoRe.MatchString(repo) {
+		return nil, fmt.Errorf("invalid repo %q: must be owner/repo with alphanumeric, hyphens, dots, underscores", repo)
+	}
+	if !branchRe.MatchString(branch) {
+		return nil, fmt.Errorf("invalid branch %q: must contain only alphanumeric, hyphens, dots, underscores, slashes", branch)
+	}
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/branches/%s/protection", repo, branch)
+	// The host is a hardcoded constant; the only interpolated segments are repo
+	// and branch, both allowlist-validated above by repoRe/branchRe (no scheme,
+	// host, "@", or ".." can appear). gosec's G704 taint analysis cannot see the
+	// regex guards as sanitizers, so it flags apiURL as a false positive here.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil) //nolint:gosec // G704 false positive: repo/branch allowlist-validated above; host is constant
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	sessioncmd "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/commands"
@@ -29,10 +30,8 @@ Examples:
   wayfinder session complete-phase D1 --outcome success
   wayfinder session end --status completed`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Get project directory from root command flag or current directory
 		dir := GetProjectDirectory()
 
-		// Validate directory exists
 		if _, err := os.Stat(dir); err != nil {
 			if os.IsNotExist(err) {
 				return fmt.Errorf("directory does not exist: %s", dir)
@@ -40,10 +39,52 @@ Examples:
 			return fmt.Errorf("failed to access directory %s: %w", dir, err)
 		}
 
-		// Set project directory for session commands package
+		// If STATUS file is not in dir, scan wf/*/ to auto-discover the project.
+		// This fixes the common case where `wayfinder start` is run from the repo
+		// root and places STATUS under wf/<id>/, but session commands are invoked
+		// from the same repo root without an explicit -C flag.
+		statusFile := filepath.Join(dir, "WAYFINDER-STATUS.md")
+		if _, err := os.Stat(statusFile); os.IsNotExist(err) {
+			discovered, discErr := discoverProjectDir(dir)
+			if discErr == nil {
+				fmt.Fprintf(os.Stderr, "wayfinder: using project at %s (use -C to be explicit)\n", discovered)
+				dir = discovered
+			}
+		}
+
 		sessioncmd.SetProjectDirectory(dir)
 		return nil
 	},
+}
+
+// discoverProjectDir scans <root>/wf/*/ for exactly one WAYFINDER-STATUS.md.
+// Returns the matching subdirectory, or an error if zero or multiple are found.
+func discoverProjectDir(root string) (string, error) {
+	wfDir := filepath.Join(root, "wf")
+	entries, err := os.ReadDir(wfDir)
+	if err != nil {
+		return "", fmt.Errorf("no wf/ directory under %s", root)
+	}
+
+	var found []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		candidate := filepath.Join(wfDir, e.Name(), "WAYFINDER-STATUS.md")
+		if _, err := os.Stat(candidate); err == nil {
+			found = append(found, filepath.Dir(candidate))
+		}
+	}
+
+	switch len(found) {
+	case 0:
+		return "", fmt.Errorf("no project found under %s/wf/", root)
+	case 1:
+		return found[0], nil
+	default:
+		return "", fmt.Errorf("multiple projects found under %s/wf/; use -C <project-dir> to specify", root)
+	}
 }
 
 func init() {
