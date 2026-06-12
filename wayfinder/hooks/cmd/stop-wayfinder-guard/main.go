@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/stophook"
+	"github.com/vbonnet/dear-agent/wayfinder/internal/status"
 )
 
 func main() {
@@ -79,51 +80,51 @@ func checkRetrospective(r *stophook.Result, dir string) {
 				r.Pass("retrospective", "S11-retrospective.md exists with content")
 				return
 			}
-			r.Warn("retrospective",
-				"S11-retrospective.md exists but has minimal content",
-				"add meaningful retrospective content")
+			// Retro file exists but is effectively empty — block: it was started
+			// but not completed before exiting.
+			r.Block("retrospective",
+				"S11-retrospective.md exists but has minimal content (<100 bytes)",
+				"add meaningful retrospective content before exiting")
 			return
 		}
 	}
 
-	// Check WAYFINDER-STATUS.md to see if we're at S11
-	statusPath := filepath.Join(dir, "WAYFINDER-STATUS.md")
-	data, err := os.ReadFile(statusPath)
+	// Parse WAYFINDER-STATUS.md to detect project completion.
+	s, err := status.ReadFrom(dir)
 	if err != nil {
-		r.Pass("retrospective", "no WAYFINDER-STATUS.md, skipped")
+		// No parseable status — skip gracefully.
+		r.Pass("retrospective", "no parseable WAYFINDER-STATUS.md, skipped")
 		return
 	}
-	content := string(data)
-	if strings.Contains(content, "S11") || strings.Contains(content, "complete") {
-		r.Warn("retrospective",
-			"project appears complete but no S11-retrospective.md found",
-			"create a retrospective document")
+	if s.Status == status.StatusCompleted || s.CurrentPhase == "S11" {
+		// Project is at or past S11 but has no retrospective — block.
+		r.Block("retrospective",
+			"project is complete but no S11-retrospective.md found",
+			"create docs/S11-retrospective.md or wf/S11-retrospective.md before exiting")
 		return
 	}
-	r.Pass("retrospective", "project not at S11, retrospective not required")
+	r.Pass("retrospective", "project not at S11, retrospective not required yet")
 }
 
 func checkPhase(r *stophook.Result, dir string) {
-	statusPath := filepath.Join(dir, "WAYFINDER-STATUS.md")
-	data, err := os.ReadFile(statusPath)
+	s, err := status.ReadFrom(dir)
 	if err != nil {
-		r.Pass("phase", "no WAYFINDER-STATUS.md, skipped")
-		return
-	}
-	content := string(data)
-
-	if strings.Contains(content, "abandoned") || strings.Contains(content, "blocked") {
-		r.Pass("phase", "project explicitly ended")
-		return
-	}
-	if strings.Contains(content, "S11") || strings.Contains(content, "completed") {
-		r.Pass("phase", "project at completion phase")
+		r.Pass("phase", "no parseable WAYFINDER-STATUS.md, skipped")
 		return
 	}
 
-	r.Warn("phase",
-		"Wayfinder project not at completion phase",
-		"complete current phase or mark project status explicitly")
+	switch s.Status {
+	case status.StatusCompleted:
+		r.Pass("phase", "project completed")
+	case status.StatusAbandoned:
+		r.Pass("phase", "project abandoned (intentional end state)")
+	default:
+		// StatusInProgress — or any other value including a stale/custom string.
+		// This is not an error; just remind the user the project is still active.
+		r.Warn("phase",
+			fmt.Sprintf("project status is %q (not yet completed)", s.Status),
+			"complete the current phase or mark the project as abandoned when done")
+	}
 }
 
 func checkArtifacts(r *stophook.Result, dir string) {
