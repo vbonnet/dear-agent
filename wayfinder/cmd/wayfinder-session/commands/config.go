@@ -36,7 +36,7 @@ func findStatusFileUpward() (string, bool) {
 	}
 	dir := cwd
 	for {
-		if _, err := os.Stat(filepath.Join(dir, statusFilename)); err == nil {
+		if fi, err := os.Stat(filepath.Join(dir, statusFilename)); err == nil && !fi.IsDir() {
 			return dir, true
 		}
 		parent := filepath.Dir(dir)
