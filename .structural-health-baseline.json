@@ -190,8 +190,6 @@
       "github.com/vbonnet/dear-agent/tools/spec-review/lib/diagram/validator",
       "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/commands",
       "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/output",
-      "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/progress",
-      "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/s7",
       "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/tracker",
       "github.com/vbonnet/dear-agent/wayfinder/internal/tracker"
     ]
