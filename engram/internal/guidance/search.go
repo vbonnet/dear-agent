@@ -3,7 +3,7 @@ package guidance
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -126,7 +126,7 @@ func (s *SearchService) searchFiles(files []string, opts SearchOptions) []Search
 func (s *SearchService) processFile(filePath, query string, opts SearchOptions) (SearchResult, bool) {
 	frontmatter, err := parseFrontmatter(filePath)
 	if err != nil {
-		log.Printf("WARNING: Failed to parse frontmatter from %s: %v", filePath, err)
+		slog.Warn("guidance: failed to parse frontmatter", "path", filePath, "error", err)
 		return SearchResult{}, false
 	}
 

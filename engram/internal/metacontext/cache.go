@@ -3,7 +3,7 @@ package metacontext
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 
@@ -101,7 +101,7 @@ func (c *UnifiedCache) GetMetacontext(ctx context.Context, key string) (*Metacon
 	// Panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("ERROR: Cache panic recovered: %v", r)
+			slog.ErrorContext(ctx, "metacontext: cache panic recovered", "panic", r)
 			// Emit telemetry (would be implemented with actual telemetry system)
 			// telemetry.emit("cache.panic", ...)
 
@@ -120,7 +120,7 @@ func (c *UnifiedCache) GetMetacontext(ctx context.Context, key string) (*Metacon
 	if err := validateMetacontext(mc); err != nil {
 		c.corruptions.Add(1)
 		c.metacontext.Remove(key)
-		log.Printf("WARN: Cache corruption detected for key %s: %v", key, err)
+		slog.WarnContext(ctx, "metacontext: cache corruption detected", "key", key, "error", err)
 		return nil, false
 	}
 
@@ -216,7 +216,7 @@ func (c *UnifiedCache) InvalidateAll(ctx context.Context) error {
 	c.metacontext.Purge()
 	c.metacontextMu.Unlock()
 
-	log.Printf("INFO: All cache tiers purged")
+	slog.InfoContext(ctx, "metacontext: all cache tiers purged")
 	return nil
 }
 
@@ -226,7 +226,7 @@ func (c *UnifiedCache) InvalidateMetacontext(ctx context.Context) error {
 	defer c.metacontextMu.Unlock()
 
 	c.metacontext.Purge()
-	log.Printf("INFO: Metacontext cache purged")
+	slog.InfoContext(ctx, "metacontext: metacontext cache purged")
 	return nil
 }
 
@@ -267,5 +267,5 @@ func (c *UnifiedCache) emergencyPurge() {
 	c.metacontext.Purge()
 	c.metacontextMu.Unlock()
 
-	log.Printf("ERROR: Emergency cache purge completed after panic")
+	slog.Error("metacontext: emergency cache purge completed after panic")
 }
