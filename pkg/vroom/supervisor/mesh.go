@@ -108,6 +108,11 @@ func (m *Mesh) Run(ctx context.Context) error {
 		l := l
 		go func() {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					errs <- loopError{role: l.Role(), err: fmt.Errorf("supervisor loop panicked: %v", r)}
+				}
+			}()
 			err := l.Run(ctx)
 			errs <- loopError{role: l.Role(), err: err}
 		}()

@@ -2,6 +2,7 @@ package papersearch
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -117,6 +118,11 @@ func (m *MultiSearcher) Search(ctx context.Context, keywords []string) ([]Paper,
 		i, b := i, b
 		go func() {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					results[i] = result{err: fmt.Errorf("backend panicked: %v", r)}
+				}
+			}()
 			papers, err := b.Search(ctx, keywords, m.maxResults)
 			results[i] = result{papers: papers, err: err}
 		}()
