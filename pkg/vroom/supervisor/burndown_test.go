@@ -212,6 +212,12 @@ func TestResourcesSaturated(t *testing.T) {
 		{"memory saturated", ResourceSnapshot{MemoryUsedFraction: 0.9}, true},
 		{"cpu saturated", ResourceSnapshot{CPUUsedFraction: 1.0}, true},
 		{"at threshold", ResourceSnapshot{DiskUsedFraction: 0.9}, true},
+		// Swap uses a lower threshold (0.5 default) than disk/memory/cpu (0.9).
+		{"swap below threshold", ResourceSnapshot{SwapUsedFraction: 0.4}, false},
+		{"swap at threshold", ResourceSnapshot{SwapUsedFraction: 0.5}, true},
+		{"swap above threshold", ResourceSnapshot{SwapUsedFraction: 0.75}, true},
+		// Swap suppresses spawn even when RAM/disk/CPU are fine.
+		{"swap high, ram ok", ResourceSnapshot{MemoryUsedFraction: 0.3, SwapUsedFraction: 0.6}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
