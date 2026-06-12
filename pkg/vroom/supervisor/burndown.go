@@ -164,10 +164,7 @@ func (o *Overseer) runBurndownTick(ctx context.Context, snap ResourceSnapshot, p
 
 	// 3. Maintain concurrency. Live count after reclaim = live − any that were
 	// stale (approximation: we don't re-query after reclaim in PR-1).
-	liveAfter := len(live) - len(stale)
-	if liveAfter < 0 {
-		liveAfter = 0
-	}
+	liveAfter := max(len(live)-len(stale), 0)
 	deficit := policy.Target - liveAfter
 	if deficit <= 0 {
 		return // at or above target — nothing to do
@@ -184,7 +181,7 @@ func (o *Overseer) runBurndownTick(ctx context.Context, snap ResourceSnapshot, p
 	}
 
 	*spawned = 0
-	for i := 0; i < deficit; i++ {
+	for range deficit {
 		model := policy.Models[(*spawned)%len(policy.Models)]
 		spec := WorkerSpec{
 			Workspace: fmt.Sprintf("~/worktrees/dear-agent-burndown-%d", len(live)+*spawned+1),
