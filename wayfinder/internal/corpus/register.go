@@ -1,36 +1,50 @@
 package corpus
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"time"
+)
+
+var (
+	ccAvailable bool
+	ccOnce      sync.Once
 )
 
 // isCorpusCallosumAvailable checks if the corpus-callosum cc CLI is installed.
 // Guards against macOS's /usr/bin/cc (clang alias) being mistaken for the tool.
+// Result is cached via sync.Once — the path check runs at most once per process.
 func isCorpusCallosumAvailable() bool {
-	ccPath, err := exec.LookPath("cc")
-	if err != nil {
-		return false
-	}
-	// Run cc --version and reject if output looks like a C compiler (clang/gcc/llvm).
-	out, err := exec.Command(ccPath, "--version").CombinedOutput()
-	if err != nil {
-		// corpus-callosum cc returns non-zero for --version; a real response with output
-		// that doesn't look like a C compiler is still acceptable.
-		if len(out) == 0 {
-			return false
+	ccOnce.Do(func() {
+		ccPath, err := exec.LookPath("cc")
+		if err != nil {
+			return
 		}
-	}
-	lower := strings.ToLower(string(out))
-	for _, marker := range []string{"clang", "llvm", "gcc", "apple", "xcode"} {
-		if strings.Contains(lower, marker) {
-			return false
+		// Run cc --version with a timeout; reject if output looks like a C compiler.
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, ccPath, "--version").CombinedOutput()
+		if err != nil {
+			// corpus-callosum cc may return non-zero for --version; output that doesn't
+			// look like a C compiler is still acceptable.
+			if len(out) == 0 {
+				return
+			}
 		}
-	}
-	return true
+		lower := strings.ToLower(string(out))
+		for _, marker := range []string{"clang", "llvm", "gcc", "apple", "xcode"} {
+			if strings.Contains(lower, marker) {
+				return
+			}
+		}
+		ccAvailable = true
+	})
+	return ccAvailable
 }
 
 // RegisterWayfinderSchemas registers all Wayfinder schemas with corpus callosum
