@@ -1,5 +1,10 @@
 # CI Gate Policy Configuration
 # This file controls when and how CI workflows must pass before allowing merges.
+#
+# Reconciled with actual .github/workflows/ filenames (ce-6as.80):
+#   - test.yml / lint.yml → ci.yml  (Build & Test workflow runs both)
+#   - security.yml        → codeql.yml  (CodeQL Security Analysis)
+#   - e2e.yml             → agm-e2e-install.yml  (AGM end-to-end install tests)
 
 version: v1
 
@@ -7,8 +12,7 @@ version: v1
 default:
   # Workflows that MUST pass before allowing merge
   required_workflows:
-    - test.yml
-    - lint.yml
+    - ci.yml
 
   # Workflows that run but don't block merges
   optional_workflows: []
@@ -40,26 +44,24 @@ branch_policies:
   # Strict policy for main branch
   main:
     required_workflows:
-      - test.yml
-      - lint.yml
-      - security.yml
+      - ci.yml
+      - codeql.yml
     allow_bypass: false
     timeout_minutes: 60
     failure_behavior: block
     parallel_execution: true
     require_all_passing: true
     workflow_dependencies:
-      # security.yml depends on test.yml and lint.yml passing first
-      security.yml:
-        - test.yml
-        - lint.yml
+      # codeql.yml depends on ci.yml passing first
+      codeql.yml:
+        - ci.yml
 
   # Relaxed policy for feature branches
   feature/*:
     required_workflows:
-      - test.yml
+      - ci.yml
     optional_workflows:
-      - lint.yml
+      - codeql.yml
     allow_bypass: true
     timeout_minutes: 20
     failure_behavior: warn
@@ -69,19 +71,19 @@ branch_policies:
   # Release branches require comprehensive checks
   release/*:
     required_workflows:
-      - test.yml
-      - lint.yml
-      - security.yml
-      - e2e.yml
+      - ci.yml
+      - codeql.yml
+      - agm-e2e-install.yml
     allow_bypass: false
     timeout_minutes: 120
     failure_behavior: block
     parallel_execution: true
     require_all_passing: true
     workflow_dependencies:
-      e2e.yml:
-        - test.yml
-        - lint.yml
+      codeql.yml:
+        - ci.yml
+      agm-e2e-install.yml:
+        - ci.yml
 
 # Notes:
 # - Workflow paths are relative to .github/workflows/

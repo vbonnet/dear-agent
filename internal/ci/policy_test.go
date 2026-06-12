@@ -478,3 +478,70 @@ default:
 	assert.Equal(t, 30, config.Default.TimeoutMinutes)
 	assert.NotNil(t, config.Default.WorkflowDependencies)
 }
+
+// TestValidateWorkflowFiles verifies that ValidateWorkflowFiles reports missing
+// workflow files and passes when all referenced files exist on disk.
+func TestValidateWorkflowFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	config := &ci.PolicyConfig{
+		Version: "v1",
+		Default: ci.GatePolicy{
+			RequiredWorkflows: []string{"ci.yml"},
+			FailureBehavior:   "block",
+			TimeoutMinutes:    30,
+		},
+		BranchPolicies: map[string]ci.GatePolicy{
+			"main": {
+				RequiredWorkflows: []string{"ci.yml", "codeql.yml"},
+				FailureBehavior:   "block",
+				TimeoutMinutes:    60,
+			},
+		},
+	}
+
+	// Neither file exists yet — should report both.
+	err := ci.ValidateWorkflowFiles(config, dir)
+	require.Error(t, err, "expected error for missing workflow files")
+	assert.Contains(t, err.Error(), "ci.yml")
+	assert.Contains(t, err.Error(), "codeql.yml")
+
+	// Create ci.yml — codeql.yml still missing.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ci.yml"), []byte(""), 0600))
+	err = ci.ValidateWorkflowFiles(config, dir)
+	require.Error(t, err, "expected error when codeql.yml still missing")
+	assert.NotContains(t, err.Error(), "ci.yml", "ci.yml is present — must not appear in error")
+	assert.Contains(t, err.Error(), "codeql.yml")
+
+	// Create codeql.yml — all files present.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "codeql.yml"), []byte(""), 0600))
+	require.NoError(t, ci.ValidateWorkflowFiles(config, dir), "all workflow files present — must pass")
+}
+
+func TestValidateWorkflowFiles_NilConfig(t *testing.T) {
+	err := ci.ValidateWorkflowFiles(nil, t.TempDir())
+	require.Error(t, err)
+}
+
+func TestValidateWorkflowFiles_DeduplicatesNames(t *testing.T) {
+	// Same workflow name in default and branch policy — should only be checked once.
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ci.yml"), []byte(""), 0600))
+
+	config := &ci.PolicyConfig{
+		Version: "v1",
+		Default: ci.GatePolicy{
+			RequiredWorkflows: []string{"ci.yml"},
+			FailureBehavior:   "block",
+			TimeoutMinutes:    30,
+		},
+		BranchPolicies: map[string]ci.GatePolicy{
+			"main": {
+				RequiredWorkflows: []string{"ci.yml"}, // same file, deduplicated
+				FailureBehavior:   "block",
+				TimeoutMinutes:    60,
+			},
+		},
+	}
+	require.NoError(t, ci.ValidateWorkflowFiles(config, dir))
+}
