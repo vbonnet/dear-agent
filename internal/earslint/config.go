@@ -7,6 +7,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// idPrefix is the optional EARS requirement ID at the start of a pattern
+// regex. After markdown stripping, **FSG-01** becomes "FSG-01 " and sits
+// before the EARS keyword. Including this prefix makes patterns work with
+// both bare "When X shall Y" and prefixed "FSG-01 When X shall Y" forms.
+const idPrefix = `(?:[A-Z][A-Z0-9-]*\d+\s+)?`
+
 // Pattern is a single named EARS template expressed as a regular expression.
 // The regex is matched against a markdown-stripped requirement line, so it
 // should generally be case-insensitive (use the (?i) flag) and anchored at
@@ -41,32 +47,32 @@ func DefaultConfig() Config {
 		Patterns: []Pattern{
 			{
 				Name:        "event-driven",
-				Regex:       `(?i)^when\s+.+,?\s+the\s+.+\s+shall\s+.+`,
+				Regex:       `(?i)^` + idPrefix + `when\s+.+,?\s+the\s+.+\s+shall\s+.+`,
 				Description: "When <trigger>, the <system> shall <response>",
 			},
 			{
 				Name:        "state-driven",
-				Regex:       `(?i)^while\s+.+,?\s+the\s+.+\s+shall\s+.+`,
+				Regex:       `(?i)^` + idPrefix + `while\s+.+,?\s+the\s+.+\s+shall\s+.+`,
 				Description: "While <state>, the <system> shall <behavior>",
 			},
 			{
 				Name:        "feature-driven",
-				Regex:       `(?i)^where\s+.+,?\s+the\s+.+\s+shall\s+.+`,
+				Regex:       `(?i)^` + idPrefix + `where\s+.+,?\s+the\s+.+\s+shall\s+.+`,
 				Description: "Where <feature>, the <system> shall <behavior>",
 			},
 			{
 				Name:        "option",
-				Regex:       `(?i)^if\s+.+,?\s+(?:then\s+)?the\s+.+\s+shall\s+.+`,
+				Regex:       `(?i)^` + idPrefix + `if\s+.+,?\s+(?:then\s+)?the\s+.+\s+shall\s+.+`,
 				Description: "If <condition>, then the <system> shall <behavior>",
 			},
 			{
 				Name:        "unwanted",
-				Regex:       `(?i)^the\s+.+\s+shall\s+not\s+.+`,
+				Regex:       `(?i)^` + idPrefix + `the\s+.+\s+shall\s+not\s+.+`,
 				Description: "The <system> shall not <behavior>",
 			},
 			{
 				Name:        "ubiquitous",
-				Regex:       `(?i)^the\s+.+\s+shall\s+.+`,
+				Regex:       `(?i)^` + idPrefix + `the\s+.+\s+shall\s+.+`,
 				Description: "The <system> shall <behavior>",
 			},
 		},
