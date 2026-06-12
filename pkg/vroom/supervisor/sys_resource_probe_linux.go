@@ -48,3 +48,48 @@ func sysMemoryUsedFraction() float64 {
 	}
 	return float64(total-avail) / float64(total)
 }
+
+// sysSwapUsedFraction returns the fraction of swap space currently in use on
+// Linux by parsing SwapTotal/SwapFree from /proc/meminfo.
+func sysSwapUsedFraction() float64 {
+	f, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	vals := make(map[string]uint64, 2)
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		key, rest, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		if key != "SwapTotal" && key != "SwapFree" {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSpace(rest))
+		if len(fields) == 0 {
+			continue
+		}
+		v, err := strconv.ParseUint(fields[0], 10, 64)
+		if err != nil {
+			continue
+		}
+		vals[key] = v
+		if len(vals) == 2 {
+			break
+		}
+	}
+
+	total := vals["SwapTotal"]
+	free := vals["SwapFree"]
+	if total == 0 {
+		return 0
+	}
+	if free >= total {
+		return 0
+	}
+	return float64(total-free) / float64(total)
+}

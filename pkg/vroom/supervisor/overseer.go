@@ -33,6 +33,11 @@ type ResourceSnapshot struct {
 	// MemoryUsedFraction is fraction of memory used (0..1).
 	MemoryUsedFraction float64
 
+	// SwapUsedFraction is fraction of swap space used (0..1). Swap pressure
+	// is a leading indicator of memory exhaustion — escalation threshold is
+	// lower than the RAM threshold (see EscalationThreshold.SwapFraction).
+	SwapUsedFraction float64
+
 	// CPUUsedFraction is fraction of CPU used over the most recent
 	// observation window (0..1).
 	CPUUsedFraction float64
@@ -54,10 +59,17 @@ type EscalationThreshold struct {
 	// Fraction is the escalation threshold for Disk/Memory/CPU. Default
 	// 0.9 if zero.
 	Fraction float64
+
+	// SwapFraction is the escalation threshold specifically for swap pressure.
+	// Swap is a leading indicator, so a lower threshold (e.g. 0.5) is
+	// appropriate — high swap means the system is already paging out and
+	// spawning new heavy processes will degrade performance further.
+	// Default 0.5 if zero.
+	SwapFraction float64
 }
 
 // DefaultEscalationThreshold is the threshold used when none is configured.
-var DefaultEscalationThreshold = EscalationThreshold{Fraction: 0.9}
+var DefaultEscalationThreshold = EscalationThreshold{Fraction: 0.9, SwapFraction: 0.5}
 
 // Overseer is the CRO-analogue supervisor. Its Tick takes one
 // ResourceSnapshot and emits an escalation event for every metric that
@@ -121,6 +133,7 @@ func (o *Overseer) Tick(ctx context.Context) error {
 		Payload: map[string]any{
 			"disk_used_fraction":   snap.DiskUsedFraction,
 			"memory_used_fraction": snap.MemoryUsedFraction,
+			"swap_used_fraction":   snap.SwapUsedFraction,
 			"cpu_used_fraction":    snap.CPUUsedFraction,
 			"stranded_worktrees":   snap.StrandedWorktrees,
 			"orphaned_sessions":    snap.OrphanedSessions,
@@ -130,6 +143,7 @@ func (o *Overseer) Tick(ctx context.Context) error {
 	// Evaluate each metric and escalate independently.
 	o.maybeEscalateFraction(ctx, "disk", snap.DiskUsedFraction)
 	o.maybeEscalateFraction(ctx, "memory", snap.MemoryUsedFraction)
+	o.maybeEscalateSwapFraction(ctx, snap.SwapUsedFraction)
 	o.maybeEscalateFraction(ctx, "cpu", snap.CPUUsedFraction)
 	o.maybeEscalateCount(ctx, "stranded_worktrees", snap.StrandedWorktrees)
 	o.maybeEscalateCount(ctx, "orphaned_sessions", snap.OrphanedSessions)
@@ -153,6 +167,29 @@ func (o *Overseer) maybeEscalateFraction(ctx context.Context, name string, v flo
 			"metric":    name,
 			"value":     v,
 			"threshold": o.threshold.Fraction,
+		},
+	})
+}
+
+// maybeEscalateSwapFraction escalates when swap pressure exceeds
+// EscalationThreshold.SwapFraction (default 0.5). Swap uses a lower threshold
+// than RAM because high swap is a leading indicator: if the system is already
+// paging, spawning new heavy processes will cause thrashing.
+func (o *Overseer) maybeEscalateSwapFraction(ctx context.Context, v float64) {
+	thresh := o.threshold.SwapFraction
+	if thresh <= 0 {
+		thresh = DefaultEscalationThreshold.SwapFraction
+	}
+	if v < thresh {
+		return
+	}
+	_ = o.trail.Append(ctx, decisiontrail.Record{
+		Role: string(RoleOverseer),
+		Kind: "supervisor.over.escalated",
+		Payload: map[string]any{
+			"metric":    "swap",
+			"value":     v,
+			"threshold": thresh,
 		},
 	})
 }
