@@ -35,8 +35,10 @@
 #   install-jaeger-health   Install jaeger-health to ~/go/bin
 #   build-bead-pr-guard     Build the bead-PR duplicate-guard CLI (cmd/bead-pr-guard)
 #   install-bead-pr-guard   Install bead-pr-guard to ~/go/bin
+#   build-safe-merge        Build safe-merge, the wayfinder-gated ~/src merge wrapper
+#   install-safe-merge      Install safe-merge to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -197,6 +199,25 @@ build-safe-push:
 install-safe-push: build-safe-push
 	cp bin/safe-push $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/safe-push"
+
+# Build safe-merge: the one sanctioned path for landing a feature branch into a
+# golden ~/src checkout. It runs `git merge --squash` and the follow-up commit
+# as one atomic unit, refuses a dirty or off-default-branch tree, rolls back on
+# conflict, requires a wayfinder trace (or audited --emergency), and never
+# pushes. See internal/safemerge and bead ce-f87f.
+build-safe-merge:
+	@echo "Building safe-merge..."
+	go build $(GOFLAGS) -o bin/safe-merge ./cmd/safe-merge/
+	@echo "Built: bin/safe-merge"
+
+# Install safe-merge to GOPATH/bin so it is on PATH for every agent session.
+# Allow-list `Bash(safe-merge *)` in chezmoi alongside safe-push/src-recovery —
+# its safety is guaranteed by construction, so it needs no per-invocation
+# approval (CLAUDE.md principle 9). The companion deny-hook for raw
+# `git -C ~/src/* merge` is a chezmoi follow-up (like safe-push's was).
+install-safe-merge: build-safe-merge
+	cp bin/safe-merge $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-merge"
 
 # Build src-recovery: the one sanctioned writer to ~/src/**. It restores a
 # golden checkout to a clean, current default branch via exactly stash ->
