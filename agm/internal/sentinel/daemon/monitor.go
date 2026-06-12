@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/sentinel/config"
-	"github.com/vbonnet/dear-agent/agm/internal/sentinel/logging"
+	"github.com/vbonnet/dear-agent/agm/internal/logging"
 	"github.com/vbonnet/dear-agent/agm/internal/sentinel/tmux"
 	"github.com/vbonnet/dear-agent/pkg/enforcement"
 )
