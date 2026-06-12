@@ -2,7 +2,7 @@ package vcs
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -82,7 +82,7 @@ func (p *Pusher) TriggerPush() error {
 	case PushAsync:
 		go func() {
 			if err := p.doPushWithRetry(3); err != nil {
-				log.Printf("vcs: async push failed: %v", err)
+				slog.Warn("vcs: async push failed", "error", err)
 			}
 		}()
 		return nil
@@ -127,7 +127,7 @@ func (p *Pusher) batchLoop() {
 
 			if pending {
 				if err := p.doPushWithRetry(3); err != nil {
-					log.Printf("vcs: batched push failed: %v", err)
+					slog.Warn("vcs: batched push failed", "error", err)
 				}
 			}
 		case <-p.stopCh:
