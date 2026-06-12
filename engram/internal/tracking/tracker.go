@@ -20,7 +20,7 @@
 package tracking
 
 import (
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -81,7 +81,7 @@ func (t *Tracker) Flush() error {
 	for path, record := range t.accessLog {
 		if err := t.updater.UpdateMetadata(path, record); err != nil {
 			// Log error but continue flushing other engrams
-			log.Printf("tracking: failed to update %s: %v", path, err)
+			slog.Warn("tracking: failed to update metadata", "path", path, "error", err)
 			// Don't clear this entry - retry on next flush
 			continue
 		}

@@ -274,17 +274,13 @@ func addListWayfinderSessionsTool(server *mcp.Server, cfg *Config) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "engram_list_wayfinder_sessions",
 		Description: "List Wayfinder sessions from Engram. Use when checking status of SDLC projects.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, input ListWayfinderSessionsInput) (*mcp.CallToolResult, interface{}, error) {
-		result, err := forwardToEngramMCP(ctx, "engram_list_wayfinder_sessions", map[string]interface{}{
-			"status_filter": input.StatusFilter,
-			"limit":         input.Limit,
-		}, cfg)
+	}, func(_ context.Context, _ *mcp.CallToolRequest, input ListWayfinderSessionsInput) (*mcp.CallToolResult, any, error) {
+		sessions, err := listWayfinderSessions(cfg.WayfinderDir, input.StatusFilter, input.Limit)
 		if err != nil {
 			return mcpError(err), nil, nil
 		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: result}},
-		}, nil, nil
+		result := map[string]any{"sessions": sessions, "count": len(sessions)}
+		return mcpSuccess(result), result, nil
 	})
 }
 
@@ -292,18 +288,16 @@ func addGetWayfinderSessionTool(server *mcp.Server, cfg *Config) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "engram_get_wayfinder_session",
 		Description: "Get detailed Wayfinder session info by ID. Use when you need phase status for a specific project.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, input GetWayfinderSessionInput) (*mcp.CallToolResult, interface{}, error) {
+	}, func(_ context.Context, _ *mcp.CallToolRequest, input GetWayfinderSessionInput) (*mcp.CallToolResult, any, error) {
 		if input.SessionID == "" {
 			return mcpError(ops.ErrInvalidInput("session_id", "Session ID is required.")), nil, nil
 		}
-		result, err := forwardToEngramMCP(ctx, "engram_get_wayfinder_session", map[string]interface{}{
-			"session_id": input.SessionID,
-		}, cfg)
+		detail, err := getWayfinderSessionDetail(cfg.WayfinderDir, input.SessionID)
 		if err != nil {
 			return mcpError(err), nil, nil
 		}
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: result}},
+			Content: []mcp.Content{&mcp.TextContent{Text: detail}},
 		}, nil, nil
 	})
 }

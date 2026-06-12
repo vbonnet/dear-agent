@@ -12,10 +12,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
 // JSONLSpan is the on-disk representation of a single span.
@@ -23,6 +25,7 @@ type JSONLSpan struct {
 	TraceID      string            `json:"trace_id"`
 	SpanID       string            `json:"span_id"`
 	ParentSpanID string            `json:"parent_span_id,omitempty"`
+	ServiceName  string            `json:"service_name,omitempty"`
 	Name         string            `json:"name"`
 	Kind         string            `json:"kind"`
 	StartTime    time.Time         `json:"start_time"`
@@ -81,6 +84,25 @@ func NewJSONLExporter(sessionID string) (*JSONLExporter, error) {
 	}, nil
 }
 
+// serviceNameFromSpan extracts the service.name attribute from a span's
+// resource. Returns "" if the resource has no service.name or if the value
+// starts with "unknown_service" (the OTel SDK default when no name is set).
+func serviceNameFromSpan(s sdktrace.ReadOnlySpan) string {
+	if s.Resource() == nil {
+		return ""
+	}
+	for _, kv := range s.Resource().Attributes() {
+		if kv.Key == semconv.ServiceNameKey {
+			v := kv.Value.AsString()
+			if strings.HasPrefix(v, "unknown_service") {
+				return ""
+			}
+			return v
+		}
+	}
+	return ""
+}
+
 // ExportSpans writes completed spans to the JSONL file.
 func (e *JSONLExporter) ExportSpans(_ context.Context, spans []sdktrace.ReadOnlySpan) error {
 	e.mu.Lock()
@@ -92,15 +114,16 @@ func (e *JSONLExporter) ExportSpans(_ context.Context, spans []sdktrace.ReadOnly
 
 	for _, s := range spans {
 		js := JSONLSpan{
-			TraceID:    s.SpanContext().TraceID().String(),
-			SpanID:     s.SpanContext().SpanID().String(),
-			Name:       s.Name(),
-			Kind:       s.SpanKind().String(),
-			StartTime:  s.StartTime(),
-			EndTime:    s.EndTime(),
-			DurationMs: float64(s.EndTime().Sub(s.StartTime()).Microseconds()) / 1000.0,
-			StatusCode: s.Status().Code.String(),
-			StatusMsg:  s.Status().Description,
+			TraceID:     s.SpanContext().TraceID().String(),
+			SpanID:      s.SpanContext().SpanID().String(),
+			ServiceName: serviceNameFromSpan(s),
+			Name:        s.Name(),
+			Kind:        s.SpanKind().String(),
+			StartTime:   s.StartTime(),
+			EndTime:     s.EndTime(),
+			DurationMs:  float64(s.EndTime().Sub(s.StartTime()).Microseconds()) / 1000.0,
+			StatusCode:  s.Status().Code.String(),
+			StatusMsg:   s.Status().Description,
 		}
 
 		if s.Parent().HasSpanID() {
