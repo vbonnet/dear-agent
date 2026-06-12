@@ -42,10 +42,20 @@ imp() {
   local addr="$1" id="$2"
   if tofu state show "$addr" >/dev/null 2>&1; then
     echo "skip (already imported): $addr"
-  elif tofu import "$addr" "$id" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local err
+  if err=$(tofu import "$addr" "$id" 2>&1 >/dev/null); then
     echo "imported: $addr"
   else
-    echo "not imported (will be CREATED by plan): $addr"
+    if [[ "$err" =~ "not found" || "$err" =~ "404" || "$err" =~ "associated" ]]; then
+      echo "not imported (will be CREATED by plan): $addr"
+    else
+      echo "Error: Failed to import $addr" >&2
+      echo "$err" >&2
+      exit 1
+    fi
   fi
 }
 
