@@ -130,7 +130,9 @@ The Agent-to-Agent HTTP endpoint is enabled via `a2a.enabled: true` in the
 config or `--a2a-port <n>`. It binds to `127.0.0.1:<port>` (default 8080)
 and handles A2A protocol payloads via `a2a_handler.go`. It runs in a
 goroutine alongside the stdio transport and shuts down when the MCP server
-exits.
+exits. The TCP listener is created via `net.ListenConfig.Listen(ctx, ...)` so
+shutdown context cancellation propagates to the listener. The goroutine
+carries a `recover()` handler that logs panics without crashing the server.
 
 ### Auto-registration
 
