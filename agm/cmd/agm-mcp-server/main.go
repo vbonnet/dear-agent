@@ -185,6 +185,11 @@ func startA2AServerIfEnabled(ctx context.Context, cfg *Config, effectiveA2APort 
 
 	logger.Info("A2A HTTP server listening", "addr", addr)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("A2A HTTP server panic", "recover", r)
+			}
+		}()
 		if err := httpServer.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("A2A HTTP server error", "error", err)
 		}
