@@ -66,8 +66,10 @@ func run(args []string) int {
 		Lookback:  *lookback,
 	}
 
+	apiURL := strings.TrimSuffix(*jaegerURL, "/")
+
 	// 1. Liveness — can we reach /api/services?
-	svcs, err := fetchServices(ctx, client, *jaegerURL)
+	svcs, err := fetchServices(ctx, client, apiURL)
 	if err != nil {
 		r.Status = "down"
 		r.Error = err.Error()
@@ -78,8 +80,11 @@ func run(args []string) int {
 
 	// 2. Readiness — any traces in the lookback window?
 	for _, svc := range svcs {
-		n, err := countTraces(ctx, client, *jaegerURL, svc, *lookback)
+		n, err := countTraces(ctx, client, apiURL, svc, *lookback)
 		if err != nil {
+			if ctx.Err() != nil {
+				break
+			}
 			fmt.Fprintf(os.Stderr, "warn: trace query for %q failed: %v\n", svc, err)
 			continue
 		}
@@ -155,7 +160,7 @@ func countTraces(ctx context.Context, c *http.Client, base, service, lookback st
 		return 0, fmt.Errorf("GET /api/traces returned %d", resp.StatusCode)
 	}
 	var tr struct {
-		Data []json.RawMessage `json:"data"`
+		Data []struct{} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
 		return 0, fmt.Errorf("decode /api/traces: %w", err)
