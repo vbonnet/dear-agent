@@ -45,22 +45,22 @@ type Baseline struct {
 
 // OperationalSnapshot holds metrics scraped from Jaeger.
 type OperationalSnapshot struct {
-	JaegerURL string         `json:"jaeger_url"`
-	Lookback  string         `json:"lookback"`
-	Services  []string       `json:"services"`
-	Spans     SpanMetrics    `json:"spans"`
-	Notes     []string       `json:"notes,omitempty"`
+	JaegerURL string      `json:"jaeger_url"`
+	Lookback  string      `json:"lookback"`
+	Services  []string    `json:"services"`
+	Spans     SpanMetrics `json:"spans"`
+	Notes     []string    `json:"notes,omitempty"`
 }
 
 // SpanMetrics aggregates span-level data into summary metrics.
 type SpanMetrics struct {
-	TraceCount    int            `json:"trace_count"`
-	SpanCount     int            `json:"span_count"`
-	ByOperation   map[string]int `json:"by_operation"`
+	TraceCount     int            `json:"trace_count"`
+	SpanCount      int            `json:"span_count"`
+	ByOperation    map[string]int `json:"by_operation"`
 	BySessionState map[string]int `json:"by_session_state,omitempty"`
-	ErrorCount    int            `json:"error_count"`
-	SuccessRate   float64        `json:"success_rate"`
-	AvgDurationMs float64        `json:"avg_duration_ms"`
+	ErrorCount     int            `json:"error_count"`
+	SuccessRate    float64        `json:"success_rate"`
+	AvgDurationMs  float64        `json:"avg_duration_ms"`
 }
 
 // jaegerTag is a single key/value pair in a Jaeger span.
@@ -269,10 +269,7 @@ func mergeTraces(m *SpanMetrics, jr *jaegerResp) {
 
 	if m.SpanCount > 0 {
 		m.AvgDurationMs = float64(totalDurUs) / float64(m.SpanCount) / 1000.0
-		nonError := m.SpanCount - m.ErrorCount
-		if nonError < 0 {
-			nonError = 0
-		}
+		nonError := max(m.SpanCount-m.ErrorCount, 0)
 		m.SuccessRate = float64(nonError) / float64(m.SpanCount)
 	}
 }
