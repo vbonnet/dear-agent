@@ -212,6 +212,11 @@ func startA2AServerIfEnabled(cfg *Config, effectiveA2APort int, stop func()) *ht
 
 	logger.Info("A2A HTTP server listening", "addr", addr)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("A2A HTTP server panicked", "recover", r)
+			}
+		}()
 		if err := httpServer.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("A2A HTTP server error", "error", err)
 		}
