@@ -40,6 +40,25 @@ forbidden-paths:
     # findings — belong in ~/src/engram-research, not in this repo.
     - research/*.md
     - research/*.txt
+    # TEMPORAL ARTIFACTS — design docs, plans, audits, DEAR retros, research,
+    # and Wayfinder artifacts (W0/problem statements). They capture a moment
+    # of thinking, are NOT maintained with the code, and ALWAYS route to the
+    # knowledge base ~/src/engram-research (projects/<name>/), never this live
+    # coding repo — even when the artifact is about code here.
+    #
+    # LIVING DOCUMENTATION stays in dear-agent, as close to the code as
+    # possible (proximity principle): ARCHITECTURE.md, ADRs (docs/adr/),
+    # inline/API docs, CLAUDE.md — anything kept true as the code changes.
+    # See .claude/CLAUDE.md "Documentation & Artifact Routing" for the full
+    # policy (Last-audited headers, wrong-fact-triggers-retro, doc audits).
+    #
+    # (Pre-existing specs in docs/design/ that CLAUDE.md and code reference as
+    # authoritative — anti-stall.md, graceful-exit.md, outcomes-framework.md —
+    # behave like living docs and remain in-repo for now; reclassifying vs.
+    # migrating them is tracked separately. New design docs follow this rule.)
+    - docs/retros/**
+    - docs/design/**
+    - wf/**
 
 # Framework-level defaults applied to every task in this repo. These
 # travel with the session, not the prompt, so a worker (and any
