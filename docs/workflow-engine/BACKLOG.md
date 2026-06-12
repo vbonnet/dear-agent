@@ -1,7 +1,7 @@
 # Workflow Engine — Backlog
 
 **Status:** Active
-**Last updated:** 2026-05-03 (cross-phase X.5 + X.6 closed)
+**Last updated:** 2026-06-12 (X.1 decided: additive ALTER TABLE ADD COLUMN)
 **Source of truth for:** individual tickets within each phase. Phase-level
 status and architecture decisions live in
 [ROADMAP.md](../../ROADMAP.md) and
@@ -196,7 +196,7 @@ phase. Triage as they come up.
 
 | # | Title | Status | Notes |
 |---|---|---|---|
-| X.1 | Schema evolution policy (additive vs. ALTER) | pending | ADR open question §5; needs a decision before Phase 2 lands |
+| X.1 | ~~Schema evolution policy (additive vs. ALTER)~~ DECIDED | done | **Policy: additive `ALTER TABLE … ADD COLUMN` only.** Implemented in `migrateSchema()` in `pkg/workflow/state_sqlite.go`: each migration is idempotent (ignores "duplicate column name"), runs on both fresh and existing DBs, never drops or renames columns. Phase 2 has already landed using this policy (bead ce-6as.15 closed). |
 | X.2 | Cost-per-mtok refresh in `roles.yaml` | pending | ADR open question §3; punted to post-MVS |
 | X.3 | Per-tenant isolation | pending | ADR open question §2; punted to post-MVS |
 | X.4 | GitHub-PR HITL backend | pending | ADR open question §4; not in v1 |
