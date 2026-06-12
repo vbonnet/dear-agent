@@ -225,11 +225,11 @@ func versionSatisfies(version, minVersion string) bool {
 	if err != nil {
 		return version >= minVersion
 	}
-	min, err := goversion.NewVersion(minVersion)
+	minV, err := goversion.NewVersion(minVersion)
 	if err != nil {
 		return version >= minVersion
 	}
-	return v.GreaterThanOrEqual(min)
+	return v.GreaterThanOrEqual(minV)
 }
 
 // validateConfig checks required config values are set
