@@ -527,6 +527,14 @@ func buildBwrapArgs(lowerDirs []string, upperDir string, shareNetwork bool, extr
 }
 
 // testBubblewrap runs a quick self-test to verify bubblewrap works on this host.
+//
+// shareNetwork is intentionally ignored for the self-test probe: this test only
+// checks whether bwrap can execute at all (filesystem overlay, mount namespaces).
+// Unsharing the network namespace requires setting up loopback via RTM_NEWADDR,
+// which GitHub Actions Ubuntu runners prohibit — so we always pass shareNetwork=true
+// here to avoid a CI-only failure. Network-isolation correctness is verified
+// separately in integration_test.go (TestBubblewrap_NetworkIsolation), which
+// skips on environments where network namespace unsharing is blocked.
 func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, _ bool) error {
 	// Create a sentinel file that the sandbox command will verify.
 	testFile := filepath.Join(upperDir, ".bwrap-test")
@@ -545,10 +553,7 @@ func (p *Provider) testBubblewrap(lowerDirs []string, upperDir, _ string, _ bool
 		}
 	}
 
-	// Always share the network for the self-test probe: we're only checking
-	// whether bwrap can execute at all, not testing network isolation.
-	// Unsharing the network namespace requires setting up loopback via
-	// RTM_NEWADDR, which GitHub Actions Ubuntu runners prohibit.
+	// Use shareNetwork=true for this probe — see function comment above.
 	args := buildBwrapArgs(lowerDirs, upperDir, true, extra)
 	cmd := exec.Command("bwrap", args...)
 	output, err := cmd.CombinedOutput()
