@@ -1,4 +1,4 @@
-<!-- Last audited at: 2026-06-12 -->
+<!-- Last audited at: 2026-06-12 ce-dn72 -->
 
 # AGM MCP Server — Architecture
 
@@ -131,6 +131,22 @@ config or `--a2a-port <n>`. It binds to `127.0.0.1:<port>` (default 8080)
 and handles A2A protocol payloads via `a2a_handler.go`. It runs in a
 goroutine alongside the stdio transport and shuts down when the MCP server
 exits.
+
+### Process Lifecycle & Orphan Prevention
+
+Two mechanisms prevent orphaned server processes when the parent Claude Code
+session exits:
+
+1. **stdin EOF (belt 1)** — the go-sdk `StdioTransport` goroutine detects EOF
+   on stdin and cancels the root context. This handles normal termination and
+   clean process-exit.
+
+2. **Parent PID poll (belt 2)** — a goroutine polling every 5 seconds calls
+   `os.Getppid()` and compares it to the PID captured at startup. If the
+   parent is reparented to PID 1 (the OOM-kill scenario where stdin EOF may
+   not arrive before the OS reparents the child), it calls `stop()`. Both
+   goroutines carry `defer recover()` per the goroutine-recover structural
+   health policy.
 
 ### Auto-registration
 
