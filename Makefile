@@ -34,7 +34,7 @@
 #   build-jaeger-health     Build the Jaeger health-check CLI (cmd/jaeger-health)
 #   install-jaeger-health   Install jaeger-health to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -227,6 +227,18 @@ build-jaeger-health:
 install-jaeger-health: build-jaeger-health
 	cp bin/jaeger-health $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/jaeger-health"
+
+# Build bead-pr-sync: reconciles bead CLOSED status against GitHub PR merge
+# state. Finds beads closed while their PR is still open (DoD violations) and
+# reopens them to in_progress. See cmd/bead-pr-sync and ce-vqju.
+build-bead-pr-sync:
+	@echo "Building bead-pr-sync..."
+	go build $(GOFLAGS) -o bin/bead-pr-sync ./cmd/bead-pr-sync/
+	@echo "Built: bin/bead-pr-sync"
+
+install-bead-pr-sync: build-bead-pr-sync
+	cp bin/bead-pr-sync $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/bead-pr-sync"
 
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
