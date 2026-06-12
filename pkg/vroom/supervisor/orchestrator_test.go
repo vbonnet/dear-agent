@@ -97,6 +97,81 @@ func TestOrchestrator_Tick_DispatchErrorRecordedButContinues(t *testing.T) {
 	}
 }
 
+func TestOrchestrator_Tick_IdleEmitsNoWork(t *testing.T) {
+	q := NewInMemoryQueue() // empty
+	trail, buf := newBufferTrail()
+	o, err := NewOrchestrator(trail, q)
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	saw := false
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.orch.no_work" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Error("no supervisor.orch.no_work record after idle tick on empty queue")
+	}
+}
+
+func TestOrchestrator_Tick_IdleEscalation(t *testing.T) {
+	q := NewInMemoryQueue() // always empty
+	trail, buf := newBufferTrail()
+	o, err := NewOrchestrator(trail, q)
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	for i := range orchIdleEscalationThreshold {
+		if err := o.Tick(context.Background()); err != nil {
+			t.Fatalf("Tick %d: %v", i, err)
+		}
+	}
+	saw := false
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.orch.idle_escalation" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Errorf("no supervisor.orch.idle_escalation after %d idle ticks", orchIdleEscalationThreshold)
+	}
+}
+
+func TestOrchestrator_Tick_IdleResetOnDispatch(t *testing.T) {
+	q := NewInMemoryQueue()
+	trail, buf := newBufferTrail()
+	o, err := NewOrchestrator(trail, q)
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	// Run 6 idle ticks (one below threshold).
+	for i := range orchIdleEscalationThreshold - 1 {
+		if err := o.Tick(context.Background()); err != nil {
+			t.Fatalf("idle Tick %d: %v", i, err)
+		}
+	}
+	// Enqueue a task — resets the streak.
+	must(t, q.Enqueue(Task{ID: "t1", Title: "x", Worker: "coder"}))
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("dispatch Tick: %v", err)
+	}
+	// Run 6 more idle ticks. No escalation should fire.
+	for i := range orchIdleEscalationThreshold - 1 {
+		if err := o.Tick(context.Background()); err != nil {
+			t.Fatalf("post-reset idle Tick %d: %v", i, err)
+		}
+	}
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.orch.idle_escalation" {
+			t.Error("idle_escalation fired even though dispatch reset the streak")
+		}
+	}
+}
+
 type errorQueue struct {
 	Queue
 	err error
