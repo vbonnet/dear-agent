@@ -104,7 +104,6 @@
       "agm/cmd/agm-bus/main.go:329",
       "agm/cmd/agm-bus/main.go:362",
       "agm/cmd/agm-daemon/main.go:143",
-      "agm/cmd/agm-mcp-server/main.go:186",
       "agm/cmd/agm-statusline/main.go:262",
       "agm/cmd/agm/watch.go:112",
       "agm/cmd/agm/watch.go:113",
@@ -198,7 +197,6 @@
       "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/progress",
       "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/s7",
       "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/tracker",
-      "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder/cmd",
       "github.com/vbonnet/dear-agent/wayfinder/hooks/cmd/stop-wayfinder-guard",
       "github.com/vbonnet/dear-agent/wayfinder/internal/tracker"
     ]
