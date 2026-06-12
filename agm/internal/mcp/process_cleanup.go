@@ -152,6 +152,7 @@ func (k *SignalKiller) Kill(pid int) error {
 	// Wait up to 5 seconds for graceful exit
 	done := make(chan struct{})
 	go func() {
+		defer func() { recover() }() //nolint:errcheck // intentional: close(done) is safe to call twice if somehow called after channel is closed
 		for i := 0; i < 50; i++ {
 			if err := process.Signal(syscall.Signal(0)); err != nil {
 				close(done)
