@@ -39,11 +39,10 @@ func parseFrontmatter(content []byte) (map[string]any, error) {
 		rest = rest[1:]
 	}
 	// Find closing delimiter
-	end := bytes.Index(rest, []byte("\n---"))
-	if end == -1 {
+	yamlData, _, ok := bytes.Cut(rest, []byte("\n---"))
+	if !ok {
 		return nil, fmt.Errorf("unterminated frontmatter")
 	}
-	yamlData := rest[:end]
 
 	var fm map[string]any
 	if err := yaml.Unmarshal(yamlData, &fm); err != nil {
