@@ -1,6 +1,6 @@
 // Command pretool-fs-write-guard is a Claude Code PreToolUse hook that
-// enforces a worktree-only write policy for the Edit / Write / MultiEdit
-// tools.
+// enforces a worktree-only write policy for the Edit / Write / MultiEdit /
+// NotebookEdit tools.
 //
 // It reads the PreToolUse JSON envelope from stdin, inspects the target
 // file_path, and either allows the write (exit 0) or blocks it (exit 2) with
@@ -25,8 +25,9 @@ type envelope struct {
 	ToolName  string `json:"tool_name"`
 	CWD       string `json:"cwd"`
 	ToolInput struct {
-		FilePath string `json:"file_path"`
-		Path     string `json:"path"`
+		FilePath     string `json:"file_path"`
+		Path         string `json:"path"`
+		NotebookPath string `json:"notebook_path"` // NotebookEdit tool
 	} `json:"tool_input"`
 }
 
@@ -43,7 +44,7 @@ func run(in io.Reader, errOut io.Writer) int {
 	}
 
 	switch env.ToolName {
-	case "Edit", "Write", "MultiEdit":
+	case "Edit", "Write", "MultiEdit", "NotebookEdit":
 	default:
 		return 0
 	}
@@ -51,6 +52,9 @@ func run(in io.Reader, errOut io.Writer) int {
 	path := env.ToolInput.FilePath
 	if path == "" {
 		path = env.ToolInput.Path
+	}
+	if path == "" {
+		path = env.ToolInput.NotebookPath
 	}
 	if path == "" {
 		return 0

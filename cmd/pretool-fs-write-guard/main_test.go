@@ -37,6 +37,17 @@ func TestRun(t *testing.T) {
 			wantErr:  "dotfile",
 		},
 		{
+			name:     "notebook in worktree allowed",
+			envelope: `{"tool_name":"NotebookEdit","tool_input":{"notebook_path":"~/worktrees/x/notebook.ipynb"}}`,
+			wantCode: 0,
+		},
+		{
+			name:     "notebook in src blocked",
+			envelope: `{"tool_name":"NotebookEdit","tool_input":{"notebook_path":"~/src/dear-agent/nb.ipynb"}}`,
+			wantCode: 2,
+			wantErr:  "PERMISSION_ESCALATION",
+		},
+		{
 			name:     "missing path ignored",
 			envelope: `{"tool_name":"Edit","tool_input":{}}`,
 			wantCode: 0,
