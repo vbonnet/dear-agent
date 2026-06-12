@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# PreToolUse hook: wayfinder-only PR lifecycle (Beads ce-p17s, CLAUDE.md
+# §PR Lifecycle / principle 9 — atomic action wrappers).
+#
+# WHAT: deny raw `gh pr create|close|reopen` in Bash (exit 2) and point the
+# agent at safe-pr, the sanctioned wrapper that stamps every PR with its
+# wayfinder session trace and audit-logs the action.
+#
+# WHY a hard block here, unlike pretool-spawn-routing's nudge: PR spray is a
+# proven failure mode — burndown workers opened untraced PRs ~10× faster than
+# serial merges could land, burning the required-check suite + bot review on
+# every one with zero attribution. Instruction-tier rules (CLAUDE.md DoD)
+# demonstrably did not stop it; this is the deterministic tier. The message
+# below follows principle 2: what you tried, the right way, and why.
+#
+# SCOPE (principle 1, no creep): only the three mutating pr verbs. Read-only
+# `gh pr view|list|checks|diff|status`, `gh pr merge` (already governed by
+# required checks + review gates), `safe-pr` itself, and every other tool are
+# untouched. safe-pr execs gh directly (not via the Bash tool), so the
+# sanctioned path can never recurse into this hook. Fails OPEN on unparseable
+# input so it can never wedge a session.
+set -uo pipefail
+
+input="$(cat)"
+tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+[ "$tool" = "Bash" ] || exit 0
+cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+[ -n "$cmd" ] || exit 0
+
+# Per simple command (split on ; | & newline): drop leading VAR=val env
+# assignments, reduce argv[0] to a basename, then walk gh's argv skipping
+# global value-flags (-R/--repo/--hostname) to find `pr <mutating-verb>`.
+verb="$(printf '%s' "$cmd" | tr ';|&\n' '\n\n\n\n' | awk '
+  function base(p){ sub(/.*\//,"",p); return p }
+  {
+    prog=""; sub_seen=0
+    for (i=1; i<=NF; i++) {
+      if (prog=="" && $i ~ /^[A-Za-z_][A-Za-z0-9_]*=/) continue
+      if (prog=="") { prog=base($i); if (prog!="gh") break; continue }
+      if (!sub_seen) {
+        if ($i=="-R" || $i=="--repo" || $i=="--hostname") { i++; continue }
+        if ($i ~ /^(-R|--repo|--hostname)=/) continue
+        if ($i=="pr") { sub_seen=1; continue }
+        break
+      }
+      if ($i ~ /^(create|close|reopen)$/) { print $i; exit }
+      break
+    }
+  }')"
+[ -n "$verb" ] || exit 0
+
+cat >&2 <<EOF
+You're trying to run \`gh pr $verb\` directly. PR open/close must go through
+the safe-pr wrapper so every PR carries a wayfinder session trace:
+
+  safe-pr create --wayfinder <wayfinder-project-dir> --title "..." --body "..." [gh flags]
+  safe-pr close  --wayfinder <wayfinder-project-dir> <number|url>
+
+(or set WAYFINDER_PROJECT_DIR; in a genuine emergency with no session, use
+\`safe-pr $verb --emergency --reason "<why>"\` — it is audited, not blocked).
+Install once with \`make install-safe-pr\` if not on PATH.
+
+Why: raw PRs have no wayfinder/plan attribution and no telemetry, and PR spray
+has repeatedly outrun the serial merge pipeline, burning CI and review quota
+(CLAUDE.md §PR Lifecycle, principle 9 — atomic action wrappers).
+
+If you need this permission to complete your task, escalate by reporting:
+'PERMISSION_ESCALATION: I need [specific permission] because [reason]'.
+EOF
+exit 2
