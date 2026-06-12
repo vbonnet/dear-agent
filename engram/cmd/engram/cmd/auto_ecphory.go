@@ -143,6 +143,11 @@ func parseAutoEcphoryStdin(ctx context.Context) (*autoEcphoryInput, error) {
 	ch := make(chan readResult, 1)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- readResult{err: fmt.Errorf("stdin read panicked: %v", r)}
+			}
+		}()
 		data, err := io.ReadAll(os.Stdin)
 		ch <- readResult{data, err}
 	}()

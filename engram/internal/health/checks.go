@@ -1325,6 +1325,14 @@ func (hc *HealthChecker) checkPluginHealth() []CheckResult {
 
 	for _, plugin := range plugins {
 		go func(p PluginInfo) {
+			defer func() {
+				if r := recover(); r != nil {
+					resultsChan <- CheckResult{
+						Status:  "error",
+						Message: fmt.Sprintf("plugin health check panicked: %v", r),
+					}
+				}
+			}()
 			resultsChan <- hc.executePluginHealthCheck(p)
 		}(plugin)
 	}

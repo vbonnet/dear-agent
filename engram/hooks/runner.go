@@ -80,6 +80,16 @@ func (r *Runner) RunAll(ctx context.Context, event HookEvent) (*AggregatedReport
 
 		go func() {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					mu.Lock()
+					report.Warnings = append(report.Warnings, HookWarning{
+						Hook:    hook.Name,
+						Message: fmt.Sprintf("Hook goroutine panicked: %v", r),
+					})
+					mu.Unlock()
+				}
+			}()
 
 			// Acquire semaphore
 			sem <- struct{}{}

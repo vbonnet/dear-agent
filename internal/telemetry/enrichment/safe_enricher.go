@@ -38,6 +38,11 @@ func (s *SafeEnricher) Enrich(ctx context.Context, event *TelemetryEvent, ec Enr
 
 	// Run enrichment in goroutine
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				resultCh <- result{event: event, err: fmt.Errorf("enricher panicked: %v", r)}
+			}
+		}()
 		enrichedEvent, err := s.enricher.Enrich(timeoutCtx, event, ec)
 		resultCh <- result{event: enrichedEvent, err: err}
 	}()

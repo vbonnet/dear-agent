@@ -482,6 +482,16 @@ func (e *ActExecutor) ExecuteWorkflowsWithDependencies(
 			wg.Add(1)
 			go func(w string) {
 				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						resultsMu.Lock()
+						results[w] = &WorkflowResult{
+							WorkflowPath: w,
+							Error:        fmt.Errorf("workflow executor panicked: %v", r),
+						}
+						resultsMu.Unlock()
+					}
+				}()
 
 				// Create workflow-specific request
 				workflowReq := req
@@ -589,6 +599,16 @@ func (e *ActExecutor) executeWorkflowsParallel(
 		wg.Add(1)
 		go func(w string) {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					resultsMu.Lock()
+					results[w] = &WorkflowResult{
+						WorkflowPath: w,
+						Error:        fmt.Errorf("workflow executor panicked: %v", r),
+					}
+					resultsMu.Unlock()
+				}
+			}()
 
 			// Execute workflow
 			workflowReq := req

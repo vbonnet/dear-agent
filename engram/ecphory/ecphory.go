@@ -404,6 +404,11 @@ func (e *Ecphory) publishEcphoryEvent(ctx context.Context, query string, session
 
 	// Publish asynchronously (non-blocking)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("ecphory: event publish goroutine panic: %v", r)
+			}
+		}()
 		if err := e.eventBus.Publish(ctx, event); err != nil {
 			// Log publish errors (eventbus may also log internally)
 			log.Printf("failed to publish ecphory event: %v", err)
@@ -419,6 +424,11 @@ func (e *Ecphory) updateFrontmatterMetadata(engrams []*engram.Engram) {
 
 	// Run updates asynchronously (non-blocking)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("ecphory: metadata update goroutine panic: %v", r)
+			}
+		}()
 		for _, eg := range engrams {
 			if err := e.incrementRetrievalCount(eg.Path); err != nil {
 				log.Printf("ecphory: failed to update metadata for %q: %v", eg.Path, err) //nolint:gosec // G706: path from internal disk scan; %q escapes any control chars
