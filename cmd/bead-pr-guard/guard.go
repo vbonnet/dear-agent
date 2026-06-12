@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -31,22 +32,19 @@ func findClaimingPRs(repo, beadID string) ([]prSummary, error) {
 		args = append(args, "--repo", repo)
 	}
 
-	// Use a timeout so a slow gh call doesn't stall forever.
-	cmd := exec.Command("gh", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "gh", args...) //nolint:gosec // args controlled by caller
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	done := make(chan error, 1)
-	go func() { done <- cmd.Run() }()
-	select {
-	case err := <-done:
-		if err != nil {
-			return nil, fmt.Errorf("gh pr list: %w (stderr: %s)", err, stderr.String())
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("gh pr list timed out after 30s")
 		}
-	case <-time.After(30 * time.Second):
-		_ = cmd.Process.Kill()
-		return nil, fmt.Errorf("gh pr list timed out after 30s")
+		return nil, fmt.Errorf("gh pr list: %w (stderr: %s)", err, stderr.String())
 	}
 
 	var prs []prSummary
