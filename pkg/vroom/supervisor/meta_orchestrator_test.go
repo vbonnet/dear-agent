@@ -125,6 +125,97 @@ func TestMetaOrchestrator_Tick_AcceptErrorRecordedButContinues(t *testing.T) {
 	}
 }
 
+func TestMetaOrchestrator_Tick_DuplicateTitleRejected(t *testing.T) {
+	// After "add lint" is accepted, a second "add lint." proposal must be
+	// rejected as a duplicate (ce-6as.80 in-session anti-duplication).
+	rm := NewInMemoryRoadmap()
+	must(t, rm.Submit(WorkProposal{ID: "p1", Title: "add lint", Reason: "quality"}))
+
+	trail, buf := newBufferTrail()
+	m, err := NewMetaOrchestrator(trail, rm)
+	if err != nil {
+		t.Fatalf("NewMetaOrchestrator: %v", err)
+	}
+	if err := m.Tick(context.Background()); err != nil {
+		t.Fatalf("first Tick: %v", err)
+	}
+	if got := rm.Accepted(); len(got) != 1 || got[0] != "p1" {
+		t.Fatalf("expected p1 accepted, got %v", got)
+	}
+
+	// Submit a duplicate with different casing and punctuation.
+	must(t, rm.Submit(WorkProposal{ID: "p2", Title: "Add Lint.", Reason: "same work"}))
+	if err := m.Tick(context.Background()); err != nil {
+		t.Fatalf("second Tick: %v", err)
+	}
+	if got := rm.Rejected(); len(got) != 1 || got[0] != "p2" {
+		t.Errorf("expected p2 rejected, got rejected=%v accepted=%v", rm.Rejected(), rm.Accepted())
+	}
+
+	// Trail must contain the duplicate_rejected indication via the evaluated record.
+	records := parseTrail(t, buf)
+	for _, r := range records {
+		if r["kind"] != "supervisor.metao.roadmap.evaluated" {
+			continue
+		}
+		p := r["payload"].(map[string]any)
+		if p["proposal_id"] == "p2" && p["accepted"] != false {
+			t.Errorf("p2 evaluated with accepted=true, want false (duplicate)")
+		}
+	}
+}
+
+func TestMetaOrchestrator_Tick_DupNotPoisonedByFailedAccept(t *testing.T) {
+	// If Accept() fails, the title must NOT be added to the admitted set, so
+	// a retry (new proposal with the same title) can still go through.
+	rm := &flakyRoadmap{
+		InMemoryRoadmap: NewInMemoryRoadmap(),
+		failAccept:      map[string]bool{"p1": true},
+	}
+	must(t, rm.Submit(WorkProposal{ID: "p1", Title: "fix tests", Reason: "stability"}))
+
+	trail, _ := newBufferTrail()
+	m, err := NewMetaOrchestrator(trail, rm)
+	if err != nil {
+		t.Fatalf("NewMetaOrchestrator: %v", err)
+	}
+	if err := m.Tick(context.Background()); err != nil {
+		t.Fatalf("first Tick: %v", err)
+	}
+
+	// p1's Accept failed — the title must not be admitted. A retry proposal
+	// with the same title must be accepted.
+	must(t, rm.Submit(WorkProposal{ID: "p1-retry", Title: "fix tests", Reason: "retry"}))
+	if err := m.Tick(context.Background()); err != nil {
+		t.Fatalf("retry Tick: %v", err)
+	}
+	if got := rm.Accepted(); len(got) != 1 || got[0] != "p1-retry" {
+		t.Errorf("Accepted = %v, want [p1-retry]", got)
+	}
+}
+
+func TestMetaTitleKey(t *testing.T) {
+	cases := []struct {
+		a, b string
+		same bool
+	}{
+		{"Fix lint", "fix lint", true},
+		{"Add tests.", "add tests", true},
+		{"Fix  Lint", "fix lint", true},
+		{"add TESTS", "add tests", true},
+		{"update docs", "update doc", false},   // different word
+		{"add feature", "add features", false}, // different word
+	}
+	for _, c := range cases {
+		ka, kb := metaTitleKey(c.a), metaTitleKey(c.b)
+		got := ka == kb
+		if got != c.same {
+			t.Errorf("metaTitleKey(%q)==metaTitleKey(%q): got %v, want %v (keys: %q %q)",
+				c.a, c.b, got, c.same, ka, kb)
+		}
+	}
+}
+
 // errorRoadmap always returns an error from PendingProposals.
 type errorRoadmap struct {
 	Roadmap // unused — only PendingProposals is called in the path under test
