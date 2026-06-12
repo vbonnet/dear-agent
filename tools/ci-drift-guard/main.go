@@ -138,15 +138,15 @@ func collectJobNames(dir string) (map[string]bool, error) {
 			continue
 		}
 		for jobID, jobDef := range wf.Jobs {
-			collectJobNames1(names, jobID, jobDef)
+			collectNamesFromJob(names, jobID, jobDef)
 		}
 	}
 	return names, nil
 }
 
-// collectJobNames1 registers all check names produced by a single job definition
-// into the names set.
-func collectJobNames1(names map[string]bool, jobID string, jobDef any) {
+// collectNamesFromJob registers all check names produced by a single job
+// definition into the names set.
+func collectNamesFromJob(names map[string]bool, jobID string, jobDef any) {
 	names[jobID] = true
 	m, ok := jobDef.(map[string]any)
 	if !ok {
@@ -272,7 +272,11 @@ func fetchRequiredChecks(ctx context.Context, token, repo, branch string) ([]str
 		return nil, fmt.Errorf("invalid branch %q: must contain only alphanumeric, hyphens, dots, underscores, slashes", branch)
 	}
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/branches/%s/protection", repo, branch)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil) //nolint:gosec // G704: repo and branch validated above by repoRe/branchRe
+	// The host is a hardcoded constant; the only interpolated segments are repo
+	// and branch, both allowlist-validated above by repoRe/branchRe (no scheme,
+	// host, "@", or ".." can appear). gosec's G704 taint analysis cannot see the
+	// regex guards as sanitizers, so it flags apiURL as a false positive here.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil) //nolint:gosec // G704 false positive: repo/branch allowlist-validated above; host is constant
 	if err != nil {
 		return nil, err
 	}
