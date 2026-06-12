@@ -4,7 +4,7 @@
 // Raw `gh pr merge` is denied by a PreToolUse hook that redirects here.
 //
 // Gates (all must pass before merge executes):
-//  1. All REQUIRED CI checks pass — no reds, no pending.
+//  1. ALL CI checks pass — no reds, no pending (required AND non-required).
 //  2. No unresolved review threads (security-* threads need a written verdict).
 //  3. Head commit is ≥ 5 minutes old (soak time).
 //  4. The review bot (gemini-code-assist[bot]) has posted.
@@ -13,18 +13,21 @@
 //
 // Usage:
 //
-//	safe-merge --pr <number> [--repo owner/repo]
+//	safe-merge --pr <number> [--repo owner/repo] [--watch] [--watch-timeout 45m] [--dry-run]
 //
 // Examples:
 //
 //	safe-merge --pr 42
 //	safe-merge --pr 42 --repo vbonnet/dear-agent
+//	safe-merge --pr 42 --watch
+//	safe-merge --pr 42 --dry-run
 package main
 
 import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/vbonnet/dear-agent/internal/safegit"
 )
@@ -42,6 +45,9 @@ func run(argv []string) error {
 
 	prNum := fs.Int("pr", 0, "pull request number (required)")
 	repo := fs.String("repo", "", "GitHub repo as owner/repo (default: GITHUB_REPOSITORY env var)")
+	watch := fs.Bool("watch", false, "poll until all gates pass or timeout elapses")
+	watchTimeout := fs.Duration("watch-timeout", safegit.DefaultWatchTimeout, "how long to wait in watch mode")
+	dryRun := fs.Bool("dry-run", false, "check gates but do not execute the merge")
 
 	if err := fs.Parse(argv); err != nil {
 		return err
@@ -61,8 +67,11 @@ func run(argv []string) error {
 	}
 
 	return safegit.SafeMerge(safegit.MergeConfig{
-		PRNumber: *prNum,
-		Repo:     resolvedRepo,
+		PRNumber:     *prNum,
+		Repo:         resolvedRepo,
+		DryRun:       *dryRun,
+		Watch:        *watch,
+		WatchTimeout: *watchTimeout,
 	})
 }
 
@@ -71,18 +80,32 @@ const usage = `safe-merge — vetted, gated PR merger (CLAUDE.md principle 9 wra
 Raw 'gh pr merge' is denied; use this instead.
 
 Usage:
-  safe-merge --pr <number> [--repo owner/repo]
+  safe-merge --pr <number> [--repo owner/repo] [flags]
 
 Flags:
-  --pr <number>      pull request number to merge (required)
-  --repo owner/repo  GitHub repo (default: GITHUB_REPOSITORY env var)
-  -h, --help         show this help
+  --pr <number>            pull request number to merge (required)
+  --repo owner/repo        GitHub repo (default: GITHUB_REPOSITORY env var)
+  --watch                  poll until all gates pass (default: one-shot)
+  --watch-timeout <dur>    how long to wait in watch mode (default: 45m)
+  --dry-run                check gates only; do not execute merge
+  -h, --help               show this help
 
 Gates enforced before merging:
-  1. All REQUIRED CI checks pass (no failures, no pending)
+  1. ALL CI checks pass (required AND non-required — no failures, no pending)
   2. No unresolved review threads
   3. Head commit ≥ 5 minutes old (soak time)
   4. Review bot (gemini-code-assist[bot]) has posted
 
+Watch mode:
+  With --watch, safe-merge polls every 30 seconds until all gates pass or
+  --watch-timeout expires. Useful when CI is still running.
+
+Audit log:
+  Every attempt is logged to ~/.local/state/dear-agent/safe-merge-audit.jsonl
+  (override with SAFE_MERGE_AUDIT_DIR).
+
 Post-merge: local worktree and branch are cleaned up automatically.
 `
+
+// WatchInterval is re-exported to allow overriding in tests.
+var _ = time.Second

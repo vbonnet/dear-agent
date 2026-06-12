@@ -2,7 +2,7 @@
 // principle 9: an atomic, vetted wrapper for PR merges that cannot be bypassed.
 //
 // Required before any merge:
-//   - All REQUIRED CI checks pass (no red, no pending)
+//   - ALL CI checks pass (no red, no pending — not just required checks)
 //   - No unresolved review threads exist
 //   - Minimum soak: head commit is at least 5 minutes old
 //   - Review bot (gemini-code-assist[bot]) has posted
@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -22,22 +23,37 @@ import (
 // MinSoak is the minimum age the head commit must be before merging.
 const MinSoak = 5 * time.Minute
 
+// DefaultWatchTimeout is the default time limit for watch mode.
+const DefaultWatchTimeout = 45 * time.Minute
+
 // ReviewBot is the GitHub login of the required code-review bot.
 const ReviewBot = "gemini-code-assist[bot]"
 
 // MergeConfig holds options for a safe merge.
 type MergeConfig struct {
-	PRNumber int
-	Repo     string    // "owner/repo"
-	Now      time.Time // injectable for tests; zero → time.Now()
+	PRNumber      int
+	Repo          string        // "owner/repo"
+	Now           time.Time     // injectable for tests; zero → time.Now()
+	DryRun        bool          // check gates but do not execute merge
+	Watch         bool          // poll until gates pass or WatchTimeout elapses
+	WatchTimeout  time.Duration // zero → DefaultWatchTimeout
+	WatchInterval time.Duration // poll interval in watch mode; zero → 30s
+}
+
+// AuditEntry is written to the JSONL audit log on each merge attempt.
+type AuditEntry struct {
+	Timestamp string `json:"timestamp"`
+	PR        int    `json:"pr"`
+	Repo      string `json:"repo"`
+	Event     string `json:"event"` // "gate_check", "merged", "dry_run", "timeout", "error"
+	Detail    string `json:"detail,omitempty"`
 }
 
 // SafeMerge gates and executes a squash-merge of the given PR.
 //
-// It checks required CI, review threads, soak time, and bot review before
-// calling `gh pr merge --squash --delete-branch`. Post-merge it attempts
-// worktree+branch cleanup, reporting cleanup failures without returning them
-// as errors (the merge is already done and irreversible).
+// When cfg.Watch is true, it polls the gates until they pass or cfg.WatchTimeout
+// elapses. When cfg.DryRun is true, it checks gates but does not execute the merge.
+// Results are appended to the JSONL audit log in ~/.local/state/dear-agent/.
 func SafeMerge(cfg MergeConfig) error {
 	if cfg.PRNumber <= 0 {
 		return fmt.Errorf("--pr must be a positive integer")
@@ -48,6 +64,53 @@ func SafeMerge(cfg MergeConfig) error {
 	if !strings.Contains(cfg.Repo, "/") {
 		return fmt.Errorf("--repo must be in owner/repo format, got %q", cfg.Repo)
 	}
+
+	if cfg.Watch {
+		return watchMerge(cfg)
+	}
+	return attemptMerge(cfg)
+}
+
+// watchMerge polls the merge gates until they pass or the timeout elapses.
+func watchMerge(cfg MergeConfig) error {
+	timeout := cfg.WatchTimeout
+	if timeout == 0 {
+		timeout = DefaultWatchTimeout
+	}
+	interval := cfg.WatchInterval
+	if interval == 0 {
+		interval = 30 * time.Second
+	}
+
+	deadline := time.Now().Add(timeout)
+	attempt := 0
+	for {
+		attempt++
+		fmt.Fprintf(os.Stderr, "safe-merge: watch attempt %d (timeout in %s)…\n",
+			attempt, time.Until(deadline).Round(time.Second))
+
+		err := attemptMerge(cfg)
+		if err == nil {
+			return nil
+		}
+
+		// If all gates passed but it was a dry-run, return immediately.
+		if cfg.DryRun {
+			return err
+		}
+
+		if time.Now().After(deadline) {
+			appendAuditEntry(cfg.Repo, cfg.PRNumber, "timeout", err.Error())
+			return fmt.Errorf("watch timeout after %s: last error: %w", timeout, err)
+		}
+
+		fmt.Fprintf(os.Stderr, "safe-merge: gates not ready (%v); retrying in %s\n", err, interval)
+		time.Sleep(interval)
+	}
+}
+
+// attemptMerge checks all gates and, unless DryRun is set, executes the merge.
+func attemptMerge(cfg MergeConfig) error {
 	now := cfg.Now
 	if now.IsZero() {
 		now = time.Now()
@@ -55,15 +118,17 @@ func SafeMerge(cfg MergeConfig) error {
 
 	fmt.Fprintf(os.Stderr, "safe-merge: checking PR #%d in %s\n", cfg.PRNumber, cfg.Repo)
 
-	// Gate 1: all required CI checks must pass.
-	if err := checkRequiredCI(cfg.PRNumber, cfg.Repo); err != nil {
+	// Gate 1: ALL CI checks must pass (not just required ones).
+	if err := checkAllCI(cfg.PRNumber, cfg.Repo); err != nil {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "CI: "+err.Error())
 		fmt.Fprintf(os.Stderr, "safe-merge: guidance: run `gh pr checks %d --repo %s --watch`\n", cfg.PRNumber, cfg.Repo)
 		return fmt.Errorf("CI gate: %w", err)
 	}
-	fmt.Fprintln(os.Stderr, "safe-merge: ✓ all required CI checks pass")
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ all CI checks pass")
 
 	// Gate 2: no unresolved review threads.
 	if err := checkReviewThreads(cfg.PRNumber, cfg.Repo); err != nil {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "threads: "+err.Error())
 		fmt.Fprintln(os.Stderr, "safe-merge: guidance: resolve open review threads; security-* threads need a written triage verdict")
 		return fmt.Errorf("review-thread gate: %w", err)
 	}
@@ -71,9 +136,16 @@ func SafeMerge(cfg MergeConfig) error {
 
 	// Gate 3: minimum soak time + bot review.
 	if err := checkSoak(cfg.PRNumber, cfg.Repo, now); err != nil {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "soak: "+err.Error())
 		return fmt.Errorf("soak gate: %w", err)
 	}
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ soak time and bot review OK")
+
+	if cfg.DryRun {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "dry_run", "all gates passed; merge skipped")
+		fmt.Fprintln(os.Stderr, "safe-merge: dry-run — all gates passed; no merge executed")
+		return nil
+	}
 
 	// Execute the merge.
 	fmt.Fprintf(os.Stderr, "safe-merge: merging PR #%d (squash)…\n", cfg.PRNumber)
@@ -92,8 +164,10 @@ func SafeMerge(cfg MergeConfig) error {
 	mergeCmd.Stdout = os.Stdout
 	mergeCmd.Stderr = os.Stderr
 	if err := mergeCmd.Run(); err != nil {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge failed: "+err.Error())
 		return fmt.Errorf("gh pr merge failed: %w", err)
 	}
+	appendAuditEntry(cfg.Repo, cfg.PRNumber, "merged", "squash merge complete")
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ merge complete")
 
 	// Post-merge cleanup (best-effort, non-fatal).
@@ -101,6 +175,44 @@ func SafeMerge(cfg MergeConfig) error {
 		cleanupWorktree(headBranch)
 	}
 	return nil
+}
+
+// appendAuditEntry writes a single JSON line to the safe-merge audit log.
+// Failures are silently ignored so audit-log issues never block merges.
+func appendAuditEntry(repo string, prNum int, event, detail string) {
+	dir := auditLogDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "safe-merge-audit.jsonl"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	entry := AuditEntry{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		PR:        prNum,
+		Repo:      repo,
+		Event:     event,
+		Detail:    detail,
+	}
+	b, _ := json.Marshal(entry)
+	_, _ = fmt.Fprintln(f, string(b))
+}
+
+// auditLogDir returns the directory for the safe-merge audit log.
+// Overridable via SAFE_MERGE_AUDIT_DIR environment variable for testing.
+func auditLogDir() string {
+	if d := os.Getenv("SAFE_MERGE_AUDIT_DIR"); d != "" {
+		return d
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "/tmp"
+	}
+	return filepath.Join(home, ".local", "state", "dear-agent")
 }
 
 // --- gate implementations ---
@@ -111,7 +223,10 @@ type checkRun struct {
 	Required bool   `json:"required"`
 }
 
-func checkRequiredCI(prNum int, repo string) error {
+// checkAllCI verifies that ALL CI checks (required and non-required) on the PR
+// have completed successfully. This is stricter than checking only required
+// checks: every check on the head SHA must be green before a merge proceeds.
+func checkAllCI(prNum int, repo string) error {
 	out, err := exec.Command("gh", "pr", "checks",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
@@ -123,8 +238,8 @@ func checkRequiredCI(prNum int, repo string) error {
 	return parseCheckRuns(out)
 }
 
-// parseCheckRuns validates that all required checks in the JSON output pass.
-// Exported for testing.
+// parseCheckRuns validates that ALL checks in the JSON output pass (both
+// required and non-required). Exported for testing.
 func parseCheckRuns(data []byte) error {
 	var checks []checkRun
 	if err := json.Unmarshal(data, &checks); err != nil {
@@ -134,23 +249,24 @@ func parseCheckRuns(data []byte) error {
 	var failing []string
 	var pending []string
 	for _, c := range checks {
+		qualifier := ""
 		if !c.Required {
-			continue
+			qualifier = " (non-required)"
 		}
 		switch strings.ToLower(c.State) {
 		case "success", "pass", "neutral", "skipping":
 			// acceptable
 		case "pending", "queued", "in_progress", "waiting", "requested":
-			pending = append(pending, c.Name)
+			pending = append(pending, c.Name+qualifier)
 		default:
-			failing = append(failing, fmt.Sprintf("%s (%s)", c.Name, c.State))
+			failing = append(failing, fmt.Sprintf("%s%s (%s)", c.Name, qualifier, c.State))
 		}
 	}
 	if len(failing) > 0 {
-		return fmt.Errorf("required checks failed: %s", strings.Join(failing, ", "))
+		return fmt.Errorf("checks failed: %s", strings.Join(failing, ", "))
 	}
 	if len(pending) > 0 {
-		return fmt.Errorf("required checks still pending: %s", strings.Join(pending, ", "))
+		return fmt.Errorf("checks still pending: %s", strings.Join(pending, ", "))
 	}
 	return nil
 }
