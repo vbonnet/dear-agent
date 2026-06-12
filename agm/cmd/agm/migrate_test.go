@@ -95,6 +95,35 @@ func TestScanOldFormatDirs_OldFormatOnly(t *testing.T) {
 	}
 }
 
+// TestScanOldFormatDirs_SkipsAlreadyMigrated guards against the re-run
+// corruption: a session originally named "foo-session" migrates to
+// "session-foo-session". On a second run, "session-foo-session" ends with
+// "-session", so without the HasPrefix guard it would be (re-)processed into
+// "session-session-foo". The fix is to skip any directory that already starts
+// with "session-".
+func TestScanOldFormatDirs_SkipsAlreadyMigrated(t *testing.T) {
+	dir := t.TempDir()
+	// This is a dir that was correctly migrated (old name was "foo-session-session",
+	// new name is "session-foo-session"). On re-run it must be ignored.
+	mkdirs(t, dir, "session-foo-session")
+	// A genuine old-format entry must still be picked up.
+	mkdirs(t, dir, "bar-session")
+
+	entries, err := scanOldFormatDirs(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1 (already-migrated dir must be skipped)", len(entries))
+	}
+	if entries[0].OldName != "bar-session" {
+		t.Errorf("OldName = %q, want bar-session", entries[0].OldName)
+	}
+	if entries[0].NewName != "session-bar" {
+		t.Errorf("NewName = %q, want session-bar", entries[0].NewName)
+	}
+}
+
 func TestScanOldFormatDirs_Mapping(t *testing.T) {
 	dir := t.TempDir()
 	mkdirs(t, dir, "claude-42-session")

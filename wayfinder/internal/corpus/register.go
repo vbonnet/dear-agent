@@ -7,9 +7,21 @@ import (
 	"os/exec"
 )
 
-// isCorpusCallosumAvailable checks if the cc CLI is installed
+// corpusCallosumBin returns the corpus-callosum CLI binary name.
+// Reads CORPUS_CALLOSUM_BIN env var; defaults to "corpus-callosum".
+// Never falls back to "cc" — on macOS/Linux that name resolves to the C
+// compiler (clang/gcc), which silently accepts the invocation and then
+// errors with "unknown argument --workspace ...".
+func corpusCallosumBin() string {
+	if bin := os.Getenv("CORPUS_CALLOSUM_BIN"); bin != "" {
+		return bin
+	}
+	return "corpus-callosum"
+}
+
+// isCorpusCallosumAvailable checks if the corpus-callosum CLI is installed.
 func isCorpusCallosumAvailable() bool {
-	_, err := exec.LookPath("cc")
+	_, err := exec.LookPath(corpusCallosumBin())
 	return err == nil
 }
 
@@ -35,40 +47,34 @@ func RegisterWayfinderSchemas(workspace string) error {
 
 // registerSchema registers a single schema with corpus callosum
 func registerSchema(workspace string, schema map[string]interface{}) error {
-	// Add workspace to schema metadata
 	schema["workspace"] = workspace
 
-	// Marshal schema to JSON
 	schemaJSON, err := json.Marshal(schema)
 	if err != nil {
 		return fmt.Errorf("failed to marshal schema: %w", err)
 	}
 
-	// Call cc register command
-	cmd := exec.Command("cc", "register", "--workspace", workspace, "--schema", "-")
-	cmd.Stdin = os.Stdin
+	bin := corpusCallosumBin()
+	cmd := exec.Command(bin, "register", "--workspace", workspace, "--schema", "-")
 	cmd.Stderr = os.Stderr
 
-	// Write schema to stdin
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start cc register: %w", err)
+		return fmt.Errorf("failed to start %s register: %w", bin, err)
 	}
 
-	// Write schema to stdin
 	if _, err := stdin.Write(schemaJSON); err != nil {
 		stdin.Close()
 		return fmt.Errorf("failed to write schema: %w", err)
 	}
 	stdin.Close()
 
-	// Wait for command to complete
 	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("cc register failed: %w", err)
+		return fmt.Errorf("%s register failed: %w", bin, err)
 	}
 
 	return nil
@@ -83,7 +89,7 @@ func UnregisterWayfinderSchemas(workspace string) error {
 
 	component := "wayfinder"
 
-	cmd := exec.Command("cc", "unregister", "--workspace", workspace, "--component", component)
+	cmd := exec.Command(corpusCallosumBin(), "unregister", "--workspace", workspace, "--component", component)
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
@@ -101,7 +107,7 @@ func GetRegistrationStatus(workspace string) ([]string, error) {
 		return []string{}, nil
 	}
 
-	cmd := exec.Command("cc", "list-schemas", "--workspace", workspace, "--component", "wayfinder", "--format", "json")
+	cmd := exec.Command(corpusCallosumBin(), "list-schemas", "--workspace", workspace, "--component", "wayfinder", "--format", "json")
 	output, err := cmd.Output()
 	if err != nil {
 		// Not registered or error - return empty list
@@ -124,17 +130,17 @@ func GetRegistrationStatus(workspace string) ([]string, error) {
 	return entities, nil
 }
 
-// PublishProject publishes a Wayfinder project to corpus callosum
-// Gracefully degrades if cc not available
+// PublishProject publishes a Wayfinder project to corpus callosum.
+// Always tags the map with workspace/_component/_entity for caller consistency.
+// Gracefully degrades (no-op) if the corpus-callosum binary is not installed.
 func PublishProject(workspace string, project map[string]interface{}) error {
-	if !isCorpusCallosumAvailable() {
-		return nil
-	}
-
-	// Ensure workspace field is set
 	project["workspace"] = workspace
 	project["_component"] = "wayfinder"
 	project["_entity"] = "project"
+
+	if !isCorpusCallosumAvailable() {
+		return nil
+	}
 
 	// Marshal to JSON
 	projectJSON, err := json.Marshal(project)
@@ -143,7 +149,7 @@ func PublishProject(workspace string, project map[string]interface{}) error {
 	}
 
 	// Publish to corpus callosum
-	cmd := exec.Command("cc", "publish", "--workspace", workspace, "--data", "-")
+	cmd := exec.Command(corpusCallosumBin(), "publish", "--workspace", workspace, "--data", "-")
 	cmd.Stderr = os.Stderr
 
 	stdin, err := cmd.StdinPipe()
@@ -169,22 +175,24 @@ func PublishProject(workspace string, project map[string]interface{}) error {
 	return nil
 }
 
-// PublishPhase publishes a Wayfinder phase to corpus callosum
+// PublishPhase publishes a Wayfinder phase to corpus callosum.
+// Always tags the map with workspace/_component/_entity for caller consistency.
+// Gracefully degrades (no-op) if the corpus-callosum binary is not installed.
 func PublishPhase(workspace string, phase map[string]interface{}) error {
-	if !isCorpusCallosumAvailable() {
-		return nil
-	}
-
 	phase["workspace"] = workspace
 	phase["_component"] = "wayfinder"
 	phase["_entity"] = "phase"
+
+	if !isCorpusCallosumAvailable() {
+		return nil
+	}
 
 	phaseJSON, err := json.Marshal(phase)
 	if err != nil {
 		return fmt.Errorf("failed to marshal phase: %w", err)
 	}
 
-	cmd := exec.Command("cc", "publish", "--workspace", workspace, "--data", "-")
+	cmd := exec.Command(corpusCallosumBin(), "publish", "--workspace", workspace, "--data", "-")
 	cmd.Stderr = os.Stderr
 
 	stdin, err := cmd.StdinPipe()
@@ -209,22 +217,24 @@ func PublishPhase(workspace string, phase map[string]interface{}) error {
 	return nil
 }
 
-// PublishValidation publishes a Wayfinder validation result to corpus callosum
+// PublishValidation publishes a Wayfinder validation result to corpus callosum.
+// Always tags the map with workspace/_component/_entity for caller consistency.
+// Gracefully degrades (no-op) if the corpus-callosum binary is not installed.
 func PublishValidation(workspace string, validation map[string]interface{}) error {
-	if !isCorpusCallosumAvailable() {
-		return nil
-	}
-
 	validation["workspace"] = workspace
 	validation["_component"] = "wayfinder"
 	validation["_entity"] = "validation"
+
+	if !isCorpusCallosumAvailable() {
+		return nil
+	}
 
 	validationJSON, err := json.Marshal(validation)
 	if err != nil {
 		return fmt.Errorf("failed to marshal validation: %w", err)
 	}
 
-	cmd := exec.Command("cc", "publish", "--workspace", workspace, "--data", "-")
+	cmd := exec.Command(corpusCallosumBin(), "publish", "--workspace", workspace, "--data", "-")
 	cmd.Stderr = os.Stderr
 
 	stdin, err := cmd.StdinPipe()
