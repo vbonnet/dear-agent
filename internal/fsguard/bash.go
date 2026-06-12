@@ -543,6 +543,12 @@ func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed b
 			}
 			continue
 		}
+		if cmd == "gh" {
+			if ok, msg := checkGh(args[1:]); !ok {
+				return false, msg
+			}
+			continue
+		}
 		if nested, ok := shellWrapped(cmd, args[1:]); ok {
 			if allowed, msg := g.inspect(nested, currentDir, depth+1); !allowed {
 				return false, msg
@@ -555,6 +561,86 @@ func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed b
 			}
 		}
 	}
+	return true, ""
+}
+
+// ghMergeBlocked is the teaching message returned when a gh merge attempt is
+// detected. It directs agents to the safe-merge atomic wrapper (CLAUDE.md
+// principle 9) instead of the raw gh command.
+const ghMergeBlocked = "You're trying to merge a PR directly with gh. " +
+	"Raw `gh pr merge` is denied — use the safe-merge wrapper instead, " +
+	"which enforces all CI gates, soak time, and bot review before merging:\n\n" +
+	"  safe-merge --pr <number> [--repo owner/repo] [--watch] [--dry-run]\n\n" +
+	"safe-merge is in ~/go/bin/safe-merge (build: go install ./cmd/safe-merge). " +
+	"It blocks on all required CI checks, unresolved review threads, soak time ≥5 min, " +
+	"and the Gemini bot review — the raw gh call bypasses all of these."
+
+// ghAPIFlagTakesValue reports whether a gh api flag consumes the following
+// token as its value, so the value is not mistaken for the endpoint path.
+func ghAPIFlagTakesValue(flag string) bool {
+	switch flag {
+	case "-X", "--method",
+		"-H", "--header",
+		"-q", "--jq",
+		"-F", "--field",
+		"-f", "--raw-field",
+		"--input",
+		"--template", "-t",
+		"--paginate", "--preview":
+		return true
+	}
+	return false
+}
+
+// checkGh blocks direct PR merge operations via the gh CLI, directing agents
+// to the safe-merge atomic wrapper. It catches three bypass vectors:
+//
+//  1. gh pr merge ...        — the direct merge subcommand.
+//  2. gh api repos/.../pulls/.../merge — REST PUT merge endpoint.
+//  3. gh api graphql with mergePullRequest/enablePullRequestAutoMerge mutations.
+func checkGh(args []string) (allowed bool, message string) {
+	if len(args) == 0 {
+		return true, ""
+	}
+
+	// gh pr merge ...
+	if len(args) >= 2 && args[0] == "pr" && args[1] == "merge" {
+		return false, ghMergeBlocked
+	}
+
+	if args[0] != "api" {
+		return true, ""
+	}
+
+	// Walk args after "api", skipping flags and their values, to find
+	// the endpoint path or "graphql" verb.
+	apiPath := ""
+	rest := args[1:]
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		if strings.HasPrefix(a, "-") {
+			if ghAPIFlagTakesValue(a) {
+				i++ // skip the flag's value token
+			}
+			continue
+		}
+		apiPath = a
+		break
+	}
+
+	// gh api repos/<owner>/<repo>/pulls/<number>/merge
+	if strings.HasSuffix(apiPath, "/merge") {
+		return false, ghMergeBlocked
+	}
+
+	// gh api graphql with a merge mutation anywhere in the argument list.
+	if apiPath == "graphql" {
+		full := strings.Join(args, " ")
+		if strings.Contains(full, "mergePullRequest") || strings.Contains(full, "enablePullRequestAutoMerge") {
+			return false, ghMergeBlocked
+		}
+	}
+
 	return true, ""
 }
 

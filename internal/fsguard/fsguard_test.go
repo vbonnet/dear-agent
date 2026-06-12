@@ -174,6 +174,65 @@ func TestInspectCommand(t *testing.T) {
 	}
 }
 
+func TestCheckGh(t *testing.T) {
+	t.Parallel()
+	g := testGuard()
+	home := "/home/tester"
+
+	tests := []struct {
+		name        string
+		command     string
+		wantAllowed bool
+		wantSubstr  string
+	}{
+		// gh pr merge — direct merge path.
+		{"pr merge blocked", "gh pr merge 42 --squash", false, "safe-merge"},
+		{"pr merge no number blocked", "gh pr merge", false, "safe-merge"},
+		{"pr merge HEAD blocked", "gh pr merge HEAD --squash --delete-branch", false, "safe-merge"},
+
+		// gh api REST merge endpoint.
+		{"api REST merge blocked", "gh api repos/owner/repo/pulls/42/merge --method PUT", false, "safe-merge"},
+		{"api REST merge trailing blocked", "gh api -X PUT repos/owner/repo/pulls/1/merge", false, "safe-merge"},
+
+		// gh api graphql merge mutations.
+		{"graphql mergePullRequest blocked",
+			`gh api graphql -f query='mutation { mergePullRequest(input:{pullRequestId:"PR_id"}){pullRequest{state}}}'`,
+			false, "safe-merge"},
+		{"graphql enableAutoMerge blocked",
+			`gh api graphql -f query='mutation { enablePullRequestAutoMerge(input:{pullRequestId:"x"}){pullRequest{state}}}'`,
+			false, "safe-merge"},
+
+		// gh commands that are allowed.
+		{"pr list allowed", "gh pr list --state open", true, ""},
+		{"pr view allowed", "gh pr view 42", true, ""},
+		{"pr checks allowed", "gh pr checks 42 --watch", true, ""},
+		{"pr create allowed", "gh pr create --title x --body y", true, ""},
+		{"api GET pulls allowed", "gh api repos/owner/repo/pulls/42", true, ""},
+		{"api graphql no mutation allowed", "gh api graphql -f query='{ viewer { login } }'", true, ""},
+		{"run list allowed", "gh run list", true, ""},
+
+		// Shell wrappers around gh pr merge are also caught.
+		{"bash -c gh pr merge blocked",
+			`bash -c "gh pr merge 10 --squash"`,
+			false, "safe-merge"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			allowed, msg := g.InspectCommand(tc.command, home)
+			if allowed != tc.wantAllowed {
+				t.Fatalf("InspectCommand(%q) allowed=%v, want %v (msg=%q)",
+					tc.command, allowed, tc.wantAllowed, msg)
+			}
+			if !allowed && tc.wantSubstr != "" && !strings.Contains(msg, tc.wantSubstr) {
+				t.Fatalf("InspectCommand(%q) msg=%q, want substring %q",
+					tc.command, msg, tc.wantSubstr)
+			}
+		})
+	}
+}
+
 func TestUnterminatedQuoteFailsOpen(t *testing.T) {
 	t.Parallel()
 	g := testGuard()
