@@ -380,6 +380,16 @@ func NewTestManifest(sessionID string, name string) *manifest.Manifest {
 	}
 }
 
+// RecordHarnessSwitch is a no-op stub for the mock adapter.
+func (m *MockAdapter) RecordHarnessSwitch(sessionID, fromHarness, toHarness string, switchedAt time.Time) error {
+	return nil
+}
+
+// GetHarnessHistory returns an empty history for the mock adapter.
+func (m *MockAdapter) GetHarnessHistory(sessionID string) ([]manifest.HarnessSwitch, error) {
+	return nil, nil
+}
+
 // --- manifest.Store implementation (delegates to legacy methods) ---
 
 // Create implements manifest.Store.

@@ -52,6 +52,8 @@ func (m *mockStorage) ApplyMigrations() error                   { return nil }
 func (m *mockStorage) CreateSession(*manifest.Manifest) error { return nil }
 func (m *mockStorage) DeleteSession(string) error             { return nil }
 func (m *mockStorage) GetSessionByUUID(string) (*manifest.Manifest, error) { return nil, nil }
+func (m *mockStorage) RecordHarnessSwitch(string, string, string, time.Time) error { return nil }
+func (m *mockStorage) GetHarnessHistory(string) ([]manifest.HarnessSwitch, error) { return nil, nil }
 
 // testManifest creates a test manifest with defaults.
 func testManifest(name, state string, stateUpdatedAt time.Time) *manifest.Manifest {
