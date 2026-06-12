@@ -1,10 +1,10 @@
 ---
-phase: D2
-title: Research — scheduling options for host-capability jobs
-date: 2026-06-11
-status: complete
-project: host-side-scheduled-automation-substrate-replacing
-session_id: b56e8212-3f64-4bbe-97b2-44dea52da1e8
+phase: RESEARCH
+phase_name: Research — scheduling options for host-capability jobs
+wayfinder_session_id: b56e8212-3f64-4bbe-97b2-44dea52da1e8
+created_at: 2026-06-11
+phase_engram_hash: ""
+phase_engram_path: ""
 ---
 
 # D2: Research
