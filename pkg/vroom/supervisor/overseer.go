@@ -59,15 +59,27 @@ type EscalationThreshold struct {
 // DefaultEscalationThreshold is the threshold used when none is configured.
 var DefaultEscalationThreshold = EscalationThreshold{Fraction: 0.9}
 
+// overSustainedThreshold is the number of consecutive ticks a metric must
+// stay above its escalation threshold before supervisor.over.sustained_escalation
+// is emitted. Three consecutive ticks signals a resource problem that has not
+// been addressed and warrants operator attention beyond a single-tick alert.
+const overSustainedThreshold = 3
+
 // Overseer is the CRO-analogue supervisor. Its Tick takes one
 // ResourceSnapshot and emits an escalation event for every metric that
 // crosses threshold. Real remediation (reaping, killing runaway sessions,
 // reclaiming quota) is out of scope for PR 1 — escalations are
 // observation-only.
+//
+// Sustained escalation (ce-6as.80): when a metric remains above threshold for
+// overSustainedThreshold consecutive ticks, Overseer also emits
+// supervisor.over.sustained_escalation — a higher-severity signal indicating
+// the first-tier alert has not been acted on.
 type Overseer struct {
-	trail     decisiontrail.Trail
-	probe     ResourceProbe
-	threshold EscalationThreshold
+	trail            decisiontrail.Trail
+	probe            ResourceProbe
+	threshold        EscalationThreshold
+	consecutiveAbove map[string]int // metric name → consecutive above-threshold ticks
 }
 
 // NewOverseer constructs the Overseer supervisor. If threshold has zero
@@ -82,7 +94,12 @@ func NewOverseer(trail decisiontrail.Trail, probe ResourceProbe, threshold Escal
 	if threshold.Fraction <= 0 {
 		threshold = DefaultEscalationThreshold
 	}
-	return &Overseer{trail: trail, probe: probe, threshold: threshold}, nil
+	return &Overseer{
+		trail:            trail,
+		probe:            probe,
+		threshold:        threshold,
+		consecutiveAbove: make(map[string]int),
+	}, nil
 }
 
 // Role implements Supervisor.
@@ -118,10 +135,14 @@ func (o *Overseer) Tick(ctx context.Context) error {
 	return nil
 }
 
+// maybeEscalateFraction escalates and tracks sustained-escalation for
+// fraction-style metrics (disk, memory, cpu).
 func (o *Overseer) maybeEscalateFraction(ctx context.Context, name string, v float64) {
 	if v < o.threshold.Fraction {
+		o.consecutiveAbove[name] = 0
 		return
 	}
+	o.consecutiveAbove[name]++
 	_ = o.trail.Append(ctx, decisiontrail.Record{
 		Role: string(RoleOverseer),
 		Kind: "supervisor.over.escalated",
@@ -131,12 +152,28 @@ func (o *Overseer) maybeEscalateFraction(ctx context.Context, name string, v flo
 			"threshold": o.threshold.Fraction,
 		},
 	})
+	if o.consecutiveAbove[name] >= overSustainedThreshold {
+		_ = o.trail.Append(ctx, decisiontrail.Record{
+			Role: string(RoleOverseer),
+			Kind: "supervisor.over.sustained_escalation",
+			Payload: map[string]any{
+				"metric":            name,
+				"consecutive_ticks": o.consecutiveAbove[name],
+				"threshold":         overSustainedThreshold,
+				"action":            "investigate: metric has not dropped below threshold after repeated alerts",
+			},
+		})
+	}
 }
 
+// maybeEscalateCount escalates and tracks sustained-escalation for count-style
+// metrics (stranded_worktrees, orphaned_sessions).
 func (o *Overseer) maybeEscalateCount(ctx context.Context, name string, n int) {
 	if n <= 0 {
+		o.consecutiveAbove[name] = 0
 		return
 	}
+	o.consecutiveAbove[name]++
 	_ = o.trail.Append(ctx, decisiontrail.Record{
 		Role: string(RoleOverseer),
 		Kind: "supervisor.over.escalated",
@@ -145,4 +182,16 @@ func (o *Overseer) maybeEscalateCount(ctx context.Context, name string, n int) {
 			"count":  n,
 		},
 	})
+	if o.consecutiveAbove[name] >= overSustainedThreshold {
+		_ = o.trail.Append(ctx, decisiontrail.Record{
+			Role: string(RoleOverseer),
+			Kind: "supervisor.over.sustained_escalation",
+			Payload: map[string]any{
+				"metric":            name,
+				"consecutive_ticks": o.consecutiveAbove[name],
+				"threshold":         overSustainedThreshold,
+				"action":            "investigate: metric has not been remediated after repeated alerts",
+			},
+		})
+	}
 }
