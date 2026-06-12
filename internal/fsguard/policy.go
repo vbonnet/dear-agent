@@ -47,6 +47,10 @@ type Policy struct {
 	// cover /dev, the temp dirs, ~/.auto-memory, Cowork /sessions, and the
 	// ~/beads tracker store.
 	Writable []string `json:"writable_paths"`
+	// Enforcement controls how the hook binary reacts when a write is blocked.
+	// Defaults to EnforceDeny (hard block). Can be overridden via
+	// FSGUARD_ENFORCEMENT or the config file.
+	Enforcement Enforcement `json:"enforcement"`
 }
 
 // Config is the on-disk / env-resolved configuration: a Policy plus the
@@ -57,9 +61,10 @@ type Config struct {
 
 	// Embedded policy fields for JSON decoding (a config file is flat, not
 	// nested under "policy"). Decoded into the Policy by LoadConfig.
-	WorktreesDir string   `json:"worktrees_dir"`
-	Protected    []string `json:"protected_paths"`
-	Writable     []string `json:"writable_paths"`
+	WorktreesDir string      `json:"worktrees_dir"`
+	Protected    []string    `json:"protected_paths"`
+	Writable     []string    `json:"writable_paths"`
+	Enforcement  Enforcement `json:"enforcement"`
 }
 
 // DefaultPolicy returns the built-in worktree-only policy rooted at home. It
@@ -118,8 +123,8 @@ func LoadConfig() (Config, error) {
 }
 
 // mergeConfigFile reads a JSON config file and layers it onto cfg: list fields
-// (protected/writable) are appended, scalar fields (worktrees_dir, log_path)
-// override when non-empty. All paths are home-expanded and cleaned.
+// (protected/writable) are appended, scalar fields (worktrees_dir, log_path,
+// enforcement) override when non-zero. All paths are home-expanded and cleaned.
 func mergeConfigFile(cfg *Config, path, home string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -137,6 +142,9 @@ func mergeConfigFile(cfg *Config, path, home string) error {
 	if fileCfg.LogPath != "" {
 		cfg.LogPath = expandHome(fileCfg.LogPath, home)
 	}
+	if fileCfg.Enforcement != EnforceDeny {
+		cfg.Policy.Enforcement = fileCfg.Enforcement
+	}
 	return nil
 }
 
@@ -152,6 +160,11 @@ func applyEnvOverrides(cfg *Config, home string) {
 	}
 	if os.Getenv(EnvDisableLog) != "" {
 		cfg.LogPath = ""
+	}
+	if v := os.Getenv(EnvEnforcement); v != "" {
+		if level, ok := ParseEnforcement(v); ok {
+			cfg.Policy.Enforcement = level
+		}
 	}
 }
 

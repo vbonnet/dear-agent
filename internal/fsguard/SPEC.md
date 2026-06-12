@@ -1,7 +1,7 @@
 # internal/fsguard — Requirements Specification (EARS)
 
-**Version**: 1.0
-**Last Updated**: 2026-06-07
+**Version**: 1.1
+**Last Updated**: 2026-06-12
 **Status**: Baseline (derived from tests + code, not design-forward)
 **Scope**: Filesystem write-gate for tools that mutate files (Edit, Write, Bash)
 
@@ -157,6 +157,35 @@ under `~/src/`, the system shall block it with worktree-creation guidance.
 
 **FSG-33** When a git write subcommand is invoked with a working directory
 under `~/worktrees/`, the system shall allow it.
+
+### Graduated Enforcement
+
+**FSG-34** When `Policy.Enforcement` is `EnforceDeny` (the default), the hook
+shall exit with code 2 and write the positive-guidance message to stderr.
+
+**FSG-35** When `Policy.Enforcement` is `EnforceWarn`, the hook shall exit 0
+and write a JSON hook response `{"permissionDecision":"allow","message":"..."}` to
+stdout; the write proceeds but the agent receives the guidance message.
+
+**FSG-36** When `Policy.Enforcement` is `EnforceAsk`, the hook shall exit 0
+and write a JSON hook response `{"permissionDecision":"ask","message":"..."}` to
+stdout; Claude Code prompts the user before proceeding.
+
+**FSG-37** When `Policy.Enforcement` is `EnforceDefer`, the hook shall exit 0
+and write a JSON hook response `{"permissionDecision":"defer"}` to stdout;
+the decision falls through to the normal Claude Code permission model.
+
+**FSG-38** When `FSGUARD_ENFORCEMENT` contains a recognized value
+(`deny`|`warn`|`ask`|`defer`, case-insensitive), `LoadConfig` shall override
+the configured `Policy.Enforcement` with the parsed level.
+
+**FSG-39** For all non-Deny enforcement levels, violations shall still be
+recorded so the retro audit captures attempted out-of-policy writes even when
+the write was ultimately allowed or deferred.
+
+**FSG-40** When a write is allowed (Writable carveout or WorktreesDir),
+`Decision.Enforcement` shall be `EnforceDeny` (the zero value), since
+enforcement level is irrelevant for allowed writes.
 
 ---
 
