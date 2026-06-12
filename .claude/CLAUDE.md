@@ -241,6 +241,45 @@ This is the **keep-going** half of the contract; the section below is the
 supervisor commands, repeated failure, irreversible actions, and
 decisions only a human can make — never for permission to continue.
 
+## Defer-Don't-Block — Unattended Session Protocol (MANDATORY)
+
+Unattended sessions (overnight burndown workers, scheduled tasks, AGM-spawned
+workers) **must never block on ask-gated operations**. If a planned action
+requires a permission dialog or interactive approval, deferring it is the
+right move — not stalling, not skipping it silently, not retrying until the
+session times out.
+
+**The rule:** When a planned operation requires a permission that has not been
+pre-approved, defer it and continue:
+
+1. **File a handoff note** — create a Beads task (or a comment on the
+   originating bead) describing the blocked operation, why the permission was
+   not pre-approved, and what the human needs to do to unblock it.
+2. **Continue with the remaining work** — skip the blocked item and keep
+   burning down the next independent item on the plan.
+3. **Surface the deferred ops in the end-of-run summary** — every unattended
+   session's final output must explicitly list any deferred operations so
+   the human can review and approve them in the next interactive session.
+
+**Why this is mandatory:** An unattended worker that stalls at 2am on a
+permission dialog wastes the entire time budget and leaves the rest of the
+backlog untouched. The failure mode is invisible — the worker is "running"
+but not doing anything useful. Deferring keeps the flywheel spinning and
+makes the blocked item visible.
+
+**What counts as an ask-gated operation:** Any `Bash` command that the
+current permission model would surface to the user (e.g. `kill` of foreign
+processes, `git commit --no-verify`, raw `gh pr create/close` without the
+safe-pr wrapper, write to a chezmoi-managed path). If in doubt, treat it as
+ask-gated.
+
+**Pre-approval path (preferred over deferral):** The orchestrator should
+check `agm admin doctor` and the bead's required permissions before spawning
+a worker. If a task is known to require a permission that isn't pre-approved,
+skip it at dispatch time and leave it in the queue rather than letting the
+worker discover the block at runtime. This is the longer-term fix tracked in
+ce-e3u7 (PermissionChecker revival).
+
 ## Agent Delegation Enforcement (MANDATORY)
 
 These rules come from the 2026-05-13 DEAR retro on stuck tasks
