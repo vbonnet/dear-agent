@@ -51,6 +51,13 @@ type WorkProposal struct {
 	SubmittedBy string
 }
 
+// metaoIdleEscalationThreshold is the number of consecutive empty-roadmap ticks
+// after which the Meta-Orchestrator emits supervisor.metao.idle_escalation.
+// Mirrors the Orchestrator's idleEscalationThreshold (ce-6as.7 / ce-6as.61):
+// a supervisor that silently does nothing for 7 ticks is either misconfigured
+// or waiting for input it never signals — that must surface.
+const metaoIdleEscalationThreshold = 7
+
 // MetaOrchestrator is the CTO-analogue supervisor. Its Tick scans the
 // roadmap for pending Work Order proposals and decides which to admit.
 //
@@ -58,9 +65,14 @@ type WorkProposal struct {
 // non-empty Reason (the only Work Order invariant CONTEXT.md mentions
 // explicitly), reject the rest. Real anti-duplication / scope-expansion
 // logic lands in the follow-up that wires this to the actual roadmap.
+//
+// Idle escalation (ce-6as.61): when the roadmap is empty for 7 consecutive
+// ticks the Meta-Orchestrator emits supervisor.metao.idle_escalation so an
+// operator or the Meta-Orchestrator itself can investigate.
 type MetaOrchestrator struct {
-	trail   decisiontrail.Trail
-	roadmap Roadmap
+	trail           decisiontrail.Trail
+	roadmap         Roadmap
+	consecutiveIdle int
 }
 
 // NewMetaOrchestrator constructs the Meta-Orchestrator supervisor.
@@ -77,12 +89,17 @@ func NewMetaOrchestrator(trail decisiontrail.Trail, roadmap Roadmap) (*MetaOrche
 // Role implements Supervisor.
 func (m *MetaOrchestrator) Role() Role { return RoleMetaOrchestrator }
 
-// Tick scans pending proposals and applies the PR-1 policy.
+// Tick scans pending proposals and applies the PR-1 policy. When no
+// proposals are pending it emits supervisor.metao.no_work and, after
+// metaoIdleEscalationThreshold consecutive idle ticks, additionally emits
+// supervisor.metao.idle_escalation (ce-6as.61).
 func (m *MetaOrchestrator) Tick(ctx context.Context) error {
 	props, err := m.roadmap.PendingProposals(ctx)
 	if err != nil {
 		return fmt.Errorf("meta-orchestrator: list proposals: %w", err)
 	}
+
+	evaluated := 0
 	for _, p := range props {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -101,7 +118,6 @@ func (m *MetaOrchestrator) Tick(ctx context.Context) error {
 		_ = m.trail.Append(ctx, rec)
 		if accepted {
 			if err := m.roadmap.Accept(ctx, p.ID); err != nil {
-				// Don't fail the whole tick on one proposal; record and continue.
 				_ = m.trail.Append(ctx, decisiontrail.Record{
 					Role: string(RoleMetaOrchestrator),
 					Kind: "supervisor.metao.roadmap.accept_failed",
@@ -111,6 +127,7 @@ func (m *MetaOrchestrator) Tick(ctx context.Context) error {
 					},
 				})
 			}
+			evaluated++
 			continue
 		}
 		if err := m.roadmap.Reject(ctx, p.ID, reason); err != nil {
@@ -123,6 +140,34 @@ func (m *MetaOrchestrator) Tick(ctx context.Context) error {
 				},
 			})
 		}
+		evaluated++
+	}
+
+	if evaluated > 0 {
+		m.consecutiveIdle = 0
+		return nil
+	}
+
+	// Empty roadmap tick.
+	m.consecutiveIdle++
+	_ = m.trail.Append(ctx, decisiontrail.Record{
+		Role: string(RoleMetaOrchestrator),
+		Kind: "supervisor.metao.no_work",
+		Payload: map[string]any{
+			"consecutive_idle": m.consecutiveIdle,
+		},
+	})
+
+	if m.consecutiveIdle >= metaoIdleEscalationThreshold {
+		_ = m.trail.Append(ctx, decisiontrail.Record{
+			Role: string(RoleMetaOrchestrator),
+			Kind: "supervisor.metao.idle_escalation",
+			Payload: map[string]any{
+				"consecutive_idle": m.consecutiveIdle,
+				"threshold":        metaoIdleEscalationThreshold,
+				"action":           "investigate: roadmap empty or no proposals being submitted",
+			},
+		})
 	}
 	return nil
 }
