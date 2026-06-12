@@ -161,7 +161,6 @@
       "github.com/vbonnet/dear-agent/agm/cmd/agm-reaper",
       "github.com/vbonnet/dear-agent/agm/cmd/fix-uuid-manual",
       "github.com/vbonnet/dear-agent/agm/examples",
-      "github.com/vbonnet/dear-agent/agm/internal/a2a/modelcard",
       "github.com/vbonnet/dear-agent/agm/internal/manager/tmuxbackend",
       "github.com/vbonnet/dear-agent/agm/internal/surface/cmd/generate",
       "github.com/vbonnet/dear-agent/agm/scripts",
