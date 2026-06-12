@@ -32,8 +32,11 @@
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 #   build-jaeger-health     Build the Jaeger health-check CLI (cmd/jaeger-health)
 #   install-jaeger-health   Install jaeger-health to ~/go/bin
+#   callgraph               Generate an interactive Go call graph (opens browser)
+#   callgraph-svg           Write the call graph as an SVG file
+#   callgraph-install       Install go-callvis to $(GOPATH)/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health
+.PHONY: lint-specs preflight preflight-tests preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health callgraph callgraph-svg callgraph-install
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -324,3 +327,32 @@ install-bumblebee-launchagent: build-bumblebee
 
 uninstall-bumblebee-launchagent: build-bumblebee
 	@./bin/dear-agent-bumblebee install-launchagent --uninstall
+
+# Generate an interactive Go call graph for the codebase and open it in the
+# default browser (served at http://localhost:7878). Focuses on cmd/agm by
+# default; override with PKG=./path/to/package. Excludes the standard library
+# to keep the graph readable. Requires go-callvis on PATH (make callgraph-install).
+#   make callgraph                 # focus: cmd/agm (default entry point)
+#   make callgraph PKG=./cmd/vroom-mesh
+callgraph:
+	@command -v go-callvis >/dev/null 2>&1 || { \
+		echo "go-callvis not found. Run: make callgraph-install"; exit 1; }
+	@command -v dot >/dev/null 2>&1 || { \
+		echo "graphviz 'dot' not found. Install with: brew install graphviz"; exit 1; }
+	go-callvis -nostd -format svg $(or $(PKG),./cmd/agm) .
+
+# Write the call graph to callgraph.svg in the current directory instead of
+# opening the browser. Useful for dropping the graph into docs or a PR.
+#   make callgraph-svg PKG=./internal/fsguard
+callgraph-svg:
+	@command -v go-callvis >/dev/null 2>&1 || { \
+		echo "go-callvis not found. Run: make callgraph-install"; exit 1; }
+	@command -v dot >/dev/null 2>&1 || { \
+		echo "graphviz 'dot' not found. Install with: brew install graphviz"; exit 1; }
+	go-callvis -nostd -format svg -output callgraph.svg $(or $(PKG),./cmd/agm) .
+	@echo "Written: callgraph.svg"
+
+# Install go-callvis to $$(GOPATH)/bin. Requires Go 1.21+.
+callgraph-install:
+	go install github.com/ofabry/go-callvis@latest
+	@echo "Installed: $$(go env GOPATH)/bin/go-callvis"
