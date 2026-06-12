@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vbonnet/dear-agent/internal/safesrc"
 )
@@ -51,6 +52,60 @@ func TestRun_RejectsPathOutsideSrc(t *testing.T) {
 	err := run([]string{t.TempDir()})
 	if err == nil {
 		t.Fatal("run(<tempdir outside ~/src>) = nil, want a boundary-rejection error")
+	}
+}
+
+// TestParseUnlockArgs covers the unlock subcommand's flag parsing in isolation,
+// including help, the defaults, and each error branch.
+func TestParseUnlockArgs(t *testing.T) {
+	t.Run("help short-circuits", func(t *testing.T) {
+		_, showed, err := parseUnlockArgs([]string{"--help"})
+		if err != nil || !showed {
+			t.Fatalf("parseUnlockArgs(--help) = (showed=%v, err=%v), want (true, nil)", showed, err)
+		}
+	})
+	t.Run("defaults", func(t *testing.T) {
+		opts, _, err := parseUnlockArgs([]string{"~/src/x"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if opts.dryRun || opts.repoArg != "~/src/x" || opts.minAge != safesrc.DefaultMinLockAge {
+			t.Fatalf("defaults wrong: %+v", opts)
+		}
+	})
+	t.Run("dry-run and min-age", func(t *testing.T) {
+		opts, _, err := parseUnlockArgs([]string{"--dry-run", "--min-age", "5m", "~/src/x"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !opts.dryRun || opts.minAge != 5*time.Minute {
+			t.Fatalf("flags not applied: %+v", opts)
+		}
+	})
+	errCases := []struct {
+		name, want string
+		argv       []string
+	}{
+		{"min-age missing", "requires a duration", []string{"--min-age"}},
+		{"min-age invalid", "invalid --min-age", []string{"--min-age", "nope", "~/src/x"}},
+		{"unknown flag", "unknown flag", []string{"--bogus"}},
+		{"two paths", "exactly one", []string{"~/src/a", "~/src/b"}},
+	}
+	for _, c := range errCases {
+		t.Run(c.name, func(t *testing.T) {
+			_, _, err := parseUnlockArgs(c.argv)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("parseUnlockArgs(%v) err = %v, want containing %q", c.argv, err, c.want)
+			}
+		})
+	}
+}
+
+// TestRunUnlock_RejectsPathOutsideSrc confirms the unlock path also enforces the
+// ~/src boundary end to end.
+func TestRunUnlock_RejectsPathOutsideSrc(t *testing.T) {
+	if err := runUnlock([]string{t.TempDir()}); err == nil {
+		t.Fatal("runUnlock(<tempdir outside ~/src>) = nil, want a boundary-rejection error")
 	}
 }
 

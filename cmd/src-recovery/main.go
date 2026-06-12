@@ -22,6 +22,14 @@
 // to ~/.local/state/dear-agent/src-recovery.log. It is the only sanctioned way
 // for an agent to write to ~/src/**, which is otherwise read-only
 // (see .claude/CLAUDE.md and docs/retros/2026-06-11-src-violations-and-burndown.md).
+//
+// The `unlock` subcommand clears a stale .git/index.lock left behind by a killed
+// git, which otherwise wedges the daily archive sync's commit step:
+//
+//	src-recovery unlock [--dry-run] [--min-age <dur>] <repo-path-under-~/src>
+//
+// It removes the lock only when it is older than --min-age (default 60s) and no
+// process holds it open, so it can never race a live index update.
 package main
 
 import (
@@ -43,6 +51,13 @@ func main() {
 }
 
 func run(argv []string) error {
+	// Subcommand dispatch: `unlock` clears a stale .git/index.lock; the bare
+	// form (no subcommand) runs the recovery sequence. Keeping recovery as the
+	// default preserves the original `src-recovery <repo>` invocation.
+	if len(argv) > 0 && argv[0] == "unlock" {
+		return runUnlock(argv[1:])
+	}
+
 	dryRun := false
 	timeout := safesrc.DefaultTimeout
 	var repoArg string
@@ -115,6 +130,102 @@ func run(argv []string) error {
 	return nil
 }
 
+// runUnlock implements `src-recovery unlock [--dry-run] [--min-age <dur>] <repo>`.
+// It validates the path through the same ~/src boundary check as recovery, then
+// removes the repo's .git/index.lock only if it is provably stale.
+func runUnlock(argv []string) error {
+	opts, showedHelp, err := parseUnlockArgs(argv)
+	if err != nil {
+		return err
+	}
+	if showedHelp {
+		return nil
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot determine home directory: %w", err)
+	}
+
+	repo, err := safesrc.ValidateRepo(home, opts.repoArg)
+	if err != nil {
+		return err
+	}
+
+	logW, closeLog, err := openAuditLog(home)
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+
+	u := &safesrc.Unlocker{
+		Repo:   repo,
+		DryRun: opts.dryRun,
+		MinAge: opts.minAge,
+		Now:    time.Now(),
+		Log:    logW,
+	}
+	res, err := u.Unlock()
+	if err != nil {
+		return err
+	}
+
+	switch {
+	case !res.Existed:
+		fmt.Printf("src-recovery unlock: %s — no index.lock present, nothing to do\n", repo)
+	case opts.dryRun:
+		fmt.Printf("src-recovery unlock (dry-run): %s — would remove stale lock %s (age %s)\n",
+			repo, res.LockPath, res.Age.Round(time.Second))
+	default:
+		fmt.Printf("src-recovery unlock: %s — removed stale lock %s (age %s)\n",
+			repo, res.LockPath, res.Age.Round(time.Second))
+	}
+	return nil
+}
+
+// unlockOpts holds the parsed `unlock` flags.
+type unlockOpts struct {
+	dryRun  bool
+	minAge  time.Duration
+	repoArg string
+}
+
+// parseUnlockArgs parses the `unlock` subcommand's flags. showedHelp is true when
+// -h/--help was handled, signalling the caller to return without doing work.
+func parseUnlockArgs(argv []string) (opts unlockOpts, showedHelp bool, err error) {
+	opts.minAge = safesrc.DefaultMinLockAge
+	for i := 0; i < len(argv); i++ {
+		arg := argv[i]
+		switch arg {
+		case "-h", "--help":
+			fmt.Print(unlockUsage)
+			return opts, true, nil
+		case "--dry-run", "-n":
+			opts.dryRun = true
+		case "--min-age":
+			rest := argv[i+1:]
+			if len(rest) == 0 {
+				return opts, false, fmt.Errorf("--min-age requires a duration argument (e.g. 60s)")
+			}
+			d, perr := time.ParseDuration(rest[0])
+			if perr != nil {
+				return opts, false, fmt.Errorf("invalid --min-age %q: %w", rest[0], perr)
+			}
+			opts.minAge = d
+			i++
+		default:
+			if len(arg) > 0 && arg[0] == '-' {
+				return opts, false, fmt.Errorf("unknown flag %q (see: src-recovery unlock --help)", arg)
+			}
+			if opts.repoArg != "" {
+				return opts, false, fmt.Errorf("expected exactly one repository path, got a second: %q", arg)
+			}
+			opts.repoArg = arg
+		}
+	}
+	return opts, false, nil
+}
+
 func dirtyNote(dirty bool) string {
 	if dirty {
 		return " (working tree would be stashed)"
@@ -176,4 +287,41 @@ Examples:
   src-recovery ~/src/dear-agent
   src-recovery --dry-run ~/src/brain-v2
   src-recovery --timeout 60s ~/src/dear-agent
+
+Subcommands:
+  unlock   remove a stale .git/index.lock (see: src-recovery unlock --help)
+`
+
+const unlockUsage = `src-recovery unlock — remove a stale .git/index.lock from a golden ~/src/<repo>.
+
+Usage:
+  src-recovery unlock [--dry-run] [--min-age <dur>] <repo-path-under-~/src>
+
+Flags:
+  --dry-run, -n     report what would be removed; delete nothing
+  --min-age <dur>   only remove a lock older than this (default 60s; e.g. 5m)
+  -h, --help        show this help
+
+What it does (and the ONLY thing it does):
+  1. validate the path is strictly under ~/src/
+  2. locate <gitdir>/index.lock
+  3. remove it iff it is older than --min-age AND no process holds it open
+
+A real index.lock lives for milliseconds while git swaps the index in place; one
+older than --min-age with no holder is debris a crashed/killed git left behind.
+The lock path is computed, never taken from an argument, so no other file can be
+named for deletion. Every decision is appended to
+~/.local/state/dear-agent/src-recovery.log.
+
+Why this exists:
+  A killed git leaves a zero-byte index.lock that makes every later commit fail
+  with exit 128. The daily archive sync then rsyncs new logs but cannot commit
+  them — a silent, compounding backlog. Clearing the lock means a raw rm into
+  ~/src, which the guards forbid; this is the one vetted path to do it safely.
+  See docs/retros/2026-06-11-src-violations-and-burndown.md.
+
+Examples:
+  src-recovery unlock ~/src/ai-conversation-logs
+  src-recovery unlock --dry-run ~/src/ai-conversation-logs
+  src-recovery unlock --min-age 5m ~/src/dear-agent
 `
