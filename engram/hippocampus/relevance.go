@@ -161,13 +161,71 @@ type RelevanceResponse struct {
 // with a small token budget for scoring/classification tasks.
 type SideQueryFunc func(ctx context.Context, systemPrompt, userPrompt string, maxTokens int) (string, error)
 
+// keywordScore scores a MemoryFile against query words using its name,
+// description, and preview. Returns a 0.0–1.0 score. Used as a fallback
+// when no sideQuery is available.
+func keywordScore(f MemoryFile, words []string) float64 {
+	if len(words) == 0 {
+		return 0
+	}
+	nameLower := strings.ToLower(strings.TrimSuffix(f.Name, ".md"))
+	descLower := strings.ToLower(f.Description)
+	previewLower := strings.ToLower(f.Preview)
+
+	hits := 0
+	for _, w := range words {
+		if len(w) < 3 {
+			continue
+		}
+		if strings.Contains(nameLower, w) {
+			hits += 3
+		}
+		if strings.Contains(descLower, w) {
+			hits += 2
+		}
+		if strings.Contains(previewLower, w) {
+			hits++
+		}
+	}
+	// Normalize: saturate at 10 hits → 1.0
+	score := float64(hits) / 10.0
+	if score > 1.0 {
+		score = 1.0
+	}
+	return score
+}
+
 // FindRelevantMemories uses an LLM sideQuery to select the most relevant memory
 // files for a given query. Returns up to 5 results, sorted by relevance score.
 // Files in excludePaths are skipped (already surfaced).
+// When sideQuery is nil, falls back to keyword matching on name/description/preview.
+//
 //nolint:gocyclo // reason: scoring loop with many independent feature contributions
 func FindRelevantMemories(ctx context.Context, query string, files []MemoryFile, sideQuery SideQueryFunc, excludePaths map[string]bool) ([]RelevanceResult, error) {
-	if len(files) == 0 || sideQuery == nil {
+	if len(files) == 0 {
 		return nil, nil
+	}
+
+	// Keyword fallback when no LLM sideQuery is wired — filters on description/preview.
+	if sideQuery == nil {
+		words := strings.Fields(strings.ToLower(query))
+		var results []RelevanceResult
+		for _, f := range files {
+			if excludePaths != nil && excludePaths[f.Path] {
+				continue
+			}
+			score := keywordScore(f, words)
+			if score >= 0.3 {
+				results = append(results, RelevanceResult{File: f, Score: score})
+			}
+		}
+		sort.Slice(results, func(i, j int) bool {
+			return results[i].Score > results[j].Score
+		})
+		if len(results) > 5 {
+			results = results[:5]
+		}
+		return results, nil
 	}
 
 	// Filter out already-surfaced files
