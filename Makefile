@@ -4,6 +4,7 @@
 #   lint-specs              Validate EARS requirements in SPEC.md files
 #   preflight               Fast local CI-parity gates: vet + build + lint  (~25s)
 #   preflight-tests         preflight + go test (no -race) — quick sanity
+#   preflight-race          preflight + go test -race — catch data races before push
 #   preflight-full          preflight + go test -race + govulncheck (full parity)
 #   health-check            Run the codebase health auditor (cmd/repo-health)
 #   install-preflight-hook  Install a git pre-push hook that runs preflight
@@ -33,7 +34,7 @@
 #   build-jaeger-health     Build the Jaeger health-check CLI (cmd/jaeger-health)
 #   install-jaeger-health   Install jaeger-health to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -56,6 +57,14 @@ preflight:
 # catches behaviour regressions a lint-only sweep misses.
 preflight-tests:
 	@./scripts/preflight.sh --tests
+
+# preflight + `go test -race -count=1`. Same as CI's race detector pass but
+# skips govulncheck. Use this before pushing any package that uses
+# package-level mutable state (var func seams, global registries, shared
+# maps) — races only show up with the race detector enabled, and CI runs
+# with -race while local `make preflight-tests` does not.
+preflight-race:
+	@./scripts/preflight.sh --race
 
 # Full CI parity: preflight + `go test -race -count=1` + govulncheck with
 # the same allowlist as ci.yml. Slower but gives the highest confidence
