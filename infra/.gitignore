@@ -1,0 +1,17 @@
+# OpenTofu / Terraform working state — never commit these
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+
+# Real tfvars may contain owner-specific values; the .example is tracked.
+*.tfvars
+!terraform.tfvars.example
+
+# Credentials
+*.pem
+*.token
+.env

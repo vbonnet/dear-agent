@@ -118,21 +118,46 @@ Content
 			errContains: "does not start with YAML frontmatter delimiter",
 		},
 		{
-			name: "frontmatter with extra fields (strict mode)",
+			name: "frontmatter with extra fields tolerated",
 			content: `---
 phase: "D1"
 phase_name: "Problem Validation"
 wayfinder_session_id: "test-session-123"
 created_at: "2026-01-05T12:00:00Z"
-phase_engram_hash: "sha256:abc123"
-phase_engram_path: "~/engrams/d1.ai.md"
-unknown_field: "should trigger error"
+unknown_field: "future schema field, should be ignored"
 ---
 
 Content
 `,
-			wantErr:     true,
-			errContains: "field unknown_field not found",
+			wantErr: false,
+			validate: func(t *testing.T, fm *DeliverableFrontmatter) {
+				if fm.Phase != "D1" {
+					t.Errorf("Phase = %q, want %q", fm.Phase, "D1")
+				}
+			},
+		},
+		{
+			name: "valid frontmatter without engram fields",
+			content: `---
+phase: "S7"
+phase_name: "Plan"
+wayfinder_session_id: "session-abc"
+created_at: "2026-06-11T10:00:00Z"
+---
+
+# S7: Plan
+
+Content here.
+`,
+			wantErr: false,
+			validate: func(t *testing.T, fm *DeliverableFrontmatter) {
+				if fm.Phase != "S7" {
+					t.Errorf("Phase = %q, want %q", fm.Phase, "S7")
+				}
+				if fm.PhaseEngramHash != "" {
+					t.Errorf("PhaseEngramHash should be empty (optional), got %q", fm.PhaseEngramHash)
+				}
+			},
 		},
 	}
 
