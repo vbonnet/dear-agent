@@ -56,12 +56,14 @@ func run(argv []string) error {
 		case "--dry-run", "-n":
 			dryRun = true
 		case "--timeout":
-			if i+1 >= len(argv) {
+			rest := argv[i+1:]
+			if len(rest) == 0 {
 				return fmt.Errorf("--timeout requires a duration argument (e.g. 30s)")
 			}
-			d, err := time.ParseDuration(argv[i+1])
+			val := rest[0]
+			d, err := time.ParseDuration(val)
 			if err != nil {
-				return fmt.Errorf("invalid --timeout %q: %w", argv[i+1], err)
+				return fmt.Errorf("invalid --timeout %q: %w", val, err)
 			}
 			timeout = d
 			i++
