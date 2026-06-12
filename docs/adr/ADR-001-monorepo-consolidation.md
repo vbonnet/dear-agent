@@ -1,32 +1,18 @@
 # ADR-001: Monorepo Consolidation
 
-## Status
+**Status**: Accepted (2026-04-24)
 
-Accepted
+`ai-tools` and `engram` lived in two repositories with `replace` directives
+pointing at absolute local paths. Every coordinated change wanted two PRs,
+import paths drifted, and cross-cutting refactors were nearly impossible to
+review atomically.
 
-## Context
+Consolidate into one Go module rooted at the old `ai-tools` repo. Subtrees:
+`agm/`, `engram/`, `wayfinder/`, `pkg/`, `internal/`, `tools/`. The old
+`engram` repository keeps stub READMEs pointing here. `go build ./...` now
+covers everything.
 
-The ai-tools ecosystem was split across two repositories:
-- `ai-tools` — AGM session management, codegen, and standalone tools
-- `engram` — Memory system, wayfinder, hooks, and shared libraries
-
-This split caused cross-repo dependency issues, import path complexity
-with `replace` directives pointing to absolute local paths, and made
-it difficult to make coordinated changes across components.
-
-## Decision
-
-Consolidate into a single monorepo (`ai-tools`) with one `go.mod` at root:
-- `agm/` — AGM (renamed from agm)
-- `engram/` — Engram memory system (copied from engram repo)
-- `wayfinder/` — Wayfinder plugin (copied from engram repo)
-- `pkg/` — Shared libraries
-- `internal/` — Shared internal packages
-- `tools/` — Standalone tools
-
-## Consequences
-
-- Single `go build ./...` compiles everything
-- No more cross-repo `replace` directives
-- Coordinated changes are atomic commits
-- engram repo retains stub READMEs pointing to new locations
+The trade-off is one large tree to navigate versus atomic cross-component
+commits. We took the latter: a refactor that touches AGM, the engram client,
+and a shared package is one diff to review, not three coordinated PRs across
+two repos that may drift while the reviews land.

@@ -28,7 +28,7 @@ func QueryAGMSessions(workspace string, filters map[string]string) ([]map[string
 		args = append(args, "--filter", fmt.Sprintf("%s=%s", key, value))
 	}
 
-	cmd := exec.Command("cc", args...)
+	cmd := exec.Command(corpusCallosumBin(), args...)
 	output, err := cmd.Output()
 	if err != nil {
 		// No results or error - return empty list
@@ -81,7 +81,7 @@ func QueryEngramBeads(workspace string, filters map[string]string) ([]map[string
 		args = append(args, "--filter", fmt.Sprintf("%s=%s", key, value))
 	}
 
-	cmd := exec.Command("cc", args...)
+	cmd := exec.Command(corpusCallosumBin(), args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return []map[string]interface{}{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
@@ -128,7 +128,7 @@ func QueryWayfinderProjects(workspace string, filters map[string]string) ([]map[
 		args = append(args, "--filter", fmt.Sprintf("%s=%s", key, value))
 	}
 
-	cmd := exec.Command("cc", args...)
+	cmd := exec.Command(corpusCallosumBin(), args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return []map[string]interface{}{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
@@ -180,7 +180,7 @@ func QueryPhases(workspace, sessionID string) ([]map[string]interface{}, error) 
 		"--format", "json",
 	}
 
-	cmd := exec.Command("cc", args...)
+	cmd := exec.Command(corpusCallosumBin(), args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return []map[string]interface{}{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
@@ -244,7 +244,7 @@ func DiscoverComponents(workspace string) ([]string, error) {
 		return []string{}, nil
 	}
 
-	cmd := exec.Command("cc", "discover", "--workspace", workspace, "--format", "json")
+	cmd := exec.Command(corpusCallosumBin(), "discover", "--workspace", workspace, "--format", "json")
 	output, err := cmd.Output()
 	if err != nil {
 		return []string{}, nil //nolint:nilerr // intentional: caller signals via separate bool/optional

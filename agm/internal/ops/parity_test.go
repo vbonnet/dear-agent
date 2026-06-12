@@ -11,6 +11,7 @@ func TestSurfaceParity_AllOpsRegistered(t *testing.T) {
 	result := ListOps()
 	if result == nil {
 		t.Fatal("ListOps returned nil")
+		return
 	}
 	if result.Total == 0 {
 		t.Fatal("ListOps returned 0 operations — registry is empty")

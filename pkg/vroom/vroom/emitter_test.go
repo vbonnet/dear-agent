@@ -108,8 +108,12 @@ func TestEmitEscalated(t *testing.T) {
 }
 
 func TestEmitEvaluated(t *testing.T) {
+	// Evaluation is a Secondary *responsibility*, not a standing role per
+	// /docs/adr/ADR-002. Tests use a canonical supervisor role string
+	// (here Orchestrator, acting as Secondary for some peer's task) rather
+	// than the retired "verifier" identifier.
 	pub := &mockPublisher{}
-	em := NewEmitter(pub, "verifier")
+	em := NewEmitter(pub, "orchestrator")
 
 	em.EmitEvaluated(EvaluatedPayload{
 		SessionID: "sess-3",
@@ -128,8 +132,8 @@ func TestEmitEvaluated(t *testing.T) {
 	if ev.Data["passed"] != true {
 		t.Errorf("passed = %v, want true", ev.Data["passed"])
 	}
-	if ev.Data["role"] != "verifier" {
-		t.Errorf("role = %v, want %q", ev.Data["role"], "verifier")
+	if ev.Data["role"] != "orchestrator" {
+		t.Errorf("role = %v, want %q", ev.Data["role"], "orchestrator")
 	}
 }
 

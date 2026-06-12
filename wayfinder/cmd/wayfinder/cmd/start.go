@@ -148,10 +148,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 	tr, err := tracker.New(st.SessionID)
 	if err != nil {
 		// Clean up directory on failure
-		os.RemoveAll(projectDir)
+		_ = os.RemoveAll(projectDir)
 		return fmt.Errorf("failed to initialize tracker: %w", err)
 	}
-	defer tr.Close(context.Background())
+	defer func() { _ = tr.Close(context.Background()) }()
 
 	// Publish session.started event
 	if err := tr.StartSession(projectDir); err != nil {
@@ -160,7 +160,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 
 	// Write STATUS file
 	if err := st.WriteTo(projectDir); err != nil {
-		os.RemoveAll(projectDir)
+		_ = os.RemoveAll(projectDir)
 		return fmt.Errorf("failed to write STATUS file: %w", err)
 	}
 
@@ -495,7 +495,7 @@ living_updates:
 - **Variance:** [+/-X]%
 
 **Phases Completed:** [List: D1, D2, D3, D4, S4, S5, S6, S7, S8, S9, S10, S11]
-**Phases Skipped:** [None - all 12 phases required]
+**Phases Skipped:** [None - all 12 V1 phase IDs (= 9 canonical V2 phases) required]
 
 **Multi-Persona Review:**
 - Total personas invoked: [X]

@@ -73,6 +73,7 @@ func TestValidateRejectsUnknownType(t *testing.T) {
 	err := Validate([]Criterion{{Type: "bogus", Command: "x"}})
 	if err == nil {
 		t.Fatal("unknown type should fail")
+		return
 	}
 	if !strings.Contains(err.Error(), "unknown type") {
 		t.Errorf("error should mention unknown type: %v", err)
@@ -120,6 +121,32 @@ func TestParseBytesAcceptsGracefulExit(t *testing.T) {
 		t.Fatalf("ParseBytes: %v", err)
 	}
 	if len(got) != 1 || got[0].Type != TypeGracefulExit {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestValidateAcceptsHandoffConfidence(t *testing.T) {
+	if err := Validate([]Criterion{{Type: TypeHandoffConfidence, Description: "handoffs carry confidence"}}); err != nil {
+		t.Errorf("handoff-confidence with description should pass: %v", err)
+	}
+	if err := Validate([]Criterion{{Type: TypeHandoffConfidence}}); err != nil {
+		t.Errorf("bare handoff-confidence should pass (it is declarative): %v", err)
+	}
+	if !TypeHandoffConfidence.IsValid() {
+		t.Error("TypeHandoffConfidence should be a recognized type")
+	}
+}
+
+func TestParseBytesAcceptsHandoffConfidence(t *testing.T) {
+	yml := []byte(`acceptance-criteria:
+  - type: handoff-confidence
+    description: "Every context handoff carries a confidence assessment"
+`)
+	got, err := ParseBytes(yml)
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+	if len(got) != 1 || got[0].Type != TypeHandoffConfidence {
 		t.Errorf("got %+v", got)
 	}
 }

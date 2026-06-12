@@ -18,6 +18,7 @@ func TestNewAnthropicProvider(t *testing.T) {
 
 		if provider == nil {
 			t.Fatal("Expected non-nil provider")
+			return
 		}
 
 		if provider.Name() != "anthropic" {
@@ -134,6 +135,7 @@ func TestAnthropicProvider_Capabilities(t *testing.T) {
 
 	t.Run("Supported models", func(t *testing.T) {
 		expectedModels := []string{
+			"claude-opus-4-8",
 			"claude-opus-4-6",
 			"claude-3-5-sonnet-20241022",
 			"claude-3-5-haiku-20241022",

@@ -52,6 +52,7 @@ func TestCheckWorktreesCmd_SessionFlag(t *testing.T) {
 	flag := checkWorktreesCmd.Flags().Lookup("session")
 	if flag == nil {
 		t.Fatal("Expected --session flag to be registered")
+		return
 	}
 	if flag.DefValue != "" {
 		t.Errorf("Expected default value '' for --session, got %q", flag.DefValue)

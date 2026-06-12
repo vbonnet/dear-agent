@@ -8,21 +8,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestSyncCommand_Exists(t *testing.T) {
-	// Verify sync command was registered
-	found := false
-	for _, cmd := range rootCmd.Commands() {
-		if cmd.Name() == "sync" {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Error("sync command not registered with root command")
-	}
-}
-
 func TestSyncCommand_Help(t *testing.T) {
 	// Verify sync command has help text
 	var syncCmd *cobra.Command
@@ -35,6 +20,7 @@ func TestSyncCommand_Help(t *testing.T) {
 
 	if syncCmd == nil {
 		t.Fatal("sync command not found")
+		return
 	}
 
 	if syncCmd.Short == "" {

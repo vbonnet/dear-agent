@@ -4,16 +4,6 @@ import (
 	"testing"
 )
 
-func TestRootCommand_Exists(t *testing.T) {
-	if rootCmd == nil {
-		t.Fatal("rootCmd is nil, want initialized command")
-	}
-
-	if rootCmd.Use != "devlog" {
-		t.Errorf("rootCmd.Use = %q, want %q", rootCmd.Use, "devlog")
-	}
-}
-
 func TestRootCommand_FlagsAreDefined(t *testing.T) {
 	// Verify cliframe standard flags are registered
 	configFlag := rootCmd.Flags().Lookup("config")

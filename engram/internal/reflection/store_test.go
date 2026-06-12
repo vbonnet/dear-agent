@@ -13,6 +13,7 @@ func TestNewStore(t *testing.T) {
 	store := NewStore("/tmp/reflections")
 	if store == nil {
 		t.Fatal("NewStore() returned nil")
+		return
 	}
 
 	if store.reflectionPath != "/tmp/reflections" {

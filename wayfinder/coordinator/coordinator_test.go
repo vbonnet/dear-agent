@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -51,6 +52,7 @@ func TestNewCoordinator(t *testing.T) {
 
 	if coord == nil {
 		t.Fatal("NewCoordinator returned nil")
+		return
 	}
 
 	if coord.maxConcurrent != 4 {
@@ -169,6 +171,7 @@ func TestGetOrCreateSandbox_Create(t *testing.T) {
 
 	if sb == nil {
 		t.Fatal("Expected sandbox, got nil")
+		return
 	}
 
 	if sb.Name != "oss-wp12" {
@@ -321,5 +324,51 @@ func TestParseWayfinderStatus_Defaults(t *testing.T) {
 
 	if status.Progress != 0 {
 		t.Errorf("Expected progress=0, got %d", status.Progress)
+	}
+}
+
+// TestStop_NoConcurrentDeadlock is a regression test for the deadlock where
+// Stop() held c.mu across wg.Wait(). runProject goroutines need c.mu to call
+// updateProjectStatus before calling wg.Done(), so holding the lock made
+// wg.Wait() hang until the 10-second forced-kill timeout fired.
+//
+// Fix: Stop() releases c.mu before entering the wg.Wait() select loop.
+// This test fails (hangs >2s) against the old code and passes quickly with the fix.
+func TestStop_NoConcurrentDeadlock(t *testing.T) {
+	const N = 4
+	cfg := DefaultConfig()
+	coord := NewCoordinator(cfg, nil)
+
+	// Register N "running" projects and spawn goroutines that simulate runProject:
+	// sleep briefly (so Stop enters its wait path first), then call updateProjectStatus
+	// (which acquires c.mu) before calling wg.Done.
+	for i := range N {
+		dir := fmt.Sprintf("/test/deadlock-%d", i)
+		coord.mu.Lock()
+		coord.projects[dir] = &ProjectExecution{
+			ProjectDir: dir,
+			Status:     StatusRunning,
+		}
+		coord.mu.Unlock()
+
+		coord.wg.Add(1)
+		go func(d string) {
+			defer coord.wg.Done()
+			time.Sleep(10 * time.Millisecond)
+			coord.updateProjectStatus(d, StatusCompleted, nil)
+		}(dir)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- coord.Stop(ctx) }()
+
+	select {
+	case <-stopDone:
+		// passed: Stop returned before the 2s deadline
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop() deadlocked: did not return within 2s under concurrent updateProjectStatus calls")
 	}
 }

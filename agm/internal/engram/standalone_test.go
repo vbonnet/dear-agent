@@ -12,6 +12,7 @@ func TestStandaloneIntegration(t *testing.T) {
 
 		if client == nil {
 			t.Fatal("NewClient should not return nil")
+			return
 		}
 	})
 

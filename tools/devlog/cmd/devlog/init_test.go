@@ -8,21 +8,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestInitCommand_Exists(t *testing.T) {
-	// Verify init command was registered
-	found := false
-	for _, cmd := range rootCmd.Commands() {
-		if cmd.Name() == "init" {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Error("init command not registered with root command")
-	}
-}
-
 func TestInitCommand_Help(t *testing.T) {
 	// Verify init command has help text
 	var initCmd *cobra.Command
@@ -35,6 +20,7 @@ func TestInitCommand_Help(t *testing.T) {
 
 	if initCmd == nil {
 		t.Fatal("init command not found")
+		return
 	}
 
 	if initCmd.Short == "" {

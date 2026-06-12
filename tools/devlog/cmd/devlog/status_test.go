@@ -8,21 +8,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestStatusCommand_Exists(t *testing.T) {
-	// Verify status command was registered
-	found := false
-	for _, cmd := range rootCmd.Commands() {
-		if cmd.Name() == "status" {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Error("status command not registered with root command")
-	}
-}
-
 func TestStatusCommand_Help(t *testing.T) {
 	// Verify status command has help text
 	var statusCmd *cobra.Command
@@ -35,6 +20,7 @@ func TestStatusCommand_Help(t *testing.T) {
 
 	if statusCmd == nil {
 		t.Fatal("status command not found")
+		return
 	}
 
 	if statusCmd.Short == "" {

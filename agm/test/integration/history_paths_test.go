@@ -75,6 +75,7 @@ func TestGetHistoryPaths_Integration(t *testing.T) {
 			// Verify location is not nil
 			if location == nil {
 				t.Fatal("GetHistoryPaths() returned nil location")
+				return
 			}
 
 			// Verify harness matches

@@ -31,6 +31,7 @@ func TestRunnerRunHook(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("Expected result, got nil")
+		return
 	}
 
 	if result.HookName != "test-hook" {

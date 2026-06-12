@@ -104,7 +104,7 @@ func runVerifyWorker(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	m, err := adapter.GetSessionByName(sessionName)
 	if err != nil {
@@ -217,7 +217,7 @@ func runVerifyAll() error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to storage: %w", err)
 	}
-	defer adapter.Close()
+	defer func() { _ = adapter.Close() }()
 
 	// List all non-archived sessions
 	all, err := adapter.ListSessions(&dolt.SessionFilter{

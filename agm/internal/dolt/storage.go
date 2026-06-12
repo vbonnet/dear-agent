@@ -26,6 +26,11 @@ type Storage interface {
 
 	// ListSessions returns sessions matching the SessionFilter.
 	ListSessions(filter *SessionFilter) ([]*manifest.Manifest, error)
+
+	// GetSessionByUUID returns the session whose Claude conversation UUID matches
+	// conversationUUID, or (nil, nil) if no session tracks that UUID. Used by
+	// agm session get to resolve Claude session UUIDs passed from Stop hooks.
+	GetSessionByUUID(conversationUUID string) (*manifest.Manifest, error)
 }
 
 // Verify that Adapter implements manifest.Store at compile time.

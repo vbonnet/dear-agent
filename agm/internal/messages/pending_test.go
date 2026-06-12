@@ -55,6 +55,7 @@ func TestWritePendingFileToDir_EmptySessionName(t *testing.T) {
 	err := WritePendingFileToDir(tmpDir, "", "id-001", "msg")
 	if err == nil {
 		t.Fatal("expected error for empty session name")
+		return
 	}
 	if !strings.Contains(err.Error(), "session name is required") {
 		t.Errorf("unexpected error: %v", err)
@@ -67,6 +68,7 @@ func TestWritePendingFileToDir_EmptyMessage(t *testing.T) {
 	err := WritePendingFileToDir(tmpDir, "sess", "id-001", "")
 	if err == nil {
 		t.Fatal("expected error for empty message")
+		return
 	}
 	if !strings.Contains(err.Error(), "message content is required") {
 		t.Errorf("unexpected error: %v", err)

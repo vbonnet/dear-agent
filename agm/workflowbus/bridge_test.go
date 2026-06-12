@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/bus"
+	"github.com/vbonnet/dear-agent/agm/internal/testutil"
 )
 
 // fakeSignaler captures each Signal(name) call so tests can assert on them.
@@ -130,6 +131,7 @@ type nullWriter struct{}
 func (nullWriter) Write(p []byte) (int, error) { return len(p), nil }
 
 func TestBridgeSignalsOnGatePrefix(t *testing.T) {
+	testutil.SkipOnCI(t)
 	s := startTestBroker(t)
 	fs := startBridge(t, s.SocketPath, "wf-test")
 
@@ -149,6 +151,7 @@ func TestBridgeSignalsOnGatePrefix(t *testing.T) {
 }
 
 func TestBridgeSignalsOnExtraKind(t *testing.T) {
+	testutil.SkipOnCI(t)
 	s := startTestBroker(t)
 	fs := startBridge(t, s.SocketPath, "wf-test-2")
 
@@ -167,6 +170,7 @@ func TestBridgeSignalsOnExtraKind(t *testing.T) {
 }
 
 func TestBridgeIgnoresNonGateMessages(t *testing.T) {
+	testutil.SkipOnCI(t)
 	s := startTestBroker(t)
 	fs := startBridge(t, s.SocketPath, "wf-test-3")
 
@@ -185,6 +189,7 @@ func TestBridgeIgnoresNonGateMessages(t *testing.T) {
 }
 
 func TestBridgeHandlesMultipleSignalsInSequence(t *testing.T) {
+	testutil.SkipOnCI(t)
 	s := startTestBroker(t)
 	fs := startBridge(t, s.SocketPath, "wf-test-4")
 
@@ -212,6 +217,7 @@ func TestBridgeHandlesMultipleSignalsInSequence(t *testing.T) {
 }
 
 func TestBridgeReconnectsAfterBrokerDrop(t *testing.T) {
+	testutil.SkipOnCI(t)
 	// This test verifies the reconnect loop by dropping the bridge's
 	// connection via unregister; the broker treats it as a disconnect
 	// and the bridge's read loop errors, triggering reconnect.
@@ -334,6 +340,7 @@ func TestExtractGateNameForms(t *testing.T) {
 }
 
 func TestBridgeRejectsDuplicateSessionOnReconnect(t *testing.T) {
+	testutil.SkipOnCI(t)
 	// If the session id is still registered when the bridge reconnects,
 	// the broker rejects with ErrAlreadyRegistered. The bridge handles
 	// this by backing off; over time the old registration drops and

@@ -60,8 +60,9 @@ echo "Project: $AGM_PROJECT_DIR" >> ` + markerFile + `
 	// 5. post-init hook executed with environment variables set
 	// 6. Marker file should exist with expected content
 
-	// For now, skip actual execution
-	t.Skip("Hook execution not yet implemented")
+	// Hook execution is not yet wired — tracked in bead ce-6as.38.
+	// Remove this Skip when AGM dispatches the post-init hook after session start.
+	t.Skip("Hook execution not yet wired (bead ce-6as.38)")
 
 	// When implemented, verify:
 	// - Hook was executed

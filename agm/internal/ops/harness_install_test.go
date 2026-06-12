@@ -110,6 +110,7 @@ func TestInstallCodex_AlreadyInstalled(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("InstallCodex() returned nil")
+		return
 	}
 
 	if result.Harness != string(HarnessCodex) {
@@ -129,6 +130,7 @@ func TestInstallGemini_AlreadyInstalled(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("InstallGemini() returned nil")
+		return
 	}
 
 	if result.Harness != string(HarnessGemini) {
@@ -146,6 +148,7 @@ func TestInstallOpenCode_AlreadyInstalled(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("InstallOpenCode() returned nil")
+		return
 	}
 
 	if result.Harness != string(HarnessOpenCode) {
@@ -181,6 +184,7 @@ func TestInstall_ValidHarness(t *testing.T) {
 
 			if result == nil {
 				t.Fatal("Install() returned nil result")
+				return
 			}
 
 			if result.Harness != string(harness) {

@@ -73,6 +73,7 @@ func TestLoadSessionState_NoFallbackToOrchestrator(t *testing.T) {
 	_, _, err := LoadSessionState(dir, "some-worker")
 	if err == nil {
 		t.Fatal("expected error: should not fall back to orchestrator-state.json for non-orchestrator session")
+		return
 	}
 	if !strings.Contains(err.Error(), "no state file found") {
 		t.Errorf("error = %q, want 'no state file found'", err.Error())
@@ -84,6 +85,7 @@ func TestLoadSessionState_NoStateFile(t *testing.T) {
 	_, _, err := LoadSessionState(dir, "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for missing state file")
+		return
 	}
 	if !strings.Contains(err.Error(), "no state file found") {
 		t.Errorf("error = %q, want 'no state file found'", err.Error())
@@ -192,6 +194,7 @@ func TestLoadSessionState_InvalidJSON(t *testing.T) {
 	_, _, err := LoadSessionState(dir, "bad")
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
+		return
 	}
 	if !strings.Contains(err.Error(), "parse state file") {
 		t.Errorf("error = %q, want 'parse state file'", err.Error())

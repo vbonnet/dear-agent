@@ -56,5 +56,5 @@ tests passed on the packages whose deps changed." We do not yet claim
 "green CI ⇒ all integration tests pass" — that lives in a release
 workflow.
 
-See [ADR-024](../../docs/adr/ADR-024-smart-integration-test-selection.md)
+See [ADR-028](../../docs/adr/ADR-028-smart-integration-test-selection.md)
 for the full rationale.

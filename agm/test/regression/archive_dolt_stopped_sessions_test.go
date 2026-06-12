@@ -62,7 +62,7 @@ func TestArchiveStoppedSessionsFromDolt(t *testing.T) {
 		SchemaVersion: "2.0",
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
-		Agent:         "claude",
+		Harness:       "claude",
 		Lifecycle:     "", // Active, not archived
 		Context: manifest.Context{
 			Project: "/tmp/test",
@@ -146,6 +146,7 @@ func TestArchiveStoppedSessionsFromDolt(t *testing.T) {
 		_, err := adapter.ResolveIdentifier("stopped-session-test")
 		if err == nil {
 			t.Fatal("ResolveIdentifier should not find archived sessions")
+			return
 		}
 		expectedError := "session not found: stopped-session-test"
 		if err.Error() != expectedError {
@@ -188,6 +189,7 @@ func TestDoltStorageBackendConsistency(t *testing.T) {
 	_, err = adapter.ResolveIdentifier("nonexistent")
 	if err == nil {
 		t.Fatal("Expected error for nonexistent session")
+		return
 	}
 
 	// The error message should indicate Dolt storage is being used

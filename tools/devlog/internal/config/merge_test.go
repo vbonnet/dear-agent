@@ -315,6 +315,7 @@ func TestMerge_ComplexScenario(t *testing.T) {
 
 	if repo1 == nil {
 		t.Fatal("repo1 not found")
+		return
 	}
 
 	// repo1 should have 3 worktrees (main, develop, my-feature)

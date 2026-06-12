@@ -10,6 +10,7 @@ func TestNewFailureDetector(t *testing.T) {
 	detector := NewFailureDetector()
 	if detector == nil {
 		t.Fatal("NewFailureDetector() returned nil")
+		return
 	}
 
 	if detector.failureKeywords == nil {

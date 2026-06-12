@@ -1,0 +1,102 @@
+name: Benchmark Dry-Run
+
+# Compiles the benchmark harness and runs every registered suite end to
+# end against the built-in fixtures using the StubExecutor. Each task
+# will report as "errored" by design (the stub has no real model) — the
+# goal is to verify the harness wires up: suite registration, fixture
+# loading, RunConfig plumbing, JSON results persistence, and the printer.
+#
+# A real executor is gated behind separate credentialed jobs; this
+# workflow stays free of API keys and burns ~1 minute per run.
+
+on:
+  schedule:
+    # Weekly on Sunday at 08:00 UTC
+    - cron: "0 8 * * 0"
+  workflow_dispatch:
+
+concurrency:
+  group: benchmark-dryrun
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  dryrun:
+    name: Benchmark dry-run (StubExecutor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: 'go.sum'
+
+      - name: Build agm
+        run: |
+          mkdir -p build
+          go build -o build/agm ./agm/cmd/agm
+
+      - name: Unit tests — pkg/benchmarks
+        run: go test -race -count=1 -timeout 5m ./pkg/benchmarks/...
+
+      - name: List registered suites
+        run: ./build/agm benchmark --help
+
+      - name: Dry-run each suite (dear-agent mode)
+        run: |
+          mkdir -p dryrun-results
+          for suite in swe-bench-lite swe-bench-verified swe-atlas vibe-bench; do
+            echo "::group::$suite (dear-agent)"
+            ./build/agm benchmark run \
+              --suite "$suite" \
+              --mode dear-agent \
+              --results-dir dryrun-results
+            echo "::endgroup::"
+          done
+
+      - name: Dry-run swe-bench-lite in raw mode (A/B parity check)
+        run: |
+          ./build/agm benchmark run \
+            --suite swe-bench-lite \
+            --mode raw \
+            --model claude-opus-4-7 \
+            --results-dir dryrun-results
+
+      - name: Verify result files were written
+        run: |
+          set -euo pipefail
+          count=$(find dryrun-results -name '*.json' | wc -l)
+          echo "Result files written: $count"
+          if [ "$count" -lt 5 ]; then
+            echo "::error::Expected at least 5 result files (4 suites + raw A/B), got $count"
+            exit 1
+          fi
+          # Spot-check: every result file should have a non-empty
+          # "tasks" array, even though each task is errored.
+          for f in dryrun-results/*.json; do
+            tasks=$(jq '.tasks | length' "$f")
+            if [ "$tasks" -lt 1 ]; then
+              echo "::error::$f has no tasks recorded"
+              exit 1
+            fi
+          done
+
+      - name: Upload dry-run artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-dryrun-results
+          path: dryrun-results
+          if-no-files-found: ignore
+          retention-days: 14

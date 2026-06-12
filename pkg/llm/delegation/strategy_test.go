@@ -146,6 +146,7 @@ func TestSelectStrategyWithFallback(t *testing.T) {
 
 		if strategy == nil {
 			t.Fatal("Expected non-nil strategy")
+			return
 		}
 
 		if strategy.Name() != "ExternalAPI" && strategy.Name() != "Headless" {
@@ -244,6 +245,7 @@ func TestHeadlessStrategy(t *testing.T) {
 		strategy := NewHeadlessStrategy("gemini")
 		if strategy == nil {
 			t.Fatal("Expected non-nil strategy")
+			return
 		}
 
 		if strategy.Name() != "Headless" {
@@ -259,6 +261,7 @@ func TestHeadlessStrategy(t *testing.T) {
 		strategy := NewHeadlessStrategy("anthropic")
 		if strategy == nil {
 			t.Fatal("Expected non-nil strategy")
+			return
 		}
 
 		if strategy.Name() != "Headless" {
@@ -273,6 +276,7 @@ func TestExternalAPIStrategy(t *testing.T) {
 		strategy := NewExternalAPIStrategy("anthropic")
 		if strategy == nil {
 			t.Fatal("Expected non-nil strategy")
+			return
 		}
 
 		if strategy.Name() != "ExternalAPI" {
@@ -309,6 +313,7 @@ func TestStrategyExecution(t *testing.T) {
 
 		if output == nil {
 			t.Fatal("Expected non-nil output")
+			return
 		}
 
 		if output.Strategy != "ExternalAPI" {

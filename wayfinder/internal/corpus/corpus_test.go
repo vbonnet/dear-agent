@@ -179,12 +179,39 @@ func TestSchemasSupportWorkspaceIsolation(t *testing.T) {
 	}
 }
 
-// TestIsCorpusCallosumAvailable tests the availability check
+// TestCorpusCallosumBin_DefaultIsNotCC verifies that the default binary name
+// is NOT "cc", which collides with the macOS/Linux C compiler (clang/gcc).
+// ce-8tjw: clang was being invoked when corpus-callosum wasn't installed.
+func TestCorpusCallosumBin_DefaultIsNotCC(t *testing.T) {
+	t.Setenv("CORPUS_CALLOSUM_BIN", "")
+	bin := corpusCallosumBin()
+	if bin == "cc" {
+		t.Error("default binary must not be 'cc' — it collides with the C compiler on macOS/Linux")
+	}
+}
+
+// TestCorpusCallosumBin_EnvVarOverride verifies CORPUS_CALLOSUM_BIN is respected.
+func TestCorpusCallosumBin_EnvVarOverride(t *testing.T) {
+	t.Setenv("CORPUS_CALLOSUM_BIN", "/usr/local/bin/my-cc")
+	bin := corpusCallosumBin()
+	if bin != "/usr/local/bin/my-cc" {
+		t.Errorf("expected env override, got %q", bin)
+	}
+}
+
+// TestIsCorpusCallosumAvailable tests the availability check.
+// After the ce-8tjw fix, the default binary is "corpus-callosum" (not "cc"),
+// which is not installed here — so the function should return false and all
+// callers gracefully degrade.
 func TestIsCorpusCallosumAvailable(t *testing.T) {
-	// This test will pass or fail depending on whether cc is installed
-	// We just verify the function doesn't panic
+	t.Setenv("CORPUS_CALLOSUM_BIN", "")
+	// On this machine, "corpus-callosum" is not installed.
 	available := isCorpusCallosumAvailable()
-	t.Logf("Corpus callosum available: %v", available)
+	if available {
+		t.Log("corpus-callosum binary found on PATH — skipping not-installed assertion")
+		return
+	}
+	t.Log("corpus-callosum not installed; isCorpusCallosumAvailable correctly returns false")
 }
 
 // TestRegisterWayfinderSchemas_GracefulDegradation tests graceful degradation

@@ -328,6 +328,7 @@ func TestGetBackendErrorMessages(t *testing.T) {
 	_, err := GetBackend()
 	if err == nil {
 		t.Fatal("expected error for nonexistent backend")
+		return
 	}
 
 	// Error message should include available backends

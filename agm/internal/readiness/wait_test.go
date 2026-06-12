@@ -54,6 +54,7 @@ func TestWaitForReady_Timeout(t *testing.T) {
 	err := WaitForReady(sessionName, 500*time.Millisecond)
 	if err == nil {
 		t.Fatal("Expected timeout error, got nil")
+		return
 	}
 
 	// Verify error message
@@ -158,6 +159,7 @@ func TestWaitForReady_CrashedStatus(t *testing.T) {
 	err := WaitForReady(sessionName, 2*time.Second)
 	if err == nil {
 		t.Fatal("Expected error for crashed status, got nil")
+		return
 	}
 
 	if err.Error() != "Claude crashed during startup" {
@@ -200,6 +202,7 @@ func TestParseReadyFile_Malformed(t *testing.T) {
 	status, err := parseReadyFile(readyFile)
 	if err == nil {
 		t.Fatal("Expected error for malformed JSON, got nil")
+		return
 	}
 
 	if status != "" {
@@ -224,6 +227,7 @@ func TestParseReadyFile_MissingStatus(t *testing.T) {
 	status, err := parseReadyFile(readyFile)
 	if err == nil {
 		t.Fatal("Expected error for missing status field, got nil")
+		return
 	}
 
 	if status != "" {

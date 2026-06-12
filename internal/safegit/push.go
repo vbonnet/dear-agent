@@ -1,0 +1,149 @@
+// Package safegit builds and runs git pushes that cannot hang on the macOS
+// keychain credential helper, and cannot force-push.
+//
+// The hang it prevents
+//
+// On this host the git credential helper chain is, for any host not explicitly
+// remapped, the *generic* chain from the system gitconfig:
+//
+//	credential.helper=osxkeychain   (system: /opt/homebrew/etc/gitconfig)
+//	credential.helper=cache         (global: ~/.gitconfig)
+//
+// git queries them in order, so osxkeychain runs first. When the keychain
+// item's access-control list does not pre-authorize the invoking git binary
+// (which happens routinely after a Homebrew git upgrade relocates/re-signs the
+// binary), macOS pops a GUI authorization dialog. In a headless agent session
+// there is no one to click it, so the push blocks forever.
+//
+// github.com pushes "usually" work because ~/.gitconfig resets the helper list
+// for https://github.com to the GitHub CLI helper — but that reset is scoped to
+// two exact hosts. Any other credential context (a mirror remote, an embedded-
+// credential URL, a submodule, GitHub Enterprise) falls back to the generic
+// chain and hangs. The widely-pasted workaround
+//
+//	git -c credential.helper='!gh auth git-credential' push
+//
+// only *appends* the CLI helper; it never resets osxkeychain off the front of
+// the chain, so it inherits the same hang for every non-github.com context.
+//
+// The fix
+//
+// CredentialResetArgs emits an empty `-c credential.helper=` (which clears the
+// entire accumulated helper list, osxkeychain included) followed by a single
+// gh-only helper. Because command-line `-c` is read last and the empty value
+// resets the whole list, the push uses *only* the GitHub CLI helper for every
+// host — osxkeychain is never invoked, so the GUI dialog can never fire.
+package safegit
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+// DefaultTimeout bounds a push so a wedged credential helper (or a network
+// stall) fails fast with a clear message instead of blocking indefinitely.
+const DefaultTimeout = 30 * time.Second
+
+// ResolveGh returns the absolute path to the GitHub CLI. The credential helper
+// string is run by git via `/bin/sh -c`, so an absolute path keeps the helper
+// working regardless of the caller's PATH.
+func ResolveGh() (string, error) {
+	path, err := exec.LookPath("gh")
+	if err != nil {
+		return "", fmt.Errorf("GitHub CLI (gh) not found on PATH; safe-push needs it "+
+			"to authenticate without the keychain helper — install it (brew install gh) "+
+			"and run `gh auth login`: %w", err)
+	}
+	return path, nil
+}
+
+// CredentialResetArgs returns the `-c` flags that force git to use ONLY the
+// GitHub CLI credential helper for this invocation.
+//
+// The empty `credential.helper=` clears every helper accumulated from system,
+// global, and URL-scoped config (notably osxkeychain); the second entry then
+// registers gh as the sole helper. The result applies to all hosts, so no
+// credential context can fall through to the osxkeychain GUI prompt.
+func CredentialResetArgs(ghPath string) []string {
+	return []string{
+		"-c", "credential.helper=",
+		"-c", "credential.helper=!" + ghPath + " auth git-credential",
+	}
+}
+
+// ForceFlag reports the first force-push flag in args, if any. Force-push is
+// rejected by construction: a wrapper that can clobber shared history is not a
+// wrapper worth allow-listing.
+func ForceFlag(args []string) (string, bool) {
+	for _, a := range args {
+		switch {
+		case a == "-f" || a == "--force" || a == "--force-with-lease":
+			return a, true
+		case strings.HasPrefix(a, "--force-with-lease=") ||
+			strings.HasPrefix(a, "--force-if-includes"):
+			return a, true
+		}
+	}
+	return "", false
+}
+
+// PushArgs assembles the full git argv for a safe push: an optional `-C
+// repoDir`, the credential reset, `push`, and the caller's push arguments.
+func PushArgs(repoDir, ghPath string, pushArgs []string) []string {
+	var argv []string
+	if repoDir != "" {
+		argv = append(argv, "-C", repoDir)
+	}
+	argv = append(argv, CredentialResetArgs(ghPath)...)
+	argv = append(argv, "push")
+	argv = append(argv, pushArgs...)
+	return argv
+}
+
+// Push runs a safe push, streaming git's output to the caller's stdout/stderr.
+// It rejects force-push, bounds the run by timeout (DefaultTimeout if zero),
+// and sets GIT_TERMINAL_PROMPT=0 so git never falls back to an interactive
+// prompt. A timeout is reported as a credential-helper hang, the failure this
+// package exists to convert from "hang forever" into "fail in seconds".
+func Push(repoDir string, pushArgs []string, timeout time.Duration) error {
+	if flag, ok := ForceFlag(pushArgs); ok {
+		return fmt.Errorf("refusing %s: safe-push never force-pushes — "+
+			"clobbering remote history is exactly what this wrapper exists to prevent", flag)
+	}
+	gh, err := ResolveGh()
+	if err != nil {
+		return err
+	}
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	argv := PushArgs(repoDir, gh, pushArgs)
+	// argv[0..] are compile-time literals plus the resolved gh path and the
+	// caller's push refspecs; exec runs no shell, so refspecs are inert argv.
+	cmd := exec.CommandContext(ctx, "git", argv...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	// GIT_TERMINAL_PROMPT=0: never block on a terminal credential prompt.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+
+	err = cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("git push exceeded %s and was killed — this is the "+
+			"credential-helper hang safe-push guards against; the push did NOT "+
+			"complete. Verify `gh auth status` and retry; if it persists, the "+
+			"keychain helper is wedged (check the credential config)", timeout)
+	}
+	if err != nil {
+		return fmt.Errorf("git push failed: %w", err)
+	}
+	return nil
+}

@@ -47,8 +47,10 @@ func TestRelaxedPatternsNotLoaded(t *testing.T) {
 	}
 	for _, relaxed := range []string{
 		"inline-env-var-prefix", "command-chaining", "error-suppression-hook",
-		"bash-conditional", "for-loop", "file-operations", "text-processing",
+		"bash-conditional", "file-operations", "text-processing",
 		"backtick-substitution",
+		"combined-redirect", "combined-redirect-append", "heredoc",
+		"output-redirect", "output-redirect-append", "triple-redirect",
 	} {
 		assert.False(t, ids[relaxed], "relaxed rule should not be loaded: %s", relaxed)
 	}
@@ -210,6 +212,35 @@ func TestRun_Integration(t *testing.T) {
 			b, err := NewBashBlocker()
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantExit, b.Run())
+		})
+	}
+}
+
+func TestAllowSnippet(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want string
+	}{
+		{
+			name: "short command unchanged",
+			cmd:  "git status",
+			want: `Bash(git status)`,
+		},
+		{
+			name: "long command truncated at word boundary with wildcard",
+			cmd:  "GIT_TERMINAL_PROMPT=0 gtimeout 30 git push -u origin my-feature-branch --set-upstream",
+			want: `Bash(GIT_TERMINAL_PROMPT=0 gtimeout 30 git push -u origin*)`,
+		},
+		{
+			name: "exactly 60 chars not truncated",
+			cmd:  "123456789012345678901234567890123456789012345678901234567890",
+			want: `Bash(123456789012345678901234567890123456789012345678901234567890)`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, allowSnippet(tt.cmd))
 		})
 	}
 }

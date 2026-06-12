@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, develop]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 # Principle of least privilege: jobs only need to read the repo and the
 # go module cache. They never push branches, comment on PRs, or write to
 # the security tab.
@@ -16,14 +20,34 @@ jobs:
   ci:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        # Run the race detector on Linux only. Data races are
+        # platform-independent in practice, so the ubuntu leg catches them;
+        # the macOS leg runs the same suite without -race. This trims ~5 min
+        # off every PR's macOS job and removes the instrumentation-induced
+        # timing pressure that made the sub-millisecond timing tests flaky on
+        # macOS. (A matrix var, not an inline `&& '' || '-race'` ternary,
+        # because GitHub treats '' as falsy and the ternary would wrongly
+        # re-add -race on macOS.)
+        include:
+          - os: ubuntu-latest
+            race: "-race"
+          - os: macos-latest
+            race: ""
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Full history required for two reasons:
+          # (1) PR runs: golangci-lint new-from-merge-base needs the merge-base reachable.
+          # (2) Push-to-main runs: golangci-lint --new-from-rev=HEAD~1 needs HEAD~1 reachable.
+          # Without fetch-depth: 0 both baselines silently degrade to a full backlog scan.
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -35,6 +59,10 @@ jobs:
       - name: Install tmux (macOS)
         if: matrix.os == 'macos-latest'
         run: brew install tmux
+
+      - name: Install bubblewrap (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install -y bubblewrap
 
       - name: Download dependencies
         run: go mod download
@@ -63,7 +91,7 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -race -count=1 ./...
+        run: go test ${{ matrix.race }} -count=1 ./...
         env:
           # Skip tmux-dependent tests on macOS CI
           CI_SKIP_TMUX: ${{ matrix.os == 'macos-latest' && 'true' || 'false' }}
@@ -71,7 +99,83 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # Pin to a specific version so linter upgrades are deliberate, not
+          # silent. `latest` lets golangci-lint bump on its own schedule,
+          # which can introduce new findings (e.g. SA5011) on an unrelated PR
+          # and red main without any code change. Bump this intentionally.
+          version: v2.12.2
+          # On push-to-main: diff against the previous commit (HEAD~1) so
+          # admin-bypass-merged PRs that skipped CI are still caught. On PRs:
+          # pass nothing — .golangci.yml's new-from-merge-base: origin/main
+          # takes effect and reports only code changed relative to main.
+          # CLI args override config-file settings in golangci-lint v2.
+          args: ${{ github.event_name == 'push' && '--new-from-rev=HEAD~1' || '' }}
+
+  # Smart integration-test selection. The selector (cmd/test-affected)
+  # walks the dependency graph from this branch vs. origin/main and runs
+  # `go test -tags=integration` on only the packages whose deps actually
+  # changed. Files that invalidate the graph itself (go.mod, go.sum,
+  # Makefile, .github/workflows/, the selector source) deliberately fall
+  # back to a full integration run — see cmd/test-affected/main.go.
+  #
+  # This is *additive*. The "Build & Test" job above still runs every
+  # unit test on every PR; this job just narrows the integration suite
+  # down to what the PR actually touches. Empty output = clean pass.
+  #
+  # Linux-only on purpose: integration tests rely on real tmux and
+  # process behaviour that's flaky on the macOS runner. Mirror the
+  # exclusion the unit-test job already encodes via CI_SKIP_TMUX.
+  integration-tests:
+    name: Integration Tests (affected)
+    runs-on: ubuntu-latest
+    # Only meaningful on PRs — we need a base ref to diff against. For
+    # pushes to main/develop, the unit-test matrix above is the gate;
+    # full integration sweeps belong in a scheduled or release workflow,
+    # not on every commit to a long-lived branch.
+    if: github.event_name == 'pull_request'
+    # Day-one posture: the `-tags=integration` suites have been running
+    # only in local worktrees, so the first time CI runs them on a PR
+    # we'll surface latent failures (build errors, search-package
+    # regressions, etc.) in code this PR didn't touch. The job reports
+    # them as informational rather than blocking — see ADR-028's
+    # "trust boundary" section. Ratchet path: drive the suite green on
+    # main, then flip continue-on-error off and add this check to
+    # branch-protection required-status-checks (admin step).
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Full history so we can git diff against the PR base ref.
+          # Shallow clones make git diff $base...HEAD lie about which
+          # files changed.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: "go.sum"
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run affected integration tests
+        env:
+          # checkout@v6 with fetch-depth: 0 already gave us full history
+          # for all branches the runner cloned; we just need to make sure
+          # the PR base ref is present as a local remote-tracking ref so
+          # the selector can `git diff origin/<base>...HEAD`.
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          SKIP_E2E: "1"
+        run: |
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          go run ./cmd/test-affected --base="origin/${BASE_REF}" --tags=integration --run
 
   # Smart integration-test selection. The selector (cmd/test-affected)
   # walks the dependency graph from this branch vs. origin/main and runs
@@ -147,6 +251,7 @@ jobs:
   govulncheck:
     name: govulncheck
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6

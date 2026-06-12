@@ -11,12 +11,12 @@ import (
 
 // customDetailedJudge allows custom evaluation logic for testing
 type customDetailedJudge struct {
-	evaluateFunc func(ctx context.Context, input, expectedOutput string, criteria EvaluationCriteria) (*JudgeResponse, error)
+	evaluateFunc func(ctx context.Context, input, expectedOutput, actualOutput string, criteria EvaluationCriteria) (*JudgeResponse, error)
 }
 
-func (c *customDetailedJudge) EvaluateDetailed(ctx context.Context, input, expectedOutput string, criteria EvaluationCriteria) (*JudgeResponse, error) {
+func (c *customDetailedJudge) EvaluateDetailed(ctx context.Context, input, expectedOutput, actualOutput string, criteria EvaluationCriteria) (*JudgeResponse, error) {
 	if c.evaluateFunc != nil {
-		return c.evaluateFunc(ctx, input, expectedOutput, criteria)
+		return c.evaluateFunc(ctx, input, expectedOutput, actualOutput, criteria)
 	}
 	return &JudgeResponse{Pass: true, Score: 1.0, Reasoning: "Default"}, nil
 }
@@ -96,7 +96,7 @@ func TestEvaluateOffline(t *testing.T) {
 		// Create custom mock with state
 		callCount := 0
 		customMock := &customDetailedJudge{
-			evaluateFunc: func(ctx context.Context, input, expectedOutput string, criteria EvaluationCriteria) (*JudgeResponse, error) {
+			evaluateFunc: func(ctx context.Context, input, expectedOutput, actualOutput string, criteria EvaluationCriteria) (*JudgeResponse, error) {
 				callCount++
 				if callCount == 1 {
 					return &JudgeResponse{Pass: true, Score: 0.9, Reasoning: "Good"}, nil
@@ -199,7 +199,7 @@ func TestEvaluateOffline(t *testing.T) {
 
 		callCount := 0
 		customMock := &customDetailedJudge{
-			evaluateFunc: func(ctx context.Context, input, expectedOutput string, criteria EvaluationCriteria) (*JudgeResponse, error) {
+			evaluateFunc: func(ctx context.Context, input, expectedOutput, actualOutput string, criteria EvaluationCriteria) (*JudgeResponse, error) {
 				callCount++
 				if callCount <= 2 {
 					return &JudgeResponse{Pass: false, Score: 0.5, Reasoning: "Failed"}, nil
@@ -256,6 +256,37 @@ func TestEvaluateOffline(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, report)
 		assert.Contains(t, err.Error(), "failed to evaluate test case")
+	})
+
+	// Regression: EvaluateOffline previously dropped TestCase.ActualOutput and
+	// passed only ExpectedOutput to the judge, so judges graded
+	// expected-vs-expected and could never detect a wrong answer. Verify the
+	// judge receives the actual output distinct from the expected output.
+	t.Run("forwards actual output to judge", func(t *testing.T) {
+		testCases := []TestCase{
+			{
+				ID:             "test-1",
+				Input:          "input1",
+				ExpectedOutput: "the-expected-answer",
+				ActualOutput:   "the-actual-answer",
+				Criteria:       EvaluationCriteria{Threshold: 0.7},
+			},
+		}
+
+		var gotExpected, gotActual string
+		captureMock := &customDetailedJudge{
+			evaluateFunc: func(ctx context.Context, input, expectedOutput, actualOutput string, criteria EvaluationCriteria) (*JudgeResponse, error) {
+				gotExpected = expectedOutput
+				gotActual = actualOutput
+				return &JudgeResponse{Pass: true, Score: 1.0, Reasoning: "ok"}, nil
+			},
+		}
+
+		_, err := EvaluateOffline(context.Background(), testCases, captureMock, DefaultOfflineConfig())
+		require.NoError(t, err)
+		assert.Equal(t, "the-expected-answer", gotExpected)
+		assert.Equal(t, "the-actual-answer", gotActual,
+			"judge must receive TestCase.ActualOutput, not the expected output")
 	})
 }
 

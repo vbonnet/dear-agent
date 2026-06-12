@@ -19,10 +19,12 @@ func TestResolveModelFullName(t *testing.T) {
 		input    string
 		expected string
 	}{
+		{"claude-code", "fable", "claude-fable-5"},
 		{"claude-code", "sonnet", "claude-sonnet-4-6[1m]"},
-		{"claude-code", "opus", "claude-opus-4-6[1m]"},
+		{"claude-code", "opus", "claude-opus-4-8[1m]"},
 		{"claude-code", "haiku", "claude-haiku-4-5"},
-		{"gemini-cli", "2.5-flash", "gemini-2.5-flash"},
+		{"claude-code", "fable", "claude-fable-5"},
+		{"gemini-cli", "3.5-flash", "gemini-3.5-flash"},
 		{"codex-cli", "5.4", "gpt-5.4"},
 		// Unknown alias passthrough
 		{"claude-code", "future-model", "future-model"},
@@ -69,10 +71,10 @@ func TestDefaultModeForHarness(t *testing.T) {
 }
 
 func TestResolveModelFullName_1MContext(t *testing.T) {
-	// opus alias should resolve to claude-opus-4-6[1m] (1M context by default)
+	// opus alias should resolve to claude-opus-4-8[1m] (1M context by default)
 	got := ResolveModelFullName("claude-code", "opus")
-	if got != "claude-opus-4-6[1m]" {
-		t.Errorf("ResolveModelFullName(claude-code, opus) = %q, want %q", got, "claude-opus-4-6[1m]")
+	if got != "claude-opus-4-8[1m]" {
+		t.Errorf("ResolveModelFullName(claude-code, opus) = %q, want %q", got, "claude-opus-4-8[1m]")
 	}
 	// sonnet alias should also get 1M context
 	got = ResolveModelFullName("claude-code", "sonnet")
@@ -81,8 +83,8 @@ func TestResolveModelFullName_1MContext(t *testing.T) {
 	}
 	// opus-200k should resolve to non-1M variant
 	got = ResolveModelFullName("claude-code", "opus-200k")
-	if got != "claude-opus-4-6" {
-		t.Errorf("ResolveModelFullName(claude-code, opus-200k) = %q, want %q", got, "claude-opus-4-6")
+	if got != "claude-opus-4-8" {
+		t.Errorf("ResolveModelFullName(claude-code, opus-200k) = %q, want %q", got, "claude-opus-4-8")
 	}
 	// Default model alias should resolve correctly (default is sonnet).
 	defaultModel, _ := DefaultModelForHarness("claude-code")
@@ -126,16 +128,16 @@ func TestResolveModelFullName_CrossHarness(t *testing.T) {
 		// Claude aliases → Gemini models
 		{"gemini-cli", "opus", "gemini-2.5-pro"},
 		{"gemini-cli", "sonnet", "gemini-3.1-pro-preview"},
-		{"gemini-cli", "haiku", "gemini-2.5-flash"},
+		{"gemini-cli", "haiku", "gemini-3.5-flash"},
 		// Claude aliases → Codex models
 		{"codex-cli", "opus", "gpt-5.4"},
 		{"codex-cli", "haiku", "gpt-5.4-mini"},
 		// Gemini aliases → Claude models
-		{"claude-code", "2.5-pro", "claude-opus-4-6[1m]"},
-		{"claude-code", "2.5-flash", "claude-haiku-4-5"},
+		{"claude-code", "2.5-pro", "claude-opus-4-8[1m]"},
+		{"claude-code", "3.5-flash", "claude-haiku-4-5"},
 		// Native aliases still work (not affected)
-		{"gemini-cli", "2.5-flash", "gemini-2.5-flash"},
-		{"claude-code", "opus", "claude-opus-4-6[1m]"},
+		{"gemini-cli", "3.5-flash", "gemini-3.5-flash"},
+		{"claude-code", "opus", "claude-opus-4-8[1m]"},
 	}
 	for _, tt := range tests {
 		got := ResolveModelFullName(tt.harness, tt.input)
@@ -157,7 +159,7 @@ func TestGetModelsForHarness_OpenCode(t *testing.T) {
 		if m.FullName == "claude-sonnet-4-6[1m]" {
 			foundClaude = true
 		}
-		if m.FullName == "gemini-2.5-flash" {
+		if m.FullName == "gemini-3.5-flash" {
 			foundGemini = true
 		}
 	}

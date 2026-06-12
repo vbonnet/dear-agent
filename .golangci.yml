@@ -25,7 +25,7 @@ linters:
     - bodyclose
     - errorlint
     - misspell
-    # - modernize  # TODO: not available in golangci-lint v2.5.0
+    - modernize    # modern Go simplifications (any-over-interface{}, etc.)
     - nilerr
     - noctx
     - revive
@@ -34,6 +34,10 @@ linters:
 
     # Complexity
     - gocyclo
+    - dupl         # copy-paste / clone detection (high threshold, see settings)
+
+    # Lint hygiene
+    - nolintlint   # every //nolint must carry a linter name + justification
 
     # Best practices
     - gocritic     # subtle style and performance issues
@@ -45,8 +49,27 @@ linters:
     gocyclo:
       min-complexity: 15
 
+    dupl:
+      # High token threshold: only flag substantial clone clusters, not
+      # incidental 3-line similarities. 150 ≈ ~40+ lines of duplicated logic.
+      threshold: 150
+
+    nolintlint:
+      # Every //nolint must name the linter(s) it suppresses and carry a
+      # human justification — no bare blanket suppressions.
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+
     errcheck:
-      check-blank: false  # Allow _ = for intentional cleanup
+      # Inverted posture: check blank `_ = err` assignments too, so swallowed
+      # errors are visible. Genuine fire-and-forget cleanup (Close/Flush in
+      # defers) is excluded narrowly via the exclude-functions list below.
+      check-blank: true
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*os.File).Sync
 
     staticcheck:
       checks: ["all", "-SA4010"]  # Disable unused append check
@@ -87,7 +110,13 @@ linters:
           - nilerr
           - revive
           - exhaustive
-      - text: "Error return value.*is not checked"
+      # Pre-existing posture: regular unchecked-return findings stay excluded
+      # (out of scope for this change). Note the "of `fn`" in the pattern — it
+      # matches ONLY the non-blank message ("Error return value of `x` is not
+      # checked") and deliberately does NOT match the blank-assignment message
+      # ("Error return value is not checked"). That lets errcheck.check-blank
+      # surface swallowed `_ = err` discards (T8) which were previously hidden.
+      - text: "Error return value of .* is not checked"
         linters:
           - errcheck
       - text: "os/exec.Command must not be called"
@@ -112,6 +141,24 @@ linters:
       - third_party
       - vendor
       - mcp-wizard/node_modules
+
+issues:
+  # Baseline the existing backlog so newly-enabled linters (dupl, nolintlint,
+  # modernize) and the errcheck.check-blank flip gate *new* regressions without
+  # blocking unrelated PRs on the pre-existing violations (positive-guidance
+  # posture, .claude/CLAUDE.md §2). Findings are reported only for code changed
+  # relative to the merge-base with origin/main; the existing backlog is burned
+  # down incrementally under scoped Beads work, not in this enabling PR.
+  #
+  # Requires full git history in CI — see fetch-depth: 0 on the ci job checkout.
+  new-from-merge-base: origin/main
+  # Don't auto-discard duplicate or per-linter-capped issues from the "new" set.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt  # two unformatted files reached main; gate new regressions
 
 output:
   formats:

@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+#
+# Git post-merge hook — auto-reap provably-merged worktrees after a merge to
+# the default branch.
+#
+# This is the trigger the worktree/branch cleanup discipline was missing. The
+# reaper itself already exists and is fail-safe: `agm worktree sweep` walks
+# every worktree under ~/worktrees, classifies each, and with --execute removes
+# ONLY the ones that are provably MERGED (ancestor-of-base OR authoritative
+# `gh` PR==MERGED — the squash-merge escape) AND clean, deleting the orphaned
+# local branch too. Everything dirty / active / awaiting-input / unprovable is
+# KEPT. We do NOT reimplement any of that here — see
+# agm/internal/ops/worktree_sweep.go. This hook only pulls the trigger when a
+# PR lands on the default branch locally.
+#
+# When it fires: git runs post-merge after any non-conflicting `git merge` /
+# `git pull` (fast-forward included). The typical path is `git pull` on main
+# after a PR was squash-merged on GitHub.
+#
+# Safety / etiquette (positive guidance — why each guard exists):
+#   • Only sweeps on the DEFAULT branch. A feature-branch integration merge
+#     ("git merge main" while on a feature branch) must NOT trigger a reap.
+#   • NEVER blocks or fails the git operation — always exits 0, and runs the
+#     sweep detached so `git pull` returns immediately. A cleanup convenience
+#     must never get in the way of the merge that triggered it.
+#   • No-op when `agm` is not installed, or when AGM_POST_MERGE_SWEEP=0 — the
+#     hook is global (core.hooksPath), so it must be inert wherever agm/the
+#     ~/worktrees workflow is not in use.
+#   • Per-invocation timeout so a hung `gh` PR-state probe can never wedge.
+#
+# Why a hook and not CI: the worktrees and the live AGM session store live on
+# this workstation, not on a CI runner — a runner sweep would classify nothing
+# as ACTIVE and see no worktrees at all.
+#
+# Test seam: AGM_POST_MERGE_SWEEP_SYNC=1 runs the sweep in the foreground
+# (deterministic for tests; also handy if you want `git pull` to wait).
+#
+# Install: `make install-post-merge-hook` (honours core.hooksPath and never
+# clobbers a chezmoi-managed hooks dir — see cmd/install-post-merge-hook).
+
+set -u
+
+# ── Opt-out / prerequisites ────────────────────────────────────────────────
+[ "${AGM_POST_MERGE_SWEEP:-1}" = "0" ] && exit 0
+command -v agm >/dev/null 2>&1 || exit 0
+
+# ── Resolve the repo's default branch (origin/HEAD, else local main/master) ─
+default_branch=""
+if ref="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"; then
+  default_branch="${ref#origin/}"
+fi
+if [ -z "${default_branch}" ]; then
+  for cand in main master; do
+    if git show-ref --verify --quiet "refs/heads/${cand}"; then
+      default_branch="${cand}"
+      break
+    fi
+  done
+fi
+
+current_branch="$(git branch --show-current 2>/dev/null)"
+
+# Only sweep when the merge landed on the default branch (a PR hitting main).
+if [ -z "${default_branch}" ] || [ "${current_branch}" != "${default_branch}" ]; then
+  exit 0
+fi
+
+# ── Logging ────────────────────────────────────────────────────────────────
+log_dir="${HOME}/.claude/logs"
+mkdir -p "${log_dir}" 2>/dev/null || true
+log_file="${log_dir}/worktree-post-merge.log"
+ts="$(date -u +%FT%TZ 2>/dev/null || echo unknown)"
+
+printf '[%s] post-merge on %s: launching `agm worktree sweep --execute`\n' \
+  "${ts}" "${default_branch}" >> "${log_file}" 2>/dev/null || true
+
+# Prefer gtimeout (macOS coreutils) then timeout; run bare if neither exists.
+timeout_bin=""
+for t in gtimeout timeout; do
+  if command -v "$t" >/dev/null 2>&1; then
+    timeout_bin="$t"
+    break
+  fi
+done
+
+# run_sweep executes the canonical reaper with a per-invocation timeout. The
+# GIT_* hook env is cleared so the sweep operates on the repos it discovers
+# under ~/worktrees, not on this hook's repo context.
+run_sweep() {
+  if [ -n "${timeout_bin}" ]; then
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX \
+      "${timeout_bin}" 120 agm worktree sweep --execute
+  else
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX \
+      agm worktree sweep --execute
+  fi
+}
+
+if [ "${AGM_POST_MERGE_SWEEP_SYNC:-0}" = "1" ]; then
+  run_sweep >> "${log_file}" 2>&1
+else
+  # Detach so the merge/pull returns immediately; the sweep is fail-safe and
+  # self-logging.
+  run_sweep >> "${log_file}" 2>&1 &
+fi
+
+exit 0

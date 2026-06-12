@@ -80,6 +80,7 @@ func TestBackendSwitching_Invalid(t *testing.T) {
 	_, err := backend.GetBackend()
 	if err == nil {
 		t.Fatal("expected error for invalid backend, got nil")
+		return
 	}
 
 	// Error should mention the invalid backend name

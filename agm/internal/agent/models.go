@@ -15,10 +15,11 @@ type ModelSpec struct {
 // HarnessModels defines known models per harness.
 var HarnessModels = map[string][]ModelSpec{
 	"claude-code": {
-		{Alias: "opus", FullName: "claude-opus-4-6[1m]", Description: "Latest Opus, 1M context"},
+		{Alias: "fable", FullName: "claude-fable-5", Description: "Mythos-class, most capable, 1M context, 128k max output (free on Pro/Max/Team through 2026-06-23)"},
+		{Alias: "opus", FullName: "claude-opus-4-8[1m]", Description: "Latest Opus, 1M context"},
 		{Alias: "sonnet", FullName: "claude-sonnet-4-6[1m]", Description: "Latest Sonnet, 1M context"},
 		{Alias: "haiku", FullName: "claude-haiku-4-5", Description: "Fast, 200k context"},
-		{Alias: "opus-200k", FullName: "claude-opus-4-6", Description: "Opus with default 200k context"},
+		{Alias: "opus-200k", FullName: "claude-opus-4-8", Description: "Opus with default 200k context"},
 		{Alias: "sonnet-200k", FullName: "claude-sonnet-4-6", Description: "Sonnet with default 200k context"},
 		{Alias: "opusplan", FullName: "opusplan", Description: "Opus for planning, Sonnet for execution"},
 	},
@@ -27,7 +28,7 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "3-flash", FullName: "gemini-3-flash-preview", Description: "High performance, lower cost"},
 		{Alias: "3.1-flash-lite", FullName: "gemini-3.1-flash-lite-preview", Description: "Fastest, cheapest"},
 		{Alias: "2.5-pro", FullName: "gemini-2.5-pro", Description: "Stable, complex tasks"},
-		{Alias: "2.5-flash", FullName: "gemini-2.5-flash", Description: "Stable, best price-performance"},
+		{Alias: "3.5-flash", FullName: "gemini-3.5-flash", Description: "Stable, best price-performance (GA 2026-05-19)"},
 		{Alias: "2.5-flash-lite", FullName: "gemini-2.5-flash-lite", Description: "Budget multimodal"},
 	},
 	"codex-cli": {
@@ -45,11 +46,13 @@ var HarnessModels = map[string][]ModelSpec{
 // Only tier names that differ across harnesses need entries.
 var CrossHarnessAliases = map[string]map[string]string{
 	"gemini-cli": {
+		"fable":  "3.1-pro",   // mythos-tier → gemini-3.1-pro-preview (best available)
 		"opus":   "2.5-pro",   // highest-tier → gemini-2.5-pro
 		"sonnet": "3.1-pro",   // mid-tier → gemini-3.1-pro-preview
-		"haiku":  "2.5-flash", // fast-tier → gemini-2.5-flash
+		"haiku":  "3.5-flash", // fast-tier → gemini-3.5-flash
 	},
 	"codex-cli": {
+		"fable":  "5.4",      // mythos-tier → gpt-5.4 (best available)
 		"opus":   "5.4",      // highest-tier → gpt-5.4
 		"sonnet": "5.4",      // mid-tier → gpt-5.4 (no direct equivalent)
 		"haiku":  "5.4-mini", // fast-tier → gpt-5.4-mini
@@ -57,7 +60,7 @@ var CrossHarnessAliases = map[string]map[string]string{
 	"claude-code": {
 		"2.5-pro":   "opus",   // gemini alias → claude equivalent
 		"3.1-pro":   "sonnet", // gemini alias → claude equivalent
-		"2.5-flash": "haiku",  // gemini alias → claude equivalent
+		"3.5-flash": "haiku",  // gemini alias → claude equivalent
 		"5.4":       "opus",   // codex alias → claude equivalent
 		"5.4-mini":  "haiku",  // codex alias → claude equivalent
 	},
@@ -71,7 +74,7 @@ var CrossHarnessAliases = map[string]map[string]string{
 // the silent default.
 var HarnessDefaults = map[string]string{
 	"claude-code": "sonnet",
-	"gemini-cli":  "2.5-flash",
+	"gemini-cli":  "3.5-flash",
 	"codex-cli":   "5.4",
 	// opencode-cli intentionally omitted — requires interactive picker
 }

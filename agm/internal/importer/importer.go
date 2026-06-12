@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -102,6 +103,201 @@ func ImportOrphanedSession(conversationUUID, sessionName, workspace string, adap
 	}
 
 	return sessionID, nil
+}
+
+// RegisterResult describes the outcome of a RegisterSession call.
+type RegisterResult struct {
+	SessionID      string // AGM session ID (existing one if AlreadyTracked)
+	Workspace      string // Workspace label that was used/stored
+	Project        string // Inferred project path
+	Name           string // Session name (existing one if AlreadyTracked)
+	AlreadyTracked bool   // true if the UUID already had a manifest (idempotent no-op)
+}
+
+// RegisterSession idempotently ensures an AGM manifest exists for a Claude
+// conversation UUID.
+//
+// Unlike ImportOrphanedSession, RegisterSession is safe to call repeatedly and
+// non-interactively (it never prompts), which is what makes it callable from a
+// SessionStart hook:
+//   - If the UUID is already tracked, it returns the existing session unchanged
+//     (AlreadyTracked=true) instead of erroring or minting a duplicate ID.
+//   - When workspace is empty, it is inferred from the conversation's project
+//     directory (InferWorkspaceFromProject) rather than blindly defaulting to
+//     the active config workspace, which mis-attributes every imported session
+//     to a single workspace (see the 2026-05-21 unified-session-management retro).
+//   - When sessionName is empty, it is derived from the project basename.
+//   - projectDir, when non-empty, is used as the project directory directly,
+//     skipping the InferProjectPath scan. This is the fix for the SessionStart
+//     timing window: the hook payload includes cwd but the conversation
+//     .jsonl file has not been written yet when SessionStart fires.
+//
+// Parameters mirror ImportOrphanedSession. fallbackWorkspace is used only when
+// neither an explicit workspace nor an inferable one is available (typically the
+// caller's cfg.Workspace).
+func RegisterSession(conversationUUID, sessionName, workspace, fallbackWorkspace, projectDir string, adapter *dolt.Adapter) (*RegisterResult, error) {
+	if conversationUUID == "" {
+		return nil, fmt.Errorf("conversation UUID cannot be empty")
+	}
+	if adapter == nil {
+		return nil, fmt.Errorf("Dolt adapter not available") //nolint:staticcheck // proper noun
+	}
+
+	// 1. Idempotency: if already tracked, return the existing session untouched.
+	existing, err := FindByUUID(conversationUUID, adapter)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return &RegisterResult{
+			SessionID:      existing.SessionID,
+			Workspace:      existing.Workspace,
+			Project:        existing.Context.Project,
+			Name:           existing.Name,
+			AlreadyTracked: true,
+		}, nil
+	}
+
+	// 2. Resolve the conversation's real project path.
+	//
+	// projectDir wins when provided (SessionStart hook knows cwd before the
+	// .jsonl is written). When absent, fall back to the conversation file scan.
+	var projectPath string
+	if projectDir != "" {
+		projectPath = projectDir
+	} else {
+		projectPath, err = InferProjectPath(conversationUUID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to infer project path: %w", err)
+		}
+	}
+	metadata, err := ExtractMetadataFromHistory(conversationUUID)
+	if err != nil {
+		metadata = &SessionMetadata{
+			UUID:         conversationUUID,
+			ProjectPath:  projectPath,
+			LastModified: time.Now(),
+		}
+	} else if metadata.ProjectPath != "" {
+		// History is more authoritative when available; prefer it over cwd hint.
+		projectPath = metadata.ProjectPath
+	}
+
+	// 3. Resolve workspace label: explicit > inferred-from-project > fallback.
+	if workspace == "" {
+		workspace = InferWorkspaceFromProject(projectPath)
+	}
+	if workspace == "" {
+		workspace = fallbackWorkspace
+	}
+	if workspace == "" {
+		return nil, fmt.Errorf("workspace could not be determined for %s\n\n"+
+			"Solutions:\n"+
+			"  • Provide workspace explicitly: --workspace=oss\n"+
+			"  • Ensure the conversation's project directory is under a git/WORKSPACE.yaml root\n"+
+			"  • Set a default workspace in ~/.agm/config.yaml", conversationUUID)
+	}
+
+	// 4. Derive a name when none was given (keeps register non-interactive).
+	if sessionName == "" {
+		sessionName = deriveSessionName(projectPath, conversationUUID)
+	}
+
+	// 5. Create the manifest.
+	sessionID := uuid.New().String()
+	m := &manifest.Manifest{
+		SchemaVersion:    manifest.SchemaVersion,
+		SessionID:        sessionID,
+		Name:             sessionName,
+		CreatedAt:        metadata.LastModified,
+		UpdatedAt:        time.Now(),
+		Lifecycle:        "",
+		Workspace:        workspace,
+		WorkingDirectory: projectPath,
+		Context: manifest.Context{
+			Project: projectPath,
+		},
+		Claude: manifest.Claude{
+			UUID: conversationUUID,
+		},
+		Tmux: manifest.Tmux{
+			SessionName: tmux.SanitizeSessionName(sessionName),
+		},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		return nil, fmt.Errorf("failed to create session in Dolt: %w", err)
+	}
+
+	return &RegisterResult{
+		SessionID:      sessionID,
+		Workspace:      workspace,
+		Project:        projectPath,
+		Name:           sessionName,
+		AlreadyTracked: false,
+	}, nil
+}
+
+// FindByUUID returns the manifest for a tracked conversation UUID, or nil if
+// no manifest exists for it. Unlike ValidateNotDuplicate it does not treat an
+// existing manifest as an error — callers decide what to do with it. Backed by
+// an indexed lookup on agm_sessions.claude_uuid (see Adapter.GetSessionByUUID),
+// so it stays O(1) instead of scanning the full session list.
+func FindByUUID(conversationUUID string, adapter *dolt.Adapter) (*manifest.Manifest, error) {
+	if adapter == nil {
+		return nil, fmt.Errorf("Dolt adapter not available") //nolint:staticcheck // proper noun
+	}
+	return adapter.GetSessionByUUID(conversationUUID)
+}
+
+// InferWorkspaceFromProject derives a workspace label from a project directory
+// by walking upward to the nearest workspace root (a directory containing a
+// WORKSPACE.yaml or a .git entry) and returning that root's basename. It returns
+// "" when no root is found or the path is not a usable absolute filesystem path
+// (e.g. a ~/.claude/projects/<encoded> directory when history was unavailable).
+func InferWorkspaceFromProject(projectPath string) string {
+	if projectPath == "" {
+		return ""
+	}
+	// Expand a leading ~ so history-supplied paths resolve on disk.
+	if strings.HasPrefix(projectPath, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			projectPath = filepath.Join(home, strings.TrimPrefix(projectPath, "~"))
+		}
+	}
+	if !filepath.IsAbs(projectPath) {
+		return ""
+	}
+	dir := projectPath
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "WORKSPACE.yaml")); err == nil {
+			return filepath.Base(dir)
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return filepath.Base(dir)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// deriveSessionName builds a stable, non-empty session name from the project
+// path, falling back to a short UUID prefix so register never needs to prompt.
+func deriveSessionName(projectPath, conversationUUID string) string {
+	base := filepath.Base(projectPath) // filepath.Base trims trailing separators.
+	if base != "" && base != "." && base != "/" {
+		short := conversationUUID
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		return fmt.Sprintf("%s-%s", base, short)
+	}
+	if len(conversationUUID) > 8 {
+		return "session-" + conversationUUID[:8]
+	}
+	return "session-" + conversationUUID
 }
 
 // InferProjectPath finds the project directory for a conversation UUID
