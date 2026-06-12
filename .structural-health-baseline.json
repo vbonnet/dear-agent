@@ -198,7 +198,6 @@
       "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/progress",
       "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/s7",
       "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/tracker",
-      "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder/cmd",
       "github.com/vbonnet/dear-agent/wayfinder/hooks/cmd/stop-wayfinder-guard",
       "github.com/vbonnet/dear-agent/wayfinder/internal/tracker"
     ]
