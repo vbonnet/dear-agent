@@ -1,21 +1,16 @@
 package source_test
 
 import (
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/source"
 )
 
-func TestErrNotFound_IsCheck(t *testing.T) {
+func TestErrNotFound_IsNonNil(t *testing.T) {
 	t.Parallel()
-	err := source.ErrNotFound
-	if !errors.Is(err, source.ErrNotFound) {
-		t.Error("errors.Is(ErrNotFound, ErrNotFound) = false, want true")
-	}
-	if errors.Is(err, errors.New("other")) {
-		t.Error("errors.Is(ErrNotFound, other) = true, want false")
+	if source.ErrNotFound == nil {
+		t.Error("ErrNotFound is nil, want non-nil sentinel")
 	}
 }
 

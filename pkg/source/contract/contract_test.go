@@ -3,6 +3,7 @@ package contract
 import (
 	"bytes"
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -59,14 +60,7 @@ func (m *memAdapter) Fetch(_ context.Context, q source.FetchQuery) ([]source.Sou
 func matchesFilters(s source.Source, f source.Filters) bool {
 	// Cue filter: source must have ALL requested cues.
 	for _, cue := range f.Cues {
-		found := false
-		for _, c := range s.Metadata.Cues {
-			if c == cue {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(s.Metadata.Cues, cue) {
 			return false
 		}
 	}

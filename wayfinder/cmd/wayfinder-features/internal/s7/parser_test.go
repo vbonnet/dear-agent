@@ -149,12 +149,7 @@ func TestFindS7Plan_Found(t *testing.T) {
 		t.Fatalf("write plan: %v", err)
 	}
 
-	// Change to dir — t.Chdir is 1.24+, use Chdir directly with cleanup.
-	orig, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(orig) })
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
+	t.Chdir(dir)
 
 	got, err := FindS7Plan()
 	if err != nil {
@@ -167,11 +162,7 @@ func TestFindS7Plan_Found(t *testing.T) {
 
 func TestFindS7Plan_NotFound(t *testing.T) {
 	dir := t.TempDir()
-	orig, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(orig) })
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir: %v", err)
-	}
+	t.Chdir(dir)
 	_, err := FindS7Plan()
 	if err == nil {
 		t.Error("FindS7Plan: expected error when no plan file exists, got nil")
