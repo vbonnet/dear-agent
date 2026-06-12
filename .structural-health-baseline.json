@@ -127,7 +127,6 @@
       "agm/internal/tmux/output_watcher.go:151",
       "agm/workflowbus/bridge.go:140",
       "cmd/workflow-dev/main.go:81",
-      "cmd/workflow-inspector/main.go:80",
       "engram/cmd/engram/cmd/auto_ecphory.go:145",
       "engram/ecphory/ecphory.go:406",
       "engram/ecphory/ecphory.go:421",
