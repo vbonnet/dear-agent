@@ -149,3 +149,27 @@ jobs:
           for n in $existing; do
             timeout 30 gh issue close "$n" --repo "$REPO" --comment "All audited repos have branch protection configured; auto-closing."
           done
+
+  bypass-audit:
+    name: Bypass Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build merge-audit
+        run: go build -o bin/merge-audit ./tools/merge-audit/
+
+      - name: Detect bypassed merges (last 24h)
+        env:
+          GITHUB_TOKEN: ${{ secrets.AUDIT_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Exit code 1 = bypassed merges found (CI failure); 0 = clean; 2 = config error.
+          # Fail loudly so bypasses appear as a red check rather than silent log lines.
+          ./bin/merge-audit --lookback 24h
