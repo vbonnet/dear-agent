@@ -327,3 +327,66 @@ Every delegated task's DoD must **explicitly** list:
 A task that says "the code works on disk" but is not in git is **not done**.
 Delegation prompts that omit this line have produced the exact failure mode
 this section exists to prevent — include it verbatim.
+
+## Living Documentation Policy (MANDATORY)
+
+Documentation in this repo must be **living** — it describes the current
+state of the code, not a historical snapshot or a future plan.
+
+### What lives here vs. what goes to engram-research
+
+**In this repo (living docs only):**
+- `ARCHITECTURE.md` — structural map of the codebase
+- `docs/adr/` — Architecture Decision Records (binding decisions, not plans)
+- Inline code comments that explain *why*, not *what*
+- API documentation generated from or co-located with source (`SPEC.md`,
+  tool-level `--help` strings)
+- `CLAUDE.md` — agent instructions that constrain code in this repo
+
+**In `~/src/engram-research` (temporal artifacts):**
+- Design docs, problem statements, wayfinder artifacts, DEAR retros
+- Research, analysis, literature reviews
+- Any document whose value is primarily historical or exploratory
+
+See `.dear-agent.yml > forbidden-paths` for the machine-readable enforcement
+(PR #341 is adding `docs/retros/**`, `docs/design/**`, and `wf/**`).
+
+### Docs must live next to the code they document
+
+A document that describes a package should live *in* or *adjacent to* that
+package, not in a central docs tree. If you are documenting `pkg/vroom`,
+the right place is `pkg/vroom/SPEC.md` or inline doc comments — not a
+top-level file that an agent or reader must hunt for.
+
+**CI enforcement intent (tracked as Beads task):** when code in a directory
+changes, any co-located documentation should also be reviewed and its
+timestamp updated if the content remains accurate. The exact gate is tracked
+as a Beads task — see the "doc proximity" rule below.
+
+### The "Last audited at" timestamp contract
+
+Living docs SHOULD carry a header line:
+
+```
+<!-- Last audited at: 2026-06-12 -->
+```
+
+Updating this timestamp is a **commitment**, not a housekeeping step. It
+means: *"I read every claim in this file and verified it matches the current
+codebase."* Fixing a typo or adding a sentence does NOT justify bumping the
+timestamp unless you also verified the whole file.
+
+If you update the timestamp without a full read, you are forging an audit.
+This is worse than a stale timestamp — a stale timestamp is honest; a false
+one is noise that hides real drift.
+
+### Stale facts trigger a DEAR retro
+
+If you find a claim in a living doc that is factually wrong or out-of-date:
+1. Fix the claim (or delete the doc if it is no longer relevant).
+2. Write a one-paragraph DEAR retro entry in `docs/retros/` explaining *why*
+   the drift happened and what process gap allowed it.
+3. File a Beads task if the retro surfaces an action item.
+
+Do **not** silently fix a stale doc without the retro. Silent fixes hide
+process gaps that will produce more drift.
