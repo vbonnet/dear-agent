@@ -113,7 +113,7 @@ func executeQuery(query map[string]interface{}) ([]map[string]interface{}, error
 	}
 
 	// Execute cc query command
-	cmd := exec.Command("cc", "query", "--query", string(queryJSON), "--format", "json")
+	cmd := exec.Command(corpusCallosumBin(), "query", "--query", string(queryJSON), "--format", "json")
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -144,7 +144,7 @@ func DiscoverComponents(workspace string) ([]string, error) {
 		return nil, fmt.Errorf("corpus callosum not available")
 	}
 
-	cmd := exec.Command("cc", "discover", "--format", "json")
+	cmd := exec.Command(corpusCallosumBin(), "discover", "--format", "json")
 
 	if workspace != "" {
 		cmd.Args = append(cmd.Args, "--workspace", workspace)

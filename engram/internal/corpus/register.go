@@ -47,7 +47,7 @@ func RegisterEngramSchemas(workspace string) error {
 	tmpFile.Close()
 
 	// Register with corpus callosum
-	cmd := exec.Command("cc", "register",
+	cmd := exec.Command(corpusCallosumBin(), "register",
 		"--component", EngramComponentName,
 		"--version", EngramComponentVersion,
 		"--schema", tmpFile.Name(),
@@ -74,7 +74,7 @@ func UnregisterEngramSchemas(workspace string) error {
 		return nil
 	}
 
-	cmd := exec.Command("cc", "unregister",
+	cmd := exec.Command(corpusCallosumBin(), "unregister",
 		"--component", EngramComponentName,
 	)
 
@@ -90,10 +90,24 @@ func UnregisterEngramSchemas(workspace string) error {
 	return nil
 }
 
-// isCorpusCallosumAvailable checks if the cc CLI tool is installed.
+// corpusCallosumBin returns the path to the corpus-callosum CLI, honoring
+// CORPUS_CALLOSUM_BIN env var. Returns "" when not configured.
+// We don't auto-detect via exec.LookPath("cc") because "cc" is the system C
+// compiler on macOS, which causes false-positives.
+func corpusCallosumBin() string {
+	if bin := os.Getenv("CORPUS_CALLOSUM_BIN"); bin != "" {
+		if _, err := exec.LookPath(bin); err == nil {
+			return bin
+		}
+	}
+	return ""
+}
+
+// isCorpusCallosumAvailable reports whether the corpus-callosum CLI is available.
+// Requires CORPUS_CALLOSUM_BIN to be set — auto-detection via "cc" is disabled
+// because "cc" resolves to the system C compiler on macOS.
 func isCorpusCallosumAvailable() bool {
-	_, err := exec.LookPath("cc")
-	return err == nil
+	return corpusCallosumBin() != ""
 }
 
 // GetRegistrationStatus checks if Engram schemas are registered with CC.
@@ -102,7 +116,7 @@ func GetRegistrationStatus(workspace string) (bool, error) {
 		return false, nil
 	}
 
-	cmd := exec.Command("cc", "discover")
+	cmd := exec.Command(corpusCallosumBin(), "discover")
 
 	if workspace != "" {
 		cmd.Args = append(cmd.Args, "--workspace", workspace)

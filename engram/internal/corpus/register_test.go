@@ -1,27 +1,20 @@
 package corpus
 
 import (
-	"os/exec"
 	"testing"
 )
 
 func TestIsCorpusCallosumAvailable(t *testing.T) {
-	// This test checks if the function works, not if cc is actually installed
-	available := isCorpusCallosumAvailable()
-
-	// Just verify it returns a boolean without panicking
-	if available {
-		t.Log("Corpus callosum CLI is available")
-	} else {
-		t.Log("Corpus callosum CLI is not available (expected in many environments)")
+	// Without CORPUS_CALLOSUM_BIN set, should be unavailable.
+	t.Setenv("CORPUS_CALLOSUM_BIN", "")
+	if isCorpusCallosumAvailable() {
+		t.Error("isCorpusCallosumAvailable() = true without CORPUS_CALLOSUM_BIN, want false")
 	}
 
-	// Verify by checking exec.LookPath directly
-	_, err := exec.LookPath("cc")
-	expectedAvailable := (err == nil)
-
-	if available != expectedAvailable {
-		t.Errorf("isCorpusCallosumAvailable() = %v, but exec.LookPath result = %v", available, expectedAvailable)
+	// With CORPUS_CALLOSUM_BIN pointing at a non-existent binary, still unavailable.
+	t.Setenv("CORPUS_CALLOSUM_BIN", "/nonexistent/corpus-callosum")
+	if isCorpusCallosumAvailable() {
+		t.Error("isCorpusCallosumAvailable() = true with bad CORPUS_CALLOSUM_BIN, want false")
 	}
 }
 
