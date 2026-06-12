@@ -135,6 +135,100 @@ func TestOverseer_Tick_ProbeErrorPropagates(t *testing.T) {
 	}
 }
 
+func TestOverseer_Tick_SustainedEscalationFraction(t *testing.T) {
+	// A fraction metric above threshold for overSustainedThreshold consecutive
+	// ticks must emit supervisor.over.sustained_escalation.
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{DiskUsedFraction: 0.95}) // always above 0.9
+	trail, buf := newBufferTrail()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	for i := range overSustainedThreshold {
+		if err := o.Tick(context.Background()); err != nil {
+			t.Fatalf("Tick %d: %v", i, err)
+		}
+	}
+	saw := false
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.over.sustained_escalation" {
+			p := r["payload"].(map[string]any)
+			if p["metric"] == "disk" {
+				saw = true
+			}
+		}
+	}
+	if !saw {
+		t.Errorf("no supervisor.over.sustained_escalation for disk after %d consecutive ticks", overSustainedThreshold)
+	}
+}
+
+func TestOverseer_Tick_SustainedEscalationCount(t *testing.T) {
+	// A count metric above zero for overSustainedThreshold consecutive ticks
+	// must emit supervisor.over.sustained_escalation.
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{StrandedWorktrees: 2})
+	trail, buf := newBufferTrail()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	for i := range overSustainedThreshold {
+		if err := o.Tick(context.Background()); err != nil {
+			t.Fatalf("Tick %d: %v", i, err)
+		}
+	}
+	saw := false
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.over.sustained_escalation" {
+			p := r["payload"].(map[string]any)
+			if p["metric"] == "stranded_worktrees" {
+				saw = true
+			}
+		}
+	}
+	if !saw {
+		t.Errorf("no supervisor.over.sustained_escalation for stranded_worktrees after %d consecutive ticks", overSustainedThreshold)
+	}
+}
+
+func TestOverseer_Tick_SustainedResetOnClear(t *testing.T) {
+	// After a metric drops below threshold, the sustained counter resets;
+	// a subsequent return above threshold must not fire sustained_escalation
+	// until another full overSustainedThreshold-tick run.
+	probe := NewInMemoryResourceProbe()
+	trail, buf := newBufferTrail()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	// Run threshold-1 ticks above — not yet sustained.
+	probe.Set(ResourceSnapshot{DiskUsedFraction: 0.95})
+	for i := range overSustainedThreshold - 1 {
+		if err := o.Tick(context.Background()); err != nil {
+			t.Fatalf("above Tick %d: %v", i, err)
+		}
+	}
+	// One tick below — resets the counter.
+	probe.Set(ResourceSnapshot{DiskUsedFraction: 0.1})
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("clear Tick: %v", err)
+	}
+	// threshold-1 ticks above again — still not sustained (counter restarted).
+	probe.Set(ResourceSnapshot{DiskUsedFraction: 0.95})
+	for i := range overSustainedThreshold - 1 {
+		if err := o.Tick(context.Background()); err != nil {
+			t.Fatalf("post-reset above Tick %d: %v", i, err)
+		}
+	}
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.over.sustained_escalation" {
+			t.Errorf("sustained_escalation fired despite counter reset: %+v", r)
+		}
+	}
+}
+
 type errorProbe struct{ err error }
 
 func (e *errorProbe) Snapshot(context.Context) (ResourceSnapshot, error) {
