@@ -65,7 +65,7 @@ type Backend struct {
 }
 
 type pendingApproval struct {
-	commentID int64               // id of our Request comment
+	commentID int64 // id of our Request comment
 	ch        chan workflow.HITLResolution
 }
 
@@ -256,7 +256,7 @@ func (c *HTTPCommenter) PostComment(ctx context.Context, owner, repo string, prN
 	if err != nil {
 		return 0, fmt.Errorf("github: post comment: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		return 0, fmt.Errorf("github: post comment: HTTP %d", resp.StatusCode)
 	}
@@ -276,7 +276,7 @@ func (c *HTTPCommenter) ListComments(ctx context.Context, owner, repo string, pr
 	if err != nil {
 		return nil, fmt.Errorf("github: list comments: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("github: list comments: HTTP %d", resp.StatusCode)
 	}

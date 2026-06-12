@@ -2,7 +2,6 @@ package github
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -16,8 +15,8 @@ import (
 type fakeCommenter struct {
 	mu       sync.Mutex
 	nextID   int64
-	posts    []string                 // bodies posted, in order
-	comments map[int][]Comment        // queued replies by prNumber
+	posts    []string          // bodies posted, in order
+	comments map[int][]Comment // queued replies by prNumber
 }
 
 func newFakeCommenter() *fakeCommenter {
@@ -173,9 +172,9 @@ func TestWait_ContextCancellation(t *testing.T) {
 
 func TestParseDecision(t *testing.T) {
 	cases := []struct {
-		input   string
-		want    workflow.HITLDecision
-		wantOK  bool
+		input  string
+		want   workflow.HITLDecision
+		wantOK bool
 	}{
 		{"approve", workflow.HITLDecisionApprove, true},
 		{"LGTM", workflow.HITLDecisionApprove, true},
@@ -230,5 +229,4 @@ func TestRequest_NilClient(t *testing.T) {
 func TestBackend_ImplementsHITLBackend(t *testing.T) {
 	// Compile-time check that *Backend satisfies workflow.HITLBackend.
 	var _ workflow.HITLBackend = (*Backend)(nil)
-	_ = fmt.Sprintf("ok") // avoid unused import
 }
