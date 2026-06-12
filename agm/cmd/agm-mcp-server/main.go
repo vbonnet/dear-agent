@@ -102,7 +102,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	httpServer := startA2AServerIfEnabled(cfg, effectiveA2APort, stop)
+	httpServer := startA2AServerIfEnabled(ctx, cfg, effectiveA2APort, stop)
 
 	// Create stdio transport (v1.2.0 API)
 	transport := &mcp.StdioTransport{}
@@ -158,7 +158,7 @@ func resolveA2APort(cfg *Config, flagPort int) int {
 // startA2AServerIfEnabled launches the A2A HTTP server in a goroutine when
 // effectiveA2APort > 0. On listen failure it calls stop() and exits the process.
 // Returns nil when A2A is disabled.
-func startA2AServerIfEnabled(cfg *Config, effectiveA2APort int, stop func()) *http.Server {
+func startA2AServerIfEnabled(ctx context.Context, cfg *Config, effectiveA2APort int, stop func()) *http.Server {
 	if effectiveA2APort <= 0 {
 		return nil
 	}
@@ -175,7 +175,8 @@ func startA2AServerIfEnabled(cfg *Config, effectiveA2APort int, stop func()) *ht
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	ln, err := net.Listen("tcp", addr) //nolint:noctx // TODO(context): plumb ctx through this layer
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		logger.Error("A2A HTTP listen failed", "addr", addr, "error", err)
 		stop()     // explicit cleanup before exit (otherwise the deferred stop() at the top of main wouldn't run)
