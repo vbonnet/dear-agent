@@ -86,6 +86,26 @@ func startClaudeHarness(sessionName, workDir string, exists bool, extraAddDirs [
 	return modeAppliedAtStartup, false, nil
 }
 
+// spawnSessionID holds the manifest UUID for the session being created. Set
+// before harness startup so OTel env vars reference the correct session.
+var spawnSessionID string
+
+// otelEnvArgs returns additional env var assignments to inject into the
+// spawned worker's shell command. Forwards OTEL_EXPORTER_OTLP_ENDPOINT from
+// the orchestrator environment (so workers inherit tracing config), and sets
+// ENGRAM_SESSION_ID to the session manifest UUID (so each worker's JSONL
+// exporter writes to its own trace file).
+func otelEnvArgs() string {
+	var args strings.Builder
+	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
+		fmt.Fprintf(&args, " OTEL_EXPORTER_OTLP_ENDPOINT=%s", endpoint)
+	}
+	if spawnSessionID != "" {
+		fmt.Fprintf(&args, " ENGRAM_SESSION_ID=%s", spawnSessionID)
+	}
+	return args.String()
+}
+
 // buildClaudeCommand assembles the env+claude shell command line, applying
 // flags for model, --add-dir, --permission-mode, and --max-budget-usd.
 // Returns the command string and whether --permission-mode was applied.
@@ -96,7 +116,7 @@ func buildClaudeCommand(sessionName, workDir string, extraAddDirs []string) (str
 		autoModeFlag = ""
 		debug.Log("Auto mode disabled by flag/env var")
 	}
-	claudeCmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s claude --model %s --add-dir '%s'%s && exit", sessionName, resolvedModel, workDir, autoModeFlag)
+	claudeCmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s%s claude --model %s --add-dir '%s'%s && exit", sessionName, otelEnvArgs(), resolvedModel, workDir, autoModeFlag)
 	for _, dir := range extraAddDirs {
 		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --add-dir '%s' && exit", dir), 1)
 	}
