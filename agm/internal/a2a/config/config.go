@@ -217,6 +217,7 @@ func mergePreferences(base, override *PreferencesConfig) {
 }
 
 // ExpandPath expands ~ and environment variables in path.
+//
 // Deprecated: use workspace.ExpandPath directly.
 func ExpandPath(path string) string {
 	return workspace.ExpandPath(path)
