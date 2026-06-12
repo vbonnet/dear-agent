@@ -5,12 +5,32 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
-// isCorpusCallosumAvailable checks if the cc CLI is installed
+// isCorpusCallosumAvailable checks if the corpus-callosum cc CLI is installed.
+// Guards against macOS's /usr/bin/cc (clang alias) being mistaken for the tool.
 func isCorpusCallosumAvailable() bool {
-	_, err := exec.LookPath("cc")
-	return err == nil
+	ccPath, err := exec.LookPath("cc")
+	if err != nil {
+		return false
+	}
+	// Run cc --version and reject if output looks like a C compiler (clang/gcc/llvm).
+	out, err := exec.Command(ccPath, "--version").CombinedOutput()
+	if err != nil {
+		// corpus-callosum cc returns non-zero for --version; a real response with output
+		// that doesn't look like a C compiler is still acceptable.
+		if len(out) == 0 {
+			return false
+		}
+	}
+	lower := strings.ToLower(string(out))
+	for _, marker := range []string{"clang", "llvm", "gcc", "apple", "xcode"} {
+		if strings.Contains(lower, marker) {
+			return false
+		}
+	}
+	return true
 }
 
 // RegisterWayfinderSchemas registers all Wayfinder schemas with corpus callosum

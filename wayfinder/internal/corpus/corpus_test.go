@@ -1,6 +1,8 @@
 package corpus
 
 import (
+	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -185,6 +187,29 @@ func TestIsCorpusCallosumAvailable(t *testing.T) {
 	// We just verify the function doesn't panic
 	available := isCorpusCallosumAvailable()
 	t.Logf("Corpus callosum available: %v", available)
+}
+
+// TestIsCorpusCallosumAvailable_NotClang verifies that macOS cc (clang alias) is not
+// treated as the corpus-callosum CLI. On macOS /usr/bin/cc is always clang.
+func TestIsCorpusCallosumAvailable_NotClang(t *testing.T) {
+	// If the system cc resolves to clang, isCorpusCallosumAvailable must return false.
+	_, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("cc not in PATH, nothing to verify")
+	}
+	out, _ := exec.Command("cc", "--version").CombinedOutput()
+	lower := strings.ToLower(string(out))
+	isSystemCompiler := strings.Contains(lower, "clang") ||
+		strings.Contains(lower, "gcc") ||
+		strings.Contains(lower, "llvm")
+	if isSystemCompiler {
+		// The guard must reject it
+		if isCorpusCallosumAvailable() {
+			t.Error("isCorpusCallosumAvailable() returned true for a system C compiler — clang guard failed")
+		}
+	} else {
+		t.Logf("cc at this path does not look like a system compiler; skipping clang-guard assertion")
+	}
 }
 
 // TestRegisterWayfinderSchemas_GracefulDegradation tests graceful degradation
@@ -408,26 +433,31 @@ func TestDiscoverComponents_GracefulDegradation(t *testing.T) {
 	t.Logf("Discovered components: %v", components)
 }
 
-// TestWorkspaceIsolation verifies workspace field is properly set
+// TestWorkspaceIsolation verifies workspace field is properly set when cc is available,
+// or that PublishProject degrades gracefully (no error, no mutation) when cc is absent.
 func TestWorkspaceIsolation(t *testing.T) {
 	workspace := "test-workspace"
 
-	// Test project publication
 	project := map[string]interface{}{
 		"session_id": "test-session",
 	}
 
-	// Should not error
 	if err := PublishProject(workspace, project); err != nil {
 		t.Errorf("PublishProject failed: %v", err)
 	}
 
-	// Verify workspace was added to project
+	if !isCorpusCallosumAvailable() {
+		// Graceful degradation: map must not have been mutated
+		if _, ok := project["workspace"]; ok {
+			t.Error("PublishProject mutated project map during graceful degradation — should be a no-op")
+		}
+		return
+	}
+
+	// cc is the real corpus-callosum CLI: metadata must be stamped
 	if project["workspace"] != workspace {
 		t.Errorf("Workspace field not set correctly: expected '%s', got '%v'", workspace, project["workspace"])
 	}
-
-	// Verify component and entity metadata
 	if project["_component"] != "wayfinder" {
 		t.Error("Component metadata not set")
 	}
