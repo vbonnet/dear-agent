@@ -11,7 +11,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,8 +18,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	_ "modernc.org/sqlite"
-
+	"github.com/vbonnet/dear-agent/internal/sqlite"
 	"github.com/vbonnet/dear-agent/pkg/workflow"
 )
 
@@ -37,7 +35,7 @@ func run() int {
 	)
 	flag.Parse()
 
-	db, err := sql.Open("sqlite", *dbPath+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(on)")
+	db, err := sqlite.Open(*dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "open %s: %v\n", *dbPath, err)
 		return 1
