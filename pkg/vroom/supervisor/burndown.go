@@ -213,15 +213,23 @@ func (o *Overseer) runBurndownTick(ctx context.Context, snap ResourceSnapshot, p
 	}
 }
 
-// resourcesSaturated returns true if any fraction metric meets or exceeds the
+// resourcesSaturated returns true if any fraction metric meets or exceeds its
 // threshold, meaning the Overseer should not spawn additional work.
+// Swap uses a lower threshold (SwapFraction, default 0.5) than RAM/disk/CPU
+// (Fraction, default 0.9) because high swap pressure is a leading indicator
+// of thrashing: spawning new heavy processes when swap is hot makes it worse.
 func resourcesSaturated(snap ResourceSnapshot, t EscalationThreshold) bool {
 	thresh := t.Fraction
 	if thresh <= 0 {
 		thresh = DefaultEscalationThreshold.Fraction
 	}
+	swapThresh := t.SwapFraction
+	if swapThresh <= 0 {
+		swapThresh = DefaultEscalationThreshold.SwapFraction
+	}
 	return snap.DiskUsedFraction >= thresh ||
 		snap.MemoryUsedFraction >= thresh ||
+		snap.SwapUsedFraction >= swapThresh ||
 		snap.CPUUsedFraction >= thresh
 }
 

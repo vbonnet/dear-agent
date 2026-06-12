@@ -5,6 +5,8 @@ package supervisor
 import (
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // sysMemoryUsedFraction returns the fraction of physical RAM currently in use
@@ -51,4 +53,30 @@ func sysMemoryUsedFraction() float64 {
 		return 0
 	}
 	return float64(totalBytes-freeBytes) / float64(totalBytes)
+}
+
+// sysSwapUsedFraction returns the fraction of swap space currently in use on
+// macOS using the vm.swapusage sysctl (struct xsw_usage).
+//
+// struct xsw_usage layout (32 bytes):
+//
+//	xsu_total    uint64  — total swap allocated
+//	xsu_avail    uint64  — swap currently available
+//	xsu_used     uint64  — swap currently in use
+//	xsu_pagesize uint32  — VM page size
+//	xsu_encrypted int32  — whether swap is encrypted
+func sysSwapUsedFraction() float64 {
+	raw, err := unix.SysctlRaw("vm.swapusage")
+	if err != nil || len(raw) < 24 {
+		return 0
+	}
+	total := *(*uint64)(unsafe.Pointer(&raw[0])) // raw is 32 bytes, offset 0 is safe
+	used := *(*uint64)(unsafe.Pointer(&raw[16])) // raw is 32 bytes, offset 16 is safe
+	if total == 0 {
+		return 0
+	}
+	if used >= total {
+		return 1
+	}
+	return float64(used) / float64(total)
 }
