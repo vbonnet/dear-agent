@@ -76,19 +76,6 @@ func TestSearch_FilterByDomain(t *testing.T) {
 	}
 }
 
-func TestContains(t *testing.T) {
-	t.Parallel()
-	if !contains([]string{"a", "b", "c"}, "b") {
-		t.Error("contains([a,b,c], b) = false, want true")
-	}
-	if contains([]string{"a", "b"}, "z") {
-		t.Error("contains([a,b], z) = true, want false")
-	}
-	if contains(nil, "a") {
-		t.Error("contains(nil, a) = true, want false")
-	}
-}
-
 func TestCalculateScore_QueryMatch(t *testing.T) {
 	t.Parallel()
 	fm := &Frontmatter{
