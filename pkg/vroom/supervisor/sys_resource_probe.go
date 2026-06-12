@@ -45,8 +45,9 @@ func (p *SysResourceProbe) Snapshot(_ context.Context) (ResourceSnapshot, error)
 		}
 	}
 
-	// Memory — platform-specific (see sys_resource_probe_{linux,darwin}.go).
+	// Memory and swap — platform-specific (see sys_resource_probe_{linux,darwin}.go).
 	snap.MemoryUsedFraction = sysMemoryUsedFraction()
+	snap.SwapUsedFraction = sysSwapUsedFraction()
 
 	return snap, nil
 }
