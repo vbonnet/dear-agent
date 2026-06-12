@@ -50,6 +50,11 @@ func ParseJSONL(path string) (<-chan *TelemetryEvent, <-chan error) {
 	go func() {
 		defer close(events)
 		defer close(errs)
+		defer func() {
+			if r := recover(); r != nil {
+				errs <- fmt.Errorf("telemetry parser panicked: %v", r)
+			}
+		}()
 
 		file, err := os.Open(path)
 		if err != nil {

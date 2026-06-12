@@ -133,6 +133,11 @@ func (s *Service) runScanners(ctx context.Context, req *AnalyzeRequest) <-chan S
 
 	// Close results channel when all scanners complete
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("metacontext: scanner wait goroutine panic: %v\n", r)
+			}
+		}()
 		wg.Wait()
 		close(results)
 	}()
