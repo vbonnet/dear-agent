@@ -390,6 +390,43 @@ func TestDefaultRepoConfig(t *testing.T) {
 	}
 }
 
+// --- BreakGlass config validation ---
+
+func TestBreakGlass_InvalidConfig(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  BreakGlassConfig
+		want string
+	}{
+		{"zero pr", BreakGlassConfig{PRNumber: 0, Repo: "a/b"}, "--pr must be"},
+		{"missing repo", BreakGlassConfig{PRNumber: 1, Repo: ""}, "--repo is required"},
+		{"bad repo format", BreakGlassConfig{PRNumber: 1, Repo: "nodash"}, "owner/repo format"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := BreakGlass(tc.cfg)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want substring %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
+func TestBreakGlass_RejectsNonTTY(t *testing.T) {
+	// In tests stdin is a pipe, not a TTY — the gate should fire.
+	cfg := BreakGlassConfig{PRNumber: 1, Repo: "owner/repo"}
+	err := BreakGlass(cfg)
+	if err == nil {
+		t.Fatal("expected error for non-TTY stdin, got nil")
+	}
+	if !strings.Contains(err.Error(), "interactive TTY") {
+		t.Errorf("error should mention TTY requirement, got: %v", err)
+	}
+}
+
 // --- helpers ---
 
 func marshalJSON(v any) []byte {
