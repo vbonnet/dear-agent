@@ -35,7 +35,7 @@ func findClaimingPRs(repo, beadID string) ([]prSummary, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "gh", args...) //nolint:gosec // args controlled by caller
+	cmd := exec.CommandContext(ctx, "gh", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
