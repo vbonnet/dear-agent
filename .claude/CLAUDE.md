@@ -316,17 +316,38 @@ git -C ~/src/dear-agent push origin --delete <branch>   # remote, if pushed
 If `gh pr merge --squash --delete-branch` was used, the remote branch is
 already gone — still remove the local worktree and branch.
 
-### 6. Definition of Done includes "committed to branch"
+### 6. Definition of Done = PR MERGED to main
 
 Every delegated task's DoD must **explicitly** list:
 
 - [ ] Changes committed to the working branch
 - [ ] (If applicable) Branch pushed to origin
 - [ ] (If applicable) Tests + lint pass on the committed tree
+- [ ] **PR merged to main — a bead may be closed ONLY when its PR is MERGED
+  to main; PR-created means the bead stays `in_progress` with the PR linked.**
 
 A task that says "the code works on disk" but is not in git is **not done**.
-Delegation prompts that omit this line have produced the exact failure mode
-this section exists to prevent — include it verbatim.
+Delegation prompts that omit these lines have produced the exact failure mode
+this section exists to prevent — include them verbatim.
+
+**"PR created" is not "done."** A bead is `in_progress` from the moment work
+starts until the moment its PR lands on `main`. Closing a bead while citing an
+open PR number is a Definition-of-Done violation: the work is not merged, may
+fail review, may be superseded, and the closed bead now hides real outstanding
+work. Until `gh pr view <num> --json state` reports `MERGED`, the bead stays
+`in_progress` with the PR number recorded in a comment.
+
+- **Violation pattern (forbidden):** `ce-d2f` was closed citing the still-open
+  PR #335. The 2026-06-12 overnight burndown DEAR retro found 25 such beads
+  closed against open PRs — every one of them re-surfaced as outstanding work.
+- **Correct pattern (required):** `ce-eky` stayed `in_progress` with its PR
+  linked, and was closed only after the PR actually merged to main. Follow
+  ce-eky, never the ce-d2f violation.
+
+The repo ships a reconciler (`make build-bead-pr-sync` → `bead-pr-sync`) that
+cross-references closed beads citing `#NNN` PR refs against live PR state and
+reopens any DoD violators. If you find a closed bead whose PR is still open,
+that is a defect — reopen the bead and let the reconciler catch the class.
 
 ## Living Documentation Policy (MANDATORY)
 
