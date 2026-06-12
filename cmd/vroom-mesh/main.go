@@ -176,6 +176,11 @@ func runContext(duration time.Duration, stderr io.Writer) (context.Context, cont
 		ctx, cancel = context.WithTimeout(ctx, duration)
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_, _ = fmt.Fprintf(stderr, "vroom-mesh: panic in signal goroutine: %v\n", r)
+			}
+		}()
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		select {
