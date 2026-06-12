@@ -36,6 +36,18 @@ func TestExtractPRNumbers_None(t *testing.T) {
 	}
 }
 
+func TestExtractPRNumbers_SkipsCrossRepoRefs(t *testing.T) {
+	t.Parallel()
+	// "dotfiles#15" and "engram#27" are PRs in OTHER repos; resolving their
+	// numbers against this repo is a false positive. Only the bare "#352"
+	// (a local PR ref) should survive.
+	text := "Fix per dotfiles#15 and engram#27; tracked as local PR #352."
+	nums := extractPRNumbers(text)
+	if len(nums) != 1 || nums[0] != 352 {
+		t.Errorf("expected [352] (cross-repo refs skipped), got %v", nums)
+	}
+}
+
 func TestExtractTitle_Typical(t *testing.T) {
 	t.Parallel()
 	text := "✓ ce-2uy [BUG] · bwrap self-test skips network isolation   [● P1 · CLOSED]\nOwner: vbonnet"

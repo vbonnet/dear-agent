@@ -60,11 +60,13 @@ func run(args []string, stdout, stderr *os.File) int {
 		return 1
 	}
 
-	mode := "fixed"
+	// In dry-run nothing is reopened, so report the count that *would* be
+	// fixed (every violation) rather than the always-zero Fixed counter.
+	mode, count := "fixed", stats.Fixed
 	if cfg.DryRun {
-		mode = "would fix"
+		mode, count = "would fix", stats.Violations
 	}
 	fmt.Fprintf(stdout, "\nscanned %d closed beads: %d violations found, %d %s\n",
-		stats.Scanned, stats.Violations, stats.Fixed, mode)
+		stats.Scanned, stats.Violations, count, mode)
 	return 0
 }

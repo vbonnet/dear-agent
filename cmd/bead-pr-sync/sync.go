@@ -27,7 +27,7 @@ type Stats struct {
 	Fixed      int
 }
 
-// Violation describes a bead whose PR is not yet merged.
+// Violation describes a closed bead whose cited PR is still OPEN.
 type Violation struct {
 	BeadID  string
 	Title   string
@@ -42,8 +42,12 @@ type prView struct {
 	MergedAt string `json:"mergedAt"`
 }
 
-// prRE matches "#NNN" patterns in bead descriptions/comments.
-var prRE = regexp.MustCompile(`#(\d+)`)
+// prRE matches "#NNN" PR references in bead descriptions/comments.
+// Group 1 captures any identifier directly fused to the "#" (e.g. the
+// "dotfiles" in "dotfiles#15"); group 2 is the number. A non-empty group 1
+// signals a CROSS-REPO reference (dotfiles#15, engram#27) that must NOT be
+// resolved against this repo — see extractPRNumbers.
+var prRE = regexp.MustCompile(`(\w*)#(\d+)`)
 
 // Reconcile scans closed beads and reports/fixes DoD violations.
 func Reconcile(cfg Config, stdout, stderr io.Writer) (Stats, error) {
@@ -74,12 +78,12 @@ func Reconcile(cfg Config, stdout, stderr io.Writer) (Stats, error) {
 
 		var openPRs []int
 		for _, n := range prNums {
-			merged, err := isPRMerged(ctx, cfg.Repo, n)
+			open, err := isPROpen(ctx, cfg.Repo, n)
 			if err != nil {
 				fmt.Fprintf(stderr, "  warn: cannot check PR #%d: %v\n", n, err)
 				continue
 			}
-			if !merged {
+			if open {
 				openPRs = append(openPRs, n)
 			}
 		}
@@ -149,13 +153,20 @@ func showBead(ctx context.Context, beadsDir, id string) (string, error) {
 	return string(out), err
 }
 
-// extractPRNumbers returns all distinct PR numbers referenced in text.
+// extractPRNumbers returns all distinct local-repo PR numbers referenced in
+// text. Cross-repo references (a non-empty identifier fused to "#", such as
+// "dotfiles#15" or "engram#27") are skipped: resolving them against this repo
+// produces false positives, since a same-numbered local PR is unrelated.
 func extractPRNumbers(text string) []int {
 	seen := make(map[int]bool)
 	var nums []int
 	for _, m := range prRE.FindAllStringSubmatch(text, -1) {
+		if m[1] != "" {
+			// Cross-repo qualifier (e.g. "dotfiles#15") — not our PR.
+			continue
+		}
 		var n int
-		for _, c := range m[1] {
+		for _, c := range m[2] {
 			n = n*10 + int(c-'0')
 		}
 		if !seen[n] && n > 0 {
@@ -196,8 +207,13 @@ func extractTitle(text string) string {
 	return "(unknown)"
 }
 
-// isPRMerged returns true if the PR has a non-empty mergedAt timestamp.
-func isPRMerged(ctx context.Context, repo string, prNum int) (bool, error) {
+// isPROpen reports whether the PR is in the OPEN state. A bead closed while
+// its cited PR is still OPEN is the exact DoD violation the 2026-06-12 retro
+// found (all 25 cited open PRs). The other states are NOT violations:
+//   - MERGED   → the work landed; the bead was closed correctly.
+//   - CLOSED   → the PR was abandoned or superseded (e.g. a stale dependabot
+//     bump); treating it as a violation reopens correctly-closed beads.
+func isPROpen(ctx context.Context, repo string, prNum int) (bool, error) {
 	args := []string{"pr", "view", fmt.Sprintf("%d", prNum), "--json", "state,mergedAt,number"}
 	if repo != "" {
 		args = append(args, "--repo", repo)
@@ -207,7 +223,7 @@ func isPRMerged(ctx context.Context, repo string, prNum int) (bool, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		// PR not found or permission error — treat as unknown, not as unmerged.
+		// PR not found or permission error — treat as unknown, not as a violation.
 		return false, fmt.Errorf("gh pr view %d: %w (stderr: %s)", prNum, err, stderr.String())
 	}
 
@@ -216,7 +232,7 @@ func isPRMerged(ctx context.Context, repo string, prNum int) (bool, error) {
 		return false, fmt.Errorf("parse gh output: %w", err)
 	}
 
-	return v.MergedAt != "" && v.MergedAt != "null", nil
+	return strings.EqualFold(v.State, "OPEN"), nil
 }
 
 // reopenBead sets the bead status to in_progress and leaves a comment.
@@ -228,7 +244,7 @@ func reopenBead(ctx context.Context, beadsDir, id string, openPRs []int) error {
 	for i, n := range openPRs {
 		prs[i] = fmt.Sprintf("#%d", n)
 	}
-	comment := fmt.Sprintf("bead-pr-sync: reopened — PR(s) %s not yet merged to main (DoD violation)", strings.Join(prs, ", "))
+	comment := fmt.Sprintf("bead-pr-sync: reopened — PR(s) %s still OPEN, not merged to main (DoD violation)", strings.Join(prs, ", "))
 	_, err := runBd(ctx, beadsDir, "comment", id, comment)
 	return err
 }
