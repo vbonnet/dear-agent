@@ -168,7 +168,7 @@ func (a *AgentMetrics) StallDuration(ctx context.Context, ms float64, attrs ...a
 
 func sessionTracer() trace.Tracer { return otel.Tracer(instrumentationScope) }
 
-func sessionAttrs(sessionID, model, provider, status string) []attribute.KeyValue {
+func sessionAttrs(sessionID, model, provider, status, role string) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{attribute.String("session_id", sessionID)}
 	if model != "" {
 		attrs = append(attrs, attribute.String("model", model))
@@ -179,13 +179,17 @@ func sessionAttrs(sessionID, model, provider, status string) []attribute.KeyValu
 	if status != "" {
 		attrs = append(attrs, attribute.String("status", status))
 	}
+	if role != "" {
+		attrs = append(attrs, attribute.String("vroom.role", role))
+	}
 	return attrs
 }
 
 // SessionStarted emits an agm.session.start span and increments the active-task
-// counter. Call once a session has been created/registered.
-func SessionStarted(ctx context.Context, sessionID, model, provider, status string) {
-	attrs := sessionAttrs(sessionID, model, provider, status)
+// counter. Call once a session has been created/registered. role is the VROOM
+// role assigned to this session (empty string if unset).
+func SessionStarted(ctx context.Context, sessionID, model, provider, status, role string) {
+	attrs := sessionAttrs(sessionID, model, provider, status, role)
 	_, span := sessionTracer().Start(ctx, "agm.session.start", trace.WithAttributes(attrs...))
 	span.End()
 	Agent().TaskStarted(ctx, provider, model)
@@ -204,7 +208,7 @@ func SessionExecute(ctx context.Context, sessionID string) (context.Context, tra
 // passed to SessionStarted so the active up/down counter balances. Call once a
 // session finishes (archived/closed).
 func SessionCompleted(ctx context.Context, sessionID, model, provider, status string) {
-	attrs := sessionAttrs(sessionID, model, provider, status)
+	attrs := sessionAttrs(sessionID, model, provider, status, "")
 	_, span := sessionTracer().Start(ctx, "agm.session.complete", trace.WithAttributes(attrs...))
 	span.End()
 	Agent().TaskCompleted(ctx, provider, model, status)

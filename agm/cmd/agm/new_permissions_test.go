@@ -474,3 +474,38 @@ func TestResolvePermissions_DefaultsAlwaysPresent(t *testing.T) {
 		}
 	}
 }
+
+// TestVROOMRoleAutoDerivesProfile validates the invariant that every VROOM role
+// name is also a valid permission profile — the precondition for the auto-derive
+// logic in configureProjectPermissions: when --role names a known role and
+// --permission-profile is empty, the role is used as the profile.
+func TestVROOMRoleAutoDerivesProfile(t *testing.T) {
+	t.Parallel()
+	vroomRoles := []string{
+		"meta-orchestrator",
+		"orchestrator",
+		"overseer",
+		"worker",
+		"implementer",
+		"researcher",
+		"verifier",
+		"requester",
+		"auditor",
+		"monitor",
+	}
+	for _, role := range vroomRoles {
+		t.Run(role, func(t *testing.T) {
+			t.Parallel()
+			if !rbac.ValidRole(role) {
+				t.Errorf("role %q is not a valid profile — auto-derive would silently skip it", role)
+			}
+			result, err := rbac.ResolvePermissions(rbac.ResolveOptions{ProfileName: role})
+			if err != nil {
+				t.Errorf("ResolvePermissions(role=%q): %v", role, err)
+			}
+			if len(result) == 0 {
+				t.Errorf("role %q resolved to empty permission list", role)
+			}
+		})
+	}
+}

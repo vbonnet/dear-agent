@@ -124,8 +124,16 @@ func TestInitMeterURLEndpoint(t *testing.T) {
 // ensure they are panic-safe with the default (no-op) global providers.
 func TestSessionLifecycleHelpers(t *testing.T) {
 	ctx := context.Background()
-	SessionStarted(ctx, "sess-1", "claude-opus-4-8", "anthropic", "WORKING")
+	SessionStarted(ctx, "sess-1", "claude-opus-4-8", "anthropic", "WORKING", "worker")
 	_, span := SessionExecute(ctx, "sess-1")
 	span.End()
 	SessionCompleted(ctx, "sess-1", "claude-opus-4-8", "anthropic", "archived")
+}
+
+// TestSessionStarted_EmptyRole verifies that an empty role string does not
+// panic and is accepted without error (role is optional).
+func TestSessionStarted_EmptyRole(t *testing.T) {
+	ctx := context.Background()
+	// Must not panic. The no-op global provider is used (no OTLP endpoint set).
+	SessionStarted(ctx, "sess-2", "claude-sonnet-4-6", "anthropic", "WORKING", "")
 }
