@@ -90,58 +90,88 @@ them.
    auditable one ("can this agent run the binary we vetted?"). Prefer building
    the wrapper over loosening a permission rule.
 
-## Output Routing — Where Artifacts Belong (MANDATORY)
+## Documentation & Artifact Routing (MANDATORY)
 
-This repo holds **code**, not research. Research artifacts (analysis docs,
-transcripts, literature reviews, findings) belong in `engram-research`.
-Conversation logs belong in `ai-conversation-logs`. Routing is governed by
-`.dear-agent.yml` at the repo root — read it once at the start of any
-session that produces artifacts.
+Every doc this repo touches is exactly one of two kinds. The kind decides
+where it lives. Routing is governed by `.dear-agent.yml` at the repo root —
+read it once at the start of any session that produces artifacts.
 
-**Forbidden in dear-agent** (declared by `.dear-agent.yml > forbidden-paths`):
-- New `*.md` or `*.txt` files under `research/`. dear-agent does not
-  currently have a `research/` tree, and any such file should be redirected
-  to `~/src/engram-research`.
-- **Temporal docs** — DEAR retros (`docs/retros/`), design docs
-  (`docs/design/`), W0/problem statements, and Wayfinder artifacts (`wf/`).
-  These are research/planning output, not code, and **ALWAYS** belong in
-  `~/src/engram-research` (under `projects/<name>/`), **never** in this live
-  coding repo — *even when the doc is about code in this repo*. Polluting
-  code history with planning artifacts strands the work away from the corpus
-  where it belongs.
+### Temporal artifacts → knowledge base (engram-research), NEVER in dear-agent
 
-**Where things go:**
+A **temporal artifact** captures a *moment of thinking*: it was true when
+written and is not maintained as the code evolves. These **always** go to the
+knowledge base (currently `~/src/engram-research`, under `projects/<name>/`)
+and **never** live in this coding repo — *even when the artifact is about code
+in this repo*:
 
-| Artifact kind                                              | Destination                  |
-|------------------------------------------------------------|------------------------------|
-| Source code, build config, ADRs (`docs/adr/`)              | this repo                    |
-| Design docs (`docs/design/`), DEAR retros (`docs/retros/`) | `~/src/engram-research`      |
-| W0 / problem statements, Wayfinder artifacts (`wf/`)       | `~/src/engram-research`      |
-| Research analysis (substrate/architecture studies, etc.)   | `~/src/engram-research`      |
-| Source transcripts (YouTube, podcasts, interviews)         | `~/src/engram-research`      |
-| Conversation/session logs                                  | `~/src/ai-conversation-logs` |
+- **Design docs, Plans, Audits, Retros (DEAR), Research, Wayfinder
+  artifacts** (`wf/`, W0/problem statements), and the like.
 
-Only **code, build config, and ADRs** (durable decision records that
-constrain code) live here. Everything narrative/temporal — plans, designs,
-retros, W0s, research, Wayfinder runs — routes to `engram-research`.
+Putting a moment-in-time artifact in code history pollutes the repo, goes
+stale silently, and strands the work away from the corpus where it belongs.
 
-> **Pre-existing exception:** a few behavioural *specs* already in
-> `docs/design/` (e.g. `anti-stall.md`, `graceful-exit.md`,
-> `outcomes-framework.md`) are referenced by this CLAUDE.md and by code as
-> authoritative and remain in-repo for now; migrating them is tracked
-> separately. New temporal docs follow the table above without exception.
+### Living documentation → stays in dear-agent
 
-**Decision procedure** when writing a new file:
-1. If it is code, build config, or an ADR (`docs/adr/`) → write here.
-2. Otherwise (design doc, retro, W0, Wayfinder artifact, research,
-   transcript, log) check `.dear-agent.yml > output-dirs` for the matching
-   kind and write there — for temporal docs that is `~/src/engram-research`.
+**Living documentation** describes the *current* state of the system and is
+maintained in lockstep with the code it documents:
+
+- **`ARCHITECTURE.md`, ADRs (`docs/adr/`), inline/code comments, API docs,
+  `CLAUDE.md`** — anything kept true as the code changes.
+
+These rules govern living docs:
+
+1. **Proximity principle.** A living doc lives as close as possible to what
+   it documents (package-level `doc.go`/`README`/`ARCHITECTURE.md` beside the
+   code, not in a far-off `docs/` tree). This is what lets CI enforce
+   *"if you touched files in dir X, you must also touch the documentation in
+   dir X."* Distance from the code is how docs rot.
+2. **`Last audited: <timestamp>` header.** Updating that header is a strong
+   claim: *"I read every line of this file and verified it is true right
+   now."* It is **not** for typo fixes or partial edits — only bump it after
+   a genuine full-content audit of the doc against reality.
+3. **A wrong fact in a living doc triggers a DEAR retro.** Treat it as a
+   defect, not a typo: do root-cause analysis — hallucination? code changed
+   without updating the doc? a fake/sloppy audit? simply too long since the
+   last audit? — and let the retro produce action items (per principle 3 of
+   the Core Engineering Principles).
+4. **Regular doc audits.** Living docs are periodically re-verified against
+   reality; a never-audited living doc is assumed stale until proven current.
+
+### Where things go
+
+| Artifact kind                                                       | Destination                  |
+|---------------------------------------------------------------------|------------------------------|
+| Source code, build config                                           | this repo                    |
+| Living docs: `ARCHITECTURE.md`, ADRs (`docs/adr/`), API/inline docs | this repo (next to the code) |
+| Design docs, Plans                                                  | `~/src/engram-research`      |
+| Audits, DEAR retros                                                 | `~/src/engram-research`      |
+| Research / analysis, Wayfinder artifacts (`wf/`), W0s               | `~/src/engram-research`      |
+| Source transcripts (YouTube, podcasts, interviews)                  | `~/src/engram-research`      |
+| Conversation/session logs                                           | `~/src/ai-conversation-logs` |
+
+**Decision procedure** when writing a new doc:
+1. Is it maintained in lockstep with the code and describes the current
+   state (architecture, ADR, API, inline)? → it is **living**; write it in
+   this repo, as close to the code as possible (proximity principle).
+2. Otherwise it is a **temporal artifact** (design, plan, audit, retro,
+   research, Wayfinder, W0) → write it to the knowledge base
+   (`.dear-agent.yml > output-dirs[research]`, currently
+   `~/src/engram-research`), never here.
 3. If unsure, ask the user — do **not** default to writing it in this repo.
 
-This rule exists because research artifacts were committed to the predecessor
-code repo (ai-tools) in error multiple times, polluting code-repo history and
-stranding work away from the corpus where it belongs. Treat the redirect as
-authoritative.
+This rule exists because temporal artifacts were committed to code repos
+(the predecessor ai-tools, then dear-agent) in error multiple times,
+polluting code-repo history and stranding work away from the corpus where it
+belongs. Treat the redirect as authoritative.
+
+> **Pre-existing exception:** a few behavioural *specs* already in
+> `docs/design/` (`anti-stall.md`, `graceful-exit.md`,
+> `outcomes-framework.md`) are referenced by this CLAUDE.md and by code as
+> authoritative — i.e. they behave like *living* docs that happen to sit
+> under `docs/design/`. They remain in-repo for now; reclassifying them as
+> living docs (and giving them `Last audited:` headers) vs. migrating them is
+> tracked separately. New design docs follow the table above without
+> exception.
 
 See [AGENTS.why.md](../AGENTS.why.md) for the rationale behind the two-tier
 (instruction + configuration) routing model.

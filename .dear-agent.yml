@@ -40,15 +40,22 @@ forbidden-paths:
     # findings — belong in ~/src/engram-research, not in this repo.
     - research/*.md
     - research/*.txt
-    # Temporal docs — DEAR retros, design docs, W0/problem statements, and
-    # Wayfinder artifacts — are research/planning output, NOT code. They
-    # ALWAYS route to ~/src/engram-research (projects/<name>/), never this
-    # live coding repo, even when the doc is about code here. Only code,
-    # build config, and ADRs (docs/adr/) stay in dear-agent.
-    # (Pre-existing behavioural specs in docs/design/ that CLAUDE.md and code
-    # reference as authoritative — anti-stall.md, graceful-exit.md,
-    # outcomes-framework.md — remain in-repo for now; new docs/design/ files
-    # follow this rule. Migration of the legacy specs is tracked separately.)
+    # TEMPORAL ARTIFACTS — design docs, plans, audits, DEAR retros, research,
+    # and Wayfinder artifacts (W0/problem statements). They capture a moment
+    # of thinking, are NOT maintained with the code, and ALWAYS route to the
+    # knowledge base ~/src/engram-research (projects/<name>/), never this live
+    # coding repo — even when the artifact is about code here.
+    #
+    # LIVING DOCUMENTATION stays in dear-agent, as close to the code as
+    # possible (proximity principle): ARCHITECTURE.md, ADRs (docs/adr/),
+    # inline/API docs, CLAUDE.md — anything kept true as the code changes.
+    # See .claude/CLAUDE.md "Documentation & Artifact Routing" for the full
+    # policy (Last-audited headers, wrong-fact-triggers-retro, doc audits).
+    #
+    # (Pre-existing specs in docs/design/ that CLAUDE.md and code reference as
+    # authoritative — anti-stall.md, graceful-exit.md, outcomes-framework.md —
+    # behave like living docs and remain in-repo for now; reclassifying vs.
+    # migrating them is tracked separately. New design docs follow this rule.)
     - docs/retros/**
     - docs/design/**
     - wf/**
