@@ -175,8 +175,7 @@
       "github.com/vbonnet/dear-agent/internal/sandbox/overlayfs",
       "github.com/vbonnet/dear-agent/pkg/llm",
       "github.com/vbonnet/dear-agent/pkg/validation",
-      "github.com/vbonnet/dear-agent/tools/devlog",
-      "github.com/vbonnet/dear-agent/tools/skill-lint"
+      "github.com/vbonnet/dear-agent/tools/devlog"
     ]
   }
 }
