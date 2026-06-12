@@ -337,7 +337,10 @@ func getEngramPath(phase string) string {
 	}
 
 	engramFilename := phaseToEngram[phase]
-	engramBase := filepath.Join(homeDir, "src/engram/core/cortex/engrams/workflows")
+	engramBase := os.Getenv("WAYFINDER_ENGRAM_DIR")
+	if engramBase == "" {
+		engramBase = filepath.Join(homeDir, "src/engram/core/cortex/engrams/workflows")
+	}
 
 	return filepath.Join(engramBase, engramFilename)
 }

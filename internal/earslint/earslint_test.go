@@ -250,3 +250,32 @@ func TestLintFile_Missing(t *testing.T) {
 		t.Fatal("expected error for missing file")
 	}
 }
+
+// TestLint_IDPrefixedRequirements verifies that bold-markdown ID prefixes like
+// **EBD-01** or **FSG-03** are accepted by all six EARS templates after markdown
+// stripping leaves "EBD-01 When ..." in the candidate text.
+func TestLint_IDPrefixedRequirements(t *testing.T) {
+	l := newDefault(t)
+	cases := map[string]string{
+		"event-driven":   "**EBD-01** When the user submits the form, the system shall validate all fields.",
+		"state-driven":   "**EBD-02** While the connection is active, the system shall stream telemetry.",
+		"feature-driven": "**EBD-03** Where the premium feature is enabled, the system shall show analytics.",
+		"option":         "**EBD-04** If the token is expired, then the system shall reject the request.",
+		"unwanted":       "**FSG-01** The system shall not store plaintext passwords.",
+		"ubiquitous":     "**FSG-02** The system shall log every authentication attempt.",
+	}
+	for name, line := range cases {
+		t.Run(name, func(t *testing.T) {
+			res, err := l.Lint("SPEC.md", strings.NewReader(line))
+			if err != nil {
+				t.Fatalf("Lint: %v", err)
+			}
+			if res.ValidRequirements != 1 {
+				t.Errorf("ID-prefixed %s: want 1 valid, got %d (findings: %v)", name, res.ValidRequirements, res.Findings)
+			}
+			if res.NonConforming() != 0 {
+				t.Errorf("ID-prefixed %s: want 0 non-conforming, got %d", name, res.NonConforming())
+			}
+		})
+	}
+}

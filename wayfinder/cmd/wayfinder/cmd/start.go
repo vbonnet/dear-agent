@@ -575,10 +575,7 @@ func detectGitRepoRoot() (string, error) {
 // runClassification calls wayfinder-classify and returns classification results
 func runClassification(prompt string) (*status.Classification, string, error) {
 	// Find wayfinder-classify command
-	classifyPath := filepath.Join(os.Getenv("HOME"), "src/engram/core/cortex/lib/wayfinder-classify")
-	if _, err := os.Stat(classifyPath); os.IsNotExist(err) {
-		classifyPath = "wayfinder-classify" // Try PATH
-	}
+	classifyPath := "wayfinder-classify"
 
 	// Execute classification
 	cmd := exec.Command(classifyPath, "--charter-text", prompt, "--format", "json") //nolint:gosec // G702: classifyPath is internally constructed; prompt passed as separate arg, not shell-composed

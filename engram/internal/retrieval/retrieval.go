@@ -36,7 +36,7 @@ package retrieval
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -175,7 +175,7 @@ func (s *Service) Search(ctx context.Context, opts SearchOptions) ([]*SearchResu
 // Should be called when the service is no longer needed.
 func (s *Service) Close() error {
 	if err := s.tracker.Flush(); err != nil {
-		log.Printf("retrieval: failed to flush tracking updates: %v", err)
+		slog.Warn("retrieval: failed to flush tracking updates", "error", err)
 		// Don't return error - this is best-effort
 	}
 	return nil

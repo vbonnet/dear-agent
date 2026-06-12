@@ -64,10 +64,16 @@ var DefaultEscalationThreshold = EscalationThreshold{Fraction: 0.9}
 // crosses threshold. Real remediation (reaping, killing runaway sessions,
 // reclaiming quota) is out of scope for PR 1 — escalations are
 // observation-only.
+//
+// When WithBurndown is called, each Tick also runs the burndown concurrency
+// maintenance loop: reconcile stale in_progress beads, reclaim them to open,
+// and spawn new workers up to the policy target.
 type Overseer struct {
-	trail     decisiontrail.Trail
-	probe     ResourceProbe
-	threshold EscalationThreshold
+	trail          decisiontrail.Trail
+	probe          ResourceProbe
+	threshold      EscalationThreshold
+	burndownCtrl   BurndownController // nil = burndown disabled
+	burndownPolicy BurndownPolicy
 }
 
 // NewOverseer constructs the Overseer supervisor. If threshold has zero
@@ -85,10 +91,22 @@ func NewOverseer(trail decisiontrail.Trail, probe ResourceProbe, threshold Escal
 	return &Overseer{trail: trail, probe: probe, threshold: threshold}, nil
 }
 
+// WithBurndown wires a BurndownController and policy into the Overseer.
+// After this call each Tick also runs the burndown maintenance phase. The
+// controller and policy may be changed between ticks; the Overseer copies the
+// references at construction and does not hold a lock (callers must not
+// replace them during an active Tick).
+func (o *Overseer) WithBurndown(ctrl BurndownController, policy BurndownPolicy) *Overseer {
+	o.burndownCtrl = ctrl
+	o.burndownPolicy = defaultBurndownPolicy(policy)
+	return o
+}
+
 // Role implements Supervisor.
 func (o *Overseer) Role() Role { return RoleOverseer }
 
-// Tick samples the probe and escalates anything that crosses threshold.
+// Tick samples the probe, escalates anything that crosses threshold, and —
+// when a BurndownController is wired — runs the burndown maintenance phase.
 func (o *Overseer) Tick(ctx context.Context) error {
 	snap, err := o.probe.Snapshot(ctx)
 	if err != nil {
@@ -115,6 +133,12 @@ func (o *Overseer) Tick(ctx context.Context) error {
 	o.maybeEscalateFraction(ctx, "cpu", snap.CPUUsedFraction)
 	o.maybeEscalateCount(ctx, "stranded_worktrees", snap.StrandedWorktrees)
 	o.maybeEscalateCount(ctx, "orphaned_sessions", snap.OrphanedSessions)
+
+	// Burndown maintenance phase — only runs when a controller is wired.
+	if o.burndownCtrl != nil {
+		var spawned int
+		o.runBurndownTick(ctx, snap, o.burndownPolicy, o.burndownCtrl, &spawned)
+	}
 	return nil
 }
 
