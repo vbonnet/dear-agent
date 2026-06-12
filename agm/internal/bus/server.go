@@ -195,7 +195,10 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		}
 	}()
 
-	if err := WriteFrame(conn, &Frame{Type: FrameWelcome, To: sessionID}); err != nil {
+	// Use delivery (not raw conn) for all writes after registration so that
+	// ACK frames written here and Deliver() calls from other goroutines all
+	// go through delivery.mu and cannot interleave on the wire (B1 fix).
+	if err := WriteFrame(delivery, &Frame{Type: FrameWelcome, To: sessionID}); err != nil {
 		s.Logger.Debug("conn: write welcome failed", "session", sessionID, "err", err)
 		return
 	}
@@ -232,7 +235,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			}
 			return
 		}
-		s.dispatch(sessionID, conn, frame)
+		s.dispatch(sessionID, delivery, frame)
 	}
 }
 
@@ -351,6 +354,10 @@ func (s *Server) routeVerdict(senderWriter io.Writer, f *Frame) {
 // connDelivery is the Delivery impl that wraps a net.Conn. All writes are
 // serialized by an internal mutex so concurrent deliveries from different
 // goroutines don't interleave bytes mid-frame on the socket.
+//
+// It also implements io.Writer so it can be used as the senderWriter in
+// dispatch(), ensuring ACK frames written back to the sender are serialized
+// against concurrent Deliver() calls from other goroutines.
 type connDelivery struct {
 	mu   sync.Mutex
 	conn net.Conn
@@ -360,6 +367,15 @@ func (c *connDelivery) Deliver(f *Frame) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return WriteFrame(c.conn, f)
+}
+
+// Write implements io.Writer using the same mutex as Deliver, so all writes
+// to this connection (ACKs from dispatch and deliveries from other sessions)
+// are serialized and frames cannot interleave.
+func (c *connDelivery) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn.Write(p)
 }
 
 func (c *connDelivery) Close() error {
