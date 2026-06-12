@@ -40,8 +40,12 @@ jobs:
           head_sha="${HEAD_REF}"
 
           # Directories where Go source files changed on this PR.
+          # NOTE: grep is guarded with `|| true` because `set -o pipefail`
+          # plus `set -e` would otherwise abort the whole script when grep
+          # finds no matches (exit 1) — i.e. on any PR with no Go changes,
+          # before we reach the "no Go source changes" early-exit below.
           changed_code_dirs=$(git diff --name-only "${base_sha}...${head_sha}" \
-            | grep '\.go$' \
+            | { grep '\.go$' || true; } \
             | xargs -I{} dirname {} \
             | sort -u)
 
