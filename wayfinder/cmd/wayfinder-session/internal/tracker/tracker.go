@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/eventbus"
@@ -58,6 +59,11 @@ func New(sessionID string) (*Tracker, error) {
 	telemetryPath := os.Getenv("ENGRAM_TELEMETRY_PATH")
 	if telemetryPath == "" {
 		telemetryPath = os.ExpandEnv("$HOME/.claude/telemetry.jsonl")
+	}
+
+	// Ensure the parent directory exists (e.g. ~/.claude/ on first run or in CI).
+	if err := os.MkdirAll(filepath.Dir(telemetryPath), 0700); err != nil {
+		return nil, fmt.Errorf("failed to create telemetry directory: %w", err)
 	}
 
 	// Open telemetry file for appending
