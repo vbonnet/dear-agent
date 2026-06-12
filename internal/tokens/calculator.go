@@ -2,6 +2,7 @@ package tokens
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,13 +95,15 @@ func runTokenizers(text string) map[string]int {
 		go func(t tokenizers.Tokenizer) {
 			defer wg.Done()
 
-			// Recover from panics (defensive — silently skip panicked tokenizers
-			// until structured logging is available; tracked separately).
-			defer func() { _ = recover() }()
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Warn("tokenizer panicked", "tokenizer", t.Name(), "panic", r)
+				}
+			}()
 
 			count, err := t.Count(text)
 			if err != nil {
-				// TODO: Log error when structured logging available
+				slog.Warn("tokenizer failed", "tokenizer", t.Name(), "error", err)
 				return // Skip failed tokenizer
 			}
 
