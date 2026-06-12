@@ -6,7 +6,7 @@ package restbackend
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 
 	"github.com/vbonnet/dear-agent/agm/internal/backend"
@@ -172,6 +172,6 @@ func init() {
 	if err := backend.Register("process", func() (backend.Backend, error) {
 		return New(""), nil
 	}); err != nil {
-		log.Printf("restbackend: failed to register process backend: %v", err)
+		slog.Error("restbackend: failed to register process backend", "error", err)
 	}
 }

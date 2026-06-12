@@ -1,3 +1,4 @@
+<!-- Last audited at: 2026-06-12 -->
 # Phase Orchestrator V2 Implementation
 
 **Module**: cortex/cmd/wayfinder-session/internal/orchestrator

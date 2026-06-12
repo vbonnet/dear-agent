@@ -1,3 +1,4 @@
+<!-- Last audited at: 2026-06-12 -->
 # Integration Test Suite for `engram validate`
 
 ## Overview

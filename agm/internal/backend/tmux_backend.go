@@ -2,7 +2,8 @@
 package backend
 
 import (
-	"log"
+	"log/slog"
+	"os"
 
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
@@ -98,6 +99,7 @@ func init() {
 	if err := Register("tmux", func() (Backend, error) {
 		return NewTmuxBackend(), nil
 	}); err != nil {
-		log.Fatalf("backend: failed to register tmux: %v", err)
+		slog.Error("backend: failed to register tmux", "error", err)
+		os.Exit(1)
 	}
 }
