@@ -416,7 +416,10 @@ func TestBDDFeatureFileLocation(t *testing.T) {
 	featuresDir := filepath.Join(bddRoot, "features")
 	err := filepath.WalkDir(bddRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip unreadable entries
+			// Propagate traversal errors (e.g. permission issues, unreadable
+			// directories) so the invariant test fails loudly rather than
+			// silently skipping entries and producing a false pass.
+			return err
 		}
 		if d.IsDir() {
 			return nil
