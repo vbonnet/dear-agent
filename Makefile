@@ -339,7 +339,7 @@ callgraph:
 		echo "go-callvis not found. Run: make callgraph-install"; exit 1; }
 	@command -v dot >/dev/null 2>&1 || { \
 		echo "graphviz 'dot' not found. Install with: brew install graphviz"; exit 1; }
-	go-callvis -nostd -format svg $(or $(PKG),./cmd/agm) .
+	go-callvis -nostd -format svg $(or $(PKG),./cmd/agm)
 
 # Write the call graph to callgraph.svg in the current directory instead of
 # opening the browser. Useful for dropping the graph into docs or a PR.
@@ -349,7 +349,7 @@ callgraph-svg:
 		echo "go-callvis not found. Run: make callgraph-install"; exit 1; }
 	@command -v dot >/dev/null 2>&1 || { \
 		echo "graphviz 'dot' not found. Install with: brew install graphviz"; exit 1; }
-	go-callvis -nostd -format svg -output callgraph.svg $(or $(PKG),./cmd/agm) .
+	go-callvis -nostd -format svg -output callgraph.svg $(or $(PKG),./cmd/agm)
 	@echo "Written: callgraph.svg"
 
 # Install go-callvis to $$(GOPATH)/bin. Requires Go 1.21+.
