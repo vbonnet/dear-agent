@@ -185,6 +185,24 @@ install-safe-push: build-safe-push
 	cp bin/safe-push $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/safe-push"
 
+# Build src-recovery: the one sanctioned writer to ~/src/**. It restores a
+# golden checkout to a clean, current default branch via exactly stash ->
+# checkout default -> pull --ff-only, takes no pass-through git args, and
+# refuses every other git verb by construction. See internal/safesrc and
+# docs/retros/2026-06-11-src-violations-and-burndown.md.
+build-src-recovery:
+	@echo "Building src-recovery..."
+	go build $(GOFLAGS) -o bin/src-recovery ./cmd/src-recovery/
+	@echo "Built: bin/src-recovery"
+
+# Install src-recovery to GOPATH/bin so it is on PATH for every agent session.
+# Allow-list `Bash(src-recovery *)` in chezmoi (dot_claude/private_settings.json.tmpl)
+# alongside chezmoi-deploy and safe-push — its safety is guaranteed by
+# construction, so it needs no per-invocation approval (CLAUDE.md principle 9).
+install-src-recovery: build-src-recovery
+	cp bin/src-recovery $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/src-recovery"
+
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
 # gates Edit/Write/MultiEdit, pretool-bash-write-guard gates Bash. They are
