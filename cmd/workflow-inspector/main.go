@@ -78,6 +78,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				_, _ = fmt.Fprintln(stderr, "workflow-inspector: shutdown goroutine panic:", r)
+			}
+		}()
 		<-ctx.Done()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
