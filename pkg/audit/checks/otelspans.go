@@ -118,19 +118,32 @@ func (c OTelSpansCheck) processFile(
 			continue // outside the lookback window
 		}
 		if s.ServiceName == "" || strings.HasPrefix(s.ServiceName, "unknown_service") {
-			findings = append(findings, audit.Finding{
-				CheckID:     "otel.span-errors",
-				Fingerprint: audit.Fingerprint("otel.unknown-service", s.TraceID, s.SpanID),
-				Severity:    audit.SeverityP2,
-				Title:       "OTel span missing service name: " + s.Name,
-				Detail:      "service_name is empty or 'unknown_service' — wire InitTracer(name) in this binary's main()",
-				Evidence: map[string]any{
-					"trace_id":     s.TraceID,
-					"span_id":      s.SpanID,
-					"service_name": s.ServiceName,
-					"file":         path,
-				},
-			})
+			// Deduplicate: a binary with no service name emits the missing-service
+			// finding on every span it produces. Report it at most once per
+			// (file, unique service name) to avoid flooding the audit results.
+			fp := audit.Fingerprint("otel.unknown-service", path, s.ServiceName)
+			hasUnknownServiceFinding := false
+			for i := range findings {
+				if findings[i].Fingerprint == fp {
+					hasUnknownServiceFinding = true
+					break
+				}
+			}
+			if !hasUnknownServiceFinding {
+				findings = append(findings, audit.Finding{
+					CheckID:     "otel.span-errors",
+					Fingerprint: fp,
+					Severity:    audit.SeverityP2,
+					Title:       "OTel span missing service name: " + s.Name,
+					Detail:      "service_name is empty or 'unknown_service' — wire InitTracer(name) in this binary's main()",
+					Evidence: map[string]any{
+						"trace_id":     s.TraceID,
+						"span_id":      s.SpanID,
+						"service_name": s.ServiceName,
+						"file":         path,
+					},
+				})
+			}
 		}
 		if s.StatusCode == "Error" {
 			msg := s.StatusMsg
