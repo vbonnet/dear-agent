@@ -19,7 +19,13 @@ type Config struct {
 	SessionsDir      string    `yaml:"sessions_dir"`
 	EngramMCPURL     string    `yaml:"engram_mcp_url"` // kept for future HTTP transport; wayfinder tools now use WayfinderDir
 	WayfinderDir     string    `yaml:"wayfinder_dir"`  // path to engram-research wf/ directory
-	A2A              A2AConfig `yaml:"a2a"`
+	// Workspace is the Dolt workspace name to use for session storage.
+	// When set, this value is applied as the WORKSPACE environment variable
+	// at startup so that tools work correctly when the server is launched
+	// from Claude Desktop (which does not inherit shell environment).
+	// Example: "oss" for the open-source dear-agent workspace.
+	Workspace string    `yaml:"workspace"`
+	A2A       A2AConfig `yaml:"a2a"`
 }
 
 // A2AConfig configures the A2A HTTP endpoint.
@@ -85,6 +91,9 @@ func loadConfig(configPath string) (*Config, error) {
 	}
 	if yamlCfg.MCPServer.WayfinderDir != "" {
 		cfg.WayfinderDir = expandHomeDir(yamlCfg.MCPServer.WayfinderDir)
+	}
+	if yamlCfg.MCPServer.Workspace != "" {
+		cfg.Workspace = yamlCfg.MCPServer.Workspace
 	}
 
 	// Use YAML boolean values

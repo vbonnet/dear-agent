@@ -57,6 +57,18 @@ func main() {
 		return
 	}
 
+	// Apply workspace from config when WORKSPACE env var is not already set.
+	// Claude Desktop launches the server without inheriting the user's shell
+	// environment, so the WORKSPACE var (required by the Dolt storage adapter)
+	// must be injected here from the YAML config.
+	if cfg.Workspace != "" && os.Getenv("WORKSPACE") == "" {
+		if err := os.Setenv("WORKSPACE", cfg.Workspace); err != nil {
+			logger.Warn("Failed to set WORKSPACE from config", "workspace", cfg.Workspace, "error", err)
+		} else {
+			logger.Info("Applied workspace from config", "workspace", cfg.Workspace)
+		}
+	}
+
 	logger.Info("Starting AGM MCP Server", "version", "1.0.0")
 	logger.Info("Configuration loaded", "sessions_dir", cfg.SessionsDir)
 
