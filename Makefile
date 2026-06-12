@@ -30,8 +30,10 @@
 #   bumblebee-scan          Run a one-shot Bumblebee endpoint scan
 #   install-bumblebee-launchagent    Schedule the daily Bumblebee scan (macOS)
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
+#   build-jaeger-health     Build the Jaeger health-check CLI (cmd/jaeger-health)
+#   install-jaeger-health   Install jaeger-health to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-merge-audit install-merge-audit
+.PHONY: lint-specs preflight preflight-tests preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-merge-audit install-merge-audit build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -211,6 +213,20 @@ build-src-recovery:
 install-src-recovery: build-src-recovery
 	cp bin/src-recovery $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/src-recovery"
+
+# Build the Jaeger health-check CLI. Reports whether Jaeger at localhost:16686
+# is alive and receiving traces. Exit codes: 0 healthy, 1 degraded (no recent
+# traces), 2 down. Designed for use as a scheduled-task probe.
+# Usage: jaeger-health [--url http://localhost:16686] [--lookback 1h] [--json]
+build-jaeger-health:
+	@echo "Building jaeger-health..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/jaeger-health ./cmd/jaeger-health/
+	@echo "Built: bin/jaeger-health"
+
+install-jaeger-health: build-jaeger-health
+	cp bin/jaeger-health $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/jaeger-health"
 
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
