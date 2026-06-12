@@ -1,0 +1,75 @@
+name: Gemini Quota Fallback
+
+# When gemini-code-assist hits its daily quota it posts a warning comment on
+# the PR instead of reviewing. This workflow detects that comment and
+# re-triggers the PR Review Agent (Codebase Health) so the PR is not left
+# with zero AI review.
+#
+# Trigger: any PR comment that starts with "> [!WARNING]" and contains the
+# phrase "daily quota limit". This is the exact pattern gemini-code-assist
+# uses: https://github.com/google-github-actions/setup-gemini/issues/...
+#
+# Security: we only act on comments from the gemini-code-assist[bot] actor
+# to prevent abuse via manually-crafted comments.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: write   # needed to dispatch the pr-review-agent workflow
+
+jobs:
+  detect-and-fallback:
+    name: Detect quota warning and trigger fallback review
+    runs-on: ubuntu-latest
+    # Only run on PR comments (issues don't have pull_request context)
+    if: github.event.issue.pull_request != null
+    timeout-minutes: 5
+    steps:
+      - name: Check if comment is a Gemini quota warning
+        id: quota_check
+        env:
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          # Only act on comments from the gemini-code-assist bot
+          if [ "$COMMENT_AUTHOR" != "gemini-code-assist[bot]" ]; then
+            echo "Not a gemini-code-assist comment; skipping."
+            echo "is_quota_warning=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Check for the quota warning pattern
+          if echo "$COMMENT_BODY" | grep -q "daily quota limit"; then
+            echo "Gemini quota warning detected on PR #${{ github.event.issue.number }}"
+            echo "is_quota_warning=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Gemini comment but not a quota warning; skipping."
+            echo "is_quota_warning=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger fallback health review
+        if: steps.quota_check.outputs.is_quota_warning == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PR_NUMBER="${{ github.event.issue.number }}"
+          echo "Triggering PR Review Agent for PR #$PR_NUMBER (Gemini quota fallback)"
+          gh workflow run pr-review-agent.yml \
+            --repo "${{ github.repository }}" \
+            --field "pr_number=$PR_NUMBER"
+
+      - name: Post fallback notice
+        if: steps.quota_check.outputs.is_quota_warning == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh pr comment "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --body "<!-- gemini-quota-fallback -->
+          ℹ️ **Gemini quota fallback triggered.** Gemini Code Assist has hit its daily quota. The [PR Review Agent (Codebase Health)](../actions/workflows/pr-review-agent.yml) has been dispatched as a fallback reviewer."
