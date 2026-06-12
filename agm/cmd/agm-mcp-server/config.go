@@ -18,7 +18,13 @@ type Config struct {
 	ClaudeConfigPath string    `yaml:"claude_config_path"`
 	SessionsDir      string    `yaml:"sessions_dir"`
 	EngramMCPURL     string    `yaml:"engram_mcp_url"` // Phase 7.1: Engram MCP server URL for forwarding
-	A2A              A2AConfig `yaml:"a2a"`
+	// Workspace is the Dolt workspace name to use for session storage.
+	// When set, this value is applied as the WORKSPACE environment variable
+	// at startup so that tools work correctly when the server is launched
+	// from Claude Desktop (which does not inherit shell environment).
+	// Example: "oss" for the open-source dear-agent workspace.
+	Workspace string    `yaml:"workspace"`
+	A2A       A2AConfig `yaml:"a2a"`
 }
 
 // A2AConfig configures the A2A HTTP endpoint.
@@ -80,6 +86,9 @@ func loadConfig(configPath string) (*Config, error) {
 	}
 	if yamlCfg.MCPServer.EngramMCPURL != "" {
 		cfg.EngramMCPURL = yamlCfg.MCPServer.EngramMCPURL
+	}
+	if yamlCfg.MCPServer.Workspace != "" {
+		cfg.Workspace = yamlCfg.MCPServer.Workspace
 	}
 
 	// Use YAML boolean values
