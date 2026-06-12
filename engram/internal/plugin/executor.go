@@ -83,6 +83,11 @@ func (e *Executor) Execute(ctx context.Context, plugin *Plugin, cmdName string, 
 
 	// Run execution in goroutine
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				resultCh <- result{err: fmt.Errorf("plugin execution panicked: %v", r)}
+			}
+		}()
 		output, err := e.execute(timeoutCtx, plugin, cmdName, args)
 		resultCh <- result{output: output, err: err}
 	}()

@@ -54,6 +54,12 @@ func (l *Loader) Load() ([]*Plugin, error) {
 
 		go func() {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					errCtx := WithSearchPath(searchPath).WithOperation("load_from_path")
+					l.logger.Warn(ctx, fmt.Sprintf("plugin loader goroutine panic: %v", r), errCtx, nil)
+				}
+			}()
 
 			// Load plugins from this path
 			discovered, err := l.loadFromPath(searchPath)
