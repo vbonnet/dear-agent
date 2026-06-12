@@ -11,6 +11,7 @@
 //	vroom-mesh --duration 10s         # bounded run
 //	vroom-mesh --trail /tmp/vroom.jsonl  # also write decision trail to disk
 //	vroom-mesh --disk 0.95            # set the simulated disk usage fraction
+//	vroom-mesh --sys-probe            # use real OS resource metrics (disk+memory)
 //
 // The decision trail is always written to stdout (one JSON object per
 // line). Pipe through `jq` for human-readable output.
@@ -55,6 +56,7 @@ type runConfig struct {
 	trailPath  string
 	nProposals int
 	nTasks     int
+	sysProbe   bool // use SysResourceProbe (real OS metrics) instead of InMemory
 }
 
 func parseFlags(args []string, stderr io.Writer) (*runConfig, error) {
@@ -72,6 +74,7 @@ func parseFlags(args []string, stderr io.Writer) (*runConfig, error) {
 	fs.StringVar(&cfg.trailPath, "trail", "", "optional path to append the decision trail to (also written to stdout)")
 	fs.IntVar(&cfg.nProposals, "proposals", 2, "number of sample Work Order proposals to seed the roadmap with")
 	fs.IntVar(&cfg.nTasks, "tasks", 2, "number of sample tasks to seed the queue with")
+	fs.BoolVar(&cfg.sysProbe, "sys-probe", false, "use real OS resource metrics (disk+memory) instead of simulated values")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -126,7 +129,7 @@ func seedQueue(n int) (*supervisor.InMemoryQueue, error) {
 // returns the Mesh. NewMesh rewires each Loop's mesh pointer to the real
 // Mesh, so the placeholderMesh passed to NewLoop is only there to satisfy
 // validation.
-func buildMesh(trail decisiontrail.Trail, roadmap *supervisor.InMemoryRoadmap, queue *supervisor.InMemoryQueue, probe *supervisor.InMemoryResourceProbe, cfg *runConfig) (*supervisor.Mesh, error) {
+func buildMesh(trail decisiontrail.Trail, roadmap *supervisor.InMemoryRoadmap, queue *supervisor.InMemoryQueue, probe supervisor.ResourceProbe, cfg *runConfig) (*supervisor.Mesh, error) {
 	metaSup, err := supervisor.NewMetaOrchestrator(trail, roadmap)
 	if err != nil {
 		return nil, err
@@ -173,6 +176,11 @@ func runContext(duration time.Duration, stderr io.Writer) (context.Context, cont
 		ctx, cancel = context.WithTimeout(ctx, duration)
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_, _ = fmt.Fprintf(stderr, "vroom-mesh: panic in signal goroutine: %v\n", r)
+			}
+		}()
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		select {
@@ -205,14 +213,20 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	probe := supervisor.NewInMemoryResourceProbe()
-	probe.Set(supervisor.ResourceSnapshot{
-		DiskUsedFraction:   cfg.diskFrac,
-		MemoryUsedFraction: cfg.memFrac,
-		CPUUsedFraction:    cfg.cpuFrac,
-		StrandedWorktrees:  cfg.stranded,
-		OrphanedSessions:   cfg.orphaned,
-	})
+	var probe supervisor.ResourceProbe
+	if cfg.sysProbe {
+		probe = supervisor.NewSysResourceProbe()
+	} else {
+		mem := supervisor.NewInMemoryResourceProbe()
+		mem.Set(supervisor.ResourceSnapshot{
+			DiskUsedFraction:   cfg.diskFrac,
+			MemoryUsedFraction: cfg.memFrac,
+			CPUUsedFraction:    cfg.cpuFrac,
+			StrandedWorktrees:  cfg.stranded,
+			OrphanedSessions:   cfg.orphaned,
+		})
+		probe = mem
+	}
 
 	mesh, err := buildMesh(trail, roadmap, queue, probe, cfg)
 	if err != nil {
