@@ -164,7 +164,6 @@
       "github.com/vbonnet/dear-agent/agm/internal/a2a/modelcard",
       "github.com/vbonnet/dear-agent/agm/internal/manager/tmuxbackend",
       "github.com/vbonnet/dear-agent/agm/internal/surface/cmd/generate",
-      "github.com/vbonnet/dear-agent/agm/internal/telemetry/usage",
       "github.com/vbonnet/dear-agent/agm/scripts",
       "github.com/vbonnet/dear-agent/agm/test/bdd/steps",
       "github.com/vbonnet/dear-agent/cmd/code-intel",
