@@ -138,6 +138,11 @@ func (b *Bridge) connectAndRead(ctx context.Context) error {
 	closeOnDone := make(chan struct{})
 	defer close(closeOnDone)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				b.Logger.Error("workflowbus: conn-close goroutine panicked", "panic", r)
+			}
+		}()
 		select {
 		case <-ctx.Done():
 			_ = conn.Close()

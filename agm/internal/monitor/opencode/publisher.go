@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -89,6 +90,11 @@ func (p *Publisher) PublishWithBackpressure(event *AGMEvent) error {
 
 		// Stop the adapter asynchronously to avoid deadlock
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "opencode: circuit breaker stop goroutine panicked: %v\n", r)
+				}
+			}()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := p.adapter.Stop(ctx); err != nil {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -258,6 +259,12 @@ func (c *ControlModeSession) Close() error {
 	// Wait for process to exit (with timeout)
 	done := make(chan error, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "tmux: control mode wait goroutine panic: %v\n", r)
+				done <- fmt.Errorf("goroutine panicked: %v", r)
+			}
+		}()
 		done <- c.cmd.Wait()
 	}()
 

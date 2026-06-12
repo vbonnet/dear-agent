@@ -115,6 +115,11 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Close the listener when ctx is cancelled so Accept returns.
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("bus: listener close goroutine panicked", "panic", r)
+			}
+		}()
 		<-ctx.Done()
 		_ = l.Close()
 	}()
@@ -136,6 +141,11 @@ func (s *Server) Start(ctx context.Context) error {
 		s.wg.Add(1)
 		go func(c net.Conn) {
 			defer s.wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("bus: connection handler goroutine panicked", "panic", r)
+				}
+			}()
 			s.handleConn(ctx, c)
 		}(conn)
 	}
@@ -145,6 +155,11 @@ func (s *Server) Start(ctx context.Context) error {
 func (s *Server) drain() {
 	done := make(chan struct{})
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("bus: drain goroutine panicked", "panic", r)
+			}
+		}()
 		s.wg.Wait()
 		close(done)
 	}()

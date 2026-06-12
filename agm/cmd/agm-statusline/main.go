@@ -261,6 +261,11 @@ func runProviders(cfg config, raw []byte, sd sessionData) []string {
 	for i, p := range providers {
 		go func(idx int, p providerEntry) {
 			defer func() { done <- idx }()
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "agm-statusline: provider %s goroutine panicked: %v\n", p.path, r)
+				}
+			}()
 			ctx, cancel := context.WithTimeout(context.Background(), providerTimeout)
 			defer cancel()
 

@@ -92,6 +92,11 @@ func (a *SSEAdapter) Start(ctx context.Context) error {
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("sse_adapter: reconnect goroutine panicked", "panic", r)
+				}
+			}()
 			a.scheduleReconnect(curCtx)
 		}()
 		return fmt.Errorf("initial connection failed (will retry): %w", err)
@@ -116,6 +121,11 @@ func (a *SSEAdapter) Stop(ctx context.Context) error {
 	// Wait for goroutines to finish with timeout
 	done := make(chan struct{})
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("sse_adapter: drain goroutine panicked", "panic", r)
+			}
+		}()
 		a.wg.Wait()
 		close(done)
 	}()

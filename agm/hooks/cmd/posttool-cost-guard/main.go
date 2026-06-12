@@ -83,6 +83,12 @@ func run() int {
 
 	done := make(chan int, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "[cost-guard] panic in hook: %v\n", r)
+				done <- 0
+			}
+		}()
 		done <- runHook(os.Stdin, os.Stderr)
 	}()
 

@@ -229,6 +229,18 @@ func ExecuteWorkflow(ctx context.Context, w *WorkflowDefinition, runner CommandR
 		for _, id := range toRun {
 			go func(taskID string) {
 				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						mu.Lock()
+						results[taskID] = &TaskResult{
+							ID:     taskID,
+							Status: TaskStatusFailed,
+							Error:  fmt.Sprintf("task panicked: %v", r),
+						}
+						allSuccess = false
+						mu.Unlock()
+					}
+				}()
 				taskStart := time.Now()
 
 				output, runErr := runner(ctx, taskDefs[taskID].Command)

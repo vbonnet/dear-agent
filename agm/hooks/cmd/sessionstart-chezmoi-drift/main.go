@@ -20,6 +20,11 @@ func run() {
 	// Hard timeout to avoid blocking session start
 	done := make(chan struct{}, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- struct{}{}
+			}
+		}()
 		check()
 		done <- struct{}{}
 	}()

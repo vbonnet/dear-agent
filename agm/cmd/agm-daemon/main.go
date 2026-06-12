@@ -141,6 +141,11 @@ func startSentinel(daemonLogger *slog.Logger) *sentineldaemon.SessionMonitor {
 		return nil
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				daemonLogger.Error("Sentinel monitor goroutine panicked", "error", r)
+			}
+		}()
 		daemonLogger.Info("Sentinel session monitor starting...")
 		if err := monitor.StartMonitoring(); err != nil {
 			daemonLogger.Error("Sentinel monitor failed", "error", err)

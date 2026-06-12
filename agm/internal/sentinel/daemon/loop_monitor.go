@@ -298,6 +298,11 @@ func bytesNewReader(data []byte) *os.File {
 		return nil
 	}
 	go func() {
+		defer func() {
+			if rv := recover(); rv != nil {
+				_ = w.Close()
+			}
+		}()
 		w.Write(data)
 		w.Close()
 	}()

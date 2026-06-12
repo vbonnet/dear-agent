@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -107,6 +108,17 @@ func spawnProcess(ctx context.Context, id, name, claudePath, workdir, model stri
 
 	// Wait for process exit in background
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "restbackend: process wait goroutine panic: %v\n", r)
+				proc.state.Store(ProcessStateCrashed)
+				select {
+				case <-proc.done:
+				default:
+					close(proc.done)
+				}
+			}
+		}()
 		waitErr := cmd.Wait()
 		proc.mu.Lock()
 		proc.err = waitErr

@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 )
@@ -149,6 +150,12 @@ func (w *OutputWatcher) ReadLine(timeout time.Duration) (string, error) {
 	var line string
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "tmux: output watcher scan goroutine panic: %v\n", r)
+				done <- false
+			}
+		}()
 		if w.scanner.Scan() {
 			line = w.scanner.Text()
 			w.addToBuffer(line)

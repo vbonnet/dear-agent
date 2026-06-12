@@ -109,9 +109,33 @@ func (w *Watcher) Run(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 	wg.Add(3)
-	go func() { defer wg.Done(); w.watchDirectives(ctx, fsw) }()
-	go func() { defer wg.Done(); w.watchQueue(ctx) }()
-	go func() { defer wg.Done(); w.watchHeartbeat(ctx) }()
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "agm watch: watchDirectives panicked: %v\n", r)
+			}
+		}()
+		w.watchDirectives(ctx, fsw)
+	}()
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "agm watch: watchQueue panicked: %v\n", r)
+			}
+		}()
+		w.watchQueue(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "agm watch: watchHeartbeat panicked: %v\n", r)
+			}
+		}()
+		w.watchHeartbeat(ctx)
+	}()
 
 	<-ctx.Done()
 	wg.Wait()
@@ -249,6 +273,11 @@ func runWatch(_ *cobra.Command, _ []string) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "agm watch: signal handler panicked: %v\n", r)
+			}
+		}()
 		<-sigCh
 		fmt.Fprintln(os.Stderr, "\nShutting down watcher...")
 		cancel()

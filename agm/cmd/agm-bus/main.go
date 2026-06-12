@@ -188,6 +188,11 @@ func cmdServe(args []string) error {
 		hup := make(chan os.Signal, 1)
 		signal.Notify(hup, syscall.SIGHUP)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("acl reload goroutine panicked", "panic", r)
+				}
+			}()
 			for range hup {
 				if err := rac.Reload(); err != nil {
 					logger.Warn("acl reload failed, keeping previous policy", "err", err)
@@ -224,6 +229,11 @@ func cmdServe(args []string) error {
 				Allowlist: allowlist,
 			}
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("discord adapter goroutine panicked", "panic", r)
+					}
+				}()
 				if err := adapter.Start(ctx); err != nil {
 					logger.Error("discord adapter stopped with error", "err", err)
 				}
@@ -327,6 +337,11 @@ func cmdServe(args []string) error {
 				Logger:        logger,
 			}
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("matrix adapter goroutine panicked", "panic", r)
+					}
+				}()
 				if err := adapter.Start(ctx); err != nil {
 					logger.Error("matrix adapter stopped with error", "err", err)
 				}
@@ -360,6 +375,11 @@ func cmdServe(args []string) error {
 		watcher.Interval = *heartbeatInterval
 		watcher.Logger = logger
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("supervisor heartbeat watcher goroutine panicked", "panic", r)
+				}
+			}()
 			if err := watcher.Run(ctx); err != nil {
 				logger.Error("supervisor heartbeat watcher stopped with error", "err", err)
 			}

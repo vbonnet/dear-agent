@@ -100,6 +100,11 @@ func runWatchStalled(cmd *cobra.Command, args []string) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "agm watch-stalled: signal handler panicked: %v\n", r)
+			}
+		}()
 		<-sigCh
 		fmt.Fprintf(os.Stderr, "\nShutting down watcher...\n")
 		cancel()
