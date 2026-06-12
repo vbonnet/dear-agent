@@ -24,6 +24,7 @@ import (
 	"strings"
 	"text/template"
 
+	goversion "github.com/hashicorp/go-version"
 	"github.com/vbonnet/dear-agent/engram/internal/config"
 	"github.com/vbonnet/dear-agent/engram/internal/identity"
 	"github.com/vbonnet/dear-agent/engram/internal/plugin"
@@ -217,12 +218,18 @@ func (v *Validator) validatePlugins() error {
 	return nil
 }
 
-// versionSatisfies checks if version >= minVersion (simple string comparison)
-// TODO: Use semver library for proper semantic versioning
+// versionSatisfies checks if version >= minVersion using semantic versioning.
+// Falls back to lexicographic comparison if either string is not a valid semver.
 func versionSatisfies(version, minVersion string) bool {
-	// Simple string comparison for now
-	// In production, would use github.com/hashicorp/go-version or similar
-	return version >= minVersion
+	v, err := goversion.NewVersion(version)
+	if err != nil {
+		return version >= minVersion
+	}
+	min, err := goversion.NewVersion(minVersion)
+	if err != nil {
+		return version >= minVersion
+	}
+	return v.GreaterThanOrEqual(min)
 }
 
 // validateConfig checks required config values are set
