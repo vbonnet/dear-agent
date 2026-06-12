@@ -402,6 +402,11 @@ func (e *Ecphory) publishEcphoryEvent(ctx context.Context, query string, session
 
 	// Publish asynchronously (non-blocking)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Warn("ecphory: panic publishing event", "recover", r)
+			}
+		}()
 		if err := e.eventBus.Publish(ctx, event); err != nil {
 			slog.WarnContext(ctx, "ecphory: failed to publish event", "error", err)
 		}
@@ -416,6 +421,11 @@ func (e *Ecphory) updateFrontmatterMetadata(engrams []*engram.Engram) {
 
 	// Run updates asynchronously (non-blocking)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Warn("ecphory: panic updating metadata", "recover", r)
+			}
+		}()
 		for _, eg := range engrams {
 			if err := e.incrementRetrievalCount(eg.Path); err != nil {
 				slog.Warn("ecphory: failed to update metadata", "path", eg.Path, "error", err)
