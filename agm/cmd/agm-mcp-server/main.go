@@ -102,6 +102,34 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Belt-and-suspenders: exit if our parent process dies.
+	// The go-sdk StdioTransport handles stdin EOF (belt 1); this goroutine handles
+	// the OOM-kill scenario where the parent is killed hard and stdin EOF may not
+	// arrive before the OS reparents us to PID 1 (belt 2).
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("parent-monitor panicked", "recover", r)
+				stop()
+			}
+		}()
+		ppid := os.Getppid()
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if os.Getppid() != ppid {
+					logger.Info("Parent process exited (reparented), shutting down")
+					stop()
+					return
+				}
+			}
+		}
+	}()
+
 	httpServer := startA2AServerIfEnabled(cfg, effectiveA2APort, stop)
 
 	// Create stdio transport (v1.2.0 API)
