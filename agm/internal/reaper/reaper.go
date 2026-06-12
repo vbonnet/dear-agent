@@ -382,7 +382,7 @@ func (r *Reaper) archiveSession() error {
 		sandboxPath = m.Sandbox.MergedPath
 	}
 	mcpKilled, mcpErr := mcp.CleanupSessionMCPProcesses(
-		&mcp.ProcFSFinder{}, &mcp.SignalKiller{},
+		mcp.DefaultProcessFinder(), &mcp.SignalKiller{},
 		m.SessionID, sandboxPath,
 	)
 	if mcpErr != nil {

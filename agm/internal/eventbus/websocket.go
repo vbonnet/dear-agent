@@ -203,6 +203,17 @@ type Client struct {
 	sessionFilter string
 }
 
+// trySend attempts to send data to the client's send channel without panicking
+// if the channel is already closed or full. Silently drops the message if it
+// cannot be delivered.
+func (c *Client) trySend(data []byte) {
+	defer func() { recover() }() //nolint:errcheck // intentional: ignore closed-channel panic
+	select {
+	case c.send <- data:
+	default:
+	}
+}
+
 // ClientMessage represents a message from the client
 type ClientMessage struct {
 	Action    string `json:"action"`     // "subscribe" or "unsubscribe"
@@ -235,10 +246,10 @@ func (c *Client) readPump() {
 		// Parse client message
 		var msg ClientMessage
 		if err := json.Unmarshal(message, &msg); err != nil {
-			// Send error response
+			// Send error response — use trySend to avoid panic if hub closed the channel
 			errMsg := map[string]string{"error": "invalid message format"}
 			if data, err := json.Marshal(errMsg); err == nil {
-				c.send <- data
+				c.trySend(data)
 			}
 			continue
 		}
@@ -262,9 +273,10 @@ func (c *Client) readPump() {
 			c.hub.logger.Info("Client unsubscribed")
 
 		default:
+			// Use trySend to avoid panic if hub closed the channel
 			errMsg := map[string]string{"error": "unknown action: " + msg.Action}
 			if data, err := json.Marshal(errMsg); err == nil {
-				c.send <- data
+				c.trySend(data)
 			}
 		}
 	}
