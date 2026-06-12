@@ -9,6 +9,7 @@ Provides MCP tools for:
 Part of workflow-improvements-2026 Phase 3.
 """
 
+import os
 import sys
 import json
 import logging
@@ -49,7 +50,8 @@ class EngramMCPServer:
                      (defaults to ~/.beads/issues.jsonl)
         """
         if engram_root is None:
-            engram_root = Path.home() / "src/engram"
+            env_root = os.environ.get('ENGRAM_ROOT')
+            engram_root = Path(env_root) if env_root else Path.home() / "src/engram"
 
         if beads_db is None:
             beads_db = Path.home() / ".beads/issues.jsonl"
@@ -367,8 +369,8 @@ def main():
     parser.add_argument(
         '--engram-root',
         type=Path,
-        default=Path.home() / "src/engram",
-        help='Engram repository root directory'
+        default=Path(os.environ.get('ENGRAM_ROOT', str(Path.home() / "src/engram"))),
+        help='Engram repository root directory (env: ENGRAM_ROOT)'
     )
     parser.add_argument(
         '--beads-db',
