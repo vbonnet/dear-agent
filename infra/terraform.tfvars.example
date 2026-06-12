@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and adjust if needed:
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# This file contains NO secrets. The GitHub token is supplied exclusively via
+# the GITHUB_TOKEN environment variable:
+#
+#   export GITHUB_TOKEN="$(gh auth token)"
+#
+# That token must have:
+#   - repo scope (for vbonnet/* repository management)
+#   - org:admin scope on dear-labs (for dear_labs.tf org ruleset)
+
+personal_owner = "vbonnet"
+org_name       = "dear-labs"
