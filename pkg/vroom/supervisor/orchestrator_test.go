@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestOrchestrator_Role(t *testing.T) {
@@ -94,6 +95,94 @@ func TestOrchestrator_Tick_DispatchErrorRecordedButContinues(t *testing.T) {
 	}
 	if !saw {
 		t.Error("no dispatch_failed record in trail")
+	}
+}
+
+func TestOrchestrator_Tick_StaleContextEscalation(t *testing.T) {
+	// A task that can't be dispatched (flakyQueue) and was enqueued 25h ago
+	// must trigger supervisor.orch.stale_context_escalation.
+	q := &flakyQueue{
+		InMemoryQueue: NewInMemoryQueue(),
+		failDispatch:  map[string]bool{"t-stale": true},
+	}
+	old := time.Now().Add(-25 * time.Hour)
+	must(t, q.Enqueue(Task{ID: "t-stale", Title: "waiting for design", Worker: "coder", EnqueuedAt: old}))
+
+	trail, buf := newBufferTrail()
+	o, err := NewOrchestrator(trail, q)
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	// Fix the clock at "now" so the age calculation is deterministic.
+	now := time.Now()
+	o.now = func() time.Time { return now }
+	o.staleThreshold = 24 * time.Hour
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	saw := false
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.orch.stale_context_escalation" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Error("no supervisor.orch.stale_context_escalation in trail for 25h-old undispatched task")
+	}
+}
+
+func TestOrchestrator_Tick_FreshTaskNoEscalation(t *testing.T) {
+	// A task enqueued 1h ago must NOT trigger stale escalation.
+	q := &flakyQueue{
+		InMemoryQueue: NewInMemoryQueue(),
+		failDispatch:  map[string]bool{"t-fresh": true},
+	}
+	recent := time.Now().Add(-1 * time.Hour)
+	must(t, q.Enqueue(Task{ID: "t-fresh", Title: "just started", Worker: "coder", EnqueuedAt: recent}))
+
+	trail, buf := newBufferTrail()
+	o, err := NewOrchestrator(trail, q)
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	now := time.Now()
+	o.now = func() time.Time { return now }
+	o.staleThreshold = 24 * time.Hour
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.orch.stale_context_escalation" {
+			t.Error("unexpected stale_context_escalation for 1h-old task")
+		}
+	}
+}
+
+func TestOrchestrator_Tick_DispatchedTaskNotEscalated(t *testing.T) {
+	// A task enqueued 48h ago that IS successfully dispatched must NOT trigger
+	// stale escalation — it is no longer blocked.
+	q := NewInMemoryQueue()
+	old := time.Now().Add(-48 * time.Hour)
+	must(t, q.Enqueue(Task{ID: "t-old-ok", Title: "ancient but dispatched", Worker: "coder", EnqueuedAt: old}))
+
+	trail, buf := newBufferTrail()
+	o, err := NewOrchestrator(trail, q)
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	now := time.Now()
+	o.now = func() time.Time { return now }
+	o.staleThreshold = 24 * time.Hour
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.orch.stale_context_escalation" {
+			t.Error("stale_context_escalation fired for a successfully dispatched task")
+		}
 	}
 }
 

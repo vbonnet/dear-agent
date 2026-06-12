@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/vroom/decisiontrail"
 )
@@ -40,15 +41,34 @@ type Task struct {
 	// Worker is the name/role of the Worker to dispatch to. Free-form for
 	// PR 1 (e.g. "coder", "code-reviewer", "researcher").
 	Worker string
+
+	// EnqueuedAt records when the task entered the queue. The InMemoryQueue
+	// sets this on Enqueue if it is zero. Tests may set it directly to
+	// control apparent age without a clock stub on the queue.
+	EnqueuedAt time.Time
 }
+
+// defaultStaleThreshold is the default age after which an undispatched task
+// triggers supervisor.orch.stale_context_escalation. Per bead ce-6as.3:
+// a task pending for >24h is a stall — the Orchestrator must take action.
+const defaultStaleThreshold = 24 * time.Hour
 
 // Orchestrator is the COO-analogue supervisor. Its Tick scans the work
 // queue and dispatches pending tasks to Workers — one per task, no
 // prioritisation beyond Queue ordering. Real prioritisation, capacity
 // limiting, and worker-health monitoring land in follow-up PRs.
+//
+// Stale-context escalation (ce-6as.3): any task that has been pending for
+// longer than staleThreshold without being dispatched triggers a
+// supervisor.orch.stale_context_escalation trail record so the
+// Meta-Orchestrator or operator can ask one specific question, document an
+// assumption, or dispatch the context-free sub-tasks instead of letting
+// the item block silently.
 type Orchestrator struct {
-	trail decisiontrail.Trail
-	queue Queue
+	trail          decisiontrail.Trail
+	queue          Queue
+	staleThreshold time.Duration    // 0 → defaultStaleThreshold
+	now            func() time.Time // nil → time.Now
 }
 
 // NewOrchestrator constructs the Orchestrator supervisor.
@@ -62,15 +82,35 @@ func NewOrchestrator(trail decisiontrail.Trail, queue Queue) (*Orchestrator, err
 	return &Orchestrator{trail: trail, queue: queue}, nil
 }
 
+// clock returns the Orchestrator's time source (defaults to time.Now).
+func (o *Orchestrator) clock() time.Time {
+	if o.now != nil {
+		return o.now()
+	}
+	return time.Now()
+}
+
+// threshold returns the configured stale threshold (defaults to 24h).
+func (o *Orchestrator) threshold() time.Duration {
+	if o.staleThreshold > 0 {
+		return o.staleThreshold
+	}
+	return defaultStaleThreshold
+}
+
 // Role implements Supervisor.
 func (o *Orchestrator) Role() Role { return RoleOrchestrator }
 
-// Tick dispatches every pending task.
+// Tick dispatches every pending task, then scans the remaining non-dispatched
+// tasks for staleness. A task whose EnqueuedAt is older than the stale
+// threshold triggers a supervisor.orch.stale_context_escalation record.
 func (o *Orchestrator) Tick(ctx context.Context) error {
 	tasks, err := o.queue.Pending(ctx)
 	if err != nil {
 		return fmt.Errorf("orchestrator: list pending: %w", err)
 	}
+
+	dispatched := make(map[string]bool, len(tasks))
 	for _, t := range tasks {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -96,6 +136,31 @@ func (o *Orchestrator) Tick(ctx context.Context) error {
 				"worker":  t.Worker,
 			},
 		})
+		dispatched[t.ID] = true
+	}
+
+	// Stale-context scan: tasks that could not be dispatched and have been
+	// pending longer than the threshold need operator attention (ce-6as.3).
+	now := o.clock()
+	threshold := o.threshold()
+	for _, t := range tasks {
+		if dispatched[t.ID] || t.EnqueuedAt.IsZero() {
+			continue
+		}
+		if now.Sub(t.EnqueuedAt) >= threshold {
+			_ = o.trail.Append(ctx, decisiontrail.Record{
+				Role: string(RoleOrchestrator),
+				Kind: "supervisor.orch.stale_context_escalation",
+				Payload: map[string]any{
+					"task_id":     t.ID,
+					"title":       t.Title,
+					"enqueued_at": t.EnqueuedAt.Format(time.RFC3339),
+					"pending_for": now.Sub(t.EnqueuedAt).String(),
+					"threshold":   threshold.String(),
+					"action":      "ask one specific question, make documented assumption, or decompose",
+				},
+			})
+		}
 	}
 	return nil
 }
