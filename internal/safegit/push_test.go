@@ -45,6 +45,10 @@ func TestForceFlag(t *testing.T) {
 		{"force-with-lease=ref", []string{"--force-with-lease=main", "origin"}, "--force-with-lease=main", true},
 		{"force-if-includes", []string{"--force-if-includes", "origin"}, "--force-if-includes", true},
 		{"refspec containing force substring is not a flag", []string{"origin", "feature/force-cleanup"}, "", false},
+		{"mirror", []string{"--mirror"}, "--mirror", true},
+		{"force refspec +HEAD:main", []string{"origin", "+HEAD:main"}, "+HEAD:main", true},
+		{"force refspec wildcard", []string{"origin", "+refs/heads/*:refs/heads/*"}, "+refs/heads/*:refs/heads/*", true},
+		{"plain refspec HEAD:main not force", []string{"origin", "HEAD:main"}, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,7 +94,7 @@ func TestPushArgs_NoRepoDirOmitsDashC(t *testing.T) {
 func TestPush_RejectsForceBeforeRunning(t *testing.T) {
 	// Force is rejected up front, so this never shells out to git.
 	err := Push("", []string{"--force", "origin", "main"}, time.Second)
-	if err == nil || !strings.Contains(err.Error(), "never force-pushes") {
+	if err == nil || !strings.Contains(err.Error(), "force-pushes") {
 		t.Fatalf("expected force rejection, got %v", err)
 	}
 }
