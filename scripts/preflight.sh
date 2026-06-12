@@ -7,8 +7,9 @@
 #
 # Usage:
 #   scripts/preflight.sh            # fast tier: vet + build + lint  (~25s)
-#   scripts/preflight.sh --full     # add: go test -race + govulncheck  (slower)
 #   scripts/preflight.sh --tests    # fast tier + go test (no -race, no vuln)
+#   scripts/preflight.sh --race     # fast tier + go test -race (no vuln)
+#   scripts/preflight.sh --full     # add: go test -race + govulncheck  (full CI parity)
 #
 # Exits non-zero on the first failing gate so a pre-push hook can chain it.
 
@@ -20,14 +21,15 @@ cd "$REPO_ROOT"
 MODE="fast"
 case "${1:-}" in
   --full) MODE="full" ;;
+  --race) MODE="race" ;;
   --tests) MODE="tests" ;;
   --fast|"") MODE="fast" ;;
   -h|--help)
-    sed -n '2,15p' "$0"
+    sed -n '2,16p' "$0"
     exit 0
     ;;
   *)
-    echo "preflight: unknown flag '$1' (try --fast | --tests | --full)" >&2
+    echo "preflight: unknown flag '$1' (try --fast | --tests | --race | --full)" >&2
     exit 2
     ;;
 esac
@@ -83,7 +85,7 @@ warn "local linter: ${LINT_VER}"
 golangci-lint run --timeout=5m ./... || fail "lint failed (see above)"
 ok "lint clean"
 
-if [[ "$MODE" == "tests" || "$MODE" == "full" ]]; then
+if [[ "$MODE" == "tests" || "$MODE" == "race" || "$MODE" == "full" ]]; then
   step "go test ./..."
   # Mirror ci.yml: CI_SKIP_TMUX=true on macOS, false on Linux. The tmux
   # tests assume an isolated tmux server; on a developer's macOS box
@@ -97,9 +99,9 @@ if [[ "$MODE" == "tests" || "$MODE" == "full" ]]; then
   else
     export CI_SKIP_TMUX=false
   fi
-  # In --full we match CI exactly: -race -count=1. In --tests we skip -race
-  # so contributors who just want a quick sanity check have a faster path.
-  if [[ "$MODE" == "full" ]]; then
+  # --full and --race both use -race -count=1 (CI parity for data-race detection).
+  # --tests skips -race for a faster contributor sanity check.
+  if [[ "$MODE" == "full" || "$MODE" == "race" ]]; then
     go test -race -count=1 ./... || fail "tests failed"
   else
     go test -count=1 ./... || fail "tests failed"

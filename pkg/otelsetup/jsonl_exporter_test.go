@@ -11,8 +11,10 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -158,5 +160,84 @@ func TestNewJSONLExporter_DefaultSession(t *testing.T) {
 	expected := filepath.Join(tmpHome, ".engram", "traces", "default", "spans.jsonl")
 	if _, err := os.Stat(expected); err != nil {
 		t.Fatalf("expected file at %s: %v", expected, err)
+	}
+}
+
+func TestServiceNameFromSpan_ExplicitName(t *testing.T) {
+	res, err := resource.New(context.Background(),
+		resource.WithAttributes(semconv.ServiceName("my-service")),
+	)
+	if err != nil {
+		t.Fatalf("resource.New: %v", err)
+	}
+	stub := tracetest.SpanStub{Resource: res}
+	got := serviceNameFromSpan(stub.Snapshot())
+	if got != "my-service" {
+		t.Errorf("serviceNameFromSpan = %q, want %q", got, "my-service")
+	}
+}
+
+func TestServiceNameFromSpan_UnknownService(t *testing.T) {
+	// resource.Default() sets service.name = "unknown_service:<binary>" when OTEL_SERVICE_NAME is unset.
+	t.Setenv("OTEL_SERVICE_NAME", "")
+	res, err := resource.New(context.Background(), resource.WithAttributes(
+		semconv.ServiceName("unknown_service:test.binary"),
+	))
+	if err != nil {
+		t.Fatalf("resource.New: %v", err)
+	}
+	stub := tracetest.SpanStub{Resource: res}
+	got := serviceNameFromSpan(stub.Snapshot())
+	if got != "" {
+		t.Errorf("serviceNameFromSpan(unknown_service:...) = %q, want empty string", got)
+	}
+}
+
+func TestServiceNameFromSpan_NilResource(t *testing.T) {
+	stub := tracetest.SpanStub{Resource: nil}
+	got := serviceNameFromSpan(stub.Snapshot())
+	if got != "" {
+		t.Errorf("serviceNameFromSpan(nil resource) = %q, want empty string", got)
+	}
+}
+
+func TestJSONLExporter_ServiceNameWritten(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "spans.jsonl")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp := &JSONLExporter{file: f, enc: json.NewEncoder(f)}
+
+	res, err := resource.New(context.Background(),
+		resource.WithAttributes(semconv.ServiceName("test-svc")),
+	)
+	if err != nil {
+		t.Fatalf("resource.New: %v", err)
+	}
+
+	now := time.Now()
+	stub := tracetest.SpanStub{
+		Name:      "op",
+		StartTime: now,
+		EndTime:   now.Add(time.Millisecond),
+		Resource:  res,
+	}
+	if err := exp.ExportSpans(context.Background(), []sdktrace.ReadOnlySpan{stub.Snapshot()}); err != nil {
+		t.Fatalf("ExportSpans: %v", err)
+	}
+	_ = exp.Shutdown(context.Background())
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var span JSONLSpan
+	if err := json.Unmarshal(data, &span); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if span.ServiceName != "test-svc" {
+		t.Errorf("ServiceName = %q, want %q", span.ServiceName, "test-svc")
 	}
 }
