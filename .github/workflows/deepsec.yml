@@ -24,47 +24,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  scan:
-    # Skip PRs from forks — they don't have access to repo secrets and would
-    # fail-noisy. Internal PRs still run.
+  # Probe for secret presence without exposing the secret value as an output.
+  # GitHub Actions job-level `if:` cannot reference secrets directly, so this
+  # two-job split is the canonical pattern: check-key exports a plain boolean,
+  # scan gates on it. When the key is absent the scan job shows as "Skipped"
+  # (grey ⊘) rather than false-green ✅ (nothing scanned).
+  check-key:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    outputs:
+      has_key: ${{ steps.probe.outputs.has_key }}
     steps:
-      - name: Gate on secret presence
-        id: gate
+      - id: probe
         env:
           KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          if [ -z "$KEY" ]; then
-            echo "::notice ::ANTHROPIC_API_KEY not set; skipping deepsec. Add the secret to enable PR scans."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
+          if [ -n "$KEY" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
           else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "::notice ::ANTHROPIC_API_KEY not set — deepsec scan will be skipped. Add the secret to enable PR scans."
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
           fi
 
+  scan:
+    needs: check-key
+    if: needs.check-key.outputs.has_key == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
       - uses: actions/checkout@v6
-        if: steps.gate.outputs.skip != 'true'
         with:
           # Need history so `--diff origin/main` can resolve the base.
           fetch-depth: 0
 
       - uses: actions/setup-node@v6
-        if: steps.gate.outputs.skip != 'true'
         with:
           node-version: '20'
 
       - name: Install pnpm
-        if: steps.gate.outputs.skip != 'true'
         run: npm install -g pnpm@9
 
       - name: Install deepsec workspace
-        if: steps.gate.outputs.skip != 'true'
         working-directory: .deepsec
         run: pnpm install --frozen-lockfile
 
       - name: Run incremental scan
-        if: steps.gate.outputs.skip != 'true'
         id: scan
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -83,7 +87,7 @@ jobs:
           fi
 
       - name: Post PR comment
-        if: steps.gate.outputs.skip != 'true' && steps.scan.outputs.has_findings == 'true'
+        if: steps.scan.outputs.has_findings == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
@@ -104,7 +108,6 @@ jobs:
           gh pr comment "$PR" --body-file /tmp/deepsec-comment.md
 
       - name: Summarise (non-blocking)
-        if: steps.gate.outputs.skip != 'true'
         run: |
           if [ "${{ steps.scan.outputs.has_findings }}" = "true" ]; then
             echo "::warning ::Deepsec found candidate issues — see PR comment. Not blocking the merge."
