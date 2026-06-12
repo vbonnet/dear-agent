@@ -125,6 +125,81 @@ func TestMetaOrchestrator_Tick_AcceptErrorRecordedButContinues(t *testing.T) {
 	}
 }
 
+func TestMetaOrchestrator_Tick_NoWork_EmitsNoWorkRecord(t *testing.T) {
+	rm := NewInMemoryRoadmap() // empty
+	trail, buf := newBufferTrail()
+	m, err := NewMetaOrchestrator(trail, rm)
+	if err != nil {
+		t.Fatalf("NewMetaOrchestrator: %v", err)
+	}
+	if err := m.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	saw := false
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.metao.no_work" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Error("no supervisor.metao.no_work record after idle tick on empty roadmap")
+	}
+}
+
+func TestMetaOrchestrator_Tick_IdleEscalation(t *testing.T) {
+	rm := NewInMemoryRoadmap() // always empty
+	trail, buf := newBufferTrail()
+	m, err := NewMetaOrchestrator(trail, rm)
+	if err != nil {
+		t.Fatalf("NewMetaOrchestrator: %v", err)
+	}
+	for i := range metaoIdleEscalationThreshold {
+		if err := m.Tick(context.Background()); err != nil {
+			t.Fatalf("Tick %d: %v", i, err)
+		}
+	}
+	saw := false
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.metao.idle_escalation" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Errorf("no supervisor.metao.idle_escalation after %d idle ticks", metaoIdleEscalationThreshold)
+	}
+}
+
+func TestMetaOrchestrator_Tick_IdleResetOnEvaluation(t *testing.T) {
+	rm := NewInMemoryRoadmap()
+	trail, buf := newBufferTrail()
+	m, err := NewMetaOrchestrator(trail, rm)
+	if err != nil {
+		t.Fatalf("NewMetaOrchestrator: %v", err)
+	}
+	// Run 6 idle ticks (one below threshold).
+	for i := range metaoIdleEscalationThreshold - 1 {
+		if err := m.Tick(context.Background()); err != nil {
+			t.Fatalf("idle Tick %d: %v", i, err)
+		}
+	}
+	// Submit + evaluate a proposal — resets the streak.
+	must(t, rm.Submit(WorkProposal{ID: "p1", Title: "x", Reason: "y"}))
+	if err := m.Tick(context.Background()); err != nil {
+		t.Fatalf("evaluation Tick: %v", err)
+	}
+	// Run 6 more idle ticks. No escalation should fire.
+	for i := range metaoIdleEscalationThreshold - 1 {
+		if err := m.Tick(context.Background()); err != nil {
+			t.Fatalf("post-reset idle Tick %d: %v", i, err)
+		}
+	}
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.metao.idle_escalation" {
+			t.Error("idle_escalation fired even though evaluation reset the streak")
+		}
+	}
+}
+
 // errorRoadmap always returns an error from PendingProposals.
 type errorRoadmap struct {
 	Roadmap // unused — only PendingProposals is called in the path under test
