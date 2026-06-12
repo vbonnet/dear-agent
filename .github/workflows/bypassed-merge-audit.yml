@@ -1,0 +1,186 @@
+name: Bypassed Merge Audit
+
+# Checks for PRs merged to main despite failing required CI checks (admin bypass).
+# The enforce_admins:false hatch is kept deliberately for solo-dev lockout recovery,
+# but every bypass should be visible — not silent.
+#
+# On detection, creates or updates a rolling issue labelled "bypassed-merge"
+# so it shows up in the issue tracker. Auto-closes once the audit window is clean.
+#
+# Addresses ce-m3c: Flag bypassed merges in CI.
+
+on:
+  schedule:
+    - cron: "30 14 * * *"   # daily at 14:30 UTC, offset from branch-protection-audit
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: "Days to look back for merged PRs"
+        default: "7"
+
+permissions:
+  issues: write
+  contents: read
+
+env:
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  audit:
+    name: Bypassed Merge Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Ensure bypassed-merge label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh label create bypassed-merge \
+            --color "c5221f" \
+            --description "PR merged with failing or pending CI checks" \
+            --repo "$REPO" 2>/dev/null || true
+
+      - name: Scan for merges on red
+        id: scan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          LOOKBACK_DAYS: ${{ github.event.inputs.lookback_days || '7' }}
+        run: |
+          set -euo pipefail
+
+          # Compute the earliest merge timestamp to consider.
+          since=$(date -u -d "${LOOKBACK_DAYS} days ago" '+%Y-%m-%dT%H:%M:%SZ')
+          echo "Scanning PRs merged to main since ${since} ..."
+
+          # Fetch recently merged PRs.
+          merged_prs=$(gh pr list \
+            --repo "$REPO" \
+            --state merged \
+            --base main \
+            --limit 100 \
+            --json number,title,mergedAt,headRefOid \
+            --jq "[.[] | select(.mergedAt >= \"${since}\")]")
+
+          pr_count=$(echo "$merged_prs" | jq length)
+          echo "Found ${pr_count} merged PRs in the window."
+
+          findings=""
+
+          while IFS= read -r pr_json; do
+            number=$(echo "$pr_json" | jq -r '.number')
+            title=$(echo "$pr_json"  | jq -r '.title')
+            merged_at=$(echo "$pr_json" | jq -r '.mergedAt')
+            head_sha=$(echo "$pr_json"  | jq -r '.headRefOid')
+
+            echo "--- PR #${number}: ${title} (merged ${merged_at}, head=${head_sha})"
+
+            # Fetch check-runs for the PR's HEAD commit.
+            check_runs=$(gh api "repos/${REPO}/commits/${head_sha}/check-runs" \
+              --jq '.check_runs // []' 2>/dev/null || echo '[]')
+
+            # Checks that completed with a non-success conclusion BEFORE the merge.
+            red=$(echo "$check_runs" | jq -r \
+              --arg merged "$merged_at" \
+              '[.[] | select(
+                  .status == "completed" and
+                  (.conclusion // "") != "" and
+                  (.conclusion // "") != "success" and
+                  (.conclusion // "") != "skipped" and
+                  (.conclusion // "") != "neutral" and
+                  (.completed_at // "z") <= $merged
+              ) | "\(.name) [\(.conclusion)]"] | join(", ")')
+
+            # Checks that were still running (started but not completed) at merge time.
+            pending=$(echo "$check_runs" | jq -r \
+              --arg merged "$merged_at" \
+              '[.[] | select(
+                  (.started_at // "z") <= $merged and
+                  (.status != "completed" or (.completed_at // "z") > $merged)
+              ) | .name] | join(", ")')
+
+            if [ -n "$red" ] || [ -n "$pending" ]; then
+              entry="- **PR #${number}** — ${title}"
+              [ -n "$red" ]     && entry="${entry} | ❌ failed: ${red}"
+              [ -n "$pending" ] && entry="${entry} | ⏳ in-progress at merge: ${pending}"
+              entry="${entry} (merged ${merged_at})"
+              findings="${findings}
+${entry}"
+              echo "  BYPASS DETECTED: ${entry}"
+            else
+              echo "  ok — all checks green at merge time"
+            fi
+          done < <(echo "$merged_prs" | jq -c '.[]')
+
+          # Export findings for the next steps.
+          {
+            echo "findings<<__EOF__"
+            printf '%s\n' "$findings"
+            echo "__EOF__"
+          } >> "$GITHUB_ENV"
+
+      - name: Open / update bypassed-merge issue
+        if: env.findings != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="bypassed-merge: PRs merged with failing or pending required checks"
+          body="The Bypassed Merge Audit detected PRs merged to \`main\` while CI checks were not all green:
+
+          ${findings}
+
+          **What this means:** \`enforce_admins: false\` allows admin merges that bypass
+          required-status-checks. This is intentional for solo-dev lockout recovery, but
+          every bypass should be visible and investigated.
+
+          **If intentional:** reply to this issue explaining why.
+          **If accidental:** consider reverting the merge or adding a follow-up fix.
+
+          _Auto-managed by \`.github/workflows/bypassed-merge-audit.yml\`; closes once
+          the lookback window contains no bypasses._"
+
+          existing=$(timeout 30 gh issue list \
+            --repo "$REPO" \
+            --label "bypassed-merge" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ -n "$existing" ]; then
+            timeout 30 gh issue comment "$existing" \
+              --repo "$REPO" \
+              --body "$body"
+            echo "Updated existing issue #${existing}"
+          else
+            timeout 30 gh issue create \
+              --repo "$REPO" \
+              --title "$title" \
+              --body "$body" \
+              --label "bypassed-merge"
+            echo "Created new issue"
+          fi
+
+      - name: Auto-close bypassed-merge issue when window is clean
+        if: env.findings == ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          open_issues=$(timeout 30 gh issue list \
+            --repo "$REPO" \
+            --label "bypassed-merge" \
+            --state open \
+            --json number \
+            --jq '.[].number')
+          for n in $open_issues; do
+            timeout 30 gh issue close "$n" \
+              --repo "$REPO" \
+              --comment "No bypassed merges in the audit window; auto-closing."
+            echo "Closed issue #${n}"
+          done
