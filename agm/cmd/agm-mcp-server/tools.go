@@ -274,7 +274,7 @@ func addListWayfinderSessionsTool(server *mcp.Server, cfg *Config) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "engram_list_wayfinder_sessions",
 		Description: "List Wayfinder sessions from Engram. Use when checking status of SDLC projects.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input ListWayfinderSessionsInput) (*mcp.CallToolResult, interface{}, error) {
+	}, func(_ context.Context, _ *mcp.CallToolRequest, input ListWayfinderSessionsInput) (*mcp.CallToolResult, any, error) {
 		sessions, err := listWayfinderSessions(cfg.WayfinderDir, input.StatusFilter, input.Limit)
 		if err != nil {
 			return mcpError(err), nil, nil
@@ -288,7 +288,7 @@ func addGetWayfinderSessionTool(server *mcp.Server, cfg *Config) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "engram_get_wayfinder_session",
 		Description: "Get detailed Wayfinder session info by ID. Use when you need phase status for a specific project.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, input GetWayfinderSessionInput) (*mcp.CallToolResult, interface{}, error) {
+	}, func(_ context.Context, _ *mcp.CallToolRequest, input GetWayfinderSessionInput) (*mcp.CallToolResult, any, error) {
 		if input.SessionID == "" {
 			return mcpError(ops.ErrInvalidInput("session_id", "Session ID is required.")), nil, nil
 		}
