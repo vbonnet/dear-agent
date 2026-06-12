@@ -35,9 +35,10 @@ func (p *SysResourceProbe) Snapshot(_ context.Context) (ResourceSnapshot, error)
 
 	// Disk.
 	var fs syscall.Statfs_t
-	if err := syscall.Statfs(diskPath, &fs); err == nil && fs.Blocks > 0 {
-		total := fs.Blocks * uint64(fs.Bsize)
-		avail := fs.Bavail * uint64(fs.Bsize)
+	if err := syscall.Statfs(diskPath, &fs); err == nil && fs.Blocks > 0 && fs.Bsize > 0 {
+		bsize := uint64(fs.Bsize) //nolint:gosec,nolintlint // Bsize is checked > 0 above; int64→uint64 is safe; directive is platform-conditional
+		total := fs.Blocks * bsize
+		avail := fs.Bavail * bsize
 		if total > 0 {
 			used := total - avail
 			snap.DiskUsedFraction = float64(used) / float64(total)
