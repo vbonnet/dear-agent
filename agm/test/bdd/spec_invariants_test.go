@@ -404,6 +404,38 @@ func TestSPECInvariants_SessionLifecycle(t *testing.T) {
 	})
 }
 
+// TestBDDFeatureFileLocation enforces the structural invariant from
+// ADR-027: every .feature file must live under agm/test/bdd/features/,
+// which is the exact path TestFeatures passes to godog. A feature file
+// placed elsewhere would be silently skipped by TestFeatures.
+func TestBDDFeatureFileLocation(t *testing.T) {
+	t.Parallel()
+	// Walk the parent directory (agm/test/bdd) and fail if any .feature
+	// file is found outside the features/ subdirectory.
+	bddRoot := "."
+	featuresDir := filepath.Join(bddRoot, "features")
+	err := filepath.WalkDir(bddRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(strings.ToLower(d.Name()), ".feature") {
+			// Is this file inside the features/ subdirectory?
+			rel, relErr := filepath.Rel(featuresDir, path)
+			if relErr != nil || strings.HasPrefix(rel, "..") {
+				t.Errorf(".feature file outside features/: %s — move it under agm/test/bdd/features/ "+
+					"or TestFeatures will silently skip it (see ADR-027)", path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WalkDir failed: %v", err)
+	}
+}
+
 // TestContractDrift runs the contract drift checker against the actual SPECs.
 func TestContractDrift(t *testing.T) {
 	contracts.ResetForTesting()
