@@ -79,16 +79,24 @@ func run(args []string) int {
 	r.Services = svcs
 
 	// 2. Readiness — any traces in the lookback window?
+	var ctxCanceled bool
 	for _, svc := range svcs {
 		n, err := countTraces(ctx, client, apiURL, svc, *lookback)
 		if err != nil {
 			if ctx.Err() != nil {
+				ctxCanceled = true
 				break
 			}
 			fmt.Fprintf(os.Stderr, "warn: trace query for %q failed: %v\n", svc, err)
 			continue
 		}
 		r.TraceCount += n
+	}
+
+	if ctxCanceled {
+		r.Status = "degraded"
+		msg := fmt.Sprintf("DEGRADED — context canceled during trace queries (partial count: %d)", r.TraceCount)
+		return emit(r, *asJSON, msg, 1)
 	}
 
 	if r.TraceCount == 0 {
@@ -128,7 +136,7 @@ func fetchServices(ctx context.Context, c *http.Client, base string) ([]string, 
 		return nil, fmt.Errorf("decode /api/services: %w", err)
 	}
 	if len(sr.Errors) > 0 {
-		return nil, fmt.Errorf("jaeger errors: %s", strings.Join(sr.Errors, "; "))
+		return nil, fmt.Errorf("Jaeger errors: %s", strings.Join(sr.Errors, "; ")) //nolint:staticcheck // proper noun
 	}
 	return sr.Data, nil
 }
