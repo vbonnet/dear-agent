@@ -33,8 +33,10 @@
 #   uninstall-bumblebee-launchagent  Remove the daily Bumblebee scan
 #   build-jaeger-health     Build the Jaeger health-check CLI (cmd/jaeger-health)
 #   install-jaeger-health   Install jaeger-health to ~/go/bin
+#   build-babysit-prs       Build babysit-prs: serial PR updater + merger
+#   install-babysit-prs     Install babysit-prs to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-babysit-prs install-babysit-prs
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -227,6 +229,20 @@ build-jaeger-health:
 install-jaeger-health: build-jaeger-health
 	cp bin/jaeger-health $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/jaeger-health"
+
+# Build babysit-prs: the serial PR updater + merger that works around the
+# "every merge makes remaining PRs BEHIND" problem from requiresLinearHistory=true.
+# For each open PR: gh pr update-branch --rebase (if BEHIND), then safe-merge.
+# Backpressure: exits if open-PR count > --cap (default 50). See ce-5w0i.
+build-babysit-prs:
+	@echo "Building babysit-prs..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/babysit-prs ./cmd/babysit-prs/
+	@echo "Built: bin/babysit-prs"
+
+install-babysit-prs: build-babysit-prs
+	cp bin/babysit-prs $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/babysit-prs"
 
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
