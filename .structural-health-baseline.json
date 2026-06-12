@@ -159,17 +159,6 @@
       "wayfinder/coordinator/monitor.go:172",
       "wayfinder/coordinator/monitor.go:182"
     ],
-    "zero-test": [
-      "github.com/vbonnet/dear-agent/agm/cmd/fix-uuid-manual",
-      "github.com/vbonnet/dear-agent/agm/examples",
-      "github.com/vbonnet/dear-agent/agm/internal/surface/cmd/generate",
-      "github.com/vbonnet/dear-agent/agm/scripts",
-      "github.com/vbonnet/dear-agent/agm/test/bdd/steps",
-      "github.com/vbonnet/dear-agent/engram/internal/guidance",
-      "github.com/vbonnet/dear-agent/internal/sandbox/gvisor",
-      "github.com/vbonnet/dear-agent/internal/sandbox/overlayfs",
-      "github.com/vbonnet/dear-agent/pkg/llm",
-      "github.com/vbonnet/dear-agent/pkg/validation"
-    ]
+    "zero-test": []
   }
 }
