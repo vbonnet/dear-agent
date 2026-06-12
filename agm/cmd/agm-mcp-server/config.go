@@ -17,7 +17,8 @@ type Config struct {
 	AutoRegister     bool      `yaml:"auto_register"`
 	ClaudeConfigPath string    `yaml:"claude_config_path"`
 	SessionsDir      string    `yaml:"sessions_dir"`
-	EngramMCPURL     string    `yaml:"engram_mcp_url"` // Phase 7.1: Engram MCP server URL for forwarding
+	EngramMCPURL     string    `yaml:"engram_mcp_url"` // kept for future HTTP transport; wayfinder tools now use WayfinderDir
+	WayfinderDir     string    `yaml:"wayfinder_dir"`  // path to engram-research wf/ directory
 	A2A              A2AConfig `yaml:"a2a"`
 }
 
@@ -39,6 +40,7 @@ func loadConfig(configPath string) (*Config, error) {
 		ClaudeConfigPath: expandHomeDir("~/.config/claude/mcp_servers.json"),
 		SessionsDir:      detectSessionsDir(),
 		EngramMCPURL:     "http://localhost:8081", // Default Engram MCP server URL
+		WayfinderDir:     expandHomeDir(defaultWayfinderDir),
 	}
 
 	// Expand config path
@@ -80,6 +82,9 @@ func loadConfig(configPath string) (*Config, error) {
 	}
 	if yamlCfg.MCPServer.EngramMCPURL != "" {
 		cfg.EngramMCPURL = yamlCfg.MCPServer.EngramMCPURL
+	}
+	if yamlCfg.MCPServer.WayfinderDir != "" {
+		cfg.WayfinderDir = expandHomeDir(yamlCfg.MCPServer.WayfinderDir)
 	}
 
 	// Use YAML boolean values
