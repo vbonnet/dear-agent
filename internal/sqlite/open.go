@@ -4,7 +4,7 @@ package sqlite
 import (
 	"database/sql"
 
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // register the sqlite3 database/sql driver
 )
 
 // Open opens a SQLite database at path with standard pragma settings:
