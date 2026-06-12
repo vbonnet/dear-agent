@@ -1,0 +1,92 @@
+name: Doc Proximity Check
+
+# Informational check: when Go source files change in a directory that also
+# contains living-doc files (SPEC.md, ARCHITECTURE.md, or any *.md), this
+# job prints a reminder to review and timestamp those docs.
+#
+# Start posture: continue-on-error=true so it annotates without blocking.
+# Ratchet path: once doc coverage is established on main, flip
+# continue-on-error off and add to branch-protection required-status-checks.
+#
+# Only runs on PRs — needs a base ref to diff against.
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  doc-proximity:
+    name: Doc Proximity Check
+    runs-on: ubuntu-latest
+    # Informational — does not block merge until doc coverage is established.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check doc proximity
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          base_sha="${BASE_REF}"
+          head_sha="${HEAD_REF}"
+
+          # Directories where Go source files changed on this PR.
+          changed_code_dirs=$(git diff --name-only "${base_sha}...${head_sha}" \
+            | grep '\.go$' \
+            | xargs -I{} dirname {} \
+            | sort -u)
+
+          if [ -z "$changed_code_dirs" ]; then
+            echo "ok: no Go source changes on this PR"
+            exit 0
+          fi
+
+          # Markdown files touched anywhere on this PR.
+          touched_docs=$(git diff --name-only "${base_sha}...${head_sha}" \
+            | grep '\.md$' || true)
+
+          violations=0
+
+          while IFS= read -r dir; do
+            # Find doc files co-located with the changed code.
+            doc_files=$(find "$dir" -maxdepth 1 -name "*.md" 2>/dev/null | sort || true)
+            [ -z "$doc_files" ] && continue
+
+            # Check if any of those docs were touched in this PR.
+            dir_docs_touched=false
+            while IFS= read -r doc; do
+              if echo "$touched_docs" | grep -qF "$doc"; then
+                dir_docs_touched=true
+                break
+              fi
+            done <<< "$doc_files"
+
+            if ! $dir_docs_touched; then
+              echo "::warning file=${dir}::Doc proximity: code changed in '${dir}' but none of its docs were reviewed."
+              echo "  Docs present but not touched:"
+              while IFS= read -r doc; do
+                echo "    - ${doc}"
+              done <<< "$doc_files"
+              echo "  If the docs still accurately describe the code, update the"
+              echo "  '<!-- Last audited at: -->' timestamp. If they are stale, fix them."
+              violations=$((violations + 1))
+            fi
+          done <<< "$changed_code_dirs"
+
+          if [ "$violations" -gt 0 ]; then
+            echo ""
+            echo "Doc proximity: ${violations} directory(ies) need doc review."
+            echo "See .claude/CLAUDE.md Living Documentation Policy for details."
+            exit 1
+          fi
+
+          echo "ok: all directories with code changes have corresponding doc updates"
