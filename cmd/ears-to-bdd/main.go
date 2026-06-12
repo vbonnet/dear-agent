@@ -20,6 +20,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -32,7 +33,7 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func run(args []string, stdout, stderr *os.File) int {
+func run(args []string, stdout, stderr io.Writer) int {
 	fs2 := flag.NewFlagSet("ears-to-bdd", flag.ContinueOnError)
 	outDir := fs2.String("out", "", "write .feature files to this directory (default: stdout)")
 	dryRun := fs2.Bool("dry-run", false, "print what would be written without writing")
@@ -120,7 +121,7 @@ func expandPaths(paths []string) ([]string, error) {
 				return walkErr
 			}
 			if d.IsDir() {
-				if n := d.Name(); n == ".git" || n == "node_modules" {
+				if n := d.Name(); n == ".git" || n == "node_modules" || n == ".worktrees" {
 					return filepath.SkipDir
 				}
 				return nil

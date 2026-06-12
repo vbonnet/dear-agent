@@ -46,6 +46,8 @@ var (
 	condTail = regexp.MustCompile(`(?i),?\s+the\s+[\w][\w-]*\s*$`)
 	// listMarker strips leading markdown list/heading markers.
 	listMarker = regexp.MustCompile(`^(\s*[-*+]\s+|\s*\d+[.)]\s+)`)
+	// emphasisPattern removes **bold** and *italic* emphasis (keeps inner text).
+	emphasisPattern = regexp.MustCompile(`\*{1,3}([^*]+)\*{1,3}`)
 )
 
 // Extract reads from r and returns every EARS requirement found.
@@ -120,13 +122,16 @@ func ExtractFile(path string) ([]Requirement, error) {
 // (after). If no "shall" is found, condition is the full text and action
 // is empty.
 func splitShall(text string) (condition, action string) {
-	lower := strings.ToLower(text)
-	idx := strings.Index(lower, " shall ")
-	if idx < 0 {
+	// Use shallDetect.FindStringIndex on the original text: it returns byte
+	// offsets directly into text, so slicing is UTF-8 safe. Indexing into a
+	// strings.ToLower copy would be unsafe because ToLower can change byte
+	// lengths of non-ASCII runes, shifting the offsets.
+	loc := shallDetect.FindStringIndex(text)
+	if loc == nil {
 		return text, ""
 	}
-	condition = strings.TrimSpace(text[:idx])
-	action = strings.TrimSpace(text[idx+7:]) // len(" shall ") == 7
+	condition = strings.TrimSpace(text[:loc[0]])
+	action = strings.TrimSpace(text[loc[1]:])
 	// Strip the trailing ", the <actor>" from the condition: in EARS format
 	// "When <trigger>, the <system> shall <response>", the actor is implicit
 	// in the Then step and clutters the When step.
@@ -145,7 +150,7 @@ func stripMarkdown(s string) string {
 	s = strings.TrimSpace(s)
 	// Remove **bold** and *italic* emphasis (keep inner text).
 	// Removing the ID prefix (**FSG-01**) is a side effect of this.
-	s = regexp.MustCompile(`\*{1,3}([^*]+)\*{1,3}`).ReplaceAllString(s, "$1")
+	s = emphasisPattern.ReplaceAllString(s, "$1")
 	s = strings.ReplaceAll(s, "`", "")
 	return strings.TrimSpace(s)
 }

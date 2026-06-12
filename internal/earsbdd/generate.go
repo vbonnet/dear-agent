@@ -106,8 +106,13 @@ func lcFirst(s string) string {
 	lower := strings.ToLower(s)
 	for _, kw := range []string{"when ", "while ", "where ", "if "} {
 		if strings.HasPrefix(lower, kw) {
-			return s[len(kw):]
+			s = s[len(kw):]
+			break
 		}
 	}
-	return s
+	if s == "" {
+		return s
+	}
+	runes := []rune(s)
+	return strings.ToLower(string(runes[0])) + string(runes[1:])
 }

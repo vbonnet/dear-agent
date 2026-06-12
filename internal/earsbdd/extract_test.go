@@ -154,11 +154,11 @@ func TestGenerate_Empty(t *testing.T) {
 
 func TestLcFirst(t *testing.T) {
 	tests := []struct{ in, want string }{
-		{"When X happens", "X happens"},
+		{"When X happens", "x happens"},
 		{"While running", "running"},
 		{"Where enabled", "enabled"},
 		{"If condition", "condition"},
-		{"The system shall", "The system shall"},
+		{"The system shall", "the system shall"},
 		{"", ""},
 	}
 	for _, tt := range tests {
