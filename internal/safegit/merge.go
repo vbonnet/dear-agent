@@ -5,7 +5,7 @@
 //   - ALL CI checks pass (no red, no pending — not just required checks)
 //   - No unresolved review threads exist
 //   - Minimum soak: head commit is at least 5 minutes old
-//   - Review bot (gemini-code-assist[bot]) has posted
+//   - Review bot (gemini-code-assist) has posted
 //
 // After merge: worktree + branch are cleaned up automatically.
 package safegit
@@ -27,7 +27,7 @@ const MinSoak = 5 * time.Minute
 const DefaultWatchTimeout = 45 * time.Minute
 
 // ReviewBot is the GitHub login of the required code-review bot.
-const ReviewBot = "gemini-code-assist[bot]"
+const ReviewBot = "gemini-code-assist"
 
 // MergeConfig holds options for a safe merge.
 type MergeConfig struct {
