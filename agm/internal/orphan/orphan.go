@@ -205,9 +205,13 @@ func Reap(lister ProcLister, killer ProcessKiller, targets []string, dryRun bool
 	return res, nil
 }
 
+// truncate shortens s to at most maxLen runes (not bytes), so a process
+// command line containing multi-byte UTF-8 (e.g. a localized path) is never
+// sliced mid-character into invalid UTF-8 when logged.
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return string(runes[:maxLen]) + "..."
 }
