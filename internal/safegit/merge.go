@@ -145,13 +145,15 @@ func attemptMerge(cfg MergeConfig) error {
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ no unresolved review threads")
 
 	// Gate 3: minimum soak time + bot review.
-	if cfg.SkipBotReview {
-		appendAuditEntry(cfg.Repo, cfg.PRNumber, "bot_review_bypassed", cfg.SkipBotReviewReason)
-		fmt.Fprintf(os.Stderr, "safe-merge: ⚠ bot-review gate bypassed — reason: %s\n", cfg.SkipBotReviewReason)
-	}
+	// Log the bypass only after soak passes to avoid flooding the audit log
+	// on every watch-mode polling iteration before soak time has elapsed.
 	if err := checkSoak(cfg.PRNumber, cfg.Repo, now, cfg.SkipBotReview); err != nil {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "soak: "+err.Error())
 		return fmt.Errorf("soak gate: %w", err)
+	}
+	if cfg.SkipBotReview {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "bot_review_bypassed", cfg.SkipBotReviewReason)
+		fmt.Fprintf(os.Stderr, "safe-merge: ⚠ bot-review gate bypassed — reason: %s\n", cfg.SkipBotReviewReason)
 	}
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ soak time and bot review OK")
 
