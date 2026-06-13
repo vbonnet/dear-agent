@@ -218,19 +218,18 @@ func auditLogDir() string {
 // --- gate implementations ---
 
 type checkRun struct {
-	Name     string `json:"name"`
-	State    string `json:"state"`
-	Required bool   `json:"required"`
+	Name  string `json:"name"`
+	State string `json:"state"`
 }
 
-// checkAllCI verifies that ALL CI checks (required and non-required) on the PR
-// have completed successfully. This is stricter than checking only required
-// checks: every check on the head SHA must be green before a merge proceeds.
+// checkAllCI verifies that ALL CI checks on the PR have completed successfully.
+// This is stricter than checking only required checks: every check on the head
+// SHA must be green before a merge proceeds.
 func checkAllCI(prNum int, repo string) error {
 	out, err := exec.Command("gh", "pr", "checks",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
-		"--json", "name,state,required",
+		"--json", "name,state",
 	).Output()
 	if err != nil {
 		return fmt.Errorf("gh pr checks failed: %w", err)
@@ -249,17 +248,13 @@ func parseCheckRuns(data []byte) error {
 	var failing []string
 	var pending []string
 	for _, c := range checks {
-		qualifier := ""
-		if !c.Required {
-			qualifier = " (non-required)"
-		}
 		switch strings.ToLower(c.State) {
 		case "success", "pass", "neutral", "skipping":
 			// acceptable
 		case "pending", "queued", "in_progress", "waiting", "requested":
-			pending = append(pending, c.Name+qualifier)
+			pending = append(pending, c.Name)
 		default:
-			failing = append(failing, fmt.Sprintf("%s%s (%s)", c.Name, qualifier, c.State))
+			failing = append(failing, fmt.Sprintf("%s (%s)", c.Name, c.State))
 		}
 	}
 	if len(failing) > 0 {
