@@ -11,6 +11,7 @@
 package safegit
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -189,7 +190,6 @@ func appendAuditEntry(repo string, prNum int, event, detail string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
 
 	entry := AuditEntry{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -200,6 +200,7 @@ func appendAuditEntry(repo string, prNum int, event, detail string) {
 	}
 	b, _ := json.Marshal(entry)
 	_, _ = fmt.Fprintln(f, string(b))
+	_ = f.Close()
 }
 
 // auditLogDir returns the directory for the safe-merge audit log.
@@ -215,6 +216,21 @@ func auditLogDir() string {
 	return filepath.Join(home, ".local", "state", "dear-agent")
 }
 
+// runCommand executes cmd, capturing stdout. On failure, stderr is appended to
+// the error so callers get actionable context instead of a bare exit-code.
+func runCommand(cmd *exec.Cmd) ([]byte, error) {
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if se := strings.TrimSpace(stderr.String()); se != "" {
+			return nil, fmt.Errorf("%w\nstderr: %s", err, se)
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
 // --- gate implementations ---
 
 type checkRun struct {
@@ -226,11 +242,11 @@ type checkRun struct {
 // This is stricter than checking only required checks: every check on the head
 // SHA must be green before a merge proceeds.
 func checkAllCI(prNum int, repo string) error {
-	out, err := exec.Command("gh", "pr", "checks",
+	out, err := runCommand(exec.Command("gh", "pr", "checks",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
 		"--json", "name,state",
-	).Output()
+	))
 	if err != nil {
 		return fmt.Errorf("gh pr checks failed: %w", err)
 	}
@@ -312,12 +328,12 @@ func checkReviewThreads(prNum int, repo string) error {
 	}
 	owner, name := parts[0], parts[1]
 
-	out, err := exec.Command("gh", "api", "graphql",
+	out, err := runCommand(exec.Command("gh", "api", "graphql",
 		"--field", fmt.Sprintf("owner=%s", owner),
 		"--field", fmt.Sprintf("name=%s", name),
 		"--field", fmt.Sprintf("number=%d", prNum),
 		"--field", fmt.Sprintf("query=%s", reviewThreadsQuery),
-	).Output()
+	))
 	if err != nil {
 		return fmt.Errorf("GraphQL query failed: %w", err)
 	}
@@ -369,11 +385,11 @@ type prViewResult struct {
 }
 
 func checkSoak(prNum int, repo string, now time.Time) error {
-	out, err := exec.Command("gh", "pr", "view",
+	out, err := runCommand(exec.Command("gh", "pr", "view",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
 		"--json", "headRefOid,commits,reviews",
-	).Output()
+	))
 	if err != nil {
 		return fmt.Errorf("gh pr view failed: %w", err)
 	}
@@ -425,11 +441,11 @@ type prInfoResult struct {
 }
 
 func prHeadBranch(prNum int, repo string) (string, error) {
-	out, err := exec.Command("gh", "pr", "view",
+	out, err := runCommand(exec.Command("gh", "pr", "view",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
 		"--json", "headRefName",
-	).Output()
+	))
 	if err != nil {
 		return "", err
 	}
@@ -453,15 +469,18 @@ func cleanupWorktree(branch string) {
 
 	// Parse porcelain output: blocks separated by blank lines.
 	// Each block has "worktree <path>", optionally "branch refs/heads/<branch>".
+	// The very first worktree block is always the main worktree — never remove it.
 	var toRemove []string
-	var currentPath string
-	for line := range strings.SplitSeq(string(out), "\n") {
+	var mainWorktree, currentPath string
+	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if after, ok := strings.CutPrefix(line, "worktree "); ok {
 			currentPath = after
+			if mainWorktree == "" {
+				mainWorktree = currentPath
+			}
 		} else if line == "branch refs/heads/"+branch && currentPath != "" {
-			// Skip the main worktree (it's typically not a feature branch worktree).
-			if !strings.HasSuffix(currentPath, ".git") {
+			if currentPath != mainWorktree {
 				toRemove = append(toRemove, currentPath)
 			}
 			currentPath = ""
