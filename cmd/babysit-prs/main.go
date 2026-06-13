@@ -230,15 +230,19 @@ func babysit(cfg config) error {
 
 // callSafeMerge invokes the safe-merge binary for a single PR.
 func callSafeMerge(cfg config, prNum int) error {
-	args := []string{strconv.Itoa(prNum), "--repo", cfg.Repo}
+	args := []string{"--pr", strconv.Itoa(prNum), "--repo", cfg.Repo}
 	if cfg.DryRun {
 		args = append(args, "--dry-run")
 	}
-	if cfg.Timeout != 0 {
-		args = append(args, "--timeout", cfg.Timeout.String())
-	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout+5*time.Minute)
+	// Context timeout kills a stuck safe-merge. We do not pass --watch to
+	// safe-merge here: babysit-prs is a serial loop that skips unready PRs
+	// and retries them on the next run, rather than waiting per-PR.
+	timeout := cfg.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "safe-merge", args...)
@@ -246,7 +250,7 @@ func callSafeMerge(cfg config, prNum int) error {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
-			return fmt.Errorf("safe-merge timed out after %s", cfg.Timeout+5*time.Minute)
+			return fmt.Errorf("safe-merge timed out after %s", timeout)
 		}
 		return fmt.Errorf("safe-merge exited non-zero: %w", err)
 	}
