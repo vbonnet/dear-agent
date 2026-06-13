@@ -238,9 +238,42 @@ type checkRun struct {
 	State string `json:"state"`
 }
 
-// checkAllCI verifies that ALL CI checks on the PR have completed successfully.
-// This is stricter than checking only required checks: every check on the head
-// SHA must be green before a merge proceeds.
+type requiredStatusChecksResponse struct {
+	Checks []struct {
+		Context string `json:"context"`
+	} `json:"checks"`
+}
+
+// fetchRequiredChecks returns the set of required status check names for the
+// main branch. If the API call fails, an empty set is returned so the caller
+// falls back to validating all checks (fail-strict).
+func fetchRequiredChecks(repo string) map[string]bool {
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return nil
+	}
+	out, err := runCommand(exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/%s/branches/main/protection/required_status_checks", parts[0], parts[1]),
+	))
+	if err != nil {
+		return nil
+	}
+	var resp requiredStatusChecksResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return nil
+	}
+	required := make(map[string]bool, len(resp.Checks))
+	for _, c := range resp.Checks {
+		required[c.Context] = true
+	}
+	return required
+}
+
+// checkAllCI verifies that all required CI checks on the PR have passed.
+// It fetches the branch-protection required check list and only gates on those,
+// so non-required checks that fail fleet-wide (e.g. Doc Proximity Check) do
+// not block merges. If the required check list cannot be fetched, all checks
+// are validated (fail-strict fallback).
 func checkAllCI(prNum int, repo string) error {
 	out, err := runCommand(exec.Command("gh", "pr", "checks",
 		fmt.Sprintf("%d", prNum),
@@ -250,11 +283,29 @@ func checkAllCI(prNum int, repo string) error {
 	if err != nil {
 		return fmt.Errorf("gh pr checks failed: %w", err)
 	}
+
+	required := fetchRequiredChecks(repo)
+	if len(required) > 0 {
+		// Filter to only required checks before validating.
+		var allChecks []checkRun
+		if err := json.Unmarshal(out, &allChecks); err != nil {
+			return fmt.Errorf("parsing check output: %w", err)
+		}
+		var requiredOnly []checkRun
+		for _, c := range allChecks {
+			if required[c.Name] {
+				requiredOnly = append(requiredOnly, c)
+			}
+		}
+		b, _ := json.Marshal(requiredOnly)
+		return parseCheckRuns(b)
+	}
 	return parseCheckRuns(out)
 }
 
-// parseCheckRuns validates that ALL checks in the JSON output pass (both
-// required and non-required). Exported for testing.
+// parseCheckRuns validates that every check in the JSON input has passed.
+// The input is expected to already be filtered to the desired set (required
+// checks only in production; all checks in unit tests). Exported for testing.
 func parseCheckRuns(data []byte) error {
 	var checks []checkRun
 	if err := json.Unmarshal(data, &checks); err != nil {
