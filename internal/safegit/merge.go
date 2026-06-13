@@ -292,9 +292,17 @@ func checkAllCI(prNum int, repo string) error {
 			return fmt.Errorf("parsing check output: %w", err)
 		}
 		var requiredOnly []checkRun
+		seen := make(map[string]bool)
 		for _, c := range allChecks {
 			if required[c.Name] {
 				requiredOnly = append(requiredOnly, c)
+				seen[c.Name] = true
+			}
+		}
+		// Required checks not yet reported count as pending (fail-safe).
+		for req := range required {
+			if !seen[req] {
+				requiredOnly = append(requiredOnly, checkRun{Name: req, State: "pending"})
 			}
 		}
 		b, _ := json.Marshal(requiredOnly)
@@ -550,7 +558,7 @@ func cleanupWorktree(branch string) {
 		// -d refuses to delete if unmerged; that's fine — we already merged.
 		// Suppress the error if it's just "branch not found".
 		if !strings.Contains(string(out), "not found") {
-			fmt.Fprintf(os.Stderr, "safe-merge: cleanup: branch -d %s: %v\n", branch, err)
+			fmt.Fprintf(os.Stderr, "safe-merge: cleanup: branch -d %s: %s\n", branch, strings.TrimSpace(string(out)))
 		}
 	} else {
 		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: removed local branch %s\n", branch)
