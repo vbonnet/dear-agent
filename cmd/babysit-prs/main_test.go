@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -71,15 +72,23 @@ func TestRun_TimeoutParsed(t *testing.T) {
 }
 
 func TestRun_SkipBotReviewRequiresReason(t *testing.T) {
-	if err := run([]string{"--skip-bot-review"}); err == nil {
+	err := run([]string{"--skip-bot-review"})
+	if err == nil {
 		t.Error("expected error when --skip-bot-review given without --skip-bot-review-reason")
+	}
+	if err != nil && !strings.Contains(err.Error(), "--skip-bot-review-reason") {
+		t.Errorf("error should name the missing flag, got: %v", err)
 	}
 }
 
 func TestRun_SkipBotReviewReasonWithoutFlag(t *testing.T) {
-	// --skip-bot-review-reason alone (without --skip-bot-review) should not error at parse time.
-	// It will be a no-op since SkipBotReview is false.
-	if err := run([]string{"--skip-bot-review-reason", "some reason", "--repo", "a/b"}); err == nil {
-		// Will error trying to connect to GitHub — that is expected and fine.
+	// --skip-bot-review-reason alone (without --skip-bot-review) must not error at
+	// flag-parse time; SkipBotReview=false means the reason is a no-op.
+	cfg, err := parseFlags([]string{"--skip-bot-review-reason", "some reason", "--repo", "a/b"})
+	if err != nil {
+		t.Errorf("parseFlags should not error for --skip-bot-review-reason alone, got: %v", err)
+	}
+	if cfg.SkipBotReview {
+		t.Error("SkipBotReview should be false when only --skip-bot-review-reason is given")
 	}
 }
