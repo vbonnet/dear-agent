@@ -4,49 +4,35 @@ import (
 	"testing"
 )
 
-// --- detectRepo ---
+// --- parseRepoFromURL ---
 
-func TestDetectRepo_parsesHTTPS(t *testing.T) {
-	// detectRepo is tested indirectly via its pure URL parsing logic.
-	// We test the parsing path manually here.
-	urls := []struct {
+func TestParseRepoFromURL(t *testing.T) {
+	cases := []struct {
 		raw  string
 		want string
 	}{
-		{"https://github.com/vbonnet/dear-agent.git\n", "vbonnet/dear-agent"},
-		{"https://github.com/vbonnet/dear-agent\n", "vbonnet/dear-agent"},
-		{"git@github.com:vbonnet/dear-agent.git\n", "vbonnet/dear-agent"},
+		{"https://github.com/vbonnet/dear-agent.git", "vbonnet/dear-agent"},
+		{"https://github.com/vbonnet/dear-agent", "vbonnet/dear-agent"},
+		{"git@github.com:vbonnet/dear-agent.git", "vbonnet/dear-agent"},
+		{"git@github.com:vbonnet/dear-agent", "vbonnet/dear-agent"},
 	}
-	for _, tc := range urls {
-		rawURL := tc.raw
-		for len(rawURL) > 0 && (rawURL[len(rawURL)-1] == '\n' || rawURL[len(rawURL)-1] == ' ') {
-			rawURL = rawURL[:len(rawURL)-1]
-		}
-		// trim .git
-		if len(rawURL) > 4 && rawURL[len(rawURL)-4:] == ".git" {
-			rawURL = rawURL[:len(rawURL)-4]
-		}
-		got := ""
-		for _, prefix := range []string{"github.com/", "github.com:"} {
-			if idx := lastIndexStr(rawURL, prefix); idx >= 0 {
-				got = rawURL[idx+len(prefix):]
-				break
-			}
+	for _, tc := range cases {
+		got, err := parseRepoFromURL(tc.raw)
+		if err != nil {
+			t.Errorf("parseRepoFromURL(%q) error: %v", tc.raw, err)
+			continue
 		}
 		if got != tc.want {
-			t.Errorf("url %q: got %q, want %q", tc.raw, got, tc.want)
+			t.Errorf("parseRepoFromURL(%q) = %q, want %q", tc.raw, got, tc.want)
 		}
 	}
 }
 
-func lastIndexStr(s, substr string) int {
-	last := -1
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			last = i
-		}
+func TestParseRepoFromURL_Invalid(t *testing.T) {
+	_, err := parseRepoFromURL("https://gitlab.com/vbonnet/repo.git")
+	if err == nil {
+		t.Error("expected error for non-GitHub URL, got nil")
 	}
-	return last
 }
 
 // --- run flag parsing ---

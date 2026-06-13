@@ -177,7 +177,9 @@ type openPR struct {
 }
 
 func babysit(cfg config) error {
-	prs, err := listOpenPRs(cfg.Repo)
+	// Fetch cap+1 so the backpressure check is accurate even when open PR
+	// count exactly equals cap.
+	prs, err := listOpenPRs(cfg.Repo, cfg.Cap+1)
 	if err != nil {
 		return fmt.Errorf("listing open PRs: %w", err)
 	}
@@ -276,13 +278,14 @@ func updateBranch(repo string, prNum int) error {
 	return nil
 }
 
-// listOpenPRs returns all open, non-draft PRs for the repo.
-func listOpenPRs(repo string) ([]openPR, error) {
+// listOpenPRs returns open, non-draft PRs up to limit. Pass cap+1 to ensure
+// the backpressure check is accurate when open-PR count equals cap exactly.
+func listOpenPRs(repo string, limit int) ([]openPR, error) {
 	args := []string{
 		"pr", "list",
 		"--state", "open",
 		"--json", "number,title,headRefName,isDraft",
-		"--limit", "200",
+		"--limit", strconv.Itoa(limit),
 	}
 	if repo != "" {
 		args = append(args, "--repo", repo)
@@ -312,14 +315,10 @@ func listOpenPRs(repo string) ([]openPR, error) {
 	return ready, nil
 }
 
-// detectRepo auto-detects the GitHub repo from the current git remote.
-func detectRepo() (string, error) {
-	cmd := exec.Command("git", "remote", "get-url", "origin")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	rawURL := strings.TrimSpace(string(out))
+// parseRepoFromURL extracts "owner/repo" from a GitHub remote URL.
+// It handles both HTTPS (github.com/owner/repo) and SSH (github.com:owner/repo)
+// forms, with or without a trailing ".git" suffix.
+func parseRepoFromURL(rawURL string) (string, error) {
 	rawURL = strings.TrimSuffix(rawURL, ".git")
 	for _, prefix := range []string{"github.com/", "github.com:"} {
 		if idx := strings.LastIndex(rawURL, prefix); idx >= 0 {
@@ -327,4 +326,14 @@ func detectRepo() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("cannot parse GitHub repo from remote URL: %q", rawURL)
+}
+
+// detectRepo auto-detects the GitHub repo from the current git remote.
+func detectRepo() (string, error) {
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return parseRepoFromURL(strings.TrimSpace(string(out)))
 }
