@@ -65,6 +65,26 @@ them.
    *Why:* untracked work is invisible work — it cannot be prioritized,
    handed off, or audited.
 
+   **Mandated command form (canonical path is not optional):** always pass the
+   canonical database explicitly —
+
+   ```
+   bd --db ~/beads/context-engine/.beads <subcommand>
+   ```
+
+   Never run a bare `bd` that relies on auto-discovery, and never use `-C`/
+   `--db` to point at any other store. *Why — the silent-fallback trap:* `bd`
+   resolves its database by walking up from the current directory for a
+   `.beads/` dir (like `git`). With no `BEADS_DIR` set, from `$HOME` this used
+   to resolve to the tiny `~/.beads` pilot store (prefix `vbonnet-ai`, since
+   merged into context-engine and retired), so a bare `bd status` reported
+   "backlog drained" while context-engine held ~120 open beads. Reporting an
+   empty backlog off the wrong DB is a Definition-of-Done-class failure. The
+   `--db` flag makes the right store the *only* store you can hit, and is
+   audit-legible in transcripts. A `BEADS_DIR=~/beads/context-engine/.beads`
+   default is being deployed as a second layer of defense; the explicit `--db`
+   flag remains mandatory regardless.
+
 9. **Atomic action wrappers — wrap unsafe command chains, deny the raw form.**
    When an action only succeeds as an all-or-nothing chain (e.g. `chezmoi
    apply` → commit → push), or when a raw command cannot be permission-granted
