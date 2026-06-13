@@ -577,6 +577,9 @@ const ghMergeBlocked = "You're trying to merge a PR directly with gh. " +
 
 // ghAPIFlagTakesValue reports whether a gh api flag consumes the following
 // token as its value, so the value is not mistaken for the endpoint path.
+// Boolean flags (--paginate / -p, --silent, --include, etc.) are NOT listed
+// here — they stand alone and must not consume the next token.
+// Note: --preview takes a name value and IS listed here.
 func ghAPIFlagTakesValue(flag string) bool {
 	switch flag {
 	case "-X", "--method",
@@ -586,7 +589,7 @@ func ghAPIFlagTakesValue(flag string) bool {
 		"-f", "--raw-field",
 		"--input",
 		"--template", "-t",
-		"--paginate", "--preview":
+		"--preview":
 		return true
 	}
 	return false

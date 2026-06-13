@@ -202,6 +202,11 @@ func TestCheckGh(t *testing.T) {
 			`gh api graphql -f query='mutation { enablePullRequestAutoMerge(input:{pullRequestId:"x"}){pullRequest{state}}}'`,
 			false, "safe-merge"},
 
+		// Bypass vectors: boolean flags must NOT consume the next token as their value.
+		// --paginate / -p are boolean; treating them as value-taking lets the endpoint slip past.
+		{"paginate boolean bypass blocked", "gh api --paginate repos/owner/repo/pulls/42/merge", false, "safe-merge"},
+		{"-p boolean bypass blocked", "gh api -p repos/owner/repo/pulls/42/merge", false, "safe-merge"},
+
 		// gh commands that are allowed.
 		{"pr list allowed", "gh pr list --state open", true, ""},
 		{"pr view allowed", "gh pr view 42", true, ""},
