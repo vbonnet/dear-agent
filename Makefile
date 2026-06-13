@@ -36,7 +36,7 @@
 #   build-bead-pr-guard     Build the bead-PR duplicate-guard CLI (cmd/bead-pr-guard)
 #   install-bead-pr-guard   Install bead-pr-guard to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -197,6 +197,20 @@ build-safe-push:
 install-safe-push: build-safe-push
 	cp bin/safe-push $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/safe-push"
+
+# Build safe-merge: the vetted, gated PR merger that replaces raw `gh pr merge`.
+# Enforces CLAUDE.md principle 9: required CI gates, review thread check, soak
+# time, and bot review before merge. Raw `gh pr merge` should be denied via a
+# PreToolUse hook pointing at this binary (see docs/design/safe-merge.md).
+build-safe-merge:
+	@echo "Building safe-merge..."
+	go build $(GOFLAGS) -o bin/safe-merge ./cmd/safe-merge/
+	@echo "Built: bin/safe-merge"
+
+# Install safe-merge to GOPATH/bin so it is on PATH for every agent session.
+install-safe-merge: build-safe-merge
+	cp bin/safe-merge $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-merge"
 
 # Build src-recovery: the one sanctioned writer to ~/src/**. It restores a
 # golden checkout to a clean, current default branch via exactly stash ->
