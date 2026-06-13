@@ -227,7 +227,7 @@ func TestParseSoak_OldCommitWithBotReview(t *testing.T) {
 	now := time.Now()
 	past := now.Add(-10 * time.Minute)
 	data := makeSoakJSON(past, ReviewBot)
-	if err := parseSoak(data, now); err != nil {
+	if err := parseSoak(data, now, false); err != nil {
 		t.Fatalf("old commit with bot review should pass, got: %v", err)
 	}
 }
@@ -236,7 +236,7 @@ func TestParseSoak_TooRecent(t *testing.T) {
 	now := time.Now()
 	recent := now.Add(-1 * time.Minute)
 	data := makeSoakJSON(recent, ReviewBot)
-	err := parseSoak(data, now)
+	err := parseSoak(data, now, false)
 	if err == nil {
 		t.Fatal("expected error for too-recent commit, got nil")
 	}
@@ -249,7 +249,7 @@ func TestParseSoak_NoBotReview(t *testing.T) {
 	now := time.Now()
 	past := now.Add(-10 * time.Minute)
 	data := makeSoakJSON(past, "")
-	err := parseSoak(data, now)
+	err := parseSoak(data, now, false)
 	if err == nil {
 		t.Fatal("expected error for missing bot review, got nil")
 	}
@@ -262,9 +262,33 @@ func TestParseSoak_OtherBotReview(t *testing.T) {
 	now := time.Now()
 	past := now.Add(-10 * time.Minute)
 	data := makeSoakJSON(past, "some-other-bot")
-	err := parseSoak(data, now)
+	err := parseSoak(data, now, false)
 	if err == nil {
 		t.Fatal("expected error when wrong bot reviewed, got nil")
+	}
+}
+
+func TestParseSoak_SkipBotReview(t *testing.T) {
+	now := time.Now()
+	past := now.Add(-10 * time.Minute)
+	// No bot review, but skip=true should still pass.
+	data := makeSoakJSON(past, "")
+	if err := parseSoak(data, now, true); err != nil {
+		t.Fatalf("skip bot review should pass even with no review, got: %v", err)
+	}
+}
+
+func TestParseSoak_SkipBotReview_StillChecksSoak(t *testing.T) {
+	now := time.Now()
+	recent := now.Add(-1 * time.Minute)
+	// skipBotReview=true does NOT skip the soak-time check.
+	data := makeSoakJSON(recent, "")
+	err := parseSoak(data, now, true)
+	if err == nil {
+		t.Fatal("expected soak-time error even with skip-bot-review, got nil")
+	}
+	if !strings.Contains(err.Error(), "retry in") {
+		t.Errorf("error should mention retry time, got: %v", err)
 	}
 }
 
@@ -279,6 +303,7 @@ func TestSafeMerge_InvalidConfig(t *testing.T) {
 		{"zero pr", MergeConfig{PRNumber: 0, Repo: "a/b"}, "--pr must be"},
 		{"missing repo", MergeConfig{PRNumber: 1, Repo: ""}, "--repo is required"},
 		{"bad repo format", MergeConfig{PRNumber: 1, Repo: "nodash"}, "owner/repo format"},
+		{"skip-bot-review without reason", MergeConfig{PRNumber: 1, Repo: "a/b", SkipBotReview: true}, "--skip-bot-review requires --skip-bot-review-reason"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
