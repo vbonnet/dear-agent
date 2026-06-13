@@ -24,6 +24,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -50,7 +51,7 @@ func run(argv []string) error {
 	dryRun := fs.Bool("dry-run", false, "check gates but do not execute the merge")
 
 	if err := fs.Parse(argv); err != nil {
-		if err == flag.ErrHelp {
+		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
 		return err

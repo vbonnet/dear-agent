@@ -472,7 +472,7 @@ func cleanupWorktree(branch string) {
 	// The very first worktree block is always the main worktree — never remove it.
 	var toRemove []string
 	var mainWorktree, currentPath string
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if after, ok := strings.CutPrefix(line, "worktree "); ok {
 			currentPath = after
