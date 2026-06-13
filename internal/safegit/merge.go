@@ -249,7 +249,7 @@ func parseCheckRuns(data []byte) error {
 	var pending []string
 	for _, c := range checks {
 		switch strings.ToLower(c.State) {
-		case "success", "pass", "neutral", "skipping":
+		case "success", "pass", "neutral", "skipping", "skipped":
 			// acceptable
 		case "pending", "queued", "in_progress", "waiting", "requested":
 			pending = append(pending, c.Name)
