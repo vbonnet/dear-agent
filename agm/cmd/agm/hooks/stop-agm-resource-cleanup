@@ -3,7 +3,7 @@
 # Triggered when Claude Code session ends (Stop event)
 #
 # Purpose: Remove git worktrees and branches left behind by the session.
-# Three layers, all best-effort and non-blocking:
+# Four layers, all best-effort and non-blocking:
 #
 #   1. Manifest/Dolt cleanup ('agm session cleanup') — removes worktrees the
 #      session explicitly tracked. Only fires for AGM/tmux sessions.
@@ -18,6 +18,11 @@
 #      hook timeout. Reclaims merged worktrees across ALL repos under
 #      ~/worktrees that Layers 1/2 structurally cannot reach (they are
 #      single-repo or DB-scoped). Safe: only MERGED worktrees are removed.
+#   4. Orphan process reaper ('agm session reap-orphans') — kills gopls and
+#      agm-mcp-server processes reparented to PID 1 (their session died
+#      abruptly without reaping them), which otherwise accumulate until the
+#      machine swaps. Runs in the background. Safe: only PPID==1 orphans are
+#      killed; any process with a live parent is left untouched.
 #
 # Installation: Copy to ~/.claude/hooks/stop-agm-resource-cleanup
 # Permissions: chmod +x ~/.claude/hooks/stop-agm-resource-cleanup
@@ -38,6 +43,11 @@ agm session reap-worktrees 2>/dev/null || true
 # Layer 3: cross-repo backfill sweep (fire-and-forget, does not block exit).
 # disown prevents SIGHUP from killing the child when the hook shell exits.
 agm worktree sweep --execute >/dev/null 2>&1 &
+disown $!
+
+# Layer 4: orphan process reaper (fire-and-forget, does not block exit).
+# Reaps gopls/agm-mcp-server reparented to PID 1 (session died abruptly).
+agm session reap-orphans >/dev/null 2>&1 &
 disown $!
 
 exit 0
