@@ -24,7 +24,9 @@ func TestParseCheckRuns_AllChecksPass(t *testing.T) {
 }
 
 func TestParseCheckRuns_NonRequiredFails(t *testing.T) {
-	// All checks (required AND non-required) must pass.
+	// parseCheckRuns validates every check in its input.
+	// The caller (checkAllCI) pre-filters to required checks in production, so
+	// non-required fleet-wide failures never reach this function in practice.
 	data := marshalJSON([]checkRun{
 		{Name: "Build", State: "success"},
 		{Name: "Optional", State: "failure"},
