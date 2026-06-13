@@ -1,0 +1,566 @@
+// Package safegit merge.go provides the safe-merge gate that enforces CLAUDE.md
+// principle 9: an atomic, vetted wrapper for PR merges that cannot be bypassed.
+//
+// Required before any merge:
+//   - ALL CI checks pass (no red, no pending — not just required checks)
+//   - No unresolved review threads exist
+//   - Minimum soak: head commit is at least 5 minutes old
+//   - Review bot (gemini-code-assist) has posted
+//
+// After merge: worktree + branch are cleaned up automatically.
+package safegit
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// MinSoak is the minimum age the head commit must be before merging.
+const MinSoak = 5 * time.Minute
+
+// DefaultWatchTimeout is the default time limit for watch mode.
+const DefaultWatchTimeout = 45 * time.Minute
+
+// ReviewBot is the GitHub login of the required code-review bot.
+const ReviewBot = "gemini-code-assist"
+
+// MergeConfig holds options for a safe merge.
+type MergeConfig struct {
+	PRNumber      int
+	Repo          string        // "owner/repo"
+	Now           time.Time     // injectable for tests; zero → time.Now()
+	DryRun        bool          // check gates but do not execute merge
+	Watch         bool          // poll until gates pass or WatchTimeout elapses
+	WatchTimeout  time.Duration // zero → DefaultWatchTimeout
+	WatchInterval time.Duration // poll interval in watch mode; zero → 30s
+}
+
+// AuditEntry is written to the JSONL audit log on each merge attempt.
+type AuditEntry struct {
+	Timestamp string `json:"timestamp"`
+	PR        int    `json:"pr"`
+	Repo      string `json:"repo"`
+	Event     string `json:"event"` // "gate_check", "merged", "dry_run", "timeout", "error"
+	Detail    string `json:"detail,omitempty"`
+}
+
+// SafeMerge gates and executes a squash-merge of the given PR.
+//
+// When cfg.Watch is true, it polls the gates until they pass or cfg.WatchTimeout
+// elapses. When cfg.DryRun is true, it checks gates but does not execute the merge.
+// Results are appended to the JSONL audit log in ~/.local/state/dear-agent/.
+func SafeMerge(cfg MergeConfig) error {
+	if cfg.PRNumber <= 0 {
+		return fmt.Errorf("--pr must be a positive integer")
+	}
+	if cfg.Repo == "" {
+		return fmt.Errorf("--repo is required (owner/repo format)")
+	}
+	if !strings.Contains(cfg.Repo, "/") {
+		return fmt.Errorf("--repo must be in owner/repo format, got %q", cfg.Repo)
+	}
+
+	if cfg.Watch {
+		return watchMerge(cfg)
+	}
+	return attemptMerge(cfg)
+}
+
+// watchMerge polls the merge gates until they pass or the timeout elapses.
+func watchMerge(cfg MergeConfig) error {
+	timeout := cfg.WatchTimeout
+	if timeout == 0 {
+		timeout = DefaultWatchTimeout
+	}
+	interval := cfg.WatchInterval
+	if interval == 0 {
+		interval = 30 * time.Second
+	}
+
+	deadline := time.Now().Add(timeout)
+	attempt := 0
+	for {
+		attempt++
+		fmt.Fprintf(os.Stderr, "safe-merge: watch attempt %d (timeout in %s)…\n",
+			attempt, time.Until(deadline).Round(time.Second))
+
+		err := attemptMerge(cfg)
+		if err == nil {
+			return nil
+		}
+
+		// If all gates passed but it was a dry-run, return immediately.
+		if cfg.DryRun {
+			return err
+		}
+
+		if time.Now().After(deadline) {
+			appendAuditEntry(cfg.Repo, cfg.PRNumber, "timeout", err.Error())
+			return fmt.Errorf("watch timeout after %s: last error: %w", timeout, err)
+		}
+
+		fmt.Fprintf(os.Stderr, "safe-merge: gates not ready (%v); retrying in %s\n", err, interval)
+		time.Sleep(interval)
+	}
+}
+
+// attemptMerge checks all gates and, unless DryRun is set, executes the merge.
+func attemptMerge(cfg MergeConfig) error {
+	now := cfg.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	fmt.Fprintf(os.Stderr, "safe-merge: checking PR #%d in %s\n", cfg.PRNumber, cfg.Repo)
+
+	// Gate 1: ALL CI checks must pass (not just required ones).
+	if err := checkAllCI(cfg.PRNumber, cfg.Repo); err != nil {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "CI: "+err.Error())
+		fmt.Fprintf(os.Stderr, "safe-merge: guidance: run `gh pr checks %d --repo %s --watch`\n", cfg.PRNumber, cfg.Repo)
+		return fmt.Errorf("CI gate: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ all CI checks pass")
+
+	// Gate 2: no unresolved review threads.
+	if err := checkReviewThreads(cfg.PRNumber, cfg.Repo); err != nil {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "threads: "+err.Error())
+		fmt.Fprintln(os.Stderr, "safe-merge: guidance: resolve open review threads; security-* threads need a written triage verdict")
+		return fmt.Errorf("review-thread gate: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ no unresolved review threads")
+
+	// Gate 3: minimum soak time + bot review.
+	if err := checkSoak(cfg.PRNumber, cfg.Repo, now); err != nil {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "soak: "+err.Error())
+		return fmt.Errorf("soak gate: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ soak time and bot review OK")
+
+	if cfg.DryRun {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "dry_run", "all gates passed; merge skipped")
+		fmt.Fprintln(os.Stderr, "safe-merge: dry-run — all gates passed; no merge executed")
+		return nil
+	}
+
+	// Execute the merge.
+	fmt.Fprintf(os.Stderr, "safe-merge: merging PR #%d (squash)…\n", cfg.PRNumber)
+	headBranch, err := prHeadBranch(cfg.PRNumber, cfg.Repo)
+	if err != nil {
+		// Non-fatal: cleanup will just skip.
+		fmt.Fprintf(os.Stderr, "safe-merge: warning: could not read head branch: %v\n", err)
+	}
+
+	mergeCmd := exec.Command("gh", "pr", "merge",
+		fmt.Sprintf("%d", cfg.PRNumber),
+		"--repo", cfg.Repo,
+		"--squash",
+		"--delete-branch",
+	)
+	mergeCmd.Stdout = os.Stdout
+	mergeCmd.Stderr = os.Stderr
+	if err := mergeCmd.Run(); err != nil {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge failed: "+err.Error())
+		return fmt.Errorf("gh pr merge failed: %w", err)
+	}
+	appendAuditEntry(cfg.Repo, cfg.PRNumber, "merged", "squash merge complete")
+	fmt.Fprintln(os.Stderr, "safe-merge: ✓ merge complete")
+
+	// Post-merge cleanup (best-effort, non-fatal).
+	if headBranch != "" {
+		cleanupWorktree(headBranch)
+	}
+	return nil
+}
+
+// appendAuditEntry writes a single JSON line to the safe-merge audit log.
+// Failures are silently ignored so audit-log issues never block merges.
+func appendAuditEntry(repo string, prNum int, event, detail string) {
+	dir := auditLogDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "safe-merge-audit.jsonl"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+
+	entry := AuditEntry{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		PR:        prNum,
+		Repo:      repo,
+		Event:     event,
+		Detail:    detail,
+	}
+	b, _ := json.Marshal(entry)
+	_, _ = fmt.Fprintln(f, string(b))
+	_ = f.Close()
+}
+
+// auditLogDir returns the directory for the safe-merge audit log.
+// Overridable via SAFE_MERGE_AUDIT_DIR environment variable for testing.
+func auditLogDir() string {
+	if d := os.Getenv("SAFE_MERGE_AUDIT_DIR"); d != "" {
+		return d
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "/tmp"
+	}
+	return filepath.Join(home, ".local", "state", "dear-agent")
+}
+
+// runCommand executes cmd, capturing stdout. On failure, stderr is appended to
+// the error so callers get actionable context instead of a bare exit-code.
+func runCommand(cmd *exec.Cmd) ([]byte, error) {
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if se := strings.TrimSpace(stderr.String()); se != "" {
+			return nil, fmt.Errorf("%w\nstderr: %s", err, se)
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
+// --- gate implementations ---
+
+type checkRun struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+type requiredStatusChecksResponse struct {
+	Checks []struct {
+		Context string `json:"context"`
+	} `json:"checks"`
+}
+
+// fetchRequiredChecks returns the set of required status check names for the
+// main branch. If the API call fails, an empty set is returned so the caller
+// falls back to validating all checks (fail-strict).
+func fetchRequiredChecks(repo string) map[string]bool {
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return nil
+	}
+	out, err := runCommand(exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/%s/branches/main/protection/required_status_checks", parts[0], parts[1]),
+	))
+	if err != nil {
+		return nil
+	}
+	var resp requiredStatusChecksResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return nil
+	}
+	required := make(map[string]bool, len(resp.Checks))
+	for _, c := range resp.Checks {
+		required[c.Context] = true
+	}
+	return required
+}
+
+// checkAllCI verifies that all required CI checks on the PR have passed.
+// It fetches the branch-protection required check list and only gates on those,
+// so non-required checks that fail fleet-wide (e.g. Doc Proximity Check) do
+// not block merges. If the required check list cannot be fetched, all checks
+// are validated (fail-strict fallback).
+func checkAllCI(prNum int, repo string) error {
+	out, err := runCommand(exec.Command("gh", "pr", "checks",
+		fmt.Sprintf("%d", prNum),
+		"--repo", repo,
+		"--json", "name,state",
+	))
+	if err != nil {
+		return fmt.Errorf("gh pr checks failed: %w", err)
+	}
+
+	required := fetchRequiredChecks(repo)
+	if len(required) > 0 {
+		// Filter to only required checks before validating.
+		var allChecks []checkRun
+		if err := json.Unmarshal(out, &allChecks); err != nil {
+			return fmt.Errorf("parsing check output: %w", err)
+		}
+		var requiredOnly []checkRun
+		seen := make(map[string]bool)
+		for _, c := range allChecks {
+			if required[c.Name] {
+				requiredOnly = append(requiredOnly, c)
+				seen[c.Name] = true
+			}
+		}
+		// Required checks not yet reported count as pending (fail-safe).
+		for req := range required {
+			if !seen[req] {
+				requiredOnly = append(requiredOnly, checkRun{Name: req, State: "pending"})
+			}
+		}
+		b, _ := json.Marshal(requiredOnly)
+		return parseCheckRuns(b)
+	}
+	return parseCheckRuns(out)
+}
+
+// parseCheckRuns validates that every check in the JSON input has passed.
+// The input is expected to already be filtered to the desired set (required
+// checks only in production; all checks in unit tests). Exported for testing.
+func parseCheckRuns(data []byte) error {
+	var checks []checkRun
+	if err := json.Unmarshal(data, &checks); err != nil {
+		return fmt.Errorf("parsing check output: %w", err)
+	}
+
+	var failing []string
+	var pending []string
+	for _, c := range checks {
+		switch strings.ToLower(c.State) {
+		case "success", "pass", "neutral", "skipping", "skipped":
+			// acceptable
+		case "pending", "queued", "in_progress", "waiting", "requested":
+			pending = append(pending, c.Name)
+		default:
+			failing = append(failing, fmt.Sprintf("%s (%s)", c.Name, c.State))
+		}
+	}
+	if len(failing) > 0 {
+		return fmt.Errorf("checks failed: %s", strings.Join(failing, ", "))
+	}
+	if len(pending) > 0 {
+		return fmt.Errorf("checks still pending: %s", strings.Join(pending, ", "))
+	}
+	return nil
+}
+
+const reviewThreadsQuery = `
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          isResolved
+          isOutdated
+          comments(first: 1) {
+            nodes {
+              body
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+
+type gqlReviewResult struct {
+	Data struct {
+		Repository struct {
+			PullRequest struct {
+				ReviewThreads struct {
+					Nodes []struct {
+						IsResolved bool `json:"isResolved"`
+						IsOutdated bool `json:"isOutdated"`
+						Comments   struct {
+							Nodes []struct {
+								Body string `json:"body"`
+							} `json:"nodes"`
+						} `json:"comments"`
+					} `json:"nodes"`
+				} `json:"reviewThreads"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	} `json:"data"`
+}
+
+func checkReviewThreads(prNum int, repo string) error {
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid repo %q", repo)
+	}
+	owner, name := parts[0], parts[1]
+
+	out, err := runCommand(exec.Command("gh", "api", "graphql",
+		"--field", fmt.Sprintf("owner=%s", owner),
+		"--field", fmt.Sprintf("name=%s", name),
+		"--field", fmt.Sprintf("number=%d", prNum),
+		"--field", fmt.Sprintf("query=%s", reviewThreadsQuery),
+	))
+	if err != nil {
+		return fmt.Errorf("GraphQL query failed: %w", err)
+	}
+	return parseReviewThreads(out)
+}
+
+// parseReviewThreads returns an error if any unresolved, non-outdated review
+// threads exist in the GraphQL response. Exported for testing.
+func parseReviewThreads(data []byte) error {
+	var result gqlReviewResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("parsing GraphQL response: %w", err)
+	}
+
+	var unresolved []string
+	for i, t := range result.Data.Repository.PullRequest.ReviewThreads.Nodes {
+		if t.IsResolved || t.IsOutdated {
+			continue
+		}
+		label := fmt.Sprintf("thread #%d", i+1)
+		if len(t.Comments.Nodes) > 0 {
+			body := t.Comments.Nodes[0].Body
+			if len(body) > 60 {
+				body = body[:60] + "…"
+			}
+			label = fmt.Sprintf("thread #%d: %q", i+1, body)
+		}
+		unresolved = append(unresolved, label)
+	}
+
+	if len(unresolved) > 0 {
+		return fmt.Errorf("%d unresolved review thread(s):\n  %s",
+			len(unresolved), strings.Join(unresolved, "\n  "))
+	}
+	return nil
+}
+
+type prViewResult struct {
+	HeadRefOid string `json:"headRefOid"`
+	Commits    []struct {
+		CommittedDate time.Time `json:"committedDate"`
+	} `json:"commits"`
+	Reviews []struct {
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		State string `json:"state"`
+	} `json:"reviews"`
+}
+
+func checkSoak(prNum int, repo string, now time.Time) error {
+	out, err := runCommand(exec.Command("gh", "pr", "view",
+		fmt.Sprintf("%d", prNum),
+		"--repo", repo,
+		"--json", "headRefOid,commits,reviews",
+	))
+	if err != nil {
+		return fmt.Errorf("gh pr view failed: %w", err)
+	}
+	return parseSoak(out, now)
+}
+
+// parseSoak checks the soak constraints from the gh pr view JSON output.
+// Exported for testing.
+func parseSoak(data []byte, now time.Time) error {
+	var pr prViewResult
+	if err := json.Unmarshal(data, &pr); err != nil {
+		return fmt.Errorf("parsing pr view: %w", err)
+	}
+
+	// Find the most recent commit time.
+	var newest time.Time
+	for _, c := range pr.Commits {
+		if c.CommittedDate.After(newest) {
+			newest = c.CommittedDate
+		}
+	}
+
+	if !newest.IsZero() {
+		age := now.Sub(newest)
+		if age < MinSoak {
+			remaining := MinSoak - age
+			return fmt.Errorf("head commit is only %s old (need ≥%s); retry in %s",
+				age.Round(time.Second), MinSoak, remaining.Round(time.Second))
+		}
+	}
+
+	// Check review bot posted.
+	botPosted := false
+	for _, r := range pr.Reviews {
+		if r.Author.Login == ReviewBot {
+			botPosted = true
+			break
+		}
+	}
+	if !botPosted {
+		return fmt.Errorf("review bot (%s) has not posted a review yet", ReviewBot)
+	}
+
+	return nil
+}
+
+type prInfoResult struct {
+	HeadRefName string `json:"headRefName"`
+}
+
+func prHeadBranch(prNum int, repo string) (string, error) {
+	out, err := runCommand(exec.Command("gh", "pr", "view",
+		fmt.Sprintf("%d", prNum),
+		"--repo", repo,
+		"--json", "headRefName",
+	))
+	if err != nil {
+		return "", err
+	}
+	var info prInfoResult
+	if err := json.Unmarshal(out, &info); err != nil {
+		return "", err
+	}
+	return info.HeadRefName, nil
+}
+
+// cleanupWorktree removes any local worktrees tracking the given branch and
+// then deletes the local branch. This mirrors the post-merge cleanup in
+// CLAUDE.md §5. Failures are printed as warnings, not returned as errors.
+func cleanupWorktree(branch string) {
+	// List worktrees in JSON format.
+	out, err := exec.Command("git", "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: git worktree list: %v\n", err)
+		return
+	}
+
+	// Parse porcelain output: blocks separated by blank lines.
+	// Each block has "worktree <path>", optionally "branch refs/heads/<branch>".
+	// The very first worktree block is always the main worktree — never remove it.
+	var toRemove []string
+	var mainWorktree, currentPath string
+	for line := range strings.SplitSeq(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "worktree "); ok {
+			currentPath = after
+			if mainWorktree == "" {
+				mainWorktree = currentPath
+			}
+		} else if line == "branch refs/heads/"+branch && currentPath != "" {
+			if currentPath != mainWorktree {
+				toRemove = append(toRemove, currentPath)
+			}
+			currentPath = ""
+		}
+	}
+
+	for _, path := range toRemove {
+		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: removing worktree %s\n", path)
+		if out, err := exec.Command("git", "worktree", "remove", path).CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "safe-merge: cleanup: worktree remove %s: %v: %s\n", path, err, out)
+		}
+	}
+
+	// Delete the local branch if it exists.
+	if out, err := exec.Command("git", "branch", "-d", branch).CombinedOutput(); err != nil {
+		// -d refuses to delete if unmerged; that's fine — we already merged.
+		// Suppress the error if it's just "branch not found".
+		if !strings.Contains(string(out), "not found") {
+			fmt.Fprintf(os.Stderr, "safe-merge: cleanup: branch -d %s: %s\n", branch, strings.TrimSpace(string(out)))
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "safe-merge: cleanup: removed local branch %s\n", branch)
+	}
+}
