@@ -74,6 +74,16 @@ func TestParseCheckRuns_SkippingIsOK(t *testing.T) {
 	}
 }
 
+func TestParseCheckRuns_SkippedIsOK(t *testing.T) {
+	// gh pr checks --json returns "SKIPPED" (uppercase) for skipped checks.
+	data := marshalJSON([]checkRun{
+		{Name: "Generate SBOM", State: "SKIPPED"},
+	})
+	if err := parseCheckRuns(data); err != nil {
+		t.Fatalf("SKIPPED check should be acceptable, got: %v", err)
+	}
+}
+
 func TestParseCheckRuns_NeutralIsOK(t *testing.T) {
 	data := marshalJSON([]checkRun{
 		{Name: "Benchmark", State: "neutral"},
