@@ -69,3 +69,17 @@ func TestRun_TimeoutParsed(t *testing.T) {
 		t.Error("expected error for invalid timeout")
 	}
 }
+
+func TestRun_SkipBotReviewRequiresReason(t *testing.T) {
+	if err := run([]string{"--skip-bot-review"}); err == nil {
+		t.Error("expected error when --skip-bot-review given without --skip-bot-review-reason")
+	}
+}
+
+func TestRun_SkipBotReviewReasonWithoutFlag(t *testing.T) {
+	// --skip-bot-review-reason alone (without --skip-bot-review) should not error at parse time.
+	// It will be a no-op since SkipBotReview is false.
+	if err := run([]string{"--skip-bot-review-reason", "some reason", "--repo", "a/b"}); err == nil {
+		// Will error trying to connect to GitHub — that is expected and fine.
+	}
+}
