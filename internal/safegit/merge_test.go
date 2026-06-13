@@ -14,9 +14,9 @@ import (
 
 func TestParseCheckRuns_AllChecksPass(t *testing.T) {
 	data := marshalJSON([]checkRun{
-		{Name: "Build", State: "success", Required: true},
-		{Name: "Lint", State: "pass", Required: true},
-		{Name: "Optional", State: "success", Required: false},
+		{Name: "Build", State: "success"},
+		{Name: "Lint", State: "pass"},
+		{Name: "Optional", State: "success"},
 	})
 	if err := parseCheckRuns(data); err != nil {
 		t.Fatalf("expected nil, got %v", err)
@@ -26,8 +26,8 @@ func TestParseCheckRuns_AllChecksPass(t *testing.T) {
 func TestParseCheckRuns_NonRequiredFails(t *testing.T) {
 	// All checks (required AND non-required) must pass.
 	data := marshalJSON([]checkRun{
-		{Name: "Build", State: "success", Required: true},
-		{Name: "Optional", State: "failure", Required: false},
+		{Name: "Build", State: "success"},
+		{Name: "Optional", State: "failure"},
 	})
 	err := parseCheckRuns(data)
 	if err == nil {
@@ -40,8 +40,8 @@ func TestParseCheckRuns_NonRequiredFails(t *testing.T) {
 
 func TestParseCheckRuns_RequiredFails(t *testing.T) {
 	data := marshalJSON([]checkRun{
-		{Name: "Build", State: "failure", Required: true},
-		{Name: "Lint", State: "success", Required: true},
+		{Name: "Build", State: "failure"},
+		{Name: "Lint", State: "success"},
 	})
 	err := parseCheckRuns(data)
 	if err == nil {
@@ -54,7 +54,7 @@ func TestParseCheckRuns_RequiredFails(t *testing.T) {
 
 func TestParseCheckRuns_RequiredPending(t *testing.T) {
 	data := marshalJSON([]checkRun{
-		{Name: "Build", State: "pending", Required: true},
+		{Name: "Build", State: "pending"},
 	})
 	err := parseCheckRuns(data)
 	if err == nil {
@@ -67,7 +67,7 @@ func TestParseCheckRuns_RequiredPending(t *testing.T) {
 
 func TestParseCheckRuns_SkippingIsOK(t *testing.T) {
 	data := marshalJSON([]checkRun{
-		{Name: "Optional", State: "skipping", Required: true},
+		{Name: "Optional", State: "skipping"},
 	})
 	if err := parseCheckRuns(data); err != nil {
 		t.Fatalf("skipping check should be acceptable, got: %v", err)
@@ -76,7 +76,7 @@ func TestParseCheckRuns_SkippingIsOK(t *testing.T) {
 
 func TestParseCheckRuns_NeutralIsOK(t *testing.T) {
 	data := marshalJSON([]checkRun{
-		{Name: "Benchmark", State: "neutral", Required: true},
+		{Name: "Benchmark", State: "neutral"},
 	})
 	if err := parseCheckRuns(data); err != nil {
 		t.Fatalf("neutral check should be acceptable, got: %v", err)
