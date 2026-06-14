@@ -7,6 +7,14 @@ import (
 	"testing"
 )
 
+// guardWithEnforcement builds a Guard with the given enforcement level for use
+// in interceptor tests.
+func guardWithEnforcement(home string, level Enforcement) *Guard {
+	pol := DefaultPolicy(home)
+	pol.Enforcement = level
+	return &Guard{Home: home, policy: &pol}
+}
+
 // recordingRecorder captures violations in memory for assertions.
 type recordingRecorder struct{ got []Violation }
 
@@ -129,5 +137,98 @@ func TestSymlinkEscapeBlocked(t *testing.T) {
 	}
 	if allowed, msg := g.Classify(real, resolvedHome); !allowed {
 		t.Fatalf("genuine worktree path blocked: %q (%q)", real, msg)
+	}
+}
+
+func TestDecisionEnforcementField(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		level Enforcement
+	}{
+		{"deny", EnforceDeny},
+		{"warn", EnforceWarn},
+		{"ask", EnforceAsk},
+		{"defer", EnforceDefer},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			g := guardWithEnforcement("/home/tester", tc.level)
+			itc := NewInterceptorWith(g, nil)
+
+			// Allowed writes carry zero enforcement (not relevant).
+			if d := itc.CheckWrite("Write", "~/worktrees/x/f", "/home/tester"); !d.Allowed {
+				t.Fatalf("worktree write blocked")
+			}
+
+			// Blocked writes carry the configured enforcement level.
+			d := itc.CheckWrite("Write", "~/src/repo/f", "/home/tester")
+			if d.Allowed {
+				t.Fatal("src write was allowed")
+			}
+			if d.Enforcement != tc.level {
+				t.Errorf("Enforcement = %v, want %v", d.Enforcement, tc.level)
+			}
+		})
+	}
+}
+
+func TestDecisionEnforcementCommand(t *testing.T) {
+	t.Parallel()
+	g := guardWithEnforcement("/home/tester", EnforceWarn)
+	itc := NewInterceptorWith(g, nil)
+
+	d := itc.CheckCommand("rm ~/src/repo/f", "/home/tester")
+	if d.Allowed {
+		t.Fatal("rm in src allowed")
+	}
+	if d.Enforcement != EnforceWarn {
+		t.Errorf("Enforcement = %v, want EnforceWarn", d.Enforcement)
+	}
+}
+
+func TestParseEnforcement(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		input string
+		want  Enforcement
+		ok    bool
+	}{
+		{"deny", EnforceDeny, true},
+		{"DENY", EnforceDeny, true},
+		{"", EnforceDeny, true},
+		{"warn", EnforceWarn, true},
+		{"Warn", EnforceWarn, true},
+		{"ask", EnforceAsk, true},
+		{"defer", EnforceDefer, true},
+		{"DEFER", EnforceDefer, true},
+		{"unknown", EnforceDeny, false},
+		{"block", EnforceDeny, false},
+	}
+	for _, tc := range cases {
+		got, ok := ParseEnforcement(tc.input)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("ParseEnforcement(%q) = (%v, %v), want (%v, %v)", tc.input, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+func TestEnforcementString(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		e    Enforcement
+		want string
+	}{
+		{EnforceDeny, "deny"},
+		{EnforceWarn, "warn"},
+		{EnforceAsk, "ask"},
+		{EnforceDefer, "defer"},
+		{Enforcement(99), "deny"}, // unknown falls back to deny
+	}
+	for _, tc := range cases {
+		if got := tc.e.String(); got != tc.want {
+			t.Errorf("Enforcement(%d).String() = %q, want %q", tc.e, got, tc.want)
+		}
 	}
 }
