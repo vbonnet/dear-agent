@@ -70,6 +70,9 @@ func SafeRebase(cfg RebaseConfig) (*RebaseResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot determine current branch: %w", err)
 	}
+	if branch == "HEAD" {
+		return nil, fmt.Errorf("refusing to rebase: repository is in a detached HEAD state")
+	}
 	if IsProtectedBranch(branch) {
 		return nil, fmt.Errorf("refusing to rebase %q — safe-rebase only operates on feature branches, "+
 			"never on protected branches (main, master). Check out your feature branch first", branch)
@@ -260,6 +263,7 @@ func appendRebaseAudit(branch, baseBranch, event, detail string, conflicts []str
 	if err != nil {
 		return
 	}
+	defer f.Close()
 	entry := RebaseAuditEntry{
 		Timestamp:  time.Now().UTC().Format(time.RFC3339),
 		Branch:     branch,
@@ -270,5 +274,4 @@ func appendRebaseAudit(branch, baseBranch, event, detail string, conflicts []str
 	}
 	b, _ := json.Marshal(entry)
 	_, _ = fmt.Fprintln(f, string(b))
-	_ = f.Close()
 }

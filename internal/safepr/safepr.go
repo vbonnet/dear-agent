@@ -105,6 +105,7 @@ func LoadSession(dir string) (Session, error) {
 
 // frontmatter extracts the YAML between the leading "---" fence pair.
 func frontmatter(content string) (string, error) {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
 	if !strings.HasPrefix(content, "---\n") {
 		return "", fmt.Errorf("file does not start with YAML frontmatter (---)")
 	}
@@ -279,6 +280,9 @@ type AuditRecord struct {
 // caller decides whether a PR should fail because the log could not be
 // written (it should not).
 func AppendAudit(home string, rec AuditRecord) error {
+	if home == "" {
+		home = "/tmp"
+	}
 	dir := filepath.Join(home, ".local", "state", "dear-agent")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("cannot create audit log dir %s: %w", dir, err)

@@ -202,6 +202,7 @@ func appendAuditEntry(repo string, prNum int, event, detail string) {
 	if err != nil {
 		return
 	}
+	defer f.Close()
 
 	entry := AuditEntry{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -212,7 +213,6 @@ func appendAuditEntry(repo string, prNum int, event, detail string) {
 	}
 	b, _ := json.Marshal(entry)
 	_, _ = fmt.Fprintln(f, string(b))
-	_ = f.Close()
 }
 
 // auditLogDir returns the directory for the safe-merge audit log.

@@ -129,8 +129,9 @@ func run(argv []string) error {
 	return execGh(&p.req, p.timeout)
 }
 
-// prURLRe matches the PR URL gh prints on success.
-var prURLRe = regexp.MustCompile(`https://github\.com/\S+/pull/\d+`)
+// prURLRe matches the PR URL gh prints on success. Anchored to a word
+// boundary to satisfy CodeQL's regex-anchor check.
+var prURLRe = regexp.MustCompile(`\bhttps://github\.com/[^\s]+/pull/\d+\b`)
 
 // execGh runs the stamped gh command, bounded by timeout and with
 // GIT_TERMINAL_PROMPT=0, then writes the audit record and span. The audit
