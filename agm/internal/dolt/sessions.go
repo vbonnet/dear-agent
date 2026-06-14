@@ -765,3 +765,47 @@ func (a *Adapter) List(filter *manifest.Filter) ([]*manifest.Manifest, error) {
 	}
 	return a.ListSessions(sf)
 }
+
+// RecordHarnessSwitch appends a harness-switch event to agm_harness_history.
+// Call this whenever a session's harness changes to a different value.
+func (a *Adapter) RecordHarnessSwitch(sessionID, fromHarness, toHarness string, switchedAt time.Time) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id cannot be empty")
+	}
+	if err := a.ApplyMigrations(); err != nil {
+		return fmt.Errorf("failed to apply migrations: %w", err)
+	}
+	_, err := a.conn.Exec( //nolint:noctx // TODO(context): plumb ctx
+		`INSERT INTO agm_harness_history (session_id, switched_at, from_harness, to_harness) VALUES (?, ?, ?, ?)`,
+		sessionID, switchedAt, fromHarness, toHarness,
+	)
+	return err
+}
+
+// GetHarnessHistory returns all harness-switch events for a session in chronological order.
+func (a *Adapter) GetHarnessHistory(sessionID string) ([]manifest.HarnessSwitch, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("session_id cannot be empty")
+	}
+	if err := a.ApplyMigrations(); err != nil {
+		return nil, fmt.Errorf("failed to apply migrations: %w", err)
+	}
+	rows, err := a.conn.Query( //nolint:noctx // TODO(context): plumb ctx
+		`SELECT switched_at, from_harness, to_harness FROM agm_harness_history WHERE session_id = ? ORDER BY switched_at ASC`,
+		sessionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var history []manifest.HarnessSwitch
+	for rows.Next() {
+		var sw manifest.HarnessSwitch
+		if err := rows.Scan(&sw.Timestamp, &sw.FromHarness, &sw.ToHarness); err != nil {
+			return nil, err
+		}
+		history = append(history, sw)
+	}
+	return history, rows.Err()
+}

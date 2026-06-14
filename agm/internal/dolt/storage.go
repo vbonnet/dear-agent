@@ -1,6 +1,8 @@
 package dolt
 
 import (
+	"time"
+
 	"github.com/vbonnet/dear-agent/agm/internal/artifacts"
 	"github.com/vbonnet/dear-agent/agm/internal/logs"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -31,6 +33,12 @@ type Storage interface {
 	// conversationUUID, or (nil, nil) if no session tracks that UUID. Used by
 	// agm session get to resolve Claude session UUIDs passed from Stop hooks.
 	GetSessionByUUID(conversationUUID string) (*manifest.Manifest, error)
+
+	// RecordHarnessSwitch appends a harness-switch event for a session.
+	RecordHarnessSwitch(sessionID, fromHarness, toHarness string, switchedAt time.Time) error
+
+	// GetHarnessHistory returns all harness-switch events for a session in chronological order.
+	GetHarnessHistory(sessionID string) ([]manifest.HarnessSwitch, error)
 }
 
 // Verify that Adapter implements manifest.Store at compile time.

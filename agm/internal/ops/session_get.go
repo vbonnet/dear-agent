@@ -31,8 +31,9 @@ type SessionDetail struct {
 	Lifecycle        string        `json:"lifecycle"`
 	CreatedAt        string        `json:"created_at"`
 	UpdatedAt        string        `json:"updated_at"`
-	ContextUsage     *ContextUsage `json:"context_usage,omitempty"`
-	PermissionMode   string        `json:"permission_mode,omitempty"`
+	ContextUsage     *ContextUsage          `json:"context_usage,omitempty"`
+	PermissionMode   string                 `json:"permission_mode,omitempty"`
+	HarnessHistory   []manifest.HarnessSwitch `json:"harness_history,omitempty"`
 }
 
 // ContextUsage mirrors manifest.ContextUsage for JSON output.
@@ -89,6 +90,11 @@ func GetSession(ctx *OpContext, req *GetSessionRequest) (*GetSessionResult, erro
 	status := computeSessionStatus(m, ctx.Tmux)
 
 	detail := toSessionDetail(m, status)
+
+	// Populate harness history (best-effort; ignore errors).
+	if history, err := ctx.Storage.GetHarnessHistory(m.SessionID); err == nil {
+		detail.HarnessHistory = history
+	}
 
 	return &GetSessionResult{
 		Operation: "get_session",

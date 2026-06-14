@@ -59,6 +59,9 @@ var migration015 string
 //go:embed migrations/016_artifacts.sql
 var migration016 string
 
+//go:embed migrations/017_harness_history.sql
+var migration017 string
+
 // Migration represents a single database migration
 type Migration struct {
 	Version       int
@@ -234,6 +237,20 @@ func AllMigrations() []Migration {
 			SQL:           migration016,
 			Checksum:      computeChecksum(migration016),
 			TablesCreated: []string{"agm_artifacts"},
+		},
+		{
+			Version:       17,
+			Name:          "harness_history",
+			SQL:           migration017,
+			Checksum:      computeChecksum(migration017),
+			TablesCreated: []string{"agm_harness_history"},
+			PreConditionSQL: `
+				SELECT 1 WHERE NOT EXISTS (
+					SELECT 1 FROM information_schema.TABLES
+					WHERE TABLE_SCHEMA = DATABASE()
+					  AND TABLE_NAME = 'agm_harness_history'
+				)
+			`,
 		},
 	}
 }

@@ -557,3 +557,5 @@ func (f *failingStorageImpl) UpdateSession(*manifest.Manifest) error            
 func (f *failingStorageImpl) DeleteSession(string) error                                     { return errors.New("unreachable") }
 func (f *failingStorageImpl) ListSessions(*dolt.SessionFilter) ([]*manifest.Manifest, error) { return nil, errors.New("unreachable") }
 func (f *failingStorageImpl) GetSessionByUUID(string) (*manifest.Manifest, error)            { return nil, errors.New("unreachable") }
+func (f *failingStorageImpl) RecordHarnessSwitch(string, string, string, time.Time) error    { return errors.New("unreachable") }
+func (f *failingStorageImpl) GetHarnessHistory(string) ([]manifest.HarnessSwitch, error)    { return nil, errors.New("unreachable") }
