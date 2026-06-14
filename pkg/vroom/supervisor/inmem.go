@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 )
 
 // In-memory implementations of Roadmap / Queue / ResourceProbe used by:
@@ -125,6 +126,9 @@ func NewInMemoryQueue() *InMemoryQueue {
 }
 
 // Enqueue adds a task to the pending set. Returns an error on duplicate ID.
+// If t.EnqueuedAt is zero it is set to the current time so the Orchestrator
+// can detect stale tasks (ce-6as.3). Callers may set EnqueuedAt explicitly
+// to control apparent age (useful in tests).
 func (q *InMemoryQueue) Enqueue(t Task) error {
 	if t.ID == "" {
 		return errors.New("InMemoryQueue: Task.ID required")
@@ -133,6 +137,9 @@ func (q *InMemoryQueue) Enqueue(t Task) error {
 	defer q.mu.Unlock()
 	if _, dup := q.pending[t.ID]; dup {
 		return fmt.Errorf("InMemoryQueue: duplicate task ID %q", t.ID)
+	}
+	if t.EnqueuedAt.IsZero() {
+		t.EnqueuedAt = time.Now()
 	}
 	q.pending[t.ID] = t
 	return nil
