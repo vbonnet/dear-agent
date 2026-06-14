@@ -2,6 +2,7 @@ package vcs
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,8 +57,8 @@ func EnsureRepo(dir, remoteName, remoteURL, branch string) (*Repo, error) {
 	}
 	// Rename default branch to configured name
 	if err := r.run("branch", "-M", branch); err != nil {
-		// Non-fatal: branch rename may fail if no commits yet
-		_ = err
+		// Branch rename can fail if there are no commits yet — non-fatal.
+		slog.Debug("branch rename failed (no commits yet?)", "branch", branch, "error", err)
 	}
 
 	// Create .gitignore that defaults to tracking .ai.md and .why.md
