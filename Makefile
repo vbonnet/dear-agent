@@ -39,8 +39,10 @@
 #   install-bead-close-guard Install bead-close-guard to ~/go/bin
 #   build-babysit-prs       Build babysit-prs: serial PR updater + merger
 #   install-babysit-prs     Install babysit-prs to ~/go/bin
+#   build-pr-linkify        Build pr-linkify: PR reference linkifier (cmd/pr-linkify)
+#   install-pr-linkify      Install pr-linkify to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -428,3 +430,12 @@ install-bumblebee-launchagent: build-bumblebee
 
 uninstall-bumblebee-launchagent: build-bumblebee
 	@./bin/dear-agent-bumblebee install-launchagent --uninstall
+
+build-pr-linkify:
+	@echo "Building pr-linkify..."
+	go build $(GOFLAGS) -o bin/pr-linkify ./cmd/pr-linkify/
+	@echo "Built: bin/pr-linkify"
+
+install-pr-linkify: build-pr-linkify
+	cp bin/pr-linkify $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/pr-linkify"
