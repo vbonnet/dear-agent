@@ -2,6 +2,7 @@ package tokenizers
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -125,8 +126,7 @@ func (t *TiktokenTokenizer) initialize() {
 
 	if err != nil {
 		t.available = false
-		// TODO: Log error when structured logging available
-		// Expected errors: network unavailable, permission denied, corrupted cache
+		slog.Warn("tiktoken init failed", "error", err)
 		return
 	}
 
