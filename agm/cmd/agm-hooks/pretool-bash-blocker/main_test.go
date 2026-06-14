@@ -31,7 +31,7 @@ func TestLoadRules(t *testing.T) {
 	for _, expected := range []string{
 		"subshell-cd", "cd-command", "command-substitution",
 		"rm-recursive", "git-checkout-main", "git-no-verify",
-		"sensitive-dotdir-access", "sed-in-place",
+		"git-push-force-variants", "sensitive-dotdir-access", "sed-in-place",
 	} {
 		assert.True(t, ids[expected], "expected active rule: %s", expected)
 	}
@@ -134,6 +134,9 @@ func TestCheckCommand_CriticalBlocks(t *testing.T) {
 		{"git --no-verify", "git commit --no-verify -m 'skip hooks'", "git-no-verify"},
 		{"git push --no-verify", "git push --no-verify", "git-no-verify"},
 		{"sensitive dotdir", "cat ~/.ssh/id_rsa", "sensitive-dotdir-access"},
+		{"git push --mirror", "git push --mirror origin", "git-push-force-variants"},
+		{"git push +refspec", "git push origin +HEAD:main", "git-push-force-variants"},
+		{"git push +refs", "git push origin +refs/heads/feat:refs/heads/main", "git-push-force-variants"},
 		{"git stash", "git stash", "git-stash"},
 		{"git add .", "git add .", "git-add-broad"},
 		{"git add -A", "git add -A", "git-add-broad"},

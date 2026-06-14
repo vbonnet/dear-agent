@@ -682,6 +682,26 @@ patterns:
     severity: high
     tier2_validation: true
 
+  # --- order 265: git push --mirror or +refspec ---
+  - id: git-push-force-variants
+    order: 265
+    re2_regex: '\bgit\s+[^|&;]*?push\s+[^|&;]*?(--mirror\b|\+[^\s])'
+    pattern_name: 'git push --mirror / +refspec (force-push variants)'
+    remediation: "Use safe-push instead: safe-push [remote] [branch]. The safe-push binary blocks --mirror and +refspec by construction. If you need to push, use: safe-push origin <branch>"
+    regex: '\bgit\s+[^|&;]*?push\s+[^|&;]*?(--mirror\b|\+[^\s])'
+    reason: "git push --mirror replaces ALL remote refs; +refspec force-pushes individual refs — both bypass branch-protection history guarantees"
+    alternative: "Use safe-push (cmd/safe-push) which strips --mirror, +refspec, --force, and --force-with-lease"
+    examples:
+      - "git push --mirror origin"
+      - "git push origin +HEAD:main"
+      - "git push origin +refs/heads/feat:refs/heads/main"
+    should_not_match:
+      - "git push origin main"
+      - "git push -u origin feat/branch"
+      - "git push origin HEAD:refs/for/main"
+    severity: critical
+    tier2_validation: true
+
   # --- order 270: stat command ---
   - id: stat-command
     order: 270
