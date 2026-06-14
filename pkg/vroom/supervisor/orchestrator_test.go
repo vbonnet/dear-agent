@@ -264,6 +264,107 @@ func TestOrchestrator_Tick_DispatchedTaskNotEscalated(t *testing.T) {
 	}
 }
 
+func TestOrchestrator_Tick_PermissionBlocked_SkipsTask(t *testing.T) {
+	// t-blocked requires "fs:write" which is denied; t-ok has no requirements.
+	// The blocked task must not stall t-ok from being dispatched (ce-6as.4).
+	q := NewInMemoryQueue()
+	must(t, q.Enqueue(Task{ID: "t-blocked", Title: "write files", Worker: "coder", RequiredPerms: []string{"fs:write"}}))
+	must(t, q.Enqueue(Task{ID: "t-ok", Title: "read only", Worker: "coder"}))
+
+	perm := NewInMemoryPermissionChecker()
+	perm.Deny("fs:write", "filesystem access not granted for autonomous run")
+
+	trail, buf := newBufferTrail()
+	o, err := NewOrchestrator(trail, q)
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	o.WithPermissionChecker(perm)
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	dispatched := q.Dispatched()
+	if len(dispatched) != 1 || dispatched[0] != "t-ok" {
+		t.Errorf("Dispatched = %v, want [t-ok]", dispatched)
+	}
+	sawBlocked := false
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.orch.permission_blocked" {
+			sawBlocked = true
+			payload, _ := r["payload"].(map[string]any)
+			if payload == nil || payload["task_id"] != "t-blocked" {
+				t.Errorf("permission_blocked.payload.task_id = %v, want t-blocked", payload)
+			}
+		}
+	}
+	if !sawBlocked {
+		t.Error("no supervisor.orch.permission_blocked record in trail")
+	}
+}
+
+func TestOrchestrator_Tick_PermissionAllowed_Dispatches(t *testing.T) {
+	// When the required permission is allowed the task dispatches normally.
+	q := NewInMemoryQueue()
+	must(t, q.Enqueue(Task{ID: "t1", Title: "write files", Worker: "coder", RequiredPerms: []string{"fs:write"}}))
+
+	perm := NewInMemoryPermissionChecker() // all allowed by default
+
+	trail, buf := newBufferTrail()
+	o, err := NewOrchestrator(trail, q)
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	o.WithPermissionChecker(perm)
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if got := q.Dispatched(); len(got) != 1 || got[0] != "t1" {
+		t.Errorf("Dispatched = %v, want [t1]", got)
+	}
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.orch.permission_blocked" {
+			t.Error("permission_blocked fired even though permission was allowed")
+		}
+	}
+}
+
+func TestOrchestrator_Tick_NilChecker_DispatchesAll(t *testing.T) {
+	// Without a PermissionChecker, tasks with RequiredPerms dispatch normally.
+	q := NewInMemoryQueue()
+	must(t, q.Enqueue(Task{ID: "t1", Title: "x", Worker: "coder", RequiredPerms: []string{"fs:write", "mcp:github"}}))
+	must(t, q.Enqueue(Task{ID: "t2", Title: "y", Worker: "coder"}))
+
+	trail, _ := newBufferTrail()
+	o, err := NewOrchestrator(trail, q) // no WithPermissionChecker
+	if err != nil {
+		t.Fatalf("NewOrchestrator: %v", err)
+	}
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if got := q.Dispatched(); !equalSorted(got, []string{"t1", "t2"}) {
+		t.Errorf("Dispatched = %v, want [t1 t2]", got)
+	}
+}
+
+func TestInMemoryPermissionChecker_DenyAllow(t *testing.T) {
+	c := NewInMemoryPermissionChecker()
+	if err := c.Check(context.Background(), []string{"fs:write"}); err != nil {
+		t.Errorf("Check before Deny: %v, want nil", err)
+	}
+	c.Deny("fs:write", "not granted")
+	if err := c.Check(context.Background(), []string{"fs:write"}); err == nil {
+		t.Error("Check after Deny returned nil, want error")
+	}
+	c.Allow("fs:write")
+	if err := c.Check(context.Background(), []string{"fs:write"}); err != nil {
+		t.Errorf("Check after Allow: %v, want nil", err)
+	}
+}
+
 type errorQueue struct {
 	Queue
 	err error
