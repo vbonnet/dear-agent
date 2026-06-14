@@ -81,6 +81,17 @@ locals {
     }
   }
 
+  # Repos with merge queue enabled. Start with dear-agent; expand by adding
+  # entries here. The merge queue replaces manual "merge when ready" with a
+  # serialized queue that tests PRs in groups before merging.
+  merge_queue_repos = {
+    "dear-agent" = {
+      min_group_size        = 1
+      max_group_size        = 5
+      check_timeout_minutes = 30
+    }
+  }
+
   # Archived repositories: GitHub rejects mutations on archived repos, so
   # these are declared minimally with all changes ignored.
   archived_repos = {
