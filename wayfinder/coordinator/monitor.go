@@ -170,6 +170,11 @@ func (m *Monitor) StreamLogs(projectID string, stdout, stderr io.Reader) {
 
 	// Stream stdout
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "monitor: stdout stream panic for %s: %v\n", projectID, r)
+			}
+		}()
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -180,6 +185,11 @@ func (m *Monitor) StreamLogs(projectID string, stdout, stderr io.Reader) {
 
 	// Stream stderr (with prefix)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "monitor: stderr stream panic for %s: %v\n", projectID, r)
+			}
+		}()
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()

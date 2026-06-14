@@ -28,6 +28,11 @@ func CaptureContext(projectDir string, st *status.Status) ContextSnapshot {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				errChan <- fmt.Errorf("git context panicked: %v", r)
+			}
+		}()
 		gitCtx, err := captureGitContext(projectDir)
 		if err != nil {
 			errChan <- fmt.Errorf("git context: %w", err)
@@ -40,6 +45,11 @@ func CaptureContext(projectDir string, st *status.Status) ContextSnapshot {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				errChan <- fmt.Errorf("deliverables panicked: %v", r)
+			}
+		}()
 		deliverables, err := captureDeliverables(projectDir)
 		if err != nil {
 			errChan <- fmt.Errorf("deliverables: %w", err)
@@ -52,6 +62,11 @@ func CaptureContext(projectDir string, st *status.Status) ContextSnapshot {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				errChan <- fmt.Errorf("phase context panicked: %v", r)
+			}
+		}()
 		phaseCtx := capturePhaseContext(st)
 		snapshot.PhaseState = phaseCtx
 	}()
