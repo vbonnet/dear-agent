@@ -379,6 +379,17 @@ func TestBuildMergeArgs_ContainsMatchHeadCommit(t *testing.T) {
 	}
 }
 
+func TestBuildMergeArgs_PanicsOnEmptySHA(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("BuildMergeArgs must panic on empty headSHA — an empty anchor " +
+				"would silently defeat the TOCTOU protection")
+		}
+	}()
+	BuildMergeArgs(1, "o/r", "")
+}
+
 func TestBuildMergeArgs_RequiredFlags(t *testing.T) {
 	args := BuildMergeArgs(99, "vbonnet/dear-agent", "deadbeef")
 
