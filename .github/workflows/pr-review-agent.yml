@@ -34,6 +34,12 @@ name: PR Review Agent (Codebase Health)
 on:
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review (for quota-fallback re-trigger)'
+        required: true
+        type: string
 
 # Least privilege: read the tree, write PR comments, read labels.
 permissions:
@@ -41,7 +47,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: pr-review-agent-${{ github.event.pull_request.number }}
+  group: pr-review-agent-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
   cancel-in-progress: true
 
 env:
@@ -55,6 +61,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Resolve PR context
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.pr_number }}" ]; then
+            PR_NUMBER="${{ github.event.inputs.pr_number }}"
+            BASE_SHA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json baseRefOid --jq '.baseRefOid')
+            HEAD_SHA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid --jq '.headRefOid')
+          else
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          fi
+          echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
+          echo "BASE_SHA=$BASE_SHA" >> "$GITHUB_ENV"
+          echo "HEAD_SHA=$HEAD_SHA" >> "$GITHUB_ENV"
+
       - name: Checkout (full history for diff)
         uses: actions/checkout@v6
         with:
@@ -67,16 +91,12 @@ jobs:
           cache: true
 
       - name: Compute changed-file sets
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           # Ensure the base commit is present (checkout@v6 fetches it with
           # fetch-depth:0, but be defensive on shallow edge cases).
           git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || \
             git fetch --no-tags origin "$BASE_SHA" || true
-          echo "BASE_SHA=$BASE_SHA" >> "$GITHUB_ENV"
           # Changed (added/copied/modified/renamed) and added-only file lists.
           git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" > /tmp/changed.txt || true
           git diff --name-only --diff-filter=A   "$BASE_SHA" "$HEAD_SHA" > /tmp/added.txt   || true
@@ -85,8 +105,6 @@ jobs:
           echo "Changed files:"; cat /tmp/changed.txt || true
 
       - name: Banned patterns (Python, non-test dot-imports, computer-use)
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -uo pipefail
           # --- Newly-added Python files (CLAUDE.md principle 4: Go is default,
@@ -128,8 +146,6 @@ jobs:
           echo "banned-patterns check done"
 
       - name: Committed binaries
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -uo pipefail
           # git marks binary files with "-\t-" in numstat. Only consider ADDED
@@ -201,7 +217,7 @@ jobs:
           set -uo pipefail
           # --- New direct dependencies (want a justification in the PR body).
           if grep -qxF 'go.mod' /tmp/changed.txt; then
-            deps=$(git diff "$BASE_SHA" "${{ github.event.pull_request.head.sha }}" -- go.mod \
+            deps=$(git diff "$BASE_SHA" "$HEAD_SHA" -- go.mod \
               | grep -E '^\+[[:space:]]' | grep -v '// indirect' \
               | grep -vE '^\+\+\+' | grep -oE '[a-z0-9./-]+ v[0-9][^ ]*' || true)
             if [ -n "$deps" ]; then
@@ -250,7 +266,7 @@ jobs:
           while IFS= read -r f; do
             [ -z "$f" ] && continue
             case "$f" in .github/workflows/pr-review-agent.yml) continue;; esac
-            if git diff "$BASE_SHA" "${{ github.event.pull_request.head.sha }}" -- "$f" 2>/dev/null | grep -qE '^\+.*(/worktrees/|~/worktrees)'; then
+            if git diff "$BASE_SHA" "$HEAD_SHA" -- "$f" 2>/dev/null | grep -qE '^\+.*(/worktrees/|~/worktrees)'; then
               echo "- **Stale worktree reference** in \`$f\` — hardcoded \`~/worktrees/...\` paths shouldn't be committed." >> /tmp/warnings.md
             fi
           done < /tmp/changed.txt
@@ -259,7 +275,7 @@ jobs:
       - name: Compose, post comment & decide
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
+          PR: ${{ env.PR_NUMBER }}
         run: |
           set -euo pipefail
           MARKER="<!-- pr-review-agent -->"
