@@ -191,15 +191,11 @@ func (p *AnthropicProvider) parseRankingResponse(resp *anthropic.Message, candid
 func (p *AnthropicProvider) recordCost(ctx context.Context, resp *anthropic.Message) error {
 	usage := resp.Usage
 
-	// TODO: SDK doesn't expose cache fields yet - set to 0 for now
-	// Will need to update when anthropic-sdk-go adds support for:
-	// - usage.CacheCreationInputTokens
-	// - usage.CacheReadInputTokens
 	tokens := costtrack.Tokens{
 		Input:      int(usage.InputTokens),
 		Output:     int(usage.OutputTokens),
-		CacheRead:  0, // TODO: int(usage.CacheReadInputTokens) when available
-		CacheWrite: 0, // TODO: int(usage.CacheCreationInputTokens) when available
+		CacheRead:  int(usage.CacheReadInputTokens),
+		CacheWrite: int(usage.CacheCreationInputTokens),
 	}
 
 	// Get pricing for model
