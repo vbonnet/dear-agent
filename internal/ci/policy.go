@@ -194,6 +194,49 @@ func (c *PolicyConfig) GetPolicyForBranch(branch string) GatePolicy {
 	return c.Default
 }
 
+// ValidateWorkflowFiles checks that every workflow file referenced in config
+// exists on disk under workflowsDir. It collects all missing files and returns
+// a single error listing them all so the caller can fix everything at once.
+//
+// ValidateWorkflowFiles is separate from ValidateConfig because file existence
+// can only be checked after a checkout; the schema-level ValidateConfig is
+// useful in environments where the repository is not yet available.
+func ValidateWorkflowFiles(config *PolicyConfig, workflowsDir string) error {
+	if config == nil {
+		return fmt.Errorf("config cannot be nil")
+	}
+	seen := make(map[string]bool)
+	var missing []string
+	check := func(name string) {
+		if seen[name] {
+			return
+		}
+		seen[name] = true
+		path := filepath.Join(workflowsDir, name)
+		if _, err := os.Stat(path); err != nil {
+			missing = append(missing, name)
+		}
+	}
+	for _, w := range config.Default.RequiredWorkflows {
+		check(w)
+	}
+	for _, w := range config.Default.OptionalWorkflows {
+		check(w)
+	}
+	for _, p := range config.BranchPolicies {
+		for _, w := range p.RequiredWorkflows {
+			check(w)
+		}
+		for _, w := range p.OptionalWorkflows {
+			check(w)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("workflow files not found in %s: %v", workflowsDir, missing)
+	}
+	return nil
+}
+
 // ValidateConfig checks if a policy configuration is valid and sane.
 //
 // Validation checks:
@@ -201,7 +244,7 @@ func (c *PolicyConfig) GetPolicyForBranch(branch string) GatePolicy {
 //   - Valid failure behaviors
 //   - Reasonable timeout values
 //   - No circular workflow dependencies
-//   - Required workflows exist
+//   - Required workflows exist (schema-level; use ValidateWorkflowFiles for on-disk check)
 func ValidateConfig(config *PolicyConfig) error {
 	if config == nil {
 		return fmt.Errorf("config cannot be nil")
