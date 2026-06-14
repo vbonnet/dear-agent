@@ -2,7 +2,7 @@ package trigger
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"github.com/vbonnet/dear-agent/pkg/engram"
 	"github.com/vbonnet/dear-agent/pkg/eventbus"
@@ -22,7 +22,7 @@ type TriggerSubscriber struct {
 func NewTriggerSubscriber(matcher *TriggerMatcher, statePath string, projectRoot string) *TriggerSubscriber {
 	state, err := LoadTriggerState(statePath)
 	if err != nil {
-		log.Printf("trigger: failed to load state from %s, starting fresh: %v", statePath, err)
+		slog.Warn("trigger: failed to load state, starting fresh", "path", statePath, "error", err)
 		state = NewTriggerState()
 	}
 
@@ -78,7 +78,7 @@ func (s *TriggerSubscriber) handleEvent(ctx context.Context, event *eventbus.Eve
 		// Parse the engram file
 		eg, err := s.parser.Parse(match.EngramPath)
 		if err != nil {
-			log.Printf("trigger: failed to parse engram %s: %v", match.EngramPath, err)
+			slog.Warn("trigger: failed to parse engram", "path", match.EngramPath, "error", err)
 			continue
 		}
 
@@ -92,7 +92,7 @@ func (s *TriggerSubscriber) handleEvent(ctx context.Context, event *eventbus.Eve
 
 	// 4. Call injector.Inject with collected engrams
 	if err := s.injector.Inject(s.projectRoot, event.Type, collected); err != nil {
-		log.Printf("trigger: injection failed: %v", err)
+		slog.Warn("trigger: injection failed", "error", err)
 		return nil, nil
 	}
 
@@ -102,7 +102,7 @@ func (s *TriggerSubscriber) handleEvent(ctx context.Context, event *eventbus.Eve
 	}
 
 	if err := s.state.Save(s.statePath); err != nil {
-		log.Printf("trigger: failed to save state: %v", err)
+		slog.Warn("trigger: failed to save state", "path", s.statePath, "error", err)
 	}
 
 	// 6. Return nil response (fire-and-forget)
