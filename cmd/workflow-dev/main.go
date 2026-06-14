@@ -79,6 +79,11 @@ func run(args []string, in io.Reader, stdout, stderr io.Writer) int {
 	if *watch {
 		paths := []string{wfPath, sess.FixturesPath}
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					_, _ = fmt.Fprintf(stderr, "[watch] panic: %v\n", r)
+				}
+			}()
 			err := dev.HotReload(ctx, paths, dev.WatchOptions{Debounce: *debounce}, func(p string) {
 				n, f, err := sess.Reload()
 				if err != nil {

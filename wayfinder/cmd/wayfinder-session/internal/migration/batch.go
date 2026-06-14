@@ -138,6 +138,11 @@ func migrateParallel(projects []string, options BatchMigrationOptions, report *B
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "migration: worker goroutine panic: %v\n", r)
+				}
+			}()
 			for projectPath := range projectChan {
 				if options.DryRun {
 					processDryRunParallel(projectPath, report, &mu)

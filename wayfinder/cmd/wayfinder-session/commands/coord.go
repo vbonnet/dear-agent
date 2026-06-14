@@ -115,6 +115,11 @@ func runCoordStart(cmd *cobra.Command, args []string) error {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "wayfinder: signal handler panic: %v\n", r)
+			}
+		}()
 		<-sigChan
 		fmt.Fprintln(os.Stderr, "\nReceived interrupt signal, stopping projects...")
 		cancel()
@@ -140,6 +145,11 @@ func runCoordStart(cmd *cobra.Command, args []string) error {
 
 	// Start status display (simple for MVP)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "wayfinder: status display panic: %v\n", r)
+			}
+		}()
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 
