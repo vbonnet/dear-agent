@@ -1,5 +1,7 @@
 # Ranking - Architecture
 
+<!-- Last audited at: 2026-06-12 -->
+
 ## System Overview
 
 The ranking package provides a multi-provider abstraction layer for semantic relevance ranking in the Engram knowledge base. It implements a factory pattern to manage multiple LLM backends (Anthropic, Vertex AI Gemini, Vertex AI Claude) with automatic provider detection and graceful fallback to local Jaccard similarity ranking.
