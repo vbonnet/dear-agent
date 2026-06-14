@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -239,13 +239,13 @@ var vcsBackfillCmd = &cobra.Command{
 			srcPath := sourceDir + "/" + name
 			data, err := os.ReadFile(srcPath)
 			if err != nil {
-				log.Printf("WARN: skip %s: %v", name, err)
+				slog.Warn("memory vcs: skipping file", "name", name, "error", err)
 				continue
 			}
 
 			dstPath := repo.Dir() + "/" + name
 			if err := os.WriteFile(dstPath, data, 0o600); err != nil {
-				log.Printf("WARN: skip %s: %v", name, err)
+				slog.Warn("memory vcs: skipping file", "name", name, "error", err)
 				continue
 			}
 

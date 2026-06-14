@@ -3,7 +3,7 @@ package orchestrator
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/lintcontext"
@@ -119,7 +119,7 @@ func (e *BuildLoopExecutor) StartBuildLoop() error {
 	if e.projectDir != "" {
 		summary, lintErr := lintcontext.Summarize(e.projectDir)
 		if lintErr != nil {
-			log.Printf("warning: failed to summarize lint config: %v", lintErr)
+			slog.Warn("wayfinder: failed to summarize lint config", "error", lintErr)
 		} else {
 			lintSummary = summary
 		}

@@ -1,3 +1,4 @@
+<!-- Last audited at: 2026-06-12 -->
 # Backend Package
 
 The `backend` package provides a pluggable backend system for AGM session management, allowing the system to switch between different session implementations (tmux, Temporal, etc.) via environment variable configuration.
