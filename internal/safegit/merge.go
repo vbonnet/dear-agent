@@ -165,30 +165,27 @@ func attemptMerge(cfg MergeConfig) error {
 
 	// Execute the merge.
 	fmt.Fprintf(os.Stderr, "safe-merge: merging PR #%d (squash)…\n", cfg.PRNumber)
-	headBranch, err := prHeadBranch(cfg.PRNumber, cfg.Repo)
+	headInfo, err := prHeadInfo(cfg.PRNumber, cfg.Repo)
 	if err != nil {
-		// Non-fatal: cleanup will just skip.
-		fmt.Fprintf(os.Stderr, "safe-merge: warning: could not read head branch: %v\n", err)
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "cannot read PR head: "+err.Error())
+		return fmt.Errorf("cannot read PR head info (needed for --match-head-commit): %w", err)
 	}
 
-	mergeCmd := exec.Command("gh", "pr", "merge",
-		fmt.Sprintf("%d", cfg.PRNumber),
-		"--repo", cfg.Repo,
-		"--squash",
-		"--delete-branch",
-	)
+	mergeArgs := BuildMergeArgs(cfg.PRNumber, cfg.Repo, headInfo.SHA)
+	mergeCmd := exec.Command(mergeArgs[0], mergeArgs[1:]...)
 	mergeCmd.Stdout = os.Stdout
 	mergeCmd.Stderr = os.Stderr
 	if err := mergeCmd.Run(); err != nil {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge failed: "+err.Error())
 		return fmt.Errorf("gh pr merge failed: %w", err)
 	}
-	appendAuditEntry(cfg.Repo, cfg.PRNumber, "merged", "squash merge complete")
+	appendAuditEntry(cfg.Repo, cfg.PRNumber, "merged",
+		fmt.Sprintf("squash merge complete (head=%s)", headInfo.SHA))
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ merge complete")
 
 	// Post-merge cleanup (best-effort, non-fatal).
-	if headBranch != "" {
-		cleanupWorktree(headBranch)
+	if headInfo.Branch != "" {
+		cleanupWorktree(headInfo.Branch)
 	}
 	return nil
 }
@@ -244,6 +241,20 @@ func runCommand(cmd *exec.Cmd) ([]byte, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// BuildMergeArgs returns the full argv for the gh pr merge command, including
+// the TOCTOU-preventing --match-head-commit flag. Exported so tests can verify
+// the flag is always present — its removal in PR #460 caused a P1 regression.
+func BuildMergeArgs(prNum int, repo, headSHA string) []string {
+	return []string{
+		"gh", "pr", "merge",
+		fmt.Sprintf("%d", prNum),
+		"--repo", repo,
+		"--squash",
+		"--delete-branch",
+		"--match-head-commit", headSHA,
+	}
 }
 
 // --- gate implementations ---
@@ -514,24 +525,31 @@ func parseSoak(data []byte, now time.Time, skipBotReview bool) error {
 	return nil
 }
 
-type prInfoResult struct {
-	HeadRefName string `json:"headRefName"`
+type prHeadResult struct {
+	SHA    string
+	Branch string
 }
 
-func prHeadBranch(prNum int, repo string) (string, error) {
+func prHeadInfo(prNum int, repo string) (prHeadResult, error) {
 	out, err := runCommand(exec.Command("gh", "pr", "view",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
-		"--json", "headRefName",
+		"--json", "headRefName,headRefOid",
 	))
 	if err != nil {
-		return "", err
+		return prHeadResult{}, err
 	}
-	var info prInfoResult
-	if err := json.Unmarshal(out, &info); err != nil {
-		return "", err
+	var raw struct {
+		HeadRefName string `json:"headRefName"`
+		HeadRefOid  string `json:"headRefOid"`
 	}
-	return info.HeadRefName, nil
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return prHeadResult{}, err
+	}
+	if raw.HeadRefOid == "" {
+		return prHeadResult{}, fmt.Errorf("PR #%d has no headRefOid — cannot anchor merge", prNum)
+	}
+	return prHeadResult{SHA: raw.HeadRefOid, Branch: raw.HeadRefName}, nil
 }
 
 // cleanupWorktree removes any local worktrees tracking the given branch and
