@@ -38,9 +38,9 @@ import (
 	"syscall"
 	"time"
 
-	_ "modernc.org/sqlite"
 	"tailscale.com/tsnet"
 
+	"github.com/vbonnet/dear-agent/internal/sqlite"
 	"github.com/vbonnet/dear-agent/pkg/api"
 	"github.com/vbonnet/dear-agent/pkg/audit"
 )
@@ -254,7 +254,7 @@ func shutdownOnContextDone(ctx context.Context, logger *slog.Logger, httpSrv *ht
 }
 
 func openSQLite(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(on)")
+	db, err := sqlite.Open(path)
 	if err != nil {
 		return nil, err
 	}

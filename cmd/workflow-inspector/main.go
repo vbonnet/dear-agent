@@ -36,8 +36,7 @@ import (
 	"syscall"
 	"time"
 
-	_ "modernc.org/sqlite"
-
+	"github.com/vbonnet/dear-agent/internal/sqlite"
 	"github.com/vbonnet/dear-agent/pkg/workflow"
 )
 
@@ -59,7 +58,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	db, err := sql.Open("sqlite", *dbPath+"?_pragma=busy_timeout(5000)")
+	db, err := sqlite.Open(*dbPath)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
@@ -79,6 +78,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				_, _ = fmt.Fprintln(stderr, "workflow-inspector: shutdown goroutine panic:", r)
+			}
+		}()
 		<-ctx.Done()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()

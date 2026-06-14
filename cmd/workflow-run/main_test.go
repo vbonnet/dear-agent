@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	_ "modernc.org/sqlite"
+	"github.com/vbonnet/dear-agent/internal/sqlite"
 )
 
 // minimalBashWorkflow returns a one-node bash workflow YAML body that
@@ -150,7 +150,7 @@ func TestRun_MissingFileFlag(t *testing.T) {
 
 func openTestDB(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
+	db, err := sqlite.Open(path)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

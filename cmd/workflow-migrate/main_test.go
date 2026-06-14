@@ -11,8 +11,7 @@ import (
 	"testing"
 	"time"
 
-	_ "modernc.org/sqlite"
-
+	"github.com/vbonnet/dear-agent/internal/sqlite"
 	"github.com/vbonnet/dear-agent/pkg/workflow"
 )
 
@@ -175,7 +174,7 @@ func mustWriteJSON(t *testing.T, path string, v any) {
 
 func openTestDB(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
+	db, err := sqlite.Open(path)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
