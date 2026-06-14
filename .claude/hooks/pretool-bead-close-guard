@@ -44,17 +44,27 @@ case "$stripped" in
   *) exit 0 ;;
 esac
 
-# Detect "bd ... close <id>" pattern
+# Detect "bd ... close <id>" pattern — extract the first non-flag token after "close"
 bead_id=""
 if printf '%s' "$stripped" | grep -qE '\bclose\b'; then
-  # Extract bead ID: the token after "close" (skipping flags)
-  bead_id="$(printf '%s' "$stripped" | sed -n 's/.*\bclose\b[[:space:]]*\([^ -][^ ]*\).*/\1/p')"
+  bead_id="$(printf '%s' "$stripped" | awk '{
+    found=0
+    for (i=1; i<=NF; i++) {
+      if ($i == "close") { found=1; continue }
+      if (found && substr($i,1,1) != "-") { print $i; exit }
+    }
+  }')"
 fi
 
 # Detect "bd ... update <id> --status closed" pattern
 if [ -z "$bead_id" ] && printf '%s' "$stripped" | grep -qE '\bupdate\b.*--status[[:space:]]+closed\b'; then
-  # Extract bead ID: the token after "update" (skipping flags)
-  bead_id="$(printf '%s' "$stripped" | sed -n 's/.*\bupdate\b[[:space:]]*\([^ -][^ ]*\).*/\1/p')"
+  bead_id="$(printf '%s' "$stripped" | awk '{
+    found=0
+    for (i=1; i<=NF; i++) {
+      if ($i == "update") { found=1; continue }
+      if (found && substr($i,1,1) != "-") { print $i; exit }
+    }
+  }')"
 fi
 
 # Not a close/update-to-closed operation
@@ -72,10 +82,11 @@ if [ -z "$guard" ]; then
   exit 0
 fi
 
-# Extract --db / beads-dir from the command if present
+# Extract --db / beads-dir from the command if present, expand ~ to $HOME
 beads_dir=""
 if printf '%s' "$stripped" | grep -qE '\-\-db[[:space:]=]'; then
   beads_dir="$(printf '%s' "$stripped" | sed -n 's/.*--db[[:space:]=]*\([^ ]*\).*/\1/p')"
+  beads_dir="${beads_dir/#\~/$HOME}"
 fi
 
 # Build guard args
