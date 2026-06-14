@@ -19,6 +19,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -39,54 +40,72 @@ func main() {
 	}
 }
 
-func run(argv []string) error {
+type parsedArgs struct {
+	req          safepr.Request
+	wayfinderDir string
+	timeout      time.Duration
+	showedHelp   bool
+}
+
+func parseArgs(argv []string) (*parsedArgs, error) {
 	if len(argv) == 0 || argv[0] == "-h" || argv[0] == "--help" {
 		fmt.Print(usage)
-		return nil
+		return &parsedArgs{showedHelp: true}, nil
 	}
 
-	req := safepr.Request{Verb: argv[0]}
-	wayfinderDir := ""
-	timeout := safepr.DefaultTimeout
+	p := &parsedArgs{
+		req:     safepr.Request{Verb: argv[0]},
+		timeout: safepr.DefaultTimeout,
+	}
 
 	for i := 1; i < len(argv); i++ {
 		arg := argv[i]
 		switch arg {
 		case "-h", "--help":
 			fmt.Print(usage)
-			return nil
+			return &parsedArgs{showedHelp: true}, nil
 		case "--wayfinder":
 			if i+1 >= len(argv) {
-				return fmt.Errorf("--wayfinder requires a wayfinder project directory argument")
+				return nil, fmt.Errorf("--wayfinder requires a wayfinder project directory argument")
 			}
-			wayfinderDir = argv[i+1]
+			p.wayfinderDir = argv[i+1]
 			i++
 		case "--emergency":
-			req.Emergency = true
+			p.req.Emergency = true
 		case "--reason":
 			if i+1 >= len(argv) {
-				return fmt.Errorf("--reason requires a text argument")
+				return nil, fmt.Errorf("--reason requires a text argument")
 			}
-			req.Reason = argv[i+1]
+			p.req.Reason = argv[i+1]
 			i++
 		case "--timeout":
 			if i+1 >= len(argv) {
-				return fmt.Errorf("--timeout requires a duration argument (e.g. 60s)")
+				return nil, fmt.Errorf("--timeout requires a duration argument (e.g. 60s)")
 			}
 			d, err := time.ParseDuration(argv[i+1])
 			if err != nil {
-				return fmt.Errorf("invalid --timeout %q: %w", argv[i+1], err)
+				return nil, fmt.Errorf("invalid --timeout %q: %w", argv[i+1], err)
 			}
-			timeout = d
+			p.timeout = d
 			i++
 		default:
-			// Everything else is forwarded to `gh pr <verb>` (after stamping).
-			req.GhArgs = append(req.GhArgs, arg)
+			p.req.GhArgs = append(p.req.GhArgs, arg)
 		}
 	}
+	return p, nil
+}
 
-	if !req.Emergency {
-		dir, err := safepr.ResolveSessionDir(wayfinderDir)
+func run(argv []string) error {
+	p, err := parseArgs(argv)
+	if err != nil {
+		return err
+	}
+	if p.showedHelp {
+		return nil
+	}
+
+	if !p.req.Emergency {
+		dir, err := safepr.ResolveSessionDir(p.wayfinderDir)
 		if err != nil {
 			return err
 		}
@@ -94,16 +113,20 @@ func run(argv []string) error {
 		if err != nil {
 			return err
 		}
-		req.Session = &s
+		p.req.Session = &s
 	}
-	if err := req.Validate(); err != nil {
+	if err := p.req.Validate(); err != nil {
 		return err
 	}
 
 	shutdown := otelsetup.InitTracer("safe-pr")
-	defer func() { _ = shutdown(context.Background()) }()
+	defer func() {
+		if err := shutdown(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "safe-pr: otel shutdown: %v\n", err)
+		}
+	}()
 
-	return execGh(&req, timeout)
+	return execGh(&p.req, p.timeout)
 }
 
 // prURLRe matches the PR URL gh prints on success.
@@ -134,7 +157,8 @@ func execGh(req *safepr.Request, timeout time.Duration) error {
 	errText := ""
 	if runErr != nil {
 		exitCode = 1
-		if ee, ok := runErr.(*exec.ExitError); ok {
+		var ee *exec.ExitError
+		if errors.As(runErr, &ee) {
 			exitCode = ee.ExitCode()
 		}
 		errText = runErr.Error()

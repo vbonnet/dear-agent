@@ -1,7 +1,7 @@
 // Package safepr is the policy core of safe-pr, the one sanctioned path for
 // opening and closing GitHub pull requests from agent sessions.
 //
-// Why PRs are wrapped at all
+// # Why PRs are wrapped at all
 //
 // Raw `gh pr create` from an agent leaves no trace of WHY the PR exists: no
 // wayfinder session, no plan, no telemetry. Untraced PRs spray CI and review

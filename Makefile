@@ -40,7 +40,7 @@
 #   build-babysit-prs       Build babysit-prs: serial PR updater + merger
 #   install-babysit-prs     Install babysit-prs to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -215,6 +215,30 @@ build-safe-merge:
 install-safe-merge: build-safe-merge
 	cp bin/safe-merge $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/safe-merge"
+
+# Build safe-rebase: rebase feature branches onto main with safety checks.
+# Refuses protected branches, aborts on conflict, optionally force-pushes
+# + runs preflight in --auto mode.
+build-safe-rebase:
+	@echo "Building safe-rebase..."
+	go build $(GOFLAGS) -o bin/safe-rebase ./cmd/safe-rebase/
+	@echo "Built: bin/safe-rebase"
+
+# Install safe-rebase to GOPATH/bin.
+install-safe-rebase: build-safe-rebase
+	cp bin/safe-rebase $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-rebase"
+
+# Build safe-pr: wayfinder-traced wrapper for gh pr create/close.
+build-safe-pr:
+	@echo "Building safe-pr..."
+	go build $(GOFLAGS) -o bin/safe-pr ./cmd/safe-pr/
+	@echo "Built: bin/safe-pr"
+
+# Install safe-pr to GOPATH/bin.
+install-safe-pr: build-safe-pr
+	cp bin/safe-pr $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-pr"
 
 # Build src-recovery: the one sanctioned writer to ~/src/**. It restores a
 # golden checkout to a clean, current default branch via exactly stash ->
