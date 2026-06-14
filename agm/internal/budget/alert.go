@@ -2,7 +2,7 @@ package budget
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -37,14 +37,14 @@ func CheckAndAlert(status Status, cfg Config, signalDir string) *Alert {
 			"session %s: context budget warning — %.1f%% used (threshold: %.0f%% for %s role)",
 			status.SessionID, status.PercentageUsed, status.Threshold, status.Role,
 		)
-		log.Printf("WARNING: %s", alert.Message)
+		slog.Warn("budget warning", "session", status.SessionID, "pct_used", status.PercentageUsed)
 
 	case LevelCritical:
 		alert.Message = fmt.Sprintf(
 			"session %s: context budget CRITICAL — %.1f%% used (critical: %.0f%%)",
 			status.SessionID, status.PercentageUsed, cfg.CriticalPercent,
 		)
-		log.Printf("CRITICAL: %s", alert.Message)
+		slog.Error("budget critical", "session", status.SessionID, "pct_used", status.PercentageUsed)
 
 		if cfg.AutoCompactSignal && signalDir != "" {
 			writeCompactSignal(status.SessionID, signalDir)
@@ -58,7 +58,7 @@ func CheckAndAlert(status Status, cfg Config, signalDir string) *Alert {
 // The file is named "compact-{sessionID}" and contains the timestamp.
 func writeCompactSignal(sessionID string, signalDir string) {
 	if err := os.MkdirAll(signalDir, 0o700); err != nil {
-		log.Printf("budget: failed to create signal dir %s: %v", signalDir, err)
+		slog.Warn("budget: failed to create signal dir", "dir", signalDir, "error", err)
 		return
 	}
 
@@ -67,7 +67,7 @@ func writeCompactSignal(sessionID string, signalDir string) {
 		time.Now().Format(time.RFC3339))
 
 	if err := os.WriteFile(signalPath, []byte(content), 0o600); err != nil {
-		log.Printf("budget: failed to write compact signal %s: %v", signalPath, err)
+		slog.Warn("budget: failed to write compact signal", "path", signalPath, "error", err)
 	}
 }
 
