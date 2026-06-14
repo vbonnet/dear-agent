@@ -9,10 +9,12 @@ package fsguard
 // It is the integration point for AGM sessions (and the PreToolUse hooks): a
 // caller intercepting a tool invocation asks the Interceptor whether the write
 // is allowed and, if not, surfaces Decision.Message (which already carries the
-// escalation hint) to the agent.
+// escalation hint) to the agent. Decision.Enforcement tells the hook binary
+// which graduated response to emit (hard block / soft warn / ask / defer).
 type Interceptor struct {
-	guard *Guard
-	rec   Recorder
+	guard       *Guard
+	rec         Recorder
+	enforcement Enforcement
 }
 
 // Decision is the result of an interception check.
@@ -24,6 +26,12 @@ type Decision struct {
 	Message string
 	// Violation is the recorded violation when blocked; nil when allowed.
 	Violation *Violation
+	// Enforcement carries the policy enforcement level at the time of the check.
+	// For allowed writes it is always EnforceDeny (the zero value). For blocked
+	// writes it reflects the configured level so hook binaries can decide
+	// whether to hard-block (EnforceDeny), soft-warn (EnforceWarn), ask the
+	// user (EnforceAsk), or defer (EnforceDefer).
+	Enforcement Enforcement
 }
 
 // NewInterceptor builds an Interceptor from the environment-resolved Config
@@ -42,7 +50,7 @@ func NewInterceptor() (*Interceptor, error) {
 	if cfg.LogPath != "" {
 		rec = NewFileRecorder(cfg.LogPath)
 	}
-	return &Interceptor{guard: g, rec: rec}, err
+	return &Interceptor{guard: g, rec: rec, enforcement: cfg.Policy.Enforcement}, err
 }
 
 // NewInterceptorWith builds an Interceptor from an explicit Guard and Recorder.
@@ -51,7 +59,11 @@ func NewInterceptorWith(g *Guard, rec Recorder) *Interceptor {
 	if rec == nil {
 		rec = NopRecorder{}
 	}
-	return &Interceptor{guard: g, rec: rec}
+	enforcement := EnforceDeny
+	if g.policy != nil {
+		enforcement = g.policy.Enforcement
+	}
+	return &Interceptor{guard: g, rec: rec, enforcement: enforcement}
 }
 
 // CheckWrite classifies a file-tool write to path (anchored at cwd) for the
@@ -73,7 +85,12 @@ func (i *Interceptor) CheckWrite(tool, path, cwd string) Decision {
 		Reason:   msg,
 	}
 	_ = i.rec.Record(v)
-	return Decision{Allowed: false, Message: msg + Escalation, Violation: &v}
+	return Decision{
+		Allowed:     false,
+		Message:     msg + Escalation,
+		Violation:   &v,
+		Enforcement: i.enforcement,
+	}
 }
 
 // CheckCommand inspects a Bash command (anchored at cwd) for filesystem-mutating
@@ -91,5 +108,10 @@ func (i *Interceptor) CheckCommand(command, cwd string) Decision {
 		Reason:  msg,
 	}
 	_ = i.rec.Record(v)
-	return Decision{Allowed: false, Message: msg + Escalation, Violation: &v}
+	return Decision{
+		Allowed:     false,
+		Message:     msg + Escalation,
+		Violation:   &v,
+		Enforcement: i.enforcement,
+	}
 }
