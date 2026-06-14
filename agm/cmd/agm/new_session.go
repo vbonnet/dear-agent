@@ -274,9 +274,16 @@ func collectExtraAddDirs(sandboxInfo *manifest.SandboxConfig) ([]string, bool) {
 // for the new session's working directory.
 func configureProjectPermissions(workDir string) error {
 	debug.Phase("Configure Permissions")
+	// Auto-derive VROOM role profile: when --role names a known profile and
+	// --permission-profile was not explicitly set, use the role as the profile.
+	resolvedProfile := permissionProfile
+	if resolvedProfile == "" && roleName != "" && rbac.ValidRole(roleName) {
+		resolvedProfile = roleName
+		debug.Log("Auto-derived permission profile %q from --role flag", resolvedProfile)
+	}
 	allowList, err := rbac.ResolvePermissions(rbac.ResolveOptions{
 		Explicit:      permissionsAllow,
-		ProfileName:   permissionProfile,
+		ProfileName:   resolvedProfile,
 		InheritParent: inheritPermissions,
 	})
 	if err != nil {

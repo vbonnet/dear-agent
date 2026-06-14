@@ -42,7 +42,7 @@ func createAndRegisterManifest(sessionID, sessionName, workDir string, sandboxIn
 	_ = git.CommitManifest(manifestPath, "create", sessionName)
 
 	// Telemetry: agm.session.start span + active-task metric.
-	telemetry.SessionStarted(context.Background(), m.SessionID, m.Model, m.Harness, m.State)
+	telemetry.SessionStarted(context.Background(), m.SessionID, m.Model, m.Harness, m.State, roleName)
 	return nil
 }
 
