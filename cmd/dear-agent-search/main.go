@@ -28,8 +28,7 @@ import (
 	"syscall"
 	"time"
 
-	_ "modernc.org/sqlite"
-
+	"github.com/vbonnet/dear-agent/internal/sqlite"
 	"github.com/vbonnet/dear-agent/pkg/source"
 	sqliteadapter "github.com/vbonnet/dear-agent/pkg/source/sqlite"
 )
@@ -142,7 +141,7 @@ func run(args []string, stdout, stderr *os.File) int {
 // search CLI is read-mostly; busy_timeout still helps when concurrent
 // runs are appending sources rows in the background.
 func openDB(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(on)")
+	db, err := sqlite.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
