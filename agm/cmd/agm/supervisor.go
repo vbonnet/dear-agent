@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/internal/override"
 )
 
 // supervisorStateDir returns the per-supervisor state directory under
@@ -42,11 +44,11 @@ func heartbeatPath(id string) (string, error) {
 // heartbeatRecord is the JSON shape written by `agm supervisor heartbeat`
 // and consumed by `agm supervisor status` and the sentinel loop_monitor.
 type heartbeatRecord struct {
-	ID           string    `json:"id"`
-	PrimaryFor   string    `json:"primary_for,omitempty"`
-	TertiaryFor  string    `json:"tertiary_for,omitempty"`
-	LastBeatUTC  time.Time `json:"last_beat_utc"`
-	PID          int       `json:"pid,omitempty"`
+	ID          string    `json:"id"`
+	PrimaryFor  string    `json:"primary_for,omitempty"`
+	TertiaryFor string    `json:"tertiary_for,omitempty"`
+	LastBeatUTC time.Time `json:"last_beat_utc"`
+	PID         int       `json:"pid,omitempty"`
 }
 
 // supervisorCmd exposes the agm supervisor subcommand group. Supervisor
@@ -110,12 +112,13 @@ Examples:
 }
 
 var (
-	supervisorID             string
-	supervisorPrimaryFor     string
-	supervisorTertiaryFor    string
-	supervisorSkipOAuthCheck bool
-	supervisorClaudeBin      string
-	supervisorExtraArgs      []string
+	supervisorID              string
+	supervisorPrimaryFor      string
+	supervisorTertiaryFor     string
+	supervisorSkipOAuthCheck  bool
+	supervisorSkipOAuthReason string
+	supervisorClaudeBin       string
+	supervisorExtraArgs       []string
 )
 
 var supervisorHeartbeatCmd = &cobra.Command{
@@ -168,7 +171,9 @@ func init() {
 	supervisorRunCmd.Flags().StringVar(&supervisorTertiaryFor, "tertiary-for", "",
 		"peer this supervisor is tertiary backup for")
 	supervisorRunCmd.Flags().BoolVar(&supervisorSkipOAuthCheck, "skip-oauth-check", false,
-		"skip the CLAUDE_CODE_OAUTH_TOKEN requirement (development only)")
+		"skip the CLAUDE_CODE_OAUTH_TOKEN requirement (development only) — requires --reason")
+	supervisorRunCmd.Flags().StringVar(&supervisorSkipOAuthReason, "reason", "",
+		"justification for --skip-oauth-check, recorded in the override audit log")
 	supervisorRunCmd.Flags().StringVar(&supervisorClaudeBin, "claude-bin", "claude",
 		"path to the claude binary (must be on $PATH by default)")
 	supervisorRunCmd.Flags().StringSliceVar(&supervisorExtraArgs, "claude-arg", nil,
@@ -185,14 +190,29 @@ type supervisorEnv interface {
 
 type realSupervisorEnv struct{}
 
-func (realSupervisorEnv) Getenv(key string) string              { return os.Getenv(key) }
-func (realSupervisorEnv) LookPath(bin string) (string, error)   { return exec.LookPath(bin) }
+func (realSupervisorEnv) Getenv(key string) string            { return os.Getenv(key) }
+func (realSupervisorEnv) LookPath(bin string) (string, error) { return exec.LookPath(bin) }
 
 // errToSRefusal signals that the supervisor refuses to start due to the
 // API-key-present guard. Unwrapped as exit code 2.
 var errToSRefusal = errors.New("supervisor refused: ANTHROPIC_API_KEY is set; unset it or use an OAuth-only env")
 
 func runSupervisorRun(cmd *cobra.Command, _ []string) error {
+	// Skipping the OAuth-token requirement requires a recorded justification:
+	// the gate exists so a supervisor never launches without auth and silently
+	// fails downstream.
+	if supervisorSkipOAuthCheck {
+		if gerr := override.Require(context.Background(), override.Guard{
+			Tool: "agm supervisor run",
+			Flag: "--skip-oauth-check",
+			Gate: "CLAUDE_CODE_OAUTH_TOKEN presence requirement",
+			Risk: override.RiskP1,
+		}, supervisorSkipOAuthReason); gerr != nil {
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), gerr)
+			os.Exit(2)
+		}
+	}
+
 	env := realSupervisorEnv{}
 	if err := checkSupervisorEnv(env, supervisorSkipOAuthCheck); err != nil {
 		// Print to our stderr (so hooks see it) and exit with a stable code.

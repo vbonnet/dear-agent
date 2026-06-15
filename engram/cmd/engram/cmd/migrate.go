@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,12 +9,14 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/engram/cmd/engram/internal/cli"
+	"github.com/vbonnet/dear-agent/internal/override"
 )
 
 var (
 	migrateWorkspaceFlag string
 	migrateDryRun        bool
 	migrateForce         bool
+	migrateReason        string
 )
 
 var migrateCmd = &cobra.Command{
@@ -58,7 +61,8 @@ func init() {
 	rootCmd.AddCommand(migrateCmd)
 	migrateCmd.Flags().StringVar(&migrateWorkspaceFlag, "workspace", "", "Target workspace name")
 	migrateCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Show what would be done without making changes")
-	migrateCmd.Flags().BoolVar(&migrateForce, "force", false, "Force migration even if target exists")
+	migrateCmd.Flags().BoolVar(&migrateForce, "force", false, "Force migration even if target exists (requires --reason)")
+	migrateCmd.Flags().StringVar(&migrateReason, "reason", "", "Justification for --force, recorded in the override audit log")
 }
 
 //nolint:gocyclo // reason: linear CLI driver dispatching across multiple migration commands
@@ -140,9 +144,17 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 	// Step 4: Check if target already exists
 	if _, err := os.Stat(targetPath); err == nil {
 		if !migrateForce {
-			return fmt.Errorf("target path already exists: %s\nUse --force to overwrite or choose a different workspace", targetPath)
+			return fmt.Errorf("target path already exists: %s\nUse --force --reason \"...\" to overwrite, or choose a different workspace", targetPath)
 		}
-		cli.PrintWarning(fmt.Sprintf("Target exists, will merge (--force enabled): %s", targetPath))
+		if gerr := override.Require(context.Background(), override.Guard{
+			Tool: "engram migrate",
+			Flag: "--force",
+			Gate: fmt.Sprintf("overwrite/merge of an existing target workspace at %s", targetPath),
+			Risk: override.RiskP1,
+		}, migrateReason); gerr != nil {
+			return gerr
+		}
+		cli.PrintWarning(fmt.Sprintf("Target exists, will merge (--force enabled, reason recorded): %s", targetPath))
 	}
 
 	// Step 5: Confirm with user
