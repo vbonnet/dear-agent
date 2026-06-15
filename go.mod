@@ -25,12 +25,13 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/hashicorp/go-retryablehttp v0.7.8
+	github.com/hashicorp/go-version v1.9.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/leanovate/gopter v0.2.11
 	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/olekukonko/tablewriter v1.1.4
-	github.com/onsi/ginkgo/v2 v2.29.0
+	github.com/onsi/ginkgo/v2 v2.31.0
 	github.com/onsi/gomega v1.41.0
 	github.com/pact-foundation/pact-go/v2 v2.5.1
 	github.com/pelletier/go-toml/v2 v2.3.1
@@ -125,7 +126,6 @@ require (
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
 	github.com/hashicorp/go-memdb v1.3.4 // indirect
-	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/hashicorp/golang-lru v0.6.0 // indirect
 	github.com/hashicorp/logutils v1.0.0 // indirect
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
