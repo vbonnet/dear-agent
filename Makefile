@@ -37,12 +37,15 @@
 #   install-bead-pr-guard   Install bead-pr-guard to ~/go/bin
 #   build-bead-close-guard  Build the DoD enforcement gate for bead closure (cmd/bead-close-guard)
 #   install-bead-close-guard Install bead-close-guard to ~/go/bin
+#   build-drift-check       Build the deployment-drift detector (cmd/drift-check)
+#   install-drift-check     Install drift-check to ~/go/bin
+#   drift-check             Run the drift check against the built-in deploy targets
 #   build-babysit-prs       Build babysit-prs: serial PR updater + merger
 #   install-babysit-prs     Install babysit-prs to ~/go/bin
 #   build-pr-linkify        Build pr-linkify: PR reference linkifier (cmd/pr-linkify)
 #   install-pr-linkify      Install pr-linkify to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-drift-check install-drift-check drift-check build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -310,6 +313,25 @@ build-bead-close-guard:
 install-bead-close-guard: build-bead-close-guard
 	cp bin/bead-close-guard $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/bead-close-guard"
+
+# Detects deployment drift: deployed artifacts (Claude Code hooks, launchd
+# plists, chezmoi files) whose source of truth in main no longer matches the
+# copy on the host — a fix merged to git but never redeployed (PR #456). Cheap
+# hash compare, no builds. See docs/drift-detection-plan.md.
+build-drift-check:
+	@echo "Building drift-check..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/drift-check ./cmd/drift-check/
+	@echo "Built: bin/drift-check"
+
+install-drift-check: build-drift-check
+	cp bin/drift-check $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/drift-check"
+
+# Run the drift check against the built-in deploy targets. Exit 2 signals
+# drift; make surfaces that as an error, which is the intended CI behaviour.
+drift-check: build-drift-check
+	./bin/drift-check
 
 # Build babysit-prs: the serial PR updater + merger that works around the
 # "every merge makes remaining PRs BEHIND" problem from requiresLinearHistory=true.
