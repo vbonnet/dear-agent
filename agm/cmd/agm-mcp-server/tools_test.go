@@ -337,6 +337,98 @@ func TestAddListOpsTool_EndToEnd(t *testing.T) {
 	}
 }
 
+// --- agm_create_session / agm_send_message input validation tests ---
+// These exercise the MCP handler layer — input validation runs before
+// Dolt or tmux are touched, so no external dependencies needed.
+
+// newTestMCPClient registers the given tools on a fresh in-memory MCP
+// server+client pair and returns the connected client session. The caller
+// must defer the returned cleanup function.
+func newTestMCPClient(t *testing.T, registerFn func(*mcp.Server, *Config)) *mcp.ClientSession {
+	t.Helper()
+	ctx := context.Background()
+	server := mcp.NewServer(&mcp.Implementation{Name: "agm-test", Version: "test"}, nil)
+	registerFn(server, &Config{})
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "test"}, nil)
+
+	st, ct := mcp.NewInMemoryTransports()
+	srvSession, err := server.Connect(ctx, st, nil)
+	if err != nil {
+		t.Fatalf("server.Connect: %v", err)
+	}
+	t.Cleanup(func() { srvSession.Close() })
+	cliSession, err := client.Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatalf("client.Connect: %v", err)
+	}
+	t.Cleanup(func() { cliSession.Close() })
+	return cliSession
+}
+
+// callToolExpectError calls a tool and asserts the result is an error.
+func callToolExpectError(t *testing.T, cli *mcp.ClientSession, name string, args map[string]any) *mcp.CallToolResult {
+	t.Helper()
+	res, err := cli.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		t.Fatalf("CallTool(%s): %v", name, err)
+	}
+	if !res.IsError {
+		t.Fatalf("CallTool(%s) expected error", name)
+	}
+	return res
+}
+
+func TestCreateSessionTool_RejectsEmptyCwd(t *testing.T) {
+	cli := newTestMCPClient(t, func(s *mcp.Server, c *Config) { addCreateSessionTool(s, c) })
+	res := callToolExpectError(t, cli, "agm_create_session", map[string]any{"prompt": "hello"})
+	text, _ := res.Content[0].(*mcp.TextContent)
+	if !strings.Contains(text.Text, "cwd") {
+		t.Errorf("error should mention 'cwd', got: %s", text.Text)
+	}
+}
+
+func TestCreateSessionTool_RejectsEmptyPrompt(t *testing.T) {
+	cli := newTestMCPClient(t, func(s *mcp.Server, c *Config) { addCreateSessionTool(s, c) })
+	callToolExpectError(t, cli, "agm_create_session", map[string]any{"cwd": "/tmp"})
+}
+
+func TestSendMessageTool_RejectsEmptySessionID(t *testing.T) {
+	cli := newTestMCPClient(t, func(s *mcp.Server, c *Config) { addSendMessageTool(s, c) })
+	res := callToolExpectError(t, cli, "agm_send_message", map[string]any{"message": "hello"})
+	text, _ := res.Content[0].(*mcp.TextContent)
+	if !strings.Contains(text.Text, "session_id") {
+		t.Errorf("error should mention 'session_id', got: %s", text.Text)
+	}
+}
+
+func TestSendMessageTool_RejectsEmptyMessage(t *testing.T) {
+	cli := newTestMCPClient(t, func(s *mcp.Server, c *Config) { addSendMessageTool(s, c) })
+	callToolExpectError(t, cli, "agm_send_message", map[string]any{"session_id": "some-id"})
+}
+
+func TestLifecycleTools_RegisterUnderCorrectNames(t *testing.T) {
+	cli := newTestMCPClient(t, func(s *mcp.Server, c *Config) {
+		addCreateSessionTool(s, c)
+		addSendMessageTool(s, c)
+	})
+
+	tools, err := cli.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+
+	names := make(map[string]bool)
+	for _, tool := range tools.Tools {
+		names[tool.Name] = true
+	}
+	if !names["agm_create_session"] {
+		t.Error("agm_create_session not registered")
+	}
+	if !names["agm_send_message"] {
+		t.Error("agm_send_message not registered")
+	}
+}
+
 func TestForwardToEngramMCP_PropagatesTraceparent(t *testing.T) {
 	// When the caller's ctx carries a span, the outbound JSON-RPC
 	// envelope must include `_meta.traceparent` so Engram can stitch
