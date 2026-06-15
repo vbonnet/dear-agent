@@ -32,6 +32,7 @@ ACTIVE_REPOS=(
 )
 
 ARCHIVED_REPOS=(
+  engram
   ai-tools
   comp-520-peephole-compiler
   comp-520
@@ -56,10 +57,10 @@ imp() {
     #   - "could not find a branch protection rule with the pattern '<branch>'"
     #                            : repo has no branch protection yet (most repos
     #                            here are pre-rulesets, so this is the common case)
-    if [[ "$err" =~ "not found" \
-       || "$err" =~ "404" \
-       || "$err" =~ "associated" \
-       || "$err" =~ "could not find a branch protection rule" ]]; then
+    if [[ "$err" == *"not found"* ||
+          "$err" == *"404"* ||
+          "$err" == *"associated"* ||
+          "$err" == *"could not find a branch protection rule"* ]]; then
       echo "not imported (will be CREATED by plan): $addr"
     else
       echo "Error: Failed to import $addr" >&2

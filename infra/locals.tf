@@ -12,9 +12,12 @@ locals {
         "Build & Test (macos-latest)",
       ]
     }
-    # NOTE: "engram" is intentionally absent — it is an ARCHIVED repo. GitHub
-    # rejects ruleset/branch-protection mutations on archived repos, so it
-    # cannot take a ruleset and would 4xx on apply.
+    # NOTE: "engram" is intentionally NOT here — it is an ARCHIVED repo and
+    # cannot take a ruleset (GitHub rejects mutations on archived repos). It is
+    # declared under archived_repos below (frozen, ignore_changes = all) rather
+    # than removed entirely: removing a previously-managed repo would make a
+    # full `tofu apply` propose DESTROYING github_repository.active["engram"],
+    # which deletes the repo on GitHub. archived_repos keeps it safely managed.
     "brain-v2" = {
       visibility      = "private"
       default_branch  = "main"
@@ -85,6 +88,7 @@ locals {
   # Archived repositories: GitHub rejects mutations on archived repos, so
   # these are declared minimally with all changes ignored.
   archived_repos = {
+    "engram"                     = { visibility = "private" }
     "ai-tools"                   = { visibility = "private" }
     "comp-520-peephole-compiler" = { visibility = "private" }
     "comp-520"                   = { visibility = "private" }
