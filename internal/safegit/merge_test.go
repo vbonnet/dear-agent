@@ -355,6 +355,64 @@ func TestAuditEntry_MultipleEntries(t *testing.T) {
 	}
 }
 
+// --- BuildMergeArgs (TOCTOU anchor) ---
+
+func TestBuildMergeArgs_ContainsMatchHeadCommit(t *testing.T) {
+	args := BuildMergeArgs(42, "owner/repo", "abc123def456")
+
+	foundFlag := false
+	foundSHA := false
+	for i, a := range args {
+		if a == "--match-head-commit" {
+			foundFlag = true
+			if i+1 < len(args) && args[i+1] == "abc123def456" {
+				foundSHA = true
+			}
+		}
+	}
+	if !foundFlag {
+		t.Fatal("BuildMergeArgs must include --match-head-commit to prevent TOCTOU " +
+			"(PR #460 regression); got: " + fmt.Sprint(args))
+	}
+	if !foundSHA {
+		t.Fatal("--match-head-commit must be followed by the head SHA; got: " + fmt.Sprint(args))
+	}
+}
+
+func TestBuildMergeArgs_PanicsOnEmptySHA(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("BuildMergeArgs must panic on empty headSHA — an empty anchor " +
+				"would silently defeat the TOCTOU protection")
+		}
+	}()
+	BuildMergeArgs(1, "o/r", "")
+}
+
+func TestBuildMergeArgs_RequiredFlags(t *testing.T) {
+	args := BuildMergeArgs(99, "vbonnet/dear-agent", "deadbeef")
+
+	required := map[string]bool{
+		"gh":                  false,
+		"pr":                  false,
+		"merge":               false,
+		"--squash":            false,
+		"--delete-branch":     false,
+		"--match-head-commit": false,
+	}
+	for _, a := range args {
+		if _, ok := required[a]; ok {
+			required[a] = true
+		}
+	}
+	for flag, found := range required {
+		if !found {
+			t.Errorf("BuildMergeArgs missing required element %q", flag)
+		}
+	}
+}
+
 // --- helpers ---
 
 func marshalJSON(v any) []byte {
