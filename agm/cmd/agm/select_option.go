@@ -10,11 +10,13 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/safety"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/override"
 )
 
 var (
 	selectOptionPrompt string
 	selectOptionForce  bool
+	selectOptionReason string
 )
 
 var selectOptionCmd = &cobra.Command{
@@ -71,7 +73,13 @@ func init() {
 		&selectOptionForce,
 		"force",
 		false,
-		"Bypass safety guards (human typing/attached detection)",
+		"Bypass safety guards (human typing/attached detection) — requires --reason",
+	)
+	selectOptionCmd.Flags().StringVar(
+		&selectOptionReason,
+		"reason",
+		"",
+		"Justification for --force, recorded in the override audit log",
 	)
 
 	sendGroupCmd.AddCommand(selectOptionCmd)
@@ -84,8 +92,8 @@ func runSelectOption(cmd *cobra.Command, args []string) (retErr error) {
 	// Audit trail: log enriched event on exit (captures both success and failure)
 	defer func() {
 		auditArgs := map[string]string{
-			"option":  optionNumber,
-			"force":   fmt.Sprintf("%v", selectOptionForce),
+			"option": optionNumber,
+			"force":  fmt.Sprintf("%v", selectOptionForce),
 		}
 		if selectOptionPrompt != "" {
 			auditArgs["has_prompt"] = "true"
@@ -107,14 +115,25 @@ func runSelectOption(cmd *cobra.Command, args []string) (retErr error) {
 		return fmt.Errorf("session '%s' does not exist", sessionName)
 	}
 
-	// Safety guard check (unless --force is set)
-	if !selectOptionForce {
+	// Safety guard check (unless --force is set). The --force bypass itself
+	// requires a recorded justification — selecting an option while a human is
+	// typing or attached can clobber their input.
+	if selectOptionForce {
+		if gerr := override.Require(cmd.Context(), override.Guard{
+			Tool: "agm send-select-option",
+			Flag: "--force",
+			Gate: "safety guard (human-typing / session-attached detection)",
+			Risk: override.RiskP0,
+		}, selectOptionReason); gerr != nil {
+			return gerr
+		}
+	} else {
 		guardResult := safety.Check(sessionName, safety.GuardOptions{
 			SkipUninitialized: true, // select-option only makes sense on initialized sessions
 			SkipMidResponse:   true, // selecting options is for prompt UIs
 		})
 		if !guardResult.Safe {
-			return fmt.Errorf("safety guard blocked select-option on session '%s':\n\n%sTo bypass: agm send select-option %s %s --force",
+			return fmt.Errorf("safety guard blocked select-option on session '%s':\n\n%sTo bypass: agm send select-option %s %s --force --reason \"...\"",
 				sessionName, guardResult.Error(), sessionName, optionNumber)
 		}
 	}
