@@ -81,6 +81,11 @@ func (p *Pusher) TriggerPush() error {
 		return p.doPush()
 	case PushAsync:
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("vcs: async push goroutine panic", "panic", r)
+				}
+			}()
 			if err := p.doPushWithRetry(3); err != nil {
 				slog.Warn("vcs: async push failed", "error", err)
 			}

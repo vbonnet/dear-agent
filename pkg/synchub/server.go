@@ -170,6 +170,12 @@ func (s *Server) Start(ctx context.Context) error {
 		MaxHeaderBytes:    16 << 10,
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "synchub: server goroutine panic: %v\n", r)
+				close(s.closed)
+			}
+		}()
 		_ = s.srv.Serve(ln)
 		close(s.closed)
 	}()

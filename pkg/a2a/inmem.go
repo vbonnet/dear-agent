@@ -2,6 +2,7 @@ package a2a
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 )
@@ -85,6 +86,11 @@ func (b *inmemBus) Subscribe(ctx context.Context, topic string) (<-chan Message,
 	b.mu.Unlock()
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("a2a: subscriber cleanup goroutine panic", "topic", topic, "panic", r)
+			}
+		}()
 		<-ctx.Done()
 		b.mu.Lock()
 		defer b.mu.Unlock()
