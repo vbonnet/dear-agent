@@ -90,7 +90,7 @@ Flags:
   --pr <number>       pull request number to merge (required)
   --repo owner/repo   GitHub repo (default: GITHUB_REPOSITORY env var)
   --watch             poll until all gates pass (default: one-shot)
-  --watch-timeout     how long to wait in watch mode (default: 45m)
+  --watch-timeout <dur>  how long to wait in watch mode (default: 45m)
   --dry-run           check gates only; do not execute merge
   -h, --help          show this help
 

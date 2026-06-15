@@ -137,8 +137,6 @@ func attemptMerge(cfg MergeConfig) error {
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ no unresolved review threads")
 
 	// Gate 3: minimum soak time + bot review.
-	// Log the bypass only after soak passes to avoid flooding the audit log
-	// on every watch-mode polling iteration before soak time has elapsed.
 	if err := checkSoak(cfg.PRNumber, cfg.Repo, now); err != nil {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "soak: "+err.Error())
 		return fmt.Errorf("soak gate: %w", err)
