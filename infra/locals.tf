@@ -4,20 +4,17 @@ locals {
   # Derive from: gh api /repos/vbonnet/<repo>/commits/main/check-runs | jq '.[].name'
   active_repos = {
     "dear-agent" = {
-      visibility      = "public"
-      default_branch  = "main"
+      visibility     = "public"
+      default_branch = "main"
       # ci.yml matrix: 2 jobs, both must pass.
       required_checks = [
         "Build & Test (ubuntu-latest)",
         "Build & Test (macos-latest)",
       ]
     }
-    "engram" = {
-      visibility      = "private"
-      default_branch  = "main"
-      # core.yml matrix: require the Linux leg as the canonical gate.
-      required_checks = ["build-and-test (ubuntu-latest)"]
-    }
+    # NOTE: "engram" is intentionally absent — it is an ARCHIVED repo. GitHub
+    # rejects ruleset/branch-protection mutations on archived repos, so it
+    # cannot take a ruleset and would 4xx on apply.
     "brain-v2" = {
       visibility      = "private"
       default_branch  = "main"
@@ -81,16 +78,9 @@ locals {
     }
   }
 
-  # Repos with merge queue enabled. Start with dear-agent; expand by adding
-  # entries here. The merge queue replaces manual "merge when ready" with a
-  # serialized queue that tests PRs in groups before merging.
-  merge_queue_repos = {
-    "dear-agent" = {
-      min_group_size        = 1
-      max_group_size        = 5
-      check_timeout_minutes = 30
-    }
-  }
+  # Merge-queue inputs removed: merge queues require an ORGANIZATION account
+  # and are unavailable on a personal account (see rulesets.tf). Reintroduce a
+  # merge_queue_repos local here if these repos ever move under an org.
 
   # Archived repositories: GitHub rejects mutations on archived repos, so
   # these are declared minimally with all changes ignored.
