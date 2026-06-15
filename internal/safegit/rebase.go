@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -263,7 +264,15 @@ func appendRebaseAudit(branch, baseBranch, event, detail string, conflicts []str
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	// Closing a writable handle can surface deferred write errors (flush
+	// failures, full disk). The audit log is non-fatal — never block a
+	// rebase on it — but a dropped close error means a silently corrupt log,
+	// so log it via slog rather than discarding it.
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			slog.Warn("safe-rebase: failed to close audit log", "error", cerr)
+		}
+	}()
 	entry := RebaseAuditEntry{
 		Timestamp:  time.Now().UTC().Format(time.RFC3339),
 		Branch:     branch,
@@ -273,5 +282,7 @@ func appendRebaseAudit(branch, baseBranch, event, detail string, conflicts []str
 		Conflicts:  conflicts,
 	}
 	b, _ := json.Marshal(entry)
-	_, _ = fmt.Fprintln(f, string(b))
+	if _, werr := fmt.Fprintln(f, string(b)); werr != nil {
+		slog.Warn("safe-rebase: failed to write audit log entry", "error", werr)
+	}
 }

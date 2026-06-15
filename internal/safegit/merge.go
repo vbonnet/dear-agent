@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -202,7 +203,15 @@ func appendAuditEntry(repo string, prNum int, event, detail string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	// Closing a writable handle can surface deferred write errors (flush
+	// failures, full disk). The audit log is non-fatal — never block a
+	// merge on it — but a dropped close error means a silently corrupt log,
+	// so log it via slog rather than discarding it.
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			slog.Warn("safe-merge: failed to close audit log", "error", cerr)
+		}
+	}()
 
 	entry := AuditEntry{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -212,7 +221,9 @@ func appendAuditEntry(repo string, prNum int, event, detail string) {
 		Detail:    detail,
 	}
 	b, _ := json.Marshal(entry)
-	_, _ = fmt.Fprintln(f, string(b))
+	if _, werr := fmt.Fprintln(f, string(b)); werr != nil {
+		slog.Warn("safe-merge: failed to write audit log entry", "error", werr)
+	}
 }
 
 // auditLogDir returns the directory for the safe-merge audit log.

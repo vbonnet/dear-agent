@@ -279,7 +279,7 @@ type AuditRecord struct {
 // the directory on first use. Audit failures are returned, not fatal — the
 // caller decides whether a PR should fail because the log could not be
 // written (it should not).
-func AppendAudit(home string, rec AuditRecord) error {
+func AppendAudit(home string, rec AuditRecord) (err error) {
 	if home == "" {
 		home = "/tmp"
 	}
@@ -291,11 +291,20 @@ func AppendAudit(home string, rec AuditRecord) error {
 	if err != nil {
 		return fmt.Errorf("cannot open audit log: %w", err)
 	}
-	defer f.Close()
+	// Closing a writable handle can surface deferred write errors (flush
+	// failures, full disk). Capture the close error, but never let it mask
+	// an earlier write error.
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("cannot close audit log: %w", cerr)
+		}
+	}()
 	line, err := json.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("cannot marshal audit record: %w", err)
 	}
-	_, err = f.Write(append(line, '\n'))
-	return err
+	if _, err = f.Write(append(line, '\n')); err != nil {
+		return err
+	}
+	return nil
 }
