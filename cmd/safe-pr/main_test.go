@@ -16,13 +16,8 @@ func TestRun_Errors(t *testing.T) {
 		wantErr string
 	}{
 		{"wayfinder missing value", []string{"create", "--wayfinder"}, "--wayfinder requires"},
-		{"reason missing value", []string{"create", "--reason"}, "--reason requires"},
 		{"bad timeout", []string{"create", "--timeout", "soon"}, "invalid --timeout"},
-		{"no session no emergency", []string{"create", "--title", "t"}, "no wayfinder session"},
-		{"emergency without reason", []string{"create", "--emergency", "--title", "t"}, "--reason"},
-		{"unsupported verb", []string{"merge", "--emergency", "--reason", "x"}, "only supports"},
-		{"web refused", []string{"create", "--emergency", "--reason", "x", "--title", "t", "--web"},
-			"browser"},
+		{"no session", []string{"create", "--title", "t"}, "no wayfinder session"},
 		{"session dir unreadable", []string{"create", "--wayfinder", "/nonexistent-wf-dir",
 			"--title", "t"}, "cannot read"},
 	}

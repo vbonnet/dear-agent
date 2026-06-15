@@ -7,7 +7,6 @@
 //
 //	safe-pr create --wayfinder <project-dir> --title "..." --body "..." [gh flags...]
 //	safe-pr close  --wayfinder <project-dir> <number|url> [gh flags...]
-//	safe-pr create --emergency --reason "<why>" --title "..." [gh flags...]
 //
 // The wayfinder project dir (or WAYFINDER_PROJECT_DIR) must contain a
 // WAYFINDER-STATUS.md with status: in_progress; its session_id is stamped
@@ -70,14 +69,6 @@ func parseArgs(argv []string) (*parsedArgs, error) {
 			}
 			p.wayfinderDir = argv[i+1]
 			i++
-		case "--emergency":
-			p.req.Emergency = true
-		case "--reason":
-			if i+1 >= len(argv) {
-				return nil, fmt.Errorf("--reason requires a text argument")
-			}
-			p.req.Reason = argv[i+1]
-			i++
 		case "--timeout":
 			if i+1 >= len(argv) {
 				return nil, fmt.Errorf("--timeout requires a duration argument (e.g. 60s)")
@@ -104,17 +95,15 @@ func run(argv []string) error {
 		return nil
 	}
 
-	if !p.req.Emergency {
-		dir, err := safepr.ResolveSessionDir(p.wayfinderDir)
-		if err != nil {
-			return err
-		}
-		s, err := safepr.LoadSession(dir)
-		if err != nil {
-			return err
-		}
-		p.req.Session = &s
+	dir, err := safepr.ResolveSessionDir(p.wayfinderDir)
+	if err != nil {
+		return err
 	}
+	s, err := safepr.LoadSession(dir)
+	if err != nil {
+		return err
+	}
+	p.req.Session = &s
 	if err := p.req.Validate(); err != nil {
 		return err
 	}
@@ -171,7 +160,6 @@ func execGh(req *safepr.Request, timeout time.Duration) error {
 	}
 	span.SetAttributes(
 		attribute.String("wayfinder.session_id", sessionID),
-		attribute.Bool("pr.emergency", req.Emergency),
 		attribute.String("pr.url", prURL),
 		attribute.Int("pr.exit_code", exitCode),
 	)
@@ -181,8 +169,8 @@ func execGh(req *safepr.Request, timeout time.Duration) error {
 	home, _ := os.UserHomeDir()
 	rec := safepr.AuditRecord{
 		Time: time.Now().UTC().Format(time.RFC3339), Verb: req.Verb, Dir: cwd,
-		Args: args, SessionID: sessionID, Emergency: req.Emergency,
-		Reason: req.Reason, PRURL: prURL, ExitCode: exitCode, Error: errText,
+		Args: args, SessionID: sessionID,
+		PRURL: prURL, ExitCode: exitCode, Error: errText,
 	}
 	if auditErr := safepr.AppendAudit(home, rec); auditErr != nil {
 		// The PR action already happened; a failed audit write must not fail
@@ -214,8 +202,6 @@ Usage:
 Flags:
   --wayfinder <dir>   wayfinder project dir holding WAYFINDER-STATUS.md
                       (default: $WAYFINDER_PROJECT_DIR); session must be in_progress
-  --emergency         skip the session requirement (audited; requires --reason)
-  --reason <text>     why no wayfinder session exists; stamped on the PR
   --timeout <dur>     kill gh after this long (default 60s)
   -h, --help          show this help
 
@@ -224,4 +210,7 @@ The session trace is stamped into the PR body (create) or comment (close).
 Refused for create: --web, --fill*, --body-file/-F, --editor (interactive or
 unstampable); --title is required. Every run appends a JSONL audit record to
 ~/.local/state/dear-agent/safe-pr.log.
+
+If no wayfinder session exists and no approved path is available, escalate:
+  agm escalate --action "create PR" --reason "<why no session exists>"
 `

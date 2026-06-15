@@ -41,11 +41,6 @@ type MergeConfig struct {
 	WatchTimeout  time.Duration // zero → DefaultWatchTimeout
 	WatchInterval time.Duration // poll interval in watch mode; zero → 30s
 
-	// SkipBotReview bypasses the Gemini review-bot gate when the bot has
-	// not yet posted (e.g. quota exhaustion). Requires SkipBotReviewReason.
-	// The bypass reason is recorded in the audit log.
-	SkipBotReview       bool
-	SkipBotReviewReason string
 }
 
 // AuditEntry is written to the JSONL audit log on each merge attempt.
@@ -72,10 +67,6 @@ func SafeMerge(cfg MergeConfig) error {
 	if !strings.Contains(cfg.Repo, "/") {
 		return fmt.Errorf("--repo must be in owner/repo format, got %q", cfg.Repo)
 	}
-	if cfg.SkipBotReview && strings.TrimSpace(cfg.SkipBotReviewReason) == "" {
-		return fmt.Errorf("--skip-bot-review requires --skip-bot-review-reason")
-	}
-
 	if cfg.Watch {
 		return watchMerge(cfg)
 	}
@@ -148,13 +139,9 @@ func attemptMerge(cfg MergeConfig) error {
 	// Gate 3: minimum soak time + bot review.
 	// Log the bypass only after soak passes to avoid flooding the audit log
 	// on every watch-mode polling iteration before soak time has elapsed.
-	if err := checkSoak(cfg.PRNumber, cfg.Repo, now, cfg.SkipBotReview); err != nil {
+	if err := checkSoak(cfg.PRNumber, cfg.Repo, now); err != nil {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "soak: "+err.Error())
 		return fmt.Errorf("soak gate: %w", err)
-	}
-	if cfg.SkipBotReview {
-		appendAuditEntry(cfg.Repo, cfg.PRNumber, "bot_review_bypassed", cfg.SkipBotReviewReason)
-		fmt.Fprintf(os.Stderr, "safe-merge: ⚠ bot-review gate bypassed — reason: %s\n", cfg.SkipBotReviewReason)
 	}
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ soak time and bot review OK")
 
@@ -484,7 +471,7 @@ type prViewResult struct {
 	} `json:"reviews"`
 }
 
-func checkSoak(prNum int, repo string, now time.Time, skipBotReview bool) error {
+func checkSoak(prNum int, repo string, now time.Time) error {
 	out, err := runCommand(exec.Command("gh", "pr", "view",
 		fmt.Sprintf("%d", prNum),
 		"--repo", repo,
@@ -493,12 +480,12 @@ func checkSoak(prNum int, repo string, now time.Time, skipBotReview bool) error 
 	if err != nil {
 		return fmt.Errorf("gh pr view failed: %w", err)
 	}
-	return parseSoak(out, now, skipBotReview)
+	return parseSoak(out, now)
 }
 
 // parseSoak checks the soak constraints from the gh pr view JSON output.
-// Exported for testing. skipBotReview bypasses the Gemini review-bot check.
-func parseSoak(data []byte, now time.Time, skipBotReview bool) error {
+// Exported for testing.
+func parseSoak(data []byte, now time.Time) error {
 	var pr prViewResult
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return fmt.Errorf("parsing pr view: %w", err)
@@ -519,10 +506,6 @@ func parseSoak(data []byte, now time.Time, skipBotReview bool) error {
 			return fmt.Errorf("head commit is only %s old (need ≥%s); retry in %s",
 				age.Round(time.Second), MinSoak, remaining.Round(time.Second))
 		}
-	}
-
-	if skipBotReview {
-		return nil
 	}
 
 	// Check review bot posted.
