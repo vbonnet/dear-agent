@@ -80,18 +80,34 @@ func (g *GitIntegrator) CommitPhaseStart(phase string) error {
 		"WAYFINDER-HISTORY.md",
 	}
 
+	// Track which files were successfully staged so we can scope the commit to
+	// exactly those files. Using `git commit -- <files>` prevents accidentally
+	// sweeping up any other staged changes the user may have queued separately.
+	var staged []string
 	for _, file := range markerFiles {
 		filePath := filepath.Join(g.projectDir, file)
 		if _, err := os.Stat(filePath); err == nil {
 			if err := g.gitAdd(file); err != nil {
 				return fmt.Errorf("failed to add %s: %w", file, err)
 			}
+			staged = append(staged, file)
 		}
 	}
 
+	if len(staged) == 0 {
+		return nil
+	}
+
 	commitMsg := fmt.Sprintf("wayfinder: start %s\n\nWayfinder-Phase: %s\nWayfinder-Event: started", phase, phase)
-	if err := g.gitCommit(commitMsg); err != nil {
-		return fmt.Errorf("failed to create commit: %w", err)
+	args := append([]string{"commit", "-m", commitMsg, "--"}, staged...)
+	cmd := exec.Command("git", args...) //nolint:gosec // G204: args are internally constructed; staged entries are filenames from a known allowlist
+	cmd.Dir = g.projectDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(output), "nothing to commit") {
+			return nil
+		}
+		return fmt.Errorf("git commit failed: %w (output: %s)", err, string(output))
 	}
 
 	return nil
