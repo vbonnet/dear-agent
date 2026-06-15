@@ -100,7 +100,7 @@ func (g *GitIntegrator) CommitPhaseStart(phase string) error {
 
 	commitMsg := fmt.Sprintf("wayfinder: start %s\n\nWayfinder-Phase: %s\nWayfinder-Event: started", phase, phase)
 	args := append([]string{"commit", "-m", commitMsg, "--"}, staged...)
-	cmd := exec.Command("git", args...) //nolint:gosec // G204: args are internally constructed; staged entries are filenames from a known allowlist
+	cmd := exec.Command("git", args...)
 	cmd.Dir = g.projectDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
