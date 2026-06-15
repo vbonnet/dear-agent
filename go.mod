@@ -31,7 +31,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/olekukonko/tablewriter v1.1.4
-	github.com/onsi/ginkgo/v2 v2.29.0
+	github.com/onsi/ginkgo/v2 v2.31.0
 	github.com/onsi/gomega v1.41.0
 	github.com/pact-foundation/pact-go/v2 v2.5.1
 	github.com/pelletier/go-toml/v2 v2.3.1
