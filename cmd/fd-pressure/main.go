@@ -35,9 +35,13 @@ import (
 )
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout); err != nil {
+	code, err := run(os.Args[1:], os.Stdout)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "fd-pressure:", err)
 		os.Exit(2)
+	}
+	if code != 0 {
+		os.Exit(code)
 	}
 }
 
@@ -48,7 +52,7 @@ type config struct {
 	thresholdGopls  int
 }
 
-func run(args []string, out *os.File) error {
+func run(args []string, out *os.File) (int, error) {
 	fs := flag.NewFlagSet("fd-pressure", flag.ContinueOnError)
 	fs.SetOutput(out)
 	cfg := config{}
@@ -60,29 +64,31 @@ func run(args []string, out *os.File) error {
 	fs.IntVar(&cfg.thresholdGopls, "threshold-gopls", supervisor.DefaultEscalationThreshold.GoplsProcesses,
 		"gopls process count threshold for non-zero exit")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return 2, err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
 	probe := supervisor.NewSysResourceProbe()
 	snap, err := probe.Snapshot(ctx)
+	cancel() // explicit cancel; don't defer so os.Exit below doesn't suppress it
 	if err != nil {
-		return fmt.Errorf("snapshot: %w", err)
+		return 2, fmt.Errorf("snapshot: %w", err)
 	}
 
 	breached := evaluate(snap, cfg)
 
 	if cfg.jsonOutput {
-		return emitJSON(out, snap, breached)
+		if err := emitJSON(out, snap, breached); err != nil {
+			return 2, err
+		}
+	} else {
+		emitTable(out, snap, breached, cfg)
 	}
-	emitTable(out, snap, breached, cfg)
 
 	if len(breached) > 0 {
-		os.Exit(1)
+		return 1, nil
 	}
-	return nil
+	return 0, nil
 }
 
 type breach struct {

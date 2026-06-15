@@ -100,15 +100,15 @@ func sysFDUsedFraction() float64 {
 		return 0
 	}
 	// Both are signed int32 in the kernel; positive values fit safely in uint32.
-	num := int32(*(*uint32)(unsafe.Pointer(&numRaw[0]))) //nolint:gosec // signed kernel int, always positive
-	max := int32(*(*uint32)(unsafe.Pointer(&maxRaw[0]))) //nolint:gosec // signed kernel int, always positive
-	if max <= 0 || num < 0 {
+	numFiles := int32(*(*uint32)(unsafe.Pointer(&numRaw[0]))) //nolint:gosec // signed kernel int, always positive
+	maxFiles := int32(*(*uint32)(unsafe.Pointer(&maxRaw[0]))) //nolint:gosec // signed kernel int, always positive
+	if maxFiles <= 0 || numFiles < 0 {
 		return 0
 	}
-	if num >= max {
+	if numFiles >= maxFiles {
 		return 1
 	}
-	return float64(num) / float64(max)
+	return float64(numFiles) / float64(maxFiles)
 }
 
 // sysVnodeUsedFraction returns the fraction of the kernel vnode table
@@ -127,15 +127,15 @@ func sysVnodeUsedFraction() float64 {
 	if err != nil || len(maxRaw) < 4 {
 		return 0
 	}
-	num := int32(*(*uint32)(unsafe.Pointer(&numRaw[0]))) //nolint:gosec // signed kernel int, always positive
-	max := int32(*(*uint32)(unsafe.Pointer(&maxRaw[0]))) //nolint:gosec // signed kernel int, always positive
-	if max <= 0 || num < 0 {
+	numVnodes := int32(*(*uint32)(unsafe.Pointer(&numRaw[0]))) //nolint:gosec // signed kernel int, always positive
+	maxVnodes := int32(*(*uint32)(unsafe.Pointer(&maxRaw[0]))) //nolint:gosec // signed kernel int, always positive
+	if maxVnodes <= 0 || numVnodes < 0 {
 		return 0
 	}
-	if num >= max {
+	if numVnodes >= maxVnodes {
 		return 1
 	}
-	return float64(num) / float64(max)
+	return float64(numVnodes) / float64(maxVnodes)
 }
 
 // sysGoplsCount returns the number of currently running gopls processes by
@@ -149,7 +149,7 @@ func sysGoplsCount(ctx context.Context) int {
 		return 0
 	}
 	n := 0
-	for _, line := range bytes.Split(bytes.TrimSpace(out), []byte("\n")) {
+	for line := range bytes.SplitSeq(bytes.TrimSpace(out), []byte("\n")) {
 		if len(bytes.TrimSpace(line)) > 0 {
 			n++
 		}
