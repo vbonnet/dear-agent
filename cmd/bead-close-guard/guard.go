@@ -41,7 +41,7 @@ type prViewResult struct {
 
 var prRE = regexp.MustCompile(`(\w*)#(\d+)`)
 
-func CheckDoD(cfg GuardConfig, stderr io.Writer) (GuardResult, error) {
+func CheckDoD(cfg GuardConfig) (GuardResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -66,8 +66,12 @@ func CheckDoD(cfg GuardConfig, stderr io.Writer) (GuardResult, error) {
 	for _, n := range prNums {
 		merged, state, err := isPRMerged(ctx, cfg.Repo, n)
 		if err != nil {
-			fmt.Fprintf(stderr, "  warn: cannot check PR #%d: %v\n", n, err)
-			continue
+			// Do not swallow the error: if we cannot verify a PR's state
+			// (network, rate limit, gh auth), returning the error makes the
+			// command exit non-zero so the hook's "fail open but warn" path
+			// runs. Continuing here would leave UnmergedPR empty and silently
+			// pass the guard, falsely claiming the PR is merged.
+			return GuardResult{}, fmt.Errorf("checking PR #%d: %w", n, err)
 		}
 		if !merged {
 			result.UnmergedPR = append(result.UnmergedPR, UnmergedPR{Number: n, State: state})
@@ -115,7 +119,12 @@ func extractPRNumbers(text string) []int {
 	seen := make(map[int]bool)
 	var nums []int
 	for _, m := range prRE.FindAllStringSubmatch(text, -1) {
-		if m[1] != "" {
+		// m[1] is the token immediately preceding '#'. An empty prefix is a
+		// bare "#449"; "pr"/"issue" (any case) are common local references
+		// like "PR#449". Any other non-empty prefix is a cross-repo reference
+		// such as "dotfiles#15" and must be skipped.
+		prefix := strings.ToLower(m[1])
+		if prefix != "" && prefix != "pr" && prefix != "issue" {
 			continue
 		}
 		var n int
@@ -141,7 +150,12 @@ func extractTitle(text string) string {
 			return line
 		}
 		rest := strings.Join(parts[2:], " ")
-		if idx := strings.Index(rest, " · "); idx >= 0 {
+		// strings.Fields collapsed the whitespace, so the separator now leads
+		// the joined string as "· " (no preceding space) rather than " · ".
+		// Strip the leading separator directly; fall back to the embedded form.
+		if trimmed, ok := strings.CutPrefix(rest, "· "); ok {
+			rest = trimmed
+		} else if idx := strings.Index(rest, " · "); idx >= 0 {
 			rest = rest[idx+3:]
 		}
 		if idx := strings.LastIndex(rest, " ["); idx >= 0 {
@@ -188,10 +202,16 @@ func bdShow(ctx context.Context, beadsDir, id string) (string, error) {
 	return stdout.String(), nil
 }
 
-func detectRepo() (string, error) {
+// detectRepo resolves owner/name from the origin remote. When beadsDir is set
+// (the .beads dir lives inside the target repo), run git there so the repo is
+// detected correctly even if the agent ran `bd close` from another directory.
+func detectRepo(beadsDir string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
+	if beadsDir != "" {
+		cmd.Dir = beadsDir
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err

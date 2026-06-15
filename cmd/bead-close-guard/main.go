@@ -18,6 +18,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -25,7 +26,7 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func run(args []string, stdout, stderr *os.File) int {
+func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("bead-close-guard", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
@@ -54,7 +55,7 @@ func run(args []string, stdout, stderr *os.File) int {
 	}
 
 	if *repo == "" {
-		detected, err := detectRepo()
+		detected, err := detectRepo(*beadsDir)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: cannot detect GitHub repo: %v\n", err)
 			fmt.Fprintf(stderr, "hint: run inside a git repo or pass --repo owner/name\n")
@@ -70,7 +71,7 @@ func run(args []string, stdout, stderr *os.File) int {
 		Force:    *force,
 	}
 
-	result, err := CheckDoD(cfg, stderr)
+	result, err := CheckDoD(cfg)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1

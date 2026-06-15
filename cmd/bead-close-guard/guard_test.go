@@ -57,12 +57,28 @@ Comments:
 	}
 }
 
+func TestExtractPRNumbers_NoSpacePrefixes(t *testing.T) {
+	t.Parallel()
+	// Common local references without a space must NOT be skipped.
+	nums := extractPRNumbers("see PR#449, pr#317, Issue#10, ISSUE#11")
+	want := []int{449, 317, 10, 11}
+	if len(nums) != len(want) {
+		t.Fatalf("got %v, want %v", nums, want)
+	}
+	for i, n := range want {
+		if nums[i] != n {
+			t.Errorf("nums[%d] = %d, want %d", i, nums[i], n)
+		}
+	}
+}
+
 func TestExtractTitle_Typical(t *testing.T) {
 	t.Parallel()
 	text := "✓ ce-gilj · Enforce safe-pr wrapper   [● P1 · CLOSED]"
+	want := "Enforce safe-pr wrapper"
 	got := extractTitle(text)
-	if got == "" || got == "(unknown)" {
-		t.Errorf("unexpected empty/unknown: %q", got)
+	if got != want {
+		t.Errorf("extractTitle(%q) = %q, want %q", text, got, want)
 	}
 }
 
