@@ -199,7 +199,7 @@ func Check(ctx context.Context, cfg Config, opts Options) (Report, error) {
 			} else {
 				rep.Summary.Missing++
 			}
-		default:
+		case StatusMissingSource, StatusError:
 			rep.Summary.Error++
 		}
 	}
@@ -334,15 +334,15 @@ func lineDiff(deployed, source []byte) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func writeBlock(b *strings.Builder, prefix string, lines []string, max int) {
+func writeBlock(b *strings.Builder, prefix string, lines []string, limit int) {
 	if len(lines) == 0 {
 		return
 	}
 	shown := lines
 	truncated := 0
-	if len(lines) > max {
-		shown = lines[:max]
-		truncated = len(lines) - max
+	if len(lines) > limit {
+		shown = lines[:limit]
+		truncated = len(lines) - limit
 	}
 	for _, ln := range shown {
 		fmt.Fprintf(b, "%s | %s\n", prefix, ln)

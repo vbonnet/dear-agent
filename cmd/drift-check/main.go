@@ -170,7 +170,7 @@ func formatText(rep drift.Report, w io.Writer, quiet bool) {
 			fmt.Fprintf(w, "  DRIFT    %s\n", t.Name)
 			fmt.Fprintf(w, "           deployed: %s\n", t.DeployedPath)
 			fmt.Fprintf(w, "           source:   %s\n", t.SourcePath)
-			for _, line := range strings.Split(t.Diff, "\n") {
+			for line := range strings.SplitSeq(t.Diff, "\n") {
 				fmt.Fprintf(w, "           %s\n", line)
 			}
 			if t.Remediation != "" {
@@ -183,7 +183,7 @@ func formatText(rep drift.Report, w io.Writer, quiet bool) {
 			}
 		case drift.StatusMissingSource:
 			fmt.Fprintf(w, "  CONFIG   %s — source not in repo: %s\n", t.Name, t.SourcePath)
-		default:
+		case drift.StatusError:
 			fmt.Fprintf(w, "  ERROR    %s — %s\n", t.Name, t.Error)
 		}
 	}
