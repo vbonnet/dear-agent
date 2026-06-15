@@ -179,6 +179,24 @@ func TestCreateSession_RejectsEmptyCwd(t *testing.T) {
 	}
 }
 
+func TestCreateSession_RejectsRelativeCwd(t *testing.T) {
+	ctx := &OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}
+	_, err := CreateSession(ctx, &CreateSessionRequest{
+		Cwd:    "relative/path",
+		Prompt: "test",
+	})
+	if err == nil {
+		t.Fatal("expected error for relative cwd")
+	}
+	var opErr *OpError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("expected *OpError, got %T", err)
+	}
+	if !strings.Contains(opErr.Detail, "absolute path") {
+		t.Errorf("error should mention absolute path, got: %s", opErr.Detail)
+	}
+}
+
 func TestCreateSession_RejectsEmptyPrompt(t *testing.T) {
 	dir := t.TempDir()
 	ctx := &OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}
@@ -213,6 +231,84 @@ func TestCreateSession_RejectsFileCwd(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for file (not dir) cwd")
+	}
+}
+
+func TestCreateSession_RejectsInvalidHarness(t *testing.T) {
+	dir := t.TempDir()
+	ctx := &OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}
+	_, err := CreateSession(ctx, &CreateSessionRequest{
+		Cwd:     dir,
+		Prompt:  "test",
+		Harness: "unknown-harness",
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported harness")
+	}
+	var opErr *OpError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("expected *OpError, got %T", err)
+	}
+	if !strings.Contains(opErr.Detail, "Unsupported harness") {
+		t.Errorf("error should mention unsupported harness, got: %s", opErr.Detail)
+	}
+}
+
+func TestCreateSession_RejectsInvalidModelChars(t *testing.T) {
+	dir := t.TempDir()
+	ctx := &OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}
+	_, err := CreateSession(ctx, &CreateSessionRequest{
+		Cwd:    dir,
+		Prompt: "test",
+		Model:  "opus; rm -rf /",
+	})
+	if err == nil {
+		t.Fatal("expected error for model with invalid characters")
+	}
+	var opErr *OpError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("expected *OpError, got %T", err)
+	}
+	if !strings.Contains(opErr.Detail, "invalid characters") {
+		t.Errorf("error should mention invalid characters, got: %s", opErr.Detail)
+	}
+}
+
+func TestCreateSession_RejectsInvalidTitleChars(t *testing.T) {
+	dir := t.TempDir()
+	ctx := &OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}
+	_, err := CreateSession(ctx, &CreateSessionRequest{
+		Cwd:    dir,
+		Prompt: "test",
+		Title:  "bad title with spaces",
+	})
+	if err == nil {
+		t.Fatal("expected error for title with invalid characters")
+	}
+	var opErr *OpError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("expected *OpError, got %T", err)
+	}
+	if !strings.Contains(opErr.Detail, "invalid characters") {
+		t.Errorf("error should mention invalid characters, got: %s", opErr.Detail)
+	}
+}
+
+func TestCreateSession_AcceptsValidModel(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	ctx := &OpContext{Tmux: tmuxMock, OutputMode: "json"}
+
+	result, err := CreateSession(ctx, &CreateSessionRequest{
+		Cwd:    dir,
+		Prompt: "test",
+		Model:  "claude-3.5-sonnet",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession with dotted model: %v", err)
+	}
+	if result.Model != "claude-3.5-sonnet" {
+		t.Errorf("model = %q, want claude-3.5-sonnet", result.Model)
 	}
 }
 
@@ -266,7 +362,6 @@ func TestCreateSession_WorksWithoutStorage(t *testing.T) {
 	ctx := &OpContext{
 		Tmux:       tmuxMock,
 		OutputMode: "json",
-		// Storage is nil — should still create session
 	}
 
 	result, err := CreateSession(ctx, &CreateSessionRequest{
@@ -287,7 +382,7 @@ func TestBuildHarnessCommand_ClaudeCode(t *testing.T) {
 	if cmd == "" {
 		t.Fatal("empty command")
 	}
-	for _, want := range []string{"claude", "--model opus", "AGM_SESSION_NAME=my-session", "--enable-auto-mode"} {
+	for _, want := range []string{"claude", "--model 'opus'", "AGM_SESSION_NAME='my-session'", "--enable-auto-mode", "--add-dir '/tmp/work'"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("command %q missing %q", cmd, want)
 		}
@@ -296,7 +391,7 @@ func TestBuildHarnessCommand_ClaudeCode(t *testing.T) {
 
 func TestBuildHarnessCommand_GeminiCli(t *testing.T) {
 	cmd := buildHarnessCommand("gemini-cli", "2.5-flash", "s", "/tmp")
-	if !strings.Contains(cmd, "gemini -m 2.5-flash") {
+	if !strings.Contains(cmd, "gemini -m '2.5-flash'") {
 		t.Errorf("gemini command = %q", cmd)
 	}
 }
@@ -305,5 +400,32 @@ func TestBuildHarnessCommand_UnknownHarness(t *testing.T) {
 	cmd := buildHarnessCommand("unknown", "m", "s", "/tmp")
 	if !strings.Contains(cmd, "Unknown harness") {
 		t.Errorf("unknown harness command = %q", cmd)
+	}
+}
+
+func TestBuildHarnessCommand_EscapesSingleQuotes(t *testing.T) {
+	cmd := buildHarnessCommand("claude-code", "opus", "sess", "/tmp/it's a dir")
+	if strings.Contains(cmd, "it's a") {
+		t.Errorf("unescaped single quote in command: %s", cmd)
+	}
+	if !strings.Contains(cmd, "it'\\''s a dir") {
+		t.Errorf("expected escaped single quote, got: %s", cmd)
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"simple", "simple"},
+		{"it's", "it'\\''s"},
+		{"a'b'c", "a'\\''b'\\''c"},
+		{"no-quotes", "no-quotes"},
+	}
+	for _, tt := range tests {
+		got := shellQuote(tt.in)
+		if got != tt.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -47,10 +48,45 @@ type createSessionParams struct {
 	model   string
 }
 
+// isSafeNameRune returns true for characters safe in tmux session names and shell arguments.
+func isSafeNameRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_'
+}
+
+// isValidModelChar returns true for characters allowed in model identifiers.
+func isValidModelChar(r rune) bool {
+	return isSafeNameRune(r) || r == '.'
+}
+
+// resolveSessionName derives a safe session name from the cwd base, or validates user-provided title.
+func resolveSessionName(title, cwd string) (string, error) {
+	if title != "" {
+		for _, r := range title {
+			if !isSafeNameRune(r) {
+				return "", ErrInvalidInput("title", "Session title contains invalid characters (only alphanumeric, hyphens, and underscores are allowed).")
+			}
+		}
+		return title, nil
+	}
+	base := filepath.Base(cwd)
+	var safe []rune
+	for _, r := range base {
+		if isSafeNameRune(r) {
+			safe = append(safe, r)
+		} else {
+			safe = append(safe, '-')
+		}
+	}
+	return "mcp-" + string(safe), nil
+}
+
 // validateCreateRequest validates the request and returns resolved defaults.
 func validateCreateRequest(ctx *OpContext, req *CreateSessionRequest) (*createSessionParams, error) {
 	if req == nil || req.Cwd == "" {
 		return nil, ErrInvalidInput("cwd", "Working directory (cwd) is required.")
+	}
+	if !filepath.IsAbs(req.Cwd) {
+		return nil, ErrInvalidInput("cwd", fmt.Sprintf("Working directory must be an absolute path: %s", req.Cwd))
 	}
 	if req.Prompt == "" {
 		return nil, ErrInvalidInput("prompt", "Prompt is required.")
@@ -66,20 +102,30 @@ func validateCreateRequest(ctx *OpContext, req *CreateSessionRequest) (*createSe
 		return nil, ErrTmuxNotRunning()
 	}
 
-	p := &createSessionParams{
-		name:    req.Title,
-		harness: req.Harness,
-		model:   req.Model,
-	}
+	p := &createSessionParams{harness: req.Harness, model: req.Model}
 	if p.harness == "" {
 		p.harness = "claude-code"
 	}
+	switch p.harness {
+	case "claude-code", "gemini-cli", "codex-cli":
+	default:
+		return nil, ErrInvalidInput("harness", fmt.Sprintf("Unsupported harness: %s. Supported: claude-code, gemini-cli, codex-cli", p.harness))
+	}
+
 	if p.model == "" {
 		p.model = "sonnet"
 	}
-	if p.name == "" {
-		p.name = fmt.Sprintf("mcp-%s", filepath.Base(req.Cwd))
+	for _, r := range p.model {
+		if !isValidModelChar(r) {
+			return nil, ErrInvalidInput("model", "Model contains invalid characters (only alphanumeric, hyphens, underscores, and dots are allowed).")
+		}
 	}
+
+	name, err := resolveSessionName(req.Title, req.Cwd)
+	if err != nil {
+		return nil, err
+	}
+	p.name = name
 	return p, nil
 }
 
@@ -158,17 +204,22 @@ func CreateSession(ctx *OpContext, req *CreateSessionRequest) (*CreateSessionRes
 	}, nil
 }
 
+// shellQuote escapes a string for safe use inside single quotes in a shell command.
+func shellQuote(s string) string {
+	return strings.ReplaceAll(s, "'", "'\\''")
+}
+
 // buildHarnessCommand constructs the shell command to start the given harness.
 func buildHarnessCommand(harness, model, sessionName, workDir string) string {
 	switch harness {
 	case "claude-code":
-		return fmt.Sprintf("env AGM_SESSION_NAME=%s claude --model %s --add-dir '%s' --enable-auto-mode && exit",
-			sessionName, model, workDir)
+		return fmt.Sprintf("env AGM_SESSION_NAME='%s' claude --model '%s' --add-dir '%s' --enable-auto-mode && exit",
+			shellQuote(sessionName), shellQuote(model), shellQuote(workDir))
 	case "gemini-cli":
-		return fmt.Sprintf("gemini -m %s && exit", model)
+		return fmt.Sprintf("gemini -m '%s' && exit", shellQuote(model))
 	case "codex-cli":
-		return fmt.Sprintf("codex --model %s && exit", model)
+		return fmt.Sprintf("codex --model '%s' && exit", shellQuote(model))
 	default:
-		return fmt.Sprintf("echo 'Unknown harness: %s' && exit 1", harness)
+		return fmt.Sprintf("echo 'Unknown harness: %s' && exit 1", shellQuote(harness))
 	}
 }
