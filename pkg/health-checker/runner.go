@@ -2,6 +2,7 @@ package healthchecker
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -61,6 +62,13 @@ func (r *Runner) runParallel(ctx context.Context) ([]Result, error) {
 		wg.Add(1)
 		go func(idx int, c Check) {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					mu.Lock()
+					results[idx] = Result{Status: StatusError, Message: fmt.Sprintf("check panicked: %v", r)}
+					mu.Unlock()
+				}
+			}()
 
 			// Check if context is cancelled
 			select {

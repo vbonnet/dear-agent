@@ -39,6 +39,12 @@ func RunWithTimeout(timeout time.Duration, fn func() int) int {
 
 	done := make(chan int, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "[stop-hook] panic in hook function: %v\n", r)
+				done <- 1
+			}
+		}()
 		done <- fn()
 	}()
 
