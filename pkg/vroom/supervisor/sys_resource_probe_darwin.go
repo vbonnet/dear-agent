@@ -3,6 +3,9 @@
 package supervisor
 
 import (
+	"bytes"
+	"context"
+	"os/exec"
 	"syscall"
 	"unsafe"
 
@@ -79,4 +82,77 @@ func sysSwapUsedFraction() float64 {
 		return 1
 	}
 	return float64(used) / float64(total)
+}
+
+// sysFDUsedFraction returns the fraction of the system-wide open-file
+// descriptor limit currently in use on macOS.
+//
+// Data sources:
+//   - kern.num_files  — current number of open file descriptors system-wide
+//   - kern.maxfiles   — system-wide FD limit
+func sysFDUsedFraction() float64 {
+	numRaw, err := unix.SysctlRaw("kern.num_files")
+	if err != nil || len(numRaw) < 4 {
+		return 0
+	}
+	maxRaw, err := unix.SysctlRaw("kern.maxfiles")
+	if err != nil || len(maxRaw) < 4 {
+		return 0
+	}
+	// Both are signed int32 in the kernel; positive values fit safely in uint32.
+	num := int32(*(*uint32)(unsafe.Pointer(&numRaw[0]))) //nolint:gosec // signed kernel int, always positive
+	max := int32(*(*uint32)(unsafe.Pointer(&maxRaw[0]))) //nolint:gosec // signed kernel int, always positive
+	if max <= 0 || num < 0 {
+		return 0
+	}
+	if num >= max {
+		return 1
+	}
+	return float64(num) / float64(max)
+}
+
+// sysVnodeUsedFraction returns the fraction of the kernel vnode table
+// currently in use on macOS. Vnode exhaustion causes filesystem operations
+// to fail with ENFILE even when per-process FD limits are not hit.
+//
+// Data sources:
+//   - kern.num_vnodes  — current vnode count
+//   - kern.maxvnodes   — vnode table size limit
+func sysVnodeUsedFraction() float64 {
+	numRaw, err := unix.SysctlRaw("kern.num_vnodes")
+	if err != nil || len(numRaw) < 4 {
+		return 0
+	}
+	maxRaw, err := unix.SysctlRaw("kern.maxvnodes")
+	if err != nil || len(maxRaw) < 4 {
+		return 0
+	}
+	num := int32(*(*uint32)(unsafe.Pointer(&numRaw[0]))) //nolint:gosec // signed kernel int, always positive
+	max := int32(*(*uint32)(unsafe.Pointer(&maxRaw[0]))) //nolint:gosec // signed kernel int, always positive
+	if max <= 0 || num < 0 {
+		return 0
+	}
+	if num >= max {
+		return 1
+	}
+	return float64(num) / float64(max)
+}
+
+// sysGoplsCount returns the number of currently running gopls processes by
+// invoking pgrep(1). pgrep -x matches the process name exactly (not
+// substrings of longer names). Exit code 1 from pgrep means "no matches" —
+// not an error we propagate.
+func sysGoplsCount(ctx context.Context) int {
+	out, err := exec.CommandContext(ctx, "pgrep", "-x", "gopls").Output()
+	if err != nil {
+		// exit code 1 = no match, any other error = pgrep unavailable; both → 0
+		return 0
+	}
+	n := 0
+	for _, line := range bytes.Split(bytes.TrimSpace(out), []byte("\n")) {
+		if len(bytes.TrimSpace(line)) > 0 {
+			n++
+		}
+	}
+	return n
 }
