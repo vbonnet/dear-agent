@@ -81,7 +81,10 @@ func TestCheck_Drift(t *testing.T) {
 func TestCheck_Tokens(t *testing.T) {
 	repo := t.TempDir()
 	host := t.TempDir()
-	t.Setenv("HOME", "/Users/test")
+	// Deliberately set the process HOME to the WRONG value: ${HOME} in the
+	// token must resolve to Options.Home, not the environment, or the rendered
+	// source would mismatch the deployed file and report false drift.
+	t.Setenv("HOME", "/wrong/home")
 	// Source is templated; deployed is the rendered form. With token
 	// substitution they must compare equal.
 	writeFile(t, repo, "plist", "Home=__USER_HOME__\nBin=__USER_HOME__/go/bin/agm\n")

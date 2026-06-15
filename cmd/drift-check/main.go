@@ -82,9 +82,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// Create the bounded context before any external command so git invocations
+	// (repo-root detection and `git show`) are all guarded by the same timeout —
+	// a hung `git rev-parse` (locked index, stuck network mount) fails fast
+	// instead of blocking the CLI indefinitely.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	root := *repoRoot
 	if root == "" {
-		detected, err := gitToplevel()
+		detected, err := gitToplevel(ctx)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: cannot detect repo root: %v\n", err)
 			fmt.Fprintf(stderr, "hint: run inside the dear-agent checkout or pass --repo-root <dir>\n")
@@ -92,9 +99,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		root = detected
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 
 	rep, err := drift.Check(ctx, cfg, drift.Options{RepoRoot: root, GitRef: *gitRef})
 	if err != nil {
@@ -198,8 +202,8 @@ func formatText(rep drift.Report, w io.Writer, quiet bool) {
 	}
 }
 
-func gitToplevel() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+func gitToplevel(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err

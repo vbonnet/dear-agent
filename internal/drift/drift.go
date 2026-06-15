@@ -220,7 +220,7 @@ func checkTarget(ctx context.Context, t Target, repoRoot, gitRef, home string) T
 		res.Error = err.Error()
 		return res
 	}
-	source = applyTokens(source, t.Tokens)
+	source = applyTokens(source, t.Tokens, home)
 	res.SourceSHA256 = sha256hex(source)
 
 	deployed, err := os.ReadFile(deployedPath)
@@ -274,29 +274,45 @@ func readSource(ctx context.Context, repoRoot, gitRef, rel string) ([]byte, erro
 	return stdout.Bytes(), nil
 }
 
-// applyTokens substitutes each placeholder with its $ENV-expanded value. This
+// homeMapper returns an os.Expand mapping that resolves $HOME/${HOME} to the
+// resolved home directory rather than the process environment. This keeps token
+// and path expansion consistent with the ~ handling and with Options.Home, so an
+// overridden home (tests, multi-user) does not produce false mismatches.
+func homeMapper(home string) func(string) string {
+	return func(k string) string {
+		if k == "HOME" && home != "" {
+			return home
+		}
+		return os.Getenv(k)
+	}
+}
+
+// applyTokens substitutes each placeholder with its expanded value. This
 // renders a templated source (e.g. a plist with __USER_HOME__) into the form
-// the host actually has on disk, so the hash compare is meaningful.
-func applyTokens(content []byte, tokens map[string]string) []byte {
+// the host actually has on disk, so the hash compare is meaningful. $HOME
+// resolves to the resolved home (honoring Options.Home).
+func applyTokens(content []byte, tokens map[string]string, home string) []byte {
 	if len(tokens) == 0 {
 		return content
 	}
+	mapper := homeMapper(home)
 	s := string(content)
 	for placeholder, value := range tokens {
-		s = strings.ReplaceAll(s, placeholder, os.ExpandEnv(value))
+		s = strings.ReplaceAll(s, placeholder, os.Expand(value, mapper))
 	}
 	return []byte(s)
 }
 
 // expandPath turns a configured deployed path into an absolute filesystem
-// path: a leading ~ becomes home, then $ENV references are expanded.
+// path: a leading ~ becomes home, then $ENV references are expanded ($HOME
+// resolving to the resolved home, not the process environment).
 func expandPath(p, home string) string {
 	if p == "~" {
 		p = home
 	} else if strings.HasPrefix(p, "~/") {
 		p = filepath.Join(home, p[2:])
 	}
-	return os.ExpandEnv(p)
+	return os.Expand(p, homeMapper(home))
 }
 
 func sha256hex(b []byte) string {
