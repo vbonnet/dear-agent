@@ -69,13 +69,21 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if projectDirFlag != "" {
 		projectRoot = projectDirFlag
 	} else {
-		// Try to detect from git repo context
+		// Try to detect from git repo context.
+		// If the repo lives under ~/src/ (the read-only golden tree), writing
+		// wf/ there would fail. Route to ~/worktrees/{repo}/wf/ instead so the
+		// wayfinder project lands in the writable worktrees area (ce-fvkz).
 		gitRoot, err := detectGitRepoRoot()
 		if err == nil && gitRoot != "" {
-			projectRoot = filepath.Join(gitRoot, "wf")
+			goldenTree := filepath.Join(os.Getenv("HOME"), "src")
+			if strings.HasPrefix(gitRoot, goldenTree+string(filepath.Separator)) || gitRoot == goldenTree {
+				projectRoot = filepath.Join(os.Getenv("HOME"), "worktrees", filepath.Base(gitRoot), "wf")
+			} else {
+				projectRoot = filepath.Join(gitRoot, "wf")
+			}
 		} else {
-			// Fall back to workspace convention
-			projectRoot = filepath.Join(os.Getenv("HOME"), "src", "ws", workspace, "wf")
+			// Fall back: worktrees area rather than the read-only ~/src/ws/
+			projectRoot = filepath.Join(os.Getenv("HOME"), "worktrees", workspace, "wf")
 		}
 	}
 

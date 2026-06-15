@@ -66,6 +66,37 @@ func (g *GitIntegrator) CommitPhaseCompletion(phase, outcome, context string) er
 	return nil
 }
 
+// CommitPhaseStart creates a git commit for phase start.
+// Adds WAYFINDER-STATUS.md and WAYFINDER-HISTORY.md to staging and commits so
+// the worktree is clean before any deliverable work begins. Without this, the
+// next start-phase call finds uncommitted marker files and refuses (ce-fvkz).
+func (g *GitIntegrator) CommitPhaseStart(phase string) error {
+	if !g.IsGitRepo() {
+		return fmt.Errorf("project directory is not a git repository")
+	}
+
+	markerFiles := []string{
+		"WAYFINDER-STATUS.md",
+		"WAYFINDER-HISTORY.md",
+	}
+
+	for _, file := range markerFiles {
+		filePath := filepath.Join(g.projectDir, file)
+		if _, err := os.Stat(filePath); err == nil {
+			if err := g.gitAdd(file); err != nil {
+				return fmt.Errorf("failed to add %s: %w", file, err)
+			}
+		}
+	}
+
+	commitMsg := fmt.Sprintf("wayfinder: start %s\n\nWayfinder-Phase: %s\nWayfinder-Event: started", phase, phase)
+	if err := g.gitCommit(commitMsg); err != nil {
+		return fmt.Errorf("failed to create commit: %w", err)
+	}
+
+	return nil
+}
+
 // formatCommitMessage creates a standardized commit message for phase completion
 func (g *GitIntegrator) formatCommitMessage(phase, outcome, context string) string {
 	var msg strings.Builder
