@@ -2,7 +2,6 @@ package override
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -50,7 +49,12 @@ func appendAudit(e auditEntry) {
 	if err != nil {
 		return
 	}
-	_, _ = fmt.Fprintln(f, string(b))
+	// Append the newline to the marshalled bytes and write in a single
+	// f.Write call. A lone Write on an O_APPEND file is atomic for payloads
+	// under PIPE_BUF (4KB) on POSIX, so concurrent agents cannot interleave
+	// partial lines into the JSONL log. fmt.Fprintln would issue two writes.
+	b = append(b, '\n')
+	_, _ = f.Write(b)
 }
 
 // auditDir returns the directory holding the override audit log. It mirrors

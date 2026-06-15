@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -202,7 +201,7 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 	// the gate exists so a supervisor never launches without auth and silently
 	// fails downstream.
 	if supervisorSkipOAuthCheck {
-		if gerr := override.Require(context.Background(), override.Guard{
+		if gerr := override.Require(cmd.Context(), override.Guard{
 			Tool: "agm supervisor run",
 			Flag: "--skip-oauth-check",
 			Gate: "CLAUDE_CODE_OAUTH_TOKEN presence requirement",

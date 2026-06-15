@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -50,7 +49,7 @@ func runSendEnter(cmd *cobra.Command, args []string) (retErr error) {
 
 	// The --force bypass of the empty-input check requires a recorded reason.
 	if sendEnterForce {
-		if gerr := override.Require(context.Background(), override.Guard{
+		if gerr := override.Require(cmd.Context(), override.Guard{
 			Tool: "agm send-enter",
 			Flag: "--force",
 			Gate: "empty-input check (refuses to submit a blank line)",

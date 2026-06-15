@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"time"
@@ -46,7 +45,7 @@ func runSendClear(cmd *cobra.Command, args []string) error {
 	// The --force escalation (extra C-a C-k clear sequence, bypassing the
 	// post-clear safety check) requires a recorded justification.
 	if sendClearForce {
-		if gerr := override.Require(context.Background(), override.Guard{
+		if gerr := override.Require(cmd.Context(), override.Guard{
 			Tool: "agm send-clear",
 			Flag: "--force",
 			Gate: "post-clear safety check (escalates to an unconditional C-a C-k clear)",

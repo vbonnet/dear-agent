@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -120,7 +119,7 @@ func runSelectOption(cmd *cobra.Command, args []string) (retErr error) {
 	// requires a recorded justification — selecting an option while a human is
 	// typing or attached can clobber their input.
 	if selectOptionForce {
-		if gerr := override.Require(context.Background(), override.Guard{
+		if gerr := override.Require(cmd.Context(), override.Guard{
 			Tool: "agm send-select-option",
 			Flag: "--force",
 			Gate: "safety guard (human-typing / session-attached detection)",
