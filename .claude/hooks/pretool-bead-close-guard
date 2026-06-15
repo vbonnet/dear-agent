@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# PreToolUse hook: Definition of Done gate on bead closure (CLAUDE.md §6).
+#
+# WHAT: when an agent runs `bd ... update <id> --status closed` or
+# `bd ... close <id>`, this hook invokes bead-close-guard to verify that all
+# referenced PRs are merged. If any PR is unmerged, the close is BLOCKED
+# (exit 2) with a clear remediation message.
+#
+# WHY a block, not a nudge: closing a bead with unmerged PRs is a Definition
+# of Done violation that hides outstanding work. The 2026-06-12 retro found
+# 25 such violations. Unlike spawn-routing (where a nudge suffices because
+# the action itself is harmless), premature close actively damages the
+# backlog's integrity — the reconciler (bead-pr-sync) has to clean up after.
+# Prevention > detection.
+#
+# SCOPE: matches Bash tool calls containing `bd` with either:
+#   - `close` subcommand
+#   - `update ... --status closed`
+# Does NOT match bd list, bd show, bd comment, etc.
+# Fails open: unparseable input or missing bead-close-guard binary exits 0.
+set -uo pipefail
+
+input="$(cat)"
+tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+[ "$tool" = "Bash" ] || exit 0
+
+cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+[ -n "$cmd" ] || exit 0
+
+# Detect bd close patterns. We need to handle:
+#   bd --db PATH close <id>
+#   bd close <id>
+#   bd --db PATH update <id> --status closed
+#   BEADS_DIR=... bd close <id>
+# But NOT: bd list --status closed (that's a read)
+
+# Strip leading env var assignments to find the actual command
+stripped="$(printf '%s' "$cmd" | sed 's/^[[:space:]]*\([A-Z_]*=[^ ]*[[:space:]]*\)*//')"
+
+# Check if this is a bd command
+case "$stripped" in
+  bd\ *|bd) ;;
+  */bd\ *) ;;
+  *) exit 0 ;;
+esac
+
+# Detect "bd ... close <id>" pattern — extract the first non-flag token after "close"
+bead_id=""
+if printf '%s' "$stripped" | grep -qE '\bclose\b'; then
+  bead_id="$(printf '%s' "$stripped" | awk '{
+    found=0
+    for (i=1; i<=NF; i++) {
+      if ($i == "close") { found=1; continue }
+      if (found && substr($i,1,1) != "-") { print $i; exit }
+    }
+  }')"
+fi
+
+# Detect "bd ... update <id> --status closed" pattern
+if [ -z "$bead_id" ] && printf '%s' "$stripped" | grep -qE '\bupdate\b.*--status[[:space:]]+closed\b'; then
+  bead_id="$(printf '%s' "$stripped" | awk '{
+    found=0
+    for (i=1; i<=NF; i++) {
+      if ($i == "update") { found=1; continue }
+      if (found && substr($i,1,1) != "-") { print $i; exit }
+    }
+  }')"
+fi
+
+# Not a close/update-to-closed operation
+[ -n "$bead_id" ] || exit 0
+
+# Check if --force is present (allow bypass for abandoned beads)
+if printf '%s' "$cmd" | grep -qE '\b--force\b'; then
+  exit 0
+fi
+
+# Locate bead-close-guard binary
+guard="$(command -v bead-close-guard 2>/dev/null || true)"
+if [ -z "$guard" ]; then
+  # Fail open: guard not installed, allow the close
+  exit 0
+fi
+
+# Extract --db / beads-dir from the command if present, expand ~ to $HOME
+beads_dir=""
+if printf '%s' "$stripped" | grep -qE '\-\-db[[:space:]=]'; then
+  beads_dir="$(printf '%s' "$stripped" | sed -n 's/.*--db[[:space:]=]*\([^ ]*\).*/\1/p')"
+  beads_dir="${beads_dir/#\~/$HOME}"
+fi
+
+# Build guard args
+guard_args="--bead $bead_id"
+[ -n "$beads_dir" ] && guard_args="$guard_args --beads-dir $beads_dir"
+
+# Run the guard check
+result="$($guard $guard_args 2>&1)" || exit_code=$?
+exit_code="${exit_code:-0}"
+
+if [ "$exit_code" -eq 2 ]; then
+  # DoD violation — block the close
+  jq -cn --arg msg "$result" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",additionalContext:$msg}}'
+  exit 2
+fi
+
+if [ "$exit_code" -ne 0 ]; then
+  # Unexpected error — fail open but warn
+  jq -cn --arg msg "bead-close-guard error (failing open): $result" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$msg}}'
+  exit 0
+fi
+
+# Guard passed — allow the close
+exit 0
