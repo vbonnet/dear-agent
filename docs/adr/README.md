@@ -34,6 +34,7 @@ of truth; an ADR loses to it for definitions.
 | [022](ADR-022-backlog-suggestion-system.md) | Backlog Suggestion System | Accepted |
 | [023](ADR-023-friction-reporting-and-session-handoff.md) | Friction Reporting & Session Handoff | Proposed (design) |
 | [029](ADR-029-ralph-wiggum-merge-loop.md) | Ralph Wiggum — host-tick persistent merge loop | Accepted |
+| [030](ADR-030-dependabot-auto-merge.md) | Dependabot Auto-Merge via GitHub Actions | Accepted |
 
 Number gaps (003–008, 019–021, 024+) are intentional — earlier numbers were
 withdrawn, renumbered into `agm/docs/adr/`, or superseded by the 2026-05-17
