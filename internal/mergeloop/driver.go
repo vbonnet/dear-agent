@@ -185,6 +185,14 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 		}
 	}
 
+	// Reset the agent-attempt budget when the failure signature has changed
+	// since we last spawned. Without this, a PR that exhausts maxAttempts is
+	// classified StateAbandoned forever: doSpawn (and thus RecordAgentSpawn,
+	// which holds the only other reset) is never reached again, so a human's
+	// fresh push or a completely different failure can never be retried. We
+	// reset before Classify so the new attempt budget feeds the decision.
+	d.Tracker.ResetAttemptsIfSigChanged(pr.Number, failureSignature(pr))
+
 	cls := d.Policy.Classify(pr, rec.AgentAttempts, agentActive)
 
 	// Stall detection: an actionable PR untouched for longer than the
@@ -361,8 +369,17 @@ func appendAudit(ev AuditEvent) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
 	if data, err := json.Marshal(ev); err == nil {
-		_, _ = f.Write(append(data, '\n'))
+		if _, werr := f.Write(append(data, '\n')); werr != nil {
+			_ = f.Close()
+			return
+		}
+	}
+	// Explicitly check the Close error on this writable handle rather than
+	// deferring an error-ignoring close: a failed Close can mask data loss
+	// (flushed buffers, delayed write errors). Nothing is actionable for a
+	// best-effort audit log beyond returning, but the error must be observed.
+	if cerr := f.Close(); cerr != nil {
+		return
 	}
 }

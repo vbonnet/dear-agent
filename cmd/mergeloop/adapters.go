@@ -158,10 +158,16 @@ func ghJSON(ctx context.Context, timeout time.Duration, args []string) ([]byte, 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		if cctx.Err() != nil {
-			return nil, fmt.Errorf("gh %s timed out", args[0])
+		// Build a label from at most the first two args; slicing args[:2]
+		// unconditionally would panic when fewer than two were passed.
+		label := strings.Join(args, " ")
+		if len(args) > 2 {
+			label = strings.Join(args[:2], " ")
 		}
-		return nil, fmt.Errorf("gh %s: %w (%s)", strings.Join(args[:2], " "), err, strings.TrimSpace(stderr.String()))
+		if cctx.Err() != nil {
+			return nil, fmt.Errorf("gh %s timed out", label)
+		}
+		return nil, fmt.Errorf("gh %s: %w (%s)", label, err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
 }
@@ -303,7 +309,12 @@ func runStreaming(ctx context.Context, timeout time.Duration, name string, args 
 }
 
 func detectRepo() (string, error) {
-	out, err := exec.Command("git", "remote", "get-url", "origin").Output()
+	// Bound the git call: a misconfigured credential helper can make
+	// `git remote get-url` hang indefinitely, which would stall mergeloop
+	// startup before the loop ever begins.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "remote", "get-url", "origin").Output()
 	if err != nil {
 		return "", err
 	}

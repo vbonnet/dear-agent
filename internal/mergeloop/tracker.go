@@ -101,6 +101,24 @@ func (t *Tracker) RecordAgentSpawn(num int, failureSig, session string, now time
 	r.LastActionAt = now
 }
 
+// ResetAttemptsIfSigChanged zeroes the agent-attempt counter for a PR when the
+// supplied failure signature differs from the one recorded at the last spawn.
+// It is the pre-Classify guard against the StateAbandoned deadlock: a genuinely
+// new failure (or a human's fresh push, which changes the failing-check set) is
+// a new problem, not a continuation of an exhausted retry budget. Ownership of
+// LastFailureSig stays with RecordAgentSpawn; this only resets the count.
+func (t *Tracker) ResetAttemptsIfSigChanged(num int, sig string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	r := t.records[num]
+	if r == nil {
+		return
+	}
+	if r.LastFailureSig != "" && r.LastFailureSig != sig {
+		r.AgentAttempts = 0
+	}
+}
+
 // RecordAction stamps a PR's last-action time and state (used for stall
 // detection). Call after any mechanical action (rebase, merge attempt).
 func (t *Tracker) RecordAction(num int, state State, now time.Time) {
@@ -143,9 +161,14 @@ func (t *Tracker) Save() error {
 		return fmt.Errorf("creating tracker state dir: %w", err)
 	}
 	// Read-modify-write the multi-repo map so concurrent repos don't clobber.
+	// A parse error must NOT be swallowed: silently continuing would write back
+	// only this repo's records and clobber every other repo's state. Surface it
+	// so the caller can preserve the existing (corrupt-but-recoverable) file.
 	stored := map[string]map[int]*PRRecord{}
-	if data, err := os.ReadFile(t.path); err == nil {
-		_ = json.Unmarshal(data, &stored)
+	if data, err := os.ReadFile(t.path); err == nil && len(data) > 0 {
+		if err := json.Unmarshal(data, &stored); err != nil {
+			return fmt.Errorf("parsing existing tracker state %s: %w", t.path, err)
+		}
 	}
 	stored[t.repo] = t.records
 	data, err := json.MarshalIndent(stored, "", "  ")
