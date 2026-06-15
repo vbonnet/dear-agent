@@ -25,6 +25,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/hashicorp/go-retryablehttp v0.7.8
+	github.com/hashicorp/go-version v1.9.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/leanovate/gopter v0.2.11
 	github.com/mattn/go-sqlite3 v1.14.44
@@ -55,8 +56,8 @@ require (
 	golang.org/x/net v0.55.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.20.0
-	golang.org/x/sys v0.45.0
-	golang.org/x/term v0.43.0
+	golang.org/x/sys v0.46.0
+	golang.org/x/term v0.44.0
 	golang.org/x/text v0.37.0
 	golang.org/x/time v0.15.0
 	google.golang.org/api v0.283.0
@@ -125,7 +126,6 @@ require (
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
 	github.com/hashicorp/go-memdb v1.3.4 // indirect
-	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/hashicorp/golang-lru v0.6.0 // indirect
 	github.com/hashicorp/logutils v1.0.0 // indirect
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
