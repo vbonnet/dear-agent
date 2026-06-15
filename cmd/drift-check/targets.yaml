@@ -1,0 +1,89 @@
+# drift-check default deploy targets.
+#
+# Each target pairs a source of truth in this repo with the place that
+# artifact is deployed to on the host. drift-check hashes both and reports
+# DRIFT when they disagree — i.e. when a fix merged to main never reached the
+# machine (PR #456: a stop-hook change that was merged but never redeployed
+# leaked processes for two days).
+#
+# Fields:
+#   name         human label shown in output
+#   deployed     path of the installed copy on the host (~ and $ENV expanded)
+#   source       path of the source of truth, relative to the repo root
+#   tokens       placeholder -> deployed value, substituted into the source
+#                before hashing so a templated artifact (a plist) compares
+#                equal to its rendered, installed form (values are $ENV-expanded)
+#   remediation  the command that redeploys this artifact
+#   optional     true => a missing deployed file is "skipped", not drift
+#
+# Override this file with `drift-check --config <path>`.
+
+targets:
+  # --- Claude Code lifecycle hooks (agm admin install-hooks) -----------------
+  # These are embedded in the agm binary and written verbatim to ~/.claude/hooks
+  # by `agm admin install-hooks`, so a plain hash compare is exact. The stop
+  # hook below is the exact artifact whose stale deployment caused the PR #456
+  # gopls-leak incident.
+  - name: stop-hook (agm resource cleanup)
+    deployed: ~/.claude/hooks/stop-agm-resource-cleanup
+    source: agm/cmd/agm/hooks/stop-agm-resource-cleanup
+    remediation: agm admin install-hooks
+
+  - name: sessionend-closeout hook
+    deployed: ~/.claude/hooks/sessionend-closeout
+    source: agm/cmd/agm/hooks/sessionend-closeout
+    remediation: agm admin install-hooks
+
+  - name: session-start state-ready hook
+    deployed: ~/.claude/hooks/session-start-agm-state-ready
+    source: agm/cmd/agm/hooks/session-start-agm-state-ready
+    remediation: agm admin install-hooks
+
+  - name: session-start plan-continuity hook
+    deployed: ~/.claude/hooks/session-start-agm-plan-continuity
+    source: agm/cmd/agm/hooks/session-start-agm-plan-continuity
+    remediation: agm admin install-hooks
+
+  - name: pretool mode-tracker hook
+    deployed: ~/.claude/hooks/pretool-agm-mode-tracker
+    source: agm/cmd/agm/hooks/pretool-agm-mode-tracker
+    remediation: agm admin install-hooks
+
+  - name: posttool state-notify hook
+    deployed: ~/.claude/hooks/posttool-agm-state-notify
+    source: agm/cmd/agm/hooks/posttool-agm-state-notify
+    remediation: agm admin install-hooks
+
+  # --- launchd plists (templated; tokens render them to installed form) ------
+  # Optional: a given machine may not have installed every scheduled job.
+  - name: worktree-sweep launchagent
+    deployed: ~/Library/LaunchAgents/com.dear-agent.worktree-sweep.plist
+    source: agm/cmd/agm/schedules/com.dear-agent.worktree-sweep.plist
+    optional: true
+    tokens:
+      __USER_HOME__: ${HOME}
+      __AGM_BINARY__: ${HOME}/go/bin/agm
+    remediation: agm admin install-sweep-schedule
+
+  - name: bumblebee launchagent
+    deployed: ~/Library/LaunchAgents/com.dear-agent.bumblebee.plist
+    source: cmd/dear-agent-bumblebee/templates/com.dear-agent.bumblebee.plist
+    optional: true
+    tokens:
+      __USER_HOME__: ${HOME}
+      __BUMBLEBEE_BINARY__: ${HOME}/go/bin/dear-agent-bumblebee
+    remediation: make install-bumblebee-launchagent
+
+  # --- chezmoi-managed files -------------------------------------------------
+  # Claude Code settings.json and other dotfiles deploy from the chezmoi source
+  # tree, not from this repo, so their source of truth lives outside dear-agent.
+  # Add them with a source path pointing at the chezmoi checkout, e.g.:
+  #
+  #   - name: claude settings.json
+  #     deployed: ~/.claude/settings.json
+  #     source: ../../.local/share/chezmoi/dot_claude/settings.json   # adjust
+  #     remediation: chezmoi-deploy
+  #
+  # Left commented because the chezmoi source path is host-specific; enable it
+  # by pointing `source` at your chezmoi checkout (or run drift-check with a
+  # custom --config and --repo-root set to the chezmoi source dir).
