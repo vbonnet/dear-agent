@@ -83,7 +83,7 @@ func (p *Pusher) TriggerPush() error {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("vcs: async push goroutine panic: %v", r)
+					slog.Error("vcs: async push goroutine panic", "panic", r)
 				}
 			}()
 			if err := p.doPushWithRetry(3); err != nil {
