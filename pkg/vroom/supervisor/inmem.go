@@ -210,3 +210,42 @@ func (p *InMemoryResourceProbe) Snapshot(_ context.Context) (ResourceSnapshot, e
 	defer p.mu.Unlock()
 	return p.snap, nil
 }
+
+// InMemoryPermissionChecker is a configurable PermissionChecker for tests
+// and the cmd/vroom-mesh demo. Permissions are either allowed or denied
+// individually; unknown permissions default to allowed.
+type InMemoryPermissionChecker struct {
+	mu     sync.Mutex
+	denied map[string]string // perm token → reason for denial
+}
+
+// NewInMemoryPermissionChecker returns a checker that allows all permissions.
+func NewInMemoryPermissionChecker() *InMemoryPermissionChecker {
+	return &InMemoryPermissionChecker{denied: map[string]string{}}
+}
+
+// Deny marks a permission token as denied with the given reason.
+func (c *InMemoryPermissionChecker) Deny(perm, reason string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.denied[perm] = reason
+}
+
+// Allow removes a previous Deny — the token becomes allowed again.
+func (c *InMemoryPermissionChecker) Allow(perm string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.denied, perm)
+}
+
+// Check implements PermissionChecker.
+func (c *InMemoryPermissionChecker) Check(_ context.Context, perms []string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, p := range perms {
+		if reason, denied := c.denied[p]; denied {
+			return fmt.Errorf("permission %q denied: %s", p, reason)
+		}
+	}
+	return nil
+}

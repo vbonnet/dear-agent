@@ -5,9 +5,16 @@
 # The same GITHUB_TOKEN must have org:admin scope (or repo:admin + ruleset
 # write) on the dear-labs org.
 #
-# Enforcement is set to "evaluate" so the ruleset is active in audit mode:
-# violations are logged but merges are not blocked. Flip to "active" once
-# the org has repos and the team is comfortable with the rules.
+# Enforcement is "active". "evaluate" (audit-only) mode is GitHub
+# Enterprise-only and 422s on non-Enterprise accounts, so we enforce directly.
+# The org has no repos yet, so an active ruleset blocks nothing until repos
+# are added — at which point it immediately protects their default branch.
+#
+# NOTE: applying THIS resource requires a token with admin:org (ruleset write)
+# on dear-labs. The default `gh auth token` here carries only read:org, so a
+# full `tofu apply` will 403 on this resource. Apply it separately once an
+# admin:org-scoped token is available; the personal-repo rulesets in
+# rulesets.tf apply independently and do not depend on it.
 #
 # Required status checks are deliberately omitted at the org level: check
 # context names are repo-specific. Add a github_repository_ruleset per repo
@@ -19,12 +26,15 @@ resource "github_organization_ruleset" "baseline" {
   provider    = github.dearlabs
   name        = "baseline"
   target      = "branch"
-  enforcement = "evaluate"
+  enforcement = "active"
 
   conditions {
     ref_name {
-      # Apply to the default branch of every repo in the org.
       include = ["~DEFAULT_BRANCH"]
+      exclude = []
+    }
+    repository_name {
+      include = ["~ALL"]
       exclude = []
     }
   }
@@ -39,14 +49,9 @@ resource "github_organization_ruleset" "baseline" {
   #   }
 
   rules {
-    # Prevent branch deletion.
-    deletion {}
-
-    # Prevent force pushes.
-    non_fast_forward {}
-
-    # Require linear history (no merge commits).
-    required_linear_history {}
+    deletion                = true
+    non_fast_forward        = true
+    required_linear_history = true
 
     pull_request {
       required_approving_review_count   = 1

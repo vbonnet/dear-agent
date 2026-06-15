@@ -35,10 +35,14 @@
 #   install-jaeger-health   Install jaeger-health to ~/go/bin
 #   build-bead-pr-guard     Build the bead-PR duplicate-guard CLI (cmd/bead-pr-guard)
 #   install-bead-pr-guard   Install bead-pr-guard to ~/go/bin
+#   build-bead-close-guard  Build the DoD enforcement gate for bead closure (cmd/bead-close-guard)
+#   install-bead-close-guard Install bead-close-guard to ~/go/bin
 #   build-babysit-prs       Build babysit-prs: serial PR updater + merger
 #   install-babysit-prs     Install babysit-prs to ~/go/bin
+#   build-pr-linkify        Build pr-linkify: PR reference linkifier (cmd/pr-linkify)
+#   install-pr-linkify      Install pr-linkify to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-babysit-prs install-babysit-prs
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -214,6 +218,30 @@ install-safe-merge: build-safe-merge
 	cp bin/safe-merge $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/safe-merge"
 
+# Build safe-rebase: rebase feature branches onto main with safety checks.
+# Refuses protected branches, aborts on conflict, optionally force-pushes
+# + runs preflight in --auto mode.
+build-safe-rebase:
+	@echo "Building safe-rebase..."
+	go build $(GOFLAGS) -o bin/safe-rebase ./cmd/safe-rebase/
+	@echo "Built: bin/safe-rebase"
+
+# Install safe-rebase to GOPATH/bin.
+install-safe-rebase: build-safe-rebase
+	cp bin/safe-rebase $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-rebase"
+
+# Build safe-pr: wayfinder-traced wrapper for gh pr create/close.
+build-safe-pr:
+	@echo "Building safe-pr..."
+	go build $(GOFLAGS) -o bin/safe-pr ./cmd/safe-pr/
+	@echo "Built: bin/safe-pr"
+
+# Install safe-pr to GOPATH/bin.
+install-safe-pr: build-safe-pr
+	cp bin/safe-pr $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-pr"
+
 # Build src-recovery: the one sanctioned writer to ~/src/**. It restores a
 # golden checkout to a clean, current default branch via exactly stash ->
 # checkout default -> pull --ff-only, takes no pass-through git args, and
@@ -270,6 +298,19 @@ install-bead-pr-guard: build-bead-pr-guard
 	cp bin/bead-pr-guard $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/bead-pr-guard"
 
+# Enforces Definition of Done before bead closure: blocks `bd close` when
+# referenced PRs are not yet merged. Used by the pretool-bead-close-guard hook.
+# Usage: bead-close-guard --bead <id> [--repo owner/name] [--beads-dir /path]
+build-bead-close-guard:
+	@echo "Building bead-close-guard..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/bead-close-guard ./cmd/bead-close-guard/
+	@echo "Built: bin/bead-close-guard"
+
+install-bead-close-guard: build-bead-close-guard
+	cp bin/bead-close-guard $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/bead-close-guard"
+
 # Build babysit-prs: the serial PR updater + merger that works around the
 # "every merge makes remaining PRs BEHIND" problem from requiresLinearHistory=true.
 # For each open PR: gh pr update-branch --rebase (if BEHIND), then safe-merge.
@@ -283,6 +324,40 @@ build-babysit-prs:
 install-babysit-prs: build-babysit-prs
 	cp bin/babysit-prs $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/babysit-prs"
+
+# Build mergeloop: the Ralph Wiggum persistent PR-merge loop (ADR-029). Drives
+# every open PR toward MERGED with zero human mechanics — rebases behind
+# branches, spawns agents to fix CI/conflicts (--enable-agents), and delegates
+# the squash-merge to safe-merge. Escalates only for policy blocks. See
+# internal/mergeloop and ce-sbnd.
+build-mergeloop:
+	@echo "Building mergeloop..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/mergeloop ./cmd/mergeloop/
+	@echo "Built: bin/mergeloop"
+
+install-mergeloop: build-mergeloop
+	cp bin/mergeloop $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/mergeloop"
+
+# Install the launchd agent that runs `mergeloop tick` on an interval. The
+# plist is rendered from deploy/launchd/com.dear-agent.mergeloop.plist with the
+# real $$HOME substituted. NOTE: this only stages the plist — activating it
+# (launchctl bootstrap) is an ask-gated host action you must run yourself; the
+# target prints the exact command. This honors Defer-Don't-Block.
+install-mergeloop-launchagent: install-mergeloop
+	@mkdir -p $(HOME)/Library/LaunchAgents
+	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.dear-agent.mergeloop.plist \
+		> $(HOME)/Library/LaunchAgents/com.dear-agent.mergeloop.plist
+	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.mergeloop.plist"
+	@echo "Activate it yourself (ask-gated host action):"
+	@echo "  launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.dear-agent.mergeloop.plist"
+
+uninstall-mergeloop-launchagent:
+	@echo "Disable it yourself, then remove the plist:"
+	@echo "  launchctl bootout gui/$$(id -u)/com.dear-agent.mergeloop"
+	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.mergeloop.plist
+	@echo "Removed plist (if present)."
 
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
@@ -389,3 +464,12 @@ install-bumblebee-launchagent: build-bumblebee
 
 uninstall-bumblebee-launchagent: build-bumblebee
 	@./bin/dear-agent-bumblebee install-launchagent --uninstall
+
+build-pr-linkify:
+	@echo "Building pr-linkify..."
+	go build $(GOFLAGS) -o bin/pr-linkify ./cmd/pr-linkify/
+	@echo "Built: bin/pr-linkify"
+
+install-pr-linkify: build-pr-linkify
+	cp bin/pr-linkify $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/pr-linkify"

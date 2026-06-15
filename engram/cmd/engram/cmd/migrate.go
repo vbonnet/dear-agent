@@ -2,18 +2,22 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/engram/cmd/engram/internal/cli"
+	"github.com/vbonnet/dear-agent/internal/override"
 )
 
 var (
 	migrateWorkspaceFlag string
 	migrateDryRun        bool
 	migrateForce         bool
+	migrateReason        string
 )
 
 var migrateCmd = &cobra.Command{
@@ -58,7 +62,8 @@ func init() {
 	rootCmd.AddCommand(migrateCmd)
 	migrateCmd.Flags().StringVar(&migrateWorkspaceFlag, "workspace", "", "Target workspace name")
 	migrateCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Show what would be done without making changes")
-	migrateCmd.Flags().BoolVar(&migrateForce, "force", false, "Force migration even if target exists")
+	migrateCmd.Flags().BoolVar(&migrateForce, "force", false, "Force migration even if target exists (requires --reason)")
+	migrateCmd.Flags().StringVar(&migrateReason, "reason", "", "Justification for --force, recorded in the override audit log")
 }
 
 //nolint:gocyclo // reason: linear CLI driver dispatching across multiple migration commands
@@ -140,9 +145,17 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 	// Step 4: Check if target already exists
 	if _, err := os.Stat(targetPath); err == nil {
 		if !migrateForce {
-			return fmt.Errorf("target path already exists: %s\nUse --force to overwrite or choose a different workspace", targetPath)
+			return fmt.Errorf("target path already exists: %s\nUse --force --reason \"...\" to overwrite, or choose a different workspace", targetPath)
 		}
-		cli.PrintWarning(fmt.Sprintf("Target exists, will merge (--force enabled): %s", targetPath))
+		if gerr := override.Require(cmd.Context(), override.Guard{
+			Tool: "engram migrate",
+			Flag: "--force",
+			Gate: fmt.Sprintf("overwrite/merge of an existing target workspace at %s", targetPath),
+			Risk: override.RiskP1,
+		}, migrateReason); gerr != nil {
+			return gerr
+		}
+		cli.PrintWarning(fmt.Sprintf("Target exists, will merge (--force enabled, reason recorded): %s", targetPath))
 	}
 
 	// Step 5: Confirm with user
@@ -178,10 +191,17 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create target directory: %w", err)
 	}
 
-	// Step 8: Move data to target
+	// Step 8: Move data to target.
+	//
+	// We copy-merge rather than os.Rename: when the target already exists and
+	// is a non-empty directory (the --force overwrite/merge case), os.Rename
+	// fails with ENOTEMPTY because it will not merge directories. copyTree
+	// recursively merges the backup into the (possibly pre-existing) target.
+	// The backup is deliberately preserved (copy, not move) so the rollback
+	// instructions printed below remain valid even if a later step fails.
 	cli.PrintInfo(fmt.Sprintf("Moving data: %s → %s", backupPath, targetPath))
-	if err := os.Rename(backupPath, targetPath); err != nil {
-		// Rollback: restore backup
+	if err := copyTree(backupPath, targetPath); err != nil {
+		// Rollback: restore original data from the still-intact backup.
 		os.Rename(backupPath, legacyPath)
 		return fmt.Errorf("failed to move data: %w", err)
 	}
@@ -213,4 +233,92 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	return nil
+}
+
+// copyTree recursively copies the contents of src into dst, creating dst and
+// any missing subdirectories and overwriting existing files. Unlike os.Rename
+// it merges into a pre-existing, non-empty dst — required for the
+// `engram migrate --force` overwrite/merge path, where os.Rename would fail
+// with ENOTEMPTY. Symlinks are recreated rather than followed.
+//
+// The walk only collects entries; all filesystem mutations happen afterwards
+// in a separate pass. Doing the FS operations outside the WalkDir callback
+// avoids the race-prone in-callback traversal pattern (gosec G122). WalkDir
+// visits parents before children in lexical order, so directories are created
+// ahead of the files and symlinks they contain.
+func copyTree(src, dst string) error {
+	var entries []struct {
+		path string
+		d    fs.DirEntry
+	}
+	if err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		entries = append(entries, struct {
+			path string
+			d    fs.DirEntry
+		}{path, d})
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	for _, e := range entries {
+		rel, err := filepath.Rel(src, e.path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+
+		switch {
+		case e.d.IsDir():
+			info, err := e.d.Info()
+			if err != nil {
+				return err
+			}
+			if err := os.MkdirAll(target, info.Mode().Perm()); err != nil {
+				return err
+			}
+		case e.d.Type()&fs.ModeSymlink != 0:
+			linkDest, err := os.Readlink(e.path)
+			if err != nil {
+				return err
+			}
+			_ = os.Remove(target)
+			if err := os.Symlink(linkDest, target); err != nil {
+				return err
+			}
+		default:
+			if err := copyFile(e.path, target); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// copyFile copies a single regular file from src to dst, overwriting dst if it
+// exists and preserving the source file's permission bits.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
