@@ -42,7 +42,7 @@
 #   build-pr-linkify        Build pr-linkify: PR reference linkifier (cmd/pr-linkify)
 #   install-pr-linkify      Install pr-linkify to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -324,6 +324,40 @@ build-babysit-prs:
 install-babysit-prs: build-babysit-prs
 	cp bin/babysit-prs $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/babysit-prs"
+
+# Build mergeloop: the Ralph Wiggum persistent PR-merge loop (ADR-029). Drives
+# every open PR toward MERGED with zero human mechanics — rebases behind
+# branches, spawns agents to fix CI/conflicts (--enable-agents), and delegates
+# the squash-merge to safe-merge. Escalates only for policy blocks. See
+# internal/mergeloop and ce-sbnd.
+build-mergeloop:
+	@echo "Building mergeloop..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/mergeloop ./cmd/mergeloop/
+	@echo "Built: bin/mergeloop"
+
+install-mergeloop: build-mergeloop
+	cp bin/mergeloop $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/mergeloop"
+
+# Install the launchd agent that runs `mergeloop tick` on an interval. The
+# plist is rendered from deploy/launchd/com.dear-agent.mergeloop.plist with the
+# real $$HOME substituted. NOTE: this only stages the plist — activating it
+# (launchctl bootstrap) is an ask-gated host action you must run yourself; the
+# target prints the exact command. This honors Defer-Don't-Block.
+install-mergeloop-launchagent: install-mergeloop
+	@mkdir -p $(HOME)/Library/LaunchAgents
+	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.dear-agent.mergeloop.plist \
+		> $(HOME)/Library/LaunchAgents/com.dear-agent.mergeloop.plist
+	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.mergeloop.plist"
+	@echo "Activate it yourself (ask-gated host action):"
+	@echo "  launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.dear-agent.mergeloop.plist"
+
+uninstall-mergeloop-launchagent:
+	@echo "Disable it yourself, then remove the plist:"
+	@echo "  launchctl bootout gui/$$(id -u)/com.dear-agent.mergeloop"
+	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.mergeloop.plist
+	@echo "Removed plist (if present)."
 
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
