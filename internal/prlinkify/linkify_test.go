@@ -158,6 +158,39 @@ func TestFindRefsDedups(t *testing.T) {
 	}
 }
 
+// TestFindRefsIgnoresNonPRNumbers is a regression test: a "#NNN" that is not
+// part of a PR reference (e.g. an issue number) must not be reported, even when
+// the word "PR" appears elsewhere in the same segment.
+func TestFindRefsIgnoresNonPRNumbers(t *testing.T) {
+	refs := FindRefs("PR #123 and issue #456", defaultCfg)
+	if len(refs) != 1 {
+		t.Fatalf("want 1 ref (only the PR), got %d: %+v", len(refs), refs)
+	}
+	if refs[0].Number != "123" {
+		t.Errorf("want #123, got #%s", refs[0].Number)
+	}
+}
+
+func TestFindRefsPlural(t *testing.T) {
+	refs := FindRefs("merged PRs #1, #2 and #3, plus issue #99", defaultCfg)
+	if len(refs) != 3 {
+		t.Fatalf("want 3 PR refs, got %d: %+v", len(refs), refs)
+	}
+	got := []string{refs[0].Number, refs[1].Number, refs[2].Number}
+	want := []string{"1", "2", "3"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("ref[%d] = #%s, want #%s", i, got[i], want[i])
+		}
+	}
+}
+
+func TestFindRefsEmpty(t *testing.T) {
+	if refs := FindRefs("no refs and issue #456 only", defaultCfg); len(refs) != 0 {
+		t.Errorf("want no refs, got %+v", refs)
+	}
+}
+
 func TestPluralThenSingularNoDoubleLink(t *testing.T) {
 	input := "PRs #1, #2 and PR #3"
 	got := Linkify(input, defaultCfg)
