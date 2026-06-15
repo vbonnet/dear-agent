@@ -408,6 +408,40 @@ cross-references closed beads citing `#NNN` PR refs against live PR state and
 reopens any DoD violators. If you find a closed bead whose PR is still open,
 that is a defect — reopen the bead and let the reconciler catch the class.
 
+## Stale PR Strategy — safe-rebase (MANDATORY)
+
+When a PR has merge conflicts or is behind main, use `safe-rebase` — the
+approved, deterministic merge strategy for agents:
+
+```
+safe-rebase -C ~/worktrees/dear-agent/<branch>
+safe-rebase -C ~/worktrees/dear-agent/<branch> --auto   # rebase + push + preflight
+```
+
+**What it does:**
+
+1. Fetches latest `origin/main`
+2. Runs `git rebase origin/main` on the current feature branch
+3. **On conflict:** aborts the rebase cleanly, reports the conflicting files,
+   and exits non-zero — agents MUST NOT auto-resolve conflicts
+4. **On clean rebase:** reports success; with `--auto`, force-pushes
+   (`--force-with-lease`) and runs `make preflight`
+
+**Safety invariants:**
+
+- **REFUSES** to operate on protected branches (main, master, develop, release)
+- Force-push uses `--force-with-lease`, not `--force` — protects against
+  upstream changes by someone else
+- Network ops bounded by timeout + `GIT_TERMINAL_PROMPT=0`
+- Every operation audit-logged to `~/.local/state/dear-agent/safe-rebase-audit.jsonl`
+
+**When to use `--auto`:** for mechanical PRs where the rebase cannot
+introduce semantic conflicts (dependency bumps, docs-only, generated code).
+For PRs with logic changes, omit `--auto` and review the rebase result
+before pushing.
+
+**Build:** `make build-safe-rebase && make install-safe-rebase`
+
 ## Living Documentation Policy (MANDATORY)
 
 Documentation in this repo must be **living** — it describes the current
