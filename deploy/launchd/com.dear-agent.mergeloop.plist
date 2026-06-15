@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent for the Ralph Wiggum persistent PR-merge loop (ADR-029).
+  Runs `mergeloop tick` every 10 minutes. The plist is a TEMPLATE: the install
+  target (make install-mergeloop-launchagent) substitutes __HOME__ for the real
+  home directory before staging it into ~/Library/LaunchAgents.
+
+  Agent code-fixing (--enable-agents) is intentionally OFF here: until the host
+  dispatch substrate + auth land (ce-cd14 / ce-m3ya), the loop rebases and
+  merges mechanically and defers CI/conflict PRs with a handoff note rather
+  than spawning agents that would fail on missing auth. Add --enable-agents to
+  ProgramArguments once that substrate is ready.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dear-agent.mergeloop</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/go/bin/mergeloop</string>
+    <string>tick</string>
+    <string>--repo</string>
+    <string>vbonnet/dear-agent</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>GIT_TERMINAL_PROMPT</key>
+    <string>0</string>
+  </dict>
+
+  <!-- One tick every 10 minutes. Each tick is idempotent. -->
+  <key>StartInterval</key>
+  <integer>600</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Never let two ticks overlap. -->
+  <key>AbandonProcessGroup</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.local/state/dear-agent/mergeloop.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.local/state/dear-agent/mergeloop.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
