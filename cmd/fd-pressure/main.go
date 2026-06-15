@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -52,7 +53,7 @@ type config struct {
 	thresholdGopls  int
 }
 
-func run(args []string, out *os.File) (int, error) {
+func run(args []string, out io.Writer) (int, error) {
 	fs := flag.NewFlagSet("fd-pressure", flag.ContinueOnError)
 	fs.SetOutput(out)
 	cfg := config{}
@@ -122,7 +123,7 @@ func evaluate(snap supervisor.ResourceSnapshot, cfg config) []breach {
 	return out
 }
 
-func emitJSON(out *os.File, snap supervisor.ResourceSnapshot, breaches []breach) error {
+func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot, breaches []breach) error {
 	type report struct {
 		Snapshot supervisor.ResourceSnapshot `json:"snapshot"`
 		Breaches []breach                    `json:"breaches"`
@@ -137,7 +138,7 @@ func emitJSON(out *os.File, snap supervisor.ResourceSnapshot, breaches []breach)
 	})
 }
 
-func emitTable(out *os.File, snap supervisor.ResourceSnapshot, breaches []breach, cfg config) {
+func emitTable(out io.Writer, snap supervisor.ResourceSnapshot, breaches []breach, cfg config) {
 	prefix := func(v float64, thresh float64) string {
 		if v >= thresh {
 			return "!"

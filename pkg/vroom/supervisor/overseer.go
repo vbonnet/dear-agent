@@ -123,7 +123,13 @@ func NewOverseer(trail decisiontrail.Trail, probe ResourceProbe, threshold Escal
 		return nil, errors.New("supervisor: Overseer requires a ResourceProbe")
 	}
 	if threshold.Fraction <= 0 {
-		threshold = DefaultEscalationThreshold
+		threshold.Fraction = DefaultEscalationThreshold.Fraction
+	}
+	if threshold.SwapFraction <= 0 {
+		threshold.SwapFraction = DefaultEscalationThreshold.SwapFraction
+	}
+	if threshold.GoplsProcesses <= 0 {
+		threshold.GoplsProcesses = DefaultEscalationThreshold.GoplsProcesses
 	}
 	return &Overseer{trail: trail, probe: probe, threshold: threshold}, nil
 }

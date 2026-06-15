@@ -113,14 +113,14 @@ func sysFDUsedFraction() float64 {
 	if err != nil || alloc < 0 {
 		return 0
 	}
-	max, err := strconv.ParseInt(fields[2], 10, 64)
-	if err != nil || max <= 0 {
+	maxFDs, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil || maxFDs <= 0 {
 		return 0
 	}
-	if alloc >= max {
+	if alloc >= maxFDs {
 		return 1
 	}
-	return float64(alloc) / float64(max)
+	return float64(alloc) / float64(maxFDs)
 }
 
 // sysVnodeUsedFraction returns 0 on Linux — the vnode abstraction is Darwin-

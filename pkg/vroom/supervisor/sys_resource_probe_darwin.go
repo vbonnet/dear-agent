@@ -91,18 +91,12 @@ func sysSwapUsedFraction() float64 {
 //   - kern.num_files  — current number of open file descriptors system-wide
 //   - kern.maxfiles   — system-wide FD limit
 func sysFDUsedFraction() float64 {
-	numRaw, err := unix.SysctlRaw("kern.num_files")
-	if err != nil || len(numRaw) < 4 {
+	numFiles, err := syscall.SysctlUint32("kern.num_files")
+	if err != nil {
 		return 0
 	}
-	maxRaw, err := unix.SysctlRaw("kern.maxfiles")
-	if err != nil || len(maxRaw) < 4 {
-		return 0
-	}
-	// Both are signed int32 in the kernel; positive values fit safely in uint32.
-	numFiles := int32(*(*uint32)(unsafe.Pointer(&numRaw[0]))) //nolint:gosec // signed kernel int, always positive
-	maxFiles := int32(*(*uint32)(unsafe.Pointer(&maxRaw[0]))) //nolint:gosec // signed kernel int, always positive
-	if maxFiles <= 0 || numFiles < 0 {
+	maxFiles, err := syscall.SysctlUint32("kern.maxfiles")
+	if err != nil || maxFiles == 0 {
 		return 0
 	}
 	if numFiles >= maxFiles {
@@ -119,17 +113,12 @@ func sysFDUsedFraction() float64 {
 //   - kern.num_vnodes  — current vnode count
 //   - kern.maxvnodes   — vnode table size limit
 func sysVnodeUsedFraction() float64 {
-	numRaw, err := unix.SysctlRaw("kern.num_vnodes")
-	if err != nil || len(numRaw) < 4 {
+	numVnodes, err := syscall.SysctlUint32("kern.num_vnodes")
+	if err != nil {
 		return 0
 	}
-	maxRaw, err := unix.SysctlRaw("kern.maxvnodes")
-	if err != nil || len(maxRaw) < 4 {
-		return 0
-	}
-	numVnodes := int32(*(*uint32)(unsafe.Pointer(&numRaw[0]))) //nolint:gosec // signed kernel int, always positive
-	maxVnodes := int32(*(*uint32)(unsafe.Pointer(&maxRaw[0]))) //nolint:gosec // signed kernel int, always positive
-	if maxVnodes <= 0 || numVnodes < 0 {
+	maxVnodes, err := syscall.SysctlUint32("kern.maxvnodes")
+	if err != nil || maxVnodes == 0 {
 		return 0
 	}
 	if numVnodes >= maxVnodes {
