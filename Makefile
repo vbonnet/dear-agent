@@ -35,10 +35,12 @@
 #   install-jaeger-health   Install jaeger-health to ~/go/bin
 #   build-bead-pr-guard     Build the bead-PR duplicate-guard CLI (cmd/bead-pr-guard)
 #   install-bead-pr-guard   Install bead-pr-guard to ~/go/bin
+#   build-bead-close-guard  Build the DoD enforcement gate for bead closure (cmd/bead-close-guard)
+#   install-bead-close-guard Install bead-close-guard to ~/go/bin
 #   build-babysit-prs       Build babysit-prs: serial PR updater + merger
 #   install-babysit-prs     Install babysit-prs to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-babysit-prs install-babysit-prs
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -269,6 +271,19 @@ build-bead-pr-guard:
 install-bead-pr-guard: build-bead-pr-guard
 	cp bin/bead-pr-guard $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/bead-pr-guard"
+
+# Enforces Definition of Done before bead closure: blocks `bd close` when
+# referenced PRs are not yet merged. Used by the pretool-bead-close-guard hook.
+# Usage: bead-close-guard --bead <id> [--repo owner/name] [--beads-dir /path]
+build-bead-close-guard:
+	@echo "Building bead-close-guard..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/bead-close-guard ./cmd/bead-close-guard/
+	@echo "Built: bin/bead-close-guard"
+
+install-bead-close-guard: build-bead-close-guard
+	cp bin/bead-close-guard $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/bead-close-guard"
 
 # Build babysit-prs: the serial PR updater + merger that works around the
 # "every merge makes remaining PRs BEHIND" problem from requiresLinearHistory=true.
