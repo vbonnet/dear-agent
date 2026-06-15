@@ -17,7 +17,6 @@ fi
 
 ACTIVE_REPOS=(
   dear-agent
-  engram
   brain-v2
   engram-research
   vbonnet.ai
@@ -33,6 +32,7 @@ ACTIVE_REPOS=(
 )
 
 ARCHIVED_REPOS=(
+  engram
   ai-tools
   comp-520-peephole-compiler
   comp-520
@@ -49,7 +49,18 @@ imp() {
   if err=$(tofu import "$addr" "$id" 2>&1 >/dev/null); then
     echo "imported: $addr"
   else
-    if [[ "$err" =~ "not found" || "$err" =~ "404" || "$err" =~ "associated" ]]; then
+    # Non-fatal "nothing to import" cases — the resource does not exist yet, so
+    # `tofu plan` will correctly propose creating it. Each matched phrase is a
+    # real provider message for a missing remote object:
+    #   - "not found" / "404"  : repo or dependabot config absent
+    #   - "associated"         : no security config associated
+    #   - "could not find a branch protection rule with the pattern '<branch>'"
+    #                            : repo has no branch protection yet (most repos
+    #                            here are pre-rulesets, so this is the common case)
+    if [[ "$err" == *"not found"* ||
+          "$err" == *"404"* ||
+          "$err" == *"associated"* ||
+          "$err" == *"could not find a branch protection rule"* ]]; then
       echo "not imported (will be CREATED by plan): $addr"
     else
       echo "Error: Failed to import $addr" >&2
