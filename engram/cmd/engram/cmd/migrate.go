@@ -240,34 +240,62 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 // it merges into a pre-existing, non-empty dst — required for the
 // `engram migrate --force` overwrite/merge path, where os.Rename would fail
 // with ENOTEMPTY. Symlinks are recreated rather than followed.
+//
+// The walk only collects entries; all filesystem mutations happen afterwards
+// in a separate pass. Doing the FS operations outside the WalkDir callback
+// avoids the race-prone in-callback traversal pattern (gosec G122). WalkDir
+// visits parents before children in lexical order, so directories are created
+// ahead of the files and symlinks they contain.
 func copyTree(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+	var entries []struct {
+		path string
+		d    fs.DirEntry
+	}
+	if err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(src, path)
+		entries = append(entries, struct {
+			path string
+			d    fs.DirEntry
+		}{path, d})
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	for _, e := range entries {
+		rel, err := filepath.Rel(src, e.path)
 		if err != nil {
 			return err
 		}
 		target := filepath.Join(dst, rel)
 
-		if d.IsDir() {
-			info, err := d.Info()
+		switch {
+		case e.d.IsDir():
+			info, err := e.d.Info()
 			if err != nil {
 				return err
 			}
-			return os.MkdirAll(target, info.Mode().Perm())
-		}
-		if d.Type()&fs.ModeSymlink != 0 {
-			linkDest, err := os.Readlink(path)
+			if err := os.MkdirAll(target, info.Mode().Perm()); err != nil {
+				return err
+			}
+		case e.d.Type()&fs.ModeSymlink != 0:
+			linkDest, err := os.Readlink(e.path)
 			if err != nil {
 				return err
 			}
 			_ = os.Remove(target)
-			return os.Symlink(linkDest, target)
+			if err := os.Symlink(linkDest, target); err != nil {
+				return err
+			}
+		default:
+			if err := copyFile(e.path, target); err != nil {
+				return err
+			}
 		}
-		return copyFile(path, target)
-	})
+	}
+	return nil
 }
 
 // copyFile copies a single regular file from src to dst, overwriting dst if it
