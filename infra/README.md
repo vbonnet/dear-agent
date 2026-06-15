@@ -17,6 +17,7 @@ infra/
 ├── locals.tf                 # Repo inventory with per-repo required CI checks
 ├── repos.tf                  # github_repository + dependabot resources
 ├── branch_protection.tf      # github_branch_protection (vbonnet/* repos)
+├── rulesets.tf               # github_repository_ruleset (vbonnet/* repos, active)
 ├── dear_labs.tf              # github_organization_ruleset (dear-labs org)
 ├── import.sh                 # Import existing state before first apply
 ├── terraform.tfvars.example  # Copy → terraform.tfvars to override defaults
@@ -90,9 +91,13 @@ still get the PR-required + no-force-push rules — they just have no check gate
 
 ### dear-labs org (`dear_labs.tf`)
 
-A baseline `github_organization_ruleset` in **evaluate mode** (audit-only, merges
-are not blocked). Covers every repo's default branch as soon as repos are added
-to the org. Flip `enforcement = "active"` to enforce once the team is comfortable.
+A baseline `github_organization_ruleset` in **active mode**. (`evaluate`/
+audit-only mode is GitHub Enterprise-only and 422s on non-Enterprise accounts,
+so the ruleset enforces directly.) The org has no repos yet, so it blocks
+nothing until repos are added, at which point it immediately protects their
+default branch. Applying this resource needs a token with `admin:org` on
+dear-labs — see the note in `dear_labs.tf`; the personal-repo rulesets apply
+independently of it.
 
 Rules:
 - No branch deletion
@@ -115,13 +120,19 @@ names are known.
   makes the rule a no-op; we simply omit the block.
 - **`enforce_admins = false`.** Solo-maintainer workflow where the owner must
   be able to merge their own PRs. Raise per-repo for shared repos.
-- **dear-labs starts in evaluate mode.** The org has no repos yet; evaluate
-  lets rules be validated before they block anyone.
+- **dear-labs runs in active mode.** `evaluate` (audit-only) mode is
+  Enterprise-only and 422s on non-Enterprise accounts. The org has no repos
+  yet, so active enforcement blocks nothing until repos are added.
 - **Archived repos are frozen.** `ai-tools`, `comp-520`, `comp-520-peephole-compiler`
   are declared with `ignore_changes = all` because GitHub rejects mutations.
-- **Personal account, not an org.** `vbonnet/*` uses `github_branch_protection`,
-  not rulesets — rulesets require an org account or GitHub Enterprise for the
-  org-level resource.
+  `engram` is likewise archived and is therefore **excluded** from
+  `active_repos` — a ruleset cannot be applied to an archived repo.
+- **Personal Pro account, no merge queues.** Repository rulesets
+  (`rulesets.tf`) work on GitHub Pro and run in `active` enforcement —
+  `evaluate` mode is Enterprise-only. Merge-queue rulesets require an
+  **organization** account, so none is defined; `vbonnet/*` keeps the existing
+  `github_branch_protection` resources alongside the rulesets until the
+  rulesets are validated.
 
 ## Adding a new repo
 

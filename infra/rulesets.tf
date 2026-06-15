@@ -1,25 +1,30 @@
 ###############################################################################
 # Repository rulesets for vbonnet/* personal repositories.
 #
-# Rulesets are the successor to branch protection rules. They support merge
-# queues, layered enforcement, and audit-mode ("evaluate"). This file adds
+# Rulesets are the successor to branch protection rules. This file adds
 # rulesets alongside the existing github_branch_protection resources; once
-# validated in evaluate mode, flip enforcement to "active" and remove
-# branch_protection.tf.
+# validated, the legacy github_branch_protection resources in
+# branch_protection.tf can be removed.
 #
-# Availability: repository-level rulesets require GitHub Pro for private repos.
-# Merge queue requires rulesets (not available via branch protection rules).
+# Availability / personal-Pro constraints:
+#   - Repository-level rulesets work on GitHub Pro ($4/mo) for private repos.
+#   - enforcement = "active" is the only mode available here. "evaluate"
+#     (audit-only) mode is GitHub Enterprise-only — it 422s on a personal
+#     account, so this file uses "active" throughout.
+#   - Merge-queue rulesets require an ORGANIZATION account and are NOT
+#     available on a personal account, so no merge_queue ruleset is defined
+#     here. (Merge queues were tried and removed for this reason.)
 #
-# Provider: integrations/github ~> 6.0 (merge_queue support added in v6.8).
+# Provider: integrations/github ~> 6.0.
 ###############################################################################
 
 # -----------------------------------------------------------------------------
 # Branch protection ruleset — applied to ALL active repos.
 #
-# Mirrors the existing github_branch_protection config but in ruleset form.
-# Starts in "evaluate" mode so violations are logged but merges are not
-# blocked. Once validated, flip enforcement to "active" and remove the
-# legacy github_branch_protection resources in branch_protection.tf.
+# Mirrors the existing github_branch_protection config but in ruleset form,
+# in "active" enforcement (the only mode available on a personal Pro account).
+# Once validated, the legacy github_branch_protection resources in
+# branch_protection.tf can be removed.
 # -----------------------------------------------------------------------------
 
 resource "github_repository_ruleset" "branch_protection" {
@@ -28,7 +33,7 @@ resource "github_repository_ruleset" "branch_protection" {
   repository  = each.key
   name        = "branch-protection"
   target      = "branch"
-  enforcement = "evaluate"
+  enforcement = "active"
 
   conditions {
     ref_name {
@@ -67,38 +72,11 @@ resource "github_repository_ruleset" "branch_protection" {
 }
 
 # -----------------------------------------------------------------------------
-# Merge queue ruleset — initially dear-agent only.
+# Merge-queue ruleset: intentionally NOT defined.
 #
-# Enables the GitHub merge queue with squash-and-merge. PRs enter a queue,
-# are tested together in groups, and merge only if all checks pass.
-#
-# Expand to other repos by adding entries to local.merge_queue_repos.
+# GitHub merge queues require an ORGANIZATION account; they are unavailable on
+# a personal account (even GitHub Pro). The previous merge_queue ruleset (and
+# its local.merge_queue_repos input) was removed for this reason. If these
+# repos ever move under an org, reintroduce a github_repository_ruleset with a
+# merge_queue rule and a merge_queue_repos local.
 # -----------------------------------------------------------------------------
-
-resource "github_repository_ruleset" "merge_queue" {
-  for_each = local.merge_queue_repos
-
-  repository  = each.key
-  name        = "merge-queue"
-  target      = "branch"
-  enforcement = "active"
-
-  conditions {
-    ref_name {
-      include = ["~DEFAULT_BRANCH"]
-      exclude = []
-    }
-  }
-
-  rules {
-    merge_queue {
-      merge_method                     = "SQUASH"
-      min_entries_to_merge             = each.value.min_group_size
-      max_entries_to_merge             = each.value.max_group_size
-      max_entries_to_build             = each.value.max_group_size
-      grouping_strategy                = "ALLGREEN"
-      check_response_timeout_minutes   = each.value.check_timeout_minutes
-      min_entries_to_merge_wait_minutes = 0
-    }
-  }
-}

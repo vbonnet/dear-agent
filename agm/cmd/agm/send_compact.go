@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,13 +15,15 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/override"
 )
 
 var (
-	compactFocus string
+	compactFocus  string
 	compactVerify bool
 	compactDryRun bool
-	compactForce bool
+	compactForce  bool
+	compactReason string
 )
 
 var sendCompactCmd = &cobra.Command{
@@ -62,7 +65,8 @@ func init() {
 	sendCompactCmd.Flags().StringVar(&compactFocus, "focus", "", "Custom preservation instructions appended to compaction prompt")
 	sendCompactCmd.Flags().BoolVar(&compactVerify, "verify", false, "Poll session state every 10s until compaction completes")
 	sendCompactCmd.Flags().BoolVar(&compactDryRun, "dry-run", false, "Output the compaction prompt without sending")
-	sendCompactCmd.Flags().BoolVar(&compactForce, "force", false, "Override anti-loop safety (cooldown and max compactions)")
+	sendCompactCmd.Flags().BoolVar(&compactForce, "force", false, "Override anti-loop safety (cooldown and max compactions) — requires --reason")
+	sendCompactCmd.Flags().StringVar(&compactReason, "reason", "", "Justification for --force, recorded in the override audit log")
 	sendGroupCmd.AddCommand(sendCompactCmd)
 }
 
@@ -110,6 +114,18 @@ func runSendCompact(_ *cobra.Command, args []string) error {
 	if err != nil {
 		ui.PrintWarning(fmt.Sprintf("Could not load compaction state: %v (proceeding without anti-loop checks)", err))
 		compState = &compaction.CompactionState{SessionName: sessionName}
+	}
+
+	// Anti-loop bypass requires a recorded justification.
+	if compactForce {
+		if gerr := override.Require(context.Background(), override.Guard{
+			Tool: "agm send-compact",
+			Flag: "--force",
+			Gate: "anti-loop guard (compaction cooldown and max-compactions cap)",
+			Risk: override.RiskP0,
+		}, compactReason); gerr != nil {
+			return gerr
+		}
 	}
 
 	// Pre-flight checks
