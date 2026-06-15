@@ -6,9 +6,13 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+	"github.com/vbonnet/dear-agent/internal/override"
 )
 
-var sendEnterForce bool
+var (
+	sendEnterForce  bool
+	sendEnterReason string
+)
 
 var sendEnterCmd = &cobra.Command{
 	Use:   "enter <session-name>",
@@ -28,7 +32,8 @@ Examples:
 }
 
 func init() {
-	sendEnterCmd.Flags().BoolVar(&sendEnterForce, "force", false, "Skip input content check and send Enter unconditionally")
+	sendEnterCmd.Flags().BoolVar(&sendEnterForce, "force", false, "Skip input content check and send Enter unconditionally — requires --reason")
+	sendEnterCmd.Flags().StringVar(&sendEnterReason, "reason", "", "Justification for --force, recorded in the override audit log")
 	sendGroupCmd.AddCommand(sendEnterCmd)
 }
 
@@ -41,6 +46,18 @@ func runSendEnter(cmd *cobra.Command, args []string) (retErr error) {
 			"force": fmt.Sprintf("%v", sendEnterForce),
 		}, retErr)
 	}()
+
+	// The --force bypass of the empty-input check requires a recorded reason.
+	if sendEnterForce {
+		if gerr := override.Require(cmd.Context(), override.Guard{
+			Tool: "agm send-enter",
+			Flag: "--force",
+			Gate: "empty-input check (refuses to submit a blank line)",
+			Risk: override.RiskP2,
+		}, sendEnterReason); gerr != nil {
+			return gerr
+		}
+	}
 
 	// Step 1: Capture pane to check input line content
 	if !sendEnterForce {

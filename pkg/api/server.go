@@ -449,6 +449,11 @@ func (e *ExecRunner) Run(_ context.Context, req RunRequest, caller Caller) (RunR
 	// the request that triggered the run has already returned. We do
 	// not want cancelling the request to also kill the child.
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("workflow-run goroutine panic", "pid", pid, "panic", r)
+			}
+		}()
 		if err := cmd.Wait(); err != nil {
 			logger.Warn("workflow-run exited", "pid", pid, "err", err)
 		} else {

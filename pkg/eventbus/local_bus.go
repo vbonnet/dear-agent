@@ -131,6 +131,11 @@ func (b *LocalBus) Emit(ctx context.Context, event *Event) error {
 	b.dispatchSinks(ctx, event, &wg)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("eventbus: wait goroutine panic", "panic", r)
+			}
+		}()
 		wg.Wait()
 		close(done)
 	}()

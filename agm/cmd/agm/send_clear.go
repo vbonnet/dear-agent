@@ -7,9 +7,13 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
+	"github.com/vbonnet/dear-agent/internal/override"
 )
 
-var sendClearForce bool
+var (
+	sendClearForce  bool
+	sendClearReason string
+)
 
 var sendClearCmd = &cobra.Command{
 	Use:   "clear <session-name>",
@@ -30,12 +34,26 @@ Examples:
 }
 
 func init() {
-	sendClearCmd.Flags().BoolVar(&sendClearForce, "force", false, "Bypass safety checks")
+	sendClearCmd.Flags().BoolVar(&sendClearForce, "force", false, "Bypass safety checks — requires --reason")
+	sendClearCmd.Flags().StringVar(&sendClearReason, "reason", "", "Justification for --force, recorded in the override audit log")
 	sendGroupCmd.AddCommand(sendClearCmd)
 }
 
 func runSendClear(cmd *cobra.Command, args []string) error {
 	sessionName := args[0]
+
+	// The --force escalation (extra C-a C-k clear sequence, bypassing the
+	// post-clear safety check) requires a recorded justification.
+	if sendClearForce {
+		if gerr := override.Require(cmd.Context(), override.Guard{
+			Tool: "agm send-clear",
+			Flag: "--force",
+			Gate: "post-clear safety check (escalates to an unconditional C-a C-k clear)",
+			Risk: override.RiskP2,
+		}, sendClearReason); gerr != nil {
+			return gerr
+		}
+	}
 
 	// Step 1: Capture pane before clearing
 	beforeContent, err := tmux.CapturePaneOutput(sessionName, 50)
