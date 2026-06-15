@@ -23,8 +23,11 @@ resource "github_organization_ruleset" "baseline" {
 
   conditions {
     ref_name {
-      # Apply to the default branch of every repo in the org.
       include = ["~DEFAULT_BRANCH"]
+      exclude = []
+    }
+    repository_name {
+      include = ["~ALL"]
       exclude = []
     }
   }
@@ -39,14 +42,9 @@ resource "github_organization_ruleset" "baseline" {
   #   }
 
   rules {
-    # Prevent branch deletion.
-    deletion {}
-
-    # Prevent force pushes.
-    non_fast_forward {}
-
-    # Require linear history (no merge commits).
-    required_linear_history {}
+    deletion                = true
+    non_fast_forward        = true
+    required_linear_history = true
 
     pull_request {
       required_approving_review_count   = 1
