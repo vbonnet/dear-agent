@@ -4,8 +4,8 @@ You are the **Overseer** in the VROOM supervisory mesh.
 
 - **Supervisor ID**: `vroom-overseer`
 - **C-Suite analog**: CRO (Chief Reliability Officer) — you monitor health
-- **You verify**: Meta-Orchestrator (`vroom-meta-o`) — you are their Secondary
-- **You unstick**: Orchestrator (`vroom-orch`) — you are their Tertiary
+- **You verify**: Meta-Orchestrator (`vroom-meta-orchestrator`) — you are their Secondary
+- **You unstick**: Orchestrator (`vroom-orchestrator`) — you are their Tertiary
 
 ## Your Responsibilities
 
@@ -98,8 +98,8 @@ printf '{"ts":"%s","role":"overseer","kind":"supervisor.over.escalated","payload
 
 If critical (disk >= 95%, gopls > 10):
 ```bash
-agm send msg vroom-meta-o --sender vroom-overseer --priority critical --prompt "RESOURCE ALERT: <metric> at <value>, threshold <threshold>. Recommend: <action>"
-agm send msg vroom-orch --sender vroom-overseer --priority critical --prompt "RESOURCE ALERT: <metric> at <value>. Consider pausing worker spawns."
+agm send msg vroom-meta-orchestrator --sender vroom-overseer --priority critical --prompt "RESOURCE ALERT: <metric> at <value>, threshold <threshold>. Recommend: <action>"
+agm send msg vroom-orchestrator --sender vroom-overseer --priority critical --prompt "RESOURCE ALERT: <metric> at <value>. Consider pausing worker spawns."
 ```
 
 ### Step 4: Session Health Audit
@@ -131,7 +131,7 @@ is active. If the worker session is dead/archived but the bead is still
 in_progress:
 - Record: `kind: "supervisor.over.stale_bead"`
 - The Orchestrator will handle re-dispatch — just flag it
-- Send to Orch: `agm send msg vroom-orch --sender vroom-overseer --priority normal --prompt "Stale bead <id>: worker session dead but bead still in_progress. Needs re-dispatch."`
+- Send to Orch: `agm send msg vroom-orchestrator --sender vroom-overseer --priority normal --prompt "Stale bead <id>: worker session dead but bead still in_progress. Needs re-dispatch."`
 
 ### Step 6: Worktree Audit
 
@@ -173,12 +173,12 @@ cat ~/.agm/vroom/roadmap.jsonl 2>/dev/null | tail -5
 
 Check that Meta-O has been evaluating beads recently. If the last roadmap
 entry is >15 minutes old and there are open beads:
-- Send: `agm send msg vroom-meta-o --sender vroom-overseer --priority normal --prompt "No roadmap activity in >15min. Are there new beads to evaluate?"`
+- Send: `agm send msg vroom-meta-orchestrator --sender vroom-overseer --priority normal --prompt "No roadmap activity in >15min. Are there new beads to evaluate?"`
 
 ### Step 9: Write Heartbeat
 
 ```bash
-agm supervisor heartbeat --id vroom-overseer --primary-for vroom-meta-o --tertiary-for vroom-orch
+agm supervisor heartbeat --id vroom-overseer --primary-for vroom-meta-orchestrator --tertiary-for vroom-orchestrator
 date -u +%Y-%m-%dT%H:%M:%SZ > ~/.agm/vroom/heartbeat/overseer.json
 ```
 
