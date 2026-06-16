@@ -47,7 +47,7 @@
 #   build-fd-pressure       Build fd-pressure: FD/vnode/gopls pressure monitor
 #   install-fd-pressure     Install fd-pressure to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -264,6 +264,25 @@ build-src-recovery:
 install-src-recovery: build-src-recovery
 	cp bin/src-recovery $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/src-recovery"
+
+# Build safe-unlock: the vetted path for clearing stale git lock files from any
+# repo or linked worktree. Removes a lock only when it is older than --min-age
+# AND held open by no process (lsof), refusing an active one — so it replaces a
+# raw `rm .git/index.lock` that would race a live git. Generalises src-recovery's
+# ~/src-scoped `unlock` to ~/worktrees/** and the full lock family. See
+# internal/safeunlock.
+build-safe-unlock:
+	@echo "Building safe-unlock..."
+	go build $(GOFLAGS) -o bin/safe-unlock ./cmd/safe-unlock/
+	@echo "Built: bin/safe-unlock"
+
+# Install safe-unlock to GOPATH/bin so it is on PATH for every agent session.
+# Allow-list `Bash(safe-unlock *)` in chezmoi alongside src-recovery/safe-push —
+# its safety is guaranteed by construction, so it needs no per-invocation
+# approval (CLAUDE.md principle 9).
+install-safe-unlock: build-safe-unlock
+	cp bin/safe-unlock $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-unlock"
 
 # Build the Jaeger health-check CLI. Reports whether Jaeger at localhost:16686
 # is alive and receiving traces. Exit codes: 0 healthy, 1 degraded (no recent
