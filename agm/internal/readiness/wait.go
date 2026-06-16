@@ -7,12 +7,55 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 )
+
+// Ready-file wait timeout bounds. The association ready-file is created by
+// `agm session associate` the moment it finishes — on the happy path that is a
+// few seconds after Claude reaches its prompt. The previous 60s default meant a
+// *failed* init (e.g. the agm plugin slash command not loading in a spawned
+// sandbox, so `/agm:agm-assoc` is "Unknown command" and no ready-file is ever
+// written) blocked the spawner for a full minute before surfacing an
+// actionable error. A short default fails fast; operators who legitimately need
+// longer (cold caches, slow CI hosts) raise it via AGM_READY_TIMEOUT_SECONDS.
+const (
+	defaultReadyTimeout = 15 * time.Second
+	minReadyTimeout     = 5 * time.Second
+	maxReadyTimeout     = 120 * time.Second
+)
+
+// ReadyTimeoutEnvVar is the env var that overrides the ready-file wait budget.
+const ReadyTimeoutEnvVar = "AGM_READY_TIMEOUT_SECONDS"
+
+// ReadyTimeout returns the ready-file wait budget. It reads
+// AGM_READY_TIMEOUT_SECONDS (whole seconds); unset/invalid values fall back to
+// defaultReadyTimeout, and valid values are clamped to [minReadyTimeout,
+// maxReadyTimeout] so a typo can neither hang the spawner indefinitely nor make
+// the wait so short that a healthy slow start is reported as a failure.
+func ReadyTimeout() time.Duration {
+	raw := os.Getenv(ReadyTimeoutEnvVar)
+	if raw == "" {
+		return defaultReadyTimeout
+	}
+	secs, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || secs <= 0 {
+		debug.Log("Ignoring invalid %s=%q; using default %v", ReadyTimeoutEnvVar, raw, defaultReadyTimeout)
+		return defaultReadyTimeout
+	}
+	d := time.Duration(secs) * time.Second
+	if d < minReadyTimeout {
+		return minReadyTimeout
+	}
+	if d > maxReadyTimeout {
+		return maxReadyTimeout
+	}
+	return d
+}
 
 // ReadyFilePayload represents the JSON structure of ready-files.
 type ReadyFilePayload struct {
@@ -80,7 +123,7 @@ func WaitForReady(sessionName string, timeout time.Duration) error {
 		}
 
 		if status == "crashed" {
-			os.Remove(readyFile) // Cleanup
+			os.Remove(readyFile)                               // Cleanup
 			return fmt.Errorf("Claude crashed during startup") //nolint:staticcheck // proper noun (product name)
 		}
 
