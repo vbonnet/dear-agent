@@ -1,5 +1,7 @@
 # Sandbox Provider Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 The sandbox package provides isolated filesystem environments for AGM sessions using platform-native technologies (OverlayFS on Linux, APFS on macOS). This enables agents to operate in secure, copy-on-write sandboxes that prevent host corruption.

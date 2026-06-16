@@ -1,5 +1,7 @@
 # Telemetry Public API - Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## System Overview
 
 The `pkg/telemetry` package serves as a thin public API layer that re-exports types from `internal/telemetry`, enabling external modules to implement telemetry event listeners without violating Go's internal package visibility rules.

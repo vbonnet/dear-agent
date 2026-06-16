@@ -1,6 +1,6 @@
 # ADR-011: Scheduled Repository Audit Subsystem
 
-**Status**: Proposed (2026-05-03)
+**Status**: Accepted (2026-06-16; was Proposed 2026-05-03)
 
 > Filename keeps `dear-audit-subsystem` for inbound-link stability;
 > the canonical title is "Scheduled Repository Audit Subsystem" so the

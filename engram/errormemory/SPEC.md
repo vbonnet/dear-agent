@@ -1,5 +1,7 @@
 # SPEC: core/errormemory
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Purpose
 
 Package `errormemory` is the shared library underlying the session error-memory system.

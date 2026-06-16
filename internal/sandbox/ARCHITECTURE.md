@@ -1,5 +1,7 @@
 # Sandbox Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## System Overview
 
 The sandbox subsystem provides isolated, copy-on-write filesystem environments for AGM sessions. It abstracts platform-specific isolation technologies (OverlayFS, APFS) behind a unified Provider interface.

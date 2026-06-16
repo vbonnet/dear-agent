@@ -1,5 +1,7 @@
 # Engram CLI - Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## System Overview
 
 The Engram CLI is a Cobra-based command-line application that provides AI agents with memory persistence, learning, and retrieval capabilities. It follows a modular architecture with clear separation of concerns.

@@ -1,5 +1,7 @@
 # OpenCode SSE Adapter - Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Package**: `internal/monitor/opencode`
 **Version**: 1.0
 **Status**: Design

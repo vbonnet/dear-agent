@@ -1,5 +1,7 @@
 # AGM v4 — Technical Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version:** 4.0-reviewed
 **Status:** Reviewed (5-persona review complete)
 **Last Updated:** 2026-03-06

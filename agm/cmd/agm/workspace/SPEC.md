@@ -1,5 +1,7 @@
 # Workspace-Aware Session Management - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version**: 1.0
 **Status**: Implemented
 **Last Updated**: 2026-02-18

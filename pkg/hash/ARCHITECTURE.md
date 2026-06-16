@@ -1,5 +1,7 @@
 # hash Package Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version:** 0.1.0
 **Status:** Production-ready
 **Last Updated:** 2026-02-11

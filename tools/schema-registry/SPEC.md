@@ -1,5 +1,7 @@
 # Corpus Callosum — Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 Corpus Callosum is a cross-component schema registry and data validation protocol.

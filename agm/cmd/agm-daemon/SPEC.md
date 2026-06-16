@@ -1,5 +1,7 @@
 # AGM Daemon - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 The AGM Daemon is a background service that delivers queued messages to Claude sessions based on their current state. It polls the message queue every 30 seconds, detects session state transitions, and delivers messages only when the target session is in the READY state.

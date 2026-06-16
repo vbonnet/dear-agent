@@ -1,5 +1,7 @@
 # AGM Architecture Overview
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 Complete architectural documentation for the AI/Agent Gateway Manager (AGM).
 
 **Version**: 3.2

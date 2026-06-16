@@ -1,5 +1,7 @@
 # Engram — Product Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 Engram is a persistent memory system for AI coding agents. It enables sessions

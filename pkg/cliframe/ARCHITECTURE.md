@@ -1,5 +1,7 @@
 # cliframe Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 This document describes the architectural decisions, design patterns, and implementation details of the cliframe library.
 
 ## Design Goals

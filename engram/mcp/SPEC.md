@@ -1,5 +1,7 @@
 # Engram MCP Server - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Document Information
 
 - **Version**: 1.1.0

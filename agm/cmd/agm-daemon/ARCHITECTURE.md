@@ -1,5 +1,7 @@
 # AGM Daemon - Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## System Overview
 
 The AGM Daemon is a background message delivery service that implements state-aware routing for inter-session communication. It polls a persistent SQLite message queue every 30 seconds, detects the current state of target Claude sessions (READY, THINKING, COMPACTING, OFFLINE), and delivers queued messages only when sessions are ready to receive them. The daemon ensures reliable message delivery through retry logic, acknowledgment tracking, and exponential backoff for failed deliveries.
