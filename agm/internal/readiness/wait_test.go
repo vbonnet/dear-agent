@@ -311,3 +311,35 @@ func TestCleanupStaleReadyFiles_IgnoresNonReadyFiles(t *testing.T) {
 		t.Error("Expected non-ready file to be preserved")
 	}
 }
+
+func TestReadyTimeout(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string // unset when "<unset>"
+		want time.Duration
+	}{
+		{"unset uses default", "<unset>", defaultReadyTimeout},
+		{"empty uses default", "", defaultReadyTimeout},
+		{"valid in-range", "30", 30 * time.Second},
+		{"below min clamps up", "1", minReadyTimeout},
+		{"above max clamps down", "9999", maxReadyTimeout},
+		{"very large overflow prevention", "1000000000000000", maxReadyTimeout},
+		{"zero falls back to default", "0", defaultReadyTimeout},
+		{"negative falls back to default", "-5", defaultReadyTimeout},
+		{"non-numeric falls back to default", "abc", defaultReadyTimeout},
+		{"whitespace trimmed", "  20  ", 20 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.env == "<unset>" {
+				t.Setenv(ReadyTimeoutEnvVar, "") // isolate, then clear
+				os.Unsetenv(ReadyTimeoutEnvVar)
+			} else {
+				t.Setenv(ReadyTimeoutEnvVar, tc.env)
+			}
+			if got := ReadyTimeout(); got != tc.want {
+				t.Errorf("ReadyTimeout() with %s=%q = %v, want %v", ReadyTimeoutEnvVar, tc.env, got, tc.want)
+			}
+		})
+	}
+}

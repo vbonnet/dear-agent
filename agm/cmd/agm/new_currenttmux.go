@@ -188,12 +188,15 @@ func runCurrentTmuxClaudeInitSequence(sessionName string) {
 		return
 	}
 	debug.Log("InitSequence completed successfully")
-	debug.Log("Waiting for ready-file signal (timeout: 60s)")
-	if err := readiness.WaitForReady(sessionName, 60*time.Second); err != nil {
+	readyTimeout := readiness.ReadyTimeout()
+	debug.Log("Waiting for ready-file signal (timeout: %v)", readyTimeout)
+	if err := readiness.WaitForReady(sessionName, readyTimeout); err != nil {
 		debug.Log("Ready-file wait failed: %v", err)
 		ui.PrintWarning("Ready-file not created within timeout")
 		fmt.Printf("💡 Session is usable, but UUID association may have failed\n")
-		fmt.Printf("  • Run 'agm sync' later to populate UUID if needed\n")
+		fmt.Printf("  • Deterministic recovery (no plugin/mode dependency):\n")
+		fmt.Printf("      agm session associate %s --create\n", sessionName)
+		fmt.Printf("  • Or run 'agm sync' later to populate UUID if needed\n")
 		return
 	}
 	debug.Log("Ready-file detected - agm binary completed")
