@@ -8,10 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/internal/override"
+	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
 // supervisorStateDir returns the per-supervisor state directory under
@@ -213,7 +215,7 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 	}
 
 	env := realSupervisorEnv{}
-	if err := checkSupervisorEnv(env, supervisorSkipOAuthCheck); err != nil {
+	if err := checkSupervisorEnv(env, supervisorSkipOAuthCheck, ""); err != nil {
 		// Print to our stderr (so hooks see it) and exit with a stable code.
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)
 		os.Exit(2)
@@ -245,6 +247,14 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 	claudeCmd.Stderr = cmd.ErrOrStderr()
 	// Scrub the env one more time before exec — defense in depth.
 	claudeCmd.Env = scrubAPIKey(os.Environ())
+	// Refresh the OAuth token from the live credentials file: a token captured
+	// into the orchestrator's env goes stale after Claude Code auto-refreshes
+	// the file (ce-dzhz). Strip any stale copy and inject the freshest token so
+	// the supervisor's claude never launches with an expired credential.
+	claudeCmd.Env = scrubEnvKey(claudeCmd.Env, auth.OAuthEnvVar)
+	if token := auth.ResolveOAuthToken(); token != "" {
+		claudeCmd.Env = append(claudeCmd.Env, auth.OAuthEnvVar+"="+token)
+	}
 	// Mark the supervisor id + mesh role in child env so the channel adapter
 	// and any in-session tooling can read them without re-parsing args.
 	claudeCmd.Env = append(claudeCmd.Env,
@@ -260,13 +270,24 @@ func runSupervisorRun(cmd *cobra.Command, _ []string) error {
 }
 
 // checkSupervisorEnv runs the two pre-launch guards. Exported for testing
-// via the supervisorEnv interface so callers can fake os.Getenv.
-func checkSupervisorEnv(env supervisorEnv, skipOAuthCheck bool) error {
+// via the supervisorEnv interface so callers can fake os.Getenv. credsPath
+// overrides the OAuth credentials-file location (empty → the real
+// ~/.claude/.credentials.json) so tests don't depend on the host's auth.
+//
+// The OAuth presence guard accepts a token from EITHER the
+// CLAUDE_CODE_OAUTH_TOKEN env var OR the live credentials file (ce-dzhz): the
+// env var goes stale after Claude Code auto-refreshes the file, so requiring
+// the env var alone would wrongly refuse a supervisor that has valid
+// file-based auth.
+func checkSupervisorEnv(env supervisorEnv, skipOAuthCheck bool, credsPath string) error {
 	if env.Getenv("ANTHROPIC_API_KEY") != "" {
 		return errToSRefusal
 	}
-	if !skipOAuthCheck && env.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" {
-		return errors.New("supervisor refused: CLAUDE_CODE_OAUTH_TOKEN not set; run `claude setup-token` or pass --skip-oauth-check for dev")
+	if !skipOAuthCheck {
+		resolver := auth.OAuthResolver{Getenv: env.Getenv, CredentialsPath: credsPath}
+		if resolver.Resolve() == "" {
+			return errors.New("supervisor refused: no Claude OAuth token available — set CLAUDE_CODE_OAUTH_TOKEN or run `claude setup-token` to populate ~/.claude/.credentials.json; pass --skip-oauth-check for dev")
+		}
 	}
 	return nil
 }
@@ -275,10 +296,17 @@ func checkSupervisorEnv(env supervisorEnv, skipOAuthCheck bool) error {
 // as a final safety pass: if the user exported the key between the env
 // check and exec (unlikely but possible), the child still won't see it.
 func scrubAPIKey(env []string) []string {
-	const prefix = "ANTHROPIC_API_KEY="
+	return scrubEnvKey(env, "ANTHROPIC_API_KEY")
+}
+
+// scrubEnvKey returns a copy of env with all assignments of key removed.
+// Used to drop a stale value before appending a fresh one, since duplicate
+// env entries have implementation-defined precedence.
+func scrubEnvKey(env []string, key string) []string {
+	prefix := key + "="
 	out := make([]string, 0, len(env))
 	for _, e := range env {
-		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
+		if strings.HasPrefix(e, prefix) {
 			continue
 		}
 		out = append(out, e)
