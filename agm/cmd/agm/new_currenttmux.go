@@ -13,7 +13,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
-	"github.com/vbonnet/dear-agent/agm/internal/readiness"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
@@ -166,46 +165,15 @@ func startCurrentTmuxClaude(sessionName, workDir string) error {
 		debug.Log("Manual hook trigger failed (non-fatal): %v", err)
 	}
 	if os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "" {
-		debug.Log("Skipping InitSequence in test environment")
-		ui.PrintSuccess("Test session ready (init sequence skipped)")
+		debug.Log("Skipping association in test environment")
+		ui.PrintSuccess("Test session ready (association skipped)")
 		return nil
 	}
-	runCurrentTmuxClaudeInitSequence(sessionName)
-	return nil
-}
-
-// runCurrentTmuxClaudeInitSequence runs the rename/agm-assoc init sequence and
-// waits for the ready-file in the in-place Claude pane case.
-func runCurrentTmuxClaudeInitSequence(sessionName string) {
-	debug.Log("Running InitSequence for /rename and /agm:agm-assoc")
-	seq := tmux.NewInitSequence(sessionName)
-	if err := seq.Run(); err != nil {
-		debug.Log("InitSequence failed: %v", err)
-		ui.PrintWarning("Failed to run initialization sequence")
-		fmt.Printf("💡 You can manually run:\n")
-		fmt.Printf("  /rename %s\n", sessionName)
-		fmt.Printf("  /agm:agm-assoc %s\n", sessionName)
-		return
-	}
-	debug.Log("InitSequence completed successfully")
-	readyTimeout := readiness.ReadyTimeout()
-	debug.Log("Waiting for ready-file signal (timeout: %v)", readyTimeout)
-	if err := readiness.WaitForReady(sessionName, readyTimeout); err != nil {
-		debug.Log("Ready-file wait failed: %v", err)
-		ui.PrintWarning("Ready-file not created within timeout")
-		fmt.Printf("💡 Session is usable, but UUID association may have failed\n")
-		fmt.Printf("  • Deterministic recovery (no plugin/mode dependency):\n")
-		fmt.Printf("      agm session associate %s --create\n", sessionName)
-		fmt.Printf("  • Or run 'agm sync' later to populate UUID if needed\n")
-		return
-	}
-	debug.Log("Ready-file detected - agm binary completed")
-	debug.Log("Waiting for skill to complete output and return to prompt")
-	if err := tmux.WaitForClaudePrompt(sessionName, 10*time.Second); err != nil {
-		debug.Log("Prompt wait failed (non-fatal): %v", err)
-		time.Sleep(1 * time.Second)
-	}
+	// Associate and signal readiness deterministically from Go — no dependency
+	// on the /agm:agm-assoc plugin slash command loading in the pane (ce-o1sg).
+	associateSpawnedClaudeSession(sessionName)
 	ui.PrintSuccess("Claude is ready and session associated!")
+	return nil
 }
 
 // startCurrentTmuxOpenCode starts OpenCode in the current tmux pane and waits
