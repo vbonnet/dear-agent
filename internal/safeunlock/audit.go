@@ -2,7 +2,6 @@ package safeunlock
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -53,8 +52,13 @@ func appendAudit(repo string, res Result, dryRun bool) {
 		Reason:    res.Reason,
 		AgeSecond: int64(res.Age.Seconds()),
 	}
+	// Append the newline to the marshalled record and write it in a single
+	// Write on the O_APPEND handle: a lone write under PIPE_BUF is atomic on
+	// POSIX, so concurrent safe-unlock runs cannot interleave a half-line into
+	// the shared audit log (which fmt.Fprintln's two writes could).
 	b, _ := json.Marshal(entry)
-	if _, werr := fmt.Fprintln(f, string(b)); werr != nil {
+	b = append(b, '\n')
+	if _, werr := f.Write(b); werr != nil {
 		slog.Warn("safe-unlock: failed to write audit entry", "error", werr)
 	}
 }

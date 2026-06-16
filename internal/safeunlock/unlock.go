@@ -331,11 +331,13 @@ func lockHolders(lockPath string) (pids string, checked bool) {
 	out, err := cmd.Output()
 	trimmed := strings.TrimSpace(string(out))
 	if err != nil {
-		// An ExitError with empty output means "no process holds it" — a real,
-		// checked result. Any other error (e.g. lsof not found) means we could
-		// not verify; report not-checked so age remains the only guard.
+		// lsof exits 1 with empty output when no process holds the file — the
+		// common, safe "no holder" result. Any OTHER exit code (permission
+		// denied, syntax/system error) or a non-exec error (lsof not found)
+		// means we could NOT verify holders; report not-checked so the age
+		// guard alone governs removal rather than wrongly assuming no holder.
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return trimmed, true
 		}
 		return "", false
