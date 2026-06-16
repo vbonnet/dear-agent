@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/workspace"
 )
 
 // DefaultArtifactsDir is the default filesystem location for A2A artifacts.
@@ -165,17 +167,7 @@ func copyFile(src, dst string) error {
 }
 
 func expandPath(path string) string {
-	expanded := os.ExpandEnv(path)
-	if len(expanded) > 0 && expanded[0] == '~' {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			if len(expanded) == 1 {
-				return home
-			}
-			return filepath.Join(home, expanded[1:])
-		}
-	}
-	return expanded
+	return workspace.ExpandPath(path)
 }
 
 // FormatSize formats file size in human-readable format
