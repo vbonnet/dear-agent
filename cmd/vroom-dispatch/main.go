@@ -84,6 +84,37 @@ type sessionInfo struct {
 
 const sessionsFile = ".agm/vroom/sessions.json"
 
+// supervisorModel is the model alias supervisors spawn with. It is the
+// 200k-context Opus variant, deliberately NOT the 1M-context default:
+//   - Opus (not the claude-code default of sonnet) per the operator directive
+//     for VROOM supervisory work — on Max-plan OAuth there is no per-token
+//     metering, so Opus's extra capability is the only trade-off that matters.
+//   - The 200k variant (opus-200k → claude-opus-4-8), not opus → claude-opus-4-8[1m]:
+//     the 1M-context models are credit-gated on this Max-plan auth, so every
+//     tick of a [1m] model fails with "API Error: Usage credits required for 1M
+//     context". 200k context is ample for a tick and dodges the gate (ce-84l2).
+const supervisorModel = "opus-200k"
+
+// supervisorMode is the permission mode supervisors spawn with. Detached
+// sessions cannot answer interactive approval prompts, so they must start in
+// auto mode rather than the claude-code default of plan: a plan-mode detached
+// session can plan its tick but never execute it, and exiting plan mode itself
+// raises an approval prompt no detached session can self-answer (ce-84l2).
+const supervisorMode = "auto"
+
+// sessionNewArgs builds the `agm session new` argument list for spawning a
+// supervisor session. Pinning --model and --mode here (rather than relying on
+// agm's defaults) is the fix for ce-84l2: the defaults are sonnet at 1M context
+// (credit-gated) in plan mode (non-executable when detached).
+func sessionNewArgs(name string) []string {
+	return []string{
+		"session", "new", name,
+		"--detached", "--workspace=oss", "--harness=claude-code",
+		"--model=" + supervisorModel,
+		"--mode=" + supervisorMode,
+	}
+}
+
 func main() {
 	skillsOnly := flag.Bool("skills-only", false, "install SKILL files to ~/.agm/vroom/skills/ and exit")
 	statusFlag := flag.Bool("status", false, "show supervisor mesh status and exit")
@@ -147,8 +178,7 @@ func ensureSessions(home string, state *sessionState) {
 func createAndBootSession(home string, sup supervisor, state *sessionState) {
 	fmt.Printf("    %s: creating... ", sup.Name)
 
-	cmd := exec.Command("agm", "session", "new", sup.Name,
-		"--detached", "--workspace=oss", "--harness=claude-code")
+	cmd := exec.Command("agm", sessionNewArgs(sup.Name)...)
 	cmd.Env = scrubAPIKey(os.Environ())
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("FAILED: %v\n%s\n", err, string(output))

@@ -125,6 +125,19 @@ func oauthEnvArg() string {
 	return ""
 }
 
+// claudeEnvUnsetFlags returns the `env -u` flag list for the spawned claude
+// shell. CLAUDECODE is always unset; ANTHROPIC_API_KEY is additionally unset
+// whenever an OAuth (Max-plan) token is being injected, so a stray metered key
+// inherited from the tmux server's long-lived environment cannot shadow the
+// OAuth token and silently route the session through the metered API instead of
+// the Max plan (ce-84l2 — the "Claude API" symptom).
+func claudeEnvUnsetFlags(haveOAuth bool) string {
+	if haveOAuth {
+		return "-u CLAUDECODE -u ANTHROPIC_API_KEY"
+	}
+	return "-u CLAUDECODE"
+}
+
 // buildClaudeCommand assembles the env+claude shell command line, applying
 // flags for model, --add-dir, --permission-mode, and --max-budget-usd.
 // Returns the command string and whether --permission-mode was applied.
@@ -135,9 +148,10 @@ func buildClaudeCommand(sessionName, workDir string, extraAddDirs []string) (str
 		autoModeFlag = ""
 		debug.Log("Auto mode disabled by flag/env var")
 	}
-	claudeCmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s%s%s claude --model '%s' --add-dir '%s'%s && exit", sessionName, otelEnvArgs(), oauthEnvArg(), resolvedModel, workDir, autoModeFlag)
+	oauthArg := oauthEnvArg()
+	claudeCmd := fmt.Sprintf("env %s AGM_SESSION_NAME=%s%s%s claude --model %s --add-dir %s%s && exit", claudeEnvUnsetFlags(oauthArg != ""), shellQuote(sessionName), otelEnvArgs(), oauthArg, shellQuote(resolvedModel), shellQuote(workDir), autoModeFlag)
 	for _, dir := range extraAddDirs {
-		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --add-dir '%s' && exit", dir), 1)
+		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --add-dir %s && exit", shellQuote(dir)), 1)
 	}
 	modeAppliedAtStartup := false
 	if modeFlagValue == "auto" || modeFlagValue == "plan" || modeFlagValue == "default" {
