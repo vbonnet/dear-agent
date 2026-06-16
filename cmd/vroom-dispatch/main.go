@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -282,11 +283,9 @@ func isSessionAlive(name string) bool {
 	if err != nil {
 		return false
 	}
-	for _, line := range strings.Split(string(out), "\n") {
-		for _, field := range strings.Fields(line) {
-			if field == name {
-				return true
-			}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		if slices.Contains(strings.Fields(line), name) {
+			return true
 		}
 	}
 	return false
