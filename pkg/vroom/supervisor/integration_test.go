@@ -143,7 +143,7 @@ type placeholderMesh struct{}
 
 func (placeholderMesh) Get(Role) (LoopStatus, bool) { return nil, false }
 
-// Compile-time assertion that our concrete supervisors satisfy the
+// Compile-time assertions that every concrete supervisor satisfies the
 // Supervisor interface. If this stops compiling, a supervisor lost its
 // Role() or Tick() method.
 var (
@@ -158,3 +158,79 @@ var _ LoopStatus = (*Loop)(nil)
 // Compile-time assertion that decisiontrail.JSONLTrail is a Trail. (Helps
 // catch breaking changes to the Trail interface.)
 var _ decisiontrail.Trail = (*decisiontrail.JSONLTrail)(nil)
+
+// Compile-time assertions that the in-memory adapters satisfy the seam
+// interfaces they are meant to stand in for. If the interface changes and
+// the adapter is not updated, these lines fail to compile — catching the
+// regression at build time, not when a test happens to exercise the adapter.
+//
+// These are the "convention verification" assertions for ce-6as.60: they prove
+// that each in-memory implementation actually satisfies its interface contract,
+// rather than just being assumed to.
+var (
+	_ Roadmap       = (*InMemoryRoadmap)(nil)
+	_ Queue         = (*InMemoryQueue)(nil)
+	_ ResourceProbe = (*InMemoryResourceProbe)(nil)
+	_ PeerLookup    = (*Mesh)(nil)
+	_ CheckSkill    = (*HeartbeatCheckSkill)(nil)
+	_ CheckSkill    = CheckSkillFunc(nil)
+)
+
+// TestHeartbeatCheckSkill_NilNowUsesRealClock verifies that a
+// HeartbeatCheckSkill with a nil Now field falls back to time.Now — i.e., the
+// convention "nil clock → system clock" holds in the actual runtime
+// environment. This is a convention verification test (ce-6as.60): it proves
+// the documented default is live, not just documented.
+func TestHeartbeatCheckSkill_NilNowUsesRealClock(t *testing.T) {
+	t.Parallel()
+	trail, _ := newBufferTrail()
+	t.Cleanup(func() { _ = trail.Close() })
+
+	overSup, err := NewOverseer(trail, NewInMemoryResourceProbe(), EscalationThreshold{})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	loop, err := NewLoop(LoopConfig{
+		Supervisor: overSup,
+		Mesh:       placeholderMesh{},
+		Check:      &HeartbeatCheckSkill{Threshold: 5 * time.Second},
+		Trail:      trail,
+		Interval:   10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewLoop: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_ = loop.Run(ctx) // returns context.DeadlineExceeded — expected
+
+	// The loop must have heartbeated at least once and its heartbeat must
+	// reflect a recent real-time timestamp (not the zero time that would
+	// indicate the clock was never consulted).
+	hb := loop.LastHeartbeat()
+	if hb.IsZero() {
+		t.Fatal("LastHeartbeat is zero — HeartbeatCheckSkill may not have used real clock")
+	}
+	if age := time.Since(hb); age > 5*time.Second {
+		t.Errorf("LastHeartbeat is %s old, want < 5s (suggests stale or fake timestamp)", age)
+	}
+}
+
+// TestCheckSkillFunc_Delegates verifies that CheckSkillFunc correctly delegates
+// to the wrapped function. This is a convention test: CheckSkillFunc is
+// documented as an adapter — this test proves the adapter contract holds.
+func TestCheckSkillFunc_Delegates(t *testing.T) {
+	t.Parallel()
+	called := 0
+	fn := CheckSkillFunc(func(_ context.Context, _ LoopStatus) error {
+		called++
+		return nil
+	})
+	if err := fn.Check(context.Background(), nil); err != nil {
+		t.Errorf("Check: %v", err)
+	}
+	if called != 1 {
+		t.Errorf("delegate called %d times, want 1", called)
+	}
+}
