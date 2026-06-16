@@ -106,6 +106,18 @@ func otelEnvArgs() string {
 	return args.String()
 }
 
+// oauthEnvArg returns the CLAUDE_CODE_OAUTH_TOKEN env assignment if the token
+// is present in the current environment. This propagates Max-plan OAuth auth
+// from the orchestrator (or any parent session) into spawned worker sessions,
+// fixing ce-dzhz where workers would 401 because the tmux server env didn't
+// carry the token.
+func oauthEnvArg() string {
+	if token := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); token != "" {
+		return " CLAUDE_CODE_OAUTH_TOKEN=" + token
+	}
+	return ""
+}
+
 // buildClaudeCommand assembles the env+claude shell command line, applying
 // flags for model, --add-dir, --permission-mode, and --max-budget-usd.
 // Returns the command string and whether --permission-mode was applied.
@@ -116,7 +128,7 @@ func buildClaudeCommand(sessionName, workDir string, extraAddDirs []string) (str
 		autoModeFlag = ""
 		debug.Log("Auto mode disabled by flag/env var")
 	}
-	claudeCmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s%s claude --model %s --add-dir '%s'%s && exit", sessionName, otelEnvArgs(), resolvedModel, workDir, autoModeFlag)
+	claudeCmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s%s%s claude --model '%s' --add-dir '%s'%s && exit", sessionName, otelEnvArgs(), oauthEnvArg(), resolvedModel, workDir, autoModeFlag)
 	for _, dir := range extraAddDirs {
 		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --add-dir '%s' && exit", dir), 1)
 	}
