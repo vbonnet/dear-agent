@@ -1,6 +1,8 @@
-// install-post-merge-hook installs the post-merge worktree-sweep trigger into
-// the hooks directory git actually consults — honouring core.hooksPath, and
-// refusing to clobber a chezmoi-managed hooks dir.
+// install-post-merge-hook installs the post-merge trigger into the hooks
+// directory git actually consults — honouring core.hooksPath, and refusing to
+// clobber a chezmoi-managed hooks dir. The hook rebuilds the Go binaries whose
+// source changed (Stage 1) and reaps provably-merged worktrees (Stage 2) after
+// a PR lands on the default branch.
 //
 // Why this is its own tool (not `agm admin install-hooks`): install-hooks
 // manages Claude Code hooks under ~/.claude/hooks. This is a *git* hook, and on
@@ -76,9 +78,13 @@ func run(stdout, stderr *os.File) int {
 		fmt.Fprintf(stderr, "Error: cannot write %s: %v\n", hookDst, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "✓ Installed: %s -> agm worktree sweep --execute (default-branch merges only)\n\n", hookDst)
+	fmt.Fprintf(stdout, "✓ Installed: %s (default-branch merges only)\n", hookDst)
+	fmt.Fprintln(stdout, "    Stage 1: rebuild Go binaries whose source changed (agm, vroom-dispatch)")
+	fmt.Fprintln(stdout, "    Stage 2: agm worktree sweep --execute (reap provably-merged worktrees)")
+	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "It runs after `git pull`/`git merge` lands a PR on the default branch.")
-	fmt.Fprintln(stdout, "Disable per-shell with: export AGM_POST_MERGE_SWEEP=0")
+	fmt.Fprintln(stdout, "Disable per-shell with: export DEAR_AGENT_POST_MERGE_REBUILD=0 (Stage 1)")
+	fmt.Fprintln(stdout, "                        export AGM_POST_MERGE_SWEEP=0           (Stage 2)")
 	return 0
 }
 
