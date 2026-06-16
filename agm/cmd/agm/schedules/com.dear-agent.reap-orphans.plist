@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.dear-agent.reap-orphans — hourly orphaned-process sweep.
+
+  Source template:
+      agm/cmd/agm/schedules/com.dear-agent.reap-orphans.plist
+  Installed by `agm admin install-reap-schedule`, which substitutes
+  __USER_HOME__ and __AGM_BINARY__ before writing this file (launchd
+  does not expand ~ or shell variables).
+
+  Schedule: every hour (StartInterval = 3600 seconds).
+  Logs:     <home>/Library/Logs/dear-agent/reap-orphans.log
+
+  The Stop hook reaps orphaned gopls and agm-mcp-server processes on graceful
+  session end, but abrupt deaths (OOM, kill -9, Desktop crash) leave orphans
+  running. This launchd job is the backstop: it runs agm session reap-orphans
+  hourly so the orphan fleet cannot accumulate to FD / swap exhaustion (the
+  root cause of the 2026-06-15 P0, ce-710r).
+
+  Trigger an immediate run outside the schedule with:
+    launchctl kickstart gui/$UID/com.dear-agent.reap-orphans
+
+  To remove the job, use 'agm admin uninstall-reap-schedule'.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dear-agent.reap-orphans</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__AGM_BINARY__</string>
+        <string>session</string>
+        <string>reap-orphans</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__USER_HOME__/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__USER_HOME__</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/reap-orphans.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/reap-orphans.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
