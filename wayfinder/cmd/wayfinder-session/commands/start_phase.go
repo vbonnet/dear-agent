@@ -102,6 +102,19 @@ func runStartPhase(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to write STATUS file: %w", err)
 	}
 
+	// Auto-commit the marker files written above so the worktree stays clean.
+	// Without this, the next start-phase call sees WAYFINDER-STATUS.md and
+	// WAYFINDER-HISTORY.md as uncommitted and refuses (ce-fvkz recurrence).
+	// This mirrors the auto-commit that complete-phase already performs.
+	gitIntegrator := git.New(projectDir)
+	if gitIntegrator.IsGitRepo() {
+		if err := gitIntegrator.CommitPhaseStart(phaseName); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to create git commit: %v\n", err)
+		} else {
+			fmt.Println("📝 Git commit created")
+		}
+	}
+
 	fmt.Printf("✅ Phase %s started\n", phaseName)
 	return nil
 }
