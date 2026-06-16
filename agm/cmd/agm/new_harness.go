@@ -12,6 +12,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
 // startHarness dispatches per-harness initialization (Claude/Gemini/Codex/OpenCode).
@@ -106,13 +107,15 @@ func otelEnvArgs() string {
 	return args.String()
 }
 
-// oauthEnvArg returns the CLAUDE_CODE_OAUTH_TOKEN env assignment if the token
-// is present in the current environment. This propagates Max-plan OAuth auth
-// from the orchestrator (or any parent session) into spawned worker sessions,
-// fixing ce-dzhz where workers would 401 because the tmux server env didn't
-// carry the token.
+// oauthEnvArg returns the CLAUDE_CODE_OAUTH_TOKEN env assignment to inject into
+// a spawned worker session. It resolves the token via auth.ResolveOAuthToken,
+// which prefers the live token from ~/.claude/.credentials.json over the
+// CLAUDE_CODE_OAUTH_TOKEN env var. This propagates Max-plan OAuth auth from the
+// orchestrator into spawned workers (ce-dzhz): the env var goes stale once
+// Claude Code auto-refreshes the credentials file, so a worker that inherited
+// the env token 401s on every turn — reading the file first keeps spawns fresh.
 func oauthEnvArg() string {
-	if token := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); token != "" {
+	if token := auth.ResolveOAuthToken(); token != "" {
 		return " CLAUDE_CODE_OAUTH_TOKEN=" + token
 	}
 	return ""

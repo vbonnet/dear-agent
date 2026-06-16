@@ -70,7 +70,7 @@ func run(argv []string) error {
 	fs.IntVar(&opts.maxAttempts, "max-attempts", mergeloop.DefaultMaxAgentAttempts, "max agent fix attempts per PR before escalation")
 	fs.DurationVar(&opts.stallThreshold, "stall-threshold", time.Hour, "a PR actionable but untouched longer than this is counted as stalled")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "classify and report; perform no rebases/merges/spawns")
-	fs.BoolVar(&opts.enableAgents, "enable-agents", false, "spawn AGM agents to fix CI/conflicts (requires CLAUDE_CODE_OAUTH_TOKEN); off → defer those PRs")
+	fs.BoolVar(&opts.enableAgents, "enable-agents", false, "spawn AGM agents to fix CI/conflicts (requires Claude OAuth: ~/.claude/.credentials.json or CLAUDE_CODE_OAUTH_TOKEN); off → defer those PRs")
 	if err := fs.Parse(argv[1:]); err != nil {
 		return err
 	}
