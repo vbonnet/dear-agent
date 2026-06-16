@@ -3,7 +3,7 @@ model: sonnet
 effort: low
 description: Exit Claude and archive AGM session automatically
 argument-hint: "{session-name}"
-allowed-tools: Bash(agm session archive *), Bash(agm get-uuid *), Bash(agm admin check-worktrees *), Bash(agm get-session-name), Bash(agm send msg *), Write(~/.agm/*), Skill(engram:bow)
+allowed-tools: Bash(agm session archive *), Bash(agm get-uuid *), Bash(agm admin check-worktrees *), Bash(agm get-session-name), Bash(agm send msg *), Bash(git status *), Bash(git log *), Write(~/.agm/*)
 ---
 
 # AGM Exit
@@ -14,50 +14,54 @@ deterministically by `agm session archive` in Go — no LLM-based checks needed 
 
 ## CRITICAL: Chaining Behavior
 
-This skill invokes `/engram:bow` as a sub-skill in Step 0. After that sub-skill
-completes, you MUST continue executing Steps 1–5 in the SAME response turn.
-Do NOT return to the user prompt after `/bow` finishes. The entire sequence
-(bow → evaluate → archive) is a single atomic operation. Treat the `/bow`
-output as intermediate data — process it inline and proceed immediately.
+All steps must run in the SAME response turn without returning control to the user.
+The entire sequence (completion gate → archive) is a single atomic operation.
 
-**Step 0: Run /bow completion gate**
+**Step 0: Inline completion gate**
 
-Before archiving, run the `/engram:bow` skill to verify session completion.
+Run the following bash checks directly. Do NOT call any external skill — the
+engram:bow skill is unavailable (its source repo ~/src/engram does not exist on
+this machine). These inline checks replace it.
 
-**0.1: Execute bow checks**
-- Invoke: `Skill(engram:bow)`
-- Capture the output and determine pass/fail status
-- **IMPORTANT**: After the skill returns, do NOT stop or wait for user input.
-  Continue evaluating the results in Step 0.2 immediately.
+**0.1: Check for uncommitted changes**
 
-**0.2: Evaluate bow results and determine whether to BLOCK**
+Run: `git -C <project-dir> status --porcelain 2>/dev/null`
+
+Replace `<project-dir>` with the current session's project directory. If the
+session is not associated with a git repo, skip this check.
+
+BLOCK if output is non-empty (uncommitted or untracked files exist).
+
+**0.2: Check for unmerged branches**
+
+Run: `git -C <project-dir> log --oneline origin/main..HEAD 2>/dev/null | head -10`
+
+BLOCK if output shows commits that haven't been pushed/merged.
+
+**0.3: Evaluate and determine whether to BLOCK**
 
 BLOCK the archive (stop processing, do NOT continue to Step 1) if ANY of these are detected:
-- Test failures → BLOCK
-- Undone tasks → BLOCK
-- Broken promises → BLOCK
-- Uncommitted changes → BLOCK
-- Open tasks → BLOCK
+- Uncommitted changes (Step 0.1 output non-empty) → BLOCK
+- Unmerged branch commits (Step 0.2 output non-empty) → BLOCK
 
 If BLOCKED, display:
 ```
-Archive blocked — bow checks failed:
+Archive blocked — completion gate failed:
 {list of CRITICAL findings}
 
 Fix the issues above, then retry /agm:agm-exit
 ```
 
-WARNING-level issues (e.g., missing docs, extra branches) do NOT block — note them and continue to Step 1.
+WARNING-level issues (extra branches, missing docs) do NOT block — note them and continue.
 
-**0.3: Report bow findings to orchestrator**
-- If an orchestrator session exists, report findings:
-  - Run: `agm send msg orchestrator "bow-gate: {PASS|FAIL} — {summary of findings}"`
+**0.4: Report gate result to orchestrator**
+- If an orchestrator session exists, report:
+  - Run: `agm send msg orchestrator "completion-gate: {PASS|FAIL} — {summary of findings}"`
 - If no orchestrator: skip silently
 
-**0.4: Continue to exit steps**
-- If bow PASSED (no CRITICAL findings): proceed IMMEDIATELY to Step 1 below.
+**0.5: Continue to exit steps**
+- If gate PASSED: proceed IMMEDIATELY to Step 1 below.
   Do NOT output a summary and wait. Do NOT return control to the user.
-  The exit sequence continues in this same response.
 
 **Step 1: Determine session name**
 
@@ -114,8 +118,7 @@ against this before running `/agm:agm-exit`.
 
 - [ ] All code changes committed and pushed
 - [ ] Tests written and passing (no "deferred" or "TODO test")
-- [ ] `/engram:bow` passed — no CRITICAL findings
-- [ ] All bow findings addressed (not deferred to "next session")
+- [ ] Inline completion gate passed (no uncommitted changes, no unmerged commits)
 - [ ] Retrospective written, committed, and pushed
 - [ ] `/agm:agm-exit` ran (this skill) — archive confirmed
 - [ ] Session no longer appears in `agm session list`
