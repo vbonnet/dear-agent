@@ -13,8 +13,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // injectTraceContext injects W3C trace context into an MCP _meta map.
@@ -191,6 +194,19 @@ type KillSessionInput struct {
 	DryRun     bool   `json:"dry_run,omitempty" jsonschema:"Preview the kill without executing. Returns what would happen."`
 }
 
+type CreateSessionInput struct {
+	Cwd     string `json:"cwd" jsonschema:"Absolute path to the working directory for the new session (required)"`
+	Prompt  string `json:"prompt" jsonschema:"Initial prompt to send to the session after startup (required)"`
+	Title   string `json:"title,omitempty" jsonschema:"Session name. If omitted, derived from cwd directory name."`
+	Model   string `json:"model,omitempty" jsonschema:"Model to use (e.g. sonnet, opus). Defaults to sonnet."`
+	Harness string `json:"harness,omitempty" jsonschema:"Agent harness (claude-code, gemini-cli). Defaults to claude-code."`
+}
+
+type SendMessageInput struct {
+	SessionID string `json:"session_id" jsonschema:"Session ID, name, or UUID prefix of the target session (required)"`
+	Message   string `json:"message" jsonschema:"Message text to send to the session (required)"`
+}
+
 func addArchiveSessionTool(server *mcp.Server, _ *Config) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_archive_session",
@@ -240,6 +256,117 @@ func addKillSessionTool(server *mcp.Server, _ *Config) {
 		if opErr != nil {
 			return mcpError(opErr), nil, nil
 		}
+
+		return mcpSuccess(result), result, nil
+	})
+}
+
+// --- Session lifecycle tools ---
+
+// newMCPOpContextWithTmux creates an OpContext with both Dolt storage and a
+// real Tmux interface. Used by tools that need to create sessions or send
+// messages (as opposed to read-only tools that only query Dolt).
+func newMCPOpContextWithTmux() (*ops.OpContext, func(), error) {
+	opCtx, cleanup, err := newMCPOpContext()
+	if err != nil {
+		return nil, cleanup, err
+	}
+	opCtx.Tmux = session.NewRealTmux()
+	return opCtx, cleanup, nil
+}
+
+// mcpTracer is the OTel tracer for MCP tool handlers.
+var mcpTracer = otel.Tracer("agm-mcp-server")
+
+func addCreateSessionTool(server *mcp.Server, _ *Config) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_create_session",
+		Description: "Create a new AGM session (tmux + harness + manifest). Use when you need to spawn a new Claude Code (or other harness) session programmatically.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input CreateSessionInput) (*mcp.CallToolResult, any, error) {
+		_, span := mcpTracer.Start(ctx, "agm_create_session",
+			trace.WithAttributes(
+				attribute.String("agm.tool", "agm_create_session"),
+				attribute.String("agm.cwd", input.Cwd),
+				attribute.String("agm.model", input.Model),
+				attribute.String("agm.harness", input.Harness),
+			))
+		defer span.End()
+
+		if input.Cwd == "" {
+			return mcpError(ops.ErrInvalidInput("cwd", "Working directory (cwd) is required.")), nil, nil
+		}
+		if input.Prompt == "" {
+			return mcpError(ops.ErrInvalidInput("prompt", "Prompt is required.")), nil, nil
+		}
+
+		opCtx, cleanup, err := newMCPOpContextWithTmux()
+		if err != nil {
+			span.RecordError(err)
+			return mcpError(err), nil, nil
+		}
+		defer cleanup()
+
+		result, opErr := ops.CreateSession(opCtx, &ops.CreateSessionRequest{
+			Cwd:     input.Cwd,
+			Prompt:  input.Prompt,
+			Title:   input.Title,
+			Model:   input.Model,
+			Harness: input.Harness,
+		})
+		if opErr != nil {
+			span.RecordError(opErr)
+			return mcpError(opErr), nil, nil
+		}
+
+		span.SetAttributes(
+			attribute.String("agm.session_id", result.SessionID),
+			attribute.String("agm.session_name", result.Name),
+		)
+
+		return mcpSuccess(result), result, nil
+	})
+}
+
+func addSendMessageTool(server *mcp.Server, _ *Config) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "agm_send_message",
+		Description: "Send a message to a running AGM session. Use when you need to deliver a prompt or instruction to an existing session.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input SendMessageInput) (*mcp.CallToolResult, any, error) {
+		_, span := mcpTracer.Start(ctx, "agm_send_message",
+			trace.WithAttributes(
+				attribute.String("agm.tool", "agm_send_message"),
+				attribute.String("agm.session_id", input.SessionID),
+				attribute.Int("agm.message_length", len(input.Message)),
+			))
+		defer span.End()
+
+		if input.SessionID == "" {
+			return mcpError(ops.ErrInvalidInput("session_id", "Session identifier is required.")), nil, nil
+		}
+		if input.Message == "" {
+			return mcpError(ops.ErrInvalidInput("message", "Message text is required.")), nil, nil
+		}
+
+		opCtx, cleanup, err := newMCPOpContextWithTmux()
+		if err != nil {
+			span.RecordError(err)
+			return mcpError(err), nil, nil
+		}
+		defer cleanup()
+
+		result, opErr := ops.SendMessage(opCtx, &ops.SendMessageRequest{
+			Recipient: input.SessionID,
+			Message:   input.Message,
+		})
+		if opErr != nil {
+			span.RecordError(opErr)
+			return mcpError(opErr), nil, nil
+		}
+
+		span.SetAttributes(
+			attribute.Bool("agm.delivered", result.Delivered),
+			attribute.String("agm.recipient", result.Recipient),
+		)
 
 		return mcpSuccess(result), result, nil
 	})
