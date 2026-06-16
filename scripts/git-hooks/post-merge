@@ -1,36 +1,47 @@
 #!/usr/bin/env bash
 #
-# Git post-merge hook — auto-reap provably-merged worktrees after a merge to
-# the default branch.
+# Git post-merge hook — two fail-safe stages that fire after a merge/pull lands
+# on the repo's DEFAULT branch:
 #
-# This is the trigger the worktree/branch cleanup discipline was missing. The
-# reaper itself already exists and is fail-safe: `agm worktree sweep` walks
-# every worktree under ~/worktrees, classifies each, and with --execute removes
-# ONLY the ones that are provably MERGED (ancestor-of-base OR authoritative
-# `gh` PR==MERGED — the squash-merge escape) AND clean, deleting the orphaned
-# local branch too. Everything dirty / active / awaiting-input / unprovable is
-# KEPT. We do NOT reimplement any of that here — see
-# agm/internal/ops/worktree_sweep.go. This hook only pulls the trigger when a
-# PR lands on the default branch locally.
+#   Stage 1 — rebuild affected Go binaries (this repo only).
+#     After a PR lands on main, the `agm` / `vroom-dispatch` binaries in
+#     ~/go/bin are stale until someone remembers to `go install`. This stage
+#     closes that gap: it inspects what changed in the merge and reinstalls
+#     ONLY the binaries whose source actually changed. Docs/tests/config-only
+#     merges rebuild nothing (near-instant no-op). See `rebuild_changed_binaries`.
 #
-# When it fires: git runs post-merge after any non-conflicting `git merge` /
-# `git pull` (fast-forward included). The typical path is `git pull` on main
-# after a PR was squash-merged on GitHub.
+#   Stage 2 — reap provably-merged worktrees via `agm worktree sweep --execute`.
+#     The reaper itself already exists and is fail-safe (it removes ONLY worktrees
+#     that are provably MERGED *and* clean). We do NOT reimplement any of that
+#     here — see agm/internal/ops/worktree_sweep.go. This stage only pulls the
+#     trigger. See `sweep_merged_worktrees`.
+#
+# Why one hook, two stages: both are triggered by the exact same event — a PR
+# landing on the default branch locally — and both must be inert everywhere
+# else. Sharing the default-branch gate keeps that contract in one place.
+#
+# Scope: this hook is GLOBAL (installed via core.hooksPath / chezmoi), so it
+# runs after every merge in every repo. Each stage therefore self-scopes:
+#   • Stage 1 acts only in a repo that actually contains the target binary
+#     packages (today, that is dear-agent). Every other repo is a silent no-op.
+#   • Stage 2 acts only when `agm` is installed and the ~/worktrees workflow is
+#     in use.
 #
 # Safety / etiquette (positive guidance — why each guard exists):
-#   • Only sweeps on the DEFAULT branch. A feature-branch integration merge
-#     ("git merge main" while on a feature branch) must NOT trigger a reap.
-#   • NEVER blocks or fails the git operation — always exits 0, and runs the
-#     sweep detached so `git pull` returns immediately. A cleanup convenience
-#     must never get in the way of the merge that triggered it.
-#   • No-op when `agm` is not installed, or when AGM_POST_MERGE_SWEEP=0 — the
-#     hook is global (core.hooksPath), so it must be inert wherever agm/the
-#     ~/worktrees workflow is not in use.
-#   • Per-invocation timeout so a hung `gh` PR-state probe can never wedge.
+#   • Only acts on the DEFAULT branch. A feature-branch integration merge
+#     ("git merge main" while on a feature branch) must NOT trigger either stage.
+#   • NEVER blocks or fails the git operation — always exits 0. A convenience
+#     (rebuild / cleanup) must never get in the way of the merge that triggered
+#     it. A failed `go install` is reported and skipped, not fatal.
+#   • Stage 1 runs in the FOREGROUND so "Rebuilding agm…" is visible in the
+#     terminal you just ran `git pull` in. Stage 2 runs DETACHED + file-logged
+#     so the merge returns immediately.
+#   • Per-invocation timeout on the sweep so a hung `gh` PR-state probe can never
+#     wedge the merge.
 #
-# Why a hook and not CI: the worktrees and the live AGM session store live on
-# this workstation, not on a CI runner — a runner sweep would classify nothing
-# as ACTIVE and see no worktrees at all.
+# Opt-outs (per stage):
+#   DEAR_AGENT_POST_MERGE_REBUILD=0   skip Stage 1 (binary rebuild)
+#   AGM_POST_MERGE_SWEEP=0            skip Stage 2 (worktree sweep)
 #
 # Test seam: AGM_POST_MERGE_SWEEP_SYNC=1 runs the sweep in the foreground
 # (deterministic for tests; also handy if you want `git pull` to wait).
@@ -39,10 +50,6 @@
 # clobbers a chezmoi-managed hooks dir — see cmd/install-post-merge-hook).
 
 set -u
-
-# ── Opt-out / prerequisites ────────────────────────────────────────────────
-[ "${AGM_POST_MERGE_SWEEP:-1}" = "0" ] && exit 0
-command -v agm >/dev/null 2>&1 || exit 0
 
 # ── Resolve the repo's default branch (origin/HEAD, else local main/master) ─
 default_branch=""
@@ -60,48 +67,186 @@ fi
 
 current_branch="$(git branch --show-current 2>/dev/null)"
 
-# Only sweep when the merge landed on the default branch (a PR hitting main).
+# Only act when the merge landed on the default branch (a PR hitting main).
 if [ -z "${default_branch}" ] || [ "${current_branch}" != "${default_branch}" ]; then
   exit 0
 fi
 
-# ── Logging ────────────────────────────────────────────────────────────────
-log_dir="${HOME}/.claude/logs"
-mkdir -p "${log_dir}" 2>/dev/null || true
-log_file="${log_dir}/worktree-post-merge.log"
-ts="$(date -u +%FT%TZ 2>/dev/null || echo unknown)"
+# ── Stage 1: rebuild affected Go binaries ──────────────────────────────────
+#
+# The binary manifest. Each entry is a Go package path (relative to the repo
+# root) followed by the source-tree prefixes whose changes can affect that
+# binary. A trailing "/" marks a directory prefix; a bare token (go.mod/go.sum)
+# is matched exactly. `go install` is cache-friendly on its own — it relinks
+# only when inputs changed — but we additionally gate on the diff so we don't
+# even invoke `go` on a docs/tests/config-only merge.
+#
+#   agm             ./agm/cmd/agm       ← agm/ pkg/ internal/ go.mod go.sum
+#   vroom-dispatch  ./cmd/vroom-dispatch ← cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
 
-printf '[%s] post-merge on %s: launching `agm worktree sweep --execute`\n' \
-  "${ts}" "${default_branch}" >> "${log_file}" 2>/dev/null || true
+# is_build_relevant: a changed file that cannot affect a compiled binary
+# (markdown, test files) is ignored even when it sits under a source prefix.
+# docs/ and .github/ are excluded automatically — they are under no binary's
+# prefixes.
+is_build_relevant() {
+  case "$1" in
+    *_test.go) return 1 ;;
+    *.md)      return 1 ;;
+  esac
+  return 0
+}
 
-# Prefer gtimeout (macOS coreutils) then timeout; run bare if neither exists.
-timeout_bin=""
-for t in gtimeout timeout; do
-  if command -v "$t" >/dev/null 2>&1; then
-    timeout_bin="$t"
-    break
-  fi
-done
+# under_prefix <file> <prefix...>: true if <file> is under any directory prefix
+# (token ending in "/") or equals any exact token (go.mod / go.sum).
+under_prefix() {
+  _f="$1"
+  shift
+  for _p in "$@"; do
+    case "${_p}" in
+      */) case "${_f}" in "${_p}"*) return 0 ;; esac ;;
+      *)  [ "${_f}" = "${_p}" ] && return 0 ;;
+    esac
+  done
+  return 1
+}
 
-# run_sweep executes the canonical reaper with a per-invocation timeout. The
-# GIT_* hook env is cleared so the sweep operates on the repos it discovers
-# under ~/worktrees, not on this hook's repo context.
-run_sweep() {
-  if [ -n "${timeout_bin}" ]; then
-    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX \
-      "${timeout_bin}" 120 agm worktree sweep --execute
+# maybe_rebuild <pkg-path> <prefix...>: reinstall the binary built from
+# <pkg-path> iff a build-relevant changed file falls under one of its prefixes
+# (or the diff could not be determined — then rebuild to be safe). Sets
+# rebuilt_any=1 on a successful install. Never fatal.
+maybe_rebuild() {
+  _pkg="$1"
+  shift
+  _name="$(basename "${_pkg}")"
+
+  # Self-scope: only a repo that actually contains this package gets touched.
+  [ -d "${repo_root}/${_pkg}" ] || return 0
+
+  _affected=0
+  _trigger=""
+  if [ "${indeterminate}" = "1" ]; then
+    _affected=1
+    _trigger="could not determine diff — rebuilding to be safe"
   else
-    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX \
-      agm worktree sweep --execute
+    while IFS= read -r _f; do
+      [ -n "${_f}" ] || continue
+      is_build_relevant "${_f}" || continue
+      if under_prefix "${_f}" "$@"; then
+        _affected=1
+        [ -z "${_trigger}" ] && _trigger="$(dirname "${_f}")/"
+      fi
+    done <<EOF
+${changed}
+EOF
+  fi
+
+  [ "${_affected}" = "1" ] || return 0
+
+  echo "[post-merge:rebuild] Rebuilding ${_name} (source changed in ${_trigger})..." >&2
+  if ( cd "${repo_root}" && GOBIN="${HOME}/go/bin" go install "./${_pkg}" ); then
+    echo "[post-merge:rebuild] ✓ installed ${_name} -> ${HOME}/go/bin/${_name}" >&2
+    rebuilt_any=1
+  else
+    echo "[post-merge:rebuild] ✗ ${_name} rebuild FAILED — git op unaffected." >&2
+    echo "[post-merge:rebuild]   rebuild manually: (cd ${repo_root} && go install ./${_pkg})" >&2
   fi
 }
 
-if [ "${AGM_POST_MERGE_SWEEP_SYNC:-0}" = "1" ]; then
-  run_sweep >> "${log_file}" 2>&1
-else
-  # Detach so the merge/pull returns immediately; the sweep is fail-safe and
-  # self-logging.
-  run_sweep >> "${log_file}" 2>&1 &
-fi
+rebuild_changed_binaries() {
+  [ "${DEAR_AGENT_POST_MERGE_REBUILD:-1}" = "0" ] && return 0
+
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+
+  # Scope the global hook: if neither binary package exists in this repo, this
+  # is not dear-agent — stay completely silent.
+  any_target=0
+  for _pkg in agm/cmd/agm cmd/vroom-dispatch; do
+    [ -d "${repo_root}/${_pkg}" ] && any_target=1
+  done
+  [ "${any_target}" = "1" ] || return 0
+
+  if ! command -v go >/dev/null 2>&1; then
+    echo "[post-merge:rebuild] go not found on PATH — skipping binary rebuild" >&2
+    return 0
+  fi
+
+  # What changed in the merge/pull that just completed. ORIG_HEAD is set by
+  # `git merge`/`git pull` to the pre-merge tip and is the most reliable
+  # baseline; HEAD@{1} is the reflog fallback (matches the documented
+  # `git diff HEAD@{1} HEAD` form). If neither resolves, treat the diff as
+  # indeterminate and rebuild (cheap — the build cache makes a no-change
+  # rebuild a fast relink).
+  range=""
+  if git rev-parse --verify --quiet ORIG_HEAD >/dev/null 2>&1; then
+    range="ORIG_HEAD HEAD"
+  elif git rev-parse --verify --quiet 'HEAD@{1}' >/dev/null 2>&1; then
+    range="HEAD@{1} HEAD"
+  fi
+
+  indeterminate=0
+  changed=""
+  if [ -n "${range}" ]; then
+    # shellcheck disable=SC2086  # range is two refs, intentional word-split.
+    changed="$(git diff --name-only ${range} 2>/dev/null)"
+  else
+    indeterminate=1
+  fi
+
+  rebuilt_any=0
+  maybe_rebuild "agm/cmd/agm"        agm/ pkg/ internal/ go.mod go.sum
+  maybe_rebuild "cmd/vroom-dispatch" cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
+
+  if [ "${indeterminate}" != "1" ] && [ "${rebuilt_any}" = "0" ]; then
+    echo "[post-merge:rebuild] No binary rebuild needed (docs/tests/config only)." >&2
+  fi
+}
+
+# ── Stage 2: reap provably-merged worktrees ────────────────────────────────
+sweep_merged_worktrees() {
+  [ "${AGM_POST_MERGE_SWEEP:-1}" = "0" ] && return 0
+  command -v agm >/dev/null 2>&1 || return 0
+
+  log_dir="${HOME}/.claude/logs"
+  mkdir -p "${log_dir}" 2>/dev/null || true
+  log_file="${log_dir}/worktree-post-merge.log"
+  ts="$(date -u +%FT%TZ 2>/dev/null || echo unknown)"
+
+  printf '[%s] post-merge on %s: launching `agm worktree sweep --execute`\n' \
+    "${ts}" "${default_branch}" >> "${log_file}" 2>/dev/null || true
+
+  # Prefer gtimeout (macOS coreutils) then timeout; run bare if neither exists.
+  timeout_bin=""
+  for t in gtimeout timeout; do
+    if command -v "$t" >/dev/null 2>&1; then
+      timeout_bin="$t"
+      break
+    fi
+  done
+
+  # run_sweep executes the canonical reaper with a per-invocation timeout. The
+  # GIT_* hook env is cleared so the sweep operates on the repos it discovers
+  # under ~/worktrees, not on this hook's repo context.
+  run_sweep() {
+    if [ -n "${timeout_bin}" ]; then
+      env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX \
+        "${timeout_bin}" 120 agm worktree sweep --execute
+    else
+      env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX \
+        agm worktree sweep --execute
+    fi
+  }
+
+  if [ "${AGM_POST_MERGE_SWEEP_SYNC:-0}" = "1" ]; then
+    run_sweep >> "${log_file}" 2>&1
+  else
+    # Detach so the merge/pull returns immediately; the sweep is fail-safe and
+    # self-logging.
+    run_sweep >> "${log_file}" 2>&1 &
+  fi
+}
+
+# ── Run the stages (each self-scopes and is individually fail-safe) ─────────
+rebuild_changed_binaries
+sweep_merged_worktrees
 
 exit 0
