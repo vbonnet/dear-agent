@@ -15,6 +15,8 @@ const OAuthEnvVar = "CLAUDE_CODE_OAUTH_TOKEN"
 // claudeCredentialsRelPath is the location of the Claude Code OAuth credentials
 // file relative to the user's home directory. Claude Code owns this file and
 // auto-refreshes the access token shortly before it expires.
+//
+//nolint:gosec // G101: this is a filesystem path to the credentials file, not a credential value.
 const claudeCredentialsRelPath = ".claude/.credentials.json"
 
 // defaultExpirySkew treats a file token that expires within this window as
