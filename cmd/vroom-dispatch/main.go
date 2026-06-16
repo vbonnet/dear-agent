@@ -68,7 +68,9 @@ var supervisors = []supervisor{
 func main() {
 	bootOnly := flag.Bool("boot-only", false, "install skills and create sessions but don't start loops")
 	loopOnly := flag.Bool("loop-only", false, "start loops on existing sessions (skip creation)")
+	skillsOnly := flag.Bool("skills-only", false, "install SKILL files to ~/.agm/vroom/skills/ and exit")
 	status := flag.Bool("status", false, "show supervisor mesh status and exit")
+	maxWorkers := flag.Int("max-workers", 8, "AGM_MAX_WORKERS override for session creation")
 	flag.Parse()
 
 	if *status {
@@ -79,6 +81,16 @@ func main() {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fatal("home dir: %v", err)
+	}
+
+	if *skillsOnly {
+		installSkills(home)
+		fmt.Println("==> SKILL files installed. Done.")
+		return
+	}
+
+	if *maxWorkers > 0 {
+		os.Setenv("AGM_MAX_WORKERS", fmt.Sprintf("%d", *maxWorkers))
 	}
 
 	if !*loopOnly {
