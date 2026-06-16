@@ -49,8 +49,6 @@ func run(argv []string) error {
 	watch := fs.Bool("watch", false, "poll until all gates pass or timeout elapses")
 	watchTimeout := fs.Duration("watch-timeout", safegit.DefaultWatchTimeout, "how long to wait in watch mode")
 	dryRun := fs.Bool("dry-run", false, "check gates but do not execute the merge")
-	skipBotReview := fs.Bool("skip-bot-review", false, "bypass the Gemini bot-review gate (requires --skip-bot-review-reason)")
-	skipBotReviewReason := fs.String("skip-bot-review-reason", "", "required justification when --skip-bot-review is set; recorded in audit log")
 
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -73,13 +71,11 @@ func run(argv []string) error {
 	}
 
 	return safegit.SafeMerge(safegit.MergeConfig{
-		PRNumber:            *prNum,
-		Repo:                resolvedRepo,
-		DryRun:              *dryRun,
-		Watch:               *watch,
-		WatchTimeout:        *watchTimeout,
-		SkipBotReview:       *skipBotReview,
-		SkipBotReviewReason: *skipBotReviewReason,
+		PRNumber:     *prNum,
+		Repo:         resolvedRepo,
+		DryRun:       *dryRun,
+		Watch:        *watch,
+		WatchTimeout: *watchTimeout,
 	})
 }
 
@@ -91,25 +87,25 @@ Usage:
   safe-merge --pr <number> [--repo owner/repo] [flags]
 
 Flags:
-  --pr <number>                  pull request number to merge (required)
-  --repo owner/repo              GitHub repo (default: GITHUB_REPOSITORY env var)
-  --watch                        poll until all gates pass (default: one-shot)
-  --watch-timeout <dur>          how long to wait in watch mode (default: 45m)
-  --dry-run                      check gates only; do not execute merge
-  --skip-bot-review              bypass Gemini bot-review gate (requires --skip-bot-review-reason)
-  --skip-bot-review-reason <s>   justification for skipping; recorded in audit log
-  -h, --help                     show this help
+  --pr <number>       pull request number to merge (required)
+  --repo owner/repo   GitHub repo (default: GITHUB_REPOSITORY env var)
+  --watch             poll until all gates pass (default: one-shot)
+  --watch-timeout <dur>  how long to wait in watch mode (default: 45m)
+  --dry-run           check gates only; do not execute merge
+  -h, --help          show this help
 
 Gates enforced before merging:
   1. Required CI checks pass (no failures, no pending)
   2. No unresolved review threads
   3. Head commit ≥ 5 minutes old (soak time)
   4. Review bot (gemini-code-assist) has posted
-     (skippable with --skip-bot-review --skip-bot-review-reason "..." when bot is unreachable)
 
 Watch mode:
   With --watch, safe-merge polls every 30 seconds until all gates pass or
   --watch-timeout expires. Useful when CI is still running.
+
+If the review bot gate is stuck (e.g. quota exhaustion), escalate:
+  agm escalate --action "merge PR <num>" --reason "<why bot is unavailable>"
 
 Audit log:
   Every attempt is logged to ~/.local/state/dear-agent/safe-merge-audit.jsonl
