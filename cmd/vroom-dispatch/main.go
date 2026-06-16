@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -69,11 +72,12 @@ func main() {
 	bootOnly := flag.Bool("boot-only", false, "install skills and create sessions but don't start loops")
 	loopOnly := flag.Bool("loop-only", false, "start loops on existing sessions (skip creation)")
 	skillsOnly := flag.Bool("skills-only", false, "install SKILL files to ~/.agm/vroom/skills/ and exit")
-	status := flag.Bool("status", false, "show supervisor mesh status and exit")
+	statusFlag := flag.Bool("status", false, "show supervisor mesh status and exit")
+	oneshotLoop := flag.Bool("oneshot-loop", false, "run tick loops via claude -p one-shot commands (no interactive session needed)")
 	maxWorkers := flag.Int("max-workers", 8, "AGM_MAX_WORKERS override for session creation")
 	flag.Parse()
 
-	if *status {
+	if *statusFlag {
 		showStatus()
 		return
 	}
@@ -86,6 +90,12 @@ func main() {
 	if *skillsOnly {
 		installSkills(home)
 		fmt.Println("==> SKILL files installed. Done.")
+		return
+	}
+
+	if *oneshotLoop {
+		installSkills(home)
+		runOneshotLoop(home)
 		return
 	}
 
@@ -120,6 +130,80 @@ func main() {
 	fmt.Println()
 	fmt.Println("Talk to a supervisor:")
 	fmt.Println("    agm send msg vroom-meta-o --prompt \"status?\"")
+}
+
+func runOneshotLoop(home string) {
+	fmt.Println("==> Starting oneshot tick loop (Ctrl-C to stop)...")
+	fmt.Println("    Each tick runs as a standalone claude -p invocation.")
+	fmt.Println()
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	protocolPath := filepath.Join(home, ".agm", "vroom", "skills", "protocol.md")
+	protocolData, err := os.ReadFile(protocolPath)
+	if err != nil {
+		fatal("read protocol: %v", err)
+	}
+
+	for _, sup := range supervisors {
+		skillPath := filepath.Join(home, ".agm", "vroom", "skills", sup.SkillFile)
+		skillData, readErr := os.ReadFile(skillPath)
+		if readErr != nil {
+			fatal("read %s: %v", skillPath, readErr)
+		}
+		sup.TickPrompt = fmt.Sprintf("You are %s, a VROOM supervisor. Your SKILL instructions follow.\n\n"+
+			"=== PROTOCOL ===\n%s\n\n=== YOUR ROLE ===\n%s\n\n=== TICK INSTRUCTION ===\n%s",
+			sup.ID, string(protocolData), string(skillData), sup.TickPrompt)
+	}
+
+	var wg sync.WaitGroup
+	for _, sup := range supervisors {
+		wg.Add(1)
+		go func(s supervisor) {
+			defer wg.Done()
+			interval, parseErr := time.ParseDuration(s.LoopInterval)
+			if parseErr != nil {
+				fmt.Fprintf(os.Stderr, "%s: bad interval %q: %v\n", s.Name, s.LoopInterval, parseErr)
+				return
+			}
+
+			tick := 0
+			for {
+				tick++
+				fmt.Printf("[%s] tick %d starting at %s\n", s.Name, tick, time.Now().Format("15:04:05"))
+
+				cmd := exec.CommandContext(ctx, "claude", "-p", s.TickPrompt,
+					"--output-format", "text",
+					"--max-turns", "25",
+					"-C", home+"/src/dear-agent")
+				cmd.Env = scrubAPIKey(os.Environ())
+				output, runErr := cmd.CombinedOutput()
+				if runErr != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					fmt.Fprintf(os.Stderr, "[%s] tick %d error: %v\n%s\n", s.Name, tick, runErr, string(output))
+				} else {
+					lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+					summary := strings.TrimSpace(string(output))
+					if len(lines) > 3 {
+						summary = strings.Join(lines[len(lines)-3:], "\n")
+					}
+					fmt.Printf("[%s] tick %d done. Summary:\n%s\n\n", s.Name, tick, summary)
+				}
+
+				select {
+				case <-ctx.Done():
+					fmt.Printf("[%s] shutting down after tick %d\n", s.Name, tick)
+					return
+				case <-time.After(interval):
+				}
+			}
+		}(sup)
+	}
+	wg.Wait()
+	fmt.Println("==> All supervisor loops stopped.")
 }
 
 func installSkills(home string) {
