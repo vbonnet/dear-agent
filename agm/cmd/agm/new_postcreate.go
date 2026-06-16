@@ -56,13 +56,14 @@ func runClaudePostCreate(sessionName string, modeAppliedAtStartup bool) error {
 	}
 
 	debug.Phase("Wait for Ready Signal")
-	debug.Log("Waiting for ready-file signal (timeout: 60s)")
+	readyTimeout := readiness.ReadyTimeout()
+	debug.Log("Waiting for ready-file signal (timeout: %v)", readyTimeout)
 	var readyErr error
 	spinErr2 := spinner.New().
 		Title("Waiting for Claude to initialize...").
 		Accessible(true).
 		Action(func() {
-			readyErr = readiness.WaitForReady(sessionName, 60*time.Second)
+			readyErr = readiness.WaitForReady(sessionName, readyTimeout)
 		}).
 		Run()
 	if spinErr2 != nil {
@@ -92,10 +93,18 @@ func reportClaudeReadyFailure(sessionName string, readyErr error) {
 	ui.PrintError(
 		readyErr,
 		fmt.Sprintf("Ready-file not created at: %s", readyFilePath),
-		fmt.Sprintf("  • Attach to session to check Claude output: tmux attach -t %s\n"+
-			"  • Check debug logs: ls -lt ~/.agm/debug/\n"+
-			"  • Run 'agm sync' later to populate UUID if needed\n\n"+
-			"  Note: Session is still usable, but UUID association may have failed", sessionName),
+		fmt.Sprintf("  The init sequence sent '/agm:agm-assoc %s' into the session, but no\n"+
+			"  ready-file appeared. The most common cause in a spawned/sandbox session\n"+
+			"  is that the agm plugin slash command did not load (Claude reports\n"+
+			"  '/agm:agm-assoc: Unknown command'), so association never ran.\n\n"+
+			"  Deterministic recovery (does NOT depend on the plugin or permission mode):\n"+
+			"    agm session associate %s --create   # run from the session's working dir\n\n"+
+			"  Diagnose:\n"+
+			"    • Attach and check Claude output: tmux attach -t %s\n"+
+			"    • Confirm the plugin is enabled:  agm admin doctor slash-commands\n"+
+			"    • Check debug logs:               ls -lt ~/.agm/debug/\n\n"+
+			"  Note: Session is still usable, but UUID association may have failed.",
+			sessionName, sessionName, sessionName),
 	)
 }
 
