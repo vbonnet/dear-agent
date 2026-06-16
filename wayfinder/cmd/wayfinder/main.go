@@ -20,7 +20,11 @@ func main() { os.Exit(realMain()) }
 // spans).
 func realMain() int {
 	shutdown := otelsetup.InitTracer("wayfinder")
-	defer func() { _ = shutdown(context.Background()) }()
+	defer func() {
+		if err := shutdown(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "wayfinder: otel shutdown: %v\n", err)
+		}
+	}()
 
 	if err := cmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

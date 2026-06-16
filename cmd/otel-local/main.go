@@ -34,6 +34,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -92,31 +93,48 @@ func run(argv []string) error {
 	}
 }
 
-func cmdUp(argv []string) error {
-	var (
-		detach bool
-		fetch  bool
-		ver    = jaegerVersion
-	)
+// upFlags holds the parsed flags for the "up" command.
+type upFlags struct {
+	detach   bool
+	fetch    bool
+	version  string
+	showHelp bool
+}
+
+func parseUpFlags(argv []string) (upFlags, error) {
+	f := upFlags{version: jaegerVersion}
 	for i := 0; i < len(argv); i++ {
 		switch argv[i] {
 		case "--detach", "-d":
-			detach = true
+			f.detach = true
 		case "--fetch":
-			fetch = true
+			f.fetch = true
 		case "--version":
 			if i+1 >= len(argv) {
-				return fmt.Errorf("--version requires an argument (e.g. v2.19.0)")
+				return f, fmt.Errorf("--version requires an argument (e.g. v2.19.0)")
 			}
-			ver = argv[i+1]
+			f.version = argv[i+1]
 			i++
 		case "-h", "--help":
-			fmt.Print(usage)
-			return nil
+			f.showHelp = true
+			return f, nil
 		default:
-			return fmt.Errorf("unknown flag %q for 'up'", argv[i])
+			return f, fmt.Errorf("unknown flag %q for 'up'", argv[i])
 		}
 	}
+	return f, nil
+}
+
+func cmdUp(argv []string) error {
+	flags, err := parseUpFlags(argv)
+	if err != nil {
+		return err
+	}
+	if flags.showHelp {
+		fmt.Print(usage)
+		return nil
+	}
+	detach, fetch, ver := flags.detach, flags.fetch, flags.version
 
 	bin, found := locateJaeger()
 	if !found {
@@ -138,6 +156,8 @@ func cmdUp(argv []string) error {
 		return nil
 	}
 
+	// bin is an operator-controlled path (JAEGER_BINARY, the dear-agent cache,
+	// or a "jaeger" on PATH), not external/network input.
 	proc := exec.Command(bin)
 	// Jaeger writes its own startup logs to stderr; surface them prefixed so
 	// they don't masquerade as otel-local output.
@@ -153,7 +173,7 @@ func cmdUp(argv []string) error {
 	fmt.Fprintln(os.Stderr, "otel-local: waiting for Jaeger to come up…")
 	if err := waitHealthy(30 * time.Second); err != nil {
 		_ = proc.Process.Kill()
-		return fmt.Errorf("Jaeger did not become healthy: %w", err)
+		return fmt.Errorf("collector did not become healthy: %w", err)
 	}
 
 	fmt.Fprintln(os.Stderr, "otel-local: ✓ collector ready")
@@ -269,10 +289,11 @@ func waitHealthy(timeout time.Duration) error {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return fmt.Errorf("timed out after %s: %v", timeout, last)
+	return fmt.Errorf("timed out after %s: %w", timeout, last)
 }
 
 func queryServices(ctx context.Context) error {
+	// Fixed localhost collector URL — not user input.
 	url := fmt.Sprintf("http://localhost:%d/api/services", jaegerUIPort)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -296,7 +317,7 @@ func writePidfile(pid int) error {
 	if err := os.MkdirAll(cacheDir(), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(pidfilePath(), []byte(strconv.Itoa(pid)), 0o644)
+	return os.WriteFile(pidfilePath(), []byte(strconv.Itoa(pid)), 0o600)
 }
 
 func readPidfile() (int, error) {
@@ -345,13 +366,16 @@ func fetchJaeger(ctx context.Context, version string) (string, error) {
 	if err := extractBinary(tarball, "jaeger", dst); err != nil {
 		return "", err
 	}
-	if err := os.Chmod(dst, 0o755); err != nil {
+	// The launcher binary must be executable.
+	if err := os.Chmod(dst, 0o755); err != nil { //nolint:gosec // G302: an executable must be 0755
 		return "", err
 	}
 	return dst, nil
 }
 
 func download(ctx context.Context, url string) ([]byte, error) {
+	// url is built from a pinned version + computed asset name against the
+	// official Jaeger GitHub releases host — not arbitrary user input.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -372,7 +396,7 @@ func download(ctx context.Context, url string) ([]byte, error) {
 // ("<hex>  <filename>" lines). It matches on the basename so a path-qualified
 // entry still resolves.
 func parseChecksum(contents, asset string) (string, error) {
-	for _, line := range strings.Split(contents, "\n") {
+	for line := range strings.SplitSeq(contents, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
@@ -395,7 +419,7 @@ func extractBinary(tarball []byte, wantBase, dst string) error {
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return fmt.Errorf("%q not found in archive", wantBase)
 		}
 		if err != nil {
@@ -409,7 +433,7 @@ func extractBinary(tarball []byte, wantBase, dst string) error {
 			return err
 		}
 		// Bound the copy to the declared size to satisfy decompression-bomb linters.
-		if _, err := io.CopyN(out, tr, hdr.Size); err != nil && err != io.EOF {
+		if _, err := io.CopyN(out, tr, hdr.Size); err != nil && !errors.Is(err, io.EOF) {
 			_ = out.Close()
 			return err
 		}
