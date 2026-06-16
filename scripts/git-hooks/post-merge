@@ -128,6 +128,9 @@ maybe_rebuild() {
     _affected=1
     _trigger="could not determine diff — rebuilding to be safe"
   else
+    # Feed the file list via `printf` + process substitution rather than an
+    # unquoted here-doc: the variable is quoted (no expansion of its contents)
+    # and the loop runs in the current shell so _affected/_trigger persist.
     while IFS= read -r _f; do
       [ -n "${_f}" ] || continue
       is_build_relevant "${_f}" || continue
@@ -135,9 +138,7 @@ maybe_rebuild() {
         _affected=1
         [ -z "${_trigger}" ] && _trigger="$(dirname "${_f}")/"
       fi
-    done <<EOF
-${changed}
-EOF
+    done < <(printf '%s\n' "${changed}")
   fi
 
   [ "${_affected}" = "1" ] || return 0
@@ -187,7 +188,12 @@ rebuild_changed_binaries() {
   changed=""
   if [ -n "${range}" ]; then
     # shellcheck disable=SC2086  # range is two refs, intentional word-split.
-    changed="$(git diff --name-only ${range} 2>/dev/null)"
+    if ! changed="$(git diff --name-only ${range} 2>/dev/null)"; then
+      # The baseline resolved but the diff itself failed (shallow clone missing
+      # the parent object, repo corruption). Don't silently skip the rebuild —
+      # treat it as indeterminate and rebuild to be safe.
+      indeterminate=1
+    fi
   else
     indeterminate=1
   fi
