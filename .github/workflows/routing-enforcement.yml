@@ -1,0 +1,103 @@
+name: Routing Enforcement
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-forbidden-paths:
+    name: Forbidden temporal artifact paths
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          git diff --name-only origin/${{ github.base_ref }}...HEAD > changed_files.txt
+          echo "Changed files:"
+          cat changed_files.txt
+
+      - name: Check for forbidden paths
+        id: check
+        run: |
+          FORBIDDEN_PATTERNS=(
+            "docs/retros/"
+            "docs/research/"
+            "retrospectives/"
+            "retros/"
+          )
+
+          VIOLATIONS=""
+          while IFS= read -r file; do
+            for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
+              if [[ "$file" == "$pattern"* ]]; then
+                VIOLATIONS="${VIOLATIONS}\n  - \`${file}\` (matches \`${pattern}*\`)"
+                break
+              fi
+            done
+          done < changed_files.txt
+
+          if [ -n "$VIOLATIONS" ]; then
+            echo "violations=true" >> "$GITHUB_OUTPUT"
+            printf '%b' "$VIOLATIONS" > violations.txt
+          else
+            echo "violations=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post PR comment on violation
+        if: steps.check.outputs.violations == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const violations = fs.readFileSync('violations.txt', 'utf8');
+            const body = [
+              '## :no_entry: Routing violation — temporal artifacts detected',
+              '',
+              'This PR adds files to paths that are **forbidden in code repos**.',
+              'These are temporal artifacts (retros, research docs) and belong in',
+              '[`engram-research`](https://github.com/vbonnet/engram-research) instead.',
+              '',
+              '**Violated paths:**',
+              violations,
+              '',
+              '### How to fix',
+              '',
+              '1. Remove the file(s) from this PR.',
+              '2. Add them to `engram-research` under `retrospectives/` (for retros)',
+              '   or `research/` (for research docs).',
+              '3. Reference the engram-research PR from this PR description.',
+              '',
+              '**Why?** Code repos are for code and its immediate documentation.',
+              'Temporal artifacts (retros, one-off research) rot in code repos —',
+              'they accumulate without a clear lifecycle, clutter blame history,',
+              'and violate the routing policy in `.dear-agent.yml`.',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Fail on violation
+        if: steps.check.outputs.violations == 'true'
+        run: |
+          echo ""
+          echo "ROUTING VIOLATION: The following files must not be added to this repo:"
+          cat violations.txt
+          echo ""
+          echo "Retros → engram-research/retrospectives/"
+          echo "Research → engram-research/research/"
+          echo ""
+          echo "See .dear-agent.yml for the full routing policy."
+          exit 1
