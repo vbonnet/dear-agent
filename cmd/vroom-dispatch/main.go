@@ -175,8 +175,8 @@ func runOneshotLoop(home string) {
 
 				cmd := exec.CommandContext(ctx, "claude", "-p", s.TickPrompt,
 					"--output-format", "text",
-					"--max-turns", "25",
-					"-C", home+"/src/dear-agent")
+					"--max-turns", "25")
+				cmd.Dir = home + "/src/dear-agent"
 				cmd.Env = scrubAPIKey(os.Environ())
 				output, runErr := cmd.CombinedOutput()
 				if runErr != nil {
