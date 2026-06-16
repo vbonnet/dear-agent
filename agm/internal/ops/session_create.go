@@ -218,11 +218,18 @@ func buildHarnessCommand(harness, model, sessionName, workDir string) string {
 		// over the possibly-stale CLAUDE_CODE_OAUTH_TOKEN env var) so the
 		// spawned worker doesn't 401 on a refreshed token (ce-dzhz).
 		oauthArg := ""
+		// envUnset always force-unsets CLAUDECODE (for consistency with the CLI
+		// spawn path in new_harness.go, so the spawned worker can't detect a
+		// nested Claude Code session) and additionally unsets a stray metered
+		// ANTHROPIC_API_KEY whenever we inject an OAuth token, so it can't shadow
+		// the Max-plan token and route the worker through the metered API (ce-84l2).
+		envUnset := "-u CLAUDECODE "
 		if token := auth.ResolveOAuthToken(); token != "" {
 			oauthArg = fmt.Sprintf(" CLAUDE_CODE_OAUTH_TOKEN='%s'", shellQuote(token))
+			envUnset = "-u CLAUDECODE -u ANTHROPIC_API_KEY "
 		}
-		return fmt.Sprintf("env AGM_SESSION_NAME='%s'%s claude --model '%s' --add-dir '%s' --enable-auto-mode && exit",
-			shellQuote(sessionName), oauthArg, shellQuote(model), shellQuote(workDir))
+		return fmt.Sprintf("env %sAGM_SESSION_NAME='%s'%s claude --model '%s' --add-dir '%s' --enable-auto-mode && exit",
+			envUnset, shellQuote(sessionName), oauthArg, shellQuote(model), shellQuote(workDir))
 	case "gemini-cli":
 		return fmt.Sprintf("gemini -m '%s' && exit", shellQuote(model))
 	case "codex-cli":
