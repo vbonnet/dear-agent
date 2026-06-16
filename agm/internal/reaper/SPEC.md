@@ -1,5 +1,7 @@
 # agm/internal/reaper — Requirements Specification (EARS)
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version**: 1.0
 **Last Updated**: 2026-06-07
 **Status**: Baseline (derived from tests + code, not design-forward)

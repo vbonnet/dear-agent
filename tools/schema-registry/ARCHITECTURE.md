@@ -1,5 +1,7 @@
 # Corpus Callosum — Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## System Overview
 
 Corpus Callosum follows a three-layer architecture: client interfaces, core library,

@@ -239,19 +239,19 @@ of Wayfinder feeds the roadmap that the Meta-Orchestrator owns.
 
 | Term | Definition |
 |------|------------|
-| **Primary / Secondary / Tertiary** | The three-agent ownership of any one task: doer / verifier-and-watcher / unsticker. |
-| **Meta-Orchestrator** | CTO supervisor. Sole roadmap-add authority. Secondary: Overseer; Tertiary: Orchestrator. |
-| **Orchestrator** | COO supervisor. Work queue + worker monitoring + progress. Secondary: Meta-Orchestrator; Tertiary: Overseer. |
-| **Overseer** | CRO supervisor. Resource/leak/cleanup reliability. Secondary: Orchestrator; Tertiary: Meta-Orchestrator. |
-| **Worker** | Does one task, hands back for verification. Secondary = its Requester; Tertiary = the Requester's Secondary. |
-| **Requester** | *Relationship, not a standing role:* the agent that spawned a given Worker. |
-| **Auditor** | Periodically mines logs/DEAR retros for patterns; feeds the Meta-Orchestrator. |
-| **SRE agent** | Emergency-only, privileged firefighter. First decides if there is a real fire. |
-| **Work Order** | <a id="work-order"></a>The formal artifact for proposing work. Required fields include **the reason the work should be added**. Routed to the Meta-Orchestrator, who alone may add it to the roadmap. |
-| **AGM** | Agent Gateway Manager — the session-driving tool VROOM uses. |
-| **VROOM** | The supervisory execution framework (proper name; old V/R/O/O/M backronym retired). |
-| **DEAR** | Define → Execute → Audit → Retro retrospective loop (process sense). |
-| **Wayfinder** | The research/planning/prep phase preceding execution. |
+| **Primary / Secondary / Tertiary** | The three-agent ownership of any one task: doer / verifier-and-watcher / unsticker. _Avoid: Lead/Support/Backup (obscures the doer→verifier→unsticker chain); Owner (implies authority, not task ownership)._ |
+| **Meta-Orchestrator** | CTO supervisor. Sole roadmap-add authority. Secondary: Overseer; Tertiary: Orchestrator. _Avoid: Tech Lead, Architect (these are analogies only, not synonyms)._ |
+| **Orchestrator** | COO supervisor. Work queue + worker monitoring + progress. Secondary: Meta-Orchestrator; Tertiary: Overseer. _Avoid: Scheduler, Dispatcher (loses the progress-monitoring/COO dimension)._ |
+| **Overseer** | CRO supervisor. Resource/leak/cleanup reliability. Secondary: Orchestrator; Tertiary: Meta-Orchestrator. _Avoid: Monitor, Watchdog (these miss the reliability/CRO framing)._ |
+| **Worker** | Does one task, hands back for verification. Secondary = its Requester; Tertiary = the Requester's Secondary. _Avoid: Agent (too generic — every participant is an agent); Bot._ |
+| **Requester** | *Relationship, not a standing role:* the agent that spawned a given Worker. _Avoid: Spawner, Caller (obscures that this is a dynamic relationship, not a standing role)._ |
+| **Auditor** | Periodically mines logs/DEAR retros for patterns; feeds the Meta-Orchestrator. _Avoid: Reviewer (implies code review, not log/retro pattern mining)._ |
+| **SRE agent** | Emergency-only, privileged firefighter. First decides if there is a real fire. _Avoid: On-call agent, Emergency responder (misses the "first verify it's a real fire" rule that defines this role)._ |
+| **Work Order** | <a id="work-order"></a>The formal artifact for proposing work. Required fields include **the reason the work should be added**. Routed to the Meta-Orchestrator, who alone may add it to the roadmap. _Avoid: Task, Ticket, Issue (these lack the mandatory reason field and the formal routing; Work Order is a specific artifact, not a generic tracker item)._ |
+| **AGM** | Agent Gateway Manager — the session-driving tool VROOM uses. _Avoid: VROOM (AGM is a tool VROOM drives; conflating the two erases the framework/tool distinction — a known collision in pre-2026-05-17 docs)._ |
+| **VROOM** | The supervisory execution framework (proper name; old V/R/O/O/M backronym retired). _Avoid: AGM (VROOM is the framework above AGM, not the runtime); Orchestration layer (too vague, erases the three-supervisor structure)._ |
+| **DEAR** | Define → Execute → Audit → Retro retrospective loop (process sense). _Avoid: Post-mortem, Sprint retro (DEAR covers all four phases; "retro" alone names only the R step); also see Known Terminology Collision 2b — the workflow-engine code lifecycle uses DEAR with different E/R expansions._ |
+| **Wayfinder** | The research/planning/prep phase preceding execution. _Avoid: "Planning" alone (too generic); Pre-work (undersells the structured research/SDLC scope)._ |
 
 ---
 

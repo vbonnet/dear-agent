@@ -1,5 +1,7 @@
 # Table Package Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 The `table` package provides a unified API for rendering styled tables in terminal applications using `charmbracelet/lipgloss`. It replaces disparate `text/tabwriter` implementations across CLI commands with a consistent, visually appealing table rendering system.

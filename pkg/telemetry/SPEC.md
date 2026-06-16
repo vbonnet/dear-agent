@@ -1,5 +1,7 @@
 # Telemetry Public API - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 The `pkg/telemetry` package provides a public API for external modules to implement telemetry event listeners. This package re-exports types from `internal/telemetry` to enable integration without violating Go's internal package visibility rules.

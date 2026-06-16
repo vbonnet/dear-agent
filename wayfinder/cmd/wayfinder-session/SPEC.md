@@ -1,5 +1,7 @@
 # Wayfinder V2 Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 Wayfinder V2 consolidates 13 phases into 9 streamlined phases with native task/roadmap management embedded in WAYFINDER-STATUS.md. This eliminates the need for separate ROADMAP.md files and provides tight integration with the Engram ecosystem.

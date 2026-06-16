@@ -1,5 +1,7 @@
 # Ranking - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 The ranking package implements a multi-provider abstraction for semantic relevance ranking in the Ecphory retrieval system. It supports multiple LLM backends (Anthropic, Vertex AI Gemini, Vertex AI Claude) with automatic provider detection and graceful fallback to local Jaccard similarity ranking.

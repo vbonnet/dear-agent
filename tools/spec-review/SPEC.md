@@ -1,5 +1,7 @@
 # Product Specification: Spec-Review Marketplace
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version:** 2.0.0
 **Last Updated:** 2026-03-17
 **Status:** Production-Ready (All 10 Phases Complete, Security Hardened)

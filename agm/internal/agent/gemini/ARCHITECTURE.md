@@ -1,5 +1,7 @@
 # Gemini Adapter Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version:** 1.0
 **Last Updated:** 2026-02-11
 **Status:** Implemented

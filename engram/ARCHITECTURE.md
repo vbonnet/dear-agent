@@ -1,5 +1,7 @@
 # Engram — Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## System Context
 
 Engram runs as a CLI tool and hook handler within Claude Code sessions. It

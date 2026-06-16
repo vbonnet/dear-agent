@@ -1,5 +1,7 @@
 # Architecture
 
+<!-- Last audited at: 2026-06-16 -->
+
 ## High-Level Overview
 
 dear-agent is a Go monorepo organized around four products that share common

@@ -1,5 +1,7 @@
 # internal/fsguard — Requirements Specification (EARS)
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version**: 1.1
 **Last Updated**: 2026-06-12
 **Status**: Baseline (derived from tests + code, not design-forward)

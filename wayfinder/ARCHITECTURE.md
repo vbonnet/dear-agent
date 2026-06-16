@@ -1,5 +1,7 @@
 # Wayfinder Plugin — Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## System Overview
 
 Wayfinder uses a waypoint orchestrator pattern with three layers: session
