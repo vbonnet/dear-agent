@@ -85,13 +85,34 @@ Content
 			errContains: "failed to parse YAML frontmatter",
 		},
 		{
+			name: "valid frontmatter without engram fields (standalone use)",
+			content: `---
+phase: "D1"
+phase_name: "Problem Validation"
+wayfinder_session_id: "test-session-123"
+created_at: "2026-01-05T12:00:00Z"
+---
+
+# D1: Problem Validation
+
+Content here.
+`,
+			wantErr: false,
+			validate: func(t *testing.T, fm *DeliverableFrontmatter) {
+				if fm.Phase != "D1" {
+					t.Errorf("Phase = %q, want %q", fm.Phase, "D1")
+				}
+				if fm.PhaseEngramHash != "" {
+					t.Errorf("PhaseEngramHash should be empty for standalone use, got %q", fm.PhaseEngramHash)
+				}
+			},
+		},
+		{
 			name: "missing required field - phase",
 			content: `---
 phase_name: "Problem Validation"
 wayfinder_session_id: "test-session-123"
 created_at: "2026-01-05T12:00:00Z"
-phase_engram_hash: "sha256:abc123"
-phase_engram_path: "~/engrams/d1.ai.md"
 ---
 
 Content
