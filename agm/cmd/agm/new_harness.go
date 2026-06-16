@@ -116,7 +116,11 @@ func otelEnvArgs() string {
 // the env token 401s on every turn — reading the file first keeps spawns fresh.
 func oauthEnvArg() string {
 	if token := auth.ResolveOAuthToken(); token != "" {
-		return " CLAUDE_CODE_OAUTH_TOKEN=" + token
+		// Single-quote the token (defense in depth; matches
+		// ops.buildHarnessCommand) so an unexpected shell metacharacter can't
+		// break the command line the token is concatenated into.
+		escaped := strings.ReplaceAll(token, "'", `'\''`)
+		return " CLAUDE_CODE_OAUTH_TOKEN='" + escaped + "'"
 	}
 	return ""
 }
