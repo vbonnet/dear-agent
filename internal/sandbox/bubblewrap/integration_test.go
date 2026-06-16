@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -252,4 +253,70 @@ func TestBubblewrap_IdempotentDestroy(t *testing.T) {
 	// Second destroy
 	err = provider.Destroy(ctx, sb.ID)
 	assert.NoError(t, err, "Second destroy should also succeed")
+}
+
+// TestBubblewrap_NetworkIsolation verifies that --share-net being absent from
+// the bwrap arg list actually isolates the network namespace.
+//
+// This test skips on environments (GitHub Actions Ubuntu runners) that do not
+// support unprivileged network namespace unsharing. It is the companion to the
+// note in testBubblewrap() — the startup self-test cannot validate network
+// isolation because of the RTM_NEWADDR restriction, so this integration test
+// covers that gap on developer machines and capable CI runners.
+func TestBubblewrap_NetworkIsolation(t *testing.T) {
+	skipUnlessBwrapFunctional(t)
+
+	if _, err := exec.LookPath("ip"); err != nil {
+		t.Skip("ip(8) not installed — cannot probe network routes inside sandbox")
+	}
+
+	// Additional probe: check whether the host allows unsharing the network
+	// namespace without --share-net. GitHub Actions runners reject this.
+	probe := exec.Command("bwrap",
+		"--unshare-all",
+		"--ro-bind", "/", "/",
+		"--proc", "/proc",
+		"--dev", "/dev",
+		"/bin/true",
+	)
+	if err := probe.Run(); err != nil {
+		t.Skipf("network namespace unsharing not supported in this environment: %v", err)
+	}
+
+	// Run `ip route` without --share-net. In an isolated network namespace the
+	// routing table is empty (no default route); with --share-net it contains
+	// the host routes.  Any non-empty output means host routes leaked in.
+	lowerDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(lowerDir, ".placeholder"), []byte("x"), 0o600))
+
+	args := buildNetworkIsolationBwrapArgs(lowerDir)
+	out, err := exec.Command("bwrap", append(args, "/bin/ip", "route")...).Output()
+	require.NoError(t, err, "bwrap ip route should not error in isolated sandbox")
+
+	routeOutput := strings.TrimSpace(string(out))
+	assert.Empty(t, routeOutput,
+		"network-isolated sandbox must have empty routing table, got:\n%s", routeOutput)
+
+	// Positive control: with --share-net the host routing table is visible.
+	sharedBaseArgs := make([]string, len(args))
+	copy(sharedBaseArgs, args)
+	sharedBaseArgs = append(sharedBaseArgs, "--share-net")
+	sharedOut, err := exec.Command("bwrap", append(sharedBaseArgs, "/bin/ip", "route")...).Output()
+	require.NoError(t, err, "bwrap ip route with --share-net should not error")
+	assert.NotEmpty(t, strings.TrimSpace(string(sharedOut)),
+		"network-shared sandbox should see host routes")
+}
+
+// buildNetworkIsolationBwrapArgs returns a minimal bwrap argument list suitable
+// for the network isolation test — no --share-net, bind /usr /bin /lib.
+func buildNetworkIsolationBwrapArgs(lowerDir string) []string {
+	args := []string{
+		"--unshare-all",
+		"--ro-bind", "/", "/",
+		"--proc", "/proc",
+		"--dev", "/dev",
+		"--bind", lowerDir, "/sandbox",
+		"--new-session",
+	}
+	return args
 }
