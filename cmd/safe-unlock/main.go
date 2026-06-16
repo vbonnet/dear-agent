@@ -106,7 +106,8 @@ func run(argv []string) int {
 	}
 
 	results, err := c.Clean()
-	if err != nil {
+	if err != nil && len(results) == 0 {
+		// Could not scan at all (not a git repo, unreadable git dir).
 		fmt.Fprintf(os.Stderr, "safe-unlock: %v\n", err)
 		return 1
 	}
@@ -130,6 +131,14 @@ func run(argv []string) int {
 	default:
 		fmt.Printf("safe-unlock: %s — removed %d stale lock(s), %d active (left in place)\n",
 			repo, removed, active)
+	}
+
+	// A per-lock failure (e.g. a removal that hit a permission error) does not
+	// abort the others, but it is still an operational error: surface it and
+	// exit 1, taking precedence over the active-lock signal.
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "safe-unlock: %v\n", err)
+		return 1
 	}
 
 	if active > 0 {

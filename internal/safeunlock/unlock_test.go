@@ -245,6 +245,39 @@ func TestClean_LinkedWorktreeGitFile(t *testing.T) {
 	}
 }
 
+func TestClean_ContinuesPastRemovalError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory write permissions; cannot force a removal error")
+	}
+	repo, gitDir := newRepo(t)
+	now := time.Now()
+
+	// One stale lock in a normal ref dir, one in a dir we make read-only so its
+	// os.Remove fails. The clean lock must still be removed and the error from
+	// the unremovable one surfaced — not abort the whole scan.
+	okLock := filepath.Join(gitDir, "refs", "heads", "ok.lock")
+	roDir := filepath.Join(gitDir, "refs", "heads", "locked")
+	badLock := filepath.Join(roDir, "stuck.lock")
+	writeLock(t, okLock, now, 10*time.Minute)
+	writeLock(t, badLock, now, 10*time.Minute)
+	if err := os.Chmod(roDir, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(roDir, 0o700) }) // let TempDir cleanup succeed
+
+	c, _ := newCleaner(t, repo, now)
+	results, err := c.Clean()
+	if err == nil {
+		t.Skip("removal did not fail on this filesystem; cannot exercise error path")
+	}
+	if len(results) != 2 {
+		t.Fatalf("want both locks reported despite one error, got %d: %+v", len(results), results)
+	}
+	if _, statErr := os.Stat(okLock); !os.IsNotExist(statErr) {
+		t.Errorf("the removable lock must still be cleaned despite the other's error")
+	}
+}
+
 func TestClean_NotAGitRepo(t *testing.T) {
 	c, _ := newCleaner(t, t.TempDir(), time.Now())
 	if _, err := c.Clean(); err == nil {

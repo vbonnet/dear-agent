@@ -46,6 +46,7 @@
 package safeunlock
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -120,20 +121,27 @@ func (c *Cleaner) Clean() ([]Result, error) {
 	fmt.Fprintf(c.Log, "safe-unlock: repo=%s gitdir=%s candidates=%d dry_run=%v min_age=%s\n",
 		c.Repo, gitDir, len(locks), c.DryRun, c.MinAge)
 
+	// Evaluate every lock; do NOT abort on the first error. A permission error
+	// on one lock must not leave the others in place — the whole point is to
+	// un-wedge the repo — so failures are collected and returned together while
+	// the remaining locks are still cleaned.
 	results := make([]Result, 0, len(locks))
+	var errs []error
 	for _, lockPath := range locks {
 		res, err := c.evaluate(gitDir, lockPath)
-		if err != nil {
-			return results, err
-		}
 		results = append(results, res)
-		appendAudit(c.Repo, res, c.DryRun)
+		if err != nil {
+			errs = append(errs, err)
+		}
 	}
+
+	// One batched audit write for all decisions, on the injected clock.
+	appendAudits(c.Now, c.Repo, results, c.DryRun)
 
 	if len(results) == 0 {
 		fmt.Fprintf(c.Log, "    no git lock files present — nothing to do\n")
 	}
-	return results, nil
+	return results, errors.Join(errs...)
 }
 
 // evaluate inspects a single lock file, removing it iff it is provably stale.
@@ -327,7 +335,14 @@ func classify(gitDir, lockPath string) string {
 // common, safe case. If lsof is unavailable, checked is false and the caller
 // falls back to the age guard alone.
 func lockHolders(lockPath string) (pids string, checked bool) {
-	cmd := exec.Command("lsof", "-t", "--", lockPath)
+	// lsof can hang indefinitely on a stuck NFS/FUSE mount or under load. Bound
+	// it: safe-unlock runs synchronously for a (possibly already-wedged) agent,
+	// so a hung holder check would defeat the tool's purpose. On timeout the
+	// error is not an exit-1 ExitError, so we report not-checked and fall back
+	// to the age guard alone — fail-safe, never a false "no holder".
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "lsof", "-t", "--", lockPath)
 	out, err := cmd.Output()
 	trimmed := strings.TrimSpace(string(out))
 	if err != nil {
