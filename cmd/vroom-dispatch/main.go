@@ -374,7 +374,7 @@ func showStatus() {
 			if alive {
 				status = "alive"
 			}
-			fmt.Printf("    %-20s %s\n", sup.Name, status)
+			fmt.Printf("    %-25s %s\n", sup.Name, status)
 		}
 	}
 
@@ -384,7 +384,7 @@ func showStatus() {
 		if len(state.Sessions) > 0 {
 			fmt.Printf("\nPersistent state (updated %s):\n", state.UpdatedAt)
 			for name, info := range state.Sessions {
-				fmt.Printf("    %-20s created=%s loop_sent=%v\n", name, info.CreatedAt, info.LoopSent)
+				fmt.Printf("    %-25s created=%s loop_sent=%v\n", name, info.CreatedAt, info.LoopSent)
 			}
 		}
 	}
@@ -407,7 +407,7 @@ func printStatus(state *sessionState) {
 		if alive {
 			status = "alive"
 		}
-		fmt.Printf("    %-22s %s (loop_sent=%v, interval=%s)\n", sup.Name+":", status, info.LoopSent, sup.TickInterval)
+		fmt.Printf("    %-25s %s (loop_sent=%v, interval=%s)\n", sup.Name+":", status, info.LoopSent, sup.TickInterval)
 	}
 	fmt.Println()
 	fmt.Println("Monitor:")
