@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -79,7 +78,7 @@ type sessionState struct {
 type sessionInfo struct {
 	Name      string `json:"name"`
 	CreatedAt string `json:"created_at"`
-	TickCount int    `json:"tick_count"`
+	LoopSent  bool   `json:"loop_sent"`
 }
 
 const sessionsFile = ".agm/vroom/sessions.json"
@@ -113,32 +112,38 @@ func main() {
 	saveState(home, state)
 
 	if *bootOnly {
-		fmt.Println("==> Sessions created. Boot-only mode, exiting.")
+		fmt.Println("==> Sessions created and booted. Exiting (boot-only).")
 		printStatus(state)
 		return
 	}
 
-	runTickLoop(home, state)
+	runHealthMonitor(home, state)
 }
 
-// ensureSessions creates AGM sessions for any supervisor that doesn't have a live one.
+// ensureSessions creates AGM sessions for any supervisor that doesn't have a live one,
+// sends the boot prompt, and starts the /loop.
 func ensureSessions(home string, state *sessionState) {
 	fmt.Println("==> Ensuring supervisor sessions...")
 
 	for _, sup := range supervisors {
 		if info, ok := state.Sessions[sup.Name]; ok {
 			if isSessionAlive(sup.Name) {
-				fmt.Printf("    %s: alive (created %s, %d ticks)\n", sup.Name, info.CreatedAt, info.TickCount)
+				fmt.Printf("    %s: alive (created %s, loop_sent=%v)\n", sup.Name, info.CreatedAt, info.LoopSent)
+				if !info.LoopSent {
+					sendLoopCommand(sup)
+					info.LoopSent = true
+					state.Sessions[sup.Name] = info
+				}
 				continue
 			}
 			fmt.Printf("    %s: dead, recreating...\n", sup.Name)
 			delete(state.Sessions, sup.Name)
 		}
-		createSession(home, sup, state)
+		createAndBootSession(home, sup, state)
 	}
 }
 
-func createSession(home string, sup supervisor, state *sessionState) {
+func createAndBootSession(home string, sup supervisor, state *sessionState) {
 	fmt.Printf("    %s: creating... ", sup.Name)
 
 	cmd := exec.Command("agm", "session", "new", sup.Name,
@@ -150,21 +155,26 @@ func createSession(home string, sup supervisor, state *sessionState) {
 	}
 	fmt.Println("created")
 
-	// Wait for the session to initialize before sending boot prompt.
 	time.Sleep(10 * time.Second)
 
 	sendBootPrompt(home, sup)
 
+	// Wait for boot prompt to be processed before starting loop.
+	fmt.Printf("    %s: waiting 30s for boot prompt processing...\n", sup.Name)
+	time.Sleep(30 * time.Second)
+
+	sendLoopCommand(sup)
+
 	state.Sessions[sup.Name] = sessionInfo{
 		Name:      sup.Name,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		TickCount: 0,
+		LoopSent:  true,
 	}
 }
 
 // sendBootPrompt sends the full SKILL + protocol content as the initial message.
 // This large static payload gets cached by Claude's prompt cache, making subsequent
-// tick messages cheap (they only pay for the tick instruction + tool call tokens).
+// /loop tick iterations cheap (the boot context is already in the conversation).
 func sendBootPrompt(home string, sup supervisor) {
 	protocolData, err := os.ReadFile(filepath.Join(home, ".agm", "vroom", "skills", "protocol.md"))
 	if err != nil {
@@ -179,8 +189,9 @@ func sendBootPrompt(home string, sup supervisor) {
 
 	bootPrompt := fmt.Sprintf(`You are %s, a VROOM supervisor running as a persistent session.
 
-Your session stays alive across ticks — you will receive periodic tick messages
-telling you to execute your role's tick behavior. Between ticks, you wait.
+Your session stays alive across ticks. After this setup, a /loop command
+will be sent that runs your tick behavior at a fixed interval. Each iteration
+of the loop should execute your role's tick steps as defined below.
 
 === SHARED PROTOCOL ===
 %s
@@ -193,9 +204,7 @@ telling you to execute your role's tick behavior. Between ticks, you wait.
 2. Write your initial heartbeat: agm supervisor heartbeat --id %s --primary-for %s --tertiary-for %s
 3. Confirm you are ready and summarize your role.
 
-You will receive tick messages shortly. Each tick message will say
-"Execute tick N" — when you see it, run through your tick steps as defined
-in your role instructions above, then report a brief summary.`,
+A /loop command will start your tick cycle shortly.`,
 		sup.ID,
 		string(protocolData),
 		string(skillData),
@@ -213,92 +222,53 @@ in your role instructions above, then report a brief summary.`,
 	}
 }
 
-// runTickLoop is the main loop. It sends tick messages to each supervisor at their
-// configured interval, health-checks sessions, and recreates dead ones.
-func runTickLoop(home string, state *sessionState) {
+// sendLoopCommand sends a /loop slash command to a supervisor session. The session's
+// built-in /loop handler takes over tick scheduling — no external tick dispatch needed.
+// The tick prompt references the SKILL instructions already loaded in the boot prompt.
+func sendLoopCommand(sup supervisor) {
+	intervalStr := fmt.Sprintf("%ds", int(sup.TickInterval.Seconds()))
+	loopCmd := fmt.Sprintf("/loop %s %s Report a brief summary when done.", intervalStr, sup.TickPrompt)
+
+	fmt.Printf("    %s: sending /loop (%s interval)...\n", sup.Name, intervalStr)
+	cmd := exec.Command("agm", "send", "msg", sup.Name,
+		"--sender", "vroom-dispatch",
+		"--prompt", loopCmd)
+	cmd.Env = scrubAPIKey(os.Environ())
+	if output, err := cmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "    %s: /loop send failed: %v\n%s\n", sup.Name, err, string(output))
+	} else {
+		fmt.Printf("    %s: /loop started\n", sup.Name)
+	}
+}
+
+// runHealthMonitor watches for dead supervisor sessions and recreates them.
+// With /loop handling the tick cadence inside each session, the launcher only
+// needs to monitor liveness and restart failures.
+func runHealthMonitor(home string, state *sessionState) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	fmt.Println("==> Starting tick dispatch loop (Ctrl-C to stop)...")
+	fmt.Println("==> Health monitor running (Ctrl-C to stop)...")
 	printStatus(state)
+	fmt.Println("==> Tick loops running inside sessions via /loop. Monitoring health every 60s...")
 
-	// Give sessions time to process boot prompts before first tick.
-	fmt.Println("==> Waiting 30s for boot prompts to settle...")
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(30 * time.Second):
-	}
-
-	var (
-		wg sync.WaitGroup
-		mu sync.Mutex
-	)
-	for i := range supervisors {
-		wg.Add(1)
-		go func(sup supervisor) {
-			defer wg.Done()
-			runSupervisorTicks(ctx, home, sup, state, &mu)
-		}(supervisors[i])
-	}
-	wg.Wait()
-
-	saveState(home, state)
-	fmt.Println("==> All tick loops stopped.")
-}
-
-func runSupervisorTicks(ctx context.Context, home string, sup supervisor, state *sessionState, mu *sync.Mutex) {
 	for {
-		mu.Lock()
-		info := state.Sessions[sup.Name]
-		info.TickCount++
-		tickNum := info.TickCount
-		state.Sessions[sup.Name] = info
-		mu.Unlock()
-
-		if !isSessionAlive(sup.Name) {
-			fmt.Printf("[%s] session dead, recreating...\n", sup.Name)
-			mu.Lock()
-			createSession(home, sup, state)
-			mu.Unlock()
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(30 * time.Second):
-			}
-			continue
-		}
-
-		fmt.Printf("[%s] tick %d at %s\n", sup.Name, tickNum, time.Now().Format("15:04:05"))
-		sendTick(sup, tickNum)
-
-		if tickNum%5 == 0 {
-			mu.Lock()
-			saveState(home, state)
-			mu.Unlock()
-		}
-
 		select {
 		case <-ctx.Done():
-			fmt.Printf("[%s] shutting down after tick %d\n", sup.Name, tickNum)
+			saveState(home, state)
+			fmt.Println("==> Health monitor stopped.")
 			return
-		case <-time.After(sup.TickInterval):
+		case <-time.After(60 * time.Second):
 		}
-	}
-}
 
-// sendTick sends a lightweight tick instruction to an existing session.
-// The session already has the full SKILL + protocol cached from the boot prompt,
-// so this message only needs to carry the tick number and any dynamic context.
-func sendTick(sup supervisor, tickNum int) {
-	tickMsg := fmt.Sprintf("Execute tick %d. %s Report a brief summary when done.", tickNum, sup.TickPrompt)
-
-	cmd := exec.Command("agm", "send", "msg", sup.Name,
-		"--sender", "vroom-dispatch",
-		"--prompt", tickMsg)
-	cmd.Env = scrubAPIKey(os.Environ())
-	if output, err := cmd.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "[%s] tick %d send failed: %v\n%s\n", sup.Name, tickNum, err, string(output))
+		for _, sup := range supervisors {
+			if !isSessionAlive(sup.Name) {
+				fmt.Printf("[%s] session dead at %s, recreating...\n", sup.Name, time.Now().Format("15:04:05"))
+				delete(state.Sessions, sup.Name)
+				createAndBootSession(home, sup, state)
+				saveState(home, state)
+			}
+		}
 	}
 }
 
@@ -397,7 +367,7 @@ func showStatus() {
 		if len(state.Sessions) > 0 {
 			fmt.Printf("\nPersistent state (updated %s):\n", state.UpdatedAt)
 			for name, info := range state.Sessions {
-				fmt.Printf("    %-20s created=%s ticks=%d\n", name, info.CreatedAt, info.TickCount)
+				fmt.Printf("    %-20s created=%s loop_sent=%v\n", name, info.CreatedAt, info.LoopSent)
 			}
 		}
 	}
@@ -411,7 +381,7 @@ func showStatus() {
 
 func printStatus(state *sessionState) {
 	fmt.Println()
-	fmt.Println("    VROOM Supervisor Mesh — Persistent Sessions")
+	fmt.Println("    VROOM Supervisor Mesh — Persistent Sessions (/loop)")
 	fmt.Println()
 	for _, sup := range supervisors {
 		info := state.Sessions[sup.Name]
@@ -420,7 +390,7 @@ func printStatus(state *sessionState) {
 		if alive {
 			status = "alive"
 		}
-		fmt.Printf("    %-22s %s (ticks=%d, interval=%s)\n", sup.Name+":", status, info.TickCount, sup.TickInterval)
+		fmt.Printf("    %-22s %s (loop_sent=%v, interval=%s)\n", sup.Name+":", status, info.LoopSent, sup.TickInterval)
 	}
 	fmt.Println()
 	fmt.Println("Monitor:")

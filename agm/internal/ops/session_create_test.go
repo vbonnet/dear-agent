@@ -413,6 +413,13 @@ func TestBuildHarnessCommand_EscapesSingleQuotes(t *testing.T) {
 	}
 }
 
+func TestBuildHarnessCommand_BracketedModelQuoted(t *testing.T) {
+	cmd := buildHarnessCommand("claude-code", "claude-sonnet-4-6[1m]", "sess", "/tmp/work")
+	if !strings.Contains(cmd, "--model 'claude-sonnet-4-6[1m]'") {
+		t.Errorf("bracketed model not quoted; zsh would glob-expand [1m]: %s", cmd)
+	}
+}
+
 func TestShellQuote(t *testing.T) {
 	tests := []struct {
 		in, want string
