@@ -42,6 +42,25 @@ type ResourceSnapshot struct {
 	// observation window (0..1).
 	CPUUsedFraction float64
 
+	// OpenFDFraction is the fraction of the system-wide open-file descriptor
+	// limit currently in use (0..1). Values approaching 1.0 indicate
+	// imminent FD exhaustion. On Darwin this reads kern.num_files /
+	// kern.maxfiles; on Linux it reads /proc/sys/fs/file-nr.
+	OpenFDFraction float64
+
+	// VnodeUsedFraction is the fraction of the kernel vnode table currently
+	// in use (Darwin only; 0 on other platforms). Vnode exhaustion is the
+	// root cause of the "package errors is not in std" build failures —
+	// at 1.0 the kernel can no longer allocate vnodes and filesystem ops
+	// start failing (see memory/gopls-fd-leak-blocks-go-build.md).
+	VnodeUsedFraction float64
+
+	// GoplsProcesses counts running gopls processes. Each orphaned gopls
+	// instance holds ~4800 FDs; accumulation is the primary driver of
+	// FD/vnode exhaustion. Escalation fires when the count exceeds
+	// EscalationThreshold.GoplsProcesses.
+	GoplsProcesses int
+
 	// StrandedWorktrees counts worktrees whose branches have been merged
 	// but the worktree itself has not been reaped. A leak indicator per
 	// memory `dear-agent-worktree-stop-reaper.md`.
@@ -66,10 +85,16 @@ type EscalationThreshold struct {
 	// spawning new heavy processes will degrade performance further.
 	// Default 0.5 if zero.
 	SwapFraction float64
+
+	// GoplsProcesses is the count above which the Overseer escalates on
+	// gopls process accumulation. Default 5 if zero — more than 5 concurrent
+	// gopls processes is unusual and likely indicates a leak (each holds
+	// ~4800 FDs on Darwin).
+	GoplsProcesses int
 }
 
 // DefaultEscalationThreshold is the threshold used when none is configured.
-var DefaultEscalationThreshold = EscalationThreshold{Fraction: 0.9, SwapFraction: 0.5}
+var DefaultEscalationThreshold = EscalationThreshold{Fraction: 0.9, SwapFraction: 0.5, GoplsProcesses: 5}
 
 // Overseer is the CRO-analogue supervisor. Its Tick takes one
 // ResourceSnapshot and emits an escalation event for every metric that
@@ -98,7 +123,13 @@ func NewOverseer(trail decisiontrail.Trail, probe ResourceProbe, threshold Escal
 		return nil, errors.New("supervisor: Overseer requires a ResourceProbe")
 	}
 	if threshold.Fraction <= 0 {
-		threshold = DefaultEscalationThreshold
+		threshold.Fraction = DefaultEscalationThreshold.Fraction
+	}
+	if threshold.SwapFraction <= 0 {
+		threshold.SwapFraction = DefaultEscalationThreshold.SwapFraction
+	}
+	if threshold.GoplsProcesses <= 0 {
+		threshold.GoplsProcesses = DefaultEscalationThreshold.GoplsProcesses
 	}
 	return &Overseer{trail: trail, probe: probe, threshold: threshold}, nil
 }
@@ -135,6 +166,9 @@ func (o *Overseer) Tick(ctx context.Context) error {
 			"memory_used_fraction": snap.MemoryUsedFraction,
 			"swap_used_fraction":   snap.SwapUsedFraction,
 			"cpu_used_fraction":    snap.CPUUsedFraction,
+			"open_fd_fraction":     snap.OpenFDFraction,
+			"vnode_used_fraction":  snap.VnodeUsedFraction,
+			"gopls_processes":      snap.GoplsProcesses,
 			"stranded_worktrees":   snap.StrandedWorktrees,
 			"orphaned_sessions":    snap.OrphanedSessions,
 		},
@@ -145,6 +179,9 @@ func (o *Overseer) Tick(ctx context.Context) error {
 	o.maybeEscalateFraction(ctx, "memory", snap.MemoryUsedFraction)
 	o.maybeEscalateSwapFraction(ctx, snap.SwapUsedFraction)
 	o.maybeEscalateFraction(ctx, "cpu", snap.CPUUsedFraction)
+	o.maybeEscalateFraction(ctx, "open_fds", snap.OpenFDFraction)
+	o.maybeEscalateFraction(ctx, "vnodes", snap.VnodeUsedFraction)
+	o.maybeEscalateGopls(ctx, snap.GoplsProcesses)
 	o.maybeEscalateCount(ctx, "stranded_worktrees", snap.StrandedWorktrees)
 	o.maybeEscalateCount(ctx, "orphaned_sessions", snap.OrphanedSessions)
 
@@ -204,6 +241,28 @@ func (o *Overseer) maybeEscalateCount(ctx context.Context, name string, n int) {
 		Payload: map[string]any{
 			"metric": name,
 			"count":  n,
+		},
+	})
+}
+
+// maybeEscalateGopls escalates when the gopls process count exceeds
+// EscalationThreshold.GoplsProcesses (default 5). Unlike the generic count
+// escalation which fires at >0, gopls processes have a higher normal baseline.
+func (o *Overseer) maybeEscalateGopls(ctx context.Context, n int) {
+	thresh := o.threshold.GoplsProcesses
+	if thresh <= 0 {
+		thresh = DefaultEscalationThreshold.GoplsProcesses
+	}
+	if n <= thresh {
+		return
+	}
+	_ = o.trail.Append(ctx, decisiontrail.Record{
+		Role: string(RoleOverseer),
+		Kind: "supervisor.over.escalated",
+		Payload: map[string]any{
+			"metric":    "gopls_processes",
+			"count":     n,
+			"threshold": thresh,
 		},
 	})
 }
