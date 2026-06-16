@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
 // CreateSessionRequest defines the input for creating a new AGM session.
@@ -213,8 +214,11 @@ func shellQuote(s string) string {
 func buildHarnessCommand(harness, model, sessionName, workDir string) string {
 	switch harness {
 	case "claude-code":
+		// Resolve the freshest OAuth token (live credentials file preferred
+		// over the possibly-stale CLAUDE_CODE_OAUTH_TOKEN env var) so the
+		// spawned worker doesn't 401 on a refreshed token (ce-dzhz).
 		oauthArg := ""
-		if token := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); token != "" {
+		if token := auth.ResolveOAuthToken(); token != "" {
 			oauthArg = fmt.Sprintf(" CLAUDE_CODE_OAUTH_TOKEN='%s'", shellQuote(token))
 		}
 		return fmt.Sprintf("env AGM_SESSION_NAME='%s'%s claude --model '%s' --add-dir '%s' --enable-auto-mode && exit",

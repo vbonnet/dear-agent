@@ -25,12 +25,33 @@ func (f fakeSupervisorEnv) LookPath(bin string) (string, error) {
 	return "", fmt.Errorf("fake: not on PATH: %s", bin)
 }
 
+// noCredsPath returns a path under the test's temp dir that does not exist, so
+// the OAuth presence guard's credentials-file lookup is isolated from the
+// host's real ~/.claude/.credentials.json.
+func noCredsPath(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), "no-credentials.json")
+}
+
+// writeFreshCreds writes a credentials.json with a non-expired token and
+// returns its path.
+func writeFreshCreds(t *testing.T, token string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	expires := time.Now().Add(time.Hour).UnixMilli()
+	body := fmt.Sprintf(`{"claudeAiOauth":{"accessToken":%q,"expiresAt":%d}}`, token, expires)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write creds: %v", err)
+	}
+	return path
+}
+
 func TestCheckSupervisorEnvRefusesAPIKey(t *testing.T) {
 	env := fakeSupervisorEnv{envs: map[string]string{
-		"ANTHROPIC_API_KEY":        "sk-fake",
-		"CLAUDE_CODE_OAUTH_TOKEN":  "oauth-token",
+		"ANTHROPIC_API_KEY":       "sk-fake",
+		"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token",
 	}}
-	err := checkSupervisorEnv(env, false)
+	err := checkSupervisorEnv(env, false, noCredsPath(t))
 	if err == nil {
 		t.Fatal("expected refusal, got nil")
 	}
@@ -41,7 +62,7 @@ func TestCheckSupervisorEnvRefusesAPIKey(t *testing.T) {
 
 func TestCheckSupervisorEnvRequiresOAuth(t *testing.T) {
 	env := fakeSupervisorEnv{envs: map[string]string{}}
-	err := checkSupervisorEnv(env, false)
+	err := checkSupervisorEnv(env, false, noCredsPath(t))
 	if err == nil {
 		t.Fatal("expected refusal, got nil")
 		return
@@ -53,7 +74,7 @@ func TestCheckSupervisorEnvRequiresOAuth(t *testing.T) {
 
 func TestCheckSupervisorEnvSkipFlag(t *testing.T) {
 	env := fakeSupervisorEnv{envs: map[string]string{}}
-	if err := checkSupervisorEnv(env, true); err != nil {
+	if err := checkSupervisorEnv(env, true, noCredsPath(t)); err != nil {
 		t.Errorf("--skip-oauth-check should bypass, got %v", err)
 	}
 }
@@ -62,7 +83,7 @@ func TestCheckSupervisorEnvAPIKeyWinsOverSkipFlag(t *testing.T) {
 	// Even with skip-oauth-check, the API-key guard still applies: that's
 	// the invariant we never want to bypass.
 	env := fakeSupervisorEnv{envs: map[string]string{"ANTHROPIC_API_KEY": "sk-bad"}}
-	err := checkSupervisorEnv(env, true)
+	err := checkSupervisorEnv(env, true, noCredsPath(t))
 	if err == nil {
 		t.Fatal("API-key guard must not be bypassed by --skip-oauth-check")
 	}
@@ -75,8 +96,18 @@ func TestCheckSupervisorEnvOK(t *testing.T) {
 	env := fakeSupervisorEnv{envs: map[string]string{
 		"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token",
 	}}
-	if err := checkSupervisorEnv(env, false); err != nil {
+	if err := checkSupervisorEnv(env, false, noCredsPath(t)); err != nil {
 		t.Errorf("happy path errored: %v", err)
+	}
+}
+
+func TestCheckSupervisorEnvAcceptsFileToken(t *testing.T) {
+	// ce-dzhz: a supervisor with a valid credentials file but no
+	// CLAUDE_CODE_OAUTH_TOKEN env var must be allowed to start — the env var
+	// goes stale after the file auto-refreshes, so file-only auth is valid.
+	env := fakeSupervisorEnv{envs: map[string]string{}}
+	if err := checkSupervisorEnv(env, false, writeFreshCreds(t, "file-token")); err != nil {
+		t.Errorf("file-based OAuth should satisfy the guard, got %v", err)
 	}
 }
 
