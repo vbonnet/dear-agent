@@ -18,6 +18,13 @@ func ExpandHome(path string) string {
 	return path
 }
 
+// ExpandPath expands ~ and environment variables in path.
+// Use this as the canonical path expander instead of re-implementing tilde expansion.
+// For absolute+symlink resolution, use NormalizePath instead.
+func ExpandPath(path string) string {
+	return ExpandHome(os.ExpandEnv(path))
+}
+
 // NormalizePath converts path to absolute, normalized form.
 // Resolves symlinks to ensure consistent comparison (e.g., macOS /var → /private/var).
 func NormalizePath(path string) (string, error) {

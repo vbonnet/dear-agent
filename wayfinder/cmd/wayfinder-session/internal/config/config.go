@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/vbonnet/dear-agent/internal/fileutil"
 	"gopkg.in/yaml.v3"
+
+	"github.com/vbonnet/dear-agent/internal/fileutil"
+	"github.com/vbonnet/dear-agent/pkg/workspace"
 )
 
 // Config represents the Wayfinder configuration
@@ -247,15 +249,8 @@ func hasWorkspaceMarker(dir string) bool {
 	return false
 }
 
-// expandPath expands ~/ and environment variables in path
 func expandPath(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			return filepath.Join(home, path[2:])
-		}
-	}
-	return os.ExpandEnv(path)
+	return workspace.ExpandPath(path)
 }
 
 // getConfigPath returns the path to the config file

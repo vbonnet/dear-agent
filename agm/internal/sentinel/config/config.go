@@ -11,6 +11,8 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"gopkg.in/yaml.v3"
+
+	"github.com/vbonnet/dear-agent/pkg/workspace"
 )
 
 // Config holds Astrocyte daemon configuration.
@@ -315,32 +317,12 @@ func (c *Config) Validate() error {
 
 // ExpandPaths expands ~ and environment variables in all path fields.
 func (c *Config) ExpandPaths() {
-	homeDir, _ := os.UserHomeDir()
-
-	// Expand pattern paths
-	c.Patterns.Bash = expandPath(c.Patterns.Bash, homeDir)
-	c.Patterns.Beads = expandPath(c.Patterns.Beads, homeDir)
-	c.Patterns.Git = expandPath(c.Patterns.Git, homeDir)
-
-	// Expand violations directory
-	c.Violations.Directory = expandPath(c.Violations.Directory, homeDir)
-
-	// Expand logging paths
-	c.Logging.IncidentsFile = expandPath(c.Logging.IncidentsFile, homeDir)
-	c.Logging.DiagnosesDir = expandPath(c.Logging.DiagnosesDir, homeDir)
-}
-
-// expandPath expands ~ to home directory and evaluates environment variables.
-func expandPath(path, homeDir string) string {
-	// Expand ~ to home directory
-	if path[:1] == "~" {
-		path = filepath.Join(homeDir, path[1:])
-	}
-
-	// Expand environment variables
-	path = os.ExpandEnv(path)
-
-	return path
+	c.Patterns.Bash = workspace.ExpandPath(c.Patterns.Bash)
+	c.Patterns.Beads = workspace.ExpandPath(c.Patterns.Beads)
+	c.Patterns.Git = workspace.ExpandPath(c.Patterns.Git)
+	c.Violations.Directory = workspace.ExpandPath(c.Violations.Directory)
+	c.Logging.IncidentsFile = workspace.ExpandPath(c.Logging.IncidentsFile)
+	c.Logging.DiagnosesDir = workspace.ExpandPath(c.Logging.DiagnosesDir)
 }
 
 // DefaultConfigPath returns the default config file path.

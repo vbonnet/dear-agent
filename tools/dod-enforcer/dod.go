@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/vbonnet/dear-agent/pkg/workspace"
 )
 
 // BeadDoD represents the Definition of Done for a bead.
@@ -178,16 +178,8 @@ func (d *BeadDoD) checkCommandsSucceed() []CheckResult {
 	return results
 }
 
-// expandPath expands tilde and environment variables in a path.
 func expandPath(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return path
-		}
-		return filepath.Join(home, path[2:])
-	}
-	return os.ExpandEnv(path)
+	return workspace.ExpandPath(path)
 }
 
 // executeCommand runs a command with a timeout and returns the exit code and output.
