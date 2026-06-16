@@ -31,10 +31,10 @@ type supervisor struct {
 
 var supervisors = []supervisor{
 	{
-		Name:         "vroom-meta-o",
-		ID:           "vroom-meta-o",
+		Name:         "vroom-meta-orchestrator",
+		ID:           "vroom-meta-orchestrator",
 		SkillFile:    "meta-orchestrator.md",
-		PrimaryFor:   "vroom-orch",
+		PrimaryFor:   "vroom-orchestrator",
 		TertiaryFor:  "vroom-overseer",
 		TickInterval: 180 * time.Second,
 		TickPrompt: "Execute your Meta-Orchestrator tick: " +
@@ -43,11 +43,11 @@ var supervisors = []supervisor{
 			"6) write heartbeat.",
 	},
 	{
-		Name:         "vroom-orch",
-		ID:           "vroom-orch",
+		Name:         "vroom-orchestrator",
+		ID:           "vroom-orchestrator",
 		SkillFile:    "orchestrator.md",
 		PrimaryFor:   "vroom-overseer",
-		TertiaryFor:  "vroom-meta-o",
+		TertiaryFor:  "vroom-meta-orchestrator",
 		TickInterval: 90 * time.Second,
 		TickPrompt: "Execute your Orchestrator tick: " +
 			"1) check peer heartbeats 2) read accepted roadmap items " +
@@ -59,8 +59,8 @@ var supervisors = []supervisor{
 		Name:         "vroom-overseer",
 		ID:           "vroom-overseer",
 		SkillFile:    "overseer.md",
-		PrimaryFor:   "vroom-meta-o",
-		TertiaryFor:  "vroom-orch",
+		PrimaryFor:   "vroom-meta-orchestrator",
+		TertiaryFor:  "vroom-orchestrator",
 		TickInterval: 60 * time.Second,
 		TickPrompt: "Execute your Overseer tick: " +
 			"1) check peer heartbeats 2) probe system resources (disk, memory, FDs, gopls) " +
@@ -276,7 +276,7 @@ func runHealthMonitor(home string, state *sessionState) {
 // isSessionAlive checks if an AGM session with the exact given name exists.
 // It matches the name as a whole whitespace-delimited token rather than a
 // substring, so a worker session whose name merely contains a supervisor's
-// name (e.g. "vroom-orch-worker-1") cannot mask a dead supervisor session.
+// name (e.g. "vroom-orchestrator-worker-1") cannot mask a dead supervisor session.
 func isSessionAlive(name string) bool {
 	cmd := exec.Command("agm", "session", "list")
 	out, err := cmd.Output()
@@ -416,7 +416,7 @@ func printStatus(state *sessionState) {
 	fmt.Println("    tail -f ~/.agm/vroom/trail.jsonl")
 	fmt.Println()
 	fmt.Println("Talk to a supervisor:")
-	fmt.Println("    agm send msg vroom-meta-o --prompt \"status?\"")
+	fmt.Println("    agm send msg vroom-meta-orchestrator --prompt \"status?\"")
 }
 
 func printTrailTail(path string, n int) {
