@@ -1,5 +1,7 @@
 # Engram CLI - Technical Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 The Engram CLI is a command-line interface for managing AI agent learning and memory persistence. It enables AI coding agents (Claude Code, Cursor, Windsurf) to learn from experience through memory traces (engrams) stored as markdown files.

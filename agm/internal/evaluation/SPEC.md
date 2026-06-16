@@ -1,5 +1,7 @@
 # EDD Framework Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Purpose
 
 The EDD (Evaluation-Driven Development) Framework provides a systematic approach to evaluating LLM-based applications throughout their lifecycle. It addresses the unique challenges of AI system quality assurance by providing:

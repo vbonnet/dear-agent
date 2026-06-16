@@ -1,5 +1,7 @@
 # Health Check & Auto-Fix System - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version**: 1.0
 **Date**: 2026-03-14
 **Status**: Implemented

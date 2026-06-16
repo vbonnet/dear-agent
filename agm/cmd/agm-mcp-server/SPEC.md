@@ -1,5 +1,7 @@
 # AGM MCP Server - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI Guided Manager) session metadata to external MCP clients like Claude Code. It enables Claude-based AI assistants to query, search, and retrieve AGM session information without accessing conversation content.

@@ -1,5 +1,7 @@
 # hash Package Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version:** 0.1.0
 **Status:** Production-ready
 **Pattern:** Library/Utility

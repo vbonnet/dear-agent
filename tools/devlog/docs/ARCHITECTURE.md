@@ -1,5 +1,7 @@
 # Devlog Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 Devlog is a documentation-only knowledge base library with no executable code. The architecture focuses on information organization, discoverability, and maintainability.

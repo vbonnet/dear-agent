@@ -1,5 +1,7 @@
 # Wayfinder Plugin - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version**: 0.1.0
 **Last Updated**: 2026-02-11
 **Status**: Active Development

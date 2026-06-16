@@ -1,5 +1,7 @@
 # cliframe Technical Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version**: 0.1.0
 **Status**: Stable
 **Last Updated**: 2026-03-20

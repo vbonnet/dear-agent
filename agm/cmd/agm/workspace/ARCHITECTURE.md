@@ -1,5 +1,7 @@
 # Workspace-Aware Session Management - Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version**: 1.0
 **Last Updated**: 2026-02-18
 **Status**: Implemented

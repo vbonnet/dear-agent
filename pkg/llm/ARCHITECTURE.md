@@ -1,5 +1,7 @@
 # pkg/llm - Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version**: 0.4.0
 **Last Updated**: 2026-03-20
 **Status**: Production

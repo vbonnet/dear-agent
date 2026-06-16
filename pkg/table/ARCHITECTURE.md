@@ -1,5 +1,7 @@
 # Table Package Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 The `table` package provides styled table rendering for CLI applications using `charmbracelet/lipgloss`. It replaces manual `text/tabwriter` usage with a unified, fluent API that supports multiple output formats.

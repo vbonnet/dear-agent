@@ -1,5 +1,7 @@
 # Bead Definition of Done (DoD) - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 The bead DoD package provides machine-checkable Definition of Done validation for bead task completion. It enables declarative specification of completion criteria through YAML files, including file existence checks, test execution requirements, and custom command validations.

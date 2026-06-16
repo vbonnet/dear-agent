@@ -1,5 +1,7 @@
 # AGM (Agent Gateway Manager) - Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 AGM (Agent Gateway Manager) is a multi-agent session management system that provides a unified CLI interface for managing AI agent sessions across different providers (Claude, Gemini, GPT, OpenCode). The system implements an adapter pattern to abstract away CLI-specific differences and enable seamless multi-session orchestration.

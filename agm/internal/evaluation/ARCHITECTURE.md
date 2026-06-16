@@ -1,5 +1,7 @@
 # EDD Framework Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## System Overview
 
 The EDD (Evaluation-Driven Development) Framework follows a layered architecture with clear separation of concerns:
