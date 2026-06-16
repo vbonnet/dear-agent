@@ -88,7 +88,7 @@ func associateSpawnedClaudeSession(sessionName string) {
 // SessionStart hook backfills the UUID once Claude emits its session_id.
 func backfillClaudeUUID(m *manifest.Manifest, manifestPath string, adapter *dolt.Adapter) {
 	if m.Claude.UUID != "" {
-		debug.Log("Deterministic association: manifest already linked to Claude UUID %s", m.Claude.UUID[:8])
+		debug.Log("Deterministic association: manifest already linked to Claude UUID %s", shortID(m.Claude.UUID))
 		return
 	}
 
@@ -109,7 +109,18 @@ func backfillClaudeUUID(m *manifest.Manifest, manifestPath string, adapter *dolt
 		return
 	}
 	_ = git.CommitManifest(manifestPath, "associate", m.Tmux.SessionName)
-	debug.Log("Deterministic association: linked Claude UUID %s", detectedUUID[:8])
+	debug.Log("Deterministic association: linked Claude UUID %s", shortID(detectedUUID))
+}
+
+// shortID returns the first 8 chars of an ID for log lines, guarding against
+// unexpectedly short strings (corrupted/partial manifest state, or a discovery
+// fallback that returns a non-canonical value) that would otherwise panic the
+// spawner on the slice expression.
+func shortID(id string) string {
+	if len(id) < 8 {
+		return id
+	}
+	return id[:8]
 }
 
 // writeAssociationReadyFile writes the readiness ready-file that the post-create
