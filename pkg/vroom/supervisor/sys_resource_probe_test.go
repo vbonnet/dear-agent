@@ -76,3 +76,43 @@ func TestSysResourceProbe_CPUAlwaysZero(t *testing.T) {
 		t.Errorf("CPUUsedFraction = %f, want 0 (not yet implemented)", snap.CPUUsedFraction)
 	}
 }
+
+func TestSysResourceProbe_Snapshot_OpenFDFraction(t *testing.T) {
+	t.Parallel()
+	p := NewSysResourceProbe()
+	snap, err := p.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() error: %v", err)
+	}
+	if snap.OpenFDFraction < 0 || snap.OpenFDFraction > 1 {
+		t.Errorf("OpenFDFraction = %f, want 0..1", snap.OpenFDFraction)
+	}
+	// On Linux and Darwin there are always some open FDs.
+	if snap.OpenFDFraction == 0 {
+		t.Log("OpenFDFraction = 0 (platform may not support this metric)")
+	}
+}
+
+func TestSysResourceProbe_Snapshot_VnodeUsedFraction(t *testing.T) {
+	t.Parallel()
+	p := NewSysResourceProbe()
+	snap, err := p.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() error: %v", err)
+	}
+	if snap.VnodeUsedFraction < 0 || snap.VnodeUsedFraction > 1 {
+		t.Errorf("VnodeUsedFraction = %f, want 0..1", snap.VnodeUsedFraction)
+	}
+}
+
+func TestSysResourceProbe_Snapshot_GoplsProcesses(t *testing.T) {
+	t.Parallel()
+	p := NewSysResourceProbe()
+	snap, err := p.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() error: %v", err)
+	}
+	if snap.GoplsProcesses < 0 {
+		t.Errorf("GoplsProcesses = %d, want >= 0", snap.GoplsProcesses)
+	}
+}

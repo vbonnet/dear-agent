@@ -135,6 +135,89 @@ func TestOverseer_Tick_ProbeErrorPropagates(t *testing.T) {
 	}
 }
 
+func TestOverseer_Tick_EscalatesGoplsWhenOverThreshold(t *testing.T) {
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{
+		GoplsProcesses: 10, // over default threshold of 5
+	})
+	trail, buf := newBufferTrail()
+	// Use a zero-fraction threshold so only gopls fires.
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9, GoplsProcesses: 5})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	saw := false
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] != "supervisor.over.escalated" {
+			continue
+		}
+		p := r["payload"].(map[string]any)
+		if p["metric"] == "gopls_processes" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Error("no escalation for gopls_processes above threshold")
+	}
+}
+
+func TestOverseer_Tick_NoGoplsEscalationAtOrBelowThreshold(t *testing.T) {
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{
+		GoplsProcesses: 5, // exactly at threshold — should NOT escalate (threshold is exclusive)
+	})
+	trail, buf := newBufferTrail()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9, GoplsProcesses: 5})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] != "supervisor.over.escalated" {
+			continue
+		}
+		p := r["payload"].(map[string]any)
+		if p["metric"] == "gopls_processes" {
+			t.Error("gopls_processes escalated at threshold — want >threshold only")
+		}
+	}
+}
+
+func TestOverseer_Tick_EscalatesFDAndVnodePressure(t *testing.T) {
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{
+		OpenFDFraction:    0.95, // over 0.9 threshold
+		VnodeUsedFraction: 1.0,  // at full saturation
+	})
+	trail, buf := newBufferTrail()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	saw := map[string]bool{}
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] != "supervisor.over.escalated" {
+			continue
+		}
+		p := r["payload"].(map[string]any)
+		saw[p["metric"].(string)] = true
+	}
+	if !saw["open_fds"] {
+		t.Error("no escalation for open_fds above threshold")
+	}
+	if !saw["vnodes"] {
+		t.Error("no escalation for vnodes at 100% saturation")
+	}
+}
+
 type errorProbe struct{ err error }
 
 func (e *errorProbe) Snapshot(context.Context) (ResourceSnapshot, error) {

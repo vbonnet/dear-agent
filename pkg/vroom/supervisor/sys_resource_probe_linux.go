@@ -4,6 +4,7 @@ package supervisor
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"strconv"
 	"strings"
@@ -92,4 +93,67 @@ func sysSwapUsedFraction() float64 {
 		return 0
 	}
 	return float64(total-free) / float64(total)
+}
+
+// sysFDUsedFraction returns the fraction of the system-wide open-file
+// descriptor limit currently in use on Linux.
+//
+// /proc/sys/fs/file-nr contains three whitespace-separated fields:
+// allocated_fds, unused_allocated_fds (always 0 since Linux 2.6), max_fds.
+func sysFDUsedFraction() float64 {
+	data, err := os.ReadFile("/proc/sys/fs/file-nr")
+	if err != nil {
+		return 0
+	}
+	fields := strings.Fields(strings.TrimSpace(string(data)))
+	if len(fields) < 3 {
+		return 0
+	}
+	alloc, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil || alloc < 0 {
+		return 0
+	}
+	maxFDs, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil || maxFDs <= 0 {
+		return 0
+	}
+	if alloc >= maxFDs {
+		return 1
+	}
+	return float64(alloc) / float64(maxFDs)
+}
+
+// sysVnodeUsedFraction returns 0 on Linux — the vnode abstraction is Darwin-
+// specific. Linux uses a unified page cache and dentry/inode caches instead.
+func sysVnodeUsedFraction() float64 { return 0 }
+
+// sysGoplsCount returns the number of running gopls processes on Linux by
+// reading /proc/<pid>/comm for each numeric /proc entry.
+func sysGoplsCount(ctx context.Context) int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		select {
+		case <-ctx.Done():
+			return n
+		default:
+		}
+		if !e.IsDir() {
+			continue
+		}
+		if _, parseErr := strconv.ParseInt(e.Name(), 10, 64); parseErr != nil {
+			continue
+		}
+		comm, err := os.ReadFile("/proc/" + e.Name() + "/comm")
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(string(comm)) == "gopls" {
+			n++
+		}
+	}
+	return n
 }
