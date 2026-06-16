@@ -36,11 +36,13 @@ Usage:
   babysit-prs [flags]
 
 Flags:
-  --repo <owner/name>   GitHub repo (auto-detected if omitted)
-  --limit <n>           Max PRs to merge per run (default: 10)
-  --cap <n>             Abort if open-PR count > cap (backpressure, default: 50)
-  --timeout <dur>       Timeout per PR for pending checks passed to safe-merge (default: 45m)
-  --dry-run             Update-branch and print checks without merging (passed to safe-merge)
+  --repo <owner/name>             GitHub repo (auto-detected if omitted)
+  --limit <n>                     Max PRs to merge per run (default: 10)
+  --cap <n>                       Abort if open-PR count > cap (backpressure, default: 50)
+  --timeout <dur>                 Timeout per PR for pending checks passed to safe-merge (default: 45m)
+  --dry-run                       Update-branch and print checks without merging (passed to safe-merge)
+  --skip-bot-review               Bypass Gemini bot-review gate (requires --skip-bot-review-reason)
+  --skip-bot-review-reason <s>    Justification for skipping; passed to safe-merge and recorded in audit log
 
 babysit-prs lists every open non-draft PR, rebases any that are BEHIND, then
 delegates each merge to the safe-merge binary (which enforces all guards and
@@ -57,11 +59,13 @@ func main() {
 }
 
 type config struct {
-	Repo    string
-	Limit   int
-	Cap     int
-	Timeout time.Duration
-	DryRun  bool
+	Repo                string
+	Limit               int
+	Cap                 int
+	Timeout             time.Duration
+	DryRun              bool
+	SkipBotReview       bool
+	SkipBotReviewReason string
 }
 
 func run(argv []string) error {
@@ -72,6 +76,9 @@ func run(argv []string) error {
 	cfg, err := parseFlags(argv)
 	if err != nil {
 		return err
+	}
+	if cfg.SkipBotReview && strings.TrimSpace(cfg.SkipBotReviewReason) == "" {
+		return fmt.Errorf("--skip-bot-review requires --skip-bot-review-reason")
 	}
 	if cfg.Repo == "" {
 		cfg.Repo, err = detectRepo()
@@ -158,6 +165,15 @@ func parseFlags(argv []string) (config, error) {
 			i++
 		case "--dry-run":
 			cfg.DryRun = true
+		case "--skip-bot-review":
+			cfg.SkipBotReview = true
+		case "--skip-bot-review-reason":
+			val, err := parseStringFlag(argv, i, "--skip-bot-review-reason")
+			if err != nil {
+				return cfg, err
+			}
+			cfg.SkipBotReviewReason = val
+			i++
 		default:
 			if len(arg) > 0 && arg[0] == '-' {
 				return cfg, fmt.Errorf("unknown flag %q\n\n%s", arg, usage)
@@ -233,6 +249,9 @@ func callSafeMerge(cfg config, prNum int) error {
 	args := []string{"--pr", strconv.Itoa(prNum), "--repo", cfg.Repo}
 	if cfg.DryRun {
 		args = append(args, "--dry-run")
+	}
+	if cfg.SkipBotReview {
+		args = append(args, "--skip-bot-review", "--skip-bot-review-reason", cfg.SkipBotReviewReason)
 	}
 
 	// Context timeout kills a stuck safe-merge. We do not pass --watch to
