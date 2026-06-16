@@ -62,6 +62,11 @@ tests/test_helper/
 /agm-mcp-server
 /agm-statusline
 /workflow-audit
+/dear-agent-mcp
+/stop-wayfinder-guard
+
+# Local runtime state
+.local/
 
 # Local audit database (created by `workflow-audit run`)
 .dear-agent/
