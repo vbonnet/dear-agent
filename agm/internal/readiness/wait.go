@@ -47,14 +47,18 @@ func ReadyTimeout() time.Duration {
 		debug.Log("Ignoring invalid %s=%q; using default %v", ReadyTimeoutEnvVar, raw, defaultReadyTimeout)
 		return defaultReadyTimeout
 	}
-	d := time.Duration(secs) * time.Second
-	if d < minReadyTimeout {
+	// Clamp in whole seconds BEFORE converting to a Duration. secs is an int
+	// (int64 on 64-bit platforms) and time.Duration(secs)*time.Second multiplies
+	// by 1e9, so any secs above ~9.2e9 overflows int64 and wraps negative — which
+	// would then clamp to minReadyTimeout instead of maxReadyTimeout. Comparing
+	// against the bounds expressed in seconds sidesteps the overflow entirely.
+	if secs < int(minReadyTimeout/time.Second) {
 		return minReadyTimeout
 	}
-	if d > maxReadyTimeout {
+	if secs > int(maxReadyTimeout/time.Second) {
 		return maxReadyTimeout
 	}
-	return d
+	return time.Duration(secs) * time.Second
 }
 
 // ReadyFilePayload represents the JSON structure of ready-files.

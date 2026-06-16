@@ -323,6 +323,7 @@ func TestReadyTimeout(t *testing.T) {
 		{"valid in-range", "30", 30 * time.Second},
 		{"below min clamps up", "1", minReadyTimeout},
 		{"above max clamps down", "9999", maxReadyTimeout},
+		{"very large overflow prevention", "1000000000000000", maxReadyTimeout},
 		{"zero falls back to default", "0", defaultReadyTimeout},
 		{"negative falls back to default", "-5", defaultReadyTimeout},
 		{"non-numeric falls back to default", "abc", defaultReadyTimeout},
