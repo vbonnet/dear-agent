@@ -137,7 +137,7 @@ func startCurrentTmuxClaude(sessionName, workDir string) error {
 		autoModeFlag = ""
 		debug.Log("Auto mode disabled by flag/env var")
 	}
-	claudeCmd := fmt.Sprintf("AGM_SESSION_NAME=%s%s claude --model %s --add-dir '%s'%s && exit", sessionName, otelEnvArgs(), resolvedModel, workDirForClaude, autoModeFlag)
+	claudeCmd := fmt.Sprintf("AGM_SESSION_NAME=%s%s%s claude --model '%s' --add-dir '%s'%s && exit", sessionName, otelEnvArgs(), oauthEnvArg(), resolvedModel, workDirForClaude, autoModeFlag)
 	if modeFlagValue == "auto" || modeFlagValue == "plan" || modeFlagValue == "default" {
 		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --permission-mode %s && exit", modeFlagValue), 1)
 	}

@@ -213,8 +213,12 @@ func shellQuote(s string) string {
 func buildHarnessCommand(harness, model, sessionName, workDir string) string {
 	switch harness {
 	case "claude-code":
-		return fmt.Sprintf("env AGM_SESSION_NAME='%s' claude --model '%s' --add-dir '%s' --enable-auto-mode && exit",
-			shellQuote(sessionName), shellQuote(model), shellQuote(workDir))
+		oauthArg := ""
+		if token := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); token != "" {
+			oauthArg = fmt.Sprintf(" CLAUDE_CODE_OAUTH_TOKEN='%s'", shellQuote(token))
+		}
+		return fmt.Sprintf("env AGM_SESSION_NAME='%s'%s claude --model '%s' --add-dir '%s' --enable-auto-mode && exit",
+			shellQuote(sessionName), oauthArg, shellQuote(model), shellQuote(workDir))
 	case "gemini-cli":
 		return fmt.Sprintf("gemini -m '%s' && exit", shellQuote(model))
 	case "codex-cli":
