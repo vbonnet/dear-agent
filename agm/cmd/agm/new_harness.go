@@ -149,9 +149,9 @@ func buildClaudeCommand(sessionName, workDir string, extraAddDirs []string) (str
 		debug.Log("Auto mode disabled by flag/env var")
 	}
 	oauthArg := oauthEnvArg()
-	claudeCmd := fmt.Sprintf("env %s AGM_SESSION_NAME=%s%s%s claude --model '%s' --add-dir '%s'%s && exit", claudeEnvUnsetFlags(oauthArg != ""), sessionName, otelEnvArgs(), oauthArg, resolvedModel, workDir, autoModeFlag)
+	claudeCmd := fmt.Sprintf("env %s AGM_SESSION_NAME=%s%s%s claude --model %s --add-dir %s%s && exit", claudeEnvUnsetFlags(oauthArg != ""), shellQuote(sessionName), otelEnvArgs(), oauthArg, shellQuote(resolvedModel), shellQuote(workDir), autoModeFlag)
 	for _, dir := range extraAddDirs {
-		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --add-dir '%s' && exit", dir), 1)
+		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --add-dir %s && exit", shellQuote(dir)), 1)
 	}
 	modeAppliedAtStartup := false
 	if modeFlagValue == "auto" || modeFlagValue == "plan" || modeFlagValue == "default" {
