@@ -46,8 +46,10 @@
 #   install-pr-linkify      Install pr-linkify to ~/go/bin
 #   build-fd-pressure       Build fd-pressure: FD/vnode/gopls pressure monitor
 #   install-fd-pressure     Install fd-pressure to ~/go/bin
+#   build-vroom-dispatch    Build vroom-dispatch: VROOM supervisor mesh launcher
+#   install-vroom-dispatch  Install vroom-dispatch to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -511,3 +513,13 @@ build-fd-pressure:
 install-fd-pressure: build-fd-pressure
 	cp bin/fd-pressure $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/fd-pressure"
+
+build-vroom-dispatch:
+	@echo "Building vroom-dispatch..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/vroom-dispatch ./cmd/vroom-dispatch/
+	@echo "Built: bin/vroom-dispatch"
+
+install-vroom-dispatch: build-vroom-dispatch
+	cp bin/vroom-dispatch $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/vroom-dispatch"
