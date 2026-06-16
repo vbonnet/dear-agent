@@ -272,14 +272,24 @@ func runHealthMonitor(home string, state *sessionState) {
 	}
 }
 
-// isSessionAlive checks if an AGM session exists and is not archived.
+// isSessionAlive checks if an AGM session with the exact given name exists.
+// It matches the name as a whole whitespace-delimited token rather than a
+// substring, so a worker session whose name merely contains a supervisor's
+// name (e.g. "vroom-orch-worker-1") cannot mask a dead supervisor session.
 func isSessionAlive(name string) bool {
 	cmd := exec.Command("agm", "session", "list")
 	out, err := cmd.Output()
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(out), name)
+	for _, line := range strings.Split(string(out), "\n") {
+		for _, field := range strings.Fields(line) {
+			if field == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func loadState(home string) *sessionState {
@@ -310,8 +320,16 @@ func saveState(home string, state *sessionState) {
 		fmt.Fprintf(os.Stderr, "vroom-dispatch: mkdir: %v\n", err)
 		return
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	// Write to a temp file then rename so a crash mid-write cannot leave a
+	// truncated or corrupt sessions.json behind (rename is atomic on POSIX).
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "vroom-dispatch: write state: %v\n", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		fmt.Fprintf(os.Stderr, "vroom-dispatch: rename state: %v\n", err)
+		_ = os.Remove(tmp)
 	}
 }
 
