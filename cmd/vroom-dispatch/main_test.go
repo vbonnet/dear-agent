@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -140,18 +141,8 @@ func TestWorkerSpawnPinsOpusAndWayfinder(t *testing.T) {
 		}
 	}
 
-	// Defend against silent regression to the credit-gated 1M opus alias and to
-	// the old raw-execution dispatch record placeholder. Match `--model=opus` as
-	// a whole whitespace-delimited token rather than a trailing-space substring:
-	// the substring form would miss a regression where the flag sits at end of
-	// line (e.g. line-continued), silently disarming this guard. strings.Fields
-	// splits on newlines too, and `--model=opus-200k` is a distinct field so it
-	// never false-positives.
-	for _, field := range strings.Fields(doc) {
-		if field == "--model=opus" {
-			t.Errorf("orchestrator.md must not spawn workers with the 1M-context opus alias (credit-gated)")
-			break
-		}
+	if slices.Contains(strings.Fields(doc), "--model=opus") {
+		t.Errorf("orchestrator.md must not spawn workers with the 1M-context opus alias (credit-gated)")
 	}
 	if strings.Contains(doc, `"model":"default"`) {
 		t.Errorf(`orchestrator.md still records "model":"default"; dispatch record must say "opus-200k"`)
