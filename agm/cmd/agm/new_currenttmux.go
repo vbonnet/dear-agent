@@ -136,7 +136,7 @@ func startCurrentTmuxClaude(sessionName, workDir string) error {
 		autoModeFlag = ""
 		debug.Log("Auto mode disabled by flag/env var")
 	}
-	claudeCmd := fmt.Sprintf("AGM_SESSION_NAME=%s%s%s claude --model '%s' --add-dir '%s'%s && exit", sessionName, otelEnvArgs(), oauthEnvArg(), resolvedModel, workDirForClaude, autoModeFlag)
+	claudeCmd := fmt.Sprintf("AGM_SESSION_NAME=%s%s%s claude --model %s --add-dir %s%s && exit", shellQuote(sessionName), otelEnvArgs(), oauthEnvArg(), shellQuote(resolvedModel), shellQuote(workDirForClaude), autoModeFlag)
 	if modeFlagValue == "auto" || modeFlagValue == "plan" || modeFlagValue == "default" {
 		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --permission-mode %s && exit", modeFlagValue), 1)
 	}
@@ -205,7 +205,7 @@ func startCurrentTmuxOpenCode(sessionName string) error {
 func startCurrentTmuxGemini(sessionName string) error {
 	fmt.Println("Starting Gemini CLI...")
 	resolvedModel := agent.ResolveModelFullName("gemini-cli", modelName)
-	geminiCmd := fmt.Sprintf("gemini -m %s && exit", resolvedModel)
+	geminiCmd := fmt.Sprintf("gemini -m %s && exit", shellQuote(resolvedModel))
 	debug.Log("Sending command: %s", geminiCmd)
 	if err := tmux.SendCommand(sessionName, geminiCmd); err != nil {
 		ui.PrintError(err,
