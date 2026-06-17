@@ -97,34 +97,73 @@ a later tick. Do NOT try to override the circuit breaker.
 kind: "supervisor.orch.at_capacity"
 ```
 
+**Cost guardrail (Opus runaway usage):** Workers now run on Opus, which is
+~5× the token throughput of Sonnet per tick. On Max-plan OAuth there is no
+per-token *billing*, but there IS a shared usage ceiling — a worker stuck in a
+retry/death loop burns that ceiling for every other session. The guardrails,
+in order, are: (1) the 3-worker concurrency cap above — never raise it to clear
+a backlog faster; (2) `opus-200k` not the 1M variant; (3) wayfinder's bounded
+phases instead of an open-ended raw loop; (4) the stuck-worker checks in Step 6
+(status ping at >60min, wrap-up at >120min). If you observe workers churning
+without committing — repeated ticks, no new commits, no PR — treat it as
+runaway usage: send a wrap-up command early and record
+`kind: "supervisor.orch.worker_runaway"` rather than letting it ride.
+
 **Create worker session**:
 ```bash
 agm session new "worker-<bead-id>" --detached --workspace=oss --harness=claude-code \
-  --model=sonnet-200k --mode=auto --role worker 2>&1
+  --model=opus-200k --mode=auto --role worker 2>&1
 ```
-Workers MUST run on `sonnet-200k` (cost control + dodges the 1M credit gate —
+Workers MUST run on `opus-200k` (design-phase work needs Opus — dodges the 1M credit gate;
 NEVER the bare `sonnet`/`opus` aliases, which resolve to credit-gated `[1m]`
 models) and in `auto` mode (a detached worker cannot answer approval prompts).
 
-Wait a moment for the session to initialize, then send the work prompt:
+**Why `--model=opus-200k --mode=auto` (do NOT omit these — same reasoning as the supervisors, ce-84l2):**
+
+- **`opus-200k`, not the claude-code default of sonnet.** Operator directive:
+  design-phase work (CHARTER / DESIGN / AUDIT in wayfinder) needs Opus —
+  Sonnet is too conservative and hamstrings quality. Workers run on the same
+  Max-plan OAuth as supervisors, where there is **no per-token metering**, so
+  Opus's extra capability is the only trade-off that matters.
+- **`opus-200k` (→ `claude-opus-4-8`), NOT `opus` (→ `claude-opus-4-8[1m]`).**
+  The 1M-context models are credit-gated on this Max-plan auth — every tick of
+  a `[1m]` model fails with "API Error: Usage credits required for 1M context".
+  200k context is ample for a bead and dodges the gate. (The `[1m]` suffix in
+  the sonnet default also trips an unquoted-glob abort in zsh — `opus-200k` has
+  no brackets and sidesteps that too.)
+- **`--mode=auto`, not the claude-code default of plan.** A detached worker
+  cannot answer interactive approval prompts. In plan mode it can plan its bead
+  but never execute it, and exiting plan mode itself raises an approval prompt
+  no detached session can self-answer.
+
+Wait a moment for the session to initialize, then send the work prompt. Workers
+**drive the bead through wayfinder** (the SDLC workflow) — not raw execution:
 ```bash
-agm send msg "worker-<bead-id>" --sender vroom-orchestrator --prompt "You are a worker session assigned to bead <bead-id>: <title>. 
+agm send msg "worker-<bead-id>" --sender vroom-orchestrator --prompt "You are a worker session assigned to bead <bead-id>: <title>.
 
-Your task: resolve this bead by implementing the required changes.
+Your task: resolve this bead by running it through the wayfinder SDLC workflow — NOT raw code-first execution.
 
-Rules:
-- Work in ~/worktrees/dear-agent/<bead-id>/ (create worktree from ~/src/dear-agent)
-- Commit incrementally after each sub-task
-- Use bd --db ~/beads/context-engine/.beads to update bead status
-- When done: create a PR via safe-pr, update bead to done
-- If stuck after 2 retries: report failure, do NOT keep retrying
+Process (MANDATORY):
+- Invoke /wayfinder and drive the bead through its phases (CHARTER -> ... -> RETRO).
+  You are running on Opus specifically so the design/audit phases are rigorous —
+  do not shortcut CHARTER/DESIGN/AUDIT to jump straight to code.
+- Wayfinder artifacts (wf/, W0, design docs, audits, retros) are temporal: they go to
+  the knowledge base (~/src/engram-research), NEVER committed into dear-agent.
+- Work in ~/worktrees/dear-agent/<bead-id>/ (create the worktree from ~/src/dear-agent;
+  ~/src is READ-ONLY).
+- Commit incrementally after each sub-task — uncommitted work is nonexistent work.
+- Use bd --db ~/beads/context-engine/.beads to update bead status. The bead stays
+  in_progress until its PR is MERGED to main; 'PR created' is NOT done.
+- When the implementation phase is complete: open a PR via 'safe-pr create --wayfinder <wf-dir>'.
+- If stuck after 2 retries on the same error: STOP, report failure with two concrete
+  alternatives. Permission/access errors: 0 retries — report immediately.
 
 Bead details: run bd --db ~/beads/context-engine/.beads show <bead-id>"
 ```
 
-Record the dispatch:
+Record the dispatch (note `opus-200k`, matching the spawn):
 ```bash
-printf '{"bead_id":"%s","session":"worker-%s","model":"sonnet-200k","dispatched_at":"%s"}\n' \
+printf '{"bead_id":"%s","session":"worker-%s","model":"opus-200k","dispatched_at":"%s"}\n' \
   "<bead-id>" "<bead-id>" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   >> ~/.agm/vroom/dispatched.jsonl
 ```
