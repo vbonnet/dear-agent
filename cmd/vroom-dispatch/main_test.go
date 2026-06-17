@@ -254,6 +254,39 @@ func TestRestartTracker_RecoveryResets(t *testing.T) {
 	}
 }
 
+func TestRestartTracker_ShouldEscalate(t *testing.T) {
+	rt := newRestartTracker()
+	name := "test-supervisor"
+
+	// Below maxRestarts: shouldEscalate must return false.
+	for range maxRestarts - 1 {
+		rt.recordAttempt(name)
+	}
+	if rt.shouldEscalate(name) {
+		t.Fatal("shouldEscalate returned true before maxRestarts reached")
+	}
+
+	// Reach maxRestarts: first call must return true.
+	rt.recordAttempt(name)
+	if !rt.shouldEscalate(name) {
+		t.Fatal("shouldEscalate returned false at maxRestarts, want true")
+	}
+
+	// Subsequent calls must return false (no spam).
+	if rt.shouldEscalate(name) {
+		t.Fatal("shouldEscalate returned true on second call, want false (no spam)")
+	}
+
+	// After recovery, escalate flag resets.
+	rt.recordRecovery(name)
+	rt.mu.Lock()
+	rt.restarts[name] = maxRestarts
+	rt.mu.Unlock()
+	if !rt.shouldEscalate(name) {
+		t.Fatal("shouldEscalate returned false after recovery reset, want true")
+	}
+}
+
 func TestReadHeartbeatTime(t *testing.T) {
 	dir := t.TempDir()
 	hbDir := filepath.Join(dir, ".agm", "vroom", "heartbeat")

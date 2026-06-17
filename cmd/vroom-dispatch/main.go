@@ -95,17 +95,19 @@ const healthCheckInterval = 30 * time.Second
 
 // restartTracker tracks per-supervisor restart state for exponential backoff.
 type restartTracker struct {
-	mu       sync.Mutex
-	restarts map[string]int           // consecutive restart count
-	backoff  map[string]time.Duration // current backoff duration
-	lastTry  map[string]time.Time     // last restart attempt
+	mu        sync.Mutex
+	restarts  map[string]int           // consecutive restart count
+	backoff   map[string]time.Duration // current backoff duration
+	lastTry   map[string]time.Time     // last restart attempt
+	escalated map[string]bool          // whether escalation has been logged for this failure cycle
 }
 
 func newRestartTracker() *restartTracker {
 	return &restartTracker{
-		restarts: make(map[string]int),
-		backoff:  make(map[string]time.Duration),
-		lastTry:  make(map[string]time.Time),
+		restarts:  make(map[string]int),
+		backoff:   make(map[string]time.Duration),
+		lastTry:   make(map[string]time.Time),
+		escalated: make(map[string]bool),
 	}
 }
 
@@ -169,6 +171,20 @@ func (rt *restartTracker) recordRecovery(name string) {
 	rt.restarts[name] = 0
 	rt.backoff[name] = 0
 	rt.lastTry[name] = time.Time{}
+	rt.escalated[name] = false
+}
+
+// shouldEscalate returns true exactly once per failure cycle when a supervisor
+// has reached maxRestarts. Subsequent calls return false until recordRecovery
+// resets the flag, preventing escalation spam on every health-check tick.
+func (rt *restartTracker) shouldEscalate(name string) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.restarts[name] >= maxRestarts && !rt.escalated[name] {
+		rt.escalated[name] = true
+		return true
+	}
+	return false
 }
 
 // consecutiveRestarts returns the current restart count for a supervisor.
@@ -298,14 +314,14 @@ func writeTrail(home, kind string, payload map[string]any) {
 		return
 	}
 
+	data = append(data, '\n')
 	path := filepath.Join(home, ".agm", "vroom", "dispatch-trail.jsonl")
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	f.Write(data)
-	f.Write([]byte("\n"))
+	_, _ = f.Write(data) // O_APPEND makes this atomic on POSIX for writes under PIPE_BUF
+	_ = f.Close()
 }
 
 // writeSelfHeartbeat writes the Dispatch Advisor's own heartbeat so
@@ -586,7 +602,7 @@ func runHealthMonitor(home string, state *sessionState, model string) {
 			case healthDead:
 				ok, count := tracker.shouldRestart(sup.Name)
 				if !ok {
-					if count >= maxRestarts {
+					if tracker.shouldEscalate(sup.Name) {
 						writeTrail(home, "dispatch.escalation.restart_exhausted", map[string]any{
 							"supervisor": sup.Name,
 							"restarts":   count,
