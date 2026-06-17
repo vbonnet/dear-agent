@@ -458,7 +458,7 @@ resolve-review-threads resolve     <threadId>                    # resolve one
 
 Common pattern for bot threads before merge:
 ```
-resolve-review-threads resolve-all vbonnet dear-agent <pr> gemini-code-assist
+resolve-review-threads resolve-all vbonnet dear-agent <pr> gemini-code-assist[bot]
 ```
 
 **Build:** `make build-resolve-review-threads && make install-resolve-review-threads`
