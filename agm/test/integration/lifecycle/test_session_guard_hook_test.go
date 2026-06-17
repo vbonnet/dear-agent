@@ -12,7 +12,7 @@ import (
 // test-* pattern sessions without --test flag and displays error message
 func TestHookTestSessionGuard_BlocksTestPattern(t *testing.T) {
 	// Set up environment to simulate Claude Code calling the hook
-	hookPath := os.ExpandEnv("$HOME/.claude/hooks/agm-pretool-test-session-guard")
+	hookPath := os.ExpandEnv("$HOME/.claude/hooks/pretool-test-session-guard")
 
 	// Verify hook exists
 	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
@@ -67,7 +67,7 @@ func TestHookTestSessionGuard_BlocksTestPattern(t *testing.T) {
 
 // TestHookTestSessionGuard_AllowsWithTestFlag verifies hook allows --test flag
 func TestHookTestSessionGuard_AllowsWithTestFlag(t *testing.T) {
-	hookPath := os.ExpandEnv("$HOME/.claude/hooks/agm-pretool-test-session-guard")
+	hookPath := os.ExpandEnv("$HOME/.claude/hooks/pretool-test-session-guard")
 
 	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
 		t.Skipf("Hook not installed at %s", hookPath)
@@ -95,7 +95,7 @@ func TestHookTestSessionGuard_AllowsWithTestFlag(t *testing.T) {
 
 // TestHookTestSessionGuard_AllowsWithOverrideFlag verifies --allow-test-name override
 func TestHookTestSessionGuard_AllowsWithOverrideFlag(t *testing.T) {
-	hookPath := os.ExpandEnv("$HOME/.claude/hooks/agm-pretool-test-session-guard")
+	hookPath := os.ExpandEnv("$HOME/.claude/hooks/pretool-test-session-guard")
 
 	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
 		t.Skipf("Hook not installed at %s", hookPath)
@@ -123,7 +123,7 @@ func TestHookTestSessionGuard_AllowsWithOverrideFlag(t *testing.T) {
 
 // TestHookTestSessionGuard_AllowsLegitimateNames verifies non-test-* names pass
 func TestHookTestSessionGuard_AllowsLegitimateNames(t *testing.T) {
-	hookPath := os.ExpandEnv("$HOME/.claude/hooks/agm-pretool-test-session-guard")
+	hookPath := os.ExpandEnv("$HOME/.claude/hooks/pretool-test-session-guard")
 
 	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
 		t.Skipf("Hook not installed at %s", hookPath)
@@ -172,7 +172,7 @@ func TestHookTestSessionGuard_AllowsLegitimateNames(t *testing.T) {
 
 // TestHookTestSessionGuard_EdgeCases verifies edge case handling
 func TestHookTestSessionGuard_EdgeCases(t *testing.T) {
-	hookPath := os.ExpandEnv("$HOME/.claude/hooks/agm-pretool-test-session-guard")
+	hookPath := os.ExpandEnv("$HOME/.claude/hooks/pretool-test-session-guard")
 
 	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
 		t.Skipf("Hook not installed at %s", hookPath)
@@ -266,7 +266,7 @@ func TestHookTestSessionGuard_EdgeCases(t *testing.T) {
 
 // TestHookTestSessionGuard_GracefulDegradation verifies hook doesn't break on errors
 func TestHookTestSessionGuard_GracefulDegradation(t *testing.T) {
-	hookPath := os.ExpandEnv("$HOME/.claude/hooks/agm-pretool-test-session-guard")
+	hookPath := os.ExpandEnv("$HOME/.claude/hooks/pretool-test-session-guard")
 
 	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
 		t.Skipf("Hook not installed at %s", hookPath)
