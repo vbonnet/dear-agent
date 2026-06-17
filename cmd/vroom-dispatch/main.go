@@ -22,6 +22,7 @@ var skills embed.FS
 type supervisor struct {
 	Name         string
 	ID           string
+	Role         string // RBAC role/profile (agm --role); grants the session's permission profile
 	SkillFile    string
 	PrimaryFor   string
 	TertiaryFor  string
@@ -33,6 +34,7 @@ var supervisors = []supervisor{
 	{
 		Name:         "vroom-meta-orchestrator",
 		ID:           "vroom-meta-orchestrator",
+		Role:         "meta-orchestrator",
 		SkillFile:    "meta-orchestrator.md",
 		PrimaryFor:   "vroom-orchestrator",
 		TertiaryFor:  "vroom-overseer",
@@ -45,6 +47,7 @@ var supervisors = []supervisor{
 	{
 		Name:         "vroom-orchestrator",
 		ID:           "vroom-orchestrator",
+		Role:         "orchestrator",
 		SkillFile:    "orchestrator.md",
 		PrimaryFor:   "vroom-overseer",
 		TertiaryFor:  "vroom-meta-orchestrator",
@@ -58,6 +61,7 @@ var supervisors = []supervisor{
 	{
 		Name:         "vroom-overseer",
 		ID:           "vroom-overseer",
+		Role:         "overseer",
 		SkillFile:    "overseer.md",
 		PrimaryFor:   "vroom-meta-orchestrator",
 		TertiaryFor:  "vroom-orchestrator",
@@ -84,16 +88,22 @@ type sessionInfo struct {
 
 const sessionsFile = ".agm/vroom/sessions.json"
 
-// supervisorModel is the model alias supervisors spawn with. It is the
-// 200k-context Opus variant, deliberately NOT the 1M-context default:
-//   - Opus (not the claude-code default of sonnet) per the operator directive
-//     for VROOM supervisory work — on Max-plan OAuth there is no per-token
-//     metering, so Opus's extra capability is the only trade-off that matters.
-//   - The 200k variant (opus-200k → claude-opus-4-8), not opus → claude-opus-4-8[1m]:
-//     the 1M-context models are credit-gated on this Max-plan auth, so every
-//     tick of a [1m] model fails with "API Error: Usage credits required for 1M
-//     context". 200k context is ample for a tick and dodges the gate (ce-84l2).
-const supervisorModel = "opus-200k"
+// defaultSupervisorModel is the model alias supervisors spawn with unless
+// overridden by -model. It is the 200k-context Sonnet variant, deliberately
+// NOT the 1M-context default and NOT Opus:
+//   - Sonnet (not Opus) per the current operator directive: conserve Opus
+//     quota until the cost/benefit of Opus supervisors is proven. This
+//     supersedes the earlier Opus default (PR #507); Opus remains one flag
+//     away via `-model=opus-200k`.
+//   - The 200k variant (sonnet-200k → claude-sonnet-4-6), not the bare
+//     `sonnet` alias → claude-sonnet-4-6[1m]: the 1M-context models are
+//     credit-gated on this Max-plan auth, so every tick of a [1m] model fails
+//     with "API Error: Usage credits required for 1M context". 200k context is
+//     ample for a tick and dodges the gate (ce-84l2).
+//
+// Override with -model (e.g. `-model=opus-200k` to switch back to Opus). Avoid
+// the bare `opus`/`sonnet` aliases: both resolve to credit-gated [1m] models.
+const defaultSupervisorModel = "sonnet-200k"
 
 // supervisorMode is the permission mode supervisors spawn with. Detached
 // sessions cannot answer interactive approval prompts, so they must start in
@@ -105,20 +115,31 @@ const supervisorMode = "auto"
 // sessionNewArgs builds the `agm session new` argument list for spawning a
 // supervisor session. Pinning --model and --mode here (rather than relying on
 // agm's defaults) is the fix for ce-84l2: the defaults are sonnet at 1M context
-// (credit-gated) in plan mode (non-executable when detached).
-func sessionNewArgs(name string) []string {
-	return []string{
+// (credit-gated) in plan mode (non-executable when detached). The model is
+// supplied by the caller (default defaultSupervisorModel, overridable via
+// -model); mode is always auto.
+func sessionNewArgs(name, model, role string) []string {
+	args := []string{
 		"session", "new", name,
 		"--detached", "--workspace=oss", "--harness=claude-code",
-		"--model=" + supervisorModel,
+		"--model=" + model,
 		"--mode=" + supervisorMode,
 	}
+	// --role applies the matching RBAC permission profile (e.g. the
+	// orchestrator profile grants `Bash(agm session new *)` so the orchestrator
+	// can spawn worker sessions). Without it a supervisor gets only the default
+	// permissions and cannot dispatch. (ce-7cdj follow-on)
+	if role != "" {
+		args = append(args, "--role="+role)
+	}
+	return args
 }
 
 func main() {
 	skillsOnly := flag.Bool("skills-only", false, "install SKILL files to ~/.agm/vroom/skills/ and exit")
 	statusFlag := flag.Bool("status", false, "show supervisor mesh status and exit")
 	bootOnly := flag.Bool("boot-only", false, "create sessions and send boot prompts, then exit (no tick loop)")
+	model := flag.String("model", defaultSupervisorModel, "model alias supervisors spawn with (e.g. sonnet-200k, opus-200k; avoid the bare opus/sonnet aliases — they resolve to credit-gated 1M models)")
 	flag.Parse()
 
 	if *statusFlag {
@@ -139,8 +160,10 @@ func main() {
 
 	installSkills(home)
 
+	fmt.Printf("==> Supervisor model: %s\n", *model)
+
 	state := loadState(home)
-	ensureSessions(home, state)
+	ensureSessions(home, state, *model)
 	saveState(home, state)
 
 	if *bootOnly {
@@ -149,12 +172,12 @@ func main() {
 		return
 	}
 
-	runHealthMonitor(home, state)
+	runHealthMonitor(home, state, *model)
 }
 
 // ensureSessions creates AGM sessions for any supervisor that doesn't have a live one,
 // sends the boot prompt, and starts the /loop.
-func ensureSessions(home string, state *sessionState) {
+func ensureSessions(home string, state *sessionState, model string) {
 	fmt.Println("==> Ensuring supervisor sessions...")
 
 	for _, sup := range supervisors {
@@ -172,14 +195,14 @@ func ensureSessions(home string, state *sessionState) {
 			fmt.Printf("    %s: dead, recreating...\n", sup.Name)
 			delete(state.Sessions, sup.Name)
 		}
-		createAndBootSession(home, sup, state)
+		createAndBootSession(home, sup, state, model)
 	}
 }
 
-func createAndBootSession(home string, sup supervisor, state *sessionState) {
+func createAndBootSession(home string, sup supervisor, state *sessionState, model string) {
 	fmt.Printf("    %s: creating... ", sup.Name)
 
-	cmd := exec.Command("agm", sessionNewArgs(sup.Name)...)
+	cmd := exec.Command("agm", sessionNewArgs(sup.Name, model, sup.Role)...)
 	cmd.Env = scrubAPIKey(os.Environ())
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("FAILED: %v\n%s\n", err, string(output))
@@ -278,7 +301,7 @@ func sendLoopCommand(sup supervisor) bool {
 // runHealthMonitor watches for dead supervisor sessions and recreates them.
 // With /loop handling the tick cadence inside each session, the launcher only
 // needs to monitor liveness and restart failures.
-func runHealthMonitor(home string, state *sessionState) {
+func runHealthMonitor(home string, state *sessionState, model string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
@@ -299,7 +322,7 @@ func runHealthMonitor(home string, state *sessionState) {
 			if !isSessionAlive(sup.Name) {
 				fmt.Printf("[%s] session dead at %s, recreating...\n", sup.Name, time.Now().Format("15:04:05"))
 				delete(state.Sessions, sup.Name)
-				createAndBootSession(home, sup, state)
+				createAndBootSession(home, sup, state, model)
 				saveState(home, state)
 			}
 		}
