@@ -53,13 +53,14 @@ func TestSupervisorNamesAreRecognized(t *testing.T) {
 }
 
 // TestSessionNewArgsPinModelAndMode guards the ce-84l2 fix: supervisors must be
-// spawned with an explicit 200k-context Opus model and auto permission mode.
-// Relying on agm's claude-code defaults (sonnet at 1M context, plan mode) gives
-// a session that credit-gate-fails every tick and, even when it doesn't, can
-// only plan — never execute — because a detached session can't clear approval
-// prompts.
+// spawned with an explicit 200k-context model and auto permission mode. Relying
+// on agm's claude-code defaults (sonnet at 1M context, plan mode) gives a
+// session that credit-gate-fails every tick and, even when it doesn't, can only
+// plan — never execute — because a detached session can't clear approval
+// prompts. The model is now caller-supplied (default defaultSupervisorModel,
+// overridable via -model); this test pins the wiring and the default.
 func TestSessionNewArgsPinModelAndMode(t *testing.T) {
-	args := sessionNewArgs("vroom-orchestrator")
+	args := sessionNewArgs("vroom-orchestrator", defaultSupervisorModel)
 
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
@@ -67,7 +68,7 @@ func TestSessionNewArgsPinModelAndMode(t *testing.T) {
 		"--detached",
 		"--workspace=oss",
 		"--harness=claude-code",
-		"--model=opus-200k",
+		"--model=sonnet-200k",
 		"--mode=auto",
 	} {
 		if !strings.Contains(joined, want) {
@@ -75,13 +76,16 @@ func TestSessionNewArgsPinModelAndMode(t *testing.T) {
 		}
 	}
 
-	// Defend against silent reintroduction of the credit-gated 1M default and
-	// the non-executable plan default.
-	if strings.Contains(joined, "--model=opus ") || strings.HasSuffix(joined, "--model=opus") {
-		t.Errorf("must not spawn with the 1M-context opus alias (credit-gated); got %v", args)
+	// Default is the 200k-context Sonnet variant: conserve Opus quota until the
+	// cost/benefit of Opus supervisors is proven (supersedes the PR #507 Opus
+	// default; Opus reachable via -model=opus-200k).
+	if defaultSupervisorModel != "sonnet-200k" {
+		t.Errorf("defaultSupervisorModel = %q, want sonnet-200k (conserve Opus; 200k dodges the 1M credit gate)", defaultSupervisorModel)
 	}
-	if supervisorModel != "opus-200k" {
-		t.Errorf("supervisorModel = %q, want opus-200k (200k dodges the 1M credit gate)", supervisorModel)
+	// Defend against silent reintroduction of the credit-gated 1M aliases for
+	// the default. The bare `opus`/`sonnet` aliases both resolve to [1m] models.
+	if defaultSupervisorModel == "opus" || defaultSupervisorModel == "sonnet" {
+		t.Errorf("default model %q is a 1M-context alias (credit-gated); use the -200k variant", defaultSupervisorModel)
 	}
 	if supervisorMode != "auto" {
 		t.Errorf("supervisorMode = %q, want auto (plan mode can't execute when detached)", supervisorMode)
