@@ -59,6 +59,38 @@ func InputLineHasContent(paneContent string) bool {
 	return false
 }
 
+// HasGhostTextInPrompt reports whether the content after the ❯ prompt is
+// Claude Code ghost/placeholder text (dim attribute \x1b[2m) rather than real
+// human input. Ghost text is rendered dim and cannot be cleared with C-u/C-k
+// (Claude Code re-renders it); it must not be treated as a human typing event.
+//
+// This is a live-capture call; use sparingly (only when InputLineHasContent
+// returns true) to avoid redundant tmux exec calls on every message send.
+func HasGhostTextInPrompt(sessionName string) bool {
+	socketPath := GetSocketPath()
+	cmd := exec.Command("tmux", "-S", socketPath, "capture-pane",
+		"-t", NormalizeTmuxSessionName(sessionName), "-p", "-e", "-S", "-5")
+	out, err := cmd.Output()
+	if err != nil {
+		return false // Can't capture — fail safe (don't suppress the guard)
+	}
+	ansiContent := string(out)
+	for line := range strings.SplitSeq(ansiContent, "\n") {
+		plainLine := stripANSI(line)
+		if !strings.Contains(plainLine, "❯") {
+			continue
+		}
+		// Only check for dim attribute AFTER ❯ to avoid false positives from
+		// dim-attributed prefixes that appear before the prompt marker.
+		idx := strings.Index(line, "❯")
+		if idx < 0 {
+			continue
+		}
+		return strings.Contains(line[idx:], "\x1b[2m")
+	}
+	return false
+}
+
 // hasQueuedInput checks if the session has queued pasted text or user input
 func hasQueuedInput(paneContent string) bool {
 	// Look for "[Pasted text" pattern which indicates queued input
@@ -153,7 +185,7 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 		}
 
 		paneContent := string(output)
-		if err := checkPaneForExistingInput(paneContent, shouldInterrupt); err != nil {
+		if err := checkPaneForExistingInput(target, paneContent, shouldInterrupt); err != nil {
 			return err
 		}
 
@@ -268,7 +300,8 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 // checkPaneForExistingInput examines a fresh pane capture and returns an
 // error if a human is currently typing or the input box already holds queued
 // text. shouldInterrupt=true short-circuits all of these checks.
-func checkPaneForExistingInput(paneContent string, shouldInterrupt bool) error {
+// sessionName is used for the secondary ghost-text ANSI check when content is detected.
+func checkPaneForExistingInput(sessionName, paneContent string, shouldInterrupt bool) error {
 	if shouldInterrupt {
 		return nil
 	}
@@ -279,7 +312,9 @@ func checkPaneForExistingInput(paneContent string, shouldInterrupt bool) error {
 		_, msg := ClassifyQueuedInput(paneContent)
 		return fmt.Errorf("%s", msg)
 	}
-	if InputLineHasContent(paneContent) {
+	// Ghost text check: Claude Code renders placeholder text with \x1b[2m (dim).
+	// Do the ANSI capture only when plain-text check finds content, to avoid overhead.
+	if InputLineHasContent(paneContent) && !HasGhostTextInPrompt(sessionName) {
 		return fmt.Errorf("input line has content — human is typing, aborting delivery. Retry on next poll cycle")
 	}
 	return nil

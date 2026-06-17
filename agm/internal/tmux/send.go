@@ -151,8 +151,10 @@ func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt 
 			// generating (spinner visible). Content changes during generation are
 			// AI output, not human typing.
 			if !hasActiveSpinner(recheckContent) {
-				// If input line has content, human started typing
-				if InputLineHasContent(recheckContent) {
+				// If input line has content, confirm it's not ghost text before blocking.
+				// Claude Code renders ghost/placeholder text with dim attribute (\x1b[2m),
+				// which cannot be cleared and must not be treated as human typing.
+				if InputLineHasContent(recheckContent) && !HasGhostTextInPrompt(sessionName) {
 					return fmt.Errorf("input line has content after cooldown — human is typing, aborting delivery")
 				}
 			}
