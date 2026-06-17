@@ -63,7 +63,9 @@ sysctl vm.swapusage 2>/dev/null
 sysctl kern.num_files 2>/dev/null
 sysctl kern.maxfiles 2>/dev/null
 
-# Vnode pressure (macOS)
+# Vnode cache (macOS) — INFORMATIONAL ONLY, do NOT treat full as exhaustion.
+# kern.num_vnodes sits at kern.maxvnodes (~100%) as normal steady state; the
+# kernel LRU-recycles. Real FS-handle pressure shows up in FD% below, not here.
 sysctl kern.num_vnodes 2>/dev/null
 sysctl kern.maxvnodes 2>/dev/null
 
@@ -83,8 +85,8 @@ agm session list 2>/dev/null | grep -c "OFFLINE" || echo "0"
 |--------|-----------|--------|
 | Disk usage | >= 90% | Escalate to Meta-O + Orch |
 | Swap usage | >= 50% | Escalate (early thrashing indicator) |
-| Open FD fraction | >= 90% | Escalate + identify FD hogs |
-| Vnode fraction | >= 90% | Escalate |
+| Open FD fraction | >= 80% | Escalate + identify FD hogs |
+| Vnode fraction | (ignore) | Do NOT escalate — ~100% is normal macOS steady state, not exhaustion |
 | Gopls processes | > 5 | Escalate (known leak pattern — see ce-710r) |
 | Stranded worktrees | > 10 | Recommend cleanup |
 | Orphaned sessions | > 0 | Recommend archive/kill |
