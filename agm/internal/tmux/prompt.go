@@ -64,8 +64,8 @@ func InputLineHasContent(paneContent string) bool {
 // human input. Ghost text is rendered dim and cannot be cleared with C-u/C-k
 // (Claude Code re-renders it); it must not be treated as a human typing event.
 //
-// This is a live-capture call; use sparingly (only when InputLineHasContent
-// returns true) to avoid redundant tmux exec calls on every message send.
+// This is a live-capture call; prefer HasGhostTextInANSI when an ANSI capture
+// is already available to avoid a second tmux round-trip.
 func HasGhostTextInPrompt(sessionName string) bool {
 	socketPath := GetSocketPath()
 	cmd := exec.Command("tmux", "-S", socketPath, "capture-pane",
@@ -74,14 +74,19 @@ func HasGhostTextInPrompt(sessionName string) bool {
 	if err != nil {
 		return false // Can't capture — fail safe (don't suppress the guard)
 	}
-	ansiContent := string(out)
+	return HasGhostTextInANSI(string(out))
+}
+
+// HasGhostTextInANSI is the pure-logic version of HasGhostTextInPrompt that
+// operates on an already-captured ANSI pane buffer. Use this instead of
+// HasGhostTextInPrompt when an ANSI capture is already available, to avoid
+// the two-capture race where pane state changes between captures.
+func HasGhostTextInANSI(ansiContent string) bool {
 	for line := range strings.SplitSeq(ansiContent, "\n") {
 		plainLine := stripANSI(line)
 		if !strings.Contains(plainLine, "❯") {
 			continue
 		}
-		// Only check for dim attribute AFTER ❯ to avoid false positives from
-		// dim-attributed prefixes that appear before the prompt marker.
 		idx := strings.Index(line, "❯")
 		if idx < 0 {
 			continue
@@ -175,17 +180,18 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 	// causing stray bytes to leak across sessions and trigger copy-mode on unrelated sessions.
 	// The lock serializes all tmux write operations, matching the pattern used by SendCommand.
 	return withTmuxLock(func() error {
-		// Step 0: Check if there's already text in the input box
-		// If user is typing, abort to avoid interfering
-		// Note: capture-pane targets panes, not sessions, so we don't use FormatSessionTarget (=prefix)
-		cmdCapture := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p")
+		// Step 0: Check if there's already text in the input box.
+		// Uses ANSI capture (-e flag) so ghost-text detection can check for
+		// the dim attribute (\x1b[2m) in the same buffer, eliminating the
+		// two-capture race where pane state changes between captures.
+		cmdCapture := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-e")
 		output, err := cmdCapture.Output()
 		if err != nil {
 			return fmt.Errorf("failed to capture pane: %w", err)
 		}
 
-		paneContent := string(output)
-		if err := checkPaneForExistingInput(target, paneContent, shouldInterrupt); err != nil {
+		ansiContent := string(output)
+		if err := checkPaneForExistingInput(ansiContent, shouldInterrupt); err != nil {
 			return err
 		}
 
@@ -295,26 +301,26 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 	})
 }
 
-// SendPromptFromFile reads prompt from file and sends it using literal mode
-// Bug fix (2026-03-14): Added shouldInterrupt parameter
-// checkPaneForExistingInput examines a fresh pane capture and returns an
+// checkPaneForExistingInput examines an ANSI pane capture and returns an
 // error if a human is currently typing or the input box already holds queued
-// text. shouldInterrupt=true short-circuits all of these checks.
-// sessionName is used for the secondary ghost-text ANSI check when content is detected.
-func checkPaneForExistingInput(sessionName, paneContent string, shouldInterrupt bool) error {
+// text. shouldInterrupt=true short-circuits all checks.
+//
+// The caller provides ANSI content (captured with -e flag) so ghost-text
+// detection and input-line detection operate on the same snapshot, eliminating
+// the two-capture race (ce-v9in retro).
+func checkPaneForExistingInput(ansiContent string, shouldInterrupt bool) error {
 	if shouldInterrupt {
 		return nil
 	}
-	if hasActiveSpinner(paneContent) {
+	plainContent := stripANSI(ansiContent)
+	if hasActiveSpinner(plainContent) {
 		return nil
 	}
-	if hasQueuedInput(paneContent) {
-		_, msg := ClassifyQueuedInput(paneContent)
+	if hasQueuedInput(plainContent) {
+		_, msg := ClassifyQueuedInput(plainContent)
 		return fmt.Errorf("%s", msg)
 	}
-	// Ghost text check: Claude Code renders placeholder text with \x1b[2m (dim).
-	// Do the ANSI capture only when plain-text check finds content, to avoid overhead.
-	if InputLineHasContent(paneContent) && !HasGhostTextInPrompt(sessionName) {
+	if InputLineHasContent(plainContent) && !HasGhostTextInANSI(ansiContent) {
 		return fmt.Errorf("input line has content — human is typing, aborting delivery. Retry on next poll cycle")
 	}
 	return nil

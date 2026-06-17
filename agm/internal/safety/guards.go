@@ -63,8 +63,10 @@ func isGhostTextAfterPrompt(ansiContent string) bool {
 	return false
 }
 
-// permissionPromptPattern matches text rendered by Claude Code permission prompts.
-// These appear at or near the prompt line but are not human input.
+// permissionPromptPattern matches text rendered by Claude Code permission
+// prompts and interactive UI elements. These appear at or near the prompt
+// line but are not human input. The pattern is checked after trimming
+// leading whitespace from the text after ❯.
 var permissionPromptPattern = regexp.MustCompile(
 	`(?i)` +
 		`(` +
@@ -74,7 +76,13 @@ var permissionPromptPattern = regexp.MustCompile(
 		`|` +
 		`^[nN]/[yY]` + // N/y prompt
 		`|` +
-		`^(?:yes|no|allow|deny|skip|cancel)\b` + // Common permission words
+		`^\([yYnN]\)` + // (Y)es/(N)o style
+		`|` +
+		`^(?:yes|no|allow|deny|skip|cancel|always allow|allow once|don't allow)\b` +
+		`|` +
+		`^(?:use arrows|press enter|do you want)\b` + // Navigation/confirmation UI hints
+		`|` +
+		`^❯\s*$` + // Bare prompt re-render artifact
 		`)`,
 )
 

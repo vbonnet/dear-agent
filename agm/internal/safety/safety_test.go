@@ -85,6 +85,36 @@ func TestDetectHumanTyping(t *testing.T) {
 			paneContent:   "some output\n❯ deny this action",
 			wantViolation: false,
 		},
+		{
+			name:          "permission prompt always allow - not human typing",
+			paneContent:   "some output\n❯ always allow this tool",
+			wantViolation: false,
+		},
+		{
+			name:          "permission prompt allow once - not human typing",
+			paneContent:   "some output\n❯ allow once",
+			wantViolation: false,
+		},
+		{
+			name:          "permission prompt don't allow - not human typing",
+			paneContent:   "some output\n❯ don't allow",
+			wantViolation: false,
+		},
+		{
+			name:          "permission prompt (Y)es style - not human typing",
+			paneContent:   "some output\n❯ (Y)es, proceed",
+			wantViolation: false,
+		},
+		{
+			name:          "permission prompt (N)o style - not human typing",
+			paneContent:   "some output\n❯ (N)o, cancel",
+			wantViolation: false,
+		},
+		{
+			name:          "navigation hint use arrows - not human typing",
+			paneContent:   "some output\n❯ Use arrows to select",
+			wantViolation: false,
+		},
 	}
 
 	for _, tt := range tests {
