@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Mesh holds the three Loops that make up a running VROOM supervisory
@@ -88,50 +89,94 @@ func (m *Mesh) Loops() []*Loop {
 	return out
 }
 
-// Run starts all three loops and blocks until ctx is cancelled or any loop
-// returns a non-cancellation error. On return, all loops have stopped.
+// maxRestartBackoff caps the exponential backoff for loop restarts.
+const maxRestartBackoff = 30 * time.Second
+
+// Run starts all three loops and blocks until ctx is cancelled or a loop
+// panics. On return, all loops have stopped.
 //
 // A loop returning context.Canceled or context.DeadlineExceeded is treated
-// as graceful shutdown — Run returns that error after waiting for siblings
-// to stop. Any other error from any loop is treated as fatal and triggers
-// cancellation of the shared context so siblings stop too.
+// as graceful shutdown. A panic is fatal and cancels the entire mesh.
+// Any other error from a loop triggers a selective restart of that loop
+// with exponential backoff — the remaining loops continue running.
 func (m *Mesh) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	loops := m.Loops()
 	errs := make(chan loopError, len(loops))
-	var wg sync.WaitGroup
-	wg.Add(len(loops))
 
 	for _, l := range loops {
 		l := l
-		go func() {
-			defer wg.Done()
-			defer func() {
-				if r := recover(); r != nil {
-					errs <- loopError{role: l.Role(), err: fmt.Errorf("supervisor loop panicked: %v", r)}
-				}
-			}()
-			err := l.Run(ctx)
-			errs <- loopError{role: l.Role(), err: err}
-		}()
+		go m.runLoop(ctx, l, errs)
 	}
 
-	// Wait for the first failure (or shutdown signal). Anything that
-	// arrives, cancel the rest and wait for them to drain.
-	first := <-errs
-	cancel()
-	wg.Wait()
-	// Drain remaining results (we already cancelled — they'll all be
-	// context.Canceled or context.DeadlineExceeded).
-	for i := 0; i < len(loops)-1; i++ {
-		<-errs
+	var firstErr error
+	stopped := 0
+	for stopped < len(loops) {
+		le := <-errs
+		if le.fatal {
+			if firstErr == nil {
+				firstErr = le.err
+			}
+			cancel()
+		}
+		if le.stopped {
+			stopped++
+			if firstErr == nil {
+				firstErr = le.err
+			}
+			continue
+		}
 	}
-	return first.err
+	return firstErr
+}
+
+// runLoop runs a single supervisor loop with automatic restart on non-fatal
+// errors. It sends a final loopError{stopped: true} when it will not restart.
+func (m *Mesh) runLoop(ctx context.Context, l *Loop, errs chan<- loopError) {
+	backoff := 1 * time.Second
+	for {
+		panicked, err := m.runLoopOnce(ctx, l)
+		if panicked {
+			errs <- loopError{role: l.Role(), err: err, fatal: true}
+			errs <- loopError{role: l.Role(), err: err, stopped: true}
+			return
+		}
+		if ctx.Err() != nil {
+			errs <- loopError{role: l.Role(), err: ctx.Err(), stopped: true}
+			return
+		}
+		errs <- loopError{role: l.Role(), err: err}
+
+		select {
+		case <-ctx.Done():
+			errs <- loopError{role: l.Role(), err: ctx.Err(), stopped: true}
+			return
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+		if backoff > maxRestartBackoff {
+			backoff = maxRestartBackoff
+		}
+	}
+}
+
+// runLoopOnce calls l.Run and catches panics. Returns (true, err) on panic.
+func (m *Mesh) runLoopOnce(ctx context.Context, l *Loop) (panicked bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			panicked = true
+			err = fmt.Errorf("supervisor loop %s panicked: %v", l.Role(), r)
+		}
+	}()
+	err = l.Run(ctx)
+	return false, err
 }
 
 type loopError struct {
-	role Role
-	err  error
+	role    Role
+	err     error
+	fatal   bool
+	stopped bool
 }
