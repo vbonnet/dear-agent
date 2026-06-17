@@ -53,8 +53,12 @@
 #   build-dear-deploy       Build dear-deploy: atomic host-artifact deployer (cmd/dear-deploy)
 #   install-dear-deploy     Install dear-deploy to ~/go/bin
 #   dear-deploy-sync        Deploy host artifacts from deploy/manifest.yaml (build guards first)
+#   build-agm-job           Build agm-job: host-side job runner (ce-m3ya)
+#   install-agm-job         Install agm-job to ~/go/bin
+#   build-src-health        Build src-health: ~/src repo canary (ce-m3ya)
+#   install-src-health      Install src-health to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-token-refresher install-token-refresher build-dear-deploy install-dear-deploy dear-deploy-sync
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-token-refresher install-token-refresher build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -652,3 +656,30 @@ build-vroom-dispatch:
 install-vroom-dispatch: build-vroom-dispatch
 	cp bin/vroom-dispatch $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/vroom-dispatch"
+
+# Build agm-job: the host-side job runner for the dear-agent dispatch loop
+# (ce-m3ya, Phase A of ce-cd14). Wraps commands with atomic flock locking,
+# mandatory --verify, macOS notification + agm send escalation on failure,
+# and self-rotating logs under ~/.agm/logs/.
+build-agm-job:
+	@echo "Building agm-job..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/agm-job ./cmd/agm-job/
+	@echo "Built: bin/agm-job"
+
+install-agm-job: build-agm-job
+	cp bin/agm-job $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/agm-job"
+
+# Build src-health: canary that checks 7 ~/src repos for clean working tree,
+# branch, and ahead/behind status. Used to soak the host dispatch loop during
+# Phase A of ce-cd14.
+build-src-health:
+	@echo "Building src-health..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/src-health ./cmd/src-health/
+	@echo "Built: bin/src-health"
+
+install-src-health: build-src-health
+	cp bin/src-health $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/src-health"
