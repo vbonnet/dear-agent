@@ -245,7 +245,7 @@ func startGeminiHarness(sessionName string, exists bool) (bool, error) {
 func startGeminiDirect(sessionName string, exists bool) error {
 	debug.Log("agm-agent-wrapper not found, falling back to direct gemini")
 	resolvedModel := agent.ResolveModelFullName("gemini-cli", modelName)
-	geminiCmd := fmt.Sprintf("gemini -m %s && exit", resolvedModel)
+	geminiCmd := fmt.Sprintf("gemini -m %s && exit", shellQuote(resolvedModel))
 	debug.Log("Sending command: %s", geminiCmd)
 	if err := tmux.SendCommand(sessionName, geminiCmd); err != nil {
 		ui.PrintError(err,
