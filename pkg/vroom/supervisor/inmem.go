@@ -260,6 +260,46 @@ func (r *InMemoryReclaimer) Calls() int {
 	return r.calls
 }
 
+// InMemoryPeerRecovery is a configurable PeerRecovery for tests.
+type InMemoryPeerRecovery struct {
+	mu    sync.Mutex
+	calls []PeerRecoveryCall
+	err   error
+}
+
+// PeerRecoveryCall records one Recover invocation.
+type PeerRecoveryCall struct {
+	PeerRole Role
+	Reason   string
+}
+
+// NewInMemoryPeerRecovery returns a recovery that succeeds by default.
+func NewInMemoryPeerRecovery() *InMemoryPeerRecovery {
+	return &InMemoryPeerRecovery{}
+}
+
+// SetError configures the error returned by subsequent Recover calls.
+func (r *InMemoryPeerRecovery) SetError(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.err = err
+}
+
+// Recover implements PeerRecovery.
+func (r *InMemoryPeerRecovery) Recover(_ context.Context, peerRole Role, reason string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, PeerRecoveryCall{PeerRole: peerRole, Reason: reason})
+	return r.err
+}
+
+// Calls returns all recorded recovery calls.
+func (r *InMemoryPeerRecovery) Calls() []PeerRecoveryCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]PeerRecoveryCall(nil), r.calls...)
+}
+
 // InMemoryPermissionChecker is a configurable PermissionChecker for tests
 // and the cmd/vroom-mesh demo. Permissions are either allowed or denied
 // individually; unknown permissions default to allowed.

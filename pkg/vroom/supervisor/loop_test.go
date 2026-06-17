@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -330,6 +331,146 @@ func TestLoop_CheckCount_IncrementsForEachCheck(t *testing.T) {
 	l.iterate(context.Background())
 	if l.CheckCount() != 4 {
 		t.Errorf("CheckCount after 2 iterations = %d, want 4", l.CheckCount())
+	}
+}
+
+func TestLoop_Iterate_RecoveryCalledOnStalePeer(t *testing.T) {
+	sup := &fakeSupervisor{role: RoleOrchestrator}
+	staleTime := time.Now().Add(-10 * time.Minute)
+	peers := &fakePeerLookup{peers: map[Role]LoopStatus{
+		RoleOverseer:         &fakePeerStatus{role: RoleOverseer, beat: staleTime},
+		RoleMetaOrchestrator: &fakePeerStatus{role: RoleMetaOrchestrator, beat: time.Now()},
+	}}
+	check := &HeartbeatCheckSkill{Threshold: 30 * time.Second}
+	recovery := NewInMemoryPeerRecovery()
+
+	trail, buf := newBufferTrail()
+	l, err := NewLoop(LoopConfig{
+		Supervisor: sup,
+		Mesh:       peers,
+		Check:      check,
+		Recovery:   recovery,
+		Trail:      trail,
+		Interval:   1 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewLoop: %v", err)
+	}
+
+	l.iterate(context.Background())
+
+	calls := recovery.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("recovery calls = %d, want 1 (stale overseer)", len(calls))
+	}
+	if calls[0].PeerRole != RoleOverseer {
+		t.Errorf("recovery peer = %s, want overseer", calls[0].PeerRole)
+	}
+
+	kinds := trailKinds(t, buf)
+	recoveryAttempts := 0
+	for _, k := range kinds {
+		if k == "supervisor.check.recovery_attempt" {
+			recoveryAttempts++
+		}
+	}
+	if recoveryAttempts != 1 {
+		t.Errorf("trail has %d recovery_attempt records, want 1 (kinds=%v)", recoveryAttempts, kinds)
+	}
+}
+
+func TestLoop_Iterate_NoRecoveryWhenNil(t *testing.T) {
+	sup := &fakeSupervisor{role: RoleOrchestrator}
+	staleTime := time.Now().Add(-10 * time.Minute)
+	peers := &fakePeerLookup{peers: map[Role]LoopStatus{
+		RoleOverseer:         &fakePeerStatus{role: RoleOverseer, beat: staleTime},
+		RoleMetaOrchestrator: &fakePeerStatus{role: RoleMetaOrchestrator, beat: time.Now()},
+	}}
+	check := &HeartbeatCheckSkill{Threshold: 30 * time.Second}
+	l, buf := newLoopForTest(t, sup, peers, check)
+
+	l.iterate(context.Background())
+
+	kinds := trailKinds(t, buf)
+	for _, k := range kinds {
+		if k == "supervisor.check.recovery_attempt" {
+			t.Error("recovery_attempt should not appear when Recovery is nil")
+		}
+	}
+}
+
+func TestLoop_Iterate_NoRecoveryWhenPeerHealthy(t *testing.T) {
+	sup := &fakeSupervisor{role: RoleOrchestrator}
+	peers := &fakePeerLookup{peers: map[Role]LoopStatus{
+		RoleOverseer:         &fakePeerStatus{role: RoleOverseer, beat: time.Now()},
+		RoleMetaOrchestrator: &fakePeerStatus{role: RoleMetaOrchestrator, beat: time.Now()},
+	}}
+	check := &HeartbeatCheckSkill{Threshold: 30 * time.Second}
+	recovery := NewInMemoryPeerRecovery()
+
+	trail, _ := newBufferTrail()
+	l, err := NewLoop(LoopConfig{
+		Supervisor: sup,
+		Mesh:       peers,
+		Check:      check,
+		Recovery:   recovery,
+		Trail:      trail,
+		Interval:   1 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewLoop: %v", err)
+	}
+
+	l.iterate(context.Background())
+
+	if len(recovery.Calls()) != 0 {
+		t.Errorf("recovery calls = %d, want 0 (all peers healthy)", len(recovery.Calls()))
+	}
+}
+
+func TestLoop_Iterate_RecoveryErrorRecordedButContinues(t *testing.T) {
+	sup := &fakeSupervisor{role: RoleOrchestrator}
+	staleTime := time.Now().Add(-10 * time.Minute)
+	peers := &fakePeerLookup{peers: map[Role]LoopStatus{
+		RoleOverseer:         &fakePeerStatus{role: RoleOverseer, beat: staleTime},
+		RoleMetaOrchestrator: &fakePeerStatus{role: RoleMetaOrchestrator, beat: staleTime},
+	}}
+	check := &HeartbeatCheckSkill{Threshold: 30 * time.Second}
+	recovery := NewInMemoryPeerRecovery()
+	recovery.SetError(fmt.Errorf("agm send failed"))
+
+	trail, buf := newBufferTrail()
+	l, err := NewLoop(LoopConfig{
+		Supervisor: sup,
+		Mesh:       peers,
+		Check:      check,
+		Recovery:   recovery,
+		Trail:      trail,
+		Interval:   1 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewLoop: %v", err)
+	}
+
+	l.iterate(context.Background())
+
+	calls := recovery.Calls()
+	if len(calls) != 2 {
+		t.Fatalf("recovery calls = %d, want 2 (both peers stale)", len(calls))
+	}
+	if sup.calls.Load() != 1 {
+		t.Error("Tick should still run even when recovery fails")
+	}
+
+	kinds := trailKinds(t, buf)
+	recoveryAttempts := 0
+	for _, k := range kinds {
+		if k == "supervisor.check.recovery_attempt" {
+			recoveryAttempts++
+		}
+	}
+	if recoveryAttempts != 2 {
+		t.Errorf("trail has %d recovery_attempt records, want 2", recoveryAttempts)
 	}
 }
 

@@ -28,6 +28,7 @@ type Loop struct {
 	sup      Supervisor
 	mesh     PeerLookup
 	check    CheckSkill
+	recovery PeerRecovery
 	trail    decisiontrail.Trail
 	interval time.Duration
 	clock    func() time.Time
@@ -50,11 +51,12 @@ type PeerLookup interface {
 }
 
 // LoopConfig holds the dependencies a Loop needs. All fields are required
-// except Clock (defaults to time.Now).
+// except Clock and Recovery (defaults to time.Now and nil respectively).
 type LoopConfig struct {
 	Supervisor Supervisor
 	Mesh       PeerLookup
 	Check      CheckSkill
+	Recovery   PeerRecovery // nil = detect-only, no corrective action
 	Trail      decisiontrail.Trail
 	Interval   time.Duration
 
@@ -92,6 +94,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 		sup:      cfg.Supervisor,
 		mesh:     cfg.Mesh,
 		check:    cfg.Check,
+		recovery: cfg.Recovery,
 		trail:    cfg.Trail,
 		interval: cfg.Interval,
 		clock:    clock,
@@ -201,6 +204,22 @@ func (l *Loop) checkPeers(ctx context.Context) {
 			rec.Payload["error"] = checkErr.Error()
 		}
 		_ = l.trail.Append(ctx, rec)
+
+		if checkErr != nil && l.recovery != nil {
+			recoverErr := l.recovery.Recover(ctx, peerRole, checkErr.Error())
+			recoveryRec := decisiontrail.Record{
+				Role: string(l.sup.Role()),
+				Kind: "supervisor.check.recovery_attempt",
+				Payload: map[string]any{
+					"peer": string(peerRole),
+					"ok":   recoverErr == nil,
+				},
+			}
+			if recoverErr != nil {
+				recoveryRec.Payload["error"] = recoverErr.Error()
+			}
+			_ = l.trail.Append(ctx, recoveryRec)
+		}
 	}
 }
 

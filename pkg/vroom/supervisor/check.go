@@ -57,6 +57,23 @@ type HeartbeatCheckSkill struct {
 	Now func() time.Time
 }
 
+// PeerRecovery is the corrective-action half of the mutual-unblock invariant.
+// When CheckSkill reports a peer as blocked, the Loop calls PeerRecovery to
+// attempt remediation (e.g. sending an AGM wake message). The interface is
+// optional — a nil PeerRecovery means "detect but don't act", which was the
+// previous behavior and is still the default for in-process test meshes.
+type PeerRecovery interface {
+	Recover(ctx context.Context, peerRole Role, reason string) error
+}
+
+// PeerRecoveryFunc adapts a plain function to PeerRecovery.
+type PeerRecoveryFunc func(ctx context.Context, peerRole Role, reason string) error
+
+// Recover implements PeerRecovery.
+func (f PeerRecoveryFunc) Recover(ctx context.Context, peerRole Role, reason string) error {
+	return f(ctx, peerRole, reason)
+}
+
 // Check reports an error if peer's heartbeat is too stale.
 func (h *HeartbeatCheckSkill) Check(_ context.Context, peer LoopStatus) error {
 	if h.Threshold <= 0 {
