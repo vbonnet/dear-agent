@@ -1,0 +1,61 @@
+#!/bin/bash
+# pretool-test-session-guard: Block test-* session names without --test flag.
+# Reads CLAUDE_TOOL_NAME and CLAUDE_TOOL_INPUT environment variables set by Claude Code.
+# Graceful degradation: exits 0 on any error so tools are never blocked by hook failures.
+#
+# Installation: agm admin install-hooks
+# Source: agm/cmd/agm-hooks/pretool-test-session-guard/main.go
+
+# Only guard Bash tool calls
+[[ "${CLAUDE_TOOL_NAME:-}" != "Bash" ]] && exit 0
+
+input="${CLAUDE_TOOL_INPUT:-}"
+[[ -z "${input}" ]] && exit 0
+
+# Only process agm session new commands
+echo "${input}" | grep -qE 'agm[[:space:]]+session[[:space:]]+new' || exit 0
+
+# Allow if --test flag is present (substring match, same as Go implementation)
+echo "${input}" | grep -q -- '--test' && exit 0
+
+# Allow if --allow-test-name override is present
+echo "${input}" | grep -q -- '--allow-test-name' && exit 0
+
+# Extract session name: portion after 'agm session new', take first non-flag token.
+# Strips JSON quoting chars that appear when CLAUDE_TOOL_INPUT is JSON-encoded.
+session_name=$(printf '%s' "${input}" | \
+    sed 's/.*agm[[:space:]][[:space:]]*session[[:space:]][[:space:]]*new[[:space:]]*//' | \
+    awk '{for(i=1;i<=NF;i++){if($i !~ /^--/){gsub(/[^a-zA-Z0-9_-].*/, "", $i); if($i != "") {print $i}; exit}}}')
+
+[[ -z "${session_name}" ]] && exit 0
+
+# Block test-* session names (case-insensitive prefix match)
+echo "${session_name}" | grep -qiE '^test-' || exit 0
+
+# Print error message and block with exit 1
+cat >&2 << EOF
+
+❌ Test Session Pattern Detected
+
+You attempted to create session '${session_name}' without --test flag.
+
+PROBLEM:
+  Test sessions should use --test flag for isolation.
+  Without it, session goes to production workspace (~/.claude/sessions/).
+
+SOLUTION:
+  agm session new --test ${session_name}
+
+WHAT --test DOES:
+  • Creates session in ~/sessions-test/ (isolated from production)
+  • Tmux session prefixed with agm-test-${session_name}
+  • Automatically cleaned up by test infrastructure
+  • Not tracked in AGM database (ephemeral)
+
+TO OVERRIDE (if you really need production session named test-*):
+  agm session new ${session_name} --allow-test-name
+
+For more info: agm session new --help
+EOF
+
+exit 1
