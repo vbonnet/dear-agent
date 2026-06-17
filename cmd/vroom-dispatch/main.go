@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -87,6 +88,253 @@ type sessionInfo struct {
 }
 
 const sessionsFile = ".agm/vroom/sessions.json"
+
+// healthCheckInterval is how often the Dispatch Advisor ticks when running
+// as a persistent daemon (default mode, without -boot-only).
+const healthCheckInterval = 30 * time.Second
+
+// restartTracker tracks per-supervisor restart state for exponential backoff.
+type restartTracker struct {
+	mu        sync.Mutex
+	restarts  map[string]int           // consecutive restart count
+	backoff   map[string]time.Duration // current backoff duration
+	lastTry   map[string]time.Time     // last restart attempt
+	escalated map[string]bool          // whether escalation has been logged for this failure cycle
+}
+
+func newRestartTracker() *restartTracker {
+	return &restartTracker{
+		restarts:  make(map[string]int),
+		backoff:   make(map[string]time.Duration),
+		lastTry:   make(map[string]time.Time),
+		escalated: make(map[string]bool),
+	}
+}
+
+const (
+	initialBackoff = 30 * time.Second
+	maxBackoff     = 5 * time.Minute
+	maxRestarts    = 3
+)
+
+// shouldRestart returns true if enough time has elapsed since the last
+// attempt for this supervisor. Returns false if the backoff window hasn't
+// elapsed or if max restarts are exhausted.
+func (rt *restartTracker) shouldRestart(name string) (bool, int) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	count := rt.restarts[name]
+	if count >= maxRestarts {
+		return false, count
+	}
+
+	bo := rt.backoff[name]
+	if bo == 0 {
+		bo = initialBackoff
+	}
+
+	last := rt.lastTry[name]
+	if !last.IsZero() && time.Since(last) < bo {
+		return false, count
+	}
+
+	return true, count
+}
+
+// recordAttempt records a restart attempt and bumps the backoff.
+func (rt *restartTracker) recordAttempt(name string) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	rt.restarts[name]++
+	rt.lastTry[name] = time.Now()
+
+	bo := rt.backoff[name]
+	if bo == 0 {
+		bo = initialBackoff
+	} else {
+		bo *= 2
+		if bo > maxBackoff {
+			bo = maxBackoff
+		}
+	}
+	rt.backoff[name] = bo
+}
+
+// recordRecovery resets the restart counter and backoff when a supervisor
+// is observed alive after a restart.
+func (rt *restartTracker) recordRecovery(name string) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	rt.restarts[name] = 0
+	rt.backoff[name] = 0
+	rt.lastTry[name] = time.Time{}
+	rt.escalated[name] = false
+}
+
+// shouldEscalate returns true exactly once per failure cycle when a supervisor
+// has reached maxRestarts. Subsequent calls return false until recordRecovery
+// resets the flag, preventing escalation spam on every health-check tick.
+func (rt *restartTracker) shouldEscalate(name string) bool {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.restarts[name] >= maxRestarts && !rt.escalated[name] {
+		rt.escalated[name] = true
+		return true
+	}
+	return false
+}
+
+// consecutiveRestarts returns the current restart count for a supervisor.
+func (rt *restartTracker) consecutiveRestarts(name string) int {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.restarts[name]
+}
+
+// supervisorHealth is the liveness classification.
+type supervisorHealth int
+
+const (
+	healthAlive supervisorHealth = iota
+	healthStale                  // heartbeat old but session exists
+	healthDead                   // no session or session archived
+)
+
+func (h supervisorHealth) String() string {
+	switch h {
+	case healthAlive:
+		return "alive"
+	case healthStale:
+		return "stale"
+	case healthDead:
+		return "dead"
+	default:
+		return "unknown"
+	}
+}
+
+// readHeartbeatTime reads a supervisor's heartbeat file and returns the
+// timestamp. Returns zero time if the file doesn't exist or can't be parsed.
+func readHeartbeatTime(home, name string) time.Time {
+	path := filepath.Join(home, ".agm", "vroom", "heartbeat", name+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return time.Time{}
+	}
+
+	// Heartbeat files contain just a timestamp string (the agm supervisor
+	// heartbeat command also writes JSON, but the skill files write a bare
+	// date string via `date -u`). Try both formats.
+	text := strings.TrimSpace(string(data))
+
+	// Try RFC3339 first (the structured format).
+	if t, err := time.Parse(time.RFC3339, text); err == nil {
+		return t
+	}
+	// Try the `date -u` format used by the skill files.
+	if t, err := time.Parse("2006-01-02T15:04:05Z", text); err == nil {
+		return t
+	}
+	// Try parsing as JSON with a "timestamp" or "ts" field.
+	var obj map[string]string
+	if err := json.Unmarshal(data, &obj); err == nil {
+		for _, key := range []string{"timestamp", "ts", "last_heartbeat"} {
+			if v, ok := obj[key]; ok {
+				if t, err := time.Parse(time.RFC3339, v); err == nil {
+					return t
+				}
+			}
+		}
+	}
+
+	return time.Time{}
+}
+
+// classifySupervisor determines the health of a supervisor based on both
+// heartbeat freshness and session liveness.
+func classifySupervisor(home string, sup supervisor) supervisorHealth {
+	sessionUp := isSessionAlive(sup.Name)
+	if !sessionUp {
+		return healthDead
+	}
+
+	heartbeat := readHeartbeatTime(home, heartbeatFileName(sup.Name))
+	if heartbeat.IsZero() {
+		// Session exists but no heartbeat file yet — could be booting.
+		// Treat as stale rather than dead to avoid killing a session
+		// that's still initializing.
+		return healthStale
+	}
+
+	threshold := 2 * sup.TickInterval
+	if time.Since(heartbeat) > threshold {
+		return healthStale
+	}
+
+	return healthAlive
+}
+
+// heartbeatFileName maps a supervisor name to its heartbeat file basename
+// (without extension). The skill files write to meta-o.json, orch.json,
+// overseer.json.
+func heartbeatFileName(name string) string {
+	switch name {
+	case "vroom-meta-orchestrator":
+		return "meta-o"
+	case "vroom-orchestrator":
+		return "orch"
+	case "vroom-overseer":
+		return "overseer"
+	default:
+		return name
+	}
+}
+
+// trailRecord is a single entry in the dispatch trail JSONL log.
+type trailRecord struct {
+	Timestamp string         `json:"ts"`
+	Role      string         `json:"role"`
+	Kind      string         `json:"kind"`
+	Payload   map[string]any `json:"payload,omitempty"`
+}
+
+// writeTrail appends a single trail record to dispatch-trail.jsonl.
+func writeTrail(home, kind string, payload map[string]any) {
+	rec := trailRecord{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Role:      "dispatch-advisor",
+		Kind:      kind,
+		Payload:   payload,
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		return
+	}
+
+	data = append(data, '\n')
+	path := filepath.Join(home, ".agm", "vroom", "dispatch-trail.jsonl")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(data) // O_APPEND makes this atomic on POSIX for writes under PIPE_BUF
+	_ = f.Close()
+}
+
+// writeSelfHeartbeat writes the Dispatch Advisor's own heartbeat so
+// supervisors (and humans) can verify the daemon is alive.
+func writeSelfHeartbeat(home string) {
+	ts := time.Now().UTC().Format(time.RFC3339)
+	path := filepath.Join(home, ".agm", "vroom", "heartbeat", "dispatch.json")
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(ts+"\n"), 0o600); err != nil {
+		return
+	}
+	os.Rename(tmp, path)
+}
 
 // defaultSupervisorModel is the model alias supervisors spawn with unless
 // overridden by -model. It is the 200k-context Sonnet variant, deliberately
@@ -172,6 +420,8 @@ func main() {
 		return
 	}
 
+	// Persistent Dispatch Advisor mode (default): monitor supervisor health
+	// and auto-restart dead sessions with exponential backoff.
 	runHealthMonitor(home, state, *model)
 }
 
@@ -298,29 +548,79 @@ func sendLoopCommand(sup supervisor) bool {
 	return true
 }
 
-// runHealthMonitor watches for dead supervisor sessions and recreates them.
-// With /loop handling the tick cadence inside each session, the launcher only
-// needs to monitor liveness and restart failures.
+// runHealthMonitor is the Dispatch Advisor's persistent daemon loop. It
+// checks supervisor health every 30s, classifying each as alive/stale/dead
+// based on both session liveness and heartbeat freshness. Dead supervisors
+// are restarted with exponential backoff. After 3 consecutive restart
+// failures for the same supervisor, it logs an escalation (future: desktop
+// notification via ce-mcw2).
 func runHealthMonitor(home string, state *sessionState, model string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	fmt.Println("==> Health monitor running (Ctrl-C to stop)...")
+	tracker := newRestartTracker()
+
+	fmt.Println("==> Dispatch Advisor running (Ctrl-C to stop)...")
 	printStatus(state)
-	fmt.Println("==> Tick loops running inside sessions via /loop. Monitoring health every 60s...")
+	fmt.Printf("==> Monitoring supervisor health every %s...\n", healthCheckInterval)
+
+	writeTrail(home, "dispatch.started", nil)
+	writeSelfHeartbeat(home)
 
 	for {
 		select {
 		case <-ctx.Done():
+			writeTrail(home, "dispatch.shutdown", nil)
+			writeSelfHeartbeat(home)
 			saveState(home, state)
-			fmt.Println("==> Health monitor stopped.")
+			fmt.Println("==> Dispatch Advisor stopped.")
 			return
-		case <-time.After(60 * time.Second):
+		case <-time.After(healthCheckInterval):
 		}
 
+		writeSelfHeartbeat(home)
+
 		for _, sup := range supervisors {
-			if !isSessionAlive(sup.Name) {
-				fmt.Printf("[%s] session dead at %s, recreating...\n", sup.Name, time.Now().Format("15:04:05"))
+			health := classifySupervisor(home, sup)
+
+			switch health {
+			case healthAlive:
+				if tracker.consecutiveRestarts(sup.Name) > 0 {
+					fmt.Printf("[%s] recovered at %s\n", sup.Name, time.Now().Format("15:04:05"))
+					writeTrail(home, "dispatch.supervisor_recovered", map[string]any{
+						"supervisor": sup.Name,
+					})
+				}
+				tracker.recordRecovery(sup.Name)
+
+			case healthStale:
+				writeTrail(home, "dispatch.supervisor_stale", map[string]any{
+					"supervisor": sup.Name,
+					"heartbeat":  heartbeatFileName(sup.Name),
+				})
+
+			case healthDead:
+				ok, count := tracker.shouldRestart(sup.Name)
+				if !ok {
+					if tracker.shouldEscalate(sup.Name) {
+						writeTrail(home, "dispatch.escalation.restart_exhausted", map[string]any{
+							"supervisor": sup.Name,
+							"restarts":   count,
+						})
+						fmt.Printf("[%s] ESCALATION: %d consecutive restart failures — needs human intervention\n",
+							sup.Name, count)
+					}
+					continue
+				}
+
+				fmt.Printf("[%s] dead at %s (attempt %d/%d), restarting...\n",
+					sup.Name, time.Now().Format("15:04:05"), count+1, maxRestarts)
+				writeTrail(home, "dispatch.restarting_supervisor", map[string]any{
+					"supervisor": sup.Name,
+					"attempt":    count + 1,
+				})
+
+				tracker.recordAttempt(sup.Name)
 				delete(state.Sessions, sup.Name)
 				createAndBootSession(home, sup, state, model)
 				saveState(home, state)
