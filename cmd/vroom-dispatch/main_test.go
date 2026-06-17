@@ -115,3 +115,37 @@ func TestSupervisorPeerRefsResolve(t *testing.T) {
 		}
 	}
 }
+
+// TestWorkerSpawnPinsOpusAndWayfinder guards the worker-side counterpart of the
+// ce-84l2 supervisor fix. Workers are spawned by the Orchestrator from its skill
+// instructions (not by Go code here), so the contract lives in the embedded
+// orchestrator.md. This test pins it: workers must spawn with opus-200k + auto
+// mode and be told to drive their bead through wayfinder, never raw sonnet
+// execution. The same credit-gate / plan-mode reasoning as the supervisors
+// applies — workers run on the same Max-plan OAuth.
+func TestWorkerSpawnPinsOpusAndWayfinder(t *testing.T) {
+	b, err := skills.ReadFile("skills/orchestrator.md")
+	if err != nil {
+		t.Fatalf("read embedded orchestrator.md: %v", err)
+	}
+	doc := string(b)
+
+	for _, want := range []string{
+		"--model=opus-200k", // Opus, 200k variant (dodges the 1M credit gate)
+		"--mode=auto",       // detached workers can't clear plan-exit prompts
+		"/wayfinder",        // workers drive the bead through the SDLC workflow
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("orchestrator.md worker dispatch missing %q", want)
+		}
+	}
+
+	// Defend against silent regression to the credit-gated 1M opus alias and to
+	// the old raw-execution dispatch record placeholder.
+	if strings.Contains(doc, "--model=opus ") {
+		t.Errorf("orchestrator.md must not spawn workers with the 1M-context opus alias (credit-gated)")
+	}
+	if strings.Contains(doc, `"model":"default"`) {
+		t.Errorf(`orchestrator.md still records "model":"default"; dispatch record must say "opus-200k"`)
+	}
+}
