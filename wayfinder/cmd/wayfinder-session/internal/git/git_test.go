@@ -164,6 +164,87 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	}
 }
 
+// TestCommitSessionInit_NonGitRepo verifies CommitSessionInit is a no-op
+// (returns nil, no error) outside a git repository so non-git workflows work.
+func TestCommitSessionInit_NonGitRepo(t *testing.T) {
+	g := New(t.TempDir())
+	if err := g.CommitSessionInit("my-project"); err != nil {
+		t.Errorf("CommitSessionInit() on non-git repo should return nil, got: %v", err)
+	}
+}
+
+// TestCommitSessionInit_CommitsStatusFile verifies that CommitSessionInit
+// creates a "wayfinder: init session" commit that includes WAYFINDER-STATUS.md,
+// leaving the worktree clean so the first start-phase does not refuse
+// with "uncommitted files detected" (ce-11fi bootstrap fix).
+func TestCommitSessionInit_CommitsStatusFile(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	g := New(repoDir)
+
+	// Seed the repo with an initial commit (git requires a HEAD before committing).
+	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Repo\n"), 0644)
+	exec.Command("git", "-C", repoDir, "add", "README.md").Run()
+	exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run()
+
+	// Write the STATUS file (mirrors what `wayfinder session start` does).
+	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("schema_version: \"2.0\"\n"), 0644)
+
+	if err := g.CommitSessionInit("my-project"); err != nil {
+		t.Fatalf("CommitSessionInit() error = %v", err)
+	}
+
+	// Commit subject must contain the project name.
+	out, err := exec.Command("git", "-C", repoDir, "log", "--format=%s", "-n", "1").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "wayfinder: init session my-project" {
+		t.Errorf("commit subject = %q, want %q", got, "wayfinder: init session my-project")
+	}
+
+	// Worktree must be clean after CommitSessionInit so start-phase CHARTER succeeds.
+	statusOut, err := exec.Command("git", "-C", repoDir, "status", "--porcelain").Output()
+	if err != nil {
+		t.Fatalf("git status failed: %v", err)
+	}
+	if len(strings.TrimSpace(string(statusOut))) != 0 {
+		t.Errorf("worktree should be clean after CommitSessionInit, got:\n%s", string(statusOut))
+	}
+}
+
+// TestCommitSessionInit_NothingToCommit verifies CommitSessionInit is a no-op
+// when WAYFINDER-STATUS.md is already committed.
+func TestCommitSessionInit_NothingToCommit(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	g := New(repoDir)
+
+	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("schema_version: \"2.0\"\n"), 0644)
+	exec.Command("git", "-C", repoDir, "add", ".").Run()
+	exec.Command("git", "-C", repoDir, "commit", "-m", "Add status").Run()
+
+	if err := g.CommitSessionInit("my-project"); err != nil {
+		t.Errorf("CommitSessionInit() with nothing to commit should not error, got: %v", err)
+	}
+}
+
+// TestCommitSessionInit_MissingStatusFile verifies CommitSessionInit is a no-op
+// when WAYFINDER-STATUS.md does not yet exist.
+func TestCommitSessionInit_MissingStatusFile(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	g := New(repoDir)
+
+	// Bootstrap git (git requires a HEAD for non-initial commits, but this test
+	// never reaches the commit path so no HEAD is needed).
+	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Repo\n"), 0644)
+	exec.Command("git", "-C", repoDir, "add", "README.md").Run()
+	exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run()
+
+	// No STATUS file written — CommitSessionInit should be a silent no-op.
+	if err := g.CommitSessionInit("my-project"); err != nil {
+		t.Errorf("CommitSessionInit() with no STATUS file should not error, got: %v", err)
+	}
+}
+
 // TestCommitPhaseStart verifies that CommitPhaseStart creates a commit
 // containing WAYFINDER-STATUS.md and WAYFINDER-HISTORY.md with the correct
 // "wayfinder: start <PHASE>" subject line.

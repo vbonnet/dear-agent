@@ -113,6 +113,40 @@ func (g *GitIntegrator) CommitPhaseStart(phase string) error {
 	return nil
 }
 
+// CommitSessionInit commits WAYFINDER-STATUS.md after a new session is created
+// so that the immediately following `start-phase CHARTER` sees a clean worktree
+// and does not refuse with "uncommitted files detected" (ce-11fi bootstrap fix).
+//
+// Unlike CommitPhaseStart, this method is lenient: it returns nil when the
+// directory is not inside a git repository (non-git workflows are valid).
+func (g *GitIntegrator) CommitSessionInit(projectName string) error {
+	if !g.IsGitRepo() {
+		return nil // not an error — non-git workflows are allowed
+	}
+
+	statusFile := filepath.Join(g.projectDir, "WAYFINDER-STATUS.md")
+	if _, err := os.Stat(statusFile); os.IsNotExist(err) {
+		return nil // nothing to commit
+	}
+
+	if err := g.gitAdd("WAYFINDER-STATUS.md"); err != nil {
+		return fmt.Errorf("failed to add WAYFINDER-STATUS.md: %w", err)
+	}
+
+	commitMsg := fmt.Sprintf("wayfinder: init session %s\n\nWayfinder-Event: session-started", projectName)
+	cmd := exec.Command("git", "commit", "-m", commitMsg, "--", "WAYFINDER-STATUS.md")
+	cmd.Dir = g.projectDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(output), "nothing to commit") {
+			return nil
+		}
+		return fmt.Errorf("git commit failed: %w (output: %s)", err, string(output))
+	}
+
+	return nil
+}
+
 // formatCommitMessage creates a standardized commit message for phase completion
 func (g *GitIntegrator) formatCommitMessage(phase, outcome, context string) string {
 	var msg strings.Builder
