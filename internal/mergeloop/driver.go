@@ -93,14 +93,14 @@ type AuditEvent struct {
 // Deps bundles the injected collaborators. Clock and Audit default to sane
 // implementations when nil; Metrics and ThreadResolver are nil-safe.
 type Deps struct {
-	Lister   PRLister
-	Rebaser  Rebaser
-	Merger   Merger
-	Spawner  AgentSpawner
-	Threads  ThreadResolver // nil = no thread resolution before merge
-	Clock    func() time.Time
-	Audit    func(AuditEvent)
-	Metrics  *Metrics
+	Lister  PRLister
+	Rebaser Rebaser
+	Merger  Merger
+	Spawner AgentSpawner
+	Threads ThreadResolver // nil = no thread resolution before merge
+	Clock   func() time.Time
+	Audit   func(AuditEvent)
+	Metrics *Metrics
 }
 
 // Driver drives one repo's open PRs toward MERGED.
