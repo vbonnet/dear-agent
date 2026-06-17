@@ -1,8 +1,8 @@
 ---
 phase: CHARTER
-title: ce-11fi CommitPhaseStart regression tests
-date: 2026-06-17
-status: complete
+phase_name: Intake & Waypoint
+wayfinder_session_id: session-ce-11fi
+created_at: 2026-06-17T00:00:00Z
 ---
 
 # Charter: ce-11fi — add CommitPhaseStart unit tests
