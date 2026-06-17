@@ -41,6 +41,17 @@ type AgentSpawner interface {
 	Spawn(ctx context.Context, req AgentRequest) (string, error)
 }
 
+// ThreadResolver resolves review threads on a PR. In unattended dark-factory
+// mode, bot review threads (e.g. from gemini-code-assist) block the merge
+// gate because the repo enforces required_conversation_resolution. This
+// interface lets the mergeloop resolve them before attempting the merge.
+type ThreadResolver interface {
+	// ResolveBotThreads resolves unresolved review threads authored by known
+	// bot accounts on the given PR. Returns the number of threads resolved.
+	// Human-authored threads are never touched.
+	ResolveBotThreads(ctx context.Context, repo string, pr int) (int, error)
+}
+
 // AgentKind distinguishes the two code-editing tasks the loop delegates.
 type AgentKind string
 
@@ -80,15 +91,16 @@ type AuditEvent struct {
 }
 
 // Deps bundles the injected collaborators. Clock and Audit default to sane
-// implementations when nil; Metrics is nil-safe.
+// implementations when nil; Metrics and ThreadResolver are nil-safe.
 type Deps struct {
-	Lister  PRLister
-	Rebaser Rebaser
-	Merger  Merger
-	Spawner AgentSpawner
-	Clock   func() time.Time
-	Audit   func(AuditEvent)
-	Metrics *Metrics
+	Lister   PRLister
+	Rebaser  Rebaser
+	Merger   Merger
+	Spawner  AgentSpawner
+	Threads  ThreadResolver // nil = no thread resolution before merge
+	Clock    func() time.Time
+	Audit    func(AuditEvent)
+	Metrics  *Metrics
 }
 
 // Driver drives one repo's open PRs toward MERGED.
@@ -232,6 +244,7 @@ func (d *Driver) drivePR(ctx context.Context, pr PR, res *TickResult) State {
 		return cls.State
 
 	case StateGreen:
+		d.resolveBotThreads(ctx, pr)
 		d.doMerge(ctx, pr, now, res)
 		return cls.State
 	}
@@ -263,6 +276,21 @@ func (d *Driver) doRebase(ctx context.Context, pr PR, now time.Time, res *TickRe
 	}
 	res.Rebased++
 	d.audit(AuditEvent{PR: pr.Number, State: StateBehind, Action: "rebased"})
+}
+
+func (d *Driver) resolveBotThreads(ctx context.Context, pr PR) {
+	if d.Deps.Threads == nil {
+		return
+	}
+	resolved, err := d.Deps.Threads.ResolveBotThreads(ctx, d.Repo, pr.Number)
+	if err != nil {
+		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "thread_resolve_error", Detail: err.Error()})
+		return
+	}
+	if resolved > 0 {
+		d.audit(AuditEvent{PR: pr.Number, State: StateGreen, Action: "bot_threads_resolved",
+			Detail: fmt.Sprintf("resolved %d bot review thread(s)", resolved)})
+	}
 }
 
 func (d *Driver) doMerge(ctx context.Context, pr PR, now time.Time, res *TickResult) {
