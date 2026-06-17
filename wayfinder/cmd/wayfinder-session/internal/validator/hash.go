@@ -50,6 +50,12 @@ func validateMethodologyFreshness(projectDir, phaseName, hashMismatchReason stri
 		)
 	}
 
+	// phase_engram_path is an optional pipeline-internal field (ce-fvkz / ce-11fi).
+	// Skip hash validation when the deliverable was authored without an engram pipeline.
+	if fm.PhaseEngramPath == "" {
+		return nil
+	}
+
 	// Calculate current hash of the phase engram
 	currentHash, err := calculatePhaseEngramHash(fm.PhaseEngramPath)
 	if err != nil {
