@@ -44,6 +44,8 @@ func stripANSI(s string) string {
 // ANSI-rich pane capture is Claude Code ghost/placeholder text. Ghost text is
 // styled with the dim attribute (\x1b[2m) — confirmed by live pane capture
 // showing: ❯ \x1b[2mstart the loop\x1b[0m (not present for real human input).
+// Only the portion of the line AFTER ❯ is checked to avoid false positives
+// from dim attributes that appear before the prompt marker.
 func isGhostTextAfterPrompt(ansiContent string) bool {
 	lines := strings.Split(ansiContent, "\n")
 	for _, line := range slices.Backward(lines) {
@@ -51,8 +53,12 @@ func isGhostTextAfterPrompt(ansiContent string) bool {
 		if !strings.Contains(plainLine, "❯") {
 			continue
 		}
-		// The dim attribute \x1b[2m on the prompt line indicates ghost/placeholder text.
-		return strings.Contains(line, "\x1b[2m")
+		// Find ❯ in the raw ANSI line and check only what follows it.
+		idx := strings.Index(line, "❯")
+		if idx < 0 {
+			continue
+		}
+		return strings.Contains(line[idx:], "\x1b[2m")
 	}
 	return false
 }
@@ -76,22 +82,21 @@ var permissionPromptPattern = regexp.MustCompile(
 
 // CheckHumanTyping detects unsent text in the Claude prompt line.
 // Text after the ❯ prompt without an AGM sender header indicates a human is typing.
-// A secondary ANSI capture is used to rule out Claude Code ghost/placeholder text,
-// which is rendered with the dim attribute (\x1b[2m) and is not real human input.
+// Uses a single ANSI capture to both detect content and rule out Claude Code
+// ghost/placeholder text (dim attribute \x1b[2m) in one tmux round-trip.
 func CheckHumanTyping(sessionName, socketPath string) *Violation {
-	content, err := capturePaneContent(sessionName, socketPath, 10)
+	ansiContent, err := capturePaneWithEscape(sessionName, socketPath, 10)
 	if err != nil {
 		return nil // Can't capture = can't detect, allow through
 	}
-	v := detectHumanTyping(content)
+	v := detectHumanTyping(stripANSI(ansiContent))
 	if v == nil {
 		return nil
 	}
-	// Secondary check: is the "unsent text" actually Claude Code ghost text?
-	// Ghost text is dim-attributed (\x1b[2m) in the raw ANSI capture.
-	ansiContent, err := capturePaneWithEscape(sessionName, socketPath, 10)
-	if err == nil && isGhostTextAfterPrompt(ansiContent) {
-		return nil // Ghost/placeholder text — not a real human typing event
+	// The plain-text check found content: confirm it is not ghost text.
+	// Ghost text is dim-attributed (\x1b[2m) after ❯ in the ANSI capture.
+	if isGhostTextAfterPrompt(ansiContent) {
+		return nil
 	}
 	return v
 }

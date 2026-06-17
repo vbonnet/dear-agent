@@ -135,6 +135,11 @@ func TestIsGhostTextAfterPrompt(t *testing.T) {
 			want:      false,
 		},
 		{
+			name:      "dim attribute before the prompt marker does not count",
+			ansiInput: "\x1b[2mpre-prompt dim prefix\x1b[0m ❯ real typing here\n",
+			want:      false,
+		},
+		{
 			name:      "ghost text overseer pattern from live capture",
 			ansiInput: "some output\n❯ \x1b[2mstart the loop\x1b[0m\n─────────────────────────────────\n",
 			want:      true,

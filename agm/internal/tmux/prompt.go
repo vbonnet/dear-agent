@@ -80,7 +80,13 @@ func HasGhostTextInPrompt(sessionName string) bool {
 		if !strings.Contains(plainLine, "❯") {
 			continue
 		}
-		return strings.Contains(line, "\x1b[2m")
+		// Only check for dim attribute AFTER ❯ to avoid false positives from
+		// dim-attributed prefixes that appear before the prompt marker.
+		idx := strings.Index(line, "❯")
+		if idx < 0 {
+			continue
+		}
+		return strings.Contains(line[idx:], "\x1b[2m")
 	}
 	return false
 }
