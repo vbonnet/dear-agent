@@ -8,3 +8,7 @@
 {"timestamp":"2026-06-16T23:55:49.297454-07:00","type":"phase.started","phase":"RESEARCH"}
 {"timestamp":"2026-06-16T23:55:49.779212-07:00","type":"phase.completed","phase":"RESEARCH","data":{"outcome":"success"}}
 {"timestamp":"2026-06-16T23:55:49.897448-07:00","type":"phase.started","phase":"DESIGN"}
+{"timestamp":"2026-06-16T23:55:50.122858-07:00","type":"validation.failed","phase":"DESIGN","data":{"error":"cannot complete D3: ARCHITECTURE.md does not exist (required). Fix: Create ARCHITECTURE.md before completing D3 phase"}}
+{"timestamp":"2026-06-16T23:55:50.236244-07:00","type":"validation.failed","phase":"SPEC","data":{"error":"cannot complete SPEC: phase was never started. Fix: Start the phase first with 'start-phase SPEC'"}}
+{"timestamp":"2026-06-16T23:55:50.351797-07:00","type":"validation.failed","phase":"PLAN","data":{"error":"cannot complete PLAN: phase was never started. Fix: Start the phase first with 'start-phase PLAN'"}}
+{"timestamp":"2026-06-16T23:55:50.467733-07:00","type":"validation.failed","phase":"SETUP","data":{"error":"cannot complete SETUP: phase was never started. Fix: Start the phase first with 'start-phase SETUP'"}}
