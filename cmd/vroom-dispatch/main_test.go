@@ -60,7 +60,7 @@ func TestSupervisorNamesAreRecognized(t *testing.T) {
 // prompts. The model is now caller-supplied (default defaultSupervisorModel,
 // overridable via -model); this test pins the wiring and the default.
 func TestSessionNewArgsPinModelAndMode(t *testing.T) {
-	args := sessionNewArgs("vroom-orchestrator", defaultSupervisorModel)
+	args := sessionNewArgs("vroom-orchestrator", defaultSupervisorModel, "orchestrator")
 
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
@@ -70,10 +70,16 @@ func TestSessionNewArgsPinModelAndMode(t *testing.T) {
 		"--harness=claude-code",
 		"--model=sonnet-200k",
 		"--mode=auto",
+		"--role=orchestrator",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("sessionNewArgs missing %q; got %v", want, args)
 		}
+	}
+
+	// An empty role must not emit a --role flag (omitted, not "--role=").
+	if strings.Contains(strings.Join(sessionNewArgs("x", "sonnet-200k", ""), " "), "--role") {
+		t.Errorf("empty role should omit --role flag")
 	}
 
 	// Default is the 200k-context Sonnet variant: conserve Opus quota until the

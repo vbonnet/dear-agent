@@ -22,6 +22,7 @@ var skills embed.FS
 type supervisor struct {
 	Name         string
 	ID           string
+	Role         string // RBAC role/profile (agm --role); grants the session's permission profile
 	SkillFile    string
 	PrimaryFor   string
 	TertiaryFor  string
@@ -33,6 +34,7 @@ var supervisors = []supervisor{
 	{
 		Name:         "vroom-meta-orchestrator",
 		ID:           "vroom-meta-orchestrator",
+		Role:         "meta-orchestrator",
 		SkillFile:    "meta-orchestrator.md",
 		PrimaryFor:   "vroom-orchestrator",
 		TertiaryFor:  "vroom-overseer",
@@ -45,6 +47,7 @@ var supervisors = []supervisor{
 	{
 		Name:         "vroom-orchestrator",
 		ID:           "vroom-orchestrator",
+		Role:         "orchestrator",
 		SkillFile:    "orchestrator.md",
 		PrimaryFor:   "vroom-overseer",
 		TertiaryFor:  "vroom-meta-orchestrator",
@@ -58,6 +61,7 @@ var supervisors = []supervisor{
 	{
 		Name:         "vroom-overseer",
 		ID:           "vroom-overseer",
+		Role:         "overseer",
 		SkillFile:    "overseer.md",
 		PrimaryFor:   "vroom-meta-orchestrator",
 		TertiaryFor:  "vroom-orchestrator",
@@ -114,13 +118,21 @@ const supervisorMode = "auto"
 // (credit-gated) in plan mode (non-executable when detached). The model is
 // supplied by the caller (default defaultSupervisorModel, overridable via
 // -model); mode is always auto.
-func sessionNewArgs(name, model string) []string {
-	return []string{
+func sessionNewArgs(name, model, role string) []string {
+	args := []string{
 		"session", "new", name,
 		"--detached", "--workspace=oss", "--harness=claude-code",
 		"--model=" + model,
 		"--mode=" + supervisorMode,
 	}
+	// --role applies the matching RBAC permission profile (e.g. the
+	// orchestrator profile grants `Bash(agm session new *)` so the orchestrator
+	// can spawn worker sessions). Without it a supervisor gets only the default
+	// permissions and cannot dispatch. (ce-7cdj follow-on)
+	if role != "" {
+		args = append(args, "--role="+role)
+	}
+	return args
 }
 
 func main() {
@@ -190,7 +202,7 @@ func ensureSessions(home string, state *sessionState, model string) {
 func createAndBootSession(home string, sup supervisor, state *sessionState, model string) {
 	fmt.Printf("    %s: creating... ", sup.Name)
 
-	cmd := exec.Command("agm", sessionNewArgs(sup.Name, model)...)
+	cmd := exec.Command("agm", sessionNewArgs(sup.Name, model, sup.Role)...)
 	cmd.Env = scrubAPIKey(os.Environ())
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("FAILED: %v\n%s\n", err, string(output))
