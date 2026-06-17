@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/git"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/resume"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/tracker"
@@ -107,6 +108,17 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// Write V2 STATUS file to project directory
 	if err := status.WriteV2ToDir(st, projectDir); err != nil {
 		return fmt.Errorf("failed to write STATUS file: %w", err)
+	}
+
+	// Commit STATUS file so the immediately following `start-phase CHARTER` sees
+	// a clean worktree and does not refuse with "uncommitted files detected".
+	// This is the bootstrap fix for ce-11fi: wayfinder session start left
+	// WAYFINDER-STATUS.md untracked, causing start-phase to fail on brand-new
+	// sessions even after the PR #488 auto-commit fix (which only covers
+	// subsequent phase transitions, not the initial session creation).
+	gitIntegrator := git.New(projectDir)
+	if err := gitIntegrator.CommitSessionInit(projectName); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to commit session init: %v\n", err)
 	}
 
 	// Success message
