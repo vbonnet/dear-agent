@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.dear-agent.loop-tick — host-side dispatch loop (Phase A, ce-cd14 / ce-m3ya).
+
+  Source template:
+      agm/cmd/agm/schedules/com.dear-agent.loop-tick.plist
+  Installed by `agm loop install-launchd`, which substitutes
+  __USER_HOME__ and __AGM_BINARY__ before writing this file (launchd
+  does not expand ~ or shell variables).
+
+  Schedule: every minute (StartInterval = 60 seconds).
+  Logs:     <home>/.agm/logs/loop-tick.log
+
+  agm loop tick is idempotent: it runs only the loops that are due and exits
+  immediately when nothing is due. Running every minute gives sub-minute
+  precision for any cadence without busy-polling.
+
+  AbandonProcessGroup is false so launchd waits for an in-flight tick to finish
+  before launching the next one — preventing overlap on slow jobs.
+
+  RunAtLoad is true: drain any overdue loops the moment the agent loads.
+
+  To remove the job, use 'agm loop uninstall-launchd'.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dear-agent.loop-tick</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__AGM_BINARY__</string>
+        <string>loop</string>
+        <string>tick</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__USER_HOME__/.local/bin:__USER_HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__USER_HOME__</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>60</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>AbandonProcessGroup</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__USER_HOME__/.agm/logs/loop-tick.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__USER_HOME__/.agm/logs/loop-tick.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
