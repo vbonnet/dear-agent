@@ -85,6 +85,23 @@ func TestDetectHumanTyping(t *testing.T) {
 			paneContent:   "some output\n❯ deny this action",
 			wantViolation: false,
 		},
+		{
+			// claude-code renders AI ghost/placeholder suggestions dim (\x1b[2m).
+			name:          "dim ghost/placeholder text - not human typing",
+			paneContent:   "some output\n\x1b[39m❯ \x1b[2mpkill -x gopls\x1b[0m\n  auto mode on · ← for agents",
+			wantViolation: false,
+		},
+		{
+			// Real human input is not dimmed, even with the persistent agents hint.
+			name:          "real human typing (not dim) with agents hint - still a violation",
+			paneContent:   "some output\n❯ please fix the bug\n  auto mode on · ← for agents",
+			wantViolation: true,
+		},
+		{
+			name:          "real human typing plain - still a violation",
+			paneContent:   "some output\n❯ please fix the bug",
+			wantViolation: true,
+		},
 	}
 
 	for _, tt := range tests {
