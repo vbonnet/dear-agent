@@ -474,6 +474,136 @@ func TestLoop_Iterate_RecoveryErrorRecordedButContinues(t *testing.T) {
 	}
 }
 
+func TestLoop_ZombieSelfTerminatesWhenAllPeersDark(t *testing.T) {
+	sup := &fakeSupervisor{role: RoleOrchestrator}
+	staleTime := time.Now().Add(-10 * time.Minute)
+	peers := &fakePeerLookup{peers: map[Role]LoopStatus{
+		RoleOverseer:         &fakePeerStatus{role: RoleOverseer, beat: staleTime},
+		RoleMetaOrchestrator: &fakePeerStatus{role: RoleMetaOrchestrator, beat: staleTime},
+	}}
+	check := &HeartbeatCheckSkill{Threshold: 30 * time.Second}
+
+	trail, buf := newBufferTrail()
+	l, err := NewLoop(LoopConfig{
+		Supervisor:      sup,
+		Mesh:            peers,
+		Check:           check,
+		Trail:           trail,
+		Interval:        1 * time.Millisecond,
+		ZombieThreshold: 3,
+	})
+	if err != nil {
+		t.Fatalf("NewLoop: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	runErr := l.Run(ctx)
+
+	if !errors.Is(runErr, ErrAllPeersDark) {
+		t.Fatalf("Run err = %v, want ErrAllPeersDark", runErr)
+	}
+	if l.TickCount() < 3 {
+		t.Errorf("TickCount = %d, want >= 3 (should run threshold iterations before exit)", l.TickCount())
+	}
+
+	kinds := trailKinds(t, buf)
+	found := false
+	for _, k := range kinds {
+		if k == "supervisor.loop.zombie_exit" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected supervisor.loop.zombie_exit in trail")
+	}
+}
+
+func TestLoop_ZombieResetsWhenOnePeerRecovers(t *testing.T) {
+	sup := &fakeSupervisor{role: RoleOrchestrator}
+	staleTime := time.Now().Add(-10 * time.Minute)
+	freshTime := time.Now()
+
+	// Start with both stale, but overseer recovers after 2 iterations
+	iterCount := 0
+	overseerBeat := staleTime
+	peers := &fakePeerLookup{peers: map[Role]LoopStatus{
+		RoleOverseer:         &fakePeerStatus{role: RoleOverseer, beat: staleTime},
+		RoleMetaOrchestrator: &fakePeerStatus{role: RoleMetaOrchestrator, beat: staleTime},
+	}}
+
+	// Use a CheckSkill that alternates the overseer's status
+	check := CheckSkillFunc(func(_ context.Context, peer LoopStatus) error {
+		if peer.Role() == RoleOverseer {
+			iterCount++
+			if iterCount > 4 {
+				overseerBeat = freshTime
+				return nil
+			}
+		}
+		_ = overseerBeat // keep compiler happy
+		return fmt.Errorf("peer %q is stale", peer.Role())
+	})
+
+	trail, _ := newBufferTrail()
+	l, err := NewLoop(LoopConfig{
+		Supervisor:      sup,
+		Mesh:            peers,
+		Check:           check,
+		Trail:           trail,
+		Interval:        1 * time.Millisecond,
+		ZombieThreshold: 10,
+	})
+	if err != nil {
+		t.Fatalf("NewLoop: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	runErr := l.Run(ctx)
+
+	if errors.Is(runErr, ErrAllPeersDark) {
+		t.Error("Run should NOT have zombie-exited — overseer recovered")
+	}
+	if !errors.Is(runErr, context.DeadlineExceeded) && !errors.Is(runErr, context.Canceled) {
+		t.Errorf("Run err = %v, want context error (graceful shutdown)", runErr)
+	}
+}
+
+func TestLoop_ZombieDisabledWhenNegativeThreshold(t *testing.T) {
+	sup := &fakeSupervisor{role: RoleOrchestrator}
+	staleTime := time.Now().Add(-10 * time.Minute)
+	peers := &fakePeerLookup{peers: map[Role]LoopStatus{
+		RoleOverseer:         &fakePeerStatus{role: RoleOverseer, beat: staleTime},
+		RoleMetaOrchestrator: &fakePeerStatus{role: RoleMetaOrchestrator, beat: staleTime},
+	}}
+	check := &HeartbeatCheckSkill{Threshold: 30 * time.Second}
+
+	trail, _ := newBufferTrail()
+	l, err := NewLoop(LoopConfig{
+		Supervisor:      sup,
+		Mesh:            peers,
+		Check:           check,
+		Trail:           trail,
+		Interval:        1 * time.Millisecond,
+		ZombieThreshold: -1,
+	})
+	if err != nil {
+		t.Fatalf("NewLoop: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	runErr := l.Run(ctx)
+
+	if errors.Is(runErr, ErrAllPeersDark) {
+		t.Error("Run should NOT zombie-exit when ZombieThreshold is negative (disabled)")
+	}
+	if l.TickCount() < 2 {
+		t.Errorf("TickCount = %d, want >= 2 (should keep running)", l.TickCount())
+	}
+}
+
 // trailKinds reads buf as JSONL and returns the Kind of each record.
 func trailKinds(t *testing.T, buf *bytes.Buffer) []string {
 	t.Helper()
