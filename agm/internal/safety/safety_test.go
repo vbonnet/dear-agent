@@ -103,6 +103,59 @@ func TestDetectHumanTyping(t *testing.T) {
 	}
 }
 
+func TestIsGhostTextAfterPrompt(t *testing.T) {
+	tests := []struct {
+		name      string
+		ansiInput string
+		want      bool
+	}{
+		{
+			name:      "ghost text with dim attribute on prompt line",
+			ansiInput: "output\n❯ \x1b[2mstart the loop\x1b[0m\n",
+			want:      true,
+		},
+		{
+			name:      "normal text on prompt line - no dim",
+			ansiInput: "output\n❯ please fix the bug\n",
+			want:      false,
+		},
+		{
+			name:      "empty prompt - no dim attribute",
+			ansiInput: "output\n❯ \n",
+			want:      false,
+		},
+		{
+			name:      "no prompt line",
+			ansiInput: "output\nthinking...\n",
+			want:      false,
+		},
+		{
+			name:      "dim attribute on non-prompt line does not count",
+			ansiInput: "\x1b[2msome dim output\x1b[0m\n❯ real typing here\n",
+			want:      false,
+		},
+		{
+			name:      "dim attribute before the prompt marker does not count",
+			ansiInput: "\x1b[2mpre-prompt dim prefix\x1b[0m ❯ real typing here\n",
+			want:      false,
+		},
+		{
+			name:      "ghost text overseer pattern from live capture",
+			ansiInput: "some output\n❯ \x1b[2mstart the loop\x1b[0m\n─────────────────────────────────\n",
+			want:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isGhostTextAfterPrompt(tt.ansiInput)
+			if got != tt.want {
+				t.Errorf("isGhostTextAfterPrompt(%q) = %v, want %v", tt.ansiInput, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDetectSessionUninitialized(t *testing.T) {
 	tests := []struct {
 		name          string
