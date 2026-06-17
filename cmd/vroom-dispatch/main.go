@@ -162,9 +162,10 @@ func ensureSessions(home string, state *sessionState) {
 			if isSessionAlive(sup.Name) {
 				fmt.Printf("    %s: alive (created %s, loop_sent=%v)\n", sup.Name, info.CreatedAt, info.LoopSent)
 				if !info.LoopSent {
-					sendLoopCommand(sup)
-					info.LoopSent = true
-					state.Sessions[sup.Name] = info
+					if sendLoopCommand(sup) {
+						info.LoopSent = true
+						state.Sessions[sup.Name] = info
+					}
 				}
 				continue
 			}
@@ -194,12 +195,12 @@ func createAndBootSession(home string, sup supervisor, state *sessionState) {
 	fmt.Printf("    %s: waiting 30s for boot prompt processing...\n", sup.Name)
 	time.Sleep(30 * time.Second)
 
-	sendLoopCommand(sup)
+	loopSent := sendLoopCommand(sup)
 
 	state.Sessions[sup.Name] = sessionInfo{
 		Name:      sup.Name,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		LoopSent:  true,
+		LoopSent:  loopSent,
 	}
 }
 
@@ -256,7 +257,8 @@ A /loop command will start your tick cycle shortly.`,
 // sendLoopCommand sends a /loop slash command to a supervisor session. The session's
 // built-in /loop handler takes over tick scheduling — no external tick dispatch needed.
 // The tick prompt references the SKILL instructions already loaded in the boot prompt.
-func sendLoopCommand(sup supervisor) {
+// Returns true if the send succeeded, false otherwise (callers must not set loop_sent=true on failure).
+func sendLoopCommand(sup supervisor) bool {
 	intervalStr := fmt.Sprintf("%ds", int(sup.TickInterval.Seconds()))
 	loopCmd := fmt.Sprintf("/loop %s %s Report a brief summary when done.", intervalStr, sup.TickPrompt)
 
@@ -267,9 +269,10 @@ func sendLoopCommand(sup supervisor) {
 	cmd.Env = scrubAPIKey(os.Environ())
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "    %s: /loop send failed: %v\n%s\n", sup.Name, err, string(output))
-	} else {
-		fmt.Printf("    %s: /loop started\n", sup.Name)
+		return false
 	}
+	fmt.Printf("    %s: /loop started\n", sup.Name)
+	return true
 }
 
 // runHealthMonitor watches for dead supervisor sessions and recreates them.

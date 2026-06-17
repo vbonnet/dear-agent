@@ -24,6 +24,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/internal/telemetry"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -41,6 +42,8 @@ var (
 	msgIncludeSelf         bool   // --include-self flag for including sender in --all
 	msgDelegate            bool   // --delegate flag to track message as a pending delegation
 	msgDelegateSummary     string // --delegate-summary for delegation task summary
+	msgForce               bool   // --force flag to bypass human_typing guard (requires --reason)
+	msgForceReason         string // --reason paired with --force, recorded in override audit log
 )
 
 // Priority levels and their instructions injected into message headers
@@ -216,11 +219,8 @@ func init() {
 	sendMsgCmd.MarkFlagsOneRequired("prompt", "prompt-file", "prompt-stdin")
 	sendMsgCmd.MarkFlagsMutuallyExclusive("to", "all")
 
-	// Deprecated --force flag: kept as hidden no-op for backward compatibility
-	var forceDeprecated bool
-	sendMsgCmd.Flags().BoolVar(&forceDeprecated, "force", false, "deprecated: safety checks always run")
-	_ = sendMsgCmd.Flags().MarkHidden("force")
-	_ = sendMsgCmd.Flags().MarkDeprecated("force", "safety checks always run; --force is no longer needed")
+	sendMsgCmd.Flags().BoolVar(&msgForce, "force", false, "Bypass the human_typing guard — requires --reason (recorded in override audit log)")
+	sendMsgCmd.Flags().StringVar(&msgForceReason, "reason", "", "Justification for --force, recorded in the override audit log")
 
 	sendGroupCmd.AddCommand(sendMsgCmd)
 
@@ -344,6 +344,8 @@ func enforceSendRateLimit(senderName string) error {
 
 // ensureRecipientReady verifies the recipient tmux session exists, runs the
 // safety guard, and wakes any stale monitors.
+// When msgForce is set, the human_typing guard is bypassed after override.Require
+// validates the provided reason and records it to the audit log.
 func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error {
 	exists, err := tmux.HasSession(recipientSession)
 	if err != nil {
@@ -352,7 +354,21 @@ func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error 
 	if !exists {
 		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: agm session list\n  • Create session: agm session new %s", recipientSession, recipientSession)
 	}
-	guardResult := safety.Check(recipientSession, safety.GuardOptions{SkipMidResponse: true})
+
+	guardOpts := safety.GuardOptions{SkipMidResponse: true}
+	if msgForce {
+		if err := override.Require(context.Background(), override.Guard{
+			Tool: "agm send msg",
+			Flag: "--force",
+			Gate: "human_typing safety guard (prevents sending to a session with unsent human text)",
+			Risk: override.RiskP1,
+		}, msgForceReason); err != nil {
+			return err
+		}
+		guardOpts.SkipHumanTyping = true
+	}
+
+	guardResult := safety.Check(recipientSession, guardOpts)
 	if !guardResult.Safe {
 		return fmt.Errorf("safety guard blocked send on session '%s':\n\n%s",
 			recipientSession, guardResult.Error())
