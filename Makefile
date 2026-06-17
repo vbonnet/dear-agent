@@ -48,8 +48,10 @@
 #   install-fd-pressure     Install fd-pressure to ~/go/bin
 #   build-vroom-dispatch    Build vroom-dispatch: VROOM supervisor mesh launcher
 #   install-vroom-dispatch  Install vroom-dispatch to ~/go/bin
+#   build-resolve-review-threads  Build resolve-review-threads: GitHub PR thread resolver
+#   install-resolve-review-threads Install resolve-review-threads to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -403,6 +405,20 @@ uninstall-mergeloop-launchagent:
 	@echo "  launchctl bootout gui/$$(id -u)/com.dear-agent.mergeloop"
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.mergeloop.plist
 	@echo "Removed plist (if present)."
+
+# Build resolve-review-threads: atomic wrapper for the resolveReviewThread
+# GraphQL mutation. Agents must use this instead of raw `gh api graphql`
+# because the classifier blocks bare GraphQL mutations. The binary shells out
+# to `gh api graphql` internally, so authentication uses the gh CLI token.
+# Usage: resolve-review-threads resolve-all <owner> <repo> <pr> [author]
+build-resolve-review-threads:
+	@echo "Building resolve-review-threads..."
+	go build $(GOFLAGS) -o bin/resolve-review-threads ./cmd/resolve-review-threads/
+	@echo "Built: bin/resolve-review-threads"
+
+install-resolve-review-threads: build-resolve-review-threads
+	cp bin/resolve-review-threads $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/resolve-review-threads"
 
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
