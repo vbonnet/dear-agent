@@ -1,5 +1,6 @@
 ---
 schema_version: "2.0"
+session_id: ce-11fi-bootstrap-fix
 project_name: ""
 project_type: ""
 risk_level: ""
