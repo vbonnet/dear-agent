@@ -176,7 +176,7 @@ func navigateAndSubmitOption(sessionName, optionNumber string) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	if selectOptionPrompt == "" {
-		if err := tmux.SendKeys(sessionName, "Enter"); err != nil {
+		if err := tmux.SendEnterReliable(sessionName); err != nil {
 			return fmt.Errorf("failed to send Enter key: %w", err)
 		}
 		return nil

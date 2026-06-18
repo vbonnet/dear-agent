@@ -150,15 +150,15 @@ func runApprove(cmd *cobra.Command, args []string) error {
 		time.Sleep(300 * time.Millisecond)
 	}
 
-	// Step 4: Send Enter to submit
-	if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "C-m").Run(); err != nil {
+	// Step 4: Send Enter to submit (reliable hex 0x0d with retry)
+	if err := tmux.SendEnterReliable(sessionName); err != nil {
 		return fmt.Errorf("failed to send Enter: %w", err)
 	}
 
 	// Step 5: Optionally auto-continue
 	if approveAutoContinue {
 		time.Sleep(500 * time.Millisecond)
-		if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "C-m").Run(); err != nil {
+		if err := tmux.SendEnterReliable(sessionName); err != nil {
 			ui.PrintWarning(fmt.Sprintf("Failed to auto-continue: %v", err))
 		}
 	}
