@@ -75,6 +75,13 @@ func (r *OrphanReclaimer) Reclaim(ctx context.Context) (ReclaimResult, error) {
 
 	out, runErr := r.exec(ctx, bin, args...)
 
+	// If the context deadline tripped (or a parent cancelled us), the run error
+	// is just a side effect of the kill — surface the context cause directly
+	// rather than reporting truncated/empty stdout as "unparseable JSON".
+	if ctx.Err() != nil {
+		return ReclaimResult{}, fmt.Errorf("orphan reaper: %w", ctx.Err())
+	}
+
 	// Parse whatever JSON we got first: a non-zero exit can still carry a valid
 	// summary (e.g. some kills failed). Prefer the structured result.
 	var parsed orphanReapResult
@@ -105,8 +112,11 @@ func (r *OrphanReclaimer) exec(ctx context.Context, name string, args ...string)
 func truncateOutput(b []byte) string {
 	const maxLen = 200
 	s := strings.TrimSpace(string(b))
-	if len(s) <= maxLen {
+	// Truncate on rune boundaries so a multi-byte UTF-8 sequence is never cut
+	// in half (which would yield an invalid-UTF-8 string in the error message).
+	r := []rune(s)
+	if len(r) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "…"
+	return string(r[:maxLen]) + "…"
 }

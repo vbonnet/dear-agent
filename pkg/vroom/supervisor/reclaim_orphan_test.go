@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestOrphanReclaimer_Reclaim(t *testing.T) {
@@ -121,6 +122,44 @@ func TestOrphanReclaimer_RespectsTimeout(t *testing.T) {
 	}
 	if _, err := r.Reclaim(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestOrphanReclaimer_CancelledContextReturnsContextError verifies that when the
+// context is cancelled/timed out the reclaimer surfaces the context cause rather
+// than misreporting empty stdout as unparseable JSON.
+func TestOrphanReclaimer_CancelledContextReturnsContextError(t *testing.T) {
+	r := &OrphanReclaimer{
+		run: func(ctx context.Context, _ string, _ ...string) ([]byte, error) {
+			// Simulate the deadline tripping mid-exec: nothing on stdout and a
+			// run error, exactly what exec.CommandContext yields on timeout.
+			return nil, ctx.Err()
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled before Reclaim runs
+
+	_, err := r.Reclaim(ctx)
+	if err == nil {
+		t.Fatal("expected an error from a cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want it to wrap context.Canceled", err)
+	}
+}
+
+// TestTruncateOutput_RuneSafe checks that truncation never splits a multi-byte
+// UTF-8 character, which would produce an invalid-UTF-8 error string.
+func TestTruncateOutput_RuneSafe(t *testing.T) {
+	// 300 multi-byte runes; byte-slicing at 200 would land mid-rune.
+	long := strings.Repeat("é", 300)
+	got := truncateOutput([]byte(long))
+	if !utf8.ValidString(got) {
+		t.Errorf("truncateOutput produced invalid UTF-8: %q", got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("truncated output missing ellipsis: %q", got)
 	}
 }
 
