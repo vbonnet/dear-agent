@@ -147,7 +147,7 @@ agm send msg vroom-orchestrator --sender vroom-overseer --priority critical --pr
 ### Step 6: Session Health Audit
 
 ```bash
-agm session list 2>/dev/null
+agm session dashboard 2>/dev/null
 ```
 
 For each active session:
@@ -155,10 +155,20 @@ For each active session:
 - Sessions in PERMISSION_PROMPT for >5 minutes are stuck
 - Sessions OFFLINE with no recent heartbeat may be dead
 
-For stuck sessions:
-```bash
-agm send msg <session> --sender vroom-overseer --priority urgent --prompt "You appear stuck on a permission prompt. If you need permission, defer the action and continue with other work."
-```
+For stuck **worker** sessions (`worker-*` name prefix):
+- If stuck for **<10 minutes**: send a nudge to the worker:
+  ```bash
+  agm send msg <session> --sender vroom-overseer --priority urgent --prompt "You appear stuck on a permission prompt. Defer the blocked action (file a handoff note) and continue with other work."
+  ```
+- If stuck for **>10 minutes**: the worker cannot process messages while
+  permission-blocked — messaging it is useless. Escalate to the Orchestrator
+  with an explicit kill recommendation:
+  ```bash
+  agm send msg vroom-orchestrator --sender vroom-overseer --priority critical --prompt "KILL STUCK WORKER: <session> has been in PERMISSION_PROMPT for >Nmin. Force-kill with: agm session kill <session> --confirmed-stuck — then re-dispatch the bead. Messages cannot reach a permission-blocked session."
+  ```
+
+For stuck **supervisor** sessions: send urgent status ping (supervisors should
+not be in PERMISSION_PROMPT — if they are, that is a mesh-level incident).
 
 Record: `kind: "supervisor.over.session_stuck"`
 
@@ -232,8 +242,9 @@ After each tick, briefly note:
 |-----------|--------|
 | Disk >= 95% | Critical to both peers, recommend pause |
 | Orphaned gopls > 10 | Critical: "Known FD leak. Run `agm session reap-orphans` — kills only PID-1 orphans, never live sessions. Do NOT `pkill gopls`." |
-| Worker session stuck on permission | Urgent to worker: defer and continue |
-| Multiple workers stuck | Urgent to Orch: "Workers blocked, check permission config" |
+| Worker stuck on permission <10min | Urgent to worker: defer and continue |
+| Worker stuck on permission >10min | Critical to Orch: "KILL STUCK WORKER: force-kill and re-dispatch" |
+| Multiple workers stuck >10min | Critical to Orch: "Workers blocked, kill stuck workers, check permission config" |
 | Meta-O stale >5min | Urgent message |
 | Orch stale >5min | Urgent message |
 | In_progress bead with dead worker | Normal to Orch for re-dispatch |

@@ -221,12 +221,45 @@ printf '{"ts":"%s","role":"orchestrator","kind":"supervisor.orch.dispatched","pa
 
 ### Step 7: Monitor Active Workers
 
+Run the dashboard to see worker states and time-in-state:
+```bash
+agm session dashboard 2>/dev/null
+```
+
 For each live `worker-*` session:
 - Check if the session is still active (not archived)
-- If a worker has been running >60 minutes on a single bead: send status check
+- **Check the session state.** If a worker is in `PERMISSION_PROMPT` state:
+  - If it has been in that state for **>10 minutes**: the worker is irrecoverably
+    stuck (it cannot process messages while blocked on a permission dialog).
+    Force-kill it and reclaim the slot:
+    ```bash
+    agm session kill "worker-<bead-id>" --confirmed-stuck
+    ```
+    Record:
+    ```
+    kind: "supervisor.orch.worker_killed_permission_stuck"
+    ```
+    Mark the bead for re-dispatch on the next tick. Also record what the
+    permission prompt was about (if visible in `agm session dashboard` output)
+    so the permission model can be fixed.
+  - If it has been in that state for **<10 minutes**: send a nudge (it may
+    self-resolve via the Defer-Don't-Block protocol):
+    ```bash
+    agm send msg "worker-<bead-id>" --sender vroom-orchestrator --priority urgent --prompt "You are stuck on a permission prompt. Defer the blocked action (file a handoff note) and continue with other work."
+    ```
+- If a worker has been running >60 minutes on a single bead (regardless of
+  state): send status check
   ```bash
   agm send msg "worker-<bead-id>" --sender vroom-orchestrator --priority normal --prompt "status? You've been running >60min."
   ```
+- If a worker has been running >120 minutes: send wrap-up command **and** check
+  state. If the worker is in `PERMISSION_PROMPT` or `OFFLINE`, force-kill it
+  (a wrap-up message cannot reach a session in these states):
+  ```bash
+  agm session kill "worker-<bead-id>" --confirmed-stuck
+  ```
+  Record `kind: "supervisor.orch.worker_killed_unresponsive"` and mark bead
+  for re-dispatch.
 - If a worker session is done/archived: check if the bead was completed
   - Read bead status: `bd --db ~/beads/context-engine/.beads show <bead-id>`
   - If bead is still `in_progress` but session is dead: record `kind: "supervisor.orch.worker_died"` and mark bead for re-dispatch
@@ -265,7 +298,9 @@ This makes it trivial to correlate sessions to beads.
 | Meta-O stale >10min | Critical message, file a bead about mesh degradation |
 | Overseer stale >5min | Urgent message |
 | Worker session dies mid-bead | Record in trail, mark for re-dispatch |
+| Worker in PERMISSION_PROMPT >10min | Force-kill (`agm session kill --confirmed-stuck`), re-dispatch bead |
 | Worker stuck >60min | Send status check |
-| Worker stuck >120min | Send wrap-up command, plan re-dispatch |
+| Worker stuck >120min (WORKING state) | Send wrap-up command, plan re-dispatch |
+| Worker stuck >120min (PERMISSION_PROMPT/OFFLINE) | Force-kill, re-dispatch bead |
 | No roadmap items to dispatch | Record idle tick, check back next tick |
 | agm session new fails | Record error, retry next tick |

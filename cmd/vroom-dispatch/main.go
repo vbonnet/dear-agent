@@ -93,6 +93,11 @@ const sessionsFile = ".agm/vroom/sessions.json"
 // as a persistent daemon (default mode, without -boot-only).
 const healthCheckInterval = 30 * time.Second
 
+// workerStuckTimeout is how long a worker can be in PERMISSION_PROMPT before
+// the Dispatch Advisor force-kills it. This is the programmatic safety net
+// — the Orchestrator prompt checks at 10min, the Dispatch Advisor at 15min.
+const workerStuckTimeout = 15 * time.Minute
+
 // restartTracker tracks per-supervisor restart state for exponential backoff.
 type restartTracker struct {
 	mu        sync.Mutex
@@ -615,6 +620,10 @@ func runHealthMonitor(home string, state *sessionState, model string) {
 
 		writeSelfHeartbeat(home)
 
+		// Check for stuck workers before supervisor health — reclaiming
+		// worker slots lets the Orchestrator dispatch on the same tick.
+		monitorWorkers(home)
+
 		for _, sup := range supervisors {
 			health := classifySupervisor(home, sup)
 
@@ -663,6 +672,89 @@ func runHealthMonitor(home string, state *sessionState, model string) {
 			}
 		}
 	}
+}
+
+// dashboardEntry mirrors the JSON output of `agm session dashboard --json`.
+type dashboardEntry struct {
+	Name        string `json:"name"`
+	State       string `json:"state"`
+	TimeInState string `json:"time_in_state"`
+	TmuxAlive   bool   `json:"tmux_alive"`
+}
+
+type dashboardResult struct {
+	Entries []dashboardEntry `json:"entries"`
+}
+
+// monitorWorkers checks for workers stuck in PERMISSION_PROMPT and force-kills
+// them after workerStuckTimeout. This is the programmatic safety net that runs
+// in the Go daemon — it does not depend on LLM supervisors detecting the stall.
+func monitorWorkers(home string) {
+	cmd := exec.Command("agm", "session", "dashboard", "--json")
+	out, err := cmd.Output()
+	if err != nil {
+		return
+	}
+
+	var result dashboardResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		return
+	}
+
+	for _, entry := range result.Entries {
+		if !strings.HasPrefix(entry.Name, "worker-") {
+			continue
+		}
+		if entry.State != "PERMISSION_PROMPT" {
+			continue
+		}
+
+		dur := parseDuration(entry.TimeInState)
+		if dur < workerStuckTimeout {
+			continue
+		}
+
+		fmt.Printf("[%s] PERMISSION_PROMPT for %s (>%s), force-killing\n",
+			entry.Name, entry.TimeInState, workerStuckTimeout)
+
+		killCmd := exec.Command("agm", "session", "kill", entry.Name, "--confirmed-stuck")
+		if killOut, killErr := killCmd.CombinedOutput(); killErr != nil {
+			fmt.Fprintf(os.Stderr, "[%s] kill failed: %v\n%s\n", entry.Name, killErr, string(killOut))
+			writeTrail(home, "dispatch.worker_kill_failed", map[string]any{
+				"worker": entry.Name,
+				"state":  entry.State,
+				"error":  killErr.Error(),
+			})
+		} else {
+			fmt.Printf("[%s] killed successfully — slot reclaimed\n", entry.Name)
+			writeTrail(home, "dispatch.worker_killed_stuck", map[string]any{
+				"worker":       entry.Name,
+				"state":        entry.State,
+				"time_in_state": entry.TimeInState,
+			})
+		}
+	}
+}
+
+// parseDuration converts the dashboard's human-friendly duration strings
+// (e.g. "45s", "12m", "2h30m", "3d") into time.Duration.
+func parseDuration(s string) time.Duration {
+	if s == "" || s == "-" {
+		return 0
+	}
+	// Try stdlib parsing first (handles "12m", "2h30m", "45s").
+	if d, err := time.ParseDuration(s); err == nil {
+		return d
+	}
+	// Handle "3d" format.
+	if strings.HasSuffix(s, "d") {
+		s = strings.TrimSuffix(s, "d")
+		var days int
+		if _, err := fmt.Sscanf(s, "%d", &days); err == nil {
+			return time.Duration(days) * 24 * time.Hour
+		}
+	}
+	return 0
 }
 
 // isSessionAlive checks if an AGM session with the exact given name exists.
