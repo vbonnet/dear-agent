@@ -117,6 +117,56 @@ func TestSupervisorPeerRefsResolve(t *testing.T) {
 	}
 }
 
+// TestLoopCommandIsErrorTolerant guards the ce-ihok fix: the /loop command sent to
+// every supervisor must carry the tick-resilience guard, so a single failing tick
+// (an Anthropic API/credit-gate error, a tool failure, or a transient fault) can
+// never halt the loop. Before this fix the happy-path tick prompt let any error
+// abort the turn that arms/re-arms the loop schedule, killing the loop permanently
+// and leaving the supervisor silently idle. The guard, the role's tick steps, and
+// the interval must all survive into the emitted command for every role.
+func TestLoopCommandIsErrorTolerant(t *testing.T) {
+	if len(supervisors) == 0 {
+		t.Fatal("no supervisors defined")
+	}
+
+	// Tokens that encode the "a failed tick must not kill the loop" contract.
+	// Keep these loose enough to survive wording tweaks but specific enough to
+	// fail if the guard is dropped or neutered.
+	guardTokens := []string{
+		"never end the loop",
+		"do NOT stop, exit, or abort the loop",
+		"next interval still fires",
+		"skipped tick",
+	}
+
+	for _, s := range supervisors {
+		t.Run(s.Name, func(t *testing.T) {
+			cmd := buildLoopCommand(s)
+
+			if !strings.HasPrefix(cmd, "/loop "+tickIntervalArg(s)+" ") {
+				t.Errorf("loop command must start with /loop and the interval; got %q", cmd)
+			}
+			for _, want := range guardTokens {
+				if !strings.Contains(cmd, want) {
+					t.Errorf("loop command for %q missing resilience guard token %q\ngot: %s", s.Name, want, cmd)
+				}
+			}
+			// The role's tick steps must still be present — the guard frames the
+			// tick, it does not replace it.
+			if s.TickPrompt == "" {
+				t.Fatalf("supervisor %q has empty TickPrompt", s.Name)
+			}
+			if !strings.Contains(cmd, s.TickPrompt) {
+				t.Errorf("loop command for %q dropped the role TickPrompt", s.Name)
+			}
+			// The guard must precede the role steps so it frames the whole tick.
+			if strings.Index(cmd, tickResilienceGuard) > strings.Index(cmd, s.TickPrompt) {
+				t.Errorf("resilience guard for %q must come before the role tick steps", s.Name)
+			}
+		})
+	}
+}
+
 // TestWorkerSpawnPinsOpusAndWayfinder guards the worker-side counterpart of the
 // ce-84l2 supervisor fix. Workers are spawned by the Orchestrator from its skill
 // instructions (not by Go code here), so the contract lives in the embedded
