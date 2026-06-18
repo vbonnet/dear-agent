@@ -85,3 +85,23 @@ func TestRun_FlagParseErrorSurfacedAsError(t *testing.T) {
 		t.Errorf("stderr should mention the bad flag; got %q", stderr.String())
 	}
 }
+
+func TestSplitTargets(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+	}{
+		{"", []string{}},
+		{"gopls", []string{"gopls"}},
+		{"gopls,agm-mcp-server", []string{"gopls", "agm-mcp-server"}},
+		{" gopls , agm-mcp-server ", []string{"gopls", "agm-mcp-server"}},
+		{"gopls,,", []string{"gopls"}},
+		{" , ", []string{}},
+	}
+	for _, tt := range tests {
+		got := splitTargets(tt.in)
+		if strings.Join(got, "|") != strings.Join(tt.want, "|") {
+			t.Errorf("splitTargets(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
