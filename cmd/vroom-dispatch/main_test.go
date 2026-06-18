@@ -162,8 +162,15 @@ func TestLoopCommandIsErrorTolerant(t *testing.T) {
 			if !strings.Contains(cmd, s.TickPrompt) {
 				t.Errorf("loop command for %q dropped the role TickPrompt", s.Name)
 			}
-			// The guard must precede the role steps so it frames the whole tick.
-			if strings.Index(cmd, tickResilienceGuard) > strings.Index(cmd, s.TickPrompt) {
+			// The guard must be present verbatim AND precede the role steps so it
+			// frames the whole tick. Check presence explicitly first: strings.Index
+			// returns -1 when absent, which would make a bare "guardIdx > promptIdx"
+			// ordering check silently pass on a missing guard (gemini review, PR #523).
+			guardIdx := strings.Index(cmd, tickResilienceGuard)
+			promptIdx := strings.Index(cmd, s.TickPrompt)
+			if guardIdx < 0 {
+				t.Errorf("loop command for %q does not contain the resilience guard verbatim", s.Name)
+			} else if promptIdx < 0 || guardIdx > promptIdx {
 				t.Errorf("resilience guard for %q must come before the role tick steps", s.Name)
 			}
 		})
