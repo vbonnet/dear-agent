@@ -1,9 +1,12 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // supervisorRoleTokens mirrors the role substrings that AGM's two
@@ -196,5 +199,264 @@ func TestWorkerSpawnPinsOpusAndWayfinder(t *testing.T) {
 	}
 	if strings.Contains(doc, `"model":"default"`) {
 		t.Errorf(`orchestrator.md still records "model":"default"; dispatch record must say "opus-200k"`)
+	}
+}
+
+// --- Dispatch Advisor tests (ce-hn8n) ---
+
+func TestRestartTracker_BackoffProgression(t *testing.T) {
+	rt := newRestartTracker()
+	name := "test-supervisor"
+
+	// First attempt: should be allowed immediately.
+	ok, count := rt.shouldRestart(name)
+	if !ok || count != 0 {
+		t.Fatalf("first attempt: shouldRestart = (%v, %d), want (true, 0)", ok, count)
+	}
+
+	rt.recordAttempt(name)
+
+	// Immediately after: backoff should block.
+	ok, count = rt.shouldRestart(name)
+	if ok {
+		t.Fatalf("should be blocked by backoff after first attempt, count=%d", count)
+	}
+	if count != 1 {
+		t.Fatalf("count after first attempt = %d, want 1", count)
+	}
+
+	// Verify backoff doubles: initial 30s → 60s → 120s.
+	rt.mu.Lock()
+	bo := rt.backoff[name]
+	rt.mu.Unlock()
+	if bo != initialBackoff {
+		t.Fatalf("backoff after first attempt = %v, want %v", bo, initialBackoff)
+	}
+
+	// Simulate time passing and record second attempt.
+	rt.mu.Lock()
+	rt.lastTry[name] = time.Now().Add(-initialBackoff - time.Second)
+	rt.mu.Unlock()
+
+	ok, count = rt.shouldRestart(name)
+	if !ok || count != 1 {
+		t.Fatalf("second attempt: shouldRestart = (%v, %d), want (true, 1)", ok, count)
+	}
+
+	rt.recordAttempt(name)
+	rt.mu.Lock()
+	bo = rt.backoff[name]
+	rt.mu.Unlock()
+	if bo != 2*initialBackoff {
+		t.Fatalf("backoff after second attempt = %v, want %v", bo, 2*initialBackoff)
+	}
+}
+
+func TestRestartTracker_MaxRestarts(t *testing.T) {
+	rt := newRestartTracker()
+	name := "test-supervisor"
+
+	for i := range maxRestarts {
+		rt.mu.Lock()
+		rt.lastTry[name] = time.Time{} // clear backoff window
+		rt.mu.Unlock()
+
+		ok, count := rt.shouldRestart(name)
+		if !ok {
+			t.Fatalf("attempt %d: shouldRestart = false (count=%d), want true", i+1, count)
+		}
+		rt.recordAttempt(name)
+	}
+
+	// After maxRestarts, should be blocked regardless of time.
+	rt.mu.Lock()
+	rt.lastTry[name] = time.Time{}
+	rt.mu.Unlock()
+
+	ok, count := rt.shouldRestart(name)
+	if ok {
+		t.Fatalf("after %d restarts: shouldRestart = true, want false", maxRestarts)
+	}
+	if count != maxRestarts {
+		t.Fatalf("count = %d, want %d", count, maxRestarts)
+	}
+}
+
+func TestRestartTracker_RecoveryResets(t *testing.T) {
+	rt := newRestartTracker()
+	name := "test-supervisor"
+
+	rt.recordAttempt(name)
+	rt.recordAttempt(name)
+	if rt.consecutiveRestarts(name) != 2 {
+		t.Fatalf("restarts = %d, want 2", rt.consecutiveRestarts(name))
+	}
+
+	rt.recordRecovery(name)
+	if rt.consecutiveRestarts(name) != 0 {
+		t.Fatalf("restarts after recovery = %d, want 0", rt.consecutiveRestarts(name))
+	}
+
+	// Should be able to restart again after recovery.
+	ok, _ := rt.shouldRestart(name)
+	if !ok {
+		t.Fatal("shouldRestart after recovery = false, want true")
+	}
+}
+
+func TestRestartTracker_ShouldEscalate(t *testing.T) {
+	rt := newRestartTracker()
+	name := "test-supervisor"
+
+	// Below maxRestarts: shouldEscalate must return false.
+	for range maxRestarts - 1 {
+		rt.recordAttempt(name)
+	}
+	if rt.shouldEscalate(name) {
+		t.Fatal("shouldEscalate returned true before maxRestarts reached")
+	}
+
+	// Reach maxRestarts: first call must return true.
+	rt.recordAttempt(name)
+	if !rt.shouldEscalate(name) {
+		t.Fatal("shouldEscalate returned false at maxRestarts, want true")
+	}
+
+	// Subsequent calls must return false (no spam).
+	if rt.shouldEscalate(name) {
+		t.Fatal("shouldEscalate returned true on second call, want false (no spam)")
+	}
+
+	// After recovery, escalate flag resets.
+	rt.recordRecovery(name)
+	rt.mu.Lock()
+	rt.restarts[name] = maxRestarts
+	rt.mu.Unlock()
+	if !rt.shouldEscalate(name) {
+		t.Fatal("shouldEscalate returned false after recovery reset, want true")
+	}
+}
+
+func TestReadHeartbeatTime(t *testing.T) {
+	dir := t.TempDir()
+	hbDir := filepath.Join(dir, ".agm", "vroom", "heartbeat")
+	os.MkdirAll(hbDir, 0o755)
+
+	// Test bare timestamp string (what the skill files write via `date -u`).
+	ts := "2026-06-17T21:32:03Z"
+	os.WriteFile(filepath.Join(hbDir, "orch.json"), []byte(ts+"\n"), 0o600)
+	got := readHeartbeatTime(dir, "orch")
+	want, _ := time.Parse(time.RFC3339, ts)
+	if !got.Equal(want) {
+		t.Errorf("bare timestamp: got %v, want %v", got, want)
+	}
+
+	// Test RFC3339 with timezone offset.
+	ts2 := "2026-06-17T14:32:03-07:00"
+	os.WriteFile(filepath.Join(hbDir, "meta-o.json"), []byte(ts2+"\n"), 0o600)
+	got2 := readHeartbeatTime(dir, "meta-o")
+	want2, _ := time.Parse(time.RFC3339, ts2)
+	if !got2.Equal(want2) {
+		t.Errorf("RFC3339 offset: got %v, want %v", got2, want2)
+	}
+
+	// Test missing file returns zero.
+	got3 := readHeartbeatTime(dir, "nonexistent")
+	if !got3.IsZero() {
+		t.Errorf("missing file: got %v, want zero", got3)
+	}
+
+	// Test JSON object format.
+	jsonHB := `{"timestamp":"2026-06-17T21:00:00Z"}`
+	os.WriteFile(filepath.Join(hbDir, "overseer.json"), []byte(jsonHB), 0o600)
+	got4 := readHeartbeatTime(dir, "overseer")
+	want4, _ := time.Parse(time.RFC3339, "2026-06-17T21:00:00Z")
+	if !got4.Equal(want4) {
+		t.Errorf("JSON object: got %v, want %v", got4, want4)
+	}
+}
+
+func TestHeartbeatFileName(t *testing.T) {
+	cases := []struct {
+		name string
+		want string
+	}{
+		{"vroom-meta-orchestrator", "meta-o"},
+		{"vroom-orchestrator", "orch"},
+		{"vroom-overseer", "overseer"},
+		{"unknown", "unknown"},
+	}
+	for _, tc := range cases {
+		got := heartbeatFileName(tc.name)
+		if got != tc.want {
+			t.Errorf("heartbeatFileName(%q) = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestWriteTrail(t *testing.T) {
+	dir := t.TempDir()
+	trailDir := filepath.Join(dir, ".agm", "vroom")
+	os.MkdirAll(trailDir, 0o755)
+
+	writeTrail(dir, "dispatch.test", map[string]any{"key": "value"})
+	writeTrail(dir, "dispatch.test2", nil)
+
+	path := filepath.Join(trailDir, "dispatch-trail.jsonl")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read trail: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("trail lines = %d, want 2", len(lines))
+	}
+
+	if !strings.Contains(lines[0], `"dispatch.test"`) {
+		t.Errorf("line 0 missing kind: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], `"dispatch-advisor"`) {
+		t.Errorf("line 0 missing role: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], `"key":"value"`) {
+		t.Errorf("line 0 missing payload: %s", lines[0])
+	}
+}
+
+func TestWriteSelfHeartbeat(t *testing.T) {
+	dir := t.TempDir()
+	hbDir := filepath.Join(dir, ".agm", "vroom", "heartbeat")
+	os.MkdirAll(hbDir, 0o755)
+
+	writeSelfHeartbeat(dir)
+
+	path := filepath.Join(hbDir, "dispatch.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read self heartbeat: %v", err)
+	}
+
+	ts := strings.TrimSpace(string(data))
+	if _, err := time.Parse(time.RFC3339, ts); err != nil {
+		t.Errorf("self heartbeat not valid RFC3339: %q — %v", ts, err)
+	}
+}
+
+func TestHealthCheckInterval(t *testing.T) {
+	if healthCheckInterval != 30*time.Second {
+		t.Errorf("healthCheckInterval = %v, want 30s", healthCheckInterval)
+	}
+}
+
+func TestSupervisorHealthString(t *testing.T) {
+	if healthAlive.String() != "alive" {
+		t.Errorf("alive.String() = %q", healthAlive.String())
+	}
+	if healthStale.String() != "stale" {
+		t.Errorf("stale.String() = %q", healthStale.String())
+	}
+	if healthDead.String() != "dead" {
+		t.Errorf("dead.String() = %q", healthDead.String())
 	}
 }
