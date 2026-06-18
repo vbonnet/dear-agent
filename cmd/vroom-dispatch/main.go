@@ -518,6 +518,7 @@ A /loop command will start your tick cycle shortly.`,
 	fmt.Printf("    %s: sending boot prompt (%d bytes)...\n", sup.Name, len(bootPrompt))
 	cmd := exec.Command("agm", "send", "msg", sup.Name,
 		"--sender", "vroom-dispatch",
+		"--autonomous",
 		"--prompt", bootPrompt)
 	cmd.Env = scrubAPIKey(os.Environ())
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -567,6 +568,7 @@ func sendLoopCommand(sup supervisor) bool {
 	fmt.Printf("    %s: sending /loop (%s interval)...\n", sup.Name, intervalStr)
 	cmd := exec.Command("agm", "send", "msg", sup.Name,
 		"--sender", "vroom-dispatch",
+		"--autonomous",
 		"--prompt", loopCmd)
 	cmd.Env = scrubAPIKey(os.Environ())
 	if output, err := cmd.CombinedOutput(); err != nil {

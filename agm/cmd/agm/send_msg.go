@@ -44,6 +44,7 @@ var (
 	msgDelegateSummary     string // --delegate-summary for delegation task summary
 	msgForce               bool   // --force flag to bypass human_typing guard (requires --reason)
 	msgForceReason         string // --reason paired with --force, recorded in override audit log
+	msgAutonomous          bool   // --autonomous flag: session is unattended, skip human_typing guard
 )
 
 // Priority levels and their instructions injected into message headers
@@ -221,6 +222,7 @@ func init() {
 
 	sendMsgCmd.Flags().BoolVar(&msgForce, "force", false, "Bypass the human_typing guard — requires --reason (recorded in override audit log)")
 	sendMsgCmd.Flags().StringVar(&msgForceReason, "reason", "", "Justification for --force, recorded in the override audit log")
+	sendMsgCmd.Flags().BoolVar(&msgAutonomous, "autonomous", false, "Session is unattended — skip human_typing guard (no audit override required)")
 
 	sendGroupCmd.AddCommand(sendMsgCmd)
 
@@ -355,7 +357,7 @@ func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error 
 		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: agm session list\n  • Create session: agm session new %s", recipientSession, recipientSession)
 	}
 
-	guardOpts := safety.GuardOptions{SkipMidResponse: true}
+	guardOpts := safety.GuardOptions{SkipMidResponse: true, AutonomousMode: msgAutonomous}
 	if msgForce {
 		if err := override.Require(context.Background(), override.Guard{
 			Tool: "agm send msg",
