@@ -266,7 +266,7 @@ func gitLines(root string, args ...string) ([]string, error) {
 		return nil, err
 	}
 	var lines []string
-	for _, l := range strings.Split(out, "\n") {
+	for l := range strings.SplitSeq(out, "\n") {
 		if l = strings.TrimSpace(l); l != "" {
 			lines = append(lines, l)
 		}
@@ -275,6 +275,8 @@ func gitLines(root string, args ...string) ([]string, error) {
 }
 
 func gitOutput(args ...string) (string, error) {
+	// #nosec G702 G204 -- fixed "git" binary; args are internal git flags plus
+	// a git ref/path passed as argv (no shell), never an attacker-chosen command.
 	cmd := exec.Command("git", args...)
 	out, err := cmd.Output()
 	return string(out), err
