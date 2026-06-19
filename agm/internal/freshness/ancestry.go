@@ -56,6 +56,8 @@ func (r AncestryResult) FailLoud() bool {
 	switch r.Status {
 	case AncestryNotAncestor, AncestryCommitMissing, AncestryUnknownCommit:
 		return true
+	case AncestryVerified, AncestryIndeterminate:
+		return false
 	default:
 		return false
 	}
@@ -132,13 +134,13 @@ func VerifyAncestry(repoPath, binaryCommit, trunkRef string) AncestryResult {
 
 	// Resolve the trunk ref. If there is no local origin/main tracking ref (no
 	// remote, fresh clone, not a repo), we cannot verify — fail open.
-	if sha, err := runGit(repoPath, "rev-parse", "--short", "--verify", r.TrunkRef+"^{commit}"); err != nil {
+	sha, err := runGit(repoPath, "rev-parse", "--short", "--verify", r.TrunkRef+"^{commit}")
+	if err != nil {
 		r.Status = AncestryIndeterminate
 		r.Err = fmt.Errorf("cannot resolve trunk ref %q in %s: %w", r.TrunkRef, repoPath, err)
 		return r
-	} else {
-		r.TrunkCommit = sha
 	}
+	r.TrunkCommit = sha
 
 	// Is the binary commit even an object in this repo? `cat-file -e` exits
 	// non-zero (and our runGit returns err) when the object is absent.
@@ -151,17 +153,18 @@ func VerifyAncestry(repoPath, binaryCommit, trunkRef string) AncestryResult {
 	//   exit 0  -> ancestor (verified)
 	//   exit 1  -> not an ancestor (rolled-back / divergent)
 	//   other   -> error (indeterminate)
-	if _, err := runGit(repoPath, "merge-base", "--is-ancestor", commit, r.TrunkRef); err == nil {
+	_, ancErr := runGit(repoPath, "merge-base", "--is-ancestor", commit, r.TrunkRef)
+	if ancErr == nil {
 		r.Status = AncestryVerified
 		return r
-	} else if ec, ok := exitCode(err); ok && ec == 1 {
+	}
+	if ec, ok := exitCode(ancErr); ok && ec == 1 {
 		r.Status = AncestryNotAncestor
 		return r
-	} else {
-		r.Status = AncestryIndeterminate
-		r.Err = fmt.Errorf("git merge-base --is-ancestor failed: %w", err)
-		return r
 	}
+	r.Status = AncestryIndeterminate
+	r.Err = fmt.Errorf("git merge-base --is-ancestor failed: %w", ancErr)
+	return r
 }
 
 // runGit runs a time-bounded git command in repoPath and returns trimmed stdout.
