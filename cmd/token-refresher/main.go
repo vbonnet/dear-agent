@@ -217,8 +217,15 @@ func writeAudit(path string, rec auditRecord) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	_, _ = f.Write(append(data, '\n'))
+	if _, werr := f.Write(append(data, '\n')); werr != nil {
+		_ = f.Close()
+		return
+	}
+	// Check the close error: for an appended writable file a failed close can
+	// mean a lost record (CodeQL: writable handle closed without handling).
+	if cerr := f.Close(); cerr != nil {
+		return
+	}
 }
 
 func defaultAuditPath() string {

@@ -1,18 +1,15 @@
+//go:build unix
+
 package auth
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
 	"time"
 )
-
-// credentialsLockName is the advisory lock file that serializes credential
-// refreshes. It lives beside the credentials file (i.e.
-// ~/.claude/.credentials.lock) so every process that shares the credentials
-// file contends on the same lock.
-const credentialsLockName = ".credentials.lock"
 
 // defaultLockTimeout bounds how long a refresh waits for the credentials lock
 // before giving up. A refresh exchange is a single sub-second HTTP round-trip,
@@ -36,20 +33,28 @@ const lockPollInterval = 50 * time.Millisecond
 // the whole mesh. A POSIX flock on a shared lock file is held against the open
 // file description, so it serializes both separate processes AND separate
 // goroutines (each opens its own descriptor), closing the race for good.
-func withCredentialsLock(credPath string, timeout time.Duration, fn func() error) error {
+//
+// ctx cancellation aborts the wait for the lock. The lock-file handle's Close
+// error is surfaced (it shares the named return) so a failed close is never
+// silently dropped.
+func withCredentialsLock(ctx context.Context, credPath string, timeout time.Duration, fn func() error) (err error) {
 	if timeout <= 0 {
 		timeout = defaultLockTimeout
 	}
 	lockPath := filepath.Join(filepath.Dir(credPath), credentialsLockName)
 
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return fmt.Errorf("open credentials lock %s: %w", lockPath, err)
+	f, openErr := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if openErr != nil {
+		return fmt.Errorf("open credentials lock %s: %w", lockPath, openErr)
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close credentials lock: %w", closeErr)
+		}
+	}()
 
-	if err := acquireFlock(f, timeout); err != nil {
-		return err
+	if lockErr := acquireFlock(ctx, f, timeout); lockErr != nil {
+		return lockErr
 	}
 	// Best-effort unlock: closing the fd (deferred above) also releases the
 	// flock, so an unlock error here is non-fatal.
@@ -59,12 +64,15 @@ func withCredentialsLock(credPath string, timeout time.Duration, fn func() error
 }
 
 // acquireFlock takes an exclusive flock on f, retrying the non-blocking variant
-// until it succeeds or the timeout elapses. A bounded poll loop (rather than a
-// blocking LOCK_EX) keeps the wait observable and guarantees we never hang past
-// the deadline.
-func acquireFlock(f *os.File, timeout time.Duration) error {
+// until it succeeds, the timeout elapses, or ctx is canceled. A bounded poll
+// loop (rather than a blocking LOCK_EX) keeps the wait observable, honors
+// cancellation, and guarantees we never hang past the deadline.
+func acquireFlock(ctx context.Context, f *os.File, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("credentials lock wait canceled: %w", ctxErr)
+		}
 		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
 			return nil
@@ -75,6 +83,10 @@ func acquireFlock(f *os.File, timeout time.Duration) error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("timed out after %s waiting for credentials lock (another process is refreshing)", timeout)
 		}
-		time.Sleep(lockPollInterval)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("credentials lock wait canceled: %w", ctx.Err())
+		case <-time.After(lockPollInterval):
+		}
 	}
 }

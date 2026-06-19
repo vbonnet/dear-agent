@@ -44,6 +44,10 @@ const (
 	// pre-refresh backup written before each mutation.
 	credentialsBackupSuffix = ".bak"
 
+	// credentialsLockName is the advisory lock file that serializes credential
+	// refreshes; it sits beside the credentials file (~/.claude/.credentials.lock).
+	credentialsLockName = ".credentials.lock"
+
 	// maxErrBodyBytes caps how much of a non-2xx response body we read for
 	// diagnostics, so a hostile/oversized error page can't exhaust memory.
 	maxErrBodyBytes = 4 << 10
@@ -149,7 +153,7 @@ func (r OAuthResolver) Refresh(ctx context.Context) (string, error) {
 	}
 
 	var token string
-	err := withCredentialsLock(path, r.LockTimeout, func() error {
+	err := withCredentialsLock(ctx, path, r.LockTimeout, func() error {
 		// Re-read under the lock: a sibling pane may have just refreshed.
 		creds, _, ok := r.readFullCredentials()
 		if !ok {
