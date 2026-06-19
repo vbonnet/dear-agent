@@ -50,36 +50,31 @@ func (m Mode) Valid() bool { return m == ModeBlocking || m == ModeAsync }
 type Phase string
 
 const (
-	// PhaseRaised: the worker created the escalation.
+	// PhaseRaised is the worker having created the escalation.
 	PhaseRaised Phase = "raised"
-	// PhaseClassified: the classifier rendered a disposition.
+	// PhaseClassified is the classifier having rendered a disposition.
 	PhaseClassified Phase = "classified"
-	// PhaseRouted: delivered to the next node up the chain.
+	// PhaseRouted is delivery to the next node up the chain.
 	PhaseRouted Phase = "routed"
-	// PhaseConferring: a VROOM supervisor is conferring with its peers.
+	// PhaseConferring is a VROOM supervisor conferring with its peers.
 	PhaseConferring Phase = "conferring"
-	// PhaseDispatchedToHuman: surfaced to the human via Dispatch.
+	// PhaseDispatchedToHuman is the escalation surfaced to the human via Dispatch.
 	PhaseDispatchedToHuman Phase = "dispatched-to-human"
-	// PhaseAnswered: a node (or the human) gave a terminal answer.
+	// PhaseAnswered is a node (or the human) having given a terminal answer.
 	PhaseAnswered Phase = "answered"
-	// PhaseAutoResolved: the classifier answered it without routing.
+	// PhaseAutoResolved is the classifier having answered without routing.
 	PhaseAutoResolved Phase = "auto-resolved"
-	// PhaseTimedOut: a blocking Await gave up; the escalation remains in-flight
-	// but the worker stopped waiting.
+	// PhaseTimedOut is a blocking Await having given up; the escalation remains
+	// in-flight but the worker stopped waiting.
 	PhaseTimedOut Phase = "timed-out"
-	// PhaseDismissed: closed without an answer (e.g. obsolete).
+	// PhaseDismissed is the escalation closed without an answer (e.g. obsolete).
 	PhaseDismissed Phase = "dismissed"
 )
 
 // Terminal reports whether the phase is an end state for the escalation itself
 // (PhaseTimedOut is not terminal — only the worker's wait ended).
 func (p Phase) Terminal() bool {
-	switch p {
-	case PhaseAnswered, PhaseAutoResolved, PhaseDismissed:
-		return true
-	default:
-		return false
-	}
+	return p == PhaseAnswered || p == PhaseAutoResolved || p == PhaseDismissed
 }
 
 // NodeKind describes a node's position in the spawn hierarchy, which decides how
@@ -92,12 +87,13 @@ const (
 	// NodeSupervisor is a non-VROOM agent that spawned children (an
 	// intermediate manager).
 	NodeSupervisor NodeKind = "supervisor"
-	// NodeVROOMMetaOrchestrator / NodeVROOMOrchestrator / NodeVROOMOverseer are
-	// the three apex supervisors. Reaching any of them arms the confer→human
-	// terminus.
+	// NodeVROOMMetaOrchestrator is the apex Meta-Orchestrator (CTO) supervisor.
+	// Reaching any VROOM node arms the confer→human terminus.
 	NodeVROOMMetaOrchestrator NodeKind = "vroom-meta-orchestrator"
-	NodeVROOMOrchestrator     NodeKind = "vroom-orchestrator"
-	NodeVROOMOverseer         NodeKind = "vroom-overseer"
+	// NodeVROOMOrchestrator is the apex Orchestrator (COO) supervisor.
+	NodeVROOMOrchestrator NodeKind = "vroom-orchestrator"
+	// NodeVROOMOverseer is the apex Overseer (CRO) supervisor.
+	NodeVROOMOverseer NodeKind = "vroom-overseer"
 	// NodeNone means "no parent" (a root session).
 	NodeNone NodeKind = "none"
 	// NodeHuman is the terminal authority.
@@ -106,12 +102,7 @@ const (
 
 // IsVROOM reports whether the node is one of the three apex supervisors.
 func (n NodeKind) IsVROOM() bool {
-	switch n {
-	case NodeVROOMMetaOrchestrator, NodeVROOMOrchestrator, NodeVROOMOverseer:
-		return true
-	default:
-		return false
-	}
+	return n == NodeVROOMMetaOrchestrator || n == NodeVROOMOrchestrator || n == NodeVROOMOverseer
 }
 
 // ParentRef identifies the session a given session should escalate to.
@@ -163,7 +154,7 @@ type Escalation struct {
 
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
-	ResolvedAt time.Time `json:"resolved_at,omitempty"`
+	ResolvedAt time.Time `json:"resolved_at,omitzero"`
 }
 
 // resolved reports whether the escalation has reached a terminal phase.

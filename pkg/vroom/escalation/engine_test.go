@@ -21,7 +21,7 @@ func (g fakeGraph) Parent(_ context.Context, id string) (ParentRef, error) {
 
 // fakeMessenger records deliveries.
 type fakeMessenger struct {
-	mu       sync.Mutex
+	mu        sync.Mutex
 	delivered []struct {
 		to  string
 		msg EscalationMessage

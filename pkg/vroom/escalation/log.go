@@ -254,6 +254,7 @@ func (l *Logger) Record(ctx context.Context, ev EscalationEvent) error {
 			attribute.String("disposition", string(ev.Disposition)),
 		))
 	}
+	//nolint:exhaustive // only these phases drive a dedicated metric; the rest intentionally no-op (the generic events counter above covers them).
 	switch ev.Phase {
 	case PhaseRaised:
 		if l.raised != nil {

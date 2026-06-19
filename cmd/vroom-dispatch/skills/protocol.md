@@ -77,6 +77,30 @@ agm send msg <target-session> --sender <self> --priority <level> --prompt "<mess
 
 Priority levels: `critical`, `urgent`, `normal`, `background`, `fyi`.
 
+## Handling Escalations (Escalate-To-Supervisor)
+
+Workers escalate questions/decisions they cannot resolve up the spawn chain
+(ADR-032). As a supervisor you DRAIN escalations on your own tick — never block
+your loop waiting on one. Each tick:
+
+```bash
+agm escalate list --mine --pending          # escalations currently held by you
+agm escalate show <id>                       # full context for one
+```
+
+For each, decide:
+- **You can answer confidently** (you have the information and it is within your
+  authority): `agm escalate answer <id> "<answer>"`. The answer is delivered
+  back to the worker automatically.
+- **You cannot, or it is above your authority**: `agm escalate forward <id>
+  --note "<why / your recommendation>"`. It moves one hop up the chain
+  (eventually to the VROOM trio, then the human via Dispatch).
+- **Flagged must-reach-human** (product/pricing/destructive/legal/…): you may
+  NOT answer it — `forward` with your recommendation so the human decides.
+
+Auto-answerable confirmations ("should I proceed with the task you assigned
+me?") never reach you — the tool resolves them at the source.
+
 ## Beads Access
 
 Always use the canonical form with explicit database path:

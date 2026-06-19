@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -28,17 +29,17 @@ import (
 //	agm escalate show    <id>         — full state of one escalation
 
 var (
-	escKind      string
-	escMode      string
-	escContext   string
-	escSession   string
-	escRole      string
-	escTimeout   time.Duration
-	escVROOM     string
-	escBy        string
-	escNote      string
-	escPending   bool
-	escListMine  bool
+	escKind     string
+	escMode     string
+	escContext  string
+	escSession  string
+	escRole     string
+	escTimeout  time.Duration
+	escVROOM    string
+	escBy       string
+	escNote     string
+	escPending  bool
+	escListMine bool
 )
 
 var escalateCmd = &cobra.Command{
@@ -447,12 +448,5 @@ func runEscalateShow(cmd *cobra.Command, args []string) error {
 }
 
 func joinArgs(args []string) string {
-	out := ""
-	for i, a := range args {
-		if i > 0 {
-			out += " "
-		}
-		out += a
-	}
-	return out
+	return strings.Join(args, " ")
 }

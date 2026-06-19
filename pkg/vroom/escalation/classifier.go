@@ -11,15 +11,15 @@ import (
 type Disposition string
 
 const (
-	// DispAutoResolve: the answer is obvious; the engine answers immediately and
-	// the escalation never leaves the worker. The canonical case is "should I do
-	// the task you assigned me?" → yes.
+	// DispAutoResolve means the answer is obvious; the engine answers immediately
+	// and the escalation never leaves the worker. The canonical case is "should I
+	// do the task you assigned me?" → yes.
 	DispAutoResolve Disposition = "auto-resolve"
-	// DispRouteToSupervisor: needs a human-or-supervisor judgment; route up the
+	// DispRouteToSupervisor needs a human-or-supervisor judgment; route up the
 	// spawn chain one hop at a time.
 	DispRouteToSupervisor Disposition = "route-to-supervisor"
-	// DispRouteToHuman: high-stakes; route up the chain but it must terminate at
-	// the human — no node below the human may answer it.
+	// DispRouteToHuman is high-stakes; route up the chain but it must terminate
+	// at the human — no node below the human may answer it.
 	DispRouteToHuman Disposition = "route-to-human"
 )
 

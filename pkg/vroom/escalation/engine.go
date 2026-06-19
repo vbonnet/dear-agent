@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -456,10 +457,5 @@ func (e *Engine) emit(ctx context.Context, esc *Escalation, phase Phase, f event
 }
 
 func inChain(chain []string, id string) bool {
-	for _, c := range chain {
-		if c == id {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(chain, id)
 }
