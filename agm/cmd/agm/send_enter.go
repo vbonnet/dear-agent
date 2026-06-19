@@ -82,8 +82,8 @@ func runSendEnter(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
-	// Step 2: Send Enter
-	if err := tmux.SendKeys(sessionName, "C-m"); err != nil {
+	// Step 2: Send Enter reliably (hex 0x0d with retry)
+	if err := tmux.SendEnterReliable(sessionName); err != nil {
 		return fmt.Errorf("failed to send Enter to session '%s': %w", sessionName, err)
 	}
 
