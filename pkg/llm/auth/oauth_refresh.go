@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,10 +14,10 @@ import (
 )
 
 const (
+	//nolint:gosec // G101: OAuth token endpoint URL, not a credential.
 	defaultTokenEndpoint = "https://platform.claude.com/v1/oauth/token"
 	defaultClientID      = "22422756-60c9-4084-8eb7-27705fd5cf9a"
 
-	//nolint:gosec // G101: these are OAuth scope identifiers, not credentials.
 	defaultRefreshScopes = "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 )
 
@@ -100,7 +101,12 @@ func (r OAuthResolver) refreshAndPersist() (string, error) {
 		"scope":         {defaultRefreshScopes},
 	}
 
-	resp, err := r.HTTPClient.Post(endpoint, "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("failed to build token refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := r.HTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("token refresh request failed: %w", err)
 	}
