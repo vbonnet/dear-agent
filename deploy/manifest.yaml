@@ -1,0 +1,52 @@
+# dear-deploy manifest — the deployable host artifacts of dear-agent.
+#
+# This is the source of truth for `dear-deploy` (cmd/dear-deploy): each entry
+# pairs a source of truth in this repo with the place that artifact is installed
+# on the host. `dear-deploy sync` writes them through the principle-9 atomic
+# sequence (stage -> verify -> activate); `dear-deploy status` compares each
+# deployed copy to its rendered source (the manifest-scoped twin of drift-check).
+#
+# Fields (see internal/deploy.Artifact):
+#   name         stable label used to select the artifact on the command line
+#   source       path of the source of truth, relative to the repo root
+#   deployed     installed path on the host (~ and $ENV expanded)
+#   mode         octal permission of the installed file (default 0644)
+#   tokens       placeholder -> value substituted into the source before writing
+#                (renders a template to its host form; $HOME is expanded)
+#   optional     true => a missing *source* is skipped, not an error
+#   remediation  command that produces the source (shown when it is absent)
+#
+# The deployed paths below are exactly the ones unblocked by the write-guard
+# carveouts in ce-k0fj (~/Library/LaunchAgents/com.dear-agent.* and
+# ~/.config/claude-code/hooks/pretool-*).
+
+artifacts:
+  # --- launchd plists --------------------------------------------------------
+  # The Ralph Wiggum persistent PR-merge loop (ADR-029). The plist is a template:
+  # __HOME__ is rendered to the real home directory before it is installed, so the
+  # deployed file matches what drift-check expects.
+  - name: com.dear-agent.mergeloop
+    source: deploy/launchd/com.dear-agent.mergeloop.plist
+    deployed: ~/Library/LaunchAgents/com.dear-agent.mergeloop.plist
+    mode: "0644"
+    tokens:
+      __HOME__: ${HOME}
+
+  # --- Claude Code PreToolUse write-guard hooks ------------------------------
+  # Compiled binaries built by `make build-write-guards` into bin/. They are
+  # marked optional so `dear-deploy sync` on a machine that has not built them
+  # yet reports "skipped (source not built)" instead of failing — build first,
+  # then sync. settings.json references them at ~/.config/claude-code/hooks.
+  - name: pretool-fs-write-guard
+    source: bin/pretool-fs-write-guard
+    deployed: ~/.config/claude-code/hooks/pretool-fs-write-guard
+    mode: "0755"
+    optional: true
+    remediation: make build-write-guards
+
+  - name: pretool-bash-write-guard
+    source: bin/pretool-bash-write-guard
+    deployed: ~/.config/claude-code/hooks/pretool-bash-write-guard
+    mode: "0755"
+    optional: true
+    remediation: make build-write-guards
