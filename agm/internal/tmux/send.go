@@ -135,7 +135,12 @@ func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt 
 	// prompt cycle as a human submission. After WaitForPromptSimple returns, the prompt
 	// may be transiently visible between human submit and Claude starting to process.
 	// Wait, then re-verify the prompt is still there and no human input is present.
-	if !shouldInterrupt {
+	//
+	// ce-v9in: skip this entirely in autonomous mode. There is no human at an
+	// unattended session, so "input line has content" only ever means AGM's own
+	// un-submitted text from a prior tick. SendPromptLiteral clears that with C-u
+	// before delivering; aborting here would re-create the mesh deadlock.
+	if !shouldInterrupt && !AutonomousMode() {
 		time.Sleep(1 * time.Second)
 
 		// Re-capture pane to verify prompt stability

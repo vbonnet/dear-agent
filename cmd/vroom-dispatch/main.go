@@ -453,7 +453,10 @@ func createAndBootSession(home string, sup supervisor, state *sessionState, mode
 	fmt.Printf("    %s: creating... ", sup.Name)
 
 	cmd := exec.Command("agm", sessionNewArgs(sup.Name, model, sup.Role)...)
-	cmd.Env = scrubAPIKey(os.Environ())
+	// ce-v9in: mark the whole spawned session tree as unattended so every
+	// `agm send` it makes (including peer-to-peer mesh sends) auto-clears its
+	// own stale input instead of deadlocking on it as if a human were typing.
+	cmd.Env = append(scrubAPIKey(os.Environ()), "AGM_AUTONOMOUS=1")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("FAILED: %v\n%s\n", err, string(output))
 		return

@@ -236,6 +236,14 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid priority '%s': must be one of fyi, background, normal, urgent, critical", sessionSendPriority)
 	}
 
+	// ce-v9in: in autonomous mode the recipient is unattended, so the tmux send
+	// path clears its own stale input (C-u) instead of blocking on it as if a
+	// human were typing. Set the process-global flag for every delivery path.
+	// AGM_AUTONOMOUS=1 lets the mesh spawner mark a whole session tree as
+	// unattended, so peer-to-peer sends auto-clear without each call passing
+	// --autonomous explicitly.
+	tmux.SetAutonomousMode(msgAutonomous || os.Getenv("AGM_AUTONOMOUS") == "1")
+
 	// Parse recipients (supports single, comma-separated, glob patterns, --all)
 	spec, err := send.ParseRecipients(args, msgTo, msgWorkspace, msgAll)
 	if err != nil {
@@ -357,7 +365,9 @@ func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error 
 		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: agm session list\n  • Create session: agm session new %s", recipientSession, recipientSession)
 	}
 
-	guardOpts := safety.GuardOptions{SkipMidResponse: true, AutonomousMode: msgAutonomous}
+	// tmux.AutonomousMode() is the single source of truth, set in runSend from
+	// either --autonomous or AGM_AUTONOMOUS=1 (ce-v9in).
+	guardOpts := safety.GuardOptions{SkipMidResponse: true, AutonomousMode: tmux.AutonomousMode()}
 	if msgForce {
 		if err := override.Require(context.Background(), override.Guard{
 			Tool: "agm send msg",
