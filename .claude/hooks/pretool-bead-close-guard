@@ -27,12 +27,19 @@ tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
 cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
 [ -n "$cmd" ] || exit 0
 
-# Detect bd close patterns. We need to handle:
+# Detect bd close patterns. cobra accepts flags in any order and in both
+# "--flag value" and "--flag=value" forms, and the bead id may appear before
+# OR after the flags. We must catch EVERY close path; a form we fail to parse
+# is a silent DoD bypass (the 2026-06-17 audit found ce-rpet/ce-11fi closed
+# with PRs open this way — retro 2026-06-17-daily-ops-audit.md R.1). Forms:
 #   bd --db PATH close <id>
-#   bd close <id>
+#   bd close <id> --reason "..."
+#   bd close --reason "..." <id>          (id after a value-flag)
 #   bd --db PATH update <id> --status closed
+#   bd update --status closed <id>        (id after flags)
+#   bd update <id> --status=closed        (equals form)
 #   BEADS_DIR=... bd close <id>
-# But NOT: bd list --status closed (that's a read)
+# But NOT: bd list --status closed (a read — no close/update subcommand verb)
 
 # Strip leading env var assignments to find the actual command
 stripped="$(printf '%s' "$cmd" | sed 's/^[[:space:]]*\([A-Z_]*=[^ ]*[[:space:]]*\)*//')"
@@ -44,35 +51,64 @@ case "$stripped" in
   *) exit 0 ;;
 esac
 
-# Detect "bd ... close <id>" pattern — extract the first non-flag token after "close"
-bead_id=""
+# Is this a close-intent command? Either a `close` subcommand, or an
+# `update` carrying `--status closed` / `--status=closed`.
+is_close=0
 if printf '%s' "$stripped" | grep -qE '\bclose\b'; then
-  bead_id="$(printf '%s' "$stripped" | awk '{
-    found=0
-    for (i=1; i<=NF; i++) {
-      if ($i == "close") { found=1; continue }
-      if (found && substr($i,1,1) != "-") { print $i; exit }
-    }
-  }')"
+  is_close=1
+elif printf '%s' "$stripped" | grep -qE '\bupdate\b' \
+  && printf '%s' "$stripped" | grep -qE '(^|[[:space:]])--status([[:space:]]+|=)closed\b'; then
+  is_close=1
 fi
+[ "$is_close" -eq 1 ] || exit 0
 
-# Detect "bd ... update <id> --status closed" pattern
-if [ -z "$bead_id" ] && printf '%s' "$stripped" | grep -qE '\bupdate\b.*--status[[:space:]]+closed\b'; then
-  bead_id="$(printf '%s' "$stripped" | awk '{
-    found=0
-    for (i=1; i<=NF; i++) {
-      if ($i == "update") { found=1; continue }
-      if (found && substr($i,1,1) != "-") { print $i; exit }
-    }
-  }')"
-fi
+# A help invocation is not an actual close.
+case " $stripped " in
+  *" --help "*|*" -h "*) exit 0 ;;
+esac
 
-# Not a close/update-to-closed operation
-[ -n "$bead_id" ] || exit 0
-
-# Check if --force is present (allow bypass for abandoned beads)
-if printf '%s' "$cmd" | grep -qE '\b--force\b'; then
+# Check if --force is present (allow bypass for abandoned beads). A leading
+# "\b" never matches before "--" (space→dash is non-word→non-word, no word
+# boundary), so anchor on whitespace/line-edges instead.
+if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])--force([[:space:]=]|$)'; then
   exit 0
+fi
+
+# Extract the bead id independent of flag ordering: walk tokens after the
+# close/update verb, skip flags and the values consumed by value-taking flags
+# (--db, --reason, --status, ...), and take the first positional that has a
+# bead-id shape (<prefix>-<suffix>, e.g. ce-rpet). "closed", status values and
+# reason words have no dash and are correctly ignored.
+bead_id="$(printf '%s' "$stripped" | awk '
+  BEGIN {
+    split("--db --reason --status --repo --actor --assignee --owner --priority --type --title --design --label -r -p -a -t", vf, " ")
+    for (i in vf) valflag[vf[i]] = 1
+    started = 0; skipnext = 0
+  }
+  {
+    for (i = 1; i <= NF; i++) {
+      tok = $i
+      if (!started) {
+        if (tok == "close" || tok == "update") started = 1
+        continue
+      }
+      if (substr(tok, 1, 1) == "-") {
+        # "--flag=value" carries its own value; a bare value-flag eats the next token.
+        if (index(tok, "=") == 0 && (tok in valflag)) skipnext = 1
+        continue
+      }
+      if (skipnext) { skipnext = 0; continue }
+      if (tok ~ /^[A-Za-z][A-Za-z0-9_]*-[A-Za-z0-9]+$/) { print tok; exit }
+    }
+  }')"
+
+# Close intent detected but no bead id could be parsed: fail CLOSED. An
+# unparseable close is exactly the bypass this guard exists to stop, so block
+# loudly rather than silently allowing it.
+if [ -z "$bead_id" ]; then
+  jq -cn --arg msg "bead-close-guard: detected a bead-close command but could not parse the bead id, so the Definition-of-Done check cannot run. Use the standard form 'bd --db <path> close <id>' (or add --force to abandon)." \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",additionalContext:$msg}}'
+  exit 2
 fi
 
 # Locate bead-close-guard binary
