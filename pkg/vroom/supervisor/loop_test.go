@@ -379,6 +379,91 @@ func TestLoop_Iterate_RecoveryCalledOnStalePeer(t *testing.T) {
 	}
 }
 
+func TestLoop_Iterate_RecoveryDebouncedByThreshold(t *testing.T) {
+	sup := &fakeSupervisor{role: RoleOrchestrator}
+	staleTime := time.Now().Add(-10 * time.Minute)
+	peers := &fakePeerLookup{peers: map[Role]LoopStatus{
+		RoleOverseer:         &fakePeerStatus{role: RoleOverseer, beat: staleTime},
+		RoleMetaOrchestrator: &fakePeerStatus{role: RoleMetaOrchestrator, beat: time.Now()},
+	}}
+	check := &HeartbeatCheckSkill{Threshold: 30 * time.Second}
+	recovery := NewInMemoryPeerRecovery()
+
+	trail, _ := newBufferTrail()
+	l, err := NewLoop(LoopConfig{
+		Supervisor:        sup,
+		Mesh:              peers,
+		Check:             check,
+		Recovery:          recovery,
+		Trail:             trail,
+		Interval:          1 * time.Millisecond,
+		RecoveryThreshold: 3,
+	})
+	if err != nil {
+		t.Fatalf("NewLoop: %v", err)
+	}
+
+	// Ticks 1 and 2 are stale but below the threshold — no recovery yet.
+	l.iterate(context.Background())
+	l.iterate(context.Background())
+	if n := len(recovery.Calls()); n != 0 {
+		t.Fatalf("recovery calls after 2 stale ticks = %d, want 0 (threshold 3)", n)
+	}
+
+	// Tick 3 reaches the threshold — first wake fires.
+	l.iterate(context.Background())
+	if n := len(recovery.Calls()); n != 1 {
+		t.Fatalf("recovery calls after 3 stale ticks = %d, want 1", n)
+	}
+
+	// Subsequent stale ticks keep attempting recovery (persistent unblock).
+	l.iterate(context.Background())
+	if n := len(recovery.Calls()); n != 2 {
+		t.Fatalf("recovery calls after 4 stale ticks = %d, want 2", n)
+	}
+	if recovery.Calls()[0].PeerRole != RoleOverseer {
+		t.Errorf("recovery peer = %s, want overseer", recovery.Calls()[0].PeerRole)
+	}
+}
+
+func TestLoop_Iterate_StaleRunResetsOnPeerRecovery(t *testing.T) {
+	sup := &fakeSupervisor{role: RoleOrchestrator}
+	overseer := &fakePeerStatus{role: RoleOverseer, beat: time.Now().Add(-10 * time.Minute)}
+	peers := &fakePeerLookup{peers: map[Role]LoopStatus{
+		RoleOverseer:         overseer,
+		RoleMetaOrchestrator: &fakePeerStatus{role: RoleMetaOrchestrator, beat: time.Now()},
+	}}
+	check := &HeartbeatCheckSkill{Threshold: 30 * time.Second}
+	recovery := NewInMemoryPeerRecovery()
+
+	trail, _ := newBufferTrail()
+	l, err := NewLoop(LoopConfig{
+		Supervisor:        sup,
+		Mesh:              peers,
+		Check:             check,
+		Recovery:          recovery,
+		Trail:             trail,
+		Interval:          1 * time.Millisecond,
+		RecoveryThreshold: 3,
+	})
+	if err != nil {
+		t.Fatalf("NewLoop: %v", err)
+	}
+
+	// Two stale ticks, then the peer recovers — the stale run must reset so a
+	// single later blip doesn't immediately trip the threshold.
+	l.iterate(context.Background())
+	l.iterate(context.Background())
+	overseer.beat = time.Now()
+	l.iterate(context.Background())
+	overseer.beat = time.Now().Add(-10 * time.Minute)
+	l.iterate(context.Background())
+	l.iterate(context.Background())
+	if n := len(recovery.Calls()); n != 0 {
+		t.Fatalf("recovery calls = %d, want 0 (stale run reset on recovery)", n)
+	}
+}
+
 func TestLoop_Iterate_NoRecoveryWhenNil(t *testing.T) {
 	sup := &fakeSupervisor{role: RoleOrchestrator}
 	staleTime := time.Now().Add(-10 * time.Minute)

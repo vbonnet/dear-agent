@@ -34,6 +34,9 @@ var heartbeatIntervalSecs int
 var heartbeatCycleNumber int
 var heartbeatMaxAge time.Duration
 var heartbeatRestartCmd string
+var heartbeatState string
+var heartbeatTickError string
+var heartbeatTickDurationMs int64
 
 var heartbeatWriteCmd = &cobra.Command{
 	Use:   "write <session>",
@@ -113,6 +116,9 @@ func init() {
 
 	heartbeatWriteCmd.Flags().IntVar(&heartbeatIntervalSecs, "interval", 300, "Loop interval in seconds")
 	heartbeatWriteCmd.Flags().IntVar(&heartbeatCycleNumber, "cycle", 0, "Current cycle number")
+	heartbeatWriteCmd.Flags().StringVar(&heartbeatState, "state", "", "Loop diagnostic state: running, stuck, or recovering")
+	heartbeatWriteCmd.Flags().StringVar(&heartbeatTickError, "tick-error", "", "Error string from the most recent tick (empty = success)")
+	heartbeatWriteCmd.Flags().Int64Var(&heartbeatTickDurationMs, "tick-duration-ms", 0, "Duration of the most recent tick in milliseconds")
 
 	heartbeatCheckCmd.Flags().DurationVar(&heartbeatMaxAge, "max-age", 0, "Maximum age before heartbeat is considered stale (e.g., 20m)")
 
@@ -129,7 +135,25 @@ func runHeartbeatWrite(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create heartbeat writer: %w", err)
 	}
 
-	if err := writer.Write(session, heartbeatIntervalSecs, heartbeatCycleNumber, true); err != nil {
+	switch heartbeatState {
+	case "", monitoring.StateRunning, monitoring.StateStuck, monitoring.StateRecovering:
+	default:
+		return fmt.Errorf("invalid --state %q (want running, stuck, or recovering)", heartbeatState)
+	}
+
+	// A tick is OK unless an error was reported or the loop declared itself stuck.
+	ok := heartbeatTickError == "" && heartbeatState != monitoring.StateStuck
+
+	var diag *monitoring.Diagnostics
+	if heartbeatState != "" || heartbeatTickError != "" || heartbeatTickDurationMs != 0 {
+		diag = &monitoring.Diagnostics{
+			LastTickError:      heartbeatTickError,
+			LastTickDurationMs: heartbeatTickDurationMs,
+			State:              heartbeatState,
+		}
+	}
+
+	if err := writer.WriteDiagnostic(session, heartbeatIntervalSecs, heartbeatCycleNumber, ok, diag); err != nil {
 		return fmt.Errorf("failed to write heartbeat: %w", err)
 	}
 
@@ -165,6 +189,15 @@ func runHeartbeatCheck(_ *cobra.Command, args []string) error {
 	fmt.Printf("Interval: %ds\n", hb.IntervalSecs)
 	fmt.Printf("Cycle:    %d\n", hb.CycleNumber)
 	fmt.Printf("Status:   %s\n", formatStatus(status))
+	if hb.State != "" {
+		fmt.Printf("State:    %s\n", hb.State)
+	}
+	if hb.LastTickDurationMs > 0 {
+		fmt.Printf("Tick:     %dms\n", hb.LastTickDurationMs)
+	}
+	if hb.LastTickError != "" {
+		fmt.Printf("TickErr:  %s\n", hb.LastTickError)
+	}
 
 	if status == "stale" {
 		if heartbeatMaxAge > 0 {
