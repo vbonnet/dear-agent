@@ -295,6 +295,144 @@ func (r *InMemoryReclaimer) Calls() int {
 	return r.calls
 }
 
+// InMemorySessionArchiver is a configurable SessionArchiver for tests and the
+// cmd/vroom-mesh demo.
+type InMemorySessionArchiver struct {
+	mu     sync.Mutex
+	result ArchiveResult
+	err    error
+	calls  int
+}
+
+// NewInMemorySessionArchiver returns an archiver that reports zeros.
+func NewInMemorySessionArchiver() *InMemorySessionArchiver { return &InMemorySessionArchiver{} }
+
+// SetResult configures the result returned by ArchiveStaleSessions.
+func (s *InMemorySessionArchiver) SetResult(result ArchiveResult, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.result = result
+	s.err = err
+}
+
+// ArchiveStaleSessions implements SessionArchiver.
+func (s *InMemorySessionArchiver) ArchiveStaleSessions(_ context.Context) (ArchiveResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	return s.result, s.err
+}
+
+// Calls returns the number of ArchiveStaleSessions invocations.
+func (s *InMemorySessionArchiver) Calls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
+// InMemorySpawnGate is a configurable SpawnGate for tests and the
+// cmd/vroom-mesh demo. It records whether spawns are currently paused and the
+// reason for the most recent pause.
+type InMemorySpawnGate struct {
+	mu          sync.Mutex
+	paused      bool
+	pauseReason string
+	pauseCalls  int
+	resumeCalls int
+	err         error
+}
+
+// NewInMemorySpawnGate returns an un-paused gate.
+func NewInMemorySpawnGate() *InMemorySpawnGate { return &InMemorySpawnGate{} }
+
+// SetError configures the error returned by PauseSpawns/ResumeSpawns.
+func (g *InMemorySpawnGate) SetError(err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.err = err
+}
+
+// PauseSpawns implements SpawnGate.
+func (g *InMemorySpawnGate) PauseSpawns(_ context.Context, reason string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.pauseCalls++
+	if g.err != nil {
+		return g.err
+	}
+	g.paused = true
+	g.pauseReason = reason
+	return nil
+}
+
+// ResumeSpawns implements SpawnGate.
+func (g *InMemorySpawnGate) ResumeSpawns(_ context.Context) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.resumeCalls++
+	if g.err != nil {
+		return g.err
+	}
+	g.paused = false
+	return nil
+}
+
+// Paused reports whether spawns are currently paused, and the last pause reason.
+func (g *InMemorySpawnGate) Paused() (bool, string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.paused, g.pauseReason
+}
+
+// PauseCalls returns the number of PauseSpawns invocations.
+func (g *InMemorySpawnGate) PauseCalls() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.pauseCalls
+}
+
+// InMemoryPressureEscalator is a configurable PressureEscalator for tests and
+// the cmd/vroom-mesh demo. It records every escalation.
+type InMemoryPressureEscalator struct {
+	mu    sync.Mutex
+	calls []PressureEscalation
+	err   error
+}
+
+// PressureEscalation records one Escalate invocation.
+type PressureEscalation struct {
+	Level    PressureLevel
+	Snapshot ResourceSnapshot
+}
+
+// NewInMemoryPressureEscalator returns an escalator that succeeds by default.
+func NewInMemoryPressureEscalator() *InMemoryPressureEscalator { return &InMemoryPressureEscalator{} }
+
+// SetError configures the error returned by subsequent Escalate calls.
+func (e *InMemoryPressureEscalator) SetError(err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.err = err
+}
+
+// Escalate implements PressureEscalator.
+func (e *InMemoryPressureEscalator) Escalate(_ context.Context, level PressureLevel, snap ResourceSnapshot) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.err != nil {
+		return e.err
+	}
+	e.calls = append(e.calls, PressureEscalation{Level: level, Snapshot: snap})
+	return nil
+}
+
+// Calls returns all recorded escalations.
+func (e *InMemoryPressureEscalator) Calls() []PressureEscalation {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]PressureEscalation(nil), e.calls...)
+}
+
 // InMemoryPeerRecovery is a configurable PeerRecovery for tests.
 type InMemoryPeerRecovery struct {
 	mu    sync.Mutex

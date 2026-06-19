@@ -7,6 +7,10 @@ import "context"
 // sysMemoryUsedFraction returns 0 on platforms other than Linux and Darwin.
 func sysMemoryUsedFraction() float64 { return 0 }
 
+// sysFreeMemoryBytes returns 0 on platforms other than Linux and Darwin
+// (treated as "unknown" by the monitor, never as "0 bytes free").
+func sysFreeMemoryBytes() uint64 { return 0 }
+
 // sysSwapUsedFraction returns 0 on platforms other than Linux and Darwin.
 func sysSwapUsedFraction() float64 { return 0 }
 

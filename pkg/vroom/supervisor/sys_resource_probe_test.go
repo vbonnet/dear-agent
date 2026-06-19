@@ -33,6 +33,21 @@ func TestSysResourceProbe_Snapshot_MemoryFraction(t *testing.T) {
 	}
 }
 
+func TestSysResourceProbe_Snapshot_FreePhysicalMemoryBytes(t *testing.T) {
+	t.Parallel()
+	p := NewSysResourceProbe()
+	snap, err := p.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() error: %v", err)
+	}
+	// On Linux and Darwin a running machine reports some free RAM; on other
+	// platforms the field is 0 ("unknown"). Either is valid — just assert it
+	// is consistent with the used-fraction (free > 0 implies not fully used).
+	if snap.FreePhysicalMemoryBytes > 0 && snap.MemoryUsedFraction >= 1 {
+		t.Errorf("free=%d bytes but MemoryUsedFraction=%f (>=1)", snap.FreePhysicalMemoryBytes, snap.MemoryUsedFraction)
+	}
+}
+
 func TestSysResourceProbe_Snapshot_CustomPath(t *testing.T) {
 	t.Parallel()
 	p := &SysResourceProbe{DiskPath: t.TempDir()}
