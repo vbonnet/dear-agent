@@ -14,6 +14,7 @@ var (
 	safetySkipTyping      bool
 	safetySkipInit        bool
 	safetySkipMidResponse bool
+	safetyAutonomous      bool
 )
 
 var safetyCmd = &cobra.Command{
@@ -54,6 +55,7 @@ func init() {
 	safetyCheckCmd.Flags().BoolVar(&safetySkipTyping, "skip-typing", false, "Skip human typing detection")
 	safetyCheckCmd.Flags().BoolVar(&safetySkipInit, "skip-init", false, "Skip session uninitialized detection")
 	safetyCheckCmd.Flags().BoolVar(&safetySkipMidResponse, "skip-mid-response", false, "Skip Claude mid-response detection")
+	safetyCheckCmd.Flags().BoolVar(&safetyAutonomous, "autonomous", false, "Session is unattended — skip human_typing guard")
 
 	safetyCmd.AddCommand(safetyCheckCmd)
 	rootCmd.AddCommand(safetyCmd)
@@ -75,6 +77,7 @@ func runSafetyCheck(cmd *cobra.Command, args []string) error {
 		SkipHumanTyping:   safetySkipTyping,
 		SkipUninitialized: safetySkipInit,
 		SkipMidResponse:   safetySkipMidResponse,
+		AutonomousMode:    safetyAutonomous,
 	})
 
 	if safetyCheckJSON {
