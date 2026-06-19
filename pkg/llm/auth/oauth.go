@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -63,11 +64,30 @@ type OAuthResolver struct {
 	// preserving the read-only behavior of the zero-value resolver.
 	HTTPClient *http.Client
 	// TokenEndpoint overrides the OAuth2 token endpoint URL.
-	// Empty means https://platform.claude.com/v1/oauth/token.
+	// Empty means https://platform.claude.com/v1/oauth/token (or the
+	// CLAUDE_OAUTH_TOKEN_ENDPOINT env override).
 	TokenEndpoint string
 	// ClientID overrides the OAuth2 client identifier.
-	// Empty means the Claude Code client ID.
+	// Empty means the Claude Code client ID (or the CLAUDE_OAUTH_CLIENT_ID
+	// env override).
 	ClientID string
+
+	// LockTimeout bounds how long Refresh waits for the cross-process
+	// credentials lock. Zero means defaultLockTimeout.
+	LockTimeout time.Duration
+
+	// Logger, when non-nil, receives structured refresh events (attempt,
+	// success, failure) for OTel/observability. Token values are never logged.
+	// Nil disables logging.
+	Logger *slog.Logger
+}
+
+// log emits a structured refresh event through the resolver's Logger, if one is
+// set. It is a no-op when Logger is nil. Token values are never passed here.
+func (r OAuthResolver) log(msg string, args ...any) {
+	if r.Logger != nil {
+		r.Logger.Info(msg, args...)
+	}
 }
 
 // Resolve returns the freshest available OAuth token. It prefers a non-expired
