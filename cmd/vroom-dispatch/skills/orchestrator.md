@@ -56,7 +56,19 @@ If a peer's heartbeat is >5 minutes old or missing:
 - Record: `kind: "supervisor.orch.peer_stale"`
 - Message: `agm send msg <peer> --sender vroom-orchestrator --priority urgent --prompt "status?"`
 
-### Step 2: Read Accepted Roadmap Items
+### Step 2: Write Heartbeat (early — proves liveness)
+
+Write heartbeat immediately after the peer check, BEFORE the rest of the
+tick work. This prevents false STALE reports when later steps (dispatch,
+worker monitoring, session spawning) take longer than the 5-minute staleness
+threshold.
+
+```bash
+agm supervisor heartbeat --id vroom-orchestrator --primary-for vroom-overseer --tertiary-for vroom-meta-orchestrator
+date -u +%Y-%m-%dT%H:%M:%SZ > ~/.agm/vroom/heartbeat/orch.json
+```
+
+### Step 3: Read Accepted Roadmap Items
 
 ```bash
 cat ~/.agm/vroom/roadmap.jsonl 2>/dev/null | grep '"state":"accepted"'
@@ -64,7 +76,7 @@ cat ~/.agm/vroom/roadmap.jsonl 2>/dev/null | grep '"state":"accepted"'
 
 Build a list of accepted bead IDs with their priorities.
 
-### Step 3: Read Dispatch History
+### Step 4: Read Dispatch History
 
 ```bash
 cat ~/.agm/vroom/dispatched.jsonl 2>/dev/null
@@ -72,7 +84,7 @@ cat ~/.agm/vroom/dispatched.jsonl 2>/dev/null
 
 Build a set of already-dispatched bead IDs.
 
-### Step 4: Check Active Workers
+### Step 5: Check Active Workers
 
 ```bash
 agm session list 2>/dev/null
@@ -81,7 +93,7 @@ agm session list 2>/dev/null
 Identify sessions whose names start with `worker-` — these are your
 dispatched workers. Note which are active vs. archived/done.
 
-### Step 5: Dispatch Undispatched Work
+### Step 6: Dispatch Undispatched Work
 
 For each accepted roadmap item NOT in dispatched.jsonl and NOT assigned
 to a live worker session:
@@ -103,7 +115,7 @@ per-token *billing*, but there IS a shared usage ceiling — a worker stuck in a
 retry/death loop burns that ceiling for every other session. The guardrails,
 in order, are: (1) the 3-worker concurrency cap above — never raise it to clear
 a backlog faster; (2) `opus-200k` not the 1M variant; (3) wayfinder's bounded
-phases instead of an open-ended raw loop; (4) the stuck-worker checks in Step 6
+phases instead of an open-ended raw loop; (4) the stuck-worker checks in Step 7
 (status ping at >60min, wrap-up at >120min). If you observe workers churning
 without committing — repeated ticks, no new commits, no PR — treat it as
 runaway usage: send a wrap-up command early and record
@@ -175,7 +187,7 @@ printf '{"ts":"%s","role":"orchestrator","kind":"supervisor.orch.dispatched","pa
   >> ~/.agm/vroom/trail.jsonl
 ```
 
-### Step 6: Monitor Active Workers
+### Step 7: Monitor Active Workers
 
 For each live `worker-*` session:
 - Check if the session is still active (not archived)
@@ -187,18 +199,11 @@ For each live `worker-*` session:
   - Read bead status: `bd --db ~/beads/context-engine/.beads show <bead-id>`
   - If bead is still `in_progress` but session is dead: record `kind: "supervisor.orch.worker_died"` and mark bead for re-dispatch
 
-### Step 7: Stale Item Detection
+### Step 8: Stale Item Detection
 
 For accepted roadmap items that have been undispatched for >30 minutes:
 - Record: `kind: "supervisor.orch.stale_context_escalation"`
 - If capacity-blocked: reduce the threshold and log why
-
-### Step 8: Write Heartbeat
-
-```bash
-agm supervisor heartbeat --id vroom-orchestrator --primary-for vroom-overseer --tertiary-for vroom-meta-orchestrator
-date -u +%Y-%m-%dT%H:%M:%SZ > ~/.agm/vroom/heartbeat/orch.json
-```
 
 ### Step 9: Report Summary
 
