@@ -209,6 +209,11 @@ func sendKey(tmuxSessionName, key string) error {
 		return fmt.Errorf("capture-pane failed before sending %s: %w (session may be down)", key, err)
 	}
 
+	// Use raw hex 0x0d for Enter to avoid paste coalescing
+	if key == "Enter" || key == "C-m" {
+		cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", tmuxSessionName, "-H", "0d")
+		return cmd.Run()
+	}
 	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", tmuxSessionName, key)
 	return cmd.Run()
 }

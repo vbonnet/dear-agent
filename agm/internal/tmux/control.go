@@ -210,8 +210,8 @@ func (c *ControlModeSession) SendKeysLiteral(target, text string) error {
 		return fmt.Errorf("failed to send literal text: %w", err)
 	}
 
-	// Send Enter separately (control mode waits for %end, so no delay needed)
-	cmd2 := fmt.Sprintf("send-keys -t %s C-m", normalizedTarget)
+	// Send Enter separately using hex 0x0d (control mode waits for %end, so no delay needed)
+	cmd2 := fmt.Sprintf("send-keys -t %s -H 0d", normalizedTarget)
 	if err := c.SendCommand(cmd2); err != nil {
 		return fmt.Errorf("failed to send Enter key: %w", err)
 	}

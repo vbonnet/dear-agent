@@ -467,7 +467,7 @@ func autoApprovePermission(sessionName string) error {
 
 // sendEnterKey sends Enter to a session to deliver a stuck message.
 func sendEnterKey(sessionName string) error {
-	cmd := exec.Command("tmux", "send-keys", "-t", sessionName, "Enter")
+	cmd := exec.Command("tmux", "send-keys", "-t", sessionName, "-H", "0d")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("send-keys Enter failed: %w (%s)", err, string(output))

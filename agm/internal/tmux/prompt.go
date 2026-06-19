@@ -272,21 +272,11 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 		}
 		bufferLoaded = false // paste-buffer -d already deleted it
 
-		// Step 3: Send Enter key to submit the prompt.
-		// Delay prevents tmux from coalescing pasted text with ENTER keystroke.
-		time.Sleep(50 * time.Millisecond)
-
-		cmd2 := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedTarget, "C-m")
-		if err := cmd2.Run(); err != nil {
-			return fmt.Errorf("failed to send Enter key: %w", err)
-		}
-
-		// Step 3.5: Fast-path Enter retry — detect and fix the common case where
-		// Enter didn't register immediately after paste-buffer.
-		// Bug fix (2026-04-10): After paste-buffer, C-m sometimes doesn't register.
-		// This quick retry (100-300ms) handles the common case before falling through
-		// to the longer Step 4 verification loop.
-		if err := retryEnterAfterPaste(socketPath, normalizedTarget, 2); err != nil {
+		// Step 3: Send Enter reliably using hex 0x0d instead of C-m.
+		// sendEnterReliable waits 100ms, sends -H 0d, then auto-retries
+		// once if the Enter didn't register (replaces the old 50ms + C-m +
+		// retryEnterAfterPaste sequence).
+		if err := sendEnterReliable(socketPath, normalizedTarget); err != nil {
 			return err
 		}
 
@@ -347,7 +337,7 @@ func verifyAndResubmitQueuedPrompt(socketPath, normalizedTarget string) {
 		if os.Getenv("AGM_DEBUG") == "1" {
 			slog.Debug("Detected queued [Pasted text] at prompt — re-sending Enter", "retry", retry+1)
 		}
-		cmdResubmit := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedTarget, "C-m")
+		cmdResubmit := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedTarget, "-H", "0d")
 		_ = cmdResubmit.Run()
 		time.Sleep(300 * time.Millisecond)
 		cmdVerify := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-S", "-5")
