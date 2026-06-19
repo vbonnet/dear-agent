@@ -1,8 +1,8 @@
 # Forbidden-artifact baseline — grandfathered, pre-existing routing debt.
 #
 # These temporal artifacts predate enforcement and are exempted from the
-# CI whole-tree scan (scripts/check-forbidden-artifacts.sh --all --baseline)
-# so it can block NEW leaks without forcing an out-of-scope migration.
+# CI whole-tree scan (routing-guard --all --baseline) so it can block NEW
+# leaks without forcing an out-of-scope migration.
 #
 # This list is SHRINK-ONLY. When you migrate one of these to
 # engram-research, delete its line here. Do NOT add new entries — a new

@@ -3,10 +3,10 @@ name: Routing Enforcement
 # Blocks temporal artifacts (Wayfinder SDLC runs, retros, designs, research)
 # from being committed to this code repo. The forbidden globs are the SINGLE
 # source of truth in .dear-agent.yml > forbidden-paths; this workflow does NOT
-# carry its own copy of the list — it runs scripts/check-forbidden-artifacts.sh
-# which parses .dear-agent.yml at runtime. (A hardcoded copy that drifted from
-# .dear-agent.yml is exactly what let the Wayfinder wf/ leak through; see the
-# 2026-06-19 DEAR retro in engram-research.)
+# carry its own copy of the list — it runs the routing-guard tool
+# (cmd/routing-guard) which parses .dear-agent.yml at runtime. (A hardcoded
+# copy that drifted from .dear-agent.yml is exactly what let the Wayfinder wf/
+# leak through; see the 2026-06-19 DEAR retro in engram-research.)
 
 on:
   pull_request:
@@ -26,24 +26,30 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Check routing (new files in this PR + whole-tree regression)
         id: check
         run: |
           set -o pipefail
           git fetch origin "${{ github.base_ref }}" --depth=1
-          chmod +x scripts/check-forbidden-artifacts.sh
+          go build -o /tmp/routing-guard ./cmd/routing-guard
 
           : > report.txt
           rc=0
 
           # 1) Block any forbidden file ADDED/renamed in this PR.
-          if ! scripts/check-forbidden-artifacts.sh --diff "origin/${{ github.base_ref }}" >>report.txt 2>&1; then
+          if ! /tmp/routing-guard --diff "origin/${{ github.base_ref }}" >>report.txt 2>&1; then
             rc=1
           fi
 
           # 2) Whole-tree regression guard: fail if a forbidden file is tracked
           #    anywhere beyond the documented, shrink-only grandfathered set.
-          if ! scripts/check-forbidden-artifacts.sh --all --baseline .forbidden-artifacts-baseline.txt >>report.txt 2>&1; then
+          if ! /tmp/routing-guard --all --baseline .forbidden-artifacts-baseline.txt >>report.txt 2>&1; then
             rc=1
           fi
 
@@ -83,9 +89,9 @@ jobs:
               '3. Re-push without the artifact.',
               '',
               'The forbidden globs are defined once in `.dear-agent.yml >',
-              'forbidden-paths` and enforced by',
-              '`scripts/check-forbidden-artifacts.sh` (also runnable locally as a',
-              'pre-commit hook: `make install-routing-guard-hook`).',
+              'forbidden-paths` and enforced by the `routing-guard` tool',
+              '(`cmd/routing-guard`), also runnable locally as a pre-commit',
+              'hook: `make install-routing-guard-hook`.',
             ].join('\n');
             await github.rest.issues.createComment({
               owner: context.repo.owner,

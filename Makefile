@@ -51,7 +51,7 @@
 #   build-resolve-review-threads  Build resolve-review-threads: GitHub PR thread resolver
 #   install-resolve-review-threads Install resolve-review-threads to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -122,16 +122,22 @@ install-preflight-hook:
 install-post-merge-hook:
 	@go run ./cmd/install-post-merge-hook
 
+# Build the routing-guard binary into ./build (used by the pre-commit hook and
+# for local `routing-guard --all` audits).
+build-routing-guard:
+	@mkdir -p build && go build -o build/routing-guard ./cmd/routing-guard && \
+		echo "Built: build/routing-guard"
+
 # Install the routing-guard pre-commit hook. It blocks temporal artifacts
 # (Wayfinder runs, retros, designs, research) from being committed to this
-# code repo — a thin wrapper over scripts/check-forbidden-artifacts.sh, so the
-# forbidden globs come from .dear-agent.yml (no drift). core.hooksPath-aware:
-# if hooks are managed by chezmoi (~/.config), it prints how to wire the guard
-# into the global dispatcher instead of silently writing a hook that won't run.
-# CI enforces the same rule on every PR regardless of local install.
-install-routing-guard-hook:
+# code repo — a thin wrapper over the routing-guard tool (cmd/routing-guard),
+# so the forbidden globs come from .dear-agent.yml (no drift). core.hooksPath-
+# aware: if hooks are managed by chezmoi (~/.config), it prints how to wire the
+# guard into the global dispatcher instead of silently writing a hook that
+# won't run. CI enforces the same rule on every PR regardless of local install.
+install-routing-guard-hook: build-routing-guard
 	@ROOT="$$(git rev-parse --show-toplevel)"; \
-	chmod +x "$$ROOT/scripts/git-hooks/pre-commit" "$$ROOT/scripts/check-forbidden-artifacts.sh"; \
+	chmod +x "$$ROOT/scripts/git-hooks/pre-commit"; \
 	HP="$$(git config --get core.hooksPath || true)"; \
 	if [ -n "$$HP" ]; then \
 		case "$$HP" in \
@@ -147,7 +153,7 @@ install-routing-guard-hook:
 	else \
 		DEST="$$(git rev-parse --git-path hooks/pre-commit)"; \
 	fi; \
-	if [ -e "$$DEST" ] && ! grep -q 'check-forbidden-artifacts\|git-hooks/pre-commit' "$$DEST" 2>/dev/null; then \
+	if [ -e "$$DEST" ] && ! grep -q 'routing-guard\|git-hooks/pre-commit' "$$DEST" 2>/dev/null; then \
 		echo "A pre-commit hook already exists at $$DEST"; \
 		echo "Merge in: exec \"$$ROOT/scripts/git-hooks/pre-commit\""; \
 		exit 1; \
