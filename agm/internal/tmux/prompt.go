@@ -191,7 +191,14 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 		}
 
 		ansiContent := string(output)
-		if err := checkPaneForExistingInput(ansiContent, shouldInterrupt); err != nil {
+		// Unattended session (ce-v9in): no human can be typing, so any leftover
+		// non-ghost text is AGM's own un-submitted send from a prior tick. Stash
+		// it with C-s before delivering and skip the human-typing aborts below —
+		// blocking on our own stale text is the #1 cause of mesh deadlocks. C-s
+		// auto-unstashes after the next submit, so genuine human input survives.
+		if AutonomousMode() {
+			clearStaleInputLocked(socketPath, normalizedTarget, ansiContent)
+		} else if err := checkPaneForExistingInput(ansiContent, shouldInterrupt); err != nil {
 			return err
 		}
 

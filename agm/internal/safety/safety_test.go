@@ -366,6 +366,62 @@ func TestCheckResultHasViolation(t *testing.T) {
 	}
 }
 
+func TestAutonomousModeBehavior(t *testing.T) {
+	t.Run("autonomous mode sets AutonomousMode in options", func(t *testing.T) {
+		opts := GuardOptions{AutonomousMode: true}
+		if !opts.AutonomousMode {
+			t.Error("expected AutonomousMode to be true")
+		}
+	})
+
+	t.Run("autonomous mode is independent of SkipHumanTyping", func(t *testing.T) {
+		opts := GuardOptions{AutonomousMode: true, SkipHumanTyping: false}
+		if opts.SkipHumanTyping {
+			t.Error("SkipHumanTyping should remain false")
+		}
+		if !opts.AutonomousMode {
+			t.Error("AutonomousMode should be true")
+		}
+	})
+}
+
+func TestCooldownCache(t *testing.T) {
+	t.Run("fresh cache has no cooldown active", func(t *testing.T) {
+		ResetCooldownCache()
+		if isHumanTypingCooldownActive("test-session") {
+			t.Error("expected no cooldown for fresh cache")
+		}
+	})
+
+	t.Run("cooldown active after recording", func(t *testing.T) {
+		ResetCooldownCache()
+		recordHumanTypingCooldown("test-session")
+		if !isHumanTypingCooldownActive("test-session") {
+			t.Error("expected cooldown to be active immediately after recording")
+		}
+	})
+
+	t.Run("cooldown is per-session", func(t *testing.T) {
+		ResetCooldownCache()
+		recordHumanTypingCooldown("session-a")
+		if isHumanTypingCooldownActive("session-b") {
+			t.Error("session-b should not have cooldown from session-a")
+		}
+		if !isHumanTypingCooldownActive("session-a") {
+			t.Error("session-a should still have active cooldown")
+		}
+	})
+
+	t.Run("ResetCooldownCache clears all entries", func(t *testing.T) {
+		ResetCooldownCache()
+		recordHumanTypingCooldown("session-x")
+		ResetCooldownCache()
+		if isHumanTypingCooldownActive("session-x") {
+			t.Error("expected cooldown cleared after reset")
+		}
+	})
+}
+
 func containsStr(s, substr string) bool {
 	return len(s) >= len(substr) && indexStr(s, substr) != -1
 }

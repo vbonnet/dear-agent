@@ -453,7 +453,10 @@ func createAndBootSession(home string, sup supervisor, state *sessionState, mode
 	fmt.Printf("    %s: creating... ", sup.Name)
 
 	cmd := exec.Command("agm", sessionNewArgs(sup.Name, model, sup.Role)...)
-	cmd.Env = scrubAPIKey(os.Environ())
+	// ce-v9in: mark the whole spawned session tree as unattended so every
+	// `agm send` it makes (including peer-to-peer mesh sends) auto-stashes its
+	// own stale input (C-s) instead of deadlocking on it as if a human were typing.
+	cmd.Env = append(scrubAPIKey(os.Environ()), "AGM_AUTONOMOUS=1")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("FAILED: %v\n%s\n", err, string(output))
 		return
@@ -518,6 +521,7 @@ A /loop command will start your tick cycle shortly.`,
 	fmt.Printf("    %s: sending boot prompt (%d bytes)...\n", sup.Name, len(bootPrompt))
 	cmd := exec.Command("agm", "send", "msg", sup.Name,
 		"--sender", "vroom-dispatch",
+		"--autonomous",
 		"--prompt", bootPrompt)
 	cmd.Env = scrubAPIKey(os.Environ())
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -567,6 +571,7 @@ func sendLoopCommand(sup supervisor) bool {
 	fmt.Printf("    %s: sending /loop (%s interval)...\n", sup.Name, intervalStr)
 	cmd := exec.Command("agm", "send", "msg", sup.Name,
 		"--sender", "vroom-dispatch",
+		"--autonomous",
 		"--prompt", loopCmd)
 	cmd.Env = scrubAPIKey(os.Environ())
 	if output, err := cmd.CombinedOutput(); err != nil {
