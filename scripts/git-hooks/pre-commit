@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+#
+# Git pre-commit hook — routing guard.
+#
+# You're committing to dear-agent. This hook blocks *temporal* artifacts —
+# Wayfinder SDLC runs (W0/D1-D4/S4-S11, WAYFINDER-STATUS.md,
+# WAYFINDER-HISTORY.md, .wayfinder/ runs), retros, designs, and research —
+# from entering this code repo. They belong in the knowledge base
+# (~/src/engram-research, conventionally wf/<project>/), because temporal
+# artifacts rot in code repos: they go stale silently and clutter blame.
+#
+# It is a thin wrapper over scripts/check-forbidden-artifacts.sh --staged, so
+# the forbidden globs come from the single source of truth (.dear-agent.yml >
+# forbidden-paths) and can't drift. The Wayfinder TOOL SOURCE (wayfinder/,
+# *.go, ADR-031) is living code and is NOT blocked.
+#
+# Bypass (discouraged; CI enforces the same rule on the PR anyway):
+#   git commit --no-verify
+#
+# Install: make install-routing-guard-hook
+
+set -eo pipefail
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+checker="$repo_root/scripts/check-forbidden-artifacts.sh"
+
+# If the checker isn't present on this branch, don't block the commit.
+[ -x "$checker" ] || [ -f "$checker" ] || exit 0
+
+if ! bash "$checker" --staged; then
+  echo "" >&2
+  echo "pre-commit: blocked — move the artifact to engram-research and re-commit." >&2
+  echo "            (last resort, not recommended: git commit --no-verify)" >&2
+  exit 1
+fi
