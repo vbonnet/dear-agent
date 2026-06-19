@@ -449,16 +449,70 @@ func ensureSessions(home string, state *sessionState, model string) {
 	}
 }
 
-func createAndBootSession(home string, sup supervisor, state *sessionState, model string) {
-	fmt.Printf("    %s: creating... ", sup.Name)
+// minSpawnInterval mirrors agm's circuitbreaker.MinSpawnInterval (hardcoded at
+// 2 minutes). agm refuses any `agm session new` that arrives within this window
+// of the previous successful spawn, printing "circuit breaker: spawn refused —
+// spawn too soon". createAndBootSession spawns the 3 supervisors only ~40s apart
+// (its 10s + 30s post-spawn sleeps), so spawns 2 and 3 land inside the window
+// and are refused — leaving just 1 of 3 supervisors up per run (ce-mu36).
+const minSpawnInterval = 2 * time.Minute
 
+// maxSpawnAttempts bounds the retry-on-refusal loop in spawnSessionWithRetry.
+const maxSpawnAttempts = 3
+
+// spawnTooSoonMarker is the substring agm prints when its spawn circuit breaker
+// refuses a too-soon spawn. Matching on the message (rather than an exit code)
+// keeps us decoupled from agm's internal error taxonomy.
+const spawnTooSoonMarker = "spawn too soon"
+
+// runSpawn executes `agm session new` for one supervisor and returns the
+// combined output. It is a package var so tests can stub the spawn without
+// shelling out to agm.
+var runSpawn = func(sup supervisor, model string) ([]byte, error) {
 	cmd := exec.Command("agm", sessionNewArgs(sup.Name, model, sup.Role)...)
 	// ce-v9in: mark the whole spawned session tree as unattended so every
 	// `agm send` it makes (including peer-to-peer mesh sends) auto-stashes its
 	// own stale input (C-s) instead of deadlocking on it as if a human were typing.
 	cmd.Env = append(scrubAPIKey(os.Environ()), "AGM_AUTONOMOUS=1")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		fmt.Printf("FAILED: %v\n%s\n", err, string(output))
+	return cmd.CombinedOutput()
+}
+
+// sleepFor is the backoff sleep used by spawnSessionWithRetry. It is a package
+// var so tests can avoid waiting out the real 2-minute window.
+var sleepFor = time.Sleep
+
+// spawnSessionWithRetry runs `agm session new` for a supervisor, retrying when
+// agm's circuit breaker refuses the spawn as "spawn too soon" (ce-mu36). On a
+// refusal it waits out the full minSpawnInterval window before retrying, up to
+// maxSpawnAttempts times. Waiting the full window (rather than only the
+// remainder) keeps the fix simple and safe: we don't track the prior spawn's
+// timestamp, and an over-wait only costs time, never correctness. Any other
+// failure (or success) returns immediately — only the breaker refusal retries.
+func spawnSessionWithRetry(sup supervisor, model string) error {
+	var lastErr error
+	for attempt := 1; attempt <= maxSpawnAttempts; attempt++ {
+		output, err := runSpawn(sup, model)
+		if err == nil {
+			return nil
+		}
+		lastErr = fmt.Errorf("%v: %s", err, strings.TrimSpace(string(output)))
+		if !strings.Contains(string(output), spawnTooSoonMarker) {
+			return lastErr
+		}
+		if attempt < maxSpawnAttempts {
+			fmt.Printf("\n    %s: spawn refused by circuit breaker (attempt %d/%d); waiting %s for the spawn window to clear... ",
+				sup.Name, attempt, maxSpawnAttempts, minSpawnInterval)
+			sleepFor(minSpawnInterval)
+		}
+	}
+	return fmt.Errorf("circuit breaker still refusing after %d attempts: %w", maxSpawnAttempts, lastErr)
+}
+
+func createAndBootSession(home string, sup supervisor, state *sessionState, model string) {
+	fmt.Printf("    %s: creating... ", sup.Name)
+
+	if err := spawnSessionWithRetry(sup, model); err != nil {
+		fmt.Printf("FAILED: %v\n", err)
 		return
 	}
 	fmt.Println("created")
