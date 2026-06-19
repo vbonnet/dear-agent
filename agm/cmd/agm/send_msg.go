@@ -237,7 +237,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 	}
 
 	// ce-v9in: in autonomous mode the recipient is unattended, so the tmux send
-	// path clears its own stale input (C-u) instead of blocking on it as if a
+	// path stashes its own stale input (C-s) instead of blocking on it as if a
 	// human were typing. Set the process-global flag for every delivery path.
 	// AGM_AUTONOMOUS=1 lets the mesh spawner mark a whole session tree as
 	// unattended, so peer-to-peer sends auto-clear without each call passing

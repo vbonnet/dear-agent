@@ -29,7 +29,7 @@ func TestShouldClearStaleInput(t *testing.T) {
 			name:    "stale agm command in input box",
 			ansi:    "some output\n❯ merge PR 527\n",
 			want:    true,
-			comment: "un-submitted AGM text must be cleared, not treated as human typing",
+			comment: "un-submitted AGM text must be stashed, not treated as human typing",
 		},
 		{
 			name:    "another stale command",
@@ -53,7 +53,7 @@ func TestShouldClearStaleInput(t *testing.T) {
 			name:    "ghost/placeholder text is left alone",
 			ansi:    "❯ \x1b[2mstart the loop\x1b[0m\n",
 			want:    false,
-			comment: "dim ghost text cannot be cleared by C-u and does not block submit",
+			comment: "dim ghost text has nothing real to stash and does not block submit",
 		},
 	}
 
@@ -66,9 +66,9 @@ func TestShouldClearStaleInput(t *testing.T) {
 	}
 }
 
-// TestClearStaleInputLockedGatedOnAutonomous verifies the clear is a no-op
-// unless autonomous mode is active, even when stale text is present — so
-// attended sessions never have a human's input wiped out.
+// TestClearStaleInputLockedGatedOnAutonomous verifies the stash is a no-op
+// unless autonomous mode is active, even when stale text is present — attended
+// sessions keep the original human-protecting behavior.
 func TestClearStaleInputLockedGatedOnAutonomous(t *testing.T) {
 	t.Cleanup(func() { SetAutonomousMode(false) })
 	staleInput := "❯ merge PR 527\n"
@@ -78,12 +78,12 @@ func TestClearStaleInputLockedGatedOnAutonomous(t *testing.T) {
 		t.Error("clearStaleInputLocked must be a no-op when autonomous mode is off")
 	}
 
-	// With autonomous on and clearable content, it attempts the C-u send. The
+	// With autonomous on and stashable content, it attempts the C-s send. The
 	// target socket/session does not exist, so the exec fails and it returns
 	// false — but the important contract (no-op when off) is covered above, and
 	// the pure decision is covered by TestShouldClearStaleInput.
 	SetAutonomousMode(true)
 	if shouldClearStaleInput(staleInput) != true {
-		t.Error("guard precondition: stale input should be deemed clearable")
+		t.Error("guard precondition: stale input should be deemed stashable")
 	}
 }
