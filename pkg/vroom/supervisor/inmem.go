@@ -211,6 +211,41 @@ func (p *InMemoryResourceProbe) Snapshot(_ context.Context) (ResourceSnapshot, e
 	return p.snap, nil
 }
 
+// InMemoryOpenPRCounter is a configurable OpenPRCounter for tests and for the
+// cmd/vroom-mesh runner, so the open-PR backpressure valve (ce-qpg9) can be
+// exercised without a live GitHub repo.
+type InMemoryOpenPRCounter struct {
+	mu    sync.Mutex
+	count int
+	err   error
+}
+
+// NewInMemoryOpenPRCounter returns a counter that reports the given count.
+func NewInMemoryOpenPRCounter(count int) *InMemoryOpenPRCounter {
+	return &InMemoryOpenPRCounter{count: count}
+}
+
+// Set overrides the count returned by subsequent OpenPRs calls.
+func (c *InMemoryOpenPRCounter) Set(count int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.count = count
+}
+
+// SetErr makes subsequent OpenPRs calls return the given error.
+func (c *InMemoryOpenPRCounter) SetErr(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.err = err
+}
+
+// OpenPRs implements OpenPRCounter.
+func (c *InMemoryOpenPRCounter) OpenPRs(_ context.Context) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.count, c.err
+}
+
 // InMemoryReclaimer is a configurable ResourceReclaimer for tests.
 type InMemoryReclaimer struct {
 	mu       sync.Mutex

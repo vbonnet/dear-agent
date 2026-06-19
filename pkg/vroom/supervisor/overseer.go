@@ -128,6 +128,7 @@ type Overseer struct {
 	reclaimer      ResourceReclaimer  // nil = remediation disabled
 	burndownCtrl   BurndownController // nil = burndown disabled
 	burndownPolicy BurndownPolicy
+	prCounter      OpenPRCounter // nil = open-PR cap disabled
 }
 
 // NewOverseer constructs the Overseer supervisor. If threshold has zero
@@ -168,6 +169,16 @@ func (o *Overseer) WithReclaimer(r ResourceReclaimer) *Overseer {
 func (o *Overseer) WithBurndown(ctrl BurndownController, policy BurndownPolicy) *Overseer {
 	o.burndownCtrl = ctrl
 	o.burndownPolicy = defaultBurndownPolicy(policy)
+	return o
+}
+
+// WithOpenPRCounter wires an OpenPRCounter into the Overseer, arming the
+// open-PR backpressure valve (ce-qpg9). After this call each burndown tick
+// queries the counter before spawning: when the open-PR count exceeds
+// BurndownPolicy.OpenPRCap, dispatch is paused for that tick. With no counter
+// wired the cap is not enforced and burndown behaves as before.
+func (o *Overseer) WithOpenPRCounter(c OpenPRCounter) *Overseer {
+	o.prCounter = c
 	return o
 }
 
