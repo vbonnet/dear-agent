@@ -189,12 +189,38 @@ func buildMesh(trail decisiontrail.Trail, roadmap *supervisor.InMemoryRoadmap, q
 	if cfg.wakePeers {
 		recovery = &supervisor.AGMRecovery{}
 	}
+
+	// One leader-election / degraded-mode coordinator per supervisor, sharing
+	// a single in-process claim store so competing claims resolve correctly
+	// (ce-bew7). The verify window is two check intervals per retro R.1.
+	claims := supervisor.NewInMemoryClaimStore()
+	mkFailover := func(self supervisor.Role) (supervisor.FailoverObserver, error) {
+		election, err := supervisor.NewElection(supervisor.ElectionConfig{
+			Self:         self,
+			Store:        claims,
+			Trail:        trail,
+			VerifyWindow: 2 * cfg.interval,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return supervisor.NewFailover(supervisor.FailoverConfig{
+			Self:     self,
+			Trail:    trail,
+			Election: election,
+		})
+	}
 	mkLoop := func(s supervisor.Supervisor) (*supervisor.Loop, error) {
+		fo, err := mkFailover(s.Role())
+		if err != nil {
+			return nil, err
+		}
 		return supervisor.NewLoop(supervisor.LoopConfig{
 			Supervisor:        s,
 			Mesh:              placeholderMesh{},
 			Check:             check,
 			Recovery:          recovery,
+			Failover:          fo,
 			Trail:             trail,
 			Interval:          cfg.interval,
 			RecoveryThreshold: cfg.recoveryThreshold,
