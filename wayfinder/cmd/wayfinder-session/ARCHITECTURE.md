@@ -303,6 +303,15 @@ cmd/wayfinder-session/
 - `ProfileConfig`: Controls skipped phases, evaluator requirement, review persona count, max retries
 - `ClassifyRisk(task, projectDir)`: Returns `(RiskLevel, ProfileConfig)` — maps a task to its risk level and corresponding profile configuration
 
+**Profile-driven phase skipping** (ce-12pl): `wayfinder session start` resolves the
+profile from `--risk-level` and persists `ProfileConfig.SkipPhases` onto
+`WAYFINDER-STATUS.md` as `skip_phases`. The lite profile (XS/S) skips
+`DESIGN`/`SPEC`/`PLAN`. The navigation layer (`StatusV2.NextWaypoint`) advances past
+skipped phases, and the validator (`CanStartPhase`) resolves the nearest non-skipped
+previous phase as the gate — mirroring the existing `skip_roadmap` (SETUP) mechanism.
+The persisted set keeps the `review` profile as the single source of truth while the
+low-level navigation/validation layers stay decoupled from profile logic.
+
 **Key Functions**:
 - `DetectRiskLevel(files []string, loc int) RiskLevel`
 - `ReviewTask(task Task, files []string) (ReviewReport, error)`

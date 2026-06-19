@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/git"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/resume"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/review"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/tracker"
 )
@@ -91,6 +93,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 	st := status.NewStatusV2(projectName, projectType, riskLevel)
 	st.SkipRoadmap = skipRoadmap
 
+	// Resolve the harness profile from the risk level and persist the phases it
+	// skips. ProfileLite (XS/S risk) skips DESIGN/SPEC/PLAN so small tasks are not
+	// forced through the full 9-phase sequence (ce-12pl / MVD T2.2). Persisting the
+	// resolved set keeps the review profile as the single source of truth while the
+	// low-level navigation and validation layers stay decoupled from profile logic.
+	profile := review.GetProfileConfigForRisk(review.ParseRiskLevel(riskLevel))
+	st.SkipPhases = profile.SkipPhases
+
 	// Initialize tracker (use project name as session ID for now)
 	sessionID := fmt.Sprintf("session-%d", st.CreatedAt.Unix())
 	tr, err := tracker.New(sessionID)
@@ -124,7 +134,10 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// Success message
 	fmt.Printf("✅ Wayfinder V2 session started\n")
 	fmt.Printf("Project: %s\n", projectName)
-	fmt.Printf("Type: %s | Risk: %s\n", projectType, riskLevel)
+	fmt.Printf("Type: %s | Risk: %s | Profile: %s\n", projectType, riskLevel, profile.Profile)
+	if len(st.SkipPhases) > 0 {
+		fmt.Printf("Skipping phases (lite profile): %s\n", strings.Join(st.SkipPhases, ", "))
+	}
 	fmt.Printf("Current Phase: %s (Intake & Waypoint)\n", st.CurrentWaypoint)
 	fmt.Printf("Schema Version: %s\n", st.SchemaVersion)
 	fmt.Printf("Created: %s\n\n", status.StatusFilename)
