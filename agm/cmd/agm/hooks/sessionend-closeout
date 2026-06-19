@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 #
-# Claude Code SessionEnd hook — flags session resources left behind.
+# Claude Code SessionEnd hook — reap this session's processes; flag leftovers.
 #
-# When a session closes it is easy to forget leftover worktrees, uncommitted
-# work, unmerged branches, and in-progress tasks. This hook scans for them and
-# *flags* them. It never deletes, commits, or mutates anything — it only makes
-# forgotten resources visible so the next session (or the user) can decide.
+# Two responsibilities, both gated behind the reason!=clear check below so a
+# /clear never triggers them:
+#
+#   1. Process reap (mutating): kill THIS session's own gopls / agm-mcp-server
+#      before they are orphaned. The PPID==1 reaper ('agm session reap-orphans',
+#      run from the Stop hook and the hourly launchd sweep) cannot see them at
+#      session end — they are still parented to this exiting session — so on a
+#      quiet machine they would linger until the next sweep. See ce-kswe.
+#   2. Resource flagging (read-only): leftover worktrees, uncommitted work,
+#      unmerged branches, and in-progress tasks are *flagged*, never mutated —
+#      it only makes forgotten resources visible so the next session can decide.
 #
 # This is the "Audit" layer of the worktree/branch cleanup discipline in
 # .claude/CLAUDE.md (Agent Delegation Enforcement §5). That section is the
@@ -63,6 +70,19 @@ if [[ "${reason}" == "clear" ]]; then
   printf '[%s] sessionend-closeout: session=%s reason=clear skipped\n' \
     "${ts}" "${session_id}" >> "${LOG_FILE}"
   exit 0
+fi
+
+# ── 0. Reap this session's own gopls / agm-mcp-server before they orphan ────
+# Resolve this session's root (nearest 'claude' ancestor of the hook) and kill
+# its gopls/agm-mcp-server subtree now, closing the graceful-end window the
+# PPID==1 reaper structurally cannot cover. Run SYNCHRONOUSLY so the 'claude'
+# ancestor is still alive while the tree is walked. Best-effort: a failure here
+# must never block session teardown. The reaper is bounded (a single 'ps' plus a
+# few SIGTERM/SIGKILL with short grace), well within the SessionEnd budget.
+if command -v agm >/dev/null 2>&1; then
+  reap_out="$(agm session reap-session 2>/dev/null || true)"
+  printf '[%s] sessionend-closeout: session=%s reap: %s\n' \
+    "${ts}" "${session_id}" "${reap_out:-skipped}" >> "${LOG_FILE}"
 fi
 
 now="$(date +%s)"

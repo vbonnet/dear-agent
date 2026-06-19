@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 )
 
 // DefaultRootNames are the command basenames treated as a session root. Each
@@ -49,10 +50,8 @@ func FindAncestor(procs []Proc, startPID int, rootNames []string) (rootPID int, 
 		if !found {
 			return 0, false // broken chain
 		}
-		for _, name := range rootNames {
-			if basename(p.Command) == name {
-				return p.PID, true
-			}
+		if slices.Contains(rootNames, basename(p.Command)) {
+			return p.PID, true
 		}
 		cur = p.PPID
 	}
@@ -93,13 +92,7 @@ func FindDescendants(procs []Proc, rootPID int, targets []string, selfPID int) [
 }
 
 func isTarget(command string, targets []string) bool {
-	b := basename(command)
-	for _, t := range targets {
-		if b == t {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(targets, basename(command))
 }
 
 // SessionResult reports the outcome of a session-scoped reap pass.
