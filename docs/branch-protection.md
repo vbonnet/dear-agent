@@ -1,35 +1,92 @@
-# Branch Protection Setup for `main`
+# Branch Protection for `main` (zero-bypass ruleset)
 
-This document describes the recommended branch protection rules for the `main` branch.
-These settings must be configured manually in GitHub under **Settings > Branches > Branch protection rules**.
+`main` is protected by a **repository ruleset**, defined as code in
+[`.github/rulesets/main.json`](../.github/rulesets/main.json) and applied via
+`gh api`. The ruleset is **zero-bypass** (`bypass_actors: []`) — it binds
+*everyone*, including the repo owner. This is the source of truth; the GitHub UI
+mirrors it but should not be edited by hand.
 
-## Recommended Rules
+Per `docs/design-safe-merge.md` §4.1 / §5 (P1), this replaces the legacy
+**classic** branch-protection rules, which allowed admin bypass
+(`enforce_admins: false`).
 
-### Add rule for branch: `main`
+## What the ruleset enforces
 
-| Setting | Value |
-|---------|-------|
-| Require a pull request before merging | Yes |
-| Required number of approvals | 1 |
-| Dismiss stale pull request approvals when new commits are pushed | Yes |
-| Require status checks to pass before merging | Yes |
-| Require branches to be up to date before merging | Yes |
-| Required status checks | `ci` (from CI workflow) |
-| Require conversation resolution before merging | Yes |
-| Do not allow bypassing the above settings | Yes (optional for solo maintainers) |
+| Rule | Value |
+|------|-------|
+| Target | default branch (`~DEFAULT_BRANCH`) |
+| Enforcement | `active` |
+| Bypass actors | none (`[]`) — binds the owner too |
+| Require a pull request before merging | yes |
+| Require conversation resolution | yes (`required_review_thread_resolution`) |
+| Dismiss stale reviews on push | yes |
+| Allowed merge methods | **squash only** |
+| Require linear history | yes (`required_linear_history` + `non_fast_forward`) |
+| Block branch deletion | yes (`deletion`) |
+| Require status checks | yes, strict (branch must be up to date) |
+| Required checks | the six contexts below |
 
-## How to Configure
+### Required status checks
 
-1. Go to **https://github.com/vbonnet/dear-agent/settings/branches**
-2. Click **Add branch protection rule**
-3. Set **Branch name pattern** to `main`
-4. Enable the settings listed above
-5. Under **Require status checks to pass**, search for and add:
-   - `Build & Test` (from `ci.yml`)
-   - `govulncheck` (from `ci.yml`)
-6. Click **Create** / **Save changes**
+Each is pinned to `integration_id: 15368` (the GitHub Actions app) so a
+same-named check from a *different* app can never satisfy the gate — the failure
+mode behind the [phantom Trivy check](retros/2026-06-08-phantom-trivy-required-check.md).
 
-## Notes
+| Context | Produced by |
+|---------|-------------|
+| `Build & Test (ubuntu-latest)` | `ci.yml` |
+| `Build & Test (macos-latest)` | `ci.yml` |
+| `Analyze Go Code (go)` | `codeql.yml` |
+| `govulncheck` | `ci.yml` |
+| `Bash Script Size Check (20-line limit)` | `language-policy.yml` |
+| `Vulnerability Scan` | `sbom-scan.yml` |
 
-- Solo maintainers may want to uncheck "Do not allow bypassing" to allow direct pushes in emergencies.
-- The `Require branches to be up to date` setting prevents merging stale PRs but requires more rebasing.
+All six run on `pull_request` targeting `main`. **Before adding/removing a
+required check, confirm a job emits a check run with that exact context name**
+(matrix suffixes included) on PRs to `main` — otherwise the gate becomes
+unsatisfiable.
+
+## Applying the ruleset
+
+> [!WARNING]
+> Applying this binds the repo owner immediately and is intended to go in
+> through a reviewed PR, not an ad-hoc push. Run these only after the change is
+> approved.
+
+**Create** (first time):
+
+```sh
+gh api repos/vbonnet/dear-agent/rulesets \
+  --method POST --input .github/rulesets/main.json
+```
+
+**Update** the existing ruleset in place (find its id with
+`gh api repos/vbonnet/dear-agent/rulesets`):
+
+```sh
+gh api repos/vbonnet/dear-agent/rulesets/<RULESET_ID> \
+  --method PUT --input .github/rulesets/main.json
+```
+
+**Verify**:
+
+```sh
+gh api repos/vbonnet/dear-agent/rulesets/<RULESET_ID> \
+  | jq '{enforcement, bypass_actors, rules: [.rules[].type]}'
+```
+
+## Retiring classic branch protection
+
+Once the ruleset is active and verified, remove the legacy classic protection
+so there is a single source of truth:
+
+```sh
+gh api -X DELETE repos/vbonnet/dear-agent/branches/main/protection
+```
+
+> [!IMPORTANT]
+> The daily **Branch Protection Audit** (`.github/workflows/branch-protection-audit.yml`)
+> historically read only the classic-protection endpoint. It has been updated to
+> also accept a qualifying active ruleset, so retiring classic protection will
+> **not** trigger false-positive `branch-protection` issues. Retire classic
+> protection only on a version of `main` that already contains that audit update.
