@@ -69,8 +69,12 @@ sysctl kern.maxfiles 2>/dev/null
 sysctl kern.num_vnodes 2>/dev/null
 sysctl kern.maxvnodes 2>/dev/null
 
-# Gopls process count
-pgrep -x gopls | wc -l
+# Orphaned gopls count (leak signal). -x = exact name, -P 1 = reparented to
+# PID 1 (session died). Do NOT use `pgrep -x gopls` alone — that counts live
+# sessions' language servers too and scales with fleet size, not leaks.
+pgrep -x -P 1 gopls | wc -l
+# Same for the other per-session helper that leaks:
+pgrep -x -P 1 agm-mcp-server | wc -l
 
 # Git worktree count
 find ~/worktrees -maxdepth 3 -name .git -type f 2>/dev/null | wc -l
@@ -198,7 +202,7 @@ After each tick, briefly note:
 | Situation | Action |
 |-----------|--------|
 | Disk >= 95% | Critical to both peers, recommend pause |
-| Gopls > 10 | Critical: "Known FD leak. User must run pkill -x gopls" |
+| Orphaned gopls > 10 | Critical: "Known FD leak. Run `agm session reap-orphans` — kills only PID-1 orphans, never live sessions. Do NOT `pkill gopls`." |
 | Worker session stuck on permission | Urgent to worker: defer and continue |
 | Multiple workers stuck | Urgent to Orch: "Workers blocked, check permission config" |
 | Meta-O stale >5min | Urgent message |
