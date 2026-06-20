@@ -149,6 +149,13 @@ agm session list 2>/dev/null | grep -c "OFFLINE" || echo "0"
 | Stranded worktrees | > 10 | Recommend cleanup |
 | Orphaned sessions | > 0 | Recommend archive/kill |
 
+> **Automated backstop (ce-710r.3):** the `gopls-watchdog` launch agent runs
+> every 2 minutes — it samples orphaned-gopls count/RSS and system FD-table
+> usage, reaps orphaned gopls automatically (PPID==1 only, never live sessions),
+> and logs a `watchdog.gopls.alarm` record to `~/.agm/vroom/trail.jsonl`. If you
+> see recent `watchdog.gopls.alarm` records, remediation has already fired; your
+> job is to confirm the alarm cleared, not to re-run the reap.
+
 For each threshold breach, write trail record:
 ```bash
 printf '{"ts":"%s","role":"overseer","kind":"supervisor.over.escalated","payload":{"metric":"%s","value":"%s","threshold":"%s"}}\n' \
