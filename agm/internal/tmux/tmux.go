@@ -253,6 +253,11 @@ func NewSession(name string, workDir string) error {
 			"GOMAXPROCS": maxProcs,
 			"GOWORK":     "off",
 		}
+		// Propagate autonomous mode so sessions spawned by an autonomous
+		// supervisor inherit the flag durably (pane-level os.Getenv check).
+		if v := os.Getenv("AGM_AUTONOMOUS"); v != "" {
+			buildEnv["AGM_AUTONOMOUS"] = v
+		}
 		for k, v := range buildEnv {
 			cmdArgs := []string{"-S", socketPath, "set-environment", "-t", sanitizedName, k, v}
 			envCmd, envCancel := CommandWithTimeout(ctx, globalTimeout, "tmux", cmdArgs...)
