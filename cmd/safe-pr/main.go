@@ -13,6 +13,10 @@
 // into the PR body (create) or close comment (close). Every invocation is
 // audit-logged to ~/.local/state/dear-agent/safe-pr.log and emits an OTel
 // span (safepr.<verb>) when a collector is configured.
+//
+// On create, squash auto-merge is armed on the new PR (gh pr merge --auto
+// --squash) so it merges itself once required checks pass; this is best-effort
+// and a failure to arm is a warning, not a fatal error (the PR already exists).
 package main
 
 import (
@@ -186,6 +190,41 @@ func execGh(req *safepr.Request, timeout time.Duration) error {
 	if runErr != nil {
 		return fmt.Errorf("gh pr %s failed: %w", req.Verb, runErr)
 	}
+
+	// A freshly created PR should merge itself once required checks pass, so we
+	// never leave green PRs waiting on a manual click. The PR already exists at
+	// this point, so a failure to arm auto-merge (e.g. the repo disallows it)
+	// is surfaced as a warning, never fatal.
+	if req.Verb == "create" && prURL != "" {
+		if mergeErr := armAutoMerge(prURL, timeout); mergeErr != nil {
+			fmt.Fprintf(os.Stderr, "safe-pr: WARNING: auto-merge not armed on %s: %v\n", prURL, mergeErr)
+		}
+	}
+	return nil
+}
+
+// armAutoMerge enables squash auto-merge on prURL so the PR merges itself once
+// required checks pass. It mirrors execGh's headless guards (timeout bound,
+// GIT_TERMINAL_PROMPT=0) and uses a fresh context so it is not starved by the
+// create call's already-elapsed deadline.
+func armAutoMerge(prURL string, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = safepr.DefaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "gh", "pr", "merge", prURL, "--auto", "--squash")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1")
+
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("gh pr merge --auto exceeded %s and was killed", timeout)
+		}
+		return err
+	}
 	return nil
 }
 
@@ -207,6 +246,8 @@ Flags:
 
 All other arguments pass through to 'gh pr create' / 'gh pr close'.
 The session trace is stamped into the PR body (create) or comment (close).
+On create, squash auto-merge is armed on the new PR so it merges itself once
+required checks pass (best-effort: a failure to arm is a warning, not fatal).
 Refused for create: --web, --fill*, --body-file/-F, --editor (interactive or
 unstampable); --title is required. Every run appends a JSONL audit record to
 ~/.local/state/dear-agent/safe-pr.log.
