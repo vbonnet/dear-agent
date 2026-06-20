@@ -1,5 +1,7 @@
 # AGM Dolt Storage - Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version**: 1.0
 **Status**: Phase 1 Complete
 **Last Updated**: 2026-03-08

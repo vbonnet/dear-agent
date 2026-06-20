@@ -12,7 +12,8 @@ import (
 //
 // Disk stats use syscall.Statfs, which is available on Linux and Darwin.
 // Memory stats use platform-specific helpers in sys_resource_probe_{linux,darwin}.go.
-// On other platforms both fields return 0 and no error.
+// FD/vnode pressure and gopls process counts are also platform-specific.
+// On other platforms all fields return 0 and no error.
 type SysResourceProbe struct {
 	// DiskPath is the filesystem path to measure disk usage for.
 	// Defaults to "/" when empty.
@@ -25,7 +26,7 @@ func NewSysResourceProbe() *SysResourceProbe {
 }
 
 // Snapshot implements ResourceProbe.
-func (p *SysResourceProbe) Snapshot(_ context.Context) (ResourceSnapshot, error) {
+func (p *SysResourceProbe) Snapshot(ctx context.Context) (ResourceSnapshot, error) {
 	diskPath := p.DiskPath
 	if diskPath == "" {
 		diskPath = "/"
@@ -48,6 +49,11 @@ func (p *SysResourceProbe) Snapshot(_ context.Context) (ResourceSnapshot, error)
 	// Memory and swap — platform-specific (see sys_resource_probe_{linux,darwin}.go).
 	snap.MemoryUsedFraction = sysMemoryUsedFraction()
 	snap.SwapUsedFraction = sysSwapUsedFraction()
+
+	// FD pressure, vnode pressure, and gopls accumulation — platform-specific.
+	snap.OpenFDFraction = sysFDUsedFraction()
+	snap.VnodeUsedFraction = sysVnodeUsedFraction()
+	snap.GoplsProcesses = sysGoplsCount(ctx)
 
 	return snap, nil
 }

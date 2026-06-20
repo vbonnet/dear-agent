@@ -73,8 +73,8 @@ func TestResolveSessionDir(t *testing.T) {
 	}
 	t.Setenv("WAYFINDER_PROJECT_DIR", "")
 	_, err := ResolveSessionDir("")
-	if err == nil || !strings.Contains(err.Error(), "--emergency") {
-		t.Errorf("want teaching error mentioning the emergency hatch, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "agm escalate") {
+		t.Errorf("want teaching error mentioning agm escalate, got %v", err)
 	}
 }
 
@@ -106,11 +106,7 @@ func TestValidate(t *testing.T) {
 			GhArgs: []string{"--title", "t", "--body-file=b.md"}}, "--body instead"},
 		{"title required", Request{Verb: "create", Session: sess(),
 			GhArgs: []string{"--body", "b"}}, "--title"},
-		{"emergency needs reason", Request{Verb: "create", Emergency: true,
-			GhArgs: []string{"--title", "t"}}, "--reason"},
-		{"emergency with reason ok", Request{Verb: "create", Emergency: true, Reason: "hotfix",
-			GhArgs: []string{"--title", "t"}}, ""},
-		{"no session no emergency", Request{Verb: "create",
+		{"no session", Request{Verb: "create",
 			GhArgs: []string{"--title", "t"}}, "wrapper bug"},
 	}
 	for _, tc := range cases {
@@ -135,10 +131,6 @@ func TestTrailer(t *testing.T) {
 	if !strings.Contains(tr, "Wayfinder-Session: abc-123") ||
 		!strings.Contains(tr, "Wayfinder-Project: proj") {
 		t.Errorf("trailer = %q", tr)
-	}
-	e := Request{Verb: "create", Emergency: true, Reason: "prod down"}
-	if !strings.Contains(e.Trailer(), "EMERGENCY (no wayfinder session): prod down") {
-		t.Errorf("emergency trailer = %q", e.Trailer())
 	}
 }
 

@@ -51,7 +51,7 @@ func retryEnterAfterPaste(socketPath, normalizedName string, maxRetries int) err
 				"retry", retry+1, "maxRetries", maxRetries)
 		}
 
-		cmdEnter := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "C-m")
+		cmdEnter := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "-H", "0d")
 		if err := cmdEnter.Run(); err != nil {
 			return fmt.Errorf("failed to re-send Enter on retry %d: %w", retry+1, err)
 		}

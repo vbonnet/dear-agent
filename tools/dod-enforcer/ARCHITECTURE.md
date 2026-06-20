@@ -1,5 +1,7 @@
 # Bead Definition of Done (DoD) - Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## System Overview
 
 The bead DoD package implements declarative task completion validation through YAML-defined criteria. It provides a simple, extensible architecture for machine-checkable Definition of Done specifications, enabling automated verification of file existence, test execution, and custom command validations.

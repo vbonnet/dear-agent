@@ -1,5 +1,7 @@
 # Ecphory - Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## System Overview
 
 The ecphory package implements a 3-tier memory retrieval pipeline for the Engram knowledge base. It combines fast frontmatter indexing, LLM-based semantic ranking, and token budget management to retrieve the most relevant engrams for a given query.

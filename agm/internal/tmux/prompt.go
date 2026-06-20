@@ -59,6 +59,43 @@ func InputLineHasContent(paneContent string) bool {
 	return false
 }
 
+// HasGhostTextInPrompt reports whether the content after the ❯ prompt is
+// Claude Code ghost/placeholder text (dim attribute \x1b[2m) rather than real
+// human input. Ghost text is rendered dim and cannot be cleared with C-u/C-k
+// (Claude Code re-renders it); it must not be treated as a human typing event.
+//
+// This is a live-capture call; prefer HasGhostTextInANSI when an ANSI capture
+// is already available to avoid a second tmux round-trip.
+func HasGhostTextInPrompt(sessionName string) bool {
+	socketPath := GetSocketPath()
+	cmd := exec.Command("tmux", "-S", socketPath, "capture-pane",
+		"-t", NormalizeTmuxSessionName(sessionName), "-p", "-e", "-S", "-5")
+	out, err := cmd.Output()
+	if err != nil {
+		return false // Can't capture — fail safe (don't suppress the guard)
+	}
+	return HasGhostTextInANSI(string(out))
+}
+
+// HasGhostTextInANSI is the pure-logic version of HasGhostTextInPrompt that
+// operates on an already-captured ANSI pane buffer. Use this instead of
+// HasGhostTextInPrompt when an ANSI capture is already available, to avoid
+// the two-capture race where pane state changes between captures.
+func HasGhostTextInANSI(ansiContent string) bool {
+	for line := range strings.SplitSeq(ansiContent, "\n") {
+		plainLine := stripANSI(line)
+		if !strings.Contains(plainLine, "❯") {
+			continue
+		}
+		idx := strings.Index(line, "❯")
+		if idx < 0 {
+			continue
+		}
+		return strings.Contains(line[idx:], "\x1b[2m")
+	}
+	return false
+}
+
 // hasQueuedInput checks if the session has queued pasted text or user input
 func hasQueuedInput(paneContent string) bool {
 	// Look for "[Pasted text" pattern which indicates queued input
@@ -143,17 +180,25 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 	// causing stray bytes to leak across sessions and trigger copy-mode on unrelated sessions.
 	// The lock serializes all tmux write operations, matching the pattern used by SendCommand.
 	return withTmuxLock(func() error {
-		// Step 0: Check if there's already text in the input box
-		// If user is typing, abort to avoid interfering
-		// Note: capture-pane targets panes, not sessions, so we don't use FormatSessionTarget (=prefix)
-		cmdCapture := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p")
+		// Step 0: Check if there's already text in the input box.
+		// Uses ANSI capture (-e flag) so ghost-text detection can check for
+		// the dim attribute (\x1b[2m) in the same buffer, eliminating the
+		// two-capture race where pane state changes between captures.
+		cmdCapture := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-e")
 		output, err := cmdCapture.Output()
 		if err != nil {
 			return fmt.Errorf("failed to capture pane: %w", err)
 		}
 
-		paneContent := string(output)
-		if err := checkPaneForExistingInput(paneContent, shouldInterrupt); err != nil {
+		ansiContent := string(output)
+		// Unattended session (ce-v9in): no human can be typing, so any leftover
+		// non-ghost text is AGM's own un-submitted send from a prior tick. Stash
+		// it with C-s before delivering and skip the human-typing aborts below —
+		// blocking on our own stale text is the #1 cause of mesh deadlocks. C-s
+		// auto-unstashes after the next submit, so genuine human input survives.
+		if AutonomousMode() {
+			clearStaleInputLocked(socketPath, normalizedTarget, ansiContent)
+		} else if err := checkPaneForExistingInput(ansiContent, shouldInterrupt); err != nil {
 			return err
 		}
 
@@ -234,21 +279,11 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 		}
 		bufferLoaded = false // paste-buffer -d already deleted it
 
-		// Step 3: Send Enter key to submit the prompt.
-		// Delay prevents tmux from coalescing pasted text with ENTER keystroke.
-		time.Sleep(50 * time.Millisecond)
-
-		cmd2 := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedTarget, "C-m")
-		if err := cmd2.Run(); err != nil {
-			return fmt.Errorf("failed to send Enter key: %w", err)
-		}
-
-		// Step 3.5: Fast-path Enter retry — detect and fix the common case where
-		// Enter didn't register immediately after paste-buffer.
-		// Bug fix (2026-04-10): After paste-buffer, C-m sometimes doesn't register.
-		// This quick retry (100-300ms) handles the common case before falling through
-		// to the longer Step 4 verification loop.
-		if err := retryEnterAfterPaste(socketPath, normalizedTarget, 2); err != nil {
+		// Step 3: Send Enter reliably using hex 0x0d instead of C-m.
+		// sendEnterReliable waits 100ms, sends -H 0d, then auto-retries
+		// once if the Enter didn't register (replaces the old 50ms + C-m +
+		// retryEnterAfterPaste sequence).
+		if err := sendEnterReliable(socketPath, normalizedTarget); err != nil {
 			return err
 		}
 
@@ -263,23 +298,26 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 	})
 }
 
-// SendPromptFromFile reads prompt from file and sends it using literal mode
-// Bug fix (2026-03-14): Added shouldInterrupt parameter
-// checkPaneForExistingInput examines a fresh pane capture and returns an
+// checkPaneForExistingInput examines an ANSI pane capture and returns an
 // error if a human is currently typing or the input box already holds queued
-// text. shouldInterrupt=true short-circuits all of these checks.
-func checkPaneForExistingInput(paneContent string, shouldInterrupt bool) error {
+// text. shouldInterrupt=true short-circuits all checks.
+//
+// The caller provides ANSI content (captured with -e flag) so ghost-text
+// detection and input-line detection operate on the same snapshot, eliminating
+// the two-capture race (ce-v9in retro).
+func checkPaneForExistingInput(ansiContent string, shouldInterrupt bool) error {
 	if shouldInterrupt {
 		return nil
 	}
-	if hasActiveSpinner(paneContent) {
+	plainContent := stripANSI(ansiContent)
+	if hasActiveSpinner(plainContent) {
 		return nil
 	}
-	if hasQueuedInput(paneContent) {
-		_, msg := ClassifyQueuedInput(paneContent)
+	if hasQueuedInput(plainContent) {
+		_, msg := ClassifyQueuedInput(plainContent)
 		return fmt.Errorf("%s", msg)
 	}
-	if InputLineHasContent(paneContent) {
+	if InputLineHasContent(plainContent) && !HasGhostTextInANSI(ansiContent) {
 		return fmt.Errorf("input line has content — human is typing, aborting delivery. Retry on next poll cycle")
 	}
 	return nil
@@ -306,7 +344,7 @@ func verifyAndResubmitQueuedPrompt(socketPath, normalizedTarget string) {
 		if os.Getenv("AGM_DEBUG") == "1" {
 			slog.Debug("Detected queued [Pasted text] at prompt — re-sending Enter", "retry", retry+1)
 		}
-		cmdResubmit := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedTarget, "C-m")
+		cmdResubmit := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedTarget, "-H", "0d")
 		_ = cmdResubmit.Run()
 		time.Sleep(300 * time.Millisecond)
 		cmdVerify := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-S", "-5")

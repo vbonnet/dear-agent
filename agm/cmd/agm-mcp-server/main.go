@@ -57,6 +57,18 @@ func main() {
 		return
 	}
 
+	// Apply workspace from config when WORKSPACE env var is not already set.
+	// Claude Desktop launches the server without inheriting the user's shell
+	// environment, so the WORKSPACE var (required by the Dolt storage adapter)
+	// must be injected here from the YAML config.
+	if cfg.Workspace != "" && os.Getenv("WORKSPACE") == "" {
+		if err := os.Setenv("WORKSPACE", cfg.Workspace); err != nil {
+			logger.Warn("Failed to set WORKSPACE from config", "workspace", cfg.Workspace, "error", err)
+		} else {
+			logger.Info("Applied workspace from config", "workspace", cfg.Workspace)
+		}
+	}
+
 	logger.Info("Starting AGM MCP Server", "version", "1.0.0")
 	logger.Info("Configuration loaded", "sessions_dir", cfg.SessionsDir)
 
@@ -75,6 +87,10 @@ func main() {
 	addArchiveSessionTool(server, cfg)
 	addKillSessionTool(server, cfg)
 
+	// Register session lifecycle tools
+	addCreateSessionTool(server, cfg)
+	addSendMessageTool(server, cfg)
+
 	// Register schema introspection tool
 	addListOpsTool(server, cfg)
 
@@ -82,7 +98,7 @@ func main() {
 	addListWayfinderSessionsTool(server, cfg)
 	addGetWayfinderSessionTool(server, cfg)
 
-	logger.Info("Registered MCP tools", "tools", "agm_list_sessions, agm_search_sessions, agm_get_session_metadata, agm_archive_session, agm_kill_session, agm_list_ops, engram_list_wayfinder_sessions, engram_get_wayfinder_session")
+	logger.Info("Registered MCP tools", "tools", "agm_list_sessions, agm_search_sessions, agm_get_session_metadata, agm_archive_session, agm_kill_session, agm_create_session, agm_send_message, agm_list_ops, engram_list_wayfinder_sessions, engram_get_wayfinder_session")
 	logger.Info("Wayfinder forwarding enabled", "engram_mcp_url", cfg.EngramMCPURL)
 
 	installGateway(server, *noGateway)

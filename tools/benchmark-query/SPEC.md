@@ -1,5 +1,7 @@
 # benchmark-query — Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 benchmark-query provides a CLI for querying benchmark metrics collected from

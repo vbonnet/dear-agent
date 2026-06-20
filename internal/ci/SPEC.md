@@ -1,5 +1,7 @@
 # CI Pipeline Executor Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 The CI package provides local CI/CD pipeline execution for AGM sessions using industry-standard tools like nektos/act (GitHub Actions simulator). This enables pre-merge quality gates that prevent bad code from reaching the main branch.

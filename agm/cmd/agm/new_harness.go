@@ -12,6 +12,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
 // startHarness dispatches per-harness initialization (Claude/Gemini/Codex/OpenCode).
@@ -106,6 +107,37 @@ func otelEnvArgs() string {
 	return args.String()
 }
 
+// oauthEnvArg returns the CLAUDE_CODE_OAUTH_TOKEN env assignment to inject into
+// a spawned worker session. It resolves the token via auth.ResolveOAuthToken,
+// which prefers the live token from ~/.claude/.credentials.json over the
+// CLAUDE_CODE_OAUTH_TOKEN env var. This propagates Max-plan OAuth auth from the
+// orchestrator into spawned workers (ce-dzhz): the env var goes stale once
+// Claude Code auto-refreshes the credentials file, so a worker that inherited
+// the env token 401s on every turn — reading the file first keeps spawns fresh.
+func oauthEnvArg() string {
+	if token := auth.ResolveOAuthToken(); token != "" {
+		// Single-quote the token (defense in depth; matches
+		// ops.buildHarnessCommand) so an unexpected shell metacharacter can't
+		// break the command line the token is concatenated into.
+		escaped := strings.ReplaceAll(token, "'", `'\''`)
+		return " CLAUDE_CODE_OAUTH_TOKEN='" + escaped + "'"
+	}
+	return ""
+}
+
+// claudeEnvUnsetFlags returns the `env -u` flag list for the spawned claude
+// shell. CLAUDECODE is always unset; ANTHROPIC_API_KEY is additionally unset
+// whenever an OAuth (Max-plan) token is being injected, so a stray metered key
+// inherited from the tmux server's long-lived environment cannot shadow the
+// OAuth token and silently route the session through the metered API instead of
+// the Max plan (ce-84l2 — the "Claude API" symptom).
+func claudeEnvUnsetFlags(haveOAuth bool) string {
+	if haveOAuth {
+		return "-u CLAUDECODE -u ANTHROPIC_API_KEY"
+	}
+	return "-u CLAUDECODE"
+}
+
 // buildClaudeCommand assembles the env+claude shell command line, applying
 // flags for model, --add-dir, --permission-mode, and --max-budget-usd.
 // Returns the command string and whether --permission-mode was applied.
@@ -116,9 +148,10 @@ func buildClaudeCommand(sessionName, workDir string, extraAddDirs []string) (str
 		autoModeFlag = ""
 		debug.Log("Auto mode disabled by flag/env var")
 	}
-	claudeCmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s%s claude --model %s --add-dir '%s'%s && exit", sessionName, otelEnvArgs(), resolvedModel, workDir, autoModeFlag)
+	oauthArg := oauthEnvArg()
+	claudeCmd := fmt.Sprintf("env %s AGM_SESSION_NAME=%s%s%s claude --model %s --add-dir %s%s && exit", claudeEnvUnsetFlags(oauthArg != ""), shellQuote(sessionName), otelEnvArgs(), oauthArg, shellQuote(resolvedModel), shellQuote(workDir), autoModeFlag)
 	for _, dir := range extraAddDirs {
-		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --add-dir '%s' && exit", dir), 1)
+		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --add-dir %s && exit", shellQuote(dir)), 1)
 	}
 	modeAppliedAtStartup := false
 	if modeFlagValue == "auto" || modeFlagValue == "plan" || modeFlagValue == "default" {
@@ -212,7 +245,7 @@ func startGeminiHarness(sessionName string, exists bool) (bool, error) {
 func startGeminiDirect(sessionName string, exists bool) error {
 	debug.Log("agm-agent-wrapper not found, falling back to direct gemini")
 	resolvedModel := agent.ResolveModelFullName("gemini-cli", modelName)
-	geminiCmd := fmt.Sprintf("gemini -m %s && exit", resolvedModel)
+	geminiCmd := fmt.Sprintf("gemini -m %s && exit", shellQuote(resolvedModel))
 	debug.Log("Sending command: %s", geminiCmd)
 	if err := tmux.SendCommand(sessionName, geminiCmd); err != nil {
 		ui.PrintError(err,
@@ -247,7 +280,7 @@ func startGeminiDirect(sessionName string, exists bool) error {
 	selectCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "1")
 	_ = selectCmd.Run()
 	time.Sleep(300 * time.Millisecond)
-	enterCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "Enter")
+	enterCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "-H", "0d")
 	_ = enterCmd.Run()
 	debug.Log("Trust prompt auto-accepted")
 	ui.PrintSuccess("Auto-accepted Gemini trust prompt")

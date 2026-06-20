@@ -1,5 +1,7 @@
 # Gemini Adapter Technical Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version:** 1.0
 **Status:** Implemented
 **Last Updated:** 2026-02-11

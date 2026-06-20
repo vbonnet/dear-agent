@@ -135,6 +135,278 @@ func TestOverseer_Tick_ProbeErrorPropagates(t *testing.T) {
 	}
 }
 
+func TestOverseer_Tick_EscalatesGoplsWhenOverThreshold(t *testing.T) {
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{
+		GoplsProcesses: 10, // over default threshold of 5
+	})
+	trail, buf := newBufferTrail()
+	// Use a zero-fraction threshold so only gopls fires.
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9, GoplsProcesses: 5})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	saw := false
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] != "supervisor.over.escalated" {
+			continue
+		}
+		p := r["payload"].(map[string]any)
+		if p["metric"] == "gopls_processes" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Error("no escalation for gopls_processes above threshold")
+	}
+}
+
+func TestOverseer_Tick_NoGoplsEscalationAtOrBelowThreshold(t *testing.T) {
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{
+		GoplsProcesses: 5, // exactly at threshold — should NOT escalate (threshold is exclusive)
+	})
+	trail, buf := newBufferTrail()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9, GoplsProcesses: 5})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] != "supervisor.over.escalated" {
+			continue
+		}
+		p := r["payload"].(map[string]any)
+		if p["metric"] == "gopls_processes" {
+			t.Error("gopls_processes escalated at threshold — want >threshold only")
+		}
+	}
+}
+
+func TestOverseer_Tick_EscalatesFDAndVnodePressure(t *testing.T) {
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{
+		OpenFDFraction:    0.95, // over 0.9 threshold
+		VnodeUsedFraction: 1.0,  // at full saturation
+	})
+	trail, buf := newBufferTrail()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	saw := map[string]bool{}
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] != "supervisor.over.escalated" {
+			continue
+		}
+		p := r["payload"].(map[string]any)
+		saw[p["metric"].(string)] = true
+	}
+	if !saw["open_fds"] {
+		t.Error("no escalation for open_fds above threshold")
+	}
+	if !saw["vnodes"] {
+		t.Error("no escalation for vnodes at 100% saturation")
+	}
+}
+
+// --- Reclaim tests ---
+
+func TestOverseer_Tick_ReclaimsOnFDPressure(t *testing.T) {
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{
+		OpenFDFraction: 0.95,
+		GoplsProcesses: 8,
+	})
+	trail, buf := newBufferTrail()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9, GoplsProcesses: 5})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+
+	reclaimer := NewInMemoryReclaimer()
+	reclaimer.SetResult(ReclaimResult{OrphansFound: 3, OrphansKilled: 3}, nil)
+	reclaimer.OnReclaim(func() {
+		probe.Set(ResourceSnapshot{OpenFDFraction: 0.4, GoplsProcesses: 2})
+	})
+	o.WithReclaimer(reclaimer)
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	if reclaimer.Calls() != 1 {
+		t.Errorf("Reclaim called %d times, want 1", reclaimer.Calls())
+	}
+
+	sawReclaim := false
+	sawVerify := false
+	for _, r := range parseTrail(t, buf) {
+		switch r["kind"] {
+		case "supervisor.over.reclaim":
+			sawReclaim = true
+			p := r["payload"].(map[string]any)
+			if int(p["orphans_killed"].(float64)) != 3 {
+				t.Errorf("orphans_killed = %v, want 3", p["orphans_killed"])
+			}
+		case "supervisor.over.reclaim_verify":
+			sawVerify = true
+			p := r["payload"].(map[string]any)
+			if p["pressure_down"] != true {
+				t.Error("pressure_down should be true after reclaim")
+			}
+		}
+	}
+	if !sawReclaim {
+		t.Error("no reclaim trail record")
+	}
+	if !sawVerify {
+		t.Error("no reclaim_verify trail record")
+	}
+}
+
+func TestOverseer_Tick_NoReclaimBelowThreshold(t *testing.T) {
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{
+		OpenFDFraction: 0.5,
+		GoplsProcesses: 3,
+	})
+	trail, _ := newBufferTrail()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9, GoplsProcesses: 5})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+
+	reclaimer := NewInMemoryReclaimer()
+	o.WithReclaimer(reclaimer)
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	if reclaimer.Calls() != 0 {
+		t.Errorf("Reclaim called %d times, want 0 (below threshold)", reclaimer.Calls())
+	}
+}
+
+func TestOverseer_Tick_ReclaimOnGoplsOnly(t *testing.T) {
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{
+		OpenFDFraction: 0.5, // below threshold
+		GoplsProcesses: 10,  // above threshold
+	})
+	trail, buf := newBufferTrail()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9, GoplsProcesses: 5})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+
+	reclaimer := NewInMemoryReclaimer()
+	reclaimer.SetResult(ReclaimResult{OrphansFound: 5, OrphansKilled: 5}, nil)
+	reclaimer.OnReclaim(func() {
+		probe.Set(ResourceSnapshot{GoplsProcesses: 3})
+	})
+	o.WithReclaimer(reclaimer)
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	if reclaimer.Calls() != 1 {
+		t.Errorf("Reclaim called %d times, want 1", reclaimer.Calls())
+	}
+
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.over.reclaim_verify" {
+			p := r["payload"].(map[string]any)
+			if int(p["gopls_before"].(float64)) != 10 {
+				t.Errorf("gopls_before = %v, want 10", p["gopls_before"])
+			}
+			if int(p["gopls_after"].(float64)) != 3 {
+				t.Errorf("gopls_after = %v, want 3", p["gopls_after"])
+			}
+		}
+	}
+}
+
+func TestOverseer_Tick_ReclaimOnVnodePressure(t *testing.T) {
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{VnodeUsedFraction: 0.98})
+	trail, _ := newBufferTrail()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+
+	reclaimer := NewInMemoryReclaimer()
+	reclaimer.SetResult(ReclaimResult{OrphansFound: 2, OrphansKilled: 2}, nil)
+	reclaimer.OnReclaim(func() {
+		probe.Set(ResourceSnapshot{VnodeUsedFraction: 0.6})
+	})
+	o.WithReclaimer(reclaimer)
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if reclaimer.Calls() != 1 {
+		t.Errorf("Reclaim called %d times, want 1", reclaimer.Calls())
+	}
+}
+
+func TestOverseer_Tick_NoReclaimWithoutReclaimer(t *testing.T) {
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{OpenFDFraction: 0.99, GoplsProcesses: 20})
+	trail, buf := newBufferTrail()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9, GoplsProcesses: 5})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	// No reclaimer wired — should escalate but not reclaim.
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.over.reclaim" {
+			t.Error("reclaim record present without a reclaimer wired")
+		}
+	}
+}
+
+func TestOverseer_Tick_ReclaimErrorRecorded(t *testing.T) {
+	probe := NewInMemoryResourceProbe()
+	probe.Set(ResourceSnapshot{OpenFDFraction: 0.95})
+	trail, buf := newBufferTrail()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+
+	reclaimer := NewInMemoryReclaimer()
+	reclaimer.SetResult(ReclaimResult{}, errors.New("ps failed"))
+	o.WithReclaimer(reclaimer)
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick should not propagate reclaim errors: %v", err)
+	}
+
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "supervisor.over.reclaim" {
+			p := r["payload"].(map[string]any)
+			if p["error"] == nil {
+				t.Error("reclaim error not recorded in trail")
+			}
+		}
+	}
+}
+
 type errorProbe struct{ err error }
 
 func (e *errorProbe) Snapshot(context.Context) (ResourceSnapshot, error) {

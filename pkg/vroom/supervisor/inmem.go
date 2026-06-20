@@ -211,6 +211,95 @@ func (p *InMemoryResourceProbe) Snapshot(_ context.Context) (ResourceSnapshot, e
 	return p.snap, nil
 }
 
+// InMemoryReclaimer is a configurable ResourceReclaimer for tests.
+type InMemoryReclaimer struct {
+	mu       sync.Mutex
+	result   ReclaimResult
+	err      error
+	calls    int
+	callback func() // called on each Reclaim invocation (e.g. to update probe)
+}
+
+// NewInMemoryReclaimer returns a reclaimer that reports the configured result.
+func NewInMemoryReclaimer() *InMemoryReclaimer {
+	return &InMemoryReclaimer{}
+}
+
+// SetResult configures the result returned by Reclaim.
+func (r *InMemoryReclaimer) SetResult(result ReclaimResult, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.result = result
+	r.err = err
+}
+
+// OnReclaim registers a callback invoked on each Reclaim call (before
+// returning the result). Tests use this to simulate the probe reading lower
+// values after the reclaim.
+func (r *InMemoryReclaimer) OnReclaim(fn func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.callback = fn
+}
+
+// Reclaim implements ResourceReclaimer.
+func (r *InMemoryReclaimer) Reclaim(_ context.Context) (ReclaimResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	if r.callback != nil {
+		r.callback()
+	}
+	return r.result, r.err
+}
+
+// Calls returns the number of times Reclaim was called.
+func (r *InMemoryReclaimer) Calls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+// InMemoryPeerRecovery is a configurable PeerRecovery for tests.
+type InMemoryPeerRecovery struct {
+	mu    sync.Mutex
+	calls []PeerRecoveryCall
+	err   error
+}
+
+// PeerRecoveryCall records one Recover invocation.
+type PeerRecoveryCall struct {
+	PeerRole Role
+	Reason   string
+}
+
+// NewInMemoryPeerRecovery returns a recovery that succeeds by default.
+func NewInMemoryPeerRecovery() *InMemoryPeerRecovery {
+	return &InMemoryPeerRecovery{}
+}
+
+// SetError configures the error returned by subsequent Recover calls.
+func (r *InMemoryPeerRecovery) SetError(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.err = err
+}
+
+// Recover implements PeerRecovery.
+func (r *InMemoryPeerRecovery) Recover(_ context.Context, peerRole Role, reason string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, PeerRecoveryCall{PeerRole: peerRole, Reason: reason})
+	return r.err
+}
+
+// Calls returns all recorded recovery calls.
+func (r *InMemoryPeerRecovery) Calls() []PeerRecoveryCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]PeerRecoveryCall(nil), r.calls...)
+}
+
 // InMemoryPermissionChecker is a configurable PermissionChecker for tests
 // and the cmd/vroom-mesh demo. Permissions are either allowed or denied
 // individually; unknown permissions default to allowed.

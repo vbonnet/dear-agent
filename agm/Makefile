@@ -81,6 +81,12 @@ install: build
 	@echo ""
 	@echo "See PLUGIN-INSTALLATION.md for details"
 	@echo ""
+	@# Redeploy Claude Code hooks so deployed version always matches the installed binary.
+	@# Root cause of ce-710r: PR #456 shipped the orphan reaper but hooks were never
+	@# redeployed, so the deployed hook predated the fix for 24h. Closes gap G1.
+	$(HOME)/go/bin/agm admin install-hooks
+	@echo "✓ Claude Code hooks redeployed (gap G1 closed: built == deployed)"
+	@echo ""
 	@echo "Make sure $(HOME)/go/bin is in your PATH"
 
 clean:

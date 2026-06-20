@@ -1,5 +1,7 @@
 # Agent Monitoring - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 The monitoring package provides comprehensive runtime monitoring and validation for sub-agent executions within the Engram system. It detects fake implementations and ensures quality by tracking multiple signals including file operations, git commits, test execution, and code quality metrics.

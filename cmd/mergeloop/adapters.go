@@ -13,6 +13,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/internal/mergeloop"
 	"github.com/vbonnet/dear-agent/internal/safegit"
+	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
 // ---- gh-backed PR lister ----
@@ -269,8 +270,11 @@ func (a *agmSpawner) Spawn(ctx context.Context, req mergeloop.AgentRequest) (str
 		// host dispatch substrate + auth (ce-cd14 / ce-m3ya) land.
 		return "", fmt.Errorf("agent spawning disabled (pass --enable-agents): %w", mergeloop.ErrSpawnUnavailable)
 	}
-	if os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" {
-		return "", fmt.Errorf("CLAUDE_CODE_OAUTH_TOKEN unset; run `claude setup-token`: %w", mergeloop.ErrSpawnUnavailable)
+	// Match the token agm itself will forward into the spawned session: prefer
+	// the live ~/.claude/.credentials.json over the (possibly stale) env var
+	// (ce-dzhz), so the pre-flight check isn't stricter than the real spawn.
+	if auth.ResolveOAuthToken() == "" {
+		return "", fmt.Errorf("no Claude OAuth token available; run `claude setup-token` or set CLAUDE_CODE_OAUTH_TOKEN: %w", mergeloop.ErrSpawnUnavailable)
 	}
 	workspace := os.Getenv("WORKSPACE")
 	if workspace == "" {

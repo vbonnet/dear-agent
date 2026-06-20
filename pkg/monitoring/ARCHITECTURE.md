@@ -1,5 +1,7 @@
 # Agent Monitoring - Architecture
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## System Overview
 
 The monitoring package implements a multi-layered approach to detecting fake implementations in sub-agent executions. It combines real-time file system monitoring, git hook integration, output parsing, and multi-signal validation to ensure sub-agents perform actual work rather than submitting stubs.

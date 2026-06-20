@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -20,8 +21,52 @@ func capturePaneContent(sessionName, socketPath string, lines int) (string, erro
 	return string(output), nil
 }
 
-// permissionPromptPattern matches text rendered by Claude Code permission prompts.
-// These appear at or near the prompt line but are not human input.
+// capturePaneWithEscape captures the last N lines of a tmux pane including ANSI escape codes.
+func capturePaneWithEscape(sessionName, socketPath string, lines int) (string, error) {
+	normalizedName := tmux.NormalizeTmuxSessionName(sessionName)
+	cmd := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedName, "-p", "-e", "-S", fmt.Sprintf("-%d", lines))
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to capture pane with escape: %w", err)
+	}
+	return string(output), nil
+}
+
+// ansiStripRe matches ANSI CSI escape sequences for stripping.
+var ansiStripRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// stripANSI removes ANSI escape sequences from a string.
+func stripANSI(s string) string {
+	return ansiStripRe.ReplaceAllString(s, "")
+}
+
+// isGhostTextAfterPrompt reports whether the text after the ❯ prompt in the
+// ANSI-rich pane capture is Claude Code ghost/placeholder text. Ghost text is
+// styled with the dim attribute (\x1b[2m) — confirmed by live pane capture
+// showing: ❯ \x1b[2mstart the loop\x1b[0m (not present for real human input).
+// Only the portion of the line AFTER ❯ is checked to avoid false positives
+// from dim attributes that appear before the prompt marker.
+func isGhostTextAfterPrompt(ansiContent string) bool {
+	lines := strings.Split(ansiContent, "\n")
+	for _, line := range slices.Backward(lines) {
+		plainLine := stripANSI(line)
+		if !strings.Contains(plainLine, "❯") {
+			continue
+		}
+		// Find ❯ in the raw ANSI line and check only what follows it.
+		idx := strings.Index(line, "❯")
+		if idx < 0 {
+			continue
+		}
+		return strings.Contains(line[idx:], "\x1b[2m")
+	}
+	return false
+}
+
+// permissionPromptPattern matches text rendered by Claude Code permission
+// prompts and interactive UI elements. These appear at or near the prompt
+// line but are not human input. The pattern is checked after trimming
+// leading whitespace from the text after ❯.
 var permissionPromptPattern = regexp.MustCompile(
 	`(?i)` +
 		`(` +
@@ -31,7 +76,13 @@ var permissionPromptPattern = regexp.MustCompile(
 		`|` +
 		`^[nN]/[yY]` + // N/y prompt
 		`|` +
-		`^(?:yes|no|allow|deny|skip|cancel)\b` + // Common permission words
+		`^\([yYnN]\)` + // (Y)es/(N)o style
+		`|` +
+		`^(?:yes|no|allow|deny|skip|cancel|always allow|allow once|don't allow)\b` +
+		`|` +
+		`^(?:use arrows|press enter|do you want)\b` + // Navigation/confirmation UI hints
+		`|` +
+		`^❯\s*$` + // Bare prompt re-render artifact
 		`)`,
 )
 
@@ -39,12 +90,23 @@ var permissionPromptPattern = regexp.MustCompile(
 
 // CheckHumanTyping detects unsent text in the Claude prompt line.
 // Text after the ❯ prompt without an AGM sender header indicates a human is typing.
+// Uses a single ANSI capture to both detect content and rule out Claude Code
+// ghost/placeholder text (dim attribute \x1b[2m) in one tmux round-trip.
 func CheckHumanTyping(sessionName, socketPath string) *Violation {
-	content, err := capturePaneContent(sessionName, socketPath, 10)
+	ansiContent, err := capturePaneWithEscape(sessionName, socketPath, 10)
 	if err != nil {
 		return nil // Can't capture = can't detect, allow through
 	}
-	return detectHumanTyping(content)
+	v := detectHumanTyping(stripANSI(ansiContent))
+	if v == nil {
+		return nil
+	}
+	// The plain-text check found content: confirm it is not ghost text.
+	// Ghost text is dim-attributed (\x1b[2m) after ❯ in the ANSI capture.
+	if isGhostTextAfterPrompt(ansiContent) {
+		return nil
+	}
+	return v
 }
 
 // detectHumanTyping is the pure-logic detection function (testable without tmux).

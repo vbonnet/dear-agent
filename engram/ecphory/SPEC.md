@@ -1,5 +1,7 @@
 # Ecphory - Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 The ecphory package implements a 3-tier memory retrieval system for the Engram knowledge base. Ecphory (from Greek: ἐκφορά "retrieval") is the process of reconstructing a memory from a cue. This package provides fast, semantically-aware retrieval of relevant engrams while respecting token budget constraints.

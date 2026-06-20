@@ -55,12 +55,13 @@ func runClearInput(cmd *cobra.Command, args []string) error {
 		// Stuck AGM message — safe to submit by sending Enter
 		_, _ = fmt.Fprintf(os.Stdout, "Detected stuck AGM message in session '%s'. Sending Enter to submit...\n", sessionName)
 
-		if err := tmux.SendKeys(sessionName, "C-m"); err != nil {
+		if err := tmux.SendEnterReliable(sessionName); err != nil {
 			return fmt.Errorf("failed to send Enter to session '%s': %w", sessionName, err)
 		}
 
-		// Brief pause then verify it was cleared
-		time.Sleep(500 * time.Millisecond)
+		// SendEnterReliable already retries once internally, but verify
+		// for this specific stuck-message case.
+		time.Sleep(300 * time.Millisecond)
 		verifyContent, err := tmux.CapturePaneOutput(sessionName, 50)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not verify input was cleared: %v\n", err)
@@ -70,10 +71,9 @@ func runClearInput(cmd *cobra.Command, args []string) error {
 		verifyType, _ := tmux.ClassifyQueuedInput(verifyContent)
 		if verifyType != tmux.QueuedInputNone {
 			// Try one more Enter
-			if err := tmux.SendKeys(sessionName, "C-m"); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to send keys to session %s: %v\n", sessionName, err)
+			if err := tmux.SendEnterReliable(sessionName); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to send Enter to session %s: %v\n", sessionName, err)
 			}
-			time.Sleep(300 * time.Millisecond)
 			_, _ = fmt.Fprintf(os.Stdout, "Sent additional Enter (input may still be processing)\n")
 		} else {
 			_, _ = fmt.Fprintf(os.Stdout, "Stuck AGM message cleared successfully from session '%s'\n", sessionName)

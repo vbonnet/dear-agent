@@ -44,8 +44,14 @@
 #   install-babysit-prs     Install babysit-prs to ~/go/bin
 #   build-pr-linkify        Build pr-linkify: PR reference linkifier (cmd/pr-linkify)
 #   install-pr-linkify      Install pr-linkify to ~/go/bin
+#   build-fd-pressure       Build fd-pressure: FD/vnode/gopls pressure monitor
+#   install-fd-pressure     Install fd-pressure to ~/go/bin
+#   build-vroom-dispatch    Build vroom-dispatch: VROOM supervisor mesh launcher
+#   install-vroom-dispatch  Install vroom-dispatch to ~/go/bin
+#   build-resolve-review-threads  Build resolve-review-threads: GitHub PR thread resolver
+#   install-resolve-review-threads Install resolve-review-threads to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-token-refresher install-token-refresher
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -115,6 +121,46 @@ install-preflight-hook:
 # cmd/install-post-merge-hook for the resolution and safety logic.
 install-post-merge-hook:
 	@go run ./cmd/install-post-merge-hook
+
+# Build the routing-guard binary into ./build (used by the pre-commit hook and
+# for local `routing-guard --all` audits).
+build-routing-guard:
+	@mkdir -p build && go build -o build/routing-guard ./cmd/routing-guard && \
+		echo "Built: build/routing-guard"
+
+# Install the routing-guard pre-commit hook. It blocks temporal artifacts
+# (Wayfinder runs, retros, designs, research) from being committed to this
+# code repo — a thin wrapper over the routing-guard tool (cmd/routing-guard),
+# so the forbidden globs come from .dear-agent.yml (no drift). core.hooksPath-
+# aware: if hooks are managed by chezmoi (~/.config), it prints how to wire the
+# guard into the global dispatcher instead of silently writing a hook that
+# won't run. CI enforces the same rule on every PR regardless of local install.
+install-routing-guard-hook: build-routing-guard
+	@ROOT="$$(git rev-parse --show-toplevel)"; \
+	chmod +x "$$ROOT/scripts/git-hooks/pre-commit"; \
+	HP="$$(git config --get core.hooksPath || true)"; \
+	if [ -n "$$HP" ]; then \
+		case "$$HP" in \
+		  "$$HOME"/.config/*|"$$HOME"/.local/share/chezmoi/*|~/.config/*|~/.local/share/chezmoi/*|'~/'*) \
+			echo "core.hooksPath is chezmoi-managed: $$HP"; \
+			echo "A repo-local hook will NOT run on this host. Wire the guard into"; \
+			echo "the global pre-commit dispatcher with a line like:"; \
+			echo "    ( cd \"$$ROOT\" && exec scripts/git-hooks/pre-commit )"; \
+			echo "CI (.github/workflows/routing-enforcement.yml) enforces it regardless."; \
+			exit 0;; \
+		esac; \
+		DEST="$$HP/pre-commit"; \
+	else \
+		DEST="$$(git rev-parse --git-path hooks/pre-commit)"; \
+	fi; \
+	if [ -e "$$DEST" ] && ! grep -q 'routing-guard\|git-hooks/pre-commit' "$$DEST" 2>/dev/null; then \
+		echo "A pre-commit hook already exists at $$DEST"; \
+		echo "Merge in: exec \"$$ROOT/scripts/git-hooks/pre-commit\""; \
+		exit 1; \
+	fi; \
+	cp "$$ROOT/scripts/git-hooks/pre-commit" "$$DEST"; \
+	chmod +x "$$DEST"; \
+	echo "Installed routing-guard pre-commit hook -> $$DEST"
 
 # Run full local CI validation via act. Requires Docker + act installed.
 # Prefer `make preflight-full` for the same gates without containerisation.
@@ -234,6 +280,19 @@ install-safe-rebase: build-safe-rebase
 	cp bin/safe-rebase $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/safe-rebase"
 
+# Build token-refresher: single-owner, file-locked Claude Code OAuth refresher
+# for the VROOM supervisor mesh. Keeps ~/.claude/.credentials.json fresh so
+# expired access tokens stop killing the mesh (ce-rnpt / ce-f3e3).
+build-token-refresher:
+	@echo "Building token-refresher..."
+	go build $(GOFLAGS) -o bin/token-refresher ./cmd/token-refresher/
+	@echo "Built: bin/token-refresher"
+
+# Install token-refresher to GOPATH/bin.
+install-token-refresher: build-token-refresher
+	cp bin/token-refresher $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/token-refresher"
+
 # Build safe-pr: wayfinder-traced wrapper for gh pr create/close.
 build-safe-pr:
 	@echo "Building safe-pr..."
@@ -262,6 +321,25 @@ build-src-recovery:
 install-src-recovery: build-src-recovery
 	cp bin/src-recovery $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/src-recovery"
+
+# Build safe-unlock: the vetted path for clearing stale git lock files from any
+# repo or linked worktree. Removes a lock only when it is older than --min-age
+# AND held open by no process (lsof), refusing an active one — so it replaces a
+# raw `rm .git/index.lock` that would race a live git. Generalises src-recovery's
+# ~/src-scoped `unlock` to ~/worktrees/** and the full lock family. See
+# internal/safeunlock.
+build-safe-unlock:
+	@echo "Building safe-unlock..."
+	go build $(GOFLAGS) -o bin/safe-unlock ./cmd/safe-unlock/
+	@echo "Built: bin/safe-unlock"
+
+# Install safe-unlock to GOPATH/bin so it is on PATH for every agent session.
+# Allow-list `Bash(safe-unlock *)` in chezmoi alongside src-recovery/safe-push —
+# its safety is guaranteed by construction, so it needs no per-invocation
+# approval (CLAUDE.md principle 9).
+install-safe-unlock: build-safe-unlock
+	cp bin/safe-unlock $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/safe-unlock"
 
 # Build the Jaeger health-check CLI. Reports whether Jaeger at localhost:16686
 # is alive and receiving traces. Exit codes: 0 healthy, 1 degraded (no recent
@@ -381,6 +459,20 @@ uninstall-mergeloop-launchagent:
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.mergeloop.plist
 	@echo "Removed plist (if present)."
 
+# Build resolve-review-threads: atomic wrapper for the resolveReviewThread
+# GraphQL mutation. Agents must use this instead of raw `gh api graphql`
+# because the classifier blocks bare GraphQL mutations. The binary shells out
+# to `gh api graphql` internally, so authentication uses the gh CLI token.
+# Usage: resolve-review-threads resolve-all <owner> <repo> <pr> [author]
+build-resolve-review-threads:
+	@echo "Building resolve-review-threads..."
+	go build $(GOFLAGS) -o bin/resolve-review-threads ./cmd/resolve-review-threads/
+	@echo "Built: bin/resolve-review-threads"
+
+install-resolve-review-threads: build-resolve-review-threads
+	cp bin/resolve-review-threads $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/resolve-review-threads"
+
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
 # gates Edit/Write/MultiEdit, pretool-bash-write-guard gates Bash. They are
@@ -495,3 +587,27 @@ build-pr-linkify:
 install-pr-linkify: build-pr-linkify
 	cp bin/pr-linkify $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/pr-linkify"
+
+# Build fd-pressure: a standalone FD/vnode/gopls pressure monitor. Samples
+# system resource state and exits non-zero if any threshold is breached.
+# Calls the same SysResourceProbe that the VROOM Overseer uses, so output
+# is Overseer-consistent. Useful for human triage and launchd health checks.
+build-fd-pressure:
+	@echo "Building fd-pressure..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/fd-pressure ./cmd/fd-pressure/
+	@echo "Built: bin/fd-pressure"
+
+install-fd-pressure: build-fd-pressure
+	cp bin/fd-pressure $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/fd-pressure"
+
+build-vroom-dispatch:
+	@echo "Building vroom-dispatch..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/vroom-dispatch ./cmd/vroom-dispatch/
+	@echo "Built: bin/vroom-dispatch"
+
+install-vroom-dispatch: build-vroom-dispatch
+	cp bin/vroom-dispatch $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/vroom-dispatch"

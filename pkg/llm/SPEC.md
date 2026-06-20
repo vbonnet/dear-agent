@@ -1,5 +1,7 @@
 # pkg/llm - Unified LLM Agent Execution Library
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Status**: Phase 6 Complete (All Phases)
 **Version**: 0.4.0
 **Last Updated**: 2026-03-20

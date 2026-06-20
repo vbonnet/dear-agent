@@ -109,15 +109,9 @@ func SendKeysToPane(sessionName string, keys string) error {
 		}
 		bufferLoaded = false
 
-		// Step 3: Send Enter key to submit.
-		// Delay prevents tmux from coalescing pasted text with ENTER keystroke.
-		// Do not remove.
-		time.Sleep(50 * time.Millisecond)
-
-		cmdEnter := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "C-m")
-		output, err := cmdEnter.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("failed to send Enter key: %w (output: %s)", err, string(output))
+		// Step 3: Send Enter reliably using hex 0x0d instead of C-m.
+		if err := sendEnterReliable(socketPath, normalizedName); err != nil {
+			return err
 		}
 
 		logger.Info("Enter key sent")

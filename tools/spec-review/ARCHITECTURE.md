@@ -1,5 +1,7 @@
 # Architecture: Spec-Review Marketplace
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 **Version:** 2.0.0
 **Last Updated:** 2026-03-13
 **Status:** Production (Phases 1-8 Complete)

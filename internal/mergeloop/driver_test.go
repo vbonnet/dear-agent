@@ -51,6 +51,17 @@ func (f *fakeSpawner) Spawn(_ context.Context, req AgentRequest) (string, error)
 	return req.SessionName, nil
 }
 
+type fakeThreadResolver struct {
+	calls    []int
+	resolved int
+	err      error
+}
+
+func (f *fakeThreadResolver) ResolveBotThreads(_ context.Context, _ string, pr int) (int, error) {
+	f.calls = append(f.calls, pr)
+	return f.resolved, f.err
+}
+
 func newTestDriver(t *testing.T, prs []PR, deps *Deps) (*Driver, *Tracker) {
 	t.Helper()
 	statePath := filepath.Join(t.TempDir(), "state.json")
@@ -220,5 +231,69 @@ func TestBackpressureSkipsTick(t *testing.T) {
 	res, _ := d.Tick(context.Background())
 	if res.Merged != 0 || len(mer.calls) != 0 {
 		t.Errorf("backpressure should skip all merges, got merged=%d calls=%v", res.Merged, mer.calls)
+	}
+}
+
+func TestGreenPRResolvesBotThreadsBeforeMerge(t *testing.T) {
+	prs := []PR{{Number: 20, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	mer := &fakeMerger{}
+	thr := &fakeThreadResolver{resolved: 2}
+	d, _ := newTestDriver(t, prs, &Deps{Merger: mer, Threads: thr})
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if len(thr.calls) != 1 || thr.calls[0] != 20 {
+		t.Errorf("thread resolver calls = %v, want [20]", thr.calls)
+	}
+	if len(mer.calls) != 1 || mer.calls[0] != 20 {
+		t.Errorf("merger calls = %v, want [20] (merge should still proceed)", mer.calls)
+	}
+	if res.Merged != 1 {
+		t.Errorf("Merged = %d, want 1", res.Merged)
+	}
+}
+
+func TestNilThreadResolverIsSafe(t *testing.T) {
+	prs := []PR{{Number: 21, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	mer := &fakeMerger{}
+	d, _ := newTestDriver(t, prs, &Deps{Merger: mer})
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if res.Merged != 1 {
+		t.Errorf("Merged = %d, want 1 (nil thread resolver should not block)", res.Merged)
+	}
+}
+
+func TestThreadResolverErrorDoesNotBlockMerge(t *testing.T) {
+	prs := []PR{{Number: 22, MergeStateStatus: "CLEAN", Mergeable: "MERGEABLE",
+		Checks: []Check{reqCheck("ci", CheckPass)}}}
+	mer := &fakeMerger{}
+	thr := &fakeThreadResolver{err: fmt.Errorf("GraphQL error")}
+	var audited []AuditEvent
+	d, _ := newTestDriver(t, prs, &Deps{
+		Merger:  mer,
+		Threads: thr,
+		Audit:   func(ev AuditEvent) { audited = append(audited, ev) },
+	})
+	res, err := d.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if res.Merged != 1 {
+		t.Errorf("Merged = %d, want 1 (thread error should not block merge)", res.Merged)
+	}
+	foundError := false
+	for _, ev := range audited {
+		if ev.Action == "thread_resolve_error" {
+			foundError = true
+		}
+	}
+	if !foundError {
+		t.Error("expected thread_resolve_error audit event")
 	}
 }

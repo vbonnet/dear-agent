@@ -1,5 +1,7 @@
 # Wayfinder Validator Specification
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 The validator package implements gate validation for Wayfinder phase transitions. Gates are quality checks that must pass before a phase can be marked complete, ensuring deliverables meet quality standards.

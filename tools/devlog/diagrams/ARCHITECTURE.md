@@ -1,5 +1,7 @@
 # Devlog CLI - Architecture Documentation
 
+<!-- Last audited at: NEEDS-AUDIT -->
+
 ## Overview
 
 Devlog CLI is a workspace management tool for developers working with multiple git repositories using bare repos and worktrees. It provides a declarative configuration approach to synchronize development environments across machines.
