@@ -129,7 +129,7 @@ func tierModel(t *roles.Tier) string {
 func runReview(cmd *cobra.Command, args []string) error {
 	artifactPath := args[0]
 
-	content, err := os.ReadFile(artifactPath) //nolint:gosec // operator-supplied artifact path
+	content, err := os.ReadFile(artifactPath)
 	if err != nil {
 		return fmt.Errorf("read artifact %q: %w", artifactPath, err)
 	}
