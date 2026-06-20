@@ -255,6 +255,10 @@ func FormatDenied(cr CheckResult) string {
 			reasons = append(reasons, fmt.Sprintf("  • [%s] %s", g.Gate, g.Message))
 		}
 	}
-	header := fmt.Sprintf("circuit breaker: spawn refused (load level: %s)", cr.Level)
+	loadLevel := cr.Level
+	if loadLevel == "" {
+		loadLevel = "unknown"
+	}
+	header := fmt.Sprintf("circuit breaker: spawn refused (load level: %s)", loadLevel)
 	return header + "\n\n" + strings.Join(reasons, "\n")
 }

@@ -196,7 +196,15 @@ func cmdUp(argv []string) error {
 	fmt.Fprintln(os.Stderr, "\notel-local: stopping Jaeger…")
 	_ = proc.Process.Signal(syscall.SIGTERM)
 	done := make(chan error, 1)
-	go func() { done <- proc.Wait() }()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "otel-local: wait goroutine panic: %v\n", r)
+				done <- fmt.Errorf("wait goroutine panic: %v", r)
+			}
+		}()
+		done <- proc.Wait()
+	}()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
