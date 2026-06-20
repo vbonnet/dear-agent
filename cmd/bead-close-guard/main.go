@@ -106,6 +106,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if !result.Passed {
+		// Record the prevented violation in the VROOM decision trail so
+		// supervisor ticks and retros can count how often the guard fires.
+		// Best-effort: a trail failure never downgrades the block.
+		home, _ := os.UserHomeDir()
+		var unmergedNums []int
+		for _, pr := range result.UnmergedPR {
+			unmergedNums = append(unmergedNums, pr.Number)
+		}
+		if trailErr := AppendDoDViolationTrail(home, *beadID, result.Title, unmergedNums); trailErr != nil {
+			fmt.Fprintf(stderr, "warning: vroom trail log failed: %v\n", trailErr)
+		}
 		return 2
 	}
 	return 0

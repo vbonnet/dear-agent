@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/vroom/decisiontrail"
 )
 
 type GuardConfig struct {
@@ -157,6 +159,50 @@ func AppendAbandonAudit(home, beadID, reason string, unmergedPRs []int) (err err
 		return err
 	}
 	return nil
+}
+
+// AppendDoDViolationTrail records a BLOCKED bead-close in the VROOM decision
+// trail (~/.agm/vroom/trail.jsonl) so supervisor ticks and retros can see every
+// prevented Definition-of-Done violation — not only the ones an agent chose to
+// abandon (those land in bead-abandon-audit.jsonl). The retro that spawned this
+// guard (ce-d2f / ce-y1zl) needed exactly this signal: a count of how often the
+// guard fired, surfaced where the supervisors already look.
+//
+// Best-effort: any failure here is returned for the caller to warn about but
+// must NOT change the guard's verdict — the block stands regardless.
+func AppendDoDViolationTrail(home, beadID, title string, unmergedPRs []int) (err error) {
+	if home == "" {
+		home = "/tmp"
+	}
+	path := filepath.Join(home, ".agm", "vroom", "trail.jsonl")
+	trail, err := decisiontrail.OpenJSONL(path)
+	if err != nil {
+		return fmt.Errorf("cannot open vroom trail: %w", err)
+	}
+	defer func() {
+		if cerr := trail.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("cannot close vroom trail: %w", cerr)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Payload uses []int (not []any) so readers can decode unmerged_prs back to
+	// numbers; JSON renders both identically.
+	prs := unmergedPRs
+	if prs == nil {
+		prs = []int{}
+	}
+	return trail.Append(ctx, decisiontrail.Record{
+		Role: "bead-close-guard",
+		Kind: "dod.violation.blocked",
+		Payload: map[string]any{
+			"bead_id":      beadID,
+			"title":        title,
+			"unmerged_prs": prs,
+		},
+	})
 }
 
 func extractPRNumbers(text string) []int {
