@@ -174,6 +174,41 @@ func TestIsGhostTextAfterPrompt(t *testing.T) {
 			ansiInput: "some output\n❯ \x1b[2mstart the loop\x1b[0m\n─────────────────────────────────\n",
 			want:      true,
 		},
+		{
+			name:      "ghost text with 256-color grey (vroom overseer, ce-5miu)",
+			ansiInput: "output\n❯ \x1b[38;5;241mstart the loop\x1b[0m\n",
+			want:      true,
+		},
+		{
+			name:      "ghost text with dim combined with 256-color grey",
+			ansiInput: "output\n❯ \x1b[2;38;5;241mstart the loop\x1b[0m\n",
+			want:      true,
+		},
+		{
+			name:      "ghost text with bright-black (grey) foreground",
+			ansiInput: "output\n❯ \x1b[90mstart the loop\x1b[0m\n",
+			want:      true,
+		},
+		{
+			name:      "ghost text with dim truecolor grey",
+			ansiInput: "output\n❯ \x1b[38;2;120;120;120mstart the loop\x1b[0m\n",
+			want:      true,
+		},
+		{
+			name:      "256-color grey before the prompt marker does not count",
+			ansiInput: "\x1b[38;5;241mpre-prompt grey\x1b[0m ❯ real typing here\n",
+			want:      false,
+		},
+		{
+			name:      "non-grey 256-color (red) after prompt is real input",
+			ansiInput: "output\n❯ \x1b[38;5;196mplease fix the bug\x1b[0m\n",
+			want:      false,
+		},
+		{
+			name:      "bright white truecolor after prompt is real input",
+			ansiInput: "output\n❯ \x1b[38;2;255;255;255mplease fix the bug\x1b[0m\n",
+			want:      false,
+		},
 	}
 
 	for _, tt := range tests {
