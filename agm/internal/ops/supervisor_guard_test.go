@@ -178,9 +178,9 @@ func TestGC_ReapsStoppedProtectedOrphans(t *testing.T) {
 	old := now.Add(-48 * time.Hour)
 
 	sessions := []*manifest.Manifest{
-		gcManifest("orphan-1", "meta-scheduler", manifest.StateDone, old),    // stopped orphan, no pane
+		gcManifest("orphan-1", "meta-scheduler", manifest.StateDone, old),     // stopped orphan, no pane
 		gcManifest("orphan-2", "orchestrator-v3", manifest.StateOffline, old), // stopped orphan, no pane
-		gcManifest("live-1", "overseer-v12", manifest.StateDone, old),        // live pane → protected
+		gcManifest("live-1", "overseer-v12", manifest.StateDone, old),         // live pane → protected
 	}
 
 	ctx := testCtx(sessions, "overseer-v12") // only overseer-v12 has a live pane
