@@ -57,6 +57,26 @@ func (r RiskLevel) String() string {
 	}
 }
 
+// ParseRiskLevel converts a risk-level string (XS/S/M/L/XL, case-insensitive) to a
+// RiskLevel. Unknown or empty values map to RiskLevelM, the safe default used for
+// the "standard" harness profile.
+func ParseRiskLevel(s string) RiskLevel {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "XS":
+		return RiskLevelXS
+	case "S":
+		return RiskLevelS
+	case "M":
+		return RiskLevelM
+	case "L":
+		return RiskLevelL
+	case "XL":
+		return RiskLevelXL
+	default:
+		return RiskLevelM
+	}
+}
+
 // RiskAdapter calculates risk levels for tasks
 type RiskAdapter struct {
 	config *ReviewConfig

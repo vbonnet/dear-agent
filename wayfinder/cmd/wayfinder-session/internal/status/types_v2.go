@@ -1,6 +1,9 @@
 package status
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // StatusV2 represents the WAYFINDER-STATUS.md V2 file structure
 // Based on Wayfinder V2 schema with 9-phase consolidation
@@ -24,6 +27,7 @@ type StatusV2 struct {
 	CompletionDate *time.Time `yaml:"completion_date,omitempty"`
 	BlockedReason  string     `yaml:"blocked_reason,omitempty"`
 	SkipRoadmap    bool       `yaml:"skip_roadmap,omitempty"` // Skip roadmap phases for small projects
+	SkipPhases     []string   `yaml:"skip_phases,omitempty"`  // Phases skipped by the harness profile (lite skips DESIGN/SPEC/PLAN)
 
 	// Waypoint tracking
 	WaypointHistory []WaypointHistory `yaml:"waypoint_history"`
@@ -385,6 +389,17 @@ func (s *StatusV2) GetStartedAt() time.Time {
 // GetSkipRoadmap returns the skip_roadmap flag for V2 Status
 func (s *StatusV2) GetSkipRoadmap() bool {
 	return s.SkipRoadmap
+}
+
+// GetSkipPhases returns the phases skipped by this session's harness profile.
+// ProfileLite (XS/S risk) skips DESIGN/SPEC/PLAN; standard/deep profiles skip none.
+func (s *StatusV2) GetSkipPhases() []string {
+	return s.SkipPhases
+}
+
+// IsPhaseSkipped reports whether the given phase is skipped by this session's profile.
+func (s *StatusV2) IsPhaseSkipped(phase string) bool {
+	return slices.Contains(s.SkipPhases, phase)
 }
 
 // SetCurrentWaypoint sets the current waypoint for V2 Status
