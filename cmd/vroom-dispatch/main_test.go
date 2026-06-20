@@ -456,6 +456,165 @@ func TestHealthCheckInterval(t *testing.T) {
 	}
 }
 
+// --- Human escalation channel tests (ce-mcw2) ---
+
+// withEscalationStubs swaps the desktopNotify and mcpPush seams for the
+// duration of a test and restores them afterwards, so the escalation path can
+// be exercised without spawning osascript or an agm session.
+func withEscalationStubs(t *testing.T, desktop func(string) error, push func(string, string) (bool, error)) {
+	t.Helper()
+	origDesktop, origPush := desktopNotify, mcpPush
+	desktopNotify, mcpPush = desktop, push
+	t.Cleanup(func() { desktopNotify, mcpPush = origDesktop, origPush })
+}
+
+func readTrail(t *testing.T, home string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(home, ".agm", "vroom", "dispatch-trail.jsonl"))
+	if err != nil {
+		t.Fatalf("read trail: %v", err)
+	}
+	return string(data)
+}
+
+// TestEscalateToHuman_FiresBothChannels covers the AC-5.5 escalation trigger
+// path: a restart-exhausted escalation must reach both the desktop (AC-5.1) and
+// MCP (AC-5.2) channels, with the human-readable message, and must append a
+// structured escalation record carrying kind, trigger, message, and the extra
+// fields (AC-5.4).
+func TestEscalateToHuman_FiresBothChannels(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".agm", "vroom"), 0o755)
+
+	var gotDesktop, gotPush string
+	withEscalationStubs(t,
+		func(msg string) error { gotDesktop = msg; return nil },
+		func(_ /*home*/, msg string) (bool, error) { gotPush = msg; return true, nil },
+	)
+
+	const msg = "vroom-orchestrator: 3 consecutive restart failures — needs human intervention"
+	escalateToHuman(dir, "restart_exhausted", msg, map[string]any{
+		"supervisor": "vroom-orchestrator",
+		"restarts":   3,
+	})
+
+	if gotDesktop != msg {
+		t.Errorf("desktop channel got %q, want %q", gotDesktop, msg)
+	}
+	if gotPush != msg {
+		t.Errorf("mcp channel got %q, want %q", gotPush, msg)
+	}
+
+	trail := readTrail(t, dir)
+	for _, want := range []string{
+		`"kind":"dispatch.escalation"`,
+		`"trigger":"restart_exhausted"`,
+		`"message":"` + msg + `"`,
+		`"supervisor":"vroom-orchestrator"`,
+		`"restarts":3`,
+		`"ts":`,
+	} {
+		if !strings.Contains(trail, want) {
+			t.Errorf("escalation trail missing %q\ngot: %s", want, trail)
+		}
+	}
+}
+
+// TestEscalateToHuman_MCPUnavailableIsNotAnError covers AC-5.6: when no session
+// is available to relay the MCP push (mcpPush returns sent=false, nil), the
+// escalation still succeeds via the desktop channel and the trail records the
+// unavailability as a benign event — not an mcp_failed error.
+func TestEscalateToHuman_MCPUnavailableIsNotAnError(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".agm", "vroom"), 0o755)
+
+	desktopCalled := false
+	withEscalationStubs(t,
+		func(string) error { desktopCalled = true; return nil },
+		func(string, string) (bool, error) { return false, nil }, // no active session
+	)
+
+	escalateToHuman(dir, "restart_exhausted", "boom", nil)
+
+	if !desktopCalled {
+		t.Error("desktop channel must still fire when MCP is unavailable (AC-5.6)")
+	}
+	trail := readTrail(t, dir)
+	if !strings.Contains(trail, `"dispatch.escalation.mcp_unavailable"`) {
+		t.Errorf("trail missing mcp_unavailable record\ngot: %s", trail)
+	}
+	if strings.Contains(trail, `"dispatch.escalation.mcp_failed"`) {
+		t.Errorf("unavailable MCP must not be logged as a failure (AC-5.6)\ngot: %s", trail)
+	}
+}
+
+// TestEscalateToHuman_ChannelFailuresAreLoggedNotPropagated covers AC-5.3: a
+// failing notification channel must be recorded but must never stop the other
+// channel or the caller.
+func TestEscalateToHuman_ChannelFailuresAreLoggedNotPropagated(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".agm", "vroom"), 0o755)
+
+	pushCalled := false
+	withEscalationStubs(t,
+		func(string) error { return os.ErrPermission }, // desktop fails
+		func(string, string) (bool, error) { pushCalled = true; return true, nil },
+	)
+
+	escalateToHuman(dir, "restart_exhausted", "boom", nil)
+
+	if !pushCalled {
+		t.Error("a desktop failure must not prevent the MCP channel from firing (AC-5.3)")
+	}
+	trail := readTrail(t, dir)
+	if !strings.Contains(trail, `"dispatch.escalation.desktop_failed"`) {
+		t.Errorf("desktop failure not recorded in trail\ngot: %s", trail)
+	}
+}
+
+// TestOsascriptArgs pins the AC-5.1 notification shape: the script must use
+// `display notification ... with title ...` with the VROOM escalation prefix
+// and the Dispatch Advisor title.
+func TestOsascriptArgs(t *testing.T) {
+	args := osascriptArgs("orchestrator down")
+	if len(args) != 2 || args[0] != "-e" {
+		t.Fatalf("osascriptArgs = %v, want [-e <script>]", args)
+	}
+	script := args[1]
+	for _, want := range []string{
+		`display notification "VROOM escalation: orchestrator down"`,
+		`with title "VROOM Dispatch Advisor"`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("osascript script missing %q\ngot: %s", want, script)
+		}
+	}
+}
+
+// TestAppleScriptString guards the escaping that keeps a crafted escalation
+// message from breaking out of the single-line `-e` AppleScript literal.
+func TestAppleScriptString(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{`plain`, `"plain"`},
+		{`say "hi"`, `"say \"hi\""`},
+		{`back\slash`, `"back\\slash"`},
+		{"new\nline", `"new line"`},
+		{"tab\tsep", `"tab sep"`},
+	}
+	for _, tc := range cases {
+		if got := appleScriptString(tc.in); got != tc.want {
+			t.Errorf("appleScriptString(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	// A NUL/control char must be dropped, not emitted into the script.
+	if got := appleScriptString("a\x00b"); got != `"ab"` {
+		t.Errorf("control char not stripped: got %q", got)
+	}
+}
+
 func TestSupervisorHealthString(t *testing.T) {
 	if healthAlive.String() != "alive" {
 		t.Errorf("alive.String() = %q", healthAlive.String())
