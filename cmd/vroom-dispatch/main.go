@@ -93,6 +93,15 @@ const sessionsFile = ".agm/vroom/sessions.json"
 // as a persistent daemon (default mode, without -boot-only).
 const healthCheckInterval = 30 * time.Second
 
+// Graduated escalation thresholds for worker monitoring. The Dispatch Advisor
+// is the programmatic safety net — it gives LLM supervisors (Orchestrator at
+// 15/30/45min) a chance to act first, then catches anything they miss.
+const (
+	workerNudgeAfter    = 20 * time.Minute // Level 1: send status ping
+	workerDiagnoseAfter = 35 * time.Minute // Level 2: send wrap-up/defer command
+	workerKillAfter     = 50 * time.Minute // Level 3: force-kill (only if stuck state + no progress)
+)
+
 // restartTracker tracks per-supervisor restart state for exponential backoff.
 type restartTracker struct {
 	mu        sync.Mutex
@@ -648,6 +657,7 @@ func runHealthMonitor(home string, state *sessionState, model string) {
 	defer cancel()
 
 	tracker := newRestartTracker()
+	wTracker := newWorkerTracker()
 
 	fmt.Println("==> Dispatch Advisor running (Ctrl-C to stop)...")
 	printStatus(state)
@@ -668,6 +678,10 @@ func runHealthMonitor(home string, state *sessionState, model string) {
 		}
 
 		writeSelfHeartbeat(home)
+
+		// Check for stuck workers before supervisor health — reclaiming
+		// worker slots lets the Orchestrator dispatch on the same tick.
+		monitorWorkers(home, wTracker)
 
 		for _, sup := range supervisors {
 			health := classifySupervisor(home, sup)
@@ -717,6 +731,194 @@ func runHealthMonitor(home string, state *sessionState, model string) {
 			}
 		}
 	}
+}
+
+// workerState tracks per-worker progress across Dispatch Advisor ticks.
+type workerState struct {
+	lastSeenUpdateAt string // last_update_at from previous tick (RFC3339)
+	escalationLevel  int    // 0=healthy, 1=nudged, 2=diagnosed, 3=killed
+	staleFor         int    // consecutive ticks with no progress
+}
+
+// workerTracker tracks per-worker escalation state across ticks.
+type workerTracker struct {
+	mu      sync.Mutex
+	workers map[string]*workerState
+}
+
+func newWorkerTracker() *workerTracker {
+	return &workerTracker{workers: make(map[string]*workerState)}
+}
+
+// healthEntry mirrors the per-session fields from `agm session health --all --json`.
+type healthEntry struct {
+	Name                string `json:"name"`
+	State               string `json:"state"`
+	Status              string `json:"status"`
+	TimeSinceLastUpdate string `json:"time_since_last_update"`
+	LastUpdateAt        string `json:"last_update_at"`
+	Health              string `json:"health"`
+	CommitCount         int    `json:"commit_count"`
+}
+
+type healthResult struct {
+	Sessions []healthEntry `json:"sessions"`
+}
+
+// monitorWorkers uses graduated escalation to handle stuck workers. It
+// compares each worker's last_update_at across ticks to distinguish "slow
+// but working" (progressing) from "stuck" (zero progress + stuck state).
+// Force-kill is a last resort, only for workers provably stuck.
+func monitorWorkers(home string, wt *workerTracker) {
+	cmd := exec.Command("agm", "session", "health", "--all", "--json")
+	out, err := cmd.Output()
+	if err != nil {
+		return
+	}
+
+	var result healthResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		return
+	}
+
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+
+	seen := make(map[string]bool)
+	for _, entry := range result.Sessions {
+		if !strings.HasPrefix(entry.Name, "worker-") || entry.Status != "active" {
+			continue
+		}
+		seen[entry.Name] = true
+		ws, exists := wt.workers[entry.Name]
+		if !exists {
+			ws = &workerState{}
+			wt.workers[entry.Name] = ws
+		}
+		escalateIfStuck(home, entry, ws, exists)
+	}
+
+	for name := range wt.workers {
+		if !seen[name] {
+			delete(wt.workers, name)
+		}
+	}
+}
+
+// escalateIfStuck applies graduated escalation (nudge → diagnose → kill) to
+// one worker based on how long it has had no manifest progress.
+func escalateIfStuck(home string, entry healthEntry, ws *workerState, exists bool) {
+	progressing := ws.lastSeenUpdateAt != "" && entry.LastUpdateAt != ws.lastSeenUpdateAt
+	ws.lastSeenUpdateAt = entry.LastUpdateAt
+
+	if progressing || !exists {
+		ws.escalationLevel = 0
+		ws.staleFor = 0
+		return
+	}
+
+	ws.staleFor++
+	staleDuration := parseDuration(entry.TimeSinceLastUpdate)
+	isStuckState := entry.State == "PERMISSION_PROMPT" || entry.State == "OFFLINE"
+
+	if staleDuration >= workerNudgeAfter && ws.escalationLevel < 1 {
+		ws.escalationLevel = 1
+		fmt.Printf("[%s] no progress for %s, sending status ping (Level 1)\n",
+			entry.Name, entry.TimeSinceLastUpdate)
+		sendWorkerMessage(entry.Name, "normal",
+			"status? No manifest activity in >20min. Report progress or blockers.")
+		writeTrail(home, "dispatch.worker_nudged", map[string]any{
+			"worker":    entry.Name,
+			"state":     entry.State,
+			"stale_for": entry.TimeSinceLastUpdate,
+		})
+		return
+	}
+
+	if staleDuration >= workerDiagnoseAfter && ws.escalationLevel < 2 {
+		ws.escalationLevel = 2
+		applyDiagnoseEscalation(home, entry, isStuckState)
+		return
+	}
+
+	if staleDuration >= workerKillAfter && ws.escalationLevel >= 2 && isStuckState {
+		ws.escalationLevel = 3
+		applyKillEscalation(home, entry, ws)
+	}
+}
+
+func applyDiagnoseEscalation(home string, entry healthEntry, isStuckState bool) {
+	if isStuckState {
+		fmt.Printf("[%s] %s for %s with no progress, sending defer nudge (Level 2)\n",
+			entry.Name, entry.State, entry.TimeSinceLastUpdate)
+		sendWorkerMessage(entry.Name, "urgent",
+			"You appear stuck on a permission prompt. Defer the blocked action (file a handoff note) and continue with other work.")
+	} else {
+		fmt.Printf("[%s] no progress for %s, sending wrap-up (Level 2)\n",
+			entry.Name, entry.TimeSinceLastUpdate)
+		sendWorkerMessage(entry.Name, "urgent",
+			"No manifest activity for >35min. Commit any WIP now, report status, or wrap up.")
+	}
+	writeTrail(home, "dispatch.worker_diagnosed", map[string]any{
+		"worker":    entry.Name,
+		"state":     entry.State,
+		"stale_for": entry.TimeSinceLastUpdate,
+		"action":    map[bool]string{true: "defer_nudge", false: "wrap_up"}[isStuckState],
+	})
+}
+
+func applyKillEscalation(home string, entry healthEntry, ws *workerState) {
+	fmt.Printf("[%s] %s for %s, no progress, prior nudge failed — force-killing (Level 3)\n",
+		entry.Name, entry.State, entry.TimeSinceLastUpdate)
+	killCmd := exec.Command("agm", "session", "kill", entry.Name, "--confirmed-stuck")
+	if killOut, killErr := killCmd.CombinedOutput(); killErr != nil {
+		fmt.Fprintf(os.Stderr, "[%s] kill failed: %v\n%s\n", entry.Name, killErr, string(killOut))
+		writeTrail(home, "dispatch.worker_kill_failed", map[string]any{
+			"worker": entry.Name,
+			"state":  entry.State,
+			"error":  killErr.Error(),
+		})
+	} else {
+		fmt.Printf("[%s] killed successfully — slot reclaimed\n", entry.Name)
+		writeTrail(home, "dispatch.worker_killed_stuck", map[string]any{
+			"worker":      entry.Name,
+			"state":       entry.State,
+			"stale_for":   entry.TimeSinceLastUpdate,
+			"stale_ticks": ws.staleFor,
+		})
+	}
+}
+
+// sendWorkerMessage sends an agm message to a worker session.
+func sendWorkerMessage(worker, priority, prompt string) {
+	cmd := exec.Command("agm", "send", "msg", worker,
+		"--sender", "vroom-dispatch",
+		"--priority", priority,
+		"--prompt", prompt)
+	cmd.Env = scrubAPIKey(os.Environ())
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "[%s] send failed: %v\n%s\n", worker, err, string(out))
+	}
+}
+
+// parseDuration converts the dashboard's human-friendly duration strings
+// (e.g. "45s", "12m", "2h30m", "3d") into time.Duration.
+func parseDuration(s string) time.Duration {
+	if s == "" || s == "-" {
+		return 0
+	}
+	// Try stdlib parsing first (handles "12m", "2h30m", "45s").
+	if d, err := time.ParseDuration(s); err == nil {
+		return d
+	}
+	// Handle "3d" format.
+	if rest, ok := strings.CutSuffix(s, "d"); ok {
+		var days int
+		if _, err := fmt.Sscanf(rest, "%d", &days); err == nil {
+			return time.Duration(days) * 24 * time.Hour
+		}
+	}
+	return 0
 }
 
 // isSessionAlive checks if an AGM session with the exact given name exists.

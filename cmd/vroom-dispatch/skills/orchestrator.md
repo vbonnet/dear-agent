@@ -221,15 +221,82 @@ printf '{"ts":"%s","role":"orchestrator","kind":"supervisor.orch.dispatched","pa
 
 ### Step 7: Monitor Active Workers
 
-For each live `worker-*` session:
-- Check if the session is still active (not archived)
-- If a worker has been running >60 minutes on a single bead: send status check
+**Principle: never kill a worker that is making progress.** A worker producing
+tokens is healthy regardless of how long it has been running. "Slow but
+working" is fine; "stuck" (zero progress + known stuck state) is not.
+
+Run health checks to see worker states AND progress signals:
+```bash
+agm session health --all --json 2>/dev/null
+```
+
+This returns per-session: `state`, `time_since_last_update` (manifest
+freshness — a proxy for "producing tokens"), `commit_count`, `health`,
+and `warnings`. A worker whose `last_update_at` is advancing is **alive and
+working** — leave it alone even if it has been running for hours.
+
+For each live `worker-*` session, apply the **graduated escalation ladder**:
+
+#### Level 0 — Healthy (no action)
+The worker's `last_update_at` is recent (advancing between ticks), meaning it
+is producing tokens. Leave it alone regardless of runtime or state.
+
+#### Level 1 — Nudge (soft)
+If the worker shows **no manifest progress for >15 minutes** but is in
+`WORKING` state (not stuck on a dialog): send a status ping.
+```bash
+agm send msg "worker-<bead-id>" --sender vroom-orchestrator --priority normal \
+  --prompt "status? No manifest activity in >15min. Report progress or blockers."
+```
+Record `kind: "supervisor.orch.worker_nudged"`.
+
+#### Level 2 — Diagnose (check state)
+If the worker shows **no manifest progress for >30 minutes**: run a deeper
+health check and inspect its state.
+```bash
+agm session health "worker-<bead-id>" --json 2>/dev/null
+```
+- If the worker is in `WORKING` state with `health: "healthy"` or
+  `health: "warning"`: send a wrap-up command (it may be churning):
   ```bash
-  agm send msg "worker-<bead-id>" --sender vroom-orchestrator --priority normal --prompt "status? You've been running >60min."
+  agm send msg "worker-<bead-id>" --sender vroom-orchestrator --priority urgent \
+    --prompt "You've had no manifest activity for >30min. Commit any WIP now, report status, or wrap up."
   ```
-- If a worker session is done/archived: check if the bead was completed
-  - Read bead status: `bd --db ~/beads/context-engine/.beads show <bead-id>`
-  - If bead is still `in_progress` but session is dead: record `kind: "supervisor.orch.worker_died"` and mark bead for re-dispatch
+  Record `kind: "supervisor.orch.worker_wrapup_sent"`.
+- If the worker is in `PERMISSION_PROMPT` state: send a nudge to defer (it
+  may self-resolve via Defer-Don't-Block):
+  ```bash
+  agm send msg "worker-<bead-id>" --sender vroom-orchestrator --priority urgent \
+    --prompt "You are stuck on a permission prompt. Defer the blocked action (file a handoff note) and continue with other work."
+  ```
+  Record `kind: "supervisor.orch.worker_permission_nudge"`.
+
+#### Level 3 — Force-kill (last resort)
+Force-kill **only** when ALL of these conditions are true:
+1. The worker has shown **zero manifest progress for >45 minutes** (no
+   `last_update_at` advancement across multiple ticks), AND
+2. The worker is in a **known stuck state**: `PERMISSION_PROMPT` (cannot
+   process messages) or `OFFLINE` (session dead), AND
+3. A prior nudge/wrap-up message was already sent (Level 1 or 2 fired on a
+   previous tick) and had no effect.
+
+```bash
+agm session kill "worker-<bead-id>" --confirmed-stuck
+```
+Record `kind: "supervisor.orch.worker_killed_stuck"` with the state and
+duration. Mark the bead for re-dispatch on the next tick. Also record what
+the stuck state was (permission prompt content if visible) so the permission
+model can be fixed.
+
+**Never force-kill a worker just because it has been running a long time.**
+A worker in `WORKING` state whose manifest is updating is healthy. Only kill
+when provably stuck: zero progress + stuck state + prior soft intervention
+failed.
+
+#### Dead/archived workers
+If a worker session is done/archived: check if the bead was completed.
+- Read bead status: `bd --db ~/beads/context-engine/.beads show <bead-id>`
+- If bead is still `in_progress` but session is dead: record `kind: "supervisor.orch.worker_died"` and mark bead for re-dispatch
 
 ### Step 8: Stale Item Detection
 
@@ -265,7 +332,9 @@ This makes it trivial to correlate sessions to beads.
 | Meta-O stale >10min | Critical message, file a bead about mesh degradation |
 | Overseer stale >5min | Urgent message |
 | Worker session dies mid-bead | Record in trail, mark for re-dispatch |
-| Worker stuck >60min | Send status check |
-| Worker stuck >120min | Send wrap-up command, plan re-dispatch |
+| Worker no manifest progress >15min (WORKING) | Level 1: status ping |
+| Worker no manifest progress >30min (any state) | Level 2: diagnose state, send wrap-up or defer nudge |
+| Worker no progress >45min + PERMISSION_PROMPT/OFFLINE + prior nudge failed | Level 3: force-kill, re-dispatch bead |
+| Worker producing tokens (any runtime) | Healthy — no action |
 | No roadmap items to dispatch | Record idle tick, check back next tick |
 | agm session new fails | Record error, retry next tick |

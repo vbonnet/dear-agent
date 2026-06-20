@@ -90,6 +90,7 @@
       "agm/internal/session/context_detector_test.go",
       "agm/internal/ui/table.go",
       "agm/test/performance/eventbus_load_test.go",
+      "cmd/vroom-dispatch/main.go",
       "engram/cmd/engram/cmd/validate_integration_test.go",
       "engram/hooks-bin/internal/validator/validator_bdd_test.go",
       "engram/internal/config/loader_test.go",
@@ -127,12 +128,6 @@
       "agm/workflowbus/bridge.go:140"
     ],
     "zero-test": [
-      "github.com/vbonnet/dear-agent/agm/cmd/agm-reaper",
-      "github.com/vbonnet/dear-agent/agm/cmd/fix-uuid-manual",
-      "github.com/vbonnet/dear-agent/agm/examples",
-      "github.com/vbonnet/dear-agent/agm/internal/surface/cmd/generate",
-      "github.com/vbonnet/dear-agent/agm/scripts",
-      "github.com/vbonnet/dear-agent/agm/test/bdd/steps",
       "github.com/vbonnet/dear-agent/cmd/fd-pressure",
       "github.com/vbonnet/dear-agent/cmd/mergeloop",
       "github.com/vbonnet/dear-agent/cmd/workflow-cancel",
