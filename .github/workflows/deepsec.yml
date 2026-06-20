@@ -30,7 +30,12 @@ jobs:
   # scan gates on it. When the key is absent the scan job shows as "Skipped"
   # (grey ⊘) rather than false-green ✅ (nothing scanned).
   check-key:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Skip forks (no secrets). Non-required: gate the per-push hot path behind
+    # the `full-ci` label; still runs for merge_group / workflow_dispatch.
+    if: >-
+      (github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'pull_request' ||
+       contains(github.event.pull_request.labels.*.name, 'full-ci'))
     runs-on: ubuntu-latest
     outputs:
       has_key: ${{ steps.probe.outputs.has_key }}

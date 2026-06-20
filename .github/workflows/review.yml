@@ -29,7 +29,12 @@ jobs:
     continue-on-error: true
     timeout-minutes: 25
     # Skip PRs from forks — they don't have access to repo secrets.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Non-required: gate the per-push hot path behind the `full-ci` label.
+    # Still runs for merge_group / workflow_dispatch (non-pull_request events).
+    if: >-
+      (github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'pull_request' ||
+       contains(github.event.pull_request.labels.*.name, 'full-ci'))
 
     steps:
       - name: Gate on secret presence
