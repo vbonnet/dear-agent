@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -18,10 +19,18 @@ import (
 
 // InMemoryRoadmap is a thread-safe in-memory Roadmap.
 type InMemoryRoadmap struct {
-	mu       sync.Mutex
-	pending  map[string]WorkProposal
-	accepted []string
-	rejected []rejectedProposal
+	mu            sync.Mutex
+	pending       map[string]WorkProposal
+	accepted      []string
+	rejected      []rejectedProposal
+	failoverAdded []failoverItem
+}
+
+// failoverItem records a roadmap item admitted under failover authority (retro
+// R.5), pending Meta-Orchestrator review on recovery.
+type failoverItem struct {
+	ID string
+	By Role
 }
 
 type rejectedProposal struct {
@@ -104,6 +113,37 @@ func (r *InMemoryRoadmap) Rejected() []string {
 	out := make([]string, 0, len(r.rejected))
 	for _, rp := range r.rejected {
 		out = append(out, rp.ID)
+	}
+	return out
+}
+
+// AddUnderFailover implements FailoverAuthority (retro R.5). The item is
+// admitted directly to the accepted set — bypassing the Meta-Orchestrator's
+// normal admission decision because it is dark — and recorded in the
+// failover-added list so it can be surfaced for Meta-O review on recovery.
+func (r *InMemoryRoadmap) AddUnderFailover(_ context.Context, p WorkProposal, by Role) error {
+	if p.ID == "" {
+		return errors.New("InMemoryRoadmap: WorkProposal.ID required")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if slices.Contains(r.accepted, p.ID) {
+		return fmt.Errorf("InMemoryRoadmap: proposal %q already accepted", p.ID)
+	}
+	delete(r.pending, p.ID) // promote out of pending if it was proposed
+	r.accepted = append(r.accepted, p.ID)
+	r.failoverAdded = append(r.failoverAdded, failoverItem{ID: p.ID, By: by})
+	return nil
+}
+
+// FailoverAdded returns the IDs of items admitted under failover authority, in
+// admission order — the review queue the Meta-Orchestrator drains on recovery.
+func (r *InMemoryRoadmap) FailoverAdded() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, 0, len(r.failoverAdded))
+	for _, fi := range r.failoverAdded {
+		out = append(out, fi.ID)
 	}
 	return out
 }
@@ -507,6 +547,68 @@ func (c *InMemoryPermissionChecker) Check(_ context.Context, perms []string) err
 	for _, p := range perms {
 		if reason, denied := c.denied[p]; denied {
 			return fmt.Errorf("permission %q denied: %s", p, reason)
+		}
+	}
+	return nil
+}
+
+// InMemoryClaimStore is a thread-safe in-process ClaimStore used by tests and
+// the cmd/vroom-mesh runner. It keeps all claims keyed by (target, by) and
+// resolves Get to the winning claim per claimWins (earliest timestamp, ties by
+// canonical role order).
+type InMemoryClaimStore struct {
+	mu     sync.Mutex
+	claims map[Role]map[Role]Claim // target → by → claim
+}
+
+// NewInMemoryClaimStore returns an empty claim store.
+func NewInMemoryClaimStore() *InMemoryClaimStore {
+	return &InMemoryClaimStore{claims: map[Role]map[Role]Claim{}}
+}
+
+// Put implements ClaimStore.
+func (s *InMemoryClaimStore) Put(_ context.Context, c Claim) error {
+	if !c.Target.Valid() || !c.By.Valid() {
+		return fmt.Errorf("InMemoryClaimStore: invalid claim target=%q by=%q", c.Target, c.By)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	byMap := s.claims[c.Target]
+	if byMap == nil {
+		byMap = map[Role]Claim{}
+		s.claims[c.Target] = byMap
+	}
+	byMap[c.By] = c
+	return nil
+}
+
+// Get implements ClaimStore, returning the winning claim for target.
+func (s *InMemoryClaimStore) Get(_ context.Context, target Role) (Claim, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	byMap := s.claims[target]
+	if len(byMap) == 0 {
+		return Claim{}, false, nil
+	}
+	var winner Claim
+	have := false
+	for _, c := range byMap {
+		if !have || claimWins(c, winner) {
+			winner = c
+			have = true
+		}
+	}
+	return winner, true, nil
+}
+
+// Delete implements ClaimStore.
+func (s *InMemoryClaimStore) Delete(_ context.Context, target Role, by Role) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if byMap := s.claims[target]; byMap != nil {
+		delete(byMap, by)
+		if len(byMap) == 0 {
+			delete(s.claims, target)
 		}
 	}
 	return nil

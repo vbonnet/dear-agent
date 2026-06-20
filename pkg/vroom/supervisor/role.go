@@ -88,3 +88,57 @@ func (r Role) PeerList() ([]Role, error) {
 	}
 	return []Role{v, u}, nil
 }
+
+// SecondaryFor returns the supervisor that holds the Secondary responsibility
+// for target — the peer that *verifies* target's work and is therefore first
+// in line to assume target's role under failover (retro R.1: "Only the
+// designated Secondary may attempt promotion").
+//
+// It is the inverse of Peers: SecondaryFor(target) is the unique role r whose
+// r.Peers() verifies-slot is target. Concretely:
+//
+//	SecondaryFor(meta-orchestrator) = overseer
+//	SecondaryFor(orchestrator)      = meta-orchestrator
+//	SecondaryFor(overseer)          = orchestrator
+func SecondaryFor(target Role) (Role, error) {
+	if !target.Valid() {
+		return "", fmt.Errorf("supervisor: SecondaryFor invalid role %q", string(target))
+	}
+	for _, r := range AllRoles() {
+		v, _, err := r.Peers()
+		if err != nil {
+			return "", err
+		}
+		if v == target {
+			return r, nil
+		}
+	}
+	return "", fmt.Errorf("supervisor: no Secondary found for role %q", string(target))
+}
+
+// TertiaryFor returns the supervisor that holds the Tertiary responsibility
+// for target — the peer that *unsticks* target and may promote itself to
+// target's role only if the Secondary is also dark (retro R.1: "The Tertiary
+// defers unless the Secondary is also dead, then it promotes itself").
+//
+// It is the inverse of Peers: TertiaryFor(target) is the unique role r whose
+// r.Peers() unsticks-slot is target. Concretely:
+//
+//	TertiaryFor(meta-orchestrator) = orchestrator
+//	TertiaryFor(orchestrator)      = overseer
+//	TertiaryFor(overseer)          = meta-orchestrator
+func TertiaryFor(target Role) (Role, error) {
+	if !target.Valid() {
+		return "", fmt.Errorf("supervisor: TertiaryFor invalid role %q", string(target))
+	}
+	for _, r := range AllRoles() {
+		_, u, err := r.Peers()
+		if err != nil {
+			return "", err
+		}
+		if u == target {
+			return r, nil
+		}
+	}
+	return "", fmt.Errorf("supervisor: no Tertiary found for role %q", string(target))
+}
