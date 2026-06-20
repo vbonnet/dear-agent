@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for the gopls watchdog (ce-710r.3).
+
+  Runs `gopls-watchdog` every 2 minutes. Each tick samples gopls pressure
+  (orphan count, orphaned-gopls RSS, and system-wide FD-table usage), logs a
+  watchdog.gopls.alarm record to ~/.agm/vroom/trail.jsonl when a threshold is
+  breached, and remediates by reaping orphaned (PPID==1) gopls via
+  `agm session reap-orphans`. A live session's language server is never touched.
+
+  This is the active complement to the existing controls from the 2026-06-15
+  gopls FD-leak P0 (epic ce-710r):
+    - com.dear-agent.fd-limit       raises kern.maxfiles at boot (headroom)
+    - com.dear-agent.reap-orphans   hourly orphan sweep (backstop)
+    - com.dear-agent.gopls-watchdog this job: fast threshold-driven detect +
+                                    remediate + alarm, on a 2-minute tick
+
+  The plist is a TEMPLATE: the install target
+  (make install-gopls-watchdog-launchagent) substitutes __HOME__ for the real
+  home directory before staging it into ~/Library/LaunchAgents (launchd does not
+  expand ~ or shell variables).
+
+  Activate (ask-gated host action):
+    launchctl bootstrap gui/$(id -u) \
+      ~/Library/LaunchAgents/com.dear-agent.gopls-watchdog.plist
+
+  Trigger an immediate run outside the schedule:
+    launchctl kickstart gui/$(id -u)/com.dear-agent.gopls-watchdog
+
+  Remove:
+    launchctl bootout gui/$(id -u)/com.dear-agent.gopls-watchdog
+    rm ~/Library/LaunchAgents/com.dear-agent.gopls-watchdog.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dear-agent.gopls-watchdog</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/go/bin/gopls-watchdog</string>
+    <string>--agm</string>
+    <string>__HOME__/go/bin/agm</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+  </dict>
+
+  <!-- One tick every 2 minutes. Each tick is idempotent and cheap. -->
+  <key>StartInterval</key>
+  <integer>120</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Never let two ticks overlap. -->
+  <key>AbandonProcessGroup</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.local/state/dear-agent/gopls-watchdog.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.local/state/dear-agent/gopls-watchdog.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
