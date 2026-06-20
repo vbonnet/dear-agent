@@ -48,6 +48,7 @@ resource "github_repository_ruleset" "branch_protection" {
     required_linear_history = true
 
     pull_request {
+      allowed_merge_methods             = ["squash"]
       required_approving_review_count   = 0
       dismiss_stale_reviews_on_push     = true
       require_code_owner_review         = false

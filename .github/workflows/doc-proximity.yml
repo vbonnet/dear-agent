@@ -30,6 +30,11 @@ permissions:
 jobs:
   doc-proximity:
     name: Doc Proximity Check
+    # Non-required: gate the per-push hot path behind the `full-ci` label.
+    # Still runs for merge_group / workflow_dispatch (non-pull_request events).
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'full-ci')
     runs-on: ubuntu-latest
     # Informational — does not block merge until doc coverage is established.
     continue-on-error: true

@@ -12,6 +12,7 @@ package safegit
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -20,7 +21,18 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
+
+// tracerName is the OTel tracer name for the safe-merge gate. Spans started
+// under it are no-ops unless a collector is configured via
+// OTEL_EXPORTER_OTLP_ENDPOINT (see pkg/otelsetup); cmd/safe-merge calls
+// InitTracer to wire one up.
+const tracerName = "safe-merge"
 
 // MinSoak is the minimum age the head commit must be before merging.
 const MinSoak = 5 * time.Minute
@@ -57,7 +69,18 @@ type AuditEntry struct {
 // When cfg.Watch is true, it polls the gates until they pass or cfg.WatchTimeout
 // elapses. When cfg.DryRun is true, it checks gates but does not execute the merge.
 // Results are appended to the JSONL audit log in ~/.local/state/dear-agent/.
+//
+// It is a thin wrapper over SafeMergeContext with a background context, kept for
+// callers that do not carry a trace context.
 func SafeMerge(cfg MergeConfig) error {
+	return SafeMergeContext(context.Background(), cfg)
+}
+
+// SafeMergeContext is SafeMerge with an explicit context for trace propagation.
+// It opens a parent "safemerge.attempt"/"safemerge.watch" span; per-gate child
+// spans (ci, threads, soak, merge) hang off it so a Jaeger trace shows exactly
+// which gate blocked a merge and how long each took.
+func SafeMergeContext(ctx context.Context, cfg MergeConfig) error {
 	if cfg.PRNumber <= 0 {
 		return fmt.Errorf("--pr must be a positive integer")
 	}
@@ -68,13 +91,13 @@ func SafeMerge(cfg MergeConfig) error {
 		return fmt.Errorf("--repo must be in owner/repo format, got %q", cfg.Repo)
 	}
 	if cfg.Watch {
-		return watchMerge(cfg)
+		return watchMerge(ctx, cfg)
 	}
-	return attemptMerge(cfg)
+	return attemptMerge(ctx, cfg)
 }
 
 // watchMerge polls the merge gates until they pass or the timeout elapses.
-func watchMerge(cfg MergeConfig) error {
+func watchMerge(ctx context.Context, cfg MergeConfig) error {
 	timeout := cfg.WatchTimeout
 	if timeout == 0 {
 		timeout = DefaultWatchTimeout
@@ -84,6 +107,13 @@ func watchMerge(cfg MergeConfig) error {
 		interval = 30 * time.Second
 	}
 
+	ctx, span := otel.Tracer(tracerName).Start(ctx, "safemerge.watch",
+		trace.WithAttributes(
+			attribute.Int("pr.number", cfg.PRNumber),
+			attribute.String("pr.repo", cfg.Repo),
+		))
+	defer span.End()
+
 	deadline := time.Now().Add(timeout)
 	attempt := 0
 	for {
@@ -91,8 +121,9 @@ func watchMerge(cfg MergeConfig) error {
 		fmt.Fprintf(os.Stderr, "safe-merge: watch attempt %d (timeout in %s)…\n",
 			attempt, time.Until(deadline).Round(time.Second))
 
-		err := attemptMerge(cfg)
+		err := attemptMerge(ctx, cfg)
 		if err == nil {
+			span.SetAttributes(attribute.Int("watch.attempts", attempt))
 			return nil
 		}
 
@@ -111,17 +142,43 @@ func watchMerge(cfg MergeConfig) error {
 	}
 }
 
+// runGate executes a named merge gate inside a child span so a trace shows
+// which gate ran, how long it took, and whether it blocked the merge.
+func runGate(ctx context.Context, name string, fn func() error) error {
+	_, span := otel.Tracer(tracerName).Start(ctx, "safemerge.gate."+name)
+	defer span.End()
+	err := fn()
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	return err
+}
+
 // attemptMerge checks all gates and, unless DryRun is set, executes the merge.
-func attemptMerge(cfg MergeConfig) error {
+func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	now := cfg.Now
 	if now.IsZero() {
 		now = time.Now()
 	}
 
+	ctx, span := otel.Tracer(tracerName).Start(ctx, "safemerge.attempt",
+		trace.WithAttributes(
+			attribute.Int("pr.number", cfg.PRNumber),
+			attribute.String("pr.repo", cfg.Repo),
+			attribute.Bool("dry_run", cfg.DryRun),
+		))
+	defer func() {
+		if retErr != nil {
+			span.SetStatus(codes.Error, retErr.Error())
+		}
+		span.End()
+	}()
+
 	fmt.Fprintf(os.Stderr, "safe-merge: checking PR #%d in %s\n", cfg.PRNumber, cfg.Repo)
 
 	// Gate 1: ALL CI checks must pass (not just required ones).
-	if err := checkAllCI(cfg.PRNumber, cfg.Repo); err != nil {
+	if err := runGate(ctx, "ci", func() error { return checkAllCI(cfg.PRNumber, cfg.Repo) }); err != nil {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "CI: "+err.Error())
 		fmt.Fprintf(os.Stderr, "safe-merge: guidance: run `gh pr checks %d --repo %s --watch`\n", cfg.PRNumber, cfg.Repo)
 		return fmt.Errorf("CI gate: %w", err)
@@ -129,7 +186,7 @@ func attemptMerge(cfg MergeConfig) error {
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ all CI checks pass")
 
 	// Gate 2: no unresolved review threads.
-	if err := checkReviewThreads(cfg.PRNumber, cfg.Repo); err != nil {
+	if err := runGate(ctx, "threads", func() error { return checkReviewThreads(cfg.PRNumber, cfg.Repo) }); err != nil {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "threads: "+err.Error())
 		fmt.Fprintln(os.Stderr, "safe-merge: guidance: resolve open review threads; security-* threads need a written triage verdict")
 		return fmt.Errorf("review-thread gate: %w", err)
@@ -137,7 +194,7 @@ func attemptMerge(cfg MergeConfig) error {
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ no unresolved review threads")
 
 	// Gate 3: minimum soak time + bot review.
-	if err := checkSoak(cfg.PRNumber, cfg.Repo, now); err != nil {
+	if err := runGate(ctx, "soak", func() error { return checkSoak(cfg.PRNumber, cfg.Repo, now) }); err != nil {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "soak: "+err.Error())
 		return fmt.Errorf("soak gate: %w", err)
 	}
@@ -149,19 +206,27 @@ func attemptMerge(cfg MergeConfig) error {
 		return nil
 	}
 
-	// Execute the merge.
+	// Execute the merge, inside its own span.
+	_, mergeSpan := otel.Tracer(tracerName).Start(ctx, "safemerge.merge")
+	defer mergeSpan.End()
+
 	fmt.Fprintf(os.Stderr, "safe-merge: merging PR #%d (squash)…\n", cfg.PRNumber)
 	headInfo, err := prHeadInfo(cfg.PRNumber, cfg.Repo)
 	if err != nil {
+		mergeSpan.RecordError(err)
+		mergeSpan.SetStatus(codes.Error, err.Error())
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "cannot read PR head: "+err.Error())
 		return fmt.Errorf("cannot read PR head info (needed for --match-head-commit): %w", err)
 	}
+	mergeSpan.SetAttributes(attribute.String("pr.head_sha", headInfo.SHA))
 
 	mergeArgs := BuildMergeArgs(cfg.PRNumber, cfg.Repo, headInfo.SHA)
 	mergeCmd := exec.Command(mergeArgs[0], mergeArgs[1:]...)
 	mergeCmd.Stdout = os.Stdout
 	mergeCmd.Stderr = os.Stderr
 	if err := mergeCmd.Run(); err != nil {
+		mergeSpan.RecordError(err)
+		mergeSpan.SetStatus(codes.Error, err.Error())
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "error", "merge failed: "+err.Error())
 		return fmt.Errorf("gh pr merge failed: %w", err)
 	}

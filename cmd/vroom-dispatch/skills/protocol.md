@@ -47,6 +47,21 @@ States: `accepted`, `rejected`.
 {"bead_id":"ce-abc1","session":"worker-ce-abc1","model":"opus","dispatched_at":"2026-06-15T22:05:00Z"}
 ```
 
+### DoD Audit Trail Kinds
+
+Definition-of-Done enforcement (a bead is Done only when its PR is MERGED — see
+the DEAR retro that found ce-6f1b, ce-mcw2, ce-1onr closed against unmerged work)
+emits two dedicated trail kinds:
+
+- `dod.audit.violation` (Overseer) — a recently-closed bead was closed against a
+  PR that is not merged. Payload fields: `bead`, `pr`, `note`.
+- `dod.dispatch.blocked` (Orchestrator) — a bead's dispatch was held because one
+  of its closed dependencies was closed against an unmerged PR. Payload fields:
+  `bead`, `dep`, `pr`, `dep_pr_state`.
+
+Both are written with the standard trail append. A human (or Meta-O) scanning the
+trail for `dod.` prefixes sees every closure-discipline breach in one grep.
+
 ## Heartbeat
 
 Each supervisor writes its heartbeat using the existing AGM command:
