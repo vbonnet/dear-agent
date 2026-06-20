@@ -1,5 +1,13 @@
 name: Routing Enforcement
 
+# Blocks temporal artifacts (Wayfinder SDLC runs, retros, designs, research)
+# from being committed to this code repo. The forbidden globs are the SINGLE
+# source of truth in .dear-agent.yml > forbidden-paths; this workflow does NOT
+# carry its own copy of the list — it runs the routing-guard tool
+# (cmd/routing-guard) which parses .dear-agent.yml at runtime. (A hardcoded
+# copy that drifted from .dear-agent.yml is exactly what let the Wayfinder wf/
+# leak through; see the 2026-06-19 DEAR retro in engram-research.)
+
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -18,40 +26,41 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get changed files
-        id: changed
-        run: |
-          git fetch origin ${{ github.base_ref }} --depth=1
-          git diff --name-only origin/${{ github.base_ref }}...HEAD > changed_files.txt
-          echo "Changed files:"
-          cat changed_files.txt
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
 
-      - name: Check for forbidden paths
+      - name: Check routing (new files in this PR + whole-tree regression)
         id: check
         run: |
-          FORBIDDEN_PATTERNS=(
-            "docs/retros/"
-            "docs/research/"
-            "retrospectives/"
-            "retros/"
-          )
+          set -o pipefail
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          go build -o /tmp/routing-guard ./cmd/routing-guard
 
-          VIOLATIONS=""
-          while IFS= read -r file; do
-            for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
-              if [[ "$file" == "$pattern"* ]]; then
-                VIOLATIONS="${VIOLATIONS}\n  - \`${file}\` (matches \`${pattern}*\`)"
-                break
-              fi
-            done
-          done < changed_files.txt
+          : > report.txt
+          rc=0
 
-          if [ -n "$VIOLATIONS" ]; then
+          # 1) Block any forbidden file ADDED/renamed in this PR.
+          if ! /tmp/routing-guard --diff "origin/${{ github.base_ref }}" >>report.txt 2>&1; then
+            rc=1
+          fi
+
+          # 2) Whole-tree regression guard: fail if a forbidden file is tracked
+          #    anywhere beyond the documented, shrink-only grandfathered set.
+          if ! /tmp/routing-guard --all --baseline .forbidden-artifacts-baseline.txt >>report.txt 2>&1; then
+            rc=1
+          fi
+
+          echo "--- routing report ---"
+          cat report.txt
+          if [ "$rc" -ne 0 ]; then
             echo "violations=true" >> "$GITHUB_OUTPUT"
-            printf '%b' "$VIOLATIONS" > violations.txt
           else
             echo "violations=false" >> "$GITHUB_OUTPUT"
           fi
+          exit 0
 
       - name: Post PR comment on violation
         if: steps.check.outputs.violations == 'true'
@@ -59,28 +68,30 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const violations = fs.readFileSync('violations.txt', 'utf8');
+            let report = '';
+            try { report = fs.readFileSync('report.txt', 'utf8'); } catch (e) {}
             const body = [
               '## :no_entry: Routing violation — temporal artifacts detected',
               '',
-              'This PR adds files to paths that are **forbidden in code repos**.',
-              'These are temporal artifacts (retros, research docs) and belong in',
-              '[`engram-research`](https://github.com/vbonnet/engram-research) instead.',
+              'This PR adds (or the tree still contains) files that are **forbidden',
+              'in this code repo**. Wayfinder SDLC runs, retros, designs, and',
+              'research are temporal artifacts — they belong in',
+              '[`engram-research`](https://github.com/vbonnet/engram-research)',
+              '(conventionally `wf/<project>/`), not here.',
               '',
-              '**Violated paths:**',
-              violations,
+              '```',
+              report.trim(),
+              '```',
               '',
               '### How to fix',
+              '1. `git rm` the file(s) from this PR.',
+              '2. Move the content into `engram-research` and open a PR there.',
+              '3. Re-push without the artifact.',
               '',
-              '1. Remove the file(s) from this PR.',
-              '2. Add them to `engram-research` under `retrospectives/` (for retros)',
-              '   or `research/` (for research docs).',
-              '3. Reference the engram-research PR from this PR description.',
-              '',
-              '**Why?** Code repos are for code and its immediate documentation.',
-              'Temporal artifacts (retros, one-off research) rot in code repos —',
-              'they accumulate without a clear lifecycle, clutter blame history,',
-              'and violate the routing policy in `.dear-agent.yml`.',
+              'The forbidden globs are defined once in `.dear-agent.yml >',
+              'forbidden-paths` and enforced by the `routing-guard` tool',
+              '(`cmd/routing-guard`), also runnable locally as a pre-commit',
+              'hook: `make install-routing-guard-hook`.',
             ].join('\n');
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -92,12 +103,6 @@ jobs:
       - name: Fail on violation
         if: steps.check.outputs.violations == 'true'
         run: |
-          echo ""
-          echo "ROUTING VIOLATION: The following files must not be added to this repo:"
-          cat violations.txt
-          echo ""
-          echo "Retros → engram-research/retrospectives/"
-          echo "Research → engram-research/research/"
-          echo ""
-          echo "See .dear-agent.yml for the full routing policy."
+          echo "ROUTING VIOLATION — see the report above and the PR comment."
+          echo "Forbidden globs live in .dear-agent.yml > forbidden-paths."
           exit 1
