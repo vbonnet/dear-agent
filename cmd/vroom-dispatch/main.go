@@ -78,7 +78,8 @@ var supervisors = []supervisor{
 		TertiaryFor:  "vroom-orchestrator",
 		TickInterval: 60 * time.Second,
 		TickPrompt: "Execute your Overseer tick: " +
-			"1) check peer heartbeats 2) probe system resources (disk, memory, FDs, gopls) " +
+			"1) check peer heartbeats 2) probe system resources by running `fd-pressure --json --trail ~/.agm/vroom/trail.jsonl` " +
+			"(samples disk/memory/swap/FDs/vnodes/gopls via SysResourceProbe and logs an \"overseer.resource.probe\" record; best-effort, never ends the tick) " +
 			"3) audit session health 4) reconcile stale beads " +
 			"5) audit worktrees 6) verify Meta-O activity " +
 			"7) verify binary freshness (agm admin verify-deployment) 8) write heartbeat.",
