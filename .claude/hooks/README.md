@@ -38,3 +38,48 @@ sanctioned shell-test path, run by `shell-tests.yml` and `shell-matrix.yml`.
 
 **First run.** Claude Code reviews new/changed hooks before they take effect;
 approve it once when prompted.
+
+## `stop-guardrail-feedback`
+
+The WF-A guardrail feedback loop (bead `ce-vrux`; CLAUDE.md principle 2,
+anti-stall). The keystone that lets deterministic guardrails close back into the
+*live* agent on the laptop instead of waiting for GitHub CI.
+
+**What it does.** Fires `Stop` and `SubagentStop`. When an agent is about to
+finish a turn *and the working tree is dirty*, it runs the deterministic
+guardrail bundle ([`../../scripts/guardrail-bundle.sh`](../../scripts/guardrail-bundle.sh)
+— `make preflight` parity today; Semgrep/arch tests via WF-B/WF-C tomorrow). If
+the bundle is **red**, it returns `{"decision":"block","reason":...}` so Claude
+Code re-prompts the *same* agent with natural-language remediation, and the agent
+keeps working until the guardrails are green — the "keep going until green" loop.
+
+**It is a block, not a nudge** (the inverse of `pretool-spawn-routing`): a
+failing guardrail at stop-time is exactly when a human reviewer would say "not
+done — fix this first," so letting the agent stop on red would defeat the point.
+But the block is *positive guidance* (principle 2) — the `reason` says what
+failed, how to fix it (root cause, never suppress the check), and how to bow out.
+
+**It cannot wedge a session** — three independent brakes:
+- A per-session attempt counter capped at `DEAR_GUARDRAIL_MAX_ITERS` (default 3).
+  Once exhausted it yields control back to the human with a non-blocking note
+  instead of blocking again (anti-stall). The counter resets the moment the
+  bundle goes green, and is keyed by `session_id` so concurrent agents don't
+  share a budget (state under `${CLAUDE_STATE_DIR:-~/.claude/state}/guardrail-loop/`).
+- It only engages on a **dirty** working tree, so read-only / chat / planning
+  turns are never touched.
+- It fails **open**: missing `jq`/`git`, unparseable input, a non-repo `cwd`, an
+  absent bundle, or unwritable state all exit 0 and let the stop proceed.
+
+**Opt out** for an interactive session with `export DEAR_GUARDRAIL_LOOP=0`.
+
+**Scope** (principle 1): WF-A owns the *loop mechanism* only. The guardrail
+*checks* live behind `scripts/guardrail-bundle.sh`, whose `run_step` list is the
+extension seam WF-B (Semgrep) and WF-C (architectural tests) grow into. The hook
+neither knows nor cares what the bundle runs.
+
+**Tests.** `bats tests/bats/stop-guardrail-feedback.bats` (11 cases; drives the
+bundle through its `GUARDRAIL_CMD` override so they never need the Go toolchain).
+Lives under `tests/bats/`, run by `shell-matrix.yml`.
+
+**First run.** Claude Code reviews new/changed hooks before they take effect;
+approve it once when prompted.
