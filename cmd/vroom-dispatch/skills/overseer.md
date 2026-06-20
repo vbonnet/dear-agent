@@ -208,7 +208,49 @@ in_progress:
 - The Orchestrator will handle re-dispatch — just flag it
 - Send to Orch: `agm send msg vroom-orchestrator --sender vroom-overseer --priority normal --prompt "Stale bead <id>: worker session dead but bead still in_progress. Needs re-dispatch."`
 
-### Step 8: Worktree Audit
+### Step 8: DoD Audit (closed-bead provenance)
+
+Catch the failure documented in the DEAR retro: beads closed against
+**unmerged** work (ce-6f1b, ce-mcw2, ce-1onr). A bead is only Done when its
+PR is MERGED — "PR created" or "PR open" is NOT done. This step re-checks
+every recently-closed bead and flags any that were closed against a PR that
+is not actually merged.
+
+List beads closed in the last 24h:
+```bash
+bd --db ~/beads/context-engine/.beads list --state=closed --format=json 2>/dev/null
+```
+(Filter the result to beads whose `closed_at`/`updated_at` is within the last
+24 hours — older closures were already audited on prior ticks.)
+
+For each such bead, read its close reason and look for a PR reference:
+```bash
+bd --db ~/beads/context-engine/.beads show <id> 2>/dev/null
+```
+- Extract the `close_reason` text. If it references a PR — it contains
+  `PR #NNN` or `pull/NNN` (a number `NNN`) — verify that PR is merged:
+  ```bash
+  STATE=$(GIT_TERMINAL_PROMPT=0 gtimeout 30 gh pr view <NNN> --repo vbonnet/dear-agent --json state --jq '.state' 2>/dev/null)
+  ```
+- If `STATE` is **not** `MERGED` (i.e. `OPEN`, `CLOSED`, or empty/unknown):
+  the bead was closed against unmerged work — a DoD violation. Append to the
+  trail:
+  ```bash
+  printf '{"ts":"%s","role":"overseer","kind":"dod.audit.violation","bead":"%s","pr":%s,"note":"closed against unmerged PR"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<id>" "<NNN>" \
+    >> ~/.agm/vroom/trail.jsonl
+  ```
+  Then flag it to the Orchestrator so the bead can be reopened / the work
+  re-driven to merge:
+  ```bash
+  agm send msg vroom-orchestrator --sender vroom-overseer --priority urgent \
+    --prompt "DoD VIOLATION: bead <id> was closed against PR #<NNN> which is <STATE>, not MERGED. Reopen the bead and drive the PR to merge (or re-dispatch)."
+  ```
+- If the `close_reason` references no PR at all, leave it — not every bead has
+  a PR (docs-only / triage closures). Only PR-referencing closures are audited
+  here.
+
+### Step 9: Worktree Audit
 
 ```bash
 # Count worktrees
@@ -231,7 +273,7 @@ If merged worktrees found, record in trail and recommend cleanup:
 kind: "supervisor.over.stranded_worktree"
 ```
 
-### Step 9: Write Resource Snapshot to Trail
+### Step 10: Write Resource Snapshot to Trail
 
 Even if nothing breached, record the baseline:
 ```bash
@@ -240,7 +282,7 @@ printf '{"ts":"%s","role":"overseer","kind":"supervisor.over.resource_snapshot",
   >> ~/.agm/vroom/trail.jsonl
 ```
 
-### Step 10: Verify Meta-O Activity
+### Step 11: Verify Meta-O Activity
 
 ```bash
 cat ~/.agm/vroom/roadmap.jsonl 2>/dev/null | tail -5
@@ -250,12 +292,13 @@ Check that Meta-O has been evaluating beads recently. If the last roadmap
 entry is >15 minutes old and there are open beads:
 - Send: `agm send msg vroom-meta-orchestrator --sender vroom-overseer --priority normal --prompt "No roadmap activity in >15min. Are there new beads to evaluate?"`
 
-### Step 11: Report Summary
+### Step 12: Report Summary
 
 After each tick, briefly note:
 - Resource posture: disk%, gopls count, notable metrics
 - Session health: total/stuck/offline
 - Stale beads: count
+- DoD violations: count (beads closed against unmerged PRs)
 - Escalations sent: count
 - Peer health: ok/stale
 
@@ -272,6 +315,7 @@ After each tick, briefly note:
 | Meta-O stale >5min | Urgent message |
 | Orch stale >5min | Urgent message |
 | In_progress bead with dead worker | Normal to Orch for re-dispatch |
+| Bead closed against unmerged PR (DoD violation) | Urgent to Orch: reopen + drive PR to merge; record `dod.audit.violation` |
 | Both peers stale >10min | Record mesh failure, file bead |
 | AGM daemon down | Restart with `agm session daemon start`, escalate if restart fails |
 

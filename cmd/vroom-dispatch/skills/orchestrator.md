@@ -141,6 +141,38 @@ a later tick. Do NOT try to override the circuit breaker.
 kind: "supervisor.orch.at_capacity"
 ```
 
+**Dispatch gate — dependency provenance (DoD).** Before `agm session new` for a
+bead `B`, verify every dependency `B` claims as satisfied is *genuinely* done.
+A closed dependency is only real if it was merged — the DEAR retro found beads
+closed against unmerged PRs (ce-6f1b, ce-mcw2, ce-1onr), which lets a downstream
+bead dispatch against work that does not exist on main yet.
+
+```bash
+# Read B's "Depends on" list.
+bd --db ~/beads/context-engine/.beads show <B> 2>/dev/null
+```
+
+For each dependency `D` listed under **Depends on**:
+- If `D` is still **open/in_progress**: `B` is not ready — skip dispatch this
+  tick (normal dependency blocking), no DoD concern.
+- If `D` is **closed**: confirm its closure is backed by a merged PR. Read its
+  close reason and, if it references a PR, check that PR is merged:
+  ```bash
+  bd --db ~/beads/context-engine/.beads show <D> 2>/dev/null     # find 'PR #NNN' in close reason
+  STATE=$(GIT_TERMINAL_PROMPT=0 gtimeout 30 gh pr view <NNN> --repo vbonnet/dear-agent --json state --jq '.state' 2>/dev/null)
+  ```
+  - If the close reason references a PR and `STATE` is **not** `MERGED`:
+    dependency `D` was closed against unmerged work. **Do NOT dispatch `B`.**
+    Record the violation and flag `D` to the Overseer for reopening:
+    ```bash
+    printf '{"ts":"%s","role":"orchestrator","kind":"dod.dispatch.blocked","payload":{"bead":"%s","dep":"%s","pr":"%s","dep_pr_state":"%s"}}\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<B>" "<D>" "<NNN>" "$STATE" >> ~/.agm/vroom/trail.jsonl
+    agm send msg vroom-overseer --sender vroom-orchestrator --priority urgent \
+      --prompt "DoD: dep <D> of <B> is closed against PR #<NNN> (<STATE>, not MERGED). Holding dispatch of <B>; reopen <D> and drive its PR to merge."
+    ```
+  - If the close reason references a merged PR (`STATE=MERGED`) or no PR at all
+    (docs-only/triage closure): the dependency is genuinely satisfied — proceed.
+
 **Cost guardrail (Opus runaway usage):** Workers now run on Opus, which is
 ~5× the token throughput of Sonnet per tick. On Max-plan OAuth there is no
 per-token *billing*, but there IS a shared usage ceiling — a worker stuck in a
@@ -201,6 +233,18 @@ Process (MANDATORY):
 - When the implementation phase is complete: open a PR via 'safe-pr create --wayfinder <wf-dir>'.
 - If stuck after 2 retries on the same error: STOP, report failure with two concrete
   alternatives. Permission/access errors: 0 retries — report immediately.
+
+Bead closure (DoD — MANDATORY, do NOT skip):
+- A bead is Done ONLY when its PR is MERGED to main. 'PR created' / 'PR open' /
+  'PR approved' are NOT done. (Three beads — ce-6f1b, ce-mcw2, ce-1onr — were
+  wrongly closed against unmerged work; the overseer now audits closures for this.)
+- Before running 'bd ... close <bead-id>', you MUST verify the PR is merged:
+    gh pr view <NNN> --repo vbonnet/dear-agent --json state,mergedAt
+- If state is not MERGED (or mergedAt is null): do NOT close the bead. Add a bead
+  note recording the block and leave the bead OPEN:
+    bd --db ~/beads/context-engine/.beads note <bead-id> 'BLOCKED: PR #<NNN> not yet merged'
+- Only run 'bd ... close <bead-id>' once mergedAt is non-null. Put the merged PR
+  reference (e.g. 'PR #<NNN>') in the close reason so the overseer DoD audit can verify it.
 
 Bead details: run bd --db ~/beads/context-engine/.beads show <bead-id>"
 ```
@@ -332,6 +376,7 @@ This makes it trivial to correlate sessions to beads.
 | Meta-O stale >10min | Critical message, file a bead about mesh degradation |
 | Overseer stale >5min | Urgent message |
 | Worker session dies mid-bead | Record in trail, mark for re-dispatch |
+| Bead's closed dependency was closed against an unmerged PR | Hold dispatch; record `dod.dispatch.blocked`; urgent to Overseer to reopen the dep |
 | Worker no manifest progress >15min (WORKING) | Level 1: status ping |
 | Worker no manifest progress >30min (any state) | Level 2: diagnose state, send wrap-up or defer nudge |
 | Worker no progress >45min + PERMISSION_PROMPT/OFFLINE + prior nudge failed | Level 3: force-kill, re-dispatch bead |
