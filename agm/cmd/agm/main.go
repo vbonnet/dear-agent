@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
 	"github.com/vbonnet/dear-agent/agm/internal/backend"
 	"github.com/vbonnet/dear-agent/agm/internal/cli"
 	"github.com/vbonnet/dear-agent/agm/internal/config"
@@ -55,6 +57,13 @@ var (
 	commandStartTime time.Time
 	auditLogger      *ops.AuditLogger
 )
+
+// stdoutIsTTY reports whether stdout is an interactive terminal. It is a package
+// variable so tests can override it to exercise the header-gating logic without a
+// real TTY.
+var stdoutIsTTY = func() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "agm",
@@ -106,7 +115,9 @@ Global Flags:
 
 		// Print header (version and binary location) for all commands except version and status-line
 		// status-line is excluded because it's designed for machine parsing (tmux status bar)
-		if cmd.Name() != "version" && cmd.Name() != "status-line" {
+		// Suppress in agent mode (AGM_AGENT set) or when stdout is not a TTY, to save tokens.
+		if cmd.Name() != "version" && cmd.Name() != "status-line" &&
+			os.Getenv("AGM_AGENT") == "" && stdoutIsTTY() {
 			executable, err := os.Executable()
 			if err != nil {
 				executable = "unknown"
@@ -208,6 +219,10 @@ Global Flags:
 }
 
 func init() {
+	// Silence the cobra Usage block on errors to save ~324 tokens per failed command.
+	// SilenceErrors stays false so errors still print.
+	rootCmd.SilenceUsage = true
+
 	// Initialize usage tracker
 	var err error
 	usageTracker, err = usage.New("")
