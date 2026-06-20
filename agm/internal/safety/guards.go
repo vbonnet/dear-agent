@@ -41,11 +41,14 @@ func stripANSI(s string) string {
 }
 
 // isGhostTextAfterPrompt reports whether the text after the ❯ prompt in the
-// ANSI-rich pane capture is Claude Code ghost/placeholder text. Ghost text is
-// styled with the dim attribute (\x1b[2m) — confirmed by live pane capture
-// showing: ❯ \x1b[2mstart the loop\x1b[0m (not present for real human input).
-// Only the portion of the line AFTER ❯ is checked to avoid false positives
-// from dim attributes that appear before the prompt marker.
+// ANSI-rich pane capture is overseer ghost/placeholder text rather than real
+// human input. Ghost text is styled with a dim or grey SGR attribute — Claude
+// Code uses the dim attribute (\x1b[2m), while the vroom-meta-orchestrator uses
+// 256-color grey (\x1b[38;5;241m). Detection is delegated to tmux.IsDimOrGreySGR
+// so all dim/grey variants are recognized (ce-5miu), generalizing the original
+// dim-only check (ce-v9in / PR #512). Only the portion of the line AFTER ❯ is
+// checked to avoid false positives from dim/grey attributes that appear before
+// the prompt marker.
 func isGhostTextAfterPrompt(ansiContent string) bool {
 	lines := strings.Split(ansiContent, "\n")
 	for _, line := range slices.Backward(lines) {
@@ -58,7 +61,7 @@ func isGhostTextAfterPrompt(ansiContent string) bool {
 		if idx < 0 {
 			continue
 		}
-		return strings.Contains(line[idx:], "\x1b[2m")
+		return tmux.IsDimOrGreySGR(line[idx:])
 	}
 	return false
 }
