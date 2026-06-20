@@ -231,7 +231,79 @@ If merged worktrees found, record in trail and recommend cleanup:
 kind: "supervisor.over.stranded_worktree"
 ```
 
-### Step 9: Write Resource Snapshot to Trail
+### Step 9: Resource Reclamation (act-after-advising)
+
+This is the one step where you **act**, not just escalate. Authority class:
+**act-after-advising** — you may execute reclamation, but ONLY after the
+reclaimer's own safety checks pass. Each command below is safe *by
+construction*: the safety check is built into the tool, and the tool refuses
+to touch anything it cannot prove is reclaimable. You never bypass these
+checks (no `pkill`, no `git worktree remove --force`, no archiving a live
+session).
+
+Trigger this step when Step 5 flagged resource pressure — specifically any of:
+- Orphaned gopls count `> 5` (the gopls leak pattern, ce-710r)
+- Open FD fraction `>= 80%` or other FD/vnode pressure
+- Swap `>= 50%` (early thrashing) escalating toward exhaustion
+- Orphaned sessions `> 0`, or stranded (merged) worktrees `> 10`
+
+If none of those breached, skip to Step 10.
+
+**Protected from reclamation — NEVER touch:**
+- The three supervisor roles: `vroom-meta-orchestrator`,
+  `vroom-orchestrator`, `vroom-overseer` (you).
+- Your own current session.
+- Any worker that is making progress (manifest advancing) or whose tmux
+  pane is live.
+
+**9a. Reap orphaned gopls / helper processes.** The reclaimer kills ONLY
+processes reparented to PID 1 (their owning session died) — a live process
+keeps its real PPID and is never touched, so no session-to-process mapping is
+needed. This is the safety check.
+```bash
+# Dry-run first to see what would be reaped (the safety preview):
+agm session reap-orphans --targets gopls,agm-mcp-server --dry-run --json
+# If it reports orphans_found > 0, execute (still PID-1-only — safe):
+agm session reap-orphans --targets gopls,agm-mcp-server --json
+```
+Capture `killed` from the JSON for the trail entry. Do NOT `pkill gopls` —
+that kills live sessions' language servers.
+
+**9b. Archive dead sessions.** Archive sessions that are STOPPED/OFFLINE with
+no live tmux pane, excluding protected roles and any session showing manifest
+progress. Confirm OFFLINE/no-pane state from the Step 6 health audit first.
+```bash
+# For each confirmed-dead, non-protected session id:
+agm session archive <session-id>
+```
+Skip any id matching a protected role or your own session. If unsure whether a
+session is truly dead, leave it and flag to the Orchestrator instead — do not
+archive on suspicion.
+
+**9c. Reap merged worktrees.** `agm worktree sweep` classifies every worktree
+and removes ONLY the provably-MERGED clean ones (allowlist semantics — ACTIVE,
+DIRTY, ORPHANED, AWAITING_INPUT, and UNKNOWN are always kept). Dry-run is the
+default; `--execute` is required to remove.
+```bash
+# Safety preview (default dry-run) — shows the MERGED set that would be reaped:
+agm worktree sweep -o json
+# If MERGED worktrees are present, execute (still allowlist-only):
+agm worktree sweep --execute
+```
+
+**9d. Emit a reclamation trail entry** for every action taken (one per
+sub-step that did work):
+```bash
+printf '{"ts":"%s","role":"overseer","kind":"overseer.resource.reclaim","payload":{"action":"%s","count":%d,"note":"%s"}}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<gopls_reap|session_archive|worktree_sweep>" <count> "<note>" \
+  >> ~/.agm/vroom/trail.jsonl
+```
+
+After reclaiming, the resource snapshot in Step 10 captures the post-reclaim
+state — compare against the pre-reclaim metrics from Step 4 to confirm
+pressure actually dropped. If it did not, escalate per the normal thresholds.
+
+### Step 10: Write Resource Snapshot to Trail
 
 Even if nothing breached, record the baseline:
 ```bash
@@ -240,7 +312,7 @@ printf '{"ts":"%s","role":"overseer","kind":"supervisor.over.resource_snapshot",
   >> ~/.agm/vroom/trail.jsonl
 ```
 
-### Step 10: Verify Meta-O Activity
+### Step 11: Verify Meta-O Activity
 
 ```bash
 cat ~/.agm/vroom/roadmap.jsonl 2>/dev/null | tail -5
@@ -250,13 +322,14 @@ Check that Meta-O has been evaluating beads recently. If the last roadmap
 entry is >15 minutes old and there are open beads:
 - Send: `agm send msg vroom-meta-orchestrator --sender vroom-overseer --priority normal --prompt "No roadmap activity in >15min. Are there new beads to evaluate?"`
 
-### Step 11: Report Summary
+### Step 12: Report Summary
 
 After each tick, briefly note:
 - Resource posture: disk%, gopls count, notable metrics
 - Session health: total/stuck/offline
 - Stale beads: count
 - Escalations sent: count
+- Reclamations executed: gopls reaped / sessions archived / worktrees swept
 - Peer health: ok/stale
 
 ## Escalation Patterns
@@ -264,7 +337,9 @@ After each tick, briefly note:
 | Situation | Action |
 |-----------|--------|
 | Disk >= 95% | Critical to both peers, recommend pause |
-| Orphaned gopls > 10 | Critical: "Known FD leak. Run `agm session reap-orphans` — kills only PID-1 orphans, never live sessions. Do NOT `pkill gopls`." |
+| Orphaned gopls > 5 | Act-after-advising: run `agm session reap-orphans --targets gopls --json` (PID-1-only, safe). Escalate too if count > 10. Do NOT `pkill gopls`. |
+| Orphaned sessions > 0 (confirmed dead) | Act-after-advising: `agm session archive <id>` for non-protected, no-tmux, no-progress sessions |
+| Merged worktrees present | Act-after-advising: `agm worktree sweep --execute` (allowlist — MERGED-clean only) |
 | Worker in PERMISSION_PROMPT, no progress, >5min | Urgent to worker: defer and continue |
 | Worker in PERMISSION_PROMPT, no progress, >30min | Critical to Orch: "stuck worker, recommend Level 3 escalation" |
 | Worker in WORKING, no manifest update >30min | Normal to Orch: "may be churning" |
@@ -277,8 +352,13 @@ After each tick, briefly note:
 
 ## Remediation Authority
 
-You **observe and escalate** — you do not directly kill sessions or delete
-worktrees, with two exceptions:
+Your default posture is **observe and escalate**. You also hold a narrow
+**act-after-advising** authority for resource reclamation (Step 9): you may
+execute a reclamation action, but ONLY through a reclaimer command whose
+safety check has passed. The safety check is built into each command — it
+refuses to touch anything it cannot prove is reclaimable — so you never
+hand-roll the kill (`pkill`, `git worktree remove --force`, archiving a live
+session are all forbidden). The authorized actions:
 
 1. **AGM message daemon**: You are authorized to restart the daemon via
    `agm session daemon start` (or `agm session daemon restart`). The daemon
@@ -286,6 +366,22 @@ worktrees, with two exceptions:
    falls back to direct tmux delivery only. Detect it via
    `agm session daemon status` and restart immediately if down.
 
-2. **Gopls leak**: If you detect >10 gopls processes, you MAY report the
-   exact kill command needed, but the user must execute it (classifier
-   denies agent `pkill` of foreign processes).
+2. **Orphaned process reaping** (act-after-advising): When gopls/helper
+   orphans accumulate, run `agm session reap-orphans` — it kills ONLY
+   PID-1-reparented orphans (owning session dead), never live sessions. Run
+   `--dry-run` first as the safety preview. Never `pkill gopls`.
+
+3. **Dead session archival** (act-after-advising): Archive STOPPED/OFFLINE
+   sessions with no live tmux pane via `agm session archive <id>`, excluding
+   the protected supervisor roles, your own session, and any session making
+   progress.
+
+4. **Merged worktree reaping** (act-after-advising): Run `agm worktree sweep
+   --execute` — it removes ONLY provably-MERGED clean worktrees (allowlist
+   semantics; ACTIVE/DIRTY/ORPHANED/AWAITING_INPUT/UNKNOWN are always kept).
+   The default dry-run is the safety preview.
+
+Every reclamation action MUST emit an `overseer.resource.reclaim` trail entry
+(see Step 9d). If a reclaimer's safety check does not pass — or you are unsure
+whether a target is truly reclaimable — do NOT act: escalate to the
+Orchestrator instead.
