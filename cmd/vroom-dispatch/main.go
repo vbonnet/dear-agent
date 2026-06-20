@@ -495,7 +495,7 @@ func spawnSessionWithRetry(sup supervisor, model string) error {
 		if err == nil {
 			return nil
 		}
-		lastErr = fmt.Errorf("%v: %s", err, strings.TrimSpace(string(output)))
+		lastErr = fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 		if !strings.Contains(string(output), spawnTooSoonMarker) {
 			return lastErr
 		}
