@@ -12,7 +12,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
-	"github.com/vbonnet/dear-agent/pkg/cliframe"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -92,6 +91,15 @@ Examples:
 
 		span.SetAttributes(attribute.Int("session.count", len(result.Sessions)))
 
+		// JSON output: route through the central printJSON path so the global
+		// --output json and --fields flags both work. --json is kept as a hidden
+		// backward-compatible alias for --output json. Emit JSON even when the
+		// result set is empty so programmatic consumers always get a parseable
+		// object rather than a human-readable warning.
+		if isJSONOutput() || listJSON {
+			return printJSON(result)
+		}
+
 		if len(result.Sessions) == 0 {
 			if !listAll {
 				ui.PrintWarning("No running sessions found")
@@ -101,19 +109,6 @@ Examples:
 				fmt.Println("\nCreate your first session with: agm session new")
 			}
 			return nil
-		}
-
-		// Output using cliframe
-		writer := cliframe.NewWriter(cmd.OutOrStdout(), cmd.ErrOrStderr())
-
-		if listJSON {
-			// Use cliframe JSON formatter
-			formatter, fmtErr := cliframe.NewFormatter(cliframe.FormatJSON, cliframe.WithPrettyPrint(true))
-			if fmtErr != nil {
-				return fmtErr
-			}
-			writer = writer.WithFormatter(formatter)
-			return writer.Output(result)
 		}
 
 		// For table output, use ops result summaries
@@ -146,7 +141,9 @@ func init() {
 	// Register with session command
 	sessionCmd.AddCommand(listCmdDolt)
 	listCmdDolt.Flags().BoolVar(&listAll, "all", false, "show all sessions including stopped and archived")
-	listCmdDolt.Flags().BoolVar(&listJSON, "json", false, "output as JSON")
+	listCmdDolt.Flags().BoolVar(&listJSON, "json", false, "output as JSON (alias for --output json)")
+	// --json is a backward-compatible alias for the global --output json flag.
+	_ = listCmdDolt.Flags().MarkHidden("json")
 	listCmdDolt.Flags().StringSliceVar(&listTags, "tag", nil, "filter by context tag (repeatable, e.g., --tag role:worker)")
 	listCmdDolt.Flags().StringSliceVar(&listFilters, "filter", nil, "filter by context tag (alias for --tag, e.g., --filter role:worker)")
 	listCmdDolt.Flags().BoolVar(&listTrust, "trust", false, "show trust score column")
