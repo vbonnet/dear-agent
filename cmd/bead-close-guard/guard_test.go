@@ -151,15 +151,19 @@ func TestFormatResult_Blocked(t *testing.T) {
 func TestFormatResult_Forced(t *testing.T) {
 	t.Parallel()
 	r := GuardResult{
-		BeadID:     "ce-test",
-		PRs:        []int{449},
-		UnmergedPR: []UnmergedPR{{Number: 449, State: "OPEN"}},
-		Passed:     true,
-		Forced:     true,
+		BeadID:        "ce-test",
+		PRs:           []int{449},
+		UnmergedPR:    []UnmergedPR{{Number: 449, State: "OPEN"}},
+		Passed:        true,
+		AbandonReason: "superseded by ce-xyz",
 	}
 	var buf strings.Builder
 	FormatResult(r, &buf)
-	if !strings.Contains(buf.String(), "OVERRIDE") {
-		t.Errorf("expected OVERRIDE, got %q", buf.String())
+	out := buf.String()
+	if !strings.Contains(out, "OVERRIDE") {
+		t.Errorf("expected OVERRIDE, got %q", out)
+	}
+	if !strings.Contains(out, "superseded by ce-xyz") {
+		t.Errorf("expected abandon reason in output, got %q", out)
 	}
 }
