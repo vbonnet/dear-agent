@@ -55,10 +55,12 @@ type ResourceSnapshot struct {
 	// start failing (see memory/gopls-fd-leak-blocks-go-build.md).
 	VnodeUsedFraction float64
 
-	// GoplsProcesses counts running gopls processes. Each orphaned gopls
-	// instance holds ~4800 FDs; accumulation is the primary driver of
-	// FD/vnode exhaustion. Escalation fires when the count exceeds
-	// EscalationThreshold.GoplsProcesses.
+	// GoplsProcesses counts *orphaned* gopls processes — those reparented to
+	// PID 1 after their owning Claude session died (not live gopls bound to a
+	// running session, which would make the count scale with session count and
+	// fire phantom alarms — see ce-u7v9). Each orphaned gopls instance holds
+	// ~4800 FDs; accumulation is the primary driver of FD/vnode exhaustion.
+	// Escalation fires when the count exceeds EscalationThreshold.GoplsProcesses.
 	GoplsProcesses int
 
 	// StrandedWorktrees counts worktrees whose branches have been merged
@@ -87,9 +89,10 @@ type EscalationThreshold struct {
 	SwapFraction float64
 
 	// GoplsProcesses is the count above which the Overseer escalates on
-	// gopls process accumulation. Default 5 if zero — more than 5 concurrent
-	// gopls processes is unusual and likely indicates a leak (each holds
-	// ~4800 FDs on Darwin).
+	// orphaned-gopls accumulation. Default 5 if zero — more than 5 gopls
+	// reparented to PID 1 is a clear leak (each holds ~4800 FDs on Darwin).
+	// Note this counts orphans only, not live session gopls (see
+	// ResourceSnapshot.GoplsProcesses).
 	GoplsProcesses int
 }
 
