@@ -76,7 +76,7 @@ func (s *FileClaimStore) Put(_ context.Context, c Claim) error {
 		return fmt.Errorf("FileClaimStore: marshal: %w", err)
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("FileClaimStore: write temp: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {

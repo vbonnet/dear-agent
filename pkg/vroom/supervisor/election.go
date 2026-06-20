@@ -78,11 +78,11 @@ func roleOrder(r Role) int {
 type ElectionPhase int
 
 const (
-	// PhaseIdle: no active claim on the target.
+	// PhaseIdle means no active claim on the target.
 	PhaseIdle ElectionPhase = iota
-	// PhaseClaimed: a claim has been written and the verify window is open.
+	// PhaseClaimed means a claim has been written and the verify window is open.
 	PhaseClaimed
-	// PhaseAssumed: the verify window passed unchallenged and this supervisor
+	// PhaseAssumed means the verify window passed unchallenged and this supervisor
 	// now holds the target's responsibilities.
 	PhaseAssumed
 )
@@ -327,7 +327,7 @@ func (e *Election) Step(ctx context.Context, target Role, reason string, isStale
 		})
 		return ElectionOutcome{Phase: PhaseAssumed, Eligible: true, Assumed: true}
 
-	default: // PhaseAssumed — steady state, nothing to do.
+	case PhaseAssumed: // steady state, nothing to do.
 		return ElectionOutcome{Phase: PhaseAssumed, Eligible: true}
 	}
 }

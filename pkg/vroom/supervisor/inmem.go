@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -126,10 +127,8 @@ func (r *InMemoryRoadmap) AddUnderFailover(_ context.Context, p WorkProposal, by
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, id := range r.accepted {
-		if id == p.ID {
-			return fmt.Errorf("InMemoryRoadmap: proposal %q already accepted", p.ID)
-		}
+	if slices.Contains(r.accepted, p.ID) {
+		return fmt.Errorf("InMemoryRoadmap: proposal %q already accepted", p.ID)
 	}
 	delete(r.pending, p.ID) // promote out of pending if it was proposed
 	r.accepted = append(r.accepted, p.ID)

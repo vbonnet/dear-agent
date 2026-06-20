@@ -113,7 +113,7 @@ func CapabilitiesFor(mode MeshMode, roadmapAuthority bool) Capabilities {
 			SelfTerminate:      false,
 			NotifyHuman:        false,
 		}
-	default: // ModeEmergency
+	case ModeEmergency:
 		return Capabilities{
 			AddRoadmapItems:    false,
 			SpawnWorkers:       false,

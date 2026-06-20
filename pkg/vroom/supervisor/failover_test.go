@@ -3,6 +3,7 @@ package supervisor
 import (
 	"bytes"
 	"context"
+	"slices"
 	"testing"
 	"time"
 )
@@ -10,12 +11,7 @@ import (
 // hasKind reports whether want appears among the trail record kinds (helper
 // trailKinds is defined in loop_test.go).
 func hasKind(kinds []string, want string) bool {
-	for _, k := range kinds {
-		if k == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(kinds, want)
 }
 
 func newFailoverForTest(t *testing.T, self Role, clock func() time.Time, window time.Duration, promote int, notifier PeerNotifier) (*Failover, *bytes.Buffer) {
