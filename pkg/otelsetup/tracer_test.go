@@ -72,3 +72,27 @@ func TestInitTracer_NoopShutdownClean(t *testing.T) {
 		t.Fatalf("no-op shutdown returned error: %v", err)
 	}
 }
+
+func TestParseOTLPEndpoint(t *testing.T) {
+	cases := []struct {
+		raw          string
+		wantTarget   string
+		wantInsecure bool
+	}{
+		// The footgun case: a scheme-less host:port must still produce a valid
+		// dial target (the exporter's env parser would map this to "").
+		{"localhost:4317", "localhost:4317", true},
+		{"http://localhost:4317", "localhost:4317", true},
+		{"http://localhost:4317/", "localhost:4317", true},
+		{"https://tempo.example.com:4317", "tempo.example.com:4317", false},
+		{"  localhost:4317  ", "localhost:4317", true},
+		{"127.0.0.1:4317", "127.0.0.1:4317", true},
+	}
+	for _, c := range cases {
+		target, insecure := parseOTLPEndpoint(c.raw)
+		if target != c.wantTarget || insecure != c.wantInsecure {
+			t.Errorf("parseOTLPEndpoint(%q) = (%q, %v), want (%q, %v)",
+				c.raw, target, insecure, c.wantTarget, c.wantInsecure)
+		}
+	}
+}
