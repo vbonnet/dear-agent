@@ -228,7 +228,7 @@ func gcSkipReason(m *manifest.Manifest, protectRoles []string, activeTmuxByID ma
 		// duplicates/orphans and ARE gc-eligible — otherwise they accumulate
 		// after crash/kill cycles and permanently block reuse of the canonical
 		// name. Fall through to the normal stopped-session gc logic below.
-		if tmuxSessions[m.Name] {
+		if activeTmuxByID[m.SessionID] {
 			return GCSkipProtectedRole, true
 		}
 	}
