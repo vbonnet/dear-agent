@@ -6,7 +6,7 @@
 //
 // Usage:
 //
-//	bead-close-guard --bead <id> [--repo owner/name] [--beads-dir /path] [--force] [--verify-only]
+//	bead-close-guard --bead <id> [--repo owner/name] [--beads-dir /path] [--abandon-reason <why>] [--verify-only]
 //
 // Exit codes:
 //
@@ -30,11 +30,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("bead-close-guard", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		beadID     = fs.String("bead", "", "bead ID to check (required)")
-		repo       = fs.String("repo", "", "GitHub repo in owner/name form (defaults to git remote)")
-		beadsDir   = fs.String("beads-dir", "", "path to the .beads directory (e.g. ~/beads/context-engine/.beads)")
-		force      = fs.Bool("force", false, "allow close even with unmerged PRs (for abandoned beads)")
-		verifyOnly = fs.Bool("verify-only", false, "check DoD without closing — use as 'bd verify'")
+		beadID        = fs.String("bead", "", "bead ID to check (required)")
+		repo          = fs.String("repo", "", "GitHub repo in owner/name form (defaults to git remote)")
+		beadsDir      = fs.String("beads-dir", "", "path to the .beads directory (e.g. ~/beads/context-engine/.beads)")
+		abandonReason = fs.String("abandon-reason", "", "reason for abandoning this bead despite unmerged PRs (audited)")
+		verifyOnly    = fs.Bool("verify-only", false, "check DoD without closing — use as 'bd verify'")
 	)
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "usage: bead-close-guard --bead <id> [flags]\n\n"+
@@ -65,10 +65,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	cfg := GuardConfig{
-		BeadID:   *beadID,
-		Repo:     *repo,
-		BeadsDir: *beadsDir,
-		Force:    *force,
+		BeadID:        *beadID,
+		Repo:          *repo,
+		BeadsDir:      *beadsDir,
+		AbandonReason: *abandonReason,
 	}
 
 	result, err := CheckDoD(cfg)
@@ -95,6 +95,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	FormatResult(result, stdout)
+	if result.AbandonReason != "" {
+		home, _ := os.UserHomeDir()
+		var unmergedNums []int
+		for _, pr := range result.UnmergedPR {
+			unmergedNums = append(unmergedNums, pr.Number)
+		}
+		if auditErr := AppendAbandonAudit(home, *beadID, result.AbandonReason, unmergedNums); auditErr != nil {
+			fmt.Fprintf(stderr, "warning: abandon audit log failed: %v\n", auditErr)
+		}
+	}
 	if !result.Passed {
 		return 2
 	}

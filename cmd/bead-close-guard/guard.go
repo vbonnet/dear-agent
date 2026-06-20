@@ -6,26 +6,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 )
 
 type GuardConfig struct {
-	BeadID   string
-	Repo     string
-	BeadsDir string
-	Force    bool
+	BeadID        string
+	Repo          string
+	BeadsDir      string
+	AbandonReason string
 }
 
 type GuardResult struct {
-	BeadID     string
-	Title      string
-	PRs        []int
-	UnmergedPR []UnmergedPR
-	Passed     bool
-	Forced     bool
+	BeadID        string
+	Title         string
+	PRs           []int
+	UnmergedPR    []UnmergedPR
+	Passed        bool
+	AbandonReason string
 }
 
 type UnmergedPR struct {
@@ -52,10 +54,10 @@ func CheckDoD(cfg GuardConfig) (GuardResult, error) {
 
 	prNums := extractPRNumbers(detail)
 	result := GuardResult{
-		BeadID: cfg.BeadID,
-		Title:  extractTitle(detail),
-		PRs:    prNums,
-		Forced: cfg.Force,
+		BeadID:        cfg.BeadID,
+		Title:         extractTitle(detail),
+		PRs:           prNums,
+		AbandonReason: cfg.AbandonReason,
 	}
 
 	if len(prNums) == 0 {
@@ -78,7 +80,7 @@ func CheckDoD(cfg GuardConfig) (GuardResult, error) {
 		}
 	}
 
-	result.Passed = len(result.UnmergedPR) == 0 || cfg.Force
+	result.Passed = len(result.UnmergedPR) == 0 || cfg.AbandonReason != ""
 	return result, nil
 }
 
@@ -98,9 +100,9 @@ func FormatResult(r GuardResult, w io.Writer) {
 		prList[i] = fmt.Sprintf("#%d (%s)", pr.Number, pr.State)
 	}
 
-	if r.Forced {
-		fmt.Fprintf(w, "OVERRIDE: bead %s has unmerged PR(s) %s but --force was specified\n",
-			r.BeadID, strings.Join(prList, ", "))
+	if r.AbandonReason != "" {
+		fmt.Fprintf(w, "OVERRIDE: bead %s has unmerged PR(s) %s — abandoning: %s\n",
+			r.BeadID, strings.Join(prList, ", "), r.AbandonReason)
 		return
 	}
 
@@ -112,7 +114,49 @@ func FormatResult(r GuardResult, w io.Writer) {
 	for _, pr := range r.UnmergedPR {
 		fmt.Fprintf(w, "  • Merge PR #%d first, then close the bead\n", pr.Number)
 	}
-	fmt.Fprintf(w, "  • Or use --force if abandoning this bead (not completing it)\n")
+	fmt.Fprintf(w, "  • Or use --abandon-reason \"<why>\" if abandoning this bead (audited)\n")
+}
+
+// AbandonAuditRecord is one JSONL line in the bead-abandon audit log.
+type AbandonAuditRecord struct {
+	Time          string `json:"time"`
+	BeadID        string `json:"bead_id"`
+	AbandonReason string `json:"abandon_reason"`
+	UnmergedPRs   []int  `json:"unmerged_prs,omitempty"`
+}
+
+// AppendAbandonAudit appends one record to ~/.local/state/dear-agent/bead-abandon-audit.jsonl.
+func AppendAbandonAudit(home, beadID, reason string, unmergedPRs []int) (err error) {
+	if home == "" {
+		home = "/tmp"
+	}
+	dir := filepath.Join(home, ".local", "state", "dear-agent")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("cannot create audit dir %s: %w", dir, err)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "bead-abandon-audit.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("cannot open abandon audit log: %w", err)
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("cannot close abandon audit log: %w", cerr)
+		}
+	}()
+	rec := AbandonAuditRecord{
+		Time:          time.Now().UTC().Format(time.RFC3339),
+		BeadID:        beadID,
+		AbandonReason: reason,
+		UnmergedPRs:   unmergedPRs,
+	}
+	line, err := json.Marshal(rec)
+	if err != nil {
+		return fmt.Errorf("cannot marshal abandon audit record: %w", err)
+	}
+	if _, err = f.Write(append(line, '\n')); err != nil {
+		return err
+	}
+	return nil
 }
 
 func extractPRNumbers(text string) []int {
