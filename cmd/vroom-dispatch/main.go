@@ -586,8 +586,9 @@ func sendLoopCommand(sup supervisor) bool {
 // checks supervisor health every 30s, classifying each as alive/stale/dead
 // based on both session liveness and heartbeat freshness. Dead supervisors
 // are restarted with exponential backoff. After 3 consecutive restart
-// failures for the same supervisor, it logs an escalation (future: desktop
-// notification via ce-mcw2).
+// failures for the same supervisor, it calls escalateToHuman, which records the
+// escalation and notifies the operator via desktop notification + MCP push
+// (ce-mcw2).
 func runHealthMonitor(home string, state *sessionState, model string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -637,12 +638,13 @@ func runHealthMonitor(home string, state *sessionState, model string) {
 				ok, count := tracker.shouldRestart(sup.Name)
 				if !ok {
 					if tracker.shouldEscalate(sup.Name) {
-						writeTrail(home, "dispatch.escalation.restart_exhausted", map[string]any{
+						msg := fmt.Sprintf("%s: %d consecutive restart failures — needs human intervention",
+							sup.Name, count)
+						escalateToHuman(home, "restart_exhausted", msg, map[string]any{
 							"supervisor": sup.Name,
 							"restarts":   count,
 						})
-						fmt.Printf("[%s] ESCALATION: %d consecutive restart failures — needs human intervention\n",
-							sup.Name, count)
+						fmt.Printf("[%s] ESCALATION: %s\n", sup.Name, msg)
 					}
 					continue
 				}
