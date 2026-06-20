@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -91,9 +93,94 @@ func HasGhostTextInANSI(ansiContent string) bool {
 		if idx < 0 {
 			continue
 		}
-		return strings.Contains(line[idx:], "\x1b[2m")
+		return IsDimOrGreySGR(line[idx:])
 	}
 	return false
+}
+
+// sgrParamRe matches an ANSI SGR escape sequence and captures its (possibly
+// empty, possibly semicolon-separated) numeric parameter list.
+var sgrParamRe = regexp.MustCompile(`\x1b\[([0-9;]*)m`)
+
+// IsDimOrGreySGR reports whether s contains any ANSI SGR escape sequence that
+// renders text dim or grey. Claude Code styles ghost/placeholder text with the
+// dim attribute (\x1b[2m), but other overseers — notably the
+// vroom-meta-orchestrator — use 256-color grey (\x1b[38;5;241m) for the same
+// hint text after the ❯ prompt. This generalizes the original dim-only check
+// (ce-v9in / PR #512) to all dim/grey SGR variants (ce-5miu):
+//
+//   - 2            dim attribute (alone or combined, e.g. \x1b[2;38;5;241m)
+//   - 90           bright-black (grey) foreground
+//   - 38;5;N       256-color foreground where N is a grey shade (8 or 232–255)
+//   - 38;2;r;g;b   truecolor foreground that is a dim grey (channels ≈ equal)
+func IsDimOrGreySGR(s string) bool {
+	for _, m := range sgrParamRe.FindAllStringSubmatch(s, -1) {
+		if hasDimOrGreySGRParams(strings.Split(m[1], ";")) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasDimOrGreySGRParams checks a split SGR parameter list for dim/grey attributes.
+func hasDimOrGreySGRParams(params []string) bool {
+	for i := 0; i < len(params); i++ {
+		switch params[i] {
+		case "2", "90": // dim attribute or bright-black (grey)
+			return true
+		case "38", "48": // extended fg/bg color — consume sub-params so the "5"/"2"
+			// selector and color operands are not re-interpreted as standalone codes.
+			grey, skip := consumeExtendedColor(params, i)
+			if grey {
+				return true
+			}
+			i += skip
+		}
+	}
+	return false
+}
+
+// consumeExtendedColor parses an extended-color (38/48) parameter sequence at
+// index i and returns (isFgGrey, paramsToSkip). Only 38 (foreground) sequences
+// that resolve to a grey shade return true; 48 (background) sequences are
+// consumed and skipped without signaling grey.
+func consumeExtendedColor(params []string, i int) (bool, int) {
+	if i+2 < len(params) && params[i+1] == "5" {
+		n, err := strconv.Atoi(params[i+2])
+		isFgGrey := params[i] == "38" && err == nil && isGreyIndex(n)
+		return isFgGrey, 2
+	}
+	if i+4 < len(params) && params[i+1] == "2" {
+		r, e1 := strconv.Atoi(params[i+2])
+		g, e2 := strconv.Atoi(params[i+3])
+		b, e3 := strconv.Atoi(params[i+4])
+		allOK := e1 == nil && e2 == nil && e3 == nil
+		isFgGrey := params[i] == "38" && allOK && isGreyRGB(r, g, b)
+		return isFgGrey, 4
+	}
+	return false, 0
+}
+
+// isGreyIndex reports whether a 256-color palette index renders as grey: the
+// dim palette grey (8) or any entry on the greyscale ramp (232–255).
+func isGreyIndex(n int) bool {
+	return n == 8 || (n >= 232 && n <= 255)
+}
+
+// isGreyRGB reports whether an (r,g,b) truecolor is a dim grey: the three
+// channels are near-equal (so it is on the grey axis) and not bright (so plain
+// white/near-white normal text is not misclassified as a ghost hint).
+func isGreyRGB(r, g, b int) bool {
+	maxc, minc := r, r
+	for _, c := range []int{g, b} {
+		if c > maxc {
+			maxc = c
+		}
+		if c < minc {
+			minc = c
+		}
+	}
+	return maxc-minc <= 16 && (r+g+b)/3 < 180
 }
 
 // hasQueuedInput checks if the session has queued pasted text or user input

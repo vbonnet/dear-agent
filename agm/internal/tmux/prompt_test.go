@@ -469,3 +469,61 @@ func TestContainsClaudePromptPattern_ForPasteVerification(t *testing.T) {
 		})
 	}
 }
+
+// TestIsDimOrGreySGR covers the generalized dim/grey SGR detection (ce-5miu),
+// extending the original dim-only (\x1b[2m) check (ce-v9in / PR #512) to the
+// 256-color grey, bright-black, and dim-truecolor variants that overseers like
+// the vroom-meta-orchestrator use for ghost/hint text.
+func TestIsDimOrGreySGR(t *testing.T) {
+	tests := []struct {
+		name string
+		s    string
+		want bool
+	}{
+		{"standard dim", "\x1b[2mhint\x1b[0m", true},
+		{"256-color grey 241", "\x1b[38;5;241mhint\x1b[0m", true},
+		{"256-color greyscale ramp 232", "\x1b[38;5;232mhint\x1b[0m", true},
+		{"256-color greyscale ramp 255", "\x1b[38;5;255mhint\x1b[0m", true},
+		{"256-color dim palette grey 8", "\x1b[38;5;8mhint\x1b[0m", true},
+		{"dim combined with 256-color grey", "\x1b[2;38;5;241mhint\x1b[0m", true},
+		{"bright black foreground", "\x1b[90mhint\x1b[0m", true},
+		{"dim truecolor grey", "\x1b[38;2;120;120;120mhint\x1b[0m", true},
+		{"no SGR at all", "plain text", false},
+		{"reset only", "\x1b[0mplain\x1b[0m", false},
+		{"plain bold", "\x1b[1mbold\x1b[0m", false},
+		{"non-grey 256-color (red)", "\x1b[38;5;196mtext\x1b[0m", false},
+		{"non-grey 256-color cube", "\x1b[38;5;33mtext\x1b[0m", false},
+		{"bright red foreground", "\x1b[91mtext\x1b[0m", false},
+		{"bright white truecolor", "\x1b[38;2;255;255;255mtext\x1b[0m", false},
+		{"non-grey truecolor (blue)", "\x1b[38;2;30;30;200mtext\x1b[0m", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsDimOrGreySGR(tt.s); got != tt.want {
+				t.Errorf("IsDimOrGreySGR(%q) = %v, want %v", tt.s, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHasGhostTextInANSI_GreyVariants confirms the live-capture path recognizes
+// the generalized grey ghost-text styles after the ❯ prompt (ce-5miu).
+func TestHasGhostTextInANSI_GreyVariants(t *testing.T) {
+	tests := []struct {
+		name string
+		ansi string
+		want bool
+	}{
+		{"dim ghost text", "❯ \x1b[2mstart the loop\x1b[0m\n", true},
+		{"256-color grey ghost text", "❯ \x1b[38;5;241mstart the loop\x1b[0m\n", true},
+		{"real human typing", "❯ please fix the bug\n", false},
+		{"grey before prompt is not ghost", "\x1b[38;5;241mlabel\x1b[0m ❯ real input\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HasGhostTextInANSI(tt.ansi); got != tt.want {
+				t.Errorf("HasGhostTextInANSI(%q) = %v, want %v", tt.ansi, got, tt.want)
+			}
+		})
+	}
+}
