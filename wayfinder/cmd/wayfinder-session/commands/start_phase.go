@@ -12,6 +12,10 @@ import (
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/tracker"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/validator"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -35,8 +39,20 @@ func init() {
 	StartPhaseCmd.Flags().BoolVar(&allowDirty, "allow-dirty", false, "Allow phase transition with uncommitted files in project directory")
 }
 
-func runStartPhase(cmd *cobra.Command, args []string) error {
+func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 	phaseName := args[0]
+
+	// Trace the phase transition. cmd.Context() is always non-nil (cobra
+	// defaults to context.Background()); the span is a no-op unless a collector
+	// is configured. Span name keeps the SDLC phase transition legible in Jaeger.
+	_, span := otel.Tracer("wayfinder").Start(cmd.Context(), "wayfinder.phase.start",
+		trace.WithAttributes(attribute.String("phase.name", phaseName)))
+	defer func() {
+		if retErr != nil {
+			span.SetStatus(codes.Error, retErr.Error())
+		}
+		span.End()
+	}()
 
 	// Get project directory
 	projectDir := GetProjectDirectory()

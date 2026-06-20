@@ -46,6 +46,10 @@
 #   install-pr-linkify      Install pr-linkify to ~/go/bin
 #   build-fd-pressure       Build fd-pressure: FD/vnode/gopls pressure monitor
 #   install-fd-pressure     Install fd-pressure to ~/go/bin
+#   build-gopls-watchdog    Build gopls-watchdog: gopls alarm + auto-remediation (cmd/gopls-watchdog)
+#   install-gopls-watchdog  Install gopls-watchdog to ~/go/bin
+#   install-gopls-watchdog-launchagent   Stage the gopls-watchdog launch agent (2-min tick)
+#   uninstall-gopls-watchdog-launchagent Remove the gopls-watchdog launch agent
 #   build-vroom-dispatch    Build vroom-dispatch: VROOM supervisor mesh launcher
 #   install-vroom-dispatch  Install vroom-dispatch to ~/go/bin
 #   build-resolve-review-threads  Build resolve-review-threads: GitHub PR thread resolver
@@ -58,7 +62,7 @@
 #   build-src-health        Build src-health: ~/src repo canary (ce-m3ya)
 #   install-src-health      Install src-health to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-token-refresher install-token-refresher build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-token-refresher install-token-refresher build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -361,6 +365,26 @@ build-jaeger-health:
 install-jaeger-health: build-jaeger-health
 	cp bin/jaeger-health $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/jaeger-health"
+
+# Build otel-local: launches a local Jaeger v2 collector (OTLP gRPC :4317,
+# UI :16686) with no Docker. Locates or --fetch'es the native Jaeger binary,
+# waits for health, and prints the OTEL_EXPORTER_OTLP_ENDPOINT export line.
+# See pkg/otelsetup/README.md for the full opt-in tracing workflow.
+build-otel-local:
+	@echo "Building otel-local..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/otel-local ./cmd/otel-local/
+	@echo "Built: bin/otel-local"
+
+install-otel-local: build-otel-local
+	cp bin/otel-local $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/otel-local"
+
+# Convenience: install and launch the local collector in one step. Fetches the
+# pinned Jaeger release if no binary is present, then runs it in the foreground
+# (Ctrl-C to stop). Then in another shell: eval "$$(otel-local env)".
+otel-up: install-otel-local
+	$(HOME)/go/bin/otel-local up --fetch
 
 # Build bead-pr-sync: reconciles bead CLOSED status against GitHub PR merge
 # state. Finds beads closed while their PR is still open (DoD violations) and
@@ -665,6 +689,30 @@ build-fd-pressure:
 install-fd-pressure: build-fd-pressure
 	cp bin/fd-pressure $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/fd-pressure"
+
+build-gopls-watchdog:
+	@echo "Building gopls-watchdog..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/gopls-watchdog ./cmd/gopls-watchdog/
+	@echo "Built: bin/gopls-watchdog"
+
+install-gopls-watchdog: build-gopls-watchdog
+	cp bin/gopls-watchdog $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/gopls-watchdog"
+
+install-gopls-watchdog-launchagent: install-gopls-watchdog
+	@mkdir -p $(HOME)/Library/LaunchAgents
+	@mkdir -p $(HOME)/.local/state/dear-agent
+	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.dear-agent.gopls-watchdog.plist \
+		> $(HOME)/Library/LaunchAgents/com.dear-agent.gopls-watchdog.plist
+	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.gopls-watchdog.plist"
+	@echo "Activate it yourself (ask-gated host action):"
+	@echo "  launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.dear-agent.gopls-watchdog.plist"
+
+uninstall-gopls-watchdog-launchagent:
+	@launchctl bootout gui/$$(id -u)/com.dear-agent.gopls-watchdog 2>/dev/null || true
+	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.gopls-watchdog.plist
+	@echo "Removed: com.dear-agent.gopls-watchdog launch agent"
 
 build-vroom-dispatch:
 	@echo "Building vroom-dispatch..."

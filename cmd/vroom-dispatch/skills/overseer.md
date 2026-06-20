@@ -83,7 +83,25 @@ agm send msg vroom-orchestrator --sender vroom-overseer --priority critical --pr
 
 ### Step 4: Probe System Resources
 
-Run these commands and capture results:
+**Primary probe — the canonical `SysResourceProbe` (bead ce-mbgq).** Run the
+`fd-pressure` binary; it samples disk / memory / swap / FDs / vnodes / gopls
+through the same Go `SysResourceProbe` the in-process supervisor uses, appends
+one `overseer.resource.probe` record to the trail, and prints the snapshot as
+JSON. Prefer this over the raw `df`/`vm_stat`/`sysctl` commands below — they
+are the manual fallback for when the binary is unavailable.
+
+```bash
+# Measure + log in one call. --trail appends an "overseer.resource.probe"
+# record to ~/.agm/vroom/trail.jsonl; --json prints the snapshot for you to read.
+# Exit code: 0 = all within limits, 1 = at least one metric breached threshold,
+# 2 = error. The trail write is best-effort — a failure prints to stderr and
+# does NOT change the exit code, so the tick continues regardless.
+fd-pressure --json --trail ~/.agm/vroom/trail.jsonl
+```
+
+If the snapshot above is enough, you can skip the raw commands below and go
+straight to Step 5; they remain as a manual fallback (e.g. if `fd-pressure` is
+not on PATH) and for reading individual metrics.
 
 ```bash
 # Disk usage (root volume)
@@ -130,6 +148,13 @@ agm session list 2>/dev/null | grep -c "OFFLINE" || echo "0"
 | Gopls processes | > 5 | Escalate (known leak pattern — see ce-710r) |
 | Stranded worktrees | > 10 | Recommend cleanup |
 | Orphaned sessions | > 0 | Recommend archive/kill |
+
+> **Automated backstop (ce-710r.3):** the `gopls-watchdog` launch agent runs
+> every 2 minutes — it samples orphaned-gopls count/RSS and system FD-table
+> usage, reaps orphaned gopls automatically (PPID==1 only, never live sessions),
+> and logs a `watchdog.gopls.alarm` record to `~/.agm/vroom/trail.jsonl`. If you
+> see recent `watchdog.gopls.alarm` records, remediation has already fired; your
+> job is to confirm the alarm cleared, not to re-run the reap.
 
 For each threshold breach, write trail record:
 ```bash
@@ -233,7 +258,14 @@ kind: "supervisor.over.stranded_worktree"
 
 ### Step 9: Write Resource Snapshot to Trail
 
-Even if nothing breached, record the baseline:
+If you ran `fd-pressure --trail ~/.agm/vroom/trail.jsonl` in Step 4, the
+canonical `overseer.resource.probe` snapshot record was **already written** by
+the probe — you do NOT need to write another baseline record. That probe record
+carries the full SysResourceProbe snapshot (disk/memory/swap/FDs/vnodes/gopls
+plus a `breached` count) and is the system of record for this tick.
+
+Only if `fd-pressure` was unavailable and you fell back to the raw commands in
+Step 4, record the baseline manually so the tick still leaves a trace:
 ```bash
 printf '{"ts":"%s","role":"overseer","kind":"supervisor.over.resource_snapshot","payload":{"disk_pct":"%s","gopls":%d,"worktrees":%d,"sessions":%d}}\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<disk%>" <gopls_count> <worktree_count> <session_count> \

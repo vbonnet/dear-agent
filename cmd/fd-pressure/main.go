@@ -12,6 +12,14 @@
 //	fd-pressure --threshold-fds 0.85     # override FD escalation threshold
 //	fd-pressure --threshold-vnodes 0.90  # override vnode escalation threshold
 //	fd-pressure --threshold-gopls 5      # override gopls count threshold
+//	fd-pressure --trail ~/.agm/vroom/trail.jsonl  # also append a probe record
+//
+// When --trail is set, one "overseer.resource.probe" record carrying the full
+// SysResourceProbe snapshot (plus any breaches) is appended to the named
+// decision trail. This is how the VROOM Overseer's tick wires the real
+// SysResourceProbe into ~/.agm/vroom/trail.jsonl (bead ce-mbgq). The trail
+// write is best-effort: a failure is reported on stderr but never changes the
+// exit code, so a tick keeps going even when the trail is unwritable.
 //
 // Metrics:
 //
@@ -32,6 +40,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/vbonnet/dear-agent/pkg/vroom/decisiontrail"
 	"github.com/vbonnet/dear-agent/pkg/vroom/supervisor"
 )
 
@@ -51,6 +60,7 @@ type config struct {
 	thresholdFDs    float64
 	thresholdVnodes float64
 	thresholdGopls  int
+	trailPath       string
 }
 
 func run(args []string, out io.Writer) (int, error) {
@@ -64,6 +74,8 @@ func run(args []string, out io.Writer) (int, error) {
 		"vnode fraction threshold for non-zero exit")
 	fs.IntVar(&cfg.thresholdGopls, "threshold-gopls", supervisor.DefaultEscalationThreshold.GoplsProcesses,
 		"gopls process count threshold for non-zero exit")
+	fs.StringVar(&cfg.trailPath, "trail", "",
+		"if set, append an overseer.resource.probe record (snapshot + breaches) to this JSONL decision trail")
 	if err := fs.Parse(args); err != nil {
 		return 2, err
 	}
@@ -77,6 +89,17 @@ func run(args []string, out io.Writer) (int, error) {
 	}
 
 	breached := evaluate(snap, cfg)
+
+	// Wire the snapshot into the VROOM decision trail (bead ce-mbgq). This is
+	// best-effort by design: a tick must record-and-continue, so a trail-write
+	// failure is reported on stderr but never changes the exit code. Use a fresh
+	// context — the probe's ctx is already canceled above, and the trail write
+	// is an independent, fast local-file append.
+	if cfg.trailPath != "" {
+		if err := appendProbeRecord(context.Background(), cfg.trailPath, snap, breached); err != nil {
+			fmt.Fprintln(os.Stderr, "fd-pressure: trail append failed:", err)
+		}
+	}
 
 	if cfg.jsonOutput {
 		if err := emitJSON(out, snap, breached); err != nil {
@@ -121,6 +144,39 @@ func evaluate(snap supervisor.ResourceSnapshot, cfg config) []breach {
 		out = append(out, breach{Metric: "swap", Value: snap.SwapUsedFraction, Threshold: supervisor.DefaultEscalationThreshold.SwapFraction})
 	}
 	return out
+}
+
+// appendProbeRecord writes one "overseer.resource.probe" record to the VROOM
+// decision trail at path. It reuses decisiontrail.OpenJSONL so the record gets
+// the canonical event_id/timestamp and a line-atomic O_APPEND write — the same
+// substrate the in-process Overseer.recordSnapshot uses — rather than a
+// hand-rolled printf. The payload mirrors supervisor.Overseer.recordSnapshot's
+// field names so trail consumers see one shape regardless of which path wrote
+// the record, and adds a "breached" count for quick filtering.
+func appendProbeRecord(ctx context.Context, path string, snap supervisor.ResourceSnapshot, breaches []breach) error {
+	trail, err := decisiontrail.OpenJSONL(path)
+	if err != nil {
+		return err
+	}
+	defer trail.Close()
+
+	return trail.Append(ctx, decisiontrail.Record{
+		Role: string(supervisor.RoleOverseer),
+		Kind: "overseer.resource.probe",
+		Payload: map[string]any{
+			"disk_used_fraction":   snap.DiskUsedFraction,
+			"memory_used_fraction": snap.MemoryUsedFraction,
+			"free_physical_bytes":  snap.FreePhysicalMemoryBytes,
+			"swap_used_fraction":   snap.SwapUsedFraction,
+			"cpu_used_fraction":    snap.CPUUsedFraction,
+			"open_fd_fraction":     snap.OpenFDFraction,
+			"vnode_used_fraction":  snap.VnodeUsedFraction,
+			"gopls_processes":      snap.GoplsProcesses,
+			"stranded_worktrees":   snap.StrandedWorktrees,
+			"orphaned_sessions":    snap.OrphanedSessions,
+			"breached":             len(breaches),
+		},
+	})
 }
 
 func emitJSON(out io.Writer, snap supervisor.ResourceSnapshot, breaches []breach) error {
