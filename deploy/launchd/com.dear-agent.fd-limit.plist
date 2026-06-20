@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchDaemon that raises the macOS kernel FD and vnode ceilings at boot.
+
+  Default kern.maxfiles=184320. With gopls v0.22+ holding ~4800 FDs per
+  process, only ~38 orphaned instances are needed to exhaust the table and
+  make `go build` fail with ENFILE. Raising the ceiling to 524288 converts
+  a hard deadlock into a degraded-but-buildable state, giving the periodic
+  orphan reaper (com.dear-agent.reap-orphans) time to act.
+
+  Install (requires sudo):
+    sudo cp deploy/launchd/com.dear-agent.fd-limit.plist \
+             /Library/LaunchDaemons/com.dear-agent.fd-limit.plist
+    sudo launchctl load -w /Library/LaunchDaemons/com.dear-agent.fd-limit.plist
+
+  Or use the Makefile target (also requires sudo):
+    sudo make install-fd-limit-launchdaemon
+
+  Source: DEAR retro docs/retros/2026-06-15-gopls-fd-leak-retro.md, R.5 (ce-710r.4).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dear-agent.fd-limit</string>
+
+  <!-- Raise both the system-wide and per-process FD ceilings. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>sysctl -w kern.maxfiles=524288 kern.maxfilesperproc=262144</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Root is required to modify kernel parameters. -->
+  <key>UserName</key>
+  <string>root</string>
+
+  <key>StandardOutPath</key>
+  <string>/var/log/com.dear-agent.fd-limit.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/com.dear-agent.fd-limit.log</string>
+</dict>
+</plist>
