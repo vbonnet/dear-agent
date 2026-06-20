@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"strings"
@@ -46,6 +47,12 @@ var mcpPush = pushViaActiveSession
 // supervisor name and restart count). It never blocks the caller: the two
 // channels are contractually non-blocking, and any channel failure is logged to
 // the trail rather than propagated (AC-5.3).
+//
+// trigger is part of the escalation contract: restart_exhausted is the only
+// wired trigger today, but the OAuth-expiry and >30min model-outage callers in
+// W3-spec pass their own trigger tokens — hence the unparam suppression.
+//
+//nolint:unparam // trigger varies across future callers (see doc comment)
 func escalateToHuman(home, trigger, message string, extra map[string]any) {
 	// AC-5.4: append a structured escalation record. trailRecord already carries
 	// kind + timestamp at the top level; trigger/message (and any extra fields)
@@ -54,9 +61,7 @@ func escalateToHuman(home, trigger, message string, extra map[string]any) {
 		"trigger": trigger,
 		"message": message,
 	}
-	for k, v := range extra {
-		payload[k] = v
-	}
+	maps.Copy(payload, extra)
 	writeTrail(home, "dispatch.escalation", payload)
 
 	// AC-5.1: desktop notification.
@@ -100,7 +105,7 @@ func osascriptNotify(message string) error {
 // (e.g. on an already-released process).
 func reapAsync(cmd *exec.Cmd) {
 	go func() {
-		defer func() { _ = recover() }()
+		defer func() { recover() }() //nolint:errcheck // intentional: swallow any panic so a notifier never crashes the daemon
 		_ = cmd.Wait()
 	}()
 }
