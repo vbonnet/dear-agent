@@ -90,7 +90,7 @@ func TestCheckActiveTmuxBlock_EmptySessionNameFallback(t *testing.T) {
 	const paneName = "agm-cecxjb1-livepane"
 	// Best-effort cleanup of any leftover from a previous run.
 	_ = exec.Command("tmux", "kill-session", "-t", paneName).Run()
-	if err := exec.Command("tmux", "new-session", "-d", "-s", paneName).Run(); err != nil {
+	if err := exec.Command("tmux", "new-session", "-d", "-s", paneName, "sleep", "30").Run(); err != nil {
 		t.Skipf("could not create tmux session (no server?): %v", err)
 	}
 	t.Cleanup(func() {
