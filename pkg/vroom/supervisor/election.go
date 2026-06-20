@@ -329,6 +329,8 @@ func (e *Election) Step(ctx context.Context, target Role, reason string, isStale
 
 	case PhaseAssumed: // steady state, nothing to do.
 		return ElectionOutcome{Phase: PhaseAssumed, Eligible: true}
+	default:
+		return ElectionOutcome{Phase: st.phase, Eligible: false}
 	}
 }
 

@@ -122,6 +122,8 @@ func CapabilitiesFor(mode MeshMode, roadmapAuthority bool) Capabilities {
 			SelfTerminate:      true,
 			NotifyHuman:        true,
 		}
+	default:
+		return Capabilities{}
 	}
 }
 
