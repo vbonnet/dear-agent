@@ -453,7 +453,10 @@ func createAndBootSession(home string, sup supervisor, state *sessionState, mode
 	fmt.Printf("    %s: creating... ", sup.Name)
 
 	cmd := exec.Command("agm", sessionNewArgs(sup.Name, model, sup.Role)...)
-	cmd.Env = scrubAPIKey(os.Environ())
+	// ce-v9in: mark the whole spawned session tree as unattended so every
+	// `agm send` it makes (including peer-to-peer mesh sends) auto-stashes its
+	// own stale input (C-s) instead of deadlocking on it as if a human were typing.
+	cmd.Env = append(scrubAPIKey(os.Environ()), "AGM_AUTONOMOUS=1")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("FAILED: %v\n%s\n", err, string(output))
 		return
@@ -518,6 +521,7 @@ A /loop command will start your tick cycle shortly.`,
 	fmt.Printf("    %s: sending boot prompt (%d bytes)...\n", sup.Name, len(bootPrompt))
 	cmd := exec.Command("agm", "send", "msg", sup.Name,
 		"--sender", "vroom-dispatch",
+		"--autonomous",
 		"--prompt", bootPrompt)
 	cmd.Env = scrubAPIKey(os.Environ())
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -527,17 +531,47 @@ A /loop command will start your tick cycle shortly.`,
 	}
 }
 
+// tickResilienceGuard frames every supervisor tick so a single failing iteration
+// can never kill the /loop. Without it the happy-path tick prompt lets any error —
+// an Anthropic API/credit-gate error, a tool failure, or a transient fault — abort
+// the turn; if that turn is the one that arms (or re-arms) the loop schedule, the
+// loop halts and never re-fires, leaving the supervisor silently idle (ce-ihok).
+// The guard tells the agent to treat a failed tick as a *skipped* tick: log it and
+// finish the turn normally so the next interval still fires. It is prepended to the
+// role's tick steps so it frames the whole tick, and is identical across all three
+// supervisors — hence it lives here, not in each role's TickPrompt.
+const tickResilienceGuard = "RESILIENT LOOP — this tick must never end the loop: " +
+	"if any step fails for any reason (Anthropic API or credit-gate error, tool failure, " +
+	"or transient fault), do NOT stop, exit, or abort the loop. Finish this turn normally " +
+	"so the next interval still fires, and treat a failed tick as a skipped tick, never as " +
+	"a reason to abort. Best-effort only: note the failure in ~/.agm/vroom/trail.jsonl " +
+	"(kind \"supervisor.tick.error\") if you can, but never let logging itself end the loop."
+
+// tickIntervalArg renders a supervisor's tick interval as the /loop interval token (e.g. "90s").
+func tickIntervalArg(sup supervisor) string {
+	return fmt.Sprintf("%ds", int(sup.TickInterval.Seconds()))
+}
+
+// buildLoopCommand constructs the /loop slash command sent to a supervisor session.
+// Shape: /loop <interval> <resilience-guard> <role-tick-steps> Report a brief summary when done.
+// Extracted (and the guard injected) so the error-tolerance contract is unit-testable.
+func buildLoopCommand(sup supervisor) string {
+	return fmt.Sprintf("/loop %s %s %s Report a brief summary when done.",
+		tickIntervalArg(sup), tickResilienceGuard, sup.TickPrompt)
+}
+
 // sendLoopCommand sends a /loop slash command to a supervisor session. The session's
 // built-in /loop handler takes over tick scheduling — no external tick dispatch needed.
 // The tick prompt references the SKILL instructions already loaded in the boot prompt.
 // Returns true if the send succeeded, false otherwise (callers must not set loop_sent=true on failure).
 func sendLoopCommand(sup supervisor) bool {
-	intervalStr := fmt.Sprintf("%ds", int(sup.TickInterval.Seconds()))
-	loopCmd := fmt.Sprintf("/loop %s %s Report a brief summary when done.", intervalStr, sup.TickPrompt)
+	intervalStr := tickIntervalArg(sup)
+	loopCmd := buildLoopCommand(sup)
 
 	fmt.Printf("    %s: sending /loop (%s interval)...\n", sup.Name, intervalStr)
 	cmd := exec.Command("agm", "send", "msg", sup.Name,
 		"--sender", "vroom-dispatch",
+		"--autonomous",
 		"--prompt", loopCmd)
 	cmd.Env = scrubAPIKey(os.Environ())
 	if output, err := cmd.CombinedOutput(); err != nil {

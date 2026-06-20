@@ -89,10 +89,35 @@ Test coverage includes:
 - Environment isolation between tests
 - Unknown provider handling
 
+## Claude Code OAuth (Max-plan) tokens
+
+`OAuthResolver` / `ResolveOAuthToken()` resolve the Claude Code OAuth access
+token used by agm-spawned workers and the VROOM supervisor mesh. They prefer
+the live token in `~/.claude/.credentials.json` over the
+`CLAUDE_CODE_OAUTH_TOKEN` environment variable (which goes stale once Claude
+Code refreshes the file), and **auto-refresh** when the on-disk token is
+expired:
+
+- The whole read → freshness-check → refresh-exchange → write cycle runs under
+  a **cross-process advisory file lock** (`~/.claude/.credentials.lock`), so the
+  separate tmux-pane processes that share one credentials file never each spend
+  the single-use refresh token (the rotation race that poisons the token
+  family). The freshness check is re-evaluated under the lock.
+- The credentials file is backed up to `.credentials.json.bak` before a
+  refresh, then written atomically (temp file + rename, mode `0600`).
+- Errors are typed: `ErrTokenFamilyDead` (a `400 invalid_grant` — re-auth
+  required) and `ErrRefreshNotPersisted` (rotated token could not be written —
+  critical). Neither is ever silently swallowed.
+- The token endpoint, client ID, and request User-Agent are overridable via
+  `CLAUDE_OAUTH_TOKEN_ENDPOINT`, `CLAUDE_OAUTH_CLIENT_ID`, and
+  `CLAUDE_OAUTH_USER_AGENT` (the endpoint and client ID have migrated before).
+
+The standalone `cmd/token-refresher` binary drives this on a schedule or as a
+Claude Code `apiKeyHelper`. See its package doc for modes and exit codes.
+
 ## Future Enhancements
 
 Planned additions (see PLAN.md):
 - OAuth device flow support (via sub-agents/headless mode only)
 - Keychain integration for secure API key storage
-- Token refresh handling
 - Multi-region Vertex AI support
