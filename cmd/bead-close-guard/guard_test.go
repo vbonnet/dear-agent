@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -145,6 +149,68 @@ func TestFormatResult_Blocked(t *testing.T) {
 	}
 	if !strings.Contains(out, "#449") {
 		t.Errorf("expected PR #449, got %q", out)
+	}
+}
+
+func TestAppendDoDViolationTrail(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	if err := AppendDoDViolationTrail(home, "ce-test", "Some title", []int{449, 551}); err != nil {
+		t.Fatalf("AppendDoDViolationTrail: %v", err)
+	}
+
+	path := filepath.Join(home, ".agm", "vroom", "trail.jsonl")
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("trail.jsonl not written: %v", err)
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	if !sc.Scan() {
+		t.Fatal("trail.jsonl is empty")
+	}
+	var rec struct {
+		EventID   string         `json:"event_id"`
+		Timestamp string         `json:"timestamp"`
+		Role      string         `json:"role"`
+		Kind      string         `json:"kind"`
+		Payload   map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
+		t.Fatalf("unmarshal trail record: %v", err)
+	}
+	if rec.Kind != "dod.violation.blocked" {
+		t.Errorf("kind = %q, want dod.violation.blocked", rec.Kind)
+	}
+	if rec.Role != "bead-close-guard" {
+		t.Errorf("role = %q, want bead-close-guard", rec.Role)
+	}
+	if rec.EventID == "" || rec.Timestamp == "" {
+		t.Errorf("expected event_id and timestamp to be populated, got %+v", rec)
+	}
+	if got := rec.Payload["bead_id"]; got != "ce-test" {
+		t.Errorf("payload.bead_id = %v, want ce-test", got)
+	}
+	prs, ok := rec.Payload["unmerged_prs"].([]any)
+	if !ok || len(prs) != 2 {
+		t.Errorf("payload.unmerged_prs = %v, want 2 entries", rec.Payload["unmerged_prs"])
+	}
+}
+
+func TestAppendDoDViolationTrail_NilPRs(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	if err := AppendDoDViolationTrail(home, "ce-test", "", nil); err != nil {
+		t.Fatalf("AppendDoDViolationTrail with nil PRs: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".agm", "vroom", "trail.jsonl"))
+	if err != nil {
+		t.Fatalf("trail.jsonl not written: %v", err)
+	}
+	// nil PRs must serialise as [] so readers always see an array.
+	if !strings.Contains(string(data), `"unmerged_prs":[]`) {
+		t.Errorf("expected empty array for nil PRs, got %s", data)
 	}
 }
 
