@@ -171,6 +171,30 @@ Examples:
 			} else {
 				ui.PrintSuccess(fmt.Sprintf("Binary is up to date (commit %s)", freshnessResult.BinaryCommit))
 			}
+
+			// Deployment verification: the running binary's embedded vcs.revision
+			// must be an ancestor of origin/main. This catches the rolled-back
+			// checkout case (a binary built from a commit not on trunk) that the
+			// HEAD-equality freshness check above cannot see — the exact failure
+			// that deadlocked the VROOM mesh on 2026-06-18 (ce-mb9g / retro B1).
+			fmt.Println(ui.Blue("\n--- Verifying deployment (vcs ancestry vs origin/main) ---"))
+			ancestry := freshness.VerifyAncestry(repoPath, GitCommit, "")
+			switch {
+			case ancestry.OK():
+				ui.PrintSuccess(fmt.Sprintf("Deployed binary is on trunk (commit %s ∈ %s)", ancestry.BinaryCommit, ancestry.TrunkRef))
+			case ancestry.FailLoud():
+				ui.PrintWarning("Deployment verification FAILED — running binary is not on origin/main!")
+				fmt.Printf("  %s\n", ancestry.Reason())
+				fmt.Printf("  Binary commit: %s\n", ancestry.BinaryCommit)
+				if ancestry.TrunkCommit != "" {
+					fmt.Printf("  %s:    %s\n", ancestry.TrunkRef, ancestry.TrunkCommit)
+				}
+				fmt.Printf("  Fix: rebuild from a clean checkout of origin/main, e.g.\n")
+				fmt.Printf("       git -C %s fetch origin && git -C %s checkout origin/main && make -C %s install\n", ancestry.RepoPath, ancestry.RepoPath, ancestry.RepoPath)
+				allHealthy = false
+			default: // AncestryIndeterminate — fail open
+				ui.PrintWarning(fmt.Sprintf("Could not verify deployment ancestry: %v", ancestry.Reason()))
+			}
 		}
 
 		// Run installation checks (binaries, hooks, settings, config, Go version)
