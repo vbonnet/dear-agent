@@ -51,7 +51,7 @@
 #   build-resolve-review-threads  Build resolve-review-threads: GitHub PR thread resolver
 #   install-resolve-review-threads Install resolve-review-threads to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-token-refresher install-token-refresher
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-token-refresher install-token-refresher
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -366,6 +366,24 @@ build-bead-pr-sync:
 install-bead-pr-sync: build-bead-pr-sync
 	cp bin/bead-pr-sync $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/bead-pr-sync"
+
+# Deploy bead-pr-sync as a launchd agent running every 4 hours (ce-yf2c).
+# Stages the plist into ~/Library/LaunchAgents and prints the activation
+# command (launchctl load is ask-gated; activate it yourself).
+install-bead-pr-sync-launchagent: install-bead-pr-sync
+	@mkdir -p $(HOME)/Library/LaunchAgents
+	@mkdir -p $(HOME)/.local/state/dear-agent
+	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.dear-agent.bead-pr-sync.plist \
+		> $(HOME)/Library/LaunchAgents/com.dear-agent.bead-pr-sync.plist
+	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.bead-pr-sync.plist"
+	@echo "Activate it yourself (ask-gated host action):"
+	@echo "  launchctl load $(HOME)/Library/LaunchAgents/com.dear-agent.bead-pr-sync.plist"
+
+uninstall-bead-pr-sync-launchagent:
+	@echo "Disable it yourself, then remove the plist:"
+	@echo "  launchctl bootout gui/$$(id -u)/com.dear-agent.bead-pr-sync"
+	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.bead-pr-sync.plist
+	@echo "Removed plist (if present)."
 
 # Checks for an existing open PR claiming a bead before creating a new one.
 # Usage: bead-pr-guard --bead <id> [--repo owner/name]
