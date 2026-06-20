@@ -34,6 +34,47 @@ You are the **Orchestrator** in the VROOM supervisory mesh.
 - Write to roadmap.jsonl (that's Meta-O's file)
 - Write code yourself — you create sessions that do the work
 
+## Peer Heartbeat Response (Meta-O staleness)
+
+The Orchestrator **never pauses dispatch just because Meta-O's heartbeat is
+stale.** Meta-O curates the roadmap; once a roadmap exists, you can keep the
+flywheel turning from the last-known-good `roadmap.jsonl` even if Meta-O goes
+quiet. A stale Meta-O is a reason to be *more conservative about what you
+dispatch*, not a reason to stop.
+
+Apply this graduated response based on minutes since Meta-O's last heartbeat
+(`META_AGE_MIN`, computed in Step 1). It narrows the **priority band** you will
+dispatch — you always continue dispatching *something* if eligible work exists:
+
+| Meta-O staleness | Dispatch breadth | Rationale |
+|------------------|------------------|-----------|
+| 0–20 min (fresh) | All priorities (P0, P1, P2) — dispatch normally | Roadmap is trustworthy and current |
+| 20–60 min (stale) | **P0 and P1 only** — skip P2 | Roadmap may be drifting; stick to important work |
+| > 60 min (very stale) | **P0 only** | Roadmap is likely stale; only critical/blocking work is safe to start |
+
+- This is a **breadth filter, not a pause.** If a P0 is eligible at any
+  staleness level, dispatch it.
+- Continue from the **last-known-good roadmap** — do NOT wait for a fresh
+  Meta-O heartbeat before dispatching.
+- The **only** trigger that actually pauses spawning is **Overseer resource
+  escalation** (swap/CPU/disk/FD exhaustion — see "Spawn-pause" below).
+  Meta-O staleness never pauses spawning.
+
+### Spawn-pause (the only hard stop)
+
+Spawn-pause halts ALL new worker dispatch this tick. It triggers **only** on an
+Overseer resource escalation indicating the host is under genuine load:
+
+- Swap usage ≥ 60%, or
+- CPU/load alert (sustained high load average), or
+- A `critical` resource alert from the Overseer (disk ≥ 95%, FD ≥ 80%, etc.).
+
+When the Overseer sends a `RESOURCE ALERT … Consider pausing worker spawns`
+message (or you observe a critical resource trail record), skip ALL dispatch
+this tick and log `kind: "supervisor.orch.spawn_paused_resource"`. Resume
+dispatch on the next tick once the pressure clears. This is separate from, and
+in addition to, the open-PR firehose cap in Step 6.
+
 ## Boot Sequence
 
 On first run, ensure the state directory exists:
@@ -78,11 +119,21 @@ If a peer's heartbeat is >5 minutes old or missing:
 - Record: `kind: "supervisor.orch.peer_stale"`
 - Message: `agm send msg <peer> --sender vroom-orchestrator --priority urgent --prompt "status?"`
 
-**Meta-O staleness does NOT pause dispatch.** Compute how long the Meta-O
-heartbeat has been stale and carry that tier into Step 6 — you keep dispatching
-from the last-known-good roadmap, just at a narrower priority band the longer
-Meta-O stays silent. See **Peer Heartbeat Response** below. The ONLY thing that
-pauses spawns is an Overseer resource escalation (see Step 6).
+**Compute Meta-O staleness — it gates dispatch breadth, NOT dispatch itself.**
+A stale or missing Meta-O heartbeat does **not** pause the Orchestrator: you
+keep dispatching from the last-known-good roadmap. What changes is *how broad*
+the dispatch is. Measure how many minutes since Meta-O's heartbeat and apply
+the graduated response in [Peer Heartbeat Response](#peer-heartbeat-response-meta-o-staleness)
+below when you reach Step 6.
+
+```bash
+META_HB=~/.agm/vroom/heartbeat/meta-o.json
+if [ -f "$META_HB" ]; then
+  META_AGE_MIN=$(( ( $(date +%s) - $(stat -f %m "$META_HB") ) / 60 ))
+else
+  META_AGE_MIN=9999   # missing heartbeat = treat as maximally stale
+fi
+```
 
 ### Step 2: Write Heartbeat (early — proves liveness)
 
@@ -155,25 +206,23 @@ created. Do NOT raise `OPEN_PR_CAP` to clear a backlog faster — that is the
 exact move that recreated the firehose (ce-qpg9). Raising it requires an
 explicit operator decision, not an orchestrator judgement call.
 
-**SECOND — spawn-pause on Overseer resource escalation.** If the most recent
-unacknowledged message from `vroom-overseer` is a `RESOURCE ALERT … Consider
-pausing worker spawns` (swap/CPU/FD past threshold), **skip ALL dispatch this
-tick** exactly like the PR cap, and log:
-```bash
-printf '{"ts":"%s","role":"orchestrator","kind":"supervisor.orch.dispatch_paused_resource","payload":{"alert":"%s"}}\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<overseer-alert-summary>" >> ~/.agm/vroom/trail.jsonl
-```
-Resume dispatch once the Overseer's next snapshot shows the metric back under
-threshold (no more alert). **This — resource exhaustion — is the only condition
-that pauses spawns. Meta-O staleness does not.**
+**SECOND — apply the Meta-O staleness breadth filter (see [Peer Heartbeat
+Response](#peer-heartbeat-response-meta-o-staleness)).** Using `META_AGE_MIN`
+from Step 1, restrict which priorities are eligible this tick. This narrows the
+candidate set; it never pauses dispatch on its own:
 
-**THIRD — apply the Meta-O staleness priority band** (see *Peer Heartbeat
-Response*). Filter the accepted-item list to the band allowed by how long Meta-O
-has been stale: 0–20min → all priorities; 20–60min → P0/P1 only; >60min → P0
-only. This narrows *what* you dispatch; it never stops dispatch outright.
+- `META_AGE_MIN < 20`: all priorities eligible (P0, P1, P2).
+- `20 <= META_AGE_MIN <= 60`: P0 and P1 only — skip P2 candidates.
+- `META_AGE_MIN > 60`: P0 only.
 
-For each accepted roadmap item NOT in dispatched.jsonl and NOT assigned
-to a live worker session (and within the current Meta-O staleness priority band):
+If the filter removes every candidate (e.g. only P2 work remains while Meta-O is
+stale), log `kind: "supervisor.orch.dispatch_narrowed_meta_stale"` with
+`META_AGE_MIN` and continue — this is expected, not an error. A spawn-pause from
+an Overseer resource escalation (see Boot section) still overrides everything
+and skips dispatch entirely.
+
+For each accepted roadmap item NOT in dispatched.jsonl, NOT assigned to a live
+worker session, **and whose priority passes the staleness filter above**:
 
 **Capacity is enforced by the agm circuit breaker on LIVE system load — not a
 fixed count.** Every `agm session new` is admitted only if: concurrent workers
@@ -417,12 +466,10 @@ This makes it trivial to correlate sessions to beads.
 
 | Situation | Action |
 |-----------|--------|
-| Meta-O stale >5min | Urgent message, continue dispatching from last-known roadmap |
-| Meta-O stale >10min | Critical message, file a bead about mesh degradation |
-| Meta-O stale 0–20min | Dispatch normally (all priorities) — see Peer Heartbeat Response |
-| Meta-O stale 20–60min | Narrow dispatch to P0/P1 only — do NOT pause |
-| Meta-O stale >60min | Dispatch P0 only — do NOT pause |
-| Overseer RESOURCE ALERT (swap/CPU/FD over threshold) | **spawn-pause**: skip all dispatch this tick until metric recovers |
+| Meta-O stale 0–20min | Dispatch normally (all priorities) from last-known roadmap; urgent status ping |
+| Meta-O stale 20–60min | Narrow dispatch to **P0/P1 only**; critical message, file a bead about mesh degradation |
+| Meta-O stale >60min | Narrow dispatch to **P0 only**; continue from last-known roadmap (do NOT pause) |
+| Overseer resource escalation (swap≥60% / CPU≥90% / disk≥95% / FD≥80%) | **Spawn-pause**: skip ALL dispatch this tick, log `supervisor.orch.spawn_paused_resource`, resume next tick |
 | Overseer stale >5min | Urgent message |
 | Worker session dies mid-bead | Record in trail, mark for re-dispatch |
 | Bead's closed dependency was closed against an unmerged PR | Hold dispatch; record `dod.dispatch.blocked`; urgent to Overseer to reopen the dep |
