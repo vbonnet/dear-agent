@@ -1,8 +1,17 @@
 name: Doc Proximity Check
 
 # Informational check: when Go source files change in a directory that also
-# contains living-doc files (SPEC.md, ARCHITECTURE.md, or any *.md), this
-# job prints a reminder to review and timestamp those docs.
+# contains living-doc files (SPEC.md, ARCHITECTURE.md, README.md, CONTEXT.md,
+# or CONTEXT-MAP.md), this job prints a reminder to review and timestamp those
+# docs.
+#
+# Scope: only the five named living-doc filenames are checked. ADR-*.md,
+# CHANGELOG.md, and other temporal/historical markdown are intentionally
+# excluded to avoid the 15.6% false-positive rate found in the 2026-06
+# DEAR retro (bead 7695f44f).
+#
+# Bypass: add the "skip-doc-proximity" label to declare a structural-only PR
+# (rename, move, generated-code, infra-only) that does not warrant doc review.
 #
 # Start posture: continue-on-error=true so it annotates without blocking.
 # Ratchet path: once doc coverage is established on main, flip
@@ -16,6 +25,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   doc-proximity:
@@ -29,7 +39,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check for skip label
+        id: labels
+        env:
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          if echo "$LABELS" | grep -q '"skip-doc-proximity"'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check doc proximity
+        if: steps.labels.outputs.skip != 'true'
         env:
           BASE_REF: ${{ github.event.pull_request.base.sha }}
           HEAD_REF: ${{ github.event.pull_request.head.sha }}
@@ -54,20 +76,31 @@ jobs:
             exit 0
           fi
 
-          # Markdown files touched anywhere on this PR.
+          # Living-doc filenames we care about — explicit allowlist, not *.md.
+          # Excludes ADR-*.md (immutable historical records) and all other markdown.
+          LIVING_DOCS="SPEC.md ARCHITECTURE.md README.md CONTEXT.md CONTEXT-MAP.md"
+
+          # Living-doc files touched anywhere on this PR (same allowlist).
           touched_docs=$(git diff --name-only "${base_sha}...${head_sha}" \
-            | grep '\.md$' || true)
+            | { grep -E '/(SPEC|ARCHITECTURE|README|CONTEXT|CONTEXT-MAP)\.md$' || true; })
 
           violations=0
 
           while IFS= read -r dir; do
-            # Find doc files co-located with the changed code.
-            doc_files=$(find "$dir" -maxdepth 1 -name "*.md" 2>/dev/null | sort || true)
+            # Find living-doc files co-located with the changed code.
+            doc_files=""
+            for docname in $LIVING_DOCS; do
+              candidate="${dir}/${docname}"
+              if [ -f "$candidate" ]; then
+                doc_files="${doc_files}${candidate}"$'\n'
+              fi
+            done
             [ -z "$doc_files" ] && continue
 
             # Check if any of those docs were touched in this PR.
             dir_docs_touched=false
             while IFS= read -r doc; do
+              [ -z "$doc" ] && continue
               if echo "$touched_docs" | grep -qF "$doc"; then
                 dir_docs_touched=true
                 break
@@ -75,22 +108,28 @@ jobs:
             done <<< "$doc_files"
 
             if ! $dir_docs_touched; then
-              echo "::warning file=${dir}::Doc proximity: code changed in '${dir}' but none of its docs were reviewed."
-              echo "  Docs present but not touched:"
+              echo "::warning file=${dir}::Doc proximity: code changed in '${dir}' but none of its living docs were reviewed."
+              echo "  Living docs present but not touched:"
               while IFS= read -r doc; do
+                [ -z "$doc" ] && continue
                 echo "    - ${doc}"
               done <<< "$doc_files"
               echo "  If the docs still accurately describe the code, update the"
               echo "  '<!-- Last audited at: -->' timestamp. If they are stale, fix them."
+              echo "  To bypass for structural-only PRs, add the 'skip-doc-proximity' label."
               violations=$((violations + 1))
             fi
           done <<< "$changed_code_dirs"
 
           if [ "$violations" -gt 0 ]; then
             echo ""
-            echo "Doc proximity: ${violations} directory(ies) need doc review."
+            echo "Doc proximity: ${violations} directory(ies) need living-doc review."
             echo "See .claude/CLAUDE.md Living Documentation Policy for details."
             exit 1
           fi
 
-          echo "ok: all directories with code changes have corresponding doc updates"
+          echo "ok: all directories with code changes have corresponding living-doc updates"
+
+      - name: Skipped (skip-doc-proximity label)
+        if: steps.labels.outputs.skip == 'true'
+        run: echo "ok: doc-proximity check skipped — 'skip-doc-proximity' label present"

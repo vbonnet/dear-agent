@@ -127,8 +127,15 @@ func sysFDUsedFraction() float64 {
 // specific. Linux uses a unified page cache and dentry/inode caches instead.
 func sysVnodeUsedFraction() float64 { return 0 }
 
-// sysGoplsCount returns the number of running gopls processes on Linux by
-// reading /proc/<pid>/comm for each numeric /proc entry.
+// sysGoplsCount returns the number of *orphaned* gopls processes on Linux —
+// gopls instances reparented to PID 1 because the Claude session that spawned
+// them died. This is the leak signal the Overseer escalates on.
+//
+// It must NOT count live gopls: every healthy Claude Code session runs its own
+// gopls (via the gopls-lsp plugin), so a raw process count scales with the
+// number of live sessions and produces phantom leak alarms (ce-u7v9). We match
+// /proc/<pid>/comm exactly against "gopls" (never a substring of a longer
+// command line) AND require PPid==1 read from /proc/<pid>/status.
 func sysGoplsCount(ctx context.Context) int {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
@@ -151,9 +158,36 @@ func sysGoplsCount(ctx context.Context) int {
 		if err != nil {
 			continue
 		}
-		if strings.TrimSpace(string(comm)) == "gopls" {
+		if strings.TrimSpace(string(comm)) != "gopls" {
+			continue
+		}
+		if procPPID("/proc/"+e.Name()+"/status") == 1 {
 			n++
 		}
 	}
 	return n
+}
+
+// procPPID parses the PPid field from a /proc/<pid>/status file. Returns 0 if
+// the file cannot be read or the field is absent (so the process is not counted
+// as an orphan).
+func procPPID(statusPath string) int {
+	f, err := os.Open(statusPath)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.HasPrefix(line, "PPid:") {
+			continue
+		}
+		ppid, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "PPid:")))
+		if err != nil {
+			return 0
+		}
+		return ppid
+	}
+	return 0
 }
