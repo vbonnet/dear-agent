@@ -34,7 +34,8 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Contains(t, cfg.Recovery.ExemptSessions, "human")
 	assert.Contains(t, cfg.Recovery.ExemptSessions, "orchestrator")
 	assert.Contains(t, cfg.Recovery.ExemptSessions, "orchestrator-v2")
-	assert.Contains(t, cfg.Recovery.ExemptSessions, "meta-orchestrator")
+	assert.NotContains(t, cfg.Recovery.ExemptSessions, "meta-orchestrator",
+		"meta-orchestrator must not be exempt (ce-bew7 cascade failure)")
 }
 
 func TestIsSessionExempt(t *testing.T) {
@@ -51,10 +52,10 @@ func TestIsSessionExempt(t *testing.T) {
 			wantExempt: true,
 		},
 		{
-			name:       "meta-orchestrator is exempt by default",
+			name:       "meta-orchestrator is NOT exempt (ce-bew7)",
 			session:    "meta-orchestrator",
 			exempt:     DefaultExemptSessions,
-			wantExempt: true,
+			wantExempt: false,
 		},
 		{
 			name:       "human is exempt by default",

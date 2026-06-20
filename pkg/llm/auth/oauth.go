@@ -2,6 +2,8 @@ package auth
 
 import (
 	"encoding/json"
+	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -56,6 +58,36 @@ type OAuthResolver struct {
 	// ExpirySkew treats file tokens expiring within this window as stale.
 	// Zero means defaultExpirySkew.
 	ExpirySkew time.Duration
+
+	// HTTPClient, when non-nil, enables automatic token refresh via the
+	// OAuth2 refresh-token exchange. A nil HTTPClient disables refresh,
+	// preserving the read-only behavior of the zero-value resolver.
+	HTTPClient *http.Client
+	// TokenEndpoint overrides the OAuth2 token endpoint URL.
+	// Empty means https://platform.claude.com/v1/oauth/token (or the
+	// CLAUDE_OAUTH_TOKEN_ENDPOINT env override).
+	TokenEndpoint string
+	// ClientID overrides the OAuth2 client identifier.
+	// Empty means the Claude Code client ID (or the CLAUDE_OAUTH_CLIENT_ID
+	// env override).
+	ClientID string
+
+	// LockTimeout bounds how long Refresh waits for the cross-process
+	// credentials lock. Zero means defaultLockTimeout.
+	LockTimeout time.Duration
+
+	// Logger, when non-nil, receives structured refresh events (attempt,
+	// success, failure) for OTel/observability. Token values are never logged.
+	// Nil disables logging.
+	Logger *slog.Logger
+}
+
+// log emits a structured refresh event through the resolver's Logger, if one is
+// set. It is a no-op when Logger is nil. Token values are never passed here.
+func (r OAuthResolver) log(msg string, args ...any) {
+	if r.Logger != nil {
+		r.Logger.Info(msg, args...)
+	}
 }
 
 // Resolve returns the freshest available OAuth token. It prefers a non-expired
@@ -134,8 +166,10 @@ func (r OAuthResolver) fileTokenFresh(expiresAtMillis int64) bool {
 }
 
 // ResolveOAuthToken returns the freshest available Claude Code OAuth token,
-// preferring ~/.claude/.credentials.json over CLAUDE_CODE_OAUTH_TOKEN. It is the
-// package-level convenience wrapper over OAuthResolver for production callers.
+// preferring ~/.claude/.credentials.json over CLAUDE_CODE_OAUTH_TOKEN. When the
+// file token is stale, it attempts an automatic refresh using the refresh token
+// from the credentials file (ce-f3e3). It is the package-level convenience
+// wrapper over OAuthResolver for production callers.
 func ResolveOAuthToken() string {
-	return OAuthResolver{}.Resolve()
+	return defaultRefreshingResolver.resolveWithRefresh()
 }

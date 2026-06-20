@@ -358,3 +358,36 @@ func TestValidateMethodologyFreshness_NoDeliverable(t *testing.T) {
 		t.Errorf("validateMethodologyFreshness() with no deliverable should return nil, got %v", err)
 	}
 }
+
+// TestValidateMethodologyFreshness_EmptyEngramPath is the regression test for
+// ce-fvkz / ce-11fi: when a deliverable has the required base frontmatter
+// (phase, phase_name, wayfinder_session_id, created_at) but omits the
+// pipeline-internal phase_engram_path field, the hash validation must be
+// skipped rather than failing with "failed to calculate hash of phase engram".
+// Before the fix, an empty path was passed to hash.CalculateFileHash which
+// resolved to the CWD and produced an "is a directory" error.
+func TestValidateMethodologyFreshness_EmptyEngramPath(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Deliverable with valid base frontmatter but no engram fields.
+	deliverable := filepath.Join(tmpDir, "CHARTER-charter.md")
+	content := `---
+phase: CHARTER
+phase_name: Intake & Waypoint
+wayfinder_session_id: session-abc123
+created_at: 2026-06-17T00:00:00Z
+---
+
+# Charter
+
+Some content here.
+`
+	if err := os.WriteFile(deliverable, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write deliverable: %v", err)
+	}
+
+	err := validateMethodologyFreshness(tmpDir, "CHARTER", "")
+	if err != nil {
+		t.Errorf("validateMethodologyFreshness() with empty phase_engram_path should return nil (ce-11fi regression), got: %v", err)
+	}
+}

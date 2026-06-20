@@ -85,6 +85,36 @@ func TestDetectHumanTyping(t *testing.T) {
 			paneContent:   "some output\n❯ deny this action",
 			wantViolation: false,
 		},
+		{
+			name:          "permission prompt always allow - not human typing",
+			paneContent:   "some output\n❯ always allow this tool",
+			wantViolation: false,
+		},
+		{
+			name:          "permission prompt allow once - not human typing",
+			paneContent:   "some output\n❯ allow once",
+			wantViolation: false,
+		},
+		{
+			name:          "permission prompt don't allow - not human typing",
+			paneContent:   "some output\n❯ don't allow",
+			wantViolation: false,
+		},
+		{
+			name:          "permission prompt (Y)es style - not human typing",
+			paneContent:   "some output\n❯ (Y)es, proceed",
+			wantViolation: false,
+		},
+		{
+			name:          "permission prompt (N)o style - not human typing",
+			paneContent:   "some output\n❯ (N)o, cancel",
+			wantViolation: false,
+		},
+		{
+			name:          "navigation hint use arrows - not human typing",
+			paneContent:   "some output\n❯ Use arrows to select",
+			wantViolation: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -98,6 +128,59 @@ func TestDetectHumanTyping(t *testing.T) {
 			}
 			if v != nil && v.Guard != ViolationHumanTyping {
 				t.Errorf("expected guard %s, got %s", ViolationHumanTyping, v.Guard)
+			}
+		})
+	}
+}
+
+func TestIsGhostTextAfterPrompt(t *testing.T) {
+	tests := []struct {
+		name      string
+		ansiInput string
+		want      bool
+	}{
+		{
+			name:      "ghost text with dim attribute on prompt line",
+			ansiInput: "output\n❯ \x1b[2mstart the loop\x1b[0m\n",
+			want:      true,
+		},
+		{
+			name:      "normal text on prompt line - no dim",
+			ansiInput: "output\n❯ please fix the bug\n",
+			want:      false,
+		},
+		{
+			name:      "empty prompt - no dim attribute",
+			ansiInput: "output\n❯ \n",
+			want:      false,
+		},
+		{
+			name:      "no prompt line",
+			ansiInput: "output\nthinking...\n",
+			want:      false,
+		},
+		{
+			name:      "dim attribute on non-prompt line does not count",
+			ansiInput: "\x1b[2msome dim output\x1b[0m\n❯ real typing here\n",
+			want:      false,
+		},
+		{
+			name:      "dim attribute before the prompt marker does not count",
+			ansiInput: "\x1b[2mpre-prompt dim prefix\x1b[0m ❯ real typing here\n",
+			want:      false,
+		},
+		{
+			name:      "ghost text overseer pattern from live capture",
+			ansiInput: "some output\n❯ \x1b[2mstart the loop\x1b[0m\n─────────────────────────────────\n",
+			want:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isGhostTextAfterPrompt(tt.ansiInput)
+			if got != tt.want {
+				t.Errorf("isGhostTextAfterPrompt(%q) = %v, want %v", tt.ansiInput, got, tt.want)
 			}
 		})
 	}
@@ -281,6 +364,62 @@ func TestCheckResultHasViolation(t *testing.T) {
 	if r.HasViolation(ViolationSessionUninitialized) {
 		t.Error("expected HasViolation to return false for session_uninitialized")
 	}
+}
+
+func TestAutonomousModeBehavior(t *testing.T) {
+	t.Run("autonomous mode sets AutonomousMode in options", func(t *testing.T) {
+		opts := GuardOptions{AutonomousMode: true}
+		if !opts.AutonomousMode {
+			t.Error("expected AutonomousMode to be true")
+		}
+	})
+
+	t.Run("autonomous mode is independent of SkipHumanTyping", func(t *testing.T) {
+		opts := GuardOptions{AutonomousMode: true, SkipHumanTyping: false}
+		if opts.SkipHumanTyping {
+			t.Error("SkipHumanTyping should remain false")
+		}
+		if !opts.AutonomousMode {
+			t.Error("AutonomousMode should be true")
+		}
+	})
+}
+
+func TestCooldownCache(t *testing.T) {
+	t.Run("fresh cache has no cooldown active", func(t *testing.T) {
+		ResetCooldownCache()
+		if isHumanTypingCooldownActive("test-session") {
+			t.Error("expected no cooldown for fresh cache")
+		}
+	})
+
+	t.Run("cooldown active after recording", func(t *testing.T) {
+		ResetCooldownCache()
+		recordHumanTypingCooldown("test-session")
+		if !isHumanTypingCooldownActive("test-session") {
+			t.Error("expected cooldown to be active immediately after recording")
+		}
+	})
+
+	t.Run("cooldown is per-session", func(t *testing.T) {
+		ResetCooldownCache()
+		recordHumanTypingCooldown("session-a")
+		if isHumanTypingCooldownActive("session-b") {
+			t.Error("session-b should not have cooldown from session-a")
+		}
+		if !isHumanTypingCooldownActive("session-a") {
+			t.Error("session-a should still have active cooldown")
+		}
+	})
+
+	t.Run("ResetCooldownCache clears all entries", func(t *testing.T) {
+		ResetCooldownCache()
+		recordHumanTypingCooldown("session-x")
+		ResetCooldownCache()
+		if isHumanTypingCooldownActive("session-x") {
+			t.Error("expected cooldown cleared after reset")
+		}
+	})
 }
 
 func containsStr(s, substr string) bool {

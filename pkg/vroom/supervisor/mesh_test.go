@@ -128,6 +128,110 @@ func TestMesh_Run_AllThreeIterate(t *testing.T) {
 	}
 }
 
+func TestMesh_Run_SelectiveRestartOnTickError(t *testing.T) {
+	// One supervisor returns an error on its first tick, then succeeds.
+	// The mesh should restart that loop — not kill all three.
+	var failCount int
+	failingSup := &fakeSupervisor{role: RoleOverseer, tick: func(_ context.Context) error {
+		failCount++
+		if failCount == 1 {
+			return errors.New("transient failure")
+		}
+		return nil
+	}}
+
+	trail1, _ := newBufferTrail()
+	trail2, _ := newBufferTrail()
+	trail3, _ := newBufferTrail()
+
+	meta, _ := NewLoop(LoopConfig{
+		Supervisor: &fakeSupervisor{role: RoleMetaOrchestrator},
+		Mesh:       &fakePeerLookup{peers: map[Role]LoopStatus{}},
+		Check:      CheckSkillFunc(func(context.Context, LoopStatus) error { return nil }),
+		Trail:      trail1,
+		Interval:   1 * time.Millisecond,
+	})
+	orch, _ := NewLoop(LoopConfig{
+		Supervisor: &fakeSupervisor{role: RoleOrchestrator},
+		Mesh:       &fakePeerLookup{peers: map[Role]LoopStatus{}},
+		Check:      CheckSkillFunc(func(context.Context, LoopStatus) error { return nil }),
+		Trail:      trail2,
+		Interval:   1 * time.Millisecond,
+	})
+	over, _ := NewLoop(LoopConfig{
+		Supervisor: failingSup,
+		Mesh:       &fakePeerLookup{peers: map[Role]LoopStatus{}},
+		Check:      CheckSkillFunc(func(context.Context, LoopStatus) error { return nil }),
+		Trail:      trail3,
+		Interval:   1 * time.Millisecond,
+	})
+
+	m, err := NewMesh(meta, orch, over)
+	if err != nil {
+		t.Fatalf("NewMesh: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	runErr := m.Run(ctx)
+
+	if !errors.Is(runErr, context.DeadlineExceeded) && !errors.Is(runErr, context.Canceled) {
+		t.Errorf("Run err = %v, want context error (mesh should survive transient failures)", runErr)
+	}
+	for _, l := range m.Loops() {
+		if l.TickCount() == 0 {
+			t.Errorf("supervisor %q ran zero ticks — selective restart failed", l.Role())
+		}
+	}
+	if meta.TickCount() < 2 {
+		t.Errorf("meta-o ticks = %d, want ≥2 (should keep running while overseer restarts)", meta.TickCount())
+	}
+}
+
+func TestMesh_Run_PanicCancelsAll(t *testing.T) {
+	trail1, _ := newBufferTrail()
+	trail2, _ := newBufferTrail()
+	trail3, _ := newBufferTrail()
+
+	meta, _ := NewLoop(LoopConfig{
+		Supervisor: &fakeSupervisor{role: RoleMetaOrchestrator},
+		Mesh:       &fakePeerLookup{peers: map[Role]LoopStatus{}},
+		Check:      CheckSkillFunc(func(context.Context, LoopStatus) error { return nil }),
+		Trail:      trail1,
+		Interval:   1 * time.Millisecond,
+	})
+	orch, _ := NewLoop(LoopConfig{
+		Supervisor: &fakeSupervisor{role: RoleOrchestrator},
+		Mesh:       &fakePeerLookup{peers: map[Role]LoopStatus{}},
+		Check:      CheckSkillFunc(func(context.Context, LoopStatus) error { return nil }),
+		Trail:      trail2,
+		Interval:   1 * time.Millisecond,
+	})
+	panickingSup := &fakeSupervisor{role: RoleOverseer, tick: func(_ context.Context) error {
+		panic("simulated crash")
+	}}
+	over, _ := NewLoop(LoopConfig{
+		Supervisor: panickingSup,
+		Mesh:       &fakePeerLookup{peers: map[Role]LoopStatus{}},
+		Check:      CheckSkillFunc(func(context.Context, LoopStatus) error { return nil }),
+		Trail:      trail3,
+		Interval:   1 * time.Millisecond,
+	})
+
+	m, err := NewMesh(meta, orch, over)
+	if err != nil {
+		t.Fatalf("NewMesh: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	runErr := m.Run(ctx)
+
+	if runErr == nil || !strings.Contains(runErr.Error(), "panicked") {
+		t.Errorf("Run err = %v, want error containing 'panicked'", runErr)
+	}
+}
+
 func TestMesh_Get_UnknownRole(t *testing.T) {
 	m, err := NewMesh(
 		newTestLoop(t, RoleMetaOrchestrator),

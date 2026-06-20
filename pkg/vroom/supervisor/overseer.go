@@ -96,11 +96,27 @@ type EscalationThreshold struct {
 // DefaultEscalationThreshold is the threshold used when none is configured.
 var DefaultEscalationThreshold = EscalationThreshold{Fraction: 0.9, SwapFraction: 0.5, GoplsProcesses: 5}
 
+// ResourceReclaimer is the remediation seam the Overseer calls when resource
+// pressure exceeds threshold. Implementations kill orphaned processes,
+// reap stranded worktrees, or archive dead sessions.
+//
+// Reclaim is best-effort: a partial success (some orphans killed, others
+// failed) is reported in ReclaimResult and does not cause Tick to fail.
+type ResourceReclaimer interface {
+	Reclaim(ctx context.Context) (ReclaimResult, error)
+}
+
+// ReclaimResult reports the outcome of a single remediation pass.
+type ReclaimResult struct {
+	OrphansFound  int
+	OrphansKilled int
+	OrphansFailed int
+}
+
 // Overseer is the CRO-analogue supervisor. Its Tick takes one
-// ResourceSnapshot and emits an escalation event for every metric that
-// crosses threshold. Real remediation (reaping, killing runaway sessions,
-// reclaiming quota) is out of scope for PR 1 — escalations are
-// observation-only.
+// ResourceSnapshot, emits escalation events for metrics that cross threshold,
+// and — when a ResourceReclaimer is wired — remediates by killing orphaned
+// processes and re-snapshotting to verify the pressure dropped.
 //
 // When WithBurndown is called, each Tick also runs the burndown concurrency
 // maintenance loop: reconcile stale in_progress beads, reclaim them to open,
@@ -109,6 +125,7 @@ type Overseer struct {
 	trail          decisiontrail.Trail
 	probe          ResourceProbe
 	threshold      EscalationThreshold
+	reclaimer      ResourceReclaimer  // nil = remediation disabled
 	burndownCtrl   BurndownController // nil = burndown disabled
 	burndownPolicy BurndownPolicy
 }
@@ -134,6 +151,15 @@ func NewOverseer(trail decisiontrail.Trail, probe ResourceProbe, threshold Escal
 	return &Overseer{trail: trail, probe: probe, threshold: threshold}, nil
 }
 
+// WithReclaimer wires a ResourceReclaimer into the Overseer. After this
+// call, Tick calls Reclaim when any resource-pressure metric (FDs, vnodes,
+// gopls count) exceeds its escalation threshold, then re-snapshots to verify
+// the pressure dropped.
+func (o *Overseer) WithReclaimer(r ResourceReclaimer) *Overseer {
+	o.reclaimer = r
+	return o
+}
+
 // WithBurndown wires a BurndownController and policy into the Overseer.
 // After this call each Tick also runs the burndown maintenance phase. The
 // controller and policy may be changed between ticks; the Overseer copies the
@@ -148,7 +174,8 @@ func (o *Overseer) WithBurndown(ctrl BurndownController, policy BurndownPolicy) 
 // Role implements Supervisor.
 func (o *Overseer) Role() Role { return RoleOverseer }
 
-// Tick samples the probe, escalates anything that crosses threshold, and —
+// Tick samples the probe, escalates anything that crosses threshold,
+// remediates if a reclaimer is wired and resource pressure is high, and —
 // when a BurndownController is wired — runs the burndown maintenance phase.
 func (o *Overseer) Tick(ctx context.Context) error {
 	snap, err := o.probe.Snapshot(ctx)
@@ -156,8 +183,36 @@ func (o *Overseer) Tick(ctx context.Context) error {
 		return fmt.Errorf("overseer: snapshot: %w", err)
 	}
 
-	// Record the raw snapshot regardless of thresholds — the trail is
-	// the place that operators learn the system was OK at this tick.
+	o.recordSnapshot(ctx, snap)
+
+	// Evaluate each metric and escalate independently.
+	o.maybeEscalateFraction(ctx, "disk", snap.DiskUsedFraction)
+	o.maybeEscalateFraction(ctx, "memory", snap.MemoryUsedFraction)
+	o.maybeEscalateSwapFraction(ctx, snap.SwapUsedFraction)
+	o.maybeEscalateFraction(ctx, "cpu", snap.CPUUsedFraction)
+	o.maybeEscalateFraction(ctx, "open_fds", snap.OpenFDFraction)
+	o.maybeEscalateFraction(ctx, "vnodes", snap.VnodeUsedFraction)
+	o.maybeEscalateGopls(ctx, snap.GoplsProcesses)
+	o.maybeEscalateCount(ctx, "stranded_worktrees", snap.StrandedWorktrees)
+	o.maybeEscalateCount(ctx, "orphaned_sessions", snap.OrphanedSessions)
+
+	// Resource remediation: when a reclaimer is wired and pressure metrics
+	// are above threshold, kill orphaned processes and re-snapshot to verify.
+	if o.reclaimer != nil && o.needsReclaim(snap) {
+		o.reclaim(ctx, snap)
+	}
+
+	// Burndown maintenance phase — only runs when a controller is wired.
+	if o.burndownCtrl != nil {
+		var spawned int
+		o.runBurndownTick(ctx, snap, o.burndownPolicy, o.burndownCtrl, &spawned)
+	}
+	return nil
+}
+
+// recordSnapshot writes the raw snapshot to the decision trail regardless of
+// thresholds — the trail is the place that operators learn the system was OK.
+func (o *Overseer) recordSnapshot(ctx context.Context, snap ResourceSnapshot) {
 	_ = o.trail.Append(ctx, decisiontrail.Record{
 		Role: string(RoleOverseer),
 		Kind: "supervisor.over.resource_snapshot",
@@ -173,24 +228,68 @@ func (o *Overseer) Tick(ctx context.Context) error {
 			"orphaned_sessions":    snap.OrphanedSessions,
 		},
 	})
+}
 
-	// Evaluate each metric and escalate independently.
-	o.maybeEscalateFraction(ctx, "disk", snap.DiskUsedFraction)
-	o.maybeEscalateFraction(ctx, "memory", snap.MemoryUsedFraction)
-	o.maybeEscalateSwapFraction(ctx, snap.SwapUsedFraction)
-	o.maybeEscalateFraction(ctx, "cpu", snap.CPUUsedFraction)
-	o.maybeEscalateFraction(ctx, "open_fds", snap.OpenFDFraction)
-	o.maybeEscalateFraction(ctx, "vnodes", snap.VnodeUsedFraction)
-	o.maybeEscalateGopls(ctx, snap.GoplsProcesses)
-	o.maybeEscalateCount(ctx, "stranded_worktrees", snap.StrandedWorktrees)
-	o.maybeEscalateCount(ctx, "orphaned_sessions", snap.OrphanedSessions)
-
-	// Burndown maintenance phase — only runs when a controller is wired.
-	if o.burndownCtrl != nil {
-		var spawned int
-		o.runBurndownTick(ctx, snap, o.burndownPolicy, o.burndownCtrl, &spawned)
+// needsReclaim reports whether any resource-pressure metric that the reclaimer
+// can act on (FDs, vnodes, gopls process count) is above its threshold.
+func (o *Overseer) needsReclaim(snap ResourceSnapshot) bool {
+	if snap.OpenFDFraction >= o.threshold.Fraction {
+		return true
 	}
-	return nil
+	if snap.VnodeUsedFraction >= o.threshold.Fraction {
+		return true
+	}
+	goplsThresh := o.threshold.GoplsProcesses
+	if goplsThresh <= 0 {
+		goplsThresh = DefaultEscalationThreshold.GoplsProcesses
+	}
+	if snap.GoplsProcesses > goplsThresh {
+		return true
+	}
+	return false
+}
+
+// reclaim runs the ResourceReclaimer, records the result, and re-snapshots
+// to verify the pressure dropped.
+func (o *Overseer) reclaim(ctx context.Context, before ResourceSnapshot) {
+	result, err := o.reclaimer.Reclaim(ctx)
+
+	payload := map[string]any{
+		"orphans_found":  result.OrphansFound,
+		"orphans_killed": result.OrphansKilled,
+		"orphans_failed": result.OrphansFailed,
+	}
+	if err != nil {
+		payload["error"] = err.Error()
+	}
+	_ = o.trail.Append(ctx, decisiontrail.Record{
+		Role:    string(RoleOverseer),
+		Kind:    "supervisor.over.reclaim",
+		Payload: payload,
+	})
+
+	if result.OrphansKilled == 0 {
+		return
+	}
+
+	// Re-snapshot to verify pressure dropped.
+	after, snapErr := o.probe.Snapshot(ctx)
+	if snapErr != nil {
+		return
+	}
+	_ = o.trail.Append(ctx, decisiontrail.Record{
+		Role: string(RoleOverseer),
+		Kind: "supervisor.over.reclaim_verify",
+		Payload: map[string]any{
+			"fd_before":     before.OpenFDFraction,
+			"fd_after":      after.OpenFDFraction,
+			"vnode_before":  before.VnodeUsedFraction,
+			"vnode_after":   after.VnodeUsedFraction,
+			"gopls_before":  before.GoplsProcesses,
+			"gopls_after":   after.GoplsProcesses,
+			"pressure_down": after.OpenFDFraction < before.OpenFDFraction || after.GoplsProcesses < before.GoplsProcesses,
+		},
+	})
 }
 
 func (o *Overseer) maybeEscalateFraction(ctx context.Context, name string, v float64) {

@@ -151,33 +151,12 @@ func SendCommandLiteral(sessionName, command string) error {
 		bufferLoaded = false // paste-buffer -d already deleted it
 		debug.Log("SendCommandLiteral: Buffer pasted successfully")
 
-		// Step 3: Send Enter key to submit the command.
-		// Delay prevents tmux from coalescing pasted text with ENTER keystroke.
-		// Do not remove.
-		time.Sleep(50 * time.Millisecond)
-		debug.Log("SendCommandLiteral: Sending C-m (Enter)")
-
-		cmdEnter, cancel3 := CommandWithTimeout(ctx, timeout, "tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "C-m")
-		defer cancel3()
-		if err := cmdEnter.Run(); err != nil {
-			if ctx.Err() == context.DeadlineExceeded {
-				return &TimeoutError{
-					Problem:  fmt.Sprintf("tmux send-keys timed out after %v (server may be hung)", timeout),
-					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
-					Duration: timeout,
-				}
-			}
-			return fmt.Errorf("failed to send Enter: %w", err)
-		}
-		debug.Log("SendCommandLiteral: Enter sent successfully, command should execute")
-
-		// Step 4: Auto-detect and retry Enter if paste left text unsubmitted.
-		// Bug fix (2026-04-10): After paste-buffer, Enter (C-m) sometimes doesn't
-		// register. Detect via capture-pane and re-send Enter up to 2 times.
-		if err := retryEnterAfterPaste(socketPath, normalizedName, 2); err != nil {
+		// Step 3: Send Enter reliably using hex 0x0d instead of C-m.
+		debug.Log("SendCommandLiteral: Sending Enter via -H 0d")
+		if err := sendEnterReliable(socketPath, normalizedName); err != nil {
 			return err
 		}
-		debug.Log("SendCommandLiteral: Enter retry check complete")
+		debug.Log("SendCommandLiteral: Enter sent and verified")
 
 		return nil
 	})
@@ -213,7 +192,7 @@ func (seq *InitSequence) sendRename() error {
 		content := string(checkOutput)
 		if strings.Contains(content, "Enter to confirm") || strings.Contains(content, "I trust this folder") {
 			debug.Log("sendRename: Trust dialog detected, sending Enter to confirm")
-			enterCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "Enter")
+			enterCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "-H", "0d")
 			if err := enterCmd.Run(); err != nil {
 				debug.Log("sendRename: Failed to confirm trust dialog: %v", err)
 			}

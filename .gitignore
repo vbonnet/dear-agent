@@ -73,3 +73,14 @@ tests/test_helper/
 
 # `make preflight` mirrors ci.yml and writes the three matrix binaries here.
 /build/
+
+# Wayfinder SDLC run artifacts are TEMPORAL — they belong in
+# engram-research/wf/<project>/, never in this code repo. Ignoring the run
+# directories + status files keeps a stray local Wayfinder run from being
+# `git add`'d by accident (defense-in-depth alongside the routing guard in
+# .dear-agent.yml + scripts/check-forbidden-artifacts.sh). This does NOT match
+# the Wayfinder TOOL SOURCE under wayfinder/, which is living code.
+/wf/
+**/.wayfinder/
+WAYFINDER-STATUS.md
+WAYFINDER-HISTORY.md

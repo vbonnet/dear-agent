@@ -245,7 +245,7 @@ func startGeminiHarness(sessionName string, exists bool) (bool, error) {
 func startGeminiDirect(sessionName string, exists bool) error {
 	debug.Log("agm-agent-wrapper not found, falling back to direct gemini")
 	resolvedModel := agent.ResolveModelFullName("gemini-cli", modelName)
-	geminiCmd := fmt.Sprintf("gemini -m %s && exit", resolvedModel)
+	geminiCmd := fmt.Sprintf("gemini -m %s && exit", shellQuote(resolvedModel))
 	debug.Log("Sending command: %s", geminiCmd)
 	if err := tmux.SendCommand(sessionName, geminiCmd); err != nil {
 		ui.PrintError(err,
@@ -280,7 +280,7 @@ func startGeminiDirect(sessionName string, exists bool) error {
 	selectCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "1")
 	_ = selectCmd.Run()
 	time.Sleep(300 * time.Millisecond)
-	enterCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "Enter")
+	enterCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "-H", "0d")
 	_ = enterCmd.Run()
 	debug.Log("Trust prompt auto-accepted")
 	ui.PrintSuccess("Auto-accepted Gemini trust prompt")
