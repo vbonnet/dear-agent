@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -46,6 +47,7 @@ Examples:
 var (
 	reapOrphansDryRun  bool
 	reapOrphansTargets []string
+	reapOrphansJSON    bool
 )
 
 func init() {
@@ -54,6 +56,21 @@ func init() {
 		"Show what would be killed without killing anything")
 	sessionReapOrphansCmd.Flags().StringSliceVar(&reapOrphansTargets, "targets", orphan.DefaultTargets,
 		"Comma-separated process command names to reap when orphaned (PPID==1)")
+	sessionReapOrphansCmd.Flags().BoolVar(&reapOrphansJSON, "json", false,
+		"Emit a machine-readable JSON summary on stdout (for programmatic consumers like the overseer reclaimer)")
+}
+
+// orphanReapJSON is the stable machine-readable shape emitted by --json. It is
+// the contract consumed by supervisor.OrphanReclaimer; keep the field names in
+// sync with that parser.
+type orphanReapJSON struct {
+	Targets      []string `json:"targets"`
+	DryRun       bool     `json:"dry_run"`
+	OrphansFound int      `json:"orphans_found"`
+	Killed       int      `json:"killed"`
+	Failed       int      `json:"failed"`
+	KilledPIDs   []int    `json:"killed_pids"`
+	FailedPIDs   []int    `json:"failed_pids"`
 }
 
 func runSessionReapOrphans(cmd *cobra.Command, args []string) error {
@@ -64,8 +81,34 @@ func runSessionReapOrphans(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if reapOrphansJSON {
+		return writeOrphanJSON(cmd.OutOrStdout(), res)
+	}
 	printOrphanSummary(cmd.OutOrStdout(), res)
 	return nil
+}
+
+func writeOrphanJSON(w io.Writer, res orphan.Result) error {
+	out := orphanReapJSON{
+		Targets:      res.Targets,
+		DryRun:       res.DryRun,
+		OrphansFound: len(res.Orphans),
+		Killed:       len(res.Killed),
+		Failed:       len(res.Failed),
+		KilledPIDs:   pids(res.Killed),
+		FailedPIDs:   pids(res.Failed),
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
+func pids(procs []orphan.Proc) []int {
+	out := make([]int, 0, len(procs))
+	for _, p := range procs {
+		out = append(out, p.PID)
+	}
+	return out
 }
 
 func printOrphanSummary(w io.Writer, res orphan.Result) {
