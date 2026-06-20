@@ -50,6 +50,12 @@
         <string>$HOME_DIR</string>
         <key>PATH</key>
         <string>$HOME_DIR/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <!-- Go memory/CPU baseline (ce-1bhq). Keeps this long-lived broker
+             within a bounded RSS envelope. Mirrors env/go-baseline.env. -->
+        <key>GOMEMLIMIT</key>
+        <string>512MiB</string>
+        <key>GOGC</key>
+        <string>100</string>
     </dict>
 
     <!-- Working dir: user's home. launchd runs in / otherwise. -->
