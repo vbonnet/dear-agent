@@ -199,7 +199,10 @@ func emitTable(out io.Writer, snap supervisor.ResourceSnapshot, breaches []breac
 		fmt.Fprintf(out, "Status: BREACHED (%d metric(s) exceeded threshold)\n", len(breaches))
 		for _, b := range breaches {
 			if b.Metric == "gopls" {
-				fmt.Fprintf(out, "  ! %s: count=%d (threshold=%d) — run: pkill -x gopls\n",
+				// The count is orphaned gopls (PPID==1) only, so the safe
+				// remediation is the orphan-only reaper — NOT `pkill gopls`,
+				// which would also kill live sessions' language servers.
+				fmt.Fprintf(out, "  ! %s: orphan count=%d (threshold=%d) — run: agm session reap-orphans\n",
 					b.Metric, b.Count, b.ThreshInt)
 			} else {
 				fmt.Fprintf(out, "  ! %s: %.1f%% (threshold=%.1f%%)\n",
