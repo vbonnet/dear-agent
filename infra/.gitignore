@@ -11,6 +11,10 @@ crash.*.log
 *.tfvars
 !terraform.tfvars.example
 
+# Real backend config embeds the account-specific R2 endpoint; the .example
+# is tracked, the live file is not.
+backend.hcl
+
 # Credentials
 *.pem
 *.token

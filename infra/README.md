@@ -37,12 +37,71 @@ The token must have:
 - `repo` scope — to manage `vbonnet/*` repositories and branch protection
 - `admin:org` scope — to create/manage `dear-labs` org rulesets
 
+## Remote state
+
+State is **not** local. It lives in a Cloudflare R2 bucket via OpenTofu's
+S3-compatible backend (`backend.tf`), so losing the working machine no longer
+means re-importing every resource. Locking uses OpenTofu's native state lock
+(`use_lockfile = true`, OpenTofu ≥ 1.10) — a `<key>.tflock` object written with
+a conditional PUT — so there is **no DynamoDB table** to run.
+
+> Why R2 and not S3? This account already runs on Cloudflare (`wrangler` is the
+> installed cloud CLI; there is no AWS account). R2 is S3-compatible, so the
+> stock `s3` backend works with a custom endpoint and a few `skip_*` flags.
+
+### One-time bucket provisioning (human, run once)
+
+```bash
+# Create the state bucket (idempotent; safe to re-run).
+wrangler r2 bucket create vbonnet-tofu-state
+
+# Create an R2 API token (Cloudflare dashboard → R2 → Manage API Tokens,
+# "Object Read & Write", scoped to this bucket). Note the Access Key ID/Secret.
+```
+
+### Backend config
+
+The account-specific `bucket` and R2 endpoint are kept out of git via a
+**partial backend config**. Copy the example and fill it in:
+
+```bash
+cd infra/
+cp backend.hcl.example backend.hcl     # gitignored; edit ACCOUNT_ID + bucket
+```
+
+`backend.hcl` needs your Cloudflare account ID (`wrangler whoami`). Credentials
+come from the environment, never from a file:
+
+```bash
+export AWS_ACCESS_KEY_ID="<R2 token Access Key ID>"
+export AWS_SECRET_ACCESS_KEY="<R2 token Secret Access Key>"
+```
+
+### Migrating existing local state → R2
+
+If you already have a local `terraform.tfstate` from an earlier apply, push it
+to the remote backend once:
+
+```bash
+cd infra/
+export GITHUB_TOKEN="$(gh auth token)"
+export AWS_ACCESS_KEY_ID=...  AWS_SECRET_ACCESS_KEY=...
+tofu init -backend-config=backend.hcl -migrate-state   # prompts y/n to copy state up
+tofu plan                                              # expect 0 changes
+```
+
+If no local state exists (e.g. the previous apply ran in an ephemeral sandbox
+and the state was lost), skip the migrate and follow **First-time setup** below —
+`import.sh` rebuilds state from the live GitHub resources straight into R2.
+
 ## First-time setup
 
 ```bash
 cd infra/
 export GITHUB_TOKEN="$(gh auth token)"
-tofu init
+export AWS_ACCESS_KEY_ID=...  AWS_SECRET_ACCESS_KEY=...   # R2 token (see Remote state)
+cp backend.hcl.example backend.hcl                        # edit ACCOUNT_ID + bucket
+tofu init -backend-config=backend.hcl                     # initializes the R2 backend
 chmod +x import.sh
 ./import.sh        # import existing repos + branch protection into state
 tofu plan          # review: expect ~0 changes for existing resources
