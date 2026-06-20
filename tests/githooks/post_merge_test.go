@@ -158,12 +158,15 @@ func TestPostMerge_NoAGM_NoOp(t *testing.T) {
 // ── Stage 1 (binary rebuild) ────────────────────────────────────────────────
 
 // stubGo writes a fake `go` that records each `go install <pkg>` invocation
-// (one pkg per line) into recordFile and returns the dir holding it.
+// into recordFile as "<pkg>|<HEAD-of-cwd>" (one per line) and returns the dir
+// holding it. Capturing the cwd's HEAD lets tests assert WHICH commit the hook
+// built from — the whole point of the origin/main fix: the build must run in a
+// checkout pinned to trunk, not in whatever ref the local working tree sits on.
 func stubGo(t *testing.T, recordFile string) string {
 	t.Helper()
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = install ]; then echo \"$2\" >> \"" + recordFile + "\"; fi\n" +
+		"if [ \"$1\" = install ]; then echo \"$2|$(git rev-parse HEAD 2>/dev/null)\" >> \"" + recordFile + "\"; fi\n" +
 		"exit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -171,20 +174,51 @@ func stubGo(t *testing.T, recordFile string) string {
 	return dir
 }
 
-// installed returns the set of pkgs the stub `go` was asked to install.
-func installed(t *testing.T, recordFile string) []string {
+// installRecord is one captured `go install` invocation: the package and the
+// HEAD commit of the directory the build actually ran in.
+type installRecord struct {
+	pkg    string
+	commit string
+}
+
+// installRecords parses the stub's record into structured invocations.
+func installRecords(t *testing.T, recordFile string) []installRecord {
 	t.Helper()
 	b, err := os.ReadFile(recordFile)
 	if err != nil {
 		return nil // no file => nothing installed
 	}
-	var out []string
+	var out []installRecord
 	for l := range strings.SplitSeq(strings.TrimSpace(string(b)), "\n") {
-		if l != "" {
-			out = append(out, l)
+		if l == "" {
+			continue
 		}
+		pkg, commit, _ := strings.Cut(l, "|")
+		out = append(out, installRecord{pkg: pkg, commit: commit})
 	}
 	return out
+}
+
+// installed returns the set of pkgs the stub `go` was asked to install.
+func installed(t *testing.T, recordFile string) []string {
+	t.Helper()
+	var out []string
+	for _, r := range installRecords(t, recordFile) {
+		out = append(out, r.pkg)
+	}
+	return out
+}
+
+// revParse returns the resolved commit for ref in dir.
+func revParse(t *testing.T, dir, ref string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", ref)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse %s in %s: %v\n%s", ref, dir, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // newRebuildRepo builds a repo that looks like dear-agent: it has the two
@@ -228,9 +262,10 @@ func mergeBranchChanging(t *testing.T, repo string, files map[string]string) {
 	git(t, repo, "merge", "-q", "--no-ff", "-m", "merge feat", "feat")
 }
 
-// runRebuild runs the hook with a stub `go` (and no agm) and returns the pkgs
-// the stub was asked to install.
-func runRebuild(t *testing.T, repo string, extraEnv ...string) []string {
+// runRebuildRecord runs the hook with a stub `go` (and no agm) and returns the
+// path to the record file capturing every `go install` invocation (pkg + the
+// HEAD of the directory it built in).
+func runRebuildRecord(t *testing.T, repo string, extraEnv ...string) string {
 	t.Helper()
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
@@ -249,7 +284,14 @@ func runRebuild(t *testing.T, repo string, extraEnv ...string) []string {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("hook must exit 0, got %v\n%s", err, out)
 	}
-	return installed(t, record)
+	return record
+}
+
+// runRebuild runs the hook with a stub `go` (and no agm) and returns the pkgs
+// the stub was asked to install.
+func runRebuild(t *testing.T, repo string, extraEnv ...string) []string {
+	t.Helper()
+	return installed(t, runRebuildRecord(t, repo, extraEnv...))
 }
 
 // A change under a shared source tree (pkg/) rebuilds BOTH binaries.
@@ -341,5 +383,67 @@ func TestRebuild_FeatureBranch_Skips(t *testing.T) {
 	got := runRebuild(t, repo)
 	if len(got) != 0 {
 		t.Fatalf("rebuild ran on a feature branch: %v", got)
+	}
+}
+
+// ── Build-source invariant: always build from origin/<default_branch> ────────
+
+// cloneRepo clones src into a fresh dir and returns the clone path. The clone's
+// main tracks origin/main, exactly like a real working checkout.
+func cloneRepo(t *testing.T, src string) string {
+	t.Helper()
+	parent := t.TempDir()
+	dst := filepath.Join(parent, "clone")
+	git(t, parent, "clone", "-q", src, dst)
+	return dst
+}
+
+// The core of the Jun-18 fix (ce-11u3 / retro B2): when an origin remote exists,
+// the rebuild must build from the freshly-fetched origin/<default_branch>, NOT
+// from the local working tree's ref — even when local main has advanced past
+// origin (an un-pushed merge). The stub records the HEAD of the dir it built in;
+// it must equal origin/main, never the divergent local HEAD.
+func TestRebuild_BuildsFromOriginMain_NotLocalRef(t *testing.T) {
+	origin := newRebuildRepo(t)
+	trunk := revParse(t, origin, "HEAD") // origin/main commit the binary must come from
+
+	local := cloneRepo(t, origin)
+	// Advance local main past origin via a merge that touches a shared source
+	// tree — this both triggers the rebuild and makes local HEAD diverge from
+	// origin/main (the un-pushed-merge scenario behind the incident).
+	mergeBranchChanging(t, local, map[string]string{"pkg/llm/auth/auth.go": "package auth // local-only\n"})
+	localHead := revParse(t, local, "HEAD")
+	if localHead == trunk {
+		t.Fatal("test setup: local HEAD did not diverge from origin/main")
+	}
+
+	recs := installRecords(t, runRebuildRecord(t, local))
+	if len(recs) == 0 {
+		t.Fatal("expected a rebuild, but the stub go install was never invoked")
+	}
+	for _, r := range recs {
+		if r.commit != trunk {
+			t.Errorf("built %s from %s; want origin/main %s (local HEAD was %s)",
+				r.pkg, r.commit, trunk, localHead)
+		}
+	}
+}
+
+// Without an origin remote (local-only repos / most tests), there is no trunk
+// ref to build from, so the hook falls back to building the working tree in
+// place — building from local HEAD rather than skipping the rebuild entirely.
+func TestRebuild_NoOrigin_FallsBackToWorkingTree(t *testing.T) {
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"pkg/llm/auth/auth.go": "package auth // v2\n"})
+	localHead := revParse(t, repo, "HEAD")
+
+	recs := installRecords(t, runRebuildRecord(t, repo))
+	if len(recs) == 0 {
+		t.Fatal("expected a fallback rebuild, but the stub go install was never invoked")
+	}
+	for _, r := range recs {
+		if r.commit != localHead {
+			t.Errorf("fallback built %s from %s; want local HEAD %s", r.pkg, r.commit, localHead)
+		}
 	}
 }
