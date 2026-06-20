@@ -7,6 +7,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	inttmux "github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // TestGC_NameCollisionDoesNotArchiveLiveWorker is a regression test for ce-cxjb.1.
@@ -88,13 +89,14 @@ func TestCheckActiveTmuxBlock_EmptySessionNameFallback(t *testing.T) {
 	}
 
 	const paneName = "agm-cecxjb1-livepane"
+	socketPath := inttmux.GetSocketPath()
 	// Best-effort cleanup of any leftover from a previous run.
-	_ = exec.Command("tmux", "kill-session", "-t", paneName).Run()
-	if err := exec.Command("tmux", "new-session", "-d", "-s", paneName, "sleep", "30").Run(); err != nil {
-		t.Skipf("could not create tmux session (no server?): %v", err)
+	_ = exec.Command("tmux", "-S", socketPath, "kill-session", "-t", paneName).Run()
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", paneName, "sleep", "30").Run(); err != nil {
+		t.Skipf("could not create tmux session on AGM socket %s (no server?): %v", socketPath, err)
 	}
 	t.Cleanup(func() {
-		_ = exec.Command("tmux", "kill-session", "-t", paneName).Run()
+		_ = exec.Command("tmux", "-S", socketPath, "kill-session", "-t", paneName).Run()
 	})
 
 	// Manifest models a live worker that never recorded its explicit tmux name.

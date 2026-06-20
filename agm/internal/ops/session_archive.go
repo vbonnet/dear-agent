@@ -15,6 +15,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/mcp"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	inttmux "github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // ArchiveSessionRequest defines the input for archiving a session.
@@ -195,7 +196,8 @@ func checkActiveTmuxBlock(m *manifest.Manifest, force bool) error {
 	if tmuxSessionName == "" {
 		return nil
 	}
-	cmd := exec.Command("tmux", "has-session", "-t", tmuxSessionName)
+	socketPath := inttmux.GetSocketPath()
+	cmd := exec.Command("tmux", "-S", socketPath, "has-session", "-t", tmuxSessionName)
 	if err := cmd.Run(); err != nil {
 		return nil //nolint:nilerr // tmux has-session failure means session doesn't exist; nothing to block
 	}
