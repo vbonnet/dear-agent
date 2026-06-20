@@ -58,6 +58,13 @@ var (
 	auditLogger      *ops.AuditLogger
 )
 
+// stdoutIsTTY reports whether stdout is an interactive terminal. It is a package
+// variable so tests can override it to exercise the header-gating logic without a
+// real TTY.
+var stdoutIsTTY = func() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "agm",
 	Short: "Agent Gateway Manager - Multi-AI session management",
@@ -110,7 +117,7 @@ Global Flags:
 		// status-line is excluded because it's designed for machine parsing (tmux status bar)
 		// Suppress in agent mode (AGM_AGENT set) or when stdout is not a TTY, to save tokens.
 		if cmd.Name() != "version" && cmd.Name() != "status-line" &&
-			os.Getenv("AGM_AGENT") == "" && term.IsTerminal(int(os.Stdout.Fd())) {
+			os.Getenv("AGM_AGENT") == "" && stdoutIsTTY() {
 			executable, err := os.Executable()
 			if err != nil {
 				executable = "unknown"

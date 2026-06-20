@@ -4,7 +4,9 @@
 exec agm version
 stdout 'version'
 
-# Test: agm without arguments shows usage (exits with error in non-interactive environment)
-# Note: agm tries to start interactive session which fails either with TTY error or database error
+# Test: agm without arguments exits with an error in a non-interactive environment.
+# Note: agm tries to start an interactive session which fails either with a TTY error
+# or a database error. The cobra Usage block is intentionally silenced
+# (rootCmd.SilenceUsage = true), so we assert the error is printed rather than usage.
 ! exec agm
-stderr 'Usage:'
+stderr 'Error'
