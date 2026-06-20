@@ -194,21 +194,32 @@ func TestReapEmptyTargetsDefaults(t *testing.T) {
 }
 
 func TestParsePS(t *testing.T) {
+	// The 4th line reproduces the real macOS case: comm is truncated to 16 chars
+	// ("/Users/vbonnet/g") while argv[0] in the args column is the full path.
+	// Command must come from argv[0] so its basename matches a target name.
 	out := `  100     1 gopls /opt/homebrew/bin/gopls -mode stdio
   200   555 agm-mcp-server /Users/x/go/bin/agm-mcp-server
   300     1 claude /Applications/Claude.app/Contents/MacOS/claude
+38435 38427 /Users/vbonnet/g /Users/vbonnet/go/bin/agm-mcp-server
 garbage line with no numbers
 `
 	procs := parsePS(out)
-	if len(procs) != 3 {
-		t.Fatalf("parsePS returned %d procs, want 3: %+v", len(procs), procs)
+	if len(procs) != 4 {
+		t.Fatalf("parsePS returned %d procs, want 4: %+v", len(procs), procs)
 	}
 	want := []Proc{
-		{PID: 100, PPID: 1, Command: "gopls", CmdLine: "gopls /opt/homebrew/bin/gopls -mode stdio"},
-		{PID: 200, PPID: 555, Command: "agm-mcp-server", CmdLine: "agm-mcp-server /Users/x/go/bin/agm-mcp-server"},
-		{PID: 300, PPID: 1, Command: "claude", CmdLine: "claude /Applications/Claude.app/Contents/MacOS/claude"},
+		{PID: 100, PPID: 1, Command: "/opt/homebrew/bin/gopls", CmdLine: "/opt/homebrew/bin/gopls -mode stdio"},
+		{PID: 200, PPID: 555, Command: "/Users/x/go/bin/agm-mcp-server", CmdLine: "/Users/x/go/bin/agm-mcp-server"},
+		{PID: 300, PPID: 1, Command: "/Applications/Claude.app/Contents/MacOS/claude", CmdLine: "/Applications/Claude.app/Contents/MacOS/claude"},
+		{PID: 38435, PPID: 38427, Command: "/Users/vbonnet/go/bin/agm-mcp-server", CmdLine: "/Users/vbonnet/go/bin/agm-mcp-server"},
 	}
 	if !reflect.DeepEqual(procs, want) {
 		t.Errorf("parsePS() = %+v\nwant %+v", procs, want)
+	}
+	// Regression: the truncated-comm process must yield a Command whose basename
+	// matches its target name (the bug was Command coming from the truncated
+	// comm "/Users/vbonnet/g", basename "g", which matched nothing).
+	if got := basename(procs[3].Command); got != "agm-mcp-server" {
+		t.Errorf("truncated-comm proc Command basename = %q, want agm-mcp-server", got)
 	}
 }

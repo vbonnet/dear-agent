@@ -96,9 +96,16 @@ func (PSLister) List() ([]Proc, error) {
 
 // parsePS parses the output of `ps -ax -o pid=,ppid=,comm=,args=`. Each line is
 // "<pid> <ppid> <comm> <args...>" with leading whitespace-padded numeric
-// columns. comm may itself contain spaces (rare), so we anchor on the two
-// leading integer columns and treat the first whitespace-delimited token after
-// them as comm and the remainder as args.
+// columns.
+//
+// We deliberately key Command on the basename of argv[0] (the first token of the
+// args column), NOT on comm: macOS truncates the comm column to 16 characters
+// when it is not the last column, so a process invoked by an absolute path such
+// as /Users/x/go/bin/agm-mcp-server shows comm "/Users/x/go/bin/" — whose
+// basename is the wrong token and never matches a target name. The args column
+// is not truncated, so its first token is the reliable, untruncated executable
+// path. comm is kept only as a fallback for the rare process with an empty args
+// column (e.g. a kernel thread), which never matches a target name anyway.
 func parsePS(out string) []Proc {
 	var procs []Proc
 	for line := range strings.SplitSeq(out, "\n") {
@@ -119,16 +126,22 @@ func parsePS(out string) []Proc {
 		if err != nil {
 			continue
 		}
-		// comm (first remaining token), args (everything from comm onward).
-		commTok, _ := nextField(rest)
+		// comm (truncated, skipped for matching), then args (the remainder).
+		commTok, args := nextField(rest)
 		if commTok == "" {
 			continue
+		}
+		// argv[0] is the untruncated executable path; prefer it over comm.
+		argv0, _ := nextField(args)
+		command, cmdline := argv0, args
+		if command == "" {
+			command, cmdline = commTok, rest
 		}
 		procs = append(procs, Proc{
 			PID:     pid,
 			PPID:    ppid,
-			Command: commTok,
-			CmdLine: rest,
+			Command: command,
+			CmdLine: cmdline,
 		})
 	}
 	return procs
