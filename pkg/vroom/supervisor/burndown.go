@@ -35,6 +35,21 @@ type BurndownController interface {
 	Spawn(ctx context.Context, spec WorkerSpec) (sessionID string, err error)
 }
 
+// OpenPRCounter reports the number of open pull requests on the dispatch
+// target repository. It is the seam the Overseer queries to enforce
+// BurndownPolicy.OpenPRCap — the hard backpressure valve that pauses worker
+// dispatch when the PR queue is already deep (ce-qpg9: the "PR firehose").
+//
+// Without this valve the burndown loop keeps spawning workers regardless of
+// how many PRs are already open; each worker opens another PR, and the merge
+// pipeline (serial rebase + conflicting-PR trap) cannot drain them as fast as
+// they arrive, so the open-PR count runs away. Capping dispatch on open-PR
+// count breaks that loop: when the queue is full, stop adding to it.
+type OpenPRCounter interface {
+	// OpenPRs returns the current count of open (non-draft) pull requests.
+	OpenPRs(ctx context.Context) (int, error)
+}
+
 // BurndownSession describes one live burndown worker session.
 type BurndownSession struct {
 	// SessionID is the AGM session identifier.
@@ -87,7 +102,22 @@ type BurndownPolicy struct {
 	// Models is the ordered list of models to assign to workers (round-robin).
 	// Default ["claude-opus-4-8"].
 	Models []string
+
+	// OpenPRCap is the hard ceiling on open pull requests above which the
+	// Overseer pauses burndown dispatch entirely: when the live open-PR count
+	// exceeds OpenPRCap, no new workers are spawned this tick regardless of
+	// the concurrency deficit (ce-qpg9). Default 20.
+	//
+	// The cap is only enforced when an OpenPRCounter is wired into the Overseer
+	// (WithOpenPRCounter). With no counter the burndown loop behaves as before
+	// — there is no PR backpressure. A non-positive value is replaced by the
+	// default; to truly disable the cap, simply do not wire a counter.
+	OpenPRCap int
 }
+
+// DefaultOpenPRCap is the open-PR ceiling used when BurndownPolicy.OpenPRCap is
+// unset. Above this many open PRs, burndown dispatch pauses (ce-qpg9).
+const DefaultOpenPRCap = 20
 
 // defaultBurndownPolicy fills zero fields with defaults.
 func defaultBurndownPolicy(p BurndownPolicy) BurndownPolicy {
@@ -99,6 +129,9 @@ func defaultBurndownPolicy(p BurndownPolicy) BurndownPolicy {
 	}
 	if len(p.Models) == 0 {
 		p.Models = []string{"claude-opus-4-8"}
+	}
+	if p.OpenPRCap <= 0 {
+		p.OpenPRCap = DefaultOpenPRCap
 	}
 	return p
 }
@@ -168,6 +201,37 @@ func (o *Overseer) runBurndownTick(ctx context.Context, snap ResourceSnapshot, p
 	deficit := policy.Target - liveAfter
 	if deficit <= 0 {
 		return // at or above target — nothing to do
+	}
+
+	// Open-PR backpressure (ce-qpg9): pause dispatch when the PR queue is
+	// already deeper than the cap. Checked before resource saturation because
+	// it is the primary firehose valve — even a perfectly healthy machine must
+	// not keep opening PRs faster than the merge pipeline can drain them. Only
+	// enforced when a counter is wired. On a counter error we fail closed (skip
+	// spawn this tick), matching the Live/Reconcile error handling above: when
+	// we cannot tell how deep the queue is, we do not add to it.
+	if o.prCounter != nil {
+		openPRs, prErr := o.prCounter.OpenPRs(ctx)
+		if prErr != nil {
+			_ = o.trail.Append(ctx, decisiontrail.Record{
+				Role:    string(RoleOverseer),
+				Kind:    "burndown.open_pr_check_error",
+				Payload: map[string]any{"error": prErr.Error()},
+			})
+			return
+		}
+		if openPRs > policy.OpenPRCap {
+			_ = o.trail.Append(ctx, decisiontrail.Record{
+				Role: string(RoleOverseer),
+				Kind: "burndown.spawn_blocked",
+				Payload: map[string]any{
+					"reason":   "open_pr_cap",
+					"open_prs": openPRs,
+					"cap":      policy.OpenPRCap,
+				},
+			})
+			return
+		}
 	}
 
 	// Suppress spawn when resources are saturated.

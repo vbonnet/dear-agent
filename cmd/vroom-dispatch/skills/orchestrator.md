@@ -95,6 +95,38 @@ dispatched workers. Note which are active vs. archived/done.
 
 ### Step 6: Dispatch Undispatched Work
 
+**FIRST — open-PR firehose cap (ce-qpg9). Before dispatching ANY worker this
+tick, check how many PRs are already open and PAUSE all dispatch if the queue
+is too deep.** Each worker eventually opens a PR; if dispatch keeps running
+while the merge pipeline (serial rebase + the conflicting-PR trap) cannot drain
+PRs as fast as they arrive, the open-PR count runs away (the firehose). The cap
+is the hard backpressure valve: when the queue is full, stop adding to it.
+
+```bash
+# Count open, non-draft PRs (drafts are not in the merge pipeline).
+OPEN_PRS=$(GIT_TERMINAL_PROMPT=0 gtimeout 30 gh pr list --repo vbonnet/dear-agent \
+  --state open --json number,isDraft --limit 200 2>/dev/null \
+  | python3 -c 'import sys,json; print(sum(1 for p in json.load(sys.stdin) if not p["isDraft"]))' 2>/dev/null || echo -1)
+OPEN_PR_CAP=20
+```
+
+- If `OPEN_PRS > OPEN_PR_CAP`: **skip ALL dispatch this tick** (do not spawn any
+  worker), jump straight to Step 6 (monitoring still runs), and log:
+  ```bash
+  printf '{"ts":"%s","role":"orchestrator","kind":"supervisor.orch.dispatch_paused_pr_cap","payload":{"open_prs":%s,"cap":%s}}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$OPEN_PRS" "$OPEN_PR_CAP" >> ~/.agm/vroom/trail.jsonl
+  ```
+- If `OPEN_PRS` is `-1` (count could not be determined — gh failed/timed out):
+  **fail closed** — skip dispatch this tick too. When you cannot tell how deep
+  the queue is, do not add to it. Log the same record with `open_prs: -1`.
+- Otherwise (`OPEN_PRS <= OPEN_PR_CAP`): proceed with dispatch below.
+
+The cap is deliberately a *full stop*, not a per-tick decrement: the goal is to
+let the merge pipeline drain the backlog below the cap before any new PRs are
+created. Do NOT raise `OPEN_PR_CAP` to clear a backlog faster — that is the
+exact move that recreated the firehose (ce-qpg9). Raising it requires an
+explicit operator decision, not an orchestrator judgement call.
+
 For each accepted roadmap item NOT in dispatched.jsonl and NOT assigned
 to a live worker session:
 

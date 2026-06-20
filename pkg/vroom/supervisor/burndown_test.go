@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -197,6 +198,140 @@ func TestOverseer_WithBurndown_Disabled(t *testing.T) {
 		if k, _ := r["kind"].(string); len(k) >= 8 && k[:8] == "burndown" {
 			t.Errorf("unexpected burndown trail record when controller not wired: %+v", r)
 		}
+	}
+}
+
+func TestDefaultBurndownPolicy_OpenPRCap(t *testing.T) {
+	if got := defaultBurndownPolicy(BurndownPolicy{}).OpenPRCap; got != DefaultOpenPRCap {
+		t.Errorf("OpenPRCap default: want %d, got %d", DefaultOpenPRCap, got)
+	}
+	// An explicit cap is preserved.
+	if got := defaultBurndownPolicy(BurndownPolicy{OpenPRCap: 5}).OpenPRCap; got != 5 {
+		t.Errorf("OpenPRCap explicit: want 5, got %d", got)
+	}
+}
+
+// When open PRs exceed the cap, no workers are spawned and a spawn_blocked
+// record with reason "open_pr_cap" is emitted.
+func TestOverseer_WithBurndown_OpenPRCapBlocksSpawn(t *testing.T) {
+	trail, buf := newBufferTrail()
+	probe := NewInMemoryResourceProbe() // resources healthy
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	ctrl := &InMemoryBurndownController{} // 0 live → deficit = Target
+	o.WithBurndown(ctrl, BurndownPolicy{Target: 3, OpenPRCap: 20})
+	o.WithOpenPRCounter(NewInMemoryOpenPRCounter(21)) // one over the cap
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	records := parseTrail(t, buf)
+	for _, r := range records {
+		if r["kind"] == "burndown.spawn" {
+			t.Errorf("spawn should be blocked when open PRs over cap; got %+v", r)
+		}
+	}
+	var blocked bool
+	for _, r := range records {
+		if r["kind"] != "burndown.spawn_blocked" {
+			continue
+		}
+		p, _ := r["payload"].(map[string]any)
+		if p["reason"] == "open_pr_cap" {
+			blocked = true
+		}
+	}
+	if !blocked {
+		t.Errorf("expected burndown.spawn_blocked reason=open_pr_cap; got=%s", buf.String())
+	}
+}
+
+// At exactly the cap, dispatch still proceeds — the valve trips only when the
+// count strictly exceeds the cap.
+func TestOverseer_WithBurndown_OpenPRAtCapSpawns(t *testing.T) {
+	trail, buf := newBufferTrail()
+	probe := NewInMemoryResourceProbe()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	ctrl := &InMemoryBurndownController{}
+	o.WithBurndown(ctrl, BurndownPolicy{Target: 2, OpenPRCap: 20, Models: []string{"claude-opus-4-8"}})
+	o.WithOpenPRCounter(NewInMemoryOpenPRCounter(20)) // exactly at the cap
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	var spawnCount int
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "burndown.spawn" {
+			spawnCount++
+		}
+	}
+	if spawnCount != 2 {
+		t.Errorf("want 2 spawns at cap, got %d; trail=%s", spawnCount, buf.String())
+	}
+}
+
+// A counter error fails closed: no spawn, and an error record is emitted.
+func TestOverseer_WithBurndown_OpenPRCounterErrorFailsClosed(t *testing.T) {
+	trail, buf := newBufferTrail()
+	probe := NewInMemoryResourceProbe()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	ctrl := &InMemoryBurndownController{}
+	o.WithBurndown(ctrl, BurndownPolicy{Target: 3})
+	counter := NewInMemoryOpenPRCounter(0)
+	counter.SetErr(errors.New("gh exploded"))
+	o.WithOpenPRCounter(counter)
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	records := parseTrail(t, buf)
+	for _, r := range records {
+		if r["kind"] == "burndown.spawn" {
+			t.Errorf("spawn should be suppressed on counter error; got %+v", r)
+		}
+	}
+	var sawErr bool
+	for _, r := range records {
+		if r["kind"] == "burndown.open_pr_check_error" {
+			sawErr = true
+		}
+	}
+	if !sawErr {
+		t.Errorf("expected burndown.open_pr_check_error record; got=%s", buf.String())
+	}
+}
+
+// With no counter wired the cap is not enforced — burndown spawns as before.
+func TestOverseer_WithBurndown_NoCounterIgnoresCap(t *testing.T) {
+	trail, buf := newBufferTrail()
+	probe := NewInMemoryResourceProbe()
+	o, err := NewOverseer(trail, probe, EscalationThreshold{Fraction: 0.9})
+	if err != nil {
+		t.Fatalf("NewOverseer: %v", err)
+	}
+	ctrl := &InMemoryBurndownController{}
+	o.WithBurndown(ctrl, BurndownPolicy{Target: 2, OpenPRCap: 1, Models: []string{"claude-opus-4-8"}})
+	// No WithOpenPRCounter — cap must be inert even though it is tiny.
+
+	if err := o.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	var spawnCount int
+	for _, r := range parseTrail(t, buf) {
+		if r["kind"] == "burndown.spawn" {
+			spawnCount++
+		}
+	}
+	if spawnCount != 2 {
+		t.Errorf("want 2 spawns with no counter wired, got %d; trail=%s", spawnCount, buf.String())
 	}
 }
 
