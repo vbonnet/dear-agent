@@ -1,9 +1,17 @@
 // Package otelsetup provides OpenTelemetry bootstrap for engram services.
 //
-// It configures a TracerProvider with an OTLP gRPC exporter pointed at
-// Grafana Tempo (default localhost:4317). When OTEL_EXPORTER_OTLP_ENDPOINT
-// is not set, a no-op TracerProvider is returned so instrumented code
-// works without a collector running.
+// It configures a TracerProvider with an OTLP gRPC exporter driven by
+// OTEL_EXPORTER_OTLP_ENDPOINT (e.g. http://localhost:4317 for a local Jaeger
+// started with `otel-local up`, or a Grafana Tempo endpoint). When the env var
+// is not set, a no-op TracerProvider is returned so instrumented code works
+// without a collector running.
+//
+// The endpoint may be given with or without a scheme: "localhost:4317",
+// "http://localhost:4317", and "https://tempo:4317" all work. A scheme-less or
+// http:// endpoint is treated as plaintext gRPC; https:// uses TLS. This is a
+// deliberate guard against a sharp footgun — otlptracegrpc's own env parser
+// maps a scheme-less "localhost:4317" to an empty target and then silently
+// exports nothing.
 package otelsetup
 
 import (
@@ -11,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -20,6 +29,28 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace/noop"
 )
+
+// parseOTLPEndpoint splits an OTLP endpoint into a gRPC dial target (host:port,
+// no scheme) and whether the connection should be plaintext (insecure).
+//
+//   - "localhost:4317"        → ("localhost:4317", true)   // scheme-less ⇒ plaintext
+//   - "http://localhost:4317" → ("localhost:4317", true)
+//   - "https://tempo:4317"    → ("tempo:4317", false)
+//
+// Passing the resulting target via otlptracegrpc.WithEndpoint avoids the
+// scheme-less-target-is-empty footgun in the exporter's env parser.
+func parseOTLPEndpoint(raw string) (target string, insecure bool) {
+	e := strings.TrimSpace(raw)
+	e = strings.TrimSuffix(e, "/")
+	switch {
+	case strings.HasPrefix(e, "https://"):
+		return strings.TrimPrefix(e, "https://"), false
+	case strings.HasPrefix(e, "http://"):
+		return strings.TrimPrefix(e, "http://"), true
+	default:
+		return e, true
+	}
+}
 
 // InitTracer initialises the global OpenTelemetry TracerProvider.
 //
@@ -58,7 +89,15 @@ func InitTracer(serviceName string) (shutdown func(context.Context) error) {
 
 	ctx := context.Background()
 
-	exporter, err := otlptracegrpc.New(ctx)
+	// Build explicit exporter options from the endpoint so a scheme-less
+	// "localhost:4317" exports correctly instead of silently dropping spans.
+	target, insecure := parseOTLPEndpoint(endpoint)
+	exporterOpts := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(target)}
+	if insecure {
+		exporterOpts = append(exporterOpts, otlptracegrpc.WithInsecure())
+	}
+
+	exporter, err := otlptracegrpc.New(ctx, exporterOpts...)
 	if err != nil {
 		// Fall back to no-op rather than crashing the host binary.
 		otel.SetTracerProvider(noop.NewTracerProvider())

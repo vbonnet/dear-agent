@@ -24,6 +24,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -31,6 +32,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/internal/safegit"
+	"github.com/vbonnet/dear-agent/pkg/otelsetup"
 )
 
 func main() {
@@ -70,7 +72,16 @@ func run(argv []string) error {
 		return fmt.Errorf("--repo or GITHUB_REPOSITORY must be set")
 	}
 
-	return safegit.SafeMerge(safegit.MergeConfig{
+	// Tracing is opt-in: a no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set
+	// (run `otel-local up` and `eval "$(otel-local env)"` to collect spans).
+	shutdown := otelsetup.InitTracer("safe-merge")
+	defer func() {
+		if err := shutdown(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "safe-merge: otel shutdown: %v\n", err)
+		}
+	}()
+
+	return safegit.SafeMergeContext(context.Background(), safegit.MergeConfig{
 		PRNumber:     *prNum,
 		Repo:         resolvedRepo,
 		DryRun:       *dryRun,
