@@ -121,7 +121,16 @@ func TestGC_SkipsProtectedRoles(t *testing.T) {
 			sessions := []*manifest.Manifest{
 				gcManifest("id-1", tt.sessName, manifest.StateDone, old),
 			}
-			ctx := testCtx(sessions) // no tmux
+			// Protected roles are only protected while ACTIVE: give the
+			// protected (wantSkip) cases a live tmux pane so they are skipped.
+			// Without a live pane a STOPPED protected record is a reapable
+			// orphan (covered by TestGC_ReapsStoppedProtectedOrphans).
+			var ctx *OpContext
+			if tt.wantSkip {
+				ctx = testCtx(sessions, tt.sessName)
+			} else {
+				ctx = testCtx(sessions) // no tmux
+			}
 
 			result, err := GC(ctx, &GCRequest{ProtectRoles: tt.roles, Force: true})
 			if err != nil {
@@ -362,7 +371,7 @@ func TestGC_CombinedSafety(t *testing.T) {
 	old := now.Add(-48 * time.Hour)
 
 	sessions := []*manifest.Manifest{
-		gcManifest("id-1", "orchestrator-main", manifest.StateDone, old),  // protected role
+		gcManifest("id-1", "orchestrator-main", manifest.StateDone, old),  // protected role + live tmux
 		gcManifest("id-2", "active-worker", manifest.StateDone, old),     // active tmux
 		gcManifest("id-3", "busy-worker", manifest.StateWorking, old),    // active state
 		gcManifest("id-4", "new-worker", manifest.StateDone, now),        // too recent (with filter)
@@ -370,7 +379,9 @@ func TestGC_CombinedSafety(t *testing.T) {
 		gcManifest("id-6", "also-eligible", manifest.StateOffline, old),  // should be GC'd
 	}
 
-	ctx := testCtx(sessions, "active-worker")
+	// orchestrator-main has a live tmux pane, so its protected role still
+	// shields it; a STOPPED orchestrator with no pane would be reaped instead.
+	ctx := testCtx(sessions, "active-worker", "orchestrator-main")
 	ctx.DryRun = true
 
 	result, err := GC(ctx, &GCRequest{

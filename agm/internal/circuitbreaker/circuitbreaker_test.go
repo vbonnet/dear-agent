@@ -255,6 +255,21 @@ func TestFormatDenied(t *testing.T) {
 	}
 }
 
+func TestFormatDenied_EmptyLevelFallsBackToUnknown(t *testing.T) {
+	r := CheckResult{
+		Allowed: false,
+		Level:   "", // probe never ran / load classification missing
+		Gates: []GateResult{
+			{Gate: "max_workers", Passed: false, Message: "worker limit reached: 3/3"},
+		},
+	}
+
+	msg := FormatDenied(r)
+	if !contains(msg, "load level: unknown") {
+		t.Errorf("expected empty load level to render as 'unknown', got: %s", msg)
+	}
+}
+
 // --- DefaultConfig env override ---
 
 func TestDefaultConfig_EnvOverride(t *testing.T) {
