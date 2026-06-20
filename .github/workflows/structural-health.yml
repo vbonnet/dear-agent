@@ -34,6 +34,11 @@ permissions:
 jobs:
   structural-health:
     name: Structural Health (baselined)
+    # Non-required: gate the per-push hot path behind the `full-ci` label.
+    # push (main), merge_group, and workflow_dispatch still run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'full-ci')
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

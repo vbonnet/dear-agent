@@ -121,7 +121,16 @@ func TestGC_SkipsProtectedRoles(t *testing.T) {
 			sessions := []*manifest.Manifest{
 				gcManifest("id-1", tt.sessName, manifest.StateDone, old),
 			}
-			ctx := testCtx(sessions) // no tmux
+			// Protected roles are only protected while ACTIVE: give the
+			// protected (wantSkip) cases a live tmux pane so they are skipped.
+			// Without a live pane a STOPPED protected record is a reapable
+			// orphan (covered by TestGC_ReapsStoppedProtectedOrphans).
+			var ctx *OpContext
+			if tt.wantSkip {
+				ctx = testCtx(sessions, tt.sessName)
+			} else {
+				ctx = testCtx(sessions) // no tmux
+			}
 
 			result, err := GC(ctx, &GCRequest{ProtectRoles: tt.roles, Force: true})
 			if err != nil {
@@ -362,7 +371,7 @@ func TestGC_CombinedSafety(t *testing.T) {
 	old := now.Add(-48 * time.Hour)
 
 	sessions := []*manifest.Manifest{
-		gcManifest("id-1", "orchestrator-main", manifest.StateDone, old),  // protected role
+		gcManifest("id-1", "orchestrator-main", manifest.StateDone, old), // protected role + live tmux
 		gcManifest("id-2", "active-worker", manifest.StateDone, old),     // active tmux
 		gcManifest("id-3", "busy-worker", manifest.StateWorking, old),    // active state
 		gcManifest("id-4", "new-worker", manifest.StateDone, now),        // too recent (with filter)
@@ -370,7 +379,9 @@ func TestGC_CombinedSafety(t *testing.T) {
 		gcManifest("id-6", "also-eligible", manifest.StateOffline, old),  // should be GC'd
 	}
 
-	ctx := testCtx(sessions, "active-worker")
+	// orchestrator-main has a live tmux pane, so its protected role still
+	// shields it; a STOPPED orchestrator with no pane would be reaped instead.
+	ctx := testCtx(sessions, "active-worker", "orchestrator-main")
 	ctx.DryRun = true
 
 	result, err := GC(ctx, &GCRequest{
@@ -413,9 +424,9 @@ func TestGC_Default24hThresholdArchivesOldSessions(t *testing.T) {
 	now := time.Now()
 
 	sessions := []*manifest.Manifest{
-		gcManifest("id-old", "stale-session", manifest.StateDone, now.Add(-48*time.Hour)),  // 2 days old — should be archived
-		gcManifest("id-new", "recent-session", manifest.StateDone, now.Add(-2*time.Hour)),  // 2 hours old — too recent
-		gcManifest("id-edge", "edge-session", manifest.StateDone, now.Add(-25*time.Hour)),  // 25 hours old — should be archived
+		gcManifest("id-old", "stale-session", manifest.StateDone, now.Add(-48*time.Hour)), // 2 days old — should be archived
+		gcManifest("id-new", "recent-session", manifest.StateDone, now.Add(-2*time.Hour)), // 2 hours old — too recent
+		gcManifest("id-edge", "edge-session", manifest.StateDone, now.Add(-25*time.Hour)), // 25 hours old — should be archived
 	}
 
 	ctx := testCtx(sessions) // no tmux sessions
@@ -544,18 +555,36 @@ type failingStorageImpl struct{}
 
 func newFailingStorage() *failingStorageImpl { return &failingStorageImpl{} }
 
-func (f *failingStorageImpl) Create(*manifest.Manifest) error                                { return errors.New("unreachable") }
-func (f *failingStorageImpl) Get(string) (*manifest.Manifest, error)                         { return nil, errors.New("unreachable") }
-func (f *failingStorageImpl) Update(*manifest.Manifest) error                                { return errors.New("unreachable") }
-func (f *failingStorageImpl) Delete(string) error                                            { return errors.New("unreachable") }
-func (f *failingStorageImpl) List(*manifest.Filter) ([]*manifest.Manifest, error)            { return nil, errors.New("unreachable") }
-func (f *failingStorageImpl) Close() error                                                   { return nil }
-func (f *failingStorageImpl) ApplyMigrations() error                                         { return nil }
-func (f *failingStorageImpl) CreateSession(*manifest.Manifest) error                         { return errors.New("unreachable") }
-func (f *failingStorageImpl) GetSession(string) (*manifest.Manifest, error)                  { return nil, errors.New("unreachable") }
-func (f *failingStorageImpl) UpdateSession(*manifest.Manifest) error                         { return errors.New("unreachable") }
-func (f *failingStorageImpl) DeleteSession(string) error                                     { return errors.New("unreachable") }
-func (f *failingStorageImpl) ListSessions(*dolt.SessionFilter) ([]*manifest.Manifest, error) { return nil, errors.New("unreachable") }
-func (f *failingStorageImpl) GetSessionByUUID(string) (*manifest.Manifest, error)            { return nil, errors.New("unreachable") }
-func (f *failingStorageImpl) RecordHarnessSwitch(string, string, string, time.Time) error    { return errors.New("unreachable") }
-func (f *failingStorageImpl) GetHarnessHistory(string) ([]manifest.HarnessSwitch, error)    { return nil, errors.New("unreachable") }
+func (f *failingStorageImpl) Create(*manifest.Manifest) error { return errors.New("unreachable") }
+func (f *failingStorageImpl) Get(string) (*manifest.Manifest, error) {
+	return nil, errors.New("unreachable")
+}
+func (f *failingStorageImpl) Update(*manifest.Manifest) error { return errors.New("unreachable") }
+func (f *failingStorageImpl) Delete(string) error             { return errors.New("unreachable") }
+func (f *failingStorageImpl) List(*manifest.Filter) ([]*manifest.Manifest, error) {
+	return nil, errors.New("unreachable")
+}
+func (f *failingStorageImpl) Close() error           { return nil }
+func (f *failingStorageImpl) ApplyMigrations() error { return nil }
+func (f *failingStorageImpl) CreateSession(*manifest.Manifest) error {
+	return errors.New("unreachable")
+}
+func (f *failingStorageImpl) GetSession(string) (*manifest.Manifest, error) {
+	return nil, errors.New("unreachable")
+}
+func (f *failingStorageImpl) UpdateSession(*manifest.Manifest) error {
+	return errors.New("unreachable")
+}
+func (f *failingStorageImpl) DeleteSession(string) error { return errors.New("unreachable") }
+func (f *failingStorageImpl) ListSessions(*dolt.SessionFilter) ([]*manifest.Manifest, error) {
+	return nil, errors.New("unreachable")
+}
+func (f *failingStorageImpl) GetSessionByUUID(string) (*manifest.Manifest, error) {
+	return nil, errors.New("unreachable")
+}
+func (f *failingStorageImpl) RecordHarnessSwitch(string, string, string, time.Time) error {
+	return errors.New("unreachable")
+}
+func (f *failingStorageImpl) GetHarnessHistory(string) ([]manifest.HarnessSwitch, error) {
+	return nil, errors.New("unreachable")
+}

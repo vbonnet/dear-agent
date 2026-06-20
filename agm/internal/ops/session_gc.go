@@ -175,6 +175,12 @@ func processGCSession(ctx *OpContext, m *manifest.Manifest, req *GCRequest, prot
 	_, archiveErr := ArchiveSession(ctx, &ArchiveSessionRequest{
 		Identifier: m.SessionID,
 		Force:      req.Force,
+		// gcSkipReason already confirmed any protected-role record reaching
+		// here is STOPPED with no live tmux pane, so the supervisor-protection
+		// guard in ArchiveSession must not re-block it. checkActiveTmuxBlock
+		// still independently re-verifies tmux liveness, so a truly live
+		// supervisor can never be archived by this path.
+		AllowSupervisorReap: true,
 	})
 	if archiveErr != nil {
 		entry.Action = "error"
@@ -217,7 +223,14 @@ func gcSkipReason(m *manifest.Manifest, protectRoles []string, activeTmuxByID ma
 		return GCSkipReaping, true
 	}
 	if matchesProtectedRole(m.Name, protectRoles) || IsSupervisorSession(m.Name) {
-		return GCSkipProtectedRole, true
+		// Protected roles are only protected while ACTIVE (a live tmux pane
+		// exists). STOPPED protected-role records with no live tmux are dead
+		// duplicates/orphans and ARE gc-eligible — otherwise they accumulate
+		// after crash/kill cycles and permanently block reuse of the canonical
+		// name. Fall through to the normal stopped-session gc logic below.
+		if tmuxSessions[m.Name] {
+			return GCSkipProtectedRole, true
+		}
 	}
 	if activeTmuxByID[m.SessionID] {
 		return GCSkipActiveTmux, true

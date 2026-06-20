@@ -126,32 +126,34 @@ func TestArchiveSession_SupervisorProtection(t *testing.T) {
 	}
 }
 
+// TestGC_SkipsSupervisorSessions verifies that supervisor/protected sessions
+// are only protected from GC while ACTIVE (a live tmux pane exists). The
+// protected meta-scheduler here has a live pane and must be skipped; the
+// regular worker has no pane and is reaped.
 func TestGC_SkipsSupervisorSessions(t *testing.T) {
 	now := time.Now()
 	old := now.Add(-48 * time.Hour)
 
 	sessions := []*manifest.Manifest{
 		gcManifest("id-1", "meta-scheduler", manifest.StateDone, old),
-		gcManifest("id-2", "orchestrator-v3", manifest.StateDone, old),
-		gcManifest("id-3", "overseer-v12", manifest.StateDone, old),
 		gcManifest("id-4", "regular-worker", manifest.StateDone, old),
 	}
 
-	ctx := testCtx(sessions) // no active tmux
+	ctx := testCtx(sessions, "meta-scheduler") // meta-scheduler has a live pane
 
 	result, err := GC(ctx, &GCRequest{Force: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Only regular-worker should be archived
+	// Only regular-worker should be archived; the active supervisor is skipped.
 	if result.Archived != 1 {
 		t.Errorf("expected 1 archived, got %d", result.Archived)
 	}
 
 	for _, s := range result.Sessions {
 		switch s.Name {
-		case "meta-scheduler", "orchestrator-v3", "overseer-v12":
+		case "meta-scheduler":
 			if s.Action != "skipped" {
 				t.Errorf("%s should be skipped, got action=%s", s.Name, s.Action)
 			}
@@ -161,6 +163,49 @@ func TestGC_SkipsSupervisorSessions(t *testing.T) {
 		case "regular-worker":
 			if s.Action != "archived" {
 				t.Errorf("regular-worker should be archived, got action=%s", s.Action)
+			}
+		}
+	}
+}
+
+// TestGC_ReapsStoppedProtectedOrphans is the regression test for ce-h5ns: a
+// STOPPED protected-role record with no live tmux pane is a dead duplicate/
+// orphan and must be reaped, otherwise it permanently blocks reuse of the
+// canonical name after crash/kill cycles. The same-named ACTIVE supervisor
+// stays protected.
+func TestGC_ReapsStoppedProtectedOrphans(t *testing.T) {
+	now := time.Now()
+	old := now.Add(-48 * time.Hour)
+
+	sessions := []*manifest.Manifest{
+		gcManifest("orphan-1", "meta-scheduler", manifest.StateDone, old),     // stopped orphan, no pane
+		gcManifest("orphan-2", "orchestrator-v3", manifest.StateOffline, old), // stopped orphan, no pane
+		gcManifest("live-1", "overseer-v12", manifest.StateDone, old),         // live pane → protected
+	}
+
+	ctx := testCtx(sessions, "overseer-v12") // only overseer-v12 has a live pane
+
+	result, err := GC(ctx, &GCRequest{Force: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Archived != 2 {
+		t.Errorf("expected 2 stopped protected orphans reaped, got %d", result.Archived)
+	}
+
+	for _, s := range result.Sessions {
+		switch s.Name {
+		case "meta-scheduler", "orchestrator-v3":
+			if s.Action != "archived" {
+				t.Errorf("%s (stopped protected orphan) should be archived, got action=%s", s.Name, s.Action)
+			}
+		case "overseer-v12":
+			if s.Action != "skipped" {
+				t.Errorf("%s (active supervisor) should be skipped, got action=%s", s.Name, s.Action)
+			}
+			if s.Reason != GCSkipProtectedRole {
+				t.Errorf("%s skip reason should be %s, got %s", s.Name, GCSkipProtectedRole, s.Reason)
 			}
 		}
 	}

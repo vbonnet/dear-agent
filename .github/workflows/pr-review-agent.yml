@@ -58,6 +58,11 @@ env:
 jobs:
   review:
     name: Codebase health review
+    # Non-required: gate the per-push hot path behind the `full-ci` label.
+    # Still runs for workflow_dispatch / merge_group (non-pull_request events).
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'full-ci')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

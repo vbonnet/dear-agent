@@ -8,7 +8,12 @@
 #     ~/go/bin are stale until someone remembers to `go install`. This stage
 #     closes that gap: it inspects what changed in the merge and reinstalls
 #     ONLY the binaries whose source actually changed. Docs/tests/config-only
-#     merges rebuild nothing (near-instant no-op). See `rebuild_changed_binaries`.
+#     merges rebuild nothing (near-instant no-op). Crucially, it ALWAYS builds
+#     from the freshly-fetched origin/<default_branch> (via a throwaway detached
+#     worktree), never from whatever ref this local checkout sits on — so the
+#     installed binary's vcs.revision is provably trunk. See `fetch_trunk_commit`
+#     / `ensure_build_dir` and `rebuild_changed_binaries`. (Jun-18 retro B2,
+#     ce-11u3: agm was rebuilt from a 4-day-stale ancestor not on origin/main.)
 #
 #   Stage 2 — reap provably-merged worktrees via `agm worktree sweep --execute`.
 #     The reaper itself already exists and is fail-safe (it removes ONLY worktrees
@@ -143,14 +148,93 @@ maybe_rebuild() {
 
   [ "${_affected}" = "1" ] || return 0
 
+  # Resolve WHERE to build from. Never `go install` the local working tree
+  # directly: its embedded vcs.revision is whatever ref this checkout/worktree
+  # happens to sit on, which on Jun-18 was a 4-day-stale ancestor (0fd2ee23)
+  # that was not on origin/main. ensure_build_dir hands back a throwaway
+  # detached worktree pinned to the freshly-fetched origin/<default_branch>, so
+  # the installed binary's revision is provably trunk. It falls back to the
+  # in-place working tree only when there is no origin trunk ref (local-only
+  # repos / this hook's own tests).
+  ensure_build_dir
+
   echo "[post-merge:rebuild] Rebuilding ${_name} (source changed in ${_trigger})..." >&2
-  if ( cd "${repo_root}" && GOBIN="${HOME}/go/bin" go install "./${_pkg}" ); then
+  if ( cd "${build_dir}" && GOBIN="${HOME}/go/bin" go install "./${_pkg}" ); then
     echo "[post-merge:rebuild] ✓ installed ${_name} -> ${HOME}/go/bin/${_name}" >&2
     rebuilt_any=1
   else
     echo "[post-merge:rebuild] ✗ ${_name} rebuild FAILED — git op unaffected." >&2
     echo "[post-merge:rebuild]   rebuild manually: (cd ${repo_root} && go install ./${_pkg})" >&2
   fi
+}
+
+# _pick_timeout: echo the first available timeout wrapper (gtimeout on macOS
+# coreutils, then GNU timeout), or nothing if neither exists. Used to cap the
+# trunk fetch so a hung network probe can never wedge the merge.
+_pick_timeout() {
+  for _t in gtimeout timeout; do
+    if command -v "${_t}" >/dev/null 2>&1; then
+      printf '%s' "${_t}"
+      return 0
+    fi
+  done
+}
+
+# fetch_trunk_commit: best-effort fetch of origin/<default_branch> and resolve
+# its commit into build_commit. The freshly-fetched trunk HEAD is the ONLY
+# legitimate source for the binary that gets run — see the Jun-18 incident
+# (ce-11u3 / retro B2). Never fatal: no origin remote (local-only repos and
+# this hook's tests) or an offline fetch simply leaves build_commit empty, and
+# the build falls back to the working tree in place.
+fetch_trunk_commit() {
+  build_commit=""
+  git -C "${repo_root}" remote get-url origin >/dev/null 2>&1 || return 0
+
+  _to="$(_pick_timeout)"
+  if [ -n "${_to}" ]; then
+    "${_to}" 60 git -C "${repo_root}" fetch --quiet origin "${default_branch}" 2>/dev/null || true
+  else
+    git -C "${repo_root}" fetch --quiet origin "${default_branch}" 2>/dev/null || true
+  fi
+
+  build_commit="$(git -C "${repo_root}" rev-parse --verify --quiet "origin/${default_branch}^{commit}" 2>/dev/null || true)"
+}
+
+# ensure_build_dir: lazily resolve build_dir — the directory `go install` runs
+# in. Preference: a throwaway detached worktree checked out at build_commit
+# (origin/<default_branch>), so the binary's vcs.revision is provably trunk
+# regardless of this checkout's ref. Falls back to the in-place working tree
+# when build_commit is empty or the worktree cannot be created. Idempotent:
+# resolves once, the worktree (if any) is reaped by cleanup_build_dir.
+ensure_build_dir() {
+  [ -n "${build_dir}" ] && return 0
+
+  if [ -n "${build_commit}" ]; then
+    _tmp_parent="$(mktemp -d 2>/dev/null || true)"
+    if [ -n "${_tmp_parent}" ]; then
+      _wt="${_tmp_parent}/build"
+      if git -C "${repo_root}" worktree add --quiet --detach "${_wt}" "${build_commit}" 2>/dev/null; then
+        build_dir="${_wt}"
+        build_worktree="${_wt}"
+        echo "[post-merge:rebuild] Building from origin/${default_branch} @ $(git -C "${repo_root}" rev-parse --short "${build_commit}" 2>/dev/null)" >&2
+        return 0
+      fi
+      rm -rf "${_tmp_parent}" 2>/dev/null || true
+    fi
+    echo "[post-merge:rebuild] could not check out origin/${default_branch}; building working tree in place" >&2
+  fi
+
+  build_dir="${repo_root}"
+}
+
+# cleanup_build_dir: remove the throwaway build worktree (if one was created).
+# Best-effort; never fatal.
+cleanup_build_dir() {
+  [ -n "${build_worktree}" ] || return 0
+  git -C "${repo_root}" worktree remove --force "${build_worktree}" 2>/dev/null || true
+  rm -rf "$(dirname "${build_worktree}")" 2>/dev/null || true
+  build_dir=""
+  build_worktree=""
 }
 
 rebuild_changed_binaries() {
@@ -198,9 +282,17 @@ rebuild_changed_binaries() {
     indeterminate=1
   fi
 
+  # Fetch the canonical trunk commit up front (once). build_dir/build_worktree
+  # are resolved lazily by ensure_build_dir on the first actual rebuild, so a
+  # docs/tests/config-only merge never pays the worktree-creation cost.
+  build_dir=""
+  build_worktree=""
+  fetch_trunk_commit
+
   rebuilt_any=0
   maybe_rebuild "agm/cmd/agm"        agm/ pkg/ internal/ go.mod go.sum
   maybe_rebuild "cmd/vroom-dispatch" cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
+  cleanup_build_dir
 
   if [ "${indeterminate}" != "1" ] && [ "${rebuilt_any}" = "0" ]; then
     echo "[post-merge:rebuild] No binary rebuild needed (docs/tests/config only)." >&2

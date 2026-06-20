@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent for the Claude Code OAuth token-refresher (ce-cs3v).
+
+  Keeps ~/.claude/.credentials.json fresh so the VROOM supervisor mesh (three
+  Claude Code sessions sharing one credentials file) survives access-token
+  expiry without a human re-running /login. This is the IDLE BACKSTOP: it runs
+  even when no session is active, so the credentials file never goes stale and
+  the single-use refresh-token family never dies of neglect. During active
+  sessions the Claude Code `apiKeyHelper` (which also points at this binary)
+  drives on-demand refresh on TTL / HTTP 401; both paths share the same
+  cross-process file lock, so they never race or double-spend the refresh token.
+
+  Runs with -force so every tick guarantees a fresh token regardless of the
+  remaining lifetime (the binary is the single-owner, file-locked refresher
+  mandated by ce-rnpt / ce-f3e3, designed for exactly this cadence). stdout
+  carries ONLY the access token (apiKeyHelper contract), so it is routed to
+  /dev/null to keep the secret out of the log file; structured logs and the
+  JSONL audit trail go to stderr / ~/.local/state/dear-agent.
+
+  The plist is a TEMPLATE: the install target
+  (make install-token-refresher-launchagent) substitutes __HOME__ for the real
+  home directory before staging it into ~/Library/LaunchAgents.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dear-agent.token-refresher</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/go/bin/token-refresher</string>
+    <string>-force</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+  </dict>
+
+  <!-- One refresh every 30 minutes, well ahead of access-token expiry. -->
+  <key>StartInterval</key>
+  <integer>1800</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Never let two refreshes overlap (they share the credentials lock). -->
+  <key>AbandonProcessGroup</key>
+  <false/>
+
+  <!-- stdout is the access token (apiKeyHelper contract) — discard it so the
+       secret never lands in a log file. -->
+  <key>StandardOutPath</key>
+  <string>/dev/null</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.local/state/dear-agent/token-refresher.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

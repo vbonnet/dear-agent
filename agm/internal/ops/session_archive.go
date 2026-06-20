@@ -25,6 +25,11 @@ type ArchiveSessionRequest struct {
 	Force bool `json:"force,omitempty"`
 	// KeepSandbox preserves the sandbox directory for debugging instead of removing it.
 	KeepSandbox bool `json:"keep_sandbox,omitempty"`
+	// AllowSupervisorReap bypasses the supervisor-protection guard (but not the
+	// active-tmux or verification guards). Set by gc when reaping a STOPPED
+	// protected-role orphan that has no live tmux pane; never set for live
+	// supervisor sessions.
+	AllowSupervisorReap bool `json:"allow_supervisor_reap,omitempty"`
 }
 
 // ArchiveSessionResult is the output of ArchiveSession.
@@ -67,7 +72,7 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 		return nil, ErrSessionArchived(m.Name)
 	}
 
-	if err := checkSupervisorProtection(m, req.Force); err != nil {
+	if err := checkSupervisorProtection(m, req.Force || req.AllowSupervisorReap); err != nil {
 		return nil, err
 	}
 	if err := checkActiveTmuxBlock(m, req.Force); err != nil {
