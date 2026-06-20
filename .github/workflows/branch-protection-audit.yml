@@ -58,7 +58,11 @@ jobs:
             slug="${OWNER}/${repo}"
             echo "=== $slug ==="
 
-            # 404 from this endpoint = no protection rules at all.
+            # 404 from this endpoint = no *classic* protection. A repo may
+            # instead (or also) be protected by a repository ruleset, which
+            # lives at a different endpoint and returns 404 here. Treat an
+            # active default-branch ruleset that enforces required checks +
+            # pull_request with no bypass actors as equivalent protection.
             if ! protection=$(timeout 30 gh api \
                 "repos/${slug}/branches/main/protection" \
                 -H "Accept: application/vnd.github+json" 2>/dev/null); then
@@ -67,7 +71,28 @@ jobs:
                 echo "  skip — repo not accessible (private or missing)"
                 continue
               fi
-              findings="${findings}\n- **${slug}**: branch \`main\` has no protection rules"
+              # Look for a qualifying active ruleset before flagging.
+              ruleset_ok=""
+              ids=$(timeout 30 gh api "repos/${slug}/rulesets" 2>/dev/null \
+                | jq -r '.[] | select(.target == "branch" and .enforcement == "active") | .id' || true)
+              for rid in $ids; do
+                detail=$(timeout 30 gh api "repos/${slug}/rulesets/${rid}" 2>/dev/null || true)
+                [ -z "$detail" ] && continue
+                if echo "$detail" | jq -e '
+                    (.conditions.ref_name.include // [] | index("~DEFAULT_BRANCH"))
+                    and ((.bypass_actors // []) | length == 0)
+                    and ([.rules[].type] | index("required_status_checks"))
+                    and ([.rules[].type] | index("pull_request"))
+                  ' >/dev/null 2>&1; then
+                  ruleset_ok="yes"
+                  break
+                fi
+              done
+              if [ -n "$ruleset_ok" ]; then
+                echo "  ok — protected by repository ruleset"
+                continue
+              fi
+              findings="${findings}\n- **${slug}**: branch \`main\` has no protection rules (no classic protection and no qualifying ruleset)"
               continue
             fi
 
@@ -120,13 +145,20 @@ jobs:
 
           ${findings}
 
-          **Required for every repo** (per the workflow):
+          **Required for every repo** — satisfied by EITHER classic branch
+          protection OR an active default-branch repository ruleset.
+
+          Classic protection must have:
           - \`required_status_checks\` configured
           - \`required_pull_request_reviews\` with \`required_approving_review_count >= 1\`
           - \`allow_force_pushes.enabled = false\`
           - \`allow_deletions.enabled = false\`
 
-          To fix a repo: \`gh api -X PUT repos/<owner>/<repo>/branches/main/protection ...\` — see [GitHub's branch protection docs](https://docs.github.com/en/rest/branches/branch-protection).
+          A ruleset qualifies when it is \`active\`, targets \`~DEFAULT_BRANCH\`,
+          has empty \`bypass_actors\`, and includes \`required_status_checks\` +
+          \`pull_request\` rules (see \`.github/rulesets/main.json\`).
+
+          To fix a repo: \`gh api -X PUT repos/<owner>/<repo>/branches/main/protection ...\` (classic) or apply a ruleset — see [GitHub's branch protection docs](https://docs.github.com/en/rest/branches/branch-protection) and [rulesets docs](https://docs.github.com/en/rest/repos/rules).
 
           Auto-managed by \`.github/workflows/branch-protection-audit.yml\`; closes once every repo passes.
           EOF
