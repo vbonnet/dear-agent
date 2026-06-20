@@ -35,6 +35,7 @@ type Loop struct {
 	mesh     PeerLookup
 	check    CheckSkill
 	recovery PeerRecovery
+	failover FailoverObserver
 	trail    decisiontrail.Trail
 	interval time.Duration
 	clock    func() time.Time
@@ -68,6 +69,15 @@ type PeerLookup interface {
 	Get(r Role) (LoopStatus, bool)
 }
 
+// FailoverObserver receives the Loop's per-iteration peer-staleness signal so
+// it can drive degraded-mode tracking and leader election. The concrete
+// implementation is *Failover; it is an optional Loop dependency (nil = the
+// legacy detect-only behaviour with no failover machinery). The staleness map
+// is keyed by peer Role with true meaning "appeared dark this iteration".
+type FailoverObserver interface {
+	Observe(ctx context.Context, staleness map[Role]bool)
+}
+
 // LoopConfig holds the dependencies a Loop needs. All fields are required
 // except Clock, Recovery, and ZombieThreshold (defaults to time.Now, nil,
 // and 10 respectively).
@@ -75,7 +85,8 @@ type LoopConfig struct {
 	Supervisor Supervisor
 	Mesh       PeerLookup
 	Check      CheckSkill
-	Recovery   PeerRecovery // nil = detect-only, no corrective action
+	Recovery   PeerRecovery     // nil = detect-only, no corrective action
+	Failover   FailoverObserver // nil = no degraded-mode / leader-election machinery
 	Trail      decisiontrail.Trail
 	Interval   time.Duration
 
@@ -134,6 +145,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 		mesh:              cfg.Mesh,
 		check:             cfg.Check,
 		recovery:          cfg.Recovery,
+		failover:          cfg.Failover,
 		trail:             cfg.Trail,
 		interval:          cfg.Interval,
 		clock:             clock,
@@ -235,10 +247,14 @@ func (l *Loop) checkPeers(ctx context.Context) {
 
 	allStale := true
 	peersChecked := 0
+	// staleness feeds the optional Failover coordinator. A peer that is
+	// missing from the mesh or fails its check counts as dark.
+	staleness := make(map[Role]bool, len(peers))
 
 	for _, peerRole := range peers {
 		peer, ok := l.mesh.Get(peerRole)
 		if !ok {
+			staleness[peerRole] = true
 			_ = l.trail.Append(ctx, decisiontrail.Record{
 				Role: string(l.sup.Role()),
 				Kind: "supervisor.check.peer_missing",
@@ -264,6 +280,7 @@ func (l *Loop) checkPeers(ctx context.Context) {
 		}
 		_ = l.trail.Append(ctx, rec)
 
+		staleness[peerRole] = checkErr != nil
 		if checkErr == nil {
 			allStale = false
 			l.peerStaleRuns[peerRole] = 0
@@ -299,6 +316,13 @@ func (l *Loop) checkPeers(ctx context.Context) {
 		l.allPeersDarkRun++
 	} else {
 		l.allPeersDarkRun = 0
+	}
+
+	// Hand the per-iteration staleness to the failover coordinator (if wired)
+	// so it can track degraded mode and drive leader election. This runs after
+	// the legacy zombie counter so both signals see the same iteration.
+	if l.failover != nil {
+		l.failover.Observe(ctx, staleness)
 	}
 }
 
