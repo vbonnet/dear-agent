@@ -146,21 +146,54 @@ agm send msg vroom-orchestrator --sender vroom-overseer --priority critical --pr
 
 ### Step 6: Session Health Audit
 
+**Principle: never recommend killing a worker that is making progress.**
+A worker producing tokens is healthy regardless of how long it has been
+running or what state it is in.
+
 ```bash
-agm session list 2>/dev/null
+agm session health --all --json 2>/dev/null
 ```
 
-For each active session:
-- Check state (WORKING, USER_PROMPT, PERMISSION_PROMPT, COMPACTING, OFFLINE)
-- Sessions in PERMISSION_PROMPT for >5 minutes are stuck
-- Sessions OFFLINE with no recent heartbeat may be dead
+For each active session, check state AND progress (`last_update_at`
+advancing = alive and working):
 
-For stuck sessions:
+**Workers in `PERMISSION_PROMPT`:**
+- First check if the worker's manifest is still updating (it may be
+  processing messages between permission prompts). If `last_update_at` is
+  recent and advancing, the worker is making progress — leave it alone.
+- If the worker shows **no manifest progress** AND has been in
+  `PERMISSION_PROMPT` for >5 minutes: send a nudge to defer:
+  ```bash
+  agm send msg <session> --sender vroom-overseer --priority urgent \
+    --prompt "You appear stuck on a permission prompt. Defer the blocked action (file a handoff note) and continue with other work."
+  ```
+  Record `kind: "supervisor.over.session_stuck"`.
+- If the worker shows **no manifest progress** AND has been in
+  `PERMISSION_PROMPT` for >30 minutes: escalate to the Orchestrator. At
+  this point soft nudges have had time to work and didn't — the Orchestrator
+  should diagnose and decide whether to kill:
+  ```bash
+  agm send msg vroom-orchestrator --sender vroom-overseer --priority critical \
+    --prompt "STUCK WORKER: <session> has been in PERMISSION_PROMPT for >30min with zero manifest progress. Prior nudge sent. Recommend running Level 3 escalation (diagnose + kill if confirmed stuck). Messages cannot reach a permission-blocked session."
+  ```
+  Record `kind: "supervisor.over.session_stuck_escalated"`.
+
+**Workers in `OFFLINE`:** The session is dead. Flag for the Orchestrator:
 ```bash
-agm send msg <session> --sender vroom-overseer --priority urgent --prompt "You appear stuck on a permission prompt. If you need permission, defer the action and continue with other work."
+agm send msg vroom-orchestrator --sender vroom-overseer --priority normal \
+  --prompt "Worker <session> is OFFLINE. Session appears dead — check bead status and re-dispatch if needed."
 ```
 
-Record: `kind: "supervisor.over.session_stuck"`
+**Supervisor sessions in `PERMISSION_PROMPT`:** Send urgent status ping.
+Supervisors should not be in this state — if they are, that is a mesh-level
+incident. Record `kind: "supervisor.over.supervisor_stuck"`.
+
+**Sessions in `WORKING` with no manifest updates >30min:** Send informational
+alert to Orchestrator (the worker may be churning without committing):
+```bash
+agm send msg vroom-orchestrator --sender vroom-overseer --priority normal \
+  --prompt "Worker <session> in WORKING state but no manifest update in >30min. May be churning."
+```
 
 ### Step 7: Stale Bead Reconciliation
 
@@ -232,8 +265,10 @@ After each tick, briefly note:
 |-----------|--------|
 | Disk >= 95% | Critical to both peers, recommend pause |
 | Orphaned gopls > 10 | Critical: "Known FD leak. Run `agm session reap-orphans` — kills only PID-1 orphans, never live sessions. Do NOT `pkill gopls`." |
-| Worker session stuck on permission | Urgent to worker: defer and continue |
-| Multiple workers stuck | Urgent to Orch: "Workers blocked, check permission config" |
+| Worker in PERMISSION_PROMPT, no progress, >5min | Urgent to worker: defer and continue |
+| Worker in PERMISSION_PROMPT, no progress, >30min | Critical to Orch: "stuck worker, recommend Level 3 escalation" |
+| Worker in WORKING, no manifest update >30min | Normal to Orch: "may be churning" |
+| Worker producing tokens (any state/runtime) | Healthy — no action |
 | Meta-O stale >5min | Urgent message |
 | Orch stale >5min | Urgent message |
 | In_progress bead with dead worker | Normal to Orch for re-dispatch |
