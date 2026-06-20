@@ -92,7 +92,7 @@ Never use bare `bd` — it silently resolves to the wrong database.
 - **NEVER** use bare `bd` without `--db`
 - **ALWAYS** use `GIT_TERMINAL_PROMPT=0 gtimeout 30` for git push operations
 - **ALWAYS** write one JSON line at a time to JSONL files (atomic append)
-- **ALWAYS** write heartbeat at the END of each tick (confirms tick completed)
+- **ALWAYS** write heartbeat at the START of each tick, right after the peer check (proves the loop is alive and the LLM is responsive; end-of-tick writes cause false STALE when ticks run longer than the 5-minute staleness threshold)
 
 ## Tick Resilience (ALL supervisors)
 

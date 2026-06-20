@@ -48,7 +48,19 @@ or missing, they may be stale. Actions:
 - Write trail record: `kind: "supervisor.metao.peer_stale"`
 - Send message: `agm send msg <peer> --sender vroom-meta-orchestrator --priority urgent --prompt "status? Your heartbeat is stale."`
 
-### Step 2: Read Open Beads
+### Step 2: Write Heartbeat (early — proves liveness)
+
+Write heartbeat immediately after the peer check, BEFORE the rest of the
+tick work. This prevents false STALE reports when later steps (bead
+evaluation, roadmap writes) take longer than the 5-minute staleness
+threshold.
+
+```bash
+agm supervisor heartbeat --id vroom-meta-orchestrator --primary-for vroom-orchestrator --tertiary-for vroom-overseer
+date -u +%Y-%m-%dT%H:%M:%SZ > ~/.agm/vroom/heartbeat/meta-o.json
+```
+
+### Step 3: Read Open Beads
 
 ```bash
 bd --db ~/beads/context-engine/.beads list --state=open --format=json 2>/dev/null
@@ -56,7 +68,7 @@ bd --db ~/beads/context-engine/.beads list --state=open --format=json 2>/dev/nul
 
 If `bd` fails, log the error in trail and proceed with the last-known roadmap.
 
-### Step 3: Read Current Roadmap
+### Step 4: Read Current Roadmap
 
 ```bash
 cat ~/.agm/vroom/roadmap.jsonl 2>/dev/null
@@ -64,7 +76,7 @@ cat ~/.agm/vroom/roadmap.jsonl 2>/dev/null
 
 Build a set of bead IDs already in the roadmap (both accepted and rejected).
 
-### Step 4: Evaluate New Beads
+### Step 5: Evaluate New Beads
 
 For each open bead NOT already in the roadmap, make a decision:
 
@@ -99,7 +111,7 @@ printf '{"ts":"%s","role":"meta-orchestrator","kind":"supervisor.metao.roadmap.e
   >> ~/.agm/vroom/trail.jsonl
 ```
 
-### Step 5: Review Orchestrator Activity
+### Step 6: Review Orchestrator Activity
 
 ```bash
 cat ~/.agm/vroom/dispatched.jsonl 2>/dev/null
@@ -109,13 +121,6 @@ Check that accepted P0 roadmap items have been dispatched. If a P0 item
 was accepted >10 minutes ago and has no dispatch record:
 - Send to Orch: `agm send msg vroom-orchestrator --sender vroom-meta-orchestrator --priority urgent --prompt "P0 bead <id> accepted but not dispatched. Please prioritize."`
 - Record in trail: `kind: "supervisor.metao.orch_slow_dispatch"`
-
-### Step 6: Write Heartbeat
-
-```bash
-agm supervisor heartbeat --id vroom-meta-orchestrator --primary-for vroom-orchestrator --tertiary-for vroom-overseer
-date -u +%Y-%m-%dT%H:%M:%SZ > ~/.agm/vroom/heartbeat/meta-o.json
-```
 
 ### Step 7: Report Summary
 
