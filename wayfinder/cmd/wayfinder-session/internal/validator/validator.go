@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
@@ -68,16 +69,19 @@ func (v *Validator) CanStartPhase(phaseName, projectDir string) error {
 		return nil
 	}
 
-	// Validate previous phase is completed
-	prevPhaseName := allPhases[phaseIdx-1]
-
-	// Skip roadmap phase (SETUP) if skip_roadmap is enabled
-	if v.status.GetVersion() == status.WayfinderV2 && v.status.GetSkipRoadmap() && prevPhaseName == status.PhaseV2Setup {
-		// If trying to start BUILD and skip_roadmap is true, check PLAN instead of SETUP
-		if phaseIdx >= 2 {
-			prevPhaseName = allPhases[phaseIdx-2]
-		}
+	// Resolve the previous phase that actually gates this one, walking back over any
+	// phases the harness profile skips (ProfileLite skips DESIGN/SPEC/PLAN — ce-12pl /
+	// MVD T2.2) or the roadmap phase (SETUP) when skip_roadmap is enabled. This mirrors
+	// how the navigation layer (StatusV2.NextWaypoint) advances past skipped phases.
+	prevIdx := phaseIdx - 1
+	for prevIdx >= 0 && v.isPhaseSkippedForStart(allPhases[prevIdx]) {
+		prevIdx--
 	}
+	if prevIdx < 0 {
+		// Every preceding phase is skipped by the profile, so nothing gates this one.
+		return nil
+	}
+	prevPhaseName := allPhases[prevIdx]
 
 	prevPhase := v.status.FindPhase(prevPhaseName)
 	if prevPhase == nil || prevPhase.Status != status.PhaseStatusCompleted {
@@ -96,6 +100,23 @@ func (v *Validator) CanStartPhase(phaseName, projectDir string) error {
 	}
 
 	return nil
+}
+
+// isPhaseSkippedForStart reports whether the given phase is skipped for the purpose
+// of resolving the previous gating phase. A phase is skipped when the harness profile
+// lists it (ProfileLite skips DESIGN/SPEC/PLAN) or when it is the roadmap phase (SETUP)
+// and skip_roadmap is enabled. Only the V2 schema carries profiles, so V1 never skips.
+func (v *Validator) isPhaseSkippedForStart(phase string) bool {
+	if v.status.GetVersion() != status.WayfinderV2 {
+		return false
+	}
+	if slices.Contains(v.status.GetSkipPhases(), phase) {
+		return true
+	}
+	if v.status.GetSkipRoadmap() && phase == status.PhaseV2Setup {
+		return true
+	}
+	return false
 }
 
 // CanCompletePhase validates if a phase can be completed

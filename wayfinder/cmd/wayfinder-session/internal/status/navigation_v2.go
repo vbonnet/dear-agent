@@ -38,8 +38,18 @@ func (s *StatusV2) NextWaypoint() (string, error) {
 		return s.CurrentWaypoint, nil
 	}
 
-	// Return next waypoint
-	return allWaypoints[currentIdx+1], nil
+	// Return the next waypoint, advancing past any phases the harness profile
+	// skips. ProfileLite (XS/S risk) skips DESIGN/SPEC/PLAN so small tasks are not
+	// routed through the full 9-phase sequence (ce-12pl / MVD T2.2). SETUP/BUILD/RETRO
+	// are never skipped, so a non-skipped waypoint always remains.
+	for next := currentIdx + 1; next < len(allWaypoints); next++ {
+		if s.IsPhaseSkipped(allWaypoints[next]) {
+			continue
+		}
+		return allWaypoints[next], nil
+	}
+
+	return "", fmt.Errorf("already at final waypoint RETRO")
 }
 
 // isWaypointCompleted checks if a waypoint is marked as completed or skipped

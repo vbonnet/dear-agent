@@ -351,6 +351,7 @@ type StatusInterface interface {
 	SetCurrentPhase(phase string)
 	GetStartedAt() time.Time
 	GetSkipRoadmap() bool
+	GetSkipPhases() []string
 }
 
 // GetSessionID returns the session ID for V1 Status
@@ -376,6 +377,12 @@ func (s *Status) SetCurrentPhase(phase string) {
 // GetSkipRoadmap returns the skip_roadmap flag for V1 Status
 func (s *Status) GetSkipRoadmap() bool {
 	return s.SkipRoadmap
+}
+
+// GetSkipPhases returns the profile-skipped phases for V1 Status. The V1 schema
+// predates harness profiles, so it never skips phases.
+func (s *Status) GetSkipPhases() []string {
+	return nil
 }
 
 // DetectSchemaVersionFromDir detects the schema version from a directory
