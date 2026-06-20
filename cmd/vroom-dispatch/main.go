@@ -730,114 +730,108 @@ func monitorWorkers(home string, wt *workerTracker) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
 
-	// Track which workers are still alive to prune stale tracker entries.
 	seen := make(map[string]bool)
-
 	for _, entry := range result.Sessions {
-		if !strings.HasPrefix(entry.Name, "worker-") {
-			continue
-		}
-		if entry.Status != "active" {
+		if !strings.HasPrefix(entry.Name, "worker-") || entry.Status != "active" {
 			continue
 		}
 		seen[entry.Name] = true
-
 		ws, exists := wt.workers[entry.Name]
 		if !exists {
 			ws = &workerState{}
 			wt.workers[entry.Name] = ws
 		}
-
-		// Detect progress: did last_update_at change since last tick?
-		progressing := ws.lastSeenUpdateAt != "" && entry.LastUpdateAt != ws.lastSeenUpdateAt
-		ws.lastSeenUpdateAt = entry.LastUpdateAt
-
-		if progressing || !exists {
-			// Worker is making progress (or just appeared) — reset escalation.
-			ws.escalationLevel = 0
-			ws.staleFor = 0
-			continue
-		}
-
-		// No progress since last tick.
-		ws.staleFor++
-
-		staleDuration := parseDuration(entry.TimeSinceLastUpdate)
-		isStuckState := entry.State == "PERMISSION_PROMPT" || entry.State == "OFFLINE"
-
-		// Level 1: Nudge — no progress for >workerNudgeAfter.
-		if staleDuration >= workerNudgeAfter && ws.escalationLevel < 1 {
-			ws.escalationLevel = 1
-			fmt.Printf("[%s] no progress for %s, sending status ping (Level 1)\n",
-				entry.Name, entry.TimeSinceLastUpdate)
-			sendWorkerMessage(entry.Name, "normal",
-				"status? No manifest activity in >20min. Report progress or blockers.")
-			writeTrail(home, "dispatch.worker_nudged", map[string]any{
-				"worker":   entry.Name,
-				"state":    entry.State,
-				"stale_for": entry.TimeSinceLastUpdate,
-			})
-			continue
-		}
-
-		// Level 2: Diagnose — no progress for >workerDiagnoseAfter.
-		if staleDuration >= workerDiagnoseAfter && ws.escalationLevel < 2 {
-			ws.escalationLevel = 2
-			if isStuckState {
-				fmt.Printf("[%s] %s for %s with no progress, sending defer nudge (Level 2)\n",
-					entry.Name, entry.State, entry.TimeSinceLastUpdate)
-				sendWorkerMessage(entry.Name, "urgent",
-					"You appear stuck on a permission prompt. Defer the blocked action (file a handoff note) and continue with other work.")
-			} else {
-				fmt.Printf("[%s] no progress for %s, sending wrap-up (Level 2)\n",
-					entry.Name, entry.TimeSinceLastUpdate)
-				sendWorkerMessage(entry.Name, "urgent",
-					"No manifest activity for >35min. Commit any WIP now, report status, or wrap up.")
-			}
-			writeTrail(home, "dispatch.worker_diagnosed", map[string]any{
-				"worker":   entry.Name,
-				"state":    entry.State,
-				"stale_for": entry.TimeSinceLastUpdate,
-				"action":   map[bool]string{true: "defer_nudge", false: "wrap_up"}[isStuckState],
-			})
-			continue
-		}
-
-		// Level 3: Force-kill — ONLY when all conditions met:
-		// 1. No progress for >workerKillAfter
-		// 2. In a known stuck state (PERMISSION_PROMPT or OFFLINE)
-		// 3. Prior escalation already sent (Level 2 fired)
-		if staleDuration >= workerKillAfter && ws.escalationLevel >= 2 && isStuckState {
-			ws.escalationLevel = 3
-			fmt.Printf("[%s] %s for %s, no progress, prior nudge failed — force-killing (Level 3)\n",
-				entry.Name, entry.State, entry.TimeSinceLastUpdate)
-
-			killCmd := exec.Command("agm", "session", "kill", entry.Name, "--confirmed-stuck")
-			if killOut, killErr := killCmd.CombinedOutput(); killErr != nil {
-				fmt.Fprintf(os.Stderr, "[%s] kill failed: %v\n%s\n", entry.Name, killErr, string(killOut))
-				writeTrail(home, "dispatch.worker_kill_failed", map[string]any{
-					"worker": entry.Name,
-					"state":  entry.State,
-					"error":  killErr.Error(),
-				})
-			} else {
-				fmt.Printf("[%s] killed successfully — slot reclaimed\n", entry.Name)
-				writeTrail(home, "dispatch.worker_killed_stuck", map[string]any{
-					"worker":        entry.Name,
-					"state":         entry.State,
-					"stale_for":     entry.TimeSinceLastUpdate,
-					"stale_ticks":   ws.staleFor,
-				})
-			}
-			continue
-		}
+		escalateIfStuck(home, entry, ws, exists)
 	}
 
-	// Prune workers no longer in the active session list.
 	for name := range wt.workers {
 		if !seen[name] {
 			delete(wt.workers, name)
 		}
+	}
+}
+
+// escalateIfStuck applies graduated escalation (nudge → diagnose → kill) to
+// one worker based on how long it has had no manifest progress.
+func escalateIfStuck(home string, entry healthEntry, ws *workerState, exists bool) {
+	progressing := ws.lastSeenUpdateAt != "" && entry.LastUpdateAt != ws.lastSeenUpdateAt
+	ws.lastSeenUpdateAt = entry.LastUpdateAt
+
+	if progressing || !exists {
+		ws.escalationLevel = 0
+		ws.staleFor = 0
+		return
+	}
+
+	ws.staleFor++
+	staleDuration := parseDuration(entry.TimeSinceLastUpdate)
+	isStuckState := entry.State == "PERMISSION_PROMPT" || entry.State == "OFFLINE"
+
+	if staleDuration >= workerNudgeAfter && ws.escalationLevel < 1 {
+		ws.escalationLevel = 1
+		fmt.Printf("[%s] no progress for %s, sending status ping (Level 1)\n",
+			entry.Name, entry.TimeSinceLastUpdate)
+		sendWorkerMessage(entry.Name, "normal",
+			"status? No manifest activity in >20min. Report progress or blockers.")
+		writeTrail(home, "dispatch.worker_nudged", map[string]any{
+			"worker":    entry.Name,
+			"state":     entry.State,
+			"stale_for": entry.TimeSinceLastUpdate,
+		})
+		return
+	}
+
+	if staleDuration >= workerDiagnoseAfter && ws.escalationLevel < 2 {
+		ws.escalationLevel = 2
+		applyDiagnoseEscalation(home, entry, isStuckState)
+		return
+	}
+
+	if staleDuration >= workerKillAfter && ws.escalationLevel >= 2 && isStuckState {
+		ws.escalationLevel = 3
+		applyKillEscalation(home, entry, ws)
+	}
+}
+
+func applyDiagnoseEscalation(home string, entry healthEntry, isStuckState bool) {
+	if isStuckState {
+		fmt.Printf("[%s] %s for %s with no progress, sending defer nudge (Level 2)\n",
+			entry.Name, entry.State, entry.TimeSinceLastUpdate)
+		sendWorkerMessage(entry.Name, "urgent",
+			"You appear stuck on a permission prompt. Defer the blocked action (file a handoff note) and continue with other work.")
+	} else {
+		fmt.Printf("[%s] no progress for %s, sending wrap-up (Level 2)\n",
+			entry.Name, entry.TimeSinceLastUpdate)
+		sendWorkerMessage(entry.Name, "urgent",
+			"No manifest activity for >35min. Commit any WIP now, report status, or wrap up.")
+	}
+	writeTrail(home, "dispatch.worker_diagnosed", map[string]any{
+		"worker":    entry.Name,
+		"state":     entry.State,
+		"stale_for": entry.TimeSinceLastUpdate,
+		"action":    map[bool]string{true: "defer_nudge", false: "wrap_up"}[isStuckState],
+	})
+}
+
+func applyKillEscalation(home string, entry healthEntry, ws *workerState) {
+	fmt.Printf("[%s] %s for %s, no progress, prior nudge failed — force-killing (Level 3)\n",
+		entry.Name, entry.State, entry.TimeSinceLastUpdate)
+	killCmd := exec.Command("agm", "session", "kill", entry.Name, "--confirmed-stuck")
+	if killOut, killErr := killCmd.CombinedOutput(); killErr != nil {
+		fmt.Fprintf(os.Stderr, "[%s] kill failed: %v\n%s\n", entry.Name, killErr, string(killOut))
+		writeTrail(home, "dispatch.worker_kill_failed", map[string]any{
+			"worker": entry.Name,
+			"state":  entry.State,
+			"error":  killErr.Error(),
+		})
+	} else {
+		fmt.Printf("[%s] killed successfully — slot reclaimed\n", entry.Name)
+		writeTrail(home, "dispatch.worker_killed_stuck", map[string]any{
+			"worker":      entry.Name,
+			"state":       entry.State,
+			"stale_for":   entry.TimeSinceLastUpdate,
+			"stale_ticks": ws.staleFor,
+		})
 	}
 }
 
@@ -864,10 +858,9 @@ func parseDuration(s string) time.Duration {
 		return d
 	}
 	// Handle "3d" format.
-	if strings.HasSuffix(s, "d") {
-		s = strings.TrimSuffix(s, "d")
+	if rest, ok := strings.CutSuffix(s, "d"); ok {
 		var days int
-		if _, err := fmt.Sscanf(s, "%d", &days); err == nil {
+		if _, err := fmt.Sscanf(rest, "%d", &days); err == nil {
 			return time.Duration(days) * 24 * time.Hour
 		}
 	}
