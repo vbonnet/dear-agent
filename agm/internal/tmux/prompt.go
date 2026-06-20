@@ -115,39 +115,50 @@ var sgrParamRe = regexp.MustCompile(`\x1b\[([0-9;]*)m`)
 //   - 38;2;r;g;b   truecolor foreground that is a dim grey (channels ≈ equal)
 func IsDimOrGreySGR(s string) bool {
 	for _, m := range sgrParamRe.FindAllStringSubmatch(s, -1) {
-		params := strings.Split(m[1], ";")
-		for i := 0; i < len(params); i++ {
-			switch params[i] {
-			case "2": // dim attribute
-				return true
-			case "90": // bright black (grey) foreground
-				return true
-			case "38", "48": // extended fg/bg color — consume its sub-params
-				// so the "5"/"2" selector and color operands are not
-				// re-interpreted as standalone SGR codes (e.g. the "2" in
-				// 38;2;r;g;b is a truecolor selector, not the dim attribute).
-				if i+2 < len(params) && params[i+1] == "5" {
-					if params[i] == "38" {
-						if n, err := strconv.Atoi(params[i+2]); err == nil && isGreyIndex(n) {
-							return true
-						}
-					}
-					i += 2
-				} else if i+4 < len(params) && params[i+1] == "2" {
-					if params[i] == "38" {
-						r, e1 := strconv.Atoi(params[i+2])
-						g, e2 := strconv.Atoi(params[i+3])
-						b, e3 := strconv.Atoi(params[i+4])
-						if e1 == nil && e2 == nil && e3 == nil && isGreyRGB(r, g, b) {
-							return true
-						}
-					}
-					i += 4
-				}
-			}
+		if hasDimOrGreySGRParams(strings.Split(m[1], ";")) {
+			return true
 		}
 	}
 	return false
+}
+
+// hasDimOrGreySGRParams checks a split SGR parameter list for dim/grey attributes.
+func hasDimOrGreySGRParams(params []string) bool {
+	for i := 0; i < len(params); i++ {
+		switch params[i] {
+		case "2", "90": // dim attribute or bright-black (grey)
+			return true
+		case "38", "48": // extended fg/bg color — consume sub-params so the "5"/"2"
+			// selector and color operands are not re-interpreted as standalone codes.
+			grey, skip := consumeExtendedColor(params, i)
+			if grey {
+				return true
+			}
+			i += skip
+		}
+	}
+	return false
+}
+
+// consumeExtendedColor parses an extended-color (38/48) parameter sequence at
+// index i and returns (isFgGrey, paramsToSkip). Only 38 (foreground) sequences
+// that resolve to a grey shade return true; 48 (background) sequences are
+// consumed and skipped without signaling grey.
+func consumeExtendedColor(params []string, i int) (bool, int) {
+	if i+2 < len(params) && params[i+1] == "5" {
+		n, err := strconv.Atoi(params[i+2])
+		isFgGrey := params[i] == "38" && err == nil && isGreyIndex(n)
+		return isFgGrey, 2
+	}
+	if i+4 < len(params) && params[i+1] == "2" {
+		r, e1 := strconv.Atoi(params[i+2])
+		g, e2 := strconv.Atoi(params[i+3])
+		b, e3 := strconv.Atoi(params[i+4])
+		allOK := e1 == nil && e2 == nil && e3 == nil
+		isFgGrey := params[i] == "38" && allOK && isGreyRGB(r, g, b)
+		return isFgGrey, 4
+	}
+	return false, 0
 }
 
 // isGreyIndex reports whether a 256-color palette index renders as grey: the
