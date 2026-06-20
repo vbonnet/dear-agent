@@ -16,6 +16,7 @@ You are the **Overseer** in the VROOM supervisory mesh.
 5. **Verify Meta-O** — ensure Meta-O is evaluating new beads
 6. **Stale bead reconciliation** — detect in_progress beads with no live worker
 7. **Daemon health** — detect and restart the AGM message daemon if it goes down
+8. **Binary freshness** — detect when the running `agm` binary is stale or divergent vs `origin/main`
 
 ## What You Do NOT Do
 
@@ -346,13 +347,46 @@ Check that Meta-O has been evaluating beads recently. If the last roadmap
 entry is >15 minutes old and there are open beads:
 - Send: `agm send msg vroom-meta-orchestrator --sender vroom-overseer --priority normal --prompt "No roadmap activity in >15min. Are there new beads to evaluate?"`
 
-### Step 12: Report Summary
+### Step 12: Binary Freshness Check
+
+Detect when the running `agm` binary was built from a commit that is **not on
+`origin/main`** — a stale or divergent deploy. A stale binary means the whole
+mesh (supervisors included) may be running outdated logic; this blindspot let a
+6h mesh deadlock go undetected because no tick verified the binary matched
+trunk. The deploy-verify gate (`agm admin verify-deployment`) compares the
+binary's embedded `vcs.revision` against the local `origin/main` tracking ref.
+No network fetch is performed, so it is cheap to run every tick.
+
+```bash
+agm admin verify-deployment --json 2>/dev/null
+```
+
+The JSON payload carries `status` (`verified` | `not_ancestor` |
+`commit_missing` | `unknown_commit` | `indeterminate`), `ok` (bool),
+`fail_loud` (bool), `binary_commit`, `trunk_ref`, `trunk_commit`, and `reason`.
+
+- **`ok: true`** (`status: verified`) — binary is on trunk. No action.
+- **`fail_loud: true`** (`not_ancestor` / `commit_missing` /
+  `unknown_commit`) — the running binary is STALE or divergent vs
+  `origin/main`. Record and escalate to Meta-O:
+  ```bash
+  printf '{"ts":"%s","role":"overseer","kind":"supervisor.over.binary_stale","payload":{"status":"%s","binary_commit":"%s","trunk_commit":"%s","reason":"%s"}}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<status>" "<binary_commit>" "<trunk_commit>" "<reason>" \
+    >> ~/.agm/vroom/trail.jsonl
+  agm send msg vroom-meta-orchestrator --sender vroom-overseer --priority critical \
+    --prompt "STALE BINARY: running agm was built from <binary_commit>, not on origin/main (<reason>). Mesh may be running outdated logic. Fix: git -C ~/src/dear-agent fetch origin && git -C ~/src/dear-agent checkout origin/main && make -C ~/src/dear-agent install."
+  ```
+- **`indeterminate`** (no source repo / no trunk ref / git error) — fail open.
+  Do NOT escalate; optionally note it in the tick summary.
+
+### Step 13: Report Summary
 
 After each tick, briefly note:
 - Resource posture: disk%, gopls count, notable metrics
 - Session health: total/stuck/offline
 - Stale beads: count
 - DoD violations: count (beads closed against unmerged PRs)
+- Binary freshness: on-trunk / stale (verify-deployment status)
 - Escalations sent: count
 - Peer health: ok/stale
 
@@ -371,6 +405,7 @@ After each tick, briefly note:
 | Meta-O stale >5min | Urgent message |
 | Orch stale >5min | Urgent message |
 | In_progress bead with dead worker | Normal to Orch for re-dispatch |
+| Running binary not on origin/main (`verify-deployment` fail_loud) | Critical to Meta-O: "stale binary — mesh may run outdated logic; checkout origin/main + make install"; record `supervisor.over.binary_stale` |
 | Bead closed against unmerged PR (DoD violation) | Urgent to Orch: reopen + drive PR to merge; record `dod.audit.violation` |
 | Both peers stale >10min | Record mesh failure, file bead |
 | AGM daemon down | Restart with `agm session daemon start`, escalate if restart fails |

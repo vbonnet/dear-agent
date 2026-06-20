@@ -81,7 +81,7 @@ var supervisors = []supervisor{
 			"1) check peer heartbeats 2) probe system resources (disk, memory, FDs, gopls) " +
 			"3) audit session health 4) reconcile stale beads " +
 			"5) audit worktrees 6) verify Meta-O activity " +
-			"7) write heartbeat.",
+			"7) verify binary freshness (agm admin verify-deployment) 8) write heartbeat.",
 	},
 }
 
