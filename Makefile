@@ -58,7 +58,7 @@
 #   build-src-health        Build src-health: ~/src repo canary (ce-m3ya)
 #   install-src-health      Install src-health to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-token-refresher install-token-refresher build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-token-refresher install-token-refresher build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -517,6 +517,25 @@ install-dear-deploy: build-dear-deploy
 # dear-deploy atomically syncs anything that has drifted. Idempotent.
 dear-deploy-sync: build-dear-deploy build-write-guards
 	./bin/dear-deploy sync
+
+# Install the kernel FD-ceiling LaunchDaemon (ce-710r.4, R.5 from gopls retro).
+# Requires sudo — raises kern.maxfiles from 184320 to 524288 at boot so a
+# gopls FD storm degrades performance rather than hard-deadlocking go build.
+install-fd-limit-launchdaemon:
+	@echo "Installing com.dear-agent.fd-limit LaunchDaemon (requires root)..."
+	sudo cp deploy/launchd/com.dear-agent.fd-limit.plist \
+		/Library/LaunchDaemons/com.dear-agent.fd-limit.plist
+	sudo chmod 644 /Library/LaunchDaemons/com.dear-agent.fd-limit.plist
+	sudo chown root:wheel /Library/LaunchDaemons/com.dear-agent.fd-limit.plist
+	sudo launchctl load -w /Library/LaunchDaemons/com.dear-agent.fd-limit.plist
+	@echo "✓ fd-limit LaunchDaemon loaded (kern.maxfiles=524288 will apply at boot)"
+	@echo "  Apply immediately without reboot: sudo sysctl -w kern.maxfiles=524288 kern.maxfilesperproc=262144"
+
+uninstall-fd-limit-launchdaemon:
+	@echo "Uninstalling com.dear-agent.fd-limit LaunchDaemon..."
+	-sudo launchctl unload /Library/LaunchDaemons/com.dear-agent.fd-limit.plist 2>/dev/null
+	sudo rm -f /Library/LaunchDaemons/com.dear-agent.fd-limit.plist
+	@echo "✓ fd-limit LaunchDaemon removed"
 
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
