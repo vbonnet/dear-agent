@@ -207,6 +207,40 @@ rebuild_changed_binaries() {
   fi
 }
 
+# ── Stage 1.5: verify the rebuilt binary is actually on origin/main ─────────
+# A merge landing on the default branch is only Definition-of-Done if the
+# binary that gets *run* contains the merged code. The Jun-18 ghost-text
+# incident (ce-mb9g) was a binary built from a rolled-back checkout (a commit
+# NOT on origin/main) that silently kept making safety decisions. This stage
+# asserts the freshly-installed `agm`'s embedded vcs.revision is an ancestor of
+# origin/main and warns LOUDLY otherwise. Like the rest of this hook it NEVER
+# fails the git operation — it only surfaces the problem.
+#   Opt-out: DEAR_AGENT_POST_MERGE_VERIFY=0
+verify_deployment_after_rebuild() {
+  [ "${DEAR_AGENT_POST_MERGE_VERIFY:-1}" = "0" ] && return 0
+  command -v agm >/dev/null 2>&1 || return 0
+
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  # Self-scope: only the repo that builds agm. Every other repo is a no-op.
+  [ -d "${repo_root}/agm/cmd/agm" ] || return 0
+
+  # Clear the hook's GIT_* env so agm's own `git -C <repo>` calls operate on the
+  # source repo, not this hook's repo context.
+  if env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX \
+      agm admin verify-deployment --repo "${repo_root}" --ref origin/main >/dev/null 2>&1; then
+    echo "[post-merge:verify] ✓ installed agm is on origin/main" >&2
+  else
+    echo "[post-merge:verify] ====================================================" >&2
+    echo "[post-merge:verify] ⚠ DEPLOY-VERIFY: rebuilt agm is NOT on origin/main!" >&2
+    echo "[post-merge:verify]   The running binary may have been built from a" >&2
+    echo "[post-merge:verify]   rolled-back or divergent checkout. Details:" >&2
+    env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX \
+      agm admin verify-deployment --repo "${repo_root}" --ref origin/main >&2 2>&1 || true
+    echo "[post-merge:verify]   Fix: rebuild from a clean origin/main checkout." >&2
+    echo "[post-merge:verify] ====================================================" >&2
+  fi
+}
+
 # ── Stage 2: reap provably-merged worktrees ────────────────────────────────
 sweep_merged_worktrees() {
   [ "${AGM_POST_MERGE_SWEEP:-1}" = "0" ] && return 0
@@ -253,6 +287,7 @@ sweep_merged_worktrees() {
 
 # ── Run the stages (each self-scopes and is individually fail-safe) ─────────
 rebuild_changed_binaries
+verify_deployment_after_rebuild
 sweep_merged_worktrees
 
 exit 0
