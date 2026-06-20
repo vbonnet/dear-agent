@@ -117,3 +117,18 @@ Never use bare `bd` — it silently resolves to the wrong database.
 - **ALWAYS** use `GIT_TERMINAL_PROMPT=0 gtimeout 30` for git push operations
 - **ALWAYS** write one JSON line at a time to JSONL files (atomic append)
 - **ALWAYS** write heartbeat at the END of each tick (confirms tick completed)
+
+## Tick Resilience (ALL supervisors)
+
+Your tick runs inside a persistent `/loop`. A single failed tick must **never** kill
+the loop — if it does, you go silently idle until a human notices.
+
+- **NEVER** let an error end, exit, or abort the loop. If any tick step fails for any
+  reason (an Anthropic API or credit-gate error, a tool failure, or a transient fault),
+  treat it as a **skipped** tick, not a fatal one, and finish the turn normally so the
+  next interval still fires.
+- **Best-effort** record the failure to `~/.agm/vroom/trail.jsonl` with
+  `kind` = `"supervisor.tick.error"` and a short `payload` describing what failed — but
+  if the log write itself fails, ignore it and keep going; logging must never end the loop.
+- Recovery is automatic: the next scheduled tick retries the work. Do not attempt to
+  tear down or re-create the loop yourself.

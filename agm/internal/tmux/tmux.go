@@ -477,29 +477,11 @@ func SendCommand(sessionName string, command string) error {
 		}
 		bufferLoaded = false // paste-buffer -d already deleted it
 
-		// Step 3: Send Enter key to submit the command
-		// Delay prevents tmux from coalescing pasted text with ENTER keystroke.
-		// Do not remove.
-		time.Sleep(50 * time.Millisecond)
-
-		// Note: send-keys targets panes, not sessions, so we don't use FormatSessionTarget (=prefix)
-		cmdEnter, cancel3 := CommandWithTimeout(ctx, timeout, "tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "C-m")
-		defer cancel3()
-		if err := cmdEnter.Run(); err != nil {
-			if ctx.Err() == context.DeadlineExceeded {
-				return &TimeoutError{
-					Problem:  fmt.Sprintf("tmux send-keys timed out after %v (server may be hung)", timeout),
-					Recovery: "  pkill -9 tmux    # Kill hung tmux server\n  agm session list         # Verify recovery",
-					Duration: timeout,
-				}
-			}
-			return fmt.Errorf("failed to send Enter key to tmux: %w", err)
-		}
-
-		// Step 4: Auto-detect and retry Enter if paste left text unsubmitted.
-		// Bug fix (2026-04-10): After paste-buffer, Enter (C-m) sometimes doesn't
-		// register. Detect via capture-pane and re-send Enter up to 2 times.
-		if err := retryEnterAfterPaste(socketPath, normalizedName, 2); err != nil {
+		// Step 3: Send Enter reliably using hex 0x0d instead of C-m.
+		// sendEnterReliable waits 100ms, sends -H 0d, then auto-retries
+		// once if the Enter didn't register (replaces the old 50ms + C-m +
+		// retryEnterAfterPaste sequence).
+		if err := sendEnterReliable(socketPath, normalizedName); err != nil {
 			return err
 		}
 

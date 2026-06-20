@@ -135,7 +135,12 @@ func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt 
 	// prompt cycle as a human submission. After WaitForPromptSimple returns, the prompt
 	// may be transiently visible between human submit and Claude starting to process.
 	// Wait, then re-verify the prompt is still there and no human input is present.
-	if !shouldInterrupt {
+	//
+	// ce-v9in: skip this entirely in autonomous mode. There is no human at an
+	// unattended session, so "input line has content" only ever means AGM's own
+	// un-submitted text from a prior tick. SendPromptLiteral stashes that with
+	// C-s before delivering; aborting here would re-create the mesh deadlock.
+	if !shouldInterrupt && !AutonomousMode() {
 		time.Sleep(1 * time.Second)
 
 		// Re-capture pane to verify prompt stability
@@ -196,10 +201,13 @@ func SendKeys(sessionName string, keyName string) error {
 	// Bug fix (2026-04-02): Without this lock, concurrent send-keys calls could
 	// interleave at the tmux server level, causing cross-session byte leakage.
 	return withTmuxLock(func() error {
-		// Send the key name directly (tmux interprets it)
-		// Example: "Down" sends arrow down key, "Tab" sends tab key
-		// Note: send-keys targets panes, not sessions, so we don't use FormatSessionTarget (=prefix)
-		cmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, keyName)
+		// Use raw hex 0x0d for Enter to avoid paste coalescing
+		var cmd *exec.Cmd
+		if keyName == "Enter" || keyName == "C-m" {
+			cmd = exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, "-H", "0d")
+		} else {
+			cmd = exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedName, keyName)
+		}
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("failed to send key %s: %w (output: %s)", keyName, err, string(output))

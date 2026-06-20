@@ -185,6 +185,7 @@ func (c *Client) GetCursorPosition(sessionName string) (int, int, error) {
 
 // SendKeys sends keystrokes to a tmux pane.
 // For special keys, use tmux key names (e.g., "Escape", "C-c").
+// Enter is sent as raw hex 0x0d via -H flag to avoid paste coalescing.
 // Returns error if session not found or send fails.
 func (c *Client) SendKeys(sessionName, keys string) error {
 	socketPath, err := c.findSessionSocket(sessionName)
@@ -196,7 +197,12 @@ func (c *Client) SendKeys(sessionName, keys string) error {
 	if socketPath != "" {
 		args = append(args, "-S", socketPath)
 	}
-	args = append(args, "send-keys", "-t", sessionName, keys)
+
+	if keys == "Enter" || keys == "C-m" {
+		args = append(args, "send-keys", "-t", sessionName, "-H", "0d")
+	} else {
+		args = append(args, "send-keys", "-t", sessionName, keys)
+	}
 
 	cmd := exec.Command("tmux", args...)
 	if err := cmd.Run(); err != nil {
