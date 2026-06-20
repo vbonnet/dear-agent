@@ -4,23 +4,23 @@
 //
 // # Mental model
 //
-//	   ┌───────────────────────── Mesh ─────────────────────────┐
-//	   │                                                          │
-//	   │   Meta-Orchestrator       Orchestrator       Overseer    │
-//	   │     ┌─────────┐            ┌─────────┐       ┌─────────┐ │
-//	   │     │  Loop   │            │  Loop   │       │  Loop   │ │
-//	   │     └────┬────┘            └────┬────┘       └────┬────┘ │
-//	   │          │                      │                 │      │
-//	   │          ▼                      ▼                 ▼      │
-//	   │   1. check(orch)         1. check(over)    1. check(meta)│
-//	   │   2. check(over)         2. check(meta)    2. check(orch)│
-//	   │   3. Tick:scan roadmap   3. Tick:dispatch  3. Tick:probe │
-//	   │   4. heartbeat           4. heartbeat      4. heartbeat  │
-//	   │   5. sleep(interval)     5. sleep          5. sleep      │
-//	   └──────────────────────────────────────────────────────────┘
-//	                              │
-//	                              ▼
-//	               decisiontrail.Trail (append-only JSONL)
+//	┌───────────────────────── Mesh ─────────────────────────┐
+//	│                                                          │
+//	│   Meta-Orchestrator       Orchestrator       Overseer    │
+//	│     ┌─────────┐            ┌─────────┐       ┌─────────┐ │
+//	│     │  Loop   │            │  Loop   │       │  Loop   │ │
+//	│     └────┬────┘            └────┬────┘       └────┬────┘ │
+//	│          │                      │                 │      │
+//	│          ▼                      ▼                 ▼      │
+//	│   1. check(orch)         1. check(over)    1. check(meta)│
+//	│   2. check(over)         2. check(meta)    2. check(orch)│
+//	│   3. Tick:scan roadmap   3. Tick:dispatch  3. Tick:probe │
+//	│   4. heartbeat           4. heartbeat      4. heartbeat  │
+//	│   5. sleep(interval)     5. sleep          5. sleep      │
+//	└──────────────────────────────────────────────────────────┘
+//	                           │
+//	                           ▼
+//	            decisiontrail.Trail (append-only JSONL)
 //
 // # Vocabulary
 //
@@ -52,4 +52,22 @@
 // The CheckSkill seam lets the mutual-unblock-first implementation evolve
 // from a pure-heartbeat HeartbeatCheckSkill (PR 1) to an AGM-aware skill
 // that detects permission-prompt blockage in peer Claude sessions (PR 2+).
+//
+// # Graduated memory-pressure handling (ce-80ca)
+//
+// Alongside the binary EscalationThreshold, the Overseer can run a graduated
+// memory-pressure policy via Overseer.WithMemoryPressure. The
+// MemoryPressureMonitor classifies a ResourceSnapshot into a PressureLevel
+// (none/warn/critical/emergency) from swap fraction, free physical memory, and
+// FD pressure; the AutoResourceReaper then drives tiered remediation:
+//
+//	warn      → log only
+//	critical  → gopls reap + stale session archive
+//	emergency → pause new worker spawns + escalate to the Meta-Orchestrator
+//
+// Critical+ incidents emit a DEAR retro (ResourceIncidentRetro) so the
+// Define→Execute→Audit→Retro narrative of each incident lands in the trail.
+// The reaper's seams (ResourceReclaimer, SessionArchiver, SpawnGate,
+// PressureEscalator) are each optional and back onto AGM adapters in
+// production.
 package supervisor

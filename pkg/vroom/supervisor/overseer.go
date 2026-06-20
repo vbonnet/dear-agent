@@ -33,6 +33,14 @@ type ResourceSnapshot struct {
 	// MemoryUsedFraction is fraction of memory used (0..1).
 	MemoryUsedFraction float64
 
+	// FreePhysicalMemoryBytes is the absolute amount of free physical RAM in
+	// bytes (genuinely free pages, not inactive/evictable). The
+	// MemoryPressureMonitor uses it for the emergency free-memory floor
+	// (default <200 MiB) because a fraction alone hides how little headroom
+	// remains on a large-RAM machine. A value of 0 means the probe could not
+	// measure it (treated as "unknown", never as "0 bytes free").
+	FreePhysicalMemoryBytes uint64
+
 	// SwapUsedFraction is fraction of swap space used (0..1). Swap pressure
 	// is a leading indicator of memory exhaustion — escalation threshold is
 	// lower than the RAM threshold (see EscalationThreshold.SwapFraction).
@@ -132,6 +140,12 @@ type Overseer struct {
 	burndownCtrl   BurndownController // nil = burndown disabled
 	burndownPolicy BurndownPolicy
 	prCounter      OpenPRCounter // nil = open-PR cap disabled
+
+	// Graduated memory-pressure monitoring (ce-80ca). Both are set together by
+	// WithMemoryPressure; nil = graduated pressure handling disabled (the
+	// binary EscalationThreshold path still runs).
+	pressureMonitor *MemoryPressureMonitor
+	pressureReaper  *AutoResourceReaper
 }
 
 // NewOverseer constructs the Overseer supervisor. If threshold has zero
@@ -161,6 +175,17 @@ func NewOverseer(trail decisiontrail.Trail, probe ResourceProbe, threshold Escal
 // the pressure dropped.
 func (o *Overseer) WithReclaimer(r ResourceReclaimer) *Overseer {
 	o.reclaimer = r
+	return o
+}
+
+// WithMemoryPressure wires graduated memory-pressure monitoring (ce-80ca)
+// into the Overseer. After this call each Tick classifies the snapshot through
+// the monitor and, on a warn/critical/emergency breach, drives the reaper's
+// graduated remediation and (for critical+) emits a DEAR retro to the trail.
+// This runs alongside — not instead of — the binary EscalationThreshold path.
+func (o *Overseer) WithMemoryPressure(monitor *MemoryPressureMonitor, reaper *AutoResourceReaper) *Overseer {
+	o.pressureMonitor = monitor
+	o.pressureReaper = reaper
 	return o
 }
 
@@ -216,6 +241,12 @@ func (o *Overseer) Tick(ctx context.Context) error {
 		o.reclaim(ctx, snap)
 	}
 
+	// Graduated memory-pressure handling (ce-80ca) — only runs when both the
+	// monitor and reaper are wired via WithMemoryPressure.
+	if o.pressureMonitor != nil && o.pressureReaper != nil {
+		o.runMemoryPressureTick(ctx, snap)
+	}
+
 	// Burndown maintenance phase — only runs when a controller is wired.
 	if o.burndownCtrl != nil {
 		var spawned int
@@ -233,6 +264,7 @@ func (o *Overseer) recordSnapshot(ctx context.Context, snap ResourceSnapshot) {
 		Payload: map[string]any{
 			"disk_used_fraction":   snap.DiskUsedFraction,
 			"memory_used_fraction": snap.MemoryUsedFraction,
+			"free_physical_bytes":  snap.FreePhysicalMemoryBytes,
 			"swap_used_fraction":   snap.SwapUsedFraction,
 			"cpu_used_fraction":    snap.CPUUsedFraction,
 			"open_fd_fraction":     snap.OpenFDFraction,
@@ -304,6 +336,40 @@ func (o *Overseer) reclaim(ctx context.Context, before ResourceSnapshot) {
 			"pressure_down": after.OpenFDFraction < before.OpenFDFraction || after.GoplsProcesses < before.GoplsProcesses,
 		},
 	})
+}
+
+// runMemoryPressureTick classifies the snapshot through the pressure monitor
+// and, on a breach, drives the reaper's graduated remediation. For critical+
+// incidents it re-snapshots after remediation and emits a DEAR retro so the
+// Audit/Retro phases capture whether the pressure actually eased. Warn-level
+// breaches are log-only (the reaper records the observation; no DEAR retro is
+// warranted for a non-actioned warning).
+func (o *Overseer) runMemoryPressureTick(ctx context.Context, snap ResourceSnapshot) {
+	level := o.pressureMonitor.Classify(snap)
+	if level == PressureNone {
+		return
+	}
+
+	outcome := o.pressureReaper.React(ctx, level, snap)
+
+	// Warn is log-only — React already recorded the observation.
+	if level < PressureCritical {
+		return
+	}
+
+	// Critical+: re-snapshot to audit whether remediation eased pressure, then
+	// emit the DEAR retro. A failed re-snapshot falls back to the before-state
+	// so the retro still records the incident (Audit will read "did not ease").
+	after, err := o.probe.Snapshot(ctx)
+	if err != nil {
+		after = snap
+	}
+	_ = o.trail.Append(ctx, ResourceIncidentRetro(ResourceIncident{
+		Level:   level,
+		Before:  snap,
+		After:   after,
+		Outcome: outcome,
+	}))
 }
 
 func (o *Overseer) maybeEscalateFraction(ctx context.Context, name string, v float64) {

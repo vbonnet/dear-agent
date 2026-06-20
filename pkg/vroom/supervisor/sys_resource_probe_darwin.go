@@ -58,6 +58,24 @@ func sysMemoryUsedFraction() float64 {
 	return float64(totalBytes-freeBytes) / float64(totalBytes)
 }
 
+// sysFreeMemoryBytes returns the number of genuinely free physical RAM bytes
+// on macOS (vm.page_free_count × hw.pagesize). This matches the "Pages free"
+// line from vm_stat(1) — the same number the operator quoted ("~63MB free").
+// Inactive/evictable pages are deliberately NOT counted as free, so this is a
+// conservative floor for the emergency free-memory check. Returns 0 if either
+// sysctl is unavailable (treated as "unknown" by the monitor).
+func sysFreeMemoryBytes() uint64 {
+	pageSize, err := syscall.SysctlUint32("hw.pagesize")
+	if err != nil || pageSize == 0 {
+		return 0
+	}
+	freePages, err := syscall.SysctlUint32("vm.page_free_count")
+	if err != nil {
+		return 0
+	}
+	return uint64(freePages) * uint64(pageSize)
+}
+
 // sysSwapUsedFraction returns the fraction of swap space currently in use on
 // macOS using the vm.swapusage sysctl (struct xsw_usage).
 //

@@ -48,6 +48,7 @@ func (p *SysResourceProbe) Snapshot(ctx context.Context) (ResourceSnapshot, erro
 
 	// Memory and swap — platform-specific (see sys_resource_probe_{linux,darwin}.go).
 	snap.MemoryUsedFraction = sysMemoryUsedFraction()
+	snap.FreePhysicalMemoryBytes = sysFreeMemoryBytes()
 	snap.SwapUsedFraction = sysSwapUsedFraction()
 
 	// FD pressure, vnode pressure, and gopls accumulation — platform-specific.

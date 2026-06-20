@@ -50,6 +50,37 @@ func sysMemoryUsedFraction() float64 {
 	return float64(total-avail) / float64(total)
 }
 
+// sysFreeMemoryBytes returns the amount of free physical RAM in bytes on Linux,
+// reading MemAvailable from /proc/meminfo (kernel's own estimate of memory
+// available for new allocations without swapping). The value is reported in kB
+// and converted to bytes. Returns 0 if /proc/meminfo is unreadable or the
+// field is absent (treated as "unknown" by the monitor).
+func sysFreeMemoryBytes() uint64 {
+	f, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		key, rest, ok := strings.Cut(sc.Text(), ":")
+		if !ok || key != "MemAvailable" {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSpace(rest))
+		if len(fields) == 0 {
+			return 0
+		}
+		kb, err := strconv.ParseUint(fields[0], 10, 64)
+		if err != nil {
+			return 0
+		}
+		return kb * 1024
+	}
+	return 0
+}
+
 // sysSwapUsedFraction returns the fraction of swap space currently in use on
 // Linux by parsing SwapTotal/SwapFree from /proc/meminfo.
 func sysSwapUsedFraction() float64 {

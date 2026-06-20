@@ -12,6 +12,8 @@
 //	vroom-mesh --trail /tmp/vroom.jsonl  # also write decision trail to disk
 //	vroom-mesh --disk 0.95            # set the simulated disk usage fraction
 //	vroom-mesh --sys-probe            # use real OS resource metrics (disk+memory)
+//	vroom-mesh --pressure --swap 0.95 --free-mem-mib 80  # exercise the graduated
+//	                                  # memory-pressure auto-reaper (ce-80ca)
 //
 // The decision trail is always written to stdout (one JSON object per
 // line). Pipe through `jq` for human-readable output.
@@ -57,8 +59,11 @@ type runConfig struct {
 	trailPath  string
 	nProposals  int
 	nTasks      int
-	sysProbe    bool   // use SysResourceProbe (real OS metrics) instead of InMemory
-	reapTargets string // comma-separated --targets for the orphan reaper; empty = CLI default
+	sysProbe    bool    // use SysResourceProbe (real OS metrics) instead of InMemory
+	reapTargets string  // comma-separated --targets for the orphan reaper; empty = CLI default
+	swapFrac    float64 // simulated swap usage fraction (drives graduated pressure)
+	freeMemMiB  int     // simulated free physical RAM in MiB (0 = unknown)
+	pressure    bool    // wire graduated memory-pressure monitoring + auto-reaper
 }
 
 func parseFlags(args []string, stderr io.Writer) (*runConfig, error) {
@@ -78,6 +83,9 @@ func parseFlags(args []string, stderr io.Writer) (*runConfig, error) {
 	fs.IntVar(&cfg.nTasks, "tasks", 2, "number of sample tasks to seed the queue with")
 	fs.BoolVar(&cfg.sysProbe, "sys-probe", false, "use real OS resource metrics (disk+memory) instead of simulated values")
 	fs.StringVar(&cfg.reapTargets, "reap-targets", "", "comma-separated process allowlist for the overseer's orphan reaper (empty = reaper default: gopls,agm-mcp-server). Only active with --sys-probe")
+	fs.Float64Var(&cfg.swapFrac, "swap", 0, "simulated swap usage fraction (0..1) for graduated memory-pressure")
+	fs.IntVar(&cfg.freeMemMiB, "free-mem-mib", 0, "simulated free physical RAM in MiB (0 = unknown)")
+	fs.BoolVar(&cfg.pressure, "pressure", false, "wire graduated memory-pressure monitoring + auto-reaper into the Overseer")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -154,6 +162,18 @@ func buildMesh(trail decisiontrail.Trail, roadmap *supervisor.InMemoryRoadmap, q
 			reclaimer.Targets = splitTargets(cfg.reapTargets)
 		}
 		overSup = overSup.WithReclaimer(reclaimer)
+	}
+	if cfg.pressure {
+		reaper, rerr := supervisor.NewAutoResourceReaper(trail,
+			supervisor.WithReapReclaimer(supervisor.NewInMemoryReclaimer()),
+			supervisor.WithSessionArchiver(supervisor.NewInMemorySessionArchiver()),
+			supervisor.WithSpawnGate(supervisor.NewInMemorySpawnGate()),
+			supervisor.WithPressureEscalator(supervisor.NewInMemoryPressureEscalator()),
+		)
+		if rerr != nil {
+			return nil, rerr
+		}
+		overSup.WithMemoryPressure(supervisor.NewMemoryPressureMonitor(supervisor.MemoryPressureThresholds{}), reaper)
 	}
 
 	check := &supervisor.HeartbeatCheckSkill{Threshold: 3 * cfg.interval}
@@ -243,13 +263,19 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if cfg.sysProbe {
 		probe = supervisor.NewSysResourceProbe()
 	} else {
+		freeMemBytes := uint64(0)
+		if cfg.freeMemMiB > 0 {
+			freeMemBytes = uint64(cfg.freeMemMiB) * supervisor.MiB
+		}
 		mem := supervisor.NewInMemoryResourceProbe()
 		mem.Set(supervisor.ResourceSnapshot{
-			DiskUsedFraction:   cfg.diskFrac,
-			MemoryUsedFraction: cfg.memFrac,
-			CPUUsedFraction:    cfg.cpuFrac,
-			StrandedWorktrees:  cfg.stranded,
-			OrphanedSessions:   cfg.orphaned,
+			DiskUsedFraction:        cfg.diskFrac,
+			MemoryUsedFraction:      cfg.memFrac,
+			CPUUsedFraction:         cfg.cpuFrac,
+			SwapUsedFraction:        cfg.swapFrac,
+			FreePhysicalMemoryBytes: freeMemBytes,
+			StrandedWorktrees:       cfg.stranded,
+			OrphanedSessions:        cfg.orphaned,
 		})
 		probe = mem
 	}
