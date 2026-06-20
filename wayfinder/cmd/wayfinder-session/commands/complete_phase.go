@@ -13,6 +13,10 @@ import (
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/tracker"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/validator"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -40,8 +44,23 @@ func init() {
 	CompletePhaseCmd.Flags().StringVar(&hashMismatchReason, "reason", "", "Reason for overriding hash mismatch validation (optional)")
 }
 
-func runCompletePhase(cmd *cobra.Command, args []string) error {
+func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 	phaseName := args[0]
+
+	// Trace the phase transition. cmd.Context() is always non-nil (cobra
+	// defaults to context.Background()); the span is a no-op unless a collector
+	// is configured. Span name keeps the SDLC phase transition legible in Jaeger.
+	_, span := otel.Tracer("wayfinder").Start(cmd.Context(), "wayfinder.phase.complete",
+		trace.WithAttributes(
+			attribute.String("phase.name", phaseName),
+			attribute.String("phase.outcome", phaseOutcome),
+		))
+	defer func() {
+		if retErr != nil {
+			span.SetStatus(codes.Error, retErr.Error())
+		}
+		span.End()
+	}()
 
 	// Get project directory
 	projectDir := GetProjectDirectory()
