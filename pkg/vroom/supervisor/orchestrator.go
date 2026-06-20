@@ -107,9 +107,10 @@ type Orchestrator struct {
 	trail           decisiontrail.Trail
 	queue           Queue
 	consecutiveIdle int
-	staleThreshold  time.Duration    // 0 → defaultStaleThreshold
-	now             func() time.Time // nil → time.Now
+	staleThreshold  time.Duration     // 0 → defaultStaleThreshold
+	now             func() time.Time  // nil → time.Now
 	perm            PermissionChecker // nil → allow all
+	reaper          *WorkerReaper     // nil → zombie reaping disabled
 }
 
 // NewOrchestrator constructs the Orchestrator supervisor.
@@ -128,6 +129,16 @@ func NewOrchestrator(trail decisiontrail.Trail, queue Queue) (*Orchestrator, err
 // method is optional; without it all tasks dispatch unconditionally.
 func (o *Orchestrator) WithPermissionChecker(perm PermissionChecker) *Orchestrator {
 	o.perm = perm
+	return o
+}
+
+// WithWorkerReaper wires a WorkerReaper into the Orchestrator. After this
+// call every Tick runs a deterministic reap pass that archives zombie
+// (stopped-and-unarchived past threshold) and ghost (unknown / no-tmux-pane)
+// worker sessions, plus any worker whose bead has been closed (ce-76bc).
+// Without it no reaping is performed.
+func (o *Orchestrator) WithWorkerReaper(r *WorkerReaper) *Orchestrator {
+	o.reaper = r
 	return o
 }
 
@@ -157,6 +168,13 @@ func (o *Orchestrator) threshold() time.Duration {
 // (ce-6as.3). When no tasks are dispatched it records supervisor.orch.no_work
 // and, if the streak reaches idleEscalationThreshold, emits idle_escalation.
 func (o *Orchestrator) Tick(ctx context.Context) error {
+	// Deterministic zombie/ghost reaping runs first so freed session slots are
+	// available before dispatch (ce-76bc). Reaping is best-effort: a reaper
+	// error is recorded to its own trail and never fails the tick.
+	if o.reaper != nil {
+		_, _ = o.reaper.Reap(ctx)
+	}
+
 	tasks, err := o.queue.Pending(ctx)
 	if err != nil {
 		return fmt.Errorf("orchestrator: list pending: %w", err)
