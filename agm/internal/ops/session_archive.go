@@ -175,11 +175,22 @@ func checkSupervisorProtection(m *manifest.Manifest, force bool) error {
 }
 
 // checkActiveTmuxBlock blocks archive when the session has an active tmux pane.
+//
+// The tmux session name is resolved via session.TmuxSessionName, the SAME helper
+// status computation uses: when m.Tmux.SessionName is empty it falls back to the
+// sanitized session Name. Previously this returned nil (no block) whenever the
+// explicit field was empty, but status computation still matched the fallback name
+// — so a live detached pane could report "active" yet be archived. Resolving the
+// name the same way here closes that bypass.
 func checkActiveTmuxBlock(m *manifest.Manifest, force bool) error {
-	if force || m.Tmux.SessionName == "" {
+	if force {
 		return nil
 	}
-	cmd := exec.Command("tmux", "has-session", "-t", m.Tmux.SessionName)
+	tmuxSessionName := session.TmuxSessionName(m)
+	if tmuxSessionName == "" {
+		return nil
+	}
+	cmd := exec.Command("tmux", "has-session", "-t", tmuxSessionName)
 	if err := cmd.Run(); err != nil {
 		return nil //nolint:nilerr // tmux has-session failure means session doesn't exist; nothing to block
 	}

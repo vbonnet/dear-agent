@@ -115,12 +115,16 @@ func GC(ctx *OpContext, req *GCRequest) (*GCResult, error) {
 	}
 
 	// Get active tmux sessions in a single batch call for efficiency.
-	tmuxSessions := make(map[string]bool)
+	// Key by SessionID (UUID), NOT Name: two manifests can share a Name (e.g. an
+	// archived shadow and a live worker), and a Name-keyed map lets the archived
+	// entry overwrite the live one ("stopped" shadows "active"), making GC archive
+	// a LIVE session. UUID is unique per session, so no shadowing is possible.
+	activeTmuxByID := make(map[string]bool)
 	if ctx.Tmux != nil {
-		statuses := session.ComputeStatusBatch(allSessions, ctx.Tmux)
-		for name, status := range statuses {
+		statuses := session.ComputeStatusBatchByID(allSessions, ctx.Tmux)
+		for id, status := range statuses {
 			if status == "active" {
-				tmuxSessions[name] = true
+				activeTmuxByID[id] = true
 			}
 		}
 	}
@@ -134,7 +138,7 @@ func GC(ctx *OpContext, req *GCRequest) (*GCResult, error) {
 
 	for _, m := range allSessions {
 		result.Scanned++
-		processGCSession(ctx, m, req, protectRoles, tmuxSessions, now, result)
+		processGCSession(ctx, m, req, protectRoles, activeTmuxByID, now, result)
 	}
 
 	return result, nil
@@ -142,12 +146,12 @@ func GC(ctx *OpContext, req *GCRequest) (*GCResult, error) {
 
 // processGCSession evaluates a single session for GC eligibility and either
 // skips, archives (or records dry-run intent), or records an error result.
-func processGCSession(ctx *OpContext, m *manifest.Manifest, req *GCRequest, protectRoles []string, tmuxSessions map[string]bool, now time.Time, result *GCResult) {
+func processGCSession(ctx *OpContext, m *manifest.Manifest, req *GCRequest, protectRoles []string, activeTmuxByID map[string]bool, now time.Time, result *GCResult) {
 	entry := GCSessionEntry{
 		Name:      m.Name,
 		SessionID: m.SessionID,
 	}
-	if reason, ok := gcSkipReason(m, protectRoles, tmuxSessions, req.OlderThan, now); ok {
+	if reason, ok := gcSkipReason(m, protectRoles, activeTmuxByID, req.OlderThan, now); ok {
 		entry.Action = "skipped"
 		entry.Reason = reason
 		result.Skipped++
@@ -205,7 +209,7 @@ func processGCSession(ctx *OpContext, m *manifest.Manifest, req *GCRequest, prot
 
 // gcSkipReason returns the (skip-reason, true) pair when m should not be
 // considered for archive. Order matches the historical GC checks.
-func gcSkipReason(m *manifest.Manifest, protectRoles []string, tmuxSessions map[string]bool, olderThan time.Duration, now time.Time) (GCSkipReason, bool) {
+func gcSkipReason(m *manifest.Manifest, protectRoles []string, activeTmuxByID map[string]bool, olderThan time.Duration, now time.Time) (GCSkipReason, bool) {
 	if m.Lifecycle == manifest.LifecycleArchived {
 		return GCSkipAlreadyArchived, true
 	}
@@ -215,7 +219,7 @@ func gcSkipReason(m *manifest.Manifest, protectRoles []string, tmuxSessions map[
 	if matchesProtectedRole(m.Name, protectRoles) || IsSupervisorSession(m.Name) {
 		return GCSkipProtectedRole, true
 	}
-	if tmuxSessions[m.Name] {
+	if activeTmuxByID[m.SessionID] {
 		return GCSkipActiveTmux, true
 	}
 	if activeStates[m.State] {

@@ -153,19 +153,19 @@ func TestComputeStatus_NilTmux(t *testing.T) {
 func TestGetTmuxSessionName(t *testing.T) {
 	t.Run("uses tmux session name when set", func(t *testing.T) {
 		m := testManifest("test", "my-tmux-session", "")
-		name := getTmuxSessionName(m)
+		name := TmuxSessionName(m)
 		assert.Equal(t, "my-tmux-session", name)
 	})
 
 	t.Run("falls back to sanitized session name", func(t *testing.T) {
 		m := testManifest("my-session", "", "")
-		name := getTmuxSessionName(m)
+		name := TmuxSessionName(m)
 		assert.NotEmpty(t, name)
 	})
 
 	t.Run("last resort fallback for empty name", func(t *testing.T) {
 		m := &manifest.Manifest{}
-		name := getTmuxSessionName(m)
+		name := TmuxSessionName(m)
 		// Should return something non-empty
 		assert.NotEmpty(t, name)
 	})
