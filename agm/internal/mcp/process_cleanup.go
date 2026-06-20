@@ -135,6 +135,11 @@ func (k *SignalKiller) Kill(pid int) error {
 	if err != nil {
 		return nil //nolint:nilerr // process doesn't exist
 	}
+	// On Go 1.23+ os.FindProcess acquires a pidfd on Linux; without Release it
+	// is only reclaimed by the GC finalizer. The orphan reaper calls Kill once
+	// per orphan per tick, so an unreleased handle leaks one FD per reap — the
+	// reaper meant to relieve gopls FD pressure would itself exhaust FDs.
+	defer func() { _ = process.Release() }()
 
 	// Check if process is alive
 	if err := process.Signal(syscall.Signal(0)); err != nil {
