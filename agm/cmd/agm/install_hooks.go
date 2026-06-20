@@ -29,7 +29,7 @@ Hooks installed:
   • pretool-test-session-guard            - Block test-* sessions without --test flag
   • pretool-agm-mode-tracker          - Track permission mode changes for persistence
   • stop-agm-resource-cleanup         - Reap stale agent worktrees on session end
-  • sessionend-closeout               - Flag leftover worktrees/branches/uncommitted work on SessionEnd
+  • sessionend-closeout               - Reap this session's gopls/agm-mcp-server + flag leftover worktrees on SessionEnd
 
 These hooks enable accurate state detection with <1% false positive rate,
 replacing the fragile tmux pane parsing method (37.5% false positive rate).
