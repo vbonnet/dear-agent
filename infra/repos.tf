@@ -8,10 +8,10 @@ resource "github_repository" "active" {
   name       = each.key
   visibility = each.value.visibility
 
-  # Merge hygiene: squash + rebase only; no merge commits (linear history);
+  # Merge hygiene: squash-only; no rebase or merge commits (linear history);
   # auto-merge and branch-delete-after-merge enabled.
   allow_squash_merge     = true
-  allow_rebase_merge     = true
+  allow_rebase_merge     = false
   allow_merge_commit     = false
   allow_auto_merge       = true
   delete_branch_on_merge = true
