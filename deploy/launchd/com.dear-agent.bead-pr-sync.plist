@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent for the bead-pr-sync reconciler (ce-yf2c).
+  Runs `bead-pr-sync` every 4 hours to catch CLOSED beads whose referenced
+  PR has not yet merged and reopen them (DoD enforcement, per CLAUDE.md §6).
+  The plist is a TEMPLATE: the install target
+  (make install-bead-pr-sync-launchagent) substitutes __HOME__ for the real
+  home directory before staging it into ~/Library/LaunchAgents.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dear-agent.bead-pr-sync</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/go/bin/bead-pr-sync</string>
+    <string>-beads-dir</string>
+    <string>__HOME__/beads/context-engine/.beads</string>
+    <string>-repo</string>
+    <string>vbonnet/dear-agent</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>GIT_TERMINAL_PROMPT</key>
+    <string>0</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+  </dict>
+
+  <!-- One reconcile every 4 hours. Each run is idempotent. -->
+  <key>StartInterval</key>
+  <integer>14400</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.local/state/dear-agent/bead-pr-sync.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.local/state/dear-agent/bead-pr-sync.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
