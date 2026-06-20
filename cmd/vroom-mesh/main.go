@@ -57,13 +57,15 @@ type runConfig struct {
 	stranded   int
 	orphaned   int
 	trailPath  string
-	nProposals  int
-	nTasks      int
-	sysProbe    bool    // use SysResourceProbe (real OS metrics) instead of InMemory
-	reapTargets string  // comma-separated --targets for the orphan reaper; empty = CLI default
-	swapFrac    float64 // simulated swap usage fraction (drives graduated pressure)
-	freeMemMiB  int     // simulated free physical RAM in MiB (0 = unknown)
-	pressure    bool    // wire graduated memory-pressure monitoring + auto-reaper
+	nProposals        int
+	nTasks            int
+	sysProbe          bool    // use SysResourceProbe (real OS metrics) instead of InMemory
+	reapTargets       string  // comma-separated --targets for the orphan reaper; empty = CLI default
+	swapFrac          float64 // simulated swap usage fraction (drives graduated pressure)
+	freeMemMiB        int     // simulated free physical RAM in MiB (0 = unknown)
+	pressure          bool    // wire graduated memory-pressure monitoring + auto-reaper
+	wakePeers         bool    // enable AGMRecovery: send `agm send wake-loop` to stale peers
+	recoveryThreshold int     // consecutive stale ticks before a wake-loop is sent
 }
 
 func parseFlags(args []string, stderr io.Writer) (*runConfig, error) {
@@ -86,6 +88,8 @@ func parseFlags(args []string, stderr io.Writer) (*runConfig, error) {
 	fs.Float64Var(&cfg.swapFrac, "swap", 0, "simulated swap usage fraction (0..1) for graduated memory-pressure")
 	fs.IntVar(&cfg.freeMemMiB, "free-mem-mib", 0, "simulated free physical RAM in MiB (0 = unknown)")
 	fs.BoolVar(&cfg.pressure, "pressure", false, "wire graduated memory-pressure monitoring + auto-reaper into the Overseer")
+	fs.BoolVar(&cfg.wakePeers, "wake-peers", false, "send `agm send wake-loop` to a peer once it has been stale for --recovery-threshold ticks (mutual-unblock)")
+	fs.IntVar(&cfg.recoveryThreshold, "recovery-threshold", 3, "consecutive stale ticks a peer must miss before a wake-loop is sent (requires --wake-peers)")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -177,13 +181,23 @@ func buildMesh(trail decisiontrail.Trail, roadmap *supervisor.InMemoryRoadmap, q
 	}
 
 	check := &supervisor.HeartbeatCheckSkill{Threshold: 3 * cfg.interval}
+
+	// Recovery is the corrective-action half of the mutual-unblock invariant.
+	// Off by default so the in-process harness doesn't shell out; --wake-peers
+	// opts in and sends `agm send wake-loop` to a peer stale for too long.
+	var recovery supervisor.PeerRecovery
+	if cfg.wakePeers {
+		recovery = &supervisor.AGMRecovery{}
+	}
 	mkLoop := func(s supervisor.Supervisor) (*supervisor.Loop, error) {
 		return supervisor.NewLoop(supervisor.LoopConfig{
-			Supervisor: s,
-			Mesh:       placeholderMesh{},
-			Check:      check,
-			Trail:      trail,
-			Interval:   cfg.interval,
+			Supervisor:        s,
+			Mesh:              placeholderMesh{},
+			Check:             check,
+			Recovery:          recovery,
+			Trail:             trail,
+			Interval:          cfg.interval,
+			RecoveryThreshold: cfg.recoveryThreshold,
 		})
 	}
 	metaLoop, err := mkLoop(metaSup)

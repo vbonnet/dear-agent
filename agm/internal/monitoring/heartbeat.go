@@ -10,14 +10,53 @@ import (
 	"time"
 )
 
+// Loop heartbeat states, written to the State field. These let a peer
+// supervisor diagnose *why* a loop is stuck across the process boundary,
+// not merely that its heartbeat is stale (retro
+// 2026-06-17-vroom-overnight-supervisor-cascade, gap 4).
+const (
+	// StateRunning means the last tick completed normally.
+	StateRunning = "running"
+	// StateStuck means the last tick errored or exceeded its budget.
+	StateStuck = "stuck"
+	// StateRecovering means the loop is mid-recovery (e.g. just restarted, or
+	// actively unblocking a peer) and not yet back to steady state.
+	StateRecovering = "recovering"
+)
+
 // LoopHeartbeat represents a heartbeat from a monitoring loop.
 // Written to ~/.agm/heartbeats/loop-{session}.json on each loop cycle.
+//
+// The trailing diagnostic fields (LastTickError, LastTickDurationMs, State)
+// are written when a loop has that context to share. They cross the process
+// boundary so a peer supervisor can tell a stuck loop from a slow one and act
+// accordingly (wake vs. wait vs. escalate). All are omitempty for backward
+// compatibility with older readers and pre-diagnostic heartbeat files.
 type LoopHeartbeat struct {
 	Timestamp    time.Time `json:"timestamp"`
 	Session      string    `json:"session"`
 	IntervalSecs int       `json:"interval_secs"`
 	CycleNumber  int       `json:"cycle_number"`
 	OK           bool      `json:"ok"`
+
+	// LastTickError is the error string from the most recent tick, empty when
+	// the tick succeeded.
+	LastTickError string `json:"last_tick_error,omitempty"`
+	// LastTickDurationMs is how long the most recent tick took, in
+	// milliseconds. Zero when unknown.
+	LastTickDurationMs int64 `json:"last_tick_duration_ms,omitempty"`
+	// State is one of StateRunning / StateStuck / StateRecovering. Empty when
+	// the writer does not track loop state.
+	State string `json:"state,omitempty"`
+}
+
+// Diagnostics carries the optional diagnostic state a loop can attach to its
+// heartbeat. A nil *Diagnostics means "no diagnostic context" and leaves the
+// corresponding JSON fields empty.
+type Diagnostics struct {
+	LastTickError      string
+	LastTickDurationMs int64
+	State              string
 }
 
 // HeartbeatWriter writes loop heartbeat files atomically.
@@ -44,8 +83,17 @@ func NewHeartbeatWriter(dir string) (*HeartbeatWriter, error) {
 	return &HeartbeatWriter{dir: dir}, nil
 }
 
-// Write writes a loop heartbeat for the given session.
+// Write writes a loop heartbeat for the given session, with no diagnostic
+// state. Equivalent to WriteDiagnostic(..., nil).
 func (w *HeartbeatWriter) Write(session string, intervalSecs int, cycleNumber int, ok bool) error {
+	return w.WriteDiagnostic(session, intervalSecs, cycleNumber, ok, nil)
+}
+
+// WriteDiagnostic writes a loop heartbeat for the given session, attaching the
+// optional diagnostic state (last tick error, tick duration, loop state) so
+// peer supervisors can diagnose a stall across the process boundary. A nil
+// diag writes only the base fields.
+func (w *HeartbeatWriter) WriteDiagnostic(session string, intervalSecs int, cycleNumber int, ok bool, diag *Diagnostics) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -55,6 +103,11 @@ func (w *HeartbeatWriter) Write(session string, intervalSecs int, cycleNumber in
 		IntervalSecs: intervalSecs,
 		CycleNumber:  cycleNumber,
 		OK:           ok,
+	}
+	if diag != nil {
+		hb.LastTickError = diag.LastTickError
+		hb.LastTickDurationMs = diag.LastTickDurationMs
+		hb.State = diag.State
 	}
 
 	data, err := json.Marshal(hb)

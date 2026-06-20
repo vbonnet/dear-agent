@@ -45,6 +45,12 @@ type Loop struct {
 	zombieThreshold int
 	allPeersDarkRun int // consecutive iterations with all peers stale
 
+	// Recovery debounce: a peer must be stale for this many consecutive ticks
+	// before PeerRecovery fires. Filters transient single-tick lag from a
+	// genuine stall. Default 1 (act on the first stale tick).
+	recoveryThreshold int
+	peerStaleRuns     map[Role]int // consecutive stale ticks per peer
+
 	// status fields — protected by mu.
 	mu            sync.RWMutex
 	lastHeartbeat time.Time
@@ -77,6 +83,13 @@ type LoopConfig struct {
 	// peers are stale before the loop self-terminates with ErrAllPeersDark.
 	// Zero disables zombie detection. Default: 10.
 	ZombieThreshold int
+
+	// RecoveryThreshold is the number of consecutive ticks a single peer must
+	// be stale before PeerRecovery fires for it. This debounces transient
+	// single-tick lag (a slow peer tick is not yet a stall). Zero defaults to
+	// 1 (act on the first stale tick); production meshes set it higher (e.g.
+	// 3) so a wake-loop is only sent after sustained staleness.
+	RecoveryThreshold int
 
 	// Clock is the source of time. Defaults to time.Now. Tests inject a
 	// fake clock here.
@@ -112,15 +125,21 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 	if zombieThreshold == 0 {
 		zombieThreshold = 10
 	}
+	recoveryThreshold := cfg.RecoveryThreshold
+	if recoveryThreshold == 0 {
+		recoveryThreshold = 1
+	}
 	return &Loop{
-		sup:             cfg.Supervisor,
-		mesh:            cfg.Mesh,
-		check:           cfg.Check,
-		recovery:        cfg.Recovery,
-		trail:           cfg.Trail,
-		interval:        cfg.Interval,
-		clock:           clock,
-		zombieThreshold: zombieThreshold,
+		sup:               cfg.Supervisor,
+		mesh:              cfg.Mesh,
+		check:             cfg.Check,
+		recovery:          cfg.Recovery,
+		trail:             cfg.Trail,
+		interval:          cfg.Interval,
+		clock:             clock,
+		zombieThreshold:   zombieThreshold,
+		recoveryThreshold: recoveryThreshold,
+		peerStaleRuns:     make(map[Role]int),
 	}, nil
 }
 
@@ -247,16 +266,26 @@ func (l *Loop) checkPeers(ctx context.Context) {
 
 		if checkErr == nil {
 			allStale = false
+			l.peerStaleRuns[peerRole] = 0
+			continue
 		}
 
-		if checkErr != nil && l.recovery != nil {
+		// Peer is stale — count consecutive stale ticks and only attempt
+		// recovery once it has been stale for recoveryThreshold ticks. This
+		// debounces a single slow tick from triggering a wake storm.
+		l.peerStaleRuns[peerRole]++
+		staleRun := l.peerStaleRuns[peerRole]
+
+		if l.recovery != nil && staleRun >= l.recoveryThreshold {
 			recoverErr := l.recovery.Recover(ctx, peerRole, checkErr.Error())
 			recoveryRec := decisiontrail.Record{
 				Role: string(l.sup.Role()),
 				Kind: "supervisor.check.recovery_attempt",
 				Payload: map[string]any{
-					"peer": string(peerRole),
-					"ok":   recoverErr == nil,
+					"peer":       string(peerRole),
+					"ok":         recoverErr == nil,
+					"stale_runs": staleRun,
+					"threshold":  l.recoveryThreshold,
 				},
 			}
 			if recoverErr != nil {
