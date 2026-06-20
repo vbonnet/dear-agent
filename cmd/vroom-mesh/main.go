@@ -27,6 +27,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -54,9 +55,10 @@ type runConfig struct {
 	stranded   int
 	orphaned   int
 	trailPath  string
-	nProposals int
-	nTasks     int
-	sysProbe   bool // use SysResourceProbe (real OS metrics) instead of InMemory
+	nProposals  int
+	nTasks      int
+	sysProbe    bool   // use SysResourceProbe (real OS metrics) instead of InMemory
+	reapTargets string // comma-separated --targets for the orphan reaper; empty = CLI default
 }
 
 func parseFlags(args []string, stderr io.Writer) (*runConfig, error) {
@@ -75,6 +77,7 @@ func parseFlags(args []string, stderr io.Writer) (*runConfig, error) {
 	fs.IntVar(&cfg.nProposals, "proposals", 2, "number of sample Work Order proposals to seed the roadmap with")
 	fs.IntVar(&cfg.nTasks, "tasks", 2, "number of sample tasks to seed the queue with")
 	fs.BoolVar(&cfg.sysProbe, "sys-probe", false, "use real OS resource metrics (disk+memory) instead of simulated values")
+	fs.StringVar(&cfg.reapTargets, "reap-targets", "", "comma-separated process allowlist for the overseer's orphan reaper (empty = reaper default: gopls,agm-mcp-server). Only active with --sys-probe")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -142,6 +145,16 @@ func buildMesh(trail decisiontrail.Trail, roadmap *supervisor.InMemoryRoadmap, q
 	if err != nil {
 		return nil, err
 	}
+	// Wire resource remediation only on the real-probe (production) path. With
+	// the in-memory probe the snapshot is simulated, so shelling out to the
+	// reaper would kill real host processes in response to fake pressure.
+	if cfg.sysProbe {
+		reclaimer := &supervisor.OrphanReclaimer{}
+		if cfg.reapTargets != "" {
+			reclaimer.Targets = splitTargets(cfg.reapTargets)
+		}
+		overSup = overSup.WithReclaimer(reclaimer)
+	}
 
 	check := &supervisor.HeartbeatCheckSkill{Threshold: 3 * cfg.interval}
 	mkLoop := func(s supervisor.Supervisor) (*supervisor.Loop, error) {
@@ -166,6 +179,19 @@ func buildMesh(trail decisiontrail.Trail, roadmap *supervisor.InMemoryRoadmap, q
 		return nil, err
 	}
 	return supervisor.NewMesh(metaLoop, orchLoop, overLoop)
+}
+
+// splitTargets parses a comma-separated reap-targets flag into a slice,
+// trimming whitespace and dropping empty entries.
+func splitTargets(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // runContext returns a context that fires on SIGINT/SIGTERM, on the
