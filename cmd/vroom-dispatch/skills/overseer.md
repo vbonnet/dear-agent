@@ -113,6 +113,11 @@ vm_stat | head -10
 # Swap usage
 sysctl vm.swapusage 2>/dev/null
 
+# CPU load (1/5/15-min load average). Compare the 5-min figure against core
+# count: load > 0.9 * ncpu ≈ "CPU > 90%" sustained pressure.
+sysctl -n vm.loadavg 2>/dev/null
+sysctl -n hw.ncpu 2>/dev/null
+
 # Open file descriptors (system-wide)
 sysctl kern.num_files 2>/dev/null
 sysctl kern.maxfiles 2>/dev/null
@@ -143,7 +148,9 @@ agm session list 2>/dev/null | grep -c "OFFLINE" || echo "0"
 |--------|-----------|--------|
 | Disk usage | >= 90% | Escalate to Meta-O + Orch |
 | Swap usage | >= 50% | Escalate (early thrashing indicator) |
-| Open FD fraction | >= 80% | Escalate + identify FD hogs |
+| Swap usage | >= 60% | **spawn-pause**: signal Orch to pause dispatch (resource exhaustion) |
+| CPU 5-min load | > 90% of ncpu | **spawn-pause**: signal Orch to pause dispatch (resource exhaustion) |
+| Open FD fraction | >= 80% | Escalate + identify FD hogs (spawn-pause if climbing toward exhaustion) |
 | Vnode fraction | (ignore) | Do NOT escalate — ~100% is normal macOS steady state, not exhaustion |
 | Gopls processes | > 5 | Escalate (known leak pattern — see ce-710r) |
 | Stranded worktrees | > 10 | Recommend cleanup |
@@ -167,6 +174,21 @@ If critical (disk >= 95%, gopls > 10):
 ```bash
 agm send msg vroom-meta-orchestrator --sender vroom-overseer --priority critical --prompt "RESOURCE ALERT: <metric> at <value>, threshold <threshold>. Recommend: <action>"
 agm send msg vroom-orchestrator --sender vroom-overseer --priority critical --prompt "RESOURCE ALERT: <metric> at <value>. Consider pausing worker spawns."
+```
+
+**Resource-exhaustion spawn-pause signal.** When swap >= 60%, the 5-min CPU load
+exceeds 90% of `ncpu`, or FD fraction is climbing toward exhaustion, send the
+Orchestrator the explicit pause signal — this is the ONE condition that makes the
+Orchestrator stop dispatching (Meta-O staleness does not; see the Orchestrator's
+*Peer Heartbeat Response*). The phrase `Consider pausing worker spawns` is what
+the Orchestrator matches on:
+```bash
+agm send msg vroom-orchestrator --sender vroom-overseer --priority critical --prompt "RESOURCE ALERT: <metric> at <value> (threshold <threshold>). Consider pausing worker spawns until this recovers."
+```
+On the next tick, once the metric is back under threshold, send a recovery note
+so the Orchestrator resumes dispatch:
+```bash
+agm send msg vroom-orchestrator --sender vroom-overseer --priority normal --prompt "RESOURCE RECOVERED: <metric> back to <value> (under threshold). Safe to resume worker spawns."
 ```
 
 ### Step 6: Session Health Audit
@@ -296,6 +318,8 @@ After each tick, briefly note:
 | Situation | Action |
 |-----------|--------|
 | Disk >= 95% | Critical to both peers, recommend pause |
+| Swap >= 60% or CPU 5-min load > 90% of ncpu | **spawn-pause**: critical to Orch, "Consider pausing worker spawns until this recovers" |
+| Resource metric back under threshold | Normal to Orch: "RESOURCE RECOVERED … Safe to resume worker spawns" |
 | Orphaned gopls > 10 | Critical: "Known FD leak. Run `agm session reap-orphans` — kills only PID-1 orphans, never live sessions. Do NOT `pkill gopls`." |
 | Worker in PERMISSION_PROMPT, no progress, >5min | Urgent to worker: defer and continue |
 | Worker in PERMISSION_PROMPT, no progress, >30min | Critical to Orch: "stuck worker, recommend Level 3 escalation" |
