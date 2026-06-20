@@ -51,6 +51,9 @@ var (
 	listCommandsJSON bool
 	outputFormat     string                // "text" (default), "json"
 	fieldsFlag       []string              // field mask for JSON output
+	forceAgent       bool                  // --agent: force agent output mode ON
+	forceNoAgent     bool                  // --no-agent: force agent output mode OFF
+	outputMode       OutputMode            // resolved once in PersistentPreRunE
 	tmuxClient       session.TmuxInterface // Injected dependency for testing
 	managerBackend   manager.Backend       // New abstraction layer (nil = legacy path)
 	usageTracker     *usage.Tracker
@@ -63,6 +66,43 @@ var (
 // real TTY.
 var stdoutIsTTY = func() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+// OutputMode is the unified agent-vs-human output mode. It is resolved exactly
+// once in PersistentPreRunE and consulted by the output helpers (header,
+// printResult, color/glyphs) so that agent-mode detection lives in one place
+// instead of being re-derived from env/TTY checks scattered across the codebase.
+type OutputMode int
+
+const (
+	// ModeHuman is the interactive terminal experience: text output, version
+	// header, color, and success suggestions.
+	ModeHuman OutputMode = iota
+	// ModeAgent is the machine-facing experience: JSON output, no version
+	// header, no color/glyphs, usage silenced, success suggestions dropped.
+	ModeAgent
+)
+
+// resolveOutputMode applies the agent-mode precedence (highest first):
+//
+//  1. --agent flag      → force agent mode ON
+//  2. --no-agent flag   → force agent mode OFF
+//  3. AGM_AGENT=1 env   → agent mode ON
+//  4. stdout not a TTY  → agent mode ON (auto)
+//  5. default           → human mode (TTY)
+func resolveOutputMode(forceAgent, forceNoAgent bool) OutputMode {
+	switch {
+	case forceAgent:
+		return ModeAgent
+	case forceNoAgent:
+		return ModeHuman
+	case os.Getenv("AGM_AGENT") == "1":
+		return ModeAgent
+	case !stdoutIsTTY():
+		return ModeAgent
+	default:
+		return ModeHuman
+	}
 }
 
 var rootCmd = &cobra.Command{
@@ -101,6 +141,17 @@ Global Flags:
 		// Record command start time for usage tracking
 		commandStartTime = time.Now()
 
+		// Resolve the unified output mode exactly once, here, from flags + env +
+		// TTY. Everything downstream (header, JSON routing, color/glyphs) consults
+		// outputMode rather than re-deriving agent detection on its own.
+		outputMode = resolveOutputMode(forceAgent, forceNoAgent)
+
+		// Agent mode defaults to JSON output. An explicit --output flag always
+		// wins (e.g. `--agent -o text` still yields text).
+		if outputMode == ModeAgent && !cmd.Flags().Changed("output") {
+			outputFormat = "json"
+		}
+
 		// Initialize audit logger (best-effort, don't fail command on audit errors)
 		if al, err := ops.NewAuditLogger(""); err == nil {
 			auditLogger = al
@@ -115,9 +166,8 @@ Global Flags:
 
 		// Print header (version and binary location) for all commands except version and status-line
 		// status-line is excluded because it's designed for machine parsing (tmux status bar)
-		// Suppress in agent mode (AGM_AGENT set) or when stdout is not a TTY, to save tokens.
-		if cmd.Name() != "version" && cmd.Name() != "status-line" &&
-			os.Getenv("AGM_AGENT") == "" && stdoutIsTTY() {
+		// Suppressed in agent mode to save tokens.
+		if cmd.Name() != "version" && cmd.Name() != "status-line" && outputMode == ModeHuman {
 			executable, err := os.Executable()
 			if err != nil {
 				executable = "unknown"
@@ -132,6 +182,11 @@ Global Flags:
 		}
 		if screenReader {
 			uiCfg.UI.ScreenReader = true
+		}
+		// Agent mode drops color and Unicode glyphs: machine consumers want plain,
+		// stable text. Explicit human flags above still apply when both are set.
+		if outputMode == ModeAgent {
+			uiCfg.UI.NoColor = true
 		}
 		ui.SetGlobalConfig(uiCfg)
 
@@ -247,6 +302,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&listCommandsJSON, "list-commands-json", false, "output all commands as JSON (agent discovery API)")
 	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "text", "output format: text, json")
 	rootCmd.PersistentFlags().StringSliceVar(&fieldsFlag, "fields", nil, "comma-separated field mask for JSON output (e.g., --fields id,name,status)")
+	rootCmd.PersistentFlags().BoolVar(&forceAgent, "agent", false, "force agent output mode (JSON, no header/color); overrides TTY auto-detection")
+	rootCmd.PersistentFlags().BoolVar(&forceNoAgent, "no-agent", false, "force human output mode (text, header, color); overrides AGM_AGENT and non-TTY auto-detection")
 }
 
 // CommandInfo represents a command for JSON output
