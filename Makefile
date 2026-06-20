@@ -1,5 +1,14 @@
 # Root Makefile for dear-agent
 #
+# Go memory/CPU baseline (ce-1bhq). Load the checked-in envelope and export it
+# so every build/test/run target — and any tool they shell out to — inherits a
+# bounded GOMEMLIMIT/GOMAXPROCS/GOGC instead of growing unbounded. Override on
+# the command line (e.g. `make test GOGC=200`) or per-daemon in its launch
+# wrapper. `-include` so a missing file degrades to Go defaults, not a hard
+# error. See env/go-baseline.env for the rationale behind each value.
+-include env/go-baseline.env
+export GOMEMLIMIT GOMAXPROCS GOGC
+#
 # Targets:
 #   lint-specs              Validate EARS requirements in SPEC.md files
 #   preflight               Fast local CI-parity gates: vet + build + lint  (~25s)

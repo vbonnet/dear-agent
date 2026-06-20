@@ -29,6 +29,12 @@
     <string>0</string>
     <key>HOME</key>
     <string>__HOME__</string>
+    <!-- Go memory/CPU baseline (ce-1bhq). Bounds each run's RSS.
+         Mirrors env/go-baseline.env. -->
+    <key>GOMEMLIMIT</key>
+    <string>512MiB</string>
+    <key>GOGC</key>
+    <string>100</string>
   </dict>
 
   <!-- One reconcile every 4 hours. Each run is idempotent. -->
