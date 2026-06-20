@@ -3,9 +3,66 @@ package monitoring
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestHeartbeatWriter_WriteDiagnostic_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	writer, err := NewHeartbeatWriter(dir)
+	if err != nil {
+		t.Fatalf("NewHeartbeatWriter: %v", err)
+	}
+
+	diag := &Diagnostics{
+		LastTickError:      "permission prompt pending",
+		LastTickDurationMs: 4200,
+		State:              StateStuck,
+	}
+	if err := writer.WriteDiagnostic("meta-orchestrator", 300, 7, false, diag); err != nil {
+		t.Fatalf("WriteDiagnostic: %v", err)
+	}
+
+	hb, err := ReadHeartbeat(dir, "meta-orchestrator")
+	if err != nil {
+		t.Fatalf("ReadHeartbeat: %v", err)
+	}
+	if hb.State != StateStuck {
+		t.Errorf("State = %q, want %q", hb.State, StateStuck)
+	}
+	if hb.LastTickError != "permission prompt pending" {
+		t.Errorf("LastTickError = %q", hb.LastTickError)
+	}
+	if hb.LastTickDurationMs != 4200 {
+		t.Errorf("LastTickDurationMs = %d, want 4200", hb.LastTickDurationMs)
+	}
+	if hb.OK {
+		t.Error("OK should be false for a stuck heartbeat")
+	}
+}
+
+func TestHeartbeatWriter_PlainWriteOmitsDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	writer, err := NewHeartbeatWriter(dir)
+	if err != nil {
+		t.Fatalf("NewHeartbeatWriter: %v", err)
+	}
+	if err := writer.Write("orchestrator", 300, 1, true); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// omitempty: the diagnostic keys must not appear in the JSON at all.
+	data, err := os.ReadFile(filepath.Join(dir, "loop-orchestrator.json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	for _, key := range []string{"last_tick_error", "last_tick_duration_ms", "state"} {
+		if strings.Contains(string(data), key) {
+			t.Errorf("plain Write JSON should omit %q, got: %s", key, data)
+		}
+	}
+}
 
 func TestHeartbeatWriter_Write(t *testing.T) {
 	dir := t.TempDir()
