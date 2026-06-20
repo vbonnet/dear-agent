@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.dear-agent.watch-stalled — host stall monitor for the VROOM mesh.
+
+  Source template:
+      agm/cmd/agm/schedules/com.dear-agent.watch-stalled.plist
+  Installed by `agm admin install-watch-stalled-schedule`, which substitutes
+  __USER_HOME__, __AGM_BINARY__, __ORCHESTRATOR__ and __WORKSPACE__ before
+  writing this file (launchd does not expand ~ or shell variables).
+
+  WORKSPACE selects the agm/Dolt workspace whose sessions are monitored.
+  launchd starts jobs in a minimal environment, so without this the watcher
+  connects to the default ("personal") Dolt database and exits immediately
+  with "database not found". The install command captures the current
+  $WORKSPACE (override with --workspace).
+
+  Unlike the reap-orphans and worktree-sweep jobs (one-shot, StartInterval),
+  `agm watch-stalled` is a long-running daemon: it polls active AGM sessions on
+  a check-interval and emits stall events as JSON. The plist therefore uses
+  KeepAlive (restart on crash) rather than StartInterval, with RunAtLoad so the
+  monitor comes up at login and after a reboot.
+
+  Alert routing: --orchestrator __ORCHESTRATOR__ routes every recovery action
+  (permission-prompt alerts, no-commit nudges, error-loop diagnostics, and
+  max-retry escalations) into the VROOM mesh by sending an agm message to the
+  orchestrator supervisor session. The orchestrator (COO of the mesh) owns
+  worker monitoring, so stall alerts land where work is steered.
+
+  Logs:   <home>/Library/Logs/dear-agent/watch-stalled.log
+          (one JSON object per detected stall / recovery action — pipe to jq)
+
+  Trigger an immediate restart of the monitor with:
+    launchctl kickstart -k gui/$UID/com.dear-agent.watch-stalled
+
+  To remove the job, use 'agm admin uninstall-watch-stalled-schedule'.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dear-agent.watch-stalled</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__AGM_BINARY__</string>
+        <string>watch-stalled</string>
+        <string>--orchestrator</string>
+        <string>__ORCHESTRATOR__</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__USER_HOME__/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__USER_HOME__</string>
+        <key>WORKSPACE</key>
+        <string>__WORKSPACE__</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Long-running daemon: restart if it crashes, but throttle respawns so a
+         persistently failing binary cannot hot-loop. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/watch-stalled.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/watch-stalled.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
