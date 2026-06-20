@@ -127,6 +127,13 @@ func init() {
 func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 	sessionName := args[0]
 
+	// In JSON mode, suppress Cobra's text error/usage dump so the only thing
+	// emitted on the error path is our structured JSON object.
+	if isJSONOutput() {
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+	}
+
 	ctx, span := startKillSpan(cmd.Context(), sessionName, hardKill, forceKill)
 	defer func() {
 		if retErr != nil {
@@ -175,8 +182,11 @@ func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 		return runHardKill(sessionName, killResult.Name)
 	}
 
-	// Soft kill: confirm (unless --force) and terminate tmux session
-	if !forceKill {
+	// Soft kill: confirm (unless --force) and terminate tmux session.
+	// JSON mode is treated as non-interactive: the confirmation prompt is
+	// skipped (the ops layer still enforces --confirmed-stuck for active
+	// sessions, so this stays safe).
+	if !forceKill && !isJSONOutput() {
 		confirmed, confirmErr := confirmKill(sessionName, killResult.Name)
 		if confirmErr != nil || !confirmed {
 			fmt.Println("Cancelled")
@@ -188,8 +198,24 @@ func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 	killTmuxSession(killResult.Name)
 
 	// Success message
+	if isJSONOutput() {
+		return printJSON(map[string]string{"status": "killed", "session": sessionName})
+	}
 	renderSuccessMessage(sessionName)
 	return nil
+}
+
+// renderKillError emits a kill failure. In JSON mode it prints a structured
+// {"error","session"} object to stdout and returns an error (so the process
+// exits non-zero); in text mode it runs the human-readable renderer.
+func renderKillError(sessionName, message string, textRender func() error) error {
+	if isJSONOutput() {
+		if err := printJSON(map[string]string{"error": message, "session": sessionName}); err != nil {
+			return err
+		}
+		return fmt.Errorf("%s", message)
+	}
+	return textRender()
 }
 
 // handleKillError dispatches an error from ops.KillSession into specific
@@ -204,12 +230,20 @@ func handleKillError(opCtx *ops.OpContext, sessionName string, killResult *ops.K
 	}
 	switch opErr.Code {
 	case ops.ErrCodeSessionNotFound:
-		return killResult, true, renderSessionNotFoundError(sessionName)
+		return killResult, true, renderKillError(sessionName, "session not found",
+			func() error { return renderSessionNotFoundError(sessionName) })
 	case ops.ErrCodeSessionArchived:
-		return killResult, true, renderSessionArchivedError(sessionName)
+		return killResult, true, renderKillError(sessionName, "session is archived",
+			func() error { return renderSessionArchivedError(sessionName) })
 	case ops.ErrCodeActiveSessionKill:
-		return killResult, true, renderActiveSessionError(sessionName)
+		return killResult, true, renderKillError(sessionName, "session is active — use --confirmed-stuck to force kill",
+			func() error { return renderActiveSessionError(sessionName) })
 	case ops.ErrCodeKillProtected:
+		// JSON mode is non-interactive: surface as a structured error instead
+		// of prompting. Callers can pass --force to bypass the safety check.
+		if isJSONOutput() {
+			return killResult, true, renderKillError(sessionName, "session was recently active — use --force to kill", nil)
+		}
 		ago := "recently"
 		if killResult != nil && killResult.LastActivity != nil {
 			ago = fmt.Sprintf("%s ago", time.Since(*killResult.LastActivity).Truncate(time.Second))
@@ -236,6 +270,10 @@ func handleKillError(opCtx *ops.OpContext, sessionName string, killResult *ops.K
 			return newResult, true, err
 		}
 		return newResult, false, nil
+	}
+	// Unrecognized op error: still surface as structured JSON when requested.
+	if isJSONOutput() {
+		return killResult, true, renderKillError(sessionName, opErr.Detail, nil)
 	}
 	return killResult, true, killErr
 }

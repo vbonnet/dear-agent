@@ -15,7 +15,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vbonnet/dear-agent/pkg/otelsetup"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
+
+// tracerName is the OTel tracer name for vroom-dispatch. Spans are no-ops
+// unless OTEL_EXPORTER_OTLP_ENDPOINT is set (run `otel-local up`).
+const tracerName = "vroom-dispatch"
 
 //go:embed skills/*.md
 var skills embed.FS
@@ -415,12 +425,22 @@ func main() {
 		return
 	}
 
+	// Tracing is opt-in: a no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set
+	// (run `otel-local up` and `eval "$(otel-local env)"` to collect spans).
+	ctx := context.Background()
+	shutdown := otelsetup.InitTracer(tracerName)
+	defer func() {
+		if err := shutdown(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "vroom-dispatch: otel shutdown: %v\n", err)
+		}
+	}()
+
 	installSkills(home)
 
 	fmt.Printf("==> Supervisor model: %s\n", *model)
 
 	state := loadState(home)
-	ensureSessions(home, state, *model)
+	ensureSessions(ctx, home, state, *model)
 	saveState(home, state)
 
 	if *bootOnly {
@@ -431,12 +451,16 @@ func main() {
 
 	// Persistent Dispatch Advisor mode (default): monitor supervisor health
 	// and auto-restart dead sessions with exponential backoff.
-	runHealthMonitor(home, state, *model)
+	runHealthMonitor(ctx, home, state, *model)
 }
 
 // ensureSessions creates AGM sessions for any supervisor that doesn't have a live one,
 // sends the boot prompt, and starts the /loop.
-func ensureSessions(home string, state *sessionState, model string) {
+func ensureSessions(ctx context.Context, home string, state *sessionState, model string) {
+	ctx, span := otel.Tracer(tracerName).Start(ctx, "vroom.ensure_sessions",
+		trace.WithAttributes(attribute.Int("supervisor.count", len(supervisors))))
+	defer span.End()
+
 	fmt.Println("==> Ensuring supervisor sessions...")
 
 	for _, sup := range supervisors {
@@ -454,7 +478,7 @@ func ensureSessions(home string, state *sessionState, model string) {
 			fmt.Printf("    %s: dead, recreating...\n", sup.Name)
 			delete(state.Sessions, sup.Name)
 		}
-		createAndBootSession(home, sup, state, model)
+		createAndBootSession(ctx, home, sup, state, model)
 	}
 }
 
@@ -517,24 +541,49 @@ func spawnSessionWithRetry(sup supervisor, model string) error {
 	return fmt.Errorf("circuit breaker still refusing after %d attempts: %w", maxSpawnAttempts, lastErr)
 }
 
-func createAndBootSession(home string, sup supervisor, state *sessionState, model string) {
+// createAndBootSession spawns one supervisor session and walks it through the
+// create → boot → loop lifecycle, each step in its own span so a trace shows
+// where spawn time goes (the two fixed sleeps dominate) and which step failed.
+func createAndBootSession(ctx context.Context, home string, sup supervisor, state *sessionState, model string) {
+	ctx, span := otel.Tracer(tracerName).Start(ctx, "vroom.session.spawn",
+		trace.WithAttributes(
+			attribute.String("supervisor.name", sup.Name),
+			attribute.String("supervisor.model", model),
+			attribute.String("supervisor.mode", supervisorMode),
+		))
+	defer span.End()
+
 	fmt.Printf("    %s: creating... ", sup.Name)
 
+	_, createSpan := otel.Tracer(tracerName).Start(ctx, "vroom.session.create")
 	if err := spawnSessionWithRetry(sup, model); err != nil {
+		createSpan.RecordError(err)
+		createSpan.SetStatus(codes.Error, err.Error())
+		createSpan.End()
+		span.SetStatus(codes.Error, "session create failed")
 		fmt.Printf("FAILED: %v\n", err)
 		return
 	}
+	createSpan.End()
 	fmt.Println("created")
 
 	time.Sleep(10 * time.Second)
 
-	sendBootPrompt(home, sup)
+	func() {
+		_, bootSpan := otel.Tracer(tracerName).Start(ctx, "vroom.session.boot")
+		defer bootSpan.End()
+		sendBootPrompt(home, sup)
+		// Wait for boot prompt to be processed before starting loop.
+		fmt.Printf("    %s: waiting 30s for boot prompt processing...\n", sup.Name)
+		time.Sleep(30 * time.Second)
+	}()
 
-	// Wait for boot prompt to be processed before starting loop.
-	fmt.Printf("    %s: waiting 30s for boot prompt processing...\n", sup.Name)
-	time.Sleep(30 * time.Second)
-
-	loopSent := sendLoopCommand(sup)
+	var loopSent bool
+	func() {
+		_, loopSpan := otel.Tracer(tracerName).Start(ctx, "vroom.session.loop")
+		defer loopSpan.End()
+		loopSent = sendLoopCommand(sup)
+	}()
 
 	state.Sessions[sup.Name] = sessionInfo{
 		Name:      sup.Name,
@@ -652,8 +701,8 @@ func sendLoopCommand(sup supervisor) bool {
 // failures for the same supervisor, it calls escalateToHuman, which records the
 // escalation and notifies the operator via desktop notification + MCP push
 // (ce-mcw2).
-func runHealthMonitor(home string, state *sessionState, model string) {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+func runHealthMonitor(parent context.Context, home string, state *sessionState, model string) {
+	ctx, cancel := signal.NotifyContext(parent, os.Interrupt)
 	defer cancel()
 
 	tracker := newRestartTracker()
@@ -726,7 +775,12 @@ func runHealthMonitor(home string, state *sessionState, model string) {
 
 				tracker.recordAttempt(sup.Name)
 				delete(state.Sessions, sup.Name)
-				createAndBootSession(home, sup, state, model)
+				// Each recreation is its own trace root: a long-lived monitor
+				// must not accumulate children under one ever-open span.
+				recreateCtx, recreateSpan := otel.Tracer(tracerName).Start(ctx, "vroom.session.recreate",
+					trace.WithAttributes(attribute.String("supervisor.name", sup.Name)))
+				createAndBootSession(recreateCtx, home, sup, state, model)
+				recreateSpan.End()
 				saveState(home, state)
 			}
 		}

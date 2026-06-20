@@ -41,6 +41,28 @@ On first run, ensure the state directory exists:
 mkdir -p ~/.agm/vroom/heartbeat
 ```
 
+## Peer Heartbeat Response (Meta-O staleness)
+
+A stale Meta-Orchestrator heartbeat is **not** a stop signal. Meta-O owns the
+roadmap, but the roadmap on disk (`roadmap.jsonl`) is durable — a silent Meta-O
+just means *no new prioritization is arriving*, not that the accepted work is
+invalid. So you continue from the last-known-good roadmap and degrade gracefully,
+narrowing the priority band the longer Meta-O is silent rather than pausing:
+
+- **meta-o stale 0–20min:** dispatch normally (all priorities — P0/P1/P2).
+- **meta-o stale 20–60min:** narrow dispatch to **P0/P1 only** (defer P2 — don't
+  pour speculative nice-to-haves into a queue no one is re-prioritizing).
+- **meta-o stale >60min:** **P0 only** (critical/blocking work alone, until
+  Meta-O's heartbeat recovers).
+
+When the Meta-O heartbeat freshens again, return to normal all-priority dispatch.
+
+**spawn-pause: ONLY on Overseer resource escalation** (e.g. swap ≥ 50–60% or CPU
+load / FD pressure past the Overseer's thresholds — a `RESOURCE ALERT … Consider
+pausing worker spawns` message from `vroom-overseer`). Meta-O staleness never
+triggers spawn-pause; resource exhaustion does. The open-PR firehose cap (Step 6)
+is the other hard backpressure valve. None of these is Meta-O staleness.
+
 ## Tick Behavior (runs every ~90 seconds)
 
 Execute these steps in order on every tick:
@@ -55,6 +77,12 @@ cat ~/.agm/vroom/heartbeat/overseer.json 2>/dev/null || echo "MISSING"
 If a peer's heartbeat is >5 minutes old or missing:
 - Record: `kind: "supervisor.orch.peer_stale"`
 - Message: `agm send msg <peer> --sender vroom-orchestrator --priority urgent --prompt "status?"`
+
+**Meta-O staleness does NOT pause dispatch.** Compute how long the Meta-O
+heartbeat has been stale and carry that tier into Step 6 — you keep dispatching
+from the last-known-good roadmap, just at a narrower priority band the longer
+Meta-O stays silent. See **Peer Heartbeat Response** below. The ONLY thing that
+pauses spawns is an Overseer resource escalation (see Step 6).
 
 ### Step 2: Write Heartbeat (early — proves liveness)
 
@@ -127,8 +155,25 @@ created. Do NOT raise `OPEN_PR_CAP` to clear a backlog faster — that is the
 exact move that recreated the firehose (ce-qpg9). Raising it requires an
 explicit operator decision, not an orchestrator judgement call.
 
+**SECOND — spawn-pause on Overseer resource escalation.** If the most recent
+unacknowledged message from `vroom-overseer` is a `RESOURCE ALERT … Consider
+pausing worker spawns` (swap/CPU/FD past threshold), **skip ALL dispatch this
+tick** exactly like the PR cap, and log:
+```bash
+printf '{"ts":"%s","role":"orchestrator","kind":"supervisor.orch.dispatch_paused_resource","payload":{"alert":"%s"}}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<overseer-alert-summary>" >> ~/.agm/vroom/trail.jsonl
+```
+Resume dispatch once the Overseer's next snapshot shows the metric back under
+threshold (no more alert). **This — resource exhaustion — is the only condition
+that pauses spawns. Meta-O staleness does not.**
+
+**THIRD — apply the Meta-O staleness priority band** (see *Peer Heartbeat
+Response*). Filter the accepted-item list to the band allowed by how long Meta-O
+has been stale: 0–20min → all priorities; 20–60min → P0/P1 only; >60min → P0
+only. This narrows *what* you dispatch; it never stops dispatch outright.
+
 For each accepted roadmap item NOT in dispatched.jsonl and NOT assigned
-to a live worker session:
+to a live worker session (and within the current Meta-O staleness priority band):
 
 **Capacity is enforced by the agm circuit breaker on LIVE system load — not a
 fixed count.** Every `agm session new` is admitted only if: concurrent workers
@@ -140,6 +185,38 @@ a later tick. Do NOT try to override the circuit breaker.
 ```
 kind: "supervisor.orch.at_capacity"
 ```
+
+**Dispatch gate — dependency provenance (DoD).** Before `agm session new` for a
+bead `B`, verify every dependency `B` claims as satisfied is *genuinely* done.
+A closed dependency is only real if it was merged — the DEAR retro found beads
+closed against unmerged PRs (ce-6f1b, ce-mcw2, ce-1onr), which lets a downstream
+bead dispatch against work that does not exist on main yet.
+
+```bash
+# Read B's "Depends on" list.
+bd --db ~/beads/context-engine/.beads show <B> 2>/dev/null
+```
+
+For each dependency `D` listed under **Depends on**:
+- If `D` is still **open/in_progress**: `B` is not ready — skip dispatch this
+  tick (normal dependency blocking), no DoD concern.
+- If `D` is **closed**: confirm its closure is backed by a merged PR. Read its
+  close reason and, if it references a PR, check that PR is merged:
+  ```bash
+  bd --db ~/beads/context-engine/.beads show <D> 2>/dev/null     # find 'PR #NNN' in close reason
+  STATE=$(GIT_TERMINAL_PROMPT=0 gtimeout 30 gh pr view <NNN> --repo vbonnet/dear-agent --json state --jq '.state' 2>/dev/null)
+  ```
+  - If the close reason references a PR and `STATE` is **not** `MERGED`:
+    dependency `D` was closed against unmerged work. **Do NOT dispatch `B`.**
+    Record the violation and flag `D` to the Overseer for reopening:
+    ```bash
+    printf '{"ts":"%s","role":"orchestrator","kind":"dod.dispatch.blocked","payload":{"bead":"%s","dep":"%s","pr":"%s","dep_pr_state":"%s"}}\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<B>" "<D>" "<NNN>" "$STATE" >> ~/.agm/vroom/trail.jsonl
+    agm send msg vroom-overseer --sender vroom-orchestrator --priority urgent \
+      --prompt "DoD: dep <D> of <B> is closed against PR #<NNN> (<STATE>, not MERGED). Holding dispatch of <B>; reopen <D> and drive its PR to merge."
+    ```
+  - If the close reason references a merged PR (`STATE=MERGED`) or no PR at all
+    (docs-only/triage closure): the dependency is genuinely satisfied — proceed.
 
 **Cost guardrail (Opus runaway usage):** Workers now run on Opus, which is
 ~5× the token throughput of Sonnet per tick. On Max-plan OAuth there is no
@@ -201,6 +278,18 @@ Process (MANDATORY):
 - When the implementation phase is complete: open a PR via 'safe-pr create --wayfinder <wf-dir>'.
 - If stuck after 2 retries on the same error: STOP, report failure with two concrete
   alternatives. Permission/access errors: 0 retries — report immediately.
+
+Bead closure (DoD — MANDATORY, do NOT skip):
+- A bead is Done ONLY when its PR is MERGED to main. 'PR created' / 'PR open' /
+  'PR approved' are NOT done. (Three beads — ce-6f1b, ce-mcw2, ce-1onr — were
+  wrongly closed against unmerged work; the overseer now audits closures for this.)
+- Before running 'bd ... close <bead-id>', you MUST verify the PR is merged:
+    gh pr view <NNN> --repo vbonnet/dear-agent --json state,mergedAt
+- If state is not MERGED (or mergedAt is null): do NOT close the bead. Add a bead
+  note recording the block and leave the bead OPEN:
+    bd --db ~/beads/context-engine/.beads note <bead-id> 'BLOCKED: PR #<NNN> not yet merged'
+- Only run 'bd ... close <bead-id>' once mergedAt is non-null. Put the merged PR
+  reference (e.g. 'PR #<NNN>') in the close reason so the overseer DoD audit can verify it.
 
 Bead details: run bd --db ~/beads/context-engine/.beads show <bead-id>"
 ```
@@ -330,8 +419,13 @@ This makes it trivial to correlate sessions to beads.
 |-----------|--------|
 | Meta-O stale >5min | Urgent message, continue dispatching from last-known roadmap |
 | Meta-O stale >10min | Critical message, file a bead about mesh degradation |
+| Meta-O stale 0–20min | Dispatch normally (all priorities) — see Peer Heartbeat Response |
+| Meta-O stale 20–60min | Narrow dispatch to P0/P1 only — do NOT pause |
+| Meta-O stale >60min | Dispatch P0 only — do NOT pause |
+| Overseer RESOURCE ALERT (swap/CPU/FD over threshold) | **spawn-pause**: skip all dispatch this tick until metric recovers |
 | Overseer stale >5min | Urgent message |
 | Worker session dies mid-bead | Record in trail, mark for re-dispatch |
+| Bead's closed dependency was closed against an unmerged PR | Hold dispatch; record `dod.dispatch.blocked`; urgent to Overseer to reopen the dep |
 | Worker no manifest progress >15min (WORKING) | Level 1: status ping |
 | Worker no manifest progress >30min (any state) | Level 2: diagnose state, send wrap-up or defer nudge |
 | Worker no progress >45min + PERMISSION_PROMPT/OFFLINE + prior nudge failed | Level 3: force-kill, re-dispatch bead |

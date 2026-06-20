@@ -41,13 +41,40 @@ stderr), so it satisfies the Claude Code `apiKeyHelper` contract.
 
 ## Wiring options
 
-- **`apiKeyHelper` (preferred):** point Claude Code's `apiKeyHelper` setting at
+- **`apiKeyHelper` (on-demand):** point Claude Code's `apiKeyHelper` setting at
   this binary; the CLI then drives the cadence (every
-  `CLAUDE_CODE_API_KEY_HELPER_TTL_MS`, or on HTTP 401).
-- **launchd / cron:** run `token-refresher -force` (or plain) on a 15-minute
-  interval.
+  `CLAUDE_CODE_API_KEY_HELPER_TTL_MS`, or on HTTP 401). This covers *active*
+  sessions.
+- **launchd (idle backstop):** schedule `token-refresher -force` so the
+  credentials file stays fresh — and the single-use refresh-token family stays
+  alive — even when no session is running. This covers *idle* time.
 - **In-process:** callers already using `auth.ResolveOAuthToken()` get the same
   refresh for free.
+
+Both the `apiKeyHelper` and the launchd job run the same binary and share its
+cross-process credentials lock, so they never race or double-spend the refresh
+token (ce-rnpt / ce-f3e3).
+
+### Wire it into the mesh (ce-cs3v)
+
+```
+make install-token-refresher-launchagent
+```
+
+Stages [`deploy/launchd/com.dear-agent.token-refresher.plist`](../../deploy/launchd/com.dear-agent.token-refresher.plist)
+(a 30-minute idle backstop) into `~/Library/LaunchAgents` and prints the two
+ask-gated host steps to run yourself:
+
+```
+# 1. schedule the idle backstop
+launchctl load ~/Library/LaunchAgents/com.dear-agent.token-refresher.plist
+
+# 2. point Claude Code's apiKeyHelper at the refresher (on-demand refresh)
+configure-claude-settings set apiKeyHelper '"$HOME/go/bin/token-refresher"'
+```
+
+The scheduled job routes stdout (the access token) to `/dev/null` and keeps
+structured logs at `~/.local/state/dear-agent/token-refresher.err.log`.
 
 ## Build
 
