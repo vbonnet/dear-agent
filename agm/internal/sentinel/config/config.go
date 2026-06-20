@@ -95,13 +95,18 @@ type RecoveryConfig struct {
 	// ExemptSessions is a list of session name prefixes that should never be
 	// targeted for stuck detection, recovery, or escalation. Sessions whose
 	// name starts with any prefix (case-sensitive) are skipped entirely.
-	// Default: ["human", "orchestrator", "orchestrator-v2", "meta-orchestrator"]
+	// Default: ["human", "orchestrator", "orchestrator-v2"]
+	//
+	// NOTE (ce-bew7): "meta-orchestrator" was removed from this list. The
+	// meta-orchestrator exemption was the single biggest contributor to the
+	// overnight cascade failure — the most critical supervisor had the least
+	// monitoring. All supervisors are now monitored equally.
 	ExemptSessions []string `yaml:"exempt_sessions"`
 }
 
 // DefaultExemptSessions returns the default list of exempt session prefixes.
 // These sessions have long inference periods and should never be interrupted.
-var DefaultExemptSessions = []string{"human", "orchestrator", "orchestrator-v2", "meta-orchestrator"}
+var DefaultExemptSessions = []string{"human", "orchestrator", "orchestrator-v2"}
 
 // IsSessionExempt checks if a session name matches any exempt prefix.
 func (c *RecoveryConfig) IsSessionExempt(sessionName string) bool {

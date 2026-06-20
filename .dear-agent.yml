@@ -59,6 +59,15 @@ forbidden-paths:
     - docs/retros/**
     - docs/design/**
     - wf/**
+    # Wayfinder SDLC run artifacts (phase outputs). These are temporal: a
+    # moment-in-time record of a Wayfinder run, NOT maintained with the code.
+    # They route to engram-research/wf/<project>/. The Wayfinder TOOL SOURCE
+    # (wayfinder/, *.go, validator testdata, docs/adr/ADR-031) is living
+    # code/docs and is deliberately NOT matched here. See the 2026-06-19 DEAR
+    # retro (engram-research) for why these globs exist.
+    - "**/.wayfinder/**"
+    - "**/WAYFINDER-STATUS.md"
+    - "**/WAYFINDER-HISTORY.md"
 
 # Framework-level defaults applied to every task in this repo. These
 # travel with the session, not the prompt, so a worker (and any

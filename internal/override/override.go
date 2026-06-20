@@ -18,9 +18,10 @@
 //     judgment. The agent invoking --force is the party that wants the bypass;
 //     it cannot also be the judge of whether the bypass is warranted.
 //
-// This generalizes the one-off pattern in cmd/safe-merge
-// (--skip-bot-review / --skip-bot-review-reason + JSONL audit) so every curated
-// tool in the repo can adopt it with a single call.
+// This is the standard pattern for curated override flags — any tool in this
+// repo that needs a legitimate bypass must route through this package, not
+// add a bare flag. Bypass flags without override.Require are prohibited
+// (see ADR-031 and .claude/hooks/pretool-bypass-guard).
 //
 // Typical call site:
 //

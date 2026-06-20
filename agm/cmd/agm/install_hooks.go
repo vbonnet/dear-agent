@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -25,7 +26,7 @@ Hooks installed:
   • posttool-agm-state-notify         - Set state to THINKING after tool use
   • session-start/agm-state-ready     - Set state to READY on session start
   • session-start/agm-plan-continuity - Link execution sessions to planning parents
-  • agm-pretool-test-session-guard        - Block test-* sessions without --test flag
+  • pretool-test-session-guard            - Block test-* sessions without --test flag
   • pretool-agm-mode-tracker          - Track permission mode changes for persistence
   • stop-agm-resource-cleanup         - Reap stale agent worktrees on session end
   • sessionend-closeout               - Flag leftover worktrees/branches/uncommitted work on SessionEnd
@@ -82,7 +83,7 @@ func runInstallHooks(cmd *cobra.Command, args []string) error {
 		"hooks/posttool-agm-state-notify":         filepath.Join(hooksDir, "posttool-agm-state-notify"),
 		"hooks/session-start-agm-state-ready":     filepath.Join(sessionStartDir, "agm-state-ready"),
 		"hooks/session-start-agm-plan-continuity": filepath.Join(sessionStartDir, "agm-plan-continuity"),
-		"hooks/agm-pretool-test-session-guard":    filepath.Join(hooksDir, "agm-pretool-test-session-guard"),
+		"hooks/pretool-test-session-guard":        filepath.Join(hooksDir, "pretool-test-session-guard"),
 		"hooks/pretool-agm-mode-tracker":          filepath.Join(hooksDir, "pretool-agm-mode-tracker"),
 		"hooks/stop-agm-resource-cleanup":         filepath.Join(hooksDir, "stop-agm-resource-cleanup"),
 		"hooks/sessionend-closeout":               filepath.Join(hooksDir, "sessionend-closeout"),
@@ -116,6 +117,16 @@ func runInstallHooks(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\nSuccessfully installed %d hook files to %s\n", installed, hooksDir)
 
+	// Remove stale hook files renamed in previous versions.
+	staleFiles := []string{
+		filepath.Join(hooksDir, "agm-pretool-test-session-guard"),
+	}
+	for _, stale := range staleFiles {
+		if err := os.Remove(stale); err == nil {
+			fmt.Printf("✓ Removed stale hook: %s\n", stale)
+		}
+	}
+
 	// Register hooks in settings.json
 	registrations := []hookRegistration{
 		{
@@ -130,7 +141,7 @@ func runInstallHooks(cmd *cobra.Command, args []string) error {
 		},
 		{
 			Event:   "PreToolUse",
-			Command: "~/.claude/hooks/agm-pretool-test-session-guard",
+			Command: "~/.claude/hooks/pretool-test-session-guard",
 			Timeout: 5,
 		},
 		{
@@ -164,6 +175,14 @@ func runInstallHooks(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\n✓ Registered %d new hooks in ~/.claude/settings.json\n", registered)
 	} else {
 		fmt.Println("\nAll hooks already registered in ~/.claude/settings.json")
+	}
+
+	// Remove settings.json entries for hooks no longer present on disk.
+	cleaned, err := removeStaleHookRegistrations(homeDir)
+	if err != nil {
+		fmt.Printf("⚠ Could not clean stale settings registrations: %v\n", err)
+	} else if cleaned > 0 {
+		fmt.Printf("✓ Removed %d stale hook registration(s) from ~/.claude/settings.json\n", cleaned)
 	}
 
 	fmt.Println("\nHooks will be triggered automatically by Claude Code.")
@@ -276,4 +295,102 @@ func addHookRegistration(hooksMap map[string]interface{}, reg hookRegistration) 
 	hooksMap[reg.Event] = eventGroups
 
 	return true
+}
+
+// removeStaleHookRegistrations removes settings.json entries for hook commands
+// that no longer exist on disk. Returns the number of removed registrations.
+func removeStaleHookRegistrations(homeDir string) (int, error) {
+	settingsPath := filepath.Join(homeDir, ".claude", "settings.json")
+	data, err := os.ReadFile(settingsPath)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return 0, err
+	}
+
+	hooksMap, ok := settings["hooks"].(map[string]any)
+	if !ok {
+		return 0, nil
+	}
+
+	removed := pruneStaleFromHooksMap(hooksMap, homeDir)
+	if removed == 0 {
+		return 0, nil
+	}
+
+	settings["hooks"] = hooksMap
+	output, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return 0, err
+	}
+	output = append(output, '\n')
+	return removed, os.WriteFile(settingsPath, output, 0o600)
+}
+
+// pruneStaleFromHooksMap removes entries from the hooks map whose command paths
+// no longer exist on disk. Returns the count of removed entries.
+func pruneStaleFromHooksMap(hooksMap map[string]any, homeDir string) int {
+	removed := 0
+	for event, eventGroups := range hooksMap {
+		groups, ok := eventGroups.([]any)
+		if !ok {
+			continue
+		}
+		newGroups := make([]any, 0, len(groups))
+		for _, group := range groups {
+			groupMap, ok := group.(map[string]any)
+			if !ok {
+				newGroups = append(newGroups, group)
+				continue
+			}
+			kept, n := filterStaleHooks(groupMap["hooks"], homeDir)
+			removed += n
+			if len(kept) > 0 {
+				groupMap["hooks"] = kept
+				newGroups = append(newGroups, groupMap)
+			}
+		}
+		if len(newGroups) > 0 {
+			hooksMap[event] = newGroups
+		} else {
+			delete(hooksMap, event)
+		}
+	}
+	return removed
+}
+
+// filterStaleHooks returns the hooks from rawList that still exist on disk,
+// and the count of entries that were dropped.
+func filterStaleHooks(rawList any, homeDir string) ([]any, int) {
+	hooksList, ok := rawList.([]any)
+	if !ok {
+		return nil, 0
+	}
+	kept := make([]any, 0, len(hooksList))
+	dropped := 0
+	for _, h := range hooksList {
+		hookMap, ok := h.(map[string]any)
+		if !ok {
+			kept = append(kept, h)
+			continue
+		}
+		cmdStr, ok := hookMap["command"].(string)
+		if !ok {
+			kept = append(kept, h)
+			continue
+		}
+		expandedPath := strings.ReplaceAll(cmdStr, "~", homeDir)
+		if _, statErr := os.Stat(expandedPath); os.IsNotExist(statErr) {
+			dropped++
+		} else {
+			kept = append(kept, h)
+		}
+	}
+	return kept, dropped
 }

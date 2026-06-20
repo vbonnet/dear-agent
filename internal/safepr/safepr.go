@@ -18,8 +18,6 @@
 //     wayfinder project (--wayfinder flag or WAYFINDER_PROJECT_DIR env) whose
 //     WAYFINDER-STATUS.md is status: in_progress, and the session id is
 //     stamped into the PR body (create) or close comment (close).
-//   - The audited emergency hatch (--emergency --reason "...") replaces the
-//     session trace with an explicit EMERGENCY marker — never silence.
 //   - Interactive and unstampable forms (--web, --fill, --body-file, missing
 //     --title) are refused so the run is deterministic and headless-safe.
 package safepr
@@ -65,8 +63,8 @@ func ResolveSessionDir(flagDir string) (string, error) {
 	}
 	return "", fmt.Errorf("no wayfinder session given: pass --wayfinder <project-dir> or set " +
 		"WAYFINDER_PROJECT_DIR to the directory containing WAYFINDER-STATUS.md. Every PR must " +
-		"carry a wayfinder trace; if this is a genuine emergency with no session, use " +
-		"--emergency --reason \"<why>\" (audited)")
+		"carry a wayfinder trace. If no approved path exists, escalate via: " +
+		"agm escalate --action \"create PR\" --reason \"<why no session exists>\"")
 }
 
 // LoadSession reads <dir>/WAYFINDER-STATUS.md and returns the session it
@@ -120,11 +118,9 @@ func frontmatter(content string) (string, error) {
 
 // Request is one validated safe-pr invocation.
 type Request struct {
-	Verb      string   // "create" or "close"
-	Session   *Session // nil only when Emergency
-	Emergency bool
-	Reason    string   // required when Emergency
-	GhArgs    []string // caller's pass-through gh arguments
+	Verb    string   // "create" or "close"
+	Session *Session // always required; set before calling Validate
+	GhArgs  []string // caller's pass-through gh arguments
 }
 
 // deniedCloseFlags are gh pr close flags that defeat the wrapper's purpose.
@@ -162,13 +158,8 @@ func (r *Request) Validate() error {
 			"(view, list, checks, diff) are read-only and need no wrapper; `merge` keeps its existing "+
 			"review-gated path", r.Verb)
 	}
-	if r.Emergency {
-		if strings.TrimSpace(r.Reason) == "" {
-			return fmt.Errorf("--emergency requires --reason \"<why no wayfinder session exists>\" — " +
-				"the reason is stamped on the PR and audit-logged so emergencies stay reviewable")
-		}
-	} else if r.Session == nil || r.Session.ID == "" {
-		return fmt.Errorf("no wayfinder session resolved and --emergency not set; this is a wrapper " +
+	if r.Session == nil || r.Session.ID == "" {
+		return fmt.Errorf("no wayfinder session resolved; this is a wrapper " +
 			"bug — Validate must run after session resolution")
 	}
 	for _, a := range r.GhArgs {
@@ -205,9 +196,6 @@ func (r *Request) Validate() error {
 
 // Trailer renders the attribution block stamped onto the PR.
 func (r *Request) Trailer() string {
-	if r.Emergency {
-		return fmt.Sprintf("---\nEMERGENCY (no wayfinder session): %s", strings.TrimSpace(r.Reason))
-	}
 	return fmt.Sprintf("---\nWayfinder-Session: %s\nWayfinder-Project: %s",
 		r.Session.ID, filepath.Base(r.Session.ProjectPath))
 }
@@ -260,16 +248,14 @@ func hasFlag(args []string, long, short string) bool {
 }
 
 // AuditRecord is one JSONL line in the safe-pr audit log. Every invocation —
-// success, refusal, or emergency — leaves a line, the same durable-trail
-// contract src-recovery established for ~/src writes.
+// success or refusal — leaves a line, the same durable-trail contract
+// src-recovery established for ~/src writes.
 type AuditRecord struct {
 	Time      string   `json:"time"`
 	Verb      string   `json:"verb"`
 	Dir       string   `json:"dir"`
 	Args      []string `json:"args"`
 	SessionID string   `json:"session_id,omitempty"`
-	Emergency bool     `json:"emergency,omitempty"`
-	Reason    string   `json:"reason,omitempty"`
 	PRURL     string   `json:"pr_url,omitempty"`
 	ExitCode  int      `json:"exit_code"`
 	Error     string   `json:"error,omitempty"`

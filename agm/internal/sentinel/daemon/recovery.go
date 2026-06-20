@@ -338,8 +338,8 @@ func SendRejectionMessage(sessionName string, message string, pattern *enforceme
 		return fmt.Errorf("failed to send rejection message: %w", err)
 	}
 
-	// Send Enter to submit message
-	enterCmd := exec.Command("tmux", "send-keys", "-t", sessionName, "Enter")
+	// Send Enter to submit message (hex 0x0d avoids paste coalescing)
+	enterCmd := exec.Command("tmux", "send-keys", "-t", sessionName, "-H", "0d")
 	return enterCmd.Run()
 }
 

@@ -164,6 +164,238 @@ func TestCommitPhaseCompletion(t *testing.T) {
 	}
 }
 
+// TestCommitSessionInit_NonGitRepo verifies CommitSessionInit is a no-op
+// (returns nil, no error) outside a git repository so non-git workflows work.
+func TestCommitSessionInit_NonGitRepo(t *testing.T) {
+	g := New(t.TempDir())
+	if err := g.CommitSessionInit("my-project"); err != nil {
+		t.Errorf("CommitSessionInit() on non-git repo should return nil, got: %v", err)
+	}
+}
+
+// TestCommitSessionInit_CommitsStatusFile verifies that CommitSessionInit
+// creates a "wayfinder: init session" commit that includes WAYFINDER-STATUS.md,
+// leaving the worktree clean so the first start-phase does not refuse
+// with "uncommitted files detected" (ce-11fi bootstrap fix).
+func TestCommitSessionInit_CommitsStatusFile(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	g := New(repoDir)
+
+	// Seed the repo with an initial commit (git requires a HEAD before committing).
+	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Repo\n"), 0644)
+	exec.Command("git", "-C", repoDir, "add", "README.md").Run()
+	exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run()
+
+	// Write the STATUS file (mirrors what `wayfinder session start` does).
+	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("schema_version: \"2.0\"\n"), 0644)
+
+	if err := g.CommitSessionInit("my-project"); err != nil {
+		t.Fatalf("CommitSessionInit() error = %v", err)
+	}
+
+	// Commit subject must contain the project name.
+	out, err := exec.Command("git", "-C", repoDir, "log", "--format=%s", "-n", "1").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "wayfinder: init session my-project" {
+		t.Errorf("commit subject = %q, want %q", got, "wayfinder: init session my-project")
+	}
+
+	// Worktree must be clean after CommitSessionInit so start-phase CHARTER succeeds.
+	statusOut, err := exec.Command("git", "-C", repoDir, "status", "--porcelain").Output()
+	if err != nil {
+		t.Fatalf("git status failed: %v", err)
+	}
+	if len(strings.TrimSpace(string(statusOut))) != 0 {
+		t.Errorf("worktree should be clean after CommitSessionInit, got:\n%s", string(statusOut))
+	}
+}
+
+// TestCommitSessionInit_NothingToCommit verifies CommitSessionInit is a no-op
+// when WAYFINDER-STATUS.md is already committed.
+func TestCommitSessionInit_NothingToCommit(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	g := New(repoDir)
+
+	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("schema_version: \"2.0\"\n"), 0644)
+	exec.Command("git", "-C", repoDir, "add", ".").Run()
+	exec.Command("git", "-C", repoDir, "commit", "-m", "Add status").Run()
+
+	if err := g.CommitSessionInit("my-project"); err != nil {
+		t.Errorf("CommitSessionInit() with nothing to commit should not error, got: %v", err)
+	}
+}
+
+// TestCommitSessionInit_MissingStatusFile verifies CommitSessionInit is a no-op
+// when WAYFINDER-STATUS.md does not yet exist.
+func TestCommitSessionInit_MissingStatusFile(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	g := New(repoDir)
+
+	// Bootstrap git (git requires a HEAD for non-initial commits, but this test
+	// never reaches the commit path so no HEAD is needed).
+	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Repo\n"), 0644)
+	exec.Command("git", "-C", repoDir, "add", "README.md").Run()
+	exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run()
+
+	// No STATUS file written — CommitSessionInit should be a silent no-op.
+	if err := g.CommitSessionInit("my-project"); err != nil {
+		t.Errorf("CommitSessionInit() with no STATUS file should not error, got: %v", err)
+	}
+}
+
+// TestCommitPhaseStart verifies that CommitPhaseStart creates a commit
+// containing WAYFINDER-STATUS.md and WAYFINDER-HISTORY.md with the correct
+// "wayfinder: start <PHASE>" subject line.
+func TestCommitPhaseStart(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	g := New(repoDir)
+
+	// Create initial commit (git requires at least one commit to commit against)
+	readmePath := filepath.Join(repoDir, "README.md")
+	if err := os.WriteFile(readmePath, []byte("# Test Project\n"), 0644); err != nil {
+		t.Fatalf("failed to write README: %v", err)
+	}
+	exec.Command("git", "-C", repoDir, "add", "README.md").Run()
+	if err := exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run(); err != nil {
+		t.Fatalf("initial commit failed: %v", err)
+	}
+
+	// Write marker files (mirrors what runStartPhase does before calling CommitPhaseStart)
+	if err := os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("# Status\n"), 0644); err != nil {
+		t.Fatalf("failed to write STATUS: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.md"), []byte("{}\n"), 0644); err != nil {
+		t.Fatalf("failed to write HISTORY: %v", err)
+	}
+
+	if err := g.CommitPhaseStart("CHARTER"); err != nil {
+		t.Fatalf("CommitPhaseStart() error = %v", err)
+	}
+
+	// Verify commit subject
+	out, err := exec.Command("git", "-C", repoDir, "log", "--format=%s", "-n", "1").Output()
+	if err != nil {
+		t.Fatalf("git log failed: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "wayfinder: start CHARTER" {
+		t.Errorf("commit subject = %q, want %q", got, "wayfinder: start CHARTER")
+	}
+
+	// Verify both marker files are tracked (not untracked)
+	statusOut, err := exec.Command("git", "-C", repoDir, "status", "--porcelain").Output()
+	if err != nil {
+		t.Fatalf("git status failed: %v", err)
+	}
+	if len(strings.TrimSpace(string(statusOut))) != 0 {
+		t.Errorf("worktree should be clean after CommitPhaseStart, got:\n%s", string(statusOut))
+	}
+}
+
+// TestCommitPhaseStart_NonGitRepo verifies CommitPhaseStart returns an error
+// when the directory is not inside a git repository.
+func TestCommitPhaseStart_NonGitRepo(t *testing.T) {
+	g := New(t.TempDir())
+	if err := g.CommitPhaseStart("CHARTER"); err == nil {
+		t.Error("CommitPhaseStart() on non-git repo should return error")
+	}
+}
+
+// TestCommitPhaseStart_NothingToCommit verifies CommitPhaseStart is a no-op
+// when both marker files are already committed and unchanged.
+func TestCommitPhaseStart_NothingToCommit(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	g := New(repoDir)
+
+	// Create initial commit with the marker files already committed.
+	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("# Status\n"), 0644)
+	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.md"), []byte("{}\n"), 0644)
+	exec.Command("git", "-C", repoDir, "add", ".").Run()
+	exec.Command("git", "-C", repoDir, "commit", "-m", "Add wayfinder files").Run()
+
+	// CommitPhaseStart when nothing has changed should succeed silently.
+	if err := g.CommitPhaseStart("PROBLEM"); err != nil {
+		t.Errorf("CommitPhaseStart() with nothing to commit should not error, got: %v", err)
+	}
+}
+
+// TestCommitPhaseStart_ScopedToMarkerFiles verifies CommitPhaseStart only
+// commits WAYFINDER-STATUS.md and WAYFINDER-HISTORY.md, leaving any other
+// staged files untouched in the index (ce-fvkz regression guard).
+func TestCommitPhaseStart_ScopedToMarkerFiles(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	g := New(repoDir)
+
+	// Bootstrap the repo with an initial commit.
+	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Repo\n"), 0644)
+	exec.Command("git", "-C", repoDir, "add", "README.md").Run()
+	exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run()
+
+	// Stage a user file that should NOT be swept up by CommitPhaseStart.
+	userFile := filepath.Join(repoDir, "my-deliverable.md")
+	os.WriteFile(userFile, []byte("# Work in progress\n"), 0644)
+	exec.Command("git", "-C", repoDir, "add", "my-deliverable.md").Run()
+
+	// Write and let CommitPhaseStart commit only the marker files.
+	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("# Status\n"), 0644)
+	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.md"), []byte("{}\n"), 0644)
+
+	if err := g.CommitPhaseStart("DESIGN"); err != nil {
+		t.Fatalf("CommitPhaseStart() error = %v", err)
+	}
+
+	// The user's staged file should still be in the index (not committed).
+	statusOut, err := exec.Command("git", "-C", repoDir, "status", "--porcelain").Output()
+	if err != nil {
+		t.Fatalf("git status failed: %v", err)
+	}
+	if !strings.Contains(string(statusOut), "my-deliverable.md") {
+		t.Errorf("user's staged file should still be staged; got:\n%s", string(statusOut))
+	}
+
+	// Verify only the marker files appear in the last commit.
+	showOut, err := exec.Command("git", "-C", repoDir, "show", "--stat", "--format=", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git show failed: %v", err)
+	}
+	if strings.Contains(string(showOut), "my-deliverable.md") {
+		t.Errorf("user file should not have been included in the commit:\n%s", string(showOut))
+	}
+}
+
+// TestCommitPhaseStart_LeavesWorktreeCleanForNextTransition is the regression
+// test for the ce-fvkz recurrence (2026-06-13): after start-phase writes marker
+// files and calls CommitPhaseStart, GetUncommittedFilesInProjectDir must return
+// an empty list so that the *next* start-phase does not refuse.
+func TestCommitPhaseStart_LeavesWorktreeCleanForNextTransition(t *testing.T) {
+	repoDir := setupGitRepo(t)
+	g := New(repoDir)
+
+	// Bootstrap: initial commit so git has a HEAD.
+	os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Repo\n"), 0644)
+	exec.Command("git", "-C", repoDir, "add", "README.md").Run()
+	exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run()
+
+	// Simulate what start-phase does: write marker files then auto-commit.
+	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-STATUS.md"), []byte("status: in_progress\n"), 0644)
+	os.WriteFile(filepath.Join(repoDir, "WAYFINDER-HISTORY.md"), []byte("[]\n"), 0644)
+
+	if err := g.CommitPhaseStart("CHARTER"); err != nil {
+		t.Fatalf("CommitPhaseStart() error = %v", err)
+	}
+
+	// The next start-phase uses GetUncommittedFilesInProjectDir to decide
+	// whether to refuse. It must see an empty list after the auto-commit.
+	uncommitted, err := g.GetUncommittedFilesInProjectDir()
+	if err != nil {
+		t.Fatalf("GetUncommittedFilesInProjectDir() error = %v", err)
+	}
+	if len(uncommitted) != 0 {
+		t.Errorf("worktree has uncommitted files after CommitPhaseStart — next start-phase would refuse: %v", uncommitted)
+	}
+}
+
 func TestCommitPhaseCompletion_NonGitRepo(t *testing.T) {
 	// Non-git directory
 	tmpDir := t.TempDir()

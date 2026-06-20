@@ -3,6 +3,9 @@
 package supervisor
 
 import (
+	"bytes"
+	"context"
+	"os/exec"
 	"syscall"
 	"unsafe"
 
@@ -79,4 +82,66 @@ func sysSwapUsedFraction() float64 {
 		return 1
 	}
 	return float64(used) / float64(total)
+}
+
+// sysFDUsedFraction returns the fraction of the system-wide open-file
+// descriptor limit currently in use on macOS.
+//
+// Data sources:
+//   - kern.num_files  — current number of open file descriptors system-wide
+//   - kern.maxfiles   — system-wide FD limit
+func sysFDUsedFraction() float64 {
+	numFiles, err := syscall.SysctlUint32("kern.num_files")
+	if err != nil {
+		return 0
+	}
+	maxFiles, err := syscall.SysctlUint32("kern.maxfiles")
+	if err != nil || maxFiles == 0 {
+		return 0
+	}
+	if numFiles >= maxFiles {
+		return 1
+	}
+	return float64(numFiles) / float64(maxFiles)
+}
+
+// sysVnodeUsedFraction returns the fraction of the kernel vnode table
+// currently in use on macOS. Vnode exhaustion causes filesystem operations
+// to fail with ENFILE even when per-process FD limits are not hit.
+//
+// Data sources:
+//   - kern.num_vnodes  — current vnode count
+//   - kern.maxvnodes   — vnode table size limit
+func sysVnodeUsedFraction() float64 {
+	numVnodes, err := syscall.SysctlUint32("kern.num_vnodes")
+	if err != nil {
+		return 0
+	}
+	maxVnodes, err := syscall.SysctlUint32("kern.maxvnodes")
+	if err != nil || maxVnodes == 0 {
+		return 0
+	}
+	if numVnodes >= maxVnodes {
+		return 1
+	}
+	return float64(numVnodes) / float64(maxVnodes)
+}
+
+// sysGoplsCount returns the number of currently running gopls processes by
+// invoking pgrep(1). pgrep -x matches the process name exactly (not
+// substrings of longer names). Exit code 1 from pgrep means "no matches" —
+// not an error we propagate.
+func sysGoplsCount(ctx context.Context) int {
+	out, err := exec.CommandContext(ctx, "pgrep", "-x", "gopls").Output()
+	if err != nil {
+		// exit code 1 = no match, any other error = pgrep unavailable; both → 0
+		return 0
+	}
+	n := 0
+	for line := range bytes.SplitSeq(bytes.TrimSpace(out), []byte("\n")) {
+		if len(bytes.TrimSpace(line)) > 0 {
+			n++
+		}
+	}
+	return n
 }

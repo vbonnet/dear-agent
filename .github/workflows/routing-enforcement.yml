@@ -1,0 +1,108 @@
+name: Routing Enforcement
+
+# Blocks temporal artifacts (Wayfinder SDLC runs, retros, designs, research)
+# from being committed to this code repo. The forbidden globs are the SINGLE
+# source of truth in .dear-agent.yml > forbidden-paths; this workflow does NOT
+# carry its own copy of the list — it runs the routing-guard tool
+# (cmd/routing-guard) which parses .dear-agent.yml at runtime. (A hardcoded
+# copy that drifted from .dear-agent.yml is exactly what let the Wayfinder wf/
+# leak through; see the 2026-06-19 DEAR retro in engram-research.)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-forbidden-paths:
+    name: Forbidden temporal artifact paths
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check routing (new files in this PR + whole-tree regression)
+        id: check
+        run: |
+          set -o pipefail
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          go build -o /tmp/routing-guard ./cmd/routing-guard
+
+          : > report.txt
+          rc=0
+
+          # 1) Block any forbidden file ADDED/renamed in this PR.
+          if ! /tmp/routing-guard --diff "origin/${{ github.base_ref }}" >>report.txt 2>&1; then
+            rc=1
+          fi
+
+          # 2) Whole-tree regression guard: fail if a forbidden file is tracked
+          #    anywhere beyond the documented, shrink-only grandfathered set.
+          if ! /tmp/routing-guard --all --baseline .forbidden-artifacts-baseline.txt >>report.txt 2>&1; then
+            rc=1
+          fi
+
+          echo "--- routing report ---"
+          cat report.txt
+          if [ "$rc" -ne 0 ]; then
+            echo "violations=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "violations=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Post PR comment on violation
+        if: steps.check.outputs.violations == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let report = '';
+            try { report = fs.readFileSync('report.txt', 'utf8'); } catch (e) {}
+            const body = [
+              '## :no_entry: Routing violation — temporal artifacts detected',
+              '',
+              'This PR adds (or the tree still contains) files that are **forbidden',
+              'in this code repo**. Wayfinder SDLC runs, retros, designs, and',
+              'research are temporal artifacts — they belong in',
+              '[`engram-research`](https://github.com/vbonnet/engram-research)',
+              '(conventionally `wf/<project>/`), not here.',
+              '',
+              '```',
+              report.trim(),
+              '```',
+              '',
+              '### How to fix',
+              '1. `git rm` the file(s) from this PR.',
+              '2. Move the content into `engram-research` and open a PR there.',
+              '3. Re-push without the artifact.',
+              '',
+              'The forbidden globs are defined once in `.dear-agent.yml >',
+              'forbidden-paths` and enforced by the `routing-guard` tool',
+              '(`cmd/routing-guard`), also runnable locally as a pre-commit',
+              'hook: `make install-routing-guard-hook`.',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Fail on violation
+        if: steps.check.outputs.violations == 'true'
+        run: |
+          echo "ROUTING VIOLATION — see the report above and the PR comment."
+          echo "Forbidden globs live in .dear-agent.yml > forbidden-paths."
+          exit 1

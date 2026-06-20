@@ -3,12 +3,18 @@ package supervisor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/vroom/decisiontrail"
 )
+
+// ErrAllPeersDark is returned by Loop.Run when the zombie detection
+// threshold is reached: all peers have been stale for too many consecutive
+// iterations. The loop self-terminates to avoid burning tokens uselessly.
+var ErrAllPeersDark = errors.New("supervisor: all peers dark, self-terminating")
 
 // Loop drives one supervisor through the constant iteration cycle described
 // in CONTEXT.md §"The three supervisors" and ADR-002 §"Two load-bearing
@@ -28,9 +34,16 @@ type Loop struct {
 	sup      Supervisor
 	mesh     PeerLookup
 	check    CheckSkill
+	recovery PeerRecovery
 	trail    decisiontrail.Trail
 	interval time.Duration
 	clock    func() time.Time
+
+	// Zombie detection: when all peers are stale for this many consecutive
+	// iterations, the loop self-terminates with ErrAllPeersDark. Zero
+	// disables zombie detection.
+	zombieThreshold int
+	allPeersDarkRun int // consecutive iterations with all peers stale
 
 	// status fields — protected by mu.
 	mu            sync.RWMutex
@@ -50,13 +63,20 @@ type PeerLookup interface {
 }
 
 // LoopConfig holds the dependencies a Loop needs. All fields are required
-// except Clock (defaults to time.Now).
+// except Clock, Recovery, and ZombieThreshold (defaults to time.Now, nil,
+// and 10 respectively).
 type LoopConfig struct {
 	Supervisor Supervisor
 	Mesh       PeerLookup
 	Check      CheckSkill
+	Recovery   PeerRecovery // nil = detect-only, no corrective action
 	Trail      decisiontrail.Trail
 	Interval   time.Duration
+
+	// ZombieThreshold is the number of consecutive iterations where ALL
+	// peers are stale before the loop self-terminates with ErrAllPeersDark.
+	// Zero disables zombie detection. Default: 10.
+	ZombieThreshold int
 
 	// Clock is the source of time. Defaults to time.Now. Tests inject a
 	// fake clock here.
@@ -88,13 +108,19 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 	if clock == nil {
 		clock = time.Now
 	}
+	zombieThreshold := cfg.ZombieThreshold
+	if zombieThreshold == 0 {
+		zombieThreshold = 10
+	}
 	return &Loop{
-		sup:      cfg.Supervisor,
-		mesh:     cfg.Mesh,
-		check:    cfg.Check,
-		trail:    cfg.Trail,
-		interval: cfg.Interval,
-		clock:    clock,
+		sup:             cfg.Supervisor,
+		mesh:            cfg.Mesh,
+		check:           cfg.Check,
+		recovery:        cfg.Recovery,
+		trail:           cfg.Trail,
+		interval:        cfg.Interval,
+		clock:           clock,
+		zombieThreshold: zombieThreshold,
 	}, nil
 }
 
@@ -124,8 +150,11 @@ func (l *Loop) TickCount() uint64 { return l.tickCount.Load() }
 // mesh).
 func (l *Loop) CheckCount() uint64 { return l.checkCount.Load() }
 
-// Run executes the loop until ctx is cancelled. The returned error is the
-// context error (context.Canceled / DeadlineExceeded) on graceful shutdown.
+// Run executes the loop until ctx is cancelled or zombie detection triggers.
+// The returned error is the context error (context.Canceled / DeadlineExceeded)
+// on graceful shutdown, or ErrAllPeersDark if all peers have been stale for
+// too many consecutive iterations.
+//
 // Tick errors and Check errors are recorded to the trail but do NOT cause
 // Run to return — the loop is designed to keep running through transient
 // failures.
@@ -134,13 +163,22 @@ func (l *Loop) CheckCount() uint64 { return l.checkCount.Load() }
 // HeartbeatCheckSkill calls don't false-positive on a freshly-started
 // supervisor.
 func (l *Loop) Run(ctx context.Context) error {
-	// Startup heartbeat: marks the supervisor as "alive but not yet
-	// ticked". Peers checking before the first tick completes see a
-	// fresh-but-recent heartbeat instead of the zero time.
 	l.recordStartup(ctx)
 
 	for {
-		l.iterate(ctx)
+		zombie := l.iterate(ctx)
+		if zombie {
+			_ = l.trail.Append(ctx, decisiontrail.Record{
+				Role: string(l.sup.Role()),
+				Kind: "supervisor.loop.zombie_exit",
+				Payload: map[string]any{
+					"consecutive_all_dark": l.allPeersDarkRun,
+					"threshold":            l.zombieThreshold,
+				},
+			})
+			return fmt.Errorf("%w: %d consecutive iterations with all peers stale (threshold %d)",
+				ErrAllPeersDark, l.allPeersDarkRun, l.zombieThreshold)
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -150,22 +188,22 @@ func (l *Loop) Run(ctx context.Context) error {
 }
 
 // iterate runs one cycle: peer checks, own tick, record heartbeat.
+// Returns true if zombie self-termination should trigger.
 // Exposed (lowercase) for tests that want to drive iterations manually
 // without time-based sleeping.
-func (l *Loop) iterate(ctx context.Context) {
+func (l *Loop) iterate(ctx context.Context) bool {
 	if ctx.Err() != nil {
-		return
+		return false
 	}
 	l.checkPeers(ctx)
 	l.tick(ctx)
+	return l.zombieThreshold > 0 && l.allPeersDarkRun >= l.zombieThreshold
 }
 
 // checkPeers implements the mutual-unblock-first invariant.
 func (l *Loop) checkPeers(ctx context.Context) {
 	peers, err := l.sup.Role().PeerList()
 	if err != nil {
-		// Should be impossible if NewLoop's validation passed; record
-		// defensively and skip the check phase rather than panic.
 		_ = l.trail.Append(ctx, decisiontrail.Record{
 			Role: string(l.sup.Role()),
 			Kind: "supervisor.check.config_error",
@@ -175,6 +213,10 @@ func (l *Loop) checkPeers(ctx context.Context) {
 		})
 		return
 	}
+
+	allStale := true
+	peersChecked := 0
+
 	for _, peerRole := range peers {
 		peer, ok := l.mesh.Get(peerRole)
 		if !ok {
@@ -187,6 +229,7 @@ func (l *Loop) checkPeers(ctx context.Context) {
 			})
 			continue
 		}
+		peersChecked++
 		l.checkCount.Add(1)
 		checkErr := l.check.Check(ctx, peer)
 		rec := decisiontrail.Record{
@@ -201,6 +244,32 @@ func (l *Loop) checkPeers(ctx context.Context) {
 			rec.Payload["error"] = checkErr.Error()
 		}
 		_ = l.trail.Append(ctx, rec)
+
+		if checkErr == nil {
+			allStale = false
+		}
+
+		if checkErr != nil && l.recovery != nil {
+			recoverErr := l.recovery.Recover(ctx, peerRole, checkErr.Error())
+			recoveryRec := decisiontrail.Record{
+				Role: string(l.sup.Role()),
+				Kind: "supervisor.check.recovery_attempt",
+				Payload: map[string]any{
+					"peer": string(peerRole),
+					"ok":   recoverErr == nil,
+				},
+			}
+			if recoverErr != nil {
+				recoveryRec.Payload["error"] = recoverErr.Error()
+			}
+			_ = l.trail.Append(ctx, recoveryRec)
+		}
+	}
+
+	if peersChecked > 0 && allStale {
+		l.allPeersDarkRun++
+	} else {
+		l.allPeersDarkRun = 0
 	}
 }
 
