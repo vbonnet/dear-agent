@@ -15,6 +15,10 @@ if [[ -z "${GITHUB_TOKEN:-}" ]]; then
   exit 1
 fi
 
+# Personal account owner. Repository rulesets are imported by numeric id, which
+# must be looked up per repo (see the ruleset import in the ACTIVE_REPOS loop).
+OWNER="${PERSONAL_OWNER:-vbonnet}"
+
 ACTIVE_REPOS=(
   dear-agent
   brain-v2
@@ -74,6 +78,19 @@ for r in "${ACTIVE_REPOS[@]}"; do
   imp "github_repository.active[\"$r\"]" "$r"
   imp "github_branch_protection.active[\"$r\"]" "$r:main"
   imp "github_repository_dependabot_security_updates.active[\"$r\"]" "$r"
+
+  # Import the existing "branch-protection" repository ruleset if one exists.
+  # Rulesets were applied in an earlier pass. Without importing them, `tofu plan`
+  # proposes CREATING a second ruleset of the same name — GitHub permits
+  # duplicate ruleset names, so a blind apply DOUBLES enforcement instead of
+  # reconciling it. Rulesets import by numeric id (<repo>:<id>), so look it up.
+  rs_id=$(gh api "/repos/${OWNER}/$r/rulesets" \
+            --jq 'map(select(.name=="branch-protection")) | .[0].id // empty' 2>/dev/null || true)
+  if [[ -n "$rs_id" ]]; then
+    imp "github_repository_ruleset.branch_protection[\"$r\"]" "$r:$rs_id"
+  else
+    echo "not imported (will be CREATED by plan): github_repository_ruleset.branch_protection[\"$r\"]"
+  fi
 done
 
 for r in "${ARCHIVED_REPOS[@]}"; do
