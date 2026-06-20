@@ -338,6 +338,8 @@ func init() {
 	loopCmd.AddCommand(loopResumeCmd)
 	loopCmd.AddCommand(loopDeleteCmd)
 	loopCmd.AddCommand(loopTickCmd)
+	loopCmd.AddCommand(loopInstallLaunchdCmd)
+	loopCmd.AddCommand(loopUninstallLaunchdCmd)
 
 	loopNewCmd.Flags().StringVar(&loopNewCadence, "cadence", "", "How often to run (Go duration: 5m, 1h, 30s) [required]")
 	_ = loopNewCmd.MarkFlagRequired("cadence")
