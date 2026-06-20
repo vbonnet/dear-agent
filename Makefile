@@ -50,8 +50,11 @@
 #   install-vroom-dispatch  Install vroom-dispatch to ~/go/bin
 #   build-resolve-review-threads  Build resolve-review-threads: GitHub PR thread resolver
 #   install-resolve-review-threads Install resolve-review-threads to ~/go/bin
+#   build-dear-deploy       Build dear-deploy: atomic host-artifact deployer (cmd/dear-deploy)
+#   install-dear-deploy     Install dear-deploy to ~/go/bin
+#   dear-deploy-sync        Deploy host artifacts from deploy/manifest.yaml (build guards first)
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-token-refresher install-token-refresher
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-token-refresher install-token-refresher build-dear-deploy install-dear-deploy dear-deploy-sync
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -490,6 +493,26 @@ build-resolve-review-threads:
 install-resolve-review-threads: build-resolve-review-threads
 	cp bin/resolve-review-threads $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/resolve-review-threads"
+
+# Build dear-deploy: the write-side counterpart to drift-check. It deploys host
+# artifacts (launchd plists, Claude Code hooks) from deploy/manifest.yaml through
+# the principle-9 atomic sequence (stage -> verify -> activate). There is no
+# bypass flag (ADR-031); a failed deploy leaves the prior artifact untouched.
+build-dear-deploy:
+	@echo "Building dear-deploy..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/dear-deploy ./cmd/dear-deploy/
+	@echo "Built: bin/dear-deploy"
+
+install-dear-deploy: build-dear-deploy
+	cp bin/dear-deploy $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/dear-deploy"
+
+# Deploy every artifact in deploy/manifest.yaml to the host. The write-guard
+# hooks are compiled first (their source is the built binary under bin/), then
+# dear-deploy atomically syncs anything that has drifted. Idempotent.
+dear-deploy-sync: build-dear-deploy build-write-guards
+	./bin/dear-deploy sync
 
 # Build the PreToolUse filesystem write-guard hooks. These enforce the
 # worktree-only write policy (see internal/fsguard): pretool-fs-write-guard
