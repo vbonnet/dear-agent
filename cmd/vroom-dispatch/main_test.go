@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -99,6 +100,111 @@ func TestSessionNewArgsPinModelAndMode(t *testing.T) {
 	}
 	if supervisorMode != "auto" {
 		t.Errorf("supervisorMode = %q, want auto (plan mode can't execute when detached)", supervisorMode)
+	}
+}
+
+// TestSpawnSessionWithRetry guards the ce-mu36 fix: createAndBootSession spawns
+// the 3 supervisors only ~40s apart, but agm's circuit breaker enforces a
+// 2-minute MinSpawnInterval and refuses the 2nd and 3rd spawns with "spawn too
+// soon". spawnSessionWithRetry must wait out the window and retry on that
+// refusal — but must NOT retry other failures, and must give up after the cap.
+func TestSpawnSessionWithRetry(t *testing.T) {
+	sup := supervisor{Name: "vroom-orchestrator", Role: "orchestrator"}
+
+	// Save and restore the injectable spawn/sleep hooks.
+	origRun, origSleep := runSpawn, sleepFor
+	t.Cleanup(func() { runSpawn, sleepFor = origRun, origSleep })
+
+	refusal := []byte("circuit breaker: spawn refused — spawn too soon")
+	cbErr := errors.New("exit status 1")
+
+	t.Run("retries past circuit-breaker refusals then succeeds", func(t *testing.T) {
+		calls, sleeps := 0, 0
+		sleepFor = func(time.Duration) { sleeps++ }
+		runSpawn = func(supervisor, string) ([]byte, error) {
+			calls++
+			if calls < 3 {
+				return refusal, cbErr
+			}
+			return []byte("created"), nil
+		}
+
+		if err := spawnSessionWithRetry(sup, "sonnet-200k"); err != nil {
+			t.Fatalf("expected success after retries, got %v", err)
+		}
+		if calls != 3 {
+			t.Errorf("expected 3 spawn attempts, got %d", calls)
+		}
+		// Sleeps the window only between attempts, never after the final one.
+		if sleeps != 2 {
+			t.Errorf("expected 2 backoff sleeps, got %d", sleeps)
+		}
+	})
+
+	t.Run("gives up after maxSpawnAttempts of persistent refusal", func(t *testing.T) {
+		calls, sleeps := 0, 0
+		sleepFor = func(time.Duration) { sleeps++ }
+		runSpawn = func(supervisor, string) ([]byte, error) {
+			calls++
+			return refusal, cbErr
+		}
+
+		err := spawnSessionWithRetry(sup, "sonnet-200k")
+		if err == nil {
+			t.Fatal("expected failure after exhausting retries, got nil")
+		}
+		if calls != maxSpawnAttempts {
+			t.Errorf("expected %d spawn attempts, got %d", maxSpawnAttempts, calls)
+		}
+		// No sleep after the last attempt: one fewer than the attempt count.
+		if sleeps != maxSpawnAttempts-1 {
+			t.Errorf("expected %d backoff sleeps, got %d", maxSpawnAttempts-1, sleeps)
+		}
+	})
+
+	t.Run("does not retry non-circuit-breaker failures", func(t *testing.T) {
+		calls, sleeps := 0, 0
+		sleepFor = func(time.Duration) { sleeps++ }
+		runSpawn = func(supervisor, string) ([]byte, error) {
+			calls++
+			return []byte("error: workspace not found"), errors.New("exit status 2")
+		}
+
+		if err := spawnSessionWithRetry(sup, "sonnet-200k"); err == nil {
+			t.Fatal("expected failure to propagate, got nil")
+		}
+		if calls != 1 {
+			t.Errorf("non-breaker failure must not retry; got %d attempts", calls)
+		}
+		if sleeps != 0 {
+			t.Errorf("non-breaker failure must not sleep; got %d sleeps", sleeps)
+		}
+	})
+
+	t.Run("succeeds on first attempt without sleeping", func(t *testing.T) {
+		calls, sleeps := 0, 0
+		sleepFor = func(time.Duration) { sleeps++ }
+		runSpawn = func(supervisor, string) ([]byte, error) {
+			calls++
+			return []byte("created"), nil
+		}
+
+		if err := spawnSessionWithRetry(sup, "sonnet-200k"); err != nil {
+			t.Fatalf("expected immediate success, got %v", err)
+		}
+		if calls != 1 || sleeps != 0 {
+			t.Errorf("happy path: want 1 call/0 sleeps, got %d calls/%d sleeps", calls, sleeps)
+		}
+	})
+}
+
+// TestMinSpawnIntervalMatchesAgm pins the assumption ce-mu36 relies on: the
+// backoff window must be at least agm's circuitbreaker.MinSpawnInterval (2
+// minutes). If this drifts below agm's value, retries would fire before the
+// window clears and be refused again.
+func TestMinSpawnIntervalMatchesAgm(t *testing.T) {
+	if minSpawnInterval < 2*time.Minute {
+		t.Errorf("minSpawnInterval = %s, must be >= agm's 2m MinSpawnInterval", minSpawnInterval)
 	}
 }
 
