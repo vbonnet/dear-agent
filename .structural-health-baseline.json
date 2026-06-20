@@ -128,8 +128,10 @@
       "agm/workflowbus/bridge.go:140"
     ],
     "zero-test": [
+      "github.com/vbonnet/dear-agent/cmd/agm-job",
       "github.com/vbonnet/dear-agent/cmd/fd-pressure",
       "github.com/vbonnet/dear-agent/cmd/mergeloop",
+      "github.com/vbonnet/dear-agent/cmd/src-health",
       "github.com/vbonnet/dear-agent/cmd/workflow-cancel",
       "github.com/vbonnet/dear-agent/cmd/workflow-list",
       "github.com/vbonnet/dear-agent/cmd/workflow-logs",

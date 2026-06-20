@@ -187,7 +187,7 @@ func runJob(argv []string) error {
 
 // runCommand executes argv, piping stdout+stderr to w. Returns non-nil on failure.
 func runCommand(ctx context.Context, argv []string, w io.Writer) error {
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //#nosec G204
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //#nosec G204,G702
 	cmd.Stdout = w
 	cmd.Stderr = w
 	return cmd.Run()
@@ -202,7 +202,7 @@ func acquireLock(lockDir, lockPath, name string) error {
 	if err := os.Mkdir(lockPath, 0o700); err != nil {
 		if os.IsExist(err) {
 			// Check if the lock is stale (process no longer exists).
-			if stale, _ := isStale(lockPath); stale {
+			if stale, err := isStale(lockPath); stale || err != nil {
 				_ = os.Remove(lockPath)
 				return os.Mkdir(lockPath, 0o700)
 			}
@@ -211,7 +211,7 @@ func acquireLock(lockDir, lockPath, name string) error {
 		return err
 	}
 	// Write our PID inside the lock dir so staleness can be detected.
-	_ = os.WriteFile(filepath.Join(lockPath, "pid"), []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o600)
+	_ = os.WriteFile(filepath.Join(lockPath, "pid"), fmt.Appendf(nil, "%d\n", os.Getpid()), 0o600)
 	return nil
 }
 
@@ -232,11 +232,11 @@ func isStale(lockPath string) (bool, error) {
 	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
-		return true, nil
+		return false, err
 	}
 	// On Unix, FindProcess never returns an error; signal 0 tests liveness.
 	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		return true, nil
+		return true, nil //nolint:nilerr // signal(0) error means dead process — intentional
 	}
 	return false, nil
 }
