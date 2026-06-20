@@ -105,7 +105,7 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 // load resolves the repo root, reads and parses the manifest, and selects the
 // requested artifacts. It centralises the error reporting so each subcommand
 // stays focused on its own output.
-func (c *commonFlags) load(names []string, stderr io.Writer) (deploy.Manifest, []deploy.Artifact, deploy.Options, int) {
+func (c *commonFlags) load(names []string, stderr io.Writer) ([]deploy.Artifact, deploy.Options, int) {
 	root := c.repoRoot
 	if root == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -114,7 +114,7 @@ func (c *commonFlags) load(names []string, stderr io.Writer) (deploy.Manifest, [
 		if err != nil {
 			fmt.Fprintf(stderr, "error: cannot detect repo root: %v\n", err)
 			fmt.Fprintf(stderr, "hint: run inside the dear-agent checkout or pass --repo-root <dir>\n")
-			return deploy.Manifest{}, nil, deploy.Options{}, 1
+			return nil, deploy.Options{}, 1
 		}
 		root = detected
 	}
@@ -126,17 +126,17 @@ func (c *commonFlags) load(names []string, stderr io.Writer) (deploy.Manifest, [
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: reading manifest: %v\n", err)
-		return deploy.Manifest{}, nil, deploy.Options{}, 1
+		return nil, deploy.Options{}, 1
 	}
 	m, err := deploy.ParseManifest(data)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
-		return deploy.Manifest{}, nil, deploy.Options{}, 1
+		return nil, deploy.Options{}, 1
 	}
 	selected, err := m.Select(names)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
-		return deploy.Manifest{}, nil, deploy.Options{}, 1
+		return nil, deploy.Options{}, 1
 	}
 
 	// Resolve home eagerly so displayed deployed paths are concrete (~ expanded)
@@ -147,11 +147,11 @@ func (c *commonFlags) load(names []string, stderr io.Writer) (deploy.Manifest, [
 		h, err := os.UserHomeDir()
 		if err != nil {
 			fmt.Fprintf(stderr, "error: cannot resolve home dir: %v\n", err)
-			return deploy.Manifest{}, nil, deploy.Options{}, 1
+			return nil, deploy.Options{}, 1
 		}
 		home = h
 	}
-	return m, selected, deploy.Options{RepoRoot: root, Home: home}, 0
+	return selected, deploy.Options{RepoRoot: root, Home: home}, 0
 }
 
 func runList(args []string, stdout, stderr io.Writer) int {
@@ -163,7 +163,7 @@ func runList(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	_, selected, opts, code := c.load(names, stderr)
+	selected, opts, code := c.load(names, stderr)
 	if code != 0 {
 		return code
 	}
@@ -215,7 +215,7 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	_, selected, opts, code := c.load(names, stderr)
+	selected, opts, code := c.load(names, stderr)
 	if code != 0 {
 		return code
 	}
@@ -239,6 +239,8 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 	drift, errs := false, false
 	for _, r := range results {
 		switch r.State {
+		case deploy.StateOK:
+			// clean — no action needed
 		case deploy.StateDrift:
 			drift = true
 		case deploy.StateMissing, deploy.StateSourceMissing:
@@ -319,7 +321,7 @@ func runDeploy(cmd string, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	_, selected, opts, code := c.load(names, stderr)
+	selected, opts, code := c.load(names, stderr)
 	if code != 0 {
 		return code
 	}

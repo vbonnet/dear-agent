@@ -49,7 +49,9 @@ func mustWrite(t *testing.T, path, content string) {
 // invoke runs the CLI with the standard --repo-root/--home wiring appended.
 func invoke(t *testing.T, repo, home string, args ...string) (int, string, string) {
 	t.Helper()
-	full := append(args, "--repo-root", repo, "--home", home)
+	full := make([]string, 0, len(args)+4)
+	full = append(full, args...)
+	full = append(full, "--repo-root", repo, "--home", home)
 	var out, errb bytes.Buffer
 	code := run(full, &out, &errb)
 	return code, out.String(), errb.String()
