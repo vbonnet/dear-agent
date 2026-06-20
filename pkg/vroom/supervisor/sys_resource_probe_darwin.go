@@ -127,12 +127,24 @@ func sysVnodeUsedFraction() float64 {
 	return float64(numVnodes) / float64(maxVnodes)
 }
 
-// sysGoplsCount returns the number of currently running gopls processes by
-// invoking pgrep(1). pgrep -x matches the process name exactly (not
-// substrings of longer names). Exit code 1 from pgrep means "no matches" —
-// not an error we propagate.
+// sysGoplsCount returns the number of *orphaned* gopls processes — gopls
+// instances reparented to PID 1 because the Claude session that spawned them
+// died. This is the leak signal the Overseer escalates on.
+//
+// It must NOT count live gopls: every healthy Claude Code session runs its own
+// gopls (via the gopls-lsp plugin), so a raw process count scales with the
+// number of live sessions and produces phantom leak alarms (ce-u7v9). Two
+// pgrep(1) flags together give the precise signal:
+//
+//   - -x  matches the process name exactly ("gopls"), never a substring of a
+//     longer argv such as a plugin path containing "gopls". (The older -f,
+//     which matches the full command line, was the original over-count cause.)
+//   - -P 1  restricts to processes whose parent is PID 1, i.e. true orphans.
+//     A gopls with a live parent keeps its real PPID and is never counted.
+//
+// Exit code 1 from pgrep means "no matches" — not an error we propagate.
 func sysGoplsCount(ctx context.Context) int {
-	out, err := exec.CommandContext(ctx, "pgrep", "-x", "gopls").Output()
+	out, err := exec.CommandContext(ctx, "pgrep", "-x", "-P", "1", "gopls").Output()
 	if err != nil {
 		// exit code 1 = no match, any other error = pgrep unavailable; both → 0
 		return 0
