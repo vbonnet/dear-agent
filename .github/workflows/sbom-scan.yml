@@ -58,6 +58,10 @@ jobs:
     name: Vulnerability Scan
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Skip on pull_request: Trivy fs scanning is redundant with the required
+    # `govulncheck` job in ci.yml on PRs. Still runs on push/release/schedule so
+    # the weekly run catches vulns disclosed against unchanged dependencies.
+    if: github.event_name != 'pull_request'
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
