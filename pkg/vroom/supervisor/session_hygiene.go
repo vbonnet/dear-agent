@@ -118,12 +118,7 @@ func (g *GCSessionGardener) GC(ctx context.Context) (SessionGCStats, error) {
 		return SessionGCStats{}, fmt.Errorf("session gc: unparseable JSON: %w (output: %q)", jsonErr, truncateOutput(out))
 	}
 
-	return SessionGCStats{
-		Scanned:  parsed.Scanned,
-		Archived: parsed.Archived,
-		Skipped:  parsed.Skipped,
-		Errors:   parsed.Errors,
-	}, nil
+	return SessionGCStats(parsed), nil
 }
 
 func (g *GCSessionGardener) exec(ctx context.Context, name string, args ...string) ([]byte, error) {
