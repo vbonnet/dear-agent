@@ -61,7 +61,7 @@ type Agent interface {
 
 	// GetSessionStatus returns the current status of a session.
 	//
-	// Returns StatusActive, StatusSuspended, or StatusTerminated.
+	// Returns StatusActive, StatusIdle, StatusSuspended, or StatusTerminated.
 	// Returns error if session not found.
 	GetSessionStatus(sessionID SessionID) (Status, error)
 
@@ -260,6 +260,12 @@ type Status string
 const (
 	// StatusActive indicates session is running and accepting messages.
 	StatusActive Status = "active"
+
+	// StatusIdle indicates the session is alive and waiting for input (e.g. a
+	// Codex TUI showing its composer). It is a refinement of StatusActive used
+	// by the supervisor to distinguish a worker that is ready for a prompt from
+	// one that is busy processing.
+	StatusIdle Status = "idle"
 
 	// StatusSuspended indicates session is paused (tmux detached).
 	StatusSuspended Status = "suspended"
