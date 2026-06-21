@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
@@ -17,12 +18,12 @@ type TransitionValidation struct {
 // validateTransition checks if transition from current to next phase is allowed
 func (o *PhaseOrchestratorV2) validateTransition(current, next string) error {
 	// Check for phase skipping (forward jumps)
-	if isPhaseSkipping(current, next) {
+	if o.isPhaseSkipping(current, next) {
 		return o.buildPhaseSkippingError(current, next)
 	}
 
 	// Check if transition is in valid transitions map
-	if !isValidSequence(current, next) {
+	if !o.isValidSequence(current, next) {
 		return fmt.Errorf("invalid transition from %s to %s", current, next)
 	}
 
@@ -43,37 +44,39 @@ func (o *PhaseOrchestratorV2) validateTransition(current, next string) error {
 	return nil
 }
 
-// isValidSequence checks if current → next is a valid transition
-func isValidSequence(current, next string) bool {
-	// Define valid forward and backward transitions
-	validTransitions := map[string][]string{
-		status.PhaseV2Charter:  {status.PhaseV2Problem},                                        // Forward only
-		status.PhaseV2Problem:  {status.PhaseV2Charter, status.PhaseV2Research},                // Forward (RESEARCH) or rewind (CHARTER)
-		status.PhaseV2Research: {status.PhaseV2Problem, status.PhaseV2Design},                  // Forward (DESIGN) or rewind (PROBLEM)
-		status.PhaseV2Design:   {status.PhaseV2Research, status.PhaseV2Spec},                   // Forward (SPEC) or rewind (RESEARCH)
-		status.PhaseV2Spec:     {status.PhaseV2Design, status.PhaseV2Plan},                     // Forward (PLAN) or rewind (DESIGN)
-		status.PhaseV2Plan:     {status.PhaseV2Spec, status.PhaseV2Setup},                      // Forward (SETUP) or rewind (SPEC)
-		status.PhaseV2Setup:    {status.PhaseV2Plan, status.PhaseV2Build},                      // Forward (BUILD) or rewind (PLAN)
-		status.PhaseV2Build:    {status.PhaseV2Setup, status.PhaseV2Plan, status.PhaseV2Retro}, // Forward (RETRO) or rewind (SETUP, PLAN)
-		status.PhaseV2Retro:    {},                                                             // Terminal phase
+// isValidSequence checks if current → next is a valid transition.
+//
+// Forward advancement to the next non-skipped phase is always valid — this is
+// computed via getNextPhaseInSequence so it honors the harness profile's skipped
+// phases (ProfileLite skips DESIGN/SPEC/PLAN, ce-cahz). Backward rewinds are
+// allowed against the documented per-phase rewind targets.
+func (o *PhaseOrchestratorV2) isValidSequence(current, next string) bool {
+	// Forward: advancing to the next non-skipped phase in sequence is valid.
+	if expected, err := o.getNextPhaseInSequence(current); err == nil && next == expected {
+		return true
 	}
 
-	allowedNext, exists := validTransitions[current]
-	if !exists {
-		return false
+	// Backward: allow the documented rewind targets for each phase.
+	validRewinds := map[string][]string{
+		status.PhaseV2Problem:  {status.PhaseV2Charter},                   // rewind (CHARTER)
+		status.PhaseV2Research: {status.PhaseV2Problem},                   // rewind (PROBLEM)
+		status.PhaseV2Design:   {status.PhaseV2Research},                  // rewind (RESEARCH)
+		status.PhaseV2Spec:     {status.PhaseV2Design},                    // rewind (DESIGN)
+		status.PhaseV2Plan:     {status.PhaseV2Spec},                      // rewind (SPEC)
+		status.PhaseV2Setup:    {status.PhaseV2Plan},                      // rewind (PLAN)
+		status.PhaseV2Build:    {status.PhaseV2Setup, status.PhaseV2Plan}, // rewind (SETUP, PLAN)
 	}
 
-	for _, allowed := range allowedNext {
-		if allowed == next {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(validRewinds[current], next)
 }
 
-// isPhaseSkipping checks if transition skips intermediate phases
-func isPhaseSkipping(current, next string) bool {
+// isPhaseSkipping checks if a transition illegally skips intermediate phases.
+//
+// A forward jump of more than one phase is only illegal when at least one of the
+// intervening phases is NOT skipped by the harness profile. Under ProfileLite
+// (which skips DESIGN/SPEC/PLAN) a RESEARCH→SETUP advance crosses only skipped
+// phases and is therefore legitimate, not a skip (ce-cahz / MVD T2.2).
+func (o *PhaseOrchestratorV2) isPhaseSkipping(current, next string) bool {
 	sequence := status.AllPhasesV2Schema()
 
 	currentIdx := -1
@@ -92,10 +95,18 @@ func isPhaseSkipping(current, next string) bool {
 		return false
 	}
 
-	// Forward: cannot skip (nextIdx must be currentIdx + 1)
-	// Backward: rewinding allowed (nextIdx < currentIdx)
-	if nextIdx > currentIdx+1 {
-		return true // Skipping phases
+	// Backward (rewind) or single-step forward: never a skip.
+	if nextIdx <= currentIdx+1 {
+		return false
+	}
+
+	// Forward jump >1: a skip only if some intervening phase is not
+	// profile-skipped. If every phase between current and next is skipped,
+	// this is a legitimate advance for the harness profile.
+	for i := currentIdx + 1; i < nextIdx; i++ {
+		if !o.status.IsPhaseSkipped(sequence[i]) {
+			return true
+		}
 	}
 
 	return false
@@ -135,6 +146,7 @@ func (o *PhaseOrchestratorV2) buildPhaseSkippingError(current, next string) erro
 }
 
 // checkTransitionWarnings checks for transition-specific warnings
+//
 //nolint:gocyclo // reason: linear warning checker enumerating each precondition
 func (o *PhaseOrchestratorV2) checkTransitionWarnings(current, next string) TransitionValidation {
 	result := TransitionValidation{
