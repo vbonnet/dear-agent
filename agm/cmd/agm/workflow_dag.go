@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -149,12 +148,7 @@ func runWorkflowRun(_ *cobra.Command, args []string) error {
 	}
 
 	if outputFormat == "json" {
-		data, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal result: %w", err)
-		}
-		fmt.Println(string(data))
-		return nil
+		return printJSON(result)
 	}
 
 	// Text output
@@ -206,12 +200,7 @@ func runWorkflowStatus(_ *cobra.Command, args []string) error {
 			Tasks:  len(w.Tasks),
 			Layers: layers,
 		}
-		data, err := json.MarshalIndent(out, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal status: %w", err)
-		}
-		fmt.Println(string(data))
-		return nil
+		return printJSON(out)
 	}
 
 	fmt.Printf("Workflow: %s\n", w.Name)

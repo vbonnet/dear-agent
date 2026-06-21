@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -442,9 +441,7 @@ func runEscalateShow(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	b, _ := json.MarshalIndent(esc, "", "  ")
-	fmt.Println(string(b))
-	return nil
+	return printJSON(esc)
 }
 
 func joinArgs(args []string) string {

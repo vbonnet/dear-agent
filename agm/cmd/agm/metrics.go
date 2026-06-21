@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -240,13 +239,15 @@ func runMetricsCheck(result *ops.MetricsResult) error {
 	return nil // Unreachable, but needed for type signature
 }
 
-// outputAlertsJSON outputs alerts in compact JSON format.
+// outputAlertsJSON outputs alerts as JSON through the central path so the
+// --fields mask is honored.
 func outputAlertsJSON(alerts []ops.Alert) {
-	data, _ := json.Marshal(map[string]interface{}{
+	if err := printJSON(map[string]any{
 		"alerts": alerts,
 		"count":  len(alerts),
-	})
-	fmt.Println(string(data))
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to output alerts: %v\n", err)
+	}
 }
 
 // outputAlertsText outputs alerts in compact text format.

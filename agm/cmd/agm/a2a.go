@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -85,12 +84,7 @@ func runA2AListCards(_ *cobra.Command, _ []string) error {
 	}
 
 	if outputFormat == "json" {
-		data, err := json.MarshalIndent(cards, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal cards: %w", err)
-		}
-		fmt.Println(string(data))
-		return nil
+		return printJSON(cards)
 	}
 
 	// Table output
