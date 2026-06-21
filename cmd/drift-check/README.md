@@ -10,6 +10,9 @@ This is Phase 0 of the deployment-drift system. The full phased plan
 (daily-audit integration, the bead-close-guard "deployed" gate, the OTel
 "verified" gate, auto-remediation) is in
 [`docs/drift-detection-plan.md`](../../docs/drift-detection-plan.md).
+[`bead-close-guard`](../bead-close-guard) consumes this tool's `targets.yaml`
+as the "deployed" gate (Phase 2): a bead whose merged change touches a target's
+`source` cannot close until that target is current on the host.
 
 ## Why
 
