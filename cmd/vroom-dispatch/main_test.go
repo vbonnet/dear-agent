@@ -315,6 +315,38 @@ func TestWorkerSpawnPinsOpusAndWayfinder(t *testing.T) {
 	}
 }
 
+// TestWorkerDispatchUsesFileHandoff pins the file-handoff discipline (ce-4tqd):
+// the Orchestrator must hand a worker its task brief as a FILE artifact, not as
+// inline pasted context. Inline pasting wastes tokens, leaves no auditable
+// handoff record, and is lost when the worker's context compacts. The contract,
+// like the spawn contract above, lives in the embedded orchestrator.md skill:
+//   - write the brief to ~/.agm/vroom/prompts/<bead-id>.md BEFORE dispatch, and
+//   - send the worker only a short pointer that reads that file back.
+func TestWorkerDispatchUsesFileHandoff(t *testing.T) {
+	b, err := skills.ReadFile("skills/orchestrator.md")
+	if err != nil {
+		t.Fatalf("read embedded orchestrator.md: %v", err)
+	}
+	doc := string(b)
+
+	for _, want := range []string{
+		"cat > ~/.agm/vroom/prompts/<bead-id>.md", // brief is written to the file before dispatch
+		"cat ~/.agm/vroom/prompts/<bead-id>.md",   // the pointer message reads the brief back
+		`"prompt_file"`,                           // dispatch record references the handoff artifact
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("orchestrator.md file-handoff dispatch missing %q", want)
+		}
+	}
+
+	// The worker-facing send must be a POINTER, not the full brief pasted inline.
+	// The old inline form opened the message with the brief's first line; assert
+	// that exact paste no longer rides in an `agm send` prompt.
+	if strings.Contains(doc, `--prompt "You are a worker session assigned to bead`) {
+		t.Errorf("orchestrator.md still pastes the full worker brief inline; it must hand off via ~/.agm/vroom/prompts/<bead-id>.md and send only a pointer")
+	}
+}
+
 // --- Dispatch Advisor tests (ce-hn8n) ---
 
 func TestRestartTracker_BackoffProgression(t *testing.T) {

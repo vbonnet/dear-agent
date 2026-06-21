@@ -16,9 +16,22 @@ mkdir -p ~/.agm/vroom/heartbeat
 | `trail.jsonl` | JSONL append-only | All 3 | All 3 + humans |
 | `roadmap.jsonl` | JSONL append-only | Meta-O only | Orch + all |
 | `dispatched.jsonl` | JSONL append-only | Orch only | All |
+| `prompts/<bead-id>.md` | Markdown atomic-write | Orch only | Worker `worker-<bead-id>` + humans |
 | `heartbeat/meta-o.json` | JSON atomic-write | Meta-O | Orch, Overseer |
 | `heartbeat/orch.json` | JSON atomic-write | Orch | Meta-O, Overseer |
 | `heartbeat/overseer.json` | JSON atomic-write | Overseer | Meta-O, Orch |
+
+### File-handoff discipline (worker dispatch)
+
+Worker task briefs are handed off as **file artifacts, not inline pasted
+context**. The Orchestrator writes each worker's full brief to
+`~/.agm/vroom/prompts/<bead-id>.md` *before* dispatch, then sends the worker a
+short pointer message that names the file. The worker reads the brief from the
+file and treats it as the source of truth — it never relies on inline pasted
+history that a later context compaction could lose. This keeps dispatch messages
+small (less token waste), makes every handoff auditable on disk (traceability),
+and survives the worker's own context compaction (the file can be re-read). See
+the Orchestrator skill, "Dispatch Undispatched Work".
 
 ## Record Formats
 
@@ -44,8 +57,11 @@ States: `accepted`, `rejected`.
 
 ### Dispatch Record (Orch writes)
 ```json
-{"bead_id":"ce-abc1","session":"worker-ce-abc1","model":"opus","dispatched_at":"2026-06-15T22:05:00Z"}
+{"bead_id":"ce-abc1","session":"worker-ce-abc1","model":"opus-200k","prompt_file":"~/.agm/vroom/prompts/ce-abc1.md","dispatched_at":"2026-06-15T22:05:00Z"}
 ```
+`prompt_file` is the file-artifact brief handed to the worker (see "File-handoff
+discipline" above) — it makes each dispatch's exact instructions auditable after
+the fact.
 
 ### DoD Audit Trail Kinds
 

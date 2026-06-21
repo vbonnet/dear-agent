@@ -306,10 +306,22 @@ models) and in `auto` mode (a detached worker cannot answer approval prompts).
   but never execute it, and exiting plan mode itself raises an approval prompt
   no detached session can self-answer.
 
-Wait a moment for the session to initialize, then send the work prompt. Workers
-**drive the bead through wayfinder** (the SDLC workflow) — not raw execution:
+**File-handoff discipline — write the brief to a file, dispatch a pointer (ce-4tqd).**
+Do NOT paste the full task brief inline into the worker's `agm send` message.
+Inline pasting wastes tokens, leaves no auditable handoff artifact, and is lost
+the moment the worker's context compacts. Instead **always write the brief to
+`~/.agm/vroom/prompts/<bead-id>.md` BEFORE dispatch**, then send the worker a
+short pointer message naming that file. The file is the single source of truth;
+the worker reads it and re-reads it after any compaction.
+
+**Step A — write the brief file (before sending anything).** Substitute the real
+`<bead-id>` and `<title>` into the heredoc body. Write atomically (temp + mv) so
+a partial write can never be read as a complete brief. Workers **drive the bead
+through wayfinder** (the SDLC workflow) — not raw execution:
 ```bash
-agm send msg "worker-<bead-id>" --sender vroom-orchestrator --prompt "You are a worker session assigned to bead <bead-id>: <title>.
+mkdir -p ~/.agm/vroom/prompts
+cat > ~/.agm/vroom/prompts/<bead-id>.md.tmp <<'PROMPT_EOF'
+You are a worker session assigned to bead <bead-id>: <title>.
 
 Your task: resolve this bead by running it through the wayfinder SDLC workflow — NOT raw code-first execution.
 
@@ -340,13 +352,27 @@ Bead closure (DoD — MANDATORY, do NOT skip):
 - Only run 'bd ... close <bead-id>' once mergedAt is non-null. Put the merged PR
   reference (e.g. 'PR #<NNN>') in the close reason so the overseer DoD audit can verify it.
 
-Bead details: run bd --db ~/beads/context-engine/.beads show <bead-id>"
+Bead details: run bd --db ~/beads/context-engine/.beads show <bead-id>
+PROMPT_EOF
+mv ~/.agm/vroom/prompts/<bead-id>.md.tmp ~/.agm/vroom/prompts/<bead-id>.md
 ```
 
-Record the dispatch (note `opus-200k`, matching the spawn):
+**Step B — wait a moment for the session to initialize, then send the POINTER**
+(short message — NOT the brief). The pointer tells the worker to read the file
+and treat it as authoritative:
 ```bash
-printf '{"bead_id":"%s","session":"worker-%s","model":"opus-200k","dispatched_at":"%s"}\n' \
-  "<bead-id>" "<bead-id>" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+agm send msg "worker-<bead-id>" --sender vroom-orchestrator --prompt "You are the worker for bead <bead-id>. Your full task brief is on disk — read it FIRST and follow it exactly; it is the single source of truth.
+
+  cat ~/.agm/vroom/prompts/<bead-id>.md
+
+Do NOT rely on any inline context in this message beyond this pointer. If your context is ever compacted, re-read that file rather than reconstructing the brief from memory. Then run: bd --db ~/beads/context-engine/.beads show <bead-id>"
+```
+
+Record the dispatch (note `opus-200k`, matching the spawn; `prompt_file` records
+the handoff artifact for traceability):
+```bash
+printf '{"bead_id":"%s","session":"worker-%s","model":"opus-200k","prompt_file":"~/.agm/vroom/prompts/%s.md","dispatched_at":"%s"}\n' \
+  "<bead-id>" "<bead-id>" "<bead-id>" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   >> ~/.agm/vroom/dispatched.jsonl
 ```
 
