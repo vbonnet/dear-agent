@@ -69,8 +69,8 @@ Overseer resource escalation indicating the host is under genuine load:
 - CPU/load alert (sustained high load average), or
 - A `critical` resource alert from the Overseer (disk ≥ 95%, FD ≥ 80%, etc.).
 
-When the Overseer sends a `RESOURCE ALERT … Consider pausing worker spawns`
-message (or you observe a critical resource trail record), skip ALL dispatch
+When the Overseer sends a `RESOURCE ALERT` message containing `Consider pausing worker spawns` or `SPAWN-PAUSE`
+(or you observe a critical resource trail record), skip ALL dispatch
 this tick and log `kind: "supervisor.orch.spawn_paused_resource"`. Resume
 dispatch on the next tick once the pressure clears. This is separate from, and
 in addition to, the open-PR firehose cap in Step 6.

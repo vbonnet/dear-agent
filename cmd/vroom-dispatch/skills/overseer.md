@@ -181,6 +181,7 @@ agm session list 2>/dev/null | grep -c "OFFLINE" || echo "0"
 | Swap usage | >= 60% | **Spawn-pause signal** to Orch (resource exhaustion) |
 | CPU / load average | sustained high (load ≥ cores, ~CPU >= 90%) | **Spawn-pause signal** to Orch |
 | Open FD fraction | >= 80% | Escalate + identify FD hogs (**spawn-pause signal**) |
+| Disk usage | >= 95% | **Spawn-pause signal** to Orch |
 | Vnode fraction | (ignore) | Do NOT escalate — ~100% is normal macOS steady state, not exhaustion |
 | Gopls processes | > 5 | Escalate (known leak pattern — see ce-710r) |
 | Stranded worktrees | > 10 | Recommend cleanup |
