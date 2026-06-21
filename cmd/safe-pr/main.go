@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/internal/safepr"
@@ -232,15 +233,19 @@ func armAutoMerge(prURL string, timeout time.Duration) error {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "gh", "pr", "merge", "--auto", "--squash", prURL)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	var errBuf bytes.Buffer
+	cmd.Stdout = nil // discard: success message ("✓ Armed auto-merge…") must not pollute safe-pr stdout
+	cmd.Stderr = &errBuf
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1")
 
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("gh pr merge --auto exceeded %s and was killed", timeout)
 		}
-		return err
+		if msg := strings.TrimSpace(errBuf.String()); msg != "" {
+			return fmt.Errorf("gh pr merge --auto: %w\nsafe-pr: WARNING: gh stderr: %s", err, msg)
+		}
+		return fmt.Errorf("gh pr merge --auto: %w", err)
 	}
 	return nil
 }
