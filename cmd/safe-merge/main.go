@@ -51,6 +51,7 @@ func run(argv []string) error {
 	watch := fs.Bool("watch", false, "poll until all gates pass or timeout elapses")
 	watchTimeout := fs.Duration("watch-timeout", safegit.DefaultWatchTimeout, "how long to wait in watch mode")
 	dryRun := fs.Bool("dry-run", false, "check gates but do not execute the merge")
+	configPath := fs.String("config", "", "path to .safe-merge.yml (default: repo root; absent → P4 gates skipped)")
 
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -87,6 +88,7 @@ func run(argv []string) error {
 		DryRun:       *dryRun,
 		Watch:        *watch,
 		WatchTimeout: *watchTimeout,
+		ConfigPath:   *configPath,
 	})
 }
 
@@ -103,6 +105,7 @@ Flags:
   --watch             poll until all gates pass (default: one-shot)
   --watch-timeout <dur>  how long to wait in watch mode (default: 45m)
   --dry-run           check gates only; do not execute merge
+  --config <path>     path to .safe-merge.yml (default: repo root)
   -h, --help          show this help
 
 Gates enforced before merging:
@@ -111,9 +114,27 @@ Gates enforced before merging:
   3. Head commit ≥ 5 minutes old (soak time)
   4. Review bot (gemini-code-assist) has posted
 
+P4 gates (only when a .safe-merge.yml is present — see below):
+  - expected_reviewers: each listed reviewer must have a review newer than the
+    head SHA push. A review that never arrives, or one that predates the last
+    push (stale), is surfaced — never a silent pass.
+  - flaky_checks: a failing flaky check gets one sanctioned rerun
+    (gh run rerun --failed); a second failure is a real block.
+
+.safe-merge.yml (repo root or --config):
+  expected_reviewers:
+    - login: "gemini-code-assist[bot]"
+      timeout_minutes: 30
+      require_newer_than_push: true
+  flaky_checks:
+    - name: "TestFullLifecycle"
+      max_retries: 1
+
 Watch mode:
   With --watch, safe-merge polls every 30 seconds until all gates pass or
-  --watch-timeout expires. Useful when CI is still running.
+  --watch-timeout expires. Useful when CI is still running. Flake-valve retry
+  counts persist across watch attempts so a check is never rerun beyond
+  max_retries.
 
 If the review bot gate is stuck (e.g. quota exhaustion), escalate:
   agm escalate --action "merge PR <num>" --reason "<why bot is unavailable>"
