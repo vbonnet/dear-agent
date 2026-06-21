@@ -14,11 +14,20 @@ mkdir -p ~/.agm/vroom/heartbeat
 | File | Format | Writer | Readers |
 |------|--------|--------|---------|
 | `trail.jsonl` | JSONL append-only | All 3 | All 3 + humans |
-| `roadmap.jsonl` | JSONL append-only | Meta-O only | Orch + all |
-| `dispatched.jsonl` | JSONL append-only | Orch only | All |
+| `roadmap.jsonl` | JSONL append-only | Meta-O only | advisory log (see note) |
 | `heartbeat/meta-o.json` | JSON atomic-write | Meta-O | Orch, Overseer |
 | `heartbeat/orch.json` | JSON atomic-write | Orch | Meta-O, Overseer |
 | `heartbeat/overseer.json` | JSON atomic-write | Overseer | Meta-O, Orch |
+
+> **Beads are the dispatch source of truth (ce-1jm2).** The Orchestrator
+> dispatches **directly from `bd ready`** via `vroom-dispatch-direct` — it no
+> longer reads a `roadmap.jsonl` "accepted" projection, and there is no
+> `dispatched.jsonl` ledger (both were the retired prompt-file layer). In-flight
+> state is derived from live `worker-<id>` sessions + open PRs. `roadmap.jsonl`
+> remains an advisory record of Meta-O's prioritization rationale, but it does
+> **not** gate dispatch: a Meta-O "reject" only takes effect when Meta-O acts on
+> the bead itself (closes it, or sets it blocked/low-priority), which is what
+> removes it from `bd ready`.
 
 ## Record Formats
 
@@ -36,16 +45,19 @@ printf '{"ts":"%s","role":"%s","kind":"%s","payload":%s}\n' \
   >> ~/.agm/vroom/trail.jsonl
 ```
 
-### Roadmap Record (Meta-O writes)
+### Roadmap Record (Meta-O writes — advisory only)
 ```json
 {"bead_id":"ce-abc1","title":"Fix auth timeout","priority":"P1","state":"accepted","reason":"Blocking 3 other beads","decided_at":"2026-06-15T22:00:00Z"}
 ```
-States: `accepted`, `rejected`.
+States: `accepted`, `rejected`. This is an advisory rationale log; it no longer
+gates dispatch (ce-1jm2). To actually keep a bead out of dispatch, Meta-O must
+act on the bead in `bd` (close it, or mark it blocked/low-priority) so it drops
+out of `bd ready`.
 
-### Dispatch Record (Orch writes)
-```json
-{"bead_id":"ce-abc1","session":"worker-ce-abc1","model":"opus","dispatched_at":"2026-06-15T22:05:00Z"}
-```
+> The `dispatched.jsonl` ledger that previously recorded each dispatch was
+> retired with the prompt-file layer (ce-1jm2). Dispatch is now derived from live
+> `worker-<id>` sessions and open PRs; the `supervisor.orch.dispatched` trail
+> record remains the audit trail.
 
 ### DoD Audit Trail Kinds
 
