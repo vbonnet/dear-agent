@@ -135,8 +135,8 @@ func ValidateToken(token string) bool {
 		t.Errorf("Expected batch review type, got %s", batchResult.ReviewType)
 	}
 
-	// Batch should have fewer personas
-	if len(batchResult.PersonaResults) > 3 {
+	// Batch should have fewer personas: 3 code-quality (Stage 2) + 1 spec-compliance (Stage 1)
+	if len(batchResult.PersonaResults) > 4 {
 		t.Errorf("Batch review should use limited personas, got %d", len(batchResult.PersonaResults))
 	}
 }

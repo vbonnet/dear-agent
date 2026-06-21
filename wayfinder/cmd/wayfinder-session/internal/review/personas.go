@@ -11,12 +11,66 @@ type PersonaType string
 
 // Built-in persona type values.
 const (
+	// PersonaSpecCompliance is the Stage 1 persona: it verifies the
+	// implementation satisfies the documented spec/requirements before any
+	// code-quality review runs.
+	PersonaSpecCompliance PersonaType = "spec_compliance"
+
+	// Code-quality personas (Stage 2).
 	PersonaSecurity        PersonaType = "security"
 	PersonaPerformance     PersonaType = "performance"
 	PersonaMaintainability PersonaType = "maintainability"
 	PersonaUX              PersonaType = "ux"
 	PersonaReliability     PersonaType = "reliability"
 )
+
+// ReviewStage identifies which stage of the two-stage review a persona belongs
+// to. Stage 1 (spec compliance) runs before Stage 2 (code quality): an artifact
+// that is well-written but does not satisfy the spec must still fail review.
+type ReviewStage int
+
+// Review stage values.
+const (
+	// StageSpecCompliance is Stage 1 — does the work satisfy the spec/requirements?
+	StageSpecCompliance ReviewStage = 1
+	// StageCodeQuality is Stage 2 — is the code secure, performant, maintainable, etc.?
+	StageCodeQuality ReviewStage = 2
+)
+
+// PersonaStage reports which review stage a persona belongs to.
+func PersonaStage(persona PersonaType) ReviewStage {
+	if persona == PersonaSpecCompliance {
+		return StageSpecCompliance
+	}
+	return StageCodeQuality
+}
+
+// antiSycophancyClause is prepended to every persona prompt. Research on
+// multi-step agent review (superpowers/supermemory landscape, OSS dispatch
+// ID-002) found that workers reviewing a prior step tend to validate it rather
+// than scrutinize it. This directive instructs the reviewing worker to stay
+// independent and flag disagreements instead of rubber-stamping the prior step.
+const antiSycophancyClause = `ANTI-SYCOPHANCY DIRECTIVE (read this first):
+You are an INDEPENDENT reviewer, not a collaborator. Your job is to find problems,
+not to validate or agree with the prior step.
+- Do NOT assume the work is correct just because a previous worker (or another
+  reviewer) produced or approved it. Re-derive your own conclusion from the evidence.
+- Do NOT soften, downplay, or omit findings to be agreeable, and do NOT add praise.
+- If you DISAGREE with a prior decision, requirement interpretation, or claim, say so
+  explicitly and explain why — flag the disagreement rather than rationalizing it away.
+- Absence of evidence is not evidence of correctness: if you cannot verify a claim,
+  report it as UNVERIFIED rather than assuming it holds.
+- It is better to raise a concern that turns out minor than to stay silent to avoid friction.`
+
+// composeReviewPrompt assembles the full worker prompt for a persona: the
+// anti-sycophancy directive, the stage framing, then the persona-specific body.
+func composeReviewPrompt(persona PersonaType, body string) string {
+	stage := "STAGE 2 of 2 — CODE QUALITY"
+	if PersonaStage(persona) == StageSpecCompliance {
+		stage = "STAGE 1 of 2 — SPEC COMPLIANCE"
+	}
+	return antiSycophancyClause + "\n\nREVIEW STAGE: " + stage + "\n\n" + body
+}
 
 // Confidence represents the confidence level of a review result
 type Confidence string
@@ -47,9 +101,12 @@ type PersonaConfig struct {
 	Prompt      string
 }
 
-// GetPersonaConfig returns the configuration for a specific persona
+// GetPersonaConfig returns the configuration for a specific persona. The
+// returned Prompt is the full worker prompt: anti-sycophancy directive + stage
+// framing + persona-specific body.
 func GetPersonaConfig(persona PersonaType) PersonaConfig {
 	configs := map[PersonaType]PersonaConfig{
+		PersonaSpecCompliance:  specCompliancePersonaConfig(),
 		PersonaSecurity:        securityPersonaConfig(),
 		PersonaPerformance:     performancePersonaConfig(),
 		PersonaMaintainability: maintainabilityPersonaConfig(),
@@ -57,7 +114,65 @@ func GetPersonaConfig(persona PersonaType) PersonaConfig {
 		PersonaReliability:     reliabilityPersonaConfig(),
 	}
 
-	return configs[persona]
+	cfg := configs[persona]
+	// Unknown personas have no body; don't fabricate a prompt for them.
+	if cfg.Name == "" {
+		return cfg
+	}
+	cfg.Prompt = composeReviewPrompt(persona, cfg.Prompt)
+	return cfg
+}
+
+// specCompliancePersonaConfig defines the Stage 1 Spec Compliance Persona. It
+// checks whether the implementation actually satisfies the task's spec and
+// requirements — independent of code quality, which is Stage 2.
+func specCompliancePersonaConfig() PersonaConfig {
+	return PersonaConfig{
+		Name:        "Spec Compliance Reviewer",
+		Description: "Stage 1: verifies the implementation satisfies the documented spec and requirements",
+		FocusAreas: []string{
+			"Acceptance-criteria coverage",
+			"Requirement-to-implementation traceability",
+			"Unimplemented or stubbed requirements",
+			"Behavior that silently diverges from the spec",
+			"Out-of-scope changes / scope creep",
+			"Undocumented behavior changes",
+			"Spec contradictions",
+		},
+		Patterns: map[string]IssueSeverity{
+			// P1 - Requirement clearly not met
+			`(?i)panic\(\s*["'][^"']*not\s+implemented`: SeverityP1, // not-implemented panic
+			`(?i)not\s+implemented`:                     SeverityP1, // not-implemented marker
+			`(?i)unimplemented`:                         SeverityP1, // unimplemented marker
+
+			// P2 - Spec gap that needs follow-up
+			`(?i)TODO[^\n]*(spec|requirement|acceptance)`:  SeverityP2, // spec TODOs
+			`(?i)FIXME[^\n]*(spec|requirement|acceptance)`: SeverityP2, // spec FIXMEs
+			`(?i)out[\s-]?of[\s-]?scope`:                   SeverityP2, // self-declared scope creep
+		},
+		Prompt: `You are a Spec Compliance Reviewer performing STAGE 1 of a two-stage review.
+This stage runs BEFORE any code-quality review. Code that is well-written but does
+NOT satisfy the spec MUST still fail this stage — getting the right thing built comes
+before building the thing right.
+
+Check the implementation against the task's spec / requirements / acceptance criteria:
+1. Is every stated requirement actually implemented, not just stubbed or mocked?
+2. Does the observable behavior match the spec, or does it silently diverge?
+3. Are the acceptance criteria demonstrably met (by tests or reproducible behavior)?
+4. Are there out-of-scope changes or scope creep not called for by the spec?
+5. Are spec-mandated edge cases handled?
+6. Does the implementation contradict the spec anywhere?
+
+Do NOT evaluate code style, performance, or security here — that is Stage 2. If the
+spec itself is ambiguous or you cannot confirm a requirement is met, flag it as
+unverified rather than assuming compliance.
+
+Classify findings as:
+- P0 (Critical): A core requirement is unmet, or behavior contradicts the spec
+- P1 (High): A requirement is only partially met, or a stated acceptance criterion is unverifiable
+- P2 (Medium): Minor spec gaps, ambiguous coverage, or undocumented deviations
+- P3 (Low): Cosmetic spec/traceability notes`,
+	}
 }
 
 // securityPersonaConfig defines the Security Persona
@@ -335,8 +450,14 @@ func checkPattern(content, pattern string, severity IssueSeverity, filePath stri
 	return false, ReviewIssue{}
 }
 
-// AllPersonas returns all available persona types
+// AllPersonas returns all available persona types, in review order: the Stage 1
+// spec-compliance persona first, then the Stage 2 code-quality personas.
 func AllPersonas() []PersonaType {
+	return append([]PersonaType{PersonaSpecCompliance}, CodeQualityPersonas()...)
+}
+
+// CodeQualityPersonas returns the Stage 2 (code-quality) personas.
+func CodeQualityPersonas() []PersonaType {
 	return []PersonaType{
 		PersonaSecurity,
 		PersonaPerformance,

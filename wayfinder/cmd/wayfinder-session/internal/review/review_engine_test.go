@@ -286,10 +286,26 @@ func TestReviewBatch(t *testing.T) {
 		t.Errorf("Expected review type %s, got %s", ReviewTypeBatch, result.ReviewType)
 	}
 
-	// Batch reviews should have fewer personas (efficiency)
-	if len(result.PersonaResults) > 3 {
+	// Batch reviews should have fewer personas (efficiency): 3 code-quality
+	// personas (Stage 2) plus the Stage 1 spec-compliance persona.
+	if len(result.PersonaResults) > 4 {
 		t.Errorf("Batch review should use limited personas, got %d", len(result.PersonaResults))
 	}
+
+	// Stage 1 (spec compliance) must run as part of the batch review.
+	if !hasPersona(result.PersonaResults, PersonaSpecCompliance) {
+		t.Error("Batch review should include the Stage 1 spec-compliance persona")
+	}
+}
+
+// hasPersona reports whether a persona produced a result.
+func hasPersona(results []PersonaResult, persona PersonaType) bool {
+	for _, r := range results {
+		if r.Persona == persona {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSelectPersonasForTask(t *testing.T) {
