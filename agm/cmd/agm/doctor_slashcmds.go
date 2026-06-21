@@ -75,12 +75,7 @@ func runDoctorSlashCmds(cmd *cobra.Command, args []string) error {
 
 	// 3. Output
 	if doctorSlashCmdsJSON {
-		data, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal report: %w", err)
-		}
-		fmt.Println(string(data))
-		return nil
+		return printJSON(report)
 	}
 
 	// Text output

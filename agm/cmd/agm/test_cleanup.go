@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -122,12 +121,10 @@ func runTestCleanup(cmd *cobra.Command, args []string) error {
 			return cleanupErr
 		}
 
-		// Print JSON output
-		jsonBytes, err := json.MarshalIndent(status, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal JSON: %w", err)
+		// Print JSON output via the central path (honors --fields).
+		if err := printJSON(status); err != nil {
+			return err
 		}
-		fmt.Println(string(jsonBytes))
 	}
 
 	return nil

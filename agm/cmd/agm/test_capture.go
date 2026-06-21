@@ -5,7 +5,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -102,11 +101,9 @@ func runTestCapture(cmd *cobra.Command, args []string) error {
 	}
 
 	if testCaptureJSON {
-		jsonBytes, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal JSON: %w", err)
+		if err := printJSON(result); err != nil {
+			return err
 		}
-		fmt.Println(string(jsonBytes))
 	} else {
 		// Human-readable output - just print the captured lines
 		for _, line := range lines {

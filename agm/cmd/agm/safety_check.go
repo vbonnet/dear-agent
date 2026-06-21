@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -81,11 +80,9 @@ func runSafetyCheck(cmd *cobra.Command, args []string) error {
 	})
 
 	if safetyCheckJSON {
-		data, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal JSON: %w", err)
+		if err := printJSON(result); err != nil {
+			return err
 		}
-		fmt.Println(string(data))
 	} else {
 		if result.Safe {
 			fmt.Printf("✓ Session '%s' is safe for interaction\n", sessionName)
