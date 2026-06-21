@@ -30,6 +30,8 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/internal/safepr"
@@ -49,6 +51,7 @@ type parsedArgs struct {
 	req          safepr.Request
 	wayfinderDir string
 	timeout      time.Duration
+	verifyCI     bool
 	showedHelp   bool
 }
 
@@ -85,6 +88,11 @@ func parseArgs(argv []string) (*parsedArgs, error) {
 			}
 			p.timeout = d
 			i++
+		case "--verify-ci":
+			// Opt-in: after create+arm, confirm CI actually started on the new
+			// PR's head SHA and warn (never fail) if it did not. Off by default
+			// so the common create path is never slowed by a poll.
+			p.verifyCI = true
 		default:
 			p.req.GhArgs = append(p.req.GhArgs, arg)
 		}
@@ -121,7 +129,7 @@ func run(argv []string) error {
 		}
 	}()
 
-	return execGh(&p.req, p.timeout)
+	return execGh(&p.req, p.timeout, p.verifyCI)
 }
 
 // prURLRe matches the PR URL gh prints on success. Anchored to a word
@@ -131,7 +139,7 @@ var prURLRe = regexp.MustCompile(`\bhttps://github\.com/[^\s]+/pull/\d+\b`)
 // execGh runs the stamped gh command, bounded by timeout and with
 // GIT_TERMINAL_PROMPT=0, then writes the audit record and span. The audit
 // line is written on every outcome, success or failure.
-func execGh(req *safepr.Request, timeout time.Duration) error {
+func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 	if timeout <= 0 {
 		timeout = safepr.DefaultTimeout
 	}
@@ -209,8 +217,101 @@ func execGh(req *safepr.Request, timeout time.Duration) error {
 				"allow auto-merge (needs allow_auto_merge=true); arm it manually once enabled with: "+
 				"gh pr merge --auto --squash %s", prURL, mergeErr, prURL)
 		}
+		// Opt-in safety net for the push-then-PR-open race (bead ce-np2s): an
+		// armed PR whose head SHA never gets check-runs would wait on auto-merge
+		// forever with no signal. When asked, confirm CI actually started and
+		// warn loudly if it did not — a warning only, since the PR exists and
+		// the standalone scan-no-checks sweep is the durable backstop.
+		if verifyCI {
+			warnIfNoCI(prURL)
+		}
 	}
 	return nil
+}
+
+// verifyCIPollWindow bounds how long warnIfNoCI waits for the first check-run
+// to register on a freshly created PR's head SHA before warning.
+const verifyCIPollWindow = 60 * time.Second
+
+// warnIfNoCI polls the new PR's head SHA for any check-run and, if none has
+// appeared within verifyCIPollWindow, prints a warning naming the PR and the
+// recovery command. It never returns an error: the PR was created and armed, so
+// a missing-CI condition is surfaced, not treated as a create failure. Any gh
+// lookup failure along the way is silently ignored — this is a best-effort
+// safety net, not a gate.
+func warnIfNoCI(prURL string) {
+	repo, num, ok := parsePRURL(prURL)
+	if !ok {
+		return
+	}
+	sha := ghHeadSHA(repo, num)
+	if sha == "" {
+		return
+	}
+	deadline := time.Now().Add(verifyCIPollWindow)
+	for {
+		if ghCheckRunCount(repo, sha) > 0 {
+			return // CI registered — nothing to warn about.
+		}
+		if time.Now().After(deadline) {
+			fmt.Fprintf(os.Stderr, "safe-pr: WARNING: PR %s head %s still has 0 CI check-runs after %s "+
+				"— the CI trigger may have been dropped (push-then-PR-open race). Re-trigger with: "+
+				"scan-no-checks --repo %s --trigger\n", prURL, shortSHA(sha), verifyCIPollWindow, repo)
+			return
+		}
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// prURLPathRe captures owner/repo and PR number from a github.com PR URL.
+var prURLPathRe = regexp.MustCompile(`github\.com/([^/]+/[^/]+)/pull/(\d+)\b`)
+
+// parsePRURL extracts "owner/repo" and the PR number string from a PR URL.
+func parsePRURL(prURL string) (repo, number string, ok bool) {
+	m := prURLPathRe.FindStringSubmatch(prURL)
+	if m == nil {
+		return "", "", false
+	}
+	return m[1], m[2], true
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
+// ghHeadSHA returns the head SHA of PR number num in repo, or "" on any error.
+func ghHeadSHA(repo, num string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "pr", "view", num, "--repo", repo, "--json", "headRefOid", "--jq", ".headRefOid")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// ghCheckRunCount returns the number of check-runs reported against sha, or 0 on
+// any error (treated as "not yet started").
+func ghCheckRunCount(repo, sha string) int {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "api",
+		fmt.Sprintf("repos/%s/commits/%s/check-runs", repo, sha), "--jq", ".total_count")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // armAutoMerge enables squash auto-merge on prURL so the PR merges itself once
@@ -252,6 +353,9 @@ Flags:
   --wayfinder <dir>   wayfinder project dir holding WAYFINDER-STATUS.md
                       (default: $WAYFINDER_PROJECT_DIR); session must be in_progress
   --timeout <dur>     kill gh after this long (default 60s)
+  --verify-ci         after create, poll the new PR's head SHA and warn (never
+                      fail) if no CI check-run starts within 60s — catches the
+                      push-then-PR-open race that strands a PR with 0 checks
   -h, --help          show this help
 
 All other arguments pass through to 'gh pr create' / 'gh pr close'.
