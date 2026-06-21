@@ -128,6 +128,14 @@ Examples:
   agm session archive my-session # Archive a session
   agm admin fix-uuid             # Fix UUID associations
 
+Exit Codes (for agents branching on $?):
+  0  success
+  1  generic / unknown error
+  2  auth failure (unauthenticated / missing API key / permission denied)
+  3  bad input (invalid args, validation failure)
+  4  state conflict (archived, already-running, confirmation required)
+  5  not found (session / resource does not exist)
+
 Global Flags:
   -C, --directory <path>    Working directory (default: current directory)`,
 	Args: cobra.ArbitraryArgs, // Allow any arguments to reach runDefaultCommand
@@ -698,7 +706,10 @@ func run() int {
 	managerBackend = mgr
 
 	if err := ExecuteWithDeps(adapter); err != nil {
-		return 1
+		// Map the failure onto the exit-code taxonomy so agent consumers can
+		// branch on $? (2=auth, 3=bad-input, 4=state-conflict, 5=not-found)
+		// without parsing stderr. Unmapped errors fall through to 1.
+		return exitCodeFromError(err)
 	}
-	return 0
+	return ExitOK
 }
