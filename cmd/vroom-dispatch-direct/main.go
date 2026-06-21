@@ -394,10 +394,7 @@ func main() {
 
 	// Cooperative capacity cap: never let more than maxWorkers workers run at
 	// once. budget is what remains under the cap right now.
-	budget := *maxWorkers - len(live)
-	if budget < 0 {
-		budget = 0
-	}
+	budget := max(*maxWorkers-len(live), 0)
 
 	dispatched := 0
 	for _, b := range candidates {
