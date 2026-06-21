@@ -173,20 +173,27 @@ agm session list 2>/dev/null | grep -c "OFFLINE" || echo "0"
 |--------|-----------|--------|
 | Disk usage | >= 90% | Escalate to Meta-O + Orch |
 | Swap usage | >= 50% | Escalate (early thrashing indicator) |
-| Swap usage | >= 60% | **spawn-pause**: signal Orch to pause dispatch (resource exhaustion) |
-| CPU 5-min load | > 90% of ncpu | **spawn-pause**: signal Orch to pause dispatch (resource exhaustion) |
-| Open FD fraction | >= 80% | Escalate + identify FD hogs (spawn-pause if climbing toward exhaustion) |
+| Swap usage | >= 60% | **Spawn-pause signal** to Orch (resource exhaustion) |
+| CPU / load average | sustained high (load ≥ cores, ~CPU >= 90%) | **Spawn-pause signal** to Orch |
+| Open FD fraction | >= 80% | Escalate + identify FD hogs (**spawn-pause signal**) |
+| Disk usage | >= 95% | **Spawn-pause signal** to Orch |
 | Vnode fraction | (ignore) | Do NOT escalate — ~100% is normal macOS steady state, not exhaustion |
 | Gopls processes | > 5 | Escalate (known leak pattern — see ce-710r) |
 | Stranded worktrees | > 10 | Recommend cleanup |
 | Orphaned sessions | > 0 | Recommend archive/kill |
 
-> **Automated backstop (ce-710r.3):** the `gopls-watchdog` launch agent runs
-> every 2 minutes — it samples orphaned-gopls count/RSS and system FD-table
-> usage, reaps orphaned gopls automatically (PPID==1 only, never live sessions),
-> and logs a `watchdog.gopls.alarm` record to `~/.agm/vroom/trail.jsonl`. If you
-> see recent `watchdog.gopls.alarm` records, remediation has already fired; your
-> job is to confirm the alarm cleared, not to re-run the reap.
+**Spawn-pause signal — the only thing that pauses Orchestrator dispatch.**
+Resource exhaustion is the **sole** condition that should make the Orchestrator
+pause worker dispatch. Meta-O staleness does NOT — the Orchestrator handles that
+with a graduated breadth filter (narrow priorities), never a pause. When swap
+≥ 60%, the host is CPU-saturated (load average ≥ core count / CPU ≥ 90%), disk
+≥ 95%, or FD ≥ 80%, send the Orchestrator an explicit spawn-pause signal so it
+skips dispatch until the pressure clears:
+```bash
+agm send msg vroom-orchestrator --sender vroom-overseer --priority critical \
+  --prompt "RESOURCE ALERT: <metric> at <value> (threshold <threshold>). SPAWN-PAUSE: skip worker dispatch until this clears."
+```
+Record `kind: "supervisor.over.spawn_pause_signal"`.
 
 For each threshold breach, write trail record:
 ```bash
@@ -509,6 +516,7 @@ After each tick, briefly note:
 
 | Situation | Action |
 |-----------|--------|
+| Swap >= 60% / CPU >= 90% / disk >= 95% / FD >= 80% | **Spawn-pause signal** to Orch — the only condition that pauses dispatch |
 | Disk >= 95% | Critical to both peers, recommend pause |
 | Swap >= 60% or CPU 5-min load > 90% of ncpu | **spawn-pause**: critical to Orch, "Consider pausing worker spawns until this recovers" |
 | Resource metric back under threshold | Normal to Orch: "RESOURCE RECOVERED … Safe to resume worker spawns" |
