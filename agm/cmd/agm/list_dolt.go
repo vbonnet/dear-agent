@@ -112,8 +112,10 @@ Examples:
 		}
 
 		// For table output, use ops result summaries
-		// Print a simple table from SessionSummary data
-		printSessionSummaryTable(cmd, result.Sessions, listTrust)
+		// Print a simple table from SessionSummary data. Show the OUTCOME column
+		// with --all so the archive pile is triage-legible (archived rows carry
+		// completed|crashed|killed|gc-stale instead of an indistinguishable '?').
+		printSessionSummaryTable(cmd, result.Sessions, listTrust, listAll)
 
 		// Show orphan tmux sessions if any
 		if len(result.OrphanTmuxSessions) > 0 {
@@ -160,9 +162,20 @@ func shortStatus(s ops.SessionSummary) string {
 		return "◐" // active & detached
 	case "stopped":
 		return "○"
+	case "archived":
+		return "▪"
 	default:
 		return "?"
 	}
+}
+
+// outcomeCell renders the per-row OUTCOME column value. Non-archived sessions
+// have no outcome, shown as "-".
+func outcomeCell(s ops.SessionSummary) string {
+	if s.Outcome == "" {
+		return "-"
+	}
+	return s.Outcome
 }
 
 // shortHarness maps harness names to compact display codes.
@@ -204,7 +217,9 @@ func compactProject(project string) string {
 }
 
 // printSessionSummaryTable prints a compact table of session summaries.
-func printSessionSummaryTable(cmd *cobra.Command, sessions []ops.SessionSummary, showTrust bool) {
+// When showOutcome is true (e.g. `list --all`), an OUTCOME column is inserted
+// so archived rows are distinguishable by how they ended.
+func printSessionSummaryTable(cmd *cobra.Command, sessions []ops.SessionSummary, showTrust, showOutcome bool) {
 	out := cmd.OutOrStdout()
 
 	// Sort alphabetically by name
@@ -213,22 +228,31 @@ func printSessionSummaryTable(cmd *cobra.Command, sessions []ops.SessionSummary,
 	})
 
 	// Legend on separate lines
-	_, _ = fmt.Fprintln(out, "Status  (S): ●=active & attached  ◐=active & detached  ○=stopped")
+	_, _ = fmt.Fprintln(out, "Status  (S): ●=active & attached  ◐=active & detached  ○=stopped  ▪=archived")
 	_, _ = fmt.Fprintln(out, "Harness (H): cc=claude  gem=gemini  cdx=codex  oc=opencode")
 	_, _ = fmt.Fprintln(out)
 
-	// Header
-	if showTrust {
-		_, _ = fmt.Fprintf(out, "%-28s %s %-3s %5s %-24s %s\n",
-			"NAME", "S", "H", "TRUST", "PROJECT", "TAGS")
-		_, _ = fmt.Fprintf(out, "%-28s %s %-3s %5s %-24s %s\n",
-			"---", "-", "--", "-----", "-------", "----")
-	} else {
-		_, _ = fmt.Fprintf(out, "%-28s %s %-3s %-24s %s\n",
-			"NAME", "S", "H", "PROJECT", "TAGS")
-		_, _ = fmt.Fprintf(out, "%-28s %s %-3s %-24s %s\n",
-			"---", "-", "--", "-------", "----")
+	// Build the format string and headers dynamically so the optional OUTCOME
+	// and TRUST columns compose without a 2x2 explosion of printf literals.
+	header := []any{"NAME", "S", "H"}
+	rule := []any{"---", "-", "--"}
+	format := "%-28s %s %-3s"
+	if showOutcome {
+		format += " %-9s"
+		header = append(header, "OUTCOME")
+		rule = append(rule, "-------")
 	}
+	if showTrust {
+		format += " %5s"
+		header = append(header, "TRUST")
+		rule = append(rule, "-----")
+	}
+	format += " %-24s %s\n"
+	header = append(header, "PROJECT", "TAGS")
+	rule = append(rule, "-------", "----")
+
+	_, _ = fmt.Fprintf(out, format, header...)
+	_, _ = fmt.Fprintf(out, format, rule...)
 
 	for _, s := range sessions {
 		name := s.Name
@@ -240,14 +264,15 @@ func printSessionSummaryTable(cmd *cobra.Command, sessions []ops.SessionSummary,
 		if len(tags) > 32 {
 			tags = tags[:29] + "..."
 		}
-		if showTrust {
-			trustScore := lookupTrustScore(s.Name)
-			_, _ = fmt.Fprintf(out, "%-28s %s %-3s %5d %-24s %s\n",
-				name, shortStatus(s), shortHarness(s.Harness), trustScore, project, tags)
-		} else {
-			_, _ = fmt.Fprintf(out, "%-28s %s %-3s %-24s %s\n",
-				name, shortStatus(s), shortHarness(s.Harness), project, tags)
+		row := []any{name, shortStatus(s), shortHarness(s.Harness)}
+		if showOutcome {
+			row = append(row, outcomeCell(s))
 		}
+		if showTrust {
+			row = append(row, fmt.Sprintf("%5d", lookupTrustScore(s.Name)))
+		}
+		row = append(row, project, tags)
+		_, _ = fmt.Fprintf(out, format, row...)
 	}
 }
 

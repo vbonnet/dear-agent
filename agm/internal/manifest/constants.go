@@ -11,6 +11,20 @@ const (
 	// LifecycleArchived marks a session that has been archived.
 	LifecycleArchived = "archived"
 
+	// OutcomeCompleted marks a session that was archived after finishing
+	// its work normally (default for `agm session archive` / auto-archive).
+	OutcomeCompleted SessionOutcome = "completed"
+	// OutcomeCrashed marks a session that was archived after an abnormal exit.
+	OutcomeCrashed SessionOutcome = "crashed"
+	// OutcomeKilled marks a session that was archived after being killed.
+	OutcomeKilled SessionOutcome = "killed"
+	// OutcomeGCStale marks a session that was archived by garbage collection
+	// for being stale/abandoned.
+	OutcomeGCStale SessionOutcome = "gc-stale"
+	// OutcomeUnknown is the zero value for sessions archived before outcome
+	// stamping existed (or never stamped).
+	OutcomeUnknown SessionOutcome = ""
+
 	// WorkflowPhaseResearch indicates the session is in the research phase.
 	// Workflow phase constants track where a session is in its research/delegation
 	// lifecycle, independent of the tmux-level State (DONE/WORKING/etc).

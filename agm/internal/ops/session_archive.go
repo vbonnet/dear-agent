@@ -26,6 +26,10 @@ type ArchiveSessionRequest struct {
 	Force bool `json:"force,omitempty"`
 	// KeepSandbox preserves the sandbox directory for debugging instead of removing it.
 	KeepSandbox bool `json:"keep_sandbox,omitempty"`
+	// Outcome records why the session is being archived (completed|crashed|
+	// killed|gc-stale). When empty, ArchiveSession defaults it to
+	// manifest.OutcomeCompleted so every archived record is triage-legible.
+	Outcome manifest.SessionOutcome `json:"outcome,omitempty"`
 	// AllowSupervisorReap bypasses the supervisor-protection guard (but not the
 	// active-tmux or verification guards). Set by gc when reaping a STOPPED
 	// protected-role orphan that has no live tmux pane; never set for live
@@ -39,6 +43,7 @@ type ArchiveSessionResult struct {
 	SessionID           string                          `json:"session_id"`
 	Name                string                          `json:"name"`
 	PreviousStatus      string                          `json:"previous_status"`
+	Outcome             manifest.SessionOutcome         `json:"outcome,omitempty"`
 	DryRun              bool                            `json:"dry_run,omitempty"`
 	Verification        *session.CompletionVerification `json:"verification,omitempty"`
 	MCPProcessesCleaned int                             `json:"mcp_processes_cleaned,omitempty"`
@@ -102,6 +107,13 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 	}
 
 	m.Lifecycle = manifest.LifecycleArchived
+	// Stamp the outcome so the archived record is triage-legible. Default to
+	// "completed" — the common archive path is a session that finished normally.
+	outcome := req.Outcome
+	if outcome == manifest.OutcomeUnknown {
+		outcome = manifest.OutcomeCompleted
+	}
+	m.Outcome = outcome
 	m.UpdatedAt = time.Now()
 	if err := ctx.Storage.UpdateSession(m); err != nil {
 		return nil, ErrStorageError("archive_session", err)
@@ -114,6 +126,7 @@ func ArchiveSession(ctx *OpContext, req *ArchiveSessionRequest) (*ArchiveSession
 		SessionID:           m.SessionID,
 		Name:                m.Name,
 		PreviousStatus:      previousStatus,
+		Outcome:             outcome,
 		Verification:        verification,
 		MCPProcessesCleaned: mcpKilled,
 		SandboxCleaned:      postCleanup.SandboxRemoved,
