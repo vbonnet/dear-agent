@@ -349,6 +349,9 @@ func prInfo(ctx context.Context, repo string, prNum int) (merged bool, state str
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return false, "", nil, ctx.Err()
+		}
 		return false, "", nil, fmt.Errorf("gh pr view %d: %w (stderr: %s)", prNum, err, stderr.String())
 	}
 
