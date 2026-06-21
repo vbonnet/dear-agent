@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent/openai"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // TestOpenAIAdapterImplementsAgentInterface verifies OpenAIAdapter implements Agent interface.
@@ -315,6 +317,68 @@ func TestGetSessionStatus(t *testing.T) {
 	}
 	if status != StatusActive {
 		t.Errorf("expected status %s, got %s", StatusActive, status)
+	}
+}
+
+// TestGetSessionStatusCodexIdle verifies that, for a codex-cli-style session
+// whose title is a live tmux pane showing the Codex composer, GetSessionStatus
+// refines Active into Idle. The session title is used as the tmux session name
+// (set from SessionContext.Name at create time).
+func TestGetSessionStatusCodexIdle(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	tmpDir := t.TempDir()
+	adapter := createTestAdapter(t, tmpDir)
+
+	sessionName := "test-openai-codex-idle"
+	socketPath := tmux.GetSocketPath()
+	exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+	if err := exec.Command("tmux", "-S", socketPath, "new-session", "-d", "-s", sessionName).Run(); err != nil {
+		t.Fatalf("failed to create tmux session: %v", err)
+	}
+	t.Cleanup(func() {
+		exec.Command("tmux", "-S", socketPath, "kill-session", "-t", sessionName).Run()
+	})
+
+	// The adapter keys off the session title; set it to the tmux session name.
+	sessionID, err := adapter.CreateSession(SessionContext{
+		Name:             sessionName,
+		WorkingDirectory: "/tmp",
+	})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	// Before the composer renders, the pane has no Codex signals → Active.
+	status, err := adapter.GetSessionStatus(sessionID)
+	if err != nil {
+		t.Fatalf("failed to get session status: %v", err)
+	}
+	if status != StatusActive {
+		t.Errorf("expected %s before composer renders, got %s", StatusActive, status)
+	}
+
+	// Render the Codex composer header into the pane.
+	if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName,
+		"echo 'OpenAI Codex (v0.141.0)'", "Enter").Run(); err != nil {
+		t.Fatalf("failed to send composer signal: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		status, err = adapter.GetSessionStatus(sessionID)
+		if err != nil {
+			t.Fatalf("failed to get session status: %v", err)
+		}
+		if status == StatusIdle {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if status != StatusIdle {
+		t.Errorf("expected %s once composer is visible, got %s", StatusIdle, status)
 	}
 }
 
