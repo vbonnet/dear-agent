@@ -27,7 +27,7 @@ func startHarness(sessionName, workDir string, exists bool, extraAddDirs []strin
 		done, err := startGeminiHarness(sessionName, exists)
 		return false, done, err
 	case "codex-cli":
-		return false, false, startCodexHarness()
+		return false, false, startCodexHarness(sessionName, workDir, exists, extraAddDirs)
 	case "opencode-cli":
 		return false, false, startOpenCodeHarness(sessionName, exists)
 	default:
@@ -287,8 +287,40 @@ func startGeminiDirect(sessionName string, exists bool) error {
 	return nil
 }
 
-// startCodexHarness verifies Codex credentials are configured.
-func startCodexHarness() error {
+// buildCodexCommand assembles the env+codex shell command line launched into the
+// tmux pane. It mirrors buildClaudeCommand's safety invariants — the resolved
+// model, session name, working dir, and any extra writable dirs are all
+// shell-quoted because the result is pasted unquoted into the pane's shell.
+//
+// Deliberately Codex-specific (see DESIGN-agm-codex-harness §3):
+//   - Only CLAUDECODE is unset; NO Claude OAuth token (CLAUDE_CODE_OAUTH_TOKEN),
+//     NO ANTHROPIC_* key, and NO ENGRAM_SESSION_ID/OTEL env is forwarded. Codex
+//     authenticates via its own ChatGPT login (~/.codex) or OPENAI_API_KEY.
+//   - Sandbox defaults to workspace-write (edit the cwd tree, escalation prompts
+//     still appear). Full bypass is intentionally NOT wired here — it must remain
+//     an explicit, audited opt-in rather than a silent default.
+//   - --skip-git-repo-check is added only when the workdir is not a git repo, so
+//     Codex still launches in non-repo AGM workdirs.
+func buildCodexCommand(sessionName, workDir string, extraAddDirs []string) string {
+	resolvedModel := agent.ResolveModelFullName("codex-cli", modelName)
+	var b strings.Builder
+	fmt.Fprintf(&b, "env -u CLAUDECODE AGM_SESSION_NAME=%s codex -m %s -C %s -s workspace-write",
+		shellQuote(sessionName), shellQuote(resolvedModel), shellQuote(workDir))
+	for _, dir := range extraAddDirs {
+		fmt.Fprintf(&b, " --add-dir %s", shellQuote(dir))
+	}
+	if !isGitRepo(workDir) {
+		b.WriteString(" --skip-git-repo-check")
+	}
+	b.WriteString(" && exit")
+	return b.String()
+}
+
+// startCodexHarness verifies Codex credentials, launches the Codex TUI into the
+// tmux pane, and waits for the prompt to appear. It mirrors startClaudeHarness /
+// startGeminiDirect: send the command, sleep briefly, then poll for readiness,
+// tearing the freshly-created session down on failure.
+func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []string) error {
 	debug.Phase("Start Codex")
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" && !agent.IsCodexOAuthConfigured() {
@@ -303,6 +335,33 @@ func startCodexHarness() error {
 		debug.Log("Codex initialized with API key")
 	} else {
 		debug.Log("Codex initialized with OAuth credentials (~/.codex/auth.json)")
+	}
+
+	codexCmd := buildCodexCommand(sessionName, workDir, extraAddDirs)
+	debug.Log("Sending command: %s", codexCmd)
+	if err := tmux.SendCommand(sessionName, codexCmd); err != nil {
+		ui.PrintError(err,
+			"Failed to start Codex in tmux session",
+			"  • Verify Codex is installed: which codex\n"+
+				"  • Test Codex manually: codex --version\n"+
+				"  • Check tmux session exists: tmux list-sessions\n"+
+				"  • Attach and start manually: tmux attach -t "+sessionName)
+		if !exists {
+			_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
+		}
+		return err
+	}
+	debug.Log("Codex command sent successfully")
+	ui.PrintSuccess("Started Codex CLI in tmux session")
+
+	debug.Log("Initial sleep (500ms) before polling")
+	time.Sleep(500 * time.Millisecond)
+
+	debug.Log("Waiting for Codex prompt readiness (timeout: 90s)")
+	if err := tmux.WaitForPromptSimple(sessionName, 90*time.Second); err != nil {
+		debug.Log("Codex prompt readiness wait failed (non-fatal): %v", err)
+	} else {
+		debug.Log("✓ Codex prompt detected - Codex is ready")
 	}
 	ui.PrintSuccess("Codex adapter ready")
 	return nil

@@ -29,6 +29,9 @@ func runHarnessPostCreate(sessionName string, modeAppliedAtStartup bool) error {
 	case harnessName == "opencode-cli":
 		runOpenCodePostCreate(sessionName)
 		return nil
+	case harnessName == "codex-cli":
+		runCodexPostCreate(sessionName)
+		return nil
 	default:
 		debug.Log("Skipping initialization sequence for harness: %s", harnessName)
 		return nil
@@ -115,6 +118,29 @@ func runGeminiPostCreate(sessionName string) {
 		deliverInitialPrompt(sessionName, false)
 	default:
 		debug.Log("Detached mode: skipping Gemini prompt wait and prompt delivery")
+	}
+}
+
+// runCodexPostCreate waits for the Codex prompt and delivers --prompt /
+// --prompt-file in non-test, non-detached mode. Like Gemini/OpenCode it performs
+// NO AGM↔agent session association (that is Claude-plugin specific) and uses the
+// literal (non-multiLine) prompt-delivery path.
+func runCodexPostCreate(sessionName string) {
+	debug.Phase("Codex Post-Create")
+	switch {
+	case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
+		debug.Log("Test environment: skipping Codex prompt wait")
+		ui.PrintSuccess("Codex test session ready (init sequence skipped)")
+	case !detached:
+		debug.Log("Waiting for Codex prompt readiness before prompt delivery")
+		if err := tmux.WaitForPromptSimple(sessionName, 30*time.Second); err != nil {
+			debug.Log("Codex prompt readiness wait failed (non-fatal): %v", err)
+		} else {
+			debug.Log("Codex prompt detected, session ready")
+		}
+		deliverInitialPrompt(sessionName, false)
+	default:
+		debug.Log("Detached mode: skipping Codex prompt wait and prompt delivery")
 	}
 }
 
