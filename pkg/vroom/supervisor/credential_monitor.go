@@ -143,8 +143,10 @@ func (f CredentialFreshness) Note() string {
 	case CredentialExpiring:
 		return fmt.Sprintf("access token expires at %s (within %s) — refresh before the mesh 401s; %s",
 			f.expiryStr(), f.StaleWindow, f.recoveryHint())
-	default:
+	case CredentialFresh:
 		return fmt.Sprintf("access token fresh; expires at %s", f.expiryStr())
+	default:
+		return fmt.Sprintf("unknown credential state %d", f.State)
 	}
 }
 

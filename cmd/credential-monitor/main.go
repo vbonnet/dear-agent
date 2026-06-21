@@ -77,7 +77,7 @@ func run(args []string, stdout, stderr io.Writer) (int, error) {
 	fs.DurationVar(&cfg.staleWithin, "stale-within", supervisor.DefaultCredentialStaleWindow,
 		"treat a token expiring within this window as stale")
 	if err := fs.Parse(args); err != nil {
-		return exitUsage, nil // flag already printed the error to stderr
+		return exitUsage, err
 	}
 
 	res := supervisor.CheckCredentialFreshness(cfg.credPath, time.Now, cfg.staleWithin)
