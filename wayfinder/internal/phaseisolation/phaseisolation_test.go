@@ -460,6 +460,60 @@ func TestFormatAntiRationalizationsEmpty(t *testing.T) {
 	}
 }
 
+func TestGlobalConstraintsWellFormed(t *testing.T) {
+	constraints := GetGlobalConstraints()
+	if len(constraints) == 0 {
+		t.Fatal("expected at least one global constraint")
+	}
+	for i, c := range constraints {
+		if c.Rule == "" {
+			t.Errorf("constraint %d has empty Rule", i)
+		}
+		if c.Why == "" {
+			t.Errorf("constraint %d has empty Why", i)
+		}
+	}
+}
+
+func TestFormatGlobalConstraints(t *testing.T) {
+	constraints := []GlobalConstraint{
+		{Rule: "Never write to ~/src/.", Why: "It is read-only."},
+	}
+	result := FormatGlobalConstraints(constraints)
+	if !strings.Contains(result, "**Never write to ~/src/.**") {
+		t.Error("expected rule rendered in bold")
+	}
+	if !strings.Contains(result, "It is read-only.") {
+		t.Error("expected rationale in output")
+	}
+}
+
+func TestFormatGlobalConstraintsEmpty(t *testing.T) {
+	if result := FormatGlobalConstraints(nil); result != "" {
+		t.Error("empty constraints should produce empty string")
+	}
+}
+
+func TestContextCompilerIncludesGlobalConstraints(t *testing.T) {
+	cc := NewContextCompiler()
+
+	// Global constraints must appear in every plan template, regardless of
+	// phase — verify across a first phase, the Plan phase, and a later phase.
+	for _, id := range []PhaseID{PhaseD1, PhaseS7, PhaseS11} {
+		phase := PhaseDefinitions[id]
+		ctx := cc.Compile(phase, map[PhaseID]*PhaseArtifact{}, "session-123", "/tmp/project")
+
+		if !strings.Contains(ctx.PhaseSystemPrompt, "Global Constraints") {
+			t.Errorf("phase %s system prompt missing Global Constraints heading", id)
+		}
+		for _, c := range GetGlobalConstraints() {
+			if !strings.Contains(ctx.PhaseSystemPrompt, c.Rule) {
+				t.Errorf("phase %s system prompt missing constraint rule %q", id, c.Rule)
+			}
+		}
+	}
+}
+
 func TestContextCompilerIncludesAntiRationalizations(t *testing.T) {
 	cc := NewContextCompiler()
 	phase := PhaseDefinitions[PhaseS8]

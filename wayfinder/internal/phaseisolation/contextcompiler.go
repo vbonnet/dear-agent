@@ -82,6 +82,12 @@ func (cc *ContextCompiler) buildSystemPrompt(phase PhaseDefinition, priorArtifac
 	tb.Heading(1, fmt.Sprintf("Phase %s: %s", phase.ID, phase.Name))
 	tb.Text(fmt.Sprintf("**Objective**: %s", phase.Objective))
 
+	if constraints := GetGlobalConstraints(); len(constraints) > 0 {
+		tb.Heading(2, "Global Constraints")
+		tb.Text("These invariants apply to every phase and task in this plan. They hold regardless of the objective above — never violate them, even when a step seems to call for it:")
+		tb.Text(FormatGlobalConstraints(constraints))
+	}
+
 	if len(priorArtifacts) > 0 {
 		tb.Heading(2, "Context from Prior Phases")
 		tb.Text("You have access to summaries of previous phases. Read the full deliverables if you need more detail.")
