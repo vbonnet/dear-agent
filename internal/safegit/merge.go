@@ -53,6 +53,16 @@ type MergeConfig struct {
 	WatchTimeout  time.Duration // zero → DefaultWatchTimeout
 	WatchInterval time.Duration // poll interval in watch mode; zero → 30s
 
+	// ConfigPath overrides where the P4 .safe-merge.yml is read from. Empty →
+	// look for ConfigFileName at the repo root; absent there → P4 gates skipped.
+	ConfigPath string
+
+	// config is the loaded P4 config (nil/empty → P4 gates skipped). flakeState
+	// tracks per-check reruns across watch attempts so max_retries is honoured.
+	// Both are populated by SafeMergeContext; flakeState is a reference type so
+	// it survives the by-value copy into watchMerge/attemptMerge.
+	config     *Config
+	flakeState map[string]int
 }
 
 // AuditEntry is written to the JSONL audit log on each merge attempt.
@@ -90,6 +100,16 @@ func SafeMergeContext(ctx context.Context, cfg MergeConfig) error {
 	if !strings.Contains(cfg.Repo, "/") {
 		return fmt.Errorf("--repo must be in owner/repo format, got %q", cfg.Repo)
 	}
+
+	// Load the optional P4 config once, up front, so a malformed .safe-merge.yml
+	// fails loudly before any gate runs (and isn't re-read every watch attempt).
+	loaded, err := LoadConfig(repoRoot(), cfg.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("loading %s: %w", ConfigFileName, err)
+	}
+	cfg.config = loaded
+	cfg.flakeState = map[string]int{}
+
 	if cfg.Watch {
 		return watchMerge(ctx, cfg)
 	}
@@ -179,6 +199,20 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 
 	// Gate 1: ALL CI checks must pass (not just required ones).
 	if err := runGate(ctx, "ci", func() error { return checkAllCI(cfg.PRNumber, cfg.Repo) }); err != nil {
+		// P4 flake valve: when flaky_checks are configured, give a failing
+		// flaky check one sanctioned rerun before treating it as a real block.
+		// The valve has the final say only when it actually finds a failing
+		// check; if CI failed for another reason (e.g. still-pending checks),
+		// the valve returns nil and we surface the original CI error.
+		if cfg.config != nil && len(cfg.config.FlakyChecks) > 0 {
+			if fvErr := runGate(ctx, "flake", func() error {
+				return checkFlakeValve(cfg.PRNumber, cfg.Repo, cfg.config, cfg.flakeState)
+			}); fvErr != nil {
+				appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "flake-valve: "+fvErr.Error())
+				fmt.Fprintln(os.Stderr, "safe-merge: flake valve: "+fvErr.Error())
+				return fmt.Errorf("flake-valve gate: %w", fvErr)
+			}
+		}
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "CI: "+err.Error())
 		fmt.Fprintf(os.Stderr, "safe-merge: guidance: run `gh pr checks %d --repo %s --watch`\n", cfg.PRNumber, cfg.Repo)
 		return fmt.Errorf("CI gate: %w", err)
@@ -199,6 +233,21 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 		return fmt.Errorf("soak gate: %w", err)
 	}
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ soak time and bot review OK")
+
+	// Gate 4 (P4): expected reviewers must have a review newer than the head
+	// push. Runs only when .safe-merge.yml lists expected_reviewers; otherwise
+	// the built-in soak gate's bot check is the only reviewer requirement.
+	if cfg.config != nil && len(cfg.config.ExpectedReviewers) > 0 {
+		if err := runGate(ctx, "reviewers", func() error {
+			return checkExpectedReviewers(cfg.PRNumber, cfg.Repo, cfg.config.ExpectedReviewers, now)
+		}); err != nil {
+			appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "reviewers: "+err.Error())
+			fmt.Fprintf(os.Stderr, "safe-merge: guidance: expected reviewers (%s) must review the latest push\n",
+				reviewerLogins(cfg.config.ExpectedReviewers))
+			return fmt.Errorf("expected-reviewer gate: %w", err)
+		}
+		fmt.Fprintln(os.Stderr, "safe-merge: ✓ expected reviewers have fresh reviews")
+	}
 
 	if cfg.DryRun {
 		appendAuditEntry(cfg.Repo, cfg.PRNumber, "dry_run", "all gates passed; merge skipped")
