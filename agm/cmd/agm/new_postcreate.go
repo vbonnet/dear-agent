@@ -125,6 +125,11 @@ func runGeminiPostCreate(sessionName string) {
 // --prompt-file in non-test, non-detached mode. Like Gemini/OpenCode it performs
 // NO AGM↔agent session association (that is Claude-plugin specific) and uses the
 // literal (non-multiLine) prompt-delivery path.
+//
+// It uses the Codex-specific WaitForCodexPrompt (rather than the generic
+// WaitForPromptSimple) so readiness keys on Codex's composer signals and any
+// first-run trust/onboarding prompt is auto-accepted inside the wait, ensuring
+// prompt delivery never races the consent dialog or a not-yet-ready TUI.
 func runCodexPostCreate(sessionName string) {
 	debug.Phase("Codex Post-Create")
 	switch {
@@ -133,7 +138,7 @@ func runCodexPostCreate(sessionName string) {
 		ui.PrintSuccess("Codex test session ready (init sequence skipped)")
 	case !detached:
 		debug.Log("Waiting for Codex prompt readiness before prompt delivery")
-		if err := tmux.WaitForPromptSimple(sessionName, 30*time.Second); err != nil {
+		if err := tmux.WaitForCodexPrompt(sessionName, 30*time.Second); err != nil {
 			debug.Log("Codex prompt readiness wait failed (non-fatal): %v", err)
 		} else {
 			debug.Log("Codex prompt detected, session ready")
