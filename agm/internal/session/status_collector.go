@@ -31,7 +31,7 @@ type SessionStatus struct {
 // terminal fallback) to ensure consistency with send_msg and list commands.
 func CollectStatus(m *manifest.Manifest) (*SessionStatus, error) {
 	// Resolve state using the canonical hybrid approach
-	tmuxName := getTmuxSessionName(m)
+	tmuxName := TmuxSessionName(m)
 	resolvedState := ResolveSessionState(tmuxName, m.State, m.Claude.UUID, m.StateUpdatedAt)
 
 	status := &SessionStatus{
