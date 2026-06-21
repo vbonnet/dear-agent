@@ -82,6 +82,30 @@ func containsCodexPromptPattern(content string) bool {
 	return false
 }
 
+// IsCodexIdle reports whether the Codex TUI composer is currently visible in
+// the pane, i.e. the session is idle and ready for input rather than processing
+// a prompt.
+//
+// It is the Codex counterpart to Claude's idle-prompt detection used by the
+// supervisor: a live `codex-cli` pane shows the bordered composer box (whose
+// header reads "OpenAI Codex" with a "/model to change" hint) only when it is
+// waiting for input. While Codex is working the composer is hidden, so none of
+// the CodexPromptPatterns are present. Callers can therefore treat a true
+// result as "idle/ready" and false as "working".
+//
+// The capture mirrors WaitForCodexPrompt: it reads the visible pane through the
+// AGM-specific tmux socket. An error is returned only when the pane cannot be
+// captured at all (e.g. the tmux session does not exist); callers that already
+// know the session is alive can treat that as "not idle".
+func IsCodexIdle(sessionName string) (bool, error) {
+	output, err := exec.Command("tmux", "-S", GetSocketPath(),
+		"capture-pane", "-t", NormalizeTmuxSessionName(sessionName), "-p").Output()
+	if err != nil {
+		return false, fmt.Errorf("capture-pane failed: %w", err)
+	}
+	return containsCodexPromptPattern(string(output)), nil
+}
+
 // containsCodexTrustPromptPattern reports whether content contains a Codex
 // first-run trust / onboarding consent prompt.
 func containsCodexTrustPromptPattern(content string) bool {

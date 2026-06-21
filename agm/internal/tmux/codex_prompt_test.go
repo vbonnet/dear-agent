@@ -166,6 +166,69 @@ func TestWaitForCodexPromptPolling(t *testing.T) {
 	}
 }
 
+// TestIsCodexIdleComposerVisible verifies IsCodexIdle reports true once the
+// Codex composer header is showing in the pane.
+func TestIsCodexIdleComposerVisible(t *testing.T) {
+	sessionName := "test-codex-idle-composer"
+	socketPath := newCodexTestSession(t, sessionName)
+
+	// Render the Codex composer header into the pane.
+	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, "echo 'OpenAI Codex (v0.141.0)'", "Enter")
+	if err := sendCmd.Run(); err != nil {
+		t.Fatalf("Failed to send composer signal: %v", err)
+	}
+
+	// Poll briefly: the keystroke takes a moment to render in the pane.
+	deadline := time.Now().Add(5 * time.Second)
+	var idle bool
+	for time.Now().Before(deadline) {
+		var err error
+		idle, err = IsCodexIdle(sessionName)
+		if err != nil {
+			t.Fatalf("IsCodexIdle returned error: %v", err)
+		}
+		if idle {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !idle {
+		t.Error("IsCodexIdle = false, want true when composer is visible")
+	}
+}
+
+// TestIsCodexIdleWorking verifies IsCodexIdle reports false when the pane shows
+// no composer (i.e. Codex is working / no TUI signals present).
+func TestIsCodexIdleWorking(t *testing.T) {
+	sessionName := "test-codex-idle-working"
+	// A bare sleep produces no composer chrome, so the pane looks "working".
+	newCodexTestSession(t, sessionName, "sh", "-c", "sleep 30")
+
+	idle, err := IsCodexIdle(sessionName)
+	if err != nil {
+		t.Fatalf("IsCodexIdle returned error: %v", err)
+	}
+	if idle {
+		t.Error("IsCodexIdle = true, want false when composer is not visible")
+	}
+}
+
+// TestIsCodexIdleNoSession verifies IsCodexIdle surfaces an error when the tmux
+// session does not exist (so callers can distinguish "can't capture" from
+// "working").
+func TestIsCodexIdleNoSession(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+	idle, err := IsCodexIdle("test-codex-idle-nonexistent")
+	if err == nil {
+		t.Error("IsCodexIdle on a missing session: expected error, got nil")
+	}
+	if idle {
+		t.Error("IsCodexIdle on a missing session: expected false")
+	}
+}
+
 // TestWaitForCodexPromptTimeout verifies WaitForCodexPrompt times out when no
 // Codex composer ever appears.
 func TestWaitForCodexPromptTimeout(t *testing.T) {

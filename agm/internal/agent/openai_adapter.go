@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agent/openai"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // OpenAIAdapter implements Agent interface for OpenAI API.
@@ -232,13 +233,31 @@ func (a *OpenAIAdapter) TerminateSession(sessionID SessionID) error {
 
 // GetSessionStatus returns the status of an OpenAI session.
 //
-// For API-based sessions, status is either Active (exists) or Terminated (doesn't exist).
-// Suspended status is not applicable to stateless API sessions.
+// For pure API-based sessions, status is either Active (exists) or Terminated
+// (doesn't exist) — Suspended is not applicable to stateless API sessions.
+//
+// This adapter also backs the codex-cli harness, whose session actually runs as
+// a Codex TUI inside a tmux pane named after the session. When such a pane is
+// alive and showing its composer (ready for input) we refine Active into Idle
+// so the supervisor can tell an idle Codex worker from a working one. The tmux
+// session name is the session's title (set to the AGM session name at create
+// time); for plain API sessions no such pane exists, so the check is skipped
+// and the prior Active behaviour is preserved.
 func (a *OpenAIAdapter) GetSessionStatus(sessionID SessionID) (Status, error) {
-	_, err := a.sessionManager.GetSession(string(sessionID))
+	info, err := a.sessionManager.GetSession(string(sessionID))
 	if err != nil {
 		// Session not found = terminated
 		return StatusTerminated, nil //nolint:nilerr // intentional: caller signals via separate bool/optional
+	}
+
+	// For codex-cli the title carries the tmux session name. If that pane is
+	// alive and the Codex composer is visible, the worker is idle/ready; any
+	// capture error (no such pane, e.g. a plain API session) falls through to
+	// the default Active status.
+	if info.Title != "" {
+		if idle, err := tmux.IsCodexIdle(info.Title); err == nil && idle {
+			return StatusIdle, nil
+		}
 	}
 
 	// Session exists = active
