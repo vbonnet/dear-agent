@@ -63,6 +63,8 @@ export GOMEMLIMIT GOMAXPROCS GOGC
 #   install-vroom-dispatch  Install vroom-dispatch to ~/go/bin
 #   build-resolve-review-threads  Build resolve-review-threads: GitHub PR thread resolver
 #   install-resolve-review-threads Install resolve-review-threads to ~/go/bin
+#   build-merge-audit       Build merge-audit: safe-merge P6 detection tier
+#   install-merge-audit     Install merge-audit to ~/go/bin
 #   install-token-refresher-launchagent   Schedule the OAuth token-refresher idle backstop + wire apiKeyHelper (macOS, ce-cs3v)
 #   uninstall-token-refresher-launchagent Remove the token-refresher launch agent + apiKeyHelper wiring
 #   build-dear-deploy       Build dear-deploy: atomic host-artifact deployer (cmd/dear-deploy)
@@ -73,7 +75,7 @@ export GOMEMLIMIT GOMAXPROCS GOGC
 #   build-src-health        Build src-health: ~/src repo canary (ce-m3ya)
 #   install-src-health      Install src-health to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -556,6 +558,18 @@ build-resolve-review-threads:
 install-resolve-review-threads: build-resolve-review-threads
 	cp bin/resolve-review-threads $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/resolve-review-threads"
+
+# Build merge-audit: safe-merge P6 detection tier. Weekly cross-repo sweep for
+# unresolved-threads-at-merge, checks-incomplete-at-merge, direct pushes,
+# break-glass overrides, and ruleset drift. Files a P1 bead per violation.
+build-merge-audit:
+	@echo "Building merge-audit..."
+	go build $(GOFLAGS) -o bin/merge-audit ./cmd/merge-audit/
+	@echo "Built: bin/merge-audit"
+
+install-merge-audit: build-merge-audit
+	cp bin/merge-audit $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/merge-audit"
 
 # Build dear-deploy: the write-side counterpart to drift-check. It deploys host
 # artifacts (launchd plists, Claude Code hooks) from deploy/manifest.yaml through

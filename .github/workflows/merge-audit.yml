@@ -1,0 +1,131 @@
+name: Merge Audit
+
+# Post-merge detection tier of safe-merge (P6). Runs on every push to the
+# default branch and validates the merge that just landed:
+#   - no associated PR  -> direct push to a protected branch
+#   - unresolved review threads at merge
+#   - required checks red or pending at merge
+#
+# Detect + ALERT only: on a violation it opens (or updates) a GitHub Issue
+# labelled "merge-audit". It NEVER reverts or rewrites history — remediation is
+# a human decision. The weekly cross-repo sweep lives in cmd/merge-audit; this
+# workflow is the in-repo, per-merge backstop.
+#
+# Restricted to PUBLIC repositories: GITHUB_TOKEN issue/PR scopes and the
+# review-thread GraphQL fields behave consistently there, and the public repos
+# are the ones whose merge integrity is externally visible.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  issues: write
+  contents: read
+  pull-requests: read
+
+env:
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  audit:
+    name: Merge Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Public repos only — see header.
+    if: github.event.repository.private == false
+    steps:
+      - name: Ensure merge-audit label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh label create merge-audit \
+            --color "b60205" \
+            --description "Post-merge safe-merge predicate violation" \
+            --repo "$REPO" 2>/dev/null || true
+
+      - name: Validate merge predicate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Find the PR whose squash/merge produced this commit.
+          pr_num=$(timeout 30 gh pr list \
+            --repo "$REPO" --state merged --base main --limit 50 \
+            --json number,mergeCommit \
+            --jq "[.[] | select(.mergeCommit.oid==\"${SHA}\")][0].number // empty")
+
+          findings=""
+
+          if [ -z "$pr_num" ]; then
+            # No PR introduced this commit → a direct push to main.
+            findings="- ⛔ **Direct push**: commit \`${SHA}\` landed on \`main\` with no associated PR."
+          else
+            echo "Auditing PR #${pr_num} (merge commit ${SHA})"
+
+            # Unresolved review threads at merge.
+            unresolved=$(timeout 30 gh api graphql \
+              -f owner="${REPO%/*}" -f name="${REPO#*/}" -F pr="${pr_num}" \
+              -f query='query($owner:String!,$name:String!,$pr:Int!){
+                repository(owner:$owner,name:$name){
+                  pullRequest(number:$pr){
+                    reviewThreads(first:100){ nodes { isResolved } }
+                  }}}' \
+              --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved|not)] | length')
+
+            if [ "${unresolved:-0}" -gt 0 ]; then
+              findings="${findings}
+          - 💬 **Unresolved threads**: PR #${pr_num} merged with ${unresolved} unresolved review thread(s)."
+            fi
+
+            # Required checks red or pending at merge time.
+            head_sha=$(timeout 30 gh pr view "$pr_num" --repo "$REPO" \
+              --json headRefOid --jq '.headRefOid')
+            not_green=$(timeout 30 gh api "repos/${REPO}/commits/${head_sha}/check-runs" \
+              --jq '[.check_runs[] | select(
+                       .status=="completed" and
+                       (.conclusion // "") != "success" and
+                       (.conclusion // "") != "skipped" and
+                       (.conclusion // "") != "neutral"
+                     ) | "\(.name) [\(.conclusion)]"] | join(", ")' 2>/dev/null || echo "")
+            if [ -n "$not_green" ]; then
+              findings="${findings}
+          - ❌ **Checks not green**: PR #${pr_num} merged with failing checks: ${not_green}."
+            fi
+          fi
+
+          {
+            echo "findings<<__EOF__"
+            printf '%s\n' "$findings"
+            echo "__EOF__"
+          } >> "$GITHUB_ENV"
+
+      - name: Open merge-audit issue on violation
+        if: env.findings != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          title="merge-audit: predicate violation at ${SHA}"
+          body="The post-merge audit detected a safe-merge predicate violation on \`main\`:
+
+          ${findings}
+
+          **Commit:** ${SHA}
+
+          This is **detect + alert only** — no automatic revert was performed.
+          Investigate and, if the merge was unsafe, revert or follow up manually.
+
+          _Auto-filed by \`.github/workflows/merge-audit.yml\` (safe-merge P6)._"
+
+          timeout 30 gh issue create \
+            --repo "$REPO" \
+            --title "$title" \
+            --body "$body" \
+            --label "merge-audit"
