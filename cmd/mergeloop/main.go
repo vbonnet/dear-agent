@@ -113,6 +113,10 @@ func run(argv []string) error {
 		Rebaser: &safeRebaser{dryRun: opts.dryRun},
 		Merger:  &safeMerger{dryRun: opts.dryRun},
 		Spawner: &agmSpawner{dryRun: opts.dryRun, enabled: opts.enableAgents},
+		// Threads clears the GREEN→MERGE blocker: bot review threads (Gemini)
+		// left unresolved trip required_conversation_resolution even when CI is
+		// green. The driver resolves them just before the merge attempt.
+		Threads: &ghThreadResolver{dryRun: opts.dryRun},
 		Metrics: mergeloop.NewMetrics(),
 	}
 
