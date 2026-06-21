@@ -175,7 +175,7 @@ func gatherFiles(root, mode, operand string) ([]string, error) {
 	case "--staged":
 		return gitLines(root, "diff", "--cached", "--name-only", "--diff-filter=ACMR")
 	case "--diff":
-		return gitLines(root, "diff", "--name-only", "--diff-filter=ACMR", operand+"...HEAD")
+		return gitLines(root, "diff", "--name-only", "--diff-filter=ACMR", operand+"..HEAD")
 	case "--files":
 		return readListFile(operand)
 	default:
