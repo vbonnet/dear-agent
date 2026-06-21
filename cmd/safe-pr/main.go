@@ -200,24 +200,6 @@ func execGh(req *safepr.Request, timeout time.Duration) error {
 	if runErr != nil {
 		return fmt.Errorf("gh pr %s failed: %w", req.Verb, runErr)
 	}
-
-	// A freshly created PR should merge itself once required checks pass, so we
-	// never leave green PRs waiting on a manual click (the silent failure mode
-	// that stranded PR #538). Arming is part of the create action, not a step an
-	// agent must remember — and it must fail loudly: if it does not stick, the
-	// PR is created but won't auto-merge, so we return a non-zero exit naming the
-	// PR rather than letting the gap pass unnoticed.
-	if req.Verb == "create" {
-		if prURL == "" {
-			return fmt.Errorf("PR was created but its URL could not be parsed from gh output, " +
-				"so auto-merge could not be armed — arm it manually with: gh pr merge --auto --squash <url>")
-		}
-		if mergeErr := armAutoMerge(prURL, timeout); mergeErr != nil {
-			return fmt.Errorf("PR %s was created but arming auto-merge failed: %w — the repo may not "+
-				"allow auto-merge (needs allow_auto_merge=true); arm it manually once enabled with: "+
-				"gh pr merge --auto --squash %s", prURL, mergeErr, prURL)
-		}
-	}
 	return nil
 }
 
