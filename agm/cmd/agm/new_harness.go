@@ -97,10 +97,25 @@ var spawnSessionID string
 // the orchestrator environment (so workers inherit tracing config), and sets
 // ENGRAM_SESSION_ID to the session manifest UUID (so each worker's JSONL
 // exporter writes to its own trace file).
+//
+// When an OTLP endpoint is present we ALSO light up the Claude Code CLI's own
+// OpenTelemetry exporter. The CLI's telemetry is off by default: forwarding
+// OTEL_EXPORTER_OTLP_ENDPOINT alone is inert (ce-ph5x). The CLI requires
+// CLAUDE_CODE_ENABLE_TELEMETRY=1 as a master switch, an explicit exporter
+// selection (OTEL_TRACES_EXPORTER=otlp), and — because per-interaction spans
+// are gated behind a beta flag — CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1, so the
+// worker emits trace spans (not just metrics) to the collector. We pin
+// OTEL_EXPORTER_OTLP_PROTOCOL=grpc to match the engram tracer and the local
+// Jaeger gRPC receiver on :4317 (the OTel SDK would otherwise default to
+// http/protobuf on :4318 and silently drop everything).
 func otelEnvArgs() string {
 	var args strings.Builder
 	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
 		fmt.Fprintf(&args, " OTEL_EXPORTER_OTLP_ENDPOINT=%s", endpoint)
+		args.WriteString(" CLAUDE_CODE_ENABLE_TELEMETRY=1")
+		args.WriteString(" CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1")
+		args.WriteString(" OTEL_TRACES_EXPORTER=otlp")
+		args.WriteString(" OTEL_EXPORTER_OTLP_PROTOCOL=grpc")
 	}
 	if spawnSessionID != "" {
 		fmt.Fprintf(&args, " ENGRAM_SESSION_ID=%s", spawnSessionID)
