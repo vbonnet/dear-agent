@@ -172,6 +172,13 @@ func buildMesh(trail decisiontrail.Trail, roadmap *supervisor.InMemoryRoadmap, q
 		// — the gardener shells out to the live agm CLI, which touches real
 		// sessions, so we never arm it against the simulated in-memory probe.
 		overSup = overSup.WithSessionHygiene(&supervisor.GCSessionGardener{}, 0)
+
+		// Session inbox-count alert (ce-cxjb.4): escalate when non-archived
+		// sessions accumulate past threshold. Read-only — shells out to
+		// `agm session list --all --json` against the live CLI, so like
+		// hygiene it is armed only on the real-probe path. Zero threshold
+		// applies the default (15).
+		overSup = overSup.WithSessionInboxAlert(&supervisor.AGMSessionInboxCounter{}, 0)
 	}
 	if cfg.pressure {
 		// On the real-probe path the critical-tier reclaimer is the AGM-aware

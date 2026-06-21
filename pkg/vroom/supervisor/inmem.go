@@ -405,6 +405,44 @@ func (g *InMemorySessionGardener) Calls() int {
 	return g.calls
 }
 
+// InMemorySessionInboxCounter is a configurable SessionInboxCounter for tests
+// and the cmd/vroom-mesh demo. It records InboxCount invocations and returns a
+// fixed count.
+type InMemorySessionInboxCounter struct {
+	mu    sync.Mutex
+	count int
+	err   error
+	calls int
+}
+
+// NewInMemorySessionInboxCounter returns a counter that reports zero.
+func NewInMemorySessionInboxCounter() *InMemorySessionInboxCounter {
+	return &InMemorySessionInboxCounter{}
+}
+
+// SetResult configures the count and error returned by InboxCount.
+func (c *InMemorySessionInboxCounter) SetResult(count int, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.count = count
+	c.err = err
+}
+
+// InboxCount implements SessionInboxCounter.
+func (c *InMemorySessionInboxCounter) InboxCount(_ context.Context) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls++
+	return c.count, c.err
+}
+
+// Calls returns the number of InboxCount invocations.
+func (c *InMemorySessionInboxCounter) Calls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
 // InMemorySpawnGate is a configurable SpawnGate for tests and the
 // cmd/vroom-mesh demo. It records whether spawns are currently paused and the
 // reason for the most recent pause.
