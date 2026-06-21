@@ -41,14 +41,21 @@ const DefaultTimeout = 60 * time.Second
 type Session struct {
 	ID          string
 	ProjectPath string
+	// BeadID is the bead this session's PR should close, if known. It is the
+	// first entry of the WAYFINDER-STATUS.md `beads:` list (wayfinder
+	// auto-creates one bead per task at SETUP). When set, safe-pr folds a
+	// "Closes <bead>" line into the create body so the PR auto-closes its bead
+	// on merge (bead-pr-sync scans the body for this reference).
+	BeadID string
 }
 
 // statusFrontmatter is the subset of WAYFINDER-STATUS.md frontmatter safe-pr
 // consumes. Unknown fields are ignored on purpose: the schema belongs to
 // wayfinder, not to us.
 type statusFrontmatter struct {
-	SessionID string `yaml:"session_id"`
-	Status    string `yaml:"status"`
+	SessionID string   `yaml:"session_id"`
+	Status    string   `yaml:"status"`
+	Beads     []string `yaml:"beads"`
 }
 
 // ResolveSessionDir picks the wayfinder project directory: the --wayfinder
@@ -98,7 +105,11 @@ func LoadSession(dir string) (Session, error) {
 	if err != nil {
 		abs = dir
 	}
-	return Session{ID: st.SessionID, ProjectPath: abs}, nil
+	beadID := ""
+	if len(st.Beads) > 0 {
+		beadID = strings.TrimSpace(st.Beads[0])
+	}
+	return Session{ID: st.SessionID, ProjectPath: abs, BeadID: beadID}, nil
 }
 
 // frontmatter extracts the YAML between the leading "---" fence pair.
@@ -203,13 +214,34 @@ func (r *Request) Trailer() string {
 // StampedArgs returns the final gh argv (after "gh"): the verb mapped to
 // `pr <verb>` with the trace trailer folded into --body (create) or
 // --comment (close), appending the flag when the caller did not pass one.
+//
+// On create, when the session carries a bead, a "Closes <bead>" line is folded
+// in above the trace trailer so the PR auto-closes its bead on merge — unless
+// the caller already referenced the bead in their args (no duplicate line).
 func (r *Request) StampedArgs() []string {
 	target, short := "--body", "-b"
 	if r.Verb == "close" {
 		target, short = "--comment", "-c"
 	}
-	args := append([]string{"pr", r.Verb}, stampFlag(r.GhArgs, target, short, r.Trailer())...)
+	trailer := r.Trailer()
+	if r.Verb == "create" && r.Session != nil && r.Session.BeadID != "" &&
+		!referencesBead(r.GhArgs, r.Session.BeadID) {
+		trailer = "Closes " + r.Session.BeadID + "\n\n" + trailer
+	}
+	args := append([]string{"pr", r.Verb}, stampFlag(r.GhArgs, target, short, trailer)...)
 	return args
+}
+
+// referencesBead reports whether any pass-through arg already mentions beadID,
+// so safe-pr does not stamp a second "Closes <bead>" line when the caller wrote
+// their own.
+func referencesBead(args []string, beadID string) bool {
+	for _, a := range args {
+		if strings.Contains(a, beadID) {
+			return true
+		}
+	}
+	return false
 }
 
 // stampFlag appends trailer to the value of `long`/`short` in args, handling

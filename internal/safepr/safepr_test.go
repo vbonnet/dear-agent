@@ -180,6 +180,88 @@ func TestStampedArgs(t *testing.T) {
 	})
 }
 
+const beadStatus = `---
+schema_version: "2.0"
+session_id: 87a5378c-2398-412c-af48-094287b11b79
+status: in_progress
+beads:
+  - ce-5vje
+  - ce-9999
+---
+
+# Wayfinder Session
+`
+
+func TestLoadSession_Bead(t *testing.T) {
+	t.Run("first bead populates BeadID", func(t *testing.T) {
+		dir := t.TempDir()
+		writeStatus(t, dir, beadStatus)
+		s, err := LoadSession(dir)
+		if err != nil {
+			t.Fatalf("LoadSession: %v", err)
+		}
+		if s.BeadID != "ce-5vje" {
+			t.Errorf("BeadID = %q, want ce-5vje (first of beads list)", s.BeadID)
+		}
+	})
+	t.Run("no beads leaves BeadID empty", func(t *testing.T) {
+		dir := t.TempDir()
+		writeStatus(t, dir, inProgressStatus)
+		s, err := LoadSession(dir)
+		if err != nil {
+			t.Fatalf("LoadSession: %v", err)
+		}
+		if s.BeadID != "" {
+			t.Errorf("BeadID = %q, want empty", s.BeadID)
+		}
+	})
+}
+
+func TestStampedArgs_Bead(t *testing.T) {
+	beadSess := func() *Session {
+		return &Session{ID: "abc-123", ProjectPath: "/x/proj", BeadID: "ce-5vje"}
+	}
+	t.Run("create folds Closes above trailer", func(t *testing.T) {
+		r := Request{Verb: "create", Session: beadSess(),
+			GhArgs: []string{"--title", "t", "--body", "hello"}}
+		joined := strings.Join(r.StampedArgs(), "\x00")
+		if !strings.Contains(joined, "hello\n\nCloses ce-5vje\n\n---\nWayfinder-Session: abc-123") {
+			t.Errorf("Closes not folded above trailer: %q", joined)
+		}
+	})
+	t.Run("create without body still adds Closes", func(t *testing.T) {
+		r := Request{Verb: "create", Session: beadSess(), GhArgs: []string{"--title", "t"}}
+		joined := strings.Join(r.StampedArgs(), "\x00")
+		if !strings.Contains(joined, "--body\x00Closes ce-5vje\n\n---\nWayfinder-Session") {
+			t.Errorf("Closes not added when body absent: %q", joined)
+		}
+	})
+	t.Run("no duplicate when caller already referenced bead", func(t *testing.T) {
+		r := Request{Verb: "create", Session: beadSess(),
+			GhArgs: []string{"--title", "t", "--body", "fixes ce-5vje now"}}
+		joined := strings.Join(r.StampedArgs(), "\x00")
+		if strings.Contains(joined, "Closes ce-5vje") {
+			t.Errorf("should not add Closes when bead already referenced: %q", joined)
+		}
+	})
+	t.Run("close never gets Closes line", func(t *testing.T) {
+		r := Request{Verb: "close", Session: beadSess(),
+			GhArgs: []string{"42", "--comment", "superseded"}}
+		joined := strings.Join(r.StampedArgs(), "\x00")
+		if strings.Contains(joined, "Closes ce-5vje") {
+			t.Errorf("close should not stamp Closes: %q", joined)
+		}
+	})
+	t.Run("no bead means no Closes line", func(t *testing.T) {
+		r := Request{Verb: "create", Session: sess(),
+			GhArgs: []string{"--title", "t", "--body", "hello"}}
+		joined := strings.Join(r.StampedArgs(), "\x00")
+		if strings.Contains(joined, "Closes") {
+			t.Errorf("no bead should mean no Closes line: %q", joined)
+		}
+	})
+}
+
 func TestAppendAudit(t *testing.T) {
 	home := t.TempDir()
 	rec := AuditRecord{Time: "2026-06-12T00:00:00Z", Verb: "create",
