@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -318,11 +317,9 @@ type CommandInfo struct {
 // printCommandsJSON outputs all commands in JSON format for agent discovery
 func printCommandsJSON(cmd *cobra.Command) error {
 	info := buildCommandInfo(cmd)
-	data, err := json.MarshalIndent(info, "", "  ")
-	if err != nil {
+	if err := printJSON(info); err != nil {
 		return fmt.Errorf("failed to marshal commands to JSON: %w", err)
 	}
-	fmt.Println(string(data))
 	os.Exit(0)
 	return nil
 }
