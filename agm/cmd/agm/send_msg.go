@@ -365,8 +365,21 @@ func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error 
 		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  • List sessions: agm session list\n  • Create session: agm session new %s", recipientSession, recipientSession)
 	}
 
+	// ce-7mxn: auto-detect autonomous recipients. The human_typing guard exists to
+	// avoid clobbering a human at the keyboard; a session tagged with a non-human
+	// role (worker/orchestrator/overseer) never has one, so the guard is pure noise.
+	// Enabling autonomous mode here makes the dark factory work without every send
+	// passing --autonomous or AGM_AUTONOMOUS=1 (which still take precedence via
+	// runSend). Resolve failures fall through harmlessly to the default guard.
+	if m, _, resolveErr := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter); resolveErr == nil {
+		if isAutonomousRole(m.Context.Tags) {
+			tmux.SetAutonomousMode(true)
+		}
+	}
+
 	// tmux.AutonomousMode() is the single source of truth, set in runSend from
-	// either --autonomous or AGM_AUTONOMOUS=1 (ce-v9in).
+	// either --autonomous or AGM_AUTONOMOUS=1 (ce-v9in) and, for autonomous-role
+	// recipients, the role auto-detection above (ce-7mxn).
 	guardOpts := safety.GuardOptions{SkipMidResponse: true, AutonomousMode: tmux.AutonomousMode()}
 	if msgForce {
 		if err := override.Require(context.Background(), override.Guard{
@@ -387,6 +400,19 @@ func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error 
 	}
 	checkAndWakeMonitors(recipientSession, adapter)
 	return nil
+}
+
+// isAutonomousRole reports whether the session tags include a non-human role.
+// Autonomous roles (worker/orchestrator/overseer/meta-orchestrator) never have a
+// human at the keyboard, so the human_typing guard is noise for sends to them.
+func isAutonomousRole(tags []string) bool {
+	for _, t := range tags {
+		switch t {
+		case "role:worker", "role:orchestrator", "role:overseer", "role:meta-orchestrator":
+			return true
+		}
+	}
+	return false
 }
 
 // readSendMessageContent reads the message body from --prompt, --prompt-file,
