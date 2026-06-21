@@ -153,8 +153,19 @@ func (o *PhaseOrchestratorV2) getNextPhaseInSequence(current string) (string, er
 		return "", fmt.Errorf("already at final phase %s", current)
 	}
 
-	// Return next phase
-	return sequence[currentIdx+1], nil
+	// Return the next phase, advancing past any phases the harness profile skips.
+	// ProfileLite (XS/S risk) skips DESIGN/SPEC/PLAN so small tasks are not routed
+	// through the full 9-phase sequence (ce-cahz / MVD T2.2). SETUP/BUILD/RETRO are
+	// never skipped, so a non-skipped phase always remains. Mirrors the navigation
+	// layer (status.StatusV2.NextWaypoint).
+	for next := currentIdx + 1; next < len(sequence); next++ {
+		if o.status.IsPhaseSkipped(sequence[next]) {
+			continue
+		}
+		return sequence[next], nil
+	}
+
+	return "", fmt.Errorf("already at final phase %s", current)
 }
 
 // executeTransition performs the phase transition
