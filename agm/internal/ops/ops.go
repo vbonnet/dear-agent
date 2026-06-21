@@ -24,6 +24,7 @@ type OpContext struct {
 	DryRun     bool
 	Fields     []string // field mask: if non-empty, only include these fields in output
 	OutputMode string   // "json", "text" (default: "json" for programmatic consumers)
+	Detailed   bool     // --detailed: re-enable IDs, full paths, and verbose hints in agent-mode output
 }
 
 // Result is the base type for all operation results.
