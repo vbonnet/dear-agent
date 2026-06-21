@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -217,11 +218,11 @@ func TestDispatch(t *testing.T) {
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
 	var spawned, sent string
-	spawnSession = func(name, model string) error { spawned = name; return nil }
-	sendPrompt = func(name, prompt string) error { sent = name; return nil }
+	spawnSession = func(ctx context.Context, name, model string) error { spawned = name; return nil }
+	sendPrompt = func(ctx context.Context, name, prompt string) error { sent = name; return nil }
 
 	b := bead{ID: "ce-test", Title: "T", Priority: 1}
-	if err := dispatch(b, "opus-200k"); err != nil {
+	if err := dispatch(context.Background(), b, "opus-200k"); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if spawned != "worker-ce-test" {
@@ -236,11 +237,11 @@ func TestDispatchSpawnFailureSkipsSend(t *testing.T) {
 	origSpawn, origSend := spawnSession, sendPrompt
 	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
 
-	spawnSession = func(name, model string) error { return errStub }
+	spawnSession = func(ctx context.Context, name, model string) error { return errStub }
 	sendCalled := false
-	sendPrompt = func(name, prompt string) error { sendCalled = true; return nil }
+	sendPrompt = func(ctx context.Context, name, prompt string) error { sendCalled = true; return nil }
 
-	if err := dispatch(bead{ID: "ce-x"}, "opus-200k"); err == nil {
+	if err := dispatch(context.Background(), bead{ID: "ce-x"}, "opus-200k"); err == nil {
 		t.Error("expected error when spawn fails")
 	}
 	if sendCalled {

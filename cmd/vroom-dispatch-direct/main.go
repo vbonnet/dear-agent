@@ -27,14 +27,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"syscall"
 )
 
 // humanGated lists beads that must never be auto-dispatched to a worker: they
@@ -85,8 +89,8 @@ type pullRequest struct {
 
 // queryReady runs `bd --db <db> ready --json` and returns the ready beads. It is
 // a package var so tests can stub the bd invocation without a real database.
-var queryReady = func(db string) ([]bead, error) {
-	cmd := exec.Command("bd", "--db", db, "ready", "--json")
+var queryReady = func(ctx context.Context, db string) ([]bead, error) {
+	cmd := exec.CommandContext(ctx, "bd", "--db", db, "ready", "--json")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bd ready: %w", err)
@@ -102,8 +106,8 @@ var queryReady = func(db string) ([]bead, error) {
 // package var so tests can stub the gh invocation. A gh failure is returned as
 // an error so the caller can fail closed rather than silently dispatching beads
 // that already have an open PR.
-var queryOpenPRs = func(repo string) ([]pullRequest, error) {
-	cmd := exec.Command("gh", "pr", "list",
+var queryOpenPRs = func(ctx context.Context, repo string) ([]pullRequest, error) {
+	cmd := exec.CommandContext(ctx, "gh", "pr", "list",
 		"--repo", repo,
 		"--state", "open",
 		"--limit", "200",
@@ -123,8 +127,8 @@ var queryOpenPRs = func(repo string) ([]pullRequest, error) {
 // var so tests can stub the agm invocation. A failure is returned as an error so
 // the caller can fail closed: without the session list we cannot tell which beads
 // are already being worked, and must not risk double-dispatching them.
-var listSessions = func() ([]string, error) {
-	cmd := exec.Command("agm", "session", "list")
+var listSessions = func(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "agm", "session", "list")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("agm session list: %w", err)
@@ -136,7 +140,12 @@ var listSessions = func() ([]string, error) {
 // "worker-ce-bi19" -> "ce-bi19" and "worker-ce-cd14.2" -> "ce-cd14.2". The id
 // runs to a whitespace or end-of-token boundary so trailing status columns in the
 // `agm session list` output do not bleed into the captured id.
-var workerSessionRe = regexp.MustCompile(`\bworker-([A-Za-z0-9.-]+)`)
+//
+// "worker-" must sit at the start of a line or field (anchored to line-start or
+// preceding whitespace) rather than a bare \b word boundary: dispatched sessions
+// are named exactly "worker-<id>", so a hyphen-joined name like "my-worker-x" or
+// "subworker-x" is a different session and must NOT be read as a live worker.
+var workerSessionRe = regexp.MustCompile(`(?m)(?:^|\s)worker-([A-Za-z0-9.-]+)`)
 
 // liveWorkerIDs scans `agm session list` output for `worker-<id>` session names
 // and returns the set of bead ids that already have a live worker. This is the
@@ -158,9 +167,27 @@ func liveWorkerIDs(lines []string) map[string]bool {
 // its parent "ce-cd14" — otherwise an open PR for a child would wrongly suppress
 // the parent (and vice versa). The leading boundary excludes alphanumerics so an
 // id embedded in a branch path like "feat/fix-ce-5z0o" still matches.
-func mentionsID(text, id string) bool {
+// mentionsIDCache memoizes the compiled whole-token matcher for each bead id.
+// Without it, scanning N PRs for M beads recompiled the same per-id regex on
+// every call (O(N*M) compilations); caching makes it one compilation per id.
+var (
+	mentionsIDMu    sync.Mutex
+	mentionsIDCache = map[string]*regexp.Regexp{}
+)
+
+func mentionsIDRe(id string) *regexp.Regexp {
+	mentionsIDMu.Lock()
+	defer mentionsIDMu.Unlock()
+	if re, ok := mentionsIDCache[id]; ok {
+		return re
+	}
 	re := regexp.MustCompile(`(^|[^A-Za-z0-9])` + regexp.QuoteMeta(id) + `([^A-Za-z0-9.]|$)`)
-	return re.MatchString(text)
+	mentionsIDCache[id] = re
+	return re
+}
+
+func mentionsID(text, id string) bool {
+	return mentionsIDRe(id).MatchString(text)
 }
 
 // inFlightInPR reports whether any open PR already covers this bead, matching the
@@ -316,8 +343,8 @@ func sessionNewArgs(name, model string) []string {
 }
 
 // spawnSession creates the detached worker session. Package var for test stubbing.
-var spawnSession = func(name, model string) error {
-	cmd := exec.Command("agm", sessionNewArgs(name, model)...)
+var spawnSession = func(ctx context.Context, name, model string) error {
+	cmd := exec.CommandContext(ctx, "agm", sessionNewArgs(name, model)...)
 	// Mark the spawned session tree as unattended so its own `agm send` calls
 	// auto-stash stale input instead of deadlocking as if a human were typing
 	// (ce-v9in), and scrub the API key so workers use the session's own auth.
@@ -330,8 +357,8 @@ var spawnSession = func(name, model string) error {
 
 // sendPrompt sends the rendered work prompt to a worker session. Package var for
 // test stubbing.
-var sendPrompt = func(name, prompt string) error {
-	cmd := exec.Command("agm", "send", "msg", name,
+var sendPrompt = func(ctx context.Context, name, prompt string) error {
+	cmd := exec.CommandContext(ctx, "agm", "send", "msg", name,
 		"--sender", dispatchSender,
 		"--autonomous",
 		"--prompt", prompt)
@@ -345,12 +372,12 @@ var sendPrompt = func(name, prompt string) error {
 // dispatch spawns a worker session for the bead and sends it the rendered prompt.
 // If the spawn is refused (agm circuit breaker / at capacity), the error is
 // returned and no prompt is sent — the bead is simply retried on a later run.
-func dispatch(b bead, model string) error {
+func dispatch(ctx context.Context, b bead, model string) error {
 	name := "worker-" + b.ID
-	if err := spawnSession(name, model); err != nil {
+	if err := spawnSession(ctx, name, model); err != nil {
 		return fmt.Errorf("spawn %s: %w", name, err)
 	}
-	if err := sendPrompt(name, renderPrompt(b)); err != nil {
+	if err := sendPrompt(ctx, name, renderPrompt(b)); err != nil {
 		return fmt.Errorf("send to %s: %w", name, err)
 	}
 	return nil
@@ -365,27 +392,32 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "report what would be dispatched without spawning any sessions")
 	flag.Parse()
 
+	// Cancel in-flight subprocesses if the dispatcher is interrupted (SIGINT/
+	// SIGTERM) so a killed run does not leave orphaned bd/gh/agm children.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fatal("home dir: %v", err)
 	}
 	dbPath := expandHome(*db, home)
 
-	beads, err := queryReady(dbPath)
+	beads, err := queryReady(ctx, dbPath)
 	if err != nil {
 		fatal("query ready beads: %v", err)
 	}
 
 	// Fail closed on a session-list failure: without it we cannot tell which
 	// beads already have a live worker and must not risk double-dispatching.
-	sessions, err := listSessions()
+	sessions, err := listSessions(ctx)
 	if err != nil {
 		fatal("list sessions (failing closed to avoid double-dispatch): %v", err)
 	}
 	live := liveWorkerIDs(sessions)
 
 	// Fail closed on a PR-list failure for the same reason.
-	prs, err := queryOpenPRs(*repo)
+	prs, err := queryOpenPRs(ctx, *repo)
 	if err != nil {
 		fatal("query open PRs (failing closed to avoid double-dispatch): %v", err)
 	}
@@ -406,7 +438,7 @@ func main() {
 			dispatched++
 			continue
 		}
-		if err := dispatch(b, *model); err != nil {
+		if err := dispatch(ctx, b, *model); err != nil {
 			// A refused spawn is expected backpressure, not a fatal error: log
 			// and stop this run (capacity is likely exhausted), retry next run.
 			fmt.Fprintf(os.Stderr, "vroom-dispatch-direct: dispatch %s: %v\n", b.ID, err)
