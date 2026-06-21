@@ -113,25 +113,20 @@ agm send msg vroom-orchestrator --sender vroom-overseer --priority critical --pr
 
 ### Step 4: Probe System Resources
 
-**Primary probe — the canonical `SysResourceProbe` (bead ce-mbgq).** Run the
-`fd-pressure` binary; it samples disk / memory / swap / FDs / vnodes / gopls
-through the same Go `SysResourceProbe` the in-process supervisor uses, appends
-one `overseer.resource.probe` record to the trail, and prints the snapshot as
-JSON. Prefer this over the raw `df`/`vm_stat`/`sysctl` commands below — they
-are the manual fallback for when the binary is unavailable.
+**Canonical probe — run this every tick:**
 
 ```bash
-# Measure + log in one call. --trail appends an "overseer.resource.probe"
-# record to ~/.agm/vroom/trail.jsonl; --json prints the snapshot for you to read.
-# Exit code: 0 = all within limits, 1 = at least one metric breached threshold,
-# 2 = error. The trail write is best-effort — a failure prints to stderr and
-# does NOT change the exit code, so the tick continues regardless.
-fd-pressure --json --trail ~/.agm/vroom/trail.jsonl
+# Measures disk, memory, swap, FDs, vnodes, and orphaned gopls via the Go
+# SysResourceProbe, prints a one-line summary, and appends a record
+# (kind "overseer.resource.probe") to ~/.agm/vroom/trail.jsonl. Best-effort:
+# never exits non-zero, so a failed probe never ends your /loop.
+agm supervisor probe
 ```
 
-If the snapshot above is enough, you can skip the raw commands below and go
-straight to Step 5; they remain as a manual fallback (e.g. if `fd-pressure` is
-not on PATH) and for reading individual metrics.
+This is the authoritative resource measurement and is logged automatically.
+The raw commands below are a fallback for spot-checking individual metrics
+or identifying specific FD/gopls hogs when `agm supervisor probe` flags a
+breach — you do NOT need to run them every tick.
 
 ```bash
 # Disk usage (root volume)
