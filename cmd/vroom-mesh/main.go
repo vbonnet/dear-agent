@@ -166,6 +166,12 @@ func buildMesh(trail decisiontrail.Trail, roadmap *supervisor.InMemoryRoadmap, q
 			reclaimer.Targets = splitTargets(cfg.reapTargets)
 		}
 		overSup = overSup.WithReclaimer(reclaimer)
+
+		// Session hygiene (ce-cxjb.3): archive completed/stopped worker
+		// sessions each tick via `agm session gc`. Only on the real-probe path
+		// — the gardener shells out to the live agm CLI, which touches real
+		// sessions, so we never arm it against the simulated in-memory probe.
+		overSup = overSup.WithSessionHygiene(&supervisor.GCSessionGardener{}, 0)
 	}
 	if cfg.pressure {
 		reaper, rerr := supervisor.NewAutoResourceReaper(trail,

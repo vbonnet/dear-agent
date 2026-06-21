@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/vroom/decisiontrail"
 )
@@ -146,7 +147,20 @@ type Overseer struct {
 	// binary EscalationThreshold path still runs).
 	pressureMonitor *MemoryPressureMonitor
 	pressureReaper  *AutoResourceReaper
+
+	// Session hygiene (ce-cxjb.3). When a SessionGardener is wired via
+	// WithSessionHygiene, each Tick archives completed/stopped worker sessions
+	// via `agm session gc`. nil = hygiene disabled.
+	gardener        SessionGardener
+	hygieneInterval time.Duration // minimum spacing between passes (rate-limit)
+	lastHygiene     time.Time     // clock time of the last pass (zero = never)
+	clock           func() time.Time
 }
+
+// defaultHygieneInterval rate-limits the session-hygiene pass so ticks firing
+// faster than this don't thrash the gc op. The Overseer runs hygiene at most
+// once per tick anyway; this guards against sub-interval ticks.
+const defaultHygieneInterval = 30 * time.Second
 
 // NewOverseer constructs the Overseer supervisor. If threshold has zero
 // fields, DefaultEscalationThreshold is used.
@@ -186,6 +200,22 @@ func (o *Overseer) WithReclaimer(r ResourceReclaimer) *Overseer {
 func (o *Overseer) WithMemoryPressure(monitor *MemoryPressureMonitor, reaper *AutoResourceReaper) *Overseer {
 	o.pressureMonitor = monitor
 	o.pressureReaper = reaper
+	return o
+}
+
+// WithSessionHygiene wires a SessionGardener into the Overseer, arming the
+// per-tick session-hygiene pass (ce-cxjb.3). After this call each Tick archives
+// completed/stopped worker sessions (via `agm session gc`), rate-limited to one
+// pass per interval. A zero interval applies defaultHygieneInterval. The GC is
+// idempotent and conservative (active sessions and protected roles are always
+// skipped), so it is safe to run on a cadence. With no gardener wired the
+// Overseer only probes OrphanedSessions; it does not archive.
+func (o *Overseer) WithSessionHygiene(g SessionGardener, interval time.Duration) *Overseer {
+	o.gardener = g
+	if interval <= 0 {
+		interval = defaultHygieneInterval
+	}
+	o.hygieneInterval = interval
 	return o
 }
 
@@ -245,6 +275,13 @@ func (o *Overseer) Tick(ctx context.Context) error {
 	// monitor and reaper are wired via WithMemoryPressure.
 	if o.pressureMonitor != nil && o.pressureReaper != nil {
 		o.runMemoryPressureTick(ctx, snap)
+	}
+
+	// Session hygiene (ce-cxjb.3) — archive completed/stopped worker sessions.
+	// Runs at most once per tick and is rate-limited; only when a gardener is
+	// wired via WithSessionHygiene.
+	if o.gardener != nil {
+		o.runSessionHygiene(ctx)
 	}
 
 	// Burndown maintenance phase — only runs when a controller is wired.
@@ -335,6 +372,48 @@ func (o *Overseer) reclaim(ctx context.Context, before ResourceSnapshot) {
 			"gopls_after":   after.GoplsProcesses,
 			"pressure_down": after.OpenFDFraction < before.OpenFDFraction || after.GoplsProcesses < before.GoplsProcesses,
 		},
+	})
+}
+
+// now returns the current time through the clock seam (time.Now in
+// production; a fake in tests).
+func (o *Overseer) now() time.Time {
+	if o.clock != nil {
+		return o.clock()
+	}
+	return time.Now()
+}
+
+// runSessionHygiene archives completed/stopped worker sessions via the wired
+// SessionGardener (`agm session gc`), then records the outcome to the trail.
+// It is rate-limited: a pass is skipped if the previous one ran less than
+// hygieneInterval ago, so ticks firing faster than the interval don't thrash
+// the gc op. The gardener's GC is idempotent and conservative — active
+// sessions and protected roles are always skipped — so a skipped pass loses
+// nothing; the next eligible tick picks up the work.
+func (o *Overseer) runSessionHygiene(ctx context.Context) {
+	now := o.now()
+	if !o.lastHygiene.IsZero() && now.Sub(o.lastHygiene) < o.hygieneInterval {
+		return // rate-limited; too soon since the last pass
+	}
+	o.lastHygiene = now
+
+	stats, err := o.gardener.GC(ctx)
+
+	payload := map[string]any{
+		"scanned":  stats.Scanned,
+		"archived": stats.Archived,
+		"skipped":  stats.Skipped,
+		"errors":   stats.Errors,
+		"note":     fmt.Sprintf("archived %d sessions", stats.Archived),
+	}
+	if err != nil {
+		payload["error"] = err.Error()
+	}
+	_ = o.trail.Append(ctx, decisiontrail.Record{
+		Role:    string(RoleOverseer),
+		Kind:    "overseer.session.hygiene",
+		Payload: payload,
 	})
 }
 

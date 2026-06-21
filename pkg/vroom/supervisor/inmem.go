@@ -370,6 +370,41 @@ func (s *InMemorySessionArchiver) Calls() int {
 	return s.calls
 }
 
+// InMemorySessionGardener is a configurable SessionGardener for tests and the
+// cmd/vroom-mesh demo. It records GC invocations and returns a fixed result.
+type InMemorySessionGardener struct {
+	mu     sync.Mutex
+	result SessionGCStats
+	err    error
+	calls  int
+}
+
+// NewInMemorySessionGardener returns a gardener that reports zeros.
+func NewInMemorySessionGardener() *InMemorySessionGardener { return &InMemorySessionGardener{} }
+
+// SetResult configures the stats and error returned by GC.
+func (g *InMemorySessionGardener) SetResult(result SessionGCStats, err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.result = result
+	g.err = err
+}
+
+// GC implements SessionGardener.
+func (g *InMemorySessionGardener) GC(_ context.Context) (SessionGCStats, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.calls++
+	return g.result, g.err
+}
+
+// Calls returns the number of GC invocations.
+func (g *InMemorySessionGardener) Calls() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.calls
+}
+
 // InMemorySpawnGate is a configurable SpawnGate for tests and the
 // cmd/vroom-mesh demo. It records whether spawns are currently paused and the
 // reason for the most recent pause.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ var (
 	gcOlderThan    string
 	gcProtectRoles string
 	gcForce        bool
+	gcJSON         bool
 )
 
 var gcCmd = &cobra.Command{
@@ -84,6 +86,15 @@ func runGC(cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		return handleError(err)
+	}
+
+	// Machine-readable summary for programmatic consumers (e.g. the overseer
+	// session-hygiene tick). GCResult already carries json tags, so emit it
+	// verbatim — scanned/archived/skipped/errors plus the per-session detail.
+	if gcJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
 	}
 
 	// Display results
@@ -159,5 +170,7 @@ func init() {
 		"Comma-separated role substrings to protect (default: orchestrator,meta-orchestrator,overseer)")
 	gcCmd.Flags().BoolVarP(&gcForce, "force", "f", false,
 		"Skip pre-archive verification checks")
+	gcCmd.Flags().BoolVar(&gcJSON, "json", false,
+		"Emit a machine-readable JSON summary on stdout (for programmatic consumers like the overseer session-hygiene tick)")
 	sessionCmd.AddCommand(gcCmd)
 }
