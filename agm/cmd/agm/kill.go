@@ -236,13 +236,29 @@ func handleKillError(opCtx *ops.OpContext, sessionName string, killResult *ops.K
 		return killResult, true, renderKillError(sessionName, "session is archived",
 			func() error { return renderSessionArchivedError(sessionName) })
 	case ops.ErrCodeActiveSessionKill:
-		return killResult, true, renderKillError(sessionName, "session is active — use --confirmed-stuck to force kill",
-			func() error { return renderActiveSessionError(sessionName) })
-	case ops.ErrCodeKillProtected:
-		// JSON mode is non-interactive: surface as a structured error instead
-		// of prompting. Callers can pass --force to bypass the safety check.
+		// Agent mode (JSON) is non-interactive: rather than blocking on a TTY
+		// prompt, emit a confirmation envelope (exit 4) carrying the exact
+		// re-run command. Human mode keeps the existing text warning.
 		if isJSONOutput() {
-			return killResult, true, renderKillError(sessionName, "session was recently active — use --force to kill", nil)
+			return killResult, true, emitConfirmationEnvelope(ConfirmationEnvelope{
+				Action:   "session_kill",
+				Target:   sessionName,
+				RerunCmd: fmt.Sprintf("agm session kill --confirmed-stuck %s", sessionName),
+				Reason:   "session is active; add --confirmed-stuck to force",
+			})
+		}
+		return killResult, true, renderActiveSessionError(sessionName)
+	case ops.ErrCodeKillProtected:
+		// Agent mode (JSON) is non-interactive: emit a confirmation envelope
+		// (exit 4) instead of prompting. Here the bypass flag is --force, since
+		// the session was recently (not currently) active.
+		if isJSONOutput() {
+			return killResult, true, emitConfirmationEnvelope(ConfirmationEnvelope{
+				Action:   "session_kill",
+				Target:   sessionName,
+				RerunCmd: fmt.Sprintf("agm session kill --force %s", sessionName),
+				Reason:   "session was recently active; add --force to kill",
+			})
 		}
 		ago := "recently"
 		if killResult != nil && killResult.LastActivity != nil {
