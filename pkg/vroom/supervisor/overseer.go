@@ -155,6 +155,12 @@ type Overseer struct {
 	hygieneInterval time.Duration // minimum spacing between passes (rate-limit)
 	lastHygiene     time.Time     // clock time of the last pass (zero = never)
 	clock           func() time.Time
+
+	// Session inbox-count alert (ce-cxjb.4). When a SessionInboxCounter is
+	// wired via WithSessionInboxAlert, each Tick counts non-archived sessions
+	// and escalates when the count exceeds inboxAlertThreshold. nil = disabled.
+	inboxCounter        SessionInboxCounter
+	inboxAlertThreshold int
 }
 
 // defaultHygieneInterval rate-limits the session-hygiene pass so ticks firing
@@ -216,6 +222,23 @@ func (o *Overseer) WithSessionHygiene(g SessionGardener, interval time.Duration)
 		interval = defaultHygieneInterval
 	}
 	o.hygieneInterval = interval
+	return o
+}
+
+// WithSessionInboxAlert wires a SessionInboxCounter into the Overseer, arming
+// the per-tick session inbox-count alert (ce-cxjb.4). After this call each Tick
+// counts non-archived sessions (active + stopped, excluding archived) and emits
+// an escalation to the trail when the count exceeds threshold. A threshold ≤ 0
+// applies defaultSessionInboxAlertThreshold. The count is read-only — it never
+// archives or mutates sessions; remediation is the SessionGardener's job
+// (WithSessionHygiene). With no counter wired the Overseer does not alert on
+// inbox depth.
+func (o *Overseer) WithSessionInboxAlert(c SessionInboxCounter, threshold int) *Overseer {
+	o.inboxCounter = c
+	if threshold <= 0 {
+		threshold = defaultSessionInboxAlertThreshold
+	}
+	o.inboxAlertThreshold = threshold
 	return o
 }
 
@@ -282,6 +305,13 @@ func (o *Overseer) Tick(ctx context.Context) error {
 	// wired via WithSessionHygiene.
 	if o.gardener != nil {
 		o.runSessionHygiene(ctx)
+	}
+
+	// Session inbox-count alert (ce-cxjb.4) — escalate when non-archived
+	// sessions accumulate past threshold. Read-only; only when a counter is
+	// wired via WithSessionInboxAlert.
+	if o.inboxCounter != nil {
+		o.runSessionInboxAlert(ctx)
 	}
 
 	// Burndown maintenance phase — only runs when a controller is wired.
@@ -414,6 +444,48 @@ func (o *Overseer) runSessionHygiene(ctx context.Context) {
 		Role:    string(RoleOverseer),
 		Kind:    "overseer.session.hygiene",
 		Payload: payload,
+	})
+}
+
+// runSessionInboxAlert counts non-archived sessions via the wired
+// SessionInboxCounter and escalates to the trail when the count exceeds
+// inboxAlertThreshold. Unlike hygiene this is read-only — it observes inbox
+// depth so an operator learns sessions are accumulating, but leaves remediation
+// to the SessionGardener. A count at or below threshold records nothing (the
+// trail stays quiet when the inbox is healthy); a counter error is recorded so
+// the failure is visible, but never fails the tick.
+func (o *Overseer) runSessionInboxAlert(ctx context.Context) {
+	count, err := o.inboxCounter.InboxCount(ctx)
+	if err != nil {
+		_ = o.trail.Append(ctx, decisiontrail.Record{
+			Role: string(RoleOverseer),
+			Kind: "overseer.session.inbox_alert",
+			Payload: map[string]any{
+				"error": err.Error(),
+			},
+		})
+		return
+	}
+
+	threshold := o.inboxAlertThreshold
+	if threshold <= 0 {
+		threshold = defaultSessionInboxAlertThreshold
+	}
+	if count <= threshold {
+		return // inbox is healthy; stay quiet
+	}
+
+	_ = o.trail.Append(ctx, decisiontrail.Record{
+		Role: string(RoleOverseer),
+		Kind: "overseer.session.inbox_alert",
+		Payload: map[string]any{
+			"count":     count,
+			"threshold": threshold,
+			"alert": fmt.Sprintf(
+				"session inbox contains %d non-archived sessions (threshold: %d); run 'agm session gc' to clean up",
+				count, threshold,
+			),
+		},
 	})
 }
 
