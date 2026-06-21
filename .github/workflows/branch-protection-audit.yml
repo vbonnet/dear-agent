@@ -122,6 +122,43 @@ jobs:
             else
               echo "  ok"
             fi
+
+            # Phantom required-check detection (informational, non-blocking):
+            # the checks above only confirm that required_status_checks EXISTS,
+            # never that each required context is actually produced by a
+            # workflow. A required context that no check run ever produces (the
+            # Trivy context lingered this way from 2026-05-11 through multiple
+            # PR cascades while this audit stayed silent) blocks every merge yet
+            # passes the audit. Cross-reference required contexts against the
+            # contexts produced by recent check runs on main and warn on any
+            # gap. Warnings only — this is diagnostic, never a merge gate, so it
+            # is deliberately kept out of $findings / issue creation.
+            required_contexts=$(echo "$protection" \
+              | jq -r '.required_status_checks.contexts // [] | .[]' 2>/dev/null \
+              | sort || true)
+            produced_contexts=$(timeout 30 gh api \
+              "repos/${slug}/commits/main/check-runs?per_page=100" \
+              --jq '[.check_runs[].name] | unique | .[]' 2>/dev/null \
+              | sort || true)
+            if [ -z "$required_contexts" ]; then
+              : # no required contexts to cross-reference
+            elif [ -z "$produced_contexts" ]; then
+              # An empty produced set (merge-commit HEAD with no checks, or an
+              # API hiccup) would flag every context as phantom — skip instead
+              # of crying wolf.
+              echo "  note — no check runs on main HEAD; skipping phantom detection"
+            else
+              phantom=$(comm -23 \
+                <(printf '%s\n' "$required_contexts") \
+                <(printf '%s\n' "$produced_contexts"))
+              if [ -n "$phantom" ]; then
+                echo "::warning::${slug}: phantom required contexts (required for merge but never produced by any recent check run):"
+                printf '%s\n' "$phantom" | sed 's/^/  ::warning::  /'
+                echo "  These contexts block merges but no workflow produces them — workflow deleted, context renamed, or the producing app is uninstalled."
+              else
+                echo "  ok — all required contexts produced by recent check runs"
+              fi
+            fi
           done
 
           # Persist findings (use newline-delimited heredoc so the body
