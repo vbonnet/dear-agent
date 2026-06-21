@@ -10,15 +10,11 @@
 //
 // The wayfinder project dir (or WAYFINDER_PROJECT_DIR) must contain a
 // WAYFINDER-STATUS.md with status: in_progress; its session_id is stamped
-// into the PR body (create) or close comment (close). Every invocation is
-// audit-logged to ~/.local/state/dear-agent/safe-pr.log and emits an OTel
-// span (safepr.<verb>) when a collector is configured.
-//
-// On create, squash auto-merge is armed on the new PR (gh pr merge --auto
-// --squash) so it merges itself once required checks pass. Arming is part of
-// the create action and fails loudly: if it does not stick (e.g. the repo has
-// allow_auto_merge disabled), safe-pr exits non-zero naming the PR, so a PR
-// that will never auto-merge is never left silently stranded.
+// into the PR body (create) or close comment (close). On create, squash
+// auto-merge is armed on the new PR so it merges itself once required checks
+// and reviews pass. Every invocation is audit-logged to
+// ~/.local/state/dear-agent/safe-pr.log and emits an OTel span (safepr.<verb>)
+// when a collector is configured.
 package main
 
 import (
@@ -30,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/internal/safepr"
@@ -184,6 +181,17 @@ func execGh(req *safepr.Request, timeout time.Duration) error {
 		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: audit log write failed: %v\n", auditErr)
 	}
 
+	// Arm squash auto-merge on a freshly created PR so it merges itself once
+	// required checks and reviews pass — every safe-pr PR is hands-off by
+	// construction. Best-effort: the PR already exists, so a failure here
+	// (auto-merge disabled on the repo, branch not yet pushed) must not fail
+	// the run; it is surfaced as a warning and can be armed manually.
+	if runErr == nil && req.Verb == "create" && prURL != "" {
+		if mergeErr := armAutoMerge(prURL, timeout); mergeErr != nil {
+			fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not arm auto-merge on %s: %v\n", prURL, mergeErr)
+		}
+	}
+
 	if ctx.Err() == context.DeadlineExceeded {
 		return fmt.Errorf("gh exceeded %s and was killed — gh may have been waiting on an "+
 			"interactive prompt; pass all required flags explicitly (safe-pr requires --title/--body "+
@@ -192,31 +200,13 @@ func execGh(req *safepr.Request, timeout time.Duration) error {
 	if runErr != nil {
 		return fmt.Errorf("gh pr %s failed: %w", req.Verb, runErr)
 	}
-
-	// A freshly created PR should merge itself once required checks pass, so we
-	// never leave green PRs waiting on a manual click (the silent failure mode
-	// that stranded PR #538). Arming is part of the create action, not a step an
-	// agent must remember — and it must fail loudly: if it does not stick, the
-	// PR is created but won't auto-merge, so we return a non-zero exit naming the
-	// PR rather than letting the gap pass unnoticed.
-	if req.Verb == "create" {
-		if prURL == "" {
-			return fmt.Errorf("PR was created but its URL could not be parsed from gh output, " +
-				"so auto-merge could not be armed — arm it manually with: gh pr merge --auto --squash <url>")
-		}
-		if mergeErr := armAutoMerge(prURL, timeout); mergeErr != nil {
-			return fmt.Errorf("PR %s was created but arming auto-merge failed: %w — the repo may not "+
-				"allow auto-merge (needs allow_auto_merge=true); arm it manually once enabled with: "+
-				"gh pr merge --auto --squash %s", prURL, mergeErr, prURL)
-		}
-	}
 	return nil
 }
 
 // armAutoMerge enables squash auto-merge on prURL so the PR merges itself once
-// required checks pass. It mirrors execGh's headless guards (timeout bound,
-// GIT_TERMINAL_PROMPT=0) and uses a fresh context so it is not starved by the
-// create call's already-elapsed deadline.
+// required checks and reviews pass. It runs with its own timeout and the same
+// non-interactive environment as the create call. A non-nil error is advisory:
+// the caller treats it as a warning, not a failure.
 func armAutoMerge(prURL string, timeout time.Duration) error {
 	if timeout <= 0 {
 		timeout = safepr.DefaultTimeout
@@ -224,16 +214,20 @@ func armAutoMerge(prURL string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "gh", "pr", "merge", prURL, "--auto", "--squash")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd := exec.CommandContext(ctx, "gh", "pr", "merge", "--auto", "--squash", prURL)
+	var errBuf bytes.Buffer
+	cmd.Stdout = nil // discard: success message ("✓ Armed auto-merge…") must not pollute safe-pr stdout
+	cmd.Stderr = &errBuf
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1")
 
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("gh pr merge --auto exceeded %s and was killed", timeout)
 		}
-		return err
+		if msg := strings.TrimSpace(errBuf.String()); msg != "" {
+			return fmt.Errorf("gh pr merge --auto: %w\nsafe-pr: WARNING: gh stderr: %s", err, msg)
+		}
+		return fmt.Errorf("gh pr merge --auto: %w", err)
 	}
 	return nil
 }
@@ -256,9 +250,8 @@ Flags:
 
 All other arguments pass through to 'gh pr create' / 'gh pr close'.
 The session trace is stamped into the PR body (create) or comment (close).
-On create, squash auto-merge is armed on the new PR so it merges itself once
-required checks pass; if arming fails (e.g. repo allow_auto_merge is off),
-safe-pr exits non-zero naming the PR rather than failing silently.
+On create, squash auto-merge is armed on the new PR (best-effort) so it merges
+itself once required checks and reviews pass.
 Refused for create: --web, --fill*, --body-file/-F, --editor (interactive or
 unstampable); --title is required. Every run appends a JSONL audit record to
 ~/.local/state/dear-agent/safe-pr.log.
