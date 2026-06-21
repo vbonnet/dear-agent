@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -97,6 +98,9 @@ Examples:
 		// result set is empty so programmatic consumers always get a parseable
 		// object rather than a human-readable warning.
 		if isJSONOutput() || listJSON {
+			if outputMode == ModeAgent {
+				applyAgentListDefaults(result, fieldsFlag)
+			}
 			return printJSON(result)
 		}
 
@@ -214,6 +218,37 @@ func compactProject(project string) string {
 	// Keep prefix and suffix, join with ellipsis
 	half := (maxLen - 1) / 2 // -1 for the …
 	return project[:half] + "…" + project[len(project)-half:]
+}
+
+// sanitizeSandboxPath shrinks a verbose project path for token-efficient
+// agent-mode output. A sandbox path like
+// /Users/.../sandboxes/<uuid>/merged collapses to just <uuid>; any other
+// absolute path is reduced to its basename.
+func sanitizeSandboxPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	if _, rest, found := strings.Cut(p, "/sandboxes/"); found {
+		return strings.TrimSuffix(rest, "/merged")
+	}
+	return filepath.Base(p)
+}
+
+// applyAgentListDefaults rewrites a list result in place for agent-mode output:
+// it drops each session's raw UUID unless the caller explicitly asked for it via
+// --fields id, and basenames verbose sandbox project paths. Human-mode output
+// never passes through here, so it is unaffected.
+func applyAgentListDefaults(result *ops.ListSessionsResult, fields []string) {
+	if result == nil {
+		return
+	}
+	includeID := slices.Contains(fields, "id")
+	for i := range result.Sessions {
+		if !includeID {
+			result.Sessions[i].ID = ""
+		}
+		result.Sessions[i].Project = sanitizeSandboxPath(result.Sessions[i].Project)
+	}
 }
 
 // printSessionSummaryTable prints a compact table of session summaries.
