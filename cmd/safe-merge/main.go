@@ -43,6 +43,14 @@ func main() {
 }
 
 func run(argv []string) error {
+	// Subcommand dispatch: `safe-merge break-glass <pr>` is the audited,
+	// TTY-only escape hatch (docs §4.4/§5 P5). It is deliberately NOT a flag on
+	// the normal merge path — break-glass bypasses every gate and must be
+	// impossible to trigger accidentally or from an agent.
+	if len(argv) > 0 && argv[0] == "break-glass" {
+		return runBreakGlass(argv[1:])
+	}
+
 	fs := flag.NewFlagSet("safe-merge", flag.ContinueOnError)
 	fs.Usage = func() { fmt.Print(usage) }
 
