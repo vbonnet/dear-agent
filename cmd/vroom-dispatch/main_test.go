@@ -400,15 +400,21 @@ func TestSupervisorSkillsPreauthorizeUnattended(t *testing.T) {
 		"guardrails, not by asking", // ... and why it is safe to not ask
 		"unattended",                // the operating condition
 	}
-	for _, name := range []string{"orchestrator.md", "overseer.md", "meta-orchestrator.md"} {
-		b, err := skills.ReadFile("skills/" + name)
+	// Derive the skill-file list from the supervisors slice in main.go rather
+	// than hardcoding it, so the test cannot drift from production as
+	// supervisors are added, removed, or renamed.
+	if len(supervisors) == 0 {
+		t.Fatal("no supervisors defined")
+	}
+	for _, s := range supervisors {
+		b, err := skills.ReadFile("skills/" + s.SkillFile)
 		if err != nil {
-			t.Fatalf("read embedded %s: %v", name, err)
+			t.Fatalf("read embedded %s: %v", s.SkillFile, err)
 		}
 		doc := string(b)
 		for _, want := range preauthTokens {
 			if !strings.Contains(doc, want) {
-				t.Errorf("%s missing unattended pre-authorization token %q", name, want)
+				t.Errorf("%s missing unattended pre-authorization token %q", s.SkillFile, want)
 			}
 		}
 	}
