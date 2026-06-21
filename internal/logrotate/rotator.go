@@ -17,6 +17,7 @@ package logrotate
 
 import (
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -241,14 +242,14 @@ func compressFile(src, dest string, mode os.FileMode) error {
 	gz := gzip.NewWriter(out)
 	if _, err := io.Copy(gz, in); err != nil {
 		gz.Close()
-		out.Close()
+		closeErr := out.Close()
 		os.Remove(dest)
-		return err
+		return errors.Join(err, closeErr)
 	}
 	if err := gz.Close(); err != nil {
-		out.Close()
+		closeErr := out.Close()
 		os.Remove(dest)
-		return err
+		return errors.Join(err, closeErr)
 	}
 	if err := out.Close(); err != nil {
 		os.Remove(dest)
