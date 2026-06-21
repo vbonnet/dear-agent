@@ -8,9 +8,30 @@ Engram is a persistent memory system for AI coding agents. It enables sessions
 to store, consolidate, and retrieve memories across conversations using
 biologically-inspired retrieval (ecphory) and consolidation (hippocampus).
 
+## Knowledge Model
+
+Engram separates knowledge into two distinct layers (see ADR-009):
+
+- **Documents** — stateless, immutable, *versioned* knowledge blobs (specs,
+  architecture docs, research findings, reference material). Trusted as-is;
+  editing appends a new version. No decay, merge, or importance scoring.
+- **Memories** — mutable, extracted facts distilled from session history.
+  Learned, updated in place, merged, decayed, and pruned by consolidation.
+
+Keeping the layers separate sharpens recall precision and prevents stale
+extracted facts from contaminating canonical reference knowledge.
+
 ## Functional Requirements
 
-### Memory Storage
+### Document Storage (stateless knowledge layer)
+- Store versioned documents by stable logical ID; each edit appends an
+  immutable new version (prior versions retained)
+- Categorize documents by kind (spec, architecture, research, reference, adr)
+- Retrieve the latest version, a specific version, or list versions
+- List/filter documents within a namespace by kind and title
+- Content-hash (SHA-256) every version for integrity and dedup
+
+### Memory Storage (extracted-fact layer)
 - Store typed memories (user, feedback, project, reference) with frontmatter
 - Index memories for fast retrieval
 - Support memory updates and deletion
