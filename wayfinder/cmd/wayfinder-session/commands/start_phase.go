@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/beads"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/git"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/history"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
@@ -96,6 +97,14 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 	st.UpdatePhase(phaseName, status.PhaseStatusInProgress, "")
 	st.SetCurrentPhase(phaseName)
 
+	// At SETUP — where task breakdown begins — guarantee the session is backed
+	// by a tracking bead so every task has one from the start and its PR can
+	// auto-close it on merge. No-op if a bead already exists (e.g. the caller
+	// passed one in) so re-running SETUP never files duplicates.
+	if strings.EqualFold(phaseName, "SETUP") {
+		ensureSessionBead(cmd.Context(), st)
+	}
+
 	// Initialize tracker
 	tr, err := tracker.New(st.GetSessionID())
 	if err != nil {
@@ -133,4 +142,34 @@ func runStartPhase(cmd *cobra.Command, args []string) (retErr error) {
 
 	fmt.Printf("✅ Phase %s started\n", phaseName)
 	return nil
+}
+
+// ensureSessionBead files a tracking bead for the session if it has none yet,
+// recording the new id on the status so it is persisted by the WriteTo that
+// follows. Bead tracking lives in the V2 schema (StatusV2.Beads); for any other
+// status version this is a no-op. Failures (bd absent, create error) warn and
+// continue — a missing tracker must never block a phase transition.
+func ensureSessionBead(ctx context.Context, st status.StatusInterface) {
+	v2, ok := st.(*status.StatusV2)
+	if !ok {
+		return
+	}
+	if len(v2.Beads) > 0 {
+		return
+	}
+	if !beads.Available() {
+		fmt.Fprintf(os.Stderr, "Warning: bd CLI not available; skipping auto-bead creation\n")
+		return
+	}
+	title := strings.TrimSpace(v2.ProjectName)
+	if title == "" {
+		title = "wayfinder session"
+	}
+	id, err := beads.Create(ctx, beads.DefaultDB(), title)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to auto-create bead: %v\n", err)
+		return
+	}
+	v2.Beads = append(v2.Beads, id)
+	fmt.Printf("🔗 Auto-created bead %s for this task\n", id)
 }

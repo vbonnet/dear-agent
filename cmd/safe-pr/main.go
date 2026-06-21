@@ -45,6 +45,7 @@ func main() {
 type parsedArgs struct {
 	req          safepr.Request
 	wayfinderDir string
+	bead         string
 	timeout      time.Duration
 	showedHelp   bool
 }
@@ -71,6 +72,12 @@ func parseArgs(argv []string) (*parsedArgs, error) {
 				return nil, fmt.Errorf("--wayfinder requires a wayfinder project directory argument")
 			}
 			p.wayfinderDir = argv[i+1]
+			i++
+		case "--bead":
+			if i+1 >= len(argv) {
+				return nil, fmt.Errorf("--bead requires a bead id argument (e.g. ce-5vje)")
+			}
+			p.bead = argv[i+1]
 			i++
 		case "--timeout":
 			if i+1 >= len(argv) {
@@ -105,6 +112,14 @@ func run(argv []string) error {
 	s, err := safepr.LoadSession(dir)
 	if err != nil {
 		return err
+	}
+	// Bead precedence: explicit --bead flag, then BEAD env var, then the bead
+	// LoadSession read from WAYFINDER-STATUS.md. An explicit choice always wins
+	// over the session default so a caller can target a different bead.
+	if p.bead != "" {
+		s.BeadID = p.bead
+	} else if env := os.Getenv("BEAD"); env != "" {
+		s.BeadID = env
 	}
 	p.req.Session = &s
 	if err := p.req.Validate(); err != nil {
@@ -245,6 +260,8 @@ Usage:
 Flags:
   --wayfinder <dir>   wayfinder project dir holding WAYFINDER-STATUS.md
                       (default: $WAYFINDER_PROJECT_DIR); session must be in_progress
+  --bead <id>         bead this PR closes; folds "Closes <id>" into the create
+                      body (default: $BEAD, then the session's first bead)
   --timeout <dur>     kill gh after this long (default 60s)
   -h, --help          show this help
 
