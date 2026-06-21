@@ -64,6 +64,10 @@ func printOpError(err *ops.OpError) {
 
 // handleError checks if an error is an OpError and formats it appropriately.
 // Returns the error for Cobra to handle exit codes.
+//
+// For OpErrors it returns an *exitError that both renders as the stable error
+// code (preserving cobra's printed output) and carries the taxonomy exit code
+// derived from OpError.Status, so the top-level run() can exit accordingly.
 func handleError(err error) error {
 	if err == nil {
 		return nil
@@ -71,7 +75,7 @@ func handleError(err error) error {
 	var opErr *ops.OpError
 	if errors.As(err, &opErr) {
 		printOpError(opErr)
-		return fmt.Errorf("%s", opErr.Code)
+		return &exitError{code: exitCodeForStatus(opErr.Status), msg: opErr.Code}
 	}
 	return err
 }
