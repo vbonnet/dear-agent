@@ -48,15 +48,15 @@ func main() {
 // struct lets the seed / build helpers take one parameter instead of a
 // dozen, and keeps run() under the gocyclo budget.
 type runConfig struct {
-	interval   time.Duration
-	duration   time.Duration
-	threshold  float64
-	diskFrac   float64
-	memFrac    float64
-	cpuFrac    float64
-	stranded   int
-	orphaned   int
-	trailPath  string
+	interval          time.Duration
+	duration          time.Duration
+	threshold         float64
+	diskFrac          float64
+	memFrac           float64
+	cpuFrac           float64
+	stranded          int
+	orphaned          int
+	trailPath         string
 	nProposals        int
 	nTasks            int
 	sysProbe          bool    // use SysResourceProbe (real OS metrics) instead of InMemory
@@ -168,8 +168,18 @@ func buildMesh(trail decisiontrail.Trail, roadmap *supervisor.InMemoryRoadmap, q
 		overSup = overSup.WithReclaimer(reclaimer)
 	}
 	if cfg.pressure {
+		// On the real-probe path the critical-tier reclaimer is the AGM-aware
+		// process reaper: it consults the session DB, protects every live
+		// session's process subtree, and reaps unsupervised high-RSS processes
+		// with SIGTERM→grace→SIGKILL (ce-3o3p). With the in-memory probe the
+		// pressure is simulated, so we keep the in-memory reclaimer there to
+		// avoid signalling real host processes in response to fake metrics.
+		var pressureReclaimer supervisor.ResourceReclaimer = supervisor.NewInMemoryReclaimer()
+		if cfg.sysProbe {
+			pressureReclaimer = &supervisor.SupervisedReclaimer{}
+		}
 		reaper, rerr := supervisor.NewAutoResourceReaper(trail,
-			supervisor.WithReapReclaimer(supervisor.NewInMemoryReclaimer()),
+			supervisor.WithReapReclaimer(pressureReclaimer),
 			supervisor.WithSessionArchiver(supervisor.NewInMemorySessionArchiver()),
 			supervisor.WithSpawnGate(supervisor.NewInMemorySpawnGate()),
 			supervisor.WithPressureEscalator(supervisor.NewInMemoryPressureEscalator()),

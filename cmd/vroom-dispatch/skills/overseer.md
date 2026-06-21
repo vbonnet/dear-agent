@@ -359,6 +359,24 @@ agm session reap-orphans --targets gopls,agm-mcp-server --json
 Capture `killed` from the JSON for the trail entry. Do NOT `pkill gopls` —
 that kills live sessions' language servers.
 
+**10a (escalation). AGM-aware high-RSS reap.** When 10a leaves the pressure
+unrelieved because the worst memory hog still has a live parent (a wedged gopls
+inside a stalled-but-not-dead session, or a runaway child of a session that
+should be drained), use the AGM-aware reaper (ce-3o3p). It queries the AGM
+session DB, protects the **entire process subtree** of every live session and
+the protected roles (orchestrator/overseer/meta-), then reaps only the
+unsupervised high-RSS processes with SIGTERM → grace → SIGKILL. It is
+fail-closed: if the session DB cannot be read it kills nothing.
+```bash
+# Safety preview first — shows candidates, protected count, and the kill set:
+agm-aware-reaper --dry-run --max-rss-mb 1500 --json
+# If it reports reapable > 0, execute (still session-DB-protected):
+agm-aware-reaper --max-rss-mb 1500 --grace 10s --json
+```
+Capture `terminated` from the JSON for the trail entry. This is the
+session-DB-aware complement to 10a's PID-1-only reap — prefer 10a first (safer
+by construction) and only escalate here when orphan-only reaping is insufficient.
+
 **10b. Archive dead sessions.** Archive sessions that are STOPPED/OFFLINE with
 no live tmux pane, excluding protected roles and any session showing manifest
 progress. Confirm OFFLINE/no-pane state from the Step 6 health audit first.
@@ -385,7 +403,7 @@ agm worktree sweep --execute
 sub-step that did work):
 ```bash
 printf '{"ts":"%s","role":"overseer","kind":"overseer.resource.reclaim","payload":{"action":"%s","count":%d,"note":"%s"}}\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<gopls_reap|session_archive|worktree_sweep>" <count> "<note>" \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<gopls_reap|agm_aware_reap|session_archive|worktree_sweep>" <count> "<note>" \
   >> ~/.agm/vroom/trail.jsonl
 ```
 
