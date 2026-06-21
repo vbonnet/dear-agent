@@ -23,6 +23,10 @@
 #      abruptly without reaping them), which otherwise accumulate until the
 #      machine swaps. Runs in the background. Safe: only PPID==1 orphans are
 #      killed; any process with a live parent is left untouched.
+#   5. Worker-session auto-archive ('agm session archive') — archives the
+#      session record for a STOPPED worker-role session so 'agm session list'
+#      stays clean without waiting for the next GC pass. Heavily guarded (see
+#      the layer below); protected supervisor roles are never touched.
 #
 # Installation: Copy to ~/.claude/hooks/stop-agm-resource-cleanup
 # Permissions: chmod +x ~/.claude/hooks/stop-agm-resource-cleanup
@@ -49,5 +53,46 @@ disown $!
 # Reaps gopls/agm-mcp-server reparented to PID 1 (session died abruptly).
 agm session reap-orphans >/dev/null 2>&1 &
 disown $!
+
+# Layer 5: worker-session auto-archive. When a worker-role session has stopped
+# (its Claude process exited and no live tmux pane remains), archive its session
+# record so it drops out of 'agm session list' immediately instead of waiting
+# for the next GC pass.
+#
+# Safety, in layers — each independently sufficient to prevent a wrong archive:
+#   - Only fires for AGM/tmux-tracked sessions (needs a resolvable name).
+#   - Skips protected supervisor roles (orchestrator/overseer/meta-) by name,
+#     mirroring the supervisor-protection guard in ArchiveSession. Matched
+#     case-insensitively, same as IsSupervisorSession.
+#   - Only fires when the manifest carries the 'role:worker' tag — never for
+#     untagged, non-worker, or unknown-role sessions.
+#   - Only archives when status is 'stopped' (no live tmux pane). A mid-session
+#     Stop event reports 'active' and is skipped, so interactive worker sessions
+#     are never archived between turns.
+#   - Archive runs WITHOUT --force, so ArchiveSession's checkActiveTmuxBlock,
+#     completion verification, and pending-delegation guards all still apply.
+#     The tmux-pane match those guards rely on was unified in ce-cxjb.1, which
+#     is what makes this no-force path safe to add.
+#   - Entirely best-effort: any failure is swallowed and never blocks exit.
+#
+# Note: we read the role from the manifest (via 'agm session get') rather than
+# from env vars — AGM only sets AGM_SESSION_NAME in the Claude environment, not
+# a role or UUID, so an env-based check would silently never fire.
+if [ -n "$AGM_SESSION" ]; then
+    agm_session_lc=$(printf '%s' "$AGM_SESSION" | tr '[:upper:]' '[:lower:]')
+    case "$agm_session_lc" in
+        *orchestrator*|*overseer*|*meta-*)
+            : # protected supervisor role — never auto-archive
+            ;;
+        *)
+            session_json=$(agm session get "$AGM_SESSION" -o json 2>/dev/null || echo "")
+            if [ -n "$session_json" ] \
+                && printf '%s' "$session_json" | jq -e '(.tags // []) | index("role:worker")' >/dev/null 2>&1 \
+                && [ "$(printf '%s' "$session_json" | jq -r '.status // ""' 2>/dev/null)" = "stopped" ]; then
+                agm session archive "$AGM_SESSION" >/dev/null 2>&1 || true
+            fi
+            ;;
+    esac
+fi
 
 exit 0
