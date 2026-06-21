@@ -11,7 +11,9 @@ name: AI Code Review (5-dimension)
 
 on:
   pull_request:
+    types: [ready_for_review]
     branches: [main]
+  merge_group:
 
 permissions:
   contents: read

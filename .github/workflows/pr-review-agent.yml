@@ -33,7 +33,9 @@ name: PR Review Agent (Codebase Health)
 
 on:
   pull_request:
+    types: [ready_for_review]
     branches: [main, develop]
+  merge_group:
   workflow_dispatch:
     inputs:
       pr_number:
