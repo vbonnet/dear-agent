@@ -53,6 +53,7 @@ var (
 	fieldsFlag       []string              // field mask for JSON output
 	forceAgent       bool                  // --agent: force agent output mode ON
 	forceNoAgent     bool                  // --no-agent: force agent output mode OFF
+	detailedMode     bool                  // --detailed: re-enable IDs/full paths/hints in agent-mode
 	outputMode       OutputMode            // resolved once in PersistentPreRunE
 	tmuxClient       session.TmuxInterface // Injected dependency for testing
 	managerBackend   manager.Backend       // New abstraction layer (nil = legacy path)
@@ -304,6 +305,7 @@ func init() {
 	rootCmd.PersistentFlags().StringSliceVar(&fieldsFlag, "fields", nil, "comma-separated field mask for JSON output (e.g., --fields id,name,status)")
 	rootCmd.PersistentFlags().BoolVar(&forceAgent, "agent", false, "force agent output mode (JSON, no header/color); overrides TTY auto-detection")
 	rootCmd.PersistentFlags().BoolVar(&forceNoAgent, "no-agent", false, "force human output mode (text, header, color); overrides AGM_AGENT and non-TTY auto-detection")
+	rootCmd.PersistentFlags().BoolVar(&detailedMode, "detailed", false, "in agent-mode, re-enable IDs, full paths, and verbose hints (inverse of terse default)")
 }
 
 // CommandInfo represents a command for JSON output
