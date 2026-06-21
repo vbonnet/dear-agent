@@ -293,7 +293,7 @@ func main() {
 		// Write atomically: temp file + rename so a crash mid-write never
 		// leaves the orchestrator a truncated prompt to dispatch.
 		tmp := c.path + ".tmp"
-		if err := os.WriteFile(tmp, []byte(renderPrompt(c.bead)), 0o644); err != nil {
+		if err := os.WriteFile(tmp, []byte(renderPrompt(c.bead)), 0o600); err != nil {
 			fmt.Fprintf(os.Stderr, "vroom-prompt-gen: write %s: %v\n", c.path, err)
 			continue
 		}
