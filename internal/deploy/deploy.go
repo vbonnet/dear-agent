@@ -83,6 +83,15 @@ func Deploy(a Artifact, opts Options) (Result, error) {
 	deployedPath := a.DeployedPath(home)
 	res := Result{Name: a.Name, DeployedPath: deployedPath}
 
+	// Binary artifacts are status-only: dear-deploy never copies a binary into
+	// place. They are built and installed out of band by their Remediation
+	// command (e.g. `make install-mergeloop`), so sync/install skip them rather
+	// than write the package-path "source" as if it were file content.
+	if a.IsBinary() {
+		res.Action = ActionSkipped
+		return res, nil
+	}
+
 	mode, err := a.FileMode()
 	if err != nil {
 		return res, err
@@ -205,23 +214,36 @@ const (
 
 // StatusResult is the outcome of inspecting one artifact without changing it.
 type StatusResult struct {
-	Name         string
-	DeployedPath string
-	State        State
-	Optional     bool
-	Remediation  string
-	Error        string
+	Name         string `json:"name"`
+	Kind         Kind   `json:"kind,omitempty"`
+	DeployedPath string `json:"deployed_path"`
+	State        State  `json:"state"`
+	Optional     bool   `json:"optional,omitempty"`
+	Remediation  string `json:"remediation,omitempty"`
+	Error        string `json:"error,omitempty"`
+	// DeployedVersion and SourceVersion are the short commit revisions compared
+	// for a binary artifact (empty for file artifacts): the vcs.revision stamped
+	// into the installed binary vs the repo HEAD it should match.
+	DeployedVersion string `json:"deployed_version,omitempty"`
+	SourceVersion   string `json:"source_version,omitempty"`
+	// Detail sub-classifies a binary drift ("stale ..." vs "divergent ...").
+	Detail string `json:"detail,omitempty"`
 }
 
 // Status reports, without writing anything, how each artifact's deployed copy
-// compares to its rendered source — the manifest-scoped twin of drift-check.
+// compares to its source — the manifest-scoped twin of drift-check. File
+// artifacts are compared by content hash; binary artifacts by embedded
+// vcs.revision against repo HEAD (see binaryStatus).
 func Status(a Artifact, opts Options) StatusResult {
-	res := StatusResult{Name: a.Name, Optional: a.Optional, Remediation: a.Remediation}
+	res := StatusResult{Name: a.Name, Kind: a.Kind, Optional: a.Optional, Remediation: a.Remediation}
 	home, err := resolveHome(opts)
 	if err != nil {
 		res.State = StateError
 		res.Error = err.Error()
 		return res
+	}
+	if a.IsBinary() {
+		return binaryStatus(a, opts, home)
 	}
 	res.DeployedPath = a.DeployedPath(home)
 

@@ -33,6 +33,18 @@ func TestParseManifest_Valid(t *testing.T) {
 	}
 }
 
+func TestParseManifest_BinaryKind(t *testing.T) {
+	data := "artifacts:\n  - name: mergeloop\n    kind: binary\n    source: cmd/mergeloop\n    deployed: ~/go/bin/mergeloop\n    remediation: make install-mergeloop\n"
+	m, err := ParseManifest([]byte(data))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	a := m.Artifacts[0]
+	if a.Kind != KindBinary || !a.IsBinary() {
+		t.Fatalf("kind = %q, IsBinary = %v", a.Kind, a.IsBinary())
+	}
+}
+
 func TestParseManifest_Errors(t *testing.T) {
 	cases := map[string]string{
 		"empty":          `artifacts: []`,
@@ -42,6 +54,7 @@ func TestParseManifest_Errors(t *testing.T) {
 		"no deployed":    "artifacts:\n  - name: x\n    source: s\n",
 		"duplicate name": "artifacts:\n  - name: x\n    source: s\n    deployed: d\n  - name: x\n    source: s2\n    deployed: d2\n",
 		"bad mode":       "artifacts:\n  - name: x\n    source: s\n    deployed: d\n    mode: \"99\"\n",
+		"unknown kind":   "artifacts:\n  - name: x\n    kind: widget\n    source: s\n    deployed: d\n",
 	}
 	for label, data := range cases {
 		t.Run(label, func(t *testing.T) {
