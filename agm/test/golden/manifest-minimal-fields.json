@@ -9,6 +9,7 @@
   "CreatedAt": "2026-02-20T13:00:00Z",
   "UpdatedAt": "2026-02-20T13:00:00Z",
   "Lifecycle": "",
+  "Outcome": "",
   "Workspace": "",
   "Context": {
     "Project": "~/src/minimal-project",

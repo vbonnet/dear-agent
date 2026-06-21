@@ -175,6 +175,9 @@ func processGCSession(ctx *OpContext, m *manifest.Manifest, req *GCRequest, prot
 	_, archiveErr := ArchiveSession(ctx, &ArchiveSessionRequest{
 		Identifier: m.SessionID,
 		Force:      req.Force,
+		// GC archives stale/abandoned sessions — stamp the outcome so the
+		// archive pile distinguishes gc-reaped records from clean completions.
+		Outcome: manifest.OutcomeGCStale,
 		// gcSkipReason already confirmed any protected-role record reaching
 		// here is STOPPED with no live tmux pane, so the supervisor-protection
 		// guard in ArchiveSession must not re-block it. checkActiveTmuxBlock

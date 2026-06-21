@@ -2,6 +2,13 @@ package manifest
 
 import "time"
 
+// SessionOutcome describes how a session ended, stamped on the record at
+// archive time. It makes the archive pile triage-legible instead of showing
+// rows of identical, indistinguishable archived sessions. Values are defined
+// as constants (OutcomeCompleted, OutcomeCrashed, OutcomeKilled, OutcomeGCStale)
+// in constants.go.
+type SessionOutcome string
+
 // Manifest represents a Claude session manifest (v2 schema)
 type Manifest struct {
 	SchemaVersion           string          `yaml:"schema_version"`
@@ -14,6 +21,7 @@ type Manifest struct {
 	CreatedAt               time.Time       `yaml:"created_at"`
 	UpdatedAt               time.Time       `yaml:"updated_at"`
 	Lifecycle               string          `yaml:"lifecycle"`           // "" (active/stopped) or "archived"
+	Outcome                 SessionOutcome  `yaml:"outcome,omitempty"`   // How the session ended, stamped at archive time (completed|crashed|killed|gc-stale)
 	Workspace               string          `yaml:"workspace,omitempty"` // Workspace name (e.g., "oss", "acme")
 	Context                 Context         `yaml:"context"`
 	Claude                  Claude          `yaml:"claude"`

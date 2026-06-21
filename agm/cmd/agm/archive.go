@@ -31,7 +31,31 @@ var (
 	forceArchive       bool // Skip pre-archive verification checks
 	keepSandbox        bool // Preserve sandbox directory for debugging
 	includeSupervisors bool // Include supervisor sessions in bulk archive
+	archiveOutcome     string // Outcome stamped on the archived record (completed|crashed|killed|gc-stale)
 )
+
+// validArchiveOutcomes lists the outcome values accepted by --outcome. Kept in
+// sync with the manifest.Outcome* constants.
+var validArchiveOutcomes = map[string]manifest.SessionOutcome{
+	"completed": manifest.OutcomeCompleted,
+	"crashed":   manifest.OutcomeCrashed,
+	"killed":    manifest.OutcomeKilled,
+	"gc-stale":  manifest.OutcomeGCStale,
+}
+
+// parseArchiveOutcome validates the --outcome flag value, returning the typed
+// outcome. An empty value maps to OutcomeUnknown (ArchiveSession then defaults
+// it to "completed").
+func parseArchiveOutcome(s string) (manifest.SessionOutcome, error) {
+	if s == "" {
+		return manifest.OutcomeUnknown, nil
+	}
+	o, ok := validArchiveOutcomes[s]
+	if !ok {
+		return manifest.OutcomeUnknown, fmt.Errorf("invalid --outcome %q (valid: completed, crashed, killed, gc-stale)", s)
+	}
+	return o, nil
+}
 
 var archiveCmd = &cobra.Command{
 	Use:   "archive [session-name]",
@@ -159,6 +183,11 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 
 	sessionName := args[0]
 
+	outcome, err := parseArchiveOutcome(archiveOutcome)
+	if err != nil {
+		return err
+	}
+
 	opCtx, cleanup, err := newOpContextWithStorage()
 	if err != nil {
 		return fmt.Errorf("failed to connect to Dolt: %w", err)
@@ -188,6 +217,7 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		Identifier:  sessionName,
 		Force:       forceArchive,
 		KeepSandbox: keepSandbox,
+		Outcome:     outcome,
 	})
 	if archiveErr != nil {
 		return handleError(archiveErr)
@@ -348,10 +378,18 @@ func parseDuration(s string) (time.Duration, error) {
 
 // archiveBulk archives multiple sessions based on filters
 func archiveBulk() error {
+	// Validate --outcome up front so a bad value fails before any work.
+	bulkOutcome, err := parseArchiveOutcome(archiveOutcome)
+	if err != nil {
+		return err
+	}
+	if bulkOutcome == manifest.OutcomeUnknown {
+		bulkOutcome = manifest.OutcomeCompleted
+	}
+
 	// Parse duration filter if specified
 	var maxAge time.Duration
 	if olderThan != "" {
-		var err error
 		maxAge, err = parseDuration(olderThan)
 		if err != nil {
 			return err
@@ -417,7 +455,7 @@ func archiveBulk() error {
 		Tmux:    tmuxClient,
 	}
 
-	successCount, failCount := bulkArchiveCandidates(adapter, candidates, opCtx)
+	successCount, failCount := bulkArchiveCandidates(adapter, candidates, opCtx, bulkOutcome)
 
 	// Report results
 	fmt.Println()
@@ -533,10 +571,11 @@ func selectArchiveCandidates(allManifests []*manifest.Manifest, activeSessions m
 
 // bulkArchiveCandidates writes the lifecycle update for each candidate session
 // and runs best-effort cleanup. Returns (successCount, failCount).
-func bulkArchiveCandidates(adapter *dolt.Adapter, candidates []*manifest.Manifest, opCtx *ops.OpContext) (int, int) {
+func bulkArchiveCandidates(adapter *dolt.Adapter, candidates []*manifest.Manifest, opCtx *ops.OpContext, outcome manifest.SessionOutcome) (int, int) {
 	var successCount, failCount int
 	for _, m := range candidates {
 		m.Lifecycle = manifest.LifecycleArchived
+		m.Outcome = outcome
 		m.UpdatedAt = time.Now()
 
 		if err := adapter.UpdateSession(m); err != nil {
@@ -726,5 +765,7 @@ func init() {
 		"Preserve sandbox directory for debugging instead of removing it")
 	archiveCmd.Flags().BoolVar(&includeSupervisors, "include-supervisors", false,
 		"Include supervisor sessions (orchestrator, overseer, meta-*) in bulk archive")
+	archiveCmd.Flags().StringVar(&archiveOutcome, "outcome", "",
+		"Outcome to stamp on the archived record: completed (default), crashed, killed, gc-stale")
 	sessionCmd.AddCommand(archiveCmd)
 }

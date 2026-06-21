@@ -230,6 +230,7 @@ func (m *MockAdapter) copyManifest(src *manifest.Manifest) *manifest.Manifest {
 		CreatedAt:      src.CreatedAt,
 		UpdatedAt:      src.UpdatedAt,
 		Lifecycle:      src.Lifecycle,
+		Outcome:        src.Outcome,
 		State:          src.State,
 		StateUpdatedAt: src.StateUpdatedAt,
 		StateSource:    src.StateSource,

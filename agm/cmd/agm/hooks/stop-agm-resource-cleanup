@@ -89,7 +89,9 @@ if [ -n "$AGM_SESSION" ]; then
             if [ -n "$session_json" ] \
                 && printf '%s' "$session_json" | jq -e '(.tags // []) | index("role:worker")' >/dev/null 2>&1 \
                 && [ "$(printf '%s' "$session_json" | jq -r '.status // ""' 2>/dev/null)" = "stopped" ]; then
-                agm session archive "$AGM_SESSION" >/dev/null 2>&1 || true
+                # A stopped worker on the Stop hook finished its turn normally —
+                # stamp 'completed' so the archived record is triage-legible.
+                agm session archive "$AGM_SESSION" --outcome completed >/dev/null 2>&1 || true
             fi
             ;;
     esac

@@ -119,6 +119,11 @@ Examples:
 
 func archiveSessionManifest(adapter *dolt.Adapter, m *manifest.Manifest) error {
 	m.Lifecycle = manifest.LifecycleArchived
+	// `agm clean` archives stopped sessions during routine cleanup — treat them
+	// as completed so the archived record is triage-legible.
+	if m.Outcome == manifest.OutcomeUnknown {
+		m.Outcome = manifest.OutcomeCompleted
+	}
 	if err := adapter.UpdateSession(m); err != nil {
 		return err
 	}

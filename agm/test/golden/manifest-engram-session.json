@@ -9,6 +9,7 @@
   "CreatedAt": "2026-02-20T11:30:00Z",
   "UpdatedAt": "2026-02-20T11:30:00Z",
   "Lifecycle": "",
+  "Outcome": "",
   "Workspace": "oss",
   "Context": {
     "Project": "~/src/engram-project",

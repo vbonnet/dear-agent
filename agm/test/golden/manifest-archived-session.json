@@ -9,6 +9,7 @@
   "CreatedAt": "2026-01-15T09:00:00Z",
   "UpdatedAt": "2026-02-01T16:45:00Z",
   "Lifecycle": "archived",
+  "Outcome": "",
   "Workspace": "oss",
   "Context": {
     "Project": "~/src/archived-project",
