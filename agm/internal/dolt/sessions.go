@@ -20,13 +20,12 @@ func defaultIfEmpty(s, dflt string) string {
 	return s
 }
 
-// marshalCreateSessionJSON serializes the JSON-typed fields needed by the
-// agm_sessions INSERT (context tags, engram metadata, monitors).
-func marshalCreateSessionJSON(session *manifest.Manifest) ([]byte, []byte, interface{}, error) {
-	contextTags, err := json.Marshal(session.Context.Tags)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to marshal context tags: %w", err)
-	}
+// buildSessionMetadata assembles the map stored in the agm_sessions.metadata
+// JSON column. It carries the engram integration fields plus the session
+// outcome (stamped at archive time). Outcome is persisted here rather than in a
+// dedicated column so it round-trips through every read path (list, get,
+// frecency, hierarchy) without a schema migration — they all select metadata.
+func buildSessionMetadata(session *manifest.Manifest) map[string]any {
 	metadata := make(map[string]any)
 	if session.EngramMetadata != nil {
 		metadata["engram_enabled"] = session.EngramMetadata.Enabled
@@ -35,7 +34,20 @@ func marshalCreateSessionJSON(session *manifest.Manifest) ([]byte, []byte, inter
 		metadata["engram_loaded_at"] = session.EngramMetadata.LoadedAt
 		metadata["engram_count"] = session.EngramMetadata.Count
 	}
-	metadataJSON, err := json.Marshal(metadata)
+	if session.Outcome != manifest.OutcomeUnknown {
+		metadata["outcome"] = string(session.Outcome)
+	}
+	return metadata
+}
+
+// marshalCreateSessionJSON serializes the JSON-typed fields needed by the
+// agm_sessions INSERT (context tags, engram metadata, monitors).
+func marshalCreateSessionJSON(session *manifest.Manifest) ([]byte, []byte, any, error) {
+	contextTags, err := json.Marshal(session.Context.Tags)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to marshal context tags: %w", err)
+	}
+	metadataJSON, err := json.Marshal(buildSessionMetadata(session))
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to marshal metadata: %w", err)
 	}
@@ -190,16 +202,8 @@ func (a *Adapter) UpdateSession(session *manifest.Manifest) error {
 		return fmt.Errorf("failed to marshal context tags: %w", err)
 	}
 
-	// Build metadata JSON from EngramMetadata
-	metadata := make(map[string]any)
-	if session.EngramMetadata != nil {
-		metadata["engram_enabled"] = session.EngramMetadata.Enabled
-		metadata["engram_query"] = session.EngramMetadata.Query
-		metadata["engram_ids"] = session.EngramMetadata.EngramIDs
-		metadata["engram_loaded_at"] = session.EngramMetadata.LoadedAt
-		metadata["engram_count"] = session.EngramMetadata.Count
-	}
-	metadataJSON, err := json.Marshal(metadata)
+	// Build metadata JSON from EngramMetadata + outcome
+	metadataJSON, err := json.Marshal(buildSessionMetadata(session))
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
@@ -694,6 +698,11 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 	var metadata map[string]any
 	if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
 		return fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+	// Outcome lives alongside engram fields but is independent of them — read it
+	// before the engram early-return so it round-trips even when engram is off.
+	if outcome, ok := metadata["outcome"].(string); ok {
+		session.Outcome = manifest.SessionOutcome(outcome)
 	}
 	enabled, ok := metadata["engram_enabled"].(bool)
 	if !ok || !enabled {

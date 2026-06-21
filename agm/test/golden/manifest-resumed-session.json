@@ -9,6 +9,7 @@
   "CreatedAt": "2026-02-19T14:30:00Z",
   "UpdatedAt": "2026-02-20T10:15:00Z",
   "Lifecycle": "",
+  "Outcome": "",
   "Workspace": "acme",
   "Context": {
     "Project": "~/src/resumed-project",

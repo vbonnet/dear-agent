@@ -40,6 +40,7 @@ type SessionSummary struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
 	Status        string   `json:"status"`
+	Outcome       string   `json:"outcome,omitempty"` // How the session ended (set for archived sessions)
 	Attached      bool     `json:"attached"`
 	Harness       string   `json:"harness"`
 	Project       string   `json:"project"`
@@ -154,6 +155,7 @@ func toSessionSummary(m *manifest.Manifest, statuses map[string]string, attached
 		ID:            m.SessionID,
 		Name:          m.Name,
 		Status:        status,
+		Outcome:       string(m.Outcome),
 		Attached:      attached[m.Name],
 		Harness:       m.Harness,
 		Project:       m.Context.Project,
