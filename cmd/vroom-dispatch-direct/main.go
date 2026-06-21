@@ -39,7 +39,14 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
+
+// subprocessTimeout bounds every bd/gh/agm child so a hung subprocess cannot
+// stall a dispatch run indefinitely. The styleguide requires subprocess calls to
+// be both context-propagated and timeout-bounded; each runner derives a deadline
+// from the caller's ctx so SIGINT/SIGTERM cancellation still composes with it.
+const subprocessTimeout = 60 * time.Second
 
 // humanGated lists beads that must never be auto-dispatched to a worker: they
 // require a human in the loop (credential rotation, backups, repointing live
@@ -90,6 +97,8 @@ type pullRequest struct {
 // queryReady runs `bd --db <db> ready --json` and returns the ready beads. It is
 // a package var so tests can stub the bd invocation without a real database.
 var queryReady = func(ctx context.Context, db string) ([]bead, error) {
+	ctx, cancel := context.WithTimeout(ctx, subprocessTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "bd", "--db", db, "ready", "--json")
 	out, err := cmd.Output()
 	if err != nil {
@@ -107,6 +116,8 @@ var queryReady = func(ctx context.Context, db string) ([]bead, error) {
 // an error so the caller can fail closed rather than silently dispatching beads
 // that already have an open PR.
 var queryOpenPRs = func(ctx context.Context, repo string) ([]pullRequest, error) {
+	ctx, cancel := context.WithTimeout(ctx, subprocessTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", "pr", "list",
 		"--repo", repo,
 		"--state", "open",
@@ -128,6 +139,8 @@ var queryOpenPRs = func(ctx context.Context, repo string) ([]pullRequest, error)
 // the caller can fail closed: without the session list we cannot tell which beads
 // are already being worked, and must not risk double-dispatching them.
 var listSessions = func(ctx context.Context) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, subprocessTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "agm", "session", "list")
 	out, err := cmd.Output()
 	if err != nil {
@@ -344,6 +357,8 @@ func sessionNewArgs(name, model string) []string {
 
 // spawnSession creates the detached worker session. Package var for test stubbing.
 var spawnSession = func(ctx context.Context, name, model string) error {
+	ctx, cancel := context.WithTimeout(ctx, subprocessTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "agm", sessionNewArgs(name, model)...)
 	// Mark the spawned session tree as unattended so its own `agm send` calls
 	// auto-stash stale input instead of deadlocking as if a human were typing
@@ -358,6 +373,8 @@ var spawnSession = func(ctx context.Context, name, model string) error {
 // sendPrompt sends the rendered work prompt to a worker session. Package var for
 // test stubbing.
 var sendPrompt = func(ctx context.Context, name, prompt string) error {
+	ctx, cancel := context.WithTimeout(ctx, subprocessTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "agm", "send", "msg", name,
 		"--sender", dispatchSender,
 		"--autonomous",
