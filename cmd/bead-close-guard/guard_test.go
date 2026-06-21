@@ -233,3 +233,94 @@ func TestFormatResult_Forced(t *testing.T) {
 		t.Errorf("expected abandon reason in output, got %q", out)
 	}
 }
+
+func TestFormatResult_BlockedByDeploy(t *testing.T) {
+	t.Parallel()
+	r := GuardResult{
+		BeadID: "ce-test",
+		PRs:    []int{449},
+		DriftFindings: []DeployFinding{
+			{Target: "stop-hook", Deployed: "~/.claude/hooks/stop", Status: "drift", Remediation: "agm admin install-hooks"},
+		},
+		Passed: false,
+	}
+	var buf strings.Builder
+	FormatResult(r, &buf)
+	out := buf.String()
+	if !strings.Contains(out, "BLOCKED") {
+		t.Errorf("expected BLOCKED, got %q", out)
+	}
+	if !strings.Contains(out, "Merged != deployed") {
+		t.Errorf("expected merged-vs-deployed explanation, got %q", out)
+	}
+	if !strings.Contains(out, "stop-hook") || !strings.Contains(out, "agm admin install-hooks") {
+		t.Errorf("expected target and remediation, got %q", out)
+	}
+}
+
+func TestFormatResult_BlockedByBothGates(t *testing.T) {
+	t.Parallel()
+	r := GuardResult{
+		BeadID:     "ce-test",
+		PRs:        []int{449, 551},
+		UnmergedPR: []UnmergedPR{{Number: 551, State: "OPEN"}},
+		DriftFindings: []DeployFinding{
+			{Target: "stop-hook", Deployed: "~/.claude/hooks/stop", Status: "missing", Remediation: "agm admin install-hooks"},
+		},
+		Passed: false,
+	}
+	var buf strings.Builder
+	FormatResult(r, &buf)
+	out := buf.String()
+	if !strings.Contains(out, "#551") {
+		t.Errorf("expected unmerged PR #551, got %q", out)
+	}
+	if !strings.Contains(out, "stop-hook") {
+		t.Errorf("expected deploy finding, got %q", out)
+	}
+}
+
+func TestFormatResult_OverrideDeploy(t *testing.T) {
+	t.Parallel()
+	r := GuardResult{
+		BeadID:        "ce-test",
+		PRs:           []int{449},
+		DriftFindings: []DeployFinding{{Target: "stop-hook", Status: "drift", Remediation: "agm admin install-hooks"}},
+		Passed:        true,
+		AbandonReason: "superseded by ce-xyz",
+	}
+	var buf strings.Builder
+	FormatResult(r, &buf)
+	out := buf.String()
+	if !strings.Contains(out, "OVERRIDE") {
+		t.Errorf("expected OVERRIDE, got %q", out)
+	}
+	if !strings.Contains(out, "undeployed artifact") {
+		t.Errorf("expected undeployed-artifact reason, got %q", out)
+	}
+}
+
+func TestFormatResult_OKWithDeployChecked(t *testing.T) {
+	t.Parallel()
+	r := GuardResult{BeadID: "ce-test", PRs: []int{449}, DeployTargetsChecked: 2, Passed: true}
+	var buf strings.Builder
+	FormatResult(r, &buf)
+	out := buf.String()
+	if !strings.Contains(out, "merged") {
+		t.Errorf("expected merged confirmation, got %q", out)
+	}
+	if !strings.Contains(out, "deploy target(s) current") {
+		t.Errorf("expected deploy-gate confirmation, got %q", out)
+	}
+}
+
+func TestFormatResult_OKWithSkipNote(t *testing.T) {
+	t.Parallel()
+	r := GuardResult{BeadID: "ce-test", PRs: []int{449}, DeploySkipNote: "no repo root resolved", Passed: true}
+	var buf strings.Builder
+	FormatResult(r, &buf)
+	out := buf.String()
+	if !strings.Contains(out, "deployed gate skipped") {
+		t.Errorf("expected skip note, got %q", out)
+	}
+}
