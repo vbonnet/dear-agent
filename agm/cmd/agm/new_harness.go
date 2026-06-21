@@ -358,7 +358,7 @@ func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []
 	time.Sleep(500 * time.Millisecond)
 
 	debug.Log("Waiting for Codex prompt readiness (timeout: 90s)")
-	if err := tmux.WaitForPromptSimple(sessionName, 90*time.Second); err != nil {
+	if err := tmux.WaitForCodexPrompt(sessionName, 90*time.Second); err != nil {
 		debug.Log("Codex prompt readiness wait failed (non-fatal): %v", err)
 	} else {
 		debug.Log("✓ Codex prompt detected - Codex is ready")
