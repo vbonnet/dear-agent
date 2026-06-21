@@ -37,7 +37,10 @@ type ListSessionsRequest struct {
 // DONE, OFFLINE) that caused cascading bad decisions. State detection will be
 // reimplemented with capture-pane-based ground truth. See cross_check.go.
 type SessionSummary struct {
-	ID            string   `json:"id"`
+	// ID is omitempty so agent-mode can drop the raw UUID by default (name is
+	// the stable handle). In human/JSON mode ID is always a non-empty UUID, so
+	// omitempty never changes that output.
+	ID            string   `json:"id,omitempty"`
 	Name          string   `json:"name"`
 	Status        string   `json:"status"`
 	Outcome       string   `json:"outcome,omitempty"` // How the session ended (set for archived sessions)

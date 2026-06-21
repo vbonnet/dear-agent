@@ -26,7 +26,15 @@ func printJSON(v any) error {
 		return nil
 	}
 
-	data, err := json.MarshalIndent(v, "", "  ")
+	// Agent mode emits compact JSON (no indentation) to save tokens; human
+	// (TTY) mode keeps the indented, readable form.
+	var data []byte
+	var err error
+	if outputMode == ModeAgent {
+		data, err = json.Marshal(v)
+	} else {
+		data, err = json.MarshalIndent(v, "", "  ")
+	}
 	if err != nil {
 		return fmt.Errorf("JSON marshal error: %w", err)
 	}
