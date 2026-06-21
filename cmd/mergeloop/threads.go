@@ -222,8 +222,14 @@ func emitThreadResolutionEvent(pr int, threadID, botAuthor string) {
 	if err != nil {
 		return
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			fmt.Fprintf(os.Stderr, "mergeloop: failed to close audit log: %v\n", cerr)
+		}
+	}()
 	if data, err := json.Marshal(ev); err == nil {
-		_, _ = f.Write(append(data, '\n'))
+		if _, werr := f.Write(append(data, '\n')); werr != nil {
+			fmt.Fprintf(os.Stderr, "mergeloop: failed to write audit log entry: %v\n", werr)
+		}
 	}
 }
