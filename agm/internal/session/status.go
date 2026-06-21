@@ -12,9 +12,13 @@ type StatusInfo struct {
 	LocallyAttached bool   // True if attached on this terminal/machine
 }
 
-// getTmuxSessionName returns the tmux session name for a manifest with fallback logic
-// If Tmux.SessionName is empty, falls back to sanitized session name
-func getTmuxSessionName(m *manifest.Manifest) string {
+// TmuxSessionName returns the tmux session name for a manifest with fallback logic.
+// If Tmux.SessionName is empty, falls back to the sanitized session name. This is
+// the single source of truth for "which tmux session name does this manifest map
+// to" — status computation and archive safety checks MUST agree on it, otherwise a
+// live detached pane (whose manifest has an empty Tmux.SessionName) can be archived
+// while status reports it active.
+func TmuxSessionName(m *manifest.Manifest) string {
 	if m.Tmux.SessionName != "" {
 		return m.Tmux.SessionName
 	}
@@ -46,7 +50,7 @@ func ComputeStatus(m *manifest.Manifest, tmux TmuxInterface) string {
 	}
 
 	// Check tmux state (use fallback logic for empty tmux_session_name)
-	tmuxSessionName := getTmuxSessionName(m)
+	tmuxSessionName := TmuxSessionName(m)
 	exists, err := tmux.HasSession(tmuxSessionName)
 	if err != nil {
 		// On tmux error, assume stopped (conservative choice)
@@ -63,8 +67,28 @@ func ComputeStatus(m *manifest.Manifest, tmux TmuxInterface) string {
 // ComputeStatusBatch computes status for multiple manifests efficiently
 // Makes a single call to tmux.ListSessions() instead of N calls to HasSession()
 //
-// Returns a map of manifest Name → status
+// Returns a map of manifest Name → status.
+//
+// WARNING: keying by Name is lossy when two manifests share a Name (e.g. an
+// archived shadow and a live worker). The last writer wins and can hide a live
+// session. Display callers tolerate this; any code that makes lifecycle
+// decisions (e.g. GC) MUST use ComputeStatusBatchByID instead.
 func ComputeStatusBatch(manifests []*manifest.Manifest, tmux TmuxInterface) map[string]string {
+	return computeStatusBatchKeyed(manifests, tmux, func(m *manifest.Manifest) string { return m.Name })
+}
+
+// ComputeStatusBatchByID computes status for multiple manifests efficiently and
+// keys the result map by SessionID (UUID) instead of Name. Use this anywhere the
+// status drives a decision per session, so name collisions can't shadow a live
+// session under an archived (or otherwise stale) duplicate name.
+func ComputeStatusBatchByID(manifests []*manifest.Manifest, tmux TmuxInterface) map[string]string {
+	return computeStatusBatchKeyed(manifests, tmux, func(m *manifest.Manifest) string { return m.SessionID })
+}
+
+// computeStatusBatchKeyed is the shared core of the batch status helpers. It
+// lists tmux sessions once and computes each manifest's status, keying the
+// result map by key(m).
+func computeStatusBatchKeyed(manifests []*manifest.Manifest, tmux TmuxInterface, key func(*manifest.Manifest) string) map[string]string {
 	statuses := make(map[string]string, len(manifests))
 
 	// If tmux interface is nil, conservatively report all as stopped (or archived if lifecycle set)
@@ -90,14 +114,14 @@ func ComputeStatusBatch(manifests []*manifest.Manifest, tmux TmuxInterface) map[
 	// Compute status for each manifest
 	for _, m := range manifests {
 		if m.Lifecycle == manifest.LifecycleArchived {
-			statuses[m.Name] = "archived"
+			statuses[key(m)] = "archived"
 		} else {
 			// Use fallback logic for empty tmux_session_name
-			tmuxSessionName := getTmuxSessionName(m)
+			tmuxSessionName := TmuxSessionName(m)
 			if sessionSet[tmuxSessionName] {
-				statuses[m.Name] = "active"
+				statuses[key(m)] = "active"
 			} else {
-				statuses[m.Name] = "stopped"
+				statuses[key(m)] = "stopped"
 			}
 		}
 	}
@@ -135,7 +159,7 @@ func ComputeStatusBatchWithInfo(manifests []*manifest.Manifest, tmux TmuxInterfa
 			}
 		} else {
 			// Use fallback logic for empty tmux_session_name
-			tmuxSessionName := getTmuxSessionName(m)
+			tmuxSessionName := TmuxSessionName(m)
 			if sessionInfo, exists := sessionMap[tmuxSessionName]; exists {
 				statuses[m.Name] = StatusInfo{
 					Status:          "active",
