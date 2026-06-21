@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -129,12 +128,7 @@ func runSessionCheckReservation(_ *cobra.Command, _ []string) error {
 	}
 
 	if checkJSON {
-		data, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal result: %w", err)
-		}
-		fmt.Println(string(data))
-		return nil
+		return printJSON(result)
 	}
 
 	if result.Reserved {

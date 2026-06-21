@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -10,9 +9,9 @@ import (
 )
 
 var (
-	dashboardJSON       bool
-	dashboardAll        bool
-	dashboardOutput     string
+	dashboardJSON         bool
+	dashboardAll          bool
+	dashboardOutput       string
 	dashboardOrchestrator bool
 )
 
@@ -84,12 +83,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	}
 
 	if outputFormat == "json" {
-		data, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal JSON: %w", err)
-		}
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
-		return nil
+		return printJSON(result)
 	}
 
 	printDashboardTable(cmd, result)
@@ -157,12 +151,7 @@ func runOrchestratorDashboard(cmd *cobra.Command, opCtx *ops.OpContext, outputFo
 	}
 
 	if outputFormat == "json" {
-		data, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal JSON: %w", err)
-		}
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(data))
-		return nil
+		return printJSON(result)
 	}
 
 	printOrchestratorDashboardTable(cmd, result)
