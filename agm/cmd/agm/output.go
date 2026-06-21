@@ -95,6 +95,7 @@ func newOpContext() *ops.OpContext {
 	return &ops.OpContext{
 		Fields:     fieldsFlag,
 		OutputMode: outputFormat,
+		Detailed:   detailedMode,
 		Tmux:       tmuxClient,
 		Manager:    managerBackend,
 	}
@@ -115,6 +116,7 @@ func newOpContextWithStorage() (*ops.OpContext, func(), error) {
 		Storage:    adapter,
 		Fields:     fieldsFlag,
 		OutputMode: outputFormat,
+		Detailed:   detailedMode,
 		Tmux:       tmuxClient,
 		Manager:    managerBackend,
 	}, cleanup, nil
