@@ -16,8 +16,8 @@ locals {
     # cannot take a ruleset (GitHub rejects mutations on archived repos). It is
     # declared under archived_repos below (frozen, ignore_changes = all) rather
     # than removed entirely: removing a previously-managed repo would make a
-    # full `tofu apply` propose DESTROYING github_repository.active["engram"],
-    # which deletes the repo on GitHub. archived_repos keeps it safely managed.
+    # full `tofu apply` propose DESTROYING module.managed_repos["engram"], which
+    # deletes the repo on GitHub. archived_repos keeps it safely managed.
     "brain-v2" = {
       visibility      = "private"
       default_branch  = "main"
