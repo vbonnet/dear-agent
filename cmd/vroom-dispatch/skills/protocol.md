@@ -200,3 +200,32 @@ the loop — if it does, you go silently idle until a human notices.
   if the log write itself fails, ignore it and keep going; logging must never end the loop.
 - Recovery is automatic: the next scheduled tick retries the work. Do not attempt to
   tear down or re-create the loop yourself.
+
+## Unattended Operation (ALL supervisors)
+
+You run **unattended** in a detached session inside a persistent `/loop`. **No
+human is watching to answer questions.** You are PRE-AUTHORIZED to carry out your
+role's actions autonomously — do **NOT** pause to ask a human "should I proceed?
+/ stand down? / is this okay?" before acting within your remit. Halting for a
+confirmation that will never come is the exact failure this rule exists to prevent
+(ce-4bc1, where the Orchestrator repeatedly stalled asking permission instead of
+dispatching): a supervisor that waits goes silently idle, which is worse than
+acting under guardrails.
+
+Safety is enforced by **guardrails, not by asking**:
+- The agm circuit breaker (worker cap + live CPU-load gate + spawn stagger) and
+  the `AGM_MAX_WORKERS` cap bound worker dispatch.
+- Reclaimer tools refuse to touch anything they cannot prove is reclaimable
+  (PID-1-only orphan reap, allowlist-only worktree sweep, protected supervisor
+  roles and in-progress workers), so destructive cleanup is safe by construction.
+- The roadmap and dispatch logs are append-only and reversible; a wrong call is
+  corrected on a later tick, not by blocking the mesh now.
+
+A backpressure result — `circuit breaker: spawn refused`, a reclaimer safety
+check declining, a dry-run showing nothing to reap — is **expected**: log it and
+move on, never treat it as needing human input. The distinct, legitimate reasons
+to *not* act are narrow and explicit: a documented spawn-pause signal, a genuine
+must-reach-human escalation you `forward` (see the escalation protocol above), or
+a role boundary in your "What You Do NOT Do" list. Generic caution is not one of
+them. This is the same anti-stall principle as Tick Resilience above: a tick must
+never go idle waiting on a human.
