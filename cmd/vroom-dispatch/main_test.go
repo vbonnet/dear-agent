@@ -315,6 +315,51 @@ func TestWorkerSpawnPinsOpusAndWayfinder(t *testing.T) {
 	}
 }
 
+// TestDeployWorkerDispatch pins the deploy-as-worker contract (ce-x9s5): the
+// Orchestrator dispatches an episodic deploy worker to land a finished bead's
+// PR, and that worker's skill drives the merge through the vetted safe-* path.
+// Both halves live in embedded markdown, so guard them here.
+func TestDeployWorkerDispatch(t *testing.T) {
+	orch, err := skills.ReadFile("skills/orchestrator.md")
+	if err != nil {
+		t.Fatalf("read embedded orchestrator.md: %v", err)
+	}
+	od := string(orch)
+	for _, want := range []string{
+		"worker-deploy-",                    // distinct deploy-worker session name
+		"deploy-worker.md",                  // dispatch points at the installed skill
+		"deploy-dispatched.jsonl",           // de-dupe ledger so we don't double-spawn
+		"--model=opus-200k",                 // same credit-gate guardrail as impl workers
+		"--mode=auto",                       // detached deploy worker can't clear prompts
+		"supervisor.orch.deploy_dispatched", // trail event for the dispatch
+	} {
+		if !strings.Contains(od, want) {
+			t.Errorf("orchestrator.md deploy dispatch missing %q", want)
+		}
+	}
+
+	skill, err := skills.ReadFile("skills/deploy-worker.md")
+	if err != nil {
+		t.Fatalf("read embedded deploy-worker.md: %v", err)
+	}
+	sd := string(skill)
+	for _, want := range []string{
+		"safe-rebase",              // rebase onto main (vetted wrapper, never --force)
+		"resolve-review-threads",   // resolve bot threads before merge gate
+		"safe-merge",               // CI-watch + TOCTOU squash-merge via vetted path
+		"--watch",                  // safe-merge --watch is the CI watch
+		"WORKER, not a supervisor", // episodic, finite — not a persistent loop
+	} {
+		if !strings.Contains(sd, want) {
+			t.Errorf("deploy-worker.md missing %q", want)
+		}
+	}
+	// A deploy worker must never use the raw, hook-denied merge path.
+	if strings.Contains(sd, "gh pr merge") {
+		t.Errorf("deploy-worker.md must merge via safe-merge, not raw 'gh pr merge'")
+	}
+}
+
 // TestWorkerPromptRequiresVerificationGate pins the verification-before-completion
 // hard gate (ce-fvsv): the worker dispatch prompt must force ≥1 verification step
 // (go test / make preflight / equivalent) before a worker may declare done. Code
