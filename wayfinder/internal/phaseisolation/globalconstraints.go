@@ -10,7 +10,7 @@ type GlobalConstraint struct {
 	Why  string // Why it matters (kept terse for prompt economy)
 }
 
-// GlobalConstraints lists the invariants that apply across all phases and
+// globalConstraints lists the invariants that apply across all phases and
 // tasks of a wayfinder plan. They are hoisted into a single "Global
 // Constraints" block at the top of every plan template so cross-task
 // behavior stays consistent and the same rules don't have to be re-stated
@@ -19,7 +19,10 @@ type GlobalConstraint struct {
 // Keep this list short and genuinely global: a constraint earns a place
 // here only if violating it in any phase would break the plan. Phase- or
 // task-specific guidance belongs in that phase's definition, not here.
-var GlobalConstraints = []GlobalConstraint{
+//
+// It is unexported so callers cannot mutate this shared slice; reach it
+// through GetGlobalConstraints, which hands back a defensive copy.
+var globalConstraints = []GlobalConstraint{
 	{
 		Rule: "Never write to the golden source checkout under `~/src/`; do all work in a dedicated worktree.",
 		Why:  "The source checkouts are read-only references shared across sessions; mutating them corrupts every other worker's view.",
@@ -38,13 +41,16 @@ var GlobalConstraints = []GlobalConstraint{
 	},
 }
 
-// GetGlobalConstraints returns the spec-wide invariants applied to every
-// plan template. Returns nil if none are defined.
+// GetGlobalConstraints returns a copy of the spec-wide invariants applied to
+// every plan template. Returns nil if none are defined. The copy keeps the
+// shared backing slice read-only for callers.
 func GetGlobalConstraints() []GlobalConstraint {
-	if len(GlobalConstraints) == 0 {
+	if len(globalConstraints) == 0 {
 		return nil
 	}
-	return GlobalConstraints
+	out := make([]GlobalConstraint, len(globalConstraints))
+	copy(out, globalConstraints)
+	return out
 }
 
 // FormatGlobalConstraints renders the constraints as a markdown bullet list
@@ -56,12 +62,14 @@ func FormatGlobalConstraints(constraints []GlobalConstraint) string {
 	}
 
 	var b strings.Builder
-	for _, c := range constraints {
+	for i, c := range constraints {
+		if i > 0 {
+			b.WriteString("\n")
+		}
 		b.WriteString("- **")
 		b.WriteString(c.Rule)
 		b.WriteString("** ")
 		b.WriteString(c.Why)
-		b.WriteString("\n")
 	}
 	return b.String()
 }
