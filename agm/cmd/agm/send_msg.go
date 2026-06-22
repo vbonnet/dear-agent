@@ -393,6 +393,12 @@ func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error 
 			return err
 		}
 		guardOpts.SkipHumanTyping = true
+		// ce-5sow: the override must follow through to the tmux-direct delivery
+		// path, which runs its own post-submit human-typing cooldown abort.
+		// Without this, a forced send is re-blocked there ("human is typing").
+		// Set only after override.Require has validated --reason and recorded
+		// the audit entry, so the tmux-layer bypass is never silent.
+		tmux.SetForceDelivery(true)
 	}
 
 	guardResult := safety.Check(recipientSession, guardOpts)
