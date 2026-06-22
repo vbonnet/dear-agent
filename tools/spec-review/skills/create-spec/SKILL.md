@@ -1,9 +1,6 @@
 ---
 name: create-spec
-description: >-
-  Generate SPEC.md files from codebase analysis and requirements.
-  TRIGGER when: user asks to create a spec, generate a product specification, write a SPEC.md, or says "create spec".
-  DO NOT TRIGGER when: reviewing an existing SPEC.md (use review-spec) or creating architecture diagrams (use create-diagrams).
+description: Generate SPEC.md files from codebase analysis and requirements.
 allowed-tools:
   - "Bash"
   - "Read"
