@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.dear-agent.archive-ui — daily idle Claude UI session declutter.
+
+  Source template:
+      agm/cmd/agm/schedules/com.dear-agent.archive-ui.plist
+  Installed by `agm admin install-archive-ui-schedule`, which substitutes
+  __USER_HOME__ and __AGM_BINARY__ before writing this file (launchd does
+  not expand ~ or shell variables).
+
+  Schedule: every 24 hours (StartInterval = 86400 seconds).
+  Logs:     <home>/Library/Logs/dear-agent/archive-ui.log
+
+  The Claude desktop / claude.ai/code "Code" session list grows without bound:
+  every CLI session adds a local_<id>.json with isArchived=false, and the only
+  first-party way to clear them is the per-row UI archive action. They
+  accumulated into the hundreds (ADR-026). `agm session archive-ui` flips the
+  local isArchived flag for sessions that have been idle past a threshold; this
+  launchd job is what makes that automatic instead of a manual chore — it is
+  Phase 3 ("wrappers + cron") of ADR-026.
+
+  Safety: the job runs the conservative default set —
+    --older-than 7d --status idle --apply
+  which only archives sessions with NO live process owning them AND last active
+  more than 7 days ago. archive-ui never deletes a file, never touches
+  ~/.claude/projects/*.jsonl transcripts, never calls a network API, backs up
+  every mutated file under ~/.agm/backups/claude-ui-sessions/<ts>/, and is
+  reversible with `agm session archive-ui --status all --unarchive --apply`.
+
+  Trigger an immediate run outside the daily schedule with:
+    launchctl kickstart gui/$UID/com.dear-agent.archive-ui
+
+  To remove the job, use 'agm admin uninstall-archive-ui-schedule'.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dear-agent.archive-ui</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__AGM_BINARY__</string>
+        <string>session</string>
+        <string>archive-ui</string>
+        <string>--older-than</string>
+        <string>7d</string>
+        <string>--status</string>
+        <string>idle</string>
+        <string>--apply</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__USER_HOME__/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__USER_HOME__</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>86400</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/archive-ui.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/archive-ui.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
