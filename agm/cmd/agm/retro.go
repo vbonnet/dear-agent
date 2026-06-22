@@ -37,9 +37,13 @@ Lenses:
   • remediation         — collect concrete follow-up actions (bead IDs, PR numbers, process changes)
   • systemic-vs-oneoff  — classify: structural/will-recur vs context-specific/one-off
 
+When all four lenses run, a supervisor synthesis folds them into one verdict:
+a triage priority (P1/P2/P3), a one-line headline, the key follow-up actions,
+and cross-lens gaps (e.g. a recurring systemic issue with no tracked fix).
+
 Output:
-  • Agent mode (default for non-TTY) — compact JSON with each lens's findings
-  • Human mode (-o markdown)         — markdown sections per lens
+  • Agent mode (default for non-TTY) — compact JSON with each lens's findings + synthesis
+  • Human mode (-o markdown)         — markdown sections per lens, synthesis first
 
 Examples:
   agm retro analyze --input RETRO.md --all-lenses
@@ -78,10 +82,40 @@ func printRetroAnalyzeMarkdown(r *ops.AnalyzeRetroResult) {
 	if r.Title != "" {
 		fmt.Printf("**Title:** %s\n\n", r.Title)
 	}
+	// Lead with the supervisor's verdict when present — it is the headline the
+	// per-lens detail below substantiates.
+	printSynthesisMarkdown(r.Synthesis)
 	printRootCauseMarkdown(r.Lenses.RootCause)
 	printRecurrenceMarkdown(r.Lenses.Recurrence)
 	printRemediationMarkdown(r.Lenses.Remediation)
 	printSystemicMarkdown(r.Lenses.Systemic)
+}
+
+func printSynthesisMarkdown(s *ops.RetroSynthesis) {
+	if s == nil {
+		return
+	}
+	fmt.Println("## Synthesis")
+	fmt.Printf("\n**Priority:** %s (severity %d/4) · **Confidence:** %s\n", s.Priority, s.Score, s.Confidence)
+	if s.Verdict != "" {
+		fmt.Printf("\n%s\n", s.Verdict)
+	}
+	if len(s.KeyActions) > 0 {
+		fmt.Println("\n**Key actions:**")
+		for _, a := range s.KeyActions {
+			fmt.Printf("- %s\n", a)
+		}
+	}
+	if len(s.Gaps) > 0 {
+		fmt.Println("\n**Gaps:**")
+		for _, g := range s.Gaps {
+			fmt.Printf("- %s\n", g)
+		}
+	}
+	if s.Rationale != "" {
+		fmt.Printf("\n_%s_\n", s.Rationale)
+	}
+	fmt.Println()
 }
 
 func printRootCauseMarkdown(rc *ops.RootCauseLens) {
