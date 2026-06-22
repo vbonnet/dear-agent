@@ -382,6 +382,54 @@ func TestWorkerPromptRequiresVerificationGate(t *testing.T) {
 	}
 }
 
+// TestSupervisorSkillsPreauthorizeUnattended guards the ce-4bc1 fix. The
+// Orchestrator (and, by the retro's plural principle, ALL supervisors) ran
+// over-cautious: spawned unattended in a detached session, they defaulted to
+// human-in-the-loop caution and stalled asking "should I proceed? / stand down?"
+// instead of acting. The fix is an explicit "no human is watching" pre-authorization
+// in each supervisor's boot SKILL. This test pins that contract: every supervisor
+// skill must carry the pre-authorization preamble, and the shared protocol must
+// document it once for all roles. Without these tokens the mesh silently regresses
+// to the stall the bead describes.
+func TestSupervisorSkillsPreauthorizeUnattended(t *testing.T) {
+	// Tokens common to all three per-role preambles. Loose enough to survive
+	// wording tweaks, specific enough to fail if the pre-authorization is dropped.
+	preauthTokens := []string{
+		"PRE-AUTHORIZED",            // the core grant
+		"pause to ask",              // ... the anti-pattern it forbids
+		"guardrails, not by asking", // ... and why it is safe to not ask
+		"unattended",                // the operating condition
+	}
+	// Derive the skill-file list from the supervisors slice in main.go rather
+	// than hardcoding it, so the test cannot drift from production as
+	// supervisors are added, removed, or renamed.
+	if len(supervisors) == 0 {
+		t.Fatal("no supervisors defined")
+	}
+	for _, s := range supervisors {
+		b, err := skills.ReadFile("skills/" + s.SkillFile)
+		if err != nil {
+			t.Fatalf("read embedded %s: %v", s.SkillFile, err)
+		}
+		doc := string(b)
+		for _, want := range preauthTokens {
+			if !strings.Contains(doc, want) {
+				t.Errorf("%s missing unattended pre-authorization token %q", s.SkillFile, want)
+			}
+		}
+	}
+
+	// The shared protocol carries the canonical "(ALL supervisors)" statement so
+	// the principle is documented once and the per-role preambles can point to it.
+	b, err := skills.ReadFile("skills/protocol.md")
+	if err != nil {
+		t.Fatalf("read embedded protocol.md: %v", err)
+	}
+	if !strings.Contains(string(b), "Unattended Operation (ALL supervisors)") {
+		t.Errorf("protocol.md missing the shared \"Unattended Operation (ALL supervisors)\" section")
+	}
+}
+
 // --- Dispatch Advisor tests (ce-hn8n) ---
 
 func TestRestartTracker_BackoffProgression(t *testing.T) {
