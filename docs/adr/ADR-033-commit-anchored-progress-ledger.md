@@ -42,7 +42,21 @@ from the tree (the §H6 failure mode) and itself needs committing to survive.
 complements bead notes (coarse, cross-session, queryable) by being granular and
 in-band; it complements handoff (deliberate cut) by being for resumption.
 
-Resume contract: a Worker's **first action** after compaction/restart is
-`git log --format=%B origin/main..HEAD` to read its own ledger, then act on the
-most recent `Ledger-Next`. Verified by the resumed Worker reaching the bead's
-acceptance criteria without re-doing committed milestones.
+Resume contract: a Worker's **first action** after compaction/restart is to read
+its own ledger off the branch, then act on the most recent `Ledger-Next`. Read it
+from the **merge-base** with the base branch, not `origin/main` directly:
+
+```
+base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)
+git log --format=%B "$(git merge-base HEAD "$base")"..HEAD
+```
+
+Merge-base, not a bare `origin/main..HEAD`, because the latter assumes the remote
+is named `origin`, the default branch is `main`, and the remote ref is freshly
+fetched — none guaranteed offline. Resolving `origin/HEAD` recovers the real
+default branch (`master` or otherwise), and the merge-base anchors to the actual
+fork point, so a stale remote ref can never resurface already-merged commits. The
+Worker tolerates empty output (a fresh branch with no milestones yet) and a
+non-zero exit (no resolvable base) by falling back to the bead note. Verified by
+the resumed Worker reaching the bead's acceptance criteria without re-doing
+committed milestones.
