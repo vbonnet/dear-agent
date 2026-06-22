@@ -70,9 +70,14 @@ imp() {
   fi
 }
 
+# The active fleet (repo + dependabot + branch-protection ruleset) is managed by
+# the ./modules/managed-repo module, instantiated per repo via for_each in
+# managed_repos.tf. Import directly to the module-qualified addresses
+# (module.managed_repos["<repo>"].<resource>.this) so a fresh import lands
+# exactly where the config expects it.
 for r in "${ACTIVE_REPOS[@]}"; do
-  imp "github_repository.active[\"$r\"]" "$r"
-  imp "github_repository_dependabot_security_updates.active[\"$r\"]" "$r"
+  imp "module.managed_repos[\"$r\"].github_repository.this" "$r"
+  imp "module.managed_repos[\"$r\"].github_repository_dependabot_security_updates.this" "$r"
 
   # Import the existing "branch-protection" repository ruleset if one exists.
   # Rulesets were applied in an earlier pass. Without importing them, `tofu plan`
@@ -82,9 +87,9 @@ for r in "${ACTIVE_REPOS[@]}"; do
   rs_id=$(gh api "/repos/${OWNER}/$r/rulesets" \
             --jq 'map(select(.name=="branch-protection")) | .[0].id // empty' 2>/dev/null || true)
   if [[ -n "$rs_id" ]]; then
-    imp "github_repository_ruleset.branch_protection[\"$r\"]" "$r:$rs_id"
+    imp "module.managed_repos[\"$r\"].github_repository_ruleset.branch_protection" "$r:$rs_id"
   else
-    echo "not imported (will be CREATED by plan): github_repository_ruleset.branch_protection[\"$r\"]"
+    echo "not imported (will be CREATED by plan): module.managed_repos[\"$r\"].github_repository_ruleset.branch_protection"
   fi
 done
 

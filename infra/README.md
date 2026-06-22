@@ -15,13 +15,25 @@ infra/
 ├── providers.tf              # Two GitHub providers: personal + dear-labs org
 ├── variables.tf              # personal_owner, org_name (token via env only)
 ├── locals.tf                 # Repo inventory with per-repo required CI checks
-├── repos.tf                  # github_repository + dependabot resources
-├── rulesets.tf               # github_repository_ruleset (vbonnet/* repos, active) — sole branch-protection mechanism
+├── managed_repos.tf          # for_each instantiation of ./modules/managed-repo (active repos)
+├── repos.tf                  # github_repository.archived (frozen, ignore_changes=all)
+├── moved.tf                  # state migration: inline resources → module (ce-32o5)
 ├── dear_labs.tf              # github_organization_ruleset (dear-labs org)
+├── modules/
+│   └── managed-repo/         # Reusable standard fleet policy (repo + dependabot + ruleset)
+├── backend.tf                # Remote state backend (Cloudflare R2, S3-compatible)
 ├── import.sh                 # Import existing state before first apply
 ├── terraform.tfvars.example  # Copy → terraform.tfvars to override defaults
 └── .gitignore                # .terraform/, *.tfstate, credentials
 ```
+
+The active vbonnet/* fleet — `github_repository`, Dependabot security updates,
+and the branch-protection ruleset — is encapsulated in the **`modules/managed-repo`**
+module and instantiated once via `for_each` over `local.active_repos` in
+`managed_repos.tf`. Fleet-wide policy changes live in the module; the per-repo
+inventory lives in `locals.tf`. The module is provider-agnostic, so the same
+policy can be applied to dear-labs org repos via the `github.dearlabs` provider
+alias once they exist (see `modules/managed-repo/README.md`).
 
 ## Authentication
 
@@ -117,12 +129,12 @@ tofu apply
 
 ## What this manages
 
-### vbonnet/* personal repos (`repos.tf` + `rulesets.tf`)
+### vbonnet/* personal repos (`managed_repos.tf` → `modules/managed-repo`)
 
 | Setting | Value |
 |---|---|
 | Allow squash merge | ✅ |
-| Allow rebase merge | ✅ |
+| Allow rebase merge | ❌ (squash-only) |
 | Allow merge commits | ❌ (linear history) |
 | Allow auto-merge | ✅ |
 | Delete branch on merge | ✅ |
@@ -132,7 +144,8 @@ tofu apply
 | Secret scanning + push protection | ✅ public repos only (private = Advanced Security required) |
 
 Branch protection on the default branch of every active repo is enforced by a
-single `branch-protection` **repository ruleset** (`rulesets.tf`, `active`):
+single `branch-protection` **repository ruleset** (defined in
+`modules/managed-repo`, `active`):
 
 | Rule | Value |
 |---|---|
@@ -178,8 +191,10 @@ names are known.
   Security; enabling it there would fail on apply.
 - **No required status checks for repos with no CI.** An empty `contexts` list
   makes the rule a no-op; we simply omit the block.
-- **`enforce_admins = false`.** Solo-maintainer workflow where the owner must
-  be able to merge their own PRs. Raise per-repo for shared repos.
+- **No bypass actors.** The ruleset applies to everyone including the owner.
+  `required_approving_review_count = 0` keeps the solo-maintainer workflow
+  viable (a PR is required, but the owner's own merge suffices). Raise the
+  approver count per-repo for shared repos.
 - **dear-labs runs in active mode.** `evaluate` (audit-only) mode is
   Enterprise-only and 422s on non-Enterprise accounts. The org has no repos
   yet, so active enforcement blocks nothing until repos are added.
@@ -187,10 +202,14 @@ names are known.
   are declared with `ignore_changes = all` because GitHub rejects mutations.
   `engram` is likewise archived and is therefore **excluded** from
   `active_repos` — a ruleset cannot be applied to an archived repo.
-- **Personal Pro account, no merge queues.** Repository rulesets
-  (`rulesets.tf`) work on GitHub Pro and run in `active` enforcement —
+- **Personal Pro account, no merge queues.** The repository ruleset defined in
+  `modules/managed-repo` works on GitHub Pro and runs in `active` enforcement —
   `evaluate` mode is Enterprise-only. Merge-queue rulesets require an
   **organization** account, so none is defined.
+- **Standard policy is a module.** The active-repo policy (`github_repository` +
+  Dependabot + branch-protection ruleset) lives in `modules/managed-repo` and is
+  instantiated via `for_each` in `managed_repos.tf` — one place to change fleet
+  policy, reusable across the personal account and the dear-labs org alias.
 - **Rulesets are the sole branch-protection mechanism.** The legacy
   `github_branch_protection` resources were validated as fully covered by the
   rulesets and removed in ce-yg6b, eliminating the divergent-mechanism trap
