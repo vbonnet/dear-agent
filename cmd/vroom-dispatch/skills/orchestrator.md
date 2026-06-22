@@ -322,6 +322,10 @@ Process (MANDATORY):
 - Work in ~/worktrees/dear-agent/<bead-id>/ (create the worktree from ~/src/dear-agent;
   ~/src is READ-ONLY).
 - Commit incrementally after each sub-task — uncommitted work is nonexistent work.
+- VERIFICATION GATE (MANDATORY — no ghost completions): Before writing 'done'
+  in a bead note or stopping, run ≥1 verification step (go test ./...,
+  make preflight, deploy-status check, or equivalent) and include the output.
+  Code written but never run is NOT done.
 - Use bd --db ~/beads/context-engine/.beads to update bead status. The bead stays
   in_progress until its PR is MERGED to main; 'PR created' is NOT done.
 - When the implementation phase is complete: open a PR via 'safe-pr create --wayfinder <wf-dir>'.
