@@ -60,22 +60,23 @@ make act-lint
 
 # Run tests only
 make act-test
-
-# Install the preflight pre-push hook (recommended)
-make install-preflight-hook
 ```
 
 ## Pre-push Hook
 
-This project ships a pre-push hook that runs `make preflight` (lint + build + vet)
-before allowing a push. Install it once after cloning:
+Pushing to the default branch runs `make preflight` (lint + build + vet) and
+aborts on failure, so a broken push fails fast before the GitHub round-trip.
 
-```bash
-make install-preflight-hook
-```
+On the maintainer host this is wired up globally via `core.hooksPath`
+(`~/.config/git/hooks`, chezmoi-managed): the global `pre-push` hook runs
+`make preflight` for any repo that defines a `preflight` target — no per-repo
+install needed. (There used to be a `make install-preflight-hook` target; it was
+removed in bead ce-hft2 because a repo-local `.git/hooks/pre-push` is silently
+bypassed when `core.hooksPath` is set, making it a redundant no-op.)
 
-If any preflight check fails the push is aborted so you can fix the issue
-before the GitHub round-trip.
+On a host **without** a global `core.hooksPath`, run `make preflight` manually
+before pushing, or drop a one-line `exec make preflight` pre-push hook into
+`.git/hooks/`.
 
 ### What `make preflight` checks
 

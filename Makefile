@@ -16,7 +16,6 @@ export GOMEMLIMIT GOMAXPROCS GOGC
 #   preflight-race          preflight + go test -race — catch data races before push
 #   preflight-full          preflight + go test -race + govulncheck (full parity)
 #   health-check            Run the codebase health auditor (cmd/repo-health)
-#   install-preflight-hook  Install a git pre-push hook that runs preflight
 #   install-post-merge-hook Install a post-merge hook that reaps merged worktrees
 #   act-validate            Run full local CI validation via act (needs Docker)
 #   act-lint                Run lint job via act
@@ -75,7 +74,7 @@ export GOMEMLIMIT GOMAXPROCS GOGC
 #   build-src-health        Build src-health: ~/src repo canary (ce-m3ya)
 #   install-src-health      Install src-health to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent build-vroom-dispatch install-vroom-dispatch build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -123,20 +122,12 @@ health-check:
 	@GOWORK=off go build -o build/repo-health ./cmd/repo-health
 	@./build/repo-health --root . $(ARGS)
 
-# Install a git pre-push hook that runs `make preflight`. Pushing to a PR
-# branch will then fail-fast before the GitHub round-trip if lint/build/vet
-# is broken. Does NOT replace CI — only shifts left. Refuses to overwrite
-# an existing hook (deepsec, husky, etc.) — merge manually if you have one.
-install-preflight-hook:
-	@HOOK="$$(git rev-parse --git-path hooks/pre-push)"; \
-	if [ -e "$$HOOK" ]; then \
-		echo "Error: a pre-push hook already exists at $$HOOK"; \
-		echo "Merge 'exec make preflight' into it manually, or remove it first."; \
-		exit 1; \
-	fi; \
-	printf '#!/bin/sh\nexec make preflight\n' > "$$HOOK"; \
-	chmod +x "$$HOOK"; \
-	echo "Installed: $$HOOK -> make preflight"
+# NOTE: there is intentionally no `install-preflight-hook` target. On this host
+# git's effective hooks dir is set globally via core.hooksPath (chezmoi-managed,
+# ~/.config/git/hooks), so a repo-local pre-push hook is silently bypassed. The
+# global pre-push hook already runs `make preflight` on default-branch pushes
+# for any repo that defines a `preflight` target — so a per-repo installer would
+# be both redundant and a silent no-op. See bead ce-hft2.
 
 # Install the post-merge worktree-sweep trigger. After a PR lands on the
 # default branch locally (e.g. `git pull` on main), it kicks off the canonical
