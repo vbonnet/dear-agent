@@ -46,8 +46,18 @@
 //
 // Every state transition emits one [EscalationEvent] (one JSONL line). The
 // schema is designed so three analyses fall out by grouping alone: incorrect or
-// misaligned answers (outcome field, backfilled by a later review pass),
-// frequent question types (group by question_hash / topic / kind), and many
-// agents asking the same question — a signal of missing prompt context — (group
-// by question_hash, count distinct origin sessions). See [EscalationEvent].
+// misaligned answers (outcome field, backfilled by the [Adjudicator] pass —
+// see [Backfill] / [AnalyzeMisaligned]), frequent question types (group by
+// question_hash / topic / kind — [AnalyzeFrequentQuestions]), and many agents
+// asking the same question — a signal of missing prompt context — (group by
+// question_hash, count distinct origin sessions — [AnalyzeManyAgents]). See
+// [EscalationEvent].
+//
+// # The adjudicator
+//
+// [Adjudicator] renders the after-the-fact outcome verdict that fills the
+// otherwise-empty Outcome/Misalignment columns. [DefaultAdjudicator] is the
+// deterministic floor; [ClaudeAdjudicator] layers a model classifier on top —
+// the same seam shape as internal/override's Judge. [Backfill] applies it over
+// a log; the agm binary exposes it as `agm escalate adjudicate`.
 package escalation
