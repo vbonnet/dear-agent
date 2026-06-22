@@ -21,6 +21,15 @@
 #     here — see agm/internal/ops/worktree_sweep.go. This stage only pulls the
 #     trigger. See `sweep_merged_worktrees`.
 #
+#   Stage 3 — transition merged beads to CLOSED in the context-engine Beads DB.
+#     safe-pr folds a Definition-of-Done close line — "Closes ce-xxxx" (also
+#     Fixes/Resolves) — into the PR body. That line is a GitHub convention, but
+#     the bead lives in a local Beads DB, not on GitHub, so the merge never
+#     actually moves it. This stage closes that gap: it reads the closing-keyword
+#     references out of the just-merged commits and runs `bd close` on each, so a
+#     merged PR leaves its tracking bead CLOSED without a human round-trip. See
+#     `transition_merged_beads`.
+#
 # Why one hook, two stages: both are triggered by the exact same event — a PR
 # landing on the default branch locally — and both must be inert everywhere
 # else. Sharing the default-branch gate keeps that contract in one place.
@@ -45,11 +54,14 @@
 #     wedge the merge.
 #
 # Opt-outs (per stage):
-#   DEAR_AGENT_POST_MERGE_REBUILD=0   skip Stage 1 (binary rebuild)
-#   AGM_POST_MERGE_SWEEP=0            skip Stage 2 (worktree sweep)
+#   DEAR_AGENT_POST_MERGE_REBUILD=0           skip Stage 1 (binary rebuild)
+#   DEAR_AGENT_POST_MERGE_VERIFY=0            skip Stage 1.5 (deploy verify)
+#   AGM_POST_MERGE_SWEEP=0                    skip Stage 2 (worktree sweep)
+#   DEAR_AGENT_POST_MERGE_BEAD_TRANSITION=0   skip Stage 3 (bead transition)
 #
-# Test seam: AGM_POST_MERGE_SWEEP_SYNC=1 runs the sweep in the foreground
+# Test seams: AGM_POST_MERGE_SWEEP_SYNC=1 runs the sweep in the foreground
 # (deterministic for tests; also handy if you want `git pull` to wait).
+# DEAR_AGENT_BEADS_DB overrides the Beads DB path Stage 3 transitions against.
 #
 # Install: `make install-post-merge-hook` (honours core.hooksPath and never
 # clobbers a chezmoi-managed hooks dir — see cmd/install-post-merge-hook).
@@ -333,6 +345,103 @@ verify_deployment_after_rebuild() {
   fi
 }
 
+# ── Stage 3: transition merged beads to closed ──────────────────────────────
+# safe-pr injects a Definition-of-Done close line into the PR body — "Closes
+# ce-xxxx" (also Fixes/Resolves; see cmd/safe-pr). That is a GitHub convention,
+# but a bead lives in the context-engine Beads DB, not on GitHub, so the merge
+# never actually moves it. This stage reads those closing-keyword references out
+# of the just-merged commits and runs `bd close` on each, so a merged PR leaves
+# its tracking bead CLOSED without a human round-trip.
+#
+# Why closing-keywords only (not a bare "(ce-xxxx)" subject mention): the
+# subject tag marks the bead a commit *implements*, but an epic or a parent bead
+# is often merely referenced in passing. Mirroring GitHub's own close-on-merge
+# semantics — act ONLY on an explicit Closes/Fixes/Resolves — keeps the hook
+# from auto-closing beads that were only mentioned.
+#
+# Scope/safety (why each guard exists):
+#   • dear-agent only — the one repo whose work context-engine tracks. Every
+#     other repo (this is a global hook) is a silent no-op.
+#   • No-op without `bd` on PATH or without the canonical Beads DB present.
+#   • Idempotent: a bead already CLOSED, or one absent from this store (a
+#     cross-store id), is skipped — never re-closed, never errored on.
+#   • NEVER forces (`bd close` without --force) and NEVER fails the git op —
+#     a close that trips a gate is logged and skipped, not fatal.
+#   Opt-out: DEAR_AGENT_POST_MERGE_BEAD_TRANSITION=0
+#   Test seam: DEAR_AGENT_BEADS_DB overrides the DB path.
+transition_merged_beads() {
+  [ "${DEAR_AGENT_POST_MERGE_BEAD_TRANSITION:-1}" = "0" ] && return 0
+  command -v bd >/dev/null 2>&1 || return 0
+
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  # Self-scope: only the dear-agent repo, whose work context-engine tracks.
+  [ -d "${repo_root}/agm/cmd/agm" ] || return 0
+
+  beads_db="${DEAR_AGENT_BEADS_DB:-${HOME}/beads/context-engine/.beads}"
+  [ -e "${beads_db}" ] || return 0
+
+  # The commit range the merge/pull just introduced (same baseline as Stage 1).
+  _range=""
+  if git rev-parse --verify --quiet ORIG_HEAD >/dev/null 2>&1; then
+    _range="ORIG_HEAD..HEAD"
+  elif git rev-parse --verify --quiet 'HEAD@{1}' >/dev/null 2>&1; then
+    _range="HEAD@{1}..HEAD"
+  else
+    return 0
+  fi
+
+  # Pull bead ids out of explicit GitHub-style closing keywords only. Two-step
+  # grep: the first keeps only "<keyword> ce-id" spans, the second lifts the
+  # bare id out of each. Bead ids look like ce-p8k1 or ce-6as.80 (sub-parts).
+  # The (^|[^[:alpha:]]) prefix anchors the keyword on a word boundary so a
+  # longer word ending in a keyword — "prefixes", "discloses" — can't false-
+  # match (POSIX bracket class, portable across BSD/GNU grep; no \b).
+  # shellcheck disable=SC2086  # _range is a single rev-range token.
+  beads="$(git log --format='%B' ${_range} 2>/dev/null \
+    | grep -ioE '(^|[^[:alpha:]])(close[sd]?|fix(es|ed)?|resolve[sd]?)[: ]+ce-[a-z0-9]+(\.[0-9]+)*' \
+    | grep -ioE 'ce-[a-z0-9]+(\.[0-9]+)*' \
+    | tr 'A-Z' 'a-z' \
+    | sort -u)"
+  [ -n "${beads}" ] || return 0
+
+  _log_dir="${HOME}/.claude/logs"
+  mkdir -p "${_log_dir}" 2>/dev/null || true
+  _log_file="${_log_dir}/bead-transition-post-merge.log"
+  _ts="$(date -u +%FT%TZ 2>/dev/null || echo unknown)"
+
+  # Cap each bd call so a wedged DB lock can never hold up the merge.
+  _to="$(_pick_timeout)"
+  run_bd() {
+    if [ -n "${_to}" ]; then
+      "${_to}" 30 bd --db "${beads_db}" "$@"
+    else
+      bd --db "${beads_db}" "$@"
+    fi
+  }
+
+  for _bead in ${beads}; do
+    _json="$(run_bd show "${_bead}" --json 2>/dev/null || true)"
+    # Absent from this store (e.g. a cross-store id) -> skip, do not error.
+    if [ -z "${_json}" ] || ! printf '%s' "${_json}" | grep -q '"id"'; then
+      printf '[%s] %s: not in %s — skipped\n' "${_ts}" "${_bead}" "${beads_db}" \
+        >> "${_log_file}" 2>/dev/null || true
+      continue
+    fi
+    # Already closed -> idempotent skip (don't re-stamp the reason / audit log).
+    if printf '%s' "${_json}" | grep -qE '"status"[[:space:]]*:[[:space:]]*"closed"'; then
+      printf '[%s] %s: already closed — skipped\n' "${_ts}" "${_bead}" \
+        >> "${_log_file}" 2>/dev/null || true
+      continue
+    fi
+    if run_bd close "${_bead}" --reason "post-merge: PR landed on ${default_branch}" \
+        >> "${_log_file}" 2>&1; then
+      echo "[post-merge:beads] ✓ closed ${_bead} (merged to ${default_branch})" >&2
+    else
+      echo "[post-merge:beads] ✗ could not close ${_bead} — git op unaffected (see ${_log_file})" >&2
+    fi
+  done
+}
+
 # ── Stage 2: reap provably-merged worktrees ────────────────────────────────
 sweep_merged_worktrees() {
   [ "${AGM_POST_MERGE_SWEEP:-1}" = "0" ] && return 0
@@ -380,6 +489,7 @@ sweep_merged_worktrees() {
 # ── Run the stages (each self-scopes and is individually fail-safe) ─────────
 rebuild_changed_binaries
 verify_deployment_after_rebuild
+transition_merged_beads
 sweep_merged_worktrees
 
 exit 0

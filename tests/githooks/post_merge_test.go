@@ -447,3 +447,214 @@ func TestRebuild_NoOrigin_FallsBackToWorkingTree(t *testing.T) {
 		}
 	}
 }
+
+// ── Stage 3 (bead transition) ───────────────────────────────────────────────
+
+// stubBd writes a fake `bd` modelling a tiny Beads store under the --db dir:
+// each bead is a file "<db>/<id>" whose contents are its status. `show --json`
+// emits {"id","status"} (exit 1 when the bead file is absent, i.e. not in this
+// store); `close` records the id into closeLog and flips the bead to "closed".
+func stubBd(t *testing.T, closeLog string) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"db=\"\"; cmd=\"\"; id=\"\"\n" +
+		"while [ $# -gt 0 ]; do\n" +
+		"  case \"$1\" in\n" +
+		"    --db) db=\"$2\"; shift 2 ;;\n" +
+		"    --json) shift ;;\n" +
+		"    --reason) shift 2 ;;\n" +
+		"    -*) shift ;;\n" +
+		"    *) if [ -z \"$cmd\" ]; then cmd=\"$1\"; elif [ -z \"$id\" ]; then id=\"$1\"; fi; shift ;;\n" +
+		"  esac\n" +
+		"done\n" +
+		"case \"$cmd\" in\n" +
+		"  show) [ -f \"$db/$id\" ] || exit 1; printf '[{\"id\":\"%s\",\"status\":\"%s\"}]\\n' \"$id\" \"$(cat \"$db/$id\")\" ;;\n" +
+		"  close) echo \"$id\" >> \"" + closeLog + "\"; echo closed > \"$db/$id\" ;;\n" +
+		"esac\n" +
+		"exit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// seedBead creates a bead with the given status in the stub store at db.
+func seedBead(t *testing.T, db, id, status string) {
+	t.Helper()
+	if err := os.MkdirAll(db, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(db, id), []byte(status), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// mergeWithMessage commits a change on a feature branch using featMsg, then
+// merges it back into main with --no-ff so ORIG_HEAD/HEAD reflect a real merge
+// and the merged range carries featMsg (where the Closes line lives).
+func mergeWithMessage(t *testing.T, repo, featMsg string) {
+	t.Helper()
+	git(t, repo, "checkout", "-q", "-b", "feat-bead")
+	if err := os.WriteFile(filepath.Join(repo, "merged.txt"), []byte("change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "add", "-A")
+	git(t, repo, "commit", "-qm", featMsg)
+	git(t, repo, "checkout", "-q", "main")
+	git(t, repo, "merge", "-q", "--no-ff", "-m", "Merge feat-bead", "feat-bead")
+}
+
+// runBeadTransition runs the hook with a stub `bd` and the other stages off,
+// pointing Stage 3 at beadsDB. It returns the bead ids the stub was asked to
+// close. The hook must always exit 0.
+func runBeadTransition(t *testing.T, repo, beadsDB string, extraEnv ...string) []string {
+	t.Helper()
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	home := t.TempDir()
+	closeLog := filepath.Join(t.TempDir(), "closed")
+	bdDir := stubBd(t, closeLog)
+	cmd := exec.Command("bash", hookPath(t))
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(),
+		"HOME="+home,
+		"PATH="+bdDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_POST_MERGE_REBUILD=0",
+		"DEAR_AGENT_POST_MERGE_VERIFY=0",
+		"AGM_POST_MERGE_SWEEP=0",
+		"DEAR_AGENT_BEADS_DB="+beadsDB,
+	)
+	cmd.Env = append(cmd.Env, extraEnv...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("hook must exit 0, got %v\n%s", err, out)
+	}
+	return installed(t, closeLog)
+}
+
+// An explicit "Closes ce-xxx" in the merged range closes that bead.
+func TestBeadTransition_ClosesOnClosesKeyword(t *testing.T) {
+	repo := newRebuildRepo(t)
+	db := t.TempDir()
+	seedBead(t, db, "ce-aaaa1", "open")
+	mergeWithMessage(t, repo, "feat: thing (ce-aaaa1)\n\nCloses ce-aaaa1")
+	got := runBeadTransition(t, repo, db)
+	if !slices.Contains(got, "ce-aaaa1") {
+		t.Fatalf("expected ce-aaaa1 closed, got %v", got)
+	}
+}
+
+// Fixes/Resolves, case-insensitivity, and sub-part ids (ce-6as.80) all work.
+func TestBeadTransition_KeywordVariants(t *testing.T) {
+	cases := []struct{ name, msg, id string }{
+		{"Fixes", "fix: x\n\nFixes ce-bbbb1", "ce-bbbb1"},
+		{"Resolves", "feat: x\n\nResolves ce-cccc1", "ce-cccc1"},
+		{"lowercase", "feat: x\n\ncloses ce-dddd1", "ce-dddd1"},
+		{"subpart", "feat: x\n\nCloses ce-6as.80", "ce-6as.80"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newRebuildRepo(t)
+			db := t.TempDir()
+			seedBead(t, db, tc.id, "open")
+			mergeWithMessage(t, repo, tc.msg)
+			got := runBeadTransition(t, repo, db)
+			if !slices.Contains(got, tc.id) {
+				t.Fatalf("expected %s closed, got %v", tc.id, got)
+			}
+		})
+	}
+}
+
+// A bare "(ce-xxx)" subject mention WITHOUT a closing keyword must NOT close.
+func TestBeadTransition_BareMention_NotClosed(t *testing.T) {
+	repo := newRebuildRepo(t)
+	db := t.TempDir()
+	seedBead(t, db, "ce-eeee1", "open")
+	mergeWithMessage(t, repo, "feat: thing (ce-eeee1)")
+	got := runBeadTransition(t, repo, db)
+	if len(got) != 0 {
+		t.Fatalf("bare mention must not close, got %v", got)
+	}
+}
+
+// A longer word that merely ENDS in a closing keyword ("prefixes ce-x",
+// "discloses ce-x") must not false-close — the keyword needs a word boundary.
+func TestBeadTransition_WordBoundary_NoFalseMatch(t *testing.T) {
+	for _, msg := range []string{
+		"refactor: tidy prefixes ce-kkkk1",
+		"docs: it discloses ce-kkkk1 internals",
+	} {
+		t.Run(msg, func(t *testing.T) {
+			repo := newRebuildRepo(t)
+			db := t.TempDir()
+			seedBead(t, db, "ce-kkkk1", "open")
+			mergeWithMessage(t, repo, msg)
+			got := runBeadTransition(t, repo, db)
+			if len(got) != 0 {
+				t.Fatalf("keyword-suffixed word must not close, got %v", got)
+			}
+		})
+	}
+}
+
+// An already-closed bead is skipped (idempotent — no re-close).
+func TestBeadTransition_AlreadyClosed_Skipped(t *testing.T) {
+	repo := newRebuildRepo(t)
+	db := t.TempDir()
+	seedBead(t, db, "ce-ffff1", "closed")
+	mergeWithMessage(t, repo, "feat: x\n\nCloses ce-ffff1")
+	got := runBeadTransition(t, repo, db)
+	if len(got) != 0 {
+		t.Fatalf("already-closed bead must be skipped, got %v", got)
+	}
+}
+
+// A bead absent from this store (e.g. a cross-store id) is a no-op, not error.
+func TestBeadTransition_MissingBead_NoOp(t *testing.T) {
+	repo := newRebuildRepo(t)
+	db := t.TempDir()
+	mergeWithMessage(t, repo, "feat: x\n\nCloses ce-9999z")
+	got := runBeadTransition(t, repo, db)
+	if len(got) != 0 {
+		t.Fatalf("absent bead must be a no-op, got %v", got)
+	}
+}
+
+// On a feature branch the whole hook is gated off — no bead transitions.
+func TestBeadTransition_FeatureBranch_Skips(t *testing.T) {
+	repo := newRebuildRepo(t)
+	db := t.TempDir()
+	seedBead(t, db, "ce-gggg1", "open")
+	mergeWithMessage(t, repo, "feat: x\n\nCloses ce-gggg1")
+	git(t, repo, "checkout", "-q", "-b", "feature")
+	got := runBeadTransition(t, repo, db)
+	if len(got) != 0 {
+		t.Fatalf("must not transition beads on a feature branch, got %v", got)
+	}
+}
+
+// DEAR_AGENT_POST_MERGE_BEAD_TRANSITION=0 disables Stage 3.
+func TestBeadTransition_OptOut(t *testing.T) {
+	repo := newRebuildRepo(t)
+	db := t.TempDir()
+	seedBead(t, db, "ce-hhhh1", "open")
+	mergeWithMessage(t, repo, "feat: x\n\nCloses ce-hhhh1")
+	got := runBeadTransition(t, repo, db, "DEAR_AGENT_POST_MERGE_BEAD_TRANSITION=0")
+	if len(got) != 0 {
+		t.Fatalf("opt-out must skip Stage 3, got %v", got)
+	}
+}
+
+// A repo without agm/cmd/agm (not dear-agent) is a silent no-op.
+func TestBeadTransition_ForeignRepo_NoOp(t *testing.T) {
+	repo := newRepo(t)
+	db := t.TempDir()
+	seedBead(t, db, "ce-iiii1", "open")
+	mergeWithMessage(t, repo, "feat: x\n\nCloses ce-iiii1")
+	got := runBeadTransition(t, repo, db)
+	if len(got) != 0 {
+		t.Fatalf("non-dear-agent repo must be a no-op, got %v", got)
+	}
+}

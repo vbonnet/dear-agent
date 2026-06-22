@@ -81,10 +81,12 @@ func run(stdout, stderr *os.File) int {
 	fmt.Fprintf(stdout, "✓ Installed: %s (default-branch merges only)\n", hookDst)
 	fmt.Fprintln(stdout, "    Stage 1: rebuild Go binaries whose source changed (agm, vroom-dispatch)")
 	fmt.Fprintln(stdout, "    Stage 2: agm worktree sweep --execute (reap provably-merged worktrees)")
+	fmt.Fprintln(stdout, "    Stage 3: bd close beads cited by Closes/Fixes/Resolves in the merge")
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "It runs after `git pull`/`git merge` lands a PR on the default branch.")
 	fmt.Fprintln(stdout, "Disable per-shell with: export DEAR_AGENT_POST_MERGE_REBUILD=0 (Stage 1)")
 	fmt.Fprintln(stdout, "                        export AGM_POST_MERGE_SWEEP=0           (Stage 2)")
+	fmt.Fprintln(stdout, "                        export DEAR_AGENT_POST_MERGE_BEAD_TRANSITION=0 (Stage 3)")
 	return 0
 }
 
