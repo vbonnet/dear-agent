@@ -137,6 +137,15 @@ P4 gates (only when a .safe-merge.yml is present — see below):
   flaky_checks:
     - name: "TestFullLifecycle"
       max_retries: 1
+  # Auto-approve decision taxonomy (bead ce-onj5): AUTO-APPROVE by default,
+  # HUMAN only for the named high-stakes categories. Shared with the VROOM
+  # escalation classifier; omitting it falls back to the built-in default.
+  approval_policy:
+    auto_approve_default: true
+    human_required:
+      - name: security-boundary
+        reason: "touches a security boundary"
+        patterns: ['(?i)\bwrite.?guard\b']
 
 Watch mode:
   With --watch, safe-merge polls every 30 seconds until all gates pass or

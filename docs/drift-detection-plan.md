@@ -111,22 +111,37 @@ without anyone remembering to run it.
 **Acceptance:** a drifted artifact appears in the daily audit output and in
 `drift-check.log` within 24h with no manual action.
 
-### Phase 2 — Bead-close-guard "deployed" gate
+### Phase 2 — Bead-close-guard "deployed" gate *(delivered)*
 
-Extend `bead-close-guard` so a bead tagged as shipping a deployed artifact
-cannot close until drift-check reports that artifact clean.
+`bead-close-guard` now runs a second gate after `merged`: a bead whose merged
+change touched a deployed artifact cannot close until that artifact is current
+on the host.
 
-- Beads that ship an artifact carry a marker (e.g. a `deploy-target:<name>`
-  label, or the PR touches a path mapped to a deploy target).
-- On `bd close`, after the existing `merged` check, the guard runs
-  `drift.Check` for the bead's target(s). Any `drift`/`missing` → block close
-  with a message naming the remediation command (principle 2: teach the fix).
-- Reuses `internal/drift` directly — no shelling out — so the guard is one
-  binary with no new runtime deps.
-- `--force` still overrides for genuinely abandoned beads, audit-logged.
+- **No manual marker needed.** The gate reads each merged PR's changed files
+  (`gh pr view --json files`) and maps them to deploy targets by matching the
+  changed path against `targets.yaml`'s `source`. A bead "ships" a target
+  exactly when its merged code touched that target's source — automatic, so the
+  enforcement does not depend on anyone remembering to label the bead.
+- On `bd close`, after the `merged` check, the guard runs `drift.Check` for the
+  matched target(s). Any `drift` (stale on host) or required `missing` (never
+  installed) → block close (exit 2) with a message naming the remediation
+  command (principle 2: teach the fix). Optional targets a machine has not
+  installed do not block.
+- Reuses `internal/drift` directly — no shelling out — so the guard stays one
+  binary with no new runtime deps. The target list is read from the repo's
+  single `cmd/drift-check/targets.yaml`, so drift-check and the gate never
+  diverge.
+- Best-effort on its own infrastructure: when no dear-agent checkout /
+  deploy-target config is reachable where the close runs (resolved from the git
+  toplevel of cwd, or `--repo-root`), the gate records *why it skipped* and
+  allows the close rather than blocking it. A genuine drift always blocks.
+- `--abandon-reason` still overrides both gates for genuinely abandoned beads,
+  audit-logged.
 
-**Acceptance:** closing a bead whose deployed artifact is stale is blocked with
-exit 2 and a remediation hint; closing it after redeploy succeeds.
+**Acceptance:** closing a bead whose merged change left a deployed artifact
+stale (or never installed) is blocked with exit 2 and a remediation hint;
+closing it after redeploy succeeds. *(Met: see
+`cmd/bead-close-guard/deploygate_test.go`.)*
 
 ### Phase 3 — Runtime "verified" gate (needs OTel)
 

@@ -1,35 +1,31 @@
 # AGM + Antigravity configuration
 
-Repo-level configuration for the **antigravity** harness (the `agy` CLI, which
-routes work to Google AI Ultra). AGM recognizes `antigravity` as a harness in
-`agm/internal/manifest/v3.go` and `agm/internal/agent/validate.go`; this file
-documents the harness-scoped rules and routing defaults.
+Configuration for the `antigravity` harness driven by the `agy` CLI
+(Google Antigravity, backed by Google AI Ultra). This spreads AI load
+off the Anthropic and OpenAI harnesses onto Google's quota.
 
 ```yaml
 harness: antigravity
 binary: ~/.local/bin/agy
+version: 1.0.10
 max_tokens: auto
 workspace: oss
 ```
 
-## Auth
+## Harness notes
 
-The `agy` binary manages its own auth against Google AI Ultra. AGM treats the
-harness as available whenever `agy` is on `PATH`; otherwise it falls back to the
-`GEMINI_API_KEY` environment variable. See <https://antigravity.google/>.
+- `agy` is the Antigravity CLI. It supports non-interactive `--print` / `-p`
+  runs, interactive `--prompt-interactive` / `-i` sessions, and conversation
+  resume via `--continue` / `--conversation`.
+- Model selection uses `--model`; list available models with `agy models`.
+- Permission auto-approval (for unattended AGM workers) uses
+  `--dangerously-skip-permissions`; pair with `--sandbox` when restricting
+  terminal access.
+- AGM registers `antigravity` as a known harness in
+  `agm/internal/manifest/v3.go` (`knownHarnesses`).
 
-## Beads task tracking
+## Beads integration
 
-This project uses **bd** (beads) for durable issue tracking — the same source of
-truth used by every other harness in this repo. Run `bd prime` for full workflow
-context. Lifecycle hooks that load and refresh Beads context for `agy` sessions
-live in [`hooks.json`](./hooks.json) and mirror `.codex/hooks.json`.
-
-### Rules
-
-- Beads is the durable source of truth for project work; local scratch files are
-  not. Do not create markdown TODO files when Beads is available.
-- Use `bd update <id> --claim` to claim work atomically and `bd close <id>` to
-  finish it. Do not auto-close tasks unless the work is actually complete.
-- Do not use `bd edit` (interactive); use `bd update` flags instead.
-- Prefer `--json` when parsing `bd` output programmatically.
+Beads lifecycle hooks for this harness live in `.agents/hooks.json`,
+mirroring the `.codex/hooks.json` pattern. They keep durable project
+task context (`bd`) in sync across the session lifecycle.

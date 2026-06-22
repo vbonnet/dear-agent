@@ -1,4 +1,4 @@
-<!-- Last audited at: 2026-06-18 -->
+<!-- Last audited at: 2026-06-21 -->
 
 # ADR-032: Escalate To Supervisor (VROOM mesh)
 
@@ -66,7 +66,7 @@ Every state transition emits one `EscalationEvent` (one JSONL line at
 designed so three analyses fall out by grouping alone:
 
 1. **Incorrect / misaligned answers** — `outcome` field on answered events
-   (backfilled by a later review/judge pass): `WHERE outcome IN ('incorrect',
+   (backfilled by the LLM-judge pass): `WHERE outcome IN ('incorrect',
    'misaligned')`.
 2. **Frequent questions / types** — `GROUP BY question_hash | topic | kind`.
 3. **Many agents asking the same question** (missing prompt context) —
@@ -75,6 +75,29 @@ designed so three analyses fall out by grouping alone:
 `question_hash` is a sha256 of the normalised question, so (2) and (3) are
 robust to trivial wording differences.
 
+### The adjudicator + analysis CLI (ce-irr0)
+
+The `outcome`/`misalignment` columns are empty at write time and backfilled by
+an LLM **adjudicator** that mirrors the `internal/override.Judge` seam:
+`Adjudicator` (interface) → `DefaultAdjudicator` (deterministic floor; only the
+decidable non-answer case is scored offline) → `ClaudeAdjudicator` (layers a
+model classifier on top, a *separate* model from any agent in the chain). It
+degrades safely — no `ANTHROPIC_API_KEY` ⇒ the floor; a model error never
+invents a verdict, it leaves the event for a later pass. The pass is a rewrite
+of the JSONL log (atomic temp+rename), idempotent unless `--force`.
+
+The three analyses are pure functions over the log (`Summarize` folds events to
+one record per escalation; `AnalyzeMisaligned` / `AnalyzeFrequentQuestions` /
+`AnalyzeManyAgents`), surfaced as:
+
+```
+agm escalate adjudicate                 # LLM judge pass → backfill columns
+agm escalate analyze misaligned         # analysis (1)
+agm escalate analyze frequent  [--min]  # analysis (2)
+agm escalate analyze duplicates [--min] # analysis (3): many agents, same question
+agm escalate analyze all
+```
+
 ## Consequences
 
 **Positive.** Agents have an audited ask-up path; product decisions provably
@@ -82,10 +105,13 @@ reach the human while task-confirmations never do; the log is a direct
 instrument for improving prompts and instructions.
 
 **Trade-offs / follow-ups (filed as beads).**
-- "Confer" among the VROOM trio is modelled as `PhaseConferring` + the trio's
-  own peer messaging; full programmatic quorum voting is future work.
-- The `outcome`/`misalignment` columns are backfilled by a later LLM-judge pass
-  (not yet built); the analysis CLI over the log is future work.
+- "Confer" among the VROOM trio was originally modelled as `PhaseConferring` +
+  the trio's own peer messaging; programmatic quorum voting is now implemented
+  (ce-es7z, see the addendum below).
+- The `outcome`/`misalignment` columns are backfilled by the LLM-judge pass and
+  the analysis CLI over the log shipped in ce-irr0 (see "The adjudicator +
+  analysis CLI" above). A stronger default model and scheduled/auto adjudication
+  remain future work.
 - The supervisor loop's `Tick` does not yet auto-drain escalations; supervisors
   act on them via the CLI for now.
 - `FileStore` is last-writer-wins on concurrent answers to one escalation
@@ -93,3 +119,41 @@ instrument for improving prompts and instructions.
 
 The temporal design record (charter → spec → plan) is in engram-research:
 `projects/vroom-escalate-to-supervisor/WAYFINDER.md`.
+
+---
+
+## Addendum (ce-es7z): programmatic trio confer
+
+The original `PhaseConferring` delivered an escalation to a *single* VROOM node
+(the one the spawn graph walked to), which then conferred with its two peers via
+informal peer messaging and answered or forwarded on their behalf. That left the
+confer invisible to the audit log and dependent on one supervisor faithfully
+polling the other two. ce-es7z replaces it with a **programmatic quorum vote**.
+
+**Registry.** A new `VROOMRegistry` seam yields the live trio. The agm adapter
+(`doltVROOMRegistry`) resolves the three well-known names
+(`vroom-meta-orchestrator`, `vroom-orchestrator`, `vroom-overseer`) to their
+current session IDs; members not currently live are skipped, and if none resolve
+the engine degrades gracefully to the original single-node conferring.
+
+**Fan-out + vote.** When an escalation reaches the mesh with a registry
+configured, the engine sets `Escalation.Confer` (members + quorum + ballots),
+sets the holder to the sentinel `vroom-trio`, and delivers the question to *all*
+members at once. Each member votes via `agm escalate vote <id> approve|reject|
+abstain` (engine: `Engine.CastVote`). Resolution:
+
+- a **quorum of matching approvals** (2 of 3 by default) answers the escalation
+  and returns the answer to the asking worker;
+- a **quorum of rejections**, or **every member voting** without an answer
+  quorum (deadlock), dispatches to the human via Dispatch;
+- a **must-reach-human** escalation is never answered by the trio — the vote only
+  gathers the trio's recommendation, then dispatches to the human.
+
+Each member votes once; only invited members may vote; while a confer is in
+flight a member must vote rather than `answer` unilaterally (the human may still
+`answer --by human` to override). Every ballot emits an `EscalationEvent` with a
+new `vote` field, so trio voting patterns are queryable alongside the existing
+analysis keys.
+
+**Boundary preserved.** The engine stays pure (`pkg/vroom/escalation`); the
+registry and the `vote` CLI are AGM adapters (`agm/cmd/agm/escalate.go`).

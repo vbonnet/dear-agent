@@ -74,6 +74,14 @@ type Config struct {
 	// that is not itself a VROOM node) is routed so it still reaches the mesh.
 	// If nil, orphaned chains go straight to the human.
 	VROOMEntry *ParentRef
+	// Registry, if set, enables the programmatic VROOM-trio confer (ce-es7z):
+	// when an escalation reaches the mesh it is delivered to every live trio
+	// member and resolved by quorum vote. If nil, reaching a VROOM node falls
+	// back to single-node conferring (the node confers via peer messaging).
+	Registry VROOMRegistry
+	// ConferQuorum overrides the votes needed to resolve a confer. Default (0 or
+	// out of range): a strict majority of the live members (2 of 3).
+	ConferQuorum int
 }
 
 // Engine routes and records escalations. It is safe for concurrent use to the
@@ -226,22 +234,27 @@ func (e *Engine) advance(ctx context.Context, esc *Escalation) error {
 		}
 	}
 
+	// Reaching the VROOM mesh runs a programmatic confer across the live trio
+	// when a registry is configured; otherwise it falls back to delivering to the
+	// single node, which confers via peer messaging (pre-ce-es7z behaviour).
+	if pref.Kind.IsVROOM() {
+		if e.cfg.Registry != nil {
+			return e.beginConfer(ctx, esc, pref, from, fromRole)
+		}
+		return e.routeSingleVROOM(ctx, esc, pref, from, fromRole)
+	}
+
 	esc.Chain = append(esc.Chain, pref.SessionID)
 	esc.CurrentSessionID = pref.SessionID
 	esc.CurrentRole = pref.Role
 	esc.CurrentKind = pref.Kind
 	esc.UpdatedAt = e.now()
-
-	phase := PhaseRouted
-	if pref.Kind.IsVROOM() {
-		phase = PhaseConferring
-	}
-	esc.Phase = phase
+	esc.Phase = PhaseRouted
 
 	if err := e.cfg.Messenger.Deliver(ctx, pref.SessionID, e.message(esc, from, fromRole, "")); err != nil {
 		return fmt.Errorf("escalation: deliver to %q: %w", pref.SessionID, err)
 	}
-	e.emit(ctx, esc, phase, eventFields{
+	e.emit(ctx, esc, PhaseRouted, eventFields{
 		from: from, fromRole: fromRole, to: pref.SessionID, toRole: pref.Role,
 	})
 	return nil
@@ -278,6 +291,15 @@ func (e *Engine) Answer(ctx context.Context, id, bySessionID, byRole, answer str
 	}
 	if esc.resolved() {
 		return nil, fmt.Errorf("escalation %s is already %s", id, esc.Phase)
+	}
+	// During a programmatic confer, a trio member must vote rather than answer
+	// unilaterally — the quorum, not a single supervisor, decides. The human may
+	// still answer directly (an override of the in-flight confer).
+	if esc.Confer != nil && esc.Phase == PhaseConferring &&
+		bySessionID != HumanSessionID && esc.Confer.isMember(bySessionID) {
+		return nil, fmt.Errorf(
+			"escalation %s is in a VROOM trio confer — cast a vote (`escalate vote %s approve|reject`), "+
+				"do not answer unilaterally", id, id)
 	}
 	if esc.MustReachHuman && bySessionID != HumanSessionID {
 		return nil, fmt.Errorf(
@@ -321,7 +343,7 @@ func (e *Engine) Forward(ctx context.Context, id, fromSessionID, fromRole, note 
 	if esc.resolved() {
 		return nil, fmt.Errorf("escalation %s is already %s", id, esc.Phase)
 	}
-	if fromSessionID != "" && fromSessionID != esc.CurrentSessionID {
+	if fromSessionID != "" && !esc.isHolder(fromSessionID) {
 		return nil, fmt.Errorf(
 			"escalation %s is currently held by %q, not %q — only the holder may forward it",
 			id, esc.CurrentSessionID, fromSessionID)
@@ -412,6 +434,7 @@ type eventFields struct {
 	toRole   string
 	answer   string
 	note     string
+	vote     string
 	latency  int64
 }
 
@@ -442,6 +465,7 @@ func (e *Engine) emit(ctx context.Context, esc *Escalation, phase Phase, f event
 		Disposition:      esc.Disposition,
 		MustReachHuman:   esc.MustReachHuman,
 		ClassifierReason: esc.ClassifierReason,
+		Vote:             f.vote,
 		LatencyMs:        f.latency,
 	}
 	if f.note != "" {
