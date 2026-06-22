@@ -38,6 +38,7 @@ var (
 	escVROOM    string
 	escBy       string
 	escNote     string
+	escAnswer   string
 	escPending  bool
 	escListMine bool
 )
@@ -95,6 +96,26 @@ var escalateShowCmd = &cobra.Command{
 	RunE:  runEscalateShow,
 }
 
+var escalateVoteCmd = &cobra.Command{
+	Use:   "vote <id> <approve|reject|abstain>",
+	Short: "Cast a VROOM trio vote on a conferring escalation",
+	Long: `Cast your ballot in a programmatic VROOM-trio confer. When an
+escalation reaches the mesh it is delivered to all three VROOM supervisors at
+once; the escalation resolves the moment a quorum (2 of 3 by default) agree.
+
+  approve --answer "<answer>"   endorse resolving with this answer
+  reject  --rationale "<why>"   push to the human instead
+  abstain --rationale "<why>"   neither; counts toward "everyone voted"
+
+A quorum of matching approvals answers the escalation (and returns the answer to
+the asking worker); a quorum of rejections — or every member voting without an
+answer quorum — dispatches it to the human via Dispatch. Must-reach-human
+escalations are never answered by the trio: the vote only gathers the trio's
+recommendation before the human decides.`,
+	Args: cobra.ExactArgs(2),
+	RunE: runEscalateVote,
+}
+
 func init() {
 	escalateAskCmd.Flags().StringVar(&escKind, "kind", "question", "question | decision | blocked-action")
 	escalateAskCmd.Flags().StringVar(&escMode, "mode", "async", "blocking | async (blocking waits for the answer)")
@@ -114,7 +135,12 @@ func init() {
 	escalateListCmd.Flags().BoolVar(&escPending, "pending", false, "only unresolved escalations")
 	escalateListCmd.Flags().BoolVar(&escListMine, "mine", false, "only escalations currently held by this session")
 
-	escalateCmd.AddCommand(escalateAskCmd, escalateAnswerCmd, escalateForwardCmd, escalateListCmd, escalateShowCmd)
+	escalateVoteCmd.Flags().StringVar(&escBy, "by", "", "voting session id/name (default: current)")
+	escalateVoteCmd.Flags().StringVar(&escRole, "role", "", "voting session role label")
+	escalateVoteCmd.Flags().StringVar(&escAnswer, "answer", "", "proposed answer (required for approve)")
+	escalateVoteCmd.Flags().StringVar(&escNote, "rationale", "", "why you voted this way (recorded for audit)")
+
+	escalateCmd.AddCommand(escalateAskCmd, escalateAnswerCmd, escalateForwardCmd, escalateListCmd, escalateShowCmd, escalateVoteCmd)
 	rootCmd.AddCommand(escalateCmd)
 }
 
@@ -182,6 +208,7 @@ func newEscalationEnv(vroomEntry string) (*escalationEnv, func(), error) {
 		Store:      store,
 		Logger:     logger,
 		VROOMEntry: entry,
+		Registry:   &doltVROOMRegistry{adapter: adapter},
 	})
 	if err != nil {
 		_ = adapter.Close()
@@ -245,6 +272,37 @@ func (g *doltGraph) Parent(_ context.Context, sessionID string) (escalation.Pare
 		Role:      parent.Name,
 		Kind:      nodeKindFor(parent),
 	}, nil
+}
+
+// vroomTrioNames are the three apex VROOM supervisors a programmatic confer
+// fans out to. They are the well-known session names the mesh always spawns;
+// the registry resolves them to whatever live session currently holds each role.
+var vroomTrioNames = []string{
+	"vroom-meta-orchestrator",
+	"vroom-orchestrator",
+	"vroom-overseer",
+}
+
+// doltVROOMRegistry implements escalation.VROOMRegistry over AGM's session
+// store: it resolves the three well-known VROOM names to their current live
+// session IDs. Members not currently resolvable are skipped (a confer runs over
+// whoever is live); if none resolve the engine falls back to single-node
+// conferring. This is the "registry of the live VROOM session IDs" the
+// programmatic confer needs (ce-es7z).
+type doltVROOMRegistry struct{ adapter *dolt.Adapter }
+
+func (r *doltVROOMRegistry) Members(_ context.Context) ([]escalation.ParentRef, error) {
+	out := make([]escalation.ParentRef, 0, len(vroomTrioNames))
+	for _, name := range vroomTrioNames {
+		m, err := r.adapter.ResolveIdentifier(name)
+		if err != nil || m == nil {
+			continue // trio member not currently live — skip it
+		}
+		out = append(out, escalation.ParentRef{
+			SessionID: m.SessionID, Role: m.Name, Kind: nodeKindFor(m),
+		})
+	}
+	return out, nil
 }
 
 // agmMessenger delivers escalation notices by shelling out to `agm send`. It is
@@ -411,6 +469,46 @@ func runEscalateForward(cmd *cobra.Command, args []string) error {
 		fmt.Printf(" → %s (%s)", esc.CurrentSessionID, esc.CurrentRole)
 	}
 	fmt.Println()
+	return nil
+}
+
+func runEscalateVote(cmd *cobra.Command, args []string) error {
+	id := args[0]
+	vote := escalation.Vote(args[1])
+	env, cleanup, err := newEscalationEnv("")
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	byID, byRole, err := env.resolveSessionID(escBy)
+	if err != nil {
+		return err
+	}
+	if escRole != "" {
+		byRole = escRole
+	}
+	esc, err := env.eng.CastVote(cmd.Context(), id, byID, byRole, vote, escAnswer, escNote)
+	if err != nil {
+		return err
+	}
+
+	//nolint:exhaustive // only the resolved phases get bespoke text; the rest fall to default.
+	switch esc.Phase {
+	case escalation.PhaseAnswered:
+		fmt.Printf("escalation %s — answered by the trio (quorum reached)\nanswer: %s\n", esc.ID, esc.Answer)
+	case escalation.PhaseDispatchedToHuman:
+		fmt.Printf("escalation %s — no quorum; surfaced to the human via Dispatch\n", esc.ID)
+	default:
+		voted, total := 0, 0
+		if esc.Confer != nil {
+			voted, total = len(esc.Confer.Ballots), len(esc.Confer.Members)
+			fmt.Printf("escalation %s — vote recorded (%d/%d cast, quorum %d); still conferring\n",
+				esc.ID, voted, total, esc.Confer.Quorum)
+		} else {
+			fmt.Printf("escalation %s — %s\n", esc.ID, esc.Phase)
+		}
+	}
 	return nil
 }
 
