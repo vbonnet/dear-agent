@@ -546,6 +546,52 @@ func (e *InMemoryPressureEscalator) Calls() []PressureEscalation {
 	return append([]PressureEscalation(nil), e.calls...)
 }
 
+// InMemoryMemoryAlertNotifier is a configurable MemoryAlertNotifier for tests
+// and the cmd/vroom-mesh demo. It records every alert it is asked to deliver.
+type InMemoryMemoryAlertNotifier struct {
+	mu    sync.Mutex
+	calls []MemoryAlertNotification
+	err   error
+}
+
+// MemoryAlertNotification records one Notify invocation.
+type MemoryAlertNotification struct {
+	To       Role
+	Level    PressureLevel
+	Snapshot ResourceSnapshot
+	Summary  string
+}
+
+// NewInMemoryMemoryAlertNotifier returns a notifier that succeeds by default.
+func NewInMemoryMemoryAlertNotifier() *InMemoryMemoryAlertNotifier {
+	return &InMemoryMemoryAlertNotifier{}
+}
+
+// SetError configures the error returned by subsequent Notify calls.
+func (n *InMemoryMemoryAlertNotifier) SetError(err error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.err = err
+}
+
+// Notify implements MemoryAlertNotifier.
+func (n *InMemoryMemoryAlertNotifier) Notify(_ context.Context, to Role, level PressureLevel, snap ResourceSnapshot, summary string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.err != nil {
+		return n.err
+	}
+	n.calls = append(n.calls, MemoryAlertNotification{To: to, Level: level, Snapshot: snap, Summary: summary})
+	return nil
+}
+
+// Calls returns all recorded alert notifications.
+func (n *InMemoryMemoryAlertNotifier) Calls() []MemoryAlertNotification {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]MemoryAlertNotification(nil), n.calls...)
+}
+
 // InMemoryPeerRecovery is a configurable PeerRecovery for tests.
 type InMemoryPeerRecovery struct {
 	mu    sync.Mutex
