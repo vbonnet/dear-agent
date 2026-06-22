@@ -111,10 +111,38 @@ For each open bead NOT already in the roadmap, make a decision:
 - **P1**: Important feature or fix, should be done soon
 - **P2**: Nice-to-have, improvement, can wait
 
-For each decision, append ONE line to `~/.agm/vroom/roadmap.jsonl`:
+**Task-type assignment (deploy vs. worker).** Most accepted beads are `worker`
+beads — creative SDLC work the Orchestrator hands to a Claude worker. But a bead
+whose entire Definition of Done is "(re)install host artifact X from the manifest"
+is a **deploy** bead: a deterministic `dear-deploy install` the Orchestrator runs
+itself, with no worker session, no Opus spend, and no PR (see protocol.md "Deploy
+task type"). Tag it so the Orchestrator takes the cheap deterministic path instead
+of burning a worker slot on a `cp`-shaped task.
+
+Tag a bead `task_type: "deploy"` when ALL of these hold:
+- It is labeled `deploy` (or its description is purely "deploy/install/sync
+  artifact X to the host"), AND
+- The artifact exists as a `name` in [`deploy/manifest.yaml`](../../../deploy/manifest.yaml), AND
+- There is no code to write/design — only an install to run.
+
+For a deploy bead, set `task_type` to `"deploy"` and `deploy_target` to the
+manifest artifact name (or `"all"` for the whole manifest). For everything else,
+omit `task_type` (the Orchestrator defaults to the worker path). If a "deploy"
+bead actually needs source changes first (e.g. build a missing binary, edit the
+manifest), it is NOT a pure deploy — leave it a `worker` bead.
+
+For each decision, append ONE line to `~/.agm/vroom/roadmap.jsonl`. A normal
+(worker) decision omits `task_type`:
 ```bash
 printf '{"bead_id":"%s","title":"%s","priority":"%s","state":"%s","reason":"%s","decided_at":"%s"}\n' \
   "<id>" "<title>" "<priority>" "<accepted|rejected>" "<reason>" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  >> ~/.agm/vroom/roadmap.jsonl
+```
+
+For an accepted **deploy** bead, include `task_type` and `deploy_target`:
+```bash
+printf '{"bead_id":"%s","title":"%s","priority":"%s","state":"accepted","task_type":"deploy","deploy_target":"%s","reason":"%s","decided_at":"%s"}\n' \
+  "<id>" "<title>" "<priority>" "<artifact-name|all>" "<reason>" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   >> ~/.agm/vroom/roadmap.jsonl
 ```
 

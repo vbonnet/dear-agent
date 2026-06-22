@@ -315,6 +315,53 @@ func TestWorkerSpawnPinsOpusAndWayfinder(t *testing.T) {
 	}
 }
 
+// TestDeployTaskTypeIsDeterministicAndWorkerless pins the deploy task type
+// (ce-33sy, deploy-worker-vroom Phase 4): a roadmap item tagged
+// `task_type: "deploy"` is executed by the Orchestrator itself via
+// `dear-deploy install`, NOT by spawning a Claude worker — it consumes no worker
+// slot, no Opus quota, and opens no PR. The contract spans three embedded skill
+// docs: protocol.md defines the schema (task_type/deploy_target), Meta-O tags the
+// bead, and the Orchestrator runs the deterministic install. This test asserts
+// all three surfaces so the deterministic path cannot silently regress to a
+// worker spawn.
+func TestDeployTaskTypeIsDeterministicAndWorkerless(t *testing.T) {
+	protocol, err := skills.ReadFile("skills/protocol.md")
+	if err != nil {
+		t.Fatalf("read embedded protocol.md: %v", err)
+	}
+	orch, err := skills.ReadFile("skills/orchestrator.md")
+	if err != nil {
+		t.Fatalf("read embedded orchestrator.md: %v", err)
+	}
+	metao, err := skills.ReadFile("skills/meta-orchestrator.md")
+	if err != nil {
+		t.Fatalf("read embedded meta-orchestrator.md: %v", err)
+	}
+	protocolDoc, orchDoc, metaoDoc := string(protocol), string(orch), string(metao)
+
+	for _, want := range []string{"task_type", "deploy_target", `"deploy"`} {
+		if !strings.Contains(protocolDoc, want) {
+			t.Errorf("protocol.md roadmap schema missing deploy task-type marker %q", want)
+		}
+	}
+
+	for _, want := range []string{"task_type", "deploy_target"} {
+		if !strings.Contains(metaoDoc, want) {
+			t.Errorf("meta-orchestrator.md missing deploy task-type tagging marker %q", want)
+		}
+	}
+
+	for _, want := range []string{
+		"dear-deploy install",
+		"dear-deploy status",
+		"task_type",
+	} {
+		if !strings.Contains(orchDoc, want) {
+			t.Errorf("orchestrator.md missing deploy dispatch marker %q", want)
+		}
+	}
+}
+
 // TestDeployWorkerDispatch pins the deploy-as-worker contract (ce-x9s5): the
 // Orchestrator dispatches an episodic deploy worker to land a finished bead's
 // PR, and that worker's skill drives the merge through the vetted safe-* path.
