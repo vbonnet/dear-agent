@@ -1,10 +1,11 @@
 ###############################################################################
 # Repository rulesets for vbonnet/* personal repositories.
 #
-# Rulesets are the successor to branch protection rules. This file adds
-# rulesets alongside the existing github_branch_protection resources; once
-# validated, the legacy github_branch_protection resources in
-# branch_protection.tf can be removed.
+# Rulesets are the successor to branch protection rules and are the SINGLE
+# active branch-protection mechanism for vbonnet/* repos. The legacy
+# github_branch_protection resources (branch_protection.tf) were validated as
+# fully covered by these rulesets and removed in ce-yg6b — see that bead and
+# the PR for the field-by-field coverage proof.
 #
 # Availability / personal-Pro constraints:
 #   - Repository-level rulesets work on GitHub Pro ($4/mo) for private repos.
@@ -21,10 +22,9 @@
 # -----------------------------------------------------------------------------
 # Branch protection ruleset — applied to ALL active repos.
 #
-# Mirrors the existing github_branch_protection config but in ruleset form,
-# in "active" enforcement (the only mode available on a personal Pro account).
-# Once validated, the legacy github_branch_protection resources in
-# branch_protection.tf can be removed.
+# In "active" enforcement (the only mode available on a personal Pro account).
+# This is the sole branch-protection mechanism; the legacy
+# github_branch_protection resources it replaced were removed in ce-yg6b.
 # -----------------------------------------------------------------------------
 
 resource "github_repository_ruleset" "branch_protection" {

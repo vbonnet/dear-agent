@@ -16,8 +16,7 @@ infra/
 ├── variables.tf              # personal_owner, org_name (token via env only)
 ├── locals.tf                 # Repo inventory with per-repo required CI checks
 ├── repos.tf                  # github_repository + dependabot resources
-├── branch_protection.tf      # github_branch_protection (vbonnet/* repos)
-├── rulesets.tf               # github_repository_ruleset (vbonnet/* repos, active)
+├── rulesets.tf               # github_repository_ruleset (vbonnet/* repos, active) — sole branch-protection mechanism
 ├── dear_labs.tf              # github_organization_ruleset (dear-labs org)
 ├── import.sh                 # Import existing state before first apply
 ├── terraform.tfvars.example  # Copy → terraform.tfvars to override defaults
@@ -118,7 +117,7 @@ tofu apply
 
 ## What this manages
 
-### vbonnet/* personal repos (`repos.tf` + `branch_protection.tf`)
+### vbonnet/* personal repos (`repos.tf` + `rulesets.tf`)
 
 | Setting | Value |
 |---|---|
@@ -132,15 +131,17 @@ tofu apply
 | Dependabot security updates | ✅ |
 | Secret scanning + push protection | ✅ public repos only (private = Advanced Security required) |
 
-Branch protection on the default branch of every active repo:
+Branch protection on the default branch of every active repo is enforced by a
+single `branch-protection` **repository ruleset** (`rulesets.tf`, `active`):
 
 | Rule | Value |
 |---|---|
 | Required linear history | ✅ |
-| No force pushes | ✅ |
-| No branch deletion | ✅ |
+| No force pushes | ✅ (`non_fast_forward`) |
+| No branch deletion | ✅ (`deletion`) |
 | Require conversation resolution | ✅ |
-| Enforce admins | ❌ (solo-maintainer workflow) |
+| Allowed merge methods | squash only |
+| Bypass actors | none (ruleset applies to everyone, incl. the owner) |
 | Dismiss stale reviews | ✅ |
 | Required approvers | 0 (PR required, solo reviewer sufficient) |
 | Required CI checks | per-repo (see `locals.tf`) |
@@ -189,9 +190,12 @@ names are known.
 - **Personal Pro account, no merge queues.** Repository rulesets
   (`rulesets.tf`) work on GitHub Pro and run in `active` enforcement —
   `evaluate` mode is Enterprise-only. Merge-queue rulesets require an
-  **organization** account, so none is defined; `vbonnet/*` keeps the existing
-  `github_branch_protection` resources alongside the rulesets until the
-  rulesets are validated.
+  **organization** account, so none is defined.
+- **Rulesets are the sole branch-protection mechanism.** The legacy
+  `github_branch_protection` resources were validated as fully covered by the
+  rulesets and removed in ce-yg6b, eliminating the divergent-mechanism trap
+  (classic branch protection had only ever materialized on `dear-agent`, where
+  it drifted to 6 stale required checks vs the ruleset's 2).
 
 ## Adding a new repo
 

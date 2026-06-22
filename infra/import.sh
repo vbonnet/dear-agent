@@ -58,13 +58,9 @@ imp() {
     # real provider message for a missing remote object:
     #   - "not found" / "404"  : repo or dependabot config absent
     #   - "associated"         : no security config associated
-    #   - "could not find a branch protection rule with the pattern '<branch>'"
-    #                            : repo has no branch protection yet (most repos
-    #                            here are pre-rulesets, so this is the common case)
     if [[ "$err" == *"not found"* ||
           "$err" == *"404"* ||
-          "$err" == *"associated"* ||
-          "$err" == *"could not find a branch protection rule"* ]]; then
+          "$err" == *"associated"* ]]; then
       echo "not imported (will be CREATED by plan): $addr"
     else
       echo "Error: Failed to import $addr" >&2
@@ -76,7 +72,6 @@ imp() {
 
 for r in "${ACTIVE_REPOS[@]}"; do
   imp "github_repository.active[\"$r\"]" "$r"
-  imp "github_branch_protection.active[\"$r\"]" "$r:main"
   imp "github_repository_dependabot_security_updates.active[\"$r\"]" "$r"
 
   # Import the existing "branch-protection" repository ruleset if one exists.
