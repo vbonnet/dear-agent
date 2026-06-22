@@ -11,6 +11,12 @@ on:
       - "**/*.lock"
       - "**/package.json"
   pull_request:
+    # SBOM/vuln surface only changes when dependencies change. Scope PR runs
+    # to main and to dependency-manifest edits so unrelated PRs don't trigger
+    # a workflow run (the jobs already skip on pull_request via `if`, but the
+    # trigger itself still spins up a run without this filter).
+    branches: [main]
+    paths: ['go.mod', 'go.sum', '**/go.mod', '**/go.sum']
   release:
     types: [created]
   schedule:
