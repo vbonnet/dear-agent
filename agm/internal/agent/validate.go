@@ -11,13 +11,16 @@ import (
 )
 
 // Known harness names
-var knownHarnesses = []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli"}
+var knownHarnesses = []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli", "antigravity"}
 
 // Harness-to-environment-variable mapping
 var harnessEnvVars = map[string]string{
 	"claude-code": "ANTHROPIC_API_KEY",
 	"gemini-cli":  "GEMINI_API_KEY",
 	"codex-cli":   "OPENAI_API_KEY",
+	// Antigravity (agy CLI) talks to Google AI Ultra. When the agy binary is on
+	// PATH it manages its own auth, so this key is only the fallback check.
+	"antigravity": "GEMINI_API_KEY",
 }
 
 // Harness-to-binary mapping for PATH-based availability checks
@@ -25,6 +28,7 @@ var harnessBinaries = map[string][]string{
 	"claude-code": {"claude"},
 	"gemini-cli":  {"gemini"},
 	"codex-cli":   {"codex"},
+	"antigravity": {"agy"},
 }
 
 // lookPath is a variable for testing
@@ -35,6 +39,7 @@ var harnessHelpURLs = map[string]string{
 	"claude-code": "https://console.anthropic.com/",
 	"gemini-cli":  "https://ai.google.dev/",
 	"codex-cli":   "https://platform.openai.com/api-keys",
+	"antigravity": "https://antigravity.google/",
 }
 
 // ValidateHarnessName checks if the harness name is valid

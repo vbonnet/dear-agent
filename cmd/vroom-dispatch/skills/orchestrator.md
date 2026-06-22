@@ -324,6 +324,10 @@ Process (MANDATORY):
 - Work in ~/worktrees/dear-agent/<bead-id>/ (create the worktree from ~/src/dear-agent;
   ~/src is READ-ONLY).
 - Commit incrementally after each sub-task — uncommitted work is nonexistent work.
+- VERIFICATION GATE (MANDATORY — no ghost completions): Before writing 'done'
+  in a bead note or stopping, run ≥1 verification step (go test ./...,
+  make preflight, deploy-status check, or equivalent) and include the output.
+  Code written but never run is NOT done.
 - Use bd --db ~/beads/context-engine/.beads to update bead status. The bead stays
   in_progress until its PR is MERGED to main; 'PR created' is NOT done.
 - When the implementation phase is complete: open a PR via 'safe-pr create --wayfinder <wf-dir>'.
@@ -341,6 +345,19 @@ Bead closure (DoD — MANDATORY, do NOT skip):
     bd --db ~/beads/context-engine/.beads note <bead-id> 'BLOCKED: PR #<NNN> not yet merged'
 - Only run 'bd ... close <bead-id>' once mergedAt is non-null. Put the merged PR
   reference (e.g. 'PR #<NNN>') in the close reason so the overseer DoD audit can verify it.
+
+Terminal status code (MANDATORY — the first token of your final bead note):
+- When you stop working this bead, record exactly one outcome as the FIRST TOKEN
+  of a bead note: DONE, DONE_WITH_CONCERNS, or FAILED.
+- DONE — deliverable complete, no reservations.
+- DONE_WITH_CONCERNS — deliverable complete, but you hold a reservation (a risky
+  assumption, a shortcut taken, a test you could not run, a design tradeoff you
+  are unsure about). Ship the work AND document the concern explicitly — what it
+  is and why — so a supervisor can decide whether to act on it. Do NOT downgrade
+  a completed bead to FAILED just because you have a doubt, and do NOT bury the
+  doubt by reporting a bare DONE. Example:
+    bd --db ~/beads/context-engine/.beads note <bead-id> 'DONE_WITH_CONCERNS: <one-line reservation>. Detail: <why>.'
+- FAILED — deliverable not complete; report the blocker and two concrete alternatives.
 
 Bead details: run bd --db ~/beads/context-engine/.beads show <bead-id>"
 ```
@@ -513,6 +530,42 @@ opening NO new PR is correct — it lands an existing one — so do not treat
 "no new commits/PR from a deploy worker" as runaway usage; judge it by manifest
 progress like any other worker.
 
+#### Worker ghost-exited with DONE_WITH_CONCERNS
+A worker that completes its deliverable but holds a reservation records
+`DONE_WITH_CONCERNS` as the first token of a bead note before its session
+ghost-exits (see [Worker Status Codes](protocol.md#worker-status-codes)). When a
+`worker-*` session is done/archived, scan its bead notes for this code so the
+reservation is never silently lost:
+
+```bash
+CONCERN=$(bd --db ~/beads/context-engine/.beads show <bead-id> 2>/dev/null \
+  | grep -m1 'DONE_WITH_CONCERNS')
+```
+
+If `CONCERN` is non-empty, the worker shipped the deliverable but flagged a
+doubt. The deliverable still stands (do NOT re-dispatch or reopen on this basis
+alone) — your job is to **surface** the concern for human/supervisor review:
+
+1. **Log the concern to the trail** so a grep for `supervisor.dispatch.concerns`
+   finds every flagged deliverable in one pass:
+   ```bash
+   printf '{"ts":"%s","role":"orchestrator","kind":"supervisor.dispatch.concerns","payload":{"bead":"%s","session":"worker-%s","concern":%s}}\n' \
+     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<bead-id>" "<bead-id>" \
+     "$(printf '%s' "$CONCERN" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')" \
+     >> ~/.agm/vroom/trail.jsonl
+   ```
+2. **Optionally spawn a verification worker.** If the concern bears on
+   correctness (a test that could not be run, an unverified assumption, a risky
+   shortcut) and the bead's PR is already merged, you MAY dispatch a short-lived
+   verifier to double-check just that reservation — do NOT redo the whole bead.
+   Gate it on the same capacity rules as any dispatch (circuit breaker, open-PR
+   cap). Spawn `worker-<bead-id>-verify` and prompt it to verify only the flagged
+   concern, then add the verifier session to the trail payload's `verifier`
+   field. If capacity is tight or the concern is cosmetic, skip this and let the
+   trail entry stand for a human to triage.
+3. Leave the bead as the worker left it (closed if DoD was satisfied). The
+   `supervisor.dispatch.concerns` entry — not a re-dispatch — is the signal.
+
 ### Step 8: Stale Item Detection
 
 For accepted roadmap items that have been undispatched for >30 minutes:
@@ -556,6 +609,7 @@ merge task from the implementation task.
 | Impl worker finished + bead has an open PR | Step 7.5: dispatch `worker-deploy-<bead-id>` to land the PR |
 | Deploy worker died with PR still open | Step 7.5: re-dispatch a deploy worker for that PR |
 | Worker session dies mid-bead (no PR opened) | Record in trail, mark for re-dispatch as an impl worker |
+| Worker ghost-exits with `DONE_WITH_CONCERNS` in bead notes | Log `supervisor.dispatch.concerns` (verbatim concern in payload); optionally spawn a `worker-<bead-id>-verify` verifier for the flagged reservation; do NOT re-dispatch or reopen — the deliverable stands |
 | Bead's closed dependency was closed against an unmerged PR | Hold dispatch; record `dod.dispatch.blocked`; urgent to Overseer to reopen the dep |
 | Worker no manifest progress >15min (WORKING) | Level 1: status ping |
 | Worker no manifest progress >30min (any state) | Level 2: diagnose state, send wrap-up or defer nudge |

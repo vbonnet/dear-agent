@@ -44,10 +44,42 @@ type Classifier interface {
 // assigned task" pattern, and it flags must-reach-human on any high-stakes
 // marker. Everything else routes to the supervisor, where a live agent applies
 // judgment. Being deterministic, it is safe in CI and fully testable.
+//
+// Its high-stakes boundary is DefaultApprovalPolicy — the declarative taxonomy
+// (see policy.go). To override the boundary from a .safe-merge.yml approval_policy
+// block, use PolicyClassifier instead; DefaultClassifier is the built-in baseline.
 type DefaultClassifier struct{}
 
 // Name identifies the classifier in audit records.
 func (DefaultClassifier) Name() string { return "default" }
+
+// PolicyClassifier is a DefaultClassifier whose must-reach-human boundary is
+// supplied by a loaded ApprovalPolicy (typically from .safe-merge.yml) rather
+// than the built-in default. The routing logic is identical; only the taxonomy
+// of human-required categories differs. This is the seam the bead asks for:
+// "express the taxonomy in .safe-merge.yml policy + the VROOM gate".
+type PolicyClassifier struct {
+	policy *CompiledApprovalPolicy
+}
+
+// NewPolicyClassifier compiles p and returns a classifier that gates on it.
+func NewPolicyClassifier(p ApprovalPolicy) (*PolicyClassifier, error) {
+	cp, err := p.Compile()
+	if err != nil {
+		return nil, err
+	}
+	return &PolicyClassifier{policy: cp}, nil
+}
+
+// Name identifies the classifier in audit records.
+func (*PolicyClassifier) Name() string { return "policy" }
+
+// Classify implements Classifier using the loaded policy's taxonomy.
+func (c *PolicyClassifier) Classify(_ context.Context, e *Escalation) (Verdict, error) {
+	return classifyWith(c.policy, e), nil
+}
+
+var _ Classifier = (*PolicyClassifier)(nil)
 
 // proceedRe matches "may I proceed with the work I was told to do" questions:
 // an optional polite lead-in, then a proceed verb, with no high-stakes marker
@@ -62,40 +94,28 @@ var assignedRe = regexp.MustCompile(
 	`(?i)\b(the |my )?(task|work|job|thing)\b.{0,30}?\b(you (asked|told|assigned|gave)|assigned|i was (asked|told|assigned|given))\b`,
 )
 
-// highStakesMarkers force must-reach-human. These are the categories a worker —
-// or even an intermediate supervisor — must not decide unilaterally. Matched as
-// whole-word/substring, case-insensitive. Kept explicit (not an LLM) so the
-// boundary is auditable and stable.
-var highStakesMarkers = []struct {
-	pat   *regexp.Regexp
-	topic string
-}{
-	{regexp.MustCompile(`(?i)\bproduct (decision|direction|strategy)\b`), "product"},
-	{regexp.MustCompile(`(?i)\b(pricing|price|paywall|monetiz)`), "pricing"},
-	{regexp.MustCompile(`(?i)\b(roadmap|prioriti[sz]e|deprioriti[sz]e|strategy|strategic)\b`), "strategy"},
-	{regexp.MustCompile(`(?i)\b(publish|release publicly|go public|announce|tweet|post to)\b`), "publishing"},
-	{regexp.MustCompile(`(?i)\b(delete|drop|wipe|destroy|purge)\b.{0,20}\b(prod|production|database|customer|user data)\b`), "destructive"},
-	{regexp.MustCompile(`(?i)\b(irreversible|cannot be undone|permanent(ly)? (delete|remove))\b`), "irreversible"},
-	{regexp.MustCompile(`(?i)\b(legal|compliance|gdpr|license|licensing|contract|terms of service)\b`), "legal"},
-	{regexp.MustCompile(`(?i)\b(security policy|disable (the )?(guard|gate|auth|2fa|mfa)|rotate.{0,15}key|exfiltrat)`), "security"},
-	{regexp.MustCompile(`(?i)\b(spend|budget|purchase|pay|invoice|\$\d)`), "spend"},
-	{regexp.MustCompile(`(?i)\b(hire|fire|headcount|terminate (an?|the) (employee|contractor))\b`), "people"},
-	{regexp.MustCompile(`(?i)\b(email|message|contact|reach out to) (the )?(customer|client|user|press|investor)`), "external-comms"},
+// Classify implements Classifier, gating on the built-in DefaultApprovalPolicy.
+func (DefaultClassifier) Classify(_ context.Context, e *Escalation) (Verdict, error) {
+	return classifyWith(defaultCompiledPolicy, e), nil
 }
 
-// Classify implements Classifier.
-func (DefaultClassifier) Classify(_ context.Context, e *Escalation) (Verdict, error) {
+// classifyWith is the shared routing logic for DefaultClassifier and
+// PolicyClassifier. The only thing that varies between them is policy — the
+// taxonomy of human-required categories. Everything else (proceed auto-resolve,
+// decision routing, supervisor fallthrough) is identical, so a custom policy
+// changes the boundary without forking the routing logic.
+func classifyWith(policy *CompiledApprovalPolicy, e *Escalation) Verdict {
 	q := e.Question
 
 	// High-stakes always wins, regardless of phrasing: a "should I proceed"
 	// dressed over a product decision still must reach the human.
-	if topic, ok := matchHighStakes(q); ok {
+	if topic, reason, required := policy.RequiresHuman(q); required {
 		return Verdict{
 			Disposition:    DispRouteToHuman,
 			MustReachHuman: true,
 			Topic:          topic,
-			Reason:         "matched high-stakes marker (" + topic + "); only the human may decide this",
-		}, nil
+			Reason:         reason,
+		}
 	}
 
 	// Decisions never auto-resolve — a judgment call is, by definition, not
@@ -105,7 +125,7 @@ func (DefaultClassifier) Classify(_ context.Context, e *Escalation) (Verdict, er
 			Disposition: DispRouteToSupervisor,
 			Topic:       "decision",
 			Reason:      "judgment call with no high-stakes marker; supervisor decides",
-		}, nil
+		}
 	}
 
 	// Auto-resolve the narrow "proceed with the assigned task" pattern. Requires
@@ -118,23 +138,14 @@ func (DefaultClassifier) Classify(_ context.Context, e *Escalation) (Verdict, er
 			Answer:      "Yes — proceed. This is the task you were assigned; you do not need approval to do the work you were dispatched to do.",
 			Topic:       "proceed-confirmation",
 			Reason:      "self-evident confirmation of the assigned task",
-		}, nil
+		}
 	}
 
 	return Verdict{
 		Disposition: DispRouteToSupervisor,
 		Topic:       topicHint(q),
 		Reason:      "no auto-answer and no high-stakes marker; supervisor decides",
-	}, nil
-}
-
-func matchHighStakes(q string) (string, bool) {
-	for _, m := range highStakesMarkers {
-		if m.pat.MatchString(q) {
-			return m.topic, true
-		}
 	}
-	return "", false
 }
 
 // topicHint produces a coarse, cheap category for frequency analysis when no

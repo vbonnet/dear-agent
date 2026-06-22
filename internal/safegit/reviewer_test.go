@@ -63,6 +63,43 @@ func TestParseExpectedReviewers_FreshReviewPasses(t *testing.T) {
 	}
 }
 
+// TestParseExpectedReviewers_BareLoginMatchesBotSuffixConfig is the gate-4
+// regression for ce-l8by: the reviews API returns the bare login
+// "gemini-code-assist", but .safe-merge.yml configures "gemini-code-assist[bot]".
+// Before the sameReviewer fix these never matched, so a Gemini-reviewed PR was
+// reported NEVER_ARRIVED forever and could not merge.
+func TestParseExpectedReviewers_BareLoginMatchesBotSuffixConfig(t *testing.T) {
+	now := time.Now()
+	push := now.Add(-20 * time.Minute)
+	data := makeReviewerJSON(push, []struct {
+		login       string
+		submittedAt time.Time
+	}{
+		{login: "gemini-code-assist", submittedAt: push.Add(2 * time.Minute)}, // bare login
+	})
+	// reviewersFor() configures the "[bot]"-suffixed login.
+	if err := parseExpectedReviewers(data, reviewersFor(), now); err != nil {
+		t.Fatalf("bare-login review should satisfy [bot]-suffixed config, got: %v", err)
+	}
+}
+
+func TestSameReviewer(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"gemini-code-assist", "gemini-code-assist[bot]", true},
+		{"gemini-code-assist[bot]", "gemini-code-assist", true},
+		{"gemini-code-assist", "gemini-code-assist", true},
+		{"alice", "bob", false},
+	}
+	for _, c := range cases {
+		if got := sameReviewer(c.a, c.b); got != c.want {
+			t.Errorf("sameReviewer(%q,%q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
 func TestParseExpectedReviewers_StaleReview(t *testing.T) {
 	now := time.Now()
 	push := now.Add(-20 * time.Minute)

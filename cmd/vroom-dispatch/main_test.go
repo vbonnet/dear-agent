@@ -360,6 +360,28 @@ func TestDeployWorkerDispatch(t *testing.T) {
 	}
 }
 
+// TestWorkerPromptRequiresVerificationGate pins the verification-before-completion
+// hard gate (ce-fvsv): the worker dispatch prompt must force ≥1 verification step
+// (go test / make preflight / equivalent) before a worker may declare done. Code
+// written but never run is not done — this guards against ghost completions.
+func TestWorkerPromptRequiresVerificationGate(t *testing.T) {
+	b, err := skills.ReadFile("skills/orchestrator.md")
+	if err != nil {
+		t.Fatalf("read embedded orchestrator.md: %v", err)
+	}
+	doc := string(b)
+
+	for _, want := range []string{
+		"VERIFICATION GATE",
+		"go test",
+		"make preflight",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("orchestrator.md worker dispatch missing verification-gate marker %q", want)
+		}
+	}
+}
+
 // --- Dispatch Advisor tests (ce-hn8n) ---
 
 func TestRestartTracker_BackoffProgression(t *testing.T) {
