@@ -32,6 +32,12 @@ func runHarnessPostCreate(sessionName string, modeAppliedAtStartup bool) error {
 	case harnessName == "codex-cli":
 		runCodexPostCreate(sessionName)
 		return nil
+	case harnessName == "antigravity":
+		// Antigravity (agy CLI) post-create is a no-op stub for now: the harness
+		// is registered as known, but prompt-readiness wait + delivery wiring is
+		// still TODO. See .agents/ config and PR description for required follow-up.
+		debug.Log("Antigravity harness recognized; skipping post-create (stub)")
+		return nil
 	default:
 		debug.Log("Skipping initialization sequence for harness: %s", harnessName)
 		return nil

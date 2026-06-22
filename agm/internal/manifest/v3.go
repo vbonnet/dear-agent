@@ -66,6 +66,7 @@ func (m *ManifestV3) Validate() error {
 		"gemini-cli":   true,
 		"codex-cli":    true,
 		"opencode-cli": true,
+		"antigravity":  true,
 	}
 	// Unknown harness names are accepted (forward-compatible). A future
 	// version may surface this via a logMigration call.
