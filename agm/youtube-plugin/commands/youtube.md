@@ -1,6 +1,6 @@
 ---
 content-hash: PLACEHOLDER
-description: Extract transcript from a YouTube video. Use when the user provides a YouTube URL or video ID and wants the content/transcript.
+description: Extract transcript from a YouTube video.
 argument-hint: "{youtube-url-or-video-id}"
 allowed-tools: Bash(yt-dlp:*), Bash(sed:*), Bash(awk:*), Bash(cat:*), Bash(rm:*), Bash(mkdir:*), Bash(ls:*), Bash(wc:*), Read, Write(/tmp/**)
 ---

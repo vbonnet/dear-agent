@@ -152,6 +152,11 @@ type Escalation struct {
 	AnsweredBy     string `json:"answered_by,omitempty"`
 	AnsweredByRole string `json:"answered_by_role,omitempty"`
 
+	// Confer holds the programmatic VROOM-trio quorum-vote state. It is nil until
+	// the escalation reaches the VROOM mesh with a Registry configured; from then
+	// on it records the invited members and the ballots cast. See confer.go.
+	Confer *Confer `json:"confer,omitempty"`
+
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 	ResolvedAt time.Time `json:"resolved_at,omitzero"`

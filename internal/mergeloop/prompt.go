@@ -32,6 +32,8 @@ func BuildPrompt(repo string, pr PR, kind AgentKind) string {
 	b.WriteString("- Use `GIT_TERMINAL_PROMPT=0 gtimeout 30 git ...` for all git/network ops.\n")
 	b.WriteString("- NEVER use --no-verify or --force / --force-with-lease.\n")
 	b.WriteString("- Commit incrementally with conventional messages; uncommitted work is lost work.\n")
+	b.WriteString("- VERIFICATION GATE (mandatory): Run go test / make preflight locally and\n")
+	b.WriteString("  confirm green before pushing or declaring done. Do not rely on CI alone.\n")
 	b.WriteString("- If you hit the SAME failure twice, stop and report it — do not retry endlessly.\n")
 	b.WriteString("- Do NOT merge the PR yourself; the merge loop merges it once checks are green.\n\n")
 

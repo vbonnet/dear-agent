@@ -169,6 +169,8 @@ func TestRenderPrompt(t *testing.T) {
 		"/wayfinder",                                // worker drives the bead through the SDLC workflow
 		"~/worktrees/dear-agent/ce-test/",           // isolated worktree off read-only ~/src
 		"A bead is Done ONLY when its PR is MERGED", // merged-PR DoD
+		"VERIFICATION GATE (MANDATORY",              // run a verification step before declaring done (ce-fvsv parity)
+		"DONE_WITH_CONCERNS",                        // terminal status code surfaces reservations (ce-n3v4 parity)
 		"bd --db ~/beads/context-engine/.beads",
 		"NEVER write to ~/src/**",
 		"claude-opus-4-8",

@@ -113,7 +113,7 @@ func (e *DeniedError) Error() string {
 func Require(ctx context.Context, g Guard, reason string) error {
 	judge := g.Judge
 	if judge == nil {
-		judge = DefaultJudge{}
+		judge = defaultJudgeFor(g.Risk)
 	}
 
 	verdict, jerr := judge.Evaluate(ctx, JudgeRequest{
@@ -153,6 +153,19 @@ func Require(ctx context.Context, g Guard, reason string) error {
 		}
 	}
 	return nil
+}
+
+// defaultJudgeFor picks the judge to use when a Guard supplies none. For risk
+// levels that warrant independent vetting (P0/P1) it layers the claude-haiku
+// classifier on top of the deterministic floor — but only when an API key is
+// present; NewClaudeHaikuJudge collapses to DefaultJudge behaviour otherwise.
+// For lower-risk bypasses (and in any key-less environment such as CI) it stays
+// fully deterministic and offline.
+func defaultJudgeFor(risk Risk) Judge {
+	if risk.NeedsIndependentJudge() {
+		return NewClaudeHaikuJudge()
+	}
+	return DefaultJudge{}
 }
 
 func (g Guard) audit(e auditEntry) {

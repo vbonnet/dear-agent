@@ -62,6 +62,11 @@ type EscalationEvent struct {
 	MustReachHuman   bool        `json:"must_reach_human,omitempty"`
 	ClassifierReason string      `json:"classifier_reason,omitempty"`
 
+	// Vote is the ballot cast on a conferring escalation (approve|reject|abstain);
+	// empty for non-vote transitions. Enables analysis of trio voting patterns —
+	// e.g. GROUP BY question_hash, vote — alongside the existing keys.
+	Vote string `json:"vote,omitempty"`
+
 	// Quality signals, backfilled by a later review/judge pass — empty at write
 	// time. Incorrect/misaligned answers → WHERE outcome IN ('incorrect',
 	// 'misaligned').

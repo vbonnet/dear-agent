@@ -1,0 +1,79 @@
+# .safe-merge.yml — per-repo safe-merge policy.
+#
+# This file currently carries ONLY the auto-approve decision taxonomy
+# (approval_policy). It deliberately omits expected_reviewers and flaky_checks,
+# so the P4 reviewer/flake merge gates remain skipped (Config.IsEmpty stays
+# true) and safe-merge's merge behaviour is unchanged. Add those sections only
+# when you intend to turn the P4 gates on.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# approval_policy — the auto-approve decision taxonomy (bead ce-onj5).
+#
+# DEAR retro 2026-06-12: human review is the bottleneck. 90% of approvals are
+# trivial and drown the 10% that are genuinely critical. So the posture is
+# AUTO-APPROVE by default; a human is required ONLY for the high-stakes
+# categories below. This block is the single source of truth shared by:
+#   - the VROOM escalation classifier (PolicyClassifier) — routes a matching
+#     escalation must-reach-human instead of letting a supervisor decide it;
+#   - the safe-merge approval surface — reads RequiresHuman / AutoApproves.
+#
+# It mirrors escalation.DefaultApprovalPolicy: editing it here re-tunes the
+# boundary as reviewable policy without a code change. Patterns are
+# case-insensitive Go regular expressions; within a category any pattern
+# matching selects it, and the first category to match wins (order
+# most-specific-first when patterns overlap).
+approval_policy:
+  # When no human_required category matches, the decision auto-approves.
+  auto_approve_default: true
+
+  human_required:
+    # Security boundaries: hooks, permissions, write-guards, auth. These are the
+    # guardrails the whole mesh trusts; only the human may move them.
+    - name: security-boundary
+      reason: "touches a security boundary (hooks, permissions, write-guards, auth); only the human may decide this"
+      patterns:
+        - '(?i)\b(add|change|modify|edit|remove|delete|disable|bypass|skip|weaken)\b.{0,30}\b(hook|hooks|pretool|posttool)\b'
+        - '(?i)\b(add|change|modify|edit|remove|grant|widen|loosen|relax|disable|bypass)\b.{0,30}\b(permission|permissions|allow.?list|deny.?list|allow rule|deny rule|allow\b|deny\b)'
+        - '(?i)\bwrite.?guard\b'
+        - '(?i)\b(settings\.json|\.claude/settings|claude code settings)\b'
+        - '(?i)\b(security policy|disable (the )?(guard|gate|auth|2fa|mfa)|rotate.{0,15}key|exfiltrat)'
+
+    # Money / spend: anything that commits budget or funds.
+    - name: spend
+      reason: "commits money or budget; only the human may decide this"
+      patterns:
+        - '(?i)\b(spend|budget|purchase|pay|invoice|\$\d)'
+
+    # Product decisions: product direction, pricing, roadmap, strategy.
+    - name: product
+      reason: "is a product, pricing, or strategy decision; only the human may decide this"
+      patterns:
+        - '(?i)\bproduct (decision|direction|strategy)\b'
+        - '(?i)\b(pricing|price|paywall|monetiz)'
+        - '(?i)\b(roadmap|prioriti[sz]e|deprioriti[sz]e|strategy|strategic)\b'
+
+    # Irreversible infra: destroying production/data, anything that cannot be undone.
+    - name: irreversible-infra
+      reason: "is irreversible or destroys infrastructure/data; only the human may decide this"
+      patterns:
+        - '(?i)\b(delete|drop|wipe|destroy|purge)\b.{0,20}\b(prod|production|database|customer|user data)\b'
+        - '(?i)\b(irreversible|cannot be undone|permanent(ly)? (delete|remove))\b'
+
+    # External publishing / communication.
+    - name: publishing
+      reason: "publishes or communicates externally; only the human may decide this"
+      patterns:
+        - '(?i)\b(publish|release publicly|go public|announce|tweet|post to)\b'
+        - '(?i)\b(email|message|contact|reach out to) (the )?(customer|client|user|press|investor)'
+
+    # Legal / compliance.
+    - name: legal
+      reason: "has legal or compliance implications; only the human may decide this"
+      patterns:
+        - '(?i)\b(legal|compliance|gdpr|license|licensing|contract|terms of service)\b'
+
+    # People / headcount.
+    - name: people
+      reason: "is a people or headcount decision; only the human may decide this"
+      patterns:
+        - '(?i)\b(hire|fire|headcount|terminate (an?|the) (employee|contractor))\b'

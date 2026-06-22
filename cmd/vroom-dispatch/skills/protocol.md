@@ -74,6 +74,47 @@ emits two dedicated trail kinds:
 Both are written with the standard trail append. A human (or Meta-O) scanning the
 trail for `dod.` prefixes sees every closure-discipline breach in one grep.
 
+### Dispatch Concern Trail Kind
+
+When a worker finishes its deliverable but holds a reservation (see
+[Worker Status Codes](#worker-status-codes)), the Orchestrator records it so a
+human or supervisor can flag the work for review:
+
+- `supervisor.dispatch.concerns` (Orchestrator) — a worker signalled
+  `DONE_WITH_CONCERNS` in its bead notes. Payload fields: `bead`, `session`,
+  `concern` (the worker's verbatim reservation, or a short summary), and
+  optionally `pr` and `verifier` (the session spawned to double-check, if any).
+
+A human grepping the trail for `supervisor.dispatch.concerns` sees every
+"complete, but…" deliverable in one pass — these are the beads most worth a
+second look even though they were not failures.
+
+## Worker Status Codes
+
+Every worker reports a terminal outcome in its bead notes when it stops working a
+bead. There are exactly three:
+
+| Code | Meaning |
+|------|---------|
+| `DONE` | Deliverable complete, no reservations. The bead's PR is merged (DoD satisfied) and the worker has nothing it wants flagged. |
+| `DONE_WITH_CONCERNS` | Deliverable complete, **but** the worker holds a reservation about some aspect (a risky assumption, a shortcut taken under time pressure, a test it could not run, a design tradeoff it is unsure about). The worker MUST document the concern explicitly in the bead notes — what the reservation is and why — so a supervisor or human can decide whether to act on it. The deliverable still ships; the concern is a flag, not a blocker. |
+| `FAILED` | Deliverable not complete. The worker could not resolve the bead and reports the blocker plus concrete alternatives. |
+
+`DONE_WITH_CONCERNS` exists so a worker is never forced to choose between
+silently shipping work it has doubts about (the doubt is lost) and failing a
+bead it actually completed (the work is discarded). It surfaces the doubt
+without throwing away the deliverable.
+
+**Worker convention — recording the outcome.** Add a bead note whose first token
+is the status code, then close (or leave open per DoD) accordingly:
+```bash
+# Complete but with a reservation — document the concern, then proceed with DoD closure.
+bd --db ~/beads/context-engine/.beads note <bead-id> \
+  "DONE_WITH_CONCERNS: <one-line reservation>. Detail: <why this is a concern / what was not verified / what assumption was made>."
+```
+The status code MUST be the first token of the note so the Orchestrator can
+detect it with a simple grep when the worker session ghost-exits.
+
 ## Heartbeat
 
 Each supervisor writes its heartbeat using the existing AGM command:

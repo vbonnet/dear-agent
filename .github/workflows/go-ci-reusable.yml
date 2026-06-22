@@ -1,0 +1,128 @@
+name: Go CI (reusable)
+
+# Reusable Go CI: checkout → setup-go → build → vet → test → lint.
+#
+# Extracted from the near-identical recipe that dear-agent, engram-research,
+# brain-v2, and gdoc-sync each maintained independently. Centralising it here
+# kills the version drift that had crept in across those copies (checkout@v4
+# vs v6, setup-go@v5 vs v6, cache on/off, golangci-lint via manual curl vs the
+# pinned action) and encodes the ce-aen7 corrections in one place:
+#
+#   * actions/setup-go with cache: true   (was disabled in 3 of 4 repos)
+#   * golangci-lint via golangci-lint-action, version pinned (not curl|sh)
+#   * actions/checkout with fetch-depth: 0 so lint baselines stay reachable
+#
+# Callers invoke with:
+#   uses: vbonnet/dear-agent/.github/workflows/go-ci-reusable.yml@main
+#
+# dear-agent's own ci.yml keeps its bespoke multi-OS matrix + integration +
+# govulncheck jobs; this template targets the simple single-module callers.
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'Runner label (e.g. ubuntu-latest, macos-latest).'
+        type: string
+        default: 'ubuntu-latest'
+      go-version-file:
+        description: >-
+          Path (relative to repo root) to the file Go reads its version from —
+          go.mod for single-module repos, go.work for workspaces.
+        type: string
+        default: 'go.mod'
+      working-directory:
+        description: >-
+          Directory to run build/vet/test/lint in. Use this for repos whose Go
+          module does not live at the repo root (e.g. engram/hooks/cmd).
+        type: string
+        default: '.'
+      cache-dependency-path:
+        description: >-
+          Path (relative to repo root) to go.sum for module-cache keying.
+          Empty lets setup-go default to go.sum in the working directory.
+        type: string
+        default: ''
+      run-vet:
+        description: 'Run go vet.'
+        type: boolean
+        default: true
+      run-race:
+        description: 'Run the race detector (go test -race).'
+        type: boolean
+        default: true
+      run-lint:
+        description: 'Run golangci-lint.'
+        type: boolean
+        default: true
+      golangci-version:
+        description: >-
+          golangci-lint version to pin. Pinned (not "latest") so linter
+          upgrades are deliberate, not silent — see ce-aen7.
+        type: string
+        default: 'v2.12.2'
+      golangci-args:
+        description: 'Extra args passed through to golangci-lint-action.'
+        type: string
+        default: ''
+      extra-build-args:
+        description: 'Extra args inserted into `go build <args> ./...`.'
+        type: string
+        default: ''
+
+# Least privilege: these jobs only read the repo and the module cache.
+permissions:
+  contents: read
+
+jobs:
+  go-ci:
+    name: Build & Test
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Full history: golangci-lint's new-from-merge-base (PRs) and
+          # --new-from-rev=HEAD~1 (push-to-main) both need the baseline commit
+          # reachable. A shallow clone silently degrades them to a full scan.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          # go-version-file is resolved from the repo root, not
+          # working-directory (action inputs ignore defaults.run), so callers
+          # pass a repo-root-relative path.
+          go-version-file: ${{ inputs.go-version-file }}
+          cache: true
+          cache-dependency-path: ${{ inputs.cache-dependency-path }}
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build ${{ inputs.extra-build-args }} ./...
+
+      - name: Vet
+        if: ${{ inputs.run-vet }}
+        run: go vet ./...
+
+      - name: Test
+        # ${{ ... && '-race' || '' }} is safe here because the truthy branch
+        # ('-race') is non-empty; GitHub only treats '' as falsy, so run-race
+        # == false correctly yields no flag.
+        run: go test ${{ inputs.run-race && '-race' || '' }} ./...
+
+      - name: Lint
+        if: ${{ inputs.run-lint }}
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ inputs.golangci-version }}
+          # Action inputs ignore defaults.run.working-directory, so pass it
+          # through explicitly for non-root modules.
+          working-directory: ${{ inputs.working-directory }}
+          args: ${{ inputs.golangci-args }}
