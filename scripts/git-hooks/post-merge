@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Git post-merge hook — two fail-safe stages that fire after a merge/pull lands
+# Git post-merge hook — three fail-safe stages that fire after a merge/pull lands
 # on the repo's DEFAULT branch:
 #
 #   Stage 1 — rebuild affected Go binaries (this repo only).
@@ -14,6 +14,23 @@
 #     installed binary's vcs.revision is provably trunk. See `fetch_trunk_commit`
 #     / `ensure_build_dir` and `rebuild_changed_binaries`. (Jun-18 retro B2,
 #     ce-11u3: agm was rebuilt from a 4-day-stale ancestor not on origin/main.)
+#
+#   Stage 1.6 — deploy host artifacts via `dear-deploy sync` (this repo only).
+#     Stage 1 keeps the `go install` binaries in ~/go/bin current, but the repo
+#     also ships HOST artifacts whose source of truth is deploy/manifest.yaml:
+#     the mergeloop launchd plist (~/Library/LaunchAgents) and the compiled
+#     PreToolUse write-guard hooks (~/.config/claude-code/hooks). Those were
+#     never auto-deployed — they drifted until someone ran `make dear-deploy-sync`
+#     by hand. This stage closes that gap declaratively: instead of hand-coding a
+#     per-artifact diff, it shells out to `dear-deploy sync`, which reads the
+#     manifest and rewrites only the artifacts that have actually drifted (each
+#     through the principle-9 stage→verify→activate sequence). It builds + syncs
+#     from the SAME trunk worktree Stage 1 uses, so the deployed write-guards and
+#     plist are provably origin/<default_branch> — never a divergent local ref,
+#     and never written into the read-only ~/src checkout. See `deploy_host_artifacts`.
+#     (Design: deploy-worker-vroom Phase 2 — Component 3; ce-snsu / ce-gzfv.)
+#     NOTE: dear-deploy is a FILE deployer — Go binaries (agm/vroom-dispatch) are
+#     status-only there (ce-12fp), so Stage 1's rebuild is NOT folded into it.
 #
 #   Stage 2 — reap provably-merged worktrees via `agm worktree sweep --execute`.
 #     The reaper itself already exists and is fail-safe (it removes ONLY worktrees
@@ -38,6 +55,7 @@
 # runs after every merge in every repo. Each stage therefore self-scopes:
 #   • Stage 1 acts only in a repo that actually contains the target binary
 #     packages (today, that is dear-agent). Every other repo is a silent no-op.
+#   • Stage 1.6 acts only in a repo that carries deploy/manifest.yaml (dear-agent).
 #   • Stage 2 acts only when `agm` is installed and the ~/worktrees workflow is
 #     in use.
 #
@@ -56,6 +74,7 @@
 # Opt-outs (per stage):
 #   DEAR_AGENT_POST_MERGE_REBUILD=0           skip Stage 1 (binary rebuild)
 #   DEAR_AGENT_POST_MERGE_VERIFY=0            skip Stage 1.5 (deploy verify)
+#   DEAR_AGENT_POST_MERGE_DEPLOY=0            skip Stage 1.6 (host-artifact deploy)
 #   AGM_POST_MERGE_SWEEP=0                    skip Stage 2 (worktree sweep)
 #   DEAR_AGENT_POST_MERGE_BEAD_TRANSITION=0   skip Stage 3 (bead transition)
 #
@@ -304,11 +323,75 @@ rebuild_changed_binaries() {
   rebuilt_any=0
   maybe_rebuild "agm/cmd/agm"        agm/ pkg/ internal/ go.mod go.sum
   maybe_rebuild "cmd/vroom-dispatch" cmd/vroom-dispatch/ pkg/ internal/ go.mod go.sum
+  # Self-update the deploy tool: keep ~/go/bin/dear-deploy current so on-demand /
+  # Orchestrator invocations (Layer 2, ce-33sy) run trunk. Stage 1.6 below does
+  # not depend on this — it builds dear-deploy from the trunk worktree itself —
+  # this only makes the binary available on PATH outside the hook.
+  maybe_rebuild "cmd/dear-deploy"    cmd/dear-deploy/ internal/deploy/ go.mod go.sum
   cleanup_build_dir
 
   if [ "${indeterminate}" != "1" ] && [ "${rebuilt_any}" = "0" ]; then
     echo "[post-merge:rebuild] No binary rebuild needed (docs/tests/config only)." >&2
   fi
+}
+
+# ── Stage 1.6: deploy host artifacts via dear-deploy sync ──────────────────
+# Stage 1 rebuilds the `go install` binaries; this stage deploys the HOST
+# artifacts declared in deploy/manifest.yaml — the mergeloop launchd plist and
+# the compiled PreToolUse write-guard hooks — to their installed locations.
+#
+# Instead of a hand-coded per-artifact diff (the pattern Stage 1 still needs for
+# `go install` targets), this stage delegates entirely to `dear-deploy sync`: it
+# reads the manifest and rewrites only artifacts that have actually drifted, each
+# through the principle-9 stage→verify→activate sequence (ADR-031, no bypass).
+# `dear-deploy` is a FILE deployer — Go binaries are status-only there (ce-12fp,
+# "deploying a binary means build + go install, not a file copy") — so Stage 1's
+# rebuild is deliberately NOT folded in here.
+#
+# Build + sync run from the SAME throwaway origin/<default_branch> worktree Stage
+# 1 builds in (ce-11u3 invariant): the deployed write-guards/plist are provably
+# trunk, never a divergent local ref, and the build never writes into the
+# read-only ~/src checkout. `make dear-deploy-sync` builds dear-deploy + the
+# write-guards first, then runs `./bin/dear-deploy sync` (cwd = the worktree, so
+# the manifest and its sources resolve there; deployed paths still use $HOME).
+#   Opt-out: DEAR_AGENT_POST_MERGE_DEPLOY=0
+deploy_host_artifacts() {
+  [ "${DEAR_AGENT_POST_MERGE_DEPLOY:-1}" = "0" ] && return 0
+
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  # Self-scope: only the repo that carries the deploy manifest (dear-agent).
+  # Every other repo is a silent no-op, exactly like Stage 1.
+  [ -f "${repo_root}/deploy/manifest.yaml" ] || return 0
+
+  if ! command -v go >/dev/null 2>&1; then
+    echo "[post-merge:deploy] go not found on PATH — skipping host-artifact deploy" >&2
+    return 0
+  fi
+  if ! command -v make >/dev/null 2>&1; then
+    echo "[post-merge:deploy] make not found on PATH — skipping host-artifact deploy" >&2
+    return 0
+  fi
+
+  # Resolve the trunk build context. Stage 1 already fetches the canonical
+  # trunk commit into build_commit; reuse it here so one post-merge run performs
+  # at most one network fetch. If Stage 1 was skipped or found no trunk ref,
+  # fetch lazily and then fall back to the working tree when still empty.
+  build_dir=""
+  build_worktree=""
+  if [ -z "${build_commit:-}" ]; then
+    fetch_trunk_commit
+  fi
+  ensure_build_dir
+
+  echo "[post-merge:deploy] Deploying host artifacts (plist + write-guards) via dear-deploy sync..." >&2
+  if ( cd "${build_dir}" && make dear-deploy-sync ) 1>&2; then
+    echo "[post-merge:deploy] ✓ host artifacts in sync with deploy/manifest.yaml" >&2
+  else
+    echo "[post-merge:deploy] ✗ dear-deploy sync FAILED — git op unaffected." >&2
+    echo "[post-merge:deploy]   deploy manually: (cd ${repo_root} && make dear-deploy-sync)" >&2
+  fi
+
+  cleanup_build_dir
 }
 
 # ── Stage 1.5: verify the rebuilt binary is actually on origin/main ─────────
@@ -487,7 +570,11 @@ sweep_merged_worktrees() {
 }
 
 # ── Run the stages (each self-scopes and is individually fail-safe) ─────────
+# Order: rebuild the go-install binaries, then deploy the host artifacts (a plist
+# may point at a freshly-rebuilt binary, so binaries go first), then verify the
+# agm deploy, then sweep merged worktrees.
 rebuild_changed_binaries
+deploy_host_artifacts
 verify_deployment_after_rebuild
 transition_merged_beads
 sweep_merged_worktrees

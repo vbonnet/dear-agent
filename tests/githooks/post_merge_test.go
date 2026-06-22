@@ -448,6 +448,123 @@ func TestRebuild_NoOrigin_FallsBackToWorkingTree(t *testing.T) {
 	}
 }
 
+// ── Stage 1.6 (host-artifact deploy via dear-deploy sync) ───────────────────
+
+// stubMake writes a fake `make` that records each invocation's target(s) into
+// recordFile (one line per run, space-joined args) and returns the dir holding
+// it. It lets a test assert the hook drove the deploy through `make
+// dear-deploy-sync` without running a real build.
+func stubMake(t *testing.T, recordFile string) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"echo \"$*\" >> \"" + recordFile + "\"\n" +
+		"exit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "make"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// newDeployRepo builds a repo that looks like dear-agent for the deploy stage:
+// it carries deploy/manifest.yaml on main. It deliberately omits the binary
+// package dirs so Stage 1 is an inert no-op and the test isolates Stage 1.6.
+func newDeployRepo(t *testing.T) string {
+	t.Helper()
+	repo := newRepo(t)
+	if err := os.MkdirAll(filepath.Join(repo, "deploy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "deploy", "manifest.yaml"), []byte("artifacts: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "add", "-A")
+	git(t, repo, "commit", "-qm", "add deploy manifest")
+	return repo
+}
+
+// runDeployRecord runs the hook with a stub `make` (and no agm), isolating Stage
+// 1.6: Stage 1 (rebuild) and Stage 2 (sweep) are disabled via their opt-outs. It
+// returns the path to the record file capturing every `make` invocation.
+func runDeployRecord(t *testing.T, repo string, extraEnv ...string) string {
+	t.Helper()
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	home := t.TempDir()
+	record := filepath.Join(t.TempDir(), "made")
+	makeDir := stubMake(t, record)
+	cmd := exec.Command("bash", hookPath(t))
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(),
+		"HOME="+home,
+		"PATH="+makeDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DEAR_AGENT_POST_MERGE_REBUILD=0", // isolate Stage 1.6 from Stage 1
+		"AGM_POST_MERGE_SWEEP=0",          // isolate Stage 1.6 from Stage 2
+	)
+	cmd.Env = append(cmd.Env, extraEnv...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("hook must exit 0, got %v\n%s", err, out)
+	}
+	return record
+}
+
+// madeTargets parses the stub make's record into the list of target strings it
+// was invoked with.
+func madeTargets(t *testing.T, recordFile string) []string {
+	t.Helper()
+	b, err := os.ReadFile(recordFile)
+	if err != nil {
+		return nil // no file => make never invoked
+	}
+	var out []string
+	for l := range strings.SplitSeq(strings.TrimSpace(string(b)), "\n") {
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// On the default branch, a repo carrying deploy/manifest.yaml deploys host
+// artifacts by shelling out to `make dear-deploy-sync`.
+func TestDeploy_DefaultBranch_RunsSync(t *testing.T) {
+	repo := newDeployRepo(t)
+	got := madeTargets(t, runDeployRecord(t, repo))
+	if !slices.Contains(got, "dear-deploy-sync") {
+		t.Fatalf("expected `make dear-deploy-sync` on a default-branch merge, got %v", got)
+	}
+}
+
+// On a feature branch, Stage 1.6 must not deploy (mirrors the rebuild/sweep gate).
+func TestDeploy_FeatureBranch_Skips(t *testing.T) {
+	repo := newDeployRepo(t)
+	git(t, repo, "checkout", "-q", "-b", "feature")
+	got := madeTargets(t, runDeployRecord(t, repo))
+	if len(got) != 0 {
+		t.Fatalf("deploy ran on a feature branch: %v", got)
+	}
+}
+
+// DEAR_AGENT_POST_MERGE_DEPLOY=0 disables Stage 1.6 even on the default branch.
+func TestDeploy_OptOut_Skips(t *testing.T) {
+	repo := newDeployRepo(t)
+	got := madeTargets(t, runDeployRecord(t, repo, "DEAR_AGENT_POST_MERGE_DEPLOY=0"))
+	if len(got) != 0 {
+		t.Fatalf("deploy ran despite DEAR_AGENT_POST_MERGE_DEPLOY=0: %v", got)
+	}
+}
+
+// A repo without deploy/manifest.yaml is a silent no-op (global-hook safety):
+// the stub `make` must never be invoked.
+func TestDeploy_NoManifest_NoOp(t *testing.T) {
+	repo := newRepo(t) // no deploy/manifest.yaml
+	got := madeTargets(t, runDeployRecord(t, repo))
+	if len(got) != 0 {
+		t.Fatalf("deploy ran in a repo without a deploy manifest: %v", got)
+	}
+}
+
 // ── Stage 3 (bead transition) ───────────────────────────────────────────────
 
 // stubBd writes a fake `bd` modelling a tiny Beads store under the --db dir:
