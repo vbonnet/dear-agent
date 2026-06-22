@@ -141,7 +141,7 @@ func TestManifestV3_Validate(t *testing.T) {
 			name: "all known harnesses",
 			modify: func(m *ManifestV3) {
 				// Test each known harness validates
-				for _, h := range []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli"} {
+				for _, h := range []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli", "antigravity"} {
 					m.Harness = h
 				}
 			},
