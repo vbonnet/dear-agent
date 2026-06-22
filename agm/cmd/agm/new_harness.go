@@ -111,14 +111,18 @@ var spawnSessionID string
 func otelEnvArgs() string {
 	var args strings.Builder
 	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
-		fmt.Fprintf(&args, " OTEL_EXPORTER_OTLP_ENDPOINT=%s", endpoint)
+		// shellQuote the interpolated value: this string is run via tmux in a
+		// shell, so an endpoint containing shell metacharacters would otherwise
+		// allow command injection (matches how sessionName/model/workDir are
+		// quoted at the call site).
+		fmt.Fprintf(&args, " OTEL_EXPORTER_OTLP_ENDPOINT=%s", shellQuote(endpoint))
 		args.WriteString(" CLAUDE_CODE_ENABLE_TELEMETRY=1")
 		args.WriteString(" CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1")
 		args.WriteString(" OTEL_TRACES_EXPORTER=otlp")
 		args.WriteString(" OTEL_EXPORTER_OTLP_PROTOCOL=grpc")
 	}
 	if spawnSessionID != "" {
-		fmt.Fprintf(&args, " ENGRAM_SESSION_ID=%s", spawnSessionID)
+		fmt.Fprintf(&args, " ENGRAM_SESSION_ID=%s", shellQuote(spawnSessionID))
 	}
 	return args.String()
 }
