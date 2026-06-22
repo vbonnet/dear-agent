@@ -13,6 +13,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/internal/safegit"
 	"github.com/vbonnet/dear-agent/pkg/vroom/decisiontrail"
 	"github.com/vbonnet/dear-agent/pkg/vroom/escalation"
 )
@@ -160,8 +161,22 @@ func newEscalationEnv(vroomEntry string) (*escalationEnv, func(), error) {
 		}
 	}
 
+	// The must-reach-human boundary is the declarative auto-approve taxonomy. By
+	// default it is the built-in DefaultClassifier; when the repo's
+	// .safe-merge.yml carries an approval_policy block, gate on that instead so
+	// the boundary is tuned by reviewable policy, not code (bead ce-onj5). A
+	// missing file, no approval_policy, or a load error all fall back to the
+	// built-in default — the gate never silently disappears.
+	var classifier escalation.Classifier = escalation.DefaultClassifier{}
+	if smCfg, cerr := safegit.LoadRepoConfig(); cerr == nil && smCfg != nil && smCfg.ApprovalPolicy != nil {
+		if pc, perr := escalation.NewPolicyClassifier(smCfg.EscalationPolicy()); perr == nil {
+			classifier = pc
+		}
+	}
+
 	eng, err := escalation.NewEngine(escalation.Config{
 		Graph:      &doltGraph{adapter: adapter},
+		Classifier: classifier,
 		Messenger:  &agmMessenger{},
 		Human:      &dispatchHuman{home: home},
 		Store:      store,
