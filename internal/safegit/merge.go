@@ -623,7 +623,10 @@ func parseSoak(data []byte, now time.Time) error {
 	// Check review bot posted.
 	botPosted := false
 	for _, r := range pr.Reviews {
-		if r.Author.Login == ReviewBot {
+		// Tolerate the "[bot]" suffix: the reviews API returns the bare login,
+		// but some surfaces/config append it (see sameReviewer). Any review
+		// state — including Gemini's COMMENTED — counts as "posted".
+		if sameReviewer(r.Author.Login, ReviewBot) {
 			botPosted = true
 			break
 		}

@@ -79,9 +79,13 @@ func parseExpectedReviewers(data []byte, reviewers []ExpectedReviewer, now time.
 		var newest time.Time
 		found := false
 		for _, r := range pr.Reviews {
-			if r.Author.Login != want.Login {
+			if !sameReviewer(r.Author.Login, want.Login) {
 				continue
 			}
+			// Any review state counts — Gemini Code Assist submits its findings
+			// as COMMENTED, never APPROVED, so requiring APPROVED here would
+			// block every Gemini-reviewed PR forever. Freshness (below) is the
+			// only additional constraint.
 			found = true
 			if r.SubmittedAt.After(newest) {
 				newest = r.SubmittedAt
@@ -119,6 +123,16 @@ func parseExpectedReviewers(data []byte, reviewers []ExpectedReviewer, now time.
 	}
 
 	return nil
+}
+
+// sameReviewer compares two GitHub logins tolerating the "[bot]" suffix that
+// some GitHub surfaces append to GitHub-App accounts. The reviews API returns
+// the bare login (e.g. "gemini-code-assist"), while operators commonly
+// configure "gemini-code-assist[bot]" in .safe-merge.yml. Without this
+// normalization gate 4 would never match the bot's review and block the merge
+// indefinitely — the exact failure mode this fix addresses.
+func sameReviewer(a, b string) bool {
+	return strings.TrimSuffix(a, "[bot]") == strings.TrimSuffix(b, "[bot]")
 }
 
 // reviewerLogins returns the configured reviewer logins, for log/diagnostic use.

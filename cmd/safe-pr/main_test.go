@@ -38,3 +38,41 @@ func TestRun_HelpIsNotAnError(t *testing.T) {
 		}
 	}
 }
+
+func TestParsePRURL(t *testing.T) {
+	repo, num, ok := parsePRURL("https://github.com/vbonnet/dear-agent/pull/582")
+	if !ok || repo != "vbonnet/dear-agent" || num != "582" {
+		t.Errorf("parsePRURL = (%q, %q, %v), want (vbonnet/dear-agent, 582, true)", repo, num, ok)
+	}
+	if _, _, ok := parsePRURL("not a url"); ok {
+		t.Error("parsePRURL should fail on a non-PR string")
+	}
+	if _, _, ok := parsePRURL("https://github.com/vbonnet/dear-agent/issues/582"); ok {
+		t.Error("parsePRURL should not match an issues URL")
+	}
+}
+
+func TestParseArgs_VerifyCI(t *testing.T) {
+	p, err := parseArgs([]string{"create", "--verify-ci", "--title", "t"})
+	if err != nil {
+		t.Fatalf("parseArgs error: %v", err)
+	}
+	if !p.verifyCI {
+		t.Error("--verify-ci should set verifyCI true")
+	}
+	// --verify-ci must not leak into the gh args passed through to gh pr create.
+	for _, a := range p.req.GhArgs {
+		if a == "--verify-ci" {
+			t.Error("--verify-ci leaked into gh args")
+		}
+	}
+}
+
+func TestShortSHA(t *testing.T) {
+	if got := shortSHA("cebb82eb05bea83"); got != "cebb82e" {
+		t.Errorf("shortSHA = %q, want cebb82e", got)
+	}
+	if got := shortSHA("abc"); got != "abc" {
+		t.Errorf("shortSHA = %q, want abc", got)
+	}
+}

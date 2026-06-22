@@ -45,7 +45,7 @@ func init() {
 	rootCmd.AddCommand(startCmd)
 	startCmd.Flags().StringVar(&depthFlag, "depth", "", "Depth tier (XS, S, M, L, XL)")
 	startCmd.Flags().BoolVar(&autoClassifyFlag, "auto-classify", false, "Auto-classify depth from project description")
-	startCmd.Flags().StringVar(&projectDirFlag, "project-dir", "", "Override project root directory (default: ~/src/ws/{workspace}/wf/)")
+	startCmd.Flags().StringVar(&projectDirFlag, "project-dir", "", "Override project root directory (default: $WAYFINDER_DIR or ~/src/ws/{workspace}/wf/)")
 }
 
 //nolint:gocyclo // reason: linear CLI driver covering many startup steps
@@ -65,27 +65,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	projectID := project.GenerateID(prompt)
 
 	// Determine project root
-	var projectRoot string
-	if projectDirFlag != "" {
-		projectRoot = projectDirFlag
-	} else {
-		// Try to detect from git repo context.
-		// If the repo lives under ~/src/ (the read-only golden tree), writing
-		// wf/ there would fail. Route to ~/worktrees/{repo}/wf/ instead so the
-		// wayfinder project lands in the writable worktrees area (ce-fvkz).
-		gitRoot, err := detectGitRepoRoot()
-		if err == nil && gitRoot != "" {
-			goldenTree := filepath.Join(os.Getenv("HOME"), "src")
-			if strings.HasPrefix(gitRoot, goldenTree+string(filepath.Separator)) || gitRoot == goldenTree {
-				projectRoot = filepath.Join(os.Getenv("HOME"), "worktrees", filepath.Base(gitRoot), "wf")
-			} else {
-				projectRoot = filepath.Join(gitRoot, "wf")
-			}
-		} else {
-			// Fall back: worktrees area rather than the read-only ~/src/ws/
-			projectRoot = filepath.Join(os.Getenv("HOME"), "worktrees", workspace, "wf")
-		}
-	}
+	projectRoot := resolveProjectRoot(workspace)
 
 	// Validate root exists or create it
 	if _, statErr := os.Stat(projectRoot); os.IsNotExist(statErr) {
@@ -569,15 +549,28 @@ living_updates:
 **Next Update:** [After current phase completes]
 `
 
-// detectGitRepoRoot finds the git repository root from the current working directory.
-// Returns empty string if not in a git repository.
-func detectGitRepoRoot() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
+// resolveProjectRoot returns the directory under which a new Wayfinder project
+// is created. Resolution order:
+//
+//  1. --project-dir flag (explicit override)
+//  2. WAYFINDER_DIR env var (explicit override)
+//  3. Default: ~/src/ws/{workspace}/wf/
+//
+// The default is the repo-independent workspace area, NOT any git repo checkout.
+// Earlier revisions derived the root from the current git repo and wrote wf/
+// inside it (ce-fvkz), but that has two problems: ~/src/<repo> is the read-only
+// golden tree, and wf/ inside ANY repo is a forbidden temporal-artifact path
+// (.dear-agent.yml forbidden-paths: wf/**). The workspace dir ~/src/ws/{ws}/wf/
+// sits outside every repo, so it is both writable and not matched by that glob
+// (ce-bq8y).
+func resolveProjectRoot(workspace string) string {
+	if projectDirFlag != "" {
+		return projectDirFlag
 	}
-	return strings.TrimSpace(string(output)), nil
+	if env := strings.TrimSpace(os.Getenv("WAYFINDER_DIR")); env != "" {
+		return env
+	}
+	return filepath.Join(os.Getenv("HOME"), "src", "ws", workspace, "wf")
 }
 
 // runClassification calls wayfinder-classify and returns classification results
