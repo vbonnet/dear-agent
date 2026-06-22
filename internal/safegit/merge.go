@@ -5,7 +5,7 @@
 //   - ALL CI checks pass (no red, no pending — not just required checks)
 //   - No unresolved review threads exist
 //   - Minimum soak: head commit is at least 5 minutes old
-//   - Review bot (gemini-code-assist) has posted
+//   - Review bot (gemini-code-assist[bot]) has posted
 //
 // After merge: worktree + branch are cleaned up automatically.
 package safegit
@@ -40,8 +40,38 @@ const MinSoak = 5 * time.Minute
 // DefaultWatchTimeout is the default time limit for watch mode.
 const DefaultWatchTimeout = 45 * time.Minute
 
-// ReviewBot is the GitHub login of the required code-review bot.
-const ReviewBot = "gemini-code-assist"
+// ReviewBot is the GitHub login of the required code-review bot. GitHub appends
+// a "[bot]" suffix to GitHub App identities, so the login that actually appears
+// in the reviews API is "gemini-code-assist[bot]" — the bare "gemini-code-assist"
+// never shows up there. The earlier bare constant caused gate 4's exact-equality
+// check to never match, blocking every merge ("review bot has not posted")
+// indefinitely (ce-l8by). Matching is done via isReviewBot, which tolerates the
+// suffix on either side so a future schema/config drift can't re-break the gate.
+const ReviewBot = "gemini-code-assist[bot]"
+
+// isReviewBot reports whether a PR review author login is the required
+// code-review bot. It compares with the "[bot]" App suffix stripped from both
+// sides, so both "gemini-code-assist" and "gemini-code-assist[bot]" match — the
+// suffix is a GitHub presentation detail, not part of the bot's identity.
+func isReviewBot(login string) bool {
+	return strings.TrimSuffix(login, "[bot]") == strings.TrimSuffix(ReviewBot, "[bot]")
+}
+
+// reviewStateCounts reports whether a review in the given state satisfies gate
+// 4. A submitted review in any substantive state counts: gemini-code-assist
+// posts COMMENTED reviews rather than APPROVED, so requiring APPROVED would
+// deadlock the gate. Only PENDING (an unsubmitted draft) and DISMISSED reviews
+// are ignored.
+func reviewStateCounts(state string) bool {
+	switch strings.ToUpper(strings.TrimSpace(state)) {
+	case "PENDING", "DISMISSED":
+		return false
+	default:
+		// APPROVED, COMMENTED, CHANGES_REQUESTED, or an empty/unknown state
+		// (older gh JSON omitted it) all count as "the bot has posted".
+		return true
+	}
+}
 
 // MergeConfig holds options for a safe merge.
 type MergeConfig struct {
@@ -620,13 +650,16 @@ func parseSoak(data []byte, now time.Time) error {
 		}
 	}
 
-	// Check review bot posted.
+	// Check review bot posted. Any submitted review counts — gemini-code-assist
+	// posts COMMENTED reviews (it does not APPROVE), so gating on state ==
+	// "APPROVED" would never pass; we only require that a review from the bot
+	// exists. COMMENTED, APPROVED, and CHANGES_REQUESTED all satisfy gate 4.
 	botPosted := false
 	for _, r := range pr.Reviews {
-		// Tolerate the "[bot]" suffix: the reviews API returns the bare login,
-		// but some surfaces/config append it (see sameReviewer). Any review
-		// state — including Gemini's COMMENTED — counts as "posted".
-		if sameReviewer(r.Author.Login, ReviewBot) {
+		// isReviewBot tolerates the "[bot]" App suffix on either side, and
+		// reviewStateCounts ignores PENDING/DISMISSED so only a submitted bot
+		// review (COMMENTED/APPROVED/CHANGES_REQUESTED) satisfies gate 4.
+		if isReviewBot(r.Author.Login) && reviewStateCounts(r.State) {
 			botPosted = true
 			break
 		}
