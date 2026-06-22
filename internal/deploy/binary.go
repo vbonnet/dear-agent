@@ -32,7 +32,7 @@ var readBinaryVersion = binaryVersion
 func binaryVersion(path string) (revision string, modified bool, err error) {
 	info, err := buildinfo.ReadFile(path)
 	if err != nil {
-		return "", false, err
+		return "", false, fmt.Errorf("read build info from %s: %w", path, err)
 	}
 	for _, s := range info.Settings {
 		switch s.Key {
@@ -135,7 +135,7 @@ func shortRev(sha string) string {
 func gitRev(repoPath, ref string) (string, error) {
 	out, err := runGit(repoPath, "rev-parse", "--verify", ref+"^{commit}")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve git ref %s in %s: %w", ref, repoPath, err)
 	}
 	return strings.TrimSpace(out), nil
 }
@@ -154,5 +154,11 @@ func runGit(repoPath string, args ...string) (string, error) {
 	defer cancel()
 	full := append([]string{"-C", repoPath}, args...)
 	out, err := exec.CommandContext(ctx, "git", full...).Output()
-	return string(out), err
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("git %v timed out or cancelled: %w", args, ctx.Err())
+	}
+	if err != nil {
+		return "", fmt.Errorf("git %v failed: %w", args, err)
+	}
+	return string(out), nil
 }
