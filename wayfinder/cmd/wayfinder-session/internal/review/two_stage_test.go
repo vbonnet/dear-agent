@@ -163,3 +163,43 @@ func TestSpecComplianceBlocksOnUnmetRequirement(t *testing.T) {
 		t.Errorf("spec-compliance score should drop below 100, got %.1f", result.Metrics.SpecComplianceScore)
 	}
 }
+
+// TestSpecCompliancePatternsWordBoundaries guards against false positives in the
+// not-implemented / unimplemented markers: word boundaries must keep them from
+// firing on legitimate Go identifiers like gRPC's auto-generated
+// Unimplemented<Service>Server structs or http.StatusNotImplemented, while still
+// flagging genuine not-implemented markers.
+func TestSpecCompliancePatternsWordBoundaries(t *testing.T) {
+	cfg := specCompliancePersonaConfig()
+
+	matchesAny := func(content string) bool {
+		for pattern, severity := range cfg.Patterns {
+			if ok, _ := checkPattern(content, pattern, severity, "x.go", PersonaSpecCompliance); ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	falsePositives := []string{
+		"type UnimplementedGreeterServer struct{}",
+		"func (UnimplementedGreeterServer) SayHello() {}",
+		"return http.StatusNotImplemented",
+	}
+	for _, content := range falsePositives {
+		if matchesAny(content) {
+			t.Errorf("spec-compliance patterns falsely matched legitimate identifier: %q", content)
+		}
+	}
+
+	truePositives := []string{
+		"panic(\"not implemented\")",
+		"// unimplemented: see ticket",
+		"return errors.New(\"not implemented\")",
+	}
+	for _, content := range truePositives {
+		if !matchesAny(content) {
+			t.Errorf("spec-compliance patterns failed to match genuine marker: %q", content)
+		}
+	}
+}

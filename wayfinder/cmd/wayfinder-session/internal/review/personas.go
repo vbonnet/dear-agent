@@ -142,8 +142,8 @@ func specCompliancePersonaConfig() PersonaConfig {
 		Patterns: map[string]IssueSeverity{
 			// P1 - Requirement clearly not met
 			`(?i)panic\(\s*["'][^"']*not\s+implemented`: SeverityP1, // not-implemented panic
-			`(?i)not\s+implemented`:                     SeverityP1, // not-implemented marker
-			`(?i)unimplemented`:                         SeverityP1, // unimplemented marker
+			`(?i)\bnot\s+implemented\b`:                 SeverityP1, // not-implemented marker
+			`(?i)\bunimplemented\b`:                     SeverityP1, // unimplemented marker
 
 			// P2 - Spec gap that needs follow-up
 			`(?i)TODO[^\n]*(spec|requirement|acceptance)`:  SeverityP2, // spec TODOs
