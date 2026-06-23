@@ -55,7 +55,7 @@ func Check(sessionName string, opts GuardOptions) *CheckResult {
 	}
 
 	if !opts.SkipUninitialized {
-		if v := CheckSessionUninitialized(sessionName, socketPath); v != nil {
+		if v := CheckSessionUninitialized(sessionName, socketPath, opts.Harness); v != nil {
 			result.Safe = false
 			result.Violations = append(result.Violations, *v)
 		}

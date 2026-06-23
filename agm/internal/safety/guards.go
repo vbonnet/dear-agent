@@ -159,11 +159,16 @@ func detectHumanTyping(paneContent string) *Violation {
 
 // --- Session Uninitialized Guard ---
 
-// CheckSessionUninitialized detects if Claude hasn't started or is showing the welcome screen.
-func CheckSessionUninitialized(sessionName, socketPath string) *Violation {
+// CheckSessionUninitialized detects if the target harness has not reached its
+// interactive composer yet. Empty harness preserves the historical Claude Code
+// behavior for legacy callers.
+func CheckSessionUninitialized(sessionName, socketPath, harness string) *Violation {
 	content, err := capturePaneContent(sessionName, socketPath, 50)
 	if err != nil {
 		return nil
+	}
+	if harness == "codex-cli" {
+		return detectCodexSessionUninitialized(content)
 	}
 
 	// Also check if Claude process is running
@@ -173,6 +178,34 @@ func CheckSessionUninitialized(sessionName, socketPath string) *Violation {
 	}
 
 	return detectSessionUninitialized(content, claudeRunning)
+}
+
+func detectCodexSessionUninitialized(paneContent string) *Violation {
+	if strings.Contains(paneContent, "OpenAI Codex") || strings.Contains(paneContent, "/model to change") {
+		return nil
+	}
+	if strings.Contains(paneContent, "Do you trust the contents of this directory") {
+		return &Violation{
+			Guard:      ViolationSessionUninitialized,
+			Message:    "Codex is showing the trust prompt (not yet initialized).",
+			Suggestion: "Attach to the session and answer the trust prompt first.",
+			Evidence:   "codex trust prompt visible",
+		}
+	}
+	if strings.Contains(paneContent, "Choose how you'd like Codex to proceed") {
+		return &Violation{
+			Guard:      ViolationSessionUninitialized,
+			Message:    "Codex is showing the model selection prompt (not yet initialized).",
+			Suggestion: "Attach to the session and choose a model first.",
+			Evidence:   "codex model prompt visible",
+		}
+	}
+	return &Violation{
+		Guard:      ViolationSessionUninitialized,
+		Message:    "No Codex composer detected. Codex may not have started yet.",
+		Suggestion: "Wait for Codex to initialize, or attach to verify.",
+		Evidence:   "no codex composer",
+	}
 }
 
 // detectSessionUninitialized is the pure-logic detection function.

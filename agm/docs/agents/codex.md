@@ -35,7 +35,6 @@ Important launch invariants:
 - model aliases are resolved through `internal/agent/models.go`
 - `-C <workdir>` pins Codex to the AGM working directory
 - `-s workspace-write` is the default sandbox
-- `--skip-git-repo-check` is added only for non-git working directories
 - no Claude, Anthropic, Engram, or OpenTelemetry environment is injected
 
 ## Send

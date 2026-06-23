@@ -371,7 +371,9 @@ func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error 
 	// Enabling autonomous mode here makes the dark factory work without every send
 	// passing --autonomous or AGM_AUTONOMOUS=1 (which still take precedence via
 	// runSend). Resolve failures fall through harmlessly to the default guard.
+	harnessType := ""
 	if m, _, resolveErr := session.ResolveIdentifier(recipientSession, cfg.SessionsDir, adapter); resolveErr == nil {
+		harnessType = m.Harness
 		if isAutonomousRole(m.Context.Tags) {
 			tmux.SetAutonomousMode(true)
 		}
@@ -380,7 +382,7 @@ func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error 
 	// tmux.AutonomousMode() is the single source of truth, set in runSend from
 	// either --autonomous or AGM_AUTONOMOUS=1 (ce-v9in) and, for autonomous-role
 	// recipients, the role auto-detection above (ce-7mxn).
-	guardOpts := safety.GuardOptions{SkipMidResponse: true, AutonomousMode: tmux.AutonomousMode()}
+	guardOpts := safety.GuardOptions{SkipMidResponse: true, AutonomousMode: tmux.AutonomousMode(), Harness: harnessType}
 	if msgForce {
 		if err := override.Require(context.Background(), override.Guard{
 			Tool: "agm send msg",
