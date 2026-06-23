@@ -321,7 +321,7 @@ type Agent interface {
 |---------|--------|--------------|------------------|
 | **Claude** | ✅ Production | 100% (baseline) | UUID-based resume, hook state detection |
 | **Gemini** | ✅ Production | ~92% | API-based, polling state detection |
-| **Codex** | ✅ Production | ~93% | API-based, OpenAI SDK |
+| **Codex** | ✅ Production | ~93% | CLI-based, OpenAI Codex CLI |
 | **OpenCode** | ✅ Production | ~95% | Server-based, SSE state detection |
 
 #### State Detection Strategies

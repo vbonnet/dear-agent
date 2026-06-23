@@ -154,7 +154,6 @@ type HealthStatus struct {
 	Warnings          []string
 }
 
-
 // resolveSessionIdentifier finds the Claude UUID and manifest path from various identifier types
 func resolveSessionIdentifier(adapter *dolt.Adapter, identifier string) (string, string, error) {
 	// Defensive check: ensure cfg is initialized
@@ -539,7 +538,7 @@ func resumeSession(adapter *dolt.Adapter, sessionID, manifestPath, harnessName s
 		ui.PrintSuccess(fmt.Sprintf("Attaching to existing tmux session: %s", health.TmuxSessionName))
 	}
 
-	// Read manifest from Dolt to get Claude UUID (needed for both display and resume command)
+	// Read manifest from Dolt to get harness-specific resume metadata.
 	m, err := adapter.GetSession(sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to read session from Dolt: %w", err)
@@ -549,7 +548,7 @@ func resumeSession(adapter *dolt.Adapter, sessionID, manifestPath, harnessName s
 		if err := dispatchResumeCommand(adapter, m, harnessName, health); err != nil {
 			return err
 		}
-		if err := waitForResumedClaude(health); err != nil {
+		if err := waitForResumedHarness(harnessName, health); err != nil {
 			return err
 		}
 		restorePermissionMode(harnessName, m, health)
@@ -564,7 +563,7 @@ func resumeSession(adapter *dolt.Adapter, sessionID, manifestPath, harnessName s
 	updateVSCodeTabTitle(health.TmuxSessionName)
 
 	// Send post-resume prompt if --prompt or --prompt-file was specified.
-	// This happens after Claude is ready (conversation loaded), before attach.
+	// This happens after the harness is ready, before attach.
 	// Works for both new sessions (sendCommands=true) and existing sessions.
 	if resumePrompt != "" || resumePromptFile != "" {
 		if err := sendPostResumePrompt(health.TmuxSessionName, resumePrompt, resumePromptFile); err != nil {
@@ -608,6 +607,8 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 	switch harnessName {
 	case "opencode-cli":
 		fullCmd = fmt.Sprintf("cd %s && opencode attach && exit", shellQuote(health.WorktreePath))
+	case "codex-cli":
+		fullCmd = buildCodexResumeCommand(m, health)
 	case "claude-code":
 		fullCmd = buildClaudeResumeCommand(adapter, m, health)
 	default:
@@ -618,6 +619,14 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 		return fmt.Errorf("failed to send resume command: %w", err)
 	}
 	return nil
+}
+
+func buildCodexResumeCommand(m *manifest.Manifest, health *HealthStatus) string {
+	model := m.Model
+	if model == "" {
+		model = agent.HarnessDefaults["codex-cli"]
+	}
+	return buildCodexCommandForModel(health.TmuxSessionName, health.WorktreePath, model, nil)
 }
 
 // buildClaudeResumeCommand assembles `claude --resume <uuid>` (or a bare
@@ -679,6 +688,17 @@ func resolveResumeDir(resumeUUID, worktreePath string) string {
 	return cwd
 }
 
+func waitForResumedHarness(harnessName string, health *HealthStatus) error {
+	switch harnessName {
+	case "claude-code":
+		return waitForResumedClaude(health)
+	case "codex-cli":
+		return waitForResumedCodex(health)
+	default:
+		return nil
+	}
+}
+
 // waitForResumedClaude waits first for the claude process to appear, then for
 // the conversation prompt to render (60s timeout each behind a spinner).
 func waitForResumedClaude(health *HealthStatus) error {
@@ -727,6 +747,47 @@ func waitForResumedClaude(health *HealthStatus) error {
 		fmt.Println("  Attaching now - conversation should appear shortly")
 	} else {
 		ui.PrintSuccess("Conversation loaded and ready!")
+	}
+	return nil
+}
+
+func waitForResumedCodex(health *HealthStatus) error {
+	var processWaitErr error
+	spinErr := spinner.New().
+		Title("Waiting for Codex process to start...").
+		Accessible(true).
+		Action(func() {
+			processWaitErr = tmux.WaitForProcessReady(health.TmuxSessionName, "codex", 15*time.Second)
+		}).
+		Run()
+	if spinErr != nil {
+		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	fmt.Println()
+	if processWaitErr != nil {
+		ui.PrintWarning("Codex process is taking longer than expected")
+		fmt.Println("  Continuing to wait for Codex to render...")
+	} else {
+		ui.PrintSuccess("Codex process started!")
+	}
+
+	var promptWaitErr error
+	spinErr = spinner.New().
+		Title("Waiting for Codex composer to load...").
+		Accessible(true).
+		Action(func() {
+			promptWaitErr = tmux.WaitForCodexPrompt(health.TmuxSessionName, 60*time.Second)
+		}).
+		Run()
+	if spinErr != nil {
+		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	fmt.Println()
+	if promptWaitErr != nil {
+		ui.PrintWarning("Codex is taking longer than expected to load")
+		fmt.Println("  Attaching now - composer should appear shortly")
+	} else {
+		ui.PrintSuccess("Codex loaded and ready!")
 	}
 	return nil
 }

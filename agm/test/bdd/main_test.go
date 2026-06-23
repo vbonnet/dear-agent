@@ -34,4 +34,5 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterTrustProtocolSteps(ctx)
 	steps.RegisterScanLoopSteps(ctx)
 	steps.RegisterStallDetectionSteps(ctx)
+	steps.RegisterHarnessParitySteps(ctx)
 }

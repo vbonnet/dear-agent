@@ -120,6 +120,12 @@ func TestDetectAgentType(t *testing.T) {
 			wantAPI:   false,
 		},
 		{
+			name:      "codex-cli is tmux-based",
+			agentType: "codex-cli",
+			wantTmux:  true,
+			wantAPI:   false,
+		},
+		{
 			name:      "openai is API-based",
 			agentType: "openai",
 			wantTmux:  false,
@@ -215,7 +221,7 @@ func (m *mockAgentAdapter) ExecuteCommand(cmd agent.Command) error {
 // This will be implemented in send.go
 func isTmuxBasedAgent(agentType string) bool {
 	switch agentType {
-	case "claude", "gemini":
+	case "claude", "gemini", "codex-cli":
 		return true
 	case "openai", "gpt":
 		return false

@@ -14,8 +14,8 @@ import (
 //
 // States:
 //   - OFFLINE:  Session doesn't exist in tmux
-//   - READY:    Claude prompt (❯) visible, Claude process still running — idle, waiting for input
-//   - DONE:     Claude prompt (❯) visible, Claude process exited — session finished
+//   - READY:    Harness prompt/composer visible, harness process still running — idle, waiting for input
+//   - DONE:     Prompt visible with no known running harness process, or unknown terminal state
 //   - WORKING:  Spinner visible or stuck (actively processing)
 //   - USER_PROMPT: Blocked on auth (y/N) or input (numbered options)
 func DetectState(sessionName string) (string, error) {
@@ -39,12 +39,14 @@ func DetectState(sessionName string) (string, error) {
 
 	mappedState := mapTerminalStateToManifest(result.State)
 
-	// If terminal shows a prompt, distinguish READY (Claude still running)
-	// from DONE (Claude process has exited). A visible prompt with Claude
-	// still running means it's idle and waiting for input, not finished.
+	// If terminal shows a prompt/composer, distinguish READY (interactive
+	// harness still running) from DONE (process exited or unknown shell).
 	if mappedState == manifest.StateDone {
-		claudeRunning, err := tmux.IsClaudeRunning(sessionName)
-		if err == nil && claudeRunning {
+		idle, err := isInteractiveHarnessIdle(sessionName)
+		if err != nil {
+			return manifest.StateDone, fmt.Errorf("failed to refine ready state: %w", err)
+		}
+		if idle {
 			return manifest.StateReady, nil
 		}
 	}
@@ -87,11 +89,14 @@ func DetectStateWithConfidence(sessionName string) (*DetectionResult, error) {
 	result := detector.DetectState(paneContent, time.Now())
 	mappedState := mapTerminalStateToManifest(result.State)
 
-	// If terminal shows a prompt, distinguish READY from DONE by checking
-	// whether Claude's process is still running.
+	// If terminal shows a prompt/composer, distinguish READY from DONE by
+	// checking whether a known interactive harness is still running.
 	if mappedState == manifest.StateDone {
-		claudeRunning, err := tmux.IsClaudeRunning(sessionName)
-		if err == nil && claudeRunning {
+		idle, err := isInteractiveHarnessIdle(sessionName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to refine ready state: %w", err)
+		}
+		if idle {
 			mappedState = manifest.StateReady
 		}
 	}
@@ -111,6 +116,25 @@ func DetectStateWithConfidence(sessionName string) (*DetectionResult, error) {
 		Confidence: confidence,
 		Reason:     fmt.Sprintf("Terminal parsing: %s (%s)", result.State, result.Evidence),
 	}, nil
+}
+
+func isInteractiveHarnessIdle(sessionName string) (bool, error) {
+	claudeRunning, err := tmux.IsClaudeRunning(sessionName)
+	if err != nil {
+		return false, fmt.Errorf("failed during Claude process check: %w", err)
+	}
+	if claudeRunning {
+		return true, nil
+	}
+
+	codexIdle, err := tmux.IsCodexIdle(sessionName)
+	if err != nil {
+		return false, fmt.Errorf("failed during Codex composer check: %w", err)
+	}
+	if codexIdle {
+		return true, nil
+	}
+	return false, nil
 }
 
 // mapTerminalStateToManifest converts terminal-parsed state.State values to

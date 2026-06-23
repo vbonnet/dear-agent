@@ -24,7 +24,7 @@ Implement full feature parity for Codex, OpenCode, and Gemini harnesses using Cl
    - Enforce feature parity through shared test cases
 
 3. **Aligned Implementations**
-   - Codex (OpenAI API) - agm-codex session
+   - Codex (OpenAI CLI) - agm-codex session
    - OpenCode (OpenAI CLI) - agm-opencode session
    - Gemini (Google AI Studio) - agm-gemini session
    - Claude Code (Anthropic CLI) - baseline (already implemented)
@@ -39,8 +39,8 @@ Implement full feature parity for Codex, OpenCode, and Gemini harnesses using Cl
 - CLI-based harness with tmux integration
 - Comprehensive hooks support
 
-### Codex (OpenAI API) - agm-codex 🔄
-**Status:** Documentation complete, testing in progress
+### Codex (OpenAI CLI) - agm-codex 🔄
+**Status:** CLI parity implementation in progress
 
 **Completed:**
 - ✅ User guide created (`docs/agents/codex.md`)
@@ -49,12 +49,13 @@ Implement full feature parity for Codex, OpenCode, and Gemini harnesses using Cl
 - ✅ Agent dropdown integration
 - ✅ Switch case handler added
 - ✅ Workspace detection tests fixed
+- ✅ tmux delivery routing and Codex composer readiness detection
 
 **Next Steps:**
 1. Complete Phase 2 E2E testing
-2. Implement synthetic hooks validation
-3. Update SPEC.md with API-based agent patterns
-4. Create Codex-specific ADRs for API vs CLI architecture
+2. Validate Codex CLI startup and resume with real tmux sessions
+3. Keep SPEC.md harness-neutral; document CLI-specific extensions only where needed
+4. Create Codex-specific ADRs for CLI session management if the design diverges
 
 **Worktree:** TBD (coordinate before creating)
 
@@ -70,7 +71,7 @@ Implement full feature parity for Codex, OpenCode, and Gemini harnesses using Cl
 1. Document current implementation state
 2. Complete Phase 4 comprehensive testing
 3. Create OpenCode user guide
-4. Align with Codex API patterns where applicable
+4. Align with Codex CLI parity patterns where applicable
 
 **Worktree:** TBD
 
@@ -249,11 +250,11 @@ If two sessions need to modify the same files:
 **Immediate:**
 1. ✅ Create this coordination document
 2. Complete Phase 2 E2E testing for Codex
-3. Implement synthetic hooks validation
-4. Document API-based agent patterns in SPEC.md
+3. Validate Codex CLI startup/resume behavior
+4. Document harness-neutral CLI patterns in SPEC.md
 
 **Near-term:**
-1. Create ADR for API vs CLI session management
+1. Create ADR for CLI session management extension points
 2. Propose shared testing patterns to other sessions
 3. Review OpenCode/Gemini progress and align
 
@@ -266,7 +267,7 @@ If two sessions need to modify the same files:
 4. Create OpenCode user guide (pattern from Codex guide)
 
 **Near-term:**
-1. Align with Codex API patterns where applicable
+1. Align with Codex CLI parity patterns where applicable
 2. Add OpenCode to shared BDD scenarios
 3. Update parity matrix in this document
 

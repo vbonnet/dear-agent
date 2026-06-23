@@ -18,10 +18,10 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/messages"
 	"github.com/vbonnet/dear-agent/agm/internal/monitoring"
-	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/safety"
 	"github.com/vbonnet/dear-agent/agm/internal/send"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/override"
@@ -688,12 +688,12 @@ func sendViaAgent(m *manifest.Manifest, senderName, messageID, formattedMessage,
 }
 
 // isAPIBasedAgent returns true if the harness type uses API-based communication
-// (as opposed to tmux-based CLI communication)
+// as opposed to tmux-based CLI communication.
 func isAPIBasedAgent(harnessType string) bool {
 	switch harnessType {
-	case "codex-cli":
+	case "openai", "gpt":
 		return true
-	case "claude-code", "gemini-cli", "opencode-cli":
+	case "claude-code", "gemini-cli", "codex-cli", "opencode-cli":
 		return false
 	default:
 		// Unknown harnesses default to tmux-based for backward compatibility
