@@ -155,16 +155,16 @@ AGM provides unified commands that work across all agents using the `CommandTran
 **Agent-specific behavior:**
 - **Claude (CLI):** Full command support via tmux slash commands
 - **Gemini (CLI):** Full command support via tmux session management
-- **Codex (API):** Core commands supported with API translations
+- **Codex (CLI):** Core commands supported through tmux session management and Codex CLI state
 - **OpenCode (API):** Core commands supported with API translations
 
 **Command Translation Examples:**
 
-| Command | Claude (CLI) | Gemini (CLI) | Codex/OpenCode (API) |
-|---------|-------------|-------------|---------------------|
-| `CommandSetDir` | `cd /path` via tmux | `cd /path` via tmux | Update session metadata |
-| `CommandClearHistory` | Clear history file | Remove history.jsonl | Clear API conversation |
-| `CommandSetSystemPrompt` | Send system instruction | Update session metadata | API system parameter |
+| Command | Claude (CLI) | Gemini (CLI) | Codex (CLI) | OpenCode (API) |
+|---------|-------------|-------------|-------------|----------------|
+| `CommandSetDir` | `cd /path` via tmux | `cd /path` via tmux | `-C /path` at launch / tmux cwd | Update session metadata |
+| `CommandClearHistory` | Clear history file | Remove history.jsonl | Not supported unless Codex exposes a CLI control | Clear API conversation |
+| `CommandSetSystemPrompt` | Send system instruction | Update session metadata | Not supported unless Codex exposes a CLI control | API system parameter |
 
 For unsupported commands, AGM gracefully degrades (returns `ErrNotSupported`).
 

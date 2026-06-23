@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 // TestResumeCommandFlags verifies that the resume command properly parses flags
@@ -94,12 +96,12 @@ func contains(s, substr string) bool {
 // after the session is resumed.
 func TestResumePromptFlagParsing(t *testing.T) {
 	tests := []struct {
-		name         string
-		args         []string
-		wantPrompt   string
-		wantFile     string
-		expectError  bool
-		description  string
+		name        string
+		args        []string
+		wantPrompt  string
+		wantFile    string
+		expectError bool
+		description string
 	}{
 		{
 			name:        "accepts --prompt flag",
@@ -221,6 +223,45 @@ func TestSendPostResumePrompt_FileTooLarge(t *testing.T) {
 	}
 }
 
+func TestBuildCodexResumeCommand(t *testing.T) {
+	m := &manifest.Manifest{
+		Model: "5.4",
+	}
+	health := &HealthStatus{
+		TmuxSessionName: "codex-session",
+		WorktreePath:    "/tmp/work",
+	}
+
+	cmd := buildCodexResumeCommand(m, health)
+
+	for _, want := range []string{
+		"env -u CLAUDECODE",
+		"AGM_SESSION_NAME='codex-session'",
+		"codex -m 'gpt-5.4'",
+		"-C '/tmp/work'",
+		"-s workspace-write",
+		"&& exit",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("command %q missing %q", cmd, want)
+		}
+	}
+	if strings.Contains(cmd, "claude") || strings.Contains(cmd, "CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Errorf("codex resume command leaked Claude-specific state: %s", cmd)
+	}
+}
+
+func TestBuildCodexResumeCommand_DefaultModel(t *testing.T) {
+	health := &HealthStatus{
+		TmuxSessionName: "codex-session",
+		WorktreePath:    "/tmp/work",
+	}
+
+	cmd := buildCodexResumeCommand(&manifest.Manifest{}, health)
+	if !strings.Contains(cmd, "codex -m 'gpt-5.4'") {
+		t.Errorf("default Codex model not resolved: %s", cmd)
+	}
+}
 
 // Regression tests for session-resume fix (commit e7cacf8)
 // Bug: resume sent commands to existing tmux sessions, injecting text

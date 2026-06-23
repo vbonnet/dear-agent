@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	agmgit "github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
@@ -302,14 +303,18 @@ func startGeminiDirect(sessionName string, exists bool) error {
 //   - --skip-git-repo-check is added only when the workdir is not a git repo, so
 //     Codex still launches in non-repo AGM workdirs.
 func buildCodexCommand(sessionName, workDir string, extraAddDirs []string) string {
-	resolvedModel := agent.ResolveModelFullName("codex-cli", modelName)
+	return buildCodexCommandForModel(sessionName, workDir, modelName, extraAddDirs)
+}
+
+func buildCodexCommandForModel(sessionName, workDir, model string, extraAddDirs []string) string {
+	resolvedModel := agent.ResolveModelFullName("codex-cli", model)
 	var b strings.Builder
 	fmt.Fprintf(&b, "env -u CLAUDECODE AGM_SESSION_NAME=%s codex -m %s -C %s -s workspace-write",
 		shellQuote(sessionName), shellQuote(resolvedModel), shellQuote(workDir))
 	for _, dir := range extraAddDirs {
 		fmt.Fprintf(&b, " --add-dir %s", shellQuote(dir))
 	}
-	if !isGitRepo(workDir) {
+	if !agmgit.IsInGitRepo(workDir) {
 		b.WriteString(" --skip-git-repo-check")
 	}
 	b.WriteString(" && exit")
