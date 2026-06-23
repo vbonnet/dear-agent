@@ -23,6 +23,7 @@ var agentRegistry = map[string]func() (Agent, error){
 	"opencode-cli": func() (Agent, error) {
 		return NewOpenCodeAdapter(nil)
 	},
+	"agy-cli": func() (Agent, error) { return NewAgyAdapter(nil) },
 }
 
 // GetHarness returns a harness adapter instance by name
@@ -36,7 +37,7 @@ func GetHarness(name string) (Agent, error) {
 
 // GetAllHarnesses returns metadata for all known harnesses
 func GetAllHarnesses() []HarnessInfo {
-	harnesses := []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli"}
+	harnesses := []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli", "agy-cli"}
 	result := []HarnessInfo{}
 
 	for _, name := range harnesses {

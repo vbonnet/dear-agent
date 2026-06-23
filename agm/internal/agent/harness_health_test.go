@@ -104,6 +104,7 @@ func TestHarnessConfigDir(t *testing.T) {
 		"claude-code":  filepath.Join(home, ".claude"),
 		"gemini-cli":   filepath.Join(home, ".gemini"),
 		"codex-cli":    filepath.Join(home, ".codex"),
+		"agy-cli":      filepath.Join(home, ".agy"),
 		"opencode-cli": "", // server-based, no local dir
 		"unknown":      "",
 	}
@@ -111,5 +112,28 @@ func TestHarnessConfigDir(t *testing.T) {
 		if got := harnessConfigDir(home, harness); got != want {
 			t.Errorf("harnessConfigDir(%q) = %q, want %q", harness, got, want)
 		}
+	}
+}
+
+func TestCheckHarnessHealth_AgyBinaryTracked(t *testing.T) {
+	clearClaudeEnv(t)
+	mockLookPath(t, map[string]bool{"agy": true})
+
+	h := CheckHarnessHealth("agy-cli")
+	if !h.Known {
+		t.Fatalf("agy-cli should be a known harness")
+	}
+	if h.BinaryName != "agy" {
+		t.Errorf("BinaryName = %q, want %q", h.BinaryName, "agy")
+	}
+	if !h.BinaryPresent {
+		t.Errorf("agy binary should be reported present")
+	}
+	// Binary on PATH ⇒ auth configured (CLI manages its own auth).
+	if !h.AuthConfigured {
+		t.Errorf("agy-cli with binary on PATH should be auth-configured")
+	}
+	if !h.IsHealthy() {
+		t.Errorf("agy-cli should be healthy when its binary is present")
 	}
 }

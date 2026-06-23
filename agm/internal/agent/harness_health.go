@@ -43,6 +43,7 @@ var harnessCLIBinary = map[string]string{
 	"gemini-cli":   "gemini",
 	"codex-cli":    "codex",
 	"opencode-cli": "opencode",
+	"agy-cli":      "agy",
 }
 
 // harnessConfigDir returns the harness's on-disk config/home directory under
@@ -58,6 +59,8 @@ func harnessConfigDir(home, harness string) string {
 		return filepath.Join(home, ".gemini")
 	case "codex-cli":
 		return filepath.Join(home, ".codex")
+	case "agy-cli":
+		return filepath.Join(home, ".agy")
 	default:
 		// opencode-cli is server-based; unknown harnesses have no known dir.
 		return ""

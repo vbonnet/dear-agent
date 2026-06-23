@@ -11,13 +11,14 @@ import (
 )
 
 // Known harness names
-var knownHarnesses = []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli"}
+var knownHarnesses = []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli", "agy-cli"}
 
 // Harness-to-environment-variable mapping
 var harnessEnvVars = map[string]string{
 	"claude-code": "ANTHROPIC_API_KEY",
 	"gemini-cli":  "GEMINI_API_KEY",
 	"codex-cli":   "OPENAI_API_KEY",
+	"agy-cli":     "GOOGLE_API_KEY", // fallback; agy manages its own auth when the binary is on PATH
 }
 
 // Harness-to-binary mapping for PATH-based availability checks
@@ -25,6 +26,7 @@ var harnessBinaries = map[string][]string{
 	"claude-code": {"claude"},
 	"gemini-cli":  {"gemini"},
 	"codex-cli":   {"codex"},
+	"agy-cli":     {"agy"},
 }
 
 // lookPath is a variable for testing
@@ -35,6 +37,7 @@ var harnessHelpURLs = map[string]string{
 	"claude-code": "https://console.anthropic.com/",
 	"gemini-cli":  "https://ai.google.dev/",
 	"codex-cli":   "https://platform.openai.com/api-keys",
+	"agy-cli":     "https://ultraai.app/",
 }
 
 // ValidateHarnessName checks if the harness name is valid
