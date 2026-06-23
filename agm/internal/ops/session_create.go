@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	agmgit "github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
@@ -233,7 +235,13 @@ func buildHarnessCommand(harness, model, sessionName, workDir string) string {
 	case "gemini-cli":
 		return fmt.Sprintf("gemini -m '%s' && exit", shellQuote(model))
 	case "codex-cli":
-		return fmt.Sprintf("codex --model '%s' && exit", shellQuote(model))
+		resolvedModel := agent.ResolveModelFullName("codex-cli", model)
+		cmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME='%s' codex -m '%s' -C '%s' -s workspace-write",
+			shellQuote(sessionName), shellQuote(resolvedModel), shellQuote(workDir))
+		if !agmgit.IsInGitRepo(workDir) {
+			cmd += " --skip-git-repo-check"
+		}
+		return cmd + " && exit"
 	default:
 		return fmt.Sprintf("echo 'Unknown harness: %s' && exit 1", shellQuote(harness))
 	}

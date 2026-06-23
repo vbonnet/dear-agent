@@ -152,7 +152,7 @@ internal/
 │   ├── interface.go    # Agent interface definition
 │   ├── claude_adapter.go   # Claude-specific implementation
 │   ├── gemini_cli_adapter.go  # Gemini CLI-specific implementation
-│   ├── openai_adapter.go   # OpenAI/Codex API-based implementation
+│   ├── openai_adapter.go   # Legacy OpenAI API implementation
 │   └── opencode_adapter.go # OpenCode SSE-based implementation
 │
 ├── command/            # Command translation layer
@@ -640,7 +640,7 @@ preferences:
 
 **Version**: 2.0 (Updated 2026-03-11)
 **Status**: Production (4 agents with full feature parity)
-**Agents**: Claude CLI, Gemini CLI, Codex API, OpenCode API
+**Agents**: Claude CLI, Gemini CLI, Codex CLI, OpenCode API
 **Phase 2 Complete**: Enhanced command execution across all agents
 
 ### Overview
@@ -1827,13 +1827,13 @@ Provide unified command interface across agents with different capabilities.
 
 ### Supported Commands (Phase 2 Complete)
 
-| Command | Claude CLI | Gemini CLI | Codex API | OpenCode API |
+| Command | Claude CLI | Gemini CLI | Codex CLI | OpenCode API |
 |---------|-----------|-----------|-----------|-------------|
-| CommandRename | ✅ (slash command) | ✅ (/chat save) | ✅ (API) | ✅ (API) |
-| CommandSetDir | ✅ (cd via tmux) | ✅ (cd via tmux) | ✅ (metadata) | ✅ (metadata) |
+| CommandRename | ✅ (slash command) | ✅ (/chat save) | ✅ (metadata) | ✅ (API) |
+| CommandSetDir | ✅ (cd via tmux) | ✅ (cd via tmux) | ✅ (`-C` at launch / tmux cwd) | ✅ (metadata) |
 | CommandRunHook | ✅ (tmux send) | ✅ (hook framework) | ✅ (limited) | ✅ (limited) |
-| CommandClearHistory | ✅ (file removal) | ✅ (file removal) | ✅ (API) | ✅ (API) |
-| CommandSetSystemPrompt | ✅ (metadata) | ✅ (metadata) | ✅ (API param) | ✅ (API param) |
+| CommandClearHistory | ✅ (file removal) | ✅ (file removal) | N/A unless Codex exposes a CLI control | ✅ (API) |
+| CommandSetSystemPrompt | ✅ (metadata) | ✅ (metadata) | N/A unless Codex exposes a CLI control | ✅ (API param) |
 | CommandAuthorize | ✅ (CLAUDE.md) | ✅ (--include-directories) | N/A | N/A |
 
 **Phase 2 Achievement:** Full command parity across CLI agents (Claude & Gemini)
@@ -1900,12 +1900,12 @@ case CommandSetDir:
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...    # Claude (CLI-based)
 GEMINI_API_KEY=AIza...          # Gemini (CLI-based, may be optional)
-OPENAI_API_KEY=sk-...           # Codex (API-based)
+OPENAI_API_KEY=sk-...           # Codex CLI (optional if `codex login` OAuth is configured)
 OPENCODE_API_KEY=...            # OpenCode (self-hosted, optional)
 OPENCODE_API_URL=...            # OpenCode endpoint (required if using OpenCode)
 ```
 
-**Note:** CLI agents (Claude, Gemini) may use API keys configured in their respective CLI tools, not necessarily environment variables.
+**Note:** CLI agents (Claude, Gemini, Codex) may use credentials configured in their respective CLI tools, not necessarily environment variables.
 
 ### Session Isolation
 

@@ -86,10 +86,12 @@ func TestIsAPIBasedAgent(t *testing.T) {
 		agentType string
 		expected  bool
 	}{
-		{"codex-cli", true},
+		{"codex-cli", false},
 		{"claude-code", false},
 		{"gemini-cli", false},
 		{"opencode-cli", false},
+		{"openai", true},
+		{"gpt", true},
 		{"unknown", false},
 		{"", false},
 	}

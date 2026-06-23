@@ -52,17 +52,18 @@ type DetectionResult struct {
 	Confidence string    // high, medium, low
 }
 
-// Detector provides visual parsing of Claude Code session state
+// Detector provides visual parsing of interactive harness session state.
 type Detector struct {
 	// Regex patterns for state detection
-	thinkingPattern            *regexp.Regexp
-	blockedAuthPattern         *regexp.Regexp
-	blockedInputPattern        *regexp.Regexp
-	blockedPermissionPattern   *regexp.Regexp
-	readyPattern               *regexp.Regexp
-	waitingAgentPattern        *regexp.Regexp
-	loopingPattern             *regexp.Regexp
-	backgroundTasksPattern     *regexp.Regexp
+	thinkingPattern          *regexp.Regexp
+	blockedAuthPattern       *regexp.Regexp
+	blockedInputPattern      *regexp.Regexp
+	blockedPermissionPattern *regexp.Regexp
+	readyPattern             *regexp.Regexp
+	codexReadyPattern        *regexp.Regexp
+	waitingAgentPattern      *regexp.Regexp
+	loopingPattern           *regexp.Regexp
+	backgroundTasksPattern   *regexp.Regexp
 
 	// Stuck detection threshold
 	stuckThreshold time.Duration
@@ -109,6 +110,11 @@ func NewDetector() *Detector {
 		// Includes \x{00a0} (NBSP) because Claude Code renders ❯ followed by NBSP.
 		// The pane may have a status bar (━━━) and trailing blank lines after the prompt.
 		readyPattern: regexp.MustCompile(`(?m)❯[\s\x{00a0}]*$`),
+
+		// Codex Ready: Codex CLI composer/footer chrome. Keep this specific to
+		// Codex text so generic box-drawing UI or menu selectors do not become
+		// sendable prompts.
+		codexReadyPattern: regexp.MustCompile(`(?ms)(?:>_\s+OpenAI Codex|OpenAI Codex[\s\S]*?/model to change)`),
 
 		// Waiting Agent: sub-agent or background task indicators
 		// Matches "Agent:", "Launching agent", "agent to", spinner with agent context
@@ -193,6 +199,15 @@ func (d *Detector) DetectState(output string, lastOutputTime time.Time) Detectio
 			State:      StateReady,
 			Timestamp:  now,
 			Evidence:   "Claude prompt (❯) detected",
+			Confidence: "high",
+		}
+	}
+
+	if d.codexReadyPattern.MatchString(output) {
+		return DetectionResult{
+			State:      StateReady,
+			Timestamp:  now,
+			Evidence:   "Codex composer detected",
 			Confidence: "high",
 		}
 	}
@@ -359,6 +374,11 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 
 	// Prompt chevron at end of output = session is at idle prompt, can receive
 	if d.readyPattern.MatchString(output) {
+		return CanReceiveYes
+	}
+
+	// Codex composer/footer visible = session is at idle prompt, can receive.
+	if d.codexReadyPattern.MatchString(output) {
 		return CanReceiveYes
 	}
 
