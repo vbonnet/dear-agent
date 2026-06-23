@@ -455,6 +455,36 @@ ce-20en; routing the in-code PR creators through safe-pr is ce-ijsq
 (pkg/selfimprove) and ce-jzqa (agm evaluation); the burndown worker prompt
 update is ce-gzmr.
 
+## Bead-Burndown Maintenance — Host Loop (MANDATORY)
+
+Bead-burndown worker maintenance runs as a **host-side loop**, not a Cowork
+scheduled task. The `burndown-maint` binary (ce-cd14.2) replaced the planned
+Cowork `bead-burndown-loop` skill. Do **not** create a Cowork scheduled task
+for burndown — the `pretool-spawn-routing` hook will nudge you away, and the
+host loop is the sanctioned path.
+
+**Registration (one-time setup after install):**
+
+```
+make install-burndown-maint
+agm loop new burndown-maint --cadence 2h \
+    --cmd 'agm-job run --name burndown-maint --verify "true" --escalate-session vroom-orchestrator -- burndown-maint' \
+    --description "Maintain N=1 concurrent bead-burndown workers"
+```
+
+**What it does each tick:**
+1. Counts active `burndown-*` sessions via `agm session list --json`
+2. If below target (default N=1), spawns one new detached worker session
+3. Spawns at most 1 per tick (backpressure by construction)
+
+**Flags:** `--target N` (default 1), `--model` (default claude-opus-4-8),
+`--dry-run`, `--json`.
+
+**Why host-side, not Cowork:** Cowork scheduled tasks run inside a sandbox
+with no host-level visibility. The burndown controller needs to query AGM
+session state and spawn sessions — both require host access. The host loop
+via `agm loop tick` (launchd-driven, 60s interval) is the right substrate.
+
 ## Stale PR Strategy — safe-rebase (MANDATORY)
 
 When a PR has merge conflicts or is behind main, use `safe-rebase` — the
