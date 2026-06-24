@@ -82,7 +82,9 @@ var supervisors = []supervisor{
 			"(measures disk, memory, swap, FDs, vnodes, gopls and logs kind \"overseer.resource.probe\" to ~/.agm/vroom/trail.jsonl) " +
 			"3) audit session health 4) reconcile stale beads " +
 			"5) audit worktrees 6) verify Meta-O activity " +
-			"7) verify binary freshness (agm admin verify-deployment) 8) write heartbeat.",
+			"7) verify binary freshness (agm admin verify-deployment) " +
+			"8) audit deployed-artifact drift (dear-deploy status --json --repo-root ~/src/dear-agent) " +
+			"9) write heartbeat.",
 	},
 }
 

@@ -25,15 +25,38 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Kind classifies how an artifact's deployed copy is compared to its source.
+type Kind string
+
+const (
+	// KindFile is the default: the deployed copy is compared byte-for-byte (by
+	// SHA-256) against the rendered source file. Used for launchd plists and
+	// compiled Claude Code hooks — anything dear-deploy installs by copying bytes.
+	KindFile Kind = "file"
+	// KindBinary marks a Go binary whose source of truth is the repo's current
+	// commit, not a file in the tree. Its deployed copy is compared by the
+	// vcs.revision embedded at build time (what `go version -m` prints) against
+	// the repo HEAD — drift means the installed binary is older than the source
+	// it was built from. Binaries are status-only: dear-deploy never copies a
+	// binary into place (they are built and installed out of band via their
+	// Remediation command, e.g. `make install-mergeloop`).
+	KindBinary Kind = "binary"
+)
+
 // Artifact is one deployable item: a source of truth in the repo and the place
 // it is installed to on the host.
 type Artifact struct {
 	// Name is a short, stable label used to select the artifact on the command
 	// line and in output. It must be unique within a manifest.
 	Name string `yaml:"name"`
+	// Kind selects how this artifact's deployed copy is compared to its source:
+	// "file" (default — SHA-256 byte compare) or "binary" (embedded vcs.revision
+	// vs repo HEAD). Empty means "file".
+	Kind Kind `yaml:"kind,omitempty"`
 	// Source is the path of the source of truth, relative to the repo root. For
 	// a compiled hook this is the built binary under bin/; for a templated plist
-	// it is the template file.
+	// it is the template file. For a binary artifact it is the package path
+	// (e.g. cmd/mergeloop) — informational, used in output and not read.
 	Source string `yaml:"source"`
 	// Deployed is the installed path on the host. A leading ~ and any $ENV
 	// references are expanded before use.
@@ -91,12 +114,22 @@ func ParseManifest(data []byte) (Manifest, error) {
 		if a.Deployed == "" {
 			return Manifest{}, fmt.Errorf("artifact %q has no deployed path", a.Name)
 		}
+		switch a.Kind {
+		case "", KindFile, KindBinary:
+			// valid
+		default:
+			return Manifest{}, fmt.Errorf("artifact %q has unknown kind %q (want \"file\" or \"binary\")", a.Name, a.Kind)
+		}
 		if _, err := a.FileMode(); err != nil {
 			return Manifest{}, fmt.Errorf("artifact %q: %w", a.Name, err)
 		}
 	}
 	return m, nil
 }
+
+// IsBinary reports whether this artifact is compared by embedded version stamp
+// (a Go binary) rather than by byte content.
+func (a Artifact) IsBinary() bool { return a.Kind == KindBinary }
 
 // FileMode parses Mode into an os.FileMode, defaulting to 0644 when empty.
 func (a Artifact) FileMode() (os.FileMode, error) {
