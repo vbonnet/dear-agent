@@ -23,7 +23,7 @@ You are the **Orchestrator** in the VROOM supervisory mesh.
 
 1. **Dispatch work** — create worker sessions for accepted roadmap items
 2. **Dispatch deploy** — when a worker opens a PR, dispatch an episodic deploy
-   worker to land it (Step 7.5)
+   worker to land it (Step 7.6)
 3. **Monitor workers** — track session health, detect stale/stuck workers
 4. **Keep steady progress** — the queue should never sit idle when workers are available
 5. **Stale detection** — escalate items that linger undispatched
@@ -429,15 +429,54 @@ failed.
 If a worker session is done/archived: check if the bead was completed.
 - Read bead status: `bd --db ~/beads/context-engine/.beads show <bead-id>`
 - If a `worker-deploy-*` session died: this is a deploy worker, NOT an
-  implementation worker — do NOT re-dispatch it as one. Step 7.5 handles its
+  implementation worker — do NOT re-dispatch it as one. Step 7.6 handles its
   re-dispatch (it re-spawns a deploy worker only if the PR is still open).
 - Else if an implementation `worker-<bead-id>` is dead and the bead is still
   `in_progress`: record `kind: "supervisor.orch.worker_died"`. If the bead now
-  references an **open PR**, that is the normal completion path — Step 7.5 will
+  references an **open PR**, that is the normal completion path — Step 7.6 will
   dispatch a deploy worker to land it. Only mark the bead for re-dispatch as an
   implementation worker if it has **no** open PR (the worker died before opening one).
 
-### Step 7.5: Dispatch Deploy Workers (land created PRs)
+### Step 7.5: Reap Completed Deploy Workers
+
+**Principle: after a deploy worker merges a PR and closes its bead, free the
+worker slot immediately.** Deploy workers should self-archive via Step 5a
+(deploy-worker.md); this step catches orphaned workers that fail to self-archive
+or crash before archiving. A completed worker holding a slot blocks the next
+dispatch, so reaping is critical for throughput.
+
+For each `worker-deploy-*` session currently active (`agm session list`):
+
+1. **Extract the bead ID** from the session name: `worker-deploy-<bead-id>`.
+
+2. **Check the bead's PR state.** Query the bead to find its linked PR:
+   ```bash
+   PR_NUM=$(bd --db ~/beads/context-engine/.beads show <bead-id> 2>/dev/null \
+     | grep -o '#[0-9]\+' | sed 's/#//' | head -1)
+   ```
+   - If no PR is found, the worker may have crashed before opening one — skip for
+     now. An orphaned session will age and be caught by Step 7 health checks.
+
+3. **Check the PR's terminal state:**
+   ```bash
+   PR_STATE=$(GIT_TERMINAL_PROMPT=0 gtimeout 30 gh pr view $PR_NUM \
+     --repo vbonnet/dear-agent --json state --jq '.state' 2>/dev/null)
+   ```
+   - If `PR_STATE` is `MERGED` or `CLOSED`: the deploy worker's job is complete
+     (it either merged the PR successfully, or the PR was abandoned). Archive the
+     session immediately to free the slot:
+     ```bash
+     agm session archive "$SESSION_NAME" 2>&1
+     printf '{"ts":"%s","role":"orchestrator","kind":"supervisor.orch.worker_deploy_reaped","payload":{"bead_id":"%s","session":"%s","pr":%s,"state":"%s"}}\n' \
+       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<bead-id>" "$SESSION_NAME" "$PR_NUM" "$PR_STATE" >> ~/.agm/vroom/trail.jsonl
+     ```
+   - If `PR_STATE` is `OPEN`: the PR is still being worked on. Leave the session
+     running; do not reap it yet.
+
+This step runs *before* Step 7.6 to ensure slots are freed before attempting
+new dispatch, improving responsiveness.
+
+### Step 7.6: Dispatch Deploy Workers (land created PRs)
 
 **This is the dispatch-as-advisor merge path (ce-x9s5): when an implementation
 worker finishes a bead and opens a PR, you dispatch an episodic _deploy worker_
@@ -561,7 +600,7 @@ After each tick, briefly note:
 workers driving a bead through wayfinder.
 
 `worker-deploy-<bead-id>` — e.g., `worker-deploy-ce-abc1` — episodic deploy
-workers landing that bead's PR (Step 7.5). Both share the `worker-` prefix so
+workers landing that bead's PR (Step 7.6). Both share the `worker-` prefix so
 Step 7 health monitoring covers them; the `-deploy-` infix distinguishes the
 merge task from the implementation task.
 
@@ -581,8 +620,8 @@ merge task from the implementation task.
 | Meta-O stale >60min | Narrow dispatch to **P0 only**; continue from last-known roadmap (do NOT pause) |
 | Overseer resource escalation (swap≥60% / CPU≥90% / disk≥95% / FD≥80%) | **Spawn-pause**: skip ALL dispatch this tick, log `supervisor.orch.spawn_paused_resource`, resume next tick |
 | Overseer stale >5min | Urgent message |
-| Impl worker finished + bead has an open PR | Step 7.5: dispatch `worker-deploy-<bead-id>` to land the PR |
-| Deploy worker died with PR still open | Step 7.5: re-dispatch a deploy worker for that PR |
+| Impl worker finished + bead has an open PR | Step 7.6: dispatch `worker-deploy-<bead-id>` to land the PR |
+| Deploy worker died with PR still open | Step 7.6: re-dispatch a deploy worker for that PR |
 | Worker session dies mid-bead (no PR opened) | Record in trail, mark for re-dispatch as an impl worker |
 | Worker ghost-exits with `DONE_WITH_CONCERNS` in bead notes | Log `supervisor.dispatch.concerns` (verbatim concern in payload); optionally spawn a `worker-<bead-id>-verify` verifier for the flagged reservation; do NOT re-dispatch or reopen — the deliverable stands |
 | Bead's closed dependency was closed against an unmerged PR | Hold dispatch; record `dod.dispatch.blocked`; urgent to Overseer to reopen the dep |
