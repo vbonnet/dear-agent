@@ -197,6 +197,12 @@ Examples:
 			}
 		}
 
+		// Check token-refresher binary freshness (vcs ancestry vs origin/main).
+		fmt.Println(ui.Blue("\n--- Checking token-refresher freshness ---"))
+		if !checkTokenRefresherFreshness() {
+			allHealthy = false
+		}
+
 		// Run installation checks (binaries, hooks, settings, config, Go version)
 		if !runInstallChecks() {
 			allHealthy = false
@@ -536,6 +542,60 @@ func reportHarnessHealth(name string, count int) bool {
 		fmt.Printf("  • Config dir %s not found (harness may be uninitialized)\n", hh.ConfigDir)
 	}
 	return false
+}
+
+// checkTokenRefresherFreshness verifies that ~/go/bin/token-refresher is
+// installed and its embedded vcs.revision is an ancestor of origin/main in the
+// dear-agent source repository. Mirrors the ce-mb9g pattern used for the agm
+// binary itself. Returns true when healthy or indeterminate (fail-open),
+// false when a definitive problem is detected.
+func checkTokenRefresherFreshness() bool {
+	homeDir, _ := os.UserHomeDir()
+	binPath := filepath.Join(homeDir, "go", "bin", "token-refresher")
+
+	if _, err := os.Stat(binPath); err != nil {
+		ui.PrintWarning("token-refresher not installed")
+		fmt.Println("  Fix: make -C ~/src/dear-agent install-token-refresher")
+		return false
+	}
+
+	rev, err := freshness.ReadBinaryVCSRevision(binPath)
+	if err != nil {
+		ui.PrintWarning(fmt.Sprintf("Could not read token-refresher build info: %v", err))
+		return true // fail open — can't distinguish infra issue from real problem
+	}
+
+	if rev == "" {
+		ui.PrintWarning("token-refresher has no embedded vcs.revision — rebuild from a tagged commit")
+		fmt.Println("  Fix: make -C ~/src/dear-agent install-token-refresher")
+		return false
+	}
+
+	repoPath, err := freshness.FindDearAgentRepoPath()
+	if err != nil {
+		ui.PrintWarning(fmt.Sprintf("Could not locate dear-agent source repo: %v — skipping ancestry check", err))
+		ui.PrintSuccess(fmt.Sprintf("token-refresher installed (commit %s, ancestry unverified)", rev))
+		return true // fail open
+	}
+
+	ancestry := freshness.VerifyAncestry(repoPath, rev, "")
+	switch {
+	case ancestry.OK():
+		ui.PrintSuccess(fmt.Sprintf("token-refresher at %s (current, on %s)", ancestry.BinaryCommit, ancestry.TrunkRef))
+		return true
+	case ancestry.FailLoud():
+		ui.PrintWarning("token-refresher is stale — embedded commit is NOT on origin/main")
+		fmt.Printf("  %s\n", ancestry.Reason())
+		fmt.Printf("  Binary commit: %s\n", ancestry.BinaryCommit)
+		if ancestry.TrunkCommit != "" {
+			fmt.Printf("  %s: %s\n", ancestry.TrunkRef, ancestry.TrunkCommit)
+		}
+		fmt.Printf("  Fix: make -C %s install-token-refresher\n", ancestry.RepoPath)
+		return false
+	default: // AncestryIndeterminate — fail open
+		ui.PrintWarning(fmt.Sprintf("Could not verify token-refresher ancestry: %v", ancestry.Reason()))
+		return true
+	}
 }
 
 func runValidation(manifests []*manifest.Manifest, fix bool, json bool) error {
