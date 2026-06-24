@@ -37,6 +37,7 @@ func RecordSessionLifecycleSpan(ctx context.Context, m *manifest.Manifest, endTi
 		attribute.String("session.id", m.SessionID),
 		attribute.String("session.name", m.Name),
 		attribute.String("session.model", m.Model),
+		attribute.String("session.model_tier", m.ModelTier),
 		attribute.String("session.harness", m.Harness),
 		attribute.String("session.workspace", m.Workspace),
 		attribute.Int("session.exit_code", exitCode),

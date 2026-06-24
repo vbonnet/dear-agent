@@ -32,6 +32,7 @@
   "OpenCode": null,
   "Harness": "claude-code",
   "Model": "",
+  "ModelTier": "",
   "EngramMetadata": null,
   "ContextUsage": null,
   "PermissionMode": "",

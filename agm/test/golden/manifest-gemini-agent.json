@@ -31,6 +31,7 @@
   "OpenCode": null,
   "Harness": "gemini-cli",
   "Model": "",
+  "ModelTier": "",
   "EngramMetadata": null,
   "ContextUsage": null,
   "PermissionMode": "",

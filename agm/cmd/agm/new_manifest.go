@@ -10,6 +10,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/modelrouter"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/internal/telemetry"
 )
@@ -39,10 +40,25 @@ func createAndRegisterManifest(sessionID, sessionName, workDir string, sandboxIn
 	if err := registerSessionInDolt(m); err != nil {
 		return err
 	}
-	_ = git.CommitManifest(manifestPath, "create", sessionName)
+	if err := git.CommitManifest(manifestPath, "create", sessionName); err != nil {
+		debug.Log("manifest commit skipped: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Telemetry: emit routing decision span when a tier was chosen.
+	if m.ModelTier != "" {
+		d := &modelrouter.Decision{
+			Tier:         modelrouter.Tier(m.ModelTier),
+			Model:        m.Model,
+			Reason:       "recorded at manifest creation",
+			ExplicitTier: modelTierFlag != "",
+		}
+		modelrouter.RecordRoutingDecision(ctx, m.Harness, d)
+	}
 
 	// Telemetry: agm.session.start span + active-task metric.
-	telemetry.SessionStarted(context.Background(), m.SessionID, m.Model, m.Harness, m.State, roleName)
+	telemetry.SessionStarted(ctx, m.SessionID, m.Model, m.Harness, m.State, roleName)
 	return nil
 }
 
@@ -63,6 +79,7 @@ func buildSessionManifest(sessionID, sessionName, workDir string, sandboxInfo *m
 		Tmux:       manifest.Tmux{SessionName: sessionName},
 		Harness:    harnessName,
 		Model:      modelName,
+		ModelTier:  modelTierFlag,
 		Claude:     manifest.Claude{},
 		Sandbox:    sandboxInfo,
 		Disposable: disposable,
