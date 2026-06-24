@@ -4,11 +4,26 @@
 
 Deploys dear-agent's **host artifacts** — launchd plists and Claude Code hooks —
 from their source of truth in this repo to their installed location on the
-machine. It is the write-side counterpart to
-[`drift-check`](../drift-check/README.md): drift-check *detects* that a deployed
-artifact is stale; dear-deploy *makes it current*.
+machine, and audits them for drift. `dear-deploy status` is the manifest-driven
+successor to [`drift-check`](../drift-check/README.md) (`make drift-check` now
+runs it); dear-deploy also *makes a drifted artifact current* via `sync`.
 
 The deployable set lives in [`deploy/manifest.yaml`](../../deploy/manifest.yaml).
+
+## Artifact kinds
+
+Each manifest entry is one of two `kind`s:
+
+- **file** (default) — launchd plists and compiled hooks. The deployed copy is
+  compared and (re)written by **byte content** (SHA-256). These are what `sync`
+  and `install` deploy through the atomic sequence below.
+- **binary** — a Go program (e.g. `mergeloop`, `vroom-dispatch`). Its source of
+  truth is the repo's current commit, not a file in the tree, so `status`
+  compares the **`vcs.revision` embedded at build time** (what `go version -m`
+  prints) against the repo HEAD: a binary built before a fix landed reports
+  `STALE`, an absent one reports `NOT DEPLOYED`. Binaries are **status-only** —
+  `sync`/`install` never copy them; they are rebuilt out of band by their
+  `remediation` command (e.g. `make install-mergeloop`).
 
 ## Why
 
@@ -70,4 +85,18 @@ dear-deploy sync --dry-run
 
 # Force a single artifact back to its source-of-truth state.
 dear-deploy install com.dear-agent.mergeloop
+
+# Audit just the Go daemons: is the deployed binary built from current source?
+dear-deploy status mergeloop vroom-dispatch
 ```
+
+## Relationship to `make drift-check` and `agm admin verify-deployment`
+
+- `make drift-check` → `make deploy-status` → `dear-deploy status`: the
+  manifest-driven drift audit. The legacy hash-only detector remains as
+  `make drift-check-legacy` (`cmd/drift-check`) for the agm-hook targets not yet
+  migrated into the manifest.
+- `agm admin verify-deployment` checks the **running** `agm` process against
+  `origin/main` ancestry. `dear-deploy status` checks **installed files on
+  disk** (plists, hooks, daemon binaries) against the repo. The Overseer runs
+  both every tick (overseer.md Steps 13 and 13.5).

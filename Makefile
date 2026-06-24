@@ -45,9 +45,11 @@ export GOMEMLIMIT GOMAXPROCS GOGC
 #   install-bead-pr-guard   Install bead-pr-guard to ~/go/bin
 #   build-bead-close-guard  Build the DoD enforcement gate for bead closure (cmd/bead-close-guard)
 #   install-bead-close-guard Install bead-close-guard to ~/go/bin
-#   build-drift-check       Build the deployment-drift detector (cmd/drift-check)
+#   build-drift-check       Build the legacy deployment-drift detector (cmd/drift-check)
 #   install-drift-check     Install drift-check to ~/go/bin
-#   drift-check             Run the drift check against the built-in deploy targets
+#   deploy-status           Manifest-driven drift audit (dear-deploy status: hooks/plists + binary version stamps)
+#   drift-check             Alias for deploy-status (the manifest-driven replacement)
+#   drift-check-legacy      Run the legacy hash-only detector (cmd/drift-check)
 #   build-babysit-prs       Build babysit-prs: serial PR updater + merger
 #   install-babysit-prs     Install babysit-prs to ~/go/bin
 #   build-pr-linkify        Build pr-linkify: PR reference linkifier (cmd/pr-linkify)
@@ -78,7 +80,7 @@ export GOMEMLIMIT GOMAXPROCS GOGC
 #   build-burndown-maint    Build burndown-maint: host-side bead-burndown maintenance (ce-cd14.2)
 #   install-burndown-maint  Install burndown-maint to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -487,10 +489,24 @@ install-drift-check: build-drift-check
 	cp bin/drift-check $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/drift-check"
 
-# Run the drift check against the built-in deploy targets. Exit 2 signals
-# drift; make surfaces that as an error, which is the intended CI behaviour.
-drift-check: build-drift-check
+# Run the legacy hash-only drift check against cmd/drift-check's built-in
+# targets. Superseded by `make deploy-status` (manifest-driven, also covers Go
+# binaries via version stamp); kept for the agm-hook targets not yet migrated
+# into deploy/manifest.yaml. Exit 2 signals drift.
+drift-check-legacy: build-drift-check
 	./bin/drift-check
+
+# Manifest-driven drift audit — the replacement for `make drift-check`. Builds
+# dear-deploy + the write-guard hooks (their source is the compiled binary), then
+# compares every artifact in deploy/manifest.yaml to the host: file artifacts by
+# content hash, Go binaries by embedded vcs.revision vs repo HEAD. Exit 2 signals
+# drift or a missing required artifact, which make surfaces as an error.
+deploy-status: build-dear-deploy build-write-guards
+	./bin/dear-deploy status
+
+# `make drift-check` now runs the manifest-driven audit (deploy-status). The
+# old hash-only detector remains available as `make drift-check-legacy`.
+drift-check: deploy-status
 
 # Build babysit-prs: the serial PR updater + merger that works around the
 # "every merge makes remaining PRs BEHIND" problem from requiresLinearHistory=true.

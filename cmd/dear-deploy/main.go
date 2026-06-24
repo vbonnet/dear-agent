@@ -18,6 +18,14 @@
 // With no names, status/sync/install operate on the whole manifest. Common
 // flags: --manifest <file>, --repo-root <dir>, --json, --dry-run (sync/install).
 //
+// Artifacts come in two kinds. File artifacts (plists, compiled hooks) are
+// compared and deployed by byte content. Binary artifacts (Go programs such as
+// mergeloop) are status-only: their deployed copy is compared by the
+// vcs.revision embedded at build time — what `go version -m` prints — against
+// the repo HEAD, so a binary built before a fix landed shows as stale drift.
+// sync/install never copy a binary; it is (re)built out of band by its
+// remediation command (e.g. `make install-mergeloop`).
+//
 // Exit codes: 0 success / clean; 2 (status only) drift or a required artifact
 // missing; 1 error.
 package main
@@ -171,6 +179,7 @@ func runList(args []string, stdout, stderr io.Writer) int {
 	if c.asJSON {
 		type item struct {
 			Name        string `json:"name"`
+			Kind        string `json:"kind,omitempty"`
 			Source      string `json:"source"`
 			Deployed    string `json:"deployed"`
 			Mode        string `json:"mode"`
@@ -180,8 +189,13 @@ func runList(args []string, stdout, stderr io.Writer) int {
 		out := make([]item, 0, len(selected))
 		for _, a := range selected {
 			mode, _ := a.FileMode()
+			kind := string(a.Kind)
+			if kind == "" {
+				kind = string(deploy.KindFile)
+			}
 			out = append(out, item{
 				Name:        a.Name,
+				Kind:        kind,
 				Source:      a.Source,
 				Deployed:    a.DeployedPath(opts.Home),
 				Mode:        fmt.Sprintf("%04o", mode.Perm()),
@@ -197,6 +211,9 @@ func runList(args []string, stdout, stderr io.Writer) int {
 		opt := ""
 		if a.Optional {
 			opt = " (optional)"
+		}
+		if a.IsBinary() {
+			opt += " [binary]"
 		}
 		fmt.Fprintf(stdout, "%s%s\n", a.Name, opt)
 		fmt.Fprintf(stdout, "    source:   %s\n", a.Source)
@@ -267,20 +284,34 @@ func formatStatus(results []deploy.StatusResult, w io.Writer) {
 		switch r.State {
 		case deploy.StateOK:
 			ok++
-			fmt.Fprintf(w, "  ok        %s\n", r.Name)
+			if r.Kind == deploy.KindBinary {
+				fmt.Fprintf(w, "  ok        %s (current %s)\n", r.Name, r.DeployedVersion)
+			} else {
+				fmt.Fprintf(w, "  ok        %s\n", r.Name)
+			}
 		case deploy.StateDrift:
 			drift++
 			fmt.Fprintf(w, "  DRIFT     %s\n", r.Name)
-			fmt.Fprintf(w, "            deployed: %s\n", r.DeployedPath)
-			fmt.Fprintf(w, "            fix: dear-deploy sync %s\n", r.Name)
+			if r.Kind == deploy.KindBinary {
+				fmt.Fprintf(w, "            deployed %s -> source %s — %s\n", r.DeployedVersion, r.SourceVersion, r.Detail)
+				fmt.Fprintf(w, "            fix: %s\n", binaryFix(r))
+			} else {
+				fmt.Fprintf(w, "            deployed: %s\n", r.DeployedPath)
+				fmt.Fprintf(w, "            fix: dear-deploy sync %s\n", r.Name)
+			}
 		case deploy.StateMissing:
 			if r.Optional {
 				skipped++
 				fmt.Fprintf(w, "  skipped   %s (optional, not deployed)\n", r.Name)
 			} else {
 				missing++
-				fmt.Fprintf(w, "  MISSING   %s (not deployed: %s)\n", r.Name, r.DeployedPath)
-				fmt.Fprintf(w, "            fix: dear-deploy sync %s\n", r.Name)
+				if r.Kind == deploy.KindBinary {
+					fmt.Fprintf(w, "  MISSING   %s (NOT DEPLOYED: %s; source %s)\n", r.Name, r.DeployedPath, r.SourceVersion)
+					fmt.Fprintf(w, "            fix: %s\n", binaryFix(r))
+				} else {
+					fmt.Fprintf(w, "  MISSING   %s (not deployed: %s)\n", r.Name, r.DeployedPath)
+					fmt.Fprintf(w, "            fix: dear-deploy sync %s\n", r.Name)
+				}
 			}
 		case deploy.StateSourceMissing:
 			if r.Optional {
@@ -303,8 +334,18 @@ func formatStatus(results []deploy.StatusResult, w io.Writer) {
 	if drift+missing == 0 && errs == 0 {
 		fmt.Fprintf(w, "In sync: every deployed artifact matches the manifest.\n")
 	} else if drift+missing > 0 {
-		fmt.Fprintf(w, "OUT OF SYNC — run `dear-deploy sync` to redeploy.\n")
+		fmt.Fprintf(w, "OUT OF SYNC — apply each fix line above (file artifacts: `dear-deploy sync`; binaries: their make target).\n")
 	}
+}
+
+// binaryFix returns the command that redeploys a binary artifact. Binaries are
+// built and installed out of band (not by `dear-deploy sync`), so the fix is the
+// artifact's own Remediation; absent that, the generic make target.
+func binaryFix(r deploy.StatusResult) string {
+	if r.Remediation != "" {
+		return r.Remediation
+	}
+	return "make install-" + r.Name
 }
 
 // runDeploy implements both `sync` and `install`. They share all machinery; the
@@ -370,6 +411,11 @@ func dryRunDeploy(cmd string, selected []deploy.Artifact, opts deploy.Options, a
 	force := cmd == "install"
 	plans := make([]plan, 0, len(selected))
 	for _, a := range selected {
+		// Binaries are status-only — sync/install never copy them into place.
+		if a.IsBinary() {
+			plans = append(plans, plan{Name: a.Name, DeployedPath: a.DeployedPath(opts.Home), WouldDo: "skip (binary)"})
+			continue
+		}
 		s := deploy.Status(a, opts)
 		would := "unchanged"
 		switch s.State {

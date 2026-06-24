@@ -50,3 +50,27 @@ artifacts:
     mode: "0755"
     optional: true
     remediation: make build-write-guards
+
+  # --- Go binaries (version-stamp drift, not byte compare) -------------------
+  # kind: binary entries are status-only. Their source of truth is the repo's
+  # current commit, not a file in the tree: `dear-deploy status` reads the
+  # vcs.revision embedded in the installed binary (`go version -m`) and compares
+  # it to repo HEAD, reporting STALE when the deployed binary predates the source
+  # it was built from, or NOT DEPLOYED when it is absent. `dear-deploy sync` never
+  # writes them — they are (re)built by their remediation command. These are the
+  # launchd-driven VROOM daemons whose staleness can silently degrade the mesh
+  # (a stale mergeloop merges with outdated policy; a stale vroom-dispatch boots
+  # supervisors from old logic), so the Overseer audits them every tick.
+  - name: mergeloop
+    kind: binary
+    source: cmd/mergeloop
+    deployed: ~/go/bin/mergeloop
+    mode: "0755"
+    remediation: make install-mergeloop
+
+  - name: vroom-dispatch
+    kind: binary
+    source: cmd/vroom-dispatch
+    deployed: ~/go/bin/vroom-dispatch
+    mode: "0755"
+    remediation: make install-vroom-dispatch
