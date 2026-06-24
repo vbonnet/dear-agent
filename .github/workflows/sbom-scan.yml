@@ -3,6 +3,13 @@ name: SBOM and Security Scan
 on:
   push:
     branches: [main]
+    paths:
+      - go.sum
+      - go.mod
+      - "**/go.sum"
+      - "**/go.mod"
+      - "**/*.lock"
+      - "**/package.json"
   pull_request:
   release:
     types: [created]
