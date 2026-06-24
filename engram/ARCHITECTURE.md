@@ -56,6 +56,27 @@ Code's hook system for automatic retrieval.
 - Shared utilities and types
 - Memory file parsing and serialization
 
+## Knowledge Layers
+
+Engram stores knowledge in two distinct layers (see ADR-009):
+
+### Document Layer (`internal/document/`)
+- Stateless, immutable, **versioned** knowledge blobs (specs, architecture,
+  research, reference, ADRs) — trusted as-is, never mutated in place
+- `Store` interface with an append-only versioning contract (`Put` appends a
+  new version; no in-place update); `FSStore` reference implementation stores
+  one JSON file per version under `{root}/{namespace…}/{id}/v{N}.json`
+- Content-hashed (SHA-256) versions; path-containment validation (ADR-006)
+
+### Memory Layer (`internal/consolidation/`, `hippocampus/`)
+- Mutable, extracted facts distilled from session history
+- Consolidation pipeline: decay, merge, prune, importance scoring
+- Pluggable `Provider` interface (ADR-007) with in-place updates
+
+This separation keeps consolidation lifecycle rules off canonical documents and
+sharpens recall precision. The corpus-callosum schema registers both a
+`document` and a `memory_trace` schema (component schema `1.1.0`).
+
 ## Key Decisions
 
 See `cmd/engram/ADR-INDEX.md` for the full list of Architecture Decision Records.

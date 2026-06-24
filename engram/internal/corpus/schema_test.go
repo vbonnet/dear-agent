@@ -2,6 +2,7 @@ package corpus
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 )
 
@@ -24,7 +25,7 @@ func TestGetEngramSchema(t *testing.T) {
 	}
 
 	// Verify required schemas
-	requiredSchemas := []string{"bead", "memory_trace", "ecphory_result"}
+	requiredSchemas := []string{"bead", "document", "memory_trace", "ecphory_result"}
 	for _, name := range requiredSchemas {
 		if _, exists := schemas[name]; !exists {
 			t.Errorf("Required schema %q not found", name)
@@ -95,6 +96,49 @@ func TestGetBeadSchema(t *testing.T) {
 	expectedStatuses := []string{"open", "in-progress", "blocked", "closed"}
 	if len(statusEnum) != len(expectedStatuses) {
 		t.Errorf("Expected %d status values, got %d", len(expectedStatuses), len(statusEnum))
+	}
+}
+
+func TestGetDocumentSchema(t *testing.T) {
+	schema := GetDocumentSchema()
+
+	if schemaType, ok := schema["type"].(string); !ok || schemaType != "object" {
+		t.Error("Document schema should be of type 'object'")
+	}
+
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("properties field is not a map")
+	}
+
+	requiredProps := []string{"id", "version", "kind", "content", "content_hash", "workspace"}
+	for _, prop := range requiredProps {
+		if _, exists := properties[prop]; !exists {
+			t.Errorf("Required property %q not found in document schema", prop)
+		}
+	}
+
+	// Verify kind enum matches the document.Kind constants.
+	kindProp, ok := properties["kind"].(map[string]any)
+	if !ok {
+		t.Fatal("kind property is not a map")
+	}
+	kindEnum, ok := kindProp["enum"].([]string)
+	if !ok {
+		t.Fatal("kind enum is not a string array")
+	}
+	expectedKinds := []string{"spec", "architecture", "research", "reference", "adr"}
+	if len(kindEnum) != len(expectedKinds) {
+		t.Errorf("Expected %d kind values, got %d", len(expectedKinds), len(kindEnum))
+	}
+
+	// Verify workspace is required for isolation.
+	required, ok := schema["required"].([]string)
+	if !ok {
+		t.Fatal("required field is not a string array")
+	}
+	if !slices.Contains(required, "workspace") {
+		t.Error("workspace should be required for document")
 	}
 }
 
@@ -191,6 +235,7 @@ func TestSchemasSupportWorkspaceIsolation(t *testing.T) {
 	// All schemas must include workspace field for proper isolation
 	schemas := map[string]func() map[string]interface{}{
 		"bead":           GetBeadSchema,
+		"document":       GetDocumentSchema,
 		"memory_trace":   GetMemoryTraceSchema,
 		"ecphory_result": GetEcphoryResultSchema,
 	}
