@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -74,5 +75,70 @@ func TestShortSHA(t *testing.T) {
 	}
 	if got := shortSHA("abc"); got != "abc" {
 		t.Errorf("shortSHA = %q, want abc", got)
+	}
+}
+
+// initGitRepo creates a minimal git repo in dir with the given origin remote URL.
+func initGitRepo(t *testing.T, dir, remoteURL string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"init", "-q", dir},
+		{"-C", dir, "remote", "add", "origin", remoteURL},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func TestValidateRemoteURL(t *testing.T) {
+	cases := []struct {
+		name      string
+		remoteURL string
+		wantErr   string
+	}{
+		{
+			name:      "valid vbonnet remote",
+			remoteURL: "https://github.com/vbonnet/dear-agent",
+		},
+		{
+			name:      "wrong org",
+			remoteURL: "https://github.com/dear-labs/dear-agent",
+			wantErr:   "does not look like a vbonnet GitHub remote",
+		},
+		{
+			name:      "non-github remote",
+			remoteURL: "https://gitlab.com/vbonnet/dear-agent",
+			wantErr:   "does not look like a vbonnet GitHub remote",
+		},
+		{
+			name:      "ssh remote",
+			remoteURL: "git@github.com:vbonnet/dear-agent.git",
+			wantErr:   "does not look like a vbonnet GitHub remote",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			initGitRepo(t, dir, tc.remoteURL)
+			err := validateRemoteURL(dir)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Errorf("validateRemoteURL(%q) = %v, want nil", tc.remoteURL, err)
+				}
+			} else {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("validateRemoteURL(%q) = %v, want substring %q", tc.remoteURL, err, tc.wantErr)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateRemoteURL_NonGitDir(t *testing.T) {
+	dir := t.TempDir()
+	err := validateRemoteURL(dir)
+	if err == nil || !strings.Contains(err.Error(), "could not resolve origin remote URL") {
+		t.Errorf("validateRemoteURL(non-git dir) = %v, want 'could not resolve origin remote URL'", err)
 	}
 }
