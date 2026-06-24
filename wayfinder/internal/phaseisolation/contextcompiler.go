@@ -82,6 +82,18 @@ func (cc *ContextCompiler) buildSystemPrompt(phase PhaseDefinition, priorArtifac
 	tb.Heading(1, fmt.Sprintf("Phase %s: %s", phase.ID, phase.Name))
 	tb.Text(fmt.Sprintf("**Objective**: %s", phase.Objective))
 
+	tb.Heading(2, "Global Constraints")
+	tb.Text("These invariants apply to **all tasks** in this plan:")
+	constraints := []string{
+		"**Filesystem**: NEVER write to ~/src/** (golden checkout). Use worktree: ~/worktrees/<repo>/<branch-name>",
+		"**Git**: ALWAYS use `GIT_TERMINAL_PROMPT=0 gtimeout 30 git push -u origin <branch>`. NEVER use --no-verify or --force (use --force-with-lease if needed).",
+		"**Beads**: MANDATORY: `bd --db ~/beads/context-engine/.beads <subcommand>`. Never bare `bd` — the flag makes the right store the only reachable store.",
+		"**Session**: Session name pattern: worker-<bead-id> (e.g., worker-ce-abc1.2). No special chars/dots except in bead-id.",
+		"**Retry Discipline**: 2-attempt maximum on any failure type. Permission/access errors: 0 retries (escalate immediately). Death loops (3+ same error): stop and ask.",
+		"**Unattended Mode**: Pre-authorized for autonomous action. If action requires permission not yet approved: defer + continue. File handoff note for deferred operations.",
+	}
+	tb.List(constraints, true)
+
 	if len(priorArtifacts) > 0 {
 		tb.Heading(2, "Context from Prior Phases")
 		tb.Text("You have access to summaries of previous phases. Read the full deliverables if you need more detail.")

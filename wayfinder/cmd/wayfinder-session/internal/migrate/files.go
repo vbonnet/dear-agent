@@ -258,11 +258,30 @@ func (fm *FileMigrator) generateTestsFeatureIfNeeded() error {
 // Template creation methods
 
 func (fm *FileMigrator) createD4Template() string {
-	return `# D4 - Requirements & Sign-off
+	return `---
+phase: D4
+title: Requirements & Sign-off
+global_constraints:
+  filesystem:
+    - NEVER write to ~/src/** (golden checkout — use worktree)
+    - Worktree location: ~/worktrees/<repo>/<branch-name>
+  git:
+    - ALWAYS use: GIT_TERMINAL_PROMPT=0 gtimeout 30 git push -u origin <branch>
+    - NEVER use --no-verify or --force (use --force-with-lease if needed)
+  beads:
+    - MANDATORY: bd --db ~/beads/context-engine/.beads <subcommand>
+  session:
+    - Session name pattern: worker-<bead-id> (e.g., worker-ce-abc1.2)
+  retry_discipline:
+    - 2-attempt maximum on any failure type
+    - Permission/access errors: 0 retries (escalate immediately)
+---
+
+# D4 - Requirements & Sign-off
 
 **Phase**: D4 - Solution Requirements
 **Status**: In Progress
-**Date**: ` + time.Now().Format("2006-01-02") + `
+**Date**: ' + time.Now().Format("2006-01-02") + '
 
 ## Overview
 
@@ -285,11 +304,30 @@ TBD
 }
 
 func (fm *FileMigrator) createS6Template() string {
-	return `# S6 - Implementation Planning
+	return `---
+phase: S6
+title: Implementation Planning
+global_constraints:
+  filesystem:
+    - NEVER write to ~/src/** (golden checkout — use worktree)
+    - Worktree location: ~/worktrees/<repo>/<branch-name>
+  git:
+    - ALWAYS use: GIT_TERMINAL_PROMPT=0 gtimeout 30 git push -u origin <branch>
+    - NEVER use --no-verify or --force (use --force-with-lease if needed)
+  beads:
+    - MANDATORY: bd --db ~/beads/context-engine/.beads <subcommand>
+  session:
+    - Session name pattern: worker-<bead-id> (e.g., worker-ce-abc1.2)
+  retry_discipline:
+    - 2-attempt maximum on any failure type
+    - Permission/access errors: 0 retries (escalate immediately)
+---
+
+# S6 - Implementation Planning
 
 **Phase**: S6 - Design & Planning
 **Status**: In Progress
-**Date**: ` + time.Now().Format("2006-01-02") + `
+**Date**: ' + time.Now().Format("2006-01-02") + '
 
 ## Overview
 
@@ -306,11 +344,30 @@ TBD
 }
 
 func (fm *FileMigrator) createS8BuildTemplate() string {
-	return `# S8 - BUILD Loop
+	return `---
+phase: S8
+title: BUILD Loop
+global_constraints:
+  filesystem:
+    - NEVER write to ~/src/** (golden checkout — use worktree)
+    - Worktree location: ~/worktrees/<repo>/<branch-name>
+  git:
+    - ALWAYS use: GIT_TERMINAL_PROMPT=0 gtimeout 30 git push -u origin <branch>
+    - NEVER use --no-verify or --force (use --force-with-lease if needed)
+  beads:
+    - MANDATORY: bd --db ~/beads/context-engine/.beads <subcommand>
+  session:
+    - Session name pattern: worker-<bead-id> (e.g., worker-ce-abc1.2)
+  retry_discipline:
+    - 2-attempt maximum on any failure type
+    - Permission/access errors: 0 retries (escalate immediately)
+---
+
+# S8 - BUILD Loop
 
 **Phase**: S8 - Build, Test, Deploy
 **Status**: In Progress
-**Date**: ` + time.Now().Format("2006-01-02") + `
+**Date**: ' + time.Now().Format("2006-01-02") + '
 
 ## Overview
 
