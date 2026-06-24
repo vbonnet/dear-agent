@@ -4,6 +4,7 @@ package circuitbreaker
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -66,4 +67,45 @@ func (f FileSpawnTimer) RecordSpawn(t time.Time) error {
 		return err
 	}
 	return os.WriteFile(f.path(), []byte(t.Format(time.RFC3339)+"\n"), 0o600)
+}
+
+// --- WorkerCounter: AGM tmux socket ---
+
+// TmuxWorkerCounter counts active sessions in the AGM tmux socket as a proxy
+// for concurrent workers. The count is used only when MaxWorkers > 0 (the
+// default is 0 = disabled). Fails open (returns 0) when tmux is unavailable.
+type TmuxWorkerCounter struct {
+	// Socket is the AGM tmux socket path. Defaults to ~/.agm/agm.sock.
+	Socket string
+}
+
+// CountWorkers returns the number of tmux sessions in the AGM socket.
+func (t TmuxWorkerCounter) CountWorkers() (int, error) {
+	sock := t.Socket
+	if sock == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return 0, nil // fail open
+		}
+		sock = filepath.Join(home, ".agm", "agm.sock")
+	}
+
+	// If the socket doesn't exist, no workers are running.
+	if _, err := os.Stat(sock); os.IsNotExist(err) {
+		return 0, nil
+	}
+
+	out, err := exec.Command("tmux", "-S", sock, "list-sessions", "-F", "#S").Output()
+	if err != nil {
+		return 0, nil // fail open: tmux unavailable or no sessions
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	count := 0
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			count++
+		}
+	}
+	return count, nil
 }
