@@ -23,12 +23,14 @@ locals {
     "brain-v2" = {
       visibility      = "private"
       default_branch  = "main"
-      required_checks = ["go test -race"]
+      # go.yml: golangci-lint + go test -race. python.yml: ruff + pytest.
+      required_checks = ["go test -race", "golangci-lint", "ruff", "pytest"]
     }
     "engram-research" = {
       visibility      = "private"
       default_branch  = "main"
-      required_checks = ["Build & Test (engram/hooks/cmd)"]
+      # ci.yml: go-hooks + python-hooks jobs.
+      required_checks = ["Build & Test (engram/hooks/cmd)", "Lint Python hooks"]
     }
     "vbonnet.ai" = {
       visibility      = "private"
