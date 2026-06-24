@@ -40,3 +40,46 @@ func TestBuildClaudeCommand_SessionNameQuoted(t *testing.T) {
 		t.Errorf("session name not quoted in command: %s", cmd)
 	}
 }
+
+// TestBuildClaudeCommand_PersistentOmitsExit verifies that --persistent omits
+// "&& exit" from the harness command so supervisor sessions survive their
+// Claude turn/loop ending without dropping to a bare shell (ce-pzca).
+func TestBuildClaudeCommand_PersistentOmitsExit(t *testing.T) {
+	savedModel := modelName
+	savedPersistent := persistent
+	defer func() {
+		modelName = savedModel
+		persistent = savedPersistent
+	}()
+	modelName = "sonnet"
+	persistent = true
+
+	cmd, _ := buildClaudeCommand("sup-session", "/tmp/work", nil)
+	if strings.Contains(cmd, "&& exit") {
+		t.Errorf("persistent=true: command still has '&& exit': %s", cmd)
+	}
+	// Must still contain all other required parts.
+	for _, want := range []string{"claude", "AGM_SESSION_NAME='sup-session'", "--add-dir '/tmp/work'"} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("persistent=true: command missing %q: %s", want, cmd)
+		}
+	}
+}
+
+// TestBuildClaudeCommand_NonPersistentHasExit verifies that non-persistent
+// (default) sessions keep the "&& exit" suffix for clean teardown.
+func TestBuildClaudeCommand_NonPersistentHasExit(t *testing.T) {
+	savedModel := modelName
+	savedPersistent := persistent
+	defer func() {
+		modelName = savedModel
+		persistent = savedPersistent
+	}()
+	modelName = "sonnet"
+	persistent = false
+
+	cmd, _ := buildClaudeCommand("worker-session", "/tmp/work", nil)
+	if !strings.Contains(cmd, "&& exit") {
+		t.Errorf("persistent=false: command missing '&& exit': %s", cmd)
+	}
+}

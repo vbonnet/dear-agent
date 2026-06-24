@@ -61,6 +61,7 @@ var (
 	inheritPermissions bool
 	disposable         bool
 	disposableTTL      string
+	persistent         bool
 )
 
 // defaultPermissions are safe, read-only commands that are always pre-approved
@@ -857,6 +858,7 @@ func init() {
 	newCmd.Flags().BoolVar(&inheritPermissions, "inherit-permissions", false, "Inherit permission allowlist from parent's ~/.claude/settings.json")
 	newCmd.Flags().BoolVar(&disposable, "disposable", false, "Create a disposable session with TTL-based auto-archive")
 	newCmd.Flags().StringVar(&disposableTTL, "disposable-ttl", "4h", "TTL for disposable sessions (e.g., 1h, 4h, 30m)")
+	newCmd.Flags().BoolVar(&persistent, "persistent", false, "Omit '&&  exit' from the harness launch command; use for long-lived supervisor sessions that must survive a Claude turn/loop ending (e.g. vroom-meta-orchestrator)")
 
 	// Tab completion for --harness flag
 	_ = newCmd.RegisterFlagCompletionFunc("harness", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
