@@ -78,6 +78,13 @@ type WorktreeStatus struct {
 	// never by itself authorizes a reap.
 	DupGroup string `json:"dup_group,omitempty"`
 	DupCount int    `json:"dup_count,omitempty"`
+	// CommitsAboveMergeBase counts commits on branch above git merge-base
+	// with the main base ref. Only populated for ClassOrphaned/no-pr.
+	CommitsAboveMergeBase int `json:"commits_above_merge_base,omitempty"`
+	// IsOrphanBranch is true when the branch has commits above the main
+	// merge-base but no open or merged PR — abandoned in-flight work that
+	// needs human attention.
+	IsOrphanBranch bool `json:"is_orphan_branch,omitempty"`
 }
 
 // SweepDeps abstracts every filesystem/git/gh interaction the sweep needs so
@@ -98,6 +105,10 @@ type SweepDeps interface {
 	// cannot be positively established.
 	PRState(repoPath, branch string) (state string, known bool)
 	HasUnpushedCommits(worktreePath, branch string) (bool, error)
+	// CommitsAboveMergeBase counts commits on branch above base
+	// (git rev-list --count base..branch). Returns -1 on error — callers
+	// treat a negative count as "has unmerged work" to stay fail-safe.
+	CommitsAboveMergeBase(repoPath, branch, base string) (int, error)
 	// AwaitingInput reports whether the session that ran in worktreePath
 	// ended waiting on the user (detail is a short tag for the report).
 	// Positive only — see wtpolicy.AwaitingInput for the fail-safe stance.
@@ -323,7 +334,17 @@ func classify(opts SweepOptions, deps SweepDeps, dw DiscoveredWorktree, selfPath
 		return setClass(st, ClassUnknown, "push-check-failed")
 	}
 	st.Pushed = !unpushed
-	return setClass(st, ClassOrphaned, huskReason(unpushed, st.PRState))
+	result := setClass(st, ClassOrphaned, huskReason(unpushed, st.PRState))
+
+	// Enrich no-pr orphans: count commits above the merge-base to flag
+	// branches with real in-flight work that was never opened as a PR.
+	if result.Reason == "no-pr" {
+		if count, countErr := deps.CommitsAboveMergeBase(mainRepo, dw.Branch, base); countErr == nil && count > 0 {
+			result.CommitsAboveMergeBase = count
+			result.IsOrphanBranch = true
+		}
+	}
+	return result
 }
 
 // annotateDuplicates flags worktrees that share an identical HEAD commit
@@ -471,6 +492,11 @@ func (RealSweepDeps) PRState(repoPath, branch string) (string, bool) {
 // HasUnpushedCommits reports whether branch has commits on no remote ref.
 func (RealSweepDeps) HasUnpushedCommits(worktreePath, branch string) (bool, error) {
 	return gitpkg.HasUnpushedCommits(worktreePath, branch)
+}
+
+// CommitsAboveMergeBase counts commits on branch above base via git rev-list.
+func (RealSweepDeps) CommitsAboveMergeBase(repoPath, branch, base string) (int, error) {
+	return gitpkg.CommitsAhead(repoPath, branch, base)
 }
 
 // AwaitingInput reports whether the worktree's Claude Code transcript ends

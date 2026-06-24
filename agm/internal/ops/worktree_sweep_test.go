@@ -35,6 +35,9 @@ type fakeSweepDeps struct {
 	unpushed    map[string]bool // keyed by branch
 	unpushedErr map[string]error
 
+	commitsAbove    map[string]int   // keyed by branch
+	commitsAboveErr map[string]error // keyed by branch
+
 	awaiting       map[string]bool   // keyed by worktree path
 	awaitingDetail map[string]string // keyed by worktree path
 
@@ -90,6 +93,12 @@ func (f *fakeSweepDeps) HasUnpushedCommits(_, branch string) (bool, error) {
 		return true, err
 	}
 	return f.unpushed[branch], nil
+}
+func (f *fakeSweepDeps) CommitsAboveMergeBase(_, branch, _ string) (int, error) {
+	if err := f.commitsAboveErr[branch]; err != nil {
+		return -1, err
+	}
+	return f.commitsAbove[branch], nil
 }
 func (f *fakeSweepDeps) AwaitingInput(p string) (bool, string) {
 	d := f.awaitingDetail[p]
@@ -331,6 +340,68 @@ func TestClassify_Matrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOrphanBranchDetection(t *testing.T) {
+	const wt = "/wt/a"
+	const br = "ce-task"
+
+	t.Run("no-pr with commits above main sets IsOrphanBranch", func(t *testing.T) {
+		f := &fakeSweepDeps{
+			commitsAbove: map[string]int{br: 3},
+		}
+		got := classifyOne(SweepOptions{CheckPR: true}, f, DiscoveredWorktree{Path: wt, Branch: br})
+		if got.Class != ClassOrphaned || got.Reason != "no-pr" {
+			t.Fatalf("class=%s reason=%q, want ORPHANED/no-pr", got.Class, got.Reason)
+		}
+		if !got.IsOrphanBranch {
+			t.Fatal("IsOrphanBranch should be true when commits above main > 0 and no PR")
+		}
+		if got.CommitsAboveMergeBase != 3 {
+			t.Fatalf("CommitsAboveMergeBase = %d, want 3", got.CommitsAboveMergeBase)
+		}
+	})
+
+	t.Run("no-pr with zero commits above main is not IsOrphanBranch", func(t *testing.T) {
+		f := &fakeSweepDeps{
+			commitsAbove: map[string]int{br: 0},
+		}
+		got := classifyOne(SweepOptions{CheckPR: true}, f, DiscoveredWorktree{Path: wt, Branch: br})
+		if got.Class != ClassOrphaned || got.Reason != "no-pr" {
+			t.Fatalf("class=%s reason=%q, want ORPHANED/no-pr", got.Class, got.Reason)
+		}
+		if got.IsOrphanBranch {
+			t.Fatal("IsOrphanBranch should be false when branch has no commits above main")
+		}
+	})
+
+	t.Run("CommitsAboveMergeBase error is fail-safe (no IsOrphanBranch)", func(t *testing.T) {
+		f := &fakeSweepDeps{
+			commitsAboveErr: map[string]error{br: errors.New("git error")},
+		}
+		got := classifyOne(SweepOptions{CheckPR: true}, f, DiscoveredWorktree{Path: wt, Branch: br})
+		if got.Class != ClassOrphaned || got.Reason != "no-pr" {
+			t.Fatalf("class=%s reason=%q, want ORPHANED/no-pr", got.Class, got.Reason)
+		}
+		if got.IsOrphanBranch {
+			t.Fatal("IsOrphanBranch must be false on count error (fail-safe)")
+		}
+	})
+
+	t.Run("open-pr orphan is never flagged as orphan-branch", func(t *testing.T) {
+		f := &fakeSweepDeps{
+			prState:      map[string]string{br: "OPEN"},
+			prKnown:      map[string]bool{br: true},
+			commitsAbove: map[string]int{br: 5},
+		}
+		got := classifyOne(SweepOptions{CheckPR: true}, f, DiscoveredWorktree{Path: wt, Branch: br})
+		if got.Class != ClassOrphaned || got.Reason != "open-pr-unmerged" {
+			t.Fatalf("class=%s reason=%q, want ORPHANED/open-pr-unmerged", got.Class, got.Reason)
+		}
+		if got.IsOrphanBranch {
+			t.Fatal("IsOrphanBranch must only be set for no-pr reason")
+		}
+	})
 }
 
 func TestSweep_DryRunListsMergedButMutatesNothing(t *testing.T) {
