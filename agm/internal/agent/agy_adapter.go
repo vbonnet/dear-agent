@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -188,7 +189,7 @@ func (a *AgyAdapter) TerminateSession(sessionID SessionID) error {
 func (a *AgyAdapter) GetSessionStatus(sessionID SessionID) (Status, error) {
 	metadata, err := a.sessionStore.Get(sessionID)
 	if err != nil {
-		return StatusTerminated, nil
+		return StatusTerminated, err
 	}
 
 	exists, err := tmux.HasSession(metadata.TmuxName)
@@ -280,15 +281,15 @@ func (a *AgyAdapter) ExportConversation(sessionID SessionID, format Conversation
 		return result, nil
 
 	case FormatMarkdown:
-		var result string
+		var sb strings.Builder
 		for _, msg := range messages {
 			role := "User"
 			if msg.Role == RoleAssistant {
 				role = "Assistant"
 			}
-			result += fmt.Sprintf("## %s (%s)\n\n%s\n\n", role, msg.Timestamp.Format(time.RFC3339), msg.Content)
+			fmt.Fprintf(&sb, "## %s (%s)\n\n%s\n\n", role, msg.Timestamp.Format(time.RFC3339), msg.Content)
 		}
-		return []byte(result), nil
+		return []byte(sb.String()), nil
 
 	case FormatHTML:
 		return nil, fmt.Errorf("HTML export not yet implemented")

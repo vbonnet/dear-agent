@@ -16,8 +16,8 @@ func TestAgyAdapterImplementsAgentInterface(t *testing.T) {
 		t.Fatalf("NewAgyAdapter failed: %v", err)
 	}
 
-	// Verify adapter implements Agent interface
-	var _ Agent = adapter
+	// Verify adapter implements Agent interface (type already Agent from NewAgyAdapter)
+	_ = adapter
 }
 
 // TestAgyAdapterName tests Name() method.
