@@ -15,6 +15,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/logging"
 	"github.com/vbonnet/dear-agent/agm/internal/sentinel/config"
 	"github.com/vbonnet/dear-agent/agm/internal/sentinel/tmux"
+	"github.com/vbonnet/dear-agent/agm/internal/sweeper"
 	"github.com/vbonnet/dear-agent/pkg/enforcement"
 )
 
@@ -53,6 +54,7 @@ type SessionMonitor struct {
 	sessionHeartbeatWriter  *SessionHeartbeatWriter
 	sessionHeartbeatMonitor *SessionHeartbeatMonitor
 	loopMonitor             *LoopMonitor
+	sessionSweeper          *sweeper.Sweeper
 	logger                  *slog.Logger // Structured logger
 	running                 bool
 	stopChan                chan struct{}
@@ -188,6 +190,15 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 	escalationPipeline := NewEscalationPipeline(escalationExecutor, escalationLogger, agmBinary, maxPerHour)
 	escalationPipeline.SetExemptSessions(cfg.Recovery.ExemptSessions)
 
+	// Create session sweeper (dead-pane + stuck-session cleanup)
+	sweeperCfg := sweeper.Config{
+		Enabled:       cfg.Sweeper.Enabled,
+		DryRun:        cfg.Sweeper.DryRun,
+		GracePeriod:   cfg.Sweeper.GracePeriodDuration,
+		SweepInterval: cfg.Sweeper.SweepIntervalDuration,
+	}
+	sessionSweeper := sweeper.New(sweeperCfg, tmuxClient, logger)
+
 	return &SessionMonitor{
 		tmuxClient:              tmuxClient,
 		detector:                detector,
@@ -208,6 +219,7 @@ func NewSessionMonitor(cfg *config.Config) (*SessionMonitor, error) {
 		sessionHeartbeatWriter:  sessionHBWriter,
 		sessionHeartbeatMonitor: sessionHBMonitor,
 		loopMonitor:             loopMon,
+		sessionSweeper:          sessionSweeper,
 		logger:                  logger,
 		stopChan:                make(chan struct{}),
 		CrossSessionThreshold:   3,
@@ -330,6 +342,9 @@ func (m *SessionMonitor) runPostCheckMaintenance(sessions []string, listErr erro
 	}
 	if m.loopMonitor != nil {
 		m.loopMonitor.CheckAll()
+	}
+	if m.sessionSweeper != nil {
+		m.sessionSweeper.Sweep()
 	}
 	if m.metrics != nil {
 		if _, err := m.metrics.FlushIfDue(); err != nil {
