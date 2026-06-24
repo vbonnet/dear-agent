@@ -21,6 +21,12 @@ type GuardConfig struct {
 	Repo          string
 	BeadsDir      string
 	AbandonReason string
+	// RepoRoot is the dear-agent checkout the deployed gate resolves source
+	// paths against. Empty disables the gate (it records why and does not block).
+	RepoRoot string
+	// GitRef, when set, makes the deployed gate compare the host against this
+	// committed ref (e.g. origin/main) instead of the working tree.
+	GitRef string
 }
 
 type GuardResult struct {
@@ -30,6 +36,16 @@ type GuardResult struct {
 	UnmergedPR    []UnmergedPR
 	Passed        bool
 	AbandonReason string
+	// DriftFindings are deploy targets the bead's merged change touched that are
+	// not current on the host — the "deployed" gate's block reasons.
+	DriftFindings []DeployFinding
+	// DeployTargetsChecked is how many deploy targets the merged change touched
+	// (0 means the gate had nothing to verify). Surfaced so a clean run shows the
+	// gate actually ran rather than silently doing nothing.
+	DeployTargetsChecked int
+	// DeploySkipNote explains why the deployed gate did not run, when it could
+	// not (no checkout, no config). Empty when the gate ran.
+	DeploySkipNote string
 }
 
 type UnmergedPR struct {
@@ -41,6 +57,9 @@ type prViewResult struct {
 	Number   int    `json:"number"`
 	State    string `json:"state"`
 	MergedAt string `json:"mergedAt"`
+	Files    []struct {
+		Path string `json:"path"`
+	} `json:"files"`
 }
 
 var prRE = regexp.MustCompile(`(\w*)#(\d+)`)
@@ -67,8 +86,9 @@ func CheckDoD(cfg GuardConfig) (GuardResult, error) {
 		return result, nil
 	}
 
+	var mergedFiles []string
 	for _, n := range prNums {
-		merged, state, err := isPRMerged(ctx, cfg.Repo, n)
+		merged, state, files, err := prInfo(ctx, cfg.Repo, n)
 		if err != nil {
 			// Do not swallow the error: if we cannot verify a PR's state
 			// (network, rate limit, gh auth), returning the error makes the
@@ -79,44 +99,104 @@ func CheckDoD(cfg GuardConfig) (GuardResult, error) {
 		}
 		if !merged {
 			result.UnmergedPR = append(result.UnmergedPR, UnmergedPR{Number: n, State: state})
+			continue
 		}
+		// Only a merged PR's files can have a deploy expectation: its source is
+		// on main, so the host should match it. An unmerged PR is already
+		// blocked by the gate above; its files are not yet "supposed" to ship.
+		mergedFiles = append(mergedFiles, files...)
 	}
 
-	result.Passed = len(result.UnmergedPR) == 0 || cfg.AbandonReason != ""
+	// Deployed gate (Phase 2): a fix can be merged yet never reach the machine.
+	// When the merged change touched a deploy target, require that target to be
+	// current on the host before the bead may close.
+	if len(mergedFiles) > 0 {
+		findings, checked, note := deployedGate(ctx, cfg.RepoRoot, cfg.GitRef, mergedFiles)
+		result.DriftFindings = findings
+		result.DeployTargetsChecked = checked
+		result.DeploySkipNote = note
+	}
+
+	blocked := len(result.UnmergedPR) > 0 || len(result.DriftFindings) > 0
+	result.Passed = !blocked || cfg.AbandonReason != ""
 	return result, nil
 }
 
 func FormatResult(r GuardResult, w io.Writer) {
-	if len(r.PRs) == 0 {
-		fmt.Fprintf(w, "ok: bead %s has no PR references — close is allowed\n", r.BeadID)
+	blockedByPR := len(r.UnmergedPR) > 0
+	blockedByDeploy := len(r.DriftFindings) > 0
+
+	// Abandoning the bead releases both gates (audited separately): the agent is
+	// declaring the work will not be completed, so neither "merged" nor
+	// "deployed" applies.
+	if r.AbandonReason != "" && (blockedByPR || blockedByDeploy) {
+		var reasons []string
+		if blockedByPR {
+			reasons = append(reasons, fmt.Sprintf("unmerged PR(s) %s", prListString(r.UnmergedPR)))
+		}
+		if blockedByDeploy {
+			reasons = append(reasons, fmt.Sprintf("%d undeployed artifact(s)", len(r.DriftFindings)))
+		}
+		fmt.Fprintf(w, "OVERRIDE: bead %s closed despite %s — abandoning: %s\n",
+			r.BeadID, strings.Join(reasons, " and "), r.AbandonReason)
 		return
 	}
 
-	if len(r.UnmergedPR) == 0 {
-		fmt.Fprintf(w, "ok: bead %s — all %d referenced PR(s) are merged\n", r.BeadID, len(r.PRs))
+	if !blockedByPR && !blockedByDeploy {
+		if len(r.PRs) == 0 {
+			fmt.Fprintf(w, "ok: bead %s has no PR references — close is allowed\n", r.BeadID)
+			return
+		}
+		fmt.Fprintf(w, "ok: bead %s — all %d referenced PR(s) are merged", r.BeadID, len(r.PRs))
+		if r.DeployTargetsChecked > 0 {
+			fmt.Fprintf(w, "; %d deploy target(s) current on host", r.DeployTargetsChecked)
+		}
+		fmt.Fprintln(w)
+		if r.DeploySkipNote != "" {
+			fmt.Fprintf(w, "note: deployed gate skipped — %s\n", r.DeploySkipNote)
+		}
 		return
 	}
 
-	prList := make([]string, len(r.UnmergedPR))
-	for i, pr := range r.UnmergedPR {
-		prList[i] = fmt.Sprintf("#%d (%s)", pr.Number, pr.State)
+	fmt.Fprintf(w, "BLOCKED: cannot close bead %s\n", r.BeadID)
+
+	if blockedByPR {
+		fmt.Fprintf(w, "\nDefinition of Done requires all referenced PRs to be merged to main.\n")
+		fmt.Fprintf(w, "Unmerged PR(s): %s\n", prListString(r.UnmergedPR))
+		fmt.Fprintf(w, "See CLAUDE.md §Agent Delegation Enforcement §6.\n")
+		fmt.Fprintf(w, "To fix:\n")
+		for _, pr := range r.UnmergedPR {
+			fmt.Fprintf(w, "  • Merge PR #%d first, then close the bead\n", pr.Number)
+		}
 	}
 
-	if r.AbandonReason != "" {
-		fmt.Fprintf(w, "OVERRIDE: bead %s has unmerged PR(s) %s — abandoning: %s\n",
-			r.BeadID, strings.Join(prList, ", "), r.AbandonReason)
-		return
+	if blockedByDeploy {
+		fmt.Fprintf(w, "\nMerged != deployed: %d artifact(s) the merged change touched are not current on the host.\n",
+			len(r.DriftFindings))
+		for _, f := range r.DriftFindings {
+			label := "stale on host"
+			if f.Status == "missing" {
+				label = "never installed"
+			}
+			fmt.Fprintf(w, "  ✗ %s — %s (%s)\n", f.Target, label, f.Deployed)
+		}
+		fmt.Fprintf(w, "The fix is on main but never reached the machine (see docs/drift-detection-plan.md).\n")
+		fmt.Fprintf(w, "To fix, redeploy then re-close:\n")
+		for _, cmd := range dedupRemediations(r.DriftFindings) {
+			fmt.Fprintf(w, "  • %s\n", cmd)
+		}
 	}
 
-	fmt.Fprintf(w, "BLOCKED: cannot close bead %s — PR(s) not yet merged: %s\n",
-		r.BeadID, strings.Join(prList, ", "))
-	fmt.Fprintf(w, "\nDefinition of Done requires all referenced PRs to be merged to main.\n")
-	fmt.Fprintf(w, "See CLAUDE.md §Agent Delegation Enforcement §6.\n\n")
-	fmt.Fprintf(w, "To fix:\n")
-	for _, pr := range r.UnmergedPR {
-		fmt.Fprintf(w, "  • Merge PR #%d first, then close the bead\n", pr.Number)
-	}
 	fmt.Fprintf(w, "  • Or use --abandon-reason \"<why>\" if abandoning this bead (audited)\n")
+}
+
+// prListString renders unmerged PRs as "#449 (OPEN), #551 (DRAFT)".
+func prListString(prs []UnmergedPR) string {
+	parts := make([]string, len(prs))
+	for i, pr := range prs {
+		parts[i] = fmt.Sprintf("#%d (%s)", pr.Number, pr.State)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // AbandonAuditRecord is one JSONL line in the bead-abandon audit log.
@@ -256,8 +336,11 @@ func extractTitle(text string) string {
 	return "(unknown)"
 }
 
-func isPRMerged(ctx context.Context, repo string, prNum int) (bool, string, error) {
-	args := []string{"pr", "view", fmt.Sprintf("%d", prNum), "--json", "state,mergedAt,number"}
+// prInfo returns a PR's merge status, raw state, and changed file paths
+// (repo-relative). The file list feeds the deployed gate: it maps a merged PR's
+// changes to the deploy targets whose source-of-truth they touched.
+func prInfo(ctx context.Context, repo string, prNum int) (merged bool, state string, files []string, err error) {
+	args := []string{"pr", "view", fmt.Sprintf("%d", prNum), "--json", "state,mergedAt,number,files"}
 	if repo != "" {
 		args = append(args, "--repo", repo)
 	}
@@ -266,15 +349,23 @@ func isPRMerged(ctx context.Context, repo string, prNum int) (bool, string, erro
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return false, "", fmt.Errorf("gh pr view %d: %w (stderr: %s)", prNum, err, stderr.String())
+		if ctx.Err() != nil {
+			return false, "", nil, ctx.Err()
+		}
+		return false, "", nil, fmt.Errorf("gh pr view %d: %w (stderr: %s)", prNum, err, stderr.String())
 	}
 
 	var v prViewResult
 	if err := json.Unmarshal(stdout.Bytes(), &v); err != nil {
-		return false, "", fmt.Errorf("parse gh output: %w", err)
+		return false, "", nil, fmt.Errorf("parse gh output: %w", err)
 	}
 
-	return strings.EqualFold(v.State, "MERGED"), v.State, nil
+	for _, f := range v.Files {
+		if f.Path != "" {
+			files = append(files, f.Path)
+		}
+	}
+	return strings.EqualFold(v.State, "MERGED"), v.State, files, nil
 }
 
 func bdShow(ctx context.Context, beadsDir, id string) (string, error) {

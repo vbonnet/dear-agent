@@ -13,6 +13,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/circuitbreaker"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/modelrouter"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -40,6 +41,7 @@ var (
 	allowTestName      bool
 	harnessName        string
 	modelName          string
+	modelTierFlag      string // --model-tier: cheap, mid, expensive
 	workspaceName      string
 	workflowName       string
 	projectID          string
@@ -546,6 +548,33 @@ Examples:
 			}
 		}
 
+		// Apply model-tier routing when --model-tier is set and --model was not
+		// explicitly specified. The router picks the harness-appropriate alias for
+		// the requested tier; if the harness is not in the tier table the router
+		// returns an empty model and the normal default falls through below.
+		if !testMode && modelTierFlag != "" && modelName == "" {
+			routePrompt := prompt
+			if routePrompt == "" && promptFile != "" {
+				// best-effort: read first 512 bytes for classification
+				if data, err := os.ReadFile(promptFile); err == nil {
+					runes := []rune(string(data))
+					if len(runes) > 512 {
+						runes = runes[:512]
+					}
+					routePrompt = string(runes)
+				}
+			}
+			d, routeErr := modelrouter.Route(harnessName, modelTierFlag, "", routePrompt)
+			if routeErr != nil {
+				return fmt.Errorf("--model-tier: %w", routeErr)
+			}
+			if d.Model != "" {
+				modelName = d.Model
+				debug.Log("Model router: tier=%s model=%s reason=%q", d.Tier, d.Model, d.Reason)
+				fmt.Printf("Model router: %s → %s (%s)\n", d.Tier, d.Model, d.Reason)
+			}
+		}
+
 		if modelName == "" {
 			defaultModel, hasDefault := agent.DefaultModelForHarness(harnessName)
 			if hasDefault {
@@ -793,6 +822,11 @@ func init() {
 	newCmd.Flags().BoolVar(&allowTestName, "allow-test-name", false, "Override test pattern warning (for legitimate production sessions with 'test' in name)")
 	newCmd.Flags().StringVar(&harnessName, "harness", "", "Harness to use (claude-code, gemini-cli, codex-cli, opencode-cli) (env: AGM_DEFAULT_HARNESS)")
 	newCmd.Flags().StringVar(&modelName, "model", "", "Model to use (e.g., sonnet, opus, 2.5-flash, 5.4) (env: AGM_DEFAULT_MODEL)")
+	newCmd.Flags().StringVar(&modelTierFlag, "model-tier", "", "Cost tier for model routing: cheap (70%), mid (20%), expensive (10%)")
+	_ = newCmd.RegisterFlagCompletionFunc("model-tier", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"cheap", "mid", "expensive"}, cobra.ShellCompDirectiveNoFileComp
+	})
+	newCmd.MarkFlagsMutuallyExclusive("model", "model-tier")
 	newCmd.Flags().StringVar(&workspaceName, "workspace", "", "Workspace to use (oss, acme, auto for detection)")
 	newCmd.Flags().StringVar(&workflowName, "workflow", "", "Execution workflow (deep-research, code-review, architect)")
 	newCmd.Flags().StringVar(&projectID, "project-id", "", "GCP project ID (required for gemini-cli harness)")

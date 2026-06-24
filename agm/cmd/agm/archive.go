@@ -23,14 +23,14 @@ import (
 )
 
 var (
-	asyncArchive     bool // Spawn background reaper for async archival
-	archiveAll       bool
-	olderThan        string
-	dryRun           bool
-	cleanupWorktrees bool
-	forceArchive       bool // Skip pre-archive verification checks
-	keepSandbox        bool // Preserve sandbox directory for debugging
-	includeSupervisors bool // Include supervisor sessions in bulk archive
+	asyncArchive       bool // Spawn background reaper for async archival
+	archiveAll         bool
+	olderThan          string
+	dryRun             bool
+	cleanupWorktrees   bool
+	forceArchive       bool   // Skip pre-archive verification checks
+	keepSandbox        bool   // Preserve sandbox directory for debugging
+	includeSupervisors bool   // Include supervisor sessions in bulk archive
 	archiveOutcome     string // Outcome stamped on the archived record (completed|crashed|killed|gc-stale)
 )
 
@@ -59,8 +59,8 @@ func parseArchiveOutcome(s string) (manifest.SessionOutcome, error) {
 
 var archiveCmd = &cobra.Command{
 	Use:   "archive [session-name]",
-	Short: "Archive a Claude session or multiple sessions",
-	Long: `Archive a Claude session by marking it as archived.
+	Short: "Archive an AGM session or multiple sessions",
+	Long: `Archive an AGM session by marking it as archived.
 
 Archived sessions:
   • Hidden from 'agm session list' (use --all flag to see them)
@@ -108,7 +108,7 @@ Examples:
   agm session list --all
 
   # Archive by tmux session name
-  agm session archive claude-5
+  agm session archive worker-5
 
   # Archive by session ID
   agm session archive session-abc123`,
@@ -287,7 +287,7 @@ func handleAlreadyArchivedOrAsync(sessionName string, getResult *ops.GetSessionR
 		return true, fmt.Errorf("--async should only be used for active sessions; omit --async for stopped sessions")
 	}
 	if asyncArchive {
-		return true, spawnReaper(sessionName)
+		return true, spawnReaper(sessionName, getResult.Session.Harness)
 	}
 	return false, nil
 }
@@ -615,9 +615,9 @@ func bulkArchiveCandidates(adapter *dolt.Adapter, candidates []*manifest.Manifes
 	return successCount, failCount
 }
 
-// spawnReaper spawns a detached agm-reaper process for async archival
-// The reaper will wait for Claude prompt, send /exit, and archive the session
-func spawnReaper(sessionName string) error {
+// spawnReaper spawns a detached agm-reaper process for async archival.
+// The reaper waits for the harness prompt, sends /exit, and archives the session.
+func spawnReaper(sessionName, harness string) error {
 	// Find agm-reaper binary (should be in same directory as agm)
 	agmPath, err := os.Executable()
 	if err != nil {
@@ -648,7 +648,7 @@ func spawnReaper(sessionName string) error {
 			"agm-reaper binary not found",
 			fmt.Sprintf("  • Expected location: %s\n"+
 				"  • Log file: %s\n"+
-				"  • Build reaper: cd ~/src/ai-tools/agm && make build\n"+
+				"  • Build reaper: make build\n"+
 				"  • Or install: make install\n"+
 				"  • Or use synchronous archive: agm session archive %s (without --async)",
 				reaperPath, logFile, sessionName))
@@ -701,13 +701,30 @@ func spawnReaper(sessionName string) error {
 	fmt.Printf("  Session: %s\n", sessionName)
 	fmt.Printf("  Log file: %s\n", logFile)
 	fmt.Printf("\nThe reaper will:\n")
-	fmt.Printf("  1. Wait for Claude to return to prompt (smart detection, not fixed interval)\n")
+	fmt.Printf("  1. Wait for %s to return to prompt (smart detection, not fixed interval)\n", archiveHarnessDisplayName(harness))
 	fmt.Printf("  2. Send /exit command\n")
 	fmt.Printf("  3. Wait for pane to close\n")
 	fmt.Printf("  4. Archive the session\n")
 	fmt.Printf("\nMonitor progress: tail -f %s\n", logFile)
 
 	return nil
+}
+
+func archiveHarnessDisplayName(harness string) string {
+	switch harness {
+	case "claude-code":
+		return "Claude Code"
+	case "codex-cli":
+		return "Codex"
+	case "gemini-cli":
+		return "Gemini"
+	case "opencode-cli":
+		return "OpenCode"
+	case "":
+		return "the agent"
+	default:
+		return harness
+	}
 }
 
 // runSessionCleanup performs best-effort cleanup of session resources.

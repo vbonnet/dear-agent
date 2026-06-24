@@ -76,6 +76,9 @@ func TestRequire_DeniesWithoutReason(t *testing.T) {
 }
 
 func TestRequire_AllowsRealReason(t *testing.T) {
+	// Keep this deterministic and offline: with no API key the P1 default judge
+	// collapses to the deterministic floor (audited as "default").
+	t.Setenv("ANTHROPIC_API_KEY", "")
 	var captured []auditEntry
 	g := Guard{
 		Tool: "engram migrate", Flag: "--force",

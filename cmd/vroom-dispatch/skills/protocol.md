@@ -14,11 +14,20 @@ mkdir -p ~/.agm/vroom/heartbeat
 | File | Format | Writer | Readers |
 |------|--------|--------|---------|
 | `trail.jsonl` | JSONL append-only | All 3 | All 3 + humans |
-| `roadmap.jsonl` | JSONL append-only | Meta-O only | Orch + all |
-| `dispatched.jsonl` | JSONL append-only | Orch only | All |
+| `roadmap.jsonl` | JSONL append-only | Meta-O only | advisory log (see note) |
 | `heartbeat/meta-o.json` | JSON atomic-write | Meta-O | Orch, Overseer |
 | `heartbeat/orch.json` | JSON atomic-write | Orch | Meta-O, Overseer |
 | `heartbeat/overseer.json` | JSON atomic-write | Overseer | Meta-O, Orch |
+
+> **Beads are the dispatch source of truth (ce-1jm2).** The Orchestrator
+> dispatches **directly from `bd ready`** via `vroom-dispatch-direct` — it no
+> longer reads a `roadmap.jsonl` "accepted" projection, and there is no
+> `dispatched.jsonl` ledger (both were the retired prompt-file layer). In-flight
+> state is derived from live `worker-<id>` sessions + open PRs. `roadmap.jsonl`
+> remains an advisory record of Meta-O's prioritization rationale, but it does
+> **not** gate dispatch: a Meta-O "reject" only takes effect when Meta-O acts on
+> the bead itself (closes it, or sets it blocked/low-priority), which is what
+> removes it from `bd ready`.
 
 ## Record Formats
 
@@ -36,16 +45,19 @@ printf '{"ts":"%s","role":"%s","kind":"%s","payload":%s}\n' \
   >> ~/.agm/vroom/trail.jsonl
 ```
 
-### Roadmap Record (Meta-O writes)
+### Roadmap Record (Meta-O writes — advisory only)
 ```json
 {"bead_id":"ce-abc1","title":"Fix auth timeout","priority":"P1","state":"accepted","reason":"Blocking 3 other beads","decided_at":"2026-06-15T22:00:00Z"}
 ```
-States: `accepted`, `rejected`.
+States: `accepted`, `rejected`. This is an advisory rationale log; it no longer
+gates dispatch (ce-1jm2). To actually keep a bead out of dispatch, Meta-O must
+act on the bead in `bd` (close it, or mark it blocked/low-priority) so it drops
+out of `bd ready`.
 
-### Dispatch Record (Orch writes)
-```json
-{"bead_id":"ce-abc1","session":"worker-ce-abc1","model":"opus","dispatched_at":"2026-06-15T22:05:00Z"}
-```
+> The `dispatched.jsonl` ledger that previously recorded each dispatch was
+> retired with the prompt-file layer (ce-1jm2). Dispatch is now derived from live
+> `worker-<id>` sessions and open PRs; the `supervisor.orch.dispatched` trail
+> record remains the audit trail.
 
 ### DoD Audit Trail Kinds
 
@@ -61,6 +73,47 @@ emits two dedicated trail kinds:
 
 Both are written with the standard trail append. A human (or Meta-O) scanning the
 trail for `dod.` prefixes sees every closure-discipline breach in one grep.
+
+### Dispatch Concern Trail Kind
+
+When a worker finishes its deliverable but holds a reservation (see
+[Worker Status Codes](#worker-status-codes)), the Orchestrator records it so a
+human or supervisor can flag the work for review:
+
+- `supervisor.dispatch.concerns` (Orchestrator) — a worker signalled
+  `DONE_WITH_CONCERNS` in its bead notes. Payload fields: `bead`, `session`,
+  `concern` (the worker's verbatim reservation, or a short summary), and
+  optionally `pr` and `verifier` (the session spawned to double-check, if any).
+
+A human grepping the trail for `supervisor.dispatch.concerns` sees every
+"complete, but…" deliverable in one pass — these are the beads most worth a
+second look even though they were not failures.
+
+## Worker Status Codes
+
+Every worker reports a terminal outcome in its bead notes when it stops working a
+bead. There are exactly three:
+
+| Code | Meaning |
+|------|---------|
+| `DONE` | Deliverable complete, no reservations. The bead's PR is merged (DoD satisfied) and the worker has nothing it wants flagged. |
+| `DONE_WITH_CONCERNS` | Deliverable complete, **but** the worker holds a reservation about some aspect (a risky assumption, a shortcut taken under time pressure, a test it could not run, a design tradeoff it is unsure about). The worker MUST document the concern explicitly in the bead notes — what the reservation is and why — so a supervisor or human can decide whether to act on it. The deliverable still ships; the concern is a flag, not a blocker. |
+| `FAILED` | Deliverable not complete. The worker could not resolve the bead and reports the blocker plus concrete alternatives. |
+
+`DONE_WITH_CONCERNS` exists so a worker is never forced to choose between
+silently shipping work it has doubts about (the doubt is lost) and failing a
+bead it actually completed (the work is discarded). It surfaces the doubt
+without throwing away the deliverable.
+
+**Worker convention — recording the outcome.** Add a bead note whose first token
+is the status code, then close (or leave open per DoD) accordingly:
+```bash
+# Complete but with a reservation — document the concern, then proceed with DoD closure.
+bd --db ~/beads/context-engine/.beads note <bead-id> \
+  "DONE_WITH_CONCERNS: <one-line reservation>. Detail: <why this is a concern / what was not verified / what assumption was made>."
+```
+The status code MUST be the first token of the note so the Orchestrator can
+detect it with a simple grep when the worker session ghost-exits.
 
 ## Heartbeat
 
@@ -147,3 +200,32 @@ the loop — if it does, you go silently idle until a human notices.
   if the log write itself fails, ignore it and keep going; logging must never end the loop.
 - Recovery is automatic: the next scheduled tick retries the work. Do not attempt to
   tear down or re-create the loop yourself.
+
+## Unattended Operation (ALL supervisors)
+
+You run **unattended** in a detached session inside a persistent `/loop`. **No
+human is watching to answer questions.** You are PRE-AUTHORIZED to carry out your
+role's actions autonomously — do **NOT** pause to ask a human "should I proceed?
+/ stand down? / is this okay?" before acting within your remit. Halting for a
+confirmation that will never come is the exact failure this rule exists to prevent
+(ce-4bc1, where the Orchestrator repeatedly stalled asking permission instead of
+dispatching): a supervisor that waits goes silently idle, which is worse than
+acting under guardrails.
+
+Safety is enforced by **guardrails, not by asking**:
+- The agm circuit breaker (live CPU-load gate + spawn stagger) and
+  resource governor bound worker dispatch through live backpressure.
+- Reclaimer tools refuse to touch anything they cannot prove is reclaimable
+  (PID-1-only orphan reap, allowlist-only worktree sweep, protected supervisor
+  roles and in-progress workers), so destructive cleanup is safe by construction.
+- The roadmap and dispatch logs are append-only and reversible; a wrong call is
+  corrected on a later tick, not by blocking the mesh now.
+
+A backpressure result — `circuit breaker: spawn refused`, a reclaimer safety
+check declining, a dry-run showing nothing to reap — is **expected**: log it and
+move on, never treat it as needing human input. The distinct, legitimate reasons
+to *not* act are narrow and explicit: a documented spawn-pause signal, a genuine
+must-reach-human escalation you `forward` (see the escalation protocol above), or
+a role boundary in your "What You Do NOT Do" list. Generic caution is not one of
+them. This is the same anti-stall principle as Tick Resilience above: a tick must
+never go idle waiting on a human.

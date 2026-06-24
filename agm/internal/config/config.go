@@ -38,6 +38,9 @@ type Config struct {
 
 	// Sandbox configuration
 	Sandbox SandboxConfig `yaml:"sandbox"`
+
+	// Budget enforcement configuration
+	Budget BudgetConfig `yaml:"budget"`
 }
 
 // StorageConfig holds centralized storage configuration
@@ -140,6 +143,32 @@ type OnboardingConfig struct {
 	TemplatePath string `yaml:"template_path,omitempty"` // Optional path to custom template file
 }
 
+// BudgetConfig holds token and cost budget enforcement settings.
+type BudgetConfig struct {
+	// Enabled controls whether budget enforcement is active. Default: false.
+	// Set to true after configuring WeeklyLimitUSD.
+	Enabled bool `yaml:"enabled"`
+
+	// WeeklyLimitUSD is the total USD spend allowed per 7-day week (starting Monday).
+	// The daily budget is computed via smoothed carryover:
+	//   day_budget = (weekly_limit / 7) + carryover_from_prior_days
+	WeeklyLimitUSD float64 `yaml:"weekly_limit_usd"`
+
+	// StateFile is where the budget ledger is persisted across restarts.
+	// Default: ~/.agm/budget-state.json
+	StateFile string `yaml:"state_file,omitempty"`
+
+	// SessionTokenCaps maps harness name → max tokens per individual session.
+	// Keys: "claude-code", "codex-cli", "gemini-cli", "opencode-cli"
+	// 0 means no per-session cap for that harness.
+	SessionTokenCaps map[string]int64 `yaml:"session_token_caps,omitempty"`
+
+	// FallbackChain is the ordered list of model identifiers to try when the
+	// primary model's budget is exhausted: e.g. ["sonnet", "haiku"].
+	// An empty list means no fallback — requests fail immediately on exhaustion.
+	FallbackChain []string `yaml:"fallback_chain,omitempty"`
+}
+
 // Default returns default configuration
 func Default() *Config {
 	homeDir, _ := os.UserHomeDir()
@@ -219,6 +248,18 @@ func Default() *Config {
 			Onboarding: OnboardingConfig{
 				Enabled: true, // Inject CLAUDE.md with worktree instructions by default
 			},
+		},
+		Budget: BudgetConfig{
+			Enabled:        false, // Opt-in — must configure WeeklyLimitUSD first
+			WeeklyLimitUSD: 0,
+			StateFile:      filepath.Join(homeDir, ".agm", "budget-state.json"),
+			SessionTokenCaps: map[string]int64{
+				"claude-code":  0, // 0 = no cap
+				"codex-cli":    0,
+				"gemini-cli":   0,
+				"opencode-cli": 0,
+			},
+			FallbackChain: []string{"sonnet", "haiku"},
 		},
 	}
 }

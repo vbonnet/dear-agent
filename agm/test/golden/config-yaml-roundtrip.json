@@ -69,5 +69,12 @@
       "Enabled": false,
       "TemplatePath": ""
     }
+  },
+  "Budget": {
+    "Enabled": false,
+    "WeeklyLimitUSD": 0,
+    "StateFile": "",
+    "SessionTokenCaps": null,
+    "FallbackChain": null
   }
 }

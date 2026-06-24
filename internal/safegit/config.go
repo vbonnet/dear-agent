@@ -7,6 +7,13 @@
 //     distinct, surfaced outcome, never a silent pass.
 //   - flaky_checks: checks that may be retried once (the "flake valve"); a second
 //     failure is treated as a real failure that blocks the merge.
+//   - approval_policy: the auto-approve decision taxonomy (bead ce-onj5).
+//     AUTO-APPROVE by default; HUMAN required only for the named high-stakes
+//     categories (security boundaries, money/spend, product decisions,
+//     irreversible infra, …). Unlike the two gates above it does not affect P4
+//     reviewer/flake gating; it is the policy consumed by the VROOM escalation
+//     classifier via Config.EscalationPolicy. Absent ⇒ the built-in
+//     escalation.DefaultApprovalPolicy is used.
 //
 // The file is optional: if it is absent, the P4 gates are skipped silently and
 // safe-merge falls back to its built-in gates.
@@ -22,6 +29,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/vbonnet/dear-agent/pkg/vroom/escalation"
 	"gopkg.in/yaml.v3"
 )
 
@@ -38,6 +46,34 @@ const DefaultReviewerTimeoutMinutes = 30
 type Config struct {
 	ExpectedReviewers []ExpectedReviewer `yaml:"expected_reviewers"`
 	FlakyChecks       []FlakyCheck       `yaml:"flaky_checks"`
+	// ApprovalPolicy is the auto-approve decision taxonomy (DEAR retro
+	// 2026-06-12): AUTO-APPROVE by default, HUMAN only for the named high-stakes
+	// categories. It is independent of the P4 reviewer/flake gates — a config
+	// that carries only an approval_policy still reports IsEmpty (no P4 gating)
+	// while supplying the taxonomy to the VROOM escalation classifier. When
+	// absent, the built-in escalation.DefaultApprovalPolicy is used. See
+	// EscalationPolicy.
+	ApprovalPolicy *ApprovalPolicy `yaml:"approval_policy"`
+}
+
+// ApprovalPolicy mirrors escalation.ApprovalPolicy as the .safe-merge.yml
+// schema. It is converted to the in-memory escalation type by
+// Config.EscalationPolicy.
+type ApprovalPolicy struct {
+	// AutoApproveDefault is the posture when no human_required category matches.
+	AutoApproveDefault bool `yaml:"auto_approve_default"`
+	// HumanRequired lists the categories that force a human; first match wins.
+	HumanRequired []HumanRequiredCategory `yaml:"human_required"`
+}
+
+// HumanRequiredCategory is one bucket of the taxonomy only a human may decide.
+type HumanRequiredCategory struct {
+	// Name is the coarse topic recorded for audit (e.g. "security-boundary").
+	Name string `yaml:"name"`
+	// Reason is the human-readable explanation recorded on the verdict.
+	Reason string `yaml:"reason"`
+	// Patterns are case-insensitive regexp sources; any match selects the bucket.
+	Patterns []string `yaml:"patterns"`
 }
 
 // ExpectedReviewer is a bot (or human) login whose review is required before
@@ -108,6 +144,15 @@ func LoadConfig(dir, path string) (*Config, error) {
 	return cfg, nil
 }
 
+// LoadRepoConfig loads .safe-merge.yml from the current git repository root,
+// returning (nil, nil) when the file is absent (callers then fall back to
+// built-in defaults). It is the convenience used by consumers — such as the
+// VROOM escalation classifier — that want the repo's config without computing
+// the root themselves.
+func LoadRepoConfig() (*Config, error) {
+	return LoadConfig(repoRoot(), "")
+}
+
 // repoRoot returns the git working-tree root for the current directory, used to
 // locate ConfigFileName. It falls back to "." when not inside a git repo so a
 // loose checkout still finds a config in the working directory.
@@ -155,5 +200,37 @@ func ParseConfig(data []byte) (*Config, error) {
 			return nil, fmt.Errorf("flaky_checks[%q] has negative max_retries", f.Name)
 		}
 	}
+	// Validate the approval_policy by compiling it: a bad category name or an
+	// uncompilable pattern must fail loudly here, never silently disable a gate
+	// the operator believed was running.
+	if cfg.ApprovalPolicy != nil {
+		if _, err := cfg.ApprovalPolicy.toEscalation().Compile(); err != nil {
+			return nil, err
+		}
+	}
 	return &cfg, nil
+}
+
+// EscalationPolicy returns the in-memory escalation.ApprovalPolicy to gate on:
+// the parsed approval_policy block when present, otherwise the built-in
+// escalation.DefaultApprovalPolicy. This is the single conversion point from the
+// .safe-merge.yml schema to the VROOM escalation classifier's taxonomy.
+func (c *Config) EscalationPolicy() escalation.ApprovalPolicy {
+	if c == nil || c.ApprovalPolicy == nil {
+		return escalation.DefaultApprovalPolicy()
+	}
+	return c.ApprovalPolicy.toEscalation()
+}
+
+// toEscalation maps the YAML schema onto the canonical escalation type.
+func (p *ApprovalPolicy) toEscalation() escalation.ApprovalPolicy {
+	out := escalation.ApprovalPolicy{AutoApproveDefault: p.AutoApproveDefault}
+	for _, c := range p.HumanRequired {
+		out.HumanRequired = append(out.HumanRequired, escalation.HumanRequiredCategory{
+			Name:     c.Name,
+			Reason:   c.Reason,
+			Patterns: c.Patterns,
+		})
+	}
+	return out
 }

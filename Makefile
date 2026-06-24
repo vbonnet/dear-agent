@@ -16,7 +16,6 @@ export GOMEMLIMIT GOMAXPROCS GOGC
 #   preflight-race          preflight + go test -race — catch data races before push
 #   preflight-full          preflight + go test -race + govulncheck (full parity)
 #   health-check            Run the codebase health auditor (cmd/repo-health)
-#   install-preflight-hook  Install a git pre-push hook that runs preflight
 #   install-post-merge-hook Install a post-merge hook that reaps merged worktrees
 #   act-validate            Run full local CI validation via act (needs Docker)
 #   act-lint                Run lint job via act
@@ -125,20 +124,12 @@ health-check:
 	@GOWORK=off go build -o build/repo-health ./cmd/repo-health
 	@./build/repo-health --root . $(ARGS)
 
-# Install a git pre-push hook that runs `make preflight`. Pushing to a PR
-# branch will then fail-fast before the GitHub round-trip if lint/build/vet
-# is broken. Does NOT replace CI — only shifts left. Refuses to overwrite
-# an existing hook (deepsec, husky, etc.) — merge manually if you have one.
-install-preflight-hook:
-	@HOOK="$$(git rev-parse --git-path hooks/pre-push)"; \
-	if [ -e "$$HOOK" ]; then \
-		echo "Error: a pre-push hook already exists at $$HOOK"; \
-		echo "Merge 'exec make preflight' into it manually, or remove it first."; \
-		exit 1; \
-	fi; \
-	printf '#!/bin/sh\nexec make preflight\n' > "$$HOOK"; \
-	chmod +x "$$HOOK"; \
-	echo "Installed: $$HOOK -> make preflight"
+# NOTE: there is intentionally no `install-preflight-hook` target. On this host
+# git's effective hooks dir is set globally via core.hooksPath (chezmoi-managed,
+# ~/.config/git/hooks), so a repo-local pre-push hook is silently bypassed. The
+# global pre-push hook already runs `make preflight` on default-branch pushes
+# for any repo that defines a `preflight` target — so a per-repo installer would
+# be both redundant and a silent no-op. See bead ce-hft2.
 
 # Install the post-merge worktree-sweep trigger. After a PR lands on the
 # default branch locally (e.g. `git pull` on main), it kicks off the canonical

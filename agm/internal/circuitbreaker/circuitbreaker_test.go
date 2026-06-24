@@ -9,15 +9,25 @@ import (
 
 // --- test doubles ---
 
-type stubLoad struct{ load float64; err error }
+type stubLoad struct {
+	load float64
+	err  error
+}
 
 func (s stubLoad) Load5() (float64, error) { return s.load, s.err }
 
-type stubWorkers struct{ count int; err error }
+type stubWorkers struct {
+	count int
+	err   error
+}
 
 func (s stubWorkers) CountWorkers() (int, error) { return s.count, s.err }
 
-type stubTimer struct{ t time.Time; err error; recorded time.Time }
+type stubTimer struct {
+	t        time.Time
+	err      error
+	recorded time.Time
+}
 
 func (s *stubTimer) LastSpawnTime() (time.Time, error) { return s.t, s.err }
 func (s *stubTimer) RecordSpawn(t time.Time) error     { s.recorded = t; return nil }
@@ -283,8 +293,58 @@ func TestDefaultConfig_EnvOverride(t *testing.T) {
 func TestDefaultConfig_InvalidEnv(t *testing.T) {
 	t.Setenv("AGM_MAX_WORKERS", "abc")
 	cfg := DefaultConfig()
-	if cfg.MaxWorkers != 3 {
-		t.Errorf("expected MaxWorkers=3 (default), got %d", cfg.MaxWorkers)
+	if cfg.MaxWorkers != 0 {
+		t.Errorf("expected MaxWorkers=0 (default: no cap), got %d", cfg.MaxWorkers)
+	}
+}
+
+func TestDefaultConfig_DefaultIsZero(t *testing.T) {
+	// The default MaxWorkers is 0 (dynamic — no hard cap).
+	// Workers are bounded by CPU load and spawn stagger gates instead.
+	t.Setenv("AGM_MAX_WORKERS", "")
+	cfg := DefaultConfig()
+	if cfg.MaxWorkers != 0 {
+		t.Errorf("expected MaxWorkers=0 (dynamic), got %d", cfg.MaxWorkers)
+	}
+}
+
+func TestDynamicMode_MaxWorkersDisabled(t *testing.T) {
+	// MaxWorkers=0 → gate passes regardless of worker count.
+	cfg := Config{MaxWorkers: 0, MaxLoad5: 100, MinSpawnInterval: 0}
+
+	for _, count := range []int{0, 1, 5, 10, 100} {
+		r := Check(cfg,
+			stubLoad{load: 1},
+			stubWorkers{count: count},
+			&stubTimer{err: os.ErrNotExist},
+		)
+		var gate GateResult
+		for _, g := range r.Gates {
+			if g.Gate == "max_workers" {
+				gate = g
+			}
+		}
+		if !gate.Passed {
+			t.Errorf("max_workers gate should pass with MaxWorkers=0 and count=%d, got: %s", count, gate.Message)
+		}
+		if !r.Allowed {
+			t.Errorf("spawn should be allowed with MaxWorkers=0 and count=%d", count)
+		}
+	}
+}
+
+func TestDynamicMode_CPUStillGates(t *testing.T) {
+	// Even with MaxWorkers=0, a high CPU load should block spawning.
+	cfg := Config{MaxWorkers: 0, MaxLoad5: 50, MinSpawnInterval: 0}
+
+	r := Check(cfg,
+		stubLoad{load: 80},
+		stubWorkers{count: 100},
+		&stubTimer{err: os.ErrNotExist},
+	)
+
+	if r.Allowed {
+		t.Error("spawn should be blocked by CPU gate even when MaxWorkers=0")
 	}
 }
 

@@ -84,6 +84,24 @@ stalled sessions are detected and recovered against agreed thresholds.
 
 ---
 
+### Harness Parity
+
+**File:** [`harness_parity.feature`](../test/bdd/features/harness_parity.feature)
+
+**Drives:** `state.Detector` / `state.CheckCanReceive`
+
+**Key scenarios:**
+- A Codex CLI composer pane is detected as `ready`.
+- An idle Codex composer allows direct delivery.
+- A Codex trust prompt is queued rather than treated as a sendable prompt.
+
+**Why this matters:** AGM's delivery contract is harness-neutral. Codex CLI uses
+different terminal chrome than Claude Code, but the orchestrator must still know
+when Codex can safely receive input and when a menu prompt must not receive
+injected text.
+
+---
+
 ## Running
 
 ```bash

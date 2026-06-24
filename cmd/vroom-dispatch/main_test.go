@@ -315,6 +315,121 @@ func TestWorkerSpawnPinsOpusAndWayfinder(t *testing.T) {
 	}
 }
 
+// TestDeployWorkerDispatch pins the deploy-as-worker contract (ce-x9s5): the
+// Orchestrator dispatches an episodic deploy worker to land a finished bead's
+// PR, and that worker's skill drives the merge through the vetted safe-* path.
+// Both halves live in embedded markdown, so guard them here.
+func TestDeployWorkerDispatch(t *testing.T) {
+	orch, err := skills.ReadFile("skills/orchestrator.md")
+	if err != nil {
+		t.Fatalf("read embedded orchestrator.md: %v", err)
+	}
+	od := string(orch)
+	for _, want := range []string{
+		"worker-deploy-",                    // distinct deploy-worker session name
+		"deploy-worker.md",                  // dispatch points at the installed skill
+		"deploy-dispatched.jsonl",           // de-dupe ledger so we don't double-spawn
+		"--model=opus-200k",                 // same credit-gate guardrail as impl workers
+		"--mode=auto",                       // detached deploy worker can't clear prompts
+		"supervisor.orch.deploy_dispatched", // trail event for the dispatch
+	} {
+		if !strings.Contains(od, want) {
+			t.Errorf("orchestrator.md deploy dispatch missing %q", want)
+		}
+	}
+
+	skill, err := skills.ReadFile("skills/deploy-worker.md")
+	if err != nil {
+		t.Fatalf("read embedded deploy-worker.md: %v", err)
+	}
+	sd := string(skill)
+	for _, want := range []string{
+		"safe-rebase",              // rebase onto main (vetted wrapper, never --force)
+		"resolve-review-threads",   // resolve bot threads before merge gate
+		"safe-merge",               // CI-watch + TOCTOU squash-merge via vetted path
+		"--watch",                  // safe-merge --watch is the CI watch
+		"WORKER, not a supervisor", // episodic, finite — not a persistent loop
+	} {
+		if !strings.Contains(sd, want) {
+			t.Errorf("deploy-worker.md missing %q", want)
+		}
+	}
+	// A deploy worker must never use the raw, hook-denied merge path.
+	if strings.Contains(sd, "gh pr merge") {
+		t.Errorf("deploy-worker.md must merge via safe-merge, not raw 'gh pr merge'")
+	}
+}
+
+// TestWorkerPromptRequiresVerificationGate pins the verification-before-completion
+// hard gate (ce-fvsv): the worker dispatch prompt must force ≥1 verification step
+// (go test / make preflight / equivalent) before a worker may declare done. Code
+// written but never run is not done — this guards against ghost completions.
+func TestWorkerPromptRequiresVerificationGate(t *testing.T) {
+	b, err := skills.ReadFile("skills/orchestrator.md")
+	if err != nil {
+		t.Fatalf("read embedded orchestrator.md: %v", err)
+	}
+	doc := string(b)
+
+	for _, want := range []string{
+		"VERIFICATION GATE",
+		"go test",
+		"make preflight",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("orchestrator.md worker dispatch missing verification-gate marker %q", want)
+		}
+	}
+}
+
+// TestSupervisorSkillsPreauthorizeUnattended guards the ce-4bc1 fix. The
+// Orchestrator (and, by the retro's plural principle, ALL supervisors) ran
+// over-cautious: spawned unattended in a detached session, they defaulted to
+// human-in-the-loop caution and stalled asking "should I proceed? / stand down?"
+// instead of acting. The fix is an explicit "no human is watching" pre-authorization
+// in each supervisor's boot SKILL. This test pins that contract: every supervisor
+// skill must carry the pre-authorization preamble, and the shared protocol must
+// document it once for all roles. Without these tokens the mesh silently regresses
+// to the stall the bead describes.
+func TestSupervisorSkillsPreauthorizeUnattended(t *testing.T) {
+	// Tokens common to all three per-role preambles. Loose enough to survive
+	// wording tweaks, specific enough to fail if the pre-authorization is dropped.
+	preauthTokens := []string{
+		"PRE-AUTHORIZED",            // the core grant
+		"pause to ask",              // ... the anti-pattern it forbids
+		"guardrails, not by asking", // ... and why it is safe to not ask
+		"unattended",                // the operating condition
+	}
+	// Derive the skill-file list from the supervisors slice in main.go rather
+	// than hardcoding it, so the test cannot drift from production as
+	// supervisors are added, removed, or renamed.
+	if len(supervisors) == 0 {
+		t.Fatal("no supervisors defined")
+	}
+	for _, s := range supervisors {
+		b, err := skills.ReadFile("skills/" + s.SkillFile)
+		if err != nil {
+			t.Fatalf("read embedded %s: %v", s.SkillFile, err)
+		}
+		doc := string(b)
+		for _, want := range preauthTokens {
+			if !strings.Contains(doc, want) {
+				t.Errorf("%s missing unattended pre-authorization token %q", s.SkillFile, want)
+			}
+		}
+	}
+
+	// The shared protocol carries the canonical "(ALL supervisors)" statement so
+	// the principle is documented once and the per-role preambles can point to it.
+	b, err := skills.ReadFile("skills/protocol.md")
+	if err != nil {
+		t.Fatalf("read embedded protocol.md: %v", err)
+	}
+	if !strings.Contains(string(b), "Unattended Operation (ALL supervisors)") {
+		t.Errorf("protocol.md missing the shared \"Unattended Operation (ALL supervisors)\" section")
+	}
+}
+
 // --- Dispatch Advisor tests (ce-hn8n) ---
 
 func TestRestartTracker_BackoffProgression(t *testing.T) {

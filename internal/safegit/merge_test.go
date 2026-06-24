@@ -268,6 +268,99 @@ func TestParseSoak_OtherBotReview(t *testing.T) {
 	}
 }
 
+// makeSoakJSONState is like makeSoakJSON but lets a test pick the review state,
+// to exercise gate 4's state handling (COMMENTED vs APPROVED vs PENDING).
+func makeSoakJSONState(committedAt time.Time, botLogin, state string) []byte {
+	type commitEntry struct {
+		CommittedDate time.Time `json:"committedDate"`
+	}
+	type reviewEntry struct {
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		State string `json:"state"`
+	}
+	type doc struct {
+		HeadRefOid string        `json:"headRefOid"`
+		Commits    []commitEntry `json:"commits"`
+		Reviews    []reviewEntry `json:"reviews"`
+	}
+	d := doc{HeadRefOid: "abc123"}
+	if !committedAt.IsZero() {
+		d.Commits = []commitEntry{{CommittedDate: committedAt}}
+	}
+	if botLogin != "" {
+		r := reviewEntry{State: state}
+		r.Author.Login = botLogin
+		d.Reviews = []reviewEntry{r}
+	}
+	b, _ := json.Marshal(d)
+	return b
+}
+
+// The actual gemini login carries GitHub's "[bot]" App suffix; the bot only ever
+// posts COMMENTED reviews. This is the exact shape that the bare-constant bug
+// (ce-l8by) failed to match — gate 4 must pass it.
+func TestParseSoak_BotSuffixedLoginCommented(t *testing.T) {
+	now := time.Now()
+	past := now.Add(-10 * time.Minute)
+	data := makeSoakJSONState(past, "gemini-code-assist[bot]", "COMMENTED")
+	if err := parseSoak(data, now); err != nil {
+		t.Fatalf("[bot]-suffixed COMMENTED review should satisfy gate 4, got: %v", err)
+	}
+}
+
+// A legacy bare "gemini-code-assist" login must still match, so the gate is
+// robust to GitHub dropping/adding the suffix.
+func TestParseSoak_BareLegacyLogin(t *testing.T) {
+	now := time.Now()
+	past := now.Add(-10 * time.Minute)
+	data := makeSoakJSONState(past, "gemini-code-assist", "COMMENTED")
+	if err := parseSoak(data, now); err != nil {
+		t.Fatalf("bare legacy login should still satisfy gate 4, got: %v", err)
+	}
+}
+
+// A PENDING (unsubmitted draft) review from the bot must NOT satisfy the gate.
+func TestParseSoak_BotPendingReviewDoesNotCount(t *testing.T) {
+	now := time.Now()
+	past := now.Add(-10 * time.Minute)
+	data := makeSoakJSONState(past, ReviewBot, "PENDING")
+	if err := parseSoak(data, now); err == nil {
+		t.Fatal("PENDING bot review should not satisfy gate 4, got nil")
+	}
+}
+
+func TestIsReviewBot(t *testing.T) {
+	cases := map[string]bool{
+		"gemini-code-assist[bot]": true,
+		"gemini-code-assist":      true,
+		"some-other-bot[bot]":     false,
+		"":                        false,
+	}
+	for login, want := range cases {
+		if got := isReviewBot(login); got != want {
+			t.Errorf("isReviewBot(%q) = %v, want %v", login, got, want)
+		}
+	}
+}
+
+func TestReviewStateCounts(t *testing.T) {
+	cases := map[string]bool{
+		"COMMENTED":         true,
+		"APPROVED":          true,
+		"CHANGES_REQUESTED": true,
+		"":                  true,
+		"PENDING":           false,
+		"DISMISSED":         false,
+	}
+	for state, want := range cases {
+		if got := reviewStateCounts(state); got != want {
+			t.Errorf("reviewStateCounts(%q) = %v, want %v", state, got, want)
+		}
+	}
+}
+
 
 // --- SafeMerge config validation ---
 

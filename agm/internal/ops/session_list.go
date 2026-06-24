@@ -46,6 +46,7 @@ type SessionSummary struct {
 	Outcome       string   `json:"outcome,omitempty"` // How the session ended (set for archived sessions)
 	Attached      bool     `json:"attached"`
 	Harness       string   `json:"harness"`
+	Workspace     string   `json:"workspace,omitempty"`
 	Project       string   `json:"project"`
 	Tags          []string `json:"tags,omitempty"`
 	CreatedAt     string   `json:"created_at"`
@@ -161,6 +162,7 @@ func toSessionSummary(m *manifest.Manifest, statuses map[string]string, attached
 		Outcome:       string(m.Outcome),
 		Attached:      attached[m.Name],
 		Harness:       m.Harness,
+		Workspace:     m.Workspace,
 		Project:       m.Context.Project,
 		Tags:          m.Context.Tags,
 		CreatedAt:     m.CreatedAt.Format("2006-01-02T15:04:05Z"),

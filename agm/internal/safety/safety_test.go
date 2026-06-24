@@ -287,6 +287,54 @@ func TestDetectSessionUninitialized(t *testing.T) {
 	}
 }
 
+func TestDetectCodexSessionUninitialized(t *testing.T) {
+	tests := []struct {
+		name          string
+		paneContent   string
+		wantViolation bool
+		wantEvidence  string
+	}{
+		{
+			name:          "codex composer visible",
+			paneContent:   "│ >_ OpenAI Codex (v0.142.0) │\n│ model: gpt-5.4 /model to change │",
+			wantViolation: false,
+		},
+		{
+			name:          "codex trust prompt",
+			paneContent:   "Do you trust the contents of this directory?",
+			wantViolation: true,
+			wantEvidence:  "codex trust prompt visible",
+		},
+		{
+			name:          "codex model prompt",
+			paneContent:   "Choose how you'd like Codex to proceed\n1. Try new model\n2. Use existing model",
+			wantViolation: true,
+			wantEvidence:  "codex model prompt visible",
+		},
+		{
+			name:          "shell prompt only",
+			paneContent:   "vbonnet@mac merged %",
+			wantViolation: true,
+			wantEvidence:  "no codex composer",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := detectCodexSessionUninitialized(tt.paneContent)
+			if tt.wantViolation && v == nil {
+				t.Error("expected violation but got nil")
+			}
+			if !tt.wantViolation && v != nil {
+				t.Errorf("expected no violation but got: %s", v.Message)
+			}
+			if v != nil && tt.wantEvidence != "" && v.Evidence != tt.wantEvidence {
+				t.Errorf("expected evidence %q, got %q", tt.wantEvidence, v.Evidence)
+			}
+		})
+	}
+}
+
 func TestDetectClaudeMidResponse(t *testing.T) {
 	tests := []struct {
 		name          string

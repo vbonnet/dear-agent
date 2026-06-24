@@ -27,8 +27,9 @@ type Manifest struct {
 	Claude                  Claude          `yaml:"claude"`
 	Tmux                    Tmux            `yaml:"tmux"`
 	OpenCode                *OpenCode       `yaml:"opencode,omitempty"` // OpenCode session metadata
-	Harness                 string          `yaml:"harness,omitempty"`  // Harness specifies the AI harness (claude-code, gemini-cli, codex-cli, opencode-cli)
-	Model                   string          `yaml:"model,omitempty"`    // Model specifies the AI model within the harness
+	Harness                 string          `yaml:"harness,omitempty"`     // Harness specifies the AI harness (claude-code, gemini-cli, codex-cli, opencode-cli)
+	Model                   string          `yaml:"model,omitempty"`       // Model specifies the AI model within the harness
+	ModelTier               string          `yaml:"model_tier,omitempty"`  // ModelTier is the cost tier assigned by the model router (cheap, mid, expensive)
 	EngramMetadata          *EngramMetadata `yaml:"engram_metadata,omitempty"`
 	ContextUsage            *ContextUsage   `yaml:"context_usage,omitempty"`              // Context usage tracking for status line
 	PermissionMode          string          `yaml:"permission_mode,omitempty"`            // Claude Code permission mode (default, plan, ask, allow)

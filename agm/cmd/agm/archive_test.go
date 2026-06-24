@@ -738,7 +738,7 @@ func TestSpawnReaper_SessionNameSanitization(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Note: spawnReaper() will fail because agm-reaper binary doesn't exist
 			// in test environment. We're testing the path sanitization logic.
-			err := spawnReaper(tc.sessionName)
+			err := spawnReaper(tc.sessionName, "codex-cli")
 
 			// Should get error about missing binary (expected in tests)
 			if err == nil {
@@ -757,6 +757,22 @@ func TestSpawnReaper_SessionNameSanitization(t *testing.T) {
 				t.Errorf("Log path should be in %s, got error: %v", os.TempDir(), err)
 			}
 		})
+	}
+}
+
+func TestArchiveHarnessDisplayName(t *testing.T) {
+	tests := map[string]string{
+		"claude-code":  "Claude Code",
+		"codex-cli":    "Codex",
+		"gemini-cli":   "Gemini",
+		"opencode-cli": "OpenCode",
+		"":             "the agent",
+		"custom":       "custom",
+	}
+	for in, want := range tests {
+		if got := archiveHarnessDisplayName(in); got != want {
+			t.Errorf("archiveHarnessDisplayName(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

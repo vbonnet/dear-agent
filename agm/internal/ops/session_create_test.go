@@ -396,6 +396,25 @@ func TestBuildHarnessCommand_GeminiCli(t *testing.T) {
 	}
 }
 
+func TestBuildHarnessCommand_CodexCli(t *testing.T) {
+	cmd := buildHarnessCommand("codex-cli", "5.4", "codex-session", "/tmp/work")
+	for _, want := range []string{
+		"env -u CLAUDECODE",
+		"AGM_SESSION_NAME='codex-session'",
+		"codex -m 'gpt-5.4'",
+		"-C '/tmp/work'",
+		"-s workspace-write",
+		"&& exit",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("command %q missing %q", cmd, want)
+		}
+	}
+	if strings.Contains(cmd, "CLAUDE_CODE_OAUTH_TOKEN") || strings.Contains(cmd, "ANTHROPIC_") {
+		t.Errorf("codex command leaked Claude/Anthropic env: %s", cmd)
+	}
+}
+
 func TestBuildHarnessCommand_UnknownHarness(t *testing.T) {
 	cmd := buildHarnessCommand("unknown", "m", "s", "/tmp")
 	if !strings.Contains(cmd, "Unknown harness") {

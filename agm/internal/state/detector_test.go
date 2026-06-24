@@ -42,6 +42,45 @@ func TestDetector_DetectState_Ready(t *testing.T) {
 	}
 }
 
+func TestDetector_DetectState_CodexReady(t *testing.T) {
+	detector := NewDetector()
+
+	output := `╭────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.43.0)                          │
+│                                                    │
+│  /model to change model   /help for commands       │
+╰────────────────────────────────────────────────────╯`
+
+	result := detector.DetectState(output, time.Now())
+
+	if result.State != StateReady {
+		t.Errorf("Expected StateReady for Codex composer, got %v", result.State)
+	}
+
+	if result.Confidence != "high" {
+		t.Errorf("Expected high confidence, got %s", result.Confidence)
+	}
+}
+
+func TestDetector_DetectState_CodexTrustPromptNotReady(t *testing.T) {
+	detector := NewDetector()
+
+	output := `Do you trust the contents of this folder?
+
+› 1. Yes, continue
+  2. No, exit`
+
+	result := detector.DetectState(output, time.Now())
+	if result.State == StateReady {
+		t.Errorf("Expected Codex trust prompt not to be StateReady")
+	}
+
+	got := detector.CheckCanReceive(output)
+	if got != CanReceiveQueue {
+		t.Errorf("Expected Codex trust prompt to queue, got %v", got)
+	}
+}
+
 func TestDetector_DetectState_Thinking(t *testing.T) {
 	detector := NewDetector()
 
@@ -653,6 +692,14 @@ func TestDetector_CheckCanReceive(t *testing.T) {
 		{
 			name:     "Prompt with status bar below = YES",
 			output:   "━━━━━━━━━━━━━━━━━━━━\n❯\u00a0\n━━━━━━━━━━━━━━━━━━━━\n\n\n",
+			expected: CanReceiveYes,
+		},
+		{
+			name: "Codex composer = YES",
+			output: `╭────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex                                    │
+│  /model to change model                            │
+╰────────────────────────────────────────────────────╯`,
 			expected: CanReceiveYes,
 		},
 	}

@@ -8,7 +8,7 @@ require (
 	github.com/Netflix/go-expect v0.0.0-20220104043353-73e0943537d2
 	github.com/a2aproject/a2a-go v0.3.15
 	github.com/agnivade/levenshtein v1.2.1
-	github.com/anthropics/anthropic-sdk-go v1.50.1
+	github.com/anthropics/anthropic-sdk-go v1.51.0
 	github.com/briandowns/spinner v1.23.2
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/charmbracelet/bubbles v1.0.0
@@ -28,13 +28,13 @@ require (
 	github.com/hashicorp/go-version v1.9.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/leanovate/gopter v0.2.11
-	github.com/mattn/go-sqlite3 v1.14.45
+	github.com/mattn/go-sqlite3 v1.14.47
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/olekukonko/tablewriter v1.1.4
 	github.com/onsi/ginkgo/v2 v2.31.0
 	github.com/onsi/gomega v1.42.0
 	github.com/pact-foundation/pact-go/v2 v2.5.1
-	github.com/pelletier/go-toml/v2 v2.3.1
+	github.com/pelletier/go-toml/v2 v2.4.0
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/rogpeppe/go-internal v1.15.0
 	github.com/sashabaranov/go-openai v1.41.2
@@ -60,10 +60,10 @@ require (
 	golang.org/x/term v0.44.0
 	golang.org/x/text v0.38.0
 	golang.org/x/time v0.15.0
-	google.golang.org/api v0.284.0
+	google.golang.org/api v0.285.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.52.0
+	modernc.org/sqlite v1.53.0
 	tailscale.com v1.100.0
 )
 
@@ -195,10 +195,10 @@ require (
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
 	google.golang.org/genproto v0.0.0-20260319201613-d00831a3d3e7 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260610212136-7ab31c22f7ad // indirect
 	google.golang.org/grpc v1.81.1 // indirect
 	gvisor.dev/gvisor v0.0.0-20260224225140-573d5e7127a8 // indirect
-	modernc.org/libc v1.72.3 // indirect
+	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )

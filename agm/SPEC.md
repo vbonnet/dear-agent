@@ -6,6 +6,32 @@
 **Status:** Reviewed (5-persona review complete)
 **Last Updated:** 2026-03-06
 
+## 2026-06-23 Audit Addendum: Harness Parity
+
+AGM supports multiple interactive harnesses. The shared orchestration layer MUST
+define behavior in harness-neutral terms first, with harness-specific extensions
+only where a tool exposes unique capabilities.
+
+For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
+
+- create paths MUST launch `codex` in tmux with the AGM working directory
+  (`-C <workdir>`), resolved model (`-m <model>`), and `workspace-write`
+  sandbox
+- resume paths MUST recreate a missing Codex tmux session with the same launch
+  contract used by create paths
+- send paths MUST route `codex-cli` through tmux delivery, not the OpenAI API
+  adapter
+- state detection MUST recognize an idle Codex composer as `ready`/sendable
+- state detection MUST NOT treat Codex trust prompts or menu selectors as idle
+  composers
+- Codex launch commands MUST NOT inherit Claude OAuth, Anthropic API key,
+  Engram, or OpenTelemetry environment intended for Claude sessions
+
+Claude-specific features remain extension points, not baseline requirements for
+other harnesses. `claude --resume <uuid>`, Shift-Tab permission-mode cycling,
+and Claude slash-command behavior are available only for `claude-code` unless a
+non-Claude harness exposes an equivalent control.
+
 ## Motivation
 
 When running detached AGM sessions, the developer must manually switch to
