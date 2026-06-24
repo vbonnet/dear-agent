@@ -219,6 +219,8 @@ func (a *AgyAdapter) SendMessage(sessionID SessionID, message Message) error {
 }
 
 // GetHistory retrieves conversation history.
+//
+//nolint:dupl // adapter interface requires identical method signature on each harness type; shared logic extracted where practical
 func (a *AgyAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 	metadata, err := a.sessionStore.Get(sessionID)
 	if err != nil {
@@ -323,6 +325,8 @@ func (a *AgyAdapter) Capabilities() Capabilities {
 }
 
 // ExecuteCommand executes a generic command.
+//
+//nolint:dupl // adapter interface requires identical method signature on each harness type; shared logic extracted where practical
 func (a *AgyAdapter) ExecuteCommand(cmd Command) error {
 	sessionIDStr, err := getStringParam(cmd.Params, "session_id")
 	if err != nil {
