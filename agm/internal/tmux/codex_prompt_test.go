@@ -48,12 +48,17 @@ func TestContainsCodexPromptPattern(t *testing.T) {
 		{
 			name:     "input box top border",
 			content:  "╭───────────────────────────────────────╮",
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "input box bottom border",
 			content:  "╰───────────────────────────────────────╯",
-			expected: true,
+			expected: false,
+		},
+		{
+			name:     "decorated shell prompt is not a Codex prompt",
+			content:  "╭─ user@host ~/work\n╰─ %",
+			expected: false,
 		},
 		{
 			name:     "bash prompt is not a Codex prompt",
@@ -128,6 +133,38 @@ func TestContainsCodexTrustPromptPattern(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := containsCodexTrustPromptPattern(tt.content); got != tt.expected {
 				t.Errorf("containsCodexTrustPromptPattern(%q) = %v, expected %v", tt.content, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestContainsCodexModelUpgradePromptPattern(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		expected bool
+	}{
+		{
+			name:     "model upgrade choice prompt",
+			content:  "Choose how you'd like Codex to proceed.\n\n› 1. Try new model\n  2. Use existing model",
+			expected: true,
+		},
+		{
+			name:     "ready composer is not a model upgrade prompt",
+			content:  "│ >_ OpenAI Codex (v0.141.0)            │",
+			expected: false,
+		},
+		{
+			name:     "empty string",
+			content:  "",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := containsCodexModelUpgradePromptPattern(tt.content); got != tt.expected {
+				t.Errorf("containsCodexModelUpgradePromptPattern(%q) = %v, expected %v", tt.content, got, tt.expected)
 			}
 		})
 	}
@@ -266,5 +303,18 @@ func TestWaitForCodexPromptAutoAcceptsTrust(t *testing.T) {
 
 	if err := WaitForCodexPrompt(sessionName, 10*time.Second); err != nil {
 		t.Errorf("WaitForCodexPrompt failed after trust auto-accept: %v", err)
+	}
+}
+
+// TestWaitForCodexPromptSelectsExistingModel verifies that the Codex
+// model-upgrade prompt does not block startup. AGM must choose the explicitly
+// requested existing model instead of accepting the highlighted upgrade option.
+func TestWaitForCodexPromptSelectsExistingModel(t *testing.T) {
+	sessionName := "test-codex-model-upgrade"
+	script := "printf \"Choose how you'd like Codex to proceed\\n› 1. Try new model\\n  2. Use existing model\\n\"; read _; printf 'OpenAI Codex (v0.141.0)\\n'; sleep 30"
+	newCodexTestSession(t, sessionName, "sh", "-c", script)
+
+	if err := WaitForCodexPrompt(sessionName, 10*time.Second); err != nil {
+		t.Errorf("WaitForCodexPrompt failed after model upgrade selection: %v", err)
 	}
 }

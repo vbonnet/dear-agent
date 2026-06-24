@@ -8,9 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/vbonnet/dear-agent/agm/internal/ops"
-	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
 
 // --- LoadReader: /proc/loadavg ---
@@ -29,28 +26,6 @@ func (ProcLoadReader) Load5() (float64, error) {
 		return 0, fmt.Errorf("unexpected /proc/loadavg format: %q", string(data))
 	}
 	return strconv.ParseFloat(fields[1], 64)
-}
-
-// --- WorkerCounter: tmux sessions minus supervisors ---
-
-// TmuxWorkerCounter counts active tmux sessions, excluding supervisors
-// (orchestrator, meta-orchestrator, overseer).
-type TmuxWorkerCounter struct{}
-
-// CountWorkers returns the number of active non-supervisor tmux sessions.
-func (TmuxWorkerCounter) CountWorkers() (int, error) {
-	sessions, err := tmux.ListSessions()
-	if err != nil {
-		return 0, fmt.Errorf("listing tmux sessions: %w", err)
-	}
-
-	count := 0
-	for _, name := range sessions {
-		if !tmux.IsSupervisorSession(name) {
-			count++
-		}
-	}
-	return count, nil
 }
 
 // --- SpawnTimer: ~/.agm/last-spawn.txt ---
@@ -91,36 +66,4 @@ func (f FileSpawnTimer) RecordSpawn(t time.Time) error {
 		return err
 	}
 	return os.WriteFile(f.path(), []byte(t.Format(time.RFC3339)+"\n"), 0o600)
-}
-
-// --- AGMSessionCounter: role-tagged session counting ---
-
-const workerTag = "role:worker"
-
-// AGMSessionCounter counts active worker sessions by inspecting role tags.
-// Only sessions with the "role:worker" tag are counted; human-created
-// sessions (no role tag) and supervisor sessions are excluded.
-type AGMSessionCounter struct{}
-
-// CountWorkers returns the number of active sessions tagged with role:worker.
-func (c *AGMSessionCounter) CountWorkers(sessions []ops.SessionSummary) int {
-	count := 0
-	for _, s := range sessions {
-		if s.Status == "archived" {
-			continue
-		}
-		if hasTag(s.Tags, workerTag) {
-			count++
-		}
-	}
-	return count
-}
-
-func hasTag(tags []string, target string) bool {
-	for _, t := range tags {
-		if t == target {
-			return true
-		}
-	}
-	return false
 }

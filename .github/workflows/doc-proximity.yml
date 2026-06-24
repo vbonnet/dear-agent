@@ -143,4 +143,5 @@ jobs:
 
       - name: Skipped (skip-doc-proximity label)
         if: steps.labels.outputs.skip == 'true'
-        run: echo "ok: doc-proximity check skipped — 'skip-doc-proximity' label present"
+        run: |
+          echo "ok: doc-proximity check skipped — 'skip-doc-proximity' label present"
