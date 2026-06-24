@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/git"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/resume"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/review"
@@ -52,13 +53,10 @@ Examples:
 }
 
 func init() {
-	// Add --force flag for non-interactive mode (FR6)
-	StartCmd.Flags().Bool("force", false, "Skip resume detection and overwrite existing files")
-	// Add --project-type flag for V2 schema
+	StartCmd.Flags().Bool("force", false, "Skip resume detection and overwrite existing files — requires --reason")
+	StartCmd.Flags().String("reason", "", "justification for --force, recorded in the override audit log")
 	StartCmd.Flags().String("project-type", "feature", "Project type: feature, research, infrastructure, refactor, bugfix")
-	// Add --risk-level flag for V2 schema
 	StartCmd.Flags().String("risk-level", "M", "Risk level: XS, S, M, L, XL")
-	// Add --skip-roadmap flag for V2 schema (for small projects)
 	StartCmd.Flags().Bool("skip-roadmap", false, "Skip roadmap.* phases (for small projects <3-4 weeks)")
 }
 
@@ -71,6 +69,15 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// Check --force flag
 	forceFlag, _ := cmd.Flags().GetBool("force")
 	if forceFlag {
+		startReason, _ := cmd.Flags().GetString("reason")
+		if gerr := override.Require(context.Background(), override.Guard{
+			Tool: "wayfinder-session start",
+			Flag: "--force",
+			Gate: "overwrite-existing wayfinder session",
+			Risk: override.RiskP2,
+		}, startReason); gerr != nil {
+			return gerr
+		}
 		fmt.Fprintf(os.Stderr, "⚠️  --force: Skipping resume detection\n")
 	} else {
 		// Detect resumable directory and handle accordingly
