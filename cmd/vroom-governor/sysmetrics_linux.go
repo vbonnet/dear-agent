@@ -30,7 +30,7 @@ func readFreeMemPct() (float64, error) {
 		return 0, fmt.Errorf("reading /proc/meminfo: %w", err)
 	}
 	var total, available int64
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
