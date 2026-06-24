@@ -67,3 +67,30 @@ func TestSessionOutcome_ReadAlongsideEngram(t *testing.T) {
 		t.Errorf("engram metadata not preserved alongside outcome: %+v", got.EngramMetadata)
 	}
 }
+
+func TestSessionMetadata_CodexRoundTrip(t *testing.T) {
+	src := &manifest.Manifest{
+		Codex: &manifest.Codex{
+			SessionID:      "019ef2af-97e0-7443-9f07-03e40636740c",
+			TranscriptPath: "/Users/vbonnet/.codex/sessions/rollout.jsonl",
+		},
+	}
+	b, err := json.Marshal(buildSessionMetadata(src))
+	if err != nil {
+		t.Fatalf("marshal metadata: %v", err)
+	}
+
+	var got manifest.Manifest
+	if err := unmarshalEngramMetadata(&got, b); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if got.Codex == nil {
+		t.Fatal("Codex metadata did not round-trip")
+	}
+	if got.Codex.SessionID != src.Codex.SessionID {
+		t.Errorf("Codex session ID = %q, want %q", got.Codex.SessionID, src.Codex.SessionID)
+	}
+	if got.Codex.TranscriptPath != src.Codex.TranscriptPath {
+		t.Errorf("Codex transcript path = %q, want %q", got.Codex.TranscriptPath, src.Codex.TranscriptPath)
+	}
+}

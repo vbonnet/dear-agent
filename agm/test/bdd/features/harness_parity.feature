@@ -27,6 +27,13 @@ Feature: Harness parity
     Then AGM should create or update a Dolt session record with harness "codex-cli"
     And AGM should create the ready-file signal
 
+  Scenario: Orphaned Codex conversation can be imported and resumed
+    Given a Codex saved session exists outside AGM
+    When AGM imports the Codex session UUID with harness "codex-cli"
+    Then AGM should create or update a Dolt session record with harness "codex-cli"
+    And the record should preserve the Codex session UUID
+    And AGM should launch a tmux pane that resumes the Codex conversation
+
   Scenario: Session list fields can target session rows
     Given AGM has Codex session records in Dolt
     When an agent lists sessions as JSON with fields "name,status,harness,workspace,tags"
