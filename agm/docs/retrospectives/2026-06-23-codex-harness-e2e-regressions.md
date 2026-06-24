@@ -48,6 +48,9 @@ The intended acceptance criteria were broader than unit-level parity:
 11. **Hard worker-count cap blocked valid harness testing.**
     `session new` refused when three `role:worker` sessions existed, even for unrelated validation work. A hard-coded worker cap is the wrong control for supervisor runaway prevention.
 
+12. **`act` could not enumerate CI because multiple workflow files were invalid YAML.**
+    `bypassed-merge-audit.yml`, `doc-proximity.yml`, and `monthly-audit.yml` each had syntax accepted by neither `act` nor GitHub-compatible YAML parsing. This blocked local CI before Docker startup.
+
 ## Audit Implemented
 
 This branch adds or updates unit-level regression coverage for:
@@ -97,6 +100,7 @@ Live E2E verification covered:
 - Add a static audit that fails if harness-specific startup code includes unsupported CLI flags not present in a versioned fixture contract.
 - Add an audit check that flags Claude-only assumptions in shared send/safety paths when the target harness is not Claude.
 - Add a CI test mode that uses isolated storage and tmux sockets; prohibit broad status reconciliation against production storage in tests.
+- Add workflow YAML parse validation as a cheap pre-CI gate (`act -l`, `actionlint`, or equivalent) so broken workflow files cannot silently accumulate.
 
 ## Retro Actions
 
