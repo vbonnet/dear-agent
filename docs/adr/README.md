@@ -36,6 +36,7 @@ of truth; an ADR loses to it for definitions.
 | [029](ADR-029-ralph-wiggum-merge-loop.md) | Ralph Wiggum — host-tick persistent merge loop | Accepted |
 | [030](ADR-030-dependabot-auto-merge.md) | Dependabot Auto-Merge via GitHub Actions | Accepted |
 | [033](ADR-033-commit-anchored-progress-ledger.md) | Commit-Anchored Progress Ledger for Long-Running Workers | Accepted |
+| [034](ADR-034-squash-only-merge-contract.md) | Squash-only merge contract + auto-merge arming | Accepted |
 
 Number gaps (003–008, 019–021, 024+) are intentional — earlier numbers were
 withdrawn, renumbered into `agm/docs/adr/`, or superseded by the 2026-05-17
