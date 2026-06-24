@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/cleanup"
+	"github.com/vbonnet/dear-agent/agm/internal/codexarchive"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	gitpkg "github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -202,7 +203,7 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 		return getErr
 	}
 
-	if handled, err := handleAlreadyArchivedOrAsync(sessionName, getResult); handled {
+	if handled, err := handleAlreadyArchivedOrAsync(opCtx, sessionName, getResult); handled {
 		return err
 	}
 
@@ -221,6 +222,9 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 	})
 	if archiveErr != nil {
 		return handleError(archiveErr)
+	}
+	if err := archiveCodexSavedSession(opCtx, archiveResult.SessionID); err != nil {
+		return fmt.Errorf("AGM session archived, but Codex saved session archive failed: %w", err)
 	}
 
 	ui.PrintSuccess(fmt.Sprintf("Archived session: %s", sessionName))
@@ -269,8 +273,11 @@ func archiveAuditArgs() map[string]string {
 // session is already archived (no-op), session is active without --async
 // (error), or --async is set (spawn reaper). Returns (handled, err) — when
 // handled is true the caller should propagate err immediately.
-func handleAlreadyArchivedOrAsync(sessionName string, getResult *ops.GetSessionResult) (bool, error) {
+func handleAlreadyArchivedOrAsync(opCtx *ops.OpContext, sessionName string, getResult *ops.GetSessionResult) (bool, error) {
 	if getResult.Session.Lifecycle == "archived" {
+		if err := archiveCodexSavedSession(opCtx, getResult.Session.ID); err != nil {
+			return true, fmt.Errorf("AGM session is already archived, but Codex saved session archive failed: %w", err)
+		}
 		msg := fmt.Sprintf("Session '%s' is already archived", sessionName)
 		ui.PrintWarning(msg)
 		fmt.Println("\nTo restore this session:")
@@ -583,6 +590,11 @@ func bulkArchiveCandidates(adapter *dolt.Adapter, candidates []*manifest.Manifes
 			failCount++
 			continue
 		}
+		if err := archiveCodexSavedManifest(m); err != nil {
+			ui.PrintWarning(fmt.Sprintf("Failed to archive Codex saved session for %s: %v", m.Name, err))
+			failCount++
+			continue
+		}
 
 		sandboxPath := ""
 		if m.Sandbox != nil {
@@ -613,6 +625,33 @@ func bulkArchiveCandidates(adapter *dolt.Adapter, candidates []*manifest.Manifes
 		successCount++
 	}
 	return successCount, failCount
+}
+
+func archiveCodexSavedSession(opCtx *ops.OpContext, sessionID string) error {
+	if opCtx == nil || opCtx.Storage == nil || sessionID == "" {
+		return nil
+	}
+	m, err := opCtx.Storage.GetSession(sessionID)
+	if err != nil {
+		return err
+	}
+	return archiveCodexSavedManifest(m)
+}
+
+func archiveCodexSavedManifest(m *manifest.Manifest) error {
+	result, err := codexarchive.ArchiveManifest(context.Background(), m)
+	if err != nil {
+		return err
+	}
+	if result == nil || result.Skipped {
+		return nil
+	}
+	if result.AlreadyArchived {
+		fmt.Printf("Codex saved session already archived: %s\n", result.Target)
+		return nil
+	}
+	fmt.Printf("Archived Codex saved session: %s\n", result.Target)
+	return nil
 }
 
 // spawnReaper spawns a detached agm-reaper process for async archival.
