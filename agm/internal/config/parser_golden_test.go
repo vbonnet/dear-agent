@@ -24,6 +24,7 @@ func TestConfigParsing_DefaultConfig(t *testing.T) {
 	// Normalize paths for reproducibility (remove user-specific parts)
 	cfg.SessionsDir = "~/sessions"
 	cfg.Lock.Path = "/tmp/agm-1000/agm.lock"
+	cfg.Budget.StateFile = "/tmp/agm-budget-state.json"
 
 	// Marshal to JSON for golden comparison
 	jsonData, err := json.MarshalIndent(cfg, "", "  ")
@@ -60,6 +61,7 @@ log_level: debug
 
 	// Normalize paths
 	cfg.Lock.Path = "/tmp/agm-1000/agm.lock"
+	cfg.Budget.StateFile = "/tmp/agm-budget-state.json"
 
 	jsonData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -104,6 +106,8 @@ health_check:
 		t.Fatalf("failed to load config: %v", err)
 	}
 
+	cfg.Budget.StateFile = "/tmp/agm-budget-state.json"
+
 	jsonData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		t.Fatalf("failed to marshal config: %v", err)
@@ -137,6 +141,7 @@ timeout:
 	}
 
 	cfg.Lock.Path = "/tmp/agm-1000/agm.lock"
+	cfg.Budget.StateFile = "/tmp/agm-budget-state.json"
 
 	jsonData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -170,6 +175,7 @@ lock:
 	}
 
 	cfg.Lock.Path = "/tmp/agm-1000/agm.lock"
+	cfg.Budget.StateFile = "/tmp/agm-budget-state.json"
 
 	jsonData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -205,6 +211,7 @@ health_check:
 	}
 
 	cfg.Lock.Path = "/tmp/agm-1000/agm.lock"
+	cfg.Budget.StateFile = "/tmp/agm-budget-state.json"
 
 	jsonData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -238,6 +245,7 @@ workspace_config: /tmp/test-agm/acme-workspace.yaml
 	}
 
 	cfg.Lock.Path = "/tmp/agm-1000/agm.lock"
+	cfg.Budget.StateFile = "/tmp/agm-budget-state.json"
 
 	jsonData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
