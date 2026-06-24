@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	// PromptDetectionTimeout is how long to wait for Claude to return to prompt
+	// PromptDetectionTimeout is how long to wait for the agent to return to prompt
 	// before falling back to timer-based waiting. This should be generous enough
 	// to handle slow responses but not so long that stuck sessions block indefinitely.
 	// Reduced to 90 seconds after fixing GetRawLine blocking bug. Most commands complete
@@ -30,12 +30,12 @@ const (
 	PromptDetectionTimeout = 90 * time.Second
 
 	// PaneCloseTimeout is how long to wait for the tmux pane to close after sending /exit.
-	// Claude should exit quickly after receiving /exit command, but we allow extra time for
-	// cleanup operations. Increased from 30s to 60s to give Claude time to run SessionEnd hooks.
+	// Agents should exit quickly after receiving /exit, but we allow extra time
+	// for cleanup operations and SessionEnd hooks.
 	PaneCloseTimeout = 60 * time.Second
 
 	// FallbackWaitTime is used when prompt detection fails or times out.
-	// This is a conservative estimate of how long Claude might take to finish
+	// This is a conservative estimate of how long an agent might take to finish
 	// a response and return to the prompt.
 	// Reduced to 60 seconds to avoid excessive waiting for stuck sessions.
 	FallbackWaitTime = 60 * time.Second
@@ -71,8 +71,8 @@ var (
 	processKillFn      = syscall.Kill
 )
 
-// Reaper manages the async archival process for a AGM session
-// It waits for Claude to return to prompt, sends /exit, and archives the session
+// Reaper manages the async archival process for a AGM session.
+// It waits for the harness to return to prompt, sends /exit, and archives the session.
 type Reaper struct {
 	SessionName string
 	SessionsDir string
@@ -93,8 +93,8 @@ func New(sessionName, sessionsDir string) *Reaper {
 // Run executes the full two-phase reaper sequence:
 //
 // Phase 1 — Stop the process (must complete before Phase 2):
-//  1. Wait for Claude to return to prompt (prompt detection)
-//  2. Send /exit command to exit Claude
+//  1. Wait for the agent to return to prompt (prompt detection)
+//  2. Send /exit command to exit the agent
 //  3. Wait for pane to close (timeout: 60s)
 //  4. If timeout: send SIGTERM to pane process, wait 10s
 //  5. If still alive: send SIGKILL, wait 5s
@@ -163,9 +163,9 @@ func (r *Reaper) Run() error {
 // Returns true if the ReaperTimeout was exceeded (zombie detected),
 // meaning /exit was skipped and tmux should be force-killed.
 func (r *Reaper) stopProcess(startTime time.Time) bool {
-	// Step 2: Wait for Claude to be ready (prompt detection)
+	// Step 2: Wait for the agent to be ready (prompt detection)
 	if remaining := r.timeRemaining(startTime); remaining > 0 {
-		r.logger.Info("Waiting for Claude to return to prompt")
+		r.logger.Info("Waiting for agent to return to prompt")
 		promptTimeout := min(PromptDetectionTimeout, remaining)
 		if err := r.waitForPrompt(promptTimeout); err != nil {
 			r.logger.Warn("Prompt detection failed", "error", err)
@@ -175,7 +175,7 @@ func (r *Reaper) stopProcess(startTime time.Time) bool {
 				time.Sleep(fallback)
 			}
 		} else {
-			r.logger.Info("Prompt detected - Claude is ready")
+			r.logger.Info("Prompt detected - agent is ready")
 		}
 	}
 
@@ -186,9 +186,9 @@ func (r *Reaper) stopProcess(startTime time.Time) bool {
 		return true
 	}
 
-	// Step 3: Send /exit to exit Claude
+	// Step 3: Send /exit to exit the agent
 	paneAlive := true
-	r.logger.Info("Sending /exit to exit Claude")
+	r.logger.Info("Sending /exit to exit agent")
 	if err := r.sendExit(); err != nil {
 		r.logger.Warn("Failed to send /exit (session may have already exited)", "error", err)
 		if active, _ := isPaneActiveFn(r.SessionName); !active {
@@ -308,19 +308,19 @@ func (r *Reaper) markReaping() error {
 	return nil
 }
 
-// waitForPrompt monitors output stream for Claude prompt
-// Uses tmux control mode to detect when Claude is ready for input
+// waitForPrompt monitors output stream for the agent prompt.
+// Uses tmux control mode to detect when the pane is ready for input.
 func (r *Reaper) waitForPrompt(timeout time.Duration) error {
 	return waitForPromptFn(r.SessionName, timeout)
 }
 
-// sendExit sends /exit command to exit Claude Code cleanly
+// sendExit sends /exit command to exit the harness cleanly.
 // Uses tmux.SendMultiLinePromptSafe which waits for prompt and sends literal /exit
 // This avoids the sender attribution header that agm send adds
 func (r *Reaper) sendExit() error {
 	// Use tmux.SendMultiLinePromptSafe to send /exit as a literal command
 	// This function:
-	// 1. Waits for Claude prompt (handles busy pane states)
+	// 1. Waits for the agent prompt (handles busy pane states)
 	// 2. Sends ESC to interrupt any thinking (shouldInterrupt=true)
 	// 3. Sends /exit in literal mode (not as a message)
 	// 4. Sends Enter to execute

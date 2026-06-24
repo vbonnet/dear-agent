@@ -183,8 +183,9 @@ Provide a production-ready CLI that:
 - **Priority:** P1 (High)
 - **Description:** CLI MUST support manual and automatic session association
 - **Commands:**
-  - `agm session associate [session-name]` - Manually associate UUID
-  - `agm session associate [session-name] --uuid [uuid]` - Specify UUID
+  - `agm session associate [session-name]` - Associate an AGM session with the current harness session
+  - `agm session associate [session-name] --uuid [uuid]` - Specify Claude UUID
+  - `agm session associate [session-name] --create --harness codex-cli` - Create/link a non-Claude harness session record
   - Auto-detection on session creation/resume
 - **Detection:**
   - Hybrid detection algorithm (timestamp + tmux correlation)
@@ -802,6 +803,29 @@ TECHNICAL IMPLEMENTATION:
    - Dolt is source of truth; YAML failures are warnings only
 8. Print success message with restore instructions
 ```
+
+### Cross-Harness Association Flow (agm session associate [session-name])
+
+```
+1. Resolve existing session by ID, name, or tmux session in Dolt/YAML.
+2. Determine target harness:
+   - Existing manifest harness wins.
+   - `--harness auto` infers from live tmux pane commands.
+   - Explicit `--harness codex-cli|gemini-cli|opencode-cli|claude-code` is accepted.
+   - Omitted harness defaults to `claude-code` for backward compatibility.
+3. For Claude Code:
+   - Detect or accept the Claude UUID.
+   - Persist the UUID and create the ready-file signal.
+4. For Codex, Gemini, and OpenCode:
+   - Do not require or detect a Claude UUID.
+   - Ensure the Dolt session record exists when `--create` is set.
+   - Persist harness, tmux session name, workspace, and working directory metadata.
+   - Create the ready-file signal.
+```
+
+**Invariant**: `/agm:agm-assoc` is a cross-harness command. It invokes
+`agm session associate ... --harness auto`; Codex/Gemini/OpenCode association
+must not fail only because no Claude UUID exists.
 
 **Migration Status** (v1.3 - March 2026):
 - ✅ Phase 1-2 Complete: Dual-write mode (YAML + Dolt)

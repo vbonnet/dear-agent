@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/history"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 // TestAssociateTimingDetection verifies that the associate command can detect
@@ -144,6 +145,66 @@ func TestAssociateRenameFlag(t *testing.T) {
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("expected default value false, got %s", flag.DefValue)
+	}
+}
+
+func TestHarnessFromPaneCommands(t *testing.T) {
+	tests := []struct {
+		name     string
+		commands []string
+		want     string
+	}{
+		{name: "codex", commands: []string{"zsh", "codex"}, want: "codex-cli"},
+		{name: "codex full path", commands: []string{"/usr/local/bin/codex"}, want: "codex-cli"},
+		{name: "gemini", commands: []string{"gemini"}, want: "gemini-cli"},
+		{name: "opencode", commands: []string{"opencode"}, want: "opencode-cli"},
+		{name: "claude", commands: []string{"claude"}, want: "claude-code"},
+		{name: "no match", commands: []string{"zsh", "vim"}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := harnessFromPaneCommands(tt.commands); got != tt.want {
+				t.Errorf("harnessFromPaneCommands(%v) = %q, want %q", tt.commands, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveAssociateHarness(t *testing.T) {
+	origHarness := associateHarness
+	t.Cleanup(func() { associateHarness = origHarness })
+
+	existing := &manifest.Manifest{Harness: "codex-cli"}
+	associateHarness = "claude-code"
+	got, err := resolveAssociateHarness("s", existing)
+	if err != nil {
+		t.Fatalf("existing harness resolution failed: %v", err)
+	}
+	if got != "codex-cli" {
+		t.Fatalf("existing harness should win, got %q", got)
+	}
+
+	associateHarness = ""
+	got, err = resolveAssociateHarness("s", nil)
+	if err != nil {
+		t.Fatalf("default harness resolution failed: %v", err)
+	}
+	if got != "claude-code" {
+		t.Fatalf("default harness = %q, want claude-code", got)
+	}
+
+	associateHarness = "codex-cli"
+	got, err = resolveAssociateHarness("s", nil)
+	if err != nil {
+		t.Fatalf("explicit codex harness failed: %v", err)
+	}
+	if got != "codex-cli" {
+		t.Fatalf("explicit harness = %q, want codex-cli", got)
+	}
+
+	associateHarness = "bogus"
+	if _, err := resolveAssociateHarness("s", nil); err == nil {
+		t.Fatal("invalid harness should fail")
 	}
 }
 

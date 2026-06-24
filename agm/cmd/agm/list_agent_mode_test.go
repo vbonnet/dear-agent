@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -14,21 +15,59 @@ func sampleListResult() *ops.ListSessionsResult {
 		Operation: "list_sessions",
 		Sessions: []ops.SessionSummary{
 			{
-				ID:      "11111111-2222-3333-4444-555555555555",
-				Name:    "worker-alpha",
-				Status:  "active",
-				Harness: "claude-code",
-				Project: "/Users/vbonnet/.agm/sandboxes/abcd-1234/merged",
+				ID:        "11111111-2222-3333-4444-555555555555",
+				Name:      "worker-alpha",
+				Status:    "active",
+				Harness:   "claude-code",
+				Workspace: "oss",
+				Project:   "/Users/vbonnet/.agm/sandboxes/abcd-1234/merged",
+				Tags:      []string{"role:worker"},
 			},
 			{
-				ID:      "66666666-7777-8888-9999-000000000000",
-				Name:    "worker-beta",
-				Status:  "stopped",
-				Harness: "gemini-cli",
-				Project: "/Users/vbonnet/code/dear-agent",
+				ID:        "66666666-7777-8888-9999-000000000000",
+				Name:      "worker-beta",
+				Status:    "stopped",
+				Harness:   "gemini-cli",
+				Workspace: "oss",
+				Project:   "/Users/vbonnet/code/dear-agent",
 			},
 		},
 		Total: 2,
+	}
+}
+
+func TestSessionList_JSONFieldsApplyToSessionRows(t *testing.T) {
+	result := sampleListResult()
+	var out string
+	withGlobals(t, ModeAgent, []string{"name", "status", "harness", "workspace", "tags"}, func() {
+		out = captureStdout(t, func() {
+			if err := printListJSON(result); err != nil {
+				t.Fatalf("printListJSON: %v", err)
+			}
+		})
+	})
+
+	if strings.TrimSpace(out) == "{}" {
+		t.Fatal("session row fields must not collapse list output to {}")
+	}
+	var decoded struct {
+		Sessions []map[string]any `json:"sessions"`
+		Total    int              `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out)
+	}
+	if decoded.Total != 2 || len(decoded.Sessions) != 2 {
+		t.Fatalf("decoded list = total %d sessions %d, want 2/2: %s", decoded.Total, len(decoded.Sessions), out)
+	}
+	first := decoded.Sessions[0]
+	for _, want := range []string{"name", "status", "harness", "workspace", "tags"} {
+		if _, ok := first[want]; !ok {
+			t.Fatalf("filtered row missing %q: %#v", want, first)
+		}
+	}
+	if _, ok := first["operation"]; ok {
+		t.Fatalf("row field filtering leaked top-level operation into row: %#v", first)
 	}
 }
 

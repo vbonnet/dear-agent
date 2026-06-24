@@ -4,8 +4,8 @@
 > session. You are PRE-AUTHORIZED to dispatch worker sessions autonomously — do
 > NOT pause to ask a human for confirmation before spawning workers. There is no
 > human watching to answer. Safety is enforced by guardrails, not by asking:
-> the agm circuit breaker (worker cap + live CPU-load gate + spawn stagger), the
-> `AGM_MAX_WORKERS` cap, and an external CPU/RAM governor that pauses spawns under
+> the agm circuit breaker (live CPU-load gate + spawn stagger), and an external
+> CPU/RAM governor that pauses spawns under
 > load. A `circuit breaker: spawn refused` result is EXPECTED backpressure — log
 > it and retry next tick, never treat it as needing human input. Do not gate on
 > macOS vnode % (the vnode cache always reads ~100% at steady state and is NOT
@@ -235,15 +235,13 @@ stale), the tool simply dispatches nothing this tick — log
 continue; this is expected, not an error. A spawn-pause from an Overseer resource
 escalation (see Boot section) still overrides everything: skip Step 6 entirely.
 
-**Capacity is enforced by the agm circuit breaker on LIVE system load — not a
-fixed count.** Each `agm session new` the tool issues is admitted only if:
-concurrent workers are below the cap (`AGM_MAX_WORKERS`), the 5-minute CPU load
-average is below threshold, and the spawn-stagger interval has elapsed. The tool
-just attempts the spawn; a `circuit breaker: spawn refused` (load too high / at
-capacity / spawn too soon) is expected backpressure — the tool stops the run
-early and the bead is retried next tick. Do NOT try to override the circuit
-breaker (e.g. by raising `--max-workers`). Log `kind: "supervisor.orch.at_capacity"`
-if you observe repeated refusals.
+**Capacity is enforced by live backpressure — not a fixed worker count.** Each
+`agm session new` the tool issues is admitted only if the live CPU-load gate and
+spawn-stagger interval allow it. The tool just attempts the spawn; a `circuit
+breaker: spawn refused` (load too high / spawn too soon / other live backpressure)
+is expected — the tool stops the run early and the bead is retried next tick. Do
+not add a numeric worker cap to clear or throttle a backlog. Log
+`kind: "supervisor.orch.at_capacity"` if you observe repeated refusals.
 
 **Dependency provenance (DoD) — enforced upstream, not in the dispatch tool.**
 A bead must not dispatch against a dependency that was closed against an *unmerged*
@@ -264,9 +262,8 @@ agm send msg vroom-overseer --sender vroom-orchestrator --priority urgent \
 ~5× the token throughput of Sonnet per tick. On Max-plan OAuth there is no
 per-token *billing*, but there IS a shared usage ceiling — a worker stuck in a
 retry/death loop burns that ceiling for every other session. The guardrails,
-in order, are: (1) the 3-worker concurrency cap (`--max-workers 3` on the dispatch
-tool) — never raise it to clear a backlog faster; (2) `opus-200k` not the 1M
-variant; (3) wayfinder's bounded
+in order, are: (1) live CPU/load backpressure and spawn stagger; (2)
+`opus-200k` not the 1M variant; (3) wayfinder's bounded
 phases instead of an open-ended raw loop; (4) the stuck-worker checks in Step 7
 (status ping at >60min, wrap-up at >120min). If you observe workers churning
 without committing — repeated ticks, no new commits, no PR — treat it as
@@ -288,14 +285,9 @@ vroom-dispatch-direct \
   --db ~/beads/context-engine/.beads \
   --repo vbonnet/dear-agent \
   --model opus-200k \
-  --max-workers 3 \
   --max-priority "$MAX_PRIORITY" 2>&1
 ```
 
-- `--max-workers 3` is the concurrency cap: the tool dispatches at most
-  `3 - <live worker count>` new workers this run, so no more than three workers
-  ever run at once. **Never raise it to clear a backlog faster** — that is the
-  cost-runaway move the guardrails exist to prevent.
 - `--max-priority "$MAX_PRIORITY"` applies the Meta-O staleness band you computed
   above (0=P0 only, 1=P0+P1, 2=all).
 - The tool **fails closed**: if `agm session list` or `gh pr list` errors, it
@@ -484,8 +476,8 @@ note) and whose bead is still `in_progress`:
      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<bead-id>" "<bead-id>" "<NNN>" >> ~/.agm/vroom/trail.jsonl
    ```
 
-Deploy workers count toward the same worker concurrency cap as everyone else.
-They are also covered by Step 7 health monitoring (a stuck `worker-deploy-*` is
+Deploy workers are covered by the same live backpressure and Step 7 health
+monitoring as everyone else (a stuck `worker-deploy-*` is
 nudged / wrapped-up / killed by the same ladder). Note that a deploy worker
 opening NO new PR is correct — it lands an existing one — so do not treat
 "no new commits/PR from a deploy worker" as runaway usage; judge it by manifest

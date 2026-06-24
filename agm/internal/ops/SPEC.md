@@ -171,6 +171,11 @@ system shall return a JSON object containing only the requested top-level keys.
 **OPS-38** When `ApplyFieldMask` is called on a value that is not a JSON
 object, the system shall return the value unchanged.
 
+**OPS-39** `agm session list` JSON output shall support field masks for
+per-session row fields (`name`, `status`, `harness`, `workspace`, `tags`, etc.)
+without dropping the `sessions` envelope. A row-field mask shall never produce
+`{}` solely because the requested fields are not top-level list result keys.
+
 ---
 
 ## Key Invariants
