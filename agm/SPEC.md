@@ -24,6 +24,9 @@ For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
 - state detection MUST recognize an idle Codex composer as `ready`/sendable
 - state detection MUST NOT treat Codex trust prompts or menu selectors as idle
   composers
+- archive paths MUST archive the matching Codex saved session by resolving the
+  Codex transcript `session_meta.cwd` to the AGM working directory or sandbox
+  merged path, then invoking the supported `codex archive` control surface
 - Codex launch commands MUST NOT inherit Claude OAuth, Anthropic API key,
   Engram, or OpenTelemetry environment intended for Claude sessions
 

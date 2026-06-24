@@ -156,6 +156,9 @@ func TestHarnessFromPaneCommands(t *testing.T) {
 	}{
 		{name: "codex", commands: []string{"zsh", "codex"}, want: "codex-cli"},
 		{name: "codex full path", commands: []string{"/usr/local/bin/codex"}, want: "codex-cli"},
+		{name: "codex node wrapper start command", commands: []string{"node", "codex -m gpt-5.4 -C /tmp/work"}, want: "codex-cli"},
+		{name: "codex quoted node wrapper start command", commands: []string{"node", `"codex -m gpt-5.4 -C /tmp/work"`}, want: "codex-cli"},
+		{name: "codex quoted executable path with spaces", commands: []string{"node", `"/Applications/Codex App.app/Contents/MacOS/codex" -m gpt-5.4`}, want: "codex-cli"},
 		{name: "gemini", commands: []string{"gemini"}, want: "gemini-cli"},
 		{name: "opencode", commands: []string{"opencode"}, want: "opencode-cli"},
 		{name: "claude", commands: []string{"claude"}, want: "claude-code"},

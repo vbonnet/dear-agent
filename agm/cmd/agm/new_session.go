@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/google/uuid"
+	"github.com/vbonnet/dear-agent/agm/internal/cli"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/interrupt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -235,9 +236,15 @@ func setupTestEnvironment() error {
 	return nil
 }
 
-// getWorkDir returns the working directory, preferring $PWD (to preserve
-// symlinks) and falling back to os.Getwd().
+// getWorkDir returns the working directory for a new session. An explicit
+// root-level -C/--directory flag wins; otherwise prefer $PWD to preserve
+// symlinked interactive paths.
 func getWorkDir() (string, error) {
+	if directory != "" {
+		workDir := cli.GetProjectDirectory()
+		debug.Log("Using --directory: %s", workDir)
+		return workDir, nil
+	}
 	if pwd := os.Getenv("PWD"); pwd != "" {
 		debug.Log("Using $PWD: %s", pwd)
 		return pwd, nil
