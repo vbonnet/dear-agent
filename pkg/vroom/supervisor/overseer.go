@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/vroom/decisiontrail"
@@ -161,6 +162,13 @@ type Overseer struct {
 	// and escalates when the count exceeds inboxAlertThreshold. nil = disabled.
 	inboxCounter        SessionInboxCounter
 	inboxAlertThreshold int
+
+	// Memory-pressure alert (ce-6jl5). When a MemoryAlertNotifier is wired via
+	// WithMemoryAlert, each Tick classifies the snapshot's free-RAM and swap
+	// against alertThresholds and routes WARN/CRITICAL alerts to the
+	// Meta-Orchestrator (and, at CRITICAL, the Orchestrator). nil = disabled.
+	alertNotifier   MemoryAlertNotifier
+	alertThresholds MemoryAlertThresholds
 }
 
 // defaultHygieneInterval rate-limits the session-hygiene pass so ticks firing
@@ -242,6 +250,21 @@ func (o *Overseer) WithSessionInboxAlert(c SessionInboxCounter, threshold int) *
 	return o
 }
 
+// WithMemoryAlert wires a MemoryAlertNotifier into the Overseer, arming the
+// per-tick memory-pressure alert (ce-6jl5). After this call each Tick classifies
+// the snapshot's free physical RAM and swap usage against thresholds and, on a
+// WARN/CRITICAL breach, records an alert to the trail and routes it to the
+// Meta-Orchestrator — and, at CRITICAL, the Orchestrator too. Any zero field in
+// thresholds falls back to DefaultMemoryAlertThresholds (free < 500/200 MiB,
+// swap > 50/75%). The alert is observe-and-notify only; remediation remains the
+// AutoResourceReaper's job (WithMemoryPressure). With no notifier wired the
+// Overseer does not classify or alert on memory pressure.
+func (o *Overseer) WithMemoryAlert(n MemoryAlertNotifier, thresholds MemoryAlertThresholds) *Overseer {
+	o.alertNotifier = n
+	o.alertThresholds = thresholds.withDefaults()
+	return o
+}
+
 // WithBurndown wires a BurndownController and policy into the Overseer.
 // After this call each Tick also runs the burndown maintenance phase. The
 // controller and policy may be changed between ticks; the Overseer copies the
@@ -318,6 +341,14 @@ func (o *Overseer) Tick(ctx context.Context) error {
 	if o.burndownCtrl != nil {
 		var spawned int
 		o.runBurndownTick(ctx, snap, o.burndownPolicy, o.burndownCtrl, &spawned)
+	}
+
+	// Memory-pressure alert (ce-6jl5) — classify free-RAM/swap and route
+	// WARN/CRITICAL alerts to the supervisors. Runs after the burndown /
+	// bead-pr-sync reconcile per the 2026-06-18 retro design; only when a
+	// notifier is wired via WithMemoryAlert.
+	if o.alertNotifier != nil {
+		o.runMemoryAlertTick(ctx, snap)
 	}
 	return nil
 }
@@ -521,6 +552,67 @@ func (o *Overseer) runMemoryPressureTick(ctx context.Context, snap ResourceSnaps
 		After:   after,
 		Outcome: outcome,
 	}))
+}
+
+// runMemoryAlertTick classifies the snapshot's free-RAM and swap against the
+// alert thresholds and, on a WARN/CRITICAL breach, records the alert to the
+// trail and routes it to the supervisors that can act: every alert goes to the
+// Meta-Orchestrator; a CRITICAL alert also goes to the Orchestrator (which owns
+// the spawn queue). A healthy snapshot records nothing — the trail stays quiet
+// when memory is fine (the raw snapshot is already logged by recordSnapshot).
+// Notifier failures are recorded but never fail the tick; under memory pressure
+// reaching *one* supervisor beats aborting on the first send error.
+func (o *Overseer) runMemoryAlertTick(ctx context.Context, snap ResourceSnapshot) {
+	level, reasons := o.alertThresholds.classify(snap)
+	if level == PressureNone {
+		return
+	}
+
+	summary := fmt.Sprintf("memory %s — %s", level, strings.Join(reasons, "; "))
+
+	// Routing: Meta-O always; Orchestrator additionally at CRITICAL.
+	targets := []Role{RoleMetaOrchestrator}
+	if level >= PressureCritical {
+		targets = append(targets, RoleOrchestrator)
+	}
+
+	var notified []string
+	var errs []string
+	for _, to := range targets {
+		if err := o.alertNotifier.Notify(ctx, to, level, snap, summary); err != nil {
+			errs = append(errs, string(to)+": "+err.Error())
+			continue
+		}
+		notified = append(notified, string(to))
+	}
+
+	payload := map[string]any{
+		"level":               level.String(),
+		"free_physical_bytes": snap.FreePhysicalMemoryBytes,
+		"free_mib":            snap.FreePhysicalMemoryBytes / MiB,
+		"swap_used_fraction":  snap.SwapUsedFraction,
+		"reasons":             reasons,
+		"summary":             summary,
+		"targets":             rolesToStrings(targets),
+		"notified":            notified,
+	}
+	if len(errs) > 0 {
+		payload["errors"] = strings.Join(errs, "; ")
+	}
+	_ = o.trail.Append(ctx, decisiontrail.Record{
+		Role:    string(RoleOverseer),
+		Kind:    "supervisor.over.memory_alert",
+		Payload: payload,
+	})
+}
+
+// rolesToStrings renders a role slice as strings for a trail payload.
+func rolesToStrings(roles []Role) []string {
+	out := make([]string, len(roles))
+	for i, r := range roles {
+		out[i] = string(r)
+	}
+	return out
 }
 
 func (o *Overseer) maybeEscalateFraction(ctx context.Context, name string, v float64) {

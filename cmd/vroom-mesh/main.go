@@ -191,6 +191,14 @@ func buildMesh(trail decisiontrail.Trail, roadmap supervisor.Roadmap, queue supe
 		// hygiene it is armed only on the real-probe path. Zero threshold
 		// applies the default (15).
 		overSup = overSup.WithSessionInboxAlert(&supervisor.AGMSessionInboxCounter{}, 0)
+
+		// Memory-pressure alert (ce-6jl5): classify free-RAM/swap each tick and
+		// route WARN/CRITICAL alerts to the Meta-Orchestrator (and, at CRITICAL,
+		// the Orchestrator). The notifier shells out to `agm send msg` against
+		// the live CLI, so like hygiene/inbox it is armed only on the real-probe
+		// path — the simulated in-memory snapshot must not page real supervisors.
+		// Zero thresholds apply the retro defaults (free < 500/200 MiB, swap > 50/75%).
+		overSup = overSup.WithMemoryAlert(&supervisor.AGMMemoryAlertNotifier{}, supervisor.MemoryAlertThresholds{})
 	}
 	if cfg.pressure {
 		// On the real-probe path the critical-tier reclaimer is the AGM-aware
