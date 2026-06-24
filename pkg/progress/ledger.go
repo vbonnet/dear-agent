@@ -11,13 +11,13 @@ import (
 
 // ProgressEntry represents a single progress milestone from git log.
 type ProgressEntry struct {
-	Phase      string    // e.g., "exploration", "design", "implementation", "verification", "complete"
-	Milestone  string    // e.g., "ce-ek4f-explore-codebase"
-	Status     string    // "in-progress", "blocked", "paused", "done"
-	Timestamp  time.Time // ISO8601 timestamp from commit
-	BeadID     string    // Link to bead (e.g., "ce-ek4f")
-	CommitSHA  string    // Git commit SHA for this milestone
-	Subject    string    // First line of commit message
+	Phase     string    // e.g., "exploration", "design", "implementation", "verification", "complete"
+	Milestone string    // e.g., "ce-ek4f-explore-codebase"
+	Status    string    // "in-progress", "blocked", "paused", "done"
+	Timestamp time.Time // ISO8601 timestamp from commit
+	BeadID    string    // Link to bead (e.g., "ce-ek4f")
+	CommitSHA string    // Git commit SHA for this milestone
+	Subject   string    // First line of commit message
 }
 
 // Ledger tracks work milestones via git commits.
@@ -156,13 +156,13 @@ func (l *Ledger) parseLogOutput(logOutput string) []ProgressEntry {
 			// If we were building an entry, save it first
 			if currentSHA != "" && currentPhase != "" {
 				entries = append(entries, ProgressEntry{
-					Phase:      currentPhase,
-					Milestone:  currentMilestone,
-					Status:     currentStatus,
-					Timestamp:  currentTimestamp,
-					BeadID:     l.beadID,
-					CommitSHA:  currentSHA,
-					Subject:    currentSubject,
+					Phase:     currentPhase,
+					Milestone: currentMilestone,
+					Status:    currentStatus,
+					Timestamp: currentTimestamp,
+					BeadID:    l.beadID,
+					CommitSHA: currentSHA,
+					Subject:   currentSubject,
 				})
 			}
 
@@ -210,13 +210,13 @@ func (l *Ledger) parseLogOutput(logOutput string) []ProgressEntry {
 	// Don't forget the last entry
 	if currentPhase != "" && currentSHA != "" {
 		entries = append(entries, ProgressEntry{
-			Phase:      currentPhase,
-			Milestone:  currentMilestone,
-			Status:     currentStatus,
-			Timestamp:  currentTimestamp,
-			BeadID:     l.beadID,
-			CommitSHA:  currentSHA,
-			Subject:    currentSubject,
+			Phase:     currentPhase,
+			Milestone: currentMilestone,
+			Status:    currentStatus,
+			Timestamp: currentTimestamp,
+			BeadID:    l.beadID,
+			CommitSHA: currentSHA,
+			Subject:   currentSubject,
 		})
 	}
 
