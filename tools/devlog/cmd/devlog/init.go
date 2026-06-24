@@ -2,11 +2,13 @@
 package devlog
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/pkg/cliframe"
 	"github.com/vbonnet/dear-agent/tools/devlog/internal/config"
 	"gopkg.in/yaml.v3"
@@ -34,10 +36,22 @@ then run 'devlog sync' to clone repos and create worktrees.`,
 
 var (
 	// initForce allows overwriting existing config
-	initForce bool
+	initForce  bool
+	initReason string // justification for --force, recorded in the override audit log
 )
 
 func runInit(cmd *cobra.Command, args []string) error {
+	if initForce {
+		if gerr := override.Require(context.Background(), override.Guard{
+			Tool: "devlog init",
+			Flag: "--force",
+			Gate: "overwrite-existing devlog workspace",
+			Risk: override.RiskP2,
+		}, initReason); gerr != nil {
+			return gerr
+		}
+	}
+
 	flags := GetCommonFlags()
 	writer := cliframe.NewWriter(cmd.OutOrStdout(), cmd.ErrOrStderr())
 	writer.SetColorEnabled(!flags.NoColor)
@@ -65,7 +79,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if _, err := os.Stat(configPath); err == nil && !initForce {
 		return cliframe.NewError("workspace_exists",
 			fmt.Sprintf("Workspace already initialized (config file exists at %s)", configPath)).
-			AddSuggestion("Use --force to overwrite existing configuration").
+			AddSuggestion("Use --force --reason \"<why>\" to overwrite existing configuration").
 			WithExitCode(cliframe.ExitUsageError)
 	}
 
@@ -258,5 +272,6 @@ func createExampleConfig(workspaceName string) *config.Config {
 
 func init() {
 	rootCmd.AddCommand(initCmd)
-	initCmd.Flags().BoolVar(&initForce, "force", false, "overwrite existing configuration")
+	initCmd.Flags().BoolVar(&initForce, "force", false, "overwrite existing configuration — requires --reason")
+	initCmd.Flags().StringVar(&initReason, "reason", "", "justification for --force, recorded in the override audit log")
 }

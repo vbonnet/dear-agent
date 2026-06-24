@@ -2,16 +2,19 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/pkg/cliframe"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/progress"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/s7"
 )
 
 var initForce bool
+var initReason string // justification for --force, recorded in the override audit log
 
 // InitCmd is the cobra command that initializes feature tracking from an S7 plan.
 var InitCmd = &cobra.Command{
@@ -31,10 +34,22 @@ Example:
 }
 
 func init() {
-	InitCmd.Flags().BoolVar(&initForce, "force", false, "Overwrite existing progress.json")
+	InitCmd.Flags().BoolVar(&initForce, "force", false, "Overwrite existing progress.json — requires --reason")
+	InitCmd.Flags().StringVar(&initReason, "reason", "", "justification for --force, recorded in the override audit log")
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
+	if initForce {
+		if gerr := override.Require(context.Background(), override.Guard{
+			Tool: "wayfinder-features init",
+			Flag: "--force",
+			Gate: "overwrite-existing features progress.json",
+			Risk: override.RiskP2,
+		}, initReason); gerr != nil {
+			return gerr
+		}
+	}
+
 	writer := cliframe.NewWriter(cmd.OutOrStdout(), cmd.ErrOrStderr())
 
 	// Find S7 plan
@@ -71,7 +86,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Check if already exists
 	if _, err := progress.ReadProgress(progressPath); err == nil && !initForce {
 		writer.Error(fmt.Sprintf("progress.json already exists at %s", progressPath))
-		writer.Info("Use --force to overwrite")
+		writer.Info("Use --force --reason \"<why>\" to overwrite")
 		return fmt.Errorf("progress file already exists")
 	}
 

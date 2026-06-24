@@ -1,15 +1,18 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/pkg/cliframe"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-features/internal/progress"
 )
 
 var startForce bool
+var startReason string // justification for --force, recorded in the override audit log
 
 // StartCmd is the cobra command that marks a feature as in_progress.
 var StartCmd = &cobra.Command{
@@ -31,11 +34,24 @@ Example:
 }
 
 func init() {
-	StartCmd.Flags().BoolVar(&startForce, "force", false, "Start even if feature already passing")
+	StartCmd.Flags().BoolVar(&startForce, "force", false, "Start even if feature already passing — requires --reason")
+	StartCmd.Flags().StringVar(&startReason, "reason", "", "justification for --force, recorded in the override audit log")
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
 	featureID := args[0]
+
+	if startForce {
+		if gerr := override.Require(context.Background(), override.Guard{
+			Tool: "wayfinder-features start",
+			Flag: "--force",
+			Gate: "overwrite-existing feature state (restart a passing feature)",
+			Risk: override.RiskP2,
+		}, startReason); gerr != nil {
+			return gerr
+		}
+	}
+
 	writer := cliframe.NewWriter(cmd.OutOrStdout(), cmd.ErrOrStderr())
 
 	// Find and read progress
@@ -63,7 +79,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	// Check if already passing
 	if feature.Status == progress.StatusPassing && !startForce {
 		writer.Error(fmt.Sprintf("Feature '%s' is already verified (passing)", featureID))
-		writer.Info("Use --force to restart this feature")
+		writer.Info("Use --force --reason \"<why>\" to restart this feature")
 		return fmt.Errorf("feature already passing")
 	}
 
