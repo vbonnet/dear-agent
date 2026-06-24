@@ -8,7 +8,10 @@ package corpus
 const EngramComponentName = "engram"
 
 // EngramComponentVersion is the schema version Engram registers with corpus callosum.
-const EngramComponentVersion = "1.0.0"
+//
+// 1.1.0 adds the "document" schema, splitting Engram's knowledge model into two
+// layers: stateless versioned documents and mutable extracted memory traces.
+const EngramComponentVersion = "1.1.0"
 
 // GetEngramSchema returns the complete Engram schema definition for corpus callosum.
 func GetEngramSchema() map[string]interface{} {
@@ -18,6 +21,7 @@ func GetEngramSchema() map[string]interface{} {
 		"compatibility": "backward",
 		"schemas": map[string]interface{}{
 			"bead":           GetBeadSchema(),
+			"document":       GetDocumentSchema(),
 			"memory_trace":   GetMemoryTraceSchema(),
 			"ecphory_result": GetEcphoryResultSchema(),
 		},
@@ -87,6 +91,61 @@ func GetBeadSchema() map[string]interface{} {
 			},
 		},
 		"required": []string{"id", "title", "status", "workspace"},
+	}
+}
+
+// GetDocumentSchema returns the schema definition for document data.
+//
+// Documents are Engram's stateless knowledge layer: immutable, versioned blobs
+// (specs, architecture docs, research findings, reference material). Unlike a
+// memory_trace — a mutable extracted fact — a document is authored content
+// trusted as-is. "Editing" a document appends a new version; the (id, version)
+// pair is immutable. See internal/document for the storage contract.
+func GetDocumentSchema() map[string]any {
+	return map[string]any{
+		"type":        "object",
+		"description": "Engram document storage schema (stateless versioned knowledge blob)",
+		"properties": map[string]any{
+			"id": map[string]any{
+				"type":        "string",
+				"description": "Stable logical identifier shared by every version (e.g. engram-spec)",
+			},
+			"version": map[string]any{
+				"type":        "integer",
+				"description": "Monotonic 1-based version number; (id, version) is immutable",
+				"minimum":     1,
+			},
+			"kind": map[string]any{
+				"type":        "string",
+				"enum":        []string{"spec", "architecture", "research", "reference", "adr"},
+				"description": "Editorial role of the document",
+			},
+			"title": map[string]any{
+				"type":        "string",
+				"description": "Short human-readable label",
+			},
+			"content": map[string]any{
+				"type":        "string",
+				"description": "Canonical knowledge blob (typically markdown or text)",
+			},
+			"content_hash": map[string]any{
+				"type":        "string",
+				"description": "Lowercase hex SHA-256 of content (integrity and dedup)",
+			},
+			"source": map[string]any{
+				"type":        "string",
+				"description": "Provenance (file path, URL, or generating session)",
+			},
+			"workspace": map[string]any{
+				"type":        "string",
+				"description": "Workspace this document belongs to",
+			},
+			"created_at": map[string]any{
+				"type":   "string",
+				"format": "date-time",
+			},
+		},
+		"required": []string{"id", "version", "content", "workspace"},
 	}
 }
 

@@ -83,6 +83,14 @@ Each ADR follows this structure:
   - Status: Accepted
   - Date: 2024-02-20
 
+### Knowledge Model
+
+- **[ADR-009: Documents vs Memories Split](./ADR-009-documents-vs-memories-split.md)**
+  - Two-layer model: stateless versioned documents vs mutable extracted memories
+  - New `internal/document` package and `document` corpus schema (1.1.0)
+  - Status: Accepted
+  - Date: 2026-06-21
+
 ## ADR Lifecycle
 
 ### Status Definitions
