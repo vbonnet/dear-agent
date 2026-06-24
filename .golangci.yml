@@ -36,6 +36,9 @@ linters:
     - gocyclo
     - dupl         # copy-paste / clone detection (high threshold, see settings)
 
+    # Dependency direction enforcement
+    - depguard     # enforce monorepo layering: pkg/ ↛ agm/internal/, no cross-product imports
+
     # Lint hygiene
     - nolintlint   # every //nolint must carry a linter name + justification
 
@@ -94,6 +97,27 @@ linters:
         - name: superfluous-else
         - name: unreachable-code
         - name: redefines-builtin-id
+
+    depguard:
+      rules:
+        # pkg/ is public API; it must not reach into agm's private internals
+        pkg-no-agm-internal:
+          list-mode: lax
+          files:
+            - "**/pkg/**/*.go"
+          deny:
+            - pkg: "github.com/vbonnet/dear-agent/agm/internal/**"
+              desc: "pkg/ packages must not import agm/internal/ — pkg is a public API layer; agm/internal is private to the agm product"
+        # Product subtrees must not cross-import at the internal level
+        no-cross-product-internal:
+          list-mode: lax
+          files:
+            - "**/agm/internal/**/*.go"
+          deny:
+            - pkg: "github.com/vbonnet/dear-agent/engram/**"
+              desc: "agm/internal must not import engram — cross-product imports couple subtrees"
+            - pkg: "github.com/vbonnet/dear-agent/wayfinder/**"
+              desc: "agm/internal must not import wayfinder — cross-product imports couple subtrees"
 
   exclusions:
     presets:
