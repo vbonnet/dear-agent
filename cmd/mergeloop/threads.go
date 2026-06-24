@@ -23,9 +23,10 @@ import (
 // Human-authored threads are NEVER auto-resolved: silently resolving a person's
 // thread would hide unaddressed feedback, which is exactly what
 // required_conversation_resolution exists to prevent.
-var knownBotLogins = map[string]bool{
-	"gemini-code-assist": true,
-}
+//
+// Empty after the Gemini sunset (2026-07-17): gemini-code-assist was removed
+// when its consumer tier was discontinued. Add future bot logins here as needed.
+var knownBotLogins = map[string]bool{}
 
 // normalizeBotLogin strips the "[bot]" suffix that some GitHub surfaces append
 // to GitHub-App accounts. The reviews/threads GraphQL API returns the bare

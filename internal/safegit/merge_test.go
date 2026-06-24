@@ -195,47 +195,35 @@ func TestParseReviewThreads_Empty(t *testing.T) {
 
 // --- parseSoak ---
 
-func makeSoakJSON(committedAt time.Time, botLogin string) []byte {
+func makeSoakJSON(committedAt time.Time) []byte {
 	type commitEntry struct {
 		CommittedDate time.Time `json:"committedDate"`
-	}
-	type reviewEntry struct {
-		Author struct {
-			Login string `json:"login"`
-		} `json:"author"`
-		State string `json:"state"`
 	}
 	type doc struct {
 		HeadRefOid string        `json:"headRefOid"`
 		Commits    []commitEntry `json:"commits"`
-		Reviews    []reviewEntry `json:"reviews"`
 	}
 	d := doc{HeadRefOid: "abc123"}
 	if !committedAt.IsZero() {
 		d.Commits = []commitEntry{{CommittedDate: committedAt}}
 	}
-	if botLogin != "" {
-		r := reviewEntry{State: "APPROVED"}
-		r.Author.Login = botLogin
-		d.Reviews = []reviewEntry{r}
-	}
 	b, _ := json.Marshal(d)
 	return b
 }
 
-func TestParseSoak_OldCommitWithBotReview(t *testing.T) {
+func TestParseSoak_OldCommit(t *testing.T) {
 	now := time.Now()
 	past := now.Add(-10 * time.Minute)
-	data := makeSoakJSON(past, ReviewBot)
+	data := makeSoakJSON(past)
 	if err := parseSoak(data, now); err != nil {
-		t.Fatalf("old commit with bot review should pass, got: %v", err)
+		t.Fatalf("old commit should pass soak gate, got: %v", err)
 	}
 }
 
 func TestParseSoak_TooRecent(t *testing.T) {
 	now := time.Now()
 	recent := now.Add(-1 * time.Minute)
-	data := makeSoakJSON(recent, ReviewBot)
+	data := makeSoakJSON(recent)
 	err := parseSoak(data, now)
 	if err == nil {
 		t.Fatal("expected error for too-recent commit, got nil")
@@ -244,123 +232,6 @@ func TestParseSoak_TooRecent(t *testing.T) {
 		t.Errorf("error should mention retry time, got: %v", err)
 	}
 }
-
-func TestParseSoak_NoBotReview(t *testing.T) {
-	now := time.Now()
-	past := now.Add(-10 * time.Minute)
-	data := makeSoakJSON(past, "")
-	err := parseSoak(data, now)
-	if err == nil {
-		t.Fatal("expected error for missing bot review, got nil")
-	}
-	if !strings.Contains(err.Error(), ReviewBot) {
-		t.Errorf("error should name the review bot, got: %v", err)
-	}
-}
-
-func TestParseSoak_OtherBotReview(t *testing.T) {
-	now := time.Now()
-	past := now.Add(-10 * time.Minute)
-	data := makeSoakJSON(past, "some-other-bot")
-	err := parseSoak(data, now)
-	if err == nil {
-		t.Fatal("expected error when wrong bot reviewed, got nil")
-	}
-}
-
-// makeSoakJSONState is like makeSoakJSON but lets a test pick the review state,
-// to exercise gate 4's state handling (COMMENTED vs APPROVED vs PENDING).
-func makeSoakJSONState(committedAt time.Time, botLogin, state string) []byte {
-	type commitEntry struct {
-		CommittedDate time.Time `json:"committedDate"`
-	}
-	type reviewEntry struct {
-		Author struct {
-			Login string `json:"login"`
-		} `json:"author"`
-		State string `json:"state"`
-	}
-	type doc struct {
-		HeadRefOid string        `json:"headRefOid"`
-		Commits    []commitEntry `json:"commits"`
-		Reviews    []reviewEntry `json:"reviews"`
-	}
-	d := doc{HeadRefOid: "abc123"}
-	if !committedAt.IsZero() {
-		d.Commits = []commitEntry{{CommittedDate: committedAt}}
-	}
-	if botLogin != "" {
-		r := reviewEntry{State: state}
-		r.Author.Login = botLogin
-		d.Reviews = []reviewEntry{r}
-	}
-	b, _ := json.Marshal(d)
-	return b
-}
-
-// The actual gemini login carries GitHub's "[bot]" App suffix; the bot only ever
-// posts COMMENTED reviews. This is the exact shape that the bare-constant bug
-// (ce-l8by) failed to match — gate 4 must pass it.
-func TestParseSoak_BotSuffixedLoginCommented(t *testing.T) {
-	now := time.Now()
-	past := now.Add(-10 * time.Minute)
-	data := makeSoakJSONState(past, "gemini-code-assist[bot]", "COMMENTED")
-	if err := parseSoak(data, now); err != nil {
-		t.Fatalf("[bot]-suffixed COMMENTED review should satisfy gate 4, got: %v", err)
-	}
-}
-
-// A legacy bare "gemini-code-assist" login must still match, so the gate is
-// robust to GitHub dropping/adding the suffix.
-func TestParseSoak_BareLegacyLogin(t *testing.T) {
-	now := time.Now()
-	past := now.Add(-10 * time.Minute)
-	data := makeSoakJSONState(past, "gemini-code-assist", "COMMENTED")
-	if err := parseSoak(data, now); err != nil {
-		t.Fatalf("bare legacy login should still satisfy gate 4, got: %v", err)
-	}
-}
-
-// A PENDING (unsubmitted draft) review from the bot must NOT satisfy the gate.
-func TestParseSoak_BotPendingReviewDoesNotCount(t *testing.T) {
-	now := time.Now()
-	past := now.Add(-10 * time.Minute)
-	data := makeSoakJSONState(past, ReviewBot, "PENDING")
-	if err := parseSoak(data, now); err == nil {
-		t.Fatal("PENDING bot review should not satisfy gate 4, got nil")
-	}
-}
-
-func TestIsReviewBot(t *testing.T) {
-	cases := map[string]bool{
-		"gemini-code-assist[bot]": true,
-		"gemini-code-assist":      true,
-		"some-other-bot[bot]":     false,
-		"":                        false,
-	}
-	for login, want := range cases {
-		if got := isReviewBot(login); got != want {
-			t.Errorf("isReviewBot(%q) = %v, want %v", login, got, want)
-		}
-	}
-}
-
-func TestReviewStateCounts(t *testing.T) {
-	cases := map[string]bool{
-		"COMMENTED":         true,
-		"APPROVED":          true,
-		"CHANGES_REQUESTED": true,
-		"":                  true,
-		"PENDING":           false,
-		"DISMISSED":         false,
-	}
-	for state, want := range cases {
-		if got := reviewStateCounts(state); got != want {
-			t.Errorf("reviewStateCounts(%q) = %v, want %v", state, got, want)
-		}
-	}
-}
-
 
 // --- SafeMerge config validation ---
 

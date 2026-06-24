@@ -7,9 +7,11 @@ locals {
       visibility     = "public"
       default_branch = "main"
       # ci.yml matrix: 2 jobs, both must pass.
+      # review.yml: 5-dimension AI review (replaces gemini-code-assist, ce-hz14).
       required_checks = [
         "Build & Test (ubuntu-latest)",
         "Build & Test (macos-latest)",
+        "5-Dimension AI Review",
       ]
     }
     # NOTE: "engram" is intentionally NOT here — it is an ARCHIVED repo and

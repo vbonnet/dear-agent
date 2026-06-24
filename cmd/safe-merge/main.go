@@ -7,7 +7,6 @@
 //  1. ALL CI checks pass — no reds, no pending (required only).
 //  2. No unresolved review threads (security-* threads need a written verdict).
 //  3. Head commit is ≥ 5 minutes old (soak time).
-//  4. The review bot (gemini-code-assist) has posted.
 //
 // After a successful merge: local worktree and branch are cleaned up.
 //
@@ -120,7 +119,6 @@ Gates enforced before merging:
   1. Required CI checks pass (no failures, no pending)
   2. No unresolved review threads
   3. Head commit ≥ 5 minutes old (soak time)
-  4. Review bot (gemini-code-assist) has posted
 
 P4 gates (only when a .safe-merge.yml is present — see below):
   - expected_reviewers: each listed reviewer must have a review newer than the
@@ -131,7 +129,7 @@ P4 gates (only when a .safe-merge.yml is present — see below):
 
 .safe-merge.yml (repo root or --config):
   expected_reviewers:
-    - login: "gemini-code-assist[bot]"
+    - login: "some-reviewer[bot]"
       timeout_minutes: 30
       require_newer_than_push: true
   flaky_checks:
@@ -152,9 +150,6 @@ Watch mode:
   --watch-timeout expires. Useful when CI is still running. Flake-valve retry
   counts persist across watch attempts so a check is never rerun beyond
   max_retries.
-
-If the review bot gate is stuck (e.g. quota exhaustion), escalate:
-  agm escalate --action "merge PR <num>" --reason "<why bot is unavailable>"
 
 Audit log:
   Every attempt is logged to ~/.local/state/dear-agent/safe-merge-audit.jsonl
