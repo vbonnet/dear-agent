@@ -74,7 +74,7 @@ func TestPrintSweepReport(t *testing.T) {
 	}
 
 	var b strings.Builder
-	printSweepReport(&b, res, false)
+	printSweepReport(&b, res, false, false)
 	out := b.String()
 	for _, want := range []string{
 		"CLASS", "MERGED=1 DIRTY=1 ORPHANED=1",
@@ -87,7 +87,7 @@ func TestPrintSweepReport(t *testing.T) {
 	}
 
 	var e strings.Builder
-	printSweepReport(&e, res, true)
+	printSweepReport(&e, res, true, false)
 	if !strings.Contains(e.String(), "Reaped 1") {
 		t.Errorf("execute report should say Reaped:\n%s", e.String())
 	}
@@ -96,8 +96,53 @@ func TestPrintSweepReport(t *testing.T) {
 	}
 
 	var z strings.Builder
-	printSweepReport(&z, &ops.SweepResult{}, false)
+	printSweepReport(&z, &ops.SweepResult{}, false, false)
 	if !strings.Contains(z.String(), "No worktrees found.") {
 		t.Errorf("empty report wrong:\n%s", z.String())
+	}
+}
+
+func TestPrintSweepReport_OrphanBranch(t *testing.T) {
+	res := &ops.SweepResult{
+		Worktrees: []ops.WorktreeStatus{
+			{Path: "/w/m", Repo: "r", Branch: "claude/m", Class: ops.ClassMerged, Reason: "pr-merged", PRState: "MERGED"},
+			{
+				Path: "/w/ob", Repo: "r", Branch: "ce-task", Class: ops.ClassOrphaned, Reason: "no-pr",
+				IsOrphanBranch: true, CommitsAboveMergeBase: 3,
+			},
+		},
+		Removed: []string{"/w/m"},
+	}
+
+	var b strings.Builder
+	printSweepReport(&b, res, false, false)
+	out := b.String()
+	for _, want := range []string{
+		"orphan branch", "ce-task", "commits_above_main=3",
+		"open a PR or run `agm worktree sweep --execute`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("orphan section missing %q:\n%s", want, out)
+		}
+	}
+
+	// --orphan-only mode: only orphan lines
+	var oo strings.Builder
+	printSweepReport(&oo, res, false, true)
+	oout := oo.String()
+	if !strings.Contains(oout, "ORPHAN") || !strings.Contains(oout, "ce-task") {
+		t.Errorf("orphan-only missing ORPHAN/ce-task:\n%s", oout)
+	}
+	if strings.Contains(oout, "claude/m") {
+		t.Errorf("orphan-only must not list merged worktrees:\n%s", oout)
+	}
+
+	// --orphan-only with no orphans
+	var no strings.Builder
+	printSweepReport(&no, &ops.SweepResult{Worktrees: []ops.WorktreeStatus{
+		{Path: "/w/m", Repo: "r", Branch: "claude/m", Class: ops.ClassMerged, Reason: "pr-merged"},
+	}}, false, true)
+	if !strings.Contains(no.String(), "No orphan branches found.") {
+		t.Errorf("orphan-only with no orphans should report empty:\n%s", no.String())
 	}
 }
