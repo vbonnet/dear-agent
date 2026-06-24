@@ -15,6 +15,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/override"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -24,6 +25,7 @@ import (
 var hardKill bool
 var forceKill bool
 var confirmedStuck bool
+var killReason string
 
 var killCmd = &cobra.Command{
 	Use:   "kill [session-name]",
@@ -119,13 +121,26 @@ Examples:
 
 func init() {
 	killCmd.Flags().BoolVar(&hardKill, "hard", false, "hard kill: detect deadlock and SIGKILL Claude process")
-	killCmd.Flags().BoolVarP(&forceKill, "force", "f", false, "skip confirmation prompt (for automation)")
+	killCmd.Flags().BoolVarP(&forceKill, "force", "f", false, "skip confirmation prompt — requires --reason")
+	killCmd.Flags().StringVar(&killReason, "reason", "", "justification for --force, recorded in the override audit log")
 	killCmd.Flags().BoolVar(&confirmedStuck, "confirmed-stuck", false, "required to kill an active (running) session")
 	sessionCmd.AddCommand(killCmd)
 }
 
 func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 	sessionName := args[0]
+
+	// Override guard: --force skips interactive confirmation — require a reason.
+	if forceKill {
+		if gerr := override.Require(context.Background(), override.Guard{
+			Tool: "agm session kill",
+			Flag: "--force",
+			Gate: "interactive kill confirmation",
+			Risk: override.RiskP2,
+		}, killReason); gerr != nil {
+			return gerr
+		}
+	}
 
 	// In JSON mode, suppress Cobra's text error/usage dump so the only thing
 	// emitted on the error path is our structured JSON object.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/override"
 )
 
 var unarchiveCmd = &cobra.Command{
@@ -48,6 +50,18 @@ Examples:
 
 func runUnarchive(cmd *cobra.Command, args []string) error {
 	pattern := args[0]
+
+	// Override guard: --force skips interactive restore confirmation — require a reason.
+	if unarchiveForce {
+		if gerr := override.Require(context.Background(), override.Guard{
+			Tool: "agm session unarchive",
+			Flag: "--force",
+			Gate: "interactive restore confirmation",
+			Risk: override.RiskP2,
+		}, unarchiveReason); gerr != nil {
+			return gerr
+		}
+	}
 
 	// Validate glob pattern
 	if _, err := filepath.Match(pattern, ""); err != nil {
@@ -270,8 +284,10 @@ func unarchiveCompletion(cmd *cobra.Command, args []string, toComplete string) (
 }
 
 var unarchiveForce bool
+var unarchiveReason string
 
 func init() {
-	unarchiveCmd.Flags().BoolVar(&unarchiveForce, "force", false, "Skip confirmation prompt (for non-interactive use)")
+	unarchiveCmd.Flags().BoolVar(&unarchiveForce, "force", false, "Skip confirmation prompt — requires --reason")
+	unarchiveCmd.Flags().StringVar(&unarchiveReason, "reason", "", "justification for --force, recorded in the override audit log")
 	sessionCmd.AddCommand(unarchiveCmd)
 }
