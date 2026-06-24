@@ -16,18 +16,29 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vbonnet/dear-agent/agm/internal/gateway"
+	pkgversion "github.com/vbonnet/dear-agent/pkg/version"
 )
 
 // logger writes to stderr (required for stdio MCP transport)
 var logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-// Version information - set via ldflags at build time
+// Version, GitCommit, BuildDate, BuiltBy are local aliases that mirror
+// pkg/version vars (set by ldflags or VCS build info). Tests reference them
+// directly; callers should prefer pkg/version for new code.
 var (
-	Version   = "1.0.0-dev"
-	GitCommit = "unknown"
-	BuildDate = "unknown"
-	BuiltBy   = "unknown"
+	Version   string
+	GitCommit string
+	BuildDate string
+	BuiltBy   string
 )
+
+func init() {
+	pkgversion.PopulateFromBuildInfo()
+	Version = pkgversion.Version
+	GitCommit = pkgversion.GitCommit
+	BuildDate = pkgversion.BuildDate
+	BuiltBy = pkgversion.BuiltBy
+}
 
 // Main entry point for AGM MCP server
 // Adapted from Engram MCP server pattern

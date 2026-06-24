@@ -32,11 +32,13 @@ import (
 
 	"github.com/vbonnet/dear-agent/internal/safepr"
 	"github.com/vbonnet/dear-agent/pkg/otelsetup"
+	pkgversion "github.com/vbonnet/dear-agent/pkg/version"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
 
 func main() {
+	pkgversion.PopulateFromBuildInfo()
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "\nsafe-pr: %v\n", err)
 		os.Exit(1)
@@ -56,6 +58,10 @@ type parsedArgs struct {
 func parseArgs(argv []string) (*parsedArgs, error) {
 	if len(argv) == 0 || argv[0] == "-h" || argv[0] == "--help" {
 		fmt.Print(usage)
+		return &parsedArgs{showedHelp: true}, nil
+	}
+	if argv[0] == "--version" || argv[0] == "-v" {
+		fmt.Printf("safe-pr %s\n", pkgversion.String())
 		return &parsedArgs{showedHelp: true}, nil
 	}
 

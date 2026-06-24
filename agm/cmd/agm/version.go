@@ -4,49 +4,22 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"runtime/debug"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/freshness"
+	pkgversion "github.com/vbonnet/dear-agent/pkg/version"
 )
 
+// Version, GitCommit, BuildDate, BuiltBy are package-level aliases kept for
+// backward compatibility with code inside this cmd that references them
+// (admin_verify_deployment.go, main.go). Their values are set by init() after
+// pkg/version vars are populated from ldflags or build info.
 var (
-	// Version information (can be set via ldflags at build time)
-	Version   = "2.0.0-dev"
-	GitCommit = "unknown"
-	BuildDate = "unknown"
-	BuiltBy   = "unknown"
+	Version   string
+	GitCommit string
+	BuildDate string
+	BuiltBy   string
 )
-
-// populateVersionFromBuildInfo fills version vars from Go's embedded VCS info
-// when ldflags were not used (e.g., plain `go install`).
-func populateVersionFromBuildInfo() {
-	if GitCommit != "unknown" {
-		return
-	}
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return
-	}
-	for _, s := range info.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			GitCommit = s.Value
-			if len(GitCommit) > 12 {
-				GitCommit = GitCommit[:12]
-			}
-		case "vcs.time":
-			BuildDate = s.Value
-		case "vcs.modified":
-			if s.Value == "true" && GitCommit != "unknown" {
-				GitCommit += "-dirty"
-			}
-		}
-	}
-	if GitCommit != "unknown" {
-		BuiltBy = "go install"
-	}
-}
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
@@ -82,7 +55,15 @@ var versionCmd = &cobra.Command{
 }
 
 func init() {
-	populateVersionFromBuildInfo()
+	// Populate pkg/version from embedded VCS info when ldflags were not used.
+	pkgversion.PopulateFromBuildInfo()
+
+	// Mirror pkg/version vars into the local aliases used by this cmd.
+	Version = pkgversion.Version
+	GitCommit = pkgversion.GitCommit
+	BuildDate = pkgversion.BuildDate
+	BuiltBy = pkgversion.BuiltBy
+
 	rootCmd.AddCommand(versionCmd)
 
 	// Enable `agm --version` in addition to `agm version`
