@@ -1,11 +1,13 @@
 package devlog
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/internal/override"
 )
 
 func TestInitCommand_Help(t *testing.T) {
@@ -159,15 +161,18 @@ func TestInitCommand_ForceOverwrite(t *testing.T) {
 		t.Fatalf("First runInit() error = %v, want nil", err)
 	}
 
-	// Enable force flag
+	// Enable force flag with a valid reason (required by override guard)
 	originalForce := initForce
 	initForce = true
 	defer func() { initForce = originalForce }()
+	originalReason := initReason
+	initReason = "re-initializing workspace after removing stale config from a crashed run"
+	defer func() { initReason = originalReason }()
 
-	// Run init second time with --force
+	// Run init second time with --force and --reason
 	err = runInit(initCmd, []string{"test-overwrite"})
 	if err != nil {
-		t.Errorf("runInit() with --force error = %v, want nil", err)
+		t.Errorf("runInit() with --force and reason error = %v, want nil", err)
 	}
 
 	// Verify config was overwritten with new name
@@ -179,6 +184,40 @@ func TestInitCommand_ForceOverwrite(t *testing.T) {
 
 	if !contains(string(content), "test-overwrite") {
 		t.Error("config.yaml should be overwritten with new workspace name")
+	}
+}
+
+// TestInitForce_NoReason verifies --force without --reason is denied before any I/O.
+func TestInitForce_NoReason(t *testing.T) {
+	originalForce := initForce
+	initForce = true
+	defer func() { initForce = originalForce }()
+	originalReason := initReason
+	initReason = ""
+	defer func() { initReason = originalReason }()
+
+	err := runInit(initCmd, []string{"test-workspace"})
+	var denied *override.DeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("expected *override.DeniedError, got %T: %v", err, err)
+	}
+}
+
+// TestInitForce_GoodReason verifies the guard configuration permits a valid reason.
+func TestInitForce_GoodReason(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+
+	originalForce := initForce
+	initForce = true
+	defer func() { initForce = originalForce }()
+	originalReason := initReason
+	initReason = "re-initializing workspace after removing stale config from a crashed run"
+	defer func() { initReason = originalReason }()
+
+	err := runInit(initCmd, []string{"test-workspace"})
+	if err != nil {
+		t.Fatalf("expected success with valid reason, got: %v", err)
 	}
 }
 
