@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -346,7 +347,7 @@ func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []
 				"  • Check tmux session exists: tmux list-sessions\n"+
 				"  • Attach and start manually: tmux attach -t "+sessionName)
 		if !exists {
-			_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
+			cleanupCodexTmuxSession(sessionName)
 		}
 		return err
 	}
@@ -365,13 +366,29 @@ func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []
 				"  • Check for onboarding, model selection, auth, or permission prompts\n"+
 				"  • Retry after resolving the prompt")
 		if !exists {
-			_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
+			cleanupCodexTmuxSession(sessionName)
 		}
 		return err
 	}
 	debug.Log("✓ Codex prompt detected - Codex is ready")
 	ui.PrintSuccess("Codex adapter ready")
 	return nil
+}
+
+func cleanupCodexTmuxSession(sessionName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	normalizedName := tmux.NormalizeTmuxSessionName(sessionName)
+	cmd := exec.CommandContext(ctx, "tmux", "-S", tmux.GetSocketPath(), "kill-session", "-t", normalizedName)
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		debug.Log("Codex session cleanup timed out or was cancelled: %v", ctx.Err())
+		return
+	}
+	if err != nil {
+		debug.Log("Failed to clean up Codex tmux session: %v (output: %s)", err, strings.TrimSpace(string(output)))
+	}
 }
 
 // startOpenCodeHarness sends the `opencode attach` command into the tmux
