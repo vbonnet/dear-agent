@@ -20,6 +20,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/internal/telemetry"
 )
 
@@ -30,6 +31,7 @@ var (
 	dryRun             bool
 	cleanupWorktrees   bool
 	forceArchive       bool   // Skip pre-archive verification checks
+	archiveReason      string // Justification for --force, recorded in override audit log
 	keepSandbox        bool   // Preserve sandbox directory for debugging
 	includeSupervisors bool   // Include supervisor sessions in bulk archive
 	archiveOutcome     string // Outcome stamped on the archived record (completed|crashed|killed|gc-stale)
@@ -158,6 +160,18 @@ Examples:
 }
 
 func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
+	// Override guard: --force skips pre-archive verification — require a reason.
+	if forceArchive {
+		if gerr := override.Require(context.Background(), override.Guard{
+			Tool: "agm session archive",
+			Flag: "--force",
+			Gate: "pre-archive verification (uncommitted changes, unmerged branch)",
+			Risk: override.RiskP2,
+		}, archiveReason); gerr != nil {
+			return gerr
+		}
+	}
+
 	// Audit trail: log archive lifecycle events
 	defer func() {
 		sessionName := ""
@@ -816,7 +830,8 @@ func init() {
 	archiveCmd.Flags().BoolVar(&cleanupWorktrees, "cleanup-worktrees", false,
 		"Clean up merged git worktrees after archiving")
 	archiveCmd.Flags().BoolVarP(&forceArchive, "force", "f", false,
-		"Skip pre-archive verification checks (uncommitted changes, unmerged branch)")
+		"Skip pre-archive verification checks (uncommitted changes, unmerged branch) — requires --reason")
+	archiveCmd.Flags().StringVar(&archiveReason, "reason", "", "justification for --force, recorded in the override audit log")
 	archiveCmd.Flags().BoolVar(&keepSandbox, "keep-sandbox", false,
 		"Preserve sandbox directory for debugging instead of removing it")
 	archiveCmd.Flags().BoolVar(&includeSupervisors, "include-supervisors", false,
