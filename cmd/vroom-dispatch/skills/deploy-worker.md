@@ -127,11 +127,28 @@ else
 fi
 ```
 
-Record the outcome to the dispatch trail and **exit** (do not loop):
+Record the outcome to the dispatch trail:
 ```bash
 printf '{"ts":"%s","role":"deploy-worker","kind":"deploy.merged","payload":{"bead_id":"%s","pr":%s}}\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<bead-id>" "<pr-number>" >> ~/.agm/vroom/trail.jsonl
 ```
+
+### Step 5a: Self-Archive (free the worker slot)
+
+After the bead is closed and the merge is recorded in the trail, archive your own
+session to immediately free the worker slot for the next dispatch. The Orchestrator
+maintains a reaper for orphaned workers, but self-archival is faster and more
+efficient:
+
+```bash
+agm session archive --async "worker-deploy-<bead-id>" 2>&1
+printf '{"ts":"%s","role":"deploy-worker","kind":"deploy.self_archived","payload":{"bead_id":"%s","pr":%s}}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<bead-id>" "<pr-number>" >> ~/.agm/vroom/trail.jsonl
+```
+
+The `--async` flag is required for active sessions; the archive happens in the
+background while this step exits. If the archive fails (unlikely), the Orchestrator
+will reap the orphaned session on its next tick.
 
 ### Step 6: Escalation (hard block — report and exit)
 
