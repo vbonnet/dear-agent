@@ -91,6 +91,9 @@ type AnalyzeRetroResult struct {
 	RetroFile string      `json:"retro_file"`
 	Title     string      `json:"title,omitempty"`
 	Lenses    RetroLenses `json:"lenses"`
+	// Synthesis is the supervisor's cross-lens verdict. It is only populated
+	// when all four lenses ran, since the synthesis reasons across every lens.
+	Synthesis *RetroSynthesis `json:"synthesis,omitempty"`
 }
 
 var (
@@ -151,6 +154,11 @@ func AnalyzeRetro(req *AnalyzeRetroRequest) (*AnalyzeRetroResult, error) {
 	if run[LensSystemic] {
 		result.Lenses.Systemic = analyzeSystemic(content)
 	}
+
+	// Supervisor step: when every lens ran, synthesize the four findings into a
+	// single prioritized verdict. synthesizeLenses returns nil for partial sets.
+	result.Synthesis = synthesizeLenses(&result.Lenses)
+
 	return result, nil
 }
 
