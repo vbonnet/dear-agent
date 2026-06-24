@@ -557,11 +557,11 @@ Examples:
 			if routePrompt == "" && promptFile != "" {
 				// best-effort: read first 512 bytes for classification
 				if data, err := os.ReadFile(promptFile); err == nil {
-					n := len(data)
-					if n > 512 {
-						n = 512
+					runes := []rune(string(data))
+					if len(runes) > 512 {
+						runes = runes[:512]
 					}
-					routePrompt = string(data[:n])
+					routePrompt = string(runes)
 				}
 			}
 			d, routeErr := modelrouter.Route(harnessName, modelTierFlag, "", routePrompt)

@@ -40,7 +40,9 @@ func createAndRegisterManifest(sessionID, sessionName, workDir string, sandboxIn
 	if err := registerSessionInDolt(m); err != nil {
 		return err
 	}
-	_ = git.CommitManifest(manifestPath, "create", sessionName)
+	if err := git.CommitManifest(manifestPath, "create", sessionName); err != nil {
+		debug.Log("manifest commit skipped: %v", err)
+	}
 
 	ctx := context.Background()
 
