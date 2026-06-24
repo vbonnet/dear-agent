@@ -360,6 +360,16 @@ Examples:
 			if !checkHarnessHealth(manifests) {
 				allHealthy = false
 			}
+
+			// 7. Check for mesh-wide send-block incidents.
+			// When the same guard violation blocks send.msg across N≥2 sessions
+			// within the recent window, emit one consolidated warning rather than
+			// letting each supervisor rediscover the block independently.
+			// See: 2026-06-18 ghost-text outage (ce-q7am).
+			fmt.Println(ui.Blue("\n--- Checking for mesh-wide send-block ---"))
+			if !checkMeshWideSendBlock() {
+				allHealthy = false
+			}
 		}
 
 		// Overall status
