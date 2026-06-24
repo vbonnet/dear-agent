@@ -42,6 +42,9 @@ type Config struct {
 	// LoopMonitoring configures loop heartbeat monitoring
 	LoopMonitoring LoopMonitoringConfig `yaml:"loop_monitoring,omitempty"`
 
+	// Sweeper configures dead-pane and stuck-session sweep
+	Sweeper SweeperConfig `yaml:"sweeper,omitempty"`
+
 	// EventBus configures event bus integration (optional)
 	EventBus EventBusConfig `yaml:"eventbus,omitempty"`
 
@@ -141,6 +144,17 @@ type TemporalConfig struct {
 	Namespace string `yaml:"namespace"`
 }
 
+// SweeperConfig configures dead-pane and stuck-session sweeping.
+type SweeperConfig struct {
+	Enabled       bool   `yaml:"enabled"`
+	DryRun        bool   `yaml:"dry_run"`
+	GracePeriod   string `yaml:"grace_period"`
+	SweepInterval string `yaml:"sweep_interval"`
+
+	GracePeriodDuration   time.Duration `yaml:"-"`
+	SweepIntervalDuration time.Duration `yaml:"-"`
+}
+
 // LoopMonitoringConfig configures loop heartbeat monitoring.
 type LoopMonitoringConfig struct {
 	// EscalationCommand is the command to run after circuit breaker trips (3 failed wakes).
@@ -205,6 +219,14 @@ func DefaultConfig() *Config {
 			MaxAutoApprovalsHour: 5,
 			AgmBinary:            "agm",
 		},
+		Sweeper: SweeperConfig{
+			Enabled:               false,
+			DryRun:                true,
+			GracePeriod:           "30m",
+			SweepInterval:         "5m",
+			GracePeriodDuration:   30 * time.Minute,
+			SweepIntervalDuration: 5 * time.Minute,
+		},
 		EventBus: EventBusConfig{
 			Enabled: false, // Disabled by default (optional integration)
 		},
@@ -268,6 +290,19 @@ func (c *Config) parseDurations() error {
 		c.Recovery.DedupCooldownDuration, err = time.ParseDuration(c.Recovery.DedupCooldown)
 		if err != nil {
 			return fmt.Errorf("invalid recovery.dedup_cooldown: %w", err)
+		}
+	}
+
+	if c.Sweeper.GracePeriod != "" {
+		c.Sweeper.GracePeriodDuration, err = time.ParseDuration(c.Sweeper.GracePeriod)
+		if err != nil {
+			return fmt.Errorf("invalid sweeper.grace_period: %w", err)
+		}
+	}
+	if c.Sweeper.SweepInterval != "" {
+		c.Sweeper.SweepIntervalDuration, err = time.ParseDuration(c.Sweeper.SweepInterval)
+		if err != nil {
+			return fmt.Errorf("invalid sweeper.sweep_interval: %w", err)
 		}
 	}
 
