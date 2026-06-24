@@ -378,11 +378,11 @@ func TestCreateSession_WorksWithoutStorage(t *testing.T) {
 }
 
 func TestBuildHarnessCommand_ClaudeCode(t *testing.T) {
-	cmd := buildHarnessCommand("claude-code", "opus", "my-session", "/tmp/work")
+	cmd := buildHarnessCommand("claude-code", "opus", "my-session", "/tmp/work", false)
 	if cmd == "" {
 		t.Fatal("empty command")
 	}
-	for _, want := range []string{"claude", "--model 'opus'", "AGM_SESSION_NAME='my-session'", "--enable-auto-mode", "--add-dir '/tmp/work'"} {
+	for _, want := range []string{"claude", "--model 'opus'", "AGM_SESSION_NAME='my-session'", "--enable-auto-mode", "--add-dir '/tmp/work'", "&& exit"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("command %q missing %q", cmd, want)
 		}
@@ -390,14 +390,17 @@ func TestBuildHarnessCommand_ClaudeCode(t *testing.T) {
 }
 
 func TestBuildHarnessCommand_GeminiCli(t *testing.T) {
-	cmd := buildHarnessCommand("gemini-cli", "2.5-flash", "s", "/tmp")
+	cmd := buildHarnessCommand("gemini-cli", "2.5-flash", "s", "/tmp", false)
 	if !strings.Contains(cmd, "gemini -m '2.5-flash'") {
 		t.Errorf("gemini command = %q", cmd)
+	}
+	if !strings.Contains(cmd, "&& exit") {
+		t.Errorf("gemini command missing exit suffix: %q", cmd)
 	}
 }
 
 func TestBuildHarnessCommand_CodexCli(t *testing.T) {
-	cmd := buildHarnessCommand("codex-cli", "5.4", "codex-session", "/tmp/work")
+	cmd := buildHarnessCommand("codex-cli", "5.4", "codex-session", "/tmp/work", false)
 	for _, want := range []string{
 		"env -u CLAUDECODE",
 		"AGM_SESSION_NAME='codex-session'",
@@ -416,14 +419,14 @@ func TestBuildHarnessCommand_CodexCli(t *testing.T) {
 }
 
 func TestBuildHarnessCommand_UnknownHarness(t *testing.T) {
-	cmd := buildHarnessCommand("unknown", "m", "s", "/tmp")
+	cmd := buildHarnessCommand("unknown", "m", "s", "/tmp", false)
 	if !strings.Contains(cmd, "Unknown harness") {
 		t.Errorf("unknown harness command = %q", cmd)
 	}
 }
 
 func TestBuildHarnessCommand_EscapesSingleQuotes(t *testing.T) {
-	cmd := buildHarnessCommand("claude-code", "opus", "sess", "/tmp/it's a dir")
+	cmd := buildHarnessCommand("claude-code", "opus", "sess", "/tmp/it's a dir", false)
 	if strings.Contains(cmd, "it's a") {
 		t.Errorf("unescaped single quote in command: %s", cmd)
 	}
@@ -433,9 +436,32 @@ func TestBuildHarnessCommand_EscapesSingleQuotes(t *testing.T) {
 }
 
 func TestBuildHarnessCommand_BracketedModelQuoted(t *testing.T) {
-	cmd := buildHarnessCommand("claude-code", "claude-sonnet-4-6[1m]", "sess", "/tmp/work")
+	cmd := buildHarnessCommand("claude-code", "claude-sonnet-4-6[1m]", "sess", "/tmp/work", false)
 	if !strings.Contains(cmd, "--model 'claude-sonnet-4-6[1m]'") {
 		t.Errorf("bracketed model not quoted; zsh would glob-expand [1m]: %s", cmd)
+	}
+}
+
+// TestBuildHarnessCommand_Persistent verifies that persistent=true omits
+// "&&  exit" from the command for all harnesses that normally include it,
+// so supervisor sessions survive their Claude turn/loop ending (ce-pzca).
+func TestBuildHarnessCommand_Persistent(t *testing.T) {
+	for _, harness := range []string{"claude-code", "gemini-cli", "codex-cli"} {
+		cmd := buildHarnessCommand(harness, "opus", "sup-session", "/tmp/work", true)
+		if strings.Contains(cmd, "&& exit") {
+			t.Errorf("persistent=true: harness %q command still has '&& exit': %s", harness, cmd)
+		}
+	}
+}
+
+// TestBuildHarnessCommand_NonPersistentHasExit verifies that persistent=false
+// keeps the "&&  exit" suffix for clean one-shot worker teardown.
+func TestBuildHarnessCommand_NonPersistentHasExit(t *testing.T) {
+	for _, harness := range []string{"claude-code", "gemini-cli", "codex-cli"} {
+		cmd := buildHarnessCommand(harness, "opus", "worker-session", "/tmp/work", false)
+		if !strings.Contains(cmd, "&& exit") {
+			t.Errorf("persistent=false: harness %q command missing '&& exit': %s", harness, cmd)
+		}
 	}
 }
 

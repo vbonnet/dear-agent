@@ -30,6 +30,12 @@ type CreateSessionRequest struct {
 
 	// Harness is the agent harness (default: "claude-code").
 	Harness string `json:"harness,omitempty"`
+
+	// Persistent omits the "&&  exit" suffix from the harness launch command.
+	// Use for long-lived supervisor sessions (vroom-meta-orchestrator, etc.)
+	// that must survive their Claude turn/loop ending. One-shot workers should
+	// leave this false so the shell exits cleanly when the task completes.
+	Persistent bool `json:"persistent,omitempty"`
 }
 
 // CreateSessionResult is the output of CreateSession.
@@ -45,9 +51,10 @@ type CreateSessionResult struct {
 
 // createSessionParams holds the validated+defaulted parameters for session creation.
 type createSessionParams struct {
-	name    string
-	harness string
-	model   string
+	name       string
+	harness    string
+	model      string
+	persistent bool
 }
 
 // isSafeNameRune returns true for characters safe in tmux session names and shell arguments.
@@ -104,7 +111,7 @@ func validateCreateRequest(ctx *OpContext, req *CreateSessionRequest) (*createSe
 		return nil, ErrTmuxNotRunning()
 	}
 
-	p := &createSessionParams{harness: req.Harness, model: req.Model}
+	p := &createSessionParams{harness: req.Harness, model: req.Model, persistent: req.Persistent}
 	if p.harness == "" {
 		p.harness = "claude-code"
 	}
@@ -163,7 +170,7 @@ func CreateSession(ctx *OpContext, req *CreateSessionRequest) (*CreateSessionRes
 		return nil, ErrStorageError("tmux.CreateSession", err)
 	}
 
-	harnessCmd := buildHarnessCommand(params.harness, params.model, params.name, req.Cwd)
+	harnessCmd := buildHarnessCommand(params.harness, params.model, params.name, req.Cwd, params.persistent)
 	if err := ctx.Tmux.SendKeys(params.name, harnessCmd); err != nil {
 		return nil, ErrStorageError("tmux.SendKeys(harness)", err)
 	}
@@ -212,7 +219,16 @@ func shellQuote(s string) string {
 }
 
 // buildHarnessCommand constructs the shell command to start the given harness.
-func buildHarnessCommand(harness, model, sessionName, workDir string) string {
+// When persistent is true the "&&  exit" suffix is omitted so that the tmux
+// pane's shell survives after the harness process exits — required for
+// long-lived supervisor sessions (vroom-meta-orchestrator, etc.) that must
+// restart or be re-driven without losing the pane.  One-shot workers should
+// pass persistent=false to get the clean-teardown behaviour.
+func buildHarnessCommand(harness, model, sessionName, workDir string, persistent bool) string {
+	exitSuffix := " && exit"
+	if persistent {
+		exitSuffix = ""
+	}
 	switch harness {
 	case "claude-code":
 		// Resolve the freshest OAuth token (live credentials file preferred
@@ -229,14 +245,14 @@ func buildHarnessCommand(harness, model, sessionName, workDir string) string {
 			oauthArg = fmt.Sprintf(" CLAUDE_CODE_OAUTH_TOKEN='%s'", shellQuote(token))
 			envUnset = "-u CLAUDECODE -u ANTHROPIC_API_KEY "
 		}
-		return fmt.Sprintf("env %sAGM_SESSION_NAME='%s'%s claude --model '%s' --add-dir '%s' --enable-auto-mode && exit",
-			envUnset, shellQuote(sessionName), oauthArg, shellQuote(model), shellQuote(workDir))
+		return fmt.Sprintf("env %sAGM_SESSION_NAME='%s'%s claude --model '%s' --add-dir '%s' --enable-auto-mode%s",
+			envUnset, shellQuote(sessionName), oauthArg, shellQuote(model), shellQuote(workDir), exitSuffix)
 	case "gemini-cli":
-		return fmt.Sprintf("gemini -m '%s' && exit", shellQuote(model))
+		return fmt.Sprintf("gemini -m '%s'%s", shellQuote(model), exitSuffix)
 	case "codex-cli":
 		resolvedModel := agent.ResolveModelFullName("codex-cli", model)
-		return fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME='%s' codex -m '%s' -C '%s' -s workspace-write && exit",
-			shellQuote(sessionName), shellQuote(resolvedModel), shellQuote(workDir))
+		return fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME='%s' codex -m '%s' -C '%s' -s workspace-write%s",
+			shellQuote(sessionName), shellQuote(resolvedModel), shellQuote(workDir), exitSuffix)
 	default:
 		return fmt.Sprintf("echo 'Unknown harness: %s' && exit 1", shellQuote(harness))
 	}
