@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -184,5 +185,120 @@ func TestScrubAPIKey(t *testing.T) {
 	// different variable and should survive.
 	if !slices.Contains(after, "ANTHROPIC_API_KEY_SUFFIX=ok") {
 		t.Error("scrubAPIKey incorrectly removed a prefix-matching but distinct var")
+	}
+}
+
+func TestSyncVroomHeartbeatFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, "vroom-hb")
+	ts := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	if err := syncVroomHeartbeatFile(dir, "meta-o", ts); err != nil {
+		t.Fatalf("syncVroomHeartbeatFile: %v", err)
+	}
+
+	// Directory must have been created.
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("dir not created: %v", err)
+	}
+
+	// File must exist with correct content.
+	data, err := os.ReadFile(filepath.Join(dir, "meta-o.json"))
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	var got vroomHeartbeatFile
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Role != "meta-orchestrator" {
+		t.Errorf("role = %q, want %q", got.Role, "meta-orchestrator")
+	}
+	if got.ISO != "2026-06-01T12:00:00Z" {
+		t.Errorf("iso = %q, want %q", got.ISO, "2026-06-01T12:00:00Z")
+	}
+	wantTS := float64(ts.UnixMilli()) / 1e3
+	if got.TS != wantTS {
+		t.Errorf("ts = %v, want %v", got.TS, wantTS)
+	}
+}
+
+func TestSyncHeartbeatFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Write internal heartbeat records for two supervisors.
+	ts1 := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	ts2 := time.Date(2026, 6, 1, 11, 0, 0, 0, time.UTC)
+	for id, ts := range map[string]time.Time{"meta-o": ts1, "orch": ts2} {
+		path, err := heartbeatPath(id)
+		if err != nil {
+			t.Fatalf("heartbeatPath(%s): %v", id, err)
+		}
+		if err := writeHeartbeatRecord(path, heartbeatRecord{
+			ID:          id,
+			LastBeatUTC: ts,
+		}); err != nil {
+			t.Fatalf("writeHeartbeatRecord(%s): %v", id, err)
+		}
+	}
+
+	// Write a supervisor dir with no heartbeat file — should be skipped.
+	missingDir := filepath.Join(home, ".agm", "supervisors", "never-beat")
+	if err := os.MkdirAll(missingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	vroomDir := filepath.Join(home, "vroom-hb")
+	if err := SyncHeartbeatFiles(vroomDir); err != nil {
+		t.Fatalf("SyncHeartbeatFiles: %v", err)
+	}
+
+	// Verify meta-o and orch files were written.
+	for id, wantRole := range map[string]string{
+		"meta-o": "meta-orchestrator",
+		"orch":   "orchestrator",
+	} {
+		data, err := os.ReadFile(filepath.Join(vroomDir, id+".json"))
+		if err != nil {
+			t.Fatalf("read %s.json: %v", id, err)
+		}
+		var got vroomHeartbeatFile
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatalf("unmarshal %s: %v", id, err)
+		}
+		if got.Role != wantRole {
+			t.Errorf("%s: role = %q, want %q", id, got.Role, wantRole)
+		}
+	}
+
+	// never-beat supervisor must NOT have a flat file.
+	if _, err := os.Stat(filepath.Join(vroomDir, "never-beat.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Error("never-beat.json should not have been written")
+	}
+}
+
+func TestSyncHeartbeatFilesNoSupervisors(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	vroomDir := filepath.Join(home, "vroom-hb")
+	// Must not error when ~/.agm/supervisors doesn't exist.
+	if err := SyncHeartbeatFiles(vroomDir); err != nil {
+		t.Fatalf("SyncHeartbeatFiles (no supervisors dir): %v", err)
+	}
+}
+
+func TestSupervisorRole(t *testing.T) {
+	cases := []struct{ id, want string }{
+		{"meta-o", "meta-orchestrator"},
+		{"orch", "orchestrator"},
+		{"overseer", "overseer"},
+		{"custom", "custom"},
+	}
+	for _, c := range cases {
+		if got := supervisorRole(c.id); got != c.want {
+			t.Errorf("supervisorRole(%q) = %q, want %q", c.id, got, c.want)
+		}
 	}
 }

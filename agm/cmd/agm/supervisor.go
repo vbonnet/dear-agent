@@ -52,6 +52,110 @@ type heartbeatRecord struct {
 	PID         int       `json:"pid,omitempty"`
 }
 
+// vroomHeartbeatFile is the flat JSON shape read by the Overseer SKILL at
+// ~/.agm/vroom/heartbeat/<name>.json. The SKILL writes these itself during
+// ticks, but when the file goes stale (supervisor crashed, skill gap) the
+// authoritative AGM store still shows the supervisor alive — causing false
+// STALE alerts. SyncHeartbeatFiles bridges the two stores.
+type vroomHeartbeatFile struct {
+	TS   float64 `json:"ts"`
+	ISO  string  `json:"iso"`
+	Role string  `json:"role"`
+}
+
+// defaultVroomHeartbeatDir returns the default directory for VROOM flat
+// heartbeat files.
+func defaultVroomHeartbeatDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("home dir: %w", err)
+	}
+	return filepath.Join(home, ".agm", "vroom", "heartbeat"), nil
+}
+
+// syncVroomHeartbeatFile writes a single flat VROOM heartbeat file for the
+// named supervisor using ts as the authoritative timestamp. Writes atomically
+// via temp-file + rename. dir is created if it doesn't exist.
+func syncVroomHeartbeatFile(dir, id string, ts time.Time) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	rec := vroomHeartbeatFile{
+		TS:   float64(ts.UnixMilli()) / 1e3,
+		ISO:  ts.UTC().Format(time.RFC3339),
+		Role: supervisorRole(id),
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		return fmt.Errorf("marshal vroom heartbeat: %w", err)
+	}
+	dst := filepath.Join(dir, id+".json")
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("write tmp: %w", err)
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
+// SyncHeartbeatFiles mirrors the authoritative AGM supervisor heartbeat
+// records to flat VROOM files under dir. Supervisors with a missing or
+// zero heartbeat record are skipped (no file written or removed). dir is
+// created on demand. Errors for individual supervisors are collected and
+// returned as a single joined error so one bad supervisor doesn't block
+// the rest.
+func SyncHeartbeatFiles(dir string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	base := filepath.Join(home, ".agm", "supervisors")
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // no supervisors registered yet
+		}
+		return err
+	}
+	var errs []error
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		id := e.Name()
+		rec, err := readHeartbeatRecord(id)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read %s: %w", id, err))
+			continue
+		}
+		if rec == nil || rec.LastBeatUTC.IsZero() {
+			continue // never heartbeated — skip, don't write a stale file
+		}
+		if err := syncVroomHeartbeatFile(dir, id, rec.LastBeatUTC); err != nil {
+			errs = append(errs, fmt.Errorf("sync %s: %w", id, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// supervisorRole returns a human-readable role label for a supervisor ID.
+// Used as the "role" field in the VROOM flat heartbeat file so the Overseer
+// SKILL can distinguish supervisors by function, not just opaque ID.
+func supervisorRole(id string) string {
+	switch id {
+	case "meta-o":
+		return "meta-orchestrator"
+	case "orch":
+		return "orchestrator"
+	case "overseer":
+		return "overseer"
+	default:
+		return id
+	}
+}
+
 // supervisorCmd exposes the agm supervisor subcommand group. Supervisor
 // sessions are persistent Claude Code CLI processes that participate in
 // the three-way supervisor mesh: they own the dear-agent-costs-style
@@ -331,18 +435,30 @@ func runSupervisorHeartbeat(cmd *cobra.Command, _ []string) error {
 		tertiary = os.Getenv("AGM_SUPERVISOR_TERTIARY_FOR")
 	}
 
+	now := time.Now().UTC()
 	rec := heartbeatRecord{
 		ID:          id,
 		PrimaryFor:  primary,
 		TertiaryFor: tertiary,
-		LastBeatUTC: time.Now().UTC(),
+		LastBeatUTC: now,
 		PID:         os.Getpid(),
 	}
 	path, err := heartbeatPath(id)
 	if err != nil {
 		return err
 	}
-	return writeHeartbeatRecord(path, rec)
+	if err := writeHeartbeatRecord(path, rec); err != nil {
+		return err
+	}
+	// Mirror to the flat VROOM heartbeat file so the Overseer SKILL's
+	// file-based staleness check sees fresh data immediately after each tick.
+	// Best-effort: a sync failure is printed but does not fail the beat.
+	if vroomDir, dirErr := defaultVroomHeartbeatDir(); dirErr == nil {
+		if syncErr := syncVroomHeartbeatFile(vroomDir, id, now); syncErr != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "warn: vroom heartbeat sync: %v\n", syncErr)
+		}
+	}
+	return nil
 }
 
 // writeHeartbeatRecord marshals rec and writes it atomically via a temp
@@ -405,6 +521,17 @@ func runSupervisorStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Mirror AGM records to the flat VROOM heartbeat files so the Overseer
+	// SKILL's file-based staleness check uses the same authoritative data.
+	// Best-effort: a sync failure is logged to stderr but does not fail the
+	// status command itself (the AGM read already succeeded).
+	if vroomDir, dirErr := defaultVroomHeartbeatDir(); dirErr == nil {
+		if syncErr := SyncHeartbeatFiles(vroomDir); syncErr != nil {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warn: vroom heartbeat sync: %v\n", syncErr)
+		}
+	}
+
 	if err := emitSupervisorStatus(cmd, rows); err != nil {
 		return err
 	}
