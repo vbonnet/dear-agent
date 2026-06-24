@@ -129,8 +129,8 @@ func printBudgetReport(e *costtrack.BudgetEnforcer, now time.Time) {
 					capStr = fmt.Sprintf("%d", ss.TokenCap)
 				}
 				shortID := ss.SessionID
-				if len(shortID) > 35 {
-					shortID = shortID[:8] + "…" + shortID[len(shortID)-8:]
+				if runes := []rune(shortID); len(runes) > 35 {
+					shortID = string(runes[:8]) + "…" + string(runes[len(runes)-8:])
 				}
 				_, _ = fmt.Fprintf(out, "%-36s %-14s %12d %12s\n",
 					shortID, ss.Harness, ss.TokensUsed, capStr)

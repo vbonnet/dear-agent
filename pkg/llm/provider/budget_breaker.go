@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -95,6 +96,8 @@ func (b *BudgetBreaker) Generate(ctx context.Context, req *GenerateRequest) (*Ge
 			var budgetErr *ErrBudgetExhausted
 			if errors.As(err, &budgetErr) {
 				b.openBreaker()
+				// Primary budget exhausted — try fallback chain for this request too.
+				return b.tryFallbackChain(ctx, req)
 			}
 		}
 		return resp, err
@@ -175,14 +178,16 @@ func (b *BudgetBreaker) tryGenerate(ctx context.Context, req *GenerateRequest, p
 		attribute.String("gen_ai.response.model", resp.Model),
 	)
 
-	// Record usage (best-effort — don't fail the request on a record error)
-	_ = b.cfg.Enforcer.RecordUsage(
+	// Record usage (best-effort — don't fail the request on a record error, but do log).
+	if err := b.cfg.Enforcer.RecordUsage(
 		b.cfg.SessionID,
 		b.cfg.Harness,
 		int64(resp.Usage.InputTokens),
 		int64(resp.Usage.OutputTokens),
 		resp.Usage.CostUSD,
-	)
+	); err != nil {
+		slog.Warn("budget: failed to record usage", "error", err, "session", b.cfg.SessionID)
+	}
 
 	// Successful call: if we were half-open, close the breaker
 	b.closeBreaker()
@@ -191,20 +196,23 @@ func (b *BudgetBreaker) tryGenerate(ctx context.Context, req *GenerateRequest, p
 }
 
 // tryFallbackChain walks FallbackChain until a provider succeeds or all are exhausted.
+// It continues to the next provider on both budget exhaustion and transient errors,
+// returning the last error if every provider fails.
 func (b *BudgetBreaker) tryFallbackChain(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
+	var lastErr error
 	for _, fallback := range b.cfg.FallbackChain {
 		resp, err := b.tryGenerate(ctx, req, fallback)
 		if err == nil {
 			return resp, nil
 		}
-		var budgetErr *ErrBudgetExhausted
-		if errors.As(err, &budgetErr) {
-			// This fallback is also over budget — try the next cheaper one
-			continue
-		}
-		return nil, err
+		lastErr = err
+		// Always try the next provider (budget exhaustion or transient error).
+		slog.Debug("budget: fallback provider failed, trying next", "provider", fallback.Name(), "error", err)
 	}
 
+	if lastErr != nil {
+		return nil, fmt.Errorf("all providers exhausted: %w", lastErr)
+	}
 	return nil, fmt.Errorf("all providers exhausted: %w",
 		&ErrBudgetExhausted{Reason: "no remaining budget in fallback chain"})
 }

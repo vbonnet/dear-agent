@@ -27,7 +27,11 @@ func (b *DailyBudget) DayIndex(t time.Time) int {
 	if !t.Before(end) {
 		return -1
 	}
-	return int(t.Sub(b.WeekStart).Hours() / 24)
+	// Use calendar-day arithmetic to handle DST transitions correctly.
+	// Comparing midnight-truncated dates avoids ±1h errors on DST boundaries.
+	startMidnight := time.Date(b.WeekStart.Year(), b.WeekStart.Month(), b.WeekStart.Day(), 0, 0, 0, 0, b.WeekStart.Location())
+	tMidnight := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	return int(tMidnight.Sub(startMidnight).Hours() / 24)
 }
 
 // AvailableToday returns how much USD can be spent on the given day.

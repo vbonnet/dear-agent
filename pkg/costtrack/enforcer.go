@@ -127,12 +127,9 @@ func (e *BudgetEnforcer) RecordUsage(sessionID, harness string, tokensIn, tokens
 
 	now := time.Now().UTC()
 
-	if err := e.state.RecordSpend(now, costUSD); err != nil {
-		return fmt.Errorf("record spend: %w", err)
-	}
 	totalTokens := tokensIn + tokensOut
-	if err := e.state.RecordSessionTokens(sessionID, harness, totalTokens); err != nil {
-		return fmt.Errorf("record session tokens: %w", err)
+	if err := e.state.RecordSpendAndTokens(now, costUSD, sessionID, harness, totalTokens); err != nil {
+		return fmt.Errorf("record usage: %w", err)
 	}
 
 	// Fire threshold alerts based on daily percentage used

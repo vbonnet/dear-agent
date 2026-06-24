@@ -92,6 +92,8 @@ func (s *BudgetState) saveLocked() error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write budget state temp: %w", err)
 	}
+	// If Rename fails, clean up the orphaned .tmp file.
+	defer os.Remove(tmp) // no-op on success (file was renamed away); removes on failure
 	if err := os.Rename(tmp, s.path); err != nil {
 		return fmt.Errorf("rename budget state: %w", err)
 	}
@@ -107,6 +109,25 @@ func (s *BudgetState) RecordSpend(now time.Time, usd float64) error {
 	idx := b.DayIndex(now.UTC())
 	if idx >= 0 && idx < 7 {
 		s.DailySpend[idx] += usd
+	}
+	return s.saveLocked()
+}
+
+// RecordSpendAndTokens records daily spend and session tokens in a single atomic
+// disk write, avoiding the double-write overhead of calling RecordSpend and
+// RecordSessionTokens separately.
+func (s *BudgetState) RecordSpendAndTokens(now time.Time, usd float64, sessionID, harness string, tokens int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	b := DailyBudget{WeeklyLimit: s.WeeklyLimitUSD, WeekStart: s.WeekStart, DailySpend: s.DailySpend}
+	idx := b.DayIndex(now.UTC())
+	if idx >= 0 && idx < 7 {
+		s.DailySpend[idx] += usd
+	}
+	s.SessionTokens[sessionID] += tokens
+	if harness != "" {
+		s.SessionHarness[sessionID] = harness
 	}
 	return s.saveLocked()
 }
