@@ -1,0 +1,72 @@
+name: Tofu Plan
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    name: Tofu Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: latest
+
+      - name: tofu init (no backend)
+        run: tofu init -backend=false
+
+      - name: tofu validate
+        run: tofu validate
+
+      - name: tofu plan
+        id: plan
+        continue-on-error: true
+        run: tofu plan -refresh=false -no-color 2>&1 | tee /tmp/plan-output.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TF_VAR_personal_owner: vbonnet
+          TF_VAR_org_name: dear-labs
+
+      - name: Format plan comment
+        if: always()
+        run: |
+          {
+            echo "### Tofu Plan"
+            echo ""
+            echo "\`\`\`hcl"
+            cat /tmp/plan-output.txt
+            echo "\`\`\`"
+            echo ""
+            echo "_Plan run against \`infra/\` with \`-backend=false -refresh=false\` (syntax + provider validation only; no live state comparison)._"
+          } > /tmp/plan-comment.md
+
+      - name: Post plan as PR comment
+        if: always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: tofu-plan
+          path: /tmp/plan-comment.md
+
+      - name: Fail if plan errored
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
