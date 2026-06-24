@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
+	"github.com/vbonnet/dear-agent/internal/override"
 )
 
 var (
@@ -16,6 +18,7 @@ var (
 	gcOlderThan    string
 	gcProtectRoles string
 	gcForce        bool
+	gcReason       string
 	gcJSON         bool
 )
 
@@ -57,6 +60,18 @@ Examples:
 }
 
 func runGC(cmd *cobra.Command, args []string) error {
+	// Override guard: --force skips pre-archive verification — require a reason.
+	if gcForce {
+		if gerr := override.Require(context.Background(), override.Guard{
+			Tool: "agm session gc",
+			Flag: "--force",
+			Gate: "pre-archive verification (uncommitted changes, unmerged branch)",
+			Risk: override.RiskP2,
+		}, gcReason); gerr != nil {
+			return gerr
+		}
+	}
+
 	opCtx, cleanup, err := newOpContextWithStorage()
 	if err != nil {
 		return fmt.Errorf("failed to connect to storage: %w", err)
@@ -169,7 +184,8 @@ func init() {
 	gcCmd.Flags().StringVar(&gcProtectRoles, "protect-roles", "",
 		"Comma-separated role substrings to protect (default: orchestrator,meta-orchestrator,overseer)")
 	gcCmd.Flags().BoolVarP(&gcForce, "force", "f", false,
-		"Skip pre-archive verification checks")
+		"Skip pre-archive verification checks — requires --reason")
+	gcCmd.Flags().StringVar(&gcReason, "reason", "", "justification for --force, recorded in the override audit log")
 	gcCmd.Flags().BoolVar(&gcJSON, "json", false,
 		"Emit a machine-readable JSON summary on stdout (for programmatic consumers like the overseer session-hygiene tick)")
 	sessionCmd.AddCommand(gcCmd)
