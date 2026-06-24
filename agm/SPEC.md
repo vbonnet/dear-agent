@@ -441,13 +441,13 @@ Start as a shell script; graduate to Go if usage warrants it.
 
 ### Problem
 
-As a developer evaluating which agent (Claude, Gemini, Codex, or OpenCode)
+As a developer evaluating which agent (Claude, Gemini, Codex, OpenCode, or Antigravity)
 works best for a specific class of task, I want to run the same prompt
 against multiple agents on a real codebase and see which one produced the
 best implementation, so I can make a data-driven choice rather than a
 subjective one.
 
-**Note:** All 4 agents are now fully supported with BDD test coverage and
+**Note:** All 5 agents are now fully supported with BDD test coverage and
 feature parity (Phase 1 & 2 complete).
 
 **Validated by:** Not yet validated — shipping to test assumption.
@@ -479,11 +479,11 @@ start with a shell script `scripts/agm-compare.sh` (~80 lines) that:
 Wrapped by a thin CLI command for discoverability:
 
 ```
-agm compare --harnesses claude-code,gemini-cli,codex-cli,opencode-cli --repo . --prompt "..."
+agm compare --harnesses claude-code,gemini-cli,codex-cli,opencode-cli,agy --repo . --prompt "..."
     [--timeout 30m]
 ```
 
-**Supported Agents:** claude, gemini, codex, opencode (all fully integrated)
+**Supported Agents:** claude, gemini, codex, opencode, agy (all fully integrated)
 
 `cmd/agm/compare.go` validates inputs and execs the shell script.
 
