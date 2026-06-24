@@ -1,77 +1,106 @@
-# Project Instructions for AI Agents
+# CLAUDE.md
 
-This file provides instructions and context for AI coding agents working on this project.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->
-## Beads Issue Tracker
-
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
-
-### Quick Reference
+## Build & Test Commands
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
+# Build everything
+go build ./...
+
+# Build specific binaries
+go build -o build/agm ./agm/cmd/agm
+go build -o build/engram ./engram/cmd/engram
+
+# Run all tests (matches CI)
+go test -race -count=1 ./...
+
+# Run tests for one product
+go test ./agm/...
+go test ./engram/...
+go test ./wayfinder/...
+
+# Run a single test
+go test -v ./agm/internal/ops/... -run TestSessionLifecycle
+
+# Run tests without race detector (faster)
+go test ./...
+
+# Lint (5m timeout, merge-base regression-only)
+golangci-lint run --timeout=5m ./...
+
+# Fast local CI parity (~25s): vet + build + lint
+make preflight
+
+# Full CI parity: preflight + tests + race + govulncheck
+make preflight-full
+
+# Run only tests affected by your changes vs origin/main
+make test-affected
+
+# Validate EARS requirements in SPEC.md files
+make lint-specs
 ```
 
-### Rules
+Test isolation: engram tests that create sessions require `ENGRAM_TEST_MODE=1` and `ENGRAM_TEST_WORKSPACE=test`. Use `testutil.RequireTestMode(t)` to enforce this.
 
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+CI runs with `GOWORK=off` — there is no go.work file; everything is one root module.
 
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+## Architecture
 
-## Agent Context Profiles
+Four products in one Go monorepo, sharing a single `go.mod`:
 
-The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
+| Product | Directory | Purpose |
+|---------|-----------|---------|
+| **AGM** | `agm/` | Agent Gateway Manager — spawns/monitors/reaps AI agent sessions (tmux-backed) |
+| **Engram** | `engram/` | Persistent memory with cue-based retrieval |
+| **Wayfinder** | `wayfinder/` | 9-phase SDLC workflow engine |
+| **Tools** | `cmd/`, `tools/` | 60+ standalone CLI utilities |
 
-- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
-- **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
-- **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
+### Three API surfaces, one operations layer
 
-## Session Completion
+CLI (Cobra), MCP server (JSON-RPC), and Claude Code Skills all route through the same business logic in `agm/internal/ops/`. An operation implemented once is available everywhere. `OpContext` provides dependency injection (storage, tmux client, config, output format).
 
-This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
+### Harness adapter pattern
 
-1. **File issues for remaining work** - Create beads for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **Handle git/sync by active profile**:
-   ```bash
-   # Conservative/minimal/default: report status and proposed commands; wait for approval.
-   git status
+AGM supports multiple AI agent CLIs via adapters in `agm/internal/agent/` — each implements the `Agent` interface (`Start`, `Stop`, `SendKeys`, `GetUUID`, `ParseHistory`, `Translate`). Adding a new harness means implementing this interface; no changes to core ops needed.
 
-   # Team-maintainer opt-in only, unless current instructions forbid it:
-   git pull --rebase
-   git push
-   git status
-   ```
-5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
+### Agent state detection
 
-**Critical rules:**
-- Explicit user or orchestrator instructions override this Beads block.
-- Do not commit or push without clear authority from the active profile or the current user request.
-- If a required sync or push is blocked, stop and report the exact command and error.
-<!-- END BEADS INTEGRATION -->
+Session state (READY/THINKING/PERMISSION_PROMPT/COMPACTING/OFFLINE) is detected via a priority chain: hook execution → tmux pane inspection → manual tracking.
 
+### Sandbox isolation
 
-## Build & Test
+Three pluggable providers in `internal/sandbox/`: OverlayFS (Linux), APFS cloned volumes (macOS), git worktree (fallback). Lifecycle tied to session lifecycle.
 
-_Add your build and test commands here_
+### Framework hierarchy (see CONTEXT.md for full vocabulary)
 
-```bash
-# Example:
-# npm install
-# npm test
-```
+Wayfinder (planning) → VROOM (supervisory execution) → AGM (session tool) → DEAR (per-task retro loop). VROOM is *above* AGM — it drives AGM as a tool. Documents that conflate them are stale.
 
-## Architecture Overview
+## Key Directories
 
-_Add a brief overview of your project architecture_
+- `agm/internal/ops/` — shared operations layer (all three API surfaces)
+- `agm/internal/agent/` — harness adapters (Claude, Gemini, Codex, OpenCode)
+- `agm/internal/session/` — session lifecycle and manifest management
+- `internal/sandbox/` — copy-on-write filesystem isolation providers
+- `pkg/` — shared public packages (importable externally)
+- `internal/` — private packages
+- `codegen/` — code generation framework (separate go.mod)
+- `deploy/launchd/` — macOS launch agent plists
+- `infra/` — Terraform IaC for GitHub repos/branch protection
 
-## Conventions & Patterns
+## Conventions
 
-_Add your project-specific conventions here_
+- **Go only** — no Python for anything we own. Rust/TypeScript only with stated justification.
+- **Conventional Commits** for commit messages.
+- **Linting**: `.golangci.yml` uses `new-from-merge-base: origin/main` so only new regressions are reported. Existing violations are baselined and burned down incrementally.
+- **Version injection**: binaries use ldflags `-X main.Version/GitCommit/BuildDate/BuiltBy`.
+- **Go memory envelope**: `env/go-baseline.env` exports `GOMEMLIMIT=512MiB`, `GOMAXPROCS`, `GOGC` — all build/test/daemon targets inherit it.
+- **Atomic wrappers**: unsafe command chains are wrapped in Go binaries that enforce safety by construction (e.g. `safe-push`, `safe-merge`, `safe-rebase`, `safe-pr`). Raw forms are denied via PreToolUse hooks.
+- **PR creation**: `safe-pr create --wayfinder <dir>` only — raw `gh pr create` is denied by hook.
+- **Temporal artifacts** (designs, retros, wayfinder runs) go to `~/src/engram-research`, never committed to this repo. Living docs (ARCHITECTURE.md, ADRs, CLAUDE.md) stay here.
+- **Beads tracker**: always use `bd --db ~/beads/context-engine/.beads <subcommand>` — never bare `bd`.
+
+## Project-Scoped Instructions
+
+See `.claude/CLAUDE.md` for the full mandatory engineering principles, delegation rules, and operational protocols that govern agent behavior in this repo.
