@@ -487,8 +487,10 @@ via `agm loop tick` (launchd-driven, 60s interval) is the right substrate.
 
 ## Stale PR Strategy — safe-rebase (MANDATORY)
 
-When a PR has merge conflicts or is behind main, use `safe-rebase` — the
-approved, deterministic merge strategy for agents:
+With squash-only merge enforced (ADR-034), **a PR does not need to be rebased
+just because it is behind `main`** — GitHub's squash merge lands the commits
+directly on top of current `main`, absorbing drift without a prior rebase.
+Use `safe-rebase` **only when there are actual merge conflicts**:
 
 ```
 safe-rebase -C ~/worktrees/dear-agent/<branch>

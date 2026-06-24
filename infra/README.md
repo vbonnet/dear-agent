@@ -206,6 +206,9 @@ names are known.
   `modules/managed-repo` works on GitHub Pro and runs in `active` enforcement —
   `evaluate` mode is Enterprise-only. Merge-queue rulesets require an
   **organization** account, so none is defined.
+- **Squash-only + auto-merge is the full merge contract.** See
+  [ADR-034](../docs/adr/ADR-034-squash-only-merge-contract.md) for the
+  supervisor-facing contract and merge-velocity health thresholds.
 - **Standard policy is a module.** The active-repo policy (`github_repository` +
   Dependabot + branch-protection ruleset) lives in `modules/managed-repo` and is
   instantiated via `for_each` in `managed_repos.tf` — one place to change fleet
