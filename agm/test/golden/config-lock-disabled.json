@@ -83,7 +83,7 @@
   "Budget": {
     "Enabled": false,
     "WeeklyLimitUSD": 0,
-    "StateFile": "/Users/vbonnet/.agm/budget-state.json",
+    "StateFile": "/tmp/agm-budget-state.json",
     "SessionTokenCaps": {
       "claude-code": 0,
       "codex-cli": 0,
