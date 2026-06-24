@@ -27,6 +27,17 @@ func defaultIfEmpty(s, dflt string) string {
 // frecency, hierarchy) without a schema migration — they all select metadata.
 func buildSessionMetadata(session *manifest.Manifest) map[string]any {
 	metadata := make(map[string]any)
+	if session.WorkingDirectory != "" {
+		metadata["working_directory"] = session.WorkingDirectory
+	}
+	if session.Codex != nil {
+		if session.Codex.SessionID != "" {
+			metadata["codex_session_id"] = session.Codex.SessionID
+		}
+		if session.Codex.TranscriptPath != "" {
+			metadata["codex_transcript_path"] = session.Codex.TranscriptPath
+		}
+	}
 	if session.EngramMetadata != nil {
 		metadata["engram_enabled"] = session.EngramMetadata.Enabled
 		metadata["engram_query"] = session.EngramMetadata.Query
@@ -482,12 +493,11 @@ func (a *Adapter) ResolveIdentifier(identifier string) (*manifest.Manifest, erro
 	return m, nil
 }
 
-// GetSessionByUUID returns the session that owns the given Claude conversation
+// GetSessionByUUID returns the session that owns the given harness conversation
 // UUID, regardless of lifecycle (active or archived), or (nil, nil) if no
-// session is tracking that UUID. A Claude conversation UUID identifies the
-// underlying transcript and is globally unique, so no workspace scoping is
-// applied — re-registering an already-imported UUID must find it even if the
-// caller's active workspace differs from the one it was first attributed to.
+// session is tracking that UUID. Claude stores this in claude_uuid; Codex stores
+// it in metadata.codex_session_id. Conversation UUIDs identify an underlying
+// transcript and are globally unique, so no workspace scoping is applied.
 func (a *Adapter) GetSessionByUUID(conversationUUID string) (*manifest.Manifest, error) {
 	if conversationUUID == "" {
 		return nil, fmt.Errorf("conversation UUID cannot be empty")
@@ -507,10 +517,11 @@ func (a *Adapter) GetSessionByUUID(conversationUUID string) (*manifest.Manifest,
 			monitors
 		FROM agm_sessions
 		WHERE claude_uuid = ?
+		   OR JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.codex_session_id')) = ?
 		LIMIT 1
 	`
 
-	row := a.conn.QueryRow(query, conversationUUID) //nolint:noctx // TODO(context): plumb ctx through this layer
+	row := a.conn.QueryRow(query, conversationUUID, conversationUUID) //nolint:noctx // TODO(context): plumb ctx through this layer
 	m, err := a.scanSession(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "session not found") {
@@ -703,6 +714,17 @@ func unmarshalEngramMetadata(session *manifest.Manifest, metadataJSON []byte) er
 	// before the engram early-return so it round-trips even when engram is off.
 	if outcome, ok := metadata["outcome"].(string); ok {
 		session.Outcome = manifest.SessionOutcome(outcome)
+	}
+	if workingDirectory, ok := metadata["working_directory"].(string); ok {
+		session.WorkingDirectory = workingDirectory
+	}
+	codexSessionID, _ := metadata["codex_session_id"].(string)
+	codexTranscriptPath, _ := metadata["codex_transcript_path"].(string)
+	if codexSessionID != "" || codexTranscriptPath != "" {
+		session.Codex = &manifest.Codex{
+			SessionID:      codexSessionID,
+			TranscriptPath: codexTranscriptPath,
+		}
 	}
 	enabled, ok := metadata["engram_enabled"].(bool)
 	if !ok || !enabled {

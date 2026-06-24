@@ -27,6 +27,13 @@ For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
 - archive paths MUST archive the matching Codex saved session by resolving the
   Codex transcript `session_meta.cwd` to the AGM working directory or sandbox
   merged path, then invoking the supported `codex archive` control surface
+- import/register paths MUST support orphaned `codex-cli` conversations by
+  resolving `~/.codex/sessions/**/rollout-*.jsonl` from
+  `session_meta.session_id`, preserving that Codex session ID in AGM storage,
+  and using `session_meta.cwd` as the imported session working directory
+- resume paths for imported Codex conversations MUST launch `codex resume
+  <session_id>` in the AGM tmux session instead of starting a fresh Codex
+  conversation
 - Codex launch commands MUST NOT inherit Claude OAuth, Anthropic API key,
   Engram, or OpenTelemetry environment intended for Claude sessions
 

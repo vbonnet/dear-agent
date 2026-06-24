@@ -263,6 +263,40 @@ func TestBuildCodexResumeCommand_DefaultModel(t *testing.T) {
 	}
 }
 
+func TestBuildCodexResumeCommand_ImportedSessionUsesCodexResume(t *testing.T) {
+	sessionID := "019ef2af-97e0-7443-9f07-03e40636740c"
+	m := &manifest.Manifest{
+		Model: "5.4",
+		Codex: &manifest.Codex{
+			SessionID: sessionID,
+		},
+	}
+	health := &HealthStatus{
+		TmuxSessionName: "codex-session",
+		WorktreePath:    "/tmp/work",
+	}
+
+	cmd := buildCodexResumeCommand(m, health)
+
+	for _, want := range []string{
+		"env -u CLAUDECODE",
+		"AGM_SESSION_NAME='codex-session'",
+		"codex resume",
+		"-m 'gpt-5.4'",
+		"-C '/tmp/work'",
+		"-s workspace-write",
+		"'" + sessionID + "'",
+		"&& exit",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("command %q missing %q", cmd, want)
+		}
+	}
+	if strings.Contains(cmd, "codex -m") {
+		t.Errorf("imported Codex session started a new conversation instead of resuming: %s", cmd)
+	}
+}
+
 // Regression tests for session-resume fix (commit e7cacf8)
 // Bug: resume sent commands to existing tmux sessions, injecting text
 // into the running agent which got processed as a user prompt.

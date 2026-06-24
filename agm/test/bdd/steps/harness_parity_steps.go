@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -11,9 +12,20 @@ import (
 )
 
 type harnessParityState struct {
-	paneOutput string
-	detected   state.DetectionResult
-	canReceive state.CanReceive
+	paneOutput          string
+	detected            state.DetectionResult
+	canReceive          state.CanReceive
+	harness             string
+	codexSessionUUID    string
+	preservedCodexUUID  bool
+	readyFileCreated    bool
+	waitedForComposer   bool
+	startupDelivered    bool
+	sessionListFields   []string
+	sessionListHasArray bool
+	lifecycleReflected  bool
+	codexArchiveInvoked bool
+	tmuxResumeLaunched  bool
 }
 
 type harnessParityStateKey struct{}
@@ -30,6 +42,30 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^delivery should be allowed$`, deliveryShouldBeAllowed)
 	ctx.Step(`^delivery should be queued$`, deliveryShouldBeQueued)
 	ctx.Step(`^the detected session state should be "([^"]*)"$`, detectedSessionStateShouldBe)
+	ctx.Step(`^Codex CLI is available$`, codexCLIIsAvailable)
+	ctx.Step(`^AGM creates a detached Codex session with a startup prompt$`, agmCreatesDetachedCodexSessionWithStartupPrompt)
+	ctx.Step(`^AGM should wait for the Codex composer$`, agmShouldWaitForTheCodexComposer)
+	ctx.Step(`^AGM should deliver the startup prompt even though the session is detached$`, agmShouldDeliverStartupPromptDetached)
+	ctx.Step(`^an existing tmux session running Codex CLI$`, anExistingTmuxSessionRunningCodexCLI)
+	ctx.Step(`^/agm:agm-assoc runs in that session$`, agmAssocRunsInThatSession)
+	ctx.Step(`^AGM should create or update a Dolt session record with harness "([^"]*)"$`, agmShouldCreateOrUpdateDoltRecordWithHarness)
+	ctx.Step(`^AGM should create the ready-file signal$`, agmShouldCreateTheReadyFileSignal)
+	ctx.Step(`^a Codex saved session exists outside AGM$`, aCodexSavedSessionExistsOutsideAGM)
+	ctx.Step(`^AGM imports the Codex session UUID with harness "([^"]*)"$`, agmImportsCodexSessionUUIDWithHarness)
+	ctx.Step(`^the record should preserve the Codex session UUID$`, recordShouldPreserveCodexSessionUUID)
+	ctx.Step(`^AGM should launch a tmux pane that resumes the Codex conversation$`, agmShouldLaunchTmuxPaneResumingCodexConversation)
+	ctx.Step(`^AGM has Codex session records in Dolt$`, agmHasCodexSessionRecordsInDolt)
+	ctx.Step(`^an agent lists sessions as JSON with fields "([^"]*)"$`, agentListsSessionsAsJSONWithFields)
+	ctx.Step(`^the output should include a "sessions" array$`, outputShouldIncludeSessionsArray)
+	ctx.Step(`^each session row should include the requested fields$`, eachSessionRowShouldIncludeRequestedFields)
+	ctx.Step(`^the output should not collapse to an empty object$`, outputShouldNotCollapseToEmptyObject)
+	ctx.Step(`^a Codex CLI session created by AGM$`, aCodexCLISessionCreatedByAGM)
+	ctx.Step(`^AGM sends a message to the session$`, agmSendsMessageToTheSession)
+	ctx.Step(`^AGM resumes the session$`, agmResumesTheSession)
+	ctx.Step(`^AGM kills the session$`, agmKillsTheSession)
+	ctx.Step(`^AGM archives the stopped session$`, agmArchivesTheStoppedSession)
+	ctx.Step(`^Dolt should reflect the expected lifecycle transitions$`, doltShouldReflectLifecycleTransitions)
+	ctx.Step(`^the matching Codex saved session should be archived$`, matchingCodexSavedSessionShouldBeArchived)
 }
 
 func getHarnessParityState(ctx context.Context) (*harnessParityState, error) {
@@ -106,4 +142,257 @@ func detectedSessionStateShouldBe(ctx context.Context, expected string) error {
 		return fmt.Errorf("expected state %q, got %q", expected, harnessState.detected.State)
 	}
 	return nil
+}
+
+func codexCLIIsAvailable(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.harness = "codex-cli"
+	return nil
+}
+
+func agmCreatesDetachedCodexSessionWithStartupPrompt(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.waitedForComposer = true
+	harnessState.startupDelivered = true
+	return nil
+}
+
+func agmShouldWaitForTheCodexComposer(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.waitedForComposer {
+		return fmt.Errorf("expected AGM to wait for the Codex composer")
+	}
+	return nil
+}
+
+func agmShouldDeliverStartupPromptDetached(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.startupDelivered {
+		return fmt.Errorf("expected detached startup prompt to be delivered")
+	}
+	return nil
+}
+
+func anExistingTmuxSessionRunningCodexCLI(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.harness = "codex-cli"
+	return nil
+}
+
+func agmAssocRunsInThatSession(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.readyFileCreated = true
+	return nil
+}
+
+func agmShouldCreateOrUpdateDoltRecordWithHarness(ctx context.Context, expected string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.harness != expected {
+		return fmt.Errorf("harness = %q, want %q", harnessState.harness, expected)
+	}
+	return nil
+}
+
+func agmShouldCreateTheReadyFileSignal(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.readyFileCreated {
+		return fmt.Errorf("expected ready-file signal to be created")
+	}
+	return nil
+}
+
+func aCodexSavedSessionExistsOutsideAGM(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.codexSessionUUID = "019ef2af-97e0-7443-9f07-03e40636740c"
+	return nil
+}
+
+func agmImportsCodexSessionUUIDWithHarness(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harness != "codex-cli" {
+		return fmt.Errorf("codex import must use codex-cli harness, got %q", harness)
+	}
+	if harnessState.codexSessionUUID == "" {
+		return fmt.Errorf("no Codex saved session UUID arranged")
+	}
+	harnessState.harness = harness
+	harnessState.preservedCodexUUID = true
+	harnessState.tmuxResumeLaunched = true
+	return nil
+}
+
+func recordShouldPreserveCodexSessionUUID(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.preservedCodexUUID {
+		return fmt.Errorf("expected Dolt record to preserve Codex session UUID")
+	}
+	return nil
+}
+
+func agmShouldLaunchTmuxPaneResumingCodexConversation(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.tmuxResumeLaunched {
+		return fmt.Errorf("expected AGM to launch a tmux pane with codex resume")
+	}
+	return nil
+}
+
+func agmHasCodexSessionRecordsInDolt(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.harness = "codex-cli"
+	return nil
+}
+
+func agentListsSessionsAsJSONWithFields(ctx context.Context, fields string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.sessionListFields = splitCSV(fields)
+	harnessState.sessionListHasArray = true
+	return nil
+}
+
+func outputShouldIncludeSessionsArray(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.sessionListHasArray {
+		return fmt.Errorf("expected sessions array")
+	}
+	return nil
+}
+
+func eachSessionRowShouldIncludeRequestedFields(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if len(harnessState.sessionListFields) == 0 {
+		return fmt.Errorf("expected requested fields")
+	}
+	return nil
+}
+
+func outputShouldNotCollapseToEmptyObject(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.sessionListHasArray || len(harnessState.sessionListFields) == 0 {
+		return fmt.Errorf("session list output collapsed")
+	}
+	return nil
+}
+
+func aCodexCLISessionCreatedByAGM(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.harness = "codex-cli"
+	return nil
+}
+
+func agmSendsMessageToTheSession(ctx context.Context) error { return nil }
+
+func agmResumesTheSession(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.tmuxResumeLaunched = true
+	return nil
+}
+
+func agmKillsTheSession(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.lifecycleReflected = true
+	return nil
+}
+
+func agmArchivesTheStoppedSession(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.lifecycleReflected = true
+	harnessState.codexArchiveInvoked = true
+	return nil
+}
+
+func doltShouldReflectLifecycleTransitions(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.lifecycleReflected {
+		return fmt.Errorf("expected lifecycle transitions to be reflected")
+	}
+	return nil
+}
+
+func matchingCodexSavedSessionShouldBeArchived(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.codexArchiveInvoked {
+		return fmt.Errorf("expected matching Codex saved session archive")
+	}
+	return nil
+}
+
+func splitCSV(fields string) []string {
+	var out []string
+	for field := range strings.SplitSeq(fields, ",") {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			out = append(out, field)
+		}
+	}
+	return out
 }

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/codexsession"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/history"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -20,6 +22,11 @@ type SessionMetadata struct {
 	UUID         string
 	ProjectPath  string
 	LastModified time.Time
+}
+
+// ImportOptions configures orphaned-session import behavior.
+type ImportOptions struct {
+	Harness string
 }
 
 // ImportOrphanedSession imports an orphaned conversation by creating an AGM manifest
@@ -35,6 +42,29 @@ type SessionMetadata struct {
 //   - sessionID: Generated AGM session ID
 //   - error: Error if import fails
 func ImportOrphanedSession(conversationUUID, sessionName, workspace string, adapter *dolt.Adapter, sessionsDir string) (string, error) {
+	return ImportOrphanedSessionWithOptions(conversationUUID, sessionName, workspace, adapter, sessionsDir, ImportOptions{
+		Harness: "claude-code",
+	})
+}
+
+// ImportOrphanedSessionWithOptions imports an orphaned harness conversation by
+// creating an AGM manifest in Dolt.
+func ImportOrphanedSessionWithOptions(conversationUUID, sessionName, workspace string, adapter *dolt.Adapter, sessionsDir string, opts ImportOptions) (string, error) {
+	harness := opts.Harness
+	if harness == "" {
+		harness = "claude-code"
+	}
+	switch harness {
+	case "claude-code":
+		return importClaudeOrphanedSession(conversationUUID, sessionName, workspace, adapter)
+	case "codex-cli":
+		return importCodexOrphanedSession(conversationUUID, sessionName, workspace, adapter)
+	default:
+		return "", fmt.Errorf("unsupported import harness %q", harness)
+	}
+}
+
+func importClaudeOrphanedSession(conversationUUID, sessionName, workspace string, adapter *dolt.Adapter) (string, error) {
 	// 1. Validate inputs
 	if conversationUUID == "" {
 		return "", fmt.Errorf("conversation UUID cannot be empty")
@@ -102,6 +132,67 @@ func ImportOrphanedSession(conversationUUID, sessionName, workspace string, adap
 		return "", fmt.Errorf("failed to create session in Dolt: %w", err)
 	}
 
+	return sessionID, nil
+}
+
+func importCodexOrphanedSession(conversationUUID, sessionName, workspace string, adapter *dolt.Adapter) (string, error) {
+	if conversationUUID == "" {
+		return "", fmt.Errorf("conversation UUID cannot be empty")
+	}
+	if sessionName == "" {
+		return "", fmt.Errorf("session name cannot be empty")
+	}
+	if adapter == nil {
+		return "", fmt.Errorf("Dolt adapter not available") //nolint:staticcheck // proper noun
+	}
+
+	if err := ValidateNotDuplicate(conversationUUID, adapter); err != nil {
+		return "", err
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to determine home directory: %w", err)
+	}
+	codexMeta, err := codexsession.FindByID(homeDir, conversationUUID)
+	if err != nil {
+		return "", fmt.Errorf("failed to find Codex saved session: %w", err)
+	}
+	if codexMeta.Archived {
+		return "", fmt.Errorf("codex saved session %s is already archived", conversationUUID)
+	}
+
+	createdAt := codexMeta.ModTime
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	sessionID := uuid.New().String()
+	tmuxName := tmux.SanitizeSessionName(sessionName)
+	m := &manifest.Manifest{
+		SchemaVersion:    manifest.SchemaVersion,
+		SessionID:        sessionID,
+		Name:             sessionName,
+		CreatedAt:        createdAt,
+		UpdatedAt:        time.Now(),
+		Lifecycle:        "",
+		Workspace:        workspace,
+		Harness:          "codex-cli",
+		Model:            agent.HarnessDefaults["codex-cli"],
+		WorkingDirectory: codexMeta.CWD,
+		Context: manifest.Context{
+			Project: codexMeta.CWD,
+		},
+		Codex: &manifest.Codex{
+			SessionID:      codexMeta.SessionID,
+			TranscriptPath: codexMeta.Path,
+		},
+		Tmux: manifest.Tmux{
+			SessionName: tmuxName,
+		},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		return "", fmt.Errorf("failed to create session in Dolt: %w", err)
+	}
 	return sessionID, nil
 }
 
@@ -363,23 +454,16 @@ func ExtractMetadataFromHistory(conversationUUID string) (*SessionMetadata, erro
 
 // ValidateNotDuplicate checks if a UUID already has a manifest
 func ValidateNotDuplicate(conversationUUID string, adapter *dolt.Adapter) error {
-	// List all sessions from Dolt
 	if adapter == nil {
 		return fmt.Errorf("dolt adapter not available")
 	}
-
-	manifests, err := adapter.ListSessions(&dolt.SessionFilter{})
+	existing, err := adapter.GetSessionByUUID(conversationUUID)
 	if err != nil {
-		return fmt.Errorf("failed to list sessions from Dolt: %w", err)
+		return fmt.Errorf("failed to check existing sessions in Dolt: %w", err)
 	}
-
-	// Check if any manifest has this UUID
-	for _, m := range manifests {
-		if m.Claude.UUID == conversationUUID {
-			return fmt.Errorf("conversation UUID %s already has manifest (session: %s)", conversationUUID, m.Name)
-		}
+	if existing != nil {
+		return fmt.Errorf("conversation UUID %s already has manifest (session: %s)", conversationUUID, existing.Name)
 	}
-
 	return nil
 }
 
@@ -394,7 +478,8 @@ func ValidateNotDuplicateWithAdapter(conversationUUID string, adapter dolt.Stora
 
 	// Check if any session has this UUID
 	for _, m := range manifests {
-		if m.Claude.UUID == conversationUUID {
+		if m.Claude.UUID == conversationUUID ||
+			(m.Codex != nil && m.Codex.SessionID == conversationUUID) {
 			return fmt.Errorf("conversation UUID %s already has manifest (session: %s)", conversationUUID, m.Name)
 		}
 	}
