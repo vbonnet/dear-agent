@@ -51,6 +51,21 @@ The intended acceptance criteria were broader than unit-level parity:
 12. **`act` could not enumerate CI because multiple workflow files were invalid YAML.**
     `bypassed-merge-audit.yml`, `doc-proximity.yml`, and `monthly-audit.yml` each had syntax accepted by neither `act` nor GitHub-compatible YAML parsing. This blocked local CI before Docker startup.
 
+13. **Codex `session new --prompt` did not visibly submit the supplied prompt.**
+    The live pane after `session new --prompt 'Reply exactly: ...'` showed Codex's default placeholder text instead of the supplied prompt. Explicit `agm send msg` worked, so the bug appears limited to startup prompt injection or display handling.
+
+14. **`session list -o json --fields ...` can return `{}` for an existing Codex session.**
+    `session get` returned the Dolt record, but a filtered JSON list for the same workspace produced an empty object. This is either a field-mask serialization bug or a workspace/list filtering bug.
+
+15. **Active archive UX still uses Claude-specific wording.**
+    `agm session archive --async` worked for Codex, but the user-facing reaper text still says it will wait for Claude and send `/exit`. The behavior was correct enough to archive the Codex session, but the output violates cross-harness parity expectations.
+
+16. **`/agm:agm-assoc` is intentionally Claude-only, but parity docs need to say that.**
+    The slash command wraps `agm session associate`, which auto-detects a Claude UUID from Claude history. Codex parity should not require that command; Codex's equivalent lifecycle invariant is Dolt registration during `session new` and `register`.
+
+17. **Review coverage missed TUI cleanup semantics.**
+    A review comment caught that failed Codex startup cleanup was sending `tmux kill-session ...` into the Codex TUI via `tmux.SendCommand`, where it would be treated as user input. Cleanup now calls `tmux kill-session` directly with a timeout, but this should be protected by a focused regression test or fake tmux executor seam.
+
 ## Audit Implemented
 
 This branch adds or updates unit-level regression coverage for:
@@ -71,7 +86,8 @@ Live E2E verification covered:
 - `agm session state detect`;
 - `agm session kill`;
 - `agm session resume --detached`;
-- `agm session archive`.
+- `agm send msg` after resume;
+- active-session `agm session archive --async`.
 
 ## Tests To Add Next
 
@@ -79,20 +95,26 @@ Live E2E verification covered:
 
 - `send.ParseRecipients` or `runSend` should cover direct recipient + `--workspace` so that single-recipient sends do not take the unsupported workspace-only path.
 - `session new -C` should have a command-level test proving the global directory flag is used as the session workdir.
+- `session new --prompt` should be tested for Codex using a fake Codex TUI fixture that proves the supplied prompt is submitted after readiness, not replaced by default composer text.
+- `session list -o json --fields name,status,harness,workspace,tags` should be tested against a known Dolt record and must return a JSON collection, not `{}`.
 - Kill confirmation logic should have table tests for active, recently-active, and active+recently-active sessions with expected flags.
 - Archive cleanup should detect sandbox merged dirs and avoid git-worktree pruning when the path is not a git repository.
+- Archive/reaper status text should be harness-aware, or the test should assert neutral wording for non-Claude harnesses.
+- Codex startup failure cleanup should be tested with an injectable tmux command runner so cleanup cannot regress to sending shell commands into a TUI pane.
 
 ### Integration
 
 - Add a fake `codex` binary fixture that emits trust, model-upgrade, composer, and response text. Use it to test `session new`, `send msg`, `state detect`, `kill`, `resume`, and `archive` without burning real Codex usage.
 - Add an isolated Dolt+tmux test environment for `session list` reconciliation so broad listing cannot update production session status.
 - Add an integration test that creates more than three worker-tagged records and proves `session new` is not blocked by worker count.
+- Add an association-parity integration test that asserts `/agm:agm-assoc`/`session associate` remains Claude-only while Codex `session new` still creates the Dolt row required for lifecycle commands.
 
 ### BDD / E2E
 
 - Create a Codex harness feature file mirroring the Claude lifecycle BDD: new, Dolt registration, send, state detect, kill, resume, archive.
 - Include a scenario for Codex startup interstitials: trust prompt, model-upgrade prompt, then composer.
 - Include a scenario for launch failure: fake Codex exits with an unknown flag/error and AGM must not register an active session.
+- Include a scenario for startup prompt delivery and another for post-resume message delivery.
 
 ### CI / Enforce
 
