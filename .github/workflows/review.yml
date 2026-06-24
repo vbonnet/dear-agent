@@ -3,11 +3,7 @@ name: AI Code Review (5-dimension)
 # Five-dimension multi-persona review per REVIEW.md §2.
 # Uses the Claude API directly (ANTHROPIC_API_KEY secret) — quota-independent.
 # Runs sequentially through all 5 dimensions then synthesizes.
-#
-# Start posture: continue-on-error=true (informational). Ratchet:
-#   1. Once signal-to-noise is validated, flip continue-on-error off.
-#   2. Add "AI Code Review (5-dimension) / 5-Dimension AI Review" to required-status-checks.
-#   3. Security auto-fail triggers escalate to needs-human-review (see REVIEW.md §1).
+# Required status check: "5-Dimension AI Review" (replaces gemini-code-assist, ce-hz14).
 
 on:
   pull_request:
@@ -27,16 +23,9 @@ jobs:
   review:
     name: 5-Dimension AI Review
     runs-on: ubuntu-latest
-    # Informational until signal-to-noise is validated.
-    continue-on-error: true
     timeout-minutes: 25
     # Skip PRs from forks — they don't have access to repo secrets.
-    # Non-required: gate the per-push hot path behind the `full-ci` label.
-    # Still runs for merge_group / workflow_dispatch (non-pull_request events).
-    if: >-
-      (github.event.pull_request.head.repo.full_name == github.repository) &&
-      (github.event_name != 'pull_request' ||
-       contains(github.event.pull_request.labels.*.name, 'full-ci'))
+    if: github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
       - name: Gate on secret presence
@@ -305,7 +294,7 @@ jobs:
             echo
             echo "</details>"
             echo
-            echo "<sub>Informational — does not block merge. Add to required-status-checks to promote.</sub>"
+            echo "<sub>Required gate per REVIEW.md §2. Model: claude-sonnet-4-6.</sub>"
           } > /tmp/review-comment.md
 
           # Sticky comment: delete prior, then post.

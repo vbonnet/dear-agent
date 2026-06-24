@@ -7,12 +7,10 @@ func TestIsKnownBotAuthor(t *testing.T) {
 		login string
 		want  bool
 	}{
-		{"gemini-code-assist", true},      // bare login (reviews/threads API form)
-		{"gemini-code-assist[bot]", true}, // App-suffixed form (config form)
-		{"Gemini-Code-Assist", false},     // logins are case-sensitive on GitHub
-		{"alice", false},                  // human
-		{"dependabot[bot]", false},        // a bot, but not one we auto-resolve
-		{"", false},                       // missing author
+		// knownBotLogins is empty after the Gemini sunset (ce-hz14).
+		{"alice", false},           // human
+		{"dependabot[bot]", false}, // a bot, but not one we auto-resolve
+		{"", false},                // missing author
 	}
 	for _, c := range cases {
 		if got := isKnownBotAuthor(c.login); got != c.want {
@@ -23,9 +21,9 @@ func TestIsKnownBotAuthor(t *testing.T) {
 
 func TestNormalizeBotLogin(t *testing.T) {
 	cases := map[string]string{
-		"gemini-code-assist":      "gemini-code-assist",
-		"gemini-code-assist[bot]": "gemini-code-assist",
-		"alice":                   "alice",
+		"some-bot":      "some-bot",
+		"some-bot[bot]": "some-bot",
+		"alice":         "alice",
 	}
 	for in, want := range cases {
 		if got := normalizeBotLogin(in); got != want {

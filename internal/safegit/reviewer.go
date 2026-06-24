@@ -82,10 +82,8 @@ func parseExpectedReviewers(data []byte, reviewers []ExpectedReviewer, now time.
 			if !sameReviewer(r.Author.Login, want.Login) {
 				continue
 			}
-			// Any review state counts — Gemini Code Assist submits its findings
-			// as COMMENTED, never APPROVED, so requiring APPROVED here would
-			// block every Gemini-reviewed PR forever. Freshness (below) is the
-			// only additional constraint.
+			// Any review state (COMMENTED, APPROVED, CHANGES_REQUESTED) counts;
+			// freshness (below) is the only additional constraint.
 			found = true
 			if r.SubmittedAt.After(newest) {
 				newest = r.SubmittedAt
