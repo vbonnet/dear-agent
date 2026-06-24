@@ -303,7 +303,7 @@ func defaultArchiveSession(identifier string, _ bool) error {
 	cmd := exec.Command("agm", "session", "archive", "--async", identifier)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
