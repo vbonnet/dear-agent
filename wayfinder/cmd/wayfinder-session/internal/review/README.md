@@ -19,7 +19,13 @@ if !result.Passed {
 
 ## Features
 
-- **5 Specialized Personas**: Security, Performance, Maintainability, UX, Reliability
+- **Two-Stage Review**: Stage 1 (`spec_compliance`) checks the implementation against
+  the spec/requirements *before* Stage 2 checks code quality. Well-written code that does
+  not satisfy the spec still fails.
+- **Anti-Sycophancy Prompts**: every persona prompt opens with a directive telling the
+  reviewing worker to stay independent and flag disagreements rather than validate the prior step.
+- **6 Specialized Personas**: Spec Compliance (Stage 1) + Security, Performance,
+  Maintainability, UX, Reliability (Stage 2)
 - **Risk-Adaptive Strategy**: XS/S/M = Batch review, L/XL = Per-task review
 - **Automated Risk Calculation**: LOC, file criticality, patterns, complexity
 - **Harness Profiles**: Lite/Standard/Deep profiles via `ClassifyRisk()` for risk-adaptive process depth
