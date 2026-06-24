@@ -50,6 +50,11 @@ type MergeConfig struct {
 	WatchTimeout  time.Duration // zero → DefaultWatchTimeout
 	WatchInterval time.Duration // poll interval in watch mode; zero → 30s
 
+	// SkipReviewCheck bypasses the unresolved-thread gate. Its use is audited.
+	// Intended only for emergency merges where manual thread resolution is not
+	// possible. Prefer resolving threads via resolve-review-threads instead.
+	SkipReviewCheck bool
+
 	// ConfigPath overrides where the P4 .safe-merge.yml is read from. Empty →
 	// look for ConfigFileName at the repo root; absent there → P4 gates skipped.
 	ConfigPath string
@@ -217,12 +222,21 @@ func attemptMerge(ctx context.Context, cfg MergeConfig) (retErr error) {
 	fmt.Fprintln(os.Stderr, "safe-merge: ✓ all CI checks pass")
 
 	// Gate 2: no unresolved review threads.
-	if err := runGate(ctx, "threads", func() error { return checkReviewThreads(cfg.PRNumber, cfg.Repo) }); err != nil {
-		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "threads: "+err.Error())
-		fmt.Fprintln(os.Stderr, "safe-merge: guidance: resolve open review threads; security-* threads need a written triage verdict")
-		return fmt.Errorf("review-thread gate: %w", err)
+	if cfg.SkipReviewCheck {
+		appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "threads: SKIPPED via --skip-review-check")
+		fmt.Fprintln(os.Stderr, "safe-merge: ⚠ review-thread gate skipped (--skip-review-check)")
+	} else {
+		if err := runGate(ctx, "threads", func() error { return checkReviewThreads(cfg.PRNumber, cfg.Repo) }); err != nil {
+			appendAuditEntry(cfg.Repo, cfg.PRNumber, "gate_check", "threads: "+err.Error())
+			parts := strings.SplitN(cfg.Repo, "/", 2)
+			owner, repoName := parts[0], parts[1]
+			fmt.Fprintf(os.Stderr,
+				"safe-merge: guidance: resolve threads, then re-run safe-merge, or use:\n  resolve-review-threads resolve-all %s %s %d [author]\n",
+				owner, repoName, cfg.PRNumber)
+			return fmt.Errorf("review-thread gate: %w", err)
+		}
+		fmt.Fprintln(os.Stderr, "safe-merge: ✓ no unresolved review threads")
 	}
-	fmt.Fprintln(os.Stderr, "safe-merge: ✓ no unresolved review threads")
 
 	// Gate 3: minimum soak time + bot review.
 	if err := runGate(ctx, "soak", func() error { return checkSoak(cfg.PRNumber, cfg.Repo, now) }); err != nil {
@@ -488,6 +502,7 @@ query($owner: String!, $name: String!, $number: Int!) {
           isOutdated
           comments(first: 1) {
             nodes {
+              author { login }
               body
             }
           }
@@ -507,6 +522,9 @@ type gqlReviewResult struct {
 						IsOutdated bool `json:"isOutdated"`
 						Comments   struct {
 							Nodes []struct {
+								Author struct {
+									Login string `json:"login"`
+								} `json:"author"`
 								Body string `json:"body"`
 							} `json:"nodes"`
 						} `json:"comments"`
@@ -551,18 +569,23 @@ func parseReviewThreads(data []byte) error {
 		}
 		label := fmt.Sprintf("thread #%d", i+1)
 		if len(t.Comments.Nodes) > 0 {
-			body := t.Comments.Nodes[0].Body
-			if len(body) > 60 {
-				body = body[:60] + "…"
+			c := t.Comments.Nodes[0]
+			author := c.Author.Login
+			if author == "" {
+				author = "unknown"
 			}
-			label = fmt.Sprintf("thread #%d: %q", i+1, body)
+			body := c.Body
+			if len([]rune(body)) > 80 {
+				body = string([]rune(body)[:80]) + "…"
+			}
+			label = fmt.Sprintf("  • @%s: %q", author, body)
 		}
 		unresolved = append(unresolved, label)
 	}
 
 	if len(unresolved) > 0 {
-		return fmt.Errorf("%d unresolved review thread(s):\n  %s",
-			len(unresolved), strings.Join(unresolved, "\n  "))
+		return fmt.Errorf("%d unresolved review thread(s):\n%s",
+			len(unresolved), strings.Join(unresolved, "\n"))
 	}
 	return nil
 }
