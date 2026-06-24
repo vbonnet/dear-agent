@@ -53,9 +53,10 @@ type Session struct {
 // consumes. Unknown fields are ignored on purpose: the schema belongs to
 // wayfinder, not to us.
 type statusFrontmatter struct {
-	SessionID string   `yaml:"session_id"`
-	Status    string   `yaml:"status"`
-	Beads     []string `yaml:"beads"`
+	SessionID   string   `yaml:"session_id"`
+	ProjectName string   `yaml:"project_name"` // V2 schema: fallback when session_id absent
+	Status      string   `yaml:"status"`
+	Beads       []string `yaml:"beads"`
 }
 
 // ResolveSessionDir picks the wayfinder project directory: the --wayfinder
@@ -75,9 +76,10 @@ func ResolveSessionDir(flagDir string) (string, error) {
 }
 
 // LoadSession reads <dir>/WAYFINDER-STATUS.md and returns the session it
-// describes. It fails unless the file exists, parses, carries a session_id,
-// and is status: in_progress — a completed or abandoned session is not a
-// valid attribution target for new PRs.
+// describes. It fails unless the file exists, parses, carries a session_id
+// (or project_name for V2 sessions), and is status: in_progress or
+// in-progress — a completed or abandoned session is not a valid attribution
+// target for new PRs.
 func LoadSession(dir string) (Session, error) {
 	path := filepath.Join(dir, "WAYFINDER-STATUS.md")
 	raw, err := os.ReadFile(path)
@@ -93,13 +95,19 @@ func LoadSession(dir string) (Session, error) {
 	if err := yaml.Unmarshal([]byte(fm), &st); err != nil {
 		return Session{}, fmt.Errorf("%s: cannot parse YAML frontmatter: %w", path, err)
 	}
-	if st.SessionID == "" {
-		return Session{}, fmt.Errorf("%s has no session_id in its frontmatter", path)
+	// V2 sessions carry project_name instead of session_id.
+	sessionID := st.SessionID
+	if sessionID == "" {
+		sessionID = st.ProjectName
 	}
-	if st.Status != "in_progress" {
+	if sessionID == "" {
+		return Session{}, fmt.Errorf("%s has no session_id or project_name in its frontmatter", path)
+	}
+	// Normalize V2 hyphen form (in-progress) to match V1 underscore form.
+	if strings.ReplaceAll(st.Status, "-", "_") != "in_progress" {
 		return Session{}, fmt.Errorf("wayfinder session %s is %q, not in_progress — start or resume "+
 			"a session (wayfinder start / wayfinder session) before opening PRs against it",
-			st.SessionID, st.Status)
+			sessionID, st.Status)
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -109,7 +117,7 @@ func LoadSession(dir string) (Session, error) {
 	if len(st.Beads) > 0 {
 		beadID = strings.TrimSpace(st.Beads[0])
 	}
-	return Session{ID: st.SessionID, ProjectPath: abs, BeadID: beadID}, nil
+	return Session{ID: sessionID, ProjectPath: abs, BeadID: beadID}, nil
 }
 
 // frontmatter extracts the YAML between the leading "---" fence pair.

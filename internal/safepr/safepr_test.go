@@ -45,7 +45,8 @@ func TestLoadSession_Failures(t *testing.T) {
 	}{
 		{"missing file", "", "cannot read"},
 		{"completed session", "---\nsession_id: x\nstatus: completed\n---\n", "not in_progress"},
-		{"no session id", "---\nstatus: in_progress\n---\n", "no session_id"},
+		{"no session id", "---\nstatus: in_progress\n---\n", "no session_id or project_name"},
+		{"v2 abandoned", "---\nproject_name: foo\nstatus: abandoned\n---\n", "not in_progress"},
 		{"no frontmatter", "# just markdown\n", "frontmatter"},
 		{"unterminated frontmatter", "---\nsession_id: x\n", "unterminated"},
 	}
@@ -215,6 +216,38 @@ func TestLoadSession_Bead(t *testing.T) {
 			t.Errorf("BeadID = %q, want empty", s.BeadID)
 		}
 	})
+}
+
+const v2InProgressStatus = `---
+schema_version: "2.0"
+project_name: my-feature
+project_type: feature
+risk_level: S
+current_waypoint: CHARTER
+status: in-progress
+created_at: 2026-06-24T00:00:00Z
+updated_at: 2026-06-24T00:00:00Z
+beads:
+  - ce-abcd
+---
+`
+
+func TestLoadSession_V2(t *testing.T) {
+	dir := t.TempDir()
+	writeStatus(t, dir, v2InProgressStatus)
+	s, err := LoadSession(dir)
+	if err != nil {
+		t.Fatalf("LoadSession V2: %v", err)
+	}
+	if s.ID != "my-feature" {
+		t.Errorf("session id = %q, want my-feature (project_name fallback)", s.ID)
+	}
+	if s.BeadID != "ce-abcd" {
+		t.Errorf("BeadID = %q, want ce-abcd", s.BeadID)
+	}
+	if s.ProjectPath == "" || !filepath.IsAbs(s.ProjectPath) {
+		t.Errorf("project path not absolute: %q", s.ProjectPath)
+	}
 }
 
 func TestStampedArgs_Bead(t *testing.T) {
