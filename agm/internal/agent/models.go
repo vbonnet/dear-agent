@@ -37,6 +37,17 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "5.3-codex", FullName: "gpt-5.3-codex", Description: "Industry-leading coding model"},
 		{Alias: "5.3-codex-spark", FullName: "gpt-5.3-codex-spark", Description: "Research preview"},
 	},
+	// openrouter: cheap-tier models accessed via OpenRouter API proxy.
+	// Configure OPENROUTER_API_KEY to enable. These are the default cheap-tier
+	// assignments; override per-bead via model_tier spec.
+	"openrouter": {
+		{Alias: "deepseek-flash", FullName: "deepseek/deepseek-chat-v3-0324:free", Description: "DeepSeek V4 Flash — $0.28/M, cheap tier default"},
+		{Alias: "gemini-flash", FullName: "google/gemini-flash-1.5", Description: "Gemini Flash — fast, cheap, good for extraction"},
+		{Alias: "glm", FullName: "zhipuai/glm-4-flash", Description: "GLM-5.2 Flash — cheap multilingual model"},
+		{Alias: "qwen-flash", FullName: "qwen/qwen-2.5-72b-instruct", Description: "Qwen 2.5 72B — strong open-weight cheap option"},
+		{Alias: "gemini-pro", FullName: "google/gemini-pro-1.5", Description: "Gemini Pro — mid-tier via OpenRouter"},
+		{Alias: "opus", FullName: "anthropic/claude-opus-4", Description: "Claude Opus via OpenRouter — expensive tier"},
+	},
 	// opencode-cli: aggregated from all other harnesses (built dynamically)
 }
 
