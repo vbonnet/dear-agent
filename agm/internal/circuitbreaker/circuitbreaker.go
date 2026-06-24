@@ -1,16 +1,13 @@
 // Package circuitbreaker implements deterministic safeguards to prevent CPU
-// spikes from too many concurrent sessions. It enforces three gates before
-// allowing a new worker session to spawn:
+// spikes from rapid session spawning. It enforces two gates before allowing a
+// new session to spawn:
 //
-//  1. MaxWorkers — hard cap on concurrent worker sessions
-//  2. CPULoad — refuses spawn if 5-min load average exceeds threshold
-//  3. SpawnStagger — minimum time between consecutive spawns
+//  1. CPULoad — refuses spawn if 5-min load average exceeds threshold
+//  2. SpawnStagger — minimum time between consecutive spawns
 package circuitbreaker
 
 import (
 	"fmt"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -42,10 +39,6 @@ func ClassifyLoad(load float64) DEARLevel {
 
 // Config holds circuit breaker thresholds.
 type Config struct {
-	// MaxWorkers is the hard cap on concurrent worker sessions.
-	// Default: 3. Override via AGM_MAX_WORKERS env var.
-	MaxWorkers int
-
 	// MaxLoad5 is the 5-minute load average ceiling.
 	// A spawn is refused when the current 5-min load exceeds this value.
 	// Default: 50.
@@ -59,29 +52,15 @@ type Config struct {
 // DefaultConfig returns a Config with production defaults, applying any
 // environment-variable overrides.
 func DefaultConfig() Config {
-	cfg := Config{
-		MaxWorkers:       3,
+	return Config{
 		MaxLoad5:         50,
 		MinSpawnInterval: 2 * time.Minute,
 	}
-
-	if v := os.Getenv("AGM_MAX_WORKERS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			cfg.MaxWorkers = n
-		}
-	}
-
-	return cfg
 }
 
 // LoadReader provides the 5-minute load average.
 type LoadReader interface {
 	Load5() (float64, error)
-}
-
-// WorkerCounter returns the number of currently active worker sessions.
-type WorkerCounter interface {
-	CountWorkers() (int, error)
 }
 
 // SpawnTimer reads and writes the last-spawn timestamp.
@@ -92,7 +71,7 @@ type SpawnTimer interface {
 
 // GateResult describes the outcome of a single gate check.
 type GateResult struct {
-	Gate    string // "max_workers", "cpu_load", "spawn_stagger"
+	Gate    string // "cpu_load", "spawn_stagger"
 	Passed  bool
 	Message string
 }
@@ -105,27 +84,18 @@ type CheckResult struct {
 	Level   DEARLevel
 }
 
-// Check evaluates all three gates. It returns CheckResult with Allowed=true
+// Check evaluates all gates. It returns CheckResult with Allowed=true
 // only if every gate passes. Gates are always all evaluated so the caller
 // can report every violation, not just the first.
-func Check(cfg Config, lr LoadReader, wc WorkerCounter, st SpawnTimer) CheckResult {
+func Check(cfg Config, lr LoadReader, st SpawnTimer) CheckResult {
 	result := CheckResult{Allowed: true}
 
-	// Gate 1: max workers
-	workerGate := checkMaxWorkers(cfg, wc)
-	result.Gates = append(result.Gates, workerGate)
-	if !workerGate.Passed {
-		result.Allowed = false
-	}
-
-	// Gate 2: CPU load
 	loadGate := checkCPULoad(cfg, lr)
 	result.Gates = append(result.Gates, loadGate)
 	if !loadGate.Passed {
 		result.Allowed = false
 	}
 
-	// Gate 3: spawn stagger
 	staggerGate := checkSpawnStagger(cfg, st)
 	result.Gates = append(result.Gates, staggerGate)
 	if !staggerGate.Passed {
@@ -139,35 +109,6 @@ func Check(cfg Config, lr LoadReader, wc WorkerCounter, st SpawnTimer) CheckResu
 	}
 
 	return result
-}
-
-func checkMaxWorkers(cfg Config, wc WorkerCounter) GateResult {
-	count, err := wc.CountWorkers()
-	if err != nil {
-		// If we can't count, fail open with a warning
-		return GateResult{
-			Gate:    "max_workers",
-			Passed:  true,
-			Message: fmt.Sprintf("could not count workers: %v (failing open)", err),
-		}
-	}
-
-	if count >= cfg.MaxWorkers {
-		return GateResult{
-			Gate:   "max_workers",
-			Passed: false,
-			Message: fmt.Sprintf(
-				"worker limit reached: %d/%d active workers. Wait for a session to finish or archive idle sessions with: agm session archive <name>",
-				count, cfg.MaxWorkers,
-			),
-		}
-	}
-
-	return GateResult{
-		Gate:    "max_workers",
-		Passed:  true,
-		Message: fmt.Sprintf("workers: %d/%d", count, cfg.MaxWorkers),
-	}
 }
 
 func checkCPULoad(cfg Config, lr LoadReader) GateResult {
