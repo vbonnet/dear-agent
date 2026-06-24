@@ -41,3 +41,4 @@ Feature: Harness parity
     And AGM kills the session
     And AGM archives the stopped session
     Then Dolt should reflect the expected lifecycle transitions
+    And the matching Codex saved session should be archived

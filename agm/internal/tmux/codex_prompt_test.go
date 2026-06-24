@@ -203,6 +203,36 @@ func TestWaitForCodexPromptPolling(t *testing.T) {
 	}
 }
 
+func TestWaitForPromptSimpleDetectsCodexComposerAboveFooter(t *testing.T) {
+	sessionName := "test-codex-simple-prompt-tail"
+	socketPath := newCodexTestSession(t, sessionName)
+
+	script := "printf 'OpenAI Codex (v0.142.0)\\n'; for i in 1 2 3 4 5 6 7 8 9 10; do printf 'footer line %s\\n' \"$i\"; done"
+	sendCmd := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", sessionName, script, "Enter")
+	if err := sendCmd.Run(); err != nil {
+		t.Fatalf("Failed to send Codex composer fixture: %v", err)
+	}
+
+	if err := WaitForPromptSimple(sessionName, 5*time.Second); err != nil {
+		t.Fatalf("WaitForPromptSimple failed to detect Codex composer above footer: %v", err)
+	}
+}
+
+func TestGetPaneCommandsIncludesStartCommand(t *testing.T) {
+	sessionName := "test-codex-pane-commands"
+	newCodexTestSession(t, sessionName, "sleep 30")
+
+	commands, err := GetPaneCommands(sessionName)
+	if err != nil {
+		t.Fatalf("GetPaneCommands returned error: %v", err)
+	}
+
+	joined := strings.Join(commands, "\n")
+	if !strings.Contains(joined, "sleep 30") {
+		t.Fatalf("GetPaneCommands() = %q, want pane_start_command", joined)
+	}
+}
+
 // TestIsCodexIdleComposerVisible verifies IsCodexIdle reports true once the
 // Codex composer header is showing in the pane.
 func TestIsCodexIdleComposerVisible(t *testing.T) {

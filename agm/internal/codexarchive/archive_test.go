@@ -1,0 +1,143 @@
+package codexarchive
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestArchiveSkipsNonCodexHarness(t *testing.T) {
+	result, err := Archive(context.Background(), Request{Harness: "claude-code", Name: "worker"})
+	if err != nil {
+		t.Fatalf("Archive returned error: %v", err)
+	}
+	if result == nil || !result.Skipped {
+		t.Fatalf("expected skipped result, got %#v", result)
+	}
+}
+
+func TestArchiveResolvesCodexSessionByWorkingDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", fakeCodexPath(t, home))
+
+	cwd := filepath.Join(home, "work", "merged")
+	writeCodexTranscript(t, home, "sessions/2026/06/24/rollout-2026-06-24T01-02-03-019efabc.jsonl", "019efabc", cwd)
+
+	result, err := Archive(context.Background(), Request{
+		Harness:          "codex-cli",
+		Name:             "agm-session-name",
+		AGMSessionID:     "agm-session-id",
+		WorkingDirectory: cwd,
+	})
+	if err != nil {
+		t.Fatalf("Archive returned error: %v", err)
+	}
+	if result.Target != "019efabc" {
+		t.Fatalf("target = %q, want Codex session id", result.Target)
+	}
+
+	args := readFakeCodexArgs(t, home)
+	if strings.TrimSpace(args) != "archive 019efabc" {
+		t.Fatalf("codex args = %q", args)
+	}
+}
+
+func TestArchiveUsesRemoteEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", fakeCodexPath(t, home))
+	t.Setenv(envRemote, "unix://")
+	t.Setenv(envRemoteToken, "CODEX_REMOTE_TOKEN")
+
+	cwd := filepath.Join(home, "work")
+	writeCodexTranscript(t, home, "sessions/2026/06/24/rollout-remote.jsonl", "019e-remote", cwd)
+
+	_, err := Archive(context.Background(), Request{
+		Harness:          "codex-cli",
+		WorkingDirectory: cwd,
+	})
+	if err != nil {
+		t.Fatalf("Archive returned error: %v", err)
+	}
+
+	args := strings.TrimSpace(readFakeCodexArgs(t, home))
+	want := "archive --remote unix:// --remote-auth-token-env CODEX_REMOTE_TOKEN 019e-remote"
+	if args != want {
+		t.Fatalf("codex args = %q, want %q", args, want)
+	}
+}
+
+func TestArchiveTreatsArchivedTranscriptAsSuccess(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", fakeCodexPath(t, home))
+
+	cwd := filepath.Join(home, "archived-work")
+	writeCodexTranscript(t, home, "archived_sessions/rollout-archived.jsonl", "019e-archived", cwd)
+
+	result, err := Archive(context.Background(), Request{
+		Harness:          "codex-cli",
+		WorkingDirectory: cwd,
+	})
+	if err != nil {
+		t.Fatalf("Archive returned error: %v", err)
+	}
+	if !result.AlreadyArchived {
+		t.Fatalf("expected already archived result, got %#v", result)
+	}
+	if _, err := os.Stat(filepath.Join(home, "codex-args.txt")); !os.IsNotExist(err) {
+		t.Fatalf("codex command should not run for already archived transcript")
+	}
+}
+
+func TestArchiveErrorsWhenCodexSessionCannotBeResolved(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", fakeCodexPath(t, home))
+
+	_, err := Archive(context.Background(), Request{
+		Harness:          "codex-cli",
+		WorkingDirectory: filepath.Join(home, "missing"),
+	})
+	if err == nil {
+		t.Fatal("expected resolve error")
+	}
+}
+
+func fakeCodexPath(t *testing.T, home string) string {
+	t.Helper()
+	binDir := filepath.Join(home, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	script := filepath.Join(binDir, "codex")
+	body := "#!/bin/sh\nprintf '%s' \"$*\" > \"$HOME/codex-args.txt\"\n"
+	if err := os.WriteFile(script, []byte(body), 0755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	return binDir + string(os.PathListSeparator) + os.Getenv("PATH")
+}
+
+func writeCodexTranscript(t *testing.T, home, relPath, id, cwd string) {
+	t.Helper()
+	path := filepath.Join(home, ".codex", relPath)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir transcript dir: %v", err)
+	}
+	line := `{"type":"session_meta","payload":{"session_id":"` + id + `","id":"` + id + `","cwd":"` + cwd + `"}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+}
+
+func readFakeCodexArgs(t *testing.T, home string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(home, "codex-args.txt"))
+	if err != nil {
+		t.Fatalf("read fake codex args: %v", err)
+	}
+	return string(data)
+}

@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/cli"
 	"github.com/vbonnet/dear-agent/agm/internal/detection"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
@@ -316,10 +318,7 @@ Examples:
 				// existed.
 				fmt.Printf("Creating new AGM session: %s\n", sessionName)
 
-				cwd := ""
-				if wd, err := os.Getwd(); err == nil {
-					cwd = wd
-				}
+				cwd := currentWorkingDirectory()
 
 				m = &manifest.Manifest{
 					SchemaVersion: manifest.SchemaVersion,
@@ -357,8 +356,8 @@ Examples:
 			}
 			m.Claude.UUID = targetUUID
 
-			// Update working directory to current directory
-			if wd, err := os.Getwd(); err == nil {
+			// Update working directory to the root-resolved command directory.
+			if wd := currentWorkingDirectory(); wd != "" {
 				m.WorkingDirectory = wd
 			}
 
@@ -481,7 +480,7 @@ func inferHarnessFromTmux(sessionName string) (string, error) {
 
 func harnessFromPaneCommands(commands []string) string {
 	for _, cmd := range commands {
-		switch filepath.Base(cmd) {
+		switch commandExecutableName(cmd) {
 		case "codex":
 			return "codex-cli"
 		case "gemini":
@@ -493,6 +492,27 @@ func harnessFromPaneCommands(commands []string) string {
 		}
 	}
 	return ""
+}
+
+func commandExecutableName(cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	if len(cmd) > 1 && (cmd[0] == '"' || cmd[0] == '\'') {
+		quote := cmd[0]
+		if end := strings.IndexByte(cmd[1:], quote); end >= 0 {
+			quoted := cmd[1 : end+1]
+			rest := strings.TrimSpace(cmd[end+2:])
+			if rest != "" {
+				return filepath.Base(quoted)
+			}
+			cmd = quoted
+		}
+	}
+	fields := strings.Fields(cmd)
+	if len(fields) > 0 {
+		cmd = fields[0]
+	}
+	cmd = strings.Trim(cmd, `"'`)
+	return filepath.Base(cmd)
 }
 
 func associateNonClaudeSession(sessionName, sessionsDir, harness string, existing *manifest.Manifest, manifestPath string, manifestErr error, adapter *dolt.Adapter) error {
@@ -584,6 +604,9 @@ func updateNonClaudeAssociationManifest(m *manifest.Manifest, sessionName, harne
 }
 
 func currentWorkingDirectory() string {
+	if directory != "" {
+		return cli.GetProjectDirectory()
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return ""

@@ -669,13 +669,16 @@ func GetCurrentSessionName() (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// GetPaneCommands returns the foreground command for each pane in the tmux session.
+// GetPaneCommands returns command hints for each pane in the tmux session.
+// It includes both the current foreground command and the pane's start command:
+// Node-based CLIs such as Codex can report "node" as the current command while
+// retaining "codex ..." as the start command.
 func GetPaneCommands(sessionName string) ([]string, error) {
 	ctx := context.Background()
 	socketPath := GetSocketPath()
 	normalizedName := NormalizeTmuxSessionName(sessionName)
-	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-panes", "-t", FormatSessionTarget(normalizedName),
-		"-F", "#{pane_current_command}")
+	output, err := RunWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "list-panes", "-t", normalizedName,
+		"-F", "#{pane_current_command}\t#{pane_start_command}")
 	if err != nil {
 		timeoutError := &TimeoutError{}
 		if errors.As(err, &timeoutError) {
@@ -687,8 +690,10 @@ func GetPaneCommands(sessionName string) ([]string, error) {
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	var commands []string
 	for _, line := range lines {
-		if cmd := strings.TrimSpace(line); cmd != "" {
-			commands = append(commands, cmd)
+		for field := range strings.SplitSeq(line, "\t") {
+			if cmd := strings.TrimSpace(field); cmd != "" {
+				commands = append(commands, cmd)
+			}
 		}
 	}
 	return commands, nil

@@ -54,14 +54,15 @@ func runClaudePostCreate(sessionName string, modeAppliedAtStartup bool) error {
 		applyCreationModeSwitch(sessionName, harnessName, modeFlagValue)
 	}
 	ui.PrintSuccess("Claude is ready and session associated!")
-	deliverInitialPrompt(sessionName, true)
+	deliverInitialPrompt(sessionName, true, true)
 	return nil
 }
 
-// deliverInitialPrompt sends the user-supplied --prompt or --prompt-file to
-// the session. The multiLine flag selects SendMultiLinePromptSafe (Claude) vs
-// SendPromptLiteral (Gemini/OpenCode).
-func deliverInitialPrompt(sessionName string, multiLine bool) {
+// deliverInitialPrompt sends the user-supplied --prompt or --prompt-file to the
+// session. The multiLine flag selects SendMultiLinePromptSafe (Claude) vs
+// SendPromptLiteral (Gemini/OpenCode/Codex). verifyDelivery enables the generic
+// retry verifier, which depends on Claude-style prompt echo/processing signals.
+func deliverInitialPrompt(sessionName string, multiLine, verifyDelivery bool) {
 	if prompt != "" {
 		debug.Log("Sending prompt from --prompt flag")
 		var sendErr error
@@ -75,12 +76,14 @@ func deliverInitialPrompt(sessionName string, multiLine bool) {
 			fmt.Println("  • You can manually enter the prompt in the session")
 			return
 		}
-		verifyAndRetryPromptDelivery(sessionName, prompt, func() error {
-			if multiLine {
-				return tmux.SendMultiLinePromptSafe(sessionName, prompt, false)
-			}
-			return tmux.SendPromptLiteral(sessionName, prompt, false)
-		})
+		if verifyDelivery {
+			verifyAndRetryPromptDelivery(sessionName, prompt, func() error {
+				if multiLine {
+					return tmux.SendMultiLinePromptSafe(sessionName, prompt, false)
+				}
+				return tmux.SendPromptLiteral(sessionName, prompt, false)
+			})
+		}
 		return
 	}
 	if promptFile == "" {
@@ -93,7 +96,7 @@ func deliverInitialPrompt(sessionName string, multiLine bool) {
 		fmt.Println("  • You can manually enter the prompt in the session")
 		return
 	}
-	if readErr == nil {
+	if verifyDelivery && readErr == nil {
 		verifyAndRetryPromptDelivery(sessionName, string(promptContent), func() error {
 			return tmux.SendPromptFileSafe(sessionName, promptFile, false)
 		})
@@ -115,7 +118,7 @@ func runGeminiPostCreate(sessionName string) {
 		} else {
 			debug.Log("Gemini prompt detected, session ready")
 		}
-		deliverInitialPrompt(sessionName, false)
+		deliverInitialPrompt(sessionName, false, true)
 	default:
 		debug.Log("Detached mode: skipping Gemini prompt wait and prompt delivery")
 	}
@@ -144,7 +147,7 @@ func runCodexPostCreate(sessionName string) {
 		} else {
 			debug.Log("Codex prompt detected, session ready")
 		}
-		deliverInitialPrompt(sessionName, false)
+		deliverInitialPrompt(sessionName, false, false)
 	}
 }
 
@@ -163,7 +166,7 @@ func runOpenCodePostCreate(sessionName string) {
 		} else {
 			debug.Log("OpenCode prompt detected, session ready")
 		}
-		deliverInitialPrompt(sessionName, false)
+		deliverInitialPrompt(sessionName, false, true)
 	default:
 		debug.Log("Detached mode: skipping OpenCode prompt wait and prompt delivery")
 	}

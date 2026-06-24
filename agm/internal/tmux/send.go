@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -144,8 +145,14 @@ func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt 
 		time.Sleep(1 * time.Second)
 
 		// Re-capture pane to verify prompt stability
-		recheck, err := exec.Command("tmux", "-S", GetSocketPath(), "capture-pane",
-			"-t", NormalizeTmuxSessionName(sessionName), "-p", "-S", "-5").Output()
+		cmdCtx, cmdCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		recheck, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane",
+			"-t", NormalizeTmuxSessionName(sessionName), "-p", "-S", "-30").Output()
+		cmdErr := cmdCtx.Err()
+		cmdCancel()
+		if cmdErr != nil {
+			return fmt.Errorf("tmux capture-pane timed out during prompt stability check: %w", cmdErr)
+		}
 		if err == nil {
 			recheckContent := string(recheck)
 			// If prompt disappeared, session is processing a human submission
