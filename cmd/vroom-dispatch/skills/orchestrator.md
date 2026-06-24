@@ -182,6 +182,28 @@ Identify sessions whose names start with `worker-` — these are your
 dispatched workers. Note which are active vs. archived/done. (The Step 6 tool
 also reads this list for dedup; you inspect it here for the monitoring in Step 7.)
 
+### Step 5a: Refresh Prompt Library
+
+Before dispatching, call `vroom-prompt-gen` to auto-generate prompt files for
+any ready beads that don't already have one in `~/.agm/vroom/prompts/`. This
+prevents the prompt library from exhausting (root cause: ce-5z0o stall):
+
+```bash
+vroom-prompt-gen \
+  --db ~/beads/context-engine/.beads \
+  --prompts-dir ~/.agm/vroom/prompts \
+  --repo vbonnet/dear-agent 2>/dev/null
+PROMPT_GEN_EXIT=$?
+```
+
+- Exit 0: prompt files written (or 0 new files — idempotent). Proceed.
+- Non-zero: `gh pr list` query failed — fails closed (no files written).
+  Continue dispatch from whatever the library already contains; log the error:
+  ```bash
+  printf '{"ts":"%s","role":"orchestrator","kind":"supervisor.orch.prompt_gen_error","payload":{"exit":%s}}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PROMPT_GEN_EXIT" >> ~/.agm/vroom/trail.jsonl
+  ```
+
 ### Step 6: Dispatch Undispatched Work
 
 **FIRST — open-PR firehose cap (ce-qpg9). Before dispatching ANY worker this
