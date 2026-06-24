@@ -226,7 +226,7 @@ func ArchiveUISessions(opCtx *OpContext, req *ArchiveUISessionsRequest) (*Archiv
 		return nil, ErrInvalidInput("store", fmt.Sprintf("cannot read store dir %s: %v", dir, err))
 	}
 
-	liveIDs, liveCwds := readPIDRegistry(c.pidDir)
+	liveIDs := readPIDRegistry(c.pidDir)
 	env := newSafetyEnv(req, c)
 
 	result := &ArchiveUISessionsResult{
@@ -251,7 +251,7 @@ func ArchiveUISessions(opCtx *OpContext, req *ArchiveUISessionsRequest) (*Archiv
 	backupDir := resolveBackupDir(req, c, result)
 
 	for _, s := range sessions {
-		oc := newOutcome(s, c.now, isLive(s, liveIDs, liveCwds))
+		oc := newOutcome(s, c.now, isLive(s, liveIDs))
 
 		if skip, reason := uiSkipReason(s.IsArchived, oc.Live, c, ageMsOf(s, c.now)); skip {
 			oc.Action, oc.Reason = "skip", reason
@@ -358,30 +358,41 @@ func applyFlip(s *claudeui.Session, c uiConfig, backup bool, backupDir string,
 }
 
 // isLive reports whether a stored session is owned by a running process.
-// Conservative by construction: an id OR cwd match against the live PID
-// registry counts as live, so the AND-of-three idle test errs toward skipping.
-func isLive(s *claudeui.Session, liveIDs, liveCwds map[string]bool) bool {
+//
+// Liveness is keyed on session IDENTITY only — the session's cliSessionId (the
+// join key to the live registry's `sessionId`) or its own sessionId. It is
+// deliberately NOT keyed on cwd.
+//
+// cwd is not a per-session signal: many sessions share one working directory
+// (every CLI run rooted at a monorepo like ~/src/dear-agent, or at $HOME), so a
+// single live process there would mark every past session in that directory as
+// "live" forever. On this machine that false-positive buried ~248 long-idle
+// sessions (only 13 were truly live by id), which is the dominant reason the
+// desktop session list never drains. Idleness is still protected by the age
+// gate (--older-than) and the safety-warning gate (uncommitted/unmerged work,
+// open PR, awaiting-input) downstream, so dropping the cwd match does not
+// archive a session that still has live work — it only stops mislabelling dead
+// sessions as live. See ADR-026 idle-derivation note.
+func isLive(s *claudeui.Session, liveIDs map[string]bool) bool {
 	if s.CliSessionID != "" && liveIDs[s.CliSessionID] {
 		return true
 	}
 	if s.SessionID != "" && liveIDs[s.SessionID] {
 		return true
 	}
-	if s.Cwd != "" && liveCwds[s.Cwd] {
-		return true
-	}
 	return false
 }
 
-// readPIDRegistry reads ~/.claude/sessions/<pid>.json. Each present file means
-// a running process owns that CLI session. Best-effort: an unreadable entry
-// just drops one liveness signal rather than aborting.
-func readPIDRegistry(dir string) (ids, cwds map[string]bool) {
+// readPIDRegistry reads ~/.claude/sessions/<pid>.json. Each present file means a
+// running process owns that CLI session; we collect the owning sessionIds. cwd
+// is intentionally not collected — see isLive for why cwd is an unsound
+// liveness signal. Best-effort: an unreadable entry just drops one liveness
+// signal rather than aborting.
+func readPIDRegistry(dir string) (ids map[string]bool) {
 	ids = map[string]bool{}
-	cwds = map[string]bool{}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return ids, cwds
+		return ids
 	}
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
@@ -393,7 +404,6 @@ func readPIDRegistry(dir string) (ids, cwds map[string]bool) {
 		}
 		var rec struct {
 			SessionID string `json:"sessionId"`
-			Cwd       string `json:"cwd"`
 		}
 		if json.Unmarshal(data, &rec) != nil {
 			continue
@@ -401,11 +411,8 @@ func readPIDRegistry(dir string) (ids, cwds map[string]bool) {
 		if rec.SessionID != "" {
 			ids[rec.SessionID] = true
 		}
-		if rec.Cwd != "" {
-			cwds[rec.Cwd] = true
-		}
 	}
-	return ids, cwds
+	return ids
 }
 
 // storeDiscoveryError maps a claudeui discovery failure to an actionable OpError.
