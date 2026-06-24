@@ -104,20 +104,25 @@ func TestParseCheckRuns_Empty(t *testing.T) {
 
 // --- parseReviewThreads ---
 
+type reviewThreadNode struct {
+	IsResolved bool `json:"isResolved"`
+	IsOutdated bool `json:"isOutdated"`
+	Comments   struct {
+		Nodes []struct {
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			Body string `json:"body"`
+		} `json:"nodes"`
+	} `json:"comments"`
+}
+
 type reviewThreadsDoc struct {
 	Data struct {
 		Repository struct {
 			PullRequest struct {
 				ReviewThreads struct {
-					Nodes []struct {
-						IsResolved bool `json:"isResolved"`
-						IsOutdated bool `json:"isOutdated"`
-						Comments   struct {
-							Nodes []struct {
-								Body string `json:"body"`
-							} `json:"nodes"`
-						} `json:"comments"`
-					} `json:"nodes"`
+					Nodes []reviewThreadNode `json:"nodes"`
 				} `json:"reviewThreads"`
 			} `json:"pullRequest"`
 		} `json:"repository"`
@@ -127,26 +132,25 @@ type reviewThreadsDoc struct {
 func makeReviewJSON(threads []struct {
 	resolved bool
 	outdated bool
+	author   string
 	body     string
 }) []byte {
 	var doc reviewThreadsDoc
 	for _, t := range threads {
-		node := struct {
-			IsResolved bool `json:"isResolved"`
-			IsOutdated bool `json:"isOutdated"`
-			Comments   struct {
-				Nodes []struct {
-					Body string `json:"body"`
-				} `json:"nodes"`
-			} `json:"comments"`
-		}{
+		node := reviewThreadNode{
 			IsResolved: t.resolved,
 			IsOutdated: t.outdated,
 		}
-		if t.body != "" {
-			node.Comments.Nodes = append(node.Comments.Nodes, struct {
+		if t.body != "" || t.author != "" {
+			var c struct {
+				Author struct {
+					Login string `json:"login"`
+				} `json:"author"`
 				Body string `json:"body"`
-			}{Body: t.body})
+			}
+			c.Author.Login = t.author
+			c.Body = t.body
+			node.Comments.Nodes = append(node.Comments.Nodes, c)
 		}
 		doc.Data.Repository.PullRequest.ReviewThreads.Nodes = append(
 			doc.Data.Repository.PullRequest.ReviewThreads.Nodes, node)
@@ -159,6 +163,7 @@ func TestParseReviewThreads_AllResolved(t *testing.T) {
 	data := makeReviewJSON([]struct {
 		resolved bool
 		outdated bool
+		author   string
 		body     string
 	}{
 		{resolved: true},
@@ -173,9 +178,10 @@ func TestParseReviewThreads_UnresolvedThread(t *testing.T) {
 	data := makeReviewJSON([]struct {
 		resolved bool
 		outdated bool
+		author   string
 		body     string
 	}{
-		{resolved: false, outdated: false, body: "Please fix the nil check"},
+		{resolved: false, outdated: false, author: "gemini-code-assist", body: "Please fix the nil check"},
 	})
 	err := parseReviewThreads(data)
 	if err == nil {
@@ -183,6 +189,69 @@ func TestParseReviewThreads_UnresolvedThread(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unresolved") {
 		t.Errorf("error should mention 'unresolved', got: %v", err)
+	}
+}
+
+func TestParseReviewThreads_ShowsAuthorAndBody(t *testing.T) {
+	data := makeReviewJSON([]struct {
+		resolved bool
+		outdated bool
+		author   string
+		body     string
+	}{
+		{resolved: false, author: "gemini-code-assist", body: "Consider extracting to a helper"},
+		{resolved: false, author: "vbonnet", body: "Will address in follow-up"},
+	})
+	err := parseReviewThreads(data)
+	if err == nil {
+		t.Fatal("expected error for unresolved threads, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "@gemini-code-assist") {
+		t.Errorf("error should show author @gemini-code-assist, got: %v", msg)
+	}
+	if !strings.Contains(msg, "@vbonnet") {
+		t.Errorf("error should show author @vbonnet, got: %v", msg)
+	}
+	if !strings.Contains(msg, "Consider extracting") {
+		t.Errorf("error should show comment body, got: %v", msg)
+	}
+}
+
+func TestParseReviewThreads_UnknownAuthorFallback(t *testing.T) {
+	data := makeReviewJSON([]struct {
+		resolved bool
+		outdated bool
+		author   string
+		body     string
+	}{
+		{resolved: false, author: "", body: "No author login"},
+	})
+	err := parseReviewThreads(data)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "@unknown") {
+		t.Errorf("error should show @unknown when author is absent, got: %v", err.Error())
+	}
+}
+
+func TestParseReviewThreads_BodyTruncatedAt80Runes(t *testing.T) {
+	longBody := strings.Repeat("x", 100)
+	data := makeReviewJSON([]struct {
+		resolved bool
+		outdated bool
+		author   string
+		body     string
+	}{
+		{resolved: false, author: "bot", body: longBody},
+	})
+	err := parseReviewThreads(data)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "…") {
+		t.Errorf("long body should be truncated with ellipsis, got: %v", err.Error())
 	}
 }
 
