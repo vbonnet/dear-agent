@@ -70,7 +70,7 @@ func main() {
 
 	log.Printf("agm-webhook-receiver listening on %s → %s", *addr, *out)
 	if err := http.ListenAndServe(*addr, mux); err != nil { //nolint:gosec // dev tool, localhost-only
-		log.Fatalf("server: %v", err)
+		log.Printf("server: %v", err)
 	}
 }
 
@@ -191,7 +191,7 @@ func newSink(path string) (*sink, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
