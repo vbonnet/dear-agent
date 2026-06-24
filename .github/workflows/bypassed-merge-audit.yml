@@ -107,8 +107,7 @@ jobs:
               [ -n "$red" ]     && entry="${entry} | ❌ failed: ${red}"
               [ -n "$pending" ] && entry="${entry} | ⏳ in-progress at merge: ${pending}"
               entry="${entry} (merged ${merged_at})"
-              findings="${findings}
-${entry}"
+              findings="${findings}"$'\n'"${entry}"
               echo "  BYPASS DETECTED: ${entry}"
             else
               echo "  ok — all checks green at merge time"

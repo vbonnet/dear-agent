@@ -65,4 +65,5 @@ type GuardOptions struct {
 	SkipMidResponse   bool   // Skip Claude mid-response detection
 	SocketPath        string // Override tmux socket path (empty = auto-detect)
 	AutonomousMode    bool   // Session is unattended; skip human_typing guard and enable cooldown
+	Harness           string // Agent harness; empty preserves Claude Code behavior
 }

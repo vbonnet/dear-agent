@@ -41,7 +41,7 @@ jobs:
       - name: Install gocognit
         run: go install github.com/uudashr/gocognit/cmd/gocognit@latest
 
-      - name: Check doc staleness (Last audited at: > 90 days)
+      - name: "Check doc staleness (Last audited at: > 90 days)"
         id: doc_staleness
         run: |
           set -euo pipefail

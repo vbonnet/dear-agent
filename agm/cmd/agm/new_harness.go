@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,7 +11,6 @@ import (
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
-	agmgit "github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
@@ -300,8 +300,6 @@ func startGeminiDirect(sessionName string, exists bool) error {
 //   - Sandbox defaults to workspace-write (edit the cwd tree, escalation prompts
 //     still appear). Full bypass is intentionally NOT wired here — it must remain
 //     an explicit, audited opt-in rather than a silent default.
-//   - --skip-git-repo-check is added only when the workdir is not a git repo, so
-//     Codex still launches in non-repo AGM workdirs.
 func buildCodexCommand(sessionName, workDir string, extraAddDirs []string) string {
 	return buildCodexCommandForModel(sessionName, workDir, modelName, extraAddDirs)
 }
@@ -313,9 +311,6 @@ func buildCodexCommandForModel(sessionName, workDir, model string, extraAddDirs 
 		shellQuote(sessionName), shellQuote(resolvedModel), shellQuote(workDir))
 	for _, dir := range extraAddDirs {
 		fmt.Fprintf(&b, " --add-dir %s", shellQuote(dir))
-	}
-	if !agmgit.IsInGitRepo(workDir) {
-		b.WriteString(" --skip-git-repo-check")
 	}
 	b.WriteString(" && exit")
 	return b.String()
@@ -352,7 +347,7 @@ func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []
 				"  • Check tmux session exists: tmux list-sessions\n"+
 				"  • Attach and start manually: tmux attach -t "+sessionName)
 		if !exists {
-			_ = tmux.SendCommand(sessionName, "tmux kill-session -t "+sessionName)
+			cleanupCodexTmuxSession(sessionName)
 		}
 		return err
 	}
@@ -364,12 +359,36 @@ func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []
 
 	debug.Log("Waiting for Codex prompt readiness (timeout: 90s)")
 	if err := tmux.WaitForCodexPrompt(sessionName, 90*time.Second); err != nil {
-		debug.Log("Codex prompt readiness wait failed (non-fatal): %v", err)
-	} else {
-		debug.Log("✓ Codex prompt detected - Codex is ready")
+		debug.Log("Codex prompt readiness wait failed: %v", err)
+		ui.PrintError(err,
+			"Codex did not become ready",
+			"  • Attach to inspect: tmux attach -t "+sessionName+"\n"+
+				"  • Check for onboarding, model selection, auth, or permission prompts\n"+
+				"  • Retry after resolving the prompt")
+		if !exists {
+			cleanupCodexTmuxSession(sessionName)
+		}
+		return err
 	}
+	debug.Log("✓ Codex prompt detected - Codex is ready")
 	ui.PrintSuccess("Codex adapter ready")
 	return nil
+}
+
+func cleanupCodexTmuxSession(sessionName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	normalizedName := tmux.NormalizeTmuxSessionName(sessionName)
+	cmd := exec.CommandContext(ctx, "tmux", "-S", tmux.GetSocketPath(), "kill-session", "-t", normalizedName)
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		debug.Log("Codex session cleanup timed out or was cancelled: %v", ctx.Err())
+		return
+	}
+	if err != nil {
+		debug.Log("Failed to clean up Codex tmux session: %v (output: %s)", err, strings.TrimSpace(string(output)))
+	}
 }
 
 // startOpenCodeHarness sends the `opencode attach` command into the tmux

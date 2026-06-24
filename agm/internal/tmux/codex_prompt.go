@@ -24,17 +24,10 @@ import (
 //	╰───────────────────────────────────────╯
 //	› Write tests for @filename
 //
-// None of these primitives appear at a bash prompt or in the first-run trust
-// dialog (which has no box), so they are reliable "the TUI is up" signals
-// rather than coincidental matches against shell output. "OpenAI Codex" is the
-// most specific and stable marker; the rounded box corners are kept as
-// defensive fallbacks in case the header wording changes. If Codex changes its
-// composer chrome, refine this list against a live `codex` pane.
-//
-// Note: the rounded box-drawing corners are shared with Gemini's UI. That
-// overlap is harmless — both are genuine TUI-ready signals — but Codex gets its
-// own pattern set (and its own WaitForCodexPrompt) so the detector is explicit
-// about which harness it is matching and can grow Codex-specific signals.
+// Decorative shell prompts can also use rounded box-drawing characters, so
+// readiness must remain keyed to Codex-specific text instead of generic TUI
+// chrome. If Codex changes its composer wording, refine this list against a live
+// `codex` pane.
 //
 // The bare "›" input cursor is deliberately NOT a pattern here: it also marks
 // the highlighted option of the trust dialog ("› 1. Yes, continue"), so keying
@@ -42,8 +35,6 @@ import (
 var CodexPromptPatterns = []string{
 	"OpenAI Codex",     // composer box header — present once the TUI renders
 	"/model to change", // composer status-line hint
-	"╭",                // top border of the Codex input box
-	"╰",                // bottom border of the Codex input box
 }
 
 // CodexTrustPromptPatterns are substrings that indicate Codex is showing a
@@ -65,6 +56,15 @@ var CodexPromptPatterns = []string{
 var CodexTrustPromptPatterns = []string{
 	"Do you trust the contents of this directory",
 	"trust the contents of this directory",
+}
+
+// CodexModelUpgradePromptPatterns match Codex's model-upgrade interstitial.
+// When a caller explicitly requested a model, AGM should keep that model rather
+// than accepting the highlighted "Try new model" option.
+var CodexModelUpgradePromptPatterns = []string{
+	"Choose how you'd like Codex to proceed",
+	"Try new model",
+	"Use existing model",
 }
 
 // containsCodexPromptPattern reports whether content contains any Codex
@@ -121,6 +121,21 @@ func containsCodexTrustPromptPattern(content string) bool {
 	return false
 }
 
+// containsCodexModelUpgradePromptPattern reports whether content contains the
+// Codex model-upgrade interstitial.
+func containsCodexModelUpgradePromptPattern(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+	for _, pattern := range CodexModelUpgradePromptPatterns {
+		if strings.Contains(trimmed, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
 // WaitForCodexPrompt polls the pane until the Codex TUI shows its composer
 // (ready for input), returning nil on success or a timeout error.
 //
@@ -141,6 +156,7 @@ func WaitForCodexPrompt(sessionName string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	checkCount := 0
 	trustAccepted := false
+	modelUpgradeAnswered := false
 
 	for time.Now().Before(deadline) {
 		checkCount++
@@ -169,6 +185,19 @@ func WaitForCodexPrompt(sessionName string, timeout time.Duration) error {
 				// Don't give up; a later poll may still succeed.
 			} else {
 				trustAccepted = true
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		if !modelUpgradeAnswered && containsCodexModelUpgradePromptPattern(content) {
+			debug.Log("⬇️  Codex model upgrade prompt detected (check #%d) — selecting existing model", checkCount)
+			if err := SendKeys(sessionName, "Down"); err != nil {
+				debug.Log("⚠️  Failed to select existing Codex model: %v", err)
+			} else if err := SendKeys(sessionName, "Enter"); err != nil {
+				debug.Log("⚠️  Failed to confirm existing Codex model: %v", err)
+			} else {
+				modelUpgradeAnswered = true
 			}
 			time.Sleep(1 * time.Second)
 			continue

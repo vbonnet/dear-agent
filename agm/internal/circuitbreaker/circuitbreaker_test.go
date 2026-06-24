@@ -3,21 +3,25 @@ package circuitbreaker
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 // --- test doubles ---
 
-type stubLoad struct{ load float64; err error }
+type stubLoad struct {
+	load float64
+	err  error
+}
 
 func (s stubLoad) Load5() (float64, error) { return s.load, s.err }
 
-type stubWorkers struct{ count int; err error }
-
-func (s stubWorkers) CountWorkers() (int, error) { return s.count, s.err }
-
-type stubTimer struct{ t time.Time; err error; recorded time.Time }
+type stubTimer struct {
+	t        time.Time
+	err      error
+	recorded time.Time
+}
 
 func (s *stubTimer) LastSpawnTime() (time.Time, error) { return s.t, s.err }
 func (s *stubTimer) RecordSpawn(t time.Time) error     { s.recorded = t; return nil }
@@ -49,47 +53,10 @@ func TestClassifyLoad(t *testing.T) {
 	}
 }
 
-// --- Gate 1: MaxWorkers ---
-
-func TestCheckMaxWorkers(t *testing.T) {
-	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinSpawnInterval: 2 * time.Minute}
-
-	tests := []struct {
-		name    string
-		workers int
-		wantOK  bool
-	}{
-		{"zero workers", 0, true},
-		{"under limit", 2, true},
-		{"at limit", 3, false},
-		{"over limit", 5, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := Check(cfg,
-				stubLoad{load: 1},
-				stubWorkers{count: tt.workers},
-				&stubTimer{err: os.ErrNotExist},
-			)
-			// Find the max_workers gate
-			var gate GateResult
-			for _, g := range r.Gates {
-				if g.Gate == "max_workers" {
-					gate = g
-				}
-			}
-			if gate.Passed != tt.wantOK {
-				t.Errorf("max_workers gate: passed=%v, want=%v (msg: %s)", gate.Passed, tt.wantOK, gate.Message)
-			}
-		})
-	}
-}
-
-// --- Gate 2: CPULoad ---
+// --- Gate 1: CPULoad ---
 
 func TestCheckCPULoad(t *testing.T) {
-	cfg := Config{MaxWorkers: 10, MaxLoad5: 50, MinSpawnInterval: 0}
+	cfg := Config{MaxLoad5: 50, MinSpawnInterval: 0}
 
 	tests := []struct {
 		name   string
@@ -106,26 +73,21 @@ func TestCheckCPULoad(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := Check(cfg,
 				stubLoad{load: tt.load},
-				stubWorkers{count: 0},
 				&stubTimer{err: os.ErrNotExist},
 			)
-			var gate GateResult
-			for _, g := range r.Gates {
-				if g.Gate == "cpu_load" {
-					gate = g
-				}
-			}
+			gate := findGate(r, "cpu_load")
 			if gate.Passed != tt.wantOK {
 				t.Errorf("cpu_load gate: passed=%v, want=%v (msg: %s)", gate.Passed, tt.wantOK, gate.Message)
 			}
+			assertNoMaxWorkersGate(t, r)
 		})
 	}
 }
 
-// --- Gate 3: SpawnStagger ---
+// --- Gate 2: SpawnStagger ---
 
 func TestCheckSpawnStagger(t *testing.T) {
-	cfg := Config{MaxWorkers: 10, MaxLoad5: 100, MinSpawnInterval: 2 * time.Minute}
+	cfg := Config{MaxLoad5: 100, MinSpawnInterval: 2 * time.Minute}
 
 	tests := []struct {
 		name   string
@@ -144,18 +106,13 @@ func TestCheckSpawnStagger(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := Check(cfg,
 				stubLoad{load: 1},
-				stubWorkers{count: 0},
 				&stubTimer{t: tt.last, err: tt.err},
 			)
-			var gate GateResult
-			for _, g := range r.Gates {
-				if g.Gate == "spawn_stagger" {
-					gate = g
-				}
-			}
+			gate := findGate(r, "spawn_stagger")
 			if gate.Passed != tt.wantOK {
 				t.Errorf("spawn_stagger gate: passed=%v, want=%v (msg: %s)", gate.Passed, tt.wantOK, gate.Message)
 			}
+			assertNoMaxWorkersGate(t, r)
 		})
 	}
 }
@@ -163,11 +120,10 @@ func TestCheckSpawnStagger(t *testing.T) {
 // --- Combined: all gates ---
 
 func TestCheckAllGatesPass(t *testing.T) {
-	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinSpawnInterval: 2 * time.Minute}
+	cfg := Config{MaxLoad5: 50, MinSpawnInterval: 2 * time.Minute}
 
 	r := Check(cfg,
 		stubLoad{load: 10},
-		stubWorkers{count: 1},
 		&stubTimer{t: time.Now().Add(-5 * time.Minute)},
 	)
 
@@ -180,14 +136,14 @@ func TestCheckAllGatesPass(t *testing.T) {
 	if r.Level != DEARGreen {
 		t.Errorf("expected DEAR level GREEN, got %s", r.Level)
 	}
+	assertNoMaxWorkersGate(t, r)
 }
 
 func TestCheckAllGatesFail(t *testing.T) {
-	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinSpawnInterval: 2 * time.Minute}
+	cfg := Config{MaxLoad5: 50, MinSpawnInterval: 2 * time.Minute}
 
 	r := Check(cfg,
 		stubLoad{load: 80},
-		stubWorkers{count: 5},
 		&stubTimer{t: time.Now().Add(-30 * time.Second)},
 	)
 
@@ -195,39 +151,39 @@ func TestCheckAllGatesFail(t *testing.T) {
 		t.Error("expected Allowed=false, got true")
 	}
 
-	// All three gates should have failed
+	// Both remaining gates should have failed.
 	for _, g := range r.Gates {
 		if g.Passed {
 			t.Errorf("expected gate %s to fail, but it passed: %s", g.Gate, g.Message)
 		}
 	}
+	assertNoMaxWorkersGate(t, r)
+}
+
+func TestCheckDoesNotEmitWorkerCapGate(t *testing.T) {
+	cfg := Config{MaxLoad5: 50, MinSpawnInterval: 2 * time.Minute}
+
+	r := Check(cfg,
+		stubLoad{load: 10},
+		&stubTimer{t: time.Now().Add(-5 * time.Minute)},
+	)
+
+	assertNoMaxWorkersGate(t, r)
+	if len(r.Gates) != 2 {
+		t.Fatalf("expected exactly CPU and stagger gates, got %d: %#v", len(r.Gates), r.Gates)
+	}
 }
 
 func TestCheckFailOpen_LoadError(t *testing.T) {
-	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinSpawnInterval: 2 * time.Minute}
+	cfg := Config{MaxLoad5: 50, MinSpawnInterval: 2 * time.Minute}
 
 	r := Check(cfg,
 		stubLoad{err: os.ErrPermission},
-		stubWorkers{count: 0},
 		&stubTimer{err: os.ErrNotExist},
 	)
 
 	if !r.Allowed {
 		t.Error("should fail open when load reader errors")
-	}
-}
-
-func TestCheckFailOpen_WorkerCountError(t *testing.T) {
-	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinSpawnInterval: 2 * time.Minute}
-
-	r := Check(cfg,
-		stubLoad{load: 1},
-		stubWorkers{err: os.ErrPermission},
-		&stubTimer{err: os.ErrNotExist},
-	)
-
-	if !r.Allowed {
-		t.Error("should fail open when worker counter errors")
 	}
 }
 
@@ -238,7 +194,7 @@ func TestFormatDenied(t *testing.T) {
 		Allowed: false,
 		Level:   DEARRed,
 		Gates: []GateResult{
-			{Gate: "max_workers", Passed: false, Message: "worker limit reached: 3/3"},
+			{Gate: "spawn_stagger", Passed: false, Message: "spawn too soon"},
 			{Gate: "cpu_load", Passed: true, Message: "ok"},
 		},
 	}
@@ -247,10 +203,10 @@ func TestFormatDenied(t *testing.T) {
 	if msg == "" {
 		t.Fatal("expected non-empty message")
 	}
-	if !contains(msg, "max_workers") {
-		t.Errorf("expected max_workers in message, got: %s", msg)
+	if !strings.Contains(msg, "spawn_stagger") {
+		t.Errorf("expected spawn_stagger in message, got: %s", msg)
 	}
-	if contains(msg, "cpu_load") {
+	if strings.Contains(msg, "cpu_load") {
 		t.Errorf("should not include passing gates in denied message")
 	}
 }
@@ -260,31 +216,13 @@ func TestFormatDenied_EmptyLevelFallsBackToUnknown(t *testing.T) {
 		Allowed: false,
 		Level:   "", // probe never ran / load classification missing
 		Gates: []GateResult{
-			{Gate: "max_workers", Passed: false, Message: "worker limit reached: 3/3"},
+			{Gate: "spawn_stagger", Passed: false, Message: "spawn too soon"},
 		},
 	}
 
 	msg := FormatDenied(r)
-	if !contains(msg, "load level: unknown") {
+	if !strings.Contains(msg, "load level: unknown") {
 		t.Errorf("expected empty load level to render as 'unknown', got: %s", msg)
-	}
-}
-
-// --- DefaultConfig env override ---
-
-func TestDefaultConfig_EnvOverride(t *testing.T) {
-	t.Setenv("AGM_MAX_WORKERS", "7")
-	cfg := DefaultConfig()
-	if cfg.MaxWorkers != 7 {
-		t.Errorf("expected MaxWorkers=7, got %d", cfg.MaxWorkers)
-	}
-}
-
-func TestDefaultConfig_InvalidEnv(t *testing.T) {
-	t.Setenv("AGM_MAX_WORKERS", "abc")
-	cfg := DefaultConfig()
-	if cfg.MaxWorkers != 3 {
-		t.Errorf("expected MaxWorkers=3 (default), got %d", cfg.MaxWorkers)
 	}
 }
 
@@ -345,15 +283,20 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsStr(s, sub))
-}
-
-func containsStr(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
+func findGate(r CheckResult, name string) GateResult {
+	for _, g := range r.Gates {
+		if g.Gate == name {
+			return g
 		}
 	}
-	return false
+	return GateResult{}
+}
+
+func assertNoMaxWorkersGate(t *testing.T, r CheckResult) {
+	t.Helper()
+	for _, g := range r.Gates {
+		if g.Gate == "max_workers" {
+			t.Fatalf("worker-count cap gate must not be present: %#v", r.Gates)
+		}
+	}
 }

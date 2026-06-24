@@ -715,10 +715,9 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 func enforceCircuitBreakers() error {
 	cfg := circuitbreaker.DefaultConfig()
 	lr := circuitbreaker.ProcLoadReader{}
-	wc := circuitbreaker.TmuxWorkerCounter{}
 	st := circuitbreaker.NewFileSpawnTimer()
 
-	result := circuitbreaker.Check(cfg, lr, wc, st)
+	result := circuitbreaker.Check(cfg, lr, st)
 
 	// Log DEAR level regardless of outcome
 	debug.Log("Circuit breaker check: level=%s load=%.1f allowed=%v", result.Level, result.Load, result.Allowed)
