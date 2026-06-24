@@ -278,8 +278,7 @@ func TestLedgerTrailerFormatting(t *testing.T) {
 	}
 
 	// Check timestamp format (rough check for ISO8601)
-	lines := strings.Split(msg, "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(msg, "\n") {
 		if after, ok := strings.CutPrefix(line, "Progress-Timestamp:"); ok {
 			ts := strings.TrimSpace(after)
 			if _, err := time.Parse(time.RFC3339, ts); err != nil {

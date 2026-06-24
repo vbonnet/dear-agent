@@ -147,12 +147,10 @@ func (l *Ledger) getHeadSHA() (string, error) {
 func (l *Ledger) parseLogOutput(logOutput string) []ProgressEntry {
 	var entries []ProgressEntry
 
-	lines := strings.Split(logOutput, "\n")
-
 	var currentSHA, currentSubject, currentPhase, currentMilestone, currentStatus string
 	var currentTimestamp time.Time
 
-	for _, line := range lines {
+	for line := range strings.SplitSeq(logOutput, "\n") {
 		// Raw line check for SHA (don't trim, SHA detection should be exact)
 		if l.isSHA(line) {
 			// If we were building an entry, save it first
@@ -196,15 +194,14 @@ func (l *Ledger) parseLogOutput(logOutput string) []ProgressEntry {
 		}
 
 		// Parse trailers from body (after subject)
-		if strings.HasPrefix(line, "Progress-Phase:") {
-			currentPhase = strings.TrimSpace(strings.TrimPrefix(line, "Progress-Phase:"))
-		} else if strings.HasPrefix(line, "Progress-Milestone:") {
-			currentMilestone = strings.TrimSpace(strings.TrimPrefix(line, "Progress-Milestone:"))
-		} else if strings.HasPrefix(line, "Progress-Status:") {
-			currentStatus = strings.TrimSpace(strings.TrimPrefix(line, "Progress-Status:"))
-		} else if strings.HasPrefix(line, "Progress-Timestamp:") {
-			timeStr := strings.TrimSpace(strings.TrimPrefix(line, "Progress-Timestamp:"))
-			if t, err := time.Parse(time.RFC3339, timeStr); err == nil {
+		if after, ok := strings.CutPrefix(line, "Progress-Phase:"); ok {
+			currentPhase = strings.TrimSpace(after)
+		} else if after, ok := strings.CutPrefix(line, "Progress-Milestone:"); ok {
+			currentMilestone = strings.TrimSpace(after)
+		} else if after, ok := strings.CutPrefix(line, "Progress-Status:"); ok {
+			currentStatus = strings.TrimSpace(after)
+		} else if after, ok := strings.CutPrefix(line, "Progress-Timestamp:"); ok {
+			if t, err := time.Parse(time.RFC3339, strings.TrimSpace(after)); err == nil {
 				currentTimestamp = t
 			}
 		}
