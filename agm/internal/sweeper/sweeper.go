@@ -86,10 +86,10 @@ type agmSessionInfo struct {
 
 // Result reports the outcome of a sweep pass.
 type Result struct {
-	DeadPaneSessions   []string // tmux sessions killed (or would-kill if dry-run)
-	StuckAGMSessions   []string // AGM sessions archived (or would-archive if dry-run)
-	DryRun             bool
-	Errors             []string
+	DeadPaneSessions []string // tmux sessions killed (or would-kill if dry-run)
+	StuckAGMSessions []string // AGM sessions archived (or would-archive if dry-run)
+	DryRun           bool
+	Errors           []string
 }
 
 // Sweeper periodically detects and cleans up dead/stuck sessions.
