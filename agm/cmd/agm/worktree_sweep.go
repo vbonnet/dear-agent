@@ -78,7 +78,8 @@ Examples:
   agm worktree sweep --execute
   agm worktree sweep --no-pr-check
   agm worktree sweep -o json > audit.json
-  agm worktree sweep --worktrees-dir ~/worktrees --execute`,
+  agm worktree sweep --worktrees-dir ~/worktrees --execute
+  agm worktree sweep --orphan-only   # daily audit: branches with commits above main but no PR`,
 	Args: cobra.NoArgs,
 	RunE: runWorktreeSweep,
 }
@@ -87,6 +88,7 @@ var (
 	sweepExecute      bool
 	sweepWorktreesDir string
 	sweepNoPRCheck    bool
+	sweepOrphanOnly   bool
 )
 
 func init() {
@@ -98,6 +100,8 @@ func init() {
 		"Base directory containing worktrees (default: ~/worktrees)")
 	worktreeSweepCmd.Flags().BoolVar(&sweepNoPRCheck, "no-pr-check", false,
 		"Disable the gh PR-state oracle; squash-merged husks kept conservatively")
+	worktreeSweepCmd.Flags().BoolVar(&sweepOrphanOnly, "orphan-only", false,
+		"Print only orphan branches (commits above main merge-base, no open or merged PR)")
 }
 
 func runWorktreeSweep(cmd *cobra.Command, args []string) error {
@@ -147,16 +151,26 @@ func runWorktreeSweep(cmd *cobra.Command, args []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(res)
 	}
-	printSweepReport(cmd.OutOrStdout(), res, sweepExecute)
+	printSweepReport(cmd.OutOrStdout(), res, sweepExecute, sweepOrphanOnly)
 	return nil
 }
 
-func printSweepReport(out io.Writer, res *ops.SweepResult, execute bool) {
+func printSweepReport(out io.Writer, res *ops.SweepResult, execute, orphanOnly bool) {
+	if orphanOnly {
+		printOrphanBranchReport(out, res)
+		return
+	}
 	if len(res.Worktrees) == 0 {
 		_, _ = fmt.Fprintln(out, "No worktrees found.")
 		return
 	}
+	printWorktreeTable(out, res)
+	printReapedSection(out, res, execute)
+	printOrphanSection(out, res)
+	printFailedSection(out, res)
+}
 
+func printWorktreeTable(out io.Writer, res *ops.SweepResult) {
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	_, _ = fmt.Fprintln(w, "CLASS\tREPO\tBRANCH\tAGE\tPR\tREASON\tPATH")
 	for _, s := range res.Worktrees {
@@ -185,35 +199,76 @@ func printSweepReport(out io.Writer, res *ops.SweepResult, execute bool) {
 		}
 	}
 	_, _ = fmt.Fprintln(out)
+}
 
-	if len(res.Removed) > 0 {
-		sort.Strings(res.Removed)
-		verb := "Would reap"
-		if execute {
-			verb = "Reaped"
-		}
-		_, _ = fmt.Fprintf(out, "\n%s %d provably-merged worktree(s):\n", verb, len(res.Removed))
-		for _, p := range res.Removed {
-			_, _ = fmt.Fprintf(out, "  %s\n", p)
-		}
-	} else {
+func printReapedSection(out io.Writer, res *ops.SweepResult, execute bool) {
+	if len(res.Removed) == 0 {
 		_, _ = fmt.Fprintln(out, "\nNothing is provably reapable.")
+		return
 	}
-
-	if !execute && len(res.Removed) > 0 {
+	sort.Strings(res.Removed)
+	verb := "Would reap"
+	if execute {
+		verb = "Reaped"
+	}
+	_, _ = fmt.Fprintf(out, "\n%s %d provably-merged worktree(s):\n", verb, len(res.Removed))
+	for _, p := range res.Removed {
+		_, _ = fmt.Fprintf(out, "  %s\n", p)
+	}
+	if !execute {
 		_, _ = fmt.Fprintln(out, "\nRe-run with --execute to remove the MERGED worktrees above.")
 	}
+}
 
-	if len(res.Failed) > 0 {
-		paths := make([]string, 0, len(res.Failed))
-		for p := range res.Failed {
-			paths = append(paths, p)
+func printFailedSection(out io.Writer, res *ops.SweepResult) {
+	if len(res.Failed) == 0 {
+		return
+	}
+	paths := make([]string, 0, len(res.Failed))
+	for p := range res.Failed {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	_, _ = fmt.Fprintf(out, "\n%d removal(s) failed:\n", len(paths))
+	for _, p := range paths {
+		_, _ = fmt.Fprintf(out, "  %s: %s\n", p, res.Failed[p])
+	}
+}
+
+// printOrphanSection prints the orphan-branch subsection inside the normal
+// sweep report. It is a no-op when no orphan branches are detected.
+func printOrphanSection(out io.Writer, res *ops.SweepResult) {
+	var orphans []ops.WorktreeStatus
+	for _, s := range res.Worktrees {
+		if s.IsOrphanBranch {
+			orphans = append(orphans, s)
 		}
-		sort.Strings(paths)
-		_, _ = fmt.Fprintf(out, "\n%d removal(s) failed:\n", len(paths))
-		for _, p := range paths {
-			_, _ = fmt.Fprintf(out, "  %s: %s\n", p, res.Failed[p])
+	}
+	if len(orphans) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(out, "\n%d orphan branch(es) — commits above main, no open or merged PR:\n", len(orphans))
+	for _, s := range orphans {
+		_, _ = fmt.Fprintf(out, "  %s  branch=%s  commits_above_main=%d  path=%s\n",
+			s.Repo, s.Branch, s.CommitsAboveMergeBase, s.Path)
+	}
+	_, _ = fmt.Fprintln(out, "  → open a PR or run `agm worktree sweep --execute` to remove")
+}
+
+// printOrphanBranchReport is the --orphan-only mode: prints ONLY orphan-branch
+// worktrees, one per line (suitable for piping into daily audit scripts).
+func printOrphanBranchReport(out io.Writer, res *ops.SweepResult) {
+	found := false
+	for _, s := range res.Worktrees {
+		if !s.IsOrphanBranch {
+			continue
 		}
+		found = true
+		_, _ = fmt.Fprintf(out, "ORPHAN  repo=%-20s  branch=%-40s  commits=%d  path=%s\n",
+			s.Repo, s.Branch, s.CommitsAboveMergeBase, s.Path)
+	}
+	if !found {
+		_, _ = fmt.Fprintln(out, "No orphan branches found.")
 	}
 }
 
