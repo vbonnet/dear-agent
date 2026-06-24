@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -48,6 +49,8 @@ type ScanFindings struct {
 	HealthStatus            string   `json:"health_status"` // "healthy", "warning", "critical"
 	CrossCheckIssues        int      `json:"cross_check_issues,omitempty"`
 	UnmanagedSessions       int      `json:"unmanaged_sessions,omitempty"`
+	GhostWorkers            []string `json:"ghost_workers,omitempty"`
+	GhostWorkerCount        int      `json:"ghost_worker_count,omitempty"`
 }
 
 var scanCmd = &cobra.Command{
@@ -177,6 +180,21 @@ func performScanCycle() (*ScanCycleResult, error) {
 			}
 			result.Findings.UnmanagedSessions = len(crossCheckReport.UnmanagedSessions)
 		}
+
+		// 4b. Ghost-worker sentinel: detect workers with closed/done beads.
+		if sessionResult != nil {
+			var sessionNames []string
+			for _, s := range sessionResult.Sessions {
+				sessionNames = append(sessionNames, s.Name)
+			}
+			ghosts, err := ops.RunGhostWorkerCheck(context.Background(), sessionNames, 0, false)
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("ghost-worker check failed: %v", err))
+			} else {
+				result.Findings.GhostWorkers = ghosts
+				result.Findings.GhostWorkerCount = len(ghosts)
+			}
+		}
 	}
 
 	// Determine overall health status
@@ -195,6 +213,10 @@ func performScanCycle() (*ScanCycleResult, error) {
 	}
 	// Cross-check issues can also elevate health status
 	if result.Findings.CrossCheckIssues > 0 && result.Findings.HealthStatus == "healthy" {
+		result.Findings.HealthStatus = "warning"
+	}
+	// Ghost workers are always a warning: bead closed but session still consuming resources
+	if result.Findings.GhostWorkerCount > 0 && result.Findings.HealthStatus == "healthy" {
 		result.Findings.HealthStatus = "warning"
 	}
 
@@ -285,6 +307,7 @@ func printScanText(r *ScanCycleResult) {
 	printScanSessions(r.Sessions)
 	printScanWorkerCommits(r.Findings.NewCommitsDetected, r.WorkerBranches)
 	printScanCrossCheck(r.CrossCheck)
+	printScanGhostWorkers(r.Findings.GhostWorkers)
 	printScanMetrics(r.Findings.HealthStatus, r.Findings.MetricsAlertCount, r.MetricsAlerts)
 	printScanErrors(r.Errors)
 	fmt.Println()
@@ -352,6 +375,16 @@ func printScanCrossCheck(cc *ops.CrossCheckReport) {
 	}
 	if len(cc.UnmanagedSessions) > 0 {
 		fmt.Printf("\n  Unmanaged Sessions: %s\n", strings.Join(cc.UnmanagedSessions, ", "))
+	}
+}
+
+func printScanGhostWorkers(ghosts []string) {
+	if len(ghosts) == 0 {
+		return
+	}
+	fmt.Printf("\nGhost Workers: %d (bead closed/done but session still alive)\n", len(ghosts))
+	for _, name := range ghosts {
+		fmt.Printf("  ! %s\n", name)
 	}
 }
 
