@@ -738,7 +738,7 @@ func resolveEnvVarDefaults(cmd *cobra.Command) {
 	}
 }
 
-// enforceCircuitBreakers runs the CPU circuit breaker gates and returns an
+// enforceCircuitBreakers runs all circuit breaker gates and returns an
 // error if any gate refuses the spawn. On success it records the spawn time
 // so the stagger gate works for subsequent spawns.
 func enforceCircuitBreakers() error {
@@ -746,8 +746,9 @@ func enforceCircuitBreakers() error {
 	lr := circuitbreaker.ProcLoadReader{}
 	wc := circuitbreaker.TmuxWorkerCounter{}
 	st := circuitbreaker.NewFileSpawnTimer()
+	mr := circuitbreaker.DefaultMemReader()
 
-	result := circuitbreaker.Check(cfg, lr, wc, st)
+	result := circuitbreaker.Check(cfg, lr, wc, st, mr)
 
 	// Log DEAR level regardless of outcome
 	debug.Log("Circuit breaker check: level=%s load=%.1f allowed=%v", result.Level, result.Load, result.Allowed)

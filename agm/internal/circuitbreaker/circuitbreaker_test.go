@@ -3,6 +3,7 @@ package circuitbreaker
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -31,6 +32,16 @@ type stubTimer struct {
 
 func (s *stubTimer) LastSpawnTime() (time.Time, error) { return s.t, s.err }
 func (s *stubTimer) RecordSpawn(t time.Time) error     { s.recorded = t; return nil }
+
+type stubMem struct {
+	pct float64
+	err error
+}
+
+func (s stubMem) FreeMemPct() (float64, error) { return s.pct, s.err }
+
+// noMem is a nil MemReader used when memory gate should be skipped.
+var noMem MemReader = nil
 
 // --- DEARLevel ---
 
@@ -81,6 +92,7 @@ func TestCheckMaxWorkers(t *testing.T) {
 				stubLoad{load: 1},
 				stubWorkers{count: tt.workers},
 				&stubTimer{err: os.ErrNotExist},
+				noMem,
 			)
 			// Find the max_workers gate
 			var gate GateResult
@@ -118,6 +130,7 @@ func TestCheckCPULoad(t *testing.T) {
 				stubLoad{load: tt.load},
 				stubWorkers{count: 0},
 				&stubTimer{err: os.ErrNotExist},
+				noMem,
 			)
 			var gate GateResult
 			for _, g := range r.Gates {
@@ -132,7 +145,47 @@ func TestCheckCPULoad(t *testing.T) {
 	}
 }
 
-// --- Gate 3: SpawnStagger ---
+// --- Gate 3: Memory ---
+
+func TestCheckMemory(t *testing.T) {
+	cfg := Config{MaxWorkers: 10, MaxLoad5: 100, MinFreeMemPct: 10, MinSpawnInterval: 0}
+
+	tests := []struct {
+		name    string
+		freePct float64
+		mr      MemReader
+		wantOK  bool
+	}{
+		{"nil reader fails open", 0, nil, true},
+		{"well above threshold", 50, stubMem{pct: 50}, true},
+		{"at threshold", 10, stubMem{pct: 10}, true},
+		{"just below threshold", 9.9, stubMem{pct: 9.9}, false},
+		{"critically low", 1, stubMem{pct: 1}, false},
+		{"reader error fails open", 0, stubMem{err: os.ErrPermission}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := Check(cfg,
+				stubLoad{load: 1},
+				stubWorkers{count: 0},
+				&stubTimer{err: os.ErrNotExist},
+				tt.mr,
+			)
+			var gate GateResult
+			for _, g := range r.Gates {
+				if g.Gate == "memory" {
+					gate = g
+				}
+			}
+			if gate.Passed != tt.wantOK {
+				t.Errorf("memory gate: passed=%v, want=%v (msg: %s)", gate.Passed, tt.wantOK, gate.Message)
+			}
+		})
+	}
+}
+
+// --- Gate 4: SpawnStagger ---
 
 func TestCheckSpawnStagger(t *testing.T) {
 	cfg := Config{MaxWorkers: 10, MaxLoad5: 100, MinSpawnInterval: 2 * time.Minute}
@@ -156,6 +209,7 @@ func TestCheckSpawnStagger(t *testing.T) {
 				stubLoad{load: 1},
 				stubWorkers{count: 0},
 				&stubTimer{t: tt.last, err: tt.err},
+				noMem,
 			)
 			var gate GateResult
 			for _, g := range r.Gates {
@@ -173,12 +227,13 @@ func TestCheckSpawnStagger(t *testing.T) {
 // --- Combined: all gates ---
 
 func TestCheckAllGatesPass(t *testing.T) {
-	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinSpawnInterval: 2 * time.Minute}
+	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinFreeMemPct: 10, MinSpawnInterval: 2 * time.Minute}
 
 	r := Check(cfg,
 		stubLoad{load: 10},
 		stubWorkers{count: 1},
 		&stubTimer{t: time.Now().Add(-5 * time.Minute)},
+		stubMem{pct: 50},
 	)
 
 	if !r.Allowed {
@@ -193,19 +248,20 @@ func TestCheckAllGatesPass(t *testing.T) {
 }
 
 func TestCheckAllGatesFail(t *testing.T) {
-	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinSpawnInterval: 2 * time.Minute}
+	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinFreeMemPct: 10, MinSpawnInterval: 2 * time.Minute}
 
 	r := Check(cfg,
 		stubLoad{load: 80},
 		stubWorkers{count: 5},
 		&stubTimer{t: time.Now().Add(-30 * time.Second)},
+		stubMem{pct: 2},
 	)
 
 	if r.Allowed {
 		t.Error("expected Allowed=false, got true")
 	}
 
-	// All three gates should have failed
+	// All four gates should have failed
 	for _, g := range r.Gates {
 		if g.Passed {
 			t.Errorf("expected gate %s to fail, but it passed: %s", g.Gate, g.Message)
@@ -220,6 +276,7 @@ func TestCheckFailOpen_LoadError(t *testing.T) {
 		stubLoad{err: os.ErrPermission},
 		stubWorkers{count: 0},
 		&stubTimer{err: os.ErrNotExist},
+		noMem,
 	)
 
 	if !r.Allowed {
@@ -234,10 +291,26 @@ func TestCheckFailOpen_WorkerCountError(t *testing.T) {
 		stubLoad{load: 1},
 		stubWorkers{err: os.ErrPermission},
 		&stubTimer{err: os.ErrNotExist},
+		noMem,
 	)
 
 	if !r.Allowed {
 		t.Error("should fail open when worker counter errors")
+	}
+}
+
+func TestCheckFailOpen_MemError(t *testing.T) {
+	cfg := Config{MaxWorkers: 3, MaxLoad5: 50, MinFreeMemPct: 10, MinSpawnInterval: 2 * time.Minute}
+
+	r := Check(cfg,
+		stubLoad{load: 1},
+		stubWorkers{count: 0},
+		&stubTimer{err: os.ErrNotExist},
+		stubMem{err: os.ErrPermission},
+	)
+
+	if !r.Allowed {
+		t.Error("should fail open when memory reader errors")
 	}
 }
 
@@ -308,6 +381,57 @@ func TestDefaultConfig_DefaultIsZero(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_MaxLoad5Default(t *testing.T) {
+	t.Setenv("AGM_MAX_LOAD5", "")
+	cfg := DefaultConfig()
+	want := float64(runtime.NumCPU()) * 2
+	if cfg.MaxLoad5 != want {
+		t.Errorf("expected MaxLoad5=%.0f (2×NumCPU), got %.1f", want, cfg.MaxLoad5)
+	}
+}
+
+func TestDefaultConfig_MaxLoad5EnvOverride(t *testing.T) {
+	t.Setenv("AGM_MAX_LOAD5", "24.5")
+	cfg := DefaultConfig()
+	if cfg.MaxLoad5 != 24.5 {
+		t.Errorf("expected MaxLoad5=24.5, got %.1f", cfg.MaxLoad5)
+	}
+}
+
+func TestDefaultConfig_MaxLoad5InvalidEnv(t *testing.T) {
+	t.Setenv("AGM_MAX_LOAD5", "bad")
+	cfg := DefaultConfig()
+	want := float64(runtime.NumCPU()) * 2
+	if cfg.MaxLoad5 != want {
+		t.Errorf("expected MaxLoad5=%.0f (default) on invalid env, got %.1f", want, cfg.MaxLoad5)
+	}
+}
+
+func TestDefaultConfig_MinFreeMemPctDefault(t *testing.T) {
+	t.Setenv("AGM_MIN_FREE_MEM_PCT", "")
+	cfg := DefaultConfig()
+	if cfg.MinFreeMemPct != 10 {
+		t.Errorf("expected MinFreeMemPct=10, got %.1f", cfg.MinFreeMemPct)
+	}
+}
+
+func TestDefaultConfig_MinFreeMemPctEnvOverride(t *testing.T) {
+	t.Setenv("AGM_MIN_FREE_MEM_PCT", "15")
+	cfg := DefaultConfig()
+	if cfg.MinFreeMemPct != 15 {
+		t.Errorf("expected MinFreeMemPct=15, got %.1f", cfg.MinFreeMemPct)
+	}
+}
+
+func TestDefaultConfig_MinFreeMemPctZeroAllowed(t *testing.T) {
+	// 0 means disable the gate.
+	t.Setenv("AGM_MIN_FREE_MEM_PCT", "0")
+	cfg := DefaultConfig()
+	if cfg.MinFreeMemPct != 0 {
+		t.Errorf("expected MinFreeMemPct=0, got %.1f", cfg.MinFreeMemPct)
+	}
+}
+
 func TestDynamicMode_MaxWorkersDisabled(t *testing.T) {
 	// MaxWorkers=0 → gate passes regardless of worker count.
 	cfg := Config{MaxWorkers: 0, MaxLoad5: 100, MinSpawnInterval: 0}
@@ -317,6 +441,7 @@ func TestDynamicMode_MaxWorkersDisabled(t *testing.T) {
 			stubLoad{load: 1},
 			stubWorkers{count: count},
 			&stubTimer{err: os.ErrNotExist},
+			noMem,
 		)
 		var gate GateResult
 		for _, g := range r.Gates {
@@ -341,6 +466,7 @@ func TestDynamicMode_CPUStillGates(t *testing.T) {
 		stubLoad{load: 80},
 		stubWorkers{count: 100},
 		&stubTimer{err: os.ErrNotExist},
+		noMem,
 	)
 
 	if r.Allowed {

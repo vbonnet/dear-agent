@@ -1,12 +1,15 @@
 // Package circuitbreaker implements deterministic safeguards to prevent CPU
-// spikes from too many concurrent sessions. It enforces up to three gates
-// before allowing a new worker session to spawn:
+// and memory spikes from too many concurrent sessions. It enforces up to four
+// gates before allowing a new worker session to spawn:
 //
 //  1. MaxWorkers — optional hard cap on concurrent worker sessions (disabled
 //     when MaxWorkers <= 0, which is the default; workers are then bounded
-//     only by the CPU and stagger gates below)
+//     only by the gates below)
 //  2. CPULoad — refuses spawn if 5-min load average exceeds threshold
-//  3. SpawnStagger — minimum time between consecutive spawns
+//     (default: 2×NumCPU; override via AGM_MAX_LOAD5)
+//  3. Memory — refuses spawn if free RAM falls below threshold
+//     (default: 10%; override via AGM_MIN_FREE_MEM_PCT)
+//  4. SpawnStagger — minimum time between consecutive spawns
 //
 // The MaxWorkers gate was previously hard-coded to 3. It is now disabled by
 // default (0 = no cap) to support dynamic multi-provider worker fleets where
@@ -17,6 +20,7 @@ package circuitbreaker
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -56,10 +60,14 @@ type Config struct {
 	// Override via AGM_MAX_WORKERS env var (0 = disable).
 	MaxWorkers int
 
-	// MaxLoad5 is the 5-minute load average ceiling.
-	// A spawn is refused when the current 5-min load exceeds this value.
-	// Default: 50.
+	// MaxLoad5 is the 5-minute load average ceiling before blocking spawns.
+	// Default: 2×NumCPU (scales with the machine; override via AGM_MAX_LOAD5).
 	MaxLoad5 float64
+
+	// MinFreeMemPct is the minimum percentage of free RAM required before
+	// a spawn is allowed. Default: 10 (i.e. 10% free RAM).
+	// Override via AGM_MIN_FREE_MEM_PCT env var.
+	MinFreeMemPct float64
 
 	// MinSpawnInterval is the minimum duration between consecutive spawns.
 	// Default: 2 minutes.
@@ -70,12 +78,17 @@ type Config struct {
 // environment-variable overrides.
 //
 // The MaxWorkers default is 0 (disabled). Worker count is bounded dynamically
-// by CPU load and spawn stagger. Set AGM_MAX_WORKERS to a positive integer to
-// restore the old hard cap of 3 (or any other limit).
+// by CPU load, memory, and spawn stagger. Set AGM_MAX_WORKERS to a positive
+// integer to restore the old hard cap of 3 (or any other limit).
+//
+// MaxLoad5 defaults to 2×NumCPU so the CPU gate fires at meaningful
+// oversubscription rather than a fixed value of 50 that never fires on a
+// 12-core box.
 func DefaultConfig() Config {
 	cfg := Config{
 		MaxWorkers:       0, // dynamic: no hard cap by default
-		MaxLoad5:         50,
+		MaxLoad5:         float64(runtime.NumCPU()) * 2,
+		MinFreeMemPct:    10,
 		MinSpawnInterval: 2 * time.Minute,
 	}
 
@@ -85,12 +98,29 @@ func DefaultConfig() Config {
 		}
 	}
 
+	if v := os.Getenv("AGM_MAX_LOAD5"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			cfg.MaxLoad5 = f
+		}
+	}
+
+	if v := os.Getenv("AGM_MIN_FREE_MEM_PCT"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
+			cfg.MinFreeMemPct = f
+		}
+	}
+
 	return cfg
 }
 
 // LoadReader provides the 5-minute load average.
 type LoadReader interface {
 	Load5() (float64, error)
+}
+
+// MemReader provides the percentage of free RAM (0–100).
+type MemReader interface {
+	FreeMemPct() (float64, error)
 }
 
 // WorkerCounter returns the number of currently active worker sessions.
@@ -106,7 +136,7 @@ type SpawnTimer interface {
 
 // GateResult describes the outcome of a single gate check.
 type GateResult struct {
-	Gate    string // "max_workers", "cpu_load", "spawn_stagger"
+	Gate    string // "max_workers", "cpu_load", "memory", "spawn_stagger"
 	Passed  bool
 	Message string
 }
@@ -119,10 +149,12 @@ type CheckResult struct {
 	Level   DEARLevel
 }
 
-// Check evaluates all three gates. It returns CheckResult with Allowed=true
-// only if every gate passes. Gates are always all evaluated so the caller
-// can report every violation, not just the first.
-func Check(cfg Config, lr LoadReader, wc WorkerCounter, st SpawnTimer) CheckResult {
+// Check evaluates all gates. It returns CheckResult with Allowed=true only if
+// every gate passes. Gates are always all evaluated so the caller can report
+// every violation, not just the first.
+//
+// mr may be nil; when nil the memory gate is skipped (fails open).
+func Check(cfg Config, lr LoadReader, wc WorkerCounter, st SpawnTimer, mr MemReader) CheckResult {
 	result := CheckResult{Allowed: true}
 
 	// Gate 1: max workers
@@ -139,7 +171,14 @@ func Check(cfg Config, lr LoadReader, wc WorkerCounter, st SpawnTimer) CheckResu
 		result.Allowed = false
 	}
 
-	// Gate 3: spawn stagger
+	// Gate 3: memory
+	memGate := checkMemory(cfg, mr)
+	result.Gates = append(result.Gates, memGate)
+	if !memGate.Passed {
+		result.Allowed = false
+	}
+
+	// Gate 4: spawn stagger
 	staggerGate := checkSpawnStagger(cfg, st)
 	result.Gates = append(result.Gates, staggerGate)
 	if !staggerGate.Passed {
@@ -221,6 +260,42 @@ func checkCPULoad(cfg Config, lr LoadReader) GateResult {
 		Gate:    "cpu_load",
 		Passed:  true,
 		Message: fmt.Sprintf("load5: %.1f (threshold: %.0f)", load, cfg.MaxLoad5),
+	}
+}
+
+func checkMemory(cfg Config, mr MemReader) GateResult {
+	if mr == nil {
+		return GateResult{
+			Gate:    "memory",
+			Passed:  true,
+			Message: "memory reader unavailable (failing open)",
+		}
+	}
+
+	freePct, err := mr.FreeMemPct()
+	if err != nil {
+		return GateResult{
+			Gate:    "memory",
+			Passed:  true,
+			Message: fmt.Sprintf("could not read free memory: %v (failing open)", err),
+		}
+	}
+
+	if freePct < cfg.MinFreeMemPct {
+		return GateResult{
+			Gate:   "memory",
+			Passed: false,
+			Message: fmt.Sprintf(
+				"free RAM too low: %.1f%% (minimum: %.0f%%). Free memory before spawning new sessions.",
+				freePct, cfg.MinFreeMemPct,
+			),
+		}
+	}
+
+	return GateResult{
+		Gate:    "memory",
+		Passed:  true,
+		Message: fmt.Sprintf("free RAM: %.1f%% (minimum: %.0f%%)", freePct, cfg.MinFreeMemPct),
 	}
 }
 
