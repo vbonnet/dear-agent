@@ -54,10 +54,10 @@ return without error (idempotent).
 ### Stop Sequence (Phase 1)
 
 **REA-08** When attempting to stop the session, the system shall wait up to 90
-seconds for the Claude prompt to appear, with a 60-second fallback sleep if
+seconds for the agent prompt to appear, with a 60-second fallback sleep if
 detection fails.
 
-**REA-09** When the Claude prompt is detected, the system shall send `/exit` via
+**REA-09** When the agent prompt is detected, the system shall send `/exit` via
 `tmux.SendMultiLinePromptSafe` to request a graceful shutdown.
 
 **REA-10** When `/exit` has been sent, the system shall wait up to 60 seconds

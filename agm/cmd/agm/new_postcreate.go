@@ -12,7 +12,7 @@ import (
 
 // runHarnessPostCreate runs the harness-specific post-create flow (deterministic
 // association + readiness signal for Claude, prompt-readiness wait + prompt
-// delivery for Gemini/OpenCode).
+// delivery for CLI harnesses).
 func runHarnessPostCreate(sessionName string, modeAppliedAtStartup bool) error {
 	switch {
 	case harnessName == "claude-code" && os.Getenv("AGM_TEST_RUN_ID") == "" && os.Getenv("AGM_TEST_ENV") == "":
@@ -122,9 +122,8 @@ func runGeminiPostCreate(sessionName string) {
 }
 
 // runCodexPostCreate waits for the Codex prompt and delivers --prompt /
-// --prompt-file in non-test, non-detached mode. Like Gemini/OpenCode it performs
-// NO AGM↔agent session association (that is Claude-plugin specific) and uses the
-// literal (non-multiLine) prompt-delivery path.
+// --prompt-file. Codex workers are normally created detached, so detached mode
+// still delivers the startup prompt after the composer is ready.
 //
 // It uses the Codex-specific WaitForCodexPrompt (rather than the generic
 // WaitForPromptSimple) so readiness keys on Codex's composer signals and any
@@ -136,7 +135,9 @@ func runCodexPostCreate(sessionName string) {
 	case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
 		debug.Log("Test environment: skipping Codex prompt wait")
 		ui.PrintSuccess("Codex test session ready (init sequence skipped)")
-	case !detached:
+	case detached && prompt == "" && promptFile == "":
+		debug.Log("Detached mode with no prompt: skipping Codex prompt wait")
+	default:
 		debug.Log("Waiting for Codex prompt readiness before prompt delivery")
 		if err := tmux.WaitForCodexPrompt(sessionName, 30*time.Second); err != nil {
 			debug.Log("Codex prompt readiness wait failed (non-fatal): %v", err)
@@ -144,8 +145,6 @@ func runCodexPostCreate(sessionName string) {
 			debug.Log("Codex prompt detected, session ready")
 		}
 		deliverInitialPrompt(sessionName, false)
-	default:
-		debug.Log("Detached mode: skipping Codex prompt wait and prompt delivery")
 	}
 }
 

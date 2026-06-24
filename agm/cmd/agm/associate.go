@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/detection"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/git"
@@ -26,26 +27,31 @@ var (
 	updateTimestampOnly bool
 	autoDetectOnly      bool
 	renameSession       bool
+	associateHarness    string
 )
 
 var associateCmd = &cobra.Command{
 	Use:   "associate <session-name>",
-	Short: "Associate a AGM session with the current Claude session UUID (Claude-only)",
-	Long: `Associate a AGM session with a Claude session UUID by updating the manifest.
+	Short: "Associate a AGM session with the current harness session",
+	Long: `Associate a AGM session with the current harness session.
 
-NOTE: This command only works with Claude sessions. OpenCode, Gemini, and other
-agents manage session state differently and do not require UUID association.
+Claude Code sessions are associated with a Claude UUID for resume. Codex,
+Gemini, and OpenCode sessions do not use Claude UUIDs; for those harnesses this
+command ensures the AGM/Dolt session record exists and is linked to the current
+tmux session.
 
 This command is useful when:
 - You started a Claude session outside of tmux and want to track it
 - You want to reassign a different Claude UUID to an existing AGM session
 - You're reconnecting an existing session after the UUID changed
+- You are in a non-Claude CLI harness and want to register the current tmux
+  session with AGM
 
 The command will:
-1. Get the current Claude session UUID (from history.jsonl latest entry)
-2. Find or create the manifest for the specified AGM session
-3. Create a backup of the existing manifest (if one exists)
-4. Update the manifest with the new Claude UUID
+1. Find or create the AGM session record
+2. For Claude Code: get and store the current Claude session UUID
+3. For non-Claude harnesses: store harness/tmux/workdir metadata in Dolt
+4. Create a ready-file signal for the session
 
 Examples:
   # Associate current Claude session with AGM session "claude-1"
@@ -56,6 +62,12 @@ Examples:
 
   # Create a new manifest if it doesn't exist
   agm session associate my-new-session --create
+
+  # Create or update a Codex session record
+  agm session associate my-codex --create --harness codex-cli
+
+  # Infer harness from the current tmux pane where possible
+  agm session associate my-session --create --harness auto
 
   # Combined rename + associate (sends /rename to Claude, then associates)
   agm session associate my-session --rename --create`,
@@ -102,20 +114,24 @@ Examples:
 			}
 		}
 
-		// Validate harness compatibility: associate is Claude-only
-		// Try to find existing manifest to check harness type
-		harnessAdapter, _ := getStorage()
-		existingManifest, _, manifestErr := session.ResolveIdentifier(sessionName, sessionsDir, harnessAdapter)
-		if manifestErr == nil && existingManifest.Harness != "" && existingManifest.Harness != "claude-code" {
+		// Determine harness before UUID discovery. Non-Claude harnesses do not
+		// have Claude UUIDs, so association means "ensure the Dolt record exists".
+		harnessAdapter, harnessErr := getStorage()
+		if harnessErr != nil {
 			if !autoDetectOnly {
-				ui.PrintError(fmt.Errorf("harness '%s' not supported", existingManifest.Harness),
-					"Associate command only supports Claude Code sessions",
-					"  • OpenCode sessions don't use UUIDs (state managed by server)\n"+
-						"  • Gemini sessions use different authentication\n"+
-						"  • This command is Claude-specific (detects UUID from history.jsonl)\n\n"+
-						"  To manage this session, use: agm session resume "+sessionName)
+				return fmt.Errorf("failed to connect to Dolt storage: %w", harnessErr)
 			}
-			return fmt.Errorf("associate command not applicable to harness: %s", existingManifest.Harness)
+			return nil
+		}
+		defer func() { _ = harnessAdapter.Close() }()
+
+		existingManifest, existingManifestPath, manifestErr := session.ResolveIdentifier(sessionName, sessionsDir, harnessAdapter)
+		targetHarness, harnessErr := resolveAssociateHarness(sessionName, existingManifest)
+		if harnessErr != nil {
+			return harnessErr
+		}
+		if !isClaudeAssociateHarness(targetHarness) {
+			return associateNonClaudeSession(sessionName, sessionsDir, targetHarness, existingManifest, existingManifestPath, manifestErr, harnessAdapter)
 		}
 
 		// Handle --auto-detect-only mode (for hooks)
@@ -419,9 +435,174 @@ Examples:
 
 func init() {
 	associateCmd.Flags().StringVar(&claudeUUID, "uuid", "", "Claude session UUID (auto-detected if not specified)")
+	associateCmd.Flags().StringVar(&associateHarness, "harness", "", "Harness for --create when no existing session is found (auto, claude-code, codex-cli, gemini-cli, opencode-cli)")
 	associateCmd.Flags().BoolVar(&createNew, "create", false, "Create new manifest if it doesn't exist")
 	associateCmd.Flags().BoolVar(&updateTimestampOnly, "update-timestamp-only", false, "Only update timestamp, don't change UUID (fast path for same UUID)")
 	associateCmd.Flags().BoolVar(&autoDetectOnly, "auto-detect-only", false, "Auto-detect UUID only if high confidence (for hooks, silent mode)")
 	associateCmd.Flags().BoolVar(&renameSession, "rename", false, "Also send /rename command to Claude session (combines rename + associate)")
 	sessionCmd.AddCommand(associateCmd)
+}
+
+func isClaudeAssociateHarness(harness string) bool {
+	return harness == "" || harness == "claude-code"
+}
+
+func resolveAssociateHarness(sessionName string, existing *manifest.Manifest) (string, error) {
+	if existing != nil && existing.Harness != "" {
+		return existing.Harness, nil
+	}
+	switch associateHarness {
+	case "", "claude-code":
+		return "claude-code", nil
+	case "auto":
+		h, err := inferHarnessFromTmux(sessionName)
+		if err != nil {
+			return "", err
+		}
+		return h, nil
+	default:
+		if err := agent.ValidateHarnessName(associateHarness); err != nil {
+			return "", err
+		}
+		return associateHarness, nil
+	}
+}
+
+func inferHarnessFromTmux(sessionName string) (string, error) {
+	commands, err := tmux.GetPaneCommands(sessionName)
+	if err != nil {
+		return "", fmt.Errorf("failed to infer harness from tmux session %q: %w", sessionName, err)
+	}
+	if harness := harnessFromPaneCommands(commands); harness != "" {
+		return harness, nil
+	}
+	return "", fmt.Errorf("could not infer harness from tmux session %q; pass --harness explicitly", sessionName)
+}
+
+func harnessFromPaneCommands(commands []string) string {
+	for _, cmd := range commands {
+		switch filepath.Base(cmd) {
+		case "codex":
+			return "codex-cli"
+		case "gemini":
+			return "gemini-cli"
+		case "opencode":
+			return "opencode-cli"
+		case "claude":
+			return "claude-code"
+		}
+	}
+	return ""
+}
+
+func associateNonClaudeSession(sessionName, sessionsDir, harness string, existing *manifest.Manifest, manifestPath string, manifestErr error, adapter *dolt.Adapter) error {
+	if autoDetectOnly {
+		if existing != nil {
+			_ = readiness.CreateReadyFile(sessionName, manifestPath)
+		}
+		return nil
+	}
+	if renameSession {
+		fmt.Fprintf(os.Stderr, "Warning: --rename is Claude-only; skipping /rename for harness %s\n", harness)
+	}
+
+	m := existing
+	if m == nil {
+		if !createNew {
+			ui.PrintError(manifestErr, "Session not found",
+				fmt.Sprintf("  • Use --create to create a new %s session record\n"+
+					"  • Or run: agm session new %s --harness %s", harness, sessionName, harness))
+			return manifestErr
+		}
+		m = newNonClaudeAssociationManifest(sessionName, harness, adapter.Workspace())
+		manifestPath = filepath.Join(sessionsDir, m.SessionID, "manifest.yaml")
+	} else {
+		updateNonClaudeAssociationManifest(m, sessionName, harness, adapter.Workspace())
+		if manifestPath == "" {
+			manifestPath = filepath.Join(sessionsDir, m.SessionID, "manifest.yaml")
+		}
+	}
+
+	if err := persistAssociatedManifest(adapter, m); err != nil {
+		return err
+	}
+
+	if err := readiness.CreateReadyFile(sessionName, manifestPath); err != nil {
+		fmt.Printf("Warning: Failed to create ready-file signal: %v\n", err)
+	}
+
+	fmt.Printf("Session association in progress: '%s' linked to %s harness\n", sessionName, harness)
+	fmt.Printf("\n%s\n", describeAssociationStorage(m, adapter.Workspace(), manifestPath))
+	fmt.Printf("\nSession association complete. You can now proceed to the next step.\n")
+	fmt.Printf("To resume this session:\n")
+	fmt.Printf("  agm session resume %s\n", sessionName)
+	fmt.Printf("[AGM_SKILL_COMPLETE]\n")
+	return nil
+}
+
+func newNonClaudeAssociationManifest(sessionName, harness, workspace string) *manifest.Manifest {
+	cwd := currentWorkingDirectory()
+	return &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion,
+		SessionID:     uuid.New().String(),
+		Name:          sessionName,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Lifecycle:     "",
+		Workspace:     workspace,
+		Context: manifest.Context{
+			Project: cwd,
+		},
+		Tmux: manifest.Tmux{
+			SessionName: sessionName,
+		},
+		Harness:          harness,
+		WorkingDirectory: cwd,
+	}
+}
+
+func updateNonClaudeAssociationManifest(m *manifest.Manifest, sessionName, harness, workspace string) {
+	m.UpdatedAt = time.Now()
+	if m.Harness == "" {
+		m.Harness = harness
+	}
+	if m.Workspace == "" {
+		m.Workspace = workspace
+	}
+	if m.Tmux.SessionName == "" {
+		m.Tmux.SessionName = sessionName
+	}
+	if wd := currentWorkingDirectory(); wd != "" {
+		m.WorkingDirectory = wd
+		if m.Context.Project == "" {
+			m.Context.Project = wd
+		}
+	}
+	if m.SessionID == "" {
+		m.SessionID = uuid.New().String()
+	}
+}
+
+func currentWorkingDirectory() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return wd
+}
+
+func persistAssociatedManifest(adapter *dolt.Adapter, m *manifest.Manifest) error {
+	existing, getErr := adapter.GetSession(m.SessionID)
+	if getErr != nil || existing == nil {
+		if err := adapter.CreateSession(m); err != nil {
+			ui.PrintError(err, "Failed to create session in Dolt", "")
+			return err
+		}
+		return nil
+	}
+	if err := adapter.UpdateSession(m); err != nil {
+		ui.PrintError(err, "Failed to update session in Dolt", "")
+		return err
+	}
+	return nil
 }
