@@ -62,6 +62,9 @@ export GOMEMLIMIT GOMAXPROCS GOGC
 #   uninstall-gopls-watchdog-launchagent Remove the gopls-watchdog launch agent
 #   build-vroom-dispatch    Build vroom-dispatch: VROOM supervisor mesh launcher
 #   install-vroom-dispatch  Install vroom-dispatch to ~/go/bin
+#   build-vroom-mesh        Build vroom-mesh: in-process 3-supervisor mesh harness with real adapters (ce-plf0)
+#   install-vroom-mesh      Install vroom-mesh to ~/go/bin
+#   build-agm-bus           Build agm-bus channel MCP adapter (TypeScript, npm run build)
 #   build-vroom-prompt-gen  Build vroom-prompt-gen: orchestrator prompt-library refresher (ce-5z0o)
 #   install-vroom-prompt-gen Install vroom-prompt-gen to ~/go/bin
 #   build-resolve-review-threads  Build resolve-review-threads: GitHub PR thread resolver
@@ -80,7 +83,7 @@ export GOMEMLIMIT GOMAXPROCS GOGC
 #   build-burndown-maint    Build burndown-maint: host-side bead-burndown maintenance (ce-cd14.2)
 #   install-burndown-maint  Install burndown-maint to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
 # deterministic linter the wayfinder D4/SPEC phase gate uses (cmd/ears-lint).
@@ -783,6 +786,29 @@ build-vroom-dispatch:
 install-vroom-dispatch: build-vroom-dispatch
 	cp bin/vroom-dispatch $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/vroom-dispatch"
+
+# Build vroom-mesh: in-process 3-supervisor VROOM mesh harness (ce-plf0).
+# Supports both in-memory substrates (default) and real adapters:
+#   vroom-mesh --beads-db ~/beads/context-engine/.beads  (real roadmap)
+#   vroom-mesh --beads-db ... --agm-dispatch             (real roadmap + dispatch)
+build-vroom-mesh:
+	@echo "Building vroom-mesh..."
+	@mkdir -p bin
+	go build $(GOFLAGS) -o bin/vroom-mesh ./cmd/vroom-mesh/
+	@echo "Built: bin/vroom-mesh"
+
+install-vroom-mesh: build-vroom-mesh
+	cp bin/vroom-mesh $(HOME)/go/bin/
+	@echo "Installed: $(HOME)/go/bin/vroom-mesh"
+
+# Build agm-bus channel MCP adapter (permission-relay channel, ce-plf0).
+# TypeScript: runs npm install + tsc. Output lands in agm/agm-plugin/channels/agm-bus/dist/.
+# Usage after build: node agm/agm-plugin/channels/agm-bus/dist/index.js
+# See agm/agm-plugin/channels/agm-bus/README.md for session wiring.
+build-agm-bus:
+	@echo "Building agm-bus channel (npm)..."
+	cd agm/agm-plugin/channels/agm-bus && npm install --prefer-offline --silent && npm run build
+	@echo "Built: agm/agm-plugin/channels/agm-bus/dist/index.js"
 
 build-vroom-prompt-gen:
 	@echo "Building vroom-prompt-gen..."

@@ -1,8 +1,11 @@
 // Command vroom-mesh runs the canonical 3-supervisor VROOM mesh
-// (Meta-Orchestrator, Orchestrator, Overseer) in a single process, with
-// in-memory roadmap / queue / resource substrates. It exists so the
-// supervisor mesh can be exercised end-to-end before the real adapters
-// (beads, AGM session spawn, live resource probes) land.
+// (Meta-Orchestrator, Orchestrator, Overseer) in a single process.
+//
+// By default it uses in-memory substrates so the mesh can be exercised
+// without external dependencies. Pass --beads-db to wire the
+// Meta-Orchestrator to a real beads database (BeadsRoadmap) and
+// --agm-dispatch to wire the Orchestrator to spawn real AGM worker
+// sessions (AGMQueue) when it dispatches tasks.
 //
 // Usage:
 //
@@ -14,6 +17,8 @@
 //	vroom-mesh --sys-probe            # use real OS resource metrics (disk+memory)
 //	vroom-mesh --pressure --swap 0.95 --free-mem-mib 80  # exercise the graduated
 //	                                  # memory-pressure auto-reaper (ce-80ca)
+//	vroom-mesh --beads-db ~/beads/context-engine/.beads  # real roadmap from beads
+//	vroom-mesh --beads-db ~/beads/context-engine/.beads --agm-dispatch  # + real dispatch
 //
 // The decision trail is always written to stdout (one JSON object per
 // line). Pipe through `jq` for human-readable output.
@@ -66,6 +71,8 @@ type runConfig struct {
 	pressure          bool    // wire graduated memory-pressure monitoring + auto-reaper
 	wakePeers         bool    // enable AGMRecovery: send `agm send wake-loop` to stale peers
 	recoveryThreshold int     // consecutive stale ticks before a wake-loop is sent
+	beadsDB           string  // path to beads database; non-empty switches to BeadsRoadmap
+	agmDispatch       bool    // wire AGMQueue for real session dispatch (requires --beads-db)
 }
 
 func parseFlags(args []string, stderr io.Writer) (*runConfig, error) {
@@ -90,8 +97,13 @@ func parseFlags(args []string, stderr io.Writer) (*runConfig, error) {
 	fs.BoolVar(&cfg.pressure, "pressure", false, "wire graduated memory-pressure monitoring + auto-reaper into the Overseer")
 	fs.BoolVar(&cfg.wakePeers, "wake-peers", false, "send `agm send wake-loop` to a peer once it has been stale for --recovery-threshold ticks (mutual-unblock)")
 	fs.IntVar(&cfg.recoveryThreshold, "recovery-threshold", 3, "consecutive stale ticks a peer must miss before a wake-loop is sent (requires --wake-peers)")
+	fs.StringVar(&cfg.beadsDB, "beads-db", "", "path to beads database; switches the Meta-Orchestrator to BeadsRoadmap (reads bd ready --json)")
+	fs.BoolVar(&cfg.agmDispatch, "agm-dispatch", false, "wire AGMQueue: Orchestrator dispatches accepted tasks via 'agm session new' (requires --beads-db)")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
+	}
+	if cfg.agmDispatch && cfg.beadsDB == "" {
+		return nil, fmt.Errorf("--agm-dispatch requires --beads-db")
 	}
 	return cfg, nil
 }
@@ -144,7 +156,7 @@ func seedQueue(n int) (*supervisor.InMemoryQueue, error) {
 // returns the Mesh. NewMesh rewires each Loop's mesh pointer to the real
 // Mesh, so the placeholderMesh passed to NewLoop is only there to satisfy
 // validation.
-func buildMesh(trail decisiontrail.Trail, roadmap *supervisor.InMemoryRoadmap, queue *supervisor.InMemoryQueue, probe supervisor.ResourceProbe, cfg *runConfig) (*supervisor.Mesh, error) {
+func buildMesh(trail decisiontrail.Trail, roadmap supervisor.Roadmap, queue supervisor.Queue, probe supervisor.ResourceProbe, cfg *runConfig) (*supervisor.Mesh, error) {
 	metaSup, err := supervisor.NewMetaOrchestrator(trail, roadmap)
 	if err != nil {
 		return nil, err
@@ -314,13 +326,35 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	defer closeTrail()
 
-	roadmap, err := seedRoadmap(cfg.nProposals)
-	if err != nil {
-		return err
-	}
-	queue, err := seedQueue(cfg.nTasks)
-	if err != nil {
-		return err
+	// Wire real or in-memory substrates based on flags.
+	var roadmap supervisor.Roadmap
+	var queue supervisor.Queue
+	if cfg.beadsDB != "" {
+		// Real adapters: Meta-Orchestrator reads from beads, Orchestrator
+		// dispatches via agm session new.
+		agmQ := &supervisor.AGMQueue{}
+		beadsR := &supervisor.BeadsRoadmap{
+			DB: cfg.beadsDB,
+		}
+		if cfg.agmDispatch {
+			beadsR.Queue = agmQ
+		}
+		roadmap = beadsR
+		queue = agmQ
+		_, _ = fmt.Fprintf(stderr, "vroom-mesh: using real adapters (beads-db=%s agm-dispatch=%v)\n",
+			cfg.beadsDB, cfg.agmDispatch)
+	} else {
+		// In-memory substrates for local testing.
+		rm, rerr := seedRoadmap(cfg.nProposals)
+		if rerr != nil {
+			return rerr
+		}
+		q, qerr := seedQueue(cfg.nTasks)
+		if qerr != nil {
+			return qerr
+		}
+		roadmap = rm
+		queue = q
 	}
 	var probe supervisor.ResourceProbe
 	if cfg.sysProbe {
