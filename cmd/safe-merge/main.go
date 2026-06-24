@@ -59,6 +59,7 @@ func run(argv []string) error {
 	watchTimeout := fs.Duration("watch-timeout", safegit.DefaultWatchTimeout, "how long to wait in watch mode")
 	dryRun := fs.Bool("dry-run", false, "check gates but do not execute the merge")
 	configPath := fs.String("config", "", "path to .safe-merge.yml (default: repo root; absent → P4 gates skipped)")
+	skipReviewCheck := fs.Bool("skip-review-check", false, "bypass unresolved-thread gate (audited; emergency use only)")
 
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -90,12 +91,13 @@ func run(argv []string) error {
 	}()
 
 	return safegit.SafeMergeContext(context.Background(), safegit.MergeConfig{
-		PRNumber:     *prNum,
-		Repo:         resolvedRepo,
-		DryRun:       *dryRun,
-		Watch:        *watch,
-		WatchTimeout: *watchTimeout,
-		ConfigPath:   *configPath,
+		PRNumber:        *prNum,
+		Repo:            resolvedRepo,
+		DryRun:          *dryRun,
+		Watch:           *watch,
+		WatchTimeout:    *watchTimeout,
+		ConfigPath:      *configPath,
+		SkipReviewCheck: *skipReviewCheck,
 	})
 }
 
@@ -107,13 +109,14 @@ Usage:
   safe-merge --pr <number> [--repo owner/repo] [flags]
 
 Flags:
-  --pr <number>       pull request number to merge (required)
-  --repo owner/repo   GitHub repo (default: GITHUB_REPOSITORY env var)
-  --watch             poll until all gates pass (default: one-shot)
-  --watch-timeout <dur>  how long to wait in watch mode (default: 45m)
-  --dry-run           check gates only; do not execute merge
-  --config <path>     path to .safe-merge.yml (default: repo root)
-  -h, --help          show this help
+  --pr <number>            pull request number to merge (required)
+  --repo owner/repo        GitHub repo (default: GITHUB_REPOSITORY env var)
+  --watch                  poll until all gates pass (default: one-shot)
+  --watch-timeout <dur>    how long to wait in watch mode (default: 45m)
+  --dry-run                check gates only; do not execute merge
+  --config <path>          path to .safe-merge.yml (default: repo root)
+  --skip-review-check      bypass unresolved-thread gate (audited; emergency use only)
+  -h, --help               show this help
 
 Gates enforced before merging:
   1. Required CI checks pass (no failures, no pending)
