@@ -83,9 +83,9 @@ type TmuxWorkerCounter struct {
 func (t TmuxWorkerCounter) CountWorkers() (int, error) {
 	sock := t.Socket
 	if sock == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return 0, nil // fail open
+		home, _ := os.UserHomeDir() // fail open: empty home → no socket path
+		if home == "" {
+			return 0, nil
 		}
 		sock = filepath.Join(home, ".agm", "agm.sock")
 	}
@@ -95,10 +95,8 @@ func (t TmuxWorkerCounter) CountWorkers() (int, error) {
 		return 0, nil
 	}
 
-	out, err := exec.Command("tmux", "-S", sock, "list-sessions", "-F", "#S").Output()
-	if err != nil {
-		return 0, nil // fail open: tmux unavailable or no sessions
-	}
+	// tmux exits non-zero when there are no sessions; treat any error as 0 workers.
+	out, _ := exec.Command("tmux", "-S", sock, "list-sessions", "-F", "#S").Output()
 
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	count := 0
