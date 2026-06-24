@@ -79,5 +79,20 @@
       "Enabled": true,
       "TemplatePath": ""
     }
+  },
+  "Budget": {
+    "Enabled": false,
+    "WeeklyLimitUSD": 0,
+    "StateFile": "/tmp/agm-budget-state.json",
+    "SessionTokenCaps": {
+      "claude-code": 0,
+      "codex-cli": 0,
+      "gemini-cli": 0,
+      "opencode-cli": 0
+    },
+    "FallbackChain": [
+      "sonnet",
+      "haiku"
+    ]
   }
 }
