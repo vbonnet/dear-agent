@@ -36,6 +36,7 @@ func GenerateReviewReport(result *ReviewResult) string {
 	fmt.Fprintf(&sb, "  P3 (Low):           %d\n", result.Metrics.P3Issues)
 	sb.WriteString("\n")
 
+	fmt.Fprintf(&sb, "Spec Compliance:      %.1f/100  (Stage 1)\n", result.Metrics.SpecComplianceScore)
 	fmt.Fprintf(&sb, "Security Score:       %.1f/100\n", result.Metrics.SecurityScore)
 	fmt.Fprintf(&sb, "Performance Score:    %.1f/100\n", result.Metrics.PerformanceScore)
 	fmt.Fprintf(&sb, "Maintainability:      %.1f/100\n", result.Metrics.MaintainabilityScore)
@@ -180,6 +181,7 @@ func GenerateMarkdownReport(result *ReviewResult) string {
 	fmt.Fprintf(&sb, "| P1 (High) | %d |\n", result.Metrics.P1Issues)
 	fmt.Fprintf(&sb, "| P2 (Medium) | %d |\n", result.Metrics.P2Issues)
 	fmt.Fprintf(&sb, "| P3 (Low) | %d |\n", result.Metrics.P3Issues)
+	fmt.Fprintf(&sb, "| Spec Compliance Score (Stage 1) | %.1f/100 |\n", result.Metrics.SpecComplianceScore)
 	fmt.Fprintf(&sb, "| Security Score | %.1f/100 |\n", result.Metrics.SecurityScore)
 	fmt.Fprintf(&sb, "| Performance Score | %.1f/100 |\n", result.Metrics.PerformanceScore)
 	fmt.Fprintf(&sb, "| Maintainability Score | %.1f/100 |\n", result.Metrics.MaintainabilityScore)

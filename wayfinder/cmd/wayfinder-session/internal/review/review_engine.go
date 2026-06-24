@@ -96,6 +96,7 @@ type ReviewMetrics struct {
 	P1Issues             int     `json:"p1_issues"`
 	P2Issues             int     `json:"p2_issues"`
 	P3Issues             int     `json:"p3_issues"`
+	SpecComplianceScore  float64 `json:"spec_compliance_score"`
 	SecurityScore        float64 `json:"security_score"`
 	PerformanceScore     float64 `json:"performance_score"`
 	MaintainabilityScore float64 `json:"maintainability_score"`
@@ -173,13 +174,23 @@ func (e *ReviewEngine) ReviewTask(task *status.Task) (*ReviewResult, error) {
 
 	riskLevel := e.riskAdapter.CalculateRiskLevel(task, e.projectDir)
 
-	// Determine which personas to invoke based on risk level
+	// Determine which code-quality personas to invoke based on risk level
 	personas := e.selectPersonasForTask(task, riskLevel)
 
-	// Execute reviews for each persona
 	var personaResults []PersonaResult
 	var allIssues []ReviewIssue
 
+	// Stage 1: spec/requirement compliance. Runs before code quality so that an
+	// implementation which diverges from the spec fails review regardless of how
+	// clean the code is.
+	if specResult, err := e.executePersonaReview(PersonaSpecCompliance, task); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: spec-compliance review failed: %v\n", err)
+	} else {
+		personaResults = append(personaResults, specResult)
+		allIssues = append(allIssues, specResult.Issues...)
+	}
+
+	// Stage 2: code-quality personas.
 	for _, persona := range personas {
 		result, err := e.executePersonaReview(persona, task)
 		if err != nil {
@@ -241,17 +252,25 @@ func (e *ReviewEngine) ReviewBatch(tasks []*status.Task) (*ReviewResult, error) 
 		}
 	}
 
-	// Select personas for batch review (lighter set for efficiency)
+	// Select code-quality personas for batch review (lighter set for efficiency)
 	personas := []PersonaType{
 		PersonaSecurity,
 		PersonaPerformance,
 		PersonaMaintainability,
 	}
 
-	// Execute batch reviews
 	var personaResults []PersonaResult
 	var allIssues []ReviewIssue
 
+	// Stage 1: spec/requirement compliance, run once across the batched files.
+	if specResult, err := e.executeBatchPersonaReview(PersonaSpecCompliance, allFiles); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: spec-compliance batch review failed: %v\n", err)
+	} else {
+		personaResults = append(personaResults, specResult)
+		allIssues = append(allIssues, specResult.Issues...)
+	}
+
+	// Stage 2: code-quality personas.
 	for _, persona := range personas {
 		result, err := e.executeBatchPersonaReview(persona, allFiles)
 		if err != nil {
@@ -473,6 +492,8 @@ func (e *ReviewEngine) calculateMetrics(issues []ReviewIssue) ReviewMetrics {
 		score := e.calculatePersonaScore(personaIssues)
 
 		switch persona {
+		case PersonaSpecCompliance:
+			metrics.SpecComplianceScore = score
 		case PersonaSecurity:
 			metrics.SecurityScore = score
 		case PersonaPerformance:
@@ -487,6 +508,9 @@ func (e *ReviewEngine) calculateMetrics(issues []ReviewIssue) ReviewMetrics {
 	}
 
 	// Default to 100 for personas with no issues
+	if metrics.SpecComplianceScore == 0 && len(personaScores[PersonaSpecCompliance]) == 0 {
+		metrics.SpecComplianceScore = 100.0
+	}
 	if metrics.SecurityScore == 0 && len(personaScores[PersonaSecurity]) == 0 {
 		metrics.SecurityScore = 100.0
 	}
