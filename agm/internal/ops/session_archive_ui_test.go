@@ -84,8 +84,12 @@ func TestArchiveUI_DryRunIdleFiltering(t *testing.T) {
 	if !r.DryRun {
 		t.Fatal("expected dry-run by default (Apply=false)")
 	}
-	if r.Changed != 1 || r.Errors != 0 {
-		t.Fatalf("expected exactly 1 would-archive, 0 errors; got changed=%d skipped=%d errors=%d",
+	// "livecwd" is idle 30d and only SHARES a cwd with a live process (pid:2,
+	// session "other") — it is not itself live. Liveness is id-based, so it must
+	// be archivable, not skipped. Only "liveid" (whose cliSessionId matches a
+	// live registry record) is genuinely live. See isLive / ADR-026.
+	if r.Changed != 2 || r.Errors != 0 {
+		t.Fatalf("expected exactly 2 would-archive, 0 errors; got changed=%d skipped=%d errors=%d",
 			r.Changed, r.Skipped, r.Errors)
 	}
 	checks := map[string][2]string{
@@ -93,7 +97,7 @@ func TestArchiveUI_DryRunIdleFiltering(t *testing.T) {
 		"recent":  {"skip", uiSkipTooRecent},
 		"arch":    {"skip", uiSkipAlreadyArchived},
 		"liveid":  {"skip", uiSkipLive},
-		"livecwd": {"skip", uiSkipLive},
+		"livecwd": {"would-archive", ""},
 	}
 	for id, want := range checks {
 		oc, ok := outcomeBySession(r, id)
@@ -128,6 +132,34 @@ func TestArchiveUI_StatusAllIgnoresAgeButNotLive(t *testing.T) {
 	}
 	if oc, _ := outcomeBySession(r, "live"); oc.Action != "skip" || oc.Reason != uiSkipLive {
 		t.Errorf("status=all must still skip live: got %s:%s", oc.Action, oc.Reason)
+	}
+}
+
+// TestArchiveUI_CwdSharedWithLiveProcessIsNotLive is the regression guard for
+// the cwd-liveness false-positive: a session that merely shares a cwd with a
+// live process owning a DIFFERENT session must not be treated as live. On a
+// monorepo (many sessions rooted at ~/src/<repo>) the old cwd match buried
+// hundreds of long-idle sessions; liveness is now identity-based only.
+func TestArchiveUI_CwdSharedWithLiveProcessIsNotLive(t *testing.T) {
+	const shared = "/Users/x/src/monorepo"
+	req := uiFixture(t, map[string]string{
+		// Idle 30d; its own cliSessionId (cli-idle) is NOT in the registry.
+		"local_idle.json": uiSession("idle", nowMs-30*dayMs, "false", shared),
+		// A genuinely live session in the same directory (cli-busy is live).
+		"local_busy.json": uiSession("busy", nowMs-1*dayMs, "false", shared),
+	}, []string{`{"pid":1,"sessionId":"cli-busy","cwd":"` + shared + `"}`})
+
+	r, err := ArchiveUISessions(&OpContext{}, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oc, _ := outcomeBySession(r, "idle"); oc.Action != "would-archive" {
+		t.Errorf("idle session sharing a live cwd must be archivable, got %s:%s", oc.Action, oc.Reason)
+	}
+	// "busy" is live by id AND under 7d — skipped (either reason is correct, but
+	// it must never be archived).
+	if oc, _ := outcomeBySession(r, "busy"); oc.Action != "skip" {
+		t.Errorf("genuinely live session must be skipped, got %s:%s", oc.Action, oc.Reason)
 	}
 }
 

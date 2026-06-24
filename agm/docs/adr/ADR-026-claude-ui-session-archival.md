@@ -1,12 +1,24 @@
 # ADR-026: Programmatic Archival of Claude Code UI Sessions
 
-**Status:** Proposed
-**Date:** 2026-05-17
+**Status:** Accepted — implemented (Phases 1–3)
+**Date:** 2026-05-17 (Phase 3 wiring landed 2026-06-22)
 **Deciders:** vbonnet (owner), AGM Foundation Engineering
 **Context:** There is no first-party CLI/API to archive the sessions that
 accumulate in the claude.ai/code and Claude desktop "Code" session list. The
 user archives ~400 of them by hand. This ADR proposes where that capability
-lives and how it works. It is a *design* decision; no code is implemented yet.
+lives and how it works.
+
+> **Implementation status (2026-06-22).** Phases 1–2 landed in PR #126
+> (`agm session archive-ui`, the `claudeui` package, and
+> `ops.ArchiveUISessions`). Phase 3 — the missing automatic invocation that
+> let the store re-accumulate to 278 unarchived files — is now wired as a
+> daily `launchd` job: `agm admin install-archive-ui-schedule` installs
+> `com.dear-agent.archive-ui.plist`, which runs
+> `agm session archive-ui --older-than 7d --status idle --apply` every 24h
+> (and once at load). It joins the same launchd family as the orphan reaper
+> (`install-reap-schedule`) and worktree sweep (`install-sweep-schedule`).
+> The experimental `--via=web-api` escape hatch (Phase 3, below) remains
+> unbuilt and is not needed: V3 validation showed the local flip propagates.
 
 Related: [ADR-016 Shared Ops Layer](ADR-016-shared-ops-layer.md),
 [ADR-001 CLI Command Structure](ADR-001-cli-command-structure.md),
@@ -194,6 +206,20 @@ Concretely:
    PID set, **and** there is no live tmux session for it, **and**
    `now - lastActivityAt > --older-than`. Anything live or ambiguous is skipped
    and reported, never archived.
+
+   > **Correction (2026-06-22).** Liveness is **identity-based only**
+   > (`cliSessionId`/`sessionId`), exactly as specified above. The initial
+   > implementation also matched on `cwd` as a "conservative" extra signal, but
+   > `cwd` is not per-session: dozens of sessions share one working directory
+   > (every CLI run rooted at `~/src/dear-agent`, or at `$HOME`), so a single
+   > live process there marked **every** past session in that directory as live
+   > forever. Measured on this machine, that buried **248** long-idle sessions
+   > as false-"live" against only **13** genuinely live by id — the dominant
+   > reason the desktop list never drained even when the tool ran. The `cwd`
+   > clause was removed (`isLive` in `session_archive_ui.go`); idleness remains
+   > protected by the age gate and the safety-warning gate (uncommitted/unmerged
+   > work, open PR, awaiting-input), so dropping it never archives a session
+   > that still has live work.
 
 6. **The undocumented web API is an explicitly experimental, off-by-default
    escape hatch only** (`--via=web-api`, hidden, requires an explicit
