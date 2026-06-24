@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # Tests for .claude/hooks/pretool-pr-guard — the wayfinder-only PR lifecycle
-# gate (Beads ce-p17s, CLAUDE.md §PR Lifecycle). Asserts the hook denies raw
+# gate (Beads ce-p17s, AGENTS.md §PR Lifecycle). Asserts the hook denies raw
 # `gh pr create|close|reopen` with exit 2 + safe-pr guidance, allows read-only
 # pr verbs / merge / safe-pr itself, and fails open on unparseable input.
 

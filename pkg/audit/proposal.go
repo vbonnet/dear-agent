@@ -53,22 +53,22 @@ func (s ProposalState) IsValid() bool {
 // Patch is a unified diff or a YAML fragment depending on Layer.
 // For ProposalEnforce a typical patch adds a linter to .golangci.yml
 // or a hook to settings.json. For ProposalDefine a typical patch
-// amends a CLAUDE.md / SPEC.md / ADR rule.
+// amends an AGENTS.md / SPEC.md / ADR rule.
 //
 // The runner persists Proposals into audit_proposals with state
 // ProposalProposed; the operator decides via `workflow audit propose`.
 type Proposal struct {
-	ProposalID  string // assigned by the store
-	AuditRunID  string // FK into audit_runs
-	Layer       ProposalLayer
-	Title       string
-	Rationale   string
-	Patch       string
-	State       ProposalState
-	ProposedAt  time.Time
-	DecidedAt   time.Time
-	DecidedBy   string
-	Decision    string // free-form note from the reviewer
+	ProposalID string // assigned by the store
+	AuditRunID string // FK into audit_runs
+	Layer      ProposalLayer
+	Title      string
+	Rationale  string
+	Patch      string
+	State      ProposalState
+	ProposedAt time.Time
+	DecidedAt  time.Time
+	DecidedBy  string
+	Decision   string // free-form note from the reviewer
 }
 
 // Validate returns a non-nil error when the proposal is missing

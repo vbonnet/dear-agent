@@ -1,4 +1,4 @@
-// Package safegit merge.go provides the safe-merge gate that enforces CLAUDE.md
+// Package safegit merge.go provides the safe-merge gate that enforces AGENTS.md
 // principle 9: an atomic, vetted wrapper for PR merges that cannot be bypassed.
 //
 // Required before any merge:
@@ -38,7 +38,6 @@ const MinSoak = 5 * time.Minute
 
 // DefaultWatchTimeout is the default time limit for watch mode.
 const DefaultWatchTimeout = 45 * time.Minute
-
 
 // MergeConfig holds options for a safe merge.
 type MergeConfig struct {
@@ -666,7 +665,7 @@ func prHeadInfo(prNum int, repo string) (prHeadResult, error) {
 
 // cleanupWorktree removes any local worktrees tracking the given branch and
 // then deletes the local branch. This mirrors the post-merge cleanup in
-// CLAUDE.md §5. Failures are printed as warnings, not returned as errors.
+// AGENTS.md §5. Failures are printed as warnings, not returned as errors.
 func cleanupWorktree(branch string) {
 	// List worktrees in JSON format.
 	out, err := exec.Command("git", "worktree", "list", "--porcelain").Output()

@@ -1,3 +1,5 @@
+@import ../AGENTS.md
+
 # AGM + Antigravity configuration
 
 Configuration for the `antigravity` harness driven by the `agy` CLI

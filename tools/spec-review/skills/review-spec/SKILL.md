@@ -27,7 +27,9 @@ metadata:
 - **Diagram Reference Validation**: Checks for broken diagram links in SPEC.md (NEW)
 - **Self-Consistency Checking**: Multiple evaluations with variance analysis
 - **Quality Dimensions**: Vision/Goals (30%), CUJs (25%), Metrics (25%), Scope (10%), Living Doc (10%)
-- **Cross-CLI Support**: Works with Claude Code, Gemini CLI, OpenCode, and Codex
+- **Cross-Harness Support**: Model-agnostic workflow; optimized adapters exist
+  for Claude Code, Gemini CLI, OpenCode, and Codex, with other harnesses using
+  the generic CLI path until a dedicated adapter exists
 - **CLI-Specific Optimizations**: Automatic batch sizing and feature detection
 
 ## CLI Support

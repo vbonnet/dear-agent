@@ -565,7 +565,7 @@ func (g *Guard) checkSegments(tokens []string, cwd string, depth int) (allowed b
 }
 
 // ghMergeBlocked is the teaching message returned when a gh merge attempt is
-// detected. It directs agents to the safe-merge atomic wrapper (CLAUDE.md
+// detected. It directs agents to the safe-merge atomic wrapper (AGENTS.md
 // principle 9) instead of the raw gh command.
 const ghMergeBlocked = "You're trying to merge a PR directly with gh. " +
 	"Raw `gh pr merge` is denied — use the safe-merge wrapper instead, " +

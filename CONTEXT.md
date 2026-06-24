@@ -217,8 +217,8 @@ VROOM) belongs in the top-level [`docs/adr/`](docs/adr/), not under `agm/`.**
 | **A** | **Audit** | Verify the runnable exit conditions actually hold. |
 | **R** | **Retro** | Retrospective: capture what was learned; findings flow to the backlog/roadmap via the Meta-Orchestrator. |
 
-This is the expansion used by `.claude/CLAUDE.md` and by the VROOM lifecycle
-above. ⚠️ It **collides** with two other in-repo uses of "DEAR" — see
+This is the expansion used by `AGENTS.md` and by the VROOM lifecycle above.
+⚠️ It **collides** with two other in-repo uses of "DEAR" — see
 [Known Terminology Collisions](#known-terminology-collisions).
 
 ---

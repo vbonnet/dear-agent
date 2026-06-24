@@ -376,7 +376,7 @@ func armAutoMerge(prURL string, timeout time.Duration) error {
 
 const usage = `safe-pr — open/close GitHub PRs with a mandatory wayfinder session trace.
 
-This is the only sanctioned PR path for agent sessions (CLAUDE.md principle 9):
+This is the only sanctioned PR path for agent sessions (AGENTS.md principle 9):
 raw 'gh pr create|close|reopen' in Bash is denied by .claude/hooks/pretool-pr-guard.
 Untraced PRs burn CI/review quota and cannot be attributed afterwards.
 

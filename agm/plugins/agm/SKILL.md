@@ -1,7 +1,7 @@
 ---
 name: agm
 description: >-
-  AGM (Agent Gateway Manager) session management for Claude and Gemini.
+  AGM (Agent Gateway Manager) session management across supported AI harnesses.
   TRIGGER when: user asks to associate a session, manage AGM sessions, exit and archive, or says "/agm", "agm session", or "associate session".
   DO NOT TRIGGER when: user wants to orchestrate multiple agents (use orchestrate/orchestrator) or manage tasks (use engram).
 allowed-tools:
@@ -83,13 +83,13 @@ AGM will:
 
 ### Starting a New Project
 1. Start tmux session: `tmux new -s project-name`
-2. Start Claude/Gemini CLI
+2. Start a supported agent CLI (Claude, Codex, Gemini, OpenCode, Antigravity/agy)
 3. Associate with AGM: `/agm:agm-assoc`
 4. Begin work
 
 ### Resuming Existing Work
 1. Attach to tmux: `tmux attach -t project-name`
-2. Start Claude/Gemini CLI
+2. Start the appropriate agent CLI
 3. AGM auto-detects and resumes session context
 
 ### Completing a Session

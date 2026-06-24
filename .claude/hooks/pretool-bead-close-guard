@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PreToolUse hook: Definition of Done gate on bead closure (CLAUDE.md §6).
+# PreToolUse hook: Definition of Done gate on bead closure (AGENTS.md §Agent Delegation Enforcement §6).
 #
 # WHAT: when an agent runs `bd ... update <id> --status closed` or
 # `bd ... close <id>`, this hook invokes bead-close-guard to verify that all

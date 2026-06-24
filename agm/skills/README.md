@@ -1,4 +1,4 @@
-# AGM Claude Code Skills
+# AGM Slash Command Skills
 
 > **DEPRECATED**: Legacy shell skills have been removed. All AGM skills are now
 > markdown-based and live in `agm-plugin/commands/`.
@@ -21,7 +21,7 @@ agm-plugin/commands/
 
 ## Usage
 
-Skills are invoked as Claude Code slash commands:
+In the Claude plugin surface, skills are invoked as slash commands:
 
 ```
 /agm:list
@@ -35,5 +35,5 @@ Skills are invoked as Claude Code slash commands:
 ## Format
 
 Each skill is a markdown file with YAML frontmatter (description,
-allowed-tools) and step-by-step instructions for Claude. All CLI
+allowed-tools) and step-by-step instructions for the invoking harness. All CLI
 calls use `--output json` for reliable parsing.

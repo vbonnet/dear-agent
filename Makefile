@@ -280,7 +280,7 @@ install-safe-push: build-safe-push
 	@echo "Installed: $(HOME)/go/bin/safe-push"
 
 # Build safe-merge: the vetted, gated PR merger that replaces raw `gh pr merge`.
-# Enforces CLAUDE.md principle 9: required CI gates, review thread check, soak
+# Enforces AGENTS.md principle 9: required CI gates, review thread check, soak
 # time, and bot review before merge. Raw `gh pr merge` should be denied via a
 # PreToolUse hook pointing at this binary (see docs/design/safe-merge.md).
 build-safe-merge:
@@ -367,7 +367,7 @@ build-src-recovery:
 # Install src-recovery to GOPATH/bin so it is on PATH for every agent session.
 # Allow-list `Bash(src-recovery *)` in chezmoi (dot_claude/private_settings.json.tmpl)
 # alongside chezmoi-deploy and safe-push — its safety is guaranteed by
-# construction, so it needs no per-invocation approval (CLAUDE.md principle 9).
+# construction, so it needs no per-invocation approval (AGENTS.md principle 9).
 install-src-recovery: build-src-recovery
 	cp bin/src-recovery $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/src-recovery"
@@ -386,7 +386,7 @@ build-safe-unlock:
 # Install safe-unlock to GOPATH/bin so it is on PATH for every agent session.
 # Allow-list `Bash(safe-unlock *)` in chezmoi alongside src-recovery/safe-push —
 # its safety is guaranteed by construction, so it needs no per-invocation
-# approval (CLAUDE.md principle 9).
+# approval (AGENTS.md principle 9).
 install-safe-unlock: build-safe-unlock
 	cp bin/safe-unlock $(HOME)/go/bin/
 	@echo "Installed: $(HOME)/go/bin/safe-unlock"

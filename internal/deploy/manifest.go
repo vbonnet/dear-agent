@@ -4,7 +4,7 @@
 //
 // Where internal/drift only *detects* the gap between source and host, this
 // package *closes* it — and does so under the atomic-wrapper discipline of
-// CLAUDE.md principle 9: every artifact is written through a deterministic
+// AGENTS.md principle 9: every artifact is written through a deterministic
 // stage → verify → activate sequence that can never leave a half-written file
 // in place. A failed deploy leaves the previously-installed artifact untouched.
 //

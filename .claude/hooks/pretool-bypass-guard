@@ -4,7 +4,7 @@
 # Blocks Bash commands that attempt to use flags that no longer exist
 # (--emergency on safe-pr, --skip-bot-review on safe-merge) or that have
 # never been approved (--no-verify on git, bare --force on git push).
-# Returns exit code 2 with positive guidance (CLAUDE.md principle 2).
+# Returns exit code 2 with positive guidance (AGENTS.md principle 2).
 #
 # Fails OPEN: any parse error exits 0 — this hook must never wedge a session
 # for a reason unrelated to the bypass it guards against.
