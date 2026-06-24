@@ -116,6 +116,10 @@ func run(argv []string) error {
 	if err != nil {
 		return err
 	}
+	cwd, _ := os.Getwd()
+	if err := validateRemoteURL(cwd); err != nil {
+		return err
+	}
 	s, err := safepr.LoadSession(dir)
 	if err != nil {
 		return err
@@ -141,6 +145,29 @@ func run(argv []string) error {
 	}()
 
 	return execGh(&p.req, p.timeout, p.verifyCI)
+}
+
+// expectedRemotePrefix is the required GitHub org prefix for origin remotes.
+// Any URL that does not start with this string is rejected by validateRemoteURL.
+const expectedRemotePrefix = "https://github.com/vbonnet/"
+
+// validateRemoteURL checks that the origin remote for the repo in dir points
+// to the expected GitHub org. It fails loudly so agents cannot silently push
+// to a stale or wrong remote (e.g. a dear-labs fork).
+func validateRemoteURL(dir string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "remote", "get-url", "origin")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("could not resolve origin remote URL in %s: %w", dir, err)
+	}
+	url := strings.TrimSpace(string(out))
+	if !strings.HasPrefix(url, expectedRemotePrefix) {
+		return fmt.Errorf("remote URL %q does not look like a vbonnet GitHub remote. Expected: %s<repo>", url, expectedRemotePrefix)
+	}
+	return nil
 }
 
 // prURLRe matches the PR URL gh prints on success. Anchored to a word
