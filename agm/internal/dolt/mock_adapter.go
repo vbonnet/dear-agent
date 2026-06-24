@@ -221,19 +221,20 @@ func (m *MockAdapter) copyManifest(src *manifest.Manifest) *manifest.Manifest {
 	}
 
 	dst := &manifest.Manifest{
-		SchemaVersion:  src.SchemaVersion,
-		SessionID:      src.SessionID,
-		Name:           src.Name,
-		Harness:        src.Harness,
-		Model:          src.Model,
-		Workspace:      src.Workspace,
-		CreatedAt:      src.CreatedAt,
-		UpdatedAt:      src.UpdatedAt,
-		Lifecycle:      src.Lifecycle,
-		Outcome:        src.Outcome,
-		State:          src.State,
-		StateUpdatedAt: src.StateUpdatedAt,
-		StateSource:    src.StateSource,
+		SchemaVersion:    src.SchemaVersion,
+		SessionID:        src.SessionID,
+		Name:             src.Name,
+		Harness:          src.Harness,
+		Model:            src.Model,
+		Workspace:        src.Workspace,
+		WorkingDirectory: src.WorkingDirectory,
+		CreatedAt:        src.CreatedAt,
+		UpdatedAt:        src.UpdatedAt,
+		Lifecycle:        src.Lifecycle,
+		Outcome:          src.Outcome,
+		State:            src.State,
+		StateUpdatedAt:   src.StateUpdatedAt,
+		StateSource:      src.StateSource,
 		Context: manifest.Context{
 			Project: src.Context.Project,
 			Purpose: src.Context.Purpose,
@@ -254,6 +255,12 @@ func (m *MockAdapter) copyManifest(src *manifest.Manifest) *manifest.Manifest {
 			ServerPort: src.OpenCode.ServerPort,
 			ServerHost: src.OpenCode.ServerHost,
 			AttachTime: src.OpenCode.AttachTime,
+		}
+	}
+	if src.Codex != nil {
+		dst.Codex = &manifest.Codex{
+			SessionID:      src.Codex.SessionID,
+			TranscriptPath: src.Codex.TranscriptPath,
 		}
 	}
 
@@ -418,7 +425,8 @@ func (m *MockAdapter) GetSessionByUUID(conversationUUID string) (*manifest.Manif
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, s := range m.sessions {
-		if s.Claude.UUID == conversationUUID {
+		if s.Claude.UUID == conversationUUID ||
+			(s.Codex != nil && s.Codex.SessionID == conversationUUID) {
 			return m.copyManifest(s), nil
 		}
 	}

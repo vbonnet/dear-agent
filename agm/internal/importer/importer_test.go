@@ -268,6 +268,54 @@ func TestImportOrphanedSession_DuplicatePrevention(t *testing.T) {
 	}
 }
 
+func TestImportOrphanedSession_Codex(t *testing.T) {
+	adapter := dolt.GetTestAdapter(t)
+	if adapter == nil {
+		t.Skip("Dolt not available for testing")
+	}
+	defer adapter.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	sessionID := "019ef2af-97e0-7443-9f07-03e40636740c"
+	projectDir := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	codexDir := filepath.Join(tmpDir, ".codex", "sessions", "2026", "06", "22")
+	if err := os.MkdirAll(codexDir, 0755); err != nil {
+		t.Fatalf("mkdir codex: %v", err)
+	}
+	transcript := filepath.Join(codexDir, "rollout-2026-06-22T21-14-14-"+sessionID+".jsonl")
+	line := `{"type":"session_meta","payload":{"session_id":"` + sessionID + `","cwd":"` + projectDir + `"}}` + "\n"
+	if err := os.WriteFile(transcript, []byte(line), 0600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	agmSessionID, err := ImportOrphanedSessionWithOptions(sessionID, "imported-codex", "test", adapter, "", ImportOptions{
+		Harness: "codex-cli",
+	})
+	if err != nil {
+		t.Fatalf("import Codex: %v", err)
+	}
+	got, err := adapter.GetSession(agmSessionID)
+	if err != nil {
+		t.Fatalf("get imported session: %v", err)
+	}
+	if got.Harness != "codex-cli" {
+		t.Fatalf("Harness = %q, want codex-cli", got.Harness)
+	}
+	if got.Codex == nil || got.Codex.SessionID != sessionID {
+		t.Fatalf("Codex metadata = %+v, want session ID %s", got.Codex, sessionID)
+	}
+	if got.Codex.TranscriptPath != transcript {
+		t.Fatalf("Codex transcript path = %q, want %q", got.Codex.TranscriptPath, transcript)
+	}
+	if got.Context.Project != projectDir || got.WorkingDirectory != projectDir {
+		t.Fatalf("working dirs not imported: context=%q working=%q want=%q", got.Context.Project, got.WorkingDirectory, projectDir)
+	}
+}
+
 func TestImportOrphanedSession_TmuxSanitization(t *testing.T) {
 	// Get test adapter
 	adapter := dolt.GetTestAdapter(t)
