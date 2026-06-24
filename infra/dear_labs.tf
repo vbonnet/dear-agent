@@ -22,6 +22,14 @@
 # exist and their CI job names are known.
 ###############################################################################
 
+# MIGRATION GATE: NO github_repository resources may be added to this file
+# until the dear-labs → vbonnet org migration decision is finalized.
+# Trigger: first external collaborator need OR first org-level feature need.
+# See: engram-research/analyses/2026-06-14-repo-org-strategy.md (R1)
+#
+# All new repos should be created under github.com/vbonnet until migration
+# is decided. dear-labs is in standby mode.
+
 resource "github_organization_ruleset" "baseline" {
   provider    = github.dearlabs
   name        = "baseline"
