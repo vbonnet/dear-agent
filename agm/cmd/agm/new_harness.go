@@ -168,18 +168,36 @@ func buildClaudeCommand(sessionName, workDir string, extraAddDirs []string) (str
 		autoModeFlag = ""
 		debug.Log("Auto mode disabled by flag/env var")
 	}
+	// exitSuffix is omitted for persistent supervisor sessions so the tmux
+	// pane's shell survives after the Claude process exits (ce-pzca).
+	exitSuffix := " && exit"
+	if persistent {
+		exitSuffix = ""
+	}
 	oauthArg := oauthEnvArg()
-	claudeCmd := fmt.Sprintf("env %s AGM_SESSION_NAME=%s%s%s claude --model %s --add-dir %s%s && exit", claudeEnvUnsetFlags(oauthArg != ""), shellQuote(sessionName), otelEnvArgs(), oauthArg, shellQuote(resolvedModel), shellQuote(workDir), autoModeFlag)
+	claudeCmd := fmt.Sprintf("env %s AGM_SESSION_NAME=%s%s%s claude --model %s --add-dir %s%s%s", claudeEnvUnsetFlags(oauthArg != ""), shellQuote(sessionName), otelEnvArgs(), oauthArg, shellQuote(resolvedModel), shellQuote(workDir), autoModeFlag, exitSuffix)
 	for _, dir := range extraAddDirs {
-		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --add-dir %s && exit", shellQuote(dir)), 1)
+		if persistent {
+			claudeCmd += fmt.Sprintf(" --add-dir %s", shellQuote(dir))
+		} else {
+			claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --add-dir %s && exit", shellQuote(dir)), 1)
+		}
 	}
 	modeAppliedAtStartup := false
 	if modeFlagValue == "auto" || modeFlagValue == "plan" || modeFlagValue == "default" {
-		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --permission-mode %s && exit", modeFlagValue), 1)
+		if persistent {
+			claudeCmd += fmt.Sprintf(" --permission-mode %s", modeFlagValue)
+		} else {
+			claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --permission-mode %s && exit", modeFlagValue), 1)
+		}
 		modeAppliedAtStartup = true
 	}
 	if maxBudgetUsd > 0 {
-		claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --max-budget-usd %.2f && exit", maxBudgetUsd), 1)
+		if persistent {
+			claudeCmd += fmt.Sprintf(" --max-budget-usd %.2f", maxBudgetUsd)
+		} else {
+			claudeCmd = strings.Replace(claudeCmd, " && exit", fmt.Sprintf(" --max-budget-usd %.2f && exit", maxBudgetUsd), 1)
+		}
 	}
 	return claudeCmd, modeAppliedAtStartup
 }
