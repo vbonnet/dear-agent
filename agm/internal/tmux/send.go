@@ -126,6 +126,22 @@ func SendSlashCommandSafe(sessionName string, command string) error {
 //   - Prompts with code blocks
 //   - Structured prompts with markdown formatting
 //   - Any text that needs to preserve newlines
+// skipPostSubmitGuard reports whether SendMultiLinePromptSafe should skip its
+// post-submit human-typing cooldown abort. The cooldown protects an attended
+// human from having a send land on top of their un-submitted keystrokes, but it
+// must yield when the caller has a legitimate reason to deliver regardless:
+//   - shouldInterrupt: the caller is deliberately interrupting (e.g. work
+//     requests / wake-loops), so the human-typing protection never applied;
+//   - autonomous: the session is unattended, so leftover input is provably
+//     AGM's own stale text, not a human mid-keystroke (ce-v9in);
+//   - force: the operator passed --force, which already bypassed safety.Check's
+//     human_typing guard upstream and must follow through here (ce-5sow).
+//
+// Pure decision helper (no tmux I/O) so the gate is unit-testable.
+func skipPostSubmitGuard(shouldInterrupt, autonomous, force bool) bool {
+	return shouldInterrupt || autonomous || force
+}
+
 func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt bool) error {
 	// Wait for Claude to be ready (consistent with all other *Safe functions)
 	if err := WaitForPromptSimple(sessionName, 60*time.Second); err != nil {
@@ -141,7 +157,12 @@ func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt 
 	// unattended session, so "input line has content" only ever means AGM's own
 	// un-submitted text from a prior tick. SendPromptLiteral stashes that with
 	// C-s before delivering; aborting here would re-create the mesh deadlock.
-	if !shouldInterrupt && !AutonomousMode() {
+	//
+	// ce-5sow: also skip under operator --force. The force override already
+	// bypassed safety.Check's human_typing guard upstream; without skipping here
+	// the send re-aborts at this separate cooldown check ("human is typing"),
+	// which is exactly what blocked forced delivery to looping supervisors.
+	if !skipPostSubmitGuard(shouldInterrupt, AutonomousMode(), ForceDelivery()) {
 		time.Sleep(1 * time.Second)
 
 		// Re-capture pane to verify prompt stability
