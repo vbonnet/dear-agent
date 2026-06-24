@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/user"
 	"path/filepath"
@@ -101,7 +102,7 @@ Examples:
 			if outputMode == ModeAgent {
 				applyAgentListDefaults(result, fieldsFlag)
 			}
-			return printJSON(result)
+			return printListJSON(result)
 		}
 
 		if len(result.Sessions) == 0 {
@@ -131,6 +132,81 @@ Examples:
 		}
 		return nil
 	},
+}
+
+var listTopLevelFields = map[string]bool{
+	"operation":            true,
+	"sessions":             true,
+	"total":                true,
+	"limit":                true,
+	"offset":               true,
+	"orphan_tmux_sessions": true,
+}
+
+var listSessionFields = map[string]bool{
+	"id":             true,
+	"name":           true,
+	"status":         true,
+	"outcome":        true,
+	"attached":       true,
+	"harness":        true,
+	"workspace":      true,
+	"project":        true,
+	"tags":           true,
+	"created_at":     true,
+	"updated_at":     true,
+	"estimated_cost": true,
+}
+
+// printListJSON keeps `agm session list --fields name,status,...` useful for
+// agents. The global field-mask helper intentionally filters only top-level
+// objects; list accepts per-session fields too, so row fields are applied inside
+// the sessions envelope instead of collapsing the whole result to `{}`.
+func printListJSON(result *ops.ListSessionsResult) error {
+	if len(fieldsFlag) == 0 || !fieldsAreOnlySessionRows(fieldsFlag) {
+		return printJSON(result)
+	}
+
+	rows := make([]map[string]any, 0, len(result.Sessions))
+	for _, s := range result.Sessions {
+		rows = append(rows, filterSessionSummaryFields(s, fieldsFlag))
+	}
+	return printJSONNoFieldMask(map[string]any{
+		"sessions": rows,
+		"total":    result.Total,
+	})
+}
+
+func fieldsAreOnlySessionRows(fields []string) bool {
+	if len(fields) == 0 {
+		return false
+	}
+	for _, f := range fields {
+		if listTopLevelFields[f] || !listSessionFields[f] {
+			return false
+		}
+	}
+	return true
+}
+
+func filterSessionSummaryFields(s ops.SessionSummary, fields []string) map[string]any {
+	source := map[string]any{}
+	data, err := json.Marshal(s)
+	if err == nil {
+		_ = json.Unmarshal(data, &source)
+	}
+
+	row := map[string]any{}
+	for _, f := range fields {
+		if v, ok := source[f]; ok {
+			row[f] = v
+		}
+	}
+	return row
+}
+
+func printJSONNoFieldMask(v any) error {
+	return printJSONUnmasked(v)
 }
 
 // startListSpan starts an OTel span for the session list operation.

@@ -213,8 +213,8 @@ dispatching): a supervisor that waits goes silently idle, which is worse than
 acting under guardrails.
 
 Safety is enforced by **guardrails, not by asking**:
-- The agm circuit breaker (worker cap + live CPU-load gate + spawn stagger) and
-  the `AGM_MAX_WORKERS` cap bound worker dispatch.
+- The agm circuit breaker (live CPU-load gate + spawn stagger) and
+  resource governor bound worker dispatch through live backpressure.
 - Reclaimer tools refuse to touch anything they cannot prove is reclaimable
   (PID-1-only orphan reap, allowlist-only worktree sweep, protected supervisor
   roles and in-progress workers), so destructive cleanup is safe by construction.

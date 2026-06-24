@@ -17,9 +17,9 @@
 //  2. open PRs (the bead is already in flight — its id appears in a PR branch/title)
 //  3. the human-gated skip list (beads a human must drive, never an autonomous worker)
 //
-// Capacity is bounded: at most --max-workers concurrent worker sessions exist at
-// once, so each run dispatches at most (max-workers - live workers) new ones. The
-// agm circuit breaker is the hard backstop; this is the cooperative cap.
+// Capacity is controlled by real spawn backpressure. This dispatcher does not
+// impose a hard worker-count cap; it dispatches eligible beads until the
+// candidate list is exhausted or `agm session new` refuses a spawn.
 //
 // Exit status is 0 on success even when zero beads are dispatched — "nothing new
 // to dispatch" (backlog drained, at capacity, or all in flight) is a normal
@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -421,7 +422,6 @@ func main() {
 	db := flag.String("db", "~/beads/context-engine/.beads", "path to the beads database")
 	repo := flag.String("repo", "vbonnet/dear-agent", "GitHub repo (owner/name) to check for open PRs")
 	model := flag.String("model", defaultModel, "model alias workers spawn with (avoid bare opus/sonnet — credit-gated 1M)")
-	maxWorkers := flag.Int("max-workers", 3, "maximum concurrent worker sessions; each run dispatches up to this minus live workers")
 	maxPriority := flag.Int("max-priority", 2, "numeric priority ceiling: 0=P0 only, 1=P0+P1, 2=P0..P2 (orchestrator narrows this as Meta-O goes stale)")
 	dryRun := flag.Bool("dry-run", false, "report what would be dispatched without spawning any sessions")
 	flag.Parse()
@@ -458,33 +458,34 @@ func main() {
 
 	candidates := selectCandidates(beads, live, prs, *maxPriority)
 
-	// Cooperative capacity cap: never let more than maxWorkers workers run at
-	// once. budget is what remains under the cap right now.
-	budget := max(*maxWorkers-len(live), 0)
+	dispatched := dispatchCandidates(ctx, candidates, *model, *dryRun, os.Stdout, os.Stderr)
 
+	fmt.Fprintf(os.Stderr,
+		"vroom-dispatch-direct: %d ready, %d live worker(s), %d eligible, %d dispatched\n",
+		len(beads), len(live), len(candidates), dispatched)
+}
+
+func dispatchCandidates(ctx context.Context, candidates []bead, model string, dryRun bool, out, errOut io.Writer) int {
 	dispatched := 0
 	for _, b := range candidates {
-		if dispatched >= budget {
+		if ctx.Err() != nil {
 			break
 		}
-		if *dryRun {
-			fmt.Printf("would dispatch worker-%s (%s) %s\n", b.ID, priorityLabel(b.Priority), b.Title)
+		if dryRun {
+			fmt.Fprintf(out, "would dispatch worker-%s (%s) %s\n", b.ID, priorityLabel(b.Priority), b.Title)
 			dispatched++
 			continue
 		}
-		if err := dispatch(ctx, b, *model); err != nil {
+		if err := dispatch(ctx, b, model); err != nil {
 			// A refused spawn is expected backpressure, not a fatal error: log
 			// and stop this run (capacity is likely exhausted), retry next run.
-			fmt.Fprintf(os.Stderr, "vroom-dispatch-direct: dispatch %s: %v\n", b.ID, err)
+			fmt.Fprintf(errOut, "vroom-dispatch-direct: dispatch %s: %v\n", b.ID, err)
 			break
 		}
-		fmt.Printf("dispatched worker-%s (%s) %s\n", b.ID, priorityLabel(b.Priority), b.Title)
+		fmt.Fprintf(out, "dispatched worker-%s (%s) %s\n", b.ID, priorityLabel(b.Priority), b.Title)
 		dispatched++
 	}
-
-	fmt.Fprintf(os.Stderr,
-		"vroom-dispatch-direct: %d ready, %d live worker(s), %d eligible, %d dispatched (cap %d)\n",
-		len(beads), len(live), len(candidates), dispatched, *maxWorkers)
+	return dispatched
 }
 
 // expandHome replaces a leading ~ in a path with the user's home directory.

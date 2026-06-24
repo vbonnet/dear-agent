@@ -452,9 +452,9 @@ func describeActions(out ReapOutcome) string {
 func retroLesson(inc ResourceIncident, dropped bool) string {
 	switch {
 	case inc.Level >= PressureEmergency && !dropped:
-		return "emergency remediation did not relieve pressure; recommend raising swap pool or lowering AGM_MAX_WORKERS — escalate to roadmap"
+		return "emergency remediation did not relieve pressure; recommend raising swap pool or tightening live resource backpressure — escalate to roadmap"
 	case inc.Level >= PressureEmergency:
-		return "emergency remediation relieved pressure; recommend tracking spawn-pause frequency — chronic pauses mean the worker cap is too high for available RAM"
+		return "emergency remediation relieved pressure; recommend tracking spawn-pause frequency — chronic pauses mean resource backpressure needs retuning"
 	case inc.Level == PressureCritical && !dropped:
 		return "gopls reap / session archive did not relieve pressure; the leak source is elsewhere — audit FD holders beyond gopls"
 	case inc.Level == PressureCritical:

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -248,6 +249,41 @@ func TestDispatchSpawnFailureSkipsSend(t *testing.T) {
 	}
 	if sendCalled {
 		t.Error("send must not be called when spawn fails")
+	}
+}
+
+func TestDispatchCandidates_DryRunHasNoWorkerCap(t *testing.T) {
+	candidates := []bead{
+		{ID: "ce-1", Title: "one", Priority: 1},
+		{ID: "ce-2", Title: "two", Priority: 1},
+		{ID: "ce-3", Title: "three", Priority: 1},
+		{ID: "ce-4", Title: "four", Priority: 1},
+	}
+	var out, errOut bytes.Buffer
+	got := dispatchCandidates(context.Background(), candidates, "opus-200k", true, &out, &errOut)
+	if got != len(candidates) {
+		t.Fatalf("dry-run dispatched %d candidates, want all %d; output:\n%s", got, len(candidates), out.String())
+	}
+	if strings.Contains(out.String(), "cap") || strings.Contains(errOut.String(), "cap") {
+		t.Fatalf("dispatcher output should not report a worker cap\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+	}
+}
+
+func TestDispatchCandidates_StopsOnCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	candidates := []bead{
+		{ID: "ce-1", Title: "one", Priority: 1},
+		{ID: "ce-2", Title: "two", Priority: 1},
+	}
+	var out, errOut bytes.Buffer
+	got := dispatchCandidates(ctx, candidates, "opus-200k", true, &out, &errOut)
+	if got != 0 {
+		t.Fatalf("dispatchCandidates dispatched %d candidates after context cancellation; output:\n%s", got, out.String())
+	}
+	if out.Len() != 0 || errOut.Len() != 0 {
+		t.Fatalf("canceled dispatch should not write output\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
 }
 

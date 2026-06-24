@@ -42,6 +42,23 @@ func printJSON(v any) error {
 	return nil
 }
 
+// printJSONUnmasked is for commands that have already applied command-specific
+// field projection but still need the central JSON formatting behavior.
+func printJSONUnmasked(v any) error {
+	var data []byte
+	var err error
+	if outputMode == ModeAgent {
+		data, err = json.Marshal(v)
+	} else {
+		data, err = json.MarshalIndent(v, "", "  ")
+	}
+	if err != nil {
+		return fmt.Errorf("JSON marshal error: %w", err)
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
 // printResult outputs the result in the appropriate format (text or JSON).
 // For JSON mode, it marshals the result. For text mode, it calls the textFn.
 func printResult(result any, textFn func()) error {
