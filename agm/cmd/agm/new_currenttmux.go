@@ -102,7 +102,7 @@ func createCurrentTmuxManifest(sessionName, workDir string) {
 }
 
 // startCurrentTmuxHarness dispatches the per-harness startup flow for the
-// in-place (current tmux pane) Claude/Gemini/OpenCode cases.
+// in-place (current tmux pane) Claude/Gemini/OpenCode/AGY cases.
 func startCurrentTmuxHarness(sessionName, workDir string) error {
 	switch harnessName {
 	case "claude-code":
@@ -111,6 +111,8 @@ func startCurrentTmuxHarness(sessionName, workDir string) error {
 		return startCurrentTmuxOpenCode(sessionName)
 	case "gemini-cli":
 		return startCurrentTmuxGemini(sessionName)
+	case "agy":
+		return startCurrentTmuxAgy(sessionName, workDir)
 	default:
 		debug.Log("Skipping CLI startup for harness: %s (no CLI configured)", harnessName)
 		ui.PrintSuccess(fmt.Sprintf("Session created for %s harness", harnessName))
@@ -223,6 +225,28 @@ func startCurrentTmuxGemini(sessionName string) error {
 	} else {
 		ui.PrintSuccess("Gemini is ready!")
 	}
+	return nil
+}
+
+func startCurrentTmuxAgy(sessionName, workDir string) error {
+	fmt.Println("Starting AGY...")
+	agyCmd := buildAgyCommand(workDir, nil, modeFlagValue)
+	if err := tmux.SendCommand(sessionName, agyCmd); err != nil {
+		ui.PrintError(err,
+			"Failed to start AGY in current tmux pane",
+			"  • Verify AGY is installed: which agy\n"+
+				"  • Test AGY manually: agy --help\n"+
+				"  • Check you're in tmux: echo $TMUX")
+		return err
+	}
+	fmt.Println("Waiting for AGY to initialize...")
+	if err := tmux.WaitForAgyPrompt(sessionName, 30*time.Second); err != nil {
+		ui.PrintWarning("AGY ready signal not detected")
+		fmt.Printf("Session may still work, but initialization timing is uncertain.\n")
+	} else {
+		ui.PrintSuccess("AGY is ready!")
+	}
+	associateSpawnedAgySession(sessionName)
 	return nil
 }
 

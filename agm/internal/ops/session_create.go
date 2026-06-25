@@ -111,14 +111,14 @@ func validateCreateRequest(ctx *OpContext, req *CreateSessionRequest) (*createSe
 		return nil, ErrTmuxNotRunning()
 	}
 
-	p := &createSessionParams{harness: req.Harness, model: req.Model, persistent: req.Persistent}
+	p := &createSessionParams{harness: agent.NormalizeHarnessName(req.Harness), model: req.Model, persistent: req.Persistent}
 	if p.harness == "" {
 		p.harness = "claude-code"
 	}
 	switch p.harness {
-	case "claude-code", "gemini-cli", "codex-cli":
+	case "claude-code", "gemini-cli", "codex-cli", "agy":
 	default:
-		return nil, ErrInvalidInput("harness", fmt.Sprintf("Unsupported harness: %s. Supported: claude-code, gemini-cli, codex-cli", p.harness))
+		return nil, ErrInvalidInput("harness", fmt.Sprintf("Unsupported harness: %s. Supported: claude-code, gemini-cli, codex-cli, agy", p.harness))
 	}
 
 	if p.model == "" {
@@ -253,6 +253,9 @@ func buildHarnessCommand(harness, model, sessionName, workDir string, persistent
 		resolvedModel := agent.ResolveModelFullName("codex-cli", model)
 		return fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME='%s' codex -m '%s' -C '%s' -s workspace-write%s",
 			shellQuote(sessionName), shellQuote(resolvedModel), shellQuote(workDir), exitSuffix)
+	case "agy":
+		return fmt.Sprintf("cd '%s' && agy --add-dir '%s'%s",
+			shellQuote(workDir), shellQuote(workDir), exitSuffix)
 	default:
 		return fmt.Sprintf("echo 'Unknown harness: %s' && exit 1", shellQuote(harness))
 	}

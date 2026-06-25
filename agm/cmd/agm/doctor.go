@@ -529,7 +529,7 @@ func reportHarnessHealth(name string, count int) bool {
 	ui.PrintWarning(fmt.Sprintf("Harness '%s' unhealthy", label))
 	switch {
 	case !hh.Known:
-		fmt.Printf("  • Unknown harness — valid harnesses: claude-code, gemini-cli, codex-cli, opencode-cli\n")
+		fmt.Printf("  • Unknown harness — valid harnesses: claude-code, gemini-cli, codex-cli, opencode-cli, agy\n")
 	case !hh.BinaryPresent:
 		fmt.Printf("  • CLI binary '%s' not found on PATH — install it or migrate these sessions\n", hh.BinaryName)
 	}

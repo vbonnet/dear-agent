@@ -16,7 +16,7 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
-// startHarness dispatches per-harness initialization (Claude/Gemini/Codex/OpenCode).
+// startHarness dispatches per-harness initialization (Claude/Gemini/Codex/OpenCode/AGY).
 // Returns (modeAppliedAtStartup, harnessHandledFullLifecycle, err): when
 // harnessHandledFullLifecycle is true the caller should return immediately —
 // the harness (e.g. gemini-cli wrapper) has already managed attach/detach.
@@ -31,6 +31,8 @@ func startHarness(sessionName, workDir string, exists bool, extraAddDirs []strin
 		return false, false, startCodexHarness(sessionName, workDir, exists, extraAddDirs)
 	case "opencode-cli":
 		return false, false, startOpenCodeHarness(sessionName, exists)
+	case "agy":
+		return false, false, startAgyHarness(sessionName, workDir, exists, extraAddDirs)
 	default:
 		debug.Phase("Skip CLI Startup")
 		debug.Log("Skipping CLI startup for harness: %s (no CLI configured)", harnessName)
@@ -322,6 +324,75 @@ func startGeminiDirect(sessionName string, exists bool) error {
 	_ = enterCmd.Run()
 	debug.Log("Trust prompt auto-accepted")
 	ui.PrintSuccess("Auto-accepted Gemini trust prompt")
+	return nil
+}
+
+func agyPermissionFlag(permissionMode string) string {
+	switch permissionMode {
+	case "auto", "dangerously-skip-permissions":
+		return " --dangerously-skip-permissions"
+	default:
+		return ""
+	}
+}
+
+func buildAgyCommand(workDir string, extraAddDirs []string, permissionMode string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "cd %s && agy", shellQuote(workDir))
+	b.WriteString(agyPermissionFlag(permissionMode))
+	for _, dir := range extraAddDirs {
+		fmt.Fprintf(&b, " --add-dir %s", shellQuote(dir))
+	}
+	b.WriteString(" && exit")
+	return b.String()
+}
+
+func startAgyHarness(sessionName, workDir string, exists bool, extraAddDirs []string) error {
+	debug.Phase("Start AGY")
+	if _, err := exec.LookPath("agy"); err != nil {
+		ui.PrintError(err,
+			"Failed to find AGY on PATH",
+			"  • Verify AGY is installed: which agy\n"+
+				"  • Test AGY manually: agy --help\n"+
+				"  • Check AGY authentication in the CLI")
+		return err
+	}
+
+	agyCmd := buildAgyCommand(workDir, extraAddDirs, modeFlagValue)
+	debug.Log("Sending command: %s", agyCmd)
+	if err := tmux.SendCommand(sessionName, agyCmd); err != nil {
+		ui.PrintError(err,
+			"Failed to start AGY in tmux session",
+			"  • Verify AGY is installed: which agy\n"+
+				"  • Test AGY manually: agy --help\n"+
+				"  • Check tmux session exists: tmux list-sessions\n"+
+				"  • Attach and start manually: tmux attach -t "+sessionName)
+		if !exists {
+			cleanupCodexTmuxSession(sessionName)
+		}
+		return err
+	}
+	debug.Log("AGY command sent successfully")
+	ui.PrintSuccess("Started AGY in tmux session")
+
+	debug.Log("Initial sleep (500ms) before polling")
+	time.Sleep(500 * time.Millisecond)
+
+	debug.Log("Waiting for AGY prompt readiness (timeout: 90s)")
+	if err := tmux.WaitForAgyPrompt(sessionName, 90*time.Second); err != nil {
+		debug.Log("AGY prompt readiness wait failed: %v", err)
+		ui.PrintError(err,
+			"AGY did not become ready",
+			"  • Attach to inspect: tmux attach -t "+sessionName+"\n"+
+				"  • Check for trust or authentication prompts\n"+
+				"  • Retry after resolving the prompt")
+		if !exists {
+			cleanupCodexTmuxSession(sessionName)
+		}
+		return err
+	}
+	debug.Log("✓ AGY prompt detected - AGY is ready")
+	ui.PrintSuccess("AGY adapter ready")
 	return nil
 }
 

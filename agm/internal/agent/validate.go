@@ -11,16 +11,16 @@ import (
 )
 
 // Known harness names
-var knownHarnesses = []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli", "antigravity"}
+var knownHarnesses = []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli", "agy"}
 
 // Harness-to-environment-variable mapping
 var harnessEnvVars = map[string]string{
 	"claude-code": "ANTHROPIC_API_KEY",
 	"gemini-cli":  "GEMINI_API_KEY",
 	"codex-cli":   "OPENAI_API_KEY",
-	// Antigravity (agy CLI) talks to Google AI Ultra. When the agy binary is on
-	// PATH it manages its own auth, so this key is only the fallback check.
-	"antigravity": "GEMINI_API_KEY",
+	// AGY talks to Google AI Ultra. When the agy binary is on PATH it manages
+	// its own auth, so this key is only the fallback check.
+	"agy": "GEMINI_API_KEY",
 }
 
 // Harness-to-binary mapping for PATH-based availability checks
@@ -28,7 +28,7 @@ var harnessBinaries = map[string][]string{
 	"claude-code": {"claude"},
 	"gemini-cli":  {"gemini"},
 	"codex-cli":   {"codex"},
-	"antigravity": {"agy"},
+	"agy":         {"agy"},
 }
 
 // lookPath is a variable for testing
@@ -39,11 +39,23 @@ var harnessHelpURLs = map[string]string{
 	"claude-code": "https://console.anthropic.com/",
 	"gemini-cli":  "https://ai.google.dev/",
 	"codex-cli":   "https://platform.openai.com/api-keys",
-	"antigravity": "https://antigravity.google/",
+	"agy":         "https://ultraai.app/",
+}
+
+// NormalizeHarnessName maps legacy or shorthand harness spellings onto AGM's
+// canonical harness identifiers.
+func NormalizeHarnessName(name string) string {
+	switch name {
+	case "agy-cli", "antigravity":
+		return "agy"
+	default:
+		return name
+	}
 }
 
 // ValidateHarnessName checks if the harness name is valid
 func ValidateHarnessName(name string) error {
+	name = NormalizeHarnessName(name)
 	for _, known := range knownHarnesses {
 		if name == known {
 			return nil
@@ -64,6 +76,7 @@ func ValidateHarnessName(name string) error {
 // A harness is available if its binary is on PATH (it manages its own auth),
 // or if the appropriate API key / auth environment is configured.
 func ValidateHarnessAvailability(name string) error {
+	name = NormalizeHarnessName(name)
 	// Special case: OpenCode availability = server reachable (not API key based)
 	if name == "opencode-cli" {
 		return validateOpenCodeServerAvailable()
@@ -106,6 +119,7 @@ func ValidateHarnessAvailability(name string) error {
 
 // isHarnessBinaryOnPath checks if the harness's CLI binary is available on PATH
 func isHarnessBinaryOnPath(name string) bool {
+	name = NormalizeHarnessName(name)
 	binaries, ok := harnessBinaries[name]
 	if !ok {
 		return false

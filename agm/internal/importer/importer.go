@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/agysession"
 	"github.com/vbonnet/dear-agent/agm/internal/codexsession"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/history"
@@ -50,7 +51,7 @@ func ImportOrphanedSession(conversationUUID, sessionName, workspace string, adap
 // ImportOrphanedSessionWithOptions imports an orphaned harness conversation by
 // creating an AGM manifest in Dolt.
 func ImportOrphanedSessionWithOptions(conversationUUID, sessionName, workspace string, adapter *dolt.Adapter, sessionsDir string, opts ImportOptions) (string, error) {
-	harness := opts.Harness
+	harness := agent.NormalizeHarnessName(opts.Harness)
 	if harness == "" {
 		harness = "claude-code"
 	}
@@ -59,6 +60,8 @@ func ImportOrphanedSessionWithOptions(conversationUUID, sessionName, workspace s
 		return importClaudeOrphanedSession(conversationUUID, sessionName, workspace, adapter)
 	case "codex-cli":
 		return importCodexOrphanedSession(conversationUUID, sessionName, workspace, adapter)
+	case "agy":
+		return importAgyOrphanedSession(conversationUUID, sessionName, workspace, adapter)
 	default:
 		return "", fmt.Errorf("unsupported import harness %q", harness)
 	}
@@ -185,6 +188,69 @@ func importCodexOrphanedSession(conversationUUID, sessionName, workspace string,
 		Codex: &manifest.Codex{
 			SessionID:      codexMeta.SessionID,
 			TranscriptPath: codexMeta.Path,
+		},
+		Tmux: manifest.Tmux{
+			SessionName: tmuxName,
+		},
+	}
+	if err := adapter.CreateSession(m); err != nil {
+		return "", fmt.Errorf("failed to create session in Dolt: %w", err)
+	}
+	return sessionID, nil
+}
+
+func importAgyOrphanedSession(conversationUUID, sessionName, workspace string, adapter *dolt.Adapter) (string, error) {
+	if conversationUUID == "" {
+		return "", fmt.Errorf("conversation UUID cannot be empty")
+	}
+	if sessionName == "" {
+		return "", fmt.Errorf("session name cannot be empty")
+	}
+	if adapter == nil {
+		return "", fmt.Errorf("Dolt adapter not available") //nolint:staticcheck // proper noun
+	}
+
+	if err := ValidateNotDuplicate(conversationUUID, adapter); err != nil {
+		return "", err
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to determine home directory: %w", err)
+	}
+	agyMeta, err := agysession.FindByID(homeDir, conversationUUID)
+	if err != nil {
+		return "", fmt.Errorf("failed to find AGY saved conversation: %w", err)
+	}
+	if agyMeta.WorkspacePath == "" {
+		return "", fmt.Errorf("failed to determine AGY workspace path for conversation %s", conversationUUID)
+	}
+
+	createdAt := agyMeta.ModTime
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	sessionID := uuid.New().String()
+	tmuxName := tmux.SanitizeSessionName(sessionName)
+	m := &manifest.Manifest{
+		SchemaVersion:    manifest.SchemaVersion,
+		SessionID:        sessionID,
+		Name:             sessionName,
+		CreatedAt:        createdAt,
+		UpdatedAt:        time.Now(),
+		Lifecycle:        "",
+		Workspace:        workspace,
+		Harness:          "agy",
+		Model:            agent.HarnessDefaults["agy"],
+		WorkingDirectory: agyMeta.WorkspacePath,
+		Context: manifest.Context{
+			Project: agyMeta.WorkspacePath,
+		},
+		Agy: &manifest.Agy{
+			ConversationID: agyMeta.ConversationID,
+			WorkspacePath:  agyMeta.WorkspacePath,
+			ConversationDB: agyMeta.ConversationDBPath,
+			TranscriptPath: agyMeta.TranscriptPath,
 		},
 		Tmux: manifest.Tmux{
 			SessionName: tmuxName,
@@ -479,7 +545,8 @@ func ValidateNotDuplicateWithAdapter(conversationUUID string, adapter dolt.Stora
 	// Check if any session has this UUID
 	for _, m := range manifests {
 		if m.Claude.UUID == conversationUUID ||
-			(m.Codex != nil && m.Codex.SessionID == conversationUUID) {
+			(m.Codex != nil && m.Codex.SessionID == conversationUUID) ||
+			(m.Agy != nil && m.Agy.ConversationID == conversationUUID) {
 			return fmt.Errorf("conversation UUID %s already has manifest (session: %s)", conversationUUID, m.Name)
 		}
 	}

@@ -621,7 +621,16 @@ func sendDirectly(recipientSession, senderName, messageID, formattedMessage, pro
 	}
 
 	// Fall back to tmux for CLI-based harnesses (Claude Code, Gemini CLI)
-	return sendViaTmux(recipientSession, senderName, messageID, formattedMessage, promptFile, false)
+	if err := sendViaTmux(recipientSession, senderName, messageID, formattedMessage, promptFile, false); err != nil {
+		return err
+	}
+	if harnessType == "agy" && (m.Agy == nil || m.Agy.ConversationID == "") {
+		if err := tmux.WaitForAgyPrompt(recipientSession, 60*time.Second); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: AGY metadata backfill wait failed: %v\n", err)
+		}
+		associateSpawnedAgySessionWithRetry(m.Name, 20, 500*time.Millisecond)
+	}
+	return nil
 }
 
 // sendViaTmux sends a message via tmux (for CLI-based agents like Claude, Gemini)
@@ -701,7 +710,7 @@ func isAPIBasedAgent(harnessType string) bool {
 	switch harnessType {
 	case "openai", "gpt":
 		return true
-	case "claude-code", "gemini-cli", "codex-cli", "opencode-cli":
+	case "claude-code", "gemini-cli", "codex-cli", "opencode-cli", "agy":
 		return false
 	default:
 		// Unknown harnesses default to tmux-based for backward compatibility

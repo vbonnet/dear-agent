@@ -45,6 +45,10 @@ func TestDefaultModelForHarness(t *testing.T) {
 	if !ok || model != "sonnet" {
 		t.Errorf("claude-code default: got (%q, %v), want (sonnet, true)", model, ok)
 	}
+	model, ok = DefaultModelForHarness("agy")
+	if !ok || model != "3.5-flash" {
+		t.Errorf("agy default: got (%q, %v), want (3.5-flash, true)", model, ok)
+	}
 	// No default
 	model, ok = DefaultModelForHarness("opencode-cli")
 	if ok {
@@ -132,12 +136,16 @@ func TestResolveModelFullName_CrossHarness(t *testing.T) {
 		// Claude aliases → Codex models
 		{"codex-cli", "opus", "gpt-5.4"},
 		{"codex-cli", "haiku", "gpt-5.4-mini"},
+		// Claude aliases → AGY model
+		{"agy", "opus", "gemini-3.5-flash-medium"},
+		{"agy", "haiku", "gemini-3.5-flash-medium"},
 		// Gemini aliases → Claude models
 		{"claude-code", "2.5-pro", "claude-opus-4-8[1m]"},
 		{"claude-code", "3.5-flash", "claude-haiku-4-5"},
 		// Native aliases still work (not affected)
 		{"gemini-cli", "3.5-flash", "gemini-3.5-flash"},
 		{"claude-code", "opus", "claude-opus-4-8[1m]"},
+		{"agy", "3.5-flash", "gemini-3.5-flash-medium"},
 	}
 	for _, tt := range tests {
 		got := ResolveModelFullName(tt.harness, tt.input)
