@@ -1,6 +1,6 @@
 // Command safe-merge is the authorised, vetted path for merging GitHub PRs.
 //
-// It enforces CLAUDE.md principle 9: an atomic wrapper that cannot be bypassed.
+// It enforces AGENTS.md principle 9: an atomic wrapper that cannot be bypassed.
 // Raw `gh pr merge` is denied by a PreToolUse hook that redirects here.
 //
 // Gates (all must pass before merge executes):
@@ -101,7 +101,7 @@ func run(argv []string) error {
 	})
 }
 
-const usage = `safe-merge — vetted, gated PR merger (CLAUDE.md principle 9 wrapper).
+const usage = `safe-merge — vetted, gated PR merger (AGENTS.md principle 9 wrapper).
 
 Raw 'gh pr merge' is denied; use this instead.
 

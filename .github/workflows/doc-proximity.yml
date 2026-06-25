@@ -135,7 +135,7 @@ jobs:
           if [ "$violations" -gt 0 ]; then
             echo ""
             echo "Doc proximity: ${violations} directory(ies) need living-doc review."
-            echo "See .claude/CLAUDE.md Living Documentation Policy for details."
+            echo "See AGENTS.md Living Documentation Policy for details."
             exit 1
           fi
 

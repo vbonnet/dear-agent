@@ -11,7 +11,7 @@
 // whole job — install to the wrong dir and the trigger never fires.
 //
 // It is a Go binary rather than a shell script on purpose: per
-// .claude/CLAUDE.md principle 4 ("Go is the default") and the language-policy
+// AGENTS.md principle 4 ("Go is the default") and the language-policy
 // CI gate, non-trivial install logic belongs in Go where it is testable.
 //
 // Positive-guidance stance (principle 2): when it cannot safely complete an

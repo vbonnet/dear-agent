@@ -1,7 +1,7 @@
 // Command safe-unlock is the authorised, vetted path for clearing stale git
 // lock files from a repository or linked worktree.
 //
-// It enforces CLAUDE.md principle 9: an atomic wrapper that makes the safe path
+// It enforces AGENTS.md principle 9: an atomic wrapper that makes the safe path
 // the only path. A raw `rm .git/index.lock` races any git that is genuinely
 // live; safe-unlock removes a lock only when it is provably stale — older than
 // --min-age AND held open by no process — and refuses (non-zero exit) any lock a

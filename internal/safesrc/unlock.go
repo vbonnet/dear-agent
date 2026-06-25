@@ -15,7 +15,7 @@ package safesrc
 //
 // Clearing it means `rm ~/src/<repo>/.git/index.lock` — a raw write into ~/src,
 // exactly what the deny-guards forbid. So an agent either can't fix it or routes
-// around the guard. Unlock is the atomic-wrapper answer (CLAUDE.md principle 9):
+// around the guard. Unlock is the atomic-wrapper answer (AGENTS.md principle 9):
 // the one vetted path that removes a *provably stale* index.lock and nothing
 // else.
 //

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # Tests for .claude/hooks/pretool-spawn-routing — the dogfooding-routing nudge
-# (Beads ce-qgf, CLAUDE.md §Dogfooding). Asserts the hook nudges on raw session
+# (Beads ce-qgf, AGENTS.md §Dogfooding). Asserts the hook nudges on raw session
 # spawns, stays silent on the AGM path and ordinary commands, and NEVER emits a
 # permissionDecision (so it can neither block nor auto-approve a call).
 #

@@ -24,7 +24,7 @@ type Rebaser interface {
 }
 
 // Merger performs the gated, irreversible squash-merge. The real implementation
-// delegates to the vetted safe-merge wrapper (ADR-029, CLAUDE.md principle 9).
+// delegates to the vetted safe-merge wrapper (ADR-029, AGENTS.md principle 9).
 // A non-nil error that is "not ready yet" (soak/bot/threads) is reported via
 // ErrNotReady so the loop treats it as wait-and-retry, not a hard failure.
 type Merger interface {

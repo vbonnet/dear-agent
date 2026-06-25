@@ -2,7 +2,7 @@
 <!--
   launchd agent for the bead-pr-sync reconciler (ce-yf2c).
   Runs `bead-pr-sync` every 4 hours to catch CLOSED beads whose referenced
-  PR has not yet merged and reopen them (DoD enforcement, per CLAUDE.md §6).
+  PR has not yet merged and reopen them (DoD enforcement, per AGENTS.md §6).
   The plist is a TEMPLATE: the install target
   (make install-bead-pr-sync-launchagent) substitutes __HOME__ for the real
   home directory before staging it into ~/Library/LaunchAgents.

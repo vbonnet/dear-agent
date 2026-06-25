@@ -12,7 +12,7 @@
 //
 // Recovering it by hand means typing raw git writes into ~/src — exactly the
 // thing the deny-rules forbid, so an agent either can't do it or routes around
-// the guard. safesrc is the atomic-wrapper answer (CLAUDE.md principle 9): one
+// the guard. safesrc is the atomic-wrapper answer (AGENTS.md principle 9): one
 // vetted binary that can perform ONLY the recovery sequence
 //
 //	git stash --include-untracked   (only if the tree is dirty)

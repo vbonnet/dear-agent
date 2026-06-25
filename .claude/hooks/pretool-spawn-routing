@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PreToolUse hook: dogfooding routing nudge (Beads ce-qgf, CLAUDE.md §Dogfooding).
+# PreToolUse hook: dogfooding routing nudge (Beads ce-qgf, AGENTS.md §Dogfooding).
 #
 # WHAT: when a session running in dear-agent tries to spawn a NEW top-level
 # agent session/task outside our own orchestration — a raw `claude` /
@@ -25,7 +25,7 @@ input="$(cat)"
 tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
 [ -n "$tool" ] || exit 0
 
-AGM_HELP='Route it through AGM so it feeds the self-improvement flywheel and lands in the VROOM decision trail: `agm new <name>` then `agm send <name> "<task>"` (or `agm supervisor run` for governance-relevant multi-step work). See dear-agent CLAUDE.md §Dogfooding. This is a reminder, not a block — your call proceeds normally.'
+AGM_HELP='Route it through AGM so it feeds the self-improvement flywheel and lands in the VROOM decision trail: `agm new <name>` then `agm send <name> "<task>"` (or `agm supervisor run` for governance-relevant multi-step work). See dear-agent AGENTS.md §Dogfooding. This is a reminder, not a block — your call proceeds normally.'
 
 emit() { # $1 = guidance text -> additionalContext only, then allow normal flow
   jq -cn --arg c "$1" \

@@ -278,7 +278,7 @@ func GetTerminalWidth() int
 
 **Design Decisions**:
 - **Why use term.IsTerminal() not os.Getenv("TERM")?** → More reliable, detects pipes/redirects correctly
-- **Why cap at 100 characters?** → User preference from ~/.claude/CLAUDE.md (terminal-friendly width)
+- **Why cap at 100 characters?** → User preference from shared agent instructions (terminal-friendly width)
 - **Why return 0 in non-TTY?** → Signals "no terminal" to callers (progressbar skips width logic)
 - **Why default to 100 on error?** → Graceful degradation (better than panic or zero-width bar)
 

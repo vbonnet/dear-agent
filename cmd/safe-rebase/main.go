@@ -103,7 +103,7 @@ func run(argv []string) error {
 
 const usage = `safe-rebase — rebase a feature branch onto main with safety checks.
 
-This is the approved merge strategy for agents handling stale PRs (CLAUDE.md).
+This is the approved merge strategy for agents handling stale PRs (AGENTS.md).
 Force-push is legitimate ONLY on feature branches during rebase — this wrapper
 enforces that invariant by refusing to operate on protected branches.
 

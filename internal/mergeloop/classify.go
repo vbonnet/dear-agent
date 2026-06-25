@@ -62,7 +62,7 @@ var DefaultSensitiveGlobs = []string{
 }
 
 // DefaultMaxAgentAttempts caps agent code-fix attempts per PR against the same
-// failure signature before abandonment (CLAUDE.md principle 3: two-retry max).
+// failure signature before abandonment (AGENTS.md principle 3: two-retry max).
 const DefaultMaxAgentAttempts = 2
 
 // Policy holds the classification thresholds. The zero value is unusable;
