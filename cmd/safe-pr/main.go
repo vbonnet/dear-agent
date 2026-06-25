@@ -250,8 +250,16 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 	)
 	span.End()
 
-	cwd, _ := os.Getwd()
-	home, _ := os.UserHomeDir()
+	cwd, cwdErr := os.Getwd()
+	if cwdErr != nil {
+		cwd = ""
+		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not determine current directory for audit log: %v\n", cwdErr)
+	}
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		home = ""
+		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not determine home directory for audit log: %v\n", homeErr)
+	}
 	rec := safepr.AuditRecord{
 		Time: time.Now().UTC().Format(time.RFC3339), Verb: req.Verb, Dir: cwd,
 		Args: args, SessionID: sessionID,
