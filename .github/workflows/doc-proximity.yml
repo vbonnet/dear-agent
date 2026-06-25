@@ -23,6 +23,12 @@ on:
   pull_request:
     branches: [main, develop]
 
+# Cancel an in-flight run when a new commit is pushed to the same PR — no point
+# annotating doc proximity against a stale revision.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: read

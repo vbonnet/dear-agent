@@ -114,6 +114,10 @@ jobs:
           # takes effect and reports only code changed relative to main.
           # CLI args override config-file settings in golangci-lint v2.
           args: ${{ github.event_name == 'push' && '--new-from-rev=HEAD~1' || '' }}
+          # Only push-to-main writes the lint cache; PR/schedule runs read it
+          # but don't save, so transient PR branches can't churn or evict the
+          # shared 10 GB Actions cache that main's hot path depends on.
+          skip-save-cache: ${{ github.event_name != 'push' }}
 
   # Smart integration-test selection. The selector (cmd/test-affected)
   # walks the dependency graph from this branch vs. origin/main and runs
