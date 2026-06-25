@@ -28,7 +28,7 @@ var harnessBinaries = map[string][]string{
 	"claude-code": {"claude"},
 	"gemini-cli":  {"gemini"},
 	"codex-cli":   {"codex"},
-	"agy": {"agy"},
+	"agy":         {"agy"},
 }
 
 // lookPath is a variable for testing

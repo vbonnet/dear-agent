@@ -1,9 +1,13 @@
 package tmux
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
@@ -15,7 +19,7 @@ var agyTrustPromptPatterns = []string{
 }
 
 func containsAgyPromptPattern(content string) bool {
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if strings.TrimSpace(line) == ">" {
 			return true
 		}
@@ -51,14 +55,26 @@ func IsAgyIdle(sessionName string) (bool, error) {
 func WaitForAgyPrompt(sessionName string, timeout time.Duration) error {
 	debug.Log("\n🔍 Starting AGY prompt detection for session: %s", sessionName)
 
-	deadline := time.Now().Add(timeout)
+	baseCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(baseCtx, timeout)
+	defer cancel()
+
 	checkCount := 0
 	trustAccepted := false
 
-	for time.Now().Before(deadline) {
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for AGY prompt (waited %v, performed %d checks): %w", timeout, checkCount, ctx.Err())
+		default:
+		}
 		checkCount++
 
-		output, err := exec.Command("tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-20").Output()
+		output, err := exec.CommandContext(ctx, "tmux", "-S", GetSocketPath(), "capture-pane", "-t", sessionName, "-p", "-S", "-20").Output()
+		if ctx.Err() != nil {
+			return fmt.Errorf("timeout or cancellation waiting for AGY prompt: %w", ctx.Err())
+		}
 		if err != nil {
 			time.Sleep(500 * time.Millisecond)
 			continue
@@ -87,6 +103,4 @@ func WaitForAgyPrompt(sessionName string, timeout time.Duration) error {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-
-	return fmt.Errorf("timeout waiting for AGY prompt (waited %v, performed %d checks)", timeout, checkCount)
 }

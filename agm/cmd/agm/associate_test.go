@@ -212,17 +212,8 @@ func TestResolveAssociateHarness(t *testing.T) {
 }
 
 func TestUpdateNonClaudeAssociationManifest_PreservesExistingProjectAndWorkingDirectory(t *testing.T) {
-	origWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
 	newWD := t.TempDir()
-	if err := os.Chdir(newWD); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(origWD)
-	})
+	t.Chdir(newWD)
 
 	m := &manifest.Manifest{
 		Context:          manifest.Context{Project: "/tmp/existing-project"},

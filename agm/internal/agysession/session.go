@@ -1,3 +1,5 @@
+// Package agysession resolves saved AGY conversation metadata from the local
+// Antigravity CLI app-data directory.
 package agysession
 
 import (
@@ -9,6 +11,11 @@ import (
 	"sort"
 	"strings"
 	"time"
+)
+
+const (
+	workspaceMarker = "Initializing CLI store manager for workspace "
+	maxLogLineSize  = 1024 * 1024
 )
 
 // Metadata describes a saved AGY conversation discovered from the local AGY
@@ -129,22 +136,14 @@ func workspaceFromLastConversations(appDir, conversationID string) string {
 }
 
 func workspaceFromLogs(appDir, conversationID string) (string, string, error) {
-	logDir := filepath.Join(appDir, "log")
-	entries, err := os.ReadDir(logDir)
+	logPaths, err := agyLogPaths(appDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", "", fmt.Errorf("no AGY log directory found for conversation %s", conversationID)
 		}
-		return "", "", fmt.Errorf("read AGY log directory: %w", err)
+		return "", "", err
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Name() > entries[j].Name()
-	})
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		logPath := filepath.Join(logDir, entry.Name())
+	for _, logPath := range logPaths {
 		workspacePath, matched, err := scanLogForConversation(logPath, conversationID)
 		if err != nil {
 			return "", "", err
@@ -157,22 +156,14 @@ func workspaceFromLogs(appDir, conversationID string) (string, string, error) {
 }
 
 func latestConversationForWorkspaceFromLogs(appDir, workspacePath string) (string, string, error) {
-	logDir := filepath.Join(appDir, "log")
-	entries, err := os.ReadDir(logDir)
+	logPaths, err := agyLogPaths(appDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", "", fmt.Errorf("no AGY log directory found for workspace %s", workspacePath)
 		}
-		return "", "", fmt.Errorf("read AGY log directory: %w", err)
+		return "", "", err
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Name() > entries[j].Name()
-	})
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		logPath := filepath.Join(logDir, entry.Name())
+	for _, logPath := range logPaths {
 		conversationID, matched, err := scanLogForWorkspace(logPath, workspacePath)
 		if err != nil {
 			return "", "", err
@@ -184,6 +175,25 @@ func latestConversationForWorkspaceFromLogs(appDir, workspacePath string) (strin
 	return "", "", fmt.Errorf("no AGY conversation recorded for workspace: %s", workspacePath)
 }
 
+func agyLogPaths(appDir string) ([]string, error) {
+	logDir := filepath.Join(appDir, "log")
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		return nil, fmt.Errorf("read AGY log directory: %w", err)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() > entries[j].Name()
+	})
+	logPaths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		logPaths = append(logPaths, filepath.Join(logDir, entry.Name()))
+	}
+	return logPaths, nil
+}
+
 func scanLogForConversation(logPath, conversationID string) (workspacePath string, matched bool, err error) {
 	file, err := os.Open(logPath)
 	if err != nil {
@@ -192,10 +202,11 @@ func scanLogForConversation(logPath, conversationID string) (workspacePath strin
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLineSize)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if idx := strings.Index(line, "Initializing CLI store manager for workspace "); idx >= 0 {
-			workspacePath = strings.TrimSpace(line[idx+len("Initializing CLI store manager for workspace "):])
+		if detectedWorkspacePath, ok := workspaceFromLogLine(line); ok {
+			workspacePath = detectedWorkspacePath
 		}
 		if strings.Contains(line, "Created conversation "+conversationID) ||
 			strings.Contains(line, "Resuming conversation "+conversationID) ||
@@ -218,10 +229,11 @@ func scanLogForWorkspace(logPath, workspacePath string) (conversationID string, 
 
 	currentWorkspace := ""
 	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLineSize)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if idx := strings.Index(line, "Initializing CLI store manager for workspace "); idx >= 0 {
-			currentWorkspace = strings.TrimSpace(line[idx+len("Initializing CLI store manager for workspace "):])
+		if detectedWorkspacePath, ok := workspaceFromLogLine(line); ok {
+			currentWorkspace = detectedWorkspacePath
 			continue
 		}
 		if currentWorkspace != workspacePath {
@@ -250,13 +262,24 @@ func scanLogForWorkspace(logPath, workspacePath string) (conversationID string, 
 }
 
 func extractConversationID(line, marker string) string {
-	idx := strings.Index(line, marker)
-	if idx < 0 {
+	_, conversationID, found := strings.Cut(line, marker)
+	if !found {
 		return ""
 	}
-	conversationID := strings.TrimSpace(line[idx+len(marker):])
-	if end := strings.IndexAny(conversationID, " \t("); end >= 0 {
-		conversationID = conversationID[:end]
+	conversationID = strings.TrimSpace(conversationID)
+	for _, sep := range []string{" ", "\t", "("} {
+		prefix, _, found := strings.Cut(conversationID, sep)
+		if found {
+			conversationID = prefix
+		}
 	}
 	return conversationID
+}
+
+func workspaceFromLogLine(line string) (string, bool) {
+	_, workspacePath, found := strings.Cut(line, workspaceMarker)
+	if !found {
+		return "", false
+	}
+	return strings.TrimSpace(workspacePath), true
 }

@@ -120,8 +120,8 @@ func associateSpawnedAgySessionWithRetry(sessionName string, attempts int, delay
 			enrichErr := enrichManifestWithAgyConversation(m)
 			if enrichErr == nil {
 				persistErr := persistAssociatedManifest(adapter, m)
-				_ = adapter.Close()
 				if persistErr == nil {
+					_ = adapter.Close()
 					return
 				}
 				debug.Log("AGY association retry %d/%d: failed to persist metadata: %v", attempt, attempts, persistErr)

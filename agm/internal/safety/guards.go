@@ -222,7 +222,7 @@ func detectAgySessionUninitialized(paneContent string) *Violation {
 		}
 	}
 
-	for _, line := range strings.Split(paneContent, "\n") {
+	for line := range strings.SplitSeq(paneContent, "\n") {
 		if strings.TrimSpace(line) == ">" {
 			return nil
 		}
