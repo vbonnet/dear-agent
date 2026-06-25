@@ -139,11 +139,12 @@ func loadTranscript(projectsDir, sessionID string) (string, error) {
 		return "", err
 	}
 
-	// Trim to ~20 000 chars to keep well within context limits.
+	// Trim to ~20 000 runes to keep well within context limits.
 	combined := strings.Join(parts, "\n\n")
-	const maxChars = 20000
-	if len(combined) > maxChars {
-		combined = combined[:maxChars] + "\n[...truncated...]"
+	const maxRunes = 20000
+	runes := []rune(combined)
+	if len(runes) > maxRunes {
+		combined = string(runes[:maxRunes]) + "\n[...truncated...]"
 	}
 	return combined, nil
 }
@@ -153,16 +154,18 @@ func loadTranscript(projectsDir, sessionID string) (string, error) {
 func findTranscriptPath(projectsDir, sessionID string) (string, error) {
 	if sessionID != "" {
 		var found string
+		errFound := errors.New("transcript found")
 		err := filepath.WalkDir(projectsDir, func(p string, d os.DirEntry, walkErr error) error {
 			if walkErr != nil || d.IsDir() {
 				return walkErr
 			}
 			if d.Name() == sessionID+".jsonl" {
 				found = p
+				return errFound
 			}
 			return nil
 		})
-		if err != nil {
+		if err != nil && !errors.Is(err, errFound) {
 			return "", err
 		}
 		if found == "" {
@@ -244,6 +247,9 @@ func listSkillNames(skillsDir string) ([]string, error) {
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
 		names = append(names, e.Name())
 	}
 	return names, nil
@@ -293,6 +299,7 @@ NOTHING_NEW`, skillList, transcript)
 
 // parseResponse extracts the structured fields from the model's raw reply.
 func parseResponse(raw string) (*ExtractionResult, error) {
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
 	raw = strings.TrimSpace(raw)
 	if raw == "NOTHING_NEW" {
 		return nil, ErrNothingNew
@@ -376,7 +383,7 @@ func newAnthropicCaller(apiKey string) *anthropicCaller {
 
 func (c *anthropicCaller) Call(ctx context.Context, prompt string) (string, error) {
 	resp, err := c.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     "claude-sonnet-4-6",
+		Model:     "claude-3-5-sonnet-latest",
 		MaxTokens: 4096,
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),

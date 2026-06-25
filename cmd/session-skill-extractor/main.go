@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 )
 
 func main() {
@@ -56,7 +57,10 @@ func run(args []string, stdout, stderr *os.File) int {
 		DryRun:      *dryRun,
 	}
 
-	result, err := Extract(context.Background(), cfg, newAnthropicCaller(apiKey))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	result, err := Extract(ctx, cfg, newAnthropicCaller(apiKey))
 	if errors.Is(err, ErrEmptyTranscript) {
 		fmt.Fprintln(stdout, "nothing to extract: transcript is empty")
 		return 0
