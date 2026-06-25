@@ -351,6 +351,84 @@ printf '{"ts":"%s","role":"orchestrator","kind":"supervisor.orch.dispatched","pa
   >> ~/.agm/vroom/trail.jsonl
 ```
 
+#### Deploy task type (deterministic, no worker)
+
+When a roadmap item is `task_type: "deploy"`, do NOT spawn a worker session.
+Installing a host artifact from the manifest is a deterministic operation with
+no design space — `dear-deploy` already wraps it in the principle-9 atomic
+sequence (stage → verify → activate, no force/bypass). Spawning an Opus worker
+for it would burn a worker slot and the shared usage ceiling for a `cp`-shaped
+task. Run it yourself, inline, in this tick.
+
+The `deploy_target` field names the manifest artifact(s) to install (a single
+name, a space-separated list, or `all`/empty for the whole manifest). Run
+`dear-deploy install` against the read-only golden checkout — it reads the source
+from the repo and writes only to the deployed host paths (`~/Library/LaunchAgents`,
+`~/.config/claude-code/hooks`), never back into `~/src`:
+
+`dear-deploy` is installed to `~/go/bin` (like `safe-pr`, `agm`, `bd`). If it is
+not on PATH, run it straight from the read-only checkout instead of building into
+`~/src` (which the write-guard blocks): `go -C ~/src/dear-agent run ./cmd/dear-deploy ...`
+— `go run` writes only to the build cache, never the repo. Substitute that form
+for the bare `dear-deploy` below if needed.
+
+```bash
+# TARGET is the deploy_target value; empty/"all" installs the whole manifest.
+TARGET="<deploy_target>"
+DEPLOY_OUT=$(dear-deploy install $TARGET --repo-root ~/src/dear-agent --json 2>&1)
+DEPLOY_RC=$?
+```
+
+Record the dispatch so the item is not re-run every tick (note the `deploy`
+model marker — there is no worker session):
+```bash
+printf '{"bead_id":"%s","session":"deploy","model":"deploy","dispatched_at":"%s"}\n' \
+  "<bead-id>" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ~/.agm/vroom/dispatched.jsonl
+```
+
+Then act on the exit code:
+
+- **`DEPLOY_RC == 0` (install succeeded):** verify the artifact is clean — this
+  is the deploy bead's verification gate and Definition of Done (a deploy bead
+  opens no PR, so the "PR merged" DoD does not apply — see protocol.md "Deploy
+  task type"):
+  ```bash
+  STATUS_OUT=$(dear-deploy status $TARGET --repo-root ~/src/dear-agent --json 2>&1)
+  STATUS_RC=$?    # 0 = clean (deployed matches source); 2 = drift; 1 = error
+  ```
+  - If `STATUS_RC == 0`: the artifact is deployed and clean. Record the result,
+    note the bead with the status evidence, and close it:
+    ```bash
+    printf '{"ts":"%s","role":"orchestrator","kind":"supervisor.orch.deploy_done","payload":{"bead_id":"%s","target":"%s"}}\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<bead-id>" "$TARGET" >> ~/.agm/vroom/trail.jsonl
+    bd --db ~/beads/context-engine/.beads note <bead-id> "STATUS: DONE — dear-deploy install $TARGET ok; status clean. $STATUS_OUT"
+    bd --db ~/beads/context-engine/.beads close <bead-id> --reason "Deployed $TARGET via dear-deploy (deterministic install; status clean)"
+    ```
+  - If `STATUS_RC != 0` (install reported success but status still shows drift):
+    treat as a failed deploy — record, note the bead, and leave it OPEN for
+    re-dispatch next tick:
+    ```bash
+    printf '{"ts":"%s","role":"orchestrator","kind":"supervisor.orch.deploy_failed","payload":{"bead_id":"%s","target":"%s","status_rc":%s}}\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<bead-id>" "$TARGET" "$STATUS_RC" >> ~/.agm/vroom/trail.jsonl
+    bd --db ~/beads/context-engine/.beads note <bead-id> "STATUS: FAILED — install ok but status drift (rc=$STATUS_RC): $STATUS_OUT"
+    ```
+- **`DEPLOY_RC != 0` (install failed):** the artifact was NOT deployed (on any
+  failure before activate, dear-deploy removes the staged file and leaves the
+  previous artifact untouched). Record the failure and leave the bead OPEN:
+  ```bash
+  printf '{"ts":"%s","role":"orchestrator","kind":"supervisor.orch.deploy_failed","payload":{"bead_id":"%s","target":"%s","rc":%s}}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "<bead-id>" "$TARGET" "$DEPLOY_RC" >> ~/.agm/vroom/trail.jsonl
+  bd --db ~/beads/context-engine/.beads note <bead-id> "STATUS: FAILED — dear-deploy install $TARGET exited $DEPLOY_RC: $DEPLOY_OUT"
+  ```
+  A common cause is an unbuilt source (e.g. a write-guard hook whose `bin/`
+  binary has not been compiled — the manifest marks those `optional`, and
+  `install` of a missing required source fails fast). Do NOT retry blindly more
+  than twice; if it keeps failing, leave the bead open with the failure note for
+  a human or a `worker` follow-up to build the missing source.
+
+After handling a deploy item, continue to the next roadmap item — do NOT fall
+through into the worker-spawn steps above.
+
 ### Step 7: Monitor Active Workers
 
 **Principle: never kill a worker that is making progress.** A worker producing
@@ -629,5 +707,7 @@ merge task from the implementation task.
 | Worker no manifest progress >30min (any state) | Level 2: diagnose state, send wrap-up or defer nudge |
 | Worker no progress >45min + PERMISSION_PROMPT/OFFLINE + prior nudge failed | Level 3: force-kill, re-dispatch bead |
 | Worker producing tokens (any runtime) | Healthy — no action |
+| Roadmap item is `task_type: "deploy"` | Run `dear-deploy install <deploy_target>` inline (no worker, no PR); verify with `dear-deploy status`, then close the bead |
+| Deploy install/status fails | Record `supervisor.orch.deploy_failed`, note the bead `STATUS: FAILED`, leave OPEN; ≤2 retries then hand to a human/`worker` follow-up |
 | No roadmap items to dispatch | Record idle tick, check back next tick |
 | agm session new fails | Record error, retry next tick |
