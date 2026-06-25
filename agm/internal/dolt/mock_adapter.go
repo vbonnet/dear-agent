@@ -263,6 +263,14 @@ func (m *MockAdapter) copyManifest(src *manifest.Manifest) *manifest.Manifest {
 			TranscriptPath: src.Codex.TranscriptPath,
 		}
 	}
+	if src.Agy != nil {
+		dst.Agy = &manifest.Agy{
+			ConversationID: src.Agy.ConversationID,
+			WorkspacePath:  src.Agy.WorkspacePath,
+			ConversationDB: src.Agy.ConversationDB,
+			TranscriptPath: src.Agy.TranscriptPath,
+		}
+	}
 
 	// Copy EngramMetadata if present
 	if src.EngramMetadata != nil {
@@ -426,7 +434,8 @@ func (m *MockAdapter) GetSessionByUUID(conversationUUID string) (*manifest.Manif
 	defer m.mu.RUnlock()
 	for _, s := range m.sessions {
 		if s.Claude.UUID == conversationUUID ||
-			(s.Codex != nil && s.Codex.SessionID == conversationUUID) {
+			(s.Codex != nil && s.Codex.SessionID == conversationUUID) ||
+			(s.Agy != nil && s.Agy.ConversationID == conversationUUID) {
 			return m.copyManifest(s), nil
 		}
 	}

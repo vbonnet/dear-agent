@@ -240,7 +240,7 @@ func selectChildHarness(parentManifest *manifest.Manifest) (string, error) {
 	if err := agent.ValidateHarnessName(selectedHarness); err != nil {
 		ui.PrintError(err,
 			"Invalid harness specified",
-			"  • Valid harnesses: claude-code, gemini-cli, codex-cli, opencode-cli\n"+
+			"  • Valid harnesses: claude-code, gemini-cli, codex-cli, opencode-cli, agy\n"+
 				"  • Run 'agm harness list' to see available harnesses")
 		return "", err
 	}

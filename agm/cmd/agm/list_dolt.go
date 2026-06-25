@@ -269,6 +269,8 @@ func shortHarness(harness string) string {
 		return "cdx"
 	case "opencode-cli":
 		return "oc"
+	case "agy", "antigravity", "agy-cli":
+		return "agy"
 	default:
 		return harness
 	}

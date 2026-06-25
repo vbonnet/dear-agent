@@ -32,6 +32,9 @@ func runHarnessPostCreate(sessionName string, modeAppliedAtStartup bool) error {
 	case harnessName == "codex-cli":
 		runCodexPostCreate(sessionName)
 		return nil
+	case harnessName == "agy":
+		runAgyPostCreate(sessionName)
+		return nil
 	default:
 		debug.Log("Skipping initialization sequence for harness: %s", harnessName)
 		return nil
@@ -148,6 +151,33 @@ func runCodexPostCreate(sessionName string) {
 			debug.Log("Codex prompt detected, session ready")
 		}
 		deliverInitialPrompt(sessionName, false, false)
+	}
+}
+
+// runAgyPostCreate waits for the AGY prompt, captures the spawned AGY
+// conversation ID, and delivers --prompt / --prompt-file even in detached mode
+// once the interactive prompt is ready.
+func runAgyPostCreate(sessionName string) {
+	debug.Phase("AGY Post-Create")
+	switch {
+	case os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "":
+		debug.Log("Test environment: skipping AGY prompt wait")
+		ui.PrintSuccess("AGY test session ready (init sequence skipped)")
+	default:
+		debug.Log("Waiting for AGY prompt readiness before metadata capture and prompt delivery")
+		if err := tmux.WaitForAgyPrompt(sessionName, 30*time.Second); err != nil {
+			debug.Log("AGY prompt readiness wait failed (non-fatal): %v", err)
+		} else {
+			debug.Log("AGY prompt detected, session ready")
+		}
+		associateSpawnedAgySession(sessionName)
+		deliverInitialPrompt(sessionName, false, false)
+		if prompt != "" || promptFile != "" {
+			if err := tmux.WaitForAgyPrompt(sessionName, 60*time.Second); err != nil {
+				debug.Log("AGY post-prompt readiness wait failed (non-fatal): %v", err)
+			}
+			associateSpawnedAgySessionWithRetry(sessionName, 20, 500*time.Millisecond)
+		}
 	}
 }
 

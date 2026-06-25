@@ -28,6 +28,7 @@ var agentRegistry = map[string]func() (Agent, error){
 
 // GetHarness returns a harness adapter instance by name
 func GetHarness(name string) (Agent, error) {
+	name = NormalizeHarnessName(name)
 	constructor, ok := agentRegistry[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown harness: %s", name)

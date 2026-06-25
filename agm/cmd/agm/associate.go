@@ -71,6 +71,9 @@ Examples:
   # Infer harness from the current tmux pane where possible
   agm session associate my-session --create --harness auto
 
+  # Create or update an AGY session record
+  agm session associate my-agy --create --harness agy
+
   # Combined rename + associate (sends /rename to Claude, then associates)
   agm session associate my-session --rename --create`,
 	Args: cobra.ExactArgs(1),
@@ -434,7 +437,7 @@ Examples:
 
 func init() {
 	associateCmd.Flags().StringVar(&claudeUUID, "uuid", "", "Claude session UUID (auto-detected if not specified)")
-	associateCmd.Flags().StringVar(&associateHarness, "harness", "", "Harness for --create when no existing session is found (auto, claude-code, codex-cli, gemini-cli, opencode-cli)")
+	associateCmd.Flags().StringVar(&associateHarness, "harness", "", "Harness for --create when no existing session is found (auto, claude-code, codex-cli, gemini-cli, opencode-cli, agy)")
 	associateCmd.Flags().BoolVar(&createNew, "create", false, "Create new manifest if it doesn't exist")
 	associateCmd.Flags().BoolVar(&updateTimestampOnly, "update-timestamp-only", false, "Only update timestamp, don't change UUID (fast path for same UUID)")
 	associateCmd.Flags().BoolVar(&autoDetectOnly, "auto-detect-only", false, "Auto-detect UUID only if high confidence (for hooks, silent mode)")
@@ -463,7 +466,7 @@ func resolveAssociateHarness(sessionName string, existing *manifest.Manifest) (s
 		if err := agent.ValidateHarnessName(associateHarness); err != nil {
 			return "", err
 		}
-		return associateHarness, nil
+		return agent.NormalizeHarnessName(associateHarness), nil
 	}
 }
 
@@ -487,6 +490,8 @@ func harnessFromPaneCommands(commands []string) string {
 			return "gemini-cli"
 		case "opencode":
 			return "opencode-cli"
+		case "agy":
+			return "agy"
 		case "claude":
 			return "claude-code"
 		}
@@ -542,6 +547,9 @@ func associateNonClaudeSession(sessionName, sessionsDir, harness string, existin
 			manifestPath = filepath.Join(sessionsDir, m.SessionID, "manifest.yaml")
 		}
 	}
+	if harness == "agy" {
+		enrichAssociatedAgyManifest(adapter, m)
+	}
 
 	if err := persistAssociatedManifest(adapter, m); err != nil {
 		return err
@@ -562,6 +570,10 @@ func associateNonClaudeSession(sessionName, sessionsDir, harness string, existin
 
 func newNonClaudeAssociationManifest(sessionName, harness, workspace string) *manifest.Manifest {
 	cwd := currentWorkingDirectory()
+	model := ""
+	if d, ok := agent.DefaultModelForHarness(harness); ok {
+		model = d
+	}
 	return &manifest.Manifest{
 		SchemaVersion: manifest.SchemaVersion,
 		SessionID:     uuid.New().String(),
@@ -577,6 +589,7 @@ func newNonClaudeAssociationManifest(sessionName, harness, workspace string) *ma
 			SessionName: sessionName,
 		},
 		Harness:          harness,
+		Model:            model,
 		WorkingDirectory: cwd,
 	}
 }
@@ -593,9 +606,16 @@ func updateNonClaudeAssociationManifest(m *manifest.Manifest, sessionName, harne
 		m.Tmux.SessionName = sessionName
 	}
 	if wd := currentWorkingDirectory(); wd != "" {
-		m.WorkingDirectory = wd
+		if m.WorkingDirectory == "" {
+			m.WorkingDirectory = wd
+		}
 		if m.Context.Project == "" {
 			m.Context.Project = wd
+		}
+	}
+	if m.Model == "" {
+		if d, ok := agent.DefaultModelForHarness(harness); ok {
+			m.Model = d
 		}
 	}
 	if m.SessionID == "" {

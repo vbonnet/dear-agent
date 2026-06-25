@@ -211,6 +211,38 @@ func TestResolveAssociateHarness(t *testing.T) {
 	}
 }
 
+func TestUpdateNonClaudeAssociationManifest_PreservesExistingProjectAndWorkingDirectory(t *testing.T) {
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	newWD := t.TempDir()
+	if err := os.Chdir(newWD); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(origWD)
+	})
+
+	m := &manifest.Manifest{
+		Context:          manifest.Context{Project: "/tmp/existing-project"},
+		WorkingDirectory: "/tmp/existing-project",
+		Tmux:             manifest.Tmux{SessionName: "existing"},
+		Harness:          "agy",
+		Model:            "3.5-flash",
+		SessionID:        "sid-1",
+	}
+
+	updateNonClaudeAssociationManifest(m, "existing", "agy", "oss")
+
+	if m.Context.Project != "/tmp/existing-project" {
+		t.Fatalf("project = %q, want existing value", m.Context.Project)
+	}
+	if m.WorkingDirectory != "/tmp/existing-project" {
+		t.Fatalf("working directory = %q, want existing value", m.WorkingDirectory)
+	}
+}
+
 // writeHistoryEntries is a helper to create a test history.jsonl file
 func writeHistoryEntries(t *testing.T, historyPath string, entries []history.ConversationEntry) {
 	t.Helper()

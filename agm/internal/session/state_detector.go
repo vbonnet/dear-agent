@@ -134,6 +134,14 @@ func isInteractiveHarnessIdle(sessionName string) (bool, error) {
 	if codexIdle {
 		return true, nil
 	}
+
+	agyIdle, err := tmux.IsAgyIdle(sessionName)
+	if err != nil {
+		return false, fmt.Errorf("failed during AGY prompt check: %w", err)
+	}
+	if agyIdle {
+		return true, nil
+	}
 	return false, nil
 }
 
