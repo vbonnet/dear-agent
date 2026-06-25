@@ -44,12 +44,13 @@ func main() {
 }
 
 type parsedArgs struct {
-	req          safepr.Request
-	wayfinderDir string
-	bead         string
-	timeout      time.Duration
-	verifyCI     bool
-	showedHelp   bool
+	req           safepr.Request
+	wayfinderDir  string
+	bead          string
+	timeout       time.Duration
+	verifyCI      bool
+	skipPreflight bool
+	showedHelp    bool
 }
 
 func parseArgs(argv []string) (*parsedArgs, error) {
@@ -96,6 +97,8 @@ func parseArgs(argv []string) (*parsedArgs, error) {
 			// PR's head SHA and warn (never fail) if it did not. Off by default
 			// so the common create path is never slowed by a poll.
 			p.verifyCI = true
+		case "--skip-preflight":
+			p.skipPreflight = true
 		default:
 			p.req.GhArgs = append(p.req.GhArgs, arg)
 		}
@@ -116,7 +119,10 @@ func run(argv []string) error {
 	if err != nil {
 		return err
 	}
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get current directory: %w", err)
+	}
 	if err := validateRemoteURL(cwd); err != nil {
 		return err
 	}
@@ -135,6 +141,12 @@ func run(argv []string) error {
 	p.req.Session = &s
 	if err := p.req.Validate(); err != nil {
 		return err
+	}
+
+	if p.req.Verb == "create" && !p.skipPreflight {
+		if err := runPreflightFull(cwd); err != nil {
+			return err
+		}
 	}
 
 	shutdown := otelsetup.InitTracer("safe-pr")
@@ -166,6 +178,27 @@ func validateRemoteURL(dir string) error {
 	url := strings.TrimSpace(string(out))
 	if !strings.HasPrefix(url, expectedRemotePrefix) {
 		return fmt.Errorf("remote URL %q does not look like a vbonnet GitHub remote. Expected: %s<repo>", url, expectedRemotePrefix)
+	}
+	return nil
+}
+
+// preflightTimeout bounds `make preflight-full` — large enough to cover
+// go test -race plus govulncheck on a warm module cache.
+const preflightTimeout = 10 * time.Minute
+
+// runPreflightFull runs `make -C dir preflight-full` and returns a clear error
+// on failure. Assigned to a var so tests can replace it without spawning make.
+var runPreflightFull = func(dir string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), preflightTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "make", "-C", dir, "preflight-full")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("preflight-full failed — fix issues before creating PR (timed out after %s)", preflightTimeout)
+		}
+		return fmt.Errorf("preflight-full failed — fix issues before creating PR: %w", err)
 	}
 	return nil
 }
@@ -217,8 +250,16 @@ func execGh(req *safepr.Request, timeout time.Duration, verifyCI bool) error {
 	)
 	span.End()
 
-	cwd, _ := os.Getwd()
-	home, _ := os.UserHomeDir()
+	cwd, cwdErr := os.Getwd()
+	if cwdErr != nil {
+		cwd = ""
+		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not determine current directory for audit log: %v\n", cwdErr)
+	}
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		home = ""
+		fmt.Fprintf(os.Stderr, "safe-pr: WARNING: could not determine home directory for audit log: %v\n", homeErr)
+	}
 	rec := safepr.AuditRecord{
 		Time: time.Now().UTC().Format(time.RFC3339), Verb: req.Verb, Dir: cwd,
 		Args: args, SessionID: sessionID,
@@ -393,10 +434,16 @@ Flags:
   --verify-ci         after create, poll the new PR's head SHA and warn (never
                       fail) if no CI check-run starts within 60s — catches the
                       push-then-PR-open race that strands a PR with 0 checks
+  --skip-preflight    skip the preflight-full gate (emergency/hotfix only);
+                      by default, safe-pr create runs 'make preflight-full' in
+                      the current directory and blocks PR creation on failure
   -h, --help          show this help
 
 All other arguments pass through to 'gh pr create' / 'gh pr close'.
 The session trace is stamped into the PR body (create) or comment (close).
+On create, 'make preflight-full' is run first to ensure local build/test/lint
+health before the PR hits CI (shift-left gate). Use --skip-preflight only for
+emergencies; prefer fixing the underlying issues instead.
 On create, squash auto-merge is armed on the new PR (best-effort) so it merges
 itself once required checks and reviews pass.
 Refused for create: --web, --fill*, --body-file/-F, --editor (interactive or
