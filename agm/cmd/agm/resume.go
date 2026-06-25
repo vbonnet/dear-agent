@@ -604,11 +604,13 @@ func resumeSession(adapter *dolt.Adapter, sessionID, manifestPath, harnessName s
 // stored UUID is missing.
 func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessName string, health *HealthStatus) error {
 	var fullCmd string
-	switch harnessName {
+	switch agent.NormalizeHarnessName(harnessName) {
 	case "opencode-cli":
 		fullCmd = fmt.Sprintf("cd %s && opencode attach && exit", shellQuote(health.WorktreePath))
 	case "codex-cli":
 		fullCmd = buildCodexResumeCommand(m, health)
+	case "agy":
+		fullCmd = buildAgyResumeCommand(m, health)
 	case "claude-code":
 		fullCmd = buildClaudeResumeCommand(adapter, m, health)
 	default:
@@ -635,6 +637,18 @@ func buildCodexResumeCommand(m *manifest.Manifest, health *HealthStatus) string 
 			shellQuote(m.Codex.SessionID))
 	}
 	return buildCodexCommandForModel(health.TmuxSessionName, health.WorktreePath, model, nil)
+}
+
+func buildAgyResumeCommand(m *manifest.Manifest, health *HealthStatus) string {
+	if m.Agy != nil && m.Agy.ConversationID != "" {
+		return fmt.Sprintf("cd %s && agy%s --conversation %s --add-dir %s && exit",
+			shellQuote(health.WorktreePath),
+			agyPermissionFlag(m.PermissionMode),
+			shellQuote(m.Agy.ConversationID),
+			shellQuote(health.WorktreePath))
+	}
+	ui.PrintWarning("No AGY conversation ID found - starting new AGY session")
+	return buildAgyCommand(health.WorktreePath, nil, m.PermissionMode)
 }
 
 // buildClaudeResumeCommand assembles `claude --resume <uuid>` (or a bare
@@ -697,11 +711,13 @@ func resolveResumeDir(resumeUUID, worktreePath string) string {
 }
 
 func waitForResumedHarness(harnessName string, health *HealthStatus) error {
-	switch harnessName {
+	switch agent.NormalizeHarnessName(harnessName) {
 	case "claude-code":
 		return waitForResumedClaude(health)
 	case "codex-cli":
 		return waitForResumedCodex(health)
+	case "agy":
+		return waitForResumedAgy(health)
 	default:
 		return nil
 	}
@@ -755,6 +771,28 @@ func waitForResumedClaude(health *HealthStatus) error {
 		fmt.Println("  Attaching now - conversation should appear shortly")
 	} else {
 		ui.PrintSuccess("Conversation loaded and ready!")
+	}
+	return nil
+}
+
+func waitForResumedAgy(health *HealthStatus) error {
+	var promptWaitErr error
+	spinErr := spinner.New().
+		Title("Waiting for AGY conversation to load...").
+		Accessible(true).
+		Action(func() {
+			promptWaitErr = tmux.WaitForAgyPrompt(health.TmuxSessionName, 60*time.Second)
+		}).
+		Run()
+	if spinErr != nil {
+		return fmt.Errorf("spinner error: %w", spinErr)
+	}
+	fmt.Println()
+	if promptWaitErr != nil {
+		ui.PrintWarning("AGY conversation is taking longer than expected to load")
+		fmt.Println("  Attaching now - AGY should appear shortly")
+	} else {
+		ui.PrintSuccess("AGY conversation loaded and ready!")
 	}
 	return nil
 }

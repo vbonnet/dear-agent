@@ -37,6 +37,35 @@ For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
 - Codex launch commands MUST NOT inherit Claude OAuth, Anthropic API key,
   Engram, or OpenTelemetry environment intended for Claude sessions
 
+For `agy`, AGM treats Antigravity as a real interactive CLI harness:
+
+- create paths MUST launch `agy` in tmux with the AGM working directory and
+  wait for an AGY prompt before detached startup-prompt delivery
+- state detection MUST recognize an idle AGY `>` prompt as ready/sendable
+- state detection MUST NOT treat the AGY trust prompt (`Do you trust the
+  contents of this project?`) as ready
+- startup waits MUST auto-accept the default AGY trust prompt so detached
+  session creation does not race prompt delivery
+- send paths MUST route `agy` through tmux delivery, not through Claude-only
+  assumptions or API adapters
+- manifest and Dolt metadata MUST preserve the AGY conversation ID for both
+  AGM-created and imported AGY sessions
+- duplicate detection for orphan/session import MUST treat the AGY conversation
+  ID as the saved-session identifier
+- import/register paths MUST support orphaned AGY conversations by resolving
+  `~/.gemini/antigravity-cli/conversations/<conversation_id>.db`, transcript
+  logs under `~/.gemini/antigravity-cli/brain/<conversation_id>/`, and the
+  originating workspace path from AGY cache/log metadata
+- resume paths for imported or previously-associated AGY conversations MUST
+  launch `agy --conversation <conversation_id>` instead of starting a fresh
+  conversation
+- AGM MUST capture and persist the spawned AGY conversation ID after `agm
+  session new --harness agy` so later `resume`, `list`, and `archive`
+  operations target the same saved conversation
+- AGY sessions with AGM `permission_mode=auto` MUST launch and resume with
+  `--dangerously-skip-permissions`; AGY does not expose Claude-style in-pane
+  permission-mode cycling, so non-auto modes remain the AGY default behavior
+
 Claude-specific features remain extension points, not baseline requirements for
 other harnesses. `claude --resume <uuid>`, Shift-Tab permission-mode cycling,
 and Claude slash-command behavior are available only for `claude-code` unless a

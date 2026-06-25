@@ -263,6 +263,75 @@ func TestBuildCodexResumeCommand_DefaultModel(t *testing.T) {
 	}
 }
 
+func TestBuildAgyResumeCommand(t *testing.T) {
+	m := &manifest.Manifest{
+		Agy: &manifest.Agy{
+			ConversationID: "117ff898-a964-4a9f-b460-1be4a8a49b17",
+		},
+	}
+	health := &HealthStatus{
+		WorktreePath: "/tmp/agy-work",
+	}
+
+	cmd := buildAgyResumeCommand(m, health)
+
+	for _, want := range []string{
+		"cd '/tmp/agy-work'",
+		"agy --conversation '117ff898-a964-4a9f-b460-1be4a8a49b17'",
+		"--add-dir '/tmp/agy-work'",
+		"&& exit",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("command %q missing %q", cmd, want)
+		}
+	}
+}
+
+func TestBuildAgyResumeCommand_AutoPermissionMode(t *testing.T) {
+	m := &manifest.Manifest{
+		PermissionMode: "auto",
+		Agy: &manifest.Agy{
+			ConversationID: "117ff898-a964-4a9f-b460-1be4a8a49b17",
+		},
+	}
+	health := &HealthStatus{
+		WorktreePath: "/tmp/agy-work",
+	}
+
+	cmd := buildAgyResumeCommand(m, health)
+
+	if !strings.Contains(cmd, "agy --dangerously-skip-permissions --conversation '117ff898-a964-4a9f-b460-1be4a8a49b17'") {
+		t.Errorf("auto AGY resume should skip permissions, got %q", cmd)
+	}
+}
+
+func TestBuildAgyResumeCommand_FallbacksToNewSession(t *testing.T) {
+	health := &HealthStatus{
+		WorktreePath: "/tmp/agy-work",
+	}
+
+	cmd := buildAgyResumeCommand(&manifest.Manifest{}, health)
+
+	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy && exit") {
+		t.Errorf("expected fallback AGY launch command, got %q", cmd)
+	}
+	if strings.Contains(cmd, "--conversation") {
+		t.Errorf("fallback AGY command should not include --conversation: %q", cmd)
+	}
+}
+
+func TestBuildAgyResumeCommand_FallbacksToNewSessionWithAutoPermissionMode(t *testing.T) {
+	health := &HealthStatus{
+		WorktreePath: "/tmp/agy-work",
+	}
+
+	cmd := buildAgyResumeCommand(&manifest.Manifest{PermissionMode: "auto"}, health)
+
+	if !strings.Contains(cmd, "cd '/tmp/agy-work' && agy --dangerously-skip-permissions && exit") {
+		t.Errorf("expected fallback AGY launch command with auto permissions, got %q", cmd)
+	}
+}
+
 func TestBuildCodexResumeCommand_ImportedSessionUsesCodexResume(t *testing.T) {
 	sessionID := "019ef2af-97e0-7443-9f07-03e40636740c"
 	m := &manifest.Manifest{

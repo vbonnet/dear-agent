@@ -335,6 +335,48 @@ func TestDetectCodexSessionUninitialized(t *testing.T) {
 	}
 }
 
+func TestDetectAgySessionUninitialized(t *testing.T) {
+	tests := []struct {
+		name          string
+		paneContent   string
+		wantViolation bool
+		wantEvidence  string
+	}{
+		{
+			name:          "agy prompt visible",
+			paneContent:   "AGM_NEW_OK\n>\n? for shortcuts",
+			wantViolation: false,
+		},
+		{
+			name:          "agy trust prompt",
+			paneContent:   "Do you trust the contents of this project?\n> Yes, I trust this folder",
+			wantViolation: true,
+			wantEvidence:  "agy trust prompt visible",
+		},
+		{
+			name:          "shell prompt only",
+			paneContent:   "vbonnet@mac agy-e2e-workdir %",
+			wantViolation: true,
+			wantEvidence:  "no agy prompt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := detectAgySessionUninitialized(tt.paneContent)
+			if tt.wantViolation && v == nil {
+				t.Error("expected violation but got nil")
+			}
+			if !tt.wantViolation && v != nil {
+				t.Errorf("expected no violation but got: %s", v.Message)
+			}
+			if v != nil && tt.wantEvidence != "" && v.Evidence != tt.wantEvidence {
+				t.Errorf("expected evidence %q, got %q", tt.wantEvidence, v.Evidence)
+			}
+		})
+	}
+}
+
 func TestDetectClaudeMidResponse(t *testing.T) {
 	tests := []struct {
 		name          string

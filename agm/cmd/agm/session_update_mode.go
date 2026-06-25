@@ -10,19 +10,20 @@ import (
 var sessionUpdateModeCmd = &cobra.Command{
 	Use:   "update-mode <session-id> <mode>",
 	Short: "Update permission mode for a session",
-	Long: `Update the Claude Code permission mode for a session.
+	Long: `Update the stored permission mode for a session.
 
 Valid modes:
-  default - Default permission level (prompts for each tool)
-  plan    - Plan mode (shows tool plan before execution)
-  ask     - Ask mode (prompts for confirmation before each tool)
-  allow   - Allow mode (executes tools without prompting)
+  default - Default permission level
+  plan    - Plan mode
+  auto    - Auto-approve mode
+  ask     - Legacy alias retained for older hook payloads
+  allow   - Legacy alias retained for older hook payloads
 
-This command is typically called by the PreToolUse hook to track
-mode changes automatically, but can also be used manually.
+This command is typically called by hooks to track mode changes
+automatically, but can also be used manually.
 
 Examples:
-  agm session update-mode my-session plan
+  agm session update-mode my-session auto
   agm session update-mode abc123 default`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -33,11 +34,15 @@ Examples:
 		validModes := map[string]bool{
 			"default": true,
 			"plan":    true,
+			"auto":    true,
 			"ask":     true,
 			"allow":   true,
 		}
 		if !validModes[mode] {
-			return fmt.Errorf("invalid mode: %s (valid modes: default, plan, ask, allow)", mode)
+			return fmt.Errorf("invalid mode: %s (valid modes: default, plan, auto, ask, allow)", mode)
+		}
+		if mode == "allow" {
+			mode = "auto"
 		}
 
 		// Get storage adapter

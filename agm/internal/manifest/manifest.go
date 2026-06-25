@@ -26,6 +26,7 @@ type Manifest struct {
 	Context                 Context           `yaml:"context"`
 	Claude                  Claude            `yaml:"claude"`
 	Codex                   *Codex            `yaml:"codex,omitempty" json:"codex,omitempty"` // Codex CLI saved-session metadata
+	Agy                     *Agy              `yaml:"agy,omitempty" json:"agy,omitempty"`     // AGY saved-conversation metadata
 	Tmux                    Tmux              `yaml:"tmux"`
 	OpenCode                *OpenCode         `yaml:"opencode,omitempty"`   // OpenCode session metadata
 	Harness                 string            `yaml:"harness,omitempty"`    // Harness specifies the AI harness (claude-code, gemini-cli, codex-cli, opencode-cli)
@@ -127,6 +128,14 @@ type Claude struct {
 type Codex struct {
 	SessionID      string `yaml:"session_id,omitempty"`      // Codex saved-session UUID (required for codex resume)
 	TranscriptPath string `yaml:"transcript_path,omitempty"` // Resolved rollout JSONL path at import time
+}
+
+// Agy represents AGY saved-conversation metadata.
+type Agy struct {
+	ConversationID string `yaml:"conversation_id,omitempty"`      // AGY conversation UUID (required for agy resume)
+	WorkspacePath  string `yaml:"workspace_path,omitempty"`       // Original AGY workspace path for discovery/audit
+	ConversationDB string `yaml:"conversation_db_path,omitempty"` // Resolved AGY sqlite conversation DB path
+	TranscriptPath string `yaml:"transcript_path,omitempty"`      // Resolved AGY transcript JSONL path
 }
 
 // Tmux represents tmux session metadata

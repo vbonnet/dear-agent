@@ -61,6 +61,7 @@ type Detector struct {
 	blockedPermissionPattern *regexp.Regexp
 	readyPattern             *regexp.Regexp
 	codexReadyPattern        *regexp.Regexp
+	agyReadyPattern          *regexp.Regexp
 	waitingAgentPattern      *regexp.Regexp
 	loopingPattern           *regexp.Regexp
 	backgroundTasksPattern   *regexp.Regexp
@@ -115,6 +116,11 @@ func NewDetector() *Detector {
 		// Codex text so generic box-drawing UI or menu selectors do not become
 		// sendable prompts.
 		codexReadyPattern: regexp.MustCompile(`(?ms)(?:>_\s+OpenAI Codex|OpenAI Codex[\s\S]*?/model to change)`),
+
+		// AGY Ready: the live AGY interactive prompt is a bare ">" line after
+		// the last response. Keep it line-anchored so trust/menu lines like
+		// "> Yes, I trust this folder" do not become sendable prompts.
+		agyReadyPattern: regexp.MustCompile(`(?m)^\s*>\s*$`),
 
 		// Waiting Agent: sub-agent or background task indicators
 		// Matches "Agent:", "Launching agent", "agent to", spinner with agent context
@@ -208,6 +214,15 @@ func (d *Detector) DetectState(output string, lastOutputTime time.Time) Detectio
 			State:      StateReady,
 			Timestamp:  now,
 			Evidence:   "Codex composer detected",
+			Confidence: "high",
+		}
+	}
+
+	if d.agyReadyPattern.MatchString(output) {
+		return DetectionResult{
+			State:      StateReady,
+			Timestamp:  now,
+			Evidence:   "AGY prompt detected",
 			Confidence: "high",
 		}
 	}
@@ -379,6 +394,11 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 
 	// Codex composer/footer visible = session is at idle prompt, can receive.
 	if d.codexReadyPattern.MatchString(output) {
+		return CanReceiveYes
+	}
+
+	// AGY bare prompt visible = session is at idle prompt, can receive.
+	if d.agyReadyPattern.MatchString(output) {
 		return CanReceiveYes
 	}
 

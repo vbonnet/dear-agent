@@ -94,3 +94,38 @@ func TestSessionMetadata_CodexRoundTrip(t *testing.T) {
 		t.Errorf("Codex transcript path = %q, want %q", got.Codex.TranscriptPath, src.Codex.TranscriptPath)
 	}
 }
+
+func TestSessionMetadata_AgyRoundTrip(t *testing.T) {
+	src := &manifest.Manifest{
+		Agy: &manifest.Agy{
+			ConversationID: "117ff898-a964-4a9f-b460-1be4a8a49b17",
+			WorkspacePath:  "/tmp/agy-probe",
+			ConversationDB: "/Users/vbonnet/.gemini/antigravity-cli/conversations/117ff898-a964-4a9f-b460-1be4a8a49b17.db",
+			TranscriptPath: "/Users/vbonnet/.gemini/antigravity-cli/brain/117ff898-a964-4a9f-b460-1be4a8a49b17/.system_generated/logs/transcript.jsonl",
+		},
+	}
+	b, err := json.Marshal(buildSessionMetadata(src))
+	if err != nil {
+		t.Fatalf("marshal metadata: %v", err)
+	}
+
+	var got manifest.Manifest
+	if err := unmarshalEngramMetadata(&got, b); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if got.Agy == nil {
+		t.Fatal("AGY metadata did not round-trip")
+	}
+	if got.Agy.ConversationID != src.Agy.ConversationID {
+		t.Errorf("AGY conversation ID = %q, want %q", got.Agy.ConversationID, src.Agy.ConversationID)
+	}
+	if got.Agy.WorkspacePath != src.Agy.WorkspacePath {
+		t.Errorf("AGY workspace path = %q, want %q", got.Agy.WorkspacePath, src.Agy.WorkspacePath)
+	}
+	if got.Agy.ConversationDB != src.Agy.ConversationDB {
+		t.Errorf("AGY conversation DB = %q, want %q", got.Agy.ConversationDB, src.Agy.ConversationDB)
+	}
+	if got.Agy.TranscriptPath != src.Agy.TranscriptPath {
+		t.Errorf("AGY transcript path = %q, want %q", got.Agy.TranscriptPath, src.Agy.TranscriptPath)
+	}
+}

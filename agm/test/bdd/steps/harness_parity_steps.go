@@ -12,20 +12,24 @@ import (
 )
 
 type harnessParityState struct {
-	paneOutput          string
-	detected            state.DetectionResult
-	canReceive          state.CanReceive
-	harness             string
-	codexSessionUUID    string
-	preservedCodexUUID  bool
-	readyFileCreated    bool
-	waitedForComposer   bool
-	startupDelivered    bool
-	sessionListFields   []string
-	sessionListHasArray bool
-	lifecycleReflected  bool
-	codexArchiveInvoked bool
-	tmuxResumeLaunched  bool
+	paneOutput                 string
+	detected                   state.DetectionResult
+	canReceive                 state.CanReceive
+	harness                    string
+	codexSessionUUID           string
+	agyConversationID          string
+	preservedCodexUUID         bool
+	preservedAgyConversationID bool
+	agyResumeAutoPermissions   bool
+	readyFileCreated           bool
+	waitedForComposer          bool
+	waitedForAgyPrompt         bool
+	startupDelivered           bool
+	sessionListFields          []string
+	sessionListHasArray        bool
+	lifecycleReflected         bool
+	codexArchiveInvoked        bool
+	tmuxResumeLaunched         bool
 }
 
 type harnessParityStateKey struct{}
@@ -38,22 +42,34 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 
 	ctx.Step(`^a Codex CLI composer pane$`, aCodexCLIComposerPane)
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
+	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
+	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
 	ctx.Step(`^AGM checks whether the session can receive input$`, agmChecksWhetherTheSessionCanReceiveInput)
 	ctx.Step(`^delivery should be allowed$`, deliveryShouldBeAllowed)
 	ctx.Step(`^delivery should be queued$`, deliveryShouldBeQueued)
 	ctx.Step(`^the detected session state should be "([^"]*)"$`, detectedSessionStateShouldBe)
 	ctx.Step(`^Codex CLI is available$`, codexCLIIsAvailable)
+	ctx.Step(`^AGY is available$`, agyIsAvailable)
 	ctx.Step(`^AGM creates a detached Codex session with a startup prompt$`, agmCreatesDetachedCodexSessionWithStartupPrompt)
+	ctx.Step(`^AGM creates a detached AGY session with a startup prompt$`, agmCreatesDetachedAGYSessionWithStartupPrompt)
 	ctx.Step(`^AGM should wait for the Codex composer$`, agmShouldWaitForTheCodexComposer)
+	ctx.Step(`^AGM should wait for the AGY prompt$`, agmShouldWaitForTheAGYPrompt)
 	ctx.Step(`^AGM should deliver the startup prompt even though the session is detached$`, agmShouldDeliverStartupPromptDetached)
 	ctx.Step(`^an existing tmux session running Codex CLI$`, anExistingTmuxSessionRunningCodexCLI)
+	ctx.Step(`^an existing tmux session running AGY$`, anExistingTmuxSessionRunningAGY)
 	ctx.Step(`^/agm:agm-assoc runs in that session$`, agmAssocRunsInThatSession)
 	ctx.Step(`^AGM should create or update a Dolt session record with harness "([^"]*)"$`, agmShouldCreateOrUpdateDoltRecordWithHarness)
 	ctx.Step(`^AGM should create the ready-file signal$`, agmShouldCreateTheReadyFileSignal)
 	ctx.Step(`^a Codex saved session exists outside AGM$`, aCodexSavedSessionExistsOutsideAGM)
+	ctx.Step(`^an AGY saved conversation exists outside AGM$`, anAGYSavedConversationExistsOutsideAGM)
 	ctx.Step(`^AGM imports the Codex session UUID with harness "([^"]*)"$`, agmImportsCodexSessionUUIDWithHarness)
+	ctx.Step(`^AGM imports the AGY conversation ID with harness "([^"]*)"$`, agmImportsAGYConversationIDWithHarness)
 	ctx.Step(`^the record should preserve the Codex session UUID$`, recordShouldPreserveCodexSessionUUID)
+	ctx.Step(`^the record should preserve the AGY conversation ID$`, recordShouldPreserveAGYConversationID)
+	ctx.Step(`^an imported AGY session with permission mode "([^"]*)"$`, anImportedAGYSessionWithPermissionMode)
 	ctx.Step(`^AGM should launch a tmux pane that resumes the Codex conversation$`, agmShouldLaunchTmuxPaneResumingCodexConversation)
+	ctx.Step(`^AGM should launch a tmux pane that resumes the AGY conversation$`, agmShouldLaunchTmuxPaneResumingAGYConversation)
+	ctx.Step(`^the AGY resume command should include "([^"]*)"$`, theAGYResumeCommandShouldInclude)
 	ctx.Step(`^AGM has Codex session records in Dolt$`, agmHasCodexSessionRecordsInDolt)
 	ctx.Step(`^an agent lists sessions as JSON with fields "([^"]*)"$`, agentListsSessionsAsJSONWithFields)
 	ctx.Step(`^the output should include a "sessions" array$`, outputShouldIncludeSessionsArray)
@@ -97,6 +113,27 @@ func aCodexCLITrustPrompt(ctx context.Context) error {
 
 › 1. Yes, continue
   2. No, exit`
+	return nil
+}
+
+func anAGYReadyPrompt(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.paneOutput = "READY\n>"
+	return nil
+}
+
+func anAGYTrustPrompt(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.paneOutput = `Do you trust the contents of this project?
+
+> Yes, I trust this folder
+  No, ask me again later`
 	return nil
 }
 
@@ -153,12 +190,31 @@ func codexCLIIsAvailable(ctx context.Context) error {
 	return nil
 }
 
+func agyIsAvailable(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.harness = "agy"
+	return nil
+}
+
 func agmCreatesDetachedCodexSessionWithStartupPrompt(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
 	}
 	harnessState.waitedForComposer = true
+	harnessState.startupDelivered = true
+	return nil
+}
+
+func agmCreatesDetachedAGYSessionWithStartupPrompt(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.waitedForAgyPrompt = true
 	harnessState.startupDelivered = true
 	return nil
 }
@@ -170,6 +226,17 @@ func agmShouldWaitForTheCodexComposer(ctx context.Context) error {
 	}
 	if !harnessState.waitedForComposer {
 		return fmt.Errorf("expected AGM to wait for the Codex composer")
+	}
+	return nil
+}
+
+func agmShouldWaitForTheAGYPrompt(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.waitedForAgyPrompt {
+		return fmt.Errorf("expected AGM to wait for the AGY prompt")
 	}
 	return nil
 }
@@ -191,6 +258,15 @@ func anExistingTmuxSessionRunningCodexCLI(ctx context.Context) error {
 		return err
 	}
 	harnessState.harness = "codex-cli"
+	return nil
+}
+
+func anExistingTmuxSessionRunningAGY(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.harness = "agy"
 	return nil
 }
 
@@ -234,6 +310,15 @@ func aCodexSavedSessionExistsOutsideAGM(ctx context.Context) error {
 	return nil
 }
 
+func anAGYSavedConversationExistsOutsideAGM(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.agyConversationID = "117ff898-a964-4a9f-b460-1be4a8a49b17"
+	return nil
+}
+
 func agmImportsCodexSessionUUIDWithHarness(ctx context.Context, harness string) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
@@ -262,6 +347,47 @@ func recordShouldPreserveCodexSessionUUID(ctx context.Context) error {
 	return nil
 }
 
+func agmImportsAGYConversationIDWithHarness(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harness != "agy" {
+		return fmt.Errorf("agy import must use agy harness, got %q", harness)
+	}
+	if harnessState.agyConversationID == "" {
+		return fmt.Errorf("no AGY conversation ID arranged")
+	}
+	harnessState.harness = harness
+	harnessState.preservedAgyConversationID = true
+	harnessState.tmuxResumeLaunched = true
+	return nil
+}
+
+func recordShouldPreserveAGYConversationID(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.preservedAgyConversationID {
+		return fmt.Errorf("expected Dolt record to preserve AGY conversation ID")
+	}
+	return nil
+}
+
+func anImportedAGYSessionWithPermissionMode(ctx context.Context, mode string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.harness = "agy"
+	harnessState.agyConversationID = "117ff898-a964-4a9f-b460-1be4a8a49b17"
+	harnessState.preservedAgyConversationID = true
+	harnessState.tmuxResumeLaunched = true
+	harnessState.agyResumeAutoPermissions = mode == "auto"
+	return nil
+}
+
 func agmShouldLaunchTmuxPaneResumingCodexConversation(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
@@ -269,6 +395,28 @@ func agmShouldLaunchTmuxPaneResumingCodexConversation(ctx context.Context) error
 	}
 	if !harnessState.tmuxResumeLaunched {
 		return fmt.Errorf("expected AGM to launch a tmux pane with codex resume")
+	}
+	return nil
+}
+
+func agmShouldLaunchTmuxPaneResumingAGYConversation(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.tmuxResumeLaunched {
+		return fmt.Errorf("expected AGM to launch a tmux pane with agy resume")
+	}
+	return nil
+}
+
+func theAGYResumeCommandShouldInclude(ctx context.Context, expected string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if expected == "--dangerously-skip-permissions" && !harnessState.agyResumeAutoPermissions {
+		return fmt.Errorf("expected AGM to include %q in the AGY resume command", expected)
 	}
 	return nil
 }

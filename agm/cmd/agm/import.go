@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/importer"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
@@ -22,11 +23,13 @@ var importCmd = &cobra.Command{
 	Short: "Import orphaned conversation by UUID",
 	Long: `Import orphaned conversation by creating an AGM manifest.
 
-This command imports a Claude or Codex conversation that exists in the
+This command imports a Claude, Codex, or AGY conversation that exists in the
 harness saved-session history but has no AGM manifest.
 
 For Claude, it validates the UUID under ~/.claude/projects. For Codex, it
-resolves ~/.codex/sessions/**/rollout-*.jsonl by session_meta.session_id.
+resolves ~/.codex/sessions/**/rollout-*.jsonl by session_meta.session_id. For
+AGY, it resolves ~/.gemini/antigravity-cli/conversations/<id>.db plus AGY
+cache/log metadata for the source workspace path.
 It will:
 1. Validate the UUID exists in the selected harness saved-session files
 2. Check that no manifest already exists for this UUID
@@ -39,7 +42,7 @@ Arguments:
 
 Flags:
   --name       - Name for the AGM session (optional, prompts if not provided)
-  --harness    - Harness to import (claude-code or codex-cli; default claude-code)
+  --harness    - Harness to import (claude-code, codex-cli, agy; default claude-code)
   --workspace  - Workspace name (e.g., "oss", "acme")
                  If omitted, uses auto-detected workspace or prompts
 
@@ -47,6 +50,7 @@ Examples:
   agm session import 370980e1-e16c-48a1-9d17-caca0d3910ba
   agm session import a1b2c3d4-e5f6-4789-a1b2-c3d4e5f67890 --name my-session
   agm session import 019ef2af-97e0-7443-9f07-03e40636740c --harness codex-cli --name recovered-codex
+  agm session import 117ff898-a964-4a9f-b460-1be4a8a49b17 --harness agy --name recovered-agy
   agm session import orphan-uuid --workspace oss --name recovered-work`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -110,6 +114,7 @@ Examples:
 		}
 
 		// Import the orphaned session
+		importHarness = agent.NormalizeHarnessName(importHarness)
 		fmt.Printf("Importing conversation %s...\n", conversationUUID)
 
 		sessionID, err := importer.ImportOrphanedSessionWithOptions(conversationUUID, sessionName, workspace, adapter, sessionsDir, importer.ImportOptions{
@@ -121,6 +126,7 @@ Examples:
 				"  • Verify UUID exists in the selected harness saved-session store\n"+
 					"  • Claude: ls ~/.claude/projects/*/<uuid>.jsonl\n"+
 					"  • Codex: rg '<uuid>' ~/.codex/sessions ~/.codex/archived_sessions\n"+
+					"  • AGY: ls ~/.gemini/antigravity-cli/conversations/<uuid>.db\n"+
 					"  • Check if already imported: agm session list\n"+
 					"  • Verify workspace is correct: agm workspace list")
 			return err
@@ -147,6 +153,6 @@ func init() {
 	sessionCmd.AddCommand(importCmd)
 
 	importCmd.Flags().StringVar(&importName, "name", "", "Name for the imported session")
-	importCmd.Flags().StringVar(&importHarness, "harness", "claude-code", "Harness for the imported session (claude-code, codex-cli)")
+	importCmd.Flags().StringVar(&importHarness, "harness", "claude-code", "Harness for the imported session (claude-code, codex-cli, agy)")
 	importCmd.Flags().StringVar(&importWorkspace, "workspace", "", "Workspace name (e.g., oss, acme)")
 }

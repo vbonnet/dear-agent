@@ -266,6 +266,17 @@ func TestValidateHarnessAvailability_BinaryOnPath(t *testing.T) {
 		}
 	})
 
+	t.Run("AGY available when binary on PATH", func(t *testing.T) {
+		mockLookPath(t, map[string]bool{"agy": true})
+		t.Setenv("GEMINI_API_KEY", "")
+		os.Unsetenv("GEMINI_API_KEY")
+
+		err := ValidateHarnessAvailability("agy")
+		if err != nil {
+			t.Errorf("Expected no error with agy on PATH, got: %v", err)
+		}
+	})
+
 	t.Run("Gemini unavailable without binary or key", func(t *testing.T) {
 		mockLookPath(t, map[string]bool{})
 		origKey := os.Getenv("GEMINI_API_KEY")
@@ -304,4 +315,21 @@ func TestIsHarnessBinaryOnPath(t *testing.T) {
 			t.Error("Expected false for unknown harness")
 		}
 	})
+}
+
+func TestNormalizeHarnessName(t *testing.T) {
+	tests := map[string]string{
+		"agy":          "agy",
+		"agy-cli":      "agy",
+		"antigravity":  "agy",
+		"codex-cli":    "codex-cli",
+		"claude-code":  "claude-code",
+		"gemini-cli":   "gemini-cli",
+		"opencode-cli": "opencode-cli",
+	}
+	for input, want := range tests {
+		if got := NormalizeHarnessName(input); got != want {
+			t.Errorf("NormalizeHarnessName(%q) = %q, want %q", input, got, want)
+		}
+	}
 }

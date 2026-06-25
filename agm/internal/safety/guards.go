@@ -170,6 +170,9 @@ func CheckSessionUninitialized(sessionName, socketPath, harness string) *Violati
 	if harness == "codex-cli" {
 		return detectCodexSessionUninitialized(content)
 	}
+	if harness == "agy" {
+		return detectAgySessionUninitialized(content)
+	}
 
 	// Also check if Claude process is running
 	claudeRunning, procErr := tmux.IsClaudeRunning(sessionName)
@@ -205,6 +208,31 @@ func detectCodexSessionUninitialized(paneContent string) *Violation {
 		Message:    "No Codex composer detected. Codex may not have started yet.",
 		Suggestion: "Wait for Codex to initialize, or attach to verify.",
 		Evidence:   "no codex composer",
+	}
+}
+
+func detectAgySessionUninitialized(paneContent string) *Violation {
+	if strings.Contains(paneContent, "Do you trust the contents of this project?") ||
+		strings.Contains(paneContent, "Yes, I trust this folder") {
+		return &Violation{
+			Guard:      ViolationSessionUninitialized,
+			Message:    "AGY is showing the trust prompt (not yet initialized).",
+			Suggestion: "Attach to the session and answer the trust prompt first.",
+			Evidence:   "agy trust prompt visible",
+		}
+	}
+
+	for line := range strings.SplitSeq(paneContent, "\n") {
+		if strings.TrimSpace(line) == ">" {
+			return nil
+		}
+	}
+
+	return &Violation{
+		Guard:      ViolationSessionUninitialized,
+		Message:    "No AGY prompt (>) detected. AGY may not have started yet.",
+		Suggestion: "Wait for AGY to initialize, or attach to verify.",
+		Evidence:   "no agy prompt",
 	}
 }
 
