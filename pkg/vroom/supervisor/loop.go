@@ -36,6 +36,7 @@ type Loop struct {
 	check    CheckSkill
 	recovery PeerRecovery
 	failover FailoverObserver
+	drainer  EscalationDrainer
 	trail    decisiontrail.Trail
 	interval time.Duration
 	clock    func() time.Time
@@ -85,8 +86,9 @@ type LoopConfig struct {
 	Supervisor Supervisor
 	Mesh       PeerLookup
 	Check      CheckSkill
-	Recovery   PeerRecovery     // nil = detect-only, no corrective action
-	Failover   FailoverObserver // nil = no degraded-mode / leader-election machinery
+	Recovery   PeerRecovery      // nil = detect-only, no corrective action
+	Failover   FailoverObserver  // nil = no degraded-mode / leader-election machinery
+	Drainer    EscalationDrainer // nil = a live agent drains escalations by hand
 	Trail      decisiontrail.Trail
 	Interval   time.Duration
 
@@ -146,6 +148,7 @@ func NewLoop(cfg LoopConfig) (*Loop, error) {
 		check:             cfg.Check,
 		recovery:          cfg.Recovery,
 		failover:          cfg.Failover,
+		drainer:           cfg.Drainer,
 		trail:             cfg.Trail,
 		interval:          cfg.Interval,
 		clock:             clock,
@@ -228,6 +231,7 @@ func (l *Loop) iterate(ctx context.Context) bool {
 	}
 	l.checkPeers(ctx)
 	l.tick(ctx)
+	l.drain(ctx)
 	return l.zombieThreshold > 0 && l.allPeersDarkRun >= l.zombieThreshold
 }
 
@@ -355,6 +359,36 @@ func (l *Loop) tick(ctx context.Context) {
 		Payload: map[string]any{
 			"ok":          err == nil,
 			"duration_ms": end.Sub(start).Milliseconds(),
+		},
+	}
+	if err != nil {
+		rec.Payload["error"] = err.Error()
+	}
+	_ = l.trail.Append(ctx, rec)
+}
+
+// drain runs the per-tick escalation drain (ADR-032 / ce-xshb): the supervisor
+// answers or forwards every escalation it currently holds, recording the pass
+// to the decision trail. A nil drainer means draining is off — a live agent
+// handles escalations by hand. Like a failed Tick, a drain error is recorded
+// and never propagated: one wedged escalation must not abort the loop.
+//
+// It runs after tick (so the heartbeat is already stamped) and is skipped once
+// ctx is cancelled, so shutdown doesn't emit a spurious final drain.
+func (l *Loop) drain(ctx context.Context) {
+	if l.drainer == nil || ctx.Err() != nil {
+		return
+	}
+	res, err := l.drainer.Drain(ctx)
+	rec := decisiontrail.Record{
+		Role: string(l.sup.Role()),
+		Kind: "supervisor.escalation.drain",
+		Payload: map[string]any{
+			"listed":    res.Listed,
+			"answered":  res.Answered,
+			"forwarded": res.Forwarded,
+			"skipped":   res.Skipped,
+			"failed":    res.Failed,
 		},
 	}
 	if err != nil {
