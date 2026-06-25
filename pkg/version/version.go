@@ -13,6 +13,7 @@ package version
 import (
 	"runtime/debug"
 	"strings"
+	"sync"
 )
 
 var (
@@ -24,6 +25,8 @@ var (
 	BuildDate = "unknown"
 	// BuiltBy identifies who/what produced the binary ("makefile", "go install", etc.).
 	BuiltBy = "unknown"
+
+	mu sync.Mutex
 )
 
 // String returns a compact one-line version summary.
@@ -35,6 +38,8 @@ func String() string {
 // metadata that `go build` embeds automatically when the module is inside a
 // git repository. It is a no-op when the vars have already been set by ldflags.
 func PopulateFromBuildInfo() {
+	mu.Lock()
+	defer mu.Unlock()
 	if GitCommit != "unknown" {
 		return
 	}

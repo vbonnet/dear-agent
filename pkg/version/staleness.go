@@ -3,6 +3,7 @@ package version
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"time"
 )
@@ -22,12 +23,18 @@ func IsStale(repoPath string) (bool, error) {
 
 	// Verify the commit exists in this repo before running merge-base.
 	if err := gitCmd(ctx, repoPath, "cat-file", "-e", commit+"^{commit}"); err != nil {
+		if ctx.Err() != nil {
+			return false, fmt.Errorf("git cat-file check timed out: %w", ctx.Err())
+		}
 		// Commit not in this repo — treat as indeterminate (fail open).
 		return false, nil
 	}
 
 	// git merge-base --is-ancestor exits 0 if ancestor, 1 if not, other on error.
 	err := gitCmd(ctx, repoPath, "merge-base", "--is-ancestor", commit, "origin/main")
+	if ctx.Err() != nil {
+		return false, fmt.Errorf("git merge-base check timed out: %w", ctx.Err())
+	}
 	if err == nil {
 		return false, nil // on trunk
 	}
@@ -36,7 +43,7 @@ func IsStale(repoPath string) (bool, error) {
 		return true, nil // not an ancestor
 	}
 	// git error (e.g. no remote tracking ref) — fail open.
-	return false, err
+	return false, fmt.Errorf("git merge-base failed: %w", err)
 }
 
 func gitCmd(ctx context.Context, repoPath string, args ...string) error {
