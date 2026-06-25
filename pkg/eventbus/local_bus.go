@@ -102,6 +102,9 @@ func NewLocalBus(opts ...Option) *LocalBus {
 //
 // Subscribers are invoked concurrently. Panics in handlers are recovered.
 func (b *LocalBus) Emit(ctx context.Context, event *Event) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := b.validateEventSize(event); err != nil {
 		return err
 	}
