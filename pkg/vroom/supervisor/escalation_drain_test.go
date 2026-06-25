@@ -146,6 +146,26 @@ func TestDrain_ContinuesPastPerEscalationError(t *testing.T) {
 	}
 }
 
+func TestDrain_StopsWhenContextCancelledBetweenEscalations(t *testing.T) {
+	inbox := &fakeInbox{pending: escNamed("e1", "e2")}
+	ctx, cancel := context.WithCancel(context.Background())
+	policy := func(_ context.Context, _ *escalation.Escalation) DrainDecision {
+		cancel()
+		return DrainDecision{Action: DrainForward, Text: "up"}
+	}
+	d, _ := NewInboxDrainer(inbox, "sup", "overseer", policy)
+	res, err := d.Drain(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Drain error = %v, want context.Canceled", err)
+	}
+	if res.Listed != 2 || res.Forwarded != 1 {
+		t.Errorf("result = %+v, want listed=2 forwarded=1", res)
+	}
+	if len(inbox.forwarded) != 1 || inbox.forwarded[0] != "e1" {
+		t.Errorf("forwarded = %v, want [e1]", inbox.forwarded)
+	}
+}
+
 // TestDrain_RealEngine confirms *escalation.Engine satisfies EscalationInbox and
 // a forwarding drain advances a real escalation one hop up the chain.
 func TestDrain_RealEngine(t *testing.T) {

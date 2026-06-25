@@ -131,6 +131,9 @@ func (d *InboxDrainer) Drain(ctx context.Context) (DrainResult, error) {
 
 	var firstErr error
 	for _, esc := range pending {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
 		decision := d.policy(ctx, esc)
 		var actErr error
 		switch decision.Action {
