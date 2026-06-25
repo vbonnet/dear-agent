@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -91,6 +94,30 @@ func initGitRepo(t *testing.T, dir, remoteURL string) {
 	}
 }
 
+// writeWayfinderStatus creates a minimal WAYFINDER-STATUS.md in dir.
+func writeWayfinderStatus(t *testing.T, dir, sessionID, status string) {
+	t.Helper()
+	content := fmt.Sprintf("---\nsession_id: %s\nstatus: %s\n---\n", sessionID, status)
+	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o600); err != nil {
+		t.Fatalf("writeWayfinderStatus: %v", err)
+	}
+}
+
+func TestParseArgs_SkipPreflight(t *testing.T) {
+	p, err := parseArgs([]string{"create", "--skip-preflight", "--title", "t"})
+	if err != nil {
+		t.Fatalf("parseArgs error: %v", err)
+	}
+	if !p.skipPreflight {
+		t.Error("--skip-preflight should set skipPreflight true")
+	}
+	for _, a := range p.req.GhArgs {
+		if a == "--skip-preflight" {
+			t.Error("--skip-preflight leaked into gh args")
+		}
+	}
+}
+
 func TestValidateRemoteURL(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -140,5 +167,62 @@ func TestValidateRemoteURL_NonGitDir(t *testing.T) {
 	err := validateRemoteURL(dir)
 	if err == nil || !strings.Contains(err.Error(), "could not resolve origin remote URL") {
 		t.Errorf("validateRemoteURL(non-git dir) = %v, want 'could not resolve origin remote URL'", err)
+	}
+}
+
+func TestRun_PreflightFail_BlocksPRCreate(t *testing.T) {
+	t.Setenv("WAYFINDER_PROJECT_DIR", "")
+	dir := t.TempDir()
+	writeWayfinderStatus(t, dir, "test-session", "in_progress")
+
+	orig := runPreflightFull
+	t.Cleanup(func() { runPreflightFull = orig })
+	runPreflightFull = func(string) error {
+		return fmt.Errorf("preflight-full failed — fix issues before creating PR")
+	}
+
+	err := run([]string{"create", "--wayfinder", dir, "--title", "t"})
+	if err == nil || !strings.Contains(err.Error(), "preflight-full failed") {
+		t.Errorf("run() = %v, want preflight-full failed error", err)
+	}
+}
+
+func TestRun_PreflightPass_ProceedsToPRCreate(t *testing.T) {
+	t.Setenv("WAYFINDER_PROJECT_DIR", "")
+	dir := t.TempDir()
+	writeWayfinderStatus(t, dir, "test-session", "in_progress")
+
+	orig := runPreflightFull
+	t.Cleanup(func() { runPreflightFull = orig })
+	runPreflightFull = func(string) error { return nil }
+
+	// When preflight passes the run proceeds to gh — which may fail in the test
+	// environment. What matters is that the error is NOT a preflight error.
+	err := run([]string{"create", "--wayfinder", dir, "--title", "t"})
+	if err != nil && strings.Contains(err.Error(), "preflight-full failed") {
+		t.Errorf("run() failed with preflight error despite passing preflight: %v", err)
+	}
+}
+
+func TestRun_SkipPreflight_NoPreflightRun(t *testing.T) {
+	t.Setenv("WAYFINDER_PROJECT_DIR", "")
+	dir := t.TempDir()
+	writeWayfinderStatus(t, dir, "test-session", "in_progress")
+
+	preflightCalled := false
+	orig := runPreflightFull
+	t.Cleanup(func() { runPreflightFull = orig })
+	// Mock would fail if called — proves --skip-preflight prevents the call.
+	runPreflightFull = func(string) error {
+		preflightCalled = true
+		return fmt.Errorf("preflight-full failed — should not have been called")
+	}
+
+	err := run([]string{"create", "--wayfinder", dir, "--skip-preflight", "--title", "t"})
+	if err != nil && strings.Contains(err.Error(), "preflight-full failed") {
+		t.Errorf("run() failed with preflight error despite --skip-preflight: %v", err)
+	}
+	if preflightCalled {
+		t.Error("preflight was called despite --skip-preflight")
 	}
 }
