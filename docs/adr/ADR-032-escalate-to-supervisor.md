@@ -112,8 +112,15 @@ instrument for improving prompts and instructions.
   the analysis CLI over the log shipped in ce-irr0 (see "The adjudicator +
   analysis CLI" above). A stronger default model and scheduled/auto adjudication
   remain future work.
-- The supervisor loop's `Tick` does not yet auto-drain escalations; supervisors
-  act on them via the CLI for now.
+- The supervisor loop's `Tick` auto-drains escalations each iteration via the
+  `EscalationDrainer` seam (`pkg/vroom/supervisor`, ce-xshb): a programmatic
+  supervisor lists the escalations it holds and answers/forwards each per a
+  pluggable `DrainPolicy`, rather than relying on a live agent reading the
+  protocol skill and running the CLI by hand. The default policy forwards
+  everything up the chain (a Go supervisor has no way to author a confident
+  answer); an answering policy can be injected. Wiring the seam to a
+  FileStore-backed engine in the agent-facing binary (which owns the session
+  hierarchy adapters) is the remaining integration step.
 - `FileStore` is last-writer-wins on concurrent answers to one escalation
   (acceptable for v1; rare in practice).
 
