@@ -59,6 +59,47 @@ out of `bd ready`.
 > `worker-<id>` sessions and open PRs; the `supervisor.orch.dispatched` trail
 > record remains the audit trail.
 
+**Task type.** A roadmap record MAY carry an optional `task_type` field telling
+the Orchestrator *how* to execute the bead. An absent or `"worker"` value means
+the default: spawn a Claude worker session that drives the bead through wayfinder
+(design → code → PR → merge). The other recognized value is `"deploy"` — a
+deterministic host-artifact (re)install that the Orchestrator runs **itself** via
+`dear-deploy install`, with no worker session, no Opus spend, and no PR (see
+"Deploy task type" below).
+
+| `task_type` | Execution | Produces a PR? | Consumes a worker slot / Opus quota? |
+|-------------|-----------|----------------|--------------------------------------|
+| `worker` (default / absent) | spawn `worker-<bead-id>` → wayfinder | yes | yes |
+| `deploy` | Orchestrator runs `dear-deploy install <deploy_target>` | no | no |
+
+### Deploy task type (`task_type: "deploy"`)
+
+A deploy bead asks for a **host artifact** declared in
+[`deploy/manifest.yaml`](../../../deploy/manifest.yaml) (a launchd plist, a
+write-guard hook, …) to be (re)installed from its source-of-truth in the repo to
+its deployed location on the machine. This is a *deterministic shell invocation*,
+not creative work — there is nothing for a Claude worker to design, so spawning
+one would waste an Opus worker slot. The Orchestrator executes it directly.
+
+A deploy roadmap record carries one extra field, `deploy_target`:
+```json
+{"bead_id":"ce-abc1","title":"Deploy mergeloop launchd agent","priority":"P1","state":"accepted","task_type":"deploy","deploy_target":"com.dear-agent.mergeloop","reason":"unblocks ce-gzfv","decided_at":"2026-06-15T22:00:00Z"}
+```
+- `deploy_target` — the manifest artifact `name` to install. May be a single name
+  (e.g. `com.dear-agent.mergeloop`), a space-separated list of names, or `"all"`
+  / `""` (empty) to install the whole manifest.
+
+**Definition of Done for a deploy bead is different.** A worker bead is Done only
+when its PR is MERGED; a deploy bead never opens a PR, so that rule does not
+apply. A deploy bead is Done when `dear-deploy status <deploy_target>` reports
+the artifact clean (exit 0 — deployed copy matches the rendered source). The
+Orchestrator records that status output as the bead's verification evidence.
+
+### Dispatch Record (Orch writes)
+```json
+{"bead_id":"ce-abc1","session":"worker-ce-abc1","model":"opus","dispatched_at":"2026-06-15T22:05:00Z"}
+```
+
 ### DoD Audit Trail Kinds
 
 Definition-of-Done enforcement (a bead is Done only when its PR is MERGED — see

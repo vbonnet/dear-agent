@@ -345,8 +345,9 @@ bd --db ~/beads/context-engine/.beads show <id> 2>/dev/null
     --prompt "DoD VIOLATION: bead <id> was closed against PR #<NNN> which is <STATE>, not MERGED. Reopen the bead and drive the PR to merge (or re-dispatch)."
   ```
 - If the `close_reason` references no PR at all, leave it — not every bead has
-  a PR (docs-only / triage closures). Only PR-referencing closures are audited
-  here.
+  a PR (docs-only / triage closures, and `task_type: "deploy"` beads, which the
+  Orchestrator closes after a clean `dear-deploy status` with no PR — see
+  protocol.md "Deploy task type"). Only PR-referencing closures are audited here.
 
 ### Step 9: Worktree Audit
 
