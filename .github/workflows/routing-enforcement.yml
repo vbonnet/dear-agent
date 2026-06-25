@@ -22,11 +22,6 @@ permissions:
   contents: read
   pull-requests: write
 
-# Cancel superseded runs when a PR is updated, so stale runs don't stack up.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
   check-forbidden-paths:
     name: Forbidden temporal artifact paths
