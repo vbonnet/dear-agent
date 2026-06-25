@@ -386,6 +386,7 @@ func TestTmuxLock_StressTest_Concurrent(t *testing.T) {
 	const numGoroutines = 50
 
 	var wg sync.WaitGroup
+	var activeHolders atomic.Int32
 	var successCount atomic.Int32
 	var lockContentionCount atomic.Int32
 
@@ -401,7 +402,13 @@ func TestTmuxLock_StressTest_Concurrent(t *testing.T) {
 				lockContentionCount.Add(1)
 				return
 			}
-			defer ReleaseTmuxLock()
+			if holders := activeHolders.Add(1); holders != 1 {
+				t.Errorf("Expected exactly 1 active lock holder, got %d", holders)
+			}
+			defer func() {
+				activeHolders.Add(-1)
+				ReleaseTmuxLock()
+			}()
 
 			// Simulate tmux operation
 			time.Sleep(5 * time.Millisecond)
@@ -411,19 +418,18 @@ func TestTmuxLock_StressTest_Concurrent(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify: Only ONE goroutine should have succeeded (lock serialization)
-	// The rest should have hit lock contention
-	if successCount.Load() != 1 {
-		t.Errorf("Expected exactly 1 success (serialization), got %d", successCount.Load())
+	// Verify: at least one goroutine acquired the lock and at least one saw
+	// contention. Additional successful acquisitions are valid after the
+	// previous holder releases the process-local lock.
+	if successCount.Load() == 0 {
+		t.Error("Expected at least 1 successful lock acquisition")
+	}
+	if lockContentionCount.Load() == 0 {
+		t.Error("Expected at least 1 lock contention")
 	}
 
-	if lockContentionCount.Load() != numGoroutines-1 {
-		t.Errorf("Expected %d lock contentions, got %d",
-			numGoroutines-1, lockContentionCount.Load())
-	}
-
-	t.Logf("Concurrent stress test: 1 succeeded, %d blocked (correct serialization)",
-		lockContentionCount.Load())
+	t.Logf("Concurrent stress test: %d succeeded, %d blocked (correct serialization)",
+		successCount.Load(), lockContentionCount.Load())
 }
 
 // TestTmuxLock_CrossProcess tests lock behavior across processes (if possible)
