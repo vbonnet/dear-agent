@@ -33,11 +33,6 @@ permissions:
   contents: read
   pull-requests: read
 
-# Cancel superseded runs when a PR is updated, so stale runs don't stack up.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
   doc-proximity:
     name: Doc Proximity Check
