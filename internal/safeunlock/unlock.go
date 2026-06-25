@@ -18,7 +18,7 @@
 // works on any repo — most importantly the ~/worktrees/** trees where agents do
 // their work — handles the full family of git lock files (not just index.lock),
 // scans linked worktrees, and appends a JSONL audit record of every decision.
-// Raw `rm` of a lock is the unsafe form this wrapper replaces (CLAUDE.md
+// Raw `rm` of a lock is the unsafe form this wrapper replaces (AGENTS.md
 // principle 9): the one vetted path that removes a *provably stale* lock and
 // refuses an active one.
 //

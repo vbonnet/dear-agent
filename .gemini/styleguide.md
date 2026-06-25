@@ -1,8 +1,8 @@
 # dear-agent — Gemini Code Assist style guide
 
 Rules for Gemini Code Assist to apply when reviewing pull requests in this
-repository. These mirror the engineering principles in `.claude/CLAUDE.md`;
-treat that file and `ARCHITECTURE.md` as the source of truth if they conflict.
+repository. These mirror the engineering principles in `AGENTS.md`; treat that
+file and `ARCHITECTURE.md` as the source of truth if they conflict.
 
 ## Language & toolchain
 

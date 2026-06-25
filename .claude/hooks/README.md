@@ -7,7 +7,7 @@ safety guards, only when a session's project dir is dear-agent.
 
 ## `pretool-spawn-routing`
 
-Dogfooding routing nudge (Beads `ce-qgf`; CLAUDE.md §Dogfooding, principle 6).
+Dogfooding routing nudge (Beads `ce-qgf`; AGENTS.md §Dogfooding, principle 6).
 
 **What it does.** Fires `PreToolUse` on `Bash` and the Cowork scheduled-task MCP
 tool. When it detects an attempt to spawn a **new top-level agent session/task**
@@ -41,7 +41,7 @@ approve it once when prompted.
 
 ## `stop-guardrail-feedback`
 
-The WF-A guardrail feedback loop (bead `ce-vrux`; CLAUDE.md principle 2,
+The WF-A guardrail feedback loop (bead `ce-vrux`; AGENTS.md principle 2,
 anti-stall). The keystone that lets deterministic guardrails close back into the
 *live* agent on the laptop instead of waiting for GitHub CI.
 

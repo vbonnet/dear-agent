@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # Tests for .claude/hooks/pretool-bead-close-guard — the Definition-of-Done gate
-# on bead closure (CLAUDE.md §6, bead ce-7p6s).
+# on bead closure (AGENTS.md §6, bead ce-7p6s).
 #
 # The 2026-06-17 daily ops audit (retro R.1) found ce-rpet/ce-11fi closed while
 # their PRs were still open, despite this guard shipping in PR #464. Root cause:

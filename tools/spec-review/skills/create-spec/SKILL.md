@@ -30,7 +30,9 @@ LLM-powered SPEC.md generation from project requirements and codebase analysis. 
 - **Template-Based Rendering**: Generates comprehensive SPEC.md from proven template
 - **Skeleton Diagram Generation**: Optionally creates C4 Context diagram in D2 format
 - **Quality Validation**: Validates generated SPEC against quality rubric
-- **Cross-CLI Support**: Works on all 4 supported CLIs with optimizations
+- **Cross-Harness Support**: Model-agnostic workflow; optimized adapters exist
+  for Claude Code, Gemini CLI, OpenCode, and Codex, with other harnesses using
+  the generic CLI path until a dedicated adapter exists
 
 ## Workflow
 
@@ -70,7 +72,7 @@ When using `--generate-diagrams` (or `-d`):
 
 ### CLI Adapters
 
-Each CLI has an optimized adapter:
+Dedicated adapters exist for these harnesses:
 
 | CLI | Adapter | Key Optimization |
 |-----|---------|-----------------|

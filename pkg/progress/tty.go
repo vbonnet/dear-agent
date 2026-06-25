@@ -25,7 +25,7 @@ func GetTerminalWidth() int {
 		return 100 // Default to 100 chars
 	}
 
-	// Cap at 100 chars (user preference from ~/.claude/CLAUDE.md)
+	// Cap at 100 chars (user preference from shared agent instructions)
 	if width > 100 {
 		return 100
 	}

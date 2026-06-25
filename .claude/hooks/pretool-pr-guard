@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PreToolUse hook: wayfinder-only PR lifecycle (Beads ce-p17s, CLAUDE.md
+# PreToolUse hook: wayfinder-only PR lifecycle (Beads ce-p17s, AGENTS.md
 # §PR Lifecycle / principle 9 — atomic action wrappers).
 #
 # WHAT: deny raw `gh pr create|close|reopen` in Bash (exit 2) and point the
@@ -9,7 +9,7 @@
 # WHY a hard block here, unlike pretool-spawn-routing's nudge: PR spray is a
 # proven failure mode — burndown workers opened untraced PRs ~10× faster than
 # serial merges could land, burning the required-check suite + bot review on
-# every one with zero attribution. Instruction-tier rules (CLAUDE.md DoD)
+# every one with zero attribution. Instruction-tier rules (AGENTS.md DoD)
 # demonstrably did not stop it; this is the deterministic tier. The message
 # below follows principle 2: what you tried, the right way, and why.
 #
@@ -89,7 +89,7 @@ $guidance
 
 Why: raw PRs have no wayfinder/plan attribution and no telemetry, and PR spray
 has repeatedly outrun the serial merge pipeline, burning CI and review quota
-(CLAUDE.md §PR Lifecycle, principle 9 — atomic action wrappers).
+(AGENTS.md §PR Lifecycle, principle 9 — atomic action wrappers).
 
 If you need this permission to complete your task, escalate by reporting:
 'PERMISSION_ESCALATION: I need [specific permission] because [reason]'.

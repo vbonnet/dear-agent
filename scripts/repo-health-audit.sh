@@ -17,7 +17,7 @@
 #   - behind:    commits behind origin/<default>  (>5 FAIL, 1-5 WARN)
 #   - ahead:     commits ahead of origin/<default> (any ahead => FAIL — golden
 #                checkouts must never carry local commits; that is the worktree-only
-#                rule from CLAUDE.md being violated)
+#                rule from AGENTS.md being violated)
 #   - artifacts: untracked *.md/*.yaml/*.json (agent leftovers) => WARN
 #
 # READ-ONLY GUARANTEE

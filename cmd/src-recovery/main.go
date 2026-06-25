@@ -21,7 +21,7 @@
 // construction (see internal/safesrc), and appends a line-per-step audit record
 // to ~/.local/state/dear-agent/src-recovery.log. It is the only sanctioned way
 // for an agent to write to ~/src/**, which is otherwise read-only
-// (see .claude/CLAUDE.md and docs/retros/2026-06-11-src-violations-and-burndown.md).
+// (see AGENTS.md and docs/retros/2026-06-11-src-violations-and-burndown.md).
 //
 // The `unlock` subcommand clears a stale .git/index.lock left behind by a killed
 // git, which otherwise wedges the daily archive sync's commit step:

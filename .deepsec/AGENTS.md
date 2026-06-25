@@ -1,3 +1,5 @@
+@import ../AGENTS.md
+
 # Agent setup
 
 This is a deepsec scanning workspace. Each registered project has its

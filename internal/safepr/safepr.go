@@ -8,7 +8,7 @@
 // quota (every PR triggers the full required-check suite plus bot review) and
 // cannot be attributed or audited afterwards. The PreToolUse hook
 // .claude/hooks/pretool-pr-guard therefore denies raw `gh pr create|close|
-// reopen` in Bash, and this wrapper is the path it points to (CLAUDE.md
+// reopen` in Bash, and this wrapper is the path it points to (AGENTS.md
 // principle 9 — atomic action wrappers).
 //
 // What the wrapper guarantees by construction
