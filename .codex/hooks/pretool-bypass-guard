@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# PreToolUse hook: intercepts bypass flags removed from our tools (ADR-031).
+# CDX harness port of .claude/hooks/pretool-bypass-guard.
+#
+# Fails OPEN: any parse error exits 0 — this hook must never wedge a session.
+
+set -uo pipefail
+
+input="$(cat)"
+tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+[ "$tool" = "Bash" ] || exit 0
+
+cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+[ -n "$cmd" ] || exit 0
+
+block() {
+  local tool_name="$1" flag="$2" approved_path="$3"
+  local msg="BLOCKED: ${tool_name} ${flag} is not an approved flag.
+
+You are trying to bypass a safety gate with ${flag}.
+Approved path: ${approved_path}
+
+If no approved path exists for your situation, escalate via:
+  agm escalate --action \"<describe what you need>\" --reason \"<why this flag was needed>\"
+Every escalation creates a bead and routes up the VROOM chain for human review."
+  jq -cn --arg m "$msg" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$m},permissionDecision:"deny",denialReason:$m}'
+  exit 2
+}
+
+# safe-pr --emergency
+if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])safe-pr([[:space:]]|$)' \
+   && printf '%s' "$cmd" | grep -q -- '--emergency'; then
+  block "safe-pr" "--emergency" \
+    "safe-pr create --wayfinder <project-dir> --title '...' --body '...'"
+fi
+
+# safe-merge --skip-bot-review
+if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])safe-merge([[:space:]]|$)' \
+   && printf '%s' "$cmd" | grep -q -- '--skip-bot-review'; then
+  block "safe-merge" "--skip-bot-review" \
+    "safe-merge --pr <num> --watch"
+fi
+
+# git commit --no-verify
+if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])git([[:space:]].*)?commit' \
+   && printf '%s' "$cmd" | grep -q -- '--no-verify'; then
+  block "git commit" "--no-verify" \
+    "Fix the pre-commit hook failure — hooks catch real problems; bypassing them hides defects"
+fi
+
+# git push --force (bare)
+if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])git([[:space:]].*)?push' \
+   && printf '%s' "$cmd" | grep -qE -- '--force([[:space:]]|$)' \
+   && ! printf '%s' "$cmd" | grep -q -- '--force-with-lease'; then
+  block "git push" "--force" \
+    "Use safe-rebase then push normally; or use --force-with-lease if you own the branch"
+fi
+
+exit 0

@@ -1,5 +1,29 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "command": "${CLAUDE_PROJECT_DIR}/.agents/hooks/pretool-bypass-guard",
+            "statusMessage": "Checking for bypass flags",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "command": "${CLAUDE_PROJECT_DIR}/.agents/hooks/pretool-pr-guard",
+            "statusMessage": "Checking PR lifecycle compliance",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      }
+    ],
     "PostCompact": [
       {
         "hooks": [

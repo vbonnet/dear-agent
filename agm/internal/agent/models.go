@@ -38,7 +38,9 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "5.3-codex-spark", FullName: "gpt-5.3-codex-spark", Description: "Research preview"},
 	},
 	"agy": {
-		{Alias: "3.5-flash", FullName: "gemini-3.5-flash-medium", Description: "Observed AGY default-quality Gemini model"},
+		{Alias: "2.5-pro", FullName: "gemini-2.5-pro", Description: "Highest-capability Gemini model (opus tier)"},
+		{Alias: "2.5-flash", FullName: "gemini-2.5-flash", Description: "Balanced speed/quality Gemini model (sonnet tier)"},
+		{Alias: "2.0-flash-lite", FullName: "gemini-2.0-flash-lite", Description: "Fastest, cheapest Gemini model (haiku tier)"},
 	},
 	// openrouter: cheap-tier models accessed via OpenRouter API proxy.
 	// Configure OPENROUTER_API_KEY to enable. These are the default cheap-tier
@@ -79,10 +81,10 @@ var CrossHarnessAliases = map[string]map[string]string{
 		"5.4-mini":  "haiku",  // codex alias → claude equivalent
 	},
 	"agy": {
-		"fable":  "3.5-flash",
-		"opus":   "3.5-flash",
-		"sonnet": "3.5-flash",
-		"haiku":  "3.5-flash",
+		"fable":  "2.5-pro",        // mythos-tier → gemini-2.5-pro (best available)
+		"opus":   "2.5-pro",        // highest-tier → gemini-2.5-pro
+		"sonnet": "2.5-flash",      // mid-tier → gemini-2.5-flash
+		"haiku":  "2.0-flash-lite", // fast-tier → gemini-2.0-flash-lite (cheapest)
 	},
 }
 
@@ -96,7 +98,7 @@ var HarnessDefaults = map[string]string{
 	"claude-code": "sonnet",
 	"gemini-cli":  "3.5-flash",
 	"codex-cli":   "5.4",
-	"agy":         "3.5-flash",
+	"agy":         "2.5-flash",
 	// opencode-cli intentionally omitted — requires interactive picker
 }
 
@@ -112,7 +114,7 @@ var TestModelDefaults = map[string]string{
 	"claude-code":  "haiku",
 	"gemini-cli":   "2.5-flash-lite",
 	"codex-cli":    "5.4-mini",
-	"agy":          "3.5-flash",
+	"agy":          "2.0-flash-lite",
 	"opencode-cli": "haiku", // opencode supports Claude models via providers
 }
 
