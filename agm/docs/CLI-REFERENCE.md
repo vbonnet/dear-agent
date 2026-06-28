@@ -115,11 +115,12 @@ agm new [session-name] [flags]
 
 **Flags:**
 ```bash
---harness string         Harness to use (claude-code|gemini-cli|codex-cli|opencode-cli) (default: claude-code)
+--harness string         Harness to use (claude-code|codex-cli|agy|opencode-cli) (default: claude-code)
+                         deprecated compatibility: gemini-cli
 --model string           Model to use (e.g., sonnet, opus, 2.5-flash, 5.4). If omitted, uses harness default.
                          claude-code: sonnet (default), opus, haiku, opusplan
-                         gemini-cli: 2.5-flash (default), 2.5-pro, 3.1-pro, 3-flash
                          codex-cli: 5.4 (default), 5.4-mini, 5.3-codex
+                         agy: 2.5-flash (default), 2.5-pro, 2.0-flash-lite
                          opencode-cli: requires selection (no default)
 --project string         Project directory (default: current directory)
 --tags strings           Tags (comma-separated)
@@ -138,11 +139,12 @@ agm new
 agm new my-session
 
 # Specify harness
-agm new --harness gemini-cli research-task
+agm new --harness agy research-task
 
 # Specify harness and model
 agm new coding-session --harness claude-code --model opus
-agm new research --harness gemini-cli --model 2.5-pro
+agm new research --harness agy --model 2.5-pro
+agm new design --harness codex-cli --model 5.4-mini
 
 # Full specification
 agm new coding-session \
@@ -160,7 +162,7 @@ agm new test-session --no-uuid
 
 **Interactive form fields:**
 1. Session name (required)
-2. Harness selection (claude-code/gemini-cli/codex-cli/opencode-cli)
+2. Harness selection (claude-code/codex-cli/agy/opencode-cli; gemini-cli is deprecated)
 3. Project directory (browse or type)
 4. Description (optional)
 5. Tags (optional)
@@ -230,7 +232,7 @@ agm list [flags]
 --archived               Only archived sessions
 --format string          Output format (table|json|simple) (default: table)
 --tag string             Filter by tag
---harness string         Filter by harness (claude-code|gemini-cli|codex-cli|opencode-cli)
+--harness string         Filter by harness (claude-code|codex-cli|agy|opencode-cli|gemini-cli)
 --project string         Filter by project directory
 ```
 
@@ -261,7 +263,7 @@ agm list --harness claude-code
 agm list --project ~/projects/myapp
 
 # Combine filters
-agm list --harness gemini-cli --tag research
+agm list --harness agy --tag research
 ```
 
 **Output formats:**

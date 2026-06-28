@@ -8,7 +8,7 @@ queryable, and let loops do the recurring work.
 
 ## Why
 
-Modern AI coding agents (Claude Code, Gemini CLI, Codex CLI) are powerful but
+Modern AI coding agents (Claude Code, Codex CLI, Antigravity/AGY, OpenCode) are powerful but
 isolated. dear-agent wraps them with:
 
 - **Loops** — named, recurring bash commands that run on a cadence and store

@@ -23,6 +23,8 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "sonnet-200k", FullName: "claude-sonnet-4-6", Description: "Sonnet with default 200k context"},
 		{Alias: "opusplan", FullName: "opusplan", Description: "Opus for planning, Sonnet for execution"},
 	},
+	// gemini-cli is deprecated for non-enterprise users in favor of AGY.
+	// Keep its model registry for legacy sessions only.
 	"gemini-cli": {
 		{Alias: "3.1-pro", FullName: "gemini-3.1-pro-preview", Description: "Latest, advanced reasoning"},
 		{Alias: "3-flash", FullName: "gemini-3-flash-preview", Description: "High performance, lower cost"},
@@ -57,8 +59,8 @@ var HarnessModels = map[string][]ModelSpec{
 }
 
 // CrossHarnessAliases maps abstract tier names to harness-specific aliases.
-// When AGM_DEFAULT_MODEL=opus is set and a gemini-cli session is created,
-// "opus" is not a native gemini-cli alias. This table maps it to the equivalent.
+// When an abstract tier alias is passed to a harness, this table maps it to
+// that harness's closest available native model alias.
 // Only tier names that differ across harnesses need entries.
 var CrossHarnessAliases = map[string]map[string]string{
 	"gemini-cli": {
@@ -96,7 +98,6 @@ var CrossHarnessAliases = map[string]map[string]string{
 // the silent default.
 var HarnessDefaults = map[string]string{
 	"claude-code": "sonnet",
-	"gemini-cli":  "3.5-flash",
 	"codex-cli":   "5.4",
 	"agy":         "2.5-flash",
 	// opencode-cli intentionally omitted — requires interactive picker
@@ -112,7 +113,6 @@ var HarnessModeDefaults = map[string]string{
 // These ensure predictable, low-cost test runs regardless of the caller's model.
 var TestModelDefaults = map[string]string{
 	"claude-code":  "haiku",
-	"gemini-cli":   "2.5-flash-lite",
 	"codex-cli":    "5.4-mini",
 	"agy":          "2.0-flash-lite",
 	"opencode-cli": "haiku", // opencode supports Claude models via providers
@@ -239,7 +239,7 @@ func safeModelPassthrough(s string) string {
 }
 
 // GetModelsForHarness returns known models for a harness.
-// For opencode-cli, returns aggregated models from all harnesses.
+// For opencode-cli, returns aggregated models from active harnesses.
 func GetModelsForHarness(harnessName string) []ModelSpec {
 	if harnessName == "opencode-cli" {
 		return AllModels()
@@ -272,7 +272,10 @@ func NeedsInteractivePicker(harnessName string) bool {
 // opencode-cli interactive picker.
 func AllModels() []ModelSpec {
 	var all []ModelSpec
-	for _, models := range HarnessModels {
+	for harness, models := range HarnessModels {
+		if IsDeprecatedHarness(harness) {
+			continue
+		}
 		all = append(all, models...)
 	}
 	return all

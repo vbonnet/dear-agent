@@ -49,6 +49,10 @@ func TestDefaultModelForHarness(t *testing.T) {
 	if !ok || model != "2.5-flash" {
 		t.Errorf("agy default: got (%q, %v), want (2.5-flash, true)", model, ok)
 	}
+	model, ok = DefaultModelForHarness("gemini-cli")
+	if ok {
+		t.Errorf("deprecated gemini-cli should not have an active default, got (%q, %v)", model, ok)
+	}
 	// No default
 	model, ok = DefaultModelForHarness("opencode-cli")
 	if ok {
@@ -164,19 +168,26 @@ func TestGetModelsForHarness_OpenCode(t *testing.T) {
 	}
 	// Should have models from all harnesses
 	foundClaude := false
-	foundGemini := false
+	foundAgy := false
+	foundDeprecatedGemini := false
 	for _, m := range models {
 		if m.FullName == "claude-sonnet-4-6[1m]" {
 			foundClaude = true
 		}
+		if m.FullName == "gemini-2.5-flash" {
+			foundAgy = true
+		}
 		if m.FullName == "gemini-3.5-flash" {
-			foundGemini = true
+			foundDeprecatedGemini = true
 		}
 	}
 	if !foundClaude {
 		t.Error("opencode-cli models should include claude models")
 	}
-	if !foundGemini {
-		t.Error("opencode-cli models should include gemini models")
+	if !foundAgy {
+		t.Error("opencode-cli models should include active AGY models")
+	}
+	if foundDeprecatedGemini {
+		t.Error("opencode-cli models should not include deprecated gemini-cli-only models")
 	}
 }

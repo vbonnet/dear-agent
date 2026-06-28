@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# PreToolUse hook: Definition of Done gate on bead closure (AGENTS.md §Agent Delegation Enforcement §6).
+#
+# WHAT: when an agent runs `bd ... update <id> --status closed` or
+# `bd ... close <id>`, this hook invokes bead-close-guard to verify that all
+# referenced PRs are merged. If any PR is unmerged, the close is BLOCKED
+# (exit 2) with a clear remediation message.
+#
+# WHY a block, not a nudge: closing a bead with unmerged PRs is a Definition
+# of Done violation that hides outstanding work. The 2026-06-12 retro found
+# 25 such violations. Unlike spawn-routing (where a nudge suffices because
+# the action itself is harmless), premature close actively damages the
+# backlog's integrity — the reconciler (bead-pr-sync) has to clean up after.
+# Prevention > detection.
+#
+# SCOPE: matches Bash tool calls containing `bd` with either:
+#   - `close` subcommand
+#   - `update ... --status closed`
+# Does NOT match bd list, bd show, bd comment, etc.
+# Fails open: unparseable input or missing bead-close-guard binary exits 0.
+set -uo pipefail
+
+input="$(cat)"
+tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+[ "$tool" = "Bash" ] || exit 0
+
+cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+[ -n "$cmd" ] || exit 0
+
+# Detect bd close patterns. cobra accepts flags in any order and in both
+# "--flag value" and "--flag=value" forms, and the bead id may appear before
+# OR after the flags. We must catch EVERY close path; a form we fail to parse
+# is a silent DoD bypass (the 2026-06-17 audit found ce-rpet/ce-11fi closed
+# with PRs open this way — retro 2026-06-17-daily-ops-audit.md R.1). Forms:
+#   bd --db PATH close <id>
+#   bd close <id> --reason "..."
+#   bd close --reason "..." <id>          (id after a value-flag)
+#   bd --db PATH update <id> --status closed
+#   bd update --status closed <id>        (id after flags)
+#   bd update <id> --status=closed        (equals form)
+#   BEADS_DIR=... bd close <id>
+# But NOT: bd list --status closed (a read — no close/update subcommand verb)
+
+# Strip leading env var assignments to find the actual command
+stripped="$(printf '%s' "$cmd" | sed 's/^[[:space:]]*\([A-Z_]*=[^ ]*[[:space:]]*\)*//')"
+
+# Check if this is a bd command
+case "$stripped" in
+  bd\ *|bd) ;;
+  */bd\ *) ;;
+  *) exit 0 ;;
+esac
+
+# Is this a close-intent command? Either a `close` subcommand, or an
+# `update` carrying `--status closed` / `--status=closed`.
+is_close=0
+if printf '%s' "$stripped" | grep -qE '\bclose\b'; then
+  is_close=1
+elif printf '%s' "$stripped" | grep -qE '\bupdate\b' \
+  && printf '%s' "$stripped" | grep -qE '(^|[[:space:]])--status([[:space:]]+|=)closed\b'; then
+  is_close=1
+fi
+[ "$is_close" -eq 1 ] || exit 0
+
+# A help invocation is not an actual close.
+case " $stripped " in
+  *" --help "*|*" -h "*) exit 0 ;;
+esac
+
+# Check if --force is present (allow bypass for abandoned beads). A leading
+# "\b" never matches before "--" (space→dash is non-word→non-word, no word
+# boundary), so anchor on whitespace/line-edges instead.
+if printf '%s' "$cmd" | grep -qE '(^|[[:space:]])--force([[:space:]=]|$)'; then
+  exit 0
+fi
+
+# Extract the bead id independent of flag ordering: walk tokens after the
+# close/update verb, skip flags and the values consumed by value-taking flags
+# (--db, --reason, --status, ...), and take the first positional that has a
+# bead-id shape (<prefix>-<suffix>, e.g. ce-rpet). "closed", status values and
+# reason words have no dash and are correctly ignored.
+bead_id="$(printf '%s' "$stripped" | xargs -n 1 2>/dev/null | awk '
+  BEGIN {
+    split("--db --reason --status --repo --actor --assignee --owner --priority --type --title --design --label -r -p -a -t", vf, " ")
+    for (i in vf) valflag[vf[i]] = 1
+    started = 0; skipnext = 0
+  }
+  {
+    tok = $0
+    if (!started) {
+      if (tok == "close" || tok == "update") started = 1
+      next
+    }
+    if (substr(tok, 1, 1) == "-") {
+      # "--flag=value" carries its own value; a bare value-flag eats the next token.
+      if (index(tok, "=") == 0 && (tok in valflag)) skipnext = 1
+      next
+    }
+    if (skipnext) { skipnext = 0; next }
+    if (tok ~ /^[A-Za-z][A-Za-z0-9_]*-[A-Za-z0-9]+$/) { print tok; exit }
+  }')"
+
+# Close intent detected but no bead id could be parsed: fail CLOSED. An
+# unparseable close is exactly the bypass this guard exists to stop, so block
+# loudly rather than silently allowing it.
+if [ -z "$bead_id" ]; then
+  jq -cn --arg msg "bead-close-guard: detected a bead-close command but could not parse the bead id, so the Definition-of-Done check cannot run. Use the standard form 'bd --db <path> close <id>' (or add --force to abandon)." \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",additionalContext:$msg}}'
+  exit 2
+fi
+
+# Locate bead-close-guard binary
+guard="$(command -v bead-close-guard 2>/dev/null || true)"
+if [ -z "$guard" ]; then
+  # Fail open: guard not installed, allow the close
+  exit 0
+fi
+
+# Extract --db / beads-dir from the command if present, expand ~ to $HOME
+beads_dir=""
+if printf '%s' "$stripped" | grep -qE '\-\-db[[:space:]=]'; then
+  beads_dir="$(printf '%s' "$stripped" | sed -n 's/.*--db[[:space:]=]*\([^ ]*\).*/\1/p')"
+  beads_dir="${beads_dir/#\~/$HOME}"
+fi
+
+# Build guard args
+guard_args="--bead $bead_id"
+[ -n "$beads_dir" ] && guard_args="$guard_args --beads-dir $beads_dir"
+
+# Run the guard check
+result="$($guard $guard_args 2>&1)" || exit_code=$?
+exit_code="${exit_code:-0}"
+
+if [ "$exit_code" -eq 2 ]; then
+  # DoD violation — block the close
+  jq -cn --arg msg "$result" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",additionalContext:$msg}}'
+  exit 2
+fi
+
+if [ "$exit_code" -ne 0 ]; then
+  # Unexpected error — fail open but warn
+  jq -cn --arg msg "bead-close-guard error (failing open): $result" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$msg}}'
+  exit 0
+fi
+
+# Guard passed — allow the close
+exit 0

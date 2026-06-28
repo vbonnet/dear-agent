@@ -1,8 +1,28 @@
 Feature: Harness parity
   AGM should use one harness-neutral delivery contract for interactive CLI
-  harnesses. Codex CLI and AGY have different terminal chrome than Claude
+  harnesses. Claude Code is the reference implementation. Codex CLI, AGY, and
+  OpenCode have different terminal chrome and control surfaces than Claude
   Code, but their idle prompts must still be sendable and their trust/menu
-  prompts must not be treated as ready.
+  prompts must not be treated as ready. Gemini CLI is deprecated compatibility
+  and is not part of active parity enforcement.
+
+  Scenario Outline: Active parity harnesses are canonical
+    Given harness "<harness>" is configured
+    When AGM validates active parity support
+    Then harness "<harness>" should be active for parity
+    And harness "<harness>" should not be deprecated
+
+    Examples:
+      | harness      |
+      | claude-code  |
+      | codex-cli    |
+      | agy          |
+      | opencode-cli |
+
+  Scenario: Gemini CLI is deprecated compatibility
+    Given harness "gemini-cli" is configured
+    When AGM validates active parity support
+    Then harness "gemini-cli" should be deprecated
 
   Scenario: Codex composer is ready to receive input
     Given a Codex CLI composer pane
@@ -32,11 +52,37 @@ Feature: Harness parity
     Then AGM should wait for the Codex composer
     And AGM should deliver the startup prompt even though the session is detached
 
+  Scenario: Codex detached startup clears first-run trust before delivery
+    Given Codex CLI is available
+    And a Codex CLI trust prompt
+    When AGM creates a detached Codex session with a startup prompt
+    Then AGM should auto-accept the Codex trust prompt before prompt delivery
+    And AGM should wait for the Codex composer
+
+  Scenario: Codex send safety is harness-specific
+    Given Codex CLI is available
+    And a Codex CLI composer pane
+    When AGM runs send safety for the configured harness
+    Then send safety should not require a Claude process
+
   Scenario: AGY detached session receives startup prompt
     Given AGY is available
     When AGM creates a detached AGY session with a startup prompt
     Then AGM should wait for the AGY prompt
     And AGM should deliver the startup prompt even though the session is detached
+
+  Scenario: AGY detached startup clears first-run trust before delivery
+    Given AGY is available
+    And an AGY trust prompt
+    When AGM creates a detached AGY session with a startup prompt
+    Then AGM should auto-accept the AGY trust prompt before prompt delivery
+    And AGM should wait for the AGY prompt
+
+  Scenario: AGY send safety is harness-specific
+    Given AGY is available
+    And an AGY ready prompt
+    When AGM runs send safety for the configured harness
+    Then send safety should not require a Claude process
 
   Scenario: Current harness session can be associated with AGM
     Given an existing tmux session running Codex CLI

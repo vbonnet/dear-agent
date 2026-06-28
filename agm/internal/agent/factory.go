@@ -1,9 +1,6 @@
 package agent
 
-import (
-	"context"
-	"fmt"
-)
+import "fmt"
 
 // HarnessInfo contains metadata about an AI harness
 type HarnessInfo struct {
@@ -18,7 +15,7 @@ var agentRegistry = map[string]func() (Agent, error){
 	"claude-code": func() (Agent, error) { return NewClaudeAdapter(nil) },
 	"gemini-cli":  func() (Agent, error) { return NewGeminiCLIAdapter(nil) },
 	"codex-cli": func() (Agent, error) {
-		return NewOpenAIAdapter(context.Background(), nil)
+		return NewCodexCLIAdapter(nil)
 	},
 	"opencode-cli": func() (Agent, error) {
 		return NewOpenCodeAdapter(nil)
@@ -38,7 +35,7 @@ func GetHarness(name string) (Agent, error) {
 
 // GetAllHarnesses returns metadata for all known harnesses
 func GetAllHarnesses() []HarnessInfo {
-	harnesses := []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli", "agy"}
+	harnesses := ActiveHarnesses()
 	result := []HarnessInfo{}
 
 	for _, name := range harnesses {

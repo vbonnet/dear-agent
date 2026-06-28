@@ -1,6 +1,6 @@
 # AGM v4 — Technical Specification
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-06-28 -->
 
 **Version:** 4.0-reviewed
 **Status:** Reviewed (5-persona review complete)
@@ -8,19 +8,44 @@
 
 ## 2026-06-23 Audit Addendum: Harness Parity
 
-AGM supports multiple interactive harnesses. The shared orchestration layer MUST
-define behavior in harness-neutral terms first, with harness-specific extensions
-only where a tool exposes unique capabilities.
+AGM supports multiple interactive harnesses. The active parity harnesses are
+`claude-code`, `codex-cli`, `agy`, and `opencode-cli`. Claude Code is the
+reference implementation because it is the oldest and most battle-tested
+integration. The shared orchestration layer MUST define behavior in
+harness-neutral terms first, with harness-specific extensions only where a tool
+exposes unique capabilities.
+
+`gemini-cli` is deprecated compatibility for non-enterprise users. Existing
+implementation paths may remain so old sessions do not break, but new parity
+requirements, defaults, examples, and E2E matrices MUST target Antigravity/AGY
+instead.
+
+Core parity capabilities:
+
+| Capability | Baseline | Active harness requirement |
+|---|---|---|
+| Session lifecycle | Claude Code create/send/resume/kill/archive | Equivalent observable outcome for `codex-cli`, `agy`, and `opencode-cli` |
+| Hooks | Claude Code native hook events | Native hooks or AGM bridge with equivalent state/safety outcome |
+| Skills/commands | Claude slash commands plus AGM CLI | Non-Claude harnesses MUST have a CLI or harness-neutral command path |
+| AGENTS.md | Claude Code instruction loading | Same repo instruction contract or documented bridge/fallback |
+| Permissions | Claude permission modes and guards | Equivalent deny/ask/allow/defer behavior, or explicit unsupported capability with fallback |
+| Models | Harness aliases and test defaults | Active harnesses have model aliases/defaults; deprecated harnesses do not define new defaults |
+| State detection | Hook first, then pane/backend fallback | Harness-specific readiness/trust prompts must not violate send safety |
 
 For `codex-cli`, AGM treats Codex as a real interactive CLI harness:
 
 - create paths MUST launch `codex` in tmux with the AGM working directory
   (`-C <workdir>`), resolved model (`-m <model>`), and `workspace-write`
   sandbox
+- create paths MUST wait for the Codex composer before detached startup-prompt
+  delivery; that wait MUST auto-accept the default Codex directory trust prompt
+  and keep explicitly requested models through Codex model-upgrade interstitials
 - resume paths MUST recreate a missing Codex tmux session with the same launch
   contract used by create paths
 - send paths MUST route `codex-cli` through tmux delivery, not the OpenAI API
   adapter
+- send safety MUST evaluate `codex-cli` readiness with Codex-specific composer
+  and onboarding detection, never by requiring a Claude process
 - state detection MUST recognize an idle Codex composer as `ready`/sendable
 - state detection MUST NOT treat Codex trust prompts or menu selectors as idle
   composers
@@ -48,6 +73,8 @@ For `agy`, AGM treats Antigravity as a real interactive CLI harness:
   session creation does not race prompt delivery
 - send paths MUST route `agy` through tmux delivery, not through Claude-only
   assumptions or API adapters
+- send safety MUST evaluate `agy` readiness with AGY-specific prompt and
+  onboarding detection, never by requiring a Claude process
 - manifest and Dolt metadata MUST preserve the AGY conversation ID for both
   AGM-created and imported AGY sessions
 - duplicate detection for orphan/session import MUST treat the AGY conversation
@@ -515,11 +542,12 @@ start with a shell script `scripts/agm-compare.sh` (~80 lines) that:
 Wrapped by a thin CLI command for discoverability:
 
 ```
-agm compare --harnesses claude-code,gemini-cli,codex-cli,opencode-cli,agy --repo . --prompt "..."
+agm compare --harnesses claude-code,codex-cli,agy,opencode-cli --repo . --prompt "..."
     [--timeout 30m]
 ```
 
-**Supported Agents:** claude, gemini, codex, opencode, agy (all fully integrated)
+**Active parity harnesses:** claude-code, codex-cli, agy, opencode-cli.
+`gemini-cli` is deprecated compatibility only.
 
 `cmd/agm/compare.go` validates inputs and execs the shell script.
 

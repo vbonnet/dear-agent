@@ -4,7 +4,7 @@ This package implements the Agent interface abstraction for supporting multiple 
 
 ## Overview
 
-The Agent interface provides a unified API for managing AI agent sessions, enabling AGM to support multiple providers (Claude, Gemini, GPT, etc.) without duplicating session management code.
+The Agent interface provides a unified API for managing AI harness sessions. The active parity harnesses are `claude-code`, `codex-cli`, `agy`, and `opencode-cli`, with Claude Code as the reference implementation. `gemini-cli` remains deprecated compatibility for old sessions.
 
 ## Architecture
 
@@ -30,11 +30,15 @@ The Agent interface provides a unified API for managing AI agent sessions, enabl
         └───────────────┘
 
         ┌───────────────┐
-        │ GeminiAdapter │ (implemented)
+        │ CodexCLI      │ (implemented)
         └───────────────┘
 
         ┌───────────────┐
-        │  GPTAdapter   │ (future)
+        │ AgyAdapter    │ (implemented)
+        └───────────────┘
+
+        ┌───────────────┐
+        │ OpenCode      │ (implemented)
         └───────────────┘
 ```
 
@@ -56,14 +60,27 @@ ClaudeAdapter implementation:
 - Maps SessionIDs to tmux session names
 - Wraps existing session management logic
 
-### gemini_adapter.go
-GeminiAdapter implementation:
-- Implements Agent interface for Google Gemini
-- Uses Google Generative AI Go SDK (`github.com/google/generative-ai-go`)
-- Client-side conversation history persistence
-- Stores sessions in `~/.agm/gemini/<session-id>/history.jsonl`
-- Default model: `gemini-3.5-flash`
-- API key from `GEMINI_API_KEY` environment variable
+### codex_cli_adapter.go
+CodexCLIAdapter implementation:
+- Implements Agent interface for OpenAI Codex CLI
+- Uses tmux-backed interactive sessions
+- Does not route `codex-cli` through the OpenAI API adapter
+
+### agy_adapter.go
+AgyAdapter implementation:
+- Implements Agent interface for Antigravity/AGY
+- Uses tmux-backed interactive sessions
+- Resumes saved conversations with AGY conversation IDs where available
+
+### opencode_adapter.go
+OpenCodeAdapter implementation:
+- Implements Agent interface for OpenCode
+- Uses `opencode attach` against a running OpenCode server
+
+### gemini_cli_adapter.go
+GeminiCLIAdapter implementation:
+- Deprecated compatibility path for old sessions
+- Not part of active parity enforcement or new defaults
 
 ### session_store.go
 SessionStore manages SessionID persistence:
@@ -190,15 +207,16 @@ This decouples the Agent abstraction from tmux naming conventions, allowing:
 ### Implemented ✅
 - Agent interface definition
 - ClaudeAdapter with all 11 methods
-- GeminiAdapter with all 11 methods ✨ NEW
+- CodexCLIAdapter for tmux-backed Codex CLI sessions
+- AgyAdapter for tmux-backed Antigravity/AGY sessions
+- OpenCodeAdapter for OpenCode attach sessions
+- GeminiCLIAdapter as deprecated compatibility
 - SessionStore with JSON persistence
-- Comprehensive unit tests for both adapters
 
 ### TODO 🚧
 - HTML export for ClaudeAdapter
 - Advanced command support (authorize, run_hook)
 - Integration tests with real API calls
-- GPTAdapter implementation (future)
 
 ## Testing
 
@@ -211,18 +229,18 @@ go test -v
 # Claude adapter only
 go test -v -run TestClaude
 
-# Gemini adapter only
-go test -v -run TestGemini
+# Active/deprecated harness contract
+go test -v -run 'Test(ActiveHarnesses|GeminiCLIIsDeprecated|CodexFactory)'
 ```
 
 Expected output:
 ```
 === RUN   TestClaudeAdapterImplementsAgentInterface
 --- PASS: TestClaudeAdapterImplementsAgentInterface (0.00s)
-=== RUN   TestGeminiAdapter_NewGeminiAdapter
---- PASS: TestGeminiAdapter_NewGeminiAdapter (0.00s)
-=== RUN   TestGeminiAdapter_CreateSession
---- PASS: TestGeminiAdapter_CreateSession (0.00s)
+=== RUN   TestActiveHarnessesCanonicalParitySet
+--- PASS: TestActiveHarnessesCanonicalParitySet (0.00s)
+=== RUN   TestCodexFactoryUsesCLIAdapter
+--- PASS: TestCodexFactoryUsesCLIAdapter (0.00s)
 ...
 PASS
 ok  	github.com/vbonnet/dear-agent/agm/internal/agent	0.035s
@@ -245,21 +263,15 @@ ok  	github.com/vbonnet/dear-agent/agm/internal/agent	0.035s
 **Alternative:** In-memory map
 **Rationale:** Survives restarts, simple to implement
 
-## Agent Comparison
+## Harness Comparison
 
-| Feature | ClaudeAdapter | GeminiAdapter | GPTAdapter |
-|---------|---------------|---------------|------------|
-| Type | CLI-based | API-based | API-based |
-| Backend | tmux + Claude CLI | Google Gen AI SDK | OpenAI SDK |
-| Session Storage | `~/.claude/sessions/` | `~/.agm/gemini/` | TBD |
-| API Key | Built into CLI | `GEMINI_API_KEY` | `OPENAI_API_KEY` |
-| Default Model | claude-sonnet-4.5 | gemini-3.5-flash | TBD |
-| Slash Commands | ✅ | ❌ | ❌ |
-| Function Calling | ✅ | ✅ | ✅ |
-| Vision | ✅ | ✅ | ✅ |
-| Multimodal | ❌ | ✅ | ❌ |
-| Max Context | 200K tokens | 1M tokens | 128K tokens |
-| Status | ✅ Implemented | ✅ Implemented | 🚧 TODO |
+| Harness | Status | Backend | Notes |
+|---------|--------|---------|-------|
+| `claude-code` | Active reference | tmux + Claude Code | Most battle-tested implementation |
+| `codex-cli` | Active parity | tmux + Codex CLI | Must not route through the OpenAI API adapter |
+| `agy` | Active parity | tmux + Antigravity CLI | Replacement path for non-enterprise Gemini CLI users |
+| `opencode-cli` | Active parity | tmux + `opencode attach` | Requires a running OpenCode server |
+| `gemini-cli` | Deprecated compatibility | tmux + Gemini CLI | Kept for old sessions only |
 
 ## Future Extensions
 
