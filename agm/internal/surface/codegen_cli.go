@@ -44,10 +44,10 @@ func NewListSessionsCmd(newOpCtx OpCtxFunc) *cobra.Command {
 			}
 			// Validate enum for harness
 			switch req.Harness {
-			case "claude-code", "gemini-cli", "codex", "opencode", "all":
+			case "claude-code", "codex-cli", "agy", "opencode-cli", "gemini-cli", "all":
 				// valid
 			default:
-				return fmt.Errorf("invalid value for --harness: %q (allowed: claude-code, gemini-cli, codex, opencode, all)", req.Harness)
+				return fmt.Errorf("invalid value for --harness: %q (allowed: claude-code, codex-cli, agy, opencode-cli, all; deprecated: gemini-cli)", req.Harness)
 			}
 
 			result, opErr := ListSessions(opCtx, req)
@@ -62,7 +62,7 @@ func NewListSessionsCmd(newOpCtx OpCtxFunc) *cobra.Command {
 	}
 
 	cmd.Flags().StringP("status", "s", "active", "Filter by session status (allowed: active, archived, all)")
-	cmd.Flags().StringP("harness", "H", "", "Filter by agent type (allowed: claude-code, gemini-cli, codex, opencode, all)")
+	cmd.Flags().StringP("harness", "H", "", "Filter by harness (allowed: claude-code, codex-cli, agy, opencode-cli, all; deprecated: gemini-cli)")
 	cmd.Flags().IntP("limit", "n", 100, "Maximum sessions to return (1-1000)")
 	cmd.Flags().Int("offset", 0, "Pagination offset")
 

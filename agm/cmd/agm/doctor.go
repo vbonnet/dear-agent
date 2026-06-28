@@ -63,8 +63,9 @@ USAGE MODES:
    - Sessions with empty/missing Claude UUIDs
    - Orphaned session directories
    - Invalid manifest files
-   - Per-harness health for every harness in use (claude-code, gemini-cli,
-     codex-cli, opencode-cli): CLI binary on PATH, auth/config, config dir
+   - Per-harness health for every active harness in use (claude-code,
+     codex-cli, agy, opencode-cli): CLI binary on PATH, auth/config, config dir
+     Deprecated compatibility: gemini-cli
 
    Use when: You want a quick overview of system health
 
@@ -461,8 +462,9 @@ func detectDuplicateSessionDirs(sessionsDir string) []DuplicateSessionDir {
 }
 
 // checkHarnessHealth runs per-harness health checks for every harness in use
-// across the session manifests. AGM supports claude-code, gemini-cli,
-// codex-cli, and opencode-cli; this surfaces a missing binary, missing
+// across the session manifests. AGM's active parity harnesses are claude-code,
+// codex-cli, agy, and opencode-cli; gemini-cli is deprecated compatibility.
+// This surfaces a missing binary, missing
 // auth/config, or absent config dir for whichever harnesses the sessions
 // actually use — without privileging Claude.
 //
@@ -529,7 +531,7 @@ func reportHarnessHealth(name string, count int) bool {
 	ui.PrintWarning(fmt.Sprintf("Harness '%s' unhealthy", label))
 	switch {
 	case !hh.Known:
-		fmt.Printf("  • Unknown harness — valid harnesses: claude-code, gemini-cli, codex-cli, opencode-cli, agy\n")
+		fmt.Printf("  • Unknown harness — active harnesses: claude-code, codex-cli, agy, opencode-cli; deprecated: gemini-cli\n")
 	case !hh.BinaryPresent:
 		fmt.Printf("  • CLI binary '%s' not found on PATH — install it or migrate these sessions\n", hh.BinaryName)
 	}

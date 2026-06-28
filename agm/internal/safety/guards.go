@@ -167,10 +167,35 @@ func CheckSessionUninitialized(sessionName, socketPath, harness string) *Violati
 	if err != nil {
 		return nil
 	}
+	harness = normalizeHarnessForSafety(harness)
 	if harness == "codex-cli" {
+		codexRunning, procErr := tmux.IsProcessRunning(sessionName, "codex")
+		if procErr != nil {
+			codexRunning = true
+		}
+		if !codexRunning {
+			return &Violation{
+				Guard:      ViolationSessionUninitialized,
+				Message:    "Codex process is not running in this session.",
+				Suggestion: "Wait for Codex to start, or verify the session: agm session list",
+				Evidence:   "no codex process",
+			}
+		}
 		return detectCodexSessionUninitialized(content)
 	}
 	if harness == "agy" {
+		agyRunning, procErr := tmux.IsProcessRunning(sessionName, "agy")
+		if procErr != nil {
+			agyRunning = true
+		}
+		if !agyRunning {
+			return &Violation{
+				Guard:      ViolationSessionUninitialized,
+				Message:    "AGY process is not running in this session.",
+				Suggestion: "Wait for AGY to start, or verify the session: agm session list",
+				Evidence:   "no agy process",
+			}
+		}
 		return detectAgySessionUninitialized(content)
 	}
 
@@ -181,6 +206,21 @@ func CheckSessionUninitialized(sessionName, socketPath, harness string) *Violati
 	}
 
 	return detectSessionUninitialized(content, claudeRunning)
+}
+
+func normalizeHarnessForSafety(harness string) string {
+	switch strings.ToLower(strings.TrimSpace(harness)) {
+	case "codex", "codex-cli":
+		return "codex-cli"
+	case "agy", "antigravity":
+		return "agy"
+	case "opencode", "opencode-cli":
+		return "opencode-cli"
+	case "claude", "claude-code", "":
+		return "claude-code"
+	default:
+		return strings.ToLower(strings.TrimSpace(harness))
+	}
 }
 
 func detectCodexSessionUninitialized(paneContent string) *Violation {

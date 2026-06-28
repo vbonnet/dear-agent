@@ -347,7 +347,7 @@ func TestSuggestHarness(t *testing.T) {
 		expected string
 	}{
 		{"claude", "claude-code"},
-		{"gem", "gemini-cli"},
+		{"gem", ""},
 		{"xyz-unknown", ""},
 	}
 	for _, tt := range tests {

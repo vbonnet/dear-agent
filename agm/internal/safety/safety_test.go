@@ -377,6 +377,31 @@ func TestDetectAgySessionUninitialized(t *testing.T) {
 	}
 }
 
+func TestNormalizeHarnessForSafety(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"codex", "codex-cli"},
+		{"codex-cli", "codex-cli"},
+		{"agy", "agy"},
+		{"antigravity", "agy"},
+		{"opencode", "opencode-cli"},
+		{"opencode-cli", "opencode-cli"},
+		{"claude", "claude-code"},
+		{"claude-code", "claude-code"},
+		{"", "claude-code"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := normalizeHarnessForSafety(tt.input); got != tt.want {
+				t.Errorf("normalizeHarnessForSafety(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDetectClaudeMidResponse(t *testing.T) {
 	tests := []struct {
 		name          string

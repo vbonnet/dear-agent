@@ -10,8 +10,9 @@ import (
 	"time"
 )
 
-// Known harness names
-var knownHarnesses = []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli", "agy"}
+// Known harness names. Active parity harnesses come first; deprecated harnesses
+// remain accepted for backward compatibility.
+var knownHarnesses = KnownHarnesses()
 
 // Harness-to-environment-variable mapping
 var harnessEnvVars = map[string]string{
@@ -216,18 +217,18 @@ func (e *HarnessUnavailableError) Error() string {
 // suggestHarness suggests the closest matching harness name for typos
 func suggestHarness(name string) string {
 	// Simple prefix matching for common typos
-	for _, known := range knownHarnesses {
+	for _, known := range ActiveHarnesses() {
 		if strings.HasPrefix(known, name) {
 			return known
 		}
-		// Also check if the input is a prefix match (e.g., "gem" -> "gemini-cli")
+		// Also check if the input is a prefix match (e.g., "cod" -> "codex-cli")
 		if strings.HasPrefix(known, strings.ToLower(name)) {
 			return known
 		}
 	}
 
 	// Check for common typos (edit distance 1)
-	for _, known := range knownHarnesses {
+	for _, known := range ActiveHarnesses() {
 		if levenshteinDistance(strings.ToLower(name), known) == 1 {
 			return known
 		}

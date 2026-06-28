@@ -1,8 +1,10 @@
 #!/bin/bash
 # Suite 09: Harness Parity
-# Table-driven tests across all supported harnesses to verify consistent behavior.
+# Table-driven tests across active parity harnesses to verify consistent behavior.
+# gemini-cli is deprecated compatibility and is intentionally not part of this
+# active parity loop.
 
-for harness in claude-code codex-cli gemini-cli opencode-cli; do
+for harness in claude-code codex-cli agy opencode-cli; do
     skip_if_no_harness "$harness" || continue
 
     # codex-cli uses OAuth login, not OPENAI_API_KEY — no skip needed
@@ -46,8 +48,8 @@ for harness in claude-code codex-cli gemini-cli opencode-cli; do
 
     # Test: mode switching
     test_start "[$harness] send mode plan"
-    if [[ "$harness" == "gemini-cli" ]]; then
-        # Gemini sessions may not be ready for mode switching immediately
+    if [[ "$harness" == "agy" ]]; then
+        # AGY sessions may not be ready for mode switching immediately
         sleep 3
     fi
     agm_run send mode plan "$session_name"
