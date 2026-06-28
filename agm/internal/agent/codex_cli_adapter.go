@@ -20,12 +20,13 @@ type CodexCLIAdapter struct {
 }
 
 var (
-	codexHasSession    = tmux.HasSession
-	codexNewSession    = tmux.NewSession
-	codexSendCommand   = tmux.SendCommand
-	codexWaitForPrompt = tmux.WaitForCodexPrompt
-	codexAttachSession = tmux.AttachSession
-	codexIsIdle        = tmux.IsCodexIdle
+	codexHasSession       = tmux.HasSession
+	codexNewSession       = tmux.NewSession
+	codexSendCommand      = tmux.SendCommand
+	codexWaitForPrompt    = tmux.WaitForCodexPrompt
+	codexAttachSession    = tmux.AttachSession
+	codexIsIdle           = tmux.IsCodexIdle
+	codexIsProcessRunning = tmux.IsProcessRunning
 )
 
 // NewCodexCLIAdapter creates a Codex CLI adapter.
@@ -112,10 +113,19 @@ func (a *CodexCLIAdapter) ResumeSession(sessionID SessionID) error {
 	if err != nil {
 		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
+	sendCommands := false
 	if !exists {
 		if err := codexNewSession(metadata.TmuxName, metadata.WorkingDir); err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
+		sendCommands = true
+	} else {
+		running, err := codexIsProcessRunning(metadata.TmuxName, "codex")
+		if err != nil || !running {
+			sendCommands = true
+		}
+	}
+	if sendCommands {
 		model, _ := DefaultModelForHarness("codex-cli")
 		resolvedModel := ResolveModelFullName("codex-cli", model)
 		cmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s codex -m %s -C %s -s workspace-write",
@@ -127,7 +137,9 @@ func (a *CodexCLIAdapter) ResumeSession(sessionID SessionID) error {
 		if err := codexSendCommand(metadata.TmuxName, cmd+" && exit"); err != nil {
 			return fmt.Errorf("failed to send Codex resume command: %w", err)
 		}
-		_ = tmux.WaitForCodexPrompt(metadata.TmuxName, 5*time.Second)
+		if err := codexWaitForPrompt(metadata.TmuxName, 5*time.Second); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Codex prompt not detected on resume: %v\n", err)
+		}
 	}
 
 	if os.Getenv("TMUX") == "" {
@@ -182,13 +194,10 @@ func (a *CodexCLIAdapter) SendMessage(sessionID SessionID, message Message) erro
 }
 
 func (a *CodexCLIAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
-	metadata, err := a.sessionStore.Get(sessionID)
-	if err != nil {
+	if _, err := a.sessionStore.Get(sessionID); err != nil {
 		return nil, fmt.Errorf("session not found: %w", err)
 	}
-	if metadata.UUID == "" {
-		return []Message{}, nil
-	}
+	// TODO: Implement actual history retrieval from ~/.codex/sessions/.
 	return []Message{}, nil
 }
 
@@ -258,7 +267,7 @@ func (a *CodexCLIAdapter) ExecuteCommand(cmd Command) error {
 		if err := ValidateSendDirPath(path); err != nil {
 			return fmt.Errorf("invalid set_directory path: %w", err)
 		}
-		return codexSendCommand(metadata.TmuxName, fmt.Sprintf("cd %s", shellQuote(path)))
+		return codexSendCommand(metadata.TmuxName, fmt.Sprintf("cd %s\r", shellQuote(path)))
 	case CommandRunHook:
 		return nil
 	default:

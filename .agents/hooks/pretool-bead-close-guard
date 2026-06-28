@@ -79,27 +79,25 @@ fi
 # (--db, --reason, --status, ...), and take the first positional that has a
 # bead-id shape (<prefix>-<suffix>, e.g. ce-rpet). "closed", status values and
 # reason words have no dash and are correctly ignored.
-bead_id="$(printf '%s' "$stripped" | awk '
+bead_id="$(printf '%s' "$stripped" | xargs -n 1 2>/dev/null | awk '
   BEGIN {
     split("--db --reason --status --repo --actor --assignee --owner --priority --type --title --design --label -r -p -a -t", vf, " ")
     for (i in vf) valflag[vf[i]] = 1
     started = 0; skipnext = 0
   }
   {
-    for (i = 1; i <= NF; i++) {
-      tok = $i
-      if (!started) {
-        if (tok == "close" || tok == "update") started = 1
-        continue
-      }
-      if (substr(tok, 1, 1) == "-") {
-        # "--flag=value" carries its own value; a bare value-flag eats the next token.
-        if (index(tok, "=") == 0 && (tok in valflag)) skipnext = 1
-        continue
-      }
-      if (skipnext) { skipnext = 0; continue }
-      if (tok ~ /^[A-Za-z][A-Za-z0-9_]*-[A-Za-z0-9]+$/) { print tok; exit }
+    tok = $0
+    if (!started) {
+      if (tok == "close" || tok == "update") started = 1
+      next
     }
+    if (substr(tok, 1, 1) == "-") {
+      # "--flag=value" carries its own value; a bare value-flag eats the next token.
+      if (index(tok, "=") == 0 && (tok in valflag)) skipnext = 1
+      next
+    }
+    if (skipnext) { skipnext = 0; next }
+    if (tok ~ /^[A-Za-z][A-Za-z0-9_]*-[A-Za-z0-9]+$/) { print tok; exit }
   }')"
 
 # Close intent detected but no bead id could be parsed: fail CLOSED. An

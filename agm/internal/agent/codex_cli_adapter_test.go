@@ -105,3 +105,125 @@ func TestCodexCreateSessionStoresMetadataEvenIfComposerWaitTimesOut(t *testing.T
 		t.Fatalf("CreateSession did not store metadata after non-fatal prompt wait timeout: %v", err)
 	}
 }
+
+func TestCodexResumeSessionRestartsDeadProcess(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/fake-tmux")
+
+	origHasSession := codexHasSession
+	origNewSession := codexNewSession
+	origSendCommand := codexSendCommand
+	origWaitForPrompt := codexWaitForPrompt
+	origIsProcessRunning := codexIsProcessRunning
+	t.Cleanup(func() {
+		codexHasSession = origHasSession
+		codexNewSession = origNewSession
+		codexSendCommand = origSendCommand
+		codexWaitForPrompt = origWaitForPrompt
+		codexIsProcessRunning = origIsProcessRunning
+	})
+
+	codexHasSession = func(string) (bool, error) { return true, nil }
+	codexNewSession = func(string, string) error {
+		t.Fatal("ResumeSession should not create an existing tmux session")
+		return nil
+	}
+	codexIsProcessRunning = func(sessionName, processName string) (bool, error) {
+		if sessionName != "codex-resume-dead" || processName != "codex" {
+			t.Fatalf("codexIsProcessRunning(%q, %q), want codex-resume-dead/codex", sessionName, processName)
+		}
+		return false, nil
+	}
+
+	var sent string
+	codexSendCommand = func(_ string, cmd string) error {
+		sent = cmd
+		return nil
+	}
+	waited := false
+	codexWaitForPrompt = func(sessionName string, timeout time.Duration) error {
+		waited = true
+		if sessionName != "codex-resume-dead" {
+			t.Fatalf("codexWaitForPrompt session = %q, want codex-resume-dead", sessionName)
+		}
+		if timeout != 5*time.Second {
+			t.Fatalf("codexWaitForPrompt timeout = %v, want 5s", timeout)
+		}
+		return nil
+	}
+
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{
+		"session-id": {
+			TmuxName:   "codex-resume-dead",
+			WorkingDir: "/work",
+			UUID:       "native-codex-session",
+		},
+	}}
+	adapter := &CodexCLIAdapter{sessionStore: store}
+	if err := adapter.ResumeSession("session-id"); err != nil {
+		t.Fatalf("ResumeSession returned error: %v", err)
+	}
+	if !strings.Contains(sent, "codex -m") || !strings.Contains(sent, "resume 'native-codex-session'") {
+		t.Fatalf("ResumeSession sent %q, want Codex resume command", sent)
+	}
+	if !waited {
+		t.Fatal("ResumeSession did not wait for Codex prompt after restart")
+	}
+}
+
+func TestCodexResumeSessionSkipsRunningProcess(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/fake-tmux")
+
+	origHasSession := codexHasSession
+	origSendCommand := codexSendCommand
+	origIsProcessRunning := codexIsProcessRunning
+	t.Cleanup(func() {
+		codexHasSession = origHasSession
+		codexSendCommand = origSendCommand
+		codexIsProcessRunning = origIsProcessRunning
+	})
+
+	codexHasSession = func(string) (bool, error) { return true, nil }
+	codexIsProcessRunning = func(string, string) (bool, error) { return true, nil }
+	codexSendCommand = func(string, string) error {
+		t.Fatal("ResumeSession should not send a resume command when Codex is already running")
+		return nil
+	}
+
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{
+		"session-id": {TmuxName: "codex-running", WorkingDir: "/work"},
+	}}
+	adapter := &CodexCLIAdapter{sessionStore: store}
+	if err := adapter.ResumeSession("session-id"); err != nil {
+		t.Fatalf("ResumeSession returned error: %v", err)
+	}
+}
+
+func TestCodexExecuteCommandSetDirSendsEnter(t *testing.T) {
+	origSendCommand := codexSendCommand
+	t.Cleanup(func() { codexSendCommand = origSendCommand })
+
+	var sent string
+	codexSendCommand = func(_ string, cmd string) error {
+		sent = cmd
+		return nil
+	}
+
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{
+		"session-id": {TmuxName: "codex-setdir"},
+	}}
+	adapter := &CodexCLIAdapter{sessionStore: store}
+	err := adapter.ExecuteCommand(Command{
+		Type: CommandSetDir,
+		Params: map[string]any{
+			"session_id": "session-id",
+			"path":       "/tmp/work-dir",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteCommand returned error: %v", err)
+	}
+	want := "cd '/tmp/work-dir'\r"
+	if sent != want {
+		t.Fatalf("ExecuteCommand sent %q, want %q", sent, want)
+	}
+}
