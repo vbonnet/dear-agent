@@ -8,6 +8,7 @@ import (
 
 	"github.com/cucumber/godog"
 
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
 )
 
@@ -25,11 +26,14 @@ type harnessParityState struct {
 	waitedForComposer          bool
 	waitedForAgyPrompt         bool
 	startupDelivered           bool
+	trustAutoAccepted          bool
+	sendSafetyRequiresClaude   bool
 	sessionListFields          []string
 	sessionListHasArray        bool
 	lifecycleReflected         bool
 	codexArchiveInvoked        bool
 	tmuxResumeLaunched         bool
+	configuredHarness          string
 }
 
 type harnessParityStateKey struct{}
@@ -41,6 +45,11 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	})
 
 	ctx.Step(`^a Codex CLI composer pane$`, aCodexCLIComposerPane)
+	ctx.Step(`^harness "([^"]*)" is configured$`, harnessIsConfigured)
+	ctx.Step(`^AGM validates active parity support$`, agmValidatesActiveParitySupport)
+	ctx.Step(`^harness "([^"]*)" should be active for parity$`, harnessShouldBeActiveForParity)
+	ctx.Step(`^harness "([^"]*)" should not be deprecated$`, harnessShouldNotBeDeprecated)
+	ctx.Step(`^harness "([^"]*)" should be deprecated$`, harnessShouldBeDeprecated)
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
@@ -55,6 +64,10 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM should wait for the Codex composer$`, agmShouldWaitForTheCodexComposer)
 	ctx.Step(`^AGM should wait for the AGY prompt$`, agmShouldWaitForTheAGYPrompt)
 	ctx.Step(`^AGM should deliver the startup prompt even though the session is detached$`, agmShouldDeliverStartupPromptDetached)
+	ctx.Step(`^AGM should auto-accept the Codex trust prompt before prompt delivery$`, agmShouldAutoAcceptCodexTrustPromptBeforePromptDelivery)
+	ctx.Step(`^AGM should auto-accept the AGY trust prompt before prompt delivery$`, agmShouldAutoAcceptAGYTrustPromptBeforePromptDelivery)
+	ctx.Step(`^AGM runs send safety for the configured harness$`, agmRunsSendSafetyForTheConfiguredHarness)
+	ctx.Step(`^send safety should not require a Claude process$`, sendSafetyShouldNotRequireClaudeProcess)
 	ctx.Step(`^an existing tmux session running Codex CLI$`, anExistingTmuxSessionRunningCodexCLI)
 	ctx.Step(`^an existing tmux session running AGY$`, anExistingTmuxSessionRunningAGY)
 	ctx.Step(`^/agm:agm-assoc runs in that session$`, agmAssocRunsInThatSession)
@@ -84,6 +97,52 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the matching Codex saved session should be archived$`, matchingCodexSavedSessionShouldBeArchived)
 }
 
+func harnessIsConfigured(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.configuredHarness = agent.NormalizeHarnessName(harness)
+	return nil
+}
+
+func agmValidatesActiveParitySupport(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	return agent.ValidateHarnessName(harnessState.configuredHarness)
+}
+
+func harnessShouldBeActiveForParity(ctx context.Context, harness string) error {
+	normalized := agent.NormalizeHarnessName(harness)
+	for _, active := range agent.ActiveHarnesses() {
+		if normalized == active {
+			return nil
+		}
+	}
+	return fmt.Errorf("harness %q is not in active parity set %v", normalized, agent.ActiveHarnesses())
+}
+
+func harnessShouldNotBeDeprecated(ctx context.Context, harness string) error {
+	normalized := agent.NormalizeHarnessName(harness)
+	if agent.IsDeprecatedHarness(normalized) {
+		return fmt.Errorf("harness %q should not be deprecated", normalized)
+	}
+	return nil
+}
+
+func harnessShouldBeDeprecated(ctx context.Context, harness string) error {
+	normalized := agent.NormalizeHarnessName(harness)
+	if !agent.IsDeprecatedHarness(normalized) {
+		return fmt.Errorf("harness %q should be deprecated", normalized)
+	}
+	return nil
+}
+
 func getHarnessParityState(ctx context.Context) (*harnessParityState, error) {
 	harnessState, ok := ctx.Value(harnessParityStateKey{}).(*harnessParityState)
 	if !ok || harnessState == nil {
@@ -109,7 +168,7 @@ func aCodexCLITrustPrompt(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	harnessState.paneOutput = `Do you trust the contents of this folder?
+	harnessState.paneOutput = `Do you trust the contents of this directory?
 
 › 1. Yes, continue
   2. No, exit`
@@ -204,6 +263,9 @@ func agmCreatesDetachedCodexSessionWithStartupPrompt(ctx context.Context) error 
 	if err != nil {
 		return err
 	}
+	if strings.Contains(harnessState.paneOutput, "trust the contents") {
+		harnessState.trustAutoAccepted = true
+	}
 	harnessState.waitedForComposer = true
 	harnessState.startupDelivered = true
 	return nil
@@ -213,6 +275,10 @@ func agmCreatesDetachedAGYSessionWithStartupPrompt(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
 		return err
+	}
+	if strings.Contains(harnessState.paneOutput, "trust this folder") ||
+		strings.Contains(harnessState.paneOutput, "trust the contents") {
+		harnessState.trustAutoAccepted = true
 	}
 	harnessState.waitedForAgyPrompt = true
 	harnessState.startupDelivered = true
@@ -248,6 +314,61 @@ func agmShouldDeliverStartupPromptDetached(ctx context.Context) error {
 	}
 	if !harnessState.startupDelivered {
 		return fmt.Errorf("expected detached startup prompt to be delivered")
+	}
+	return nil
+}
+
+func agmShouldAutoAcceptCodexTrustPromptBeforePromptDelivery(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.harness != "codex-cli" {
+		return fmt.Errorf("harness = %q, want codex-cli", harnessState.harness)
+	}
+	if !harnessState.trustAutoAccepted || !harnessState.startupDelivered {
+		return fmt.Errorf("expected Codex trust prompt to be auto-accepted before startup prompt delivery")
+	}
+	return nil
+}
+
+func agmShouldAutoAcceptAGYTrustPromptBeforePromptDelivery(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.harness != "agy" {
+		return fmt.Errorf("harness = %q, want agy", harnessState.harness)
+	}
+	if !harnessState.trustAutoAccepted || !harnessState.startupDelivered {
+		return fmt.Errorf("expected AGY trust prompt to be auto-accepted before startup prompt delivery")
+	}
+	return nil
+}
+
+func agmRunsSendSafetyForTheConfiguredHarness(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	switch harnessState.harness {
+	case "codex-cli", "agy":
+		harnessState.sendSafetyRequiresClaude = false
+	case "":
+		return fmt.Errorf("no harness configured")
+	default:
+		harnessState.sendSafetyRequiresClaude = true
+	}
+	return nil
+}
+
+func sendSafetyShouldNotRequireClaudeProcess(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.sendSafetyRequiresClaude {
+		return fmt.Errorf("send safety for harness %q should not require a Claude process", harnessState.harness)
 	}
 	return nil
 }

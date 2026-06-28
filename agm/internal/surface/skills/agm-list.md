@@ -1,6 +1,6 @@
 ---
 description: List all AGM sessions
-argument-hint: "[--status active|archived|all] [--harness claude-code|gemini-cli|codex|opencode|all] [--limit N] [--offset N]"
+argument-hint: "[--status active|archived|all] [--harness claude-code|codex-cli|agy|opencode-cli|all] [--limit N] [--offset N]"
 allowed-tools: Bash(agm session list:*)
 ---
 

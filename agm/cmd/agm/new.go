@@ -92,7 +92,8 @@ Flags:
   --detached    - Create session without attaching (useful when inside tmux)
   --workspace   - Specify workspace (oss, acme) or "auto" for interactive selection
                   If omitted, uses auto-detected workspace or prompts if detection fails
-  --harness     - Harness to use (claude-code, gemini-cli, codex-cli, opencode-cli, agy)
+  --harness     - Harness to use (claude-code, codex-cli, agy, opencode-cli)
+                  Deprecated compatibility: gemini-cli
                   If omitted, prompts interactively
   --model       - Model to use (e.g., sonnet, opus, 2.5-flash, 5.4)
                   If omitted, uses default for harness
@@ -488,10 +489,9 @@ Examples:
 			var selectedHarness string
 			options := []huh.Option[string]{
 				huh.NewOption("Claude Code (Anthropic CLI)", "claude-code"),
-				huh.NewOption("Gemini CLI (Google)", "gemini-cli"),
 				huh.NewOption("Codex CLI (OpenAI)", "codex-cli"),
-				huh.NewOption("OpenCode CLI (Multi-provider)", "opencode-cli"),
 				huh.NewOption("AGY (Antigravity CLI)", "agy"),
+				huh.NewOption("OpenCode CLI (Multi-provider)", "opencode-cli"),
 			}
 			err := huh.NewSelect[string]().
 				Title("Which harness would you like to use?").
@@ -503,7 +503,7 @@ Examples:
 					"Failed to read harness selection",
 					"  • Use --harness flag for non-interactive usage: agm session new --harness=claude-code\n"+
 						"  • Check terminal is interactive (TTY)\n"+
-						"  • Available harnesses: claude-code, gemini-cli, codex-cli, opencode-cli, agy")
+						"  • Available harnesses: claude-code, codex-cli, agy, opencode-cli")
 				return err
 			}
 			harnessName = selectedHarness
@@ -525,7 +525,8 @@ Examples:
 		if err := agent.ValidateHarnessName(harnessName); err != nil {
 			ui.PrintError(err,
 				"Invalid harness specified",
-				"  • Valid harnesses: claude-code, gemini-cli, codex-cli, opencode-cli, agy\n"+
+				"  • Valid active harnesses: claude-code, codex-cli, agy, opencode-cli\n"+
+					"  • Deprecated compatibility harness: gemini-cli\n"+
 					"  • Run 'agm harness list' to see available harnesses")
 			return err
 		}
@@ -673,7 +674,7 @@ Examples:
 			}
 		}
 
-		// Set GCP_PROJECT_ID environment variable if provided (for gemini-cli harness)
+		// Set GCP_PROJECT_ID environment variable if provided (for deprecated gemini-cli harness)
 		if projectID != "" {
 			os.Setenv("GCP_PROJECT_ID", projectID)
 			debug.Log("Set GCP_PROJECT_ID: %s", projectID)
@@ -824,7 +825,7 @@ func init() {
 	// propagate to child commands for full isolation.
 	newCmd.Flags().BoolVar(&testMode, "test", false, "Create test session with per-run sandbox isolation")
 	newCmd.Flags().BoolVar(&allowTestName, "allow-test-name", false, "Override test pattern warning (for legitimate production sessions with 'test' in name)")
-	newCmd.Flags().StringVar(&harnessName, "harness", "", "Harness to use (claude-code, gemini-cli, codex-cli, opencode-cli, agy) (env: AGM_DEFAULT_HARNESS)")
+	newCmd.Flags().StringVar(&harnessName, "harness", "", "Harness to use (claude-code, codex-cli, agy, opencode-cli; deprecated: gemini-cli) (env: AGM_DEFAULT_HARNESS)")
 	newCmd.Flags().StringVar(&modelName, "model", "", "Model to use (e.g., sonnet, opus, 2.5-flash, 5.4) (env: AGM_DEFAULT_MODEL)")
 	newCmd.Flags().StringVar(&modelTierFlag, "model-tier", "", "Cost tier for model routing: cheap (70%), mid (20%), expensive (10%)")
 	_ = newCmd.RegisterFlagCompletionFunc("model-tier", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -833,7 +834,7 @@ func init() {
 	newCmd.MarkFlagsMutuallyExclusive("model", "model-tier")
 	newCmd.Flags().StringVar(&workspaceName, "workspace", "", "Workspace to use (oss, acme, auto for detection)")
 	newCmd.Flags().StringVar(&workflowName, "workflow", "", "Execution workflow (deep-research, code-review, architect)")
-	newCmd.Flags().StringVar(&projectID, "project-id", "", "GCP project ID (required for gemini-cli harness)")
+	newCmd.Flags().StringVar(&projectID, "project-id", "", "GCP project ID (deprecated gemini-cli compatibility)")
 	newCmd.Flags().StringVar(&prompt, "prompt", "", "Prompt to send after session initialization")
 	newCmd.Flags().StringVar(&promptFile, "prompt-file", "", "File containing prompt to send")
 	newCmd.Flags().BoolVar(&noSandbox, "no-sandbox", false, "Disable sandbox isolation (sandbox is ON by default)")
@@ -864,7 +865,7 @@ func init() {
 
 	// Tab completion for --harness flag
 	_ = newCmd.RegisterFlagCompletionFunc("harness", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"claude-code", "gemini-cli", "codex-cli", "opencode-cli", "agy"}, cobra.ShellCompDirectiveNoFileComp
+		return agent.ActiveHarnesses(), cobra.ShellCompDirectiveNoFileComp
 	})
 	// Tab completion for --model flag (context-sensitive based on --harness value)
 	_ = newCmd.RegisterFlagCompletionFunc("model", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

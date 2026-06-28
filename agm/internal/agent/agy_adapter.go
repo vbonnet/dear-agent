@@ -21,6 +21,13 @@ type AgyAdapter struct {
 	sessionStore SessionStore
 }
 
+var (
+	agyHasSession    = tmux.HasSession
+	agyNewSession    = tmux.NewSession
+	agySendCommand   = tmux.SendCommand
+	agyWaitForPrompt = tmux.WaitForAgyPrompt
+)
+
 // NewAgyAdapter creates a new Agy adapter instance.
 //
 // If sessionStore is nil, creates a default JSON-backed store at ~/.agm/sessions.json.
@@ -60,34 +67,38 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if tmuxName == "" {
 		tmuxName = fmt.Sprintf("agy-%s", time.Now().Format("20060102-150405"))
 	}
+	workDir := ctx.WorkingDirectory
+	if workDir == "" {
+		workDir = "."
+	}
 
 	// Check if tmux session already exists
-	exists, err := tmux.HasSession(tmuxName)
+	exists, err := agyHasSession(tmuxName)
 	if err != nil {
 		return "", fmt.Errorf("failed to check tmux session: %w", err)
 	}
 
 	if !exists {
 		// Create new tmux session
-		if err := tmux.NewSession(tmuxName, ctx.WorkingDirectory); err != nil {
+		if err := agyNewSession(tmuxName, workDir); err != nil {
 			return "", fmt.Errorf("failed to create tmux session: %w", err)
 		}
 	}
 
 	// Build Agy command (navigate to dir and run)
-	agyCmd := fmt.Sprintf("cd '%s' && agy && exit", ctx.WorkingDirectory)
+	agyCmd := fmt.Sprintf("cd %s && agy%s && exit", shellQuote(workDir), agyPermissionFlag(ctx.Environment["AGM_PERMISSION_MODE"]))
 
 	// Start Agy in the tmux session
-	if err := tmux.SendCommand(tmuxName, agyCmd); err != nil {
+	if err := agySendCommand(tmuxName, agyCmd); err != nil {
 		// Clean up tmux session on error if we created it
 		if !exists {
-			_ = tmux.SendCommand(tmuxName, "exit\r")
+			_ = agySendCommand(tmuxName, "exit\r")
 		}
 		return "", fmt.Errorf("failed to start Agy in tmux session: %w", err)
 	}
 
 	// Wait for Agy to be ready
-	if err := tmux.WaitForClaudeReady(tmuxName, 30*time.Second); err != nil {
+	if err := agyWaitForPrompt(tmuxName, 30*time.Second); err != nil {
 		// Non-fatal warning
 		fmt.Fprintf(os.Stderr, "Warning: Agy prompt not detected (still initializing)\n")
 	}
@@ -97,13 +108,14 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		TmuxName:   tmuxName,
 		Title:      ctx.Name, // Set initial title from session name
 		CreatedAt:  time.Now(),
-		WorkingDir: ctx.WorkingDirectory,
+		WorkingDir: workDir,
 		Project:    ctx.Project,
+		UUID:       ctx.Environment["AGY_CONVERSATION_ID"],
 	}
 
 	if err := a.sessionStore.Set(sessionID, metadata); err != nil {
 		// Clean up tmux session on error
-		_ = tmux.SendCommand(tmuxName, "exit\r")
+		_ = agySendCommand(tmuxName, "exit\r")
 		return "", fmt.Errorf("failed to store session metadata: %w", err)
 	}
 
@@ -145,16 +157,23 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 
 	// Send resume command if needed
 	if sendCommands {
-		// Build combined command
-		fullCmd := fmt.Sprintf("cd '%s' && agy --resume %s && exit",
-			metadata.WorkingDir,
-			string(sessionID))
+		// Build combined command. AGY resumes saved conversations with
+		// --conversation; metadata.UUID stores the native AGY conversation ID
+		// when AGM imported or captured one.
+		conversationID := metadata.UUID
+		if conversationID == "" {
+			conversationID = string(sessionID)
+		}
+		fullCmd := fmt.Sprintf("cd %s && agy --conversation %s --add-dir %s && exit",
+			shellQuote(metadata.WorkingDir),
+			shellQuote(conversationID),
+			shellQuote(metadata.WorkingDir))
 
 		if err := tmux.SendCommand(metadata.TmuxName, fullCmd); err != nil {
 			return fmt.Errorf("failed to send resume command: %w", err)
 		}
 
-		_ = tmux.WaitForClaudeReady(metadata.TmuxName, 5*time.Second)
+		_ = tmux.WaitForAgyPrompt(metadata.TmuxName, 5*time.Second)
 	}
 
 	// Attach to tmux session (skip if already in tmux)
@@ -165,6 +184,13 @@ func (a *AgyAdapter) ResumeSession(sessionID SessionID) error {
 	}
 
 	return nil
+}
+
+func agyPermissionFlag(mode string) string {
+	if mode == "auto" {
+		return " --dangerously-skip-permissions"
+	}
+	return ""
 }
 
 // TerminateSession terminates an Agy session.
