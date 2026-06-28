@@ -41,10 +41,13 @@ func NewCodexCLIAdapter(sessionStore SessionStore) (Agent, error) {
 	return &CodexCLIAdapter{sessionStore: sessionStore}, nil
 }
 
+// Name returns the canonical harness name.
 func (a *CodexCLIAdapter) Name() string { return "codex-cli" }
 
+// Version returns the adapter version string.
 func (a *CodexCLIAdapter) Version() string { return "codex-cli" }
 
+// CreateSession starts a Codex CLI session in tmux and waits for the composer.
 func (a *CodexCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if err := ValidateHarnessAvailability("codex-cli"); err != nil {
 		return "", err
@@ -79,7 +82,9 @@ func (a *CodexCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		shellQuote(tmuxName), shellQuote(resolvedModel), shellQuote(workDir))
 	if err := codexSendCommand(tmuxName, cmd); err != nil {
 		if !exists {
-			_ = codexSendCommand(tmuxName, "exit\r")
+			if cleanupErr := codexSendCommand(tmuxName, "exit\r"); cleanupErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to clean up Codex tmux session: %v\n", cleanupErr)
+			}
 		}
 		return "", fmt.Errorf("failed to start Codex CLI in tmux session: %w", err)
 	}
@@ -96,13 +101,16 @@ func (a *CodexCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		UUID:       ctx.Environment["CODEX_SESSION_ID"],
 	}
 	if err := a.sessionStore.Set(sessionID, metadata); err != nil {
-		_ = codexSendCommand(tmuxName, "exit\r")
+		if cleanupErr := codexSendCommand(tmuxName, "exit\r"); cleanupErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to clean up Codex tmux session: %v\n", cleanupErr)
+		}
 		return "", fmt.Errorf("failed to store session metadata: %w", err)
 	}
 
 	return sessionID, nil
 }
 
+// ResumeSession resumes a stored Codex CLI session.
 func (a *CodexCLIAdapter) ResumeSession(sessionID SessionID) error {
 	metadata, err := a.sessionStore.Get(sessionID)
 	if err != nil {
@@ -150,6 +158,7 @@ func (a *CodexCLIAdapter) ResumeSession(sessionID SessionID) error {
 	return nil
 }
 
+// TerminateSession exits the tmux-backed Codex CLI session and removes metadata.
 func (a *CodexCLIAdapter) TerminateSession(sessionID SessionID) error {
 	metadata, err := a.sessionStore.Get(sessionID)
 	if err != nil {
@@ -164,6 +173,7 @@ func (a *CodexCLIAdapter) TerminateSession(sessionID SessionID) error {
 	return nil
 }
 
+// GetSessionStatus returns the tmux-backed Codex CLI session status.
 func (a *CodexCLIAdapter) GetSessionStatus(sessionID SessionID) (Status, error) {
 	metadata, err := a.sessionStore.Get(sessionID)
 	if err != nil {
@@ -182,6 +192,7 @@ func (a *CodexCLIAdapter) GetSessionStatus(sessionID SessionID) (Status, error) 
 	return StatusActive, nil
 }
 
+// SendMessage sends a message into the Codex CLI session.
 func (a *CodexCLIAdapter) SendMessage(sessionID SessionID, message Message) error {
 	metadata, err := a.sessionStore.Get(sessionID)
 	if err != nil {
@@ -193,6 +204,7 @@ func (a *CodexCLIAdapter) SendMessage(sessionID SessionID, message Message) erro
 	return nil
 }
 
+// GetHistory retrieves Codex CLI conversation history.
 func (a *CodexCLIAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 	if _, err := a.sessionStore.Get(sessionID); err != nil {
 		return nil, fmt.Errorf("session not found: %w", err)
@@ -201,6 +213,7 @@ func (a *CodexCLIAdapter) GetHistory(sessionID SessionID) ([]Message, error) {
 	return []Message{}, nil
 }
 
+// ExportConversation exports Codex CLI conversation history.
 func (a *CodexCLIAdapter) ExportConversation(sessionID SessionID, format ConversationFormat) ([]byte, error) {
 	messages, err := a.GetHistory(sessionID)
 	if err != nil {
@@ -224,15 +237,19 @@ func (a *CodexCLIAdapter) ExportConversation(sessionID SessionID, format Convers
 			fmt.Fprintf(&sb, "## %s (%s)\n\n%s\n\n", msg.Role, msg.Timestamp.Format(time.RFC3339), msg.Content)
 		}
 		return []byte(sb.String()), nil
+	case FormatHTML, FormatNative:
+		return nil, fmt.Errorf("unsupported format for Codex CLI: %s", format)
 	default:
 		return nil, fmt.Errorf("unsupported format for Codex CLI: %s", format)
 	}
 }
 
+// ImportConversation imports conversation data into a Codex CLI session.
 func (a *CodexCLIAdapter) ImportConversation(data []byte, format ConversationFormat) (SessionID, error) {
 	return "", fmt.Errorf("conversation import not implemented in CodexCLIAdapter; use AGM session import/register paths")
 }
 
+// Capabilities returns Codex CLI harness capabilities.
 func (a *CodexCLIAdapter) Capabilities() Capabilities {
 	model, _ := DefaultModelForHarness("codex-cli")
 	return Capabilities{
@@ -248,6 +265,7 @@ func (a *CodexCLIAdapter) Capabilities() Capabilities {
 	}
 }
 
+// ExecuteCommand runs a harness command against a Codex CLI session.
 func (a *CodexCLIAdapter) ExecuteCommand(cmd Command) error {
 	sessionIDStr, err := getStringParam(cmd.Params, "session_id")
 	if err != nil {
@@ -270,6 +288,8 @@ func (a *CodexCLIAdapter) ExecuteCommand(cmd Command) error {
 		return codexSendCommand(metadata.TmuxName, fmt.Sprintf("cd %s\r", shellQuote(path)))
 	case CommandRunHook:
 		return nil
+	case CommandRename, CommandAuthorize, CommandClearHistory, CommandSetSystemPrompt:
+		return fmt.Errorf("command %s not supported by Codex CLI", cmd.Type)
 	default:
 		return fmt.Errorf("command %s not supported by Codex CLI", cmd.Type)
 	}

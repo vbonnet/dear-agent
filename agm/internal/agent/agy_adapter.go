@@ -92,7 +92,9 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 	if err := agySendCommand(tmuxName, agyCmd); err != nil {
 		// Clean up tmux session on error if we created it
 		if !exists {
-			_ = agySendCommand(tmuxName, "exit\r")
+			if cleanupErr := agySendCommand(tmuxName, "exit\r"); cleanupErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to clean up Agy tmux session: %v\n", cleanupErr)
+			}
 		}
 		return "", fmt.Errorf("failed to start Agy in tmux session: %w", err)
 	}
@@ -115,7 +117,9 @@ func (a *AgyAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 
 	if err := a.sessionStore.Set(sessionID, metadata); err != nil {
 		// Clean up tmux session on error
-		_ = agySendCommand(tmuxName, "exit\r")
+		if cleanupErr := agySendCommand(tmuxName, "exit\r"); cleanupErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to clean up Agy tmux session: %v\n", cleanupErr)
+		}
 		return "", fmt.Errorf("failed to store session metadata: %w", err)
 	}
 

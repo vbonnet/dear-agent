@@ -1,5 +1,7 @@
 package agent
 
+import "slices"
+
 // activeHarnesses is the canonical parity set. Claude Code is the reference
 // implementation; Codex, AGY, and OpenCode must match its core outcomes.
 var activeHarnesses = []string{"claude-code", "codex-cli", "agy", "opencode-cli"}
@@ -28,20 +30,5 @@ func KnownHarnesses() []string {
 // IsDeprecatedHarness reports whether a normalized harness is legacy-only.
 func IsDeprecatedHarness(name string) bool {
 	name = NormalizeHarnessName(name)
-	for _, deprecated := range deprecatedHarnesses {
-		if name == deprecated {
-			return true
-		}
-	}
-	return false
-}
-
-func isActiveHarness(name string) bool {
-	name = NormalizeHarnessName(name)
-	for _, active := range activeHarnesses {
-		if name == active {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(deprecatedHarnesses, name)
 }

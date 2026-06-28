@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -119,10 +120,8 @@ func agmValidatesActiveParitySupport(ctx context.Context) error {
 
 func harnessShouldBeActiveForParity(ctx context.Context, harness string) error {
 	normalized := agent.NormalizeHarnessName(harness)
-	for _, active := range agent.ActiveHarnesses() {
-		if normalized == active {
-			return nil
-		}
+	if slices.Contains(agent.ActiveHarnesses(), normalized) {
+		return nil
 	}
 	return fmt.Errorf("harness %q is not in active parity set %v", normalized, agent.ActiveHarnesses())
 }
