@@ -224,7 +224,12 @@ func normalizeHarnessForSafety(harness string) string {
 }
 
 func detectCodexSessionUninitialized(paneContent string) *Violation {
-	if strings.Contains(paneContent, "OpenAI Codex") || strings.Contains(paneContent, "/model to change") {
+	// Initial composer box (visible on first launch or before any exchange).
+	// After the first exchange the bordered box scrolls off; only the footer
+	// "gpt-X.Y quality · /path" remains — "gpt-" covers both states.
+	if strings.Contains(paneContent, "OpenAI Codex") ||
+		strings.Contains(paneContent, "/model to change") ||
+		strings.Contains(paneContent, "gpt-") {
 		return nil
 	}
 	if strings.Contains(paneContent, "Do you trust the contents of this directory") {
