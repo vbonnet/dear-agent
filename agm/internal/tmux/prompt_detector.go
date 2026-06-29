@@ -750,11 +750,12 @@ func WaitForGeminiPrompt(sessionName string, timeout time.Duration) error {
 }
 
 // containsAnyHarnessPromptPattern checks if content contains prompt patterns from
-// ANY supported harness (Claude, Gemini, OpenCode, or Codex). Used by SendMultiLinePromptSafe and
+// ANY supported harness (Claude, Gemini, OpenCode, Codex, or AGY). Used by SendMultiLinePromptSafe and
 // SendPromptLiteral which don't know the harness type but need to detect readiness.
 func containsAnyHarnessPromptPattern(content string) bool {
 	return containsClaudePromptPattern(content) || containsGeminiPromptPattern(content) ||
-		containsOpenCodePromptPattern(content) || containsCodexPromptPattern(content)
+		containsOpenCodePromptPattern(content) || containsCodexPromptPattern(content) ||
+		containsAgyPromptPattern(content)
 }
 
 // containsGeminiPromptPattern checks if content contains any Gemini prompt pattern

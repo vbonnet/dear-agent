@@ -115,7 +115,10 @@ func NewDetector() *Detector {
 		// Codex Ready: Codex CLI composer/footer chrome. Keep this specific to
 		// Codex text so generic box-drawing UI or menu selectors do not become
 		// sendable prompts.
-		codexReadyPattern: regexp.MustCompile(`(?ms)(?:>_\s+OpenAI Codex|OpenAI Codex[\s\S]*?/model to change)`),
+		// After the first exchange the bordered composer box ("OpenAI Codex" /
+		// "/model to change") scrolls off; only the footer "gpt-X.Y quality ·
+		// /path" remains. "gpt-\d" covers both the initial and post-exchange state.
+		codexReadyPattern: regexp.MustCompile(`(?ms)(?:>_\s+OpenAI Codex|OpenAI Codex[\s\S]*?/model to change|gpt-\d)`),
 
 		// AGY Ready: the live AGY interactive prompt is a bare ">" line after
 		// the last response. Keep it line-anchored so trust/menu lines like
