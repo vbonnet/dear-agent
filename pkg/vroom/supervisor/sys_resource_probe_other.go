@@ -25,3 +25,8 @@ func sysGoplsCount(_ context.Context) int { return 0 }
 
 // sysMemorystatusLevel returns 0 on platforms other than Darwin.
 func sysMemorystatusLevel() int { return 0 }
+
+// sysCorrectMemoryMetrics is a no-op on platforms other than Darwin.
+func sysCorrectMemoryMetrics(_ context.Context, snap ResourceSnapshot) (float64, uint64) {
+	return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
+}

@@ -51,6 +51,12 @@ func (p *SysResourceProbe) Snapshot(ctx context.Context) (ResourceSnapshot, erro
 	snap.FreePhysicalMemoryBytes = sysFreeMemoryBytes()
 	snap.SwapUsedFraction = sysSwapUsedFraction()
 
+	// On Darwin, refine MemoryUsedFraction and FreePhysicalMemoryBytes to
+	// include inactive (reclaimable) pages from vm_stat(1) — vm.page_inactive_count
+	// is not exposed as a sysctl on macOS. On Linux and other platforms this is
+	// a no-op (MemAvailable already accounts for reclaimable cache).
+	snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes = sysCorrectMemoryMetrics(ctx, snap)
+
 	// FD pressure, vnode pressure, and gopls accumulation — platform-specific.
 	snap.OpenFDFraction = sysFDUsedFraction()
 	snap.VnodeUsedFraction = sysVnodeUsedFraction()
