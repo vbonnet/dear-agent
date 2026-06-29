@@ -81,6 +81,12 @@ type ResourceSnapshot struct {
 	// OrphanedSessions counts AGM sessions whose owning workspace no
 	// longer exists. Another leak indicator.
 	OrphanedSessions int
+
+	// MemorystatusLevel is the macOS kernel memory-pressure level from
+	// kern.memorystatus_level (0–100; 100 = plenty of memory, <40 = high
+	// pressure). Zero on non-Darwin platforms or when the sysctl is
+	// unavailable — treated as "unknown" by the monitor.
+	MemorystatusLevel int
 }
 
 // EscalationThreshold is the PR-1 default escalation policy. Any single
@@ -92,10 +98,12 @@ type EscalationThreshold struct {
 	Fraction float64
 
 	// SwapFraction is the escalation threshold specifically for swap pressure.
-	// Swap is a leading indicator, so a lower threshold (e.g. 0.5) is
+	// Swap is a leading indicator, so a lower threshold than RAM/disk/CPU is
 	// appropriate — high swap means the system is already paging out and
 	// spawning new heavy processes will degrade performance further.
-	// Default 0.5 if zero.
+	// Default 0.75 if zero. (On macOS, vm_stat inactive pages are reclaimable
+	// so swap is the reliable pressure signal; 0.75 avoids false alarms from
+	// LRU-warm steady states that previously fired at 0.50.)
 	SwapFraction float64
 
 	// GoplsProcesses is the count above which the Overseer escalates on
@@ -107,7 +115,7 @@ type EscalationThreshold struct {
 }
 
 // DefaultEscalationThreshold is the threshold used when none is configured.
-var DefaultEscalationThreshold = EscalationThreshold{Fraction: 0.9, SwapFraction: 0.5, GoplsProcesses: 5}
+var DefaultEscalationThreshold = EscalationThreshold{Fraction: 0.9, SwapFraction: 0.75, GoplsProcesses: 5}
 
 // ResourceReclaimer is the remediation seam the Overseer calls when resource
 // pressure exceeds threshold. Implementations kill orphaned processes,
@@ -370,6 +378,7 @@ func (o *Overseer) recordSnapshot(ctx context.Context, snap ResourceSnapshot) {
 			"gopls_processes":      snap.GoplsProcesses,
 			"stranded_worktrees":   snap.StrandedWorktrees,
 			"orphaned_sessions":    snap.OrphanedSessions,
+			"memorystatus_level":   snap.MemorystatusLevel,
 		},
 	})
 }
@@ -631,9 +640,9 @@ func (o *Overseer) maybeEscalateFraction(ctx context.Context, name string, v flo
 }
 
 // maybeEscalateSwapFraction escalates when swap pressure exceeds
-// EscalationThreshold.SwapFraction (default 0.5). Swap uses a lower threshold
-// than RAM because high swap is a leading indicator: if the system is already
-// paging, spawning new heavy processes will cause thrashing.
+// EscalationThreshold.SwapFraction (default 0.75). Swap uses a lower threshold
+// than RAM/disk/CPU because high swap is a leading indicator: if the system is
+// already paging, spawning new heavy processes will cause thrashing.
 func (o *Overseer) maybeEscalateSwapFraction(ctx context.Context, v float64) {
 	thresh := o.threshold.SwapFraction
 	if thresh <= 0 {

@@ -17,10 +17,10 @@ func TestBuildCodexCommand_ModelResolved(t *testing.T) {
 	if !strings.Contains(cmd, "-m 'gpt-5.4'") {
 		t.Errorf("resolved model not present in command: %s", cmd)
 	}
-	// Cross-harness alias should resolve too (opus → 5.4 → gpt-5.4).
+	// Cross-harness alias should resolve too (opus → 5.6 → gpt-5.6).
 	modelName = "opus"
 	cmd = buildCodexCommand("test-session", "/tmp/work", nil)
-	if !strings.Contains(cmd, "-m 'gpt-5.4'") {
+	if !strings.Contains(cmd, "-m 'gpt-5.6'") {
 		t.Errorf("cross-harness alias not resolved in command: %s", cmd)
 	}
 }

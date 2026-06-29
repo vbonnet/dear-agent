@@ -258,7 +258,7 @@ func TestBuildCodexResumeCommand_DefaultModel(t *testing.T) {
 	}
 
 	cmd := buildCodexResumeCommand(&manifest.Manifest{}, health)
-	if !strings.Contains(cmd, "codex -m 'gpt-5.4'") {
+	if !strings.Contains(cmd, "codex -m 'gpt-5.6'") {
 		t.Errorf("default Codex model not resolved: %s", cmd)
 	}
 }
