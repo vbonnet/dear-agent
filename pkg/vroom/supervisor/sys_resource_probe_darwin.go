@@ -6,23 +6,27 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
 
-// sysMemoryUsedFraction returns the fraction of physical RAM currently in use
-// on macOS, computed as (total - free_pages×page_size) / total.
+// sysMemoryUsedFraction returns the fraction of physical RAM under real
+// pressure on macOS, computed as (wired + active) / total.
 //
 // Data sources:
-//   - hw.memsize  — total physical RAM (bytes, 64-bit sysctl)
-//   - hw.pagesize — VM page size (bytes)
-//   - vm.page_free_count — number of genuinely free pages
+//   - hw.memsize              — total physical RAM (bytes, 64-bit sysctl)
+//   - hw.pagesize             — VM page size (bytes)
+//   - vm.page_free_count      — genuinely free pages (not yet allocated)
+//   - vm.page_inactive_count  — inactive pages (reclaimable LRU cache)
 //
-// This is a point-in-time snapshot: pages classified as "inactive" (evictable
-// but not yet freed) count as used. The denominator is always hw.memsize,
-// so values above 0.9 reliably indicate memory pressure.
+// macOS maintains a large inactive-page pool as a warm read cache; those pages
+// are evicted instantly on demand and do not represent real memory pressure.
+// Counting (free + inactive) as available prevents the metric from permanently
+// reading ~99% in normal LRU-warm steady state (ce-fix-macos-mem).
 func sysMemoryUsedFraction() float64 {
 	// hw.memsize is a 64-bit sysctl — SysctlUint32 would truncate it.
 	totalBytes := uint64(0)
@@ -51,19 +55,30 @@ func sysMemoryUsedFraction() float64 {
 		return 0
 	}
 
-	freeBytes := uint64(freePages) * uint64(pageSize)
-	if freeBytes >= totalBytes {
+	// Inactive pages are reclaimable on-demand; include them as "available".
+	inactivePages, err := syscall.SysctlUint32("vm.page_inactive_count")
+	if err != nil {
+		inactivePages = 0 // degrade gracefully — treat unknown inactive as 0
+	}
+
+	availBytes := uint64(freePages+inactivePages) * uint64(pageSize)
+	if availBytes >= totalBytes {
 		return 0
 	}
-	return float64(totalBytes-freeBytes) / float64(totalBytes)
+	return float64(totalBytes-availBytes) / float64(totalBytes)
 }
 
-// sysFreeMemoryBytes returns the number of genuinely free physical RAM bytes
-// on macOS (vm.page_free_count × hw.pagesize). This matches the "Pages free"
-// line from vm_stat(1) — the same number the operator quoted ("~63MB free").
-// Inactive/evictable pages are deliberately NOT counted as free, so this is a
-// conservative floor for the emergency free-memory check. Returns 0 if either
-// sysctl is unavailable (treated as "unknown" by the monitor).
+// sysFreeMemoryBytes returns the number of readily available physical RAM bytes
+// on macOS: free pages plus inactive (reclaimable) pages, both multiplied by
+// the page size. This is what Activity Monitor shows as "available" and
+// reflects the true headroom before the kernel must write to swap.
+//
+// The previous implementation returned only vm.page_free_count × pagesize,
+// which reads as ~66MB even on a healthy 24GB machine with ~6GB of inactive
+// cache — triggering false emergency alerts (ce-fix-macos-mem).
+//
+// Returns 0 if either sysctl is unavailable (treated as "unknown" by the
+// monitor, never as "0 bytes free").
 func sysFreeMemoryBytes() uint64 {
 	pageSize, err := syscall.SysctlUint32("hw.pagesize")
 	if err != nil || pageSize == 0 {
@@ -73,7 +88,11 @@ func sysFreeMemoryBytes() uint64 {
 	if err != nil {
 		return 0
 	}
-	return uint64(freePages) * uint64(pageSize)
+	inactivePages, err := syscall.SysctlUint32("vm.page_inactive_count")
+	if err != nil {
+		inactivePages = 0
+	}
+	return uint64(freePages+inactivePages) * uint64(pageSize)
 }
 
 // sysSwapUsedFraction returns the fraction of swap space currently in use on
@@ -130,6 +149,14 @@ func sysFDUsedFraction() float64 {
 // Data sources:
 //   - kern.num_vnodes  — current vnode count
 //   - kern.maxvnodes   — vnode table size limit
+//
+// macOS operates the vnode table as a fixed-size LRU cache: num_vnodes equals
+// maxvnodes in normal steady state because the kernel continuously fills and
+// recycles it. A ratio of 1.0 is therefore the expected warm-cache baseline,
+// not an alarm signal. This function returns 0 when num_vnodes >= maxvnodes
+// to suppress chronic false-positive escalations; real vnode exhaustion (where
+// the kernel cannot recycle fast enough) surfaces as ENFILE/EMFILE errors in
+// gopls and build tools, which the gopls-process and FD-fraction metrics catch.
 func sysVnodeUsedFraction() float64 {
 	numVnodes, err := syscall.SysctlUint32("kern.num_vnodes")
 	if err != nil {
@@ -140,9 +167,89 @@ func sysVnodeUsedFraction() float64 {
 		return 0
 	}
 	if numVnodes >= maxVnodes {
-		return 1
+		// LRU warm-cache steady state — not a pressure signal on Darwin.
+		return 0
 	}
 	return float64(numVnodes) / float64(maxVnodes)
+}
+
+// sysCorrectMemoryMetrics refines the sysctl-derived MemoryUsedFraction and
+// FreePhysicalMemoryBytes by adding the inactive-page count obtained from
+// vm_stat(1). Inactive pages are reclaimable LRU cache — they are not "free"
+// but they are available without going to swap. Without this correction, both
+// metrics read as near-100% / near-zero on any machine with a warm VM cache,
+// producing chronic false-positive pressure escalations.
+//
+// The vm_stat subprocess is fast (< 5ms) and runs only once per probe tick
+// (typically every 30+ seconds in the overseer loop). On any error (command
+// unavailable, parse failure, zero count), the original sysctl-derived values
+// are returned unchanged so the probe degrades gracefully.
+func sysCorrectMemoryMetrics(ctx context.Context, snap ResourceSnapshot) (memFraction float64, freeBytes uint64) {
+	out, err := exec.CommandContext(ctx, "vm_stat").Output()
+	if err != nil {
+		return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
+	}
+
+	var inactivePages uint64
+	for line := range strings.SplitSeq(string(out), "\n") {
+		key, val, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok || strings.TrimSpace(key) != "Pages inactive" {
+			continue
+		}
+		// val looks like "  396211."
+		s := strings.TrimRight(strings.TrimSpace(val), ".")
+		n, parseErr := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+		if parseErr == nil {
+			inactivePages = n
+		}
+		break
+	}
+
+	if inactivePages == 0 {
+		return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
+	}
+
+	pageSize, err := syscall.SysctlUint32("hw.pagesize")
+	if err != nil || pageSize == 0 {
+		return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
+	}
+
+	totalBytes := uint64(0)
+	{
+		mib := [2]int32{6, 24} // CTL_HW=6, HW_MEMSIZE=24
+		n := uintptr(8)
+		_, _, _ = syscall.RawSyscall6(
+			syscall.SYS___SYSCTL,
+			uintptr(unsafe.Pointer(&mib[0])),
+			2,
+			uintptr(unsafe.Pointer(&totalBytes)),
+			uintptr(unsafe.Pointer(&n)),
+			0, 0,
+		)
+	}
+	if totalBytes == 0 {
+		return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
+	}
+
+	inactiveBytes := inactivePages * uint64(pageSize)
+	newFreeBytes := snap.FreePhysicalMemoryBytes + inactiveBytes
+	if newFreeBytes >= totalBytes {
+		return 0, newFreeBytes
+	}
+	return float64(totalBytes-newFreeBytes) / float64(totalBytes), newFreeBytes
+}
+
+// sysMemorystatusLevel returns the macOS kernel memory-pressure level from
+// kern.memorystatus_level (0–100). The kernel reports 100 when memory is
+// plentiful and lowers the value as pressure rises; values below 40 indicate
+// high pressure (the kernel begins aggressive eviction and may OOM-kill
+// processes). Returns 0 when the sysctl is unavailable (treated as "unknown").
+func sysMemorystatusLevel() int {
+	v, err := syscall.SysctlUint32("kern.memorystatus_level")
+	if err != nil {
+		return 0
+	}
+	return int(v)
 }
 
 // sysGoplsCount returns the number of *orphaned* gopls processes — gopls

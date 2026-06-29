@@ -51,10 +51,18 @@ func (p *SysResourceProbe) Snapshot(ctx context.Context) (ResourceSnapshot, erro
 	snap.FreePhysicalMemoryBytes = sysFreeMemoryBytes()
 	snap.SwapUsedFraction = sysSwapUsedFraction()
 
+	// On Darwin, refine MemoryUsedFraction and FreePhysicalMemoryBytes by
+	// adding inactive (reclaimable) pages, which sysctl does not expose directly
+	// but vm_stat(1) reports. On Linux and other platforms this is a no-op.
+	snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes = sysCorrectMemoryMetrics(ctx, snap)
+
 	// FD pressure, vnode pressure, and gopls accumulation — platform-specific.
 	snap.OpenFDFraction = sysFDUsedFraction()
 	snap.VnodeUsedFraction = sysVnodeUsedFraction()
 	snap.GoplsProcesses = sysGoplsCount(ctx)
+
+	// macOS kernel memory-pressure level (Darwin only; 0 elsewhere = "unknown").
+	snap.MemorystatusLevel = sysMemorystatusLevel()
 
 	return snap, nil
 }
