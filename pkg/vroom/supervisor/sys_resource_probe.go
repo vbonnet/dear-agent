@@ -56,5 +56,8 @@ func (p *SysResourceProbe) Snapshot(ctx context.Context) (ResourceSnapshot, erro
 	snap.VnodeUsedFraction = sysVnodeUsedFraction()
 	snap.GoplsProcesses = sysGoplsCount(ctx)
 
+	// macOS kernel memory-pressure level (Darwin only; 0 elsewhere = "unknown").
+	snap.MemorystatusLevel = sysMemorystatusLevel()
+
 	return snap, nil
 }

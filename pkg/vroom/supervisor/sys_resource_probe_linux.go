@@ -158,6 +158,10 @@ func sysFDUsedFraction() float64 {
 // specific. Linux uses a unified page cache and dentry/inode caches instead.
 func sysVnodeUsedFraction() float64 { return 0 }
 
+// sysMemorystatusLevel returns 0 on Linux — kern.memorystatus_level is a
+// Darwin-specific kernel interface.
+func sysMemorystatusLevel() int { return 0 }
+
 // sysGoplsCount returns the number of *orphaned* gopls processes on Linux —
 // gopls instances reparented to PID 1 because the Claude session that spawned
 // them died. This is the leak signal the Overseer escalates on.

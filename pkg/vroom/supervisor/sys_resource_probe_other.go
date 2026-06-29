@@ -22,3 +22,6 @@ func sysVnodeUsedFraction() float64 { return 0 }
 
 // sysGoplsCount returns 0 on platforms other than Linux and Darwin.
 func sysGoplsCount(_ context.Context) int { return 0 }
+
+// sysMemorystatusLevel returns 0 on platforms other than Darwin.
+func sysMemorystatusLevel() int { return 0 }
