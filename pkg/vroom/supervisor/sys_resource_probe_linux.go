@@ -162,6 +162,12 @@ func sysVnodeUsedFraction() float64 { return 0 }
 // Darwin-specific kernel interface.
 func sysMemorystatusLevel() int { return 0 }
 
+// sysCorrectMemoryMetrics returns the sysctl-derived values unchanged on
+// Linux — /proc/meminfo MemAvailable already accounts for reclaimable cache.
+func sysCorrectMemoryMetrics(_ context.Context, snap ResourceSnapshot) (float64, uint64) {
+	return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
+}
+
 // sysGoplsCount returns the number of *orphaned* gopls processes on Linux —
 // gopls instances reparented to PID 1 because the Claude session that spawned
 // them died. This is the leak signal the Overseer escalates on.
