@@ -62,7 +62,7 @@ jobs:
 
       - name: Post plan as PR comment
         if: always()
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: tofu-plan
           path: /tmp/plan-comment.md
