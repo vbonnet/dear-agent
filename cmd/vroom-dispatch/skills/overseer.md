@@ -191,8 +191,8 @@ agm session list 2>/dev/null | grep -c "OFFLINE" || echo "0"
 | Metric | Threshold | Action |
 |--------|-----------|--------|
 | Disk usage | >= 90% | Escalate to Meta-O + Orch |
-| Swap usage | >= 50% | Escalate (early thrashing indicator) |
-| Swap usage | >= 60% | **Spawn-pause signal** to Orch (resource exhaustion) |
+| Swap usage | >= 60% | Escalate (early indicator; macOS LRU cache makes lower thresholds unreliable) |
+| Swap usage | >= 75% | **Spawn-pause signal** to Orch (resource exhaustion) |
 | CPU / load average | sustained high (load ≥ cores, ~CPU >= 90%) | **Spawn-pause signal** to Orch |
 | Open FD fraction | >= 80% | Escalate + identify FD hogs (**spawn-pause signal**) |
 | Disk usage | >= 95% | **Spawn-pause signal** to Orch |
@@ -205,7 +205,7 @@ agm session list 2>/dev/null | grep -c "OFFLINE" || echo "0"
 Resource exhaustion is the **sole** condition that should make the Orchestrator
 pause worker dispatch. Meta-O staleness does NOT — the Orchestrator handles that
 with a graduated breadth filter (narrow priorities), never a pause. When swap
-≥ 60%, the host is CPU-saturated (load average ≥ core count / CPU ≥ 90%), disk
+≥ 75%, the host is CPU-saturated (load average ≥ core count / CPU ≥ 90%), disk
 ≥ 95%, or FD ≥ 80%, send the Orchestrator an explicit spawn-pause signal so it
 skips dispatch until the pressure clears:
 ```bash
@@ -227,7 +227,7 @@ agm send msg vroom-meta-orchestrator --sender vroom-overseer --priority critical
 agm send msg vroom-orchestrator --sender vroom-overseer --priority critical --prompt "RESOURCE ALERT: <metric> at <value>. Consider pausing worker spawns."
 ```
 
-**Resource-exhaustion spawn-pause signal.** When swap >= 60%, the 5-min CPU load
+**Resource-exhaustion spawn-pause signal.** When swap >= 75%, the 5-min CPU load
 exceeds 90% of `ncpu`, or FD fraction is climbing toward exhaustion, send the
 Orchestrator the explicit pause signal — this is the ONE condition that makes the
 Orchestrator stop dispatching (Meta-O staleness does not; see the Orchestrator's
@@ -580,9 +580,9 @@ After each tick, briefly note:
 
 | Situation | Action |
 |-----------|--------|
-| Swap >= 60% / CPU >= 90% / disk >= 95% / FD >= 80% | **Spawn-pause signal** to Orch — the only condition that pauses dispatch |
+| Swap >= 75% / CPU >= 90% / disk >= 95% / FD >= 80% | **Spawn-pause signal** to Orch — the only condition that pauses dispatch |
 | Disk >= 95% | Critical to both peers, recommend pause |
-| Swap >= 60% or CPU 5-min load > 90% of ncpu | **spawn-pause**: critical to Orch, "Consider pausing worker spawns until this recovers" |
+| Swap >= 75% or CPU 5-min load > 90% of ncpu | **spawn-pause**: critical to Orch, "Consider pausing worker spawns until this recovers" |
 | Resource metric back under threshold | Normal to Orch: "RESOURCE RECOVERED … Safe to resume worker spawns" |
 | Orphaned gopls > 5 | Act-after-advising (Step 10): run `agm session reap-orphans --targets gopls --json` (PID-1-only, safe). Also escalate critical if count > 10. Do NOT `pkill gopls`. |
 | Orphaned sessions > 0 (confirmed dead) | Act-after-advising (Step 10): `agm session archive <id>` for non-protected, no-tmux, no-progress sessions |
