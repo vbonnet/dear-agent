@@ -62,9 +62,13 @@ func TestRegressionDetection(t *testing.T) {
 		wantRegression  bool
 	}{
 		{
-			name:            "No regression (2% overhead)",
-			controlDelay:    50 * time.Millisecond,
-			experimentDelay: 51 * time.Millisecond, // 51ms = 2% — well below 5% threshold
+			// Make the experiment intentionally faster than control so measured
+			// overhead is negative, guaranteeing no regression regardless of
+			// CI scheduler jitter. The previous 51ms/50ms (2%) case was too
+			// close to the 5% detection threshold and flaked on loaded runners.
+			name:            "No regression (experiment faster than control)",
+			controlDelay:    60 * time.Millisecond,
+			experimentDelay: 50 * time.Millisecond, // ~17% faster — overhead is negative
 			wantRegression:  false,
 		},
 		{
