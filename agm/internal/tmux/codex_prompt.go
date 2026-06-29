@@ -32,9 +32,15 @@ import (
 // The bare "›" input cursor is deliberately NOT a pattern here: it also marks
 // the highlighted option of the trust dialog ("› 1. Yes, continue"), so keying
 // on it would risk a false "ready" before the trust prompt is answered.
+//
+// Post-conversation state: after the first exchange, the bordered composer box
+// scrolls off screen. Codex then shows a minimal footer: "gpt-X.Y quality ·
+// /path". The "gpt-" prefix in a footer context reliably identifies Codex after
+// processing one or more turns.
 var CodexPromptPatterns = []string{
 	"OpenAI Codex",     // composer box header — present once the TUI renders
 	"/model to change", // composer status-line hint
+	"gpt-",             // footer model name after first exchange (e.g. "gpt-5.4 high · /path")
 }
 
 // CodexTrustPromptPatterns are substrings that indicate Codex is showing a
