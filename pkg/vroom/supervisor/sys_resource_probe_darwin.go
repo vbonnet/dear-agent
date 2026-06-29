@@ -169,6 +169,9 @@ func sysVnodeUsedFraction() float64 {
 // any error, the original sysctl-derived values are returned unchanged.
 func sysCorrectMemoryMetrics(ctx context.Context, snap ResourceSnapshot) (memFraction float64, freeBytes uint64) {
 	out, err := exec.CommandContext(ctx, "vm_stat").Output()
+	if ctx.Err() != nil {
+		return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
+	}
 	if err != nil {
 		return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
 	}
@@ -201,14 +204,16 @@ func sysCorrectMemoryMetrics(ctx context.Context, snap ResourceSnapshot) (memFra
 	{
 		mib := [2]int32{6, 24} // CTL_HW=6, HW_MEMSIZE=24
 		n := uintptr(8)
-		_, _, _ = syscall.RawSyscall6(
+		if _, _, errno := syscall.RawSyscall6(
 			syscall.SYS___SYSCTL,
 			uintptr(unsafe.Pointer(&mib[0])),
 			2,
 			uintptr(unsafe.Pointer(&totalBytes)),
 			uintptr(unsafe.Pointer(&n)),
 			0, 0,
-		)
+		); errno != 0 {
+			return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
+		}
 	}
 	if totalBytes == 0 {
 		return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
