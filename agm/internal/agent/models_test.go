@@ -143,7 +143,9 @@ func TestResolveModelFullName_CrossHarness(t *testing.T) {
 		{"gemini-cli", "sonnet", "gemini-3.1-pro-preview"},
 		{"gemini-cli", "haiku", "gemini-3.5-flash"},
 		// Claude aliases → Codex models
+		{"codex-cli", "fable", "gpt-5.6"},
 		{"codex-cli", "opus", "gpt-5.6"},
+		{"codex-cli", "sonnet", "gpt-5.6"},
 		{"codex-cli", "haiku", "gpt-5.4-mini"},
 		// Claude aliases → AGY models (ce-7sh1: proper tier mapping)
 		{"agy", "opus", "gemini-2.5-pro"},
