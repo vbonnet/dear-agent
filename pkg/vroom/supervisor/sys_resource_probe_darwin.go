@@ -6,8 +6,6 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
-	"strconv"
-	"strings"
 	"syscall"
 	"unsafe"
 
@@ -171,72 +169,6 @@ func sysVnodeUsedFraction() float64 {
 		return 0
 	}
 	return float64(numVnodes) / float64(maxVnodes)
-}
-
-// sysCorrectMemoryMetrics refines the sysctl-derived MemoryUsedFraction and
-// FreePhysicalMemoryBytes by adding the inactive-page count obtained from
-// vm_stat(1). Inactive pages are reclaimable LRU cache — they are not "free"
-// but they are available without going to swap. Without this correction, both
-// metrics read as near-100% / near-zero on any machine with a warm VM cache,
-// producing chronic false-positive pressure escalations.
-//
-// The vm_stat subprocess is fast (< 5ms) and runs only once per probe tick
-// (typically every 30+ seconds in the overseer loop). On any error (command
-// unavailable, parse failure, zero count), the original sysctl-derived values
-// are returned unchanged so the probe degrades gracefully.
-func sysCorrectMemoryMetrics(ctx context.Context, snap ResourceSnapshot) (memFraction float64, freeBytes uint64) {
-	out, err := exec.CommandContext(ctx, "vm_stat").Output()
-	if err != nil {
-		return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
-	}
-
-	var inactivePages uint64
-	for line := range strings.SplitSeq(string(out), "\n") {
-		key, val, ok := strings.Cut(strings.TrimSpace(line), ":")
-		if !ok || strings.TrimSpace(key) != "Pages inactive" {
-			continue
-		}
-		// val looks like "  396211."
-		s := strings.TrimRight(strings.TrimSpace(val), ".")
-		n, parseErr := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
-		if parseErr == nil {
-			inactivePages = n
-		}
-		break
-	}
-
-	if inactivePages == 0 {
-		return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
-	}
-
-	pageSize, err := syscall.SysctlUint32("hw.pagesize")
-	if err != nil || pageSize == 0 {
-		return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
-	}
-
-	totalBytes := uint64(0)
-	{
-		mib := [2]int32{6, 24} // CTL_HW=6, HW_MEMSIZE=24
-		n := uintptr(8)
-		_, _, _ = syscall.RawSyscall6(
-			syscall.SYS___SYSCTL,
-			uintptr(unsafe.Pointer(&mib[0])),
-			2,
-			uintptr(unsafe.Pointer(&totalBytes)),
-			uintptr(unsafe.Pointer(&n)),
-			0, 0,
-		)
-	}
-	if totalBytes == 0 {
-		return snap.MemoryUsedFraction, snap.FreePhysicalMemoryBytes
-	}
-
-	inactiveBytes := inactivePages * uint64(pageSize)
-	newFreeBytes := snap.FreePhysicalMemoryBytes + inactiveBytes
-	if newFreeBytes >= totalBytes {
-		return 0, newFreeBytes
-	}
-	return float64(totalBytes-newFreeBytes) / float64(totalBytes), newFreeBytes
 }
 
 // sysMemorystatusLevel returns the macOS kernel memory-pressure level from
