@@ -347,12 +347,15 @@ func TestResourcesSaturated(t *testing.T) {
 		{"memory saturated", ResourceSnapshot{MemoryUsedFraction: 0.9}, true},
 		{"cpu saturated", ResourceSnapshot{CPUUsedFraction: 1.0}, true},
 		{"at threshold", ResourceSnapshot{DiskUsedFraction: 0.9}, true},
-		// Swap uses a lower threshold (0.5 default) than disk/memory/cpu (0.9).
-		{"swap below threshold", ResourceSnapshot{SwapUsedFraction: 0.4}, false},
-		{"swap at threshold", ResourceSnapshot{SwapUsedFraction: 0.5}, true},
-		{"swap above threshold", ResourceSnapshot{SwapUsedFraction: 0.75}, true},
+		// Swap uses a lower threshold (0.75 default) than disk/memory/cpu (0.9).
+		// Raised from 0.50 to 0.75 because macOS LRU-warm steady states were
+		// producing false alarms at 0.50 (ce-fix-macos-mem).
+		{"swap well below threshold", ResourceSnapshot{SwapUsedFraction: 0.4}, false},
+		{"swap below new threshold", ResourceSnapshot{SwapUsedFraction: 0.5}, false},
+		{"swap at new threshold", ResourceSnapshot{SwapUsedFraction: 0.75}, true},
+		{"swap above threshold", ResourceSnapshot{SwapUsedFraction: 0.9}, true},
 		// Swap suppresses spawn even when RAM/disk/CPU are fine.
-		{"swap high, ram ok", ResourceSnapshot{MemoryUsedFraction: 0.3, SwapUsedFraction: 0.6}, true},
+		{"swap high, ram ok", ResourceSnapshot{MemoryUsedFraction: 0.3, SwapUsedFraction: 0.8}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
