@@ -84,7 +84,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history: golangci-lint's new-from-merge-base (PRs) and
           # --new-from-rev=HEAD~1 (push-to-main) both need the baseline commit

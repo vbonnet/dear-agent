@@ -45,7 +45,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history required for two reasons:
           # (1) PR runs: golangci-lint new-from-merge-base needs the merge-base reachable.
@@ -148,7 +148,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history so we can git diff against the PR base ref.
           # Shallow clones make git diff $base...HEAD lie about which
@@ -192,7 +192,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
