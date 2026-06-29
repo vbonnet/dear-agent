@@ -34,6 +34,7 @@ var HarnessModels = map[string][]ModelSpec{
 		{Alias: "2.5-flash-lite", FullName: "gemini-2.5-flash-lite", Description: "Budget multimodal"},
 	},
 	"codex-cli": {
+		{Alias: "5.6", FullName: "gpt-5.6", Description: "Flagship frontier model (latest)"},
 		{Alias: "5.4", FullName: "gpt-5.4", Description: "Flagship frontier model"},
 		{Alias: "5.4-mini", FullName: "gpt-5.4-mini", Description: "Fast, efficient"},
 		{Alias: "5.3-codex", FullName: "gpt-5.3-codex", Description: "Industry-leading coding model"},
@@ -70,15 +71,16 @@ var CrossHarnessAliases = map[string]map[string]string{
 		"haiku":  "3.5-flash", // fast-tier → gemini-3.5-flash
 	},
 	"codex-cli": {
-		"fable":  "5.4",      // mythos-tier → gpt-5.4 (best available)
-		"opus":   "5.4",      // highest-tier → gpt-5.4
-		"sonnet": "5.4",      // mid-tier → gpt-5.4 (no direct equivalent)
+		"fable":  "5.6",      // mythos-tier → gpt-5.6 (best available)
+		"opus":   "5.6",      // highest-tier → gpt-5.6
+		"sonnet": "5.6",      // mid-tier → gpt-5.6 (no direct equivalent)
 		"haiku":  "5.4-mini", // fast-tier → gpt-5.4-mini
 	},
 	"claude-code": {
 		"2.5-pro":   "opus",   // gemini alias → claude equivalent
 		"3.1-pro":   "sonnet", // gemini alias → claude equivalent
 		"3.5-flash": "haiku",  // gemini alias → claude equivalent
+		"5.6":       "opus",   // codex alias → claude equivalent
 		"5.4":       "opus",   // codex alias → claude equivalent
 		"5.4-mini":  "haiku",  // codex alias → claude equivalent
 	},
@@ -98,7 +100,7 @@ var CrossHarnessAliases = map[string]map[string]string{
 // the silent default.
 var HarnessDefaults = map[string]string{
 	"claude-code": "sonnet",
-	"codex-cli":   "5.4",
+	"codex-cli":   "5.6",
 	"agy":         "2.5-flash",
 	// opencode-cli intentionally omitted — requires interactive picker
 }

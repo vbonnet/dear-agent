@@ -25,6 +25,7 @@ func TestResolveModelFullName(t *testing.T) {
 		{"claude-code", "haiku", "claude-haiku-4-5"},
 		{"claude-code", "fable", "claude-fable-5"},
 		{"gemini-cli", "3.5-flash", "gemini-3.5-flash"},
+		{"codex-cli", "5.6", "gpt-5.6"},
 		{"codex-cli", "5.4", "gpt-5.4"},
 		// Unknown alias passthrough
 		{"claude-code", "future-model", "future-model"},
@@ -44,6 +45,10 @@ func TestDefaultModelForHarness(t *testing.T) {
 	model, ok := DefaultModelForHarness("claude-code")
 	if !ok || model != "sonnet" {
 		t.Errorf("claude-code default: got (%q, %v), want (sonnet, true)", model, ok)
+	}
+	model, ok = DefaultModelForHarness("codex-cli")
+	if !ok || model != "5.6" {
+		t.Errorf("codex-cli default: got (%q, %v), want (5.6, true)", model, ok)
 	}
 	model, ok = DefaultModelForHarness("agy")
 	if !ok || model != "2.5-flash" {
@@ -138,7 +143,7 @@ func TestResolveModelFullName_CrossHarness(t *testing.T) {
 		{"gemini-cli", "sonnet", "gemini-3.1-pro-preview"},
 		{"gemini-cli", "haiku", "gemini-3.5-flash"},
 		// Claude aliases → Codex models
-		{"codex-cli", "opus", "gpt-5.4"},
+		{"codex-cli", "opus", "gpt-5.6"},
 		{"codex-cli", "haiku", "gpt-5.4-mini"},
 		// Claude aliases → AGY models (ce-7sh1: proper tier mapping)
 		{"agy", "opus", "gemini-2.5-pro"},
