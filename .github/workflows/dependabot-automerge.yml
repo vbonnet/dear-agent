@@ -19,6 +19,7 @@ jobs:
 
       - name: Auto-approve patch and minor
         if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        continue-on-error: true
         run: gh pr review --approve "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
@@ -26,6 +27,7 @@ jobs:
 
       - name: Enable auto-merge for patch and minor
         if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        continue-on-error: true
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
