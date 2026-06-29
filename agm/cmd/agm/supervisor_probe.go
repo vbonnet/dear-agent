@@ -122,6 +122,7 @@ func snapshotPayload(snap supervisor.ResourceSnapshot) map[string]any {
 		"gopls_processes":      snap.GoplsProcesses,
 		"stranded_worktrees":   snap.StrandedWorktrees,
 		"orphaned_sessions":    snap.OrphanedSessions,
+		"memorystatus_level":   snap.MemorystatusLevel,
 	}
 }
 
@@ -129,7 +130,7 @@ func snapshotPayload(snap supervisor.ResourceSnapshot) map[string]any {
 // session can read the metrics it just logged without re-parsing the trail.
 func printSnapshot(cmd *cobra.Command, snap supervisor.ResourceSnapshot) {
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(),
-		"resource probe: disk=%.0f%% mem=%.0f%% swap=%.0f%% fd=%.0f%% vnode=%.0f%% gopls=%d worktrees=%d sessions=%d\n",
+		"resource probe: disk=%.0f%% mem=%.0f%% swap=%.0f%% fd=%.0f%% vnode=%.0f%% gopls=%d worktrees=%d sessions=%d memorystatus=%d\n",
 		snap.DiskUsedFraction*100,
 		snap.MemoryUsedFraction*100,
 		snap.SwapUsedFraction*100,
@@ -138,5 +139,6 @@ func printSnapshot(cmd *cobra.Command, snap supervisor.ResourceSnapshot) {
 		snap.GoplsProcesses,
 		snap.StrandedWorktrees,
 		snap.OrphanedSessions,
+		snap.MemorystatusLevel,
 	)
 }

@@ -67,7 +67,7 @@ dispatch — you always continue dispatching *something* if eligible work exists
 Spawn-pause halts ALL new worker dispatch this tick. It triggers **only** on an
 Overseer resource escalation indicating the host is under genuine load:
 
-- Swap usage ≥ 60%, or
+- Swap usage ≥ 75%, or
 - CPU/load alert (sustained high load average), or
 - A `critical` resource alert from the Overseer (disk ≥ 95%, FD ≥ 80%, etc.).
 
@@ -100,7 +100,7 @@ narrowing the priority band the longer Meta-O is silent rather than pausing:
 
 When the Meta-O heartbeat freshens again, return to normal all-priority dispatch.
 
-**spawn-pause: ONLY on Overseer resource escalation** (e.g. swap ≥ 50–60% or CPU
+**spawn-pause: ONLY on Overseer resource escalation** (e.g. swap ≥ 75% or CPU
 load / FD pressure past the Overseer's thresholds — a `RESOURCE ALERT … Consider
 pausing worker spawns` message from `vroom-overseer`). Meta-O staleness never
 triggers spawn-pause; resource exhaustion does. The open-PR firehose cap (Step 6)
