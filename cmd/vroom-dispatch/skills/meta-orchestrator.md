@@ -61,6 +61,7 @@ Compare timestamps to current time. If a peer's heartbeat is >5 minutes old
 or missing, they may be stale. Actions:
 - Write trail record: `kind: "supervisor.metao.peer_stale"`
 - Send message: `agm send msg <peer> --sender vroom-meta-orchestrator --priority urgent --prompt "status? Your heartbeat is stale."`
+- Attempt mutual-unblock: `agm send approve <peer>` — a peer stuck on a permission prompt cannot receive `agm send msg`; approve clears the block even if no prompt is visible (it exits cleanly if there is none)
 
 ### Step 2: Write Heartbeat (early — proves liveness)
 

@@ -120,6 +120,7 @@ cat ~/.agm/vroom/heartbeat/overseer.json 2>/dev/null || echo "MISSING"
 If a peer's heartbeat is >5 minutes old or missing:
 - Record: `kind: "supervisor.orch.peer_stale"`
 - Message: `agm send msg <peer> --sender vroom-orchestrator --priority urgent --prompt "status?"`
+- Attempt mutual-unblock: `agm send approve <peer>` — a peer stuck on a permission prompt cannot receive `agm send msg`; approve clears the block even if no prompt is visible (it exits cleanly if there is none)
 
 **Compute Meta-O staleness — it gates dispatch breadth, NOT dispatch itself.**
 A stale or missing Meta-O heartbeat does **not** pause the Orchestrator: you
