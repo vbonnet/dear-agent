@@ -42,7 +42,7 @@ jobs:
 
       - name: Checkout (full history for diff)
         if: steps.gate.outputs.skip != 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
