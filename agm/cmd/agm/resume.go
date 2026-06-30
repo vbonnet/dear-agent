@@ -623,6 +623,15 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 	return nil
 }
 
+func activeHarnessHasTmuxResumeCommand(harnessName string) bool {
+	switch agent.NormalizeHarnessName(harnessName) {
+	case "claude-code", "codex-cli", "agy", "opencode-cli":
+		return true
+	default:
+		return false
+	}
+}
+
 func buildCodexResumeCommand(m *manifest.Manifest, health *HealthStatus) string {
 	model := m.Model
 	if model == "" {

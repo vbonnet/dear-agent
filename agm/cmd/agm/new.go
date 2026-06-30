@@ -75,16 +75,16 @@ var defaultPermissions = rbac.DefaultPermissions
 
 var newCmd = &cobra.Command{
 	Use:   "new [session-name]",
-	Short: "Create a new Claude session with tmux",
-	Long: `Create a new Claude session with tmux integration.
+	Short: "Create a new AGM-managed harness session with tmux",
+	Long: `Create a new AGM-managed harness session with tmux integration.
 
 This command will:
 1. Create or use an existing tmux session with the specified name
-2. Start Claude CLI in the tmux session
-3. Create a manifest linking the tmux session to the Claude session
+2. Start the selected harness CLI in the tmux session
+3. Create a manifest linking the tmux session to the harness session
 
 Arguments:
-  session-name - Name for the tmux/Claude session (optional)
+  session-name - Name for the tmux/harness session (optional)
                  If not provided and outside tmux, you'll be prompted
                  If not provided and inside tmux, uses current tmux session name
 
@@ -106,10 +106,10 @@ Workspace Detection:
   • Sessions stored in: {workspace_root}/.agm/sessions
 
 Behavior:
-  • Outside tmux + no name → Prompts for name, creates tmux + claude
-  • Outside tmux + name provided → Creates tmux session with that name + claude
-  • Inside tmux + no name → Uses current tmux name, starts claude
-  • Inside tmux + matching name → Uses current tmux, starts claude
+  • Outside tmux + no name → Prompts for name, creates tmux + selected harness
+  • Outside tmux + name provided → Creates tmux session with that name + selected harness
+  • Inside tmux + no name → Uses current tmux name, starts selected harness
+  • Inside tmux + matching name → Uses current tmux, starts selected harness
   • Inside tmux + different name → Error (name mismatch) unless --detached
   • --detached flag → Creates session, doesn't attach (stays in current context)
 
