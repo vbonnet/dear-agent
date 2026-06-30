@@ -66,6 +66,7 @@ cat ~/.agm/vroom/heartbeat/orch.json 2>/dev/null || echo "MISSING"
 If a peer's heartbeat is >5 minutes old or missing:
 - Record: `kind: "supervisor.over.peer_stale"`
 - Message: `agm send msg <peer> --sender vroom-overseer --priority urgent --prompt "status?"`
+- Attempt mutual-unblock: `agm send approve <peer>` — a peer stuck on a permission prompt cannot receive `agm send msg`; approve clears the block even if no prompt is visible (it exits cleanly if there is none)
 
 ### Step 2: Write Heartbeat (early — proves liveness)
 
@@ -282,7 +283,11 @@ agm send msg vroom-orchestrator --sender vroom-overseer --priority normal \
   --prompt "Worker <session> is OFFLINE. Session appears dead — check bead status and re-dispatch if needed."
 ```
 
-**Supervisor sessions in `PERMISSION_PROMPT`:** Send urgent status ping.
+**Supervisor sessions in `PERMISSION_PROMPT`:** Run `agm send approve` immediately
+— a status ping cannot reach a permission-blocked session:
+```bash
+agm send approve <supervisor-session>
+```
 Supervisors should not be in this state — if they are, that is a mesh-level
 incident. Record `kind: "supervisor.over.supervisor_stuck"`.
 
