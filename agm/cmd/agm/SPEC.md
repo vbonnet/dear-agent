@@ -811,12 +811,12 @@ TECHNICAL IMPLEMENTATION:
 2. Determine target harness:
    - Existing manifest harness wins.
    - `--harness auto` infers from live tmux pane commands.
-   - Explicit `--harness codex-cli|gemini-cli|opencode-cli|claude-code` is accepted.
+   - Explicit `--harness claude-code|codex-cli|agy|opencode-cli|gemini-cli` is accepted.
    - Omitted harness defaults to `claude-code` for backward compatibility.
 3. For Claude Code:
    - Detect or accept the Claude UUID.
    - Persist the UUID and create the ready-file signal.
-4. For Codex, Gemini, and OpenCode:
+4. For Codex, AGY, Gemini, and OpenCode:
    - Do not require or detect a Claude UUID.
    - Ensure the Dolt session record exists when `--create` is set.
    - Persist harness, tmux session name, workspace, and working directory metadata.
@@ -824,7 +824,7 @@ TECHNICAL IMPLEMENTATION:
 ```
 
 **Invariant**: `/agm:agm-assoc` is a cross-harness command. It invokes
-`agm session associate ... --harness auto`; Codex/Gemini/OpenCode association
+`agm session associate ... --harness auto`; Codex/AGY/Gemini/OpenCode association
 must not fail only because no Claude UUID exists.
 
 **Migration Status** (v1.3 - March 2026):
