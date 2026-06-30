@@ -10,12 +10,14 @@ import (
 	"github.com/cucumber/godog"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/engramparity"
 	"github.com/vbonnet/dear-agent/agm/internal/marketplaceparity"
 	"github.com/vbonnet/dear-agent/agm/internal/mcpparity"
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
 	"github.com/vbonnet/dear-agent/agm/internal/quotaparity"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
+	"github.com/vbonnet/dear-agent/agm/internal/wayfinderparity"
 )
 
 type harnessParityState struct {
@@ -57,6 +59,11 @@ type harnessParityState struct {
 	marketplaceMirrorValid     bool
 	marketplacePlugin          string
 	marketplacePluginValid     bool
+	engramSurface              engramparity.HarnessSurface
+	engramMetadataValid        bool
+	wayfinderSurface           wayfinderparity.HarnessSurface
+	wayfinderAssetsValid       bool
+	wayfinderPhaseEngrams      bool
 }
 
 type harnessParityStateKey struct{}
@@ -110,6 +117,18 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the Claude marketplace should match the neutral marketplace catalog$`, claudeMarketplaceShouldMatchNeutralMarketplaceCatalog)
 	ctx.Step(`^marketplace plugin "([^"]*)" is configured$`, marketplacePluginIsConfigured)
 	ctx.Step(`^marketplace plugin "([^"]*)" should publish its declared assets$`, marketplacePluginShouldPublishDeclaredAssets)
+	ctx.Step(`^AGM validates Engram parity$`, agmValidatesEngramParity)
+	ctx.Step(`^harness "([^"]*)" should have an Engram injection surface$`, harnessShouldHaveEngramInjectionSurface)
+	ctx.Step(`^harness "([^"]*)" should persist Engram metadata through the shared manifest$`, harnessShouldPersistEngramMetadataThroughSharedManifest)
+	ctx.Step(`^AGM validates Engram metadata parity$`, agmValidatesEngramMetadataParity)
+	ctx.Step(`^Engram metadata should be stored in harness-neutral fields$`, engramMetadataShouldBeStoredInHarnessNeutralFields)
+	ctx.Step(`^AGM validates Wayfinder parity$`, agmValidatesWayfinderParity)
+	ctx.Step(`^harness "([^"]*)" should have a Wayfinder discovery surface$`, harnessShouldHaveWayfinderDiscoverySurface)
+	ctx.Step(`^harness "([^"]*)" should have a Wayfinder execution surface$`, harnessShouldHaveWayfinderExecutionSurface)
+	ctx.Step(`^AGM validates Wayfinder asset parity$`, agmValidatesWayfinderAssetParity)
+	ctx.Step(`^Wayfinder should publish SKILL, plugin, command, and MCP status surfaces$`, wayfinderShouldPublishSkillPluginCommandAndMCPStatusSurfaces)
+	ctx.Step(`^AGM validates Wayfinder phase Engram parity$`, agmValidatesWayfinderPhaseEngramParity)
+	ctx.Step(`^Wayfinder should resolve phase Engrams without harness-specific state$`, wayfinderShouldResolvePhaseEngramsWithoutHarnessSpecificState)
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
@@ -725,6 +744,164 @@ func marketplacePluginExists(catalog marketplaceparity.Catalog, plugin string) b
 		}
 	}
 	return false
+}
+
+func agmValidatesEngramParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := engramparity.ValidateActiveHarnessSurfaces(); err != nil {
+		return err
+	}
+	surface, ok := engramparity.SurfaceForHarness(harnessState.configuredHarness)
+	if !ok {
+		return fmt.Errorf("harness %q has no Engram surface", harnessState.configuredHarness)
+	}
+	harnessState.engramSurface = surface
+	return nil
+}
+
+func harnessShouldHaveEngramInjectionSurface(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.engramSurface.Harness != normalized {
+		return fmt.Errorf("Engram surface harness = %q, want %q", harnessState.engramSurface.Harness, normalized)
+	}
+	if harnessState.engramSurface.InjectionSurface == "" {
+		return fmt.Errorf("harness %q has empty Engram injection surface", normalized)
+	}
+	return nil
+}
+
+func harnessShouldPersistEngramMetadataThroughSharedManifest(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.engramSurface.Harness != normalized {
+		return fmt.Errorf("Engram surface harness = %q, want %q", harnessState.engramSurface.Harness, normalized)
+	}
+	if harnessState.engramSurface.PersistenceSurface != "manifest.EngramMetadata" {
+		return fmt.Errorf("Engram persistence surface = %q, want manifest.EngramMetadata", harnessState.engramSurface.PersistenceSurface)
+	}
+	return nil
+}
+
+func agmValidatesEngramMetadataParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.engramMetadataValid = engramparity.ValidateManifestMetadata() == nil && engramparity.ValidateOpsSurfaces() == nil
+	return nil
+}
+
+func engramMetadataShouldBeStoredInHarnessNeutralFields(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.engramMetadataValid {
+		return fmt.Errorf("Engram metadata parity validation failed")
+	}
+	return nil
+}
+
+func agmValidatesWayfinderParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := wayfinderparity.ValidateActiveHarnessSurfaces(); err != nil {
+		return err
+	}
+	surface, ok := wayfinderparity.SurfaceForHarness(harnessState.configuredHarness)
+	if !ok {
+		return fmt.Errorf("harness %q has no Wayfinder surface", harnessState.configuredHarness)
+	}
+	harnessState.wayfinderSurface = surface
+	return nil
+}
+
+func harnessShouldHaveWayfinderDiscoverySurface(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.wayfinderSurface.Harness != normalized {
+		return fmt.Errorf("Wayfinder surface harness = %q, want %q", harnessState.wayfinderSurface.Harness, normalized)
+	}
+	if harnessState.wayfinderSurface.DiscoverySurface == "" {
+		return fmt.Errorf("harness %q has empty Wayfinder discovery surface", normalized)
+	}
+	return nil
+}
+
+func harnessShouldHaveWayfinderExecutionSurface(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.wayfinderSurface.Harness != normalized {
+		return fmt.Errorf("Wayfinder surface harness = %q, want %q", harnessState.wayfinderSurface.Harness, normalized)
+	}
+	if harnessState.wayfinderSurface.ExecutionSurface == "" {
+		return fmt.Errorf("harness %q has empty Wayfinder execution surface", normalized)
+	}
+	return nil
+}
+
+func agmValidatesWayfinderAssetParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.wayfinderAssetsValid = wayfinderparity.ValidateAssets(bddRepoRoot()) == nil && wayfinderparity.ValidateMCPOperations() == nil
+	return nil
+}
+
+func wayfinderShouldPublishSkillPluginCommandAndMCPStatusSurfaces(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.wayfinderAssetsValid {
+		return fmt.Errorf("Wayfinder asset or MCP operation parity validation failed")
+	}
+	return nil
+}
+
+func agmValidatesWayfinderPhaseEngramParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.wayfinderPhaseEngrams = wayfinderparity.ValidatePhaseEngramCoverage() == nil
+	return nil
+}
+
+func wayfinderShouldResolvePhaseEngramsWithoutHarnessSpecificState(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.wayfinderPhaseEngrams {
+		return fmt.Errorf("Wayfinder phase Engram coverage validation failed")
+	}
+	return nil
 }
 
 func findQuotaSurface(surfaces []quotaparity.HarnessSurface, harness string) (quotaparity.HarnessSurface, bool) {
