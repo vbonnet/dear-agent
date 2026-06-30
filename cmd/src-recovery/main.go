@@ -21,7 +21,8 @@
 // construction (see internal/safesrc), and appends a line-per-step audit record
 // to ~/.local/state/dear-agent/src-recovery.log. It is the only sanctioned way
 // for an agent to write to ~/src/**, which is otherwise read-only
-// (see AGENTS.md and docs/retros/2026-06-11-src-violations-and-burndown.md).
+// (see AGENTS.md and vbonnet/engram-research
+// retrospectives/2026-06-11-src-violations-and-burndown.md).
 //
 // The `unlock` subcommand clears a stale .git/index.lock left behind by a killed
 // git, which otherwise wedges the daily archive sync's commit step:
@@ -281,7 +282,7 @@ Why this exists:
   When a checkout drifts (dirty, wrong branch, behind origin), recovering it by
   hand means raw git writes into ~/src — the exact thing the guards forbid. This
   wrapper is the one vetted, narrowly-scoped path to clean it up, so the safe
-  action is the only action. See docs/retros/2026-06-11-src-violations-and-burndown.md.
+  action is the only action. See vbonnet/engram-research retrospectives/2026-06-11-src-violations-and-burndown.md.
 
 Examples:
   src-recovery ~/src/dear-agent
@@ -318,7 +319,7 @@ Why this exists:
   with exit 128. The daily archive sync then rsyncs new logs but cannot commit
   them — a silent, compounding backlog. Clearing the lock means a raw rm into
   ~/src, which the guards forbid; this is the one vetted path to do it safely.
-  See docs/retros/2026-06-11-src-violations-and-burndown.md.
+  See vbonnet/engram-research retrospectives/2026-06-11-src-violations-and-burndown.md.
 
 Examples:
   src-recovery unlock ~/src/ai-conversation-logs

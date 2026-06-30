@@ -303,7 +303,7 @@ needs follow-up work tracked on the roadmap.
    Most ADRs in the repo fail the "hard-to-reverse + surprising + real
    trade-off" test (many are bug-fix notes, standard-pattern conventions, or
    LLM-padded design dumps). A full repo-wide audit with per-ADR dispositions
-   is in [docs/audits/2026-05-17-adr-inventory-prune.md](docs/audits/2026-05-17-adr-inventory-prune.md).
+   is in `vbonnet/engram-research` `audits/2026-05-17-adr-inventory-prune.md`.
    Only the top-level governance set + one exact duplicate are pruned in the
    originating PR; the rest are grouped into follow-up surgical PRs.
 

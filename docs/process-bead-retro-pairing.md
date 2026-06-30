@@ -6,7 +6,7 @@
 ## Why
 
 We already write DEAR retros — it is the one mandate we pay willingly. But
-they land as standalone docs in `docs/retros/` via `safe-pr --emergency`
+they land as standalone docs in `engram-research/retrospectives/`
 with no matching bead. That makes the retro corpus a floating file
 collection: you can `grep` it, but you cannot query it through the bead
 graph (by label, parent epic, status, or relationship to the work that
@@ -25,17 +25,17 @@ Create a bead **any time a DEAR retro doc is written**:
 - Milestone or epic review
 - Supervisor / agent failure analysis
 
-Rule of thumb: if it goes in `docs/retros/`, it gets a bead first.
+Rule of thumb: if it goes in `engram-research/retrospectives/`, it gets a bead first.
 
 ## Naming convention
 
 Pick the dated slug once; use it for both the doc filename and the bead
 title so the two are trivially cross-referenced.
 
-| Artifact      | Format                                         | Example                                           |
-| ------------- | ---------------------------------------------- | ------------------------------------------------- |
-| Doc filename  | `docs/retros/<YYYY-MM-DD>-<slug>.md`           | `docs/retros/2026-06-20-ci-cascade.md`            |
-| Bead title    | `retro: <YYYY-MM-DD>-<slug> — <short summary>` | `retro: 2026-06-20-ci-cascade — CI red 6h`        |
+| Artifact      | Format                                                   | Example                                                     |
+| ------------- | -------------------------------------------------------- | ----------------------------------------------------------- |
+| Doc filename  | `engram-research/retrospectives/<YYYY-MM-DD>-<slug>.md`  | `engram-research/retrospectives/2026-06-20-ci-cascade.md`   |
+| Bead title    | `retro: <YYYY-MM-DD>-<slug> — <short summary>`           | `retro: 2026-06-20-ci-cascade — CI red 6h`                  |
 
 ## Bead creation command
 
@@ -49,7 +49,7 @@ bd --db ~/beads/context-engine/.beads create \
   --type task \
   --priority 1 \
   --labels dear-retro,retro \
-  --description "DEAR retro for the 2026-06-20 CI cascade. Doc: docs/retros/2026-06-20-ci-cascade.md"
+  --description "DEAR retro for the 2026-06-20 CI cascade. Doc: engram-research/retrospectives/2026-06-20-ci-cascade.md"
 ```
 
 Required fields:
@@ -79,7 +79,7 @@ Link the bead and the PR **both ways** so either side reaches the other:
 
 A retro bead is closed only when **all three** hold:
 
-1. Retro doc is committed to `docs/retros/`.
+1. Retro doc is committed to `engram-research/retrospectives/`.
 2. Bead and PR are linked both ways (PR body + bead comment).
 3. PR is merged to `main`.
 
@@ -91,7 +91,7 @@ bd --db ~/beads/context-engine/.beads close <bead-id>
 
 ## Backfill guidance
 
-For the existing floating retro docs in `docs/retros/`:
+For the existing floating retro docs in `engram-research/retrospectives/`:
 
 - **Do not** mass-create beads retroactively — low value, high churn.
 - **Do** create a retroactive bead when you next *touch* a floating retro
@@ -106,8 +106,8 @@ DATE=2026-06-20; SLUG=ci-cascade
 bd --db ~/beads/context-engine/.beads create \
   "retro: ${DATE}-${SLUG} — <summary>" \
   --type task --priority 1 --labels dear-retro,retro \
-  --description "DEAR retro. Doc: docs/retros/${DATE}-${SLUG}.md"
-# → write docs/retros/${DATE}-${SLUG}.md
+  --description "DEAR retro. Doc: engram-research/retrospectives/${DATE}-${SLUG}.md"
+# → write engram-research/retrospectives/${DATE}-${SLUG}.md
 # → open PR, body cites the bead ID
 # → bd comment <bead-id> "PR: <url>"
 # → on merge: bd close <bead-id>

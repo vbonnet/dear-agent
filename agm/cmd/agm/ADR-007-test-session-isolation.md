@@ -273,7 +273,7 @@ The `oss` workspace accumulated 98 sessions, including many ephemeral test sessi
 - **Implementation:** `feat/test-session-cleanup` branch
 - **Tests:** `test/integration/lifecycle/test_session_guard_hook_test.go`
 - **Documentation:** `docs/TEST-SESSION-GUIDE.md`
-- **Retrospective:** `RETROSPECTIVE-TEST-SESSION-CLEANUP.md`
+- **Retrospective:** `vbonnet/engram-research` `retrospectives/RETROSPECTIVE-TEST-SESSION-CLEANUP.md`
 - **Plan:** `~/.claude/plans/tranquil-dreaming-crane.md`
 
 ---
