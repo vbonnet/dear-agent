@@ -35,6 +35,8 @@ type harnessParityState struct {
 	codexArchiveInvoked        bool
 	tmuxResumeLaunched         bool
 	configuredHarness          string
+	configuredModelFamily      string
+	modelFamilyDefaulted       bool
 }
 
 type harnessParityStateKey struct{}
@@ -51,6 +53,10 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^harness "([^"]*)" should be active for parity$`, harnessShouldBeActiveForParity)
 	ctx.Step(`^harness "([^"]*)" should not be deprecated$`, harnessShouldNotBeDeprecated)
 	ctx.Step(`^harness "([^"]*)" should be deprecated$`, harnessShouldBeDeprecated)
+	ctx.Step(`^model family "([^"]*)" is configured$`, modelFamilyIsConfigured)
+	ctx.Step(`^AGM validates model family parity support$`, agmValidatesModelFamilyParitySupport)
+	ctx.Step(`^model family "([^"]*)" should be supported$`, modelFamilyShouldBeSupported)
+	ctx.Step(`^model family "([^"]*)" should have a default model route$`, modelFamilyShouldHaveDefaultModelRoute)
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
@@ -138,6 +144,52 @@ func harnessShouldBeDeprecated(ctx context.Context, harness string) error {
 	normalized := agent.NormalizeHarnessName(harness)
 	if !agent.IsDeprecatedHarness(normalized) {
 		return fmt.Errorf("harness %q should be deprecated", normalized)
+	}
+	return nil
+}
+
+func modelFamilyIsConfigured(ctx context.Context, family string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.configuredModelFamily = strings.ToLower(family)
+	return nil
+}
+
+func agmValidatesModelFamilyParitySupport(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredModelFamily == "" {
+		return fmt.Errorf("no model family configured")
+	}
+	model, ok := agent.DefaultModelForFamily(harnessState.configuredModelFamily)
+	harnessState.modelFamilyDefaulted = ok
+	if !ok {
+		return nil
+	}
+	return agent.ValidateModel("opencode-cli", model.FullName)
+}
+
+func modelFamilyShouldBeSupported(ctx context.Context, family string) error {
+	if agent.IsSupportedModelFamily(family) {
+		return nil
+	}
+	return fmt.Errorf("model family %q is not supported; supported families: %v", family, agent.ModelFamilyNames())
+}
+
+func modelFamilyShouldHaveDefaultModelRoute(ctx context.Context, family string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if strings.ToLower(family) != harnessState.configuredModelFamily {
+		return fmt.Errorf("configured model family = %q, want %q", harnessState.configuredModelFamily, family)
+	}
+	if !harnessState.modelFamilyDefaulted {
+		return fmt.Errorf("model family %q has no default route", family)
 	}
 	return nil
 }

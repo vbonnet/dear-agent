@@ -77,9 +77,9 @@ func NewOpenCodeAdapter(config *OpenCodeConfig) (Agent, error) {
 
 // Name returns the agent identifier.
 //
-// Contract: Returns "opencode" to identify this adapter in agent factory.
+// Contract: Returns the canonical harness key used by active parity checks.
 func (a *OpenCodeAdapter) Name() string {
-	return "opencode"
+	return "opencode-cli"
 }
 
 // Version returns the agent version or model name.
