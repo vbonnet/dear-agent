@@ -10,6 +10,7 @@ import (
 	"github.com/cucumber/godog"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/configdirparity"
 	"github.com/vbonnet/dear-agent/agm/internal/engramparity"
 	"github.com/vbonnet/dear-agent/agm/internal/marketplaceparity"
 	"github.com/vbonnet/dear-agent/agm/internal/mcpparity"
@@ -64,6 +65,7 @@ type harnessParityState struct {
 	wayfinderSurface           wayfinderparity.HarnessSurface
 	wayfinderAssetsValid       bool
 	wayfinderPhaseEngrams      bool
+	configDirSurface           configdirparity.DirectorySurface
 }
 
 type harnessParityStateKey struct{}
@@ -129,6 +131,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^Wayfinder should publish SKILL, plugin, command, and MCP status surfaces$`, wayfinderShouldPublishSkillPluginCommandAndMCPStatusSurfaces)
 	ctx.Step(`^AGM validates Wayfinder phase Engram parity$`, agmValidatesWayfinderPhaseEngramParity)
 	ctx.Step(`^Wayfinder should resolve phase Engrams without harness-specific state$`, wayfinderShouldResolvePhaseEngramsWithoutHarnessSpecificState)
+	ctx.Step(`^AGM validates configuration directory parity$`, agmValidatesConfigurationDirectoryParity)
+	ctx.Step(`^AGM validates deprecated configuration directory parity$`, agmValidatesDeprecatedConfigurationDirectoryParity)
+	ctx.Step(`^harness "([^"]*)" should have configuration directory "([^"]*)"$`, harnessShouldHaveConfigurationDirectory)
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
@@ -900,6 +905,59 @@ func wayfinderShouldResolvePhaseEngramsWithoutHarnessSpecificState(ctx context.C
 	}
 	if !harnessState.wayfinderPhaseEngrams {
 		return fmt.Errorf("Wayfinder phase Engram coverage validation failed")
+	}
+	return nil
+}
+
+func agmValidatesConfigurationDirectoryParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := configdirparity.ValidateActiveDirectories(bddRepoRoot()); err != nil {
+		return err
+	}
+	surface, ok := configdirparity.SurfaceForHarness(harnessState.configuredHarness)
+	if !ok {
+		return fmt.Errorf("harness %q has no configuration directory surface", harnessState.configuredHarness)
+	}
+	harnessState.configDirSurface = surface
+	return nil
+}
+
+func agmValidatesDeprecatedConfigurationDirectoryParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := configdirparity.ValidateDeprecatedCompatibility(bddRepoRoot()); err != nil {
+		return err
+	}
+	surface, ok := configdirparity.SurfaceForHarness(harnessState.configuredHarness)
+	if !ok {
+		return fmt.Errorf("harness %q has no configuration directory surface", harnessState.configuredHarness)
+	}
+	harnessState.configDirSurface = surface
+	return nil
+}
+
+func harnessShouldHaveConfigurationDirectory(ctx context.Context, harness, directory string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.configDirSurface.Harness != normalized {
+		return fmt.Errorf("configuration directory surface harness = %q, want %q", harnessState.configDirSurface.Harness, normalized)
+	}
+	if harnessState.configDirSurface.Directory != directory {
+		return fmt.Errorf("configuration directory = %q, want %q", harnessState.configDirSurface.Directory, directory)
 	}
 	return nil
 }
