@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -249,6 +250,7 @@ func TestGetAgentIcon(t *testing.T) {
 		{"claude-code", "🤖"},
 		{"gemini-cli", "✨"},
 		{"codex-cli", "🧠"},
+		{"agy", "✦"},
 		{"opencode-cli", "💻"},
 		{"unknown", "🤖"},
 		{"", "🤖"},
@@ -259,6 +261,18 @@ func TestGetAgentIcon(t *testing.T) {
 			icon := getAgentIcon(tt.agent)
 			if icon != tt.expected {
 				t.Errorf("getAgentIcon(%q) = %q, want %q", tt.agent, icon, tt.expected)
+			}
+		})
+	}
+}
+
+func TestActiveHarnessesHaveStatusLineIcons(t *testing.T) {
+	t.Parallel()
+
+	for _, harness := range agent.ActiveHarnesses() {
+		t.Run(harness, func(t *testing.T) {
+			if _, ok := defaultAgentIcons[harness]; !ok {
+				t.Fatalf("active harness %q missing statusline icon", harness)
 			}
 		})
 	}
