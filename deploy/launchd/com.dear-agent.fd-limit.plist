@@ -16,7 +16,7 @@
   Or use the Makefile target (also requires sudo):
     sudo make install-fd-limit-launchdaemon
 
-  Source: DEAR retro docs/retros/2026-06-15-gopls-fd-leak-retro.md, R.5 (ce-710r.4).
+  Source: DEAR retro vbonnet/engram-research retrospectives/2026-06-15-gopls-fd-leak-retro.md, R.5 (ce-710r.4).
 -->
 <plist version="1.0">
 <dict>

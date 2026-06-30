@@ -24,7 +24,8 @@
 // SPIKE SCAFFOLDING: this is a skeleton for the spike, not a production binary.
 // It is syntactically valid Go but is not wired into a build target, has no
 // graceful shutdown, and elides ret/error-path polish. See
-// docs/spike-github-webhooks-pr-events.md "Next actions" for the real work.
+// vbonnet/engram-research spikes/spike-github-webhooks-pr-events.md "Next
+// actions" for the real work.
 package main
 
 import (

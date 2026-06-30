@@ -50,7 +50,7 @@ behaviour cheap and in-band.
    not rely on `Emitter`'s backgrounded goroutine, which `os.Exit`
    races.
 
-We deliberately do not write to beads or `docs/retros/` directly. The
+We deliberately do not write to beads or `engram-research/retrospectives/` directly. The
 triage agent (§F4) *proposes* backlog/retro items for human approval.
 No Slack/Asana hop — keep dear-agent's signal inside the substrate that
 already governs it.

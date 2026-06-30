@@ -1,6 +1,7 @@
 // Command retro-audit reads OTel span JSONL files from the engram traces
 // directory, classifies findings, and appends a formatted markdown report to
-// docs/retros/RETRO_LOG.md (or a path supplied via --output).
+// the sibling engram-research retrospectives directory (or a path supplied via
+// --output).
 //
 // Usage:
 //
@@ -51,7 +52,7 @@ func main() {
 
 	home, _ := os.UserHomeDir()
 	defaultTracesDir := filepath.Join(home, ".engram", "traces")
-	defaultOutput := filepath.Join("docs", "retros", "RETRO_LOG.md")
+	defaultOutput := defaultRetroOutput()
 
 	flag.StringVar(&tracesDir, "traces-dir", defaultTracesDir, "root directory of span JSONL files")
 	flag.StringVar(&output, "output", defaultOutput, "output markdown file path (appended)")
@@ -118,6 +119,14 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("retro-audit: appended report to %s\n", output)
+}
+
+func defaultRetroOutput() string {
+	root := os.Getenv("ENGRAM_RESEARCH_ROOT")
+	if root == "" {
+		root = filepath.Join("..", "engram-research")
+	}
+	return filepath.Join(root, "retrospectives", "RETRO_LOG.md")
 }
 
 // readSpans opens a spans.jsonl file and returns spans that start at or after

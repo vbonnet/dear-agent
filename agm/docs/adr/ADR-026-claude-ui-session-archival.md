@@ -343,7 +343,7 @@ validation determines whether the local flip propagates server-side.
 (`agm new` / `agm send`), with `agm acceptance show` at start; the
 `.dear-agent.yml` acceptance criteria (`go test ./...`, `golangci-lint`,
 no-regressions) gate the Audit phase. If the undocumented-format coupling
-causes churn, write a `docs/retros/` entry (Retro phase).
+causes churn, write an `engram-research/retrospectives/` entry (Retro phase).
 
 ## Validation
 

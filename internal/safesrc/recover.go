@@ -7,8 +7,8 @@
 // ~/worktrees/**. In practice the tree still drifts: a scheduled task whose
 // workspace is ~/src/<repo> runs `git pull`/`git stash` there, an agent
 // fat-fingers a command, and the checkout ends up dirty, on a feature branch,
-// behind origin, or carrying a stash-pop conflict (see
-// docs/retros/2026-06-11-src-violations-and-burndown.md).
+// behind origin, or carrying a stash-pop conflict (see vbonnet/engram-research
+// retrospectives/2026-06-11-src-violations-and-burndown.md).
 //
 // Recovering it by hand means typing raw git writes into ~/src — exactly the
 // thing the deny-rules forbid, so an agent either can't do it or routes around

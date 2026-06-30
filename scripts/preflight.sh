@@ -3,7 +3,8 @@
 #
 # Shift-left for the inner dev loop. CI on GitHub is not a substitute for
 # running these gates before pushing — it is a backstop. See
-# docs/retros/2026-05-27-ci-shift-left.md for why this script exists.
+# vbonnet/engram-research retrospectives/2026-05-27-ci-shift-left.md for why
+# this script exists.
 #
 # Usage:
 #   scripts/preflight.sh            # fast tier: vet + build + lint  (~25s)

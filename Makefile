@@ -120,7 +120,8 @@ lint-specs:
 
 # Fast local CI-parity gates. Runs the same go vet / go build / golangci-lint
 # CI does, no Docker needed. Catches ~all lint failures in ~25s on a warm
-# build cache. See docs/retros/2026-05-27-ci-shift-left.md for the rationale
+# build cache. See vbonnet/engram-research
+# retrospectives/2026-05-27-ci-shift-left.md for the rationale
 # (CI on GitHub is not part of the inner dev loop).
 preflight:
 	@./scripts/preflight.sh --fast
@@ -289,7 +290,8 @@ install-configure-settings: build-configure-settings
 
 # Build safe-push: a git-push wrapper that resets the credential helper chain
 # to gh-only (never osxkeychain, which can hang on a headless GUI prompt) and
-# never force-pushes. See internal/safegit and docs/retros/2026-06-08-git-push-credential-hang.md.
+# never force-pushes. See internal/safegit and vbonnet/engram-research
+# retrospectives/2026-06-08-git-push-credential-hang.md.
 build-safe-push:
 	@echo "Building safe-push..."
 	go build $(GOFLAGS) -o bin/safe-push ./cmd/safe-push/
@@ -379,7 +381,7 @@ install-safe-pr: build-safe-pr
 # golden checkout to a clean, current default branch via exactly stash ->
 # checkout default -> pull --ff-only, takes no pass-through git args, and
 # refuses every other git verb by construction. See internal/safesrc and
-# docs/retros/2026-06-11-src-violations-and-burndown.md.
+# vbonnet/engram-research retrospectives/2026-06-11-src-violations-and-burndown.md.
 build-src-recovery:
 	@echo "Building src-recovery..."
 	go build $(GOFLAGS) -o bin/src-recovery ./cmd/src-recovery/
