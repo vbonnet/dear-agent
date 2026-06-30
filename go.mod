@@ -32,7 +32,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/olekukonko/tablewriter v1.1.4
 	github.com/onsi/ginkgo/v2 v2.32.0
-	github.com/onsi/gomega v1.42.0
+	github.com/onsi/gomega v1.42.1
 	github.com/pact-foundation/pact-go/v2 v2.5.1
 	github.com/pelletier/go-toml/v2 v2.4.2
 	github.com/pkoukk/tiktoken-go v0.1.8
