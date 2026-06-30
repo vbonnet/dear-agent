@@ -1,4 +1,5 @@
 {
+  "schema_version": "dear-agent.marketplace/v1",
   "name": "dear-agent",
   "description": "DEAR (Define, Execute, Audit, Retro) agent tooling: AGM session management, Wayfinder SDLC workflow, and YouTube transcript extraction.",
   "owner": {
@@ -10,19 +11,44 @@
       "name": "agm",
       "source": "./agm/agm-plugin",
       "description": "AGM (Agent Gateway Manager) commands for managing multi-harness tmux sessions",
-      "version": "0.4.1"
+      "version": "0.4.1",
+      "capabilities": ["commands", "skills"]
     },
     {
       "name": "wayfinder",
       "source": "./wayfinder",
       "description": "Wayfinder SDLC workflow management: 9-phase methodology (CHARTER through RETRO) with phase-gate validation",
-      "version": "0.2.0"
+      "version": "0.2.0",
+      "capabilities": ["commands", "skills"]
     },
     {
       "name": "youtube",
       "source": "./agm/youtube-plugin",
       "description": "Extract transcripts and metadata from YouTube videos",
-      "version": "0.1.0"
+      "version": "0.1.0",
+      "capabilities": ["commands"]
+    }
+  ],
+  "harnesses": [
+    {
+      "name": "claude-code",
+      "mode": "native-claude-plugin-marketplace",
+      "catalog": ".claude-plugin/marketplace.json"
+    },
+    {
+      "name": "codex-cli",
+      "mode": "agents-md-skill-fallback",
+      "catalog": ".dear-agent/marketplace.json"
+    },
+    {
+      "name": "agy",
+      "mode": "agents-md-skill-fallback",
+      "catalog": ".dear-agent/marketplace.json"
+    },
+    {
+      "name": "opencode-cli",
+      "mode": "agents-md-skill-fallback",
+      "catalog": ".dear-agent/marketplace.json"
     }
   ]
 }

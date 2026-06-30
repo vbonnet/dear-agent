@@ -10,6 +10,7 @@ import (
 	"github.com/cucumber/godog"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/marketplaceparity"
 	"github.com/vbonnet/dear-agent/agm/internal/mcpparity"
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
 	"github.com/vbonnet/dear-agent/agm/internal/quotaparity"
@@ -51,6 +52,11 @@ type harnessParityState struct {
 	mcpSurface                 mcpparity.CreateSessionSurface
 	mcpModelAccepted           bool
 	mcpLifecycleOpsExposed     bool
+	marketplaceCatalog         marketplaceparity.Catalog
+	marketplaceSurface         marketplaceparity.HarnessSurface
+	marketplaceMirrorValid     bool
+	marketplacePlugin          string
+	marketplacePluginValid     bool
 }
 
 type harnessParityStateKey struct{}
@@ -97,6 +103,13 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the MCP model identifier should be accepted$`, mcpModelIdentifierShouldBeAccepted)
 	ctx.Step(`^AGM validates MCP operation discovery parity$`, agmValidatesMCPOperationDiscoveryParity)
 	ctx.Step(`^the MCP operation registry should expose lifecycle mutations$`, mcpOperationRegistryShouldExposeLifecycleMutations)
+	ctx.Step(`^AGM validates marketplace parity$`, agmValidatesMarketplaceParity)
+	ctx.Step(`^harness "([^"]*)" should have a marketplace discovery surface$`, harnessShouldHaveMarketplaceDiscoverySurface)
+	ctx.Step(`^the marketplace discovery surface should use the expected mode$`, marketplaceDiscoverySurfaceShouldUseExpectedMode)
+	ctx.Step(`^AGM validates marketplace catalog mirrors$`, agmValidatesMarketplaceCatalogMirrors)
+	ctx.Step(`^the Claude marketplace should match the neutral marketplace catalog$`, claudeMarketplaceShouldMatchNeutralMarketplaceCatalog)
+	ctx.Step(`^marketplace plugin "([^"]*)" is configured$`, marketplacePluginIsConfigured)
+	ctx.Step(`^marketplace plugin "([^"]*)" should publish its declared assets$`, marketplacePluginShouldPublishDeclaredAssets)
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
@@ -603,6 +616,115 @@ func mcpOperationRegistryShouldExposeLifecycleMutations(ctx context.Context) err
 		return fmt.Errorf("MCP operation registry does not expose lifecycle mutations")
 	}
 	return nil
+}
+
+func agmValidatesMarketplaceParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	root := bddRepoRoot()
+	if err := marketplaceparity.ValidateCatalog(root); err != nil {
+		return err
+	}
+	catalog, err := marketplaceparity.LoadCatalog(root)
+	if err != nil {
+		return err
+	}
+	harnessState.marketplaceCatalog = catalog
+	if harnessState.configuredHarness != "" {
+		surface, ok := marketplaceparity.SurfaceForHarness(catalog, harnessState.configuredHarness)
+		if !ok {
+			return fmt.Errorf("harness %q has no marketplace surface", harnessState.configuredHarness)
+		}
+		harnessState.marketplaceSurface = surface
+	}
+	if harnessState.marketplacePlugin != "" {
+		harnessState.marketplacePluginValid = marketplacePluginExists(catalog, harnessState.marketplacePlugin)
+	}
+	return nil
+}
+
+func harnessShouldHaveMarketplaceDiscoverySurface(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.marketplaceSurface.Name != normalized {
+		return fmt.Errorf("marketplace surface harness = %q, want %q", harnessState.marketplaceSurface.Name, normalized)
+	}
+	if harnessState.marketplaceSurface.Catalog == "" {
+		return fmt.Errorf("marketplace surface for %q has empty catalog", normalized)
+	}
+	return nil
+}
+
+func marketplaceDiscoverySurfaceShouldUseExpectedMode(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	want := "agents-md-skill-fallback"
+	if harnessState.marketplaceSurface.Name == "claude-code" {
+		want = "native-claude-plugin-marketplace"
+	}
+	if harnessState.marketplaceSurface.Mode != want {
+		return fmt.Errorf("marketplace mode = %q, want %q", harnessState.marketplaceSurface.Mode, want)
+	}
+	return nil
+}
+
+func agmValidatesMarketplaceCatalogMirrors(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.marketplaceMirrorValid = marketplaceparity.ValidateClaudeMarketplaceMirror(bddRepoRoot()) == nil
+	return nil
+}
+
+func claudeMarketplaceShouldMatchNeutralMarketplaceCatalog(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.marketplaceMirrorValid {
+		return fmt.Errorf("Claude marketplace does not match neutral marketplace catalog")
+	}
+	return nil
+}
+
+func marketplacePluginIsConfigured(ctx context.Context, plugin string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.marketplacePlugin = plugin
+	return nil
+}
+
+func marketplacePluginShouldPublishDeclaredAssets(ctx context.Context, plugin string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.marketplacePlugin != plugin {
+		return fmt.Errorf("marketplace plugin = %q, want %q", harnessState.marketplacePlugin, plugin)
+	}
+	if !harnessState.marketplacePluginValid {
+		return fmt.Errorf("marketplace plugin %q did not validate", plugin)
+	}
+	return nil
+}
+
+func marketplacePluginExists(catalog marketplaceparity.Catalog, plugin string) bool {
+	for _, entry := range catalog.Plugins {
+		if entry.Name == plugin {
+			return true
+		}
+	}
+	return false
 }
 
 func findQuotaSurface(surfaces []quotaparity.HarnessSurface, harness string) (quotaparity.HarnessSurface, bool) {
