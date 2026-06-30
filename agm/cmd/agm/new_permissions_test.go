@@ -4,8 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/config"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 )
 
@@ -507,5 +511,102 @@ func TestVROOMRoleAutoDerivesProfile(t *testing.T) {
 				t.Errorf("role %q resolved to empty permission list", role)
 			}
 		})
+	}
+}
+
+func TestResolveSessionPermissionPolicyRecordsProfileAndTargets(t *testing.T) {
+	origAllow := permissionsAllow
+	origProfile := permissionProfile
+	origInherit := inheritPermissions
+	origRole := roleName
+	defer func() {
+		permissionsAllow = origAllow
+		permissionProfile = origProfile
+		inheritPermissions = origInherit
+		roleName = origRole
+	}()
+
+	permissionsAllow = []string{"Bash(custom *)"}
+	permissionProfile = ""
+	inheritPermissions = false
+	roleName = "worker"
+
+	policy, allowList, err := resolveSessionPermissionPolicy()
+	if err != nil {
+		t.Fatalf("resolveSessionPermissionPolicy: %v", err)
+	}
+	if policy.Profile != "worker" {
+		t.Fatalf("policy profile = %q, want worker", policy.Profile)
+	}
+	if policy.ProfileSource != "role" {
+		t.Fatalf("policy profile source = %q, want role", policy.ProfileSource)
+	}
+	for _, source := range []string{"defaults", "explicit", "profile"} {
+		if !slices.Contains(policy.Sources, source) {
+			t.Errorf("policy sources missing %q: %v", source, policy.Sources)
+		}
+	}
+	if !slices.Contains(policy.Explicit, "Bash(custom *)") {
+		t.Errorf("policy explicit entries missing custom permission: %v", policy.Explicit)
+	}
+	if !slices.Contains(allowList, "Bash(custom *)") {
+		t.Errorf("allow list missing custom permission: %v", allowList)
+	}
+	if len(policy.Targets) != len(agent.ActiveHarnesses()) {
+		t.Fatalf("policy targets = %d, want %d: %v", len(policy.Targets), len(agent.ActiveHarnesses()), policy.Targets)
+	}
+	targets := map[string]bool{}
+	for _, target := range policy.Targets {
+		targets[target.Harness] = target.PolicySurface != "" &&
+			target.StartupSurface != "" &&
+			target.RuntimeSurface != "" &&
+			target.NativeEnforcement != ""
+	}
+	for _, harness := range agent.ActiveHarnesses() {
+		if !targets[harness] {
+			t.Errorf("policy target for %q missing or incomplete: %v", harness, policy.Targets)
+		}
+	}
+}
+
+func TestBuildSessionManifestPersistsPermissionPolicy(t *testing.T) {
+	origPolicy := resolvedSessionPermissionPolicy
+	origHarness := harnessName
+	origModel := modelName
+	origCfg := cfg
+	defer func() {
+		resolvedSessionPermissionPolicy = origPolicy
+		harnessName = origHarness
+		modelName = origModel
+		cfg = origCfg
+	}()
+
+	cfg = &config.Config{Workspace: "test"}
+	resolvedSessionPermissionPolicy = &manifest.PermissionPolicy{
+		Profile: "auditor",
+		Sources: []string{"defaults", "profile"},
+		Allow:   []string{"Bash(git status)"},
+		Targets: []manifest.PermissionPolicyTarget{{
+			Harness:           "claude-code",
+			PolicySurface:     ".claude/settings.local.json permissions.allow",
+			StartupSurface:    "claude --permission-mode",
+			RuntimeSurface:    "Shift+Tab and /plan",
+			NativeEnforcement: "Claude Code allowlist and permission modes",
+		}},
+	}
+	harnessName = "claude-code"
+	modelName = "sonnet"
+
+	m := buildSessionManifest("session-id", "session-name", "/tmp/work", nil)
+	if m.PermissionPolicy == nil {
+		t.Fatal("manifest missing permission policy")
+	}
+	if m.PermissionPolicy.Profile != "auditor" {
+		t.Fatalf("manifest permission profile = %q, want auditor", m.PermissionPolicy.Profile)
+	}
+
+	resolvedSessionPermissionPolicy.Allow[0] = "Bash(mutated)"
+	if m.PermissionPolicy.Allow[0] != "Bash(git status)" {
+		t.Fatalf("manifest permission policy was not cloned: %v", m.PermissionPolicy.Allow)
 	}
 }
