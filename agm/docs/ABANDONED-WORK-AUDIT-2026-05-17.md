@@ -217,4 +217,4 @@ wt=...; br=$(git -C "$wt" rev-parse --abbrev-ref HEAD)
 ```
 
 See the companion DEAR retro:
-[`docs/retros/2026-05-17-abandoned-work-sprawl.md`](../../docs/retros/2026-05-17-abandoned-work-sprawl.md).
+[`2026-05-17-abandoned-work-sprawl.md`](https://github.com/vbonnet/engram-research/blob/main/retrospectives/2026-05-17-abandoned-work-sprawl.md).

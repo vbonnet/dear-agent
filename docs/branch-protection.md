@@ -30,7 +30,7 @@ Per `docs/design-safe-merge.md` §4.1 / §5 (P1), this replaces the legacy
 
 Each is pinned to `integration_id: 15368` (the GitHub Actions app) so a
 same-named check from a *different* app can never satisfy the gate — the failure
-mode behind the [phantom Trivy check](retros/2026-06-08-phantom-trivy-required-check.md).
+mode behind the [phantom Trivy check](https://github.com/vbonnet/engram-research/blob/main/retrospectives/2026-06-08-phantom-trivy-required-check.md).
 
 | Context | Produced by |
 |---------|-------------|

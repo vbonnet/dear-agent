@@ -694,7 +694,7 @@ The plan is "done" when **all of the following are measurable on `main`**:
 - Wiring a real SWE-bench executor in `pkg/benchmarks/`. Separate workstream;
   Docker dependency.
 - Resolving collision #5 (ADR sprawl). The audit at
-  `docs/audits/2026-05-17-adr-inventory-prune.md` already plans this; not
+  `vbonnet/engram-research` `audits/2026-05-17-adr-inventory-prune.md` already plans this; not
   re-litigated here.
 
 ---

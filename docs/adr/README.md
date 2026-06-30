@@ -3,7 +3,7 @@
 Decisions about dear-agent's architecture live here. The format is light:
 one short ADR per decision (target: ~200 words), descriptive H1, single
 `Status:` line, no fixed Context/Decision/Alternatives/Consequences scaffold.
-The 2026-05-17 [ADR inventory prune](../audits/2026-05-17-adr-inventory-prune.md)
+The 2026-05-17 ADR inventory prune (`vbonnet/engram-research` `audits/2026-05-17-adr-inventory-prune.md`)
 captures the audit that produced the current set; this directory was rewritten
 in Pocock-tight form on 2026-05-26.
 

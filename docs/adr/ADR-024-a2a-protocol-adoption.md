@@ -224,7 +224,7 @@ can be exposed in pkg/a2a later without breaking the v1 callers.
 Rejected. The substrate works for AGM's single-session control loop but
 falls apart the moment a supervisor needs to *answer* a worker's
 question: there is no event-shaped channel back. Every "the agent got
-stuck waiting for input" retro in `docs/retros/` is a tax this option
+stuck waiting for input" retro in `engram-research/retrospectives/` is a tax this option
 keeps paying.
 
 ### B. Build a bespoke supervisor RPC

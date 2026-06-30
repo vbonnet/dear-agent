@@ -460,7 +460,7 @@ Provide a production-ready CLI that:
 - **Documentation:**
   - **User guide:** `docs/TEST-SESSION-GUIDE.md` (comprehensive examples, comparison table)
   - **ADR:** `cmd/agm/ADR-007-test-session-isolation.md` (architectural decisions)
-  - **Retrospective:** `RETROSPECTIVE-TEST-SESSION-CLEANUP.md` (implementation learnings)
+  - **Retrospective:** `vbonnet/engram-research` `retrospectives/RETROSPECTIVE-TEST-SESSION-CLEANUP.md` (implementation learnings)
   - **README:** Updated with test session quick start section
   - **CHANGELOG:** v2.4 release notes with feature details
 - **Related:**
