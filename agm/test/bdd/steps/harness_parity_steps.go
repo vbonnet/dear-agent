@@ -11,6 +11,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
+	"github.com/vbonnet/dear-agent/agm/internal/quotaparity"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
 )
@@ -44,6 +45,8 @@ type harnessParityState struct {
 	permissionProfile          string
 	permissionSurfaces         []permissionparity.Surface
 	permissionAllowList        []string
+	quotaSurfaces              []quotaparity.HarnessSurface
+	quotaFamilyCoverage        quotaparity.ModelFamilyCoverage
 }
 
 type harnessParityStateKey struct{}
@@ -75,6 +78,13 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^every active harness should have a permission policy target$`, everyActiveHarnessShouldHavePermissionPolicyTarget)
 	ctx.Step(`^the resolved permission policy should include default permissions$`, resolvedPermissionPolicyShouldIncludeDefaultPermissions)
 	ctx.Step(`^the resolved permission policy should include profile permissions$`, resolvedPermissionPolicyShouldIncludeProfilePermissions)
+	ctx.Step(`^AGM validates quota monitoring parity$`, agmValidatesQuotaMonitoringParity)
+	ctx.Step(`^AGM validates quota model family coverage$`, agmValidatesQuotaModelFamilyCoverage)
+	ctx.Step(`^harness "([^"]*)" should have a context quota source$`, harnessShouldHaveContextQuotaSource)
+	ctx.Step(`^harness "([^"]*)" should have a cost quota source$`, harnessShouldHaveCostQuotaSource)
+	ctx.Step(`^harness "([^"]*)" should have a rate limit quota policy$`, harnessShouldHaveRateLimitQuotaPolicy)
+	ctx.Step(`^model family "([^"]*)" should have a quota pricing policy$`, modelFamilyShouldHaveQuotaPricingPolicy)
+	ctx.Step(`^model family "([^"]*)" should have a default quota model route$`, modelFamilyShouldHaveDefaultQuotaModelRoute)
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
@@ -375,6 +385,123 @@ func findPermissionSurface(surfaces []permissionparity.Surface, harness string) 
 		}
 	}
 	return permissionparity.Surface{}, false
+}
+
+func agmValidatesQuotaMonitoringParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := quotaparity.ValidateActiveHarnessSurfaces(); err != nil {
+		return err
+	}
+	harnessState.quotaSurfaces = quotaparity.ActiveHarnessSurfaces()
+	return nil
+}
+
+func agmValidatesQuotaModelFamilyCoverage(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredModelFamily == "" {
+		return fmt.Errorf("no model family configured")
+	}
+	if err := quotaparity.ValidateModelFamilyCoverage(); err != nil {
+		return err
+	}
+	coverage, ok := quotaparity.ModelFamilyCoverageFor(harnessState.configuredModelFamily)
+	if !ok {
+		return fmt.Errorf("model family %q has no quota coverage", harnessState.configuredModelFamily)
+	}
+	harnessState.quotaFamilyCoverage = coverage
+	return nil
+}
+
+func harnessShouldHaveContextQuotaSource(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	surface, ok := findQuotaSurface(harnessState.quotaSurfaces, harness)
+	if !ok {
+		return fmt.Errorf("harness %q has no quota surface", harness)
+	}
+	if surface.ContextSource == "" {
+		return fmt.Errorf("harness %q has empty context quota source", harness)
+	}
+	return nil
+}
+
+func harnessShouldHaveCostQuotaSource(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	surface, ok := findQuotaSurface(harnessState.quotaSurfaces, harness)
+	if !ok {
+		return fmt.Errorf("harness %q has no quota surface", harness)
+	}
+	if surface.CostSource == "" {
+		return fmt.Errorf("harness %q has empty cost quota source", harness)
+	}
+	return nil
+}
+
+func harnessShouldHaveRateLimitQuotaPolicy(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	surface, ok := findQuotaSurface(harnessState.quotaSurfaces, harness)
+	if !ok {
+		return fmt.Errorf("harness %q has no quota surface", harness)
+	}
+	if surface.RateLimitSource == "" {
+		return fmt.Errorf("harness %q has empty rate limit quota policy", harness)
+	}
+	return nil
+}
+
+func modelFamilyShouldHaveQuotaPricingPolicy(ctx context.Context, family string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.quotaFamilyCoverage.Family != strings.ToLower(family) {
+		return fmt.Errorf("quota coverage family = %q, want %q", harnessState.quotaFamilyCoverage.Family, family)
+	}
+	if harnessState.quotaFamilyCoverage.PricePolicy == "" {
+		return fmt.Errorf("model family %q has empty quota pricing policy", family)
+	}
+	return nil
+}
+
+func modelFamilyShouldHaveDefaultQuotaModelRoute(ctx context.Context, family string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.quotaFamilyCoverage.Family != strings.ToLower(family) {
+		return fmt.Errorf("quota coverage family = %q, want %q", harnessState.quotaFamilyCoverage.Family, family)
+	}
+	if harnessState.quotaFamilyCoverage.DefaultModel == "" {
+		return fmt.Errorf("model family %q has no default quota model route", family)
+	}
+	return nil
+}
+
+func findQuotaSurface(surfaces []quotaparity.HarnessSurface, harness string) (quotaparity.HarnessSurface, bool) {
+	normalized := agent.NormalizeHarnessName(harness)
+	for _, surface := range surfaces {
+		if surface.Harness == normalized {
+			return surface, true
+		}
+	}
+	return quotaparity.HarnessSurface{}, false
 }
 
 func getHarnessParityState(ctx context.Context) (*harnessParityState, error) {
