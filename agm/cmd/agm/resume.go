@@ -34,20 +34,20 @@ var (
 
 var resumeCmd = &cobra.Command{
 	Use:   "resume [identifier]",
-	Short: "Resume a Claude session by UUID, tmux name, or fuzzy match",
-	Long: `Resume a Claude session by various identifier types:
+	Short: "Resume an AGM session by ID, tmux name, or fuzzy match",
+	Long: `Resume an AGM-managed harness session by various identifier types:
 
-- UUID (full or partial): agmresume c4eb298c
-- Tmux session name:      agmresume claude-1
-- Fuzzy match on project: agmresume workspace-design
-- Interactive (no args):  agmresume
+- Session or conversation ID: agmresume c4eb298c
+- Tmux session name:         agmresume worker-1
+- Fuzzy match on project:    agmresume workspace-design
+- Interactive (no args):     agmresume
 
 The command will:
-1. Resolve the identifier to find the Claude UUID
-2. Check session health (worktree exists, Claude dirs present)
+1. Resolve the identifier to find the AGM session record
+2. Check session health (worktree exists, harness metadata present)
 3. Create or attach to tmux session
 4. Send 'cd' to worktree directory
-5. Send 'claude --resume <uuid>' to tmux pane
+5. Send the harness-specific resume command to the tmux pane
 6. Update manifest last_activity timestamp
 
 Flags:
@@ -56,8 +56,8 @@ Flags:
   --prompt-file  Send file contents as prompt after resume (useful for crash recovery)
 
 Examples:
-  agmresume c4eb298c              # By UUID prefix
-  agmresume claude-1              # By tmux name
+  agmresume c4eb298c              # By ID prefix
+  agmresume worker-1              # By tmux name
   agmresume workspace-design      # By project path pattern
   agmresume orchestrator --detached  # Resume without attaching
   agmresume worker-1 --prompt "continue working on the auth module"  # Resume and inject prompt
