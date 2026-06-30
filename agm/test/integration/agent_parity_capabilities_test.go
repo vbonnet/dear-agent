@@ -23,17 +23,17 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 
 		claudeAdapter, err := agent.NewClaudeAdapter(nil)
 		Expect(err).ToNot(HaveOccurred())
-		adapters["claude"] = claudeAdapter
+		adapters["claude-code"] = claudeAdapter
 
 		os.Setenv("GEMINI_API_KEY", "test-api-key-for-testing")
 		geminiAdapter, err := agent.NewGeminiCLIAdapter(nil)
 		Expect(err).ToNot(HaveOccurred())
-		adapters["gemini"] = geminiAdapter
+		adapters["gemini-cli"] = geminiAdapter
 
 		// OpenCode adapter
 		opencodeAdapter, err := agent.NewOpenCodeAdapter(nil)
 		Expect(err).ToNot(HaveOccurred())
-		adapters["opencode"] = opencodeAdapter
+		adapters["opencode-cli"] = opencodeAdapter
 	})
 
 	AfterEach(func() {
@@ -49,9 +49,9 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 				Expect(name).ToNot(BeEmpty())
 				Expect(name).To(Equal(agentName))
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 
 		DescribeTable("returns valid version string",
@@ -63,9 +63,9 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 				// Version should contain model identifier
 				Expect(version).To(MatchRegexp(`(?i)(claude|gemini|sonnet|flash|pro)`))
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 	})
 
@@ -79,9 +79,9 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 				Expect(caps.MaxContextWindow).To(BeNumerically(">", 0))
 				Expect(caps.MaxContextWindow).To(BeNumerically("<", 10000000)) // Sanity check
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 
 		DescribeTable("model name matches version",
@@ -93,30 +93,30 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 				// Capabilities model name should be related to version
 				Expect(caps.ModelName).To(ContainSubstring(version))
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 	})
 
 	Describe("Agent-Specific Capabilities", func() {
 		It("claude supports slash commands (CLI agent)", func() {
-			adapter := adapters["claude"]
+			adapter := adapters["claude-code"]
 			caps := adapter.Capabilities()
 
 			Expect(caps.SupportsSlashCommands).To(BeTrue())
 		})
 
 		It("gemini does not support slash commands (API agent)", func() {
-			adapter := adapters["gemini"]
+			adapter := adapters["gemini-cli"]
 			caps := adapter.Capabilities()
 
 			Expect(caps.SupportsSlashCommands).To(BeFalse())
 		})
 
 		It("claude has smaller context window than gemini", func() {
-			claudeCaps := adapters["claude"].Capabilities()
-			geminiCaps := adapters["gemini"].Capabilities()
+			claudeCaps := adapters["claude-code"].Capabilities()
+			geminiCaps := adapters["gemini-cli"].Capabilities()
 
 			// Claude: ~200K tokens
 			// Gemini: 1M+ tokens
@@ -132,9 +132,9 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 
 				Expect(caps.SupportsTools).To(BeTrue())
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 
 		DescribeTable("both agents support vision",
@@ -144,9 +144,9 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 
 				Expect(caps.SupportsVision).To(BeTrue())
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 
 		DescribeTable("both agents support streaming",
@@ -156,9 +156,9 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 
 				Expect(caps.SupportsStreaming).To(BeTrue())
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 
 		DescribeTable("both agents support system prompts",
@@ -168,9 +168,9 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 
 				Expect(caps.SupportsSystemPrompts).To(BeTrue())
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 	})
 
@@ -187,9 +187,9 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 				// (audio, video beyond just images)
 				_ = caps.SupportsMultimodal
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 
 		DescribeTable("hooks support",
@@ -204,15 +204,15 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 				// Value should be consistent across agents
 				_ = caps.SupportsHooks
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 	})
 
 	Describe("Context Window Details", func() {
 		It("claude has reasonable context window (100K-500K tokens)", func() {
-			adapter := adapters["claude"]
+			adapter := adapters["claude-code"]
 			caps := adapter.Capabilities()
 
 			Expect(caps.MaxContextWindow).To(BeNumerically(">=", 100000))
@@ -220,7 +220,7 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 		})
 
 		It("gemini has large context window (500K-2M tokens)", func() {
-			adapter := adapters["gemini"]
+			adapter := adapters["gemini-cli"]
 			caps := adapter.Capabilities()
 
 			Expect(caps.MaxContextWindow).To(BeNumerically(">=", 500000))
@@ -230,22 +230,22 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 
 	Describe("Model Naming Conventions", func() {
 		It("claude model name contains 'claude'", func() {
-			adapter := adapters["claude"]
+			adapter := adapters["claude-code"]
 			caps := adapter.Capabilities()
 
 			Expect(caps.ModelName).To(MatchRegexp(`(?i)claude`))
 		})
 
 		It("gemini model name contains 'gemini'", func() {
-			adapter := adapters["gemini"]
+			adapter := adapters["gemini-cli"]
 			caps := adapter.Capabilities()
 
 			Expect(caps.ModelName).To(MatchRegexp(`(?i)gemini`))
 		})
 
 		It("model names indicate version/tier", func() {
-			claudeCaps := adapters["claude"].Capabilities()
-			geminiCaps := adapters["gemini"].Capabilities()
+			claudeCaps := adapters["claude-code"].Capabilities()
+			geminiCaps := adapters["gemini-cli"].Capabilities()
 
 			// Should contain tier/version indicators
 			Expect(claudeCaps.ModelName).To(MatchRegexp(`(?i)(sonnet|opus|haiku|3|4)`))
@@ -279,8 +279,8 @@ var _ = Describe("Agent Parity - Capabilities", func() {
 
 	Describe("Feature Documentation", func() {
 		It("generates capability comparison matrix", func() {
-			claudeCaps := adapters["claude"].Capabilities()
-			geminiCaps := adapters["gemini"].Capabilities()
+			claudeCaps := adapters["claude-code"].Capabilities()
+			geminiCaps := adapters["gemini-cli"].Capabilities()
 
 			GinkgoWriter.Println("\n=== Agent Capability Comparison ===")
 			GinkgoWriter.Printf("%-30s | %-15s | %-15s\n", "Feature", "Claude", "Gemini")
