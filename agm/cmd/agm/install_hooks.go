@@ -16,11 +16,13 @@ var hooksFS embed.FS
 
 var installHooksCmd = &cobra.Command{
 	Use:   "install-hooks",
-	Short: "Install Claude Code hooks for state tracking",
-	Long: `Install Claude Code hooks that notify AGM of session state transitions.
+	Short: "Install AGM hooks for harness state tracking",
+	Long: `Install AGM-managed hooks that notify AGM of session state transitions.
 
-This command copies hook scripts to ~/.claude/hooks/ and registers them in
-~/.claude/settings.json so Claude Code invokes them automatically.
+For Claude Code, this command copies hook scripts to ~/.claude/hooks/ and
+registers them in ~/.claude/settings.json so the harness invokes them
+automatically. Repository-scoped hook manifests for Codex, AGY, and OpenCode
+live under .codex/, .agents/, and .opencode/ respectively.
 
 Hooks installed:
   • posttool-agm-state-notify         - Set state to THINKING after tool use
@@ -34,9 +36,9 @@ Hooks installed:
 These hooks enable accurate state detection with <1% false positive rate,
 replacing the fragile tmux pane parsing method (37.5% false positive rate).
 
-The agm-plan-continuity hook automatically detects when Claude Code creates
-execution sessions via "Clear Context and Execute Plan" and links them to
-their parent planning sessions for proper session resumption.
+The agm-plan-continuity hook automatically detects when a Claude Code planning
+session creates an execution session via "Clear Context and Execute Plan" and
+links it to its parent planning session for proper session resumption.
 
 Examples:
   # Install hooks (copy files + register in settings.json)
