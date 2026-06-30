@@ -6,30 +6,32 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
 
 var setModelDryRun bool
+var setModelHarness string
 
 var sendSetModelCmd = &cobra.Command{
 	Use:   "set-model <session-name> <model>",
-	Short: "Change the AI model of a running Claude Code session",
-	Long: `Send /model command to a running Claude Code session to switch models.
+	Short: "Change the AI model of a running harness session",
+	Long: `Send the harness model-switch command to a running AGM session.
 
-Supported model aliases:
-  default, sonnet  → sonnet (latest Sonnet)
-  sonnet-1m        → sonnet with 1M context window
-  opus             → opus (latest Opus)
-  opus-1m          → opus with 1M context window
-  haiku            → haiku
+The command resolves the session harness from AGM metadata, then resolves model
+aliases through the shared harness model registry. Use --harness when changing
+a live tmux session that is not yet associated with AGM.
 
 Examples:
-  # Switch to opus with 1M context
+  # Switch a Claude Code session to Opus
   agm send set-model my-session opus-1m
 
-  # Switch to haiku
-  agm send set-model my-session haiku
+  # Switch a Codex session to its fast model
+  agm send set-model codex-worker 5.4-mini
+
+  # Preview an OpenRouter-compatible OpenCode route
+  agm send set-model open-worker glm-5.2 --harness=opencode-cli --dry-run
 
   # Preview without sending
   agm send set-model my-session opus --dry-run
@@ -43,28 +45,75 @@ See Also:
 
 func init() {
 	sendSetModelCmd.Flags().BoolVar(&setModelDryRun, "dry-run", false, "Print command without sending")
+	sendSetModelCmd.Flags().StringVar(&setModelHarness, "harness", "", "Explicit harness when the session is not associated with AGM")
 	sendGroupCmd.AddCommand(sendSetModelCmd)
 }
 
-// modelAliases maps user-friendly names to /model command arguments.
-var modelAliases = map[string]string{
-	"default":   "sonnet",
-	"sonnet":    "sonnet",
-	"sonnet-1m": "sonnet[1m]",
-	"opus":      "opus",
-	"opus-1m":   "opus[1m]",
-	"haiku":     "haiku",
+type setModelInstruction struct {
+	Harness       string
+	ResolvedModel string
+	Command       string
 }
 
-// resolveModelAlias converts a user-provided alias to a /model argument.
-// Returns the resolved model name and true if valid, or empty string and false.
-func resolveModelAlias(alias string) (string, bool) {
-	resolved, ok := modelAliases[strings.ToLower(alias)]
-	return resolved, ok
+// resolveSetModelInstruction validates a model in the context of the target
+// harness and returns the tmux command that should be sent to the pane.
+func resolveSetModelInstruction(harnessName, modelInput string) (setModelInstruction, error) {
+	normalized := agent.NormalizeHarnessName(harnessName)
+	if normalized == "" {
+		normalized = "claude-code"
+	}
+	if err := agent.ValidateHarnessName(normalized); err != nil {
+		return setModelInstruction{}, err
+	}
+
+	alias := strings.ToLower(modelInput)
+	if normalized == "claude-code" {
+		alias = normalizeClaudeSetModelAlias(alias)
+	}
+	if err := agent.ValidateModel(normalized, alias); err != nil {
+		return setModelInstruction{}, err
+	}
+
+	resolved := agent.ResolveModelFullName(normalized, alias)
+	if resolved == "" {
+		return setModelInstruction{}, fmt.Errorf("model %q resolved to an empty identifier for harness %q", modelInput, normalized)
+	}
+
+	return setModelInstruction{
+		Harness:       normalized,
+		ResolvedModel: resolved,
+		Command:       "/model " + resolved,
+	}, nil
+}
+
+func normalizeClaudeSetModelAlias(alias string) string {
+	switch alias {
+	case "default":
+		return "sonnet"
+	case "sonnet-1m":
+		return "sonnet"
+	case "opus-1m":
+		return "opus"
+	default:
+		return alias
+	}
+}
+
+func resolveSetModelHarness(sessionName string) string {
+	if setModelHarness != "" {
+		return setModelHarness
+	}
+	m, err := findManifestBySession(sessionName)
+	if err != nil || m == nil || m.Harness == "" {
+		return "claude-code"
+	}
+	return m.Harness
 }
 
 // verifyModelSet captures pane output and checks for model confirmation.
-// Claude Code prints "Set model to ..." when a model change succeeds.
+// Claude Code prints "Set model to ..." when a model change succeeds. Other
+// harnesses may not expose a stable confirmation line, so this remains a
+// best-effort check for the common slash-command path.
 func verifyModelSet(sessionName string, timeout time.Duration) (bool, string) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -87,15 +136,15 @@ func runSendSetModel(_ *cobra.Command, args []string) error {
 	sessionName := args[0]
 	modelInput := args[1]
 
-	// Resolve alias
-	modelArg, valid := resolveModelAlias(modelInput)
-	if !valid {
-		validAliases := make([]string, 0, len(modelAliases))
-		for k := range modelAliases {
-			validAliases = append(validAliases, k)
-		}
-		return fmt.Errorf("unknown model %q\n\nSupported models: %s",
-			modelInput, strings.Join(validAliases, ", "))
+	instruction, err := resolveSetModelInstruction(resolveSetModelHarness(sessionName), modelInput)
+	if err != nil {
+		return fmt.Errorf("invalid model change request: %w", err)
+	}
+
+	if setModelDryRun {
+		fmt.Printf("Dry-run: would send %q to session '%s' (harness: %s, model: %s)\n",
+			instruction.Command, sessionName, instruction.Harness, instruction.ResolvedModel)
+		return nil
 	}
 
 	// Check tmux session exists
@@ -107,15 +156,8 @@ func runSendSetModel(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("session '%s' does not exist in tmux.\n\nSuggestions:\n  - List sessions: agm session list\n  - Create session: agm session new %s", sessionName, sessionName)
 	}
 
-	command := "/model " + modelArg
-
-	if setModelDryRun {
-		fmt.Printf("Dry-run: would send %q to session '%s'\n", command, sessionName)
-		return nil
-	}
-
 	// Send /model command
-	if err := tmux.SendSlashCommandSafe(sessionName, command); err != nil {
+	if err := tmux.SendSlashCommandSafe(sessionName, instruction.Command); err != nil {
 		return fmt.Errorf("failed to send model command: %w", err)
 	}
 
@@ -125,7 +167,7 @@ func runSendSetModel(_ *cobra.Command, args []string) error {
 		ui.PrintSuccess(fmt.Sprintf("Model changed for session '%s': %s", sessionName, confirmation))
 	} else {
 		ui.PrintWarning(fmt.Sprintf("Sent %q to session '%s' but could not verify confirmation. Attach to verify: agm session attach %s",
-			command, sessionName, sessionName))
+			instruction.Command, sessionName, sessionName))
 	}
 
 	return nil

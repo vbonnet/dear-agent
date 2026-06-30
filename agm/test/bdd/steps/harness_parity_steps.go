@@ -37,6 +37,8 @@ type harnessParityState struct {
 	configuredHarness          string
 	configuredModelFamily      string
 	modelFamilyDefaulted       bool
+	modelChangeCommand         string
+	modelChangeResolvedModel   string
 }
 
 type harnessParityStateKey struct{}
@@ -57,6 +59,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates model family parity support$`, agmValidatesModelFamilyParitySupport)
 	ctx.Step(`^model family "([^"]*)" should be supported$`, modelFamilyShouldBeSupported)
 	ctx.Step(`^model family "([^"]*)" should have a default model route$`, modelFamilyShouldHaveDefaultModelRoute)
+	ctx.Step(`^AGM resolves a model change for harness "([^"]*)" with model "([^"]*)"$`, agmResolvesModelChangeForHarness)
+	ctx.Step(`^the model change should use tmux command "([^"]*)"$`, modelChangeShouldUseTmuxCommand)
+	ctx.Step(`^the resolved model should not be empty$`, resolvedModelShouldNotBeEmpty)
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
@@ -190,6 +195,47 @@ func modelFamilyShouldHaveDefaultModelRoute(ctx context.Context, family string) 
 	}
 	if !harnessState.modelFamilyDefaulted {
 		return fmt.Errorf("model family %q has no default route", family)
+	}
+	return nil
+}
+
+func agmResolvesModelChangeForHarness(ctx context.Context, harness, model string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if err := agent.ValidateHarnessName(normalized); err != nil {
+		return err
+	}
+	if err := agent.ValidateModel(normalized, model); err != nil {
+		return err
+	}
+	resolved := agent.ResolveModelFullName(normalized, model)
+	harnessState.configuredHarness = normalized
+	harnessState.modelChangeResolvedModel = resolved
+	harnessState.modelChangeCommand = "/model"
+	return nil
+}
+
+func modelChangeShouldUseTmuxCommand(ctx context.Context, expected string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.modelChangeCommand != expected {
+		return fmt.Errorf("model change command = %q, want %q", harnessState.modelChangeCommand, expected)
+	}
+	return nil
+}
+
+func resolvedModelShouldNotBeEmpty(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.modelChangeResolvedModel == "" {
+		return fmt.Errorf("resolved model for harness %q is empty", harnessState.configuredHarness)
 	}
 	return nil
 }

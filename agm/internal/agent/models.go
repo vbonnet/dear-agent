@@ -226,8 +226,8 @@ func ValidateModel(harnessName, modelAlias string) error {
 // character allowlist here so a caller that forgot to call ValidateModel
 // still can't smuggle a payload through.
 func ResolveModelFullName(harnessName, aliasOrFull string) string {
-	models, ok := HarnessModels[harnessName]
-	if !ok {
+	models := GetModelsForHarness(harnessName)
+	if len(models) == 0 {
 		return safeModelPassthrough(aliasOrFull)
 	}
 	for _, m := range models {
