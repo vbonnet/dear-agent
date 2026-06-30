@@ -31,8 +31,8 @@ func TestClaudeAdapterName(t *testing.T) {
 		t.Fatalf("NewClaudeAdapter failed: %v", err)
 	}
 
-	if got := adapter.Name(); got != "claude" {
-		t.Errorf("Name() = %q, want %q", got, "claude")
+	if got := adapter.Name(); got != "claude-code" {
+		t.Errorf("Name() = %q, want %q", got, "claude-code")
 	}
 }
 

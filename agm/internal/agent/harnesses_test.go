@@ -42,3 +42,27 @@ func TestCodexFactoryUsesCLIAdapter(t *testing.T) {
 		t.Fatalf("GetHarness(codex-cli) = %T, want *CodexCLIAdapter", got)
 	}
 }
+
+func TestActiveHarnessFactoryNamesMatchCanonicalNames(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	for _, harness := range ActiveHarnesses() {
+		got, err := GetHarness(harness)
+		if err != nil {
+			t.Fatalf("GetHarness(%q) returned error: %v", harness, err)
+		}
+		if got.Name() != harness {
+			t.Fatalf("GetHarness(%q).Name() = %q, want %q", harness, got.Name(), harness)
+		}
+	}
+}
+
+func TestAntigravityAliasesNormalizeToAGY(t *testing.T) {
+	for _, input := range []string{"agy", "agy-cli", "antigravity"} {
+		if got := NormalizeHarnessName(input); got != "agy" {
+			t.Fatalf("NormalizeHarnessName(%q) = %q, want agy", input, got)
+		}
+		if err := ValidateHarnessName(input); err != nil {
+			t.Fatalf("ValidateHarnessName(%q) returned error: %v", input, err)
+		}
+	}
+}

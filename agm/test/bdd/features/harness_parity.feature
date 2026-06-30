@@ -24,6 +24,22 @@ Feature: Harness parity
     When AGM validates active parity support
     Then harness "gemini-cli" should be deprecated
 
+  Scenario Outline: Supported model families have default routes
+    Given model family "<family>" is configured
+    When AGM validates model family parity support
+    Then model family "<family>" should be supported
+    And model family "<family>" should have a default model route
+
+    Examples:
+      | family    |
+      | anthropic |
+      | openai    |
+      | gemini    |
+      | glm       |
+      | deepseek  |
+      | nemotron  |
+      | qwen      |
+
   Scenario: Codex composer is ready to receive input
     Given a Codex CLI composer pane
     When AGM checks whether the session can receive input

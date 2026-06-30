@@ -39,7 +39,7 @@ func NewClaudeAdapter(sessionStore SessionStore) (Agent, error) {
 
 // Name returns the agent identifier
 func (a *ClaudeAdapter) Name() string {
-	return "claude"
+	return "claude-code"
 }
 
 // Version returns the model name
