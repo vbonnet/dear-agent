@@ -10,6 +10,7 @@ import (
 	"github.com/cucumber/godog"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/mcpparity"
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
 	"github.com/vbonnet/dear-agent/agm/internal/quotaparity"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
@@ -47,6 +48,9 @@ type harnessParityState struct {
 	permissionAllowList        []string
 	quotaSurfaces              []quotaparity.HarnessSurface
 	quotaFamilyCoverage        quotaparity.ModelFamilyCoverage
+	mcpSurface                 mcpparity.CreateSessionSurface
+	mcpModelAccepted           bool
+	mcpLifecycleOpsExposed     bool
 }
 
 type harnessParityStateKey struct{}
@@ -85,6 +89,14 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^harness "([^"]*)" should have a rate limit quota policy$`, harnessShouldHaveRateLimitQuotaPolicy)
 	ctx.Step(`^model family "([^"]*)" should have a quota pricing policy$`, modelFamilyShouldHaveQuotaPricingPolicy)
 	ctx.Step(`^model family "([^"]*)" should have a default quota model route$`, modelFamilyShouldHaveDefaultQuotaModelRoute)
+	ctx.Step(`^AGM validates MCP session creation parity$`, agmValidatesMCPSessionCreationParity)
+	ctx.Step(`^harness "([^"]*)" should have an MCP create-session surface$`, harnessShouldHaveMCPCreateSessionSurface)
+	ctx.Step(`^the MCP create-session surface should use shared model validation$`, mcpCreateSessionSurfaceShouldUseSharedModelValidation)
+	ctx.Step(`^the MCP create-session surface should be deprecated compatibility$`, mcpCreateSessionSurfaceShouldBeDeprecatedCompatibility)
+	ctx.Step(`^AGM validates MCP model identifier "([^"]*)"$`, agmValidatesMCPModelIdentifier)
+	ctx.Step(`^the MCP model identifier should be accepted$`, mcpModelIdentifierShouldBeAccepted)
+	ctx.Step(`^AGM validates MCP operation discovery parity$`, agmValidatesMCPOperationDiscoveryParity)
+	ctx.Step(`^the MCP operation registry should expose lifecycle mutations$`, mcpOperationRegistryShouldExposeLifecycleMutations)
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
@@ -490,6 +502,105 @@ func modelFamilyShouldHaveDefaultQuotaModelRoute(ctx context.Context, family str
 	}
 	if harnessState.quotaFamilyCoverage.DefaultModel == "" {
 		return fmt.Errorf("model family %q has no default quota model route", family)
+	}
+	return nil
+}
+
+func agmValidatesMCPSessionCreationParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := mcpparity.ValidateActiveCreateSessionSurfaces(); err != nil {
+		return err
+	}
+	surface, ok := mcpparity.CreateSessionSurfaceFor(harnessState.configuredHarness)
+	if !ok {
+		return fmt.Errorf("harness %q has no MCP create-session surface", harnessState.configuredHarness)
+	}
+	harnessState.mcpSurface = surface
+	return nil
+}
+
+func harnessShouldHaveMCPCreateSessionSurface(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.mcpSurface.Harness != normalized {
+		return fmt.Errorf("MCP surface harness = %q, want %q", harnessState.mcpSurface.Harness, normalized)
+	}
+	if harnessState.mcpSurface.DefaultModel == "" {
+		return fmt.Errorf("harness %q has empty MCP default model", normalized)
+	}
+	return nil
+}
+
+func mcpCreateSessionSurfaceShouldUseSharedModelValidation(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.mcpSurface.ModelPolicy != "shared-agent-registry" {
+		return fmt.Errorf("MCP model policy = %q, want shared-agent-registry", harnessState.mcpSurface.ModelPolicy)
+	}
+	return mcpparity.ValidateModelIdentifier(harnessState.mcpSurface.Harness, harnessState.mcpSurface.DefaultModel)
+}
+
+func mcpCreateSessionSurfaceShouldBeDeprecatedCompatibility(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.mcpSurface.Deprecated {
+		return fmt.Errorf("MCP surface for %q is not marked deprecated compatibility", harnessState.mcpSurface.Harness)
+	}
+	return nil
+}
+
+func agmValidatesMCPModelIdentifier(ctx context.Context, model string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	harnessState.mcpModelAccepted = mcpparity.ValidateModelIdentifier(harnessState.configuredHarness, model) == nil
+	return nil
+}
+
+func mcpModelIdentifierShouldBeAccepted(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.mcpModelAccepted {
+		return fmt.Errorf("MCP model identifier was rejected")
+	}
+	return nil
+}
+
+func agmValidatesMCPOperationDiscoveryParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.mcpLifecycleOpsExposed = mcpparity.ValidateLifecycleOperations() == nil
+	return nil
+}
+
+func mcpOperationRegistryShouldExposeLifecycleMutations(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.mcpLifecycleOpsExposed {
+		return fmt.Errorf("MCP operation registry does not expose lifecycle mutations")
 	}
 	return nil
 }

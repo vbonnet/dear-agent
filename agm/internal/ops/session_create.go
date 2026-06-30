@@ -25,7 +25,9 @@ type CreateSessionRequest struct {
 	// derived from the cwd directory name.
 	Title string `json:"title,omitempty"`
 
-	// Model is the model to use (e.g. "sonnet", "opus"). Defaults to "sonnet".
+	// Model is the model to use (e.g. "sonnet", "opus"). Defaults to the
+	// selected harness's default model, or "sonnet" when the harness requires
+	// interactive model selection.
 	Model string `json:"model,omitempty"`
 
 	// Harness is the agent harness (default: "claude-code").
@@ -62,11 +64,6 @@ func isSafeNameRune(r rune) bool {
 	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_'
 }
 
-// isValidModelChar returns true for characters allowed in model identifiers.
-func isValidModelChar(r rune) bool {
-	return isSafeNameRune(r) || r == '.'
-}
-
 // resolveSessionName derives a safe session name from the cwd base, or validates user-provided title.
 func resolveSessionName(title, cwd string) (string, error) {
 	if title != "" {
@@ -87,6 +84,17 @@ func resolveSessionName(title, cwd string) (string, error) {
 		}
 	}
 	return "mcp-" + string(safe), nil
+}
+
+func defaultModelForMCPSession(harness string) string {
+	if model, ok := agent.DefaultModelForHarness(harness); ok {
+		return model
+	}
+	return "sonnet"
+}
+
+func supportedMCPHarnessesMessage() string {
+	return strings.Join(agent.KnownHarnesses(), ", ")
 }
 
 // validateCreateRequest validates the request and returns resolved defaults.
@@ -115,19 +123,15 @@ func validateCreateRequest(ctx *OpContext, req *CreateSessionRequest) (*createSe
 	if p.harness == "" {
 		p.harness = "claude-code"
 	}
-	switch p.harness {
-	case "claude-code", "gemini-cli", "codex-cli", "agy":
-	default:
-		return nil, ErrInvalidInput("harness", fmt.Sprintf("Unsupported harness: %s. Supported: claude-code, gemini-cli, codex-cli, agy", p.harness))
+	if err := agent.ValidateHarnessName(p.harness); err != nil {
+		return nil, ErrInvalidInput("harness", fmt.Sprintf("Unsupported harness: %s. Supported: %s", p.harness, supportedMCPHarnessesMessage()))
 	}
 
 	if p.model == "" {
-		p.model = "sonnet"
+		p.model = defaultModelForMCPSession(p.harness)
 	}
-	for _, r := range p.model {
-		if !isValidModelChar(r) {
-			return nil, ErrInvalidInput("model", "Model contains invalid characters (only alphanumeric, hyphens, underscores, and dots are allowed).")
-		}
+	if err := agent.ValidateModel(p.harness, p.model); err != nil {
+		return nil, ErrInvalidInput("model", err.Error())
 	}
 
 	name, err := resolveSessionName(req.Title, req.Cwd)
@@ -256,6 +260,8 @@ func buildHarnessCommand(harness, model, sessionName, workDir string, persistent
 	case "agy":
 		return fmt.Sprintf("cd '%s' && agy --add-dir '%s'%s",
 			shellQuote(workDir), shellQuote(workDir), exitSuffix)
+	case "opencode-cli":
+		return fmt.Sprintf("cd '%s' && opencode attach%s", shellQuote(workDir), exitSuffix)
 	default:
 		return fmt.Sprintf("echo 'Unknown harness: %s' && exit 1", shellQuote(harness))
 	}

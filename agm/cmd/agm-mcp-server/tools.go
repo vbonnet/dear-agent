@@ -36,7 +36,7 @@ func injectTraceContext(ctx context.Context) map[string]interface{} {
 type ListSessionsInput struct {
 	Filters struct {
 		Status    string `json:"status,omitempty" jsonschema:"Filter by status: active (default), archived, or all"`
-		AgentType string `json:"agent_type,omitempty" jsonschema:"Filter by agent type: claude-code, gemini-cli, or all"`
+		AgentType string `json:"agent_type,omitempty" jsonschema:"Filter by harness: claude-code, codex-cli, agy, opencode-cli, gemini-cli, or all"`
 		Limit     int    `json:"limit,omitempty" jsonschema:"Maximum sessions to return (1-1000, default 100)"`
 	} `json:"filters"`
 	Fields []string `json:"fields,omitempty" jsonschema:"Field mask: only return these fields (e.g. [id, name, status]). Omit for all fields."`
@@ -198,8 +198,8 @@ type CreateSessionInput struct {
 	Cwd     string `json:"cwd" jsonschema:"Absolute path to the working directory for the new session (required)"`
 	Prompt  string `json:"prompt" jsonschema:"Initial prompt to send to the session after startup (required)"`
 	Title   string `json:"title,omitempty" jsonschema:"Session name. If omitted, derived from cwd directory name."`
-	Model   string `json:"model,omitempty" jsonschema:"Model to use (e.g. sonnet, opus). Defaults to sonnet."`
-	Harness string `json:"harness,omitempty" jsonschema:"Agent harness (claude-code, gemini-cli). Defaults to claude-code."`
+	Model   string `json:"model,omitempty" jsonschema:"Model to use (e.g. sonnet, 5.6, 2.5-flash, z-ai/glm-5.2). Defaults to the selected harness default."`
+	Harness string `json:"harness,omitempty" jsonschema:"Agent harness: claude-code, codex-cli, agy, opencode-cli, or deprecated gemini-cli. Defaults to claude-code."`
 }
 
 type SendMessageInput struct {
@@ -281,7 +281,7 @@ var mcpTracer = otel.Tracer("agm-mcp-server")
 func addCreateSessionTool(server *mcp.Server, _ *Config) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "agm_create_session",
-		Description: "Create a new AGM session (tmux + harness + manifest). Use when you need to spawn a new Claude Code (or other harness) session programmatically.",
+		Description: "Create a new AGM session (tmux + harness + manifest). Use when you need to spawn a new agent harness session programmatically.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input CreateSessionInput) (*mcp.CallToolResult, any, error) {
 		_, span := mcpTracer.Start(ctx, "agm_create_session",
 			trace.WithAttributes(

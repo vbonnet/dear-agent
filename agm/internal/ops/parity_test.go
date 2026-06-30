@@ -2,6 +2,7 @@ package ops
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -61,6 +62,27 @@ func TestSurfaceParity_CoreOpsExist(t *testing.T) {
 	for _, name := range coreOps {
 		if _, ok := opsMap[name]; !ok {
 			t.Errorf("core operation %q missing from ops registry", name)
+		}
+	}
+}
+
+func TestSurfaceParity_MCPMutationOpsRegistered(t *testing.T) {
+	result := ListOps()
+	opsMap := make(map[string]OpInfo)
+	for _, op := range result.Operations {
+		opsMap[op.Name] = op
+	}
+
+	for _, name := range []string{"create_session", "send_message"} {
+		op, ok := opsMap[name]
+		if !ok {
+			t.Fatalf("MCP mutation operation %q missing from ops registry", name)
+		}
+		if op.Category != "mutation" {
+			t.Errorf("operation %q category = %q, want mutation", name, op.Category)
+		}
+		if !strings.Contains(op.Surface, "mcp") {
+			t.Errorf("operation %q surface = %q, want mcp", name, op.Surface)
 		}
 	}
 }
