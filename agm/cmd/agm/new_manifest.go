@@ -76,13 +76,14 @@ func buildSessionManifest(sessionID, sessionName, workDir string, sandboxInfo *m
 			Project: workDir,
 			Tags:    buildSessionTags(roleName, sessionTags),
 		},
-		Tmux:       manifest.Tmux{SessionName: sessionName},
-		Harness:    harnessName,
-		Model:      modelName,
-		ModelTier:  modelTierFlag,
-		Claude:     manifest.Claude{},
-		Sandbox:    sandboxInfo,
-		Disposable: disposable,
+		Tmux:             manifest.Tmux{SessionName: sessionName},
+		Harness:          harnessName,
+		Model:            modelName,
+		ModelTier:        modelTierFlag,
+		Claude:           manifest.Claude{},
+		PermissionPolicy: clonePermissionPolicy(resolvedSessionPermissionPolicy),
+		Sandbox:          sandboxInfo,
+		Disposable:       disposable,
 	}
 	if disposable {
 		m.DisposableTTL = disposableTTL
@@ -98,6 +99,18 @@ func buildSessionManifest(sessionID, sessionName, workDir string, sandboxInfo *m
 		}
 	}
 	return m
+}
+
+func clonePermissionPolicy(policy *manifest.PermissionPolicy) *manifest.PermissionPolicy {
+	if policy == nil {
+		return nil
+	}
+	clone := *policy
+	clone.Sources = append([]string{}, policy.Sources...)
+	clone.Explicit = append([]string{}, policy.Explicit...)
+	clone.Allow = append([]string{}, policy.Allow...)
+	clone.Targets = append([]manifest.PermissionPolicyTarget{}, policy.Targets...)
+	return &clone
 }
 
 // registerSessionInDolt persists m to Dolt. In the test-sandbox env (where Dolt

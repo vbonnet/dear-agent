@@ -9,7 +9,7 @@ import "time"
 // in constants.go.
 type SessionOutcome string
 
-// Manifest represents a Claude session manifest (v2 schema)
+// Manifest represents an AGM session manifest (v2 schema)
 type Manifest struct {
 	SchemaVersion           string            `yaml:"schema_version"`
 	SessionID               string            `yaml:"session_id"`
@@ -34,7 +34,8 @@ type Manifest struct {
 	ModelTier               string            `yaml:"model_tier,omitempty"` // ModelTier is the cost tier assigned by the model router (cheap, mid, expensive)
 	EngramMetadata          *EngramMetadata   `yaml:"engram_metadata,omitempty"`
 	ContextUsage            *ContextUsage     `yaml:"context_usage,omitempty"`              // Context usage tracking for status line
-	PermissionMode          string            `yaml:"permission_mode,omitempty"`            // Claude Code permission mode (default, plan, ask, allow)
+	PermissionPolicy        *PermissionPolicy `yaml:"permission_policy,omitempty"`          // Resolved AGM role/profile permission policy
+	PermissionMode          string            `yaml:"permission_mode,omitempty"`            // AGM permission mode (default, plan, auto)
 	PermissionModeUpdatedAt *time.Time        `yaml:"permission_mode_updated_at,omitempty"` // When mode was last changed
 	PermissionModeSource    string            `yaml:"permission_mode_source,omitempty"`     // How mode was detected (hook, manual, resume)
 	IsTest                  bool              `yaml:"is_test,omitempty"`                    // Whether this is a test session (created with --test)
@@ -50,6 +51,29 @@ type Manifest struct {
 	WorkflowPhaseUpdatedAt  *time.Time        `yaml:"workflow_phase_updated_at,omitempty"`  // When workflow phase was last changed
 	CostTracking            *CostTracking     `yaml:"cost_tracking,omitempty"`              // Token usage and cost tracking
 	Resources               *ResourceManifest `yaml:"resources,omitempty"`                  // Git worktrees and branches created by this session
+}
+
+// PermissionPolicy records the resolved role/profile permission policy used
+// when AGM created a session. Claude Code receives the allowlist natively;
+// other active harnesses use this manifest field as the shared control-plane
+// record plus their harness-specific startup/runtime permission surface.
+type PermissionPolicy struct {
+	Profile       string                   `yaml:"profile,omitempty"`
+	ProfileSource string                   `yaml:"profile_source,omitempty"` // flag or role
+	Sources       []string                 `yaml:"sources,omitempty"`        // defaults, explicit, profile, parent
+	InheritParent bool                     `yaml:"inherit_parent,omitempty"`
+	Explicit      []string                 `yaml:"explicit,omitempty"`
+	Allow         []string                 `yaml:"allow,omitempty"`
+	Targets       []PermissionPolicyTarget `yaml:"targets,omitempty"`
+}
+
+// PermissionPolicyTarget describes how a harness carries the resolved policy.
+type PermissionPolicyTarget struct {
+	Harness           string `yaml:"harness"`
+	PolicySurface     string `yaml:"policy_surface"`
+	StartupSurface    string `yaml:"startup_surface"`
+	RuntimeSurface    string `yaml:"runtime_surface"`
+	NativeEnforcement string `yaml:"native_enforcement"`
 }
 
 // IsExpired returns true if the session is disposable and its TTL has elapsed.

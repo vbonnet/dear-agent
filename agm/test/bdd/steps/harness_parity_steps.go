@@ -10,6 +10,8 @@ import (
 	"github.com/cucumber/godog"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
+	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
 )
 
@@ -39,6 +41,9 @@ type harnessParityState struct {
 	modelFamilyDefaulted       bool
 	modelChangeCommand         string
 	modelChangeResolvedModel   string
+	permissionProfile          string
+	permissionSurfaces         []permissionparity.Surface
+	permissionAllowList        []string
 }
 
 type harnessParityStateKey struct{}
@@ -62,6 +67,14 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM resolves a model change for harness "([^"]*)" with model "([^"]*)"$`, agmResolvesModelChangeForHarness)
 	ctx.Step(`^the model change should use tmux command "([^"]*)"$`, modelChangeShouldUseTmuxCommand)
 	ctx.Step(`^the resolved model should not be empty$`, resolvedModelShouldNotBeEmpty)
+	ctx.Step(`^permission profile "([^"]*)" is configured$`, permissionProfileIsConfigured)
+	ctx.Step(`^AGM validates permission parity support$`, agmValidatesPermissionParitySupport)
+	ctx.Step(`^AGM resolves permission policy parity$`, agmResolvesPermissionPolicyParity)
+	ctx.Step(`^harness "([^"]*)" should have a permission policy target$`, harnessShouldHavePermissionPolicyTarget)
+	ctx.Step(`^harness "([^"]*)" should have a startup permission surface$`, harnessShouldHaveStartupPermissionSurface)
+	ctx.Step(`^every active harness should have a permission policy target$`, everyActiveHarnessShouldHavePermissionPolicyTarget)
+	ctx.Step(`^the resolved permission policy should include default permissions$`, resolvedPermissionPolicyShouldIncludeDefaultPermissions)
+	ctx.Step(`^the resolved permission policy should include profile permissions$`, resolvedPermissionPolicyShouldIncludeProfilePermissions)
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
@@ -238,6 +251,130 @@ func resolvedModelShouldNotBeEmpty(ctx context.Context) error {
 		return fmt.Errorf("resolved model for harness %q is empty", harnessState.configuredHarness)
 	}
 	return nil
+}
+
+func permissionProfileIsConfigured(ctx context.Context, profile string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !rbac.ValidRole(profile) {
+		return fmt.Errorf("permission profile %q is not valid", profile)
+	}
+	harnessState.permissionProfile = profile
+	return nil
+}
+
+func agmValidatesPermissionParitySupport(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := permissionparity.ValidateActiveHarnessSurfaces(); err != nil {
+		return err
+	}
+	harnessState.permissionSurfaces = permissionparity.ActiveHarnessSurfaces()
+	return nil
+}
+
+func agmResolvesPermissionPolicyParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	allowList, err := rbac.ResolvePermissions(rbac.ResolveOptions{ProfileName: harnessState.permissionProfile})
+	if err != nil {
+		return err
+	}
+	harnessState.permissionAllowList = allowList
+	harnessState.permissionSurfaces = permissionparity.ActiveHarnessSurfaces()
+	return nil
+}
+
+func harnessShouldHavePermissionPolicyTarget(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	surface, ok := findPermissionSurface(harnessState.permissionSurfaces, harness)
+	if !ok {
+		return fmt.Errorf("harness %q has no permission policy target", harness)
+	}
+	if surface.PolicySurface == "" {
+		return fmt.Errorf("harness %q has empty policy surface", harness)
+	}
+	return nil
+}
+
+func harnessShouldHaveStartupPermissionSurface(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	surface, ok := findPermissionSurface(harnessState.permissionSurfaces, harness)
+	if !ok {
+		return fmt.Errorf("harness %q has no permission policy target", harness)
+	}
+	if surface.StartupSurface == "" {
+		return fmt.Errorf("harness %q has empty startup permission surface", harness)
+	}
+	return nil
+}
+
+func everyActiveHarnessShouldHavePermissionPolicyTarget(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, harness := range agent.ActiveHarnesses() {
+		if _, ok := findPermissionSurface(harnessState.permissionSurfaces, harness); !ok {
+			return fmt.Errorf("active harness %q has no permission policy target", harness)
+		}
+	}
+	return nil
+}
+
+func resolvedPermissionPolicyShouldIncludeDefaultPermissions(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, permission := range rbac.DefaultPermissions {
+		if !slices.Contains(harnessState.permissionAllowList, permission) {
+			return fmt.Errorf("resolved policy missing default permission %q", permission)
+		}
+	}
+	return nil
+}
+
+func resolvedPermissionPolicyShouldIncludeProfilePermissions(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	profile, err := rbac.LookupProfile(harnessState.permissionProfile)
+	if err != nil {
+		return err
+	}
+	for _, permission := range profile.AllowedTools {
+		if !slices.Contains(harnessState.permissionAllowList, permission) {
+			return fmt.Errorf("resolved policy missing profile permission %q", permission)
+		}
+	}
+	return nil
+}
+
+func findPermissionSurface(surfaces []permissionparity.Surface, harness string) (permissionparity.Surface, bool) {
+	normalized := agent.NormalizeHarnessName(harness)
+	for _, surface := range surfaces {
+		if surface.Harness == normalized {
+			return surface, true
+		}
+	}
+	return permissionparity.Surface{}, false
 }
 
 func getHarnessParityState(ctx context.Context) (*harnessParityState, error) {
