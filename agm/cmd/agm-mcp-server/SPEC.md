@@ -4,39 +4,39 @@
 
 ## Overview
 
-The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI Guided Manager) session metadata to external MCP clients like Claude Code. It enables Claude-based AI assistants to query, search, and retrieve AGM session information without accessing conversation content.
+The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI Guided Manager) session metadata to external MCP clients such as Claude Code, Codex, AGY, and OpenCode. It enables MCP-capable AI assistants to query, search, retrieve, and drive AGM session lifecycle operations without accessing conversation content.
 
 ## Objectives
 
-1. **Discoverability**: Enable Claude Code to discover and query AGM sessions
+1. **Discoverability**: Enable MCP clients to discover and query AGM sessions
 2. **Performance**: Achieve p99 <100ms response times for 1000+ sessions
 3. **Privacy**: Expose only metadata, never conversation content
-4. **Integration**: Seamless integration with Claude Code via MCP protocol
+4. **Integration**: Seamless integration with supported harness clients via MCP protocol
 
 ## Use Cases
 
 ### Primary Use Cases
 
 1. **Session Discovery**
-   - User asks Claude: "What AGM sessions do I have?"
-   - Claude queries MCP server to list all sessions
+   - User asks an MCP client: "What AGM sessions do I have?"
+   - The client queries MCP server to list all sessions
    - User sees session names, IDs, and creation dates
 
 2. **Session Search**
-   - User asks Claude: "Find my session about the authentication refactor"
-   - Claude searches sessions by name
+   - User asks an MCP client: "Find my session about the authentication refactor"
+   - The client searches sessions by name
    - User gets ranked results with relevance scores
 
 3. **Session Context Retrieval**
-   - User asks Claude: "What's the status of session XYZ?"
-   - Claude retrieves detailed metadata for specific session
+   - User asks an MCP client: "What's the status of session XYZ?"
+   - The client retrieves detailed metadata for specific session
    - User sees full session details (status, timestamps, tmux info)
 
 ### Secondary Use Cases
 
 1. **Session Filtering**
    - Filter by status (active/archived)
-   - Filter by agent type (currently only Claude)
+   - Filter by harness
    - Limit result counts for large session lists
 
 2. **Performance Monitoring**
@@ -55,7 +55,7 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 {
   "filters": {
     "status": "active|archived|all",
-    "agent_type": "claude|all",
+    "agent_type": "claude-code|codex-cli|agy|opencode-cli|gemini-cli|all",
     "limit": 100
   }
 }
@@ -71,7 +71,7 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
       "created_at": "RFC3339",
       "updated_at": "RFC3339",
       "status": "active|archived",
-      "agent_type": "claude",
+      "harness": "claude-code",
       "tmux_session": "string"
     }
   ],
@@ -116,7 +116,7 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
       "created_at": "RFC3339",
       "updated_at": "RFC3339",
       "status": "active|archived",
-      "agent_type": "claude",
+      "harness": "claude-code",
       "tmux_session": "string",
       "relevance_score": 0.95
     }
@@ -157,7 +157,7 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
     "created_at": "RFC3339",
     "updated_at": "RFC3339",
     "status": "active|archived",
-    "agent_type": "claude",
+    "harness": "claude-code",
     "tmux_session": "string"
   }
 }
@@ -179,7 +179,7 @@ type MCPSessionMetadata struct {
     CreatedAt      string  `json:"created_at"`       // RFC3339 timestamp
     UpdatedAt      string  `json:"updated_at"`       // RFC3339 timestamp
     Status         string  `json:"status"`           // active|archived
-    AgentType      string  `json:"agent_type"`       // claude (hardcoded V1)
+    Harness        string  `json:"harness"`          // claude-code, codex-cli, agy, opencode-cli, gemini-cli
     TmuxSession    string  `json:"tmux_session"`     // Tmux session name
     RelevanceScore float64 `json:"relevance_score"`  // Optional (search only)
 }
@@ -194,7 +194,7 @@ type MCPSessionMetadata struct {
 | `CreatedAt` | `created_at` | Format as RFC3339 |
 | `UpdatedAt` | `updated_at` | Format as RFC3339 |
 | `Lifecycle` | `status` | Map: "" → "active", "archived" → "archived" |
-| N/A | `agent_type` | Hardcode "claude" |
+| `Harness` | `harness` | Normalize to canonical harness name |
 | `Tmux.SessionName` | `tmux_session` | Direct copy |
 
 ## Configuration
@@ -296,7 +296,7 @@ mcp_server:
 
 ### Message Flow
 
-1. Claude Code launches `agm-mcp-server` binary
+1. An MCP client launches `agm-mcp-server` binary
 2. Server writes header to stderr
 3. Server initializes MCP server with stdio transport
 4. Server registers 3 tools
@@ -360,13 +360,13 @@ var (
 
 ## Future Enhancements (V2+)
 
-1. **Auto-Registration**: Automatically register with Claude Code on install
-2. **Session Modification**: Create, update, archive sessions via MCP
+1. **Auto-Registration**: Automatically register with supported MCP clients on install
+2. **Session Modification**: Update sessions via MCP
 3. **Real-Time Updates**: WebSocket transport for live session updates
 4. **Advanced Search**: Full-text search in session metadata
 5. **Session Grouping**: Organize sessions by project/workspace
 6. **Performance Metrics**: Expose query performance metrics via MCP
-7. **Multi-Agent Support**: Support non-Claude agents (GPT, Gemini)
+7. **Expanded Harness Support**: Add parity coverage for future harnesses
 
 ## Testing Requirements
 
@@ -382,7 +382,7 @@ var (
 ### Integration Tests
 
 - MCP protocol compliance
-- Claude Code integration
+- Supported MCP client integration
 - End-to-end tool invocation
 - Error handling
 

@@ -23,9 +23,10 @@ func ListOps() *ListOpsResult {
 		{Name: "search_sessions", Description: "Search sessions by name with relevance scoring. Use when finding a specific session.", Category: "read", Surface: "cli,mcp,skill"},
 		{Name: "get_status", Description: "Get live status of all sessions with summary counts. Use for dashboard views.", Category: "read", Surface: "cli,mcp,skill"},
 		{Name: "list_workspaces", Description: "List configured workspaces. Use when checking workspace configuration.", Category: "read", Surface: "cli,mcp"},
+		{Name: "create_session", Description: "Create a tmux-backed AGM session for a supported harness. Use when spawning work programmatically.", Category: "mutation", Surface: "cli,mcp"},
 		{Name: "archive_session", Description: "Archive a session. Use when a session is no longer needed.", Category: "mutation", Surface: "cli,mcp,skill"},
 		{Name: "kill_session", Description: "Terminate a running session. Use when a session needs to be stopped.", Category: "mutation", Surface: "cli,mcp,skill"},
-		{Name: "send_message", Description: "Send a message to a session. Use for inter-session communication.", Category: "mutation", Surface: "cli,skill"},
+		{Name: "send_message", Description: "Send a message to a session. Use for inter-session communication.", Category: "mutation", Surface: "cli,mcp,skill"},
 		{Name: "list_ops", Description: "List all available operations. Use for schema discovery.", Category: "meta", Surface: "mcp"},
 	}
 	return &ListOpsResult{
