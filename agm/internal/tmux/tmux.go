@@ -764,14 +764,22 @@ func IsClaudeRunning(sessionName string) (bool, error) {
 
 // isClaudeProcess checks if a pane command name indicates Claude Code.
 // Claude Code shows up as its semver version (e.g., "2.1.50") in tmux,
-// or as "claude" if invoked directly.
+// or as "claude" if invoked directly. macOS also reports the process with
+// underscores instead of dots (e.g., "2_1_195") due to how the OS names it.
+// When tmux formats a tab-separated line and pane_start_command is empty, it
+// appends a trailing "_" as a null placeholder (e.g., "2_1_195_"), so we also
+// strip a single trailing underscore before checking.
 func isClaudeProcess(command string) bool {
 	if command == "claude" {
 		return true
 	}
-	// Claude Code reports as semver (e.g., "2.1.50", "3.0.0")
-	// Check for N.N.N pattern where N is digits
-	parts := strings.Split(command, ".")
+	// Strip a single trailing underscore that tmux appends as a null placeholder
+	// for an empty pane_start_command field in tab-separated format output.
+	command = strings.TrimSuffix(command, "_")
+	// Normalise: macOS reports "2_1_195" but the canonical form is "2.1.195"
+	normalised := strings.ReplaceAll(command, "_", ".")
+	// Claude Code reports as semver (e.g., "2.1.50", "3.0.0") — N.N.N all digits
+	parts := strings.Split(normalised, ".")
 	if len(parts) == 3 {
 		allDigits := true
 		for _, p := range parts {

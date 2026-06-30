@@ -430,6 +430,10 @@ func TestIsClaudeProcess(t *testing.T) {
 	}{
 		{"claude", true},       // Direct claude binary
 		{"2.1.50", true},       // Claude Code version (current)
+		{"2_1_195", true},      // macOS reports underscores instead of dots
+		{"2_1_195_", true},     // tmux tab-format appends trailing _ for empty pane_start_command
+		{"3_0_0", true},        // macOS underscore form, future version
+		{"3_0_0_", true},       // future version with trailing _ from tmux tab-format
 		{"3.0.0", true},        // Future version
 		{"0.1.0", true},        // Semver pattern
 		{"10.20.30", true},     // Multi-digit version
