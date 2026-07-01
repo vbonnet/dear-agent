@@ -143,6 +143,62 @@ func TestValidateSurfaceAcceptsCompletedAuditMarker(t *testing.T) {
 	}
 }
 
+func TestValidateSurfaceRejectsInvalidEARSRequirement(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "internal/example/SPEC.md", strings.Join([]string{
+		"# SPEC",
+		"",
+		"<!-- Last audited at: 2026-07-01 -->",
+		"",
+		"## EARS Requirements",
+		"",
+		"**EX-01** Eventually the system shall maybe work.",
+		"**EX-02** Somehow the system shall become correct.",
+	}, "\n"))
+	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "Feature: Example parity\n")
+
+	findings := validateSurface(root, Surface{
+		Name:        "example parity",
+		PackagePath: "internal/example",
+		SpecPath:    "internal/example/SPEC.md",
+		FeaturePath: "agm/test/bdd/features/example_parity.feature",
+	})
+	if len(findings) != 3 {
+		t.Fatalf("expected all invalid EARS findings, got %d: %v", len(findings), findings)
+	}
+	want := []string{
+		"SPEC.md has invalid EARS syntax: line 7: requirement does not match any EARS pattern",
+		"SPEC.md has invalid EARS syntax: line 8: requirement does not match any EARS pattern",
+		"SPEC.md has invalid EARS syntax: no valid EARS requirements found",
+	}
+	for i, message := range want {
+		if findings[i].Message != message {
+			t.Fatalf("finding[%d] message = %q, want %q", i, findings[i].Message, message)
+		}
+	}
+}
+
+func TestValidateSurfaceSkipsEARSLintWithoutEARSSection(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: 2026-07-01 -->\n\n**EX-01** Eventually the system shall maybe work.\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "Feature: Example parity\n")
+
+	findings := validateSurface(root, Surface{
+		Name:        "example parity",
+		PackagePath: "internal/example",
+		SpecPath:    "internal/example/SPEC.md",
+		FeaturePath: "agm/test/bdd/features/example_parity.feature",
+	})
+	if len(findings) != 1 {
+		t.Fatalf("expected one missing EARS section finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "SPEC.md does not declare EARS requirements" {
+		t.Fatalf("finding message = %q", findings[0].Message)
+	}
+}
+
 func TestValidateGoPackageSpecsForFilesRequiresSpecForProductionGo(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
