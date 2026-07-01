@@ -36,3 +36,7 @@ harness can represent.
 **APP-09** When AGM starts OpenCode, the system shall preserve the resolved policy in the manifest and record OpenCode's permission surface as server-policy plus manifest coordination.
 
 **APP-10** When an active harness is added, the system shall require a permission parity surface with non-empty policy, startup, runtime, and native-enforcement descriptions.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/permission_parity.feature`

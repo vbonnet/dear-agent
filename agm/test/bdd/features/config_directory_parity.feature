@@ -1,3 +1,4 @@
+# SPEC: agm/internal/configdirparity/SPEC.md
 Feature: Harness configuration directory parity
   AGM should keep repo-local dot-directory configuration surfaces for every
   active harness, with Gemini retained as deprecated compatibility.

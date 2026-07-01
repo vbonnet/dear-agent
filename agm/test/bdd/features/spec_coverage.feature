@@ -11,6 +11,8 @@ Feature: SPEC and BDD coverage
     And every parity surface should have an executable BDD feature
     And every parity SPEC should declare EARS requirements
     And every parity SPEC should pass strict EARS lint
+    And every parity SPEC should reference its executable BDD feature
+    And every parity BDD feature should reference its governing SPEC.md
 
   Scenario: Parity-critical specs have completed audit markers
     Given AGM parity coverage requirements

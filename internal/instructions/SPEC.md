@@ -32,3 +32,7 @@ shared rules.
 **IEP-08** When a harness-specific entrypoint is import-only, the system shall not duplicate shared `AGENTS.md` policy sections in that file.
 
 **IEP-09** When instruction entrypoints are changed, the system shall require tests that enforce the import-first contract.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/instruction_parity.feature`
