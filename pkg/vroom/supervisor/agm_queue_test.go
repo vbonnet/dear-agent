@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -56,7 +57,7 @@ func TestAGMQueue_Pending(t *testing.T) {
 }
 
 func TestAGMQueue_Dispatch(t *testing.T) {
-	t.Run("calls agm session new and removes from pending", func(t *testing.T) {
+	t.Run("calls agm session new and removes from pending after success", func(t *testing.T) {
 		var capturedArgs []string
 		q := &AGMQueue{
 			run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -96,16 +97,29 @@ func TestAGMQueue_Dispatch(t *testing.T) {
 		}
 	})
 
-	t.Run("agm failure propagated", func(t *testing.T) {
+	t.Run("agm failure propagated and task remains pending", func(t *testing.T) {
 		q := &AGMQueue{
 			run: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
-				return nil, errors.New("agm: session limit reached")
+				return []byte("capacity exhausted"), errors.New("agm: session limit reached")
 			},
 		}
 		_ = q.Enqueue(Task{ID: "t1"})
 		err := q.Dispatch(context.Background(), "t1", "coder")
 		if err == nil {
 			t.Fatal("expected error from agm, got nil")
+		}
+		if !strings.Contains(err.Error(), "worker-t1") {
+			t.Fatalf("error should include worker session name, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "capacity exhausted") {
+			t.Fatalf("error should include agm output, got: %v", err)
+		}
+		tasks, pendingErr := q.Pending(context.Background())
+		if pendingErr != nil {
+			t.Fatalf("pending failed: %v", pendingErr)
+		}
+		if len(tasks) != 1 || tasks[0].ID != "t1" {
+			t.Fatalf("failed dispatch must keep task pending, got: %v", tasks)
 		}
 	})
 
@@ -126,6 +140,50 @@ func TestAGMQueue_Dispatch(t *testing.T) {
 		}
 		if !strings.Contains(joined, defaultWorkerRole) {
 			t.Errorf("default role not in args: %v", capturedArgs)
+		}
+	})
+
+	t.Run("rejects concurrent dispatch of same pending task", func(t *testing.T) {
+		started := make(chan struct{})
+		release := make(chan struct{})
+		var runCalls atomic.Int32
+		q := &AGMQueue{
+			run: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+				runCalls.Add(1)
+				close(started)
+				<-release
+				return []byte("ok"), nil
+			},
+		}
+		_ = q.Enqueue(Task{ID: "t-race"})
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- q.Dispatch(context.Background(), "t-race", "coder")
+		}()
+		<-started
+
+		err := q.Dispatch(context.Background(), "t-race", "coder")
+		if err == nil {
+			t.Fatal("expected concurrent dispatch error, got nil")
+		}
+		if !strings.Contains(err.Error(), "already dispatching") {
+			t.Fatalf("expected already-dispatching error, got: %v", err)
+		}
+
+		close(release)
+		if err := <-errCh; err != nil {
+			t.Fatalf("first dispatch failed: %v", err)
+		}
+		if got := runCalls.Load(); got != 1 {
+			t.Fatalf("run calls = %d, want 1", got)
+		}
+		tasks, pendingErr := q.Pending(context.Background())
+		if pendingErr != nil {
+			t.Fatalf("pending failed: %v", pendingErr)
+		}
+		if len(tasks) != 0 {
+			t.Fatalf("successful first dispatch should remove pending task, got: %v", tasks)
 		}
 	})
 }
