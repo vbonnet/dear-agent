@@ -447,7 +447,7 @@ func TestCreateSessionInputSchemaDocumentsHarnessParity(t *testing.T) {
 		t.Fatal("CreateSessionInput.Model field missing")
 	}
 	modelTag := modelField.Tag.Get("jsonschema")
-	for _, want := range []string{"5.6", "2.5-flash", "z-ai/glm-5.2"} {
+	for _, want := range []string{"5.5", "5.6", "2.5-flash", "z-ai/glm-5.2"} {
 		if !strings.Contains(modelTag, want) {
 			t.Errorf("Model jsonschema tag %q missing %q", modelTag, want)
 		}

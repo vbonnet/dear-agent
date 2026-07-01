@@ -21,7 +21,7 @@ Anthropic API keys, or Claude-specific environment.
 ## Create
 
 ```bash
-agm session new --harness=codex-cli --model=5.4 my-codex-session
+agm session new --harness=codex-cli --model=5.5 my-codex-session
 ```
 
 AGM launches Codex with:
@@ -66,6 +66,8 @@ Native Codex aliases:
 
 | Alias | Full model |
 | --- | --- |
+| `5.5` | `gpt-5.5` |
+| `5.6` | `gpt-5.6` |
 | `5.4` | `gpt-5.4` |
 | `5.4-mini` | `gpt-5.4-mini` |
 | `5.3-codex` | `gpt-5.3-codex` |
