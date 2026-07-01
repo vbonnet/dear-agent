@@ -210,7 +210,6 @@ golangci-lint run ./...
 | `devlog` | `tools/devlog/` | Development log management |
 | `dod-enforcer` | `tools/dod-enforcer/` | Definition-of-done enforcement |
 | `schema-registry` | `tools/schema-registry/` | Schema validation registry |
-| `spec-review` | `tools/spec-review/` | Specification review tooling |
 
 ## Design Philosophy
 

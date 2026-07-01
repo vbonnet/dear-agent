@@ -1,5 +1,5 @@
 <!-- Last audited at: 2026-06-15 -->
-# ADR-031: Wayfinder Enforcement at the AGM Session Boundary
+# ADR-035: Wayfinder Enforcement at the AGM Session Boundary
 
 **Status:** Accepted  
 **Date:** 2026-06-15  

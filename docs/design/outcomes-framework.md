@@ -93,8 +93,7 @@ Decomposes into three checks of increasing depth:
    *Evaluator:* `audit`, check `spec.staleness` (proposed; backlog).
 3. **Conformance** — identifiers / file paths referenced in `SPEC.md`
    resolve in the codebase. *Evaluator:* `audit`, check
-   `spec.conformance` (proposed; backlog; potentially LLM-assisted via
-   `tools/spec-review` for prose claims).
+   `spec.conformance` (proposed; backlog).
 
 Tier 1 is mechanical and cheap; tier 3 is expensive enough to belong
 in the monthly cadence and possibly behind an LLM. The framework's
@@ -167,9 +166,6 @@ template for the staleness / conformance checks that follow.
 
 ## Out-of-scope explicitly
 
-- Replacing `tools/spec-review` (LLM-as-judge for documentation
-  *quality*). That tool answers "is the SPEC well-written?"; this
-  framework answers "is the SPEC honored?" Different question.
 - Generating SPECs. dear-agent has `create-spec` skills already; the
   Outcomes framework is verification, not authoring.
 

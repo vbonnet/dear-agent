@@ -5,7 +5,7 @@
 // temporal: they capture a moment of thinking, are not maintained as the code
 // evolves, and belong in the knowledge base (~/src/engram-research,
 // conventionally wf/<project>/) — never in this code repo. The Wayfinder TOOL
-// SOURCE (wayfinder/, *.go, validator testdata, docs/adr/ADR-031) is living
+// SOURCE (wayfinder/, *.go, validator testdata, docs/adr/ADR-035) is living
 // code/docs and is deliberately not matched.
 //
 // The forbidden globs are the SINGLE source of truth in .dear-agent.yml >
