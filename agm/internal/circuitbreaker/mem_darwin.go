@@ -3,11 +3,20 @@
 package circuitbreaker
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
+
+// memoryPressureTimeout bounds the memory_pressure -Q subprocess call so a
+// hung or slow probe fails the gate instead of hanging session spawns.
+const memoryPressureTimeout = 5 * time.Second
 
 // MemoryPressureMemReader reads free memory percentage on macOS using
 // memory_pressure -Q, the same tool that backs Activity Monitor's memory
@@ -29,7 +38,15 @@ type MemoryPressureMemReader struct{}
 // Activity Monitor would see, instead of reimplementing an approximation of
 // Apple's internal accounting.
 func (MemoryPressureMemReader) FreeMemPct() (float64, error) {
-	out, err := exec.Command("memory_pressure", "-Q").Output()
+	bgCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(bgCtx, memoryPressureTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "memory_pressure", "-Q").Output()
+	if ctx.Err() != nil {
+		return 0, fmt.Errorf("memory_pressure -Q: %w", ctx.Err())
+	}
 	if err != nil {
 		return 0, fmt.Errorf("memory_pressure -Q: %w", err)
 	}
