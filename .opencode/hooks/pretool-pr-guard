@@ -35,6 +35,11 @@ verb="$(printf '%s' "$cmd" | tr ';|&\n' '\n\n\n\n' | awk '
         if ($i=="pr") { sub_seen=1; continue }
         break
       }
+      if ($i ~ /^-/) {
+        if ($i=="-R" || $i=="--repo" || $i=="--hostname") { i++; continue }
+        if ($i ~ /^(-R|--repo|--hostname)=/) continue
+        continue
+      }
       if ($i ~ /^(create|close|reopen)$/) { print $i; exit }
       break
     }

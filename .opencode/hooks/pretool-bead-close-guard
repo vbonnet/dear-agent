@@ -51,13 +51,36 @@ case "$stripped" in
   *) exit 0 ;;
 esac
 
+# Extract the actual bd subcommand. Only the first non-flag positional after
+# bd is a subcommand; words like "close" in comments or titles must not trip
+# the Definition-of-Done gate.
+subcmd="$(printf '%s' "$stripped" | xargs -n 1 2>/dev/null | awk '
+  BEGIN {
+    split("--db -d --repo --actor", gf, " ")
+    for (i in gf) globalflag[gf[i]] = 1
+    bd_seen = 0; skipnext = 0
+  }
+  {
+    tok = $0
+    if (!bd_seen) {
+      if (tok ~ /\/?bd$/) bd_seen = 1
+      next
+    }
+    if (skipnext) { skipnext = 0; next }
+    if (substr(tok, 1, 1) == "-") {
+      if (index(tok, "=") == 0 && (tok in globalflag)) skipnext = 1
+      next
+    }
+    print tok; exit
+  }')"
+
 # Is this a close-intent command? Either a `close` subcommand, or an
 # `update` carrying `--status closed` / `--status=closed`.
 is_close=0
-if printf '%s' "$stripped" | grep -qE '\bclose\b'; then
+if [ "$subcmd" = "close" ]; then
   is_close=1
-elif printf '%s' "$stripped" | grep -qE '\bupdate\b' \
-  && printf '%s' "$stripped" | grep -qE '(^|[[:space:]])--status([[:space:]]+|=)closed\b'; then
+elif [ "$subcmd" = "update" ] \
+  && printf '%s' "$stripped" | grep -qE '(^|[[:space:]])--status([[:space:]]+|=)closed([[:space:]]|$)'; then
   is_close=1
 fi
 [ "$is_close" -eq 1 ] || exit 0

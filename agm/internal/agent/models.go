@@ -356,7 +356,7 @@ func ModelFamiliesForHarness(harnessName string) []string {
 	seen := make(map[string]bool)
 	var families []string
 	for _, model := range GetModelsForHarness(harnessName) {
-		for _, candidate := range []string{model.Alias, model.FullName, model.Description} {
+		for _, candidate := range []string{model.Alias, model.FullName} {
 			family := ModelFamilyForName(candidate)
 			if family == "" || seen[family] {
 				continue
@@ -375,8 +375,7 @@ func DefaultModelForFamily(family string) (ModelSpec, bool) {
 	for _, harness := range append(ActiveHarnesses(), "openrouter") {
 		for _, model := range GetModelsForHarness(harness) {
 			if ModelFamilyForName(model.FullName) == family ||
-				ModelFamilyForName(model.Alias) == family ||
-				ModelFamilyForName(model.Description) == family {
+				ModelFamilyForName(model.Alias) == family {
 				return model, true
 			}
 		}

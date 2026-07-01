@@ -49,7 +49,9 @@ case "$tool" in
         c=""; nxt=""
         for (i=1; i<=NF; i++) {
           if (c=="" && $i ~ /=/) continue
-          if (c=="") { c=base($i); continue }
+          b=base($i)
+          if (c=="" && b ~ /^(gtimeout|timeout|env|command|sudo|nohup|time|nice|caffeinate|stdbuf|xargs)$/) continue
+          if (c=="") { c=b; continue }
           nxt=$i; break
         }
         if (c ~ /^(claude|claude-code|cowork)$/) {

@@ -2,7 +2,9 @@ package hookparity_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -113,6 +115,57 @@ func TestHookManifestLocalScriptsExistAndAreExecutable(t *testing.T) {
 	}
 }
 
+func TestOpenCodeHookParserRegressions(t *testing.T) {
+	root := repoRoot(t)
+	tests := []struct {
+		name       string
+		script     string
+		command    string
+		wantCode   int
+		wantOutput string
+	}{
+		{
+			name:     "bead close guard ignores close in comments",
+			script:   ".opencode/hooks/pretool-bead-close-guard",
+			command:  `bd comment ce-rpet --text "please close this after merge"`,
+			wantCode: 0,
+		},
+		{
+			name:       "bypass guard blocks short force push",
+			script:     ".opencode/hooks/pretool-bypass-guard",
+			command:    "git push -f origin feat/harness-model-parity",
+			wantCode:   2,
+			wantOutput: "git push --force",
+		},
+		{
+			name:       "pr guard catches repo flag before create",
+			script:     ".opencode/hooks/pretool-pr-guard",
+			command:    "gh pr -R vbonnet/dear-agent create --title test --body test",
+			wantCode:   2,
+			wantOutput: "gh pr create",
+		},
+		{
+			name:       "spawn routing skips launcher prefix",
+			script:     ".opencode/hooks/pretool-spawn-routing",
+			command:    "env claude-code --continue",
+			wantCode:   0,
+			wantOutput: "outside AGM/VROOM",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code, output := runHookScript(t, filepath.Join(root, tc.script), tc.command)
+			if code != tc.wantCode {
+				t.Fatalf("exit code = %d, want %d; output: %s", code, tc.wantCode, output)
+			}
+			if tc.wantOutput != "" && !strings.Contains(output, tc.wantOutput) {
+				t.Fatalf("output missing %q: %s", tc.wantOutput, output)
+			}
+		})
+	}
+}
+
 func readHookSettings(t *testing.T, path string) hookSettings {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -127,6 +180,32 @@ func readHookSettings(t *testing.T, path string) hookSettings {
 		t.Fatalf("%s has no hooks", path)
 	}
 	return settings
+}
+
+func runHookScript(t *testing.T, script, command string) (int, string) {
+	t.Helper()
+	input, err := json.Marshal(map[string]any{
+		"tool_name": "Bash",
+		"tool_input": map[string]string{
+			"command": command,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal hook input: %v", err)
+	}
+
+	cmd := exec.Command(script)
+	cmd.Stdin = strings.NewReader(string(input))
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return 0, string(output)
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode(), string(output)
+	}
+	t.Fatalf("run hook script %s: %v; output: %s", script, err, output)
+	return -1, string(output)
 }
 
 func allCommands(settings hookSettings) []string {
