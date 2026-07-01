@@ -33,3 +33,7 @@ the larger repo-wide SPEC backlog is burned down incrementally.
 **SCB-08** When a pull request changes only Go test files or files under test-only directories, the system shall not require a new package `SPEC.md` solely for that test-only change.
 
 **SCB-09** When a parity-critical `SPEC.md` file is registered in the coverage matrix, the system shall require a completed `Last audited at` marker and shall reject the placeholder value `NEEDS-AUDIT`.
+
+**SCB-10** When AGM defines an executable BDD feature file, the system shall require that feature to be listed in `agm/docs/BDD-CATALOG.md`.
+
+**SCB-11** When `agm/docs/BDD-CATALOG.md` lists a BDD feature file, the system shall require that referenced feature file to exist under `agm/test/bdd/features/`.
