@@ -1,6 +1,7 @@
 package speccoverage
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -44,6 +45,53 @@ func TestValidateSurfaceDoesNotReadEmptyPaths(t *testing.T) {
 		if finding.Path != "" {
 			t.Fatalf("empty-path finding should not attempt file read: %v", finding)
 		}
+	}
+}
+
+func TestValidateGoPackageSpecsForFilesRequiresSpecForProductionGo(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "internal", "newfeature"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	findings := ValidateGoPackageSpecsForFiles(root, []string{"internal/newfeature/newfeature.go"})
+	if len(findings) != 1 {
+		t.Fatalf("expected one missing SPEC finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Path != "internal/newfeature/SPEC.md" {
+		t.Fatalf("finding path = %q, want internal/newfeature/SPEC.md", findings[0].Path)
+	}
+}
+
+func TestValidateGoPackageSpecsForFilesAcceptsCoLocatedSpec(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := filepath.Join(root, "internal", "newfeature")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SPEC.md"), []byte("# SPEC\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings := ValidateGoPackageSpecsForFiles(root, []string{"internal/newfeature/newfeature.go"})
+	if len(findings) != 0 {
+		t.Fatalf("expected no findings, got %v", findings)
+	}
+}
+
+func TestValidateGoPackageSpecsForFilesIgnoresTestOnlyChanges(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	findings := ValidateGoPackageSpecsForFiles(root, []string{
+		"internal/newfeature/newfeature_test.go",
+		"agm/test/bdd/main.go",
+		"tests/githooks/hook.go",
+		"internal/newfeature/testdata/fixture.go",
+	})
+	if len(findings) != 0 {
+		t.Fatalf("expected no findings for test-only changes, got %v", findings)
 	}
 }
 

@@ -29,6 +29,8 @@ func RegisterSpecCoverageSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^every parity surface should have an executable BDD feature$`, everyParitySurfaceShouldHaveExecutableBDDFeature)
 	ctx.Step(`^every parity SPEC should declare EARS requirements$`, everyParitySPECShouldDeclareEARSRequirements)
 	ctx.Step(`^every parity BDD feature should be registered in the coverage matrix$`, everyParityBDDFeatureShouldBeRegistered)
+	ctx.Step(`^AGM validates changed Go package SPEC coverage$`, agmValidatesChangedGoPackageSPECCoverage)
+	ctx.Step(`^changed production Go packages should have co-located SPEC.md files$`, changedProductionGoPackagesShouldHaveCoLocatedSPECFiles)
 }
 
 func agmParityCoverageRequirements(ctx context.Context) error {
@@ -65,6 +67,23 @@ func everyParitySPECShouldDeclareEARSRequirements(ctx context.Context) error {
 
 func everyParityBDDFeatureShouldBeRegistered(ctx context.Context) error {
 	return specCoverageShouldHaveNoFindings(ctx, "not registered")
+}
+
+func agmValidatesChangedGoPackageSPECCoverage(ctx context.Context) error {
+	state, err := getSpecCoverageState(ctx)
+	if err != nil {
+		return err
+	}
+	findings, err := speccoverage.ValidateChangedGoPackageSpecs(specCoverageRepoRoot(), "origin/main")
+	if err != nil {
+		return err
+	}
+	state.findings = findings
+	return nil
+}
+
+func changedProductionGoPackagesShouldHaveCoLocatedSPECFiles(ctx context.Context) error {
+	return specCoverageShouldHaveNoFindings(ctx, "co-located SPEC.md")
 }
 
 func specCoverageShouldHaveNoFindings(ctx context.Context, phrase string) error {

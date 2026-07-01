@@ -5,6 +5,7 @@ package speccoverage
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -151,6 +152,82 @@ func UnregisteredParityFeatures(root string) ([]string, error) {
 	}
 	slices.Sort(missing)
 	return missing, nil
+}
+
+// ValidateChangedGoPackageSpecs requires changed production Go package
+// directories to carry a co-located SPEC.md. It is intentionally diff-based so
+// legacy packages can be burned down incrementally without allowing new drift.
+func ValidateChangedGoPackageSpecs(root, baseRef string) ([]Finding, error) {
+	files, err := ChangedGoFiles(root, baseRef)
+	if err != nil {
+		return nil, err
+	}
+	return ValidateGoPackageSpecsForFiles(root, files), nil
+}
+
+// ChangedGoFiles returns changed Go files relative to baseRef...HEAD.
+func ChangedGoFiles(root, baseRef string) ([]string, error) {
+	if baseRef == "" {
+		baseRef = "origin/main"
+	}
+	cmd := exec.Command("git", "-C", root, "diff", "--name-only", "--diff-filter=ACMR", baseRef+"...HEAD", "--", "*.go")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("list changed Go files against %s: %w: %s", baseRef, err, strings.TrimSpace(string(out)))
+	}
+
+	var files []string
+	for line := range strings.SplitSeq(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		files = append(files, filepath.ToSlash(filepath.Clean(line)))
+	}
+	slices.Sort(files)
+	return files, nil
+}
+
+// ValidateGoPackageSpecsForFiles validates an already-known changed-file set.
+func ValidateGoPackageSpecsForFiles(root string, files []string) []Finding {
+	seen := map[string]bool{}
+	var findings []Finding
+	for _, file := range files {
+		file = filepath.ToSlash(filepath.Clean(file))
+		if !requiresPackageSpec(file) {
+			continue
+		}
+		dir := filepath.ToSlash(filepath.Dir(file))
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		specPath := filepath.Join(root, filepath.FromSlash(dir), "SPEC.md")
+		if _, err := os.Stat(specPath); err != nil {
+			findings = append(findings, Finding{
+				Surface: "changed Go package SPEC coverage",
+				Path:    filepath.ToSlash(filepath.Join(dir, "SPEC.md")),
+				Message: fmt.Sprintf("changed production Go package %q does not have a co-located SPEC.md", dir),
+			})
+		}
+	}
+	return findings
+}
+
+func requiresPackageSpec(file string) bool {
+	if !strings.HasSuffix(file, ".go") || strings.HasSuffix(file, "_test.go") {
+		return false
+	}
+	if strings.HasPrefix(file, "agm/test/") || strings.HasPrefix(file, "tests/") {
+		return false
+	}
+	for part := range strings.SplitSeq(file, "/") {
+		switch part {
+		case "testdata", "testutil", "integration_test":
+			return false
+		}
+	}
+	return true
 }
 
 func validateSurface(root string, surface Surface) []Finding {
