@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// TestHooks_AllFour_FireOnRun checks that the four DEAR hooks each fire at
-// least once during a small successful + failing run. The test uses a
+// TestHooks_AllFour_FireOnRun checks that the four workflow lifecycle hooks
+// each fire at least once during a small successful + failing run. The test uses a
 // minimal in-memory runner and tracks fire counts via atomics so the
 // assertions are race-free.
 func TestHooks_AllFour_FireOnRun(t *testing.T) {

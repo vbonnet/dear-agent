@@ -295,7 +295,7 @@ want the knowledge corpus in a separate file.
 |---|---|---|
 | 0 | SQLite + audit_events | done (#38) |
 | 1 | Roles + budget | done (#39) |
-| 2 | DEAR hooks + HITL + audit sinks + MCP + Discord | done (#40) |
+| 2 | Workflow lifecycle hooks + HITL + audit sinks + MCP + Discord | done (#40) |
 | 3 | FetchSource / AddSource (this guide is current as of here) | done |
 | 4 | Migration + `workflow dev` | done — `workflow-migrate`, `workflow-codemod`, `workflow-dev` |
 | 5 | Adapters + visual inspector + `kind: spawn` | done — Obsidian/llm-wiki/registry adapters, `workflow-inspector`, `kind: spawn`; OpenViking ships as a stub |

@@ -89,16 +89,16 @@ skill completes. Three classes:
 
 ---
 
-## Integration with DEAR
+## Integration with Process DEAR
 
 ```
-DEAR phase   ←→  Skill contract
+Process DEAR phase   ←→  Skill contract
 ─────────────────────────────────────────────────────────
-Define        ←   `description:` + `verification_criteria:` read upfront;
-                  the criteria are the skill's exit conditions
-Execute       ←   skill body runs (the normal workflow steps)
-Audit         ←   each criterion item checked: pass → continue; fail → block Done
-Retro         ←   unmet criteria become findings → fed back to Wayfinder/roadmap
+Define              ←   `description:` + `verification_criteria:` read upfront;
+                        the criteria are the skill's exit conditions
+Execute             ←   skill body runs (the normal workflow steps)
+Audit               ←   each criterion item checked: pass → continue; fail → block Done
+Retro               ←   unmet criteria become findings → fed back to Wayfinder/roadmap
 ```
 
 If a skill has no criteria declared, the Auditor falls back to the global DoD.
@@ -161,5 +161,6 @@ checked each declared criterion. This doc will be updated when that gate lands.
 
 - `docs/skill-tiers.md` — `model:` / `effort:` frontmatter requirements (CI-enforced today)
 - `pkg/skilllint/` — skill frontmatter linter
-- `CONTEXT.md §DEAR` — canonical DEAR definition
+- `CONTEXT.md §DEAR` — canonical Process DEAR definition
+- `docs/adr/ADR-035-dear-terminology-disambiguation.md` — Process DEAR vs workflow lifecycle hooks
 - `.claude/skills/example-with-criteria.md` — worked example skill file
