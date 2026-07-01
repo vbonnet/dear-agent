@@ -1,6 +1,8 @@
 package speccoverage
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,6 +94,16 @@ func TestValidateGoPackageSpecsForFilesIgnoresTestOnlyChanges(t *testing.T) {
 	})
 	if len(findings) != 0 {
 		t.Fatalf("expected no findings for test-only changes, got %v", findings)
+	}
+}
+
+func TestChangedGoFilesHonorsCanceledContext(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := ChangedGoFiles(ctx, repoRoot(), "origin/main")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ChangedGoFiles error = %v, want context.Canceled", err)
 	}
 }
 

@@ -3,6 +3,7 @@
 package speccoverage
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -157,8 +158,8 @@ func UnregisteredParityFeatures(root string) ([]string, error) {
 // ValidateChangedGoPackageSpecs requires changed production Go package
 // directories to carry a co-located SPEC.md. It is intentionally diff-based so
 // legacy packages can be burned down incrementally without allowing new drift.
-func ValidateChangedGoPackageSpecs(root, baseRef string) ([]Finding, error) {
-	files, err := ChangedGoFiles(root, baseRef)
+func ValidateChangedGoPackageSpecs(ctx context.Context, root, baseRef string) ([]Finding, error) {
+	files, err := ChangedGoFiles(ctx, root, baseRef)
 	if err != nil {
 		return nil, err
 	}
@@ -166,12 +167,15 @@ func ValidateChangedGoPackageSpecs(root, baseRef string) ([]Finding, error) {
 }
 
 // ChangedGoFiles returns changed Go files relative to baseRef...HEAD.
-func ChangedGoFiles(root, baseRef string) ([]string, error) {
+func ChangedGoFiles(ctx context.Context, root, baseRef string) ([]string, error) {
 	if baseRef == "" {
 		baseRef = "origin/main"
 	}
-	cmd := exec.Command("git", "-C", root, "diff", "--name-only", "--diff-filter=ACMR", baseRef+"...HEAD", "--", "*.go")
+	cmd := exec.CommandContext(ctx, "git", "-C", root, "diff", "--name-only", "--diff-filter=ACMR", baseRef+"...HEAD", "--", "*.go")
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("list changed Go files against %s: %w: %s", baseRef, err, strings.TrimSpace(string(out)))
 	}

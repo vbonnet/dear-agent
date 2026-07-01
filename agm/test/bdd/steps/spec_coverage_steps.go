@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/cucumber/godog"
 	"github.com/vbonnet/dear-agent/internal/speccoverage"
@@ -74,7 +75,9 @@ func agmValidatesChangedGoPackageSPECCoverage(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	findings, err := speccoverage.ValidateChangedGoPackageSpecs(specCoverageRepoRoot(), "origin/main")
+	diffCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	findings, err := speccoverage.ValidateChangedGoPackageSpecs(diffCtx, specCoverageRepoRoot(), "origin/main")
 	if err != nil {
 		return err
 	}
