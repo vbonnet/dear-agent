@@ -56,7 +56,8 @@ func (s ProposalState) IsValid() bool {
 // amends an AGENTS.md / SPEC.md / ADR rule.
 //
 // The runner persists Proposals into audit_proposals with state
-// ProposalProposed; the operator decides via `workflow audit propose`.
+// ProposalProposed. The v1 CLI does not implement a proposal review
+// command.
 type Proposal struct {
 	ProposalID string // assigned by the store
 	AuditRunID string // FK into audit_runs

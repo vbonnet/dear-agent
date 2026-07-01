@@ -83,9 +83,9 @@ type CheckMeta struct {
 	Description     string
 	Cadence         Cadence
 	SeverityCeiling Severity
-	// RequiresNetwork is informational — `workflow audit dev` skips
-	// network-touching checks unless --live is passed. Not enforced
-	// at the package level.
+	// RequiresNetwork is informational. Developer-mode audit runners can
+	// skip network-touching checks by default. Not enforced at the
+	// package level.
 	RequiresNetwork bool
 }
 
