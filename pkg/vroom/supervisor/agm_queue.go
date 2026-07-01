@@ -71,7 +71,7 @@ func (q *AGMQueue) Pending(_ context.Context) ([]Task, error) {
 
 // Dispatch implements Queue. It removes the task from the pending list and
 // shells out to "agm session new" to spawn a worker session named
-// "worker-<taskID>". The session runs detached (--detach) with the
+// "worker-<taskID>". The session runs detached (--detached) with the
 // configured model and role.
 func (q *AGMQueue) Dispatch(ctx context.Context, taskID, _ string) error {
 	q.mu.Lock()
@@ -109,16 +109,7 @@ func (q *AGMQueue) Dispatch(ctx context.Context, taskID, _ string) error {
 	dctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	args := []string{
-		"session", "new",
-		"--name", "worker-" + taskID,
-		"--model", model,
-		"--role", role,
-		"--mode", "auto",
-		"--workspace", "oss",
-		"--detach",
-		"--send", fmt.Sprintf("Pick up bead %s and execute it.", taskID),
-	}
+	args := AGMDispatchArgs(taskID, model, role)
 
 	if q.run != nil {
 		_, err := q.run(dctx, bin, args...)
@@ -131,4 +122,19 @@ func (q *AGMQueue) Dispatch(ctx context.Context, taskID, _ string) error {
 			taskID, err, out)
 	}
 	return nil
+}
+
+// AGMDispatchArgs builds the `agm session new` argument list used to spawn a
+// VROOM worker session.
+func AGMDispatchArgs(taskID, model, role string) []string {
+	return []string{
+		"session", "new",
+		"worker-" + taskID,
+		"--model", model,
+		"--role", role,
+		"--mode", "auto",
+		"--workspace", "oss",
+		"--detached",
+		"--prompt", fmt.Sprintf("Pick up bead %s and execute it.", taskID),
+	}
 }
