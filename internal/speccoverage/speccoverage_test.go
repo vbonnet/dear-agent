@@ -50,7 +50,10 @@ func TestValidateBDDCatalogReportsUnlistedFeature(t *testing.T) {
 	root := t.TempDir()
 	writeCoverageFile(t, root, "agm/test/bdd/features/listed.feature", "Feature: Listed\n")
 	writeCoverageFile(t, root, "agm/test/bdd/features/unlisted.feature", "Feature: Unlisted\n")
-	writeCoverageFile(t, root, "agm/docs/BDD-CATALOG.md", "**File:** [`listed.feature`](../test/bdd/features/listed.feature)\n")
+	writeCoverageFile(t, root, "agm/docs/BDD-CATALOG.md", strings.Join([]string{
+		"unlisted.feature was mentioned in prose but is not cataloged.",
+		"**File:** [`listed.feature`](../test/bdd/features/listed.feature)",
+	}, "\n"))
 
 	findings := ValidateBDDCatalog(root)
 	if len(findings) != 1 {

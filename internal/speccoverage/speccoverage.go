@@ -152,9 +152,15 @@ func ValidateBDDCatalog(root string) []Finding {
 	}
 
 	catalogText := string(catalog)
+	catalogRefs := catalogFeatureReferences(catalogText)
+	catalogSet := map[string]bool{}
+	for _, feature := range catalogRefs {
+		catalogSet[feature] = true
+	}
+
 	var findings []Finding
 	for _, feature := range features {
-		if !strings.Contains(catalogText, filepath.Base(feature)) {
+		if !catalogSet[feature] {
 			findings = append(findings, Finding{
 				Surface: "BDD catalog",
 				Path:    feature,
@@ -167,7 +173,7 @@ func ValidateBDDCatalog(root string) []Finding {
 	for _, feature := range features {
 		featureSet[feature] = true
 	}
-	for _, feature := range catalogFeatureReferences(catalogText) {
+	for _, feature := range catalogRefs {
 		if !featureSet[feature] {
 			findings = append(findings, Finding{
 				Surface: "BDD catalog",
