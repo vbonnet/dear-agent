@@ -1,3 +1,5 @@
+// Package engramparity defines executable coverage for harness-neutral Engram
+// support.
 package engramparity
 
 import (
@@ -9,6 +11,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/ops"
 )
 
+// HarnessSurface describes how a harness receives and persists Engram context.
 type HarnessSurface struct {
 	Harness            string
 	InjectionSurface   string
@@ -57,6 +60,7 @@ func SurfaceForHarness(harness string) (HarnessSurface, bool) {
 	}
 }
 
+// ActiveHarnessSurfaces returns Engram surfaces for all active harnesses.
 func ActiveHarnessSurfaces() []HarnessSurface {
 	active := agent.ActiveHarnesses()
 	out := make([]HarnessSurface, 0, len(active))
@@ -69,6 +73,8 @@ func ActiveHarnessSurfaces() []HarnessSurface {
 	return out
 }
 
+// ValidateActiveHarnessSurfaces verifies all active harnesses have complete
+// Engram surfaces.
 func ValidateActiveHarnessSurfaces() error {
 	for _, harness := range agent.ActiveHarnesses() {
 		surface, ok := SurfaceForHarness(harness)
@@ -86,7 +92,7 @@ func ValidateActiveHarnessSurfaces() error {
 // ValidateManifestMetadata verifies the durable manifest has the shared Engram
 // metadata fields every harness depends on.
 func ValidateManifestMetadata() error {
-	t := reflect.TypeOf(manifest.EngramMetadata{})
+	t := reflect.TypeFor[manifest.EngramMetadata]()
 	for _, field := range []string{"Enabled", "Query", "EngramIDs", "LoadedAt", "Count"} {
 		if _, ok := t.FieldByName(field); !ok {
 			return fmt.Errorf("manifest.EngramMetadata missing field %s", field)

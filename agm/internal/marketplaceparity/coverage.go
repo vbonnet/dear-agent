@@ -1,3 +1,5 @@
+// Package marketplaceparity defines executable coverage for neutral plugin
+// marketplace publication across harnesses.
 package marketplaceparity
 
 import (
@@ -11,15 +13,19 @@ import (
 )
 
 const (
+	// NeutralCatalogPath is the harness-neutral marketplace catalog path.
 	NeutralCatalogPath = ".dear-agent/marketplace.json"
-	ClaudeCatalogPath  = ".claude-plugin/marketplace.json"
+	// ClaudeCatalogPath is the native Claude marketplace mirror path.
+	ClaudeCatalogPath = ".claude-plugin/marketplace.json"
 )
 
+// Owner describes the marketplace owner metadata.
 type Owner struct {
 	Name  string `json:"name"`
 	Email string `json:"email"`
 }
 
+// PluginEntry describes one published plugin in a marketplace catalog.
 type PluginEntry struct {
 	Name         string   `json:"name"`
 	Source       string   `json:"source"`
@@ -28,12 +34,14 @@ type PluginEntry struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 
+// HarnessSurface describes a harness marketplace discovery surface.
 type HarnessSurface struct {
 	Name    string `json:"name"`
 	Mode    string `json:"mode"`
 	Catalog string `json:"catalog"`
 }
 
+// Catalog describes the harness-neutral marketplace catalog.
 type Catalog struct {
 	SchemaVersion string           `json:"schema_version"`
 	Name          string           `json:"name"`

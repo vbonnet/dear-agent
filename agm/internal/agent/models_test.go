@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestValidateModel(t *testing.T) {
 	// Known model should return nil
@@ -231,14 +234,7 @@ func TestOpenRouterProvidesRequestedOpenModelFamilies(t *testing.T) {
 	want := []string{"glm", "deepseek", "nemotron", "qwen"}
 	got := ModelFamiliesForHarness("openrouter")
 	for _, family := range want {
-		found := false
-		for _, gotFamily := range got {
-			if gotFamily == family {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(got, family) {
 			t.Fatalf("openrouter model aliases missing family %q; got %v", family, got)
 		}
 	}

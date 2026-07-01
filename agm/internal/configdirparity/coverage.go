@@ -1,3 +1,5 @@
+// Package configdirparity defines executable coverage for harness-specific
+// configuration directory contracts.
 package configdirparity
 
 import (
@@ -8,6 +10,8 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 )
 
+// DirectorySurface describes the repo-local configuration directory for a
+// harness.
 type DirectorySurface struct {
 	Harness    string
 	Directory  string
@@ -15,6 +19,7 @@ type DirectorySurface struct {
 	Purpose    string
 }
 
+// SurfaceForHarness returns the configuration directory surface for a harness.
 func SurfaceForHarness(harness string) (DirectorySurface, bool) {
 	switch agent.NormalizeHarnessName(harness) {
 	case "claude-code":
@@ -32,6 +37,7 @@ func SurfaceForHarness(harness string) (DirectorySurface, bool) {
 	}
 }
 
+// ActiveSurfaces returns configuration directory surfaces for active harnesses.
 func ActiveSurfaces() []DirectorySurface {
 	active := agent.ActiveHarnesses()
 	out := make([]DirectorySurface, 0, len(active))
@@ -44,6 +50,8 @@ func ActiveSurfaces() []DirectorySurface {
 	return out
 }
 
+// ValidateActiveDirectories verifies active harness directories exist and are
+// not marked deprecated.
 func ValidateActiveDirectories(root string) error {
 	for _, harness := range agent.ActiveHarnesses() {
 		surface, ok := SurfaceForHarness(harness)
@@ -60,6 +68,8 @@ func ValidateActiveDirectories(root string) error {
 	return nil
 }
 
+// ValidateDeprecatedCompatibility verifies deprecated harness directories
+// remain available for compatibility.
 func ValidateDeprecatedCompatibility(root string) error {
 	for _, harness := range agent.DeprecatedHarnesses() {
 		surface, ok := SurfaceForHarness(harness)

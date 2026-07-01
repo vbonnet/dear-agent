@@ -87,7 +87,7 @@ func assertFirstNonEmptyLineNot(t *testing.T, file, content, forbiddenPrefix str
 
 func nonEmptyLines(content string) []string {
 	var lines []string
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			lines = append(lines, line)

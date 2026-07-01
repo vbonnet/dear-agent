@@ -1,3 +1,5 @@
+// Package quotaparity defines executable coverage for quota and cost monitoring
+// surfaces across supported harnesses and model families.
 package quotaparity
 
 import (

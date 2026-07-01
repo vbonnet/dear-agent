@@ -150,7 +150,7 @@ func TestAgyAdapterExecuteCommandRunHook(t *testing.T) {
 	adapter := &AgyAdapter{sessionStore: store}
 	if err := adapter.ExecuteCommand(Command{
 		Type: CommandRunHook,
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"session_id": string(sessionID),
 			"hook_name":  "SessionStart",
 		},

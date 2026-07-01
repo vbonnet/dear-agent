@@ -105,7 +105,7 @@ func getInstructionParityState(ctx context.Context) (*instructionParityState, er
 
 func nonEmptyInstructionLines(content string) []string {
 	var lines []string
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			lines = append(lines, line)

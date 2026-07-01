@@ -1,3 +1,5 @@
+// Package mcpparity defines executable coverage for MCP operations shared
+// across supported harnesses.
 package mcpparity
 
 import (
@@ -93,7 +95,7 @@ func HasMCPOperation(name string) bool {
 func ValidateLifecycleOperations() error {
 	for _, name := range []string{"create_session", "send_message"} {
 		if !HasMCPOperation(name) {
-			return fmt.Errorf("MCP operation %q missing from ops registry", name)
+			return fmt.Errorf("mcp operation %q missing from ops registry", name)
 		}
 	}
 	return nil

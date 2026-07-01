@@ -1,9 +1,12 @@
+// Package wayfinderparity defines executable coverage for harness-neutral
+// Wayfinder surfaces.
 package wayfinderparity
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
@@ -11,6 +14,8 @@ import (
 	"github.com/vbonnet/dear-agent/pkg/phaseengram"
 )
 
+// HarnessSurface describes how a harness discovers, executes, and reports
+// Wayfinder sessions.
 type HarnessSurface struct {
 	Harness          string
 	DiscoverySurface string
@@ -18,6 +23,7 @@ type HarnessSurface struct {
 	StatusSurface    string
 }
 
+// SurfaceForHarness returns the Wayfinder surface for a harness.
 func SurfaceForHarness(harness string) (HarnessSurface, bool) {
 	switch agent.NormalizeHarnessName(harness) {
 	case "claude-code":
@@ -53,6 +59,7 @@ func SurfaceForHarness(harness string) (HarnessSurface, bool) {
 	}
 }
 
+// ActiveHarnessSurfaces returns Wayfinder surfaces for all active harnesses.
 func ActiveHarnessSurfaces() []HarnessSurface {
 	active := agent.ActiveHarnesses()
 	out := make([]HarnessSurface, 0, len(active))
@@ -65,6 +72,8 @@ func ActiveHarnessSurfaces() []HarnessSurface {
 	return out
 }
 
+// ValidateActiveHarnessSurfaces verifies all active harnesses have complete
+// Wayfinder surfaces.
 func ValidateActiveHarnessSurfaces() error {
 	for _, harness := range agent.ActiveHarnesses() {
 		surface, ok := SurfaceForHarness(harness)
@@ -78,6 +87,7 @@ func ValidateActiveHarnessSurfaces() error {
 	return nil
 }
 
+// ValidateAssets verifies shared Wayfinder files and plugin assets exist.
 func ValidateAssets(root string) error {
 	for _, rel := range []string{
 		"wayfinder/SPEC.md",
@@ -88,12 +98,14 @@ func ValidateAssets(root string) error {
 		"wayfinder/cmd/wayfinder-session/SPEC.md",
 	} {
 		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
-			return fmt.Errorf("Wayfinder asset %s: %w", rel, err)
+			return fmt.Errorf("wayfinder asset %s: %w", rel, err)
 		}
 	}
 	return nil
 }
 
+// ValidateMCPOperations verifies Wayfinder status operations are exposed via
+// the MCP operation registry.
 func ValidateMCPOperations() error {
 	required := map[string]bool{
 		"list_wayfinder_sessions": false,
@@ -106,22 +118,17 @@ func ValidateMCPOperations() error {
 	}
 	for name, ok := range required {
 		if !ok {
-			return fmt.Errorf("Wayfinder MCP operation %q missing from ops registry", name)
+			return fmt.Errorf("wayfinder mcp operation %q missing from ops registry", name)
 		}
 	}
 	return nil
 }
 
+// ValidatePhaseEngramCoverage verifies core Wayfinder phases have Engram
+// registry coverage.
 func ValidatePhaseEngramCoverage() error {
 	for _, phase := range []string{"CHARTER", "RESEARCH", "SPEC", "BUILD", "RETRO"} {
-		found := false
-		for _, known := range phaseengram.KnownPhases() {
-			if known == phase {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(phaseengram.KnownPhases(), phase) {
 			return fmt.Errorf("phase engram registry missing %s", phase)
 		}
 	}

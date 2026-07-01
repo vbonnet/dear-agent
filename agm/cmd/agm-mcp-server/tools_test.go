@@ -431,7 +431,7 @@ func TestLifecycleTools_RegisterUnderCorrectNames(t *testing.T) {
 }
 
 func TestCreateSessionInputSchemaDocumentsHarnessParity(t *testing.T) {
-	field, ok := reflect.TypeOf(CreateSessionInput{}).FieldByName("Harness")
+	field, ok := reflect.TypeFor[CreateSessionInput]().FieldByName("Harness")
 	if !ok {
 		t.Fatal("CreateSessionInput.Harness field missing")
 	}
@@ -442,7 +442,7 @@ func TestCreateSessionInputSchemaDocumentsHarnessParity(t *testing.T) {
 		}
 	}
 
-	modelField, ok := reflect.TypeOf(CreateSessionInput{}).FieldByName("Model")
+	modelField, ok := reflect.TypeFor[CreateSessionInput]().FieldByName("Model")
 	if !ok {
 		t.Fatal("CreateSessionInput.Model field missing")
 	}

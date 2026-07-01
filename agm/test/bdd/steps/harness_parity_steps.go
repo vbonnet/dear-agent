@@ -714,7 +714,7 @@ func claudeMarketplaceShouldMatchNeutralMarketplaceCatalog(ctx context.Context) 
 		return err
 	}
 	if !harnessState.marketplaceMirrorValid {
-		return fmt.Errorf("Claude marketplace does not match neutral marketplace catalog")
+		return fmt.Errorf("claude marketplace does not match neutral marketplace catalog")
 	}
 	return nil
 }
@@ -777,7 +777,7 @@ func harnessShouldHaveEngramInjectionSurface(ctx context.Context, harness string
 	}
 	normalized := agent.NormalizeHarnessName(harness)
 	if harnessState.engramSurface.Harness != normalized {
-		return fmt.Errorf("Engram surface harness = %q, want %q", harnessState.engramSurface.Harness, normalized)
+		return fmt.Errorf("engram surface harness = %q, want %q", harnessState.engramSurface.Harness, normalized)
 	}
 	if harnessState.engramSurface.InjectionSurface == "" {
 		return fmt.Errorf("harness %q has empty Engram injection surface", normalized)
@@ -792,10 +792,10 @@ func harnessShouldPersistEngramMetadataThroughSharedManifest(ctx context.Context
 	}
 	normalized := agent.NormalizeHarnessName(harness)
 	if harnessState.engramSurface.Harness != normalized {
-		return fmt.Errorf("Engram surface harness = %q, want %q", harnessState.engramSurface.Harness, normalized)
+		return fmt.Errorf("engram surface harness = %q, want %q", harnessState.engramSurface.Harness, normalized)
 	}
 	if harnessState.engramSurface.PersistenceSurface != "manifest.EngramMetadata" {
-		return fmt.Errorf("Engram persistence surface = %q, want manifest.EngramMetadata", harnessState.engramSurface.PersistenceSurface)
+		return fmt.Errorf("engram persistence surface = %q, want manifest.EngramMetadata", harnessState.engramSurface.PersistenceSurface)
 	}
 	return nil
 }
@@ -815,7 +815,7 @@ func engramMetadataShouldBeStoredInHarnessNeutralFields(ctx context.Context) err
 		return err
 	}
 	if !harnessState.engramMetadataValid {
-		return fmt.Errorf("Engram metadata parity validation failed")
+		return fmt.Errorf("engram metadata parity validation failed")
 	}
 	return nil
 }
@@ -846,7 +846,7 @@ func harnessShouldHaveWayfinderDiscoverySurface(ctx context.Context, harness str
 	}
 	normalized := agent.NormalizeHarnessName(harness)
 	if harnessState.wayfinderSurface.Harness != normalized {
-		return fmt.Errorf("Wayfinder surface harness = %q, want %q", harnessState.wayfinderSurface.Harness, normalized)
+		return fmt.Errorf("wayfinder surface harness = %q, want %q", harnessState.wayfinderSurface.Harness, normalized)
 	}
 	if harnessState.wayfinderSurface.DiscoverySurface == "" {
 		return fmt.Errorf("harness %q has empty Wayfinder discovery surface", normalized)
@@ -861,7 +861,7 @@ func harnessShouldHaveWayfinderExecutionSurface(ctx context.Context, harness str
 	}
 	normalized := agent.NormalizeHarnessName(harness)
 	if harnessState.wayfinderSurface.Harness != normalized {
-		return fmt.Errorf("Wayfinder surface harness = %q, want %q", harnessState.wayfinderSurface.Harness, normalized)
+		return fmt.Errorf("wayfinder surface harness = %q, want %q", harnessState.wayfinderSurface.Harness, normalized)
 	}
 	if harnessState.wayfinderSurface.ExecutionSurface == "" {
 		return fmt.Errorf("harness %q has empty Wayfinder execution surface", normalized)
@@ -884,7 +884,7 @@ func wayfinderShouldPublishSkillPluginCommandAndMCPStatusSurfaces(ctx context.Co
 		return err
 	}
 	if !harnessState.wayfinderAssetsValid {
-		return fmt.Errorf("Wayfinder asset or MCP operation parity validation failed")
+		return fmt.Errorf("wayfinder asset or mcp operation parity validation failed")
 	}
 	return nil
 }
@@ -904,7 +904,7 @@ func wayfinderShouldResolvePhaseEngramsWithoutHarnessSpecificState(ctx context.C
 		return err
 	}
 	if !harnessState.wayfinderPhaseEngrams {
-		return fmt.Errorf("Wayfinder phase Engram coverage validation failed")
+		return fmt.Errorf("wayfinder phase engram coverage validation failed")
 	}
 	return nil
 }

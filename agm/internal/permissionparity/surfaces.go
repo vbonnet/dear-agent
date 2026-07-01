@@ -1,3 +1,5 @@
+// Package permissionparity defines executable coverage for permission policy
+// surfaces across supported harnesses.
 package permissionparity
 
 import (
