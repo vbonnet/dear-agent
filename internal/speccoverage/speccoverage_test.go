@@ -50,6 +50,43 @@ func TestValidateSurfaceDoesNotReadEmptyPaths(t *testing.T) {
 	}
 }
 
+func TestValidateSurfaceRejectsNeedsAuditMarker(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: NEEDS-AUDIT -->\n\n## EARS Requirements\n\n**EX-01** When an example is validated, the system shall report stale audits.\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "Feature: Example parity\n")
+
+	findings := validateSurface(root, Surface{
+		Name:        "example parity",
+		PackagePath: "internal/example",
+		SpecPath:    "internal/example/SPEC.md",
+		FeaturePath: "agm/test/bdd/features/example_parity.feature",
+	})
+	if len(findings) != 1 {
+		t.Fatalf("expected one stale audit finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "SPEC.md audit marker is missing or still NEEDS-AUDIT" {
+		t.Fatalf("finding message = %q", findings[0].Message)
+	}
+}
+
+func TestValidateSurfaceAcceptsCompletedAuditMarker(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: 2026-07-01 -->\n\n## EARS Requirements\n\n**EX-01** When an example is validated, the system shall accept completed audits.\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "Feature: Example parity\n")
+
+	findings := validateSurface(root, Surface{
+		Name:        "example parity",
+		PackagePath: "internal/example",
+		SpecPath:    "internal/example/SPEC.md",
+		FeaturePath: "agm/test/bdd/features/example_parity.feature",
+	})
+	if len(findings) != 0 {
+		t.Fatalf("expected no findings, got %v", findings)
+	}
+}
+
 func TestValidateGoPackageSpecsForFilesRequiresSpecForProductionGo(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -109,4 +146,15 @@ func TestChangedGoFilesHonorsCanceledContext(t *testing.T) {
 
 func repoRoot() string {
 	return filepath.Clean(filepath.Join("..", ".."))
+}
+
+func writeCoverageFile(t *testing.T, root, name, content string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -255,6 +255,7 @@ surfaces so hook, instruction, and marketplace support can be audited.
 - Every parity-critical surface has a registered `SPEC.md`.
 - Every parity-critical surface has an executable BDD feature.
 - Every parity `SPEC.md` declares EARS requirements.
+- Every registered parity `SPEC.md` has a completed audit marker.
 - Every `*_parity.feature` file is registered in the coverage matrix.
 - Changed production Go package directories carry a co-located `SPEC.md`.
 

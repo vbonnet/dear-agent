@@ -270,6 +270,12 @@ func validateSurface(root string, surface Surface) []Finding {
 				Path:    surface.SpecPath,
 				Message: "SPEC.md does not declare EARS requirements",
 			})
+		} else if !hasCompletedAuditMarker(string(spec)) {
+			findings = append(findings, Finding{
+				Surface: surface.Name,
+				Path:    surface.SpecPath,
+				Message: "SPEC.md audit marker is missing or still NEEDS-AUDIT",
+			})
 		}
 	}
 
@@ -291,4 +297,14 @@ func validateSurface(root string, surface Surface) []Finding {
 	}
 
 	return findings
+}
+
+func hasCompletedAuditMarker(spec string) bool {
+	for line := range strings.SplitSeq(spec, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "<!-- Last audited at:") {
+			return !strings.Contains(line, "NEEDS-AUDIT")
+		}
+	}
+	return false
 }
