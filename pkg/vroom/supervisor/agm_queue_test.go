@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +75,12 @@ func TestAGMQueue_Dispatch(t *testing.T) {
 		if !strings.Contains(joined, "worker-ce-abc") {
 			t.Errorf("session name not in args: %v", capturedArgs)
 		}
+		if !containsArg(capturedArgs, "--detached") {
+			t.Errorf("detached flag not in args: %v", capturedArgs)
+		}
+		if containsArg(capturedArgs, "--detach") {
+			t.Errorf("obsolete detach flag in args: %v", capturedArgs)
+		}
 		// Task should be removed from pending.
 		tasks, _ := q.Pending(context.Background())
 		if len(tasks) != 0 {
@@ -121,4 +128,8 @@ func TestAGMQueue_Dispatch(t *testing.T) {
 			t.Errorf("default role not in args: %v", capturedArgs)
 		}
 	})
+}
+
+func containsArg(args []string, want string) bool {
+	return slices.Contains(args, want)
 }
