@@ -37,3 +37,5 @@ the larger repo-wide SPEC backlog is burned down incrementally.
 **SCB-10** When AGM defines an executable BDD feature file, the system shall require that feature to be listed in `agm/docs/BDD-CATALOG.md`.
 
 **SCB-11** When `agm/docs/BDD-CATALOG.md` lists a BDD feature file, the system shall require that referenced feature file to exist under `agm/test/bdd/features/`.
+
+**SCB-12** When a parity-critical `SPEC.md` file is registered in the coverage matrix, the system shall require every candidate requirement to pass strict EARS lint.

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/vbonnet/dear-agent/internal/earslint"
 )
 
 // Surface maps one parity-critical implementation area to its executable BDD
@@ -371,18 +373,26 @@ func validateSurface(root string, surface Surface) []Finding {
 				Path:    surface.SpecPath,
 				Message: fmt.Sprintf("read SPEC.md: %v", err),
 			})
-		} else if !strings.Contains(string(spec), "## EARS Requirements") {
-			findings = append(findings, Finding{
-				Surface: surface.Name,
-				Path:    surface.SpecPath,
-				Message: "SPEC.md does not declare EARS requirements",
-			})
-		} else if !hasCompletedAuditMarker(string(spec)) {
-			findings = append(findings, Finding{
-				Surface: surface.Name,
-				Path:    surface.SpecPath,
-				Message: "SPEC.md audit marker is missing or still NEEDS-AUDIT",
-			})
+		} else {
+			specText := string(spec)
+			hasEARS := strings.Contains(specText, "## EARS Requirements")
+			if !hasEARS {
+				findings = append(findings, Finding{
+					Surface: surface.Name,
+					Path:    surface.SpecPath,
+					Message: "SPEC.md does not declare EARS requirements",
+				})
+			}
+			if !hasCompletedAuditMarker(specText) {
+				findings = append(findings, Finding{
+					Surface: surface.Name,
+					Path:    surface.SpecPath,
+					Message: "SPEC.md audit marker is missing or still NEEDS-AUDIT",
+				})
+			}
+			if hasEARS {
+				findings = append(findings, validateSpecEARS(surface, specText)...)
+			}
 		}
 	}
 
@@ -403,6 +413,43 @@ func validateSurface(root string, surface Surface) []Finding {
 		}
 	}
 
+	return findings
+}
+
+func validateSpecEARS(surface Surface, spec string) []Finding {
+	linter, err := earslint.New(earslint.Config{})
+	if err != nil {
+		return []Finding{{
+			Surface: surface.Name,
+			Path:    surface.SpecPath,
+			Message: fmt.Sprintf("initialize EARS linter: %v", err),
+		}}
+	}
+
+	result, err := linter.Lint(surface.SpecPath, strings.NewReader(spec))
+	if err != nil {
+		return []Finding{{
+			Surface: surface.Name,
+			Path:    surface.SpecPath,
+			Message: fmt.Sprintf("lint SPEC.md EARS requirements: %v", err),
+		}}
+	}
+	if !result.Failed(true) {
+		return nil
+	}
+
+	var findings []Finding
+	for _, finding := range result.Findings {
+		detail := finding.Message
+		if finding.Line > 0 {
+			detail = fmt.Sprintf("line %d: %s", finding.Line, finding.Message)
+		}
+		findings = append(findings, Finding{
+			Surface: surface.Name,
+			Path:    surface.SpecPath,
+			Message: "SPEC.md has invalid EARS syntax: " + detail,
+		})
+	}
 	return findings
 }
 
