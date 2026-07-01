@@ -391,7 +391,6 @@ A: No - you're only billed for actual API calls to each agent. Exporting/importi
 
 - [docs/AGENT-COMPARISON.md](./AGENT-COMPARISON.md) - When to use each agent
 - [docs/agents/gemini-cli.md](./agents/gemini-cli.md) - Gemini CLI user guide
-- [docs/gemini-parity-analysis.md](./gemini-parity-analysis.md) - Detailed parity breakdown
 - [SPEC.md](../SPEC.md) - Technical specification
 
 ---

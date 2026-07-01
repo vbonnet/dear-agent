@@ -319,7 +319,6 @@ Hooks are file-based:
 
 - `HOOKS-ARCHITECTURE.md` - Hook design and implementation
 - `OPENAI_HOOK_INTEGRATION.md` - Integration guide
-- `HOOK-TEST-RESULTS.md` - Test results and validation
 
 ## Future Enhancements
 

@@ -221,7 +221,6 @@ go build -C cmd/agm -o ~/go/bin/agm
 
 ## Related Files
 
-- **Diagnosis**: `docs/REAPER-HANG-DIAGNOSIS.md`
 - **Implementation**:
   - `internal/tmux/prompt_detector.go` (ReadLine fix + heartbeat)
   - `internal/reaper/reaper.go` (timeout reductions)

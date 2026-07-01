@@ -1244,9 +1244,6 @@ func collectMetrics(detector *context.Detector, calculator *context.Calculator) 
 
 - **Specification**: `SPEC.md`
 - **Architecture**: `ARCHITECTURE.md`
-- **Research Report**: `phase-0/deliverables/RESEARCH-REPORT.md`
-- **Hook Audit**: `phase-0/deliverables/HOOK-AUDIT.md`
-- **CLI Detection Strategy**: `phase-0/deliverables/CLI-DETECTION-STRATEGY.md`
 
 ### Benchmarks
 

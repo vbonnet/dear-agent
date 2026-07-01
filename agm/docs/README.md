@@ -6,7 +6,6 @@ Welcome to the AGM (AI Agent Manager) documentation.
 
 ### Getting Started
 - **[BUILD-AND-VERIFY.md](./BUILD-AND-VERIFY.md)** - Build AGM and verify the archive fix (15 min)
-- **[IMPLEMENTATION-SUMMARY.md](./IMPLEMENTATION-SUMMARY.md)** - Executive summary of recent changes
 
 ### For Developers
 - **[ARCHIVE-DOLT-MIGRATION.md](./ARCHIVE-DOLT-MIGRATION.md)** - Complete technical guide to the Dolt migration
@@ -28,16 +27,14 @@ Fixed bug where STOPPED sessions couldn't be archived ("session not found" error
 - Complete documentation package
 
 **Quick Start**:
-1. Read: [IMPLEMENTATION-SUMMARY.md](./IMPLEMENTATION-SUMMARY.md)
-2. Build: [BUILD-AND-VERIFY.md](./BUILD-AND-VERIFY.md)
-3. Test: [testing/ARCHIVE-DOLT-RUNBOOK.md](./testing/ARCHIVE-DOLT-RUNBOOK.md)
+1. Build: [BUILD-AND-VERIFY.md](./BUILD-AND-VERIFY.md)
+2. Test: [testing/ARCHIVE-DOLT-RUNBOOK.md](./testing/ARCHIVE-DOLT-RUNBOOK.md)
 
 ## Documentation Structure
 
 ```
 docs/
 ├── README.md                          # This file - documentation overview
-├── IMPLEMENTATION-SUMMARY.md          # Executive summary of archive fix
 ├── ARCHIVE-DOLT-MIGRATION.md          # Complete technical guide
 ├── BUILD-AND-VERIFY.md                # Build and verification guide
 └── testing/
@@ -51,7 +48,6 @@ docs/
 
 | If you want to... | Read this... |
 |-------------------|--------------|
-| Understand what was fixed | [IMPLEMENTATION-SUMMARY.md](./IMPLEMENTATION-SUMMARY.md) |
 | Build and verify the fix | [BUILD-AND-VERIFY.md](./BUILD-AND-VERIFY.md) |
 | Understand technical details | [ARCHIVE-DOLT-MIGRATION.md](./ARCHIVE-DOLT-MIGRATION.md) |
 | Run manual tests | [testing/ARCHIVE-DOLT-RUNBOOK.md](./testing/ARCHIVE-DOLT-RUNBOOK.md) |
