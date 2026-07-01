@@ -31,3 +31,5 @@ the larger repo-wide SPEC backlog is burned down incrementally.
 **SCB-07** When a pull request changes a production Go file outside test-only directories, the system shall require a co-located `SPEC.md` in that file's package directory.
 
 **SCB-08** When a pull request changes only Go test files or files under test-only directories, the system shall not require a new package `SPEC.md` solely for that test-only change.
+
+**SCB-09** When a parity-critical `SPEC.md` file is registered in the coverage matrix, the system shall require a completed `Last audited at` marker and shall reject the placeholder value `NEEDS-AUDIT`.
