@@ -6,68 +6,59 @@ import (
 	"testing"
 )
 
-func TestParseVmStat(t *testing.T) {
-	// Realistic vm_stat output from macOS Sequoia (16 KiB pages).
-	const sample = `Mach Virtual Memory Statistics: (page size of 16384 bytes)
-Pages free:                               27542.
-Pages active:                            435088.
-Pages inactive:                          151553.
-Pages speculative:                         6199.
-Pages throttled:                              0.
-Pages wired down:                        140534.
-Pages purgeable:                          16082.
-"File-backed" pages:                     147048.
-Pages copied on write:                   158826.
-Pages zero filled:                      4985897.
-Pages reactivated:                       198049.
-Pages purged:                            162898.
-Swapins:                                      0.
-Swapouts:                                     0.
-Object cache: 18 hits of 1103960 lookups (0% hit rate)
+func TestParseMemoryPressure(t *testing.T) {
+	const sample = `The system has 25769803776 (1572864 pages with a page size of 16384).
+System-wide memory free percentage: 69%
 `
-
-	pageSize, freePages, specPages, err := parseVMStat(sample)
+	pct, err := parseMemoryPressure(sample)
 	if err != nil {
-		t.Fatalf("parseVMStat: %v", err)
+		t.Fatalf("parseMemoryPressure: %v", err)
 	}
-
-	if pageSize != 16384 {
-		t.Errorf("pageSize = %d, want 16384", pageSize)
-	}
-	if freePages != 27542 {
-		t.Errorf("freePages = %d, want 27542", freePages)
-	}
-	if specPages != 6199 {
-		t.Errorf("specPages = %d, want 6199", specPages)
+	if pct != 69 {
+		t.Errorf("pct = %v, want 69", pct)
 	}
 }
 
-func TestParseVmStatLine(t *testing.T) {
-	tests := []struct {
-		line string
-		want int64
-	}{
-		{"Pages free:                               27542.", 27542},
-		{"Pages speculative:                         6199.", 6199},
-		{"Pages throttled:                              0.", 0},
+// TestParseMemoryPressure_LowFreeFalsePositive documents the bug this fix
+// replaces: the old vm_stat-derived formula (free+speculative only) reported
+// single-digit "free" percentages on a healthy idle Mac because macOS parks
+// reclaimable file-backed content in the inactive queue instead of counting
+// it as free. Deferring to `memory_pressure -Q` avoids reimplementing an
+// approximation of Apple's own accounting, so a genuinely healthy machine
+// (which `memory_pressure -Q` reports as mostly free) is parsed as such
+// instead of tripping a 10%-free-minimum circuit breaker.
+func TestParseMemoryPressure_LowFreeFalsePositive(t *testing.T) {
+	const sample = `The system has 25769803776 (1572864 pages with a page size of 16384).
+System-wide memory free percentage: 65%
+`
+	pct, err := parseMemoryPressure(sample)
+	if err != nil {
+		t.Fatalf("parseMemoryPressure: %v", err)
 	}
-
-	for _, tt := range tests {
-		got, err := parseVMStatLine(tt.line)
-		if err != nil {
-			t.Errorf("parseVMStatLine(%q): %v", tt.line, err)
-			continue
-		}
-		if got != tt.want {
-			t.Errorf("parseVMStatLine(%q) = %d, want %d", tt.line, got, tt.want)
-		}
+	if pct < 10 {
+		t.Errorf("pct = %v, want >= 10 (should not trip the default MinFreeMemPct circuit breaker)", pct)
 	}
 }
 
-func TestVMStatMemReader_Live(t *testing.T) {
-	// Integration test: actually call vm_stat and sysctl.
-	// Only runs on Darwin; verifies the result is in a sane range (1–99%).
-	mr := VMStatMemReader{}
+func TestParseMemoryPressure_MissingLine(t *testing.T) {
+	_, err := parseMemoryPressure("some unexpected output\n")
+	if err == nil {
+		t.Fatal("expected an error when the free percentage line is missing")
+	}
+}
+
+func TestParseMemoryPressure_MalformedPercentage(t *testing.T) {
+	const sample = `System-wide memory free percentage: not-a-number%`
+	_, err := parseMemoryPressure(sample)
+	if err == nil {
+		t.Fatal("expected an error for a non-numeric percentage")
+	}
+}
+
+func TestMemoryPressureMemReader_Live(t *testing.T) {
+	// Integration test: actually calls memory_pressure -Q.
+	// Only runs on Darwin; verifies the result is in a sane range (0–100).
+	mr := MemoryPressureMemReader{}
 	pct, err := mr.FreeMemPct()
 	if err != nil {
 		t.Fatalf("FreeMemPct: %v", err)
@@ -83,7 +74,7 @@ func TestDefaultMemReader_IsDarwin(t *testing.T) {
 	if mr == nil {
 		t.Fatal("expected non-nil MemReader on Darwin")
 	}
-	if _, ok := mr.(VMStatMemReader); !ok {
-		t.Errorf("expected VMStatMemReader, got %T", mr)
+	if _, ok := mr.(MemoryPressureMemReader); !ok {
+		t.Errorf("expected MemoryPressureMemReader, got %T", mr)
 	}
 }

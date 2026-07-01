@@ -3,95 +3,80 @@
 package circuitbreaker
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
-// VMStatMemReader reads free memory percentage on macOS using vm_stat and sysctl.
-type VMStatMemReader struct{}
+// memoryPressureTimeout bounds the memory_pressure -Q subprocess call so a
+// hung or slow probe fails the gate instead of hanging session spawns.
+const memoryPressureTimeout = 5 * time.Second
 
-// FreeMemPct returns the percentage of free RAM (0–100) by reading vm_stat
-// output. It computes: (free_pages + speculative_pages) × page_size / hw.memsize × 100.
+// MemoryPressureMemReader reads free memory percentage on macOS using
+// memory_pressure -Q, the same tool that backs Activity Monitor's memory
+// pressure gauge and the OS-level low-memory notifications apps respond to.
+type MemoryPressureMemReader struct{}
+
+// FreeMemPct returns the percentage of available RAM (0–100) as reported by
+// `memory_pressure -Q` ("System-wide memory free percentage: N%").
 //
-// Speculative pages are included because macOS eagerly pre-faults data but
-// can reclaim those pages instantly — they behave like free memory from the
-// OS scheduler's perspective.
-func (VMStatMemReader) FreeMemPct() (float64, error) {
-	vmOut, err := exec.Command("vm_stat").Output()
-	if err != nil {
-		return 0, fmt.Errorf("vm_stat: %w", err)
-	}
+// This used to be computed from vm_stat as (free_pages + speculative_pages)
+// / total, which reports single-digit percentages on a healthy idle Mac:
+// macOS deliberately keeps raw "free" pages near zero, parking
+// recently-used file-backed content in the inactive queue (reclaimable
+// instantly, at zero cost) instead of actually freeing it. That formula
+// tripped spawn-blocking circuit breakers on false alarms — observed as low
+// as 1.8% free on a machine memory_pressure -Q measured at 65% free.
+// Deferring to macOS's own pressure calculation (which does account for the
+// inactive queue and compressor headroom) matches what a human checking
+// Activity Monitor would see, instead of reimplementing an approximation of
+// Apple's internal accounting.
+func (MemoryPressureMemReader) FreeMemPct() (float64, error) {
+	bgCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(bgCtx, memoryPressureTimeout)
+	defer cancel()
 
-	pageSize, freePages, specPages, err := parseVMStat(string(vmOut))
+	out, err := exec.CommandContext(ctx, "memory_pressure", "-Q").Output()
+	if ctx.Err() != nil {
+		return 0, fmt.Errorf("memory_pressure -Q: %w", ctx.Err())
+	}
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("memory_pressure -Q: %w", err)
 	}
-
-	sysctlOut, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
-	if err != nil {
-		return 0, fmt.Errorf("sysctl hw.memsize: %w", err)
-	}
-	totalBytes, err := strconv.ParseInt(strings.TrimSpace(string(sysctlOut)), 10, 64)
-	if err != nil || totalBytes <= 0 {
-		return 0, fmt.Errorf("unexpected hw.memsize output: %q", string(sysctlOut))
-	}
-
-	freeBytes := float64(freePages+specPages) * float64(pageSize)
-	return freeBytes / float64(totalBytes) * 100, nil
+	return parseMemoryPressure(string(out))
 }
 
-// parseVMStat extracts page size, free pages, and speculative pages from
-// vm_stat output. The first line has the form:
+// parseMemoryPressure extracts the free-memory percentage from
+// `memory_pressure -Q` output, e.g.:
 //
-//	Mach Virtual Memory Statistics: (page size of 16384 bytes)
-func parseVMStat(output string) (pageSize, freePages, specPages int64, err error) {
+//	The system has 25769803776 (1572864 pages with a page size of 16384).
+//	System-wide memory free percentage: 69%
+func parseMemoryPressure(output string) (float64, error) {
 	for line := range strings.SplitSeq(output, "\n") {
 		line = strings.TrimSpace(line)
-		switch {
-		case strings.Contains(line, "page size of "):
-			// "Mach Virtual Memory Statistics: (page size of 16384 bytes)"
-			_, rest, ok := strings.Cut(line, "page size of ")
-			if !ok {
-				continue
-			}
-			rest = strings.TrimSuffix(rest, " bytes)")
-			rest = strings.TrimSuffix(rest, " bytes")
-			pageSize, err = strconv.ParseInt(strings.TrimSpace(rest), 10, 64)
-			if err != nil {
-				return 0, 0, 0, fmt.Errorf("parsing page size from %q: %w", line, err)
-			}
-		case strings.HasPrefix(line, "Pages free:"):
-			freePages, err = parseVMStatLine(line)
-			if err != nil {
-				return 0, 0, 0, fmt.Errorf("parsing free pages: %w", err)
-			}
-		case strings.HasPrefix(line, "Pages speculative:"):
-			specPages, err = parseVMStatLine(line)
-			if err != nil {
-				return 0, 0, 0, fmt.Errorf("parsing speculative pages: %w", err)
-			}
+		_, rest, ok := strings.Cut(line, "System-wide memory free percentage:")
+		if !ok {
+			continue
 		}
+		rest = strings.TrimSpace(rest)
+		rest = strings.TrimSuffix(rest, "%")
+		pct, err := strconv.ParseFloat(rest, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parsing free percentage from %q: %w", line, err)
+		}
+		return pct, nil
 	}
-	if pageSize <= 0 {
-		return 0, 0, 0, fmt.Errorf("page size not found in vm_stat output")
-	}
-	return pageSize, freePages, specPages, nil
+	return 0, fmt.Errorf("memory_pressure -Q output missing free percentage line: %q", output)
 }
 
-// parseVMStatLine parses a vm_stat line of the form "Pages free: 12345."
-func parseVMStatLine(line string) (int64, error) {
-	parts := strings.SplitN(line, ":", 2)
-	if len(parts) != 2 {
-		return 0, fmt.Errorf("unexpected vm_stat line: %q", line)
-	}
-	val := strings.TrimSpace(parts[1])
-	val = strings.TrimSuffix(val, ".")
-	return strconv.ParseInt(val, 10, 64)
-}
-
-// DefaultMemReader returns the platform-native memory reader (VMStatMemReader on macOS).
+// DefaultMemReader returns the platform-native memory reader (MemoryPressureMemReader on macOS).
 func DefaultMemReader() MemReader {
-	return VMStatMemReader{}
+	return MemoryPressureMemReader{}
 }
