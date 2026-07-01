@@ -30,6 +30,7 @@
   "ModelTier": "",
   "EngramMetadata": null,
   "ContextUsage": null,
+  "PermissionPolicy": null,
   "PermissionMode": "",
   "PermissionModeUpdatedAt": null,
   "PermissionModeSource": "",
