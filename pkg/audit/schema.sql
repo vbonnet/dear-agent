@@ -1,8 +1,7 @@
 -- DEAR Audit subsystem schema (ADR-011 §D6).
--- Three additive tables on the workflow engine's runs.db. The
--- workflow schema (pkg/workflow/schema.sql) creates runs, nodes,
--- node_attempts, audit_events, etc.; this file appends. JOINs across
--- the two schemas are valid and used by `workflow audit` queries.
+-- Three additive tables that may be applied to the workflow engine's
+-- runs.db, but are also valid in the standalone .dear-agent/audit.db
+-- used by the workflow-audit CLI default.
 --
 -- All statements are IF NOT EXISTS — re-running ApplySchema on a
 -- populated DB is a no-op. Every column added in a future revision
@@ -61,7 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_runs_repo ON audit_runs (repo, started_at);
 CREATE INDEX IF NOT EXISTS idx_audit_runs_state ON audit_runs (state);
 
 -- One row per Refiner.Propose() output. Persisted in state proposed;
--- the operator transitions via `workflow audit propose --accept|--reject`.
+-- the v1 CLI does not implement accept/reject transitions.
 CREATE TABLE IF NOT EXISTS audit_proposals (
     proposal_id   TEXT PRIMARY KEY,
     audit_run_id  TEXT NOT NULL REFERENCES audit_runs(audit_run_id) ON DELETE CASCADE,

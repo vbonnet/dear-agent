@@ -17,10 +17,9 @@ import (
 //go:embed schema.sql
 var sqliteSchema string
 
-// SQLiteOpenOptions are the pragmas every audits-on-runs.db database
-// needs. Mirrors pkg/workflow's openSQLiteDB for consistency: the two
-// schemas live in the same file, so they must agree on WAL,
-// busy_timeout, and foreign_keys.
+// SQLiteOpenOptions are the pragmas every audit database needs. They
+// mirror pkg/workflow's openSQLiteDB so audit tables can live in
+// runs.db when an operator chooses to co-locate the schemas.
 const SQLiteOpenOptions = "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)"
 
 // ErrNotFound is returned by Get* methods when the key is absent.
@@ -512,10 +511,10 @@ func (s *SQLiteStore) ListProposals(ctx context.Context, filter ProposalFilter) 
 	out := []Proposal{}
 	for rows.Next() {
 		var (
-			p        Proposal
-			layer    string
-			state    string
-			decided  sql.NullTime
+			p       Proposal
+			layer   string
+			state   string
+			decided sql.NullTime
 		)
 		if err := rows.Scan(&p.ProposalID, &p.AuditRunID, &layer, &p.Title, &p.Rationale,
 			&p.Patch, &state, &p.ProposedAt, &decided, &p.DecidedBy, &p.Decision); err != nil {

@@ -26,7 +26,7 @@ type LintGapRefiner struct {
 	MinHits int
 }
 
-// Name is the stable identifier surfaced in `workflow audit propose`.
+// Name is the stable identifier used when listing persisted proposals.
 func (LintGapRefiner) Name() string { return "lint-gap" }
 
 // Propose scans findings for runs of the same linter and emits one

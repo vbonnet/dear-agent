@@ -19,9 +19,11 @@ moved. Today these are ad-hoc CI scripts: no shared lifecycle, no
 history, no feedback into Define/Enforce, no cost-vs-importance discipline.
 
 Add `pkg/audit/` as a first-class subsystem. It is the dual of the
-workflow engine — same SQLite substrate, same audit-event spine, same
-role/permission/budget primitives, but a different code path. Engine
-runs work; audit runs checks.
+workflow engine: engine runs work; audit runs checks. The shipped v1
+uses the same SQLite-compatible substrate and can be pointed at the
+same database, but it is exposed through a standalone `workflow-audit`
+binary and defaults to `.dear-agent/audit.db`. Workflow integration is
+provided by normal workflow YAML wrappers that invoke that binary.
 
 - **D1. Checks are addressable, versioned, composable.** A `Check` is
   `Meta() CheckMeta` plus `Run(ctx, env) (Result, error)`. Stable IDs
@@ -29,9 +31,10 @@ runs work; audit runs checks.
   `Registry`. New checks ship as additive registrations.
 - **D2. Declarative schedules, recommended defaults.** Each `CheckMeta`
   carries a recommended cadence (`daily / weekly / monthly / on-demand`);
-  repos override in `.dear-agent.yml`. **The subsystem owns no clock** —
-  it ships a generated GitHub Actions workflow + `workflow audit` CLI;
-  the operator wires it to whatever scheduler they already use.
+  repos override in `.dear-agent.yml`. **The subsystem owns no clock**.
+  The shipped surface is `workflow-audit run`; operators wire that
+  command into cron, GitHub Actions, or the included workflow YAML
+  wrappers.
 - **D3. Findings are structured, severity-ranked, de-duplicated.**
   `Fingerprint` (file + symbol + rule) is the load-bearing field — the
   same `unused export X.Foo` cannot inflate counts run-over-run. Severity
@@ -47,15 +50,22 @@ runs work; audit runs checks.
   amendments to Define and Enforce — a recurring `lint.go` finding
   becomes a proposed linter add; three `docs.dead-links` on the same
   domain become a CI link-check denylist. Proposals are suggestions,
-  not auto-applied (HITL gate).
-- **D6. One SQLite database, additive schema.** Three new tables on
-  `runs.db`: `audit_findings`, `audit_runs`, `audit_proposals`. No
-  existing column or index changes.
-- **D7. Audits run as workflows.** A new `KindAuditCheck` node kind is
-  the only new shape; permissions, budget, retry, and HITL all reuse the
-  engine. An audit run shows up in `workflow status` and `workflow logs`.
-- **D8. The subsystem owns its CLI: `workflow audit run | list | show |
-  ack | resolve | propose | trends`.** Thin wrapper over `pkg/audit`.
+  not auto-applied. The shipped v1 persists proposals in
+  `audit_proposals`; a proposal review CLI is not implemented.
+- **D6. Additive SQLite schema.** The audit schema creates three tables:
+  `audit_findings`, `audit_runs`, `audit_proposals`. No existing
+  workflow column or index changes. `workflow-audit --db` may point at
+  `runs.db` when operators want one file, but the binary defaults to
+  `.dear-agent/audit.db` and the v1 code does not require co-location
+  with workflow state.
+- **D7. Audits are workflow-compatible, not a new node kind.** The
+  workflow engine has no `KindAuditCheck`. Audits run as the standalone
+  `workflow-audit` command, and the repository ships YAML workflows that
+  wrap that command in ordinary `bash` nodes when operators want audit
+  runs to appear in `workflow status` and `workflow logs`.
+- **D8. The shipped CLI is `workflow-audit`.** Current subcommands are
+  `run | list | show | ack | resolve`. The `workflow audit ...`
+  namespace, `propose`, and `trends` commands are not implemented in v1.
 - **D9. A check is wrong if it cannot be replayed offline.** Every
   built-in check ships a `testdata/` fixture + a `Mock` mode in the
   registry. A check that depends on network or shell without an offline
@@ -75,10 +85,14 @@ runs work; audit runs checks.
 
 - **Use only `Hooks.OnAudit`.** Per-transition, not scheduled or
   repo-scoped.
-- **Audits as Bash nodes.** Possible; loses fingerprint, severity,
-  lifecycle, trend table.
-- **Separate `audits.db`.** Splits the substrate. The whole point of
-  ADR-010 is one queryable DB.
+- **Only ad-hoc Bash checks.** Simple to schedule, but loses fingerprint,
+  severity, lifecycle, and proposal persistence. The shipped workflow
+  YAML wrappers use Bash only as a transport for `workflow-audit`; the
+  audit model still lives in `pkg/audit`.
+- **Require one physical `runs.db` in v1.** Operationally convenient for
+  joins, but too coupled for the first audit CLI. The current default is
+  `.dear-agent/audit.db`, with `--db` available for operators who want
+  to co-locate the audit tables with workflow state.
 - **Build on Mend/Snyk.** Vendor lock-in for what *is* the substrate.
 - **Run remediation inline.** Couples find and fix; loses dry-run.
 - **Run everything on every commit.** Some checks (deep security, doc
@@ -88,9 +102,10 @@ runs work; audit runs checks.
 
 High stakes: fingerprints de-duplicate cleanly run-over-run; refinement
 proposals are useful, not noise. Hedges: D9 offline tests assert
-fingerprint stability; per-Refiner recurrence threshold + explicit
-`propose` review CLI. Medium stakes: the schema is sufficient for v1;
-audits-as-workflows is the right framing.
+fingerprint stability; per-Refiner recurrence thresholds keep proposal
+volume bounded. Medium stakes: the schema is sufficient for v1; wrapping
+`workflow-audit` in normal workflow YAML is enough integration before a
+dedicated audit node kind exists.
 
 ### Cross-references
 

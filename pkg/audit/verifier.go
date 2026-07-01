@@ -83,8 +83,8 @@ type Verifier interface {
 	// constrain the alphabet.
 	Name() string
 
-	// Description is a one-line human-readable summary used by
-	// `workflow audit verifiers list`. May be empty.
+	// Description is a one-line human-readable summary for a future
+	// verifier-listing CLI. May be empty.
 	Description() string
 
 	// ReviewDepth is the depth the verifier claims its findings are
@@ -146,7 +146,7 @@ func (r *Registry) Verifiers() []Verifier {
 }
 
 // LookupVerifier returns the verifier registered under name, or
-// (nil, false). Used by CLI `workflow audit verifiers describe NAME`.
+// (nil, false). Intended for a future verifier-describe CLI.
 func (r *Registry) LookupVerifier(name string) (Verifier, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
