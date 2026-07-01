@@ -13,6 +13,12 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 3. **Privacy**: Expose only metadata, never conversation content
 4. **Integration**: Seamless integration with supported harness clients via MCP protocol
 
+## EARS Requirements
+
+**MCS-01** When the MCP server exposes the create-session schema, the system shall document the selected harness default as the fallback for an omitted model.
+
+**MCS-02** When the MCP server documents model examples, the system shall include both the supported codex-cli default alias and explicitly selectable Codex aliases.
+
 ## Use Cases
 
 ### Primary Use Cases
