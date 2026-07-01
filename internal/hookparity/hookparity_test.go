@@ -79,7 +79,7 @@ func TestNonClaudeHookHarnessesExposeBeadsLifecycleHooks(t *testing.T) {
 				"PreCompact":       "PreCompact",
 				"PostCompact":      "PostCompact",
 			} {
-				want := "bd " + cfg.prefix + "-hook " + suffix
+				want := "bd --db ~/beads/context-engine/.beads " + cfg.prefix + "-hook " + suffix
 				if !eventHasCommandContaining(settings, event, want) {
 					t.Fatalf("%s missing %s Beads hook command %q", harness, event, want)
 				}
