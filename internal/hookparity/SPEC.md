@@ -1,6 +1,6 @@
 # Hook Harness Parity Specification
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-01 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -23,7 +23,7 @@ uses `.claude/settings.json`; Codex CLI uses `.codex/hooks.json`; AGY uses
 
 **HHP-04** When a hook manifest references a local hook script, the system shall keep the referenced script present and executable in the matching harness directory.
 
-**HHP-05** When a non-Claude hook-capable harness supports Beads lifecycle events, the system shall configure `SessionStart`, `UserPromptSubmit`, `PreCompact`, and `PostCompact` events with a harness-specific `bd <harness>-hook` command.
+**HHP-05** When a non-Claude hook-capable harness supports Beads lifecycle events, the system shall configure `SessionStart`, `UserPromptSubmit`, `PreCompact`, and `PostCompact` events with a harness-specific `bd --db ~/beads/context-engine/.beads <harness>-hook` command.
 
 **HHP-06** When an active hook-capable harness is added, the system shall require BDD and Go tests that verify required hook events, guardrail commands, script existence, and executable mode across the hook parity matrix.
 
