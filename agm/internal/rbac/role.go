@@ -1,8 +1,9 @@
 // Package rbac implements role-based access control for AGM sessions.
 //
-// Each session role maps to a permission profile that defines which Claude Code
-// tools and commands are pre-approved. Profiles follow least-privilege: only the
-// permissions needed for the role's specific function are granted.
+// Each session role maps to a permission profile that defines which tools and
+// commands are pre-approved by AGM and, where available, by the harness's native
+// permission surface. Profiles follow least-privilege: only the permissions
+// needed for the role's specific function are granted.
 package rbac
 
 import "fmt"
@@ -42,8 +43,9 @@ type Profile struct {
 	Description string
 	TrustLevel  TrustLevel
 
-	// AllowedTools are Claude Code permission patterns written to
-	// the project's .claude/settings.json permissions.allow list.
+	// AllowedTools are AGM permission patterns. Claude Code receives them in
+	// .claude/settings.local.json permissions.allow; other active harnesses
+	// carry them in the session manifest permission policy.
 	AllowedTools []string
 }
 

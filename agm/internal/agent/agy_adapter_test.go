@@ -77,6 +77,10 @@ func TestAgyAdapterCapabilities(t *testing.T) {
 		t.Error("SupportsTools should be true for Agy")
 	}
 
+	if !caps.SupportsHooks {
+		t.Error("SupportsHooks should be true for Agy")
+	}
+
 	if caps.MaxContextWindow != 200000 {
 		t.Errorf("MaxContextWindow = %d, want 200000", caps.MaxContextWindow)
 	}
@@ -133,5 +137,24 @@ func TestAgyCreateSessionWaitsForPrompt(t *testing.T) {
 	}
 	if len(sent) == 0 || !strings.Contains(sent[0], "agy --dangerously-skip-permissions") {
 		t.Fatalf("CreateSession sent commands = %v, want AGY launch with auto permission flag", sent)
+	}
+}
+
+func TestAgyAdapterExecuteCommandRunHook(t *testing.T) {
+	store := &MockSessionStore{sessions: map[SessionID]*SessionMetadata{}}
+	sessionID := SessionID("agy-hook-session")
+	if err := store.Set(sessionID, &SessionMetadata{TmuxName: "agy-hook"}); err != nil {
+		t.Fatalf("store.Set: %v", err)
+	}
+
+	adapter := &AgyAdapter{sessionStore: store}
+	if err := adapter.ExecuteCommand(Command{
+		Type: CommandRunHook,
+		Params: map[string]any{
+			"session_id": string(sessionID),
+			"hook_name":  "SessionStart",
+		},
+	}); err != nil {
+		t.Fatalf("ExecuteCommand(CommandRunHook) returned error: %v", err)
 	}
 }

@@ -10,7 +10,15 @@ import (
 	"github.com/cucumber/godog"
 
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/configdirparity"
+	"github.com/vbonnet/dear-agent/agm/internal/engramparity"
+	"github.com/vbonnet/dear-agent/agm/internal/marketplaceparity"
+	"github.com/vbonnet/dear-agent/agm/internal/mcpparity"
+	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
+	"github.com/vbonnet/dear-agent/agm/internal/quotaparity"
+	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
+	"github.com/vbonnet/dear-agent/agm/internal/wayfinderparity"
 )
 
 type harnessParityState struct {
@@ -35,6 +43,29 @@ type harnessParityState struct {
 	codexArchiveInvoked        bool
 	tmuxResumeLaunched         bool
 	configuredHarness          string
+	configuredModelFamily      string
+	modelFamilyDefaulted       bool
+	modelChangeCommand         string
+	modelChangeResolvedModel   string
+	permissionProfile          string
+	permissionSurfaces         []permissionparity.Surface
+	permissionAllowList        []string
+	quotaSurfaces              []quotaparity.HarnessSurface
+	quotaFamilyCoverage        quotaparity.ModelFamilyCoverage
+	mcpSurface                 mcpparity.CreateSessionSurface
+	mcpModelAccepted           bool
+	mcpLifecycleOpsExposed     bool
+	marketplaceCatalog         marketplaceparity.Catalog
+	marketplaceSurface         marketplaceparity.HarnessSurface
+	marketplaceMirrorValid     bool
+	marketplacePlugin          string
+	marketplacePluginValid     bool
+	engramSurface              engramparity.HarnessSurface
+	engramMetadataValid        bool
+	wayfinderSurface           wayfinderparity.HarnessSurface
+	wayfinderAssetsValid       bool
+	wayfinderPhaseEngrams      bool
+	configDirSurface           configdirparity.DirectorySurface
 }
 
 type harnessParityStateKey struct{}
@@ -51,6 +82,58 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^harness "([^"]*)" should be active for parity$`, harnessShouldBeActiveForParity)
 	ctx.Step(`^harness "([^"]*)" should not be deprecated$`, harnessShouldNotBeDeprecated)
 	ctx.Step(`^harness "([^"]*)" should be deprecated$`, harnessShouldBeDeprecated)
+	ctx.Step(`^model family "([^"]*)" is configured$`, modelFamilyIsConfigured)
+	ctx.Step(`^AGM validates model family parity support$`, agmValidatesModelFamilyParitySupport)
+	ctx.Step(`^model family "([^"]*)" should be supported$`, modelFamilyShouldBeSupported)
+	ctx.Step(`^model family "([^"]*)" should have a default model route$`, modelFamilyShouldHaveDefaultModelRoute)
+	ctx.Step(`^AGM resolves a model change for harness "([^"]*)" with model "([^"]*)"$`, agmResolvesModelChangeForHarness)
+	ctx.Step(`^the model change should use tmux command "([^"]*)"$`, modelChangeShouldUseTmuxCommand)
+	ctx.Step(`^the resolved model should not be empty$`, resolvedModelShouldNotBeEmpty)
+	ctx.Step(`^permission profile "([^"]*)" is configured$`, permissionProfileIsConfigured)
+	ctx.Step(`^AGM validates permission parity support$`, agmValidatesPermissionParitySupport)
+	ctx.Step(`^AGM resolves permission policy parity$`, agmResolvesPermissionPolicyParity)
+	ctx.Step(`^harness "([^"]*)" should have a permission policy target$`, harnessShouldHavePermissionPolicyTarget)
+	ctx.Step(`^harness "([^"]*)" should have a startup permission surface$`, harnessShouldHaveStartupPermissionSurface)
+	ctx.Step(`^every active harness should have a permission policy target$`, everyActiveHarnessShouldHavePermissionPolicyTarget)
+	ctx.Step(`^the resolved permission policy should include default permissions$`, resolvedPermissionPolicyShouldIncludeDefaultPermissions)
+	ctx.Step(`^the resolved permission policy should include profile permissions$`, resolvedPermissionPolicyShouldIncludeProfilePermissions)
+	ctx.Step(`^AGM validates quota monitoring parity$`, agmValidatesQuotaMonitoringParity)
+	ctx.Step(`^AGM validates quota model family coverage$`, agmValidatesQuotaModelFamilyCoverage)
+	ctx.Step(`^harness "([^"]*)" should have a context quota source$`, harnessShouldHaveContextQuotaSource)
+	ctx.Step(`^harness "([^"]*)" should have a cost quota source$`, harnessShouldHaveCostQuotaSource)
+	ctx.Step(`^harness "([^"]*)" should have a rate limit quota policy$`, harnessShouldHaveRateLimitQuotaPolicy)
+	ctx.Step(`^model family "([^"]*)" should have a quota pricing policy$`, modelFamilyShouldHaveQuotaPricingPolicy)
+	ctx.Step(`^model family "([^"]*)" should have a default quota model route$`, modelFamilyShouldHaveDefaultQuotaModelRoute)
+	ctx.Step(`^AGM validates MCP session creation parity$`, agmValidatesMCPSessionCreationParity)
+	ctx.Step(`^harness "([^"]*)" should have an MCP create-session surface$`, harnessShouldHaveMCPCreateSessionSurface)
+	ctx.Step(`^the MCP create-session surface should use shared model validation$`, mcpCreateSessionSurfaceShouldUseSharedModelValidation)
+	ctx.Step(`^the MCP create-session surface should be deprecated compatibility$`, mcpCreateSessionSurfaceShouldBeDeprecatedCompatibility)
+	ctx.Step(`^AGM validates MCP model identifier "([^"]*)"$`, agmValidatesMCPModelIdentifier)
+	ctx.Step(`^the MCP model identifier should be accepted$`, mcpModelIdentifierShouldBeAccepted)
+	ctx.Step(`^AGM validates MCP operation discovery parity$`, agmValidatesMCPOperationDiscoveryParity)
+	ctx.Step(`^the MCP operation registry should expose lifecycle mutations$`, mcpOperationRegistryShouldExposeLifecycleMutations)
+	ctx.Step(`^AGM validates marketplace parity$`, agmValidatesMarketplaceParity)
+	ctx.Step(`^harness "([^"]*)" should have a marketplace discovery surface$`, harnessShouldHaveMarketplaceDiscoverySurface)
+	ctx.Step(`^the marketplace discovery surface should use the expected mode$`, marketplaceDiscoverySurfaceShouldUseExpectedMode)
+	ctx.Step(`^AGM validates marketplace catalog mirrors$`, agmValidatesMarketplaceCatalogMirrors)
+	ctx.Step(`^the Claude marketplace should match the neutral marketplace catalog$`, claudeMarketplaceShouldMatchNeutralMarketplaceCatalog)
+	ctx.Step(`^marketplace plugin "([^"]*)" is configured$`, marketplacePluginIsConfigured)
+	ctx.Step(`^marketplace plugin "([^"]*)" should publish its declared assets$`, marketplacePluginShouldPublishDeclaredAssets)
+	ctx.Step(`^AGM validates Engram parity$`, agmValidatesEngramParity)
+	ctx.Step(`^harness "([^"]*)" should have an Engram injection surface$`, harnessShouldHaveEngramInjectionSurface)
+	ctx.Step(`^harness "([^"]*)" should persist Engram metadata through the shared manifest$`, harnessShouldPersistEngramMetadataThroughSharedManifest)
+	ctx.Step(`^AGM validates Engram metadata parity$`, agmValidatesEngramMetadataParity)
+	ctx.Step(`^Engram metadata should be stored in harness-neutral fields$`, engramMetadataShouldBeStoredInHarnessNeutralFields)
+	ctx.Step(`^AGM validates Wayfinder parity$`, agmValidatesWayfinderParity)
+	ctx.Step(`^harness "([^"]*)" should have a Wayfinder discovery surface$`, harnessShouldHaveWayfinderDiscoverySurface)
+	ctx.Step(`^harness "([^"]*)" should have a Wayfinder execution surface$`, harnessShouldHaveWayfinderExecutionSurface)
+	ctx.Step(`^AGM validates Wayfinder asset parity$`, agmValidatesWayfinderAssetParity)
+	ctx.Step(`^Wayfinder should publish SKILL, plugin, command, and MCP status surfaces$`, wayfinderShouldPublishSkillPluginCommandAndMCPStatusSurfaces)
+	ctx.Step(`^AGM validates Wayfinder phase Engram parity$`, agmValidatesWayfinderPhaseEngramParity)
+	ctx.Step(`^Wayfinder should resolve phase Engrams without harness-specific state$`, wayfinderShouldResolvePhaseEngramsWithoutHarnessSpecificState)
+	ctx.Step(`^AGM validates configuration directory parity$`, agmValidatesConfigurationDirectoryParity)
+	ctx.Step(`^AGM validates deprecated configuration directory parity$`, agmValidatesDeprecatedConfigurationDirectoryParity)
+	ctx.Step(`^harness "([^"]*)" should have configuration directory "([^"]*)"$`, harnessShouldHaveConfigurationDirectory)
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
@@ -140,6 +223,753 @@ func harnessShouldBeDeprecated(ctx context.Context, harness string) error {
 		return fmt.Errorf("harness %q should be deprecated", normalized)
 	}
 	return nil
+}
+
+func modelFamilyIsConfigured(ctx context.Context, family string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.configuredModelFamily = strings.ToLower(family)
+	return nil
+}
+
+func agmValidatesModelFamilyParitySupport(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredModelFamily == "" {
+		return fmt.Errorf("no model family configured")
+	}
+	model, ok := agent.DefaultModelForFamily(harnessState.configuredModelFamily)
+	harnessState.modelFamilyDefaulted = ok
+	if !ok {
+		return nil
+	}
+	return agent.ValidateModel("opencode-cli", model.FullName)
+}
+
+func modelFamilyShouldBeSupported(ctx context.Context, family string) error {
+	if agent.IsSupportedModelFamily(family) {
+		return nil
+	}
+	return fmt.Errorf("model family %q is not supported; supported families: %v", family, agent.ModelFamilyNames())
+}
+
+func modelFamilyShouldHaveDefaultModelRoute(ctx context.Context, family string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if strings.ToLower(family) != harnessState.configuredModelFamily {
+		return fmt.Errorf("configured model family = %q, want %q", harnessState.configuredModelFamily, family)
+	}
+	if !harnessState.modelFamilyDefaulted {
+		return fmt.Errorf("model family %q has no default route", family)
+	}
+	return nil
+}
+
+func agmResolvesModelChangeForHarness(ctx context.Context, harness, model string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if err := agent.ValidateHarnessName(normalized); err != nil {
+		return err
+	}
+	if err := agent.ValidateModel(normalized, model); err != nil {
+		return err
+	}
+	resolved := agent.ResolveModelFullName(normalized, model)
+	harnessState.configuredHarness = normalized
+	harnessState.modelChangeResolvedModel = resolved
+	harnessState.modelChangeCommand = "/model"
+	return nil
+}
+
+func modelChangeShouldUseTmuxCommand(ctx context.Context, expected string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.modelChangeCommand != expected {
+		return fmt.Errorf("model change command = %q, want %q", harnessState.modelChangeCommand, expected)
+	}
+	return nil
+}
+
+func resolvedModelShouldNotBeEmpty(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.modelChangeResolvedModel == "" {
+		return fmt.Errorf("resolved model for harness %q is empty", harnessState.configuredHarness)
+	}
+	return nil
+}
+
+func permissionProfileIsConfigured(ctx context.Context, profile string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !rbac.ValidRole(profile) {
+		return fmt.Errorf("permission profile %q is not valid", profile)
+	}
+	harnessState.permissionProfile = profile
+	return nil
+}
+
+func agmValidatesPermissionParitySupport(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := permissionparity.ValidateActiveHarnessSurfaces(); err != nil {
+		return err
+	}
+	harnessState.permissionSurfaces = permissionparity.ActiveHarnessSurfaces()
+	return nil
+}
+
+func agmResolvesPermissionPolicyParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	allowList, err := rbac.ResolvePermissions(rbac.ResolveOptions{ProfileName: harnessState.permissionProfile})
+	if err != nil {
+		return err
+	}
+	harnessState.permissionAllowList = allowList
+	harnessState.permissionSurfaces = permissionparity.ActiveHarnessSurfaces()
+	return nil
+}
+
+func harnessShouldHavePermissionPolicyTarget(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	surface, ok := findPermissionSurface(harnessState.permissionSurfaces, harness)
+	if !ok {
+		return fmt.Errorf("harness %q has no permission policy target", harness)
+	}
+	if surface.PolicySurface == "" {
+		return fmt.Errorf("harness %q has empty policy surface", harness)
+	}
+	return nil
+}
+
+func harnessShouldHaveStartupPermissionSurface(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	surface, ok := findPermissionSurface(harnessState.permissionSurfaces, harness)
+	if !ok {
+		return fmt.Errorf("harness %q has no permission policy target", harness)
+	}
+	if surface.StartupSurface == "" {
+		return fmt.Errorf("harness %q has empty startup permission surface", harness)
+	}
+	return nil
+}
+
+func everyActiveHarnessShouldHavePermissionPolicyTarget(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, harness := range agent.ActiveHarnesses() {
+		if _, ok := findPermissionSurface(harnessState.permissionSurfaces, harness); !ok {
+			return fmt.Errorf("active harness %q has no permission policy target", harness)
+		}
+	}
+	return nil
+}
+
+func resolvedPermissionPolicyShouldIncludeDefaultPermissions(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	for _, permission := range rbac.DefaultPermissions {
+		if !slices.Contains(harnessState.permissionAllowList, permission) {
+			return fmt.Errorf("resolved policy missing default permission %q", permission)
+		}
+	}
+	return nil
+}
+
+func resolvedPermissionPolicyShouldIncludeProfilePermissions(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	profile, err := rbac.LookupProfile(harnessState.permissionProfile)
+	if err != nil {
+		return err
+	}
+	for _, permission := range profile.AllowedTools {
+		if !slices.Contains(harnessState.permissionAllowList, permission) {
+			return fmt.Errorf("resolved policy missing profile permission %q", permission)
+		}
+	}
+	return nil
+}
+
+func findPermissionSurface(surfaces []permissionparity.Surface, harness string) (permissionparity.Surface, bool) {
+	normalized := agent.NormalizeHarnessName(harness)
+	for _, surface := range surfaces {
+		if surface.Harness == normalized {
+			return surface, true
+		}
+	}
+	return permissionparity.Surface{}, false
+}
+
+func agmValidatesQuotaMonitoringParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := quotaparity.ValidateActiveHarnessSurfaces(); err != nil {
+		return err
+	}
+	harnessState.quotaSurfaces = quotaparity.ActiveHarnessSurfaces()
+	return nil
+}
+
+func agmValidatesQuotaModelFamilyCoverage(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredModelFamily == "" {
+		return fmt.Errorf("no model family configured")
+	}
+	if err := quotaparity.ValidateModelFamilyCoverage(); err != nil {
+		return err
+	}
+	coverage, ok := quotaparity.ModelFamilyCoverageFor(harnessState.configuredModelFamily)
+	if !ok {
+		return fmt.Errorf("model family %q has no quota coverage", harnessState.configuredModelFamily)
+	}
+	harnessState.quotaFamilyCoverage = coverage
+	return nil
+}
+
+func harnessShouldHaveContextQuotaSource(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	surface, ok := findQuotaSurface(harnessState.quotaSurfaces, harness)
+	if !ok {
+		return fmt.Errorf("harness %q has no quota surface", harness)
+	}
+	if surface.ContextSource == "" {
+		return fmt.Errorf("harness %q has empty context quota source", harness)
+	}
+	return nil
+}
+
+func harnessShouldHaveCostQuotaSource(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	surface, ok := findQuotaSurface(harnessState.quotaSurfaces, harness)
+	if !ok {
+		return fmt.Errorf("harness %q has no quota surface", harness)
+	}
+	if surface.CostSource == "" {
+		return fmt.Errorf("harness %q has empty cost quota source", harness)
+	}
+	return nil
+}
+
+func harnessShouldHaveRateLimitQuotaPolicy(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	surface, ok := findQuotaSurface(harnessState.quotaSurfaces, harness)
+	if !ok {
+		return fmt.Errorf("harness %q has no quota surface", harness)
+	}
+	if surface.RateLimitSource == "" {
+		return fmt.Errorf("harness %q has empty rate limit quota policy", harness)
+	}
+	return nil
+}
+
+func modelFamilyShouldHaveQuotaPricingPolicy(ctx context.Context, family string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.quotaFamilyCoverage.Family != strings.ToLower(family) {
+		return fmt.Errorf("quota coverage family = %q, want %q", harnessState.quotaFamilyCoverage.Family, family)
+	}
+	if harnessState.quotaFamilyCoverage.PricePolicy == "" {
+		return fmt.Errorf("model family %q has empty quota pricing policy", family)
+	}
+	return nil
+}
+
+func modelFamilyShouldHaveDefaultQuotaModelRoute(ctx context.Context, family string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.quotaFamilyCoverage.Family != strings.ToLower(family) {
+		return fmt.Errorf("quota coverage family = %q, want %q", harnessState.quotaFamilyCoverage.Family, family)
+	}
+	if harnessState.quotaFamilyCoverage.DefaultModel == "" {
+		return fmt.Errorf("model family %q has no default quota model route", family)
+	}
+	return nil
+}
+
+func agmValidatesMCPSessionCreationParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := mcpparity.ValidateActiveCreateSessionSurfaces(); err != nil {
+		return err
+	}
+	surface, ok := mcpparity.CreateSessionSurfaceFor(harnessState.configuredHarness)
+	if !ok {
+		return fmt.Errorf("harness %q has no MCP create-session surface", harnessState.configuredHarness)
+	}
+	harnessState.mcpSurface = surface
+	return nil
+}
+
+func harnessShouldHaveMCPCreateSessionSurface(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.mcpSurface.Harness != normalized {
+		return fmt.Errorf("MCP surface harness = %q, want %q", harnessState.mcpSurface.Harness, normalized)
+	}
+	if harnessState.mcpSurface.DefaultModel == "" {
+		return fmt.Errorf("harness %q has empty MCP default model", normalized)
+	}
+	return nil
+}
+
+func mcpCreateSessionSurfaceShouldUseSharedModelValidation(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.mcpSurface.ModelPolicy != "shared-agent-registry" {
+		return fmt.Errorf("MCP model policy = %q, want shared-agent-registry", harnessState.mcpSurface.ModelPolicy)
+	}
+	return mcpparity.ValidateModelIdentifier(harnessState.mcpSurface.Harness, harnessState.mcpSurface.DefaultModel)
+}
+
+func mcpCreateSessionSurfaceShouldBeDeprecatedCompatibility(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.mcpSurface.Deprecated {
+		return fmt.Errorf("MCP surface for %q is not marked deprecated compatibility", harnessState.mcpSurface.Harness)
+	}
+	return nil
+}
+
+func agmValidatesMCPModelIdentifier(ctx context.Context, model string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	harnessState.mcpModelAccepted = mcpparity.ValidateModelIdentifier(harnessState.configuredHarness, model) == nil
+	return nil
+}
+
+func mcpModelIdentifierShouldBeAccepted(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.mcpModelAccepted {
+		return fmt.Errorf("MCP model identifier was rejected")
+	}
+	return nil
+}
+
+func agmValidatesMCPOperationDiscoveryParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.mcpLifecycleOpsExposed = mcpparity.ValidateLifecycleOperations() == nil
+	return nil
+}
+
+func mcpOperationRegistryShouldExposeLifecycleMutations(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.mcpLifecycleOpsExposed {
+		return fmt.Errorf("MCP operation registry does not expose lifecycle mutations")
+	}
+	return nil
+}
+
+func agmValidatesMarketplaceParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	root := bddRepoRoot()
+	if err := marketplaceparity.ValidateCatalog(root); err != nil {
+		return err
+	}
+	catalog, err := marketplaceparity.LoadCatalog(root)
+	if err != nil {
+		return err
+	}
+	harnessState.marketplaceCatalog = catalog
+	if harnessState.configuredHarness != "" {
+		surface, ok := marketplaceparity.SurfaceForHarness(catalog, harnessState.configuredHarness)
+		if !ok {
+			return fmt.Errorf("harness %q has no marketplace surface", harnessState.configuredHarness)
+		}
+		harnessState.marketplaceSurface = surface
+	}
+	if harnessState.marketplacePlugin != "" {
+		harnessState.marketplacePluginValid = marketplacePluginExists(catalog, harnessState.marketplacePlugin)
+	}
+	return nil
+}
+
+func harnessShouldHaveMarketplaceDiscoverySurface(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.marketplaceSurface.Name != normalized {
+		return fmt.Errorf("marketplace surface harness = %q, want %q", harnessState.marketplaceSurface.Name, normalized)
+	}
+	if harnessState.marketplaceSurface.Catalog == "" {
+		return fmt.Errorf("marketplace surface for %q has empty catalog", normalized)
+	}
+	return nil
+}
+
+func marketplaceDiscoverySurfaceShouldUseExpectedMode(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	want := "agents-md-skill-fallback"
+	if harnessState.marketplaceSurface.Name == "claude-code" {
+		want = "native-claude-plugin-marketplace"
+	}
+	if harnessState.marketplaceSurface.Mode != want {
+		return fmt.Errorf("marketplace mode = %q, want %q", harnessState.marketplaceSurface.Mode, want)
+	}
+	return nil
+}
+
+func agmValidatesMarketplaceCatalogMirrors(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.marketplaceMirrorValid = marketplaceparity.ValidateClaudeMarketplaceMirror(bddRepoRoot()) == nil
+	return nil
+}
+
+func claudeMarketplaceShouldMatchNeutralMarketplaceCatalog(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.marketplaceMirrorValid {
+		return fmt.Errorf("claude marketplace does not match neutral marketplace catalog")
+	}
+	return nil
+}
+
+func marketplacePluginIsConfigured(ctx context.Context, plugin string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.marketplacePlugin = plugin
+	return nil
+}
+
+func marketplacePluginShouldPublishDeclaredAssets(ctx context.Context, plugin string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.marketplacePlugin != plugin {
+		return fmt.Errorf("marketplace plugin = %q, want %q", harnessState.marketplacePlugin, plugin)
+	}
+	if !harnessState.marketplacePluginValid {
+		return fmt.Errorf("marketplace plugin %q did not validate", plugin)
+	}
+	return nil
+}
+
+func marketplacePluginExists(catalog marketplaceparity.Catalog, plugin string) bool {
+	for _, entry := range catalog.Plugins {
+		if entry.Name == plugin {
+			return true
+		}
+	}
+	return false
+}
+
+func agmValidatesEngramParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := engramparity.ValidateActiveHarnessSurfaces(); err != nil {
+		return err
+	}
+	surface, ok := engramparity.SurfaceForHarness(harnessState.configuredHarness)
+	if !ok {
+		return fmt.Errorf("harness %q has no Engram surface", harnessState.configuredHarness)
+	}
+	harnessState.engramSurface = surface
+	return nil
+}
+
+func harnessShouldHaveEngramInjectionSurface(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.engramSurface.Harness != normalized {
+		return fmt.Errorf("engram surface harness = %q, want %q", harnessState.engramSurface.Harness, normalized)
+	}
+	if harnessState.engramSurface.InjectionSurface == "" {
+		return fmt.Errorf("harness %q has empty Engram injection surface", normalized)
+	}
+	return nil
+}
+
+func harnessShouldPersistEngramMetadataThroughSharedManifest(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.engramSurface.Harness != normalized {
+		return fmt.Errorf("engram surface harness = %q, want %q", harnessState.engramSurface.Harness, normalized)
+	}
+	if harnessState.engramSurface.PersistenceSurface != "manifest.EngramMetadata" {
+		return fmt.Errorf("engram persistence surface = %q, want manifest.EngramMetadata", harnessState.engramSurface.PersistenceSurface)
+	}
+	return nil
+}
+
+func agmValidatesEngramMetadataParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.engramMetadataValid = engramparity.ValidateManifestMetadata() == nil && engramparity.ValidateOpsSurfaces() == nil
+	return nil
+}
+
+func engramMetadataShouldBeStoredInHarnessNeutralFields(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.engramMetadataValid {
+		return fmt.Errorf("engram metadata parity validation failed")
+	}
+	return nil
+}
+
+func agmValidatesWayfinderParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := wayfinderparity.ValidateActiveHarnessSurfaces(); err != nil {
+		return err
+	}
+	surface, ok := wayfinderparity.SurfaceForHarness(harnessState.configuredHarness)
+	if !ok {
+		return fmt.Errorf("harness %q has no Wayfinder surface", harnessState.configuredHarness)
+	}
+	harnessState.wayfinderSurface = surface
+	return nil
+}
+
+func harnessShouldHaveWayfinderDiscoverySurface(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.wayfinderSurface.Harness != normalized {
+		return fmt.Errorf("wayfinder surface harness = %q, want %q", harnessState.wayfinderSurface.Harness, normalized)
+	}
+	if harnessState.wayfinderSurface.DiscoverySurface == "" {
+		return fmt.Errorf("harness %q has empty Wayfinder discovery surface", normalized)
+	}
+	return nil
+}
+
+func harnessShouldHaveWayfinderExecutionSurface(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.wayfinderSurface.Harness != normalized {
+		return fmt.Errorf("wayfinder surface harness = %q, want %q", harnessState.wayfinderSurface.Harness, normalized)
+	}
+	if harnessState.wayfinderSurface.ExecutionSurface == "" {
+		return fmt.Errorf("harness %q has empty Wayfinder execution surface", normalized)
+	}
+	return nil
+}
+
+func agmValidatesWayfinderAssetParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.wayfinderAssetsValid = wayfinderparity.ValidateAssets(bddRepoRoot()) == nil && wayfinderparity.ValidateMCPOperations() == nil
+	return nil
+}
+
+func wayfinderShouldPublishSkillPluginCommandAndMCPStatusSurfaces(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.wayfinderAssetsValid {
+		return fmt.Errorf("wayfinder asset or mcp operation parity validation failed")
+	}
+	return nil
+}
+
+func agmValidatesWayfinderPhaseEngramParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.wayfinderPhaseEngrams = wayfinderparity.ValidatePhaseEngramCoverage() == nil
+	return nil
+}
+
+func wayfinderShouldResolvePhaseEngramsWithoutHarnessSpecificState(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.wayfinderPhaseEngrams {
+		return fmt.Errorf("wayfinder phase engram coverage validation failed")
+	}
+	return nil
+}
+
+func agmValidatesConfigurationDirectoryParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := configdirparity.ValidateActiveDirectories(bddRepoRoot()); err != nil {
+		return err
+	}
+	surface, ok := configdirparity.SurfaceForHarness(harnessState.configuredHarness)
+	if !ok {
+		return fmt.Errorf("harness %q has no configuration directory surface", harnessState.configuredHarness)
+	}
+	harnessState.configDirSurface = surface
+	return nil
+}
+
+func agmValidatesDeprecatedConfigurationDirectoryParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	if err := configdirparity.ValidateDeprecatedCompatibility(bddRepoRoot()); err != nil {
+		return err
+	}
+	surface, ok := configdirparity.SurfaceForHarness(harnessState.configuredHarness)
+	if !ok {
+		return fmt.Errorf("harness %q has no configuration directory surface", harnessState.configuredHarness)
+	}
+	harnessState.configDirSurface = surface
+	return nil
+}
+
+func harnessShouldHaveConfigurationDirectory(ctx context.Context, harness, directory string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if harnessState.configDirSurface.Harness != normalized {
+		return fmt.Errorf("configuration directory surface harness = %q, want %q", harnessState.configDirSurface.Harness, normalized)
+	}
+	if harnessState.configDirSurface.Directory != directory {
+		return fmt.Errorf("configuration directory = %q, want %q", harnessState.configDirSurface.Directory, directory)
+	}
+	return nil
+}
+
+func findQuotaSurface(surfaces []quotaparity.HarnessSurface, harness string) (quotaparity.HarnessSurface, bool) {
+	normalized := agent.NormalizeHarnessName(harness)
+	for _, surface := range surfaces {
+		if surface.Harness == normalized {
+			return surface, true
+		}
+	}
+	return quotaparity.HarnessSurface{}, false
 }
 
 func getHarnessParityState(ctx context.Context) (*harnessParityState, error) {

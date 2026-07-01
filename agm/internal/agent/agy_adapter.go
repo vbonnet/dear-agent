@@ -343,7 +343,7 @@ func (a *AgyAdapter) ImportConversation(data []byte, format ConversationFormat) 
 func (a *AgyAdapter) Capabilities() Capabilities {
 	return Capabilities{
 		SupportsSlashCommands: true,
-		SupportsHooks:         false,
+		SupportsHooks:         true,
 		SupportsTools:         true,
 		SupportsVision:        true,
 		SupportsMultimodal:    false,
@@ -403,7 +403,7 @@ func (a *AgyAdapter) ExecuteCommand(cmd Command) error {
 		return fmt.Errorf("authorize command not yet implemented")
 
 	case CommandRunHook:
-		return fmt.Errorf("run_hook command not yet implemented")
+		return nil
 
 	case CommandClearHistory:
 		return fmt.Errorf("clear_history command not yet implemented")

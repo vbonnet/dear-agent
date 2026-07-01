@@ -4,8 +4,25 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestInstallHooksHelpIsHarnessNeutral(t *testing.T) {
+	for _, text := range []string{installHooksCmd.Short, installHooksCmd.Long} {
+		for _, forbidden := range []string{
+			"Install Claude Code hooks",
+			"Claude Code hooks that notify",
+		} {
+			if strings.Contains(text, forbidden) {
+				t.Fatalf("install-hooks help contains Claude-only wording %q in:\n%s", forbidden, text)
+			}
+		}
+	}
+	if !strings.Contains(installHooksCmd.Long, ".opencode/") {
+		t.Fatalf("install-hooks help should mention OpenCode hook manifest location:\n%s", installHooksCmd.Long)
+	}
+}
 
 func TestAddHookRegistration(t *testing.T) {
 	tests := []struct {

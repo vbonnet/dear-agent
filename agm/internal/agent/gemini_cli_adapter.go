@@ -42,7 +42,7 @@ func NewGeminiCLIAdapter(sessionStore SessionStore) (Agent, error) {
 
 // Name returns the agent identifier
 func (a *GeminiCLIAdapter) Name() string {
-	return "gemini"
+	return "gemini-cli"
 }
 
 // Version returns the model name

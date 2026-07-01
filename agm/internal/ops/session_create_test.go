@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
@@ -144,6 +145,33 @@ func TestCreateSession_DefaultsModelAndHarness(t *testing.T) {
 	}
 }
 
+func TestCreateSession_DefaultsModelPerHarness(t *testing.T) {
+	tests := []struct {
+		harness string
+		want    string
+	}{
+		{"codex-cli", "5.6"},
+		{"agy", "2.5-flash"},
+		{"opencode-cli", "sonnet"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.harness, func(t *testing.T) {
+			result, err := CreateSession(&OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}, &CreateSessionRequest{
+				Cwd:     t.TempDir(),
+				Prompt:  "test",
+				Title:   "session-" + strings.ReplaceAll(tt.harness, "-", "_"),
+				Harness: tt.harness,
+			})
+			if err != nil {
+				t.Fatalf("CreateSession: %v", err)
+			}
+			if result.Model != tt.want {
+				t.Errorf("default model = %q, want %q", result.Model, tt.want)
+			}
+		})
+	}
+}
+
 func TestCreateSession_DerivesNameFromCwd(t *testing.T) {
 	dir := t.TempDir()
 	dirName := filepath.Base(dir)
@@ -269,8 +297,8 @@ func TestCreateSession_RejectsInvalidModelChars(t *testing.T) {
 	if !errors.As(err, &opErr) {
 		t.Fatalf("expected *OpError, got %T", err)
 	}
-	if !strings.Contains(opErr.Detail, "invalid characters") {
-		t.Errorf("error should mention invalid characters, got: %s", opErr.Detail)
+	if !strings.Contains(opErr.Detail, "disallowed character") {
+		t.Errorf("error should mention disallowed character, got: %s", opErr.Detail)
 	}
 }
 
@@ -309,6 +337,25 @@ func TestCreateSession_AcceptsValidModel(t *testing.T) {
 	}
 	if result.Model != "claude-3.5-sonnet" {
 		t.Errorf("model = %q, want claude-3.5-sonnet", result.Model)
+	}
+}
+
+func TestCreateSession_AcceptsRegistryModelIdentifier(t *testing.T) {
+	dir := t.TempDir()
+	tmuxMock := session.NewMockTmux()
+	ctx := &OpContext{Tmux: tmuxMock, OutputMode: "json"}
+
+	result, err := CreateSession(ctx, &CreateSessionRequest{
+		Cwd:     dir,
+		Prompt:  "test",
+		Harness: "opencode-cli",
+		Model:   "z-ai/glm-5.2",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession with slash model: %v", err)
+	}
+	if result.Model != "z-ai/glm-5.2" {
+		t.Errorf("model = %q, want z-ai/glm-5.2", result.Model)
 	}
 }
 
@@ -418,6 +465,31 @@ func TestBuildHarnessCommand_CodexCli(t *testing.T) {
 	}
 }
 
+func TestBuildHarnessCommand_OpenCodeCli(t *testing.T) {
+	cmd := buildHarnessCommand("opencode-cli", "sonnet", "open-session", "/tmp/work", false)
+	for _, want := range []string{
+		"cd '/tmp/work'",
+		"opencode attach",
+		"&& exit",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("command %q missing %q", cmd, want)
+		}
+	}
+	if strings.Contains(cmd, "--model") || strings.Contains(cmd, "-m ") {
+		t.Errorf("opencode command should not pass a model flag: %s", cmd)
+	}
+}
+
+func TestBuildHarnessCommand_ActiveHarnessesSupported(t *testing.T) {
+	for _, harness := range agent.ActiveHarnesses() {
+		cmd := buildHarnessCommand(harness, "sonnet", "session", "/tmp/work", false)
+		if strings.Contains(cmd, "Unknown harness") {
+			t.Errorf("active harness %q produced unknown-harness command: %s", harness, cmd)
+		}
+	}
+}
+
 func TestBuildHarnessCommand_UnknownHarness(t *testing.T) {
 	cmd := buildHarnessCommand("unknown", "m", "s", "/tmp", false)
 	if !strings.Contains(cmd, "Unknown harness") {
@@ -446,7 +518,7 @@ func TestBuildHarnessCommand_BracketedModelQuoted(t *testing.T) {
 // "&&  exit" from the command for all harnesses that normally include it,
 // so supervisor sessions survive their Claude turn/loop ending (ce-pzca).
 func TestBuildHarnessCommand_Persistent(t *testing.T) {
-	for _, harness := range []string{"claude-code", "gemini-cli", "codex-cli"} {
+	for _, harness := range append(agent.ActiveHarnesses(), agent.DeprecatedHarnesses()...) {
 		cmd := buildHarnessCommand(harness, "opus", "sup-session", "/tmp/work", true)
 		if strings.Contains(cmd, "&& exit") {
 			t.Errorf("persistent=true: harness %q command still has '&& exit': %s", harness, cmd)
@@ -457,7 +529,7 @@ func TestBuildHarnessCommand_Persistent(t *testing.T) {
 // TestBuildHarnessCommand_NonPersistentHasExit verifies that persistent=false
 // keeps the "&&  exit" suffix for clean one-shot worker teardown.
 func TestBuildHarnessCommand_NonPersistentHasExit(t *testing.T) {
-	for _, harness := range []string{"claude-code", "gemini-cli", "codex-cli"} {
+	for _, harness := range append(agent.ActiveHarnesses(), agent.DeprecatedHarnesses()...) {
 		cmd := buildHarnessCommand(harness, "opus", "worker-session", "/tmp/work", false)
 		if !strings.Contains(cmd, "&& exit") {
 			t.Errorf("persistent=false: harness %q command missing '&& exit': %s", harness, cmd)

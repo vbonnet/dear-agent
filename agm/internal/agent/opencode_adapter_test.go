@@ -54,8 +54,8 @@ func TestOpenCodeAdapterName(t *testing.T) {
 		t.Fatalf("NewOpenCodeAdapter failed: %v", err)
 	}
 
-	if got := adapter.Name(); got != "opencode" {
-		t.Errorf("Name() = %q, want %q", got, "opencode")
+	if got := adapter.Name(); got != "opencode-cli" {
+		t.Errorf("Name() = %q, want %q", got, "opencode-cli")
 	}
 }
 
