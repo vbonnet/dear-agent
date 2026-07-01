@@ -136,7 +136,7 @@ func UnregisteredParityFeatures(root string) ([]string, error) {
 
 	registered := map[string]bool{}
 	for _, surface := range ParitySurfaces() {
-		registered[filepath.Clean(surface.FeaturePath)] = true
+		registered[filepath.ToSlash(filepath.Clean(surface.FeaturePath))] = true
 	}
 
 	var missing []string
@@ -175,34 +175,38 @@ func validateSurface(root string, surface Surface) []Finding {
 		})
 	}
 
-	spec, err := os.ReadFile(filepath.Join(root, surface.SpecPath))
-	if err != nil {
-		findings = append(findings, Finding{
-			Surface: surface.Name,
-			Path:    surface.SpecPath,
-			Message: fmt.Sprintf("read SPEC.md: %v", err),
-		})
-	} else if !strings.Contains(string(spec), "## EARS Requirements") {
-		findings = append(findings, Finding{
-			Surface: surface.Name,
-			Path:    surface.SpecPath,
-			Message: "SPEC.md does not declare EARS requirements",
-		})
+	if surface.SpecPath != "" {
+		spec, err := os.ReadFile(filepath.Join(root, surface.SpecPath))
+		if err != nil {
+			findings = append(findings, Finding{
+				Surface: surface.Name,
+				Path:    surface.SpecPath,
+				Message: fmt.Sprintf("read SPEC.md: %v", err),
+			})
+		} else if !strings.Contains(string(spec), "## EARS Requirements") {
+			findings = append(findings, Finding{
+				Surface: surface.Name,
+				Path:    surface.SpecPath,
+				Message: "SPEC.md does not declare EARS requirements",
+			})
+		}
 	}
 
-	feature, err := os.ReadFile(filepath.Join(root, surface.FeaturePath))
-	if err != nil {
-		findings = append(findings, Finding{
-			Surface: surface.Name,
-			Path:    surface.FeaturePath,
-			Message: fmt.Sprintf("read BDD feature: %v", err),
-		})
-	} else if !strings.Contains(string(feature), "Feature:") {
-		findings = append(findings, Finding{
-			Surface: surface.Name,
-			Path:    surface.FeaturePath,
-			Message: "BDD feature does not declare a Feature",
-		})
+	if surface.FeaturePath != "" {
+		feature, err := os.ReadFile(filepath.Join(root, surface.FeaturePath))
+		if err != nil {
+			findings = append(findings, Finding{
+				Surface: surface.Name,
+				Path:    surface.FeaturePath,
+				Message: fmt.Sprintf("read BDD feature: %v", err),
+			})
+		} else if !strings.Contains(string(feature), "Feature:") {
+			findings = append(findings, Finding{
+				Surface: surface.Name,
+				Path:    surface.FeaturePath,
+				Message: "BDD feature does not declare a Feature",
+			})
+		}
 	}
 
 	return findings
