@@ -126,16 +126,16 @@ func SendSlashCommandSafe(sessionName string, command string) error {
 //   - Prompts with code blocks
 //   - Structured prompts with markdown formatting
 //   - Any text that needs to preserve newlines
+//
 // skipPostSubmitGuard reports whether SendMultiLinePromptSafe should skip its
-// post-submit human-typing cooldown abort. The cooldown protects an attended
-// human from having a send land on top of their un-submitted keystrokes, but it
-// must yield when the caller has a legitimate reason to deliver regardless:
+// post-submit composer-stability check. That check aborts only if the composer
+// vanished (session mid-processing); the old human-typing abort here is gone
+// (human_typing is non-blocking now — see stash.go). It still yields when the
+// caller has a legitimate reason to deliver regardless:
 //   - shouldInterrupt: the caller is deliberately interrupting (e.g. work
-//     requests / wake-loops), so the human-typing protection never applied;
-//   - autonomous: the session is unattended, so leftover input is provably
-//     AGM's own stale text, not a human mid-keystroke (ce-v9in);
-//   - force: the operator passed --force, which already bypassed safety.Check's
-//     human_typing guard upstream and must follow through here (ce-5sow).
+//     requests / wake-loops);
+//   - autonomous: the session is unattended (ce-v9in);
+//   - force: the operator passed --force and must follow through (ce-5sow).
 //
 // Pure decision helper (no tmux I/O) so the gate is unit-testable.
 func skipPostSubmitGuard(shouldInterrupt, autonomous, force bool) bool {
@@ -148,24 +148,24 @@ func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt 
 		return fmt.Errorf("session not ready for multi-line prompt: %w", err)
 	}
 
-	// Bug fix (2026-03-31): Post-submit cooldown — prevent delivering in the same
-	// prompt cycle as a human submission. After WaitForPromptSimple returns, the prompt
-	// may be transiently visible between human submit and Claude starting to process.
-	// Wait, then re-verify the prompt is still there and no human input is present.
+	// Post-submit composer-stability check. After WaitForPromptSimple returns, the
+	// prompt may be transiently visible between a human submit and the session
+	// starting to process. We pause briefly and re-verify the composer is still
+	// present so we do not paste into a vanishing prompt.
 	//
-	// ce-v9in: skip this entirely in autonomous mode. There is no human at an
-	// unattended session, so "input line has content" only ever means AGM's own
-	// un-submitted text from a prior tick. SendPromptLiteral stashes that with
-	// C-s before delivering; aborting here would re-create the mesh deadlock.
+	// The human_typing abort that used to live here ("input line has content
+	// after cooldown — human is typing") is GONE: it over-captured and blocked
+	// the mesh. Leftover input is now stashed non-blockingly in SendPromptLiteral
+	// (see stash.go), so we simply proceed. Only the composer-disappeared check
+	// remains, and it is a distinct protection (session mid-processing), not
+	// human_typing.
 	//
-	// ce-5sow: also skip under operator --force. The force override already
-	// bypassed safety.Check's human_typing guard upstream; without skipping here
-	// the send re-aborts at this separate cooldown check ("human is typing"),
-	// which is exactly what blocked forced delivery to looping supervisors.
+	// ce-v9in / ce-5sow: still skipped in autonomous mode, under operator --force,
+	// and when shouldInterrupt — those callers deliver regardless.
 	if !skipPostSubmitGuard(shouldInterrupt, AutonomousMode(), ForceDelivery()) {
 		time.Sleep(1 * time.Second)
 
-		// Re-capture pane to verify prompt stability
+		// Re-capture pane to verify composer stability
 		cmdCtx, cmdCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		recheck, err := exec.CommandContext(cmdCtx, "tmux", "-S", GetSocketPath(), "capture-pane",
 			"-t", NormalizeTmuxSessionName(sessionName), "-p", "-S", "-30").Output()
@@ -176,20 +176,10 @@ func SendMultiLinePromptSafe(sessionName string, prompt string, shouldInterrupt 
 		}
 		if err == nil {
 			recheckContent := string(recheck)
-			// If prompt disappeared, session is processing a human submission
+			// If the composer disappeared, the session is actively processing; abort
+			// rather than paste into a vanished prompt. This is NOT human_typing.
 			if !containsAnyHarnessPromptPattern(recheckContent) {
-				return fmt.Errorf("prompt disappeared after detection — session likely processing human input, aborting delivery")
-			}
-			// Bug fix (2026-04-10): Skip human-input detection when AI is actively
-			// generating (spinner visible). Content changes during generation are
-			// AI output, not human typing.
-			if !hasActiveSpinner(recheckContent) {
-				// If input line has content, confirm it's not ghost text before blocking.
-				// Claude Code renders ghost/placeholder text with dim attribute (\x1b[2m),
-				// which cannot be cleared and must not be treated as human typing.
-				if InputLineHasContent(recheckContent) && !HasGhostTextInPrompt(sessionName) {
-					return fmt.Errorf("input line has content after cooldown — human is typing, aborting delivery")
-				}
+				return fmt.Errorf("prompt disappeared after detection — session likely processing, aborting delivery")
 			}
 		}
 	}
