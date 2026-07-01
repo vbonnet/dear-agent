@@ -88,17 +88,161 @@ stalled sessions are detected and recovered against agreed thresholds.
 
 **File:** [`harness_parity.feature`](../test/bdd/features/harness_parity.feature)
 
-**Drives:** `state.Detector` / `state.CheckCanReceive`
+**Drives:** `agm/internal/agent` harness/model registry plus Codex terminal
+state detection contracts.
 
 **Key scenarios:**
 - A Codex CLI composer pane is detected as `ready`.
 - An idle Codex composer allows direct delivery.
 - A Codex trust prompt is queued rather than treated as a sendable prompt.
+- Active harnesses are exactly Claude Code, Codex CLI, AGY, and OpenCode.
+- Gemini CLI remains deprecated compatibility, not active parity.
+- Active harness factories use canonical names.
+- Supported model families include Anthropic, OpenAI, Gemini, GLM, DeepSeek,
+  Nemotron, and Qwen.
 
-**Why this matters:** AGM's delivery contract is harness-neutral. Codex CLI uses
-different terminal chrome than Claude Code, but the orchestrator must still know
-when Codex can safely receive input and when a menu prompt must not receive
-injected text.
+**Why this matters:** AGM's delivery contract is harness-neutral. Different
+terminal chrome, adapter names, and model aliases must still route through one
+shared registry instead of harness-specific assumptions.
+
+### Instruction Parity
+
+**File:** [`instruction_parity.feature`](../test/bdd/features/instruction_parity.feature)
+
+**Drives:** root instruction entrypoints and `internal/instructions`.
+
+**Key scenarios:**
+- `CLAUDE.md`, `GEMINI.md`, `CODEX.md`, `AGY.md`, and `OPENCODE.md` import
+  `AGENTS.md` first.
+- Harness-specific files do not duplicate shared policy sections.
+
+**Why this matters:** The shared policy is the source of truth; model-specific
+entrypoints should only add model/harness-specific guidance.
+
+### Hook Parity
+
+**File:** [`hook_parity.feature`](../test/bdd/features/hook_parity.feature)
+
+**Drives:** repository hook manifests and `internal/hookparity`.
+
+**Key scenarios:**
+- Claude Code, Codex CLI, AGY, and OpenCode expose the required PreToolUse
+  guardrails.
+- Stop and SubagentStop feedback hooks are configured.
+- Non-Claude harnesses expose Beads lifecycle hooks through their native hook
+  manifests.
+
+**Why this matters:** Safety and dogfooding guardrails must travel with every
+hook-capable harness, not only Claude Code.
+
+### Permission Parity
+
+**File:** [`permission_parity.feature`](../test/bdd/features/permission_parity.feature)
+
+**Drives:** `agm/internal/permissionparity` and session manifest permission
+policy persistence.
+
+**Key scenarios:**
+- Every active harness has a permission policy target.
+- Resolved permission policy includes default and profile permissions.
+- The manifest records the resolved policy as the shared source of truth.
+
+**Why this matters:** Harnesses have different native permission features, so
+AGM must preserve one durable policy contract across them.
+
+### Quota Parity
+
+**File:** [`quota_parity.feature`](../test/bdd/features/quota_parity.feature)
+
+**Drives:** `agm/internal/quotaparity`, model-family defaults, and pricing
+coverage policy.
+
+**Key scenarios:**
+- Every active harness has explicit context, cost, rate-limit, persistence, and
+  degradation surfaces.
+- Every supported model family has priced coverage or an explicit unpriced
+  policy.
+
+**Why this matters:** Quota monitoring must degrade honestly instead of falling
+back to Claude-specific or Opus-specific assumptions.
+
+### MCP Parity
+
+**File:** [`mcp_parity.feature`](../test/bdd/features/mcp_parity.feature)
+
+**Drives:** `agm/internal/mcpparity`, MCP tool schemas, and the shared ops
+registry.
+
+**Key scenarios:**
+- Every active harness has an MCP create-session surface.
+- MCP create-session uses shared harness/model validation.
+- Deprecated Gemini compatibility remains detectable as compatibility.
+- Lifecycle operations are exposed through the MCP operation registry.
+
+**Why this matters:** MCP clients should call the same harness-neutral session
+contract as the CLI rather than receiving a Claude-only subset.
+
+### Marketplace Parity
+
+**File:** [`marketplace_parity.feature`](../test/bdd/features/marketplace_parity.feature)
+
+**Drives:** `.dear-agent/marketplace.json`, `.claude-plugin/marketplace.json`,
+and `agm/internal/marketplaceparity`.
+
+**Key scenarios:**
+- The neutral marketplace catalog is valid.
+- Claude's native marketplace mirror matches the neutral catalog.
+- Published plugin assets exist for declared capabilities.
+- Every active harness has an explicit discovery surface.
+
+**Why this matters:** Claude may have native plugin marketplace support, but
+other harnesses still need a neutral discovery path.
+
+### Engram Parity
+
+**File:** [`engram_parity.feature`](../test/bdd/features/engram_parity.feature)
+
+**Drives:** `agm/internal/engramparity`, manifest Engram metadata, and ops
+discovery.
+
+**Key scenarios:**
+- Every active harness has an Engram injection surface.
+- Engram metadata is persisted through harness-neutral manifest fields.
+- Engram metadata remains discoverable through shared ops.
+
+**Why this matters:** Memory retrieval should not depend on Claude-only state or
+native memory APIs.
+
+### Wayfinder Parity
+
+**File:** [`wayfinder_parity.feature`](../test/bdd/features/wayfinder_parity.feature)
+
+**Drives:** `agm/internal/wayfinderparity`, Wayfinder assets, phase Engrams, and
+MCP operations.
+
+**Key scenarios:**
+- Every active harness has Wayfinder discovery and execution surfaces.
+- Wayfinder publishes SKILL, plugin, command, and MCP status surfaces.
+- Wayfinder phase guidance resolves through harness-neutral Engrams.
+
+**Why this matters:** Wayfinder is the planning layer for consequential work;
+non-Claude harnesses need an executable path to the same workflow.
+
+### Config Directory Parity
+
+**File:** [`config_directory_parity.feature`](../test/bdd/features/config_directory_parity.feature)
+
+**Drives:** repo-local harness config directories and
+`agm/internal/configdirparity`.
+
+**Key scenarios:**
+- Active harnesses have `.claude`, `.codex`, `.agents`, and `.opencode`
+  directory surfaces.
+- Deprecated Gemini compatibility keeps `.gemini` available without making it
+  active parity.
+
+**Why this matters:** Harness-specific config belongs in explicit repo-local
+surfaces so hook, instruction, and marketplace support can be audited.
 
 ---
 
