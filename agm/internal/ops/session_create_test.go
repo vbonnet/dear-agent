@@ -152,7 +152,7 @@ func TestCreateSession_DefaultsModelPerHarness(t *testing.T) {
 	}{
 		{"codex-cli", "5.6"},
 		{"agy", "2.5-flash"},
-		{"opencode-cli", "sonnet"},
+		{"opencode-cli", "glm-5.2"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.harness, func(t *testing.T) {

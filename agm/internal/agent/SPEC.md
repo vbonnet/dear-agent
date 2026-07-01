@@ -1,6 +1,6 @@
 # Agent Harness and Model Parity Specification
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-01 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -30,6 +30,8 @@ compatibility.
 **AGP-04** When AGM resolves an active harness adapter, the system shall return a concrete adapter whose `Name()` matches the normalized harness identifier.
 
 **AGP-05** When AGM builds OpenCode model choices, the system shall include model aliases from every active harness and the OpenRouter-compatible model family source while excluding deprecated-only Gemini CLI aliases.
+
+**AGP-13** When AGM validates active harness adapter conformance, the system shall run the same non-I/O adapter contract across every active harness and require canonical identity, non-empty version, sane capabilities, default model coverage, test model coverage, model aliases, and model family coverage.
 
 ### Model Families
 
