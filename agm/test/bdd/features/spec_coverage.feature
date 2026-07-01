@@ -32,3 +32,4 @@ Feature: SPEC and BDD coverage
     Given AGM parity coverage requirements
     When AGM validates changed Go package SPEC coverage
     Then changed production Go packages should have co-located SPEC.md files
+    And changed production Go package SPEC.md files should pass strict EARS lint
