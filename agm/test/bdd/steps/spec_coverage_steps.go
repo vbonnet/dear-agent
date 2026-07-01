@@ -36,6 +36,7 @@ func RegisterSpecCoverageSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^every BDD catalog feature reference should exist$`, everyBDDCatalogFeatureReferenceShouldExist)
 	ctx.Step(`^AGM validates changed Go package SPEC coverage$`, agmValidatesChangedGoPackageSPECCoverage)
 	ctx.Step(`^changed production Go packages should have co-located SPEC.md files$`, changedProductionGoPackagesShouldHaveCoLocatedSPECFiles)
+	ctx.Step(`^changed production Go package SPEC.md files should pass strict EARS lint$`, changedProductionGoPackageSPECFilesShouldPassStrictEARSLint)
 }
 
 func agmParityCoverageRequirements(ctx context.Context) error {
@@ -107,6 +108,10 @@ func agmValidatesChangedGoPackageSPECCoverage(ctx context.Context) error {
 
 func changedProductionGoPackagesShouldHaveCoLocatedSPECFiles(ctx context.Context) error {
 	return specCoverageShouldHaveNoFindings(ctx, "co-located SPEC.md")
+}
+
+func changedProductionGoPackageSPECFilesShouldPassStrictEARSLint(ctx context.Context) error {
+	return specCoverageShouldHaveNoFindings(ctx, "invalid EARS syntax")
 }
 
 func specCoverageShouldHaveNoFindings(ctx context.Context, phrase string) error {

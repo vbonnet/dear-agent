@@ -39,3 +39,5 @@ the larger repo-wide SPEC backlog is burned down incrementally.
 **SCB-11** When `agm/docs/BDD-CATALOG.md` lists a BDD feature file, the system shall require that referenced feature file to exist under `agm/test/bdd/features/`.
 
 **SCB-12** When a parity-critical `SPEC.md` file is registered in the coverage matrix, the system shall require every candidate requirement to pass strict EARS lint.
+
+**SCB-13** When a pull request changes a production Go package with a co-located `SPEC.md`, the system shall require that co-located `SPEC.md` to pass strict EARS lint.
