@@ -244,6 +244,22 @@ non-Claude harnesses need an executable path to the same workflow.
 **Why this matters:** Harness-specific config belongs in explicit repo-local
 surfaces so hook, instruction, and marketplace support can be audited.
 
+### SPEC and BDD Coverage
+
+**File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)
+
+**Drives:** `internal/speccoverage`.
+
+**Key scenarios:**
+- Every parity-critical surface has a registered `SPEC.md`.
+- Every parity-critical surface has an executable BDD feature.
+- Every parity `SPEC.md` declares EARS requirements.
+- Every `*_parity.feature` file is registered in the coverage matrix.
+
+**Why this matters:** Parity work should not land as untraceable test-only or
+doc-only changes. The coverage matrix keeps SPEC and BDD artifacts paired while
+legacy repo-wide SPEC coverage is burned down incrementally.
+
 ---
 
 ## Running
