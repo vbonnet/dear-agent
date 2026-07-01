@@ -1,14 +1,11 @@
 package safety
 
 import (
-	"context"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
@@ -162,40 +159,6 @@ func detectHumanTyping(paneContent string) *Violation {
 
 // --- Session Uninitialized Guard ---
 
-func isHarnessProcessRunning(sessionName, socketPath, processName string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-t", sessionName, "-F", "#{pane_pid}")
-	out, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	panePid := strings.TrimSpace(string(out))
-	if panePid == "" {
-		return false
-	}
-
-	psCmd := exec.CommandContext(ctx, "ps", "-o", "ppid=", "-o", "comm=", "-ax")
-	psOut, psErr := psCmd.Output()
-	if psErr != nil {
-		return false
-	}
-
-	for line := range strings.SplitSeq(string(psOut), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			ppid := fields[0]
-			comm := fields[1]
-			baseComm := filepath.Base(comm)
-			if ppid == panePid && (baseComm == processName || comm == processName) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // CheckSessionUninitialized detects if the target harness has not reached its
 // interactive composer yet. Empty harness preserves the historical Claude Code
 // behavior for legacy callers.
@@ -211,9 +174,6 @@ func CheckSessionUninitialized(sessionName, socketPath, harness string) *Violati
 			codexRunning = true
 		}
 		if !codexRunning {
-			codexRunning = isHarnessProcessRunning(sessionName, socketPath, "codex") || isHarnessProcessRunning(sessionName, socketPath, "node")
-		}
-		if !codexRunning {
 			return &Violation{
 				Guard:      ViolationSessionUninitialized,
 				Message:    "Codex process is not running in this session.",
@@ -227,9 +187,6 @@ func CheckSessionUninitialized(sessionName, socketPath, harness string) *Violati
 		agyRunning, procErr := tmux.IsProcessRunning(sessionName, "agy")
 		if procErr != nil {
 			agyRunning = true
-		}
-		if !agyRunning {
-			agyRunning = isHarnessProcessRunning(sessionName, socketPath, "agy")
 		}
 		if !agyRunning {
 			return &Violation{
@@ -272,11 +229,7 @@ func detectCodexSessionUninitialized(paneContent string) *Violation {
 	// "gpt-X.Y quality · /path" remains — "gpt-" covers both states.
 	if strings.Contains(paneContent, "OpenAI Codex") ||
 		strings.Contains(paneContent, "/model to change") ||
-		strings.Contains(paneContent, "gpt-") ||
-		strings.Contains(paneContent, "Thought for") ||
-		strings.Contains(paneContent, "Running...") ||
-		strings.Contains(paneContent, "●") ||
-		strings.Contains(paneContent, "▸") {
+		strings.Contains(paneContent, "gpt-") {
 		return nil
 	}
 	if strings.Contains(paneContent, "Do you trust the contents of this directory") {
@@ -318,14 +271,6 @@ func detectAgySessionUninitialized(paneContent string) *Violation {
 		if strings.TrimSpace(line) == ">" {
 			return nil
 		}
-	}
-
-	// Bypass if the agent is actively working/thinking or executing tools
-	if strings.Contains(paneContent, "Thought for") ||
-		strings.Contains(paneContent, "Running...") ||
-		strings.Contains(paneContent, "●") ||
-		strings.Contains(paneContent, "▸") {
-		return nil
 	}
 
 	return &Violation{
