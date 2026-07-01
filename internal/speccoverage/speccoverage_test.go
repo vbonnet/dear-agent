@@ -52,21 +52,26 @@ func TestValidateSurfaceDoesNotReadEmptyPaths(t *testing.T) {
 
 func TestValidateSurfaceRejectsNeedsAuditMarker(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
-	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: NEEDS-AUDIT -->\n\n## EARS Requirements\n\n**EX-01** When an example is validated, the system shall report stale audits.\n")
-	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "Feature: Example parity\n")
+	for _, marker := range []string{"NEEDS-AUDIT", "needs-audit", ""} {
+		t.Run(marker, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: "+marker+" -->\n\n## EARS Requirements\n\n**EX-01** When an example is validated, the system shall report stale audits.\n")
+			writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "Feature: Example parity\n")
 
-	findings := validateSurface(root, Surface{
-		Name:        "example parity",
-		PackagePath: "internal/example",
-		SpecPath:    "internal/example/SPEC.md",
-		FeaturePath: "agm/test/bdd/features/example_parity.feature",
-	})
-	if len(findings) != 1 {
-		t.Fatalf("expected one stale audit finding, got %d: %v", len(findings), findings)
-	}
-	if findings[0].Message != "SPEC.md audit marker is missing or still NEEDS-AUDIT" {
-		t.Fatalf("finding message = %q", findings[0].Message)
+			findings := validateSurface(root, Surface{
+				Name:        "example parity",
+				PackagePath: "internal/example",
+				SpecPath:    "internal/example/SPEC.md",
+				FeaturePath: "agm/test/bdd/features/example_parity.feature",
+			})
+			if len(findings) != 1 {
+				t.Fatalf("expected one stale audit finding, got %d: %v", len(findings), findings)
+			}
+			if findings[0].Message != "SPEC.md audit marker is missing or still NEEDS-AUDIT" {
+				t.Fatalf("finding message = %q", findings[0].Message)
+			}
+		})
 	}
 }
 

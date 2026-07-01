@@ -302,8 +302,10 @@ func validateSurface(root string, surface Surface) []Finding {
 func hasCompletedAuditMarker(spec string) bool {
 	for line := range strings.SplitSeq(spec, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "<!-- Last audited at:") {
-			return !strings.Contains(line, "NEEDS-AUDIT")
+		if value, ok := strings.CutPrefix(line, "<!-- Last audited at:"); ok {
+			value = strings.TrimSuffix(value, "-->")
+			value = strings.TrimSpace(value)
+			return value != "" && !strings.EqualFold(value, "NEEDS-AUDIT")
 		}
 	}
 	return false
