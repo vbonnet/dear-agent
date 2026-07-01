@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,6 +35,56 @@ func TestUnregisteredParityFeaturesIsEmpty(t *testing.T) {
 	}
 	if len(missing) > 0 {
 		t.Fatalf("unregistered parity features: %v", missing)
+	}
+}
+
+func TestBDDCatalogCoversExecutableFeatures(t *testing.T) {
+	t.Parallel()
+	for _, finding := range ValidateBDDCatalog(repoRoot()) {
+		t.Error(finding.Error())
+	}
+}
+
+func TestValidateBDDCatalogReportsUnlistedFeature(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "agm/test/bdd/features/listed.feature", "Feature: Listed\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/unlisted.feature", "Feature: Unlisted\n")
+	writeCoverageFile(t, root, "agm/docs/BDD-CATALOG.md", strings.Join([]string{
+		"unlisted.feature was mentioned in prose but is not cataloged.",
+		"**File:** [`listed.feature`](../test/bdd/features/listed.feature)",
+	}, "\n"))
+
+	findings := ValidateBDDCatalog(root)
+	if len(findings) != 1 {
+		t.Fatalf("expected one uncataloged feature finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Path != "agm/test/bdd/features/unlisted.feature" {
+		t.Fatalf("finding path = %q", findings[0].Path)
+	}
+	if findings[0].Message != "BDD feature is not listed in agm/docs/BDD-CATALOG.md" {
+		t.Fatalf("finding message = %q", findings[0].Message)
+	}
+}
+
+func TestValidateBDDCatalogReportsMissingReferencedFeature(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "agm/test/bdd/features/listed.feature", "Feature: Listed\n")
+	writeCoverageFile(t, root, "agm/docs/BDD-CATALOG.md", strings.Join([]string{
+		"**File:** [`listed.feature`](../test/bdd/features/listed.feature)",
+		"**File:** [`missing.feature`](../test/bdd/features/missing.feature)",
+	}, "\n"))
+
+	findings := ValidateBDDCatalog(root)
+	if len(findings) != 1 {
+		t.Fatalf("expected one missing feature finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Path != "agm/test/bdd/features/missing.feature" {
+		t.Fatalf("finding path = %q", findings[0].Path)
+	}
+	if findings[0].Message != "BDD catalog references a missing feature file" {
+		t.Fatalf("finding message = %q", findings[0].Message)
 	}
 }
 
