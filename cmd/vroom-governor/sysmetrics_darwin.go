@@ -3,10 +3,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // readLoad5 reads the 5-minute load average on macOS via `sysctl -n vm.loadavg`.
@@ -24,67 +29,59 @@ func readLoad5() (float64, error) {
 	return strconv.ParseFloat(fields[1], 64)
 }
 
-// readFreeMemPct returns the percentage of free RAM on macOS using vm_stat and sysctl.
+// memoryPressureTimeout bounds the memory_pressure -Q subprocess call so a
+// hung or slow probe fails the read instead of hanging the governor loop.
+const memoryPressureTimeout = 5 * time.Second
+
+// readFreeMemPct returns the percentage of free RAM on macOS using
+// `memory_pressure -Q`, the same tool that backs Activity Monitor's memory
+// pressure gauge and the OS-level low-memory notifications apps respond to.
+//
+// This used to be computed from vm_stat as (free_pages + speculative_pages)
+// / total, which reports single-digit percentages on a healthy idle Mac:
+// macOS deliberately keeps raw "free" pages near zero, parking
+// recently-used file-backed content in the inactive queue (reclaimable
+// instantly, at zero cost) instead of actually freeing it. That formula
+// reported free memory as low as 1.8% on a machine memory_pressure -Q
+// measured at 57-65% free. Deferring to macOS's own pressure calculation
+// (which does account for the inactive queue and compressor headroom)
+// matches what a human checking Activity Monitor would see, instead of
+// reimplementing an approximation of Apple's internal accounting.
 func readFreeMemPct() (float64, error) {
-	vmOut, err := exec.Command("vm_stat").Output()
+	bgCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(bgCtx, memoryPressureTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "memory_pressure", "-Q").Output()
+	if ctx.Err() != nil {
+		return 0, fmt.Errorf("memory_pressure -Q: %w", ctx.Err())
+	}
 	if err != nil {
-		return 0, fmt.Errorf("vm_stat: %w", err)
+		return 0, fmt.Errorf("memory_pressure -Q: %w", err)
 	}
-	pageSize, freePages, specPages, err := parseVMStatOutput(string(vmOut))
-	if err != nil {
-		return 0, err
-	}
-	sysctlOut, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
-	if err != nil {
-		return 0, fmt.Errorf("sysctl hw.memsize: %w", err)
-	}
-	totalBytes, err := strconv.ParseInt(strings.TrimSpace(string(sysctlOut)), 10, 64)
-	if err != nil || totalBytes <= 0 {
-		return 0, fmt.Errorf("unexpected hw.memsize output: %q", string(sysctlOut))
-	}
-	freeBytes := float64(freePages+specPages) * float64(pageSize)
-	return freeBytes / float64(totalBytes) * 100, nil
+	return parseMemoryPressure(string(out))
 }
 
-func parseVMStatOutput(output string) (pageSize, freePages, specPages int64, err error) {
+// parseMemoryPressure extracts the free-memory percentage from
+// `memory_pressure -Q` output, e.g.:
+//
+//	The system has 25769803776 (1572864 pages with a page size of 16384).
+//	System-wide memory free percentage: 69%
+func parseMemoryPressure(output string) (float64, error) {
 	for line := range strings.SplitSeq(output, "\n") {
 		line = strings.TrimSpace(line)
-		switch {
-		case strings.Contains(line, "page size of "):
-			_, rest, ok := strings.Cut(line, "page size of ")
-			if !ok {
-				continue
-			}
-			rest = strings.TrimSuffix(rest, " bytes)")
-			rest = strings.TrimSuffix(rest, " bytes")
-			pageSize, err = strconv.ParseInt(strings.TrimSpace(rest), 10, 64)
-			if err != nil {
-				return 0, 0, 0, fmt.Errorf("parsing page size: %w", err)
-			}
-		case strings.HasPrefix(line, "Pages free:"):
-			freePages, err = parseStatLine(line)
-			if err != nil {
-				return 0, 0, 0, fmt.Errorf("parsing free pages: %w", err)
-			}
-		case strings.HasPrefix(line, "Pages speculative:"):
-			specPages, err = parseStatLine(line)
-			if err != nil {
-				return 0, 0, 0, fmt.Errorf("parsing speculative pages: %w", err)
-			}
+		_, rest, ok := strings.Cut(line, "System-wide memory free percentage:")
+		if !ok {
+			continue
 		}
+		rest = strings.TrimSpace(rest)
+		rest = strings.TrimSuffix(rest, "%")
+		pct, err := strconv.ParseFloat(rest, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parsing free percentage from %q: %w", line, err)
+		}
+		return pct, nil
 	}
-	if pageSize <= 0 {
-		return 0, 0, 0, fmt.Errorf("page size not found in vm_stat output")
-	}
-	return pageSize, freePages, specPages, nil
-}
-
-func parseStatLine(line string) (int64, error) {
-	parts := strings.SplitN(line, ":", 2)
-	if len(parts) != 2 {
-		return 0, fmt.Errorf("unexpected vm_stat line: %q", line)
-	}
-	val := strings.TrimSpace(parts[1])
-	val = strings.TrimSuffix(val, ".")
-	return strconv.ParseInt(val, 10, 64)
+	return 0, fmt.Errorf("memory_pressure -Q output missing free percentage line: %q", output)
 }
