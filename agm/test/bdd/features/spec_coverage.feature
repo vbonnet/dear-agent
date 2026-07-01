@@ -16,3 +16,7 @@ Feature: SPEC and BDD coverage
     When AGM validates parity SPEC and BDD coverage
     Then every parity BDD feature should be registered in the coverage matrix
 
+  Scenario: Changed production Go packages carry co-located specs
+    Given AGM parity coverage requirements
+    When AGM validates changed Go package SPEC coverage
+    Then changed production Go packages should have co-located SPEC.md files

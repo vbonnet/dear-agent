@@ -255,10 +255,12 @@ surfaces so hook, instruction, and marketplace support can be audited.
 - Every parity-critical surface has an executable BDD feature.
 - Every parity `SPEC.md` declares EARS requirements.
 - Every `*_parity.feature` file is registered in the coverage matrix.
+- Changed production Go package directories carry a co-located `SPEC.md`.
 
 **Why this matters:** Parity work should not land as untraceable test-only or
 doc-only changes. The coverage matrix keeps SPEC and BDD artifacts paired while
-legacy repo-wide SPEC coverage is burned down incrementally.
+legacy repo-wide SPEC coverage is burned down incrementally. The diff-based
+package guard prevents new feature work from deepening the SPEC backlog.
 
 ---
 

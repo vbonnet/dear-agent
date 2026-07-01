@@ -28,3 +28,6 @@ the larger repo-wide SPEC backlog is burned down incrementally.
 
 **SCB-06** When a new `*_parity.feature` file is added, the system shall fail unless that feature is represented in the SPEC/BDD coverage matrix.
 
+**SCB-07** When a pull request changes a production Go file outside test-only directories, the system shall require a co-located `SPEC.md` in that file's package directory.
+
+**SCB-08** When a pull request changes only Go test files or files under test-only directories, the system shall not require a new package `SPEC.md` solely for that test-only change.
