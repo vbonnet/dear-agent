@@ -56,7 +56,7 @@ func TestAGMQueue_Pending(t *testing.T) {
 }
 
 func TestAGMQueue_Dispatch(t *testing.T) {
-	t.Run("calls agm session new and removes from pending", func(t *testing.T) {
+	t.Run("calls agm session new and removes from pending after success", func(t *testing.T) {
 		var capturedArgs []string
 		q := &AGMQueue{
 			run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -96,16 +96,29 @@ func TestAGMQueue_Dispatch(t *testing.T) {
 		}
 	})
 
-	t.Run("agm failure propagated", func(t *testing.T) {
+	t.Run("agm failure propagated and task remains pending", func(t *testing.T) {
 		q := &AGMQueue{
 			run: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
-				return nil, errors.New("agm: session limit reached")
+				return []byte("capacity exhausted"), errors.New("agm: session limit reached")
 			},
 		}
 		_ = q.Enqueue(Task{ID: "t1"})
 		err := q.Dispatch(context.Background(), "t1", "coder")
 		if err == nil {
 			t.Fatal("expected error from agm, got nil")
+		}
+		if !strings.Contains(err.Error(), "worker-t1") {
+			t.Fatalf("error should include worker session name, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "capacity exhausted") {
+			t.Fatalf("error should include agm output, got: %v", err)
+		}
+		tasks, pendingErr := q.Pending(context.Background())
+		if pendingErr != nil {
+			t.Fatalf("pending failed: %v", pendingErr)
+		}
+		if len(tasks) != 1 || tasks[0].ID != "t1" {
+			t.Fatalf("failed dispatch must keep task pending, got: %v", tasks)
 		}
 	})
 
