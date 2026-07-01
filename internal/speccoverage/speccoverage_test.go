@@ -248,7 +248,7 @@ func TestValidateGoPackageSpecsForFilesRequiresEARSSection(t *testing.T) {
 	if len(findings) != 1 {
 		t.Fatalf("expected one missing EARS section finding, got %d: %v", len(findings), findings)
 	}
-	if findings[0].Message != "co-located SPEC.md does not declare EARS requirements" {
+	if findings[0].Message != "SPEC.md has invalid EARS syntax: does not declare EARS requirements" {
 		t.Fatalf("finding message = %q", findings[0].Message)
 	}
 }

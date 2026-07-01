@@ -345,7 +345,7 @@ func validateChangedPackageSpec(root, dir string) []Finding {
 		return []Finding{{
 			Surface: "changed Go package SPEC coverage",
 			Path:    specPath,
-			Message: "co-located SPEC.md does not declare EARS requirements",
+			Message: "SPEC.md has invalid EARS syntax: does not declare EARS requirements",
 		}}
 	}
 
