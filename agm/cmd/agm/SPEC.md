@@ -20,6 +20,12 @@ Provide a production-ready CLI that:
 - Ensures session health through validation and diagnostics
 - Maintains backward compatibility with Agent Session Manager (AGM)
 
+## EARS Requirements
+
+**CLI-01** When AGM creates a Codex CLI session without an explicit model, the system shall use the shared codex-cli harness default from the agent model registry.
+
+**CLI-02** When AGM builds a Codex CLI launch or resume command, the system shall resolve the selected model alias to the full Codex model name before invoking the harness.
+
 ## Requirements
 
 ### Functional Requirements

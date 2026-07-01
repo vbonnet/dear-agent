@@ -198,7 +198,7 @@ type CreateSessionInput struct {
 	Cwd     string `json:"cwd" jsonschema:"Absolute path to the working directory for the new session (required)"`
 	Prompt  string `json:"prompt" jsonschema:"Initial prompt to send to the session after startup (required)"`
 	Title   string `json:"title,omitempty" jsonschema:"Session name. If omitted, derived from cwd directory name."`
-	Model   string `json:"model,omitempty" jsonschema:"Model to use (e.g. sonnet, 5.5, 2.5-flash, z-ai/glm-5.2). Defaults to the selected harness default."`
+	Model   string `json:"model,omitempty" jsonschema:"Model to use (e.g. sonnet, 5.5, 5.6, 2.5-flash, z-ai/glm-5.2). Defaults to the selected harness default."`
 	Harness string `json:"harness,omitempty" jsonschema:"Agent harness: claude-code, codex-cli, agy, opencode-cli, or deprecated gemini-cli. Defaults to claude-code."`
 }
 
