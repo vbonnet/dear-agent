@@ -21,6 +21,12 @@ Feature: SPEC and BDD coverage
     When AGM validates parity SPEC and BDD coverage
     Then every parity BDD feature should be registered in the coverage matrix
 
+  Scenario: BDD catalog reflects executable feature files
+    Given AGM parity coverage requirements
+    When AGM validates parity SPEC and BDD coverage
+    Then every executable BDD feature should be listed in the BDD catalog
+    And every BDD catalog feature reference should exist
+
   Scenario: Changed production Go packages carry co-located specs
     Given AGM parity coverage requirements
     When AGM validates changed Go package SPEC coverage

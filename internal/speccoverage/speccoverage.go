@@ -124,7 +124,114 @@ func Validate(root string) ([]Finding, error) {
 		})
 	}
 
+	findings = append(findings, ValidateBDDCatalog(root)...)
+
 	return findings, nil
+}
+
+// ValidateBDDCatalog verifies the BDD catalog covers every executable feature
+// and does not list feature files that no longer exist.
+func ValidateBDDCatalog(root string) []Finding {
+	catalogPath := filepath.Join(root, "agm", "docs", "BDD-CATALOG.md")
+	catalog, err := os.ReadFile(catalogPath)
+	if err != nil {
+		return []Finding{{
+			Surface: "BDD catalog",
+			Path:    "agm/docs/BDD-CATALOG.md",
+			Message: fmt.Sprintf("read BDD catalog: %v", err),
+		}}
+	}
+
+	features, err := bddFeaturePaths(root)
+	if err != nil {
+		return []Finding{{
+			Surface: "BDD catalog",
+			Path:    "agm/test/bdd/features",
+			Message: err.Error(),
+		}}
+	}
+
+	catalogText := string(catalog)
+	catalogRefs := catalogFeatureReferences(catalogText)
+	catalogSet := map[string]bool{}
+	for _, feature := range catalogRefs {
+		catalogSet[feature] = true
+	}
+
+	var findings []Finding
+	for _, feature := range features {
+		if !catalogSet[feature] {
+			findings = append(findings, Finding{
+				Surface: "BDD catalog",
+				Path:    feature,
+				Message: "BDD feature is not listed in agm/docs/BDD-CATALOG.md",
+			})
+		}
+	}
+
+	featureSet := map[string]bool{}
+	for _, feature := range features {
+		featureSet[feature] = true
+	}
+	for _, feature := range catalogRefs {
+		if !featureSet[feature] {
+			findings = append(findings, Finding{
+				Surface: "BDD catalog",
+				Path:    feature,
+				Message: "BDD catalog references a missing feature file",
+			})
+		}
+	}
+
+	return findings
+}
+
+func bddFeaturePaths(root string) ([]string, error) {
+	featuresDir := filepath.Join(root, "agm", "test", "bdd", "features")
+	entries, err := os.ReadDir(featuresDir)
+	if err != nil {
+		return nil, fmt.Errorf("read BDD features directory: %w", err)
+	}
+
+	var features []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".feature") {
+			continue
+		}
+		features = append(features, filepath.ToSlash(filepath.Join("agm", "test", "bdd", "features", entry.Name())))
+	}
+	slices.Sort(features)
+	return features, nil
+}
+
+func catalogFeatureReferences(catalog string) []string {
+	const marker = "../test/bdd/features/"
+	seen := map[string]bool{}
+	var features []string
+	for line := range strings.SplitSeq(catalog, "\n") {
+		for {
+			_, after, ok := strings.Cut(line, marker)
+			if !ok {
+				break
+			}
+			name := after
+			if end := strings.IndexAny(name, ")` \t"); end >= 0 {
+				name = name[:end]
+			}
+			line = after
+			if !strings.HasSuffix(name, ".feature") || filepath.Base(name) != name {
+				continue
+			}
+			feature := "agm/test/bdd/features/" + name
+			if seen[feature] {
+				continue
+			}
+			seen[feature] = true
+			features = append(features, feature)
+		}
+	}
+	slices.Sort(features)
+	return features
 }
 
 // UnregisteredParityFeatures returns every *_parity.feature file that is not

@@ -31,6 +31,8 @@ func RegisterSpecCoverageSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^every parity SPEC should declare EARS requirements$`, everyParitySPECShouldDeclareEARSRequirements)
 	ctx.Step(`^every parity SPEC should have a completed audit marker$`, everyParitySPECShouldHaveCompletedAuditMarker)
 	ctx.Step(`^every parity BDD feature should be registered in the coverage matrix$`, everyParityBDDFeatureShouldBeRegistered)
+	ctx.Step(`^every executable BDD feature should be listed in the BDD catalog$`, everyExecutableBDDFeatureShouldBeListedInBDDCatalog)
+	ctx.Step(`^every BDD catalog feature reference should exist$`, everyBDDCatalogFeatureReferenceShouldExist)
 	ctx.Step(`^AGM validates changed Go package SPEC coverage$`, agmValidatesChangedGoPackageSPECCoverage)
 	ctx.Step(`^changed production Go packages should have co-located SPEC.md files$`, changedProductionGoPackagesShouldHaveCoLocatedSPECFiles)
 }
@@ -73,6 +75,14 @@ func everyParitySPECShouldHaveCompletedAuditMarker(ctx context.Context) error {
 
 func everyParityBDDFeatureShouldBeRegistered(ctx context.Context) error {
 	return specCoverageShouldHaveNoFindings(ctx, "not registered")
+}
+
+func everyExecutableBDDFeatureShouldBeListedInBDDCatalog(ctx context.Context) error {
+	return specCoverageShouldHaveNoFindings(ctx, "not listed in agm/docs/BDD-CATALOG.md")
+}
+
+func everyBDDCatalogFeatureReferenceShouldExist(ctx context.Context) error {
+	return specCoverageShouldHaveNoFindings(ctx, "references a missing feature file")
 }
 
 func agmValidatesChangedGoPackageSPECCoverage(ctx context.Context) error {
