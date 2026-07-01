@@ -1,6 +1,6 @@
 # MCP Harness Parity Specification
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-01 -->
 
 **Version:** 1.0
 **Status:** Baseline

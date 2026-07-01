@@ -11,6 +11,11 @@ Feature: SPEC and BDD coverage
     And every parity surface should have an executable BDD feature
     And every parity SPEC should declare EARS requirements
 
+  Scenario: Parity-critical specs have completed audit markers
+    Given AGM parity coverage requirements
+    When AGM validates parity SPEC and BDD coverage
+    Then every parity SPEC should have a completed audit marker
+
   Scenario: Parity feature files are registered in the coverage matrix
     Given AGM parity coverage requirements
     When AGM validates parity SPEC and BDD coverage
