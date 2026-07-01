@@ -375,7 +375,8 @@ func validateSurface(root string, surface Surface) []Finding {
 			})
 		} else {
 			specText := string(spec)
-			if !strings.Contains(specText, "## EARS Requirements") {
+			hasEARS := strings.Contains(specText, "## EARS Requirements")
+			if !hasEARS {
 				findings = append(findings, Finding{
 					Surface: surface.Name,
 					Path:    surface.SpecPath,
@@ -389,7 +390,9 @@ func validateSurface(root string, surface Surface) []Finding {
 					Message: "SPEC.md audit marker is missing or still NEEDS-AUDIT",
 				})
 			}
-			findings = append(findings, validateSpecEARS(surface, specText)...)
+			if hasEARS {
+				findings = append(findings, validateSpecEARS(surface, specText)...)
+			}
 		}
 	}
 
@@ -435,21 +438,19 @@ func validateSpecEARS(surface Surface, spec string) []Finding {
 		return nil
 	}
 
-	detail := "no valid EARS requirements found"
+	var findings []Finding
 	for _, finding := range result.Findings {
+		detail := finding.Message
 		if finding.Line > 0 {
 			detail = fmt.Sprintf("line %d: %s", finding.Line, finding.Message)
-			break
 		}
-		if finding.Message != "" {
-			detail = finding.Message
-		}
+		findings = append(findings, Finding{
+			Surface: surface.Name,
+			Path:    surface.SpecPath,
+			Message: "SPEC.md has invalid EARS syntax: " + detail,
+		})
 	}
-	return []Finding{{
-		Surface: surface.Name,
-		Path:    surface.SpecPath,
-		Message: "SPEC.md has invalid EARS syntax: " + detail,
-	}}
+	return findings
 }
 
 func hasCompletedAuditMarker(spec string) bool {
