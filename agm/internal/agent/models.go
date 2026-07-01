@@ -122,17 +122,17 @@ var CrossHarnessAliases = map[string]map[string]string{
 	},
 }
 
-// HarnessDefaults defines the default model alias for each harness.
+// HarnessDefaults defines the default model alias for each active harness.
 // Harnesses not listed here require interactive model selection.
 //
 // claude-code defaults to sonnet. Opus stays opt-in via --model=opus or
 // AGM_DEFAULT_MODEL=opus; Opus costs ~5× Sonnet per token and should not be
 // the silent default.
 var HarnessDefaults = map[string]string{
-	"claude-code": "sonnet",
-	"codex-cli":   "5.6",
-	"agy":         "2.5-flash",
-	// opencode-cli intentionally omitted — requires interactive picker
+	"claude-code":  "sonnet",
+	"codex-cli":    "5.6",
+	"agy":          "2.5-flash",
+	"opencode-cli": "glm-5.2",
 }
 
 // HarnessModeDefaults defines the default permission mode for each harness.
@@ -280,7 +280,7 @@ func GetModelsForHarness(harnessName string) []ModelSpec {
 }
 
 // DefaultModelForHarness returns the default model alias and true,
-// or empty string and false if no default exists (e.g., opencode-cli).
+// or empty string and false if no default exists.
 func DefaultModelForHarness(harnessName string) (string, bool) {
 	d, ok := HarnessDefaults[harnessName]
 	return d, ok

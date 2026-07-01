@@ -24,6 +24,11 @@ Feature: Harness parity
     When AGM validates active parity support
     Then harness "gemini-cli" should be deprecated
 
+  Scenario: Active harness adapters satisfy shared conformance
+    Given AGM active harnesses are configured
+    When AGM validates active harness adapter conformance
+    Then every active harness adapter should satisfy the shared conformance suite
+
   Scenario Outline: Supported model families have default routes
     Given model family "<family>" is configured
     When AGM validates model family parity support
