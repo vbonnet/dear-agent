@@ -1,3 +1,5 @@
+// Package speccoverage validates parity-critical SPEC.md and BDD feature
+// coverage for dear-agent governance surfaces.
 package speccoverage
 
 import (
