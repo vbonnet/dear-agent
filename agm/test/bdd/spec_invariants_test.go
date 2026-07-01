@@ -439,6 +439,33 @@ func TestBDDFeatureFileLocation(t *testing.T) {
 	}
 }
 
+// TestBDDCatalogListsEveryFeatureFile keeps the living BDD catalog in sync with
+// the executable feature suite. New feature files must be documented there so
+// parity and governance coverage remains discoverable.
+func TestBDDCatalogListsEveryFeatureFile(t *testing.T) {
+	t.Parallel()
+	catalogPath := filepath.Join("..", "..", "docs", "BDD-CATALOG.md")
+	catalog, err := os.ReadFile(catalogPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", catalogPath, err)
+	}
+	catalogText := string(catalog)
+
+	entries, err := os.ReadDir(filepath.Join(".", "features"))
+	if err != nil {
+		t.Fatalf("read features directory: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".feature") {
+			continue
+		}
+		want := fmt.Sprintf("[`%s`]", entry.Name())
+		if !strings.Contains(catalogText, want) {
+			t.Errorf("%s is missing from %s", entry.Name(), catalogPath)
+		}
+	}
+}
+
 // TestContractDrift runs the contract drift checker against the actual SPECs.
 func TestContractDrift(t *testing.T) {
 	contracts.ResetForTesting()
