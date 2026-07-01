@@ -95,7 +95,7 @@ Flags:
   --harness     - Harness to use (claude-code, codex-cli, agy, opencode-cli)
                   Deprecated compatibility: gemini-cli
                   If omitted, prompts interactively
-  --model       - Model to use (e.g., sonnet, opus, 2.5-flash, 5.4)
+  --model       - Model to use (e.g., sonnet, opus, 2.5-flash, 5.5)
                   If omitted, uses default for harness
 
 Workspace Detection:
@@ -826,7 +826,7 @@ func init() {
 	newCmd.Flags().BoolVar(&testMode, "test", false, "Create test session with per-run sandbox isolation")
 	newCmd.Flags().BoolVar(&allowTestName, "allow-test-name", false, "Override test pattern warning (for legitimate production sessions with 'test' in name)")
 	newCmd.Flags().StringVar(&harnessName, "harness", "", "Harness to use (claude-code, codex-cli, agy, opencode-cli; deprecated: gemini-cli) (env: AGM_DEFAULT_HARNESS)")
-	newCmd.Flags().StringVar(&modelName, "model", "", "Model to use (e.g., sonnet, opus, 2.5-flash, 5.4) (env: AGM_DEFAULT_MODEL)")
+	newCmd.Flags().StringVar(&modelName, "model", "", "Model to use (e.g., sonnet, opus, 2.5-flash, 5.5) (env: AGM_DEFAULT_MODEL)")
 	newCmd.Flags().StringVar(&modelTierFlag, "model-tier", "", "Cost tier for model routing: cheap (70%), mid (20%), expensive (10%)")
 	_ = newCmd.RegisterFlagCompletionFunc("model-tier", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"cheap", "mid", "expensive"}, cobra.ShellCompDirectiveNoFileComp
