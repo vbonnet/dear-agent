@@ -259,6 +259,7 @@ surfaces so hook, instruction, and marketplace support can be audited.
 - Every registered parity `SPEC.md` has a completed audit marker.
 - Every `*_parity.feature` file is registered in the coverage matrix.
 - Changed production Go package directories carry a co-located `SPEC.md`.
+- Changed production Go package `SPEC.md` files pass strict EARS lint.
 
 **Why this matters:** Parity work should not land as untraceable test-only or
 doc-only changes. The coverage matrix keeps SPEC and BDD artifacts paired while

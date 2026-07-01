@@ -222,13 +222,64 @@ func TestValidateGoPackageSpecsForFilesAcceptsCoLocatedSpec(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "SPEC.md"), []byte("# SPEC\n"), 0o644); err != nil {
+	spec := "# SPEC\n\n## EARS Requirements\n\n**NEW-01** When a new feature changes, the system shall keep a valid SPEC.\n"
+	if err := os.WriteFile(filepath.Join(dir, "SPEC.md"), []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	findings := ValidateGoPackageSpecsForFiles(root, []string{"internal/newfeature/newfeature.go"})
 	if len(findings) != 0 {
 		t.Fatalf("expected no findings, got %v", findings)
+	}
+}
+
+func TestValidateGoPackageSpecsForFilesRequiresEARSSection(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := filepath.Join(root, "internal", "newfeature")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SPEC.md"), []byte("# SPEC\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings := ValidateGoPackageSpecsForFiles(root, []string{"internal/newfeature/newfeature.go"})
+	if len(findings) != 1 {
+		t.Fatalf("expected one missing EARS section finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "co-located SPEC.md does not declare EARS requirements" {
+		t.Fatalf("finding message = %q", findings[0].Message)
+	}
+}
+
+func TestValidateGoPackageSpecsForFilesRequiresStrictEARSLint(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := filepath.Join(root, "internal", "newfeature")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec := strings.Join([]string{
+		"# SPEC",
+		"",
+		"## EARS Requirements",
+		"",
+		"**NEW-01** Eventually the system shall maybe work.",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dir, "SPEC.md"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings := ValidateGoPackageSpecsForFiles(root, []string{"internal/newfeature/newfeature.go"})
+	if len(findings) != 2 {
+		t.Fatalf("expected strict EARS lint findings, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "SPEC.md has invalid EARS syntax: line 5: requirement does not match any EARS pattern" {
+		t.Fatalf("finding[0] message = %q", findings[0].Message)
+	}
+	if findings[1].Message != "SPEC.md has invalid EARS syntax: no valid EARS requirements found" {
+		t.Fatalf("finding[1] message = %q", findings[1].Message)
 	}
 }
 
