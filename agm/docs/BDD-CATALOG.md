@@ -98,6 +98,7 @@ state detection contracts.
 - Active harnesses are exactly Claude Code, Codex CLI, AGY, and OpenCode.
 - Gemini CLI remains deprecated compatibility, not active parity.
 - Active harness factories use canonical names.
+- Active harness adapters satisfy the shared non-I/O conformance suite.
 - Supported model families include Anthropic, OpenAI, Gemini, GLM, DeepSeek,
   Nemotron, and Qwen.
 

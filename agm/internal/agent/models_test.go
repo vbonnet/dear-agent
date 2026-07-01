@@ -61,10 +61,9 @@ func TestDefaultModelForHarness(t *testing.T) {
 	if ok {
 		t.Errorf("deprecated gemini-cli should not have an active default, got (%q, %v)", model, ok)
 	}
-	// No default
 	model, ok = DefaultModelForHarness("opencode-cli")
-	if ok {
-		t.Errorf("opencode-cli should have no default, got (%q, %v)", model, ok)
+	if !ok || model != "glm-5.2" {
+		t.Errorf("opencode-cli default: got (%q, %v), want (glm-5.2, true)", model, ok)
 	}
 }
 
@@ -114,8 +113,8 @@ func TestNeedsInteractivePicker(t *testing.T) {
 	if NeedsInteractivePicker("claude-code") {
 		t.Error("claude-code should not need interactive picker")
 	}
-	if !NeedsInteractivePicker("opencode-cli") {
-		t.Error("opencode-cli should need interactive picker")
+	if NeedsInteractivePicker("opencode-cli") {
+		t.Error("opencode-cli should not need interactive picker")
 	}
 }
 

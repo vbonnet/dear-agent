@@ -66,6 +66,7 @@ type harnessParityState struct {
 	wayfinderAssetsValid       bool
 	wayfinderPhaseEngrams      bool
 	configDirSurface           configdirparity.DirectorySurface
+	conformanceFindings        []agent.HarnessConformanceFinding
 }
 
 type harnessParityStateKey struct{}
@@ -82,6 +83,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^harness "([^"]*)" should be active for parity$`, harnessShouldBeActiveForParity)
 	ctx.Step(`^harness "([^"]*)" should not be deprecated$`, harnessShouldNotBeDeprecated)
 	ctx.Step(`^harness "([^"]*)" should be deprecated$`, harnessShouldBeDeprecated)
+	ctx.Step(`^AGM active harnesses are configured$`, agmActiveHarnessesAreConfigured)
+	ctx.Step(`^AGM validates active harness adapter conformance$`, agmValidatesActiveHarnessAdapterConformance)
+	ctx.Step(`^every active harness adapter should satisfy the shared conformance suite$`, everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite)
 	ctx.Step(`^model family "([^"]*)" is configured$`, modelFamilyIsConfigured)
 	ctx.Step(`^AGM validates model family parity support$`, agmValidatesModelFamilyParitySupport)
 	ctx.Step(`^model family "([^"]*)" should be supported$`, modelFamilyShouldBeSupported)
@@ -223,6 +227,43 @@ func harnessShouldBeDeprecated(ctx context.Context, harness string) error {
 		return fmt.Errorf("harness %q should be deprecated", normalized)
 	}
 	return nil
+}
+
+func agmActiveHarnessesAreConfigured(ctx context.Context) error {
+	active := agent.ActiveHarnesses()
+	if len(active) == 0 {
+		return fmt.Errorf("no active harnesses configured")
+	}
+	for _, harness := range active {
+		if err := agent.ValidateHarnessName(harness); err != nil {
+			return fmt.Errorf("active harness %q failed validation: %w", harness, err)
+		}
+	}
+	return nil
+}
+
+func agmValidatesActiveHarnessAdapterConformance(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.conformanceFindings = agent.ValidateActiveHarnessConformance()
+	return nil
+}
+
+func everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if len(harnessState.conformanceFindings) == 0 {
+		return nil
+	}
+	messages := make([]string, 0, len(harnessState.conformanceFindings))
+	for _, finding := range harnessState.conformanceFindings {
+		messages = append(messages, finding.Error())
+	}
+	return fmt.Errorf("active harness conformance failed:\n%s", strings.Join(messages, "\n"))
 }
 
 func modelFamilyIsConfigured(ctx context.Context, family string) error {
