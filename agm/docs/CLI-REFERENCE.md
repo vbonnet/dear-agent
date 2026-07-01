@@ -117,9 +117,9 @@ agm new [session-name] [flags]
 ```bash
 --harness string         Harness to use (claude-code|codex-cli|agy|opencode-cli) (default: claude-code)
                          deprecated compatibility: gemini-cli
---model string           Model to use (e.g., sonnet, opus, 2.5-flash, 5.4). If omitted, uses harness default.
+--model string           Model to use (e.g., sonnet, opus, 2.5-flash, 5.5). If omitted, uses harness default.
                          claude-code: sonnet (default), opus, haiku, opusplan
-                         codex-cli: 5.4 (default), 5.4-mini, 5.3-codex
+                         codex-cli: 5.5 (default), 5.6, 5.4, 5.4-mini, 5.3-codex
                          agy: 2.5-flash (default), 2.5-pro, 2.0-flash-lite
                          opencode-cli: requires selection (no default)
 --project string         Project directory (default: current directory)

@@ -150,7 +150,7 @@ func TestCreateSession_DefaultsModelPerHarness(t *testing.T) {
 		harness string
 		want    string
 	}{
-		{"codex-cli", "5.6"},
+		{"codex-cli", "5.5"},
 		{"agy", "2.5-flash"},
 		{"opencode-cli", "glm-5.2"},
 	}
