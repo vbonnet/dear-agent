@@ -42,8 +42,7 @@ ZONES
   🚨 critical  - High utilization, compaction recommended
 
 DOCUMENTATION
-  See pkg/context/README.md for library API documentation.
-  See swarm/context-management/RESEARCH-REPORT.md for benchmark data.`,
+  See pkg/context/README.md for library API documentation.`,
 }
 
 func init() {

@@ -5,8 +5,8 @@
 **Context**: Add a daily, host-side supply-chain inventory pass that
 covers the layer DeepSec, Trivy, and the `weekly-security-audit` task all
 miss — *what is actually installed on the developer endpoint*, including
-MCP configs and IDE/browser extensions. Companion to the audit at
-[docs/design/2026-05-23-security-pipeline-bumblebee-deepsec.md](../design/2026-05-23-security-pipeline-bumblebee-deepsec.md).
+MCP configs and IDE/browser extensions. Companion to the archived audit in
+[`engram-research`](https://github.com/vbonnet/engram-research/blob/main/archive/dear-agent-temporal-artifacts-2026-06-30/docs/design/2026-05-23-security-pipeline-bumblebee-deepsec.md).
 
 Builds on / aligns with:
 
@@ -35,7 +35,7 @@ several IDE extensions, and browser extensions across multiple browsers.
 If one of those gets compromised — or simply ships a malicious version —
 nothing in the current pipeline notices.
 
-The 2026-05-23 audit doc evaluated [Perplexity's Bumblebee](https://github.com/perplexityai/bumblebee),
+The archived 2026-05-23 audit doc evaluated [Perplexity's Bumblebee](https://github.com/perplexityai/bumblebee),
 a single-binary read-only inventory scanner, and recommended adopting it
 on a daily launchd schedule (§4.1). This ADR accepts that recommendation
 with three modifications tightening the install path against the threat

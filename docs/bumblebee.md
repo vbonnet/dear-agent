@@ -16,9 +16,9 @@ It complements DeepSec, not replaces it:
 | LLM cost        | yes         | none (Go binary, no LLM) |
 | Triggers install hooks? | no  | no — reads metadata only |
 
-See `docs/design/2026-05-23-security-pipeline-bumblebee-deepsec.md` for the
-audit that motivates this integration, and `docs/adr/ADR-027` for the
-decision record.
+The motivating audit is archived in
+[`engram-research`](https://github.com/vbonnet/engram-research/blob/main/archive/dear-agent-temporal-artifacts-2026-06-30/docs/design/2026-05-23-security-pipeline-bumblebee-deepsec.md);
+see `docs/adr/ADR-027` for the decision record.
 
 ## Cost model
 

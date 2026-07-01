@@ -59,15 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added diagram-related tags (c4-model, diagram-as-code)
   - Added diagram-quality-rubric
 
-### Documentation
-- **Phase 9 Testing Reports** (2,862+ lines):
-  - PERFORMANCE-BENCHMARKS.md: All operations 10-1200x faster than targets
-  - SECURITY-AUDIT-REPORT.md: Comprehensive vulnerability assessment
-  - ACCESSIBILITY-REPORT.md: WCAG 2.1 Level AA compliance verification
-  - CROSS-CLI-TEST-REPORT.md: Integration patterns and usage
-  - PHASE-9-VALIDATION-REPORT.md: Multi-persona validation (CONDITIONAL GO → GO)
-  - SECURITY-FIXES-APPLIED.md: All 5 vulnerabilities fixed, 45 tests passing
-
 ### Testing
 - **45 security tests**: 100% passing
   - Path traversal attack prevention
@@ -131,7 +122,6 @@ No breaking changes. All existing skills continue to work identically.
 **Security module**:
 - All diagram skills use `lib/security_utils.py` for file operations
 - Prevents path traversal, symlink attacks, and DoS
-- See `tests/SECURITY-FIXES-APPLIED.md` for details
 
 ### Installation
 ```bash

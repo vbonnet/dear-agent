@@ -62,9 +62,9 @@ Source of truth in code:
 V2 status files use `CurrentWaypoint` (not `current_phase`) in the Go
 struct, while the V2 YAML schema documented in
 [`wayfinder/cmd/wayfinder-session/SPEC.md`](cmd/wayfinder-session/SPEC.md)
-still uses `current_phase`. This is a known doc/code drift tracked in
-`docs/plans/spec-compliance-plan.md` (P1-8); it is **not** related to the
-9-vs-12 axis and is unchanged by this document.
+still uses `current_phase`. This is a known doc/code drift captured by
+the archived 2026-06-30 temporal cleanup notes; it is **not** related to
+the 9-vs-12 axis and is unchanged by this document.
 
 ## History
 

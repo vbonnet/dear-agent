@@ -20,8 +20,6 @@ internal/agent/
 ### Documentation
 ```
 docs/
-├── gemini-parity-analysis.md      # Detailed gap analysis
-├── gemini-test-summary.md         # Test execution summary
 └── gemini-testing-guide.md        # This file
 ```
 
@@ -437,8 +435,6 @@ A:
 ## Resources
 
 ### Documentation
-- [Gemini Parity Analysis](./gemini-parity-analysis.md) - Detailed gap analysis
-- [Test Summary](./gemini-test-summary.md) - Test execution results
 - [Agent Interface](../internal/agent/interface.go) - Interface definition
 
 ### Related Code

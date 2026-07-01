@@ -215,7 +215,6 @@ func (r *doltSessionResolver) ListAllSessions() ([]*manifest.Manifest, error) {
 
 ## See Also
 
-- `PHASE2_IMPLEMENTATION.md` - Detailed implementation guide
 - `cmd/agm/send_msg.go` - Command integration
 - `internal/dolt/` - Session storage adapter
 - `internal/messages/` - Message logging

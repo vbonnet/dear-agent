@@ -834,7 +834,8 @@ must not fail only because no Claude UUID exists.
 - ✅ `agm session archive` reads/writes Dolt, writes YAML (backward compat)
 - 🚧 Phase 3-6: Command layer migration, YAML removal (in progress)
 
-**See**: `docs/YAML-TO-DOLT-MIGRATION-PHASES-1-2.md` for migration details
+Historical migration notes are archived in `engram-research`; this spec
+describes the current behavior.
 
 ### Doctor Health Check Flow (agm admin doctor)
 

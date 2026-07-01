@@ -121,7 +121,6 @@ For more information, see:
 
 - `docs/HOOKS-SETUP.md` - Comprehensive setup guide (2600+ words)
 - `docs/HOOK-BASED-READINESS-DESIGN.md` - Design rationale
-- `docs/HOOK-IMPLEMENTATION-SUMMARY.md` - Implementation details
 
 ## 🐛 Troubleshooting
 

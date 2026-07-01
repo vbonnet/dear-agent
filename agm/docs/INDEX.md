@@ -191,17 +191,15 @@ AGM_DEBUG=true          # Debug mode
 18. **gemini-readiness-detection.md** - Gemini agent readiness detection
 19. **engram-integration.md** - Engram integration guide
 20. **UX_PATTERNS.md** - User experience patterns
-21. **UX-ACCESSIBILITY-REVIEW.md** - UX accessibility review
-22. **UX-SPRINT1-REVIEW.md** - UX sprint 1 review
-23. **ux-style-guide.md** - UX style guide
-24. **performance-benchmarks.md** - Performance benchmarks
-25. **unified-storage-migration.md** - Unified storage migration spec
-26. **tmux-lock-refactoring.md** - Tmux lock refactoring documentation
-27. **lock-improvements.md** - Lock improvements documentation
-28. **deep-research-e2e-test-plan.md** - Deep research E2E test plan
+21. **ux-style-guide.md** - UX style guide
+22. **performance-benchmarks.md** - Performance benchmarks
+23. **unified-storage-migration.md** - Unified storage migration spec
+24. **tmux-lock-refactoring.md** - Tmux lock refactoring documentation
+25. **lock-improvements.md** - Lock improvements documentation
+26. **deep-research-e2e-test-plan.md** - Deep research E2E test plan
 
 ### Agent-Specific
-29. **AGENTS.md.example** - Example AGENTS.md configuration
+27. **AGENTS.md.example** - Example AGENTS.md configuration
 
 ---
 

@@ -242,10 +242,6 @@ ps aux | grep gemini | grep defunct
   - File: `docs/AGENT-COMPARISON.md`
   - Verified: Phase 3 completion
 
-- [x] **gemini-parity-analysis.md**: Parity score updated to 94/100
-  - File: `docs/gemini-parity-analysis.md`
-  - Verified: Line 51, 473
-
 - [x] **SPEC.md**: Gemini CLI capabilities documented
   - File: `SPEC.md`
   - Verified: Phase 3 completion
@@ -408,7 +404,6 @@ All checkboxes above must be checked (✓) before Phase 4 completion.
 - Gemini CLI Adapter: `internal/agent/gemini_cli_adapter.go`
 - Test Suite: `test/integration/gemini_cli_integration_test.go`
 - E2E Tests: `test/e2e/gemini_phase4_e2e_test.go`
-- Parity Analysis: `docs/gemini-parity-analysis.md`
 
 ---
 

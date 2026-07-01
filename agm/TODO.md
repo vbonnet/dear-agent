@@ -45,8 +45,6 @@
   - Standardized warning symbol (⚠ vs ⚠️ inconsistency fixed)
   - Created comprehensive documentation:
     - `docs/UX_PATTERNS.md` - UX guide for developers
-    - `docs/UX-ACCESSIBILITY-REVIEW.md` - Infrastructure review
-    - `docs/UX-SPRINT1-REVIEW.md` - Sprint documentation
   - Updated README.md with accessibility section
   - All 26 packages passing tests
   - Commit: d86fbe2
