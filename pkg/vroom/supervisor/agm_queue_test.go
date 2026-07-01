@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -139,6 +140,50 @@ func TestAGMQueue_Dispatch(t *testing.T) {
 		}
 		if !strings.Contains(joined, defaultWorkerRole) {
 			t.Errorf("default role not in args: %v", capturedArgs)
+		}
+	})
+
+	t.Run("rejects concurrent dispatch of same pending task", func(t *testing.T) {
+		started := make(chan struct{})
+		release := make(chan struct{})
+		var runCalls atomic.Int32
+		q := &AGMQueue{
+			run: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+				runCalls.Add(1)
+				close(started)
+				<-release
+				return []byte("ok"), nil
+			},
+		}
+		_ = q.Enqueue(Task{ID: "t-race"})
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- q.Dispatch(context.Background(), "t-race", "coder")
+		}()
+		<-started
+
+		err := q.Dispatch(context.Background(), "t-race", "coder")
+		if err == nil {
+			t.Fatal("expected concurrent dispatch error, got nil")
+		}
+		if !strings.Contains(err.Error(), "already dispatching") {
+			t.Fatalf("expected already-dispatching error, got: %v", err)
+		}
+
+		close(release)
+		if err := <-errCh; err != nil {
+			t.Fatalf("first dispatch failed: %v", err)
+		}
+		if got := runCalls.Load(); got != 1 {
+			t.Fatalf("run calls = %d, want 1", got)
+		}
+		tasks, pendingErr := q.Pending(context.Background())
+		if pendingErr != nil {
+			t.Fatalf("pending failed: %v", pendingErr)
+		}
+		if len(tasks) != 0 {
+			t.Fatalf("successful first dispatch should remove pending task, got: %v", tasks)
 		}
 	})
 }

@@ -32,7 +32,7 @@ sync with AGM's registered `session new` flags.
 
 ### AGM Worker Dispatch
 
-**VROOM-SUP-05** When AGMQueue dispatches a pending task, the system shall remove the task from the pending list only after `agm session new` succeeds.
+**VROOM-SUP-05** When AGMQueue dispatches a pending task, the system shall prevent concurrent dispatch of the same task, remove it from pending only after `agm session new` succeeds, and preserve it in pending if dispatch fails.
 
 **VROOM-SUP-06** When AGMQueue builds worker dispatch arguments, the system shall pass the worker session name as the positional `agm session new` argument.
 

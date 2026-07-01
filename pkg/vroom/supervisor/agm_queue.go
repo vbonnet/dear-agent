@@ -16,8 +16,9 @@ import (
 // The in-memory pending list does not survive process restarts. A persistent
 // backing store is deferred to a follow-up.
 type AGMQueue struct {
-	mu      sync.Mutex
-	pending []Task
+	mu          sync.Mutex
+	pending     []Task
+	dispatching map[string]struct{}
 
 	// AGMBin is the agm binary to invoke. Empty resolves "agm" on PATH.
 	AGMBin string
@@ -82,11 +83,21 @@ func (q *AGMQueue) Dispatch(ctx context.Context, taskID, _ string) error {
 			break
 		}
 	}
-	q.mu.Unlock()
 
 	if !found {
+		q.mu.Unlock()
 		return fmt.Errorf("AGMQueue.Dispatch: unknown task %q", taskID)
 	}
+	if q.dispatching == nil {
+		q.dispatching = make(map[string]struct{})
+	}
+	if _, ok := q.dispatching[taskID]; ok {
+		q.mu.Unlock()
+		return fmt.Errorf("AGMQueue.Dispatch: task %q already dispatching", taskID)
+	}
+	q.dispatching[taskID] = struct{}{}
+	q.mu.Unlock()
+	defer q.clearDispatching(taskID)
 
 	model := q.Model
 	if model == "" {
@@ -111,7 +122,12 @@ func (q *AGMQueue) Dispatch(ctx context.Context, taskID, _ string) error {
 	args := AGMDispatchArgs(taskID, model, role)
 
 	if q.run != nil {
-		if out, err := q.run(dctx, bin, args...); err != nil {
+		out, err := q.run(dctx, bin, args...)
+		if ctxErr := dctx.Err(); ctxErr != nil {
+			return fmt.Errorf("AGMQueue.Dispatch: agm session new worker-%s: %w\n%s",
+				taskID, ctxErr, out)
+		}
+		if err != nil {
 			return fmt.Errorf("AGMQueue.Dispatch: agm session new worker-%s: %w\n%s",
 				taskID, err, out)
 		}
@@ -120,6 +136,10 @@ func (q *AGMQueue) Dispatch(ctx context.Context, taskID, _ string) error {
 	}
 
 	out, err := exec.CommandContext(dctx, bin, args...).CombinedOutput() //#nosec G204 -- bin is a fixed binary path; args are controlled caller values
+	if ctxErr := dctx.Err(); ctxErr != nil {
+		return fmt.Errorf("AGMQueue.Dispatch: agm session new worker-%s: %w\n%s",
+			taskID, ctxErr, out)
+	}
 	if err != nil {
 		return fmt.Errorf("AGMQueue.Dispatch: agm session new worker-%s: %w\n%s",
 			taskID, err, out)
@@ -137,6 +157,12 @@ func (q *AGMQueue) removePending(taskID string) {
 			return
 		}
 	}
+}
+
+func (q *AGMQueue) clearDispatching(taskID string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	delete(q.dispatching, taskID)
 }
 
 // AGMDispatchArgs builds the `agm session new` argument list used to spawn a
