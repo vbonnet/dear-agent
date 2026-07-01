@@ -14,11 +14,14 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
 	"github.com/vbonnet/dear-agent/agm/internal/interrupt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/testcontext"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
+
+var resolvedSessionPermissionPolicy *manifest.PermissionPolicy
 
 // createTmuxSessionAndStartClaude creates a new tmux session and starts Claude in it
 func createTmuxSessionAndStartClaude(sessionName string) (retErr error) {
@@ -281,24 +284,14 @@ func collectExtraAddDirs(sandboxInfo *manifest.SandboxConfig) ([]string, bool) {
 // for the new session's working directory.
 func configureProjectPermissions(workDir string) error {
 	debug.Phase("Configure Permissions")
-	// Auto-derive VROOM role profile: when --role names a known profile and
-	// --permission-profile was not explicitly set, use the role as the profile.
-	resolvedProfile := permissionProfile
-	if resolvedProfile == "" && roleName != "" && rbac.ValidRole(roleName) {
-		resolvedProfile = roleName
-		debug.Log("Auto-derived permission profile %q from --role flag", resolvedProfile)
-	}
-	allowList, err := rbac.ResolvePermissions(rbac.ResolveOptions{
-		Explicit:      permissionsAllow,
-		ProfileName:   resolvedProfile,
-		InheritParent: inheritPermissions,
-	})
+	policy, allowList, err := resolveSessionPermissionPolicy()
 	if err != nil {
 		ui.PrintError(err, "Failed to resolve permissions",
 			"  • Check --permission-profile value is valid: "+fmt.Sprintf("%v", rbac.ProfileNames())+"\n"+
 				"  • Check ~/.claude/settings.json exists for --inherit-permissions")
 		return err
 	}
+	resolvedSessionPermissionPolicy = policy
 	if len(allowList) > 0 {
 		debug.Log("Configuring %d permission entries in project settings", len(allowList))
 		if err := rbac.ConfigureProjectPermissions(workDir, allowList); err != nil {
@@ -310,6 +303,69 @@ func configureProjectPermissions(workDir string) error {
 		}
 	}
 	return nil
+}
+
+func resolveSessionPermissionPolicy() (*manifest.PermissionPolicy, []string, error) {
+	resolvedProfile, profileSource := resolvePermissionProfile()
+	allowList, err := rbac.ResolvePermissions(rbac.ResolveOptions{
+		Explicit:      permissionsAllow,
+		ProfileName:   resolvedProfile,
+		InheritParent: inheritPermissions,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	policy := &manifest.PermissionPolicy{
+		Profile:       resolvedProfile,
+		ProfileSource: profileSource,
+		Sources:       permissionPolicySources(resolvedProfile),
+		InheritParent: inheritPermissions,
+		Explicit:      append([]string{}, permissionsAllow...),
+		Allow:         append([]string{}, allowList...),
+		Targets:       permissionPolicyTargets(),
+	}
+	return policy, allowList, nil
+}
+
+func resolvePermissionProfile() (profile string, source string) {
+	if permissionProfile != "" {
+		return permissionProfile, "flag"
+	}
+	if roleName != "" && rbac.ValidRole(roleName) {
+		debug.Log("Auto-derived permission profile %q from --role flag", roleName)
+		return roleName, "role"
+	}
+	return "", ""
+}
+
+func permissionPolicySources(profile string) []string {
+	sources := []string{"defaults"}
+	if len(permissionsAllow) > 0 {
+		sources = append(sources, "explicit")
+	}
+	if profile != "" {
+		sources = append(sources, "profile")
+	}
+	if inheritPermissions {
+		sources = append(sources, "parent")
+	}
+	return sources
+}
+
+func permissionPolicyTargets() []manifest.PermissionPolicyTarget {
+	surfaces := permissionparity.ActiveHarnessSurfaces()
+	targets := make([]manifest.PermissionPolicyTarget, 0, len(surfaces))
+	for _, surface := range surfaces {
+		targets = append(targets, manifest.PermissionPolicyTarget{
+			Harness:           surface.Harness,
+			PolicySurface:     surface.PolicySurface,
+			StartupSurface:    surface.StartupSurface,
+			RuntimeSurface:    surface.RuntimeSurface,
+			NativeEnforcement: surface.NativeEnforcement,
+		})
+	}
+	return targets
 }
 
 // handleExistingTmuxSession handles the prompt flow when a tmux session already

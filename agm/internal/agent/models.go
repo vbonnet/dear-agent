@@ -3,6 +3,8 @@ package agent
 import (
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 )
 
 // ModelSpec maps a short alias to a full model identifier.
@@ -10,6 +12,29 @@ type ModelSpec struct {
 	Alias       string
 	FullName    string
 	Description string
+}
+
+// ModelFamilySpec describes a first-class model family that AGM can route
+// through at least one supported harness or model aggregator.
+type ModelFamilySpec struct {
+	Name        string
+	Provider    string
+	Priority    int
+	Description string
+}
+
+// SupportedModelFamilies is the canonical model-family parity set.
+// Anthropic, OpenAI, and Gemini are the incumbent first-party families. GLM,
+// DeepSeek, Nemotron, and Qwen are OpenRouter-compatible open-model families
+// prioritized for cost and quota diversity.
+var SupportedModelFamilies = []ModelFamilySpec{
+	{Name: "anthropic", Provider: "Anthropic", Priority: 0, Description: "Claude family used by Claude Code and OpenRouter"},
+	{Name: "openai", Provider: "OpenAI", Priority: 0, Description: "GPT family used by Codex CLI"},
+	{Name: "gemini", Provider: "Google", Priority: 0, Description: "Gemini family used by AGY and legacy Gemini CLI"},
+	{Name: "glm", Provider: "Z.ai", Priority: 1, Description: "GLM 5.2 family, first new open-model priority"},
+	{Name: "deepseek", Provider: "DeepSeek", Priority: 2, Description: "DeepSeek V4 family, second new open-model priority"},
+	{Name: "nemotron", Provider: "NVIDIA", Priority: 3, Description: "Nemotron family, third new open-model priority"},
+	{Name: "qwen", Provider: "Alibaba", Priority: 4, Description: "Qwen family, fourth new open-model priority"},
 }
 
 // HarnessModels defines known models per harness.
@@ -49,10 +74,15 @@ var HarnessModels = map[string][]ModelSpec{
 	// Configure OPENROUTER_API_KEY to enable. These are the default cheap-tier
 	// assignments; override per-bead via model_tier spec.
 	"openrouter": {
-		{Alias: "deepseek-flash", FullName: "deepseek/deepseek-chat-v3-0324:free", Description: "DeepSeek V4 Flash — $0.28/M, cheap tier default"},
+		{Alias: "glm-5.2", FullName: "z-ai/glm-5.2", Description: "GLM 5.2 family default via OpenRouter-compatible routing"},
+		{Alias: "glm", FullName: "z-ai/glm-5.2", Description: "GLM 5.2 family default via OpenRouter-compatible routing"},
+		{Alias: "deepseek-v4", FullName: "deepseek/deepseek-v4-pro", Description: "DeepSeek V4 Pro family default via OpenRouter-compatible routing"},
+		{Alias: "deepseek-v4-flash", FullName: "deepseek/deepseek-v4-flash", Description: "DeepSeek V4 Flash family default via OpenRouter-compatible routing"},
+		{Alias: "deepseek-flash", FullName: "deepseek/deepseek-v4-flash", Description: "DeepSeek V4 Flash family default via OpenRouter-compatible routing"},
+		{Alias: "nemotron", FullName: "nvidia/nemotron-3-ultra", Description: "Nemotron family default via OpenRouter-compatible routing"},
+		{Alias: "qwen", FullName: "qwen/qwen3.6-max", Description: "Qwen family default via OpenRouter-compatible routing"},
+		{Alias: "qwen-flash", FullName: "qwen/qwen3.6-35b-a3b", Description: "Qwen 3.6 family low-cost option via OpenRouter-compatible routing"},
 		{Alias: "gemini-flash", FullName: "google/gemini-flash-1.5", Description: "Gemini Flash — fast, cheap, good for extraction"},
-		{Alias: "glm", FullName: "zhipuai/glm-4-flash", Description: "GLM-5.2 Flash — cheap multilingual model"},
-		{Alias: "qwen-flash", FullName: "qwen/qwen-2.5-72b-instruct", Description: "Qwen 2.5 72B — strong open-weight cheap option"},
 		{Alias: "gemini-pro", FullName: "google/gemini-pro-1.5", Description: "Gemini Pro — mid-tier via OpenRouter"},
 		{Alias: "opus", FullName: "anthropic/claude-opus-4", Description: "Claude Opus via OpenRouter — expensive tier"},
 	},
@@ -196,8 +226,8 @@ func ValidateModel(harnessName, modelAlias string) error {
 // character allowlist here so a caller that forgot to call ValidateModel
 // still can't smuggle a payload through.
 func ResolveModelFullName(harnessName, aliasOrFull string) string {
-	models, ok := HarnessModels[harnessName]
-	if !ok {
+	models := GetModelsForHarness(harnessName)
+	if len(models) == 0 {
 		return safeModelPassthrough(aliasOrFull)
 	}
 	for _, m := range models {
@@ -281,6 +311,76 @@ func AllModels() []ModelSpec {
 		all = append(all, models...)
 	}
 	return all
+}
+
+// ModelFamilyNames returns supported model families in canonical priority order.
+func ModelFamilyNames() []string {
+	names := make([]string, 0, len(SupportedModelFamilies))
+	for _, family := range SupportedModelFamilies {
+		names = append(names, family.Name)
+	}
+	return names
+}
+
+// IsSupportedModelFamily reports whether family is part of the parity set.
+func IsSupportedModelFamily(family string) bool {
+	return slices.Contains(ModelFamilyNames(), strings.ToLower(family))
+}
+
+// ModelFamilyForName infers the family for a full model identifier or alias.
+func ModelFamilyForName(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "anthropic/") || strings.Contains(lower, "claude"):
+		return "anthropic"
+	case strings.Contains(lower, "openai/") || strings.Contains(lower, "gpt"):
+		return "openai"
+	case strings.Contains(lower, "google/") || strings.Contains(lower, "gemini"):
+		return "gemini"
+	case strings.Contains(lower, "z-ai/") || strings.Contains(lower, "zhipu") || strings.Contains(lower, "glm"):
+		return "glm"
+	case strings.Contains(lower, "deepseek"):
+		return "deepseek"
+	case strings.Contains(lower, "nvidia/") || strings.Contains(lower, "nemotron"):
+		return "nemotron"
+	case strings.Contains(lower, "qwen") || strings.Contains(lower, "alibaba"):
+		return "qwen"
+	default:
+		return ""
+	}
+}
+
+// ModelFamiliesForHarness returns the supported model families reachable from
+// a harness's configured model aliases.
+func ModelFamiliesForHarness(harnessName string) []string {
+	seen := make(map[string]bool)
+	var families []string
+	for _, model := range GetModelsForHarness(harnessName) {
+		for _, candidate := range []string{model.Alias, model.FullName} {
+			family := ModelFamilyForName(candidate)
+			if family == "" || seen[family] {
+				continue
+			}
+			seen[family] = true
+			families = append(families, family)
+		}
+	}
+	return families
+}
+
+// DefaultModelForFamily returns the first configured model matching a family.
+// The search order is canonical and favors active harnesses before aggregators.
+func DefaultModelForFamily(family string) (ModelSpec, bool) {
+	family = strings.ToLower(family)
+	for _, harness := range append(ActiveHarnesses(), "openrouter") {
+		for _, model := range GetModelsForHarness(harness) {
+			if ModelFamilyForName(model.FullName) == family ||
+				ModelFamilyForName(model.Alias) == family {
+				return model, true
+			}
+		}
+	}
+	return ModelSpec{}, false
 }
 
 // ModelAliases returns just the alias strings for a harness, suitable for

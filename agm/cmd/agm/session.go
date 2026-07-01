@@ -6,8 +6,8 @@ import (
 
 var sessionCmd = &cobra.Command{
 	Use:   "session",
-	Short: "Manage Claude session lifecycle",
-	Long: `Session commands handle the full lifecycle of Claude sessions including
+	Short: "Manage AGM session lifecycle",
+	Long: `Session commands handle the full lifecycle of AGM-managed harness sessions including
 creation, resumption, termination, archiving, and message management.
 
 Examples:

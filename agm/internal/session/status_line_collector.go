@@ -53,6 +53,7 @@ var defaultAgentIcons = map[string]string{
 	"claude-code":  "🤖",
 	"gemini-cli":   "✨",
 	"codex-cli":    "🧠",
+	"agy":          "✦",
 	"opencode-cli": "💻",
 }
 

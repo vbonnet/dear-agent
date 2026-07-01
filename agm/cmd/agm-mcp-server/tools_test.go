@@ -15,6 +15,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -426,6 +427,30 @@ func TestLifecycleTools_RegisterUnderCorrectNames(t *testing.T) {
 	}
 	if !names["agm_send_message"] {
 		t.Error("agm_send_message not registered")
+	}
+}
+
+func TestCreateSessionInputSchemaDocumentsHarnessParity(t *testing.T) {
+	field, ok := reflect.TypeFor[CreateSessionInput]().FieldByName("Harness")
+	if !ok {
+		t.Fatal("CreateSessionInput.Harness field missing")
+	}
+	tag := field.Tag.Get("jsonschema")
+	for _, want := range []string{"claude-code", "codex-cli", "agy", "opencode-cli", "gemini-cli"} {
+		if !strings.Contains(tag, want) {
+			t.Errorf("Harness jsonschema tag %q missing %q", tag, want)
+		}
+	}
+
+	modelField, ok := reflect.TypeFor[CreateSessionInput]().FieldByName("Model")
+	if !ok {
+		t.Fatal("CreateSessionInput.Model field missing")
+	}
+	modelTag := modelField.Tag.Get("jsonschema")
+	for _, want := range []string{"5.6", "2.5-flash", "z-ai/glm-5.2"} {
+		if !strings.Contains(modelTag, want) {
+			t.Errorf("Model jsonschema tag %q missing %q", modelTag, want)
+		}
 	}
 }
 

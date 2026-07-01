@@ -3,55 +3,100 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/agm/internal/agent"
 )
 
-func TestResolveModelAlias(t *testing.T) {
+func TestNormalizeClaudeSetModelAlias(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
-		valid    bool
 	}{
-		{"sonnet", "sonnet", true},
-		{"default", "sonnet", true},
-		{"sonnet-1m", "sonnet[1m]", true},
-		{"opus", "opus", true},
-		{"opus-1m", "opus[1m]", true},
-		{"haiku", "haiku", true},
-		// Case insensitive
-		{"Opus", "opus", true},
-		{"HAIKU", "haiku", true},
-		{"Sonnet-1m", "sonnet[1m]", true},
-		// Invalid
-		{"gpt-4", "", false},
-		{"", "", false},
-		{"unknown", "", false},
+		{"sonnet", "sonnet"},
+		{"default", "sonnet"},
+		{"sonnet-1m", "sonnet"},
+		{"opus", "opus"},
+		{"opus-1m", "opus"},
+		{"haiku", "haiku"},
+		{"unknown-future-model", "unknown-future-model"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got, valid := resolveModelAlias(tt.input)
-			if valid != tt.valid {
-				t.Errorf("resolveModelAlias(%q) valid = %v, want %v", tt.input, valid, tt.valid)
-			}
+			got := normalizeClaudeSetModelAlias(tt.input)
 			if got != tt.expected {
-				t.Errorf("resolveModelAlias(%q) = %q, want %q", tt.input, got, tt.expected)
+				t.Errorf("normalizeClaudeSetModelAlias(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
 	}
 }
 
-func TestModelAliasesCompleteness(t *testing.T) {
-	// Ensure all expected aliases exist
-	expected := []string{"default", "sonnet", "sonnet-1m", "opus", "opus-1m", "haiku"}
-	for _, alias := range expected {
-		if _, ok := modelAliases[alias]; !ok {
-			t.Errorf("missing model alias %q", alias)
+func TestResolveSetModelInstruction_ActiveHarnesses(t *testing.T) {
+	tests := map[string]string{
+		"claude-code":  "opus",
+		"codex-cli":    "5.4-mini",
+		"agy":          "2.5-flash",
+		"opencode-cli": "glm-5.2",
+	}
+	for _, harness := range agent.ActiveHarnesses() {
+		model := tests[harness]
+		if model == "" {
+			t.Fatalf("test missing model for active harness %q", harness)
+		}
+		t.Run(harness, func(t *testing.T) {
+			instruction, err := resolveSetModelInstruction(harness, model)
+			if err != nil {
+				t.Fatalf("resolveSetModelInstruction(%q, %q) returned error: %v", harness, model, err)
+			}
+			if instruction.Harness != harness {
+				t.Fatalf("instruction harness = %q, want %q", instruction.Harness, harness)
+			}
+			if instruction.ResolvedModel == "" {
+				t.Fatal("resolved model is empty")
+			}
+			if !strings.HasPrefix(instruction.Command, "/model ") {
+				t.Fatalf("command = %q, want /model prefix", instruction.Command)
+			}
+			if !strings.Contains(instruction.Command, instruction.ResolvedModel) {
+				t.Fatalf("command %q should include resolved model %q", instruction.Command, instruction.ResolvedModel)
+			}
+		})
+	}
+}
+
+func TestResolveSetModelInstruction_OpenCodeSupportsNewModelFamilies(t *testing.T) {
+	for _, family := range []string{"glm", "deepseek", "nemotron", "qwen"} {
+		model, ok := agent.DefaultModelForFamily(family)
+		if !ok {
+			t.Fatalf("missing default model for family %q", family)
+		}
+		instruction, err := resolveSetModelInstruction("opencode-cli", model.Alias)
+		if err != nil {
+			t.Fatalf("resolveSetModelInstruction(opencode-cli, %q) returned error: %v", model.Alias, err)
+		}
+		if instruction.ResolvedModel != model.FullName {
+			t.Errorf("family %s resolved model = %q, want %q", family, instruction.ResolvedModel, model.FullName)
 		}
 	}
+}
 
-	// Verify count matches
-	if len(modelAliases) != len(expected) {
-		t.Errorf("expected %d aliases, got %d", len(expected), len(modelAliases))
+func TestResolveSetModelInstruction_RejectsUnsafeModel(t *testing.T) {
+	_, err := resolveSetModelInstruction("codex-cli", "gpt-5;rm -rf /")
+	if err == nil {
+		t.Fatal("expected error for unsafe model")
+	}
+	if !strings.Contains(err.Error(), "disallowed character") {
+		t.Errorf("error should mention disallowed character, got: %s", err.Error())
+	}
+}
+
+func TestResolveSetModelInstruction_NormalizesAgyAliases(t *testing.T) {
+	instruction, err := resolveSetModelInstruction("antigravity", "2.5-flash")
+	if err != nil {
+		t.Fatalf("resolveSetModelInstruction returned error: %v", err)
+	}
+	if instruction.Harness != "agy" {
+		t.Fatalf("instruction harness = %q, want agy", instruction.Harness)
 	}
 }
 
@@ -81,16 +126,19 @@ func TestVerifyModelSetParsing(t *testing.T) {
 }
 
 func TestRunSendSetModelInvalidModel(t *testing.T) {
-	// Calling with invalid model should return descriptive error
-	err := runSendSetModel(nil, []string{"test-session", "gpt-4"})
+	savedHarness := setModelHarness
+	defer func() { setModelHarness = savedHarness }()
+	setModelHarness = "codex-cli"
+
+	err := runSendSetModel(nil, []string{"test-session", "gpt-4;rm"})
 	if err == nil {
 		t.Fatal("expected error for invalid model")
 		return
 	}
-	if !strings.Contains(err.Error(), "unknown model") {
-		t.Errorf("error should mention 'unknown model', got: %s", err.Error())
+	if !strings.Contains(err.Error(), "invalid model change request") {
+		t.Errorf("error should mention invalid request, got: %s", err.Error())
 	}
-	if !strings.Contains(err.Error(), "gpt-4") {
+	if !strings.Contains(err.Error(), "gpt-4;rm") {
 		t.Errorf("error should include the invalid model name, got: %s", err.Error())
 	}
 }

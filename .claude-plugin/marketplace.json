@@ -9,7 +9,7 @@
     {
       "name": "agm",
       "source": "./agm/agm-plugin",
-      "description": "AGM (Agent Gateway Manager) commands for managing Claude sessions with tmux",
+      "description": "AGM (Agent Gateway Manager) commands for managing multi-harness tmux sessions",
       "version": "0.4.1"
     },
     {

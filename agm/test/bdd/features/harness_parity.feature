@@ -24,6 +24,38 @@ Feature: Harness parity
     When AGM validates active parity support
     Then harness "gemini-cli" should be deprecated
 
+  Scenario Outline: Supported model families have default routes
+    Given model family "<family>" is configured
+    When AGM validates model family parity support
+    Then model family "<family>" should be supported
+    And model family "<family>" should have a default model route
+
+    Examples:
+      | family    |
+      | anthropic |
+      | openai    |
+      | gemini    |
+      | glm       |
+      | deepseek  |
+      | nemotron  |
+      | qwen      |
+
+  Scenario Outline: Active harness model changes use the shared registry
+    Given harness "<harness>" is configured
+    When AGM resolves a model change for harness "<harness>" with model "<model>"
+    Then the model change should use tmux command "/model"
+    And the resolved model should not be empty
+
+    Examples:
+      | harness      | model     |
+      | claude-code  | sonnet    |
+      | codex-cli    | 5.4-mini  |
+      | agy          | 2.5-flash |
+      | opencode-cli | glm-5.2   |
+      | opencode-cli | deepseek-v4 |
+      | opencode-cli | nemotron  |
+      | opencode-cli | qwen      |
+
   Scenario: Codex composer is ready to receive input
     Given a Codex CLI composer pane
     When AGM checks whether the session can receive input

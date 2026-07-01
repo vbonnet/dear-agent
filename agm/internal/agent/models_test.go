@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestValidateModel(t *testing.T) {
 	// Known model should return nil
@@ -196,5 +199,43 @@ func TestGetModelsForHarness_OpenCode(t *testing.T) {
 	}
 	if foundDeprecatedGemini {
 		t.Error("opencode-cli models should not include deprecated gemini-cli-only models")
+	}
+}
+
+func TestSupportedModelFamiliesPriorityOrder(t *testing.T) {
+	want := []string{"anthropic", "openai", "gemini", "glm", "deepseek", "nemotron", "qwen"}
+	got := ModelFamilyNames()
+	if len(got) != len(want) {
+		t.Fatalf("ModelFamilyNames length = %d, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ModelFamilyNames()[%d] = %q, want %q (all: %v)", i, got[i], want[i], got)
+		}
+		if !IsSupportedModelFamily(got[i]) {
+			t.Fatalf("family %q should be supported", got[i])
+		}
+	}
+}
+
+func TestDefaultModelForFamilyCoversParitySet(t *testing.T) {
+	for _, family := range ModelFamilyNames() {
+		model, ok := DefaultModelForFamily(family)
+		if !ok {
+			t.Fatalf("DefaultModelForFamily(%q) returned no model", family)
+		}
+		if err := ValidateModel("opencode-cli", model.FullName); err != nil {
+			t.Fatalf("family %q default model %q should be syntactically safe: %v", family, model.FullName, err)
+		}
+	}
+}
+
+func TestOpenRouterProvidesRequestedOpenModelFamilies(t *testing.T) {
+	want := []string{"glm", "deepseek", "nemotron", "qwen"}
+	got := ModelFamiliesForHarness("openrouter")
+	for _, family := range want {
+		if !slices.Contains(got, family) {
+			t.Fatalf("openrouter model aliases missing family %q; got %v", family, got)
+		}
 	}
 }

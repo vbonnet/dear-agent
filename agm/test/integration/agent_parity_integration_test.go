@@ -24,16 +24,16 @@ var _ = Describe("Agent Parity - End-to-End Integration", func() {
 
 		claudeAdapter, err := agent.NewClaudeAdapter(nil)
 		Expect(err).ToNot(HaveOccurred())
-		adapters["claude"] = claudeAdapter
+		adapters["claude-code"] = claudeAdapter
 
 		os.Setenv("GEMINI_API_KEY", "test-api-key-for-testing")
 		geminiAdapter, err := agent.NewGeminiCLIAdapter(nil)
 		Expect(err).ToNot(HaveOccurred())
-		adapters["gemini"] = geminiAdapter
+		adapters["gemini-cli"] = geminiAdapter
 
 		opencodeAdapter, err := agent.NewOpenCodeAdapter(nil)
 		Expect(err).ToNot(HaveOccurred())
-		adapters["opencode"] = opencodeAdapter
+		adapters["opencode-cli"] = opencodeAdapter
 	})
 
 	AfterEach(func() {
@@ -99,9 +99,9 @@ var _ = Describe("Agent Parity - End-to-End Integration", func() {
 				GinkgoWriter.Printf("%s completed full lifecycle: %d initial messages\n",
 					agentName, initialLength)
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 	})
 
@@ -156,9 +156,9 @@ var _ = Describe("Agent Parity - End-to-End Integration", func() {
 				GinkgoWriter.Printf("%s managed %d concurrent sessions\n",
 					agentName, len(sessions))
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 	})
 
@@ -182,11 +182,11 @@ var _ = Describe("Agent Parity - End-to-End Integration", func() {
 
 				// Create new adapter instance
 				var newAdapter agent.Agent
-				if agentName == "claude" {
+				if agentName == "claude-code" {
 					newAdapter, err = agent.NewClaudeAdapter(nil)
-				} else if agentName == "gemini" {
+				} else if agentName == "gemini-cli" {
 					newAdapter, err = agent.NewGeminiCLIAdapter(nil)
-				} else if agentName == "opencode" {
+				} else if agentName == "opencode-cli" {
 					newAdapter, err = agent.NewOpenCodeAdapter(nil)
 				}
 				Expect(err).ToNot(HaveOccurred())
@@ -200,9 +200,9 @@ var _ = Describe("Agent Parity - End-to-End Integration", func() {
 				err = newAdapter.TerminateSession(sessionID)
 				Expect(err).ToNot(HaveOccurred())
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 	})
 
@@ -225,9 +225,9 @@ var _ = Describe("Agent Parity - End-to-End Integration", func() {
 				// May return error or succeed idempotently
 				_ = err
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 
 		DescribeTable("handles operations on non-existent sessions consistently",
@@ -256,9 +256,9 @@ var _ = Describe("Agent Parity - End-to-End Integration", func() {
 				err4 := adapter.SendMessage(fakeSessionID, msg)
 				Expect(err4).To(HaveOccurred())
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 	})
 
@@ -297,16 +297,16 @@ var _ = Describe("Agent Parity - End-to-End Integration", func() {
 				// Sessions should be created reasonably fast
 				Expect(creationTime).To(BeNumerically("<", 30*time.Second))
 			},
-			Entry("claude agent", "claude"),
-			Entry("gemini agent", "gemini"),
-			Entry("opencode agent", "opencode"),
+			Entry("claude agent", "claude-code"),
+			Entry("gemini agent", "gemini-cli"),
+			Entry("opencode agent", "opencode-cli"),
 		)
 	})
 
 	Describe("Feature Parity Summary", func() {
 		It("generates comprehensive feature comparison", func() {
-			claudeAdapter := adapters["claude"]
-			geminiAdapter := adapters["gemini"]
+			claudeAdapter := adapters["claude-code"]
+			geminiAdapter := adapters["gemini-cli"]
 
 			GinkgoWriter.Println("\n=== COMPREHENSIVE FEATURE PARITY REPORT ===\n")
 
@@ -354,8 +354,8 @@ var _ = Describe("Agent Parity - End-to-End Integration", func() {
 				return true
 			}
 
-			claudeSession := testSession(claudeAdapter, "claude")
-			geminiSession := testSession(geminiAdapter, "gemini")
+			claudeSession := testSession(claudeAdapter, "claude-code")
+			geminiSession := testSession(geminiAdapter, "gemini-cli")
 
 			GinkgoWriter.Printf("   CreateSession: Claude: %v | Gemini: %v\n", claudeSession, geminiSession)
 

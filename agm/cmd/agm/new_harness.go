@@ -41,6 +41,15 @@ func startHarness(sessionName, workDir string, exists bool, extraAddDirs []strin
 	}
 }
 
+func activeHarnessHasTmuxLauncher(harness string) bool {
+	switch agent.NormalizeHarnessName(harness) {
+	case "claude-code", "codex-cli", "agy", "opencode-cli":
+		return true
+	default:
+		return false
+	}
+}
+
 // startClaudeHarness builds and sends the claude command, waits for the prompt,
 // and answers the trust prompt if needed. Returns (modeAppliedAtStartup, false, err).
 func startClaudeHarness(sessionName, workDir string, exists bool, extraAddDirs []string, trustPreConfigured bool) (bool, bool, error) {
