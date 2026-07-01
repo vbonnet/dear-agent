@@ -29,6 +29,7 @@ func RegisterSpecCoverageSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^every parity surface should have a SPEC.md$`, everyParitySurfaceShouldHaveSPEC)
 	ctx.Step(`^every parity surface should have an executable BDD feature$`, everyParitySurfaceShouldHaveExecutableBDDFeature)
 	ctx.Step(`^every parity SPEC should declare EARS requirements$`, everyParitySPECShouldDeclareEARSRequirements)
+	ctx.Step(`^every parity SPEC should pass strict EARS lint$`, everyParitySPECShouldPassStrictEARSLint)
 	ctx.Step(`^every parity SPEC should have a completed audit marker$`, everyParitySPECShouldHaveCompletedAuditMarker)
 	ctx.Step(`^every parity BDD feature should be registered in the coverage matrix$`, everyParityBDDFeatureShouldBeRegistered)
 	ctx.Step(`^every executable BDD feature should be listed in the BDD catalog$`, everyExecutableBDDFeatureShouldBeListedInBDDCatalog)
@@ -67,6 +68,10 @@ func everyParitySurfaceShouldHaveExecutableBDDFeature(ctx context.Context) error
 
 func everyParitySPECShouldDeclareEARSRequirements(ctx context.Context) error {
 	return specCoverageShouldHaveNoFindings(ctx, "EARS requirements")
+}
+
+func everyParitySPECShouldPassStrictEARSLint(ctx context.Context) error {
+	return specCoverageShouldHaveNoFindings(ctx, "invalid EARS syntax")
 }
 
 func everyParitySPECShouldHaveCompletedAuditMarker(ctx context.Context) error {

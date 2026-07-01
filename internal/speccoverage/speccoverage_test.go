@@ -143,6 +143,26 @@ func TestValidateSurfaceAcceptsCompletedAuditMarker(t *testing.T) {
 	}
 }
 
+func TestValidateSurfaceRejectsInvalidEARSRequirement(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: 2026-07-01 -->\n\n## EARS Requirements\n\n**EX-01** Eventually the system shall maybe work.\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "Feature: Example parity\n")
+
+	findings := validateSurface(root, Surface{
+		Name:        "example parity",
+		PackagePath: "internal/example",
+		SpecPath:    "internal/example/SPEC.md",
+		FeaturePath: "agm/test/bdd/features/example_parity.feature",
+	})
+	if len(findings) != 1 {
+		t.Fatalf("expected one invalid EARS finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "SPEC.md has invalid EARS syntax: line 7: requirement does not match any EARS pattern" {
+		t.Fatalf("finding message = %q", findings[0].Message)
+	}
+}
+
 func TestValidateGoPackageSpecsForFilesRequiresSpecForProductionGo(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
