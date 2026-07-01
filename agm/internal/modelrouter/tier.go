@@ -45,8 +45,8 @@ var TierModels = map[string]map[Tier]string{
 	},
 	"codex-cli": {
 		TierCheap:     "5.4-mini", // fast, efficient
-		TierMid:       "5.4",      // flagship
-		TierExpensive: "5.4",      // same cap — no budget codex option
+		TierMid:       "5.5",      // ChatGPT-account supported flagship default
+		TierExpensive: "5.5",      // same cap - no separate expensive codex default
 	},
 	"openrouter": {
 		TierCheap:     "deepseek/deepseek-chat-v3-0324:free", // DeepSeek V4 Flash ~$0.28/M

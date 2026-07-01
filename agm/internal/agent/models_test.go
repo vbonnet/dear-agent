@@ -29,6 +29,7 @@ func TestResolveModelFullName(t *testing.T) {
 		{"claude-code", "fable", "claude-fable-5"},
 		{"gemini-cli", "3.5-flash", "gemini-3.5-flash"},
 		{"codex-cli", "5.6", "gpt-5.6"},
+		{"codex-cli", "5.5", "gpt-5.5"},
 		{"codex-cli", "5.4", "gpt-5.4"},
 		// Unknown alias passthrough
 		{"claude-code", "future-model", "future-model"},
@@ -50,8 +51,15 @@ func TestDefaultModelForHarness(t *testing.T) {
 		t.Errorf("claude-code default: got (%q, %v), want (sonnet, true)", model, ok)
 	}
 	model, ok = DefaultModelForHarness("codex-cli")
-	if !ok || model != "5.6" {
-		t.Errorf("codex-cli default: got (%q, %v), want (5.6, true)", model, ok)
+	if !ok || model != "5.5" {
+		t.Errorf("codex-cli default: got (%q, %v), want (5.5, true)", model, ok)
+	}
+	resolved := ResolveModelFullName("codex-cli", model)
+	if resolved == "gpt-5.6" {
+		t.Fatalf("codex-cli default resolved to unsupported ChatGPT-account model %q", resolved)
+	}
+	if resolved != "gpt-5.5" {
+		t.Fatalf("codex-cli default resolved to %q, want gpt-5.5", resolved)
 	}
 	model, ok = DefaultModelForHarness("agy")
 	if !ok || model != "2.5-flash" {
@@ -145,9 +153,9 @@ func TestResolveModelFullName_CrossHarness(t *testing.T) {
 		{"gemini-cli", "sonnet", "gemini-3.1-pro-preview"},
 		{"gemini-cli", "haiku", "gemini-3.5-flash"},
 		// Claude aliases → Codex models
-		{"codex-cli", "fable", "gpt-5.6"},
-		{"codex-cli", "opus", "gpt-5.6"},
-		{"codex-cli", "sonnet", "gpt-5.6"},
+		{"codex-cli", "fable", "gpt-5.5"},
+		{"codex-cli", "opus", "gpt-5.5"},
+		{"codex-cli", "sonnet", "gpt-5.5"},
 		{"codex-cli", "haiku", "gpt-5.4-mini"},
 		// Claude aliases → AGY models (ce-7sh1: proper tier mapping)
 		{"agy", "opus", "gemini-2.5-pro"},
@@ -156,6 +164,7 @@ func TestResolveModelFullName_CrossHarness(t *testing.T) {
 		// Gemini aliases → Claude models
 		{"claude-code", "2.5-pro", "claude-opus-4-8[1m]"},
 		{"claude-code", "3.5-flash", "claude-haiku-4-5"},
+		{"claude-code", "5.5", "claude-opus-4-8[1m]"},
 		// Native aliases still work (not affected)
 		{"gemini-cli", "3.5-flash", "gemini-3.5-flash"},
 		{"claude-code", "opus", "claude-opus-4-8[1m]"},
@@ -167,6 +176,12 @@ func TestResolveModelFullName_CrossHarness(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("ResolveModelFullName(%q, %q) = %q, want %q", tt.harness, tt.input, got, tt.expected)
 		}
+	}
+}
+
+func TestCodexRegistryKeepsExplicitGPT56(t *testing.T) {
+	if got := ResolveModelFullName("codex-cli", "5.6"); got != "gpt-5.6" {
+		t.Fatalf("explicit codex 5.6 resolved to %q, want gpt-5.6", got)
 	}
 }
 
