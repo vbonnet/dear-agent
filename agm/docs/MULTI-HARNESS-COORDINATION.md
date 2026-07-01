@@ -79,10 +79,8 @@ Implement full feature parity for Codex, OpenCode, and Gemini harnesses using Cl
 **Status:** Parity analysis complete, testing framework exists
 
 **Completed:**
-- ✅ Comprehensive parity analysis (`docs/gemini-parity-analysis.md`)
 - ✅ Testing guide created
 - ✅ Readiness detection documented
-- ✅ Test summary available
 
 **Known Gaps:**
 - ⚠️ HTML export not supported (architectural limitation)

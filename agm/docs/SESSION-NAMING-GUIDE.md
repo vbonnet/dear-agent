@@ -258,7 +258,6 @@ A: Technically yes, but they're not recommended. Stick to ASCII alphanumeric, da
 
 ## See Also
 
-- [BUG-001 Documentation](../CSM-BUG-FIX-REPORT.md) - Full incident report
 - [User Guide](USER-GUIDE.md) - General AGM usage
 - [Troubleshooting Guide](TROUBLESHOOTING.md) - Common issues and solutions
 

@@ -341,11 +341,6 @@ repository.
 | 1 | Error (JSON parse failure or internal error) |
 | 2 | Blocked (golden-ref violation or non-repo write) |
 
-**Documentation**: See `cmd/pretool-worktree-enforcer/IMPLEMENTATION_STATUS.md` for full
-implementation history.
-
----
-
 ### sessionstart-guardian
 
 **Type**: SessionStart hook (Go binary)

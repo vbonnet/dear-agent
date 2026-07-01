@@ -199,8 +199,7 @@ go test -bench=. -benchtime=10s
 
 1. Run with race detector: `go test -race`
 2. Run benchmarks on production-like hardware
-3. Review VALIDATION_REPORT.md
-4. Confirm all known limitations are acceptable
+3. Confirm all known limitations are acceptable
 
 ### Regular Maintenance
 
@@ -213,7 +212,6 @@ go test -bench=. -benchtime=10s
 
 For issues or questions:
 - Check README.md for detailed documentation
-- Review VALIDATION_REPORT.md for known limitations
 - Consult Wayfinder team
 
 ---

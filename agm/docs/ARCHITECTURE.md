@@ -501,7 +501,8 @@ agm: unarchive session 'old-project'
 
 **Status**: Phases 1-2 Complete (Dual-Write Mode) - 2026-03-14
 **Migration Plan**: ``
-**Documentation**: `docs/YAML-TO-DOLT-MIGRATION-PHASES-1-2.md`
+Historical migration notes are archived in `engram-research`; this
+architecture document describes the current storage design.
 
 AGM is migrating from filesystem-based YAML manifests to Dolt database storage for improved query performance, atomic operations, and version history.
 

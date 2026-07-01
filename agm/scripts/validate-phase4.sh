@@ -219,7 +219,7 @@ fi
 
 echo -n "6.2 Verifying Phase 3 documentation... "
 docs_complete=true
-for doc in "docs/agents/gemini-cli.md" "docs/gemini-parity-analysis.md" "docs/AGENT-COMPARISON.md"; do
+for doc in "docs/agents/gemini-cli.md" "docs/AGENT-COMPARISON.md"; do
     if [ ! -f "$doc" ]; then
         docs_complete=false
         echo
