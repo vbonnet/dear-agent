@@ -135,7 +135,6 @@ deterministic ordering.
 - It is not a feature checklist. The point is the *property*, not a specific
   implementation. A YAML file with a stable schema can be a record; a SQL
   table without one isn't.
-- It is not a replacement for the workflow lifecycle. The lifecycle governs
-  *how* you maintain the substrate (Define → Enforce → Audit → Resolve). The
-  diagnostic governs *whether the substrate is structured well enough to
-  maintain at all.*
+- It is not a replacement for DEAR. DEAR governs *how* you maintain the
+  substrate (Define → Enforce → Audit → Resolve). The diagnostic governs
+  *whether the substrate is structured well enough to maintain at all.*
