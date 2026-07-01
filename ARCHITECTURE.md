@@ -1,6 +1,6 @@
 # Architecture
 
-<!-- Last audited at: 2026-06-16 -->
+<!-- Last audited at: 2026-07-01 -->
 
 ## High-Level Overview
 
@@ -17,13 +17,16 @@ the lifecycle of AI coding agent sessions across multiple harnesses.
          │                  │                        │
          v                  v                        v
 ┌─────────────────────────────────────────────────────────────────┐
-│                   Shared Operations Layer                        │
-│                     (internal/ops/)                              │
+│              Operations + CLI Lifecycle Logic                    │
 │                                                                 │
-│  ListSessions · GetSession · SearchSessions · GetStatus · ...  │
+│  internal/ops covers many reusable API operations, while some   │
+│  CLI lifecycle paths still own harness/tmux control directly.   │
 │                                                                 │
-│  OpContext: dependency injection container for storage, tmux,   │
-│  config, and output formatting preferences                      │
+│  Examples in ops: list/get/search/status, health, tag, retry,   │
+│  compact helpers, GC, install, and selected send/create paths.  │
+│                                                                 │
+│  Examples still leaky in cmd/agm: session new, resume/attach,   │
+│  send msg, and mode/model command dispatch.                     │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Harness Adapter Registry                      │
 │                    (internal/agent/)                             │
@@ -70,20 +73,36 @@ The primary user interface. Cobra-based command tree with these groups:
 - **Workflow commands** — `deep-research`, `code-review`, `architect`
 - **Communication** — `send`, `compact`
 
-### Shared Operations Layer (`agm/internal/ops/`)
+### Operations Layer and CLI Lifecycle Split
 
-The abstraction that makes AGM accessible from three API surfaces:
+`agm/internal/ops/` is a reusable operations layer for many command and API
+paths, but it is not yet the single business-logic funnel for every AGM
+surface. The real split is:
 
 ```
-CLI (Cobra)    →  internal/ops  →  Dolt Storage
-MCP (JSON-RPC) →  internal/ops  →  Dolt Storage
-Skills (.md)   →  CLI --json    →  internal/ops  →  Dolt Storage
+MCP / JSON-friendly paths  →  internal/ops  → storage / tmux / backend
+Many CLI commands          →  internal/ops  → storage / tmux / backend
+Skills (.md)               →  CLI commands  → whichever path that command uses
+CLI lifecycle paths        →  cmd/agm helpers + harness/tmux switches
 ```
 
-- `OpContext` provides dependency injection (storage, tmux client, config)
+- `OpContext` provides dependency injection for storage, tmux, manager backend,
+  config, and output preferences where a command uses ops.
 - RFC 7807 structured errors with stable error codes (AGM-001 through AGM-100)
 - Field masks via `--fields` for token-efficient output
 - JSON output mode for programmatic consumers
+- `agm session new` still runs through `agm/cmd/agm/new*.go`, including
+  sandbox setup, tmux creation, harness command construction, post-create
+  hooks, and attach/detach handling.
+- `agm session resume` still runs through `agm/cmd/agm/resume.go`, including
+  identifier resolution, health checks, tmux recreation, and harness-specific
+  resume command delivery.
+- `agm send msg` still runs through `agm/cmd/agm/send_msg.go`, including
+  queueing, safety checks, pending-file writes, tmux delivery, and a legacy
+  API-adapter branch for API-based harness names.
+
+This leaky split is intentional documentation, not a re-architecture plan. The
+ops/adapter boundary cleanup is tabled separately.
 
 ### Harness Adapters (`agm/internal/agent/`)
 
@@ -94,11 +113,11 @@ implements the `Agent` interface, encapsulating all harness-specific logic:
 |---------|---------|-----------------|
 | Claude | Claude Code | UUID detection, slash commands, history.jsonl parsing |
 | Gemini | Gemini CLI | API integration, session file management |
-| Codex | Codex CLI | Thread management, OpenAI API integration |
+| Codex | Codex CLI | CLI launch/resume, composer readiness detection, model alias resolution |
 | OpenCode | OpenCode CLI | SSE event streams, server port management |
 
-Adding a new harness requires implementing the `Agent` interface — no changes
-to the core operations layer.
+Adding a new harness normally starts with the `Agent` interface and model
+registry, then any still-leaky CLI lifecycle switches must be audited as well.
 
 ### Session Management (`agm/internal/session/`)
 
@@ -256,10 +275,13 @@ dear-agent/
 
 ## Design Principles
 
-1. **Adapter pattern for extensibility** — All harness-specific logic isolated
-   in adapters. Adding a new AI CLI never touches core operations.
-2. **Shared operations layer** — CLI, MCP, and Skills all route through the
-   same business logic. No behavior divergence between API surfaces.
+1. **Adapter pattern for extensibility** — Harness-specific logic should live
+   in adapters where the current code supports it, but session creation,
+   resume, send, and mode/model dispatch still have command-layer harness
+   switches that must be kept honest.
+2. **Shared operations layer** — `agm/internal/ops` is the target home for
+   reusable API behavior and already backs many surfaces, but not all CLI
+   lifecycle behavior routes through it yet.
 3. **Configuration cascade** — CLI flags → environment variables → config file
    → smart defaults.
 4. **Advisory over enforced** — File reservations warn rather than block,
