@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"sync"
 )
 
 // HarnessConformanceFinding describes a shared adapter-contract violation.
@@ -187,6 +188,7 @@ func newConformanceAdapter(harness string) (Agent, error) {
 }
 
 type memorySessionStore struct {
+	mu       sync.RWMutex
 	sessions map[SessionID]*SessionMetadata
 }
 
@@ -195,6 +197,9 @@ func newMemorySessionStore() *memorySessionStore {
 }
 
 func (s *memorySessionStore) Get(sessionID SessionID) (*SessionMetadata, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	metadata, ok := s.sessions[sessionID]
 	if !ok {
 		return nil, ErrSessionNotFound
@@ -203,15 +208,24 @@ func (s *memorySessionStore) Get(sessionID SessionID) (*SessionMetadata, error) 
 }
 
 func (s *memorySessionStore) Set(sessionID SessionID, metadata *SessionMetadata) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.sessions[sessionID] = metadata
 	return nil
 }
 
 func (s *memorySessionStore) Delete(sessionID SessionID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	delete(s.sessions, sessionID)
 	return nil
 }
 
 func (s *memorySessionStore) List() (map[SessionID]*SessionMetadata, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	return maps.Clone(s.sessions), nil
 }
