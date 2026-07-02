@@ -6,12 +6,17 @@ locals {
     "dear-agent" = {
       visibility     = "public"
       default_branch = "main"
-      # ci.yml matrix: 2 jobs, both must pass.
-      # review.yml: 5-dimension AI review (replaces gemini-code-assist, ce-hz14).
+      # Exact check-run names enforced on main (verified live via
+      #   gh api /repos/vbonnet/dear-agent/commits/main/check-runs).
+      # ci.yml Build & Test matrix (2 jobs) + CodeQL (Analyze Go Code) +
+      # govulncheck + the bash 20-line size gate + the vulnerability scan.
       required_checks = [
         "Build & Test (ubuntu-latest)",
         "Build & Test (macos-latest)",
-        "5-Dimension AI Review",
+        "Analyze Go Code (go)",
+        "govulncheck",
+        "Bash Script Size Check (20-line limit)",
+        "Vulnerability Scan",
       ]
     }
     # NOTE: "engram" is intentionally NOT here — it is an ARCHIVED repo and
