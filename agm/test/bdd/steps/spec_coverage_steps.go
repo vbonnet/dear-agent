@@ -36,6 +36,8 @@ func RegisterSpecCoverageSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^every parity BDD feature should be registered in the coverage matrix$`, everyParityBDDFeatureShouldBeRegistered)
 	ctx.Step(`^every executable BDD feature should be listed in the BDD catalog$`, everyExecutableBDDFeatureShouldBeListedInBDDCatalog)
 	ctx.Step(`^every BDD catalog feature reference should exist$`, everyBDDCatalogFeatureReferenceShouldExist)
+	ctx.Step(`^every executable BDD feature should reference a governing SPEC\.md$`, everyExecutableBDDFeatureShouldReferenceGoverningSPEC)
+	ctx.Step(`^every governing SPEC\.md should reference its executable BDD feature$`, everyGoverningSPECShouldReferenceExecutableBDDFeature)
 	ctx.Step(`^AGM validates changed Go package SPEC coverage$`, agmValidatesChangedGoPackageSPECCoverage)
 	ctx.Step(`^changed production Go packages should have co-located SPEC.md files$`, changedProductionGoPackagesShouldHaveCoLocatedSPECFiles)
 	ctx.Step(`^changed production Go package SPEC.md files should pass strict EARS lint$`, changedProductionGoPackageSPECFilesShouldPassStrictEARSLint)
@@ -99,6 +101,14 @@ func everyExecutableBDDFeatureShouldBeListedInBDDCatalog(ctx context.Context) er
 
 func everyBDDCatalogFeatureReferenceShouldExist(ctx context.Context) error {
 	return specCoverageShouldHaveNoFindings(ctx, "references a missing feature file")
+}
+
+func everyExecutableBDDFeatureShouldReferenceGoverningSPEC(ctx context.Context) error {
+	return specCoverageShouldHaveNoFindings(ctx, "does not declare governing SPEC.md")
+}
+
+func everyGoverningSPECShouldReferenceExecutableBDDFeature(ctx context.Context) error {
+	return specCoverageShouldHaveNoFindings(ctx, "governing SPEC.md does not reference executable BDD feature")
 }
 
 func agmValidatesChangedGoPackageSPECCoverage(ctx context.Context) error {

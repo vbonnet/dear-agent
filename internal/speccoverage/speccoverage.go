@@ -133,6 +133,7 @@ func Validate(root string) ([]Finding, error) {
 	}
 
 	findings = append(findings, ValidateBDDCatalog(root)...)
+	findings = append(findings, ValidateBDDFeatureTraceability(root)...)
 
 	return findings, nil
 }
@@ -192,6 +193,74 @@ func ValidateBDDCatalog(root string) []Finding {
 	}
 
 	return findings
+}
+
+// ValidateBDDFeatureTraceability verifies every executable BDD feature declares
+// a governing SPEC.md and that the referenced SPEC points back to the feature.
+func ValidateBDDFeatureTraceability(root string) []Finding {
+	features, err := bddFeaturePaths(root)
+	if err != nil {
+		return []Finding{{
+			Surface: "BDD feature traceability",
+			Path:    "agm/test/bdd/features",
+			Message: err.Error(),
+		}}
+	}
+
+	var findings []Finding
+	for _, feature := range features {
+		featureData, err := os.ReadFile(filepath.Join(root, feature))
+		if err != nil {
+			findings = append(findings, Finding{
+				Surface: "BDD feature traceability",
+				Path:    feature,
+				Message: fmt.Sprintf("read BDD feature: %v", err),
+			})
+			continue
+		}
+		specPath, ok := featureSpecPath(string(featureData))
+		if !ok {
+			findings = append(findings, Finding{
+				Surface: "BDD feature traceability",
+				Path:    feature,
+				Message: "BDD feature does not declare governing SPEC.md",
+			})
+			continue
+		}
+		specData, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(specPath)))
+		if err != nil {
+			findings = append(findings, Finding{
+				Surface: "BDD feature traceability",
+				Path:    specPath,
+				Message: fmt.Sprintf("BDD feature references a missing SPEC.md: %v", err),
+			})
+			continue
+		}
+		if !strings.Contains(string(specData), feature) {
+			findings = append(findings, Finding{
+				Surface: "BDD feature traceability",
+				Path:    specPath,
+				Message: "governing SPEC.md does not reference executable BDD feature",
+			})
+		}
+	}
+	return findings
+}
+
+func featureSpecPath(featureText string) (string, bool) {
+	for line := range strings.SplitSeq(featureText, "\n") {
+		line = strings.TrimSpace(line)
+		value, ok := strings.CutPrefix(line, "# SPEC:")
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value == "" || filepath.Base(value) != "SPEC.md" {
+			return "", false
+		}
+		return filepath.ToSlash(filepath.Clean(value)), true
+	}
+	return "", false
 }
 
 func bddFeaturePaths(root string) ([]string, error) {
