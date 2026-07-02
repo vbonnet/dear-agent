@@ -18,6 +18,33 @@ func TestArchiveSkipsNonCodexHarness(t *testing.T) {
 	}
 }
 
+func TestArchiveUsesPersistedCodexSessionID(t *testing.T) {
+	orig := archiveCodexThreadFn
+	t.Cleanup(func() { archiveCodexThreadFn = orig })
+
+	var got string
+	archiveCodexThreadFn = func(_ context.Context, threadID string) error {
+		got = threadID
+		return nil
+	}
+
+	res, err := Archive(context.Background(), Request{
+		Harness:        "codex-cli",
+		Name:           "agm-name",
+		AGMSessionID:   "agm-session-id",
+		CodexSessionID: "thr_123",
+	})
+	if err != nil {
+		t.Fatalf("Archive returned error: %v", err)
+	}
+	if got != "thr_123" {
+		t.Fatalf("archived Codex id = %q, want thr_123", got)
+	}
+	if res.Target != "thr_123" {
+		t.Fatalf("result target = %q, want thr_123", res.Target)
+	}
+}
+
 func TestArchiveResolvesCodexSessionByWorkingDirectory(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

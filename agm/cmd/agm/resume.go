@@ -639,13 +639,13 @@ func buildCodexResumeCommand(m *manifest.Manifest, health *HealthStatus) string 
 	}
 	if m.Codex != nil && m.Codex.SessionID != "" {
 		resolvedModel := agent.ResolveModelFullName("codex-cli", model)
-		return fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s codex resume -m %s -C %s -s workspace-write %s && exit",
+		return fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s codex resume --remote unix:// -m %s -C %s -s workspace-write %s && exit",
 			shellQuote(health.TmuxSessionName),
 			shellQuote(resolvedModel),
 			shellQuote(health.WorktreePath),
 			shellQuote(m.Codex.SessionID))
 	}
-	return buildCodexCommandForModel(health.TmuxSessionName, health.WorktreePath, model, nil)
+	return buildCodexCommandForModel(health.TmuxSessionName, health.WorktreePath, model, nil, nil)
 }
 
 func buildAgyResumeCommand(m *manifest.Manifest, health *HealthStatus) string {

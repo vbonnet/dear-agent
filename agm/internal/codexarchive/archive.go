@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
@@ -24,6 +25,8 @@ const (
 	// #nosec G101 -- this is the name of an environment variable, not a credential.
 	envRemoteToken = "AGM_CODEX_REMOTE_AUTH_TOKEN_ENV"
 )
+
+var archiveCodexThreadFn = archiveCodexThread
 
 // Result describes the Codex-side archive operation paired with AGM archive.
 type Result struct {
@@ -45,6 +48,9 @@ func ArchiveManifest(ctx context.Context, m *manifest.Manifest) (*Result, error)
 		WorkingDirectory: m.WorkingDirectory,
 		ProjectDirectory: m.Context.Project,
 	}
+	if m.Codex != nil {
+		req.CodexSessionID = m.Codex.SessionID
+	}
 	if m.Sandbox != nil {
 		req.SandboxMergedPath = m.Sandbox.MergedPath
 	}
@@ -57,6 +63,7 @@ type Request struct {
 	Harness           string
 	Name              string
 	AGMSessionID      string
+	CodexSessionID    string
 	WorkingDirectory  string
 	SandboxMergedPath string
 	ProjectDirectory  string
@@ -68,6 +75,13 @@ type Request struct {
 func Archive(ctx context.Context, req Request) (*Result, error) {
 	if req.Harness != "codex-cli" {
 		return &Result{Skipped: true}, nil
+	}
+
+	if req.CodexSessionID != "" {
+		if err := archiveCodexThreadFn(ctx, req.CodexSessionID); err != nil {
+			return nil, err
+		}
+		return &Result{Target: req.CodexSessionID}, nil
 	}
 
 	match, err := findSessionByCWD(req.candidateDirs())
@@ -86,6 +100,16 @@ func Archive(ctx context.Context, req Request) (*Result, error) {
 		return nil, err
 	}
 	return &Result{Target: target, TranscriptPath: match.path}, nil
+}
+
+func archiveCodexThread(ctx context.Context, threadID string) error {
+	client := codexcontrol.New()
+	if err := client.StartRemoteControl(ctx); err == nil {
+		if err := client.ArchiveThread(ctx, threadID); err == nil {
+			return nil
+		}
+	}
+	return runCodexArchive(ctx, threadID)
 }
 
 func (r Request) candidateDirs() []string {
