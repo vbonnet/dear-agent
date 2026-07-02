@@ -1,3 +1,4 @@
+# SPEC: internal/speccoverage/SPEC.md
 Feature: SPEC and BDD coverage
   AGM parity governance should keep SPEC.md files and executable BDD scenarios
   paired for every parity-critical surface. Legacy packages may still be burned
@@ -29,6 +30,12 @@ Feature: SPEC and BDD coverage
     When AGM validates parity SPEC and BDD coverage
     Then every executable BDD feature should be listed in the BDD catalog
     And every BDD catalog feature reference should exist
+
+  Scenario: Executable BDD feature files declare SPEC traceability
+    Given AGM parity coverage requirements
+    When AGM validates parity SPEC and BDD coverage
+    Then every executable BDD feature should reference a governing SPEC.md
+    And every governing SPEC.md should reference its executable BDD feature
 
   Scenario: Changed production Go packages carry co-located specs
     Given AGM parity coverage requirements

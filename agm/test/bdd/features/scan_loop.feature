@@ -1,3 +1,4 @@
+# SPEC: agm/internal/ops/SPEC.md
 Feature: Scan Loop
   As an AGM orchestrator
   I want the scan loop to detect anomalies across sessions
