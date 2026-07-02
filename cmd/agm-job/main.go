@@ -200,17 +200,25 @@ func acquireLock(lockDir, lockPath, name string) error {
 		return fmt.Errorf("create lock dir: %w", err)
 	}
 	if err := os.Mkdir(lockPath, 0o700); err != nil {
-		if os.IsExist(err) {
-			// Check if the lock is stale (process no longer exists).
-			if stale, err := isStale(lockPath); stale || err != nil {
-				_ = os.Remove(lockPath)
-				return os.Mkdir(lockPath, 0o700)
-			}
+		if !os.IsExist(err) {
+			return err
+		}
+		// Lock dir exists. Reclaim it only if the recorded process is gone
+		// (or its pid file is unreadable/corrupt).
+		if stale, serr := isStale(lockPath); !stale && serr == nil {
 			return fmt.Errorf("lock dir %q exists — %s already running", lockPath, name)
 		}
-		return err
+		// RemoveAll (not Remove) because the lock dir holds a "pid" file —
+		// os.Remove only deletes empty dirs and would leave the stale lock in
+		// place, wedging the job permanently.
+		_ = os.RemoveAll(lockPath)
+		if err := os.Mkdir(lockPath, 0o700); err != nil {
+			return err
+		}
 	}
-	// Write our PID inside the lock dir so staleness can be detected.
+	// Record our PID inside the lock dir so a future run can detect staleness.
+	// This must run on both the fresh and post-recovery paths — a lock without
+	// a pid file would be treated as stale and reclaimed by a concurrent run.
 	_ = os.WriteFile(filepath.Join(lockPath, "pid"), fmt.Appendf(nil, "%d\n", os.Getpid()), 0o600)
 	return nil
 }
