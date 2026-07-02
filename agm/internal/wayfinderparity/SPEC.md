@@ -32,3 +32,7 @@ requiring the caller to be Claude Code.
 **WFP-07** When Wayfinder phase guidance is used, the system shall keep phase engram resolution harness-neutral.
 
 **WFP-08** When a new active harness is added, the system shall require Wayfinder parity tests before the harness is considered supported.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/wayfinder_parity.feature`

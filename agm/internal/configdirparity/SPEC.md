@@ -31,3 +31,7 @@ keeps `.gemini/` as deprecated compatibility.
 **CDP-07** When Gemini CLI compatibility is present, the system shall keep `.gemini/` separate from the active harness parity set.
 
 **CDP-08** When a new active harness is added, the system shall require configuration-directory parity tests before the harness is considered supported.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/config_directory_parity.feature`

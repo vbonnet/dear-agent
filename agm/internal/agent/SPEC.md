@@ -52,3 +52,7 @@ compatibility.
 ### BDD Enforcement
 
 **AGP-12** When a new active harness or model family is added, the system shall require BDD scenarios and registry tests that cross-cut the active parity matrix before the change is complete.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/harness_parity.feature`

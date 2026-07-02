@@ -28,3 +28,7 @@ uses `.claude/settings.json`; Codex CLI uses `.codex/hooks.json`; AGY uses
 **HHP-06** When an active hook-capable harness is added, the system shall require BDD and Go tests that verify required hook events, guardrail commands, script existence, and executable mode across the hook parity matrix.
 
 **HHP-07** When hook installation help is shown, the system shall describe hook installation as AGM hook support rather than Claude-only support.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/hook_parity.feature`

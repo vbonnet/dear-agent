@@ -36,3 +36,7 @@ Claude-specific defaults.
 **QMP-09** When AGM reports cost for an unknown model family, the system shall mark the family explicitly unpriced rather than applying Opus pricing.
 
 **QMP-10** When an active harness or supported model family is added, the system shall require quota parity tests for monitoring surfaces and pricing policy coverage.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/quota_parity.feature`

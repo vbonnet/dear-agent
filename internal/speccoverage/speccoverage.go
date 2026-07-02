@@ -373,6 +373,10 @@ func requiresPackageSpec(file string) bool {
 
 func validateSurface(root string, surface Surface) []Finding {
 	var findings []Finding
+	var specText string
+	var featureText string
+	specLoaded := false
+	featureLoaded := false
 
 	if surface.PackagePath == "" {
 		findings = append(findings, Finding{
@@ -402,7 +406,8 @@ func validateSurface(root string, surface Surface) []Finding {
 				Message: fmt.Sprintf("read SPEC.md: %v", err),
 			})
 		} else {
-			specText := string(spec)
+			specText = string(spec)
+			specLoaded = true
 			hasEARS := strings.Contains(specText, "## EARS Requirements")
 			if !hasEARS {
 				findings = append(findings, Finding{
@@ -432,13 +437,32 @@ func validateSurface(root string, surface Surface) []Finding {
 				Path:    surface.FeaturePath,
 				Message: fmt.Sprintf("read BDD feature: %v", err),
 			})
-		} else if !strings.Contains(string(feature), "Feature:") {
-			findings = append(findings, Finding{
-				Surface: surface.Name,
-				Path:    surface.FeaturePath,
-				Message: "BDD feature does not declare a Feature",
-			})
+		} else {
+			featureText = string(feature)
+			featureLoaded = true
+			if !strings.Contains(featureText, "Feature:") {
+				findings = append(findings, Finding{
+					Surface: surface.Name,
+					Path:    surface.FeaturePath,
+					Message: "BDD feature does not declare a Feature",
+				})
+			}
 		}
+	}
+
+	if specLoaded && surface.FeaturePath != "" && !strings.Contains(specText, surface.FeaturePath) {
+		findings = append(findings, Finding{
+			Surface: surface.Name,
+			Path:    surface.SpecPath,
+			Message: "SPEC.md does not reference its executable BDD feature",
+		})
+	}
+	if featureLoaded && surface.SpecPath != "" && !strings.Contains(featureText, surface.SpecPath) {
+		findings = append(findings, Finding{
+			Surface: surface.Name,
+			Path:    surface.FeaturePath,
+			Message: "BDD feature does not reference its governing SPEC.md",
+		})
 	}
 
 	return findings

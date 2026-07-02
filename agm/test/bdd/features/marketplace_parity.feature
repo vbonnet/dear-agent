@@ -1,3 +1,4 @@
+# SPEC: agm/internal/marketplaceparity/SPEC.md
 Feature: SKILL and plugin marketplace parity
   AGM should publish one marketplace contract that every active harness can
   consume. Claude Code uses the native plugin marketplace, while Codex CLI, AGY,

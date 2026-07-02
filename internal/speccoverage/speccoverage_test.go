@@ -107,8 +107,8 @@ func TestValidateSurfaceRejectsNeedsAuditMarker(t *testing.T) {
 		t.Run(marker, func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
-			writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: "+marker+" -->\n\n## EARS Requirements\n\n**EX-01** When an example is validated, the system shall report stale audits.\n")
-			writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "Feature: Example parity\n")
+			writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: "+marker+" -->\n\n## EARS Requirements\n\n**EX-01** When an example is validated, the system shall report stale audits.\n\n## BDD Traceability\n\n- Feature: `agm/test/bdd/features/example_parity.feature`\n")
+			writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "# SPEC: internal/example/SPEC.md\nFeature: Example parity\n")
 
 			findings := validateSurface(root, Surface{
 				Name:        "example parity",
@@ -129,8 +129,8 @@ func TestValidateSurfaceRejectsNeedsAuditMarker(t *testing.T) {
 func TestValidateSurfaceAcceptsCompletedAuditMarker(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: 2026-07-01 -->\n\n## EARS Requirements\n\n**EX-01** When an example is validated, the system shall accept completed audits.\n")
-	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "Feature: Example parity\n")
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: 2026-07-01 -->\n\n## EARS Requirements\n\n**EX-01** When an example is validated, the system shall accept completed audits.\n\n## BDD Traceability\n\n- Feature: `agm/test/bdd/features/example_parity.feature`\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "# SPEC: internal/example/SPEC.md\nFeature: Example parity\n")
 
 	findings := validateSurface(root, Surface{
 		Name:        "example parity",
@@ -155,8 +155,12 @@ func TestValidateSurfaceRejectsInvalidEARSRequirement(t *testing.T) {
 		"",
 		"**EX-01** Eventually the system shall maybe work.",
 		"**EX-02** Somehow the system shall become correct.",
+		"",
+		"## BDD Traceability",
+		"",
+		"- Feature: `agm/test/bdd/features/example_parity.feature`",
 	}, "\n"))
-	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "Feature: Example parity\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "# SPEC: internal/example/SPEC.md\nFeature: Example parity\n")
 
 	findings := validateSurface(root, Surface{
 		Name:        "example parity",
@@ -182,8 +186,8 @@ func TestValidateSurfaceRejectsInvalidEARSRequirement(t *testing.T) {
 func TestValidateSurfaceSkipsEARSLintWithoutEARSSection(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: 2026-07-01 -->\n\n**EX-01** Eventually the system shall maybe work.\n")
-	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "Feature: Example parity\n")
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: 2026-07-01 -->\n\n**EX-01** Eventually the system shall maybe work.\n\n## BDD Traceability\n\n- Feature: `agm/test/bdd/features/example_parity.feature`\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "# SPEC: internal/example/SPEC.md\nFeature: Example parity\n")
 
 	findings := validateSurface(root, Surface{
 		Name:        "example parity",
@@ -195,6 +199,46 @@ func TestValidateSurfaceSkipsEARSLintWithoutEARSSection(t *testing.T) {
 		t.Fatalf("expected one missing EARS section finding, got %d: %v", len(findings), findings)
 	}
 	if findings[0].Message != "SPEC.md does not declare EARS requirements" {
+		t.Fatalf("finding message = %q", findings[0].Message)
+	}
+}
+
+func TestValidateSurfaceRequiresSpecToReferenceFeature(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: 2026-07-01 -->\n\n## EARS Requirements\n\n**EX-01** When an example is validated, the system shall reject missing feature traceability.\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "# SPEC: internal/example/SPEC.md\nFeature: Example parity\n")
+
+	findings := validateSurface(root, Surface{
+		Name:        "example parity",
+		PackagePath: "internal/example",
+		SpecPath:    "internal/example/SPEC.md",
+		FeaturePath: "agm/test/bdd/features/example_parity.feature",
+	})
+	if len(findings) != 1 {
+		t.Fatalf("expected one missing feature reference finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "SPEC.md does not reference its executable BDD feature" {
+		t.Fatalf("finding message = %q", findings[0].Message)
+	}
+}
+
+func TestValidateSurfaceRequiresFeatureToReferenceSpec(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n<!-- Last audited at: 2026-07-01 -->\n\n## EARS Requirements\n\n**EX-01** When an example is validated, the system shall reject missing SPEC traceability.\n\n## BDD Traceability\n\n- Feature: `agm/test/bdd/features/example_parity.feature`\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/example_parity.feature", "Feature: Example parity\n")
+
+	findings := validateSurface(root, Surface{
+		Name:        "example parity",
+		PackagePath: "internal/example",
+		SpecPath:    "internal/example/SPEC.md",
+		FeaturePath: "agm/test/bdd/features/example_parity.feature",
+	})
+	if len(findings) != 1 {
+		t.Fatalf("expected one missing SPEC reference finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "BDD feature does not reference its governing SPEC.md" {
 		t.Fatalf("finding message = %q", findings[0].Message)
 	}
 }
