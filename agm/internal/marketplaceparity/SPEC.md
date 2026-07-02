@@ -36,3 +36,7 @@ marketplace format.
 **MKT-09** When Codex CLI, AGY, or OpenCode consume the catalog, the system shall use an AGENTS.md/SKILL fallback mode.
 
 **MKT-10** When a new active harness is added, the system shall require marketplace parity tests before the harness is considered supported.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/marketplace_parity.feature`
