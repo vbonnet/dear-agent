@@ -20,6 +20,8 @@ type modelFamilyParityState struct {
 	resolvedModel  string
 	created        provider.Provider
 	capabilities   provider.Capabilities
+	origAPIKey     string
+	apiKeySet      bool
 }
 
 type modelFamilyParityStateKey struct{}
@@ -27,7 +29,22 @@ type modelFamilyParityStateKey struct{}
 // RegisterModelFamilyParitySteps registers BDD steps for LLM provider family parity.
 func RegisterModelFamilyParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		return context.WithValue(ctx, modelFamilyParityStateKey{}, &modelFamilyParityState{}), nil
+		origAPIKey, apiKeySet := os.LookupEnv("OPENROUTER_API_KEY")
+		return context.WithValue(ctx, modelFamilyParityStateKey{}, &modelFamilyParityState{
+			origAPIKey: origAPIKey,
+			apiKeySet:  apiKeySet,
+		}), nil
+	})
+
+	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
+		state, ok := ctx.Value(modelFamilyParityStateKey{}).(*modelFamilyParityState)
+		if !ok || state == nil {
+			return ctx, nil
+		}
+		if state.apiKeySet {
+			return ctx, os.Setenv("OPENROUTER_API_KEY", state.origAPIKey)
+		}
+		return ctx, os.Unsetenv("OPENROUTER_API_KEY")
 	})
 
 	ctx.Step(`^LLM model identifier "([^"]*)" for model family "([^"]*)"$`, llmModelIdentifierForModelFamily)

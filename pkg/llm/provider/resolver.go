@@ -135,17 +135,10 @@ func resolveByHeuristic(id string) (family, model string, ok bool) {
 }
 
 func hasOpenRouterFamilyPrefix(lower string) bool {
-	for _, prefix := range []string{
-		"z-ai/",
-		"deepseek/",
-		"nvidia/",
-		"qwen/",
-	} {
-		if strings.HasPrefix(lower, prefix) {
-			return true
-		}
-	}
-	return false
+	return strings.HasPrefix(lower, "z-ai/") ||
+		strings.HasPrefix(lower, "deepseek/") ||
+		strings.HasPrefix(lower, "nvidia/") ||
+		strings.HasPrefix(lower, "qwen/")
 }
 
 // resolveByRegistered consults the user-registered prefix map; the
