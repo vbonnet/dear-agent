@@ -88,6 +88,70 @@ func TestValidateBDDCatalogReportsMissingReferencedFeature(t *testing.T) {
 	}
 }
 
+func TestValidateBDDFeatureTraceabilityReportsMissingSpecMarker(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "agm/test/bdd/features/untraced.feature", "Feature: Untraced\n")
+
+	findings := ValidateBDDFeatureTraceability(root)
+	if len(findings) != 1 {
+		t.Fatalf("expected one missing SPEC marker finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Path != "agm/test/bdd/features/untraced.feature" {
+		t.Fatalf("finding path = %q", findings[0].Path)
+	}
+	if findings[0].Message != "BDD feature does not declare governing SPEC.md" {
+		t.Fatalf("finding message = %q", findings[0].Message)
+	}
+}
+
+func TestValidateBDDFeatureTraceabilityReportsMissingSpec(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "agm/test/bdd/features/missing_spec.feature", "# SPEC: internal/missing/SPEC.md\nFeature: Missing SPEC\n")
+
+	findings := ValidateBDDFeatureTraceability(root)
+	if len(findings) != 1 {
+		t.Fatalf("expected one missing SPEC finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Path != "internal/missing/SPEC.md" {
+		t.Fatalf("finding path = %q", findings[0].Path)
+	}
+	if !strings.Contains(findings[0].Message, "BDD feature references a missing SPEC.md") {
+		t.Fatalf("finding message = %q", findings[0].Message)
+	}
+}
+
+func TestValidateBDDFeatureTraceabilityReportsMissingBackReference(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "agm/test/bdd/features/missing_backref.feature", "# SPEC: internal/example/SPEC.md\nFeature: Missing backref\n")
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n## EARS Requirements\n\n**EX-01** When an example is validated, the system shall keep BDD traceability.\n")
+
+	findings := ValidateBDDFeatureTraceability(root)
+	if len(findings) != 1 {
+		t.Fatalf("expected one missing back-reference finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Path != "internal/example/SPEC.md" {
+		t.Fatalf("finding path = %q", findings[0].Path)
+	}
+	if findings[0].Message != "governing SPEC.md does not reference executable BDD feature: agm/test/bdd/features/missing_backref.feature" {
+		t.Fatalf("finding message = %q", findings[0].Message)
+	}
+}
+
+func TestValidateBDDFeatureTraceabilityAcceptsReciprocalTrace(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "agm/test/bdd/features/traced.feature", "# SPEC: internal/example/SPEC.md\nFeature: Traced\n")
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n## EARS Requirements\n\n**EX-01** When an example is validated, the system shall keep BDD traceability.\n\n## BDD Traceability\n\n- Feature: `agm/test/bdd/features/traced.feature`\n")
+
+	findings := ValidateBDDFeatureTraceability(root)
+	if len(findings) != 0 {
+		t.Fatalf("expected no findings, got %v", findings)
+	}
+}
+
 func TestValidateSurfaceDoesNotReadEmptyPaths(t *testing.T) {
 	t.Parallel()
 	findings := validateSurface(repoRoot(), Surface{Name: "empty surface"})

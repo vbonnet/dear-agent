@@ -1,6 +1,6 @@
 # agm/internal/ops — Requirements Specification (EARS)
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-02 -->
 
 **Version**: 1.0
 **Last Updated**: 2026-06-07
@@ -133,3 +133,9 @@ surfaces (CLI, MCP server, Skills plugin). Every surface constructs an
 - **State field removed.** The `State` field was removed from `SessionSummary`
   because it produced false positives causing cascading bad decisions. Do not
   re-add it without an ADR.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/trust_protocol.feature`
+- Feature: `agm/test/bdd/features/scan_loop.feature`
+- Feature: `agm/test/bdd/features/stall_detection.feature`
