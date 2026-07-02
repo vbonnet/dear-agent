@@ -106,6 +106,26 @@ state detection contracts.
 terminal chrome, adapter names, and model aliases must still route through one
 shared registry instead of harness-specific assumptions.
 
+### Model Family Parity
+
+**File:** [`model_family_parity.feature`](../test/bdd/features/model_family_parity.feature)
+
+**Drives:** `agm/internal/agent` model-family defaults and
+`pkg/llm/provider` resolver/factory routing.
+
+**Key scenarios:**
+- OpenRouter-hosted GLM, DeepSeek, Nemotron, and Qwen model identifiers resolve
+  through the OpenRouter provider family.
+- AGM model-family defaults for the priority open-model families resolve through
+  the lower-level LLM provider resolver.
+- The provider factory constructs an OpenRouter provider when API-key
+  authentication is available.
+- OpenRouter capabilities advertise the priority model-family defaults.
+
+**Why this matters:** Model-family parity must be executable below the AGM
+alias registry. The default routes for the new families should reach a concrete
+provider instead of stopping at documentation or harness-only aliases.
+
 ### Instruction Parity
 
 **File:** [`instruction_parity.feature`](../test/bdd/features/instruction_parity.feature)

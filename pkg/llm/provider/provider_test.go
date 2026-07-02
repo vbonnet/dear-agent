@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -282,14 +283,43 @@ func TestFactory_NewProvider_OpenRouterNoAuth(t *testing.T) {
 }
 
 func TestFactory_NewProvider_OpenRouterWithAPIKey(t *testing.T) {
-	// OpenRouter API key provider is "not yet implemented" per factory code
 	t.Setenv("OPENROUTER_API_KEY", "sk-or-test-key-123")
 	t.Setenv("GOOGLE_CLOUD_PROJECT", "")
 
 	f := NewFactory()
-	_, err := f.NewProvider("openrouter", "")
-	if err == nil {
-		t.Fatal("expected error (OpenRouter provider not implemented)")
+	p, err := f.NewProvider("openrouter", "z-ai/glm-5.2")
+	if err != nil {
+		t.Fatalf("expected OpenRouter provider, got error: %v", err)
+	}
+	if p.Name() != "openrouter" {
+		t.Fatalf("provider name = %q, want openrouter", p.Name())
+	}
+	or, ok := p.(*OpenRouterProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *OpenRouterProvider", p)
+	}
+	if or.model != "z-ai/glm-5.2" {
+		t.Fatalf("provider model = %q, want z-ai/glm-5.2", or.model)
+	}
+}
+
+func TestOpenRouterProvider_CapabilitiesIncludePriorityOpenFamilies(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-test-key-123")
+
+	p, err := NewOpenRouterProvider(OpenRouterConfig{})
+	if err != nil {
+		t.Fatalf("NewOpenRouterProvider() error = %v", err)
+	}
+	caps := p.Capabilities()
+	for _, want := range []string{
+		"z-ai/glm-5.2",
+		"deepseek/deepseek-v4-pro",
+		"nvidia/nemotron-3-ultra",
+		"qwen/qwen3.6-max",
+	} {
+		if !slices.Contains(caps.SupportedModels, want) {
+			t.Fatalf("OpenRouter capabilities missing %q: %v", want, caps.SupportedModels)
+		}
 	}
 }
 
@@ -949,7 +979,6 @@ func TestFactory_NewProvider_GeminiWithGoogleAPIKey(t *testing.T) {
 }
 
 // --- OpenRouter Generate with httptest mock server ---
-
 
 func TestOpenRouterProvider_Generate_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
