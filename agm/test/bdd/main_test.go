@@ -37,5 +37,6 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterHarnessParitySteps(ctx)
 	steps.RegisterInstructionParitySteps(ctx)
 	steps.RegisterHookParitySteps(ctx)
+	steps.RegisterModelFamilyParitySteps(ctx)
 	steps.RegisterSpecCoverageSteps(ctx)
 }
