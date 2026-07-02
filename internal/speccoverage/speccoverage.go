@@ -240,7 +240,7 @@ func ValidateBDDFeatureTraceability(root string) []Finding {
 			findings = append(findings, Finding{
 				Surface: "BDD feature traceability",
 				Path:    specPath,
-				Message: "governing SPEC.md does not reference executable BDD feature",
+				Message: fmt.Sprintf("governing SPEC.md does not reference executable BDD feature: %s", feature),
 			})
 		}
 	}

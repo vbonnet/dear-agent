@@ -135,7 +135,7 @@ func TestValidateBDDFeatureTraceabilityReportsMissingBackReference(t *testing.T)
 	if findings[0].Path != "internal/example/SPEC.md" {
 		t.Fatalf("finding path = %q", findings[0].Path)
 	}
-	if findings[0].Message != "governing SPEC.md does not reference executable BDD feature" {
+	if findings[0].Message != "governing SPEC.md does not reference executable BDD feature: agm/test/bdd/features/missing_backref.feature" {
 		t.Fatalf("finding message = %q", findings[0].Message)
 	}
 }
