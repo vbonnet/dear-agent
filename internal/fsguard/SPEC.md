@@ -189,6 +189,13 @@ the write was ultimately allowed or deferred.
 `Decision.Enforcement` shall be `EnforceDeny` (the zero value), since
 enforcement level is irrelevant for allowed writes.
 
+**FSG-41** When a path falls under `~/.agm/vroom/` or `~/.agm/sandboxes/`, the
+system shall allow the write. These are VROOM supervisor runtime-state directories
+(heartbeat files, trail logs, dispatch ledger, worker sandbox trees). The carveout
+is namespaced: `~/.agm/vroomX/` or `~/.agm/sandboxesX/` (prefix lookalikes) are
+still blocked. (Mirrors the carveout added to the chezmoi Python script in
+commit e252119; fixes ce-q172.)
+
 ---
 
 ## Key Invariants
