@@ -679,13 +679,25 @@ func main() {
 }
 
 func run() int {
+	// Bound telemetry teardown so a wedged or partially-implemented collector
+	// (e.g. one missing MetricsService) can never delay or hang process exit —
+	// telemetry is fail-open, never load-bearing (ce-5zbg).
+	const telemetryShutdownTimeout = 5 * time.Second
 	shutdown := otelsetup.InitTracer("agm")
-	defer shutdown(context.Background()) //nolint:errcheck
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), telemetryShutdownTimeout)
+		defer cancel()
+		_ = shutdown(ctx) //nolint:errcheck // best-effort flush; exit must not block on telemetry
+	}()
 
 	// Metrics counterpart to the tracer above (agent.tasks.*, agent.tokens.*,
 	// agent.stall.*). No-op until OTEL_EXPORTER_OTLP_ENDPOINT is set.
 	if _, err := telemetry.InitMeter("agm"); err == nil {
-		defer func() { _ = telemetry.Shutdown(context.Background()) }()
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), telemetryShutdownTimeout)
+			defer cancel()
+			_ = telemetry.Shutdown(ctx)
+		}()
 	}
 
 	// Use backend adapter to support multiple backends
