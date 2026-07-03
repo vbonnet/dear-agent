@@ -1,26 +1,24 @@
-#!/usr/bin/env python3
-"""PreToolUse hook: block BEADS_DIR usage, redirect to bd --db or bd -C.
+#!/usr/bin/env bash
+# PreToolUse hook: block BEADS_DIR usage, redirect to bd --db or bd -C.
+#
+# bd (beads) supports two ways to target a database outside the current
+# directory:
+#
+#   bd --db /path/to/.beads/embeddeddolt <cmd>   # explicit DB path
+#   bd -C /path/to/project <cmd>                  # cd-style directory targeting
+#
+# BEADS_DIR is not a supported bd environment variable and has no effect on bd.
+# Setting or dereferencing it only clutters the environment and misleads readers.
+#
+# Triggers on:
+#   - Bash commands that assign (BEADS_DIR=...) or dereference ($BEADS_DIR)
+#   - Write/Edit/MultiEdit on shell-like files containing the same patterns
+#
+# Fails OPEN: any parse error exits 0 — this hook must never wedge a session.
 
-bd (beads) supports two ways to target a database outside the current directory:
+set -uo pipefail
 
-  bd --db /path/to/.beads/embeddeddolt <cmd>   # explicit DB path
-  bd -C /path/to/project <cmd>                  # cd-style directory targeting
-
-BEADS_DIR is not a supported bd environment variable and has no effect on bd.
-Setting or dereferencing it only clutters the environment and misleads readers.
-
-Triggers on:
-  - Bash commands that assign (BEADS_DIR=...) or dereference ($BEADS_DIR)
-  - Write/Edit/MultiEdit on shell-like files containing the same patterns
-
-Fails open on any parse error so a malformed payload never silently blocks.
-"""
-import json
-import re
-import sys
-
-MESSAGE = """\
-Use `bd --db <path>` or `bd -C <dir>` instead of BEADS_DIR.
+MESSAGE='Use `bd --db <path>` or `bd -C <dir>` instead of BEADS_DIR.
 
 BEADS_DIR is not a supported bd environment variable. Setting it has no
 effect on bd and leaves dead weight in the environment.
@@ -36,71 +34,56 @@ To target a database outside the current directory, use one of:
   bd -C /path/to/project show ce-123
 
 bd also auto-discovers databases by walking up the directory tree, so
-if you are already inside the project no flag is needed at all.
-"""
+if you are already inside the project no flag is needed at all.'
 
-# Assignment: BEADS_DIR=... or export BEADS_DIR=...
-# Negative lookbehind on \w prevents MY_BEADS_DIR from matching.
-_ASSIGN_RE = re.compile(r"(?<!\w)BEADS_DIR\s*=")
+# Assignment: BEADS_DIR=... or export BEADS_DIR=... — the leading
+# (^|[^[:alnum:]_]) emulates a negative lookbehind so MY_BEADS_DIR passes.
+ASSIGN_RE='(^|[^[:alnum:]_])BEADS_DIR[[:space:]]*='
 
-# Dereference: $BEADS_DIR or ${BEADS_DIR}
-_DEREF_RE = re.compile(r"\$\{?BEADS_DIR\b")
+# Dereference: $BEADS_DIR or ${BEADS_DIR} — trailing ([^[:alnum:]_]|$)
+# emulates \b so $BEADS_DIRX passes.
+DEREF_RE='\$\{?BEADS_DIR([^[:alnum:]_]|$)'
 
 # Shell-like files that could embed env-var setup.
-_SHELL_FILE_RE = re.compile(
-    r"(?:\.(?:sh|bash|zsh|fish|env|envrc|profile)|"
-    r"/\.?(?:bashrc|zshrc|bash_profile|profile|envrc|env))$"
-)
+SHELL_FILE_RE='(\.(sh|bash|zsh|fish|env|envrc|profile)|/\.?(bashrc|zshrc|bash_profile|profile|envrc|env))$'
 
+uses_beads_dir() {
+  printf '%s' "$1" | grep -qE "$ASSIGN_RE" && return 0
+  printf '%s' "$1" | grep -qE "$DEREF_RE" && return 0
+  return 1
+}
 
-def _uses_beads_dir(text: str) -> bool:
-    return bool(_ASSIGN_RE.search(text) or _DEREF_RE.search(text))
+block() {
+  printf '%s\n' "$MESSAGE" >&2
+  exit 2
+}
 
+input="$(cat)"
+tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
+[ -n "$tool" ] || exit 0
 
-def main() -> None:
-    try:
-        data = json.load(sys.stdin)
-    except Exception:
-        sys.exit(0)  # fail open
+case "$tool" in
+Bash)
+  cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+  [ -n "$cmd" ] || exit 0
+  if uses_beads_dir "$cmd"; then
+    block
+  fi
+  ;;
+Write | Edit | MultiEdit)
+  file_path="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)"
+  [ -n "$file_path" ] || exit 0
+  printf '%s' "$file_path" | grep -qE "$SHELL_FILE_RE" || exit 0
+  text="$(printf '%s' "$input" | jq -r '
+    .tool_input as $t |
+    [($t.content // empty), ($t.new_string // empty),
+     (($t.edits // [])[] | .new_string // empty)] | join("\n")
+  ' 2>/dev/null || true)"
+  [ -n "$text" ] || exit 0
+  if uses_beads_dir "$text"; then
+    block
+  fi
+  ;;
+esac
 
-    if not isinstance(data, dict):
-        sys.exit(0)
-
-    tool_name = data.get("tool_name", "")
-    tool_input = data.get("tool_input")
-    if not isinstance(tool_input, dict):
-        sys.exit(0)
-
-    if tool_name == "Bash":
-        command = tool_input.get("command", "")
-        if not isinstance(command, str):
-            sys.exit(0)
-        if _uses_beads_dir(command):
-            print(MESSAGE, file=sys.stderr)
-            sys.exit(2)
-
-    elif tool_name in ("Write", "Edit", "MultiEdit"):
-        file_path = tool_input.get("file_path", "")
-        if not isinstance(file_path, str) or not _SHELL_FILE_RE.search(file_path):
-            sys.exit(0)
-        texts: list[str] = []
-        if tool_name == "Write":
-            texts.append(tool_input.get("content", "") or "")
-        elif tool_name == "Edit":
-            texts.append(tool_input.get("new_string", "") or "")
-        elif tool_name == "MultiEdit":
-            for edit in tool_input.get("edits", []):
-                if isinstance(edit, dict):
-                    ns = edit.get("new_string", "")
-                    if ns:
-                        texts.append(ns)
-        for text in texts:
-            if _uses_beads_dir(text):
-                print(MESSAGE, file=sys.stderr)
-                sys.exit(2)
-
-    sys.exit(0)
-
-
-if __name__ == "__main__":
-    main()
+exit 0
