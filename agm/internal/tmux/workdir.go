@@ -47,6 +47,12 @@ func EnsureSessionWorkDir(sessionName, workDir string) error {
 	if workDir == "" {
 		return nil
 	}
+	// Resolve relative workdirs against the client's cwd up front: the repair
+	// `cd` below runs in the pane's shell, whose cwd is the (dead) server cwd,
+	// so a relative path would resolve against the wrong base.
+	if abs, err := filepath.Abs(workDir); err == nil {
+		workDir = abs
+	}
 	deadline := time.Now().Add(workDirVerifyDeadline)
 	graceEnd := time.Now().Add(workDirRepairGrace)
 	repaired := false

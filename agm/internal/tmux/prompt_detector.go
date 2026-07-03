@@ -173,10 +173,11 @@ var (
 
 // paneForegroundCommand returns the name of the process currently in the
 // foreground of the session's active pane (#{pane_current_command}). The
-// boolean is false when the value could not be determined.
+// boolean is false when the value could not be determined. The tmux call is
+// timeout-bounded so a wedged server cannot stall the caller's poll loop.
 func paneForegroundCommand(socketPath, sessionName string) (string, bool) {
-	cmd := exec.Command("tmux", "-S", socketPath, "display-message", "-p", "-t", sessionName, "#{pane_current_command}")
-	output, err := cmd.CombinedOutput()
+	output, err := RunWithTimeout(context.Background(), globalTimeout, "tmux", "-S", socketPath,
+		"display-message", "-p", "-t", sessionName, "#{pane_current_command}")
 	if err != nil {
 		return "", false
 	}
@@ -192,7 +193,7 @@ func paneForegroundCommand(socketPath, sessionName string) (string, bool) {
 func isShellCommand(name string) bool {
 	name = strings.TrimPrefix(filepath.Base(name), "-") // login shells may report as "-zsh"
 	switch name {
-	case "zsh", "bash", "sh", "fish", "dash", "ksh", "tcsh", "csh":
+	case "zsh", "bash", "sh", "ash", "fish", "dash", "ksh", "tcsh", "csh":
 		return true
 	}
 	return false

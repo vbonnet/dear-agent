@@ -18,7 +18,7 @@ func TestSingleQuote(t *testing.T) {
 }
 
 func TestIsShellCommand(t *testing.T) {
-	for _, shell := range []string{"zsh", "bash", "sh", "fish", "-zsh", "/bin/bash"} {
+	for _, shell := range []string{"zsh", "bash", "sh", "ash", "fish", "-zsh", "/bin/bash"} {
 		assert.True(t, isShellCommand(shell), "expected %q to be a shell", shell)
 	}
 	for _, notShell := range []string{"claude", "node", "bun", "env", "codex", "agm", ""} {
