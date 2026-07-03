@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.dear-agent.supervisor-unblock — external permission-prompt watchdog for
+  the VROOM mesh (ce-20p9).
+
+  Source template:
+      agm/cmd/agm/schedules/com.dear-agent.supervisor-unblock.plist
+  Installed by `agm admin install-supervisor-unblock-schedule`, which substitutes
+  __USER_HOME__, __AGM_BINARY__ and __WORKSPACE__ before writing this file
+  (launchd does not expand ~ or shell variables).
+
+  WHY THIS EXISTS. ADR-002 mutual-unblock (a supervisor runs `agm send approve`
+  on a stuck peer) assumes at least one supervisor is alive to do the approving.
+  When the whole trio is blocked or uninitialized at once, no peer can approve
+  and the mesh deadlocks. `agm watch-stalled` does NOT cover this: its
+  permission-prompt recovery only *alerts* the orchestrator, so the alert lands
+  on a dead session. This job is the supervisor-INDEPENDENT backstop — it runs
+  `agm scan --loop --cross-check`, which captures each supervisor pane via tmux
+  and auto-approves RBAC-safe permission prompts, whether or not any supervisor
+  is alive.
+
+  WORKSPACE selects the agm/Dolt workspace whose sessions are scanned. launchd
+  starts jobs in a minimal environment, so without this the scan connects to the
+  default ("personal") Dolt database and finds no supervisor sessions. The
+  install command captures the current $WORKSPACE (override with --workspace).
+
+  Like `agm watch-stalled` (and unlike the one-shot reap/sweep jobs), this is a
+  long-running loop: the plist uses KeepAlive (restart on crash) with RunAtLoad
+  so the watchdog comes up at login and after a reboot. `--interval 2m` bounds
+  how long a stuck supervisor waits for auto-approval.
+
+  Logs:   <home>/Library/Logs/dear-agent/supervisor-unblock.log
+          (one JSON scan report per cycle — pipe to jq)
+
+  Trigger an immediate restart with:
+    launchctl kickstart -k gui/$UID/com.dear-agent.supervisor-unblock
+
+  To remove the job, use 'agm admin uninstall-supervisor-unblock-schedule'.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dear-agent.supervisor-unblock</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__AGM_BINARY__</string>
+        <string>scan</string>
+        <string>--loop</string>
+        <string>--cross-check</string>
+        <string>--interval</string>
+        <string>2m</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__USER_HOME__/.local/bin:__USER_HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>__USER_HOME__</string>
+        <key>WORKSPACE</key>
+        <string>__WORKSPACE__</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Long-running loop: restart if it crashes, but throttle respawns so a
+         persistently failing binary cannot hot-loop. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/supervisor-unblock.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__USER_HOME__/Library/Logs/dear-agent/supervisor-unblock.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

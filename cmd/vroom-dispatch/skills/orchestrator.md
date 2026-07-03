@@ -183,6 +183,45 @@ Identify sessions whose names start with `worker-` — these are your
 dispatched workers. Note which are active vs. archived/done. (The Step 6 tool
 also reads this list for dedup; you inspect it here for the monitoring in Step 7.)
 
+### Step 5b: Cross-check peer supervisors (tmux ground truth + auto-unblock)
+
+`agm session list` and heartbeats can both **lie** about a stuck peer: a
+supervisor blocked on a permission prompt still lists as `active`, and its
+heartbeat may look fresh (written just before it blocked) or stale for a benign
+reason. The only ground truth is what is actually on the peer's terminal. Read it
+every tick and auto-clear safe blocks:
+
+```bash
+agm scan --cross-check 2>/dev/null
+```
+
+`agm scan --cross-check` captures each **peer supervisor** pane
+(`vroom-orchestrator` / `vroom-overseer` / `vroom-meta-orchestrator` — it targets
+supervisor sessions only and excludes you, the caller) and classifies it as
+`HEALTHY` / `STUCK` (permission prompt visible too long) / `DOWN` (tmux session
+gone) / `ENTER_BUG` (an unsent message wedged in the input buffer) /
+`NOT_LOOPING`. For a `STUCK` peer whose pending action matches the safe RBAC
+allowlist it **auto-approves the prompt itself** (reported under
+`cross_check.results[].action_taken`) — this is the mutual-unblock ADR-002 relies
+on, executed on the spot instead of waiting for a heartbeat cycle.
+
+For any peer the scan still reports as `STUCK` after its own pass — an unsafe
+prompt it would not auto-approve, or anything in
+`findings.sessions_needing_approval` — clear it yourself. A permission-blocked
+peer cannot receive `agm send msg`, so approve is the only channel that reaches
+it:
+
+```bash
+agm send approve <stuck-peer-session>
+```
+
+`agm send approve` acts on the visible prompt; if no prompt is actually up it
+exits non-zero (`could not find Yes option`), which is harmless here — ignore its
+exit. This ground-truth sweep complements the heartbeat-based peer check in
+[Step 1](#step-1-check-peer-heartbeats): Step 1 catches a *silent* peer, Step 5b
+catches a *blocked* one. When any peer is stuck or approved, record
+`kind: "supervisor.orch.peer_cross_check"` with the count.
+
 ### Step 5a: Refresh Prompt Library
 
 Before dispatching, call `vroom-prompt-gen` to auto-generate prompt files for
@@ -474,13 +513,20 @@ agm session health "worker-<bead-id>" --json 2>/dev/null
     --prompt "You've had no manifest activity for >30min. Commit any WIP now, report status, or wrap up."
   ```
   Record `kind: "supervisor.orch.worker_wrapup_sent"`.
-- If the worker is in `PERMISSION_PROMPT` state: send a nudge to defer (it
-  may self-resolve via Defer-Don't-Block):
+- If the worker is in `PERMISSION_PROMPT` state: **approve, do not message.** A
+  permission-blocked session is frozen on its prompt and **cannot receive
+  `agm send msg`** — a defer nudge sent as a message never reaches it (the same
+  reason peers use `agm send approve` in Step 1 / Step 5b). Clear the prompt with
+  `agm send approve`, and carry the defer guidance as the approval `--reason` so
+  the worker reads it the instant it unblocks and can self-apply
+  Defer-Don't-Block on the *next* action:
   ```bash
-  agm send msg "worker-<bead-id>" --sender vroom-orchestrator --priority urgent \
-    --prompt "You are stuck on a permission prompt. Defer the blocked action (file a handoff note) and continue with other work."
+  agm send approve "worker-<bead-id>" \
+    --reason "If the action you were blocked on is not essential, defer it (file a handoff note) and continue with other work; commit any WIP now."
   ```
-  Record `kind: "supervisor.orch.worker_permission_nudge"`.
+  `agm send approve` acts on the visible prompt; if the worker already cleared it
+  (no prompt up) it exits non-zero (`could not find Yes option`) — harmless, so
+  ignore its exit. Record `kind: "supervisor.orch.worker_permission_approved"`.
 
 #### Level 3 — Force-kill (last resort)
 Force-kill **only** when ALL of these conditions are true:
@@ -699,14 +745,16 @@ merge task from the implementation task.
 | Meta-O stale >60min | Narrow dispatch to **P0 only**; continue from last-known roadmap (do NOT pause) |
 | Overseer resource escalation (swap≥60% / CPU≥90% / disk≥95% / FD≥80%) | **Spawn-pause**: skip ALL dispatch this tick, log `supervisor.orch.spawn_paused_resource`, resume next tick |
 | Overseer stale >5min | Urgent message |
+| Peer supervisor `STUCK` on a permission prompt (from `agm scan --cross-check`) | Step 5b: cross-check auto-approves safe prompts; for the rest run `agm send approve <peer>` (a blocked peer can't receive `agm send msg`); log `supervisor.orch.peer_cross_check` |
 | Impl worker finished + bead has an open PR | Step 7.6: dispatch `worker-deploy-<bead-id>` to land the PR |
 | Deploy worker died with PR still open | Step 7.6: re-dispatch a deploy worker for that PR |
 | Worker session dies mid-bead (no PR opened) | Record in trail, mark for re-dispatch as an impl worker |
 | Worker ghost-exits with `DONE_WITH_CONCERNS` in bead notes | Log `supervisor.dispatch.concerns` (verbatim concern in payload); optionally spawn a `worker-<bead-id>-verify` verifier for the flagged reservation; do NOT re-dispatch or reopen — the deliverable stands |
 | Bead's closed dependency was closed against an unmerged PR | Hold dispatch; record `dod.dispatch.blocked`; urgent to Overseer to reopen the dep |
 | Worker no manifest progress >15min (WORKING) | Level 1: status ping |
-| Worker no manifest progress >30min (any state) | Level 2: diagnose state, send wrap-up or defer nudge |
-| Worker no progress >45min + PERMISSION_PROMPT/OFFLINE + prior nudge failed | Level 3: force-kill, re-dispatch bead |
+| Worker no manifest progress >30min, `WORKING` | Level 2: diagnose state, send wrap-up message |
+| Worker no manifest progress >30min, `PERMISSION_PROMPT` | Level 2: `agm send approve worker-<id> --reason "<defer guidance>"` (a blocked worker can't receive `agm send msg`); log `supervisor.orch.worker_permission_approved` |
+| Worker no progress >45min + PERMISSION_PROMPT/OFFLINE + prior approve/nudge failed | Level 3: force-kill, re-dispatch bead |
 | Worker producing tokens (any runtime) | Healthy — no action |
 | Roadmap item is `task_type: "deploy"` | Run `dear-deploy install <deploy_target>` inline (no worker, no PR); verify with `dear-deploy status`, then close the bead |
 | Deploy install/status fails | Record `supervisor.orch.deploy_failed`, note the bead `STATUS: FAILED`, leave OPEN; ≤2 retries then hand to a human/`worker` follow-up |
