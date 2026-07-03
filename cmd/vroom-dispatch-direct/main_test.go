@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMentionsID(t *testing.T) {
@@ -50,6 +52,8 @@ func TestInFlightInPR(t *testing.T) {
 
 func TestLiveWorkerIDs(t *testing.T) {
 	// Mimics `agm session list` output: arbitrary columns after the session name.
+	// worker-ce-cd14.2 is a legacy pre-sanitization session (dotted name); the
+	// returned set holds NORMALIZED ids, so it appears as ce-cd14-2.
 	lines := []string{
 		"NAME                       STATUS   MODEL",
 		"worker-ce-bi19             running  opus-200k",
@@ -62,14 +66,65 @@ func TestLiveWorkerIDs(t *testing.T) {
 	if !ids["ce-bi19"] {
 		t.Error("expected ce-bi19 to be live")
 	}
-	if !ids["ce-cd14.2"] {
-		t.Error("expected sub-bead ce-cd14.2 to be live (full id captured)")
+	if !ids["ce-cd14-2"] {
+		t.Error("expected sub-bead session worker-ce-cd14.2 to be live under its normalized id ce-cd14-2")
 	}
 	if ids["ce-cd14"] {
 		t.Error("parent ce-cd14 should NOT be considered live from a ce-cd14.2 session")
 	}
 	if len(ids) != 2 {
 		t.Errorf("expected exactly 2 live worker ids, got %d: %v", len(ids), ids)
+	}
+}
+
+func TestNormalizeSessionID(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"ce-6as.10", "ce-6as-10"},               // dotted sub-bead (the ce-b1zw trigger)
+		{"ce-xulg.14", "ce-xulg-14"},             // another dotted sub-bead
+		{"ce-bi19", "ce-bi19"},                   // already safe: unchanged
+		{"a.b:c d", "a-b-c-d"},                   // dots, colons, spaces all normalize
+		{"worker-ce-6as-10", "worker-ce-6as-10"}, // idempotent on normalized input
+	}
+	for _, tt := range tests {
+		if got := normalizeSessionID(tt.in); got != tt.want {
+			t.Errorf("normalizeSessionID(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestWorkerSessionName(t *testing.T) {
+	if got := workerSessionName("ce-6as.10"); got != "worker-ce-6as-10" {
+		t.Errorf("workerSessionName(ce-6as.10) = %q, want worker-ce-6as-10", got)
+	}
+	if got := workerSessionName("ce-bi19"); got != "worker-ce-bi19" {
+		t.Errorf("workerSessionName(ce-bi19) = %q, want worker-ce-bi19", got)
+	}
+}
+
+// TestDottedIDDedupBothDirections proves dedup survives the dot→dash rename in
+// BOTH directions (ce-b1zw): a sanitized live session dedups the dotted bead,
+// and a legacy dotted live session dedups the same bead.
+func TestDottedIDDedupBothDirections(t *testing.T) {
+	beads := []bead{{ID: "ce-xyz.3", Title: "dotted sub-bead", Priority: 0}}
+
+	// Direction 1: live session already uses the sanitized name.
+	live := liveWorkerIDs([]string{"worker-ce-xyz-3   running  opus-200k"})
+	if got := selectCandidates(beads, live, nil, 2); len(got) != 0 {
+		t.Errorf("sanitized session worker-ce-xyz-3 must dedup bead ce-xyz.3, got candidates %+v", got)
+	}
+
+	// Direction 2: legacy live session still carries the dotted name.
+	live = liveWorkerIDs([]string{"worker-ce-xyz.3   running  opus-200k"})
+	if got := selectCandidates(beads, live, nil, 2); len(got) != 0 {
+		t.Errorf("legacy dotted session worker-ce-xyz.3 must dedup bead ce-xyz.3, got candidates %+v", got)
+	}
+
+	// No live session at all: the bead must remain eligible.
+	if got := selectCandidates(beads, nil, nil, 2); len(got) != 1 {
+		t.Errorf("with no live worker, bead ce-xyz.3 must stay eligible, got %+v", got)
 	}
 }
 
@@ -113,6 +168,16 @@ func TestSelectCandidates(t *testing.T) {
 	}
 	if got[0].ID != "ce-aaaa" {
 		t.Errorf("expected ce-aaaa, got %s", got[0].ID)
+	}
+}
+
+func TestHumanGatedSkipsGmailOAuthBead(t *testing.T) {
+	if !humanGated["ce-6as.10"] {
+		t.Fatal("ce-6as.10 (interactive Gmail OAuth re-consent) must be human-gated")
+	}
+	beads := []bead{{ID: "ce-6as.10", Title: "Gmail OAuth re-consent", Priority: 0}}
+	if got := selectCandidates(beads, nil, nil, 2); len(got) != 0 {
+		t.Errorf("human-gated ce-6as.10 must never be a dispatch candidate, got %+v", got)
 	}
 }
 
@@ -249,6 +314,167 @@ func TestDispatchSpawnFailureSkipsSend(t *testing.T) {
 	}
 	if sendCalled {
 		t.Error("send must not be called when spawn fails")
+	}
+}
+
+// TestDispatchDottedBeadSpawnsSanitizedName verifies a dotted bead id spawns
+// (and messages) the tmux-safe session name while the prompt keeps the real
+// bead id for bd commands.
+func TestDispatchDottedBeadSpawnsSanitizedName(t *testing.T) {
+	origSpawn, origSend := spawnSession, sendPrompt
+	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
+
+	var spawned, sent, sentPrompt string
+	spawnSession = func(ctx context.Context, name, model string) error { spawned = name; return nil }
+	sendPrompt = func(ctx context.Context, name, prompt string) error {
+		sent, sentPrompt = name, prompt
+		return nil
+	}
+
+	b := bead{ID: "ce-xyz.3", Title: "dotted", Priority: 0}
+	if err := dispatch(context.Background(), b, "opus-200k"); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if spawned != "worker-ce-xyz-3" {
+		t.Errorf("spawned = %q, want sanitized worker-ce-xyz-3", spawned)
+	}
+	if sent != "worker-ce-xyz-3" {
+		t.Errorf("sent to = %q, want sanitized worker-ce-xyz-3", sent)
+	}
+	if !strings.Contains(sentPrompt, "ce-xyz.3") {
+		t.Error("prompt must reference the real (dotted) bead id for bd commands")
+	}
+}
+
+func TestIsDeterministicSpawnFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"circuit breaker backpressure", fmt.Errorf("circuit breaker: spawn refused"), false},
+		{"spawn refused", fmt.Errorf("agm: spawn refused (at capacity)"), false},
+		{"timeout", fmt.Errorf("agm session new: %w", context.DeadlineExceeded), false},
+		{"canceled", fmt.Errorf("agm session new: %w", context.Canceled), false},
+		{"unknown error stays fail-closed", fmt.Errorf("exit status 1\nsomething novel"), false},
+		{"no TTY (interactive prompt in detached context)",
+			fmt.Errorf("exit status 1\ncould not open a new TTY: open /dev/tty: device not configured"), true},
+		{"invalid session name", fmt.Errorf("exit status 1\nInvalid session name"), true},
+		{"unsafe characters", fmt.Errorf("exit status 1\nsession name contains unsafe characters"), true},
+		{"invalid bead", fmt.Errorf("exit status 1\ninvalid bead id"), true},
+		{"backpressure wins over signature text",
+			fmt.Errorf("circuit breaker: spawn refused (invalid session name mentioned in passing)"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isDeterministicSpawnFailure(tt.err); got != tt.want {
+				t.Errorf("isDeterministicSpawnFailure(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDispatchCandidates_SkipsDeterministicSpawnFailure verifies a per-bead
+// deterministic spawn failure (bad name / no-TTY prompt) skips that bead and
+// keeps the run going — one poisoned bead must not stall the whole queue
+// (ce-b1zw: 0/17 dispatched).
+func TestDispatchCandidates_SkipsDeterministicSpawnFailure(t *testing.T) {
+	origSpawn, origSend := spawnSession, sendPrompt
+	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
+
+	var spawnedNames []string
+	spawnSession = func(ctx context.Context, name, model string) error {
+		spawnedNames = append(spawnedNames, name)
+		if name == "worker-ce-2" {
+			return fmt.Errorf("exit status 1\ncould not open a new TTY")
+		}
+		return nil
+	}
+	sendPrompt = func(ctx context.Context, name, prompt string) error { return nil }
+
+	candidates := []bead{
+		{ID: "ce-1", Title: "one", Priority: 1},
+		{ID: "ce-2", Title: "poisoned", Priority: 1},
+		{ID: "ce-3", Title: "three", Priority: 1},
+	}
+	var out, errOut bytes.Buffer
+	got := dispatchCandidates(context.Background(), candidates, "opus-200k", false, &out, &errOut)
+	if got != 2 {
+		t.Errorf("dispatched = %d, want 2 (skip the poisoned bead, keep going)\nstderr:\n%s", got, errOut.String())
+	}
+	if len(spawnedNames) != 3 {
+		t.Errorf("spawn attempts = %d, want 3 (run continues past the failure): %v", len(spawnedNames), spawnedNames)
+	}
+	if !strings.Contains(errOut.String(), "skip ce-2") {
+		t.Errorf("stderr should log the per-bead skip, got:\n%s", errOut.String())
+	}
+}
+
+// TestDispatchCandidates_StopsOnBackpressure preserves the original fail-closed
+// behavior: a circuit-breaker refusal (capacity exhausted) stops the run early.
+func TestDispatchCandidates_StopsOnBackpressure(t *testing.T) {
+	origSpawn, origSend := spawnSession, sendPrompt
+	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
+
+	spawnCalls := 0
+	spawnSession = func(ctx context.Context, name, model string) error {
+		spawnCalls++
+		return fmt.Errorf("circuit breaker: spawn refused")
+	}
+	sendPrompt = func(ctx context.Context, name, prompt string) error { return nil }
+
+	candidates := []bead{
+		{ID: "ce-1", Title: "one", Priority: 1},
+		{ID: "ce-2", Title: "two", Priority: 1},
+	}
+	var out, errOut bytes.Buffer
+	got := dispatchCandidates(context.Background(), candidates, "opus-200k", false, &out, &errOut)
+	if got != 0 {
+		t.Errorf("dispatched = %d, want 0 on backpressure", got)
+	}
+	if spawnCalls != 1 {
+		t.Errorf("spawn attempts = %d, want 1 (backpressure stops the run)", spawnCalls)
+	}
+}
+
+// TestDispatchCandidates_StopsOnUnknownError keeps unknown spawn errors
+// fail-closed: stop the run rather than risk skipping through a systemic fault.
+func TestDispatchCandidates_StopsOnUnknownError(t *testing.T) {
+	origSpawn, origSend := spawnSession, sendPrompt
+	defer func() { spawnSession, sendPrompt = origSpawn, origSend }()
+
+	spawnCalls := 0
+	spawnSession = func(ctx context.Context, name, model string) error {
+		spawnCalls++
+		return fmt.Errorf("exit status 1\nsomething never seen before")
+	}
+	sendPrompt = func(ctx context.Context, name, prompt string) error { return nil }
+
+	candidates := []bead{
+		{ID: "ce-1", Title: "one", Priority: 1},
+		{ID: "ce-2", Title: "two", Priority: 1},
+	}
+	var out, errOut bytes.Buffer
+	got := dispatchCandidates(context.Background(), candidates, "opus-200k", false, &out, &errOut)
+	if got != 0 {
+		t.Errorf("dispatched = %d, want 0 on unknown error", got)
+	}
+	if spawnCalls != 1 {
+		t.Errorf("spawn attempts = %d, want 1 (unknown errors stop the run)", spawnCalls)
+	}
+}
+
+// TestSessionSpawnTimeoutIsGenerous pins the spawn-specific timeout: `agm
+// session new` boots the whole harness and legitimately exceeds the blanket
+// 60s subprocess bound, so it gets its own, larger budget.
+func TestSessionSpawnTimeoutIsGenerous(t *testing.T) {
+	if sessionSpawnTimeout <= subprocessTimeout {
+		t.Errorf("sessionSpawnTimeout (%v) must exceed subprocessTimeout (%v)",
+			sessionSpawnTimeout, subprocessTimeout)
+	}
+	if sessionSpawnTimeout < 180*time.Second {
+		t.Errorf("sessionSpawnTimeout (%v) should be at least 180s for harness boot", sessionSpawnTimeout)
 	}
 }
 
