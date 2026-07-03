@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,6 +43,15 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 	trustAnswered := false
 	var trustAnsweredAt time.Time
 
+	// Fast-fail bookkeeping (ce-5zbg): if the harness process dies at startup
+	// (e.g. Claude launched in a deleted cwd exits instantly with a Bun
+	// ENOENT), the ❯ prompt can never appear — detect that and surface the
+	// pane's actual output within seconds instead of burning the full timeout.
+	sawHarness := false
+	consecutiveShell := 0
+	captureFailures := 0
+	lastContent := ""
+
 	for time.Now().Before(deadline) {
 		checksPerformed++
 
@@ -56,11 +66,24 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			debug.Log("⚠️  capture-pane failed (attempt %d): %v", checksPerformed, err)
+			// Repeated capture failures usually mean the session itself is
+			// gone (harness exited and closed the pane) — check and fail fast
+			// instead of silently polling out the whole timeout.
+			captureFailures++
+			if captureFailures >= sessionGoneChecks {
+				if exists, hasErr := HasSession(sessionName); hasErr == nil && !exists {
+					return fmt.Errorf("tmux session %q no longer exists while waiting for Claude prompt (harness exited during startup?); last pane output:\n%s",
+						sessionName, paneTail(lastContent, 6))
+				}
+				captureFailures = 0
+			}
 			time.Sleep(pollInterval)
 			continue
 		}
+		captureFailures = 0
 
 		content := string(output)
+		lastContent = content
 
 		// Log a sample on first check to verify we're reading output
 		if checksPerformed == 1 {
@@ -104,11 +127,94 @@ func WaitForClaudePrompt(sessionName string, timeout time.Duration) error {
 			}
 		}
 
+		// Fast-fail when the harness process is not (or no longer) running in
+		// the pane. The claude command was already sent, so the pane's
+		// foreground process should exec into the harness almost immediately
+		// and stay there; a shell in the foreground means the harness either
+		// failed to start or died (ce-5zbg: instant Bun ENOENT in deleted cwd).
+		if fg, ok := paneForegroundCommand(socketPath, sessionName); ok {
+			if isShellCommand(fg) {
+				consecutiveShell++
+				if sawHarness && consecutiveShell >= harnessExitedChecks {
+					return fmt.Errorf("harness process exited before becoming ready (pane foreground returned to %q); last pane output:\n%s",
+						fg, paneTail(content, 6))
+				}
+				if !sawHarness && consecutiveShell >= harnessNeverStartedChecks {
+					return fmt.Errorf("harness process never started (pane foreground still %q after %d checks — the launch command likely failed immediately); last pane output:\n%s",
+						fg, checksPerformed, paneTail(content, 6))
+				}
+			} else {
+				sawHarness = true
+				consecutiveShell = 0
+			}
+		}
+
 		// Sleep before next poll
 		time.Sleep(pollInterval)
 	}
 
 	return fmt.Errorf("timeout waiting for Claude prompt (waited %v, checked %d times)", timeout, checksPerformed)
+}
+
+// Fast-fail thresholds for WaitForClaudePrompt, in units of poll iterations
+// (500ms each). Package-level vars so tests can tighten them.
+var (
+	// harnessExitedChecks: consecutive shell-foreground polls after the
+	// harness was seen running before we declare it dead (~1.5s).
+	harnessExitedChecks = 3
+	// harnessNeverStartedChecks: consecutive shell-foreground polls with the
+	// harness never seen before we declare the launch failed (~15s — generous
+	// so a slow-booting harness on a loaded machine is not misdiagnosed).
+	harnessNeverStartedChecks = 30
+	// sessionGoneChecks: consecutive capture-pane failures before we probe
+	// whether the session still exists (~3s).
+	sessionGoneChecks = 6
+)
+
+// paneForegroundCommand returns the name of the process currently in the
+// foreground of the session's active pane (#{pane_current_command}). The
+// boolean is false when the value could not be determined.
+func paneForegroundCommand(socketPath, sessionName string) (string, bool) {
+	cmd := exec.Command("tmux", "-S", socketPath, "display-message", "-p", "-t", sessionName, "#{pane_current_command}")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", false
+	}
+	fg := strings.TrimSpace(string(output))
+	if fg == "" {
+		return "", false
+	}
+	return fg, true
+}
+
+// isShellCommand reports whether a pane_current_command value is a plain
+// interactive shell (as opposed to a harness CLI like claude/codex/gemini).
+func isShellCommand(name string) bool {
+	name = strings.TrimPrefix(filepath.Base(name), "-") // login shells may report as "-zsh"
+	switch name {
+	case "zsh", "bash", "sh", "fish", "dash", "ksh", "tcsh", "csh":
+		return true
+	}
+	return false
+}
+
+// paneTail returns the last n non-empty lines of captured pane content with
+// ANSI escapes stripped, for inclusion in error messages.
+func paneTail(content string, n int) string {
+	lines := strings.Split(strings.TrimSpace(stripANSI(content)), "\n")
+	var kept []string
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			kept = append(kept, line)
+		}
+	}
+	if len(kept) > n {
+		kept = kept[len(kept)-n:]
+	}
+	if len(kept) == 0 {
+		return "  (pane empty)"
+	}
+	return "  " + strings.Join(kept, "\n  ")
 }
 
 // WaitForClaudePromptControlMode is the old control-mode based implementation
