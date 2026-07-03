@@ -97,6 +97,12 @@ func stashKeyForHarness(h string) (key string, verified bool) {
 	}
 }
 
+// stashTmuxTimeout bounds each raw tmux subprocess issued by the stash step.
+// The stash runs while holding the tmux server lock, so an unbounded exec
+// against a hung tmux server would stall every other send behind the lock —
+// exactly the mesh-wide stall the non-blocking stash exists to prevent.
+const stashTmuxTimeout = 5 * time.Second
+
 // StashOutcome reports what happened when the non-blocking human_typing stash
 // ran before a send. It feeds telemetry and test assertions.
 type StashOutcome struct {
@@ -159,22 +165,30 @@ func stashStaleInputLocked(socketPath, normalizedTarget, ansiContent string) Sta
 
 	before := inputLineAfterPrompt(stripANSI(ansiContent))
 
-	if err := exec.Command("tmux", "-S", socketPath, "send-keys", "-t", normalizedTarget, key).Run(); err != nil {
-		return outcome // send failed; nothing to record beyond the attempt
+	// Bound both raw tmux execs (see stashTmuxTimeout). No caller threads a
+	// ctx into the send path (SendPromptLiteral starts from context.Background()),
+	// so the deadline is derived locally.
+	ctx, cancel := context.WithTimeout(context.Background(), stashTmuxTimeout)
+	defer cancel()
+
+	if err := exec.CommandContext(ctx, "tmux", "-S", socketPath, "send-keys", "-t", normalizedTarget, key).Run(); err != nil {
+		return outcome // send failed or timed out; nothing to record beyond the attempt
 	}
 	outcome.Sent = true
 	// Give the harness a moment to re-render the now-(maybe-)empty input line.
 	time.Sleep(50 * time.Millisecond)
 
-	after := before
-	if out, err := exec.Command("tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-e").Output(); err == nil {
-		after = inputLineAfterPrompt(stripANSI(string(out)))
-	}
-	switch after {
-	case "":
-		outcome.Cleared = true // real input was stashed
-	case before:
-		outcome.FalsePositive = true // stash did nothing → human_typing over-captured
+	// Re-read the input line to classify the outcome. If the capture fails or
+	// the deadline hit, the outcome is UNKNOWN: leave Cleared and FalsePositive
+	// both false rather than defaulting after to before, which would misreport
+	// a capture failure as a human_typing false positive in telemetry.
+	if out, err := exec.CommandContext(ctx, "tmux", "-S", socketPath, "capture-pane", "-t", normalizedTarget, "-p", "-e").Output(); err == nil && ctx.Err() == nil {
+		switch inputLineAfterPrompt(stripANSI(string(out))) {
+		case "":
+			outcome.Cleared = true // real input was stashed
+		case before:
+			outcome.FalsePositive = true // stash did nothing → human_typing over-captured
+		}
 	}
 
 	telemetry.RecordHumanTypingStash(context.Background(), outcome.Harness,
