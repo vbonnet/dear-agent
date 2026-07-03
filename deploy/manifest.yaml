@@ -45,6 +45,18 @@ artifacts:
     tokens:
       __HOME__: ${HOME}
 
+  # The disk watchdog (ce-6fel): a 5-minute launchd tick that alarms on low
+  # free disk space / high inode usage (free < 20/5 GiB, inodes > 90/95%),
+  # writes a watchdog.disk.alarm trail record, and remediates by reaping
+  # provably-merged worktree husks. Independent of the VROOM mesh by design:
+  # a full disk is exactly the state that takes the mesh down.
+  - name: com.dear-agent.disk-watchdog
+    source: deploy/launchd/com.dear-agent.disk-watchdog.plist
+    deployed: ~/Library/LaunchAgents/com.dear-agent.disk-watchdog.plist
+    mode: "0644"
+    tokens:
+      __HOME__: ${HOME}
+
   # --- Claude Code PreToolUse write-guard hooks ------------------------------
   # Compiled binaries built by `make build-write-guards` into bin/. They are
   # marked optional so `dear-deploy sync` on a machine that has not built them
@@ -87,3 +99,10 @@ artifacts:
     deployed: ~/go/bin/vroom-dispatch
     mode: "0755"
     remediation: make install-vroom-dispatch
+
+  - name: disk-watchdog
+    kind: binary
+    source: cmd/disk-watchdog
+    deployed: ~/go/bin/disk-watchdog
+    mode: "0755"
+    remediation: make install-disk-watchdog

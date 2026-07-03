@@ -199,6 +199,13 @@ func buildMesh(trail decisiontrail.Trail, roadmap supervisor.Roadmap, queue supe
 		// path — the simulated in-memory snapshot must not page real supervisors.
 		// Zero thresholds apply the retro defaults (free < 500/200 MiB, swap > 50/75%).
 		overSup = overSup.WithMemoryAlert(&supervisor.AGMMemoryAlertNotifier{}, supervisor.MemoryAlertThresholds{})
+
+		// Disk-free + inode alert (ce-6fel): classify absolute free disk space
+		// and inode usage each tick with the same Meta-O/Orchestrator fan-out
+		// as the memory alert, armed only on the real-probe path for the same
+		// reason. Zero thresholds apply the disk-retro defaults
+		// (free < 20/5 GiB, inodes > 90/95%).
+		overSup = overSup.WithDiskAlert(&supervisor.AGMDiskAlertNotifier{}, supervisor.DiskAlertThresholds{})
 	}
 	if cfg.pressure {
 		// On the real-probe path the critical-tier reclaimer is the AGM-aware

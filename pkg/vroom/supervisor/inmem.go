@@ -592,6 +592,52 @@ func (n *InMemoryMemoryAlertNotifier) Calls() []MemoryAlertNotification {
 	return append([]MemoryAlertNotification(nil), n.calls...)
 }
 
+// InMemoryDiskAlertNotifier is a configurable DiskAlertNotifier for tests
+// and the cmd/vroom-mesh demo. It records every alert it is asked to deliver.
+type InMemoryDiskAlertNotifier struct {
+	mu    sync.Mutex
+	calls []DiskAlertNotification
+	err   error
+}
+
+// DiskAlertNotification records one Notify invocation.
+type DiskAlertNotification struct {
+	To       Role
+	Level    PressureLevel
+	Snapshot ResourceSnapshot
+	Summary  string
+}
+
+// NewInMemoryDiskAlertNotifier returns a notifier that succeeds by default.
+func NewInMemoryDiskAlertNotifier() *InMemoryDiskAlertNotifier {
+	return &InMemoryDiskAlertNotifier{}
+}
+
+// SetError configures the error returned by subsequent Notify calls.
+func (n *InMemoryDiskAlertNotifier) SetError(err error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.err = err
+}
+
+// Notify implements DiskAlertNotifier.
+func (n *InMemoryDiskAlertNotifier) Notify(_ context.Context, to Role, level PressureLevel, snap ResourceSnapshot, summary string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.err != nil {
+		return n.err
+	}
+	n.calls = append(n.calls, DiskAlertNotification{To: to, Level: level, Snapshot: snap, Summary: summary})
+	return nil
+}
+
+// Calls returns all recorded alert notifications.
+func (n *InMemoryDiskAlertNotifier) Calls() []DiskAlertNotification {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]DiskAlertNotification(nil), n.calls...)
+}
+
 // InMemoryPeerRecovery is a configurable PeerRecovery for tests.
 type InMemoryPeerRecovery struct {
 	mu    sync.Mutex
