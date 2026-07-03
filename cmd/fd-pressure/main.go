@@ -165,6 +165,8 @@ func appendProbeRecord(ctx context.Context, path string, snap supervisor.Resourc
 		Kind: "overseer.resource.probe",
 		Payload: map[string]any{
 			"disk_used_fraction":   snap.DiskUsedFraction,
+			"disk_free_bytes":      snap.DiskFreeBytes,
+			"inode_used_fraction":  snap.InodeUsedFraction,
 			"memory_used_fraction": snap.MemoryUsedFraction,
 			"free_physical_bytes":  snap.FreePhysicalMemoryBytes,
 			"swap_used_fraction":   snap.SwapUsedFraction,
