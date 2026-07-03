@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""PreToolUse hook: block BEADS_DIR usage, redirect to bd --db or bd -C.
+
+bd (beads) supports two ways to target a database outside the current directory:
+
+  bd --db /path/to/.beads/embeddeddolt <cmd>   # explicit DB path
+  bd -C /path/to/project <cmd>                  # cd-style directory targeting
+
+BEADS_DIR is not a supported bd environment variable and has no effect on bd.
+Setting or dereferencing it only clutters the environment and misleads readers.
+
+Triggers on:
+  - Bash commands that assign (BEADS_DIR=...) or dereference ($BEADS_DIR)
+  - Write/Edit/MultiEdit on shell-like files containing the same patterns
+
+Fails open on any parse error so a malformed payload never silently blocks.
+"""
+import json
+import re
+import sys
+
+MESSAGE = """\
+Use `bd --db <path>` or `bd -C <dir>` instead of BEADS_DIR.
+
+BEADS_DIR is not a supported bd environment variable. Setting it has no
+effect on bd and leaves dead weight in the environment.
+
+To target a database outside the current directory, use one of:
+
+  # Explicit DB path (find with `bd where` inside the project):
+  bd --db /path/to/.beads/embeddeddolt list
+  bd --db /path/to/.beads/embeddeddolt show ce-123
+
+  # cd-style targeting (equivalent to running bd from inside the project):
+  bd -C /path/to/project list
+  bd -C /path/to/project show ce-123
+
+bd also auto-discovers databases by walking up the directory tree, so
+if you are already inside the project no flag is needed at all.
+"""
+
+# Assignment: BEADS_DIR=... or export BEADS_DIR=...
+# Negative lookbehind on \w prevents MY_BEADS_DIR from matching.
+_ASSIGN_RE = re.compile(r"(?<!\w)BEADS_DIR\s*=")
+
+# Dereference: $BEADS_DIR or ${BEADS_DIR}
+_DEREF_RE = re.compile(r"\$\{?BEADS_DIR\b")
+
+# Shell-like files that could embed env-var setup.
+_SHELL_FILE_RE = re.compile(
+    r"(?:\.(?:sh|bash|zsh|fish|env|envrc|profile)|"
+    r"/\.?(?:bashrc|zshrc|bash_profile|profile|envrc|env))$"
+)
+
+
+def _uses_beads_dir(text: str) -> bool:
+    return bool(_ASSIGN_RE.search(text) or _DEREF_RE.search(text))
+
+
+def main() -> None:
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
+        sys.exit(0)  # fail open
+
+    if not isinstance(data, dict):
+        sys.exit(0)
+
+    tool_name = data.get("tool_name", "")
+    tool_input = data.get("tool_input")
+    if not isinstance(tool_input, dict):
+        sys.exit(0)
+
+    if tool_name == "Bash":
+        command = tool_input.get("command", "")
+        if not isinstance(command, str):
+            sys.exit(0)
+        if _uses_beads_dir(command):
+            print(MESSAGE, file=sys.stderr)
+            sys.exit(2)
+
+    elif tool_name in ("Write", "Edit", "MultiEdit"):
+        file_path = tool_input.get("file_path", "")
+        if not isinstance(file_path, str) or not _SHELL_FILE_RE.search(file_path):
+            sys.exit(0)
+        texts: list[str] = []
+        if tool_name == "Write":
+            texts.append(tool_input.get("content", "") or "")
+        elif tool_name == "Edit":
+            texts.append(tool_input.get("new_string", "") or "")
+        elif tool_name == "MultiEdit":
+            for edit in tool_input.get("edits", []):
+                if isinstance(edit, dict):
+                    ns = edit.get("new_string", "")
+                    if ns:
+                        texts.append(ns)
+        for text in texts:
+            if _uses_beads_dir(text):
+                print(MESSAGE, file=sys.stderr)
+                sys.exit(2)
+
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
