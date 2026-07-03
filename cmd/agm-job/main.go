@@ -211,7 +211,9 @@ func acquireLock(lockDir, lockPath, name string) error {
 		// RemoveAll (not Remove) because the lock dir holds a "pid" file —
 		// os.Remove only deletes empty dirs and would leave the stale lock in
 		// place, wedging the job permanently.
-		_ = os.RemoveAll(lockPath)
+		if err := os.RemoveAll(lockPath); err != nil {
+			return fmt.Errorf("remove stale lock: %w", err)
+		}
 		if err := os.Mkdir(lockPath, 0o700); err != nil {
 			return err
 		}
@@ -219,7 +221,12 @@ func acquireLock(lockDir, lockPath, name string) error {
 	// Record our PID inside the lock dir so a future run can detect staleness.
 	// This must run on both the fresh and post-recovery paths — a lock without
 	// a pid file would be treated as stale and reclaimed by a concurrent run.
-	_ = os.WriteFile(filepath.Join(lockPath, "pid"), fmt.Appendf(nil, "%d\n", os.Getpid()), 0o600)
+	if err := os.WriteFile(filepath.Join(lockPath, "pid"), fmt.Appendf(nil, "%d\n", os.Getpid()), 0o600); err != nil {
+		// Don't leave a pid-less lock behind — it would be reclaimed as stale
+		// by a concurrent run, defeating mutual exclusion.
+		_ = os.RemoveAll(lockPath)
+		return fmt.Errorf("write pid file: %w", err)
+	}
 	return nil
 }
 
