@@ -242,9 +242,21 @@ var supervisorStatusCmd = &cobra.Command{
 	Use:   "status [id]",
 	Short: "Report supervisor liveness by heartbeat age",
 	Long: `Print the current heartbeat age for one supervisor, or all known
-supervisors if no id is provided. Exits non-zero if any supervisor's
-heartbeat is older than --stale-after (default 5m) so this can drive a
-monitoring check.`,
+supervisors if no id is provided. Beyond per-supervisor staleness, the
+report cross-references the mesh liveness graph (primary_for/tertiary_for)
+to flag mesh-recovery quorum loss: a stale supervisor whose every recoverer
+is also stale cannot be re-driven from inside the mesh and needs an external
+respawn/escalation (bead ce-2qbx).
+
+Exit codes (so this can drive a monitoring check with severity gradation):
+  0 — all supervisors fresh.
+  3 — some supervisor stale, but every stale one still has a live peer able
+      to wake it; the mesh is expected to self-heal.
+  4 — quorum lost: a stale supervisor has no live recoverer; external action
+      is required. Supersedes 3.
+
+A supervisor is stale when its heartbeat is older than --stale-after
+(default 5m).`,
 	RunE: runSupervisorStatus,
 }
 
@@ -501,12 +513,88 @@ func readHeartbeatRecord(id string) (*heartbeatRecord, error) {
 }
 
 // supervisorRow is the per-supervisor row produced by status reporting.
+//
+// Recoverable/QuorumLost/Recoverers capture mesh-recovery reachability, not
+// just this supervisor's own liveness. The mesh's mutual-unblock invariant
+// (ADR-002) only self-heals a stale supervisor when a *surviving* peer that
+// lists it as primary_for/tertiary_for is still ticking to re-drive it. When
+// a stale supervisor's every recoverer is also stale, no in-mesh recovery can
+// fire (bead ce-2qbx: both meta-o and orch stale at once) — an external
+// watchdog must respawn/escalate. These fields make that condition machine-
+// readable instead of leaving it to be inferred from a table of independent
+// staleness flags.
 type supervisorRow struct {
-	ID      string           `json:"id"`
-	AgeSecs float64          `json:"age_secs"`
-	Stale   bool             `json:"stale"`
-	Missing bool             `json:"missing"`
-	Record  *heartbeatRecord `json:"record,omitempty"`
+	ID          string           `json:"id"`
+	AgeSecs     float64          `json:"age_secs"`
+	Stale       bool             `json:"stale"`
+	Missing     bool             `json:"missing"`
+	Recoverable bool             `json:"recoverable"`
+	QuorumLost  bool             `json:"quorum_lost"`
+	Recoverers  []string         `json:"recoverers,omitempty"`
+	Record      *heartbeatRecord `json:"record,omitempty"`
+}
+
+// annotateMeshRecovery cross-references the per-supervisor staleness flags
+// against the mesh liveness graph (primary_for/tertiary_for) to fill in each
+// row's Recoverable/QuorumLost/Recoverers. It returns true if any supervisor
+// is quorum-lost — stale with no live peer able to re-drive it.
+//
+// A supervisor Y's recoverers are the peers Z where Z.PrimaryFor == Y or
+// Z.TertiaryFor == Y (the mesh members responsible for waking Y). Y is
+// recoverable when it is not stale, or when at least one recoverer is present
+// and itself not stale. Y is quorum-lost when it is stale and no recoverer is
+// live (all stale/missing, or none declared) — the exact state where the
+// in-mesh AGMRecovery cannot run because the supervisor that would call
+// `agm send wake-loop Y` is dead too.
+//
+// Pure over its input slice: mutates the rows' recovery fields and reads no
+// clock or filesystem, so it is trivially testable.
+func annotateMeshRecovery(rows []supervisorRow) bool {
+	// staleByID lets a recoverer's liveness be looked up in O(1). A supervisor
+	// named as a peer but never registered has no row and is treated as stale:
+	// an absent recoverer cannot recover anyone.
+	staleByID := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		staleByID[r.ID] = r.Stale
+	}
+	// recoverersOf maps a peer Y to the ids that list it as primary/tertiary.
+	recoverersOf := make(map[string][]string)
+	for _, r := range rows {
+		if r.Record == nil {
+			continue
+		}
+		if p := r.Record.PrimaryFor; p != "" {
+			recoverersOf[p] = append(recoverersOf[p], r.ID)
+		}
+		if tf := r.Record.TertiaryFor; tf != "" && tf != r.Record.PrimaryFor {
+			recoverersOf[tf] = append(recoverersOf[tf], r.ID)
+		}
+	}
+
+	anyQuorumLost := false
+	for i := range rows {
+		r := &rows[i]
+		recoverers := recoverersOf[r.ID]
+		r.Recoverers = recoverers
+		if !r.Stale {
+			// A live supervisor needs no recovery; it is trivially recoverable.
+			r.Recoverable = true
+			continue
+		}
+		liveRecoverer := false
+		for _, rid := range recoverers {
+			if stale, known := staleByID[rid]; known && !stale {
+				liveRecoverer = true
+				break
+			}
+		}
+		r.Recoverable = liveRecoverer
+		if !liveRecoverer {
+			r.QuorumLost = true
+			anyQuorumLost = true
+		}
+	}
+	return anyQuorumLost
 }
 
 func runSupervisorStatus(cmd *cobra.Command, args []string) error {
@@ -521,6 +609,10 @@ func runSupervisorStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Cross-reference staleness against the mesh liveness graph so a stale
+	// supervisor whose recoverers are also dead surfaces as quorum-lost rather
+	// than an ordinary stale row (bead ce-2qbx).
+	quorumLost := annotateMeshRecovery(rows)
 
 	// Mirror AGM records to the flat VROOM heartbeat files so the Overseer
 	// SKILL's file-based staleness check uses the same authoritative data.
@@ -534,6 +626,17 @@ func runSupervisorStatus(cmd *cobra.Command, args []string) error {
 
 	if err := emitSupervisorStatus(cmd, rows); err != nil {
 		return err
+	}
+	// Graded exit status so an external watchdog can distinguish a mesh that
+	// will self-heal from one that cannot:
+	//   4 — quorum lost: a stale supervisor has no live recoverer; the mesh
+	//       cannot re-drive it from inside, so external respawn/escalation is
+	//       required. Strictly worse than 3, so it takes precedence.
+	//   3 — some supervisor stale, but every stale one still has a live peer
+	//       able to wake it; the mesh is expected to self-heal.
+	//   0 — all supervisors fresh.
+	if quorumLost {
+		os.Exit(4)
 	}
 	if anyStale {
 		os.Exit(3)
@@ -606,7 +709,7 @@ func emitSupervisorStatus(cmd *cobra.Command, rows []supervisorRow) error {
 		return enc.Encode(rows)
 	}
 	w := cmd.OutOrStdout()
-	_, _ = fmt.Fprintf(w, "%-16s %-12s %-10s %s\n", "SUPERVISOR", "AGE", "STATE", "MESH")
+	_, _ = fmt.Fprintf(w, "%-16s %-12s %-10s %-12s %s\n", "SUPERVISOR", "AGE", "STATE", "RECOVERY", "MESH")
 	for _, r := range rows {
 		age := "—"
 		mesh := ""
@@ -623,7 +726,18 @@ func emitSupervisorStatus(cmd *cobra.Command, rows []supervisorRow) error {
 				state = "NEVER"
 			}
 		}
-		_, _ = fmt.Fprintf(w, "%-16s %-12s %-10s %s\n", r.ID, age, state, mesh)
+		// RECOVERY reflects whether the mesh can re-drive this supervisor from
+		// inside: a live supervisor is "ok"; a stale one is "recoverable" while
+		// a peer can still wake it, or "QUORUM-LOST" when none can.
+		recovery := "ok"
+		if r.Stale {
+			if r.QuorumLost {
+				recovery = "QUORUM-LOST"
+			} else {
+				recovery = "recoverable"
+			}
+		}
+		_, _ = fmt.Fprintf(w, "%-16s %-12s %-10s %-12s %s\n", r.ID, age, state, recovery, mesh)
 	}
 	return nil
 }
