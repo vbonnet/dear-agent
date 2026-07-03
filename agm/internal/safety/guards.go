@@ -168,10 +168,8 @@ func isHarnessProcessRunning(sessionName, socketPath string, processNames ...str
 
 	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-t", sessionName, "-F", "#{pane_pid}")
 	out, err := cmd.Output()
-	if ctx.Err() != nil {
-		return false
-	}
-	if err != nil {
+	if ctx.Err() != nil || err != nil {
+		// Timed out, cancelled, or failed — never parse partial output.
 		return false
 	}
 	panePid := strings.TrimSpace(string(out))
@@ -181,22 +179,27 @@ func isHarnessProcessRunning(sessionName, socketPath string, processNames ...str
 
 	psCmd := exec.CommandContext(ctx, "ps", "-o", "ppid=", "-o", "comm=", "-ax")
 	psOut, psErr := psCmd.Output()
-	if ctx.Err() != nil {
-		return false
-	}
-	if psErr != nil {
+	if ctx.Err() != nil || psErr != nil {
 		return false
 	}
 
 	for line := range strings.SplitSeq(string(psOut), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			ppid := fields[0]
-			comm := fields[1]
-			baseComm := filepath.Base(comm)
-			if ppid == panePid && (slices.Contains(processNames, baseComm) || slices.Contains(processNames, comm)) {
-				return true
-			}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Split at the first whitespace only: comm may be a full path that
+		// itself contains spaces (e.g. "/Users/x/My Projects/node"), so
+		// strings.Fields would truncate it.
+		idx := strings.IndexAny(line, " \t")
+		if idx == -1 {
+			continue
+		}
+		ppid := line[:idx]
+		comm := strings.TrimSpace(line[idx:])
+		baseComm := filepath.Base(comm)
+		if ppid == panePid && (slices.Contains(processNames, baseComm) || slices.Contains(processNames, comm)) {
+			return true
 		}
 	}
 	return false
