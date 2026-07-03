@@ -168,6 +168,9 @@ func isHarnessProcessRunning(sessionName, socketPath, processName string) bool {
 
 	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-t", sessionName, "-F", "#{pane_pid}")
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return false
+	}
 	if err != nil {
 		return false
 	}
@@ -178,6 +181,9 @@ func isHarnessProcessRunning(sessionName, socketPath, processName string) bool {
 
 	psCmd := exec.CommandContext(ctx, "ps", "-o", "ppid=", "-o", "comm=", "-ax")
 	psOut, psErr := psCmd.Output()
+	if ctx.Err() != nil {
+		return false
+	}
 	if psErr != nil {
 		return false
 	}
