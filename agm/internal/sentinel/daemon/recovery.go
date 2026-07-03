@@ -368,8 +368,14 @@ func formatRejectionForTmux(message string, pattern *enforcement.Pattern) string
 }
 
 // isHumanPresent calls `agm safety check --json` to detect human presence.
-// Returns true if a human is attached or typing. Fails open (returns false) if
-// the agm binary is unavailable or the check fails.
+// Returns true only if a human is actively attached (human_attached).
+//
+// human_typing is deliberately NOT treated as human-present: it over-captures
+// (stale scrollback, old prompts, ghost-text remnants — see agm/internal/safety)
+// and gating recovery on it caused the mesh stalls this change fixes (ce-subs).
+// It is now advisory only and surfaced under `advisories`, so recovery can still
+// observe it without blocking on it. Fails open (returns false) if the agm
+// binary is unavailable or the check fails.
 func isHumanPresent(sessionName string) bool {
 	output, err := exec.Command("agm", "safety", "check", sessionName, "--json",
 		"--skip-init", "--skip-mid-response").CombinedOutput()
@@ -379,7 +385,7 @@ func isHumanPresent(sessionName string) bool {
 		if jsonErr := json.Unmarshal(output, &result); jsonErr == nil {
 			if !result.Safe {
 				for _, v := range result.Violations {
-					if v.Guard == "human_attached" || v.Guard == "human_typing" {
+					if v.Guard == "human_attached" {
 						return true
 					}
 				}
@@ -395,7 +401,7 @@ func isHumanPresent(sessionName string) bool {
 
 	if !result.Safe {
 		for _, v := range result.Violations {
-			if v.Guard == "human_attached" || v.Guard == "human_typing" {
+			if v.Guard == "human_attached" {
 				return true
 			}
 		}

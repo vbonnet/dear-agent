@@ -45,20 +45,7 @@ func hasActiveSpinner(paneContent string) bool {
 // Previously only [Pasted text] indicators were checked; actual typed text on the
 // input line was not detected.
 func InputLineHasContent(paneContent string) bool {
-	lines := strings.Split(paneContent, "\n")
-	// Scan from the bottom (most recent) to find the prompt line
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := lines[i]
-		idx := strings.Index(line, "❯")
-		if idx >= 0 {
-			// Extract text after the prompt character
-			after := line[idx+len("❯"):]
-			// Trim leading space (prompt is typically "❯ ") and trailing whitespace
-			after = strings.TrimSpace(after)
-			return after != ""
-		}
-	}
-	return false
+	return inputLineAfterPrompt(paneContent) != ""
 }
 
 // HasGhostTextInPrompt reports whether the content after the ❯ prompt is
@@ -245,6 +232,7 @@ func extractSender(headerLine string) string {
 // Bug fix (2026-03-14): Added shouldInterrupt parameter to make ESC sending conditional.
 // ESC interrupts Claude's thinking state, which should only happen when explicitly requested.
 // When shouldInterrupt=false, prompts are queued instead of interrupting.
+//
 //nolint:gocyclo // reason: linear protocol — capture pane, optional ESC, load-buffer, paste-buffer, C-m, retry — extracting each step into a helper would obscure the linear flow.
 func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 	ctx := context.Background()
@@ -278,15 +266,20 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 		}
 
 		ansiContent := string(output)
-		// Unattended session (ce-v9in): no human can be typing, so any leftover
-		// non-ghost text is AGM's own un-submitted send from a prior tick. Stash
-		// it with C-s before delivering and skip the human-typing aborts below —
-		// blocking on our own stale text is the #1 cause of mesh deadlocks. C-s
-		// auto-unstashes after the next submit, so genuine human input survives.
-		if AutonomousMode() {
-			clearStaleInputLocked(socketPath, normalizedTarget, ansiContent)
-		} else if err := checkPaneForExistingInput(ansiContent, shouldInterrupt); err != nil {
-			return err
+		// Non-blocking human_typing (the guard over-captures; see stash.go): stash
+		// any stale/human input with the harness stash key, then deliver anyway.
+		// Blocking on leftover text was the #1 cause of mesh deadlocks; the stash
+		// preserves genuine human input (Claude Code auto-unstashes after the next
+		// submit) and records over-capture via false-positive telemetry.
+		stashStaleInputLocked(socketPath, normalizedTarget, ansiContent)
+		// Queued paste artifacts ([Pasted text] / "Press up to edit queued
+		// messages") are a SEPARATE guard from human_typing and still abort, so a
+		// send does not pile onto an already-queued message. shouldInterrupt and
+		// autonomous/force override this exactly as before.
+		if !AutonomousMode() {
+			if err := checkPaneForQueuedInput(ansiContent, shouldInterrupt); err != nil {
+				return err
+			}
 		}
 
 		// Step 1: Conditionally send ESC to interrupt thinking state (Bug fix: only if shouldInterrupt=true)
@@ -385,14 +378,19 @@ func SendPromptLiteral(target, prompt string, shouldInterrupt bool) error {
 	})
 }
 
-// checkPaneForExistingInput examines an ANSI pane capture and returns an
-// error if a human is currently typing or the input box already holds queued
-// text. shouldInterrupt=true short-circuits all checks.
+// checkPaneForQueuedInput examines an ANSI pane capture and returns an error if
+// the input box already holds queued paste text ([Pasted text] / "Press up to
+// edit queued messages"), so a send does not pile onto an already-queued
+// message. shouldInterrupt=true short-circuits all checks.
 //
-// The caller provides ANSI content (captured with -e flag) so ghost-text
-// detection and input-line detection operate on the same snapshot, eliminating
-// the two-capture race (ce-v9in retro).
-func checkPaneForExistingInput(ansiContent string, shouldInterrupt bool) error {
+// This deliberately no longer aborts on plain "input line has content" — that
+// was the human_typing block, which over-captured and is now handled
+// non-blockingly by stashStaleInputLocked (see stash.go). Queued-paste
+// detection is a separate guard and is retained.
+//
+// The caller provides ANSI content (captured with -e flag) so detection
+// operates on a single snapshot, eliminating the two-capture race (ce-v9in retro).
+func checkPaneForQueuedInput(ansiContent string, shouldInterrupt bool) error {
 	if shouldInterrupt {
 		return nil
 	}
@@ -403,9 +401,6 @@ func checkPaneForExistingInput(ansiContent string, shouldInterrupt bool) error {
 	if hasQueuedInput(plainContent) {
 		_, msg := ClassifyQueuedInput(plainContent)
 		return fmt.Errorf("%s", msg)
-	}
-	if InputLineHasContent(plainContent) && !HasGhostTextInANSI(ansiContent) {
-		return fmt.Errorf("input line has content — human is typing, aborting delivery. Retry on next poll cycle")
 	}
 	return nil
 }
