@@ -589,11 +589,16 @@ var probeSupervisorPane = func(sessionName string) (paneProbe, error) {
 
 // supervisorTmuxSession resolves the tmux session to verify for a row.
 // Prefers the session the heartbeat self-reported (explicit=true); falls back
-// to the well-known VROOM session name for known mesh roles (explicit=false).
+// to the supervisor id itself when it is already a VROOM session name (the
+// deployed mesh registers ids like "vroom-meta-orchestrator"), then to the
+// well-known VROOM session name for short mesh roles (both explicit=false).
 // Returns "" when there is nothing to verify against.
 func supervisorTmuxSession(r supervisorRow) (name string, explicit bool) {
 	if r.Record != nil && r.Record.TmuxSession != "" {
 		return r.Record.TmuxSession, true
+	}
+	if strings.HasPrefix(r.ID, "vroom-") {
+		return r.ID, false
 	}
 	switch r.ID {
 	case "meta-o", "orch", "overseer":

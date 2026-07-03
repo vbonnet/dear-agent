@@ -688,6 +688,11 @@ func TestSupervisorTmuxSession(t *testing.T) {
 			want: "vroom-orchestrator",
 		},
 		{
+			name: "id that is already a vroom session name is used directly",
+			row:  supervisorRow{ID: "vroom-meta-orchestrator", Record: &heartbeatRecord{}},
+			want: "vroom-meta-orchestrator",
+		},
+		{
 			name: "unknown id has nothing to verify",
 			row:  supervisorRow{ID: "s7", Record: &heartbeatRecord{}},
 			want: "",
