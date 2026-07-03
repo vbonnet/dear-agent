@@ -14,9 +14,9 @@ import (
 // Schema the output must satisfy, a regex the output must match, or a
 // numeric floor the output's confidence must clear.
 //
-// The point is to separate two concerns the DEAR cycle conflates by
-// default: a human author writes down the contract once (the
-// invariants), and downstream Audit / Enforce phases — eventually
+// The point is to separate two concerns a workflow lifecycle can otherwise
+// conflate: a human author writes down the contract once (the invariants), and
+// downstream Audit / Enforce phases — eventually
 // adversarial review per ROADMAP §6.5 — verify the run-time artifact
 // against that contract. This file ships the schema + the Define-time
 // validation; verification lives in pkg/audit.

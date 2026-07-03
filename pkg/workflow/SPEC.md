@@ -1,0 +1,22 @@
+# Workflow Engine Specification
+
+<!-- Last audited at: 2026-07-03 -->
+
+## Purpose
+
+`pkg/workflow` executes declarative workflows with AI, shell, gate, state,
+budget, permission, output, hook, HITL, and audit surfaces. The runner keeps the
+engine backend-neutral while exposing enough structured state for durable
+execution, resume, review, and cost controls.
+
+## EARS Requirements
+
+**WFLOW-01** When a runner is constructed, the system shall require an AI executor and initialize default logging, shell, and signal-channel behavior.
+
+**WFLOW-02** When a workflow run starts, the system shall validate the plan, create a unique run identity, and begin durable state or audit recording when configured.
+
+**WFLOW-03** When a workflow is resumed, the system shall load the saved snapshot and skip already-completed nodes while preserving their outputs for downstream templates.
+
+**WFLOW-04** When a node declares permissions, budgets, outputs, hooks, or HITL policy, the system shall apply the configured enforcer or default implementation before treating the node as complete.
+
+**WFLOW-05** When workflow execution emits audit events, the system shall write them to the audit sink and notify audit hooks without allowing hook failure to abort the run.
