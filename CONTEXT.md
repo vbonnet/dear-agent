@@ -218,8 +218,9 @@ VROOM) belongs in the top-level [`docs/adr/`](docs/adr/), not under `agm/`.**
 | **R** | **Retro** | Retrospective: capture what was learned; findings flow to the backlog/roadmap via the Meta-Orchestrator. |
 
 This is the expansion used by `AGENTS.md` and by the VROOM lifecycle above.
-⚠️ It **collides** with two other in-repo uses of "DEAR" — see
-[Known Terminology Collisions](#known-terminology-collisions).
+The canonical disambiguation is
+[ADR-035](docs/adr/ADR-035-dear-terminology-disambiguation.md): bare "DEAR"
+means this process loop unless a document is quoting a historical identifier.
 
 ---
 
@@ -250,16 +251,16 @@ of Wayfinder feeds the roadmap that the Meta-Orchestrator owns.
 | **Work Order** | <a id="work-order"></a>The formal artifact for proposing work. Required fields include **the reason the work should be added**. Routed to the Meta-Orchestrator, who alone may add it to the roadmap. _Avoid: Task, Ticket, Issue (these lack the mandatory reason field and the formal routing; Work Order is a specific artifact, not a generic tracker item)._ |
 | **AGM** | Agent Gateway Manager — the session-driving tool VROOM uses. _Avoid: VROOM (AGM is a tool VROOM drives; conflating the two erases the framework/tool distinction — a known collision in pre-2026-05-17 docs)._ |
 | **VROOM** | The supervisory execution framework (proper name; old V/R/O/O/M backronym retired). _Avoid: AGM (VROOM is the framework above AGM, not the runtime); Orchestration layer (too vague, erases the three-supervisor structure)._ |
-| **DEAR** | Define → Execute → Audit → Retro retrospective loop (process sense). _Avoid: Post-mortem, Sprint retro (DEAR covers all four phases; "retro" alone names only the R step); also see Known Terminology Collision 2b — the workflow-engine code lifecycle uses DEAR with different E/R expansions._ |
+| **DEAR** | Define → Execute → Audit → Retro retrospective loop (process sense). _Avoid: Post-mortem, Sprint retro (DEAR covers all four phases; "retro" alone names only the R step); use "workflow lifecycle hooks" for the workflow-engine Define/Enforce/Audit/Resolve API._ |
 | **Wayfinder** | The research/planning/prep phase preceding execution. _Avoid: "Planning" alone (too generic); Pre-work (undersells the structured research/SDLC scope)._ |
 
 ---
 
 ## Known Terminology Collisions
 
-These are **bugs in the vocabulary**, recorded here per the "call conflicts out
-immediately" rule. They are not resolved by this document alone; resolving them
-needs follow-up work tracked on the roadmap.
+These are or were **bugs in the vocabulary**, recorded here per the "call
+conflicts out immediately" rule. Some entries are resolved by ADRs and remain
+listed so older docs and identifiers can be interpreted correctly.
 
 1. **"VROOM" — old five-role model vs. corrected model.**
    Many pre-2026-05-17 docs describe VROOM as Verifier/Requester/Orchestrator/
@@ -268,20 +269,18 @@ needs follow-up work tracked on the roadmap.
    [docs/adr/ADR-002](docs/adr/ADR-002-vroom-execution-architecture.md). The
    superseded ADRs (`agm/docs/adr/ADR-020`…`ADR-025`) are stubbed with redirects.
 
-2. **"DEAR" — three different meanings.**
+2. **"DEAR" — resolved two-level model plus historical identifiers.**
    - **(a) Process / retrospective loop:** Define → **Execute** → Audit →
-     **Retro**. *This is the canonical meaning above.*
-   - **(b) Workflow-engine code lifecycle hooks:** `pkg/workflow.Hooks` and
-     ADR-010/ADR-011 use **Define → Enforce → Audit → Resolve & Refine** for the
-     workflow-engine's `OnDefine/OnEnforce/OnAudit/OnResolve` callbacks. This is
-     a *code concept* with a different "E" and "R". It is **not** renamed by this
-     change (renaming exported code is a hard-to-reverse API change deserving its
-     own ADR); it is flagged here as drift.
+     **Retro**. *Bare "DEAR" means this process loop.*
+   - **(b) Workflow lifecycle hooks:** `pkg/workflow.Hooks` and ADR-010/ADR-011
+     use **Define → Enforce → Audit → Resolve & Refine** for the workflow-engine's
+     `OnDefine/OnEnforce/OnAudit/OnResolve` callbacks. This is a *code concept*
+     with a different "E" and "R"; docs call it "workflow lifecycle hooks", not
+     "DEAR hooks". Exported Go names stay unchanged.
    - **(c) Backlog phase prefix:** `DEAR-X.*` identifiers in
      `docs/workflow-engine/BACKLOG.md` / ROADMAP are a numbering convention for
      framework-improvement items, unrelated to either loop.
-   *Resolution owner:* Meta-Orchestrator (roadmap). Recommended: rename the
-   code-level lifecycle so it stops shadowing the process loop.
+   Canonical authority: [ADR-035](docs/adr/ADR-035-dear-terminology-disambiguation.md).
 
 3. **`pkg/vroom` code encodes the superseded model.**
    `pkg/vroom/vroom/topics.go` defines decision-trail topics
