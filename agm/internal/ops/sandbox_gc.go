@@ -171,26 +171,49 @@ func sandboxGCWithChecker(req *SandboxGCRequest, base string, checker *sandboxgc
 }
 
 // liveSessionIDsFromStorage returns a closure yielding the IDs of all
-// non-archived sessions. It fails closed: a storage error OR a store with
-// zero sessions (indistinguishable from a wiped/broken store on this host,
-// which always has archived history) aborts the sweep.
+// non-archived sessions. It fails closed: a nil context/storage, a storage
+// error, OR a store with zero sessions (indistinguishable from a
+// wiped/broken store on this host, which always has archived history)
+// aborts the sweep.
+//
+// The result is memoized: the checker consults the live-session gate once
+// per sandbox, and a 500-dir backlog must not turn into 500 storage queries.
+// Memoization is safe because a session that goes live MID-sweep gets a NEW
+// session ID and a NEW sandbox dir (protected by the MinAge gate), and any
+// actively used sandbox is still refused by the live-process gate.
 func liveSessionIDsFromStorage(ctx *OpContext) func() (map[string]bool, error) {
+	var cached map[string]bool
+	var cachedErr error
+	var done bool
 	return func() (map[string]bool, error) {
-		sessions, err := ctx.Storage.ListSessions(nil)
-		if err != nil {
-			return nil, fmt.Errorf("listing sessions: %w", err)
+		if done {
+			return cached, cachedErr
 		}
-		if len(sessions) == 0 {
-			return nil, fmt.Errorf("session store returned zero sessions — refusing to treat all sandboxes as orphaned")
-		}
-		live := make(map[string]bool, len(sessions))
-		for _, s := range sessions {
-			if s.Lifecycle != manifest.LifecycleArchived {
-				live[s.SessionID] = true
-			}
-		}
-		return live, nil
+		done = true
+		cached, cachedErr = queryLiveSessionIDs(ctx)
+		return cached, cachedErr
 	}
+}
+
+// queryLiveSessionIDs performs the actual (fail-closed) storage query.
+func queryLiveSessionIDs(ctx *OpContext) (map[string]bool, error) {
+	if ctx == nil || ctx.Storage == nil {
+		return nil, fmt.Errorf("no session storage configured — refusing to enumerate live sessions")
+	}
+	sessions, err := ctx.Storage.ListSessions(nil)
+	if err != nil {
+		return nil, fmt.Errorf("listing sessions: %w", err)
+	}
+	if len(sessions) == 0 {
+		return nil, fmt.Errorf("session store returned zero sessions — refusing to treat all sandboxes as orphaned")
+	}
+	live := make(map[string]bool, len(sessions))
+	for _, s := range sessions {
+		if s.Lifecycle != manifest.LifecycleArchived {
+			live[s.SessionID] = true
+		}
+	}
+	return live, nil
 }
 
 // refusalReason renders a compact reason for report entries.

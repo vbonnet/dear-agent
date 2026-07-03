@@ -17,10 +17,12 @@ import (
 // (unlike mockStorage in stall_detector_test.go).
 type sandboxGCStorage struct {
 	mockStorage
-	listErr error
+	listErr   error
+	listCalls int
 }
 
 func (s *sandboxGCStorage) ListSessions(filter *dolt.SessionFilter) ([]*manifest.Manifest, error) {
+	s.listCalls++
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
@@ -280,5 +282,41 @@ func TestLiveSessionIDsFromStorage(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLiveSessionIDsMemoized(t *testing.T) {
+	storage := &sandboxGCStorage{mockStorage: mockStorage{sessions: []*manifest.Manifest{
+		{SessionID: "live1"},
+	}}}
+	fn := liveSessionIDsFromStorage(&OpContext{Storage: storage})
+	for i := range 5 {
+		if _, err := fn(); err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+	}
+	if storage.listCalls != 1 {
+		t.Errorf("ListSessions called %d times, want 1 (memoized)", storage.listCalls)
+	}
+
+	// Errors are memoized too — a failed store is not retried mid-sweep.
+	failing := &sandboxGCStorage{listErr: fmt.Errorf("dolt down")}
+	fnErr := liveSessionIDsFromStorage(&OpContext{Storage: failing})
+	for i := range 3 {
+		if _, err := fnErr(); err == nil {
+			t.Fatalf("call %d: want error", i)
+		}
+	}
+	if failing.listCalls != 1 {
+		t.Errorf("ListSessions called %d times on error path, want 1", failing.listCalls)
+	}
+}
+
+func TestLiveSessionIDsNilContextFailsClosed(t *testing.T) {
+	if _, err := liveSessionIDsFromStorage(nil)(); err == nil {
+		t.Error("nil OpContext must fail closed")
+	}
+	if _, err := liveSessionIDsFromStorage(&OpContext{})(); err == nil {
+		t.Error("nil Storage must fail closed")
 	}
 }

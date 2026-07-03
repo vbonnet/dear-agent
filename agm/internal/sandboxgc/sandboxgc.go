@@ -26,6 +26,7 @@ package sandboxgc
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -33,6 +34,16 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
+)
+
+// Subprocess timeouts: a hung FUSE/NFS mount can wedge `mount` or `lsof`
+// indefinitely (the 2026-07-03 incident had sandbox walks timing out). A
+// timeout surfaces as an error, and every caller fails CLOSED on error — the
+// sandbox is kept, never reaped blind.
+const (
+	mountCmdTimeout = 10 * time.Second
+	lsofCmdTimeout  = 60 * time.Second
 )
 
 // Reason codes for refusing to reap a sandbox.
@@ -256,8 +267,12 @@ func (c *Checker) Reap(dir string) error {
 // --- real host implementations ---
 
 // listMountsFromMountCmd shells out to `mount` and parses the mount points.
+// Timeout-bounded: a hung mount-table read must not wedge GC, and the
+// resulting error fails closed at the caller.
 func listMountsFromMountCmd() ([]string, error) {
-	out, err := exec.Command("mount").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), mountCmdTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "mount").Output()
 	if err != nil {
 		return nil, fmt.Errorf("running mount: %w", err)
 	}
@@ -309,9 +324,15 @@ func ParseMountOutput(out string) []string {
 // listProcPathsFromLsof shells out to lsof for every path any process holds
 // (cwd + open fds). lsof exits non-zero when it cannot stat some files, so a
 // non-zero exit with usable output is tolerated; no output at all is an error
-// (fail closed at the caller).
+// (fail closed at the caller). Timeout-bounded so a hung filesystem cannot
+// wedge GC; a timeout also fails closed — partial output is never trusted.
 func listProcPathsFromLsof() ([]ProcPath, error) {
-	out, err := exec.Command("lsof", "-n", "-P", "-F", "pn").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), lsofCmdTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "lsof", "-n", "-P", "-F", "pn").Output()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("running lsof: %w", ctxErr)
+	}
 	if len(out) == 0 && err != nil {
 		return nil, fmt.Errorf("running lsof: %w", err)
 	}
