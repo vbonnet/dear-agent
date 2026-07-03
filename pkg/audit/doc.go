@@ -4,10 +4,10 @@
 // Enforce layers. See ADR-011 for the architectural decisions this
 // package implements.
 //
-// The substrate is the same SQLite database as the workflow engine
-// (pkg/workflow's runs.db). Three additive tables — audit_findings,
-// audit_runs, audit_proposals — are created by ApplySchema; they
-// JOIN against the workflow engine's existing rows when needed but
+// The substrate is SQLite. Three additive tables — audit_findings,
+// audit_runs, audit_proposals — are created by ApplySchema. Operators
+// may apply them to the workflow engine's runs.db, but the shipped
+// workflow-audit binary defaults to .dear-agent/audit.db and the tables
 // can be queried in isolation.
 //
 // The mental model is a fleet of named Checks ("build", "test",
@@ -17,7 +17,7 @@
 // are intentionally separate so checks stay pure and trivial to test.
 //
 // Higher-level surfaces — the workflow-audit CLI, the .dear-agent.yml
-// > audits: config loader, the KindAuditCheck node kind in
-// pkg/workflow — sit on top of this package. They are thin; the
+// > audits: config loader, and workflow YAML wrappers that invoke the
+// CLI from bash nodes — sit on top of this package. They are thin; the
 // substrate is here.
 package audit
