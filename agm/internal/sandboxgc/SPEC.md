@@ -1,0 +1,63 @@
+# Sandbox Garbage Collection Safety Specification
+
+<!-- Last audited at: 2026-07-03 -->
+
+**Version:** 1.0
+**Status:** Baseline
+**Scope:** `agm/internal/sandboxgc` — provably-safe reaping of session sandbox directories under `~/.agm/sandboxes`
+
+## Overview
+
+`agm/internal/sandboxgc` owns the safety gates that decide whether a sandbox
+directory may be deleted, and the reap sequence that deletes it. It exists
+because on 2026-07-03 `~/.agm/sandboxes` grew to 2.3T across 541 directories
+and crashed the host twice (ce-uxju), and because sandboxes use overlay-style
+`merged/` + `upper/` layouts where deleting through a live mount can destroy
+the underlying source repository (`~/.agm/cleanup-runbook.md`).
+
+Consumers: the archive-time reap in `agm/internal/ops` (session archive /
+session gc / orphaned-sandbox cleanup) and the periodic `agm sandbox gc`
+sweep scheduled by `deploy/launchd/com.dear-agent.sandbox-gc.plist`.
+
+## EARS Requirements
+
+### Path Validation
+
+**SGC-01** When the reaper evaluates a candidate path, the system shall refuse any path that is not directly under the sandbox base directory as exactly one clean, absolute path component.
+
+**SGC-02** When the reaper is constructed with a base directory that does not end in `.agm/sandboxes`, the system shall refuse every reap against that base.
+
+### Live-Session Gate
+
+**SGC-03** When a live-session source is configured and a non-archived session references the sandbox name, the system shall refuse the reap.
+
+**SGC-04** When the live-session source returns an error or the session store returns zero sessions, the system shall fail closed and refuse the reap.
+
+**SGC-05** When the archive flow reaps the sandbox of a session it has just archived, the system shall allow the live-session gate to be omitted while keeping all other gates mandatory.
+
+### Live-Process Gate
+
+**SGC-06** When any process holds a working directory or an open file descriptor at or under the sandbox, the system shall refuse the reap before attempting any unmount.
+
+**SGC-07** When the process table cannot be enumerated or the enumeration times out, the system shall fail closed and refuse the reap.
+
+### Mount Hard Gate
+
+**SGC-08** When a reap proceeds past the liveness gates, the system shall attempt a best-effort unmount of the sandbox overlay and then re-read the mount table before removal.
+
+**SGC-09** When the re-read mount table shows any mount point at or under the sandbox, the system shall refuse the removal.
+
+**SGC-10** When the mount table cannot be read, the system shall fail closed and refuse the removal.
+
+### Sweep Behaviour
+
+**SGC-11** When `agm sandbox gc` runs without the `--reap` flag, the system shall report reap decisions without deleting anything.
+
+**SGC-12** When the sweep encounters a sandbox entry younger than the configured minimum age, the system shall keep the entry untouched.
+
+**SGC-13** When the sweep encounters non-git, partial, or corrupt sandbox content, the system shall treat it as ordinary reapable content rather than an error.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/spec_coverage.feature` (changed-package SPEC coverage gate)
+- Unit evidence: `agm/internal/sandboxgc/sandboxgc_test.go` (table-driven gate tests with fakes: mount-survives-unmount, live fd/cwd, store-down, path escapes) and `agm/internal/ops/sandbox_gc_test.go` (sweep dry-run default, age gate, fail-closed storage).
