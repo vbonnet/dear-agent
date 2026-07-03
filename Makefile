@@ -78,6 +78,8 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   install-gopls-watchdog  Install gopls-watchdog to ~/go/bin
 #   install-gopls-watchdog-launchagent   Stage the gopls-watchdog launch agent (2-min tick)
 #   uninstall-gopls-watchdog-launchagent Remove the gopls-watchdog launch agent
+#   install-sandbox-gc-launchagent   Stage the hourly sandbox GC launch agent (ce-uxju)
+#   uninstall-sandbox-gc-launchagent Remove the sandbox GC launch agent
 #   build-vroom-dispatch    Build vroom-dispatch: VROOM supervisor mesh launcher
 #   install-vroom-dispatch  Install vroom-dispatch to ~/go/bin
 #   build-vroom-mesh        Build vroom-mesh: in-process 3-supervisor mesh harness with real adapters (ce-plf0)
@@ -105,7 +107,7 @@ GOFLAGS ?= -ldflags "$(VERSION_LDFLAGS)"
 #   build-session-skill-extractor  Build session-skill-extractor: extract reusable SKILL candidates from sessions (ce-ouvr)
 #   install-session-skill-extractor Install session-skill-extractor to ~/go/bin
 
-.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server
+.PHONY: lint-specs preflight preflight-tests preflight-race preflight-full health-check install-preflight-hook install-post-merge-hook build-routing-guard install-routing-guard-hook act-validate act-lint act-test install-hooks test test-affected test-affected-print test-shell build-configure-settings install-configure-settings build-safe-push install-safe-push build-safe-merge install-safe-merge build-safe-rebase install-safe-rebase build-safe-pr install-safe-pr build-write-guards install-write-guards uninstall codegraph codegraph-all codegraph-install sync-main deepsec-incremental deepsec-staged install-deepsec-hook uninstall-deepsec-hook build-bumblebee bumblebee-install bumblebee-scan install-bumblebee-launchagent uninstall-bumblebee-launchagent structural-health structural-health-baseline build-src-recovery install-src-recovery build-safe-unlock install-safe-unlock build-jaeger-health install-jaeger-health build-bead-pr-sync install-bead-pr-sync install-bead-pr-sync-launchagent uninstall-bead-pr-sync-launchagent build-bead-pr-guard install-bead-pr-guard build-bead-close-guard install-bead-close-guard build-babysit-prs install-babysit-prs build-pr-linkify install-pr-linkify build-mergeloop install-mergeloop install-mergeloop-launchagent uninstall-mergeloop-launchagent build-drift-check install-drift-check drift-check drift-check-legacy deploy-status build-fd-pressure install-fd-pressure build-gopls-watchdog install-gopls-watchdog install-gopls-watchdog-launchagent uninstall-gopls-watchdog-launchagent install-sandbox-gc-launchagent uninstall-sandbox-gc-launchagent build-vroom-dispatch install-vroom-dispatch build-vroom-mesh install-vroom-mesh build-agm-bus build-vroom-prompt-gen install-vroom-prompt-gen build-resolve-review-threads install-resolve-review-threads build-merge-audit install-merge-audit build-token-refresher install-token-refresher install-token-refresher-launchagent uninstall-token-refresher-launchagent build-dear-deploy install-dear-deploy dear-deploy-sync build-agm-job install-agm-job build-src-health install-src-health build-burndown-maint install-burndown-maint install-fd-limit-launchdaemon uninstall-fd-limit-launchdaemon build-otel-local install-otel-local otel-up build-vroom-governor install-vroom-governor build-agm install-agm build-agm-mcp-server install-agm-mcp-server
 .PHONY: build-session-skill-extractor install-session-skill-extractor
 
 # Validate EARS-formatted requirements in SPEC.md files using the same
@@ -801,6 +803,24 @@ uninstall-gopls-watchdog-launchagent:
 	@launchctl bootout gui/$$(id -u)/com.dear-agent.gopls-watchdog 2>/dev/null || true
 	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.gopls-watchdog.plist
 	@echo "Removed: com.dear-agent.gopls-watchdog launch agent"
+
+# Stage the hourly sandbox-dir GC launch agent (ce-uxju). Staging only —
+# activation is a separate ask-gated `launchctl bootstrap`, and the plist
+# header says to run a manual `agm sandbox gc` dry run first.
+install-sandbox-gc-launchagent: install-agm
+	@mkdir -p $(HOME)/Library/LaunchAgents
+	@mkdir -p $(HOME)/.local/state/dear-agent
+	@sed 's|__HOME__|$(HOME)|g' deploy/launchd/com.dear-agent.sandbox-gc.plist \
+		> $(HOME)/Library/LaunchAgents/com.dear-agent.sandbox-gc.plist
+	@echo "Staged: $(HOME)/Library/LaunchAgents/com.dear-agent.sandbox-gc.plist"
+	@echo "Review a dry run first: agm sandbox gc"
+	@echo "Activate it yourself (ask-gated host action):"
+	@echo "  launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.dear-agent.sandbox-gc.plist"
+
+uninstall-sandbox-gc-launchagent:
+	@launchctl bootout gui/$$(id -u)/com.dear-agent.sandbox-gc 2>/dev/null || true
+	@rm -f $(HOME)/Library/LaunchAgents/com.dear-agent.sandbox-gc.plist
+	@echo "Removed: com.dear-agent.sandbox-gc launch agent"
 
 build-vroom-dispatch:
 	@echo "Building vroom-dispatch..."

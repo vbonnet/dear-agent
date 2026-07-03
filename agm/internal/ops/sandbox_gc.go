@@ -1,0 +1,202 @@
+// Package ops — sandbox_gc.go implements the periodic sandbox sweep (ce-uxju).
+//
+// SandboxGC walks ~/.agm/sandboxes and reaps every entry that fails ALL
+// liveness checks (no non-archived session references it, no process holds a
+// cwd/fd inside it, no mount point survives inside it). It is the periodic
+// complement to the archive-time reap in runArchiveCleanup: the sweep catches
+// sandboxes whose archive-time cleanup was skipped, refused, or predates the
+// guarded reaper (the 2.3T / 541-dir backlog of 2026-07-03).
+//
+// Safety posture (see internal/sandboxgc):
+//   - dry-run by default; the caller must set Reap=true to delete anything
+//   - refuses to run when the session store is unreachable or empty (an empty
+//     store is indistinguishable from a broken one — fail closed)
+//   - skips sandboxes younger than MinAge to avoid racing session creation
+//   - per-entry refusals are reported, never escalated to run failures; non-git
+//     and partial dirs are ordinary reapable content (ce-nd1z)
+package ops
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+
+	"github.com/vbonnet/dear-agent/agm/internal/gclog"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/sandboxgc"
+)
+
+// DefaultSandboxMinAge is how old a sandbox dir must be before the sweep will
+// touch it. It protects the window between a session row being created and
+// our storage snapshot: a sandbox created mid-sweep is never a reap candidate.
+const DefaultSandboxMinAge = time.Hour
+
+// SandboxGCRequest defines input for the sandbox sweep.
+type SandboxGCRequest struct {
+	// Reap actually deletes eligible sandboxes. Default false = dry-run.
+	Reap bool `json:"reap,omitempty"`
+	// MinAge skips sandboxes modified more recently than this
+	// (default DefaultSandboxMinAge).
+	MinAge time.Duration `json:"min_age,omitempty"`
+}
+
+// SandboxGCEntry records the decision for one sandbox dir.
+type SandboxGCEntry struct {
+	Name   string `json:"name"`
+	Action string `json:"action"` // reaped | would-reap | kept | error
+	Reason string `json:"reason,omitempty"`
+}
+
+// SandboxGCResult summarises a sweep.
+type SandboxGCResult struct {
+	Operation string           `json:"operation"`
+	DryRun    bool             `json:"dry_run"`
+	Scanned   int              `json:"scanned"`
+	Reaped    int              `json:"reaped"` // deleted (or would-reap in dry-run)
+	Kept      int              `json:"kept"`   // refused by a safety gate or too young
+	Errors    int              `json:"errors"` // removal attempted and failed
+	Entries   []SandboxGCEntry `json:"entries,omitempty"`
+}
+
+// SandboxGC sweeps ~/.agm/sandboxes for reapable sandbox dirs.
+func SandboxGC(ctx *OpContext, req *SandboxGCRequest) (*SandboxGCResult, error) {
+	if req == nil {
+		req = &SandboxGCRequest{}
+	}
+	base, err := sandboxgc.DefaultBase()
+	if err != nil {
+		return nil, err
+	}
+	checker := sandboxgc.NewChecker(base, liveSessionIDsFromStorage(ctx))
+	return sandboxGCWithChecker(req, base, checker)
+}
+
+// sandboxGCWithChecker is the testable core of SandboxGC.
+func sandboxGCWithChecker(req *SandboxGCRequest, base string, checker *sandboxgc.Checker) (*SandboxGCResult, error) {
+	minAge := req.MinAge
+	if minAge <= 0 {
+		minAge = DefaultSandboxMinAge
+	}
+
+	// Fail closed on storage health BEFORE touching the filesystem. An
+	// unreachable or empty session store must abort the sweep: with no live-ID
+	// set every sandbox would look orphaned.
+	if checker.LiveSessionIDs == nil {
+		return nil, fmt.Errorf("sandbox gc requires a live-session source; refusing to sweep without one")
+	}
+	if _, err := checker.LiveSessionIDs(); err != nil {
+		return nil, fmt.Errorf("session store unreachable, refusing to sweep: %w", err)
+	}
+
+	result := &SandboxGCResult{
+		Operation: "sandbox_gc",
+		DryRun:    !req.Reap,
+	}
+
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return result, nil
+		}
+		return nil, fmt.Errorf("reading sandbox base %s: %w", base, err)
+	}
+
+	now := time.Now()
+	for _, entry := range entries {
+		result.Scanned++
+		name := entry.Name()
+		dir := filepath.Join(base, name)
+
+		// Age gate: never touch fresh entries (racing session creation).
+		if info, err := entry.Info(); err == nil && now.Sub(info.ModTime()) < minAge {
+			result.Kept++
+			result.Entries = append(result.Entries, SandboxGCEntry{
+				Name: name, Action: "kept",
+				Reason: fmt.Sprintf("younger than %s", minAge),
+			})
+			continue
+		}
+
+		// Non-directories directly under the base (stray files, dead
+		// symlinks, partial provisioning debris) go through the same gates;
+		// they are reapable content, not errors (ce-nd1z).
+
+		if err := checker.CheckReapable(dir); err != nil {
+			result.Kept++
+			result.Entries = append(result.Entries, SandboxGCEntry{
+				Name: name, Action: "kept", Reason: refusalReason(err),
+			})
+			continue
+		}
+
+		if !req.Reap {
+			result.Reaped++
+			result.Entries = append(result.Entries, SandboxGCEntry{
+				Name: name, Action: "would-reap",
+			})
+			continue
+		}
+
+		if err := checker.Reap(dir); err != nil {
+			var refusal *sandboxgc.RefusalError
+			if errors.As(err, &refusal) {
+				result.Kept++
+				result.Entries = append(result.Entries, SandboxGCEntry{
+					Name: name, Action: "kept", Reason: refusalReason(err),
+				})
+			} else {
+				result.Errors++
+				result.Entries = append(result.Entries, SandboxGCEntry{
+					Name: name, Action: "error", Reason: err.Error(),
+				})
+			}
+			continue
+		}
+
+		result.Reaped++
+		result.Entries = append(result.Entries, SandboxGCEntry{Name: name, Action: "reaped"})
+		logGCEntry(gclog.Entry{
+			Operation:      "sandbox_gc_reap",
+			SessionID:      name,
+			SandboxRemoved: dir,
+		})
+	}
+
+	sort.Slice(result.Entries, func(i, j int) bool { return result.Entries[i].Name < result.Entries[j].Name })
+	return result, nil
+}
+
+// liveSessionIDsFromStorage returns a closure yielding the IDs of all
+// non-archived sessions. It fails closed: a storage error OR a store with
+// zero sessions (indistinguishable from a wiped/broken store on this host,
+// which always has archived history) aborts the sweep.
+func liveSessionIDsFromStorage(ctx *OpContext) func() (map[string]bool, error) {
+	return func() (map[string]bool, error) {
+		sessions, err := ctx.Storage.ListSessions(nil)
+		if err != nil {
+			return nil, fmt.Errorf("listing sessions: %w", err)
+		}
+		if len(sessions) == 0 {
+			return nil, fmt.Errorf("session store returned zero sessions — refusing to treat all sandboxes as orphaned")
+		}
+		live := make(map[string]bool, len(sessions))
+		for _, s := range sessions {
+			if s.Lifecycle != manifest.LifecycleArchived {
+				live[s.SessionID] = true
+			}
+		}
+		return live, nil
+	}
+}
+
+// refusalReason renders a compact reason for report entries.
+func refusalReason(err error) string {
+	var ref *sandboxgc.RefusalError
+	if errors.As(err, &ref) {
+		return fmt.Sprintf("%s: %s", ref.Reason, ref.Detail)
+	}
+	return err.Error()
+}
