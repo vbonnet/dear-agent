@@ -516,6 +516,32 @@ func TestCheckResultHasViolation(t *testing.T) {
 	}
 }
 
+// TestHumanTypingIsAdvisoryNotBlocking documents the core contract of this
+// change: a human_typing detection is an advisory that keeps Safe=true. It is
+// surfaced via Advisories/HasAdvisory, never Violations, so callers proceed
+// (and stash) instead of blocking.
+func TestHumanTypingIsAdvisoryNotBlocking(t *testing.T) {
+	r := &CheckResult{
+		Safe: true,
+		Advisories: []Violation{
+			{Guard: ViolationHumanTyping, Message: "Unsent text detected in prompt: \"merge PR 527\""},
+		},
+	}
+
+	if !r.Safe {
+		t.Error("human_typing must not make a result unsafe")
+	}
+	if !r.HasAdvisory(ViolationHumanTyping) {
+		t.Error("expected HasAdvisory to report the human_typing advisory")
+	}
+	if r.HasViolation(ViolationHumanTyping) {
+		t.Error("human_typing must not appear as a blocking violation")
+	}
+	if r.Error() != "" {
+		t.Errorf("advisory-only result must produce no blocking error, got %q", r.Error())
+	}
+}
+
 func TestAutonomousModeBehavior(t *testing.T) {
 	t.Run("autonomous mode sets AutonomousMode in options", func(t *testing.T) {
 		opts := GuardOptions{AutonomousMode: true}

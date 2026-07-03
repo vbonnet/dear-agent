@@ -1,0 +1,22 @@
+# AGM Sentinel Daemon Specification
+
+<!-- Last audited at: 2026-07-03 -->
+
+## Purpose
+
+`agm/internal/sentinel/daemon` monitors long-running AGM sessions and applies
+bounded recovery when a session appears stuck. Recovery must prefer
+non-destructive interruption, avoid fighting human operators, and keep repeated
+automation inside explicit circuit-breaker limits.
+
+## EARS Requirements
+
+**SENTD-01** When a stuck-session symptom is classified, the system shall choose the least disruptive recovery strategy defined for that symptom.
+
+**SENTD-02** When automated recovery would act on a session with a human present, the system shall downgrade the attempt to manual recovery without sending tmux keys.
+
+**SENTD-03** When recovering a cursor-frozen session, the system shall attempt a flag-based interrupt before escalating to tmux control-key injection.
+
+**SENTD-04** When recovery attempts reach the configured maximum, the system shall block additional attempts until the cooldown permits the history to reset.
+
+**SENTD-05** When a recovery attempt is recorded, the system shall persist the strategy, success value, reason, timestamp, and total-attempt count in the recovery history.
