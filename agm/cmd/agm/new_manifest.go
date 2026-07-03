@@ -30,7 +30,7 @@ func createAndRegisterManifest(sessionID, sessionName, workDir string, sandboxIn
 	}
 
 	debug.Log("Using SessionID: %s", sessionID)
-	m := buildSessionManifest(sessionID, sessionName, workDir, sandboxInfo)
+	m := buildSessionManifest(sessionID, sessionName, workDir, sandboxInfo, spawnedCodexMetadata)
 	if testMode {
 		m.IsTest = true
 		debug.Log("Marking session as test (is_test=true)")
@@ -63,7 +63,7 @@ func createAndRegisterManifest(sessionID, sessionName, workDir string, sandboxIn
 }
 
 // buildSessionManifest constructs the in-memory manifest for the new session.
-func buildSessionManifest(sessionID, sessionName, workDir string, sandboxInfo *manifest.SandboxConfig) *manifest.Manifest {
+func buildSessionManifest(sessionID, sessionName, workDir string, sandboxInfo *manifest.SandboxConfig, codexMeta *manifest.Codex) *manifest.Manifest {
 	m := &manifest.Manifest{
 		SchemaVersion: manifest.SchemaVersion,
 		SessionID:     sessionID,
@@ -84,6 +84,10 @@ func buildSessionManifest(sessionID, sessionName, workDir string, sandboxInfo *m
 		PermissionPolicy: clonePermissionPolicy(resolvedSessionPermissionPolicy),
 		Sandbox:          sandboxInfo,
 		Disposable:       disposable,
+	}
+	if codexMeta != nil {
+		meta := *codexMeta
+		m.Codex = &meta
 	}
 	if disposable {
 		m.DisposableTTL = disposableTTL

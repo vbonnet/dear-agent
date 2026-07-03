@@ -465,6 +465,24 @@ func TestBuildHarnessCommand_CodexCli(t *testing.T) {
 	}
 }
 
+func TestBuildHarnessCommand_CodexCliRemoteThread(t *testing.T) {
+	cmd := buildHarnessCommandWithCodex("codex-cli", "5.4", "codex-session", "/tmp/work", false, &manifest.Codex{SessionID: "thr_123"})
+	for _, want := range []string{
+		"env -u CLAUDECODE",
+		"AGM_SESSION_NAME='codex-session'",
+		"codex resume --remote unix://",
+		"-m 'gpt-5.4'",
+		"-C '/tmp/work'",
+		"-s workspace-write",
+		"'thr_123'",
+		"&& exit",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("remote Codex command %q missing %q", cmd, want)
+		}
+	}
+}
+
 func TestBuildHarnessCommand_OpenCodeCli(t *testing.T) {
 	cmd := buildHarnessCommand("opencode-cli", "sonnet", "open-session", "/tmp/work", false)
 	for _, want := range []string{

@@ -41,3 +41,15 @@ the larger repo-wide SPEC backlog is burned down incrementally.
 **SCB-12** When a parity-critical `SPEC.md` file is registered in the coverage matrix, the system shall require every candidate requirement to pass strict EARS lint.
 
 **SCB-13** When a pull request changes a production Go package with a co-located `SPEC.md`, the system shall require that co-located `SPEC.md` to pass strict EARS lint.
+
+**SCB-14** When a parity-critical `SPEC.md` file is registered in the coverage matrix, the system shall require that `SPEC.md` to reference its executable BDD feature path.
+
+**SCB-15** When a parity-critical BDD feature is registered in the coverage matrix, the system shall require that feature to reference its governing `SPEC.md` path.
+
+**SCB-16** When AGM defines an executable BDD feature file, the system shall require that feature to declare a governing `SPEC.md` path.
+
+**SCB-17** When an executable BDD feature declares a governing `SPEC.md` path, the system shall require that `SPEC.md` file to exist and reference the executable BDD feature path.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/spec_coverage.feature`

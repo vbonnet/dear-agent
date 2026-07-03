@@ -1,3 +1,4 @@
+# SPEC: agm/internal/wayfinderparity/SPEC.md
 Feature: Wayfinder harness parity
   AGM should expose Wayfinder workflow discovery, execution, and status surfaces
   across every active harness.

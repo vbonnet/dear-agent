@@ -24,7 +24,6 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
-	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/internal/telemetry"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -42,9 +41,9 @@ var (
 	msgIncludeSelf         bool   // --include-self flag for including sender in --all
 	msgDelegate            bool   // --delegate flag to track message as a pending delegation
 	msgDelegateSummary     string // --delegate-summary for delegation task summary
-	msgForce               bool   // --force flag to bypass human_typing guard (requires --reason)
-	msgForceReason         string // --reason paired with --force, recorded in override audit log
-	msgAutonomous          bool   // --autonomous flag: session is unattended, skip human_typing guard
+	msgForce               bool   // --force flag: force through queued-input/cooldown checks (ForceDelivery)
+	msgForceReason         string // --reason: deprecated no-op (human_typing no longer blocks; kept for compat)
+	msgAutonomous          bool   // --autonomous flag: session is unattended, skip human_typing detection
 )
 
 // Priority levels and their instructions injected into message headers
@@ -220,9 +219,9 @@ func init() {
 	sendMsgCmd.MarkFlagsOneRequired("prompt", "prompt-file", "prompt-stdin")
 	sendMsgCmd.MarkFlagsMutuallyExclusive("to", "all")
 
-	sendMsgCmd.Flags().BoolVar(&msgForce, "force", false, "Bypass the human_typing guard — requires --reason (recorded in override audit log)")
-	sendMsgCmd.Flags().StringVar(&msgForceReason, "reason", "", "Justification for --force, recorded in the override audit log")
-	sendMsgCmd.Flags().BoolVar(&msgAutonomous, "autonomous", false, "Session is unattended — skip human_typing guard (no audit override required)")
+	sendMsgCmd.Flags().BoolVar(&msgForce, "force", false, "Force delivery through the queued-input/post-submit cooldown checks (human_typing is advisory now and never blocks)")
+	sendMsgCmd.Flags().StringVar(&msgForceReason, "reason", "", "Deprecated no-op: human_typing no longer blocks, so --force needs no audited reason (accepted for compatibility)")
+	sendMsgCmd.Flags().BoolVar(&msgAutonomous, "autonomous", false, "Session is unattended — skip human_typing detection entirely")
 
 	sendGroupCmd.AddCommand(sendMsgCmd)
 
@@ -353,9 +352,13 @@ func enforceSendRateLimit(senderName string) error {
 }
 
 // ensureRecipientReady verifies the recipient tmux session exists, runs the
-// safety guard, and wakes any stale monitors.
-// When msgForce is set, the human_typing guard is bypassed after override.Require
-// validates the provided reason and records it to the audit log.
+// safety guards, records the recipient harness for the non-blocking human_typing
+// stash, and wakes any stale monitors.
+//
+// human_typing is advisory now (it over-captures; see internal/tmux/stash.go), so
+// it never blocks a send and --force no longer needs to bypass it. --force still
+// sets ForceDelivery, which forces through the SEPARATE queued-input / post-submit
+// cooldown checks for genuinely-stuck supervisors (ce-5sow).
 func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error {
 	exists, err := tmux.HasSession(recipientSession)
 	if err != nil {
@@ -379,29 +382,30 @@ func ensureRecipientReady(recipientSession string, adapter *dolt.Adapter) error 
 		}
 	}
 
+	// Record the recipient harness so the non-blocking human_typing stash in the
+	// tmux send path picks the right stash key (ce-subs).
+	tmux.SetStashHarness(harnessType)
+
 	// tmux.AutonomousMode() is the single source of truth, set in runSend from
 	// either --autonomous or AGM_AUTONOMOUS=1 (ce-v9in) and, for autonomous-role
 	// recipients, the role auto-detection above (ce-7mxn).
 	guardOpts := safety.GuardOptions{SkipMidResponse: true, AutonomousMode: tmux.AutonomousMode(), Harness: harnessType}
 	if msgForce {
-		if err := override.Require(context.Background(), override.Guard{
-			Tool: "agm send msg",
-			Flag: "--force",
-			Gate: "human_typing safety guard (prevents sending to a session with unsent human text)",
-			Risk: override.RiskP1,
-		}, msgForceReason); err != nil {
-			return err
-		}
-		guardOpts.SkipHumanTyping = true
-		// ce-5sow: the override must follow through to the tmux-direct delivery
-		// path, which runs its own post-submit human-typing cooldown abort.
-		// Without this, a forced send is re-blocked there ("human is typing").
-		// Set only after override.Require has validated --reason and recorded
-		// the audit entry, so the tmux-layer bypass is never silent.
+		// ce-5sow: --force forces delivery through the SEPARATE queued-input /
+		// post-submit cooldown checks for genuinely-stuck supervisors. It no
+		// longer bypasses human_typing (advisory/non-blocking now), so no audit
+		// override is required — nothing is being overridden.
 		tmux.SetForceDelivery(true)
 	}
 
 	guardResult := safety.Check(recipientSession, guardOpts)
+	// human_typing is advisory (over-captures): count it for telemetry, never
+	// block. Only genuine blocking violations (uninitialized/mid-response) abort.
+	for _, adv := range guardResult.Advisories {
+		if adv.Guard == safety.ViolationHumanTyping {
+			telemetry.RecordHumanTypingDetected(context.Background(), harnessType)
+		}
+	}
 	if !guardResult.Safe {
 		return fmt.Errorf("safety guard blocked send on session '%s':\n\n%s",
 			recipientSession, guardResult.Error())

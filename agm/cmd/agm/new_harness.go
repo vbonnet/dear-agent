@@ -10,7 +10,9 @@ import (
 
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
 	"github.com/vbonnet/dear-agent/agm/internal/debug"
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
@@ -418,16 +420,25 @@ func startAgyHarness(sessionName, workDir string, exists bool, extraAddDirs []st
 //     still appear). Full bypass is intentionally NOT wired here — it must remain
 //     an explicit, audited opt-in rather than a silent default.
 func buildCodexCommand(sessionName, workDir string, extraAddDirs []string) string {
-	return buildCodexCommandForModel(sessionName, workDir, modelName, extraAddDirs)
+	return buildCodexCommandForModel(sessionName, workDir, modelName, extraAddDirs, spawnedCodexMetadata)
 }
 
-func buildCodexCommandForModel(sessionName, workDir, model string, extraAddDirs []string) string {
+func buildCodexCommandForModel(sessionName, workDir, model string, extraAddDirs []string, codexMeta *manifest.Codex) string {
 	resolvedModel := agent.ResolveModelFullName("codex-cli", model)
 	var b strings.Builder
-	fmt.Fprintf(&b, "env -u CLAUDECODE AGM_SESSION_NAME=%s codex -m %s -C %s -s workspace-write",
-		shellQuote(sessionName), shellQuote(resolvedModel), shellQuote(workDir))
+	fmt.Fprintf(&b, "env -u CLAUDECODE AGM_SESSION_NAME=%s codex", shellQuote(sessionName))
+	if codexMeta != nil && codexMeta.SessionID != "" {
+		fmt.Fprintf(&b, " resume --remote unix:// -m %s -C %s -s workspace-write",
+			shellQuote(resolvedModel), shellQuote(workDir))
+	} else {
+		fmt.Fprintf(&b, " -m %s -C %s -s workspace-write",
+			shellQuote(resolvedModel), shellQuote(workDir))
+	}
 	for _, dir := range extraAddDirs {
 		fmt.Fprintf(&b, " --add-dir %s", shellQuote(dir))
+	}
+	if codexMeta != nil && codexMeta.SessionID != "" {
+		fmt.Fprintf(&b, " %s", shellQuote(codexMeta.SessionID))
 	}
 	b.WriteString(" && exit")
 	return b.String()
@@ -452,6 +463,16 @@ func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []
 		debug.Log("Codex initialized with API key")
 	} else {
 		debug.Log("Codex initialized with OAuth credentials (~/.codex/auth.json)")
+	}
+
+	spawnedCodexMetadata = nil
+	if meta, err := createCodexRemoteThread(context.Background(), sessionName, workDir); err != nil {
+		if os.Getenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL") == "1" {
+			return err
+		}
+		ui.PrintWarning(fmt.Sprintf("Codex remote-control bridge unavailable; falling back to local Codex CLI: %v", err))
+	} else {
+		spawnedCodexMetadata = meta
 	}
 
 	codexCmd := buildCodexCommand(sessionName, workDir, extraAddDirs)
@@ -490,6 +511,34 @@ func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []
 	debug.Log("✓ Codex prompt detected - Codex is ready")
 	ui.PrintSuccess("Codex adapter ready")
 	return nil
+}
+
+// spawnedCodexMetadata carries the app-server thread created during
+// startCodexHarness into manifest creation.
+var spawnedCodexMetadata *manifest.Codex
+
+func createCodexRemoteThread(ctx context.Context, sessionName, workDir string) (*manifest.Codex, error) {
+	if os.Getenv("AGM_CODEX_REMOTE_CONTROL") == "0" {
+		return nil, nil
+	}
+	client := codexcontrol.New()
+	if err := client.StartRemoteControl(ctx); err != nil {
+		return nil, err
+	}
+	thread, err := client.StartThread(ctx, codexcontrol.StartThreadOptions{
+		CWD:   workDir,
+		Model: agent.ResolveModelFullName("codex-cli", modelName),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := client.SetThreadName(ctx, thread.ID, sessionName); err != nil {
+		return nil, err
+	}
+	return &manifest.Codex{
+		SessionID:      thread.ID,
+		TranscriptPath: thread.Path,
+	}, nil
 }
 
 func cleanupCodexTmuxSession(sessionName string) {

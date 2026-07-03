@@ -87,11 +87,11 @@ the right abstraction; Discord/CLI HITL is enough; mock-by-default
 `State` interface for a Postgres adapter; `model_override` escape hatch;
 pluggable HITL backend.
 
-> **Terminology.** "DEAR hooks" here (`OnDefine/OnEnforce/OnAudit/OnResolve`)
-> are the workflow-engine *code* lifecycle, not the canonical *process*
-> retrospective (Define / **Execute** / Audit / **Retro**) in
-> [/CONTEXT.md](../../CONTEXT.md) § Known Terminology Collisions (2b). No
-> code rename implied.
+> **Terminology.** `OnDefine/OnEnforce/OnAudit/OnResolve` are the
+> workflow-engine *workflow lifecycle hooks*, not the canonical *process*
+> DEAR retrospective (Define / **Execute** / Audit / **Retro**). See
+> [ADR-035](ADR-035-dear-terminology-disambiguation.md). No code rename
+> implied.
 
 Storage schema, retention policy, and performance targets are in
 [docs/workflow-engine/](../workflow-engine/); source synthesis lives on

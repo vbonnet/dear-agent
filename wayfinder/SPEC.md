@@ -1,11 +1,11 @@
 # Wayfinder Plugin - Specification
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-01 -->
 
 **Version**: 0.1.0
 **Last Updated**: 2026-02-11
 **Status**: Active Development
-**Plugin**: wayfinder (core/cortex)
+**Plugin**: wayfinder
 
 ---
 
@@ -57,7 +57,9 @@ Reduce context token usage by 40-50% for long projects through waypoint summarie
 
 ### High-Level Design
 
-Wayfinder uses a **waypoint orchestrator** pattern with three layers: session management (Go), phase execution (TypeScript), and validation (Go + TypeScript).
+Wayfinder uses a **waypoint orchestrator** pattern implemented in Go with shell
+gate helpers. Session management, phase navigation, context compilation,
+validation, task tracking, review, and telemetry live under `wayfinder/`.
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -79,11 +81,11 @@ Wayfinder uses a **waypoint orchestrator** pattern with three layers: session ma
          v                             v
 ┌──────────────────────┐    ┌──────────────────────────┐
 │  Phase Orchestrator  │    │   Validation Engine      │
-│  (lib/*.ts)          │    │   (internal/validator)   │
+│  (Go packages)       │    │   (Go packages + shell)  │
 │                      │    │                          │
-│  - Context compiler  │    │  - Frontmatter signing   │
-│  - Signal detector   │    │  - Phase boundaries      │
-│  - Template builder  │    │  - Git claim validation  │
+│  - Context compiler  │    │  - Frontmatter parsing   │
+│  - Phase graph       │    │  - Phase boundaries      │
+│  - Template builder  │    │  - Git/code checks       │
 │  - Scope validator   │    │  - Deliverable checks    │
 └──────────┬───────────┘    └──────────┬───────────────┘
            │                           │
@@ -111,41 +113,44 @@ Wayfinder uses a **waypoint orchestrator** pattern with three layers: session ma
   - Coordinate validation and signing
 - **Interfaces**: CLI commands (`wayfinder-session start`, `wayfinder-session next-phase`, etc.)
 
-**Component 2: Phase Orchestrator (TypeScript)**
+**Component 2: Phase Orchestrator (Go)**
 - **Purpose**: Execute individual waypoints with compiled context
 - **Responsibilities**:
   - Compile phase context from prior artifacts
   - Detect signals for progressive rigor
   - Build templates for phase execution
   - Validate scope isolation
-- **Interfaces**: `PhaseOrchestrator.executePhase()`, `ContextCompiler.compile()`
+- **Implementation**: `wayfinder/internal/phaseisolation/` and
+  `wayfinder/cmd/wayfinder-session/internal/phasegraph/`
 
-**Component 3: Validation Engine (Go + TypeScript)**
+**Component 3: Validation Engine (Go + shell)**
 - **Purpose**: Validate and sign waypoint artifacts
 - **Responsibilities**:
   - Sign validated artifacts with cryptographic checksums
   - Check phase boundary violations (scope creep)
   - Validate deliverables against requirements
   - Verify git claims (D2, S9)
-- **Interfaces**: `validator.ValidateAndSign()`, `ScopeValidator.validate()`
+- **Implementation**: `wayfinder/cmd/wayfinder-session/internal/validator/`,
+  `wayfinder/internal/phaseisolation/`, and shell gate scripts in
+  `wayfinder/lib/`
 
-**Component 4: Signal Detector (TypeScript)**
+**Component 4: Signal and Scope Detection (Go)**
 - **Purpose**: Detect project complexity signals for progressive rigor
 - **Responsibilities**:
   - Keyword analysis (HIPAA, OAuth, compliance, etc.)
   - Effort estimation from context
   - Domain expert detection (ML, Mobile, Fintech, etc.)
   - Confidence scoring (0.0-1.0)
-- **Interfaces**: `SignalDetector.detect()`, `DomainDetector.detect()`
+- **Implementation**: `wayfinder/internal/phaseisolation/`
 
-**Component 5: W0 Detector (TypeScript)**
+**Component 5: W0/Charter Detection (Go)**
 - **Purpose**: Detect vague requests requiring project framing
 - **Responsibilities**:
   - Analyze user request for 5 vagueness signals
   - Calculate vagueness score (0.0-1.0)
   - Generate framing questions if score ≥ 0.60
   - Skip W0 if detailed charter exists
-- **Interfaces**: `W0Detector.shouldActivate()`, `W0Questions.generate()`
+- **Implementation**: Wayfinder session commands and phase-isolation helpers
 
 ### Data Flow
 
@@ -157,7 +162,7 @@ Wayfinder uses a **waypoint orchestrator** pattern with three layers: session ma
 2. **Waypoint Execution**:
    - User requests next phase: `/wayfinder-next-phase` (skill invocation)
    - Session manager calls `next-phase` → returns D1
-   - Phase orchestrator compiles context (no prior artifacts for D1)
+   - Go phase orchestration compiles context (no prior artifacts for D1)
    - AI agent executes D1 methodology, creates D1-problem-validation.md
    - Validation engine signs artifact with frontmatter checksum
 
@@ -168,7 +173,7 @@ Wayfinder uses a **waypoint orchestrator** pattern with three layers: session ma
    - Next call to `next-phase` returns D2
 
 4. **Progressive Rigor**:
-   - Signal detector analyzes D1-D3 outputs for complexity signals
+   - Signal/scope detection analyzes D1-D3 outputs for complexity signals
    - Detects "OAuth" keyword + "security" → confidence 0.85
    - Auto-escalates to Thorough rigor for S4-S11
    - Reports reasoning: "Using thorough level (confidence 0.85) because: OAuth security implications, 2 integration points"
@@ -225,7 +230,8 @@ Wayfinder uses a **waypoint orchestrator** pattern with three layers: session ma
 
 ### Quality Metrics
 
-- **Test Coverage**: ≥80% for TypeScript orchestration, ≥70% for Go validation
+- **Test Coverage**: focused Go package coverage for phase orchestration,
+  validation, review, status, build loop, and task management
 - **Documentation**: README, SPEC, ARCHITECTURE, ADRs for all major decisions
 - **Signal Detection Accuracy**: Precision ≥85% for domain expert detection
 
@@ -261,8 +267,7 @@ Future considerations:
 ### Constraints
 
 - **Dependency Constraints**:
-  - Node.js ≥18.0.0 for TypeScript orchestration
-  - Go ≥1.21 for session management and validation
+  - Go 1.26.4 for session management, orchestration, and validation
   - Git for version control and validation
   - Claude 3.5 Haiku for waypoint summarization (~$0.01-0.03 per summary)
 - **Phase Constraints**:
@@ -279,11 +284,6 @@ Future considerations:
 ## Dependencies
 
 ### External Libraries
-
-**TypeScript/Node.js**:
-- `unified` + `remark-parse` - Markdown parsing for scope validation
-- `fast-levenshtein` - Fuzzy section name matching (75% threshold)
-- `vitest` - Unit and integration testing
 
 **Go**:
 - `github.com/spf13/cobra` - CLI framework for wayfinder-session
@@ -326,25 +326,16 @@ wayfinder-session status --force-fs  # Rebuild from filesystem
 wayfinder-session end
 ```
 
-### Phase Orchestration (TypeScript)
+### Phase Orchestration (Go)
 
-```typescript
-import { PhaseOrchestrator } from '@wayfinder/core';
-
-const orchestrator = new PhaseOrchestrator({
-  projectPath: '/path/to/project',
-  sessionId: 'uuid-v4',
-  startPhase: 'D1',  // Optional: resume from phase
-});
-
-const result = await orchestrator.executePhase('D1');
-// Returns: PhaseResult with artifact, status, tokenCount
-```
+Phase orchestration is exposed through `wayfinder-session` commands and
+implemented by Go packages under `wayfinder/internal/phaseisolation/` and
+`wayfinder/cmd/wayfinder-session/internal/phasegraph/`.
 
 ### Validation (Go)
 
 ```go
-import "github.com/vbonnet/engram/core/cortex/cmd/wayfinder-session/internal/validator"
+import "github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/validator"
 
 // Validate and sign artifact
 result := validator.ValidateAndSign("D1-problem-validation.md")
@@ -356,31 +347,15 @@ violations := validator.CheckPhaseBoundaries("D3", "D3-approach-decision.md")
 valid := validator.VerifySignature("D1-problem-validation.md")
 ```
 
-### Signal Detection (TypeScript)
+### Signal Detection (Go)
 
-```typescript
-import { SignalDetector } from '@wayfinder/core';
-
-const detector = new SignalDetector();
-const signals = detector.detect({
-  userRequest: "Add OAuth authentication",
-  priorArtifacts: ["D1-problem-validation.md"],
-});
-// Returns: { confidence: 0.85, level: 'thorough', reasons: [...] }
-```
+Signal, phase-boundary, and scope checks live in
+`wayfinder/internal/phaseisolation/` and are exercised through the
+`wayfinder-session` lifecycle.
 
 ---
 
 ## Testing Strategy
-
-### Unit Tests (TypeScript)
-
-- Phase orchestration logic (context compilation, template building)
-- Signal detection accuracy (keyword matching, confidence scoring)
-- Scope validation (section parsing, boundary detection)
-- W0 vagueness detection (5 signal analysis)
-
-**Coverage Target**: ≥80%
 
 ### Unit Tests (Go)
 
@@ -388,8 +363,8 @@ const signals = detector.detect({
 - Phase navigation (next-phase, complete-phase)
 - Validation logic (frontmatter parsing, signature verification)
 - Filesystem state reconstruction
-
-**Coverage Target**: ≥70%
+- Phase orchestration logic (context compilation, template building)
+- Signal and scope detection
 
 ### Integration Tests
 
