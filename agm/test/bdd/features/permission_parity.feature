@@ -1,3 +1,4 @@
+# SPEC: agm/internal/permissionparity/SPEC.md
 Feature: Agent permission parity
   AGM should resolve one agent permission policy and carry it through every
   active harness. Harnesses may enforce the policy through different native

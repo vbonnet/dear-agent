@@ -36,3 +36,7 @@ deprecated compatibility.
 **MCP-09** When an MCP client lists tool schemas, the system shall document all active harnesses and deprecated Gemini compatibility rather than only Claude Code.
 
 **MCP-10** When an active harness or supported model family is added, the system shall require MCP parity tests before the harness or family is considered supported.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/mcp_parity.feature`

@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
+	"github.com/vbonnet/dear-agent/agm/internal/codexcontrol"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
@@ -174,7 +176,14 @@ func CreateSession(ctx *OpContext, req *CreateSessionRequest) (*CreateSessionRes
 		return nil, ErrStorageError("tmux.CreateSession", err)
 	}
 
-	harnessCmd := buildHarnessCommand(params.harness, params.model, params.name, req.Cwd, params.persistent)
+	codexMeta, err := createCodexThreadForSession(params.harness, params.model, params.name, req.Cwd)
+	if err != nil {
+		if os.Getenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL") == "1" {
+			return nil, ErrStorageError("codex.thread.start", err)
+		}
+		codexMeta = nil
+	}
+	harnessCmd := buildHarnessCommandWithCodex(params.harness, params.model, params.name, req.Cwd, params.persistent, codexMeta)
 	if err := ctx.Tmux.SendKeys(params.name, harnessCmd); err != nil {
 		return nil, ErrStorageError("tmux.SendKeys(harness)", err)
 	}
@@ -193,6 +202,10 @@ func CreateSession(ctx *OpContext, req *CreateSessionRequest) (*CreateSessionRes
 		Tmux:    manifest.Tmux{SessionName: params.name},
 		Harness: params.harness,
 		Model:   params.model,
+	}
+	if codexMeta != nil {
+		meta := *codexMeta
+		m.Codex = &meta
 	}
 	if ctx.Storage != nil {
 		if err := ctx.Storage.CreateSession(m); err != nil {
@@ -229,6 +242,10 @@ func shellQuote(s string) string {
 // restart or be re-driven without losing the pane.  One-shot workers should
 // pass persistent=false to get the clean-teardown behaviour.
 func buildHarnessCommand(harness, model, sessionName, workDir string, persistent bool) string {
+	return buildHarnessCommandWithCodex(harness, model, sessionName, workDir, persistent, nil)
+}
+
+func buildHarnessCommandWithCodex(harness, model, sessionName, workDir string, persistent bool, codexMeta *manifest.Codex) string {
 	exitSuffix := " && exit"
 	if persistent {
 		exitSuffix = ""
@@ -255,6 +272,10 @@ func buildHarnessCommand(harness, model, sessionName, workDir string, persistent
 		return fmt.Sprintf("gemini -m '%s'%s", shellQuote(model), exitSuffix)
 	case "codex-cli":
 		resolvedModel := agent.ResolveModelFullName("codex-cli", model)
+		if codexMeta != nil && codexMeta.SessionID != "" {
+			return fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME='%s' codex resume --remote unix:// -m '%s' -C '%s' -s workspace-write '%s'%s",
+				shellQuote(sessionName), shellQuote(resolvedModel), shellQuote(workDir), shellQuote(codexMeta.SessionID), exitSuffix)
+		}
 		return fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME='%s' codex -m '%s' -C '%s' -s workspace-write%s",
 			shellQuote(sessionName), shellQuote(resolvedModel), shellQuote(workDir), exitSuffix)
 	case "agy":
@@ -265,4 +286,25 @@ func buildHarnessCommand(harness, model, sessionName, workDir string, persistent
 	default:
 		return fmt.Sprintf("echo 'Unknown harness: %s' && exit 1", shellQuote(harness))
 	}
+}
+
+func createCodexThreadForSession(harness, model, sessionName, workDir string) (*manifest.Codex, error) {
+	if harness != "codex-cli" {
+		return nil, nil
+	}
+	client := codexcontrol.New()
+	if err := client.StartRemoteControl(context.Background()); err != nil {
+		return nil, err
+	}
+	thread, err := client.StartThread(context.Background(), codexcontrol.StartThreadOptions{
+		CWD:   workDir,
+		Model: agent.ResolveModelFullName("codex-cli", model),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := client.SetThreadName(context.Background(), thread.ID, sessionName); err != nil {
+		return nil, err
+	}
+	return &manifest.Codex{SessionID: thread.ID, TranscriptPath: thread.Path}, nil
 }

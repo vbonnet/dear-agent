@@ -30,6 +30,16 @@ type AgentMetrics struct {
 	evalScore          metric.Float64Histogram // agent.eval.score{gen_ai.eval.name}
 	evalCasesGenerated metric.Int64Counter     // agent.eval.cases_generated
 	dearCycleDuration  metric.Float64Histogram // dear.cycle.duration_ms{dear.phase}
+
+	// human_typing guard instruments. The guard is advisory/non-blocking and is
+	// known to over-capture (stale scrollback, old prompts, ghost-text remnants);
+	// these counters measure how often it fires and — via the before/after stash
+	// compare — how often that detection was a false positive, so the heuristic
+	// can be improved later. All tagged {harness, stash_key_verified}.
+	humanTypingDetected      metric.Int64Counter // human_typing.detected
+	humanTypingStashSent     metric.Int64Counter // human_typing.stash_sent
+	humanTypingStashed       metric.Int64Counter // human_typing.stashed
+	humanTypingFalsePositive metric.Int64Counter // human_typing.false_positive
 }
 
 var (
@@ -87,14 +97,38 @@ func newAgentMetrics(mp metric.MeterProvider) *AgentMetrics {
 		metric.WithDescription("Duration of a DEAR (Define-Execute-Audit-Retro) cycle in milliseconds"),
 		metric.WithUnit("ms"),
 	)
+	humanTypingDetected, _ := m.Int64Counter(
+		"human_typing.detected",
+		metric.WithDescription("Times the advisory human_typing guard fired (non-blocking), by harness"),
+		metric.WithUnit("{detection}"),
+	)
+	humanTypingStashSent, _ := m.Int64Counter(
+		"human_typing.stash_sent",
+		metric.WithDescription("Times a stash key was sent before delivery to preserve detected input, by harness"),
+		metric.WithUnit("{stash}"),
+	)
+	humanTypingStashed, _ := m.Int64Counter(
+		"human_typing.stashed",
+		metric.WithDescription("Times a stash actually set input aside (input line cleared afterward), by harness"),
+		metric.WithUnit("{stash}"),
+	)
+	humanTypingFalsePositive, _ := m.Int64Counter(
+		"human_typing.false_positive",
+		metric.WithDescription("Times a stash was sent but nothing was stashed — human_typing over-captured, by harness"),
+		metric.WithUnit("{detection}"),
+	)
 	return &AgentMetrics{
-		tasksActive:        tasksActive,
-		tasksCompleted:     tasksCompleted,
-		tokensUsed:         tokensUsed,
-		stallDuration:      stallDuration,
-		evalScore:          evalScore,
-		evalCasesGenerated: evalCasesGenerated,
-		dearCycleDuration:  dearCycleDuration,
+		tasksActive:              tasksActive,
+		tasksCompleted:           tasksCompleted,
+		tokensUsed:               tokensUsed,
+		stallDuration:            stallDuration,
+		evalScore:                evalScore,
+		evalCasesGenerated:       evalCasesGenerated,
+		dearCycleDuration:        dearCycleDuration,
+		humanTypingDetected:      humanTypingDetected,
+		humanTypingStashSent:     humanTypingStashSent,
+		humanTypingStashed:       humanTypingStashed,
+		humanTypingFalsePositive: humanTypingFalsePositive,
 	}
 }
 
@@ -299,4 +333,57 @@ func (a *AgentMetrics) recordDEARCycle(ctx context.Context, phase string, ms flo
 		attrs = append(attrs, attribute.String("dear.phase", phase))
 	}
 	a.dearCycleDuration.Record(ctx, ms, metric.WithAttributes(attrs...))
+}
+
+// human_typing guard instrumentation.
+//
+// The human_typing guard is advisory and non-blocking: it never aborts a send.
+// It is known to over-capture — stale scrollback, old prompts, and ghost-text
+// remnants all read as "a human is typing". Instead of blocking, callers stash
+// the composer (Claude Code's C-s auto-unstashes after the next submit, so
+// genuine human input survives) and deliver anyway. These counters let us
+// quantify the over-capture from production: a stash that changed nothing means
+// the detection was a false positive. Data feeds a future heuristic revamp.
+
+func humanTypingAttrs(harness string, verified bool) []attribute.KeyValue {
+	if harness == "" {
+		harness = "claude-code"
+	}
+	return []attribute.KeyValue{
+		attribute.String("harness", harness),
+		attribute.Bool("stash_key_verified", verified),
+	}
+}
+
+// RecordHumanTypingDetected records one advisory human_typing detection (the
+// guard fired but did not block), tagged by harness.
+func RecordHumanTypingDetected(ctx context.Context, harness string) {
+	a := Agent()
+	if a == nil || a.humanTypingDetected == nil {
+		return
+	}
+	a.humanTypingDetected.Add(ctx, 1, metric.WithAttributes(humanTypingAttrs(harness, false)...))
+}
+
+// RecordHumanTypingStash records the outcome of a pre-delivery stash attempt:
+// sent (the stash key went to the pane), stashed (the input line was cleared,
+// so real input was set aside), and falsePositive (the stash changed nothing,
+// so the human_typing detection over-captured). verified reports whether the
+// harness's stash key is a confirmed mapping (only claude-code today). Counters
+// are tagged {harness, stash_key_verified}.
+func RecordHumanTypingStash(ctx context.Context, harness string, verified, sent, stashed, falsePositive bool) {
+	a := Agent()
+	if a == nil {
+		return
+	}
+	attrs := metric.WithAttributes(humanTypingAttrs(harness, verified)...)
+	if sent && a.humanTypingStashSent != nil {
+		a.humanTypingStashSent.Add(ctx, 1, attrs)
+	}
+	if stashed && a.humanTypingStashed != nil {
+		a.humanTypingStashed.Add(ctx, 1, attrs)
+	}
+	if falsePositive && a.humanTypingFalsePositive != nil {
+		a.humanTypingFalsePositive.Add(ctx, 1, attrs)
+	}
 }

@@ -205,6 +205,12 @@ func (p *OpenRouterProvider) Capabilities() Capabilities {
 			"openai/gpt-4",
 			"openai/gpt-4-turbo",
 			"google/gemini-pro-1.5",
+			"z-ai/glm-5.2",
+			"deepseek/deepseek-v4-pro",
+			"deepseek/deepseek-v4-flash",
+			"nvidia/nemotron-3-ultra",
+			"qwen/qwen3.6-max",
+			"qwen/qwen3.6-35b-a3b",
 		},
 	}
 }

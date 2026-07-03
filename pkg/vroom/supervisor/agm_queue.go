@@ -16,8 +16,9 @@ import (
 // The in-memory pending list does not survive process restarts. A persistent
 // backing store is deferred to a follow-up.
 type AGMQueue struct {
-	mu      sync.Mutex
-	pending []Task
+	mu          sync.Mutex
+	pending     []Task
+	dispatching map[string]struct{}
 
 	// AGMBin is the agm binary to invoke. Empty resolves "agm" on PATH.
 	AGMBin string
@@ -69,25 +70,34 @@ func (q *AGMQueue) Pending(_ context.Context) ([]Task, error) {
 	return out, nil
 }
 
-// Dispatch implements Queue. It removes the task from the pending list and
-// shells out to "agm session new" to spawn a worker session named
-// "worker-<taskID>". The session runs detached (--detach) with the
-// configured model and role.
+// Dispatch implements Queue. It shells out to "agm session new" to spawn a
+// worker session named "worker-<taskID>" and removes the task from the pending
+// list only after the spawn succeeds. The session runs detached (--detached)
+// with the configured model and role.
 func (q *AGMQueue) Dispatch(ctx context.Context, taskID, _ string) error {
 	q.mu.Lock()
 	found := false
-	for i, t := range q.pending {
+	for _, t := range q.pending {
 		if t.ID == taskID {
-			q.pending = append(q.pending[:i], q.pending[i+1:]...)
 			found = true
 			break
 		}
 	}
-	q.mu.Unlock()
 
 	if !found {
+		q.mu.Unlock()
 		return fmt.Errorf("AGMQueue.Dispatch: unknown task %q", taskID)
 	}
+	if q.dispatching == nil {
+		q.dispatching = make(map[string]struct{})
+	}
+	if _, ok := q.dispatching[taskID]; ok {
+		q.mu.Unlock()
+		return fmt.Errorf("AGMQueue.Dispatch: task %q already dispatching", taskID)
+	}
+	q.dispatching[taskID] = struct{}{}
+	q.mu.Unlock()
+	defer q.clearDispatching(taskID)
 
 	model := q.Model
 	if model == "" {
@@ -109,26 +119,63 @@ func (q *AGMQueue) Dispatch(ctx context.Context, taskID, _ string) error {
 	dctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	args := []string{
-		"session", "new",
-		"--name", "worker-" + taskID,
-		"--model", model,
-		"--role", role,
-		"--mode", "auto",
-		"--workspace", "oss",
-		"--detach",
-		"--send", fmt.Sprintf("Pick up bead %s and execute it.", taskID),
-	}
+	args := AGMDispatchArgs(taskID, model, role)
 
 	if q.run != nil {
-		_, err := q.run(dctx, bin, args...)
-		return err
+		out, err := q.run(dctx, bin, args...)
+		if ctxErr := dctx.Err(); ctxErr != nil {
+			return fmt.Errorf("AGMQueue.Dispatch: agm session new worker-%s: %w\n%s",
+				taskID, ctxErr, out)
+		}
+		if err != nil {
+			return fmt.Errorf("AGMQueue.Dispatch: agm session new worker-%s: %w\n%s",
+				taskID, err, out)
+		}
+		q.removePending(taskID)
+		return nil
 	}
 
 	out, err := exec.CommandContext(dctx, bin, args...).CombinedOutput() //#nosec G204 -- bin is a fixed binary path; args are controlled caller values
+	if ctxErr := dctx.Err(); ctxErr != nil {
+		return fmt.Errorf("AGMQueue.Dispatch: agm session new worker-%s: %w\n%s",
+			taskID, ctxErr, out)
+	}
 	if err != nil {
 		return fmt.Errorf("AGMQueue.Dispatch: agm session new worker-%s: %w\n%s",
 			taskID, err, out)
 	}
+	q.removePending(taskID)
 	return nil
+}
+
+func (q *AGMQueue) removePending(taskID string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for i, t := range q.pending {
+		if t.ID == taskID {
+			q.pending = append(q.pending[:i], q.pending[i+1:]...)
+			return
+		}
+	}
+}
+
+func (q *AGMQueue) clearDispatching(taskID string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	delete(q.dispatching, taskID)
+}
+
+// AGMDispatchArgs builds the `agm session new` argument list used to spawn a
+// VROOM worker session.
+func AGMDispatchArgs(taskID, model, role string) []string {
+	return []string{
+		"session", "new",
+		"worker-" + taskID,
+		"--model", model,
+		"--role", role,
+		"--mode", "auto",
+		"--workspace", "oss",
+		"--detached",
+		"--prompt", fmt.Sprintf("Pick up bead %s and execute it.", taskID),
+	}
 }

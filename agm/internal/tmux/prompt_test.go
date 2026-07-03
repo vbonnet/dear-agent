@@ -158,21 +158,17 @@ func TestInputLineHasContent(t *testing.T) {
 	}
 }
 
-func TestInputLineHasContent_ForceBypass(t *testing.T) {
-	// Documents that --force (shouldInterrupt=true) bypasses InputLineHasContent checks
-	// in SendPromptLiteral. The check is wrapped in `if !shouldInterrupt { ... }`.
+func TestInputLineHasContent_NonBlocking(t *testing.T) {
+	// human_typing no longer BLOCKS in SendPromptLiteral. InputLineHasContent now
+	// feeds the non-blocking stash decision (shouldClearStaleInput), not an abort.
 	//
-	// When shouldInterrupt=true:
-	//   - hasQueuedInput check: SKIPPED
-	//   - InputLineHasContent check: SKIPPED
-	//   - ESC is sent to interrupt thinking
+	// In SendPromptLiteral, regardless of shouldInterrupt:
+	//   - stashStaleInputLocked stashes any real input, then delivery proceeds.
 	//
-	// When shouldInterrupt=false:
-	//   - hasQueuedInput check: ACTIVE — aborts if pasted text detected
-	//   - InputLineHasContent check: ACTIVE — aborts if human is typing
-	//   - ESC is NOT sent
+	// The only remaining pre-send abort is the SEPARATE queued-paste guard
+	// (checkPaneForQueuedInput), which shouldInterrupt still bypasses.
 
-	// Verify the function itself works correctly (the bypass is in SendPromptLiteral)
+	// Verify the detector still works — it is what the stash decision relies on.
 	content := "❯ human is typing something"
 	if !InputLineHasContent(content) {
 		t.Error("InputLineHasContent should detect typed content")
@@ -271,27 +267,28 @@ func TestHasActiveSpinner(t *testing.T) {
 	}
 }
 
-func TestSpinnerBypassesHumanInputDetection(t *testing.T) {
+func TestSpinnerSuppressesStash(t *testing.T) {
 	// When a spinner is present, InputLineHasContent may return true because
-	// AI-generated text appears after ❯. But hasActiveSpinner should cause the
-	// caller to skip the InputLineHasContent check entirely.
+	// AI-generated text appears after ❯. The non-blocking stash must NOT fire in
+	// that case (it would send a stash key mid-generation), so stashStaleInputLocked
+	// short-circuits on an active spinner. Here we assert the precondition and the
+	// guard predicate the stash uses.
 	paneWithSpinnerAndContent := "⠋ Thinking...\n❯ some AI output text"
 
-	// InputLineHasContent would flag this as human typing
+	// InputLineHasContent alone would flag this as content.
 	if !InputLineHasContent(paneWithSpinnerAndContent) {
 		t.Fatal("expected InputLineHasContent to detect content (precondition)")
 	}
-
-	// But hasActiveSpinner detects AI generation, so caller should skip the check
+	// hasActiveSpinner detects AI generation, which suppresses the stash.
 	if !hasActiveSpinner(paneWithSpinnerAndContent) {
 		t.Fatal("expected hasActiveSpinner to detect spinner")
 	}
 
-	// The combined logic: if spinner is active, do NOT treat content as human input
-	// This is the fix — callers check hasActiveSpinner before InputLineHasContent
-	isHumanTyping := !hasActiveSpinner(paneWithSpinnerAndContent) && InputLineHasContent(paneWithSpinnerAndContent)
-	if isHumanTyping {
-		t.Error("spinner present — should NOT classify as human typing")
+	// stashStaleInputLocked treats an active spinner as a no-op (Attempted=false),
+	// so AI output mid-render is never mistaken for stashable input.
+	out := stashStaleInputLocked("/nonexistent.sock", "no-such-session", paneWithSpinnerAndContent)
+	if out.Attempted {
+		t.Error("spinner present — stash must be a no-op, not attempted")
 	}
 }
 
@@ -308,8 +305,9 @@ func TestSpinnerBypassesQueuedInputDetection(t *testing.T) {
 		t.Fatal("expected hasQueuedInput to detect queued input (precondition)")
 	}
 
-	// Combined logic: spinner active means skip both checks
-	shouldBlock := !hasActiveSpinner(paneWithSpinnerAndQueued) && (hasQueuedInput(paneWithSpinnerAndQueued) || InputLineHasContent(paneWithSpinnerAndQueued))
+	// checkPaneForQueuedInput logic: spinner active short-circuits the queued-paste
+	// abort (human_typing content no longer blocks at all).
+	shouldBlock := !hasActiveSpinner(paneWithSpinnerAndQueued) && hasQueuedInput(paneWithSpinnerAndQueued)
 	if shouldBlock {
 		t.Error("spinner present — should NOT block delivery")
 	}

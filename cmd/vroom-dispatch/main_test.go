@@ -477,6 +477,79 @@ func TestSupervisorSkillsPreauthorizeUnattended(t *testing.T) {
 	}
 }
 
+// TestOrchestratorCrossChecksPeers pins ce-20p9 Fix 3: the Orchestrator tick
+// must run `agm scan --cross-check` to read the ground-truth (tmux) state of peer
+// supervisors and clear any that are still stuck with `agm send approve`. Without
+// this, a peer blocked on a permission prompt looks `active`/fresh and is never
+// unblocked — the ADR-002 gap this bead closes.
+func TestOrchestratorCrossChecksPeers(t *testing.T) {
+	b, err := skills.ReadFile("skills/orchestrator.md")
+	if err != nil {
+		t.Fatalf("read embedded orchestrator.md: %v", err)
+	}
+	doc := string(b)
+	for _, want := range []string{
+		"agm scan --cross-check",           // the ground-truth peer sweep
+		"agm send approve",                 // clear anything cross-check couldn't auto-approve
+		"supervisor.orch.peer_cross_check", // trail event for the sweep
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("orchestrator.md missing cross-check marker %q", want)
+		}
+	}
+}
+
+// TestOrchestratorApprovesBlockedWorker pins ce-20p9 Fix 4: a worker stuck in
+// PERMISSION_PROMPT cannot receive `agm send msg` (it is frozen on its prompt),
+// so the Level 2 response must be `agm send approve worker-<id>` — not a defer
+// message that never arrives. Guard both the new behavior and the removal of the
+// old (broken) nudge-by-message so it cannot silently regress.
+func TestOrchestratorApprovesBlockedWorker(t *testing.T) {
+	b, err := skills.ReadFile("skills/orchestrator.md")
+	if err != nil {
+		t.Fatalf("read embedded orchestrator.md: %v", err)
+	}
+	doc := string(b)
+	for _, want := range []string{
+		`agm send approve "worker-<bead-id>"`,        // approve the blocked worker
+		"supervisor.orch.worker_permission_approved", // trail event for the approve
+		"cannot receive", // the reason messaging fails
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("orchestrator.md missing blocked-worker-approve marker %q", want)
+		}
+	}
+	// The old broken behavior — messaging a permission-blocked worker to defer —
+	// must be gone; that message can never reach a frozen session.
+	if strings.Contains(doc, "supervisor.orch.worker_permission_nudge") {
+		t.Errorf("orchestrator.md still records worker_permission_nudge; a blocked worker can't receive agm send msg (ce-20p9 Fix 4)")
+	}
+}
+
+// TestProtocolDocumentsPermissionModel pins ce-20p9 Fix 5 & Fix 6: the shared
+// protocol must document how supervisors stay unblocked — the pre-approved RBAC
+// profile + auto mode (so prompts are rare), mutual `agm send approve` (so the
+// rare ones clear), and the supervisor-independent watchdog that survives a
+// total-mesh stall (the gap watch-stalled's alert-only recovery cannot cover).
+func TestProtocolDocumentsPermissionModel(t *testing.T) {
+	b, err := skills.ReadFile("skills/protocol.md")
+	if err != nil {
+		t.Fatalf("read embedded protocol.md: %v", err)
+	}
+	doc := string(b)
+	for _, want := range []string{
+		"Permission Model & Mutual Unblock (ALL supervisors)", // the section
+		"--mode=auto",                         // auto mode: no interactive waits
+		"agm send approve",                    // mutual unblock channel
+		"install-supervisor-unblock-schedule", // the external watchdog (Fix 6)
+		"watch-stalled",                       // ... and why it is not enough alone
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("protocol.md missing permission-model marker %q", want)
+		}
+	}
+}
+
 // --- Dispatch Advisor tests (ce-hn8n) ---
 
 func TestRestartTracker_BackoffProgression(t *testing.T) {

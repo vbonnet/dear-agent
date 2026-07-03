@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 )
 
 // TestBuildCodexCommand_ModelResolved verifies that a registry alias is resolved
@@ -17,10 +19,10 @@ func TestBuildCodexCommand_ModelResolved(t *testing.T) {
 	if !strings.Contains(cmd, "-m 'gpt-5.4'") {
 		t.Errorf("resolved model not present in command: %s", cmd)
 	}
-	// Cross-harness alias should resolve too (opus → 5.6 → gpt-5.6).
+	// Cross-harness alias should resolve too (opus -> 5.5 -> gpt-5.5).
 	modelName = "opus"
 	cmd = buildCodexCommand("test-session", "/tmp/work", nil)
-	if !strings.Contains(cmd, "-m 'gpt-5.6'") {
+	if !strings.Contains(cmd, "-m 'gpt-5.5'") {
 		t.Errorf("cross-harness alias not resolved in command: %s", cmd)
 	}
 }
@@ -95,6 +97,24 @@ func TestBuildCodexCommand_NoClaudeEnvLeak(t *testing.T) {
 	}
 	if strings.Contains(cmd, "dangerously-bypass") {
 		t.Errorf("full-autonomy bypass must not be a silent default: %s", cmd)
+	}
+}
+
+func TestBuildCodexCommand_RemoteThreadResume(t *testing.T) {
+	cmd := buildCodexCommandForModel("codex-session", "/tmp/work", "5.4", []string{"/tmp/extra dir"}, &manifest.Codex{SessionID: "thr_123"})
+
+	for _, want := range []string{
+		"AGM_SESSION_NAME='codex-session'",
+		"codex resume --remote unix://",
+		"-m 'gpt-5.4'",
+		"-C '/tmp/work'",
+		"-s workspace-write",
+		"--add-dir '/tmp/extra dir'",
+		"'thr_123'",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("remote Codex command missing %q: %s", want, cmd)
+		}
 	}
 }
 

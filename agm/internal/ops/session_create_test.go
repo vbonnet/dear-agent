@@ -150,7 +150,7 @@ func TestCreateSession_DefaultsModelPerHarness(t *testing.T) {
 		harness string
 		want    string
 	}{
-		{"codex-cli", "5.6"},
+		{"codex-cli", "5.5"},
 		{"agy", "2.5-flash"},
 		{"opencode-cli", "glm-5.2"},
 	}
@@ -462,6 +462,24 @@ func TestBuildHarnessCommand_CodexCli(t *testing.T) {
 	}
 	if strings.Contains(cmd, "CLAUDE_CODE_OAUTH_TOKEN") || strings.Contains(cmd, "ANTHROPIC_") {
 		t.Errorf("codex command leaked Claude/Anthropic env: %s", cmd)
+	}
+}
+
+func TestBuildHarnessCommand_CodexCliRemoteThread(t *testing.T) {
+	cmd := buildHarnessCommandWithCodex("codex-cli", "5.4", "codex-session", "/tmp/work", false, &manifest.Codex{SessionID: "thr_123"})
+	for _, want := range []string{
+		"env -u CLAUDECODE",
+		"AGM_SESSION_NAME='codex-session'",
+		"codex resume --remote unix://",
+		"-m 'gpt-5.4'",
+		"-C '/tmp/work'",
+		"-s workspace-write",
+		"'thr_123'",
+		"&& exit",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("remote Codex command %q missing %q", cmd, want)
+		}
 	}
 }
 

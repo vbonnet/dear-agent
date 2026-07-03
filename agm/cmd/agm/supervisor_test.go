@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 // fakeSupervisorEnv is a stub supervisorEnv for unit tests.
@@ -300,5 +302,213 @@ func TestSupervisorRole(t *testing.T) {
 		if got := supervisorRole(c.id); got != c.want {
 			t.Errorf("supervisorRole(%q) = %q, want %q", c.id, got, c.want)
 		}
+	}
+}
+
+// row is a small builder for annotateMeshRecovery test cases.
+func row(id string, stale bool, primaryFor, tertiaryFor string) supervisorRow {
+	return supervisorRow{
+		ID:    id,
+		Stale: stale,
+		Record: &heartbeatRecord{
+			ID:          id,
+			PrimaryFor:  primaryFor,
+			TertiaryFor: tertiaryFor,
+		},
+	}
+}
+
+func findRow(rows []supervisorRow, id string) supervisorRow {
+	for _, r := range rows {
+		if r.ID == id {
+			return r
+		}
+	}
+	panic(fmt.Sprintf("supervisor row %q not found", id))
+}
+
+// TestAnnotateMeshRecoveryBothStale is the ce-2qbx incident: meta-o is
+// primary-for orch and orch is primary-for meta-o, and both are stale. Neither
+// can re-drive the other, so both are quorum-lost and the mesh cannot self-heal.
+func TestAnnotateMeshRecoveryBothStale(t *testing.T) {
+	rows := []supervisorRow{
+		row("vroom-meta-orchestrator", true, "vroom-orchestrator", ""),
+		row("vroom-orchestrator", true, "vroom-meta-orchestrator", ""),
+	}
+	quorumLost := annotateMeshRecovery(rows)
+	if !quorumLost {
+		t.Fatal("expected quorumLost=true when a stale pair are each other's only recoverer")
+	}
+	for _, id := range []string{"vroom-meta-orchestrator", "vroom-orchestrator"} {
+		r := findRow(rows, id)
+		if r.Recoverable {
+			t.Errorf("%s: Recoverable=true, want false", id)
+		}
+		if !r.QuorumLost {
+			t.Errorf("%s: QuorumLost=false, want true", id)
+		}
+	}
+}
+
+// TestAnnotateMeshRecoveryPairStaleOverseerLive: the same stale pair, but a
+// fresh overseer is tertiary-for both. The pair is recoverable (overseer can
+// re-drive them) and NOT quorum-lost — the mesh is expected to self-heal.
+func TestAnnotateMeshRecoveryPairStaleOverseerLive(t *testing.T) {
+	rows := []supervisorRow{
+		row("vroom-meta-orchestrator", true, "vroom-orchestrator", ""),
+		row("vroom-orchestrator", true, "vroom-meta-orchestrator", ""),
+		{ID: "vroom-overseer", Stale: false, Record: &heartbeatRecord{
+			ID:          "vroom-overseer",
+			TertiaryFor: "vroom-meta-orchestrator",
+		}},
+	}
+	// overseer is tertiary-for meta-o only; make it tertiary-for orch too via a
+	// second record field is not possible, so cover orch through primary-for.
+	rows[2].Record.PrimaryFor = "vroom-orchestrator"
+
+	quorumLost := annotateMeshRecovery(rows)
+	if quorumLost {
+		t.Fatal("expected quorumLost=false when a live overseer can recover the stale pair")
+	}
+	for _, id := range []string{"vroom-meta-orchestrator", "vroom-orchestrator"} {
+		r := findRow(rows, id)
+		if !r.Recoverable {
+			t.Errorf("%s: Recoverable=false, want true (overseer is live)", id)
+		}
+		if r.QuorumLost {
+			t.Errorf("%s: QuorumLost=true, want false", id)
+		}
+	}
+}
+
+// TestAnnotateMeshRecoverySingleStaleLiveRecoverer: one stale supervisor whose
+// sole recoverer is fresh — recoverable, no quorum loss.
+func TestAnnotateMeshRecoverySingleStaleLiveRecoverer(t *testing.T) {
+	rows := []supervisorRow{
+		row("A", true, "", ""),
+		row("B", false, "A", ""), // B (fresh) is primary-for A
+	}
+	if annotateMeshRecovery(rows) {
+		t.Fatal("expected quorumLost=false")
+	}
+	a := findRow(rows, "A")
+	if !a.Recoverable || a.QuorumLost {
+		t.Errorf("A: Recoverable=%v QuorumLost=%v, want true/false", a.Recoverable, a.QuorumLost)
+	}
+	if !slices.Contains(a.Recoverers, "B") {
+		t.Errorf("A.Recoverers = %v, want to contain B", a.Recoverers)
+	}
+}
+
+// TestAnnotateMeshRecoveryAllFresh: nobody stale → no quorum loss, everyone
+// trivially recoverable.
+func TestAnnotateMeshRecoveryAllFresh(t *testing.T) {
+	rows := []supervisorRow{
+		row("A", false, "B", ""),
+		row("B", false, "A", ""),
+	}
+	if annotateMeshRecovery(rows) {
+		t.Fatal("expected quorumLost=false when all fresh")
+	}
+	for _, id := range []string{"A", "B"} {
+		if r := findRow(rows, id); !r.Recoverable {
+			t.Errorf("%s: Recoverable=false, want true", id)
+		}
+	}
+}
+
+// TestAnnotateMeshRecoveryLoneStaleNoRecoverer: a stale supervisor nobody lists
+// as primary/tertiary has no recoverer at all → quorum-lost.
+func TestAnnotateMeshRecoveryLoneStaleNoRecoverer(t *testing.T) {
+	rows := []supervisorRow{row("solo", true, "", "")}
+	if !annotateMeshRecovery(rows) {
+		t.Fatal("expected quorumLost=true for a stale supervisor with no recoverers")
+	}
+	r := findRow(rows, "solo")
+	if r.Recoverable || !r.QuorumLost {
+		t.Errorf("solo: Recoverable=%v QuorumLost=%v, want false/true", r.Recoverable, r.QuorumLost)
+	}
+	if len(r.Recoverers) != 0 {
+		t.Errorf("solo.Recoverers = %v, want empty", r.Recoverers)
+	}
+}
+
+// TestEmitSupervisorStatusTableRecoveryColumn checks the human table renders
+// the RECOVERY column with QUORUM-LOST for an unrecoverable stale supervisor.
+func TestEmitSupervisorStatusTableRecoveryColumn(t *testing.T) {
+	rows := []supervisorRow{
+		row("vroom-meta-orchestrator", true, "vroom-orchestrator", ""),
+		row("vroom-orchestrator", true, "vroom-meta-orchestrator", ""),
+	}
+	annotateMeshRecovery(rows)
+
+	prev := supervisorStatusJSON
+	supervisorStatusJSON = false
+	defer func() { supervisorStatusJSON = prev }()
+
+	cmd := &cobra.Command{}
+	var out strings.Builder
+	cmd.SetOut(&out)
+	if err := emitSupervisorStatus(cmd, rows); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "RECOVERY") {
+		t.Errorf("table header missing RECOVERY column:\n%s", got)
+	}
+	if !strings.Contains(got, "QUORUM-LOST") {
+		t.Errorf("table missing QUORUM-LOST for the stale pair:\n%s", got)
+	}
+}
+
+// TestEmitSupervisorStatusJSONFields checks the JSON payload carries the new
+// mesh-recovery fields so an external watchdog can act on them.
+func TestEmitSupervisorStatusJSONFields(t *testing.T) {
+	rows := []supervisorRow{
+		row("A", true, "", ""),
+		row("B", false, "A", ""),
+	}
+	annotateMeshRecovery(rows)
+
+	prev := supervisorStatusJSON
+	supervisorStatusJSON = true
+	defer func() { supervisorStatusJSON = prev }()
+
+	cmd := &cobra.Command{}
+	var out strings.Builder
+	cmd.SetOut(&out)
+	if err := emitSupervisorStatus(cmd, rows); err != nil {
+		t.Fatal(err)
+	}
+	var decoded []supervisorRow
+	if err := json.Unmarshal([]byte(out.String()), &decoded); err != nil {
+		t.Fatalf("unmarshal status JSON: %v\n%s", err, out.String())
+	}
+	a := findRow(decoded, "A")
+	if !a.Recoverable {
+		t.Errorf("A.recoverable = false, want true (B is live)")
+	}
+	if !slices.Contains(a.Recoverers, "B") {
+		t.Errorf("A.recoverers = %v, want to contain B", a.Recoverers)
+	}
+	// Confirm the field name is present in the raw JSON (contract for callers).
+	if !strings.Contains(out.String(), "\"quorum_lost\"") {
+		t.Errorf("JSON missing quorum_lost field:\n%s", out.String())
+	}
+}
+
+// TestAnnotateMeshRecoveryNilRecordPeerIsNoRecoverer: a fresh peer with no
+// heartbeat record (never wrote primary_for/tertiary_for) contributes no
+// recoverer edge, so a stale supervisor it does not cover stays quorum-lost.
+func TestAnnotateMeshRecoveryNilRecordPeerIsNoRecoverer(t *testing.T) {
+	rows := []supervisorRow{
+		row("A", true, "", ""),
+		{ID: "B", Stale: false, Record: nil}, // fresh but declares no edges
+	}
+	if !annotateMeshRecovery(rows) {
+		t.Fatal("expected quorumLost=true: B declares no primary/tertiary edge to A")
+	}
+	if r := findRow(rows, "A"); r.Recoverable {
+		t.Error("A should be unrecoverable: no peer declares itself its recoverer")
 	}
 }

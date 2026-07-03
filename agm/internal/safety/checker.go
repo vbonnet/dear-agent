@@ -43,11 +43,15 @@ func Check(sessionName string, opts GuardOptions) *CheckResult {
 
 	result := &CheckResult{Safe: true}
 
+	// human_typing is ADVISORY only: it over-captures and must never block a send
+	// (see package doc + internal/tmux/stash.go). Detection still runs so the
+	// signal is visible for telemetry and recovery introspection, but the result
+	// goes into Advisories and never flips Safe. The send path stashes the
+	// composer non-blockingly instead of aborting.
 	if !opts.SkipHumanTyping && !opts.AutonomousMode {
 		if !isHumanTypingCooldownActive(sessionName) {
 			if v := CheckHumanTyping(sessionName, socketPath); v != nil {
-				result.Safe = false
-				result.Violations = append(result.Violations, *v)
+				result.Advisories = append(result.Advisories, *v)
 			} else {
 				recordHumanTypingCooldown(sessionName)
 			}

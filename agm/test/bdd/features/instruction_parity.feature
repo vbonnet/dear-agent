@@ -1,3 +1,4 @@
+# SPEC: internal/instructions/SPEC.md
 Feature: Instruction entrypoint parity
   AGENTS.md is the canonical shared instruction file. Harness-specific
   entrypoints should import it first so Claude Code, Codex CLI, AGY, OpenCode,

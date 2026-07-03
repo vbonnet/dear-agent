@@ -21,7 +21,7 @@ Anthropic API keys, or Claude-specific environment.
 ## Create
 
 ```bash
-agm session new --harness=codex-cli --model=5.4 my-codex-session
+agm session new --harness=codex-cli --model=5.5 my-codex-session
 ```
 
 AGM launches Codex with:
@@ -30,11 +30,25 @@ AGM launches Codex with:
 env -u CLAUDECODE AGM_SESSION_NAME='<session>' codex -m '<model>' -C '<workdir>' -s workspace-write
 ```
 
+When Codex app-server remote control is available, AGM first creates a Codex
+thread through `codex app-server`, sets the Codex thread name to the AGM session
+name, stores that Codex thread id in AGM metadata, and launches the tmux UI with:
+
+```bash
+env -u CLAUDECODE AGM_SESSION_NAME='<session>' codex resume --remote unix:// -m '<model>' -C '<workdir>' -s workspace-write '<codex-thread-id>'
+```
+
+Set `AGM_CODEX_REMOTE_CONTROL=0` to skip this bridge. Set
+`AGM_CODEX_REQUIRE_REMOTE_CONTROL=1` to fail creation instead of falling back to
+plain local Codex CLI when the bridge is unavailable.
+
 Important launch invariants:
 
 - model aliases are resolved through `internal/agent/models.go`
 - `-C <workdir>` pins Codex to the AGM working directory
 - `-s workspace-write` is the default sandbox
+- app-server-backed starts preserve the same thread in Codex remote-control
+  surfaces and in the AGM tmux pane
 - no Claude, Anthropic, Engram, or OpenTelemetry environment is injected
 
 ## Send
@@ -56,9 +70,26 @@ If the tmux session already exists, AGM attaches without sending commands. If
 the tmux session must be recreated, AGM starts Codex with the same launch
 invariants as session creation and waits for the Codex composer to render.
 
-Codex does not support Claude's `--resume <uuid>` conversation recovery or
-runtime permission-mode cycling. AGM stores and resumes the session shell/tmux
-environment, then lets Codex load its own local state.
+For sessions with persisted Codex metadata, AGM resumes the matching Codex
+thread with `codex resume --remote unix:// <codex-thread-id>`. Older imported
+or local-only sessions fall back to the saved-session behavior available from
+the Codex CLI.
+
+Codex does not support Claude runtime permission-mode cycling. AGM stores and
+resumes the session shell/tmux environment, then lets Codex load its own local
+state.
+
+## Reconcile Codex-Originated Threads
+
+Codex threads created outside AGM can be imported into AGM metadata with:
+
+```bash
+agm admin reconcile-codex          # dry-run
+agm admin reconcile-codex --execute
+```
+
+This records AGM metadata only. It does not create tmux sessions, archive Codex
+threads, or delete resources.
 
 ## Models
 
@@ -66,6 +97,8 @@ Native Codex aliases:
 
 | Alias | Full model |
 | --- | --- |
+| `5.5` | `gpt-5.5` |
+| `5.6` | `gpt-5.6` |
 | `5.4` | `gpt-5.4` |
 | `5.4-mini` | `gpt-5.4-mini` |
 | `5.3-codex` | `gpt-5.3-codex` |

@@ -1,3 +1,4 @@
+# SPEC: agm/internal/quotaparity/SPEC.md
 Feature: Quota monitoring parity
   AGM should expose truthful context, cost, and quota monitoring behavior for
   every active harness and every supported model family. Missing native data

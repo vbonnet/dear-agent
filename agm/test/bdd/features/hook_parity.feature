@@ -1,3 +1,4 @@
+# SPEC: internal/hookparity/SPEC.md
 Feature: Hook harness parity
   Active interactive harnesses should receive the same repository guardrails
   through their native hook configuration surfaces.

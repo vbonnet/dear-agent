@@ -76,6 +76,30 @@ func TestResolver_ForcedRoutingWinsOverHeuristic(t *testing.T) {
 	}
 }
 
+func TestResolver_OpenRouterHostedModelFamilies(t *testing.T) {
+	r := NewResolver()
+	cases := []struct {
+		name  string
+		model string
+	}{
+		{"glm", "z-ai/glm-5.2"},
+		{"deepseek", "deepseek/deepseek-v4-pro"},
+		{"nemotron", "nvidia/nemotron-3-ultra"},
+		{"qwen", "qwen/qwen3.6-max"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fam, model, err := r.Resolve(c.model)
+			if err != nil {
+				t.Fatalf("Resolve(%q) returned error: %v", c.model, err)
+			}
+			if fam != "openrouter" || model != c.model {
+				t.Fatalf("Resolve(%q) = (%q,%q), want (openrouter,%q)", c.model, fam, model, c.model)
+			}
+		})
+	}
+}
+
 func TestResolver_UnknownFamilyPrefixIsErrorOnScheme(t *testing.T) {
 	r := NewResolver()
 	if _, _, err := r.Resolve("nope://something"); err == nil {

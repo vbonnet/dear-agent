@@ -186,6 +186,61 @@ agm send msg <target-session> --sender <self> --priority <level> --prompt "<mess
 
 Priority levels: `critical`, `urgent`, `normal`, `background`, `fyi`.
 
+## Permission Model & Mutual Unblock (ALL supervisors)
+
+ADR-002 requires supervisors to keep each other unblocked. Two layers make that
+work — the first stops most prompts from ever appearing, the second clears the
+ones that slip through.
+
+**Layer 1 — pre-approval (a supervisor should almost never see a prompt).**
+Each supervisor is spawned with `--role <orchestrator|overseer|meta-orchestrator>`
+in `--mode=auto`. The `--role` flag resolves an RBAC permission profile whose
+allowlist is written into the session's harness settings at boot, pre-approving
+every command your tick actually runs — `agm send *` (incl. `agm send approve`),
+`agm scan *` (incl. `--cross-check`), `agm session *`, `tmux send-keys *` and the
+git/read tooling. `--mode=auto` means a detached session never waits on an
+interactive approval. Consequence: a correctly-launched supervisor sitting on a
+permission prompt is **not normal** — it means either the action falls outside
+the pre-approved allowlist or the session was launched without its role profile.
+Treat a stuck supervisor as a mesh-level incident, not routine backpressure.
+
+**Layer 2 — mutual unblock (clear the prompts that slip through).** When a peer
+*does* block, a plain `agm send msg` cannot reach it — a permission-blocked
+session is frozen on its prompt and ignores messages. The only channel that
+reaches it is `agm send approve <peer>`, which drives the peer's terminal to
+select "Yes" and submit. Every supervisor runs this on a stale/blocked peer:
+
+```bash
+agm send approve <peer-session>          # clears the visible prompt
+```
+
+- `agm send approve` acts on the *visible* prompt; if no prompt is actually up it
+  exits non-zero (`could not find Yes option`). That is harmless when you are
+  approving speculatively (a peer that looked stuck but wasn't) — **ignore its
+  exit code** in that case.
+- `agm scan --cross-check` is the batch form: it captures every peer supervisor
+  pane, auto-approves the ones whose pending action is RBAC-safe, and reports the
+  rest for you to `agm send approve` manually. The Orchestrator runs it each tick
+  (orchestrator.md Step 5b); the Overseer approves stuck supervisors it finds in
+  its Step 6 health audit.
+
+**The gap this cannot cover — all supervisors stuck at once.** Layer 2 assumes at
+least one supervisor is alive to approve the others. If the whole trio is blocked
+or uninitialized simultaneously (the failure that filed this bead), no peer can
+run `agm send approve` and the mesh deadlocks. `agm watch-stalled` does **not**
+close this gap — its permission-prompt recovery only *alerts* the Orchestrator
+(`alert_orchestrator`), so the alert lands on a dead session. The backstop is an
+**external, supervisor-independent watchdog**: a launchd job running
+`agm scan --loop --cross-check` on a short interval, which auto-approves stuck
+supervisors whether or not any supervisor is alive. Install it with:
+
+```bash
+agm admin install-supervisor-unblock-schedule      # remove: uninstall-...
+```
+
+This is the only permission-recovery path that survives a total-mesh stall; it is
+strongly recommended in any unattended deployment.
+
 ## Handling Escalations (Escalate-To-Supervisor)
 
 Workers escalate questions/decisions they cannot resolve up the spawn chain

@@ -597,7 +597,7 @@ func TestBuildSessionManifestPersistsPermissionPolicy(t *testing.T) {
 	harnessName = "claude-code"
 	modelName = "sonnet"
 
-	m := buildSessionManifest("session-id", "session-name", "/tmp/work", nil)
+	m := buildSessionManifest("session-id", "session-name", "/tmp/work", nil, nil)
 	if m.PermissionPolicy == nil {
 		t.Fatal("manifest missing permission policy")
 	}
