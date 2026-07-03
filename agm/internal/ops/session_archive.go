@@ -14,6 +14,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/gclog"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/mcp"
+	"github.com/vbonnet/dear-agent/agm/internal/sandboxgc"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	inttmux "github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
@@ -312,15 +313,23 @@ func killTmuxAndProcessGroup(m *manifest.Manifest) {
 // Returns true if a sandbox directory was found and removed.
 // Preserves .claude/settings.local.json from the overlay upper layer before
 // removal, as it contains RBAC permission rules that should not be lost.
+//
+// Removal goes through the sandboxgc safety gates (ce-uxju): allowlist path
+// validation, no live process inside, and — after a best-effort unmount — no
+// mount point left inside (deleting through a live overlay mount can destroy
+// the source repo, per ~/.agm/cleanup-runbook.md). The live-session gate is
+// intentionally nil here: the caller archived this session immediately before
+// invoking cleanup. A refused reap keeps the sandbox for the periodic
+// `agm sandbox gc` sweep to retry once the blocker is gone.
 func cleanupSandboxDir(sessionID, mergedPath string) bool {
-	homeDir, err := os.UserHomeDir()
+	base, err := sandboxgc.DefaultBase()
 	if err != nil {
 		slog.Warn("Failed to get home dir for sandbox cleanup", "error", err)
 		return false
 	}
 
-	sandboxDir := filepath.Join(homeDir, ".agm", "sandboxes", sessionID)
-	if _, err := os.Stat(sandboxDir); os.IsNotExist(err) {
+	sandboxDir := filepath.Join(base, sessionID)
+	if _, err := os.Lstat(sandboxDir); os.IsNotExist(err) {
 		return false
 	}
 
@@ -328,15 +337,18 @@ func cleanupSandboxDir(sessionID, mergedPath string) bool {
 	// This file contains RBAC permission rules written by ConfigureProjectPermissions.
 	preserveSettingsFromUpper(sandboxDir)
 
-	// Unmount merged path if known
+	// Unmount merged path if known (checker.Reap also unmounts <dir>/merged,
+	// but mergedPath from the manifest may differ from the default layout).
 	if mergedPath != "" {
 		if err := unmountBestEffort(mergedPath); err != nil {
 			slog.Warn("Failed to unmount sandbox", "path", mergedPath, "error", err)
 		}
 	}
 
-	if err := os.RemoveAll(sandboxDir); err != nil {
-		slog.Warn("Failed to remove sandbox directory", "path", sandboxDir, "error", err)
+	checker := sandboxgc.NewChecker(base, nil)
+	if err := checker.Reap(sandboxDir); err != nil {
+		slog.Warn("Sandbox not removed during archive cleanup — periodic sandbox gc will retry",
+			"session", sessionID, "path", sandboxDir, "error", err)
 		return false
 	}
 
@@ -406,16 +418,13 @@ func CleanupOrphanedSandboxes(ctx *OpContext, req *CleanupOrphanedSandboxesReque
 		return nil, fmt.Errorf("failed to read sandboxes directory: %w", err)
 	}
 
-	// Build set of active (non-archived) session IDs
-	sessions, err := ctx.Storage.ListSessions(nil)
+	// Build set of active (non-archived) session IDs. Fails closed on storage
+	// errors and on an empty store — with no live-ID set, every sandbox would
+	// look orphaned.
+	liveIDs := liveSessionIDsFromStorage(ctx)
+	live, err := liveIDs()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sessions: %w", err)
-	}
-	activeIDs := make(map[string]bool, len(sessions))
-	for _, s := range sessions {
-		if s.Lifecycle != manifest.LifecycleArchived {
-			activeIDs[s.SessionID] = true
-		}
 	}
 
 	result := &CleanupOrphanedSandboxesResult{
@@ -423,6 +432,7 @@ func CleanupOrphanedSandboxes(ctx *OpContext, req *CleanupOrphanedSandboxesReque
 		DryRun:    req.DryRun,
 	}
 
+	checker := sandboxgc.NewChecker(sandboxBase, liveIDs)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -430,7 +440,7 @@ func CleanupOrphanedSandboxes(ctx *OpContext, req *CleanupOrphanedSandboxesReque
 		result.Scanned++
 		sessionID := entry.Name()
 
-		if activeIDs[sessionID] {
+		if live[sessionID] {
 			continue
 		}
 
@@ -442,14 +452,10 @@ func CleanupOrphanedSandboxes(ctx *OpContext, req *CleanupOrphanedSandboxesReque
 			continue
 		}
 
-		// Unmount merged path before removal
-		mergedPath := filepath.Join(sandboxDir, "merged")
-		if err := unmountBestEffort(mergedPath); err != nil {
-			slog.Warn("Failed to unmount orphaned sandbox", "path", mergedPath, "error", err)
-		}
-
-		if err := os.RemoveAll(sandboxDir); err != nil {
-			slog.Warn("Failed to remove orphaned sandbox", "path", sandboxDir, "error", err)
+		// Reap through the sandboxgc safety gates (ce-uxju): path validation,
+		// no live process inside, and no mount left inside after unmount.
+		if err := checker.Reap(sandboxDir); err != nil {
+			slog.Warn("Orphaned sandbox not removed", "path", sandboxDir, "error", err)
 			result.Errors++
 			continue
 		}
