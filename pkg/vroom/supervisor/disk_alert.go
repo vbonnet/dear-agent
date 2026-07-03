@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Disk-free + inode alerting (ce-6fel).
@@ -157,8 +158,16 @@ type AGMDiskAlertNotifier struct {
 	RunCommand func(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
+// diskAlertNotifyTimeout bounds one `agm send msg` delivery: under the disk
+// pressure being alerted on, a shelled-out send can stall on I/O, and a hung
+// notifier must not block the Overseer's tick loop.
+const diskAlertNotifyTimeout = 30 * time.Second
+
 // Notify implements DiskAlertNotifier.
 func (n *AGMDiskAlertNotifier) Notify(ctx context.Context, to Role, level PressureLevel, _ ResourceSnapshot, summary string) error {
+	ctx, cancel := context.WithTimeout(ctx, diskAlertNotifyTimeout)
+	defer cancel()
+
 	binary := n.Binary
 	if binary == "" {
 		binary = "agm"

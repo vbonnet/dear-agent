@@ -63,10 +63,12 @@ func main() {
 
 // probeTimeout bounds the statfs snapshot; sweepTimeout bounds the worktree
 // sweep, which shells out to gh per worktree and can legitimately take minutes
-// on a husk-heavy machine.
+// on a husk-heavy machine; trailTimeout bounds the alarm append, which can
+// stall when the disk being alarmed about is already exhausted.
 const (
 	probeTimeout = 15 * time.Second
 	sweepTimeout = 10 * time.Minute
+	trailTimeout = 30 * time.Second
 )
 
 type config struct {
@@ -106,11 +108,7 @@ func run(args []string, out io.Writer) (int, error) {
 	cfg.thresholds.FreeWarnBytes = uint64(freeWarnGB * supervisor.GiB)
 	cfg.thresholds.FreeCriticalBytes = uint64(freeCriticalGB * supervisor.GiB)
 
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-	probe := supervisor.NewSysResourceProbe()
-	probe.DiskPath = cfg.path
-	snap, err := probe.Snapshot(ctx)
-	cancel()
+	snap, err := takeSnapshot(cfg.path)
 	if err != nil {
 		return 2, fmt.Errorf("snapshot: %w", err)
 	}
@@ -130,9 +128,13 @@ func run(args []string, out io.Writer) (int, error) {
 
 	// Logging the alarm to the trail is best-effort: a trail write failure is a
 	// warning, never a reason to suppress the breach exit code — and on a truly
-	// full disk the append will fail while the alarm must still exit 1.
+	// full disk the append will fail while the alarm must still exit 1. The
+	// write is timeout-bounded because I/O on an exhausted disk can stall.
 	if breached {
-		if lerr := logAlarm(context.Background(), cfg, snap, level, reasons, remediation); lerr != nil {
+		logCtx, logCancel := context.WithTimeout(context.Background(), trailTimeout)
+		lerr := logAlarm(logCtx, cfg, snap, level, reasons, remediation)
+		logCancel()
+		if lerr != nil {
 			fmt.Fprintf(os.Stderr, "disk-watchdog: warning: trail append failed: %v\n", lerr)
 		}
 	}
@@ -149,6 +151,16 @@ func run(args []string, out io.Writer) (int, error) {
 		return 1, nil
 	}
 	return 0, nil
+}
+
+// takeSnapshot samples the filesystem under a bounded context; defer cancel()
+// in its own scope guarantees cleanup on every return path.
+func takeSnapshot(path string) (supervisor.ResourceSnapshot, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	probe := supervisor.NewSysResourceProbe()
+	probe.DiskPath = path
+	return probe.Snapshot(ctx)
 }
 
 func defaultTrailPath() string {
@@ -179,9 +191,13 @@ func sweepMergedWorktrees(ctx context.Context, cfg config) (*sweepResult, error)
 	run := cfg.runCommand
 	if run == nil {
 		run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			cmd := exec.CommandContext(ctx, name, args...)
+			// The sweep shells out to git/gh; with no TTY a credential prompt
+			// would hang the launchd job until the timeout, so forbid prompts.
+			cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 			// Capture stdout only; the sweep logs progress to stderr, which we
 			// intentionally drop so JSON parsing sees clean output.
-			return exec.CommandContext(ctx, name, args...).Output()
+			return cmd.Output()
 		}
 	}
 
