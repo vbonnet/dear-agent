@@ -324,7 +324,7 @@ func findRow(rows []supervisorRow, id string) supervisorRow {
 			return r
 		}
 	}
-	return supervisorRow{}
+	panic(fmt.Sprintf("supervisor row %q not found", id))
 }
 
 // TestAnnotateMeshRecoveryBothStale is the ce-2qbx incident: meta-o is

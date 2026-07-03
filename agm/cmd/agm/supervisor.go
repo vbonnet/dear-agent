@@ -566,7 +566,7 @@ func annotateMeshRecovery(rows []supervisorRow) bool {
 		if p := r.Record.PrimaryFor; p != "" {
 			recoverersOf[p] = append(recoverersOf[p], r.ID)
 		}
-		if tf := r.Record.TertiaryFor; tf != "" {
+		if tf := r.Record.TertiaryFor; tf != "" && tf != r.Record.PrimaryFor {
 			recoverersOf[tf] = append(recoverersOf[tf], r.ID)
 		}
 	}
