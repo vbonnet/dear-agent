@@ -10,7 +10,7 @@ MCP configs and IDE/browser extensions. Companion to the archived audit in
 
 Builds on / aligns with:
 
-- [ADR-011: DEAR Audit Subsystem](ADR-011-dear-audit-subsystem.md) — the
+- [ADR-011: Scheduled Repository Audit Subsystem](ADR-011-dear-audit-subsystem.md) — the
   catalog-curation follow-up (see "Follow-ups") is a candidate Audit-phase
   signal source.
 - `docs/deepsec.md` — source-code scanner this complements but does not
@@ -106,7 +106,7 @@ Shipping a catalog now is premature — the project is v0.1.x, days old,
 and community catalogs haven't coalesced. The audit doc §2.3
 recommended a narrow, in-repo catalog seeded from
 `weekly-security-audit` findings, one PR per added entry. That work is
-left for a follow-up ADR or DEAR Define artifact.
+left for a follow-up ADR or Process DEAR Define artifact.
 
 ### D5. No CI integration
 
@@ -142,7 +142,7 @@ workflow.
 
 - **Catalog never lands.** The diff-vs-yesterday delta is still useful
   on its own, but most of the value comes from catalog matching. Flag
-  this in the next DEAR Audit pass.
+  this in the next scheduled repository audit pass.
 - **Schedule conflict.** 04:00 local was chosen as low-activity; if the
   user is in a different timezone or works overnight, edit the plist's
   `StartCalendarInterval` and `launchctl kickstart`. Documented.

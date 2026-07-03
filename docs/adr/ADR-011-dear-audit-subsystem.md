@@ -2,13 +2,13 @@
 
 **Status**: Accepted (2026-06-16; was Proposed 2026-05-03)
 
-> Filename keeps `dear-audit-subsystem` for inbound-link stability;
-> the canonical title is "Scheduled Repository Audit Subsystem" so the
-> "DEAR" ambiguity ([/CONTEXT.md](../../CONTEXT.md) § Known Terminology
-> Collisions, 2b) does not propagate. Read "DEAR" below as the
-> workflow-engine *code* lifecycle (Define / **Enforce** / Audit /
-> **Resolve & Refine**), not the *process* retrospective (Define /
-> **Execute** / Audit / **Retro**).
+> Filename keeps `dear-audit-subsystem` for inbound-link stability. The
+> canonical title is "Scheduled Repository Audit Subsystem" so the old
+> ambiguity does not propagate. Per
+> [ADR-035](ADR-035-dear-terminology-disambiguation.md), this ADR concerns the
+> workflow-engine lifecycle (Define / **Enforce** / Audit /
+> **Resolve & Refine**), not Process DEAR (Define / **Execute** / Audit /
+> **Retro**).
 
 `pkg/workflow.Hooks.OnAudit` ([ADR-010](ADR-010-workflow-engine-architecture.md)
 §D3) covers per-run audit — what happened during one workflow. It does

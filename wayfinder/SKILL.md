@@ -107,7 +107,7 @@ wayfinder-start "<concise-project-description>"
 
 ## Phase Context Management
 
-Each phase receives context from its dependencies via a **dependency graph** (not linear loading). The graph is configured in `core/cortex/config/phase-dependencies.yaml`:
+Each phase receives context from its dependencies via a **dependency graph** (not linear loading). The graph is implemented by the Go `phasegraph` and `phaseisolation` packages:
 
 - **full**: Load complete prior-phase artifact
 - **summary**: Load 100-200 token summary
@@ -211,7 +211,7 @@ See ADR-005 (revised 2026-03-24) for details.
 
 ## Documentation
 
-- Phase dependencies: `core/cortex/config/phase-dependencies.yaml`
+- Phase dependencies: `wayfinder/cmd/wayfinder-session/internal/phasegraph/`
 - ADRs: `docs/wayfinder/ADR-001-phase-consolidation.md`, `ADR-002-build-loop-tdd-enforcement.md`
-- Go packages: `core/cortex/cmd/wayfinder-session/internal/{phasegraph,lintcontext,telemetry}/`
-- TypeScript: `core/cortex/lib/{phase-definitions,context-compiler}.ts`
+- Go packages: `wayfinder/cmd/wayfinder-session/internal/{phasegraph,lintcontext,telemetry}/` and `wayfinder/internal/phaseisolation/`
+- Shell gates: `wayfinder/lib/*-gate-check.sh`

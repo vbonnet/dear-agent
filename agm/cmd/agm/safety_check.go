@@ -29,12 +29,15 @@ var safetyCheckCmd = &cobra.Command{
 	Short: "Check session safety guards before interaction",
 	Long: `Check all safety guards for a session before sending messages or performing actions.
 
-Returns exit code 0 if safe, exit code 1 if any guards are violated.
+Returns exit code 0 if safe, exit code 1 if any BLOCKING guard is violated.
 
 Guards checked:
-  • human_typing      - Unsent text in the prompt line
-  • session_uninit    - Claude hasn't started or is on welcome screen
-  • claude_mid_resp   - Claude is actively generating a response
+  • human_typing      - Unsent text in the prompt line (ADVISORY, non-blocking)
+  • session_uninit    - Claude hasn't started or is on welcome screen (blocking)
+  • claude_mid_resp   - Claude is actively generating a response (blocking)
+
+human_typing is advisory only: it over-captures and never fails the check or
+blocks a send. It is reported under "advisories" so tooling can still see it.
 
 Examples:
   # Check all guards (human-readable output)
@@ -90,6 +93,11 @@ func runSafetyCheck(cmd *cobra.Command, args []string) error {
 			fmt.Printf("✗ Session '%s' has safety violations:\n\n", sessionName)
 			fmt.Print(result.Error())
 			fmt.Printf("To bypass: use --force flag on the command, or --skip-* flags on safety check\n")
+		}
+		// Advisories (e.g. human_typing) never fail the check but are shown so the
+		// operator knows the send path will stash-and-proceed rather than block.
+		for _, a := range result.Advisories {
+			fmt.Printf("\nⓘ advisory %s: %s (non-blocking — send stashes and proceeds)\n", a.Guard, a.Message)
 		}
 	}
 

@@ -102,7 +102,8 @@ type Runner struct {
 	// DefaultWorkingDir.
 	WorkflowDir string
 
-	// Hooks is the DEAR (Define/Enforce/Audit/Resolve) extension surface.
+	// Hooks is the workflow lifecycle extension surface
+	// (Define/Enforce/Audit/Resolve).
 	// Nil disables the hooks; the runner makes no calls.
 	Hooks *Hooks
 
@@ -389,11 +390,11 @@ func (r *Runner) markSkippedDownstream(ctx context.Context, runID string, all []
 	now := time.Now()
 	for _, id := range remaining {
 		_ = r.recorder().UpsertNode(ctx, NodeRecord{
-			RunID:       runID,
-			NodeID:      id,
-			State:       NodeStateSkipped,
-			FinishedAt:  now,
-			Error:       reason,
+			RunID:      runID,
+			NodeID:     id,
+			State:      NodeStateSkipped,
+			FinishedAt: now,
+			Error:      reason,
 		})
 		_ = r.emitAudit(ctx, AuditEvent{
 			RunID:      runID,

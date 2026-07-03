@@ -32,3 +32,7 @@ the same for Claude Code, Codex CLI, AGY, and OpenCode.
 **ENG-07** When AGM bridges error memory, the system shall expose the bridge through ops-layer contracts rather than harness-local state.
 
 **ENG-08** When an active harness or supported model family is added, the system shall require Engram parity tests before the addition is considered supported.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/engram_parity.feature`

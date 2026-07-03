@@ -6,10 +6,11 @@ import (
 	"time"
 )
 
-// Hooks is the DEAR (Define/Enforce/Audit/Resolve) extension surface for the
-// workflow runner. The four hooks line up one-to-one with the substrate
+// Hooks is the workflow lifecycle extension surface for the workflow runner:
+// Define, Enforce, Audit, and Resolve. The four hooks line up with the substrate
 // properties from ADR-009: callers plug in their own logic to participate in
-// each phase without forking the runner.
+// each phase without forking the runner. Do not call this "DEAR" in docs; ADR-035
+// reserves that acronym for the process-level Define/Execute/Audit/Retro loop.
 //
 //   - OnDefine fires once per run, after Validate has accepted the workflow
 //     and before any node executes. Use it to inspect or annotate the

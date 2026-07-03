@@ -41,8 +41,7 @@ assert "I'm held to the no-overfit rule" reads `gracefulexit.Guardrail`. A
 drift between banner, criterion, and downstream tools would silently weaken
 the contract.
 
-> **Terminology note.** This ADR extends the workflow-engine *code* DEAR
-> lifecycle (Define / **Enforce** / Audit / **Resolve & Refine**), distinct
-> from the canonical *process* DEAR (Define / **Execute** / Audit /
-> **Retro**); see [/CONTEXT.md](../../CONTEXT.md) § Known Terminology
-> Collisions (2b).
+> **Terminology note.** This ADR extends the workflow-engine lifecycle hooks
+> (Define / **Enforce** / Audit / **Resolve & Refine**), distinct
+> from canonical Process DEAR (Define / **Execute** / Audit /
+> **Retro**); see [ADR-035](ADR-035-dear-terminology-disambiguation.md).

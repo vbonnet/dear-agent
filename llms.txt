@@ -10,9 +10,11 @@ dear-agent is a meta-harness for AI coding agents. It provides the session
 lifecycle, sandbox isolation, persistent memory, and multi-agent orchestration
 that production-grade AI-assisted development requires.
 
-The core philosophy is DEAR: Define, Enforce, Audit, Resolve. Every rule is
-written down, enforced automatically, audited continuously, and when things
-break, we fix the infrastructure — not the agent.
+The core philosophy is Process DEAR: Define, Execute, Audit, Retro. Every task
+states its exit conditions, does the work, verifies the result, and captures
+the prevention when things break. The workflow engine has a separate
+Define/Enforce/Audit/Resolve hook lifecycle; see
+docs/adr/ADR-035-dear-terminology-disambiguation.md.
 
 Supported AI CLIs: Claude Code, Gemini CLI, Codex CLI, OpenCode CLI — all
 behind a unified adapter interface.

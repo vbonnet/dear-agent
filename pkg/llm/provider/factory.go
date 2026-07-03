@@ -64,7 +64,7 @@ func NewFactory() *Factory {
 //   - Neither available → error
 //
 // For "openrouter":
-//   - OpenRouter API key available → OpenRouterProvider (future)
+//   - OpenRouter API key available → OpenRouterProvider
 //   - No key → error
 //
 // For "ollama" or "local":
@@ -176,11 +176,10 @@ func (f *Factory) newGeminiProvider(authMethod auth.AuthMethod, _ string) (Provi
 }
 
 // newOpenRouterProvider creates OpenRouter provider based on auth hierarchy.
-func (f *Factory) newOpenRouterProvider(authMethod auth.AuthMethod, _ string) (Provider, error) {
+func (f *Factory) newOpenRouterProvider(authMethod auth.AuthMethod, model string) (Provider, error) {
 	switch authMethod {
 	case auth.AuthAPIKey:
-		// TODO: Implement OpenRouterProvider
-		return nil, fmt.Errorf("OpenRouter provider not yet implemented")
+		return NewOpenRouterProvider(OpenRouterConfig{Model: model})
 
 	case auth.AuthNone:
 		return nil, fmt.Errorf("no authentication available for OpenRouter (need OPENROUTER_API_KEY)")

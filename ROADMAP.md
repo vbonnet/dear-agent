@@ -38,7 +38,7 @@ landed on `engram-research/main` on 2026-05-02:
 
 | Doc | Angle | Path on `engram-research` |
 |---|---|---|
-| `WORKFLOW-ENGINE-RESEARCH-CLAUDE.md` | Substrate / DEAR alignment | `/` |
+| `WORKFLOW-ENGINE-RESEARCH-CLAUDE.md` | Substrate / workflow lifecycle alignment | `/` |
 | `WORKFLOW-ENGINE-RESEARCH-ENGINEERING.md` | Schemas, APIs, schema, tickets | `/` |
 | `WORKFLOW-ENGINE-RESEARCH-ECOSYSTEM.md` | Framework comparison, DX | `/` |
 | `WORKFLOW-ENGINE-SYNTHESIS.md` | Unified architecture + 6-phase plan | `/` |
@@ -152,7 +152,7 @@ ship incrementally without breaking anything.
 |---|------|------|--------|----------|
 | 0 | SQLite + audit_events (MVS pt. 1) | 4 weeks | `done (#38)` | [BACKLOG §0](docs/workflow-engine/BACKLOG.md#phase-0--sqlite--audit_events-mvs-pt-1) |
 | 1 | Roles + budget (MVS pt. 2) | 3 weeks | `done` | [BACKLOG §1](docs/workflow-engine/BACKLOG.md#phase-1--roles--budget-mvs-pt-2) |
-| 2 | DEAR hooks + HITL + exit_gate + outputs[] | 4 weeks | `done (#40)` | [BACKLOG §2](docs/workflow-engine/BACKLOG.md#phase-2--dear-hooks--hitl--exit_gate--outputs) |
+| 2 | Workflow lifecycle hooks + HITL + exit_gate + outputs[] | 4 weeks | `done (#40)` | [BACKLOG §2](docs/workflow-engine/BACKLOG.md#phase-2--workflow-lifecycle-hooks--hitl--exit_gate--outputs) |
 | 3 | FetchSource / AddSource | 2 weeks | `done` | [BACKLOG §3](docs/workflow-engine/BACKLOG.md#phase-3--fetchsource--addsource) |
 | 4 | Migration + `workflow dev` | 4 weeks | `done` | [BACKLOG §4](docs/workflow-engine/BACKLOG.md#phase-4--migration--workflow-dev) |
 | 5 | Adapters + visual inspector + `kind: spawn` | open-ended | `done` (5.3 ships as stub) | [BACKLOG §5](docs/workflow-engine/BACKLOG.md#phase-5--adapters--visual-inspector--kind-spawn) |
@@ -212,14 +212,14 @@ the role to a model tier. Budgets are enforced per-node and per-run.
 passes on all existing workflows after a one-time codemod. Switching
 Opus 4.7 → Opus 5.0 is a one-line edit to `roles.yaml`.
 
-### Phase 2 — DEAR hooks + HITL + exit_gate + outputs[]
+### Phase 2 — Workflow lifecycle hooks + HITL + exit_gate + outputs[]
 
 **Goal:** the engine becomes substrate-grade — bounded permissions,
 human-in-the-loop gates, declared outputs with durability tiers.
 
 **Deliverables:**
 
-- DEAR hook surface (`OnDefine`, `OnEnforce`, `OnAudit`, `OnResolve`).
+- Workflow lifecycle hook surface (`OnDefine`, `OnEnforce`, `OnAudit`, `OnResolve`).
 - `awaiting_hitl` state; approver_role enforcement; timeout policies.
 - Exit gate evaluator: 5 kinds (bash, regex_match, json_schema, test_cmd,
   confidence_score).
@@ -299,11 +299,11 @@ verification backend plug in without dear-agent owning the verifier.
 |----|----------|-------|------|
 | 6.1 | HIGH | Cross-model adversarial review in Audit | `pkg/audit` + `pkg/llm/router` |
 | 6.2 | HIGH | Comprehensibility check (`complexity`) — `done` (7483251d6) | `pkg/audit/checks/complexity.go` |
-| 6.3 | HIGH | Confidence scoring per DEAR phase | `pkg/audit` + `pkg/workflow` exit gates |
+| 6.3 | HIGH | Confidence scoring per workflow lifecycle phase | `pkg/audit` + `pkg/workflow` exit gates |
 | 6.4 | MED  | Constitutional designer mode (schema-validated invariants) | `pkg/workflow` Define hooks — **in-flight** |
 | 6.5 | MED  | Trust inversion tracking (verified-vs-casual review) | `pkg/audit` finding metadata — **in-flight** (verified_at seam) |
 | 6.6 | MED  | External verification backend interface (`VerifierProvider`) | `pkg/plugin` + `pkg/audit` (in-flight) |
-| 6.7 | LOW  | A/B model testing per DEAR phase | `pkg/workflow/roles` + bench |
+| 6.7 | LOW  | A/B model testing per workflow lifecycle phase | `pkg/workflow/roles` + bench |
 
 **6.1 — Cross-model adversarial review in Audit (HIGH).** When a node's
 `role` resolves to a model in family X, the Audit phase should be able to
@@ -322,7 +322,7 @@ function above a configurable threshold (default 15). Recommended
 cadence is monthly per ADR-011, but the operator may promote it in
 `.dear-agent.yml`.
 
-**6.3 — Confidence scoring per DEAR phase (HIGH).** Today, exit gates
+**6.3 — Confidence scoring per workflow lifecycle phase (HIGH).** Today, exit gates
 *validate* a confidence field on outputs but no phase produces one. Wire
 each phase to emit a confidence number into `audit_events.payload`:
 compile = binary, tests = coverage %, comprehensibility = 1 − (max_cc /
@@ -348,7 +348,7 @@ Adds a `VerifierProvider` interface to `pkg/plugin` (`Verify(ctx, target)
 ([]Finding, error)`) and lets Audit dispatch to all registered providers.
 Mythos and similar tools plug in here.
 
-**6.7 — A/B model testing per DEAR phase (LOW).** Connects to the AGM
+**6.7 — A/B model testing per workflow lifecycle phase (LOW).** Connects to the AGM
 routing vision: run a task through {role=implementer-A, role=implementer-B}
 in parallel, score the outputs, write the result to `bench/` so the
 registry can be tuned per-phase. Skeleton lives in `internal/benchmark`;
