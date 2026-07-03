@@ -14,6 +14,32 @@ type ClientInfo struct {
 	PID         int
 }
 
+// LivenessInfo is the harness-process liveness verdict for a tmux session
+// (ce-axsr). `tmux has-session` alone is false-green: the session keeps
+// existing after the harness exits and the pane falls back to a shell.
+type LivenessInfo struct {
+	// SessionExists reports whether the tmux session was found at all.
+	SessionExists bool
+	// HarnessAlive reports whether a harness process (claude, codex, agy,
+	// node, …) is running in a pane's descendant process tree.
+	HarnessAlive bool
+	// ZombieWriter reports that no harness is alive but an agm process is
+	// still in the pane tree — the ce-qkf7 orphaned-heartbeat-writer mode.
+	ZombieWriter bool
+	// Evidence summarizes the pane's descendant process names.
+	Evidence string
+}
+
+// HarnessLivenessChecker is an optional capability a TmuxInterface
+// implementation can provide: proving (not assuming) that a harness process
+// runs inside the session. Callers discover it by type assertion so existing
+// mocks keep compiling.
+type HarnessLivenessChecker interface {
+	// HarnessLiveness scans the session's pane process tree for a live
+	// harness process.
+	HarnessLiveness(sessionName string) (LivenessInfo, error)
+}
+
 // TmuxInterface provides an abstraction for tmux operations
 // This allows mocking tmux in tests without requiring real tmux to be installed
 type TmuxInterface interface {

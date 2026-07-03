@@ -28,6 +28,9 @@ type StatusSummary struct {
 	Active   int `json:"active"`
 	Stopped  int `json:"stopped"`
 	Archived int `json:"archived"`
+	// Zombie counts sessions whose tmux session exists but whose harness
+	// process is provably dead (ce-axsr) — they are NOT active.
+	Zombie int `json:"zombie,omitempty"`
 }
 
 // GetStatus returns the live status of all sessions.
@@ -69,6 +72,8 @@ func GetStatus(ctx *OpContext, req *GetStatusRequest) (*GetStatusResult, error) 
 			summary.Stopped++
 		case "archived":
 			summary.Archived++
+		case "zombie":
+			summary.Zombie++
 		}
 	}
 

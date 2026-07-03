@@ -69,6 +69,36 @@ func (m *mockTmux) SendKeys(session, keys string) error {
 	return nil
 }
 
+// mockTmuxWithLiveness wraps mockTmux with the optional
+// session.HarnessLivenessChecker capability (ce-axsr). Plain mockTmux
+// deliberately does NOT implement it, so existing tests exercise the
+// capability-absent fallback path.
+type mockTmuxWithLiveness struct {
+	*mockTmux
+	liveness    map[string]session.LivenessInfo
+	livenessErr error
+}
+
+func (m *mockTmuxWithLiveness) HarnessLiveness(name string) (session.LivenessInfo, error) {
+	if m.livenessErr != nil {
+		return session.LivenessInfo{}, m.livenessErr
+	}
+	return m.liveness[name], nil
+}
+
+// testCtxWithLiveness creates an OpContext whose tmux backend can prove
+// harness-process liveness.
+func testCtxWithLiveness(sessions []*manifest.Manifest, tm *mockTmuxWithLiveness) *OpContext {
+	mock := dolt.NewMockAdapter()
+	for _, s := range sessions {
+		_ = mock.CreateSession(s)
+	}
+	return &OpContext{
+		Storage: mock,
+		Tmux:    tm,
+	}
+}
+
 // testCtx creates an OpContext with mock storage and tmux.
 func testCtx(sessions []*manifest.Manifest, tmuxSessions ...string) *OpContext {
 	mock := dolt.NewMockAdapter()

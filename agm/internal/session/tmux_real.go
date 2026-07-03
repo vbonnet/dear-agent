@@ -53,6 +53,21 @@ func (t *RealTmux) SendKeys(session, keys string) error {
 	return tmux.SendCommand(session, keys)
 }
 
+// HarnessLiveness scans the session's pane process tree for a live harness
+// process (ce-axsr). Implements HarnessLivenessChecker.
+func (t *RealTmux) HarnessLiveness(sessionName string) (LivenessInfo, error) {
+	pl, err := tmux.CheckPaneLiveness(sessionName, tmux.GetSocketPath())
+	if err != nil {
+		return LivenessInfo{}, err
+	}
+	return LivenessInfo{
+		SessionExists: pl.SessionExists,
+		HarnessAlive:  pl.HarnessAlive,
+		ZombieWriter:  pl.ZombieWriter,
+		Evidence:      pl.Evidence,
+	}, nil
+}
+
 // ListClients returns all clients attached to a specific session
 func (t *RealTmux) ListClients(sessionName string) ([]ClientInfo, error) {
 	tmuxClients, err := tmux.ListClients(sessionName)
