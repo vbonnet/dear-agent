@@ -527,6 +527,9 @@ func (s *SQLiteStore) ListProposals(ctx context.Context, filter ProposalFilter) 
 		}
 		out = append(out, p)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("audit: ListProposals rows: %w", err)
+	}
 	return out, nil
 }
 
