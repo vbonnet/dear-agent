@@ -162,12 +162,15 @@ func detectHumanTyping(paneContent string) *Violation {
 
 // --- Session Uninitialized Guard ---
 
-func isHarnessProcessRunning(sessionName, socketPath, processName string) bool {
+func isHarnessProcessRunning(sessionName, socketPath string, processNames ...string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-t", sessionName, "-F", "#{pane_pid}")
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return false
+	}
 	if err != nil {
 		return false
 	}
@@ -178,6 +181,9 @@ func isHarnessProcessRunning(sessionName, socketPath, processName string) bool {
 
 	psCmd := exec.CommandContext(ctx, "ps", "-o", "ppid=", "-o", "comm=", "-ax")
 	psOut, psErr := psCmd.Output()
+	if ctx.Err() != nil {
+		return false
+	}
 	if psErr != nil {
 		return false
 	}
@@ -188,7 +194,7 @@ func isHarnessProcessRunning(sessionName, socketPath, processName string) bool {
 			ppid := fields[0]
 			comm := fields[1]
 			baseComm := filepath.Base(comm)
-			if ppid == panePid && (baseComm == processName || comm == processName) {
+			if ppid == panePid && (slices.Contains(processNames, baseComm) || slices.Contains(processNames, comm)) {
 				return true
 			}
 		}
@@ -211,7 +217,7 @@ func CheckSessionUninitialized(sessionName, socketPath, harness string) *Violati
 			codexRunning = true
 		}
 		if !codexRunning {
-			codexRunning = isHarnessProcessRunning(sessionName, socketPath, "codex") || isHarnessProcessRunning(sessionName, socketPath, "node")
+			codexRunning = isHarnessProcessRunning(sessionName, socketPath, "codex", "node")
 		}
 		if !codexRunning {
 			return &Violation{
