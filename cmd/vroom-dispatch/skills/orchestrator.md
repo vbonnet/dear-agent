@@ -183,7 +183,7 @@ Identify sessions whose names start with `worker-` — these are your
 dispatched workers. Note which are active vs. archived/done. (The Step 6 tool
 also reads this list for dedup; you inspect it here for the monitoring in Step 7.)
 
-#### Step 5b: Cross-check peer supervisors (tmux ground truth + auto-unblock)
+### Step 5b: Cross-check peer supervisors (tmux ground truth + auto-unblock)
 
 `agm session list` and heartbeats can both **lie** about a stuck peer: a
 supervisor blocked on a permission prompt still lists as `active`, and its

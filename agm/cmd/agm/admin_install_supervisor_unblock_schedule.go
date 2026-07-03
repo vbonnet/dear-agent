@@ -1,17 +1,23 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
 
 const supervisorUnblockPlistLabel = "com.dear-agent.supervisor-unblock"
 const supervisorUnblockPlistFile = "schedules/com.dear-agent.supervisor-unblock.plist"
+
+// launchctlTimeout bounds each launchctl subprocess call; load/unload of a
+// local plist is near-instant, so a hang past this means launchd is wedged.
+const launchctlTimeout = 10 * time.Second
 
 var supervisorUnblockWorkspace string
 
@@ -81,7 +87,7 @@ func renderSupervisorUnblockPlist(homeDir, agmBin, workspace string) (string, er
 	return content, nil
 }
 
-func runInstallSupervisorUnblockSchedule(_ *cobra.Command, _ []string) error {
+func runInstallSupervisorUnblockSchedule(cmd *cobra.Command, _ []string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("get home dir: %w", err)
@@ -120,9 +126,16 @@ func runInstallSupervisorUnblockSchedule(_ *cobra.Command, _ []string) error {
 	}
 	fmt.Printf("✓ Installed: %s\n", dest)
 
-	// Load the job. Unload first in case an older version is running.
-	_ = exec.Command("launchctl", "unload", dest).Run()                                   //#nosec G204 -- controlled path
-	if out, err := exec.Command("launchctl", "load", dest).CombinedOutput(); err != nil { //#nosec G204
+	ctx, cancel := context.WithTimeout(cmd.Context(), launchctlTimeout)
+	defer cancel()
+
+	// Load the job. Unload first in case an older version is running. Unload
+	// failure is expected on first install (no older job loaded), so it is
+	// reported but never fatal.
+	if err := exec.CommandContext(ctx, "launchctl", "unload", dest).Run(); err != nil { //#nosec G204 -- controlled path
+		fmt.Printf("  (no previous job unloaded: %v)\n", err)
+	}
+	if out, err := exec.CommandContext(ctx, "launchctl", "load", dest).CombinedOutput(); err != nil { //#nosec G204
 		fmt.Printf("⚠ launchctl load failed (%v): %s\n", err, out)
 		fmt.Println("  The plist was written; load it manually with:")
 		fmt.Printf("  launchctl load %s\n", dest)
@@ -138,7 +151,7 @@ func runInstallSupervisorUnblockSchedule(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func runUninstallSupervisorUnblockSchedule(_ *cobra.Command, _ []string) error {
+func runUninstallSupervisorUnblockSchedule(cmd *cobra.Command, _ []string) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("get home dir: %w", err)
@@ -146,7 +159,10 @@ func runUninstallSupervisorUnblockSchedule(_ *cobra.Command, _ []string) error {
 
 	dest := supervisorUnblockPlistPath(homeDir)
 
-	if out, err := exec.Command("launchctl", "unload", dest).CombinedOutput(); err != nil { //#nosec G204
+	ctx, cancel := context.WithTimeout(cmd.Context(), launchctlTimeout)
+	defer cancel()
+
+	if out, err := exec.CommandContext(ctx, "launchctl", "unload", dest).CombinedOutput(); err != nil { //#nosec G204
 		fmt.Printf("⚠ launchctl unload: %v: %s\n", err, out)
 	} else {
 		fmt.Printf("✓ Unloaded: %s\n", supervisorUnblockPlistLabel)
