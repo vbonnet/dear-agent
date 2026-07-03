@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for the periodic sandbox sweep (ce-uxju).
+
+  Runs `agm sandbox gc --reap --json` hourly. Each tick walks
+  ~/.agm/sandboxes and reaps sandbox dirs that provably belong to no live
+  session. On 2026-07-03 the sandbox dir grew to 2.3T across 541 dirs and
+  crashed the host twice; this job is the periodic backstop behind the
+  archive-time reap in `agm session archive` / `agm session gc`.
+
+  Safety gates (internal/sandboxgc — a reap happens ONLY when ALL pass):
+    - allowlist path validation (directly under ~/.agm/sandboxes)
+    - no non-archived session references the sandbox (aborts if the session
+      store is unreachable or empty)
+    - no process holds a cwd/open fd inside the sandbox (lsof)
+    - after a best-effort unmount, the mount table is RE-READ and the reap
+      refuses if any mount point remains inside (deleting through a live
+      overlay mount can destroy the source repo — ~/.agm/cleanup-runbook.md)
+    - sandboxes modified within the last hour are never touched
+
+  The plist is a TEMPLATE: __HOME__ is substituted for the real home
+  directory before staging into ~/Library/LaunchAgents (launchd does not
+  expand ~ or shell variables). Stage with:
+    make install-sandbox-gc-launchagent
+
+  Activate (ask-gated host action — run a manual dry-run first:
+  `agm sandbox gc`):
+    launchctl bootstrap gui/$(id -u) \
+      ~/Library/LaunchAgents/com.dear-agent.sandbox-gc.plist
+
+  Trigger an immediate run outside the schedule:
+    launchctl kickstart gui/$(id -u)/com.dear-agent.sandbox-gc
+
+  Remove:
+    launchctl bootout gui/$(id -u)/com.dear-agent.sandbox-gc
+    rm ~/Library/LaunchAgents/com.dear-agent.sandbox-gc.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dear-agent.sandbox-gc</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/go/bin/agm</string>
+    <string>sandbox</string>
+    <string>gc</string>
+    <string>--reap</string>
+    <string>--json</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+  </dict>
+
+  <!-- One tick per hour. Each tick is idempotent; every reap re-verifies all
+       safety gates, so overlapping state changes only cause skips. -->
+  <key>StartInterval</key>
+  <integer>3600</integer>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>AbandonProcessGroup</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.local/state/dear-agent/sandbox-gc.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.local/state/dear-agent/sandbox-gc.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
