@@ -124,15 +124,16 @@ func sandboxGCWithChecker(req *SandboxGCRequest, base string, checker *sandboxgc
 		// symlinks, partial provisioning debris) go through the same gates;
 		// they are reapable content, not errors (ce-nd1z).
 
-		if err := checker.CheckReapable(dir); err != nil {
-			result.Kept++
-			result.Entries = append(result.Entries, SandboxGCEntry{
-				Name: name, Action: "kept", Reason: refusalReason(err),
-			})
-			continue
-		}
-
 		if !req.Reap {
+			// Dry run: classify only (Reap would re-run these gates itself;
+			// running them once per entry avoids duplicate lsof/mount scans).
+			if err := checker.CheckReapable(dir); err != nil {
+				result.Kept++
+				result.Entries = append(result.Entries, SandboxGCEntry{
+					Name: name, Action: "kept", Reason: refusalReason(err),
+				})
+				continue
+			}
 			result.Reaped++
 			result.Entries = append(result.Entries, SandboxGCEntry{
 				Name: name, Action: "would-reap",
