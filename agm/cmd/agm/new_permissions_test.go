@@ -610,3 +610,32 @@ func TestBuildSessionManifestPersistsPermissionPolicy(t *testing.T) {
 		t.Fatalf("manifest permission policy was not cloned: %v", m.PermissionPolicy.Allow)
 	}
 }
+
+func TestBuildSessionManifestPersistsStartupPermissionMode(t *testing.T) {
+	origMode := modeFlagValue
+	origHarness := harnessName
+	origModel := modelName
+	origCfg := cfg
+	defer func() {
+		modeFlagValue = origMode
+		harnessName = origHarness
+		modelName = origModel
+		cfg = origCfg
+	}()
+
+	cfg = &config.Config{Workspace: "test"}
+	harnessName = "agy"
+	modelName = "2.5-flash"
+	modeFlagValue = "auto"
+
+	m := buildSessionManifest("session-id", "session-name", "/tmp/work", nil, nil)
+	if m.PermissionMode != "auto" {
+		t.Fatalf("permission mode = %q, want auto", m.PermissionMode)
+	}
+	if m.PermissionModeSource != "startup" {
+		t.Fatalf("permission mode source = %q, want startup", m.PermissionModeSource)
+	}
+	if m.PermissionModeUpdatedAt == nil {
+		t.Fatal("permission mode updated timestamp was not set")
+	}
+}

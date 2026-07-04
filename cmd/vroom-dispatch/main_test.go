@@ -57,13 +57,13 @@ func TestSupervisorNamesAreRecognized(t *testing.T) {
 	}
 }
 
-// TestSessionNewArgsPinModelAndMode guards the ce-84l2 fix: supervisors must be
-// spawned with an explicit 200k-context model and auto permission mode. Relying
-// on agm's claude-code defaults (sonnet at 1M context, plan mode) gives a
-// session that credit-gate-fails every tick and, even when it doesn't, can only
-// plan — never execute — because a detached session can't clear approval
-// prompts. The model is now caller-supplied (default defaultSupervisorModel,
-// overridable via -model); this test pins the wiring and the default.
+// TestSessionNewArgsPinModelAndMode guards the ce-84l2/ce-o5nj fixes:
+// supervisors must be spawned with an explicit model and startup auto mode
+// whenever the canonical harness supports it. Detached sessions cannot clear
+// approval prompts, so default/plan mode turns every tick into an operator
+// intervention. The Claude model is caller-supplied (default
+// defaultSupervisorModel, overridable via -model); this test pins the wiring
+// and the default.
 func TestSessionNewArgsPinModelAndMode(t *testing.T) {
 	meta := supervisor{
 		Name:    "vroom-meta-orchestrator",
@@ -120,16 +120,15 @@ func TestSupervisorCanonicalHarnesses(t *testing.T) {
 			if !strings.Contains(joined, "--model=opus-200k") {
 				t.Errorf("%s should honor Claude model override, got %v", sup.Name, args)
 			}
-			if !strings.Contains(joined, "--mode=auto") {
-				t.Errorf("%s should include Claude auto mode, got %v", sup.Name, args)
-			}
-			continue
-		}
-		if !strings.Contains(joined, "--model="+sup.Model) {
+		} else if !strings.Contains(joined, "--model="+sup.Model) {
 			t.Errorf("%s should keep canonical model %q despite Claude override, got %v", sup.Name, sup.Model, args)
 		}
-		if strings.Contains(joined, "--mode=") {
-			t.Errorf("%s should not receive Claude permission mode flag, got %v", sup.Name, args)
+		if supportsStartupAutoMode(sup.Harness) {
+			if !strings.Contains(joined, "--mode=auto") {
+				t.Errorf("%s should include startup auto mode, got %v", sup.Name, args)
+			}
+		} else if strings.Contains(joined, "--mode=") {
+			t.Errorf("%s should not receive unsupported permission mode flag, got %v", sup.Name, args)
 		}
 	}
 }

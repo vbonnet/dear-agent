@@ -392,10 +392,9 @@ const supervisorMode = "auto"
 
 // sessionNewArgs builds the `agm session new` argument list for spawning a
 // supervisor session. Pinning --model and --mode here (rather than relying on
-// agm's defaults) is the fix for ce-84l2: the Claude defaults are sonnet at 1M
-// context (credit-gated) in plan mode (non-executable when detached). Each
-// supervisor also carries its canonical harness so recovery cannot collapse the
-// mesh onto a single provider family (ce-2n5j).
+// agm's defaults) is the fix for ce-84l2: detached supervisors cannot clear
+// approval prompts. Each supervisor also carries its canonical harness so
+// recovery cannot collapse the mesh onto a single provider family (ce-2n5j).
 func sessionNewArgs(sup supervisor, claudeModelOverride string) []string {
 	model := sup.Model
 	if sup.Harness == "claude-code" && claudeModelOverride != "" {
@@ -406,7 +405,7 @@ func sessionNewArgs(sup supervisor, claudeModelOverride string) []string {
 		"--detached", "--workspace=oss", "--harness=" + sup.Harness,
 		"--model=" + model,
 	}
-	if sup.Harness == "claude-code" {
+	if supportsStartupAutoMode(sup.Harness) {
 		args = append(args, "--mode="+supervisorMode)
 	}
 	// --role applies the matching RBAC permission profile (e.g. the
@@ -417,6 +416,10 @@ func sessionNewArgs(sup supervisor, claudeModelOverride string) []string {
 		args = append(args, "--role="+sup.Role)
 	}
 	return args
+}
+
+func supportsStartupAutoMode(harness string) bool {
+	return harness == "claude-code" || harness == "agy"
 }
 
 func main() {
