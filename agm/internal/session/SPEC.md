@@ -31,3 +31,7 @@ directly, including the optional harness-process liveness capability
 - **Fail-safe liveness.** A failed or unavailable liveness scan proves
   nothing: callers must fall back to tmux session existence, never treat an
   unverifiable session as dead.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/harness_parity.feature`
