@@ -465,6 +465,13 @@ func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []
 		debug.Log("Codex initialized with OAuth credentials (~/.codex/auth.json)")
 	}
 
+	// Pre-trust the workdir so Codex does not block on its interactive trust
+	// prompt (or refuse outright) in fresh non-git sandbox dirs (ce-cmsq).
+	// Best-effort: an already-trusted dir launches fine without it.
+	if err := agent.EnsureCodexWorkdirTrusted(workDir); err != nil {
+		ui.PrintWarning(fmt.Sprintf("Could not pre-trust Codex workdir %s: %v", workDir, err))
+	}
+
 	spawnedCodexMetadata = nil
 	if meta, err := createCodexRemoteThread(context.Background(), sessionName, workDir); err != nil {
 		if os.Getenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL") == "1" {

@@ -34,6 +34,10 @@ Provide a production-ready CLI that:
 
 **CLI-06** When `agm session kill` completes against a session whose harness process was proven dead, the system shall tell the user why the kill did not require `--confirmed-stuck`, including the pane-tree evidence and any orphaned agm heartbeat writer.
 
+**CLI-07** When AGM starts or resumes a Codex CLI harness in a working directory, the system shall record that directory as a trusted Codex project in `$CODEX_HOME/config.toml` before sending the launch command, so a fresh non-git sandbox directory cannot block startup on Codex's interactive trust prompt (ce-cmsq).
+
+**CLI-08** If pre-trusting the Codex working directory fails, the system shall emit a warning and still attempt the harness launch.
+
 ## Requirements
 
 ### Functional Requirements
