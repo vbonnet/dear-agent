@@ -34,6 +34,8 @@ type supervisor struct {
 	Name         string
 	ID           string
 	Role         string // RBAC role/profile (agm --role); grants the session's permission profile
+	Harness      string
+	Model        string
 	SkillFile    string
 	PrimaryFor   string
 	TertiaryFor  string
@@ -46,6 +48,8 @@ var supervisors = []supervisor{
 		Name:         "vroom-meta-orchestrator",
 		ID:           "vroom-meta-orchestrator",
 		Role:         "meta-orchestrator",
+		Harness:      "claude-code",
+		Model:        defaultSupervisorModel,
 		SkillFile:    "meta-orchestrator.md",
 		PrimaryFor:   "vroom-orchestrator",
 		TertiaryFor:  "vroom-overseer",
@@ -59,6 +63,8 @@ var supervisors = []supervisor{
 		Name:         "vroom-orchestrator",
 		ID:           "vroom-orchestrator",
 		Role:         "orchestrator",
+		Harness:      "codex-cli",
+		Model:        "gpt-5.5",
 		SkillFile:    "orchestrator.md",
 		PrimaryFor:   "vroom-overseer",
 		TertiaryFor:  "vroom-meta-orchestrator",
@@ -73,6 +79,8 @@ var supervisors = []supervisor{
 		Name:         "vroom-overseer",
 		ID:           "vroom-overseer",
 		Role:         "overseer",
+		Harness:      "agy",
+		Model:        "2.5-flash",
 		SkillFile:    "overseer.md",
 		PrimaryFor:   "vroom-meta-orchestrator",
 		TertiaryFor:  "vroom-orchestrator",
@@ -384,25 +392,34 @@ const supervisorMode = "auto"
 
 // sessionNewArgs builds the `agm session new` argument list for spawning a
 // supervisor session. Pinning --model and --mode here (rather than relying on
-// agm's defaults) is the fix for ce-84l2: the defaults are sonnet at 1M context
-// (credit-gated) in plan mode (non-executable when detached). The model is
-// supplied by the caller (default defaultSupervisorModel, overridable via
-// -model); mode is always auto.
-func sessionNewArgs(name, model, role string) []string {
+// agm's defaults) is the fix for ce-84l2: detached supervisors cannot clear
+// approval prompts. Each supervisor also carries its canonical harness so
+// recovery cannot collapse the mesh onto a single provider family (ce-2n5j).
+func sessionNewArgs(sup supervisor, claudeModelOverride string) []string {
+	model := sup.Model
+	if sup.Harness == "claude-code" && claudeModelOverride != "" {
+		model = claudeModelOverride
+	}
 	args := []string{
-		"session", "new", name,
-		"--detached", "--workspace=oss", "--harness=claude-code",
+		"session", "new", sup.Name,
+		"--detached", "--workspace=oss", "--harness=" + sup.Harness,
 		"--model=" + model,
-		"--mode=" + supervisorMode,
+	}
+	if supportsStartupAutoMode(sup.Harness) {
+		args = append(args, "--mode="+supervisorMode)
 	}
 	// --role applies the matching RBAC permission profile (e.g. the
 	// orchestrator profile grants `Bash(agm session new *)` so the orchestrator
 	// can spawn worker sessions). Without it a supervisor gets only the default
 	// permissions and cannot dispatch. (ce-7cdj follow-on)
-	if role != "" {
-		args = append(args, "--role="+role)
+	if sup.Role != "" {
+		args = append(args, "--role="+sup.Role)
 	}
 	return args
+}
+
+func supportsStartupAutoMode(harness string) bool {
+	return harness == "claude-code" || harness == "agy"
 }
 
 func main() {
@@ -496,6 +513,10 @@ const minSpawnInterval = 2 * time.Minute
 // maxSpawnAttempts bounds the retry-on-refusal loop in spawnSessionWithRetry.
 const maxSpawnAttempts = 3
 
+// spawnCommandTimeout bounds one `agm session new` subprocess. A hung spawn
+// must not stall the supervisor recovery loop indefinitely.
+const spawnCommandTimeout = 5 * time.Minute
+
 // spawnTooSoonMarker is the substring agm prints when its spawn circuit breaker
 // refuses a too-soon spawn. Matching on the message (rather than an exit code)
 // keeps us decoupled from agm's internal error taxonomy.
@@ -505,7 +526,10 @@ const spawnTooSoonMarker = "spawn too soon"
 // combined output. It is a package var so tests can stub the spawn without
 // shelling out to agm.
 var runSpawn = func(sup supervisor, model string) ([]byte, error) {
-	cmd := exec.Command("agm", sessionNewArgs(sup.Name, model, sup.Role)...)
+	ctx, cancel := context.WithTimeout(context.Background(), spawnCommandTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "agm", sessionNewArgs(sup, model)...)
 	// ce-v9in: mark the whole spawned session tree as unattended so every
 	// `agm send` it makes (including peer-to-peer mesh sends) auto-stashes its
 	// own stale input (C-s) instead of deadlocking on it as if a human were typing.
