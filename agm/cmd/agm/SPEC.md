@@ -26,6 +26,14 @@ Provide a production-ready CLI that:
 
 **CLI-02** When AGM builds a Codex CLI launch or resume command, the system shall resolve the selected model alias to the full Codex model name before invoking the harness.
 
+**CLI-03** When `agm supervisor heartbeat` runs inside a tmux session, the system shall record that tmux session name in the heartbeat record so status can verify a harness process is actually running where the heartbeat claims to come from.
+
+**CLI-04** When `agm supervisor status` finds a fresh heartbeat, the system shall cross-check the supervisor's tmux pane process tree; a fresh heartbeat with no live harness process shall report as ZOMBIE, count as stale for exit codes and mesh-recovery reachability, and include a reason naming any orphaned agm writer (ce-axsr/ce-qkf7).
+
+**CLI-05** When a supervisor's process liveness cannot be verified (probe error, or no tmux session recorded and no known role mapping), the system shall keep the heartbeat-based verdict in `agm supervisor status` and annotate the row as unverified rather than marking it dead.
+
+**CLI-06** When `agm session kill` completes against a session whose harness process was proven dead, the system shall tell the user why the kill did not require `--confirmed-stuck`, including the pane-tree evidence and any orphaned agm heartbeat writer.
+
 ## Requirements
 
 ### Functional Requirements

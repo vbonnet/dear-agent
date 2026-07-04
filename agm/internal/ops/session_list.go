@@ -114,6 +114,9 @@ func ListSessions(ctx *OpContext, req *ListSessionsRequest) (*ListSessionsResult
 
 	// Compute statuses and attachment from cached tmux data
 	statuses, attached := computeStatusesFromInfo(manifests, tmuxSessions)
+	// Session existence alone is a false-green liveness signal (ce-axsr):
+	// demote "active" to "zombie" where the harness process is provably dead.
+	refineActiveStatusesWithLiveness(manifests, statuses, ctx.Tmux)
 
 	// Transform to summaries
 	sessions := make([]SessionSummary, 0, len(manifests))
@@ -183,6 +186,59 @@ func computeStatuses(manifests []*manifest.Manifest, tmux interface{}) map[strin
 	return statuses
 }
 
+// refineActiveStatusesWithLiveness demotes "active" entries to "zombie" when
+// the tmux backend can prove no harness process is running in the session's
+// pane tree (ce-axsr). `tmux has-session` alone is false-green: the session
+// keeps existing after the harness exits and the pane falls back to a bare
+// shell. Only sessions currently marked "active" are scanned. The batch
+// capability is preferred — it costs a constant number of subprocesses for
+// the whole list (one `tmux list-panes -a`, one `ps`) instead of 3 per
+// session. Best-effort: backends without either liveness capability, and
+// scan errors, leave the status as "active" (a failed scan proves nothing).
+func refineActiveStatusesWithLiveness(manifests []*manifest.Manifest, statuses map[string]string, tmux any) {
+	// Collect the tmux names of "active" sessions, keyed back to manifest name.
+	manifestByTmuxName := make(map[string]string)
+	var tmuxNames []string
+	for _, m := range manifests {
+		if statuses[m.Name] != "active" {
+			continue
+		}
+		tmuxName := m.Tmux.SessionName
+		if tmuxName == "" {
+			tmuxName = m.Name
+		}
+		manifestByTmuxName[tmuxName] = m.Name
+		tmuxNames = append(tmuxNames, tmuxName)
+	}
+	if len(tmuxNames) == 0 {
+		return
+	}
+
+	if batcher, ok := tmux.(session.HarnessLivenessBatchChecker); ok {
+		infos, err := batcher.HarnessLivenessBatch(tmuxNames)
+		if err != nil {
+			return // a failed scan proves nothing
+		}
+		for tmuxName, info := range infos {
+			if info.SessionExists && !info.HarnessAlive {
+				statuses[manifestByTmuxName[tmuxName]] = "zombie"
+			}
+		}
+		return
+	}
+
+	checker, ok := tmux.(session.HarnessLivenessChecker)
+	if !ok {
+		return
+	}
+	for _, tmuxName := range tmuxNames {
+		info, err := checker.HarnessLiveness(tmuxName)
+		if err == nil && info.SessionExists && !info.HarnessAlive {
+			statuses[manifestByTmuxName[tmuxName]] = "zombie"
+		}
+	}
+}
+
 // computeStatusesWithAttachment computes both status and attachment info in a single tmux call.
 func computeStatusesWithAttachment(manifests []*manifest.Manifest, tmux interface{}) (map[string]string, map[string]bool) {
 	statuses := make(map[string]string, len(manifests))
@@ -212,6 +268,7 @@ func computeStatusesWithAttachment(manifests []*manifest.Manifest, tmux interfac
 				statuses[m.Name] = "stopped"
 			}
 		}
+		refineActiveStatusesWithLiveness(manifests, statuses, tmux)
 		return statuses, attached
 	}
 

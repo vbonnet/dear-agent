@@ -33,7 +33,11 @@ var killCmd = &cobra.Command{
 	Long: `Kill tmux session for a AGM session or force-kill deadlocked Claude process.
 
 SAFETY: Active sessions require --confirmed-stuck flag to prevent accidental
-termination. Stopped sessions can be killed without the flag.
+termination. Stopped sessions can be killed without the flag. "Active" means
+a harness process is actually running in the session's pane tree — a tmux
+session whose harness has died (zombie pane) does not require the flag, and
+either --confirmed-stuck or --force alone is sufficient confirmation for a
+recently-active session (no flag combination is ever required).
 
 This command has two modes:
 
@@ -214,10 +218,35 @@ func runKillCommand(cmd *cobra.Command, args []string) (retErr error) {
 
 	// Success message
 	if isJSONOutput() {
-		return printJSON(map[string]string{"status": "killed", "session": sessionName})
+		out := map[string]string{"status": "killed", "session": sessionName}
+		if killResult.HarnessDead {
+			out["harness_dead"] = "true"
+			out["liveness_evidence"] = killResult.LivenessEvidence
+			if killResult.ZombieWriter {
+				out["zombie_writer"] = "true"
+			}
+		}
+		return printJSON(out)
+	}
+	if killResult.HarnessDead {
+		renderZombieNotice(killResult)
 	}
 	renderSuccessMessage(sessionName)
 	return nil
+}
+
+// renderZombieNotice explains WHY a session that tmux still listed was
+// killable without --confirmed-stuck: the process check proved no harness
+// was running in the pane tree (ce-axsr). If an orphaned agm process was
+// found, it was likely keeping a heartbeat file falsely fresh (ce-qkf7) and
+// died with the pane.
+func renderZombieNotice(r *ops.KillSessionResult) {
+	ui.PrintWarning(fmt.Sprintf(
+		"Session was a zombie: tmux session existed but no harness process was running (pane tree: %s)",
+		r.LivenessEvidence))
+	if r.ZombieWriter {
+		ui.PrintWarning("An orphaned agm process was in the pane tree — it may have been writing a stale-but-fresh-looking heartbeat; it dies with the pane.")
+	}
 }
 
 // renderKillError emits a kill failure. In JSON mode it prints a structured

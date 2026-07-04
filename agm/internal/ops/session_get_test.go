@@ -1,10 +1,12 @@
 package ops
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 // --- GetSession by Claude UUID tests ---
@@ -91,6 +93,46 @@ func TestComputeSessionStatus_IncompatibleTmux(t *testing.T) {
 	status := computeSessionStatus(m, "not-a-tmux-interface")
 	if status != "unknown" {
 		t.Errorf("expected 'unknown' for incompatible tmux type, got %s", status)
+	}
+}
+
+// TestComputeSessionStatus_ZombiePane: tmux has-session alone is false-green
+// (ce-axsr) — a session whose harness process is provably dead reports
+// "zombie", not "active".
+func TestComputeSessionStatus_ZombiePane(t *testing.T) {
+	m := newManifest("cs-8", "zombie", "~/project")
+	tm := &mockTmuxWithLiveness{
+		mockTmux: newMockTmux("zombie"),
+		liveness: map[string]session.LivenessInfo{
+			"zombie": {SessionExists: true, HarnessAlive: false, ZombieWriter: true, Evidence: "zsh,agm"},
+		},
+	}
+	if status := computeSessionStatus(m, tm); status != "zombie" {
+		t.Errorf("expected 'zombie' for existing session with dead harness, got %s", status)
+	}
+}
+
+func TestComputeSessionStatus_LiveHarnessStaysActive(t *testing.T) {
+	m := newManifest("cs-9", "alive", "~/project")
+	tm := &mockTmuxWithLiveness{
+		mockTmux: newMockTmux("alive"),
+		liveness: map[string]session.LivenessInfo{
+			"alive": {SessionExists: true, HarnessAlive: true, Evidence: "zsh,claude"},
+		},
+	}
+	if status := computeSessionStatus(m, tm); status != "active" {
+		t.Errorf("expected 'active' for live harness, got %s", status)
+	}
+}
+
+func TestComputeSessionStatus_LivenessErrorFallsBackToActive(t *testing.T) {
+	m := newManifest("cs-10", "opaque", "~/project")
+	tm := &mockTmuxWithLiveness{
+		mockTmux:    newMockTmux("opaque"),
+		livenessErr: errors.New("ps unavailable"),
+	}
+	if status := computeSessionStatus(m, tm); status != "active" {
+		t.Errorf("expected 'active' when liveness cannot be verified, got %s", status)
 	}
 }
 

@@ -20,3 +20,5 @@ consistent across Claude Code, Codex CLI, AGY, and other tmux-backed harnesses.
 **SAFE-04** When AGY output contains trust, prompt, or active-work indicators, the system shall not classify the session as uninitialized solely because the final prompt marker is absent.
 
 **SAFE-05** When human typing is detected in a target pane, the system shall return a safety violation instead of sending automated input over active human input.
+
+**SAFE-06** When the pane process tree is inspected for harness liveness, the system shall use the shared full-descendant-tree scan from `agm/internal/tmux` so a harness running as a grandchild under a shell (crash-resume) is still detected.
