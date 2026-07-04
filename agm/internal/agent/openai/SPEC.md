@@ -19,7 +19,7 @@ errors for callers that need harness-neutral failure handling.
 
 **OAI-04** When creating an OpenAI session, the system shall create a private session directory, persist metadata, and reject duplicate session IDs.
 
-**OAI-05** When adding a message to an OpenAI session, the system shall update in-memory metadata, append the JSONL message, and persist the updated metadata.
+**OAI-05** When adding a message to an OpenAI session, the system shall synchronize access to prevent data races, update in-memory metadata, append the JSONL message, and persist the updated metadata.
 
 ## BDD Traceability
 

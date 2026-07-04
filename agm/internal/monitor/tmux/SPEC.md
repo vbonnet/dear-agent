@@ -21,6 +21,8 @@ tmux servers, and permission failures.
 
 **TMON-05** When session information is requested, the system shall parse tmux session name, window count, creation time, and attached state from formatted session output.
 
+**TMON-06** When executing any tmux subprocess command, the system shall use a timeout-bounded context to prevent the process from hanging indefinitely.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
