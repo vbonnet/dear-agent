@@ -9,6 +9,8 @@
 # RELATED-SPEC: agm/cmd/agm/SPEC.md
 # RELATED-SPEC: cmd/vroom-dispatch/SPEC.md
 # RELATED-SPEC: agm/internal/tmux/SPEC.md
+# RELATED-SPEC: agm/internal/bus/SPEC.md
+# RELATED-SPEC: agm/internal/messages/SPEC.md
 # RELATED-SPEC: agm/internal/backend/SPEC.md
 # RELATED-SPEC: agm/internal/manager/SPEC.md
 # RELATED-SPEC: agm/internal/readiness/SPEC.md
