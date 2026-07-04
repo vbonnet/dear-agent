@@ -1,4 +1,5 @@
 # SPEC: internal/hookparity/SPEC.md
+# RELATED-SPEC: .codex/hooks/SPEC.md
 # RELATED-SPEC: agm/internal/hooks/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-hooks/posttool-context-monitor/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-hooks/posttool-response-masking/SPEC.md
