@@ -751,12 +751,12 @@ func IsClaudeRunning(sessionName string) (bool, error) {
 		}
 	}
 
-	// Fallback: Claude runs as child of bash after crash/resume.
-	// In this state, pane_current_command shows "bash" (or zsh/sh) instead of
-	// the Claude process. Detect by capturing recent pane output and looking
-	// for the Claude prompt character.
+	// Fallback: Claude can run behind a shell after crash/resume, or behind
+	// the AGM wrapper. In this state, pane_current_command shows the wrapper
+	// instead of the Claude process. Detect by capturing recent pane output
+	// and looking for the Claude prompt character.
 	for _, cmd := range commands {
-		if cmd == "bash" || cmd == "zsh" || cmd == "sh" || cmd == "agm" {
+		if isShellCommand(cmd) || cmd == "agm" {
 			ctx := context.Background()
 			socketPath := GetSocketPath()
 			normalizedName := NormalizeTmuxSessionName(sessionName)
