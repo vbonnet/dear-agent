@@ -65,6 +65,12 @@ func TestRenderSupervisorUnblockPlist(t *testing.T) {
 	if !strings.Contains(out, "<key>WORKSPACE</key>") || !strings.Contains(out, "<string>"+ws+"</string>") {
 		t.Error("rendered plist missing WORKSPACE environment variable")
 	}
+
+	// WorkingDirectory must be the user's home (CLI-09, ce-k414): launchd
+	// otherwise starts the daemon with cwd=/.
+	if !strings.Contains(out, "<key>WorkingDirectory</key>\n    <string>"+home+"</string>") {
+		t.Errorf("rendered plist missing WorkingDirectory pinned to home %q", home)
+	}
 }
 
 // TestRenderSupervisorUnblockPlistCustomWorkspace confirms a non-default

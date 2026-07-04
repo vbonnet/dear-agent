@@ -38,6 +38,8 @@ Provide a production-ready CLI that:
 
 **CLI-08** If pre-trusting the Codex working directory fails, the system shall emit a warning and still attempt the harness launch.
 
+**CLI-09** When AGM installs a launchd schedule from an embedded plist template, the system shall set the job's WorkingDirectory to the invoking user's home directory, so launchd does not start the job with cwd=/ (ce-k414).
+
 ## Requirements
 
 ### Functional Requirements
