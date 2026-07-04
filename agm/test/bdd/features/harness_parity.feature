@@ -6,6 +6,12 @@
 # RELATED-SPEC: agm/internal/command/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/opencode/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/tmux/SPEC.md
+# RELATED-SPEC: agm/internal/backend/SPEC.md
+# RELATED-SPEC: agm/internal/manager/SPEC.md
+# RELATED-SPEC: agm/internal/readiness/SPEC.md
+# RELATED-SPEC: agm/internal/send/SPEC.md
+# RELATED-SPEC: agm/internal/manifest/SPEC.md
+# RELATED-SPEC: agm/internal/statusline/SPEC.md
 Feature: Harness parity
   AGM should use one harness-neutral delivery contract for interactive CLI
   harnesses. Claude Code is the reference implementation. Codex CLI, AGY, and
