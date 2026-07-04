@@ -65,17 +65,23 @@ func TestSupervisorNamesAreRecognized(t *testing.T) {
 // prompts. The model is now caller-supplied (default defaultSupervisorModel,
 // overridable via -model); this test pins the wiring and the default.
 func TestSessionNewArgsPinModelAndMode(t *testing.T) {
-	args := sessionNewArgs("vroom-orchestrator", defaultSupervisorModel, "orchestrator")
+	meta := supervisor{
+		Name:    "vroom-meta-orchestrator",
+		Role:    "meta-orchestrator",
+		Harness: "claude-code",
+		Model:   defaultSupervisorModel,
+	}
+	args := sessionNewArgs(meta, defaultSupervisorModel)
 
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"session new vroom-orchestrator",
+		"session new vroom-meta-orchestrator",
 		"--detached",
 		"--workspace=oss",
 		"--harness=claude-code",
 		"--model=sonnet-200k",
 		"--mode=auto",
-		"--role=orchestrator",
+		"--role=meta-orchestrator",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("sessionNewArgs missing %q; got %v", want, args)
@@ -83,7 +89,7 @@ func TestSessionNewArgsPinModelAndMode(t *testing.T) {
 	}
 
 	// An empty role must not emit a --role flag (omitted, not "--role=").
-	if strings.Contains(strings.Join(sessionNewArgs("x", "sonnet-200k", ""), " "), "--role") {
+	if strings.Contains(strings.Join(sessionNewArgs(supervisor{Name: "x", Harness: "claude-code", Model: "sonnet-200k"}, "sonnet-200k"), " "), "--role") {
 		t.Errorf("empty role should omit --role flag")
 	}
 
@@ -100,6 +106,31 @@ func TestSessionNewArgsPinModelAndMode(t *testing.T) {
 	}
 	if supervisorMode != "auto" {
 		t.Errorf("supervisorMode = %q, want auto (plan mode can't execute when detached)", supervisorMode)
+	}
+}
+
+func TestSupervisorCanonicalHarnesses(t *testing.T) {
+	for _, sup := range supervisors {
+		args := sessionNewArgs(sup, "opus-200k")
+		joined := strings.Join(args, " ")
+		if !strings.Contains(joined, "--harness="+sup.Harness) {
+			t.Errorf("%s args missing canonical harness %q: %v", sup.Name, sup.Harness, args)
+		}
+		if sup.Harness == "claude-code" {
+			if !strings.Contains(joined, "--model=opus-200k") {
+				t.Errorf("%s should honor Claude model override, got %v", sup.Name, args)
+			}
+			if !strings.Contains(joined, "--mode=auto") {
+				t.Errorf("%s should include Claude auto mode, got %v", sup.Name, args)
+			}
+			continue
+		}
+		if !strings.Contains(joined, "--model="+sup.Model) {
+			t.Errorf("%s should keep canonical model %q despite Claude override, got %v", sup.Name, sup.Model, args)
+		}
+		if strings.Contains(joined, "--mode=") {
+			t.Errorf("%s should not receive Claude permission mode flag, got %v", sup.Name, args)
+		}
 	}
 }
 
