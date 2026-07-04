@@ -45,3 +45,9 @@ sync with AGM's registered `session new` flags.
 ### CLI Contract Drift
 
 **VROOM-SUP-10** When VROOM worker dispatch arguments are changed, the system shall verify that they parse against AGM's actual `session new` flag set.
+
+### Peer Liveness (ce-axsr)
+
+**VROOM-SUP-11** When a peer liveness check combines heartbeat freshness with a harness-process probe, the system shall report the peer as blocked (DEAD, with a zombie-heartbeat reason) if the probe proves no harness process is running, even when the heartbeat is fresh.
+
+**VROOM-SUP-12** When the harness-process probe returns an error, the peer liveness check shall fail open to the heartbeat check alone and shall not mark the peer dead on an unverifiable probe.

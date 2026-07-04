@@ -512,3 +512,198 @@ func TestAnnotateMeshRecoveryNilRecordPeerIsNoRecoverer(t *testing.T) {
 		t.Error("A should be unrecoverable: no peer declares itself its recoverer")
 	}
 }
+
+// --- applyProcessLiveness tests (ce-axsr: heartbeat freshness alone must ---
+// --- not prove liveness; a zombie heartbeat writer must surface as DEAD) ---
+
+func TestApplyProcessLiveness(t *testing.T) {
+	freshRec := func(id, tmuxSession string) *heartbeatRecord {
+		return &heartbeatRecord{ID: id, LastBeatUTC: time.Now().UTC(), TmuxSession: tmuxSession}
+	}
+
+	tests := []struct {
+		name         string
+		row          supervisorRow
+		probe        func(sessionName string) (paneProbe, error)
+		wantStale    bool
+		wantZombie   bool
+		wantAlive    bool
+		wantAnyStale bool
+		wantReason   string // substring; "" means no assertion
+	}{
+		{
+			name: "fresh heartbeat with live harness stays fresh",
+			row:  supervisorRow{ID: "meta-o", Record: freshRec("meta-o", "vroom-meta-orchestrator")},
+			probe: func(string) (paneProbe, error) {
+				return paneProbe{Exists: true, HarnessAlive: true, Evidence: "zsh,claude"}, nil
+			},
+			wantStale:  false,
+			wantZombie: false,
+			wantAlive:  true,
+		},
+		{
+			name: "fresh heartbeat with zsh-only pane is a zombie (dead)",
+			row:  supervisorRow{ID: "meta-o", Record: freshRec("meta-o", "vroom-meta-orchestrator")},
+			probe: func(string) (paneProbe, error) {
+				return paneProbe{Exists: true, HarnessAlive: false, Evidence: "zsh"}, nil
+			},
+			wantStale:    true,
+			wantZombie:   true,
+			wantAnyStale: true,
+			wantReason:   "no harness process",
+		},
+		{
+			name: "fresh heartbeat with orphaned agm writer names the writer (ce-qkf7)",
+			row:  supervisorRow{ID: "meta-o", Record: freshRec("meta-o", "vroom-meta-orchestrator")},
+			probe: func(string) (paneProbe, error) {
+				return paneProbe{Exists: true, HarnessAlive: false, ZombieWriter: true, Evidence: "zsh,agm"}, nil
+			},
+			wantStale:    true,
+			wantZombie:   true,
+			wantAnyStale: true,
+			wantReason:   "orphaned agm process",
+		},
+		{
+			name: "fresh heartbeat whose recorded session vanished is a zombie",
+			row:  supervisorRow{ID: "meta-o", Record: freshRec("meta-o", "vroom-meta-orchestrator")},
+			probe: func(string) (paneProbe, error) {
+				return paneProbe{Exists: false}, nil
+			},
+			wantStale:    true,
+			wantZombie:   true,
+			wantAnyStale: true,
+			wantReason:   "no longer exists",
+		},
+		{
+			name: "inferred session missing is unverifiable, not dead",
+			row:  supervisorRow{ID: "overseer", Record: &heartbeatRecord{ID: "overseer", LastBeatUTC: time.Now().UTC()}},
+			probe: func(string) (paneProbe, error) {
+				return paneProbe{Exists: false}, nil
+			},
+			wantStale:  false,
+			wantZombie: false,
+			wantReason: "unverified",
+		},
+		{
+			name: "probe error fails open with a reason",
+			row:  supervisorRow{ID: "meta-o", Record: freshRec("meta-o", "vroom-meta-orchestrator")},
+			probe: func(string) (paneProbe, error) {
+				return paneProbe{}, errors.New("tmux socket gone")
+			},
+			wantStale:  false,
+			wantZombie: false,
+			wantReason: "unverified",
+		},
+		{
+			name: "unknown supervisor with no recorded session is unverifiable",
+			row:  supervisorRow{ID: "s9", Record: &heartbeatRecord{ID: "s9", LastBeatUTC: time.Now().UTC()}},
+			probe: func(string) (paneProbe, error) {
+				t.Error("probe must not be called when there is no session to verify")
+				return paneProbe{}, nil
+			},
+			wantStale:  false,
+			wantReason: "no tmux session recorded",
+		},
+		{
+			name:         "already-stale row is left alone",
+			row:          supervisorRow{ID: "meta-o", Stale: true, Record: freshRec("meta-o", "vroom-meta-orchestrator")},
+			probe:        func(string) (paneProbe, error) { return paneProbe{Exists: true, HarnessAlive: true}, nil },
+			wantStale:    true,
+			wantAnyStale: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows := []supervisorRow{tt.row}
+			anyStale := applyProcessLiveness(rows, tt.probe)
+			r := rows[0]
+			if r.Stale != tt.wantStale {
+				t.Errorf("Stale = %v, want %v", r.Stale, tt.wantStale)
+			}
+			if r.Zombie != tt.wantZombie {
+				t.Errorf("Zombie = %v, want %v", r.Zombie, tt.wantZombie)
+			}
+			if r.ProcessAlive != tt.wantAlive {
+				t.Errorf("ProcessAlive = %v, want %v", r.ProcessAlive, tt.wantAlive)
+			}
+			if anyStale != tt.wantAnyStale {
+				t.Errorf("anyStale = %v, want %v", anyStale, tt.wantAnyStale)
+			}
+			if tt.wantReason != "" && !strings.Contains(r.Reason, tt.wantReason) {
+				t.Errorf("Reason = %q, want substring %q", r.Reason, tt.wantReason)
+			}
+		})
+	}
+}
+
+// TestApplyProcessLiveness_ZombieFeedsQuorum verifies the zombie verdict
+// participates in mesh-recovery reachability: a zombie whose only recoverer
+// is also dead is quorum-lost.
+func TestApplyProcessLiveness_ZombieFeedsQuorum(t *testing.T) {
+	now := time.Now().UTC()
+	rows := []supervisorRow{
+		{ID: "meta-o", Record: &heartbeatRecord{ID: "meta-o", LastBeatUTC: now, TmuxSession: "vroom-meta-orchestrator", PrimaryFor: "orch"}},
+		{ID: "orch", Stale: true, Record: &heartbeatRecord{ID: "orch", LastBeatUTC: now.Add(-time.Hour), PrimaryFor: "meta-o"}},
+	}
+	probe := func(string) (paneProbe, error) {
+		return paneProbe{Exists: true, HarnessAlive: false, ZombieWriter: true, Evidence: "zsh,agm"}, nil
+	}
+	if !applyProcessLiveness(rows, probe) {
+		t.Fatal("expected anyStale=true")
+	}
+	if !rows[0].Zombie || !rows[0].Stale {
+		t.Fatal("expected meta-o to be a stale zombie")
+	}
+	quorumLost := annotateMeshRecovery(rows)
+	if !quorumLost {
+		t.Error("expected quorum lost: the zombie's only recoverer is also stale")
+	}
+	if !rows[0].QuorumLost {
+		t.Error("expected meta-o QuorumLost=true")
+	}
+}
+
+func TestSupervisorTmuxSession(t *testing.T) {
+	tests := []struct {
+		name         string
+		row          supervisorRow
+		want         string
+		wantExplicit bool
+	}{
+		{
+			name:         "recorded session wins",
+			row:          supervisorRow{ID: "meta-o", Record: &heartbeatRecord{TmuxSession: "custom-session"}},
+			want:         "custom-session",
+			wantExplicit: true,
+		},
+		{
+			name: "known role falls back to vroom session name",
+			row:  supervisorRow{ID: "meta-o", Record: &heartbeatRecord{}},
+			want: "vroom-meta-orchestrator",
+		},
+		{
+			name: "orch maps to vroom-orchestrator",
+			row:  supervisorRow{ID: "orch", Record: &heartbeatRecord{}},
+			want: "vroom-orchestrator",
+		},
+		{
+			name: "id that is already a vroom session name is used directly",
+			row:  supervisorRow{ID: "vroom-meta-orchestrator", Record: &heartbeatRecord{}},
+			want: "vroom-meta-orchestrator",
+		},
+		{
+			name: "unknown id has nothing to verify",
+			row:  supervisorRow{ID: "s7", Record: &heartbeatRecord{}},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, explicit := supervisorTmuxSession(tt.row)
+			if got != tt.want || explicit != tt.wantExplicit {
+				t.Errorf("supervisorTmuxSession() = (%q, %v), want (%q, %v)", got, explicit, tt.want, tt.wantExplicit)
+			}
+		})
+	}
+}

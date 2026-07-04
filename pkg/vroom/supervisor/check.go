@@ -74,6 +74,42 @@ func (f PeerRecoveryFunc) Recover(ctx context.Context, peerRole Role, reason str
 	return f(ctx, peerRole, reason)
 }
 
+// ProcessLivenessCheckSkill layers a harness-process probe over an inner
+// CheckSkill (typically HeartbeatCheckSkill). A fresh heartbeat alone must
+// not prove liveness (ce-axsr/ce-qkf7): an orphaned writer can keep a peer's
+// heartbeat fresh for hours after its harness process died. This skill
+// reports such a peer as blocked — DEAD with a zombie-heartbeat reason —
+// even though the heartbeat check would pass.
+//
+// Probe semantics: (alive=false, err=nil) means "proven dead"; a non-nil err
+// means "could not verify", which fails open to the inner check only — an
+// unverifiable probe must not flip a healthy peer red.
+type ProcessLivenessCheckSkill struct {
+	// Inner is the heartbeat-freshness (or other) check that must ALSO pass.
+	// Nil means process liveness is the only check.
+	Inner CheckSkill
+
+	// Probe resolves whether the peer's harness process is actually running
+	// (e.g. a tmux pane process-tree scan). detail is appended to the error
+	// for a proven-dead peer so callers can say why.
+	Probe func(ctx context.Context, peer LoopStatus) (alive bool, detail string, err error)
+}
+
+// Check implements CheckSkill: the peer is blocked if the process probe
+// proves its harness dead, or if the inner check reports it blocked.
+func (s *ProcessLivenessCheckSkill) Check(ctx context.Context, peer LoopStatus) error {
+	if s.Probe != nil {
+		alive, detail, err := s.Probe(ctx, peer)
+		if err == nil && !alive {
+			return fmt.Errorf("peer %q is DEAD: no harness process is running (%s) — a fresh heartbeat alone does not prove liveness (zombie heartbeat writer, ce-qkf7)", peer.Role(), detail)
+		}
+	}
+	if s.Inner != nil {
+		return s.Inner.Check(ctx, peer)
+	}
+	return nil
+}
+
 // Check reports an error if peer's heartbeat is too stale.
 func (h *HeartbeatCheckSkill) Check(_ context.Context, peer LoopStatus) error {
 	if h.Threshold <= 0 {
