@@ -32,7 +32,7 @@ to receive queued work.
 
 **DAEMON-10** When a queued message is delivered successfully, the system shall acknowledge it when an acknowledgment manager is configured.
 
-**DAEMON-11** When health status is requested, the system shall report daemon running state, queue depth, recent poll timing, and metric health from current daemon state.
+**DAEMON-11** When standalone health status is requested, the system shall report daemon running state, PID when available, queue statistics when a queue is provided, and an overall health level derived from configured queue-depth thresholds.
 
 ## BDD Traceability
 
