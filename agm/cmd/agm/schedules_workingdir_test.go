@@ -25,8 +25,12 @@ func TestScheduleTemplatesSetWorkingDirectory(t *testing.T) {
 	}
 
 	for _, entry := range entries {
-		t.Run(entry.Name(), func(t *testing.T) {
-			raw, err := schedulesFS.ReadFile(path.Join("schedules", entry.Name()))
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".plist") {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			raw, err := schedulesFS.ReadFile(path.Join("schedules", name))
 			if err != nil {
 				t.Fatalf("read template: %v", err)
 			}

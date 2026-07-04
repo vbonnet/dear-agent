@@ -31,7 +31,7 @@ func TestDeployLaunchdPlistsSetWorkingDirectory(t *testing.T) {
 	var checked int
 	for _, entry := range entries {
 		name := entry.Name()
-		if !strings.HasSuffix(name, ".plist") || exempt[name] {
+		if entry.IsDir() || !strings.HasSuffix(name, ".plist") || exempt[name] {
 			continue
 		}
 		checked++
