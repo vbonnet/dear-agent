@@ -1,0 +1,30 @@
+# vroom-dispatch Specification
+
+<!-- Last audited at: 2026-07-04 -->
+
+## Purpose
+
+`cmd/vroom-dispatch` supervises the persistent VROOM control-plane mesh and
+bootstraps worker dispatch. It owns the recovery contract for the three
+supervisors: Meta-Orchestrator, Orchestrator, and Overseer. Recovery must
+preserve provider redundancy, keep detached supervisors executable without
+interactive approval prompts, and avoid silently substituting a different
+harness when a supervisor is stale.
+
+## EARS Requirements
+
+**VD-01** When `vroom-dispatch` spawns a supervisor, the system shall pass that supervisor's canonical `--harness` and `--model` to `agm session new`.
+
+**VD-02** When a Claude supervisor is spawned and a supervisor model override is configured, the system shall apply the override only to the Claude supervisor.
+
+**VD-03** When a non-Claude supervisor is spawned, the system shall keep the supervisor's canonical model even if a Claude model override is configured.
+
+**VD-04** When a supervisor harness supports startup auto mode, the system shall pass `--mode=auto` to `agm session new` so the detached supervisor can execute its tick without an interactive approval prompt.
+
+**VD-05** When the canonical Overseer is spawned on the `agy` harness, the system shall pass `--mode=auto` so AGM launches AGY with its startup skip-permissions mechanism instead of default prompt-per-command mode.
+
+**VD-06** When a supervisor spawn fails because AGM's spawn circuit breaker reports "spawn too soon", the system shall retry within the bounded retry policy instead of permanently dropping that supervisor.
+
+**VD-07** When a supervisor spawn fails for an error other than recognized circuit-breaker backpressure, the system shall surface the failure and shall not retry blindly.
+
+**VD-08** When supervisor role metadata is present, the system shall pass the matching `--role` flag to `agm session new` so the supervisor receives its RBAC permission profile.
