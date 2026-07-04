@@ -28,3 +28,8 @@ harness when a supervisor is stale.
 **VD-07** When a supervisor spawn fails for an error other than recognized circuit-breaker backpressure, the system shall surface the failure and shall not retry blindly.
 
 **VD-08** When supervisor role metadata is present, the system shall pass the matching `--role` flag to `agm session new` so the supervisor receives its RBAC permission profile.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/harness_parity.feature`
+- Package tests: `cmd/vroom-dispatch/main_test.go`

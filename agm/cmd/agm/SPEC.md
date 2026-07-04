@@ -40,6 +40,10 @@ Provide a production-ready CLI that:
 
 **CLI-09** When AGM installs a launchd schedule from an embedded plist template, the system shall set the job's WorkingDirectory to the invoking user's home directory, so launchd does not start the job with cwd=/ (ce-k414).
 
+**CLI-10** When AGM starts AGY with startup permission mode `auto`, the system shall launch AGY with its skip-permissions mechanism and shall treat the mode as already applied at startup.
+
+**CLI-11** When AGM builds a session manifest with a startup permission mode, the system shall persist the permission mode, source, and update timestamp so resume and audit surfaces reflect the launch contract.
+
 ## Requirements
 
 ### Functional Requirements

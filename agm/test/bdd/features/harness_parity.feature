@@ -6,6 +6,8 @@
 # RELATED-SPEC: agm/internal/command/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/opencode/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/tmux/SPEC.md
+# RELATED-SPEC: agm/cmd/agm/SPEC.md
+# RELATED-SPEC: cmd/vroom-dispatch/SPEC.md
 # RELATED-SPEC: agm/internal/backend/SPEC.md
 # RELATED-SPEC: agm/internal/manager/SPEC.md
 # RELATED-SPEC: agm/internal/readiness/SPEC.md
