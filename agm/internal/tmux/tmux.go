@@ -756,7 +756,7 @@ func IsClaudeRunning(sessionName string) (bool, error) {
 	// the Claude process. Detect by capturing recent pane output and looking
 	// for the Claude prompt character.
 	for _, cmd := range commands {
-		if cmd == "bash" || cmd == "zsh" || cmd == "sh" {
+		if cmd == "bash" || cmd == "zsh" || cmd == "sh" || cmd == "agm" {
 			ctx := context.Background()
 			socketPath := GetSocketPath()
 			normalizedName := NormalizeTmuxSessionName(sessionName)
