@@ -608,6 +608,11 @@ func dispatchResumeCommand(adapter *dolt.Adapter, m *manifest.Manifest, harnessN
 	case "opencode-cli":
 		fullCmd = fmt.Sprintf("cd %s && opencode attach && exit", shellQuote(health.WorktreePath))
 	case "codex-cli":
+		// Pre-trust the workdir so a Codex relaunch does not block on the
+		// interactive trust prompt in non-git sandbox dirs (ce-cmsq).
+		if err := agent.EnsureCodexWorkdirTrusted(health.WorktreePath); err != nil {
+			ui.PrintWarning(fmt.Sprintf("Could not pre-trust Codex workdir %s: %v", health.WorktreePath, err))
+		}
 		fullCmd = buildCodexResumeCommand(m, health)
 	case "agy":
 		fullCmd = buildAgyResumeCommand(m, health)
