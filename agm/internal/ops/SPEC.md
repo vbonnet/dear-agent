@@ -1,6 +1,6 @@
 # agm/internal/ops — Requirements Specification (EARS)
 
-<!-- Last audited at: 2026-07-02 -->
+<!-- Last audited at: 2026-07-03 -->
 
 **Version**: 1.0
 **Last Updated**: 2026-06-07
@@ -111,6 +111,8 @@ surfaces (CLI, MCP server, Skills plugin). Every surface constructs an
 
 **OPS-42** When Codex remote-control thread creation fails and `AGM_CODEX_REQUIRE_REMOTE_CONTROL` is set to `1`, the system shall fail session creation instead of silently starting an untracked Codex thread.
 
+**OPS-48** When `CreateSession` creates a `codex-cli` session, the system shall record the session's working directory as a trusted Codex project in `$CODEX_HOME/config.toml` before creating the Codex thread or sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt (ce-cmsq); if the pre-trust write fails, the system shall warn and still attempt the launch.
+
 **OPS-36** While a session's state is OFFLINE, READY, or DONE, the stall detector shall skip error-loop detection for that session.
 
 ### Field Mask Projection
@@ -120,6 +122,18 @@ surfaces (CLI, MCP server, Skills plugin). Every surface constructs an
 **OPS-38** When `ApplyFieldMask` is called on a value that is not a JSON object, the system shall return the value unchanged.
 
 **OPS-39** When `agm session list` JSON output applies a field mask for per-session row fields (`name`, `status`, `harness`, `workspace`, `tags`, etc.), the system shall preserve the `sessions` envelope and shall not produce `{}` solely because the requested fields are not top-level list result keys.
+
+### Harness-Process Liveness (ce-axsr)
+
+**OPS-43** When `KillSession` evaluates whether a session is active, the system shall require both tmux session existence and a verified harness process in the pane tree; a session whose harness process is provably dead shall be killable without `ConfirmedStuck`.
+
+**OPS-44** When `KillSession` kills a session whose harness process was proven dead, the result shall report the dead-harness verdict, any orphaned agm zombie-writer, and the pane-tree evidence so the caller can say why the session was treated as dead.
+
+**OPS-45** When `KillSession` evaluates the recent-activity protection, the system shall accept either `Force` or `ConfirmedStuck` as sufficient confirmation, so that no combination of two flags is ever required to kill a session.
+
+**OPS-46** When session status is computed and the tmux backend can verify process liveness, a session whose tmux session exists but whose harness process is dead shall report status `zombie` rather than `active`.
+
+**OPS-47** When a process-liveness scan fails or the tmux backend cannot verify process liveness, status and kill decisions shall fall back to tmux session existence (fail-safe: an unverifiable session is treated as active).
 
 ---
 

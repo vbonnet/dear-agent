@@ -32,6 +32,22 @@ type ResourceSnapshot struct {
 	// DiskUsedFraction is fraction of disk space used (0..1).
 	DiskUsedFraction float64
 
+	// DiskFreeBytes is the absolute free disk space in bytes available to
+	// unprivileged writes (statfs Bavail). The disk-alert tick uses it for the
+	// free-space floor (default <20 GiB) because a fraction alone hides how
+	// little headroom remains on a large disk — the ce-6fel lesson: the disk
+	// filled to 0 twice while DiskUsedFraction sat below the 0.9 escalation
+	// threshold's radar until far too late. A value of 0 with a zero
+	// DiskUsedFraction means the probe could not measure it ("unknown").
+	DiskFreeBytes uint64
+
+	// InodeUsedFraction is the fraction of the filesystem's inodes in use
+	// (0..1; statfs Files/Ffree). Inode exhaustion fails writes while df still
+	// shows free blocks, so it is tracked separately from DiskUsedFraction.
+	// 0 on filesystems that do not report inode counts (e.g. APFS allocates
+	// inodes dynamically and reports a huge virtual total).
+	InodeUsedFraction float64
+
 	// MemoryUsedFraction is fraction of memory used (0..1).
 	MemoryUsedFraction float64
 
@@ -177,6 +193,13 @@ type Overseer struct {
 	// Meta-Orchestrator (and, at CRITICAL, the Orchestrator). nil = disabled.
 	alertNotifier   MemoryAlertNotifier
 	alertThresholds MemoryAlertThresholds
+
+	// Disk-free + inode alert (ce-6fel). When a DiskAlertNotifier is wired via
+	// WithDiskAlert, each Tick classifies the snapshot's free disk space and
+	// inode usage against diskAlertThresholds and routes WARN/CRITICAL alerts
+	// with the same fan-out as the memory alert. nil = disabled.
+	diskAlertNotifier   DiskAlertNotifier
+	diskAlertThresholds DiskAlertThresholds
 }
 
 // defaultHygieneInterval rate-limits the session-hygiene pass so ticks firing
@@ -273,6 +296,21 @@ func (o *Overseer) WithMemoryAlert(n MemoryAlertNotifier, thresholds MemoryAlert
 	return o
 }
 
+// WithDiskAlert wires a DiskAlertNotifier into the Overseer, arming the
+// per-tick disk-free + inode alert (ce-6fel). After this call each Tick
+// classifies the snapshot's free disk space and inode usage against thresholds
+// and, on a WARN/CRITICAL breach, records an alert to the trail and routes it
+// to the Meta-Orchestrator — and, at CRITICAL, the Orchestrator too. Any zero
+// field in thresholds falls back to DefaultDiskAlertThresholds (free < 20/5
+// GiB, inodes > 90/95%). The alert is observe-and-notify only; disk
+// remediation is the host-level disk-watchdog's job (cmd/disk-watchdog). With
+// no notifier wired the Overseer does not classify or alert on disk pressure.
+func (o *Overseer) WithDiskAlert(n DiskAlertNotifier, thresholds DiskAlertThresholds) *Overseer {
+	o.diskAlertNotifier = n
+	o.diskAlertThresholds = thresholds.withDefaults()
+	return o
+}
+
 // WithBurndown wires a BurndownController and policy into the Overseer.
 // After this call each Tick also runs the burndown maintenance phase. The
 // controller and policy may be changed between ticks; the Overseer copies the
@@ -315,6 +353,7 @@ func (o *Overseer) Tick(ctx context.Context) error {
 	o.maybeEscalateFraction(ctx, "cpu", snap.CPUUsedFraction)
 	o.maybeEscalateFraction(ctx, "open_fds", snap.OpenFDFraction)
 	o.maybeEscalateFraction(ctx, "vnodes", snap.VnodeUsedFraction)
+	o.maybeEscalateFraction(ctx, "inodes", snap.InodeUsedFraction)
 	o.maybeEscalateGopls(ctx, snap.GoplsProcesses)
 	o.maybeEscalateCount(ctx, "stranded_worktrees", snap.StrandedWorktrees)
 	o.maybeEscalateCount(ctx, "orphaned_sessions", snap.OrphanedSessions)
@@ -358,6 +397,13 @@ func (o *Overseer) Tick(ctx context.Context) error {
 	if o.alertNotifier != nil {
 		o.runMemoryAlertTick(ctx, snap)
 	}
+
+	// Disk-free + inode alert (ce-6fel) — classify free space / inodes and
+	// route WARN/CRITICAL alerts to the supervisors, mirroring the memory
+	// alert above; only when a notifier is wired via WithDiskAlert.
+	if o.diskAlertNotifier != nil {
+		o.runDiskAlertTick(ctx, snap)
+	}
 	return nil
 }
 
@@ -369,6 +415,8 @@ func (o *Overseer) recordSnapshot(ctx context.Context, snap ResourceSnapshot) {
 		Kind: "supervisor.over.resource_snapshot",
 		Payload: map[string]any{
 			"disk_used_fraction":   snap.DiskUsedFraction,
+			"disk_free_bytes":      snap.DiskFreeBytes,
+			"inode_used_fraction":  snap.InodeUsedFraction,
 			"memory_used_fraction": snap.MemoryUsedFraction,
 			"free_physical_bytes":  snap.FreePhysicalMemoryBytes,
 			"swap_used_fraction":   snap.SwapUsedFraction,
@@ -611,6 +659,59 @@ func (o *Overseer) runMemoryAlertTick(ctx context.Context, snap ResourceSnapshot
 	_ = o.trail.Append(ctx, decisiontrail.Record{
 		Role:    string(RoleOverseer),
 		Kind:    "supervisor.over.memory_alert",
+		Payload: payload,
+	})
+}
+
+// runDiskAlertTick classifies the snapshot's free disk space and inode usage
+// against the disk-alert thresholds and, on a WARN/CRITICAL breach, records
+// the alert to the trail and routes it to the supervisors that can act: every
+// alert goes to the Meta-Orchestrator; a CRITICAL alert also goes to the
+// Orchestrator (which owns the spawn queue — each spawn clones a worktree, the
+// dominant disk writer). A healthy snapshot records nothing. Notifier failures
+// are recorded but never fail the tick; with the disk filling up, reaching
+// *one* supervisor beats aborting on the first send error.
+func (o *Overseer) runDiskAlertTick(ctx context.Context, snap ResourceSnapshot) {
+	level, reasons := o.diskAlertThresholds.Classify(snap)
+	if level == PressureNone {
+		return
+	}
+
+	summary := fmt.Sprintf("disk %s — %s", level, strings.Join(reasons, "; "))
+
+	// Routing: Meta-O always; Orchestrator additionally at CRITICAL.
+	targets := []Role{RoleMetaOrchestrator}
+	if level >= PressureCritical {
+		targets = append(targets, RoleOrchestrator)
+	}
+
+	var notified []string
+	var errs []string
+	for _, to := range targets {
+		if err := o.diskAlertNotifier.Notify(ctx, to, level, snap, summary); err != nil {
+			errs = append(errs, string(to)+": "+err.Error())
+			continue
+		}
+		notified = append(notified, string(to))
+	}
+
+	payload := map[string]any{
+		"level":               level.String(),
+		"disk_free_bytes":     snap.DiskFreeBytes,
+		"disk_free_gib":       float64(snap.DiskFreeBytes) / GiB,
+		"disk_used_fraction":  snap.DiskUsedFraction,
+		"inode_used_fraction": snap.InodeUsedFraction,
+		"reasons":             reasons,
+		"summary":             summary,
+		"targets":             rolesToStrings(targets),
+		"notified":            notified,
+	}
+	if len(errs) > 0 {
+		payload["errors"] = strings.Join(errs, "; ")
+	}
+	_ = o.trail.Append(ctx, decisiontrail.Record{
+		Role:    string(RoleOverseer),
+		Kind:    "supervisor.over.disk_alert",
 		Payload: payload,
 	})
 }

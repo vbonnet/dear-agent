@@ -34,7 +34,8 @@ func startHarness(sessionName, workDir string, exists bool, extraAddDirs []strin
 	case "opencode-cli":
 		return false, false, startOpenCodeHarness(sessionName, exists)
 	case "agy":
-		return false, false, startAgyHarness(sessionName, workDir, exists, extraAddDirs)
+		modeApplied, err := startAgyHarness(sessionName, workDir, exists, extraAddDirs)
+		return modeApplied, false, err
 	default:
 		debug.Phase("Skip CLI Startup")
 		debug.Log("Skipping CLI startup for harness: %s (no CLI configured)", harnessName)
@@ -358,7 +359,7 @@ func buildAgyCommand(workDir string, extraAddDirs []string, permissionMode strin
 	return b.String()
 }
 
-func startAgyHarness(sessionName, workDir string, exists bool, extraAddDirs []string) error {
+func startAgyHarness(sessionName, workDir string, exists bool, extraAddDirs []string) (bool, error) {
 	debug.Phase("Start AGY")
 	if _, err := exec.LookPath("agy"); err != nil {
 		ui.PrintError(err,
@@ -366,10 +367,11 @@ func startAgyHarness(sessionName, workDir string, exists bool, extraAddDirs []st
 			"  • Verify AGY is installed: which agy\n"+
 				"  • Test AGY manually: agy --help\n"+
 				"  • Check AGY authentication in the CLI")
-		return err
+		return false, err
 	}
 
 	agyCmd := buildAgyCommand(workDir, extraAddDirs, modeFlagValue)
+	modeAppliedAtStartup := agyPermissionFlag(modeFlagValue) != ""
 	debug.Log("Sending command: %s", agyCmd)
 	if err := tmux.SendCommand(sessionName, agyCmd); err != nil {
 		ui.PrintError(err,
@@ -381,7 +383,7 @@ func startAgyHarness(sessionName, workDir string, exists bool, extraAddDirs []st
 		if !exists {
 			cleanupCodexTmuxSession(sessionName)
 		}
-		return err
+		return modeAppliedAtStartup, err
 	}
 	debug.Log("AGY command sent successfully")
 	ui.PrintSuccess("Started AGY in tmux session")
@@ -400,11 +402,11 @@ func startAgyHarness(sessionName, workDir string, exists bool, extraAddDirs []st
 		if !exists {
 			cleanupCodexTmuxSession(sessionName)
 		}
-		return err
+		return modeAppliedAtStartup, err
 	}
 	debug.Log("✓ AGY prompt detected - AGY is ready")
 	ui.PrintSuccess("AGY adapter ready")
-	return nil
+	return modeAppliedAtStartup, nil
 }
 
 // buildCodexCommand assembles the env+codex shell command line launched into the
@@ -463,6 +465,13 @@ func startCodexHarness(sessionName, workDir string, exists bool, extraAddDirs []
 		debug.Log("Codex initialized with API key")
 	} else {
 		debug.Log("Codex initialized with OAuth credentials (~/.codex/auth.json)")
+	}
+
+	// Pre-trust the workdir so Codex does not block on its interactive trust
+	// prompt (or refuse outright) in fresh non-git sandbox dirs (ce-cmsq).
+	// Best-effort: an already-trusted dir launches fine without it.
+	if err := agent.EnsureCodexWorkdirTrusted(workDir); err != nil {
+		ui.PrintWarning(fmt.Sprintf("Could not pre-trust Codex workdir %s: %v", workDir, err))
 	}
 
 	spawnedCodexMetadata = nil

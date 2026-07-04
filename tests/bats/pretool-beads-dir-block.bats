@@ -9,7 +9,8 @@
 # and blocks them with a helpful redirect message.
 
 setup() {
-    command -v python3 >/dev/null 2>&1 || skip "hook requires python3"
+    command -v jq >/dev/null 2>&1 || skip "hook requires jq"
+    command -v python3 >/dev/null 2>&1 || skip "test helper requires python3"
     HOOK="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/.codex/hooks/pretool-beads-dir-block"
     [ -x "$HOOK" ] || skip "hook not found or not executable: $HOOK"
 }

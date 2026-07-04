@@ -44,6 +44,14 @@ func (p *SysResourceProbe) Snapshot(ctx context.Context) (ResourceSnapshot, erro
 			used := total - avail
 			snap.DiskUsedFraction = float64(used) / float64(total)
 		}
+		snap.DiskFreeBytes = avail
+
+		// Inodes (ce-6fel): exhaustion fails writes while blocks remain free.
+		// Guard Ffree ≤ Files — some filesystems (APFS) report a huge virtual
+		// Files total with Ffree tracking it; the fraction still lands in 0..1.
+		if fs.Files > 0 && fs.Ffree <= fs.Files {
+			snap.InodeUsedFraction = float64(fs.Files-fs.Ffree) / float64(fs.Files)
+		}
 	}
 
 	// Memory and swap — platform-specific (see sys_resource_probe_{linux,darwin}.go).

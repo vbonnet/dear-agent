@@ -1,4 +1,6 @@
 # SPEC: agm/internal/ops/SPEC.md
+# RELATED-SPEC: agm/internal/eventbus/SPEC.md
+# RELATED-SPEC: agm/internal/daemon/SPEC.md
 Feature: Stall Detection
   As an AGM orchestrator
   I want stalled sessions to be detected and recovered

@@ -29,6 +29,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -49,6 +50,14 @@ import (
 // from the caller's ctx so SIGINT/SIGTERM cancellation still composes with it.
 const subprocessTimeout = 60 * time.Second
 
+// sessionSpawnTimeout bounds the `agm session new` call specifically. Unlike
+// the quick bd/gh/agm-list calls under subprocessTimeout, a spawn boots the
+// whole worker harness (tmux session, claude-code startup, workspace checks)
+// and legitimately runs past 60s; killing it mid-boot leaves a half-created
+// session AND reads as a spawn failure that stops the run. 180s is generous
+// for a healthy boot while still bounding a truly hung spawn.
+const sessionSpawnTimeout = 180 * time.Second
+
 // humanGated lists beads that must never be auto-dispatched to a worker: they
 // require a human in the loop (credential rotation, backups, repointing live
 // skills, destructive ops) or are otherwise gated by operator decision. Kept in
@@ -65,6 +74,7 @@ var humanGated = map[string]bool{
 	"ce-cd14.1":  true,
 	"ce-rrry":    true,
 	"ce-clm6":    true,
+	"ce-6as.10":  true, // interactive Gmail OAuth re-consent — HUMAN-ACTION, needs a human at the browser
 }
 
 // defaultModel is the model alias workers spawn with. opus-200k → claude-opus-4-8:
@@ -161,15 +171,40 @@ var listSessions = func(ctx context.Context) ([]string, error) {
 // "subworker-x" is a different session and must NOT be read as a live worker.
 var workerSessionRe = regexp.MustCompile(`(?m)(?:^|\s)worker-([A-Za-z0-9.-]+)`)
 
+// normalizeSessionID maps a bead id to its tmux-safe form: dots, colons and
+// spaces become dashes. This mirrors agm's tmux.NormalizeTmuxSessionName
+// (agm/internal/tmux — not importable from cmd/): tmux itself performs the same
+// conversion on session creation, and agm's tmux-safety check falls into an
+// INTERACTIVE prompt when it sees an unsafe name, which is fatal in a
+// detached/no-TTY dispatch context ("could not open a new TTY", ce-b1zw).
+// Sanitizing up front means agm never prompts — and dedup must then normalize
+// BOTH sides of the comparison, so a live session worker-ce-6as-10 dedups bead
+// ce-6as.10 and a legacy dotted session worker-ce-6as.10 dedups it too.
+func normalizeSessionID(id string) string {
+	id = strings.ReplaceAll(id, ".", "-")
+	id = strings.ReplaceAll(id, ":", "-")
+	id = strings.ReplaceAll(id, " ", "-")
+	return id
+}
+
+// workerSessionName returns the tmux-safe session name a bead's worker spawns
+// under. All session-name construction goes through here so spawn, send, and
+// dedup can never disagree about a bead's session.
+func workerSessionName(id string) string {
+	return "worker-" + normalizeSessionID(id)
+}
+
 // liveWorkerIDs scans `agm session list` output for `worker-<id>` session names
-// and returns the set of bead ids that already have a live worker. This is the
-// ground-truth replacement for vroom-prompt-gen's "already has a prompt file"
-// check: a session exists iff a worker is actually running the bead.
+// and returns the set of NORMALIZED bead ids that already have a live worker.
+// This is the ground-truth replacement for vroom-prompt-gen's "already has a
+// prompt file" check: a session exists iff a worker is actually running the
+// bead. Ids are normalized (dots→dashes) so lookups with normalizeSessionID
+// match both sanitized session names and legacy dotted ones.
 func liveWorkerIDs(lines []string) map[string]bool {
 	ids := make(map[string]bool)
 	for _, line := range lines {
 		for _, m := range workerSessionRe.FindAllStringSubmatch(line, -1) {
-			ids[m[1]] = true
+			ids[normalizeSessionID(m[1])] = true
 		}
 	}
 	return ids
@@ -341,7 +376,11 @@ func selectCandidates(beads []bead, liveWorkers map[string]bool, prs []pullReque
 		if humanGated[b.ID] {
 			continue
 		}
-		if liveWorkers[b.ID] {
+		// Live-worker dedup compares normalized ids: liveWorkerIDs normalizes
+		// what it reads from `agm session list`, and the bead id is normalized
+		// here, so the match holds whether the live session was spawned with
+		// the sanitized name or a legacy dotted one (ce-b1zw).
+		if liveWorkers[normalizeSessionID(b.ID)] {
 			continue
 		}
 		if inFlightInPR(b.ID, prs) {
@@ -374,8 +413,10 @@ func sessionNewArgs(name, model string) []string {
 }
 
 // spawnSession creates the detached worker session. Package var for test stubbing.
+// Uses sessionSpawnTimeout (not the blanket subprocessTimeout): harness boot
+// legitimately exceeds 60s — see the const's comment.
 var spawnSession = func(ctx context.Context, name, model string) error {
-	ctx, cancel := context.WithTimeout(ctx, subprocessTimeout)
+	ctx, cancel := context.WithTimeout(ctx, sessionSpawnTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "agm", sessionNewArgs(name, model)...)
 	// Mark the spawned session tree as unattended so its own `agm send` calls
@@ -404,13 +445,66 @@ var sendPrompt = func(ctx context.Context, name, prompt string) error {
 	return nil
 }
 
+// deterministicSpawnFailures are error signatures that identify a spawn failure
+// caused by THIS bead (unsafe/invalid session name, invalid bead, agm falling
+// into an interactive prompt with no TTY) rather than by system state. Such
+// failures recur identically on every retry, so aborting the run on them lets
+// one poisoned bead stall ALL dispatch every tick (ce-b1zw: 0/17 dispatched).
+// Matching is positive-signature only: anything unrecognized stays fail-closed.
+var deterministicSpawnFailures = []string{
+	"could not open a new tty", // agm hit an interactive prompt in a detached/no-TTY context
+	"invalid session name",
+	"unsafe characters", // agm tmux-safety rejection
+	"invalid bead",
+}
+
+// skipBeadError marks a deterministic per-bead spawn failure: the dispatcher
+// should log it, skip the bead, and keep working the rest of the candidate list.
+type skipBeadError struct{ err error }
+
+func (e *skipBeadError) Error() string { return e.err.Error() }
+func (e *skipBeadError) Unwrap() error { return e.err }
+
+// isDeterministicSpawnFailure classifies a spawn error: true means a per-bead
+// deterministic failure (skip the bead, continue the run); false means
+// backpressure, timeout, or unknown (stop the run — the original fail-closed
+// behavior, still correct for systemic conditions). Backpressure and
+// context-deadline errors are checked FIRST so they can never be misread as
+// per-bead even if their text happens to contain a known signature.
+func isDeterministicSpawnFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "circuit breaker") || strings.Contains(msg, "spawn refused") {
+		return false
+	}
+	for _, sig := range deterministicSpawnFailures {
+		if strings.Contains(msg, sig) {
+			return true
+		}
+	}
+	return false
+}
+
 // dispatch spawns a worker session for the bead and sends it the rendered prompt.
-// If the spawn is refused (agm circuit breaker / at capacity), the error is
-// returned and no prompt is sent — the bead is simply retried on a later run.
+// The session name is the tmux-safe form of the bead id so agm's tmux-safety
+// check never prompts (ce-b1zw); the prompt itself keeps the real bead id.
+// A deterministic per-bead spawn failure is returned wrapped in *skipBeadError
+// so the caller can skip the bead and continue; any other failure (circuit
+// breaker / at capacity / timeout / unknown) is returned as-is and no prompt is
+// sent — the bead is simply retried on a later run.
 func dispatch(ctx context.Context, b bead, model string) error {
-	name := "worker-" + b.ID
+	name := workerSessionName(b.ID)
 	if err := spawnSession(ctx, name, model); err != nil {
-		return fmt.Errorf("spawn %s: %w", name, err)
+		wrapped := fmt.Errorf("spawn %s: %w", name, err)
+		if isDeterministicSpawnFailure(err) {
+			return &skipBeadError{err: wrapped}
+		}
+		return wrapped
 	}
 	if err := sendPrompt(ctx, name, renderPrompt(b)); err != nil {
 		return fmt.Errorf("send to %s: %w", name, err)
@@ -472,17 +566,26 @@ func dispatchCandidates(ctx context.Context, candidates []bead, model string, dr
 			break
 		}
 		if dryRun {
-			fmt.Fprintf(out, "would dispatch worker-%s (%s) %s\n", b.ID, priorityLabel(b.Priority), b.Title)
+			fmt.Fprintf(out, "would dispatch %s (%s) %s\n", workerSessionName(b.ID), priorityLabel(b.Priority), b.Title)
 			dispatched++
 			continue
 		}
 		if err := dispatch(ctx, b, model); err != nil {
+			// Deterministic per-bead failure: it will fail identically on every
+			// retry, so skip this bead and keep dispatching — aborting here is
+			// how one poisoned bead stalled all dispatch every tick (ce-b1zw).
+			var skip *skipBeadError
+			if errors.As(err, &skip) {
+				fmt.Fprintf(errOut, "vroom-dispatch-direct: skip %s (deterministic spawn failure): %v\n", b.ID, err)
+				continue
+			}
 			// A refused spawn is expected backpressure, not a fatal error: log
 			// and stop this run (capacity is likely exhausted), retry next run.
+			// Timeouts and unknown errors also stop the run (fail closed).
 			fmt.Fprintf(errOut, "vroom-dispatch-direct: dispatch %s: %v\n", b.ID, err)
 			break
 		}
-		fmt.Fprintf(out, "dispatched worker-%s (%s) %s\n", b.ID, priorityLabel(b.Priority), b.Title)
+		fmt.Fprintf(out, "dispatched %s (%s) %s\n", workerSessionName(b.ID), priorityLabel(b.Priority), b.Title)
 		dispatched++
 	}
 	return dispatched

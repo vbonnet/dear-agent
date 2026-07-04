@@ -1,4 +1,20 @@
 # SPEC: internal/hookparity/SPEC.md
+# RELATED-SPEC: .codex/hooks/SPEC.md
+# RELATED-SPEC: agm/internal/hooks/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-hooks/posttool-context-monitor/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-hooks/posttool-response-masking/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-hooks/posttool-worktree-tracker/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-hooks/pre-merge-commit/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-hooks/pretool-bash-blocker/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-hooks/pretool-interrupt-check/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-hooks/pretool-npm-safety/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-hooks/pretool-test-session-guard/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-hooks/sessionend-state-reporter/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-hooks/stop-state-reporter/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-hooks/userpromptsubmit-state-reporter/SPEC.md
+# RELATED-SPEC: agm/hooks/cmd/posttool-cost-guard/SPEC.md
+# RELATED-SPEC: agm/hooks/cmd/sessionstart-chezmoi-drift/SPEC.md
+# RELATED-SPEC: agm/hooks/cmd/stop-session-guard/SPEC.md
 Feature: Hook harness parity
   Active interactive harnesses should receive the same repository guardrails
   through their native hook configuration surfaces.

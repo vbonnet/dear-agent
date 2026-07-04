@@ -202,7 +202,7 @@ func NewSession(name string, workDir string) error {
 	}
 
 	// Lock tmux server for session creation + settings (prevent parallel mutations)
-	return withTmuxLock(func() error {
+	err := withTmuxLock(func() error {
 		// Create session with detached mode (use sanitized name)
 		cmd, cancel := CommandWithTimeout(ctx, globalTimeout, "tmux", "-S", socketPath, "new-session", "-d", "-s", sanitizedName, "-c", workDir)
 		defer cancel()
@@ -287,6 +287,16 @@ func NewSession(name string, workDir string) error {
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	// Verify the pane actually landed in workDir and repair it if not.
+	// tmux silently ignores `new-session -c` when the server's own cwd has
+	// been deleted, leaving the pane in a dead directory where harness CLIs
+	// die instantly (ce-5zbg). Must run outside withTmuxLock: the repair path
+	// sends a `cd` via SendCommand, which takes the lock itself.
+	return EnsureSessionWorkDir(sanitizedName, workDir)
 }
 
 // AttachSession attaches to tmux session or switches if already inside tmux
@@ -741,12 +751,12 @@ func IsClaudeRunning(sessionName string) (bool, error) {
 		}
 	}
 
-	// Fallback: Claude runs as child of bash after crash/resume.
-	// In this state, pane_current_command shows "bash" (or zsh/sh) instead of
-	// the Claude process. Detect by capturing recent pane output and looking
-	// for the Claude prompt character.
+	// Fallback: Claude can run behind a shell after crash/resume, or behind
+	// the AGM wrapper. In this state, pane_current_command shows the wrapper
+	// instead of the Claude process. Detect by capturing recent pane output
+	// and looking for the Claude prompt character.
 	for _, cmd := range commands {
-		if cmd == "bash" || cmd == "zsh" || cmd == "sh" {
+		if isShellCommand(cmd) || cmd == "agm" {
 			ctx := context.Background()
 			socketPath := GetSocketPath()
 			normalizedName := NormalizeTmuxSessionName(sessionName)

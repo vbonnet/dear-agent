@@ -47,6 +47,13 @@ Important launch invariants:
 - model aliases are resolved through `internal/agent/models.go`
 - `-C <workdir>` pins Codex to the AGM working directory
 - `-s workspace-write` is the default sandbox
+- before every launch/resume, AGM pre-trusts the workdir by writing
+  `[projects."<workdir>"] trust_level = "trusted"` to `$CODEX_HOME/config.toml`
+  (ce-cmsq). Fresh sandbox `merged/` dirs are not git repos, and an untrusted
+  dir blocks the Codex TUI on an interactive trust prompt. Note
+  `--skip-git-repo-check` is NOT used: the TUI and `codex resume` reject the
+  flag (it is `codex exec`-only), which would brick every launch. Existing
+  entries — including explicit `untrusted` — are never overwritten.
 - app-server-backed starts preserve the same thread in Codex remote-control
   surfaces and in the AGM tmux pane
 - no Claude, Anthropic, Engram, or OpenTelemetry environment is injected

@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 // GetSessionRequest defines the input for getting a single session.
@@ -179,8 +180,17 @@ func computeSessionStatus(m *manifest.Manifest, tmux interface{}) string {
 	if err != nil {
 		return "unknown"
 	}
-	if has {
-		return "active"
+	if !has {
+		return "stopped"
 	}
-	return "stopped"
+	// The tmux session exists — but existence alone is a false-green liveness
+	// signal (ce-axsr): the session survives the harness exiting and the pane
+	// falling back to a bare shell. When the backend can prove process
+	// liveness, a dead-harness session reports "zombie" instead of "active".
+	if checker, ok := tmux.(session.HarnessLivenessChecker); ok {
+		if info, lerr := checker.HarnessLiveness(tmuxName); lerr == nil && info.SessionExists && !info.HarnessAlive {
+			return "zombie"
+		}
+	}
+	return "active"
 }

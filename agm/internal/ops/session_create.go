@@ -176,6 +176,15 @@ func CreateSession(ctx *OpContext, req *CreateSessionRequest) (*CreateSessionRes
 		return nil, ErrStorageError("tmux.CreateSession", err)
 	}
 
+	if params.harness == "codex-cli" {
+		// Pre-trust the workdir so Codex does not block on its interactive
+		// trust prompt in fresh non-git sandbox dirs (ce-cmsq). Best-effort:
+		// already-trusted dirs launch fine without it.
+		if err := agent.EnsureCodexWorkdirTrusted(req.Cwd); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not pre-trust Codex workdir %s: %v\n", req.Cwd, err)
+		}
+	}
+
 	codexMeta, err := createCodexThreadForSession(params.harness, params.model, params.name, req.Cwd)
 	if err != nil {
 		if os.Getenv("AGM_CODEX_REQUIRE_REMOTE_CONTROL") == "1" {

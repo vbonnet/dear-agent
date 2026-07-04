@@ -156,6 +156,8 @@ func TestCreateSession_DefaultsModelPerHarness(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.harness, func(t *testing.T) {
+			// Isolate the codex trust pre-write from the developer's real ~/.codex.
+			t.Setenv("CODEX_HOME", t.TempDir())
 			result, err := CreateSession(&OpContext{Tmux: session.NewMockTmux(), OutputMode: "json"}, &CreateSessionRequest{
 				Cwd:     t.TempDir(),
 				Prompt:  "test",

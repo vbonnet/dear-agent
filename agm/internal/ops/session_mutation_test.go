@@ -7,6 +7,7 @@ import (
 
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/session"
 )
 
 // --- ArchiveSession tests ---
@@ -354,10 +355,10 @@ func TestKillSession_KillProtect_RecentlyActive(t *testing.T) {
 	m := newManifest("id-1", "active-session", "~/project")
 	m.UpdatedAt = time.Now().Add(-1 * time.Minute) // active 1 min ago
 	sessions := []*manifest.Manifest{m}
-	ctx := testCtx(sessions, "active-session")
+	ctx := testCtx(sessions) // no tmux session — stopped but recently active
 
-	// With --confirmed-stuck but without --force, recently active should still be protected
-	_, err := KillSession(ctx, &KillSessionRequest{Identifier: "active-session", ConfirmedStuck: true})
+	// Without any bypass flag, recently active is protected.
+	_, err := KillSession(ctx, &KillSessionRequest{Identifier: "active-session"})
 	if err == nil {
 		t.Fatal("expected kill-protected error for recently active session")
 	}
@@ -368,6 +369,28 @@ func TestKillSession_KillProtect_RecentlyActive(t *testing.T) {
 	}
 	if opErr.Code != ErrCodeKillProtected {
 		t.Errorf("expected code %s, got %s", ErrCodeKillProtected, opErr.Code)
+	}
+}
+
+// TestKillSession_ConfirmedStuckAloneSuffices guards against the ce-axsr flag
+// ping-pong: --confirmed-stuck demanded --force, and --force demanded
+// --confirmed-stuck, so no single re-run command could kill a stuck session.
+// One flag path must be sufficient.
+func TestKillSession_ConfirmedStuckAloneSuffices(t *testing.T) {
+	m := newManifest("id-1", "active-session", "~/project")
+	m.UpdatedAt = time.Now().Add(-1 * time.Minute) // recently active
+	sessions := []*manifest.Manifest{m}
+	ctx := testCtx(sessions, "active-session") // tmux session exists
+
+	result, err := KillSession(ctx, &KillSessionRequest{
+		Identifier:     "active-session",
+		ConfirmedStuck: true,
+	})
+	if err != nil {
+		t.Fatalf("--confirmed-stuck alone must suffice for an active, recently-active session, got: %v", err)
+	}
+	if !result.RecentlyActive {
+		t.Error("expected RecentlyActive=true")
 	}
 }
 
@@ -405,6 +428,115 @@ func TestKillSession_KillProtect_OldSession(t *testing.T) {
 	}
 	if result.RecentlyActive {
 		t.Error("expected RecentlyActive=false for old session")
+	}
+}
+
+// --- KillSession harness-liveness tests (ce-axsr) ---
+
+// TestKillSession_ZombiePane_NoConfirmedStuckNeeded: a tmux session that
+// exists but whose harness process is dead (pane fell back to zsh) is NOT an
+// active session — `tmux has-session` alone is false-green.
+func TestKillSession_ZombiePane_NoConfirmedStuckNeeded(t *testing.T) {
+	m := newManifest("id-1", "zombie-session", "~/project")
+	m.UpdatedAt = time.Now().Add(-10 * time.Minute) // not recently active
+	tm := &mockTmuxWithLiveness{
+		mockTmux: newMockTmux("zombie-session"),
+		liveness: map[string]session.LivenessInfo{
+			"zombie-session": {SessionExists: true, HarnessAlive: false, ZombieWriter: true, Evidence: "zsh,agm"},
+		},
+	}
+	ctx := testCtxWithLiveness([]*manifest.Manifest{m}, tm)
+
+	result, err := KillSession(ctx, &KillSessionRequest{Identifier: "zombie-session"})
+	if err != nil {
+		t.Fatalf("zombie pane must be killable without --confirmed-stuck, got: %v", err)
+	}
+	if result.WasRunning {
+		t.Error("expected WasRunning=false: harness process is dead")
+	}
+	if !result.HarnessDead {
+		t.Error("expected HarnessDead=true")
+	}
+	if !result.ZombieWriter {
+		t.Error("expected ZombieWriter=true (orphaned agm child in pane tree)")
+	}
+	if result.LivenessEvidence != "zsh,agm" {
+		t.Errorf("expected liveness evidence to say why, got %q", result.LivenessEvidence)
+	}
+}
+
+// TestKillSession_ZombiePane_RecentlyActive_OneFlagSuffices: even when the
+// zombie's manifest was recently touched (e.g. by the orphaned writer),
+// EITHER --force or --confirmed-stuck alone must complete the kill.
+func TestKillSession_ZombiePane_RecentlyActive_OneFlagSuffices(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req  KillSessionRequest
+	}{
+		{"force alone", KillSessionRequest{Identifier: "zombie-session", Force: true}},
+		{"confirmed-stuck alone", KillSessionRequest{Identifier: "zombie-session", ConfirmedStuck: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newManifest("id-1", "zombie-session", "~/project")
+			m.UpdatedAt = time.Now().Add(-1 * time.Minute) // recently active
+			tm := &mockTmuxWithLiveness{
+				mockTmux: newMockTmux("zombie-session"),
+				liveness: map[string]session.LivenessInfo{
+					"zombie-session": {SessionExists: true, HarnessAlive: false, Evidence: "zsh"},
+				},
+			}
+			ctx := testCtxWithLiveness([]*manifest.Manifest{m}, tm)
+
+			result, err := KillSession(ctx, &tc.req)
+			if err != nil {
+				t.Fatalf("one flag must be sufficient to kill a proven-dead session, got: %v", err)
+			}
+			if !result.HarnessDead {
+				t.Error("expected HarnessDead=true")
+			}
+		})
+	}
+}
+
+// TestKillSession_LiveHarness_StillRequiresConfirmedStuck: when the process
+// check proves the harness IS running, the safety gate stays.
+func TestKillSession_LiveHarness_StillRequiresConfirmedStuck(t *testing.T) {
+	m := newManifest("id-1", "live-session", "~/project")
+	tm := &mockTmuxWithLiveness{
+		mockTmux: newMockTmux("live-session"),
+		liveness: map[string]session.LivenessInfo{
+			"live-session": {SessionExists: true, HarnessAlive: true, Evidence: "zsh,claude"},
+		},
+	}
+	ctx := testCtxWithLiveness([]*manifest.Manifest{m}, tm)
+
+	_, err := KillSession(ctx, &KillSessionRequest{Identifier: "live-session"})
+	if err == nil {
+		t.Fatal("expected active-session error: harness process is alive")
+	}
+	opErr := &OpError{}
+	if !errors.As(err, &opErr) || opErr.Code != ErrCodeActiveSessionKill {
+		t.Fatalf("expected %s, got %v", ErrCodeActiveSessionKill, err)
+	}
+}
+
+// TestKillSession_LivenessProbeError_FailsSafe: a failed process scan proves
+// nothing — the session must still be treated as active (conservative).
+func TestKillSession_LivenessProbeError_FailsSafe(t *testing.T) {
+	m := newManifest("id-1", "opaque-session", "~/project")
+	tm := &mockTmuxWithLiveness{
+		mockTmux:    newMockTmux("opaque-session"),
+		livenessErr: errors.New("ps unavailable"),
+	}
+	ctx := testCtxWithLiveness([]*manifest.Manifest{m}, tm)
+
+	_, err := KillSession(ctx, &KillSessionRequest{Identifier: "opaque-session"})
+	if err == nil {
+		t.Fatal("expected active-session error when liveness cannot be verified")
+	}
+	opErr := &OpError{}
+	if !errors.As(err, &opErr) || opErr.Code != ErrCodeActiveSessionKill {
+		t.Fatalf("expected %s, got %v", ErrCodeActiveSessionKill, err)
 	}
 }
 

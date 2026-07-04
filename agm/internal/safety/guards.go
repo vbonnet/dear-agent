@@ -1,14 +1,11 @@
 package safety
 
 import (
-	"context"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 )
@@ -162,47 +159,13 @@ func detectHumanTyping(paneContent string) *Violation {
 
 // --- Session Uninitialized Guard ---
 
-func isHarnessProcessRunning(sessionName, socketPath string, processNames ...string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-t", sessionName, "-F", "#{pane_pid}")
-	out, err := cmd.Output()
-	if ctx.Err() != nil || err != nil {
-		// Timed out, cancelled, or failed — never parse partial output.
-		return false
-	}
-	panePid := strings.TrimSpace(string(out))
-	if panePid == "" {
-		return false
-	}
-
-	psCmd := exec.CommandContext(ctx, "ps", "-o", "ppid=", "-o", "comm=", "-ax")
-	psOut, psErr := psCmd.Output()
-	if ctx.Err() != nil || psErr != nil {
-		return false
-	}
-
-	for line := range strings.SplitSeq(string(psOut), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// Split at the first whitespace only: comm may be a full path that
-		// itself contains spaces (e.g. "/Users/x/My Projects/node"), so
-		// strings.Fields would truncate it.
-		idx := strings.IndexAny(line, " \t")
-		if idx == -1 {
-			continue
-		}
-		ppid := line[:idx]
-		comm := strings.TrimSpace(line[idx:])
-		baseComm := filepath.Base(comm)
-		if ppid == panePid && (slices.Contains(processNames, baseComm) || slices.Contains(processNames, comm)) {
-			return true
-		}
-	}
-	return false
+// isHarnessProcessRunning reports whether processName is running in the
+// session pane's process tree. Delegates to the shared full-descendant scan
+// in internal/tmux (ce-axsr): the previous direct-children-only version
+// missed harnesses running as grandchildren under a shell after
+// crash-resume.
+func isHarnessProcessRunning(sessionName, socketPath, processName string) bool {
+	return tmux.IsProcessInPaneTree(sessionName, socketPath, processName)
 }
 
 // CheckSessionUninitialized detects if the target harness has not reached its
@@ -220,7 +183,7 @@ func CheckSessionUninitialized(sessionName, socketPath, harness string) *Violati
 			codexRunning = true
 		}
 		if !codexRunning {
-			codexRunning = isHarnessProcessRunning(sessionName, socketPath, "codex", "node")
+			codexRunning = isHarnessProcessRunning(sessionName, socketPath, "codex") || isHarnessProcessRunning(sessionName, socketPath, "node")
 		}
 		if !codexRunning {
 			return &Violation{

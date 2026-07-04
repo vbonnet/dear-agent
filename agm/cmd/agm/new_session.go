@@ -86,7 +86,7 @@ func startAndFinalizeSession(sessionName, sessionID, workDir string, exists bool
 	if err := runHarnessPostCreate(sessionName, modeAppliedAtStartup); err != nil {
 		return err
 	}
-	if modeFlagValue != "" && (harnessName != "claude-code" || os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "") {
+	if modeFlagValue != "" && !modeAppliedAtStartup && (harnessName != "claude-code" || os.Getenv("AGM_TEST_RUN_ID") != "" || os.Getenv("AGM_TEST_ENV") != "") {
 		applyCreationModeSwitch(sessionName, harnessName, modeFlagValue)
 	}
 	updateVSCodeTabTitle(sessionName)

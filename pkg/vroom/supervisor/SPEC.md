@@ -1,6 +1,6 @@
 # pkg/vroom/supervisor — Requirements Specification (EARS)
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-04 -->
 
 **Version**: 1.0
 **Last Updated**: 2026-07-01
@@ -14,7 +14,9 @@
 The supervisor package coordinates VROOM task dispatch. The AGM-backed queue
 adapts accepted tasks into detached `agm session new` worker sessions. Because
 that handoff crosses a CLI boundary, the generated argument list must stay in
-sync with AGM's registered `session new` flags.
+sync with AGM's registered `session new` flags. The overseer also classifies
+host pressure signals and routes memory, disk, and inode alerts to supervisors
+that can pause or reshape work before resource exhaustion causes data loss.
 
 ---
 
@@ -45,3 +47,33 @@ sync with AGM's registered `session new` flags.
 ### CLI Contract Drift
 
 **VROOM-SUP-10** When VROOM worker dispatch arguments are changed, the system shall verify that they parse against AGM's actual `session new` flag set.
+
+### Peer Liveness (ce-axsr)
+
+**VROOM-SUP-11** When a peer liveness check combines heartbeat freshness with a harness-process probe, the system shall report the peer as blocked (DEAD, with a zombie-heartbeat reason) if the probe proves no harness process is running, even when the heartbeat is fresh.
+
+**VROOM-SUP-12** When the harness-process probe returns an error, the peer liveness check shall fail open to the heartbeat check alone and shall not mark the peer dead on an unverifiable probe.
+
+### Disk and Inode Pressure (ce-6fel)
+
+**VROOM-SUP-13** When disk-alert thresholds are zero-valued, the system shall apply the default free-space and inode thresholds before classification.
+
+**VROOM-SUP-14** When measured free disk space falls below the warning or critical floors, the system shall classify the snapshot at the matching pressure level and include a free-space reason.
+
+**VROOM-SUP-15** When measured inode usage rises above the warning or critical thresholds, the system shall classify the snapshot at the matching pressure level and include an inode reason.
+
+**VROOM-SUP-16** When both free-space and inode pressure are present, the system shall report the highest pressure level warranted by either signal.
+
+**VROOM-SUP-17** When disk alerting is not explicitly wired into the overseer, the system shall leave disk-pressure snapshots quiet.
+
+**VROOM-SUP-18** When a warning disk alert is emitted, the system shall route it to the Meta-Orchestrator.
+
+**VROOM-SUP-19** When a critical disk alert is emitted, the system shall route it to both the Meta-Orchestrator and Orchestrator.
+
+**VROOM-SUP-20** When a disk alert notifier fails for one supervisor role, the system shall record the error in the decision trail and shall continue notifying remaining roles.
+
+## Test Traceability
+
+- Package tests: `pkg/vroom/supervisor/disk_alert_test.go`
+- Package tests: `pkg/vroom/supervisor/check_test.go`
+- Package tests: `pkg/vroom/supervisor/queue_test.go`

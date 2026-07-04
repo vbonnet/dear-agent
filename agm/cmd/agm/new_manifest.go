@@ -89,6 +89,12 @@ func buildSessionManifest(sessionID, sessionName, workDir string, sandboxInfo *m
 		meta := *codexMeta
 		m.Codex = &meta
 	}
+	if modeFlagValue != "" {
+		now := time.Now()
+		m.PermissionMode = modeFlagValue
+		m.PermissionModeUpdatedAt = &now
+		m.PermissionModeSource = "startup"
+	}
 	if disposable {
 		m.DisposableTTL = disposableTTL
 	}

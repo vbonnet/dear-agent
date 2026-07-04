@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
@@ -50,6 +51,12 @@ type heartbeatRecord struct {
 	TertiaryFor string    `json:"tertiary_for,omitempty"`
 	LastBeatUTC time.Time `json:"last_beat_utc"`
 	PID         int       `json:"pid,omitempty"`
+	// TmuxSession is the tmux session the heartbeat was written from,
+	// self-reported best-effort at beat time. It lets `agm supervisor status`
+	// verify that a harness process is actually running where the heartbeat
+	// claims to come from — a fresh heartbeat alone is false-green when an
+	// orphaned writer keeps beating after the harness died (ce-axsr/ce-qkf7).
+	TmuxSession string `json:"tmux_session,omitempty"`
 }
 
 // vroomHeartbeatFile is the flat JSON shape read by the Overseer SKILL at
@@ -256,7 +263,11 @@ Exit codes (so this can drive a monitoring check with severity gradation):
       is required. Supersedes 3.
 
 A supervisor is stale when its heartbeat is older than --stale-after
-(default 5m).`,
+(default 5m). Heartbeat freshness alone is NOT proof of liveness: a fresh
+heartbeat is cross-checked against the supervisor's tmux pane process tree,
+and a fresh heartbeat with no live harness process reports as ZOMBIE and
+counts as stale (an orphaned writer is beating for a dead supervisor —
+ce-axsr/ce-qkf7).`,
 	RunE: runSupervisorStatus,
 }
 
@@ -455,6 +466,12 @@ func runSupervisorHeartbeat(cmd *cobra.Command, _ []string) error {
 		LastBeatUTC: now,
 		PID:         os.Getpid(),
 	}
+	// Self-report the tmux session so status can verify a harness process is
+	// actually running where this heartbeat claims to come from (ce-axsr).
+	// Best-effort: outside tmux the field stays empty.
+	if tmuxSession, tsErr := tmux.GetCurrentSessionName(); tsErr == nil {
+		rec.TmuxSession = tmuxSession
+	}
 	path, err := heartbeatPath(id)
 	if err != nil {
 		return err
@@ -532,6 +549,123 @@ type supervisorRow struct {
 	QuorumLost  bool             `json:"quorum_lost"`
 	Recoverers  []string         `json:"recoverers,omitempty"`
 	Record      *heartbeatRecord `json:"record,omitempty"`
+	// ProcessAlive reports that a harness process was verified running in
+	// the supervisor's tmux session pane tree. Heartbeat freshness alone is
+	// false-green (ce-axsr/ce-qkf7): an orphaned writer can keep the
+	// heartbeat fresh for hours after the harness died.
+	ProcessAlive bool `json:"process_alive,omitempty"`
+	// Zombie reports a fresh heartbeat WITHOUT a live harness process — the
+	// exact ce-qkf7 failure mode. A zombie is treated as stale/DEAD for exit
+	// codes and mesh-recovery reachability.
+	Zombie bool `json:"zombie,omitempty"`
+	// Reason explains a Zombie verdict or why process liveness could not be
+	// verified.
+	Reason string `json:"reason,omitempty"`
+}
+
+// paneProbe is the process-liveness verdict for one tmux session, decoupled
+// from the tmux package so status logic is table-testable with fakes.
+type paneProbe struct {
+	Exists       bool
+	HarnessAlive bool
+	ZombieWriter bool
+	Evidence     string
+}
+
+// probeSupervisorPane resolves harness-process liveness for a supervisor's
+// tmux session. Injectable for tests.
+var probeSupervisorPane = func(sessionName string) (paneProbe, error) {
+	pl, err := tmux.CheckPaneLiveness(sessionName, tmux.GetSocketPath())
+	if err != nil {
+		return paneProbe{}, err
+	}
+	return paneProbe{
+		Exists:       pl.SessionExists,
+		HarnessAlive: pl.HarnessAlive,
+		ZombieWriter: pl.ZombieWriter,
+		Evidence:     pl.Evidence,
+	}, nil
+}
+
+// supervisorTmuxSession resolves the tmux session to verify for a row.
+// Prefers the session the heartbeat self-reported (explicit=true); falls back
+// to the supervisor id itself when it is already a VROOM session name (the
+// deployed mesh registers ids like "vroom-meta-orchestrator"), then to the
+// well-known VROOM session name for short mesh roles (both explicit=false).
+// Returns "" when there is nothing to verify against.
+func supervisorTmuxSession(r supervisorRow) (name string, explicit bool) {
+	if r.Record != nil && r.Record.TmuxSession != "" {
+		return r.Record.TmuxSession, true
+	}
+	if strings.HasPrefix(r.ID, "vroom-") {
+		return r.ID, false
+	}
+	switch r.ID {
+	case "meta-o", "orch", "overseer":
+		return "vroom-" + supervisorRole(r.ID), false
+	}
+	return "", false
+}
+
+// applyProcessLiveness cross-checks each FRESH heartbeat against the actual
+// process state of the supervisor's tmux session (ce-axsr). A fresh heartbeat
+// with no live harness process is a zombie: something external (e.g. an
+// orphaned agm child, ce-qkf7) is writing the heartbeat, and the supervisor
+// is DEAD. Zombies are marked Stale so exit codes and mesh-recovery
+// reachability treat them as dead.
+//
+// Fail-safe rules:
+//   - Rows already stale/missing are left alone — heartbeat age was decisive.
+//   - A probe error, or no tmux session to verify against, never flips a row
+//     red: the row keeps its fresh verdict with Reason noting "unverified".
+//   - A MISSING tmux session only proves death when the heartbeat itself
+//     recorded that session (explicit): the writer claims to run in a session
+//     that no longer exists. For inferred (role-mapped) names, a missing
+//     session is treated as unverifiable — the supervisor may legitimately
+//     run outside tmux.
+//
+// Returns true if any row is stale after application. Pure over rows given a
+// fake probe, so it is table-testable.
+func applyProcessLiveness(rows []supervisorRow, probe func(sessionName string) (paneProbe, error)) bool {
+	anyStale := false
+	for i := range rows {
+		r := &rows[i]
+		if r.Stale || r.Missing {
+			anyStale = true
+			continue
+		}
+		sessionName, explicit := supervisorTmuxSession(*r)
+		if sessionName == "" {
+			r.Reason = "process liveness unverified: no tmux session recorded for this supervisor"
+			continue
+		}
+		p, err := probe(sessionName)
+		if err != nil {
+			r.Reason = fmt.Sprintf("process liveness unverified: probe of %q failed: %v", sessionName, err)
+			continue
+		}
+		switch {
+		case p.Exists && p.HarnessAlive:
+			r.ProcessAlive = true
+		case p.Exists && !p.HarnessAlive:
+			r.Zombie = true
+			r.Stale = true
+			r.Reason = fmt.Sprintf("ZOMBIE: heartbeat is fresh but no harness process is running in tmux session %q (pane tree: %s)", sessionName, p.Evidence)
+			if p.ZombieWriter {
+				r.Reason += " — an orphaned agm process in the pane tree is likely writing this heartbeat"
+			}
+		case !p.Exists && explicit:
+			r.Zombie = true
+			r.Stale = true
+			r.Reason = fmt.Sprintf("ZOMBIE: heartbeat is fresh but its recorded tmux session %q no longer exists — an orphaned writer is beating for a dead supervisor", sessionName)
+		default: // !p.Exists && !explicit
+			r.Reason = fmt.Sprintf("process liveness unverified: inferred tmux session %q not found (supervisor may run outside tmux)", sessionName)
+		}
+		if r.Stale {
+			anyStale = true
+		}
+	}
+	return anyStale
 }
 
 // annotateMeshRecovery cross-references the per-supervisor staleness flags
@@ -608,6 +742,12 @@ func runSupervisorStatus(cmd *cobra.Command, args []string) error {
 	rows, anyStale, err := buildSupervisorStatusRows(ids)
 	if err != nil {
 		return err
+	}
+	// Heartbeat freshness alone must not prove liveness (ce-axsr/ce-qkf7):
+	// verify a harness process actually runs where each fresh heartbeat
+	// claims to come from. Zombies (fresh beat, dead process) become stale.
+	if processStale := applyProcessLiveness(rows, probeSupervisorPane); processStale {
+		anyStale = true
 	}
 	// Cross-reference staleness against the mesh liveness graph so a stale
 	// supervisor whose recoverers are also dead surfaces as quorum-lost rather
@@ -725,6 +865,9 @@ func emitSupervisorStatus(cmd *cobra.Command, rows []supervisorRow) error {
 			if r.Missing {
 				state = "NEVER"
 			}
+			if r.Zombie {
+				state = "ZOMBIE"
+			}
 		}
 		// RECOVERY reflects whether the mesh can re-drive this supervisor from
 		// inside: a live supervisor is "ok"; a stale one is "recoverable" while
@@ -738,6 +881,9 @@ func emitSupervisorStatus(cmd *cobra.Command, rows []supervisorRow) error {
 			}
 		}
 		_, _ = fmt.Fprintf(w, "%-16s %-12s %-10s %-12s %s\n", r.ID, age, state, recovery, mesh)
+		if r.Reason != "" {
+			_, _ = fmt.Fprintf(w, "%-16s   %s\n", "", r.Reason)
+		}
 	}
 	return nil
 }

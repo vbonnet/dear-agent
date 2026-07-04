@@ -72,7 +72,7 @@ type Plan struct {
 	// nil falls back to the package default in DefaultSeverityPolicy.
 	SeverityPolicy map[Severity]SeverityRule
 	// DryRun, when true, records findings but does not invoke the
-	// Remediator. Used by `workflow audit run --dry-run`.
+	// Remediator. Used by workflow-audit run --dry-run.
 	DryRun bool
 }
 
@@ -98,9 +98,9 @@ type ScheduledCheck struct {
 // a Finding fails the audit run, what default Strategy to apply when
 // the check did not specify one, and whether to notify.
 type SeverityRule struct {
-	FailRun        bool
+	FailRun         bool
 	DefaultStrategy Strategy
-	Notify         bool
+	Notify          bool
 }
 
 // DefaultSeverityPolicy returns the recommended defaults from

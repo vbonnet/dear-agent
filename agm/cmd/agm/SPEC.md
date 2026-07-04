@@ -26,6 +26,24 @@ Provide a production-ready CLI that:
 
 **CLI-02** When AGM builds a Codex CLI launch or resume command, the system shall resolve the selected model alias to the full Codex model name before invoking the harness.
 
+**CLI-03** When `agm supervisor heartbeat` runs inside a tmux session, the system shall record that tmux session name in the heartbeat record so status can verify a harness process is actually running where the heartbeat claims to come from.
+
+**CLI-04** When `agm supervisor status` finds a fresh heartbeat, the system shall cross-check the supervisor's tmux pane process tree; a fresh heartbeat with no live harness process shall report as ZOMBIE, count as stale for exit codes and mesh-recovery reachability, and include a reason naming any orphaned agm writer (ce-axsr/ce-qkf7).
+
+**CLI-05** When a supervisor's process liveness cannot be verified (probe error, or no tmux session recorded and no known role mapping), the system shall keep the heartbeat-based verdict in `agm supervisor status` and annotate the row as unverified rather than marking it dead.
+
+**CLI-06** When `agm session kill` completes against a session whose harness process was proven dead, the system shall tell the user why the kill did not require `--confirmed-stuck`, including the pane-tree evidence and any orphaned agm heartbeat writer.
+
+**CLI-07** When AGM starts or resumes a Codex CLI harness in a working directory, the system shall record that directory as a trusted Codex project in `$CODEX_HOME/config.toml` before sending the launch command, so a fresh non-git sandbox directory cannot block startup on Codex's interactive trust prompt (ce-cmsq).
+
+**CLI-08** If pre-trusting the Codex working directory fails, the system shall emit a warning and still attempt the harness launch.
+
+**CLI-09** When AGM installs a launchd schedule from an embedded plist template, the system shall set the job's WorkingDirectory to the invoking user's home directory, so launchd does not start the job with cwd=/ (ce-k414).
+
+**CLI-10** When AGM starts AGY with startup permission mode `auto`, the system shall launch AGY with its skip-permissions mechanism and shall treat the mode as already applied at startup.
+
+**CLI-11** When AGM builds a session manifest with a startup permission mode, the system shall persist the permission mode, source, and update timestamp so resume and audit surfaces reflect the launch contract.
+
 ## Requirements
 
 ### Functional Requirements

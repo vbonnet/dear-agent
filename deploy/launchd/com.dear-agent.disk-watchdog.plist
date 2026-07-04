@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for the disk watchdog (ce-6fel).
+
+  Runs `disk-watchdog` every 5 minutes. Each tick samples disk free space and
+  inode usage for "/", logs a watchdog.disk.alarm record to
+  ~/.agm/vroom/trail.jsonl when a threshold is breached (free < 20 GiB WARN /
+  < 5 GiB CRITICAL; inodes > 90% WARN / > 95% CRITICAL), and remediates by
+  reaping provably-merged worktree husks via `agm worktree sweep` in execute
+  mode. Dirty, active, and unpushed worktrees are never touched.
+
+  This is the host-level backstop of the 2026-07-03 disk-full P0: the VROOM
+  Overseer classifies the same thresholds in-process every tick
+  (supervisor.WithDiskAlert), but the mesh only alarms while it is running —
+  a full disk is exactly the state that takes the mesh down, so an independent
+  launchd tick must fire regardless.
+
+  The plist is a TEMPLATE: the install target
+  (make install-disk-watchdog-launchagent) substitutes __HOME__ for the real
+  home directory before staging it into ~/Library/LaunchAgents (launchd does
+  not expand ~ or shell variables).
+
+  Activate (ask-gated host action):
+    launchctl bootstrap gui/$(id -u) \
+      ~/Library/LaunchAgents/com.dear-agent.disk-watchdog.plist
+
+  Trigger an immediate run outside the schedule:
+    launchctl kickstart gui/$(id -u)/com.dear-agent.disk-watchdog
+
+  Remove:
+    launchctl bootout gui/$(id -u)/com.dear-agent.disk-watchdog
+    rm ~/Library/LaunchAgents/com.dear-agent.disk-watchdog.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dear-agent.disk-watchdog</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/go/bin/disk-watchdog</string>
+    <string>--agm</string>
+    <string>__HOME__/go/bin/agm</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/go/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>__HOME__</string>
+  </dict>
+
+  <!-- One tick every 5 minutes. launchd never starts a second instance of the
+       same label, so a slow remediation sweep cannot overlap the next tick. -->
+  <key>StartInterval</key>
+  <integer>300</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Never let two ticks overlap. -->
+  <key>AbandonProcessGroup</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.local/state/dear-agent/disk-watchdog.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.local/state/dear-agent/disk-watchdog.err.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <!-- Working dir: user's home. launchd otherwise starts jobs with cwd=/ (ce-k414). -->
+  <key>WorkingDirectory</key>
+  <string>__HOME__</string>
+</dict>
+</plist>

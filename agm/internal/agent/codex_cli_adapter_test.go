@@ -108,6 +108,8 @@ func TestCodexCreateSessionStoresMetadataEvenIfComposerWaitTimesOut(t *testing.T
 
 func TestCodexResumeSessionRestartsDeadProcess(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/fake-tmux")
+	// Isolate the codex trust pre-write from the developer's real ~/.codex.
+	t.Setenv("CODEX_HOME", t.TempDir())
 
 	origHasSession := codexHasSession
 	origNewSession := codexNewSession
