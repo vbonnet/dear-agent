@@ -27,6 +27,7 @@ var (
 	codexAttachSession    = tmux.AttachSession
 	codexIsIdle           = tmux.IsCodexIdle
 	codexIsProcessRunning = tmux.IsProcessRunning
+	ensureCodexTrusted    = EnsureCodexWorkdirTrusted
 )
 
 // NewCodexCLIAdapter creates a Codex CLI adapter.
@@ -78,6 +79,11 @@ func (a *CodexCLIAdapter) CreateSession(ctx SessionContext) (SessionID, error) {
 		model, _ = DefaultModelForHarness("codex-cli")
 	}
 	resolvedModel := ResolveModelFullName("codex-cli", model)
+	// Pre-trust the workdir so Codex does not block on its interactive trust
+	// prompt in fresh non-git sandbox dirs (ce-cmsq). Best-effort.
+	if err := ensureCodexTrusted(workDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not pre-trust Codex workdir %s: %v\n", workDir, err)
+	}
 	cmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s codex -m %s -C %s -s workspace-write && exit",
 		shellQuote(tmuxName), shellQuote(resolvedModel), shellQuote(workDir))
 	if err := codexSendCommand(tmuxName, cmd); err != nil {
@@ -136,6 +142,11 @@ func (a *CodexCLIAdapter) ResumeSession(sessionID SessionID) error {
 	if sendCommands {
 		model, _ := DefaultModelForHarness("codex-cli")
 		resolvedModel := ResolveModelFullName("codex-cli", model)
+		// Pre-trust the workdir so the Codex relaunch does not block on its
+		// interactive trust prompt in non-git sandbox dirs (ce-cmsq).
+		if err := ensureCodexTrusted(metadata.WorkingDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not pre-trust Codex workdir %s: %v\n", metadata.WorkingDir, err)
+		}
 		cmd := fmt.Sprintf("env -u CLAUDECODE AGM_SESSION_NAME=%s codex -m %s -C %s -s workspace-write",
 			shellQuote(metadata.TmuxName), shellQuote(resolvedModel), shellQuote(metadata.WorkingDir))
 		if metadata.UUID != "" {

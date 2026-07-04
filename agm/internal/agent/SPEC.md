@@ -49,6 +49,16 @@ compatibility.
 
 **AGP-11** When a user selects an active harness's test mode, the system shall choose a low-cost test model for `claude-code`, `codex-cli`, `agy`, and `opencode-cli`.
 
+### Codex Workdir Trust (ce-cmsq)
+
+**AGP-14** When a Codex CLI session is created or resumed through the codex-cli adapter, the system shall record the working directory as a trusted Codex project in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`) before sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt.
+
+**AGP-15** When the trusted-projects config already contains an entry for the working directory — at any trust level — the system shall leave the config unmodified, preserving explicit user distrust decisions.
+
+**AGP-16** When appending a trust entry, the system shall preserve the existing config bytes, escape the directory path as a TOML basic-string key, and replace the file atomically; if the existing config fails to parse, the system shall leave the file untouched and report an error rather than risk a duplicate-table append that would break every subsequent Codex launch.
+
+**AGP-17** If pre-trusting the working directory fails, the codex-cli adapter shall warn and still attempt the launch.
+
 ### BDD Enforcement
 
 **AGP-12** When a new active harness or model family is added, the system shall require BDD scenarios and registry tests that cross-cut the active parity matrix before the change is complete.

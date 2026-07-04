@@ -111,6 +111,8 @@ surfaces (CLI, MCP server, Skills plugin). Every surface constructs an
 
 **OPS-42** When Codex remote-control thread creation fails and `AGM_CODEX_REQUIRE_REMOTE_CONTROL` is set to `1`, the system shall fail session creation instead of silently starting an untracked Codex thread.
 
+**OPS-48** When `CreateSession` creates a `codex-cli` session, the system shall record the session's working directory as a trusted Codex project in `$CODEX_HOME/config.toml` before creating the Codex thread or sending the launch command, so a fresh non-git sandbox directory cannot block Codex startup on its interactive trust prompt (ce-cmsq); if the pre-trust write fails, the system shall warn and still attempt the launch.
+
 **OPS-36** While a session's state is OFFLINE, READY, or DONE, the stall detector shall skip error-loop detection for that session.
 
 ### Field Mask Projection
