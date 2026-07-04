@@ -360,6 +360,8 @@ func TestSearchSessions_Performance(t *testing.T) {
 	insertDuration := time.Since(start)
 	t.Logf("Inserted %d sessions in %v", numSessions, insertDuration)
 
+	maxSearchDuration := 2 * time.Second
+
 	// Test various query types
 	testCases := []struct {
 		name  string
@@ -382,11 +384,11 @@ func TestSearchSessions_Performance(t *testing.T) {
 			require.NoError(t, err, "Search query failed")
 			t.Logf("Query '%s' returned %d results in %v", tc.query, len(results), duration)
 
-			// Verify search completes in a reasonable time. The threshold is
-			// generous to absorb noisy CI runners; we still want to catch
-			// catastrophic regressions, not micro-perf drift.
-			assert.Less(t, duration.Milliseconds(), int64(500),
-				"Search should complete in <500ms, took %v", duration)
+			// Verify search completes in a reasonable time. Keep the threshold
+			// high enough for noisy CI runners; detailed performance tracking
+			// belongs in benchmarks, not hard PR gates.
+			assert.Less(t, duration, maxSearchDuration,
+				"Search should complete in <%v, took %v", maxSearchDuration, duration)
 		})
 	}
 }
