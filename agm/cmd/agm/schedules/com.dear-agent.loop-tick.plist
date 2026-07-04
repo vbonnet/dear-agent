@@ -60,5 +60,9 @@
 
     <key>ProcessType</key>
     <string>Background</string>
+
+    <!-- Working dir: user's home. launchd otherwise starts jobs with cwd=/ (ce-k414). -->
+    <key>WorkingDirectory</key>
+    <string>__USER_HOME__</string>
 </dict>
 </plist>
