@@ -68,6 +68,9 @@ func engramRetrieve(ctx context.Context, cfg *Config, input EngramRetrieveInput)
 		"retrieve", "--query", input.Query, "--limit", strconv.Itoa(topK), "--format", "json")
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		var exitErr *exec.ExitError
 		msg := err.Error()
 		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {

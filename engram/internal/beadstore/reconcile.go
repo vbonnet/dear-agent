@@ -94,7 +94,7 @@ func (s *Store) Reconcile(ctx context.Context, legacyPath string, dryRun bool) (
 	byBackfillSrc := map[string]string{} // legacy ID -> bead ID
 	byTitle := map[string]string{}       // lowercase title -> bead ID
 	for _, b := range existing {
-		byTitle[strings.ToLower(strings.TrimSpace(b.Title))] = b.ID
+		byTitle[titleKey(b.Title)] = b.ID
 		for _, l := range b.Labels {
 			if src, ok := strings.CutPrefix(l, BackfillLabelPrefix); ok {
 				byBackfillSrc[src] = b.ID
@@ -119,13 +119,15 @@ func (s *Store) Reconcile(ctx context.Context, legacyPath string, dryRun bool) (
 			entry.BeadID = byBackfillSrc[lb.ID]
 			entry.Reason = "already backfilled"
 			res.Skipped = append(res.Skipped, entry)
-		case byTitle[strings.ToLower(strings.TrimSpace(lb.Title))] != "":
-			entry.BeadID = byTitle[strings.ToLower(strings.TrimSpace(lb.Title))]
+		case byTitle[titleKey(lb.Title)] != "":
+			entry.BeadID = byTitle[titleKey(lb.Title)]
 			entry.Reason = "bead with same title already in store"
 			res.Skipped = append(res.Skipped, entry)
 		case dryRun:
 			entry.Reason = "would create (dry run)"
 			res.Created = append(res.Created, entry)
+			byBackfillSrc[lb.ID] = entry.Reason
+			byTitle[titleKey(lb.Title)] = entry.Reason
 		default:
 			bead, err := s.VerifiedCreate(ctx, CreateRequest{
 				Title:       lb.Title,
@@ -140,9 +142,15 @@ func (s *Store) Reconcile(ctx context.Context, legacyPath string, dryRun bool) (
 			}
 			entry.BeadID = bead.ID
 			res.Created = append(res.Created, entry)
+			byBackfillSrc[lb.ID] = bead.ID
+			byTitle[titleKey(lb.Title)] = bead.ID
 		}
 	}
 	return res, nil
+}
+
+func titleKey(title string) string {
+	return strings.ToLower(strings.TrimSpace(title))
 }
 
 // clampPriority maps the legacy 0-5 priority range onto bd's 0-4.

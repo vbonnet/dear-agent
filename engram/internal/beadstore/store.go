@@ -19,6 +19,7 @@
 package beadstore
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -229,5 +230,5 @@ func (s *Store) List(ctx context.Context, all bool) ([]Bead, error) {
 }
 
 func bytesTrim(b []byte) []byte {
-	return []byte(strings.TrimSpace(string(b)))
+	return bytes.TrimSpace(b)
 }

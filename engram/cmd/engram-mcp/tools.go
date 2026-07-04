@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vbonnet/dear-agent/engram/internal/beadstore"
@@ -153,7 +154,10 @@ func addWayfinderPhaseStatusTool(server *mcp.Server, _ *Config) {
 // --- Result helpers (same shape as agm-mcp-server) ---
 
 func mcpSuccess(result any) *mcp.CallToolResult {
-	data, _ := json.Marshal(result)
+	data, err := json.Marshal(result)
+	if err != nil {
+		return mcpError(fmt.Errorf("marshal result: %w", err))
+	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
 	}

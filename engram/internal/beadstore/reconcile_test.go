@@ -99,6 +99,52 @@ func TestReconcile_DryRunWritesNothing(t *testing.T) {
 	}
 }
 
+func TestReconcile_SkipsDuplicatesWithinLegacyFile(t *testing.T) {
+	legacy := `{"id": "aa", "title": "Duplicate title", "description": "first", "priority": 2, "labels": [], "estimated_minutes": 10, "status": "open", "created_at": "2026-07-01T00:00:00Z"}
+{"id": "aa", "title": "Different title same legacy ID", "description": "same id", "priority": 2, "labels": [], "estimated_minutes": 10, "status": "open", "created_at": "2026-07-01T00:00:00Z"}
+{"id": "bb", "title": "duplicate title", "description": "same title", "priority": 2, "labels": [], "estimated_minutes": 10, "status": "open", "created_at": "2026-07-01T00:00:00Z"}
+`
+	calls := []fakeCall{
+		{stdout: `[]`}, // list
+		{stdout: `{"id":"ce-aa","title":"Duplicate title","status":"open"}`},
+		{stdout: `[{"id":"ce-aa","title":"Duplicate title","status":"open"}]`},
+	}
+	s := &Store{DBPath: "/tmp/db/.beads", Run: fakeRunner(t, &calls)}
+
+	res, err := s.Reconcile(context.Background(), writeLegacy(t, legacy), false)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(res.Created) != 1 || res.Created[0].LegacyID != "aa" {
+		t.Fatalf("Created = %+v, want only first legacy bead", res.Created)
+	}
+	if len(res.Skipped) != 2 {
+		t.Fatalf("Skipped = %+v, want duplicate ID and duplicate title skipped", res.Skipped)
+	}
+	if res.Skipped[0].BeadID != "ce-aa" || res.Skipped[1].BeadID != "ce-aa" {
+		t.Fatalf("duplicates should point at created bead ce-aa, got skipped %+v", res.Skipped)
+	}
+}
+
+func TestReconcile_DryRunSkipsDuplicatesWithinLegacyFile(t *testing.T) {
+	legacy := `{"id": "aa", "title": "Duplicate title", "description": "first", "priority": 2, "labels": [], "estimated_minutes": 10, "status": "open", "created_at": "2026-07-01T00:00:00Z"}
+{"id": "bb", "title": "duplicate title", "description": "same title", "priority": 2, "labels": [], "estimated_minutes": 10, "status": "open", "created_at": "2026-07-01T00:00:00Z"}
+`
+	calls := []fakeCall{{stdout: `[]`}}
+	s := &Store{DBPath: "/tmp/db/.beads", Run: fakeRunner(t, &calls)}
+
+	res, err := s.Reconcile(context.Background(), writeLegacy(t, legacy), true)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(res.Created) != 1 || res.Created[0].LegacyID != "aa" {
+		t.Fatalf("Created = %+v, want only first legacy bead", res.Created)
+	}
+	if len(res.Skipped) != 1 {
+		t.Fatalf("Skipped = %+v, want duplicate title skipped", res.Skipped)
+	}
+}
+
 func TestReconcile_MissingJSONLIsError(t *testing.T) {
 	s := &Store{DBPath: "/tmp/db/.beads", Run: fakeRunner(t, &[]fakeCall{})}
 	if _, err := s.Reconcile(context.Background(), "/nonexistent/issues.jsonl", false); err == nil {
