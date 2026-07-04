@@ -1,6 +1,6 @@
 # AGM tmux Delivery Specification
 
-<!-- Last audited at: 2026-07-03 -->
+<!-- Last audited at: 2026-07-04 -->
 
 ## Purpose
 
@@ -10,7 +10,9 @@ serializes send-keys operations, stashes potentially human-authored input, and
 keeps prompt delivery behavior consistent across supported CLI harnesses. It
 also owns the harness-process liveness scan (ce-axsr): proving a harness
 process is actually running in a pane's process tree, because tmux session
-existence alone is a false-green liveness signal.
+existence alone is a false-green liveness signal. It also verifies and repairs
+new-session working directories when tmux silently ignores `new-session -c`
+because the tmux server's own cwd has been deleted.
 
 ## EARS Requirements
 
@@ -29,3 +31,17 @@ existence alone is a false-green liveness signal.
 **TMUX-07** When a liveness scan finds no harness process but finds an agm process in a pane's descendant tree, the system shall report the zombie-writer condition alongside the dead verdict.
 
 **TMUX-08** When a liveness scan classifies a session as dead, the system shall include the pane's descendant process names as evidence so callers can report why the session was treated as dead.
+
+**TMUX-09** When a new tmux session is created with a requested work directory, the system shall verify the active pane's `pane_current_path` before launching the harness.
+
+**TMUX-10** When tmux starts the pane outside the requested work directory, the system shall send a corrective quoted `cd` command after a short grace period.
+
+**TMUX-11** When the pane cannot be verified in the requested work directory before the deadline, the system shall return an error that explains tmux may have ignored `new-session -c` because the tmux server cwd was deleted.
+
+**TMUX-12** When work directory comparison runs, the system shall canonicalize paths and tolerate symlink resolution and trailing slash differences.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/harness_parity.feature`
+- Package tests: `agm/internal/tmux/workdir_test.go`
+- Package tests: `agm/internal/tmux/liveness_test.go`
