@@ -1,6 +1,7 @@
 # SPEC: agm/internal/engramparity/SPEC.md
 # RELATED-SPEC: engram/cmd/engram-mcp/SPEC.md
 # RELATED-SPEC: engram/internal/beadstore/SPEC.md
+# RELATED-SPEC: agm/internal/engram/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/beads/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/personas/SPEC.md
 Feature: Engram harness parity
