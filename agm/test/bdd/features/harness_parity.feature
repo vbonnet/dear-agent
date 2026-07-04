@@ -11,6 +11,11 @@
 # RELATED-SPEC: agm/internal/tmux/SPEC.md
 # RELATED-SPEC: agm/internal/bus/SPEC.md
 # RELATED-SPEC: agm/internal/messages/SPEC.md
+# RELATED-SPEC: agm/internal/config/SPEC.md
+# RELATED-SPEC: agm/internal/daemon/SPEC.md
+# RELATED-SPEC: agm/internal/eventbus/SPEC.md
+# RELATED-SPEC: agm/internal/interrupt/SPEC.md
+# RELATED-SPEC: agm/internal/lifecycle/SPEC.md
 # RELATED-SPEC: agm/internal/backend/SPEC.md
 # RELATED-SPEC: agm/internal/manager/SPEC.md
 # RELATED-SPEC: agm/internal/readiness/SPEC.md
