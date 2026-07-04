@@ -1,4 +1,6 @@
 # SPEC: agm/internal/engramparity/SPEC.md
+# RELATED-SPEC: engram/cmd/engram-mcp/SPEC.md
+# RELATED-SPEC: engram/internal/beadstore/SPEC.md
 Feature: Engram harness parity
   AGM should preserve Engram retrieval metadata and context injection contracts
   across every active harness.

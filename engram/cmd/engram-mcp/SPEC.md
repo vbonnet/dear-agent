@@ -1,6 +1,6 @@
 # Engram MCP Server (Go) - Specification
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-04 -->
 
 ## Overview
 
@@ -68,3 +68,8 @@ is the root cause this server exists to fix.
   including a regression test reproducing the acknowledged-but-not-landed
   write (`TestVerifiedCreate_AcknowledgedButNotLanded`).
 - `engram/cmd/engram-mcp`: unit tests for the read-tool ports and parsers.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/engram_parity.feature`
+- Related SPEC: `engram/internal/beadstore/SPEC.md`
