@@ -513,6 +513,10 @@ const minSpawnInterval = 2 * time.Minute
 // maxSpawnAttempts bounds the retry-on-refusal loop in spawnSessionWithRetry.
 const maxSpawnAttempts = 3
 
+// spawnCommandTimeout bounds one `agm session new` subprocess. A hung spawn
+// must not stall the supervisor recovery loop indefinitely.
+const spawnCommandTimeout = 5 * time.Minute
+
 // spawnTooSoonMarker is the substring agm prints when its spawn circuit breaker
 // refuses a too-soon spawn. Matching on the message (rather than an exit code)
 // keeps us decoupled from agm's internal error taxonomy.
@@ -522,7 +526,10 @@ const spawnTooSoonMarker = "spawn too soon"
 // combined output. It is a package var so tests can stub the spawn without
 // shelling out to agm.
 var runSpawn = func(sup supervisor, model string) ([]byte, error) {
-	cmd := exec.Command("agm", sessionNewArgs(sup, model)...)
+	ctx, cancel := context.WithTimeout(context.Background(), spawnCommandTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "agm", sessionNewArgs(sup, model)...)
 	// ce-v9in: mark the whole spawned session tree as unattended so every
 	// `agm send` it makes (including peer-to-peer mesh sends) auto-stashes its
 	// own stale input (C-s) instead of deadlocking on it as if a human were typing.

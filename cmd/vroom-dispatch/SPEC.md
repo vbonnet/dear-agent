@@ -29,6 +29,8 @@ harness when a supervisor is stale.
 
 **VD-08** When supervisor role metadata is present, the system shall pass the matching `--role` flag to `agm session new` so the supervisor receives its RBAC permission profile.
 
+**VD-09** When `vroom-dispatch` invokes `agm session new` for supervisor recovery, the system shall bound the subprocess with an internal timeout so a hung spawn cannot stall the recovery loop indefinitely.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
