@@ -40,6 +40,14 @@ type HarnessLivenessChecker interface {
 	HarnessLiveness(sessionName string) (LivenessInfo, error)
 }
 
+// HarnessLivenessBatchChecker is the batch form of HarnessLivenessChecker:
+// one scan for many sessions using a constant number of subprocesses. List
+// paths must prefer this capability so N sessions do not cost 3N subprocess
+// spawns. The result map is keyed by the requested session names.
+type HarnessLivenessBatchChecker interface {
+	HarnessLivenessBatch(sessionNames []string) (map[string]LivenessInfo, error)
+}
+
 // TmuxInterface provides an abstraction for tmux operations
 // This allows mocking tmux in tests without requiring real tmux to be installed
 type TmuxInterface interface {

@@ -201,6 +201,21 @@ func TestIsHarnessComm(t *testing.T) {
 	}
 }
 
+func TestClassifyPaneLiveness_EvidenceTruncatesOnRuneBoundary(t *testing.T) {
+	// Build a pane tree whose comm names exceed the evidence cap with
+	// multi-byte runes right at the boundary.
+	procs := []ProcEntry{{PID: 100, PPID: 1, Comm: strings.Repeat("é", 300)}}
+	got := ClassifyPaneLiveness([]int{100}, procs, IsHarnessComm)
+	if !strings.HasSuffix(got.Evidence, "...") {
+		t.Fatalf("expected truncated evidence, got %q", got.Evidence)
+	}
+	for i, r := range got.Evidence {
+		if r == '�' {
+			t.Fatalf("evidence contains invalid UTF-8 at byte %d: %q", i, got.Evidence)
+		}
+	}
+}
+
 func TestParsePSTable(t *testing.T) {
 	out := "  100     1 zsh\n" +
 		"  200   100 /Users/x/My Projects/node\n" +

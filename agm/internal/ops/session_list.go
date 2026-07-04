@@ -190,15 +190,15 @@ func computeStatuses(manifests []*manifest.Manifest, tmux interface{}) map[strin
 // the tmux backend can prove no harness process is running in the session's
 // pane tree (ce-axsr). `tmux has-session` alone is false-green: the session
 // keeps existing after the harness exits and the pane falls back to a bare
-// shell. Only sessions currently marked "active" are scanned, so the cost
-// scales with live tmux sessions, not total sessions. Best-effort: backends
-// without the HarnessLivenessChecker capability, and scan errors, leave the
-// status as "active" (a failed scan proves nothing).
+// shell. Only sessions currently marked "active" are scanned. The batch
+// capability is preferred — it costs a constant number of subprocesses for
+// the whole list (one `tmux list-panes -a`, one `ps`) instead of 3 per
+// session. Best-effort: backends without either liveness capability, and
+// scan errors, leave the status as "active" (a failed scan proves nothing).
 func refineActiveStatusesWithLiveness(manifests []*manifest.Manifest, statuses map[string]string, tmux any) {
-	checker, ok := tmux.(session.HarnessLivenessChecker)
-	if !ok {
-		return
-	}
+	// Collect the tmux names of "active" sessions, keyed back to manifest name.
+	manifestByTmuxName := make(map[string]string)
+	var tmuxNames []string
 	for _, m := range manifests {
 		if statuses[m.Name] != "active" {
 			continue
@@ -207,9 +207,34 @@ func refineActiveStatusesWithLiveness(manifests []*manifest.Manifest, statuses m
 		if tmuxName == "" {
 			tmuxName = m.Name
 		}
+		manifestByTmuxName[tmuxName] = m.Name
+		tmuxNames = append(tmuxNames, tmuxName)
+	}
+	if len(tmuxNames) == 0 {
+		return
+	}
+
+	if batcher, ok := tmux.(session.HarnessLivenessBatchChecker); ok {
+		infos, err := batcher.HarnessLivenessBatch(tmuxNames)
+		if err != nil {
+			return // a failed scan proves nothing
+		}
+		for tmuxName, info := range infos {
+			if info.SessionExists && !info.HarnessAlive {
+				statuses[manifestByTmuxName[tmuxName]] = "zombie"
+			}
+		}
+		return
+	}
+
+	checker, ok := tmux.(session.HarnessLivenessChecker)
+	if !ok {
+		return
+	}
+	for _, tmuxName := range tmuxNames {
 		info, err := checker.HarnessLiveness(tmuxName)
 		if err == nil && info.SessionExists && !info.HarnessAlive {
-			statuses[m.Name] = "zombie"
+			statuses[manifestByTmuxName[tmuxName]] = "zombie"
 		}
 	}
 }

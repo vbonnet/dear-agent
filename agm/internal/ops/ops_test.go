@@ -86,6 +86,25 @@ func (m *mockTmuxWithLiveness) HarnessLiveness(name string) (session.LivenessInf
 	return m.liveness[name], nil
 }
 
+// mockTmuxWithBatchLiveness additionally implements the batch capability so
+// list paths can be tested against the constant-subprocess-count scan.
+type mockTmuxWithBatchLiveness struct {
+	*mockTmuxWithLiveness
+	batchCalls int
+}
+
+func (m *mockTmuxWithBatchLiveness) HarnessLivenessBatch(names []string) (map[string]session.LivenessInfo, error) {
+	m.batchCalls++
+	if m.livenessErr != nil {
+		return nil, m.livenessErr
+	}
+	out := make(map[string]session.LivenessInfo, len(names))
+	for _, n := range names {
+		out[n] = m.liveness[n]
+	}
+	return out, nil
+}
+
 // testCtxWithLiveness creates an OpContext whose tmux backend can prove
 // harness-process liveness.
 func testCtxWithLiveness(sessions []*manifest.Manifest, tm *mockTmuxWithLiveness) *OpContext {
@@ -553,5 +572,80 @@ func TestApplyFieldMask_Filters(t *testing.T) {
 	}
 	if _, ok := parsed["b"]; ok {
 		t.Error("field 'b' should be filtered out")
+	}
+}
+
+// --- refineActiveStatusesWithLiveness tests (ce-axsr) ---
+
+// TestRefineActiveStatuses_PrefersBatchScan: the batch capability must be
+// used (one scan for all active sessions) and zombies demoted.
+func TestRefineActiveStatuses_PrefersBatchScan(t *testing.T) {
+	manifests := []*manifest.Manifest{
+		newManifest("id-1", "alive-session", "~/p"),
+		newManifest("id-2", "zombie-session", "~/p"),
+		newManifest("id-3", "stopped-session", "~/p"),
+	}
+	statuses := map[string]string{
+		"alive-session":   "active",
+		"zombie-session":  "active",
+		"stopped-session": "stopped",
+	}
+	tm := &mockTmuxWithBatchLiveness{
+		mockTmuxWithLiveness: &mockTmuxWithLiveness{
+			mockTmux: newMockTmux("alive-session", "zombie-session"),
+			liveness: map[string]session.LivenessInfo{
+				"alive-session":  {SessionExists: true, HarnessAlive: true},
+				"zombie-session": {SessionExists: true, HarnessAlive: false, ZombieWriter: true},
+			},
+		},
+	}
+
+	refineActiveStatusesWithLiveness(manifests, statuses, tm)
+
+	if tm.batchCalls != 1 {
+		t.Errorf("expected exactly 1 batch scan, got %d", tm.batchCalls)
+	}
+	if statuses["alive-session"] != "active" {
+		t.Errorf("alive-session = %q, want active", statuses["alive-session"])
+	}
+	if statuses["zombie-session"] != "zombie" {
+		t.Errorf("zombie-session = %q, want zombie", statuses["zombie-session"])
+	}
+	if statuses["stopped-session"] != "stopped" {
+		t.Errorf("stopped-session = %q, want stopped (never scanned)", statuses["stopped-session"])
+	}
+}
+
+// TestRefineActiveStatuses_BatchErrorFailsSafe: a failed batch scan proves
+// nothing; statuses stay "active".
+func TestRefineActiveStatuses_BatchErrorFailsSafe(t *testing.T) {
+	manifests := []*manifest.Manifest{newManifest("id-1", "s1", "~/p")}
+	statuses := map[string]string{"s1": "active"}
+	tm := &mockTmuxWithBatchLiveness{
+		mockTmuxWithLiveness: &mockTmuxWithLiveness{
+			mockTmux:    newMockTmux("s1"),
+			livenessErr: errors.New("tmux socket gone"),
+		},
+	}
+	refineActiveStatusesWithLiveness(manifests, statuses, tm)
+	if statuses["s1"] != "active" {
+		t.Errorf("s1 = %q, want active after failed scan", statuses["s1"])
+	}
+}
+
+// TestRefineActiveStatuses_FallsBackToPerSession: without the batch
+// capability, the per-session checker is used.
+func TestRefineActiveStatuses_FallsBackToPerSession(t *testing.T) {
+	manifests := []*manifest.Manifest{newManifest("id-1", "zombie-session", "~/p")}
+	statuses := map[string]string{"zombie-session": "active"}
+	tm := &mockTmuxWithLiveness{
+		mockTmux: newMockTmux("zombie-session"),
+		liveness: map[string]session.LivenessInfo{
+			"zombie-session": {SessionExists: true, HarnessAlive: false},
+		},
+	}
+	refineActiveStatusesWithLiveness(manifests, statuses, tm)
+	if statuses["zombie-session"] != "zombie" {
+		t.Errorf("zombie-session = %q, want zombie via per-session fallback", statuses["zombie-session"])
 	}
 }

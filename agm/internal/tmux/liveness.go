@@ -17,6 +17,7 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -178,22 +179,35 @@ func ClassifyPaneLiveness(panePIDs []int, procs []ProcEntry, isHarness func(comm
 	}
 	const maxEvidence = 200
 	verdict.Evidence = strings.Join(comms, ",")
-	if len(verdict.Evidence) > maxEvidence {
-		verdict.Evidence = verdict.Evidence[:maxEvidence] + "..."
+	// Truncate on a rune boundary: comm values may be paths containing
+	// multi-byte UTF-8, and slicing by byte index could produce invalid UTF-8.
+	if runes := []rune(verdict.Evidence); len(runes) > maxEvidence {
+		verdict.Evidence = string(runes[:maxEvidence]) + "..."
 	}
 	return verdict
 }
 
 // listPanePIDs returns the pane root PIDs for sessionName on socketPath.
 // A missing session returns (nil, nil) — absence is a verdict, not an error.
+// Only a clean non-zero exit from tmux ("no such session") counts as absence:
+// a timeout, a missing tmux binary, or any other execution failure returns an
+// error so callers fail safe instead of misreading "could not check" as
+// "session is dead".
 func listPanePIDs(ctx context.Context, sessionName, socketPath string) ([]int, error) {
 	normalized := NormalizeTmuxSessionName(sessionName)
 	has := exec.CommandContext(ctx, "tmux", "-S", socketPath, "has-session", "-t", FormatSessionTarget(normalized))
 	if err := has.Run(); err != nil {
+		// Check the context FIRST: a context-kill also surfaces as an
+		// *exec.ExitError (signal: killed), which must not be mistaken for
+		// "session does not exist".
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("tmux has-session timed out: %w", ctx.Err())
 		}
-		return nil, nil // session does not exist
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, nil // tmux ran and said: session does not exist
+		}
+		return nil, fmt.Errorf("tmux has-session failed: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-s", "-t", FormatSessionTarget(normalized), "-F", "#{pane_pid}")
 	out, err := cmd.Output()
@@ -245,6 +259,72 @@ func CheckPaneLiveness(sessionName, socketPath string) (PaneLiveness, error) {
 		return PaneLiveness{}, err
 	}
 	return ClassifyPaneLiveness(pids, procs, IsHarnessComm), nil
+}
+
+// CheckPaneLivenessBatch scans many sessions with a constant number of
+// subprocesses: ONE `tmux list-panes -a` (all panes on the server, tagged
+// with their session name) and ONE `ps` snapshot, then the pure classifier
+// per requested session. The result map is keyed by the caller's original
+// session names; a requested session with no panes on the server reports
+// SessionExists=false. Use this instead of per-session CheckPaneLiveness in
+// list paths, where N sessions would otherwise mean 3N subprocesses.
+func CheckPaneLivenessBatch(sessionNames []string, socketPath string) (map[string]PaneLiveness, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), livenessScanTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}")
+	out, err := cmd.Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("tmux list-panes -a timed out: %w", ctx.Err())
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			// tmux ran but failed — most commonly "no server running", which
+			// means no session exists at all. That IS a verdict for every
+			// requested name.
+			results := make(map[string]PaneLiveness, len(sessionNames))
+			for _, name := range sessionNames {
+				results[name] = PaneLiveness{SessionExists: false}
+			}
+			return results, nil
+		}
+		return nil, fmt.Errorf("tmux list-panes -a failed: %w", err)
+	}
+
+	pidsBySession := make(map[string][]int)
+	for line := range strings.SplitSeq(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		idx := strings.LastIndex(line, "\t")
+		if idx < 0 {
+			continue
+		}
+		sessionName := line[:idx]
+		pid, convErr := strconv.Atoi(strings.TrimSpace(line[idx+1:]))
+		if convErr != nil {
+			continue
+		}
+		pidsBySession[sessionName] = append(pidsBySession[sessionName], pid)
+	}
+
+	procs, err := readProcessTable(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make(map[string]PaneLiveness, len(sessionNames))
+	for _, name := range sessionNames {
+		pids := pidsBySession[NormalizeTmuxSessionName(name)]
+		if len(pids) == 0 {
+			results[name] = PaneLiveness{SessionExists: false}
+			continue
+		}
+		results[name] = ClassifyPaneLiveness(pids, procs, IsHarnessComm)
+	}
+	return results, nil
 }
 
 // IsProcessInPaneTree reports whether a process named processName (exact comm
