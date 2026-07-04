@@ -1,4 +1,7 @@
 # SPEC: agm/internal/mcpparity/SPEC.md
+# RELATED-SPEC: agm/internal/mcp/SPEC.md
+# RELATED-SPEC: agm/internal/a2a/SPEC.md
+# RELATED-SPEC: agm/internal/a2a/jsonrpc/SPEC.md
 Feature: MCP harness parity
   AGM should expose harness-neutral MCP lifecycle tools. MCP clients should be
   able to create sessions and send messages through the same active harness and
