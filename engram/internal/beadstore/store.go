@@ -44,7 +44,7 @@ type Runner func(ctx context.Context, name string, args ...string) (stdout, stde
 
 // execRunner is the default Runner backed by os/exec.
 func execRunner(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // name is the bd binary path; args are flag-built
+	cmd := exec.CommandContext(ctx, name, args...)
 	var outBuf, errBuf strings.Builder
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf

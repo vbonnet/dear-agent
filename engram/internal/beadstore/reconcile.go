@@ -45,7 +45,7 @@ type ReconcileResult struct {
 
 // LoadLegacyJSONL reads a legacy JSONL bead store, skipping malformed lines.
 func LoadLegacyJSONL(path string) ([]LegacyBead, error) {
-	f, err := os.Open(path) //nolint:gosec // operator-supplied path to the legacy store
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open legacy store: %w", err)
 	}

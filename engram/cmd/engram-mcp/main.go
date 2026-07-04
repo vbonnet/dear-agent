@@ -35,7 +35,13 @@ var Version = "dev"
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	if err := run(logger); err != nil {
+		logger.Error("Server error", "error", err)
+		os.Exit(1)
+	}
+}
 
+func run(logger *slog.Logger) error {
 	cfg := configFromEnv()
 	logger.Info("Starting Engram MCP Server",
 		"version", Version,
@@ -65,10 +71,7 @@ func main() {
 	// belt-and-suspenders as agm-mcp-server).
 	go watchParent(ctx, stop, logger)
 
-	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil {
-		logger.Error("Server error", "error", err)
-		os.Exit(1)
-	}
+	return server.Run(ctx, &mcp.StdioTransport{})
 }
 
 // Config holds the server configuration.

@@ -30,23 +30,32 @@ type RetrieveResult struct {
 	Error      string           `json:"error,omitempty"`
 }
 
-func engramRetrieve(ctx context.Context, cfg *Config, input EngramRetrieveInput) (*RetrieveResult, error) {
+// normalizeRetrieveInput validates and applies defaults to the tool input.
+func normalizeRetrieveInput(input EngramRetrieveInput) (typeFilter string, topK int, err error) {
 	if strings.TrimSpace(input.Query) == "" {
-		return nil, errors.New("query must be a non-empty string")
+		return "", 0, errors.New("query must be a non-empty string")
 	}
-	typeFilter := input.TypeFilter
+	typeFilter = input.TypeFilter
 	if typeFilter == "" {
 		typeFilter = "all"
 	}
 	if typeFilter != "all" && typeFilter != "ai" && typeFilter != "why" {
-		return nil, fmt.Errorf("type_filter must be ai, why, or all; got %q", typeFilter)
+		return "", 0, fmt.Errorf("type_filter must be ai, why, or all; got %q", typeFilter)
 	}
-	topK := input.TopK
+	topK = input.TopK
 	if topK <= 0 {
 		topK = 5
 	}
 	if topK > 20 {
 		topK = 20
+	}
+	return typeFilter, topK, nil
+}
+
+func engramRetrieve(ctx context.Context, cfg *Config, input EngramRetrieveInput) (*RetrieveResult, error) {
+	typeFilter, topK, err := normalizeRetrieveInput(input)
+	if err != nil {
+		return nil, err
 	}
 
 	bin := cfg.EngramCLI
@@ -55,7 +64,7 @@ func engramRetrieve(ctx context.Context, cfg *Config, input EngramRetrieveInput)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, //nolint:gosec // bin is operator config; args are flag-separated
+	cmd := exec.CommandContext(ctx, bin,
 		"retrieve", "--query", input.Query, "--limit", strconv.Itoa(topK), "--format", "json")
 	out, err := cmd.Output()
 	if err != nil {
@@ -155,7 +164,7 @@ func pluginsList(engramRoot string) *PluginsListResult {
 				continue
 			}
 			dir := filepath.Join(base, entry.Name())
-			data, err := os.ReadFile(filepath.Join(dir, "plugin.yaml")) //nolint:gosec // path under operator-configured plugin root
+			data, err := os.ReadFile(filepath.Join(dir, "plugin.yaml"))
 			if err != nil {
 				continue
 			}
@@ -189,7 +198,7 @@ func pluginsList(engramRoot string) *PluginsListResult {
 // nesting the legacy tool cared about, and this keeps us dependency-free.
 func parseFlatYAML(text string) map[string]string {
 	result := map[string]string{}
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "#") {
 			continue
 		}
@@ -237,7 +246,7 @@ func wayfinderStatus(projectPath string) (*WayfinderStatusResult, error) {
 	}
 
 	statusFile := filepath.Join(abs, "WAYFINDER-STATUS.md")
-	data, err := os.ReadFile(statusFile) //nolint:gosec // caller-supplied project dir, read-only status file
+	data, err := os.ReadFile(statusFile)
 	if err != nil {
 		return nil, fmt.Errorf("WAYFINDER-STATUS.md not found in %s", abs)
 	}
