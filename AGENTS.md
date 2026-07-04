@@ -1,5 +1,17 @@
 # dear-agent — Agent Instructions
 
+## Engineering Policies (canonical — read first)
+
+Non-negotiable engineering principles live in [`docs/policies/`](docs/policies/)
+as `*.ai.md` (the policy) + `*.why.md` (reasoning + real failure cases) pairs.
+They are the source of truth for how every agent — on every harness — works here:
+
+- [broken-windows](docs/policies/broken-windows.ai.md) — delete deprecated code completely, in the same change; never leave two versions coexisting.
+- [dear-retro](docs/policies/dear-retro.ai.md) — every systemic defect gets a DEAR retrospective; a fix without a retro recurs.
+- [definition-of-done](docs/policies/definition-of-done.ai.md) — done = merged to main, deployed, verified. Not "PR open".
+- [wayfinder-v2-canonical](docs/policies/wayfinder-v2-canonical.ai.md) — Wayfinder V2 (9 phases) is the only model; V1 is dead.
+- [autonomous-merge](docs/policies/autonomous-merge.ai.md) — review+merge your own PRs, except security/product/money → human.
+
 ## Build & Test Commands
 
 ```bash
