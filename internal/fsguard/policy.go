@@ -81,6 +81,8 @@ func DefaultPolicy(home string) Policy {
 			"/var/folders", "/private/var/folders",
 			"/sessions",
 			filepath.Join(home, "beads"),
+			filepath.Join(home, ".agm", "vroom"),
+			filepath.Join(home, ".agm", "sandboxes"),
 		},
 	}
 }
