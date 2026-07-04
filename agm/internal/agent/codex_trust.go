@@ -160,7 +160,6 @@ func acquireCodexConfigLock(configPath string) (func(), error) {
 		return nil, fmt.Errorf("create codex config dir: %w", err)
 	}
 	lockPath := configPath + ".agm-lock"
-	deadline := time.Now().Add(2 * time.Second)
 	for {
 		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) // #nosec G304 -- sibling of the config path.
 		if err == nil {
@@ -170,9 +169,11 @@ func acquireCodexConfigLock(configPath string) (func(), error) {
 		if !errors.Is(err, os.ErrExist) {
 			return nil, fmt.Errorf("acquire codex config lock: %w", err)
 		}
-		if time.Now().After(deadline) {
-			// A stale lock (crashed holder) must not brick launches forever:
-			// steal it after the deadline.
+		// A stale lock (crashed holder) must not brick launches forever.
+		// Staleness is judged by the lock file's own age, not this waiter's
+		// wait time: a per-waiter deadline could steal a lock another waiter
+		// just legitimately acquired.
+		if fi, statErr := os.Stat(lockPath); statErr == nil && time.Since(fi.ModTime()) > 2*time.Second {
 			_ = os.Remove(lockPath)
 		}
 		time.Sleep(25 * time.Millisecond)

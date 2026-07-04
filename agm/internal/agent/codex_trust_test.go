@@ -185,6 +185,37 @@ func TestEnsureCodexWorkdirTrusted_DefaultsToHomeCodex(t *testing.T) {
 	assertTrusted(t, data, workDir)
 }
 
+// TestEnsureCodexWorkdirTrusted_StealsStaleLock verifies a lock left behind by
+// a crashed holder does not brick trust writes forever: a lock older than the
+// staleness window is stolen and the write proceeds.
+func TestEnsureCodexWorkdirTrusted_StealsStaleLock(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	workDir := t.TempDir()
+
+	lockPath := filepath.Join(codexHome, "config.toml.agm-lock")
+	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+		t.Fatalf("seed lock: %v", err)
+	}
+	stale := time.Now().Add(-10 * time.Second)
+	if err := os.Chtimes(lockPath, stale, stale); err != nil {
+		t.Fatalf("age lock: %v", err)
+	}
+
+	if err := EnsureCodexWorkdirTrusted(workDir); err != nil {
+		t.Fatalf("EnsureCodexWorkdirTrusted with stale lock: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	assertTrusted(t, data, workDir)
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("stale lock not cleaned up: %v", err)
+	}
+}
+
 // TestCodexCreateSessionPreTrustsWorkdir verifies the adapter launch path
 // records trust for the workdir before the codex command is sent (ce-cmsq).
 func TestCodexCreateSessionPreTrustsWorkdir(t *testing.T) {
