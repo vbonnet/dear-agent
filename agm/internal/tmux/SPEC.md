@@ -40,8 +40,11 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-12** When work directory comparison runs, the system shall canonicalize paths and tolerate symlink resolution and trailing slash differences.
 
+**TMUX-13** When Claude liveness is checked and tmux reports a shell or `agm` wrapper as the foreground command, the system shall inspect captured pane output for the Claude prompt before declaring Claude not running.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
 - Package tests: `agm/internal/tmux/workdir_test.go`
 - Package tests: `agm/internal/tmux/liveness_test.go`
+- Package tests: `agm/internal/tmux/tmux_test.go`
