@@ -402,16 +402,20 @@ func TestModeAppliedAtStartup(t *testing.T) {
 			modeAppliedAtStartup: false,
 			expectPostInitCycle:  true,
 		},
+		{
+			name:                 "auto mode for agy applied at startup",
+			modeFlagValue:        "auto",
+			harness:              "agy",
+			modeAppliedAtStartup: true,
+			expectPostInitCycle:  false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reproduce the modeAppliedAtStartup logic:
-			// Mode is applied at startup when:
-			// 1. harness is claude-code
-			// 2. modeFlagValue is "auto"
-			// 3. --permission-mode auto was added to the startup command
-			modeAppliedAtStartup := tt.harness == "claude-code" && tt.modeFlagValue == "auto"
+			modeAppliedAtStartup := (tt.harness == "claude-code" && tt.modeFlagValue == "auto") ||
+				(tt.harness == "agy" && agyPermissionFlag(tt.modeFlagValue) != "")
 
 			if modeAppliedAtStartup != tt.modeAppliedAtStartup {
 				t.Errorf("modeAppliedAtStartup: got %v, want %v",
