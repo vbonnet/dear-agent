@@ -64,6 +64,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runDeploy(cmd, rest, stdout, stderr)
 	case "install":
 		return runDeploy(cmd, rest, stdout, stderr)
+	case "build-install":
+		return runBuildInstall(rest, stdout, stderr)
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -479,6 +481,52 @@ func gitToplevel(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// runBuildInstall builds a Go binary from the repo and atomically installs it,
+// gating on the built revision being origin/main (or an ancestor). This is the
+// crash-safe, stale-proof replacement for the post-merge hook's `go install`.
+func runBuildInstall(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("build-install", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var pkg, target, sourceRef, repoRoot string
+	fs.StringVar(&pkg, "pkg", "", "go package to build, relative to repo root (e.g. ./agm/cmd/agm)")
+	fs.StringVar(&target, "target", "", "install path (default ~/go/bin/<pkg basename>)")
+	fs.StringVar(&sourceRef, "source-ref", "origin/main", "ref the built binary must be, or be an ancestor of")
+	fs.StringVar(&repoRoot, "repo-root", "", "repo root to build in (default: git toplevel of cwd)")
+	if _, err := parseArgs(fs, args); err != nil {
+		return 1
+	}
+	if pkg == "" {
+		fmt.Fprintln(stderr, "build-install: --pkg is required")
+		return 1
+	}
+	if repoRoot == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		root, err := gitToplevel(ctx)
+		cancel()
+		if err != nil {
+			fmt.Fprintf(stderr, "build-install: cannot resolve repo root: %v\n", err)
+			return 1
+		}
+		repoRoot = strings.TrimSpace(root)
+	}
+	if target == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(stderr, "build-install: cannot resolve home: %v\n", err)
+			return 1
+		}
+		target = filepath.Join(home, "go", "bin", filepath.Base(pkg))
+	}
+
+	r, err := deploy.AtomicInstall(pkg, target, sourceRef, deploy.Options{RepoRoot: repoRoot})
+	if err != nil {
+		fmt.Fprintf(stderr, "build-install FAILED: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "✓ installed %s -> %s (rev %s, gated against %s)\n", r.Name, r.Target, r.Revision, r.SourceRef)
+	return 0
+}
+
 const usage = `dear-deploy — deploy dear-agent host artifacts (launchd plists, Claude Code hooks).
 
 Usage:
@@ -486,9 +534,16 @@ Usage:
   dear-deploy status [name...]     show deployed state vs the manifest
   dear-deploy sync   [name...]     deploy artifacts that have drifted (idempotent)
   dear-deploy install [name...]    (re)install artifacts, even if unchanged
+  dear-deploy build-install --pkg P   build a Go binary and atomically install it
 
 Each write is atomic (stage -> verify -> activate); a failed deploy leaves the
 previously-installed artifact untouched. There is no force/bypass flag.
+
+build-install flags:
+  --pkg PKG         go package to build, relative to repo root (e.g. ./agm/cmd/agm) [required]
+  --target PATH     install path (default: ~/go/bin/<pkg basename>)
+  --source-ref REF  the built binary must be REF or an ancestor of it (default: origin/main)
+  --repo-root DIR   repo root to build in (default: git toplevel of cwd)
 
 Common flags:
   --manifest FILE   manifest file (default: <repo-root>/deploy/manifest.yaml)
