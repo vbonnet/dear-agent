@@ -501,8 +501,8 @@ func runBuildInstall(args []string, stdout, stderr io.Writer) int {
 	}
 	if repoRoot == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		root, err := gitToplevel(ctx)
-		cancel()
 		if err != nil {
 			fmt.Fprintf(stderr, "build-install: cannot resolve repo root: %v\n", err)
 			return 1

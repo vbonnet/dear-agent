@@ -133,6 +133,25 @@ func TestAtomicInstall_FailsLoudOnBadSourceRef(t *testing.T) {
 	}
 }
 
+func TestAtomicInstall_ResolvesRelativeTarget(t *testing.T) {
+	repo, _, headSha := gitRepo(t)
+	stubBuild(t, "fresh", nil)
+	stubVersion(t, headSha, false, nil)
+
+	base := t.TempDir()
+	t.Chdir(base) // build runs in repoRoot; a relative target must still resolve here
+	res, err := AtomicInstall("./cmd/agm", "bin/agm", headSha, Options{RepoRoot: repo})
+	if err != nil {
+		t.Fatalf("relative target should install: %v", err)
+	}
+	if !filepath.IsAbs(res.Target) {
+		t.Errorf("res.Target = %q, want absolute", res.Target)
+	}
+	if _, err := os.Stat(filepath.Join(base, "bin", "agm")); err != nil {
+		t.Errorf("installed binary not at the resolved absolute path: %v", err)
+	}
+}
+
 func TestAtomicInstall_RequiresArgs(t *testing.T) {
 	if _, err := AtomicInstall("", "/x", "HEAD", Options{RepoRoot: "/r"}); err == nil {
 		t.Error("empty pkg should error")

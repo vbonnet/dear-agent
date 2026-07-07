@@ -75,6 +75,15 @@ func AtomicInstall(pkg, target, sourceRef string, opts Options) (InstallResult, 
 	if pkg == "" || target == "" {
 		return res, fmt.Errorf("AtomicInstall: pkg and target are required")
 	}
+	// Resolve target to absolute: the build runs with cmd.Dir=RepoRoot, so a
+	// relative -o path would be written relative to RepoRoot while the rename
+	// resolves it relative to the caller's CWD — a mismatch that misfires.
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return res, fmt.Errorf("AtomicInstall: resolve absolute target %q: %w", target, err)
+	}
+	target = absTarget
+	res.Target = absTarget
 	if sourceRef == "" {
 		sourceRef = "origin/main"
 	}
@@ -97,13 +106,15 @@ func AtomicInstall(pkg, target, sourceRef string, opts Options) (InstallResult, 
 		return res, fmt.Errorf("create temp binary in %s: %w", dir, err)
 	}
 	tmpPath := f.Name()
-	f.Close()
 	installed := false
 	defer func() {
 		if !installed {
 			os.Remove(tmpPath) // never leave a temp binary behind on failure
 		}
 	}()
+	if err := f.Close(); err != nil {
+		return res, fmt.Errorf("close temp binary %s: %w", tmpPath, err)
+	}
 
 	// 3. Build to temp and gate the freshly built binary's revision.
 	revLabel, err := buildAndVerify(pkg, tmpPath, srcSha, res.SourceRef, opts)
