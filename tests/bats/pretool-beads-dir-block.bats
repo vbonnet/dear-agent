@@ -83,7 +83,7 @@ bash_cmd() { # $1 = command string -> hook payload
     [ "$status" -eq 0 ]
 }
 
-# --- Write/Edit on shell files ---
+# --- Write/Edit/apply_patch on shell files ---
 
 @test "blocks BEADS_DIR= in Write to .sh file" {
     payload='{"tool_name":"Write","tool_input":{"file_path":"/tmp/setup.sh","content":"export BEADS_DIR=/x\n"}}'
@@ -99,6 +99,26 @@ bash_cmd() { # $1 = command string -> hook payload
 
 @test "allows Write to non-shell file even with BEADS_DIR text" {
     payload='{"tool_name":"Write","tool_input":{"file_path":"/tmp/notes.md","content":"Do not use BEADS_DIR=..."}}'
+    hook "$payload"
+    [ "$status" -eq 0 ]
+}
+
+@test "blocks BEADS_DIR= in apply_patch to .sh file" {
+    payload="$(jq -cn --arg patch '*** Begin Patch
+*** Update File: /tmp/setup.sh
+@@
++export BEADS_DIR=/x
+*** End Patch' '{tool_name:"apply_patch",tool_input:{patch:$patch}}')"
+    hook "$payload"
+    [ "$status" -eq 2 ]
+}
+
+@test "allows apply_patch to non-shell file even with BEADS_DIR text" {
+    payload="$(jq -cn --arg patch '*** Begin Patch
+*** Update File: /tmp/notes.md
+@@
++Do not use BEADS_DIR=...
+*** End Patch' '{tool_name:"apply_patch",tool_input:{patch:$patch}}')"
     hook "$payload"
     [ "$status" -eq 0 ]
 }

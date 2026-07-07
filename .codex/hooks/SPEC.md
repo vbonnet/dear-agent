@@ -15,9 +15,9 @@ OpenCode receive through their native hook or bridge surfaces.
 
 **CODEX-HOOK-02** When a Bash tool command dereferences `BEADS_DIR`, the system shall block the tool use and explain that `bd --db` or `bd -C` must be used instead.
 
-**CODEX-HOOK-03** When a Write, Edit, or MultiEdit tool writes `BEADS_DIR` usage to a shell-like file, the system shall block the tool use and print the same Beads guidance.
+**CODEX-HOOK-03** When a Write, Edit, MultiEdit, or apply_patch tool writes `BEADS_DIR` usage to a shell-like file, the system shall block the tool use and print the same Beads guidance.
 
-**CODEX-HOOK-04** When a Write, Edit, or MultiEdit tool writes `BEADS_DIR` text to a non-shell file, the system shall allow the tool use.
+**CODEX-HOOK-04** When a Write, Edit, MultiEdit, or apply_patch tool writes `BEADS_DIR` text to a non-shell file, the system shall allow the tool use.
 
 **CODEX-HOOK-05** When hook input is malformed, incomplete, or uses an unrelated tool name, the system shall fail open with exit code 0.
 

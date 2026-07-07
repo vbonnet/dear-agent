@@ -24,6 +24,17 @@
         ]
       },
       {
+        "matcher": "Bash|Write|Edit|MultiEdit|apply_patch",
+        "hooks": [
+          {
+            "command": "${CLAUDE_PROJECT_DIR}/.codex/hooks/pretool-beads-dir-block",
+            "statusMessage": "Checking Beads database targeting",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {
