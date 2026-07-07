@@ -12,7 +12,8 @@
 #
 # Triggers on:
 #   - Bash commands that assign (BEADS_DIR=...) or dereference ($BEADS_DIR)
-#   - Write/Edit/MultiEdit on shell-like files containing the same patterns
+#   - Write/Edit/MultiEdit/apply_patch on shell-like files containing the same
+#     patterns
 #
 # Fails OPEN: any parse error exits 0 — this hook must never wedge a session.
 
@@ -58,6 +59,16 @@ block() {
   exit 2
 }
 
+patch_touches_shell_file() {
+  printf '%s\n' "$1" | awk '
+    /^\*\*\* (Add|Update|Delete) File: / {
+      path=$0
+      sub(/^\*\*\* (Add|Update|Delete) File: /, "", path)
+      print path
+    }
+  ' | grep -qE "$SHELL_FILE_RE"
+}
+
 input="$(cat)"
 tool="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)"
 [ -n "$tool" ] || exit 0
@@ -81,6 +92,17 @@ Write | Edit | MultiEdit)
   ' 2>/dev/null || true)"
   [ -n "$text" ] || exit 0
   if uses_beads_dir "$text"; then
+    block
+  fi
+  ;;
+apply_patch)
+  patch_text="$(printf '%s' "$input" | jq -r '
+    if (.tool_input | type) == "string" then .tool_input
+    else (.tool_input.patch // .tool_input.input // .tool_input.content // empty)
+    end
+  ' 2>/dev/null || true)"
+  [ -n "$patch_text" ] || exit 0
+  if patch_touches_shell_file "$patch_text" && uses_beads_dir "$patch_text"; then
     block
   fi
   ;;
