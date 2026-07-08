@@ -464,6 +464,21 @@ rebase, and stale-lock cleanup instead of raw mutation commands.
 **Why this matters:** Agent cleanup and review-thread workflows need audited
 command contracts before they are used in local development and merge gates.
 
+### Quality Command Guardrails
+
+**File:** [`quality_command_guardrails.feature`](../test/bdd/features/quality_command_guardrails.feature)
+
+**Drives:** `cmd/ears-lint`, `cmd/ears-to-bdd`, `cmd/test-affected`,
+`cmd/repo-health`, `cmd/structural-health`, and `cmd/src-health` SPEC coverage.
+
+**Key scenarios:**
+- Repo quality command packages keep co-located SPEC coverage.
+- Repo quality command package SPECs point back to their executable BDD feature.
+
+**Why this matters:** These commands enforce EARS, BDD, affected-test, and repo
+health contracts. They are part of the parity safety net and need the same
+traceability as the features they guard.
+
 ### AGM Control Surface Guardrails
 
 **File:** [`agm_control_surface_guardrails.feature`](../test/bdd/features/agm_control_surface_guardrails.feature)
