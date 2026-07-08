@@ -1,6 +1,6 @@
 # AGM MCP Server - Specification
 
-<!-- Last audited at: NEEDS-AUDIT -->
+<!-- Last audited at: 2026-07-08 -->
 
 ## Overview
 
@@ -22,6 +22,10 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 **MCS-03** When the MCP server starts without a resolvable Dolt workspace (the WORKSPACE environment variable is unset and mcp-server.yaml declares no workspace), the system shall exit non-zero with an actionable error and shall not register any tools.
 
 **MCS-04** When the MCP server starts and the resolved workspace's Dolt database is not reachable, the system shall exit non-zero with an error naming the workspace and shall not register any tools.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/mcp_parity.feature`
 
 ## Use Cases
 

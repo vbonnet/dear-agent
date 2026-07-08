@@ -2,6 +2,7 @@
 # RELATED-SPEC: agm/internal/mcp/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/jsonrpc/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-mcp-server/SPEC.md
 Feature: MCP harness parity
   AGM should expose harness-neutral MCP lifecycle tools. MCP clients should be
   able to create sessions and send messages through the same active harness and
@@ -41,3 +42,7 @@ Feature: MCP harness parity
   Scenario: MCP operation discovery includes lifecycle mutations
     When AGM validates MCP operation discovery parity
     Then the MCP operation registry should expose lifecycle mutations
+
+  Scenario: MCP server startup guard fails loud before tool registration
+    When AGM validates MCP server startup guard coverage
+    Then the MCP server SPEC should cover loud workspace and database failures
