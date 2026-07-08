@@ -48,6 +48,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterLocalDevelopmentGuardrailSteps(ctx)
 	steps.RegisterModelFamilyParitySteps(ctx)
 	steps.RegisterMCPCommandGuardrailSteps(ctx)
+	steps.RegisterPluginSkillPackageGuardrailSteps(ctx)
 	steps.RegisterQuotaMonitoringGuardrailSteps(ctx)
 	steps.RegisterQualityCommandGuardrailSteps(ctx)
 	steps.RegisterSandboxProviderGuardrailSteps(ctx)
