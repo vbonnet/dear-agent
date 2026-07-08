@@ -483,6 +483,22 @@ surface for persisted workflow execution. They need explicit contracts for
 state changes, audit trails, migration, development loops, and machine-readable
 output before parity work can rely on them.
 
+### Workflow Package Guardrails
+
+**File:** [`workflow_package_guardrails.feature`](../test/bdd/features/workflow_package_guardrails.feature)
+
+**Drives:** workflow implementation package SPEC coverage for
+`agm/internal/workflow`, `agm/internal/workflow/deepresearch`,
+`pkg/workflow/codemod`, `pkg/workflow/dev`, and `pkg/workflow/roles`.
+
+**Key scenarios:**
+- Workflow implementation packages keep co-located SPEC coverage.
+- Workflow implementation package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Workflow command parity is only enforceable if the
+registry, role resolver, codemods, dev loop, and specialized workflow adapters
+behind those commands have explicit contracts.
+
 ### Quality Command Guardrails
 
 **File:** [`quality_command_guardrails.feature`](../test/bdd/features/quality_command_guardrails.feature)
