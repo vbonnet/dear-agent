@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -157,16 +158,23 @@ func TestPostMerge_NoAGM_NoOp(t *testing.T) {
 
 // ── Stage 1 (binary rebuild) ────────────────────────────────────────────────
 
-// stubGo writes a fake `go` that records each `go install <pkg>` invocation
-// into recordFile as "<pkg>|<HEAD-of-cwd>" (one per line) and returns the dir
-// holding it. Capturing the cwd's HEAD lets tests assert WHICH commit the hook
-// built from — the whole point of the origin/main fix: the build must run in a
-// checkout pinned to trunk, not in whatever ref the local working tree sits on.
+// stubGo writes a fake `go` that records each `go build -o <tmp> <pkg>`
+// invocation into recordFile as "<pkg>|<HEAD-of-cwd>" (one per line) and returns
+// the dir holding it. Capturing the cwd's HEAD lets tests assert WHICH commit the
+// hook built from — the whole point of the origin/main fix: the build must run in
+// a checkout pinned to trunk, not in whatever ref the local working tree sits on.
+// It also writes a fake binary to the `-o` path so the hook's atomic rename into
+// GOBIN succeeds (the hook now build-to-temp + mv instead of `go install`).
 func stubGo(t *testing.T, recordFile string) string {
 	t.Helper()
 	dir := t.TempDir()
 	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = install ]; then echo \"$2|$(git rev-parse HEAD 2>/dev/null)\" >> \"" + recordFile + "\"; fi\n" +
+		"if [ \"$1\" = build ]; then\n" +
+		"  out=\"\"; pkg=\"\"; prev=\"\"\n" +
+		"  for a in \"$@\"; do [ \"$prev\" = -o ] && out=\"$a\"; pkg=\"$a\"; prev=\"$a\"; done\n" +
+		"  [ -n \"$out\" ] && printf 'fakebin\\n' > \"$out\"\n" +
+		"  echo \"$pkg|$(git rev-parse HEAD 2>/dev/null)\" >> \"" + recordFile + "\"\n" +
+		"fi\n" +
 		"exit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -292,6 +300,50 @@ func runRebuildRecord(t *testing.T, repo string, extraEnv ...string) string {
 func runRebuild(t *testing.T, repo string, extraEnv ...string) []string {
 	t.Helper()
 	return installed(t, runRebuildRecord(t, repo, extraEnv...))
+}
+
+// Re-installing must produce a NEW inode at the target — i.e. the hook builds
+// to a temp file and rename()s it, never overwriting the target inode in place.
+// An in-place overwrite is exactly what SIGKILLs a running binary with "Code
+// Signature Invalid" (ce-w77v, the 2026-07-06 crash loop).
+func TestRebuild_AtomicInstall_NewInode(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	repo := newRebuildRepo(t)
+	mergeBranchChanging(t, repo, map[string]string{"agm/cmd/agm/main.go": "package main // v2\n"})
+	gobin := t.TempDir()
+	home := t.TempDir()
+
+	install := func() uint64 {
+		record := filepath.Join(t.TempDir(), "installed")
+		goDir := stubGo(t, record)
+		cmd := exec.Command("bash", hookPath(t))
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(),
+			"HOME="+home, "GOBIN="+gobin,
+			"PATH="+goDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+			"AGM_POST_MERGE_SWEEP=0",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("hook must exit 0: %v\n%s", err, out)
+		}
+		fi, err := os.Stat(filepath.Join(gobin, "agm"))
+		if err != nil {
+			t.Fatalf("agm was not atomically installed into GOBIN: %v", err)
+		}
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if !ok {
+			t.Skip("no inode info on this platform")
+		}
+		return uint64(st.Ino)
+	}
+
+	ino1 := install()
+	ino2 := install()
+	if ino1 == ino2 {
+		t.Errorf("re-install reused inode %d — in-place overwrite, not atomic rename (would SIGKILL a running binary, ce-w77v)", ino1)
+	}
 }
 
 // A change under a shared source tree (pkg/) rebuilds BOTH binaries.
