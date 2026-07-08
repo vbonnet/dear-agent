@@ -1,0 +1,42 @@
+# resolve-review-threads Command Specification
+
+<!-- Last audited at: 2026-07-08 -->
+
+**Version:** 1.0
+**Status:** Baseline
+**Scope:** `cmd/resolve-review-threads`.
+
+## Overview
+
+`resolve-review-threads` is the sanctioned helper for listing, resolving, and
+reopening GitHub pull-request review threads. It exists because GitHub review
+thread resolution is GraphQL-only and required conversation resolution blocks
+safe merges until unresolved threads are handled explicitly.
+
+## EARS Requirements
+
+**RESOLVE-REVIEW-THREADS-01** When no subcommand or an unknown subcommand is provided, the system shall print usage and exit with a usage failure.
+
+**RESOLVE-REVIEW-THREADS-02** When listing review threads, the system shall require owner, repository, and integer pull-request number arguments.
+
+**RESOLVE-REVIEW-THREADS-03** When listing review threads, the system shall page through GitHub GraphQL reviewThreads results until no next page remains.
+
+**RESOLVE-REVIEW-THREADS-04** When `list` is requested, the system shall emit only unresolved threads as compact JSON lines.
+
+**RESOLVE-REVIEW-THREADS-05** When `list-all` is requested, the system shall emit resolved and unresolved threads as compact JSON lines.
+
+**RESOLVE-REVIEW-THREADS-06** When resolving or unresolving one thread, the system shall require a review-thread GraphQL node ID and call the matching GraphQL mutation.
+
+**RESOLVE-REVIEW-THREADS-07** When `resolve-all` is requested with an author filter, the system shall resolve only unresolved threads whose first comment author matches that filter.
+
+**RESOLVE-REVIEW-THREADS-08** When comment bodies are printed, the system shall collapse whitespace and truncate previews on rune boundaries.
+
+**RESOLVE-REVIEW-THREADS-09** When GitHub CLI reports a GraphQL error, the system shall include GitHub CLI diagnostics in the returned error.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/workflow_tooling_guardrails.feature`
+
+## Test Traceability
+
+- Unit package: `cmd/resolve-review-threads`
