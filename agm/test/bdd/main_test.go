@@ -33,6 +33,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	// state, so there is no shared environment to wire here.
 	steps.RegisterAGMControlSurfaceGuardrailSteps(ctx)
 	steps.RegisterAgentSelectionGuardrailSteps(ctx)
+	steps.RegisterAPIGatewayPackageGuardrailSteps(ctx)
 	steps.RegisterAuditPackageGuardrailSteps(ctx)
 	steps.RegisterDBPersistenceGuardrailSteps(ctx)
 	steps.RegisterEngramHookGuardrailSteps(ctx)
