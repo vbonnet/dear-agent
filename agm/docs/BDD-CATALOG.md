@@ -237,6 +237,20 @@ registry.
 **Why this matters:** MCP clients should call the same harness-neutral session
 contract as the CLI rather than receiving a Claude-only subset.
 
+### MCP Command Guardrails
+
+**File:** [`mcp_command_guardrails.feature`](../test/bdd/features/mcp_command_guardrails.feature)
+
+**Drives:** `cmd/dear-agent-mcp` and `cmd/recommendation-mcp` SPEC coverage.
+
+**Key scenarios:**
+- Top-level MCP command packages keep co-located SPEC coverage.
+- MCP command package SPECs point back to their executable BDD feature.
+
+**Why this matters:** The standalone MCP binaries are client-facing integration
+points. Their workflow, source, recommendation, and backlog contracts need the
+same executable traceability as AGM and Engram MCP surfaces.
+
 ### Marketplace Parity
 
 **File:** [`marketplace_parity.feature`](../test/bdd/features/marketplace_parity.feature)
