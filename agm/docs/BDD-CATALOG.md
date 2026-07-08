@@ -191,6 +191,21 @@ coverage policy.
 **Why this matters:** Quota monitoring must degrade honestly instead of falling
 back to Claude-specific or Opus-specific assumptions.
 
+### Quota Monitoring Guardrails
+
+**File:** [`quota_monitoring_guardrails.feature`](../test/bdd/features/quota_monitoring_guardrails.feature)
+
+**Drives:** cost tracking, Claude Code usage monitoring, and CLI usage tracker
+SPEC coverage.
+
+**Key scenarios:**
+- Quota monitoring packages keep co-located SPEC coverage.
+- Quota monitoring package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Quota parity policy is only useful if the concrete
+pricing, budget, transcript-scan, burn-rate, and usage-log implementations
+remain specified and executable.
+
 ### MCP Parity
 
 **File:** [`mcp_parity.feature`](../test/bdd/features/mcp_parity.feature)
