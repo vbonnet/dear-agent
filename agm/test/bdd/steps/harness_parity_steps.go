@@ -3,6 +3,8 @@ package steps
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -67,6 +69,8 @@ type harnessParityState struct {
 	wayfinderPhaseEngrams      bool
 	configDirSurface           configdirparity.DirectorySurface
 	conformanceFindings        []agent.HarnessConformanceFinding
+	runtimeHelperCommand       string
+	runtimeHelperSpec          string
 }
 
 type harnessParityStateKey struct{}
@@ -86,6 +90,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM active harnesses are configured$`, agmActiveHarnessesAreConfigured)
 	ctx.Step(`^AGM validates active harness adapter conformance$`, agmValidatesActiveHarnessAdapterConformance)
 	ctx.Step(`^every active harness adapter should satisfy the shared conformance suite$`, everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite)
+	ctx.Step(`^AGM runtime helper command "([^"]*)" is configured$`, agmRuntimeHelperCommandIsConfigured)
+	ctx.Step(`^AGM validates runtime helper command coverage$`, agmValidatesRuntimeHelperCommandCoverage)
+	ctx.Step(`^runtime helper command "([^"]*)" should have a co-located SPEC$`, runtimeHelperCommandShouldHaveCoLocatedSPEC)
 	ctx.Step(`^model family "([^"]*)" is configured$`, modelFamilyIsConfigured)
 	ctx.Step(`^AGM validates model family parity support$`, agmValidatesModelFamilyParitySupport)
 	ctx.Step(`^model family "([^"]*)" should be supported$`, modelFamilyShouldBeSupported)
@@ -264,6 +271,45 @@ func everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite(ctx context.Co
 		messages = append(messages, finding.Error())
 	}
 	return fmt.Errorf("active harness conformance failed:\n%s", strings.Join(messages, "\n"))
+}
+
+func agmRuntimeHelperCommandIsConfigured(ctx context.Context, command string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.runtimeHelperCommand = command
+	harnessState.runtimeHelperSpec = filepath.Join(bddRepoRoot(), "agm", "cmd", command, "SPEC.md")
+	return nil
+}
+
+func agmValidatesRuntimeHelperCommandCoverage(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.runtimeHelperSpec == "" {
+		return fmt.Errorf("no AGM runtime helper command configured")
+	}
+	if _, err := os.Stat(harnessState.runtimeHelperSpec); err != nil {
+		return fmt.Errorf("runtime helper SPEC %s: %w", harnessState.runtimeHelperSpec, err)
+	}
+	return nil
+}
+
+func runtimeHelperCommandShouldHaveCoLocatedSPEC(ctx context.Context, command string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if command != harnessState.runtimeHelperCommand {
+		return fmt.Errorf("configured runtime helper command = %q, want %q", harnessState.runtimeHelperCommand, command)
+	}
+	wantSuffix := filepath.Join("agm", "cmd", command, "SPEC.md")
+	if !strings.HasSuffix(harnessState.runtimeHelperSpec, wantSuffix) {
+		return fmt.Errorf("runtime helper SPEC = %q, want suffix %q", harnessState.runtimeHelperSpec, wantSuffix)
+	}
+	return nil
 }
 
 func modelFamilyIsConfigured(ctx context.Context, family string) error {
