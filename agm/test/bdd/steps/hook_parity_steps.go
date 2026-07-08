@@ -188,7 +188,11 @@ func repositoryPostMergeHookShouldIncludeLifecycleSafeguard(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	for _, want := range postMergeSafeguardNeedles(safeguard) {
+	needles := postMergeSafeguardNeedles(safeguard)
+	if len(needles) == 0 {
+		return fmt.Errorf("unknown post-merge safeguard %q", safeguard)
+	}
+	for _, want := range needles {
 		if !strings.Contains(state.postMergeHook, want) {
 			return fmt.Errorf("repository post-merge hook missing safeguard %q marker %q", safeguard, want)
 		}
@@ -213,7 +217,7 @@ func postMergeSafeguardNeedles(safeguard string) []string {
 	case "fail-safe-exit":
 		return []string{"NEVER blocks or fails the git operation", "exit 0"}
 	default:
-		return []string{"\x00"}
+		return nil
 	}
 }
 
