@@ -10,6 +10,10 @@
 # RELATED-SPEC: cmd/vroom-dispatch/SPEC.md
 # RELATED-SPEC: agm/internal/tmux/SPEC.md
 # RELATED-SPEC: agm/internal/safety/SPEC.md
+# RELATED-SPEC: agm/internal/cleanup/SPEC.md
+# RELATED-SPEC: agm/internal/procguard/SPEC.md
+# RELATED-SPEC: agm/internal/procreaper/SPEC.md
+# RELATED-SPEC: agm/internal/sweeper/SPEC.md
 # RELATED-SPEC: agm/internal/bus/SPEC.md
 # RELATED-SPEC: agm/internal/messages/SPEC.md
 # RELATED-SPEC: agm/internal/config/SPEC.md
@@ -97,6 +101,18 @@ Feature: Harness parity
       | backend/restbackend             |
       | manager/tmuxbackend             |
       | manager/dockerbackend           |
+
+  Scenario Outline: AGM cleanup and process support packages declare SPEC coverage
+    Given AGM cleanup support package "<package>" is configured
+    When AGM validates cleanup support package coverage
+    Then cleanup support package "<package>" should have a co-located SPEC
+
+    Examples:
+      | package    |
+      | cleanup    |
+      | procguard  |
+      | procreaper |
+      | sweeper    |
 
   Scenario Outline: Supported model families have default routes
     Given model family "<family>" is configured
