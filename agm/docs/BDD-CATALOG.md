@@ -143,6 +143,21 @@ newer harness and model-family parity registries evolve.
 alias registry. The default routes for the new families should reach a concrete
 provider instead of stopping at documentation or harness-only aliases.
 
+### LLM Runtime Guardrails
+
+**File:** [`llm_runtime_guardrails.feature`](../test/bdd/features/llm_runtime_guardrails.feature)
+
+**Drives:** `pkg/llm/auth`, `pkg/llm/config`, `pkg/llm/delegation`, and
+`pkg/llm/router` SPEC coverage.
+
+**Key scenarios:**
+- LLM runtime packages keep co-located SPEC coverage.
+- LLM runtime package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Model-family parity depends on lower-level auth,
+configuration, delegation, and role-routing contracts remaining explicit across
+providers instead of becoming incidental behavior in individual tests.
+
 ### Instruction Parity
 
 **File:** [`instruction_parity.feature`](../test/bdd/features/instruction_parity.feature)
