@@ -464,6 +464,23 @@ rebase, and stale-lock cleanup instead of raw mutation commands.
 **Why this matters:** Agent cleanup and review-thread workflows need audited
 command contracts before they are used in local development and merge gates.
 
+### AGM Control Surface Guardrails
+
+**File:** [`agm_control_surface_guardrails.feature`](../test/bdd/features/agm_control_surface_guardrails.feature)
+
+**Drives:** `agm/internal/api`, `agm/internal/cli`,
+`agm/internal/delegation`, `agm/internal/discovery`, `agm/internal/surface`,
+`agm/internal/terminal`, and `agm/internal/validate` SPEC coverage.
+
+**Key scenarios:**
+- AGM control-plane packages keep co-located SPEC coverage.
+- AGM control-plane package SPECs point back to their executable BDD feature.
+
+**Why this matters:** The AGM control plane ties CLI, MCP, status, discovery,
+tmux terminal handling, validation, and delegation behavior together. These
+packages need explicit contracts so parity work does not regress into
+harness-specific or Claude-only assumptions.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)
