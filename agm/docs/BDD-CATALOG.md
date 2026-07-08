@@ -301,6 +301,19 @@ policy packages.
 **Why this matters:** Agents must use audited wrappers for push, PR, merge,
 rebase, and stale-lock cleanup instead of raw mutation commands.
 
+### Workflow Tooling Guardrails
+
+**File:** [`workflow_tooling_guardrails.feature`](../test/bdd/features/workflow_tooling_guardrails.feature)
+
+**Drives:** workflow support command SPEC coverage for `agm-worktree-audit` and
+`resolve-review-threads`.
+
+**Key scenarios:**
+- Workflow tooling command packages keep co-located SPEC coverage.
+
+**Why this matters:** Agent cleanup and review-thread workflows need audited
+command contracts before they are used in local development and merge gates.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)
