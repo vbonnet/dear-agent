@@ -315,6 +315,21 @@ Wayfinder phase guidance, and cross-harness work. Its core retrieval,
 document, and schema-sharing packages need executable traceability rather than
 being covered only by package tests.
 
+### Engram Hook Guardrails
+
+**File:** [`engram_hook_guardrails.feature`](../test/bdd/features/engram_hook_guardrails.feature)
+
+**Drives:** Engram hook runtime, built-in checks, Bash validator, worktree
+isolation, verification escalation, and denial analyzer SPEC coverage.
+
+**Key scenarios:**
+- Engram hook packages keep co-located SPEC coverage.
+- Engram hook package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Hook parity is one of the repo's safety boundaries.
+Engram's hook runtime and enforcement binaries must remain documented and
+executable across harnesses instead of accumulating Claude-only assumptions.
+
 ### Local Development Guardrails
 
 **File:** [`local_development_guardrails.feature`](../test/bdd/features/local_development_guardrails.feature)
