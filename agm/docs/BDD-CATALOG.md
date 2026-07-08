@@ -100,6 +100,7 @@ state detection contracts.
 - Active harness factories use canonical names.
 - Active harness adapters satisfy the shared non-I/O conformance suite.
 - AGM runtime helper commands keep co-located SPEC coverage.
+- AGM backend implementations keep co-located SPEC coverage.
 - Supported model families include Anthropic, OpenAI, Gemini, GLM, DeepSeek,
   Nemotron, and Qwen.
 

@@ -71,6 +71,8 @@ type harnessParityState struct {
 	conformanceFindings        []agent.HarnessConformanceFinding
 	runtimeHelperCommand       string
 	runtimeHelperSpec          string
+	backendImplementation      string
+	backendImplementationSpec  string
 }
 
 type harnessParityStateKey struct{}
@@ -93,6 +95,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM runtime helper command "([^"]*)" is configured$`, agmRuntimeHelperCommandIsConfigured)
 	ctx.Step(`^AGM validates runtime helper command coverage$`, agmValidatesRuntimeHelperCommandCoverage)
 	ctx.Step(`^runtime helper command "([^"]*)" should have a co-located SPEC$`, runtimeHelperCommandShouldHaveCoLocatedSPEC)
+	ctx.Step(`^AGM backend implementation "([^"]*)" is configured$`, agmBackendImplementationIsConfigured)
+	ctx.Step(`^AGM validates backend implementation coverage$`, agmValidatesBackendImplementationCoverage)
+	ctx.Step(`^backend implementation "([^"]*)" should have a co-located SPEC$`, backendImplementationShouldHaveCoLocatedSPEC)
 	ctx.Step(`^model family "([^"]*)" is configured$`, modelFamilyIsConfigured)
 	ctx.Step(`^AGM validates model family parity support$`, agmValidatesModelFamilyParitySupport)
 	ctx.Step(`^model family "([^"]*)" should be supported$`, modelFamilyShouldBeSupported)
@@ -308,6 +313,45 @@ func runtimeHelperCommandShouldHaveCoLocatedSPEC(ctx context.Context, command st
 	wantSuffix := filepath.Join("agm", "cmd", command, "SPEC.md")
 	if !strings.HasSuffix(harnessState.runtimeHelperSpec, wantSuffix) {
 		return fmt.Errorf("runtime helper SPEC = %q, want suffix %q", harnessState.runtimeHelperSpec, wantSuffix)
+	}
+	return nil
+}
+
+func agmBackendImplementationIsConfigured(ctx context.Context, backend string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.backendImplementation = backend
+	harnessState.backendImplementationSpec = filepath.Join(bddRepoRoot(), "agm", "internal", filepath.FromSlash(backend), "SPEC.md")
+	return nil
+}
+
+func agmValidatesBackendImplementationCoverage(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.backendImplementationSpec == "" {
+		return fmt.Errorf("no AGM backend implementation configured")
+	}
+	if _, err := os.Stat(harnessState.backendImplementationSpec); err != nil {
+		return fmt.Errorf("backend implementation SPEC %s: %w", harnessState.backendImplementationSpec, err)
+	}
+	return nil
+}
+
+func backendImplementationShouldHaveCoLocatedSPEC(ctx context.Context, backend string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if backend != harnessState.backendImplementation {
+		return fmt.Errorf("configured backend implementation = %q, want %q", harnessState.backendImplementation, backend)
+	}
+	wantSuffix := filepath.Join("agm", "internal", filepath.FromSlash(backend), "SPEC.md")
+	if !strings.HasSuffix(harnessState.backendImplementationSpec, wantSuffix) {
+		return fmt.Errorf("backend implementation SPEC = %q, want suffix %q", harnessState.backendImplementationSpec, wantSuffix)
 	}
 	return nil
 }
