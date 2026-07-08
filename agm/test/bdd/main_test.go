@@ -42,4 +42,5 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterModelFamilyParitySteps(ctx)
 	steps.RegisterSpecCoverageSteps(ctx)
 	steps.RegisterWorkflowToolingGuardrailSteps(ctx)
+	steps.RegisterWayfinderStatusGuardrailSteps(ctx)
 }

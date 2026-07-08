@@ -254,6 +254,19 @@ MCP operations.
 **Why this matters:** Wayfinder is the planning layer for consequential work;
 non-Claude harnesses need an executable path to the same workflow.
 
+### Wayfinder Status Guardrails
+
+**File:** [`wayfinder_status_guardrails.feature`](../test/bdd/features/wayfinder_status_guardrails.feature)
+
+**Drives:** Wayfinder V2 status and phase dependency package SPEC coverage.
+
+**Key scenarios:**
+- Wayfinder core status packages keep co-located SPEC coverage.
+
+**Why this matters:** Wayfinder V2 is the canonical planning workflow, so its
+state schema and dependency graph need executable traceability alongside the
+harness parity surfaces that consume it.
+
 ### Config Directory Parity
 
 **File:** [`config_directory_parity.feature`](../test/bdd/features/config_directory_parity.feature)
