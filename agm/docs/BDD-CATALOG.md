@@ -464,6 +464,25 @@ rebase, and stale-lock cleanup instead of raw mutation commands.
 **Why this matters:** Agent cleanup and review-thread workflows need audited
 command contracts before they are used in local development and merge gates.
 
+### Workflow Command Guardrails
+
+**File:** [`workflow_command_guardrails.feature`](../test/bdd/features/workflow_command_guardrails.feature)
+
+**Drives:** workflow command SPEC coverage for `workflow-run`,
+`workflow-status`, `workflow-list`, `workflow-logs`, `workflow-cancel`,
+`workflow-approve`, `workflow-audit`, `workflow-codemod`, `workflow-dev`,
+`workflow-inspector`, `workflow-lint`, `workflow-migrate`, and
+`workflow-roles`.
+
+**Key scenarios:**
+- Workflow command packages keep co-located SPEC coverage.
+- Workflow command package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Workflow commands are the human and automation control
+surface for persisted workflow execution. They need explicit contracts for
+state changes, audit trails, migration, development loops, and machine-readable
+output before parity work can rely on them.
+
 ### Quality Command Guardrails
 
 **File:** [`quality_command_guardrails.feature`](../test/bdd/features/quality_command_guardrails.feature)
