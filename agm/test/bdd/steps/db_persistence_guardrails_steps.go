@@ -69,7 +69,7 @@ func agmInspectsTheDatabaseSchema(ctx context.Context) error {
 	if state.db == nil {
 		return fmt.Errorf("database is not open")
 	}
-	rows, err := state.db.Conn().Query(`
+	rows, err := state.db.Conn().QueryContext(ctx, `
 		SELECT name, type
 		FROM sqlite_master
 		WHERE type IN ('table', 'view')
