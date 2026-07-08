@@ -1,0 +1,40 @@
+# Bubblewrap Sandbox Provider Specification
+
+<!-- Last audited at: 2026-07-08 -->
+
+## Overview
+
+The Bubblewrap provider creates Linux namespace sandboxes for AGM sessions using
+`bwrap`. It favors per-session git worktrees so agents can edit and commit in an
+isolated branch, and it falls back to a symlink-populated merged directory when
+no repository can be resolved.
+
+## Requirements
+
+**BWRAP-01** When the provider is queried for its name, the system shall return `bubblewrap`.
+
+**BWRAP-02** When creating a sandbox, the system shall reject requests with an empty session ID, no lower directories, missing lower directories, or an empty workspace directory using structured sandbox errors.
+
+**BWRAP-03** When `bwrap` is not available in `PATH`, the system shall fail creation with an unsupported-platform sandbox error before creating sandbox state.
+
+**BWRAP-04** When a valid sandbox request is created, the system shall create `upper`, `work`, and `merged` directories under the requested workspace directory.
+
+**BWRAP-05** When an explicit target repository is configured or a git repository can be resolved from the lower directories, the system shall replace the merged directory with a git worktree on an `agm/<session>` branch.
+
+**BWRAP-06** When no git repository can be resolved, the system shall populate the merged directory with top-level symlinks from the lower directories without writing into the source lower directories.
+
+**BWRAP-07** When Bubblewrap arguments are built for execution, the system shall mount lower directories read-only, bind the writable upper directory, isolate all namespaces by default, and include `--die-with-parent`.
+
+**BWRAP-08** When provider-level or request-level network sharing is enabled, the system shall add `--share-net`; otherwise network access shall remain isolated by default.
+
+**BWRAP-09** When secrets are provided, the system shall write them only to `upper/.env` with owner-only permissions and shell environment expansion.
+
+**BWRAP-10** When a sandbox is destroyed, the system shall remove any created git worktree, remove the sandbox directories, and remove the sandbox from the active provider registry.
+
+**BWRAP-11** When a sandbox is validated, the system shall require an active registry entry and an existing merged path.
+
+## BDD Traceability
+
+- `agm/test/bdd/features/sandbox_provider_guardrails.feature` enforces that this
+  package keeps co-located SPEC coverage and that the SPEC points back to the
+  executable guardrail.
