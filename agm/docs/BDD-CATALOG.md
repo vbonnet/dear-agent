@@ -529,6 +529,22 @@ SPEC coverage.
 surfaces must remain harness-neutral across loopback, Tailscale, CLI, HTTP, and
 future adapters instead of drifting into transport-specific behavior.
 
+### Observability Package Guardrails
+
+**File:** [`observability_package_guardrails.feature`](../test/bdd/features/observability_package_guardrails.feature)
+
+**Drives:** observability SPEC coverage for `cmd/jaeger-health`,
+`cmd/otel-local`, `internal/metrics`, telemetry agent, telemetry analysis,
+telemetry enrichment, telemetry error rendering, and `pkg/otelsetup`.
+
+**Key scenarios:**
+- Observability packages keep co-located SPEC coverage.
+- Observability package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Quota monitoring, drift audits, local trace collectors,
+agent launch telemetry, and Engram session summaries are only useful when every
+harness and model family reports through documented, testable contracts.
+
 ### Plugin And Skill Package Guardrails
 
 **File:** [`plugin_skill_package_guardrails.feature`](../test/bdd/features/plugin_skill_package_guardrails.feature)
