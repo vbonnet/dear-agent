@@ -166,35 +166,59 @@ func theRetrievedSessionShouldPreserveHarnessNeutralMetadata(ctx context.Context
 	}
 	want := state.session
 	got := state.retrieved
+	if err := compareSessionIdentity(got, want); err != nil {
+		return err
+	}
+	if err := compareSessionContext(got, want); err != nil {
+		return err
+	}
+	if err := compareNativeMetadata(got, want); err != nil {
+		return err
+	}
+	if err := compareEngramMetadata(got.EngramMetadata, want.EngramMetadata); err != nil {
+		return err
+	}
+	return nil
+}
+
+func compareSessionIdentity(got, want *manifest.Manifest) error {
 	if got.Harness != want.Harness || got.Model != want.Model {
 		return fmt.Errorf("retrieved harness/model = %q/%q, want %q/%q", got.Harness, got.Model, want.Harness, want.Model)
 	}
+	return nil
+}
+
+func compareSessionContext(got, want *manifest.Manifest) error {
 	if got.Context.Project != want.Context.Project || got.Context.Purpose != want.Context.Purpose || got.Context.Notes != want.Context.Notes {
 		return fmt.Errorf("retrieved context = %#v, want %#v", got.Context, want.Context)
 	}
-	if len(got.Context.Tags) != len(want.Context.Tags) {
-		return fmt.Errorf("retrieved context tags = %v, want %v", got.Context.Tags, want.Context.Tags)
-	}
-	for i := range got.Context.Tags {
-		if got.Context.Tags[i] != want.Context.Tags[i] {
-			return fmt.Errorf("retrieved context tags = %v, want %v", got.Context.Tags, want.Context.Tags)
-		}
-	}
+	return compareStringSlices("retrieved context tags", got.Context.Tags, want.Context.Tags)
+}
+
+func compareNativeMetadata(got, want *manifest.Manifest) error {
 	if got.Claude.UUID != want.Claude.UUID || got.Tmux.SessionName != want.Tmux.SessionName {
 		return fmt.Errorf("retrieved native metadata = %q/%q, want %q/%q", got.Claude.UUID, got.Tmux.SessionName, want.Claude.UUID, want.Tmux.SessionName)
 	}
-	if got.EngramMetadata == nil || want.EngramMetadata == nil {
+	return nil
+}
+
+func compareEngramMetadata(got, want *manifest.EngramMetadata) error {
+	if got == nil || want == nil {
 		return fmt.Errorf("engram metadata was not preserved")
 	}
-	if got.EngramMetadata.Enabled != want.EngramMetadata.Enabled ||
-		got.EngramMetadata.Query != want.EngramMetadata.Query ||
-		got.EngramMetadata.Count != want.EngramMetadata.Count ||
-		len(got.EngramMetadata.EngramIDs) != len(want.EngramMetadata.EngramIDs) {
-		return fmt.Errorf("retrieved engram metadata = %#v, want %#v", got.EngramMetadata, want.EngramMetadata)
+	if got.Enabled != want.Enabled || got.Query != want.Query || got.Count != want.Count {
+		return fmt.Errorf("retrieved engram metadata = %#v, want %#v", got, want)
 	}
-	for i := range got.EngramMetadata.EngramIDs {
-		if got.EngramMetadata.EngramIDs[i] != want.EngramMetadata.EngramIDs[i] {
-			return fmt.Errorf("retrieved engram IDs = %v, want %v", got.EngramMetadata.EngramIDs, want.EngramMetadata.EngramIDs)
+	return compareStringSlices("retrieved engram IDs", got.EngramIDs, want.EngramIDs)
+}
+
+func compareStringSlices(label string, got, want []string) error {
+	if len(got) != len(want) {
+		return fmt.Errorf("%s = %v, want %v", label, got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return fmt.Errorf("%s = %v, want %v", label, got, want)
 		}
 	}
 	return nil
