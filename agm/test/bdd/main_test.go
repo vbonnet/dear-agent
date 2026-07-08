@@ -42,6 +42,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterHookParitySteps(ctx)
 	steps.RegisterLocalDevelopmentGuardrailSteps(ctx)
 	steps.RegisterModelFamilyParitySteps(ctx)
+	steps.RegisterQuotaMonitoringGuardrailSteps(ctx)
 	steps.RegisterSpecCoverageSteps(ctx)
 	steps.RegisterWorkflowToolingGuardrailSteps(ctx)
 	steps.RegisterWayfinderStatusGuardrailSteps(ctx)
