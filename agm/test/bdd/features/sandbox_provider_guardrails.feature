@@ -1,0 +1,22 @@
+# SPEC: internal/sandbox/bubblewrap/SPEC.md
+# RELATED-SPEC: internal/sandbox/apfs/SPEC.md
+# RELATED-SPEC: internal/sandbox/gvisor/SPEC.md
+# RELATED-SPEC: internal/sandbox/overlayfs/SPEC.md
+# RELATED-SPEC: wayfinder/pkg/sandbox/SPEC.md
+Feature: Sandbox provider guardrails
+  Sandbox provider and Wayfinder sandbox packages should carry executable SPEC
+  traceability so isolation and permissions behavior stays visible across AGM
+  and Wayfinder implementations.
+
+  Scenario Outline: Sandbox packages declare SPEC coverage
+    Given sandbox provider package "<package>" is configured
+    When AGM validates sandbox provider package coverage
+    Then sandbox provider package "<package>" should have a co-located SPEC
+
+    Examples:
+      | package                     |
+      | internal/sandbox/bubblewrap |
+      | internal/sandbox/apfs       |
+      | internal/sandbox/gvisor     |
+      | internal/sandbox/overlayfs  |
+      | wayfinder/pkg/sandbox       |
