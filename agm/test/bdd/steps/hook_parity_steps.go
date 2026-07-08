@@ -14,8 +14,9 @@ import (
 )
 
 type hookParityState struct {
-	harness string
-	hooks   map[string][]bddHookGroup
+	harness       string
+	hooks         map[string][]bddHookGroup
+	postMergeHook string
 }
 
 type bddHookGroup struct {
@@ -42,6 +43,9 @@ func RegisterHookParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates hook parity for that harness$`, agmValidatesHookParityForThatHarness)
 	ctx.Step(`^hook harness "([^"]*)" should include guardrail hook "([^"]*)"$`, hookHarnessShouldIncludeGuardrailHook)
 	ctx.Step(`^hook harness "([^"]*)" should include Beads lifecycle hook "([^"]*)"$`, hookHarnessShouldIncludeBeadsLifecycleHook)
+	ctx.Step(`^the repository post-merge hook is configured$`, repositoryPostMergeHookIsConfigured)
+	ctx.Step(`^AGM validates repository post-merge hook coverage$`, agmValidatesRepositoryPostMergeHookCoverage)
+	ctx.Step(`^the repository post-merge hook should include lifecycle safeguard "([^"]*)"$`, repositoryPostMergeHookShouldIncludeLifecycleSafeguard)
 }
 
 func hookHarnessIsConfigured(ctx context.Context, harness string) error {
@@ -140,6 +144,81 @@ func getHookParityState(ctx context.Context) (*hookParityState, error) {
 		return nil, fmt.Errorf("hook parity state not initialized")
 	}
 	return state, nil
+}
+
+func repositoryPostMergeHookIsConfigured(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(hookBDDRepoRoot(), "scripts", "git-hooks", "post-merge")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read repository post-merge hook %s: %w", path, err)
+	}
+	state.postMergeHook = string(data)
+	return nil
+}
+
+func agmValidatesRepositoryPostMergeHookCoverage(ctx context.Context) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(state.postMergeHook) == "" {
+		return fmt.Errorf("repository post-merge hook was not loaded")
+	}
+	for _, want := range []string{
+		"rebuild_changed_binaries",
+		"deploy_host_artifacts",
+		"verify_deployment_after_rebuild",
+		"transition_merged_beads",
+		"sweep_merged_worktrees",
+		"exit 0",
+	} {
+		if !strings.Contains(state.postMergeHook, want) {
+			return fmt.Errorf("repository post-merge hook missing %q", want)
+		}
+	}
+	return nil
+}
+
+func repositoryPostMergeHookShouldIncludeLifecycleSafeguard(ctx context.Context, safeguard string) error {
+	state, err := getHookParityState(ctx)
+	if err != nil {
+		return err
+	}
+	needles := postMergeSafeguardNeedles(safeguard)
+	if len(needles) == 0 {
+		return fmt.Errorf("unknown post-merge safeguard %q", safeguard)
+	}
+	for _, want := range needles {
+		if !strings.Contains(state.postMergeHook, want) {
+			return fmt.Errorf("repository post-merge hook missing safeguard %q marker %q", safeguard, want)
+		}
+	}
+	return nil
+}
+
+func postMergeSafeguardNeedles(safeguard string) []string {
+	switch safeguard {
+	case "atomic-binary-install":
+		return []string{"go build -o", "mv -f", "(atomic)"}
+	case "trunk-build-context":
+		return []string{"fetch_trunk_commit", "ensure_build_dir", "origin/${default_branch}"}
+	case "host-artifact-deploy":
+		return []string{"deploy_host_artifacts", "make dear-deploy-sync"}
+	case "deployment-verification":
+		return []string{"verify_deployment_after_rebuild", "agm admin verify-deployment"}
+	case "bead-transition":
+		return []string{"transition_merged_beads", "bd --db", "close"}
+	case "worktree-sweep":
+		return []string{"sweep_merged_worktrees", "agm worktree sweep --execute"}
+	case "fail-safe-exit":
+		return []string{"NEVER blocks or fails the git operation", "exit 0"}
+	default:
+		return nil
+	}
 }
 
 func hookManifestPath(harness string) (string, bool) {
