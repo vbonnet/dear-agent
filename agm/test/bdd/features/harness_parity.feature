@@ -18,7 +18,10 @@
 # RELATED-SPEC: agm/internal/interrupt/SPEC.md
 # RELATED-SPEC: agm/internal/lifecycle/SPEC.md
 # RELATED-SPEC: agm/internal/backend/SPEC.md
+# RELATED-SPEC: agm/internal/backend/restbackend/SPEC.md
 # RELATED-SPEC: agm/internal/manager/SPEC.md
+# RELATED-SPEC: agm/internal/manager/tmuxbackend/SPEC.md
+# RELATED-SPEC: agm/internal/manager/dockerbackend/SPEC.md
 # RELATED-SPEC: agm/internal/readiness/SPEC.md
 # RELATED-SPEC: agm/internal/send/SPEC.md
 # RELATED-SPEC: agm/internal/manifest/SPEC.md
@@ -83,6 +86,17 @@ Feature: Harness parity
       | agm-reaper             |
       | agm-statusline         |
       | agm-statusline-capture |
+
+  Scenario Outline: AGM backend implementations declare SPEC coverage
+    Given AGM backend implementation "<backend>" is configured
+    When AGM validates backend implementation coverage
+    Then backend implementation "<backend>" should have a co-located SPEC
+
+    Examples:
+      | backend                         |
+      | backend/restbackend             |
+      | manager/tmuxbackend             |
+      | manager/dockerbackend           |
 
   Scenario Outline: Supported model families have default routes
     Given model family "<family>" is configured
