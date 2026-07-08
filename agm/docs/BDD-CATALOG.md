@@ -373,6 +373,22 @@ review gates staying explicit and executable.
 **Why this matters:** Harness-specific config belongs in explicit repo-local
 surfaces so hook, instruction, and marketplace support can be audited.
 
+### Harness Configuration Surface Guardrails
+
+**File:** [`harness_config_surface_guardrails.feature`](../test/bdd/features/harness_config_surface_guardrails.feature)
+
+**Drives:** `.agents`, `.claude`, `.codex`, `.gemini`, `.opencode`,
+`.dear-agent`, and `.claude-plugin` SPEC coverage.
+
+**Key scenarios:**
+- Harness configuration and marketplace surface directories keep co-located SPEC coverage.
+- Surface directory SPECs point back to their executable BDD feature.
+
+**Why this matters:** The config-directory and marketplace parity tests validate
+behavior, but the directories themselves are supported integration surfaces.
+They need local contracts so harness-specific files do not drift into
+undocumented Claude-only assumptions.
+
 ### Database Persistence Guardrails
 
 **File:** [`db_persistence_guardrails.feature`](../test/bdd/features/db_persistence_guardrails.feature)
