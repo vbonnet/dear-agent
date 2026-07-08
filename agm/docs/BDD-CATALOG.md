@@ -270,6 +270,21 @@ non-Claude harnesses need an executable path to the same workflow.
 **Why this matters:** Harness-specific config belongs in explicit repo-local
 surfaces so hook, instruction, and marketplace support can be audited.
 
+### Local Development Guardrails
+
+**File:** [`local_development_guardrails.feature`](../test/bdd/features/local_development_guardrails.feature)
+
+**Drives:** safe local development wrapper SPEC coverage for `safe-push`,
+`safe-pr`, `safe-merge`, `safe-rebase`, `safe-unlock`, and their internal
+policy packages.
+
+**Key scenarios:**
+- Safe local development command packages keep co-located SPEC coverage.
+- Safe local development internal policy packages keep co-located SPEC coverage.
+
+**Why this matters:** Agents must use audited wrappers for push, PR, merge,
+rebase, and stale-lock cleanup instead of raw mutation commands.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)
