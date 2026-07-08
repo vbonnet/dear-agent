@@ -529,6 +529,23 @@ SPEC coverage.
 surfaces must remain harness-neutral across loopback, Tailscale, CLI, HTTP, and
 future adapters instead of drifting into transport-specific behavior.
 
+### AGM Runtime Package Guardrails
+
+**File:** [`agm_runtime_package_guardrails.feature`](../test/bdd/features/agm_runtime_package_guardrails.feature)
+
+**Drives:** AGM runtime support SPEC coverage for artifacts, backups,
+capacity, compaction, deadlock detection, freshness, locks, monitoring,
+reservations, state detection, and failure tracking.
+
+**Key scenarios:**
+- AGM runtime packages keep co-located SPEC coverage.
+- AGM runtime package SPECs point back to their executable BDD feature.
+
+**Why this matters:** AGM parity is not only command syntax. The operational
+substrate behind every harness needs explicit contracts for preserving state,
+avoiding unsafe concurrency, detecting interactive readiness, and recovering
+from stale or wedged sessions.
+
 ### Observability Package Guardrails
 
 **File:** [`observability_package_guardrails.feature`](../test/bdd/features/observability_package_guardrails.feature)
