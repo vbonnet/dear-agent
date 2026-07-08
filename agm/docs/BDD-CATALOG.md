@@ -299,6 +299,22 @@ search contracts.
 **Why this matters:** AGM persistence must remain harness-neutral and searchable
 instead of encoding Claude-only state or untested schema assumptions.
 
+### Engram Knowledge Guardrails
+
+**File:** [`engram_knowledge_guardrails.feature`](../test/bdd/features/engram_knowledge_guardrails.feature)
+
+**Drives:** Engram retrieval, document, and corpus-callosum knowledge package
+SPEC coverage.
+
+**Key scenarios:**
+- Engram knowledge packages keep co-located SPEC coverage.
+- Engram knowledge package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Engram is the repo's shared knowledge layer for recall,
+Wayfinder phase guidance, and cross-harness work. Its core retrieval,
+document, and schema-sharing packages need executable traceability rather than
+being covered only by package tests.
+
 ### Local Development Guardrails
 
 **File:** [`local_development_guardrails.feature`](../test/bdd/features/local_development_guardrails.feature)
