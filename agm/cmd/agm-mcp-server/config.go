@@ -11,14 +11,14 @@ import (
 
 // Config represents AGM MCP server configuration
 type Config struct {
-	Enabled          bool      `yaml:"enabled"`
-	Transport        string    `yaml:"transport"`
-	Tools            []string  `yaml:"tools"`
-	AutoRegister     bool      `yaml:"auto_register"`
-	ClaudeConfigPath string    `yaml:"claude_config_path"`
-	SessionsDir      string    `yaml:"sessions_dir"`
-	EngramMCPURL     string    `yaml:"engram_mcp_url"` // kept for future HTTP transport; wayfinder tools now use WayfinderDir
-	WayfinderDir     string    `yaml:"wayfinder_dir"`  // path to engram-research wf/ directory
+	Enabled          bool     `yaml:"enabled"`
+	Transport        string   `yaml:"transport"`
+	Tools            []string `yaml:"tools"`
+	AutoRegister     bool     `yaml:"auto_register"`
+	ClaudeConfigPath string   `yaml:"claude_config_path"`
+	SessionsDir      string   `yaml:"sessions_dir"`
+	EngramMCPURL     string   `yaml:"engram_mcp_url"` // kept for future HTTP transport; wayfinder tools now use WayfinderDir
+	WayfinderDir     string   `yaml:"wayfinder_dir"`  // path to engram-research wf/ directory
 	// Workspace is the Dolt workspace name to use for session storage.
 	// When set, this value is applied as the WORKSPACE environment variable
 	// at startup so that tools work correctly when the server is launched
@@ -110,6 +110,26 @@ func loadConfig(configPath string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// resolveWorkspace picks the Dolt workspace for the MCP server: an explicit
+// WORKSPACE environment variable wins, otherwise the workspace from
+// mcp-server.yaml. It returns an error when NEITHER is set.
+//
+// This is deliberately strict: without an explicit workspace the Dolt adapter
+// silently falls back to default_workspace ('personal', which has no DB) and the
+// server boots a non-functional ("handless") tool surface — the recurring MCP
+// outage (ce-vj8a). The server must fail loud instead of falling back.
+func resolveWorkspace(configWorkspace string, getenv func(string) string) (string, error) {
+	if ws := getenv("WORKSPACE"); ws != "" {
+		return ws, nil
+	}
+	if configWorkspace != "" {
+		return configWorkspace, nil
+	}
+	return "", fmt.Errorf("no Dolt workspace configured: set the WORKSPACE environment variable, " +
+		"or add 'workspace: <name>' under mcp_server in ~/.config/agm/mcp-server.yaml " +
+		"(Claude Desktop launches this server without your shell environment)")
 }
 
 // detectSessionsDir auto-detects AGM sessions directory

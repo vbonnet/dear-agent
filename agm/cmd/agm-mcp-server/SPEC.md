@@ -19,6 +19,10 @@ The AGM MCP Server is a Model Context Protocol (MCP) server that exposes AGM (AI
 
 **MCS-02** When the MCP server documents model examples, the system shall include both the supported codex-cli default alias and explicitly selectable Codex aliases.
 
+**MCS-03** When the MCP server starts without a resolvable Dolt workspace (the WORKSPACE environment variable is unset and mcp-server.yaml declares no workspace), the system shall exit non-zero with an actionable error and shall not register any tools.
+
+**MCS-04** When the MCP server starts and the resolved workspace's Dolt database is not reachable, the system shall exit non-zero with an error naming the workspace and shall not register any tools.
+
 ## Use Cases
 
 ### Primary Use Cases
