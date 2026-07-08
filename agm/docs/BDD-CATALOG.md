@@ -158,6 +158,23 @@ provider instead of stopping at documentation or harness-only aliases.
 configuration, delegation, and role-routing contracts remaining explicit across
 providers instead of becoming incidental behavior in individual tests.
 
+### Sandbox Provider Guardrails
+
+**File:** [`sandbox_provider_guardrails.feature`](../test/bdd/features/sandbox_provider_guardrails.feature)
+
+**Drives:** `internal/sandbox/bubblewrap`, `internal/sandbox/apfs`,
+`internal/sandbox/gvisor`, `internal/sandbox/overlayfs`, and
+`wayfinder/pkg/sandbox` SPEC coverage.
+
+**Key scenarios:**
+- Sandbox provider packages keep co-located SPEC coverage.
+- Sandbox provider package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Sandbox behavior is a permissions boundary for AGM and
+Wayfinder. Provider-specific isolation, secrets, cleanup, and path-resolution
+contracts need executable traceability without requiring privileged mounts in
+BDD.
+
 ### Instruction Parity
 
 **File:** [`instruction_parity.feature`](../test/bdd/features/instruction_parity.feature)
