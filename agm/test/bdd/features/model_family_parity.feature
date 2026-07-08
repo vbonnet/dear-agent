@@ -1,4 +1,6 @@
 # SPEC: pkg/llm/provider/SPEC.md
+# RELATED-SPEC: agm/internal/llm/SPEC.md
+# RELATED-SPEC: internal/pricing/SPEC.md
 Feature: Model family provider parity
   Dear-agent should route supported model families through one provider
   resolver/factory contract. AGM owns the family defaults, and pkg/llm/provider
