@@ -15,9 +15,27 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/gateway"
 	pkgversion "github.com/vbonnet/dear-agent/pkg/version"
 )
+
+// verifyWorkspaceDB resolves the Dolt config and opens the store to confirm the
+// workspace's database is reachable, then closes it. It is the boot-time gate
+// that turns a silent "handless" tool surface into a loud startup failure
+// (ce-vj8a). dolt.New pings the connection (and auto-starts Dolt if configured),
+// so a non-existent DB (e.g. an empty 'personal' workspace) returns an error.
+func verifyWorkspaceDB() error {
+	cfg, err := dolt.DefaultConfig()
+	if err != nil {
+		return err
+	}
+	adapter, err := dolt.New(cfg)
+	if err != nil {
+		return err
+	}
+	return adapter.Close()
+}
 
 // logger writes to stderr (required for stdio MCP transport)
 var logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -68,16 +86,31 @@ func main() {
 		return
 	}
 
-	// Apply workspace from config when WORKSPACE env var is not already set.
-	// Claude Desktop launches the server without inheriting the user's shell
-	// environment, so the WORKSPACE var (required by the Dolt storage adapter)
-	// must be injected here from the YAML config.
-	if cfg.Workspace != "" && os.Getenv("WORKSPACE") == "" {
-		if err := os.Setenv("WORKSPACE", cfg.Workspace); err != nil {
-			logger.Warn("Failed to set WORKSPACE from config", "workspace", cfg.Workspace, "error", err)
-		} else {
-			logger.Info("Applied workspace from config", "workspace", cfg.Workspace)
-		}
+	// Resolve the Dolt workspace (WORKSPACE env, else mcp-server.yaml) and FAIL
+	// LOUD if none. Claude Desktop launches the server without the shell
+	// environment, so WORKSPACE is often unset; without an explicit workspace the
+	// Dolt adapter silently falls back to default_workspace ('personal', which
+	// has no DB) and the server boots a non-functional tool surface — the
+	// recurring "handless MCP" outage (ce-vj8a). Refuse to start instead.
+	ws, err := resolveWorkspace(cfg.Workspace, os.Getenv)
+	if err != nil {
+		logger.Error("refusing to start — no Dolt workspace (ce-vj8a)", "error", err)
+		fmt.Fprintf(os.Stderr, "FATAL: agm-mcp-server cannot start: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.Setenv("WORKSPACE", ws); err != nil {
+		logger.Error("failed to set WORKSPACE", "workspace", ws, "error", err)
+		os.Exit(1)
+	}
+	logger.Info("Resolved Dolt workspace", "workspace", ws)
+
+	// Verify the workspace's Dolt DB is actually reachable BEFORE registering any
+	// tools. A resolved-but-unreachable workspace would otherwise register a
+	// non-functional tool surface (ce-vj8a). Fail loud with an actionable error.
+	if err := verifyWorkspaceDB(); err != nil {
+		logger.Error("refusing to start — Dolt DB not reachable (ce-vj8a)", "workspace", ws, "error", err)
+		fmt.Fprintf(os.Stderr, "FATAL: agm-mcp-server: workspace %q has no reachable Dolt DB: %v\n", ws, err)
+		os.Exit(1)
 	}
 
 	logger.Info("Starting AGM MCP Server", "version", "1.0.0")
