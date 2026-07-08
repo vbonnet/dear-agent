@@ -310,6 +310,21 @@ non-Claude harnesses need an executable path to the same workflow.
 state schema and dependency graph need executable traceability alongside the
 harness parity surfaces that consume it.
 
+### Wayfinder Lifecycle Guardrails
+
+**File:** [`wayfinder_lifecycle_guardrails.feature`](../test/bdd/features/wayfinder_lifecycle_guardrails.feature)
+
+**Drives:** Wayfinder archive, resume, workspace detection, and review package
+SPEC coverage.
+
+**Key scenarios:**
+- Wayfinder lifecycle packages keep co-located SPEC coverage.
+- Wayfinder lifecycle package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Wayfinder lifecycle safety depends on resumable project
+detection, pre-rewind archive snapshots, workspace isolation, and risk-adaptive
+review gates staying explicit and executable.
+
 ### Config Directory Parity
 
 **File:** [`config_directory_parity.feature`](../test/bdd/features/config_directory_parity.feature)
