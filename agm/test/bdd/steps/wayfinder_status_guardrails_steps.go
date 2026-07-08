@@ -80,6 +80,21 @@ func getWayfinderStatusGuardrailState(ctx context.Context) (*wayfinderStatusGuar
 }
 
 func wayfinderStatusBDDRepoRoot() string {
+	if dir, err := os.Getwd(); err == nil {
+		for {
+			if _, err := os.Stat(filepath.Join(dir, "wayfinder")); err == nil {
+				if _, err := os.Stat(filepath.Join(dir, "agm")); err == nil {
+					return dir
+				}
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		return "."
