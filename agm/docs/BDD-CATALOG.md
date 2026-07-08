@@ -499,6 +499,21 @@ output before parity work can rely on them.
 registry, role resolver, codemods, dev loop, and specialized workflow adapters
 behind those commands have explicit contracts.
 
+### Audit Package Guardrails
+
+**File:** [`audit_package_guardrails.feature`](../test/bdd/features/audit_package_guardrails.feature)
+
+**Drives:** audit support package SPEC coverage for `agm/internal/audit`,
+`internal/driftaudit`, `pkg/audit/config`, and `pkg/audit/verifiers`.
+
+**Key scenarios:**
+- Audit support packages keep co-located SPEC coverage.
+- Audit support package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Repo-wide parity governance depends on trustworthy audit
+inputs: AGM session audits, durable drift evidence, audit plan config, and
+verifier dispatch all need stable contracts.
+
 ### Quality Command Guardrails
 
 **File:** [`quality_command_guardrails.feature`](../test/bdd/features/quality_command_guardrails.feature)
