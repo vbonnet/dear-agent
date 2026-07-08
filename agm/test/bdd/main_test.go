@@ -51,6 +51,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterQualityCommandGuardrailSteps(ctx)
 	steps.RegisterSandboxProviderGuardrailSteps(ctx)
 	steps.RegisterSpecCoverageSteps(ctx)
+	steps.RegisterWorkflowCommandGuardrailSteps(ctx)
 	steps.RegisterWorkflowToolingGuardrailSteps(ctx)
 	steps.RegisterWayfinderLifecycleGuardrailSteps(ctx)
 	steps.RegisterWayfinderStatusGuardrailSteps(ctx)
