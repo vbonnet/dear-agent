@@ -94,3 +94,49 @@ func TestBoot_NoWorkspace_FailsLoud(t *testing.T) {
 		t.Errorf("expected an actionable FATAL workspace error, got:\n%s", s)
 	}
 }
+
+// TestBoot_UnreachableDB_FailsLoud covers MCS-04: a workspace resolves but its
+// Dolt DB is unreachable (WORKSPACE set, DOLT_PORT pointed at a dead port). The
+// server must exit non-zero with an actionable error, never register tools.
+func TestBoot_UnreachableDB_FailsLoud(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping boot test in short mode")
+	}
+	bin := filepath.Join(t.TempDir(), "agm-mcp-server")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, out)
+	}
+
+	// Enabled config, no workspace in it — the workspace comes from the env so
+	// resolveWorkspace passes and the boot reaches the DB-reachability probe.
+	home := t.TempDir()
+	cfgDir := filepath.Join(home, ".config", "agm")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "mcp-server.yaml"), []byte("mcp_server:\n  enabled: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin)
+	// WORKSPACE resolves; DOLT_PORT points at a dead port so New's ping fails.
+	cmd.Env = []string{
+		"HOME=" + home,
+		"PATH=" + os.Getenv("PATH"),
+		"WORKSPACE=unreachable-db-test",
+		"DOLT_PORT=54321",
+	}
+	out, err := cmd.CombinedOutput()
+
+	if ctx.Err() == context.DeadlineExceeded {
+		t.Fatal("server hung instead of failing loud on an unreachable DB (ce-vj8a)")
+	}
+	if err == nil {
+		t.Fatalf("server booted with an unreachable DB — it must fail loud (ce-vj8a)\n%s", out)
+	}
+	if s := string(out); !strings.Contains(s, "FATAL") || !strings.Contains(s, "reachable") {
+		t.Errorf("expected an actionable 'DB not reachable' FATAL error, got:\n%s", s)
+	}
+}
