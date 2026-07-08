@@ -23,6 +23,11 @@
 # RELATED-SPEC: agm/internal/send/SPEC.md
 # RELATED-SPEC: agm/internal/manifest/SPEC.md
 # RELATED-SPEC: agm/internal/statusline/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-bus/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-aware-reaper/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-reaper/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-statusline/SPEC.md
+# RELATED-SPEC: agm/cmd/agm-statusline-capture/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/artifacts/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/broker/SPEC.md
@@ -65,6 +70,19 @@ Feature: Harness parity
     Given AGM active harnesses are configured
     When AGM validates active harness adapter conformance
     Then every active harness adapter should satisfy the shared conformance suite
+
+  Scenario Outline: AGM runtime helper commands declare SPEC coverage
+    Given AGM runtime helper command "<command>" is configured
+    When AGM validates runtime helper command coverage
+    Then runtime helper command "<command>" should have a co-located SPEC
+
+    Examples:
+      | command                |
+      | agm-bus                |
+      | agm-aware-reaper       |
+      | agm-reaper             |
+      | agm-statusline         |
+      | agm-statusline-capture |
 
   Scenario Outline: Supported model families have default routes
     Given model family "<family>" is configured
