@@ -73,6 +73,8 @@ type harnessParityState struct {
 	runtimeHelperSpec          string
 	backendImplementation      string
 	backendImplementationSpec  string
+	cleanupSupportPackage      string
+	cleanupSupportSpec         string
 }
 
 type harnessParityStateKey struct{}
@@ -98,6 +100,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM backend implementation "([^"]*)" is configured$`, agmBackendImplementationIsConfigured)
 	ctx.Step(`^AGM validates backend implementation coverage$`, agmValidatesBackendImplementationCoverage)
 	ctx.Step(`^backend implementation "([^"]*)" should have a co-located SPEC$`, backendImplementationShouldHaveCoLocatedSPEC)
+	ctx.Step(`^AGM cleanup support package "([^"]*)" is configured$`, agmCleanupSupportPackageIsConfigured)
+	ctx.Step(`^AGM validates cleanup support package coverage$`, agmValidatesCleanupSupportPackageCoverage)
+	ctx.Step(`^cleanup support package "([^"]*)" should have a co-located SPEC$`, cleanupSupportPackageShouldHaveCoLocatedSPEC)
 	ctx.Step(`^model family "([^"]*)" is configured$`, modelFamilyIsConfigured)
 	ctx.Step(`^AGM validates model family parity support$`, agmValidatesModelFamilyParitySupport)
 	ctx.Step(`^model family "([^"]*)" should be supported$`, modelFamilyShouldBeSupported)
@@ -352,6 +357,45 @@ func backendImplementationShouldHaveCoLocatedSPEC(ctx context.Context, backend s
 	wantSuffix := filepath.Join("agm", "internal", filepath.FromSlash(backend), "SPEC.md")
 	if !strings.HasSuffix(harnessState.backendImplementationSpec, wantSuffix) {
 		return fmt.Errorf("backend implementation SPEC = %q, want suffix %q", harnessState.backendImplementationSpec, wantSuffix)
+	}
+	return nil
+}
+
+func agmCleanupSupportPackageIsConfigured(ctx context.Context, pkg string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.cleanupSupportPackage = pkg
+	harnessState.cleanupSupportSpec = filepath.Join(bddRepoRoot(), "agm", "internal", pkg, "SPEC.md")
+	return nil
+}
+
+func agmValidatesCleanupSupportPackageCoverage(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.cleanupSupportSpec == "" {
+		return fmt.Errorf("no AGM cleanup support package configured")
+	}
+	if _, err := os.Stat(harnessState.cleanupSupportSpec); err != nil {
+		return fmt.Errorf("cleanup support SPEC %s: %w", harnessState.cleanupSupportSpec, err)
+	}
+	return nil
+}
+
+func cleanupSupportPackageShouldHaveCoLocatedSPEC(ctx context.Context, pkg string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if pkg != harnessState.cleanupSupportPackage {
+		return fmt.Errorf("configured cleanup support package = %q, want %q", harnessState.cleanupSupportPackage, pkg)
+	}
+	wantSuffix := filepath.Join("agm", "internal", pkg, "SPEC.md")
+	if !strings.HasSuffix(harnessState.cleanupSupportSpec, wantSuffix) {
+		return fmt.Errorf("cleanup support SPEC = %q, want suffix %q", harnessState.cleanupSupportSpec, wantSuffix)
 	}
 	return nil
 }
