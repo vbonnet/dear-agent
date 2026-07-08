@@ -514,6 +514,22 @@ behind those commands have explicit contracts.
 inputs: AGM session audits, durable drift evidence, audit plan config, and
 verifier dispatch all need stable contracts.
 
+### Plugin And Skill Package Guardrails
+
+**File:** [`plugin_skill_package_guardrails.feature`](../test/bdd/features/plugin_skill_package_guardrails.feature)
+
+**Drives:** plugin and skill governance SPEC coverage for
+`engram/internal/plugin`, `pkg/plugin`, `pkg/skilllint`, and
+`tools/skill-lint`.
+
+**Key scenarios:**
+- Plugin and skill packages keep co-located SPEC coverage.
+- Plugin and skill package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Plugin marketplace and skill parity require stable
+contracts for manifests, discovery, execution, integrity checks, EventBus
+subscriptions, and cost-governed skill frontmatter.
+
 ### Quality Command Guardrails
 
 **File:** [`quality_command_guardrails.feature`](../test/bdd/features/quality_command_guardrails.feature)
