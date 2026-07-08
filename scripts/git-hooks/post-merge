@@ -190,12 +190,30 @@ maybe_rebuild() {
   ensure_build_dir
 
   echo "[post-merge:rebuild] Rebuilding ${_name} (source changed in ${_trigger})..." >&2
-  if ( cd "${build_dir}" && GOBIN="${HOME}/go/bin" go install "./${_pkg}" ); then
-    echo "[post-merge:rebuild] ✓ installed ${_name} -> ${HOME}/go/bin/${_name}" >&2
-    rebuilt_any=1
+
+  # ATOMIC install: build to a temp file in GOBIN, then rename() it over the
+  # target on the same filesystem. `go install` (like any in-place overwrite)
+  # truncates and rewrites the SAME inode, so macOS SIGKILLs every running
+  # instance whose mapped Mach-O changed underneath it ("Code Signature
+  # Invalid" — the 2026-07-06 crash loop, ce-w77v). A rename leaves the old
+  # inode intact for live processes until they exit, so redeploying a running
+  # binary can never crash it. Build source is ${build_dir} (ensure_build_dir's
+  # origin/<default_branch>-pinned checkout), not the local working tree.
+  _gobin="${GOBIN:-${HOME}/go/bin}"
+  mkdir -p "${_gobin}" 2>/dev/null || true
+  _tmp="${_gobin}/.${_name}.install.$$"
+  if ( cd "${build_dir}" && go build -o "${_tmp}" "./${_pkg}" ); then
+    if mv -f "${_tmp}" "${_gobin}/${_name}"; then
+      echo "[post-merge:rebuild] ✓ installed ${_name} -> ${_gobin}/${_name} (atomic)" >&2
+      rebuilt_any=1
+    else
+      rm -f "${_tmp}" 2>/dev/null || true
+      echo "[post-merge:rebuild] ✗ ${_name} atomic install (rename) FAILED — git op unaffected." >&2
+    fi
   else
+    rm -f "${_tmp}" 2>/dev/null || true
     echo "[post-merge:rebuild] ✗ ${_name} rebuild FAILED — git op unaffected." >&2
-    echo "[post-merge:rebuild]   rebuild manually: (cd ${repo_root} && go install ./${_pkg})" >&2
+    echo "[post-merge:rebuild]   rebuild manually: (cd ${repo_root} && go build -o ${_gobin}/${_name} ./${_pkg})" >&2
   fi
 }
 
