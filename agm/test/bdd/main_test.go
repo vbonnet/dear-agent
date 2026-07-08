@@ -31,6 +31,7 @@ func TestFeatures(t *testing.T) {
 func InitializeScenario(ctx *godog.ScenarioContext) {
 	// Each step group registers its own per-scenario Before hook to set up
 	// state, so there is no shared environment to wire here.
+	steps.RegisterDBPersistenceGuardrailSteps(ctx)
 	steps.RegisterTrustProtocolSteps(ctx)
 	steps.RegisterScanLoopSteps(ctx)
 	steps.RegisterStallDetectionSteps(ctx)

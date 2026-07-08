@@ -270,6 +270,22 @@ non-Claude harnesses need an executable path to the same workflow.
 **Why this matters:** Harness-specific config belongs in explicit repo-local
 surfaces so hook, instruction, and marketplace support can be audited.
 
+### Database Persistence Guardrails
+
+**File:** [`db_persistence_guardrails.feature`](../test/bdd/features/db_persistence_guardrails.feature)
+
+**Drives:** `agm/internal/db` SQLite schema, session persistence, and FTS5
+search contracts.
+
+**Key scenarios:**
+- The embedded schema exposes session, message, escalation, FTS, and view
+  surfaces.
+- Session persistence preserves harness-neutral manifest metadata.
+- FTS search applies harness filters across stored sessions.
+
+**Why this matters:** AGM persistence must remain harness-neutral and searchable
+instead of encoding Claude-only state or untested schema assumptions.
+
 ### Local Development Guardrails
 
 **File:** [`local_development_guardrails.feature`](../test/bdd/features/local_development_guardrails.feature)
