@@ -203,6 +203,7 @@ registry.
 - MCP create-session uses shared harness/model validation.
 - Deprecated Gemini compatibility remains detectable as compatibility.
 - Lifecycle operations are exposed through the MCP operation registry.
+- MCP server startup guards fail loudly when workspace or database access is missing.
 
 **Why this matters:** MCP clients should call the same harness-neutral session
 contract as the CLI rather than receiving a Claude-only subset.

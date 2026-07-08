@@ -57,6 +57,7 @@ type harnessParityState struct {
 	mcpSurface                 mcpparity.CreateSessionSurface
 	mcpModelAccepted           bool
 	mcpLifecycleOpsExposed     bool
+	mcpServerStartupGuard      bool
 	marketplaceCatalog         marketplaceparity.Catalog
 	marketplaceSurface         marketplaceparity.HarnessSurface
 	marketplaceMirrorValid     bool
@@ -133,6 +134,8 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^the MCP model identifier should be accepted$`, mcpModelIdentifierShouldBeAccepted)
 	ctx.Step(`^AGM validates MCP operation discovery parity$`, agmValidatesMCPOperationDiscoveryParity)
 	ctx.Step(`^the MCP operation registry should expose lifecycle mutations$`, mcpOperationRegistryShouldExposeLifecycleMutations)
+	ctx.Step(`^AGM validates MCP server startup guard coverage$`, agmValidatesMCPServerStartupGuardCoverage)
+	ctx.Step(`^the MCP server SPEC should cover loud workspace and database failures$`, mcpServerSPECShouldCoverLoudWorkspaceAndDatabaseFailures)
 	ctx.Step(`^AGM validates marketplace parity$`, agmValidatesMarketplaceParity)
 	ctx.Step(`^harness "([^"]*)" should have a marketplace discovery surface$`, harnessShouldHaveMarketplaceDiscoverySurface)
 	ctx.Step(`^the marketplace discovery surface should use the expected mode$`, marketplaceDiscoverySurfaceShouldUseExpectedMode)
@@ -813,6 +816,35 @@ func mcpOperationRegistryShouldExposeLifecycleMutations(ctx context.Context) err
 	}
 	if !harnessState.mcpLifecycleOpsExposed {
 		return fmt.Errorf("MCP operation registry does not expose lifecycle mutations")
+	}
+	return nil
+}
+
+func agmValidatesMCPServerStartupGuardCoverage(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	specPath := filepath.Join(bddRepoRoot(), "agm", "cmd", "agm-mcp-server", "SPEC.md")
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		return fmt.Errorf("read MCP server SPEC %s: %w", specPath, err)
+	}
+	text := string(data)
+	harnessState.mcpServerStartupGuard = strings.Contains(text, "MCS-03") &&
+		strings.Contains(text, "MCS-04") &&
+		strings.Contains(text, "agm/test/bdd/features/mcp_parity.feature") &&
+		!strings.Contains(text, "NEEDS-AUDIT")
+	return nil
+}
+
+func mcpServerSPECShouldCoverLoudWorkspaceAndDatabaseFailures(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.mcpServerStartupGuard {
+		return fmt.Errorf("MCP server SPEC does not cover completed startup guard traceability")
 	}
 	return nil
 }
