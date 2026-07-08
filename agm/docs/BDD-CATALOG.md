@@ -109,6 +109,20 @@ state detection contracts.
 terminal chrome, adapter names, and model aliases must still route through one
 shared registry instead of harness-specific assumptions.
 
+### Agent Selection Guardrails
+
+**File:** [`agent_selection_guardrails.feature`](../test/bdd/features/agent_selection_guardrails.feature)
+
+**Drives:** `agm/internal/agents` SPEC coverage for AGENTS.md keyword-based
+harness routing compatibility.
+
+**Key scenarios:**
+- Agent selection packages keep co-located SPEC coverage.
+
+**Why this matters:** AGM still carries a legacy AGENTS.md keyword-routing
+path. Its fallback and first-match behavior must remain explicit while the
+newer harness and model-family parity registries evolve.
+
 ### Model Family Parity
 
 **File:** [`model_family_parity.feature`](../test/bdd/features/model_family_parity.feature)
