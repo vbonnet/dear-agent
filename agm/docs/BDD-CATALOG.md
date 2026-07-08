@@ -514,6 +514,21 @@ behind those commands have explicit contracts.
 inputs: AGM session audits, durable drift evidence, audit plan config, and
 verifier dispatch all need stable contracts.
 
+### API And Gateway Package Guardrails
+
+**File:** [`api_gateway_package_guardrails.feature`](../test/bdd/features/api_gateway_package_guardrails.feature)
+
+**Drives:** `cmd/dear-agent-api`, `pkg/api`, `pkg/gateway`, and gateway adapter
+SPEC coverage.
+
+**Key scenarios:**
+- API and gateway packages keep co-located SPEC coverage.
+- API and gateway package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Workflow, HITL, audit, and run-triggering control
+surfaces must remain harness-neutral across loopback, Tailscale, CLI, HTTP, and
+future adapters instead of drifting into transport-specific behavior.
+
 ### Plugin And Skill Package Guardrails
 
 **File:** [`plugin_skill_package_guardrails.feature`](../test/bdd/features/plugin_skill_package_guardrails.feature)
