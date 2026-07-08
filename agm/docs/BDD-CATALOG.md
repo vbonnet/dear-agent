@@ -530,6 +530,23 @@ verifier dispatch all need stable contracts.
 contracts for manifests, discovery, execution, integrity checks, EventBus
 subscriptions, and cost-governed skill frontmatter.
 
+### Source And Knowledge Package Guardrails
+
+**File:** [`source_knowledge_package_guardrails.feature`](../test/bdd/features/source_knowledge_package_guardrails.feature)
+
+**Drives:** `pkg/source`, source adapter backends, `pkg/papersearch`, and
+`pkg/wikibrain` SPEC coverage.
+
+**Key scenarios:**
+- Source and knowledge packages keep co-located SPEC coverage.
+- Source and knowledge package SPECs point back to their executable BDD
+  feature.
+
+**Why this matters:** Workflow durability, search, engram support, paper
+retrieval, and wiki graph analysis all share this knowledge substrate. Adapter
+and graph behavior must stay explicit across implementations rather than
+drifting into backend-specific assumptions.
+
 ### Quality Command Guardrails
 
 **File:** [`quality_command_guardrails.feature`](../test/bdd/features/quality_command_guardrails.feature)
