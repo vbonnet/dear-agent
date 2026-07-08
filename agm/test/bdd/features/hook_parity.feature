@@ -1,5 +1,6 @@
 # SPEC: internal/hookparity/SPEC.md
 # RELATED-SPEC: .codex/hooks/SPEC.md
+# RELATED-SPEC: scripts/git-hooks/SPEC.md
 # RELATED-SPEC: agm/internal/hooks/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-hooks/posttool-context-monitor/SPEC.md
 # RELATED-SPEC: agm/cmd/agm-hooks/posttool-response-masking/SPEC.md
@@ -66,3 +67,18 @@ Feature: Hook harness parity
       | opencode-cli | UserPromptSubmit |
       | opencode-cli | PreCompact       |
       | opencode-cli | PostCompact      |
+
+  Scenario Outline: Repository post-merge hook exposes lifecycle safeguards
+    Given the repository post-merge hook is configured
+    When AGM validates repository post-merge hook coverage
+    Then the repository post-merge hook should include lifecycle safeguard "<safeguard>"
+
+    Examples:
+      | safeguard               |
+      | atomic-binary-install   |
+      | trunk-build-context     |
+      | host-artifact-deploy    |
+      | deployment-verification |
+      | bead-transition         |
+      | worktree-sweep          |
+      | fail-safe-exit          |
