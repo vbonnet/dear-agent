@@ -99,6 +99,7 @@ state detection contracts.
 - Gemini CLI remains deprecated compatibility, not active parity.
 - Active harness factories use canonical names.
 - Active harness adapters satisfy the shared non-I/O conformance suite.
+- AGM runtime helper commands keep co-located SPEC coverage.
 - Supported model families include Anthropic, OpenAI, Gemini, GLM, DeepSeek,
   Nemotron, and Qwen.
 
@@ -152,6 +153,7 @@ entrypoints should only add model/harness-specific guidance.
 - Stop and SubagentStop feedback hooks are configured.
 - Non-Claude harnesses expose Beads lifecycle hooks through their native hook
   manifests.
+- The repository post-merge hook exposes its lifecycle safeguards.
 
 **Why this matters:** Safety and dogfooding guardrails must travel with every
 hook-capable harness, not only Claude Code.
