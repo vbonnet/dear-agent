@@ -114,6 +114,11 @@ const sessionsFile = ".agm/vroom/sessions.json"
 // as a persistent daemon (default mode, without -boot-only).
 const healthCheckInterval = 30 * time.Second
 
+const (
+	workerHealthProbeTimeout = time.Minute
+	readyBeadsProbeTimeout   = 30 * time.Second
+)
+
 // Graduated escalation thresholds for worker monitoring. The Dispatch Advisor
 // is the programmatic safety net — it gives LLM supervisors (Orchestrator at
 // 15/30/45min) a chance to act first, then catches anything they miss.
@@ -759,9 +764,9 @@ func runHealthMonitor(parent context.Context, home string, state *sessionState, 
 
 		// Check for stuck workers before supervisor health — reclaiming
 		// worker slots lets the Orchestrator dispatch on the same tick.
-		activeWorkers, err := monitorWorkers(home, wTracker)
+		activeWorkers, err := monitorWorkers(ctx, home, wTracker)
 		if err == nil {
-			_, flErr := checkFlowLiveness(home, activeWorkers, &stallStartTime, &flowLivenessEscalated, 15*time.Minute)
+			_, flErr := checkFlowLiveness(ctx, home, activeWorkers, &stallStartTime, &flowLivenessEscalated, 15*time.Minute)
 			if flErr != nil {
 				fmt.Fprintf(os.Stderr, "watchdog: flow liveness check failed: %v\n", flErr)
 			}
@@ -860,21 +865,22 @@ type healthResult struct {
 // compares each worker's last_update_at across ticks to distinguish "slow
 // but working" (progressing) from "stuck" (zero progress + stuck state).
 // Force-kill is a last resort, only for workers provably stuck.
-// monitorWorkers uses graduated escalation to handle stuck workers. It
-// compares each worker's last_update_at across ticks to distinguish "slow
-// but working" (progressing) from "stuck" (zero progress + stuck state).
-// Force-kill is a last resort, only for workers provably stuck.
 // Returns the count of active workers and any error listing them.
-func monitorWorkers(home string, wt *workerTracker) (int, error) {
-	cmd := exec.Command("agm", "session", "health", "--all", "--json")
-	out, err := cmd.Output()
+func monitorWorkers(parent context.Context, home string, wt *workerTracker) (int, error) {
+	ctx, cancel := context.WithTimeout(parent, workerHealthProbeTimeout)
+	defer cancel()
+
+	out, err := flowProbeOutput(ctx, "agm", "session", "health", "--all", "--json")
 	if err != nil {
-		return 0, err
+		if ctx.Err() != nil {
+			return 0, fmt.Errorf("agm session health canceled: %w", ctx.Err())
+		}
+		return 0, fmt.Errorf("run agm session health: %w", err)
 	}
 
 	var result healthResult
 	if err := json.Unmarshal(out, &result); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("decode agm session health: %w", err)
 	}
 
 	wt.mu.Lock()
@@ -907,16 +913,25 @@ func monitorWorkers(home string, wt *workerTracker) (int, error) {
 // countReadyBeadsFunc retrieves the number of ready beads. Overridable in tests.
 var countReadyBeadsFunc = defaultCountReadyBeads
 
-func defaultCountReadyBeads(home string) (int, error) {
+var flowProbeOutput = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).Output()
+}
+
+func defaultCountReadyBeads(parent context.Context, home string) (int, error) {
+	ctx, cancel := context.WithTimeout(parent, readyBeadsProbeTimeout)
+	defer cancel()
+
 	dbPath := filepath.Join(home, "beads", "context-engine", ".beads")
-	cmd := exec.Command("bd", "--db", dbPath, "ready", "--json")
-	out, err := cmd.Output()
+	out, err := flowProbeOutput(ctx, "bd", "--db", dbPath, "ready", "--json")
 	if err != nil {
-		return 0, err
+		if ctx.Err() != nil {
+			return 0, fmt.Errorf("bd ready canceled: %w", ctx.Err())
+		}
+		return 0, fmt.Errorf("run bd ready: %w", err)
 	}
 	var ready []any
 	if err := json.Unmarshal(out, &ready); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("decode bd ready: %w", err)
 	}
 	return len(ready), nil
 }
@@ -924,8 +939,8 @@ func defaultCountReadyBeads(home string) (int, error) {
 // checkFlowLiveness checks if ready_beads > 0 && active_workers == 0 has persisted
 // for the threshold (15m), and triggers escalation if so.
 // Returns escalated=true if it triggered an escalation in this tick.
-func checkFlowLiveness(home string, activeWorkers int, stallStartTime *time.Time, escalated *bool, threshold time.Duration) (bool, error) {
-	readyCount, err := countReadyBeadsFunc(home)
+func checkFlowLiveness(ctx context.Context, home string, activeWorkers int, stallStartTime *time.Time, escalated *bool, threshold time.Duration) (bool, error) {
+	readyCount, err := countReadyBeadsFunc(ctx, home)
 	if err != nil {
 		return false, fmt.Errorf("failed to count ready beads: %w", err)
 	}

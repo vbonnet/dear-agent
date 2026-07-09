@@ -1,6 +1,6 @@
 # vroom-dispatch Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: 2026-07-09 -->
 
 ## Purpose
 
@@ -31,7 +31,14 @@ harness when a supervisor is stale.
 
 **VD-09** When `vroom-dispatch` invokes `agm session new` for supervisor recovery, the system shall bound the subprocess with an internal timeout so a hung spawn cannot stall the recovery loop indefinitely.
 
+**VD-10** When ready beads remain available while no active workers are reported for the flow-liveness threshold, the system shall raise one `flow_liveness_stall` escalation until flow resumes.
+
+**VD-11** When no ready beads remain or an active worker returns, the system shall reset the flow-liveness timer and duplicate-escalation guard.
+
+**VD-12** When the health monitor queries AGM session health or Beads ready work, the system shall derive a timeout-bounded subprocess context from the monitor context and wrap cancellation, command, and decoding failures.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
+- Feature: `agm/test/bdd/features/stall_detection.feature`
 - Package tests: `cmd/vroom-dispatch/main_test.go`

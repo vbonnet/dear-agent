@@ -78,6 +78,8 @@ awareness; its safety (allowlist) and cadence (SLO thresholds) must be pinned.
 - Detector thresholds come from the SLO contracts (permission timeout,
   no-commit timeout, error-repeat threshold).
 - Exactly three stall types exist: `permission_prompt`, `no_commit`, `error_loop`.
+- VROOM flow stalls escalate once after the threshold and reset when flow resumes.
+- VROOM worker-health and ready-bead probes inherit cancellation and enforce timeouts.
 
 **Why this matters:** The multi-agent system only makes forward progress if
 stalled sessions are detected and recovered against agreed thresholds.
