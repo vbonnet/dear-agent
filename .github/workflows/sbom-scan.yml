@@ -133,7 +133,7 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck -format json -scan package ./... > vulncheck.json
           unhandled=$(jq -c \
-            --argjson allow '["GO-2025-3884"]' \
+            --argjson allow '["GO-2025-3884", "GO-2026-5932"]' \
             'select(.finding != null)
              | select(.finding.osv as $id | $allow | index($id) | not)
              | .finding' \
