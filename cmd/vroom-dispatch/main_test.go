@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -1004,7 +1005,7 @@ func TestCheckFlowLiveness(t *testing.T) {
 
 	// Stub countReadyBeadsFunc to return 5 ready beads
 	origCountReadyBeads := countReadyBeadsFunc
-	countReadyBeadsFunc = func(home string) (int, error) {
+	countReadyBeadsFunc = func(context.Context, string) (int, error) {
 		return 5, nil
 	}
 	defer func() { countReadyBeadsFunc = origCountReadyBeads }()
@@ -1019,7 +1020,7 @@ func TestCheckFlowLiveness(t *testing.T) {
 	var escalated bool
 
 	// 1. Initial check with active workers > 0: should not set stall start time
-	_, err := checkFlowLiveness(dir, 2, &stallStartTime, &escalated, 5*time.Minute)
+	_, err := checkFlowLiveness(context.Background(), dir, 2, &stallStartTime, &escalated, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1028,7 +1029,7 @@ func TestCheckFlowLiveness(t *testing.T) {
 	}
 
 	// 2. First check with active workers == 0: should set stall start time but not escalate
-	_, err = checkFlowLiveness(dir, 0, &stallStartTime, &escalated, 5*time.Minute)
+	_, err = checkFlowLiveness(context.Background(), dir, 0, &stallStartTime, &escalated, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1041,7 +1042,7 @@ func TestCheckFlowLiveness(t *testing.T) {
 	firstStallTime := stallStartTime
 
 	// 3. Check again shortly after (within threshold): should not escalate
-	_, err = checkFlowLiveness(dir, 0, &stallStartTime, &escalated, 5*time.Minute)
+	_, err = checkFlowLiveness(context.Background(), dir, 0, &stallStartTime, &escalated, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1054,7 +1055,7 @@ func TestCheckFlowLiveness(t *testing.T) {
 
 	// 4. Simulate time passing past threshold: should escalate
 	stallStartTime = time.Now().Add(-6 * time.Minute)
-	triggered, err := checkFlowLiveness(dir, 0, &stallStartTime, &escalated, 5*time.Minute)
+	triggered, err := checkFlowLiveness(context.Background(), dir, 0, &stallStartTime, &escalated, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1070,7 +1071,7 @@ func TestCheckFlowLiveness(t *testing.T) {
 
 	// 5. Next check (still stalled): should not escalate again (no spam)
 	gotEscalationMsg = ""
-	triggered, err = checkFlowLiveness(dir, 0, &stallStartTime, &escalated, 5*time.Minute)
+	triggered, err = checkFlowLiveness(context.Background(), dir, 0, &stallStartTime, &escalated, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1082,7 +1083,7 @@ func TestCheckFlowLiveness(t *testing.T) {
 	}
 
 	// 6. Active workers return: should reset state
-	_, err = checkFlowLiveness(dir, 1, &stallStartTime, &escalated, 5*time.Minute)
+	_, err = checkFlowLiveness(context.Background(), dir, 1, &stallStartTime, &escalated, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1092,4 +1093,58 @@ func TestCheckFlowLiveness(t *testing.T) {
 	if escalated {
 		t.Error("escalated flag should be reset to false")
 	}
+}
+
+func TestCheckFlowLivenessPropagatesCancellation(t *testing.T) {
+	origCountReadyBeads := countReadyBeadsFunc
+	countReadyBeadsFunc = func(ctx context.Context, _ string) (int, error) {
+		return 0, ctx.Err()
+	}
+	defer func() { countReadyBeadsFunc = origCountReadyBeads }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var stallStartTime time.Time
+	var escalated bool
+
+	_, err := checkFlowLiveness(ctx, t.TempDir(), 0, &stallStartTime, &escalated, time.Minute)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("checkFlowLiveness() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestFlowProbesBoundContextAndWrapErrors(t *testing.T) {
+	origFlowProbeOutput := flowProbeOutput
+	defer func() { flowProbeOutput = origFlowProbeOutput }()
+
+	t.Run("worker health cancellation", func(t *testing.T) {
+		flowProbeOutput = func(ctx context.Context, _ string, _ ...string) ([]byte, error) {
+			if _, ok := ctx.Deadline(); !ok {
+				t.Fatal("worker health probe context has no deadline")
+			}
+			<-ctx.Done()
+			return nil, errors.New("command stopped")
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := monitorWorkers(ctx, t.TempDir(), newWorkerTracker())
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("monitorWorkers() error = %v, want context.Canceled", err)
+		}
+	})
+
+	t.Run("ready beads decode", func(t *testing.T) {
+		flowProbeOutput = func(ctx context.Context, _ string, _ ...string) ([]byte, error) {
+			if _, ok := ctx.Deadline(); !ok {
+				t.Fatal("ready beads probe context has no deadline")
+			}
+			return []byte("not-json"), nil
+		}
+
+		_, err := defaultCountReadyBeads(context.Background(), t.TempDir())
+		if err == nil || !strings.Contains(err.Error(), "decode bd ready") {
+			t.Fatalf("defaultCountReadyBeads() error = %v, want wrapped decode error", err)
+		}
+	})
 }
