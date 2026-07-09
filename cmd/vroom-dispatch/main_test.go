@@ -997,3 +997,99 @@ func TestSupervisorHealthString(t *testing.T) {
 		t.Errorf("dead.String() = %q", healthDead.String())
 	}
 }
+
+func TestCheckFlowLiveness(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".agm", "vroom"), 0o755)
+
+	// Stub countReadyBeadsFunc to return 5 ready beads
+	origCountReadyBeads := countReadyBeadsFunc
+	countReadyBeadsFunc = func(home string) (int, error) {
+		return 5, nil
+	}
+	defer func() { countReadyBeadsFunc = origCountReadyBeads }()
+
+	var gotEscalationMsg string
+	withEscalationStubs(t,
+		func(msg string) error { gotEscalationMsg = msg; return nil },
+		func(_ /*home*/, msg string) (bool, error) { return true, nil },
+	)
+
+	var stallStartTime time.Time
+	var escalated bool
+
+	// 1. Initial check with active workers > 0: should not set stall start time
+	_, err := checkFlowLiveness(dir, 2, &stallStartTime, &escalated, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !stallStartTime.IsZero() {
+		t.Error("stallStartTime should be zero when activeWorkers > 0")
+	}
+
+	// 2. First check with active workers == 0: should set stall start time but not escalate
+	_, err = checkFlowLiveness(dir, 0, &stallStartTime, &escalated, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stallStartTime.IsZero() {
+		t.Error("stallStartTime should be set when ready_beads > 0 && activeWorkers == 0")
+	}
+	if escalated {
+		t.Error("should not escalate immediately")
+	}
+	firstStallTime := stallStartTime
+
+	// 3. Check again shortly after (within threshold): should not escalate
+	_, err = checkFlowLiveness(dir, 0, &stallStartTime, &escalated, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stallStartTime != firstStallTime {
+		t.Error("stallStartTime should not change on consecutive checks")
+	}
+	if escalated {
+		t.Error("should not escalate before threshold duration")
+	}
+
+	// 4. Simulate time passing past threshold: should escalate
+	stallStartTime = time.Now().Add(-6 * time.Minute)
+	triggered, err := checkFlowLiveness(dir, 0, &stallStartTime, &escalated, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !triggered {
+		t.Error("expected checkFlowLiveness to return triggered=true")
+	}
+	if !escalated {
+		t.Error("expected escalated to be true after escalation")
+	}
+	if gotEscalationMsg == "" {
+		t.Error("expected escalation notification to fire")
+	}
+
+	// 5. Next check (still stalled): should not escalate again (no spam)
+	gotEscalationMsg = ""
+	triggered, err = checkFlowLiveness(dir, 0, &stallStartTime, &escalated, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if triggered {
+		t.Error("expected checkFlowLiveness to return triggered=false (no spam)")
+	}
+	if gotEscalationMsg != "" {
+		t.Error("should not trigger another escalation notification (no spam)")
+	}
+
+	// 6. Active workers return: should reset state
+	_, err = checkFlowLiveness(dir, 1, &stallStartTime, &escalated, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !stallStartTime.IsZero() {
+		t.Error("stallStartTime should be reset to zero")
+	}
+	if escalated {
+		t.Error("escalated flag should be reset to false")
+	}
+}

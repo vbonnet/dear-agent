@@ -734,6 +734,8 @@ func runHealthMonitor(parent context.Context, home string, state *sessionState, 
 
 	tracker := newRestartTracker()
 	wTracker := newWorkerTracker()
+	var stallStartTime time.Time
+	var flowLivenessEscalated bool
 
 	fmt.Println("==> Dispatch Advisor running (Ctrl-C to stop)...")
 	printStatus(state)
@@ -757,7 +759,15 @@ func runHealthMonitor(parent context.Context, home string, state *sessionState, 
 
 		// Check for stuck workers before supervisor health — reclaiming
 		// worker slots lets the Orchestrator dispatch on the same tick.
-		monitorWorkers(home, wTracker)
+		activeWorkers, err := monitorWorkers(home, wTracker)
+		if err == nil {
+			_, flErr := checkFlowLiveness(home, activeWorkers, &stallStartTime, &flowLivenessEscalated, 15*time.Minute)
+			if flErr != nil {
+				fmt.Fprintf(os.Stderr, "watchdog: flow liveness check failed: %v\n", flErr)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "watchdog: failed to monitor workers: %v\n", err)
+		}
 
 		for _, sup := range supervisors {
 			health := classifySupervisor(home, sup)
@@ -850,26 +860,33 @@ type healthResult struct {
 // compares each worker's last_update_at across ticks to distinguish "slow
 // but working" (progressing) from "stuck" (zero progress + stuck state).
 // Force-kill is a last resort, only for workers provably stuck.
-func monitorWorkers(home string, wt *workerTracker) {
+// monitorWorkers uses graduated escalation to handle stuck workers. It
+// compares each worker's last_update_at across ticks to distinguish "slow
+// but working" (progressing) from "stuck" (zero progress + stuck state).
+// Force-kill is a last resort, only for workers provably stuck.
+// Returns the count of active workers and any error listing them.
+func monitorWorkers(home string, wt *workerTracker) (int, error) {
 	cmd := exec.Command("agm", "session", "health", "--all", "--json")
 	out, err := cmd.Output()
 	if err != nil {
-		return
+		return 0, err
 	}
 
 	var result healthResult
 	if err := json.Unmarshal(out, &result); err != nil {
-		return
+		return 0, err
 	}
 
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
 
+	activeCount := 0
 	seen := make(map[string]bool)
 	for _, entry := range result.Sessions {
 		if !strings.HasPrefix(entry.Name, "worker-") || entry.Status != "active" {
 			continue
 		}
+		activeCount++
 		seen[entry.Name] = true
 		ws, exists := wt.workers[entry.Name]
 		if !exists {
@@ -884,6 +901,54 @@ func monitorWorkers(home string, wt *workerTracker) {
 			delete(wt.workers, name)
 		}
 	}
+	return activeCount, nil
+}
+
+// countReadyBeadsFunc retrieves the number of ready beads. Overridable in tests.
+var countReadyBeadsFunc = defaultCountReadyBeads
+
+func defaultCountReadyBeads(home string) (int, error) {
+	dbPath := filepath.Join(home, "beads", "context-engine", ".beads")
+	cmd := exec.Command("bd", "--db", dbPath, "ready", "--json")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	var ready []any
+	if err := json.Unmarshal(out, &ready); err != nil {
+		return 0, err
+	}
+	return len(ready), nil
+}
+
+// checkFlowLiveness checks if ready_beads > 0 && active_workers == 0 has persisted
+// for the threshold (15m), and triggers escalation if so.
+// Returns escalated=true if it triggered an escalation in this tick.
+func checkFlowLiveness(home string, activeWorkers int, stallStartTime *time.Time, escalated *bool, threshold time.Duration) (bool, error) {
+	readyCount, err := countReadyBeadsFunc(home)
+	if err != nil {
+		return false, fmt.Errorf("failed to count ready beads: %w", err)
+	}
+
+	if readyCount > 0 && activeWorkers == 0 {
+		if stallStartTime.IsZero() {
+			*stallStartTime = time.Now()
+		} else if time.Since(*stallStartTime) >= threshold && !*escalated {
+			msg := fmt.Sprintf("Flywheel stall detected: %d ready beads but 0 active workers for >%v", readyCount, threshold)
+			escalateToHuman(home, "flow_liveness_stall", msg, map[string]any{
+				"ready_beads":    readyCount,
+				"active_workers": 0,
+				"duration":       time.Since(*stallStartTime).String(),
+			})
+			fmt.Printf("[watchdog] ESCALATION: %s\n", msg)
+			*escalated = true
+			return true, nil
+		}
+	} else {
+		*stallStartTime = time.Time{}
+		*escalated = false
+	}
+	return false, nil
 }
 
 // escalateIfStuck applies graduated escalation (nudge → diagnose → kill) to
@@ -1012,7 +1077,23 @@ func isSessionAlive(name string) bool {
 	if err != nil {
 		return false
 	}
-	for line := range strings.SplitSeq(string(out), "\n") {
+	outStr := strings.TrimSpace(string(out))
+	if strings.HasPrefix(outStr, "{") {
+		var res struct {
+			Sessions []struct {
+				Name string `json:"name"`
+			} `json:"sessions"`
+		}
+		if err := json.Unmarshal([]byte(outStr), &res); err == nil {
+			for _, s := range res.Sessions {
+				if s.Name == name {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	for line := range strings.SplitSeq(outStr, "\n") {
 		if slices.Contains(strings.Fields(line), name) {
 			return true
 		}
