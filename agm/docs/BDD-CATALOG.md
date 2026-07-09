@@ -516,6 +516,20 @@ behind those commands have explicit contracts.
 inputs: AGM session audits, durable drift evidence, audit plan config, and
 verifier dispatch all need stable contracts.
 
+### AGM Diagnostics Package Guardrails
+
+**File:** [`agm_diagnostics_package_guardrails.feature`](../test/bdd/features/agm_diagnostics_package_guardrails.feature)
+
+**Drives:** co-located SPEC coverage for AGM SLO contracts, benchmark evaluation,
+logging, trace evidence, Git/worktree safety, quality baselines, and verification.
+
+**Key scenarios:**
+- Every listed diagnostics package has a co-located `SPEC.md`.
+- Every package SPEC points back to the executable guardrail feature.
+- Repository safety and evidence contracts remain test-enforced support surfaces.
+
+---
+
 ### API And Gateway Package Guardrails
 
 **File:** [`api_gateway_package_guardrails.feature`](../test/bdd/features/api_gateway_package_guardrails.feature)
