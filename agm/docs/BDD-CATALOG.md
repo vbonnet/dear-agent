@@ -784,6 +784,24 @@ doc-only changes. The coverage matrix keeps SPEC and BDD artifacts paired while
 legacy repo-wide SPEC coverage is burned down incrementally. The diff-based
 package guard prevents new feature work from deepening the SPEC backlog.
 
+### VROOM Runtime Guardrails
+
+**File:** [`vroom_runtime_guardrails.feature`](../test/bdd/features/vroom_runtime_guardrails.feature)
+
+**Drives:** `pkg/vroom/decisiontrail`, `pkg/vroom/escalation`,
+`pkg/vroom/goplswatch`, `pkg/vroom/supervisor`, and `pkg/vroom/vroom` SPEC
+coverage and provider-neutral runtime behavior.
+
+**Key scenarios:**
+- VROOM runtime packages keep co-located SPEC coverage.
+- Every supported harness preserves every supported model-family route.
+- Unspecified worker models remain provider-selected instead of defaulting to
+  an Anthropic model.
+
+**Why this matters:** VROOM is shared coordination infrastructure. Its worker
+dispatch, adjudication, decision trail, and process-pressure behavior must not
+silently pin Claude when the active harness or model provider is different.
+
 ---
 
 ## Running

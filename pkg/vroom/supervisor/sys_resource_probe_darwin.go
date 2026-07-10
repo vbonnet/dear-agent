@@ -241,10 +241,10 @@ func sysMemorystatusLevel() int {
 }
 
 // sysGoplsCount returns the number of *orphaned* gopls processes — gopls
-// instances reparented to PID 1 because the Claude session that spawned them
+// instances reparented to PID 1 because the harness session that spawned them
 // died. This is the leak signal the Overseer escalates on.
 //
-// It must NOT count live gopls: every healthy Claude Code session runs its own
+// It must NOT count live gopls: every healthy harness session may run its own
 // gopls (via the gopls-lsp plugin), so a raw process count scales with the
 // number of live sessions and produces phantom leak alarms (ce-u7v9). Two
 // pgrep(1) flags together give the precise signal:

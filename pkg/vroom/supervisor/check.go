@@ -18,7 +18,7 @@ import (
 //     fresh heartbeat" (HeartbeatCheckSkill). That is enough to validate
 //     the loop-and-mesh wiring.
 //   - In follow-up PRs the supervisors run as separate AGM sessions and
-//     "blocked" includes "child Claude process awaiting a permission
+//     "blocked" includes "child harness process awaiting a permission
 //     prompt" (the historically dominant blockage per CONTEXT.md). That
 //     CheckSkill will read AGM session state and may send AGM messages to
 //     unblock — but the Loop's contract with CheckSkill stays the same.

@@ -169,10 +169,10 @@ func sysCorrectMemoryMetrics(_ context.Context, snap ResourceSnapshot) (float64,
 }
 
 // sysGoplsCount returns the number of *orphaned* gopls processes on Linux —
-// gopls instances reparented to PID 1 because the Claude session that spawned
+// gopls instances reparented to PID 1 because the harness session that spawned
 // them died. This is the leak signal the Overseer escalates on.
 //
-// It must NOT count live gopls: every healthy Claude Code session runs its own
+// It must NOT count live gopls: every healthy harness session may run its own
 // gopls (via the gopls-lsp plugin), so a raw process count scales with the
 // number of live sessions and produces phantom leak alarms (ce-u7v9). We match
 // /proc/<pid>/comm exactly against "gopls" (never a substring of a longer

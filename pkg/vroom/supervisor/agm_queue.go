@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
@@ -23,7 +24,8 @@ type AGMQueue struct {
 	// AGMBin is the agm binary to invoke. Empty resolves "agm" on PATH.
 	AGMBin string
 
-	// Model is the Claude model workers spawn with. Defaults to "opus-200k".
+	// Model is the optional model route workers spawn with. Empty delegates
+	// model selection to AGM and the active harness/provider configuration.
 	Model string
 
 	// WorkerRole is the RBAC role passed to --role. Defaults to "worker".
@@ -38,7 +40,6 @@ type AGMQueue struct {
 }
 
 const defaultAGMDispatchTimeout = 60 * time.Second
-const defaultDispatchModel = "opus-200k"
 const defaultWorkerRole = "worker"
 
 // Enqueue adds a task to the pending list. Returns an error on duplicate ID.
@@ -73,7 +74,7 @@ func (q *AGMQueue) Pending(_ context.Context) ([]Task, error) {
 // Dispatch implements Queue. It shells out to "agm session new" to spawn a
 // worker session named "worker-<taskID>" and removes the task from the pending
 // list only after the spawn succeeds. The session runs detached (--detached)
-// with the configured model and role.
+// with the configured role and optional model route.
 func (q *AGMQueue) Dispatch(ctx context.Context, taskID, _ string) error {
 	q.mu.Lock()
 	found := false
@@ -99,10 +100,6 @@ func (q *AGMQueue) Dispatch(ctx context.Context, taskID, _ string) error {
 	q.mu.Unlock()
 	defer q.clearDispatching(taskID)
 
-	model := q.Model
-	if model == "" {
-		model = defaultDispatchModel
-	}
 	role := q.WorkerRole
 	if role == "" {
 		role = defaultWorkerRole
@@ -119,7 +116,7 @@ func (q *AGMQueue) Dispatch(ctx context.Context, taskID, _ string) error {
 	dctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	args := AGMDispatchArgs(taskID, model, role)
+	args := AGMDispatchArgs(taskID, q.Model, role)
 
 	if q.run != nil {
 		out, err := q.run(dctx, bin, args...)
@@ -168,14 +165,18 @@ func (q *AGMQueue) clearDispatching(taskID string) {
 // AGMDispatchArgs builds the `agm session new` argument list used to spawn a
 // VROOM worker session.
 func AGMDispatchArgs(taskID, model, role string) []string {
-	return []string{
+	args := []string{
 		"session", "new",
 		"worker-" + taskID,
-		"--model", model,
+	}
+	if model = strings.TrimSpace(model); model != "" {
+		args = append(args, "--model", model)
+	}
+	return append(args,
 		"--role", role,
 		"--mode", "auto",
 		"--workspace", "oss",
 		"--detached",
 		"--prompt", fmt.Sprintf("Pick up bead %s and execute it.", taskID),
-	}
+	)
 }
