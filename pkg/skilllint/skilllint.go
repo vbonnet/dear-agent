@@ -93,7 +93,7 @@ func CheckDir(root string) ([]Violation, error) {
 // isSkillFile reports whether path is a skill-style markdown file we should
 // lint. Rules:
 //   - Must be *.md.
-//   - README.md and *-README.md (usage guides that sit alongside skills) are excluded.
+//   - README.md, *-README.md, and SPEC.md contract files are excluded.
 //   - Test files (_test.sh, _test.go) are excluded.
 //   - Files under a `commands/` directory are skills.
 //   - SKILL.md inside a `skills/<name>/` directory is a skill.
@@ -105,8 +105,8 @@ func isSkillFile(path string) bool {
 	if !strings.HasSuffix(base, ".md") {
 		return false
 	}
-	// Skip README-style docs that share the commands/ directory.
-	if base == "README.md" || strings.HasSuffix(base, "-README.md") {
+	// Skip documentation and contract files that share the commands/ directory.
+	if base == "README.md" || base == "SPEC.md" || strings.HasSuffix(base, "-README.md") {
 		return false
 	}
 	parent := filepath.Base(filepath.Dir(path))
