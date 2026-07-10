@@ -120,8 +120,7 @@ validation, task tracking, review, and telemetry live under `wayfinder/`.
   - Detect signals for progressive rigor
   - Build templates for phase execution
   - Validate scope isolation
-- **Implementation**: `wayfinder/internal/phaseisolation/` and
-  `wayfinder/cmd/wayfinder-session/internal/phasegraph/`
+- **Implementation**: `wayfinder/cmd/wayfinder-session/internal/phasegraph/`
 
 **Component 3: Validation Engine (Go + shell)**
 - **Purpose**: Validate and sign waypoint artifacts
@@ -130,9 +129,8 @@ validation, task tracking, review, and telemetry live under `wayfinder/`.
   - Check phase boundary violations (scope creep)
   - Validate deliverables against requirements
   - Verify git claims (D2, S9)
-- **Implementation**: `wayfinder/cmd/wayfinder-session/internal/validator/`,
-  `wayfinder/internal/phaseisolation/`, and shell gate scripts in
-  `wayfinder/lib/`
+- **Implementation**: `wayfinder/cmd/wayfinder-session/internal/validator/`
+  and shell gate scripts in `wayfinder/lib/`
 
 **Component 4: Signal and Scope Detection (Go)**
 - **Purpose**: Detect project complexity signals for progressive rigor
@@ -141,7 +139,8 @@ validation, task tracking, review, and telemetry live under `wayfinder/`.
   - Effort estimation from context
   - Domain expert detection (ML, Mobile, Fintech, etc.)
   - Confidence scoring (0.0-1.0)
-- **Implementation**: `wayfinder/internal/phaseisolation/`
+- **Implementation**: `wayfinder/cmd/wayfinder-session/internal/validator/`
+  and `wayfinder/cmd/wayfinder-session/internal/review/`
 
 **Component 5: W0/Charter Detection (Go)**
 - **Purpose**: Detect vague requests requiring project framing
@@ -150,7 +149,7 @@ validation, task tracking, review, and telemetry live under `wayfinder/`.
   - Calculate vagueness score (0.0-1.0)
   - Generate framing questions if score ≥ 0.60
   - Skip W0 if detailed charter exists
-- **Implementation**: Wayfinder session commands and phase-isolation helpers
+- **Implementation**: Wayfinder session commands and validator helpers
 
 ### Data Flow
 
@@ -329,7 +328,7 @@ wayfinder-session end
 ### Phase Orchestration (Go)
 
 Phase orchestration is exposed through `wayfinder-session` commands and
-implemented by Go packages under `wayfinder/internal/phaseisolation/` and
+implemented by Go packages under
 `wayfinder/cmd/wayfinder-session/internal/phasegraph/`.
 
 ### Validation (Go)
@@ -349,9 +348,8 @@ valid := validator.VerifySignature("D1-problem-validation.md")
 
 ### Signal Detection (Go)
 
-Signal, phase-boundary, and scope checks live in
-`wayfinder/internal/phaseisolation/` and are exercised through the
-`wayfinder-session` lifecycle.
+Signal, phase-boundary, and scope checks live in the `wayfinder-session`
+validator/review packages and are exercised through the session lifecycle.
 
 ---
 
@@ -392,87 +390,57 @@ original design intent.
 
 ### Session Lifecycle
 
-**WAY-01** When a Wayfinder session is started, the system shall create a
-`WAYFINDER-STATUS.md` file in the project directory using the V2 schema.
+**WAY-01** When a Wayfinder session is started, the system shall create a `WAYFINDER-STATUS.md` file in the project directory using the V2 schema.
 
-**WAY-02** When `wayfinder-session status --force-fs` is called, the system
-shall reconstruct session state from artifact frontmatter without requiring
-`WAYFINDER-STATUS.md` to be present.
+**WAY-02** When `wayfinder-session status --force-fs` is called, the system shall reconstruct session state from artifact frontmatter without requiring `WAYFINDER-STATUS.md` to be present.
 
-**WAY-03** While a session is active, the system shall enforce sequential phase
-order; no phase may be started or completed out of order.
+**WAY-03** While a session is active, the system shall enforce sequential phase order; no phase may be started or completed out of order.
 
-**WAY-04** When a V1 session file is detected, the system shall migrate it to
-the V2 schema with 100% data preservation via `internal/migrate/`.
+**WAY-04** When a V1 session file is detected, the system shall migrate it to the V2 schema with 100% data preservation via `internal/migrate/`.
 
 ### Phase Progression (V2 — CHARTER → RETRO)
 
-**WAY-05** When the user request contains 5 or more vagueness signals with a
-combined score ≥ 0.60, the system shall activate the W0 framing-questions path
-before allowing progression to any other phase.
+**WAY-05** When the user request contains 5 or more vagueness signals with a combined score ≥ 0.60, the system shall activate the W0 framing-questions path before allowing progression to any other phase.
 
-**WAY-06** When a phase artifact is written, the system shall embed a
-cryptographic frontmatter checksum (signature) in the artifact.
+**WAY-06** When a phase artifact is written, the system shall embed a cryptographic frontmatter checksum in the artifact.
 
-**WAY-07** When `complete-phase` is called, the system shall verify the
-artifact signature before marking the phase complete; a missing or invalid
-signature shall block completion.
+**WAY-07** When `complete-phase` is called, the system shall verify the artifact signature before marking the phase complete and shall block completion when the signature is missing or invalid.
 
-**WAY-08** When a phase artifact contains content appropriate only to a future
-phase, the scope validator shall detect the violation and block phase completion
-(target: 95%+ detection rate).
+**WAY-08** When a phase artifact contains content appropriate only to a future phase, the scope validator shall detect the violation and block phase completion with a target detection rate of at least 95 percent.
 
-**WAY-09** When a phase is 2 or more steps behind the current phase, the system
-shall load its artifact as a context summary (100–200 tokens) rather than in
-full.
+**WAY-09** When a phase is 2 or more steps behind the current phase, the system shall load its artifact as a context summary of 100 to 200 tokens rather than in full.
 
-**WAY-10** When a phase is 1 step behind the current phase, the system shall
-load its artifact in full.
+**WAY-10** When a phase is 1 step behind the current phase, the system shall load its artifact in full.
 
 ### Progressive Rigor
 
-**WAY-11** When the signal detector's confidence reaches ≥ 0.80 (e.g. keywords
-OAuth, HIPAA, compliance), the system shall auto-escalate to Thorough rigor
-without prompting the user, and shall log the triggering keywords, effort
-estimate, and confidence score.
+**WAY-11** When the signal detector confidence reaches at least 0.80 for high-risk keywords, the system shall auto-escalate to Thorough rigor without prompting and shall log the triggering keywords, effort estimate, and confidence score.
 
-**WAY-12** Where a project is active, the system shall support 4 rigor levels:
-Minimal, Standard, Thorough, and Comprehensive.
+**WAY-12** Where a project is active, the system shall support Minimal, Standard, Thorough, and Comprehensive rigor levels.
 
 ### BUILD Phase (V2)
 
-**WAY-13** While in the BUILD phase, the system shall enforce that a failing
-test exists before implementation begins (TDD discipline).
+**WAY-13** While in the BUILD phase, the system shall enforce that a failing test exists before implementation begins.
 
-**WAY-14** When assertion density falls below 0.3 assertions per 10 lines of
-test code, the system shall reject the coverage claim.
+**WAY-14** When assertion density falls below 0.3 assertions per 10 lines of test code, the system shall reject the coverage claim.
 
-**WAY-15** When test coverage is below 80%, the BUILD phase shall not be marked
-complete.
+**WAY-15** When test coverage is below 80 percent, the BUILD phase shall not be marked complete.
 
-**WAY-16** When the reviewer role fails the build, the system shall loop back
-to the CODING sub-state up to a maximum of 3 retries before halting.
+**WAY-16** When the reviewer role fails the build, the system shall loop back to the CODING sub-state up to a maximum of 3 retries before halting.
 
-**WAY-17** When any P0 or P1 issues remain open at the BUILD exit gate, the
-system shall block phase completion.
+**WAY-17** When any P0 or P1 issues remain open at the BUILD exit gate, the system shall block phase completion.
 
 ### Multi-Persona Review (`wayfinder-session review`)
 
-**WAY-18** When the project risk level is L or XL, the system shall run
-per-task review rather than batch review.
+**WAY-18** When the project risk level is L or XL, the system shall run per-task review rather than batch review.
 
-**WAY-19** When a finding's confidence score falls below the configured
-`--min-confidence` threshold, the system shall exclude it from the report.
+**WAY-19** When a finding confidence score falls below the configured `--min-confidence` threshold, the system shall exclude it from the report.
 
-**WAY-20** When two or more personas report similar findings (similarity ≥
-0.80), the system shall deduplicate them to the highest severity and combine
-their attributions.
+**WAY-20** When two or more personas report findings with similarity at or above 0.80, the system shall deduplicate them to the highest severity and combine their attributions.
 
-**WAY-21** When the weighted vote sum divided by total weight is at or below the
-`--vote-threshold`, the decision shall be NO-GO.
+**WAY-21** When the weighted vote sum divided by total weight is at or below the `--vote-threshold`, the decision shall be NO-GO.
 
-**WAY-22** Where a persona is Tier 1, its vote shall carry 3× weight; Tier 2
-personas shall carry 1× weight; Tier 3 personas shall carry 0.5× weight.
+**WAY-22** Where a persona tier is evaluated, the system shall apply vote weight 3 to Tier 1, weight 1 to Tier 2, and weight 0.5 to Tier 3.
 
 ---
 

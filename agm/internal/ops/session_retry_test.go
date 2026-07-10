@@ -197,7 +197,7 @@ func TestRetrySession_ThirdAttemptBackoffNotElapsed(t *testing.T) {
 	}
 }
 
-func TestRetrySessionWithMessage_ReadyForRetry(t *testing.T) {
+func TestRetrySession_ReadyForRetryWithDescription(t *testing.T) {
 	// This test would require mocking SendMessage which requires deeper integration
 	// For now, we test the basic retry message construction via RetrySession alone
 	tmpDir := t.TempDir()
