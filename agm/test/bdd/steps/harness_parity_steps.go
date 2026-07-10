@@ -21,6 +21,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/wayfinderparity"
+	"github.com/vbonnet/dear-agent/engram/hippocampus"
 )
 
 type harnessParityState struct {
@@ -65,6 +66,8 @@ type harnessParityState struct {
 	marketplacePluginValid     bool
 	engramSurface              engramparity.HarnessSurface
 	engramMetadataValid        bool
+	hippocampusAdapter         hippocampus.HarnessAdapter
+	hippocampusLLMNeutral      bool
 	wayfinderSurface           wayfinderparity.HarnessSurface
 	wayfinderAssetsValid       bool
 	wayfinderPhaseEngrams      bool
@@ -152,6 +155,10 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^harness "([^"]*)" should persist Engram metadata through the shared manifest$`, harnessShouldPersistEngramMetadataThroughSharedManifest)
 	ctx.Step(`^AGM validates Engram metadata parity$`, agmValidatesEngramMetadataParity)
 	ctx.Step(`^Engram metadata should be stored in harness-neutral fields$`, engramMetadataShouldBeStoredInHarnessNeutralFields)
+	ctx.Step(`^AGM validates Hippocampus transcript parity$`, agmValidatesHippocampusTranscriptParity)
+	ctx.Step(`^harness "([^"]*)" should have a Hippocampus transcript adapter$`, harnessShouldHaveHippocampusTranscriptAdapter)
+	ctx.Step(`^AGM validates Hippocampus LLM parity$`, agmValidatesHippocampusLLMParity)
+	ctx.Step(`^Hippocampus consolidation should use a model-family-neutral provider$`, hippocampusConsolidationShouldUseModelFamilyNeutralProvider)
 	ctx.Step(`^AGM validates Wayfinder parity$`, agmValidatesWayfinderParity)
 	ctx.Step(`^harness "([^"]*)" should have a Wayfinder discovery surface$`, harnessShouldHaveWayfinderDiscoverySurface)
 	ctx.Step(`^harness "([^"]*)" should have a Wayfinder execution surface$`, harnessShouldHaveWayfinderExecutionSurface)
@@ -1027,6 +1034,59 @@ func engramMetadataShouldBeStoredInHarnessNeutralFields(ctx context.Context) err
 	}
 	if !harnessState.engramMetadataValid {
 		return fmt.Errorf("engram metadata parity validation failed")
+	}
+	return nil
+}
+
+func agmValidatesHippocampusTranscriptParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	adapter, err := hippocampus.NewHarnessAdapter(harnessState.configuredHarness, "")
+	if err != nil {
+		return err
+	}
+	harnessState.hippocampusAdapter = adapter
+	return nil
+}
+
+func harnessShouldHaveHippocampusTranscriptAdapter(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.hippocampusAdapter == nil {
+		return fmt.Errorf("harness %q has no Hippocampus transcript adapter", harness)
+	}
+	want := agent.NormalizeHarnessName(harness)
+	if got := harnessState.hippocampusAdapter.Name(); got != want {
+		return fmt.Errorf("hippocampus adapter name = %q, want %q", got, want)
+	}
+	return nil
+}
+
+func agmValidatesHippocampusLLMParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	var provider hippocampus.LLMProvider = hippocampus.NewSideQueryLLM(nil)
+	signals, err := provider.ExtractSignals(ctx, "")
+	harnessState.hippocampusLLMNeutral = err == nil && len(signals) == 0
+	return nil
+}
+
+func hippocampusConsolidationShouldUseModelFamilyNeutralProvider(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.hippocampusLLMNeutral {
+		return fmt.Errorf("hippocampus LLM provider is not model-family-neutral")
 	}
 	return nil
 }

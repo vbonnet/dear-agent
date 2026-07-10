@@ -1,6 +1,6 @@
 # Engram Harness Parity Specification
 
-<!-- Last audited at: 2026-07-01 -->
+<!-- Last audited at: 2026-07-09 -->
 
 **Version:** 1.0
 **Status:** Baseline
@@ -32,6 +32,10 @@ the same for Claude Code, Codex CLI, AGY, and OpenCode.
 **ENG-07** When AGM bridges error memory, the system shall expose the bridge through ops-layer contracts rather than harness-local state.
 
 **ENG-08** When an active harness or supported model family is added, the system shall require Engram parity tests before the addition is considered supported.
+
+**ENG-09** When Hippocampus discovers consolidation evidence, the system shall provide transcript adapters for Claude Code, Codex CLI, Antigravity, and OpenCode.
+
+**ENG-10** When Hippocampus uses LLM-assisted extraction, the system shall route through a model-family-neutral callback contract.
 
 ## BDD Traceability
 

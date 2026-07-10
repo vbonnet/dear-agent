@@ -366,10 +366,9 @@ func formatEngramOutput(engrams []*engram.Engram) string {
 	return sb.String()
 }
 
-// resolveMemoryDir finds the Claude Code memory directory for the given cwd.
+// resolveMemoryDir finds shared Engram memory with a Claude compatibility fallback.
 func resolveMemoryDir(cwd string) string {
-	adapter := hippocampus.NewClaudeCodeAdapter("")
-	memDir, err := adapter.GetMemoryDir(cwd)
+	memDir, err := hippocampus.ResolveMemoryDir(cwd)
 	if err != nil {
 		return ""
 	}

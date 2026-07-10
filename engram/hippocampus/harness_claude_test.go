@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -132,6 +133,38 @@ func TestClaudeCodeAdapter_DiscoverSessions_NoProjectDir(t *testing.T) {
 	}
 	if len(sessions) != 0 {
 		t.Errorf("expected 0 sessions, got %d", len(sessions))
+	}
+}
+
+func TestClaudeCodeAdapter_DiscoverSessions_DirectJSONLAndSorted(t *testing.T) {
+	tmpDir := t.TempDir()
+	projectPath := "/project"
+	key := strings.ReplaceAll(projectPath, string(filepath.Separator), "-")
+	projectDir := filepath.Join(tmpDir, "projects", key)
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	newer := filepath.Join(projectDir, "newer.jsonl")
+	older := filepath.Join(projectDir, "older.jsonl")
+	for _, path := range []string{newer, older} {
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	if err := os.Chtimes(older, now.Add(-time.Hour), now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newer, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err := NewClaudeCodeAdapter(tmpDir).DiscoverSessions(context.Background(), projectPath, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 2 || sessions[0].ID != "older" || sessions[1].ID != "newer" {
+		t.Fatalf("sessions = %#v", sessions)
 	}
 }
 
