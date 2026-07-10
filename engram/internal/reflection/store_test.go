@@ -105,7 +105,17 @@ func TestSave_Success(t *testing.T) {
 
 func TestSave_RejectsUnsafeSessionID(t *testing.T) {
 	store := NewStore(t.TempDir())
-	for _, sessionID := range []string{"short", "../escape-session", "path/session-id"} {
+	for _, sessionID := range []string{
+		"short",
+		"../escape-session",
+		"path/session-id",
+		`path\session-id`,
+		"session:bad",
+		"session bad",
+		"session?bad",
+		"session|bad",
+		"control\nbad",
+	} {
 		t.Run(sessionID, func(t *testing.T) {
 			err := store.Save(&Reflection{
 				SessionID: sessionID,

@@ -45,6 +45,9 @@ func (p *SimpleFileProvider) StoreArtifact(ctx context.Context, artifactID strin
 		}
 	}()
 
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	// 1. Validate artifact ID and containment
 	artifactPath, pathErr := p.getArtifactPath(artifactID)
 	if pathErr != nil {
@@ -96,6 +99,9 @@ func (p *SimpleFileProvider) GetArtifact(ctx context.Context, artifactID string)
 		}
 	}()
 
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	// 1. Validate artifact ID and containment
 	artifactPath, pathErr := p.getArtifactPath(artifactID)
 	if pathErr != nil {
@@ -146,6 +152,9 @@ func (p *SimpleFileProvider) DeleteArtifact(ctx context.Context, artifactID stri
 			_ = recorder.Record(consolidation.EventArtifactDeleted, "", level, eventData)
 		}
 	}()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	// 1. Validate artifact ID and containment
 	artifactPath, pathErr := p.getArtifactPath(artifactID)

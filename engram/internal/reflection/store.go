@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -28,8 +27,7 @@ func (s *Store) Save(r *Reflection) error {
 	if r == nil {
 		return fmt.Errorf("reflection is nil")
 	}
-	if len(r.SessionID) < 8 || strings.Contains(r.SessionID, "..") ||
-		strings.ContainsAny(r.SessionID, `/\`) || strings.ContainsRune(r.SessionID, 0) {
+	if !safeReflectionSessionID(r.SessionID) {
 		return fmt.Errorf("invalid reflection session ID")
 	}
 
@@ -102,6 +100,28 @@ func (s *Store) Save(r *Reflection) error {
 	}
 
 	return nil
+}
+
+func safeReflectionSessionID(sessionID string) bool {
+	if len(sessionID) < 8 {
+		return false
+	}
+	for _, char := range sessionID {
+		if char >= 'a' && char <= 'z' {
+			continue
+		}
+		if char >= 'A' && char <= 'Z' {
+			continue
+		}
+		if char >= '0' && char <= '9' {
+			continue
+		}
+		if char == '-' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // SaveWithAutoDetect saves a reflection with automatic failure detection
