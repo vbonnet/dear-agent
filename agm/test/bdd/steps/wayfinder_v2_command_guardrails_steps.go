@@ -175,11 +175,7 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) (resultErr error
 	if err != nil {
 		return fmt.Errorf("open Wayfinder source root: %w", err)
 	}
-	defer func() {
-		if closeErr := rootFS.Close(); resultErr == nil && closeErr != nil {
-			resultErr = fmt.Errorf("close Wayfinder source root: %w", closeErr)
-		}
-	}()
+	defer preserveRootCloseError(rootFS, &resultErr)
 	retired := regexp.MustCompile(`\b(W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11)\b|S11-retrospective|discovery\.(problem|solutions|approach|requirements)|design\.(tech-lead|security|qa)|roadmap\.(planning|breakdown|dependencies)`)
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -208,6 +204,12 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) (resultErr error
 		}
 		return nil
 	})
+}
+
+func preserveRootCloseError(rootFS *os.Root, resultErr *error) {
+	if closeErr := rootFS.Close(); *resultErr == nil && closeErr != nil {
+		*resultErr = fmt.Errorf("close Wayfinder source root: %w", closeErr)
+	}
 }
 
 func unversionedPhasesDefaultToV2(ctx context.Context) error {
