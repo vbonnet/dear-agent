@@ -117,6 +117,7 @@ func TestCheckDir_ScansCommandsAndSkillMD(t *testing.T) {
 	// Not a skill file — should be ignored.
 	writeFile(t, dir, "commands/helper_test.sh", "echo hi")
 	writeFile(t, dir, "commands/notes.txt", "plain text")
+	writeFile(t, dir, "commands/SPEC.md", "# Command contracts\n")
 
 	vs, err := CheckDir(dir)
 	if err != nil {

@@ -54,6 +54,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterMCPCommandGuardrailSteps(ctx)
 	steps.RegisterObservabilityPackageGuardrailSteps(ctx)
 	steps.RegisterPluginSkillPackageGuardrailSteps(ctx)
+	steps.RegisterAGMProductSurfaceGuardrailSteps(ctx)
 	steps.RegisterQuotaMonitoringGuardrailSteps(ctx)
 	steps.RegisterQualityCommandGuardrailSteps(ctx)
 	steps.RegisterSandboxProviderGuardrailSteps(ctx)
