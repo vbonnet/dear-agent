@@ -1,12 +1,12 @@
 # A2A Bead Linkage Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: 2026-07-09 -->
 
 ## Overview
 
-`agm/internal/a2a/beads` links A2A channels to Beads work items and validates
-file references embedded in bead descriptions so coordination metadata stays
-grounded in repository facts.
+`agm/internal/a2a/beads` validates file references embedded in bead
+descriptions and reads or updates existing channel metadata so coordination
+records stay grounded in repository facts.
 
 ## EARS Requirements
 
@@ -16,11 +16,13 @@ grounded in repository facts.
 
 **A2A-BEAD-03** When formatting a failed validation result, the system shall include each invalid file reference and a warning count.
 
-**A2A-BEAD-04** When linking a channel to a bead, the system shall require the active channel file and a bead that exists in project, global, or bd-backed storage.
+**A2A-BEAD-04** When bead existence is checked, the system shall search project files, global files, and known bd-backed stores without invoking a command shell.
 
-**A2A-BEAD-05** When a channel is linked to a bead, the system shall write `Bead-ID` and `Bead-Link` metadata into the channel header.
+**A2A-BEAD-05** When channel metadata is extracted, the system shall return key-value fields from the fenced metadata header and ignore body content.
 
-**A2A-BEAD-06** When a channel is unlinked from a bead, the system shall remove bead metadata while preserving the rest of the channel header and body.
+**A2A-BEAD-06** When existing channel metadata is updated, the system shall replace the fenced header while preserving the channel body.
+
+**A2A-BEAD-07** When linked bead metadata is requested, the system shall return the existing `Bead-ID`, return an empty identifier when no link exists, and diagnose a missing channel.
 
 ## BDD Traceability
 

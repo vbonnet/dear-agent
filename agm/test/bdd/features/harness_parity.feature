@@ -39,6 +39,7 @@
 # RELATED-SPEC: agm/internal/a2a/artifacts/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/broker/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/channel/SPEC.md
+# RELATED-SPEC: agm/internal/a2a/beads/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/discovery/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/messaging/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/metrics/SPEC.md
@@ -54,6 +55,11 @@ Feature: Harness parity
   Code, but their idle prompts must still be sendable and their trust/menu
   prompts must not be treated as ready. Gemini CLI is deprecated compatibility
   and is not part of active parity enforcement.
+
+  Scenario: Removed A2A helpers do not remain normative
+    Given the retained A2A coordination implementation
+    When AGM validates A2A coordination specification drift
+    Then A2A coordination specifications should describe only retained behavior
 
   Scenario Outline: Active parity harnesses are canonical
     Given harness "<harness>" is configured
