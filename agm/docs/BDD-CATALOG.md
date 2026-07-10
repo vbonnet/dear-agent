@@ -451,6 +451,21 @@ Wayfinder phase guidance, and cross-harness work. Its core retrieval,
 document, and schema-sharing packages need executable traceability rather than
 being covered only by package tests.
 
+### Engram Analysis And Configuration Guardrails
+
+**File:** [`engram_analysis_configuration_guardrails.feature`](../test/bdd/features/engram_analysis_configuration_guardrails.feature)
+
+**Drives:** Engram Wayfinder analytics, layered configuration, provider-neutral
+memory consolidation, and instruction detector SPEC coverage.
+
+**Key scenarios:**
+- Engram analysis and configuration packages keep co-located SPEC coverage.
+- Engram analysis and configuration SPECs point back to executable BDD.
+
+**Why this matters:** Telemetry, policy precedence, durable memory, and
+violation detection are shared governance inputs. Their contracts must not
+change based on the calling harness or selected model provider.
+
 ### Engram Core Context Guardrails
 
 **File:** [`engram_core_context_guardrails.feature`](../test/bdd/features/engram_core_context_guardrails.feature)
