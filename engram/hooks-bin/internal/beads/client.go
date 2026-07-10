@@ -55,6 +55,10 @@ func (c *Client) GetBeadByUUID(uuid string) (string, error) {
 
 // GetBeadTitle fetches bead title using bd show
 func (c *Client) GetBeadTitle(beadID string) (string, error) {
+	if !c.IsAvailable() {
+		return "", fmt.Errorf("bd CLI not available")
+	}
+
 	cmd := exec.CommandContext(context.Background(), c.bdPath, "show", beadID) //nolint:gosec // bdPath from exec.LookPath, args controlled
 	output, err := cmd.Output()
 	if err != nil {

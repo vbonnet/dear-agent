@@ -197,7 +197,7 @@ func findConversationFile(_, sessionID string) string {
 	projectsDir := filepath.Join(home, ".claude", "projects")
 
 	// If we have a session ID, search for it directly
-	if sessionID != "" {
+	if sessionID != "" && filepath.Base(sessionID) == sessionID && !strings.ContainsAny(sessionID, `/\\`) {
 		entries, err := os.ReadDir(projectsDir)
 		if err != nil {
 			return ""
