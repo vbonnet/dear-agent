@@ -156,14 +156,15 @@ func Require(ctx context.Context, g Guard, reason string) error {
 }
 
 // defaultJudgeFor picks the judge to use when a Guard supplies none. For risk
-// levels that warrant independent vetting (P0/P1) it layers the claude-haiku
-// classifier on top of the deterministic floor — but only when an API key is
-// present; NewClaudeHaikuJudge collapses to DefaultJudge behaviour otherwise.
+// levels that warrant independent vetting (P0/P1) it layers the configured LLM
+// classifier on top of the deterministic floor. The current live adapter uses
+// Anthropic when its API key is present; NewLLMOverrideJudge collapses to
+// DefaultJudge behaviour when no provider is configured.
 // For lower-risk bypasses (and in any key-less environment such as CI) it stays
 // fully deterministic and offline.
 func defaultJudgeFor(risk Risk) Judge {
 	if risk.NeedsIndependentJudge() {
-		return NewClaudeHaikuJudge()
+		return NewLLMOverrideJudge()
 	}
 	return DefaultJudge{}
 }

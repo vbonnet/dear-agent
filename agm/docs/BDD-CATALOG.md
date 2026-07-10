@@ -951,6 +951,23 @@ prompt generation SPEC coverage.
 **Why this matters:** Autonomous dispatch prompts are control-plane artifacts;
 they must enforce safety rules without hardcoding one harness or model.
 
+### Internal Foundation Guardrails
+
+**File:** [`internal_foundation_guardrails.feature`](../test/bdd/features/internal_foundation_guardrails.feature)
+
+**Drives:** Shared baseline, benchmark, local CI, drift, EARS, atomic file,
+log rotation, safety override, SQLite, and Engram tracking packages.
+
+**Key scenarios:**
+- Every internal foundation package keeps a co-located executable SPEC.
+- High-risk override policy keeps one provider-neutral identity across the full
+  supported harness and model-family matrix.
+- The deterministic override floor cannot be weakened by a model classifier.
+
+**Why this matters:** Shared host and persistence utilities sit beneath every
+harness. Their behavior must remain explicit, traceable, and independent of the
+agent or model route that invokes them.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)

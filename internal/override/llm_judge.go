@@ -18,9 +18,10 @@ import (
 const llmJudgeModel = "claude-haiku-4-5-20251001"
 
 // LLMJudge classifies an override request via a language-model call. It is the
-// seam for the model layer: ClaudeHaikuJudge wraps the real Anthropic call,
-// FakeJudge wraps a canned response for deterministic tests. The shape mirrors
-// the prompt contract — (command, reason, context) → allow/deny+explanation.
+// provider-neutral seam for the model layer: LLMOverrideJudge applies policy,
+// provider adapters make live calls, and FakeJudge supplies deterministic test
+// responses. The shape mirrors the prompt contract:
+// (command, reason, context) -> allow/deny+explanation.
 type LLMJudge interface {
 	// Classify renders a verdict on whether `reason` is a legitimate, specific
 	// justification for the bypass described by `cmd` in `context`. A non-nil
@@ -29,7 +30,7 @@ type LLMJudge interface {
 	Classify(ctx context.Context, cmd, reason, context string) (JudgeVerdict, error)
 }
 
-// ClaudeHaikuJudge is a [Judge] that layers an [LLMJudge] classifier on top of
+// LLMOverrideJudge is a [Judge] that layers an [LLMJudge] classifier on top of
 // the deterministic [DefaultJudge] floor. Order of operations on Evaluate:
 //
 //  1. Run the deterministic floor. If it denies (empty/junk/too-short reason),
@@ -41,39 +42,40 @@ type LLMJudge interface {
 //  3. If the model is unconfigured (no API key) or errors, fall through to the
 //     floor's verdict. The override is never blocked merely because the model
 //     was unreachable — degrade safely, fail open to the deterministic decision.
-type ClaudeHaikuJudge struct {
+type LLMOverrideJudge struct {
 	llm      LLMJudge // model classifier; nil ⇒ deterministic floor only
 	fallback Judge    // floor + degradation target; nil ⇒ DefaultJudge{}
 }
 
-// NewClaudeHaikuJudge builds a ClaudeHaikuJudge backed by the live Anthropic
-// API when ANTHROPIC_API_KEY is set. When the key is absent it returns a judge
+// NewLLMOverrideJudge builds an LLMOverrideJudge backed by the configured live
+// provider adapter. Anthropic Haiku is the current default adapter when
+// ANTHROPIC_API_KEY is set. When the key is absent it returns a judge
 // whose model layer is nil — i.e. it behaves exactly like DefaultJudge, so CI
 // and key-less environments are never blocked by a missing credential.
-func NewClaudeHaikuJudge() *ClaudeHaikuJudge {
-	return &ClaudeHaikuJudge{llm: newAnthropicClassifierFromEnv(), fallback: DefaultJudge{}}
+func NewLLMOverrideJudge() *LLMOverrideJudge {
+	return &LLMOverrideJudge{llm: newAnthropicClassifierFromEnv(), fallback: DefaultJudge{}}
 }
 
-// NewClaudeHaikuJudgeWith builds a ClaudeHaikuJudge around an explicit
+// NewLLMOverrideJudgeWith builds an LLMOverrideJudge around an explicit
 // classifier (e.g. a [FakeJudge] in tests, or a pre-built client). A nil llm
 // degrades to the deterministic floor.
-func NewClaudeHaikuJudgeWith(llm LLMJudge) *ClaudeHaikuJudge {
-	return &ClaudeHaikuJudge{llm: llm, fallback: DefaultJudge{}}
+func NewLLMOverrideJudgeWith(llm LLMJudge) *LLMOverrideJudge {
+	return &LLMOverrideJudge{llm: llm, fallback: DefaultJudge{}}
 }
 
 // Name implements Judge.
-func (j *ClaudeHaikuJudge) Name() string {
+func (j *LLMOverrideJudge) Name() string {
 	if j.llm == nil {
 		// No model layer wired (no API key): the deterministic floor is what
 		// actually decided, so the audit log should say so.
 		return "default"
 	}
-	return "claude-haiku"
+	return "llm-override"
 }
 
 // Evaluate implements Judge: deterministic floor first, then the model layer,
 // degrading safely to the floor's verdict on any model trouble.
-func (j *ClaudeHaikuJudge) Evaluate(ctx context.Context, req JudgeRequest) (JudgeVerdict, error) {
+func (j *LLMOverrideJudge) Evaluate(ctx context.Context, req JudgeRequest) (JudgeVerdict, error) {
 	fb := j.fallback
 	if fb == nil {
 		fb = DefaultJudge{}
@@ -103,6 +105,24 @@ func (j *ClaudeHaikuJudge) Evaluate(ctx context.Context, req JudgeRequest) (Judg
 		return base, nil //nolint:nilerr // intentional safe degradation to the floor verdict
 	}
 	return verdict, nil
+}
+
+// ClaudeHaikuJudge is retained as a source-compatible alias. New policy code
+// should use LLMOverrideJudge so selecting a provider does not change the
+// override contract or audit vocabulary.
+type ClaudeHaikuJudge = LLMOverrideJudge
+
+// NewClaudeHaikuJudge is the compatibility name for NewLLMOverrideJudge.
+//
+// Deprecated: use NewLLMOverrideJudge.
+func NewClaudeHaikuJudge() *ClaudeHaikuJudge { return NewLLMOverrideJudge() }
+
+// NewClaudeHaikuJudgeWith is the compatibility name for
+// NewLLMOverrideJudgeWith.
+//
+// Deprecated: use NewLLMOverrideJudgeWith.
+func NewClaudeHaikuJudgeWith(llm LLMJudge) *ClaudeHaikuJudge {
+	return NewLLMOverrideJudgeWith(llm)
 }
 
 // FakeJudge is a deterministic [LLMJudge] for tests. It returns a fixed verdict
@@ -212,7 +232,7 @@ func parseVerdictJSON(text string) (llmVerdictJSON, error) {
 
 // Compile-time checks.
 var (
-	_ Judge    = (*ClaudeHaikuJudge)(nil)
+	_ Judge    = (*LLMOverrideJudge)(nil)
 	_ LLMJudge = (*FakeJudge)(nil)
 	_ LLMJudge = (*anthropicClassifier)(nil)
 )
