@@ -451,6 +451,22 @@ Wayfinder phase guidance, and cross-harness work. Its core retrieval,
 document, and schema-sharing packages need executable traceability rather than
 being covered only by package tests.
 
+### Engram Core Context Guardrails
+
+**File:** [`engram_core_context_guardrails.feature`](../test/bdd/features/engram_core_context_guardrails.feature)
+
+**Drives:** Engram agent and project context detection, identity, episodic
+memory, metacontext, profile, prompt-boundary, and scratchpad SPEC coverage.
+
+**Key scenarios:**
+- Engram core context packages keep co-located SPEC coverage.
+- Engram core context package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Engram carries durable context across harness and model
+families. Its trust sources, canonical `AGENTS.md` constitution, Wayfinder
+memory integration, prompt boundaries, and execution sandbox need explicit,
+executable contracts rather than package tests alone.
+
 ### Engram Hook Guardrails
 
 **File:** [`engram_hook_guardrails.feature`](../test/bdd/features/engram_hook_guardrails.feature)
