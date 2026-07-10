@@ -531,6 +531,20 @@ SPEC coverage.
 surfaces must remain harness-neutral across loopback, Tailscale, CLI, HTTP, and
 future adapters instead of drifting into transport-specific behavior.
 
+### AGM Conversation And Discovery Guardrails
+
+**File:** [`agm_conversation_discovery_guardrails.feature`](../test/bdd/features/agm_conversation_discovery_guardrails.feature)
+
+**Drives:** co-located SPEC coverage for AGM conversation formats, harness-specific
+history adapters, UUID detection, orphan import, transcript context, and search.
+
+**Key scenarios:**
+- Every listed conversation and discovery package has a co-located `SPEC.md`.
+- Every package SPEC points back to the executable guardrail feature.
+- Claude-only storage details remain explicit adapters rather than shared contracts.
+
+---
+
 ### AGM Runtime Package Guardrails
 
 **File:** [`agm_runtime_package_guardrails.feature`](../test/bdd/features/agm_runtime_package_guardrails.feature)
