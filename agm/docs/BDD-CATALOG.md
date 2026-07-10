@@ -66,6 +66,20 @@ awareness; its safety (allowlist) and cadence (SLO thresholds) must be pinned.
 
 ---
 
+### AGM Supervision And Recovery Guardrails
+
+**File:** [`agm_supervision_recovery_guardrails.feature`](../test/bdd/features/agm_supervision_recovery_guardrails.feature)
+
+**Drives:** co-located SPEC coverage for conservative PR, process, worktree,
+sentinel intake, tmux inspection, and verification-skip recovery policies.
+
+**Key scenarios:**
+- Every listed supervision and recovery package has a co-located `SPEC.md`.
+- Every package SPEC points back to the executable guardrail feature.
+- Unknown cleanup evidence remains conservative rather than destructive.
+
+---
+
 ### Stall Detection
 
 **File:** [`stall_detection.feature`](../test/bdd/features/stall_detection.feature)
