@@ -1,5 +1,5 @@
 // Package a2a wraps the upstream A2A (Agent-to-Agent) protocol SDK so
-// dear-agent components can expose Claude Code sessions as A2A endpoints
+// dear-agent components can expose agent sessions as A2A endpoints
 // and supervisors can drive them through tasks.
 //
 // The spike's goal is to replace the in-process AskUserQuestion blocking

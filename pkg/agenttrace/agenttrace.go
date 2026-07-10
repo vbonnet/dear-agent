@@ -132,5 +132,5 @@ func strAttr(key, val string) (attribute.KeyValue, bool) {
 	if val == "" {
 		return attribute.KeyValue{}, false
 	}
-	return attribute.String(key, truncate(val)), true
+	return attribute.String(key, truncate(redactAttribute(val))), true
 }

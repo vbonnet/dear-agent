@@ -968,6 +968,23 @@ log rotation, safety override, SQLite, and Engram tracking packages.
 harness. Their behavior must remain explicit, traceable, and independent of the
 agent or model route that invokes them.
 
+### Session Protocol And Signal Guardrails
+
+**File:** [`session_protocol_guardrails.feature`](../test/bdd/features/session_protocol_guardrails.feature)
+
+**Drives:** A2A session transport and client behavior, Wayfinder acceptance
+criteria, privacy-preserving agent traces, and project health signal packages.
+
+**Key scenarios:**
+- Every session-protocol and signal package keeps co-located SPEC coverage.
+- A2A cards advertise the selected harness across all supported harness and
+  model-family routes.
+- A2A transport presentation remains independent of model-provider choice.
+
+**Why this matters:** Delegation protocols, acceptance policy, observability,
+and health signals are shared infrastructure. Hard-coded Claude presentation
+or unredacted trace content would break parity or privacy for every caller.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)
