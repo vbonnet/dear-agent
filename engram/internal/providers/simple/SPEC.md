@@ -21,13 +21,13 @@ working-context, session-history, and artifact operations with private JSON file
 
 **ESP-06** When artifact operations receive an unsafe identifier, the system shall reject it and keep all artifact paths beneath the private `_artifacts` directory.
 
-**ESP-07** When working context is updated, the system shall create or load session state, apply phase, task, completion, pin, and unpin changes, and atomically persist the resulting context.
+**ESP-07** When working context or session history is persisted, the system shall flush a private temporary file before atomically renaming it over the destination.
 
 **ESP-08** When session events are appended, the system shall preserve append order, initialize the session start time, and atomically persist private history JSON.
 
 **ESP-09** When a session is persisted, the system shall require existing history, record its completion time, and publish a harness-neutral session-persisted event when a bus is present.
 
-**ESP-10** When concurrent context or session reads and mutations use one provider instance, the system shall serialize access to persisted session state.
+**ESP-10** When concurrent context, session, or artifact operations use one provider instance, the system shall serialize access to persisted filesystem state.
 
 **ESP-11** When memory and artifact operations complete or fail, the system shall emit available telemetry without requiring a recorder or changing the operation result.
 
