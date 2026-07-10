@@ -922,6 +922,20 @@ coverage.
 **Why this matters:** Native harness files are valid adapter details, but shared
 permissions, hooks, and policy must remain in neutral contracts.
 
+### Root Intelligence Command Guardrails
+
+**File:** [`root_intelligence_command_guardrails.feature`](../test/bdd/features/root_intelligence_command_guardrails.feature)
+
+**Drives:** deterministic backlog, code intelligence, source search, signal,
+and trace-to-eval command SPEC coverage.
+
+**Key scenarios:**
+- Every listed intelligence package has reciprocal co-located SPEC traceability.
+- Specs require shared schemas and deterministic behavior across harnesses and models.
+
+**Why this matters:** Search, supervision, dispatch, and evaluation evidence
+must not change meaning based on which model produced or consumed it.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)
