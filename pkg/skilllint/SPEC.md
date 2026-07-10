@@ -8,7 +8,7 @@
 markdown files. It prevents unpinned skills from silently inheriting expensive
 session defaults and keeps skill cost governance machine-checkable.
 
-## Requirements
+## EARS Requirements
 
 **SKILLLINT-PKG-01** When a skill file cannot be read, the system shall return an I/O error.
 
@@ -30,7 +30,7 @@ session defaults and keeps skill cost governance machine-checkable.
 
 **SKILLLINT-PKG-10** When checking a directory, the system shall lint `SKILL.md` files inside `skills/<name>` directories.
 
-**SKILLLINT-PKG-11** When checking a directory, the system shall ignore README-style markdown files and test files.
+**SKILLLINT-PKG-11** When checking a directory, the system shall ignore README-style markdown files, co-located `SPEC.md` contracts, and test files.
 
 ## BDD Traceability
 

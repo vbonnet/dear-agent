@@ -100,6 +100,20 @@ stalled sessions are detected and recovered against agreed thresholds.
 
 ---
 
+### AGM Product Surface Guardrails
+
+**File:** [`agm_product_surface_guardrails.feature`](../test/bdd/features/agm_product_surface_guardrails.feature)
+
+**Drives:** co-located SPEC coverage for AGM gateway middleware, plugin commands,
+generated surface metadata, workflow-bus signaling, and accessible operator UIs.
+
+**Key scenarios:**
+- Every listed AGM product surface has a co-located `SPEC.md`.
+- Every surface SPEC points back to the executable guardrail feature.
+- UI accessibility and shared-registry boundaries remain explicit contracts.
+
+---
+
 ### Harness Parity
 
 **File:** [`harness_parity.feature`](../test/bdd/features/harness_parity.feature)
