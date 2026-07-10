@@ -206,6 +206,84 @@ func TestExtractTokensFromJSON(t *testing.T) {
 	}
 }
 
+func TestExtractTokensFromJSON_ModelFamilySchemas(t *testing.T) {
+	tests := []struct {
+		name     string
+		family   string
+		response string
+		want     TokenUsage
+	}{
+		{
+			name:     "Anthropic schema",
+			family:   "anthropic",
+			response: `{"usage":{"input_tokens":100,"output_tokens":25,"cache_read_input_tokens":10}}`,
+			want:     TokenUsage{Provider: "anthropic", InputTokens: 100, OutputTokens: 25, CacheReadTokens: 10, TotalTokens: 125},
+		},
+		{
+			name:     "OpenAI schema",
+			family:   "openai",
+			response: `{"usage":{"prompt_tokens":120,"completion_tokens":30,"prompt_tokens_details":{"cached_tokens":20}}}`,
+			want:     TokenUsage{Provider: "openai", InputTokens: 120, OutputTokens: 30, CacheReadTokens: 20, TotalTokens: 150},
+		},
+		{
+			name:     "Gemini schema",
+			family:   "gemini",
+			response: `{"usageMetadata":{"promptTokenCount":90,"candidatesTokenCount":10,"cachedContentTokenCount":15,"totalTokenCount":100}}`,
+			want:     TokenUsage{Provider: "gemini", InputTokens: 90, OutputTokens: 10, CacheReadTokens: 15, TotalTokens: 100},
+		},
+	}
+	for _, family := range []string{"glm", "deepseek", "nemotron", "qwen"} {
+		tests = append(tests, struct {
+			name     string
+			family   string
+			response string
+			want     TokenUsage
+		}{
+			name:     family + " OpenRouter-compatible schema",
+			family:   family,
+			response: `{"usage":{"prompt_tokens":120,"completion_tokens":30,"prompt_tokens_details":{"cached_tokens":20}}}`,
+			want:     TokenUsage{Provider: family, InputTokens: 120, OutputTokens: 30, CacheReadTokens: 20, TotalTokens: 150},
+		})
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ExtractTokensFromJSONForFamily([]byte(tt.response), tt.family)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if *got != tt.want {
+				t.Fatalf("usage = %#v, want %#v", *got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractTokensFromJSONForFamilyRejectsMismatches(t *testing.T) {
+	tests := []struct {
+		name     string
+		family   string
+		response string
+	}{
+		{"unknown family", "other", `{"usage":{"prompt_tokens":1}}`},
+		{"Gemini family with Anthropic schema", "gemini", `{"usage":{"input_tokens":1,"output_tokens":1}}`},
+		{"Anthropic family with OpenAI schema", "anthropic", `{"usage":{"prompt_tokens":1,"completion_tokens":1}}`},
+		{"OpenAI family with Gemini schema", "openai", `{"usageMetadata":{"promptTokenCount":1}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := ExtractTokensFromJSONForFamily([]byte(tt.response), tt.family); err == nil {
+				t.Fatal("family/schema mismatch error = nil")
+			}
+		})
+	}
+}
+
+func TestExtractTokensFromJSON_RejectsUnknownSchema(t *testing.T) {
+	if _, err := ExtractTokensFromJSON([]byte(`{"usage":{"total_tokens":42}}`)); err == nil {
+		t.Fatal("ExtractTokensFromJSON unknown schema error = nil")
+	}
+}
+
 func TestDetermineSeverityLevel(t *testing.T) {
 	tests := []struct {
 		name        string

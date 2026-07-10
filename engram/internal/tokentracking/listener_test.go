@@ -61,6 +61,21 @@ func TestOnEvent_FiltersByEventType(t *testing.T) {
 	}
 }
 
+func TestOnEvent_AcceptsNeutralLLMResponseEvent(t *testing.T) {
+	listener := NewTokenSummaryListener()
+	if err := listener.OnEvent(&telemetry.Event{
+		Type: "llm.api.response",
+		Data: map[string]any{
+			"usage": TokenUsage{Provider: "openai", InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := listener.GetSummary(); got.TotalTokens != 15 || got.ResponseCount != 1 {
+		t.Fatalf("summary = %#v", got)
+	}
+}
+
 func TestOnEvent_AccumulatesTokenUsage(t *testing.T) {
 	listener := NewTokenSummaryListener()
 

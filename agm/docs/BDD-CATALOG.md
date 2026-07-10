@@ -545,6 +545,21 @@ provider's memory, session, context, and artifact SPEC coverage.
 collection and a complete provider-neutral persistence implementation, not a
 harness-specific or partially implemented memory path.
 
+### Engram Observability Guardrails
+
+**File:** [`engram_observability_guardrails.feature`](../test/bdd/features/engram_observability_guardrails.feature)
+
+**Drives:** Engram provider-neutral token tracking, retrieval metadata, and
+analytics dashboard SPEC coverage.
+
+**Key scenarios:**
+- Engram observability packages keep co-located SPEC coverage.
+- Engram observability SPECs point back to executable BDD.
+
+**Why this matters:** Quota and quality comparisons require normalized evidence
+across Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen routes
+rather than a Claude-only accounting path.
+
 ### Local Development Guardrails
 
 **File:** [`local_development_guardrails.feature`](../test/bdd/features/local_development_guardrails.feature)

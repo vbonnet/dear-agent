@@ -17,7 +17,7 @@ type SessionSummary struct {
 	HighestSeverity          telemetry.Level
 }
 
-// TokenSummaryListener accumulates token usage across a Claude CLI session.
+// TokenSummaryListener accumulates token usage across a harness session.
 // Implements EventListener interface for integration with P1 Telemetry.
 //
 // Thread-safe: Multiple goroutines can call OnEvent() concurrently.
@@ -41,13 +41,13 @@ func NewTokenSummaryListener() *TokenSummaryListener {
 }
 
 // OnEvent handles telemetry events and extracts token usage.
-// Filters for "claude.api.response" events and accumulates token counts.
+// Filters for neutral LLM response events and legacy Claude response events.
 //
 // Expected event data format:
 //   - "usage": TokenUsage struct with token counts
 func (l *TokenSummaryListener) OnEvent(event *telemetry.Event) error {
-	// Filter: Only process Claude API response events
-	if event.Type != "claude.api.response" {
+	// Filter neutral response events and the legacy Claude event alias.
+	if event.Type != "llm.api.response" && event.Type != "claude.api.response" {
 		return nil
 	}
 
