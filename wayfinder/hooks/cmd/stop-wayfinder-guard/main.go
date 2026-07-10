@@ -1,5 +1,5 @@
 // stop-wayfinder-guard validates Wayfinder project state before allowing
-// a Claude Code session to exit. Only fires if a Wayfinder project is detected.
+// an agent session to exit. Only fires if a Wayfinder project is detected.
 package main
 
 import (
@@ -11,8 +11,19 @@ import (
 	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/stophook"
-	"github.com/vbonnet/dear-agent/wayfinder/internal/status"
+	"gopkg.in/yaml.v3"
 )
+
+const (
+	statusCompleted = "completed"
+	statusAbandoned = "abandoned"
+)
+
+type wayfinderStatus struct {
+	SchemaVersion   string `yaml:"schema_version"`
+	Status          string `yaml:"status"`
+	CurrentWaypoint string `yaml:"current_waypoint"`
+}
 
 func main() {
 	os.Exit(stophook.RunWithTimeout(10*time.Second, run))
@@ -67,56 +78,56 @@ func checkBeads(r *stophook.Result, dir string) {
 }
 
 func checkRetrospective(r *stophook.Result, dir string) {
-	// Look for S11-retrospective.md in common locations
+	// Look for the canonical RETRO artifact in common locations.
 	candidates := []string{
-		filepath.Join(dir, "S11-retrospective.md"),
-		filepath.Join(dir, "wf", "S11-retrospective.md"),
+		filepath.Join(dir, "RETRO-retrospective.md"),
+		filepath.Join(dir, "wf", "RETRO-retrospective.md"),
+		filepath.Join(dir, "docs", "RETRO-retrospective.md"),
 	}
 
 	for _, c := range candidates {
 		if stophook.FileExists(c) {
 			info, err := os.Stat(c)
 			if err == nil && info.Size() > 100 {
-				r.Pass("retrospective", "S11-retrospective.md exists with content")
+				r.Pass("retrospective", "RETRO-retrospective.md exists with content")
 				return
 			}
 			// Retro file exists but is effectively empty — block: it was started
 			// but not completed before exiting.
 			r.Block("retrospective",
-				"S11-retrospective.md exists but has minimal content (<100 bytes)",
+				"RETRO-retrospective.md exists but has minimal content (<100 bytes)",
 				"add meaningful retrospective content before exiting")
 			return
 		}
 	}
 
 	// Parse WAYFINDER-STATUS.md to detect project completion.
-	s, err := status.ReadFrom(dir)
+	s, err := readCanonicalStatus(dir)
 	if err != nil {
 		// No parseable status — skip gracefully.
 		r.Pass("retrospective", "no parseable WAYFINDER-STATUS.md, skipped")
 		return
 	}
-	if s.Status == status.StatusCompleted || s.CurrentPhase == "S11" {
-		// Project is at or past S11 but has no retrospective — block.
+	if s.Status == statusCompleted || s.CurrentWaypoint == "RETRO" {
 		r.Block("retrospective",
-			"project is complete but no S11-retrospective.md found",
-			"create docs/S11-retrospective.md or wf/S11-retrospective.md before exiting")
+			"project is complete but no RETRO-retrospective.md found",
+			"create RETRO-retrospective.md, docs/RETRO-retrospective.md, or wf/RETRO-retrospective.md before exiting")
 		return
 	}
-	r.Pass("retrospective", "project not at S11, retrospective not required yet")
+	r.Pass("retrospective", "project not at RETRO, retrospective not required yet")
 }
 
 func checkPhase(r *stophook.Result, dir string) {
-	s, err := status.ReadFrom(dir)
+	s, err := readCanonicalStatus(dir)
 	if err != nil {
 		r.Pass("phase", "no parseable WAYFINDER-STATUS.md, skipped")
 		return
 	}
 
 	switch s.Status {
-	case status.StatusCompleted:
+	case statusCompleted:
 		r.Pass("phase", "project completed")
-	case status.StatusAbandoned:
+	case statusAbandoned:
 		r.Pass("phase", "project abandoned (intentional end state)")
 	default:
 		// StatusInProgress — or any other value including a stale/custom string.
@@ -125,6 +136,25 @@ func checkPhase(r *stophook.Result, dir string) {
 			fmt.Sprintf("project status is %q (not yet completed)", s.Status),
 			"complete the current phase or mark the project as abandoned when done")
 	}
+}
+
+func readCanonicalStatus(dir string) (*wayfinderStatus, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "WAYFINDER-STATUS.md"))
+	if err != nil {
+		return nil, err
+	}
+	parts := strings.SplitN(string(data), "---", 3)
+	if len(parts) != 3 || strings.TrimSpace(parts[0]) != "" {
+		return nil, fmt.Errorf("invalid WAYFINDER-STATUS.md frontmatter")
+	}
+	var parsed wayfinderStatus
+	if err := yaml.Unmarshal([]byte(parts[1]), &parsed); err != nil {
+		return nil, fmt.Errorf("parse WAYFINDER-STATUS.md: %w", err)
+	}
+	if parsed.SchemaVersion != "2.0" {
+		return nil, fmt.Errorf("legacy Wayfinder status requires explicit migration")
+	}
+	return &parsed, nil
 }
 
 func checkArtifacts(r *stophook.Result, dir string) {

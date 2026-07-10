@@ -133,7 +133,7 @@ func createTestStatusFileWithRepoRoot(t *testing.T) (string, *TaskManager) {
 func TestAddTask_BeadWithInvalidDeliverables(t *testing.T) {
 	_, tm := createTestStatusFileWithRepoRoot(t)
 
-	_, err := tm.AddTask("S8", "Task with bad deliverables", &TaskOptions{
+	_, err := tm.AddTask("BUILD", "Task with bad deliverables", &TaskOptions{
 		BeadID:       "bd-123",
 		Deliverables: []string{"nonexistent.go", "also_missing.go"},
 	})
@@ -150,7 +150,7 @@ func TestAddTask_DeliverablesWithoutBead(t *testing.T) {
 	_, tm := createTestStatusFileWithRepoRoot(t)
 
 	// Deliverables without BeadID should skip validation (planned files)
-	task, err := tm.AddTask("S8", "Planned task", &TaskOptions{
+	task, err := tm.AddTask("BUILD", "Planned task", &TaskOptions{
 		Deliverables: []string{"planned_file.go", "future_test.go"},
 	})
 	if err != nil {
@@ -165,7 +165,7 @@ func TestUpdateTask_BeadWithInvalidDeliverables(t *testing.T) {
 	_, tm := createTestStatusFileWithRepoRoot(t)
 
 	// Create a task first
-	task, err := tm.AddTask("S8", "Test task", nil)
+	task, err := tm.AddTask("BUILD", "Test task", nil)
 	if err != nil {
 		t.Fatalf("failed to add task: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestAddTask_BeadWithValidDeliverables(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	task, err := tm.AddTask("S8", "Task with valid deliverables", &TaskOptions{
+	task, err := tm.AddTask("BUILD", "Task with valid deliverables", &TaskOptions{
 		BeadID:       "bd-789",
 		Deliverables: []string{"real.go"},
 	})

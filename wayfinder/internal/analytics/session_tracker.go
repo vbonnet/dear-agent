@@ -18,9 +18,9 @@ import (
 //
 //	tracker := analytics.NewSessionTracker(eventBus)
 //	tracker.StartSession("/path/to/project")
-//	tracker.StartPhase("D1")
+//	tracker.StartPhase("PROBLEM")
 //	// ... do work ...
-//	tracker.CompletePhase("D1", "success", metadata)
+//	tracker.CompletePhase("PROBLEM", "success", metadata)
 //	tracker.EndSession("success")
 type SessionTracker struct {
 	sessionID        string
@@ -61,7 +61,7 @@ func (st *SessionTracker) StartSession(projectPath string) error {
 // StartPhase publishes a phase.started event.
 //
 // Parameters:
-//   - phase: Phase identifier (e.g., "D1", "D2", "S6")
+//   - phase: Canonical phase identifier (for example, "PROBLEM", "RESEARCH", "PLAN")
 func (st *SessionTracker) StartPhase(phase string) error {
 	st.phaseStartTime = time.Now()
 

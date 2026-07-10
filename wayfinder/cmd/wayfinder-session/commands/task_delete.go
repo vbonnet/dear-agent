@@ -14,8 +14,8 @@ var TaskDeleteCmd = &cobra.Command{
 	Long: `Delete a task from the roadmap. This will fail if other tasks depend on it.
 
 Examples:
-  wayfinder session task delete S8-1
-  wayfinder session task delete D4-2`,
+  wayfinder session task delete BUILD-1
+  wayfinder session task delete SPEC-2`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTaskDelete,
 }

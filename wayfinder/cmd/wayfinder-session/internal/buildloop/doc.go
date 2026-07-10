@@ -1,8 +1,8 @@
-// Package buildloop implements the BUILD Loop State Machine for Wayfinder v2 S8 phase.
+// Package buildloop implements the state machine for the canonical BUILD phase.
 //
 // # Overview
 //
-// The BUILD loop replaces linear S8→S9→S10 execution with tight TDD feedback cycles.
+// The BUILD loop uses tight TDD feedback cycles for implementation, validation, and deployment.
 // Each task follows test-first development with continuous validation and risk-adaptive reviews.
 //
 // # State Machine
@@ -65,9 +65,9 @@
 //
 // # Integration with Wayfinder
 //
-// The BUILD loop integrates at the S8 (build.implement) phase:
+// The BUILD loop integrates at the canonical BUILD phase:
 //
-//	discovery.problem → ... → build.implement (S8) → ... → deploy.release
+//	CHARTER → ... → SETUP → BUILD → RETRO
 //	                              ↓
 //	                         BUILD Loop
 //	                              ↓

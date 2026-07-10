@@ -13,7 +13,7 @@ import (
 func TestValidateDocQuality_MissingFile(t *testing.T) {
 	tempDir := t.TempDir()
 
-	err := validateDocQuality("D4", tempDir)
+	err := validateDocQuality("SPEC", tempDir)
 	if err == nil {
 		t.Fatal("expected error for missing SPEC.md, got nil")
 	}
@@ -24,20 +24,20 @@ func TestValidateDocQuality_MissingFile(t *testing.T) {
 		t.Fatalf("expected ValidationError, got %T", err)
 	}
 
-	if verr.Phase != "complete D4" {
-		t.Errorf("expected Phase='complete D4', got '%s'", verr.Phase)
+	if verr.Phase != "complete SPEC" {
+		t.Errorf("expected Phase='complete SPEC', got '%s'", verr.Phase)
 	}
 	if !containsString(verr.Reason, "SPEC.md does not exist") {
 		t.Errorf("expected Reason to mention missing file, got '%s'", verr.Reason)
 	}
 }
 
-// TestValidateDocQuality_NonValidatedPhase tests non-D3/D4/S6 phases skip validation
+// TestValidateDocQuality_NonValidatedPhase tests non-DESIGN/SPEC/PLAN phases skip validation
 func TestValidateDocQuality_NonValidatedPhase(t *testing.T) {
 	tempDir := t.TempDir()
 
-	// Test phases that should NOT trigger validation (D3, D4, S6 are validated)
-	phases := []string{"W0", "D1", "D2", "S7", "S8", "S11"}
+	// Test phases that should NOT trigger validation (DESIGN, SPEC, PLAN are validated)
+	phases := []string{"CHARTER", "PROBLEM", "RESEARCH", "SETUP", "BUILD", "RETRO"}
 
 	for _, phase := range phases {
 		err := validateDocQuality(phase, tempDir)
@@ -58,7 +58,7 @@ func TestValidateDocQuality_FileTooLarge(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	err := validateDocQuality("D4", tempDir)
+	err := validateDocQuality("SPEC", tempDir)
 	if err == nil {
 		t.Fatal("expected error for oversized file, got nil")
 	}
@@ -302,7 +302,7 @@ func TestValidateDocFileSize_ValidSize(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	err := validateDocFileSize(docPath, "D4", "SPEC.md")
+	err := validateDocFileSize(docPath, "SPEC", "SPEC.md")
 	if err != nil {
 		t.Errorf("expected no error for valid size, got: %v", err)
 	}

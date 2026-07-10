@@ -55,10 +55,10 @@ func TestCaptureContext_GitSuccess(t *testing.T) {
 
 	// Create minimal status
 	st := &status.Status{
-		CurrentPhase: "S7",
+		CurrentPhase: "RETRO",
 		Phases: []status.Phase{
-			{Name: "W0", Status: status.PhaseStatusCompleted},
-			{Name: "S7", Status: status.PhaseStatusInProgress},
+			{Name: "CHARTER", Status: status.PhaseStatusCompleted},
+			{Name: "RETRO", Status: status.PhaseStatusInProgress},
 		},
 	}
 
@@ -80,8 +80,8 @@ func TestCaptureContext_GitSuccess(t *testing.T) {
 	}
 
 	// Verify phase state
-	if snapshot.PhaseState.CurrentPhase != "S7" {
-		t.Errorf("Expected current phase 'S7', got: %s", snapshot.PhaseState.CurrentPhase)
+	if snapshot.PhaseState.CurrentPhase != "RETRO" {
+		t.Errorf("Expected current phase 'RETRO', got: %s", snapshot.PhaseState.CurrentPhase)
 	}
 }
 
@@ -134,7 +134,7 @@ func TestCaptureContext_GitUncommittedChanges(t *testing.T) {
 	}
 
 	// Capture context
-	st := &status.Status{CurrentPhase: "S7"}
+	st := &status.Status{CurrentPhase: "RETRO"}
 	snapshot := CaptureContext(tmpDir, st)
 
 	// Should detect uncommitted changes
@@ -148,12 +148,12 @@ func TestCaptureContext_Concurrent(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	st := &status.Status{
-		CurrentPhase: "D3",
+		CurrentPhase: "DESIGN",
 		Phases: []status.Phase{
-			{Name: "W0", Status: status.PhaseStatusCompleted},
-			{Name: "D1", Status: status.PhaseStatusCompleted},
-			{Name: "D2", Status: status.PhaseStatusCompleted},
-			{Name: "D3", Status: status.PhaseStatusInProgress},
+			{Name: "CHARTER", Status: status.PhaseStatusCompleted},
+			{Name: "PROBLEM", Status: status.PhaseStatusCompleted},
+			{Name: "RESEARCH", Status: status.PhaseStatusCompleted},
+			{Name: "DESIGN", Status: status.PhaseStatusInProgress},
 		},
 	}
 
@@ -163,7 +163,7 @@ func TestCaptureContext_Concurrent(t *testing.T) {
 		go func() {
 			snapshot := CaptureContext(tmpDir, st)
 			// Should not panic
-			if snapshot.PhaseState.CurrentPhase != "D3" {
+			if snapshot.PhaseState.CurrentPhase != "DESIGN" {
 				t.Errorf("Concurrent capture corrupted phase state")
 			}
 			done <- true
@@ -188,11 +188,11 @@ func TestCaptureDeliverables_RealFiles(t *testing.T) {
 
 	// Create phase deliverable files
 	deliverableFiles := []string{
-		"W0-PROJECT-CHARTER.md",
-		"D1-problem-validation.md",
-		"D2-user-research.md",
-		"S6-design.md",
-		"S7-plan.md",
+		"CHARTER-PROJECT-CHARTER.md",
+		"PROBLEM-problem-validation.md",
+		"RESEARCH-user-research.md",
+		"BUILD-design.md",
+		"RETRO-plan.md",
 		"README.md", // Not a phase deliverable
 	}
 
@@ -216,11 +216,11 @@ func TestCaptureDeliverables_RealFiles(t *testing.T) {
 
 	// Verify specific deliverables
 	expectedDeliverables := map[string]bool{
-		"W0-PROJECT-CHARTER.md":    true,
-		"D1-problem-validation.md": true,
-		"D2-user-research.md":      true,
-		"S6-design.md":             true,
-		"S7-plan.md":               true,
+		"CHARTER-PROJECT-CHARTER.md":    true,
+		"PROBLEM-problem-validation.md": true,
+		"RESEARCH-user-research.md":     true,
+		"BUILD-design.md":               true,
+		"RETRO-plan.md":                 true,
 	}
 
 	for _, deliverable := range deliverables {

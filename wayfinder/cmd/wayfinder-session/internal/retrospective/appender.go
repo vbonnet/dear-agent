@@ -8,30 +8,30 @@ import (
 	"time"
 )
 
-// S11Filename is the standard filename for the S11 retrospective document.
-const S11Filename = "S11-retrospective.md"
+// RetroFilename is the canonical retrospective deliverable filename.
+const RetroFilename = "RETRO-retrospective.md"
 
-// AppendToS11 formats RewindEventData as markdown and appends to S11-retrospective.md
+// AppendToRetro formats RewindEventData as markdown and appends to the RETRO deliverable.
 //
 // Uses O_APPEND flag for concurrent-safe writes (atomic at OS level).
 // Creates file if it doesn't exist (should exist from wayfinder-session start, but fail-gracefully).
-func AppendToS11(projectDir string, data *RewindEventData) error {
-	s11Path := filepath.Join(projectDir, S11Filename)
+func AppendToRetro(projectDir string, data *RewindEventData) error {
+	retroPath := filepath.Join(projectDir, RetroFilename)
 
 	// Format markdown entry
 	entry := formatRewindEntry(data)
 
 	// Open file with O_APPEND (concurrent-safe atomic writes)
 	// Create if doesn't exist (0644 permissions)
-	file, err := os.OpenFile(s11Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	file, err := os.OpenFile(retroPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		return fmt.Errorf("failed to open %s: %w", S11Filename, err)
+		return fmt.Errorf("failed to open %s: %w", RetroFilename, err)
 	}
 	defer func() { _ = file.Close() }()
 
 	// Write markdown entry
 	if _, err := file.WriteString(entry); err != nil {
-		return fmt.Errorf("failed to write to %s: %w", S11Filename, err)
+		return fmt.Errorf("failed to write to %s: %w", RetroFilename, err)
 	}
 
 	return nil

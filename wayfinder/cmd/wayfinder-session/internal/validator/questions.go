@@ -13,7 +13,7 @@ import (
 //
 // Performs three validation checks:
 //  1. Scans all .md files for unresolved [NEEDS_CLARIFICATION_BY_PHASE: ...] markers
-//  2. For D4/S7 phases: Verifies all assumption checklist items are checked
+//  2. For SPEC/SETUP phases: Verifies all assumption checklist items are checked
 //  3. Checks for pending AskUserQuestion state file (optional hook-based tracking)
 //
 // Returns ValidationError if any check fails, nil if validation passes.
@@ -32,8 +32,8 @@ func validatePhaseQuestions(projectDir string, phaseName string) error {
 		)
 	}
 
-	// Layer 2: Check assumption verification checklists (D4/S7 only)
-	if phaseName == "D4" || phaseName == "S7" || phaseName == "SPEC" || phaseName == "SETUP" {
+	// Layer 2: Check assumption verification checklists (SPEC/SETUP only)
+	if phaseName == "SPEC" || phaseName == "SETUP" {
 		count, file, err := countUncheckedAssumptions(phaseName, projectDir)
 		if err != nil {
 			return fmt.Errorf("failed to check assumptions: %w", err)
@@ -94,18 +94,18 @@ func countClarificationMarkers(projectDir string) (int, []string, error) {
 	return markerCount, filesWithMarkers, nil
 }
 
-// countUncheckedAssumptions counts unchecked items in D4 or S7 assumption
+// countUncheckedAssumptions counts unchecked items in SPEC or SETUP assumption
 // verification checklists.
 func countUncheckedAssumptions(phaseName string, projectDir string) (int, string, error) {
 	// Determine target file based on phase
 	var filename string
 	switch phaseName {
-	case "D4", "SPEC":
+	case "SPEC":
 		filename = phaseName + "-solution-requirements.md"
-	case "S7", "SETUP":
+	case "SETUP":
 		filename = phaseName + "-plan.md"
 	default:
-		// Not D4/SPEC or S7/SETUP - no assumption checklist required
+		// Other phases do not require an assumption checklist.
 		return 0, "", nil
 	}
 

@@ -15,7 +15,7 @@ func writeSpecFile(t *testing.T, dir, body string) {
 }
 
 // TestValidateSpecEARS_Valid confirms a SPEC.md with conforming EARS
-// requirements passes the D4/SPEC gate deterministically (no API key needed).
+// requirements passes the SPEC/SPEC gate deterministically (no API key needed).
 func TestValidateSpecEARS_Valid(t *testing.T) {
 	dir := t.TempDir()
 	writeSpecFile(t, dir, `# SPEC
@@ -26,8 +26,8 @@ func TestValidateSpecEARS_Valid(t *testing.T) {
 - The system shall not store plaintext passwords.
 - The system shall record an audit entry for each request.
 `)
-	if err := validateDocQuality("D4", dir); err != nil {
-		t.Fatalf("expected D4 to pass with valid EARS requirements, got: %v", err)
+	if err := validateDocQuality("SPEC", dir); err != nil {
+		t.Fatalf("expected SPEC to pass with valid EARS requirements, got: %v", err)
 	}
 }
 
@@ -35,7 +35,7 @@ func TestValidateSpecEARS_Valid(t *testing.T) {
 func TestValidateSpecEARS_ZeroRequirements(t *testing.T) {
 	dir := t.TempDir()
 	writeSpecFile(t, dir, "# SPEC\n\nThis is just prose with no requirements.\n")
-	err := validateDocQuality("D4", dir)
+	err := validateDocQuality("SPEC", dir)
 	if err == nil {
 		t.Fatal("expected error for SPEC.md with zero requirements")
 	}
@@ -43,8 +43,8 @@ func TestValidateSpecEARS_ZeroRequirements(t *testing.T) {
 	if !errors.As(err, &verr) {
 		t.Fatalf("expected ValidationError, got %T", err)
 	}
-	if verr.Phase != "complete D4" {
-		t.Errorf("expected Phase 'complete D4', got %q", verr.Phase)
+	if verr.Phase != "complete SPEC" {
+		t.Errorf("expected Phase 'complete SPEC', got %q", verr.Phase)
 	}
 }
 
@@ -58,7 +58,7 @@ func TestValidateSpecEARS_NonConformingStrict(t *testing.T) {
 - The system shall log requests.
 - Eventually the thing shall happen somehow.
 `)
-	err := validateDocQuality("D4", dir)
+	err := validateDocQuality("SPEC", dir)
 	if err == nil {
 		t.Fatal("expected strict gate to fail on a non-conforming requirement")
 	}
@@ -74,7 +74,7 @@ func TestValidateSpecEARS_NonConformingStrict(t *testing.T) {
 // TestValidateSpecEARS_Missing confirms a missing SPEC.md is reported.
 func TestValidateSpecEARS_Missing(t *testing.T) {
 	dir := t.TempDir()
-	err := validateDocQuality("D4", dir)
+	err := validateDocQuality("SPEC", dir)
 	if err == nil {
 		t.Fatal("expected error for missing SPEC.md")
 	}
@@ -96,7 +96,7 @@ func TestValidateSpecEARS_ConfigOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeSpecFile(t, dir, "The system must persist all state.\n")
-	if err := validateDocQuality("D4", dir); err != nil {
+	if err := validateDocQuality("SPEC", dir); err != nil {
 		t.Fatalf("expected pass with custom EARS config, got: %v", err)
 	}
 }
@@ -108,7 +108,7 @@ func TestValidateSpecEARS_BadConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeSpecFile(t, dir, "The system shall work.\n")
-	err := validateDocQuality("D4", dir)
+	err := validateDocQuality("SPEC", dir)
 	if err == nil {
 		t.Fatal("expected error for malformed .earslint.yml")
 	}

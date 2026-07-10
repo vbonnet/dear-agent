@@ -5,25 +5,16 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/vbonnet/dear-agent/pkg/stophook"
-	"github.com/vbonnet/dear-agent/wayfinder/internal/status"
 )
 
 // writeStatus writes a minimal WAYFINDER-STATUS.md with the given status value.
 func writeStatus(t *testing.T, dir, projectStatus, currentPhase string) {
 	t.Helper()
-	s := &status.Status{
-		SchemaVersion: status.SchemaVersion,
-		SessionID:     "test-session",
-		ProjectPath:   dir,
-		StartedAt:     time.Now(),
-		Status:        projectStatus,
-		CurrentPhase:  currentPhase,
-	}
-	if err := s.WriteTo(dir); err != nil {
-		t.Fatalf("writeTo: %v", err)
+	raw := fmt.Sprintf("---\nschema_version: \"2.0\"\nproject_name: test\nproject_type: feature\nrisk_level: M\ncurrent_waypoint: %s\nstatus: %s\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\nwaypoint_history: []\n---\n", currentPhase, projectStatus)
+	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(raw), 0o600); err != nil {
+		t.Fatalf("write status: %v", err)
 	}
 }
 
@@ -33,7 +24,7 @@ func newResult() *stophook.Result { return &stophook.Result{HookName: "test"} }
 
 func TestCheckPhase_InProgress(t *testing.T) {
 	dir := t.TempDir()
-	writeStatus(t, dir, status.StatusInProgress, "S5")
+	writeStatus(t, dir, "in-progress", "RESEARCH")
 
 	r := newResult()
 	checkPhase(r, dir)
@@ -48,7 +39,7 @@ func TestCheckPhase_InProgress(t *testing.T) {
 
 func TestCheckPhase_Completed(t *testing.T) {
 	dir := t.TempDir()
-	writeStatus(t, dir, status.StatusCompleted, "S11")
+	writeStatus(t, dir, statusCompleted, "RETRO")
 
 	r := newResult()
 	checkPhase(r, dir)
@@ -63,7 +54,7 @@ func TestCheckPhase_Completed(t *testing.T) {
 
 func TestCheckPhase_Abandoned(t *testing.T) {
 	dir := t.TempDir()
-	writeStatus(t, dir, status.StatusAbandoned, "")
+	writeStatus(t, dir, statusAbandoned, "")
 
 	r := newResult()
 	checkPhase(r, dir)
@@ -80,7 +71,7 @@ func TestCheckPhase_Abandoned(t *testing.T) {
 func TestCheckPhase_BlockedIsNotPass(t *testing.T) {
 	dir := t.TempDir()
 	// Manually write a status file with a non-standard "blocked" value.
-	raw := fmt.Sprintf("---\nschema_version: \"2.0\"\nsession_id: test\nproject_path: %s\nstarted_at: 2026-01-01T00:00:00Z\nstatus: blocked\ncurrent_phase: S3\n---\n\n# Wayfinder Session\n", dir)
+	raw := "---\nschema_version: \"2.0\"\nproject_name: test\nstatus: blocked\ncurrent_waypoint: BUILD\n---\n"
 	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +104,7 @@ func TestCheckPhase_NoStatusFile(t *testing.T) {
 
 func TestCheckRetrospective_CompletedNoRetro_IsBlock(t *testing.T) {
 	dir := t.TempDir()
-	writeStatus(t, dir, status.StatusCompleted, "S11")
+	writeStatus(t, dir, statusCompleted, "RETRO")
 
 	r := newResult()
 	checkRetrospective(r, dir)
@@ -126,9 +117,9 @@ func TestCheckRetrospective_CompletedNoRetro_IsBlock(t *testing.T) {
 	t.Errorf("expected Block when project complete but no retrospective, got %+v", r.Findings)
 }
 
-func TestCheckRetrospective_AtS11NoRetro_IsBlock(t *testing.T) {
+func TestCheckRetrospective_AtRetroNoRetro_IsBlock(t *testing.T) {
 	dir := t.TempDir()
-	writeStatus(t, dir, status.StatusInProgress, "S11")
+	writeStatus(t, dir, "in-progress", "RETRO")
 
 	r := newResult()
 	checkRetrospective(r, dir)
@@ -138,19 +129,19 @@ func TestCheckRetrospective_AtS11NoRetro_IsBlock(t *testing.T) {
 			return
 		}
 	}
-	t.Errorf("expected Block when current phase is S11 but no retrospective, got %+v", r.Findings)
+	t.Errorf("expected Block when current phase is RETRO but no retrospective, got %+v", r.Findings)
 }
 
 func TestCheckRetrospective_InProgressMidPhase_IsPass(t *testing.T) {
 	dir := t.TempDir()
-	writeStatus(t, dir, status.StatusInProgress, "S5")
+	writeStatus(t, dir, "in-progress", "BUILD")
 
 	r := newResult()
 	checkRetrospective(r, dir)
 
 	for _, f := range r.Findings {
 		if f.Check == "retrospective" && f.Severity == stophook.SeverityPass {
-			return // not at S11 — no retro required
+			return // not at RETRO — no retro required
 		}
 	}
 	t.Errorf("expected Pass when project is mid-phase, got %+v", r.Findings)
@@ -158,13 +149,13 @@ func TestCheckRetrospective_InProgressMidPhase_IsPass(t *testing.T) {
 
 func TestCheckRetrospective_ExistsWithContent_IsPass(t *testing.T) {
 	dir := t.TempDir()
-	writeStatus(t, dir, status.StatusCompleted, "S11")
+	writeStatus(t, dir, statusCompleted, "RETRO")
 	// Write a retro with substantial content (>100 bytes)
 	content := make([]byte, 200)
 	for i := range content {
 		content[i] = 'x'
 	}
-	if err := os.WriteFile(filepath.Join(dir, "S11-retrospective.md"), content, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "RETRO-retrospective.md"), content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -181,8 +172,8 @@ func TestCheckRetrospective_ExistsWithContent_IsPass(t *testing.T) {
 
 func TestCheckRetrospective_ExistsMinimalContent_IsBlock(t *testing.T) {
 	dir := t.TempDir()
-	writeStatus(t, dir, status.StatusCompleted, "S11")
-	if err := os.WriteFile(filepath.Join(dir, "S11-retrospective.md"), []byte("hi"), 0o600); err != nil {
+	writeStatus(t, dir, statusCompleted, "RETRO")
+	if err := os.WriteFile(filepath.Join(dir, "RETRO-retrospective.md"), []byte("hi"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

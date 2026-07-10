@@ -8,13 +8,13 @@ import (
 	"time"
 )
 
-func TestAppendToS11(t *testing.T) {
+func TestAppendToRetro(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create mock rewind event data
 	data := &RewindEventData{
-		FromPhase: "S7",
-		ToPhase:   "S5",
+		FromPhase: "RETRO",
+		ToPhase:   "SETUP",
 		Magnitude: 2,
 		Timestamp: time.Date(2026, 1, 7, 12, 0, 0, 0, time.UTC),
 		Prompted:  true,
@@ -26,101 +26,101 @@ func TestAppendToS11(t *testing.T) {
 				Commit:             "abc123",
 				UncommittedChanges: true,
 			},
-			Deliverables: []string{"D1-problem.md", "S6-design.md"},
+			Deliverables: []string{"PROBLEM-problem.md", "BUILD-design.md"},
 			PhaseState: PhaseContext{
-				CurrentPhase:    "S7",
-				CompletedPhases: []string{"W0", "D1", "S6"},
+				CurrentPhase:    "RETRO",
+				CompletedPhases: []string{"CHARTER", "PROBLEM", "BUILD"},
 				SessionID:       "test-session-123",
 			},
 		},
 	}
 
-	// Append to S11
-	err := AppendToS11(tmpDir, data)
+	// Append to RETRO
+	err := AppendToRetro(tmpDir, data)
 	if err != nil {
-		t.Fatalf("AppendToS11 failed: %v", err)
+		t.Fatalf("AppendToRetro failed: %v", err)
 	}
 
-	// Read S11 file
-	s11Path := filepath.Join(tmpDir, S11Filename)
+	// Read RETRO file
+	s11Path := filepath.Join(tmpDir, RetroFilename)
 	content, err := os.ReadFile(s11Path)
 	if err != nil {
-		t.Fatalf("Failed to read S11 file: %v", err)
+		t.Fatalf("Failed to read RETRO file: %v", err)
 	}
 
 	contentStr := string(content)
 
 	// Validate markdown structure
-	if !strings.Contains(contentStr, "## Rewind: S7 → S5 (magnitude 2)") {
-		t.Errorf("Missing rewind header in S11")
+	if !strings.Contains(contentStr, "## Rewind: RETRO → SETUP (magnitude 2)") {
+		t.Errorf("Missing rewind header in RETRO")
 	}
 	if !strings.Contains(contentStr, "**Reason**: Design was overcomplicated") {
-		t.Errorf("Missing reason in S11")
+		t.Errorf("Missing reason in RETRO")
 	}
 	if !strings.Contains(contentStr, "**Learnings**: Simpler approach is better") {
-		t.Errorf("Missing learnings in S11")
+		t.Errorf("Missing learnings in RETRO")
 	}
 	if !strings.Contains(contentStr, "main@abc123") {
-		t.Errorf("Missing git context in S11")
+		t.Errorf("Missing git context in RETRO")
 	}
 	if !strings.Contains(contentStr, "uncommitted: yes") {
-		t.Errorf("Missing uncommitted changes flag in S11")
+		t.Errorf("Missing uncommitted changes flag in RETRO")
 	}
 }
 
-func TestAppendToS11_Multiple(t *testing.T) {
+func TestAppendToRetro_Multiple(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create first rewind
 	data1 := &RewindEventData{
-		FromPhase: "S7",
-		ToPhase:   "S6",
+		FromPhase: "RETRO",
+		ToPhase:   "BUILD",
 		Magnitude: 1,
 		Timestamp: time.Now(),
 		Reason:    "First rewind",
 	}
 
-	err := AppendToS11(tmpDir, data1)
+	err := AppendToRetro(tmpDir, data1)
 	if err != nil {
 		t.Fatalf("First append failed: %v", err)
 	}
 
 	// Create second rewind
 	data2 := &RewindEventData{
-		FromPhase: "S8",
-		ToPhase:   "S5",
+		FromPhase: "BUILD",
+		ToPhase:   "SETUP",
 		Magnitude: 3,
 		Timestamp: time.Now(),
 		Reason:    "Second rewind",
 	}
 
-	err = AppendToS11(tmpDir, data2)
+	err = AppendToRetro(tmpDir, data2)
 	if err != nil {
 		t.Fatalf("Second append failed: %v", err)
 	}
 
-	// Read S11 file
-	s11Path := filepath.Join(tmpDir, S11Filename)
+	// Read RETRO file
+	s11Path := filepath.Join(tmpDir, RetroFilename)
 	content, err := os.ReadFile(s11Path)
 	if err != nil {
-		t.Fatalf("Failed to read S11 file: %v", err)
+		t.Fatalf("Failed to read RETRO file: %v", err)
 	}
 
 	contentStr := string(content)
 
 	// Both rewinds should be present
 	if !strings.Contains(contentStr, "First rewind") {
-		t.Errorf("First rewind missing in S11")
+		t.Errorf("First rewind missing in RETRO")
 	}
 	if !strings.Contains(contentStr, "Second rewind") {
-		t.Errorf("Second rewind missing in S11")
+		t.Errorf("Second rewind missing in RETRO")
 	}
 }
 
 func TestFormatRewindEntry(t *testing.T) {
 	data := &RewindEventData{
-		FromPhase: "D3",
-		ToPhase:   "D1",
+		FromPhase: "DESIGN",
+		ToPhase:   "PROBLEM",
 		Magnitude: 2,
 		Timestamp: time.Date(2026, 1, 7, 12, 0, 0, 0, time.UTC),
 		Reason:    "Test reason",
@@ -130,9 +130,9 @@ func TestFormatRewindEntry(t *testing.T) {
 				Branch: "feature",
 				Commit: "xyz789",
 			},
-			Deliverables: []string{"D1-problem.md"},
+			Deliverables: []string{"PROBLEM-problem.md"},
 			PhaseState: PhaseContext{
-				CompletedPhases: []string{"W0", "D1"},
+				CompletedPhases: []string{"CHARTER", "PROBLEM"},
 			},
 		},
 	}
@@ -140,7 +140,7 @@ func TestFormatRewindEntry(t *testing.T) {
 	entry := formatRewindEntry(data)
 
 	// Validate markdown format
-	if !strings.Contains(entry, "## Rewind: D3 → D1 (magnitude 2)") {
+	if !strings.Contains(entry, "## Rewind: DESIGN → PROBLEM (magnitude 2)") {
 		t.Errorf("Missing header")
 	}
 	if !strings.Contains(entry, "2026-01-07T12:00:00Z") {
@@ -159,8 +159,8 @@ func TestFormatRewindEntry(t *testing.T) {
 
 func TestFormatRewindEntry_GitError(t *testing.T) {
 	data := &RewindEventData{
-		FromPhase: "S5",
-		ToPhase:   "S4",
+		FromPhase: "SETUP",
+		ToPhase:   "PLAN",
 		Magnitude: 1,
 		Timestamp: time.Now(),
 		Reason:    "Test",

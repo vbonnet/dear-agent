@@ -376,7 +376,7 @@ harness parity surfaces that consume it.
 
 **File:** [`wayfinder_lifecycle_guardrails.feature`](../test/bdd/features/wayfinder_lifecycle_guardrails.feature)
 
-**Drives:** Wayfinder archive, resume, workspace detection, and review package
+**Drives:** Wayfinder archive, workspace detection, and review package
 SPEC coverage.
 
 **Key scenarios:**
@@ -801,6 +801,25 @@ coverage and provider-neutral runtime behavior.
 **Why this matters:** VROOM is shared coordination infrastructure. Its worker
 dispatch, adjudication, decision trail, and process-pressure behavior must not
 silently pin Claude when the active harness or model provider is different.
+
+### Wayfinder V2 Command Guardrails
+
+**File:** [`wayfinder_v2_command_guardrails.feature`](../test/bdd/features/wayfinder_v2_command_guardrails.feature)
+
+**Drives:** canonical Wayfinder root/session commands, V2 status defaults,
+roadmap tasks, validator gates, stop-hook enforcement, and rewind retrospective
+persistence.
+
+**Key scenarios:**
+- Changed command packages keep co-located strict EARS specifications.
+- Built root help exposes the nine canonical phases and no retired executors.
+- Normal session commands parse V2 only while legacy reads remain isolated to
+  explicit migration commands.
+- Non-migration runtime source cannot reintroduce retired phase identifiers.
+
+**Why this matters:** Wayfinder is the repository's planning gate. A V1 default
+or hidden legacy executor makes phase enforcement ambiguous and violates the
+canonical V2 and broken-windows policies.
 
 ---
 

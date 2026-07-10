@@ -19,9 +19,6 @@ dependencies:
   BUILD:
     PLAN: full
     CHARTER: summary
-v1_to_v2:
-  D1: PROBLEM
-  S8: BUILD
 `
 		err := os.WriteFile(configPath, []byte(yamlContent), 0o644)
 		if err != nil {
@@ -37,9 +34,6 @@ v1_to_v2:
 			t.Errorf("expected 3 phases, got %d", len(cfg.Dependencies))
 		}
 
-		if len(cfg.V1ToV2) != 2 {
-			t.Errorf("expected 2 V1 mappings, got %d", len(cfg.V1ToV2))
-		}
 	})
 
 	t.Run("returns error for missing file", func(t *testing.T) {
@@ -96,9 +90,6 @@ func TestParseConfig(t *testing.T) {
 			t.Error("Dependencies should be initialized, not nil")
 		}
 
-		if cfg.V1ToV2 == nil {
-			t.Error("V1ToV2 should be initialized, not nil")
-		}
 	})
 }
 
@@ -119,11 +110,6 @@ dependencies:
     CHARTER: summary
     BUILD: full
     SPEC: summary
-v1_to_v2:
-  D1: PROBLEM
-  D3: DESIGN
-  S8: BUILD
-  S11: RETRO
 `
 	cfg, err := ParseConfig([]byte(yamlContent))
 	if err != nil {
@@ -182,17 +168,6 @@ v1_to_v2:
 		}
 	})
 
-	t.Run("resolves V1 names automatically", func(t *testing.T) {
-		deps := cfg.GetDependencies("S8")
-		if len(deps) != 3 {
-			t.Fatalf("S8 (BUILD) should have 3 deps, got %d", len(deps))
-		}
-
-		if deps["PLAN"] != Full {
-			t.Errorf("S8->PLAN should be full, got %q", deps["PLAN"])
-		}
-	})
-
 	t.Run("returns empty map for unknown phase", func(t *testing.T) {
 		deps := cfg.GetDependencies("UNKNOWN")
 		if len(deps) != 0 {
@@ -207,60 +182,6 @@ v1_to_v2:
 		original := cfg.GetDependencies("BUILD")
 		if _, ok := original["INJECTED"]; ok {
 			t.Error("mutation of returned map should not affect original")
-		}
-	})
-}
-
-func TestResolveV1Name(t *testing.T) {
-	yamlContent := `
-dependencies:
-  PROBLEM: {}
-  BUILD: {}
-v1_to_v2:
-  D1: PROBLEM
-  D2: RESEARCH
-  D3: DESIGN
-  D4: SPEC
-  S8: BUILD
-  S11: RETRO
-`
-	cfg, err := ParseConfig([]byte(yamlContent))
-	if err != nil {
-		t.Fatalf("ParseConfig() error: %v", err)
-	}
-
-	t.Run("maps V1 to V2", func(t *testing.T) {
-		tests := map[string]string{
-			"D1":  "PROBLEM",
-			"D2":  "RESEARCH",
-			"D3":  "DESIGN",
-			"D4":  "SPEC",
-			"S8":  "BUILD",
-			"S11": "RETRO",
-		}
-
-		for v1, expectedV2 := range tests {
-			got := cfg.ResolveV1Name(v1)
-			if got != expectedV2 {
-				t.Errorf("ResolveV1Name(%q) = %q, want %q", v1, got, expectedV2)
-			}
-		}
-	})
-
-	t.Run("returns V2 names unchanged", func(t *testing.T) {
-		v2Names := []string{"CHARTER", "PROBLEM", "BUILD", "RETRO"}
-		for _, name := range v2Names {
-			got := cfg.ResolveV1Name(name)
-			if got != name {
-				t.Errorf("ResolveV1Name(%q) = %q, want %q", name, got, name)
-			}
-		}
-	})
-
-	t.Run("returns unknown names unchanged", func(t *testing.T) {
-		got := cfg.ResolveV1Name("UNKNOWN")
-		if got != "UNKNOWN" {
-			t.Errorf("ResolveV1Name(UNKNOWN) = %q, want UNKNOWN", got)
 		}
 	})
 }
@@ -316,10 +237,6 @@ func TestLoadConfigFromRealFile(t *testing.T) {
 	// Verify key properties of the real config
 	if len(cfg.Dependencies) < 5 {
 		t.Errorf("real config should have at least 5 phases, got %d", len(cfg.Dependencies))
-	}
-
-	if len(cfg.V1ToV2) < 8 {
-		t.Errorf("real config should have at least 8 V1 mappings, got %d", len(cfg.V1ToV2))
 	}
 
 	// CHARTER should have no dependencies

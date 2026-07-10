@@ -38,14 +38,14 @@ func TestAddTask(t *testing.T) {
 	}{
 		{
 			name:    "basic task",
-			phaseID: "S8",
+			phaseID: "BUILD",
 			title:   "Implement feature",
 			opts:    nil,
 			wantErr: false,
 		},
 		{
 			name:    "task with effort",
-			phaseID: "S8",
+			phaseID: "BUILD",
 			title:   "Another task",
 			opts: &TaskOptions{
 				EffortDays: 3.5,
@@ -63,7 +63,7 @@ func TestAddTask(t *testing.T) {
 		},
 		{
 			name:    "invalid priority",
-			phaseID: "S8",
+			phaseID: "BUILD",
 			title:   "Task",
 			opts: &TaskOptions{
 				Priority: "PX",
@@ -114,7 +114,7 @@ func TestUpdateTask(t *testing.T) {
 	_, tm := createTestStatusFile(t)
 
 	// Create a task first
-	task, err := tm.AddTask("S8", "Test task", nil)
+	task, err := tm.AddTask("BUILD", "Test task", nil)
 	if err != nil {
 		t.Fatalf("failed to add task: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestGetTask(t *testing.T) {
 	_, tm := createTestStatusFile(t)
 
 	// Add a test task
-	added, err := tm.AddTask("S8", "Test task", &TaskOptions{
+	added, err := tm.AddTask("BUILD", "Test task", &TaskOptions{
 		EffortDays: 3.0,
 		Priority:   status.PriorityP1,
 	})
@@ -299,23 +299,23 @@ func TestListTasks(t *testing.T) {
 	_, tm := createTestStatusFile(t)
 
 	// Add multiple tasks
-	_, err := tm.AddTask("S8", "Task 1", &TaskOptions{Priority: status.PriorityP0})
+	_, err := tm.AddTask("BUILD", "Task 1", &TaskOptions{Priority: status.PriorityP0})
 	if err != nil {
 		t.Fatalf("failed to add task 1: %v", err)
 	}
 
-	_, err = tm.AddTask("S8", "Task 2", &TaskOptions{Priority: status.PriorityP1})
+	_, err = tm.AddTask("BUILD", "Task 2", &TaskOptions{Priority: status.PriorityP1})
 	if err != nil {
 		t.Fatalf("failed to add task 2: %v", err)
 	}
 
-	_, err = tm.AddTask("S7", "Task 3", &TaskOptions{Priority: status.PriorityP0})
+	_, err = tm.AddTask("PLAN", "Task 3", &TaskOptions{Priority: status.PriorityP0})
 	if err != nil {
 		t.Fatalf("failed to add task 3: %v", err)
 	}
 
 	// Update one task status
-	_, err = tm.UpdateTask("S8-1", &UpdateOptions{Status: status.TaskStatusInProgress})
+	_, err = tm.UpdateTask("BUILD-1", &UpdateOptions{Status: status.TaskStatusInProgress})
 	if err != nil {
 		t.Fatalf("failed to update task: %v", err)
 	}
@@ -330,37 +330,37 @@ func TestListTasks(t *testing.T) {
 			name:       "all tasks",
 			filter:     nil,
 			wantCount:  3,
-			wantPhases: []string{"S8", "S8", "S7"},
+			wantPhases: []string{"BUILD", "BUILD", "PLAN"},
 		},
 		{
-			name:       "filter by phase S8",
-			filter:     &TaskFilter{PhaseID: "S8"},
+			name:       "filter by phase BUILD",
+			filter:     &TaskFilter{PhaseID: "BUILD"},
 			wantCount:  2,
-			wantPhases: []string{"S8", "S8"},
+			wantPhases: []string{"BUILD", "BUILD"},
 		},
 		{
-			name:       "filter by phase S7",
-			filter:     &TaskFilter{PhaseID: "S7"},
+			name:       "filter by phase PLAN",
+			filter:     &TaskFilter{PhaseID: "PLAN"},
 			wantCount:  1,
-			wantPhases: []string{"S7"},
+			wantPhases: []string{"PLAN"},
 		},
 		{
 			name:       "filter by status pending",
 			filter:     &TaskFilter{Status: status.TaskStatusPending},
 			wantCount:  2,
-			wantPhases: []string{"S8", "S7"},
+			wantPhases: []string{"BUILD", "PLAN"},
 		},
 		{
 			name:       "filter by status in-progress",
 			filter:     &TaskFilter{Status: status.TaskStatusInProgress},
 			wantCount:  1,
-			wantPhases: []string{"S8"},
+			wantPhases: []string{"BUILD"},
 		},
 		{
 			name:       "filter by phase and status",
-			filter:     &TaskFilter{PhaseID: "S8", Status: status.TaskStatusPending},
+			filter:     &TaskFilter{PhaseID: "BUILD", Status: status.TaskStatusPending},
 			wantCount:  1,
-			wantPhases: []string{"S8"},
+			wantPhases: []string{"BUILD"},
 		},
 	}
 
@@ -388,8 +388,8 @@ func TestDeleteTask(t *testing.T) {
 	_, tm := createTestStatusFile(t)
 
 	// Add tasks
-	task1, _ := tm.AddTask("S8", "Task 1", nil)
-	task2, _ := tm.AddTask("S8", "Task 2", &TaskOptions{DependsOn: []string{task1.ID}})
+	task1, _ := tm.AddTask("BUILD", "Task 1", nil)
+	task2, _ := tm.AddTask("BUILD", "Task 2", &TaskOptions{DependsOn: []string{task1.ID}})
 
 	tests := []struct {
 		name      string
@@ -449,13 +449,13 @@ func TestTaskDependencies(t *testing.T) {
 	_, tm := createTestStatusFile(t)
 
 	// Add base task
-	task1, err := tm.AddTask("S8", "Task 1", nil)
+	task1, err := tm.AddTask("BUILD", "Task 1", nil)
 	if err != nil {
 		t.Fatalf("failed to add task 1: %v", err)
 	}
 
 	// Add dependent task
-	task2, err := tm.AddTask("S8", "Task 2", &TaskOptions{
+	task2, err := tm.AddTask("BUILD", "Task 2", &TaskOptions{
 		DependsOn: []string{task1.ID},
 	})
 	if err != nil {
@@ -467,7 +467,7 @@ func TestTaskDependencies(t *testing.T) {
 	}
 
 	// Try to add task with invalid dependency
-	_, err = tm.AddTask("S8", "Task 3", &TaskOptions{
+	_, err = tm.AddTask("BUILD", "Task 3", &TaskOptions{
 		DependsOn: []string{"INVALID"},
 	})
 	if err == nil {
@@ -479,24 +479,24 @@ func TestTaskIDGeneration(t *testing.T) {
 	_, tm := createTestStatusFile(t)
 
 	// Add multiple tasks to same phase
-	task1, _ := tm.AddTask("S8", "Task 1", nil)
-	task2, _ := tm.AddTask("S8", "Task 2", nil)
-	task3, _ := tm.AddTask("S8", "Task 3", nil)
+	task1, _ := tm.AddTask("BUILD", "Task 1", nil)
+	task2, _ := tm.AddTask("BUILD", "Task 2", nil)
+	task3, _ := tm.AddTask("BUILD", "Task 3", nil)
 
-	if task1.ID != "S8-1" {
-		t.Errorf("expected task1 ID to be S8-1, got %s", task1.ID)
+	if task1.ID != "BUILD-1" {
+		t.Errorf("expected task1 ID to be BUILD-1, got %s", task1.ID)
 	}
-	if task2.ID != "S8-2" {
-		t.Errorf("expected task2 ID to be S8-2, got %s", task2.ID)
+	if task2.ID != "BUILD-2" {
+		t.Errorf("expected task2 ID to be BUILD-2, got %s", task2.ID)
 	}
-	if task3.ID != "S8-3" {
-		t.Errorf("expected task3 ID to be S8-3, got %s", task3.ID)
+	if task3.ID != "BUILD-3" {
+		t.Errorf("expected task3 ID to be BUILD-3, got %s", task3.ID)
 	}
 
 	// Add task to different phase
-	task4, _ := tm.AddTask("S7", "Task 4", nil)
-	if task4.ID != "S7-1" {
-		t.Errorf("expected task4 ID to be S7-1, got %s", task4.ID)
+	task4, _ := tm.AddTask("PLAN", "Task 4", nil)
+	if task4.ID != "PLAN-1" {
+		t.Errorf("expected task4 ID to be PLAN-1, got %s", task4.ID)
 	}
 }
 
@@ -504,7 +504,7 @@ func TestAtomicUpdates(t *testing.T) {
 	tempDir, tm := createTestStatusFile(t)
 
 	// Add a task
-	_, err := tm.AddTask("S8", "Task 1", nil)
+	_, err := tm.AddTask("BUILD", "Task 1", nil)
 	if err != nil {
 		t.Fatalf("failed to add task: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestAtomicUpdates(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Update the task
-	_, err = tm.UpdateTask("S8-1", &UpdateOptions{
+	_, err = tm.UpdateTask("BUILD-1", &UpdateOptions{
 		Status: status.TaskStatusInProgress,
 	})
 	if err != nil {
