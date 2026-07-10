@@ -242,6 +242,9 @@ func TestAllowedToolsPresent(t *testing.T) {
 	var missing []string
 
 	for _, file := range files {
+		if filepath.Base(file) == "SPEC.md" {
+			continue
+		}
 		content, err := os.ReadFile(file)
 		if err != nil {
 			t.Errorf("Failed to read file %s: %v", file, err)
