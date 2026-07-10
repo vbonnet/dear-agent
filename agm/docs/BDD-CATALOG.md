@@ -482,6 +482,21 @@ isolation, verification escalation, and denial analyzer SPEC coverage.
 Engram's hook runtime and enforcement binaries must remain documented and
 executable across harnesses instead of accumulating Claude-only assumptions.
 
+### Engram Governance Runtime Guardrails
+
+**File:** [`engram_governance_runtime_guardrails.feature`](../test/bdd/features/engram_governance_runtime_guardrails.feature)
+
+**Drives:** Engram enforcement, guidance search, harness-effort generation,
+and composed platform runtime SPEC coverage.
+
+**Key scenarios:**
+- Engram governance runtime packages keep co-located SPEC coverage.
+- Engram governance runtime package SPECs point back to their executable BDD feature.
+
+**Why this matters:** Enforcement and runtime composition must remain
+harness-neutral, while effort configuration must preserve custom model-provider
+identifiers even where harnesses expose different native configuration formats.
+
 ### Local Development Guardrails
 
 **File:** [`local_development_guardrails.feature`](../test/bdd/features/local_development_guardrails.feature)

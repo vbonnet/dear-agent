@@ -41,6 +41,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterDBPersistenceGuardrailSteps(ctx)
 	steps.RegisterEngramCoreContextGuardrailSteps(ctx)
 	steps.RegisterEngramHookGuardrailSteps(ctx)
+	steps.RegisterEngramGovernanceRuntimeGuardrailSteps(ctx)
 	steps.RegisterEngramKnowledgeGuardrailSteps(ctx)
 	steps.RegisterTrustProtocolSteps(ctx)
 	steps.RegisterScanLoopSteps(ctx)
