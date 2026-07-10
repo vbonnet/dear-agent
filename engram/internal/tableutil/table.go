@@ -2,6 +2,8 @@
 package tableutil
 
 import (
+	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -85,18 +87,17 @@ func (t *TableRenderer) RenderPlainMarkdown() string {
 
 // FormatCSV formats data as CSV
 func FormatCSV(headers []string, rows [][]string, sb *strings.Builder) {
-	// Write header
-	sb.WriteString(strings.Join(headers, ",") + "\n")
-
-	// Write data rows (basic CSV - no escaping for now)
-	for _, row := range rows {
-		sb.WriteString(strings.Join(row, ",") + "\n")
-	}
+	w := csv.NewWriter(sb)
+	_ = w.Write(headers)
+	_ = w.WriteAll(rows)
+	w.Flush()
 }
 
 // FormatJSON formats data as JSON
 func FormatJSON(data interface{}) (string, error) {
-	// This is a placeholder - actual JSON marshaling should be done by the caller
-	// to maintain type safety
-	return fmt.Sprintf("%v", data), nil
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		return "", fmt.Errorf("format JSON: %w", err)
+	}
+	return string(encoded), nil
 }

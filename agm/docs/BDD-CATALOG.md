@@ -482,6 +482,21 @@ families. Its trust sources, canonical `AGENTS.md` constitution, Wayfinder
 memory integration, prompt boundaries, and execution sandbox need explicit,
 executable contracts rather than package tests alone.
 
+### Engram CLI Support Guardrails
+
+**File:** [`engram_cli_support_guardrails.feature`](../test/bdd/features/engram_cli_support_guardrails.feature)
+
+**Drives:** Engram CLI errors, security and validation helpers, enhanced slash
+commands, and structured table formatting SPEC coverage.
+
+**Key scenarios:**
+- Engram CLI support packages keep co-located SPEC coverage.
+- Engram CLI support SPECs point back to executable BDD.
+
+**Why this matters:** Every harness ultimately reaches operator-facing command
+surfaces. Their path boundaries, dynamic completion, and machine-readable
+output must remain safe and deterministic.
+
 ### Engram Hook Guardrails
 
 **File:** [`engram_hook_guardrails.feature`](../test/bdd/features/engram_hook_guardrails.feature)
