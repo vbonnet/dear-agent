@@ -203,26 +203,17 @@ func TestNextPhase_AllPhases(t *testing.T) {
 	}
 }
 
-// TestAllPhases_IncludesW0 verifies W0 is included in AllPhases()
-func TestAllPhases_IncludesW0(t *testing.T) {
+// TestAllPhases_DefaultsToCanonicalV2 verifies the unversioned API is safe.
+func TestAllPhases_DefaultsToCanonicalV2(t *testing.T) {
 	phases := AllPhases()
 
-	// Verify W0 is first
 	if len(phases) == 0 {
 		t.Fatal("AllPhases() returned empty slice")
 	}
-
-	if phases[0] != "W0" {
-		t.Errorf("AllPhases()[0] = %q, want %q", phases[0], "W0")
+	expected := []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"}
+	if len(phases) != len(expected) {
+		t.Fatalf("AllPhases() length = %d, want %d", len(phases), len(expected))
 	}
-
-	// Verify total count is 13 (W0 + D1-D4 + S4-S11)
-	if len(phases) != 13 {
-		t.Errorf("AllPhases() length = %d, want 13", len(phases))
-	}
-
-	// Verify exact sequence
-	expected := []string{"W0", "D1", "D2", "D3", "D4", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S11"}
 	for i, phase := range phases {
 		if phase != expected[i] {
 			t.Errorf("AllPhases()[%d] = %q, want %q", i, phase, expected[i])

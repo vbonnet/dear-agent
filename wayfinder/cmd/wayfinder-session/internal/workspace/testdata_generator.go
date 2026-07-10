@@ -151,12 +151,12 @@ Cross-workspace data leakage would be a critical security violation.
 // Distributes projects across different phases
 func getPhaseByIndex(index int) string {
 	phases := []string{
-		"discovery.problem",
-		"build.implement",
-		"deploy",
-		"discovery.solutions",
-		"design.tech-lead",
-		"retrospective",
+		"CHARTER",
+		"PROBLEM",
+		"RESEARCH",
+		"DESIGN",
+		"BUILD",
+		"RETRO",
 	}
 	return phases[index%len(phases)]
 }

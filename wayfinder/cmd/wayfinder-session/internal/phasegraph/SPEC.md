@@ -9,8 +9,8 @@
 ## Overview
 
 `internal/phasegraph` parses the Wayfinder phase dependency configuration used
-to load upstream artifacts for a phase and resolve V1 phase identifiers to V2
-names. It keeps dependency lookup pure and defensive by copying returned maps
+to load upstream artifacts for canonical V2 phases. It keeps dependency lookup
+pure and defensive by copying returned maps
 and rejecting unsupported load strategy values.
 
 ## EARS Requirements
@@ -19,11 +19,11 @@ and rejecting unsupported load strategy values.
 
 **WAYFINDER-PHASEGRAPH-02** When YAML parsing fails, the system shall return an error that identifies phase dependency configuration parsing.
 
-**WAYFINDER-PHASEGRAPH-03** When dependencies or V1-to-V2 mappings are omitted, the system shall initialize them as empty maps.
+**WAYFINDER-PHASEGRAPH-03** When dependencies are omitted, the system shall initialize them as an empty map.
 
 **WAYFINDER-PHASEGRAPH-04** When a dependency load strategy is not `full` or `summary`, the system shall reject the configuration.
 
-**WAYFINDER-PHASEGRAPH-05** When dependencies are requested for a V1 phase name, the system shall resolve it through the V1-to-V2 mapping before lookup.
+**WAYFINDER-PHASEGRAPH-05** When dependencies are requested for an unknown phase name, the system shall return an empty map.
 
 **WAYFINDER-PHASEGRAPH-06** When dependencies are returned, the system shall return a copy so callers cannot mutate stored configuration.
 

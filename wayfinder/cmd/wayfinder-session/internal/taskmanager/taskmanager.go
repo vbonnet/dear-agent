@@ -3,6 +3,7 @@ package taskmanager
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
@@ -44,7 +45,7 @@ func (tm *TaskManager) AddTask(phaseID, title string, opts *TaskOptions) (*statu
 
 	// Validate phase ID
 	if !isValidPhaseID(phaseID) {
-		return nil, fmt.Errorf("invalid phase ID: %s (must be one of: W0, D1, D2, D3, D4, S6, S7, S8, S11)", phaseID)
+		return nil, fmt.Errorf("invalid phase ID: %s (must be one of: CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, RETRO)", phaseID)
 	}
 
 	// Initialize roadmap if nil
@@ -443,7 +444,7 @@ func (tm *TaskManager) checkTaskReferences(st *status.StatusV2, taskID string) e
 }
 
 func generateTaskID(phase *status.RoadmapPhase) string {
-	// Generate task ID in format: phase-N (e.g., "S8-1", "S8-2")
+	// Generate task ID in format: phase-N (e.g., "BUILD-1", "BUILD-2")
 	maxNum := 0
 	prefix := phase.ID + "-"
 
@@ -460,11 +461,7 @@ func generateTaskID(phase *status.RoadmapPhase) string {
 }
 
 func isValidPhaseID(phaseID string) bool {
-	validPhases := map[string]bool{
-		"W0": true, "D1": true, "D2": true, "D3": true,
-		"D4": true, "S6": true, "S7": true, "S8": true, "S11": true,
-	}
-	return validPhases[phaseID]
+	return slices.Contains(status.AllPhasesV2(), phaseID)
 }
 
 func isValidTaskStatus(taskStatus string) bool {
@@ -482,15 +479,15 @@ func isValidPriority(priority string) bool {
 
 func getPhaseNameByID(phaseID string) string {
 	names := map[string]string{
-		"W0":  "Intake & Waypoint",
-		"D1":  "Discovery & Context",
-		"D2":  "Investigation & Options",
-		"D3":  "Architecture & Design Spec",
-		"D4":  "Solution Requirements",
-		"S6":  "Design",
-		"S7":  "Planning & Task Breakdown",
-		"S8":  "BUILD Loop",
-		"S11": "Closure & Retrospective",
+		"CHARTER":  "Charter & Intake",
+		"PROBLEM":  "Problem Definition",
+		"RESEARCH": "Research & Context",
+		"DESIGN":   "Architecture & Design",
+		"SPEC":     "Requirements Specification",
+		"PLAN":     "Planning & Task Breakdown",
+		"SETUP":    "Environment Setup",
+		"BUILD":    "BUILD Loop",
+		"RETRO":    "Closure & Retrospective",
 	}
 	if name, ok := names[phaseID]; ok {
 		return name

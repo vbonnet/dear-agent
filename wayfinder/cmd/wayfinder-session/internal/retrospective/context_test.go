@@ -15,24 +15,24 @@ func TestCaptureContext(t *testing.T) {
 	// Create mock status
 	st := &status.Status{
 		SessionID:    "test-session-123",
-		CurrentPhase: "S7",
+		CurrentPhase: "RETRO",
 		Phases: []status.Phase{
-			{Name: "W0", Status: status.PhaseStatusCompleted},
-			{Name: "D1", Status: status.PhaseStatusCompleted},
-			{Name: "S7", Status: status.PhaseStatusInProgress},
+			{Name: "CHARTER", Status: status.PhaseStatusCompleted},
+			{Name: "PROBLEM", Status: status.PhaseStatusCompleted},
+			{Name: "RETRO", Status: status.PhaseStatusInProgress},
 		},
 	}
 
 	// Create mock deliverables
-	os.WriteFile(filepath.Join(tmpDir, "W0-PROJECT-CHARTER.md"), []byte("test"), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "D1-problem-validation.md"), []byte("test"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "CHARTER-PROJECT-CHARTER.md"), []byte("test"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "PROBLEM-problem-validation.md"), []byte("test"), 0644)
 
 	// Capture context (git will fail in tmpDir, that's expected)
 	snapshot := CaptureContext(tmpDir, st)
 
 	// Validate phase context
-	if snapshot.PhaseState.CurrentPhase != "S7" {
-		t.Errorf("Expected CurrentPhase S7, got %s", snapshot.PhaseState.CurrentPhase)
+	if snapshot.PhaseState.CurrentPhase != "RETRO" {
+		t.Errorf("Expected CurrentPhase RETRO, got %s", snapshot.PhaseState.CurrentPhase)
 	}
 	if snapshot.PhaseState.SessionID != "test-session-123" {
 		t.Errorf("Expected SessionID test-session-123, got %s", snapshot.PhaseState.SessionID)
@@ -58,25 +58,25 @@ func TestCaptureContext(t *testing.T) {
 func TestCapturePhaseContext(t *testing.T) {
 	st := &status.Status{
 		SessionID:    "test-123",
-		CurrentPhase: "D2",
+		CurrentPhase: "RESEARCH",
 		Phases: []status.Phase{
-			{Name: "W0", Status: status.PhaseStatusCompleted},
-			{Name: "D1", Status: status.PhaseStatusCompleted},
-			{Name: "D2", Status: status.PhaseStatusInProgress},
-			{Name: "D3", Status: status.PhaseStatusPending},
+			{Name: "CHARTER", Status: status.PhaseStatusCompleted},
+			{Name: "PROBLEM", Status: status.PhaseStatusCompleted},
+			{Name: "RESEARCH", Status: status.PhaseStatusInProgress},
+			{Name: "DESIGN", Status: status.PhaseStatusPending},
 		},
 	}
 
 	phaseCtx := capturePhaseContext(st)
 
-	if phaseCtx.CurrentPhase != "D2" {
-		t.Errorf("Expected CurrentPhase D2, got %s", phaseCtx.CurrentPhase)
+	if phaseCtx.CurrentPhase != "RESEARCH" {
+		t.Errorf("Expected CurrentPhase RESEARCH, got %s", phaseCtx.CurrentPhase)
 	}
 	if len(phaseCtx.CompletedPhases) != 2 {
 		t.Errorf("Expected 2 completed phases, got %d", len(phaseCtx.CompletedPhases))
 	}
-	if phaseCtx.CompletedPhases[0] != "W0" {
-		t.Errorf("Expected first completed phase W0, got %s", phaseCtx.CompletedPhases[0])
+	if phaseCtx.CompletedPhases[0] != "CHARTER" {
+		t.Errorf("Expected first completed phase CHARTER, got %s", phaseCtx.CompletedPhases[0])
 	}
 }
 
@@ -84,9 +84,9 @@ func TestCaptureDeliverables(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create mock deliverables
-	os.WriteFile(filepath.Join(tmpDir, "W0-charter.md"), []byte("test"), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "D1-problem.md"), []byte("test"), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "S6-design.md"), []byte("test"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "CHARTER-charter.md"), []byte("test"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "PROBLEM-problem.md"), []byte("test"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "BUILD-design.md"), []byte("test"), 0644)
 	os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("test"), 0644) // Should be ignored
 
 	deliverables, err := captureDeliverables(tmpDir)

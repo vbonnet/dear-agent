@@ -7,17 +7,8 @@ import (
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/git"
 )
 
-// forbiddenPhasesV1 defines v1 phases where code changes are not allowed (planning phases).
-// These phases focus on discovery, design, and planning rather than implementation.
-var forbiddenPhasesV1 = map[string]bool{
-	"D1":       true, // Problem Validation (v1 legacy)
-	"D2":       true, // Existing Solutions (v1 legacy)
-	"D3":       true, // Approach Decision (v1 legacy)
-	"D4":       true, // Solution Requirements (v1 legacy)
-	"S4":       true, // Stakeholder Alignment (v1 legacy)
-	"S5":       true, // Research (v1 legacy)
-	"S6":       true, // Design (v1 legacy)
-	"S7":       true, // Plan (v1 legacy)
+// forbiddenPhases defines canonical planning phases where code changes are not allowed.
+var forbiddenPhases = map[string]bool{
 	"PROBLEM":  true, // Discovery & Context (v2)
 	"RESEARCH": true, // Investigation & Options (v2)
 	"DESIGN":   true, // Architecture & Design Spec (v2)
@@ -26,38 +17,17 @@ var forbiddenPhasesV1 = map[string]bool{
 	"SETUP":    true, // Planning & Task Breakdown (v2)
 }
 
-// forbiddenPhasesV2 defines v2 phases where code changes are not allowed.
-var forbiddenPhasesV2 = map[string]bool{
-	"discovery.problem":      true,
-	"discovery.solutions":    true,
-	"discovery.approach":     true,
-	"discovery.requirements": true,
-	"definition":             true,
-	"specification":          true,
-	"design.tech-lead":       true,
-	"design.security":        true,
-	"design.qa":              true,
-	"roadmap.planning":       true,
-	"roadmap.breakdown":      true,
-	"roadmap.dependencies":   true,
-}
-
 // isPhaseForbiddenForCode returns true if the phase is a planning phase
-// where code changes are not allowed. Supports both v1 and v2 phase names.
+// where code changes are not allowed.
 func isPhaseForbiddenForCode(phaseName string) bool {
-	// Check v1 phases
-	if forbiddenPhasesV1[phaseName] {
-		return true
-	}
-	// Check v2 phases
-	return forbiddenPhasesV2[phaseName]
+	return forbiddenPhases[phaseName]
 }
 
 // validatePhaseBoundaries checks if current phase allows code changes.
 // Returns ValidationError if code changes detected in planning phases.
 //
 // Algorithm:
-//  1. Check if phase is forbidden for code (D1-D4, S4-S7)
+//  1. Check if the canonical phase is forbidden for code
 //  2. If allowed phase (CHARTER, BUILD, RETRO) → skip check (optimization)
 //  3. If forbidden → query git for modified source files
 //  4. If violations found → return ValidationError with file list

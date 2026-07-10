@@ -65,17 +65,17 @@ const (
 	LifecycleWorking           = "working"            // Agent actively executing
 	LifecycleInputRequired     = "input-required"     // Blocked on user input (AskUserQuestion)
 	LifecycleDependencyBlocked = "dependency-blocked" // Waiting for another agent/task
-	LifecycleValidating        = "validating"         // Running S9 validation or quality gates
+	LifecycleValidating        = "validating"         // Running BUILD validation or quality gates
 	LifecycleCompleted         = "completed"          // Task successfully finished
 	LifecycleFailed            = "failed"             // Error encountered, cannot proceed
 	LifecycleCanceled          = "canceled"           // Task abandoned or superseded
 )
 
 // AllPhases returns the standard Wayfinder phase sequence based on version
-// Defaults to v1 if version is empty (backward compatibility)
-// Can be called with no arguments (AllPhases()) which defaults to v1
+// Defaults to canonical V2 when version is empty. V1 is available only when
+// explicitly requested by migration code.
 func AllPhases(version ...string) []string {
-	v := WayfinderV1 // default
+	v := WayfinderV2
 	if len(version) > 0 && version[0] != "" {
 		v = version[0]
 	}
@@ -91,16 +91,15 @@ func AllPhasesV1() []string {
 	return []string{"W0", "D1", "D2", "D3", "D4", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S11"}
 }
 
-// AllPhasesV2 returns v2 phase sequence (short names: W0, D1, D2, etc.)
-// Note: S7 (roadmap.planning) is optional and can be skipped for small projects
+// AllPhasesV2 returns the canonical descriptive phase sequence.
+// PLAN is optional and can be skipped for small projects.
 func AllPhasesV2() []string {
 	return AllPhasesV2Schema()
 }
 
 // V2 phase validation regex pattern
 // Matches: V2 descriptive names (CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, RETRO)
-// Also matches legacy V1 short names (W0, D1, D2, D3, D4, S4-S11) for backward compat
-var v2PhasePattern = regexp.MustCompile(`^([WDS]\d+|CHARTER|PROBLEM|RESEARCH|DESIGN|SPEC|PLAN|SETUP|BUILD|RETRO)$`)
+var v2PhasePattern = regexp.MustCompile(`^(CHARTER|PROBLEM|RESEARCH|DESIGN|SPEC|PLAN|SETUP|BUILD|RETRO)$`)
 
 // IsValidV2Phase returns true if the phase name is valid v2 format
 func IsValidV2Phase(phase string) bool {

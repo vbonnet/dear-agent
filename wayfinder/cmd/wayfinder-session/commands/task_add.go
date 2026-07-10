@@ -25,12 +25,12 @@ var TaskAddCmd = &cobra.Command{
 	Short: "Add a new task to a phase",
 	Long: `Add a new task to the specified phase in WAYFINDER-STATUS.md.
 
-The task will be created with a unique ID (e.g., S8-1, S8-2) and pending status.
+The task will be created with a unique ID (e.g., BUILD-1, BUILD-2) and pending status.
 
 Examples:
-  wayfinder session task add S8 "Implement OAuth2 authorization endpoint" --effort 4
-  wayfinder session task add S8 "Create token endpoint" --effort 5 --priority P0 --depends-on S8-1
-  wayfinder session task add S7 "Break down implementation tasks" --effort 2`,
+  wayfinder session task add BUILD "Implement OAuth2 authorization endpoint" --effort 4
+  wayfinder session task add BUILD "Create token endpoint" --effort 5 --priority P0 --depends-on BUILD-1
+  wayfinder session task add PLAN "Break down implementation tasks" --effort 2`,
 	Args: cobra.ExactArgs(2),
 	RunE: runTaskAdd,
 }

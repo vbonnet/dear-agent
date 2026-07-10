@@ -12,21 +12,21 @@ func TestCalculateMagnitude(t *testing.T) {
 		wantErr  bool
 	}{
 		// Same phase (magnitude 0)
-		{"S7", "S7", 0, false},
+		{"RETRO", "RETRO", 0, false},
 
 		// Forward rewinds (moving backwards in time)
-		{"S7", "S6", 1, false},   // S7 (idx 8) → S6 (idx 7) = |8-7| = 1
-		{"S7", "S5", 2, false},   // S7 (idx 8) → S5 (idx 6) = |8-6| = 2
-		{"S7", "D4", 4, false},   // S7 (idx 8) → D4 (idx 4) = |8-4| = 4
-		{"S11", "W0", 12, false}, // S11 (idx 12) → W0 (idx 0) = |12-0| = 12
+		{"RETRO", "BUILD", 1, false},   // RETRO (idx 8) → BUILD (idx 7) = |8-7| = 1
+		{"RETRO", "SETUP", 2, false},   // RETRO (idx 8) → SETUP (idx 6) = |8-6| = 2
+		{"RETRO", "SPEC", 4, false},    // RETRO (idx 8) → SPEC (idx 4) = |8-4| = 4
+		{"RETRO", "CHARTER", 8, false}, // RETRO (idx 8) → CHARTER (idx 0) = |8-0| = 8
 
 		// Edge cases
-		{"W0", "W0", 0, false},
-		{"S11", "S11", 0, false},
+		{"CHARTER", "CHARTER", 0, false},
+		{"RETRO", "RETRO", 0, false},
 
 		// Unknown phases
-		{"INVALID", "S5", 0, true},
-		{"S5", "INVALID", 0, true},
+		{"INVALID", "SETUP", 0, true},
+		{"SETUP", "INVALID", 0, true},
 	}
 
 	for _, tt := range tests {
@@ -54,16 +54,16 @@ func TestCalculateMagnitude(t *testing.T) {
 }
 
 func TestFindPhaseIndex(t *testing.T) {
-	allPhases := []string{"W0", "D1", "D2", "D3", "D4", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S11"}
+	allPhases := []string{"CHARTER", "PROBLEM", "RESEARCH", "DESIGN", "SPEC", "PLAN", "SETUP", "BUILD", "RETRO"}
 
 	tests := []struct {
 		phase    string
 		expected int
 	}{
-		{"W0", 0},
-		{"D1", 1},
-		{"S5", 6},
-		{"S11", 12},
+		{"CHARTER", 0},
+		{"PROBLEM", 1},
+		{"SETUP", 6},
+		{"RETRO", 8},
 		{"INVALID", -1},
 	}
 
@@ -83,12 +83,12 @@ func TestLogRewindEvent_Magnitude0(t *testing.T) {
 	// (LogRewindEvent should skip early for magnitude 0)
 	flags := RewindFlags{}
 
-	// S7→S7 is magnitude 0, should skip logging
-	err := LogRewindEvent(tmpDir, "S7", "S7", flags)
+	// RETRO→RETRO is magnitude 0, should skip logging
+	err := LogRewindEvent(tmpDir, "RETRO", "RETRO", flags)
 	if err != nil {
 		t.Errorf("LogRewindEvent failed: %v", err)
 	}
 
-	// S11-retrospective.md should not be created (magnitude 0 skips logging)
+	// RETRO-retrospective.md should not be created (magnitude 0 skips logging)
 	// This test validates early return logic
 }

@@ -18,7 +18,7 @@ Lifecycle states (A2A-compatible 7-state model):
   working            - Agent actively executing (default)
   input-required     - Blocked on user input (AskUserQuestion)
   dependency-blocked - Waiting for another agent/task
-  validating         - Running S9 validation or quality gates
+  validating         - Running BUILD validation or quality gates
   completed          - Task successfully finished
   failed             - Error encountered, cannot proceed
   canceled           - Task abandoned or superseded
@@ -55,8 +55,14 @@ Examples:
 			return fmt.Errorf("invalid lifecycle state: %s (valid: working, input-required, dependency-blocked, validating, completed, failed, canceled)", lifecycleState)
 		}
 
-		// Read current status
-		st, err := status.ReadFrom(projectDir)
+		version, err := status.DetectSchemaVersionFromDir(projectDir)
+		if err != nil {
+			return fmt.Errorf("failed to inspect status: %w", err)
+		}
+		if version != status.SchemaVersionV2 {
+			return fmt.Errorf("legacy Wayfinder status requires explicit migration before set-lifecycle-state")
+		}
+		st, err := status.ParseV2FromDir(projectDir)
 		if err != nil {
 			return fmt.Errorf("failed to read status: %w", err)
 		}
@@ -97,13 +103,13 @@ Examples:
 		// Update high-level status field to match lifecycle state
 		switch lifecycleState {
 		case status.LifecycleWorking, status.LifecycleValidating:
-			st.Status = status.StatusInProgress
+			st.Status = status.StatusV2InProgress
 		case status.LifecycleInputRequired, status.LifecycleDependencyBlocked, status.LifecycleFailed:
-			st.Status = status.StatusBlocked
+			st.Status = status.StatusV2Blocked
 		case status.LifecycleCompleted:
-			st.Status = status.StatusCompleted
+			st.Status = status.StatusV2Completed
 		case status.LifecycleCanceled:
-			st.Status = status.StatusAbandoned
+			st.Status = status.StatusV2Abandoned
 		}
 
 		// Write updated status
@@ -124,6 +130,11 @@ Examples:
 
 		return nil
 	},
+}
+
+// GetLifecycleStateCmd returns the lifecycle-state command for registration.
+func GetLifecycleStateCmd() *cobra.Command {
+	return setLifecycleStateCmd
 }
 
 // validateTransition checks if a lifecycle state transition is valid

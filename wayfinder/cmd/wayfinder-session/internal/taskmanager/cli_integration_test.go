@@ -13,7 +13,7 @@ func TestCLIWorkflow(t *testing.T) {
 	tempDir, tm := createTestStatusFile(t)
 
 	// Step 1: Add multiple tasks
-	task1, err := tm.AddTask("S8", "Implement OAuth2 authorization endpoint", &TaskOptions{
+	task1, err := tm.AddTask("BUILD", "Implement OAuth2 authorization endpoint", &TaskOptions{
 		EffortDays:  4.0,
 		Priority:    status.PriorityP0,
 		Description: "Create /oauth/authorize endpoint with PKCE support",
@@ -30,7 +30,7 @@ func TestCLIWorkflow(t *testing.T) {
 		t.Fatalf("failed to add task 1: %v", err)
 	}
 
-	task2, err := tm.AddTask("S8", "Implement OAuth2 token endpoint", &TaskOptions{
+	task2, err := tm.AddTask("BUILD", "Implement OAuth2 token endpoint", &TaskOptions{
 		EffortDays:  5.0,
 		Priority:    status.PriorityP0,
 		Description: "Create /oauth/token endpoint with refresh token support",
@@ -44,7 +44,7 @@ func TestCLIWorkflow(t *testing.T) {
 		t.Fatalf("failed to add task 2: %v", err)
 	}
 
-	task3, err := tm.AddTask("S8", "Implement token validation middleware", &TaskOptions{
+	task3, err := tm.AddTask("BUILD", "Implement token validation middleware", &TaskOptions{
 		EffortDays: 3.0,
 		Priority:   status.PriorityP0,
 		DependsOn:  []string{task1.ID},
@@ -161,19 +161,19 @@ func TestCLIWorkflow(t *testing.T) {
 
 	var s8Phase *status.RoadmapPhase
 	for i := range st.Roadmap.Phases {
-		if st.Roadmap.Phases[i].ID == "S8" {
+		if st.Roadmap.Phases[i].ID == "BUILD" {
 			s8Phase = &st.Roadmap.Phases[i]
 			break
 		}
 	}
 
 	if s8Phase == nil {
-		t.Fatal("expected S8 phase to exist")
+		t.Fatal("expected BUILD phase to exist")
 		return
 	}
 
 	if len(s8Phase.Tasks) != 2 {
-		t.Errorf("expected 2 tasks in S8 phase, got %d", len(s8Phase.Tasks))
+		t.Errorf("expected 2 tasks in BUILD phase, got %d", len(s8Phase.Tasks))
 	}
 }
 
@@ -182,11 +182,11 @@ func TestDependencyValidationWorkflow(t *testing.T) {
 	_, tm := createTestStatusFile(t)
 
 	// Create a chain of dependencies
-	task1, _ := tm.AddTask("S8", "Task 1", nil)
-	task2, _ := tm.AddTask("S8", "Task 2", &TaskOptions{
+	task1, _ := tm.AddTask("BUILD", "Task 1", nil)
+	task2, _ := tm.AddTask("BUILD", "Task 2", &TaskOptions{
 		DependsOn: []string{task1.ID},
 	})
-	task3, _ := tm.AddTask("S8", "Task 3", &TaskOptions{
+	task3, _ := tm.AddTask("BUILD", "Task 3", &TaskOptions{
 		DependsOn: []string{task2.ID},
 	})
 
@@ -219,69 +219,69 @@ func TestMultiPhaseWorkflow(t *testing.T) {
 	_, tm := createTestStatusFile(t)
 
 	// Add tasks to different phases
-	s7Task, err := tm.AddTask("S7", "Break down implementation tasks", &TaskOptions{
+	s7Task, err := tm.AddTask("PLAN", "Break down implementation tasks", &TaskOptions{
 		EffortDays: 2.0,
 		Priority:   status.PriorityP0,
 	})
 	if err != nil {
-		t.Fatalf("failed to add S7 task: %v", err)
+		t.Fatalf("failed to add PLAN task: %v", err)
 	}
 
-	s8Task1, err := tm.AddTask("S8", "Implement feature A", &TaskOptions{
+	s8Task1, err := tm.AddTask("BUILD", "Implement feature A", &TaskOptions{
 		EffortDays: 4.0,
 		Priority:   status.PriorityP0,
 		DependsOn:  []string{s7Task.ID}, // Cross-phase dependency
 	})
 	if err != nil {
-		t.Fatalf("failed to add S8 task 1: %v", err)
+		t.Fatalf("failed to add BUILD task 1: %v", err)
 	}
 
-	_, err = tm.AddTask("S8", "Implement feature B", &TaskOptions{
+	_, err = tm.AddTask("BUILD", "Implement feature B", &TaskOptions{
 		EffortDays: 3.0,
 		Priority:   status.PriorityP1,
 	})
 	if err != nil {
-		t.Fatalf("failed to add S8 task 2: %v", err)
+		t.Fatalf("failed to add BUILD task 2: %v", err)
 	}
 
 	// List tasks by phase
-	s7Tasks, err := tm.ListTasks(&TaskFilter{PhaseID: "S7"})
+	s7Tasks, err := tm.ListTasks(&TaskFilter{PhaseID: "PLAN"})
 	if err != nil {
-		t.Fatalf("failed to list S7 tasks: %v", err)
+		t.Fatalf("failed to list PLAN tasks: %v", err)
 	}
 
 	if len(s7Tasks) != 1 {
-		t.Errorf("expected 1 S7 task, got %d", len(s7Tasks))
+		t.Errorf("expected 1 PLAN task, got %d", len(s7Tasks))
 	}
 
-	s8Tasks, err := tm.ListTasks(&TaskFilter{PhaseID: "S8"})
+	s8Tasks, err := tm.ListTasks(&TaskFilter{PhaseID: "BUILD"})
 	if err != nil {
-		t.Fatalf("failed to list S8 tasks: %v", err)
+		t.Fatalf("failed to list BUILD tasks: %v", err)
 	}
 
 	if len(s8Tasks) != 2 {
-		t.Errorf("expected 2 S8 tasks, got %d", len(s8Tasks))
+		t.Errorf("expected 2 BUILD tasks, got %d", len(s8Tasks))
 	}
 
 	// Verify cross-phase dependency
 	if len(s8Task1.DependsOn) != 1 || s8Task1.DependsOn[0] != s7Task.ID {
-		t.Error("expected S8 task to depend on S7 task")
+		t.Error("expected BUILD task to depend on PLAN task")
 	}
 
-	// Complete S7 task
+	// Complete PLAN task
 	_, err = tm.UpdateTask(s7Task.ID, &UpdateOptions{
 		Status: status.TaskStatusCompleted,
 	})
 	if err != nil {
-		t.Fatalf("failed to complete S7 task: %v", err)
+		t.Fatalf("failed to complete PLAN task: %v", err)
 	}
 
-	// Update S8 task with cross-phase dependency
+	// Update BUILD task with cross-phase dependency
 	_, err = tm.UpdateTask(s8Task1.ID, &UpdateOptions{
 		Status: status.TaskStatusInProgress,
 	})
 	if err != nil {
-		t.Fatalf("failed to update S8 task: %v", err)
+		t.Fatalf("failed to update BUILD task: %v", err)
 	}
 }
 
@@ -291,7 +291,7 @@ func TestAtomicFileUpdates(t *testing.T) {
 	statusFile := filepath.Join(tempDir, "WAYFINDER-STATUS.md")
 
 	// Add a task
-	task1, err := tm.AddTask("S8", "Task 1", nil)
+	task1, err := tm.AddTask("BUILD", "Task 1", nil)
 	if err != nil {
 		t.Fatalf("failed to add task: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestErrorHandling(t *testing.T) {
 		{
 			name: "invalid priority",
 			fn: func() error {
-				_, err := tm.AddTask("S8", "Task", &TaskOptions{
+				_, err := tm.AddTask("BUILD", "Task", &TaskOptions{
 					Priority: "INVALID",
 				})
 				return err
@@ -391,7 +391,7 @@ func TestErrorHandling(t *testing.T) {
 		{
 			name: "invalid dependency",
 			fn: func() error {
-				_, err := tm.AddTask("S8", "Task", &TaskOptions{
+				_, err := tm.AddTask("BUILD", "Task", &TaskOptions{
 					DependsOn: []string{"INVALID"},
 				})
 				return err
@@ -401,8 +401,8 @@ func TestErrorHandling(t *testing.T) {
 		{
 			name: "delete task with references",
 			fn: func() error {
-				task1, _ := tm.AddTask("S8", "Task 1", nil)
-				_, _ = tm.AddTask("S8", "Task 2", &TaskOptions{
+				task1, _ := tm.AddTask("BUILD", "Task 1", nil)
+				_, _ = tm.AddTask("BUILD", "Task 2", &TaskOptions{
 					DependsOn: []string{task1.ID},
 				})
 				return tm.DeleteTask(task1.ID)

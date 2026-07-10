@@ -26,6 +26,10 @@ type StatusV2 struct {
 	Beads          []string   `yaml:"beads,omitempty"`
 	CompletionDate *time.Time `yaml:"completion_date,omitempty"`
 	BlockedReason  string     `yaml:"blocked_reason,omitempty"`
+	LifecycleState string     `yaml:"lifecycle_state,omitempty"`
+	BlockedOn      string     `yaml:"blocked_on,omitempty"`
+	ErrorMessage   string     `yaml:"error_message,omitempty"`
+	InputNeeded    string     `yaml:"input_needed,omitempty"`
 	SkipRoadmap    bool       `yaml:"skip_roadmap,omitempty"` // Skip roadmap phases for small projects
 	SkipPhases     []string   `yaml:"skip_phases,omitempty"`  // Phases skipped by the harness profile (lite skips DESIGN/SPEC/PLAN)
 

@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	minDocQualityScore  = 8.0      // Minimum score required (from W0 decision)
+	minDocQualityScore  = 8.0      // Minimum score required by the canonical quality gate
 	maxDocFileSizeBytes = 10485760 // 10MB limit for documentation files
 )
 
@@ -42,45 +42,45 @@ type DocumentReviewResult struct {
 	Timestamp    time.Time
 }
 
-// validateDocQuality checks documentation quality for D3/D4/S6 phases.
+// validateDocQuality checks documentation quality for DESIGN/SPEC/PLAN phases.
 // Returns ValidationError if documentation scores below 8.0/10 threshold.
 // Uses SHA-256 hash-based caching to skip re-validation for unchanged files.
 //
-// Extended to support D3 phase validation (NEW).
+// Extended to support DESIGN phase validation (NEW).
 func validateDocQuality(phaseName, projectDir string) error {
 	// Route to appropriate validation based on phase
 	switch phaseName {
-	case "D3", "DESIGN":
-		return validateD3Documents(projectDir)
-	case "D4", "SPEC":
+	case "DESIGN":
+		return validateDesignDocuments(projectDir)
+	case "SPEC":
 		// SPEC.md is gated by the deterministic EARS linter (replaces the
 		// former Python LLM "review-spec" rubric). See spec_ears_gate.go.
 		return validateSpecEARS(projectDir, phaseName)
-	case "S6", "PLAN":
-		return validateSingleDocument(projectDir, phaseName, "ARCHITECTURE.md", "review-architecture")
+	case "PLAN":
+		return validateSingleDocument(projectDir, phaseName, "PLAN-design.md", "review-architecture")
 	default:
 		// Not a phase that requires doc quality validation
 		return nil
 	}
 }
 
-// validateD3Documents validates all D3 architecture documents
+// validateDesignDocuments validates all DESIGN architecture documents
 // (ARCHITECTURE.md + ADR-*.md files) using appropriate review skills.
 //
 // Returns nil if all documents pass (score ≥8.0), error otherwise.
-func validateD3Documents(projectDir string) error {
+func validateDesignDocuments(projectDir string) error {
 	// Check ARCHITECTURE.md exists (required)
 	archPath := filepath.Join(projectDir, "ARCHITECTURE.md")
 	if _, err := os.Stat(archPath); err != nil {
 		if os.IsNotExist(err) {
 			return NewValidationError(
-				"complete D3",
+				"complete DESIGN",
 				"ARCHITECTURE.md does not exist (required)",
-				"Create ARCHITECTURE.md before completing D3 phase",
+				"Create ARCHITECTURE.md before completing DESIGN phase",
 			)
 		}
 		return NewValidationError(
-			"complete D3",
+			"complete DESIGN",
 			fmt.Sprintf("failed to check ARCHITECTURE.md: %v", err),
 			"Check file permissions and try again",
 		)
@@ -91,7 +91,7 @@ func validateD3Documents(projectDir string) error {
 	adrFiles, err := filepath.Glob(adrPattern)
 	if err != nil {
 		return NewValidationError(
-			"complete D3",
+			"complete DESIGN",
 			fmt.Sprintf("failed to search for ADR files: %v", err),
 			"Check file permissions and try again",
 		)
@@ -137,7 +137,7 @@ func validateD3Documents(projectDir string) error {
 	}
 
 	// Emit telemetry for each reviewed document
-	emitDocQualityTelemetry("D3", projectDir, results)
+	emitDocQualityTelemetry("DESIGN", projectDir, results)
 
 	// Check if ALL documents pass (score ≥8.0)
 	var failedDocs []DocumentReviewResult
@@ -149,15 +149,15 @@ func validateD3Documents(projectDir string) error {
 
 	// If any failed, return error with details
 	if len(failedDocs) > 0 {
-		return formatD3ValidationError(results, failedDocs)
+		return formatDesignValidationError(results, failedDocs)
 	}
 
 	// All passed
-	fmt.Fprintf(os.Stderr, "✓ D3 document quality check passed (%d documents reviewed)\n", len(results))
+	fmt.Fprintf(os.Stderr, "✓ DESIGN document quality check passed (%d documents reviewed)\n", len(results))
 	return nil
 }
 
-// validateSingleDocument validates a single document (D4 SPEC.md or S6 ARCHITECTURE.md)
+// validateSingleDocument validates a single canonical phase document.
 func validateSingleDocument(projectDir, phaseName, docFile, skillName string) error {
 	docPath := filepath.Join(projectDir, docFile)
 
@@ -367,7 +367,7 @@ func findReviewSkillScript(skillName string) (string, error) {
 	// arbitrary Python execution (with the reviewer's ambient creds —
 	// ANTHROPIC_API_KEY is intentionally NOT stripped from the env) the
 	// moment the reviewer ran `cd <project> && wayfinder-session
-	// complete-phase D3/D4/S6`. Skills now resolve only from install-time
+	// complete-phase DESIGN/SPEC/PLAN`. Skills now resolve only from install-time
 	// locations under the user's home or system prefixes, plus an explicit
 	// opt-in via WAYFINDER_SKILLS_DIR.
 	skillPaths := []string{}
@@ -392,10 +392,10 @@ func findReviewSkillScript(skillName string) (string, error) {
 	return "", fmt.Errorf("%s skill not found in common locations", skillName)
 }
 
-// formatD3ValidationError creates a detailed error message for D3 validation failures.
-func formatD3ValidationError(allResults, failedDocs []DocumentReviewResult) error {
+// formatDesignValidationError creates a detailed error message for DESIGN validation failures.
+func formatDesignValidationError(allResults, failedDocs []DocumentReviewResult) error {
 	var msg strings.Builder
-	msg.WriteString("❌ D3 document quality gate failed\n\n")
+	msg.WriteString("❌ DESIGN document quality gate failed\n\n")
 	msg.WriteString("Documents reviewed:\n")
 
 	// Show all documents with pass/fail status
@@ -409,7 +409,7 @@ func formatD3ValidationError(allResults, failedDocs []DocumentReviewResult) erro
 
 	fmt.Fprintf(&msg, "\nMinimum score required: %.1f/10\n\n", minDocQualityScore)
 	msg.WriteString("Fix failing documents and re-run:\n")
-	msg.WriteString("  wayfinder session complete-phase D3\n\n")
+	msg.WriteString("  wayfinder session complete-phase DESIGN\n\n")
 
 	// Show how to review manually
 	if len(failedDocs) > 0 {
@@ -421,7 +421,7 @@ func formatD3ValidationError(allResults, failedDocs []DocumentReviewResult) erro
 	}
 
 	return NewValidationError(
-		"complete D3",
+		"complete DESIGN",
 		msg.String(),
 		"",
 	)

@@ -4,7 +4,7 @@ import "math"
 
 // PhaseROIMetrics contains Wayfinder phase ROI calculations.
 //
-// Quality score formula (S6 design / D4 requirements):
+// Quality score formula (DESIGN and SPEC decisions):
 //
 //	quality_score = 1.0 - (rework_count * 0.2) - (error_count * 0.1)
 //	Clamped to [0.0, 1.0]

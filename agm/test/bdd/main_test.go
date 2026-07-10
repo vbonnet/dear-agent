@@ -71,5 +71,6 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterWorkflowToolingGuardrailSteps(ctx)
 	steps.RegisterWayfinderLifecycleGuardrailSteps(ctx)
 	steps.RegisterWayfinderStatusGuardrailSteps(ctx)
+	steps.RegisterWayfinderV2CommandGuardrailSteps(ctx)
 	steps.RegisterVROOMRuntimeGuardrailSteps(ctx)
 }

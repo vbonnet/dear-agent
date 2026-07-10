@@ -17,9 +17,9 @@ import (
 
 const (
 	maxCodeFileSizeBytes = 10485760 // 10MB limit for code files
-	buildTimeoutMinutes  = 5        // Build timeout from D4
-	testTimeoutMinutes   = 10       // Test timeout from D4
-	cacheExpiryHours     = 24       // Cache expiry from D4
+	buildTimeoutMinutes  = 5        // SPEC-defined build timeout
+	testTimeoutMinutes   = 10       // SPEC-defined test timeout
+	cacheExpiryHours     = 24       // SPEC-defined cache expiry
 )
 
 // CodeVerificationCache represents cache entry for bead code verification
@@ -120,7 +120,7 @@ func validateCodeDeliverables(phaseName, projectDir string) error {
 func findCodeFiles(projectDir string) ([]string, error) {
 	var codeFiles []string
 
-	// Supported extensions from D4
+	// Supported extensions from the canonical SPEC contract.
 	supportedExts := map[string]bool{
 		".go":   true,
 		".py":   true,
@@ -314,7 +314,7 @@ func runBuildCommand(projectDir, language string) error {
 	// Set working directory
 	cmd.Dir = projectDir
 
-	// Set timeout (5 minutes from D4)
+	// Apply the SPEC-defined five-minute timeout.
 	ctx, cancel := context.WithTimeout(context.Background(), buildTimeoutMinutes*time.Minute)
 	defer cancel()
 
@@ -368,7 +368,7 @@ func runTestCommand(projectDir, language string) error {
 	// Set working directory
 	cmd.Dir = projectDir
 
-	// Set timeout (10 minutes from D4)
+	// Apply the SPEC-defined ten-minute timeout.
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeoutMinutes*time.Minute)
 	defer cancel()
 
@@ -484,7 +484,7 @@ func checkCodeVerificationCache(projectDir, beadID string, sourceFiles, testFile
 		return nil, false
 	}
 
-	// Check cache expiry (24 hours from D4)
+	// Check the SPEC-defined 24-hour cache expiry.
 	if time.Since(cache.LastVerified) > cacheExpiryHours*time.Hour {
 		// Cache expired - treat as miss
 		return nil, false

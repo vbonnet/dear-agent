@@ -100,19 +100,6 @@ Session archival: compress and store completed session artifacts.
 
 V1 → V2 migration tools for session format conversion.
 
-### `cmd/wayfinder-features` (Go)
-
-Feature detection and progress tracking:
-
-| File | Purpose |
-|------|---------|
-| `commands/init.go` | Initialize feature tracking |
-| `commands/start.go` | Start tracking a feature |
-| `commands/verify.go` | Verify feature completion |
-| `commands/status.go` | Feature status report |
-| `internal/progress/` | Progress I/O and schema |
-| `internal/s7/parser.go` | S7 plan parser |
-
 ## Phase Context Management
 
 Phases load context from dependencies via a directed graph

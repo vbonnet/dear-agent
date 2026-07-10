@@ -3,9 +3,37 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
+
+func TestRootCommandUsesCanonicalSessionSurface(t *testing.T) {
+	var names []string
+	for _, command := range rootCmd.Commands() {
+		names = append(names, command.Name())
+	}
+	if !slices.Contains(names, "session") {
+		t.Fatalf("root commands = %v, want session", names)
+	}
+	for _, retired := range []string{"start", "autopilot", "features", "abort"} {
+		if slices.Contains(names, retired) {
+			t.Errorf("root commands expose retired V1 executor %q: %v", retired, names)
+		}
+	}
+}
+
+func TestSessionCommandRegistersCanonicalOperations(t *testing.T) {
+	var names []string
+	for _, command := range sessionCmd.Commands() {
+		names = append(names, command.Name())
+	}
+	for _, want := range []string{"start", "status", "next-phase", "start-phase", "complete-phase", "end", "task", "rewind-to", "set-lifecycle-state", "coord", "migrate"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("session commands = %v, missing %q", names, want)
+		}
+	}
+}
 
 func writeStatus(t *testing.T, dir string) {
 	t.Helper()

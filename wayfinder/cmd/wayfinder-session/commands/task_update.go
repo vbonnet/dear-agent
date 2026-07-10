@@ -31,10 +31,10 @@ var TaskUpdateCmd = &cobra.Command{
 	Long: `Update an existing task's status, metadata, or other fields.
 
 Examples:
-  wayfinder session task update S8-1 --status in-progress
-  wayfinder session task update S8-1 --status completed --tests-status passed
-  wayfinder session task update S8-2 --priority P0 --effort 6
-  wayfinder session task update S8-3 --assigned-to "claude"`,
+  wayfinder session task update BUILD-1 --status in-progress
+  wayfinder session task update BUILD-1 --status completed --tests-status passed
+  wayfinder session task update BUILD-2 --priority P0 --effort 6
+  wayfinder session task update BUILD-3 --assigned-to "worker"`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTaskUpdate,
 }

@@ -29,21 +29,20 @@ var MigrateCmd = &cobra.Command{
 The migration process:
   1. Reads and validates the V1 status file
   2. Maps 13 V1 phases to 9 V2 phases
-  3. Merges phases (S4→D4, S5→S6, S8/S9/S10→S8)
+  3. Merges retired phases into the canonical V2 waypoints
   4. Preserves all data (timestamps, outcomes, etc.)
   5. Writes the V2 status file
 
 Phase Mapping:
-  W0        → W0        (unchanged)
-  D1-D4     → D1-D4     (unchanged)
-  S4        → D4        (merged - stakeholder approval)
-  S5        → S6        (merged - research notes)
-  S6        → S6        (unchanged)
-  S7        → S7        (unchanged)
-  S8        → S8        (BUILD phase)
-  S9        → S8        (merged - validation status)
-  S10       → S8        (merged - deployment status)
-  S11       → S11       (unchanged)
+  W0        → CHARTER
+  D1        → PROBLEM
+  D2        → RESEARCH
+  D3        → DESIGN
+  D4/S4     → SPEC
+  S5/S6     → PLAN
+  S7        → SETUP
+  S8/S9/S10 → BUILD
+  S11       → RETRO
 
 Examples:
   # Migrate with dry-run (preview changes)

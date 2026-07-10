@@ -20,7 +20,7 @@ func TestCountClarificationMarkers(t *testing.T) {
 		{
 			name: "no markers",
 			files: map[string]string{
-				"D1.md": "# Document\nNo markers here",
+				"PROBLEM.md": "# Document\nNo markers here",
 			},
 			expectedCount: 0,
 			expectedFiles: nil,
@@ -28,19 +28,19 @@ func TestCountClarificationMarkers(t *testing.T) {
 		{
 			name: "single marker in one file",
 			files: map[string]string{
-				"D2.md": "[NEEDS_CLARIFICATION_BY_PHASE: How should we handle edge case?]",
+				"RESEARCH.md": "[NEEDS_CLARIFICATION_BY_PHASE: How should we handle edge case?]",
 			},
 			expectedCount: 1,
-			expectedFiles: []string{"D2.md"},
+			expectedFiles: []string{"RESEARCH.md"},
 		},
 		{
 			name: "multiple markers across files",
 			files: map[string]string{
-				"D3.md": "[NEEDS_CLARIFICATION_BY_PHASE: Q1]\n[NEEDS_CLARIFICATION_BY_PHASE: Q2]",
-				"D4.md": "[NEEDS_CLARIFICATION_BY_PHASE: Q3]",
+				"DESIGN.md": "[NEEDS_CLARIFICATION_BY_PHASE: Q1]\n[NEEDS_CLARIFICATION_BY_PHASE: Q2]",
+				"SPEC.md":   "[NEEDS_CLARIFICATION_BY_PHASE: Q3]",
 			},
 			expectedCount: 3,
-			expectedFiles: []string{"D3.md", "D4.md"},
+			expectedFiles: []string{"DESIGN.md", "SPEC.md"},
 		},
 		{
 			name: "strikethrough marker (false positive - acceptable)",
@@ -100,17 +100,17 @@ func TestCountUncheckedAssumptions(t *testing.T) {
 		expectedFile  string
 	}{
 		{
-			name:          "non-D4-S7 phase",
-			phase:         "D2",
+			name:          "non-SPEC-SETUP phase",
+			phase:         "RESEARCH",
 			files:         map[string]string{},
 			expectedCount: 0,
 			expectedFile:  "",
 		},
 		{
-			name:  "D4 with all checked",
-			phase: "D4",
+			name:  "SPEC with all checked",
+			phase: "SPEC",
 			files: map[string]string{
-				"D4-solution-requirements.md": `
+				"SPEC-solution-requirements.md": `
 ## Assumption Verification Checklist
 - [x] Assumption 1 verified
 - [x] Assumption 2 verified
@@ -120,10 +120,10 @@ func TestCountUncheckedAssumptions(t *testing.T) {
 			expectedFile:  "",
 		},
 		{
-			name:  "D4 with unchecked items",
-			phase: "D4",
+			name:  "SPEC with unchecked items",
+			phase: "SPEC",
 			files: map[string]string{
-				"D4-solution-requirements.md": `
+				"SPEC-solution-requirements.md": `
 ## Assumption Verification Checklist
 - [x] Assumption 1 verified
 - [ ] Assumption 2 NOT verified
@@ -131,24 +131,24 @@ func TestCountUncheckedAssumptions(t *testing.T) {
 `,
 			},
 			expectedCount: 2,
-			expectedFile:  "D4-solution-requirements.md",
+			expectedFile:  "SPEC-solution-requirements.md",
 		},
 		{
-			name:  "S7 with unchecked items",
-			phase: "S7",
+			name:  "SETUP with unchecked items",
+			phase: "SETUP",
 			files: map[string]string{
-				"S7-plan.md": `
+				"SETUP-plan.md": `
 ## Assumption Verification Checklist
 - [ ] Verify database schema
 - [x] Verify API endpoint
 `,
 			},
 			expectedCount: 1,
-			expectedFile:  "S7-plan.md",
+			expectedFile:  "SETUP-plan.md",
 		},
 		{
-			name:  "D4 file missing (graceful degradation)",
-			phase: "D4",
+			name:  "SPEC file missing (graceful degradation)",
+			phase: "SPEC",
 			files: map[string]string{
 				"other.md": "Some content",
 			},
@@ -156,10 +156,10 @@ func TestCountUncheckedAssumptions(t *testing.T) {
 			expectedFile:  "",
 		},
 		{
-			name:  "D4 with no assumption section",
-			phase: "D4",
+			name:  "SPEC with no assumption section",
+			phase: "SPEC",
 			files: map[string]string{
-				"D4-solution-requirements.md": `
+				"SPEC-solution-requirements.md": `
 # Requirements
 No assumption section here
 `,
@@ -208,8 +208,8 @@ func TestGetPendingQuestions(t *testing.T) {
 			name: "all questions answered",
 			stateFile: `{
 				"questions": [
-					{"phase": "D2", "question": "Q1", "status": "answered"},
-					{"phase": "D3", "question": "Q2", "status": "answered"}
+					{"phase": "RESEARCH", "question": "Q1", "status": "answered"},
+					{"phase": "DESIGN", "question": "Q2", "status": "answered"}
 				]
 			}`,
 			expectedCount: 0,
@@ -219,13 +219,13 @@ func TestGetPendingQuestions(t *testing.T) {
 			name: "pending questions",
 			stateFile: `{
 				"questions": [
-					{"phase": "D2", "question": "Q1", "status": "pending"},
-					{"phase": "D3", "question": "Q2", "status": "answered"},
-					{"phase": "D4", "question": "Q3", "status": "pending"}
+					{"phase": "RESEARCH", "question": "Q1", "status": "pending"},
+					{"phase": "DESIGN", "question": "Q2", "status": "answered"},
+					{"phase": "SPEC", "question": "Q3", "status": "pending"}
 				]
 			}`,
 			expectedCount: 2,
-			expectedPhase: "D2",
+			expectedPhase: "RESEARCH",
 		},
 		{
 			name:        "malformed JSON",
@@ -285,24 +285,24 @@ func TestValidatePhaseQuestions(t *testing.T) {
 	}{
 		{
 			name:        "validation passes - no issues",
-			phase:       "D2",
-			files:       map[string]string{"D2.md": "# Document"},
+			phase:       "RESEARCH",
+			files:       map[string]string{"RESEARCH.md": "# Document"},
 			expectError: false,
 		},
 		{
 			name:  "validation fails - clarification markers",
-			phase: "D3",
+			phase: "DESIGN",
 			files: map[string]string{
-				"D3.md": "[NEEDS_CLARIFICATION_BY_PHASE: Unresolved question]",
+				"DESIGN.md": "[NEEDS_CLARIFICATION_BY_PHASE: Unresolved question]",
 			},
 			expectError: true,
 			errorReason: "unresolved clarification marker",
 		},
 		{
-			name:  "validation fails - unchecked D4 assumptions",
-			phase: "D4",
+			name:  "validation fails - unchecked SPEC assumptions",
+			phase: "SPEC",
 			files: map[string]string{
-				"D4-solution-requirements.md": `
+				"SPEC-solution-requirements.md": `
 ## Assumption Verification Checklist
 - [ ] Unchecked assumption
 `,
@@ -312,11 +312,11 @@ func TestValidatePhaseQuestions(t *testing.T) {
 		},
 		{
 			name:  "validation fails - pending hook questions",
-			phase: "S5",
+			phase: "PLAN",
 			files: map[string]string{
 				".wayfinder-questions.json": `{
 					"questions": [
-						{"phase": "S5", "question": "Q1", "status": "pending"}
+						{"phase": "PLAN", "question": "Q1", "status": "pending"}
 					]
 				}`,
 			},
@@ -325,9 +325,9 @@ func TestValidatePhaseQuestions(t *testing.T) {
 		},
 		{
 			name:  "multiple issues - returns first (markers)",
-			phase: "D4",
+			phase: "SPEC",
 			files: map[string]string{
-				"D4-solution-requirements.md": `
+				"SPEC-solution-requirements.md": `
 ## Assumption Verification Checklist
 - [ ] Unchecked
 `,

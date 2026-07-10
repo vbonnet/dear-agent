@@ -71,25 +71,25 @@ func TestAllPhases_VersionSwitch(t *testing.T) {
 			expectedCount: 9,
 		},
 		{
-			name:          "empty defaults to v1",
+			name:          "empty defaults to v2",
 			version:       "",
-			expectedFirst: "W0",
-			expectedLast:  "S11",
-			expectedCount: 13,
+			expectedFirst: "CHARTER",
+			expectedLast:  "RETRO",
+			expectedCount: 9,
 		},
 		{
-			name:          "no args defaults to v1",
+			name:          "no args defaults to v2",
 			version:       "",
-			expectedFirst: "W0",
-			expectedLast:  "S11",
-			expectedCount: 13,
+			expectedFirst: "CHARTER",
+			expectedLast:  "RETRO",
+			expectedCount: 9,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var phases []string
-			if tt.version == "" && tt.name == "no args defaults to v1" {
+			if tt.version == "" && tt.name == "no args defaults to v2" {
 				phases = AllPhases() // no args
 			} else {
 				phases = AllPhases(tt.version)
@@ -128,13 +128,13 @@ func TestIsValidV2Phase(t *testing.T) {
 		{"RETRO", true},
 
 		// Valid V1 phases (also match pattern)
-		{"W0", true},
-		{"D1", true},
-		{"S4", true},
-		{"S5", true},
-		{"S9", true},
-		{"S10", true},
-		{"S11", true},
+		{"W0", false},
+		{"D1", false},
+		{"S4", false},
+		{"S5", false},
+		{"S9", false},
+		{"S10", false},
+		{"S11", false},
 
 		// Invalid: lowercase
 		{"charter", false},

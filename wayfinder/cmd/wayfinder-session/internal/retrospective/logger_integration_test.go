@@ -10,28 +10,7 @@ import (
 func TestLogRewindEvent_FullFlow(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create WAYFINDER-STATUS.md for ReadFrom to work
-	statusContent := `---
-session_id: test-session-123
-current_phase: S7
-phases:
-  - name: W0
-    status: completed
-    started_at: "2024-01-01T10:00:00Z"
-    completed_at: "2024-01-01T11:00:00Z"
-  - name: D1
-    status: completed
-    started_at: "2024-01-01T12:00:00Z"
-    completed_at: "2024-01-01T13:00:00Z"
-  - name: S7
-    status: in_progress
-    started_at: "2024-01-01T14:00:00Z"
----
-`
-	statusPath := filepath.Join(tmpDir, "WAYFINDER-STATUS.md")
-	if err := os.WriteFile(statusPath, []byte(statusContent), 0644); err != nil {
-		t.Fatalf("Failed to write STATUS file: %v", err)
-	}
+	createStatusFile(t, tmpDir, "RETRO")
 
 	// Create WAYFINDER-HISTORY.md for history logging
 	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
@@ -46,29 +25,29 @@ phases:
 		Learnings: "Integration test learnings",
 	}
 
-	err := LogRewindEvent(tmpDir, "S7", "D1", flags)
+	err := LogRewindEvent(tmpDir, "RETRO", "PROBLEM", flags)
 	if err != nil {
 		t.Errorf("LogRewindEvent failed: %v", err)
 	}
 
-	// Verify S11 file was created
-	s11Path := filepath.Join(tmpDir, S11Filename)
+	// Verify RETRO file was created
+	s11Path := filepath.Join(tmpDir, RetroFilename)
 	s11Content, err := os.ReadFile(s11Path)
 	if err != nil {
-		t.Fatalf("Failed to read S11 file: %v", err)
+		t.Fatalf("Failed to read RETRO file: %v", err)
 	}
 
 	s11Str := string(s11Content)
 
-	// Validate S11 content
-	if !contains(s11Str, "## Rewind: S7 → D1") {
-		t.Errorf("S11 missing rewind header")
+	// Validate RETRO content
+	if !contains(s11Str, "## Rewind: RETRO → PROBLEM") {
+		t.Errorf("RETRO missing rewind header")
 	}
 	if !contains(s11Str, "Testing full flow") {
-		t.Errorf("S11 missing reason")
+		t.Errorf("RETRO missing reason")
 	}
 	if !contains(s11Str, "Integration test learnings") {
-		t.Errorf("S11 missing learnings")
+		t.Errorf("RETRO missing learnings")
 	}
 
 	// Verify HISTORY file was appended
@@ -91,7 +70,7 @@ func TestLogRewindEvent_ErrorHandling(t *testing.T) {
 	flags := RewindFlags{NoPrompt: true, Reason: "Test"}
 
 	// Should return nil (fail-gracefully), log warning to stderr
-	err := LogRewindEvent(tmpDir, "S7", "S5", flags)
+	err := LogRewindEvent(tmpDir, "RETRO", "SETUP", flags)
 	if err != nil {
 		t.Errorf("LogRewindEvent should return nil even on errors (fail-gracefully), got: %v", err)
 	}
@@ -101,21 +80,7 @@ func TestLogRewindEvent_ErrorHandling(t *testing.T) {
 func TestLogRewindEvent_WithPrompting(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create minimal STATUS
-	statusContent := `---
-session_id: test-session-456
-current_phase: S6
-phases:
-  - name: W0
-    status: completed
-  - name: S6
-    status: in_progress
----
-`
-	statusPath := filepath.Join(tmpDir, "WAYFINDER-STATUS.md")
-	if err := os.WriteFile(statusPath, []byte(statusContent), 0644); err != nil {
-		t.Fatalf("Failed to write STATUS file: %v", err)
-	}
+	createStatusFile(t, tmpDir, "BUILD")
 
 	historyPath := filepath.Join(tmpDir, "WAYFINDER-HISTORY.md")
 	if err := os.WriteFile(historyPath, []byte("# History\n\n"), 0644); err != nil {
@@ -128,20 +93,20 @@ phases:
 		Learnings: "",
 	}
 
-	err := LogRewindEvent(tmpDir, "S6", "W0", flags)
+	err := LogRewindEvent(tmpDir, "BUILD", "CHARTER", flags)
 	if err != nil {
 		t.Errorf("LogRewindEvent failed: %v", err)
 	}
 
-	// Verify S11
-	s11Path := filepath.Join(tmpDir, S11Filename)
+	// Verify RETRO
+	s11Path := filepath.Join(tmpDir, RetroFilename)
 	s11Content, err := os.ReadFile(s11Path)
 	if err != nil {
-		t.Fatalf("Failed to read S11 file: %v", err)
+		t.Fatalf("Failed to read RETRO file: %v", err)
 	}
 
 	if !contains(string(s11Content), "Pre-provided reason") {
-		t.Errorf("S11 missing pre-provided reason")
+		t.Errorf("RETRO missing pre-provided reason")
 	}
 }
 

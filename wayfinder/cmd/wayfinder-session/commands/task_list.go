@@ -21,14 +21,14 @@ var TaskListCmd = &cobra.Command{
 
 Examples:
   wayfinder session task list
-  wayfinder session task list --phase S8
+  wayfinder session task list --phase BUILD
   wayfinder session task list --status pending
-  wayfinder session task list --phase S8 --status in-progress`,
+  wayfinder session task list --phase BUILD --status in-progress`,
 	RunE: runTaskList,
 }
 
 func init() {
-	TaskListCmd.Flags().StringVar(&taskListPhase, "phase", "", "Filter by phase ID (W0, D1, D2, D3, D4, S6, S7, S8, S11)")
+	TaskListCmd.Flags().StringVar(&taskListPhase, "phase", "", "Filter by canonical phase name")
 	TaskListCmd.Flags().StringVar(&taskListStatus, "status", "", "Filter by status (pending, in-progress, completed, blocked)")
 }
 

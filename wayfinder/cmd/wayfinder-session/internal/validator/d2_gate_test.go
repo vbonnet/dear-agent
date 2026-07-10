@@ -5,22 +5,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 )
 
-func TestValidateD2Content_FileNotFound(t *testing.T) {
-	st := &status.Status{
-		StartedAt: time.Now(),
-	}
-
+func TestValidateResearchContent_FileNotFound(t *testing.T) {
 	// Use non-existent directory
 	projectDir := "/tmp/nonexistent-project-12345"
 
-	err := validateD2Content(projectDir, st)
+	err := validateResearchContent(projectDir)
 	if err == nil {
-		t.Fatal("expected error for missing D2 file, got nil")
+		t.Fatal("expected error for missing RESEARCH file, got nil")
 		return
 	}
 
@@ -29,22 +22,18 @@ func TestValidateD2Content_FileNotFound(t *testing.T) {
 	}
 }
 
-func TestValidateD2Content_FileTooLarge(t *testing.T) {
-	// Create temp dir with huge D2 file
+func TestValidateResearchContent_FileTooLarge(t *testing.T) {
+	// Create temp dir with huge RESEARCH file
 	tmpDir := t.TempDir()
-	d2Path := filepath.Join(tmpDir, "D2-existing-solutions.md")
+	researchPath := filepath.Join(tmpDir, "RESEARCH-existing-solutions.md")
 
 	// Create file larger than 1MB
 	largeContent := strings.Repeat("a", maxFileSizeBytes+1)
-	if err := os.WriteFile(d2Path, []byte(largeContent), 0644); err != nil {
+	if err := os.WriteFile(researchPath, []byte(largeContent), 0644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	st := &status.Status{
-		StartedAt: time.Now(),
-	}
-
-	err := validateD2Content(tmpDir, st)
+	err := validateResearchContent(tmpDir)
 	if err == nil {
 		t.Fatal("expected error for large file, got nil")
 		return
@@ -55,18 +44,14 @@ func TestValidateD2Content_FileTooLarge(t *testing.T) {
 	}
 }
 
-func TestValidateD2Content_MissingOverlap(t *testing.T) {
+func TestValidateResearchContent_MissingOverlap(t *testing.T) {
 	// Use test fixture
 	projectDir := "testdata"
 
-	st := &status.Status{
-		StartedAt: time.Now(),
-	}
-
 	// Copy missing-overlap fixture to temp dir
 	tmpDir := t.TempDir()
-	src := filepath.Join(projectDir, "d2-missing-overlap.md")
-	dst := filepath.Join(tmpDir, "D2-existing-solutions.md")
+	src := filepath.Join(projectDir, "research-missing-overlap.md")
+	dst := filepath.Join(tmpDir, "RESEARCH-existing-solutions.md")
 	content, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatalf("failed to read fixture: %v", err)
@@ -75,7 +60,7 @@ func TestValidateD2Content_MissingOverlap(t *testing.T) {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
-	err = validateD2Content(tmpDir, st)
+	err = validateResearchContent(tmpDir)
 	if err == nil {
 		t.Fatal("expected error for missing overlap, got nil")
 		return
@@ -86,18 +71,14 @@ func TestValidateD2Content_MissingOverlap(t *testing.T) {
 	}
 }
 
-func TestValidateD2Content_MissingSearchMethodology(t *testing.T) {
+func TestValidateResearchContent_MissingSearchMethodology(t *testing.T) {
 	// Use test fixture with overlap < 100% but no search methodology
 	projectDir := "testdata"
 
-	st := &status.Status{
-		StartedAt: time.Now(),
-	}
-
 	// Copy missing-methodology fixture to temp dir
 	tmpDir := t.TempDir()
-	src := filepath.Join(projectDir, "d2-missing-methodology.md")
-	dst := filepath.Join(tmpDir, "D2-existing-solutions.md")
+	src := filepath.Join(projectDir, "research-missing-methodology.md")
+	dst := filepath.Join(tmpDir, "RESEARCH-existing-solutions.md")
 	content, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatalf("failed to read fixture: %v", err)
@@ -106,7 +87,7 @@ func TestValidateD2Content_MissingSearchMethodology(t *testing.T) {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
-	err = validateD2Content(tmpDir, st)
+	err = validateResearchContent(tmpDir)
 	if err == nil {
 		t.Fatal("expected error for missing search methodology, got nil")
 		return
@@ -117,18 +98,14 @@ func TestValidateD2Content_MissingSearchMethodology(t *testing.T) {
 	}
 }
 
-func TestValidateD2Content_SearchMethodologyOptional(t *testing.T) {
+func TestValidateResearchContent_SearchMethodologyOptional(t *testing.T) {
 	// With 100% overlap, search methodology is optional
 	projectDir := "testdata"
 
-	st := &status.Status{
-		StartedAt: time.Now(),
-	}
-
 	// Copy valid-100 fixture to temp dir
 	tmpDir := t.TempDir()
-	src := filepath.Join(projectDir, "d2-valid-100.md")
-	dst := filepath.Join(tmpDir, "D2-existing-solutions.md")
+	src := filepath.Join(projectDir, "research-valid-100.md")
+	dst := filepath.Join(tmpDir, "RESEARCH-existing-solutions.md")
 	content, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatalf("failed to read fixture: %v", err)
@@ -137,24 +114,20 @@ func TestValidateD2Content_SearchMethodologyOptional(t *testing.T) {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
-	err = validateD2Content(tmpDir, st)
+	err = validateResearchContent(tmpDir)
 	if err != nil {
 		t.Errorf("expected no error for 100%% overlap without methodology, got: %v", err)
 	}
 }
 
-func TestValidateD2Content_TooShort(t *testing.T) {
+func TestValidateResearchContent_TooShort(t *testing.T) {
 	// File with < 200 words
 	projectDir := "testdata"
 
-	st := &status.Status{
-		StartedAt: time.Now(),
-	}
-
 	// Copy too-short fixture to temp dir
 	tmpDir := t.TempDir()
-	src := filepath.Join(projectDir, "d2-too-short.md")
-	dst := filepath.Join(tmpDir, "D2-existing-solutions.md")
+	src := filepath.Join(projectDir, "research-too-short.md")
+	dst := filepath.Join(tmpDir, "RESEARCH-existing-solutions.md")
 	content, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatalf("failed to read fixture: %v", err)
@@ -163,7 +136,7 @@ func TestValidateD2Content_TooShort(t *testing.T) {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
-	err = validateD2Content(tmpDir, st)
+	err = validateResearchContent(tmpDir)
 	if err == nil {
 		t.Fatal("expected error for short file, got nil")
 		return
@@ -174,34 +147,14 @@ func TestValidateD2Content_TooShort(t *testing.T) {
 	}
 }
 
-func TestValidateD2Content_LegacyProject(t *testing.T) {
-	// Project started before gate deployment date
-	legacyTime, _ := time.Parse(time.RFC3339, "2026-01-15T00:00:00Z")
-	st := &status.Status{
-		StartedAt: legacyTime, // Before 2026-01-20
-	}
-
-	// Use non-existent directory - should bypass due to legacy status
-	projectDir := "/tmp/nonexistent-legacy-project"
-
-	err := validateD2Content(projectDir, st)
-	if err != nil {
-		t.Errorf("expected no error for legacy project, got: %v", err)
-	}
-}
-
-func TestValidateD2Content_Valid(t *testing.T) {
-	// Valid D2 file with all required fields
+func TestValidateResearchContent_Valid(t *testing.T) {
+	// Valid RESEARCH file with all required fields
 	projectDir := "testdata"
-
-	st := &status.Status{
-		StartedAt: time.Now(),
-	}
 
 	// Copy valid-87 fixture to temp dir
 	tmpDir := t.TempDir()
-	src := filepath.Join(projectDir, "d2-valid-87.md")
-	dst := filepath.Join(tmpDir, "D2-existing-solutions.md")
+	src := filepath.Join(projectDir, "research-valid-87.md")
+	dst := filepath.Join(tmpDir, "RESEARCH-existing-solutions.md")
 	content, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatalf("failed to read fixture: %v", err)
@@ -210,9 +163,9 @@ func TestValidateD2Content_Valid(t *testing.T) {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
-	err = validateD2Content(tmpDir, st)
+	err = validateResearchContent(tmpDir)
 	if err != nil {
-		t.Errorf("expected no error for valid D2, got: %v", err)
+		t.Errorf("expected no error for valid RESEARCH, got: %v", err)
 	}
 }
 
@@ -259,30 +212,6 @@ func TestExtractOverlapPercentage_Missing(t *testing.T) {
 		t.Fatal("expected error for missing overlap, got nil")
 	}
 }
-
-func TestIsLegacyProject_Before(t *testing.T) {
-	legacyTime, _ := time.Parse(time.RFC3339, "2026-01-15T00:00:00Z")
-	st := &status.Status{
-		StartedAt: legacyTime, // Before gate deployment
-	}
-
-	if !isLegacyProject(st) {
-		t.Error("expected true for project before gate deployment")
-	}
-}
-
-func TestIsLegacyProject_After(t *testing.T) {
-	futureTime, _ := time.Parse(time.RFC3339, "2026-01-25T00:00:00Z")
-	st := &status.Status{
-		StartedAt: futureTime, // After gate deployment
-	}
-
-	if isLegacyProject(st) {
-		t.Error("expected false for project after gate deployment")
-	}
-}
-
-// TestIsLegacyProject_ParseError no longer needed since StartedAt is time.Time, not string
 
 func TestHasSearchMethodology(t *testing.T) {
 	tests := []struct {
