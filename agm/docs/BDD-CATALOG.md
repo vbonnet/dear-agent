@@ -841,6 +841,23 @@ and preset package specifications.
 gate regardless of which harness or model executes a task. Structural package
 coverage prevents migration or tooling helpers from becoming ungoverned paths.
 
+### Developer Tool Package Guardrails
+
+**File:** [`developer_tool_package_guardrails.feature`](../test/bdd/features/developer_tool_package_guardrails.feature)
+
+**Drives:** Session skill extraction, Git hook integration tests, CI drift and
+dead-link checks, devlog command and support packages, the stop quality guard,
+and schema-registry MCP, query, persistence, and validation packages.
+
+**Key scenarios:**
+- Every covered developer-tool package keeps a co-located, audited SPEC.
+- Shared developer-tool contracts remain available across the canonical four
+  harnesses and seven supported model families.
+
+**Why this matters:** Repository automation is part of the agent control plane.
+Provider-specific assumptions in these tools can block one harness even when
+the product runtime itself claims parity.
+
 ---
 
 ## Running
