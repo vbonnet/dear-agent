@@ -76,6 +76,7 @@ type harnessParityState struct {
 	backendImplementationSpec  string
 	cleanupSupportPackage      string
 	cleanupSupportSpec         string
+	a2aCoordinationSpecsValid  bool
 }
 
 type harnessParityStateKey struct{}
@@ -104,6 +105,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM cleanup support package "([^"]*)" is configured$`, agmCleanupSupportPackageIsConfigured)
 	ctx.Step(`^AGM validates cleanup support package coverage$`, agmValidatesCleanupSupportPackageCoverage)
 	ctx.Step(`^cleanup support package "([^"]*)" should have a co-located SPEC$`, cleanupSupportPackageShouldHaveCoLocatedSPEC)
+	ctx.Step(`^the retained A2A coordination implementation$`, retainedA2ACoordinationImplementation)
+	ctx.Step(`^AGM validates A2A coordination specification drift$`, agmValidatesA2ACoordinationSpecificationDrift)
+	ctx.Step(`^A2A coordination specifications should describe only retained behavior$`, a2aCoordinationSpecificationsShouldDescribeOnlyRetainedBehavior)
 	ctx.Step(`^model family "([^"]*)" is configured$`, modelFamilyIsConfigured)
 	ctx.Step(`^AGM validates model family parity support$`, agmValidatesModelFamilyParitySupport)
 	ctx.Step(`^model family "([^"]*)" should be supported$`, modelFamilyShouldBeSupported)
@@ -1700,4 +1704,75 @@ func splitCSV(fields string) []string {
 		}
 	}
 	return out
+}
+
+func retainedA2ACoordinationImplementation() error {
+	root := packageSpecBDDRepoRoot()
+	checks := map[string][]string{
+		"agm/internal/a2a/channel": {"NewManager", "NewCreator", "CreateChannelSimple"},
+		"agm/internal/a2a/beads":   {"LinkChannelToBead", "UnlinkChannelFromBead", "RunBeadCommand"},
+	}
+	for pkg, removed := range checks {
+		entries, err := os.ReadDir(filepath.Join(root, pkg))
+		if err != nil {
+			return fmt.Errorf("read retained A2A package %s: %w", pkg, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(root, pkg, entry.Name()))
+			if err != nil {
+				return fmt.Errorf("read retained A2A source %s: %w", entry.Name(), err)
+			}
+			for _, symbol := range removed {
+				if strings.Contains(string(data), symbol) {
+					return fmt.Errorf("removed A2A symbol %s remains in %s", symbol, entry.Name())
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func agmValidatesA2ACoordinationSpecificationDrift(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	root := packageSpecBDDRepoRoot()
+	checks := map[string][]string{
+		"agm/internal/a2a/channel/SPEC.md": {
+			"When a manager lists channels", "When a topic has multiple channel files",
+			"When a channel is archived", "When a template channel is created",
+		},
+		"agm/internal/a2a/beads/SPEC.md": {
+			"When linking a channel to a bead", "When a channel is linked to a bead",
+			"When a channel is unlinked from a bead",
+		},
+	}
+	for spec, removedRequirements := range checks {
+		data, err := os.ReadFile(filepath.Join(root, spec))
+		if err != nil {
+			return fmt.Errorf("read A2A SPEC %s: %w", spec, err)
+		}
+		for _, requirement := range removedRequirements {
+			if strings.Contains(string(data), requirement) {
+				return fmt.Errorf("A2A SPEC %s retains deleted requirement %q", spec, requirement)
+			}
+		}
+	}
+	harnessState.a2aCoordinationSpecsValid = true
+	return nil
+}
+
+func a2aCoordinationSpecificationsShouldDescribeOnlyRetainedBehavior(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.a2aCoordinationSpecsValid {
+		return fmt.Errorf("A2A coordination specifications were not validated")
+	}
+	return nil
 }

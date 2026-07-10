@@ -12,15 +12,14 @@ The Wayfinder repository currently contains **two parallel phase models**:
    and [`wayfinder/ARCHITECTURE.md`](ARCHITECTURE.md). This is the canonical
    Wayfinder model — when a doc, command, or skill says "Wayfinder is a
    9-phase workflow," it means V2.
-2. **V1 (legacy orchestrator):** 12 detailed phase IDs — `D1-D4` discovery
+2. **V1 (legacy status model):** 12 detailed phase IDs — `D1-D4` discovery
    plus `S4-S11` SDLC (a `W0` charter sits outside the 12-ID array,
-   making the conceptual V1 set 13). Implemented by
-   `wayfinder/internal/phaseisolation/` and the V1 `wayfinder` CLI in
-   `wayfinder/cmd/wayfinder/`. V1 still ships and runs.
+   making the conceptual V1 set 13). V1 status migration still ships through
+   `wayfinder/cmd/wayfinder-session/internal/migrate/`; the standalone V1
+   phase-isolation implementation has been removed.
 
-V1 is **not deprecated for removal** — both models coexist intentionally,
-bridged by `wayfinder/cmd/wayfinder-session/internal/migrate/`. New work
-and new docs should target V2.
+V1 session files remain supported for migration. New work and new docs should
+target V2.
 
 ## The truth table
 
@@ -38,9 +37,9 @@ and new docs should target V2.
 
 Source of truth in code:
 
-- V1 IDs: [`wayfinder/internal/phaseisolation/types.go`](internal/phaseisolation/types.go) (`PhaseD1`..`PhaseS11`, `AllPhaseIDs`)
-- V2 names: [`wayfinder/internal/phaseisolation/types.go`](internal/phaseisolation/types.go) (`V2Charter`..`V2Retro`)
-- Mapping: [`wayfinder/internal/phaseisolation/definitions.go`](internal/phaseisolation/definitions.go) (`V1ToV2PhaseMap`)
+- V1/V2 status types: [`wayfinder/cmd/wayfinder-session/internal/status/types.go`](cmd/wayfinder-session/internal/status/types.go)
+- V2 names: [`wayfinder/cmd/wayfinder-session/internal/status/types_v2.go`](cmd/wayfinder-session/internal/status/types_v2.go) (`PhaseV2Charter`..`PhaseV2Retro`)
+- Mapping: [`wayfinder/cmd/wayfinder-session/internal/migrate/converter.go`](cmd/wayfinder-session/internal/migrate/converter.go) (`V1ToV2PhaseMap`)
 - Migration converter: [`wayfinder/cmd/wayfinder-session/internal/migrate/converter.go`](cmd/wayfinder-session/internal/migrate/converter.go)
   and [`wayfinder/cmd/wayfinder-session/internal/converter/converter.go`](cmd/wayfinder-session/internal/converter/converter.go)
 
@@ -52,9 +51,8 @@ Source of truth in code:
 | `wayfinder/README.md`                | V2 (9)      | Front door. |
 | `wayfinder/SKILL.md`                 | V2 (9)      | Skill description used by Claude Code. |
 | `wayfinder/ARCHITECTURE.md`          | V2 (9)      | Notes the historical V1→V2 consolidation. |
-| `wayfinder` CLI (`cmd/wayfinder/`)   | V1 (12)     | Walks D1→…→S11. Help text now frames itself as the V1 legacy orchestrator. |
+| `wayfinder` CLI (`cmd/wayfinder/`)   | V2 (9)      | Root command wrapper for the current session/features commands. |
 | `wayfinder-session` CLI              | V2 (9)      | The current/recommended CLI. |
-| `wayfinder/internal/phaseisolation/` | V1 (12)     | The V1 orchestrator engine. |
 | Migration bridge                     | V1 → V2     | One-way: in-flight V1 sessions can be migrated to V2 status files. |
 
 ## Status field naming gotcha

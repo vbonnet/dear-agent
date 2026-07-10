@@ -1,13 +1,12 @@
 # A2A Channel Specification
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: 2026-07-09 -->
 
 ## Overview
 
-`agm/internal/a2a/channel` owns the markdown channel format used for
-file-backed A2A coordination. It creates channel files, appends validated
-protocol messages, parses existing messages, archives inactive channels, and
-creates template-backed channels with optional Wayfinder metadata.
+`agm/internal/a2a/channel` owns the retained markdown channel format used for
+file-backed A2A coordination. It creates individual channel files, appends
+validated protocol messages, and parses messages from existing channels.
 
 ## EARS Requirements
 
@@ -17,15 +16,11 @@ creates template-backed channels with optional Wayfinder metadata.
 
 **A2A-CHN-03** When reading channel messages, the system shall parse message headers, status values, numbered messages, context, proposal, questions, blockers, and next steps from the markdown format.
 
-**A2A-CHN-04** When a manager lists channels, the system shall create the base directory if needed and report topic, path, modification time, and message count for markdown channel files.
+**A2A-CHN-04** When a channel path ends in a date suffix, the system shall derive its topic without the date or Markdown extension.
 
-**A2A-CHN-05** When a topic has multiple channel files, the system shall return the most recently modified matching channel.
+**A2A-CHN-05** When a channel cannot be read or opened for append, the system shall return a diagnostic that identifies the failed channel operation.
 
-**A2A-CHN-06** When a channel is archived, the system shall move it into a year-month archive directory without changing the active channel contents.
-
-**A2A-CHN-07** When a template channel is created with a Wayfinder project path, the system shall verify the project path exists before writing the channel.
-
-**A2A-CHN-08** When a template channel is created without an explicit agent ID or participants value, the system shall infer the agent identity and use it as the default participant set.
+**A2A-CHN-06** When a parsed message has an invalid status, the system shall exclude that malformed message from the returned message set.
 
 ## BDD Traceability
 

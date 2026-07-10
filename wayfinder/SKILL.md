@@ -107,7 +107,7 @@ wayfinder-start "<concise-project-description>"
 
 ## Phase Context Management
 
-Each phase receives context from its dependencies via a **dependency graph** (not linear loading). The graph is implemented by the Go `phasegraph` and `phaseisolation` packages:
+Each phase receives context from its dependencies via a **dependency graph** (not linear loading). The graph is implemented by the Go `phasegraph` package:
 
 - **full**: Load complete prior-phase artifact
 - **summary**: Load 100-200 token summary
@@ -213,5 +213,5 @@ See ADR-005 (revised 2026-03-24) for details.
 
 - Phase dependencies: `wayfinder/cmd/wayfinder-session/internal/phasegraph/`
 - ADRs: `docs/wayfinder/ADR-001-phase-consolidation.md`, `ADR-002-build-loop-tdd-enforcement.md`
-- Go packages: `wayfinder/cmd/wayfinder-session/internal/{phasegraph,lintcontext,telemetry}/` and `wayfinder/internal/phaseisolation/`
+- Go packages: `wayfinder/cmd/wayfinder-session/internal/{phasegraph,lintcontext,telemetry}/`
 - Shell gates: `wayfinder/lib/*-gate-check.sh`

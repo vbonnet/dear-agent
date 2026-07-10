@@ -95,25 +95,6 @@ func (c *Channel) Read() (string, error) {
 	return string(content), nil
 }
 
-// GetLatestMessage returns the most recent message in the channel
-func (c *Channel) GetLatestMessage() (*protocol.Message, error) {
-	content, err := c.Read()
-	if err != nil {
-		return nil, err
-	}
-
-	messages, err := parseMessages(content)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(messages) == 0 {
-		return nil, fmt.Errorf("no messages in channel")
-	}
-
-	return messages[len(messages)-1], nil
-}
-
 // GetAllMessages returns all messages in the channel
 func (c *Channel) GetAllMessages() ([]*protocol.Message, error) {
 	content, err := c.Read()
@@ -122,15 +103,6 @@ func (c *Channel) GetAllMessages() ([]*protocol.Message, error) {
 	}
 
 	return parseMessages(content)
-}
-
-// GetMessageCount returns the number of messages in the channel
-func (c *Channel) GetMessageCount() (int, error) {
-	messages, err := c.GetAllMessages()
-	if err != nil {
-		return 0, err
-	}
-	return len(messages), nil
 }
 
 func parseMessages(content string) ([]*protocol.Message, error) {
