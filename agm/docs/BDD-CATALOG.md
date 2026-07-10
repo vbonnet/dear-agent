@@ -512,6 +512,21 @@ and composed platform runtime SPEC coverage.
 harness-neutral, while effort configuration must preserve custom model-provider
 identifiers even where harnesses expose different native configuration formats.
 
+### Engram Security And Token Guardrails
+
+**File:** [`engram_security_token_guardrails.feature`](../test/bdd/features/engram_security_token_guardrails.feature)
+
+**Drives:** Engram plugin security, signing and revocation, token estimation,
+and tokenizer registry SPEC coverage.
+
+**Key scenarios:**
+- Engram security and token packages keep co-located SPEC coverage.
+- Engram security and token SPECs point back to executable BDD.
+
+**Why this matters:** Plugin trust, provider credential handling, and token
+budgets are cross-harness boundaries. Credential protection must cover
+Anthropic, OpenAI, Gemini, and OpenRouter-routed model families uniformly.
+
 ### Local Development Guardrails
 
 **File:** [`local_development_guardrails.feature`](../test/bdd/features/local_development_guardrails.feature)

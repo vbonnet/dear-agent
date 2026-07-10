@@ -44,6 +44,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterEngramHookGuardrailSteps(ctx)
 	steps.RegisterEngramGovernanceRuntimeGuardrailSteps(ctx)
 	steps.RegisterEngramKnowledgeGuardrailSteps(ctx)
+	steps.RegisterEngramSecurityTokenGuardrailSteps(ctx)
 	steps.RegisterTrustProtocolSteps(ctx)
 	steps.RegisterScanLoopSteps(ctx)
 	steps.RegisterStallDetectionSteps(ctx)

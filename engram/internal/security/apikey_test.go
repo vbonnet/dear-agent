@@ -57,6 +57,48 @@ func TestGetAnthropicKey_NotSet(t *testing.T) {
 	}
 }
 
+func TestGetProviderKey_ModelFamilyProviders(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-proj-openai-test")
+	t.Setenv("GEMINI_API_KEY", "AIzaGeminiTestKey123456789012345")
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-openrouter-test")
+
+	tests := []struct {
+		provider string
+		want     string
+	}{
+		{provider: "openai", want: "sk-proj-openai-test"},
+		{provider: "gemini", want: "AIzaGeminiTestKey123456789012345"},
+		{provider: "google", want: "AIzaGeminiTestKey123456789012345"},
+		{provider: "openrouter", want: "sk-or-openrouter-test"},
+	}
+
+	manager := NewAPIKeyManager()
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			got, err := manager.GetProviderKey(tt.provider)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("GetProviderKey(%q) = %q, want %q", tt.provider, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetProviderKey_GoogleFallbackAndUnsupportedProvider(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GOOGLE_API_KEY", "AIzaGoogleFallback123456789012345")
+
+	manager := NewAPIKeyManager()
+	if got, err := manager.GetProviderKey("gemini"); err != nil || got != "AIzaGoogleFallback123456789012345" {
+		t.Fatalf("GetProviderKey(gemini) = %q, %v", got, err)
+	}
+	if _, err := manager.GetProviderKey("unknown"); err == nil {
+		t.Fatal("GetProviderKey(unknown) error = nil")
+	}
+}
+
 // TestValidateConfigFile_NoKeys verifies valid config passes
 func TestValidateConfigFile_NoKeys(t *testing.T) {
 	manager := NewAPIKeyManager()
@@ -84,6 +126,9 @@ func TestValidateConfigFile_ContainsKeys(t *testing.T) {
 		"apiKey: my-secret-key",
 		"ANTHROPIC_API_KEY: sk-ant-123",
 		"key: sk-ant-api-key-here",
+		"OPENAI_API_KEY: sk-proj-123",
+		"GEMINI_API_KEY: AIza123",
+		"OPENROUTER_API_KEY: sk-or-123",
 	}
 
 	for _, config := range invalidConfigs {
@@ -108,7 +153,7 @@ func TestSanitizeForLogs_AnthropicKey(t *testing.T) {
 		},
 		{
 			input: "Using key: sk-ant-secret-key",
-			want:  "Using key: sk-ant-secret-key", // Only redacts if string STARTS with sk-ant-
+			want:  "Using key: sk-ant-***REDACTED***",
 		},
 		{
 			input: "No sensitive data here",
@@ -123,6 +168,28 @@ func TestSanitizeForLogs_AnthropicKey(t *testing.T) {
 				t.Errorf("SanitizeForLogs(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSanitizeForLogs_ModelFamilyProviderKeys(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-proj-openai-secret")
+	t.Setenv("GEMINI_API_KEY", "AIzaGeminiSecret123456789012345")
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-openrouter-secret")
+
+	input := "openai=sk-proj-openai-secret gemini=AIzaGeminiSecret123456789012345 openrouter=sk-or-openrouter-secret"
+	got := NewAPIKeyManager().SanitizeForLogs(input)
+	for _, secret := range []string{"sk-proj-openai-secret", "AIzaGeminiSecret123456789012345", "sk-or-openrouter-secret"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("SanitizeForLogs retained %q in %q", secret, got)
+		}
+	}
+}
+
+func TestSanitizeForLogs_UnsetNamedEnvironmentDoesNotCorruptMessage(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	input := "ANTHROPIC_API_KEY is not configured"
+	if got := NewAPIKeyManager().SanitizeForLogs(input); got != input {
+		t.Fatalf("SanitizeForLogs(%q) = %q", input, got)
 	}
 }
 

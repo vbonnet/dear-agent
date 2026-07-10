@@ -37,8 +37,24 @@ package security
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 )
+
+var providerKeyEnvironments = map[string][]string{
+	"anthropic":  {"ANTHROPIC_API_KEY"},
+	"gemini":     {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+	"google":     {"GEMINI_API_KEY", "GOOGLE_API_KEY"},
+	"openai":     {"OPENAI_API_KEY"},
+	"openrouter": {"OPENROUTER_API_KEY"},
+}
+
+var credentialPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`sk-ant-[A-Za-z0-9_-]+`),
+	regexp.MustCompile(`sk-or-[A-Za-z0-9_-]+`),
+	regexp.MustCompile(`sk-proj-[A-Za-z0-9_-]+`),
+	regexp.MustCompile(`AIza[A-Za-z0-9_-]{20,}`),
+}
 
 // APIKeyManager handles API key validation and security
 type APIKeyManager struct{}
@@ -50,12 +66,22 @@ func NewAPIKeyManager() *APIKeyManager {
 
 // GetAnthropicKey retrieves Anthropic API key from environment
 func (m *APIKeyManager) GetAnthropicKey() (string, error) {
-	key := os.Getenv("ANTHROPIC_API_KEY")
-	if key == "" {
-		return "", fmt.Errorf("ANTHROPIC_API_KEY not set")
-	}
+	return m.GetProviderKey("anthropic")
 
-	return key, nil
+}
+
+// GetProviderKey retrieves the first configured API key for a supported provider.
+func (m *APIKeyManager) GetProviderKey(provider string) (string, error) {
+	environments, ok := providerKeyEnvironments[strings.ToLower(provider)]
+	if !ok {
+		return "", fmt.Errorf("unsupported API key provider %q", provider)
+	}
+	for _, environment := range environments {
+		if key := os.Getenv(environment); key != "" {
+			return key, nil
+		}
+	}
+	return "", fmt.Errorf("%s not set", strings.Join(environments, " or "))
 }
 
 // ValidateConfigFile validates that a config file doesn't contain API keys
@@ -65,7 +91,14 @@ func (m *APIKeyManager) ValidateConfigFile(content string) error {
 		"api_key:",
 		"apiKey:",
 		"ANTHROPIC_API_KEY",
+		"GEMINI_API_KEY",
+		"GOOGLE_API_KEY",
+		"OPENAI_API_KEY",
+		"OPENROUTER_API_KEY",
 		"sk-ant-",
+		"sk-or-",
+		"sk-proj-",
+		"AIza",
 	}
 
 	for _, pattern := range patterns {
@@ -79,16 +112,25 @@ func (m *APIKeyManager) ValidateConfigFile(content string) error {
 
 // SanitizeForLogs removes sensitive data from strings before logging
 func (m *APIKeyManager) SanitizeForLogs(s string) string {
-	// Redact API keys
-	if strings.HasPrefix(s, "sk-ant-") {
-		return "sk-ant-***REDACTED***"
+	for _, environments := range providerKeyEnvironments {
+		for _, environment := range environments {
+			if key := os.Getenv(environment); key != "" {
+				s = strings.ReplaceAll(s, key, "***REDACTED***")
+			}
+		}
 	}
-
-	// Redact environment variables that look like keys
-	if strings.Contains(s, "ANTHROPIC_API_KEY") {
-		return strings.ReplaceAll(s, os.Getenv("ANTHROPIC_API_KEY"), "***REDACTED***")
+	for _, pattern := range credentialPatterns {
+		s = pattern.ReplaceAllStringFunc(s, func(value string) string {
+			if strings.HasPrefix(value, "AIza") {
+				return "AIza***REDACTED***"
+			}
+			prefixEnd := strings.Index(value, "-") + 1
+			if strings.HasPrefix(value, "sk-") {
+				prefixEnd = strings.Index(value[prefixEnd:], "-") + prefixEnd + 1
+			}
+			return value[:prefixEnd] + "***REDACTED***"
+		})
 	}
-
 	return s
 }
 
