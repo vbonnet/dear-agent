@@ -828,6 +828,21 @@ cross-harness hook normalization, and harness-neutral session synchronization.
 **Why this matters:** Utility packages sit below adapters and are reused by
 every route; a provider-specific default here propagates across the codebase.
 
+### Validation and Workspace Parity
+
+**File:** [`validation_workspace_parity.feature`](../test/bdd/features/validation_workspace_parity.feature)
+
+**Drives:** Co-located contracts and route-neutral implementation checks for
+filesystem safety, content validation, VCS, versioning, W0, and workspace state.
+
+**Key scenarios:**
+- Every validation and workspace package carries a strict EARS specification.
+- Production string literals remain free of harness and model-family defaults.
+- The complete four-harness by seven-family route matrix is exercised.
+
+**Why this matters:** Validation and workspace policy is shared infrastructure;
+route-specific defaults would produce different safety outcomes for identical work.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)

@@ -5,7 +5,7 @@
 // implements a two-layer defense:
 //
 //   - Layer 1: Direct integration via the MemoryVCS facade called by engram CLI
-//   - Layer 2: Claude Code hooks that catch changes bypassing the CLI
+//   - Layer 2: Harness hooks that catch changes bypassing the CLI
 //
 // Key features:
 //   - Automatic companion file tracking (.ai.md <-> .why.md)
