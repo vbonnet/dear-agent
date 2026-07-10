@@ -17,10 +17,8 @@ var sessionStatus string
 // EndCmd is the cobra command that ends the current Wayfinder session.
 var EndCmd = &cobra.Command{
 	Use:   "end",
-	Short: "End the current Wayfinder session (V1 or V2)",
+	Short: "End the current canonical Wayfinder session",
 	Long: `Update WAYFINDER-STATUS.md and publish session.completed event.
-
-Supports both V1 (session_id/started_at schema) and V2 (project_name/created_at schema).
 
 Supported statuses:
   completed  - Project achieved its goals
@@ -37,74 +35,18 @@ func init() {
 }
 
 func runEnd(cmd *cobra.Command, args []string) error {
-	projectDir := GetProjectDirectory()
+	return runEndInDir(GetProjectDirectory(), sessionStatus)
+}
 
-	// Detect schema version before attempting parse.
-	statusPath := filepath.Join(projectDir, status.StatusFilename)
-	schemaVer, err := status.DetectSchemaVersion(statusPath)
+func runEndInDir(projectDir, newStatus string) error {
+	version, err := status.DetectSchemaVersion(filepath.Join(projectDir, status.StatusFilename))
 	if err != nil {
 		return fmt.Errorf("failed to read STATUS file: %w", err)
 	}
-
-	if schemaVer != status.SchemaVersionV2 {
-		return runEndV1(projectDir, sessionStatus)
+	if version != status.SchemaVersionV2 {
+		return fmt.Errorf("legacy Wayfinder status requires explicit migration before end")
 	}
-	return runEndV2(projectDir, sessionStatus)
-}
-
-// runEndV1 handles V1 WAYFINDER-STATUS.md files (session_id/started_at schema).
-func runEndV1(projectDir, newStatus string) error {
-	validStatuses := map[string]bool{
-		status.StatusCompleted: true,
-		status.StatusAbandoned: true,
-		status.StatusBlocked:   true,
-	}
-	if !validStatuses[newStatus] {
-		return fmt.Errorf("invalid status: %s (must be completed, abandoned, or blocked)", newStatus)
-	}
-
-	st, err := status.ReadFrom(projectDir)
-	if err != nil {
-		return fmt.Errorf("failed to read V1 STATUS file: %w", err)
-	}
-
-	now := time.Now()
-	st.Status = newStatus
-	st.EndedAt = &now
-
-	if err := st.WriteTo(projectDir); err != nil {
-		return fmt.Errorf("failed to write STATUS file: %w", err)
-	}
-
-	// Tracker uses session_id from V1.
-	tr, err := tracker.New(st.SessionID)
-	if err != nil {
-		return fmt.Errorf("failed to initialize tracker: %w", err)
-	}
-	defer func() { _ = tr.Close(context.Background()) }()
-	if err := tr.EndSession(newStatus); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to publish session.completed event: %v\n", err)
-	}
-
-	duration := now.Sub(st.StartedAt)
-	completed := 0
-	for _, p := range st.Phases {
-		if p.Status == status.PhaseStatusCompleted {
-			completed++
-		}
-	}
-
-	projectLabel := st.ProjectPath
-	if projectLabel == "" {
-		projectLabel = st.SessionID
-	}
-
-	fmt.Printf("✅ Wayfinder session ended\n")
-	fmt.Printf("Project: %s\n", projectLabel)
-	fmt.Printf("Duration: %s\n", formatDuration(duration))
-	fmt.Printf("Status: %s\n", newStatus)
-	fmt.Printf("Phases completed: %d\n", completed)
-	return nil
+	return runEndV2(projectDir, newStatus)
 }
 
 // runEndV2 handles V2 WAYFINDER-STATUS.md files (project_name/created_at schema).

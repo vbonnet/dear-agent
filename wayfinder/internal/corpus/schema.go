@@ -36,7 +36,7 @@ func GetWayfinderSchema() map[string]interface{} {
 			},
 			"current_phase": map[string]interface{}{
 				"type":        "string",
-				"description": "Current phase in Wayfinder workflow (D1, D2, S4, etc.)",
+				"description": "Current canonical Wayfinder phase",
 				"required":    false,
 			},
 			"depth": map[string]interface{}{
@@ -78,7 +78,7 @@ func GetPhaseSchema() map[string]interface{} {
 			},
 			"phase_name": map[string]interface{}{
 				"type":        "string",
-				"description": "Phase identifier (D1, D2, D3, D4, S4, S5, S6, S7, S8, S9, S10, S11)",
+				"description": "Canonical phase identifier (CHARTER, PROBLEM, RESEARCH, DESIGN, SPEC, PLAN, SETUP, BUILD, RETRO)",
 				"required":    true,
 			},
 			"phase_title": map[string]interface{}{

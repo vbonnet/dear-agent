@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/internal/override"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/git"
-	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/resume"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/review"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/status"
 	"github.com/vbonnet/dear-agent/wayfinder/cmd/wayfinder-session/internal/tracker"
@@ -80,14 +80,18 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Fprintf(os.Stderr, "⚠️  --force: Skipping resume detection\n")
 	} else {
-		// Detect resumable directory and handle accordingly
-		shouldContinue, err := resume.Detect(projectDir, projectName)
-		if err != nil {
-			return err
-		}
-		if !shouldContinue {
-			// User chose Abort, or created new session in different location
-			return nil
+		statusPath := filepath.Join(projectDir, status.StatusFilename)
+		if _, err := os.Stat(statusPath); err == nil {
+			version, detectErr := status.DetectSchemaVersion(statusPath)
+			if detectErr != nil {
+				return fmt.Errorf("failed to inspect existing Wayfinder status: %w", detectErr)
+			}
+			if version != status.SchemaVersionV2 {
+				return fmt.Errorf("legacy Wayfinder status requires explicit migration before start")
+			}
+			return fmt.Errorf("canonical Wayfinder session already exists; use status or next-phase instead of start")
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to inspect existing Wayfinder status: %w", err)
 		}
 	}
 

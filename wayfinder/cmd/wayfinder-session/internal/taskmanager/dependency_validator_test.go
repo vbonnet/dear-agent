@@ -20,7 +20,7 @@ func TestDependencyValidator_ValidateTask(t *testing.T) {
 				return status.NewStatusV2("Test", status.ProjectTypeFeature, status.RiskLevelM)
 			},
 			task: &status.Task{
-				ID:    "S8-1",
+				ID:    "BUILD-1",
 				Title: "Task 1",
 			},
 			wantErr: false,
@@ -32,10 +32,10 @@ func TestDependencyValidator_ValidateTask(t *testing.T) {
 				st.Roadmap = &status.Roadmap{
 					Phases: []status.RoadmapPhase{
 						{
-							ID:   "S8",
+							ID:   "BUILD",
 							Name: "BUILD Loop",
 							Tasks: []status.Task{
-								{ID: "S8-1", Title: "Task 1"},
+								{ID: "BUILD-1", Title: "Task 1"},
 							},
 						},
 					},
@@ -43,9 +43,9 @@ func TestDependencyValidator_ValidateTask(t *testing.T) {
 				return st
 			},
 			task: &status.Task{
-				ID:        "S8-2",
+				ID:        "BUILD-2",
 				Title:     "Task 2",
-				DependsOn: []string{"S8-1"},
+				DependsOn: []string{"BUILD-1"},
 			},
 			wantErr: false,
 		},
@@ -55,7 +55,7 @@ func TestDependencyValidator_ValidateTask(t *testing.T) {
 				return status.NewStatusV2("Test", status.ProjectTypeFeature, status.RiskLevelM)
 			},
 			task: &status.Task{
-				ID:        "S8-1",
+				ID:        "BUILD-1",
 				Title:     "Task 1",
 				DependsOn: []string{"INVALID"},
 			},
@@ -103,12 +103,12 @@ func TestDependencyValidator_DetectCycles(t *testing.T) {
 				st.Roadmap = &status.Roadmap{
 					Phases: []status.RoadmapPhase{
 						{
-							ID:   "S8",
+							ID:   "BUILD",
 							Name: "BUILD Loop",
 							Tasks: []status.Task{
-								{ID: "S8-1", Title: "Task 1", DependsOn: []string{}},
-								{ID: "S8-2", Title: "Task 2", DependsOn: []string{"S8-1"}},
-								{ID: "S8-3", Title: "Task 3", DependsOn: []string{"S8-2"}},
+								{ID: "BUILD-1", Title: "Task 1", DependsOn: []string{}},
+								{ID: "BUILD-2", Title: "Task 2", DependsOn: []string{"BUILD-1"}},
+								{ID: "BUILD-3", Title: "Task 3", DependsOn: []string{"BUILD-2"}},
 							},
 						},
 					},
@@ -124,12 +124,12 @@ func TestDependencyValidator_DetectCycles(t *testing.T) {
 				st.Roadmap = &status.Roadmap{
 					Phases: []status.RoadmapPhase{
 						{
-							ID:   "S8",
+							ID:   "BUILD",
 							Name: "BUILD Loop",
 							Tasks: []status.Task{
-								{ID: "S8-1", Title: "Task 1", DependsOn: []string{}},
-								{ID: "S8-2", Title: "Task 2", DependsOn: []string{}},
-								{ID: "S8-3", Title: "Task 3", DependsOn: []string{"S8-1", "S8-2"}},
+								{ID: "BUILD-1", Title: "Task 1", DependsOn: []string{}},
+								{ID: "BUILD-2", Title: "Task 2", DependsOn: []string{}},
+								{ID: "BUILD-3", Title: "Task 3", DependsOn: []string{"BUILD-1", "BUILD-2"}},
 							},
 						},
 					},
@@ -145,10 +145,10 @@ func TestDependencyValidator_DetectCycles(t *testing.T) {
 				st.Roadmap = &status.Roadmap{
 					Phases: []status.RoadmapPhase{
 						{
-							ID:   "S8",
+							ID:   "BUILD",
 							Name: "BUILD Loop",
 							Tasks: []status.Task{
-								{ID: "S8-1", Title: "Task 1", DependsOn: []string{"S8-1"}},
+								{ID: "BUILD-1", Title: "Task 1", DependsOn: []string{"BUILD-1"}},
 							},
 						},
 					},
@@ -165,11 +165,11 @@ func TestDependencyValidator_DetectCycles(t *testing.T) {
 				st.Roadmap = &status.Roadmap{
 					Phases: []status.RoadmapPhase{
 						{
-							ID:   "S8",
+							ID:   "BUILD",
 							Name: "BUILD Loop",
 							Tasks: []status.Task{
-								{ID: "S8-1", Title: "Task 1", DependsOn: []string{"S8-2"}},
-								{ID: "S8-2", Title: "Task 2", DependsOn: []string{"S8-1"}},
+								{ID: "BUILD-1", Title: "Task 1", DependsOn: []string{"BUILD-2"}},
+								{ID: "BUILD-2", Title: "Task 2", DependsOn: []string{"BUILD-1"}},
 							},
 						},
 					},
@@ -186,12 +186,12 @@ func TestDependencyValidator_DetectCycles(t *testing.T) {
 				st.Roadmap = &status.Roadmap{
 					Phases: []status.RoadmapPhase{
 						{
-							ID:   "S8",
+							ID:   "BUILD",
 							Name: "BUILD Loop",
 							Tasks: []status.Task{
-								{ID: "S8-1", Title: "Task 1", DependsOn: []string{"S8-3"}},
-								{ID: "S8-2", Title: "Task 2", DependsOn: []string{"S8-1"}},
-								{ID: "S8-3", Title: "Task 3", DependsOn: []string{"S8-2"}},
+								{ID: "BUILD-1", Title: "Task 1", DependsOn: []string{"BUILD-3"}},
+								{ID: "BUILD-2", Title: "Task 2", DependsOn: []string{"BUILD-1"}},
+								{ID: "BUILD-3", Title: "Task 3", DependsOn: []string{"BUILD-2"}},
 							},
 						},
 					},
@@ -208,13 +208,13 @@ func TestDependencyValidator_DetectCycles(t *testing.T) {
 				st.Roadmap = &status.Roadmap{
 					Phases: []status.RoadmapPhase{
 						{
-							ID:   "S8",
+							ID:   "BUILD",
 							Name: "BUILD Loop",
 							Tasks: []status.Task{
-								{ID: "S8-1", Title: "Task 1", DependsOn: []string{}},
-								{ID: "S8-2", Title: "Task 2", DependsOn: []string{"S8-1"}},
-								{ID: "S8-3", Title: "Task 3", DependsOn: []string{"S8-1"}},
-								{ID: "S8-4", Title: "Task 4", DependsOn: []string{"S8-2", "S8-3"}},
+								{ID: "BUILD-1", Title: "Task 1", DependsOn: []string{}},
+								{ID: "BUILD-2", Title: "Task 2", DependsOn: []string{"BUILD-1"}},
+								{ID: "BUILD-3", Title: "Task 3", DependsOn: []string{"BUILD-1"}},
+								{ID: "BUILD-4", Title: "Task 4", DependsOn: []string{"BUILD-2", "BUILD-3"}},
 							},
 						},
 					},
@@ -255,13 +255,13 @@ func TestDependencyValidator_GetDependencyChain(t *testing.T) {
 	st.Roadmap = &status.Roadmap{
 		Phases: []status.RoadmapPhase{
 			{
-				ID:   "S8",
+				ID:   "BUILD",
 				Name: "BUILD Loop",
 				Tasks: []status.Task{
-					{ID: "S8-1", Title: "Task 1", DependsOn: []string{}},
-					{ID: "S8-2", Title: "Task 2", DependsOn: []string{"S8-1"}},
-					{ID: "S8-3", Title: "Task 3", DependsOn: []string{"S8-2"}},
-					{ID: "S8-4", Title: "Task 4", DependsOn: []string{"S8-1", "S8-3"}},
+					{ID: "BUILD-1", Title: "Task 1", DependsOn: []string{}},
+					{ID: "BUILD-2", Title: "Task 2", DependsOn: []string{"BUILD-1"}},
+					{ID: "BUILD-3", Title: "Task 3", DependsOn: []string{"BUILD-2"}},
+					{ID: "BUILD-4", Title: "Task 4", DependsOn: []string{"BUILD-1", "BUILD-3"}},
 				},
 			},
 		},
@@ -277,26 +277,26 @@ func TestDependencyValidator_GetDependencyChain(t *testing.T) {
 	}{
 		{
 			name:      "task with no dependencies",
-			taskID:    "S8-1",
+			taskID:    "BUILD-1",
 			wantChain: []string{},
 			wantErr:   false,
 		},
 		{
 			name:      "task with one dependency",
-			taskID:    "S8-2",
-			wantChain: []string{"S8-1"},
+			taskID:    "BUILD-2",
+			wantChain: []string{"BUILD-1"},
 			wantErr:   false,
 		},
 		{
 			name:      "task with transitive dependencies",
-			taskID:    "S8-3",
-			wantChain: []string{"S8-2", "S8-1"},
+			taskID:    "BUILD-3",
+			wantChain: []string{"BUILD-2", "BUILD-1"},
 			wantErr:   false,
 		},
 		{
 			name:      "task with multiple dependencies",
-			taskID:    "S8-4",
-			wantChain: []string{"S8-1", "S8-3", "S8-2", "S8-1"}, // S8-1 appears twice (direct + transitive)
+			taskID:    "BUILD-4",
+			wantChain: []string{"BUILD-1", "BUILD-3", "BUILD-2", "BUILD-1"}, // BUILD-1 appears twice (direct + transitive)
 			wantErr:   false,
 		},
 		{
@@ -347,12 +347,12 @@ func TestDependencyValidator_GetBlockedBy(t *testing.T) {
 	st.Roadmap = &status.Roadmap{
 		Phases: []status.RoadmapPhase{
 			{
-				ID:   "S8",
+				ID:   "BUILD",
 				Name: "BUILD Loop",
 				Tasks: []status.Task{
-					{ID: "S8-1", Title: "Task 1", DependsOn: []string{}},
-					{ID: "S8-2", Title: "Task 2", DependsOn: []string{"S8-1"}},
-					{ID: "S8-3", Title: "Task 3", DependsOn: []string{"S8-1", "S8-2"}},
+					{ID: "BUILD-1", Title: "Task 1", DependsOn: []string{}},
+					{ID: "BUILD-2", Title: "Task 2", DependsOn: []string{"BUILD-1"}},
+					{ID: "BUILD-3", Title: "Task 3", DependsOn: []string{"BUILD-1", "BUILD-2"}},
 				},
 			},
 		},
@@ -367,18 +367,18 @@ func TestDependencyValidator_GetBlockedBy(t *testing.T) {
 	}{
 		{
 			name:       "task with no dependencies",
-			taskID:     "S8-1",
+			taskID:     "BUILD-1",
 			wantBlocks: []string{},
 		},
 		{
 			name:       "task with one dependency",
-			taskID:     "S8-2",
-			wantBlocks: []string{"S8-1"},
+			taskID:     "BUILD-2",
+			wantBlocks: []string{"BUILD-1"},
 		},
 		{
 			name:       "task with multiple dependencies",
-			taskID:     "S8-3",
-			wantBlocks: []string{"S8-1", "S8-2"},
+			taskID:     "BUILD-3",
+			wantBlocks: []string{"BUILD-1", "BUILD-2"},
 		},
 	}
 
@@ -410,13 +410,13 @@ func TestDependencyValidator_GetBlocks(t *testing.T) {
 	st.Roadmap = &status.Roadmap{
 		Phases: []status.RoadmapPhase{
 			{
-				ID:   "S8",
+				ID:   "BUILD",
 				Name: "BUILD Loop",
 				Tasks: []status.Task{
-					{ID: "S8-1", Title: "Task 1", DependsOn: []string{}},
-					{ID: "S8-2", Title: "Task 2", DependsOn: []string{"S8-1"}},
-					{ID: "S8-3", Title: "Task 3", DependsOn: []string{"S8-1"}},
-					{ID: "S8-4", Title: "Task 4", DependsOn: []string{"S8-2"}},
+					{ID: "BUILD-1", Title: "Task 1", DependsOn: []string{}},
+					{ID: "BUILD-2", Title: "Task 2", DependsOn: []string{"BUILD-1"}},
+					{ID: "BUILD-3", Title: "Task 3", DependsOn: []string{"BUILD-1"}},
+					{ID: "BUILD-4", Title: "Task 4", DependsOn: []string{"BUILD-2"}},
 				},
 			},
 		},
@@ -431,22 +431,22 @@ func TestDependencyValidator_GetBlocks(t *testing.T) {
 	}{
 		{
 			name:       "task that blocks multiple",
-			taskID:     "S8-1",
-			wantBlocks: []string{"S8-2", "S8-3"},
+			taskID:     "BUILD-1",
+			wantBlocks: []string{"BUILD-2", "BUILD-3"},
 		},
 		{
 			name:       "task that blocks one",
-			taskID:     "S8-2",
-			wantBlocks: []string{"S8-4"},
+			taskID:     "BUILD-2",
+			wantBlocks: []string{"BUILD-4"},
 		},
 		{
 			name:       "task that blocks none",
-			taskID:     "S8-3",
+			taskID:     "BUILD-3",
 			wantBlocks: []string{},
 		},
 		{
 			name:       "task that blocks none",
-			taskID:     "S8-4",
+			taskID:     "BUILD-4",
 			wantBlocks: []string{},
 		},
 	}
@@ -488,11 +488,11 @@ func TestDependencyValidator_ValidateAll(t *testing.T) {
 				st.Roadmap = &status.Roadmap{
 					Phases: []status.RoadmapPhase{
 						{
-							ID:   "S8",
+							ID:   "BUILD",
 							Name: "BUILD Loop",
 							Tasks: []status.Task{
-								{ID: "S8-1", Title: "Task 1", DependsOn: []string{}},
-								{ID: "S8-2", Title: "Task 2", DependsOn: []string{"S8-1"}},
+								{ID: "BUILD-1", Title: "Task 1", DependsOn: []string{}},
+								{ID: "BUILD-2", Title: "Task 2", DependsOn: []string{"BUILD-1"}},
 							},
 						},
 					},
@@ -508,10 +508,10 @@ func TestDependencyValidator_ValidateAll(t *testing.T) {
 				st.Roadmap = &status.Roadmap{
 					Phases: []status.RoadmapPhase{
 						{
-							ID:   "S8",
+							ID:   "BUILD",
 							Name: "BUILD Loop",
 							Tasks: []status.Task{
-								{ID: "S8-1", Title: "Task 1", DependsOn: []string{"INVALID"}},
+								{ID: "BUILD-1", Title: "Task 1", DependsOn: []string{"INVALID"}},
 							},
 						},
 					},
@@ -528,11 +528,11 @@ func TestDependencyValidator_ValidateAll(t *testing.T) {
 				st.Roadmap = &status.Roadmap{
 					Phases: []status.RoadmapPhase{
 						{
-							ID:   "S8",
+							ID:   "BUILD",
 							Name: "BUILD Loop",
 							Tasks: []status.Task{
-								{ID: "S8-1", Title: "Task 1", DependsOn: []string{"S8-2"}},
-								{ID: "S8-2", Title: "Task 2", DependsOn: []string{"S8-1"}},
+								{ID: "BUILD-1", Title: "Task 1", DependsOn: []string{"BUILD-2"}},
+								{ID: "BUILD-2", Title: "Task 2", DependsOn: []string{"BUILD-1"}},
 							},
 						},
 					},

@@ -44,7 +44,7 @@ func scanForRedFlags(projectDir string) error {
 				if strings.Contains(lineLower, pattern) {
 					return NewValidationError(
 						"complete BUILD",
-						fmt.Sprintf("Design document detected instead of implementation\n\nRed flag found in %s:\n  Line %d: %q\n\nS8 is for IMPLEMENTATION, not design. Common causes:\n- Agent wrote planning docs instead of code\n- Copy-pasted from S6 Design phase\n- Placeholder text not replaced\n\nFix by:\n1. Write actual code (*.go, *.py, *.ts files)\n2. Remove design language from documentation\n3. Update %s to describe what WAS built, not what WILL BE built",
+						fmt.Sprintf("Design document detected instead of implementation\n\nRed flag found in %s:\n  Line %d: %q\n\nBUILD is for implementation, not design. Common causes:\n- Agent wrote planning docs instead of code\n- Copy-pasted from the PLAN phase\n- Placeholder text not replaced\n\nFix by:\n1. Write actual code (*.go, *.py, *.ts files)\n2. Remove design language from documentation\n3. Update %s to describe what WAS built, not what WILL BE built",
 							filepath.Base(mdFile), lineNum+1, strings.TrimSpace(line), filepath.Base(mdFile)),
 						"Remove design language and implement actual code",
 					)

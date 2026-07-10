@@ -26,8 +26,8 @@ Commands:
 Examples:
   wayfinder session start myproject
   wayfinder session next-phase
-  wayfinder session start-phase D1
-  wayfinder session complete-phase D1 --outcome success
+  wayfinder session start-phase PROBLEM
+  wayfinder session complete-phase PROBLEM --outcome success
   wayfinder session end --status completed`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		dir := GetProjectDirectory()
@@ -91,7 +91,6 @@ func init() {
 	// Add session subcommands from existing package
 	sessionCmd.AddCommand(sessioncmd.StartCmd)
 	sessionCmd.AddCommand(sessioncmd.StatusCmd)
-	sessionCmd.AddCommand(sessioncmd.VerifyCmd)
 	sessionCmd.AddCommand(sessioncmd.NextPhaseCmd)
 	sessionCmd.AddCommand(sessioncmd.StartPhaseCmd)
 	sessionCmd.AddCommand(sessioncmd.CompletePhaseCmd)
@@ -108,6 +107,9 @@ func init() {
 	// Add migration commands
 	sessionCmd.AddCommand(sessioncmd.MigrateCmd)
 	sessionCmd.AddCommand(sessioncmd.MigrateAllCmd)
+	sessionCmd.AddCommand(sessioncmd.RewindCmd)
+	sessionCmd.AddCommand(sessioncmd.GetLifecycleStateCmd())
+	sessionCmd.AddCommand(sessioncmd.GetCoordCmd())
 
 	// Add session to root
 	rootCmd.AddCommand(sessionCmd)

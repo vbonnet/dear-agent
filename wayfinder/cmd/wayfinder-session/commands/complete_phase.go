@@ -65,10 +65,16 @@ func runCompletePhase(cmd *cobra.Command, args []string) (retErr error) {
 	// Get project directory
 	projectDir := GetProjectDirectory()
 
-	// Read existing STATUS from project directory (version-aware)
-	st, err := status.LoadAnyVersion(projectDir)
+	version, err := status.DetectSchemaVersionFromDir(projectDir)
 	if err != nil {
-		return fmt.Errorf("failed to read STATUS file: %w", err)
+		return fmt.Errorf("failed to inspect STATUS file: %w", err)
+	}
+	if version != status.SchemaVersionV2 {
+		return fmt.Errorf("legacy Wayfinder status requires explicit migration before complete-phase")
+	}
+	st, err := status.ParseV2FromDir(projectDir)
+	if err != nil {
+		return fmt.Errorf("failed to read canonical V2 STATUS file: %w", err)
 	}
 
 	// Initialize history logger

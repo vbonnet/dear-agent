@@ -18,6 +18,15 @@ import (
 // Uses parallel goroutines with sync.WaitGroup for performance (<500ms target).
 // Git operations have 500ms timeout to prevent blocking on large repos.
 func CaptureContext(projectDir string, st *status.Status) ContextSnapshot {
+	return captureContext(projectDir, func() PhaseContext { return capturePhaseContext(st) })
+}
+
+// CaptureContextV2 captures context from the canonical V2 status schema.
+func CaptureContextV2(projectDir string, st *status.StatusV2) ContextSnapshot {
+	return captureContext(projectDir, func() PhaseContext { return capturePhaseContextV2(st) })
+}
+
+func captureContext(projectDir string, phaseContext func() PhaseContext) ContextSnapshot {
 	var wg sync.WaitGroup
 	snapshot := ContextSnapshot{}
 
@@ -67,7 +76,7 @@ func CaptureContext(projectDir string, st *status.Status) ContextSnapshot {
 				errChan <- fmt.Errorf("phase context panicked: %v", r)
 			}
 		}()
-		phaseCtx := capturePhaseContext(st)
+		phaseCtx := phaseContext()
 		snapshot.PhaseState = phaseCtx
 	}()
 
@@ -126,7 +135,7 @@ func captureDeliverables(projectDir string) ([]string, error) {
 	phases := status.AllPhases()
 
 	for _, phase := range phases {
-		// Glob pattern: {PHASE}-*.md (e.g., D1-*.md, S6-*.md)
+		// Glob pattern: {PHASE}-*.md (e.g., PROBLEM-*.md, DESIGN-*.md)
 		pattern := filepath.Join(projectDir, fmt.Sprintf("%s-*.md", phase))
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
@@ -157,5 +166,19 @@ func capturePhaseContext(st *status.Status) PhaseContext {
 		}
 	}
 
+	return phaseCtx
+}
+
+func capturePhaseContextV2(st *status.StatusV2) PhaseContext {
+	phaseCtx := PhaseContext{
+		CurrentPhase:    st.CurrentWaypoint,
+		SessionID:       st.GetSessionID(),
+		CompletedPhases: []string{},
+	}
+	for _, waypoint := range st.WaypointHistory {
+		if waypoint.Status == status.WaypointStatusV2Completed {
+			phaseCtx.CompletedPhases = append(phaseCtx.CompletedPhases, waypoint.Name)
+		}
+	}
 	return phaseCtx
 }

@@ -14,7 +14,7 @@ var NextPhaseCmd = &cobra.Command{
 	Short: "Get the next phase in the sequence",
 	Long: `Read WAYFINDER-STATUS.md and output the next phase.
 
-Works for both V1 (W0/D1-D4/S4-S11) and V2 (CHARTER/PROBLEM/…/RETRO) files.
+Works with the canonical V2 sequence (CHARTER through RETRO).
 Returns the current phase if it is not yet completed.
 Returns an error if already at the final phase.
 
@@ -26,34 +26,24 @@ Example:
 }
 
 func runNextPhase(cmd *cobra.Command, args []string) error {
-	projectDir := GetProjectDirectory()
+	return runNextPhaseInDir(GetProjectDirectory())
+}
 
-	statusPath := filepath.Join(projectDir, status.StatusFilename)
-	schemaVersion, err := status.DetectSchemaVersion(statusPath)
+func runNextPhaseInDir(projectDir string) error {
+	version, err := status.DetectSchemaVersion(filepath.Join(projectDir, status.StatusFilename))
 	if err != nil {
 		return fmt.Errorf("failed to read STATUS file: %w (run 'wayfinder session start' or use -C <project-dir>)", err)
 	}
-
-	var nextPhase string
-	if schemaVersion == status.SchemaVersionV2 {
-		st, err := status.ParseV2FromDir(projectDir)
-		if err != nil {
-			return fmt.Errorf("failed to parse V2 STATUS: %w", err)
-		}
-		nextPhase, err = st.NextPhase()
-		if err != nil {
-			return fmt.Errorf("failed to get next phase: %w", err)
-		}
-	} else {
-		// V1 (legacy 12-ID model)
-		st, err := status.ReadFrom(projectDir)
-		if err != nil {
-			return fmt.Errorf("failed to parse V1 STATUS: %w", err)
-		}
-		nextPhase, err = st.NextPhase()
-		if err != nil {
-			return fmt.Errorf("failed to get next phase: %w", err)
-		}
+	if version != status.SchemaVersionV2 {
+		return fmt.Errorf("legacy Wayfinder status requires explicit migration before next-phase")
+	}
+	st, err := status.ParseV2FromDir(projectDir)
+	if err != nil {
+		return fmt.Errorf("failed to parse canonical V2 STATUS: %w (run 'wayfinder session start', migrate legacy state, or use -C <project-dir>)", err)
+	}
+	nextPhase, err := st.NextPhase()
+	if err != nil {
+		return fmt.Errorf("failed to get next phase: %w", err)
 	}
 
 	fmt.Println(nextPhase)

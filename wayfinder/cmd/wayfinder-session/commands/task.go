@@ -18,11 +18,11 @@ Task management commands allow you to:
   - Delete tasks
 
 Examples:
-  wayfinder session task add S8 "Implement OAuth2 endpoint" --effort 4
-  wayfinder session task update S8-1 --status in-progress
-  wayfinder session task list --phase S8
-  wayfinder session task show S8-1
-  wayfinder session task delete S8-1`,
+  wayfinder session task add BUILD "Implement OAuth2 endpoint" --effort 4
+  wayfinder session task update BUILD-1 --status in-progress
+  wayfinder session task list --phase BUILD
+  wayfinder session task show BUILD-1
+  wayfinder session task delete BUILD-1`,
 }
 
 func init() {

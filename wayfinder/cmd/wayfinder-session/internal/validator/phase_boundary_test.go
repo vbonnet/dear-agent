@@ -11,21 +11,17 @@ func TestIsPhaseForbiddenForCode(t *testing.T) {
 		want      bool
 	}{
 		// Forbidden phases (planning)
-		{"D1 is forbidden", "D1", true},
-		{"D2 is forbidden", "D2", true},
-		{"D3 is forbidden", "D3", true},
-		{"D4 is forbidden", "D4", true},
-		{"S4 is forbidden", "S4", true},
-		{"S5 is forbidden", "S5", true},
-		{"S6 is forbidden", "S6", true},
-		{"S7 is forbidden", "S7", true},
+		{"PROBLEM is forbidden", "PROBLEM", true},
+		{"RESEARCH is forbidden", "RESEARCH", true},
+		{"DESIGN is forbidden", "DESIGN", true},
+		{"SPEC is forbidden", "SPEC", true},
+		{"PLAN is forbidden", "PLAN", true},
+		{"SETUP is forbidden", "SETUP", true},
 
 		// Allowed phases (implementation/deployment)
-		{"W0 is allowed", "W0", false},
-		{"S8 is allowed", "S8", false},
-		{"S9 is allowed", "S9", false},
-		{"S10 is allowed", "S10", false},
-		{"S11 is allowed", "S11", false},
+		{"CHARTER is allowed", "CHARTER", false},
+		{"BUILD is allowed", "BUILD", false},
+		{"RETRO is allowed", "RETRO", false},
 
 		// Unknown phase (treat as allowed)
 		{"Unknown phase is allowed", "X1", false},

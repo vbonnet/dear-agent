@@ -258,7 +258,7 @@ func parseWayfinderStatus(projectDir, content string) *ProjectStatus {
 		LastUpdate: time.Now(),
 	}
 
-	// Parse current phase: Look for "**Current Phase**: D2 - Research" pattern
+	// Parse current phase from the human-readable status summary.
 	phaseRe := regexp.MustCompile(`\*\*Current Phase\*\*:\s*([A-Z]\d+)`)
 	if match := phaseRe.FindStringSubmatch(content); len(match) > 1 {
 		status.CurrentPhase = match[1]

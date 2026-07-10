@@ -13,7 +13,7 @@ import (
 // present in the project directory, its patterns replace the built-in defaults.
 const earsConfigFile = ".earslint.yml"
 
-// validateSpecEARS gates the D4/SPEC phase by validating SPEC.md against the
+// validateSpecEARS gates the canonical SPEC phase by validating SPEC.md against the
 // EARS (Easy Approach to Requirements Syntax) templates.
 //
 // This is the deterministic replacement for the previous LLM-as-judge rubric

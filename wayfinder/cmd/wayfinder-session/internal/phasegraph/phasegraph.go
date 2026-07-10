@@ -1,5 +1,5 @@
 // Package phasegraph provides phase dependency graph configuration
-// with full/summary/skip loading strategies and V1-to-V2 phase name mapping.
+// with full and summary loading strategies for canonical V2 phases.
 package phasegraph
 
 import (
@@ -25,7 +25,6 @@ const (
 // phase dependencies and V1-to-V2 name mapping.
 type PhaseDependencyConfig struct {
 	Dependencies map[string]map[string]LoadStrategy `yaml:"dependencies"`
-	V1ToV2       map[string]string                  `yaml:"v1_to_v2"`
 }
 
 // LoadConfig reads and parses a phase dependency YAML config file.
@@ -49,10 +48,6 @@ func ParseConfig(data []byte) (*PhaseDependencyConfig, error) {
 		cfg.Dependencies = make(map[string]map[string]LoadStrategy)
 	}
 
-	if cfg.V1ToV2 == nil {
-		cfg.V1ToV2 = make(map[string]string)
-	}
-
 	// Validate strategies
 	for phase, deps := range cfg.Dependencies {
 		for dep, strategy := range deps {
@@ -69,12 +64,9 @@ func ParseConfig(data []byte) (*PhaseDependencyConfig, error) {
 }
 
 // GetDependencies returns the dependency map for a given phase.
-// If the phase is a V1 name, it is resolved to V2 first.
 // Returns an empty map if the phase has no dependencies.
 func (c *PhaseDependencyConfig) GetDependencies(phase string) map[string]LoadStrategy {
-	resolved := c.ResolveV1Name(phase)
-
-	deps, ok := c.Dependencies[resolved]
+	deps, ok := c.Dependencies[phase]
 	if !ok {
 		return make(map[string]LoadStrategy)
 	}
@@ -86,16 +78,6 @@ func (c *PhaseDependencyConfig) GetDependencies(phase string) map[string]LoadStr
 	}
 
 	return result
-}
-
-// ResolveV1Name maps a V1 phase name (e.g. "D1") to its V2 equivalent
-// (e.g. "PROBLEM"). If the name is not a V1 name, it is returned unchanged.
-func (c *PhaseDependencyConfig) ResolveV1Name(v1Name string) string {
-	if v2, ok := c.V1ToV2[v1Name]; ok {
-		return v2
-	}
-
-	return v1Name
 }
 
 // Phases returns all V2 phase names defined in the dependency graph.

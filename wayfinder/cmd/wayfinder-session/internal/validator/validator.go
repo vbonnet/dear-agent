@@ -25,6 +25,7 @@ func NewValidator(s status.StatusInterface) *Validator {
 // - Previous phase is not completed
 // - Phase doesn't exist in AllPhases()
 // - DESIGN phase attempted without valid RESEARCH content
+//
 //nolint:gocyclo // reason: linear phase precondition checker
 func (v *Validator) CanStartPhase(phaseName, projectDir string) error {
 	allPhases := status.AllPhases(v.status.GetVersion())
@@ -92,9 +93,9 @@ func (v *Validator) CanStartPhase(phaseName, projectDir string) error {
 		)
 	}
 
-	// Special case: D3 requires validated D2 content
+	// DESIGN requires validated RESEARCH content.
 	if phaseName == "DESIGN" {
-		if err := validateD2Content(projectDir, v.status); err != nil {
+		if err := validateResearchContent(projectDir); err != nil {
 			return err
 		}
 	}

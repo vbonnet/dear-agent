@@ -7,25 +7,6 @@ import (
 	"testing"
 )
 
-// makeV1StatusFile writes a minimal V1 WAYFINDER-STATUS.md into dir.
-func makeV1StatusFile(t *testing.T, dir string, currentPhase string) {
-	t.Helper()
-	content := `---
-schema_version: "1.0"
-session_id: test-session
-project_path: /test/project
-status: in_progress
-current_phase: ` + currentPhase + `
-phases: []
----
-
-# Wayfinder Session
-`
-	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // makeV2StatusFile writes a minimal V2 WAYFINDER-STATUS.md into dir.
 func makeV2StatusFile(t *testing.T, dir string, currentWaypoint string) {
 	t.Helper()
@@ -46,46 +27,11 @@ waypoint_history: []
 	}
 }
 
-// TestNextPhase_V1StatusReturnsCorrectPhase verifies that a V1 STATUS file
-// with no completed phases returns the first V1 phase (W0), not "CHARTER".
-// This was the ce-l8o4 bug: ParseV2FromDir always returned CHARTER for V1 files.
-func TestNextPhase_V1StatusReturnsCorrectPhase(t *testing.T) {
-	dir := t.TempDir()
-	makeV1StatusFile(t, dir, "") // empty current_phase → first phase
-
-	// Set project directory and capture output by running the logic directly.
-	// We test the schema-version branch without invoking cobra end-to-end.
-	SetProjectDirectory(dir)
-	defer func() { projectDirectory = "" }()
-
-	// runNextPhase writes to stdout; redirect via a pipe.
-	r, w, err := os.Pipe()
-	if err != nil {
+func makeLegacyStatusFile(t *testing.T, dir string) {
+	t.Helper()
+	content := "---\nschema_version: \"1.0\"\nsession_id: legacy\ncurrent_phase: D1\n---\n"
+	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
-	}
-	oldStdout := os.Stdout
-	os.Stdout = w
-
-	cmdErr := runNextPhase(nil, nil)
-
-	w.Close()
-	os.Stdout = oldStdout
-
-	if cmdErr != nil {
-		t.Fatalf("runNextPhase returned error: %v", cmdErr)
-	}
-
-	buf := make([]byte, 64)
-	n, _ := r.Read(buf)
-	output := strings.TrimSpace(string(buf[:n]))
-
-	// V1 first phase is "W0", not "CHARTER" (which would indicate V2 was used).
-	if output == "CHARTER" {
-		t.Errorf("got CHARTER — V2 parser was used on a V1 STATUS file (ce-l8o4 regression)")
-	}
-	// V1 AllPhases() starts with "W0"
-	if output != "W0" {
-		t.Errorf("expected W0 as first V1 phase, got %q", output)
 	}
 }
 
@@ -95,9 +41,6 @@ func TestNextPhase_V2StatusReturnsWaypoint(t *testing.T) {
 	dir := t.TempDir()
 	makeV2StatusFile(t, dir, "CHARTER")
 
-	SetProjectDirectory(dir)
-	defer func() { projectDirectory = "" }()
-
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +48,7 @@ func TestNextPhase_V2StatusReturnsWaypoint(t *testing.T) {
 	oldStdout := os.Stdout
 	os.Stdout = w
 
-	cmdErr := runNextPhase(nil, nil)
+	cmdErr := runNextPhaseInDir(dir)
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -127,14 +70,20 @@ func TestNextPhase_V2StatusReturnsWaypoint(t *testing.T) {
 func TestNextPhase_MissingStatusFileErrors(t *testing.T) {
 	dir := t.TempDir() // no STATUS file written
 
-	SetProjectDirectory(dir)
-	defer func() { projectDirectory = "" }()
-
-	err := runNextPhase(nil, nil)
+	err := runNextPhaseInDir(dir)
 	if err == nil {
 		t.Fatal("expected error for missing STATUS file, got nil")
 	}
 	if !strings.Contains(err.Error(), "STATUS") {
 		t.Errorf("error should mention STATUS file, got: %v", err)
+	}
+}
+
+func TestNextPhase_RequiresExplicitLegacyMigration(t *testing.T) {
+	dir := t.TempDir()
+	makeLegacyStatusFile(t, dir)
+	err := runNextPhaseInDir(dir)
+	if err == nil || !strings.Contains(err.Error(), "explicit migration") {
+		t.Fatalf("runNextPhase legacy error = %v, want migration guidance", err)
 	}
 }

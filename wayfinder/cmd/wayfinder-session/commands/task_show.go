@@ -15,8 +15,8 @@ var TaskShowCmd = &cobra.Command{
 dependencies, deliverables, and acceptance criteria.
 
 Examples:
-  wayfinder session task show S8-1
-  wayfinder session task show D4-2`,
+  wayfinder session task show BUILD-1
+  wayfinder session task show SPEC-2`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTaskShow,
 }

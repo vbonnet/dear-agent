@@ -1,15 +1,15 @@
 # Wayfinder Session Status Specification
 
-<!-- Last audited at: 2026-07-08 -->
+<!-- Last audited at: 2026-07-10 -->
 
-**Version:** 1.0
-**Status:** Baseline
+**Version:** 1.1
+**Status:** Active
 **Scope:** `wayfinder/cmd/wayfinder-session/internal/status`.
 
 ## Overview
 
 `internal/status` owns Wayfinder session state files, including the canonical
-V2 nine-waypoint schema and compatibility helpers for older phase terminology.
+V2 nine-waypoint schema and migration-only helpers for retired phase terminology.
 It validates `WAYFINDER-STATUS.md`, navigates waypoints, persists roadmap and
 task metadata, and protects the Wayfinder workflow from invalid or legacy
 state shapes.
@@ -44,9 +44,18 @@ state shapes.
 
 **WAYFINDER-STATUS-14** When a V2 status is completed or blocked, the system shall require completion_date or blocked_reason respectively.
 
+**WAYFINDER-STATUS-15** When phases are requested without an explicit version, the system shall return the canonical V2 nine-phase sequence.
+
+**WAYFINDER-STATUS-16** When legacy phases are requested for migration, the system shall require the caller to explicitly select V1.
+
+**WAYFINDER-STATUS-17** When V2 phase names are validated, the system shall reject retired short phase identifiers.
+
+**WAYFINDER-STATUS-18** When lifecycle observability is persisted, the system shall retain lifecycle state, blocked target, error message, and requested input in canonical V2 status.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/wayfinder_status_guardrails.feature`
+- Feature: `agm/test/bdd/features/wayfinder_v2_command_guardrails.feature`
 
 ## Test Traceability
 

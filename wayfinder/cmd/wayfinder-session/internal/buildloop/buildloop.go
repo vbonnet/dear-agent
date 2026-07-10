@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// BuildLoop manages the BUILD loop state machine for S8 phase
+// BuildLoop manages the canonical BUILD phase state machine.
 type BuildLoop struct {
 	currentState State
 	context      *BuildContext

@@ -5,12 +5,12 @@ import "time"
 // RewindEventData captures comprehensive rewind context for retrospectives
 //
 // This struct is marshaled to map[string]interface{} for history.Event.Data
-// and formatted to markdown for S11-retrospective.md appending.
+// and formatted to markdown for RETRO-retrospective.md appending.
 type RewindEventData struct {
-	// FromPhase is the phase being rewound from (e.g., "S7")
+	// FromPhase is the phase being rewound from (e.g., "BUILD")
 	FromPhase string `json:"from_phase"`
 
-	// ToPhase is the target phase being rewound to (e.g., "S5")
+	// ToPhase is the target phase being rewound to (e.g., "PLAN")
 	ToPhase string `json:"to_phase"`
 
 	// Magnitude is the number of phases between from and to (0 = no-op, 1+ = rewind)
@@ -63,10 +63,10 @@ type GitContext struct {
 
 // PhaseContext captures Wayfinder phase state
 type PhaseContext struct {
-	// CurrentPhase before rewind (e.g., "S7")
+	// CurrentPhase before rewind (e.g., "BUILD")
 	CurrentPhase string `json:"current_phase"`
 
-	// CompletedPhases list (e.g., ["W0", "D1", "D2", ...])
+	// CompletedPhases list (e.g., ["CHARTER", "PROBLEM", "RESEARCH", ...])
 	CompletedPhases []string `json:"completed_phases"`
 
 	// SessionID from WAYFINDER-STATUS.md

@@ -17,8 +17,8 @@ func TestLogToHistory(t *testing.T) {
 
 	// Create rewind event data
 	data := &RewindEventData{
-		FromPhase: "S7",
-		ToPhase:   "S5",
+		FromPhase: "RETRO",
+		ToPhase:   "SETUP",
 		Magnitude: 2,
 		Timestamp: time.Date(2024, 1, 7, 12, 0, 0, 0, time.UTC),
 		Prompted:  true,
@@ -30,10 +30,10 @@ func TestLogToHistory(t *testing.T) {
 				Commit:             "abc123",
 				UncommittedChanges: false,
 			},
-			Deliverables: []string{"D1-problem.md"},
+			Deliverables: []string{"PROBLEM-problem.md"},
 			PhaseState: PhaseContext{
-				CurrentPhase:    "S7",
-				CompletedPhases: []string{"W0", "D1"},
+				CurrentPhase:    "RETRO",
+				CompletedPhases: []string{"CHARTER", "PROBLEM"},
 				SessionID:       "test-session",
 			},
 		},
@@ -66,8 +66,8 @@ func TestLogToHistory(t *testing.T) {
 		t.Errorf("Expected type 'rewind.logged', got: %v", parsedEvent["type"])
 	}
 
-	if parsedEvent["phase"] != "S5" {
-		t.Errorf("Expected phase 'S5', got: %v", parsedEvent["phase"])
+	if parsedEvent["phase"] != "SETUP" {
+		t.Errorf("Expected phase 'SETUP', got: %v", parsedEvent["phase"])
 	}
 
 	// Verify nested data structure
@@ -76,12 +76,12 @@ func TestLogToHistory(t *testing.T) {
 		t.Fatalf("Expected 'data' field to be object, got: %T", parsedEvent["data"])
 	}
 
-	if dataField["from_phase"] != "S7" {
-		t.Errorf("Expected from_phase 'S7', got: %v", dataField["from_phase"])
+	if dataField["from_phase"] != "RETRO" {
+		t.Errorf("Expected from_phase 'RETRO', got: %v", dataField["from_phase"])
 	}
 
-	if dataField["to_phase"] != "S5" {
-		t.Errorf("Expected to_phase 'S5', got: %v", dataField["to_phase"])
+	if dataField["to_phase"] != "SETUP" {
+		t.Errorf("Expected to_phase 'SETUP', got: %v", dataField["to_phase"])
 	}
 
 	magnitude, ok := dataField["magnitude"].(float64) // JSON numbers are float64
@@ -100,8 +100,8 @@ func TestLogToHistory_MultipleEvents(t *testing.T) {
 
 	// First event
 	data1 := &RewindEventData{
-		FromPhase: "S7",
-		ToPhase:   "S6",
+		FromPhase: "RETRO",
+		ToPhase:   "BUILD",
 		Magnitude: 1,
 		Timestamp: time.Now(),
 		Reason:    "First rewind",
@@ -114,8 +114,8 @@ func TestLogToHistory_MultipleEvents(t *testing.T) {
 
 	// Second event
 	data2 := &RewindEventData{
-		FromPhase: "S8",
-		ToPhase:   "S5",
+		FromPhase: "BUILD",
+		ToPhase:   "SETUP",
 		Magnitude: 3,
 		Timestamp: time.Now(),
 		Reason:    "Second rewind",
@@ -167,8 +167,8 @@ func TestLogToHistory_JSONMarshaling(t *testing.T) {
 
 	// Test with minimal data (omitempty fields)
 	data := &RewindEventData{
-		FromPhase: "S5",
-		ToPhase:   "S4",
+		FromPhase: "SETUP",
+		ToPhase:   "PLAN",
 		Magnitude: 1,
 		Timestamp: time.Now(),
 		Prompted:  false,
@@ -177,7 +177,7 @@ func TestLogToHistory_JSONMarshaling(t *testing.T) {
 			Git:          GitContext{Error: "git not available"},
 			Deliverables: []string{},
 			PhaseState: PhaseContext{
-				CurrentPhase: "S5",
+				CurrentPhase: "SETUP",
 			},
 		},
 	}

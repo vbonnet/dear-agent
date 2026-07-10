@@ -16,7 +16,7 @@ import (
 // 1. Magnitude calculation (skip if magnitude 0)
 // 2. User prompting (if needed)
 // 3. Context capture (parallel)
-// 4. Dual logging: WAYFINDER-HISTORY.md (JSON) + S11-retrospective.md (markdown)
+// 4. Dual logging: WAYFINDER-HISTORY.md (JSON) + RETRO-retrospective.md (markdown)
 //
 // Errors are logged to stderr but don't block rewind operation (fail-gracefully).
 func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFlags) error {
@@ -40,7 +40,7 @@ func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFl
 	}
 
 	// Read status for context capture
-	st, err := status.ReadFrom(projectDir)
+	st, err := status.ParseV2FromDir(projectDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to read status: %v\n", err)
 		return nil // Non-blocking error
@@ -54,7 +54,7 @@ func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFl
 	}
 
 	// Capture context snapshot (parallel git/deliverables/phase)
-	snapshot := CaptureContext(projectDir, st)
+	snapshot := CaptureContextV2(projectDir, st)
 
 	// Build rewind event data. Timestamp is stored UTC so the rendered
 	// RFC3339 string carries a "Z" suffix and stays comparable across hosts.
@@ -69,13 +69,13 @@ func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFl
 		Context:   snapshot,
 	}
 
-	// Dual logging: History (JSON) + S11 (markdown)
+	// Dual logging: History (JSON) + canonical RETRO deliverable (markdown)
 	if err := LogToHistory(projectDir, data); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to log to history: %v\n", err)
 	}
 
-	if err := AppendToS11(projectDir, data); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to append to S11: %v\n", err)
+	if err := AppendToRetro(projectDir, data); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to append to RETRO: %v\n", err)
 	}
 
 	return nil
@@ -84,7 +84,7 @@ func LogRewindEvent(projectDir string, fromPhase, toPhase string, flags RewindFl
 // CalculateMagnitude calculates number of phases between from and to
 //
 // Returns |phaseIndex(from) - phaseIndex(to)|
-// Handles edge cases: unknown phases, wrap-around (e.g., S11→W0)
+// Handles edge cases such as unknown canonical phase names.
 func CalculateMagnitude(fromPhase, toPhase string) (int, error) {
 	allPhases := status.AllPhases()
 
