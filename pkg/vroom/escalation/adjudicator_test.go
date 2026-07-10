@@ -105,6 +105,29 @@ func TestClaudeAdjudicatorNoModelBehavesLikeDefault(t *testing.T) {
 	}
 }
 
+func TestModelAdjudicatorSupportsEveryModelFamily(t *testing.T) {
+	families := []string{"anthropic", "openai", "gemini", "glm", "deepseek", "nemotron", "qwen"}
+	for _, family := range families {
+		t.Run(family, func(t *testing.T) {
+			fake := &FakeAdjudicator{Verdict: Adjudication{Outcome: OutcomeCorrect}}
+			a := NewModelAdjudicator(family, fake)
+			if got := a.Name(); got != family {
+				t.Fatalf("Name() = %q, want %q", got, family)
+			}
+			got, err := a.Adjudicate(context.Background(), AdjudicationRequest{Answer: "substantive answer"})
+			if err != nil {
+				t.Fatalf("Adjudicate: %v", err)
+			}
+			if got.Outcome != OutcomeCorrect {
+				t.Fatalf("outcome = %q, want %q", got.Outcome, OutcomeCorrect)
+			}
+			if len(fake.Calls) != 1 {
+				t.Fatalf("model calls = %d, want 1", len(fake.Calls))
+			}
+		})
+	}
+}
+
 func TestParseAdjudicationJSON(t *testing.T) {
 	cases := []struct {
 		name string

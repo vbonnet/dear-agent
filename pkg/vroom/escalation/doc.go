@@ -57,7 +57,7 @@
 //
 // [Adjudicator] renders the after-the-fact outcome verdict that fills the
 // otherwise-empty Outcome/Misalignment columns. [DefaultAdjudicator] is the
-// deterministic floor; [ClaudeAdjudicator] layers a model classifier on top —
+// deterministic floor; [ModelAdjudicator] layers a model classifier on top —
 // the same seam shape as internal/override's Judge. [Backfill] applies it over
 // a log; the agm binary exposes it as `agm escalate adjudicate`.
 package escalation

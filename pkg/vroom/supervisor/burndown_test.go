@@ -18,6 +18,9 @@ func TestDefaultBurndownPolicy(t *testing.T) {
 	if len(p.Models) == 0 {
 		t.Error("Models: want non-empty default")
 	}
+	if p.Models[0] != "" {
+		t.Errorf("Models[0]: want provider-selected empty route, got %q", p.Models[0])
+	}
 }
 
 func TestInMemoryBurndownController_Live(t *testing.T) {

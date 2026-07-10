@@ -123,7 +123,7 @@ func TestAGMQueue_Dispatch(t *testing.T) {
 		}
 	})
 
-	t.Run("uses defaults for model and role", func(t *testing.T) {
+	t.Run("delegates default model selection and defaults role", func(t *testing.T) {
 		var capturedArgs []string
 		q := &AGMQueue{
 			run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -134,12 +134,28 @@ func TestAGMQueue_Dispatch(t *testing.T) {
 		_ = q.Enqueue(Task{ID: "t-def"})
 		_ = q.Dispatch(context.Background(), "t-def", "coder")
 
-		joined := strings.Join(capturedArgs, " ")
-		if !strings.Contains(joined, defaultDispatchModel) {
-			t.Errorf("default model not in args: %v", capturedArgs)
+		if containsArg(capturedArgs, "--model") {
+			t.Errorf("provider-selected model route should omit --model: %v", capturedArgs)
 		}
+		joined := strings.Join(capturedArgs, " ")
 		if !strings.Contains(joined, defaultWorkerRole) {
 			t.Errorf("default role not in args: %v", capturedArgs)
+		}
+	})
+
+	t.Run("preserves explicit model family routes", func(t *testing.T) {
+		models := []string{
+			"claude-sonnet-4-5", "gpt-5.2-codex", "gemini-3-pro",
+			"glm-5.2", "deepseek-v4", "nemotron-4", "qwen3-coder",
+		}
+		for _, model := range models {
+			t.Run(model, func(t *testing.T) {
+				args := AGMDispatchArgs("family", model, defaultWorkerRole)
+				joined := strings.Join(args, " ")
+				if !strings.Contains(joined, "--model "+model) {
+					t.Fatalf("explicit model route missing from args: %v", args)
+				}
+			})
 		}
 	})
 

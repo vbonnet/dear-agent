@@ -1,10 +1,10 @@
 # pkg/vroom/supervisor — Requirements Specification (EARS)
 
-<!-- Last audited at: 2026-07-04 -->
+<!-- Last audited at: 2026-07-10 -->
 
-**Version**: 1.0
-**Last Updated**: 2026-07-01
-**Status**: Baseline for VROOM supervisor queue dispatch behavior
+**Version**: 1.1
+**Last Updated**: 2026-07-10
+**Status**: Active
 **Scope**: VROOM supervisor task queues, with emphasis on AGM-backed worker dispatch.
 
 ---
@@ -72,8 +72,23 @@ that can pause or reshape work before resource exhaustion causes data loss.
 
 **VROOM-SUP-20** When a disk alert notifier fails for one supervisor role, the system shall record the error in the decision trail and shall continue notifying remaining roles.
 
+### Harness and Model Routing
+
+**VROOM-SUP-21** When AGM worker dispatch has no explicit model route, the system shall omit `--model` so AGM and the active harness or provider select the model.
+
+**VROOM-SUP-22** When AGM worker dispatch has an explicit model route, the system shall preserve the route without restricting its model family.
+
+**VROOM-SUP-23** When a burndown policy has no model list, the system shall default to one provider-selected empty model route.
+
+**VROOM-SUP-24** When a burndown policy has multiple explicit model routes, the system shall assign those routes to workers in round-robin order.
+
+**VROOM-SUP-25** When VROOM records a worker session with an empty model route, the system shall preserve the empty value as provider-selected rather than substituting an Anthropic model.
+
+**VROOM-SUP-26** While VROOM runs under any supported harness, the system shall use the same model-neutral dispatch contract.
+
 ## Test Traceability
 
 - Package tests: `pkg/vroom/supervisor/disk_alert_test.go`
 - Package tests: `pkg/vroom/supervisor/check_test.go`
 - Package tests: `pkg/vroom/supervisor/queue_test.go`
+- BDD: `agm/test/bdd/features/vroom_runtime_guardrails.feature`

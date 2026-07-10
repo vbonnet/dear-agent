@@ -30,7 +30,7 @@ type LLMAdjudicator interface {
 	Score(ctx context.Context, req AdjudicationRequest) (Adjudication, error)
 }
 
-// ClaudeAdjudicator layers an [LLMAdjudicator] on top of the deterministic
+// ModelAdjudicator layers an [LLMAdjudicator] on top of the deterministic
 // [DefaultAdjudicator] floor. Order of operations on Adjudicate:
 //
 //  1. If the deterministic floor renders a verdict (e.g. a non-answer is
@@ -41,38 +41,55 @@ type LLMAdjudicator interface {
 //     floor's verdict — which for a substantive answer is the empty "could not
 //     assess" result, so the backfill simply leaves the event for a later pass.
 //     A model outage never mislabels an answer.
-type ClaudeAdjudicator struct {
+type ModelAdjudicator struct {
+	name     string
 	llm      LLMAdjudicator // model layer; nil ⇒ deterministic floor only
 	fallback Adjudicator    // floor + degradation target; nil ⇒ DefaultAdjudicator{}
 }
 
-// NewClaudeAdjudicator builds a ClaudeAdjudicator backed by the live Anthropic
-// API when ANTHROPIC_API_KEY is set. When the key is absent its model layer is
-// nil — it behaves exactly like DefaultAdjudicator, so CI and key-less
-// environments are never blocked by a missing credential.
-func NewClaudeAdjudicator() *ClaudeAdjudicator {
-	return &ClaudeAdjudicator{llm: newAnthropicAdjudicatorFromEnv(), fallback: DefaultAdjudicator{}}
+// NewModelAdjudicator builds a provider-neutral adjudicator around an explicit
+// model layer. family is used for audit attribution and may name any supported
+// model family. A nil model layer degrades to the deterministic floor.
+func NewModelAdjudicator(family string, llm LLMAdjudicator) *ModelAdjudicator {
+	return &ModelAdjudicator{
+		name:     strings.ToLower(strings.TrimSpace(family)),
+		llm:      llm,
+		fallback: DefaultAdjudicator{},
+	}
 }
 
-// NewClaudeAdjudicatorWith builds a ClaudeAdjudicator around an explicit model
-// layer (e.g. a [FakeAdjudicator] in tests). A nil llm degrades to the floor.
+// ClaudeAdjudicator is the compatibility name for the Anthropic/Claude adapter.
+// New code that injects a model family should use [ModelAdjudicator].
+type ClaudeAdjudicator = ModelAdjudicator
+
+// NewClaudeAdjudicator builds the legacy Claude-named adapter backed by the
+// live Anthropic API when ANTHROPIC_API_KEY is set.
+func NewClaudeAdjudicator() *ClaudeAdjudicator {
+	return NewModelAdjudicator("claude", newAnthropicAdjudicatorFromEnv())
+}
+
+// NewClaudeAdjudicatorWith preserves the legacy Claude attribution for an
+// explicitly injected model layer.
 func NewClaudeAdjudicatorWith(llm LLMAdjudicator) *ClaudeAdjudicator {
-	return &ClaudeAdjudicator{llm: llm, fallback: DefaultAdjudicator{}}
+	return NewModelAdjudicator("claude", llm)
 }
 
 // Name implements Adjudicator.
-func (a *ClaudeAdjudicator) Name() string {
+func (a *ModelAdjudicator) Name() string {
 	if a.llm == nil {
 		// No model layer wired (no API key): the deterministic floor is what
 		// actually decided, so the log should say so.
 		return "default"
 	}
-	return "claude"
+	if a.name == "" {
+		return "model"
+	}
+	return a.name
 }
 
 // Adjudicate implements Adjudicator: floor first, then model, degrading to the
 // floor's verdict on any model trouble.
-func (a *ClaudeAdjudicator) Adjudicate(ctx context.Context, req AdjudicationRequest) (Adjudication, error) {
+func (a *ModelAdjudicator) Adjudicate(ctx context.Context, req AdjudicationRequest) (Adjudication, error) {
 	fb := a.fallback
 	if fb == nil {
 		fb = DefaultAdjudicator{}
@@ -224,7 +241,7 @@ func parseAdjudicationJSON(text string) (adjudicationJSON, error) {
 
 // Compile-time checks.
 var (
-	_ Adjudicator    = (*ClaudeAdjudicator)(nil)
+	_ Adjudicator    = (*ModelAdjudicator)(nil)
 	_ LLMAdjudicator = (*FakeAdjudicator)(nil)
 	_ LLMAdjudicator = (*anthropicAdjudicator)(nil)
 )

@@ -82,7 +82,7 @@ type ResourceSnapshot struct {
 	VnodeUsedFraction float64
 
 	// GoplsProcesses counts *orphaned* gopls processes — those reparented to
-	// PID 1 after their owning Claude session died (not live gopls bound to a
+	// PID 1 after their owning harness session died (not live gopls bound to a
 	// running session, which would make the count scale with session count and
 	// fire phantom alarms — see ce-u7v9). Each orphaned gopls instance holds
 	// ~4800 FDs; accumulation is the primary driver of FD/vnode exhaustion.
