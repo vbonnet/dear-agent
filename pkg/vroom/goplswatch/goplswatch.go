@@ -4,7 +4,7 @@
 // log an alarm and remediate.
 //
 // Background (epic ce-710r, the 2026-06-15 P0): gopls v0.22+ holds ~4800 file
-// descriptors per process. When a Claude Code session dies abruptly its gopls
+// descriptors per process. When a harness session dies abruptly its gopls
 // is reparented to PID 1 and lingers, each instance holding hundreds of MB of
 // RSS and thousands of FDs. A handful of orphans is enough to exhaust the
 // system file table (kern.maxfiles) and make every `go build` fail with ENFILE.
@@ -100,7 +100,7 @@ func (s Sample) OrphanRSSMB() float64 { return float64(s.OrphanRSSKiB()) / 1024.
 // field disables that check.
 //
 // The count and rss ceilings deliberately apply to the ORPHANED gopls subset,
-// not the raw total. Every healthy Claude Code session runs its own gopls, so a
+// not the raw total. Every healthy harness session may run its own gopls, so a
 // raw count/RSS scales with the number of live sessions and produces phantom
 // alarms (ce-u7v9) — and the watchdog cannot safely kill a live session's gopls
 // anyway. Orphans (PPID==1) are both the actual leak signal (the 2026-06-15 P0

@@ -55,7 +55,8 @@ type BurndownSession struct {
 	// SessionID is the AGM session identifier.
 	SessionID string
 
-	// Model is the model the session is running (e.g. claude-opus-4-8).
+	// Model is the optional model route the session is running. Empty means the
+	// active harness/provider selected its default model.
 	Model string
 
 	// BeadID is the bead the session has claimed, if any.
@@ -99,8 +100,9 @@ type BurndownPolicy struct {
 	// considered orphaned. Default 20 minutes.
 	StaleAfter time.Duration
 
-	// Models is the ordered list of models to assign to workers (round-robin).
-	// Default ["claude-opus-4-8"].
+	// Models is the ordered list of model routes to assign to workers
+	// (round-robin). The default contains one empty route, delegating selection
+	// to the active harness/provider configuration.
 	Models []string
 
 	// OpenPRCap is the hard ceiling on open pull requests above which the
@@ -128,7 +130,7 @@ func defaultBurndownPolicy(p BurndownPolicy) BurndownPolicy {
 		p.StaleAfter = 20 * time.Minute
 	}
 	if len(p.Models) == 0 {
-		p.Models = []string{"claude-opus-4-8"}
+		p.Models = []string{""}
 	}
 	if p.OpenPRCap <= 0 {
 		p.OpenPRCap = DefaultOpenPRCap

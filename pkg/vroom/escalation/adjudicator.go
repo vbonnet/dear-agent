@@ -66,11 +66,11 @@ type Adjudication struct {
 
 // Adjudicator renders an after-the-fact quality verdict on an answered
 // escalation. The default ([DefaultAdjudicator]) is deterministic and offline;
-// [ClaudeAdjudicator] layers a model classifier on top. The interface is the
+// [ModelAdjudicator] layers a model classifier on top. The interface is the
 // same seam shape as internal/override.Judge — call sites and tests never change
 // when the model layer is swapped in.
 type Adjudicator interface {
-	// Name identifies the adjudicator in the audit/log (e.g. "default", "claude").
+	// Name identifies the adjudicator in the audit/log (e.g. "default", "openai").
 	Name() string
 	// Adjudicate returns a verdict. A non-nil error means the adjudicator could
 	// not be consulted at all; the backfill skips the event and leaves it for a
@@ -114,7 +114,7 @@ func (DefaultAdjudicator) Adjudicate(_ context.Context, req AdjudicationRequest)
 	// (empty Outcome) so a later model pass can; do not guess.
 	return Adjudication{
 		Reason: "deterministic adjudicator cannot assess semantic correctness; " +
-			"set ANTHROPIC_API_KEY to enable the model adjudicator",
+			"configure a model adjudicator to enable semantic scoring",
 	}, nil
 }
 

@@ -51,7 +51,7 @@
 //
 // The CheckSkill seam lets the mutual-unblock-first implementation evolve
 // from a pure-heartbeat HeartbeatCheckSkill (PR 1) to an AGM-aware skill
-// that detects permission-prompt blockage in peer Claude sessions (PR 2+).
+// that detects permission-prompt blockage in peer harness sessions (PR 2+).
 //
 // # Graduated memory-pressure handling (ce-80ca)
 //
