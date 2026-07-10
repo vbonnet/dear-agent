@@ -113,6 +113,12 @@ func ParitySurfaces() []Surface {
 			SpecPath:    "pkg/context/SPEC.md",
 			FeaturePath: "agm/test/bdd/features/context_management_parity.feature",
 		},
+		{
+			Name:        "agent utility parity",
+			PackagePath: "pkg/promptcache",
+			SpecPath:    "pkg/promptcache/SPEC.md",
+			FeaturePath: "agm/test/bdd/features/agent_utility_parity.feature",
+		},
 	}
 }
 

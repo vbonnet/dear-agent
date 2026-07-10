@@ -812,6 +812,22 @@ enforcement, evaluation, event, markdown, graceful-exit, and health packages.
 routes; hard-coded route defaults in these packages silently break parity above
 the adapter layer.
 
+### Agent Utility Parity
+
+**File:** [`agent_utility_parity.feature`](../test/bdd/features/agent_utility_parity.feature)
+
+**Drives:** Shared agent utility SPEC coverage, model-family cache policy,
+cross-harness hook normalization, and harness-neutral session synchronization.
+
+**Key scenarios:**
+- Eleven shared utility packages carry co-located executable specifications.
+- Every active harness and supported model family resolves a cache policy.
+- Hook and synchronization boundaries preserve the selected route without
+  inheriting Anthropic or Claude Code wire assumptions.
+
+**Why this matters:** Utility packages sit below adapters and are reused by
+every route; a provider-specific default here propagates across the codebase.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)

@@ -1,4 +1,4 @@
-// Package stophook provides shared utilities for Claude Code Stop hooks.
+// Package stophook provides shared utilities for harness stop and completion hooks.
 package stophook
 
 import (
@@ -10,12 +10,27 @@ import (
 	"time"
 )
 
-// Input is the JSON structure received from Claude Code Stop hooks on stdin.
+// Input is the normalized JSON structure received from a harness hook on stdin.
 type Input struct {
+	Harness        string `json:"harness,omitempty"`
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
 	StopReason     string `json:"stop_reason"`
 	Cwd            string `json:"cwd"`
+}
+
+type wireInput struct {
+	Harness        string `json:"harness"`
+	SessionID      string `json:"session_id"`
+	ThreadID       string `json:"thread_id"`
+	ConversationID string `json:"conversation_id"`
+	TranscriptPath string `json:"transcript_path"`
+	Transcript     string `json:"transcript"`
+	StopReason     string `json:"stop_reason"`
+	Reason         string `json:"reason"`
+	Cwd            string `json:"cwd"`
+	WorkspaceDir   string `json:"workspace_dir"`
+	ProjectDir     string `json:"project_dir"`
 }
 
 // ReadInput reads and parses the Stop hook JSON input from stdin.
@@ -24,11 +39,26 @@ func ReadInput(r io.Reader) (*Input, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading stdin: %w", err)
 	}
-	var input Input
-	if err := json.Unmarshal(data, &input); err != nil {
+	var wire wireInput
+	if err := json.Unmarshal(data, &wire); err != nil {
 		return nil, fmt.Errorf("parsing input: %w", err)
 	}
-	return &input, nil
+	return &Input{
+		Harness:        wire.Harness,
+		SessionID:      firstHookValue(wire.SessionID, wire.ThreadID, wire.ConversationID),
+		TranscriptPath: firstHookValue(wire.TranscriptPath, wire.Transcript),
+		StopReason:     firstHookValue(wire.StopReason, wire.Reason),
+		Cwd:            firstHookValue(wire.Cwd, wire.WorkspaceDir, wire.ProjectDir),
+	}, nil
+}
+
+func firstHookValue(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // RunWithTimeout executes a hook function with a timeout.

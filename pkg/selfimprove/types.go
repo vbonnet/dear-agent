@@ -8,8 +8,8 @@ import (
 )
 
 // Hypothesis is a proposed improvement to dear-agent generated from failure
-// patterns. The Source identifies which model proposed it (Claude, GPT,
-// Gemini, …) so the loop can attribute wins per-model.
+// patterns. Source identifies the proposing model family so the loop can
+// attribute wins without assuming a particular provider.
 type Hypothesis struct {
 	ID          string  `json:"id"`
 	Source      string  `json:"source"`
@@ -56,7 +56,8 @@ type LoopConfig struct {
 }
 
 // Proposer turns benchmarks.Insights into a list of Hypothesis. The model
-// argument lets a single Proposer impl multiplex over Claude, GPT, Gemini.
+// argument lets a single Proposer implementation multiplex over every
+// configured model family.
 type Proposer interface {
 	Propose(ctx context.Context, insights *benchmarks.Insights, model string) ([]Hypothesis, error)
 }
