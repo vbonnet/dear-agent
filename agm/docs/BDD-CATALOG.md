@@ -843,6 +843,21 @@ filesystem safety, content validation, VCS, versioning, W0, and workspace state.
 **Why this matters:** Validation and workspace policy is shared infrastructure;
 route-specific defaults would produce different safety outcomes for identical work.
 
+### Evaluation and Control Parity
+
+**File:** [`evaluation_control_parity.feature`](../test/bdd/features/evaluation_control_parity.feature)
+
+**Drives:** Benchmark orchestration, model-route preservation, Engram migration,
+and Discord/GitHub human approval transport SPEC coverage.
+
+**Key scenarios:**
+- Every benchmark, migration, and HITL package carries a co-located SPEC.
+- Every harness and model family preserves the selected benchmark model route.
+- Engram tier migration remains independent of the invoking harness.
+
+**Why this matters:** Comparative evidence and human approval decisions must
+not change because a task entered through a different harness or model family.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)

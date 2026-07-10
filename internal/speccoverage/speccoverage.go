@@ -125,6 +125,12 @@ func ParitySurfaces() []Surface {
 			SpecPath:    "pkg/security/SPEC.md",
 			FeaturePath: "agm/test/bdd/features/validation_workspace_parity.feature",
 		},
+		{
+			Name:        "evaluation and control parity",
+			PackagePath: "pkg/benchmarks",
+			SpecPath:    "pkg/benchmarks/SPEC.md",
+			FeaturePath: "agm/test/bdd/features/evaluation_control_parity.feature",
+		},
 	}
 }
 
