@@ -37,6 +37,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterAgentSelectionGuardrailSteps(ctx)
 	steps.RegisterAPIGatewayPackageGuardrailSteps(ctx)
 	steps.RegisterAuditPackageGuardrailSteps(ctx)
+	steps.RegisterAGMDiagnosticsPackageGuardrailSteps(ctx)
 	steps.RegisterDBPersistenceGuardrailSteps(ctx)
 	steps.RegisterEngramHookGuardrailSteps(ctx)
 	steps.RegisterEngramKnowledgeGuardrailSteps(ctx)
