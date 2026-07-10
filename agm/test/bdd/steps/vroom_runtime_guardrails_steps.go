@@ -83,7 +83,7 @@ func vroomBuildsSharedContracts(ctx context.Context) error {
 		Verdict: escalation.Adjudication{Outcome: escalation.OutcomeCorrect},
 	}
 	state.adjudicator = escalation.NewModelAdjudicator(state.family, fake)
-	state.adjudication, err = state.adjudicator.Adjudicate(context.Background(), escalation.AdjudicationRequest{
+	state.adjudication, err = state.adjudicator.Adjudicate(ctx, escalation.AdjudicationRequest{
 		Answer: "a substantive answer from the configured model family",
 	})
 	if err != nil {
