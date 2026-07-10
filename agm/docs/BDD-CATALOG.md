@@ -906,6 +906,22 @@ SPEC coverage.
 **Why this matters:** Host maintenance must preserve golden-source and safe-push
 rules while remaining independent of a single harness or model provider.
 
+### Root Safety Command Guardrails
+
+**File:** [`root_safety_command_guardrails.feature`](../test/bdd/features/root_safety_command_guardrails.feature)
+
+**Drives:** native Claude settings and OAuth adapters, deployment drift,
+language-server pressure, log rotation, and shared filesystem-hook adapter SPEC
+coverage.
+
+**Key scenarios:**
+- Every listed safety package has reciprocal co-located SPEC traceability.
+- Claude-native credential/configuration tools declare their adapter boundary.
+- Filesystem guards also point to the active cross-harness hook parity suite.
+
+**Why this matters:** Native harness files are valid adapter details, but shared
+permissions, hooks, and policy must remain in neutral contracts.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)

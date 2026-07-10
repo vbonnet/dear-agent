@@ -1,0 +1,34 @@
+# Claude OAuth Token Refresher Specification
+
+<!-- Last audited at: 2026-07-09 -->
+
+## Overview
+
+`cmd/token-refresher` is the single-owner refresh adapter for Claude Code OAuth
+credentials. It does not stand in for OpenAI, Gemini, OpenRouter, or other
+provider credential handling.
+
+## EARS Requirements
+
+**CTR-01** When a token freshness operation runs, the command shall hold the cross-process credential lock across read, exchange, and atomic persistence.
+
+**CTR-02** When check mode is selected, the command shall report status without network access or mutation.
+
+**CTR-03** When a token remains fresh, the command shall return it without spending the refresh token.
+
+**CTR-04** When force mode is selected, the command shall attempt refresh even when the access token is still fresh.
+
+**CTR-05** When refresh succeeds, stdout shall contain only the access token and logs shall remain on stderr.
+
+**CTR-06** When the OAuth server reports `invalid_grant`, the command shall report a dead token family and return exit code 2.
+
+**CTR-07** When server refresh succeeds but rotated credentials cannot be persisted, the command shall report a critical non-persistence failure and return exit code 3.
+
+**CTR-08** When audit evidence is written, the command shall record mode, outcome, freshness, expiry metadata, and errors without recording token values.
+
+**CTR-09** When provider credentials are not Claude Code OAuth credentials, the system shall use the corresponding provider or harness credential surface instead of this adapter.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/root_safety_command_guardrails.feature`
+- Package tests: `cmd/token-refresher/*_test.go`

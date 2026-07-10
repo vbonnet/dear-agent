@@ -74,6 +74,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterQualityCommandGuardrailSteps(ctx)
 	steps.RegisterRootLifecycleCommandGuardrailSteps(ctx)
 	steps.RegisterRootMaintenanceCommandGuardrailSteps(ctx)
+	steps.RegisterRootSafetyCommandGuardrailSteps(ctx)
 	steps.RegisterSandboxProviderGuardrailSteps(ctx)
 	steps.RegisterSharedRuntimePolicyGuardrailSteps(ctx)
 	steps.RegisterAGMSupervisionRecoveryGuardrailSteps(ctx)
