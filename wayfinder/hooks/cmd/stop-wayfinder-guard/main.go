@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,6 +19,8 @@ const (
 	statusCompleted = "completed"
 	statusAbandoned = "abandoned"
 )
+
+var errLegacyStatus = errors.New("legacy Wayfinder status requires explicit migration")
 
 type wayfinderStatus struct {
 	SchemaVersion   string `yaml:"schema_version"`
@@ -104,6 +107,12 @@ func checkRetrospective(r *stophook.Result, dir string) {
 	// Parse WAYFINDER-STATUS.md to detect project completion.
 	s, err := readCanonicalStatus(dir)
 	if err != nil {
+		if errors.Is(err, errLegacyStatus) {
+			r.Block("retrospective",
+				"legacy Wayfinder status detected",
+				"run 'wayfinder session migrate' to upgrade to V2")
+			return
+		}
 		// No parseable status — skip gracefully.
 		r.Pass("retrospective", "no parseable WAYFINDER-STATUS.md, skipped")
 		return
@@ -120,6 +129,12 @@ func checkRetrospective(r *stophook.Result, dir string) {
 func checkPhase(r *stophook.Result, dir string) {
 	s, err := readCanonicalStatus(dir)
 	if err != nil {
+		if errors.Is(err, errLegacyStatus) {
+			r.Block("phase",
+				"legacy Wayfinder status detected",
+				"run 'wayfinder session migrate' to upgrade to V2")
+			return
+		}
 		r.Pass("phase", "no parseable WAYFINDER-STATUS.md, skipped")
 		return
 	}
@@ -152,7 +167,7 @@ func readCanonicalStatus(dir string) (*wayfinderStatus, error) {
 		return nil, fmt.Errorf("parse WAYFINDER-STATUS.md: %w", err)
 	}
 	if parsed.SchemaVersion != "2.0" {
-		return nil, fmt.Errorf("legacy Wayfinder status requires explicit migration")
+		return nil, errLegacyStatus
 	}
 	return &parsed, nil
 }

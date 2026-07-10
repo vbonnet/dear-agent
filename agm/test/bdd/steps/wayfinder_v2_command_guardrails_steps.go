@@ -165,7 +165,7 @@ func normalWayfinderCommandsParseOnlyV2(ctx context.Context) error {
 	return nil
 }
 
-func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) error {
+func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) (resultErr error) {
 	state, err := getWayfinderV2CommandState(ctx)
 	if err != nil {
 		return err
@@ -175,7 +175,11 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open Wayfinder source root: %w", err)
 	}
-	defer func() { _ = rootFS.Close() }()
+	defer func() {
+		if closeErr := rootFS.Close(); resultErr == nil && closeErr != nil {
+			resultErr = fmt.Errorf("close Wayfinder source root: %w", closeErr)
+		}
+	}()
 	retired := regexp.MustCompile(`\b(W0|D1|D2|D3|D4|S4|S5|S6|S7|S8|S9|S10|S11)\b|S11-retrospective|discovery\.(problem|solutions|approach|requirements)|design\.(tech-lead|security|qa)|roadmap\.(planning|breakdown|dependencies)`)
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -195,7 +199,7 @@ func nonMigrationRuntimeOmitsRetiredPhases(ctx context.Context) error {
 			rel == filepath.Join("cmd", "wayfinder-session", "commands", "migrate.go") {
 			return nil
 		}
-		data, readErr := rootFS.ReadFile(rel)
+		data, readErr := rootFS.ReadFile(filepath.ToSlash(rel))
 		if readErr != nil {
 			return readErr
 		}
