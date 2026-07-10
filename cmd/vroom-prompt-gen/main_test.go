@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vbonnet/dear-agent/internal/vroomprompt"
 )
 
 func TestMentionsID(t *testing.T) {
@@ -165,6 +167,17 @@ func TestRenderPromptEmptyDescription(t *testing.T) {
 	out := renderPrompt(b)
 	if !strings.Contains(out, "Bead ce-x (P2). Title only") {
 		t.Errorf("empty description should fall back to title in summary:\n%s", out)
+	}
+}
+
+func TestRenderPromptForRoute(t *testing.T) {
+	got := renderPromptForRoute(bead{ID: "ce-route", Title: "route"}, vroomprompt.Route{
+		Harness: "opencode-cli", Model: "qwen", Mode: "auto", Workspace: "oss",
+	})
+	for _, want := range []string{"harness=opencode-cli", "model=qwen", "--mode=auto", "--workspace=oss"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, got)
+		}
 	}
 }
 

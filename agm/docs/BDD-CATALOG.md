@@ -936,6 +936,21 @@ and trace-to-eval command SPEC coverage.
 **Why this matters:** Search, supervision, dispatch, and evaluation evidence
 must not change meaning based on which model produced or consumed it.
 
+### Root Operations Command Guardrails
+
+**File:** [`root_operations_command_guardrails.feature`](../test/bdd/features/root_operations_command_guardrails.feature)
+
+**Drives:** webhook, benchmark, Bumblebee, flywheel, retrospective, and VROOM
+prompt generation SPEC coverage.
+
+**Key scenarios:**
+- Every listed operations package has reciprocal co-located SPEC traceability.
+- Generated VROOM prompts preserve every active harness route.
+- Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen worker routes remain selectable.
+
+**Why this matters:** Autonomous dispatch prompts are control-plane artifacts;
+they must enforce safety rules without hardcoding one harness or model.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)
