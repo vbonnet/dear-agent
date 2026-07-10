@@ -316,6 +316,86 @@ models:
     confidence: "LOW"
     last_updated: "2026-03-18T00:00:00Z"
 
+  # ==================== Current Parity Defaults ====================
+
+  - model_id: "gpt-5.5"
+    provider: "openai"
+    max_context_tokens: 200000
+    sweet_spot_threshold: 0.60
+    warning_threshold: 0.70
+    danger_threshold: 0.80
+    critical_threshold: 0.90
+    benchmark_sources:
+      - "AGM active-harness capability contract"
+    notes: "Codex CLI default; conservative thresholds pending model-specific benchmark data."
+    confidence: "LOW"
+    last_updated: "2026-07-09T00:00:00Z"
+
+  - model_id: "gemini-2.5-flash"
+    provider: "google"
+    max_context_tokens: 200000
+    sweet_spot_threshold: 0.60
+    warning_threshold: 0.70
+    danger_threshold: 0.80
+    critical_threshold: 0.90
+    benchmark_sources:
+      - "AGM Antigravity harness capability contract"
+    notes: "Antigravity default route; window is capped conservatively to the active harness contract."
+    confidence: "LOW"
+    last_updated: "2026-07-09T00:00:00Z"
+
+  - model_id: "z-ai/glm-5.2"
+    provider: "openrouter"
+    max_context_tokens: 200000
+    sweet_spot_threshold: 0.60
+    warning_threshold: 0.70
+    danger_threshold: 0.80
+    critical_threshold: 0.90
+    benchmark_sources:
+      - "Dear-agent model-family parity fallback"
+    notes: "GLM family default; conservative window and thresholds until benchmark-specific data is registered."
+    confidence: "LOW"
+    last_updated: "2026-07-09T00:00:00Z"
+
+  - model_id: "deepseek/deepseek-v4-pro"
+    provider: "openrouter"
+    max_context_tokens: 200000
+    sweet_spot_threshold: 0.60
+    warning_threshold: 0.70
+    danger_threshold: 0.80
+    critical_threshold: 0.90
+    benchmark_sources:
+      - "Dear-agent model-family parity fallback"
+    notes: "DeepSeek family default; conservative window and thresholds until benchmark-specific data is registered."
+    confidence: "LOW"
+    last_updated: "2026-07-09T00:00:00Z"
+
+  - model_id: "nvidia/nemotron-3-ultra"
+    provider: "openrouter"
+    max_context_tokens: 200000
+    sweet_spot_threshold: 0.60
+    warning_threshold: 0.70
+    danger_threshold: 0.80
+    critical_threshold: 0.90
+    benchmark_sources:
+      - "Dear-agent model-family parity fallback"
+    notes: "Nemotron family default; conservative window and thresholds until benchmark-specific data is registered."
+    confidence: "LOW"
+    last_updated: "2026-07-09T00:00:00Z"
+
+  - model_id: "qwen/qwen3.6-max"
+    provider: "openrouter"
+    max_context_tokens: 200000
+    sweet_spot_threshold: 0.60
+    warning_threshold: 0.70
+    danger_threshold: 0.80
+    critical_threshold: 0.90
+    benchmark_sources:
+      - "Dear-agent model-family parity fallback"
+    notes: "Qwen family default; conservative window and thresholds until benchmark-specific data is registered."
+    confidence: "LOW"
+    last_updated: "2026-07-09T00:00:00Z"
+
   # ==================== Default Fallback ====================
 
   - model_id: "default"

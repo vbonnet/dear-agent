@@ -58,6 +58,13 @@ func TestCompactConversation_BelowThreshold(t *testing.T) {
 	}
 }
 
+func TestDefaultCompactionConfigDelegatesModelSelection(t *testing.T) {
+	cfg := DefaultCompactionConfig()
+	if cfg.Model != "" {
+		t.Fatalf("default compaction model = %q, want provider-selected route", cfg.Model)
+	}
+}
+
 func TestCompactConversation_AboveThreshold(t *testing.T) {
 	bigContent := strings.Repeat("x", 700_000) // ~233K tokens, well above 80% of 200K
 	msgs := []Message{

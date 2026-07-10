@@ -72,6 +72,7 @@ func (d *Detector) extractFromSystemReminder(text string, sessionID string) (*Us
 		Source:         "claude-cli",
 		ModelID:        modelID,
 		SessionID:      sessionID,
+		Estimated:      false,
 	}, nil
 }
 
@@ -143,7 +144,7 @@ func (d *Detector) extractFromConversationFile(sessionID string) (*Usage, error)
 
 // DetectFromHeuristic estimates token usage when actual data is unavailable.
 func (d *Detector) DetectFromHeuristic() (*Usage, error) {
-	// Default to Claude-level context (200K)
+	// Use the neutral fallback context window.
 	maxTokens := 200000
 
 	// Estimate based on typical session (assume 50 messages)
@@ -152,6 +153,7 @@ func (d *Detector) DetectFromHeuristic() (*Usage, error) {
 	usage := EstimateFromMessageCount(estimatedMessages, maxTokens)
 	usage.Source = "heuristic"
 	usage.ModelID = "default"
+	usage.Estimated = true
 
 	return usage, nil
 }

@@ -54,6 +54,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	steps.RegisterHarnessParitySteps(ctx)
 	steps.RegisterHarnessConfigSurfaceGuardrailSteps(ctx)
 	steps.RegisterInstructionParitySteps(ctx)
+	steps.RegisterContextManagementParitySteps(ctx)
 	steps.RegisterHookParitySteps(ctx)
 	steps.RegisterLLMRuntimeGuardrailSteps(ctx)
 	steps.RegisterLocalDevelopmentGuardrailSteps(ctx)

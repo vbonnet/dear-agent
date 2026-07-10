@@ -107,6 +107,12 @@ func ParitySurfaces() []Surface {
 			SpecPath:    "pkg/llm/provider/SPEC.md",
 			FeaturePath: "agm/test/bdd/features/model_family_parity.feature",
 		},
+		{
+			Name:        "context management parity",
+			PackagePath: "pkg/context",
+			SpecPath:    "pkg/context/SPEC.md",
+			FeaturePath: "agm/test/bdd/features/context_management_parity.feature",
+		},
 	}
 }
 

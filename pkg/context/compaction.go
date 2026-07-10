@@ -23,7 +23,8 @@ Output format: a single <compact_summary> block.`
 
 // CompactionConfig controls conversation compaction behavior.
 type CompactionConfig struct {
-	// Model is the model identifier for summarization (e.g., "claude-haiku-4-5-20251001").
+	// Model is the optional model identifier for summarization. Empty delegates
+	// model selection to the configured provider.
 	Model string
 
 	// MaxTokens is the maximum number of tokens for the summary response.
@@ -42,7 +43,7 @@ type CompactionConfig struct {
 // DefaultCompactionConfig returns a CompactionConfig with sensible defaults.
 func DefaultCompactionConfig() CompactionConfig {
 	return CompactionConfig{
-		Model:          "claude-haiku-4-5-20251001",
+		Model:          "",
 		MaxTokens:      4096,
 		PreserveRecent: 3,
 		WindowSize:     200_000,

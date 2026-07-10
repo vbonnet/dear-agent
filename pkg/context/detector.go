@@ -21,21 +21,10 @@ func NewDetector(registry *Registry) *Detector {
 // Detect auto-detects CLI type and extracts token usage.
 func (d *Detector) Detect() (*Usage, error) {
 	cli := d.DetectCLI()
-
-	switch cli {
-	case CLIClaude:
-		return d.DetectFromClaude()
-	case CLIGemini:
-		return nil, fmt.Errorf("gemini context detection not implemented")
-	case CLIOpenCode:
-		return nil, fmt.Errorf("OpenCode context detection not implemented")
-	case CLICodex:
-		return nil, fmt.Errorf("codex context detection not implemented")
-	case CLIUnknown:
+	if cli == CLIUnknown {
 		return d.DetectFromHeuristic()
 	}
-
-	return d.DetectFromHeuristic()
+	return d.DetectFromSession(sessionIDForCLI(cli), cli)
 }
 
 // DetectCLI identifies which CLI is currently running based on environment variables.
@@ -51,6 +40,10 @@ func (d *Detector) DetectCLI() CLI {
 	}
 	if os.Getenv("CODEX_SESSION_ID") != "" {
 		return CLICodex
+	}
+	if os.Getenv("AGY_CONVERSATION_ID") != "" || os.Getenv("AGY_SESSION_ID") != "" ||
+		os.Getenv("ANTIGRAVITY_SESSION_ID") != "" {
+		return CLIAgy
 	}
 
 	return CLIUnknown
@@ -81,13 +74,13 @@ func (d *Detector) DetectWithModel(modelID string) (*Usage, error) {
 func (d *Detector) DetectFromSession(sessionID string, cli CLI) (*Usage, error) {
 	switch cli {
 	case CLIClaude:
-		return d.DetectFromClaudeSession(sessionID)
-	case CLIGemini:
-		return nil, fmt.Errorf("gemini context detection not implemented")
-	case CLIOpenCode:
-		return nil, fmt.Errorf("OpenCode context detection not implemented")
-	case CLICodex:
-		return nil, fmt.Errorf("codex context detection not implemented")
+		usage, err := d.DetectFromClaudeSession(sessionID)
+		if err == nil {
+			return usage, nil
+		}
+		return d.detectPortableSession(sessionID, cli)
+	case CLIGemini, CLIOpenCode, CLICodex, CLIAgy:
+		return d.detectPortableSession(sessionID, cli)
 	case CLIUnknown:
 		return nil, fmt.Errorf("unsupported CLI type: %s", cli)
 	}
@@ -114,5 +107,6 @@ func EstimateFromMessageCount(messageCount int, maxTokens int) *Usage {
 		LastUpdated:    time.Now(),
 		Source:         "heuristic",
 		ModelID:        "default", // Will be updated if model known
+		Estimated:      true,
 	}
 }

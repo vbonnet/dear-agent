@@ -779,6 +779,22 @@ tmux terminal handling, validation, and delegation behavior together. These
 packages need explicit contracts so parity work does not regress into
 harness-specific or Claude-only assumptions.
 
+### Context Management Parity
+
+**File:** [`context_management_parity.feature`](../test/bdd/features/context_management_parity.feature)
+
+**Drives:** `pkg/context` harness detection, explicit heuristic labeling,
+model-family context windows, and provider-neutral compaction defaults.
+
+**Key scenarios:**
+- Every active harness resolves context usage for every supported model family.
+- Fallback usage is visibly estimated and retains the selected model route.
+- Every supported family has a positive registered context window.
+
+**Why this matters:** Quota and compaction policy cannot be parity-complete when
+non-Claude harnesses return not-implemented errors or silently inherit a Claude
+summarizer model.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)
