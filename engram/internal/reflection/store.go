@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -24,6 +25,14 @@ func NewStore(reflectionPath string) *Store {
 
 // Save saves a reflection as an engram
 func (s *Store) Save(r *Reflection) error {
+	if r == nil {
+		return fmt.Errorf("reflection is nil")
+	}
+	if len(r.SessionID) < 8 || strings.Contains(r.SessionID, "..") ||
+		strings.ContainsAny(r.SessionID, `/\`) || strings.ContainsRune(r.SessionID, 0) {
+		return fmt.Errorf("invalid reflection session ID")
+	}
+
 	// Create reflections directory if needed
 	if err := os.MkdirAll(s.reflectionPath, 0o700); err != nil {
 		return fmt.Errorf("failed to create reflections directory: %w", err)

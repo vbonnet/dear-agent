@@ -3,6 +3,7 @@ package simple
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/vbonnet/dear-agent/engram/internal/consolidation"
 )
@@ -16,6 +17,7 @@ import (
 // Not optimized for production use (no caching, simple file I/O).
 type SimpleFileProvider struct {
 	storagePath string // Root directory for all storage
+	mu          sync.Mutex
 }
 
 func init() {

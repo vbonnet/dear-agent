@@ -527,6 +527,21 @@ and tokenizer registry SPEC coverage.
 budgets are cross-harness boundaries. Credential protection must cover
 Anthropic, OpenAI, Gemini, and OpenRouter-routed model families uniformly.
 
+### Engram Reflection And Storage Guardrails
+
+**File:** [`engram_reflection_storage_guardrails.feature`](../test/bdd/features/engram_reflection_storage_guardrails.feature)
+
+**Drives:** Engram reflection synthesis, project scanners, and the simple
+provider's memory, session, context, and artifact SPEC coverage.
+
+**Key scenarios:**
+- Engram reflection and storage packages keep co-located SPEC coverage.
+- Engram reflection and storage SPECs point back to executable BDD.
+
+**Why this matters:** Cross-session learning requires both safe signal
+collection and a complete provider-neutral persistence implementation, not a
+harness-specific or partially implemented memory path.
+
 ### Local Development Guardrails
 
 **File:** [`local_development_guardrails.feature`](../test/bdd/features/local_development_guardrails.feature)

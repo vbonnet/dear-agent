@@ -103,6 +103,25 @@ func TestSave_Success(t *testing.T) {
 	}
 }
 
+func TestSave_RejectsUnsafeSessionID(t *testing.T) {
+	store := NewStore(t.TempDir())
+	for _, sessionID := range []string{"short", "../escape-session", "path/session-id"} {
+		t.Run(sessionID, func(t *testing.T) {
+			err := store.Save(&Reflection{
+				SessionID: sessionID,
+				Timestamp: time.Now(),
+				Trigger:   Trigger{Type: TriggerExplicitRequest, Description: "test"},
+			})
+			if err == nil {
+				t.Fatalf("Save() accepted unsafe session ID %q", sessionID)
+			}
+		})
+	}
+	if err := store.Save(nil); err == nil {
+		t.Fatal("Save(nil) error = nil")
+	}
+}
+
 // TestSave_CreatesDirectory verifies directory creation
 func TestSave_CreatesDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
