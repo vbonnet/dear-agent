@@ -795,6 +795,23 @@ model-family context windows, and provider-neutral compaction defaults.
 non-Claude harnesses return not-implemented errors or silently inherit a Claude
 summarizer model.
 
+### Shared Runtime Policy Package Guardrails
+
+**File:** [`shared_runtime_policy_guardrails.feature`](../test/bdd/features/shared_runtime_policy_guardrails.feature)
+
+**Drives:** Co-located strict EARS contracts and route-neutral implementation
+checks for shared configuration, backlog, code generation, code intelligence,
+enforcement, evaluation, event, markdown, graceful-exit, and health packages.
+
+**Key scenarios:**
+- Every shared runtime policy package carries a reciprocal SPEC reference.
+- Every package contract names all four active harnesses and seven model families.
+- Production string literals do not embed a harness or model-family route.
+
+**Why this matters:** Shared policy behavior must remain identical across caller
+routes; hard-coded route defaults in these packages silently break parity above
+the adapter layer.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)
