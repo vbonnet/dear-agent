@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vbonnet/dear-agent/engram/internal/consolidation"
@@ -44,14 +45,15 @@ func (p *SimpleFileProvider) StoreArtifact(ctx context.Context, artifactID strin
 		}
 	}()
 
-	// 1. Validate artifact ID (basic check)
-	if artifactID == "" || artifactID == "." || artifactID == ".." {
-		err = fmt.Errorf("store artifact: invalid artifact ID")
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// 1. Validate artifact ID and containment
+	artifactPath, pathErr := p.getArtifactPath(artifactID)
+	if pathErr != nil {
+		err = pathErr
 		return err
 	}
-
-	// 2. Construct file path
-	artifactPath := filepath.Join(p.storagePath, "_artifacts", artifactID)
 
 	// 3. Create parent directory
 	if err = os.MkdirAll(filepath.Dir(artifactPath), 0o700); err != nil {
@@ -97,14 +99,15 @@ func (p *SimpleFileProvider) GetArtifact(ctx context.Context, artifactID string)
 		}
 	}()
 
-	// 1. Validate artifact ID
-	if artifactID == "" || artifactID == "." || artifactID == ".." {
-		err = fmt.Errorf("get artifact: invalid artifact ID")
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// 1. Validate artifact ID and containment
+	artifactPath, pathErr := p.getArtifactPath(artifactID)
+	if pathErr != nil {
+		err = pathErr
 		return nil, err
 	}
-
-	// 2. Construct file path
-	artifactPath := filepath.Join(p.storagePath, "_artifacts", artifactID)
 
 	// 3. Read file
 	data, readErr := os.ReadFile(artifactPath)
@@ -150,14 +153,15 @@ func (p *SimpleFileProvider) DeleteArtifact(ctx context.Context, artifactID stri
 		}
 	}()
 
-	// 1. Validate artifact ID
-	if artifactID == "" || artifactID == "." || artifactID == ".." {
-		err = fmt.Errorf("delete artifact: invalid artifact ID")
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// 1. Validate artifact ID and containment
+	artifactPath, pathErr := p.getArtifactPath(artifactID)
+	if pathErr != nil {
+		err = pathErr
 		return err
 	}
-
-	// 2. Construct file path
-	artifactPath := filepath.Join(p.storagePath, "_artifacts", artifactID)
 
 	// 3. Check file exists
 	if _, statErr := os.Stat(artifactPath); os.IsNotExist(statErr) {
@@ -172,4 +176,17 @@ func (p *SimpleFileProvider) DeleteArtifact(ctx context.Context, artifactID stri
 
 	success = true
 	return nil
+}
+
+func (p *SimpleFileProvider) getArtifactPath(artifactID string) (string, error) {
+	if err := validateMemoryID(artifactID); err != nil {
+		return "", fmt.Errorf("invalid artifact ID: %w", err)
+	}
+
+	artifactRoot := filepath.Clean(filepath.Join(p.storagePath, "_artifacts"))
+	artifactPath := filepath.Clean(filepath.Join(artifactRoot, artifactID))
+	if !strings.HasPrefix(artifactPath, artifactRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid artifact ID: %w", consolidation.ErrInvalidNamespace)
+	}
+	return artifactPath, nil
 }

@@ -24,6 +24,13 @@ func NewStore(reflectionPath string) *Store {
 
 // Save saves a reflection as an engram
 func (s *Store) Save(r *Reflection) error {
+	if r == nil {
+		return fmt.Errorf("reflection is nil")
+	}
+	if !safeReflectionSessionID(r.SessionID) {
+		return fmt.Errorf("invalid reflection session ID")
+	}
+
 	// Create reflections directory if needed
 	if err := os.MkdirAll(s.reflectionPath, 0o700); err != nil {
 		return fmt.Errorf("failed to create reflections directory: %w", err)
@@ -93,6 +100,28 @@ func (s *Store) Save(r *Reflection) error {
 	}
 
 	return nil
+}
+
+func safeReflectionSessionID(sessionID string) bool {
+	if len(sessionID) < 8 {
+		return false
+	}
+	for _, char := range sessionID {
+		if char >= 'a' && char <= 'z' {
+			continue
+		}
+		if char >= 'A' && char <= 'Z' {
+			continue
+		}
+		if char >= '0' && char <= '9' {
+			continue
+		}
+		if char == '-' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // SaveWithAutoDetect saves a reflection with automatic failure detection
