@@ -890,6 +890,22 @@ and merge-loop command and policy package SPEC coverage.
 **Why this matters:** Repository automation must use safe wrappers and shared
 AGM routing rather than embedding Claude-only credentials or model assumptions.
 
+### Root Maintenance Command Guardrails
+
+**File:** [`root_maintenance_command_guardrails.feature`](../test/bdd/features/root_maintenance_command_guardrails.feature)
+
+**Drives:** burndown worker maintenance, merge velocity, PR linkification,
+golden source recovery, post-merge hook installation, and chezmoi deployment
+SPEC coverage.
+
+**Key scenarios:**
+- Every listed maintenance package has reciprocal co-located SPEC traceability.
+- Burndown workers preserve every active AGM harness route.
+- Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen routes reach AGM unchanged.
+
+**Why this matters:** Host maintenance must preserve golden-source and safe-push
+rules while remaining independent of a single harness or model provider.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)

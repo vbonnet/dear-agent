@@ -34,6 +34,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/vbonnet/dear-agent/internal/burndownmaint"
 )
 
 const (
@@ -58,6 +60,7 @@ func main() {
 
 type options struct {
 	target    int
+	harness   string
 	model     string
 	workspace string
 	jsonOut   bool
@@ -68,6 +71,7 @@ func run(argv []string) error {
 	fs := flag.NewFlagSet("burndown-maint", flag.ContinueOnError)
 	var opts options
 	fs.IntVar(&opts.target, "target", 1, "Desired concurrent burndown workers")
+	fs.StringVar(&opts.harness, "harness", "claude-code", "AGM harness for new workers")
 	fs.StringVar(&opts.model, "model", "claude-opus-4-8", "Model for new workers")
 	fs.StringVar(&opts.workspace, "workspace", "oss", "AGM workspace for new sessions")
 	fs.BoolVar(&opts.jsonOut, "json", false, "Output JSON status")
@@ -100,14 +104,16 @@ func run(argv []string) error {
 	}
 
 	if opts.dryRun {
-		logf("dry-run: would spawn 1 worker (model=%s)", opts.model)
+		logf("dry-run: would spawn 1 worker (harness=%s model=%s)", opts.harness, opts.model)
 		result.DryRun = true
 		return outputResult(result, opts.jsonOut)
 	}
 
-	logf("below target, spawning 1 worker (model=%s)", opts.model)
+	logf("below target, spawning 1 worker (harness=%s model=%s)", opts.harness, opts.model)
 	sessionName := fmt.Sprintf("burndown-%s", time.Now().Format("20060102-150405"))
-	sid, err := spawnWorker(sessionName, opts.model, opts.workspace)
+	sid, err := spawnWorker(sessionName, burndownmaint.Route{
+		Harness: opts.harness, Model: opts.model, Workspace: opts.workspace,
+	})
 	if err != nil {
 		return fmt.Errorf("spawn worker: %w", err)
 	}
@@ -163,17 +169,8 @@ func countActiveBurndownWorkers() (int, error) {
 }
 
 // spawnWorker creates a new detached AGM session for burndown work.
-func spawnWorker(name, model, workspace string) (string, error) {
-	args := []string{
-		"session", "new", name,
-		"--detached",
-		"--harness", "claude-code",
-		"--model", model,
-	}
-	if workspace != "" {
-		args = append(args, "--workspace", workspace)
-	}
-
+func spawnWorker(name string, route burndownmaint.Route) (string, error) {
+	args := burndownmaint.BuildSessionArgs(name, route)
 	out, err := exec.Command("agm", args...).CombinedOutput() //#nosec G204
 	if err != nil {
 		return "", fmt.Errorf("agm session new: %w\n%s", err, out)
