@@ -193,6 +193,20 @@ func TestSanitizeForLogs_UnsetNamedEnvironmentDoesNotCorruptMessage(t *testing.T
 	}
 }
 
+func TestSanitizeForLogs_ShortPlaceholderDoesNotCorruptMessage(t *testing.T) {
+	for _, environments := range providerKeyEnvironments {
+		for _, environment := range environments {
+			t.Setenv(environment, "")
+		}
+	}
+	t.Setenv("OPENAI_API_KEY", "test")
+
+	input := "test mode should preserve contest and testing text"
+	if got := NewAPIKeyManager().SanitizeForLogs(input); got != input {
+		t.Fatalf("SanitizeForLogs(%q) = %q", input, got)
+	}
+}
+
 // TestSanitizeForLogs_EnvironmentVariable verifies env var values are redacted
 func TestSanitizeForLogs_EnvironmentVariable(t *testing.T) {
 	oldVal := os.Getenv("ANTHROPIC_API_KEY")

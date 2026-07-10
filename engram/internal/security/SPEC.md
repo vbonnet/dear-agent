@@ -15,7 +15,7 @@ credentials, and constructs operating-system sandbox boundaries.
 
 **ESE-03** When configuration text contains a supported provider key name or recognizable credential prefix, the system shall reject the configuration so secrets remain outside files.
 
-**ESE-04** When log text contains a configured or recognizable supported-provider credential, the system shall redact the secret wherever it appears and shall not corrupt text when an environment variable is empty.
+**ESE-04** When log text contains a configured or recognizable supported-provider credential, the system shall redact the secret wherever it appears and shall not corrupt text when an environment variable is empty or only a short placeholder.
 
 **ESE-05** When filesystem permissions include root access, empty values, control characters, or AppArmor profile metacharacters, the system shall reject them before profile construction.
 

@@ -56,6 +56,8 @@ var credentialPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`AIza[A-Za-z0-9_-]{20,}`),
 }
 
+const minimumCredentialRedactionLength = 8
+
 // APIKeyManager handles API key validation and security
 type APIKeyManager struct{}
 
@@ -114,7 +116,7 @@ func (m *APIKeyManager) ValidateConfigFile(content string) error {
 func (m *APIKeyManager) SanitizeForLogs(s string) string {
 	for _, environments := range providerKeyEnvironments {
 		for _, environment := range environments {
-			if key := os.Getenv(environment); key != "" {
+			if key := os.Getenv(environment); len(key) >= minimumCredentialRedactionLength {
 				s = strings.ReplaceAll(s, key, "***REDACTED***")
 			}
 		}
