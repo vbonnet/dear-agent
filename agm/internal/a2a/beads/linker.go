@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/vbonnet/dear-agent/agm/internal/a2a/config"
 )
@@ -107,42 +106,6 @@ func (l *Linker) UpdateMetadata(channelFile string, metadata map[string]string) 
 	return nil
 }
 
-// LinkChannelToBead links channel to bead
-func (l *Linker) LinkChannelToBead(channelID, beadID string) error {
-	channelFile := filepath.Join(l.activeDir, channelID+".md")
-	if _, err := os.Stat(channelFile); os.IsNotExist(err) {
-		return fmt.Errorf("channel not found: %s", channelID)
-	}
-	beadExists, beadPath := l.ValidateBeadExists(beadID)
-	if !beadExists {
-		return fmt.Errorf("bead not found: %s", beadID)
-	}
-	content, err := os.ReadFile(channelFile)
-	if err != nil {
-		return fmt.Errorf("failed to read channel: %w", err)
-	}
-	metadata := l.ExtractMetadata(string(content))
-	metadata["Bead-ID"] = beadID
-	metadata["Bead-Link"] = beadPath
-	return l.UpdateMetadata(channelFile, metadata)
-}
-
-// UnlinkChannelFromBead unlinks channel from bead
-func (l *Linker) UnlinkChannelFromBead(channelID string) error {
-	channelFile := filepath.Join(l.activeDir, channelID+".md")
-	if _, err := os.Stat(channelFile); os.IsNotExist(err) {
-		return fmt.Errorf("channel not found: %s", channelID)
-	}
-	content, err := os.ReadFile(channelFile)
-	if err != nil {
-		return fmt.Errorf("failed to read channel: %w", err)
-	}
-	metadata := l.ExtractMetadata(string(content))
-	delete(metadata, "Bead-ID")
-	delete(metadata, "Bead-Link")
-	return l.UpdateMetadata(channelFile, metadata)
-}
-
 // GetLinkedBead returns linked bead ID, or empty string if not linked
 func (l *Linker) GetLinkedBead(channelID string) (string, error) {
 	channelFile := filepath.Join(l.activeDir, channelID+".md")
@@ -155,22 +118,4 @@ func (l *Linker) GetLinkedBead(channelID string) (string, error) {
 	}
 	metadata := l.ExtractMetadata(string(content))
 	return metadata["Bead-ID"], nil
-}
-
-// RunBeadCommand runs a bd command with optional timeout
-func RunBeadCommand(args []string, timeout time.Duration) (string, error) {
-	cmd := exec.Command("bd", args...)
-	if timeout > 0 {
-		timer := time.AfterFunc(timeout, func() {
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
-		})
-		defer timer.Stop()
-	}
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("bd command failed: %w\nOutput: %s", err, string(output))
-	}
-	return string(output), nil
 }

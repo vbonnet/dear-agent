@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -308,23 +307,4 @@ func SaveWorkflow(w *WorkflowDefinition, dir string) (string, error) {
 	}
 
 	return path, nil
-}
-
-// ListWorkflowFiles returns all .yaml files in the workflows directory.
-func ListWorkflowFiles(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to read workflow directory: %w", err)
-	}
-
-	var files []string
-	for _, e := range entries {
-		if !e.IsDir() && (strings.HasSuffix(e.Name(), ".yaml") || strings.HasSuffix(e.Name(), ".yml")) {
-			files = append(files, filepath.Join(dir, e.Name()))
-		}
-	}
-	return files, nil
 }

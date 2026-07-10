@@ -120,8 +120,7 @@ validation, task tracking, review, and telemetry live under `wayfinder/`.
   - Detect signals for progressive rigor
   - Build templates for phase execution
   - Validate scope isolation
-- **Implementation**: `wayfinder/internal/phaseisolation/` and
-  `wayfinder/cmd/wayfinder-session/internal/phasegraph/`
+- **Implementation**: `wayfinder/cmd/wayfinder-session/internal/phasegraph/`
 
 **Component 3: Validation Engine (Go + shell)**
 - **Purpose**: Validate and sign waypoint artifacts
@@ -130,9 +129,8 @@ validation, task tracking, review, and telemetry live under `wayfinder/`.
   - Check phase boundary violations (scope creep)
   - Validate deliverables against requirements
   - Verify git claims (D2, S9)
-- **Implementation**: `wayfinder/cmd/wayfinder-session/internal/validator/`,
-  `wayfinder/internal/phaseisolation/`, and shell gate scripts in
-  `wayfinder/lib/`
+- **Implementation**: `wayfinder/cmd/wayfinder-session/internal/validator/`
+  and shell gate scripts in `wayfinder/lib/`
 
 **Component 4: Signal and Scope Detection (Go)**
 - **Purpose**: Detect project complexity signals for progressive rigor
@@ -141,7 +139,8 @@ validation, task tracking, review, and telemetry live under `wayfinder/`.
   - Effort estimation from context
   - Domain expert detection (ML, Mobile, Fintech, etc.)
   - Confidence scoring (0.0-1.0)
-- **Implementation**: `wayfinder/internal/phaseisolation/`
+- **Implementation**: `wayfinder/cmd/wayfinder-session/internal/validator/`
+  and `wayfinder/cmd/wayfinder-session/internal/review/`
 
 **Component 5: W0/Charter Detection (Go)**
 - **Purpose**: Detect vague requests requiring project framing
@@ -150,7 +149,7 @@ validation, task tracking, review, and telemetry live under `wayfinder/`.
   - Calculate vagueness score (0.0-1.0)
   - Generate framing questions if score ≥ 0.60
   - Skip W0 if detailed charter exists
-- **Implementation**: Wayfinder session commands and phase-isolation helpers
+- **Implementation**: Wayfinder session commands and validator helpers
 
 ### Data Flow
 
@@ -329,7 +328,7 @@ wayfinder-session end
 ### Phase Orchestration (Go)
 
 Phase orchestration is exposed through `wayfinder-session` commands and
-implemented by Go packages under `wayfinder/internal/phaseisolation/` and
+implemented by Go packages under
 `wayfinder/cmd/wayfinder-session/internal/phasegraph/`.
 
 ### Validation (Go)
@@ -349,9 +348,8 @@ valid := validator.VerifySignature("D1-problem-validation.md")
 
 ### Signal Detection (Go)
 
-Signal, phase-boundary, and scope checks live in
-`wayfinder/internal/phaseisolation/` and are exercised through the
-`wayfinder-session` lifecycle.
+Signal, phase-boundary, and scope checks live in the `wayfinder-session`
+validator/review packages and are exercised through the session lifecycle.
 
 ---
 

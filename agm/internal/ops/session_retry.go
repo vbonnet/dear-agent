@@ -23,11 +23,11 @@ type RetrySessionRequest struct {
 
 // RetrySessionResult is the output of RetrySession.
 type RetrySessionResult struct {
-	Operation   string     `json:"operation"`
-	SessionName string     `json:"session_name"`
+	Operation   string      `json:"operation"`
+	SessionName string      `json:"session_name"`
 	RetryState  *RetryState `json:"retry_state"`
-	Status      string     `json:"status"`
-	Description string     `json:"description,omitempty"`
+	Status      string      `json:"status"`
+	Description string      `json:"description,omitempty"`
 }
 
 // RetrySession manually retries a session with error context from previous failure.
@@ -89,34 +89,4 @@ func RetrySession(ctx *OpContext, req *RetrySessionRequest) (*RetrySessionResult
 		result.Description = "Unable to determine retry status"
 		return result, nil
 	}
-}
-
-// RetrySessionWithMessage extends RetrySession to also send a retry nudge message to the session.
-// This is useful for notifying a stalled session that it's being retried.
-func RetrySessionWithMessage(ctx *OpContext, req *RetrySessionRequest) (*RetrySessionResult, error) {
-	// First, get the retry status
-	result, err := RetrySession(ctx, req)
-	if err != nil {
-		return result, err
-	}
-
-	// If session is ready for retry, send a nudge message
-	if result.Status == "ready_for_retry" {
-		msg := fmt.Sprintf("🔄 Retry attempt %d: Retrying after previous error: %s",
-			result.RetryState.AttemptCount+1, result.RetryState.LastError)
-
-		_, msgErr := SendMessage(ctx, &SendMessageRequest{
-			Recipient: req.SessionName,
-			Message:   msg,
-		})
-
-		if msgErr != nil {
-			result.Description = fmt.Sprintf("%s (Note: Failed to send retry message: %v)",
-				result.Description, msgErr)
-		} else {
-			result.Description = fmt.Sprintf("%s (Retry message sent)", result.Description)
-		}
-	}
-
-	return result, nil
 }
