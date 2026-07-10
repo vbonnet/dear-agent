@@ -821,6 +821,23 @@ persistence.
 or hidden legacy executor makes phase enforcement ambiguous and violates the
 canonical V2 and broken-windows policies.
 
+### Wayfinder Internal Package Guardrails
+
+**File:** [`wayfinder_internal_package_guardrails.feature`](../test/bdd/features/wayfinder_internal_package_guardrails.feature)
+
+**Drives:** canonical command entrypoint, Beads, configuration, explicit
+migration, Git, history, lint context, telemetry, tracker, project-discovery,
+and preset package specifications.
+
+**Key scenarios:**
+- Every surviving Wayfinder support package keeps a co-located strict EARS SPEC.
+- The exact canonical nine-phase AST contract is preserved across all four
+  supported harnesses and seven model families.
+
+**Why this matters:** Wayfinder support code participates in the same planning
+gate regardless of which harness or model executes a task. Structural package
+coverage prevents migration or tooling helpers from becoming ungoverned paths.
+
 ---
 
 ## Running
