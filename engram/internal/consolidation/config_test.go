@@ -68,6 +68,40 @@ func TestLoadConfigFile_InvalidYAML(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_InvalidProjectConfigReturnsError(t *testing.T) {
+	projectDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Join(projectDir, ".engram"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".engram", "config.yaml"), []byte("memory: [invalid"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(projectDir)
+
+	if _, err := LoadConfig(); err == nil {
+		t.Fatal("LoadConfig() error = nil, want malformed project config error")
+	}
+}
+
+func TestLoadConfig_InvalidGlobalConfigReturnsError(t *testing.T) {
+	workDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	globalDir := filepath.Join(homeDir, ".config", "engram")
+	if err := os.MkdirAll(globalDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalDir, "config.yaml"), []byte("memory: [invalid"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workDir)
+
+	if _, err := LoadConfig(); err == nil {
+		t.Fatal("LoadConfig() error = nil, want malformed global config error")
+	}
+}
+
 func TestLoadConfigFile_Nonexistent(t *testing.T) {
 	_, err := loadConfigFile("/nonexistent/config.yaml")
 	if err == nil {

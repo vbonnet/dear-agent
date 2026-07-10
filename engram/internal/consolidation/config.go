@@ -48,13 +48,21 @@ type Config struct {
 //	provider, err := consolidation.Load(config)
 func LoadConfig() (Config, error) {
 	// 1. Check for project-specific config
-	if cfg, err := loadProjectConfig(); err == nil {
+	cfg, err := loadProjectConfig()
+	if err == nil {
 		return cfg, nil
+	}
+	if !os.IsNotExist(err) {
+		return Config{}, err
 	}
 
 	// 2. Check for global config
-	if cfg, err := loadGlobalConfig(); err == nil {
+	cfg, err = loadGlobalConfig()
+	if err == nil {
 		return cfg, nil
+	}
+	if !os.IsNotExist(err) {
+		return Config{}, err
 	}
 
 	// 3. Return defaults
@@ -70,8 +78,12 @@ func loadProjectConfig() (Config, error) {
 
 	for {
 		configPath := filepath.Join(dir, ".engram", "config.yaml")
-		if cfg, err := loadConfigFile(configPath); err == nil {
+		cfg, err := loadConfigFile(configPath)
+		if err == nil {
 			return cfg, nil
+		}
+		if !os.IsNotExist(err) {
+			return Config{}, err
 		}
 
 		parent := filepath.Dir(dir)
