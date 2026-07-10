@@ -875,6 +875,21 @@ and Discord/GitHub human approval transport SPEC coverage.
 **Why this matters:** Comparative evidence and human approval decisions must
 not change because a task entered through a different harness or model family.
 
+### Root Lifecycle Command Guardrails
+
+**File:** [`root_lifecycle_command_guardrails.feature`](../test/bdd/features/root_lifecycle_command_guardrails.feature)
+
+**Drives:** PR babysitting, Bead closure and PR synchronization, merge audit,
+and merge-loop command and policy package SPEC coverage.
+
+**Key scenarios:**
+- Every listed lifecycle package has reciprocal co-located SPEC traceability.
+- Merge-loop repair sessions preserve all active harness routes.
+- Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen model routes are passed through AGM's shared validation path.
+
+**Why this matters:** Repository automation must use safe wrappers and shared
+AGM routing rather than embedding Claude-only credentials or model assumptions.
+
 ### SPEC and BDD Coverage
 
 **File:** [`spec_coverage.feature`](../test/bdd/features/spec_coverage.feature)

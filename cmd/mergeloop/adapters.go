@@ -13,7 +13,6 @@ import (
 
 	"github.com/vbonnet/dear-agent/internal/mergeloop"
 	"github.com/vbonnet/dear-agent/internal/safegit"
-	"github.com/vbonnet/dear-agent/pkg/llm/auth"
 )
 
 // ---- gh-backed PR lister ----
@@ -224,6 +223,8 @@ func isSoftMergeError(err error) bool {
 type agmSpawner struct {
 	dryRun  bool
 	enabled bool
+	harness string
+	model   string
 }
 
 func (a *agmSpawner) ActiveSession(ctx context.Context, _ string, pr int) (bool, error) {
@@ -270,22 +271,19 @@ func (a *agmSpawner) Spawn(ctx context.Context, req mergeloop.AgentRequest) (str
 		// host dispatch substrate + auth (ce-cd14 / ce-m3ya) land.
 		return "", fmt.Errorf("agent spawning disabled (pass --enable-agents): %w", mergeloop.ErrSpawnUnavailable)
 	}
-	// Match the token agm itself will forward into the spawned session: prefer
-	// the live ~/.claude/.credentials.json over the (possibly stale) env var
-	// (ce-dzhz), so the pre-flight check isn't stricter than the real spawn.
-	if auth.ResolveOAuthToken() == "" {
-		return "", fmt.Errorf("no Claude OAuth token available; run `claude setup-token` or set CLAUDE_CODE_OAUTH_TOKEN: %w", mergeloop.ErrSpawnUnavailable)
-	}
 	workspace := os.Getenv("WORKSPACE")
 	if workspace == "" {
 		workspace = "oss"
 	}
 	cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
+	args := mergeloop.BuildSessionNewArgs(req, workspace, mergeloop.SpawnRoute{
+		Harness: a.harness,
+		Model:   a.model,
+	})
 	// #nosec G204 G702 -- arguments are passed as exec argv, never interpreted
 	// by a shell; the agm binary name is a constant.
-	cmd := exec.CommandContext(cctx, "agm", "session", "new", req.SessionName,
-		"--workspace", workspace, "--detached", "--prompt", req.Prompt)
+	cmd := exec.CommandContext(cctx, "agm", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

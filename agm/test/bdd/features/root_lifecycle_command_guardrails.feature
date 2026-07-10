@@ -1,0 +1,53 @@
+# SPEC: cmd/mergeloop/SPEC.md
+# RELATED-SPEC: internal/mergeloop/SPEC.md
+# RELATED-SPEC: cmd/babysit-prs/SPEC.md
+# RELATED-SPEC: cmd/bead-close-guard/SPEC.md
+# RELATED-SPEC: cmd/bead-pr-guard/SPEC.md
+# RELATED-SPEC: cmd/bead-pr-sync/SPEC.md
+# RELATED-SPEC: cmd/merge-audit/SPEC.md
+Feature: Root lifecycle command guardrails
+  Repository lifecycle commands should keep executable SPEC traceability, and
+  repair-agent routing should remain neutral across active harnesses and model
+  families.
+
+  Scenario Outline: Lifecycle command packages declare SPEC coverage
+    Given lifecycle command package "<package>" is configured
+    When AGM validates lifecycle command package coverage
+    Then lifecycle command package "<package>" should have a co-located SPEC
+
+    Examples:
+      | package                |
+      | cmd/babysit-prs        |
+      | cmd/bead-close-guard   |
+      | cmd/bead-pr-guard      |
+      | cmd/bead-pr-sync       |
+      | cmd/merge-audit        |
+      | cmd/mergeloop          |
+      | internal/mergeloop     |
+
+  Scenario Outline: Merge repair agents preserve active harness routes
+    Given merge repair harness "<harness>" uses model "<model>"
+    When AGM builds merge repair session arguments
+    Then the merge repair arguments should preserve harness "<harness>" and model "<model>"
+
+    Examples:
+      | harness      | model     |
+      | claude-code  | sonnet    |
+      | codex-cli    | 5.5       |
+      | agy          | 2.5-pro   |
+      | opencode-cli | glm-5.2   |
+
+  Scenario Outline: Merge repair agents preserve model-family routes
+    Given merge repair model family "<family>" uses model "<model>"
+    When AGM builds merge repair session arguments
+    Then the merge repair arguments should preserve model "<model>" for family "<family>"
+
+    Examples:
+      | family    | model         |
+      | anthropic | opus          |
+      | openai    | 5.5           |
+      | gemini    | gemini-pro    |
+      | glm       | glm-5.2       |
+      | deepseek  | deepseek-v4   |
+      | nemotron  | nemotron      |
+      | qwen      | qwen          |
