@@ -7,6 +7,7 @@
 # RELATED-SPEC: agm/internal/monitor/opencode/SPEC.md
 # RELATED-SPEC: agm/internal/monitor/tmux/SPEC.md
 # RELATED-SPEC: agm/cmd/agm/SPEC.md
+# RELATED-SPEC: agm/cmd/agm/parity/SPEC.md
 # RELATED-SPEC: cmd/vroom-dispatch/SPEC.md
 # RELATED-SPEC: agm/internal/tmux/SPEC.md
 # RELATED-SPEC: agm/internal/safety/SPEC.md
@@ -96,6 +97,27 @@ Feature: Harness parity
       | codex-cli    |
       | agy          |
       | opencode-cli |
+
+  Scenario: Every tmux-facing AGM command declares active harness parity
+    Given AGM tmux-facing command sources
+    When AGM validates tmux command parity contracts
+    Then every tmux-facing command should declare all active harness strategies
+    And every tmux-facing Cobra command source should have a parity contract
+
+  Scenario Outline: Model-independent tmux commands cross model families
+    Given model family "<family>" is configured
+    When AGM validates model-independent tmux command parity
+    Then model-independent tmux commands should support model family "<family>"
+
+    Examples:
+      | family    |
+      | anthropic |
+      | openai    |
+      | gemini    |
+      | glm       |
+      | deepseek  |
+      | nemotron  |
+      | qwen      |
 
   Scenario Outline: AGM runtime helper commands declare SPEC coverage
     Given AGM runtime helper command "<command>" is configured

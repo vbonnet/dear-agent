@@ -11,6 +11,7 @@ import (
 
 	"github.com/cucumber/godog"
 
+	commandparity "github.com/vbonnet/dear-agent/agm/cmd/agm/parity"
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/configdirparity"
 	"github.com/vbonnet/dear-agent/agm/internal/engramparity"
@@ -83,6 +84,9 @@ type harnessParityState struct {
 	a2aCoordinationSpecsValid  bool
 	captureInvocationArgs      []string
 	captureSessionName         string
+	commandParityValid         bool
+	commandSourceCoverageValid bool
+	modelCommandParityValid    bool
 }
 
 type harnessParityStateKey struct{}
@@ -105,6 +109,12 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates the pane capture invocation$`, agmValidatesPaneCaptureInvocation)
 	ctx.Step(`^pane capture should use the canonical AGM tmux socket$`, paneCaptureShouldUseCanonicalAGMTmuxSocket)
 	ctx.Step(`^pane capture should normalize the session target$`, paneCaptureShouldNormalizeSessionTarget)
+	ctx.Step(`^AGM tmux-facing command sources$`, agmTmuxFacingCommandSources)
+	ctx.Step(`^AGM validates tmux command parity contracts$`, agmValidatesTmuxCommandParityContracts)
+	ctx.Step(`^every tmux-facing command should declare all active harness strategies$`, everyTmuxFacingCommandShouldDeclareAllActiveHarnessStrategies)
+	ctx.Step(`^every tmux-facing Cobra command source should have a parity contract$`, everyTmuxFacingCobraCommandSourceShouldHaveAParityContract)
+	ctx.Step(`^AGM validates model-independent tmux command parity$`, agmValidatesModelIndependentTmuxCommandParity)
+	ctx.Step(`^model-independent tmux commands should support model family "([^"]*)"$`, modelIndependentTmuxCommandsShouldSupportModelFamily)
 	ctx.Step(`^AGM runtime helper command "([^"]*)" is configured$`, agmRuntimeHelperCommandIsConfigured)
 	ctx.Step(`^AGM validates runtime helper command coverage$`, agmValidatesRuntimeHelperCommandCoverage)
 	ctx.Step(`^runtime helper command "([^"]*)" should have a co-located SPEC$`, runtimeHelperCommandShouldHaveCoLocatedSPEC)
@@ -270,6 +280,81 @@ func paneCaptureShouldNormalizeSessionTarget(ctx context.Context) error {
 		}
 	}
 	return fmt.Errorf("capture invocation target is not normalized to %q: %q", want, args)
+}
+
+func agmTmuxFacingCommandSources(context.Context) error {
+	return nil
+}
+
+func agmValidatesTmuxCommandParityContracts(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.commandParityValid = commandparity.ValidateContracts() == nil
+	harnessState.commandSourceCoverageValid = commandparity.ValidateSourceCoverage(bddRepoRoot()) == nil
+	return nil
+}
+
+func everyTmuxFacingCommandShouldDeclareAllActiveHarnessStrategies(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.commandParityValid {
+		return commandparity.ValidateContracts()
+	}
+	return nil
+}
+
+func everyTmuxFacingCobraCommandSourceShouldHaveAParityContract(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.commandSourceCoverageValid {
+		return commandparity.ValidateSourceCoverage(bddRepoRoot())
+	}
+	return nil
+}
+
+func agmValidatesModelIndependentTmuxCommandParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredModelFamily == "" {
+		return fmt.Errorf("no model family configured")
+	}
+	if _, ok := agent.DefaultModelForFamily(harnessState.configuredModelFamily); !ok {
+		return fmt.Errorf("model family %q has no default route", harnessState.configuredModelFamily)
+	}
+	for _, contract := range commandparity.Contracts() {
+		if !contract.ModelIndependent {
+			continue
+		}
+		for _, harness := range agent.ActiveHarnesses() {
+			if contract.Strategies[harness] == "" {
+				return fmt.Errorf("model-independent command %q lacks harness %q", contract.Command, harness)
+			}
+		}
+	}
+	harnessState.modelCommandParityValid = true
+	return nil
+}
+
+func modelIndependentTmuxCommandsShouldSupportModelFamily(ctx context.Context, family string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredModelFamily != strings.ToLower(family) {
+		return fmt.Errorf("configured model family = %q, want %q", harnessState.configuredModelFamily, family)
+	}
+	if !harnessState.modelCommandParityValid {
+		return fmt.Errorf("model-independent tmux command parity was not validated")
+	}
+	return nil
 }
 
 func agmValidatesActiveParitySupport(ctx context.Context) error {

@@ -73,7 +73,7 @@ func normalizeStashHarness(h string) string {
 	}
 }
 
-// stashKeyForHarness returns the tmux key that stashes the input composer for a
+// StashKeyForHarness returns the tmux key that stashes the input composer for a
 // harness, and whether that mapping is verified. Only Claude Code's C-s is
 // confirmed: it stashes the draft and auto-unstashes it after the next submit,
 // so genuine human input survives. Other harnesses default to C-s as a
@@ -88,7 +88,7 @@ func normalizeStashHarness(h string) string {
 // draft keys are confirmed, non-Claude harnesses return their own key here.
 //
 //nolint:unparam // key intentionally uniform today; registry shape is future-proofing (see doc above).
-func stashKeyForHarness(h string) (key string, verified bool) {
+func StashKeyForHarness(h string) (key string, verified bool) {
 	switch normalizeStashHarness(h) {
 	case "claude-code":
 		return "C-s", true
@@ -160,7 +160,7 @@ func stashStaleInputLocked(socketPath, normalizedTarget, ansiContent string) Sta
 		return outcome // empty or ghost text — nothing real to stash
 	}
 	outcome.Attempted = true
-	key, verified := stashKeyForHarness(StashHarness())
+	key, verified := StashKeyForHarness(StashHarness())
 	outcome.Verified = verified
 
 	before := inputLineAfterPrompt(stripANSI(ansiContent))
