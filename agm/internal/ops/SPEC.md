@@ -67,9 +67,9 @@ surfaces (CLI, MCP server, Skills plugin). Every surface constructs an
 
 **OPS-20** When `ArchiveSession` is called on a session that is already archived, the system shall return an error without re-running any cleanup step.
 
-**OPS-21** When `ArchiveSession` completes its durable AGM cleanup, the system shall report a harness-neutral external archive outcome without reverting the archived lifecycle state.
+**OPS-51** When `ArchiveSession` completes its durable AGM cleanup, the system shall report a harness-neutral external archive outcome without reverting the archived lifecycle state.
 
-**OPS-22** While `ArchiveSession` is executing with `DryRun = true`, the system shall not invoke an external session archive adapter.
+**OPS-52** While `ArchiveSession` is executing with `DryRun = true`, the system shall not invoke an external session archive adapter.
 
 ### Garbage Collection
 
