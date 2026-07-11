@@ -1,4 +1,5 @@
 # SPEC: agm/internal/agent/SPEC.md
+# RELATED-SPEC: agm/internal/launchparity/SPEC.md
 # RELATED-SPEC: agm/internal/activity/SPEC.md
 # RELATED-SPEC: agm/internal/agysession/SPEC.md
 # RELATED-SPEC: agm/internal/codexsession/SPEC.md
@@ -85,6 +86,31 @@ Feature: Harness parity
     Given AGM active harnesses are configured
     When AGM validates active harness adapter conformance
     Then every active harness adapter should satisfy the shared conformance suite
+
+  Scenario Outline: Active harness launch commands preserve startup mode and persistence
+    Given active harness "<harness>" uses startup mode "<mode>"
+    When AGM builds the harness launch command with persistence enabled
+    Then the launch command should use the native interactive startup contract
+    And the launch command should not exit the tmux pane shell
+
+    Examples:
+      | harness      | mode |
+      | claude-code  | auto |
+      | codex-cli    | auto |
+      | agy          | auto |
+      | opencode-cli | plan |
+
+  Scenario Outline: Active harness startup is transactional
+    Given active harness "<harness>" uses startup mode "default"
+    When AGM validates final startup liveness
+    Then startup should require a live tmux session and harness process
+
+    Examples:
+      | harness      |
+      | claude-code  |
+      | codex-cli    |
+      | agy          |
+      | opencode-cli |
 
   Scenario Outline: Active harness recovery requires process-state evidence
     Given harness "<harness>" is configured

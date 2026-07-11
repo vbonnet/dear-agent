@@ -158,8 +158,8 @@ generated surface metadata, workflow-bus signaling, and accessible operator UIs.
 
 **File:** [`harness_parity.feature`](../test/bdd/features/harness_parity.feature)
 
-**Drives:** `agm/internal/agent` harness/model registry plus Codex terminal
-state detection contracts.
+**Drives:** `agm/internal/agent` harness/model registry,
+`agm/internal/launchparity` startup contracts, and terminal state detection.
 
 **Key scenarios:**
 - A Codex CLI composer pane is detected as `ready`.
@@ -169,6 +169,7 @@ state detection contracts.
 - Gemini CLI remains deprecated compatibility, not active parity.
 - Active harness factories use canonical names.
 - Active harness adapters satisfy the shared non-I/O conformance suite.
+- Active harness launch commands preserve native startup mode and persistence.
 - AGM runtime helper commands keep co-located SPEC coverage.
 - AGM backend implementations keep co-located SPEC coverage.
 - AGM cleanup and process support packages keep co-located SPEC coverage.

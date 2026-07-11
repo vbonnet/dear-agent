@@ -15,6 +15,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/agent"
 	"github.com/vbonnet/dear-agent/agm/internal/configdirparity"
 	"github.com/vbonnet/dear-agent/agm/internal/engramparity"
+	"github.com/vbonnet/dear-agent/agm/internal/launchparity"
 	"github.com/vbonnet/dear-agent/agm/internal/marketplaceparity"
 	"github.com/vbonnet/dear-agent/agm/internal/mcpparity"
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
@@ -90,6 +91,9 @@ type harnessParityState struct {
 	modelCommandParityValid    bool
 	recoveryConfirmationValid  bool
 	recoveryFallback           recovery.Fallback
+	launchMode                 string
+	launchContract             launchparity.Contract
+	startupLivenessValid       bool
 }
 
 type harnessParityStateKey struct{}
@@ -121,6 +125,12 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM validates session recovery parity$`, agmValidatesSessionRecoveryParity)
 	ctx.Step(`^recovery should require process-state confirmation$`, recoveryShouldRequireProcessStateConfirmation)
 	ctx.Step(`^harness "([^"]*)" should have a safe recovery fallback policy$`, harnessShouldHaveSafeRecoveryFallbackPolicy)
+	ctx.Step(`^active harness "([^"]*)" uses startup mode "([^"]*)"$`, activeHarnessUsesStartupMode)
+	ctx.Step(`^AGM builds the harness launch command with persistence enabled$`, agmBuildsPersistentHarnessLaunchCommand)
+	ctx.Step(`^the launch command should use the native interactive startup contract$`, launchCommandShouldUseNativeInteractiveContract)
+	ctx.Step(`^the launch command should not exit the tmux pane shell$`, launchCommandShouldNotExitTmuxPaneShell)
+	ctx.Step(`^AGM validates final startup liveness$`, agmValidatesFinalStartupLiveness)
+	ctx.Step(`^startup should require a live tmux session and harness process$`, startupShouldRequireLiveTmuxAndHarness)
 	ctx.Step(`^AGM runtime helper command "([^"]*)" is configured$`, agmRuntimeHelperCommandIsConfigured)
 	ctx.Step(`^AGM validates runtime helper command coverage$`, agmValidatesRuntimeHelperCommandCoverage)
 	ctx.Step(`^runtime helper command "([^"]*)" should have a co-located SPEC$`, runtimeHelperCommandShouldHaveCoLocatedSPEC)
@@ -239,6 +249,73 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM archives the stopped session$`, agmArchivesTheStoppedSession)
 	ctx.Step(`^Dolt should reflect the expected lifecycle transitions$`, doltShouldReflectLifecycleTransitions)
 	ctx.Step(`^the matching Codex saved session should be archived$`, matchingCodexSavedSessionShouldBeArchived)
+}
+
+func activeHarnessUsesStartupMode(ctx context.Context, harness, mode string) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	state.configuredHarness = agent.NormalizeHarnessName(harness)
+	state.launchMode = mode
+	return nil
+}
+
+func agmBuildsPersistentHarnessLaunchCommand(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	contract, err := launchparity.Resolve(state.configuredHarness, state.launchMode, true)
+	if err != nil {
+		return err
+	}
+	state.launchContract = contract
+	return nil
+}
+
+func launchCommandShouldUseNativeInteractiveContract(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.launchContract.InteractiveToken == "" {
+		return fmt.Errorf("harness %q has no native interactive startup token", state.configuredHarness)
+	}
+	return nil
+}
+
+func launchCommandShouldNotExitTmuxPaneShell(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.launchContract.ExitSuffix != "" {
+		return fmt.Errorf("persistent harness %q exit suffix = %q", state.configuredHarness, state.launchContract.ExitSuffix)
+	}
+	return nil
+}
+
+func agmValidatesFinalStartupLiveness(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	missingHarness := tmux.PaneLiveness{SessionExists: true, HarnessAlive: false, Evidence: "descendants: zsh"}
+	state.startupLivenessValid = launchparity.ValidateFinalLiveness(missingHarness, nil) != nil &&
+		launchparity.ValidateFinalLiveness(tmux.PaneLiveness{SessionExists: true, HarnessAlive: true}, nil) == nil
+	return nil
+}
+
+func startupShouldRequireLiveTmuxAndHarness(ctx context.Context) error {
+	state, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !state.startupLivenessValid {
+		return fmt.Errorf("startup liveness accepted a session without a harness process")
+	}
+	return nil
 }
 
 func harnessIsConfigured(ctx context.Context, harness string) error {

@@ -51,6 +51,12 @@ tmux harnesses. Gemini CLI remains deprecated compatibility.
 
 **ACP-16** When `agm send mode` targets Codex CLI or AGY, the system shall return an actionable harness-specific restart configuration because neither harness exposes a verified in-session mode switch.
 
+**ACP-17** When AGM starts AGY, the system shall request its interactive prompt mode and shall map automatic permission mode to the native startup flag.
+
+**ACP-18** When AGM starts Codex, the system shall map plan and automatic permission modes to native startup flags instead of attempting an unsupported in-session mode switch.
+
+**ACP-19** When an AGM session is created with `--persistent`, the system shall omit the shell exit suffix for Claude Code, Codex, AGY, and OpenCode launch commands.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/harness_parity.feature`
