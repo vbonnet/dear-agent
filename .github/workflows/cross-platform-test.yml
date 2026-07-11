@@ -6,10 +6,9 @@ name: Cross-Platform Clean Install
 # here is to catch platform-specific drift early (e.g. an engram file
 # path that breaks on Windows) without burning CI minutes on every push.
 #
-# Windows runs a subset of packages: the AGM CLI uses Unix syscalls
-# (syscall.Flock, syscall.Statfs) and depends on tmux, so it can't
-# build on Windows today. The portable packages (engram, pkg/benchmarks)
-# are exercised on Windows to keep dreaming/memory file-ops honest.
+# Windows builds the portable packages, then tests the Windows-safe Engram
+# packages that exercise dreaming/memory file-ops. Some Engram packages still
+# intentionally depend on Unix paths, Docker, or mutable user-home config.
 
 on:
   pull_request:
@@ -116,16 +115,35 @@ jobs:
         run: go mod download
 
       # The AGM CLI uses POSIX syscalls (Flock, Statfs) and tmux, so it
-      # can't build on Windows. Only the portable packages are tested
-      # here so we surface Windows regressions in the engram/dreaming
-      # path without blocking on Unix-only code.
+      # can't build on Windows. Engram builds on Windows, but not every
+      # Engram test package is Windows-safe yet. The test list below
+      # keeps memory, reflection, security, token, and retrieval file-op
+      # coverage on pull requests without blocking on CLI, Docker, or
+      # plugin-execution tests that still carry Unix assumptions.
       - name: Build portable packages
         run: |
           go build ./engram/...
           go build ./pkg/benchmarks/...
 
-      - name: Unit tests — engram / dreaming
-        run: go test -count=1 -timeout 10m ./engram/...
+      - name: Unit tests — Windows-safe engram file ops
+        run: >
+          go test -count=1 -timeout 10m
+          ./engram/internal/profile
+          ./engram/internal/prompt
+          ./engram/internal/providers/simple
+          ./engram/internal/reflection
+          ./engram/internal/retrieval
+          ./engram/internal/scanners
+          ./engram/internal/security
+          ./engram/internal/signing
+          ./engram/internal/slashcmd
+          ./engram/internal/tableutil
+          ./engram/internal/testutil
+          ./engram/internal/tokens
+          ./engram/internal/tokens/tokenizers
+          ./engram/internal/tokentracking
+          ./engram/internal/tracking
+          ./engram/retrieval
 
       - name: Unit tests — benchmarks scaffolding
         run: go test -count=1 -timeout 5m ./pkg/benchmarks/...

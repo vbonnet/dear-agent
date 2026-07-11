@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/vbonnet/dear-agent/engram/internal/consolidation"
@@ -14,6 +15,9 @@ func TestSimpleFileProvider_StoreMemory_PermissionDenied(t *testing.T) {
 	// Root can write to any directory regardless of permissions
 	if os.Getuid() == 0 {
 		t.Skip("Skipping test: requires non-root user for filesystem permission checks")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test: POSIX directory permission bits do not deny writes on Windows")
 	}
 
 	ctx := context.Background()
