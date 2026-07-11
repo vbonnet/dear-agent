@@ -20,6 +20,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/permissionparity"
 	"github.com/vbonnet/dear-agent/agm/internal/quotaparity"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
+	"github.com/vbonnet/dear-agent/agm/internal/recovery"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/wayfinderparity"
@@ -87,6 +88,8 @@ type harnessParityState struct {
 	commandParityValid         bool
 	commandSourceCoverageValid bool
 	modelCommandParityValid    bool
+	recoveryConfirmationValid  bool
+	recoveryFallback           recovery.Fallback
 }
 
 type harnessParityStateKey struct{}
@@ -115,6 +118,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^every tmux-facing Cobra command source should have a parity contract$`, everyTmuxFacingCobraCommandSourceShouldHaveAParityContract)
 	ctx.Step(`^AGM validates model-independent tmux command parity$`, agmValidatesModelIndependentTmuxCommandParity)
 	ctx.Step(`^model-independent tmux commands should support model family "([^"]*)"$`, modelIndependentTmuxCommandsShouldSupportModelFamily)
+	ctx.Step(`^AGM validates session recovery parity$`, agmValidatesSessionRecoveryParity)
+	ctx.Step(`^recovery should require process-state confirmation$`, recoveryShouldRequireProcessStateConfirmation)
+	ctx.Step(`^harness "([^"]*)" should have a safe recovery fallback policy$`, harnessShouldHaveSafeRecoveryFallbackPolicy)
 	ctx.Step(`^AGM runtime helper command "([^"]*)" is configured$`, agmRuntimeHelperCommandIsConfigured)
 	ctx.Step(`^AGM validates runtime helper command coverage$`, agmValidatesRuntimeHelperCommandCoverage)
 	ctx.Step(`^runtime helper command "([^"]*)" should have a co-located SPEC$`, runtimeHelperCommandShouldHaveCoLocatedSPEC)
@@ -280,6 +286,51 @@ func paneCaptureShouldNormalizeSessionTarget(ctx context.Context) error {
 		}
 	}
 	return fmt.Errorf("capture invocation target is not normalized to %q: %q", want, args)
+}
+
+func agmValidatesSessionRecoveryParity(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	before := recovery.Snapshot{WorkLeaves: []recovery.Process{{PID: 42}}}
+	after := recovery.Snapshot{Descendants: []recovery.Process{{PID: 42}}}
+	harnessState.recoveryConfirmationValid = !recovery.Confirmed(before, after, true)
+	harnessState.recoveryFallback = recovery.FallbackForHarness(harnessState.configuredHarness)
+	return nil
+}
+
+func recoveryShouldRequireProcessStateConfirmation(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !harnessState.recoveryConfirmationValid {
+		return fmt.Errorf("recovery accepted a ready-looking pane without work-process exit")
+	}
+	return nil
+}
+
+func harnessShouldHaveSafeRecoveryFallbackPolicy(ctx context.Context, harness string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	normalized := agent.NormalizeHarnessName(harness)
+	if normalized != harnessState.configuredHarness {
+		return fmt.Errorf("configured harness = %q, want %q", harnessState.configuredHarness, normalized)
+	}
+	want := recovery.FallbackNone
+	if normalized == "agy" {
+		want = recovery.FallbackLeafInterrupt
+	}
+	if harnessState.recoveryFallback != want {
+		return fmt.Errorf("recovery fallback for %q = %q, want %q", normalized, harnessState.recoveryFallback, want)
+	}
+	return nil
 }
 
 func agmTmuxFacingCommandSources(context.Context) error {

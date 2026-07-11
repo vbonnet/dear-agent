@@ -9,7 +9,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
+	"github.com/vbonnet/dear-agent/agm/internal/recovery"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
+	"github.com/vbonnet/dear-agent/agm/internal/state"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/ui"
 )
@@ -127,53 +129,48 @@ func runRecoverCommand(cmd *cobra.Command, args []string) error {
 	// Step 4: Attempt soft recovery
 	fmt.Printf("Attempting soft recovery for session '%s'...\n\n", sessionName)
 
-	// Try 1: ESC
-	fmt.Println("1. Sending ESC to interrupt...")
-	if err := sendKey(tmuxSessionName, "Escape"); err != nil {
-		fmt.Printf("   Warning: Failed to send ESC: %v\n", err)
-	} else {
-		fmt.Println("   Sent ESC, waiting 5 seconds...")
-		time.Sleep(5 * time.Second)
-		if checkRecovered(tmuxSessionName) {
-			fmt.Println("   ✓ Recovery successful with ESC")
+	attempts := []struct {
+		label string
+		keys  []string
+	}{
+		{label: "ESC", keys: []string{"Escape"}},
+		{label: "Ctrl-C", keys: []string{"C-c"}},
+		{label: "double Ctrl-C", keys: []string{"C-c", "C-c"}},
+	}
+	for i, attempt := range attempts {
+		fmt.Printf("%d. Sending %s...\n", i+1, attempt.label)
+		confirmed, attemptErr := attemptVerifiedRecovery(cmd.Context(), tmuxSessionName, attempt.keys)
+		if attemptErr != nil {
+			fmt.Printf("   Warning: %v\n", attemptErr)
+			continue
+		}
+		if confirmed {
+			fmt.Printf("   Recovery confirmed with %s\n", attempt.label)
 			renderRecoverySuccess(sessionName)
 			return nil
 		}
-		fmt.Println("   Still stuck, trying next method...")
+		fmt.Println("   Recovery signal sent but child-process exit was not confirmed")
 	}
 
-	// Try 2: Single Ctrl-C
-	fmt.Println("\n2. Sending Ctrl-C...")
-	if err := sendKey(tmuxSessionName, "C-c"); err != nil {
-		fmt.Printf("   Warning: Failed to send Ctrl-C: %v\n", err)
-	} else {
-		fmt.Println("   Sent Ctrl-C, waiting 5 seconds...")
-		time.Sleep(5 * time.Second)
-		if checkRecovered(tmuxSessionName) {
-			fmt.Println("   ✓ Recovery successful with Ctrl-C")
-			renderRecoverySuccess(sessionName)
-			return nil
-		}
-		fmt.Println("   Still stuck, trying next method...")
-	}
-
-	// Try 3: Double Ctrl-C
-	fmt.Println("\n3. Sending double Ctrl-C...")
-	if err := sendKey(tmuxSessionName, "C-c"); err != nil {
-		fmt.Printf("   Warning: Failed to send first Ctrl-C: %v\n", err)
-	} else {
-		time.Sleep(500 * time.Millisecond)
-		if err := sendKey(tmuxSessionName, "C-c"); err != nil {
-			fmt.Printf("   Warning: Failed to send second Ctrl-C: %v\n", err)
+	if recovery.FallbackForHarness(m.Harness) == recovery.FallbackLeafInterrupt {
+		fmt.Println("4. AGY terminal keys were unconfirmed; interrupting session-scoped work leaves...")
+		before, snapshotErr := recovery.SnapshotSession(cmd.Context(), tmuxSessionName)
+		if snapshotErr != nil {
+			fmt.Printf("   Warning: could not snapshot AGY process tree: %v\n", snapshotErr)
 		} else {
-			fmt.Println("   Sent double Ctrl-C, waiting 5 seconds...")
-			time.Sleep(5 * time.Second)
-			if checkRecovered(tmuxSessionName) {
-				fmt.Println("   ✓ Recovery successful with double Ctrl-C")
-				renderRecoverySuccess(sessionName)
-				return nil
+			interrupted, interruptErr := recovery.InterruptWorkLeaves(before)
+			if interruptErr != nil {
+				fmt.Printf("   Warning: %v\n", interruptErr)
 			}
-			fmt.Println("   Still stuck")
+			if interrupted > 0 {
+				time.Sleep(5 * time.Second)
+				after, afterErr := recovery.SnapshotSession(cmd.Context(), tmuxSessionName)
+				if afterErr == nil && recovery.Confirmed(before, after, false) {
+					fmt.Printf("   Recovery confirmed after interrupting %d AGY work process(es)\n", interrupted)
+					renderRecoverySuccess(sessionName)
+					return nil
+				}
+			}
 		}
 	}
 
@@ -218,20 +215,27 @@ func sendKey(tmuxSessionName, key string) error {
 	return cmd.Run()
 }
 
-func checkRecovered(tmuxSessionName string) bool {
-	// Check if session is responsive by capturing pane content
-	// If we can read the pane and it shows a prompt, it's likely recovered
-	// This is a simple heuristic - just check if tmux responds
-	socketPath := tmux.GetSocketPath()
-	ctx := context.Background()
-
-	cmd := exec.CommandContext(ctx, "tmux", "-S", socketPath, "capture-pane", "-p", "-t", tmuxSessionName)
-	_, err := cmd.Output()
-
-	// If we can capture the pane without error, session is responsive
-	// Note: This is a simple check. A more sophisticated check would parse
-	// the output for prompt markers, but that's complex and fragile.
-	return err == nil
+func attemptVerifiedRecovery(ctx context.Context, tmuxSessionName string, keys []string) (bool, error) {
+	before, err := recovery.SnapshotSession(ctx, tmuxSessionName)
+	if err != nil {
+		return false, fmt.Errorf("snapshot before recovery: %w", err)
+	}
+	for i, key := range keys {
+		if err := sendKey(tmuxSessionName, key); err != nil {
+			return false, fmt.Errorf("send %s: %w", key, err)
+		}
+		if i+1 < len(keys) {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	fmt.Println("   Signal sent, waiting 5 seconds for process-state confirmation...")
+	time.Sleep(5 * time.Second)
+	after, err := recovery.SnapshotSession(ctx, tmuxSessionName)
+	if err != nil {
+		return false, fmt.Errorf("snapshot after recovery: %w", err)
+	}
+	promptReady := session.CheckSessionDelivery(tmuxSessionName) == state.CanReceiveYes
+	return recovery.Confirmed(before, after, promptReady), nil
 }
 
 func renderRecoverySuccess(sessionName string) {

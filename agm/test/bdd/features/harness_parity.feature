@@ -14,6 +14,7 @@
 # RELATED-SPEC: agm/internal/cleanup/SPEC.md
 # RELATED-SPEC: agm/internal/procguard/SPEC.md
 # RELATED-SPEC: agm/internal/procreaper/SPEC.md
+# RELATED-SPEC: agm/internal/recovery/SPEC.md
 # RELATED-SPEC: agm/internal/sweeper/SPEC.md
 # RELATED-SPEC: agm/internal/bus/SPEC.md
 # RELATED-SPEC: agm/internal/messages/SPEC.md
@@ -84,6 +85,19 @@ Feature: Harness parity
     Given AGM active harnesses are configured
     When AGM validates active harness adapter conformance
     Then every active harness adapter should satisfy the shared conformance suite
+
+  Scenario Outline: Active harness recovery requires process-state evidence
+    Given harness "<harness>" is configured
+    When AGM validates session recovery parity
+    Then recovery should require process-state confirmation
+    And harness "<harness>" should have a safe recovery fallback policy
+
+    Examples:
+      | harness      |
+      | claude-code  |
+      | codex-cli    |
+      | agy          |
+      | opencode-cli |
 
   Scenario Outline: Active harness capture uses the canonical AGM socket
     Given harness "<harness>" is configured
