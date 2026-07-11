@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/vbonnet/dear-agent/internal/safepr"
 )
 
 // run is exercised only on paths that fail before any gh execution; the gh
@@ -195,12 +198,19 @@ func TestRun_PreflightPass_ProceedsToPRCreate(t *testing.T) {
 	orig := runPreflightFull
 	t.Cleanup(func() { runPreflightFull = orig })
 	runPreflightFull = func(string) error { return nil }
+	ghCalled := false
+	origGitHub := executeGitHub
+	t.Cleanup(func() { executeGitHub = origGitHub })
+	executeGitHub = func(*safepr.Request, time.Duration, bool) error {
+		ghCalled = true
+		return nil
+	}
 
-	// When preflight passes the run proceeds to gh — which may fail in the test
-	// environment. What matters is that the error is NOT a preflight error.
-	err := run([]string{"create", "--wayfinder", dir, "--title", "t"})
-	if err != nil && strings.Contains(err.Error(), "preflight-full failed") {
-		t.Errorf("run() failed with preflight error despite passing preflight: %v", err)
+	if err := run([]string{"create", "--wayfinder", dir, "--title", "t"}); err != nil {
+		t.Fatalf("run() failed despite passing preflight: %v", err)
+	}
+	if !ghCalled {
+		t.Error("GitHub boundary was not called after preflight passed")
 	}
 }
 
@@ -217,12 +227,21 @@ func TestRun_SkipPreflight_NoPreflightRun(t *testing.T) {
 		preflightCalled = true
 		return fmt.Errorf("preflight-full failed — should not have been called")
 	}
+	ghCalled := false
+	origGitHub := executeGitHub
+	t.Cleanup(func() { executeGitHub = origGitHub })
+	executeGitHub = func(*safepr.Request, time.Duration, bool) error {
+		ghCalled = true
+		return nil
+	}
 
-	err := run([]string{"create", "--wayfinder", dir, "--skip-preflight", "--title", "t"})
-	if err != nil && strings.Contains(err.Error(), "preflight-full failed") {
-		t.Errorf("run() failed with preflight error despite --skip-preflight: %v", err)
+	if err := run([]string{"create", "--wayfinder", dir, "--skip-preflight", "--title", "t"}); err != nil {
+		t.Fatalf("run() failed despite --skip-preflight: %v", err)
 	}
 	if preflightCalled {
 		t.Error("preflight was called despite --skip-preflight")
+	}
+	if !ghCalled {
+		t.Error("GitHub boundary was not called with --skip-preflight")
 	}
 }

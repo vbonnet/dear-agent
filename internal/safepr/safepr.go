@@ -16,8 +16,8 @@
 //   - Only the verbs `create` and `close` exist; everything else is refused.
 //   - A PR carries a wayfinder session trace: the caller names an active
 //     wayfinder project (--wayfinder flag or WAYFINDER_PROJECT_DIR env) whose
-//     WAYFINDER-STATUS.md is status: in_progress, and the session id is
-//     stamped into the PR body (create) or close comment (close).
+//     WAYFINDER-STATUS.md is active, and its canonical project name (or legacy
+//     session id) is stamped into the PR body (create) or close comment (close).
 //   - Interactive and unstampable forms (--web, --fill, --body-file, missing
 //     --title) are refused so the run is deterministic and headless-safe.
 package safepr
@@ -76,10 +76,10 @@ func ResolveSessionDir(flagDir string) (string, error) {
 }
 
 // LoadSession reads <dir>/WAYFINDER-STATUS.md and returns the session it
-// describes. It fails unless the file exists, parses, carries a session_id
-// (or project_name for V2 sessions), and is status: in_progress or
-// in-progress — a completed or abandoned session is not a valid attribution
-// target for new PRs.
+// describes. It fails unless the file exists, parses, carries a project_name
+// (or legacy session_id), and has an active status. Canonical V2 planning and
+// in-progress sessions are active; completed, abandoned, and blocked sessions
+// are not valid attribution targets for new PRs.
 func LoadSession(dir string) (Session, error) {
 	path := filepath.Join(dir, "WAYFINDER-STATUS.md")
 	raw, err := os.ReadFile(path)
@@ -103,9 +103,8 @@ func LoadSession(dir string) (Session, error) {
 	if sessionID == "" {
 		return Session{}, fmt.Errorf("%s has no session_id or project_name in its frontmatter", path)
 	}
-	// Normalize V2 hyphen form (in-progress) to match V1 underscore form.
-	if strings.ReplaceAll(st.Status, "-", "_") != "in_progress" {
-		return Session{}, fmt.Errorf("wayfinder session %s is %q, not in_progress — start or resume "+
+	if !isActiveStatus(st.Status) {
+		return Session{}, fmt.Errorf("wayfinder session %s is %q, not active — start or resume "+
 			"a session (wayfinder start / wayfinder session) before opening PRs against it",
 			sessionID, st.Status)
 	}
@@ -118,6 +117,15 @@ func LoadSession(dir string) (Session, error) {
 		beadID = strings.TrimSpace(st.Beads[0])
 	}
 	return Session{ID: sessionID, ProjectPath: abs, BeadID: beadID}, nil
+}
+
+func isActiveStatus(status string) bool {
+	switch strings.ReplaceAll(strings.ToLower(strings.TrimSpace(status)), "_", "-") {
+	case "planning", "in-progress":
+		return true
+	default:
+		return false
+	}
 }
 
 // frontmatter extracts the YAML between the leading "---" fence pair.

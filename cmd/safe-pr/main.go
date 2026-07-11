@@ -9,8 +9,8 @@
 //	safe-pr close  --wayfinder <project-dir> <number|url> [gh flags...]
 //
 // The wayfinder project dir (or WAYFINDER_PROJECT_DIR) must contain a
-// WAYFINDER-STATUS.md with status: in_progress; its session_id is stamped
-// into the PR body (create) or close comment (close). On create, squash
+// active WAYFINDER-STATUS.md; its project_name (or legacy session_id) is
+// stamped into the PR body (create) or close comment (close). On create, squash
 // auto-merge is armed on the new PR so it merges itself once required checks
 // and reviews pass. Every invocation is audit-logged to
 // ~/.local/state/dear-agent/safe-pr.log and emits an OTel span (safepr.<verb>)
@@ -162,8 +162,12 @@ func run(argv []string) error {
 		}
 	}()
 
-	return execGh(&p.req, p.timeout, p.verifyCI)
+	return executeGitHub(&p.req, p.timeout, p.verifyCI)
 }
+
+// executeGitHub is the external PR mutation boundary. Tests replace it so a
+// unit test can prove control flow without creating a real GitHub pull request.
+var executeGitHub = execGh
 
 // expectedRemotePrefix is the required GitHub org prefix for origin remotes.
 // Any URL that does not start with this string is rejected by validateRemoteURL.
