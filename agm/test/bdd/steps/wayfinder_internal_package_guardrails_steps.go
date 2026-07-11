@@ -88,14 +88,19 @@ func wayfinderPreservesNinePhaseContract(ctx context.Context) error {
 		}
 		var got []string
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
-			literal, ok := node.(*ast.CompositeLit)
+			ret, ok := node.(*ast.ReturnStmt)
 			if !ok {
 				return true
 			}
-			for _, element := range literal.Elts {
-				identifier, ok := element.(*ast.Ident)
-				if ok {
-					got = append(got, identifier.Name)
+			for _, result := range ret.Results {
+				literal, ok := result.(*ast.CompositeLit)
+				if !ok {
+					continue
+				}
+				for _, element := range literal.Elts {
+					if identifier, ok := element.(*ast.Ident); ok {
+						got = append(got, identifier.Name)
+					}
 				}
 			}
 			return false
