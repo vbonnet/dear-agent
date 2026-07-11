@@ -75,9 +75,9 @@ func TestCLIServeShutdown(t *testing.T) {
 	cmd := exec.Command(bin, "serve", "-socket", sock,
 		"-queue-dir", "off", "-acl", "off", "-supervisors-dir", "off")
 	cmd.Env = append(os.Environ(), "AGM_BUS_SOCKET="+sock)
-	var processOutput bytes.Buffer
-	cmd.Stdout = &processOutput
-	cmd.Stderr = &processOutput
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -93,10 +93,11 @@ func TestCLIServeShutdown(t *testing.T) {
 	if _, err := os.Stat(sock); err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
-		if strings.Contains(processOutput.String(), "bind: operation not permitted") {
-			t.Skipf("host sandbox denies subprocess Unix-socket binds: %s", processOutput.String())
+		output := stdoutBuf.String() + stderrBuf.String()
+		if strings.Contains(output, "bind: operation not permitted") {
+			t.Skipf("host sandbox denies subprocess Unix-socket binds: %s", output)
 		}
-		t.Fatalf("socket never appeared: %v\nagm-bus output:\n%s", err, processOutput.String())
+		t.Fatalf("socket never appeared: %v\nagm-bus output:\n%s", err, output)
 	}
 
 	// Verify status subcommand sees it.
