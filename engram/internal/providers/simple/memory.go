@@ -141,6 +141,7 @@ func (p *SimpleFileProvider) RetrieveMemory(ctx context.Context, namespace []str
 	// 5. Read and deserialize each file
 	memories := make([]consolidation.Memory, 0, len(files))
 	for _, file := range files {
+		// #nosec G304 -- file comes from a Glob rooted in a namespace validated by validateNamespace.
 		data, readErr := os.ReadFile(file)
 		if readErr != nil {
 			continue // Skip unreadable files
@@ -215,6 +216,7 @@ func (p *SimpleFileProvider) UpdateMemory(ctx context.Context, namespace []strin
 	}
 
 	// 3. Read existing memory
+	// #nosec G304 -- filePath comes from getMemoryPath, which validates namespace/memory ID and checks storage-root containment.
 	data, readErr := os.ReadFile(filePath)
 	if os.IsNotExist(readErr) {
 		err = consolidation.ErrNotFound

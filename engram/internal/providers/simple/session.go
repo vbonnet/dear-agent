@@ -129,6 +129,7 @@ func (p *SimpleFileProvider) sessionFilePath(sessionID, filename string) (string
 }
 
 func readSessionJSON(path string, destination any) error {
+	// #nosec G304 -- callers pass paths from sessionFilePath, which validates the session ID before joining under storagePath/_sessions.
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return consolidation.ErrNotFound

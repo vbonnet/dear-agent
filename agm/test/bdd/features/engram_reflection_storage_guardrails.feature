@@ -16,3 +16,13 @@ Feature: Engram reflection and storage guardrails
       | engram/internal/reflection       |
       | engram/internal/scanners         |
       | engram/internal/providers/simple |
+
+  Scenario: Reflection storage documents filename-safe session IDs
+    Given Engram reflection storage SPEC "engram/internal/reflection/SPEC.md" is loaded
+    Then the SPEC should require reflection session IDs to use only ASCII letters, ASCII digits, hyphen, or underscore
+
+  Scenario: Simple provider documents storage hardening rules
+    Given Engram reflection storage SPEC "engram/internal/providers/simple/SPEC.md" is loaded
+    Then the SPEC should reject unsafe artifact identifiers before constructing artifact paths
+    And the SPEC should require temporary files to be flushed before atomic replacement
+    And the SPEC should require concurrent filesystem operations to be serialized

@@ -20,6 +20,11 @@ func skipWithoutDocker(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("Skipping: Docker not installed")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "docker", "info").CombinedOutput(); err != nil {
+		t.Skipf("Skipping: Docker daemon unavailable: %v\n%s", err, out)
+	}
 }
 
 func TestNewSandbox(t *testing.T) {

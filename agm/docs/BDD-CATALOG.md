@@ -537,6 +537,9 @@ provider's memory, session, context, and artifact SPEC coverage.
 **Key scenarios:**
 - Engram reflection and storage packages keep co-located SPEC coverage.
 - Engram reflection and storage SPECs point back to executable BDD.
+- Reflection storage documents the exact filename-safe session ID allowlist.
+- Simple provider storage documents artifact path containment, temp-file flush
+  before atomic replacement, and serialized filesystem operations.
 
 **Why this matters:** Cross-session learning requires both safe signal
 collection and a complete provider-neutral persistence implementation, not a
