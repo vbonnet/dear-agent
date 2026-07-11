@@ -48,6 +48,25 @@ configuration, and language-specific code-intelligence rules.
 from repository-wide governance would leave CI, plugin loading, protocols,
 schedules, and deployment outside the same parity contract as Go code.
 
+### Declarative Fixture Guardrails
+
+**File:** [`declarative_fixture_guardrails.feature`](../test/bdd/features/declarative_fixture_guardrails.feature)
+
+**Drives:** manifest and provenance testdata, golden configuration and agent
+interactions, archived and corrupt session states, installer images, benchmark
+baselines, configuration loaders, lint contexts, and canonical status fixtures.
+
+**Key scenarios:**
+- Every declarative fixture directory has a co-located strict EARS
+  specification.
+- Every specification retains reciprocal executable BDD traceability.
+- All active harnesses preserve these contracts across all supported model
+  families.
+
+**Why this matters:** Fixtures define the boundary between accepted and
+rejected behavior. Unspecified fixture drift can make tests pass against the
+wrong contract just as readily as implementation drift.
+
 ---
 
 ### Trust Protocol
