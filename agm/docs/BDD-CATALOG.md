@@ -1135,6 +1135,24 @@ workflow, and safety surfaces.
 executable scenario can still drift unnoticed. Reciprocal linkage makes the
 maintained contract discoverable and test-enforced.
 
+### Cross-Language Implementation Guardrails
+
+**File:** [`cross_language_implementation_guardrails.feature`](../test/bdd/features/cross_language_implementation_guardrails.feature)
+
+**Drives:** repository wrappers, harness hooks, AGM and Engram shell/TypeScript
+surfaces, migrations, infrastructure, test suites, and Wayfinder shell support.
+
+**Key scenarios:**
+- Every executable implementation directory has a co-located strict EARS
+  specification.
+- Every specification retains reciprocal executable BDD traceability.
+- Claude Code, Codex, Antigravity, and OpenCode preserve the same contract
+  across Anthropic, OpenAI, Gemini, GLM, DeepSeek, Nemotron, and Qwen families.
+
+**Why this matters:** Repository-wide coverage cannot exclude behavior merely
+because it is implemented outside a Go package. Hooks, installers, migrations,
+infrastructure, and protocol services are part of the shipped control plane.
+
 ---
 
 ### Test Support Package Guardrails
