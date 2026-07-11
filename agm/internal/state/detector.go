@@ -62,6 +62,7 @@ type Detector struct {
 	readyPattern             *regexp.Regexp
 	codexReadyPattern        *regexp.Regexp
 	agyReadyPattern          *regexp.Regexp
+	agySurveyPattern         *regexp.Regexp
 	waitingAgentPattern      *regexp.Regexp
 	loopingPattern           *regexp.Regexp
 	backgroundTasksPattern   *regexp.Regexp
@@ -123,7 +124,8 @@ func NewDetector() *Detector {
 		// AGY Ready: the live AGY interactive prompt is a bare ">" line after
 		// the last response. Keep it line-anchored so trust/menu lines like
 		// "> Yes, I trust this folder" do not become sendable prompts.
-		agyReadyPattern: regexp.MustCompile(`(?m)^\s*>\s*$`),
+		agyReadyPattern:  regexp.MustCompile(`(?m)^\s*>\s*$`),
+		agySurveyPattern: regexp.MustCompile(`(?i)(?:How's the CLI experience so far\?|\[1\]\s*Good\s*\[2\]\s*Fine\s*\[3\]\s*Bad\s*\[0\]\s*Skip)`),
 
 		// Waiting Agent: sub-agent or background task indicators
 		// Matches "Agent:", "Launching agent", "agent to", spinner with agent context
@@ -200,6 +202,13 @@ func (d *Detector) DetectState(output string, lastOutputTime time.Time) Detectio
 			Evidence:   evidence,
 			Confidence: "high",
 		}
+	}
+
+	// AGY's feedback footer owns input focus even when a bare ">" prompt is
+	// still visible. Treat it as a dismissible overlay before readiness checks.
+	if d.agySurveyPattern.MatchString(output) {
+		evidence := d.extractEvidence(output, d.agySurveyPattern, 80)
+		return DetectionResult{State: StateBackgroundTasksView, Timestamp: now, Evidence: evidence, Confidence: "high"}
 	}
 
 	// 2. Check for ready (Claude prompt at end — highest priority after permission)
@@ -387,6 +396,9 @@ func (d *Detector) CheckCanReceive(output string) CanReceive {
 
 	// Background Tasks overlay blocks input but is auto-dismissible
 	if d.backgroundTasksPattern.MatchString(output) {
+		return CanReceiveOverlay
+	}
+	if d.agySurveyPattern.MatchString(output) {
 		return CanReceiveOverlay
 	}
 

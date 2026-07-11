@@ -195,9 +195,11 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^a Codex CLI trust prompt$`, aCodexCLITrustPrompt)
 	ctx.Step(`^an AGY ready prompt$`, anAGYReadyPrompt)
 	ctx.Step(`^an AGY trust prompt$`, anAGYTrustPrompt)
+	ctx.Step(`^an AGY feedback survey over a ready prompt$`, anAGYFeedbackSurveyOverAReadyPrompt)
 	ctx.Step(`^AGM checks whether the session can receive input$`, agmChecksWhetherTheSessionCanReceiveInput)
 	ctx.Step(`^delivery should be allowed$`, deliveryShouldBeAllowed)
 	ctx.Step(`^delivery should be queued$`, deliveryShouldBeQueued)
+	ctx.Step(`^delivery should require dismissing an overlay$`, deliveryShouldRequireDismissingAnOverlay)
 	ctx.Step(`^the detected session state should be "([^"]*)"$`, detectedSessionStateShouldBe)
 	ctx.Step(`^Codex CLI is available$`, codexCLIIsAvailable)
 	ctx.Step(`^AGY is available$`, agyIsAvailable)
@@ -1494,6 +1496,15 @@ func anAGYTrustPrompt(ctx context.Context) error {
 	return nil
 }
 
+func anAGYFeedbackSurveyOverAReadyPrompt(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	harnessState.paneOutput = "Task complete\n>\nHow's the CLI experience so far? [1] Good [2] Fine [3] Bad [0] Skip"
+	return nil
+}
+
 func agmChecksWhetherTheSessionCanReceiveInput(ctx context.Context) error {
 	harnessState, err := getHarnessParityState(ctx)
 	if err != nil {
@@ -1523,6 +1534,17 @@ func deliveryShouldBeQueued(ctx context.Context) error {
 	}
 	if harnessState.canReceive != state.CanReceiveQueue {
 		return fmt.Errorf("expected delivery to be queued, got %s", harnessState.canReceive)
+	}
+	return nil
+}
+
+func deliveryShouldRequireDismissingAnOverlay(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.canReceive != state.CanReceiveOverlay {
+		return fmt.Errorf("expected dismissible overlay, got %s", harnessState.canReceive)
 	}
 	return nil
 }

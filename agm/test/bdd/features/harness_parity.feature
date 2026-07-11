@@ -223,6 +223,11 @@ Feature: Harness parity
     When AGM checks whether the session can receive input
     Then delivery should be queued
 
+  Scenario: AGY feedback survey owns input focus
+    Given an AGY feedback survey over a ready prompt
+    When AGM checks whether the session can receive input
+    Then delivery should require dismissing an overlay
+
   Scenario: Codex detached session receives startup prompt
     Given Codex CLI is available
     When AGM creates a detached Codex session with a startup prompt
