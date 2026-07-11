@@ -122,6 +122,52 @@ func TestListSessions_SkipsBadSchemaAsLoadError(t *testing.T) {
 	}
 }
 
+func TestFindByCLISessionID_MatchesExactIDAcrossStores(t *testing.T) {
+	root, first := newStore(t, map[string]string{
+		"local_target.json": sessionFile("target", 1700000000000, false),
+		"local_other.json":  sessionFile("other", 1700000000000, false),
+	})
+	second := filepath.Join(root, "dev2", "acct2")
+	if err := os.MkdirAll(second, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(second, "local_target-copy.json"), []byte(sessionFile("target", 1700000000000, true)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(second, "local_bad.json"), []byte(`not json`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	matches, loadErrs, err := FindByCLISessionID(root, "cli-target")
+	if err != nil {
+		t.Fatalf("FindByCLISessionID() error = %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("matches = %#v, want both exact-ID records", matches)
+	}
+	if matches[0].Path != filepath.Join(first, "local_target.json") || matches[1].Path != filepath.Join(second, "local_target-copy.json") {
+		t.Fatalf("matches were not deterministic exact-ID results: %#v", matches)
+	}
+	if len(loadErrs) != 1 || !errors.Is(loadErrs[0].Err, ErrUnknownSchema) {
+		t.Fatalf("load errors = %#v, want one unknown-schema record", loadErrs)
+	}
+}
+
+func TestFindByCLISessionID_DoesNotMatchByWorkingDirectory(t *testing.T) {
+	sameCWD := strings.Replace(sessionFile("other", 1700000000000, false), "/other", "/target", 1)
+	root, _ := newStore(t, map[string]string{
+		"local_same-cwd.json": sameCWD,
+	})
+
+	matches, _, err := FindByCLISessionID(root, "cli-target")
+	if err != nil {
+		t.Fatalf("FindByCLISessionID() error = %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("matches = %#v, want no CWD-based match", matches)
+	}
+}
+
 func TestSetArchived_IdempotentNoOp(t *testing.T) {
 	_, dir := newStore(t, map[string]string{
 		"local_a.json": sessionFile("a", 1700000000000, true),

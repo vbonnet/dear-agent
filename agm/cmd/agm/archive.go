@@ -14,7 +14,6 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 	"github.com/vbonnet/dear-agent/agm/internal/cleanup"
-	"github.com/vbonnet/dear-agent/agm/internal/codexarchive"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	gitpkg "github.com/vbonnet/dear-agent/agm/internal/git"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
@@ -237,9 +236,7 @@ func archiveSession(cmd *cobra.Command, args []string) (retErr error) {
 	if archiveErr != nil {
 		return handleError(archiveErr)
 	}
-	if err := archiveCodexSavedSession(opCtx, archiveResult.SessionID); err != nil {
-		return fmt.Errorf("AGM session archived, but Codex saved session archive failed: %w", err)
-	}
+	reportExternalArchives(archiveResult.ExternalArchives)
 
 	ui.PrintSuccess(fmt.Sprintf("Archived session: %s", sessionName))
 	fmt.Printf("\nThe session is now hidden from 'agm session list'.\n")
@@ -289,9 +286,11 @@ func archiveAuditArgs() map[string]string {
 // handled is true the caller should propagate err immediately.
 func handleAlreadyArchivedOrAsync(opCtx *ops.OpContext, sessionName string, getResult *ops.GetSessionResult) (bool, error) {
 	if getResult.Session.Lifecycle == "archived" {
-		if err := archiveCodexSavedSession(opCtx, getResult.Session.ID); err != nil {
-			return true, fmt.Errorf("AGM session is already archived, but Codex saved session archive failed: %w", err)
+		outcomes, err := archiveExternalSavedSession(opCtx, getResult.Session.ID)
+		if err != nil {
+			return true, fmt.Errorf("load external archive state: %w", err)
 		}
+		reportExternalArchives(outcomes)
 		msg := fmt.Sprintf("Session '%s' is already archived", sessionName)
 		ui.PrintWarning(msg)
 		fmt.Println("\nTo restore this session:")
@@ -604,11 +603,8 @@ func bulkArchiveCandidates(adapter *dolt.Adapter, candidates []*manifest.Manifes
 			failCount++
 			continue
 		}
-		if err := archiveCodexSavedManifest(m); err != nil {
-			ui.PrintWarning(fmt.Sprintf("Failed to archive Codex saved session for %s: %v", m.Name, err))
-			failCount++
-			continue
-		}
+		externalArchives := ops.ArchiveExternalSession(context.Background(), m)
+		reportExternalArchives(externalArchives)
 
 		sandboxPath := ""
 		if m.Sandbox != nil {
@@ -641,31 +637,28 @@ func bulkArchiveCandidates(adapter *dolt.Adapter, candidates []*manifest.Manifes
 	return successCount, failCount
 }
 
-func archiveCodexSavedSession(opCtx *ops.OpContext, sessionID string) error {
+func archiveExternalSavedSession(opCtx *ops.OpContext, sessionID string) ([]ops.ExternalArchiveOutcome, error) {
 	if opCtx == nil || opCtx.Storage == nil || sessionID == "" {
-		return nil
+		return nil, nil
 	}
 	m, err := opCtx.Storage.GetSession(sessionID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return archiveCodexSavedManifest(m)
+	return ops.ArchiveExternalSession(context.Background(), m), nil
 }
 
-func archiveCodexSavedManifest(m *manifest.Manifest) error {
-	result, err := codexarchive.ArchiveManifest(context.Background(), m)
-	if err != nil {
-		return err
+func reportExternalArchives(outcomes []ops.ExternalArchiveOutcome) {
+	for _, outcome := range outcomes {
+		switch outcome.Status {
+		case ops.ExternalArchiveArchived:
+			fmt.Printf("Archived %s external session: %s\n", outcome.Provider, outcome.Target)
+		case ops.ExternalArchiveAlreadyArchived:
+			fmt.Printf("%s external session already archived: %s\n", outcome.Provider, outcome.Target)
+		case ops.ExternalArchiveFailed:
+			ui.PrintWarning(fmt.Sprintf("AGM archived, but %s external archive failed: %s", outcome.Provider, outcome.Detail))
+		}
 	}
-	if result == nil || result.Skipped {
-		return nil
-	}
-	if result.AlreadyArchived {
-		fmt.Printf("Codex saved session already archived: %s\n", result.Target)
-		return nil
-	}
-	fmt.Printf("Archived Codex saved session: %s\n", result.Target)
-	return nil
 }
 
 // spawnReaper spawns a detached agm-reaper process for async archival.

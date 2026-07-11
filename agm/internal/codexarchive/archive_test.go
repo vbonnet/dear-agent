@@ -45,6 +45,38 @@ func TestArchiveUsesPersistedCodexSessionID(t *testing.T) {
 	}
 }
 
+func TestArchiveCodexThreadUsesOnlyThreadScopedControl(t *testing.T) {
+	origArchiver := newThreadArchiver
+	origFallback := runCodexArchiveFn
+	t.Cleanup(func() {
+		newThreadArchiver = origArchiver
+		runCodexArchiveFn = origFallback
+	})
+
+	fake := &fakeThreadArchiver{}
+	newThreadArchiver = func() codexThreadArchiver { return fake }
+	runCodexArchiveFn = func(context.Context, string) error {
+		t.Fatal("CLI fallback must not run when the thread archive succeeds")
+		return nil
+	}
+
+	if err := archiveCodexThread(context.Background(), "thread-123"); err != nil {
+		t.Fatalf("archiveCodexThread() error = %v", err)
+	}
+	if fake.threadID != "thread-123" {
+		t.Fatalf("thread archive target = %q, want thread-123", fake.threadID)
+	}
+}
+
+type fakeThreadArchiver struct {
+	threadID string
+}
+
+func (f *fakeThreadArchiver) ArchiveThread(_ context.Context, threadID string) error {
+	f.threadID = threadID
+	return nil
+}
+
 func TestArchiveResolvesCodexSessionByWorkingDirectory(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

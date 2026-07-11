@@ -12,11 +12,11 @@ import (
 	"context"
 
 	"github.com/vbonnet/dear-agent/agm/internal/cleanup"
-	"github.com/vbonnet/dear-agent/agm/internal/codexarchive"
 	"github.com/vbonnet/dear-agent/agm/internal/dolt"
 	"github.com/vbonnet/dear-agent/agm/internal/logging"
 	"github.com/vbonnet/dear-agent/agm/internal/manifest"
 	"github.com/vbonnet/dear-agent/agm/internal/mcp"
+	"github.com/vbonnet/dear-agent/agm/internal/ops"
 	"github.com/vbonnet/dear-agent/agm/internal/safety"
 	"github.com/vbonnet/dear-agent/agm/internal/session"
 	"github.com/vbonnet/dear-agent/agm/internal/tmux"
@@ -401,8 +401,10 @@ func (r *Reaper) archiveSession() error {
 		return fmt.Errorf("failed to update session in Dolt: %w", err)
 	}
 	r.logger.Info("Dolt database updated to archived")
-	if _, err := codexarchive.ArchiveManifest(context.Background(), m); err != nil {
-		return fmt.Errorf("failed to archive Codex saved session: %w", err)
+	for _, outcome := range ops.ArchiveExternalSession(context.Background(), m) {
+		if outcome.Status == ops.ExternalArchiveFailed {
+			r.logger.Warn("External session archive failed after AGM archival", "session", m.SessionID, "provider", outcome.Provider, "error", outcome.Detail)
+		}
 	}
 
 	r.runReaperResourceCleanup(adapter)

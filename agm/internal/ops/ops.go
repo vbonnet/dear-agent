@@ -25,6 +25,10 @@ type OpContext struct {
 	Fields     []string // field mask: if non-empty, only include these fields in output
 	OutputMode string   // "json", "text" (default: "json" for programmatic consumers)
 	Detailed   bool     // --detailed: re-enable IDs, full paths, and verbose hints in agent-mode output
+	// ExternalSessionArchiver synchronizes a successfully archived AGM session
+	// with its harness-specific desktop or remote representation. Nil selects
+	// the production dispatcher; tests inject a deterministic implementation.
+	ExternalSessionArchiver ExternalSessionArchiver
 }
 
 // Result is the base type for all operation results.

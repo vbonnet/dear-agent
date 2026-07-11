@@ -182,6 +182,60 @@ func ListSessions(dir, deviceID, accountID string) ([]*Session, []LoadError, err
 	return sessions, loadErrs, nil
 }
 
+// FindByCLISessionID returns every validated desktop session whose
+// cliSessionId exactly equals cliSessionID across all local device/account
+// stores. Exact identity makes a multi-store scan safe: unlike bulk archival,
+// this never selects a session from a guessed working directory or account.
+func FindByCLISessionID(root, cliSessionID string) ([]*Session, []LoadError, error) {
+	if cliSessionID == "" {
+		return nil, nil, nil
+	}
+	if _, err := os.Stat(root); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, fmt.Errorf("%w: %s", ErrStoreNotFound, root)
+		}
+		return nil, nil, err
+	}
+
+	deviceEntries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	sort.Slice(deviceEntries, func(i, j int) bool { return deviceEntries[i].Name() < deviceEntries[j].Name() })
+
+	var matches []*Session
+	var loadErrs []LoadError
+	for _, device := range deviceEntries {
+		if !device.IsDir() {
+			continue
+		}
+		deviceID := device.Name()
+		deviceDir := filepath.Join(root, deviceID)
+		accountEntries, readErr := os.ReadDir(deviceDir)
+		if readErr != nil {
+			return nil, loadErrs, readErr
+		}
+		sort.Slice(accountEntries, func(i, j int) bool { return accountEntries[i].Name() < accountEntries[j].Name() })
+		for _, account := range accountEntries {
+			if !account.IsDir() {
+				continue
+			}
+			accountID := account.Name()
+			sessions, errs, listErr := ListSessions(filepath.Join(deviceDir, accountID), deviceID, accountID)
+			if listErr != nil {
+				return nil, loadErrs, listErr
+			}
+			loadErrs = append(loadErrs, errs...)
+			for _, s := range sessions {
+				if s.CliSessionID == cliSessionID {
+					matches = append(matches, s)
+				}
+			}
+		}
+	}
+	return matches, loadErrs, nil
+}
+
 // LoadSession reads and schema-validates a single session file.
 func LoadSession(path string) (*Session, error) {
 	data, err := os.ReadFile(path)

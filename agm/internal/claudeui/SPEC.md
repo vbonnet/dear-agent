@@ -22,6 +22,8 @@ archive or lifecycle contract.
 
 **CUI-06** When backup is requested before mutation, the system shall write a byte-identical copy before changing the source file.
 
+**CUI-07** When AGM archives a Claude session with a persisted UUID, the system shall select only desktop records whose `cliSessionId` exactly equals that UUID, including across multiple local device/account stores.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/agm_conversation_discovery_guardrails.feature`
