@@ -1,5 +1,15 @@
 # Workspace-Aware Session Management - Specification
 
+## Executable EARS Requirements
+
+**WSR-01** When AGM discovers or lists sessions, the workspace command shall preserve each session's workspace identity.
+
+**WSR-02** If workspace detection is unavailable, then the workspace command shall return an explicit fallback or error without exposing another workspace's sessions.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 **Version**: 1.0

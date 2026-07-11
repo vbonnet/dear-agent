@@ -1,5 +1,15 @@
 # hash Package Specification
 
+## Executable EARS Requirements
+
+**HASHR-01** When a file hash is requested, the package shall compute SHA-256 over the file contents and return the canonical encoded value.
+
+**HASHR-02** If a path cannot be expanded, opened, or read, then the package shall return an error without a partial hash.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 **Version:** 0.1.0

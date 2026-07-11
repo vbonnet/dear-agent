@@ -1,5 +1,15 @@
 # Wayfinder V2 Specification
 
+## Executable EARS Requirements
+
+**WFV2R-01** When a Wayfinder session advances, the system shall enforce the canonical nine-phase order and persist valid V2 status.
+
+**WFV2R-02** When BUILD completes, the system shall require test evidence and transition through RETRO before final completion.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview

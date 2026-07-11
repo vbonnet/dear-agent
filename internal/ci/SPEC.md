@@ -1,5 +1,15 @@
 # CI Pipeline Executor Specification
 
+## Executable EARS Requirements
+
+**CIPER-01** When a pipeline is requested, the CI executor shall run the configured workflow with bounded context and captured output.
+
+**CIPER-02** If infrastructure execution fails, then the CI executor shall distinguish that failure from a completed pipeline failure.
+
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_strictness_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 ## Overview
