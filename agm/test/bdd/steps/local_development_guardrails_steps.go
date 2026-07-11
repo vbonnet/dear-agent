@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/cucumber/godog"
+	"github.com/vbonnet/dear-agent/internal/safepr"
 )
 
 type localDevGuardrailState struct {
@@ -16,6 +17,10 @@ type localDevGuardrailState struct {
 	commandSpec string
 	library     string
 	librarySpec string
+	traceDir    string
+	trace       safepr.Session
+	harness     string
+	family      string
 }
 
 type localDevGuardrailStateKey struct{}
@@ -25,6 +30,15 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
 		return context.WithValue(ctx, localDevGuardrailStateKey{}, &localDevGuardrailState{}), nil
 	})
+	ctx.After(func(ctx context.Context, _ *godog.Scenario, scenarioErr error) (context.Context, error) {
+		state, err := getLocalDevGuardrailState(ctx)
+		if err == nil && state.traceDir != "" {
+			if removeErr := os.RemoveAll(state.traceDir); removeErr != nil && scenarioErr == nil {
+				return ctx, fmt.Errorf("remove canonical trace directory: %w", removeErr)
+			}
+		}
+		return ctx, nil
+	})
 
 	ctx.Step(`^safe local development command "([^"]*)" is configured$`, safeLocalDevelopmentCommandIsConfigured)
 	ctx.Step(`^AGM validates safe local development command coverage$`, agmValidatesSafeLocalDevelopmentCommandCoverage)
@@ -32,6 +46,55 @@ func RegisterLocalDevelopmentGuardrailSteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^safe local development library "([^"]*)" is configured$`, safeLocalDevelopmentLibraryIsConfigured)
 	ctx.Step(`^AGM validates safe local development library coverage$`, agmValidatesSafeLocalDevelopmentLibraryCoverage)
 	ctx.Step(`^safe local development library "([^"]*)" should have a co-located SPEC$`, safeLocalDevelopmentLibraryShouldHaveCoLocatedSPEC)
+	ctx.Step(`^canonical Wayfinder V2 status for harness "([^"]*)" and model family "([^"]*)"$`, canonicalWayfinderV2StatusForRoute)
+	ctx.Step(`^safe-pr loads the canonical planning trace$`, safePRLoadsCanonicalPlanningTrace)
+	ctx.Step(`^safe-pr should attribute the trace to project "([^"]*)"$`, safePRShouldAttributeTraceToProject)
+}
+
+func canonicalWayfinderV2StatusForRoute(ctx context.Context, harness, family string) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	dir, err := os.MkdirTemp("", "safe-pr-v2-trace-*")
+	if err != nil {
+		return fmt.Errorf("create canonical trace directory: %w", err)
+	}
+	state.traceDir = dir
+	state.harness = harness
+	state.family = family
+	content := fmt.Sprintf("---\nschema_version: \"2.0\"\nproject_name: parity-audit\nproject_type: infrastructure\nrisk_level: M\ncurrent_waypoint: CHARTER\nstatus: planning\nharness: %s\nmodel_family: %s\n---\n", harness, family)
+	if err := os.WriteFile(filepath.Join(dir, "WAYFINDER-STATUS.md"), []byte(content), 0o600); err != nil {
+		return fmt.Errorf("write canonical trace: %w", err)
+	}
+	return nil
+}
+
+func safePRLoadsCanonicalPlanningTrace(ctx context.Context) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.traceDir == "" {
+		return fmt.Errorf("trace directory is not initialized in scenario state")
+	}
+	trace, err := safepr.LoadSession(state.traceDir)
+	if err != nil {
+		return fmt.Errorf("load canonical %s/%s trace: %w", state.harness, state.family, err)
+	}
+	state.trace = trace
+	return nil
+}
+
+func safePRShouldAttributeTraceToProject(ctx context.Context, project string) error {
+	state, err := getLocalDevGuardrailState(ctx)
+	if err != nil {
+		return err
+	}
+	if state.trace.ID != project {
+		return fmt.Errorf("safe-pr trace attribution = %q, want %q", state.trace.ID, project)
+	}
+	return nil
 }
 
 func safeLocalDevelopmentCommandIsConfigured(ctx context.Context, command string) error {
