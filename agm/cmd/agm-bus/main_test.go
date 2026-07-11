@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -71,8 +72,12 @@ func TestCLIServeShutdown(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(sockDir) })
 	sock := filepath.Join(sockDir, "s")
 
-	cmd := exec.Command(bin, "serve", "-socket", sock)
+	cmd := exec.Command(bin, "serve", "-socket", sock,
+		"-queue-dir", "off", "-acl", "off", "-supervisors-dir", "off")
 	cmd.Env = append(os.Environ(), "AGM_BUS_SOCKET="+sock)
+	var processOutput bytes.Buffer
+	cmd.Stdout = &processOutput
+	cmd.Stderr = &processOutput
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -87,7 +92,11 @@ func TestCLIServeShutdown(t *testing.T) {
 	}
 	if _, err := os.Stat(sock); err != nil {
 		_ = cmd.Process.Kill()
-		t.Fatalf("socket never appeared: %v", err)
+		_ = cmd.Wait()
+		if strings.Contains(processOutput.String(), "bind: operation not permitted") {
+			t.Skipf("host sandbox denies subprocess Unix-socket binds: %s", processOutput.String())
+		}
+		t.Fatalf("socket never appeared: %v\nagm-bus output:\n%s", err, processOutput.String())
 	}
 
 	// Verify status subcommand sees it.
