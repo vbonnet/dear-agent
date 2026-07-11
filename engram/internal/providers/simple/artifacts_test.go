@@ -104,7 +104,7 @@ func FuzzSimpleFileProvider_ArtifactPathContainment(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, artifactID string) {
-		storagePath := t.TempDir()
+		storagePath := "/mock/storage"
 		provider := &SimpleFileProvider{storagePath: storagePath}
 		artifactRoot := filepath.Clean(filepath.Join(storagePath, "_artifacts"))
 
