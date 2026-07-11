@@ -1,5 +1,9 @@
 # Model Router Specification
 
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+
 ## Purpose
 
 The model router assigns an AGM session to a cost tier and returns the

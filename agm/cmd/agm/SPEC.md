@@ -1,5 +1,9 @@
 # AGM CLI - Technical Specification
 
+## BDD Traceability
+
+- Feature: `agm/test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature`
+
 <!-- Last audited at: NEEDS-AUDIT -->
 
 **Version:** 2.0

@@ -1026,6 +1026,25 @@ EARS makes those existing promises executable without discarding them.
 
 ---
 
+### Legacy Specification BDD Linkage Guardrails
+
+**File:** [`legacy_spec_bdd_linkage_guardrails.feature`](../test/bdd/features/legacy_spec_bdd_linkage_guardrails.feature)
+
+**Drives:** reciprocal executable BDD linkage for maintained strict legacy
+specifications across AGM, VROOM, Wayfinder, audit, deployment, telemetry,
+workflow, and safety surfaces.
+
+**Key scenarios:**
+- Every listed specification passes strict EARS lint.
+- Every listed specification and feature reference each other.
+- Linkage remains enforced across all active harness and model-family routes.
+
+**Why this matters:** Strict requirements that are not connected to an
+executable scenario can still drift unnoticed. Reciprocal linkage makes the
+maintained contract discoverable and test-enforced.
+
+---
+
 ## Running
 
 ```bash
