@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"path/filepath"
+	pathpkg "path"
 	"strings"
 )
 
@@ -91,7 +91,7 @@ func (v *Validator) validateFilesystemPath(path string) error {
 	}
 
 	// Clean path
-	clean := filepath.Clean(path)
+	clean := pathpkg.Clean(path)
 
 	// Disallow root filesystem access
 	if clean == "/" {
@@ -324,6 +324,7 @@ func (v *Validator) classifyNetworkPermission(network string) (NetworkPermission
 //   - Labels contain only alphanumerics and hyphens
 //   - Labels start and end with alphanumeric
 //   - TLD is at least 2 letters
+//
 //nolint:gocyclo // reason: linear domain validation with many character-class checks
 func (v *Validator) isValidDomain(domain string) bool {
 	// Length check
@@ -517,7 +518,7 @@ func (v *Validator) validateCommand(cmd string) error {
 		return err
 	}
 	// Command should be absolute path or well-known binary
-	if !filepath.IsAbs(cmd) && !v.isWellKnownCommand(cmd) {
+	if !pathpkg.IsAbs(cmd) && !v.isWellKnownCommand(cmd) {
 		return fmt.Errorf("command must be absolute path or well-known binary")
 	}
 
