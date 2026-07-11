@@ -29,6 +29,27 @@ into listing tests that do not actually run.
 
 ## Feature Files
 
+### Declarative Runtime Guardrails
+
+**File:** [`declarative_runtime_guardrails.feature`](../test/bdd/features/declarative_runtime_guardrails.feature)
+
+**Drives:** harness and plugin manifests, GitHub automation and rulesets, AGM
+contracts, schemas and schedules, deployment service definitions, workflow
+configuration, and language-specific code-intelligence rules.
+
+**Key scenarios:**
+- Every declarative runtime directory has a co-located strict EARS
+  specification.
+- Every specification retains reciprocal executable BDD traceability.
+- All active harnesses preserve these contracts across all supported model
+  families.
+
+**Why this matters:** Configuration controls executable behavior. Excluding it
+from repository-wide governance would leave CI, plugin loading, protocols,
+schedules, and deployment outside the same parity contract as Go code.
+
+---
+
 ### Trust Protocol
 
 **File:** [`trust_protocol.feature`](../test/bdd/features/trust_protocol.feature)
