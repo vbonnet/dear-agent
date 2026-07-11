@@ -17,7 +17,7 @@ credentials, and constructs operating-system sandbox boundaries.
 
 **ESE-04** When log text contains a configured or recognizable supported-provider credential, the system shall redact the secret wherever it appears and shall not corrupt text when an environment variable is empty or only a short placeholder.
 
-**ESE-05** When filesystem permissions include root access, empty values, control characters, or AppArmor profile metacharacters, the system shall reject them before profile construction.
+**ESE-05** When filesystem permissions include root access, empty values, control characters, or AppArmor profile metacharacters, the system shall reject them before profile construction using slash-path semantics consistently across host operating systems.
 
 **ESE-06** When filesystem permissions target sensitive, home, or broad paths without violating hard syntax rules, the system shall emit an auditable warning.
 
@@ -25,7 +25,7 @@ credentials, and constructs operating-system sandbox boundaries.
 
 **ESE-08** When network access is wildcard, loopback, private, or expressed as a raw IP, the system shall emit risk-specific audit telemetry.
 
-**ESE-09** When command permissions are validated, the system shall require an absolute path or well-known binary and shall reject profile-injection metacharacters.
+**ESE-09** When command permissions are validated, the system shall require a slash-absolute path or well-known binary and shall reject profile-injection metacharacters consistently across host operating systems.
 
 **ESE-10** When a sandbox is applied on macOS or supported Linux hosts, the system shall wrap execution in the platform sandbox with only declared filesystem and network permissions.
 

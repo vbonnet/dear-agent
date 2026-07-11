@@ -95,7 +95,7 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ${{ matrix.race }} ./...
+        run: go test ${{ matrix.race }} -count=1 -timeout=20m ./...
         env:
           # Skip tmux-dependent tests on macOS CI
           CI_SKIP_TMUX: ${{ matrix.os == 'macos-latest' && 'true' || 'false' }}
@@ -179,6 +179,33 @@ jobs:
         run: |
           git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           go run ./cmd/test-affected --base="origin/${BASE_REF}" --tags=integration --run
+
+  engram-storage-hardening:
+    name: Engram Storage Hardening
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+          cache-dependency-path: "go.sum"
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Race-test storage packages
+        run: go test -race -count=1 -timeout=5m ./engram/internal/providers/simple ./engram/internal/reflection
+
+      - name: Run fuzz seed corpus for storage validators
+        run: go test -run=Fuzz -count=1 -timeout=5m ./engram/internal/providers/simple ./engram/internal/reflection
+
+      - name: Run focused gosec scan
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 -quiet ./engram/internal/providers/simple/...
 
   # govulncheck runs inside the *required* CI workflow (not only the
   # separate, non-blocking Security Scan / SBOM workflows) so a known-vuln

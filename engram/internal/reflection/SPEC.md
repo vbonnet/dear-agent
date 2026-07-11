@@ -17,7 +17,7 @@ parses retrospectives, and synthesizes recurring patterns through multiple lense
 
 **ERF-04** When a lesson is supplied, the system shall preserve it; otherwise, it shall derive a bounded lesson from the error or category.
 
-**ERF-05** When a reflection is saved, the system shall reject nil reflections and unsafe or too-short session identifiers before constructing the output path.
+**ERF-05** When a reflection is saved, the system shall reject nil reflections and session identifiers shorter than eight characters or containing characters outside ASCII letters, ASCII digits, hyphen, and underscore before constructing the output path.
 
 **ERF-06** When a valid reflection is saved, the system shall write private `.ai.md` content with retrieval frontmatter, trigger, learning, outcome details, and session metrics.
 
