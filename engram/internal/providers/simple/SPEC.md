@@ -19,7 +19,7 @@ working-context, session-history, and artifact operations with private JSON file
 
 **ESP-05** When an update targets missing memory, the system shall return not-found; when append content targets non-string content, it shall return an update error.
 
-**ESP-06** When artifact operations receive an unsafe identifier, the system shall reject it and keep all artifact paths beneath the private `_artifacts` directory.
+**ESP-06** When artifact operations receive an identifier that is empty, relative, traversing, slash-delimited, backslash-delimited, or null-containing, the system shall reject it and keep all artifact paths beneath the private `_artifacts` directory.
 
 **ESP-07** When working context or session history is persisted, the system shall flush a private temporary file before atomically renaming it over the destination.
 

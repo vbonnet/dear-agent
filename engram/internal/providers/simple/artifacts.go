@@ -110,6 +110,7 @@ func (p *SimpleFileProvider) GetArtifact(ctx context.Context, artifactID string)
 	}
 
 	// 3. Read file
+	// #nosec G304 -- artifactPath comes from getArtifactPath, which validates the ID and checks _artifacts containment.
 	data, readErr := os.ReadFile(artifactPath)
 	if os.IsNotExist(readErr) {
 		err = consolidation.ErrNotFound

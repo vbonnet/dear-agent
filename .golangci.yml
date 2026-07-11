@@ -150,9 +150,10 @@ linters:
       # - G104: errors unhandled (errcheck already covers what matters)
       # - G204: subprocess from variable (we run lots of internal commands)
       # - G301: directory permissions (we set 0o700 explicitly where it matters)
-      # - G703: path traversal taint analysis (paths are derived from internal
-      #         session/channel IDs, not external input)
-      - text: "G204|G301|G104|G703"
+      # Path traversal findings must be suppressed at the call site with a
+      # rule-specific //nolint:gosec justification so storage hardening
+      # regressions cannot hide behind a global exclusion.
+      - text: "G204|G301|G104"
         linters:
           - gosec
       - text: "if-return|exported.*stutters|package-comments"

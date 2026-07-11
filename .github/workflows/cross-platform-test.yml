@@ -12,6 +12,12 @@ name: Cross-Platform Clean Install
 # are exercised on Windows to keep dreaming/memory file-ops honest.
 
 on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'engram/**'
+      - 'pkg/benchmarks/**'
+      - '.github/workflows/cross-platform-test.yml'
   schedule:
     # Weekly on Sunday at 06:00 UTC
     - cron: "0 6 * * 0"

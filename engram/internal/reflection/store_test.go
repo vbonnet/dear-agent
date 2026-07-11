@@ -132,6 +132,81 @@ func TestSave_RejectsUnsafeSessionID(t *testing.T) {
 	}
 }
 
+func TestSafeReflectionSessionID_DocumentedAllowlist(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		sessionID string
+		want      bool
+	}{
+		{name: "lowercase", sessionID: "abcdefgh", want: true},
+		{name: "uppercase", sessionID: "ABCDEFGH", want: true},
+		{name: "digits", sessionID: "12345678", want: true},
+		{name: "hyphen underscore", sessionID: "abc_DEF-123", want: true},
+		{name: "too short", sessionID: "abc_123", want: false},
+		{name: "space", sessionID: "abc defg", want: false},
+		{name: "colon", sessionID: "abc:defg", want: false},
+		{name: "question", sessionID: "abc?defg", want: false},
+		{name: "slash", sessionID: "abc/defg", want: false},
+		{name: "backslash", sessionID: `abc\defg`, want: false},
+		{name: "control", sessionID: "abc\ndefg", want: false},
+		{name: "unicode", sessionID: "abcdefgé", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := safeReflectionSessionID(tt.sessionID); got != tt.want {
+				t.Fatalf("safeReflectionSessionID(%q) = %v, want %v", tt.sessionID, got, tt.want)
+			}
+		})
+	}
+}
+
+func FuzzSafeReflectionSessionID(f *testing.F) {
+	for _, sessionID := range []string{
+		"abcdefgh",
+		"abc_DEF-123",
+		"abc defg",
+		"abc:defg",
+		"abc/defg",
+		`abc\defg`,
+		"abc\ndefg",
+		"abcdefgé",
+		"short",
+	} {
+		f.Add(sessionID)
+	}
+
+	f.Fuzz(func(t *testing.T, sessionID string) {
+		if got, want := safeReflectionSessionID(sessionID), documentedSafeReflectionSessionID(sessionID); got != want {
+			t.Fatalf("safeReflectionSessionID(%q) = %v, want %v", sessionID, got, want)
+		}
+	})
+}
+
+func documentedSafeReflectionSessionID(sessionID string) bool {
+	if len(sessionID) < 8 {
+		return false
+	}
+	for _, char := range sessionID {
+		if char >= 'a' && char <= 'z' {
+			continue
+		}
+		if char >= 'A' && char <= 'Z' {
+			continue
+		}
+		if char >= '0' && char <= '9' {
+			continue
+		}
+		if char == '-' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // TestSave_CreatesDirectory verifies directory creation
 func TestSave_CreatesDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
