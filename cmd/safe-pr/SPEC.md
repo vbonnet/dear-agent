@@ -31,6 +31,8 @@ creation.
 
 **SAFE-PR-08** When the canonical Wayfinder V2 writer creates a `planning` session with `project_name`, the system shall accept that trace without requiring a legacy `session_id`.
 
+**SAFE-PR-09** When safe-pr control flow is tested, the system shall replace the GitHub mutation boundary so unit tests cannot create real pull requests.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

@@ -162,8 +162,12 @@ func run(argv []string) error {
 		}
 	}()
 
-	return execGh(&p.req, p.timeout, p.verifyCI)
+	return executeGitHub(&p.req, p.timeout, p.verifyCI)
 }
+
+// executeGitHub is the external PR mutation boundary. Tests replace it so a
+// unit test can prove control flow without creating a real GitHub pull request.
+var executeGitHub = execGh
 
 // expectedRemotePrefix is the required GitHub org prefix for origin remotes.
 // Any URL that does not start with this string is rejected by validateRemoteURL.
