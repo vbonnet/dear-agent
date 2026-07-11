@@ -75,6 +75,9 @@ func safePRLoadsCanonicalPlanningTrace(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if state.traceDir == "" {
+		return fmt.Errorf("trace directory is not initialized in scenario state")
+	}
 	trace, err := safepr.LoadSession(state.traceDir)
 	if err != nil {
 		return fmt.Errorf("load canonical %s/%s trace: %w", state.harness, state.family, err)
