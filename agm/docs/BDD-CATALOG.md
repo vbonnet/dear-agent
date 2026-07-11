@@ -1008,6 +1008,24 @@ surface as newly governed packages.
 
 ---
 
+### Legacy NFR EARS Guardrails
+
+**File:** [`legacy_nfr_ears_guardrails.feature`](../test/bdd/features/legacy_nfr_ears_guardrails.feature)
+
+**Drives:** strict EARS conversion for maintained Ecphory, ranking, monitoring,
+telemetry, and Definition of Done functional and non-functional requirements.
+
+**Key scenarios:**
+- Every converted requirement retains a stable canonical identifier.
+- Every converted specification passes strict EARS lint.
+- Converted contracts remain enforced across all harness and model routes.
+
+**Why this matters:** Uppercase prose `SHALL` bullets looked normative but
+could not be consumed by the repository's deterministic SPEC gate. Canonical
+EARS makes those existing promises executable without discarding them.
+
+---
+
 ## Running
 
 ```bash
