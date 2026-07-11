@@ -1,4 +1,5 @@
 # SPEC: internal/speccoverage/SPEC.md
+# RELATED-SPEC: agm/internal/sandboxgc/SPEC.md
 Feature: SPEC and BDD coverage
   AGM parity governance should keep SPEC.md files and executable BDD scenarios
   paired for every parity-critical surface. Legacy packages may still be burned

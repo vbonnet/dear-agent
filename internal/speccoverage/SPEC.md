@@ -50,6 +50,18 @@ the larger repo-wide SPEC backlog is burned down incrementally.
 
 **SCB-17** When an executable BDD feature declares a governing `SPEC.md` path, the system shall require that `SPEC.md` file to exist and reference the executable BDD feature path.
 
+**SCB-18** When repository-wide implementation coverage is validated, the system shall include production, test-only, and support directories while excluding dependency, build-output, and nested-worktree directories.
+
+**SCB-19** When a repository implementation directory is discovered, the system shall require a co-located `SPEC.md` with strict EARS requirements.
+
+**SCB-20** When a repository implementation `SPEC.md` is validated, the system shall require at least one referenced executable BDD feature.
+
+**SCB-21** When a repository implementation references an executable BDD feature, the system shall require the feature to exist, declare a `Feature`, and identify the implementation `SPEC.md` through `SPEC` or `RELATED-SPEC` traceability.
+
+**SCB-22** When repository-wide implementation coverage is validated, the system shall include directories containing executable source or runtime configuration in the repository's supported programming, shell, infrastructure, data, service, and configuration formats.
+
+**SCB-23** When an executable BDD feature declares a `RELATED-SPEC`, the system shall require that specification to exist and reference the executable feature.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/spec_coverage.feature`

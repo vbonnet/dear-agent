@@ -135,8 +135,33 @@ func TestValidateBDDFeatureTraceabilityReportsMissingBackReference(t *testing.T)
 	if findings[0].Path != "internal/example/SPEC.md" {
 		t.Fatalf("finding path = %q", findings[0].Path)
 	}
-	if findings[0].Message != "governing SPEC.md does not reference executable BDD feature: agm/test/bdd/features/missing_backref.feature" {
+	if findings[0].Message != "governing or related SPEC.md does not reference executable BDD feature: agm/test/bdd/features/missing_backref.feature" {
 		t.Fatalf("finding message = %q", findings[0].Message)
+	}
+}
+
+func TestValidateBDDFeatureTraceabilityReportsMissingRelatedSpec(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "agm/test/bdd/features/related.feature", "# SPEC: internal/primary/SPEC.md\n# RELATED-SPEC: internal/missing/SPEC.md\nFeature: Related\n")
+	writeCoverageFile(t, root, "internal/primary/SPEC.md", "- Feature: `agm/test/bdd/features/related.feature`\n")
+
+	findings := ValidateBDDFeatureTraceability(root)
+	if len(findings) != 1 || findings[0].Path != "internal/missing/SPEC.md" {
+		t.Fatalf("expected missing related SPEC finding, got %v", findings)
+	}
+}
+
+func TestValidateBDDFeatureTraceabilityReportsMissingRelatedBackReference(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "agm/test/bdd/features/related.feature", "# SPEC: internal/primary/SPEC.md\n# RELATED-SPEC: internal/related/SPEC.md\nFeature: Related\n")
+	writeCoverageFile(t, root, "internal/primary/SPEC.md", "- Feature: `agm/test/bdd/features/related.feature`\n")
+	writeCoverageFile(t, root, "internal/related/SPEC.md", "# Related\n")
+
+	findings := ValidateBDDFeatureTraceability(root)
+	if len(findings) != 1 || findings[0].Path != "internal/related/SPEC.md" {
+		t.Fatalf("expected missing related back-reference finding, got %v", findings)
 	}
 }
 
@@ -145,6 +170,19 @@ func TestValidateBDDFeatureTraceabilityAcceptsReciprocalTrace(t *testing.T) {
 	root := t.TempDir()
 	writeCoverageFile(t, root, "agm/test/bdd/features/traced.feature", "# SPEC: internal/example/SPEC.md\nFeature: Traced\n")
 	writeCoverageFile(t, root, "internal/example/SPEC.md", "# SPEC\n\n## EARS Requirements\n\n**EX-01** When an example is validated, the system shall keep BDD traceability.\n\n## BDD Traceability\n\n- Feature: `agm/test/bdd/features/traced.feature`\n")
+
+	findings := ValidateBDDFeatureTraceability(root)
+	if len(findings) != 0 {
+		t.Fatalf("expected no findings, got %v", findings)
+	}
+}
+
+func TestValidateBDDFeatureTraceabilityAcceptsReciprocalRelatedTrace(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "agm/test/bdd/features/traced.feature", "# SPEC: internal/primary/SPEC.md\n# RELATED-SPEC: internal/related/SPEC.md\nFeature: Traced\n")
+	writeCoverageFile(t, root, "internal/primary/SPEC.md", "- Feature: `agm/test/bdd/features/traced.feature`\n")
+	writeCoverageFile(t, root, "internal/related/SPEC.md", "- Feature: `agm/test/bdd/features/traced.feature`\n")
 
 	findings := ValidateBDDFeatureTraceability(root)
 	if len(findings) != 0 {
@@ -423,6 +461,171 @@ func TestValidateGoPackageSpecsForFilesIgnoresTestOnlyChanges(t *testing.T) {
 	}
 }
 
+func TestValidateAllGoPackageSpecsAcceptsProductionAndTestOnlyPackages(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeRepositoryPackageCoverage(t, root, "internal/production", "production.go")
+	writeRepositoryPackageCoverage(t, root, "testutil/assertions", "assertions_test.go")
+
+	findings, err := ValidateAllGoPackageSpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("expected complete repository coverage, got %v", findings)
+	}
+}
+
+func TestValidateAllGoPackageSpecsRequiresSpecForTestOnlyPackage(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "integration_test/example_test.go", "package integration_test\n")
+
+	findings, err := ValidateAllGoPackageSpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Path != "integration_test/SPEC.md" {
+		t.Fatalf("expected missing test-only package SPEC finding, got %v", findings)
+	}
+}
+
+func TestValidateAllGoPackageSpecsRequiresStrictEARS(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "internal/example/example.go", "package example\n")
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# Example\n\n## EARS Requirements\n\n**EX-01** Eventually this maybe works.\n\n- Feature: `agm/test/bdd/features/example.feature`\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/example.feature", "# SPEC: internal/example/SPEC.md\nFeature: Example\n")
+
+	findings, err := ValidateAllGoPackageSpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) == 0 || !strings.Contains(findings[0].Message, "invalid EARS syntax") {
+		t.Fatalf("expected strict EARS findings, got %v", findings)
+	}
+}
+
+func TestValidateAllGoPackageSpecsAcceptsStrictEARSUnderEstablishedHeading(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "internal/example/example.go", "package example\n")
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# Example\n\n## Requirements\n\n**EX-01** When coverage is checked, the system shall validate EARS semantics.\n\n- Feature: `agm/test/bdd/features/example.feature`\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/example.feature", "# SPEC: internal/example/SPEC.md\nFeature: Example\n")
+
+	findings, err := ValidateAllGoPackageSpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("expected semantic EARS validation independent of heading, got %v", findings)
+	}
+}
+
+func TestValidateAllGoPackageSpecsRequiresBDDReference(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "internal/example/example.go", "package example\n")
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# Example\n\n## EARS Requirements\n\n**EX-01** When coverage is checked, the system shall require BDD coverage.\n")
+
+	findings, err := ValidateAllGoPackageSpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Message != "SPEC.md does not reference an executable BDD feature" {
+		t.Fatalf("expected missing BDD reference finding, got %v", findings)
+	}
+}
+
+func TestValidateAllGoPackageSpecsRequiresReciprocalBDDTraceability(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "internal/example/example.go", "package example\n")
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# Example\n\n## EARS Requirements\n\n**EX-01** When coverage is checked, the system shall require reciprocal traceability.\n\n- Feature: `agm/test/bdd/features/example.feature`\n")
+	writeCoverageFile(t, root, "agm/test/bdd/features/example.feature", "# SPEC: internal/other/SPEC.md\nFeature: Example\n")
+
+	findings, err := ValidateAllGoPackageSpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || !strings.Contains(findings[0].Message, "reciprocal SPEC traceability") {
+		t.Fatalf("expected reciprocal traceability finding, got %v", findings)
+	}
+}
+
+func TestValidateAllGoPackageSpecsRejectsMissingBDDFeature(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "internal/example/example.go", "package example\n")
+	writeCoverageFile(t, root, "internal/example/SPEC.md", "# Example\n\n## EARS Requirements\n\n**EX-01** When coverage is checked, the system shall reject stale BDD references.\n\n- Feature: `agm/test/bdd/features/missing.feature`\n")
+
+	findings, err := ValidateAllGoPackageSpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || !strings.Contains(findings[0].Message, "missing executable BDD feature") {
+		t.Fatalf("expected missing BDD feature finding, got %v", findings)
+	}
+}
+
+func TestValidateAllGoPackageSpecsSkipsNestedWorktreesAndOutputs(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeRepositoryPackageCoverage(t, root, "internal/example", "example.go")
+	for _, path := range []string{
+		".worktrees/branch/uncovered.go",
+		"vendor/dependency/uncovered.go",
+		"node_modules/tool/uncovered.go",
+		"build/generated/uncovered.go",
+		"bin/generated/uncovered.go",
+	} {
+		writeCoverageFile(t, root, path, "package ignored\n")
+	}
+
+	findings, err := ValidateAllGoPackageSpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("expected excluded directories to be skipped, got %v", findings)
+	}
+}
+
+func TestValidateAllImplementationSpecsIncludesNonGoAndExecutableSources(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeRepositoryPackageCoverage(t, root, "services/typescript", "index.ts")
+	writeRepositoryPackageCoverage(t, root, "tools/shell", "deploy.sh")
+	writeRepositoryPackageCoverage(t, root, "tools/rust", "main.rs")
+	writeRepositoryPackageCoverage(t, root, "config/harness", "settings.yaml")
+	writeRepositoryPackageCoverage(t, root, "tools/executable", "hook")
+	if err := os.Chmod(filepath.Join(root, "tools", "executable", "hook"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := ValidateAllImplementationSpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("expected complete cross-language coverage, got %v", findings)
+	}
+}
+
+func TestValidateAllImplementationSpecsRequiresNonGoSpec(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeCoverageFile(t, root, "services/typescript/index.ts", "export const value = true;\n")
+
+	findings, err := ValidateAllImplementationSpecs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Path != "services/typescript/SPEC.md" {
+		t.Fatalf("expected missing TypeScript SPEC finding, got %v", findings)
+	}
+}
+
 func TestChangedGoFilesHonorsCanceledContext(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -446,4 +649,14 @@ func writeCoverageFile(t *testing.T, root, name, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeRepositoryPackageCoverage(t *testing.T, root, dir, goFile string) {
+	t.Helper()
+	specPath := filepath.ToSlash(filepath.Join(dir, "SPEC.md"))
+	featureName := strings.ReplaceAll(filepath.ToSlash(dir), "/", "_") + ".feature"
+	featurePath := "agm/test/bdd/features/" + featureName
+	writeCoverageFile(t, root, filepath.ToSlash(filepath.Join(dir, goFile)), "package example\n")
+	writeCoverageFile(t, root, specPath, "# Example\n\n## EARS Requirements\n\n**EX-01** When coverage is checked, the system shall retain executable BDD traceability.\n\n- Feature: `"+featurePath+"`\n")
+	writeCoverageFile(t, root, featurePath, "# RELATED-SPEC: "+specPath+"\nFeature: Example\n")
 }

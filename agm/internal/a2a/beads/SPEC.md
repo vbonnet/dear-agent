@@ -27,5 +27,6 @@ records stay grounded in repository facts.
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/engram_parity.feature`
+- Feature: `agm/test/bdd/features/harness_parity.feature`
 - Package tests: `agm/internal/a2a/beads/validator_test.go`
 - Package tests: `agm/internal/a2a/beads/linker_test.go`

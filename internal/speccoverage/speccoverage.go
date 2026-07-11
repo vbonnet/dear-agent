@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -242,7 +243,7 @@ func ValidateBDDFeatureTraceability(root string) []Finding {
 			})
 			continue
 		}
-		specPath, ok := featureSpecPath(string(featureData))
+		specPaths, ok := featureSpecPaths(string(featureData))
 		if !ok {
 			findings = append(findings, Finding{
 				Surface: "BDD feature traceability",
@@ -251,40 +252,64 @@ func ValidateBDDFeatureTraceability(root string) []Finding {
 			})
 			continue
 		}
-		specData, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(specPath)))
-		if err != nil {
-			findings = append(findings, Finding{
-				Surface: "BDD feature traceability",
-				Path:    specPath,
-				Message: fmt.Sprintf("BDD feature references a missing SPEC.md: %v", err),
-			})
-			continue
-		}
-		if !strings.Contains(string(specData), feature) {
-			findings = append(findings, Finding{
-				Surface: "BDD feature traceability",
-				Path:    specPath,
-				Message: fmt.Sprintf("governing SPEC.md does not reference executable BDD feature: %s", feature),
-			})
+		for _, specPath := range specPaths {
+			specData, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(specPath)))
+			if err != nil {
+				findings = append(findings, Finding{
+					Surface: "BDD feature traceability",
+					Path:    specPath,
+					Message: fmt.Sprintf("BDD feature references a missing SPEC.md: %v", err),
+				})
+				continue
+			}
+			if !strings.Contains(string(specData), feature) {
+				findings = append(findings, Finding{
+					Surface: "BDD feature traceability",
+					Path:    specPath,
+					Message: fmt.Sprintf("governing or related SPEC.md does not reference executable BDD feature: %s", feature),
+				})
+			}
 		}
 	}
 	return findings
 }
 
 func featureSpecPath(featureText string) (string, bool) {
+	paths, ok := featureSpecPaths(featureText)
+	if !ok {
+		return "", false
+	}
+	return paths[0], true
+}
+
+func featureSpecPaths(featureText string) ([]string, bool) {
+	var paths []string
+	hasPrimary := false
 	for line := range strings.SplitSeq(featureText, "\n") {
 		line = strings.TrimSpace(line)
-		value, ok := strings.CutPrefix(line, "# SPEC:")
-		if !ok {
-			continue
+		value, primary := strings.CutPrefix(line, "# SPEC:")
+		if !primary {
+			var related bool
+			value, related = strings.CutPrefix(line, "# RELATED-SPEC:")
+			if !related {
+				continue
+			}
 		}
 		value = strings.TrimSpace(value)
 		if value == "" || filepath.Base(value) != "SPEC.md" {
-			return "", false
+			return nil, false
 		}
-		return filepath.ToSlash(filepath.Clean(value)), true
+		if primary {
+			if hasPrimary {
+				return nil, false
+			}
+			hasPrimary = true
+			paths = append([]string{filepath.ToSlash(filepath.Clean(value))}, paths...)
+			continue
+		}
+		paths = append(paths, filepath.ToSlash(filepath.Clean(value)))
 	}
-	return "", false
+	return paths, hasPrimary
 }
 
 func bddFeaturePaths(root string) ([]string, error) {
@@ -372,6 +397,180 @@ func ValidateChangedGoPackageSpecs(ctx context.Context, root, baseRef string) ([
 		return nil, err
 	}
 	return ValidateGoPackageSpecsForFiles(root, files), nil
+}
+
+var specBDDFeaturePattern = regexp.MustCompile(`agm/test/bdd/features/[A-Za-z0-9._-]+\.feature`)
+
+// ValidateAllGoPackageSpecs requires every Go package, including test-only
+// packages, to have strict SPEC.md and reciprocal executable BDD coverage.
+func ValidateAllGoPackageSpecs(root string) ([]Finding, error) {
+	packageDirs, err := allImplementationDirs(root, goSourceFile)
+	if err != nil {
+		return nil, err
+	}
+	return validateAllImplementationDirs(root, packageDirs)
+}
+
+// ValidateAllImplementationSpecs requires every implementation directory,
+// regardless of source language, to have strict SPEC.md and BDD coverage.
+func ValidateAllImplementationSpecs(root string) ([]Finding, error) {
+	implementationDirs, err := allImplementationDirs(root, implementationSourceFile)
+	if err != nil {
+		return nil, err
+	}
+	return validateAllImplementationDirs(root, implementationDirs)
+}
+
+func validateAllImplementationDirs(root string, dirs []string) ([]Finding, error) {
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("open repository root: %w", err)
+	}
+	defer func() { _ = rootFS.Close() }()
+
+	var findings []Finding
+	for _, dir := range dirs {
+		findings = append(findings, validateRepositoryImplementationSpec(rootFS, dir)...)
+	}
+	return findings, nil
+}
+
+func allImplementationDirs(root string, isSource func(os.DirEntry) (bool, error)) ([]string, error) {
+	seen := map[string]bool{}
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if path != root && skippedCoverageDir(entry.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		include, err := isSource(entry)
+		if err != nil {
+			return err
+		}
+		if !include {
+			return nil
+		}
+		rel, err := filepath.Rel(root, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		seen[filepath.ToSlash(rel)] = true
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("discover repository Go packages: %w", err)
+	}
+
+	dirs := make([]string, 0, len(seen))
+	for dir := range seen {
+		dirs = append(dirs, dir)
+	}
+	slices.Sort(dirs)
+	return dirs, nil
+}
+
+func goSourceFile(entry os.DirEntry) (bool, error) {
+	return strings.HasSuffix(entry.Name(), ".go"), nil
+}
+
+func implementationSourceFile(entry os.DirEntry) (bool, error) {
+	switch strings.ToLower(filepath.Ext(entry.Name())) {
+	case ".go", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py",
+		".sh", ".bash", ".zsh", ".bats", ".tf", ".sql", ".yaml", ".yml",
+		".json", ".toml", ".plist", ".service", ".dockerfile":
+		return true, nil
+	}
+	if filepath.Ext(entry.Name()) != "" {
+		return false, nil
+	}
+	info, err := entry.Info()
+	if err != nil {
+		return false, err
+	}
+	return info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0, nil
+}
+
+func skippedCoverageDir(name string) bool {
+	switch name {
+	case ".git", ".worktrees", "vendor", "node_modules", "bin", "build":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateRepositoryImplementationSpec(root *os.Root, dir string) []Finding {
+	specPath := filepath.ToSlash(filepath.Join(dir, "SPEC.md"))
+	specData, err := root.ReadFile(filepath.FromSlash(specPath))
+	if err != nil {
+		return []Finding{{
+			Surface: "repository implementation SPEC coverage",
+			Path:    specPath,
+			Message: fmt.Sprintf("implementation directory %q does not have a co-located SPEC.md: %v", dir, err),
+		}}
+	}
+
+	specText := string(specData)
+	findings := validateSpecEARS(Surface{
+		Name:     "repository implementation SPEC coverage",
+		SpecPath: specPath,
+	}, specText)
+
+	featurePaths := specBDDFeaturePattern.FindAllString(specText, -1)
+	slices.Sort(featurePaths)
+	featurePaths = slices.Compact(featurePaths)
+	if len(featurePaths) == 0 {
+		return append(findings, Finding{
+			Surface: "repository implementation BDD coverage",
+			Path:    specPath,
+			Message: "SPEC.md does not reference an executable BDD feature",
+		})
+	}
+
+	for _, featurePath := range featurePaths {
+		featureData, err := root.ReadFile(filepath.FromSlash(featurePath))
+		if err != nil {
+			findings = append(findings, Finding{
+				Surface: "repository implementation BDD coverage",
+				Path:    featurePath,
+				Message: fmt.Sprintf("SPEC.md references a missing executable BDD feature: %v", err),
+			})
+			continue
+		}
+		featureText := string(featureData)
+		if !strings.Contains(featureText, "Feature:") {
+			findings = append(findings, Finding{
+				Surface: "repository implementation BDD coverage",
+				Path:    featurePath,
+				Message: "referenced BDD feature does not declare a Feature",
+			})
+		}
+		if !bddFeatureReferencesSpec(featureText, specPath) {
+			findings = append(findings, Finding{
+				Surface: "repository implementation BDD coverage",
+				Path:    featurePath,
+				Message: fmt.Sprintf("referenced BDD feature does not declare reciprocal SPEC traceability to %s", specPath),
+			})
+		}
+	}
+	return findings
+}
+
+func bddFeatureReferencesSpec(featureText, specPath string) bool {
+	for line := range strings.SplitSeq(featureText, "\n") {
+		line = strings.TrimSpace(line)
+		for _, marker := range []string{"# SPEC:", "# RELATED-SPEC:"} {
+			value, ok := strings.CutPrefix(line, marker)
+			if ok && filepath.ToSlash(filepath.Clean(strings.TrimSpace(value))) == specPath {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ChangedGoFiles returns changed Go files relative to baseRef...HEAD.

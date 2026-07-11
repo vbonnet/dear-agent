@@ -1,4 +1,5 @@
 # SPEC: agm/internal/permissionparity/SPEC.md
+# RELATED-SPEC: agm/internal/manifest/SPEC.md
 # RELATED-SPEC: agm/internal/rbac/SPEC.md
 Feature: Agent permission parity
   AGM should resolve one agent permission policy and carry it through every

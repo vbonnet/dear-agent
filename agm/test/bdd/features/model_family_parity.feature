@@ -1,4 +1,5 @@
 # SPEC: pkg/llm/provider/SPEC.md
+# RELATED-SPEC: agm/internal/agent/openai/SPEC.md
 # RELATED-SPEC: agm/internal/llm/SPEC.md
 # RELATED-SPEC: internal/pricing/SPEC.md
 Feature: Model family provider parity

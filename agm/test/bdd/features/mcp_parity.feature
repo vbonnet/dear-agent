@@ -1,4 +1,5 @@
 # SPEC: agm/internal/mcpparity/SPEC.md
+# RELATED-SPEC: agm/internal/surface/SPEC.md
 # RELATED-SPEC: agm/internal/mcp/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/SPEC.md
 # RELATED-SPEC: agm/internal/a2a/jsonrpc/SPEC.md
