@@ -29,6 +29,8 @@ creation.
 
 **SAFE-PR-07** When a PR URL is returned, the system shall parse owner, repository, and PR number from GitHub URLs.
 
+**SAFE-PR-08** When the canonical Wayfinder V2 writer creates a `planning` session with `project_name`, the system shall accept that trace without requiring a legacy `session_id`.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/local_development_guardrails.feature`

@@ -9,8 +9,8 @@
 //	safe-pr close  --wayfinder <project-dir> <number|url> [gh flags...]
 //
 // The wayfinder project dir (or WAYFINDER_PROJECT_DIR) must contain a
-// WAYFINDER-STATUS.md with status: in_progress; its session_id is stamped
-// into the PR body (create) or close comment (close). On create, squash
+// active WAYFINDER-STATUS.md; its project_name (or legacy session_id) is
+// stamped into the PR body (create) or close comment (close). On create, squash
 // auto-merge is armed on the new PR so it merges itself once required checks
 // and reviews pass. Every invocation is audit-logged to
 // ~/.local/state/dear-agent/safe-pr.log and emits an OTel span (safepr.<verb>)

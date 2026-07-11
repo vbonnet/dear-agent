@@ -44,9 +44,10 @@ func TestLoadSession_Failures(t *testing.T) {
 		name, content, wantErr string
 	}{
 		{"missing file", "", "cannot read"},
-		{"completed session", "---\nsession_id: x\nstatus: completed\n---\n", "not in_progress"},
+		{"completed session", "---\nsession_id: x\nstatus: completed\n---\n", "not active"},
 		{"no session id", "---\nstatus: in_progress\n---\n", "no session_id or project_name"},
-		{"v2 abandoned", "---\nproject_name: foo\nstatus: abandoned\n---\n", "not in_progress"},
+		{"v2 abandoned", "---\nproject_name: foo\nstatus: abandoned\n---\n", "not active"},
+		{"v2 blocked", "---\nproject_name: foo\nstatus: blocked\n---\n", "not active"},
 		{"no frontmatter", "# just markdown\n", "frontmatter"},
 		{"unterminated frontmatter", "---\nsession_id: x\n", "unterminated"},
 	}
@@ -247,6 +248,30 @@ func TestLoadSession_V2(t *testing.T) {
 	}
 	if s.ProjectPath == "" || !filepath.IsAbs(s.ProjectPath) {
 		t.Errorf("project path not absolute: %q", s.ProjectPath)
+	}
+}
+
+func TestLoadSession_V2Planning(t *testing.T) {
+	dir := t.TempDir()
+	writeStatus(t, dir, strings.Replace(v2InProgressStatus, "status: in-progress", "status: planning", 1))
+	s, err := LoadSession(dir)
+	if err != nil {
+		t.Fatalf("LoadSession V2 planning: %v", err)
+	}
+	if s.ID != "my-feature" {
+		t.Errorf("session id = %q, want my-feature", s.ID)
+	}
+}
+
+func TestIsActiveStatus(t *testing.T) {
+	cases := map[string]bool{
+		"planning": true, "in-progress": true, "in_progress": true,
+		"blocked": false, "completed": false, "abandoned": false, "": false,
+	}
+	for status, want := range cases {
+		if got := isActiveStatus(status); got != want {
+			t.Errorf("isActiveStatus(%q) = %v, want %v", status, got, want)
+		}
 	}
 }
 

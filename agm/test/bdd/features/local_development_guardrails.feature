@@ -35,3 +35,39 @@ Feature: Local development guardrails
       | safepr     |
       | safesrc    |
       | safeunlock |
+
+  Scenario Outline: Canonical Wayfinder traces are accepted across parity routes
+    Given canonical Wayfinder V2 status for harness "<harness>" and model family "<family>"
+    When safe-pr loads the canonical planning trace
+    Then safe-pr should attribute the trace to project "parity-audit"
+
+    Examples:
+      | harness      | family    |
+      | claude-code  | anthropic |
+      | claude-code  | openai    |
+      | claude-code  | gemini    |
+      | claude-code  | glm       |
+      | claude-code  | deepseek  |
+      | claude-code  | nemotron  |
+      | claude-code  | qwen      |
+      | codex-cli    | anthropic |
+      | codex-cli    | openai    |
+      | codex-cli    | gemini    |
+      | codex-cli    | glm       |
+      | codex-cli    | deepseek  |
+      | codex-cli    | nemotron  |
+      | codex-cli    | qwen      |
+      | agy          | anthropic |
+      | agy          | openai    |
+      | agy          | gemini    |
+      | agy          | glm       |
+      | agy          | deepseek  |
+      | agy          | nemotron  |
+      | agy          | qwen      |
+      | opencode-cli | anthropic |
+      | opencode-cli | openai    |
+      | opencode-cli | gemini    |
+      | opencode-cli | glm       |
+      | opencode-cli | deepseek  |
+      | opencode-cli | nemotron  |
+      | opencode-cli | qwen      |
