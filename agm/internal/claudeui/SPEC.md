@@ -8,7 +8,7 @@
 This package is a Claude-only storage adapter and does not define AGM's shared
 archive or lifecycle contract.
 
-## Requirements
+## EARS Requirements
 
 **CUI-01** When the Claude UI store has one device and account directory, the system shall autodetect that store.
 
