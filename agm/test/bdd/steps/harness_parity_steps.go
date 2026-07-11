@@ -20,6 +20,7 @@ import (
 	"github.com/vbonnet/dear-agent/agm/internal/quotaparity"
 	"github.com/vbonnet/dear-agent/agm/internal/rbac"
 	"github.com/vbonnet/dear-agent/agm/internal/state"
+	"github.com/vbonnet/dear-agent/agm/internal/tmux"
 	"github.com/vbonnet/dear-agent/agm/internal/wayfinderparity"
 	"github.com/vbonnet/dear-agent/engram/hippocampus"
 )
@@ -80,6 +81,8 @@ type harnessParityState struct {
 	cleanupSupportPackage      string
 	cleanupSupportSpec         string
 	a2aCoordinationSpecsValid  bool
+	captureInvocationArgs      []string
+	captureSessionName         string
 }
 
 type harnessParityStateKey struct{}
@@ -99,6 +102,9 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^AGM active harnesses are configured$`, agmActiveHarnessesAreConfigured)
 	ctx.Step(`^AGM validates active harness adapter conformance$`, agmValidatesActiveHarnessAdapterConformance)
 	ctx.Step(`^every active harness adapter should satisfy the shared conformance suite$`, everyActiveHarnessAdapterShouldSatisfySharedConformanceSuite)
+	ctx.Step(`^AGM validates the pane capture invocation$`, agmValidatesPaneCaptureInvocation)
+	ctx.Step(`^pane capture should use the canonical AGM tmux socket$`, paneCaptureShouldUseCanonicalAGMTmuxSocket)
+	ctx.Step(`^pane capture should normalize the session target$`, paneCaptureShouldNormalizeSessionTarget)
 	ctx.Step(`^AGM runtime helper command "([^"]*)" is configured$`, agmRuntimeHelperCommandIsConfigured)
 	ctx.Step(`^AGM validates runtime helper command coverage$`, agmValidatesRuntimeHelperCommandCoverage)
 	ctx.Step(`^runtime helper command "([^"]*)" should have a co-located SPEC$`, runtimeHelperCommandShouldHaveCoLocatedSPEC)
@@ -224,6 +230,46 @@ func harnessIsConfigured(ctx context.Context, harness string) error {
 	}
 	harnessState.configuredHarness = agent.NormalizeHarnessName(harness)
 	return nil
+}
+
+func agmValidatesPaneCaptureInvocation(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if harnessState.configuredHarness == "" {
+		return fmt.Errorf("no harness configured")
+	}
+	harnessState.captureSessionName = harnessState.configuredHarness + ".capture:test"
+	harnessState.captureInvocationArgs = tmux.CapturePaneCommandArgs(harnessState.captureSessionName, 50)
+	return nil
+}
+
+func paneCaptureShouldUseCanonicalAGMTmuxSocket(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	args := harnessState.captureInvocationArgs
+	if len(args) < 2 || args[0] != "-S" || args[1] != tmux.GetSocketPath() {
+		return fmt.Errorf("capture invocation does not use canonical socket: %q", args)
+	}
+	return nil
+}
+
+func paneCaptureShouldNormalizeSessionTarget(ctx context.Context) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	args := harnessState.captureInvocationArgs
+	want := tmux.NormalizeTmuxSessionName(harnessState.captureSessionName)
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-t" && args[i+1] == want {
+			return nil
+		}
+	}
+	return fmt.Errorf("capture invocation target is not normalized to %q: %q", want, args)
 }
 
 func agmValidatesActiveParitySupport(ctx context.Context) error {

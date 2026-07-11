@@ -4,16 +4,49 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"strings"
 )
 
-// CapturePaneOutput captures last N lines from session's active pane
+// CapturePaneOutput captures the last N lines from a session's active pane.
 func CapturePaneOutput(sessionName string, lines int) (string, error) {
-	socketPath := GetSocketPath()
-	// Normalize session name to match tmux's conversion (dots/colons → dashes)
-	normalizedName := NormalizeTmuxSessionName(sessionName)
-	// Note: capture-pane targets panes, not sessions, so we don't use FormatSessionTarget (=prefix)
-	cmd := exec.Command("tmux", "-S", socketPath, // Use AGM-specific socket
-		"capture-pane", "-t", normalizedName, "-p", "-S", fmt.Sprintf("-%d", lines))
+	return capturePane(sessionName, lines)
+}
+
+// CapturePaneHistoryOutput captures all available scrollback from a session's
+// active pane.
+func CapturePaneHistoryOutput(sessionName string) (string, error) {
+	return capturePane(sessionName, 0)
+}
+
+// CapturePaneLines captures pane output and returns it as individual lines.
+// A non-positive line count captures all available history.
+func CapturePaneLines(sessionName string, lines int) ([]string, error) {
+	var (
+		output string
+		err    error
+	)
+	if lines > 0 {
+		output, err = CapturePaneOutput(sessionName, lines)
+	} else {
+		output, err = CapturePaneHistoryOutput(sessionName)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	output = strings.TrimRight(output, "\n")
+	if output == "" {
+		return []string{}, nil
+	}
+	return strings.Split(output, "\n"), nil
+}
+
+func capturePane(sessionName string, lines int) (string, error) {
+	if sessionName == "" {
+		return "", fmt.Errorf("session name cannot be empty")
+	}
+
+	cmd := exec.Command("tmux", CapturePaneCommandArgs(sessionName, lines)...)
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -23,4 +56,20 @@ func CapturePaneOutput(sessionName string, lines int) (string, error) {
 	}
 
 	return stdout.String(), nil
+}
+
+// CapturePaneCommandArgs returns the canonical tmux arguments used for pane
+// capture. It is exposed within AGM so parity checks can validate the command
+// contract without starting a tmux server.
+func CapturePaneCommandArgs(sessionName string, lines int) []string {
+	start := "-"
+	if lines > 0 {
+		start = fmt.Sprintf("-%d", lines)
+	}
+	// capture-pane targets panes, so the exact-session "=" prefix is invalid.
+	return []string{
+		"-S", GetSocketPath(),
+		"capture-pane", "-t", NormalizeTmuxSessionName(sessionName),
+		"-p", "-S", start,
+	}
 }

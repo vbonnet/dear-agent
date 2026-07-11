@@ -84,6 +84,19 @@ Feature: Harness parity
     When AGM validates active harness adapter conformance
     Then every active harness adapter should satisfy the shared conformance suite
 
+  Scenario Outline: Active harness capture uses the canonical AGM socket
+    Given harness "<harness>" is configured
+    When AGM validates the pane capture invocation
+    Then pane capture should use the canonical AGM tmux socket
+    And pane capture should normalize the session target
+
+    Examples:
+      | harness      |
+      | claude-code  |
+      | codex-cli    |
+      | agy          |
+      | opencode-cli |
+
   Scenario Outline: AGM runtime helper commands declare SPEC coverage
     Given AGM runtime helper command "<command>" is configured
     When AGM validates runtime helper command coverage

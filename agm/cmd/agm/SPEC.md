@@ -48,6 +48,8 @@ Provide a production-ready CLI that:
 
 **CLI-11** When AGM builds a session manifest with a startup permission mode, the system shall persist the permission mode, source, and update timestamp so resume and audit surfaces reflect the launch contract.
 
+**CLI-12** When `agm capture` reads pane output for any active harness, the system shall use the canonical AGM tmux socket for both session discovery and capture rather than the host default socket.
+
 ## Requirements
 
 ### Functional Requirements

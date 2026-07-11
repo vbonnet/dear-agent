@@ -42,6 +42,8 @@ because the tmux server's own cwd has been deleted.
 
 **TMUX-13** When Claude liveness is checked and tmux reports a shell or `agm` wrapper as the foreground command, the system shall inspect captured pane output for the Claude prompt before declaring Claude not running.
 
+**TMUX-14** When pane output or scrollback is captured for any active harness, the system shall invoke tmux through the canonical AGM socket and normalize the target session name.
+
 **TMUX-21** When the operating-system user database cannot resolve the current process UID, the system shall use the numeric UID and environment username for linger diagnostics.
 
 **TMUX-22** When `CI_SKIP_TMUX=true`, the test suite shall skip tmux-dependent integration tests while continuing to execute pure tmux unit tests.
@@ -53,3 +55,4 @@ because the tmux server's own cwd has been deleted.
 - Package tests: `agm/internal/tmux/liveness_test.go`
 - Package tests: `agm/internal/tmux/tmux_test.go`
 - Package tests: `agm/internal/tmux/linger_test.go`
+- Package tests: `agm/internal/tmux/capture_test.go`
