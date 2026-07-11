@@ -1,0 +1,91 @@
+# SPEC: agm/test/SPEC.md
+# RELATED-SPEC: agm/examples/SPEC.md
+# RELATED-SPEC: agm/internal/testcontext/SPEC.md
+# RELATED-SPEC: agm/internal/testutil/SPEC.md
+# RELATED-SPEC: agm/scripts/SPEC.md
+# RELATED-SPEC: agm/test/bdd/SPEC.md
+# RELATED-SPEC: agm/test/bdd/steps/SPEC.md
+# RELATED-SPEC: agm/test/contract/SPEC.md
+# RELATED-SPEC: agm/test/contracts/SPEC.md
+# RELATED-SPEC: agm/test/e2e/SPEC.md
+# RELATED-SPEC: agm/test/helpers/SPEC.md
+# RELATED-SPEC: agm/test/integration/SPEC.md
+# RELATED-SPEC: agm/test/integration/helpers/SPEC.md
+# RELATED-SPEC: agm/test/integration/lifecycle/SPEC.md
+# RELATED-SPEC: agm/test/performance/SPEC.md
+# RELATED-SPEC: agm/test/regression/SPEC.md
+# RELATED-SPEC: agm/test/unit/SPEC.md
+# RELATED-SPEC: engram/hooks-bin/cmd/integration_test/SPEC.md
+# RELATED-SPEC: engram/hooks-bin/internal/integration_test/SPEC.md
+# RELATED-SPEC: engram/internal/testutil/SPEC.md
+# RELATED-SPEC: internal/testutil/SPEC.md
+# RELATED-SPEC: wayfinder/cmd/wayfinder-session/internal/integration/SPEC.md
+Feature: Test support package guardrails
+  Test infrastructure is part of the product's enforcement boundary. Its
+  contracts must remain strict, executable, and provider-neutral.
+
+  Scenario Outline: Test support packages declare strict executable contracts
+    Given test support package "<package>" is configured
+    When AGM validates test support package coverage
+    Then test support package "<package>" should have a co-located SPEC
+
+    Examples:
+      | package                                                   |
+      | agm/examples                                              |
+      | agm/internal/testcontext                                  |
+      | agm/internal/testutil                                     |
+      | agm/scripts                                               |
+      | agm/test                                                  |
+      | agm/test/bdd                                              |
+      | agm/test/bdd/steps                                        |
+      | agm/test/contract                                         |
+      | agm/test/contracts                                        |
+      | agm/test/e2e                                              |
+      | agm/test/helpers                                          |
+      | agm/test/integration                                      |
+      | agm/test/integration/helpers                              |
+      | agm/test/integration/lifecycle                            |
+      | agm/test/performance                                      |
+      | agm/test/regression                                       |
+      | agm/test/unit                                             |
+      | engram/hooks-bin/cmd/integration_test                     |
+      | engram/hooks-bin/internal/integration_test                |
+      | engram/internal/testutil                                  |
+      | internal/testutil                                         |
+      | wayfinder/cmd/wayfinder-session/internal/integration      |
+
+  Scenario Outline: Test enforcement is invariant across active routes
+    Given test support coverage runs through "<harness>" with "<family>"
+    When AGM validates residual support package parity
+    Then every residual support package should retain strict SPEC and BDD traceability
+
+    Examples:
+      | harness      | family    |
+      | claude-code  | anthropic |
+      | claude-code  | openai    |
+      | claude-code  | gemini    |
+      | claude-code  | glm       |
+      | claude-code  | deepseek  |
+      | claude-code  | nemotron  |
+      | claude-code  | qwen      |
+      | codex-cli    | anthropic |
+      | codex-cli    | openai    |
+      | codex-cli    | gemini    |
+      | codex-cli    | glm       |
+      | codex-cli    | deepseek  |
+      | codex-cli    | nemotron  |
+      | codex-cli    | qwen      |
+      | agy          | anthropic |
+      | agy          | openai    |
+      | agy          | gemini    |
+      | agy          | glm       |
+      | agy          | deepseek  |
+      | agy          | nemotron  |
+      | agy          | qwen      |
+      | opencode-cli | anthropic |
+      | opencode-cli | openai    |
+      | opencode-cli | gemini    |
+      | opencode-cli | glm       |
+      | opencode-cli | deepseek  |
+      | opencode-cli | nemotron  |
+      | opencode-cli | qwen      |

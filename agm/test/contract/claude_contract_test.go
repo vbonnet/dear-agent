@@ -82,7 +82,7 @@ func TestClaudeAPI_BasicPrompt(t *testing.T) {
 	// Consume API quota (need 2: create + prompt)
 	quota := helpers.GetAPIQuota()
 	if quota.Remaining() < 2 {
-		t.Skip("Insufficient API quota (need 2, have %d)", quota.Remaining())
+		t.Skipf("Insufficient API quota (need 2, have %d)", quota.Remaining())
 	}
 
 	// First quota for session creation
