@@ -57,6 +57,7 @@ func Contracts() []Contract {
 		neutral("admin_watchdog.go", "admin install-watchdog/uninstall-watchdog"),
 		neutral("associate.go", "session associate"),
 		neutral("boot_check.go", "boot-check"),
+		neutral("capture.go", "capture"),
 		native("create_child.go", "create-child"),
 		neutral("doctor.go", "admin doctor"),
 		bridge("escape_ui.go", "send escape-ui"),
