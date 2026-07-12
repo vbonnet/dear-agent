@@ -8,7 +8,7 @@
 This package is a Claude-only storage adapter and does not define AGM's shared
 archive or lifecycle contract.
 
-## Requirements
+## EARS Requirements
 
 **CUI-01** When the Claude UI store has one device and account directory, the system shall autodetect that store.
 
@@ -21,6 +21,10 @@ archive or lifecycle contract.
 **CUI-05** When the requested archive state already matches the file, the system shall return an idempotent no-op without touching disk or creating a backup.
 
 **CUI-06** When backup is requested before mutation, the system shall write a byte-identical copy before changing the source file.
+
+**CUI-07** When AGM archives a Claude session with a persisted UUID, the system shall select only desktop records whose `cliSessionId` exactly equals that UUID, including across multiple local device/account stores.
+
+**CUI-08** When an individual Claude desktop device or account store cannot be read, the system shall record that store as a load error and continue scanning the remaining stores.
 
 ## BDD Traceability
 

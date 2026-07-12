@@ -229,6 +229,11 @@ Concretely:
    never reads the cookie store; it can only consume a user-provided token via
    env. Document, but do not implement in phase 1.
 
+7. **Replacement criterion.** If Anthropic publishes a supported per-session
+   archive API with archive (not delete) semantics, AGM must replace this local
+   store extension with that API and retain the exact-UUID and reversible
+   outcome contract at the shared archive boundary.
+
 ### Interface
 
 ```

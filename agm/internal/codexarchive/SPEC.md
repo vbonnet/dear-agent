@@ -11,3 +11,5 @@
 **CAX-04** When Codex app-server archival fails or app-server remote control is unavailable for a persisted Codex thread id, the archive bridge shall fall back to the Codex CLI archive command.
 
 **CAX-05** When neither a persisted Codex id nor a transcript cwd match can identify the Codex session, the archive bridge shall return an error without guessing a target.
+
+**CAX-06** While archiving a Codex thread, the archive bridge shall not start, stop, or otherwise change device-global remote-control state.
