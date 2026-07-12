@@ -213,7 +213,8 @@ func FindByCLISessionID(root, cliSessionID string) ([]*Session, []LoadError, err
 		deviceDir := filepath.Join(root, deviceID)
 		accountEntries, readErr := os.ReadDir(deviceDir)
 		if readErr != nil {
-			return nil, loadErrs, readErr
+			loadErrs = append(loadErrs, LoadError{Path: deviceDir, Err: readErr})
+			continue
 		}
 		sort.Slice(accountEntries, func(i, j int) bool { return accountEntries[i].Name() < accountEntries[j].Name() })
 		for _, account := range accountEntries {
@@ -223,7 +224,11 @@ func FindByCLISessionID(root, cliSessionID string) ([]*Session, []LoadError, err
 			accountID := account.Name()
 			sessions, errs, listErr := ListSessions(filepath.Join(deviceDir, accountID), deviceID, accountID)
 			if listErr != nil {
-				return nil, loadErrs, listErr
+				loadErrs = append(loadErrs, LoadError{
+					Path: filepath.Join(deviceDir, accountID),
+					Err:  listErr,
+				})
+				continue
 			}
 			loadErrs = append(loadErrs, errs...)
 			for _, s := range sessions {

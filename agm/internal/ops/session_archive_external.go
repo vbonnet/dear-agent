@@ -105,7 +105,7 @@ func archiveClaudeExternalSession(m *manifest.Manifest) ExternalArchiveOutcome {
 	if len(sessions) == 0 {
 		detail := "no matching Claude desktop session"
 		if len(loadErrs) > 0 {
-			detail = fmt.Sprintf("%s (%d unrecognized store record(s) skipped)", detail, len(loadErrs))
+			detail = fmt.Sprintf("%s (%d unreadable or unrecognized store record(s) skipped)", detail, len(loadErrs))
 		}
 		return ExternalArchiveOutcome{Provider: "claude", Status: ExternalArchiveNotPresent, Target: m.Claude.UUID, Detail: detail}
 	}
@@ -124,7 +124,11 @@ func archiveClaudeExternalSession(m *manifest.Manifest) ExternalArchiveOutcome {
 	if changed == 0 {
 		return ExternalArchiveOutcome{Provider: "claude", Status: ExternalArchiveAlreadyArchived, Target: m.Claude.UUID}
 	}
-	return ExternalArchiveOutcome{Provider: "claude", Status: ExternalArchiveArchived, Target: m.Claude.UUID, Detail: fmt.Sprintf("archived %d Claude desktop record(s)", changed)}
+	detail := fmt.Sprintf("archived %d Claude desktop record(s)", changed)
+	if len(loadErrs) > 0 {
+		detail = fmt.Sprintf("%s (%d unreadable or unrecognized store record(s) skipped)", detail, len(loadErrs))
+	}
+	return ExternalArchiveOutcome{Provider: "claude", Status: ExternalArchiveArchived, Target: m.Claude.UUID, Detail: detail}
 }
 
 func archiveExternalForContext(opCtx *OpContext, m *manifest.Manifest) []ExternalArchiveOutcome {

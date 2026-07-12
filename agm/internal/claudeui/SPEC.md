@@ -24,6 +24,8 @@ archive or lifecycle contract.
 
 **CUI-07** When AGM archives a Claude session with a persisted UUID, the system shall select only desktop records whose `cliSessionId` exactly equals that UUID, including across multiple local device/account stores.
 
+**CUI-08** When an individual Claude desktop device or account store cannot be read, the system shall record that store as a load error and continue scanning the remaining stores.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/agm_conversation_discovery_guardrails.feature`

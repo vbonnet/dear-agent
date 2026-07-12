@@ -168,6 +168,38 @@ func TestFindByCLISessionID_DoesNotMatchByWorkingDirectory(t *testing.T) {
 	}
 }
 
+func TestFindByCLISessionID_SkipsUnreadableStore(t *testing.T) {
+	root, goodDir := newStore(t, map[string]string{
+		"local_target.json": sessionFile("target", 1700000000000, false),
+	})
+	blockedDir := filepath.Join(root, "dev2", "acct2")
+	if err := os.MkdirAll(blockedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(blockedDir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(blockedDir, 0o755); err != nil {
+			t.Errorf("restore permissions for %s: %v", blockedDir, err)
+		}
+	})
+	if _, err := os.ReadDir(blockedDir); err == nil {
+		t.Skip("test user can read mode-000 directory")
+	}
+
+	matches, loadErrs, err := FindByCLISessionID(root, "cli-target")
+	if err != nil {
+		t.Fatalf("FindByCLISessionID() error = %v", err)
+	}
+	if len(matches) != 1 || matches[0].Path != filepath.Join(goodDir, "local_target.json") {
+		t.Fatalf("matches = %#v, want the readable exact-ID record", matches)
+	}
+	if len(loadErrs) != 1 || loadErrs[0].Path != blockedDir {
+		t.Fatalf("load errors = %#v, want unreadable store %s", loadErrs, blockedDir)
+	}
+}
+
 func TestSetArchived_IdempotentNoOp(t *testing.T) {
 	_, dir := newStore(t, map[string]string{
 		"local_a.json": sessionFile("a", 1700000000000, true),
