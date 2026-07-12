@@ -208,8 +208,8 @@ func (p *OpenRouterProvider) Capabilities() Capabilities {
 			"z-ai/glm-5.2",
 			"deepseek/deepseek-v4-pro",
 			"deepseek/deepseek-v4-flash",
-			"nvidia/nemotron-3-ultra",
-			"qwen/qwen3.6-max",
+			"nvidia/nemotron-3-ultra-550b-a55b",
+			"qwen/qwen3.6-max-preview",
 			"qwen/qwen3.6-35b-a3b",
 		},
 	}

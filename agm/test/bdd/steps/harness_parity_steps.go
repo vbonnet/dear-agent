@@ -132,6 +132,7 @@ func RegisterHarnessParitySteps(ctx *godog.ScenarioContext) {
 	ctx.Step(`^harness "([^"]*)" should have a cost quota source$`, harnessShouldHaveCostQuotaSource)
 	ctx.Step(`^harness "([^"]*)" should have a rate limit quota policy$`, harnessShouldHaveRateLimitQuotaPolicy)
 	ctx.Step(`^model family "([^"]*)" should have a quota pricing policy$`, modelFamilyShouldHaveQuotaPricingPolicy)
+	ctx.Step(`^model family "([^"]*)" should have sourced shared pricing$`, modelFamilyShouldHaveSourcedSharedPricing)
 	ctx.Step(`^model family "([^"]*)" should have a default quota model route$`, modelFamilyShouldHaveDefaultQuotaModelRoute)
 	ctx.Step(`^AGM validates MCP session creation parity$`, agmValidatesMCPSessionCreationParity)
 	ctx.Step(`^harness "([^"]*)" should have an MCP create-session surface$`, harnessShouldHaveMCPCreateSessionSurface)
@@ -714,6 +715,21 @@ func modelFamilyShouldHaveQuotaPricingPolicy(ctx context.Context, family string)
 	}
 	if harnessState.quotaFamilyCoverage.PricePolicy == "" {
 		return fmt.Errorf("model family %q has empty quota pricing policy", family)
+	}
+	return nil
+}
+
+func modelFamilyShouldHaveSourcedSharedPricing(ctx context.Context, family string) error {
+	harnessState, err := getHarnessParityState(ctx)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains([]string{"glm", "deepseek", "nemotron", "qwen"}, strings.ToLower(family)) {
+		return fmt.Errorf("model family %q is outside priority sourced-pricing scope", family)
+	}
+	coverage := harnessState.quotaFamilyCoverage
+	if !coverage.Priced || coverage.PriceSource == "" || coverage.PriceAsOf == "" {
+		return fmt.Errorf("model family %q lacks sourced shared pricing: %+v", family, coverage)
 	}
 	return nil
 }

@@ -37,6 +37,8 @@ Claude-specific defaults.
 
 **QMP-10** When an active harness or supported model family is added, the system shall require quota parity tests for monitoring surfaces and pricing policy coverage.
 
+**QMP-11** When GLM, DeepSeek, Nemotron, or Qwen is a supported default family, the system shall require sourced shared pricing rather than accepting an explicitly-unpriced placeholder.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/quota_parity.feature`

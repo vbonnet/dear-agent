@@ -21,6 +21,8 @@ callers.
 
 **LLMP-05** When OpenRouter authentication is unavailable or unsupported, the system shall reject provider construction with an explicit error instead of falling back to another provider family.
 
+**LLMP-06** When OpenRouter capabilities advertise Nemotron or Qwen defaults, the system shall publish provider-canonical model identifiers that correspond to routable model pages.
+
 ## BDD Traceability
 
 - Feature: `agm/test/bdd/features/model_family_parity.feature`

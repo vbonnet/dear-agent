@@ -16,8 +16,8 @@ Feature: Model family provider parity
       | family   | model                    |
       | glm      | z-ai/glm-5.2             |
       | deepseek | deepseek/deepseek-v4-pro |
-      | nemotron | nvidia/nemotron-3-ultra  |
-      | qwen     | qwen/qwen3.6-max         |
+      | nemotron | nvidia/nemotron-3-ultra-550b-a55b |
+      | qwen     | qwen/qwen3.6-max-preview |
 
   Scenario Outline: AGM model-family defaults resolve through the provider resolver
     Given AGM model family "<family>" has a default route
@@ -46,5 +46,5 @@ Feature: Model family provider parity
       | model                    |
       | z-ai/glm-5.2             |
       | deepseek/deepseek-v4-pro |
-      | nvidia/nemotron-3-ultra  |
-      | qwen/qwen3.6-max         |
+      | nvidia/nemotron-3-ultra-550b-a55b |
+      | qwen/qwen3.6-max-preview |

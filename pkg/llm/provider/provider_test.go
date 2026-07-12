@@ -314,8 +314,8 @@ func TestOpenRouterProvider_CapabilitiesIncludePriorityOpenFamilies(t *testing.T
 	for _, want := range []string{
 		"z-ai/glm-5.2",
 		"deepseek/deepseek-v4-pro",
-		"nvidia/nemotron-3-ultra",
-		"qwen/qwen3.6-max",
+		"nvidia/nemotron-3-ultra-550b-a55b",
+		"qwen/qwen3.6-max-preview",
 	} {
 		if !slices.Contains(caps.SupportedModels, want) {
 			t.Fatalf("OpenRouter capabilities missing %q: %v", want, caps.SupportedModels)

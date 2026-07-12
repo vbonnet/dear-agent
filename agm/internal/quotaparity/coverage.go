@@ -28,6 +28,8 @@ type ModelFamilyCoverage struct {
 	DefaultModel string
 	PricePolicy  string
 	Priced       bool
+	PriceSource  string
+	PriceAsOf    string
 }
 
 // ActiveHarnessSurfaces returns quota monitoring surfaces for each active
@@ -112,7 +114,11 @@ func ModelFamilyCoverageFor(family string) (ModelFamilyCoverage, bool) {
 	if !ok {
 		return ModelFamilyCoverage{}, false
 	}
-	priced := pricing.IsKnown(model.FullName) || pricing.IsKnown(model.Alias)
+	price := pricing.Lookup(model.FullName)
+	if price == pricing.UnknownModel {
+		price = pricing.Lookup(model.Alias)
+	}
+	priced := price != pricing.UnknownModel
 	policy := "explicitly-unpriced"
 	if priced {
 		policy = "priced"
@@ -122,6 +128,8 @@ func ModelFamilyCoverageFor(family string) (ModelFamilyCoverage, bool) {
 		DefaultModel: model.FullName,
 		PricePolicy:  policy,
 		Priced:       priced,
+		PriceSource:  price.Source,
+		PriceAsOf:    price.AsOf,
 	}, true
 }
 
