@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/cucumber/godog"
@@ -106,24 +105,29 @@ func getPackageSpecGuardrailState(ctx context.Context, cfg packageSpecGuardrailC
 }
 
 func packageSpecBDDRepoRoot() string {
-	if dir, err := os.Getwd(); err == nil {
-		for {
-			if _, err := os.Stat(filepath.Join(dir, "engram")); err == nil {
-				if _, err := os.Stat(filepath.Join(dir, "agm")); err == nil {
-					return dir
-				}
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
+	dir, err := os.Getwd()
+	if err != nil {
+		return "."
 	}
-
-	_, file, _, ok := runtime.Caller(0)
+	root, ok := findBDDRepoRoot(dir)
 	if !ok {
 		return "."
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", ".."))
+	return root
+}
+
+func findBDDRepoRoot(start string) (string, bool) {
+	dir := filepath.Clean(start)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			if info, err := os.Stat(filepath.Join(dir, "agm")); err == nil && info.IsDir() {
+				return dir, true
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }
